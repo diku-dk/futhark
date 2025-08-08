@@ -100,7 +100,7 @@ addTileBinding env pe tile_nms =
   let nms = namesFromList tile_nms
       fwdenv = M.insert pe nms $ appTilesFwd env
       bwdenv = foldl (foldfun nms) (appTilesInv env) tile_nms
-  in  Env { appTilesFwd = fwdenv, appTilesInv = bwdenv, iotas = iotas env, scalars = mempty, arrTransf = mempty }
+  in  env { appTilesFwd = fwdenv, appTilesInv = bwdenv }
   where
     foldfun nms env_cur nm = M.insert nm (pe, nms) env_cur
 
@@ -198,10 +198,10 @@ addInpDeps2Env ::
   DepNode ->
   DepGraph ->
   Env
-addInpDeps2Env env0 (nId, _nT) DepGraph{dgGraph = g} = do
+addInpDeps2Env env0 (nId, _nT) DepGraph{dgGraph = g} =
   -- SoacNode{} <- soac_nT,
   let (_out_deps, _, _, inp_deps) = G.context g nId
-  foldl addInpDep env0 inp_deps
+  in  L.foldl addInpDep env0 inp_deps
   where
     se0 = Constant $ IntValue $ Int64Value 0
     se1 = Constant $ IntValue $ Int64Value 1
@@ -209,14 +209,14 @@ addInpDeps2Env env0 (nId, _nT) DepGraph{dgGraph = g} = do
     --
     addInpDep env edgeid =
       let (_, _, node, inp_deps0) = G.context g (snd edgeid)
-          inp_deps = filter (isInd . fst) inp_deps0
-          env' = foldl addInpDep env inp_deps
-      in case getStmNode node of
-           Just (Let pat _aux (Apply fnm arg_diets _ _)) ->
-             processTileFCall env' (pat, fnm, arg_diets)
-           Just (Let (Pat [pat_el]) _aux e) ->
-             processExp env' (patElemName pat_el, patElemDec pat_el) e
-           _ -> env'
+          (inp_deps, _other_deps) = L.partition (isInd . fst) inp_deps0
+          env' = L.foldl addInpDep env inp_deps
+      in  case getStmNode node of
+            Just (Let pat _aux (Apply fnm arg_diets _ _)) ->
+              processTileFCall env' (pat, fnm, arg_diets)
+            Just (Let (Pat [pat_el]) _aux e) ->
+              processExp env' (patElemName pat_el, patElemDec pat_el) e
+            _ -> env'
     --
     processTileFCall env (pat, fnm, arg_diets)
       | any (`L.isPrefixOf` (nameToString fnm)) tileFuns,

@@ -40,7 +40,7 @@ onStm mode scope (Let pat aux (Op (VJP args vec lam))) = do
   lam' <- onLambda mode scope lam
   if mode == All || lam == lam'
     then do
-      lam'' <- (`runReaderT` scope) . simplifyLambda =<< revVJP scope lam'
+      lam'' <- (`runReaderT` scope) . (simplifyLambda 1) =<< revVJP scope lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
     else pure $ oneStm $ Let pat aux $ Op $ VJP args vec lam'
 onStm mode scope (Let pat aux (Op (JVP args vec lam))) = do

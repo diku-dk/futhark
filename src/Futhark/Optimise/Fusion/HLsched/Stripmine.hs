@@ -95,7 +95,13 @@ validStripForDim env k m sched
     validSize dims =
       if eqPEs (expandSE env m i64ptp) (foldl mulPes pe1 dims)
       then True
-      else error ("\n\n\nvalidSize FAILS\n\n\n")
+      else error ( "\n\n\nvalidSize FAILS! expanded size: " ++
+                   prettyString (expandSE env m i64ptp) ++
+                   " dims: " ++
+                   prettyString (foldl mulPes pe1 dims) ++
+                   "env-sizes: " ++ show (scalars env) ++
+                   "\n\n\n"
+                 ) -- False
 --
 validStripForDim _ _ _ _ = Nothing
 
@@ -141,7 +147,7 @@ stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
                     -- BasicOp $ Index inp_nm (Slice [DimFix i_flat])
           addStms $ bodyStms $ lambdaBody lam
           pure $ bodyResult $ lambdaBody lam
-      new_lam' <- renameLambda new_lam >>= simplifyLambda
+      new_lam' <- renameLambda new_lam >>= simplifyLambda 0
       let soac = F.Screma w [iotnm] $ ScremaForm new_lam' [] []
       pure $ Just (prologue_stms, env, soac)
     --
@@ -153,7 +159,7 @@ stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
             runLambdaBuilder [i_p] $ localScope scope $ do
               prev_soac_res <- letTupExp' ("map"++show k++"strip") $ Op prev_soac
               pure $ map subExpRes prev_soac_res
-          new_lam' <- renameLambda new_lam >>= simplifyLambda
+          new_lam' <- renameLambda new_lam >>= simplifyLambda 0
           let soac = F.Screma w [iotnm] $ ScremaForm new_lam' [] []
           pure $ Just (prologue_stms <> prev_stms, prev_env, soac)
         -- end ^
@@ -185,7 +191,7 @@ stripmineLambda fenv k env sched lam0 = do
         runLambdaBuilder (lambdaParams lam) $ localScope scope $ do
           addStms $ bodyStms new_bdy
           pure $ bodyResult new_bdy
-      new_lam' <- renameLambda new_lam >>= simplifyLambda
+      new_lam' <- renameLambda new_lam >>= simplifyLambda 0
       pure $ Just (prologue_stms, new_env, new_lam')
 
 stripmineBody :: (LocalScope SOACS m, MonadFreshNames m) =>
@@ -370,7 +376,7 @@ stripmineStmt fenv k env sched (Let pat aux
           new_lam <-
             runLambdaBuilder [i_p] $ localScope (scope <> scopeOfLParams red_acc') $ do
               addStms rec_stms; pure rec_res'
-          new_lam' <- renameLambda new_lam >>= simplifyLambda
+          new_lam' <- renameLambda new_lam >>= simplifyLambda 0
           let map_stm = soacStm (pat_nms, map (`arrayOfRow` w) $ lambdaReturnType red_lam)
                 (w,iotnm) $ ScremaForm new_lam' [] []
           pure $ Just (new_prologue <> rec_prologue, rec_env, Sq.singleton map_stm)
@@ -380,7 +386,7 @@ stripmineStmt fenv k env sched (Let pat aux
           new_lam <-
             runLambdaBuilder [i_p] $ localScope (scope <> scopeOfLParams red_acc') $ do
               addStms rec_stms; pure rec_res'
-          new_lam' <- renameLambda new_lam >>= simplifyLambda
+          new_lam' <- renameLambda new_lam >>= simplifyLambda 0
           red_lam' <- renameLambda red_lam
           new_stms <- flip runBuilderT_ scope $ do
               soac_res <- forM pat_nms $ \_ -> newVName $ "redomap_res" ++ show k

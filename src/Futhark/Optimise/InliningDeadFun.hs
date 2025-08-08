@@ -93,7 +93,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined0 prog = do
             if any (`calledByConsts` cg) to_inline_now
               then do
                 consts' <-
-                  simplifyConsts . performCSEOnStms
+                  (simplifyConsts 1) . performCSEOnStms
                     =<< inlineInStms inlinemap consts
                 pure (ST.insertStms (informStms consts') mempty, consts')
               else pure (vtable, consts)
@@ -102,7 +102,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined0 prog = do
                 | i `rem` simplify_rate == 0 =
                     copyPropagateInFun simpleSOACS vtable'
                       . performCSEOnFunDef True
-                      =<< simplifyFun vtable' fd
+                      =<< simplifyFun 0 vtable' fd
                 | otherwise =
                     copyPropagateInFun simpleSOACS vtable' fd
 

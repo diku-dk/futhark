@@ -11,6 +11,11 @@ module Futhark.Optimise.Fusion.HLsched.SchedUtils
   , parseHLSched
   , parMode
   , mkRegIndStrides
+  , identityPerm
+  , headOfSched
+  , tailOfSched
+  , sortByPerm
+  , append2Sched
   )
 where
 
@@ -180,6 +185,62 @@ parseArrLitEdge env DepGraph{dgGraph = g} inp_deps (Var arr_nm)
 parseArrLitEdge _ _ _ _ =
   error "Something went wrong in parsing an array literal (part of HLsched)"
 
+-------------------------------
+--- Other Utility Functions ---
+-------------------------------
+
+identityPerm :: [Int] -> Bool
+identityPerm [] = True
+identityPerm perm = perm == [0 .. length perm - 1]
+
+nullSched :: HLSched -> Bool
+nullSched sched =
+  null (dimlens sched) || null (strides sched) ||
+  null (origids sched) || null (signals sched) || null (sigma sched)
+
+headOfSched :: HLSched -> (PrimExp VName, PrimExp VName, Int, Int, Int)
+headOfSched sched
+  | nullSched sched =
+    error ("Illegal Schedule passed as argument to headOfSched: "++prettyString sched)
+headOfSched sched =
+  ( head (dimlens sched)
+  , head (strides sched)
+  , head (origids sched)
+  , head (sigma   sched)
+  , head (signals sched)
+  )
+
+tailOfSched :: HLSched -> HLSched
+tailOfSched sched
+  | nullSched sched =
+    error ("Illegal Schedule passed as argument to tailOfSched: "++prettyString sched)
+tailOfSched sched =
+  sched { dimlens = tail (dimlens sched)
+        , strides = tail (strides sched)
+        , origids = tail (origids sched)
+        , sigma   = tail (sigma   sched)
+        , signals = tail (signals sched)
+        }
+
+sortByPerm :: HLSched -> HLSched
+sortByPerm sched =
+  let lst = L.zip5 (dimlens sched) (strides sched) (origids sched) (sigma sched) (signals sched)
+      (lens, strds, oids, sigm, signs)= L.unzip5 $ L.sortBy sortGT lst
+  in  sched { dimlens = lens, strides = strds, origids = oids, sigma = sigm, signals = signs }
+  where
+    sortGT (_,_,_,p1,_) (_,_,_,p2,_)
+      | p1 < p2 = GT
+      | p1 > p2 = LT
+      | True = LT
+
+append2Sched :: (PrimExp VName, PrimExp VName, Int, Int, Int) -> HLSched -> HLSched
+append2Sched (l, s, o, p, d) sched =
+  sched { dimlens = l : (dimlens sched)
+        , strides = s : (strides sched)
+        , origids = o : (origids sched)
+        , sigma   = p : (sigma   sched)
+        , signals = d : (signals sched)
+        }
 -----------------------------------------------------------
 --  GARBAGE CODE BELOW, i.e., replaced with simpler one
 -----------------------------------------------------------

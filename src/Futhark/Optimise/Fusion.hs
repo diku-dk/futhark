@@ -574,13 +574,13 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
 doFusionInLambda :: Lambda SOACS -> FusionM (Lambda SOACS, Bool)
 doFusionInLambda lam = do
   -- To clean up previous instances of fusion.
-  lam' <- simplifyLambda lam
+  lam' <- simplifyLambda 0 lam
   prev_count <- gets fusionCount
   newbody <- inScopeOf lam' $ doFusionBody $ lambdaBody lam'
   aft_count <- gets fusionCount
   -- To clean up any inner fusion.
   lam'' <-
-    (if prev_count /= aft_count then simplifyLambda else pure)
+    (if prev_count /= aft_count then (simplifyLambda 0) else pure)
       lam' {lambdaBody = newbody}
   pure (lam'', prev_count /= aft_count)
   where

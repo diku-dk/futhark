@@ -52,16 +52,16 @@ import Futhark.Pipeline
 standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
   passes
-    [ simplifySOACS,
+    [ simplifySOACS 0,
       inlineConservatively,
-      simplifySOACS,
+      simplifySOACS 0,
       inlineAggressively,
-      simplifySOACS,
+      simplifySOACS 0,
       performCSE True,
-      simplifySOACS,
+      simplifySOACS 0,
       fuseSOACs,
       performCSE True,
-      simplifySOACS,
+      simplifySOACS 1,
       removeDeadFunctions
     ]
     >>> condPipeline usesAD adPipeline
@@ -72,11 +72,11 @@ adPipeline :: Pipeline SOACS SOACS
 adPipeline =
   passes
     [ applyAD,
-      simplifySOACS,
+      simplifySOACS 1,
       performCSE True,
       fuseSOACs,
       performCSE True,
-      simplifySOACS
+      simplifySOACS 1
     ]
 
 -- | The pipeline used by the CUDA, HIP, and OpenCL backends, but before

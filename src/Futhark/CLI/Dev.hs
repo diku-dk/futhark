@@ -310,7 +310,7 @@ simplifyOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where
     perform (SOACS prog) config =
-      SOACS <$> runPipeline (onePass simplifySOACS) config prog
+      SOACS <$> runPipeline (onePass (simplifySOACS 1)) config prog
     perform (GPU prog) config =
       GPU <$> runPipeline (onePass simplifyGPU) config prog
     perform (MC prog) config =
@@ -325,7 +325,7 @@ simplifyOption short =
       MCMem <$> runPipeline (onePass simplifyMCMem) config prog
 
     long = [passLongOption pass]
-    pass = simplifySOACS
+    pass = simplifySOACS 1
 
 allocateOption :: String -> FutharkOption
 allocateOption short =

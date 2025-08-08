@@ -403,7 +403,7 @@ maybeDistributeStm stm@(Let pat aux (Loop merge form@ForLoop {} body)) acc
                 -- (which are now innermost).
                 stms <-
                   (`runReaderT` types) $
-                    simplifyStms =<< interchangeLoops nest' (SeqLoop perm pat merge form body)
+                    (simplifyStms 1) =<< interchangeLoops nest' (SeqLoop perm pat merge form body)
                 onTopLevelStms stms
                 pure acc'
         _ ->
@@ -426,7 +426,7 @@ maybeDistributeStm stm@(Let pat _ (Match cond cases defbody ret)) acc
                 let branch = Branch perm pat cond cases defbody ret
                 stms <-
                   (`runReaderT` types) $
-                    simplifyStms . oneStm =<< interchangeBranch nest' branch
+                    (simplifyStms 1) . oneStm =<< interchangeBranch nest' branch
                 onTopLevelStms stms
                 pure acc'
         _ ->
@@ -448,7 +448,7 @@ maybeDistributeStm stm@(Let pat _ (WithAcc inputs lam)) acc
                 let withacc = WithAccStm perm pat inputs lam
                 stms <-
                   (`runReaderT` types) $
-                    simplifyStms . oneStm =<< interchangeWithAcc nest' withacc
+                    (simplifyStms 1) . oneStm =<< interchangeWithAcc nest' withacc
                 onTopLevelStms stms
                 pure acc'
         _ ->

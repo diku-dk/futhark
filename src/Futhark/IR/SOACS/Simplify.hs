@@ -17,6 +17,7 @@ module Futhark.IR.SOACS.Simplify
     liftIdentityMapping,
     simplifyMapIota,
     SOACS,
+    Aggressiveness,
   )
 where
 
@@ -54,39 +55,52 @@ simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
 dont_hoist_from_par :: Engine.HoistBlockers SOACS
 dont_hoist_from_par = Engine.HoistBlockers Engine.alwaysBlocks Engine.neverBlocks Engine.neverBlocks (const False)
 
-simplifySOACS :: Prog SOACS -> PassM (Prog SOACS)
-simplifySOACS =
+type Aggressiveness = Int
+agressiveness :: Aggressiveness -> (Engine.HoistBlockers SOACS, RuleBook (Wise SOACS))
+agressiveness 0 = (dont_hoist_from_par, soacRules0)
+agressiveness _ = (Engine.noExtraHoistBlockers, soacRules)
+
+simplifySOACS :: Aggressiveness -> Prog SOACS -> PassM (Prog SOACS)
+simplifySOACS agg =
 --  Simplify.simplifyProg simpleSOACS soacRules Engine.noExtraHoistBlockers
   -- cosmin changed such that nothing is hoisted from maps
-  Simplify.simplifyProg simpleSOACS soacRules dont_hoist_from_par
+  let (blockers, rules) = agressiveness agg
+  in  Simplify.simplifyProg simpleSOACS rules blockers
 
 simplifyFun ::
   (MonadFreshNames m) =>
+  Aggressiveness ->
   ST.SymbolTable (Wise SOACS) ->
   FunDef SOACS ->
   m (FunDef SOACS)
-simplifyFun =
+simplifyFun agg =
 --  Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
   -- cosmin changed such that nothing is hoisted from maps
-  Simplify.simplifyFun simpleSOACS soacRules dont_hoist_from_par
+  -- Simplify.simplifyFun simpleSOACS soacRules dont_hoist_from_par
+  let (blockers, rules) = agressiveness agg
+  in  Simplify.simplifyFun simpleSOACS rules blockers
 
 simplifyLambda ::
-  (HasScope SOACS m, MonadFreshNames m) => Lambda SOACS -> m (Lambda SOACS)
-simplifyLambda =
+  (HasScope SOACS m, MonadFreshNames m) => Aggressiveness -> Lambda SOACS -> m (Lambda SOACS)
+simplifyLambda agg =
 --  Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
   -- cosmin changed such that nothing is hoisted from maps
-  Simplify.simplifyLambda simpleSOACS soacRules dont_hoist_from_par
+  -- Simplify.simplifyLambda simpleSOACS soacRules dont_hoist_from_par
+  let (blockers, rules) = agressiveness agg
+  in  Simplify.simplifyLambda simpleSOACS rules blockers
 
 simplifyStms ::
-  (HasScope SOACS m, MonadFreshNames m) => Stms SOACS -> m (Stms SOACS)
-simplifyStms stms = do
+  (HasScope SOACS m, MonadFreshNames m) => Aggressiveness -> Stms SOACS -> m (Stms SOACS)
+simplifyStms agg stms = do
   scope <- askScope
-  Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers scope stms
+  let (blockers, rules) = agressiveness agg
+  Simplify.simplifyStms simpleSOACS rules blockers scope stms
 
 simplifyConsts ::
-  (MonadFreshNames m) => Stms SOACS -> m (Stms SOACS)
-simplifyConsts =
-  Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
+  (MonadFreshNames m) => Aggressiveness -> Stms SOACS -> m (Stms SOACS)
+simplifyConsts agg =
+  let (blockers, rules) = agressiveness agg
+  in  Simplify.simplifyStms simpleSOACS rules blockers mempty
 
 simplifySOAC ::
   (Simplify.SimplifiableRep rep) =>
@@ -190,8 +204,11 @@ removeLambdaResults keep lam =
     lam_body' = lam_body {bodyResult = keep' $ bodyResult lam_body}
     ret = keep' $ lambdaReturnType lam
 
+soacRules0 :: RuleBook (Wise SOACS)
+soacRules0 = standardRules <> ruleBook topDownRules bottomUpRules
+
 soacRules :: RuleBook (Wise SOACS)
-soacRules = standardRules <> ruleBook topDownRules bottomUpRules
+soacRules = soacRules0 <> ruleBook [RuleOp simplifyMapIota] []
 
 -- | Does this rep contain 'SOAC's in its t'Op's?  A rep must be an
 -- instance of this class for the simplification rules to work.

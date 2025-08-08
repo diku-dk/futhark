@@ -260,7 +260,7 @@ identifyCase ops lam = do
 
     pure $ concat (transpose lam_rs)
 
-  simp <- simplifyLambda jac_lam
+  simp <- simplifyLambda 1 jac_lam
   let jac = chunk d $ fmap (BasicOp . SubExp . resSubExp) $ bodyResult $ lambdaBody simp
   pure $ cases d (head t) jac
 

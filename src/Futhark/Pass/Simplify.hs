@@ -25,8 +25,8 @@ simplify ::
   Pass rep rep
 simplify = Pass "simplify" "Perform simple enabling optimisations."
 
-simplifySOACS :: Pass SOACS.SOACS SOACS.SOACS
-simplifySOACS = simplify SOACS.simplifySOACS
+simplifySOACS :: SOACS.Aggressiveness -> Pass SOACS.SOACS SOACS.SOACS
+simplifySOACS agg = simplify (SOACS.simplifySOACS agg)
 
 simplifyGPU :: Pass GPU.GPU GPU.GPU
 simplifyGPU = simplify GPU.simplifyGPU

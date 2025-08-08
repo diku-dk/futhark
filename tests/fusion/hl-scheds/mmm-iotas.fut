@@ -13,7 +13,7 @@ def mmm [M][N][Q] (A: [M][Q]real) (B: [Q][N]real) : [M][N]real =
   let (m, Tm, Rm) = strip2 M
   let (n, Tn, Rn) = strip2 N
   let (q, Tq)     = strip1 Q
-  let C = imap (iota M) (\i -> imap (iota N) (\j -> #[unsafe] padDotProd (q*Tq) 0 A[i] B[:,j] )) 
+  let C = imap (iota M) (\i -> imap (iota N) (\j -> #[unsafe] padDotProd (q*Tq) 0 A[i] B[:,j] ))
   in  hlSched2D C ( Rm*Tn*Rn
                   , [m, Tm, Rm, n, Tn, Rn, q, Tq]  -- dims length
                   , [0,  0,  0, 1,  1,  1, 2,  2]  -- orig dimensions
