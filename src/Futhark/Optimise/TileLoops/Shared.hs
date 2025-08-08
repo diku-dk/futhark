@@ -161,7 +161,7 @@ segScatter2D ::
   ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
   Builder GPU VName
 segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f =
-  letExp desc <=< withAcc [updt_arr] $ \ ~[acc] -> do
+  letExp desc <=< withAcc [updt_arr] 1 $ \ ~[acc] -> do
     ltid_flat <- newVName "ltid_flat"
     ltid_y <- newVName "ltid_y"
     ltid_x <- newVName "ltid_x"

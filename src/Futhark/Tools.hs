@@ -185,9 +185,10 @@ partitionChunkedFoldParameters num_accs (chunk_param : params) =
 withAcc ::
   (MonadBuilder m, LParam (Rep m) ~ Param Type) =>
   [VName] ->
+  Int ->
   ([VName] -> m [SubExp]) ->
   m (Exp (Rep m))
-withAcc dest mk = do
+withAcc dest rank mk = do
   cert_ps <- replicateM (length dest) $ newParam "acc_cert" $ Prim Unit
   dest_ts <- mapM lookupType dest
   let acc_shape = Shape $ take rank $ arrayDims $ head dest_ts
@@ -200,8 +201,6 @@ withAcc dest mk = do
   withacc_lam <- mkLambda (cert_ps <> acc_ps) $ subExpsRes <$> mk (map paramName acc_ps)
 
   pure $ WithAcc [(acc_shape, [v], Nothing) | v <- dest] withacc_lam
-  where
-    rank = 1
 
 -- | Perform a scatter-like operation using accumulators and map.
 doScatter ::
