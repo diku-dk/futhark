@@ -220,7 +220,12 @@ okToFuseProducer (H.Screma _ _ form) = do
 okToFuseProducer _ = pure True
 
 -- First node is producer, second is consumer.
-vFuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT], [EdgeT]) -> (NodeT, [EdgeT]) -> FusionM (Maybe NodeT)
+vFuseNodeT ::
+  [EdgeT] ->
+  [VName] ->
+  (NodeT, [EdgeT], [EdgeT]) ->
+  (NodeT, [EdgeT]) ->
+  FusionM (Maybe NodeT)
 vFuseNodeT _ infusible (s1, _, e1s) (MatchNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
@@ -250,8 +255,15 @@ vFuseNodeT
         preserveEdge e = isDep e
         preserve = namesFromList $ map getName $ filter preserveEdge i1s
     ok <- okToFuseProducer soac1
+    -- It is not safe to fuse if any accumulators are updated by both, as the
+    -- semantics require that any updates done by the consumer take precedence
+    -- over those in the producer. This is implemented with a manual check here
+    -- for convenience, but it could be argued that this should really be a Fake
+    -- edge in the graph.
+    let isProducedAcc (H.Input _ v Acc {}) = v `elem` patNames pats1
+        isProducedAcc _ = False
     r <-
-      if ok && ots1 == mempty
+      if ok && ots1 == mempty && not (any isProducedAcc (H.inputs soac2))
         then TF.attemptFusion TF.Vertical preserve (patNames pats1) soac1 ker
         else pure Nothing
     case r of
@@ -302,35 +314,36 @@ vFuseNodeT
 --    for as long as it is returned by the withAcc. If `infusible` is empty
 --    then the extranous result will be simplified away.
 vFuseNodeT
-  _edges
+  edges
   _infusible
-  (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, is1, _os1)
+  (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, _is1, os1)
   (StmNode (Let pat2 aux2 (WithAcc w_inps lam0)), _os2)
     | ots1 == mempty,
+      not $ any isFake edges,
       wacc_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps,
       soac_prod_nms <- map patElemName $ patElems pat1,
-      soac_indep_nms <- map getName is1,
-      all (`notNameIn` wacc_cons_nms) (soac_indep_nms ++ soac_prod_nms) =
-        do
-          lam <- fst <$> doFusionInLambda lam0
-          bdy' <-
-            runBodyBuilder $ inScopeOf lam $ do
-              soac' <- H.toExp soac
-              addStm $ Let pat1 aux1 soac'
-              lam_res <- bodyBind $ lambdaBody lam
-              let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms
-              pure $ lam_res ++ pat1_res
-          let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
-              pat = Pat $ patElems pat2 ++ patElems pat1
-          lam' <- renameLambda $ lam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
-          -- see if bringing the map inside the scatter has actually benefitted fusion
-          (lam'', success) <- doFusionInLambda lam'
-          if not success
-            then pure Nothing
-            else do
-              -- `aux1` already appear in the moved SOAC stm; is there
-              -- any need to add it to the enclosing withAcc stm as well?
-              fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
+      soac_indep_nms <- map getName os1,
+      all (`notNameIn` wacc_cons_nms) (soac_indep_nms ++ soac_prod_nms) = do
+        lam <- fst <$> doFusionInLambda lam0
+        bdy' <-
+          runBodyBuilder $ inScopeOf lam $ do
+            soac' <- H.toExp soac
+            addStm $ Let pat1 aux1 soac'
+            lam_res <- bodyBind $ lambdaBody lam
+            let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms
+            pure $ lam_res ++ pat1_res
+        let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
+            pat = Pat $ patElems pat2 ++ patElems pat1
+        lam' <- renameLambda $ lam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
+        -- see if bringing the map inside the scatter has actually benefitted fusion
+        (lam'', success) <- doFusionInLambda lam'
+        if not success
+          then pure Nothing
+          else do
+            -- `aux1` already appear in the moved SOAC stm; is there
+            -- any need to add it to the enclosing withAcc stm as well?
+            fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
+
 --
 -- The reverse of the case above, i.e., fusing a screma at the back of an
 --   WithAcc such as to (hopefully) enable more fusion there.
@@ -379,11 +392,12 @@ vFuseNodeT
             fusedSomething $ StmNode $ Let pat aux1 $ WithAcc w_inps wlam''
 -- the case of fusing two withaccs
 vFuseNodeT
-  _edges
+  edges
   infusible
   (StmNode (Let pat1 aux1 (WithAcc w1_inps lam1)), is1, _os1)
   (StmNode (Let pat2 aux2 (WithAcc w2_inps lam2)), _os2)
-    | wacc2_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w2_inps,
+    | not $ any isFake edges,
+      wacc2_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w2_inps,
       wacc1_indep_nms <- map getName is1,
       all (`notNameIn` wacc2_cons_nms) wacc1_indep_nms = do
         -- the other safety checks are done inside `tryFuseWithAccs`
@@ -429,6 +443,31 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
                 zipWith PatElem (TF.fsOutNames ker') (H.typeOf (TF.fsSOAC ker'))
           fusedSomething $ SoacNode mempty (Pat pats2') (TF.fsSOAC ker') (aux1 <> aux2)
         Nothing -> pure Nothing
+hFuseNodeT
+  (StmNode (Let pat1 aux1 (WithAcc w1_inps lam1)))
+  (StmNode (Let pat2 aux2 (WithAcc w2_inps lam2))) = do
+    -- The only tricky thing here is that we have to put all the
+    -- accumulator-based results first.
+    let num_inputs1 = length w1_inps
+        num_inputs2 = length w2_inps
+        num_arrs1 = sum $ map (\(_, as, _) -> length as) w1_inps
+        num_arrs2 = sum $ map (\(_, as, _) -> length as) w2_inps
+        w3_inps = w1_inps <> w2_inps
+        reorder f n a m b =
+          let (a_xs, a_ys) = splitAt n $ f a
+              (b_xs, b_ys) = splitAt m $ f b
+           in a_xs <> b_xs <> a_ys <> b_ys
+        lam3 =
+          Lambda
+            (reorder lambdaParams num_inputs1 lam1 num_inputs2 lam2)
+            (reorder lambdaReturnType num_inputs1 lam1 num_inputs2 lam2)
+            $ mkBody
+              (bodyStms (lambdaBody lam1) <> bodyStms (lambdaBody lam2))
+              (reorder (bodyResult . lambdaBody) num_inputs1 lam1 num_inputs2 lam2)
+    fusedSomething $
+      StmNode $
+        Let (Pat $ reorder patElems num_arrs1 pat1 num_arrs2 pat2) (aux1 <> aux2) $
+          WithAcc w3_inps lam3
 hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
@@ -468,13 +507,8 @@ tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
 tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g}
   | not (G.gelem (nodeFromLNode node_to_fuse) g) = pure dg
 -- \^ Node might have been fused away since.
-tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
-  spec_rule_res <- SF.ruleMFScat node_to_fuse dg
-  -- \^ specialized fusion rules such as the one
-  --   enabling map-flatten-scatter fusion
-  case spec_rule_res of
-    Just dg' -> pure dg'
-    Nothing -> applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
+tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} =
+  applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
   where
     node_to_fuse_id = nodeFromLNode node_to_fuse
     relevant (n, InfDep _) = isWithAccNodeId n dg
@@ -488,13 +522,13 @@ doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relev
     relevant (_, ResNode {}) = False
     relevant _ = True
 
--- | For each pair of SOAC nodes that share an input, attempt to fuse
--- them horizontally.
+-- | For each pair of SOAC nodes that share an input, or any WithAcc nodes,
+-- attempt to fuse them horizontally.
 doHorizontalFusion :: DepGraphAug FusionM
-doHorizontalFusion dg = applyAugs pairs dg
+doHorizontalFusion dg = applyAugs (soac_pairs <> withacc_pairs) dg
   where
-    pairs :: [DepGraphAug FusionM]
-    pairs = do
+    soac_pairs, withacc_pairs :: [DepGraphAug FusionM]
+    soac_pairs = do
       (x, SoacNode _ _ soac_x _) <- G.labNodes $ dgGraph dg
       (y, SoacNode _ _ soac_y _) <- G.labNodes $ dgGraph dg
       guard $ x < y
@@ -503,6 +537,16 @@ doHorizontalFusion dg = applyAugs pairs dg
         any
           ((`elem` map H.inputArray (H.inputs soac_x)) . H.inputArray)
           (H.inputs soac_y)
+      pure $ \dg' -> do
+        -- Nodes might have been fused away by now.
+        if G.gelem x (dgGraph dg') && G.gelem y (dgGraph dg')
+          then hTryFuseNodesInGraph x y dg'
+          else pure dg'
+
+    withacc_pairs = do
+      (x, StmNode (Let _ _ (WithAcc {}))) <- G.labNodes $ dgGraph dg
+      (y, StmNode (Let _ _ (WithAcc {}))) <- G.labNodes $ dgGraph dg
+      guard $ x < y
       pure $ \dg' -> do
         -- Nodes might have been fused away by now.
         if G.gelem x (dgGraph dg') && G.gelem y (dgGraph dg')

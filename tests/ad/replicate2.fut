@@ -4,7 +4,7 @@
 -- output { [[1,1,1],[1,1,1]] }
 
 entry f_jvp n m x : [][]i32 =
- jvp (replicate m >-> replicate n) x 1
+  jvp (replicate m >-> replicate n) x 1
 
 -- ==
 -- entry: f_vjp
@@ -12,4 +12,4 @@ entry f_jvp n m x : [][]i32 =
 -- output { 6i64 }
 
 entry f_vjp n m x =
- vjp (replicate m >-> replicate n) x (replicate n (iota m))
+  vjp (replicate m >-> replicate n) x (replicate n (iota m))

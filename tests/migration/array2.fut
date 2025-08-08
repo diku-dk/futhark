@@ -9,4 +9,4 @@
 
 def main (i: i64) (v: [2]i32) : i32 =
   let xs = [[0, 1], [2, 3], v]
-  in xs[i%3, i%2]
+  in xs[i % 3, i % 2]

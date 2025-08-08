@@ -8,34 +8,34 @@
 -- structure { Map 1 Redomap 1 Scanomap 1 }
 
 def correlateDeltas [num_und] [num_dates]
-                    (md_c:  [num_und][num_und]f64,
-                     zds: [num_dates][num_und]f64
-                    ): [num_dates][num_und]f64 =
-    map (\(zi: [num_und]f64): [num_und]f64  ->
-            map (\(j: i32): f64  ->
-                    let x = map2 (*) zi (md_c[j] )
-                    in  reduce (+) (0.0) x
-               ) (map i32.i64 (iota(num_und)))
-       ) zds
+                    ( md_c: [num_und][num_und]f64
+                    , zds: [num_dates][num_und]f64
+                    ) : [num_dates][num_und]f64 =
+  map (\(zi: [num_und]f64) : [num_und]f64 ->
+         map (\(j: i32) : f64 ->
+                let x = map2 (*) zi (md_c[j])
+                in reduce (+) (0.0) x)
+             (map i32.i64 (iota (num_und))))
+      zds
 
-def blackScholes [num_und][num_dates]
-                (md_c:[num_und][num_und]f64,
-                md_vols: [num_dates][num_und]f64,
-                md_drifts: [num_dates][num_und]f64,
-                md_starts: [num_und]f64,
-                bb_arr: [num_dates][num_und]f64
-           ): [num_dates][num_und]f64 =
-    let noises = correlateDeltas(md_c, bb_arr) in
-        scan (\(x: []f64) (y: []f64)  -> map2 (*) x y
-            ) (md_starts) noises
+def blackScholes [num_und] [num_dates]
+                 ( md_c: [num_und][num_und]f64
+                 , md_vols: [num_dates][num_und]f64
+                 , md_drifts: [num_dates][num_und]f64
+                 , md_starts: [num_und]f64
+                 , bb_arr: [num_dates][num_und]f64
+                 ) : [num_dates][num_und]f64 =
+  let noises = correlateDeltas (md_c, bb_arr)
+  in scan (\(x: []f64) (y: []f64) -> map2 (*) x y)
+          (md_starts)
+          noises
 
-
-def main [num_und][num_dates]
-        (md_cs: [num_und][num_und]f64,
-         md_vols: [num_dates][num_und]f64,
-         md_drifts: [num_dates][num_und]f64,
-         md_sts: [num_und]f64,
-         bb_row: [num_dates][num_und]f64
-        ): [][]f64 =
-  let bd_row = blackScholes(md_cs, md_vols, md_drifts, md_sts, bb_row)
-  in  bd_row
+def main [num_und] [num_dates]
+         ( md_cs: [num_und][num_und]f64
+         , md_vols: [num_dates][num_und]f64
+         , md_drifts: [num_dates][num_und]f64
+         , md_sts: [num_und]f64
+         , bb_row: [num_dates][num_und]f64
+         ) : [][]f64 =
+  let bd_row = blackScholes (md_cs, md_vols, md_drifts, md_sts, bb_row)
+  in bd_row

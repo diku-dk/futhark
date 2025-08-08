@@ -4,4 +4,4 @@
 -- ==
 -- error: also bound
 
-def f [m] (m:[m]i64) = m
+def f [m] (m: [m]i64) = m

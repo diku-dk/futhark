@@ -47,10 +47,10 @@ extractUpdate accs v stms = do
       pure (x, oneStm stm <> stms'')
 
 mkHistBody :: Accs GPU -> KernelBody GPU -> Maybe (KernelBody GPU, WithAccInput GPU, VName)
-mkHistBody accs (KernelBody () stms [Returns rm cs (Var v)]) = do
+mkHistBody accs (Body () stms [Returns rm cs (Var v)]) = do
   ((acc_input, acc, is, vs), stms') <- extractUpdate accs v stms
   pure
-    ( KernelBody () stms' $ map (Returns rm cs) is ++ map (Returns rm cs) vs,
+    ( Body () stms' $ map (Returns rm cs) is <> map (Returns rm cs) vs,
       acc_input,
       acc
     )
@@ -86,7 +86,7 @@ addArrsToAcc lvl shape arrs acc = do
 
   acc_t <- lookupType acc
   pure . Op . SegOp . SegMap lvl space [acc_t] $
-    KernelBody () stms [Returns ResultMaySimplify mempty (Var acc')]
+    Body () stms [Returns ResultMaySimplify mempty (Var acc')]
 
 flatKernelBody ::
   (MonadBuilder m) =>
@@ -106,9 +106,9 @@ flatKernelBody space kbody = do
           unflattenIndex (map pe64 (segSpaceDims space)) (pe64 $ Var gtid)
     zipWithM_ letBindNames (map (pure . fst) (unSegSpace space))
       =<< mapM toExp new_inds
-    addStms $ kernelBodyStms kbody
+    addStms $ bodyStms kbody
 
-  pure (space', kbody {kernelBodyStms = kbody_stms})
+  pure (space', kbody {bodyStms = kbody_stms})
 
 optimiseStm :: Accs GPU -> Stm GPU -> OptM (Stms GPU)
 -- TODO: this is very restricted currently, but shows the idea.

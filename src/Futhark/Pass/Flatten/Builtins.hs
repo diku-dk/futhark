@@ -45,7 +45,7 @@ segMap segments f = do
     res <- f $ fmap Var gtids
     ts <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, ts)
-  let kbody = KernelBody () stms res
+  let kbody = Body () stms res
   pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
@@ -58,7 +58,7 @@ genScanomap desc segments lam nes m = do
     res <- m $ fmap Var gtids
     res_t <- mapM subExpType res
     pure (map (Returns ResultMaySimplify mempty) res, res_t)
-  let kbody = KernelBody () stms res
+  let kbody = Body () stms res
       op = SegBinOp Commutative lam nes mempty
   letTupExp desc $ Op $ SegOp $ SegScan lvl space res_t kbody [op]
   where
@@ -126,12 +126,13 @@ genScatter :: VName -> SubExp -> (SubExp -> Builder GPU (VName, SubExp)) -> Buil
 genScatter dest n f = do
   gtid <- newVName "gtid"
   space <- mkSegSpace [(gtid, n)]
-  ((res, v_t), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
-    (i, v) <- f $ Var gtid
-    dest_t <- lookupType dest
-    pure (WriteReturns mempty dest [(Slice [DimFix (Var i)], v)], dest_t)
-  let kbody = KernelBody () stms [res]
-  pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space [v_t] kbody
+  withAcc [dest] 1 $ \ ~[acc] -> do
+    kbody <- buildBody_ $ localScope (scopeOfSegSpace space) $ do
+      (i, v) <- f $ Var gtid
+      acc' <- letExp (baseString acc) $ BasicOp $ UpdateAcc Safe acc [Var i] [v]
+      pure [Returns ResultMaySimplify mempty $ Var acc']
+    acc_t <- lookupType acc
+    letTupExp' "scatter" $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space [acc_t] kbody
 
 genTabulate :: SubExp -> (SubExp -> Builder GPU [SubExp]) -> Builder GPU (Exp GPU)
 genTabulate w m = do
@@ -141,7 +142,7 @@ genTabulate w m = do
     ses <- m $ Var gtid
     ts <- mapM subExpType ses
     pure (map (Returns ResultMaySimplify mempty) ses, ts)
-  let kbody = KernelBody () stms res
+  let kbody = Body () stms res
   pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
 
 genFlags :: SubExp -> VName -> Builder GPU VName

@@ -12,13 +12,11 @@
 --      Screma 1
 -- }
 --
-def main(arr: []f64): (f64,[]f64,[]f64,[]f64) =
-    let a = map (+3.0) arr
-    let b = map (+7.0) arr
-    let s = reduce (+) (0.0) a
-
-    let x1 = map (*3.0) a
-    let x2 = map (*5.0) b
-    let x3 = map (*0.7) arr  in
-
-    (s,x1,x2,x3)
+def main (arr: []f64) : (f64, []f64, []f64, []f64) =
+  let a = map (+ 3.0) arr
+  let b = map (+ 7.0) arr
+  let s = reduce (+) (0.0) a
+  let x1 = map (* 3.0) a
+  let x2 = map (* 5.0) b
+  let x3 = map (* 0.7) arr
+  in (s, x1, x2, x3)

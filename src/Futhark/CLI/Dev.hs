@@ -32,6 +32,7 @@ import Futhark.Internalise.FullNormalise as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.ReplaceRecords as ReplaceRecords
+import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
@@ -831,13 +832,14 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
         Pipeline {} -> do
           let (base, ext) = splitExtension file
 
-              readCore parse construct = do
+              readIR parse construct = do
                 logMsg $ "Reading " <> file <> "..."
                 input <- liftIO $ T.readFile file
                 logMsg ("Parsing..." :: T.Text)
                 case parse file input of
                   Left err -> externalErrorS $ T.unpack err
-                  Right prog -> do
+                  Right (src, prog) -> do
+                    modifyNameSource $ const ((), src)
                     logMsg ("Typechecking..." :: T.Text)
                     case checkProg $ Alias.aliasAnalysis prog of
                       Left err -> externalErrorS $ show err
@@ -849,13 +851,13 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                       prog <- runPipelineOnProgram (futharkConfig config) id file
                       runPolyPasses config base (SOACS prog)
                   ),
-                  (".fut_soacs", readCore parseSOACS SOACS),
-                  (".fut_seq", readCore parseSeq Seq),
-                  (".fut_seq_mem", readCore parseSeqMem SeqMem),
-                  (".fut_gpu", readCore parseGPU GPU),
-                  (".fut_gpu_mem", readCore parseGPUMem GPUMem),
-                  (".fut_mc", readCore parseMC MC),
-                  (".fut_mc_mem", readCore parseMCMem MCMem)
+                  (".fut_soacs", readIR parseSOACS SOACS),
+                  (".fut_seq", readIR parseSeq Seq),
+                  (".fut_seq_mem", readIR parseSeqMem SeqMem),
+                  (".fut_gpu", readIR parseGPU GPU),
+                  (".fut_gpu_mem", readIR parseGPUMem GPUMem),
+                  (".fut_mc", readIR parseMC MC),
+                  (".fut_mc_mem", readIR parseMCMem MCMem)
                 ]
           case lookup ext handlers of
             Just handler -> handler

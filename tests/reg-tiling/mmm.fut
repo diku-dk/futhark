@@ -14,9 +14,8 @@
 
 -- compiled random input {[2048][4096]f32 [4096][2048]f32} auto output
 
+def dotproduct [n] (x: [n]f32) (y: [n]f32) =
+  map2 (*) x y |> reduce (+) 0
 
-let dotproduct [n] (x: [n]f32) (y: [n]f32) =
-    map2 (*) x y |> reduce (+) 0
-
-let main [m][n][q]  (A: [m][q]f32) (B: [q][n]f32) : [m][n]f32 =
-    map (\ Arow -> map (\Bcol -> dotproduct Arow Bcol) (transpose B)) A
+def main [m] [n] [q] (A: [m][q]f32) (B: [q][n]f32) : [m][n]f32 =
+  map (\Arow -> map (\Bcol -> dotproduct Arow Bcol) (transpose B)) A

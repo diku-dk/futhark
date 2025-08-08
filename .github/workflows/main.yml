@@ -403,6 +403,7 @@ jobs:
       with:
         script: |
           set -e
+          hostname
           python -m venv virtualenv
           source virtualenv/bin/activate
           pip install jsonschema
@@ -425,6 +426,7 @@ jobs:
       with:
         script: |
           set -e
+          hostname
           python -m venv virtualenv
           source virtualenv/bin/activate
           pip install numpy pyopencl jsonschema
@@ -444,6 +446,7 @@ jobs:
       with:
         script: |
           set -e
+          hostname
           python -m venv virtualenv
           source virtualenv/bin/activate
           pip install jsonschema
@@ -473,6 +476,7 @@ jobs:
       with:
         script: |
           set -e
+          hostname
           futhark test tests --no-terminal --backend=hip --concurrency=8
           source virtualenv/bin/activate
           FUTHARK_BACKEND=hip make -C tests_lib/c -j

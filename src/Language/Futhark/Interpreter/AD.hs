@@ -377,7 +377,6 @@ deriveTape' tp@(TapeOp op p uid _) s =
       if r > 0
         then pure (ss', rs')
         else -- Otherwise, derive the tape
-
           if r == 0
             then do
               let s'' = fromJust (M.lookup (-uid' - 1) ss')

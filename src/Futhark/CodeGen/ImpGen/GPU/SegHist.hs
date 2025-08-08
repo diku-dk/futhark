@@ -41,11 +41,13 @@ import Control.Monad
 import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.CodeGen.ImpGen.GPU.SegRed (compileSegRed')
 import Futhark.Construct (fullSliceNum)
+import Futhark.IR.Aliases (consumedInBody)
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Pass.ExplicitAllocations ()
@@ -197,7 +199,7 @@ data Passage = MustBeSinglePass | MayBeMultiPass deriving (Eq, Ord)
 
 bodyPassage :: KernelBody GPUMem -> Passage
 bodyPassage kbody
-  | mempty == consumedInKernelBody (aliasAnalyseKernelBody mempty kbody) =
+  | mempty == consumedInBody (Alias.analyseBody mempty kbody) =
       MayBeMultiPass
   | otherwise =
       MustBeSinglePass
@@ -418,8 +420,8 @@ histKernelGlobalPass map_pes num_tblocks tblock_size space slugs kbody histogram
       let input_in_bounds = offset .<. total_w_64
 
       sWhen input_in_bounds $
-        compileStms mempty (kernelBodyStms kbody) $ do
-          let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
+        compileStms mempty (bodyStms kbody) $ do
+          let (red_res, map_res) = splitFromEnd (length map_pes) $ bodyResult kbody
 
           sComment "save map-out results" $
             forM_ (zip map_pes map_res) $ \(pe, res) ->
@@ -720,11 +722,11 @@ histKernelLocalPass
           -- serially.  This also involves writing to the mapout arrays if
           -- this is the first chunk.
 
-          compileStms mempty (kernelBodyStms kbody) $ do
+          compileStms mempty (bodyStms kbody) $ do
             let (red_res, map_res) =
                   splitFromEnd (length map_pes) $
                     map kernelResultSubExp $
-                      kernelBodyResult kbody
+                      bodyResult kbody
 
             sWhen (chk_i .==. 0) $
               sComment "save map-out results" $

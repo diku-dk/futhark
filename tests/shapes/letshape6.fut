@@ -6,5 +6,5 @@
 def main [n] (xs: [n]i32) =
   let res =
     let m = n - 1
-    in map (+1) (take m xs)
+    in map (+ 1) (take m xs)
   in res

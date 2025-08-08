@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Futhark now implements the cachedir specification, such that e.g. the `data`
+  directories created by `futhark test` and `futhark bench` contain a
+  `CACHEDIR.TAG` file.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `futhark fmt --check` no longer prints the program on failure.
+
+## [0.25.32]
+
+### Added
+
 * `futhark doc` now prints warnings about errors in doc comments (mostly
   references to unknown names).
 
@@ -22,9 +38,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   are not yet accurately tracked, and only the static location is reported
   (i.e., no full call stack).
 
-### Removed
-
-### Changed
+* The AD transformation is now more diligent about propagating attributes from
+  SOACs in the primal code to SOACs in the differentiated code.
 
 ### Fixed
 
@@ -44,6 +59,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * For GPU backends, incorrect code generation for accumulator updates (produced
   by AD) for thread-local arrays (#2294).
+
+* Missing consumption check in the termination condition for `while` loops (#2300).
 
 ## [0.25.31]
 

@@ -7,5 +7,8 @@
 def (++) 't (xs: []t) (ys: []t) = xs
 
 def main (xss: [][]i32) (yss: [][]i32) (ass: [][]bool) (bss: [][]bool) =
-  (map2 (++) xss yss, map2 (++) ass bss,
-   map (++[1]) xss, map ([true]++) bss)
+  ( map2 (++) xss yss
+  , map2 (++) ass bss
+  , map (++ [1]) xss
+  , map ([true] ++) bss
+  )

@@ -40,6 +40,7 @@ module Futhark.AD.Rev.Monad
     tabNest,
     oneExp,
     zeroExp,
+    zeroArray,
     unitAdjOfType,
     addLambda,
     --
@@ -126,6 +127,9 @@ instance Substitute Adj where
   substituteNames m (AdjVal (Var v)) = AdjVal $ Var $ substituteNames m v
   substituteNames _ adj = adj
 
+-- | Create an array of the given shape and element type consisting of zeroes.
+-- The shape may be empty, meaning this function can (despite its name) also
+-- create non-arrays.
 zeroArray :: (MonadBuilder m) => Shape -> Type -> m VName
 zeroArray shape t
   | shapeRank shape == 0 =
@@ -261,8 +265,11 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
                 addSubstitution v' v
                 pure [(v, v')]
               _ -> pure mempty
-       in M.fromList . mconcat
-            <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
+
+          consumed =
+            namesToList . consumedInStms $
+              fst (Alias.analyseStms mempty (oneStm stm))
+       in M.fromList . mconcat <$> mapM onConsumed consumed
 
 copyConsumedArrsInBody :: [VName] -> Body SOACS -> ADM Substitutions
 copyConsumedArrsInBody dontCopy b =
@@ -374,6 +381,8 @@ lookupAdj v = do
       v_t <- lookupType v
       case v_t of
         Acc _ shape [Prim t] _ -> pure $ AdjZero shape t
+        Acc _ shape [t] _ -> pure $ AdjZero (shape <> arrayShape t) (elemType t)
+        Acc {} -> error $ "lookupAdj: Non-singleton accumulator adjoint: " <> prettyString v_t
         _ -> pure $ AdjZero (arrayShape v_t) (elemType v_t)
     Just v_adj -> pure v_adj
 

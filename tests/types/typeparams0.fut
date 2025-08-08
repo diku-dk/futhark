@@ -4,4 +4,4 @@
 
 type~ vector 't = []t
 
-def main(n: i64): vector i64 = iota n
+def main (n: i64) : vector i64 = iota n

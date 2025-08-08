@@ -2,6 +2,6 @@
 -- ==
 -- error:
 
-def main(a: *[][]i32): [][]i32 =
-  let _ = filter (\(r: *[]i32): bool  -> true) a
-  in empty([]i32)
+def main (a: *[][]i32) : [][]i32 =
+  let _ = filter (\(r: *[]i32) : bool -> true) a
+  in empty ([] i32)

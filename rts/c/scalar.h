@@ -1381,7 +1381,6 @@ SCALAR_FUN_ATTR double futrts_log1p_64(double x) {
 SCALAR_FUN_ATTR double futrts_sqrt64(double x) { return sqrt(x); }
 SCALAR_FUN_ATTR double futrts_rsqrt64(double x) { return 1/sqrt(x); }
 
-extern "C" unmasked uniform double cbrt(uniform double);
 SCALAR_FUN_ATTR double futrts_cbrt64(double x) {
   double res;
   foreach_active (i) {
