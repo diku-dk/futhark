@@ -80,10 +80,10 @@ tileInKernelBody ::
   KernelBody GPU ->
   TileM (Stms GPU, (SegLevel, SegSpace, KernelBody GPU))
 tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
-  | Just kbody_res <- mapM isSimpleResult $ kernelBodyResult kbody = do
+  | Just kbody_res <- mapM isSimpleResult $ bodyResult kbody = do
       maybe_tiled <-
         tileInBody branch_variant initial_variance lvl initial_kspace ts $
-          Body () (kernelBodyStms kbody) kbody_res
+          Body () (bodyStms kbody) kbody_res
       case maybe_tiled of
         Just (host_stms, tiling, tiledBody) -> do
           (res', stms') <-
@@ -92,7 +92,7 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
             ( host_stms,
               ( tilingLevel tiling,
                 tilingSpace tiling,
-                KernelBody () stms' res'
+                Body () stms' res'
               )
             )
         Nothing ->

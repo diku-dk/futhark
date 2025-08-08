@@ -10,7 +10,7 @@ import Futhark.AD.Rev.Monad
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
-import Futhark.Tools
+import Futhark.Tools hiding (withAcc)
 import Futhark.Transform.Rename
 import Futhark.Util (splitAt3)
 

@@ -18,14 +18,6 @@ writeResult ::
   MulticoreGen ()
 writeResult is pe (Returns _ _ se) =
   copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
-writeResult _ pe (WriteReturns _ arr idx_vals) = do
-  arr_t <- lookupType arr
-  let (iss, vs) = unzip idx_vals
-      rws' = map pe64 $ arrayDims arr_t
-  forM_ (zip iss vs) $ \(slice, v) -> do
-    let slice' = fmap pe64 slice
-    sWhen (inBounds slice' rws') $
-      copyDWIM (patElemName pe) (unSlice slice') v []
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ prettyString res
 
@@ -34,7 +26,7 @@ compileSegMapBody ::
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.MCCode
-compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
+compileSegMapBody pat space (Body _ kstms kres) = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   dPrim_ (segFlat space) int64

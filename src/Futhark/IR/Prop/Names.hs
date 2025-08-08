@@ -176,10 +176,11 @@ freeInStmsAndRes ::
     FreeDec (BodyDec rep),
     FreeIn (RetType rep),
     FreeIn (BranchType rep),
-    FreeDec (ExpDec rep)
+    FreeDec (ExpDec rep),
+    FreeIn res
   ) =>
   Stms rep ->
-  Result ->
+  res ->
   FV
 freeInStmsAndRes stms res =
   fvBind (boundByStms stms) $ foldMap freeIn' stms <> freeIn' res
@@ -264,9 +265,10 @@ instance
     FreeIn (LetDec rep),
     FreeIn (RetType rep),
     FreeIn (BranchType rep),
-    FreeIn (Op rep)
+    FreeIn (Op rep),
+    FreeIn res
   ) =>
-  FreeIn (Body rep)
+  FreeIn (GBody rep res)
   where
   freeIn' (Body dec stms res) =
     precomputed dec $ freeIn' dec <> freeInStmsAndRes stms res

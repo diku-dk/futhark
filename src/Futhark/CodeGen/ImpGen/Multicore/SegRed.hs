@@ -25,8 +25,8 @@ compileSegRed ::
   MulticoreGen Imp.MCCode
 compileSegRed pat space reds kbody nsubtasks =
   compileSegRed' pat space reds nsubtasks $ \red_cont ->
-    compileStms mempty (kernelBodyStms kbody) $ do
-      let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult kbody
+    compileStms mempty (bodyStms kbody) $ do
+      let (red_res, map_res) = splitAt (segBinOpResults reds) $ bodyResult kbody
 
       sComment "save map-out results" $ do
         let map_arrs = drop (segBinOpResults reds) $ patElems pat

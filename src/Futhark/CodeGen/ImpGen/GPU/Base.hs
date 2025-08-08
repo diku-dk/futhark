@@ -1470,12 +1470,5 @@ compileThreadResult _ _ RegTileReturns {} =
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ pe (WriteReturns _ arr dests) = do
-  arr_t <- lookupType arr
-  let rws' = map pe64 $ arrayDims arr_t
-  forM_ dests $ \(slice, e) -> do
-    let slice' = fmap pe64 slice
-        write = inBounds slice' rws'
-    sWhen write $ copyDWIM (patElemName pe) (unSlice slice') e []
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."

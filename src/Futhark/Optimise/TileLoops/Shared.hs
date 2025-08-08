@@ -23,6 +23,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (foldl', zip4)
 import Data.Map qualified as M
+import Data.Maybe
 import Futhark.IR.GPU
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SeqMem qualified as ExpMem
@@ -99,11 +100,8 @@ segMap1D desc lvl manifest w f = do
   Body _ stms' res' <- renameBody $ mkBody stms res
 
   let ret (SubExpRes cs se) = Returns manifest cs se
-  letTupExp desc $
-    Op . SegOp $
-      SegMap lvl space ts $
-        KernelBody () stms' $
-          map ret res'
+  letTupExp desc . Op . SegOp $
+    SegMap lvl space ts (Body () stms' $ map ret res')
 
 segMap2D ::
   String -> -- desc
@@ -127,10 +125,8 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op . SegOp $
-      SegMap lvl segspace ts $
-        KernelBody () stms $
-          map ret res
+    Op . SegOp . SegMap lvl segspace ts $
+      Body () stms (map ret res)
 
 segMap3D ::
   String -> -- desc
@@ -155,10 +151,8 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op . SegOp $
-      SegMap lvl segspace ts $
-        KernelBody () stms $
-          map ret res
+    Op . SegOp . SegMap lvl segspace ts $
+      Body () stms (map ret res)
 
 segScatter2D ::
   String ->
@@ -167,28 +161,30 @@ segScatter2D ::
   (SubExp, SubExp) -> -- (dim_y, dim_x)
   ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
   Builder GPU VName
-segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f = do
-  ltid_flat <- newVName "ltid_flat"
-  ltid_y <- newVName "ltid_y"
-  ltid_x <- newVName "ltid_x"
+segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f =
+  letExp desc <=< withAcc [updt_arr] 1 $ \ ~[acc] -> do
+    ltid_flat <- newVName "ltid_flat"
+    ltid_y <- newVName "ltid_y"
+    ltid_x <- newVName "ltid_x"
 
-  seq_is <- replicateM (length seq_dims) (newVName "ltid_seq")
-  let seq_space = zip seq_is seq_dims
+    seq_is <- replicateM (length seq_dims) (newVName "ltid_seq")
+    let seq_space = zip seq_is seq_dims
 
-  let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_y, dim_y), (ltid_x, dim_x)]
-      lvl =
-        SegThreadInBlock
-          (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
+    let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_y, dim_y), (ltid_x, dim_x)]
+        lvl =
+          SegThreadInBlock
+            (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
 
-  ((res_v, res_i), stms) <-
-    runBuilder . localScope (scopeOfSegSpace segspace) $
-      f seq_is (ltid_y, ltid_x)
+    body <- buildBody_ $ do
+      (res_v, res_i) <-
+        localScope (scopeOfSegSpace segspace) $
+          f seq_is (ltid_y, ltid_x)
+      acc' <- letExp "acc" $ BasicOp $ UpdateAcc Safe acc [res_i] [res_v]
+      pure [Returns ResultMaySimplify mempty $ Var acc']
 
-  let ret = WriteReturns mempty updt_arr [(Slice [DimFix res_i], res_v)]
-  let body = KernelBody () stms [ret]
-
-  updt_arr_t <- lookupType updt_arr
-  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [updt_arr_t] body
+    acc_t <- lookupType acc
+    fmap pure . letSubExp desc <=< renameExp $
+      Op (SegOp $ SegMap lvl segspace [acc_t] body)
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices
@@ -288,16 +284,16 @@ initialIxFnEnv = M.mapMaybe f
 
 changeWithEnv :: WithEnv -> Exp GPU -> TileM WithEnv
 changeWithEnv with_env (WithAcc accum_decs inner_lam) = do
-  let bindings = map mapfun accum_decs
+  let bindings = mapMaybe mapfun accum_decs
       par_tps = take (length bindings) $ map paramName $ lambdaParams inner_lam
       with_env' = M.union with_env $ M.fromList $ zip par_tps bindings
   pure with_env'
   where
-    mapfun (_, _, Nothing) = error "What the hack is an accumulator without operator?"
+    mapfun (_, _, Nothing) = Nothing
     mapfun (shp, _, Just (lam_inds, ne)) =
       let len_inds = length $ shapeDims shp
           lam_op = lam_inds {lambdaParams = drop len_inds $ lambdaParams lam_inds}
-       in (lam_op, ne)
+       in Just (lam_op, ne)
 changeWithEnv with_env _ = pure with_env
 
 composeIxfuns :: IxFnEnv -> VName -> VName -> (LMAD -> Maybe LMAD) -> TileM IxFnEnv

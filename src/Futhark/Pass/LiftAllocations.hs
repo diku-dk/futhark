@@ -132,17 +132,17 @@ liftAllocationsInSegOp ::
   SegOp lvl rep ->
   LiftM (inner rep) (SegOp lvl rep)
 liftAllocationsInSegOp (SegMap lvl sp tps body) = do
-  stms <- liftAllocationsInStms (kernelBodyStms body)
-  pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+  stms <- liftAllocationsInStms (bodyStms body)
+  pure $ SegMap lvl sp tps $ body {bodyStms = stms}
 liftAllocationsInSegOp (SegRed lvl sp tps body binops) = do
-  stms <- liftAllocationsInStms (kernelBodyStms body)
-  pure $ SegRed lvl sp tps (body {kernelBodyStms = stms}) binops
+  stms <- liftAllocationsInStms (bodyStms body)
+  pure $ SegRed lvl sp tps (body {bodyStms = stms}) binops
 liftAllocationsInSegOp (SegScan lvl sp tps body binops) = do
-  stms <- liftAllocationsInStms (kernelBodyStms body)
-  pure $ SegScan lvl sp tps (body {kernelBodyStms = stms}) binops
+  stms <- liftAllocationsInStms (bodyStms body)
+  pure $ SegScan lvl sp tps (body {bodyStms = stms}) binops
 liftAllocationsInSegOp (SegHist lvl sp tps body histops) = do
-  stms <- liftAllocationsInStms (kernelBodyStms body)
-  pure $ SegHist lvl sp tps (body {kernelBodyStms = stms}) histops
+  stms <- liftAllocationsInStms (bodyStms body)
+  pure $ SegHist lvl sp tps (body {bodyStms = stms}) histops
 
 liftAllocationsInHostOp ::
   HostOp NoOp (Aliases GPUMem) ->

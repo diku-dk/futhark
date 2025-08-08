@@ -128,7 +128,7 @@ analyseKernelBody ::
   InUse ->
   KernelBody GPUMem ->
   m (InUse, LastUsed, Graph VName)
-analyseKernelBody lumap inuse body = analyseStms lumap inuse $ kernelBodyStms body
+analyseKernelBody lumap inuse body = analyseStms lumap inuse $ bodyStms body
 
 analyseBody ::
   (LocalScope GPUMem m) =>
@@ -274,11 +274,11 @@ memSizes stms =
     memSizesExp :: (LocalScope GPUMem m) => Exp GPUMem -> m (Map VName Int)
     memSizesExp (Op (Inner (SegOp segop))) =
       let body = segBody segop
-       in inScopeOf (kernelBodyStms body)
+       in inScopeOf (bodyStms body)
             $ fmap mconcat
               <$> mapM memSizesStm
             $ stmsToList
-            $ kernelBodyStms body
+            $ bodyStms body
     memSizesExp (Match _ cases defbody _) = do
       mconcat <$> mapM (memSizes . bodyStms) (defbody : map caseBody cases)
     memSizesExp (Loop _ _ body) =
@@ -295,7 +295,7 @@ memSpaces stms =
       M.singleton name sp
     getSpacesStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
     getSpacesStm (Let _ _ (Op (Inner (SegOp segop)))) =
-      foldMap getSpacesStm $ kernelBodyStms $ segBody segop
+      foldMap getSpacesStm $ bodyStms $ segBody segop
     getSpacesStm (Let _ _ (Match _ cases defbody _)) =
       foldMap (foldMap getSpacesStm . bodyStms) $ defbody : map caseBody cases
     getSpacesStm (Let _ _ (Loop _ _ body)) =

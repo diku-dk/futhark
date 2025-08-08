@@ -352,9 +352,9 @@ compileSegScan pat lvl space scan_op map_kbody = do
           dIndexSpace (zip gtids dims') virt_tid
           -- Perform the map
           let in_bounds =
-                compileStms mempty (kernelBodyStms map_kbody) $ do
+                compileStms mempty (bodyStms map_kbody) $ do
                   let (all_scan_res, map_res) =
-                        splitAt (segBinOpResults [scan_op]) $ kernelBodyResult map_kbody
+                        splitAt (segBinOpResults [scan_op]) $ bodyResult map_kbody
 
                   -- Write map results to their global memory destinations
                   forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) ->

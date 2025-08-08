@@ -86,9 +86,9 @@ renameStm binding = do
 -- of the body is unaffected, under the assumption that the body was
 -- correct to begin with.  Any free variables are left untouched.
 renameBody ::
-  (Renameable rep, MonadFreshNames m) =>
-  Body rep ->
-  m (Body rep)
+  (Renameable rep, Rename res, MonadFreshNames m) =>
+  GBody rep res ->
+  m (GBody rep res)
 renameBody = modifyNameSource . runRenamer . rename
 
 -- | Rename bound variables such that each is unique.  The semantics
@@ -251,7 +251,7 @@ instance (Rename dec) => Rename (StmAux dec) where
 instance Rename SubExpRes where
   rename (SubExpRes cs se) = SubExpRes <$> rename cs <*> rename se
 
-instance (Renameable rep) => Rename (Body rep) where
+instance (Renameable rep, Rename res) => Rename (GBody rep res) where
   rename (Body dec stms res) = do
     dec' <- rename dec
     renamingStms stms $ \stms' ->

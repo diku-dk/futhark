@@ -747,47 +747,55 @@ segmentedUpdateKernel ::
   Slice SubExp ->
   VName ->
   DistNestT rep m (Stms rep)
-segmentedUpdateKernel nest perm cs arr slice v = do
+segmentedUpdateKernel nest perm cs arr slice v = runBuilderT'_ $ do
   (base_ispace, kernel_inps) <- flatKernel nest
-  let slice_dims = sliceDims slice
-  slice_gtids <- replicateM (length slice_dims) (newVName "gtid_slice")
+  let rank = length base_ispace + length (sliceDims slice)
+      arr' =
+        maybe (error "incorrectly typed Update") kernelInputArray $
+          find ((== arr) . kernelInputName) kernel_inps
 
-  let ispace = base_ispace ++ zip slice_gtids slice_dims
+  arr_t <- lookupType arr'
+  let arr_rank = arrayRank arr_t
+      remnant_dims = drop rank $ arrayDims arr_t
 
-  ((dest_t, res), kstms) <- runBuilder $ do
-    -- Compute indexes into full array.
-    v' <-
-      certifying cs . letSubExp "v" . BasicOp . Index v $
-        Slice (map (DimFix . Var) slice_gtids)
-    slice_is <-
-      traverse (toSubExp "index") $
-        fixSlice (fmap pe64 slice) $
-          map (pe64 . Var) slice_gtids
+  e <- withAcc [arr'] arr_rank $ \ ~[acc] -> do
+    let slice_dims = sliceDims slice
+    slice_gtids <- replicateM (length slice_dims) (newVName "gtid_slice")
+    remnant_gtids <- replicateM (length remnant_dims) $ newVName "gtid_remnant"
 
-    let write_is = map (Var . fst) base_ispace ++ slice_is
-        arr' =
-          maybe (error "incorrectly typed Update") kernelInputArray $
-            find ((== arr) . kernelInputName) kernel_inps
-    arr_t <- lookupType arr'
-    pure
-      ( arr_t,
-        WriteReturns mempty arr' [(Slice $ map DimFix write_is, v')]
-      )
+    let ispace =
+          base_ispace
+            <> zip slice_gtids slice_dims
+            <> zip remnant_gtids remnant_dims
 
-  -- Remove unused kernel inputs, since some of these might
-  -- reference the array we are scattering into.
-  let kernel_inps' =
-        filter ((`nameIn` (freeIn kstms <> freeIn res)) . kernelInputName) kernel_inps
+    body <- runBodyBuilder $ do
+      -- Compute indexes into full array.
+      v' <-
+        certifying cs . letSubExp "v" . BasicOp . Index v $
+          Slice (map (DimFix . Var) slice_gtids)
+      slice_is <-
+        traverse (toSubExp "index") $
+          fixSlice (fmap pe64 slice) $
+            map (pe64 . Var) slice_gtids
 
-  mk_lvl <- mkSegLevel
-  (k, prestms) <-
-    mapKernel mk_lvl ispace kernel_inps' [dest_t] $
-      KernelBody () kstms [res]
+      let write_is = map (Var . fst) base_ispace ++ slice_is
+      acc' <- letExp "acc" $ BasicOp $ UpdateAcc Safe acc write_is [v']
+      pure [Returns ResultMaySimplify mempty $ Var acc']
 
-  traverse renameStm <=< runBuilder_ $ do
+    -- Remove unused kernel inputs, since some of these might
+    -- reference the array we are scattering into.
+    let kernel_inps' =
+          filter ((`nameIn` freeIn body) . kernelInputName) kernel_inps
+
+    mk_lvl <- lift mkSegLevel
+    acc_t <- lookupType acc
+    (k, prestms) <-
+      lift $ mapKernel mk_lvl ispace kernel_inps' [acc_t] body
     addStms prestms
-    let pat = Pat . rearrangeShape perm $ patElems $ loopNestingPat $ fst nest
-    letBind pat $ Op $ segOp k
+    fmap pure $ letSubExp "segmented_upd" $ Op $ segOp k
+
+  let pat = Pat . rearrangeShape perm $ patElems $ loopNestingPat $ fst nest
+  letBind pat e
 
 segmentedGatherKernel ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>
@@ -817,7 +825,7 @@ segmentedGatherKernel nest cs arr slice = do
   mk_lvl <- mkSegLevel
   (k, prestms) <-
     mapKernel mk_lvl ispace kernel_inps [res_t] $
-      KernelBody () kstms [res]
+      Body () kstms [res]
 
   traverse renameStm <=< runBuilder_ $ do
     addStms prestms

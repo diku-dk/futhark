@@ -318,9 +318,9 @@ cseInKernelBody ::
   (Aliased rep, CSEInOp (Op rep)) =>
   GPU.KernelBody rep ->
   CSEM rep (GPU.KernelBody rep)
-cseInKernelBody (GPU.KernelBody bodydec stms res) = do
+cseInKernelBody (GPU.Body bodydec stms res) = do
   Body _ stms' _ <- cseInBody (map (const Observe) res) $ Body bodydec stms []
-  pure $ GPU.KernelBody bodydec stms' res
+  pure $ GPU.Body bodydec stms' res
 
 instance (CSEInOp (op rep)) => CSEInOp (Memory.MemOp op rep) where
   cseInOp o@Memory.Alloc {} = pure o

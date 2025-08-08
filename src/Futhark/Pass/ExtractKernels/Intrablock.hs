@@ -109,14 +109,13 @@ intrablockParallelise knest lam = runMaybeT $ do
       space <- SegSpace <$> newVName "phys_tblock_id" <*> pure ispace
       pure (intra_avail_par, space, read_input_stms)
 
-  let kbody' = kbody {kernelBodyStms = read_input_stms <> kernelBodyStms kbody}
+  let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
 
   let nested_pat = loopNestingPat first_nest
       rts = map (length ispace `stripArray`) $ patTypes nested_pat
       grid = KernelGrid (Count num_tblocks) (Count $ Var tblock_size)
       lvl = SegBlock SegNoVirt (Just grid)
-      kstm =
-        Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
+      kstm = Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
   pure
@@ -312,7 +311,7 @@ intrablockParalleliseBody body = do
     ( S.toList min_ws,
       S.toList avail_ws,
       log,
-      KernelBody () kstms $ map ret $ bodyResult body
+      Body () kstms $ map ret $ bodyResult body
     )
   where
     ret (SubExpRes cs se) = Returns ResultMaySimplify cs se

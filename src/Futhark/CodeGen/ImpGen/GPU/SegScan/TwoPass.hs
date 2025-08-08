@@ -196,9 +196,9 @@ scanStage1 (Pat all_pes) num_tblocks tblock_size space scans kbody = do
           in_bounds =
             foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
 
-          when_in_bounds = compileStms mempty (kernelBodyStms kbody) $ do
+          when_in_bounds = compileStms mempty (bodyStms kbody) $ do
             let (all_scan_res, map_res) =
-                  splitAt (segBinOpResults scans) $ kernelBodyResult kbody
+                  splitAt (segBinOpResults scans) $ bodyResult kbody
                 per_scan_res =
                   segBinOpChunks scans all_scan_res
 

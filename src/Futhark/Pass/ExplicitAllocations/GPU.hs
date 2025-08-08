@@ -104,12 +104,12 @@ kernelExpHints (BasicOp (Manifest v perm)) = do
       lmad = LMAD.permute (LMAD.iota 0 $ map pe64 dims') perm_inv
   pure [Hint lmad $ Space "device"]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@(SegThread _ _) space ts body)))) =
-  zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
+  zipWithM (mapResultHint lvl space) ts $ bodyResult body
 kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space ts body reds)))) =
   (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint lvl space) (drop num_reds ts) map_res
   where
     num_reds = segBinOpResults reds
-    (red_res, map_res) = splitAt num_reds $ kernelBodyResult body
+    (red_res, map_res) = splitAt num_reds $ bodyResult body
 kernelExpHints e = defaultExpHints e
 
 mapResultHint ::
@@ -153,10 +153,10 @@ semiStatic consts (Var v) = v `S.member` consts
 
 inGroupExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
 inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
-  | any private $ kernelBodyResult body = do
+  | any private $ bodyResult body = do
       consts <- asks envConsts
       pure $ do
-        (t, r) <- zip ts $ kernelBodyResult body
+        (t, r) <- zip ts $ bodyResult body
         pure $
           if private r && all (semiStatic consts) (arrayDims t)
             then

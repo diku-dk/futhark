@@ -90,7 +90,7 @@ funDefMetrics :: (OpMetrics (Op rep)) => FunDef rep -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
 
 -- | Compute metrics for this body.
-bodyMetrics :: (OpMetrics (Op rep)) => Body rep -> MetricsM ()
+bodyMetrics :: (OpMetrics (Op rep)) => GBody rep res -> MetricsM ()
 bodyMetrics = mapM_ stmMetrics . bodyStms
 
 -- | Compute metrics for this statement.

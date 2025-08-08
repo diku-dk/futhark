@@ -554,7 +554,7 @@ analyseSegOp op ctx pats =
           . unSegSpace
           $ segSpace op
    in -- Analyse statements in the SegOp body
-      analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
+      analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . bodyStms $ segBody op
 
 analyseSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyseSizeOp op ctx pats =

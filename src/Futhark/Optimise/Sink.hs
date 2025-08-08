@@ -208,9 +208,9 @@ optimiseKernelBody ::
   (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (KernelBody rep)
-optimiseKernelBody onOp vtable sinking (KernelBody attr stms res) =
+optimiseKernelBody onOp vtable sinking (Body attr stms res) =
   let (stms', sunk) = optimiseStms onOp vtable sinking stms $ freeIn res
-   in (KernelBody attr stms' res, sunk)
+   in (Body attr stms' res, sunk)
 
 optimiseSegOp ::
   (Constraints rep) =>

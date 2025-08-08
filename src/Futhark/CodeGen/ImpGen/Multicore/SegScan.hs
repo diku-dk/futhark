@@ -184,12 +184,12 @@ genScanLoop ::
   ImpM MCMem HostEnv Imp.Multicore ()
 genScanLoop typ pat space kbody scan_ops local_accs i = do
   let (all_scan_res, map_res) =
-        splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
+        splitAt (segBinOpResults scan_ops) $ bodyResult kbody
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
 
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-  compileStms mempty (kernelBodyStms kbody) $ do
+  compileStms mempty (bodyStms kbody) $ do
     let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
     sComment "write mapped values results to memory" $
       zipWithM_ (compileThreadResult space) map_arrs map_res
@@ -460,8 +460,8 @@ compileSegScanBody pat space scan_ops kbody = collect $ do
       sFor "i" inner_bound $ \i -> do
         zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns_64) segment_i
         dPrimV_ (last is) i
-        compileStms mempty (kernelBodyStms kbody) $ do
-          let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ kernelBodyResult kbody
+        compileStms mempty (bodyStms kbody) $ do
+          let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ bodyResult kbody
           sComment "write to-scan values to parameters" $
             forM_ (zip scan_y_params scan_res) $ \(p, se) ->
               copyDWIMFix (paramName p) [] (kernelResultSubExp se) []

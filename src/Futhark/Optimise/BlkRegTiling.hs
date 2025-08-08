@@ -267,7 +267,7 @@ mmBlkRegTiling env stm = do
 
 mmBlkRegTilingAcc :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
-  | KernelBody () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
+  | Body () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
     cs == mempty,
     -- check kernel has one result of primitive type
     [res_tp] <- ts,
@@ -389,7 +389,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         let grid = KernelGrid (Count grid_size) (Count tblock_size)
             level' = SegBlock SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_t, gridDim_t), (gid_y, gridDim_y), (gid_x, gridDim_x)])
-            kbody' = KernelBody () stms_seggroup ret_seggroup
+            kbody' = Body () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
       pure $ Just (host_stms, new_kernel)
   where
@@ -462,7 +462,7 @@ mmBlkRegTilingAcc _ _ = pure Nothing
 
 mmBlkRegTilingNrm :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
-  | KernelBody () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
+  | Body () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
     cs == mempty,
     -- check kernel has one result of primitive type
     [res_tp] <- ts,
@@ -562,7 +562,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         let grid = KernelGrid (Count grid_size) (Count tblock_size)
             level' = SegBlock SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
-            kbody' = KernelBody () stms_seggroup ret_seggroup
+            kbody' = Body () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
       pure $ Just (host_stms, new_kernel)
   where
@@ -992,7 +992,7 @@ isInvarTo2of3InnerDims branch_variant kspace variance arrs =
 -- mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
 doRegTiling3D :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
-  | SegMap SegThread {} space kertp (KernelBody () kstms kres) <- old_kernel,
+  | SegMap SegThread {} space kertp (Body () kstms kres) <- old_kernel,
     -- build the variance table, that records, for
     -- each variable name, the variables it depends on
     initial_variance <- M.map mempty $ scopeOfSegSpace space,
@@ -1112,44 +1112,40 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                 loc_arr_nms' <-
                   forLoop' count_shmem loc_arr_merge_nms $ \tt loc_arr_merge2_nms -> do
                     loc_arr_merge2_nms' <-
-                      forM (zip loc_arr_merge2_nms (M.toList tab_out)) $ \(loc_Y_nm, (glb_Y_nm, (ptp_Y, load_Y))) -> do
-                        ltid_flat <- newVName "ltid_flat"
-                        ltid <- newVName "ltid"
-                        let segspace = SegSpace ltid_flat [(ltid, tblock_size)]
-                        ((res_v, res_i), stms) <- runBuilder $ do
-                          offs <- letExp "offs" =<< toExp (pe64 tblock_size * le64 tt)
-                          loc_ind <- letExp "loc_ind" =<< toExp (le64 ltid + le64 offs)
-                          letBindNames [gtid_z] =<< toExp (le64 ii + le64 loc_ind)
-                          let glb_ind = gtid_z
-                          y_elm <-
-                            letSubExp "y_elem"
-                              =<< eIf
-                                (toExp $ le64 glb_ind .<. pe64 d_M)
-                                ( do
-                                    addStm load_Y
-                                    res <- index "Y_elem" glb_Y_nm [q]
-                                    resultBodyM [Var res]
-                                )
-                                (eBody [eBlank $ Prim ptp_Y])
-                          y_ind <-
-                            letSubExp "y_loc_ind"
-                              =<< eIf
-                                (toExp $ le64 loc_ind .<. pe64 rz)
-                                (toExp loc_ind >>= letTupExp' "loc_fi" >>= resultBodyM)
-                                (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
-                          -- y_tp  <- subExpType y_elm
-                          pure (y_elm, y_ind)
+                      forM (zip loc_arr_merge2_nms (M.toList tab_out)) $ \(loc_Y_nm, (glb_Y_nm, (ptp_Y, load_Y))) ->
+                        letExp "Y_glb2loc" <=< withAcc [loc_Y_nm] 1 $ \ ~[acc] -> do
+                          ltid_flat <- newVName "ltid_flat"
+                          ltid <- newVName "ltid"
+                          let segspace = SegSpace ltid_flat [(ltid, tblock_size)]
+                          body <- runBodyBuilder $ do
+                            offs <- letExp "offs" =<< toExp (pe64 tblock_size * le64 tt)
+                            loc_ind <- letExp "loc_ind" =<< toExp (le64 ltid + le64 offs)
+                            letBindNames [gtid_z] =<< toExp (le64 ii + le64 loc_ind)
+                            let glb_ind = gtid_z
+                            y_elm <-
+                              letSubExp "y_elem"
+                                =<< eIf
+                                  (toExp $ le64 glb_ind .<. pe64 d_M)
+                                  ( do
+                                      addStm load_Y
+                                      res <- index "Y_elem" glb_Y_nm [q]
+                                      resultBodyM [Var res]
+                                  )
+                                  (eBody [eBlank $ Prim ptp_Y])
+                            y_ind <-
+                              letSubExp "y_loc_ind"
+                                =<< eIf
+                                  (toExp $ le64 loc_ind .<. pe64 rz)
+                                  (toExp loc_ind >>= letTupExp' "loc_fi" >>= resultBodyM)
+                                  (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
+                            acc' <- letExp (baseString acc) $ BasicOp $ UpdateAcc Safe acc [y_ind] [y_elm]
+                            pure [Returns ResultMaySimplify mempty $ Var acc']
 
-                        let ret = WriteReturns mempty loc_Y_nm [(Slice [DimFix res_i], res_v)]
-                        let body = KernelBody () stms [ret]
-                        loc_Y_nm_t <- lookupType loc_Y_nm
+                          acc_t <- lookupType acc
 
-                        res_nms <-
-                          letTupExp "Y_glb2loc" <=< renameExp $
+                          letTupExp' "Y_glb2loc" <=< renameExp $
                             Op . SegOp $
-                              SegMap segthd_lvl segspace [loc_Y_nm_t] body
-                        let res_nm : _ = res_nms
-                        pure res_nm
+                              SegMap segthd_lvl segspace [acc_t] body
                     resultBodyM $ map Var loc_arr_merge2_nms'
 
                 redomap_res <-
@@ -1280,7 +1276,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         let grid = KernelGrid (Count grid_size) (Count tblock_size)
             level' = SegBlock SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
-            kbody' = KernelBody () stms_seggroup ret_seggroup
+            kbody' = Body () stms_seggroup ret_seggroup
 
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' kertp kbody'
       -- END (new_kernel, host_stms) <- runBuilder $ do
