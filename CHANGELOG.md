@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   directories created by `futhark test` and `futhark bench` contain a
   `CACHEDIR.TAG` file.
 
+* C types corresponding to records now have nicer names.
+
 ### Removed
 
 ### Changed
@@ -20,6 +22,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 
 * `futhark fmt --check` no longer prints the program on failure.
+
+* Use of unsigned types in entry points could cause invalid C to be generated.
+  (#2306)
 
 ## [0.25.32]
 
