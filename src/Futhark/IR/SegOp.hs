@@ -441,7 +441,7 @@ instance (ASTConstraints lvl) => AliasedOp (SegOp lvl) where
   consumedInOp (SegRed _ _ _ kbody _) =
     consumedInBody kbody
   consumedInOp (SegScan _ _ _ kbody _ post_op) =
-    consumedInBody kbody <> consumed_lam
+    consumed_lam <> consumedInBody kbody
     where
       consumed_lam = consumedByLambda $ segPostOpLambda post_op
   consumedInOp (SegHist _ _ _ kbody ops) =

@@ -321,22 +321,18 @@ kernelAlternatives ::
   (MonadFreshNames m, HasScope GPU m) =>
   Pat Type ->
   Body GPU ->
-  Maybe (Lambda SOACS) ->
   [(SubExp, Body GPU)] ->
   m (Stms GPU)
-kernelAlternatives pat default_body maybe_post_op [] = runBuilder_ $ do
-  ses <-
-    case maybe_post_op of
-      Just post_op -> pure $ bodyResult $ lambdaBody post_op
-      Nothing -> bodyBind default_body
+kernelAlternatives pat default_body [] = runBuilder_ $ do
+  ses <- bodyBind default_body
   forM_ (zip (patNames pat) ses) $ \(name, SubExpRes cs se) ->
     certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
-kernelAlternatives pat default_body maybe_post_op ((cond, alt) : alts) = runBuilder_ $ do
+kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   alts_pat <- fmap Pat . forM (patElems pat) $ \pe -> do
     name <- newVName $ baseString $ patElemName pe
     pure pe {patElemName = name}
 
-  alt_stms <- kernelAlternatives alts_pat default_body maybe_post_op alts
+  alt_stms <- kernelAlternatives alts_pat default_body alts
   let alt_body = mkBody alt_stms $ varsRes $ patNames alts_pat
 
   letBind pat . Match [cond] [Case [Just $ BoolValue True] alt] alt_body $
@@ -353,12 +349,11 @@ versionScanRed ::
   StmAux () ->
   SubExp ->
   Lambda SOACS ->
-  Maybe (Lambda SOACS) ->
   DistribM (Stms GPU) ->
   DistribM (Body GPU) ->
   ([(Name, Bool)] -> DistribM (Body GPU)) ->
   DistribM (Stms GPU)
-versionScanRed path pat aux w map_lam post_op paralleliseOuter outerParallelBody innerParallelBody =
+versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody =
   if not (lambdaContainsParallelism map_lam)
     || ("sequential_inner" `inAttrs` stmAuxAttrs aux)
     then paralleliseOuter
@@ -369,7 +364,7 @@ versionScanRed path pat aux w map_lam post_op paralleliseOuter outerParallelBody
       outer_stms <- outerParallelBody
       inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
 
-      (suff_stms <>) <$> kernelAlternatives pat inner_stms post_op [(outer_suff, outer_stms)]
+      (suff_stms <>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
 
 transformStm :: KernelPath -> Stm SOACS -> DistribM GPUStms
 transformStm _ stm
@@ -410,8 +405,13 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
               let scan_lam'' = soacsLambdaToGPU scan_lam'
               pure $ SegBinOp Noncommutative scan_lam'' nes' shape
             let map_lam_sequential = soacsLambdaToGPU map_lam
-            let ret = lambdaReturnType map_lam
+                segBinOpType op =
+                  flip arrayOfShape (segBinOpShape op) <$> lambdaReturnType (segBinOpLambda op)
+                ret' = concatMap segBinOpType scan_ops
+                ret'' = drop (length ret') $ lambdaReturnType map_lam
+                ret = ret' <> ret''
             identity <- mkIdentityLambda ret
+
             let post_op = SegPostOp identity
             lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
             addStms . fmap (certify cs)
@@ -432,7 +432,7 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
             renameBody
               =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
-      versionScanRed path pat aux w map_lam Nothing paralleliseOuter outerParallelBody innerParallelBody
+      versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody
   where
     cs = stmAuxCerts aux
 transformStm path (Let res_pat aux (Op (Screma w arrs form)))
@@ -474,7 +474,7 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
             renameBody
               =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
-      versionScanRed path pat aux w map_lam Nothing paralleliseOuter outerParallelBody innerParallelBody
+      versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody
   where
     cs = stmAuxCerts aux
 transformStm path (Let pat aux (Op (Screma w arrs form))) = do
@@ -683,7 +683,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
   case intra of
     _ | "sequential_inner" `inAttrs` attrs -> do
       seq_body <- renameBody =<< mkBody <$> mk_seq_stms path <*> pure res
-      kernelAlternatives pat seq_body Nothing []
+      kernelAlternatives pat seq_body []
     --
     Nothing
       | not only_intra,
@@ -694,17 +694,17 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
               =<< mkBody
                 <$> mk_par_stms ((outer_suff_key, False) : path)
                 <*> pure res
-          (outer_suff_stms <>) <$> kernelAlternatives pat par_body Nothing [(outer_suff, seq_body)]
+          (outer_suff_stms <>) <$> kernelAlternatives pat par_body [(outer_suff, seq_body)]
       --
       | otherwise -> do
           par_body <- renameBody =<< mkBody <$> mk_par_stms path <*> pure res
-          kernelAlternatives pat par_body Nothing []
+          kernelAlternatives pat par_body []
     --
     Just intra'@(_, _, log, intra_prelude, intra_stms)
       | only_intra -> do
           addLog log
           group_par_body <- renameBody $ mkBody intra_stms res
-          (intra_prelude <>) <$> kernelAlternatives pat group_par_body Nothing []
+          (intra_prelude <>) <$> kernelAlternatives pat group_par_body []
       --
       | otherwise -> do
           addLog log
@@ -721,7 +721,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
                     <*> pure res
 
               (intra_suff_stms <>)
-                <$> kernelAlternatives pat par_body Nothing [(intra_ok, group_par_body)]
+                <$> kernelAlternatives pat par_body [(intra_ok, group_par_body)]
             Just m -> do
               (outer_suff, outer_suff_key, outer_suff_stms, seq_body) <- m
 
@@ -743,7 +743,6 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
                 <$> kernelAlternatives
                   pat
                   par_body
-                  Nothing
                   [(outer_suff, seq_body), (intra_ok, group_par_body)]
   where
     nest_ws = kernelNestWidths loopnest
