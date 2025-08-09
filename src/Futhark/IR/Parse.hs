@@ -946,6 +946,9 @@ pSegOp pr pLvl =
       comm <- pComm
       lam <- pLambda pr
       pure $ SegOp.SegBinOp comm lam nes shape
+    pSegPostOp =
+      SegOp.SegPostOp
+        <$> pLambda pr
     pHistOp =
       SegOp.HistOp
         <$> pShape
@@ -961,7 +964,7 @@ pSegOp pr pLvl =
         <*> pLambda pr
     pSegMap = pSegOp' SegOp.SegMap
     pSegRed = pSegOp' SegOp.SegRed <*> parens (pSegBinOp `sepBy` pComma)
-    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma)
+    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma) <*> pSegPostOp
     pSegHist = pSegOp' SegOp.SegHist <*> parens (pHistOp `sepBy` pComma)
 
 pSegLevel :: Parser GPU.SegLevel

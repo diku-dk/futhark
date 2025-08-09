@@ -239,13 +239,20 @@ transformSOAC pat _ (Screma w arrs form)
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
       (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
+      let segBinOpType op =
+            flip arrayOfShape (segBinOpShape op) <$> lambdaReturnType (segBinOpLambda op)
+          ret' = concatMap segBinOpType scans'
+          ret'' = drop (length ret') $ lambdaReturnType map_lam
+          ret = ret' <> ret''
+      identity <- mkIdentityLambda ret
+      let post_op = SegPostOp identity
       pure $
         mconcat scans_stms
           <> oneStm
             ( Let pat (defAux ()) $
                 Op $
                   ParOp Nothing $
-                    SegScan () space (lambdaReturnType map_lam) kbody scans'
+                    SegScan () space (lambdaReturnType map_lam) kbody scans' post_op
             )
   | otherwise = do
       -- This screma is too complicated for us to immediately do

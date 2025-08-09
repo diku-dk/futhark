@@ -92,8 +92,7 @@ instance SOAC.HasSOAC (Wise GPU) where
 
 kernelRules :: RuleBook (Wise GPU)
 kernelRules =
-  standardRules
-    <> segOpRules
+  segOpRules
     <> ruleBook
       [ RuleOp SOAC.simplifyKnownIterationSOAC,
         RuleOp SOAC.removeReplicateMapping,

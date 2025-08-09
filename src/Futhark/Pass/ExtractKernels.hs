@@ -405,9 +405,17 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
               let scan_lam'' = soacsLambdaToGPU scan_lam'
               pure $ SegBinOp Noncommutative scan_lam'' nes' shape
             let map_lam_sequential = soacsLambdaToGPU map_lam
+                segBinOpType op =
+                  flip arrayOfShape (segBinOpShape op) <$> lambdaReturnType (segBinOpLambda op)
+                ret' = concatMap segBinOpType scan_ops
+                ret'' = drop (length ret') $ lambdaReturnType map_lam
+                ret = ret' <> ret''
+            identity <- mkIdentityLambda ret
+
+            let post_op = SegPostOp identity
             lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
             addStms . fmap (certify cs)
-              =<< segScan lvl pat mempty w scan_ops map_lam_sequential arrs [] []
+              =<< segScan lvl pat mempty w scan_ops post_op map_lam_sequential arrs [] []
 
           outerParallelBody =
             renameBody

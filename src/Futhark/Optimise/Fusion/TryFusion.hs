@@ -18,7 +18,7 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, (\\))
+import Data.List (find, partition, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.HORep.MapNest (MapNest)
@@ -197,6 +197,131 @@ mapWriteFusionOK :: [VName] -> FusedSOAC -> Bool
 mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
   where
     inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
+
+scanScatterMapLambda ::
+  [SOAC.Input] ->
+  Lambda SOACS ->
+  [VName] ->
+  [SOAC.Input] ->
+  TryFusion ([SOAC.Input], Lambda SOACS, [VName])
+scanScatterMapLambda inp lam out inp' = do
+  (old, new) <- combineInputs inp lam out inp'
+  let new_lam = extendLambda lam $ snd <$> new
+      new_inp = fst <$> old <> filter (`notElem` old) new
+  extra_out <- mapM (inputToVName . fst) new
+  let new_scatter_inp = out <> extra_out
+  pure (new_inp, new_lam, new_scatter_inp)
+
+scanScatterPostLambda ::
+  [VName] ->
+  [VName] ->
+  [SOAC.Input] ->
+  Lambda SOACS ->
+  TryFusion (Lambda SOACS)
+scanScatterPostLambda new_inp extra_out old_inp lam = do
+  new_extra_out_ts <- mapM (fmap rowType . lookupType) extra_out
+  new_params <- mapM paramDefault new_inp
+  let new_params_map = M.fromList $ zip new_inp new_params
+      outToParam = liftMaybe . flip M.lookup new_params_map
+      outToRet = fmap (varRes . paramName) . outToParam
+  extra_rets <- mapM outToRet extra_out
+  let body = lambdaBody lam
+      new_body = body {bodyResult = bodyResult body <> extra_rets}
+      new_lam =
+        lam
+          { lambdaReturnType = lambdaReturnType lam <> new_extra_out_ts,
+            lambdaBody = new_body,
+            lambdaParams = new_params
+          }
+  pure new_lam
+  where
+    inp = mapM inputToVName old_inp
+    (.:) = (.) . (.)
+    params_map = M.fromList .: zip <$> inp <*> pure (lambdaParams lam)
+    paramDefault name =
+      maybe (vNameToNewParam name) pure . M.lookup name =<< params_map
+
+extendLambda ::
+  Lambda SOACS ->
+  [Param Type] ->
+  Lambda SOACS
+extendLambda lam extra_params =
+  lam
+    { lambdaBody = new_body,
+      lambdaReturnType = new_rets,
+      lambdaParams = new_params
+    }
+  where
+    params = lambdaParams lam
+    extra_rets = varRes . paramName <$> extra_params
+    extra_ts = paramType <$> extra_params
+    body = lambdaBody lam
+    new_body = body {bodyResult = bodyResult body <> extra_rets}
+    new_rets = lambdaReturnType lam <> extra_ts
+    new_params = params <> filter (`notElem` params) extra_params
+
+fusability :: Names -> [VName] -> ([VName], [VName])
+fusability unfus_set = partition (`notNameIn` unfus_set)
+
+vNameToNewParam :: VName -> TryFusion (Param Type)
+vNameToNewParam = lookupType >=> newParam "x" . rowType
+
+inputToVName :: SOAC.Input -> TryFusion VName
+inputToVName = liftMaybe . SOAC.isVarishInput
+
+inputToNewParam :: SOAC.Input -> TryFusion (Param Type)
+inputToNewParam = inputToVName >=> vNameToNewParam
+
+combineInputs ::
+  [SOAC.Input] ->
+  Lambda SOACS ->
+  [VName] ->
+  [SOAC.Input] ->
+  TryFusion ([(SOAC.Input, Param Type)], [(SOAC.Input, Param Type)])
+combineInputs inp lam out inp' =
+  (old_inputs,) <$> new_inputs
+  where
+    old_inputs = zip inp $ lambdaParams lam
+    toNewParamPair inp'' =
+      maybe
+        ((inp'',) <$> inputToNewParam inp'')
+        (pure . (inp'',))
+        (lookup inp'' old_inputs)
+    isOutput = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
+    new_inputs = mapM toNewParamPair =<< filterM isOutput inp'
+
+fuseMapLambdaHorizontally ::
+  (Lambda SOACS, Scan SOACS) ->
+  (Lambda SOACS, Scan SOACS) ->
+  Lambda SOACS
+fuseMapLambdaHorizontally (lam_c, scan_c) (lam_p, scan_p) =
+  Lambda
+    { lambdaBody = new_body,
+      lambdaParams = new_params,
+      lambdaReturnType = new_ts
+    }
+  where
+    (scan_ts_c, map_ts_c) =
+      splitAt (length $ scanNeutral scan_c) $ lambdaReturnType lam_c
+    (scan_ts_p, map_ts_p) =
+      splitAt (length $ scanNeutral scan_p) $ lambdaReturnType lam_p
+    new_ts = scan_ts_c <> scan_ts_p <> map_ts_c <> map_ts_p
+    (scan_res_c, map_res_c) =
+      splitAt (length $ scanNeutral scan_c) $ bodyResult $ lambdaBody lam_c
+    (scan_res_p, map_res_p) =
+      splitAt (length $ scanNeutral scan_p) $ bodyResult $ lambdaBody lam_p
+    new_res = scan_res_c <> scan_res_p <> map_res_c <> map_res_p
+    body_stms_c = bodyStms $ lambdaBody lam_c
+    body_stms_p = bodyStms $ lambdaBody lam_p
+    new_body_stms = body_stms_c <> body_stms_p
+    new_body =
+      (lambdaBody lam_c)
+        { bodyStms = new_body_stms,
+          bodyResult = new_res
+        }
+    params_c = lambdaParams lam_c
+    params_p = lambdaParams lam_p
+    new_params = params_c <> params_p
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::

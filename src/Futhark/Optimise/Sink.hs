@@ -222,7 +222,13 @@ optimiseSegOp onOp vtable sinking op =
   where
     opMapper scope =
       identitySegOpMapper
-        { mapOnSegOpLambda = \lam -> do
+        { mapOnSegBinOpLambda = \lam -> do
+            let (body, sunk) =
+                  optimiseBody onOp op_vtable sinking $
+                    lambdaBody lam
+            modify (<> sunk)
+            pure lam {lambdaBody = body},
+          mapOnSegPostOpLambda = \lam -> do
             let (body, sunk) =
                   optimiseBody onOp op_vtable sinking $
                     lambdaBody lam

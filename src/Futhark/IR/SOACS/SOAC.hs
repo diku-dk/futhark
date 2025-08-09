@@ -338,21 +338,21 @@ mapSOACM tv (Screma w arrs (ScremaForm map_lam scans reds)) =
     <*> mapM (mapOnSOACVName tv) arrs
     <*> ( ScremaForm
             <$> mapOnSOACLambda tv map_lam
-            <*> forM
-              scans
-              ( \(Scan red_lam red_nes) ->
-                  Scan
-                    <$> mapOnSOACLambda tv red_lam
-                    <*> mapM (mapOnSOACSubExp tv) red_nes
-              )
-            <*> forM
-              reds
-              ( \(Reduce comm red_lam red_nes) ->
-                  Reduce comm
-                    <$> mapOnSOACLambda tv red_lam
-                    <*> mapM (mapOnSOACSubExp tv) red_nes
-              )
+            <*> mapM (mapOnSOACScan tv) scans
+            <*> mapM (mapOnSOACReduce tv) reds
         )
+
+mapOnSOACScan :: (Monad m) => SOACMapper frep trep m -> Scan frep -> m (Scan trep)
+mapOnSOACScan tv (Scan red_lam red_nes) =
+  Scan
+    <$> mapOnSOACLambda tv red_lam
+    <*> mapM (mapOnSOACSubExp tv) red_nes
+
+mapOnSOACReduce :: (Monad m) => SOACMapper frep trep m -> Reduce frep -> m (Reduce trep)
+mapOnSOACReduce tv (Reduce comm red_lam red_nes) =
+  Reduce comm
+    <$> mapOnSOACLambda tv red_lam
+    <*> mapM (mapOnSOACSubExp tv) red_nes
 
 -- | A helper for defining 'TraverseOpStms'.
 traverseSOACStms :: (Monad m) => OpStmsTraverser m (SOAC rep) rep
@@ -669,35 +669,9 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
   TC.require [Prim int64] w
   arrs' <- TC.checkSOACArrayArgs w arrs
   TC.checkLambda map_lam arrs'
-
-  scan_nes' <- fmap concat $
-    forM scans $ \(Scan scan_lam scan_nes) -> do
-      scan_nes' <- mapM TC.checkArg scan_nes
-      let scan_t = map TC.argType scan_nes'
-      TC.checkLambda scan_lam $ map TC.noArgAliases $ scan_nes' ++ scan_nes'
-      unless (scan_t == lambdaReturnType scan_lam) $
-        TC.bad . TC.TypeError $
-          "Scan function returns type "
-            <> prettyTuple (lambdaReturnType scan_lam)
-            <> " but neutral element has type "
-            <> prettyTuple scan_t
-      pure scan_nes'
-
-  red_nes' <- fmap concat $
-    forM reds $ \(Reduce _ red_lam red_nes) -> do
-      red_nes' <- mapM TC.checkArg red_nes
-      let red_t = map TC.argType red_nes'
-      TC.checkLambda red_lam $ map TC.noArgAliases $ red_nes' ++ red_nes'
-      unless (red_t == lambdaReturnType red_lam) $
-        TC.bad . TC.TypeError $
-          "Reduce function returns type "
-            <> prettyTuple (lambdaReturnType red_lam)
-            <> " but neutral element has type "
-            <> prettyTuple red_t
-      pure red_nes'
-
+  scan_nes' <- concat <$> mapM typeCheckScan scans
+  red_nes' <- concat <$> mapM typeCheckReduce reds
   let map_lam_ts = lambdaReturnType map_lam
-
   unless
     ( take (length scan_nes' + length red_nes') map_lam_ts
         == map TC.argType (scan_nes' ++ red_nes')
@@ -707,6 +681,32 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
     $ "Map function return type "
       <> prettyTuple map_lam_ts
       <> " wrong for given scan and reduction functions."
+
+typeCheckScan :: (TC.Checkable rep) => Scan (Aliases rep) -> TC.TypeM rep [(Type, Names)]
+typeCheckScan (Scan scan_lam scan_nes) = do
+  scan_nes' <- mapM TC.checkArg scan_nes
+  let scan_t = map TC.argType scan_nes'
+  TC.checkLambda scan_lam $ map TC.noArgAliases $ scan_nes' ++ scan_nes'
+  unless (scan_t == lambdaReturnType scan_lam) $
+    TC.bad . TC.TypeError $
+      "Scan function returns type "
+        <> prettyTuple (lambdaReturnType scan_lam)
+        <> " but neutral element has type "
+        <> prettyTuple scan_t
+  pure scan_nes'
+
+typeCheckReduce :: (TC.Checkable rep) => Reduce (Aliases rep) -> TC.TypeM rep [(Type, Names)]
+typeCheckReduce (Reduce _ red_lam red_nes) = do
+  red_nes' <- mapM TC.checkArg red_nes
+  let red_t = map TC.argType red_nes'
+  TC.checkLambda red_lam $ map TC.noArgAliases $ red_nes' ++ red_nes'
+  unless (red_t == lambdaReturnType red_lam) $
+    TC.bad . TC.TypeError $
+      "Reduce function returns type "
+        <> prettyTuple (lambdaReturnType red_lam)
+        <> " but neutral element has type "
+        <> prettyTuple red_t
+  pure red_nes'
 
 instance RephraseOp SOAC where
   rephraseInOp r (VJP args vec lam) =
@@ -724,12 +724,17 @@ instance RephraseOp SOAC where
     Screma w arrs
       <$> ( ScremaForm
               <$> rephraseLambda r lam
-              <*> mapM onScan scans
-              <*> mapM onRed red
+              <*> mapM (rephraseScan r) scans
+              <*> mapM (rephraseRed r) red
           )
-    where
-      onScan (Scan op nes) = Scan <$> rephraseLambda r op <*> pure nes
-      onRed (Reduce comm op nes) = Reduce comm <$> rephraseLambda r op <*> pure nes
+
+rephraseRed :: (Monad m) => Rephraser m from to -> Reduce from -> m (Reduce to)
+rephraseRed r (Reduce comm op nes) =
+  Reduce comm <$> rephraseLambda r op <*> pure nes
+
+rephraseScan :: (Monad m) => Rephraser m from to -> Scan from -> m (Scan to)
+rephraseScan r (Scan op nes) =
+  Scan <$> rephraseLambda r op <*> pure nes
 
 instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
   opMetrics (VJP _ _ lam) =
