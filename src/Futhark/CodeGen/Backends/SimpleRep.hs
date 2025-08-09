@@ -146,14 +146,17 @@ findPrettyName =
   either (Left . errorBundlePretty) Right . parse (p <* eof) "type name"
   where
     p :: Parsec Void T.Text T.Text
-    p = choice [pArr, pTup, pQual]
+    p = choice [pArr, pTup, pRec, pQual]
     pArr = do
       dims <- some "[]"
       (("arr" <> showText (length dims) <> "d_") <>) <$> p
     pTup = between "(" ")" $ do
       ts <- p `sepBy` pComma
       pure $ "tup" <> showText (length ts) <> "_" <> T.intercalate "_" ts
-    pAtom = T.pack <$> some (satisfy (`notElem` ("[]{}(),." :: String)))
+    pRec = between "{" "}" $ do
+      fs <- pField `sepBy` pComma
+      pure $ "rec__" <> T.intercalate "__" fs
+    pAtom = T.pack <$> some (satisfy (`notElem` ("[]{}(),.:" :: String)))
     pComma = void $ "," <* space
     -- Rewrite 'x.y' to 'x_y'.
     pQual = do
@@ -162,6 +165,10 @@ findPrettyName =
         [ "." >> ((x <> "_") <>) <$> pAtom,
           pure x
         ]
+    pField = do
+      f <- pAtom <* ":"
+      t <- p
+      pure $ f <> "_" <> t
 
 -- | The name of exposed opaque types.
 opaqueName :: Name -> T.Text
