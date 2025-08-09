@@ -378,7 +378,7 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
           foldr (flip arrayOfRow) (arrayOfShape t s) $
             segSpaceDims space
       (scan_pars, map_pars) = splitAt (length $ segBinOpNeutral scan) $ lambdaParams $ segPostOpLambda post_op
-      (body_scan_res, body_map_res) = splitAt (length $ segBinOpNeutral scan) $ kernelBodyResult body
+      (body_scan_res, body_map_res) = splitAt (length $ segBinOpNeutral scan) $ bodyResult body
 
   scan_out <- forM scan_ts $ \(s, t) ->
     sAllocArray "scan_out" (elemType t) (shpOfT t s) $ Space "shared"

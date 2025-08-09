@@ -272,7 +272,9 @@ genScanLoop ::
   ImpM MCMem HostEnv Imp.Multicore ()
 genScanLoop typ space kbody scan_ops local_accs scan_out map_out i = do
   let (all_scan_res, all_map_res) =
-        splitAt (segBinOpResults scan_ops) $ bodyResult kbody
+        splitAt (segBinOpResults scan_ops) $
+          fmap kernelResultSubExp $
+            bodyResult kbody
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
@@ -294,7 +296,7 @@ genScanLoop1Subtask typ pat space kbody scan_ops post_op local_accs i = do
   let (all_scan_res, all_map_res) =
         splitAt (segBinOpResults scan_ops) $
           map kernelResultSubExp $
-            kernelBodyResult kbody
+            bodyResult kbody
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i

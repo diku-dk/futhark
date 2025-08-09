@@ -439,9 +439,9 @@ instance (ASTConstraints lvl) => AliasedOp (SegOp lvl) where
   consumedInOp (SegMap _ _ _ kbody) =
     consumedInBody kbody
   consumedInOp (SegRed _ _ _ kbody _) =
-    consumedInKernelBody kbody
+    consumedInBody kbody
   consumedInOp (SegScan _ _ _ kbody _ post_op) =
-    consumedInKernelBody kbody <> consumed_lam
+    consumedInBody kbody <> consumed_lam
     where
       consumed_lam = consumedByLambda $ segPostOpLambda post_op
   consumedInOp (SegHist _ _ _ kbody ops) =
@@ -695,6 +695,14 @@ rephraseBinOp ::
 rephraseBinOp r (SegBinOp comm lam nes shape) =
   SegBinOp comm <$> rephraseLambda r lam <*> pure nes <*> pure shape
 
+rephrasePostOp ::
+  (Monad f) =>
+  Rephraser f from rep ->
+  SegPostOp from ->
+  f (SegPostOp rep)
+rephrasePostOp r (SegPostOp lam) =
+  SegPostOp <$> rephraseLambda r lam
+
 instance RephraseOp (SegOp lvl) where
   rephraseInOp r (SegMap lvl space ts body) =
     SegMap lvl space ts <$> rephraseBody r body
@@ -774,7 +782,7 @@ instance (OpMetrics (Op rep)) => OpMetrics (SegOp lvl rep) where
   opMetrics (SegRed _ _ _ body reds) =
     inside "SegRed" $ do
       mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) reds
-      kernelBodyMetrics body
+      bodyMetrics body
   opMetrics (SegScan _ _ _ body scans post_op) =
     inside "SegScan" $ do
       mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) scans
