@@ -43,7 +43,7 @@ class
   where
   mkExpPat :: [Ident] -> Exp rep -> Pat (LetDec rep)
   mkExpDec :: Pat (LetDec rep) -> Exp rep -> ExpDec rep
-  mkBody :: (FreeIn res) => Stms rep -> [res] -> GBody rep res
+  mkBody :: (IsResult res) => Stms rep -> [res] -> GBody rep res
   mkLetNames ::
     (MonadFreshNames m, HasScope rep m) =>
     [VName] ->
@@ -72,7 +72,7 @@ class
   where
   type Rep m :: Data.Kind.Type
   mkExpDecM :: Pat (LetDec (Rep m)) -> Exp (Rep m) -> m (ExpDec (Rep m))
-  mkBodyM :: (FreeIn res) => Stms (Rep m) -> [res] -> m (GBody (Rep m) res)
+  mkBodyM :: (IsResult res) => Stms (Rep m) -> [res] -> m (GBody (Rep m) res)
   mkLetNamesM :: [VName] -> Exp (Rep m) -> m (Stm (Rep m))
 
   -- | Add a statement to the 'Stms' under construction.
@@ -170,9 +170,9 @@ bodyBind (Body _ stms res) = do
   pure res
 
 -- | Add several bindings at the outermost level of a t'Body'.
-insertStms :: (Buildable rep, FreeIn res) => Stms rep -> GBody rep res -> GBody rep res
+insertStms :: (Buildable rep, IsResult res) => Stms rep -> GBody rep res -> GBody rep res
 insertStms stms1 (Body _ stms2 res) = mkBody (stms1 <> stms2) res
 
 -- | Add a single binding at the outermost level of a t'Body'.
-insertStm :: (Buildable rep, FreeIn res) => Stm rep -> GBody rep res -> GBody rep res
+insertStm :: (Buildable rep, IsResult res) => Stm rep -> GBody rep res -> GBody rep res
 insertStm = insertStms . oneStm

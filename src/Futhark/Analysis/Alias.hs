@@ -49,7 +49,7 @@ analyseFun (FunDef entry attrs fname restype params body) =
 
 -- | Perform alias analysis on Body.
 analyseBody ::
-  (AliasableRep rep, FreeIn res) =>
+  (AliasableRep rep, IsResult res) =>
   AliasTable ->
   GBody rep res ->
   GBody (Aliases rep) res

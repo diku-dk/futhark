@@ -230,7 +230,7 @@ addWisdomToPat pat e =
 
 -- | Produce a body with simplifier information.
 mkWiseBody ::
-  (Informing rep, FreeIn res) =>
+  (Informing rep, IsResult res) =>
   BodyDec rep ->
   Stms (Wise rep) ->
   [res] ->
@@ -314,7 +314,7 @@ informStms :: (Informing rep) => Stms rep -> Stms (Wise rep)
 informStms = fmap informStm
 
 -- | Construct a 'Wise' body.
-informBody :: (Informing rep, FreeIn res) => GBody rep res -> GBody (Wise rep) res
+informBody :: (Informing rep, IsResult res) => GBody rep res -> GBody (Wise rep) res
 informBody (Body dec stms res) = mkWiseBody dec (informStms stms) res
 
 -- | Construct a 'Wise' lambda.
