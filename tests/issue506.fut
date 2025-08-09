@@ -2,7 +2,7 @@
 -- function.  This program does not compute anything interesting.
 -- ==
 
-def map2 [n] 'a 'b 'x (f: a -> b -> x) (as: [n]a) (bs: [n]b): []x =
+def map2 [n] 'a 'b 'x (f: a -> b -> x) (as: [n]a) (bs: [n]b) : []x =
   map (\(a, b) -> f a b) (zip as bs)
 
 def main (n: i64) =

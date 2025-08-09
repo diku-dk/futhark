@@ -8,8 +8,8 @@
 
 def main (arr: [3]f32) : f32 =
   let (a, b) = (arr[0], arr[1])
-  let c = a*b + a
-  let d = -b/2
+  let c = a * b + a
+  let d = -b / 2
   let e = c / arr[2]
   let f = 10 * e
   in f * d

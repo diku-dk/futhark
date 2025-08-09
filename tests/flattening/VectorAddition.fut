@@ -6,5 +6,5 @@
 -- output {
 --   [6,8,10,12]
 -- }
-def main (xs: []i32) (ys: []i32): []i32 =
+def main (xs: []i32) (ys: []i32) : []i32 =
   map2 (+) xs ys

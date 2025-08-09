@@ -3,10 +3,12 @@
 -- ==
 -- input { 12 } output { 17 }
 
-def main (x : i32) =
-  let f = let b = 2 in
-          let g = let a = 1 in
-                  let h = \(x:i32) -> x+a
-                  in \(z:i32) -> h b + z
-          in \(y:i32) -> g y + b
+def main (x: i32) =
+  let f =
+    let b = 2
+    let g =
+      let a = 1
+      let h = \(x: i32) -> x + a
+      in \(z: i32) -> h b + z
+    in \(y: i32) -> g y + b
   in f x

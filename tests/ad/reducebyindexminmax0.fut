@@ -13,9 +13,9 @@ def red_max [n] (is: [n]i64, vs: [n]f32) =
   reduce_by_index (replicate 5 0) f32.max f32.lowest is vs
 
 entry rev [n] (is: [n]i64) (vs: [n]f32) =
-  let (_, res) = vjp red_max (is,vs) (replicate 5 0 with [0] = 1)
+  let (_, res) = vjp red_max (is, vs) (replicate 5 0 with [0] = 1)
   in res
 
 entry revp [n] (is: [n]i64) (vs: [n]f32) =
-  let (res,_) = vjp red_max (is,vs) (replicate 5 0 with [0] = 1)
+  let (res, _) = vjp red_max (is, vs) (replicate 5 0 with [0] = 1)
   in res

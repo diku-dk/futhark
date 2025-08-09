@@ -2,6 +2,6 @@
 -- ==
 -- error: Duplicate fields
 
-def main(x: i32) =
-  let {x=a, x=b} = {x}
-  in a+b
+def main (x: i32) =
+  let {x = a, x = b} = {x}
+  in a + b

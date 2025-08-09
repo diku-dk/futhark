@@ -11,12 +11,12 @@
 --   [[120f32, 120f32], [60f32, 60f32], [40f32, 40f32], [30f32, 30f32], [24f32, 24f32]]]
 -- }
 
-def primal [n][k] (a: [n][k]f32) =
+def primal [n] [k] (a: [n][k]f32) =
   scan (map2 (*)) (replicate k 1) a
 
-entry fwd_J [n][k] (a: [n][k]f32) =
+entry fwd_J [n] [k] (a: [n][k]f32) =
   tabulate n (\i -> jvp primal a (replicate n (replicate k 0) with [i] = replicate k 1))
   |> transpose
 
-entry rev_J [n][k] (a: [n][k]f32) =
+entry rev_J [n] [k] (a: [n][k]f32) =
   tabulate n (\i -> vjp primal a (replicate n (replicate k 0) with [i] = replicate k 1))

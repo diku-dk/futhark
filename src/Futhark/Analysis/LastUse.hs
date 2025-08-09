@@ -165,7 +165,7 @@ lastUseKernelBody ::
   --      (i) an updated last-use table,
   --     (ii) an updated set of used names (including the binding).
   LastUseM rep (LUTabFun, Names)
-lastUseKernelBody bdy@(KernelBody _ stms result) (lutab, used_nms) =
+lastUseKernelBody bdy@(Body _ stms result) (lutab, used_nms) =
   inScopeOf stms $ do
     -- perform analysis bottom-up in bindings: results are known to be used,
     -- hence they are added to the used_nms set.

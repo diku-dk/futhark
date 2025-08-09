@@ -3,8 +3,12 @@
 -- ==
 -- error: consumed
 
-def consume(a: *[]i32): i32 = 0 -- OK.
+def consume (a: *[]i32) : i32 = 0
 
-def main(a: *[]i32): []i32 =
-  let _ = consume(a) in
-  a -- Should fail, because a has been consumed!
+-- OK.
+
+def main (a: *[]i32) : []i32 =
+  let _ = consume (a)
+  in a
+
+-- Should fail, because a has been consumed!

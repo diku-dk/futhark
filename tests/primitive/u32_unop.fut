@@ -18,4 +18,3 @@
 entry negateu32 = map (\x : u32 -> -x)
 entry absu32 = map (u32.abs)
 entry sgnu32 = map (u32.sgn)
-

@@ -182,8 +182,8 @@ optimiseKernelBody ::
   KernelBody rep ->
   DoubleBufferM rep (KernelBody rep)
 optimiseKernelBody kbody = do
-  stms' <- optimiseStms $ stmsToList $ kernelBodyStms kbody
-  pure $ kbody {kernelBodyStms = stms'}
+  stms' <- optimiseStms $ stmsToList $ bodyStms kbody
+  pure $ kbody {bodyStms = stms'}
 
 optimiseLambda ::
   (ASTRep rep) =>

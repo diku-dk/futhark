@@ -361,9 +361,9 @@ compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   compileFlatId space
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $
+    compileStms mempty (bodyStms body) $
       zipWithM_ (compileThreadResult space) (patElems pat) $
-        kernelBodyResult body
+        bodyResult body
   sOp $ Imp.ErrorSync Imp.FenceLocal
 compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
   compileFlatId space
@@ -389,7 +389,7 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
         segPostOpLambda post_op
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $ do
+    compileStms mempty (bodyStms body) $ do
       forM_ (zip scan_out body_scan_res) $ \(dest, res) ->
         copyDWIMFix
           dest
@@ -454,9 +454,9 @@ compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
 
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $ do
+    compileStms mempty (bodyStms body) $ do
       let (red_res, map_res) =
-            splitAt (segBinOpResults ops) $ kernelBodyResult body
+            splitAt (segBinOpResults ops) $ bodyResult body
       forM_ (zip tmp_arrs red_res) $ \(dest, res) ->
         copyDWIMFix dest (map Imp.le64 ltids) (kernelResultSubExp res) []
       zipWithM_ (compileThreadResult space) map_pes map_res
@@ -584,8 +584,8 @@ compileBlockOp pat (Inner (SegOp (SegHist lvl space _ kbody ops))) = do
   sOp $ Imp.Barrier Imp.FenceLocal
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms kbody) $ do
-      let (red_res, map_res) = splitAt num_red_res $ kernelBodyResult kbody
+    compileStms mempty (bodyStms kbody) $ do
+      let (red_res, map_res) = splitAt num_red_res $ bodyResult kbody
           (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
       zipWithM_ (compileThreadResult space) map_pes map_res
 
@@ -731,8 +731,6 @@ compileBlockResult space pe (Returns _ _ what) = do
     -- block.  TODO: also do this if the array is in global memory
     -- (but this is a bit more tricky, synchronisation-wise).
       copyDWIMFix (patElemName pe) gids what []
-compileBlockResult _ _ WriteReturns {} =
-  compilerLimitationS "compileBlockResult: WriteReturns not handled yet."
 
 -- | The sizes of nested iteration spaces in the kernel.
 type SegOpSizes = S.Set [SubExp]

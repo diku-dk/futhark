@@ -75,21 +75,10 @@ optimiseStms onOp stms =
 optimiseBody ::
   (ASTRep rep) =>
   OnOp rep ->
-  Body rep ->
-  UnstreamM rep (Body rep)
+  GBody rep res ->
+  UnstreamM rep (GBody rep res)
 optimiseBody onOp (Body aux stms res) =
   Body aux <$> optimiseStms onOp stms <*> pure res
-
-optimiseKernelBody ::
-  (ASTRep rep) =>
-  OnOp rep ->
-  KernelBody rep ->
-  UnstreamM rep (KernelBody rep)
-optimiseKernelBody onOp (KernelBody attr stms res) =
-  localScope (scopeOf stms) $
-    KernelBody attr
-      <$> (stmsFromList . concat <$> mapM (optimiseStm onOp) (stmsToList stms))
-      <*> pure res
 
 optimiseLambda ::
   (ASTRep rep) =>
@@ -126,7 +115,7 @@ optimiseSegOp onOp op =
   where
     optimise =
       identitySegOpMapper
-        { mapOnSegOpBody = optimiseKernelBody onOp,
+        { mapOnSegOpBody = optimiseBody onOp,
           mapOnSegBinOpLambda = optimiseLambda onOp,
           mapOnSegPostOpLambda = optimiseLambda onOp
         }

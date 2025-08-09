@@ -8,5 +8,5 @@
 -- output { [11.0f32, 13.0f32, 15.0f32, 17.0f32, 19.0f32, 21.0f32, 23.0f32, 25.0f32] }
 def main [n] (arr: [n]f32) =
   if (arr[0] < 0.0)
-  then arr[2+n/2:n]
-  else arr[2+n/4:n]
+  then arr[2 + n / 2:n]
+  else arr[2 + n / 4:n]

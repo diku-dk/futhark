@@ -25,19 +25,17 @@
 --              [ 81i64, 82i64, 83i64 ],
 --              [ 91i64, 92i64, 93i64 ] ] ] }
 
-
 import "intrinsics"
 
 entry my_iota (n: i64) = iota n
 
-entry update_antidiag [n] (xs: *[n]i64): [n]i64 =
-  let vs = iota (3*3*3) |> unflatten |> unflatten
+entry update_antidiag [n] (xs: *[n]i64) : [n]i64 =
+  let vs = iota (3 * 3 * 3) |> unflatten |> unflatten
   let zs = flat_update_3d xs 17 27 10 1 vs
   in zs
 
-entry index_antidiag [n] (xs: [n]i64): [][][]i64 =
+entry index_antidiag [n] (xs: [n]i64) : [][][]i64 =
   flat_index_3d xs 17 3 27 3 10 3 1
-
 
 -- We need to test weird inner strides as well
 

@@ -1,4 +1,5 @@
-local module type sparse = {
+local
+module type sparse = {
   type~ mat = ?[nnz].[nnz]i64
 }
 

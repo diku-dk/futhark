@@ -11,11 +11,12 @@
 --        }
 -- structure gpu-mem { Alloc 2 }
 
-let main [n] (xs: *[n][n]i64) (cond: bool) (i: i64): [n][n]i64 =
+def main [n] (xs: *[n][n]i64) (cond: bool) (i: i64) : [n][n]i64 =
   let ys0 = iota n
-  let ys = if cond
-           then ys0
-           else let ys1 = map (+ 1) (iota n)
-                in ys1
+  let ys =
+    if cond
+    then ys0
+    else let ys1 = map (+ 1) (iota n)
+         in ys1
   let xs[i] = ys
   in xs

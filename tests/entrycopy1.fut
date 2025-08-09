@@ -8,4 +8,4 @@
 -- structure gpu-mem { SegMap 1 Manifest 0 }
 -- structure seq-mem { Manifest 1 }
 
-def main A = flatten A |> map (+2i32) |> unflatten
+def main A = flatten A |> map (+ 2i32) |> unflatten

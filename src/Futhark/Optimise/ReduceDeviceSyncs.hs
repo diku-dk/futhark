@@ -326,19 +326,19 @@ optimizeWithAccInput acc (shape, arrs, Just (op, nes)) = do
 -- that depends on migrated scalars.
 optimizeHostOp :: HostOp op GPU -> ReduceM (HostOp op GPU)
 optimizeHostOp (SegOp (SegMap lvl space types kbody)) =
-  SegOp . SegMap lvl space types <$> addReadsToKernelBody kbody
+  SegOp . SegMap lvl space types <$> addReadsToBody kbody
 optimizeHostOp (SegOp (SegRed lvl space types kbody ops)) = do
   ops' <- mapM addReadsToSegBinOp ops
-  kbody' <- addReadsToKernelBody kbody
+  kbody' <- addReadsToBody kbody
   pure . SegOp $ SegRed lvl space types kbody' ops'
 optimizeHostOp (SegOp (SegScan lvl space types kbody ops post_op)) = do
   ops' <- mapM addReadsToSegBinOp ops
   post_op' <- addReadsToSegPostOp post_op
-  kbody' <- addReadsToKernelBody kbody
+  kbody' <- addReadsToBody kbody
   pure . SegOp $ SegScan lvl space types kbody' ops' post_op'
 optimizeHostOp (SegOp (SegHist lvl space types kbody ops)) = do
   ops' <- mapM addReadsToHistOp ops
-  kbody' <- addReadsToKernelBody kbody
+  kbody' <- addReadsToBody kbody
   pure . SegOp $ SegHist lvl space types kbody' ops'
 optimizeHostOp (SizeOp op) =
   pure (SizeOp op)
@@ -665,16 +665,13 @@ addReadsToLambda f = do
   pure (f {lambdaBody = body'})
 
 -- | Rewrite generic body dependencies to scalars that have been migrated.
-addReadsToBody :: Body GPU -> ReduceM (Body GPU)
+addReadsToBody ::
+  (FreeIn res, Substitute res) =>
+  GBody GPU res ->
+  ReduceM (GBody GPU res)
 addReadsToBody body = do
   (body', prologue) <- addReadsHelper body
   pure body' {bodyStms = prologue >< bodyStms body'}
-
--- | Rewrite kernel body dependencies to scalars that have been migrated.
-addReadsToKernelBody :: KernelBody GPU -> ReduceM (KernelBody GPU)
-addReadsToKernelBody kbody = do
-  (kbody', prologue) <- addReadsHelper kbody
-  pure kbody' {kernelBodyStms = prologue >< kernelBodyStms kbody'}
 
 -- | Rewrite migrated scalar dependencies within anything. The returned
 -- statements must be added to the scope of the rewritten construct.

@@ -272,13 +272,11 @@ genScanLoop ::
   ImpM MCMem HostEnv Imp.Multicore ()
 genScanLoop typ space kbody scan_ops local_accs scan_out map_out i = do
   let (all_scan_res, all_map_res) =
-        splitAt (segBinOpResults scan_ops) $
-          map kernelResultSubExp $
-            kernelBodyResult kbody
+        splitAt (segBinOpResults scan_ops) $ bodyResult kbody
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-  compileStms mempty (kernelBodyStms kbody) $ do
+  compileStms mempty (bodyStms kbody) $ do
     sComment "Apply scan op and map" $
       applyScanOpsAndMap typ scan_out map_out space all_scan_res all_map_res scan_ops local_accs
 
@@ -300,7 +298,7 @@ genScanLoop1Subtask typ pat space kbody scan_ops post_op local_accs i = do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-  compileStms mempty (kernelBodyStms kbody) $ do
+  compileStms mempty (bodyStms kbody) $ do
     sComment "Apply scan op and map" $
       applyScanOpsAndMap1Subtask typ pat space all_scan_res all_map_res scan_ops post_op local_accs
 
@@ -703,8 +701,8 @@ compileSegScanBody pat space kbody scan_ops _ = collect $ do
       sFor "i" inner_bound $ \i -> do
         zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns_64) segment_i
         dPrimV_ (last is) i
-        compileStms mempty (kernelBodyStms kbody) $ do
-          let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ kernelBodyResult kbody
+        compileStms mempty (bodyStms kbody) $ do
+          let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ bodyResult kbody
           sComment "write to-scan values to parameters" $
             forM_ (zip scan_y_params scan_res) $ \(p, se) ->
               copyDWIMFix (paramName p) [] (kernelResultSubExp se) []

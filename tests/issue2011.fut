@@ -2,7 +2,7 @@
 -- input {}
 -- output { 4u64 }
 
-module mod: {module x: integral} = {
+module mod : {module x: integral} = {
   module x = u64
 }
 

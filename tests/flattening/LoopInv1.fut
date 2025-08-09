@@ -17,8 +17,8 @@
 --    [9, 9, 9],
 --    [12, 12, 12]]
 -- }
-def addRows [n] (xs: [n]i32, ys: [n]i32): [n]i32 =
+def addRows [n] (xs: [n]i32, ys: [n]i32) : [n]i32 =
   map2 (+) xs ys
 
-def main (xss: [][]i32) (ys: []i32): [][]i32 =
-  map (\(xs: []i32) -> addRows(xs,ys)) xss
+def main (xss: [][]i32) (ys: []i32) : [][]i32 =
+  map (\(xs: []i32) -> addRows (xs, ys)) xss

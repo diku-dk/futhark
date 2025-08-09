@@ -19,9 +19,8 @@ allocInKernelBody ::
   (Allocable fromrep torep inner) =>
   KernelBody fromrep ->
   AllocM fromrep torep (KernelBody torep)
-allocInKernelBody (KernelBody () stms res) =
-  uncurry (flip (KernelBody ()))
-    <$> collectStms (allocInStms stms (pure res))
+allocInKernelBody (Body () stms res) =
+  uncurry (flip (Body ())) <$> collectStms (allocInStms stms (pure res))
 
 allocInBinOpParams ::
   (Allocable fromrep torep inner) =>
