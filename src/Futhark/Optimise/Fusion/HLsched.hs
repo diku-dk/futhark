@@ -10,14 +10,14 @@ module Futhark.Optimise.Fusion.HLsched
 where
 
 --import Data.List qualified as L
---import Control.Monad
+import Control.Monad
 --import Data.Graph.Inductive.Graph qualified as G
 --import Data.Map.Strict qualified as M
 --import Data.Maybe
 import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
---import Futhark.IR.SOACS qualified as F
+import Futhark.IR.SOACS qualified as F
 import Futhark.Optimise.Fusion.GraphRep
 --import Futhark.Tools
 --import Futhark.Transform.Rename
@@ -26,6 +26,7 @@ import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Optimise.Fusion.HLsched.Env
 import Futhark.Optimise.Fusion.HLsched.SchedUtils
 import Futhark.Optimise.Fusion.HLsched.Stripmine
+import Futhark.Optimise.Fusion.HLsched.Permute
 --import Futhark.Util.Pretty hiding (line, sep, (</>))
 -- import Futhark.Analysis.PrimExp.Convert
 
@@ -50,8 +51,8 @@ applyHLsched fuseInLam node_to_fuse dg = do
     Just (env0, soac_node@(_, SoacNode out_trsfs soac_pat soac soac_aux), sched, patel_sched) -> do
       let (_valid_soac, exact_result) = isSupportedSOAC soac
           env = addInpDeps2Env env0 soac_node dg
-      stripmined_soac  <- applyStripmining fenv env sched (soac_pat, soac_aux, soac)
-      _rescheduled_soac <- applyPermutation sched stripmined_soac
+      stripmined_soac <- applyStripmining fenv env sched (soac_pat, soac_aux, soac)
+      _permuted_res_stms <- applyPermute fenv env sched soac_aux stripmined_soac
       (_prologue, _epilogue) <-
         if exact_result
         then pure (mempty,mempty)
@@ -76,11 +77,60 @@ isSupportedSOAC soac
     (True, False)
 isSupportedSOAC _ = (False, False)
 
-applyPermutation :: 
+
+-------------------------------------------------------------------------
+-------------------------------------------------------------------------
+
+-- | Fusion entrypoint for permuting the dimensions of a SOAC nest,
+--     i.e., HORep.SOAC argument
+applyPermute :: 
     (LocalScope SOACS m, MonadFreshNames m) =>
-    HLSched -> Maybe (H.SOAC SOACS) -> m (Maybe (H.SOAC SOACS))
-applyPermutation _sched Nothing     = pure Nothing
-applyPermutation _sched (Just soac) = pure $ Just soac
+    FuseEnv m -> Env -> HLSched -> StmAux (ExpDec SOACS) ->
+    Maybe (H.SOAC SOACS) -> m (Stms SOACS)
+applyPermute fenv env sched aux msoac
+  | Just (H.Screma mm inps (H.ScremaForm map_lam [] reduces)) <- msoac,
+    emptyOrFullyConsumedReduce map_lam reduces,
+    not (any hasTransform inps) = do
+  -- ^ ToDo: please relax the input-transforms later
+  let soac = F.Screma mm (map nameFromInp inps) $ F.ScremaForm map_lam [] reduces
+      inp_soac_type = findSOACtype soac
+  strip_params <- forM inp_soac_type $ \ tp -> newParam ("tmp_stripmined_res") tp
+  let strip_tmp_pat = Pat $ map (\ (Param _ nm dec) -> PatElem nm dec) strip_params
+      sched' = sched { sigma = invPerm (sigma sched) }
+  perm_soac_stms <- permuteNest fenv env sched' $ Let strip_tmp_pat aux $ Op soac
+  trace ( "Stripmined soac:\n" ++ prettyString soac ++
+          "Permuted   soac:\n" ++ prettyString perm_soac_stms
+        ) $
+      pure perm_soac_stms
+  where
+    hasTransform (H.Input transf _ _) = not $ H.nullTransforms transf
+    nameFromInp (H.Input _ nm _) = nm
+    --
+    emptyOrFullyConsumedReduce _map_lam [] = True
+    emptyOrFullyConsumedReduce map_lam reduces
+      | Just _ <- oneFullyConsumedMapRed map_lam reduces = True
+    emptyOrFullyConsumedReduce _ _ = False
+    --
+    oneFullyConsumedMapRed map_lam [Reduce _ red_lam _]
+      | lambdaReturnType red_lam == lambdaReturnType map_lam =
+      Just red_lam
+    oneFullyConsumedMapRed _ _ = Nothing
+    --
+    findSOACtype (F.Screma mm _inp_nms (F.ScremaForm map_lam [] [])) =
+      map (`arrayOfRow` mm) $ lambdaReturnType map_lam
+    findSOACtype (F.Screma _mm _inp_nms (F.ScremaForm map_lam [] reduces))
+      | Just red_lam <- oneFullyConsumedMapRed map_lam reduces = lambdaReturnType red_lam
+    findSOACtype soac =
+      error ("Unsupported soac in function findType of HLSched: "++prettyString soac)
+--
+--
+applyPermute _ _ _ _ Nothing     =
+  error ("Illegal (Nothing) argument to applyPermute in HLSched, i.e., stripmining must have failed!")
+applyPermute _ _ _ _ (Just hsoac)     =
+  error ("Unsupported argument to applyPermute in HLsched:\n"++prettyString hsoac)
+
+-------------------------------------------------------------------------
+-------------------------------------------------------------------------
 
 mkProEpilogue ::
     (LocalScope SOACS m, MonadFreshNames m) =>

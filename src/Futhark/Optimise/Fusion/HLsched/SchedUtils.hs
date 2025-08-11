@@ -229,9 +229,9 @@ sortByPerm sched =
   in  sched { dimlens = lens, strides = strds, origids = oids, sigma = sigm, signals = signs }
   where
     sortGT (_,_,_,p1,_) (_,_,_,p2,_)
-      | p1 < p2 = GT
-      | p1 > p2 = LT
-      | True = LT
+      | p1 < p2 = LT
+      | p1 > p2 = GT
+      | True = GT
 
 append2Sched :: (PrimExp VName, PrimExp VName, Int, Int, Int) -> HLSched -> HLSched
 append2Sched (l, s, o, p, d) sched =
