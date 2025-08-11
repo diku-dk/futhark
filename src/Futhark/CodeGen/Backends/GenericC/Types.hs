@@ -312,7 +312,7 @@ projectField ops (TypeOpaque f_desc) components = do
           then [C.citems|v->$id:(tupleField j) = obj->$id:(tupleField i);|]
           else
             [C.citems|v->$id:(tupleField j) = malloc(sizeof(*v->$id:(tupleField j)));
-                      *v->$id:(tupleField j) = *obj->$id:(tupleField i);
+                      memcpy(v->$id:(tupleField j), obj->$id:(tupleField i), sizeof(*obj->$id:(tupleField i)));
                       (void)(*(v->$id:(tupleField j)->mem.references))++;|]
   pure
     ( [C.cty|$ty:ct *|],
@@ -360,8 +360,12 @@ setFieldField i e (ValueType _ (Rank r) _)
   | r == 0 =
       [C.cstm|v->$id:(tupleField i) = $exp:e;|]
   | otherwise =
+      -- We use a memcpy instead of a straight assignment because the types may
+      -- not actually be exactly the same - this is because we ignore array
+      -- signedness when representing the payload of opaque types. However, the
+      -- array types will have the same layout, so we can copy like this.
       [C.cstm|{v->$id:(tupleField i) = malloc(sizeof(*$exp:e));
-               *v->$id:(tupleField i) = *$exp:e;
+               memcpy(v->$id:(tupleField i), $exp:e, sizeof(*$exp:e));
                (void)(*(v->$id:(tupleField i)->mem.references))++;}|]
 
 recordNewSetFields ::
@@ -394,7 +398,7 @@ recordNewSetFields types fs =
               ( param_name,
                 [C.cparam|const $ty:ct* $id:param_name|],
                 [C.citem|{v->$id:(tupleField offset) = malloc(sizeof($ty:ct));
-                          *v->$id:(tupleField offset) = *$id:param_name;
+                          memcpy(v->$id:(tupleField offset), $id:param_name, sizeof($ty:ct));
                           (void)(*(v->$id:(tupleField offset)->mem.references))++;}|]
               )
             )

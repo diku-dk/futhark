@@ -35,6 +35,7 @@ module Futhark.IR.Prop
     ASTConstraints,
     IsOp (..),
     ASTRep (..),
+    IsResult (..),
   )
 where
 
@@ -204,6 +205,17 @@ instance IsOp NoOp where
   safeOp NoOp = True
   cheapOp NoOp = True
   opDependencies NoOp = []
+
+-- | Something that can be returned from a 'GBody'.
+class (FreeIn res) => IsResult res where
+  -- | The names that may or may not contribute to the aliases of this result.
+  resAliases :: res -> Names
+
+instance IsResult SubExpRes where
+  resAliases = freeIn . resSubExp
+
+instance IsResult () where
+  resAliases () = mempty
 
 -- | Representation-specific attributes; also means the rep supports
 -- some basic facilities.
