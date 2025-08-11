@@ -31,7 +31,7 @@ import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util (fixPoint)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -55,41 +55,34 @@ newIndexFn :: E.VName -> E.TypeBase E.Exp u -> IndexFnM [IndexFn]
 newIndexFn vn t = do
   -- x :: [n](t, (t, t))
   --  -->
-  --  x = for i < n . for j < 2 . for k < j=0 + j=1 * 2 . x(i,j,k)
-  (array_shape, tuple_shape) <- shapeOf t
-  let (regular, irregular) = part [] tuple_shape
-  let regular_dims = array_shape <> map (int2SoP . toInteger) regular
-  f <- createUninterpretedIndexFn vn regular_dims irregular
-  insertIndexFn vn f
-  pure f
+  --  [ for i < n . x.0(i),
+  --    for i < n . x.1.0(i),
+  --    for i < n . x.1.1(i)]
+  array_shape <- shapeOf t
+  printM 2 $ "### tuple projections " <> prettyStr vn <> prettyStr (toTupleOfArrays t)
+  fs <- mapM (createUninterpretedIndexFn array_shape <=< dots vn) (toTupleOfArrays t)
+  printM 2 $ "### fs " <> prettyStr vn <> prettyStr fs
+  insertIndexFn vn fs
+  pure fs
   where
-    part regular (shape : shapes)
-      | all (== head shape) shape = part (regular <> shape) shapes
-      | otherwise = (regular, shape : shapes)
-    part regular [] = (regular, [])
+    name `dots` [] =
+      -- Not a tuple; don't touch vn.
+      pure name
+    name `dots` proj =
+      newNameFromString (E.baseString name <> concatMap (('.' :) . show) proj)
 
-createUninterpretedIndexFn :: E.VName -> [SoP Symbol] -> [[Integer]] -> IndexFnM [IndexFn]
-createUninterpretedIndexFn vn [] [] = do
+createUninterpretedIndexFn :: [SoP Symbol] -> E.VName -> IndexFnM IndexFn
+createUninterpretedIndexFn [] vn =
   -- Uninterpreted scalar.
-  pure [IndexFn [] (singleCase $ sVar vn)]
-createUninterpretedIndexFn vn regular_dims irregular_shapes = do
+  pure $ IndexFn [] (singleCase $ sVar vn)
+createUninterpretedIndexFn array_shape vn = do
   -- Uinterpreted array/tuple.
-  ids <- mapM newVName (take num_dims $ cycle ["i", "j", "k"])
-  let irregular_dims =
-        zipWith mkIrregDim (drop (length regular_dims - 1) ids) irregular_shapes
-  let shape = regular_dims <> irregular_dims
-  pure
-    [ IndexFn
-        { shape = zipWith (\sz i -> Forall i (Iota sz)) shape ids,
-          body = singleCase . sym2SoP $ Apply (Var vn) (map sVar ids)
-        }
-    ]
-  where
-    num_dims = length regular_dims + length irregular_shapes
-    mkIrregDim i shape =
-      foldl1 (.+.) $
-        zipWith (\idx sz -> i `equals` idx .*. int2SoP sz) [0 ..] shape
-    equals a b = sym2SoP (sVar a :== int2SoP b)
+  ids <- mapM newVName (take (length array_shape) $ cycle ["i", "j", "k"])
+  pure $
+    IndexFn
+      { shape = zipWith (\sz i -> Forall i (Iota sz)) array_shape ids,
+        body = singleCase . sym2SoP $ Apply (Var vn) (map sVar ids)
+      }
 
 {-
     Construct index function for source program
@@ -530,7 +523,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
           printM 1 $ warningMsg loc ("g: " <> prettyStr g)
           arg_fns <- mconcat <$> mapM forward (getArgs args)
           let return_type = E.appResType (E.unInfo appres)
-          size <- fst <$> shapeOf return_type
+          size <- shapeOf return_type
           arg_names <- forM arg_fns (const $ newVName "x")
           iter <- case size of
             [] ->
@@ -1050,11 +1043,11 @@ getTERefine _ = []
 hasRefinement :: E.TypeExp E.Exp E.VName -> Bool
 hasRefinement = not . null . getTERefine
 
-shapeOf :: E.TypeBase E.Exp as -> IndexFnM ([SoP Symbol], [[Integer]])
+shapeOf :: E.TypeBase E.Exp as -> IndexFnM [SoP Symbol]
 shapeOf (E.Scalar (E.Refinement t _)) = shapeOf t
-shapeOf (E.Scalar t) = pure (mempty, tupleToShape t)
-shapeOf (E.Array _ shp t) = do
-  (,tupleToShape t) <$> shapeToSoP shp
+shapeOf (E.Scalar _) = pure mempty
+shapeOf (E.Array _ shp _) = do
+  shapeToSoP shp
   where
     shapeToSoP s = do
       dims <- mapM forward (E.shapeDims s)
@@ -1063,6 +1056,21 @@ shapeOf (E.Array _ shp t) = do
 
     getScalar (IndexFn [] cs) | [(Bool True, x)] <- casesToList cs = x
     getScalar f = error ("getScalar on " <> prettyStr f)
+
+-- Flatten array of tuples into list of projections, giving the structure
+-- for a tuple of arrays representation.
+toTupleOfArrays :: E.TypeBase dim u -> [[Integer]]
+toTupleOfArrays (E.Array _ _ ty) = toTupleOfArrays (E.Scalar ty)
+toTupleOfArrays (E.Scalar ty) = project ty
+  where
+    project :: E.ScalarTypeBase dim u -> [[Integer]]
+    project (E.Record ts) = do
+      (i, t) <- zip [0 ..] (M.elems ts)
+      map (i :) (project (unwrapScalar t))
+    project _ = pure mempty
+
+    unwrapScalar E.Array {} = error "Arrays of structures is not supported."
+    unwrapScalar (E.Scalar t) = t
 
 newtype Tree a = Node [Tree a]
   deriving (Show)
@@ -1183,47 +1191,31 @@ zipArgs' ::
   IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
 zipArgs' loc formal_args actual_args = do
   let pats = map patternMapAligned formal_args
+  -- Each name in the pattern may partially deconstruct tuple arguments.
+  -- Our arguments are always fully deconstructed, so I only allow full
+  -- deconstructions in the source code for now. TODO implement partial
+  -- deconstruction using `alignWithPattern`, biggest question is
+  -- how to bind one name to multiple index functions in the functions
+  -- that use zipArgs's output (e.g., substParams).
+  printM 2 $ "# zipArgs pats " <> show pats
   unless (length pats == length actual_args) . error $
     errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
-  -- The formal arguments can be patterns deconstructing tuple values in the
-  -- actual args. The actual args are index functions and so all values must
-  -- be scalar; tuples are are represented as additional array dimensions.
-  -- We unpack the actual args into this pattern by indexing into the index
-  -- functions at locations corresponding to projections in the pattern.
-  unpacked_actual_args <- do
-    let args = do
-          (projections, arg) <- zip (map patToProjections formal_args) actual_args
-          pure $ case arg of
-            _
-              -- arg is not being deconstructed.
-              | null projections -> arg
-              -- arg was already deconstructed (e.g., arg is the result of `zip`).
-              | length projections == length arg -> arg
-            [f] | maximum (map length projections) <= rank f -> do
-              -- TODO can get for k < 1 . ... ; get rid of unit dimensions,
-              -- since we disallow arrays of structures, we know this to be a scalar---not a unit length array.
-              proj <- projections
-              let ids = map boundVar (shape f)
-              let s = mkRepFromList $ zipWith (\i p -> (i, int2SoP p :: SoP Symbol)) ids proj
-              pure $ repIndexFn s (f {shape = drop (length proj) (shape f)})
-            _fs -> error "not implemented yet: projection on zipped value"
-    mapM (mapM (simplify <=< fmap removeUnitDimensions . simplify)) args
-
-  unless (map length pats == map length unpacked_actual_args) . error $
-    errorMsg loc "Internal error."
+  unless (map length pats == map length actual_args) . error $
+    errorMsg loc "Internal error: actual argument does not match parameter pattern."
 
   -- Discard unused parameters such as wildcards while maintaining alignment.
   let aligned_args = do
-        (pat, arg) <- zip pats unpacked_actual_args
+        (pat, arg) <- zip pats actual_args
+        let _TODO = alignWithPattern pat arg
         pure . catMaybes $ zipWith (\vn fn -> (,fn) <$> vn) (map fst pat) arg
 
   -- When applying top-level functions size parameters must be replaced as well.
   aligned_sizes <-
-    forM (zip pats unpacked_actual_args) $ \(pat, arg) -> do
+    forM (zip pats actual_args) $ \(pat, arg) -> do
       fmap mconcat . forM (zip (map snd pat) arg) $ \(pat_type, f) -> do
         printM 2 $ "zipArgs (pat_type, f) " <> prettyStr (pat_type, f)
-        (array_shape, tuple_shape) <- shapeOf pat_type
-        unless (length array_shape + length tuple_shape == rank f) . error $
+        array_shape <- shapeOf pat_type
+        unless (length array_shape == rank f) . error $
           errorMsg loc "Internal error: parameter and argument sizes do not align."
         let size_vars = map getVName array_shape
         sizes <- mapM (domainSize . formula) (shape f)
@@ -1237,13 +1229,11 @@ zipArgs' loc formal_args actual_args = do
 
     domainSize d = rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
 
-    removeUnitDimensions = fixPoint removeUnitDimension
-
-    removeUnitDimension f
-      | Forall i (Iota n) : dims <- shape f,
-        Just 1 <- justConstant n =
-          repIndexFn (mkRep i (int2SoP 0 :: SoP Symbol)) (f {shape = dims})
-      | otherwise = f
+    alignWithPattern [] arg = [arg]
+    alignWithPattern ((_vn, t) : pat) arg =
+      take n arg : alignWithPattern pat (drop n arg)
+      where
+        n = length (toTupleOfArrays t)
 
 substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
 substParams = foldM substParam

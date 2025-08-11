@@ -65,11 +65,7 @@ simplify = astMap m
 
     simplifySymbol :: Symbol -> IndexFnM Symbol
     simplifySymbol symbol = case symbol of
-      a :== b
-        | Just c <- justConstant a,
-          Just d <- justConstant b ->
-            pure (Bool $ c == d)
-        | otherwise -> refine symbol
+      _ :== _ -> refine symbol
       _ :/= _ -> refine symbol
       _ :> _ -> refine symbol
       _ :>= _ -> refine symbol
