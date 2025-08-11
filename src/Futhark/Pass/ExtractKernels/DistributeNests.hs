@@ -505,7 +505,7 @@ maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
               localScope (typeEnvFromDistAcc acc') $ do
                 nest' <- expandKernelNest pat_unused nest
                 map_lam' <- soacsLambda map_lam
-                post_lam <- mkIdentityLambda $ lambdaReturnType lam
+                post_lam <- mkIdentityLambda $ lambdaReturnType map_lam
                 localScope (typeEnvFromDistAcc acc') $
                   segmentedScanomapKernel nest' perm (stmAuxCerts aux) w lam post_lam map_lam' nes arrs
                     >>= kernelOrNot mempty stm acc kernels acc'
