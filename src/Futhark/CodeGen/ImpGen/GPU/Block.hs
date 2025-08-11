@@ -432,16 +432,19 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
         (segBinOpLambda scan)
         arrs_flat
 
-  sComment "bind scan results to post lambda params" $
-    forM_ (zip scan_pars scan_out) $ \(par, acc) ->
-      copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 ltids)
+  -- FIXME: we actually need something like blockCoverSegSpacee here, although in
+  -- practice we currently do not generate virtualised scans.
+  sWhen (isActive $ zip ltids dims) $ do
+    sComment "bind scan results to post lambda params" $
+      forM_ (zip scan_pars scan_out) $ \(par, acc) ->
+        copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 ltids)
 
-  let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
-  sComment "compute post op." $
-    compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
-      sComment "write values" $
-        forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
-          copyDWIMFix (patElemName pe) (map le64 ltids) subexp []
+    let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+    sComment "compute post op." $
+      compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+        sComment "write values" $
+          forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
+            copyDWIMFix (patElemName pe) (map le64 ltids) subexp []
 
   sOp $ Imp.Barrier Imp.FenceGlobal
 compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
