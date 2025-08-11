@@ -17,4 +17,4 @@ instance IsString (Body MC) where
   fromString = parseString "Body MC" parseBodyMC
 
 instance IsString (Prog MC) where
-  fromString = parseString "Prog MC" parseMC
+  fromString = snd . parseString "Prog MC" parseMC

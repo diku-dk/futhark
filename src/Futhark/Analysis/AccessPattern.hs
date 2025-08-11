@@ -308,7 +308,6 @@ analyseStms ctx body_constructor pats body = do
               then result <> oneName a
               else -- Otherwise, recurse on its dependencies;
               -- 0. Add dependencies in ctx to result
-
                 let (deps_in_ctx, deps_not_in_ctx) =
                       L.partition (`M.member` local_assignments) $
                         namesToList (deps var_info)
@@ -555,7 +554,7 @@ analyseSegOp op ctx pats =
           . unSegSpace
           $ segSpace op
    in -- Analyse statements in the SegOp body
-      analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
+      analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . bodyStms $ segBody op
 
 analyseSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyseSizeOp op ctx pats =

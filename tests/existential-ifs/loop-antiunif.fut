@@ -6,7 +6,8 @@
 --
 -- input  { [1, 2, 3, 4, 5, 6, 7] }
 -- output { 22 }
-def main [n] (arr: *[n]i32): i32 =
-  let xs = loop arr for _i < n / 2 do
-             arr[1:]
+def main [n] (arr: *[n]i32) : i32 =
+  let xs =
+    loop arr for _i < n / 2 do
+      arr[1:]
   in reduce (+) 0 xs

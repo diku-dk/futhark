@@ -31,6 +31,7 @@ where
 
 import Control.Monad
 import Control.Monad.IO.Class
+import Control.Monad.State (get)
 import Data.Bifunctor
 import Data.List (intercalate)
 import Data.Map qualified as M
@@ -68,11 +69,18 @@ import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.Fusion.GraphRep qualified
 import Futhark.Test.WebGPUTest qualified as WebGPUTest
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
+import Futhark.Util.Pretty (Doc, pretty, putDocLn, (</>))
 import Futhark.Version (versionString)
 import System.Directory
 import System.Exit
-import System.FilePath
+import System.FilePath hiding ((</>))
 import System.Info qualified
+
+-- | Convert the program and compiler state to a textual form.
+progDoc :: (PrettyRep rep) => Prog rep -> FutharkM (Doc a)
+progDoc prog = do
+  state <- get
+  pure $ pretty state </> mempty </> pretty prog
 
 -- | Print the result to stdout.
 printAction :: (ASTRep rep) => Action rep
@@ -80,7 +88,7 @@ printAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
-      actionProcedure = liftIO . putStrLn . prettyString
+      actionProcedure = liftIO . putDocLn <=< progDoc
     }
 
 -- | Print the result to stdout, alias annotations.
@@ -89,7 +97,7 @@ printAliasesAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
-      actionProcedure = liftIO . putStrLn . prettyString . aliasAnalysis
+      actionProcedure = liftIO . putDocLn . pretty . aliasAnalysis
     }
 
 -- | Print last use information to stdout.

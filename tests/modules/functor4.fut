@@ -5,21 +5,21 @@
 module type foo = {
   type foo
 
-  val mkfoo: i32 -> foo
+  val mkfoo : i32 -> foo
 }
 
-module rgba_foo: foo = {
+module rgba_foo : foo = {
   type foo = i32
 
   def mkfoo (x: i32) = x
 }
 
-module foospace(C: foo) = {
+module foospace (C: foo) = {
   open C
 
-  def frob (x: foo): foo = x
+  def frob (x: foo) : foo = x
 }
 
-module rgba = foospace(rgba_foo)
+module rgba = foospace (rgba_foo)
 
 def main = 2

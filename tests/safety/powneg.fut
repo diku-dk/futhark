@@ -2,4 +2,4 @@
 -- ==
 -- input { 2 [-1] } error:
 
-def main (b: i32) (xs: []i32) = map (b**) xs
+def main (b: i32) (xs: []i32) = map (b **) xs

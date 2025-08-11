@@ -6,11 +6,12 @@
 -- output { 0.14285 -0.102041 }
 
 def f (b, x, y) : f64 =
-  if b then x*y else x/y
+  if b then x * y else x / y
 
 entry f_jvp b x y =
-  (jvp f (b,x,y) (b,1,0),
-   jvp f (b,x,y) (b,0,1))
+  ( jvp f (b, x, y) (b, 1, 0)
+  , jvp f (b, x, y) (b, 0, 1)
+  )
 
 -- ==
 -- entry: f_vjp
@@ -20,4 +21,4 @@ entry f_jvp b x y =
 -- output { false 0.14285 -0.102041 }
 
 entry f_vjp b x y =
-  vjp f (b,x,y) 1
+  vjp f (b, x, y) 1

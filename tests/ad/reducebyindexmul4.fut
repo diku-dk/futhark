@@ -12,9 +12,9 @@
 --     [[0f32,0f32],[63f32,0f32]],[[0f32,0f32],[63f32,0f32]],[[0f32,0f32],[63f32,0f32]],[[0f32,0f32],[63f32,0f32]]]
 --    [[[36f32,120f32],[0f32,0f32]],[[0f32,0f32],[9f32,0f32]]] }
 
-def f [n][m][k][l] (is: [n]i64) (dst: [k][m][l]f32,vs: [n][m][l]f32,c: [k][m][l]f32) =
+def f [n] [m] [k] [l] (is: [n]i64) (dst: [k][m][l]f32, vs: [n][m][l]f32, c: [k][m][l]f32) =
   let tmp = reduce_by_index (copy dst) (map2 (map2 (*))) (replicate m (replicate l 1)) is vs
   in map2 (map2 (map2 (*))) tmp c
 
-def main [n][m][k][l] (is: [n]i64) (dst: [k][m][l]f32) (vs: [n][m][l]f32) (c: [k][m][l]f32) =
-  vjp (f is) (dst,vs,c) (replicate k (replicate m (replicate l 1)))
+def main [n] [m] [k] [l] (is: [n]i64) (dst: [k][m][l]f32) (vs: [n][m][l]f32) (c: [k][m][l]f32) =
+  vjp (f is) (dst, vs, c) (replicate k (replicate m (replicate l 1)))

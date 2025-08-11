@@ -43,7 +43,7 @@ class
   where
   mkExpPat :: [Ident] -> Exp rep -> Pat (LetDec rep)
   mkExpDec :: Pat (LetDec rep) -> Exp rep -> ExpDec rep
-  mkBody :: Stms rep -> Result -> Body rep
+  mkBody :: (IsResult res) => Stms rep -> [res] -> GBody rep res
   mkLetNames ::
     (MonadFreshNames m, HasScope rep m) =>
     [VName] ->
@@ -72,7 +72,7 @@ class
   where
   type Rep m :: Data.Kind.Type
   mkExpDecM :: Pat (LetDec (Rep m)) -> Exp (Rep m) -> m (ExpDec (Rep m))
-  mkBodyM :: Stms (Rep m) -> Result -> m (Body (Rep m))
+  mkBodyM :: (IsResult res) => Stms (Rep m) -> [res] -> m (GBody (Rep m) res)
   mkLetNamesM :: [VName] -> Exp (Rep m) -> m (Stm (Rep m))
 
   -- | Add a statement to the 'Stms' under construction.
@@ -104,10 +104,7 @@ censorStms f m = do
 
 -- | Add the given attributes to any statements added by this action.
 attributing :: (MonadBuilder m) => Attrs -> m a -> m a
-attributing attrs = censorStms $ fmap onStm
-  where
-    onStm (Let pat aux e) =
-      Let pat aux {stmAuxAttrs = attrs <> stmAuxAttrs aux} e
+attributing attrs = censorStms $ fmap $ attribute attrs
 
 -- | Add the certificates and attributes to any statements added by
 -- this action.
@@ -173,9 +170,9 @@ bodyBind (Body _ stms res) = do
   pure res
 
 -- | Add several bindings at the outermost level of a t'Body'.
-insertStms :: (Buildable rep) => Stms rep -> Body rep -> Body rep
+insertStms :: (Buildable rep, IsResult res) => Stms rep -> GBody rep res -> GBody rep res
 insertStms stms1 (Body _ stms2 res) = mkBody (stms1 <> stms2) res
 
 -- | Add a single binding at the outermost level of a t'Body'.
-insertStm :: (Buildable rep) => Stm rep -> Body rep -> Body rep
+insertStm :: (Buildable rep, IsResult res) => Stm rep -> GBody rep res -> GBody rep res
 insertStm = insertStms . oneStm

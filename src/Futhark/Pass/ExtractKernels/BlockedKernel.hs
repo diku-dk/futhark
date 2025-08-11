@@ -59,7 +59,7 @@ prepareRedOrScan ::
 prepareRedOrScan cs w map_lam arrs ispace inps = do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, w)]
-  kbody <- fmap (uncurry (flip (KernelBody ()))) $
+  kbody <- fmap (uncurry (flip (Body ()))) $
     runBuilder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
@@ -183,7 +183,7 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBuilder_ $ do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, arr_w)]
 
-  kbody <- fmap (uncurry (flip $ KernelBody ())) $
+  kbody <- fmap (uncurry (flip $ Body ())) $
     runBuilder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
@@ -218,10 +218,10 @@ mapKernel ::
   [Type] ->
   KernelBody rep ->
   m (SegOp (SegOpLevel rep) rep, Stms rep)
-mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBuilderT' $ do
+mapKernel mk_lvl ispace inputs rts (Body () kstms krets) = runBuilderT' $ do
   (space, read_input_stms) <- mapKernelSkeleton ispace inputs
 
-  let kbody' = KernelBody () (read_input_stms <> kstms) krets
+  let kbody' = Body () (read_input_stms <> kstms) krets
 
   -- If the kernel creates arrays (meaning it will require memory
   -- expansion), we want to truncate the amount of threads.

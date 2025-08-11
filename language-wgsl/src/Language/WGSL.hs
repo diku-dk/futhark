@@ -23,8 +23,8 @@ module Language.WGSL
   )
 where
 
-import Data.Text qualified as T
 import Data.Maybe (fromMaybe)
+import Data.Text qualified as T
 import Prettyprinter
 
 type Ident = T.Text
@@ -70,7 +70,7 @@ structLayout fields = do
         scanl
           (\prev_off (al, prev_sz) -> roundUp al (prev_off + prev_sz))
           0
-          (zip (tail fieldAligns) fieldSizes)
+          (zip (drop 1 fieldAligns) fieldSizes)
   let structSize = roundUp structAlign (last fieldOffsets + last fieldSizes)
   pure (fieldOffsets, structAlign, structSize)
   where
@@ -212,23 +212,27 @@ instance Pretty Stmt where
     "if"
       <+> pretty cond
       <+> "{"
-      </> indent 2 (pretty th) <> ";"
-      </> "}"
+        </> indent 2 (pretty th)
+      <> ";"
+        </> "}"
   pretty (If cond Skip el) =
     "if"
       <+> pretty cond
       <+> "{ }"
-      </> "else {"
-      </> indent 2 (pretty el) <> ";"
-      </> "}"
+        </> "else {"
+        </> indent 2 (pretty el)
+      <> ";"
+        </> "}"
   pretty (If cond th el) =
     "if"
       <+> pretty cond
       <+> "{"
-      </> indent 2 (pretty th) <> ";"
-      </> "} else {"
-      </> indent 2 (pretty el) <> ";"
-      </> "}"
+        </> indent 2 (pretty th)
+      <> ";"
+        </> "} else {"
+        </> indent 2 (pretty el)
+      <> ";"
+        </> "}"
   pretty (For x initializer cond upd body) =
     "for"
       <+> parens
@@ -236,20 +240,22 @@ instance Pretty Stmt where
             <+> pretty x
             <+> "="
             <+> pretty initializer
-              <> ";"
+            <> ";"
             <+> pretty cond
-              <> ";"
+            <> ";"
             <+> pretty upd
         )
       <+> "{"
-      </> indent 2 (pretty body) <> ";"
-      </> "}"
+        </> indent 2 (pretty body)
+      <> ";"
+        </> "}"
   pretty (While cond body) =
     "while"
       <+> pretty cond
       <+> "{"
-      </> indent 2 (pretty body) <> ";"
-      </> "}"
+        </> indent 2 (pretty body)
+      <> ";"
+        </> "}"
   pretty (Call f args) = pretty f <> parens (commasep $ map pretty args)
 
 instance Pretty Attrib where
@@ -282,25 +288,32 @@ instance Pretty Function where
     stack $ hsep (map pretty attribs) : function
     where
       funBody = indent 2 (pretty body) <> ";"
-      funDecls = let local_decls = map (\(Param v typ _) -> case typ of
-                              Pointer t _ _ -> DeclareVar (fromMaybe v (T.stripSuffix "_out" v)) (Prim t)
-                              _             -> error "Can only return primitive types!") out_params
-                 in stack (map (\decl -> indent 2 (pretty decl) <> ";") local_decls)
+      funDecls =
+        let local_decls =
+              map
+                ( \(Param v typ _) -> case typ of
+                    Pointer t _ _ -> DeclareVar (fromMaybe v (T.stripSuffix "_out" v)) (Prim t)
+                    _ -> error "Can only return primitive types!"
+                )
+                out_params
+         in stack (map (\decl -> indent 2 (pretty decl) <> ";") local_decls)
       function = case out_params of
         [] ->
           ["fn" <+> pretty name <> prettyParams in_params <+> "{", funBody, "}"]
         [Param ret_id (Pointer t _ _) _] ->
-          ["fn" <+> pretty name <> prettyParams in_params <+> "->" <+> pretty t <+> "{",
-          funDecls,
-          funBody,
-          indent 2 "return " <> pretty (T.stripSuffix "_out" ret_id) <> ";", 
-          "}"]
+          [ "fn" <+> pretty name <> prettyParams in_params <+> "->" <+> pretty t <+> "{",
+            funDecls,
+            funBody,
+            indent 2 "return " <> pretty (T.stripSuffix "_out" ret_id) <> ";",
+            "}"
+          ]
         _ ->
-          ["fn" <+> pretty name <> prettyParams (in_params ++ out_params) <+> "{", 
-           funDecls,
-           funBody, 
-           prettyAssignOutParams out_params,
-           "}"]
+          [ "fn" <+> pretty name <> prettyParams (in_params ++ out_params) <+> "{",
+            funDecls,
+            funBody,
+            prettyAssignOutParams out_params,
+            "}"
+          ]
 
 instance Pretty Field where
   pretty (Field name typ) = pretty name <+> ":" <+> pretty typ
@@ -310,8 +323,8 @@ instance Pretty Struct where
     "struct"
       <+> pretty name
       <+> "{"
-      </> indent 2 (commastack (map pretty fields))
-      </> "}"
+        </> indent 2 (commastack (map pretty fields))
+        </> "}"
 
 instance Pretty AccessMode where
   pretty ReadOnly = "read"
@@ -329,12 +342,12 @@ instance Pretty Declaration where
   pretty (VarDecl attribs as name typ) =
     hsep (map pretty attribs)
       </> "var<"
-        <> pretty as
-        <> ">"
+      <> pretty as
+      <> ">"
       <+> pretty name
       <+> ":"
       <+> pretty typ
-        <> ";"
+      <> ";"
   pretty (OverrideDecl name typ Nothing) =
     "override" <+> pretty name <+> ":" <+> pretty typ <> ";"
   pretty (OverrideDecl name typ (Just initial)) =
@@ -344,7 +357,7 @@ instance Pretty Declaration where
       <+> pretty typ
       <+> "="
       <+> pretty initial
-        <> ";"
+      <> ";"
 
 prettyDecls :: [Declaration] -> Doc a
 prettyDecls decls = stack (map pretty decls)

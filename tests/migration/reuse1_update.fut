@@ -9,9 +9,9 @@
 
 entry case_if (A: *[5]i64) (x: i64) : [1]i64 =
   if A[0] == 42
-     then let B = #[unsafe] A with [x%5] = 0
-           in #[unsafe] (opaque B)[0:1] :> [1]i64
-     else A[0:1] :> [1]i64
+  then let B = #[unsafe] A with [x % 5] = 0
+       in #[unsafe] (opaque B)[0:1] :> [1]i64
+  else A[0:1] :> [1]i64
 
 -- Compiler limitations prevent these cases from being validated.
 --

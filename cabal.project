@@ -1,6 +1,6 @@
 packages: futhark.cabal, language-wgsl
-index-state: 2025-05-28T09:14:26Z
-multi-repl: True
+index-state: 2025-07-03T02:06:05Z
+packages: futhark.cabal
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie

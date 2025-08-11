@@ -28,12 +28,14 @@ module Futhark.IR.Prop
     defAux,
     stmCerts,
     certify,
+    attribute,
     expExtTypesFromPat,
     attrsForAssert,
     lamIsBinOp,
     ASTConstraints,
     IsOp (..),
     ASTRep (..),
+    IsResult (..),
   )
 where
 
@@ -178,6 +180,11 @@ certify :: Certs -> Stm rep -> Stm rep
 certify cs1 (Let pat aux e) =
   Let pat (aux {stmAuxCerts = stmAuxCerts aux <> cs1}) e
 
+-- | Add attributes to a statement.
+attribute :: Attrs -> Stm rep -> Stm rep
+attribute attrs (Let pat aux e) =
+  Let pat (aux {stmAuxAttrs = stmAuxAttrs aux <> attrs}) e
+
 -- | A handy shorthand for properties that we usually want for things
 -- we stuff into ASTs.
 type ASTConstraints a =
@@ -198,6 +205,17 @@ instance IsOp NoOp where
   safeOp NoOp = True
   cheapOp NoOp = True
   opDependencies NoOp = []
+
+-- | Something that can be returned from a 'GBody'.
+class (FreeIn res) => IsResult res where
+  -- | The names that may or may not contribute to the aliases of this result.
+  resAliases :: res -> Names
+
+instance IsResult SubExpRes where
+  resAliases = freeIn . resSubExp
+
+instance IsResult () where
+  resAliases () = mempty
 
 -- | Representation-specific attributes; also means the rep supports
 -- some basic facilities.

@@ -3,7 +3,7 @@
 
 module type dict = {
   type~ dict
-  val empties : (dict,dict)
+  val empties : (dict, dict)
 }
 
 module naive_dict : dict = {

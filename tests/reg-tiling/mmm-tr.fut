@@ -7,8 +7,8 @@
 -- compiled random input {[2011][4011]f32 [1011][4011]f32} auto output
 --
 
-let dotproduct [n] (x: [n]f32) (y: [n]f32) =
-    map2 (*) x y |> reduce (+) 0
+def dotproduct [n] (x: [n]f32) (y: [n]f32) =
+  map2 (*) x y |> reduce (+) 0
 
-let main [m][n][q]  (A: [m][q]f32) (B: [n][q]f32) : [m][n]f32 =
-    map (\ Arow -> map (\Brow -> dotproduct Arow Brow) B) A
+def main [m] [n] [q] (A: [m][q]f32) (B: [n][q]f32) : [m][n]f32 =
+  map (\Arow -> map (\Brow -> dotproduct Arow Brow) B) A

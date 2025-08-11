@@ -3,4 +3,4 @@
 -- ==
 -- error: non-lifted
 
-module m = \(p: {type ^a}) -> ({ type^ t = p.a } : { type t })
+module m = \(p: {type^ a}) -> ({type^ t = p.a}: {type t})

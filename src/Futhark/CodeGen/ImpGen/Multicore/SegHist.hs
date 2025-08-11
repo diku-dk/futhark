@@ -120,9 +120,9 @@ atomicHistogram pat space histops kbody = do
     sOp $ Imp.GetTaskId (segFlat space)
     generateChunkLoop "SegHist" Scalar $ \flat_idx -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
-      compileStms mempty (kernelBodyStms kbody) $ do
+      compileStms mempty (bodyStms kbody) $ do
         let (red_res, map_res) =
-              splitFromEnd (length map_pes) $ kernelBodyResult kbody
+              splitFromEnd (length map_pes) $ bodyResult kbody
             red_res_split = splitHistResults histops $ map kernelResultSubExp red_res
 
         let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
@@ -230,11 +230,11 @@ subHistogram pat space histops num_histos kbody = do
     inISPC $
       generateChunkLoop "SegRed" Vectorized $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns_64 i
-        compileStms mempty (kernelBodyStms kbody) $ do
+        compileStms mempty (bodyStms kbody) $ do
           let (red_res, map_res) =
                 splitFromEnd (length map_pes) $
                   map kernelResultSubExp $
-                    kernelBodyResult kbody
+                    bodyResult kbody
 
           sComment "save map-out results" $
             forM_ (zip map_pes map_res) $ \(pe, res) ->
@@ -360,11 +360,11 @@ compileSegHistBody pat space histops kbody = collect $ do
       zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns_64) idx
       dPrimV_ (last is) i
 
-      compileStms mempty (kernelBodyStms kbody) $ do
+      compileStms mempty (bodyStms kbody) $ do
         let (red_res, map_res) =
               splitFromEnd (length map_pes) $
                 map kernelResultSubExp $
-                  kernelBodyResult kbody
+                  bodyResult kbody
         forM_ (zip3 per_red_pes histops (splitHistResults histops red_res)) $
           \(red_pes, HistOp dest_shape _ _ _ shape lam, (bucket, vs')) -> do
             let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam

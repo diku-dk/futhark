@@ -1,4 +1,4 @@
-type^ nn 'u = { f : u }
+type^ nn 'u = {f: u}
 
 def connect '^u (a: nn u) (b: nn u) : nn (u, u) =
   { f = (a.f, a.f)

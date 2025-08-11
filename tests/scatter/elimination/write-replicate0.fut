@@ -7,7 +7,7 @@
 -- output {
 --   [5, 5, -3, 5, 41]
 -- }
--- structure { Scatter 1 }
+-- structure { Screma 1 }
 
-def main [k][n] (indexes: [k]i64) (array: *[n]i32): [n]i32 =
+def main [k] [n] (indexes: [k]i64) (array: *[n]i32) : [n]i32 =
   scatter array indexes (replicate k 5)

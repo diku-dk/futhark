@@ -82,14 +82,14 @@ basicOpType (ConvOp conv _) =
 basicOpType (Index ident slice) =
   result <$> lookupType ident
   where
-    result t = [Prim (elemType t) `arrayOfShape` shape]
+    result t = [t `setArrayShape` shape]
     shape = Shape $ sliceDims slice
 basicOpType (Update _ src _ _) =
   pure <$> lookupType src
 basicOpType (FlatIndex ident slice) =
   result <$> lookupType ident
   where
-    result t = [Prim (elemType t) `arrayOfShape` shape]
+    result t = [t `setArrayShape` shape]
     shape = Shape $ flatSliceDims slice
 basicOpType (FlatUpdate src _ _) =
   pure <$> lookupType src

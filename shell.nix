@@ -2,8 +2,8 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
-  python = pkgs.python312Packages;
-  haskell = pkgs.haskell.packages.ghc96;
+  python = pkgs.python313Packages;
+  haskell = pkgs.haskell.packages.ghc98;
   PWD = builtins.getEnv "PWD";
 in
 pkgs.stdenv.mkDerivation {

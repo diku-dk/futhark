@@ -14,13 +14,12 @@
 --   815730721.000000, 665416609183179904.000000]]
 -- }
 
-def seqloop (num_dates: i64) (gauss: f64): [num_dates]f64 =
+def seqloop (num_dates: i64) (gauss: f64) : [num_dates]f64 =
   let bbrow = replicate num_dates 0.0f64
-  let bbrow[ 0 ] = gauss in
+  let bbrow[0] = gauss
+  in loop (bbrow) for i in map (+ 1) (iota (num_dates - 1)) do
+       let bbrow[i] = bbrow[i - 1] * bbrow[i - 1]
+       in bbrow
 
-  loop (bbrow) for i in map (+1) (iota (num_dates-1)) do
-      let bbrow[i] = bbrow[i-1] * bbrow[i-1]
-      in  bbrow
-
-def main [num_dates] (gausses: [num_dates]f64): [][]f64 =
-  map (seqloop(num_dates)) gausses
+def main [num_dates] (gausses: [num_dates]f64) : [][]f64 =
+  map (seqloop (num_dates)) gausses
