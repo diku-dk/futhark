@@ -205,6 +205,9 @@ data KernelResult
       VName -- Tile returned by this thread/block.
   deriving (Eq, Show, Ord)
 
+instance IsResult KernelResult where
+  resAliases = freeIn . kernelResultSubExp
+
 -- | Get the certs for this 'KernelResult'.
 kernelResultCerts :: KernelResult -> Certs
 kernelResultCerts (Returns _ cs _) = cs

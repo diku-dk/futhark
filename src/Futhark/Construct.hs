@@ -605,7 +605,7 @@ insertStmsM m = do
 -- value, then return the body constructed from the 'Result' and any
 -- statements added during the action, along the auxiliary value.
 buildBody ::
-  (MonadBuilder m, FreeIn res) =>
+  (MonadBuilder m, IsResult res) =>
   m ([res], a) ->
   m (GBody (Rep m) res, a)
 buildBody m = do
@@ -615,7 +615,7 @@ buildBody m = do
 
 -- | As 'buildBody', but there is no auxiliary value.
 buildBody_ ::
-  (MonadBuilder m, FreeIn res) =>
+  (MonadBuilder m, IsResult res) =>
   m [res] ->
   m (GBody (Rep m) res)
 buildBody_ m = fst <$> buildBody ((,()) <$> m)
