@@ -45,7 +45,7 @@ redomapToMapAndReduce ::
 redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
   (map_pat, red_pat, red_arrs) <-
     splitScanOrRedomap pes w map_lam $ map redNeutral reds
-  let map_stm = mkLet map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
+  map_stm <- mkLet map_pat . Op . Screma w arrs <$> mapSOAC map_lam
   red_stm <-
     Let red_pat (defAux ()) . Op
       <$> (Screma w red_arrs <$> reduceSOAC reds)
@@ -67,7 +67,7 @@ scanomapToMapAndScan ::
 scanomapToMapAndScan (Pat pes) (w, scans, map_lam, arrs) = do
   (map_pat, scan_pat, scan_arrs) <-
     splitScanOrRedomap pes w map_lam $ map scanNeutral scans
-  let map_stm = mkLet map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
+  map_stm <- mkLet map_pat . Op . Screma w arrs <$> mapSOAC map_lam
   scan_stm <-
     Let scan_pat (defAux ()) . Op
       <$> (Screma w scan_arrs <$> scanSOAC scans)
@@ -108,7 +108,7 @@ dissectScrema ::
   ScremaForm (Rep m) ->
   [VName] ->
   m ()
-dissectScrema pat w (ScremaForm map_lam scans reds) arrs = do
+dissectScrema pat w (ScremaForm map_lam scans reds post_lam _) arrs = do
   let num_reds = redResults reds
       num_scans = scanResults scans
       (scan_res, red_res, map_res) = splitAt3 num_scans num_reds $ patNames pat

@@ -107,7 +107,9 @@ data ScremaForm rep = ScremaForm
     -- the input arrays, however.
     scremaLambda :: Lambda rep,
     scremaScans :: [Scan rep],
-    scremaReduces :: [Reduce rep]
+    scremaReduces :: [Reduce rep],
+    scremaPostLambda :: Lambda rep,
+    scremaNumReds :: Int
   }
   deriving (Eq, Ord, Show)
 
@@ -173,14 +175,10 @@ singleReduce reds =
 -- | The types produced by a single 'Screma', given the size of the
 -- input array.
 scremaType :: SubExp -> ScremaForm rep -> [Type]
-scremaType w (ScremaForm map_lam scans reds) =
-  scan_tps ++ red_tps ++ map (`arrayOfRow` w) map_tps
+scremaType w (ScremaForm _map_lam _scans _reds post_lam num_reds) =
+  val_rets <> fmap (`arrayOfRow` w) arr_rets
   where
-    scan_tps =
-      map (`arrayOfRow` w) $
-        concatMap (lambdaReturnType . scanLambda) scans
-    red_tps = concatMap (lambdaReturnType . redLambda) reds
-    map_tps = drop (length scan_tps + length red_tps) $ lambdaReturnType map_lam
+    (val_rets, arr_rets) = splitAt num_reds $ lambdaReturnType post_lam
 
 -- | Construct a lambda that takes parameters of the given types and
 -- simply returns them unchanged.
@@ -209,13 +207,25 @@ nilFn = Lambda mempty mempty (mkBody mempty mempty)
 
 -- | Construct a Screma with possibly multiple scans, and
 -- the given map function.
-scanomapSOAC :: [Scan rep] -> Lambda rep -> ScremaForm rep
-scanomapSOAC scans lam = ScremaForm lam scans []
+scanomapSOAC ::
+  (Buildable rep, MonadFreshNames m) =>
+  [Scan rep] ->
+  Lambda rep ->
+  m (ScremaForm rep)
+scanomapSOAC scans lam = do
+  post_lam <- mkIdentityLambda $ lambdaReturnType lam
+  pure $ ScremaForm lam scans [] post_lam 0
 
 -- | Construct a Screma with possibly multiple reductions, and
 -- the given map function.
-redomapSOAC :: [Reduce rep] -> Lambda rep -> ScremaForm rep
-redomapSOAC reds lam = ScremaForm lam [] reds
+redomapSOAC ::
+  (Buildable rep, MonadFreshNames m) =>
+  [Reduce rep] ->
+  Lambda rep ->
+  m (ScremaForm rep)
+redomapSOAC reds lam = do
+  post_lam <- mkIdentityLambda $ lambdaReturnType lam
+  pure $ ScremaForm lam [] reds post_lam $ redResults reds
 
 -- | Construct a Screma with possibly multiple scans, and identity map
 -- function.
@@ -223,7 +233,7 @@ scanSOAC ::
   (Buildable rep, MonadFreshNames m) =>
   [Scan rep] ->
   m (ScremaForm rep)
-scanSOAC scans = scanomapSOAC scans <$> mkIdentityLambda ts
+scanSOAC scans = scanomapSOAC scans =<< mkIdentityLambda ts
   where
     ts = concatMap (lambdaReturnType . scanLambda) scans
 
@@ -233,19 +243,25 @@ reduceSOAC ::
   (Buildable rep, MonadFreshNames m) =>
   [Reduce rep] ->
   m (ScremaForm rep)
-reduceSOAC reds = redomapSOAC reds <$> mkIdentityLambda ts
+reduceSOAC reds = redomapSOAC reds =<< mkIdentityLambda ts
   where
     ts = concatMap (lambdaReturnType . redLambda) reds
 
 -- | Construct a Screma corresponding to a map.
-mapSOAC :: Lambda rep -> ScremaForm rep
-mapSOAC lam = ScremaForm lam [] []
+mapSOAC ::
+  (Buildable rep, MonadFreshNames m) =>
+  Lambda rep ->
+  m (ScremaForm rep)
+mapSOAC lam = do
+  post_lam <- mkIdentityLambda $ lambdaReturnType lam
+  pure $ ScremaForm lam [] [] post_lam 0
 
 -- | Does this Screma correspond to a scan-map composition?
 isScanomapSOAC :: ScremaForm rep -> Maybe ([Scan rep], Lambda rep)
-isScanomapSOAC (ScremaForm map_lam scans reds) = do
+isScanomapSOAC (ScremaForm map_lam scans reds post_lam _) = do
   guard $ null reds
   guard $ not $ null scans
+  guard $ isIdentityLambda post_lam
   pure (scans, map_lam)
 
 -- | Does this Screma correspond to pure scan?
@@ -257,9 +273,10 @@ isScanSOAC form = do
 
 -- | Does this Screma correspond to a reduce-map composition?
 isRedomapSOAC :: ScremaForm rep -> Maybe ([Reduce rep], Lambda rep)
-isRedomapSOAC (ScremaForm map_lam scans reds) = do
+isRedomapSOAC (ScremaForm map_lam scans reds post_lam _) = do
   guard $ null scans
   guard $ not $ null reds
+  guard $ isIdentityLambda post_lam
   pure (reds, map_lam)
 
 -- | Does this Screma correspond to a pure reduce?
@@ -272,9 +289,10 @@ isReduceSOAC form = do
 -- | Does this Screma correspond to a simple map, without any
 -- reduction or scan results?
 isMapSOAC :: ScremaForm rep -> Maybe (Lambda rep)
-isMapSOAC (ScremaForm map_lam scans reds) = do
+isMapSOAC (ScremaForm map_lam scans reds post_lam _) = do
   guard $ null scans
   guard $ null reds
+  guard $ isIdentityLambda post_lam
   pure map_lam
 
 -- | Like 'Mapper', but just for 'SOAC's.
@@ -332,7 +350,7 @@ mapSOACM tv (Hist w arrs ops bucket_fun) =
       )
       ops
     <*> mapOnSOACLambda tv bucket_fun
-mapSOACM tv (Screma w arrs (ScremaForm map_lam scans reds)) =
+mapSOACM tv (Screma w arrs (ScremaForm map_lam scans reds post_lam num_reds)) =
   Screma
     <$> mapOnSOACSubExp tv w
     <*> mapM (mapOnSOACVName tv) arrs
@@ -340,6 +358,8 @@ mapSOACM tv (Screma w arrs (ScremaForm map_lam scans reds)) =
             <$> mapOnSOACLambda tv map_lam
             <*> mapM (mapOnSOACScan tv) scans
             <*> mapM (mapOnSOACReduce tv) reds
+            <*> mapOnSOACLambda tv post_lam
+            <*> pure num_reds
         )
 
 mapOnSOACScan :: (Monad m) => SOACMapper frep trep m -> Scan frep -> m (Scan trep)
@@ -367,8 +387,8 @@ instance (ASTRep rep) => FreeIn (Reduce rep) where
   freeIn' (Reduce _ lam ne) = freeIn' lam <> freeIn' ne
 
 instance (ASTRep rep) => FreeIn (ScremaForm rep) where
-  freeIn' (ScremaForm scans reds lam) =
-    freeIn' scans <> freeIn' reds <> freeIn' lam
+  freeIn' (ScremaForm scans reds lam post_lam _) =
+    freeIn' scans <> freeIn' reds <> freeIn' lam <> freeIn' post_lam
 
 instance (ASTRep rep) => FreeIn (HistOp rep) where
   freeIn' (HistOp w rf dests nes lam) =
@@ -429,7 +449,7 @@ instance AliasedOp SOAC where
   consumedInOp VJP {} = mempty
   -- Only map functions can consume anything.  The operands to scan
   -- and reduce functions are always considered "fresh".
-  consumedInOp (Screma _ arrs (ScremaForm map_lam _ _)) =
+  consumedInOp (Screma _ arrs (ScremaForm map_lam _ _ _ _)) =
     mapNames consumedArray $ consumedByLambda map_lam
     where
       consumedArray v = fromMaybe v $ lookup v params_to_arrs
@@ -464,12 +484,14 @@ instance CanBeAliased SOAC where
       arrs
       (map (mapHistOp (Alias.analyseLambda aliases)) ops)
       (Alias.analyseLambda aliases bucket_fun)
-  addOpAliases aliases (Screma w arrs (ScremaForm map_lam scans reds)) =
+  addOpAliases aliases (Screma w arrs (ScremaForm map_lam scans reds post_lam num_reds)) =
     Screma w arrs $
       ScremaForm
         (Alias.analyseLambda aliases map_lam)
         (map onScan scans)
         (map onRed reds)
+        (Alias.analyseLambda aliases post_lam)
+        num_reds
     where
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
       onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
@@ -514,7 +536,7 @@ instance IsOp SOAC where
       lam
       (zipWith (<>) (map depsOf' args) (map depsOf' vec))
       <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
-  opDependencies (Screma w arrs (ScremaForm map_lam scans reds)) =
+  opDependencies (Screma w arrs (ScremaForm map_lam scans reds post_lam _)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $
             lambdaDependencies mempty map_lam (depsOfArrays w arrs)
@@ -522,7 +544,7 @@ instance IsOp SOAC where
           concatMap depsOfScan (zip scans $ chunks (scanSizes scans) scans_in)
         reds_deps =
           concatMap depsOfRed (zip reds $ chunks (redSizes reds) reds_in)
-     in scans_deps <> reds_deps <> map_deps
+     in lambdaDependencies mempty post_lam (scans_deps <> reds_deps <> map_deps)
     where
       depsOfScan (Scan lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
@@ -554,7 +576,9 @@ instance (RepTypes rep) => ST.IndexOp (SOAC rep) where
       SubExpRes _ (Var v) -> uncurry (flip ST.Indexed) <$> M.lookup v arr_indexes'
       _ -> Nothing
     where
-      lambdaAndSubExp (Screma _ arrs (ScremaForm map_lam scans reds)) =
+      lambdaAndSubExp (Screma _ arrs (ScremaForm map_lam scans reds post_lam _)) = do
+        -- UNSURE_IF_CORRECT
+        guard $ isIdentityLambda post_lam
         nthMapOut (scanResults scans + redResults reds) map_lam arrs
       lambdaAndSubExp _ =
         Nothing
@@ -665,7 +689,7 @@ typeCheckSOAC (Hist w arrs ops bucket_fun) = do
         <> prettyTuple (lambdaReturnType bucket_fun)
         <> " but should have type "
         <> prettyTuple bucket_ret_t
-typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
+typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam _)) = do
   TC.require [Prim int64] w
   arrs' <- TC.checkSOACArrayArgs w arrs
   TC.checkLambda map_lam arrs'
@@ -681,6 +705,8 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
     $ "Map function return type "
       <> prettyTuple map_lam_ts
       <> " wrong for given scan and reduction functions."
+  let map_args = (,mempty) <$> drop (length scan_nes' + length red_nes') map_lam_ts
+  TC.checkLambda post_lam (scan_nes' <> red_nes' <> map_args)
 
 typeCheckScan :: (TC.Checkable rep) => Scan (Aliases rep) -> TC.TypeM rep [(Type, Names)]
 typeCheckScan (Scan scan_lam scan_nes) = do
@@ -720,12 +746,14 @@ instance RephraseOp SOAC where
     where
       onOp (HistOp dest_shape rf dests nes op) =
         HistOp dest_shape rf dests nes <$> rephraseLambda r op
-  rephraseInOp r (Screma w arrs (ScremaForm lam scans red)) =
+  rephraseInOp r (Screma w arrs (ScremaForm lam scans red post_lam num_reds)) =
     Screma w arrs
       <$> ( ScremaForm
               <$> rephraseLambda r lam
               <*> mapM (rephraseScan r) scans
               <*> mapM (rephraseRed r) red
+              <*> rephraseLambda r post_lam
+              <*> pure num_reds
           )
 
 rephraseRed :: (Monad m) => Rephraser m from to -> Reduce from -> m (Reduce to)
@@ -745,11 +773,12 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Hist _ _ ops bucket_fun) =
     inside "Hist" $ mapM_ (lambdaMetrics . histOp) ops >> lambdaMetrics bucket_fun
-  opMetrics (Screma _ _ (ScremaForm map_lam scans reds)) =
+  opMetrics (Screma _ _ (ScremaForm map_lam scans reds post_lam _)) =
     inside "Screma" $ do
       lambdaMetrics map_lam
       mapM_ (lambdaMetrics . scanLambda) scans
       mapM_ (lambdaMetrics . redLambda) reds
+      lambdaMetrics post_lam
 
 instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
   pretty (VJP args vec lam) =
@@ -772,16 +801,15 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
     ppStream size arrs acc lam
   pretty (Hist w arrs ops bucket_fun) =
     ppHist w arrs ops bucket_fun
-  pretty (Screma w arrs (ScremaForm map_lam scans reds))
-    | null scans,
-      null reds =
+  pretty (Screma w arrs screma)
+    | Just map_lam <- isMapSOAC screma =
         "map"
           <> (parens . align)
             ( pretty w
                 <> comma </> ppTuple' (map pretty arrs)
                 <> comma </> pretty map_lam
             )
-    | null scans =
+    | Just (reds, map_lam) <- isRedomapSOAC screma =
         "redomap"
           <> (parens . align)
             ( pretty w
@@ -790,7 +818,7 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
                 <> comma
                   </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds)
             )
-    | null reds =
+    | Just (scans, map_lam) <- isScanomapSOAC screma =
         "scanomap"
           <> (parens . align)
             ( pretty w
@@ -805,7 +833,7 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
 -- | Prettyprint the given Screma.
 ppScrema ::
   (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> ScremaForm rep -> Doc ann
-ppScrema w arrs (ScremaForm map_lam scans reds) =
+ppScrema w arrs (ScremaForm map_lam scans reds post_lam n) =
   "screma"
     <> (parens . align)
       ( pretty w
@@ -815,6 +843,8 @@ ppScrema w arrs (ScremaForm map_lam scans reds) =
             </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty scans)
           <> comma
             </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds)
+          <> comma </> pretty post_lam
+          <> comma </> pretty n
       )
 
 -- | Prettyprint the given Stream.
