@@ -16,6 +16,9 @@ module Futhark.Optimise.Fusion.HLsched.SchedUtils
   , tailOfSched
   , sortByPerm
   , append2Sched
+  , oneFullyConsumedMapRed
+  , fromFParam
+  , toFParam
   )
 where
 
@@ -241,6 +244,18 @@ append2Sched (l, s, o, p, d) sched =
         , sigma   = p : (sigma   sched)
         , signals = d : (signals sched)
         }
+
+oneFullyConsumedMapRed :: ScremaForm SOACS -> Maybe (Lambda SOACS)
+oneFullyConsumedMapRed (ScremaForm map_lam [] [Reduce _com red_lam _ne])
+  | lambdaReturnType red_lam == lambdaReturnType map_lam = Just red_lam
+oneFullyConsumedMapRed _ = Nothing
+
+toFParam :: LParam SOACS -> FParam SOACS
+toFParam p = Param (paramAttrs p) (paramName p) $ toDecl (paramDec p) Unique
+
+fromFParam :: FParam SOACS -> LParam SOACS
+fromFParam p = Param (paramAttrs p) (paramName p) $ fromDecl (paramDec p)
+
 -----------------------------------------------------------
 --  GARBAGE CODE BELOW, i.e., replaced with simpler one
 -----------------------------------------------------------

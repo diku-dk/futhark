@@ -88,8 +88,8 @@ applyPermute ::
     FuseEnv m -> Env -> HLSched -> StmAux (ExpDec SOACS) ->
     Maybe (H.SOAC SOACS) -> m (Stms SOACS)
 applyPermute fenv env sched aux msoac
-  | Just (H.Screma mm inps (H.ScremaForm map_lam [] reduces)) <- msoac,
-    emptyOrFullyConsumedReduce map_lam reduces,
+  | Just (H.Screma mm inps form@(H.ScremaForm map_lam [] reduces)) <- msoac,
+    emptyOrFullyConsumedReduce form,
     not (any hasTransform inps) = do
   -- ^ ToDo: please relax the input-transforms later
   let soac = F.Screma mm (map nameFromInp inps) $ F.ScremaForm map_lam [] reduces
@@ -106,20 +106,15 @@ applyPermute fenv env sched aux msoac
     hasTransform (H.Input transf _ _) = not $ H.nullTransforms transf
     nameFromInp (H.Input _ nm _) = nm
     --
-    emptyOrFullyConsumedReduce _map_lam [] = True
-    emptyOrFullyConsumedReduce map_lam reduces
-      | Just _ <- oneFullyConsumedMapRed map_lam reduces = True
-    emptyOrFullyConsumedReduce _ _ = False
-    --
-    oneFullyConsumedMapRed map_lam [Reduce _ red_lam _]
-      | lambdaReturnType red_lam == lambdaReturnType map_lam =
-      Just red_lam
-    oneFullyConsumedMapRed _ _ = Nothing
+    emptyOrFullyConsumedReduce (ScremaForm _ [] []) = True
+    emptyOrFullyConsumedReduce form
+      | Just _ <- oneFullyConsumedMapRed form = True
+    emptyOrFullyConsumedReduce _ = False
     --
     findSOACtype (F.Screma mm _inp_nms (F.ScremaForm map_lam [] [])) =
       map (`arrayOfRow` mm) $ lambdaReturnType map_lam
-    findSOACtype (F.Screma _mm _inp_nms (F.ScremaForm map_lam [] reduces))
-      | Just red_lam <- oneFullyConsumedMapRed map_lam reduces = lambdaReturnType red_lam
+    findSOACtype (F.Screma _mm _inp_nms form)
+      | Just red_lam <- oneFullyConsumedMapRed form = lambdaReturnType red_lam
     findSOACtype soac =
       error ("Unsupported soac in function findType of HLSched: "++prettyString soac)
 --

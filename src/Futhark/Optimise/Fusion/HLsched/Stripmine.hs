@@ -450,14 +450,6 @@ pe1 = ValueExp $ IntValue $ Int64Value 1
 i64ptp :: PrimType
 i64ptp = IntType Int64
 
-{--
-toFParam :: LParam SOACS -> FParam SOACS
-toFParam p = Param (paramAttrs p) (paramName p) $ toDecl (paramDec p) Unique
-
-fromFParam :: FParam SOACS -> LParam SOACS
-fromFParam p = Param (paramAttrs p) (paramName p) $ fromDecl (paramDec p)
---}
-
 mkArrIndexingExp :: Env -> VName -> Type -> SubExp -> Exp SOACS
 mkArrIndexingExp env inp_nm inp_tp i_flat
   | Just _ <- M.lookup inp_nm (iotas env),
