@@ -112,18 +112,19 @@ simplifySOAC (Hist w imgs ops bfun) = do
   imgs' <- mapM Engine.simplify imgs
   (bfun', bfun_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty bfun
   pure (Hist w' imgs' ops' bfun', mconcat hoisted <> bfun_hoisted)
-simplifySOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
+simplifySOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
   (scans', scans_hoisted) <- mapAndUnzipM simplifyScan scans
   (reds', reds_hoisted) <- mapAndUnzipM simplifyReduce reds
   (map_lam', map_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty map_lam
+  (post_lam', post_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty post_lam
 
   (,)
     <$> ( Screma
             <$> Engine.simplify w
             <*> Engine.simplify arrs
-            <*> pure (ScremaForm map_lam' scans' reds')
+            <*> pure (ScremaForm map_lam' scans' reds' post_lam')
         )
-    <*> pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
+    <*> pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted <> post_lam_hoisted)
 
 simplifyScan ::
   (Simplify.SimplifiableRep rep) =>
@@ -296,8 +297,8 @@ liftIdentityMapping _ pat aux op
                   }
           auxing aux $ do
             mapM_ (uncurry letBind) invariant
-            letBindNames (map patElemName pat') . Op $
-              soacOp (Screma w arrs (mapSOAC fun'))
+            letBindNames (map patElemName pat') . Op . soacOp . Screma w arrs
+              =<< mapSOAC fun'
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
@@ -335,14 +336,15 @@ liftIdentityStreaming _ _ _ _ = Skip
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping ::
-  (Aliased rep, BuilderOps rep, HasSOAC rep) =>
+  (Aliased rep, Buildable rep, BuilderOps rep, HasSOAC rep) =>
   TopDownRuleOp rep
 removeReplicateMapping vtable pat aux op
   | Just (Screma w arrs form) <- asSOAC op,
     Just fun <- isMapSOAC form,
     Just (stms, fun', arrs') <- removeReplicateInput vtable fun arrs = Simplify $ do
       forM_ stms $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
-      auxing aux $ letBind pat $ Op $ soacOp $ Screma w arrs' $ mapSOAC fun'
+      auxing aux . letBind pat . Op . soacOp . Screma w arrs'
+        =<< mapSOAC fun'
 removeReplicateMapping _ _ _ _ = Skip
 
 removeReplicateInput ::
@@ -389,10 +391,10 @@ removeUnusedSOACInput ::
   TopDownRuleOp rep
 removeUnusedSOACInput _ pat aux op
   | Just (Screma w arrs form :: SOAC rep) <- asSOAC op,
-    ScremaForm map_lam scan reduce <- form,
+    ScremaForm map_lam scan reduce post_lam <- form,
     Just (used_arrs, map_lam') <- remove map_lam arrs =
       Simplify . auxing aux . letBind pat . Op $
-        soacOp (Screma w used_arrs (ScremaForm map_lam' scan reduce))
+        soacOp (Screma w used_arrs (ScremaForm map_lam' scan reduce post_lam))
   where
     used_in_body map_lam = freeIn $ lambdaBody map_lam
     usedInput map_lam (param, _) = paramName param `nameIn` used_in_body map_lam
@@ -404,8 +406,10 @@ removeUnusedSOACInput _ pat aux op
 removeUnusedSOACInput _ _ _ _ = Skip
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
-removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm lam scans reds))
-  | (nonmap_pes, map_pes) <- splitAt num_nonmap_res pes,
+removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm lam scans reds post_lam))
+  | -- This case should probably also be handled.
+    isIdentityLambda post_lam,
+    (nonmap_pes, map_pes) <- splitAt num_nonmap_res pes,
     not $ null map_pes =
       let (nonmap_res, map_res) = splitAt num_nonmap_res $ bodyResult $ lambdaBody lam
           (nonmap_ts, map_ts) = splitAt num_nonmap_res $ lambdaReturnType lam
@@ -421,7 +425,7 @@ removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm lam scans r
             then
               Simplify . auxing aux $
                 letBind (Pat $ nonmap_pes <> map_pes') . Op $
-                  Screma w arrs (ScremaForm lam' scans reds)
+                  Screma w arrs (ScremaForm lam' scans reds post_lam)
             else Skip
   where
     num_nonmap_res = scanResults scans + redResults reds
@@ -445,7 +449,7 @@ removeDuplicateMapOutput _ (Pat pes) aux (Screma w arrs form)
                         lambdaReturnType = ts'
                       }
               auxing aux $ do
-                letBind (Pat pes') $ Op $ Screma w arrs $ mapSOAC fun'
+                letBind (Pat pes') . Op . Screma w arrs =<< mapSOAC fun'
                 forM_ copies $ \(from, to) ->
                   letBind (Pat [to]) $ BasicOp $ Replicate mempty $ Var $ patElemName from
   where
@@ -515,7 +519,7 @@ removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
 removeDeadReduction (_, used) pat aux (Screma w arrs form) =
   case isRedomapSOAC form of
     Just ([Reduce comm redlam rednes], maplam) ->
-      let mkOp lam nes' = redomapSOAC [Reduce comm lam nes']
+      let mkOp lam nes' = pure . redomapSOAC [Reduce comm lam nes']
        in removeDeadReduction' redlam rednes maplam mkOp
     _ ->
       case isScanomapSOAC form of
@@ -558,8 +562,11 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form) =
             removeLambdaResults alive_mask
               <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
 
-          auxing aux . letBind (Pat $ used_red_pes ++ map_pes) . Op $
-            Screma w arrs (mkOp redlam' used_nes maplam')
+          auxing aux
+            . letBind (Pat $ used_red_pes ++ map_pes)
+            . Op
+            . Screma w arrs
+            =<< mkOp redlam' used_nes maplam'
     removeDeadReduction' _ _ _ _ = Skip
 removeDeadReduction _ _ _ _ = Skip
 
@@ -582,7 +589,8 @@ fuseConcatScatter vtable pat aux (Screma _ arrs form)
       lam' <-
         mkLambda (acc_params <> input_params) $
           subExpsRes <$> recurse (map (Var . paramName) acc_params) lams
-      letBind pat $ Op $ Screma w' (map snd accs <> concat xivs) (mapSOAC lam')
+      letBind pat . Op . Screma w' (map snd accs <> concat xivs)
+        =<< mapSOAC lam'
   where
     recurse accs [] = pure accs
     recurse accs (lam : lams) = do
@@ -626,7 +634,7 @@ simplifyKnownIterationSOAC ::
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
   TopDownRuleOp rep
 simplifyKnownIterationSOAC _ pat _ op
-  | Just (Screma (Constant k) arrs (ScremaForm map_lam scans reds)) <- asSOAC op,
+  | Just (Screma (Constant k) arrs (ScremaForm map_lam scans reds post_lam)) <- asSOAC op,
     oneIsh k = Simplify $ do
       let (Reduce _ red_lam red_nes) = singleReduce reds
           (Scan scan_lam scan_nes) = singleScan scans

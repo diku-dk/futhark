@@ -22,7 +22,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.SOACS.SOAC
-import Futhark.Util
 
 -- | Turns a binding of a @redomap@ into two seperate bindings, a
 -- @map@ binding and a @reduce@ binding (returned in that order).
@@ -108,16 +107,15 @@ dissectScrema ::
   ScremaForm (Rep m) ->
   [VName] ->
   m ()
-dissectScrema pat w (ScremaForm map_lam scans reds post_lam _) arrs = do
+dissectScrema pat w (ScremaForm map_lam scans reds post_lam) arrs = do
   let num_reds = redResults reds
-      num_scans = scanResults scans
-      (scan_res, red_res, map_res) = splitAt3 num_scans num_reds $ patNames pat
+      (red_res, scan_map_res) = splitAt num_reds $ patNames pat
 
   to_red <- replicateM num_reds $ newVName "to_red"
 
-  let scanomap = scanomapSOAC scans map_lam
-  letBindNames (scan_res <> to_red <> map_res) $
-    Op (Screma w arrs scanomap)
+  let maposcanomap = maposcanomapSOAC post_lam scans map_lam
+  letBindNames (to_red <> scan_map_res) $
+    Op (Screma w arrs maposcanomap)
 
   reduce <- reduceSOAC reds
   letBindNames red_res $ Op $ Screma w to_red reduce
@@ -231,8 +229,12 @@ doScatter desc rank dest arrs mk = do
         fmap subExpsRes $ forM (zip acc_ps_inner vs) $ \(acc_p_inner, v) ->
           letSubExp "scatter_acc" . BasicOp $
             UpdateAcc Safe (paramName acc_p_inner) is [v]
+
+    -- NOTE: Is this problematic?
     let w = arraysSize 0 arrs_ts
-    fmap varsRes . letTupExp "acc_res" . Op $
-      Screma w (map paramName acc_ps <> arrs) (mapSOAC map_lam)
+    (fmap varsRes . letTupExp "acc_res")
+      . Op
+      . Screma w (map paramName acc_ps <> arrs)
+      =<< mapSOAC map_lam
 
   letTupExp desc $ WithAcc [(acc_shape, [v], Nothing) | v <- dest] withacc_lam

@@ -125,26 +125,21 @@ transformSOAC _ JVP {} =
   error "transformSOAC: unhandled JVP"
 transformSOAC _ VJP {} =
   error "transformSOAC: unhandled VJP"
-transformSOAC pat (Screma w arrs form@(ScremaForm map_lam scans reds)) = do
+transformSOAC pat (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
   -- See Note [Translation of Screma].
   --
   -- Start by combining all the reduction and scan parts into a single
   -- operator
   let Reduce _ red_lam red_nes = singleReduce reds
       Scan scan_lam scan_nes = singleScan scans
-      (scan_arr_ts, _red_ts, map_arr_ts) =
-        splitAt3 (length scan_nes) (length red_nes) $ scremaType w form
-
-  scan_arrs <- resultArray [] scan_arr_ts
-  map_arrs <- resultArray arrs map_arr_ts
+      ts = lambdaReturnType post_lam
 
   scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) $ lambdaReturnType scan_lam
-  scanout_params <- mapM (newParam "scanout" . flip toDecl Unique) scan_arr_ts
   redout_params <- mapM (newParam "redout" . flip toDecl Nonunique) $ lambdaReturnType red_lam
-  mapout_params <- mapM (newParam "mapout" . flip toDecl Unique) map_arr_ts
+  out_params <- mapM (newParam "out" . flip toDecl Unique) ts
 
   arr_ts <- mapM lookupType arrs
-  let paramForAcc (Acc c _ _ _) = find (f . paramType) mapout_params
+  let paramForAcc (Acc c _ _ _) = find (f . paramType) out_params
         where
           f (Acc c2 _ _ _) = c == c2
           f _ = False
@@ -153,9 +148,8 @@ transformSOAC pat (Screma w arrs form@(ScremaForm map_lam scans reds)) = do
   let merge =
         concat
           [ zip scanacc_params scan_nes,
-            zip scanout_params $ map Var scan_arrs,
             zip redout_params red_nes,
-            zip mapout_params $ map Var map_arrs
+            zip out_params $ map Var arrs
           ]
   i <- newVName "i"
   let loopform = ForLoop i Int64 w
@@ -201,23 +195,23 @@ transformSOAC pat (Screma w arrs form@(ScremaForm map_lam scans reds)) = do
           map (pure . BasicOp . SubExp) $
             map (Var . paramName) redout_params ++ map resSubExp red_res
 
-      -- Write the scan accumulator to the scan result arrays.
-      scan_outarrs <-
-        certifying (foldMap resCerts scan_res) $
-          letwith (map paramName scanout_params) (Var i) $
-            map resSubExp scan_res'
+      let res = scan_res' <> map_res
+          param_bind = resSubExp <$> res
+      forM_ (zip (paramName <$> lambdaParams post_lam) param_bind) $
+        \(par, v) -> do
+          letBindNames [par] $ BasicOp $ SubExp v
 
-      -- Write the map results to the map result arrays.
-      map_outarrs <-
-        certifying (foldMap resCerts map_res) $
-          letwith (map paramName mapout_params) (Var i) $
-            map resSubExp map_res
+      mapM_ addStm $ bodyStms $ lambdaBody post_lam
+
+      outarrs <-
+        certifying (foldMap resCerts res) $
+          letwith (map paramName out_params) (Var i) $
+            map resSubExp res
 
       pure . concat $
         [ scan_res',
-          varsRes scan_outarrs,
           red_res',
-          varsRes map_outarrs
+          varsRes outarrs
         ]
 
   -- We need to discard the final scan accumulators, as they are not
