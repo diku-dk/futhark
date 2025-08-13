@@ -821,6 +821,7 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
             ( pretty w
                 <> comma </> ppTuple' (map pretty arrs)
                 <> comma </> pretty map_lam
+                <> comma </> pretty (scremaPostLambda screma)
             )
     | Just (reds, map_lam) <- isRedomapSOAC screma =
         "redomap"
@@ -830,6 +831,7 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
                 <> comma </> pretty map_lam
                 <> comma
                   </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds)
+                <> comma </> pretty (scremaPostLambda screma)
             )
     | Just (scans, map_lam) <- isScanomapSOAC screma =
         "scanomap"
@@ -840,6 +842,7 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
                 <> comma
                   </> PP.braces
                     (mconcat $ intersperse (comma <> PP.line) $ map pretty scans)
+                <> comma </> pretty (scremaPostLambda screma)
             )
   pretty (Screma w arrs form) = ppScrema w arrs form
 

@@ -638,9 +638,8 @@ simplifyKnownIterationSOAC _ pat _ op
     oneIsh k = Simplify $ do
       let (Reduce _ red_lam red_nes) = singleReduce reds
           (Scan scan_lam scan_nes) = singleScan scans
-          (scan_pes, red_pes, map_pes) =
-            splitAt3 (length scan_nes) (length red_nes) $
-              patElems pat
+          (red_pes, post_pes) =
+            splitAt (length red_nes) $ patElems pat
           bindMapParam p a = do
             a_t <- lookupType a
             letBindNames [paramName p] . BasicOp $
@@ -653,8 +652,8 @@ simplifyKnownIterationSOAC _ pat _ op
                 ArrayLit [se] $
                   rowType $
                     patElemType pe
-          bindResult pe (SubExpRes cs se) =
-            certifying cs $ letBindNames [patElemName pe] $ BasicOp $ SubExp se
+          bindResult name (SubExpRes cs se) =
+            certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
 
       zipWithM_ bindMapParam (lambdaParams map_lam) arrs
       (to_scan, to_red, map_res) <-
@@ -663,9 +662,12 @@ simplifyKnownIterationSOAC _ pat _ op
       scan_res <- eLambda scan_lam $ map eSubExp $ scan_nes ++ map resSubExp to_scan
       red_res <- eLambda red_lam $ map eSubExp $ red_nes ++ map resSubExp to_red
 
-      zipWithM_ bindArrayResult scan_pes scan_res
-      zipWithM_ bindResult red_pes red_res
-      zipWithM_ bindArrayResult map_pes map_res
+      zipWithM_ bindResult (patElemName <$> red_pes) red_res
+
+      let par_names = paramName <$> lambdaParams post_lam
+      zipWithM_ bindResult par_names (scan_res <> map_res)
+
+      zipWithM_ bindArrayResult post_pes =<< bodyBind (lambdaBody post_lam)
 simplifyKnownIterationSOAC _ pat _ op
   | Just (Stream (Constant k) arrs nes fold_lam) <- asSOAC op,
     oneIsh k = Simplify $ do
@@ -689,8 +691,9 @@ simplifyKnownIterationSOAC _ pat _ op
         certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 --
 simplifyKnownIterationSOAC _ pat aux op
-  | Just (Screma (Constant (IntValue (Int64Value k))) arrs (ScremaForm map_lam [] [])) <- asSOAC op,
-    "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
+  | Just (Screma (Constant (IntValue (Int64Value k))) arrs (ScremaForm map_lam [] [] post_lam)) <- asSOAC op,
+    "unroll" `inAttrs` stmAuxAttrs aux,
+    isIdentityLambda post_lam = Simplify $ do
       arrs_elems <- fmap transpose . forM [0 .. k - 1] $ \i -> do
         map_lam' <- renameLambda map_lam
         eLambda map_lam' $ map (`eIndex` [eSubExp (constant i)]) arrs
@@ -823,12 +826,14 @@ replaceArrayOps substs (Body _ stms res) =
 -- case - if you find yourself planning to extend it to handle more
 -- complex situations (rotate or whatnot), consider turning it into a
 -- separate compiler pass instead.
+--
+-- NOTE: Mybe this should also be handled in the post lambda.
 simplifyMapIota ::
   forall rep.
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
   TopDownRuleOp rep
 simplifyMapIota vtable screma_pat aux op
-  | Just (Screma w arrs (ScremaForm map_lam scan reduce) :: SOAC rep) <- asSOAC op,
+  | Just (Screma w arrs (ScremaForm map_lam scan reduce post_lam) :: SOAC rep) <- asSOAC op,
     Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
     indexings <-
       mapMaybe (indexesWith (paramName p)) . S.toList $
@@ -847,7 +852,7 @@ simplifyMapIota vtable screma_pat aux op
               }
 
       auxing aux . letBind screma_pat . Op . soacOp $
-        Screma w (arrs <> more_arrs) (ScremaForm map_lam' scan reduce)
+        Screma w (arrs <> more_arrs) (ScremaForm map_lam' scan reduce post_lam)
   where
     isIota (_, arr) = case ST.lookupBasicOp arr vtable of
       Just (Iota _ (Constant o) (Constant s) _, _) ->
@@ -900,7 +905,7 @@ simplifyMapIota _ _ _ _ = Skip
 -- corresponding to that transformation performed on the rows of the
 -- full array.
 moveTransformToInput :: TopDownRuleOp (Wise SOACS)
-moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_lam scan reduce))
+moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_lam scan reduce post_lam))
   | ops <- filter arrayIsMapParam $ S.toList $ arrayOps mempty $ lambdaBody map_lam,
     not $ null ops = Simplify $ do
       (more_arrs, more_params, replacements) <-
@@ -915,7 +920,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
               }
 
       auxing aux . letBind screma_pat . Op $
-        Screma w (arrs <> more_arrs) (ScremaForm map_lam' scan reduce)
+        Screma w (arrs <> more_arrs) (ScremaForm map_lam' scan reduce post_lam)
   where
     -- It is not safe to move the transform if the root array is being
     -- consumed by the Screma.  This is a bit too conservative - it's
@@ -1005,21 +1010,24 @@ moveTransformToInput _ _ _ _ =
 -- TODO: currently we only handle reshapes here, but the principle
 -- should actually hold for any ArrayTransform.
 moveTransformToOutput :: TopDownRuleOp (Wise SOACS)
-moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm map_lam scan reduce))
+moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm map_lam scan reduce post_lam))
   | (transformed, map_infos, stms') <-
       foldl' onStm ([], zip3 map_res map_rets map_pes, mempty) $ bodyStms $ lambdaBody map_lam,
     (map_res', map_rets', map_pes') <- unzip3 map_infos,
-    not $ null transformed = Simplify $ do
-      (tr_res, tr_rets, tr_names, post) <- unzip4 <$> mapM mkTransformed transformed
-      let map_lam' =
-            map_lam
-              { lambdaBody = mkBody stms' $ nonmap_res <> map_res' <> tr_res,
-                lambdaReturnType = nonmap_rets <> map_rets' <> tr_rets
-              }
-          pat_names = map patElemName (nonmap_pes <> map_pes') <> tr_names
-      auxing screma_aux . letBindNames pat_names . Op $
-        Screma w arrs (ScremaForm map_lam' scan reduce)
-      sequence_ post
+    not $ null transformed,
+    -- Should probably account for non-identity lambda.
+    isIdentityLambda post_lam =
+      Simplify $ do
+        (tr_res, tr_rets, tr_names, post) <- unzip4 <$> mapM mkTransformed transformed
+        let map_lam' =
+              map_lam
+                { lambdaBody = mkBody stms' $ nonmap_res <> map_res' <> tr_res,
+                  lambdaReturnType = nonmap_rets <> map_rets' <> tr_rets
+                }
+            pat_names = map patElemName (nonmap_pes <> map_pes') <> tr_names
+        auxing screma_aux . letBindNames pat_names . Op $
+          Screma w arrs (ScremaForm map_lam' scan reduce post_lam)
+        sequence_ post
   where
     num_nonmap_res = scanResults scan + redResults reduce
     (nonmap_pes, map_pes) =

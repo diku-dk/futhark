@@ -533,7 +533,7 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
             max
             (bodyInterest defbody)
             (map (bodyInterest . caseBody) cases)
-      | Op (Screma w _ (ScremaForm lam' _ _)) <- stmExp stm =
+      | Op (Screma w _ (ScremaForm lam' _ _ _)) <- stmExp stm =
           zeroIfTooSmall w + bodyInterest (lambdaBody lam')
       | Op (Stream _ _ _ lam') <- stmExp stm =
           bodyInterest $ lambdaBody lam'
@@ -564,7 +564,7 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
     interest depth stm
       | "sequential" `inAttrs` attrs =
           0 :: Int
-      | Op (Screma _ _ form@(ScremaForm lam' _ _)) <- stmExp stm,
+      | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm,
         isJust $ isMapSOAC form =
           if sequential_inner
             then 0
@@ -573,7 +573,7 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
           bodyInterest (depth + 1) body * 10
       | WithAcc _ withacc_lam <- stmExp stm =
           bodyInterest (depth + 1) (lambdaBody withacc_lam)
-      | Op (Screma _ _ form@(ScremaForm lam' _ _)) <- stmExp stm =
+      | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm =
           1
             + bodyInterest (depth + 1) (lambdaBody lam')
             +
@@ -817,9 +817,9 @@ onInnerMap ::
 onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
   | unbalancedLambda lam,
     lambdaContainsParallelism lam =
-      addStmToAcc (mapLoopStm maploop) acc
+      flip addStmToAcc acc =<< mapLoopStm maploop
   | otherwise =
-      distributeSingleStm acc (mapLoopStm maploop) >>= \case
+      (distributeSingleStm acc =<< mapLoopStm maploop) >>= \case
         Just (post_kernels, res, nest, acc')
           | Just (perm, pat', lam') <- removeUnusedMapResults pat res lam -> do
               addPostStms post_kernels

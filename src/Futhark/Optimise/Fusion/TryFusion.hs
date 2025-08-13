@@ -669,10 +669,9 @@ iswim _ (SOAC.Screma w arrs form) ots
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 
-      pure
-        ( SOAC.Screma map_w map_arrs' (mapSOAC map_fun'),
-          ots SOAC.|> SOAC.Rearrange map_aux perm
-        )
+      (,ots SOAC.|> SOAC.Rearrange map_aux perm)
+        . SOAC.Screma map_w map_arrs'
+        <$> mapSOAC map_fun'
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
@@ -776,7 +775,7 @@ pullIndex (SOAC.Screma _ inps form) ots
           else
             runLambdaBuilder (lambdaParams lam) $
               mapM sliceRes =<< bodyBind (lambdaBody lam)
-      pure (SOAC.Screma w' (map sliceInput inps) (mapSOAC lam'), ots')
+      (,ots') . SOAC.Screma w' (map sliceInput inps) <$> mapSOAC lam'
 pullIndex _ _ = fail "Cannot pull index"
 
 pushRearrange ::

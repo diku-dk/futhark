@@ -60,9 +60,9 @@ scopeForSOACs = castScope
 
 data MapLoop = MapLoop (Pat Type) (StmAux ()) SubExp (Lambda SOACS) [VName]
 
-mapLoopStm :: MapLoop -> Stm SOACS
+mapLoopStm :: (MonadFreshNames m) => MapLoop -> m (Stm SOACS)
 mapLoopStm (MapLoop pat aux w lam arrs) =
-  Let pat aux $ Op $ Screma w arrs $ mapSOAC lam
+  Let pat aux . Op . Screma w arrs <$> mapSOAC lam
 
 data DistEnv rep m = DistEnv
   { distNest :: Nestings,
@@ -243,9 +243,11 @@ leavingNesting acc =
                     lambdaReturnType = map rowType $ patTypes pat
                   }
           stms <-
-            runBuilder_ . auxing aux . FOT.transformSOAC pat $
-              Screma w used_arrs $
-                mapSOAC lam'
+            runBuilder_
+              . auxing aux
+              . FOT.transformSOAC pat
+              . Screma w used_arrs
+              =<< mapSOAC lam'
 
           pure $ acc {distTargets = newtargets, distStms = stms}
       | otherwise -> do
