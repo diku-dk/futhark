@@ -1025,10 +1025,12 @@ moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm ma
                   lambdaReturnType = nonmap_rets <> map_rets' <> tr_rets
                 }
             pat_names = map patElemName (nonmap_pes <> map_pes') <> tr_names
+        post_lam' <- mkIdentityLambda (scan_ts <> map_rets' <> tr_rets)
         auxing screma_aux . letBindNames pat_names . Op $
-          Screma w arrs (ScremaForm map_lam' scan reduce post_lam)
+          Screma w arrs (ScremaForm map_lam' scan reduce post_lam')
         sequence_ post
   where
+    scan_ts = concatMap (lambdaReturnType . scanLambda) scan
     num_nonmap_res = scanResults scan + redResults reduce
     (nonmap_pes, map_pes) =
       splitAt num_nonmap_res $ patElems screma_pat

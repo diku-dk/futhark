@@ -482,10 +482,10 @@ removeOutputsExcept toKeep s = case s of
       red_output_size = Futhark.redResults red_1
 
       (pats_unchanged, pats_toChange) = splitAt red_output_size pats1
-      (res_unchanged, res_toChange) = splitAt red_output_size (zip (resFromLambda post_lam) (lambdaReturnType post_lam))
+      res_toChange = zip (resFromLambda post_lam) (lambdaReturnType post_lam)
 
-      (pats_new, other) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
-      (results, types) = unzip (res_unchanged ++ other)
+      (pats_new, res_new) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
+      (results, types) = unzip res_new
       lam_new =
         post_lam
           { lambdaReturnType = types,

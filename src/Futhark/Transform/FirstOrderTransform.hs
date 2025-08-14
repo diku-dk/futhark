@@ -125,18 +125,21 @@ transformSOAC _ JVP {} =
   error "transformSOAC: unhandled JVP"
 transformSOAC _ VJP {} =
   error "transformSOAC: unhandled VJP"
-transformSOAC pat (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
+transformSOAC pat soac@(Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
   -- See Note [Translation of Screma].
   --
   -- Start by combining all the reduction and scan parts into a single
   -- operator
   let Reduce _ red_lam red_nes = singleReduce reds
       Scan scan_lam scan_nes = singleScan scans
-      ts = lambdaReturnType post_lam
+      (_red_ts, post_ts) =
+        splitAt (length red_nes) $ soacType soac
+
+  post_arrs <- resultArray arrs post_ts
 
   scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) $ lambdaReturnType scan_lam
   redout_params <- mapM (newParam "redout" . flip toDecl Nonunique) $ lambdaReturnType red_lam
-  out_params <- mapM (newParam "out" . flip toDecl Unique) ts
+  out_params <- mapM (newParam "out" . flip toDecl Unique) post_ts
 
   arr_ts <- mapM lookupType arrs
   let paramForAcc (Acc c _ _ _) = find (f . paramType) out_params
@@ -149,7 +152,7 @@ transformSOAC pat (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
         concat
           [ zip scanacc_params scan_nes,
             zip redout_params red_nes,
-            zip out_params $ map Var arrs
+            zip out_params $ map Var post_arrs
           ]
   i <- newVName "i"
   let loopform = ForLoop i Int64 w
