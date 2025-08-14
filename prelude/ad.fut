@@ -125,3 +125,13 @@ def jvp 'a 'b (f: a -> b) (x: a) (x': a) : b =
 -- | Vector-Jacobian Product ("reverse mode").
 def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
   (vjp2 f x y').1
+
+-- | As `jvp`, but accepts a vector of seed values. Semantically
+-- equivalent to mapping, but may be more efficient.
+def jvp_vec 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : [n]b =
+  (jvp2_vec f x x').1
+
+-- | As `vjp`, but accepts a vector of seed values. Semantically
+-- equivalent to mapping, but may be more efficient.
+def vjp_vec 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : [n]a =
+  (vjp2_vec f x y').1
