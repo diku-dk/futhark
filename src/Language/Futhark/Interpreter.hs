@@ -1319,13 +1319,13 @@ doJVP2 f v s = do
 
   -- Turn the seeds into a list of ADValues
   let s' =
-        expectJust ("jvp: invalid seeds " ++ show s) $
+        fromMaybe (error $ "jvp: invalid seeds " ++ show s) $
           mapM getAD $
             fst $
               valueAccum (\a b -> (b : a, b)) [] s
   -- Augment the values
   let v' =
-        expectJust ("jvp: invalid values " ++ show v) $
+        fromMaybe (error $ "jvp: invalid values " ++ show v) $
           modifyValueM
             ( \i lv -> do
                 lv' <- getAD lv
@@ -1339,24 +1339,21 @@ doJVP2 f v s = do
 
   -- For each output..
   let m =
-        expectJust "jvp: differentiation failed" $
-          mapM
-            ( \on -> case on of
-                -- If it is a JVP variable of the correct depth, return
-                -- its primal and derivative
-                (ValueAD d (AD.JVP (AD.JVPValue pv dv)))
-                  | d == depth -> Just (putAD pv, putAD dv)
-                -- Otherwise, its partial derivatives are all 0
-                _ ->
-                  (on,)
-                    . ValuePrim
-                    . putV
-                    . P.blankPrimValue
-                    . P.primValueType
-                    . AD.primitive
-                    <$> getAD on
-            )
-            o'
+        fromMaybe (error "jvp: differentiation failed") $
+          forM o' $ \on -> case on of
+            -- If it is a JVP variable of the correct depth, return
+            -- its primal and derivative
+            (ValueAD d (AD.JVP (AD.JVPValue pv dv)))
+              | d == depth -> Just (putAD pv, putAD dv)
+            -- Otherwise, its partial derivatives are all 0
+            _ ->
+              (on,)
+                . ValuePrim
+                . putV
+                . P.blankPrimValue
+                . P.primValueType
+                . AD.primitive
+                <$> getAD on
 
   -- Extract the output values, and the partial derivatives
   let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
@@ -1364,9 +1361,6 @@ doJVP2 f v s = do
 
   -- Return a tuple of the output values, and partial derivatives
   pure $ toTuple [ov, od]
-  where
-    expectJust _ (Just v) = v
-    expectJust s Nothing = error s
 
 -- TODO: This could be much better. Currently, it is very inefficient
 -- Perhaps creating VJPValues could be abstracted into a function
