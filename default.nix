@@ -34,9 +34,6 @@ let
           futhark-manifest =
             haskellPackagesNew.callPackage ./nix/futhark-manifest.nix { };
 
-          zlib =
-            haskellPackagesNew.callPackage ./nix/zlib.nix {zlib=pkgs.zlib;};
-
           futhark =
             # callCabal2Nix does not do a great job at determining
             # which files must be included as source, which causes
@@ -52,14 +49,14 @@ let
                            "^docs.*"
                            "^prelude.*"
                            "^assets.*"
-                           "^unittests.*"
+                           "^src-testing.*"
                           ];
                 cleanSource = src: pkgs.lib.sourceByRegex src sources;
             in
             pkgs.haskell.lib.overrideCabal
               (pkgs.haskell.lib.addBuildTools
                 (haskellPackagesOld.callCabal2nix "futhark" (cleanSource ./.) { })
-                [ pkgs.python39Packages.sphinx ])
+                [ pkgs.python312Packages.sphinx ])
               ( _drv: {
                 isLibrary = false;
                 isExecutable = true;

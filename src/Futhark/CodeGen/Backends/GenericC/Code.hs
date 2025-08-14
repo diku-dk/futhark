@@ -108,7 +108,7 @@ compilePrimExp f (BinOpExp bop x y) = do
     _ -> [C.cexp|$id:(prettyString bop)($exp:x', $exp:y')|]
 compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
-  pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
+  pure [C.cexp|$id:(funName (nameFromText h))($args:args')|]
 
 -- | Compile prim expression to C expression.
 compileExp :: Exp -> CompilerM op s C.Exp
@@ -221,13 +221,10 @@ compileCode :: Code op -> CompilerM op s ()
 compileCode (Op op) =
   join $ asks (opsCompiler . envOperations) <*> pure op
 compileCode Skip = pure ()
-compileCode (Comment s code) = do
-  xs <- collect $ compileCode code
-  let comment = "// " ++ T.unpack s
-  stm
-    [C.cstm|$comment:comment
-              { $items:xs }
-             |]
+compileCode (Meta (MetaComment s)) = do
+  comment s
+compileCode (Meta (MetaProvenance (Provenance _ l))) =
+  unless (l == mempty) $ comment $ locText l
 compileCode (TracePrint msg) = do
   (formatstr, formatargs) <- errorMsgString msg
   stm [C.cstm|fprintf(ctx->log, $string:formatstr, $args:formatargs);|]
@@ -271,6 +268,9 @@ compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
           args' <- mapM compileArg args
           item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $id:(funName fname)($args:args');|]
           go code
+    go (x@(Meta (MetaProvenance p)) : xs) = do
+      compileCode x
+      localProvenance p $ go xs
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
 compileCode (Assert e msg (loc, locs)) = do

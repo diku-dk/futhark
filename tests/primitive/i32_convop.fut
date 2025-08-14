@@ -54,5 +54,3 @@ entry i32tou8 = map (u8.i32)
 entry i32tou16 = map (u16.i32)
 entry i32tou32 = map (u32.i32)
 entry i32tou64 = map (u64.i32)
-
-

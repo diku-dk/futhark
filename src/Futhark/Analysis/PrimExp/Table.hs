@@ -70,9 +70,9 @@ kernelToBodyPrimExps ::
   Scope rep ->
   KernelBody rep ->
   State PrimExpTable ()
-kernelToBodyPrimExps scope kbody = mapM_ (stmToPrimExps scope') (kernelBodyStms kbody)
+kernelToBodyPrimExps scope kbody = mapM_ (stmToPrimExps scope') (bodyStms kbody)
   where
-    scope' = scope <> scopeOf (kernelBodyStms kbody)
+    scope' = scope <> scopeOf (bodyStms kbody)
 
 -- | Adds a statement to the PrimExpTable. If it can't be resolved as a `PrimExp`,
 -- it will be added as `Nothing`.

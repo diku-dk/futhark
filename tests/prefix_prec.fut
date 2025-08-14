@@ -3,4 +3,4 @@
 -- ==
 -- input {1 2} output { 1 }
 
-def main x y = -x%y : i32
+def main x y = -x % y : i32

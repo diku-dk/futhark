@@ -45,7 +45,7 @@ class (ASTRep rep, AliasedOp (OpC rep), AliasesOf (LetDec rep)) => Aliased rep w
   bodyAliases :: Body rep -> [Names]
 
   -- | The variables consumed in the body.
-  consumedInBody :: Body rep -> Names
+  consumedInBody :: GBody rep res -> Names
 
 vnameAliases :: VName -> Names
 vnameAliases = oneName
@@ -71,8 +71,8 @@ basicOpAliases FlatUpdate {} = [mempty]
 basicOpAliases Iota {} = [mempty]
 basicOpAliases Replicate {} = [mempty]
 basicOpAliases Scratch {} = [mempty]
-basicOpAliases (Reshape _ _ e) = [vnameAliases e]
-basicOpAliases (Rearrange _ e) = [vnameAliases e]
+basicOpAliases (Reshape v _) = [vnameAliases v]
+basicOpAliases (Rearrange v _) = [vnameAliases v]
 basicOpAliases Concat {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]

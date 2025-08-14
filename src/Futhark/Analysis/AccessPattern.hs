@@ -228,7 +228,7 @@ class Analyse rep where
   -- | Analyse the op for this representation.
   analyseOp :: Op rep -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 
--- | Analyse each `entry` and accumulate the results.
+-- | Analyse each entry and accumulate the results.
 analyseDimAccesses :: (Analyse rep) => Prog rep -> IndexTable rep
 analyseDimAccesses = foldMap' analyseFunction . progFuns
 
@@ -308,7 +308,6 @@ analyseStms ctx body_constructor pats body = do
               then result <> oneName a
               else -- Otherwise, recurse on its dependencies;
               -- 0. Add dependencies in ctx to result
-
                 let (deps_in_ctx, deps_not_in_ctx) =
                       L.partition (`M.member` local_assignments) $
                         namesToList (deps var_info)
@@ -471,19 +470,20 @@ analyseBasicOp ctx expression pats =
         BinOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
         CmpOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
         ConvOp _ se -> varInfoFromSubExp se
-        Assert se _ _ -> varInfoFromSubExp se
+        Assert se _ -> varInfoFromSubExp se
         Index name _ ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         Update _ name _slice _subexp ->
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
         Concat _ _ length_subexp -> varInfoFromSubExp length_subexp
-        Manifest _dim name -> varInfoFromNames ctx $ oneName name
+        Manifest name _dim -> varInfoFromNames ctx $ oneName name
         Iota end start stride _ -> concatVariableInfos mempty [end, start, stride]
         Replicate (Shape shape) value' -> concatVariableInfos mempty (value' : shape)
         Scratch _ sers -> concatVariableInfos mempty sers
-        Reshape _ (Shape shape_subexp) name -> concatVariableInfos (oneName name) shape_subexp
-        Rearrange _ name -> varInfoFromNames ctx $ oneName name
+        Reshape name newshape ->
+          concatVariableInfos (oneName name) (shapeDims (newShape newshape))
+        Rearrange name _ -> varInfoFromNames ctx $ oneName name
         UpdateAcc _ name lsubexprs rsubexprs ->
           concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)
         FlatIndex name _ -> varInfoFromNames ctx $ oneName name
@@ -554,7 +554,7 @@ analyseSegOp op ctx pats =
           . unSegSpace
           $ segSpace op
    in -- Analyse statements in the SegOp body
-      analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
+      analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . bodyStms $ segBody op
 
 analyseSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyseSizeOp op ctx pats =

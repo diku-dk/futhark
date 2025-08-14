@@ -99,7 +99,9 @@
 module Futhark.IR.Syntax
   ( module Language.Futhark.Core,
     prettyString,
+    prettyStringOneLine,
     prettyText,
+    prettyTextOneLine,
     Pretty,
     module Futhark.IR.Rep,
     module Futhark.IR.Syntax.Core,
@@ -123,14 +125,16 @@ module Futhark.IR.Syntax
     Stms,
     SubExpRes (..),
     Result,
-    Body (..),
+    GBody (..),
+    Body,
     BasicOp (..),
     UnOp (..),
     BinOp (..),
     CmpOp (..),
     ConvOp (..),
     OpaqueOp (..),
-    ReshapeKind (..),
+    DimSplice (..),
+    NewShape (..),
     WithAccInput,
     Exp (..),
     Case (..),
@@ -173,7 +177,7 @@ import Data.Text qualified as T
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
 import Futhark.IR.Syntax.Core
-import Futhark.Util.Pretty (Pretty, prettyString, prettyText)
+import Futhark.Util.Pretty (Pretty, prettyString, prettyStringOneLine, prettyText, prettyTextOneLine)
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
 
@@ -201,13 +205,27 @@ instance Traversable Pat where
 data StmAux dec = StmAux
   { stmAuxCerts :: !Certs,
     stmAuxAttrs :: Attrs,
+    stmAuxLoc :: Provenance,
     stmAuxDec :: dec
   }
   deriving (Ord, Show, Eq)
 
+instance Functor StmAux where
+  fmap = fmapDefault
+
+instance Foldable StmAux where
+  foldMap = foldMapDefault
+
+instance Traversable StmAux where
+  traverse f (StmAux cs attrs loc dec) =
+    StmAux cs attrs loc <$> f dec
+
+instance (Monoid dec) => Monoid (StmAux dec) where
+  mempty = StmAux mempty mempty mempty mempty
+
 instance (Semigroup dec) => Semigroup (StmAux dec) where
-  StmAux cs1 attrs1 dec1 <> StmAux cs2 attrs2 dec2 =
-    StmAux (cs1 <> cs2) (attrs1 <> attrs2) (dec1 <> dec2)
+  StmAux cs1 attrs1 loc1 dec1 <> StmAux cs2 attrs2 loc2 dec2 =
+    StmAux (cs1 <> cs2) (attrs1 <> attrs2) (loc1 <> loc2) (dec1 <> dec2)
 
 -- | A local variable binding.
 data Stm rep = Let
@@ -283,19 +301,23 @@ subExpResVName _ = Nothing
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExpRes]
 
--- | A body consists of a sequence of statements, terminating in a
--- list of result values.
-data Body rep = Body
+-- | A generalised body consists of a sequence of statements, terminated in some
+-- kind of result.
+data GBody rep res = Body
   { bodyDec :: BodyDec rep,
     bodyStms :: Stms rep,
-    bodyResult :: Result
+    bodyResult :: [res]
   }
 
-deriving instance (RepTypes rep) => Ord (Body rep)
+-- | A body consists of a sequence of statements, terminating in a
+-- list of result values.
+type Body rep = GBody rep SubExpRes
 
-deriving instance (RepTypes rep) => Show (Body rep)
+deriving instance (RepTypes rep, Ord res) => Ord (GBody rep res)
 
-deriving instance (RepTypes rep) => Eq (Body rep)
+deriving instance (RepTypes rep, Show res) => Show (GBody rep res)
+
+deriving instance (RepTypes rep, Eq res) => Eq (GBody rep res)
 
 -- | Apart from being Opaque, what else is going on here?
 data OpaqueOp
@@ -305,13 +327,40 @@ data OpaqueOp
     OpaqueTrace T.Text
   deriving (Eq, Ord, Show)
 
--- | Which kind of reshape is this?
-data ReshapeKind
-  = -- | New shape is dynamically same as original.
-    ReshapeCoerce
-  | -- | Any kind of reshaping.
-    ReshapeArbitrary
-  deriving (Eq, Ord, Show)
+-- | Split or join a range of dimensions. A reshaping operation consists of a
+-- sequence of these. The purpose is to maintain information about the original
+-- operations (flatten/unflatten), which can then be used for algebraic
+-- optimisations.
+data DimSplice d
+  = -- | @DimSplice i k s@ modifies dimensions @i@ to @i+k-1@ to instead have
+    -- shape @s@.
+    --
+    -- If @k@ is 1 and the rank of @s@ is greater than 1, then this is
+    -- equivalent to unflattening a dimension.
+    --
+    -- If @k@ is greater than 1 and the rank of @s@ is 1, then this is
+    -- equivalent to flattening adjacent dimensions.
+    --
+    -- If @k@ is 1 and the rank of @s@ is 1, then it is a coercion - a change
+    -- that only affects the type, but does not have any semantic effect.
+    --
+    -- Other cases can do arbitrary changes, but are harder for the compiler to
+    -- analyse.
+    DimSplice Int Int (ShapeBase d)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+-- | A reshaping operation consists of a sequence of splices, as well as an
+-- annotation indicating the final shape.
+data NewShape d = NewShape
+  { -- | The changes to perform.
+    dimSplices :: [DimSplice d],
+    -- | The resulting shape.
+    newShape :: ShapeBase d
+  }
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+instance Semigroup (NewShape d) where
+  NewShape ss1 _ <> NewShape ss2 shape = NewShape (ss1 <> ss2) shape
 
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.
@@ -343,14 +392,15 @@ data BasicOp
     CmpOp CmpOp SubExp SubExp
   | -- | Conversion "casting".
     ConvOp ConvOp SubExp
-  | -- | Turn a boolean into a certificate, halting the program with the
-    -- given error message if the boolean is false.
-    Assert SubExp (ErrorMsg SubExp) (SrcLoc, [SrcLoc])
+  | -- | Turn a boolean into a certificate, halting the program with the given
+    -- error message if the boolean is false. The error location comes from the
+    -- provenance of the statement.
+    Assert SubExp (ErrorMsg SubExp)
   | -- | The certificates for bounds-checking are part of the 'Stm'.
     Index VName (Slice SubExp)
   | -- | An in-place update of the given array at the given position.
     -- Consumes the array.  If 'Safe', perform a run-time bounds check
-    -- and ignore the write if out of bounds (like @Scatter@).
+    -- and ignore the write if out of bounds (scatter-like).
     Update Safety VName (Slice SubExp) SubExp
   | FlatIndex VName (FlatSlice SubExp)
   | FlatUpdate VName (FlatSlice SubExp) VName
@@ -365,7 +415,7 @@ data BasicOp
     Concat Int (NonEmpty VName) SubExp
   | -- | Manifest an array with dimensions represented in the given
     -- order.  The result will not alias anything.
-    Manifest [Int] VName
+    Manifest VName [Int]
   | -- Array construction.
 
     -- | @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@.
@@ -378,17 +428,17 @@ data BasicOp
     Replicate Shape SubExp
   | -- | Create array of given type and shape, with undefined elements.
     Scratch PrimType [SubExp]
-  | -- | 1st arg is the new shape, 2nd arg is the input array.
-    Reshape ReshapeKind Shape VName
+  | -- | 1st arg is the input array, 2nd arg is new shape.
+    Reshape VName (NewShape SubExp)
   | -- | Permute the dimensions of the input array.  The list
     -- of integers is a list of dimensions (0-indexed), which
     -- must be a permutation of @[0,n-1]@, where @n@ is the
     -- number of dimensions in the input array.
-    Rearrange [Int] VName
+    Rearrange VName [Int]
   | -- | Update an accumulator at the given index with the given
     -- value. Consumes the accumulator and produces a new one. If
     -- 'Safe', perform a run-time bounds check and ignore the write if
-    -- out of bounds (like @Scatter@).
+    -- out of bounds (scatter-like).
     UpdateAcc Safety VName [SubExp] [SubExp]
   deriving (Eq, Ord, Show)
 
@@ -439,7 +489,7 @@ instance Semigroup RetAls where
 data Exp rep
   = -- | A simple (non-recursive) operation.
     BasicOp BasicOp
-  | Apply Name [(SubExp, Diet)] [(RetType rep, RetAls)] (Safety, SrcLoc, [SrcLoc])
+  | Apply Name [(SubExp, Diet)] [(RetType rep, RetAls)] Safety
   | -- | A match statement picks a branch by comparing the given
     -- subexpressions (called the /scrutinee/) with the pattern in
     -- each of the cases.  If none of the cases match, the /default
@@ -575,3 +625,25 @@ data Prog rep = Prog
     progFuns :: [FunDef rep]
   }
   deriving (Eq, Ord, Show)
+
+-- Note [Tracking Source Locations]
+--
+-- It is useful for such things as profiling to be able to relate the generated
+-- code to the original source code. The Futhark compiler is not great at this,
+-- but we have begun to try a bit.
+--
+-- Each 'Stm' is associated with a 'Provenance', which keeps information about
+-- the (single) source expression that gave rise to the statement. This is by
+-- itself not challenging (although a single source expression can give rise to
+-- multiple core expressions). The real challenge is how to propagate this
+-- information when the compiler starts rewriting the program, without every
+-- rewrite having to be laboriously aware of provenances. In practice, we stick
+-- it in the StmAux and hope that consistent use of such constructs as 'auxing'
+-- will mostly do the right thing.
+--
+-- Another downside of our representation is that it is not flow-sensitive: an
+-- expression can be reached in multiple ways and generally the innermost one is
+-- picked. This is particularly problematic for the prelude functions (e.g.
+-- f32.exp), as it is not exceptionally useful when the provenance simply points
+-- at a file in /prelude. We could address this by just special casing /prelude,
+-- but that won't help when users write their own libraries.

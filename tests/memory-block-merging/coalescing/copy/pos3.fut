@@ -13,12 +13,12 @@
 -- structure seq-mem { Alloc 1 }
 -- structure gpu-mem { Alloc 2 }
 
-let main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32): [n][n]i32 =
+def main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32) : [n][n]i32 =
   -- This is the basis array in which everything will be put.
   let t1 = map (\ms -> map (+ 1) ms) mss
-
   let k = t1[0, 1]
-  let t0 = map (+ k) ns -- Will use the memory of t1[i].
+  let t0 = map (+ k) ns
+  -- Will use the memory of t1[i].
 
   let t1[i] = t0
   in t1

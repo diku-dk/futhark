@@ -118,14 +118,14 @@ replaceInStm ::
   (Mem rep inner, LetDec rep ~ LetDecMem) =>
   Stm rep ->
   UpdateM (inner rep) (Stm rep)
-replaceInStm (Let (Pat elems) (StmAux c a d) e) = do
+replaceInStm (Let (Pat elems) (StmAux c a loc d) e) = do
   elems' <- mapM replaceInPatElem elems
   e' <- replaceInExp elems' e
   entries <- asks (M.elems . envCoalesceTab)
   let c' = case filter (\entry -> (map patElemName elems `L.intersect` M.keys (vartab entry)) /= []) entries of
         [] -> c
         entries' -> c <> foldMap certs entries'
-  pure $ Let (Pat elems') (StmAux c' a d) e'
+  pure $ Let (Pat elems') (StmAux c' a loc d) e'
   where
     replaceInPatElem :: PatElem LetDecMem -> UpdateM inner (PatElem LetDecMem)
     replaceInPatElem p@(PatElem vname (MemArray _ _ u _)) =
@@ -164,17 +164,17 @@ replaceInSegOp ::
   SegOp lvl rep ->
   UpdateM (inner rep) (SegOp lvl rep)
 replaceInSegOp (SegMap lvl sp tps body) = do
-  stms <- updateStms $ kernelBodyStms body
-  pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
-replaceInSegOp (SegRed lvl sp binops tps body) = do
-  stms <- updateStms $ kernelBodyStms body
-  pure $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
-replaceInSegOp (SegScan lvl sp binops tps body) = do
-  stms <- updateStms $ kernelBodyStms body
-  pure $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
-replaceInSegOp (SegHist lvl sp hist_ops tps body) = do
-  stms <- updateStms $ kernelBodyStms body
-  pure $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
+  stms <- updateStms $ bodyStms body
+  pure $ SegMap lvl sp tps $ body {bodyStms = stms}
+replaceInSegOp (SegRed lvl sp tps body binops) = do
+  stms <- updateStms $ bodyStms body
+  pure $ SegRed lvl sp tps (body {bodyStms = stms}) binops
+replaceInSegOp (SegScan lvl sp tps body binops) = do
+  stms <- updateStms $ bodyStms body
+  pure $ SegScan lvl sp tps (body {bodyStms = stms}) binops
+replaceInSegOp (SegHist lvl sp tps body hist_ops) = do
+  stms <- updateStms $ bodyStms body
+  pure $ SegHist lvl sp tps (body {bodyStms = stms}) hist_ops
 
 replaceInHostOp :: HostOp NoOp GPUMem -> UpdateM (HostOp NoOp GPUMem) (HostOp NoOp GPUMem)
 replaceInHostOp (SegOp op) = SegOp <$> replaceInSegOp op

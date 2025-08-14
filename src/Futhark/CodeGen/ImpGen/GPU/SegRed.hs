@@ -113,8 +113,8 @@ compileSegRed pat lvl space segbinops map_kbody = do
 
   compileSegRed' pat grid space segbinops $ \red_cont ->
     sComment "apply map function" $
-      compileStms mempty (kernelBodyStms map_kbody) $ do
-        let (red_res, map_res) = splitAt (segBinOpResults segbinops) $ kernelBodyResult map_kbody
+      compileStms mempty (bodyStms map_kbody) $ do
+        let (red_res, map_res) = splitAt (segBinOpResults segbinops) $ bodyResult map_kbody
 
         let mapout_arrs = drop (segBinOpResults segbinops) $ patElems pat
         unless (null mapout_arrs) $
@@ -143,7 +143,12 @@ compileSegRed' ::
 compileSegRed' pat grid space segbinops map_body_cont
   | genericLength segbinops > maxNumOps =
       compilerLimitationS $
-        ("compileSegRed': at most " <> show maxNumOps <> " reduction operators are supported.\n")
+        ( "compileSegRed': at most "
+            <> show maxNumOps
+            <> " reduction operators are supported,\nbut found kernel with "
+            <> show (length segbinops)
+            <> ".\n"
+        )
           <> ("Pattern: " <> prettyString pat)
   | otherwise = do
       chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
@@ -192,7 +197,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     all isPrimSegBinOp segbinops =
       noncommPrimSegRedInterms
   | otherwise =
-      generalSegRedInterms tblock_id tblock_size segbinops
+      generalSegRedInterms False tblock_id tblock_size segbinops
   where
     params = map paramOf segbinops
 
@@ -246,24 +251,28 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
 
 generalSegRedInterms ::
+  Bool ->
   Imp.TExp Int64 ->
   SubExp ->
   [SegBinOp GPUMem] ->
   InKernelGen [SegRedIntermediateArrays]
-generalSegRedInterms tblock_id tblock_size segbinops =
-  fmap (map GeneralSegRedInterms) $
-    forM (map paramOf segbinops) $
-      mapM $ \p ->
-        case paramDec p of
-          MemArray pt shape _ (ArrayIn mem _) -> do
-            let shape' = Shape [tblock_size] <> shape
-            let shape_E = map pe64 $ shapeDims shape'
-            sArray ("red_arr_" ++ prettyString pt) pt shape' mem $
-              LMAD.iota (tblock_id * product shape_E) shape_E
-          _ -> do
-            let pt = elemType $ paramType p
-                shape = Shape [tblock_size]
-            sAllocArray ("red_arr_" ++ prettyString pt) pt shape $ Space "shared"
+generalSegRedInterms segmented tblock_id tblock_size segbinops =
+  fmap (map GeneralSegRedInterms) . forM (map paramOf segbinops) . mapM $ \p ->
+    case paramDec p of
+      MemArray pt shape _ (ArrayIn mem ixfun) -> do
+        let shape' = Shape [tblock_size] <> shape
+        let shape_E = map pe64 $ shapeDims shape'
+        sArray ("red_arr_" ++ prettyString pt) pt shape' mem $
+          -- This 'segmented' thing here is a hack, related to #2227.
+          -- There absolutely must be some unifying principle we are
+          -- missing.
+          if segmented
+            then ixfun
+            else LMAD.iota (tblock_id * product shape_E) shape_E
+      _ -> do
+        let pt = elemType $ paramType p
+            shape = Shape [tblock_size]
+        sAllocArray ("red_arr_" ++ prettyString pt) pt shape $ Space "shared"
 
 -- | Arrays for storing block results.
 --
@@ -380,7 +389,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
     dPrimVE "segment_size_nonzero" $ sMax64 1 segment_size
 
   let tblock_size_se = unCount tblock_size
-      num_tblocks_se = unCount tblock_size
+      num_tblocks_se = unCount num_tblocks
       num_tblocks' = pe64 num_tblocks_se
       tblock_size' = pe64 tblock_size_se
   num_threads <- fmap tvSize $ dPrimV "num_threads" $ num_tblocks' * tblock_size'
@@ -399,7 +408,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
     let tblock_id = kernelBlockSize constants
         ltid = sExt64 $ kernelLocalThreadId constants
 
-    interms <- generalSegRedInterms tblock_id tblock_size_se segbinops
+    interms <- generalSegRedInterms True tblock_id tblock_size_se segbinops
     let reds_arrs = map blockRedArrs interms
 
     -- We probably do not have enough actual threadblocks to cover the
@@ -921,10 +930,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
       block_res_arrs = blockResArrs slug
 
   old_counter <- dPrim "old_counter"
-  (counter_mem, _, counter_offset) <-
-    fullyIndexArray
-      counters
-      [counter_idx]
+  (counter_mem, _, counter_offset) <- fullyIndexArray counters [counter_idx]
   sComment "first thread in block saves block result to global memory" $
     sWhen (ltid32 .==. 0) $ do
       forM_ (take (length nes) $ zip block_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->

@@ -9,6 +9,7 @@
 module Futhark.AD.Rev (revVJP) where
 
 import Control.Monad
+import Control.Monad.Identity
 import Data.List ((\\))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map qualified as M
@@ -22,11 +23,20 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (takeLast)
+import Futhark.Util (chunks, takeLast)
 
 patName :: Pat Type -> ADM VName
 patName (Pat [pe]) = pure $ patElemName pe
 patName pat = error $ "Expected single-element pattern: " ++ prettyString pat
+
+copyIfArray :: VName -> ADM VName
+copyIfArray v = do
+  v_t <- lookupType v
+  case v_t of
+    Array {} ->
+      letExp (baseString v <> "_copy") . BasicOp $
+        Replicate mempty (Var v)
+    _ -> pure v
 
 -- The vast majority of BasicOps require no special treatment in the
 -- forward pass and produce one value (and hence one adjoint).  We
@@ -42,28 +52,8 @@ commonBasicOp pat aux op m = do
 diffBasicOp :: Pat Type -> StmAux () -> BasicOp -> ADM () -> ADM ()
 diffBasicOp pat aux e m =
   case e of
-    CmpOp cmp x y -> do
-      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ do
-        let t = cmpOpType cmp
-            update contrib = do
-              void $ updateSubExpAdj x contrib
-              void $ updateSubExpAdj y contrib
-
-        case t of
-          FloatType ft ->
-            update <=< letExp "contrib" $
-              Match
-                [Var pat_adj]
-                [Case [Just $ BoolValue True] $ resultBody [constant (floatValue ft (1 :: Int))]]
-                (resultBody [constant (floatValue ft (0 :: Int))])
-                (MatchDec [Prim (FloatType ft)] MatchNormal)
-          IntType it ->
-            update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var pat_adj)
-          Bool ->
-            update pat_adj
-          Unit ->
-            pure ()
+    CmpOp {} ->
+      void $ commonBasicOp pat aux e m
     --
     ConvOp op x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -120,8 +110,7 @@ diffBasicOp pat aux e m =
     --
     Index arr slice -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ do
-        void $ updateAdjSlice slice arr pat_adj
+      returnSweepCode $ void $ updateAdjSlice slice arr pat_adj
     FlatIndex {} -> error "FlatIndex not handled by AD yet."
     FlatUpdate {} -> error "FlatUpdate not handled by AD yet."
     --
@@ -129,20 +118,20 @@ diffBasicOp pat aux e m =
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ updateSubExpAdj se pat_adj
     --
-    Reshape k _ arr -> do
+    Reshape arr newshape -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
         arr_shape <- arrayShape <$> lookupType arr
         void $
           updateAdj arr <=< letExp "adj_reshape" . BasicOp $
-            Reshape k arr_shape pat_adj
+            Reshape pat_adj (reshapeAll (newShape newshape) arr_shape)
     --
-    Rearrange perm arr -> do
+    Rearrange arr perm -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $
         void $
           updateAdj arr <=< letExp "adj_rearrange" . BasicOp $
-            Rearrange (rearrangeInverse perm) pat_adj
+            Rearrange pat_adj (rearrangeInverse perm)
     --
     Replicate (Shape []) (Var se) -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -157,7 +146,7 @@ diffBasicOp pat aux e m =
         n <- letSubExp "rep_size" =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ns
         pat_adj_flat <-
           letExp (baseString pat_adj <> "_flat") . BasicOp $
-            Reshape ReshapeArbitrary (Shape $ n : arrayDims x_t) pat_adj
+            Reshape pat_adj (reshapeAll (Shape ns) (Shape $ n : arrayDims x_t))
         reduce <- reduceSOAC [Reduce Commutative lam [ne]]
         updateSubExpAdj x
           =<< letExp "rep_contrib" (Op $ Screma n [pat_adj_flat] reduce)
@@ -182,7 +171,7 @@ diffBasicOp pat aux e m =
 
         zipWithM_ updateAdj (arr : arrs) slices
     --
-    Manifest _ se -> do
+    Manifest se _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ void $ updateAdj se pat_adj
     --
@@ -202,13 +191,7 @@ diffBasicOp pat aux e m =
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
         v_adj <- letExp "update_val_adj" $ BasicOp $ Index pat_adj slice
-        t <- lookupType v_adj
-        v_adj_copy <-
-          case t of
-            Array {} ->
-              letExp "update_val_adj_copy" . BasicOp $
-                Replicate mempty (Var v_adj)
-            _ -> pure v_adj
+        v_adj_copy <- copyIfArray v_adj
         updateSubExpAdj v v_adj_copy
         zeroes <- letSubExp "update_zero" . zeroExp =<< subExpType v
         void $
@@ -221,7 +204,8 @@ diffBasicOp pat aux e m =
       pat_adjs <- mapM lookupAdjVal (patNames pat)
       returnSweepCode $ do
         forM_ (zip pat_adjs vs) $ \(adj, v) -> do
-          adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ Slice $ map DimFix is
+          adj_t <- lookupType adj
+          adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
           updateSubExpAdj v adj_i
 
 vjpOps :: VjpOps
@@ -230,6 +214,27 @@ vjpOps =
     { vjpLambda = diffLambda,
       vjpStm = diffStm
     }
+
+-- | Transform updates on accumulators matching the given certificates into
+-- updates that write provided zero values.
+zeroOutUpdates :: [(VName, [SubExp])] -> Lambda SOACS -> Lambda SOACS
+zeroOutUpdates certs_to_zeroes lam = lam {lambdaBody = onBody $ lambdaBody lam}
+  where
+    onExp = runIdentity . mapExpM mapper
+      where
+        mapper =
+          (identityMapper :: (Monad m) => Mapper SOACS SOACS m)
+            { mapOnOp = traverseSOACStms (\_ stms -> pure $ onStms stms),
+              mapOnBody = \_ body -> pure $ onBody body
+            }
+    onStms = fmap onStm
+    onStm (Let (Pat [pe]) aux (BasicOp (UpdateAcc safety acc is _)))
+      | Acc c _ _ _ <- patElemType pe,
+        Just zero <- lookup c certs_to_zeroes =
+          Let (Pat [pe]) aux (BasicOp (UpdateAcc safety acc is zero))
+    onStm (Let pat aux e) = Let pat aux $ onExp e
+
+    onBody body = body {bodyStms = onStms $ bodyStms body}
 
 diffStm :: Stm SOACS -> ADM () -> ADM ()
 diffStm (Let pat aux (BasicOp e)) m =
@@ -278,9 +283,18 @@ diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
           ses
           (map (fmap $ diffBody adjs branches_free) cases)
           (diffBody adjs branches_free defbody)
-    zipWithM_ insAdj branches_free branches_free_adj
+    -- See Note [Array Adjoints of Match]
+    forM_ (zip branches_free branches_free_adj) $ \(v, v_adj) ->
+      insAdj v =<< copyIfArray v_adj
 diffStm (Let pat aux (Op soac)) m =
-  vjpSOAC vjpOps pat aux soac m
+  -- We add the attributes from 'aux' to every SOAC (but only SOAC) produced. We
+  -- could do this on *every* stm, but it would be very verbose.
+  censorStms (fmap addAttrs) $ vjpSOAC vjpOps pat aux soac m
+  where
+    addAttrs stm
+      | Op _ <- stmExp stm =
+          attribute (stmAuxAttrs aux) stm
+      | otherwise = stm
 diffStm (Let pat aux loop@Loop {}) m =
   diffLoop diffStms pat aux loop m
 -- See Note [Adjoints of accumulators]
@@ -294,16 +308,20 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
     free_accs <- filterM (fmap isAcc . lookupType) free_vars
     let free_vars' = free_vars \\ free_accs
     lam'' <- diffLambda' adjs free_vars' lam'
-    inputs' <- mapM renameInputLambda inputs
-    free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' lam''
+    (inputs_zeroes, inputs') <-
+      unzip <$> zipWithM renameInputLambda (chunks lengths adjs) inputs
+    let certs = map paramName $ take (length inputs) $ lambdaParams lam''
+    free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' $ zeroOutUpdates (zip certs inputs_zeroes) lam''
     zipWithM_ insAdj (arrs <> free_vars') free_adjs
   where
+    lengths = map (\(_, as, _) -> length as) inputs
     arrs = concatMap (\(_, as, _) -> as) inputs
-    renameInputLambda (shape, as, Just (f, nes)) = do
-      f' <- renameLambda f
-      pure (shape, as, Just (f', nes))
-    renameInputLambda input = pure input
-    diffLambda' res_adjs get_adjs_for (Lambda params ts body) =
+    renameInputLambda as_adj (shape, as, _) = do
+      nes_ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) as
+      zeroes <- mapM (zeroArray mempty) nes_ts
+      as' <- mapM adjVal as_adj
+      pure (map Var zeroes, (shape, as', Nothing))
+    diffLambda' res_adjs get_adjs_for (Lambda params ts body) = do
       localScope (scopeOfLParams params) $ do
         Body () stms res <- diffBody res_adjs get_adjs_for body
         let body' = Body () stms $ take (length inputs) res <> takeLast (length get_adjs_for) res
@@ -367,9 +385,15 @@ revVJP scope (Lambda params ts body) =
 -- some assumptions and lay down a basic design.
 --
 -- First, we assume that any WithAccs that occur in the program are
--- the result of previous invocations of VJP.  This means we can rely
--- on the operator having a constant adjoint (it's some kind of
--- addition).
+-- come from one of these sources:
+--
+-- - A previous instance of VJP, which means we can rely on the operator having
+--   a constant adjoint (it's addition as appropriate to the type).
+--
+-- - A scatter, meaning there is no operator.
+--
+-- (These can actually be distinguished by the presence of an operator, although
+-- we do not currently bother.)
 --
 -- Second, the adjoint of an accumulator is an array of the same type
 -- as the underlying array.  For example, the adjoint type of the
@@ -378,23 +402,38 @@ revVJP scope (Lambda params ts body) =
 -- '[]f64', '[]f32'.  Our current design assumes that adjoints are
 -- single variables.  This is fixable.
 --
+-- In the return sweep, when inserting the with_acc, we still compute the
+-- "original" accumulator result, but modified such that its initial value is
+-- the adjoint of the result of the accumulator. We also modify the update_accs
+-- of these accumulators to be with zero values. This means that the array that
+-- is produced will be equal to the adjoint of the result, except for those
+-- places that have been updated, where it will be zero. This is intuitively
+-- sensible - values that have been overwritten (and so do not contribute to the
+-- result) should obviously have zero sensitivity.
+--
 -- # Adjoint of UpdateAcc
 --
---   Consider primal code
+-- Consider primal code
 --
 --     update_acc(acc, i, v)
 --
---   Interpreted as an imperative statement, this means
+-- Interpreted as an imperative statement, this means
 --
 --     acc[i] ⊕= v
 --
---   for some '⊕'.  Normally all the compiler knows of '⊕' is that it
---   is associative and commutative, but because we assume that all
---   accumulators are the result of previous AD transformations, we
---   can assume that '⊕' actually behaves like addition - that is, has
---   unit partial derivatives.  So the return sweep is
+-- for some '⊕'.  Normally all the compiler knows of '⊕' is that it
+-- is associative and commutative, but because we assume that all
+-- accumulators are the result of previous AD transformations, we
+-- can assume that '⊕' actually behaves like addition - that is, has
+-- unit partial derivatives.  So the return sweep is
 --
---     v += acc_adj[i]
+--     v_adj += acc_adj[i]
+--
+-- Further, we modify the primal code so that it becomes
+--
+--     update_acc(acc, i, 0)
+--
+-- for some appropriate notion of zero.
 --
 -- # Adjoint of Map
 --
@@ -439,3 +478,43 @@ revVJP scope (Lambda params ts body) =
 -- our current translation rules, they will be dead code.  As long as
 -- we are careful to run dead code elimination after revVJP, we should
 -- be good.
+
+-- Note [Array Adjoints of Match]
+--
+-- Some unusual, but sadly not completely contrived, contain Match
+-- expressions that return multiple arrays, and there the arrays
+-- returned by one branch have overlapping aliases with another
+-- branch, although in different places. As an example consider this:
+--
+--   let (X,Y) = if c
+--               then (A, B)
+--               else (B, A)
+--
+-- Because our aliasing representation cannot express mutually
+-- exclusive aliases, we will consider X and Y to be aliased to each
+-- other. In practice, this means it is unlikely for X or Y to be
+-- consumed, because it would also consume the other (although it's
+-- possible for carefully written code).
+--
+-- When producing adjoints for this, it will be something like
+--
+--   let (X_adj,Y_adj) = if c
+--                       then (A_adj, B_adj)
+--                       else (B_adj, A_adj)
+--
+-- which completely reflects the primal code. However, while it is
+-- unlikely that any consumption takes place for the original primal
+-- variables, it is almost guaranteed that X_adj and Y_adj will be
+-- consumed (that is the main way we use adjoints after all), and due
+-- to the conservative aliasing, when one is consumed, so is the
+-- other! To avoid this tragic fate, we are forced to copy any
+-- array-typed adjoints returned by a Match. This can be quite costly.
+-- However:
+--
+-- 1) Futhark has pretty OK copy removal, so maybe it can get rid of
+--    these by using information not available to the AD pass.
+--
+-- 2) In many cases, arrays will have accumulator adjoints, which are
+--    not subject to this problem.
+--
+-- Issue #2228 was caused by neglecting to do this.

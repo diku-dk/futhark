@@ -3,6 +3,6 @@
 -- ==
 
 def main (arr: [](i32, i32, i32, i32, i32)) =
-  let (a,b,c,d,e) = arr[0]
+  let (a, b, c, d, e) = arr[0]
   let x = if a == 0 then 0 else b + c + d + e
-  in (x,a,b,c,d,e)
+  in (x, a, b, c, d, e)

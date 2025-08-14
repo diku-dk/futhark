@@ -11,4 +11,4 @@ def main (arr: [1]i32) : i32 =
   let v = arr[0]
   let x = assert (v != 7) 1007
   let y = assert (v != 21) 330
-  in x+y
+  in x + y

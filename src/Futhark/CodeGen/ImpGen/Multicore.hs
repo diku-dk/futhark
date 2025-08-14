@@ -155,20 +155,23 @@ compileMCOp pat (ParOp par_op op) = do
   s <- segOpString op
   let seq_task = Imp.ParallelTask seq_code
   free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
-  emit . Imp.Op $
-    Imp.SegOp s free_params seq_task par_task retvals $
-      scheduling_info (decideScheduling' op seq_code)
+  let code =
+        Imp.Op $
+          Imp.SegOp s free_params seq_task par_task retvals $
+            scheduling_info (decideScheduling' op seq_code)
+  emit $ Imp.Meta $ Imp.MetaProvenance $ taskProvenance code
+  emit code
 
 compileSegOp ::
   Pat LetDecMem ->
   SegOp () MCMem ->
   TV Int32 ->
   ImpM MCMem HostEnv Imp.Multicore Imp.MCCode
-compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
+compileSegOp pat (SegHist _ space _ kbody histops) ntasks =
   compileSegHist pat space histops kbody ntasks
-compileSegOp pat (SegScan _ space scans _ kbody) ntasks =
+compileSegOp pat (SegScan _ space _ kbody scans) ntasks =
   compileSegScan pat space scans kbody ntasks
-compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
+compileSegOp pat (SegRed _ space _ kbody reds) ntasks =
   compileSegRed pat space reds kbody ntasks
 compileSegOp pat (SegMap _ space _ kbody) _ =
   compileSegMap pat space kbody

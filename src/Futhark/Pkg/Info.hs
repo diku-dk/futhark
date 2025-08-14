@@ -167,7 +167,12 @@ revInfo gitdir path ref = do
   gitCmd_ ["-C", gitdir, "rev-parse", ref, "--"]
   [sha] <- gitCmdLines ["-C", gitdir, "rev-list", "-n1", ref]
   [time] <- gitCmdLines ["-C", gitdir, "show", "-s", "--format=%cI", ref]
-  utc <- zonedTimeToUTC <$> iso8601ParseM (T.unpack time)
+  utc <-
+    -- Git sometimes produces timestamps with Z time zone, which are
+    -- not valid ZonedTimes.
+    if 'Z' `T.elem` time
+      then iso8601ParseM (T.unpack time)
+      else zonedTimeToUTC <$> iso8601ParseM (T.unpack time)
   gm <- memoiseGetManifest getManifest'
   pure $
     PkgRevInfo

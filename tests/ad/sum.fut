@@ -11,4 +11,4 @@ entry rev [n] (xs: [n]f64) =
   vjp sum xs 1
 
 entry fwd [n] (xs: [n]f64) =
-  tabulate n (\i -> jvp sum xs (tabulate n ((==i) >-> f64.bool)))
+  tabulate n (\i -> jvp sum xs (tabulate n ((== i) >-> f64.bool)))

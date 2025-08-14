@@ -113,10 +113,10 @@ mapExpM tv (Match ses cases defbody (MatchDec ts s)) =
     <*> (MatchDec <$> mapM (mapOnBranchType tv) ts <*> pure s)
   where
     mapOnCase (Case vs body) = Case vs <$> mapOnBody tv mempty body
-mapExpM tv (Apply fname args ret loc) = do
+mapExpM tv (Apply fname args ret safety) = do
   args' <- forM args $ \(arg, d) ->
     (,) <$> mapOnSubExp tv arg <*> pure d
-  Apply fname args' <$> mapM (bitraverse (mapOnRetType tv) pure) ret <*> pure loc
+  Apply fname args' <$> mapM (bitraverse (mapOnRetType tv) pure) ret <*> pure safety
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp
     <$> ( Index
@@ -149,23 +149,23 @@ mapExpM tv (BasicOp (Replicate shape vexp)) =
   BasicOp <$> (Replicate <$> mapOnShape tv shape <*> mapOnSubExp tv vexp)
 mapExpM tv (BasicOp (Scratch t shape)) =
   BasicOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
-mapExpM tv (BasicOp (Reshape kind shape arrexp)) =
+mapExpM tv (BasicOp (Reshape arrexp newshape)) =
   BasicOp
-    <$> ( Reshape kind
-            <$> mapM (mapOnSubExp tv) shape
-            <*> mapOnVName tv arrexp
+    <$> ( Reshape
+            <$> mapOnVName tv arrexp
+            <*> mapM (mapOnSubExp tv) newshape
         )
-mapExpM tv (BasicOp (Rearrange perm e)) =
-  BasicOp <$> (Rearrange perm <$> mapOnVName tv e)
+mapExpM tv (BasicOp (Rearrange e perm)) =
+  BasicOp <$> (Rearrange <$> mapOnVName tv e <*> pure perm)
 mapExpM tv (BasicOp (Concat i (x :| ys) size)) = do
   x' <- mapOnVName tv x
   ys' <- mapM (mapOnVName tv) ys
   size' <- mapOnSubExp tv size
   pure $ BasicOp $ Concat i (x' :| ys') size'
-mapExpM tv (BasicOp (Manifest perm e)) =
-  BasicOp <$> (Manifest perm <$> mapOnVName tv e)
-mapExpM tv (BasicOp (Assert e msg loc)) =
-  BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
+mapExpM tv (BasicOp (Manifest v perm)) =
+  BasicOp <$> (Manifest <$> mapOnVName tv v <*> pure perm)
+mapExpM tv (BasicOp (Assert e msg)) =
+  BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg)
 mapExpM tv (BasicOp (Opaque op e)) =
   BasicOp <$> (Opaque op <$> mapOnSubExp tv e)
 mapExpM tv (BasicOp (UpdateAcc safety v is ses)) =
@@ -319,15 +319,15 @@ walkExpM tv (BasicOp (Replicate shape vexp)) =
   walkOnShape tv shape >> walkOnSubExp tv vexp
 walkExpM tv (BasicOp (Scratch _ shape)) =
   mapM_ (walkOnSubExp tv) shape
-walkExpM tv (BasicOp (Reshape _ shape arrexp)) =
+walkExpM tv (BasicOp (Reshape arrexp shape)) =
   mapM_ (walkOnSubExp tv) shape >> walkOnVName tv arrexp
-walkExpM tv (BasicOp (Rearrange _ e)) =
-  walkOnVName tv e
+walkExpM tv (BasicOp (Rearrange v _)) =
+  walkOnVName tv v
 walkExpM tv (BasicOp (Concat _ (x :| ys) size)) =
   walkOnVName tv x >> mapM_ (walkOnVName tv) ys >> walkOnSubExp tv size
-walkExpM tv (BasicOp (Manifest _ e)) =
-  walkOnVName tv e
-walkExpM tv (BasicOp (Assert e msg _)) =
+walkExpM tv (BasicOp (Manifest v _)) =
+  walkOnVName tv v
+walkExpM tv (BasicOp (Assert e msg)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
 walkExpM tv (BasicOp (Opaque _ e)) =
   walkOnSubExp tv e

@@ -9,7 +9,7 @@ futhark-fmt
 SYNOPSIS
 ========
 
-futhark fmt [FILES]
+futhark fmt [options...] [FILES]
 
 DESCRIPTION
 ===========
@@ -26,6 +26,10 @@ these, insert a linebreak at an arbitrary location.
 
 OPTIONS
 =======
+
+--check
+  Check if the given files are correctly formatted, and if not,
+  terminate with an error message and a nonzero exit code.
 
 -h
   Print help text to standard output and exit.

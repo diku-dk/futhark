@@ -45,10 +45,10 @@ class (ASTRep rep) => BuilderOps rep where
     Exp rep ->
     m (ExpDec rep)
   mkBodyB ::
-    (MonadBuilder m, Rep m ~ rep) =>
+    (MonadBuilder m, Rep m ~ rep, IsResult res) =>
     Stms rep ->
-    Result ->
-    m (Body rep)
+    [res] ->
+    m (GBody rep res)
   mkLetNamesB ::
     (MonadBuilder m, Rep m ~ rep) =>
     [VName] ->
@@ -63,10 +63,10 @@ class (ASTRep rep) => BuilderOps rep where
   mkExpDecB pat e = pure $ mkExpDec pat e
 
   default mkBodyB ::
-    (MonadBuilder m, Buildable rep) =>
+    (MonadBuilder m, Buildable rep, IsResult res) =>
     Stms rep ->
-    Result ->
-    m (Body rep)
+    [res] ->
+    m (GBody rep res)
   mkBodyB stms res = pure $ mkBody stms res
 
   default mkLetNamesB ::
@@ -201,10 +201,11 @@ runBodyBuilder ::
   ( Buildable rep,
     MonadFreshNames m,
     HasScope somerep m,
-    SameScope somerep rep
+    SameScope somerep rep,
+    IsResult res
   ) =>
-  Builder rep Result ->
-  m (Body rep)
+  Builder rep [res] ->
+  m (GBody rep res)
 runBodyBuilder =
   fmap (uncurry $ flip insertStms) . runBuilder . fmap (mkBody mempty)
 

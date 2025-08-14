@@ -12,5 +12,5 @@
 
 def main (A: *[5]i64) : i64 =
   let (x, y) = if A[0] == 0 then (A[1], 42) else (A[2], 1337)
-  let A' = map (+y) A
+  let A' = map (+ y) A
   in x + A'[4]

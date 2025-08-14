@@ -53,7 +53,7 @@ compileProg version =
         mempty
         operations
         generateBoilerplate
-        ""
+        "#include <pthread.h>\n"
         (DefaultSpace, [DefaultSpace])
         cliOptions
     )
@@ -138,7 +138,7 @@ compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
   where
     field name (ct, Prim _) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=(($ty:ct*)&$id:name);
-               $escstm:("#if ISPC")
+               $escstm:("#if defined(ISPC)")
                $id:struct.$id:(closureRetvalStructField name)+= programIndex;
                $escstm:("#endif")|]
     field name (_, MemBlock) =
@@ -203,6 +203,7 @@ mcMemToCType v space = do
 benchmarkCode :: Name -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
 benchmarkCode name code = do
   event <- newVName "event"
+  provenance <- GC.provenanceExp
   pure
     [C.citems|
      struct mc_event* $id:event = mc_event_new(ctx);
@@ -215,7 +216,8 @@ benchmarkCode name code = do
        lock_lock(&ctx->event_list_lock);
        add_event(ctx,
                  $string:(nameToString name),
-                 strdup("nothing further"),
+                 $exp:provenance,
+                 NULL,
                  $id:event,
                  (typename event_report_fn)mc_event_report);
        lock_unlock(&ctx->event_list_lock);

@@ -48,24 +48,25 @@ data EvSummary = EvSummary
 tabulateEvents :: [ProfilingEvent] -> T.Text
 tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
   where
-    pair (ProfilingEvent name dur _) = (name, EvSummary 1 dur dur dur)
+    pair (ProfilingEvent name dur _ _details) = (name, EvSummary 1 dur dur dur)
     comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
       EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
     numpad = 15
     mkRows rows =
       let longest = foldl max numpad $ map (T.length . fst) rows
+          total = sum $ map (evSum . snd) rows
           header = headerRow longest
           splitter = T.map (const '-') header
           bottom =
             T.unwords
               [ showText (sum (map (evCount . snd) rows)),
                 "events with a total runtime of",
-                T.pack $ printf "%.2fμs" $ sum $ map (evSum . snd) rows
+                T.pack $ printf "%.2fμs" total
               ]
        in T.unlines $
             header
               : splitter
-              : map (mkRow longest) rows
+              : map (mkRow longest total) rows
                 <> [splitter, bottom]
     headerRow longest =
       T.unwords
@@ -74,23 +75,28 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
           padLeft numpad "sum",
           padLeft numpad "avg",
           padLeft numpad "min",
-          padLeft numpad "max"
+          padLeft numpad "max",
+          padLeft numpad "fraction"
         ]
-    mkRow longest (name, ev) =
+    mkRow longest total (name, ev) =
       T.unwords
         [ padRight longest name,
           padLeft numpad (showText (evCount ev)),
           padLeft numpad $ T.pack $ printf "%.2fμs" (evSum ev),
           padLeft numpad $ T.pack $ printf "%.2fμs" $ evSum ev / fromInteger (evCount ev),
           padLeft numpad $ T.pack $ printf "%.2fμs" (evMin ev),
-          padLeft numpad $ T.pack $ printf "%.2fμs" (evMax ev)
+          padLeft numpad $ T.pack $ printf "%.2fμs" (evMax ev),
+          padLeft numpad $ T.pack $ printf "%.4f" (evSum ev / total)
         ]
 
 timeline :: [ProfilingEvent] -> T.Text
 timeline = T.unlines . L.intercalate [""] . map onEvent
   where
-    onEvent (ProfilingEvent name duration description) =
-      [name, "Duration: " <> showText duration <> " μs"] <> T.lines description
+    onEvent (ProfilingEvent name duration provenance _details) =
+      [ name,
+        "Duration: " <> showText duration <> " μs",
+        "At: " <> provenance
+      ]
 
 data TargetFiles = TargetFiles
   { summaryFile :: FilePath,

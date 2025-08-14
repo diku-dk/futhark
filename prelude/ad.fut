@@ -55,23 +55,23 @@
 -- Both `jvp` and `vjp` work by transforming the program to carry
 -- along extra information associated with each scalar value.
 --
--- In the case of `vjp`, this extra information takes the form of an
+-- In the case of `jvp`, this extra information takes the form of an
 -- additional scalar representing the tangent, which is then
 -- propagated in each scalar computation using essentially the [chain
 -- rule](https://en.wikipedia.org/wiki/Chain_rule). Therefore, `jvp`
 -- has a memory overhead of approximately *2x*, and a computational
 -- overhead of slightly more, but usually less than *4x*.
 --
--- In the case of `jvp`, since our starting point is a *cotangent*,
+-- In the case of `vjp`, since our starting point is a *cotangent*,
 -- the function is essentially first run forward, then backwards (the
 -- *return sweep*) to propagate the cotangent. During the return
 -- sweep, all intermediate results computed during the forward sweep
 -- must still be available, and must therefore be stored in memory
--- during the forward sweep. This means that the memory usage of `jvp`
--- is essentially proportional to the number of sequential steps of
--- the original function (essentially turning *time* into *space*).
--- The compiler does a nontrivial amount of optimisation to ameliorate
--- this overhead (see [AD for an Array Language with Nested
+-- during the forward sweep. This means that the memory usage of `vjp`
+-- is proportional to the number of sequential steps of the original
+-- function (essentially turning *time* into *space*). The compiler
+-- does a nontrivial amount of optimisation to ameliorate this
+-- overhead (see [AD for an Array Language with Nested
 -- Parallelism](https://futhark-lang.org/publications/sc22-ad.pdf)),
 -- but it can still be substantial for programs with deep sequential
 -- loops.
@@ -84,6 +84,11 @@
 -- differentiable if its results are computed using a composition of
 -- primitive floating-point operations, without ever converting to or
 -- from integers.
+--
+-- Note that a function whose input or output is a sum type with more
+-- than one constructor is *not* differentiable (or at least the
+-- sum-typed part is not). This is because the choice of constructor
+-- is not a continuous quantity.
 --
 -- ## Limitations
 --

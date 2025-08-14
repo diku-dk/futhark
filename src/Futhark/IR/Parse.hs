@@ -27,11 +27,13 @@ import Data.Char (isAlpha)
 import Data.Functor
 import Data.List (singleton)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Loc qualified as L
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Void
 import Futhark.Analysis.PrimExp.Parse
+import Futhark.FreshNames (VNameSource (..))
 import Futhark.IR
 import Futhark.IR.GPU (GPU)
 import Futhark.IR.GPU.Op qualified as GPU
@@ -238,11 +240,30 @@ pErrorMsgPart =
 pErrorMsg :: Parser (ErrorMsg SubExp)
 pErrorMsg = ErrorMsg <$> braces (pErrorMsgPart `sepBy` pComma)
 
-pSrcLoc :: Parser SrcLoc
-pSrcLoc = pStringLiteral $> mempty -- FIXME
+lInt :: Parser Int
+lInt = lexeme L.decimal
 
-pErrorLoc :: Parser (SrcLoc, [SrcLoc])
-pErrorLoc = (,mempty) <$> pSrcLoc
+pPos :: Parser L.Pos
+pPos =
+  L.Pos
+    <$> manyTill L.charLiteral (char ':')
+    <*> lInt
+    <*> (char ':' *> lInt)
+    <*> pure (-1) -- Cannot recover offset.
+
+pLocStr :: Parser Loc
+pLocStr = do
+  start <- pPos
+  void $ char '-'
+  end <- do
+    x <- lInt
+    choice
+      [ do
+          y <- char ':' *> lInt
+          pure $ L.Pos (L.posFile start) x y (-1),
+        pure $ L.Pos (L.posFile start) (L.posLine start) x (-1)
+      ]
+  pure $ L.Loc start end
 
 pIota :: Parser BasicOp
 pIota =
@@ -260,6 +281,12 @@ pIota =
               <*> pure t
           )
 
+pDimSplice :: Parser (DimSplice SubExp)
+pDimSplice = DimSplice <$> pInt <* lexeme "::" <*> pInt <* lexeme "=>" <*> pShape
+
+pNewShape :: Parser (NewShape SubExp)
+pNewShape = parens $ NewShape <$> (pDimSplice `sepBy` pComma) <* pSemi <*> pShape
+
 pBasicOp :: Parser BasicOp
 pBasicOp =
   choice
@@ -268,29 +295,19 @@ pBasicOp =
         $> uncurry (Opaque . OpaqueTrace)
         <*> parens ((,) <$> pStringLiteral <* pComma <*> pSubExp),
       keyword "copy" $> Replicate mempty . Var <*> parens pVName,
-      keyword "assert"
-        *> parens
-          ( Assert
-              <$> pSubExp
-              <* pComma
-              <*> pErrorMsg
-              <* pComma
-              <*> pErrorLoc
-          ),
+      keyword "assert" *> parens (Assert <$> pSubExp <* pComma <*> pErrorMsg),
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
       keyword "reshape"
-        *> parens (Reshape ReshapeArbitrary <$> pShape <* pComma <*> pVName),
-      keyword "coerce"
-        *> parens (Reshape ReshapeCoerce <$> pShape <* pComma <*> pVName),
+        *> parens (Reshape <$> pVName <* pComma <*> pNewShape),
       keyword "scratch"
         *> parens (Scratch <$> pPrimType <*> many (pComma *> pSubExp)),
       keyword "rearrange"
         *> parens
-          (Rearrange <$> parens (pInt `sepBy` pComma) <* pComma <*> pVName),
+          (Rearrange <$> pVName <* pComma <*> parens (pInt `sepBy` pComma)),
       keyword "manifest"
         *> parens
-          (Manifest <$> parens (pInt `sepBy` pComma) <* pComma <*> pVName),
+          (Manifest <$> pVName <* pComma <*> parens (pInt `sepBy` pComma)),
       keyword "concat" *> do
         d <- "@" *> L.decimal
         parens $ do
@@ -337,6 +354,8 @@ pBasicOp =
       pConvOp "btoi" (const BToI) (keyword "bool") pIntType,
       pConvOp "ftob" (const . FToB) pFloatType (keyword "bool"),
       pConvOp "btof" (const BToF) (keyword "bool") pFloatType,
+      pConvOp "fptobits" (const . FPToBits) pFloatType pIntType,
+      pConvOp "bitstofp" (const BitsToFP) pIntType pFloatType,
       --
       pIndex,
       pFlatIndex,
@@ -481,7 +500,7 @@ pApply pr =
         <*> parens (pArg `sepBy` pComma)
         <* pColon
         <*> pRetTypes pr
-        <*> pure (safety, mempty, mempty)
+        <*> pure safety
 
     pArg =
       choice
@@ -583,11 +602,21 @@ pCerts =
 pSubExpRes :: Parser SubExpRes
 pSubExpRes = SubExpRes <$> pCerts <*> pSubExp
 
+pProvenance :: Parser Provenance
+pProvenance =
+  choice
+    [ lexeme $ between (char '"') (char '"') $ do
+        l <- pLocStr `sepBy1` "->"
+        pure $ Provenance (init l) (last l),
+      pure mempty
+    ]
+
 pStm :: PR rep -> Parser (Stm rep)
-pStm pr =
-  keyword "let" $> Let <*> pPat pr <* pEqual <*> pStmAux <*> pExp pr
+pStm pr = do
+  loc <- pProvenance
+  keyword "let" $> Let <*> pPat pr <* pEqual <*> pStmAux loc <*> pExp pr
   where
-    pStmAux = flip StmAux <$> pAttrs <*> pCerts <*> pure (pExpDec pr)
+    pStmAux loc = flip StmAux <$> pAttrs <*> pCerts <*> pure loc <*> pure (pExpDec pr)
 
 pStms :: PR rep -> Parser (Stms rep)
 pStms pr = stmsFromList <$> many (pStm pr)
@@ -694,6 +723,9 @@ pOpaqueType =
 pOpaqueTypes :: Parser OpaqueTypes
 pOpaqueTypes = keyword "types" $> OpaqueTypes <*> braces (many pOpaqueType)
 
+pVNameSource :: Parser VNameSource
+pVNameSource = keyword "name_source" *> (VNameSource <$> braces pInt)
+
 pProg :: PR rep -> Parser (Prog rep)
 pProg pr =
   Prog
@@ -702,6 +734,9 @@ pProg pr =
     <*> many (pFunDef pr)
   where
     noTypes = OpaqueTypes mempty
+
+pStateAndProg :: PR rep -> Parser (VNameSource, Prog rep)
+pStateAndProg pr = (,) <$> (pVNameSource <|> pure (VNameSource 0)) <*> pProg pr
 
 pSOAC :: PR rep -> Parser (SOAC.SOAC rep)
 pSOAC pr =
@@ -712,7 +747,6 @@ pSOAC pr =
       keyword "screma" *> pScrema pScremaForm,
       keyword "vjp" *> pVJP,
       keyword "jvp" *> pJVP,
-      pScatter,
       pHist,
       pStream
     ]
@@ -746,20 +780,6 @@ pSOAC pr =
         <*> pure []
     pMapForm =
       SOAC.ScremaForm <$> pLambda pr <*> pure mempty <*> pure mempty
-    pScatter =
-      keyword "scatter"
-        *> parens
-          ( SOAC.Scatter
-              <$> pSubExp
-              <* pComma
-              <*> braces (pVName `sepBy` pComma)
-              <* pComma
-              <*> many (pDest <* pComma)
-              <*> pLambda pr
-          )
-      where
-        pDest =
-          parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
     pHist =
       keyword "hist"
         *> parens
@@ -885,11 +905,6 @@ pKernelResult = do
           ]
         <*> pure cs
         <*> pSubExp,
-      try $
-        SegOp.WriteReturns cs
-          <$> pVName
-          <* keyword "with"
-          <*> parens (pWrite `sepBy` pComma),
       try "tile"
         *> parens (SegOp.TileReturns cs <$> (pTile `sepBy` pComma))
         <*> pVName,
@@ -905,11 +920,10 @@ pKernelResult = do
         blk_tile <- pSubExp <* pAsterisk
         reg_tile <- pSubExp
         pure (dim, blk_tile, reg_tile)
-    pWrite = (,) <$> pSlice <* pEqual <*> pSubExp
 
 pKernelBody :: PR rep -> Parser (SegOp.KernelBody rep)
 pKernelBody pr =
-  SegOp.KernelBody (pBodyDec pr)
+  Body (pBodyDec pr)
     <$> pStms pr
     <* keyword "return"
     <*> braces (pKernelResult `sepBy` pComma)
@@ -923,18 +937,10 @@ pSegOp pr pLvl =
       keyword "seghist" *> pSegHist
     ]
   where
-    pSegMap =
-      SegOp.SegMap
-        <$> pLvl
-        <*> pSegSpace
-        <* pColon
-        <*> pTypes
-        <*> braces (pKernelBody pr)
-    pSegOp' f p =
+    pSegOp' f =
       f
         <$> pLvl
         <*> pSegSpace
-        <*> parens (p `sepBy` pComma)
         <* pColon
         <*> pTypes
         <*> braces (pKernelBody pr)
@@ -957,9 +963,10 @@ pSegOp pr pLvl =
         <*> pShape
         <* pComma
         <*> pLambda pr
-    pSegRed = pSegOp' SegOp.SegRed pSegBinOp
-    pSegScan = pSegOp' SegOp.SegScan pSegBinOp
-    pSegHist = pSegOp' SegOp.SegHist pHistOp
+    pSegMap = pSegOp' SegOp.SegMap
+    pSegRed = pSegOp' SegOp.SegRed <*> parens (pSegBinOp `sepBy` pComma)
+    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma)
+    pSegHist = pSegOp' SegOp.SegHist <*> parens (pHistOp `sepBy` pComma)
 
 pSegLevel :: Parser GPU.SegLevel
 pSegLevel =
@@ -1151,28 +1158,28 @@ parseFull p fname s =
   either (Left . T.pack . errorBundlePretty) Right $
     parse (whitespace *> p <* eof) fname s
 
-parseRep :: PR rep -> FilePath -> T.Text -> Either T.Text (Prog rep)
-parseRep = parseFull . pProg
+parseRep :: PR rep -> FilePath -> T.Text -> Either T.Text (VNameSource, Prog rep)
+parseRep = parseFull . pStateAndProg
 
-parseSOACS :: FilePath -> T.Text -> Either T.Text (Prog SOACS)
+parseSOACS :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog SOACS)
 parseSOACS = parseRep prSOACS
 
-parseSeq :: FilePath -> T.Text -> Either T.Text (Prog Seq)
+parseSeq :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog Seq)
 parseSeq = parseRep prSeq
 
-parseSeqMem :: FilePath -> T.Text -> Either T.Text (Prog SeqMem)
+parseSeqMem :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog SeqMem)
 parseSeqMem = parseRep prSeqMem
 
-parseGPU :: FilePath -> T.Text -> Either T.Text (Prog GPU)
+parseGPU :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog GPU)
 parseGPU = parseRep prGPU
 
-parseGPUMem :: FilePath -> T.Text -> Either T.Text (Prog GPUMem)
+parseGPUMem :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog GPUMem)
 parseGPUMem = parseRep prGPUMem
 
-parseMC :: FilePath -> T.Text -> Either T.Text (Prog MC)
+parseMC :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog MC)
 parseMC = parseRep prMC
 
-parseMCMem :: FilePath -> T.Text -> Either T.Text (Prog MCMem)
+parseMCMem :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog MCMem)
 parseMCMem = parseRep prMCMem
 
 --- Fragment parsers

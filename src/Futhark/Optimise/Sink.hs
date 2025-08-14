@@ -77,12 +77,11 @@ multiplicity :: (Constraints rep) => Stm rep -> M.Map VName Int
 multiplicity stm =
   case stmExp stm of
     Match cond cases defbody _ ->
-      foldl comb mempty $
-        free 1 cond
-          : free 1 defbody
-          : map (free 1 . caseBody) cases
+      foldl' comb mempty $
+        free 1 cond : free 1 defbody : map (free 1 . caseBody) cases
     Op {} -> free 2 stm
     Loop {} -> free 2 stm
+    WithAcc {} -> free 2 stm
     _ -> free 1 stm
   where
     free k x = M.fromList $ map (,k) $ namesToList $ freeIn x
@@ -209,9 +208,9 @@ optimiseKernelBody ::
   (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (KernelBody rep)
-optimiseKernelBody onOp vtable sinking (KernelBody attr stms res) =
+optimiseKernelBody onOp vtable sinking (Body attr stms res) =
   let (stms', sunk) = optimiseStms onOp vtable sinking stms $ freeIn res
-   in (KernelBody attr stms' res, sunk)
+   in (Body attr stms' res, sunk)
 
 optimiseSegOp ::
   (Constraints rep) =>

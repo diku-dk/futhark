@@ -265,7 +265,7 @@ basicFwd pat aux op = do
                 pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
            in x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
     CmpOp {} ->
-      addStm $ Let pat_tan aux $ BasicOp op
+      addStm $ Let pat_tan aux $ zeroExp $ Prim Bool
     ConvOp cop x -> do
       x_tan <- tangent x
       addStm $ Let pat_tan aux $ BasicOp $ ConvOp cop x_tan
@@ -284,11 +284,11 @@ basicFwd pat aux op = do
       arrs_tans <- mapM tangent arrs
       r <- shapeRank <$> askShape
       addStm $ Let pat_tan aux $ BasicOp $ Concat (d + r) (arr_tan :| arrs_tans) w
-    Manifest ds arr -> do
+    Manifest arr ds -> do
       arr_tan <- tangent arr
       r <- shapeRank <$> askShape
       addStm . Let pat_tan aux . BasicOp $
-        Manifest ([0 .. r - 1] ++ map (+ r) ds) arr_tan
+        Manifest arr_tan ([0 .. r - 1] ++ map (+ r) ds)
     Iota n _ _ it -> do
       shape <- askShape
       addStm . Let pat_tan aux . BasicOp $
@@ -299,15 +299,15 @@ basicFwd pat aux op = do
     Scratch t shape -> do
       tan_shape <- askShape
       addStm $ Let pat_tan aux $ BasicOp $ Scratch t $ shapeDims tan_shape <> shape
-    Reshape k reshape arr -> do
+    Reshape arr reshape -> do
       arr_tan <- tangent arr
       shape <- askShape
-      addStm $ Let pat_tan aux $ BasicOp $ Reshape k (shape <> reshape) arr_tan
-    Rearrange perm arr -> do
+      addStm $ Let pat_tan aux $ BasicOp $ Reshape arr_tan (newshapeInner shape reshape)
+    Rearrange arr perm -> do
       arr_tan <- tangent arr
       r <- shapeRank <$> askShape
       addStm . Let pat_tan aux . BasicOp $
-        Rearrange ([0 .. r - 1] <> map (+ r) perm) arr_tan
+        Rearrange arr_tan ([0 .. r - 1] <> map (+ r) perm)
     _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
 
 fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)
@@ -405,32 +405,6 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
-fwdSOAC (Pat pes) aux (Scatter w ivs as lam) = do
-  as_tan <- mapM (\(s, n, a) -> do a_tan <- tangent a; pure (s, n, a_tan)) as
-  pes_tan <- mapM newTan pes
-  ivs' <- bundleTangents ivs
-  let (as_ws, as_ns, _as_vs) = unzip3 as
-      n_indices = sum $ zipWith (*) as_ns $ map length as_ws
-  lam' <- fwdScatterLambda n_indices lam
-  let s = Let (Pat (pes ++ pes_tan)) aux $ Op $ Scatter w ivs' (as ++ as_tan) lam'
-  addStm s
-  where
-    fwdScatterLambda :: Int -> Lambda SOACS -> ADM (Lambda SOACS)
-    fwdScatterLambda n_indices (Lambda params ret body) = do
-      params' <- bundleNewList params
-      ret_tan <- mapM tangent $ drop n_indices ret
-      body' <- fwdBodyScatter n_indices body
-      let indices = concat $ replicate 2 $ take n_indices ret
-          ret' = indices ++ drop n_indices ret ++ ret_tan
-      pure $ Lambda params' ret' body'
-    fwdBodyScatter :: Int -> Body SOACS -> ADM (Body SOACS)
-    fwdBodyScatter n_indices (Body _ stms res) = do
-      (res_tan, stms') <- collectStms $ do
-        mapM_ fwdStm stms
-        mapM tangent $ drop n_indices res
-      let indices = concat $ replicate 2 $ take n_indices res
-          res' = indices ++ drop n_indices res ++ res_tan
-      pure $ mkBody stms' res'
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =

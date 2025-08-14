@@ -109,14 +109,13 @@ intrablockParallelise knest lam = runMaybeT $ do
       space <- SegSpace <$> newVName "phys_tblock_id" <*> pure ispace
       pure (intra_avail_par, space, read_input_stms)
 
-  let kbody' = kbody {kernelBodyStms = read_input_stms <> kernelBodyStms kbody}
+  let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
 
   let nested_pat = loopNestingPat first_nest
       rts = map (length ispace `stripArray`) $ patTypes nested_pat
       grid = KernelGrid (Count num_tblocks) (Count $ Var tblock_size)
       lvl = SegBlock SegNoVirt (Just grid)
-      kstm =
-        Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
+      kstm = Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
   pure
@@ -295,33 +294,6 @@ intrablockStm stm@(Let pat aux e) = do
               replaceSets (IntraAcc x y log) =
                 IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
           censor replaceSets $ intrablockStms stream_stms
-    Op (Scatter w ivs dests lam) -> do
-      write_i <- newVName "write_i"
-      space <- mkSegSpace [(write_i, w)]
-
-      let lam' = soacsLambdaToGPU lam
-          krets = do
-            (_a_w, a, is_vs) <-
-              groupScatterResults dests $ bodyResult $ lambdaBody lam'
-            let cs =
-                  foldMap (foldMap resCerts . fst) is_vs
-                    <> foldMap (resCerts . snd) is_vs
-                is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-            pure $ WriteReturns cs a is_vs'
-          inputs = do
-            (p, p_a) <- zip (lambdaParams lam') ivs
-            pure $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
-
-      kstms <- runBuilder_ $
-        localScope (scopeOfSegSpace space) $ do
-          mapM_ readKernelInput inputs
-          addStms $ bodyStms $ lambdaBody lam'
-
-      certifying (stmAuxCerts aux) $ do
-        let body = KernelBody () kstms krets
-        letBind pat $ Op $ SegOp $ SegMap lvl space (patTypes pat) body
-
-      parallelMin [w]
     _ ->
       addStm $ soacsStmToGPU stm
 
@@ -339,7 +311,7 @@ intrablockParalleliseBody body = do
     ( S.toList min_ws,
       S.toList avail_ws,
       log,
-      KernelBody () kstms $ map ret $ bodyResult body
+      Body () kstms $ map ret $ bodyResult body
     )
   where
     ret (SubExpRes cs se) = Returns ResultMaySimplify cs se

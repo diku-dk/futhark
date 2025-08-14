@@ -130,20 +130,9 @@ mapout is n w = do
 
   letExp "is'" $ Op $ Screma n (pure is) $ mapSOAC is'_lam
 
-multiScatter :: SubExp -> [VName] -> VName -> [VName] -> ADM [VName]
-multiScatter n dst is vs = do
-  tps <- traverse lookupType vs
-  par_i <- newParam "i" $ Prim int64
-  scatter_params <- traverse (newParam "scatter_param" . rowType) tps
-  scatter_lam <-
-    mkLambda (par_i : scatter_params) $
-      fmap subExpsRes . mapM (letSubExp "scatter_map_res") =<< do
-        p1 <- replicateM (length scatter_params) $ eParam par_i
-        p2 <- traverse eParam scatter_params
-        pure $ p1 <> p2
-
-  let spec = zipWith (\t -> (,,) (Shape $ pure $ arraySize 0 t) 1) tps dst
-  letTupExp "scatter_res" . Op $ Scatter n (is : vs) spec scatter_lam
+multiScatter :: [VName] -> VName -> [VName] -> ADM [VName]
+multiScatter dst is vs =
+  doScatter "scatter_res" 1 dst (is : vs) $ pure . map (Var . paramName)
 
 multiIndex :: [VName] -> [DimIndex SubExp] -> ADM [VName]
 multiIndex vs s = do
@@ -304,13 +293,15 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
   scatter_inps <- do
     -- traverse (letExp "flat" . BasicOp . Reshape [DimNew q]) $ inds ++ [vs_bar_p]
     -- ToDo: Cosmin asks: is the below the correct translation of the line above?
-    traverse (letExp "flat" . BasicOp . Reshape ReshapeArbitrary (Shape [q])) $
-      inds ++ [vs_bar_p]
+    forM (inds ++ [vs_bar_p]) $ \v -> do
+      v_t <- lookupType v
+      letExp "flat" . BasicOp . Reshape v $
+        reshapeAll (arrayShape v_t) (Shape [q])
 
-  f'' <- mkIdentityLambda $ replicate nr_dims (Prim int64) ++ [Prim t]
   vs_bar' <-
-    letExp (baseString vs <> "_bar") . Op $
-      Scatter q scatter_inps [(Shape vs_dims, 1, vs_bar)] f''
+    fmap head $
+      doScatter (baseString vs <> "_bar") nr_dims [vs_bar] scatter_inps $
+        pure . map (Var . paramName)
   insAdj vs vs_bar'
   where
     mk_indices :: [SubExp] -> [SubExp] -> ADM [VName]
@@ -553,8 +544,8 @@ diffVecHist ops x aux n op nes is vss w rf dst m = do
     rank <- arrayRank <$> lookupType vss
     let dims = [1, 0] ++ drop 2 [0 .. rank - 1]
 
-    dstT <- letExp "dstT" $ BasicOp $ Rearrange dims dst
-    vssT <- letExp "vssT" $ BasicOp $ Rearrange dims vss
+    dstT <- letExp "dstT" $ BasicOp $ Rearrange dst dims
+    vssT <- letExp "vssT" $ BasicOp $ Rearrange vss dims
     t_dstT <- lookupType dstT
     t_vssT <- lookupType vssT
     t_nes <- lookupType nes
@@ -578,11 +569,10 @@ diffVecHist ops x aux n op nes is vss w rf dst m = do
               [HistOp (Shape [w]) rf [dst_col_cpy] [Var $ paramName ne] op]
               f
     histT <-
-      letExp "histT" $
-        Op $
-          Screma (arraySize 0 t_dstT) [dstT, vssT, nes] $
-            mapSOAC map_lam
-    auxing aux . letBindNames [x] . BasicOp $ Rearrange dims histT
+      letExp "histT" . Op $
+        Screma (arraySize 0 t_dstT) [dstT, vssT, nes] $
+          mapSOAC map_lam
+    auxing aux . letBindNames [x] . BasicOp $ Rearrange histT dims
   foldr (vjpStm ops) m stms
 
 --
@@ -683,7 +673,7 @@ radixSortStep xs tps bit n w = do
   nis <- letExp "nis" $ Op $ Screma n (bins : offsets) $ mapSOAC map_lam
 
   scatter_dst <- traverse (\t -> letExp "scatter_dst" $ BasicOp $ Scratch (elemType t) (arrayDims t)) tps
-  multiScatter n scatter_dst nis xs
+  multiScatter scatter_dst nis xs
   where
     iConst c = eSubExp $ intConst Int64 c
 
@@ -934,7 +924,7 @@ diffHist ops xs aux n lam0 ne as w rf dst m = do
       =<< eLambda f_adj (map (eSubExp . Var) $ ls_arr <> sas <> rs_arr)
 
   scatter_dst <- traverse (\t -> letExp "scatter_dst" $ BasicOp $ Scratch (elemType t) (arrayDims t)) as_type
-  as_bar <- multiScatter n scatter_dst siota sas_bar
+  as_bar <- multiScatter scatter_dst siota sas_bar
 
   zipWithM_ updateAdj (tail as) as_bar
   where

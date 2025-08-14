@@ -474,9 +474,9 @@ unifyWith onDims usage = subunify False
             | uncurry (<) $ swap ord (uniqueness b2) (uniqueness b1) -> do
                 unifyError usage mempty bcs . withIndexLink "unify-return-uniqueness" $
                   "Return types"
-                    </> indent 2 (pretty d1 <> pretty b1)
+                    </> indent 2 (pretty b1)
                     </> "and"
-                    </> indent 2 (pretty d2 <> pretty b2)
+                    </> indent 2 (pretty b2)
                     </> "have incompatible uniqueness."
             | otherwise -> do
                 -- Introduce the existentials as size variables so they
@@ -557,7 +557,7 @@ unifySizes usage bcs bound nonrigid e1 (Var v2 _ _)
     not (anyBound bound e1) || (qualLeaf v2 `elem` bound) =
       linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
 unifySizes usage bcs _ _ e1 e2 = do
-  notes <- (<>) <$> dimNotes usage e2 <*> dimNotes usage e2
+  notes <- (<>) <$> dimNotes usage e1 <*> dimNotes usage e2
   unifyError usage notes bcs $
     "Sizes"
       <+> dquotes (pretty e1)

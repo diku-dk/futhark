@@ -67,13 +67,13 @@ type MemAliasesM inner a = Reader (Env inner) a
 
 analyzeHostOp :: MemAliases -> HostOp NoOp GPUMem -> MemAliasesM (HostOp NoOp GPUMem) MemAliases
 analyzeHostOp m (SegOp (SegMap _ _ _ kbody)) =
-  analyzeStms (kernelBodyStms kbody) m
-analyzeHostOp m (SegOp (SegRed _ _ _ _ kbody)) =
-  analyzeStms (kernelBodyStms kbody) m
-analyzeHostOp m (SegOp (SegScan _ _ _ _ kbody)) =
-  analyzeStms (kernelBodyStms kbody) m
-analyzeHostOp m (SegOp (SegHist _ _ _ _ kbody)) =
-  analyzeStms (kernelBodyStms kbody) m
+  analyzeStms (bodyStms kbody) m
+analyzeHostOp m (SegOp (SegRed _ _ _ kbody _)) =
+  analyzeStms (bodyStms kbody) m
+analyzeHostOp m (SegOp (SegScan _ _ _ kbody _)) =
+  analyzeStms (bodyStms kbody) m
+analyzeHostOp m (SegOp (SegHist _ _ _ kbody _)) =
+  analyzeStms (bodyStms kbody) m
 analyzeHostOp m SizeOp {} = pure m
 analyzeHostOp m GPUBody {} = pure m
 analyzeHostOp m (OtherOp NoOp) = pure m

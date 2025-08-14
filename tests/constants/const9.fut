@@ -6,7 +6,7 @@
 -- ==
 -- structure { Screma 2 }
 
-def xs = map (+3) (iota 1000)
+def xs = map (+ 3) (iota 1000)
 def ys = copy xs with [4] = 0
 def v = i64.sum ys
 

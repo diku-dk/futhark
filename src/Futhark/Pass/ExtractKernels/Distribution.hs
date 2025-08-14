@@ -252,7 +252,7 @@ constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
       pat = loopNestingPat first_nest
       rts = map (stripArray (length ispace)) $ patTypes pat
 
-  inner_body' <- fmap (uncurry (flip (KernelBody ()))) $
+  inner_body' <- fmap (uncurry (flip (Body ()))) $
     runBuilder . localScope ispace_scope $ do
       mapM_ readKernelInput $ filter inputIsUsed inps
       res <- bodyBind inner_body
@@ -513,8 +513,8 @@ removeIdentityMappingGeneral bound pat res =
         expandTarget
       )
   where
-    isIdentity (patElem, SubExpRes cs (Var v))
-      | v `notNameIn` bound = Left (patElem, (cs, v))
+    isIdentity (patElem, SubExpRes _ (Var v))
+      | v `notNameIn` bound = Left (patElem, (mempty, v))
     isIdentity x = Right x
 
 removeIdentityMappingFromNesting ::

@@ -136,11 +136,10 @@ optimizeStm out stm = do
                 let e' = BasicOp $ Replicate (Shape dims) (Var v')
                 let repl = Let pat' (stmAux stm) e'
 
-                let aux = StmAux mempty mempty ()
                 let slice = map sliceDim (arrayDims arr_t)
                 let slice' = slice ++ [DimFix $ intConst Int64 0]
                 let idx = BasicOp $ Index n' (Slice slice')
-                let index = Let (stmPat stm) aux idx
+                let index = Let (stmPat stm) (defAux ()) idx
 
                 pure (out |> repl |> index)
       BasicOp {} ->
@@ -327,16 +326,19 @@ optimizeWithAccInput acc (shape, arrs, Just (op, nes)) = do
 -- that depends on migrated scalars.
 optimizeHostOp :: HostOp op GPU -> ReduceM (HostOp op GPU)
 optimizeHostOp (SegOp (SegMap lvl space types kbody)) =
-  SegOp . SegMap lvl space types <$> addReadsToKernelBody kbody
-optimizeHostOp (SegOp (SegRed lvl space ops types kbody)) = do
+  SegOp . SegMap lvl space types <$> addReadsToBody kbody
+optimizeHostOp (SegOp (SegRed lvl space types kbody ops)) = do
   ops' <- mapM addReadsToSegBinOp ops
-  SegOp . SegRed lvl space ops' types <$> addReadsToKernelBody kbody
-optimizeHostOp (SegOp (SegScan lvl space ops types kbody)) = do
+  kbody' <- addReadsToBody kbody
+  pure . SegOp $ SegRed lvl space types kbody' ops'
+optimizeHostOp (SegOp (SegScan lvl space types kbody ops)) = do
   ops' <- mapM addReadsToSegBinOp ops
-  SegOp . SegScan lvl space ops' types <$> addReadsToKernelBody kbody
-optimizeHostOp (SegOp (SegHist lvl space ops types kbody)) = do
+  kbody' <- addReadsToBody kbody
+  pure . SegOp $ SegScan lvl space types kbody' ops'
+optimizeHostOp (SegOp (SegHist lvl space types kbody ops)) = do
   ops' <- mapM addReadsToHistOp ops
-  SegOp . SegHist lvl space ops' types <$> addReadsToKernelBody kbody
+  kbody' <- addReadsToBody kbody
+  pure . SegOp $ SegHist lvl space types kbody' ops'
 optimizeHostOp (SizeOp op) =
   pure (SizeOp op)
 optimizeHostOp OtherOp {} =
@@ -476,7 +478,7 @@ eIndex arr = BasicOp $ Index arr (Slice [DimFix $ intConst Int64 0])
 
 -- | A shorthand for binding a single variable to an expression.
 bind :: PatElem Type -> Exp GPU -> Stm GPU
-bind pe = Let (Pat [pe]) (StmAux mempty mempty ())
+bind pe = Let (Pat [pe]) (defAux ())
 
 -- | Returns the array alias of @se@ if it is a variable that has been migrated
 -- to device. Otherwise returns @Nothing@.
@@ -603,7 +605,7 @@ inGPUBody m = do
 
   let pes = patElems (stmPat stm)
   pat <- Pat <$> mapM arrayizePatElem pes
-  let aux = StmAux mempty mempty ()
+  let aux = defAux ()
   let types = map patElemType pes
   let res = map (SubExpRes mempty . Var . patElemName) pes
   let body = Body () (prologue |> stm) res
@@ -656,16 +658,13 @@ addReadsToLambda f = do
   pure (f {lambdaBody = body'})
 
 -- | Rewrite generic body dependencies to scalars that have been migrated.
-addReadsToBody :: Body GPU -> ReduceM (Body GPU)
+addReadsToBody ::
+  (FreeIn res, Substitute res) =>
+  GBody GPU res ->
+  ReduceM (GBody GPU res)
 addReadsToBody body = do
   (body', prologue) <- addReadsHelper body
   pure body' {bodyStms = prologue >< bodyStms body'}
-
--- | Rewrite kernel body dependencies to scalars that have been migrated.
-addReadsToKernelBody :: KernelBody GPU -> ReduceM (KernelBody GPU)
-addReadsToKernelBody kbody = do
-  (kbody', prologue) <- addReadsHelper kbody
-  pure kbody' {kernelBodyStms = prologue >< kernelBodyStms kbody'}
 
 -- | Rewrite migrated scalar dependencies within anything. The returned
 -- statements must be added to the scope of the rewritten construct.
@@ -708,9 +707,9 @@ rewriteStms = foldM rewriteTo mempty
     bnd :: Stms GPU -> (PatElem Type, SubExpRes) -> Stms GPU
     bnd out (pe, SubExpRes cs se)
       | Just t' <- peelArray 1 (typeOf pe) =
-          out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ ArrayLit [se] t')
+          out |> Let (Pat [pe]) (StmAux cs mempty mempty ()) (BasicOp $ ArrayLit [se] t')
       | otherwise =
-          out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ SubExp se)
+          out |> Let (Pat [pe]) (StmAux cs mempty mempty ()) (BasicOp $ SubExp se)
 
 -- | Rewrite all bindings introduced by a single statement (to ensure they are
 -- unique) and fix any dependencies that are broken as a result of migration or
@@ -742,9 +741,9 @@ rewritePatElem (PatElem n t) = do
 -- | Fix any 'StmAux' certificate references that are broken as a result of
 -- migration or rewriting.
 rewriteStmAux :: StmAux () -> RewriteM (StmAux ())
-rewriteStmAux (StmAux certs attrs _) = do
-  certs' <- renameCerts certs
-  pure (StmAux certs' attrs ())
+rewriteStmAux aux = do
+  certs' <- renameCerts $ stmAuxCerts aux
+  pure $ aux {stmAuxCerts = certs'}
 
 -- | Rewrite the bindings introduced by an expression (to ensure they are
 -- unique) and fix any dependencies that are broken as a result of migration or

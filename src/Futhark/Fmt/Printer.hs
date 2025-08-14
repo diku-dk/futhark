@@ -1,3 +1,4 @@
+-- | The actual implementation of @futhark fmt@.
 module Futhark.Fmt.Printer
   ( fmtToText,
     fmtToDoc,
@@ -226,6 +227,29 @@ instance Format PrimValue where
       BoolValue False -> "false"
       FloatValue v -> prettyText v
 
+updates ::
+  UncheckedExp ->
+  (UncheckedExp, [(Fmt, Fmt)])
+updates (RecordUpdate src fs ve _ _) = second (++ [(fs', ve')]) $ updates src
+  where
+    fs' = sep "." $ fmt <$> fs
+    ve' = fmt ve
+updates (Update src is ve _) = second (++ [(is', ve')]) $ updates src
+  where
+    is' = brackets $ sep ("," <> space) $ map fmt is
+    ve' = fmt ve
+updates e = (e, [])
+
+fmtUpdate :: UncheckedExp -> Fmt
+fmtUpdate e =
+  -- Special case multiple chained Updates/RecordUpdates.
+  let (root, us) = updates e
+      loc = srclocOf e
+   in addComments loc . localLayout loc $
+        fmt root <+> align (sep line (map fmtWith us))
+  where
+    fmtWith (fs', v) = "with" <+> fs' <+> "=" <+> v
+
 instance Format UncheckedExp where
   fmt (Var name _ loc) = addComments loc $ fmtQualName name
   fmt (Hole _ loc) = addComments loc "???"
@@ -246,16 +270,8 @@ instance Format UncheckedExp where
   fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmt k
   fmt (Negate e loc) = addComments loc $ "-" <> fmt e
   fmt (Not e loc) = addComments loc $ "!" <> fmt e
-  fmt (Update src idxs ve loc) =
-    addComments loc $
-      fmt src <+> "with" <+> idxs' <+> stdNest ("=" </> fmt ve)
-    where
-      idxs' = brackets $ sep ("," <> space) $ map fmt idxs
-  fmt (RecordUpdate src fs ve _ loc) =
-    addComments loc $
-      fmt src <+> "with" <+> fs' <+> stdNest ("=" </> fmt ve)
-    where
-      fs' = sep "." $ fmt <$> fs
+  fmt e@Update {} = fmtUpdate e
+  fmt e@RecordUpdate {} = fmtUpdate e
   fmt (Assert e1 e2 _ loc) =
     addComments loc $ "assert" <+> fmt e1 <+> fmt e2
   fmt (Lambda params body rettype _ loc) =
@@ -303,7 +319,7 @@ instance Format UncheckedCase where
 
 instance Format (AppExpBase NoInfo Name) where
   fmt (BinOp (bop, _) _ (x, _) (y, _) loc) =
-    addComments loc $ fmt x </> fmtBinOp bop <+> fmt y
+    addComments loc $ align (fmt x) </> fmtBinOp bop <+> align (fmt y)
   fmt (Match e cs loc) =
     addComments loc $ "match" <+> fmt e </> sep line (map fmt $ toList cs)
   -- need some way to omit the inital value expression, when this it's trivial
@@ -495,8 +511,12 @@ instance Format UncheckedSpec where
     addComments loc $ fmt doc <> "val" <+> sub <+> ":" </> stdIndent (fmt te)
     where
       sub
-        | null ps = fmtName bindingStyle name
-        | otherwise = fmtName bindingStyle name <+> align (sep line $ map fmt ps)
+        | null ps = name'
+        | otherwise = name' <+> align (sep space $ map fmt ps)
+      name' =
+        if symbolName name
+          then parens $ fmtName bindingStyle name
+          else fmtName bindingStyle name
   fmt (ModSpec name mte doc loc) =
     addComments loc $ fmt doc <> "module" <+> fmtName bindingStyle name <> ":" <+> fmt mte
   fmt (IncludeSpec mte loc) = addComments loc $ "include" <+> fmt mte
@@ -518,7 +538,7 @@ instance Format UncheckedModTypeExp where
     let (root, withs) = typeWiths mte
      in addComments loc . localLayout loc $
           fmt root
-            </> sep line (map fmtWith (withs ++ [tr]))
+            </> sep line (map fmtWith (reverse $ tr : withs))
     where
       fmtWith (TypeRef v ps td _) =
         "with"
@@ -599,11 +619,12 @@ instance Format UncheckedDec where
   fmt (ModTypeDec tb) = fmt tb
   fmt (ModDec tb) = fmt tb
   fmt (OpenDec tb loc) = addComments loc $ "open" <+> fmt tb
-  fmt (LocalDec tb loc) = addComments loc $ "local" <+> fmt tb
+  fmt (LocalDec tb loc) = addComments loc $ "local" </> fmt tb
   fmt (ImportDec path _tb loc) =
     addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
 
 instance Format UncheckedProg where
+  fmt (Prog Nothing []) = popComments
   fmt (Prog Nothing decs) = sepDecs fmt decs </> popComments
   fmt (Prog (Just dc) decs) = fmt dc </> sepDecs fmt decs </> popComments
 

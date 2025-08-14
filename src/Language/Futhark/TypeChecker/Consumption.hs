@@ -616,6 +616,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
               && not (S.null (aliases t `S.intersection` (cons <> obs)))
           )
           $ lift . addError loop_loc mempty
+          $ withIndexLink "aliases-previously-returned"
           $ "Return value for consuming loop parameter"
             <+> dquotes (prettyName pat_v)
             <+> "aliases previously returned value."
@@ -673,16 +674,25 @@ checkLoop loop_loc (param, arg, form, body) = do
     LoopInitExplicit e ->
       contain $ first LoopInitExplicit <$> checkArg [] param_t e
   consumed arg_cons
-  free_bound <- boundFreeInExp body
 
-  let bad = any (`M.member` arg_cons) . boundAliases . aliases . snd
-  forM_ (filter bad $ M.toList free_bound) $ \(v, _) -> do
-    v' <- describeVar v
-    addError loop_loc mempty $
-      "Loop body uses"
-        <+> v'
-        <> " (or an alias),"
-          </> "but this is consumed by the initial loop argument."
+  let checkFree what e = do
+        free_bound <- boundFreeInExp e
+
+        let bad = any (`M.member` arg_cons) . boundAliases . aliases . snd
+        forM_ (filter bad $ M.toList free_bound) $ \(v, _) -> do
+          v' <- describeVar v
+          addError loop_loc mempty $
+            what
+              <+> "uses"
+              <+> v'
+              <> " (or an alias),"
+                </> "but this is consumed by the initial loop argument."
+
+  checkFree "Loop body" body
+
+  case form of
+    While cond -> checkFree "Loop condition" cond
+    _ -> pure ()
 
   v <- VName "internal_loop_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameLoopRes (srclocOf loop_loc)) $ stateNames s}

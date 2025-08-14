@@ -31,7 +31,7 @@ tileLoops =
     onStms scope stms =
       modifyNameSource $
         runState $
-          runReaderT (optimiseStms (M.empty, M.empty) stms) scope
+          runReaderT (optimiseStms (M.empty, initialIxFnEnv scope) stms) scope
 
 optimiseBody :: Env -> Body GPU -> TileM (Body GPU)
 optimiseBody env (Body () stms res) =
@@ -80,10 +80,10 @@ tileInKernelBody ::
   KernelBody GPU ->
   TileM (Stms GPU, (SegLevel, SegSpace, KernelBody GPU))
 tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
-  | Just kbody_res <- mapM isSimpleResult $ kernelBodyResult kbody = do
+  | Just kbody_res <- mapM isSimpleResult $ bodyResult kbody = do
       maybe_tiled <-
         tileInBody branch_variant initial_variance lvl initial_kspace ts $
-          Body () (kernelBodyStms kbody) kbody_res
+          Body () (bodyStms kbody) kbody_res
       case maybe_tiled of
         Just (host_stms, tiling, tiledBody) -> do
           (res', stms') <-
@@ -92,7 +92,7 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
             ( host_stms,
               ( tilingLevel tiling,
                 tilingSpace tiling,
-                KernelBody () stms' res'
+                Body () stms' res'
               )
             )
         Nothing ->
@@ -741,7 +741,7 @@ tileReturns dims_on_top dims arr = do
       else do
         let new_shape = Shape $ unit_dims ++ arrayDims arr_t
         letExp (baseString arr) . BasicOp $
-          Reshape ReshapeArbitrary new_shape arr
+          Reshape arr (reshapeAll (arrayShape arr_t) new_shape)
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
   pure $ TileReturns mempty tile_dims arr'
 

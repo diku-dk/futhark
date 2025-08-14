@@ -177,11 +177,11 @@ repairExpression ::
   (Allocable fromrep torep inner) =>
   Exp torep ->
   AllocM fromrep torep (Exp torep)
-repairExpression (BasicOp (Reshape k shape v)) = do
+repairExpression (BasicOp (Reshape v shape)) = do
   v_mem <- fst <$> lookupArraySummary v
   space <- lookupMemSpace v_mem
   v' <- snd <$> ensureDirectArray (Just space) v
-  pure $ BasicOp $ Reshape k shape v'
+  pure $ BasicOp $ Reshape v' shape
 repairExpression e =
   error $ "repairExpression:\n" <> prettyString e
 
@@ -535,7 +535,7 @@ allocPermArray space perm s v = do
             MemArray pt shape u . ArrayIn mem $
               LMAD.permute (LMAD.iota 0 $ map pe64 $ arrayDims t) perm
           pat = Pat [PatElem v' info]
-      addStm $ Let pat (defAux ()) $ BasicOp $ Manifest perm v
+      addStm $ Let pat (defAux ()) $ BasicOp $ Manifest v perm
       pure (mem, v')
     _ ->
       error $ "allocPermArray: " ++ prettyString t
@@ -615,8 +615,11 @@ explicitAllocationsGeneric space handleOp hints =
             allocInFunBody (map (const $ Just space) rettype) fbody
           let num_extra_params = length params' - length params
               num_extra_rets = length mem_rets
+              -- The mem_pals is an over-approximation, like in the case for Apply.
+              mem_pals = map fst $ filter (isMem . paramType . snd) $ zip [0 ..] params'
+              mem_als = RetAls mem_pals mempty
               rettype' =
-                map (,RetAls mempty mempty) mem_rets
+                map (,mem_als) mem_rets
                   ++ zip
                     (memoryInDeclExtType space (length mem_rets) (map fst rettype))
                     (map (shiftRetAls num_extra_params num_extra_rets . snd) rettype)
@@ -915,16 +918,20 @@ allocInExp (Loop merge form (Body () bodystms bodyres)) =
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   space <- askDefaultSpace
-  -- We assume that every array is going to be in its own memory.
-  let num_extra_args = length args' - length args
+  args_ts <- mapM (subExpType . fst) args'
+  -- We assume that every array is going to be in its own memory. Further, we
+  -- assume that every result memory block can alias any argument memory block.
+  -- This is an overapproximation that can be loosened in the future.
+  let mem_als = RetAls (map fst $ filter (isMem . snd) $ zip [0 ..] args_ts) mempty
+      mems = replicate num_arrays (MemMem space, mem_als)
+      num_extra_args = length args' - length args
       rettype' =
-        mems space
+        mems
           ++ zip
             (memoryInDeclExtType space num_arrays (map fst rettype))
             (map (shiftRetAls num_extra_args num_arrays . snd) rettype)
   pure $ Apply fname args' rettype' loc
   where
-    mems space = replicate num_arrays (MemMem space, RetAls mempty mempty)
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf . fst) rettype
 allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   (defbody', def_reqs) <- allocInMatchBody rets defbody

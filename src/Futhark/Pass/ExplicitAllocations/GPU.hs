@@ -97,19 +97,19 @@ handleHostOp _ (GPUBody ts (Body _ stms res)) =
   fmap (Inner . GPUBody ts) . buildBody_ . allocInStms stms $ pure res
 
 kernelExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
-kernelExpHints (BasicOp (Manifest perm v)) = do
+kernelExpHints (BasicOp (Manifest v perm)) = do
   dims <- arrayDims <$> lookupType v
   let perm_inv = rearrangeInverse perm
       dims' = rearrangeShape perm dims
       lmad = LMAD.permute (LMAD.iota 0 $ map pe64 dims') perm_inv
   pure [Hint lmad $ Space "device"]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@(SegThread _ _) space ts body)))) =
-  zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
-kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space reds ts body)))) =
+  zipWithM (mapResultHint lvl space) ts $ bodyResult body
+kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space ts body reds)))) =
   (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint lvl space) (drop num_reds ts) map_res
   where
     num_reds = segBinOpResults reds
-    (red_res, map_res) = splitAt num_reds $ kernelBodyResult body
+    (red_res, map_res) = splitAt num_reds $ bodyResult body
 kernelExpHints e = defaultExpHints e
 
 mapResultHint ::
@@ -122,8 +122,10 @@ mapResultHint _lvl space = hint
   where
     -- Heuristic: do not rearrange for returned arrays that are
     -- sufficiently small.
+    thresholdBytes = 8
+
     coalesceReturnOfShape _ [] = False
-    coalesceReturnOfShape bs [Constant (IntValue (Int64Value d))] = bs * d > 4
+    coalesceReturnOfShape bs [Constant (IntValue (Int64Value d))] = bs * d > thresholdBytes
     coalesceReturnOfShape _ _ = True
 
     hint t Returns {}
@@ -151,10 +153,10 @@ semiStatic consts (Var v) = v `S.member` consts
 
 inGroupExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
 inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
-  | any private $ kernelBodyResult body = do
+  | any private $ bodyResult body = do
       consts <- asks envConsts
       pure $ do
-        (t, r) <- zip ts $ kernelBodyResult body
+        (t, r) <- zip ts $ bodyResult body
         pure $
           if private r && all (semiStatic consts) (arrayDims t)
             then

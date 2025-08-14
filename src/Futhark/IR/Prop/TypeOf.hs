@@ -82,14 +82,14 @@ basicOpType (ConvOp conv _) =
 basicOpType (Index ident slice) =
   result <$> lookupType ident
   where
-    result t = [Prim (elemType t) `arrayOfShape` shape]
+    result t = [t `setArrayShape` shape]
     shape = Shape $ sliceDims slice
 basicOpType (Update _ src _ _) =
   pure <$> lookupType src
 basicOpType (FlatIndex ident slice) =
   result <$> lookupType ident
   where
-    result t = [Prim (elemType t) `arrayOfShape` shape]
+    result t = [t `setArrayShape` shape]
     shape = Shape $ flatSliceDims slice
 basicOpType (FlatUpdate src _ _) =
   pure <$> lookupType src
@@ -101,23 +101,19 @@ basicOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
 basicOpType (Scratch t shape) =
   pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
-basicOpType (Reshape _ (Shape []) e) =
+basicOpType (Reshape e shape) =
   result <$> lookupType e
   where
-    result t = [Prim $ elemType t]
-basicOpType (Reshape _ shape e) =
-  result <$> lookupType e
-  where
-    result t = [t `setArrayShape` shape]
-basicOpType (Rearrange perm e) =
-  result <$> lookupType e
+    result t = [t `setArrayShape` newShape shape]
+basicOpType (Rearrange v perm) =
+  result <$> lookupType v
   where
     result t = [rearrangeType perm t]
 basicOpType (Concat i (x :| _) ressize) =
   result <$> lookupType x
   where
     result xt = [setDimSize i xt ressize]
-basicOpType (Manifest _ v) =
+basicOpType (Manifest v _) =
   pure <$> lookupType v
 basicOpType Assert {} =
   pure [Prim Unit]

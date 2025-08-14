@@ -18,6 +18,8 @@ module Language.Futhark.Core
     locText,
     locTextRel,
     prettyStacktrace,
+    isBuiltin,
+    isBuiltinLoc,
 
     -- * Name handling
     Name,
@@ -29,6 +31,7 @@ module Language.Futhark.Core
     baseTag,
     baseName,
     baseString,
+    baseText,
     quote,
 
     -- * Number re-export
@@ -53,6 +56,7 @@ import Futhark.Util (showText)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
 import Numeric.Half
+import System.FilePath (takeDirectory)
 import Prelude hiding (id, (.))
 
 -- | The uniqueness attribute of a type.  This essentially indicates
@@ -160,6 +164,18 @@ locText = T.pack . locStr
 locTextRel :: (Located a, Located b) => a -> b -> T.Text
 locTextRel a b = T.pack $ locStrRel a b
 
+-- | Is this include part of the built-in prelude?
+isBuiltin :: FilePath -> Bool
+isBuiltin = (== "/prelude") . takeDirectory
+
+-- | Is the position of this thing builtin as per 'isBuiltin'?  Things
+-- without location are considered not built-in.
+isBuiltinLoc :: (Located a) => a -> Bool
+isBuiltinLoc x =
+  case locOf x of
+    NoLoc -> False
+    Loc pos _ -> isBuiltin $ posFile pos
+
 -- | Given a list of strings representing entries in the stack trace
 -- and the index of the frame to highlight, produce a final
 -- newline-terminated string for showing to the user.  This string
@@ -195,6 +211,10 @@ baseName (VName vn _) = vn
 -- | Return the base 'Name' converted to a string.
 baseString :: VName -> String
 baseString = nameToString . baseName
+
+-- | Return the base 'Name' converted to a text.
+baseText :: VName -> T.Text
+baseText = nameToText . baseName
 
 instance Eq VName where
   VName _ x == VName _ y = x == y

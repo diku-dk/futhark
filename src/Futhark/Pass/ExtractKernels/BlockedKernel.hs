@@ -59,7 +59,7 @@ prepareRedOrScan ::
 prepareRedOrScan cs w map_lam arrs ispace inps = do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, w)]
-  kbody <- fmap (uncurry (flip (KernelBody ()))) $
+  kbody <- fmap (uncurry (flip (Body ()))) $
     runBuilder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
@@ -88,7 +88,7 @@ segRed lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
   letBind pat $
     Op $
       segOp $
-        SegRed lvl kspace ops (lambdaReturnType map_lam) kbody
+        SegRed lvl kspace (lambdaReturnType map_lam) kbody ops
 
 segScan ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
@@ -107,7 +107,7 @@ segScan lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
   letBind pat $
     Op $
       segOp $
-        SegScan lvl kspace ops (lambdaReturnType map_lam) kbody
+        SegScan lvl kspace (lambdaReturnType map_lam) kbody ops
 
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
@@ -183,7 +183,7 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBuilder_ $ do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, arr_w)]
 
-  kbody <- fmap (uncurry (flip $ KernelBody ())) $
+  kbody <- fmap (uncurry (flip $ Body ())) $
     runBuilder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
@@ -197,7 +197,7 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBuilder_ $ do
         forM res $ \(SubExpRes cs se) ->
           pure $ Returns ResultMaySimplify cs se
 
-  letBind pat $ Op $ segOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
+  letBind pat $ Op $ segOp $ SegHist lvl space (lambdaReturnType lam) kbody ops
 
 mapKernelSkeleton ::
   (DistRep rep, HasScope rep m, MonadFreshNames m) =>
@@ -218,10 +218,10 @@ mapKernel ::
   [Type] ->
   KernelBody rep ->
   m (SegOp (SegOpLevel rep) rep, Stms rep)
-mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBuilderT' $ do
+mapKernel mk_lvl ispace inputs rts (Body () kstms krets) = runBuilderT' $ do
   (space, read_input_stms) <- mapKernelSkeleton ispace inputs
 
-  let kbody' = KernelBody () (read_input_stms <> kstms) krets
+  let kbody' = Body () (read_input_stms <> kstms) krets
 
   -- If the kernel creates arrays (meaning it will require memory
   -- expansion), we want to truncate the amount of threads.

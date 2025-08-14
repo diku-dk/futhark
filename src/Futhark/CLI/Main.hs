@@ -3,6 +3,7 @@ module Futhark.CLI.Main (main) where
 
 import Control.Exception
 import Data.List (sortOn)
+import Data.List qualified as L
 import Data.Maybe
 import Data.Text.IO qualified as T
 import Futhark.CLI.Autotune qualified as Autotune
@@ -154,4 +155,6 @@ main = reportingIOErrors $ do
   case args of
     cmd : args'
       | Just (m, _) <- lookup cmd commands -> m (unwords [prog, cmd]) args'
+      | not $ "-" `L.isPrefixOf` cmd ->
+          optionsError $ "unknown subcommand \"" <> cmd <> "\"."
     _ -> mainWithOptions () [] msg (const . const Nothing) prog args

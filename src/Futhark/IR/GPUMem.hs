@@ -95,7 +95,7 @@ simpleGPUMem =
     -- importantly, past the versioning If, but see also #1569).
     usage (SegOp (SegMap _ _ _ kbody)) = localAllocs kbody
     usage _ = mempty
-    localAllocs = foldMap stmSharedAlloc . kernelBodyStms
+    localAllocs = foldMap stmSharedAlloc . bodyStms
     stmSharedAlloc = expSharedAlloc . stmExp
     expSharedAlloc (Op (Alloc (Var v) _)) =
       UT.sizeUsage v

@@ -370,15 +370,21 @@ Entry Points
 ~~~~~~~~~~~~
 
 Apart from declaring a function with the keyword ``def``, it can also
-be declared with ``entry``.  When the Futhark program is compiled any
-top-level function declared with ``entry`` will be exposed as an entry
-point.  If the Futhark program has been compiled as a library, these
-are the functions that will be exposed.  If compiled as an executable,
-you can use the ``--entry-point`` command line option of the generated
-executable to select the entry point you wish to run.
+be declared with ``entry``. When the Futhark program is compiled any
+top-level function declared with ``entry`` *in the single file passed
+directly to the Futhark compiler* will be exposed as an entry point.
+This means that any functions defined with ``entry`` in a file that is
+accessed via ``import`` are not considered entry points, but they are
+still usable as normal functions.
 
-Any top-level function named ``main`` will always be considered an
-entry point, whether it is declared with ``entry`` or not.
+If the Futhark program has been compiled as a library, these entry
+points are the functions that will be exposed as the library
+interface. If compiled as an executable, you can use the
+``--entry-point`` command line option of the generated executable to
+select the entry point you wish to run.
+
+Any top-level function named ``main`` is treated as if it had been
+defined with ``entry``.
 
 The name of an entry point must not contain an apostrophe (``'``),
 even though that is normally permitted in Futhark identifiers.
@@ -1639,6 +1645,7 @@ Module Type Expressions
 
 .. productionlist::
    spec:   "val" `name` `type_param`* ":" `type`
+       : | "val" "(" `symbol` ")" ":" `type`
        : | "val" `symbol` `type_param`* ":" `type`
        : | ("type" | "type^" | "type~") `name` `type_param`* "=" `type`
        : | ("type" | "type^" | "type~") `name` `type_param`*
@@ -1736,6 +1743,16 @@ unspecified which attributes take precedence.
 
 The following expression attributes are supported.
 
+``blank``
+.........
+
+Indicates that the value computed by the expression does not matter, and that
+the expression can be replaced with an arbitrary other expression of the same
+type. This is useful for constructing arrays that will eventually be filled with
+``scatter`` or similar operations. Note that this can subvert type-based
+invariants safety if the blank value is used, but it cannot subvert memory
+safety.
+
 ``trace``
 .........
 
@@ -1795,6 +1812,13 @@ to multiple versions at deeper levels).
 Do not inline the attributed function application.  If used within a
 parallel construct (e.g. ``map``), this will likely prevent the GPU
 backends from generating working code.
+
+``scratch``
+...........
+
+Like ``blank``, but the resulting values (if arrays) will comprise initialised
+memory. Reading from such arrays is potentially dangerous, as the elements are
+completely undefined until they are updated with a ``scatter`` or similar.
 
 ``sequential``
 ..............

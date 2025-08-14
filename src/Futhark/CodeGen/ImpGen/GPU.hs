@@ -65,7 +65,28 @@ openclAtomics, cudaAtomics :: AtomicBinOp
         (Or Int32, Imp.AtomicOr Int32),
         (Xor Int32, Imp.AtomicXor Int32)
       ]
-    opencl = opencl32 ++ opencl64
+    opencl16 =
+      [ (Add Int16 OverflowUndef, Imp.AtomicAdd Int16),
+        (FAdd Float16, Imp.AtomicFAdd Float16),
+        (SMax Int16, Imp.AtomicSMax Int16),
+        (SMin Int16, Imp.AtomicSMin Int16),
+        (UMax Int16, Imp.AtomicUMax Int16),
+        (UMin Int16, Imp.AtomicUMin Int16),
+        (And Int16, Imp.AtomicAnd Int16),
+        (Or Int16, Imp.AtomicOr Int16),
+        (Xor Int16, Imp.AtomicXor Int16)
+      ]
+    opencl8 =
+      [ (Add Int8 OverflowUndef, Imp.AtomicAdd Int8),
+        (SMax Int8, Imp.AtomicSMax Int8),
+        (SMin Int8, Imp.AtomicSMin Int8),
+        (UMax Int8, Imp.AtomicUMax Int8),
+        (UMin Int8, Imp.AtomicUMin Int8),
+        (And Int8, Imp.AtomicAnd Int8),
+        (Or Int8, Imp.AtomicOr Int8),
+        (Xor Int8, Imp.AtomicXor Int8)
+      ]
+    opencl = opencl8 <> opencl16 <> opencl32 <> opencl64
     cuda = opencl
 
 compileProg ::
@@ -153,11 +174,11 @@ segOpCompiler ::
   CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
-segOpCompiler pat (SegRed lvl@(SegThread _ _) space reds _ kbody) =
+segOpCompiler pat (SegRed lvl@(SegThread _ _) space _ kbody reds) =
   compileSegRed pat lvl space reds kbody
-segOpCompiler pat (SegScan lvl@(SegThread _ _) space scans _ kbody) =
+segOpCompiler pat (SegScan lvl@(SegThread _ _) space _ kbody scans) =
   compileSegScan pat lvl space scans kbody
-segOpCompiler pat (SegHist lvl@(SegThread _ _) space ops _ kbody) =
+segOpCompiler pat (SegHist lvl@(SegThread _ _) space _ kbody ops) =
   compileSegHist pat lvl space ops kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ prettyString (segLevel segop) ++ " for rhs of pattern " ++ prettyString pat
@@ -223,11 +244,10 @@ withAcc pat inputs lam = do
           locksForInputs atomics inputs'
 
 expCompiler :: ExpCompiler GPUMem HostEnv Imp.HostOp
--- We generate a simple kernel for itoa and replicate.
+-- We generate a simple kernel for iota and replicate.
 expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
   s' <- toExp s
-
   sIota (patElemName pe) (pe64 n) x' s' et
 expCompiler (Pat [pe]) (BasicOp (Replicate shape se))
   | Acc {} <- patElemType pe = pure ()

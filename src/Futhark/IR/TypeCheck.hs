@@ -73,7 +73,7 @@ data ErrorCase rep
   | UnknownVariableError VName
   | UnknownFunctionError Name
   | ParameterMismatch (Maybe Name) [Type] [Type]
-  | SlicingError Int Int
+  | SlicingError Shape Int
   | BadAnnotation String Type Type
   | ReturnAliased Name VName
   | UniqueReturnAliased Name
@@ -143,7 +143,7 @@ instance (Checkable rep) => Show (ErrorCase rep) where
       ngot = length got
       fname' = maybe "anonymous function" (("function " ++) . nameToString) fname
   show (SlicingError dims got) =
-    show got ++ " indices given, but type of indexee has " ++ show dims ++ " dimension(s)."
+    show got ++ " indices given, but type of indexee has shape " ++ prettyString dims
   show (BadAnnotation desc expected got) =
     "Annotation of \""
       ++ desc
@@ -834,8 +834,11 @@ checkBody (Body (_, rep) stms res) = do
 checkSlice :: (Checkable rep) => Type -> Slice SubExp -> TypeM rep ()
 checkSlice vt (Slice idxes) = do
   when (arrayRank vt /= length idxes) . bad $
-    SlicingError (arrayRank vt) (length idxes)
+    SlicingError (arrayShape vt) (length idxes)
   mapM_ (traverse $ require [Prim int64]) idxes
+
+checkShape :: (Checkable rep) => Shape -> TypeM rep ()
+checkShape = mapM_ (require [Prim int64])
 
 checkBasicOp :: (Checkable rep) => BasicOp -> TypeM rep ()
 checkBasicOp (SubExp es) =
@@ -883,15 +886,11 @@ checkBasicOp (Update _ src slice se) = do
 checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
   observe ident
-  when (arrayRank vt /= 1) $
-    bad $
-      SlicingError (arrayRank vt) 1
+  when (arrayRank vt /= 1) $ bad $ SlicingError (arrayShape vt) 1
   checkFlatSlice slice
 checkBasicOp (FlatUpdate src slice v) = do
   (src_shape, src_pt) <- checkArrIdent src
-  when (shapeRank src_shape /= 1) $
-    bad $
-      SlicingError (shapeRank src_shape) 1
+  when (shapeRank src_shape /= 1) $ bad $ SlicingError src_shape 1
 
   v_aliases <- lookupAliases v
   when (src `nameIn` v_aliases) $
@@ -909,17 +908,23 @@ checkBasicOp (Replicate (Shape dims) valexp) = do
   mapM_ (require [Prim int64]) dims
   void $ checkSubExp valexp
 checkBasicOp (Scratch _ shape) =
-  mapM_ checkSubExp shape
-checkBasicOp (Reshape k newshape arrexp) = do
-  rank <- shapeRank . fst <$> checkArrIdent arrexp
-  mapM_ (require [Prim int64]) $ shapeDims newshape
-  case k of
-    ReshapeCoerce ->
-      when (shapeRank newshape /= rank) . bad $
-        TypeError "Coercion changes rank of array."
-    ReshapeArbitrary ->
-      pure ()
-checkBasicOp (Rearrange perm arr) = do
+  checkShape $ Shape shape
+checkBasicOp (Reshape arrexp newshape) = do
+  (arr_shape, _) <- checkArrIdent arrexp
+  checkShape $ newShape newshape
+  spliced_shape <- foldM checkSplice arr_shape $ dimSplices newshape
+  when (spliced_shape /= newShape newshape) . bad . TypeError $
+    "Splice produces shape "
+      <> prettyText spliced_shape
+      <> " but annotation is shape "
+      <> prettyText (newShape newshape)
+  where
+    checkSplice arr_shape sp@(DimSplice i k shape) = do
+      checkShape shape
+      when (i < 0 || i + k > shapeRank arr_shape) . bad . TypeError $
+        "Splice " <> prettyText sp <> " cannot be applied to shape " <> prettyText arr_shape
+      pure $ applySplice arr_shape sp
+checkBasicOp (Rearrange arr perm) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0 .. rank - 1]) $
@@ -933,9 +938,9 @@ checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
     bad $
       TypeError "Types of arguments to concat do not match."
   require [Prim int64] ressize
-checkBasicOp (Manifest perm arr) =
-  checkBasicOp $ Rearrange perm arr -- Basically same thing!
-checkBasicOp (Assert e (ErrorMsg parts) _) = do
+checkBasicOp (Manifest arr perm) =
+  checkBasicOp $ Rearrange arr perm -- Basically same thing!
+checkBasicOp (Assert e (ErrorMsg parts)) = do
   require [Prim Bool] e
   mapM_ checkPart parts
   where
@@ -958,6 +963,8 @@ checkBasicOp (UpdateAcc _ acc is ses) = do
         <> " indices, but "
         <> prettyText (length is)
         <> " provided."
+
+  mapM_ (require [Prim int64]) is
 
   zipWithM_ require (map pure ts) ses
   consume =<< lookupAliases acc
@@ -1252,7 +1259,9 @@ checkStm ::
   Stm (Aliases rep) ->
   TypeM rep a ->
   TypeM rep a
-checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
+checkStm stm@(Let pat aux e) m = do
+  let Certs cs = stmAuxCerts aux
+      (_, dec) = stmAuxDec aux
   context "When checking certificates" $ mapM_ (requireI [Prim Unit]) cs
   context "When checking expression annotation" $ checkExpDec dec
   context ("When matching\n" <> message "  " pat <> "\nwith\n" <> message "  " e) $
@@ -1424,7 +1433,7 @@ checkPrimExp (ConvOpExp op x) = requirePrimExp (fst $ convOpType op) x
 checkPrimExp (FunExp h args t) = do
   (h_ts, h_ret, _) <-
     maybe
-      (bad $ TypeError $ "Unknown function: " <> T.pack h)
+      (bad $ TypeError $ "Unknown function: " <> h)
       pure
       $ M.lookup h primFuns
   when (length h_ts /= length args) . bad . TypeError $

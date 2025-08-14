@@ -2,6 +2,6 @@
 -- ==
 -- warning: with binding
 
-def main (n:i64) (xs:*[n]i64) =
+def main (n: i64) (xs: *[n]i64) =
   let t = iota n
-  in t[:let m = n-4 in m*m/n]
+  in t[:let m = n - 4 in m * m / n]

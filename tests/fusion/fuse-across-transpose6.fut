@@ -24,7 +24,7 @@
 --      [ -0.0144179417871814f32, 0.0157411263968213f32, 0.0125315353728014f32  ],
 --      [ -0.0121497422218761f32, 0.0182904634062437f32, 0.0151125070556484f32  ]
 -- ]
--- [	[ 2.2372928847280580f32, 1.0960951589853829f32, 0.7075902730592357f32, 0.8166828043492210f32, 0.7075902730592357f32 ],
+-- [  [ 2.2372928847280580f32, 1.0960951589853829f32, 0.7075902730592357f32, 0.8166828043492210f32, 0.7075902730592357f32 ],
 --      [ 0.0000000000000000f32, 0.5998905309250137f32, 0.4993160054719562f32, 0.6669708029197080f32, 0.5006839945280438f32 ],
 --      [ 0.0000000000000000f32, 0.4001094690749863f32, 0.5006839945280438f32, 0.3330291970802919f32, 0.4993160054719562f32 ]
 -- ]
@@ -38,41 +38,44 @@
 -- }
 -- structure { /Screma 1 /Screma/Screma 1 /Screma/Screma/Screma 1 }
 
-def correlateDeltas [num_und][num_dates]
-                   (md_c: [num_und][num_und]f32,
-                    zds: [num_dates][num_und]f32): [num_dates][num_und]f32 =
-  map (\(zi: [num_und]f32): [num_und]f32  ->
-         map (\j: f32  ->
+def correlateDeltas [num_und] [num_dates]
+                    ( md_c: [num_und][num_und]f32
+                    , zds: [num_dates][num_und]f32
+                    ) : [num_dates][num_und]f32 =
+  map (\(zi: [num_und]f32) : [num_und]f32 ->
+         map (\j : f32 ->
                 let j' = j + 1
                 let x = map2 (*) (take j' zi) (take j' md_c[j])
-                in  reduce (+) (0.0) x
-            ) (iota(num_und) )
-     ) zds
+                in reduce (+) (0.0) x)
+             (iota (num_und)))
+      zds
 
 def combineVs [num_und]
-             (n_row:   [num_und]f32,
-              vol_row: [num_und]f32,
-              dr_row: [num_und]f32 ): [num_und]f32 =
+              ( n_row: [num_und]f32
+              , vol_row: [num_und]f32
+              , dr_row: [num_und]f32
+              ) : [num_und]f32 =
   map2 (+) dr_row (map2 (*) n_row vol_row)
 
-def mkPrices [num_dates][num_und]
-            (md_vols: [num_dates][num_und]f32,
-             md_drifts: [num_dates][num_und]f32,
-             noises: [num_dates][num_und]f32): [num_dates][num_und]f32 =
-  let c_rows = map combineVs (zip3 noises (md_vols) (md_drifts) )
-  let e_rows = map (\(x: []f32): [num_und]f32  -> map f32.exp x
-                  ) (c_rows
-                  )
-  in  scan (\x y -> map2 (*) x y) (replicate num_und 1.0) (e_rows )
+def mkPrices [num_dates] [num_und]
+             ( md_vols: [num_dates][num_und]f32
+             , md_drifts: [num_dates][num_und]f32
+             , noises: [num_dates][num_und]f32
+             ) : [num_dates][num_und]f32 =
+  let c_rows = map combineVs (zip3 noises (md_vols) (md_drifts))
+  let e_rows =
+    map (\(x: []f32) : [num_und]f32 -> map f32.exp x)
+        (c_rows)
+  in scan (\x y -> map2 (*) x y) (replicate num_und 1.0) (e_rows)
 
-  -- Formerly blackScholes.
-def main [num_dates][num_und]
-        (md_c: [num_und][num_und]f32)
-        (md_vols: [num_dates][num_und]f32)
-        (md_drifts: [num_dates][num_und]f32)
-        (bb_arr: [num_und][num_dates]f32): [num_dates][num_und]f32 =
+-- Formerly blackScholes.
+def main [num_dates] [num_und]
+         (md_c: [num_und][num_und]f32)
+         (md_vols: [num_dates][num_und]f32)
+         (md_drifts: [num_dates][num_und]f32)
+         (bb_arr: [num_und][num_dates]f32) : [num_dates][num_und]f32 =
   -- I don't want to import the entire Brownian bridge, so we just
   -- transpose bb_arr.
   let bb_row = transpose bb_arr
-  let noises = correlateDeltas(md_c, bb_row) in
-  mkPrices(md_vols, md_drifts, noises)
+  let noises = correlateDeltas (md_c, bb_row)
+  in mkPrices (md_vols, md_drifts, noises)

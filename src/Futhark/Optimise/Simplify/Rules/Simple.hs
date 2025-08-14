@@ -118,8 +118,6 @@ simplifyBinOp _ _ (BinOp Mul {} e1 e2)
   | isCt1 e1 = resIsSubExp e2
   | isCt1 e2 = resIsSubExp e1
 simplifyBinOp _ _ (BinOp FMul {} e1 e2)
-  | isCt0 e1 = resIsSubExp e1
-  | isCt0 e2 = resIsSubExp e2
   | isCt1 e1 = resIsSubExp e2
   | isCt1 e2 = resIsSubExp e1
 simplifyBinOp look _ (BinOp (SMod t _) e1 e2)
@@ -175,6 +173,7 @@ simplifyBinOp defOf _ (BinOp LogAnd e1 e2)
   | isCt0 e2 = constRes $ BoolValue False
   | isCt1 e1 = resIsSubExp e2
   | isCt1 e2 = resIsSubExp e1
+  | e1 == e2 = resIsSubExp e1
   | Var v <- e1,
     Just (BasicOp (UnOp (Neg Bool) e1'), v_cs) <- defOf v,
     e1' == e2 =
@@ -264,59 +263,50 @@ simplifyConvOp _ _ _ =
 
 -- If expression is true then just replace assertion.
 simplifyAssert :: SimpleRule rep
-simplifyAssert _ _ (Assert (Constant (BoolValue True)) _ _) =
+simplifyAssert _ _ (Assert (Constant (BoolValue True)) _) =
   constRes UnitValue
 simplifyAssert _ _ _ =
   Nothing
 
--- No-op reshape.
-simplifyIdentityReshape :: SimpleRule rep
-simplifyIdentityReshape _ seType (Reshape _ newshape v)
+simplifyReshape :: SimpleRule rep
+simplifyReshape defOf seType (Reshape v newshape)
+  -- No-op reshape
   | Just t <- seType $ Var v,
-    newshape == arrayShape t =
+    newShape newshape == arrayShape t =
       resIsSubExp $ Var v
-simplifyIdentityReshape _ _ _ = Nothing
-
-simplifyReshapeReshape :: SimpleRule rep
-simplifyReshapeReshape defOf _ (Reshape k1 newshape v)
-  | Just (BasicOp (Reshape k2 _ v2), v_cs) <- defOf v =
-      Just (Reshape (max k1 k2) newshape v2, v_cs)
-simplifyReshapeReshape _ _ _ = Nothing
-
-simplifyReshapeScratch :: SimpleRule rep
-simplifyReshapeScratch defOf _ (Reshape _ newshape v)
+  -- Simplifying a reshape
+  | Just shape <- arrayShape <$> seType (Var v),
+    Just newshape' <- simplifyNewShape shape newshape =
+      Just (Reshape v newshape', mempty)
+  -- Reshape-of-reshape
+  | Just (BasicOp (Reshape v2 oldnewshape), v_cs) <- defOf v =
+      Just (Reshape v2 (oldnewshape <> newshape), v_cs)
+  -- Reshape-of-scratch
   | Just (BasicOp (Scratch bt _), v_cs) <- defOf v =
-      Just (Scratch bt $ shapeDims newshape, v_cs)
-simplifyReshapeScratch _ _ _ = Nothing
-
-simplifyReshapeReplicate :: SimpleRule rep
-simplifyReshapeReplicate defOf seType (Reshape _ newshape v)
+      Just (Scratch bt $ shapeDims $ newShape newshape, v_cs)
+  -- Reshape-of-replicate
   | Just (BasicOp (Replicate _ se), v_cs) <- defOf v,
     Just oldshape <- arrayShape <$> seType se,
-    shapeDims oldshape `isSuffixOf` shapeDims newshape =
+    newshape' <- newShape newshape,
+    shapeDims oldshape `isSuffixOf` shapeDims newshape' =
       let new =
-            take (length newshape - shapeRank oldshape) $
-              shapeDims newshape
+            take (shapeRank newshape' - shapeRank oldshape) $
+              shapeDims newshape'
        in Just (Replicate (Shape new) se, v_cs)
-simplifyReshapeReplicate _ _ _ = Nothing
-
-simplifyReshapeIota :: SimpleRule rep
-simplifyReshapeIota defOf _ (Reshape _ newshape v)
+  -- Reshape-of-iota
   | Just (BasicOp (Iota _ offset stride it), v_cs) <- defOf v,
-    [n] <- shapeDims newshape =
+    [n] <- shapeDims (newShape newshape) =
       Just (Iota n offset stride it, v_cs)
-simplifyReshapeIota _ _ _ = Nothing
-
-simplifyReshapeConcat :: SimpleRule rep
-simplifyReshapeConcat defOf seType (Reshape ReshapeCoerce newshape v) = do
-  (BasicOp (Concat d arrs _), v_cs) <- defOf v
-  (bef, w', aft) <- focusNth d $ shapeDims newshape
-  (arr_bef, _, arr_aft) <-
-    focusNth d <=< fmap arrayDims $ seType $ Var $ NE.head arrs
-  guard $ arr_bef == bef
-  guard $ arr_aft == aft
-  Just (Concat d arrs w', v_cs)
-simplifyReshapeConcat _ _ _ = Nothing
+  -- Reshape-of-concat
+  | ReshapeCoerce <- reshapeKind newshape = do
+      (BasicOp (Concat d arrs _), v_cs) <- defOf v
+      (bef, w', aft) <- focusNth d $ shapeDims $ newShape newshape
+      (arr_bef, _, arr_aft) <-
+        focusNth d <=< fmap arrayDims $ seType $ Var $ NE.head arrs
+      guard $ arr_bef == bef
+      guard $ arr_aft == aft
+      Just (Concat d arrs w', v_cs)
+simplifyReshape _ _ _ = Nothing
 
 reshapeSlice :: [DimIndex d] -> [d] -> [DimIndex d]
 reshapeSlice (DimFix i : slice') scs =
@@ -328,9 +318,10 @@ reshapeSlice _ _ = []
 -- If we are size-coercing a slice, then we might as well just use a
 -- different slice instead.
 simplifyReshapeIndex :: SimpleRule rep
-simplifyReshapeIndex defOf _ (Reshape ReshapeCoerce newshape v)
-  | Just (BasicOp (Index v' slice), v_cs) <- defOf v,
-    slice' <- Slice $ reshapeSlice (unSlice slice) $ shapeDims newshape,
+simplifyReshapeIndex defOf _ (Reshape v newshape)
+  | ReshapeCoerce <- reshapeKind newshape,
+    Just (BasicOp (Index v' slice), v_cs) <- defOf v,
+    slice' <- Slice $ reshapeSlice (unSlice slice) $ shapeDims $ newShape newshape,
     slice' /= slice =
       Just (Index v' slice', v_cs)
 simplifyReshapeIndex _ _ _ = Nothing
@@ -339,7 +330,8 @@ simplifyReshapeIndex _ _ _ = Nothing
 -- instead use the original array and update the slice dimensions.
 simplifyUpdateReshape :: SimpleRule rep
 simplifyUpdateReshape defOf seType (Update safety dest slice (Var v))
-  | Just (BasicOp (Reshape ReshapeCoerce _ v'), v_cs) <- defOf v,
+  | Just (BasicOp (Reshape v' newshape), v_cs) <- defOf v,
+    ReshapeCoerce <- reshapeKind newshape,
     Just ds <- arrayDims <$> seType (Var v'),
     slice' <- Slice $ reshapeSlice (unSlice slice) ds,
     slice' /= slice =
@@ -358,9 +350,9 @@ repScratchToScratch defOf seType (Replicate shape (Var src)) = do
       case defOf v of
         Just (BasicOp Scratch {}, cs) ->
           Just cs
-        Just (BasicOp (Rearrange _ v'), cs) ->
+        Just (BasicOp (Rearrange v' _), cs) ->
           (cs <>) <$> isActuallyScratch v'
-        Just (BasicOp (Reshape _ _ v'), cs) ->
+        Just (BasicOp (Reshape v' _), cs) ->
           (cs <>) <$> isActuallyScratch v'
         _ -> Nothing
 repScratchToScratch _ _ _ =
@@ -374,12 +366,7 @@ simpleRules =
     simplifyConvOp,
     simplifyAssert,
     repScratchToScratch,
-    simplifyIdentityReshape,
-    simplifyReshapeReshape,
-    simplifyReshapeScratch,
-    simplifyReshapeReplicate,
-    simplifyReshapeIota,
-    simplifyReshapeConcat,
+    simplifyReshape,
     simplifyReshapeIndex,
     simplifyUpdateReshape
   ]

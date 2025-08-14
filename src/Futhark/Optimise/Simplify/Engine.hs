@@ -296,10 +296,10 @@ protectIf _ _ taken (Let pat aux (Match [cond] [Case [Just (BoolValue True)] tak
   auxing aux . letBind pat $
     Match [cond'] [Case [Just (BoolValue True)] taken_body] untaken_body $
       MatchDec if_ts MatchFallback
-protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
+protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp (Neg Bool) taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
-  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
+  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg
 protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
       auxing aux m
@@ -423,11 +423,11 @@ nonrecSimplifyStm ::
   (SimplifiableRep rep) =>
   Stm (Wise rep) ->
   SimpleM rep (Stm (Wise rep))
-nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
+nonrecSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) = do
   cs' <- simplify cs
   e' <- simplifyExpBase e
   (pat', pat_cs) <- collectCerts $ traverse simplify $ removePatWisdom pat
-  let aux' = StmAux (cs' <> pat_cs) attrs dec
+  let aux' = StmAux (cs' <> pat_cs) attrs loc dec
   pure $ mkWiseStm pat' aux' e'
 
 -- Bottom-up simplify a statement.  Recurses into sub-Bodies and Ops.
@@ -439,9 +439,9 @@ recSimplifyStm ::
   Stm (Wise rep) ->
   UT.UsageTable ->
   SimpleM rep (Stms (Wise rep), Stm (Wise rep))
-recSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) usage = do
+recSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) usage = do
   ((e', e_hoisted), e_cs) <- collectCerts $ simplifyExp (usage <> UT.usageInPat pat) pat e
-  let aux' = StmAux (cs <> e_cs) attrs dec
+  let aux' = StmAux (cs <> e_cs) attrs loc dec
   pure (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
 
 hoistStms ::
@@ -589,8 +589,15 @@ andAlso p1 p2 body vtable need = p1 body vtable need && p2 body vtable need
 isConsumed :: BlockPred rep
 isConsumed _ utable = any (`UT.isConsumed` utable) . patNames . stmPat
 
+-- The main purpose of this rule is to avoid hoisting 'inblock' SegOps
+-- out of their enclosing SegOp, *including* when those are present in
+-- nested Bodies.
 isOp :: BlockPred rep
 isOp _ _ (Let _ _ Op {}) = True
+isOp vtable utable (Let _ _ (Match _ cs def_body _)) =
+  any (any (isOp vtable utable) . bodyStms) $ def_body : map caseBody cs
+isOp vtable utable (Let _ _ (Loop _ _ body)) =
+  any (isOp vtable utable) $ bodyStms body
 isOp _ _ _ = False
 
 constructBody ::
@@ -1032,7 +1039,7 @@ instance Simplifiable VName where
       _ -> pure v
 
 instance (Simplifiable d) => Simplifiable (ShapeBase d) where
-  simplify = fmap Shape . simplify . shapeDims
+  simplify = traverse simplify
 
 instance Simplifiable ExtSize where
   simplify (Free se) = Free <$> simplify se

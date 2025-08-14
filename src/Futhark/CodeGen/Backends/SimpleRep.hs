@@ -88,12 +88,12 @@ primAPIType _ t = primStorageType t
 
 -- | Convert from scalar to storage representation for the given type.
 toStorage :: PrimType -> C.Exp -> C.Exp
-toStorage (FloatType Float16) e = [C.cexp|futrts_to_bits16($exp:e)|]
+toStorage (FloatType Float16) e = [C.cexp|fptobits_f16_i16($exp:e)|]
 toStorage _ e = e
 
 -- | Convert from storage to scalar representation for the given type.
 fromStorage :: PrimType -> C.Exp -> C.Exp
-fromStorage (FloatType Float16) e = [C.cexp|futrts_from_bits16($exp:e)|]
+fromStorage (FloatType Float16) e = [C.cexp|bitstofp_i16_f16($exp:e)|]
 fromStorage _ e = e
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
@@ -146,15 +146,29 @@ findPrettyName =
   either (Left . errorBundlePretty) Right . parse (p <* eof) "type name"
   where
     p :: Parsec Void T.Text T.Text
-    p = choice [pArr, pTup, pAtom]
+    p = choice [pArr, pTup, pRec, pQual]
     pArr = do
       dims <- some "[]"
       (("arr" <> showText (length dims) <> "d_") <>) <$> p
     pTup = between "(" ")" $ do
       ts <- p `sepBy` pComma
       pure $ "tup" <> showText (length ts) <> "_" <> T.intercalate "_" ts
-    pAtom = T.pack <$> some (satisfy (`notElem` ("[]{}()," :: String)))
+    pRec = between "{" "}" $ do
+      fs <- pField `sepBy` pComma
+      pure $ "rec__" <> T.intercalate "__" fs
+    pAtom = T.pack <$> some (satisfy (`notElem` ("[]{}(),.:" :: String)))
     pComma = void $ "," <* space
+    -- Rewrite 'x.y' to 'x_y'.
+    pQual = do
+      x <- pAtom
+      choice
+        [ "." >> ((x <> "_") <>) <$> pAtom,
+          pure x
+        ]
+    pField = do
+      f <- pAtom <* ":"
+      t <- p
+      pure $ f <> "_" <> t
 
 -- | The name of exposed opaque types.
 opaqueName :: Name -> T.Text

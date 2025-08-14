@@ -117,28 +117,28 @@ transformExp (Op (Inner (SegOp (SegMap lvl space ts kbody)))) = do
     ( alloc_stms,
       Op $ Inner $ SegOp $ SegMap lvl' space ts kbody'
     )
-transformExp (Op (Inner (SegOp (SegRed lvl space reds ts kbody)))) = do
+transformExp (Op (Inner (SegOp (SegRed lvl space ts kbody reds)))) = do
   (alloc_stms, (lvl', lams, kbody')) <-
     transformScanRed lvl space (map segBinOpLambda reds) kbody
   let reds' = zipWith (\red lam -> red {segBinOpLambda = lam}) reds lams
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegRed lvl' space reds' ts kbody'
+      Op $ Inner $ SegOp $ SegRed lvl' space ts kbody' reds'
     )
-transformExp (Op (Inner (SegOp (SegScan lvl space scans ts kbody)))) = do
+transformExp (Op (Inner (SegOp (SegScan lvl space ts kbody scans)))) = do
   (alloc_stms, (lvl', lams, kbody')) <-
     transformScanRed lvl space (map segBinOpLambda scans) kbody
   let scans' = zipWith (\red lam -> red {segBinOpLambda = lam}) scans lams
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegScan lvl' space scans' ts kbody'
+      Op $ Inner $ SegOp $ SegScan lvl' space ts kbody' scans'
     )
-transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
+transformExp (Op (Inner (SegOp (SegHist lvl space ts kbody ops)))) = do
   (alloc_stms, (lvl', lams', kbody')) <- transformScanRed lvl space lams kbody
   let ops' = zipWith onOp ops lams'
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegHist lvl' space ops' ts kbody'
+      Op $ Inner $ SegOp $ SegHist lvl' space ts kbody' ops'
     )
   where
     lams = map histOp ops
@@ -259,11 +259,11 @@ transformScanRed lvl space ops kbody = do
         <> boundInKernelBody kbody
 
 boundInKernelBody :: KernelBody GPUMem -> Names
-boundInKernelBody = namesFromList . M.keys . scopeOf . kernelBodyStms
+boundInKernelBody = namesFromList . M.keys . scopeOf . bodyStms
 
 addStmsToKernelBody :: Stms GPUMem -> KernelBody GPUMem -> KernelBody GPUMem
 addStmsToKernelBody stms kbody =
-  kbody {kernelBodyStms = stms <> kernelBodyStms kbody}
+  kbody {bodyStms = stms <> bodyStms kbody}
 
 allocsForBody ::
   Extraction ->
@@ -279,7 +279,7 @@ allocsForBody variant_allocs invariant_allocs grid space kbody kbody' m = do
     memoryRequirements
       grid
       space
-      (kernelBodyStms kbody)
+      (bodyStms kbody)
       variant_allocs
       invariant_allocs
 
@@ -358,8 +358,8 @@ extractKernelBodyAllocations ::
     Extraction
   )
 extractKernelBodyAllocations lvl bound_outside bound_kernel =
-  extractGenericBodyAllocations lvl bound_outside bound_kernel kernelBodyStms $
-    \stms kbody -> kbody {kernelBodyStms = stms}
+  extractGenericBodyAllocations lvl bound_outside bound_kernel bodyStms $
+    \stms kbody -> kbody {bodyStms = stms}
 
 extractBodyAllocations ::
   User ->
@@ -615,8 +615,8 @@ offsetMemoryInKernelBody :: RebaseMap -> KernelBody GPUMem -> OffsetM (KernelBod
 offsetMemoryInKernelBody offsets kbody = do
   stms' <-
     collectStms_ $
-      mapM_ (addStm <=< offsetMemoryInStm offsets) (kernelBodyStms kbody)
-  pure kbody {kernelBodyStms = stms'}
+      mapM_ (addStm <=< offsetMemoryInStm offsets) (bodyStms kbody)
+  pure kbody {bodyStms = stms'}
 
 offsetMemoryInBody :: RebaseMap -> Body GPUMem -> OffsetM (Body GPUMem)
 offsetMemoryInBody offsets (Body _ stms res) = do
@@ -870,8 +870,8 @@ unAllocGPUStms = unAllocStms False
     unAllocBody (Body dec stms res) =
       Body dec <$> unAllocStms True stms <*> pure res
 
-    unAllocKernelBody (KernelBody dec stms res) =
-      KernelBody dec <$> unAllocStms True stms <*> pure res
+    unAllocKernelBody (Body dec stms res) =
+      Body dec <$> unAllocStms True stms <*> pure res
 
     unAllocStms nested = mapM (unAllocStm nested)
 

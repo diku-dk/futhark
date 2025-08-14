@@ -368,8 +368,10 @@ def initialise_opencl_object(
 
 
 def opencl_alloc(self, min_size, tag):
-    min_size = 1 if min_size == 0 else min_size
+    min_size = 4 if min_size == 0 else min_size
     assert min_size > 0
+    # Round up to a multiple of four.
+    min_size = ((min_size + 3) // 4) * 4
     return self.pool.allocate(min_size)
 
 

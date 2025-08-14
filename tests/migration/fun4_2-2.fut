@@ -11,4 +11,4 @@ def id2 'a (x: a) (y: a) : (a, a) =
 
 def main (arr: [3]i32) : (i32, i32) =
   let (a, b) = (arr[0], arr[1])
-   in id2 a b
+  in id2 a b

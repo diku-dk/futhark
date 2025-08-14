@@ -32,6 +32,10 @@
 -- }
 
 def main [m] (n: i64) (is: [m]i32) (image: [m]i32) : ([n]i32, [n]i32) =
-  (reduce_by_index (replicate n 0) i32.max i32.lowest (map i64.i32 is) image,
-   map i32.u32 (reduce_by_index (replicate n 0) u32.max u32.lowest
-                                (map i64.i32 is) (map u32.i32 image)))
+  ( reduce_by_index (replicate n 0) i32.max i32.lowest (map i64.i32 is) image
+  , map i32.u32 (reduce_by_index (replicate n 0)
+                                 u32.max
+                                 u32.lowest
+                                 (map i64.i32 is)
+                                 (map u32.i32 image))
+  )

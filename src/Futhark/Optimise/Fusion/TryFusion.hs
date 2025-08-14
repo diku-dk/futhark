@@ -18,9 +18,10 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, tails, (\\))
+import Data.List (find, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Futhark.Analysis.HORep.MapNest (MapNest)
 import Futhark.Analysis.HORep.MapNest qualified as MapNest
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Construct
@@ -65,8 +66,6 @@ liftMaybe Nothing = fail "Nothing"
 liftMaybe (Just x) = pure x
 
 type SOAC = SOAC.SOAC SOACS
-
-type MapNest = MapNest.MapNest SOACS
 
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
 inputToOutput (SOAC.Input ts ia iat) =
@@ -309,29 +308,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                 new_inp
                 (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c))
 
-    ------------------
-    -- Scatter fusion --
-    ------------------
-
-    -- Map-Scatter fusion.
-    --
-    -- The 'inplace' mechanism for kernels already takes care of
-    -- checking that the Scatter is not writing to any array used in
-    -- the Map.
-    ( SOAC.Scatter _len _ivs dests _lam,
-      SOAC.Screma _ _ form,
-      _
-      )
-        | isJust $ isMapSOAC form,
-          -- 1. all arrays produced by the map are ONLY used (consumed)
-          --    by the scatter, i.e., not used elsewhere.
-          all (`notNameIn` unfus_set) outVars,
-          -- 2. all arrays produced by the map are input to the scatter.
-          mapWriteFusionOK outVars ker -> do
-            let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-            success (fsOutNames ker ++ extra_nms) $
-              SOAC.Scatter w new_inp dests res_lam'
-
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
@@ -380,35 +356,10 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                 }
         success (fsOutNames ker ++ returned_outvars) $
           SOAC.Hist w (inp_c_arr <> inp_p_arr) (ops_c <> ops_p) lam'
-
-    -- Scatter-write fusion.
-    ( SOAC.Scatter _w_c ivs_c as_c _lam_c,
-      SOAC.Scatter _w_p ivs_p as_p _lam_p,
-      Horizontal
-      ) -> do
-        let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
-              where
-                (xs_indices, xs_vals) = splitScatterResults as_xs xs
-                (ys_indices, ys_vals) = splitScatterResults as_ys ys
-        let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
-        let body' =
-              Body
-                { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
-                  bodyStms = bodyStms body_p <> bodyStms body_c,
-                  bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
-                }
-        let lam' =
-              Lambda
-                { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
-                  lambdaBody = body',
-                  lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
-                }
-        success (fsOutNames ker ++ returned_outvars) $
-          SOAC.Scatter w (ivs_c ++ ivs_p) (as_c ++ as_p) lam'
-    (SOAC.Scatter {}, _, _) ->
-      fail "Cannot fuse a scatter with anything else than a scatter or a map"
-    (_, SOAC.Scatter {}, _) ->
-      fail "Cannot fuse a scatter with anything else than a scatter or a map"
+    (_, SOAC.Hist {}, _) ->
+      fail "Cannot fuse a Hist with anything else than a Hist or a Map"
+    (SOAC.Hist {}, _, _) ->
+      fail "Cannot fuse a Hist with anything else than a Hist or a Map"
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
@@ -559,7 +510,7 @@ iswim ::
   TryFusion (SOAC, SOAC.ArrayTransforms)
 iswim _ (SOAC.Screma w arrs form) ots
   | Just [Futhark.Scan scan_fun nes] <- Futhark.isScanSOAC form,
-    Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun,
+    Just (map_pat, map_aux, map_w, map_fun) <- rwimPossible scan_fun,
     Just nes_names <- mapM subExpVar nes = do
       let nes_idents = zipWith Ident nes_names $ lambdaReturnType scan_fun
           map_nes = map SOAC.identInput nes_idents
@@ -595,7 +546,7 @@ iswim _ (SOAC.Screma w arrs form) ots
 
       pure
         ( SOAC.Screma map_w map_arrs' (mapSOAC map_fun'),
-          ots SOAC.|> SOAC.Rearrange map_cs perm
+          ots SOAC.|> SOAC.Rearrange map_aux perm
         )
 iswim _ _ _ =
   fail "ISWIM does not apply."
@@ -767,52 +718,19 @@ fixupInputs inpIds inps =
       | otherwise = Nothing
 
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
-pullReshape (SOAC.Screma _ inps form) ots
-  | Just maplam <- Futhark.isMapSOAC form,
-    SOAC.Reshape cs k shape SOAC.:< ots' <- SOAC.viewf ots,
-    all primType $ lambdaReturnType maplam = do
-      let mapw' = case reverse $ shapeDims shape of
-            [] -> intConst Int64 0
-            d : _ -> d
-          trInput inp
-            | arrayRank (SOAC.inputType inp) == 1 =
-                SOAC.addTransform (SOAC.Reshape cs k shape) inp
-            | otherwise =
-                SOAC.addTransform (SOAC.ReshapeOuter cs k shape) inp
-          inputs' = map trInput inps
-          inputTypes = map SOAC.inputType inputs'
-
-      let outersoac ::
-            ([SOAC.Input] -> SOAC) ->
-            (SubExp, [SubExp]) ->
-            TryFusion ([SOAC.Input] -> SOAC)
-          outersoac inner (w, outershape) = do
-            let addDims t = arrayOf t (Shape outershape) NoUniqueness
-                retTypes = map addDims $ lambdaReturnType maplam
-
-            ps <- forM inputTypes $ \inpt ->
-              newParam "pullReshape_param" $
-                stripArray (length shape - length outershape) inpt
-
-            inner_body <-
-              runBodyBuilder $
-                varsRes
-                  <$> (letTupExp "x" <=< SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps)
-            let inner_fun =
-                  Lambda
-                    { lambdaParams = ps,
-                      lambdaReturnType = retTypes,
-                      lambdaBody = inner_body
-                    }
-            pure $ flip (SOAC.Screma w) $ Futhark.mapSOAC inner_fun
-
-      op' <-
-        foldM outersoac (flip (SOAC.Screma mapw') $ Futhark.mapSOAC maplam) $
-          zip (drop 1 $ reverse $ shapeDims shape) $
-            drop 1 . reverse . drop 1 . tails $
-              shapeDims shape
-      pure (op' inputs', ots')
-pullReshape _ _ = fail "Cannot pull reshape"
+pullReshape soac ots = do
+  Just mapnest <- MapNest.fromSOAC soac
+  SOAC.Reshape cs newshape SOAC.:< ots' <- pure $ SOAC.viewf ots
+  -- This handles only the easy case where the underlying lambda is
+  -- scalar. The more complicated cases could also be handled, but
+  -- requires more tricky checks.
+  guard $
+    all
+      ((== MapNest.depth mapnest) . arrayRank)
+      (MapNest.typeOf mapnest)
+  mapnest' <- MapNest.reshape cs (newShape newshape) mapnest
+  soac' <- MapNest.toSOAC mapnest'
+  pure (soac', ots')
 
 -- Tie it all together in exposeInputs (for making inputs to a
 -- consumer available) and pullOutputTransforms (for moving
@@ -825,6 +743,7 @@ exposeInputs ::
 exposeInputs inpIds ker =
   (exposeInputs' =<< pushRearrange')
     <|> (exposeInputs' =<< pullRearrange')
+    <|> (exposeInputs' =<< pullReshape')
     <|> (exposeInputs' =<< pullIndex')
     <|> exposeInputs' ker
   where
@@ -842,6 +761,16 @@ exposeInputs inpIds ker =
       (soac', ot') <- pullRearrange (fsSOAC ker) ot
       unless (SOAC.nullTransforms ot') $
         fail "pullRearrange was not enough"
+      pure
+        ker
+          { fsSOAC = soac',
+            fsOutputTransform = SOAC.noTransforms
+          }
+
+    pullReshape' = do
+      (soac', ot') <- pullReshape (fsSOAC ker) ot
+      unless (SOAC.nullTransforms ot') $
+        fail "pullReshape was not enough"
       pure
         ker
           { fsSOAC = soac',

@@ -12,6 +12,7 @@ module Futhark.IR.Prop.Types
     staticShapes1,
     primType,
     isAcc,
+    isMem,
     arrayOf,
     arrayOfRow,
     arrayOfShape,
@@ -297,6 +298,11 @@ primType _ = False
 isAcc :: TypeBase shape u -> Bool
 isAcc Acc {} = True
 isAcc _ = False
+
+-- | Is this a memory block?
+isMem :: TypeBase shape u -> Bool
+isMem Mem {} = True
+isMem _ = False
 
 -- | Returns the bottommost type of an array.  For @[][]i32@, this
 -- would be @i32@.  If the given type is not an array, it is returned.
