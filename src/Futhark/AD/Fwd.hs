@@ -5,15 +5,15 @@ module Futhark.AD.Fwd (fwdJVP) where
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
-import Data.Bifunctor (second)
-import Data.List (transpose)
+import Data.Bifunctor (bimap, second)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map qualified as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
-import Futhark.Construct
 import Futhark.IR.SOACS
+import Futhark.Tools
+import Futhark.Util (interleave)
 
 zeroTan :: Type -> ADM SubExp
 zeroTan (Prim t) = pure $ constant $ blankPrimValue t
@@ -28,16 +28,15 @@ zeroExp t = error $ "zeroExp: " ++ show t
 
 tanType :: (ArrayShape s, Monoid u) => TypeBase s u -> ADM (TypeBase s u)
 tanType (Acc acc ispace ts u) = do
-  ts_tan <- mapM tanType ts
-  pure $ Acc acc ispace (ts ++ ts_tan) u
+  acc_tan <- tangent acc
+  pure $ Acc acc_tan ispace ts u
 tanType t = do
   shape <- askShape
   pure $
     arrayOf (Prim (elemType t)) (shape `prependShape` arrayShape t) u
   where
     u = case t of
-      Array _ _ u -> u
-      Acc _ _ _ u -> u
+      Array _ _ u' -> u'
       _ -> mempty
 
 slocal' :: ADM a -> ADM a
@@ -100,27 +99,20 @@ insertTan v v' =
 
 class TanBuilder a where
   newTan :: a -> ADM a
-  bundleNew :: a -> ADM [a]
+  bundleNew :: a -> ADM (a, a)
 
 bundleNewList :: (TanBuilder a) => [a] -> ADM [a]
-bundleNewList = fmap mconcat . mapM bundleNew
+bundleNewList = fmap (uncurry interleave . unzip) . mapM bundleNew
 
 instance (ArrayShape s, Monoid u) => TanBuilder (PatElem (TypeBase s u)) where
-  newTan (PatElem p t)
-    | isAcc t = do
-        insertTan p p
-        t' <- tanType t
-        pure $ PatElem p t'
-    | otherwise = do
-        p' <- tanVName p
-        insertTan p p'
-        t' <- tanType t
-        pure $ PatElem p' t'
-  bundleNew pe@(PatElem _ t) = do
+  newTan (PatElem p t) = do
+    p' <- tanVName p
+    insertTan p p'
+    t' <- tanType t
+    pure $ PatElem p' t'
+  bundleNew pe = do
     pe' <- newTan pe
-    if isAcc t
-      then pure [pe']
-      else pure [pe, pe']
+    pure (pe, pe')
 
 newTanPat :: (TanBuilder (PatElem t)) => Pat t -> ADM (Pat t)
 newTanPat (Pat pes) = Pat <$> mapM newTan pes
@@ -132,40 +124,29 @@ instance (ArrayShape s, Monoid u) => TanBuilder (Param (TypeBase s u)) where
   newTan (Param _ p t) = do
     PatElem p' t' <- newTan $ PatElem p t
     pure $ Param mempty p' t'
-  bundleNew param@(Param _ _ (Prim Unit)) =
-    pure [param]
-  bundleNew param@(Param _ _ t) = do
+  bundleNew param = do
     param' <- newTan param
-    if isAcc t
-      then pure [param']
-      else pure [param, param']
+    pure (param, param')
 
-instance
-  (ArrayShape s, Monoid u, Tangent a) =>
-  TanBuilder (Param (TypeBase s u), a)
-  where
+instance (TanBuilder a, Tangent b) => TanBuilder (a, b) where
   newTan (p, x) = (,) <$> newTan p <*> tangent x
   bundleNew (p, x) = do
-    b <- bundleNew p
+    p' <- newTan p
     x_tan <- tangent x
-    pure $ zip b [x, x_tan]
+    pure ((p, x), (p', x_tan))
 
 class Tangent a where
   tangent :: a -> ADM a
-  bundleTan :: a -> ADM [a]
+  bundleTan :: a -> ADM (a, a)
 
 instance (ArrayShape s, Monoid u) => Tangent (TypeBase s u) where
   tangent = tanType
-  bundleTan t
-    | isAcc t = do
-        t' <- tangent t
-        pure [t']
-    | otherwise = do
-        t' <- tangent t
-        pure [t, t']
+  bundleTan t = do
+    t' <- tangent t
+    pure (t, t')
 
 bundleTangents :: (Tangent a) => [a] -> ADM [a]
-bundleTangents = (mconcat <$>) . mapM bundleTan
+bundleTangents = fmap (uncurry interleave . unzip) . mapM bundleTan
 
 instance Tangent VName where
   tangent v = do
@@ -174,26 +155,25 @@ instance Tangent VName where
       Just v_tan -> pure v_tan
       Nothing -> do
         t <- lookupType v
+        when (isAcc t) $
+          error $
+            "Missing tangent for accumulator " <> prettyString v
         letExp (baseString v <> "_implicit_tan") $ zeroExp t
   bundleTan v = do
-    t <- lookupType v
-    if isAcc t
-      then pure [v]
-      else do
-        v_tan <- tangent v
-        pure [v, v_tan]
+    v_tan <- tangent v
+    pure (v, v_tan)
 
 instance Tangent SubExp where
   tangent (Constant c) = zeroTan $ Prim $ primValueType c
   tangent (Var v) = Var <$> tangent v
   bundleTan c@Constant {} = do
     c_tan <- tangent c
-    pure [c, c_tan]
-  bundleTan (Var v) = fmap Var <$> bundleTan v
+    pure (c, c_tan)
+  bundleTan (Var v) = bimap Var Var <$> bundleTan v
 
 instance Tangent SubExpRes where
   tangent (SubExpRes cs se) = SubExpRes cs <$> tangent se
-  bundleTan (SubExpRes cs se) = map (SubExpRes cs) <$> bundleTan se
+  bundleTan (SubExpRes cs se) = bimap (SubExpRes cs) (SubExpRes cs) <$> bundleTan se
 
 asVName :: SubExp -> ADM VName
 asVName (Var v) = pure v
@@ -313,21 +293,31 @@ basicFwd pat aux op = do
     _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
 
 fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)
-fwdLambda (Lambda params ret body) = do
+fwdLambda (Lambda params _ body) = do
   params' <- bundleNewList params
-  Lambda params'
-    <$> bundleTangents ret
-    <*> localScope (scopeOfLParams params') (fwdBody body)
+  mkLambda params' $ bodyBind =<< fwdBody body
+
+fwdWithAccLambda :: [WithAccInput SOACS] -> Lambda SOACS -> ADM (Lambda SOACS)
+fwdWithAccLambda inputs (Lambda params _ body) = do
+  let (cert_params, acc_params) = splitAt (length inputs) params
+  cert_params_tan <- replicateM (length inputs) $ newParam "acc_cert_tan" $ Prim Unit
+  acc_params_tan <- zipWithM mkAccParam (map paramName cert_params_tan) inputs
+
+  mkLambda (cert_params <> cert_params_tan <> acc_params <> acc_params_tan) $ do
+    zipWithM_
+      insertTan
+      (map paramName (cert_params <> acc_params))
+      (map paramName (cert_params_tan <> acc_params_tan))
+    bodyBind =<< fwdBody body
+  where
+    mkAccParam c (shape, arrs, _) = do
+      ts <- map (stripArray (shapeRank shape)) <$> mapM lookupType arrs
+      newParam "acc_p_tan" $ Acc c shape ts NoUniqueness
 
 fwdStreamLambda :: Lambda SOACS -> ADM (Lambda SOACS)
-fwdStreamLambda (Lambda params ret body) = do
+fwdStreamLambda (Lambda params _ body) = do
   params' <- (take 1 params ++) <$> bundleNewList (drop 1 params)
-  Lambda params'
-    <$> bundleTangents ret
-    <*> localScope (scopeOfLParams params') (fwdBody body)
-
-interleave :: [a] -> [a] -> [a]
-interleave xs ys = concat $ transpose [xs, ys]
+  mkLambda params' $ bodyBind =<< fwdBody body
 
 zeroFromSubExp :: SubExp -> ADM VName
 zeroFromSubExp (Constant c) =
@@ -414,10 +404,11 @@ fwdSOAC _ _ VJP {} =
 
 fwdStm :: Stm SOACS -> ADM ()
 fwdStm (Let pat aux (BasicOp (UpdateAcc safety acc i x))) = do
-  pat' <- bundleNewPat pat
-  x' <- bundleTangents x
+  x_tan <- mapM tangent x
   acc_tan <- tangent acc
-  addStm $ Let pat' aux $ BasicOp $ UpdateAcc safety acc_tan i x'
+  addStm $ Let pat aux $ BasicOp $ UpdateAcc safety acc i x
+  res_tan <- letExp "tan" $ BasicOp $ UpdateAcc safety acc_tan i x_tan
+  insertTan (head $ patNames pat) res_tan
 fwdStm stm@(Let pat aux (BasicOp e)) = do
   -- XXX: this has to be too naive.
   unless (any isAcc $ patTypes pat) $ addStm stm
@@ -467,25 +458,23 @@ fwdStm (Let pat aux (Loop val_pats loop@(ForLoop i it bound) body)) = do
       fwdBody body
   addStm $ Let pat' aux $ Loop val_pats' (ForLoop i it bound) body'
 fwdStm (Let pat aux (WithAcc inputs lam)) = do
-  inputs' <- forM inputs $ \(shape, arrs, op) -> do
+  inputs_tan <- forM inputs $ \(shape, arrs, op) -> do
     arrs_tan <- mapM tangent arrs
     op' <- case op of
       Nothing -> pure Nothing
       Just (op_lam, nes) -> do
-        nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
-        op_lam' <- fwdLambda op_lam
-        case op_lam' of
-          Lambda ps ret body -> do
-            let op_lam'' = Lambda (removeIndexTans (shapeRank shape) ps) ret body
-            pure $ Just (op_lam'', interleave nes nes_tan)
-    pure (shape, arrs <> arrs_tan, op')
+        -- We assume that op_lam has unit partial derivatives (i.e., is some
+        -- kind of addition). This is the case for all WithAccs produced by VJP.
+        lams <- mapM addLambda $ lambdaReturnType op_lam
+        -- Horizontally fuse the lambdas to produce a single one.
+        idx_params <- replicateM (shapeRank shape) $ newParam "idx" $ Prim int64
+        let (xs, ys) = bimap concat concat $ unzip $ map (splitAt 1 . lambdaParams) lams
+        op_lam' <- mkLambda (idx_params <> xs <> ys) $ mconcat <$> mapM (bodyBind . lambdaBody) lams
+        pure $ Just (op_lam', nes)
+    pure (shape, arrs_tan, op')
   pat' <- bundleNewPat pat
-  lam' <- fwdLambda lam
-  addStm $ Let pat' aux $ WithAcc inputs' lam'
-  where
-    removeIndexTans 0 ps = ps
-    removeIndexTans i (p : _ : ps) = p : removeIndexTans (i - 1) ps
-    removeIndexTans _ ps = ps
+  lam' <- fwdWithAccLambda inputs lam
+  addStm $ Let pat' aux $ WithAcc (interleave inputs inputs_tan) lam'
 fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ prettyString stm ++ "\n" ++ show stm

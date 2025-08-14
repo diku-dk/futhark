@@ -314,12 +314,6 @@ noAdjsFor names m = do
   where
     names' = namesToList names
 
-addBinOp :: PrimType -> BinOp
-addBinOp (IntType it) = Add it OverflowWrap
-addBinOp (FloatType ft) = FAdd ft
-addBinOp Bool = LogAnd
-addBinOp Unit = LogAnd
-
 tabNest ::
   (MonadBuilder m, Rep m ~ SOACS) =>
   Int ->
@@ -344,27 +338,6 @@ tabNest = tabNest' []
         pure (ret, varsRes res)
       let lam = Lambda (iparam : params) ret (Body () stms res)
       letTupExp "tab" $ Op $ Screma w (iota : vs) (mapSOAC lam)
-
--- | Construct a lambda for adding two values of the given type.
-addLambda :: Type -> ADM (Lambda SOACS)
-addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
-addLambda t@Array {} = do
-  xs_p <- newParam "xs" t
-  ys_p <- newParam "ys" t
-  lam <- addLambda $ rowType t
-  body <- insertStmsM $ do
-    res <-
-      letSubExp "lam_map" . Op $
-        Screma (arraySize 0 t) [paramName xs_p, paramName ys_p] (mapSOAC lam)
-    pure $ resultBody [res]
-  pure
-    Lambda
-      { lambdaParams = [xs_p, ys_p],
-        lambdaReturnType = [t],
-        lambdaBody = body
-      }
-addLambda t =
-  error $ "addLambda: " ++ show t
 
 -- | Construct a lambda for binop'ing two values of the given type,
 -- which may be arrays.

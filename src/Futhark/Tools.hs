@@ -11,6 +11,8 @@ module Futhark.Tools
     partitionChunkedFoldParameters,
     withAcc,
     doScatter,
+    addBinOp,
+    addLambda,
 
     -- * Primitive expressions
     module Futhark.Analysis.PrimExp.Convert,
@@ -236,3 +238,37 @@ doScatter desc rank dest arrs mk = do
       Screma w (map paramName acc_ps <> arrs) (mapSOAC map_lam)
 
   letTupExp desc $ WithAcc [(acc_shape, [v], Nothing) | v <- dest] withacc_lam
+
+-- | The most addition-like binary operator for some primitive type.
+addBinOp :: PrimType -> BinOp
+addBinOp (IntType it) = Add it OverflowWrap
+addBinOp (FloatType ft) = FAdd ft
+addBinOp Bool = LogAnd
+addBinOp Unit = LogAnd
+
+-- | Construct a lambda for adding two values of the given type, Using SOACs to handle arrays.
+addLambda ::
+  ( OpC (Rep m) ~ SOAC,
+    MonadBuilder m,
+    Buildable (Rep m)
+  ) =>
+  TypeBase Shape NoUniqueness ->
+  m (Lambda (Rep m))
+addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
+addLambda t@Array {} = do
+  xs_p <- newParam "xs" t
+  ys_p <- newParam "ys" t
+  lam <- addLambda $ rowType t
+  body <- insertStmsM $ do
+    res <-
+      letSubExp "lam_map" . Op $
+        Screma (arraySize 0 t) [paramName xs_p, paramName ys_p] (mapSOAC lam)
+    pure $ resultBody [res]
+  pure
+    Lambda
+      { lambdaParams = [xs_p, ys_p],
+        lambdaReturnType = [t],
+        lambdaBody = body
+      }
+addLambda t =
+  error $ "addLambda: " ++ show t
