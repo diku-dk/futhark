@@ -134,10 +134,10 @@ existential = any ext . shapeDims . arrayShape
     ext (Free _) = False
 
 -- | Return the uniqueness of a type.
-uniqueness :: (Monoid u) => TypeBase shape u -> u
+uniqueness :: TypeBase shape Uniqueness -> Uniqueness
 uniqueness (Array _ _ u) = u
 uniqueness (Acc _ _ _ u) = u
-uniqueness _ = mempty
+uniqueness _ = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
 unique :: TypeBase shape Uniqueness -> Bool

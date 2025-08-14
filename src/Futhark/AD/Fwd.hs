@@ -33,10 +33,12 @@ tanType (Acc acc ispace ts u) = do
 tanType t = do
   shape <- askShape
   pure $
-    arrayOf
-      (Prim (elemType t))
-      (shape `prependShape` arrayShape t)
-      (uniqueness t)
+    arrayOf (Prim (elemType t)) (shape `prependShape` arrayShape t) u
+  where
+    u = case t of
+      Array _ _ u -> u
+      Acc _ _ _ u -> u
+      _ -> mempty
 
 slocal' :: ADM a -> ADM a
 slocal' = slocal id
