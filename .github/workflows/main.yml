@@ -87,24 +87,24 @@ jobs:
 
     - name: Build
       run: |
-        cp -r tools/release/skeleton futhark-nightly-macos-x86_64
+        cp -r tools/release/skeleton futhark-nightly-macos-arm64
 
-        mkdir -p futhark-nightly-macos-x86_64/bin
+        mkdir -p futhark-nightly-macos-arm64/bin
         cabal v2-update
-        cabal install --install-method=copy --overwrite-policy=always --installdir=futhark-nightly-macos-x86_64/bin
-        mkdir -p futhark-nightly-macos-x86_64/share/man/man1/
+        cabal install --install-method=copy --overwrite-policy=always --installdir=futhark-nightly-macos-arm64/bin
+        mkdir -p futhark-nightly-macos-arm64/share/man/man1/
         (cd docs; make man)
-        cp -r docs/_build/man/* futhark-nightly-macos-x86_64/share/man/man1/
+        cp -r docs/_build/man/* futhark-nightly-macos-arm64/share/man/man1/
 
-        mkdir -p futhark-nightly-macos-x86_64/share/futhark
-        cp LICENSE futhark-nightly-macos-x86_64/share/futhark/
-        echo "${GITHUB_SHA}" > futhark-nightly-macos-x86_64/commit-id
-        tar -Jcf futhark-nightly-macos-x86_64.tar.xz futhark-nightly-macos-x86_64
+        mkdir -p futhark-nightly-macos-arm64/share/futhark
+        cp LICENSE futhark-nightly-macos-arm64/share/futhark/
+        echo "${GITHUB_SHA}" > futhark-nightly-macos-arm64/commit-id
+        tar -Jcf futhark-nightly-macos-arm64.tar.xz futhark-nightly-macos-arm64
 
     - uses: actions/upload-artifact@v4
       with:
-        name: futhark-nightly-macos-x86_64.tar.xz
-        path: futhark-nightly-macos-x86_64.tar.xz
+        name: futhark-nightly-macos-arm64.tar.xz
+        path: futhark-nightly-macos-arm64.tar.xz
 
   build-windows-cabal:
     runs-on: windows-latest
@@ -690,7 +690,7 @@ jobs:
 
     - uses: actions/download-artifact@v4
       with:
-        name: futhark-nightly-macos-x86_64.tar.xz
+        name: futhark-nightly-macos-arm64.tar.xz
 
     - uses: actions/download-artifact@v4
       with:
@@ -718,5 +718,5 @@ jobs:
         title: "nightly"
         files: |
           futhark-nightly-linux-x86_64.tar.xz
-          futhark-nightly-macos-x86_64.tar.xz
+          futhark-nightly-macos-arm64.tar.xz
           futhark-nightly-windows-x86_64.zip
