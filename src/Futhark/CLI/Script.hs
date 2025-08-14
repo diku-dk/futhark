@@ -114,7 +114,7 @@ main = mainWithOptions initialOptions commandLineOptions "PROGRAM [EXP]" $ \args
             vs <- mapM (evalExp extScriptBuiltin s) scripts'
             case reverse vs of
               [] -> pure Nothing
-              v : _ -> Just <$> getExpValue s v
+              v : _ -> Just <$> getExpValue s v <* freeValue s v
         case r of
           Left e -> do
             T.hPutStrLn stderr e
