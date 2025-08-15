@@ -15,3 +15,5 @@
 - error: {lhs: "copyDWIM p [] y [DimFix i]", rhs: "copyDWIMFix p [] y [i]" }
 - error: {lhs: "copyDWIM x [DimFix i] y []", rhs: "copyDWIMFix x [i] y []" }
 - error: {lhs: "copyDWIM x [DimFix i] y [DimFix j]", rhs: "copyDWIMFix x [i] y [j]" }
+- error: {lhs: "letBindNames (patNames x)", rhs: "letBind x" }
+- error: {lhs: "newNameFromString (baseString x)", rhs: "newName x" }
