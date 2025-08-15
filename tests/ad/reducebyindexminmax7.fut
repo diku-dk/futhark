@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- compiled random input { [500]i64 [100][30]f32 [500][30]f32 } output { true }
 
 def primal [n] [m] [k] (is: [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =

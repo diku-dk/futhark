@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def euclid_dist_2 [d] (pt1: [d]f32) (pt2: [d]f32) : f32 =
   f32.sum (map (\x -> x * x) (map2 (-) pt1 pt2))
 

@@ -1,5 +1,6 @@
 -- An array is both a 'map' input and a free variable in the lambda.
 -- ==
+-- tags { autodiff }
 -- entry: fwd_J rev_J
 -- input { [1,2,3] }
 -- output {

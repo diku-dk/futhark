@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- structure { BinOp 2 }
 
 def main (A: [](i32, i32)) (n: i64) =

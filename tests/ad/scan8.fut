@@ -1,5 +1,6 @@
 -- Scan with 3x3 matrix multiplication.
 -- ==
+-- tags { autodiff }
 -- entry: fwd rev
 -- input { [[1f32,2f32,3f32,4f32,5f32,6f32,7f32,8f32,9f32],
 -- [9f32,8f32,7f32,6f32,5f32,4f32,3f32,2f32,1f32],

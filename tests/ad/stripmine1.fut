@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def square [n] (xs: [n]i32) =
   let xs' = copy xs
   in #[stripmine(2)]

@@ -1,4 +1,7 @@
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: f_jvp
 -- input { 1i64 [1,2,3,4] }
 -- output { [2,3,4,1] }
