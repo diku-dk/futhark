@@ -556,7 +556,7 @@ instance IsOp SOAC where
           concatMap depsOfScan (zip scans $ chunks (scanSizes scans) scans_in)
         reds_deps =
           concatMap depsOfRed (zip reds $ chunks (redSizes reds) reds_in)
-     in lambdaDependencies mempty post_lam (scans_deps <> reds_deps <> map_deps)
+     in reds_deps <> lambdaDependencies mempty post_lam (scans_deps <> map_deps)
     where
       depsOfScan (Scan lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
