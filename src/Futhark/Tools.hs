@@ -109,11 +109,27 @@ dissectScrema ::
   m ()
 dissectScrema pat w (ScremaForm map_lam scans reds post_lam) arrs = do
   let num_reds = redResults reds
+      num_scans = scanResults scans
+      reds_ts = concatMap (lambdaReturnType . redLambda) reds
       (red_res, scan_map_res) = splitAt num_reds $ patNames pat
+      (scan_pars, map_pars) = splitAt num_scans $ lambdaParams post_lam
+      post_res = bodyResult $ lambdaBody post_lam
 
   to_red <- replicateM num_reds $ newVName "to_red"
+  red_pars <- mapM (newParam "x") reds_ts
+  let red_post_res = paramName <$> red_pars
 
-  let maposcanomap = maposcanomapSOAC post_lam scans map_lam
+  let post_lam' =
+        post_lam
+          { lambdaParams = scan_pars <> red_pars <> map_pars,
+            lambdaBody =
+              (lambdaBody post_lam)
+                { bodyResult = varsRes red_post_res <> post_res
+                },
+            lambdaReturnType = reds_ts <> lambdaReturnType post_lam
+          }
+
+  let maposcanomap = maposcanomapSOAC post_lam' scans map_lam
   letBindNames (to_red <> scan_map_res) $
     Op (Screma w arrs maposcanomap)
 

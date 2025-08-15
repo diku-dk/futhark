@@ -28,6 +28,7 @@ module Futhark.IR.SOACS.SOAC
     scanSOAC,
     reduceSOAC,
     mapSOAC,
+    isMaposcanomapSOAC,
     isScanomapSOAC,
     isRedomapSOAC,
     isScanSOAC,
@@ -277,6 +278,12 @@ isScanomapSOAC (ScremaForm map_lam scans reds post_lam) = do
   guard $ not $ null scans
   guard $ isIdentityLambda post_lam
   pure (scans, map_lam)
+
+isMaposcanomapSOAC :: ScremaForm rep -> Maybe (Lambda rep, [Scan rep], Lambda rep)
+isMaposcanomapSOAC (ScremaForm map_lam scans reds post_lam) = do
+  guard $ null reds
+  guard $ not $ null scans
+  pure (post_lam, scans, map_lam)
 
 -- | Does this Screma correspond to pure scan?
 isScanSOAC :: ScremaForm rep -> Maybe [Scan rep]
