@@ -356,14 +356,54 @@ zeroFromSubExp (Var v) = do
   t <- lookupType v
   letExp "zero" $ zeroExp t
 
+vecPerm :: Shape -> Type -> [Int]
+vecPerm tan_shape t =
+  [shapeRank tan_shape]
+    ++ [0 .. shapeRank tan_shape - 1]
+    ++ [shapeRank tan_shape + 1 .. arrayRank t - 1]
+
+pushTanShape :: VName -> ADM VName
+pushTanShape v = do
+  tan_shape <- askShape
+  v_t <- lookupType v
+  if tan_shape == mempty || arrayShape v_t == tan_shape || isAcc v_t
+    then pure v
+    else do
+      let perm = vecPerm tan_shape v_t
+      letExp (baseString v <> "_tr") $ BasicOp $ Rearrange v perm
+
+soacInputsWithTangents :: [VName] -> ADM [VName]
+soacInputsWithTangents xs = do
+  xs_tans <- mapM (pushTanShape <=< tangent) xs
+  pure $ interleave xs xs_tans
+
+soacResPat :: Pat Type -> ADM (Pat Type, [(Pat Type, VName)])
+soacResPat (Pat pes) = do
+  pes_tan <- mapM newTan pes
+  bimap (Pat . interleave pes) mconcat . unzip <$> mapM tweakPatElem pes_tan
+  where
+    tweakPatElem pe@(PatElem v v_t) = do
+      tan_shape <- askShape
+      if tan_shape == mempty || arrayShape v_t == tan_shape || isAcc v_t
+        then pure (pe, [])
+        else do
+          let perm = vecPerm tan_shape v_t
+          v' <- newName v
+          pure (PatElem v' $ rearrangeType perm v_t, [(Pat [pe], v')])
+
 fwdSOAC :: Pat Type -> StmAux () -> SOAC SOACS -> ADM ()
 fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds)) = do
-  pat' <- bundleNewPat pat
-  xs' <- bundleTangents xs
+  (pat', to_transpose) <- soacResPat pat
+  xs' <- soacInputsWithTangents xs
   f' <- fwdLambda f
   scs' <- mapM fwdScan scs
   reds' <- mapM fwdRed reds
   addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm f' scs' reds'
+  tan_shape <- askShape
+  forM_ to_transpose $ \(rpat, v) -> do
+    v_t <- lookupType v
+    let perm = rearrangeInverse $ vecPerm tan_shape v_t
+    letBind rpat $ BasicOp $ Rearrange v perm
   where
     zeroTans lam =
       mapM (letSubExp "zero" . zeroExp <=< tanType) $ lambdaReturnType lam
