@@ -214,7 +214,7 @@ topDownRules =
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
 bottomUpRules =
   [ RuleOp removeDeadMapping,
-    RuleOp removeDeadReduction,
+    RuleOp removeDeadReducxtion,
     RuleBasicOp removeUnnecessaryCopy,
     RuleOp liftIdentityStreaming,
     RuleOp mapOpToOp
@@ -421,11 +421,15 @@ removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm lam scans r
               { lambdaBody = (lambdaBody lam) {bodyResult = nonmap_res <> map_res'},
                 lambdaReturnType = nonmap_ts <> map_ts'
               }
+          scan_ts = concatMap (lambdaReturnType . scanLambda) scans
        in if map_pes /= map_pes'
             then
               Simplify . auxing aux $
-                letBind (Pat $ nonmap_pes <> map_pes') . Op $
-                  Screma w arrs (ScremaForm lam' scans reds post_lam)
+                letBind (Pat $ nonmap_pes <> map_pes')
+                  . Op
+                  . Screma w arrs
+                  . ScremaForm lam' scans reds
+                  =<< mkIdentityLambda (scan_ts <> map_ts')
             else Skip
   where
     num_nonmap_res = scanResults scans + redResults reds
