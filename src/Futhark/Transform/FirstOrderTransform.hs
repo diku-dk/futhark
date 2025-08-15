@@ -206,10 +206,11 @@ transformSOAC pat soac@(Screma w arrs (ScremaForm map_lam scans reds post_lam)) 
 
       mapM_ addStm $ bodyStms $ lambdaBody post_lam
 
+      let post_res = bodyResult $ lambdaBody post_lam
       outarrs <-
-        certifying (foldMap resCerts res) $
+        certifying (foldMap resCerts post_res) $
           letwith (map paramName out_params) (Var i) $
-            map resSubExp res
+            map resSubExp post_res
 
       pure . concat $
         [ scan_res',
