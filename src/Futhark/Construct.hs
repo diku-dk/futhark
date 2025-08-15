@@ -107,6 +107,7 @@ module Futhark.Construct
     fullSliceNum,
     isFullSlice,
     sliceAt,
+    iota64,
 
     -- * Result types
     instantiateShapes,
@@ -566,6 +567,11 @@ fullSlice t slice =
 sliceAt :: Type -> Int -> [DimIndex SubExp] -> Slice SubExp
 sliceAt t n slice =
   fullSlice t $ map sliceDim (take n $ arrayDims t) ++ slice
+
+-- | Produce a straightforward `Int64` `Iota` of the given length with offset 0
+-- and stride 1.
+iota64 :: SubExp -> Exp rep
+iota64 n = BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
 
 -- | Like 'fullSlice', but the dimensions are simply numeric.
 fullSliceNum :: (Num d) => [d] -> [DimIndex d] -> Slice d

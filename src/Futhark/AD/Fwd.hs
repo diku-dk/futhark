@@ -29,7 +29,8 @@ zeroExp t = error $ "zeroExp: " ++ show t
 tanType :: (ArrayShape s, Monoid u) => TypeBase s u -> ADM (TypeBase s u)
 tanType (Acc acc ispace ts u) = do
   acc_tan <- tangent acc
-  pure $ Acc acc_tan ispace ts u
+  tan_shape <- askShape
+  pure $ Acc acc_tan (tan_shape <> ispace) ts u
 tanType t = do
   shape <- askShape
   pure $
@@ -158,7 +159,8 @@ instance Tangent VName where
         when (isAcc t) $
           error $
             "Missing tangent for accumulator " <> prettyString v
-        letExp (baseString v <> "_implicit_tan") $ zeroExp t
+        tan_shape <- askShape
+        letExp (baseString v <> "_implicit_tan") $ zeroExp $ t `arrayOfShape` tan_shape
   bundleTan v = do
     v_tan <- tangent v
     pure (v, v_tan)
@@ -196,6 +198,32 @@ withTan x f = do
         fmap (subExpsRes . pure) . letSubExp "tan"
           =<< f (Var (paramName x_tan_p))
       pure $ Op $ Screma w [x_tan_v] (mapSOAC lam)
+
+withTansI ::
+  VName ->
+  [SubExp] ->
+  ([SubExp] -> VName -> [SubExp] -> ADM (Exp SOACS)) ->
+  ADM (Exp SOACS)
+withTansI x ys f = do
+  shape <- askShape
+  x_tan <- tangent x
+  ys_tan <- mapM tangent ys
+  if shape == mempty
+    then f [] x_tan ys_tan
+    else do
+      let w = shapeSize 0 shape
+      ys_tan_vs <- mapM asVName ys_tan
+      iota_p <- newParam "iota_p" $ Prim int64
+      x_tan_p <- newParam "x_tanp" . rowType =<< lookupType x_tan
+      ys_tan_ps <- mapM (newParam "y_tanp" . rowType <=< lookupType) ys_tan_vs
+      lam <- mkLambda (iota_p : x_tan_p : ys_tan_ps) $ do
+        fmap (subExpsRes . pure) . letSubExp "tan"
+          =<< f
+            [Var $ paramName iota_p]
+            (paramName x_tan_p)
+            (map (Var . paramName) ys_tan_ps)
+      iota_v <- letExp "iota" $ iota64 w
+      pure $ Op $ Screma w (iota_v : x_tan : ys_tan_vs) (mapSOAC lam)
 
 withTans ::
   PrimType ->
@@ -237,11 +265,11 @@ basicFwd pat aux op = do
       let t = unOpType unop
           x_pe = primExpFromSubExp t x
           dx = pdUnOp unop x_pe
-      auxing aux $ letBindNames (patNames pat_tan) <=< withTan x $ \x_tan ->
+      auxing aux $ letBind pat_tan <=< withTan x $ \x_tan ->
         toExp $ primExpFromSubExp t x_tan ~*~ dx
     BinOp bop x y -> do
       let t = binOpType bop
-      auxing aux . letBindNames (patNames pat_tan) <=< withTans t x y $
+      auxing aux . letBind pat_tan <=< withTans t x y $
         \x_tan y_tan ->
           let (wrt_x, wrt_y) =
                 pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
@@ -311,8 +339,9 @@ fwdWithAccLambda inputs (Lambda params _ body) = do
     bodyBind =<< fwdBody body
   where
     mkAccParam c (shape, arrs, _) = do
+      tan_shape <- askShape
       ts <- map (stripArray (shapeRank shape)) <$> mapM lookupType arrs
-      newParam "acc_p_tan" $ Acc c shape ts NoUniqueness
+      newParam "acc_p_tan" $ Acc c (tan_shape <> shape) ts NoUniqueness
 
 fwdStreamLambda :: Lambda SOACS -> ADM (Lambda SOACS)
 fwdStreamLambda (Lambda params _ body) = do
@@ -404,11 +433,10 @@ fwdSOAC _ _ VJP {} =
 
 fwdStm :: Stm SOACS -> ADM ()
 fwdStm (Let pat aux (BasicOp (UpdateAcc safety acc i x))) = do
-  x_tan <- mapM tangent x
-  acc_tan <- tangent acc
+  pat_tan <- newTanPat pat
   addStm $ Let pat aux $ BasicOp $ UpdateAcc safety acc i x
-  res_tan <- letExp "tan" $ BasicOp $ UpdateAcc safety acc_tan i x_tan
-  insertTan (head $ patNames pat) res_tan
+  addStm . Let pat_tan aux <=< withTansI acc x $ \is acc_tan x_tan' -> do
+    pure $ BasicOp $ UpdateAcc safety acc_tan (is <> i) x_tan'
 fwdStm stm@(Let pat aux (BasicOp e)) = do
   -- XXX: this has to be too naive.
   unless (any isAcc $ patTypes pat) $ addStm stm
@@ -460,6 +488,7 @@ fwdStm (Let pat aux (Loop val_pats loop@(ForLoop i it bound) body)) = do
 fwdStm (Let pat aux (WithAcc inputs lam)) = do
   inputs_tan <- forM inputs $ \(shape, arrs, op) -> do
     arrs_tan <- mapM tangent arrs
+    tan_shape <- askShape
     op' <- case op of
       Nothing -> pure Nothing
       Just (op_lam, nes) -> do
@@ -471,7 +500,7 @@ fwdStm (Let pat aux (WithAcc inputs lam)) = do
         let (xs, ys) = bimap concat concat $ unzip $ map (splitAt 1 . lambdaParams) lams
         op_lam' <- mkLambda (idx_params <> xs <> ys) $ mconcat <$> mapM (bodyBind . lambdaBody) lams
         pure $ Just (op_lam', nes)
-    pure (shape, arrs_tan, op')
+    pure (tan_shape <> shape, arrs_tan, op')
   pat' <- bundleNewPat pat
   lam' <- fwdWithAccLambda inputs lam
   addStm $ Let pat' aux $ WithAcc (interleave inputs inputs_tan) lam'
