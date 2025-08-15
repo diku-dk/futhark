@@ -1,5 +1,8 @@
 import "../../accs/intrinsics"
 
+-- ==
+-- tags { autodiff }
+
 def f (acc: *acc ([]i32)) i = write acc i (i32.i64 i)
 
 -- ==

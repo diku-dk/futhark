@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: rev
 -- input { [2f32,1f32,1f32,1f32,1f32] [0i64,0i64,0i64,0i64,0i64] [1f32,2f32,3f32,4f32,10f32] } output { [5f32,0f32,0f32,0f32,0f32] }
 

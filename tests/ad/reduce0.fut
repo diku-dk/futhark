@@ -1,5 +1,6 @@
 -- Simple reduce with multiplication
 -- ==
+-- tags { autodiff }
 -- entry: rev
 -- input { [1.0f32, 2.0f32, 3.0f32, 4.0f32] 1.0f32 } output { [24.0f32, 12.0f32, 8.0f32, 6.0f32] 24.0f32 }
 

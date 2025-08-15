@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: fwd rev
 -- input { 1i32 [1i32,2i32,3i32] }
 -- output { [1i32,2i32,3i32] }

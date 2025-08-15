@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: fwd rev
 -- input { 1f32 } output { -1f32 }
 -- input { 3f32 } output { -1f32 }
