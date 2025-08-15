@@ -1,4 +1,7 @@
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: f_jvp
 -- input { true 5.0 7.0 }
 -- output { 7.0 5.0 }

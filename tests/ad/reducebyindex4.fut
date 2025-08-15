@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 --  entry: rev
 --  input {
 --    [ 0i64, 1i64, 2i64, 1i64, 0i64, 1i64, 2i64, 1i64, 0i64]

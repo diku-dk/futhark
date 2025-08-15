@@ -1,4 +1,7 @@
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: add mul
 -- compiled random input { [1000]i32 } output { true }
 

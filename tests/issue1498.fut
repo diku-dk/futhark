@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def pi = 3.141592653589793f32
 
 def mpr_node [N] [T]

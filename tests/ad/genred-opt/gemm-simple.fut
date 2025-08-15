@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: rev_J
 -- compiled random input { 0.5f32 0.7f32 [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 [1024][1024]f32} auto output
 

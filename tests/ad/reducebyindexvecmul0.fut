@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: vecmul
 -- input { [5i64, 3i64, 2i64, 4i64, 3i64, 3i64, 4i64, 2i64, 2i64, 3i64]
 --                  [[8i32, 5i32, -2i32, 4i32, 6i32],

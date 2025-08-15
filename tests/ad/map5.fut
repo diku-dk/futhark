@@ -1,5 +1,6 @@
 -- Map with free array variable.
 -- ==
+-- tags { autodiff }
 -- entry: fwd_J rev_J
 -- input { [[1,2,3],[4,5,6]] [0,0] }
 -- output { [[1, 0], [0, 1]] }

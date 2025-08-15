@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: fwd rev
 -- input { true } output { true }
 

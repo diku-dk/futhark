@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: rev fwd
 -- input {
 --   [[[0f32,1f32],[2f32,3f32]],

@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 -- computes x^2*y^3
 def pow y x =
   loop acc = 1

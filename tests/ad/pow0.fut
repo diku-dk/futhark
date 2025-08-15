@@ -1,6 +1,9 @@
 -- The power function has a dangerous kink for x==0.
 
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: fwd
 -- input { 0.0 1.0 } output { 1.0 }
 

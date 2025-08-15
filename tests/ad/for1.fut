@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def pow_list [n] y (xs: [n]i32) =
   loop accs = (replicate n 1)
   for _i < y do

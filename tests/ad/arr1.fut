@@ -1,6 +1,7 @@
 def f (x, y) : [2]f64 = [x + y, x * y]
 
 -- ==
+-- tags { autodiff }
 -- entry: f_vjp f_jvp
 -- input { 5.0 7.0 }
 -- output { [1.0,7.0] [1.0, 5.0] }

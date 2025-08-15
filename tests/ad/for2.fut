@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def mult_list xs =
   loop start = 1
   for x in xs do

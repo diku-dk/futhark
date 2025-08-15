@@ -1,5 +1,6 @@
 -- JVP form of #2229.
 -- ==
+-- tags { autodiff }
 -- input { 1.0 5.0 }
 -- output { -2.0 }
 
