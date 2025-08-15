@@ -71,13 +71,14 @@ standardPipeline =
 adPipeline :: Pipeline SOACS SOACS
 adPipeline =
   passes
-    [ applyAD,
-      simplifySOACS,
-      performCSE True,
-      fuseSOACs,
-      performCSE True,
-      simplifySOACS
-    ]
+    []
+
+-- applyAD,
+-- simplifySOACS,
+-- performCSE True,
+-- fuseSOACs,
+-- performCSE True,
+-- simplifySOACS
 
 -- | The pipeline used by the CUDA, HIP, and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
