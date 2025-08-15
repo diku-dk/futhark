@@ -497,7 +497,7 @@ maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Index arr slice))) acc
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
 maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
-  | Just (scans, map_lam) <- isScanomapSOAC form,
+  | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     Scan lam nes <- singleScan scans =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
@@ -507,7 +507,6 @@ maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
               localScope (typeEnvFromDistAcc acc') $ do
                 nest' <- expandKernelNest pat_unused nest
                 map_lam' <- soacsLambda map_lam
-                post_lam <- mkIdentityLambda $ lambdaReturnType map_lam
                 localScope (typeEnvFromDistAcc acc') $
                   segmentedScanomapKernel nest' perm (stmAuxCerts aux) w lam post_lam map_lam' nes arrs
                     >>= kernelOrNot mempty stm acc kernels acc'

@@ -398,21 +398,14 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
     Just do_iswim <- iswim pat w scan_lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       transformStms path . stmsToList . snd =<< runBuilderT (certifying cs do_iswim) types
-  | Just (scans, map_lam) <- isScanomapSOAC form = do
+  | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form = do
       let paralleliseOuter = runBuilder_ $ do
             scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
               (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
               let scan_lam'' = soacsLambdaToGPU scan_lam'
               pure $ SegBinOp Noncommutative scan_lam'' nes' shape
             let map_lam_sequential = soacsLambdaToGPU map_lam
-                segBinOpType op =
-                  flip arrayOfShape (segBinOpShape op) <$> lambdaReturnType (segBinOpLambda op)
-                ret' = concatMap segBinOpType scan_ops
-                ret'' = drop (length ret') $ lambdaReturnType map_lam
-                ret = ret' <> ret''
-            identity <- mkIdentityLambda ret
-
-            let post_op = SegPostOp identity
+                post_op = SegPostOp $ soacsLambdaToGPU post_lam
             lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
             addStms . fmap (certify cs)
               =<< segScan lvl pat mempty w scan_ops post_op map_lam_sequential arrs [] []
