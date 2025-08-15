@@ -1,4 +1,7 @@
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: testmm2by2
 -- compiled random input { [250][4]i32 } output { true }
 

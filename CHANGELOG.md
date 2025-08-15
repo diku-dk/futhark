@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Use of unsigned types in entry points could cause invalid C to be generated.
   (#2306)
 
+* `futhark script` now frees values before terminating.
+
 ## [0.25.32]
 
 ### Added

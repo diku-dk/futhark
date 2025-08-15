@@ -1,6 +1,7 @@
 -- Scan with vectorised product.
 -- Vectorised special case + generic case
 -- ==
+-- tags { autodiff }
 -- entry: fwd_J rev_J
 -- input { [[1f32,1f32],[2f32,2f32],[3f32,3f32],[4f32,4f32],[5f32,5f32]] }
 -- output {

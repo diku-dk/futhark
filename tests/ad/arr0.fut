@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def f (xs: [2]f64) = xs[0] * xs[1]
 
 -- ==

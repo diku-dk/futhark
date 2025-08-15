@@ -1,5 +1,6 @@
 -- Signed Distance Functions, as you would find in a ray marcher.
 -- ==
+-- tags { autodiff }
 -- entry: jvp_normal vjp_normal
 -- input { 0i32 0f64 1f64 0f64 } output { 1f64 0f64 0f64 }
 -- input { 1i32 0f64 1f64 0f64 } output { 0.412393f64 0.907265f64 -0.082479f64 }

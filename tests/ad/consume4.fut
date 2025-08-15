@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def test [n] (xs: [n]i32) =
   let xs' = copy xs
   let xs'' = map (* 2) xs'
