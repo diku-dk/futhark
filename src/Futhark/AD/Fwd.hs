@@ -199,7 +199,7 @@ basicFwd pat aux op = do
           x_pe = primExpFromSubExp t x
           dx = pdUnOp unop x_pe
       x_tan <- primExpFromSubExp t <$> tangent x
-      auxing aux $ letBind pat_tan <=< toExp $ x_tan ~*~ dx
+      auxing aux $ letBindNames (patNames pat_tan) <=< toExp $ x_tan ~*~ dx
     BinOp bop x y -> do
       let t = binOpType bop
       x_tan <- primExpFromSubExp t <$> tangent x
@@ -207,7 +207,7 @@ basicFwd pat aux op = do
       let (wrt_x, wrt_y) =
             pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
       auxing aux $
-        letBind pat_tan <=< toExp $
+        letBindNames (patNames pat_tan) <=< toExp $
           x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
     CmpOp {} ->
       addStm $ Let pat_tan aux $ zeroExp $ Prim Bool

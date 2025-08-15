@@ -125,9 +125,9 @@ simplifyIndex (vtable, used) pat@(Pat [pe]) aux (Index idd inds)
         res <- m
         attributing (stmAuxAttrs aux) $ case res of
           SubExpResult cs' se ->
-            certifying cs' $ letBind pat $ BasicOp $ SubExp se
+            certifying cs' $ letBindNames (patNames pat) $ BasicOp $ SubExp se
           IndexResult extra_cs idd' inds' ->
-            certifying extra_cs $ letBind pat $ BasicOp $ Index idd' inds'
+            certifying extra_cs $ letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
   where
     consuming = (`UT.isConsumed` used)
     consumed = consuming $ patElemName pe
