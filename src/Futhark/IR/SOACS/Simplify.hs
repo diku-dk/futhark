@@ -214,7 +214,7 @@ topDownRules =
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
 bottomUpRules =
   [ RuleOp removeDeadMapping,
-    RuleOp removeDeadReducxtion,
+    RuleOp removeDeadReduction,
     RuleBasicOp removeUnnecessaryCopy,
     RuleOp liftIdentityStreaming,
     RuleOp mapOpToOp
