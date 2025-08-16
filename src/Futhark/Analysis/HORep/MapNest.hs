@@ -217,7 +217,7 @@ fixInputs w ourInps = mapM inspect
     inspect (_, SOAC.Input ts v _)
       | Just (p, pInp) <- find (isParam v) ourInps = do
           let pInp' = SOAC.transformRows ts pInp
-          p' <- newNameFromString $ baseString p
+          p' <- newName p
           pure (p', pInp')
     inspect (param, SOAC.Input ts a t) = do
       param' <- newNameFromString (baseString param ++ "_rep")
