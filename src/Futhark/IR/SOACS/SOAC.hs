@@ -297,7 +297,7 @@ isRedomapSOAC :: ScremaForm rep -> Maybe ([Reduce rep], Lambda rep)
 isRedomapSOAC (ScremaForm map_lam scans reds post_lam) = do
   guard $ null scans
   guard $ not $ null reds
-  guard $ isNilLambda post_lam
+  guard $ isIdentityLambda post_lam
   pure (reds, map_lam)
 
 -- | Does this Screma correspond to a pure reduce?
