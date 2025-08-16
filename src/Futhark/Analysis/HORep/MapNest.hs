@@ -70,32 +70,36 @@ setInputs (inp : inps) (MapNest _ body ns _) = MapNest w body ns' (inp : inps)
     setDepth n nw = n {nestingWidth = nw}
 
 pushIntoMapLambda ::
+  (MonadFreshNames m) =>
   Stms SOACS ->
   Stm SOACS ->
-  Maybe (Stm SOACS)
+  m (Maybe (Stm SOACS))
 pushIntoMapLambda stms (Let pat aux (Op (Futhark.Screma w inps form)))
   | Just map_lam <- Futhark.isMapSOAC form,
-    not $ any ((`namesIntersect` bound_by_stms) . freeIn) inps =
+    not $ any ((`namesIntersect` bound_by_stms) . freeIn) inps = do
       let lam_body = lambdaBody map_lam
           map_lam' =
             map_lam {lambdaBody = lam_body {bodyStms = stms <> bodyStms lam_body}}
-          form' = Futhark.mapSOAC map_lam'
-       in Just $ Let pat aux (Op (Futhark.Screma w inps form'))
+      form' <- Futhark.mapSOAC map_lam'
+      pure $ Just $ Let pat aux (Op (Futhark.Screma w inps form'))
   where
     bound_by_stms = namesFromList $ foldMap (patNames . stmPat) stms
-pushIntoMapLambda _ _ = Nothing
+pushIntoMapLambda _ _ = pure Nothing
 
-massage :: SOAC SOACS -> SOAC SOACS
-massage (SOAC.Screma w inps form)
+massage :: (MonadFreshNames m) => SOAC SOACS -> m (SOAC SOACS)
+massage soac@(SOAC.Screma w inps form)
   | Just lam <- Futhark.isMapSOAC form,
     Just (init_stms, last_stm) <- stmsLast $ bodyStms $ lambdaBody lam,
     all (cheap . stmExp) init_stms,
     all (`notNameIn` freeIn (bodyResult (lambdaBody lam))) $
-      foldMap (patNames . stmPat) init_stms,
-    Just last_stm' <- pushIntoMapLambda init_stms last_stm =
-      let lam' =
-            lam {lambdaBody = (lambdaBody lam) {bodyStms = oneStm last_stm'}}
-       in SOAC.Screma w inps (Futhark.mapSOAC lam')
+      foldMap (patNames . stmPat) init_stms = do
+      maybe_last_stm <- pushIntoMapLambda init_stms last_stm
+      case maybe_last_stm of
+        Just last_stm' -> do
+          let lam' =
+                lam {lambdaBody = (lambdaBody lam) {bodyStms = oneStm last_stm'}}
+          SOAC.Screma w inps <$> Futhark.mapSOAC lam'
+        Nothing -> pure soac
   where
     cheap (BasicOp BinOp {}) = True
     cheap (BasicOp SubExp {}) = True
@@ -103,15 +107,18 @@ massage (SOAC.Screma w inps form)
     cheap (BasicOp ConvOp {}) = True
     cheap (BasicOp UnOp {}) = True
     cheap _ = False
-massage soac = soac
+massage soac = pure soac
 
 fromSOAC' ::
   (MonadFreshNames m, LocalScope SOACS m) =>
   [Ident] ->
   SOAC SOACS ->
   m (Maybe MapNest)
-fromSOAC' bound soac
-  | SOAC.Screma w inps (SOAC.ScremaForm lam [] []) <- massage soac = do
+fromSOAC' bound soac = do
+  screma <- massage soac
+
+  case screma of
+    SOAC.Screma w inps (SOAC.ScremaForm lam [] [] _) -> do
       let bound' = bound <> map paramIdent (lambdaParams lam)
 
       maybenest <- case ( stmsToList $ bodyStms $ lambdaBody lam,
@@ -121,7 +128,11 @@ fromSOAC' bound soac
           | map resSubExp res == map Var (patNames pat) ->
               localScope (scopeOfLParams $ lambdaParams lam) $
                 SOAC.fromExp e
-                  >>= either (pure . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound')
+                  >>= either
+                    (pure . Left)
+                    ( fmap (Right . fmap (pat,))
+                        . fromSOAC' bound'
+                    )
         _ ->
           pure $ Right Nothing
 
@@ -169,14 +180,14 @@ fromSOAC' bound soac
                         ++ [Param mempty name t | Ident name t <- newParams]
                   }
           pure $ Just $ MapNest w lam' [] inps'
-fromSOAC' _ _ = pure Nothing
+    _any -> pure Nothing
 
 fromSOAC :: (MonadFreshNames m, LocalScope SOACS m) => SOAC SOACS -> m (Maybe MapNest)
 fromSOAC = fromSOAC' mempty
 
 toSOAC :: (MonadFreshNames m, HasScope SOACS m) => MapNest -> m (SOAC SOACS)
 toSOAC (MapNest w lam [] inps) =
-  pure $ SOAC.Screma w inps (Futhark.mapSOAC lam)
+  SOAC.Screma w inps <$> Futhark.mapSOAC lam
 toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
   let nparams = zipWith (Param mempty) npnames $ map SOAC.inputRowType inps
   body <- runBodyBuilder $
@@ -191,7 +202,7 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
             lambdaBody = body,
             lambdaReturnType = nrettype
           }
-  pure $ SOAC.Screma w inps (Futhark.mapSOAC outerlam)
+  SOAC.Screma w inps <$> Futhark.mapSOAC outerlam
 
 fixInputs ::
   (MonadFreshNames m) =>

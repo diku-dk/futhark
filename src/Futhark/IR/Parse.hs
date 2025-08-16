@@ -766,20 +766,33 @@ pSOAC pr =
         <*> braces (pScan pr `sepBy` pComma)
         <* pComma
         <*> braces (pReduce pr `sepBy` pComma)
+        <* pComma
+        <*> pLambda pr
     pRedomapForm =
       SOAC.ScremaForm
         <$> pLambda pr
         <*> pure []
         <* pComma
         <*> braces (pReduce pr `sepBy` pComma)
+        <* pComma
+        -- NOTE: This is dumb, but it also seems weird to have
+        -- multiple waus of parsing a screma? but it is human readable.
+        <*> pLambda pr
     pScanomapForm =
       SOAC.ScremaForm
         <$> pLambda pr
         <* pComma
         <*> braces (pScan pr `sepBy` pComma)
         <*> pure []
+        <* pComma
+        <*> pLambda pr
     pMapForm =
-      SOAC.ScremaForm <$> pLambda pr <*> pure mempty <*> pure mempty
+      SOAC.ScremaForm
+        <$> pLambda pr
+        <*> pure mempty
+        <*> pure mempty
+        <* pComma
+        <*> pLambda pr
     pHist =
       keyword "hist"
         *> parens
@@ -946,6 +959,9 @@ pSegOp pr pLvl =
       comm <- pComm
       lam <- pLambda pr
       pure $ SegOp.SegBinOp comm lam nes shape
+    pSegPostOp =
+      SegOp.SegPostOp
+        <$> pLambda pr
     pHistOp =
       SegOp.HistOp
         <$> pShape
@@ -961,7 +977,7 @@ pSegOp pr pLvl =
         <*> pLambda pr
     pSegMap = pSegOp' SegOp.SegMap
     pSegRed = pSegOp' SegOp.SegRed <*> parens (pSegBinOp `sepBy` pComma)
-    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma)
+    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma) <*> pSegPostOp
     pSegHist = pSegOp' SegOp.SegHist <*> parens (pHistOp `sepBy` pComma)
 
 pSegLevel :: Parser GPU.SegLevel

@@ -183,8 +183,11 @@ vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
 
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
-        auxing aux . letTupExp "map_adjs" . Op $
-          Screma w (as ++ pat_adj_vals ++ free_adjs) (mapSOAC lam_rev)
+        auxing aux
+          . letTupExp "map_adjs"
+          . Op
+          . Screma w (as ++ pat_adj_vals ++ free_adjs)
+          =<< mapSOAC lam_rev
 
     -- Crucial that we handle the free contribs first in case 'free'
     -- and 'as' intersect.

@@ -1270,9 +1270,11 @@ internaliseStreamAcc desc dest op lam bs = do
     bs_ts <- mapM lookupType bs'
     lam' <- internaliseLambdaCoerce lam $ map rowType $ paramType acc_p : bs_ts
     let w = arraysSize 0 bs_ts
-    fmap subExpsRes . letValExp' "acc_res" $
-      I.Op $
-        I.Screma w (I.paramName acc_p : bs') (I.mapSOAC lam')
+    fmap subExpsRes
+      . letValExp' "acc_res"
+      . I.Op
+      . I.Screma w (I.paramName acc_p : bs')
+      =<< I.mapSOAC lam'
 
   op' <-
     case op of
@@ -1595,9 +1597,10 @@ isOverloadedFunction qname desc = do
                     -- Compare the elements.
                     cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
                     cmps <-
-                      letExp "cmps" $
-                        I.Op $
-                          I.Screma x_num_elems [x_flat, y_flat] (I.mapSOAC cmp_lam)
+                      letExp "cmps"
+                        . I.Op
+                        . I.Screma x_num_elems [x_flat, y_flat]
+                        =<< I.mapSOAC cmp_lam
 
                     -- Check that all were equal.
                     and_lam <- binOpLambda I.LogAnd I.Bool
@@ -1677,7 +1680,7 @@ isIntrinsicFunction qname args = do
       arr_ts <- mapM lookupType arr'
       lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
       let w = arraysSize 0 arr_ts
-      letTupExp' desc $ I.Op $ I.Screma w arr' (I.mapSOAC lam')
+      letTupExp' desc . I.Op . I.Screma w arr' =<< I.mapSOAC lam'
     handleSOACs [k, lam, arr] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
@@ -2035,7 +2038,11 @@ partitionWithSOACS :: Int -> I.Lambda SOACS -> [I.VName] -> InternaliseM ([I.Sub
 partitionWithSOACS k lam arrs = do
   arr_ts <- mapM lookupType arrs
   let w = arraysSize 0 arr_ts
-  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Screma w arrs (mapSOAC lam)
+  classes_and_increments <-
+    letTupExp "increments"
+      . I.Op
+      . I.Screma w arrs
+      =<< mapSOAC lam
   (classes, increments) <- case classes_and_increments of
     classes : increments -> pure (classes, take k increments)
     _ -> error "partitionWithSOACS"
