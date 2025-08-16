@@ -304,7 +304,7 @@ isRedomapSOAC (ScremaForm map_lam scans reds post_lam) = do
 isReduceSOAC :: ScremaForm rep -> Maybe [Reduce rep]
 isReduceSOAC form = do
   (reds, map_lam) <- isRedomapSOAC form
-  guard $ isNilLambda map_lam
+  guard $ isIdentityLambda map_lam
   pure reds
 
 -- | Does this Screma correspond to a simple map, without any
