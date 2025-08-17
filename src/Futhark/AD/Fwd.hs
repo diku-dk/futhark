@@ -522,14 +522,14 @@ fwdStm (Let pat aux (Loop val_pats loop@(WhileLoop v) body)) = do
   val_pats' <- bundleNewList val_pats
   pat' <- bundleNewPat pat
   body' <-
-    localScope (scopeOfFParams (map fst val_pats) <> scopeOfLoopForm loop) . slocal' $
+    localScope (scopeOfFParams (map fst val_pats') <> scopeOfLoopForm loop) . slocal' $
       fwdBody body
   addStm $ Let pat' aux $ Loop val_pats' (WhileLoop v) body'
 fwdStm (Let pat aux (Loop val_pats loop@(ForLoop i it bound) body)) = do
   pat' <- bundleNewPat pat
   val_pats' <- bundleNewList val_pats
   body' <-
-    localScope (scopeOfFParams (map fst val_pats) <> scopeOfLoopForm loop) . slocal' $
+    localScope (scopeOfFParams (map fst val_pats') <> scopeOfLoopForm loop) . slocal' $
       fwdBody body
   addStm $ Let pat' aux $ Loop val_pats' (ForLoop i it bound) body'
 fwdStm (Let pat aux (WithAcc inputs lam)) = do
