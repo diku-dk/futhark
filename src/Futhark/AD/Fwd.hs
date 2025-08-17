@@ -15,10 +15,6 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Util (interleave)
 
-zeroTan :: Type -> ADM SubExp
-zeroTan (Prim t) = pure $ constant $ blankPrimValue t
-zeroTan t = error $ "zeroTan on non-primitive type: " ++ prettyString t
-
 zeroExp :: Type -> Exp SOACS
 zeroExp (Prim pt) =
   BasicOp $ SubExp $ Constant $ blankPrimValue pt
@@ -166,7 +162,7 @@ instance Tangent VName where
     pure (v, v_tan)
 
 instance Tangent SubExp where
-  tangent (Constant c) = zeroTan $ Prim $ primValueType c
+  tangent (Constant c) = pure $ constant $ blankPrimValue $ primValueType c
   tangent (Var v) = Var <$> tangent v
   bundleTan c@Constant {} = do
     c_tan <- tangent c
@@ -274,11 +270,12 @@ basicFwd pat aux op = do
           let (wrt_x, wrt_y) =
                 pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
            in x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
-    CmpOp {} ->
-      addStm $ Let pat_tan aux $ zeroExp $ Prim Bool
-    ConvOp cop x -> do
-      x_tan <- tangent x
-      addStm $ Let pat_tan aux $ BasicOp $ ConvOp cop x_tan
+    CmpOp {} -> do
+      tan_shape <- askShape
+      addStm $ Let pat_tan aux $ zeroExp $ Prim Bool `arrayOfShape` tan_shape
+    ConvOp cop x ->
+      auxing aux $ letBind pat_tan <=< withTan x $ \x_tan ->
+        pure $ BasicOp $ ConvOp cop x_tan
     Assert {} -> pure ()
     Index arr slice -> do
       arr_tan <- tangent arr
