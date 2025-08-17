@@ -255,8 +255,16 @@ basicFwd pat aux op = do
       se_tan <- tangent se
       addStm $ Let pat_tan aux $ BasicOp $ Opaque opaqueop se_tan
     ArrayLit ses t -> do
+      tan_shape <- askShape
       ses_tan <- mapM tangent ses
-      addStm $ Let pat_tan aux $ BasicOp $ ArrayLit ses_tan t
+      if tan_shape == mempty
+        then
+          addStm $ Let pat_tan aux $ BasicOp $ ArrayLit ses_tan t
+        else do
+          pat_tan_tr <- letExp "pat_tan_tr" $ BasicOp $ ArrayLit ses_tan $ t `arrayOfShape` tan_shape
+          pat_tan_tr_t <- lookupType pat_tan_tr
+          let perm = vecPerm tan_shape pat_tan_tr_t
+          addStm $ Let pat_tan aux $ BasicOp $ Rearrange pat_tan_tr perm
     UnOp unop x -> do
       let t = unOpType unop
           x_pe = primExpFromSubExp t x
@@ -278,22 +286,24 @@ basicFwd pat aux op = do
         pure $ BasicOp $ ConvOp cop x_tan
     Assert {} -> pure ()
     Index arr slice -> do
-      arr_tan <- tangent arr
       dims <- shapeDims <$> askShape
+      arr_tan <- tangent arr
       let slice' = Slice $ map sliceDim dims <> unSlice slice
       addStm $ Let pat_tan aux $ BasicOp $ Index arr_tan slice'
     Update safety arr slice se -> do
+      dims <- shapeDims <$> askShape
       arr_tan <- tangent arr
       se_tan <- tangent se
-      addStm $ Let pat_tan aux $ BasicOp $ Update safety arr_tan slice se_tan
+      let slice' = Slice $ map sliceDim dims <> unSlice slice
+      addStm $ Let pat_tan aux $ BasicOp $ Update safety arr_tan slice' se_tan
     Concat d (arr :| arrs) w -> do
+      r <- shapeRank <$> askShape
       arr_tan <- tangent arr
       arrs_tans <- mapM tangent arrs
-      r <- shapeRank <$> askShape
       addStm $ Let pat_tan aux $ BasicOp $ Concat (d + r) (arr_tan :| arrs_tans) w
     Manifest arr ds -> do
-      arr_tan <- tangent arr
       r <- shapeRank <$> askShape
+      arr_tan <- tangent arr
       addStm . Let pat_tan aux . BasicOp $
         Manifest arr_tan ([0 .. r - 1] ++ map (+ r) ds)
     Iota n _ _ it -> do
@@ -307,12 +317,12 @@ basicFwd pat aux op = do
       tan_shape <- askShape
       addStm $ Let pat_tan aux $ BasicOp $ Scratch t $ shapeDims tan_shape <> shape
     Reshape arr reshape -> do
-      arr_tan <- tangent arr
       shape <- askShape
+      arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Reshape arr_tan (newshapeInner shape reshape)
     Rearrange arr perm -> do
-      arr_tan <- tangent arr
       r <- shapeRank <$> askShape
+      arr_tan <- tangent arr
       addStm . Let pat_tan aux . BasicOp $
         Rearrange arr_tan ([0 .. r - 1] <> map (+ r) perm)
     _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
