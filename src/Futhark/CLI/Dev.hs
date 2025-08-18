@@ -516,6 +516,23 @@ commandLineOptions =
       "Translate pipeline result to ImpGPU and write it on stdout.",
     Option
       []
+      ["compile-imp-webgpu"]
+      ( NoArg $
+          Right $ \opts ->
+            opts {futharkAction = GPUMemAction $ \_ _ _ -> webgpuImpCodeGenAction}
+      )
+      "Translate pipeline result to ImpWebGPU and write it on stdout.",
+    Option
+      []
+      ["test-webgpu-kernels"]
+      ( NoArg $
+          Right $ \opts ->
+            -- type BackendAction rep = FutharkConfig -> CompilerMode -> FilePath -> Action rep
+            opts {futharkAction = GPUMemAction $ \_ _ -> webgpuTestKernelsAction}
+      )
+      "Translate pipeline result to ImpWebGPU and generate test runner input.",
+    Option
+      []
       ["compile-imp-multicore"]
       ( NoArg $
           Right $ \opts ->
