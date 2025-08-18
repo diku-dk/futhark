@@ -363,21 +363,6 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       -- Some functions are magical (overloaded) and we handle that here.
       case () of
         ()
-          -- Short-circuiting operators are magical.
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            baseString (qualLeaf qfname) == "&&",
-            [(x, _), (y, _)] <- args ->
-              internaliseExp desc $
-                E.AppExp
-                  (E.If x y (E.Literal (E.BoolValue False) mempty) mempty)
-                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            baseString (qualLeaf qfname) == "||",
-            [(x, _), (y, _)] <- args ->
-              internaliseExp desc $
-                E.AppExp
-                  (E.If x (E.Literal (E.BoolValue True) mempty) y mempty)
-                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
           -- Overloaded and intrinsic functions never take array
           -- arguments (except equality, but those cannot be
           -- existential), so we can safely ignore the existential
