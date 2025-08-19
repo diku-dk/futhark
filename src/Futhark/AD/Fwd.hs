@@ -3,12 +3,16 @@
 module Futhark.AD.Fwd (fwdJVP) where
 
 import Control.Monad
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (bimap, second)
+import Data.Functor.Product
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map qualified as M
+import Data.Tuple (Solo (..), getSolo)
 import Futhark.AD.Derivatives
+import Futhark.AD.Shared
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
@@ -173,10 +177,6 @@ instance Tangent SubExpRes where
   tangent (SubExpRes cs se) = SubExpRes cs <$> tangent se
   bundleTan (SubExpRes cs se) = bimap (SubExpRes cs) (SubExpRes cs) <$> bundleTan se
 
-asVName :: SubExp -> ADM VName
-asVName (Var v) = pure v
-asVName (Constant x) = letExp "v" $ BasicOp $ SubExp $ Constant x
-
 withTan ::
   SubExp ->
   (SubExp -> ADM (Exp SOACS)) ->
@@ -184,16 +184,7 @@ withTan ::
 withTan x f = do
   shape <- askShape
   x_tan <- tangent x
-  if shape == mempty
-    then f x_tan
-    else do
-      let w = shapeSize 0 shape
-      x_tan_v <- asVName x_tan
-      x_tan_p <- newParam "x_tanp" . rowType =<< lookupType x_tan_v
-      lam <- mkLambda [x_tan_p] $ do
-        fmap (subExpsRes . pure) . letSubExp "tan"
-          =<< f (Var (paramName x_tan_p))
-      pure $ Op $ Screma w [x_tan_v] (mapSOAC lam)
+  mapNest shape (MkSolo x_tan) (f . getSolo)
 
 withTansI ::
   VName ->
@@ -229,20 +220,11 @@ withTans ::
   ADM (Exp SOACS)
 withTans t x y f = do
   shape <- askShape
-  x_tan <- asVName =<< tangent x
-  y_tan <- asVName =<< tangent y
-  if shape == mempty
-    then toExp $ f (LeafExp x_tan t) (LeafExp y_tan t)
-    else do
-      let w = shapeSize 0 shape
-      x_tan_p <- newParam "x_tanp" . rowType =<< lookupType x_tan
-      y_tan_p <- newParam "y_tanp" . rowType =<< lookupType y_tan
-      lam <- mkLambda [x_tan_p, y_tan_p] $ do
-        fmap (subExpsRes . pure) . letSubExp "tan" <=< toExp $
-          f
-            (LeafExp (paramName x_tan_p) t)
-            (LeafExp (paramName y_tan_p) t)
-      pure $ Op $ Screma w [x_tan, y_tan] (mapSOAC lam)
+  x_tan <- tangent x
+  y_tan <- tangent y
+  mapNest shape (Pair (Identity x_tan) (Identity y_tan)) $ \xy -> do
+    Pair (Identity x_tan_v) (Identity y_tan_v) <- traverse asVName xy
+    toExp $ f (LeafExp x_tan_v t) (LeafExp y_tan_v t)
 
 basicFwd :: Pat Type -> StmAux () -> BasicOp -> ADM ()
 basicFwd pat aux op = do

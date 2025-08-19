@@ -13,6 +13,7 @@ module Futhark.AD.Rev.Monad
     Adj (..),
     InBounds (..),
     Sparse (..),
+    askShape,
     adjFromParam,
     adjFromVar,
     lookupAdj,
@@ -55,6 +56,7 @@ module Futhark.AD.Rev.Monad
 where
 
 import Control.Monad
+import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
 import Data.List (foldl')
@@ -199,12 +201,13 @@ data RState = RState
     stateNameSource :: VNameSource
   }
 
-newtype ADM a = ADM (BuilderT SOACS (State RState) a)
+newtype ADM a = ADM (BuilderT SOACS (ReaderT Shape (State RState)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadState RState,
+      MonadReader Shape,
       MonadFreshNames,
       HasScope SOACS,
       LocalScope SOACS
@@ -223,12 +226,15 @@ instance MonadFreshNames (State RState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
-runADM :: (MonadFreshNames m) => ADM a -> m a
-runADM (ADM m) =
+askShape :: ADM Shape
+askShape = ADM $ lift ask
+
+runADM :: (MonadFreshNames m) => Shape -> ADM a -> m a
+runADM shape (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
       runState
-        (fst <$> runBuilderT m mempty)
+        (runReaderT (fst <$> runBuilderT m mempty) shape)
         (RState mempty mempty mempty vn)
 
 adjVal :: Adj -> ADM VName

@@ -13,10 +13,12 @@ import Control.Monad.Identity
 import Data.List ((\\))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map qualified as M
+import Data.Tuple
 import Futhark.AD.Derivatives
 import Futhark.AD.Rev.Loop
 import Futhark.AD.Rev.Monad
 import Futhark.AD.Rev.SOAC
+import Futhark.AD.Shared
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
@@ -83,10 +85,20 @@ diffBasicOp pat aux e m =
             (wrt_x, wrt_y) =
               pdBinOp op (primExpFromSubExp t x) (primExpFromSubExp t y)
 
-            pat_adj' = primExpFromSubExp t $ Var pat_adj
+        adj_shape <- askShape
 
-        adj_x <- letExp "binop_x_adj" <=< toExp $ pat_adj' ~*~ wrt_x
-        adj_y <- letExp "binop_y_adj" <=< toExp $ pat_adj' ~*~ wrt_y
+        adj_x <- letExp "binop_x_adj"
+          <=< mapNest adj_shape (MkSolo (Var pat_adj))
+          $ \(MkSolo pat_adj') ->
+            let pat_adj'' = primExpFromSubExp t pat_adj'
+             in toExp $ pat_adj'' ~*~ wrt_x
+
+        adj_y <- letExp "binop_y_adj"
+          <=< mapNest adj_shape (MkSolo (Var pat_adj))
+          $ \(MkSolo pat_adj') ->
+            let pat_adj'' = primExpFromSubExp t pat_adj'
+             in toExp $ pat_adj'' ~*~ wrt_y
+
         updateSubExpAdj x adj_x
         updateSubExpAdj y adj_y
     --
@@ -364,11 +376,14 @@ diffLambda res_adjs get_adjs_for (Lambda params _ body) =
     ts' <- mapM lookupType get_adjs_for
     pure $ Lambda params ts' body'
 
-revVJP :: (MonadFreshNames m) => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
-revVJP scope (Lambda params ts body) =
-  runADM . localScope (scope <> scopeOfLParams params) $ do
+revVJP :: (MonadFreshNames m) => Scope SOACS -> Shape -> Lambda SOACS -> m (Lambda SOACS)
+revVJP scope shape (Lambda params ts body) = do
+  runADM shape . localScope (scope <> scopeOfLParams params) $ do
+    adj_shape <- askShape
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->
-      Param mempty <$> maybe (newVName "const_adj") adjVName (subExpVar se) <*> pure t
+      Param mempty
+        <$> maybe (newVName "const_adj") adjVName (subExpVar se)
+        <*> pure (t `arrayOfShape` adj_shape)
 
     body' <-
       localScope (scopeOfLParams params_adj) $
