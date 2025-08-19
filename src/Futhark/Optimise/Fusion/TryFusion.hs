@@ -290,30 +290,28 @@ combineInputs inp lam out inp' =
     isOutput = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
     new_inputs = mapM toNewParamPair =<< filterM isOutput inp'
 
-fuseMapLambdaHorizontally ::
-  (Lambda SOACS, Scan SOACS) ->
-  (Lambda SOACS, Scan SOACS) ->
+fuseMapLambda ::
+  Lambda SOACS ->
+  [SOAC.Input] ->
+  Lambda SOACS ->
+  [VName] ->
   Lambda SOACS
-fuseMapLambdaHorizontally (lam_c, scan_c) (lam_p, scan_p) =
+fuseMapLambda lam_c inp_c lam_p out_c =
   Lambda
     { lambdaBody = new_body,
       lambdaParams = new_params,
       lambdaReturnType = new_ts
     }
   where
-    (scan_ts_c, map_ts_c) =
-      splitAt (length $ scanNeutral scan_c) $ lambdaReturnType lam_c
-    (scan_ts_p, map_ts_p) =
-      splitAt (length $ scanNeutral scan_p) $ lambdaReturnType lam_p
-    new_ts = scan_ts_c <> scan_ts_p <> map_ts_c <> map_ts_p
-    (scan_res_c, map_res_c) =
-      splitAt (length $ scanNeutral scan_c) $ bodyResult $ lambdaBody lam_c
-    (scan_res_p, map_res_p) =
-      splitAt (length $ scanNeutral scan_p) $ bodyResult $ lambdaBody lam_p
-    new_res = scan_res_c <> scan_res_p <> map_res_c <> map_res_p
+    map_ts_c = lambdaReturnType lam_c
+    map_ts_p = lambdaReturnType lam_p
+    new_ts = map_ts_c <> map_ts_p
+    map_res_c = bodyResult $ lambdaBody lam_c
+    map_res_p = bodyResult $ lambdaBody lam_p
+    new_res = map_res_c <> map_res_p
     body_stms_c = bodyStms $ lambdaBody lam_c
     body_stms_p = bodyStms $ lambdaBody lam_p
-    new_body_stms = body_stms_c <> body_stms_p
+    new_body_stms = body_stms_p <> body_stms_c
     new_body =
       (lambdaBody lam_c)
         { bodyStms = new_body_stms,
@@ -498,64 +496,96 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       SOAC.Screma _ _ form_p,
       _
       )
-        | isJust $ isMapSOAC form_p,
-          -- 1. all arrays produced by the map are ONLY used (consumed)
-          --    by the hist, i.e., not used elsewhere.
-          all (`notNameIn` unfus_set) outVars,
-          -- 2. all arrays produced by the map are input to the screma.
-          mapWriteFusionOK outVars ker -> do
-            let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-                ts = drop (length $ fsOutNames ker) $ lambdaReturnType $ res_lam'
-            pars <- mapM (newParam "x") ts
-            let res = varsRes $ paramName <$> pars
-                post_lam = scremaPostLambda form_c
-                post_lam' =
-                  post_lam
-                    { lambdaReturnType = lambdaReturnType post_lam <> ts,
-                      lambdaParams = lambdaParams post_lam <> pars,
-                      lambdaBody =
-                        (lambdaBody post_lam)
-                          { bodyResult = (bodyResult $ lambdaBody post_lam) <> res
-                          }
-                    }
-            success (fsOutNames ker ++ extra_nms) $
-              SOAC.Screma
+        | scremaFusionOK
+            ( splitAt
+                ( Futhark.scanResults scans_p
+                    + Futhark.redResults reds_p
+                )
+                outVars
+            )
+            ker,
+          isIdentityLambda $ scremaPostLambda form_c,
+          isIdentityLambda $ scremaPostLambda form_p -> do
+            let (res_lam', new_inp) =
+                  fuseRedomap
+                    unfus_set
+                    outVars
+                    lam_p
+                    scan_nes_p
+                    red_nes_p
+                    inp_p_arr
+                    outPairs
+                    lam_c
+                    scan_nes_c
+                    red_nes_c
+                    inp_c_arr
+                (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
+                  splitAt3 (length scan_nes_p) (length red_nes_p) outVars
+                (soac_c_scanout, soac_c_redout, soac_c_mapout) =
+                  splitAt3 (length scan_nes_c) (length red_nes_c) $ fsOutNames ker
+                unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
+                post_lam_ts =
+                  soac_p_scanout
+                    ++ soac_c_scanout
+                    ++ soac_c_mapout
+                    ++ unfus_arrs
+
+            post_lam <-
+              mkIdentityLambda
+                =<< mapM (fmap (stripArray 1) . lookupType) post_lam_ts
+            success
+              ( soac_p_redout
+                  ++ soac_c_redout
+                  ++ post_lam_ts
+              )
+              $ SOAC.Screma
                 w
                 new_inp
-                ( form_c
-                    { scremaLambda = res_lam',
-                      scremaPostLambda = post_lam'
-                    }
-                )
-    ( SOAC.Screma _ inp_c form_c,
-      SOAC.Screma _ inp_p form_p,
-      Horizontal
-      ) -> do
-        let (form, out) =
-              fuseScremaHorizontally
-                (form_c, fsOutNames ker)
-                (form_p, returned_outvars)
-        success
-          out
-          $ SOAC.Screma w (inp_c <> inp_p) form
-    {- ( SOAC.Screma _ inp_c form_c,
-      SOAC.Screma _ inp_p form_p,
-      Vertical
+                (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c) post_lam)
+        where
+          reds_p = scremaReduces form_p
+          reds_c = scremaReduces form_c
+          scans_p = scremaScans form_p
+          scans_c = scremaScans form_c
+          red_nes_p = concatMap redNeutral reds_p
+          red_nes_c = concatMap redNeutral reds_c
+          scan_nes_p = concatMap scanNeutral scans_p
+          scan_nes_c = concatMap scanNeutral scans_c
+    {- ( SOAC.Screma _ _ form_c,
+      SOAC.Screma _ _ form_p,
+      _
       )
         | Just map_lam <- isMapSOAC form_c,
-          not $ null $ scremaScans form_p,
-          all (`notNameIn` unfus_set) outVars,
-          mapWriteFusionOK outVars ker -> do
-            let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-            undefined  do
-                      let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-                      let (form, out) =
-                            fuseScremaHorizontally
-                              (form_c, fsOutNames ker)
-                              (form_p, returned_outvars)
-                      success
-                        out
-                        $ SOAC.Screma w (inp_c <> inp_p) form -}
+          all (`notNameIn` unfus_set) $ fsOutNames ker -> do
+            let post_lam = scremaPostLambda form_p
+                num_reds = redResults $ scremaReduces form_p
+                outPairs' = drop num_reds outPairs
+                (res_lam, new_inp) =
+                  fuseMaps
+                    unfus_set
+                    post_lam
+                    inp_p_arr
+                    outPairs'
+                    post_lam
+                    inp_c_arr
+                (extra_nms, extra_rtps) =
+                  unzip $
+                    filter ((`nameIn` unfus_set) . fst) $
+                      zip outVars $
+                        map (stripArray 1) $
+                          SOAC.typeOf soac_p
+                post_lam' = res_lam {lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps}
+            pars <- mapM (newParam "x") extra_rtps
+            let map_lam'' = scremaLambda form_p
+                map_lam' = extendLambda map_lam'' pars
+                form =
+                  form_p
+                    { scremaLambda = map_lam',
+                      scremaPostLambda = post_lam'
+                    }
+            success
+              (outVars ++ extra_nms)
+              $ SOAC.Screma w new_inp form -}
 
     -- Map-Hist fusion.
     --
