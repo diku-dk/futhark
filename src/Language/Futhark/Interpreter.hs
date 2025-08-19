@@ -2145,7 +2145,7 @@ initialCtx =
     def "vjp2_vec" = Just $ fun3 $ \f x seeds -> do
       v <- apply noLoc mempty f x
       dvs <-
-        toArray' (valueShape x)
+        toArray' (valueShape x) . map (project "1")
           <$> mapM (doVJP2 f x) (snd (fromArray seeds))
       pure $ toTuple [v, dvs]
     def "acc" = Nothing
