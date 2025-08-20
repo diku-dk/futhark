@@ -198,49 +198,6 @@ mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
   where
     inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
-fuseLambda ::
-  [SOAC.Input] ->
-  Lambda SOACS ->
-  [VName] ->
-  [SOAC.Input] ->
-  TryFusion ([SOAC.Input], Lambda SOACS, [VName])
-fuseLambda inp lam out inp' = do
-  (old, new) <- combineInputs inp lam out inp'
-  let new_lam = extendLambda lam $ snd <$> new
-      new_inp = fst <$> old <> filter (`notElem` old) new
-  extra_out <- mapM (inputToVName . fst) new
-  let new_scatter_inp = out <> extra_out
-  pure (new_inp, new_lam, new_scatter_inp)
-
-scanScatterPostLambda ::
-  [VName] ->
-  [VName] ->
-  [SOAC.Input] ->
-  Lambda SOACS ->
-  TryFusion (Lambda SOACS)
-scanScatterPostLambda new_inp extra_out old_inp lam = do
-  new_extra_out_ts <- mapM (fmap rowType . lookupType) extra_out
-  new_params <- mapM paramDefault new_inp
-  let new_params_map = M.fromList $ zip new_inp new_params
-      outToParam = liftMaybe . flip M.lookup new_params_map
-      outToRet = fmap (varRes . paramName) . outToParam
-  extra_rets <- mapM outToRet extra_out
-  let body = lambdaBody lam
-      new_body = body {bodyResult = bodyResult body <> extra_rets}
-      new_lam =
-        lam
-          { lambdaReturnType = lambdaReturnType lam <> new_extra_out_ts,
-            lambdaBody = new_body,
-            lambdaParams = new_params
-          }
-  pure new_lam
-  where
-    inp = mapM inputToVName old_inp
-    (.:) = (.) . (.)
-    params_map = M.fromList .: zip <$> inp <*> pure (lambdaParams lam)
-    paramDefault name =
-      maybe (vNameToNewParam name) pure . M.lookup name =<< params_map
-
 extendLambda ::
   Lambda SOACS ->
   [Param Type] ->
@@ -272,14 +229,28 @@ inputToVName = liftMaybe . SOAC.isVarishInput
 inputToNewParam :: SOAC.Input -> TryFusion (Param Type)
 inputToNewParam = inputToVName >=> vNameToNewParam
 
+partitionM :: (Monad m) => (a -> m Bool) -> [a] -> m ([a], [a])
+partitionM _ [] = pure ([], [])
+partitionM p (x : xs) = do
+  flag <- p x
+  (ts, fs) <- partitionM p xs
+  pure $
+    if flag
+      then (x : ts, fs)
+      else (ts, x : fs)
+
 combineInputs ::
   [SOAC.Input] ->
   Lambda SOACS ->
   [VName] ->
   [SOAC.Input] ->
-  TryFusion ([(SOAC.Input, Param Type)], [(SOAC.Input, Param Type)])
-combineInputs inp lam out inp' =
-  (old_inputs,) <$> new_inputs
+  TryFusion
+    ( [(SOAC.Input, Param Type)],
+      [(SOAC.Input, Param Type)]
+    )
+combineInputs inp lam out inp' = do
+  new_inputs <- mapM toNewParamPair =<< filterM (isOutput out) inp'
+  pure $ (old_inputs, new_inputs)
   where
     old_inputs = zip inp $ lambdaParams lam
     toNewParamPair inp'' =
@@ -287,31 +258,68 @@ combineInputs inp lam out inp' =
         ((inp'',) <$> inputToNewParam inp'')
         (pure . (inp'',))
         (lookup inp'' old_inputs)
-    isOutput = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
-    new_inputs = mapM toNewParamPair =<< filterM isOutput inp'
 
-fuseMapLambda ::
+isOutput :: (Foldable t) => t VName -> SOAC.Input -> TryFusion Bool
+isOutput out = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
+
+isInput :: (Foldable t) => t SOAC.Input -> VName -> Bool
+isInput inp = (`notElem` (SOAC.inputArray <$> inp))
+
+fuseLambda ::
   Lambda SOACS ->
   [SOAC.Input] ->
+  [VName] ->
   Lambda SOACS ->
   [VName] ->
-  Lambda SOACS
-fuseMapLambda lam_c inp_c lam_p out_c =
-  Lambda
-    { lambdaBody = new_body,
-      lambdaParams = new_params,
-      lambdaReturnType = new_ts
-    }
+  ([SOAC.Input], Lambda SOACS, [VName])
+fuseLambda lam_c inp_c out_c lam_p out_p =
+  ( new_inp,
+    Lambda
+      { lambdaBody = new_body,
+        lambdaParams = new_params,
+        lambdaReturnType = new_ts
+      },
+    new_out
+  )
   where
-    map_ts_c = lambdaReturnType lam_c
-    map_ts_p = lambdaReturnType lam_p
-    new_ts = map_ts_c <> map_ts_p
-    map_res_c = bodyResult $ lambdaBody lam_c
-    map_res_p = bodyResult $ lambdaBody lam_p
-    new_res = map_res_c <> map_res_p
+    inp_c_map =
+      M.fromList $
+        zip
+          (SOAC.inputArray <$> inp_c)
+          (paramName <$> params_c)
+
+    bindResToPar :: (Buildable rep) => (VName, SubExpRes, Type) -> Maybe (Stm rep)
+    bindResToPar (out, res, t) =
+      case M.lookup out inp_c_map of
+        Just name ->
+          Just $ certify cs $ mkLet [Ident name t] $ BasicOp $ SubExp e
+          where
+            SubExpRes cs e = res
+        Nothing -> Nothing
+
+    binds =
+      stmsFromList $
+        mapMaybe bindResToPar $
+          zip3 out_p res_p ts_p
+
+    (new_out, new_res, new_ts) =
+      unzip3 $
+        filter ((`M.member` inp_c_map) . (\(a, _, _) -> a)) (zip3 out_p res_p ts_p)
+          <> zip3 out_c res_c ts_c
+
+    (new_params, new_inp) =
+      unzip $ filter (const True . snd) (zip params_c inp_c)
+
+    ts_c = lambdaReturnType lam_c
+    ts_p = lambdaReturnType lam_p
+    res_c = bodyResult $ lambdaBody lam_c
+    res_p = bodyResult $ lambdaBody lam_p
     body_stms_c = bodyStms $ lambdaBody lam_c
     body_stms_p = bodyStms $ lambdaBody lam_p
-    new_body_stms = body_stms_p <> body_stms_c
+    new_body_stms =
+      body_stms_p
+        <> binds
+        <> body_stms_c
     new_body =
       (lambdaBody lam_c)
         { bodyStms = new_body_stms,
@@ -319,7 +327,6 @@ fuseMapLambda lam_c inp_c lam_p out_c =
         }
     params_c = lambdaParams lam_c
     params_p = lambdaParams lam_p
-    new_params = params_c <> params_p
 
 fuseScremaMapHorizontally :: ScremaForm rep -> ScremaForm rep -> Lambda rep
 fuseScremaMapHorizontally
