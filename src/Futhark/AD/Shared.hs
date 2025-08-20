@@ -8,7 +8,7 @@ import Futhark.IR.SOACS
 
 asVName :: (MonadBuilder m) => SubExp -> m VName
 asVName (Var v) = pure v
-asVName (Constant x) = letExp "v" $ BasicOp $ SubExp $ Constant x
+asVName (Constant x) = letExp "asv" $ BasicOp $ SubExp $ Constant x
 
 mapNest ::
   (MonadBuilder m, Rep m ~ SOACS, Traversable f) =>

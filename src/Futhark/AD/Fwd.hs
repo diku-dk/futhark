@@ -7,6 +7,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (bimap, second)
+import Data.Foldable
 import Data.Functor.Product
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map qualified as M
@@ -166,7 +167,13 @@ instance Tangent VName where
     pure (v, v_tan)
 
 instance Tangent SubExp where
-  tangent (Constant c) = pure $ constant $ blankPrimValue $ primValueType c
+  tangent (Constant c) = do
+    tan_shape <- askShape
+    if tan_shape == mempty
+      then pure $ constant $ blankPrimValue pt
+      else letSubExp "const_implicit_tan" $ zeroExp $ Prim pt `arrayOfShape` tan_shape
+    where
+      pt = primValueType c
   tangent (Var v) = Var <$> tangent v
   bundleTan c@Constant {} = do
     c_tan <- tangent c
@@ -225,6 +232,20 @@ withTans t x y f = do
   mapNest shape (Pair (Identity x_tan) (Identity y_tan)) $ \xy -> do
     Pair (Identity x_tan_v) (Identity y_tan_v) <- traverse asVName xy
     toExp $ f (LeafExp x_tan_v t) (LeafExp y_tan_v t)
+
+withAnyTans ::
+  (Traversable f) =>
+  f SubExp ->
+  ([PrimExp VName] -> PrimExp VName) ->
+  ADM (Exp SOACS)
+withAnyTans xs f = do
+  shape <- askShape
+  xs_tan <- traverse tangent xs
+  mapNest shape xs_tan $ \xs_tan' -> do
+    xs_tan'' <- forM xs_tan' $ \se -> do
+      ~(Prim t) <- subExpType se
+      pure $ primExpFromSubExp t se
+    toExp $ f $ toList xs_tan''
 
 basicFwd :: Pat Type -> StmAux () -> BasicOp -> ADM ()
 basicFwd pat aux op = do
@@ -470,11 +491,9 @@ fwdStm stm@(Let pat aux (BasicOp e)) = do
   -- XXX: this has to be too naive.
   unless (any isAcc $ patTypes pat) $ addStm stm
   basicFwd pat aux e
-fwdStm stm@(Let pat _ (Apply f args _ _))
+fwdStm stm@(Let pat aux (Apply f args _ _))
   | Just (ret, argts) <- M.lookup f builtInFunctions = do
       addStm stm
-      arg_tans <-
-        zipWith primExpFromSubExp argts <$> mapM (tangent . fst) args
       pat_tan <- newTanPat pat
       let arg_pes = zipWith primExpFromSubExp argts (map fst args)
       case pdBuiltin f arg_pes of
@@ -492,8 +511,13 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
                       _ -> error $ "fwdStm.convertTo: " ++ prettyString (f, tt, e_t)
                 where
                   e_t = primExpType e
-          zipWithM_ (letBindNames . pure) (patNames pat_tan)
-            =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
+
+          auxing aux . letBind pat_tan <=< withAnyTans (map fst args) $
+            \arg_tans' ->
+              foldl1 (~+~) $ zipWith (~*~) (map (convertTo ret) arg_tans') derivs
+
+--          zipWithM_ (letBindNames . pure) (patNames pat_tan)
+--            =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
 fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
   cases' <- slocal' $ mapM (traverse fwdBody) cases
   defbody' <- slocal' $ fwdBody defbody
