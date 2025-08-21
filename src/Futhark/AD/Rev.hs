@@ -69,11 +69,12 @@ diffBasicOp pat aux e m =
 
       returnSweepCode $ do
         let t = unOpType op
-        contrib <- do
-          let x_pe = primExpFromSubExp t x
-              pat_adj' = primExpFromSubExp t (Var pat_adj)
-              dx = pdUnOp op x_pe
-          letExp "contrib" <=< toExp $ pat_adj' ~*~ dx
+
+        adj_shape <- askShape
+
+        contrib <- letExp "unop_contrib" <=< mapNest adj_shape (MkSolo (Var pat_adj)) $
+          \(MkSolo pat_adj') ->
+            toExp $ primExpFromSubExp t pat_adj' ~*~ pdUnOp op (primExpFromSubExp t x)
 
         updateSubExpAdj x contrib
     --
@@ -258,7 +259,6 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
 
       pat_adj <- lookupAdjVal =<< patName pat
       let arg_pes = zipWith primExpFromSubExp argts (map fst args)
-          pat_adj' = primExpFromSubExp ret (Var pat_adj)
           convert ft tt
             | ft == tt = id
           convert (IntType ft) (IntType tt) = ConvOpExp (SExt ft tt)
@@ -267,13 +267,17 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
           convert (FloatType ft) Bool = ConvOpExp (FToB ft)
           convert ft tt = error $ "diffStm.convert: " ++ prettyString (f, ft, tt)
 
+      adj_shape <- askShape
+
       contribs <-
         case pdBuiltin f arg_pes of
           Nothing ->
             error $ "No partial derivative defined for builtin function: " ++ prettyString f
           Just derivs ->
             forM (zip derivs argts) $ \(deriv, argt) ->
-              letExp "contrib" <=< toExp . convert ret argt $ pat_adj' ~*~ deriv
+              letExp "apply_contrib" <=< mapNest adj_shape (MkSolo (Var pat_adj)) $
+                \(MkSolo pat_adj') ->
+                  toExp $ convert ret argt $ primExpFromSubExp ret pat_adj' ~*~ deriv
 
       zipWithM_ updateSubExpAdj (map fst args) contribs
 diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
