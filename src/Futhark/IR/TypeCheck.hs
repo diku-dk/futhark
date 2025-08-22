@@ -115,7 +115,7 @@ instance (Checkable rep) => Show (ErrorCase rep) where
   show (InvalidPatError pat t desc) =
     "Pat\n"
       ++ prettyString pat
-      ++ "\ncannot match value of type\n"
+      ++ "\ncannot match expression of type\n"
       ++ T.unpack (prettyTupleLines t)
       ++ end
     where

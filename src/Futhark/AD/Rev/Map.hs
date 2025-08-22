@@ -6,7 +6,6 @@ module Futhark.AD.Rev.Map (vjpMap) where
 
 import Control.Monad
 import Data.Bifunctor (first)
-import Debug.Trace
 import Futhark.AD.Rev.Monad
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
@@ -86,7 +85,6 @@ pushAdjShape :: VName -> ADM VName
 pushAdjShape v = do
   adj_shape <- askShape
   v_t <- lookupType v
-  traceM $ unlines ["pushAdjShape", prettyString v, prettyString adj_shape, prettyString v_t, show [adj_shape == mempty, arrayShape v_t == adj_shape, isAcc v_t]]
   if adj_shape == mempty || arrayShape v_t == adj_shape || isAcc v_t
     then pure v
     else do

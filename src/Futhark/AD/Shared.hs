@@ -1,10 +1,16 @@
 -- | Various definitions used for both forward and reverse mode.
-module Futhark.AD.Shared (asVName, mapNest) where
+module Futhark.AD.Shared (auxPerm, asVName, mapNest) where
 
 import Control.Monad
 import Data.Foldable
 import Futhark.Construct
 import Futhark.IR.SOACS
+
+auxPerm :: Shape -> Type -> [Int]
+auxPerm aux_shape t =
+  [shapeRank aux_shape]
+    ++ [0 .. shapeRank aux_shape - 1]
+    ++ [shapeRank aux_shape + 1 .. arrayRank t - 1]
 
 asVName :: (MonadBuilder m) => SubExp -> m VName
 asVName (Var v) = pure v

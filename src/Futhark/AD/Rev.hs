@@ -141,10 +141,10 @@ diffBasicOp pat aux e m =
     --
     Rearrange arr perm -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      r <- shapeRank <$> askShape
       returnSweepCode $
-        void $
-          updateAdj arr <=< letExp "adj_rearrange" . BasicOp $
-            Rearrange pat_adj (rearrangeInverse perm)
+        void . updateAdj arr <=< letExp "adj_rearrange" . BasicOp $
+          Rearrange pat_adj ([0 .. r - 1] <> map (+ r) (rearrangeInverse perm))
     --
     Replicate (Shape []) (Var se) -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -374,11 +374,9 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
 
 diffLambda :: [Adj] -> [VName] -> Lambda SOACS -> ADM (Lambda SOACS)
 diffLambda res_adjs get_adjs_for (Lambda params _ body) =
-  localScope (scopeOfLParams params) $ do
-    Body () stms res <- diffBody res_adjs get_adjs_for body
-    let body' = Body () stms $ takeLast (length get_adjs_for) res
-    ts' <- mapM lookupType get_adjs_for
-    pure $ Lambda params ts' body'
+  mkLambda params $ do
+    res <- bodyBind =<< diffBody res_adjs get_adjs_for body
+    pure $ takeLast (length get_adjs_for) res
 
 revVJP :: (MonadFreshNames m) => Scope SOACS -> Shape -> Lambda SOACS -> m (Lambda SOACS)
 revVJP scope shape (Lambda params ts body) = do

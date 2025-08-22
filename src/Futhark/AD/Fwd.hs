@@ -367,10 +367,7 @@ zeroFromSubExp (Var v) = do
   letExp "zero" $ zeroExp t
 
 vecPerm :: Shape -> Type -> [Int]
-vecPerm tan_shape t =
-  [shapeRank tan_shape]
-    ++ [0 .. shapeRank tan_shape - 1]
-    ++ [shapeRank tan_shape + 1 .. arrayRank t - 1]
+vecPerm = auxPerm
 
 pushTanShape :: VName -> ADM VName
 pushTanShape v = do
@@ -387,14 +384,15 @@ soacInputsWithTangents xs = do
   xs_tans <- mapM (pushTanShape <=< tangent) xs
   pure $ interleave xs xs_tans
 
-soacResPat :: Pat Type -> ADM (Pat Type, [(Pat Type, VName)])
-soacResPat (Pat pes) = do
+soacResPat :: Int -> Int -> Pat Type -> ADM (Pat Type, [(Pat Type, VName)])
+soacResPat scan_res red_res (Pat pes) = do
   pes_tan <- mapM newTan pes
-  bimap (Pat . interleave pes) mconcat . unzip <$> mapM tweakPatElem pes_tan
+  bimap (Pat . interleave pes) mconcat . unzip <$> zipWithM tweakPatElem [0 ..] pes_tan
   where
-    tweakPatElem pe@(PatElem v v_t) = do
+    isRedRes i = i >= scan_res && i < scan_res + red_res
+    tweakPatElem i pe@(PatElem v v_t) = do
       tan_shape <- askShape
-      if tan_shape == mempty || arrayShape v_t == tan_shape || isAcc v_t
+      if isRedRes i || tan_shape == mempty || arrayShape v_t == tan_shape || isAcc v_t
         then pure (pe, [])
         else do
           let perm = vecPerm tan_shape v_t
@@ -403,7 +401,7 @@ soacResPat (Pat pes) = do
 
 fwdSOAC :: Pat Type -> StmAux () -> SOAC SOACS -> ADM ()
 fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds)) = do
-  (pat', to_transpose) <- soacResPat pat
+  (pat', to_transpose) <- soacResPat (scanResults scs) (redResults reds) pat
   xs' <- soacInputsWithTangents xs
   f' <- fwdLambda f
   scs' <- mapM fwdScan scs
@@ -515,9 +513,6 @@ fwdStm stm@(Let pat aux (Apply f args _ _))
           auxing aux . letBind pat_tan <=< withAnyTans (map fst args) $
             \arg_tans' ->
               foldl1 (~+~) $ zipWith (~*~) (map (convertTo ret) arg_tans') derivs
-
---          zipWithM_ (letBindNames . pure) (patNames pat_tan)
---            =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
 fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
   cases' <- slocal' $ mapM (traverse fwdBody) cases
   defbody' <- slocal' $ fwdBody defbody

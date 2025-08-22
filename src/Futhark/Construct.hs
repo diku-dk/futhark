@@ -68,6 +68,7 @@ module Futhark.Construct
 
     -- * Monadic expression builders
     eSubExp,
+    eVar,
     eParam,
     eMatch',
     eMatch,
@@ -203,6 +204,13 @@ eSubExp ::
   SubExp ->
   m (Exp (Rep m))
 eSubExp = pure . BasicOp . SubExp
+
+-- | Turn a variable into a monad expression, through 'eSubExp'.
+eVar ::
+  (MonadBuilder m) =>
+  VName ->
+  m (Exp (Rep m))
+eVar = eSubExp . Var
 
 -- | Treat a parameter as a monadic expression.
 eParam ::
