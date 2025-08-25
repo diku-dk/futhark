@@ -18,7 +18,7 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, (\\))
+import Data.List (find, partition, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.HORep.MapNest (MapNest)
@@ -198,6 +198,249 @@ mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
   where
     inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
+extendLambda ::
+  Lambda SOACS ->
+  [Param Type] ->
+  Lambda SOACS
+extendLambda lam extra_params =
+  lam
+    { lambdaBody = new_body,
+      lambdaReturnType = new_rets,
+      lambdaParams = new_params
+    }
+  where
+    params = lambdaParams lam
+    extra_rets = varRes . paramName <$> extra_params
+    extra_ts = paramType <$> extra_params
+    body = lambdaBody lam
+    new_body = body {bodyResult = bodyResult body <> extra_rets}
+    new_rets = lambdaReturnType lam <> extra_ts
+    new_params = params <> filter (`notElem` params) extra_params
+
+fusability :: Names -> [VName] -> ([VName], [VName])
+fusability unfus_set = partition (`notNameIn` unfus_set)
+
+vNameToNewParam :: VName -> TryFusion (Param Type)
+vNameToNewParam = lookupType >=> newParam "x" . rowType
+
+inputToVName :: SOAC.Input -> TryFusion VName
+inputToVName = liftMaybe . SOAC.isVarishInput
+
+inputToNewParam :: SOAC.Input -> TryFusion (Param Type)
+inputToNewParam = inputToVName >=> vNameToNewParam
+
+partitionM :: (Monad m) => (a -> m Bool) -> [a] -> m ([a], [a])
+partitionM _ [] = pure ([], [])
+partitionM p (x : xs) = do
+  flag <- p x
+  (ts, fs) <- partitionM p xs
+  pure $
+    if flag
+      then (x : ts, fs)
+      else (ts, x : fs)
+
+combineInputs ::
+  [SOAC.Input] ->
+  Lambda SOACS ->
+  [VName] ->
+  [SOAC.Input] ->
+  TryFusion
+    ( [(SOAC.Input, Param Type)],
+      [(SOAC.Input, Param Type)]
+    )
+combineInputs inp lam out inp' = do
+  new_inputs <- mapM toNewParamPair =<< filterM (isOutput out) inp'
+  pure $ (old_inputs, new_inputs)
+  where
+    old_inputs = zip inp $ lambdaParams lam
+    toNewParamPair inp'' =
+      maybe
+        ((inp'',) <$> inputToNewParam inp'')
+        (pure . (inp'',))
+        (lookup inp'' old_inputs)
+
+isOutput :: (Foldable t) => t VName -> SOAC.Input -> TryFusion Bool
+isOutput out = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
+
+fuseLambda ::
+  Lambda SOACS ->
+  [SOAC.Input] ->
+  [VName] ->
+  Lambda SOACS ->
+  [VName] ->
+  Maybe ([SOAC.Input], Lambda SOACS, [VName])
+fuseLambda lam_c inp_c out_c lam_p out_p =
+  if all (isJust . SOAC.isVarishInput . snd) $
+    mapMaybe (`M.lookup` inp_c_map) out_p
+    then
+      Just
+        ( extra_inp,
+          Lambda
+            { lambdaBody = new_body,
+              lambdaParams = new_params,
+              lambdaReturnType = new_ts
+            },
+          new_out
+        )
+    else Nothing
+  where
+    new_params = params_p <> extra_params
+    inp_c_map =
+      M.fromList $
+        zip
+          (SOAC.inputArray <$> inp_c)
+          (zip (paramName <$> params_c) inp_c)
+
+    bindResToPar (out, res, t) =
+      case M.lookup out inp_c_map of
+        Just (name, _) ->
+          Just $ certify cs $ mkLet [Ident name t] $ BasicOp $ SubExp e
+          where
+            SubExpRes cs e = res
+        Nothing -> Nothing
+
+    binds =
+      stmsFromList $
+        mapMaybe bindResToPar $
+          zip3 out_p res_p ts_p
+
+    (new_out, new_res, new_ts) =
+      unzip3 $
+        (zip3 out_p res_p ts_p)
+          <> zip3 out_c res_c ts_c
+
+    (extra_params, extra_inp) =
+      unzip $
+        filter
+          ((`notElem` out_p) . SOAC.inputArray . snd)
+          (zip params_c inp_c)
+
+    ts_c = lambdaReturnType lam_c
+    ts_p = lambdaReturnType lam_p
+    res_c = bodyResult $ lambdaBody lam_c
+    res_p = bodyResult $ lambdaBody lam_p
+    body_stms_c = bodyStms $ lambdaBody lam_c
+    body_stms_p = bodyStms $ lambdaBody lam_p
+    new_body_stms =
+      body_stms_p
+        <> binds
+        <> body_stms_c
+    new_body =
+      (lambdaBody lam_c)
+        { bodyStms = new_body_stms,
+          bodyResult = new_res
+        }
+    params_c = lambdaParams lam_c
+    params_p = lambdaParams lam_p
+
+fuseScremaMapHorizontally :: ScremaForm rep -> ScremaForm rep -> Lambda rep
+fuseScremaMapHorizontally
+  (SOAC.ScremaForm map_c scans_c reds_c _)
+  (SOAC.ScremaForm map_p scans_p reds_p _) =
+    Lambda
+      { lambdaParams = lambdaParams map_c <> lambdaParams map_p,
+        lambdaBody = new_body,
+        lambdaReturnType =
+          scans_ts_c
+            <> scans_ts_p
+            <> reds_ts_c
+            <> reds_ts_p
+            <> map_ts_c
+            <> map_ts_p
+      }
+    where
+      (scans_ts_c, reds_ts_c, map_ts_c) =
+        splitAt3
+          (Futhark.scanResults scans_c)
+          (Futhark.redResults reds_c)
+          $ lambdaReturnType map_c
+      (scans_res_c, reds_res_c, map_res_c) =
+        splitAt3
+          (Futhark.scanResults scans_c)
+          (Futhark.redResults reds_c)
+          $ lambdaBodyResult map_c
+      (scans_ts_p, reds_ts_p, map_ts_p) =
+        splitAt3
+          (Futhark.scanResults scans_p)
+          (Futhark.redResults reds_p)
+          $ lambdaReturnType map_p
+      (scans_res_p, reds_res_p, map_res_p) =
+        splitAt3
+          (Futhark.scanResults scans_p)
+          (Futhark.redResults reds_p)
+          $ lambdaBodyResult map_p
+      lambdaBodyResult = bodyResult . lambdaBody
+      lambdaBodyStms = bodyStms . lambdaBody
+      new_body =
+        Body
+          { bodyDec = bodyDec $ lambdaBody map_c,
+            bodyStms = lambdaBodyStms map_c <> lambdaBodyStms map_p,
+            bodyResult =
+              scans_res_c
+                <> scans_res_p
+                <> reds_res_c
+                <> reds_res_p
+                <> map_res_c
+                <> map_res_p
+          }
+
+fuseScremaScansHorizontally :: ScremaForm rep -> ScremaForm rep -> [Scan rep]
+fuseScremaScansHorizontally
+  (SOAC.ScremaForm _ scans_c _ _)
+  (SOAC.ScremaForm _ scans_p _ _) = scans_c <> scans_p
+
+fuseScremaRedsHorizontally :: ScremaForm rep -> ScremaForm rep -> [Reduce rep]
+fuseScremaRedsHorizontally
+  (SOAC.ScremaForm _ _ reds_c _)
+  (SOAC.ScremaForm _ _ reds_p _) = reds_c <> reds_p
+
+fuseScremaPostHorizontally :: ScremaForm rep -> ScremaForm rep -> Lambda rep
+fuseScremaPostHorizontally
+  (SOAC.ScremaForm _ scans_c _ post_c)
+  (SOAC.ScremaForm _ scans_p _ post_p) =
+    Lambda
+      { lambdaParams =
+          scans_pars_c
+            <> scans_pars_p
+            <> map_pars_c
+            <> map_pars_p,
+        lambdaBody = new_body,
+        lambdaReturnType = lambdaReturnType post_c <> lambdaReturnType post_p
+      }
+    where
+      (scans_pars_c, map_pars_c) =
+        splitAt
+          (Futhark.scanResults scans_c)
+          $ lambdaParams post_c
+      (scans_pars_p, map_pars_p) =
+        splitAt
+          (Futhark.scanResults scans_p)
+          $ lambdaParams post_p
+      lambdaBodyResult = bodyResult . lambdaBody
+      lambdaBodyStms = bodyStms . lambdaBody
+      new_body =
+        Body
+          { bodyDec = bodyDec $ lambdaBody post_c,
+            bodyStms = lambdaBodyStms post_c <> lambdaBodyStms post_p,
+            bodyResult = lambdaBodyResult post_c <> lambdaBodyResult post_p
+          }
+
+fuseScremaHorizontally ::
+  (ScremaForm rep, [VName]) -> (ScremaForm rep, [VName]) -> (ScremaForm rep, [VName])
+fuseScremaHorizontally (form_c, out_c) (form_p, out_p) =
+  ( ScremaForm new_map new_scans new_reds new_post,
+    out_reds_c <> out_reds_p <> out_rest_c <> out_rest_p
+  )
+  where
+    new_map = fuseScremaMapHorizontally form_c form_p
+    new_scans = fuseScremaScansHorizontally form_c form_p
+    new_reds = fuseScremaRedsHorizontally form_c form_p
+    new_post = fuseScremaPostHorizontally form_c form_p
+    (out_reds_c, out_rest_c) =
+      splitAt (Futhark.redResults $ scremaReduces form_c) out_c
+    (out_reds_p, out_rest_p) =
+      splitAt (Futhark.redResults $ scremaReduces form_p) out_p
+
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
   Mode ->
@@ -260,54 +503,84 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
     (_, _, Vertical)
       | unfus_set /= mempty,
         not (SOAC.nullTransforms $ fsOutputTransform ker) ->
-          fail "Cannot perform diagonal fusion in the presence of output transforms."
-    ( SOAC.Screma _ _ (ScremaForm _ scans_c reds_c),
-      SOAC.Screma _ _ (ScremaForm _ scans_p reds_p),
+          fail
+            "Cannot perform diagonal fusion in the presence of output transforms."
+    {- ( SOAC.Screma _ _ (ScremaForm _ scans_c reds_c _),
+       SOAC.Screma _ _ (ScremaForm _ scans_p reds_p _),
+       _
+       )
+         | scremaFusionOK
+             ( splitAt
+                 ( Futhark.scanResults scans_p
+                     + Futhark.redResults reds_p
+                 )
+                 outVars
+             )
+             ker -> do
+             let red_nes_p = concatMap redNeutral reds_p
+                 red_nes_c = concatMap redNeutral reds_c
+                 scan_nes_p = concatMap scanNeutral scans_p
+                 scan_nes_c = concatMap scanNeutral scans_c
+                 (res_lam', new_inp) =
+                   fuseRedomap
+                     unfus_set
+                     outVars
+                     lam_p
+                     scan_nes_p
+                     red_nes_p
+                     inp_p_arr
+                     outPairs
+                     lam_c
+                     scan_nes_c
+                     red_nes_c
+                     inp_c_arr
+                 (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
+                   splitAt3 (length scan_nes_p) (length red_nes_p) outVars
+                 (soac_c_scanout, soac_c_redout, soac_c_mapout) =
+                   splitAt3 (length scan_nes_c) (length red_nes_c) $ fsOutNames ker
+                 unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
+                 post_lam_ts =
+                   soac_p_scanout
+                     ++ soac_c_scanout
+                     ++ soac_c_mapout
+                     ++ unfus_arrs
+             post_lam <-
+               mkIdentityLambda
+                 =<< mapM (fmap (stripArray 1) . lookupType) post_lam_ts
+             success
+               ( soac_p_redout
+                   ++ soac_c_redout
+                   ++ post_lam_ts
+               )
+               $ SOAC.Screma
+                 w
+                 new_inp
+                 (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c) post_lam) -}
+    ( SOAC.Screma _ _ form_c,
+      SOAC.Screma _ _ form_p,
       _
       )
-        | scremaFusionOK
-            ( splitAt
-                ( Futhark.scanResults scans_p
-                    + Futhark.redResults reds_p
-                )
-                outVars
-            )
-            ker -> do
-            let red_nes_p = concatMap redNeutral reds_p
-                red_nes_c = concatMap redNeutral reds_c
-                scan_nes_p = concatMap scanNeutral scans_p
-                scan_nes_c = concatMap scanNeutral scans_c
-                (res_lam', new_inp) =
-                  fuseRedomap
-                    unfus_set
-                    outVars
-                    lam_p
-                    scan_nes_p
-                    red_nes_p
-                    inp_p_arr
-                    outPairs
-                    lam_c
-                    scan_nes_c
-                    red_nes_c
-                    inp_c_arr
-                (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
-                  splitAt3 (length scan_nes_p) (length red_nes_p) outVars
-                (soac_c_scanout, soac_c_redout, soac_c_mapout) =
-                  splitAt3 (length scan_nes_c) (length red_nes_c) $ fsOutNames ker
-                unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
-            success
-              ( soac_p_scanout
-                  ++ soac_c_scanout
-                  ++ soac_p_redout
-                  ++ soac_c_redout
-                  ++ soac_c_mapout
-                  ++ unfus_arrs
-              )
-              $ SOAC.Screma
-                w
-                new_inp
-                (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c))
-
+        | Just map_lam <- isMapSOAC form_c,
+          not $ null $ scremaScans form_p,
+          all (`notNameIn` unfus_set) $ fsOutNames ker,
+          Just (extra_inp, post_lam', out) <-
+            fuseLambda
+              map_lam
+              inp_c_arr
+              (fsOutNames ker)
+              post_lam
+              outVars -> do
+            let new_inp = inp_p_arr <> extra_inp
+            extra_pars <- mapM (newParam "x" . stripArray 1 . SOAC.inputType) extra_inp
+            let form =
+                  form_p
+                    { scremaPostLambda = post_lam',
+                      scremaLambda = extendLambda map_lam_p extra_pars
+                    }
+            success out $ SOAC.Screma w new_inp form
+        where
+          post_lam = scremaPostLambda form_p
+          map_lam_p = scremaLambda form_p
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
@@ -544,10 +817,9 @@ iswim _ (SOAC.Screma w arrs form) ots
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 
-      pure
-        ( SOAC.Screma map_w map_arrs' (mapSOAC map_fun'),
-          ots SOAC.|> SOAC.Rearrange map_aux perm
-        )
+      (,ots SOAC.|> SOAC.Rearrange map_aux perm)
+        . SOAC.Screma map_w map_arrs'
+        <$> mapSOAC map_fun'
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
@@ -651,7 +923,7 @@ pullIndex (SOAC.Screma _ inps form) ots
           else
             runLambdaBuilder (lambdaParams lam) $
               mapM sliceRes =<< bodyBind (lambdaBody lam)
-      pure (SOAC.Screma w' (map sliceInput inps) (mapSOAC lam'), ots')
+      (,ots') . SOAC.Screma w' (map sliceInput inps) <$> mapSOAC lam'
 pullIndex _ _ = fail "Cannot pull index"
 
 pushRearrange ::
