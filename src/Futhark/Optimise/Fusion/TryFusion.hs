@@ -291,7 +291,6 @@ fuseLambda lam_c inp_c out_c lam_p out_p =
           (SOAC.inputArray <$> inp_c)
           (zip (paramName <$> params_c) inp_c)
 
-    bindResToPar :: (Buildable rep) => (VName, SubExpRes, Type) -> Maybe (Stm rep)
     bindResToPar (out, res, t) =
       case M.lookup out inp_c_map of
         Just (name, _) ->
@@ -307,9 +306,7 @@ fuseLambda lam_c inp_c out_c lam_p out_p =
 
     (new_out, new_res, new_ts) =
       unzip3 $
-        filter
-          ((`M.member` inp_c_map) . (\(a, _, _) -> a))
-          (zip3 out_p res_p ts_p)
+        (zip3 out_p res_p ts_p)
           <> zip3 out_c res_c ts_c
 
     (extra_params, extra_inp) =
