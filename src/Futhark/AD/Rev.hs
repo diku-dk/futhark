@@ -59,8 +59,12 @@ diffBasicOp pat aux e m =
     ConvOp op x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
-        contrib <-
-          letExp "contrib" $ BasicOp $ ConvOp (flipConvOp op) $ Var pat_adj
+        adj_shape <- askShape
+
+        contrib <- letExp "convop_contrib" <=< mapNest adj_shape (MkSolo (Var pat_adj)) $
+          \(MkSolo pat_adj') ->
+            pure $ BasicOp $ ConvOp (flipConvOp op) pat_adj'
+
         updateSubExpAdj x contrib
     --
     UnOp op x -> do
