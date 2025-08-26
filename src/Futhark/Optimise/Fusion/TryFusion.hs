@@ -305,9 +305,7 @@ fuseLambda lam_c inp_c out_c lam_p out_p =
           zip3 out_p res_p ts_p
 
     (new_out, new_res, new_ts) =
-      unzip3 $
-        (zip3 out_p res_p ts_p)
-          <> zip3 out_c res_c ts_c
+      (out_p <> out_c, res_p <> res_c, ts_p <> ts_c)
 
     (extra_params, extra_inp) =
       unzip $
@@ -440,6 +438,16 @@ fuseScremaHorizontally (form_c, out_c) (form_p, out_p) =
       splitAt (Futhark.redResults $ scremaReduces form_c) out_c
     (out_reds_p, out_rest_p) =
       splitAt (Futhark.redResults $ scremaReduces form_p) out_p
+
+scremaFusionOkay :: SOAC.ScremaForm SOACS -> SOAC.ScremaForm SOACS -> Bool
+scremaFusionOkay form_c form_p =
+  undefined
+  where
+    post_lam_p = scremaPostLambda form_p
+    scans_p = scremaScans form_p
+    map_lam_c = scremaLambda form_c
+    (scan_pars_c, map_pars_c) =
+      splitAt (scanResults scans_p) $ lambdaParams post_lam_p
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
