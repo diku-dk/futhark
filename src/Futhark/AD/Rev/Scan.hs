@@ -437,7 +437,7 @@ diffScanVec ::
   [VName] ->
   ADM () ->
   ADM ()
-diffScanVec ops ys aux w lam ne as m = do
+diffScanVec ops ys aux w lam ne as m = locallyNonvectorised (ys, lam, as) $ do
   stmts <- collectStms_ $ do
     rank <- arrayRank <$> lookupType (head as)
     let rear = [1, 0] ++ drop 2 [0 .. rank - 1]
@@ -468,7 +468,7 @@ diffScanVec ops ys aux w lam ne as m = do
   foldr (vjpStm ops) m stmts
 
 diffScanAdd :: VjpOps -> VName -> SubExp -> Lambda SOACS -> SubExp -> VName -> ADM ()
-diffScanAdd _ops ys n lam' ne as = do
+diffScanAdd _ops ys n lam' ne as = locallyNonvectorised (ys, lam', as) $ do
   lam <- renameLambda lam'
   ys_bar <- lookupAdjVal ys
 

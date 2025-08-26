@@ -1,10 +1,16 @@
+-- Scan with addition.
 -- ==
 -- tags { autodiff }
 -- entry: fwd_vec fwd_map rev_map rev_vec
--- input { [1f32, 2f32, 3f32] }
--- output { [[1f32, 2.0, 6.0], [0f32, 1.0, 3.0], [0f32, 0.0, 2.0]] }
+-- input { [1.0f32, 2.0f32, 3.0f32, 4.0f32, 5.0f32] }
+-- output { [[1f32, 1f32, 1f32, 1f32, 1f32],
+--           [0f32, 1f32, 1f32, 1f32, 1f32],
+--           [0f32, 0f32, 1f32, 1f32, 1f32],
+--           [0f32, 0f32, 0f32, 1f32, 1f32],
+--           [0f32, 0f32, 0f32, 0f32, 1f32]]
+--        }
 
-def f (xs: []f32) = scan (*) 1 xs
+def f (xs: []f32) = scan (+) 0 xs
 
 entry fwd_vec (xs: []f32) : [][]f32 =
   let seeds =
