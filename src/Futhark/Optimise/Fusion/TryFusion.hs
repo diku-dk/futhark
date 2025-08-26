@@ -238,7 +238,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   guard $ all inputOrUnfus outVars
 
   outPairs <- forM (zip outVars $ map rowType $ SOAC.typeOf soac_p) $ \(outVar, t) -> do
-    outVar' <- newVName $ baseString outVar ++ "_elem"
+    outVar' <- newVName $ baseName outVar <> "_elem"
     pure (outVar, Ident outVar' t)
 
   let mapLikeFusionCheck =
@@ -638,7 +638,7 @@ pullIndex (SOAC.Screma _ inps form) ots
           sliceRes (SubExpRes rcs (Var v)) =
             certifying rcs
               . fmap subExpRes
-              . letSubExp (baseString v <> "_sliced")
+              . letSubExp (baseName v <> "_sliced")
               $ BasicOp (Index v (Slice inner_ds))
           sliceRes r = pure r
           inner_changed =

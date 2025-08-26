@@ -101,10 +101,10 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
             else Just $ do
               arr_sliced <-
                 certifying cs $
-                  letExp (baseString arr <> "_sliced") . BasicOp . Index arr . Slice
+                  letExp (baseName arr <> "_sliced") . BasicOp . Index arr . Slice
                     =<< sequence inds'''
               arr_sliced_tr <-
-                letSubExp (baseString arr_sliced <> "_tr") $
+                letSubExp (baseName arr_sliced <> "_tr") $
                   BasicOp (Rearrange arr_sliced perm)
               pure $ SubExpResult mempty arr_sliced_tr
       where

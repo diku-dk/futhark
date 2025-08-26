@@ -32,7 +32,7 @@ parallelCopy pt destloc srcloc = do
     free_params <- freeParams body
     emit $ Imp.Op $ Imp.ParLoop "copy" body free_params
   free_params <- freeParams seq_code
-  s <- prettyString <$> newVName "copy"
+  s <- nameFromText . prettyText <$> newVName "copy"
   iterations <- dPrimVE "iterations" $ product $ map pe64 srcshape
   let scheduling = Imp.SchedulerInfo (untyped iterations) Imp.Static
   emit . Imp.Op $
@@ -152,7 +152,7 @@ compileMCOp pat (ParOp par_op op) = do
       pure $ Just $ Imp.ParallelTask par_code
     Nothing -> pure Nothing
 
-  s <- segOpString op
+  s <- segOpName op
   let seq_task = Imp.ParallelTask seq_code
   free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
   let code =

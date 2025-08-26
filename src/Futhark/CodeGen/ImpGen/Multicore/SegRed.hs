@@ -82,7 +82,7 @@ renameSlug slug = do
 
 -- | Arrays for storing group results shared between threads
 groupResultArrays ::
-  String ->
+  Name ->
   SubExp ->
   [SegBinOp MCMem] ->
   MulticoreGen [[VName]]
