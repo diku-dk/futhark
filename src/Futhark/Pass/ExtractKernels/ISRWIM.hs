@@ -65,8 +65,8 @@ iswim res_pat w scan_fun scan_input
           mapM (newIdent' (<> "_transposed") . transposeIdentType) $
             patIdents res_pat
 
-      addStm . Let res_pat' map_aux . Op $
-        Screma map_w map_arrs' (mapSOAC map_fun')
+      addStm . Let res_pat' map_aux . Op . Screma map_w map_arrs'
+        =<< mapSOAC map_fun'
 
       forM_ (zip (patIdents res_pat) (patIdents res_pat')) $ \(to, from) -> do
         let perm = [1, 0] ++ [2 .. arrayRank (identType from) - 1]
@@ -132,8 +132,8 @@ irwim res_pat w comm red_fun red_input
 
       let map_fun' = Lambda map_params map_rettype map_body
 
-      addStm . Let res_pat map_aux . Op . Screma map_w arrs' $
-        mapSOAC map_fun'
+      addStm . Let res_pat map_aux . Op . Screma map_w arrs'
+        =<< mapSOAC map_fun'
   | otherwise = Nothing
 
 -- | Does this reduce operator contain an inner map, and if so, what
