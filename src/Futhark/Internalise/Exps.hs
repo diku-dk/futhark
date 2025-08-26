@@ -399,7 +399,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
               funcall desc qfname args'
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
-internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
+internaliseAppExp _ _ (E.LetFun (ofname, _) _ _ _) =
   error $ "Unexpected LetFun " ++ prettyString ofname
 internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
   ses <- internaliseExp "loop_init" $ loopInitExp loopinit

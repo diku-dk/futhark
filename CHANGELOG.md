@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark script` now frees values before terminating.
 
+* Correct source locations when warning about unused local functions.
+
 ## [0.25.32]
 
 ### Added

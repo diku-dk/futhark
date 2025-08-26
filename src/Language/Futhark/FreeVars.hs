@@ -68,7 +68,7 @@ freeInExp expr = case expr of
       <> ( (freeInPat pat <> freeInExp e2)
              `freeWithoutL` (patNames pat <> map sizeName let_sizes)
          )
-  AppExp (LetFun vn (tparams, pats, _, _, e1) e2 _) _ ->
+  AppExp (LetFun (vn, _) (tparams, pats, _, _, e1) e2 _) _ ->
     ( (freeInExp e1 <> foldMap freeInPat pats)
         `freeWithoutL` (foldMap patNames pats <> map typeParamName tparams)
     )

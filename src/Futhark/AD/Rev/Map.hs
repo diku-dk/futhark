@@ -6,6 +6,7 @@ module Futhark.AD.Rev.Map (vjpMap) where
 
 import Control.Monad
 import Data.Bifunctor (first)
+import Debug.Trace
 import Futhark.AD.Rev.Monad
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder

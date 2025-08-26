@@ -291,7 +291,7 @@ getOrdering final (AppExp (LetPat sizes pat expr body _) _) = do
   expr' <- naming (patRepName pat) $ getOrdering True expr
   addBind $ PatBind sizes pat expr'
   getOrdering final body
-getOrdering final (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
+getOrdering final (AppExp (LetFun (vn, _) (tparams, params, mrettype, rettype, body) e _) _) = do
   body' <- transformBody body
   addBind $ FunBind vn (tparams, params, mrettype, rettype, body')
   getOrdering final e
@@ -364,7 +364,7 @@ transformBody e = do
     f body (PatBind sizes p expr) =
       AppExp (LetPat sizes p expr body mempty) appRes
     f body (FunBind vn infos) =
-      AppExp (LetFun vn infos body mempty) appRes
+      AppExp (LetFun (vn, mempty) infos body mempty) appRes
 
 transformValBind :: (MonadFreshNames m) => ValBind -> m ValBind
 transformValBind valbind = do

@@ -343,7 +343,7 @@ resolveAppExp (LetPat sizes p e1 e2 loc) = do
     resolvePat p $ \p' -> do
       e2' <- resolveExp e2
       pure $ LetPat sizes' p' e1' e2' loc
-resolveAppExp (LetFun fname (tparams, params, ret, NoInfo, fbody) body loc) = do
+resolveAppExp (LetFun (fname, fnameloc) (tparams, params, ret, NoInfo, fbody) body loc) = do
   checkForDuplicateNames tparams params
   checkDoNotShadow loc fname
   (tparams', params', ret', fbody') <-
@@ -351,9 +351,9 @@ resolveAppExp (LetFun fname (tparams, params, ret, NoInfo, fbody) body loc) = do
       resolveParams params $ \params' -> do
         ret' <- traverse resolveTypeExp ret
         (tparams',params',ret',) <$> resolveExp fbody
-  bindSpaced1 Term fname loc $ \fname' -> do
+  bindSpaced1 Term fname fnameloc $ \fname' -> do
     body' <- resolveExp body
-    pure $ LetFun fname' (tparams', params', ret', NoInfo, fbody') body' loc
+    pure $ LetFun (fname', fnameloc) (tparams', params', ret', NoInfo, fbody') body' loc
 resolveAppExp (LetWith (Ident dst _ dstloc) (Ident src _ srcloc) slice e1 e2 loc) = do
   src' <- Ident <$> resolveName src srcloc <*> pure NoInfo <*> pure srcloc
   e1' <- resolveExp e1

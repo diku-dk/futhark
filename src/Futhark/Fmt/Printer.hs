@@ -363,7 +363,7 @@ instance Format (AppExpBase NoInfo Name) where
       sub
         | null sizes = fmt pat
         | otherwise = sizes' <+> fmt pat
-  fmt (LetFun fname (tparams, params, retdecl, _, e) body loc) =
+  fmt (LetFun (fname, _) (tparams, params, retdecl, _, e) body loc) =
     addComments loc $
       lineIndent
         e
