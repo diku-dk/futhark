@@ -152,7 +152,7 @@ transformPat :: PatBase Info VName (TypeBase Exp u) -> LiftM (PatBase Info VName
 transformPat = traverse transformType
 
 transformExp :: Exp -> LiftM Exp
-transformExp (AppExp (LetFun fname (tparams, params, _, Info ret, funbody) body _) _) = do
+transformExp (AppExp (LetFun (fname, _) (tparams, params, _, Info ret, funbody) body _) _) = do
   funbody' <- bindingParams (map typeParamName tparams) params $ transformExp funbody
   fname' <- newVName $ "lifted_" <> baseName fname
   lifted_call <- liftFunction fname' tparams params ret funbody'

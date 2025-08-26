@@ -691,10 +691,10 @@ LetExp :: { UncheckedExp }
        { AppExp (LetPat [] $2 $4 $5 (srcspan $1 $>)) NoInfo }
 
      | let id LocalFunTypeParams FunParams1 maybeAscription(TypeExp) '=' Exp LetBody
-       { let L _ (ID name) = $2
-         in AppExp (LetFun name ($3, fst $4 : snd $4, $5, NoInfo, $7)
-                    $8 (srcspan $1 $>))
-                   NoInfo}
+       { let L nameloc (ID name) = $2
+           in AppExp (LetFun (name, srclocOf nameloc) ($3, fst $4 : snd $4, $5, NoInfo, $7)
+                     $8 (srcspan $1 $>))
+                     NoInfo}
 
      | let id '...[' DimIndices ']' '=' Exp LetBody
        { let L vloc (ID v) = $2; ident = Ident v NoInfo (srclocOf vloc)
