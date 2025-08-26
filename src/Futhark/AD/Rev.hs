@@ -384,7 +384,7 @@ revVJP scope shape (Lambda params ts body) = do
     adj_shape <- askShape
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->
       Param mempty
-        <$> maybe (newVName "const_adj") adjVName (subExpVar se)
+        <$> maybe (newVName "const_res_adj") adjVName (subExpVar se)
         <*> pure (t `arrayOfShape` adj_shape)
 
     body' <-

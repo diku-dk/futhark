@@ -52,6 +52,8 @@ module Futhark.AD.Rev.Monad
     lookupLoopTape,
     substLoopTape,
     renameLoopTape,
+    --
+    locallyNonvectorised,
   )
 where
 
@@ -62,6 +64,7 @@ import Data.Bifunctor (second)
 import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Maybe
+import Futhark.AD.Shared
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
@@ -238,7 +241,7 @@ runADM shape (ADM m) =
         (RState mempty mempty mempty vn)
 
 adjVal :: Adj -> ADM VName
-adjVal (AdjVal se) = letExp "const_adj" $ BasicOp $ SubExp se
+adjVal (AdjVal se) = letExp "const_val_adj" $ BasicOp $ SubExp se
 adjVal (AdjSparse sparse) = sparseArray sparse
 adjVal (AdjZero shape t) = zeroArray shape $ Prim t
 
@@ -396,6 +399,7 @@ vecOpExp bop x y = do
 lookupAdj :: VName -> ADM Adj
 lookupAdj v = do
   maybeAdj <- gets $ M.lookup v . stateAdjs
+  adj_shape <- askShape
   case maybeAdj of
     Nothing -> do
       v_t <- lookupType v
@@ -403,7 +407,7 @@ lookupAdj v = do
         Acc _ shape [Prim t] _ -> pure $ AdjZero shape t
         Acc _ shape [t] _ -> pure $ AdjZero (shape <> arrayShape t) (elemType t)
         Acc {} -> error $ "lookupAdj: Non-singleton accumulator adjoint: " <> prettyString v_t
-        _ -> pure $ AdjZero (arrayShape v_t) (elemType v_t)
+        _ -> pure $ AdjZero (adj_shape <> arrayShape v_t) (elemType v_t)
     Just v_adj -> pure v_adj
 
 lookupAdjVal :: VName -> ADM VName
@@ -561,6 +565,39 @@ substLoopTape v v' = mapM_ (setLoopTape v') =<< lookupLoopTape v
 -- the names in the loop tape after a loop rename.
 renameLoopTape :: Substitutions -> ADM ()
 renameLoopTape = mapM_ (uncurry substLoopTape) . M.toList
+
+-- | Disable vectorised AD within the provided action. This results in a map
+-- that computes each adjoint explicitly, then assembles the resulting adjoint
+-- vectors. This is useful for constructs (such as scans) where vectorised AD is
+-- impractical or inefficient.
+locallyNonvectorised ::
+  (FreeIn e) =>
+  -- | Something that represents all the free variables used in the action.
+  -- Usually just an expression or statement.
+  e ->
+  ADM () ->
+  ADM ()
+locallyNonvectorised e m = do
+  adj_shape <- askShape
+  if adj_shape == mempty
+    then m
+    else do
+      -- We map over all adjoints of free variables in 'e'. To avoid clutter, we
+      -- only consider those that actually have known nonzero adjoints.
+      e_adjs <- filterM knownAdjoint e_free
+      e_adjs_vals <- mapM lookupAdjVal e_adjs
+      e_free_adjs <- mkMap "nonvec_adj" e_adjs_vals $ \e_adjs_vals' -> do
+        zipWithM_ insAdj e_adjs e_adjs_vals'
+        local (const mempty) m
+        mapM lookupAdjVal e_free
+      zipWithM_ insAdj e_free e_free_adjs
+  where
+    e_free = namesToList $ freeIn e
+    knownAdjoint v = do
+      v_adj <- lookupAdj v
+      pure $ case v_adj of
+        AdjZero {} -> False
+        _ -> True
 
 -- Note [Consumption]
 --

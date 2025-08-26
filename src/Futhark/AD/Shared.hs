@@ -1,5 +1,11 @@
 -- | Various definitions used for both forward and reverse mode.
-module Futhark.AD.Shared (auxPerm, asVName, mapNest) where
+module Futhark.AD.Shared
+  ( auxPerm,
+    asVName,
+    mapNest,
+    mkMap,
+  )
+where
 
 import Control.Monad
 import Data.Foldable
@@ -33,3 +39,15 @@ mapNest shape x f = do
         fmap (subExpsRes . pure) . letSubExp "tan"
           =<< f (fmap (Var . paramName) x_p)
       pure $ Op $ Screma w (toList x_v) (mapSOAC lam)
+
+mkMap ::
+  (MonadBuilder m, Rep m ~ SOACS, Traversable f) =>
+  String ->
+  f VName ->
+  (f VName -> m [VName]) ->
+  m [VName]
+mkMap desc arrs f = do
+  w <- arraySize 0 <$> lookupType (head $ toList arrs)
+  x_p <- traverse (newParam "xp" . rowType <=< lookupType) arrs
+  lam <- mkLambda (toList x_p) $ varsRes <$> f (fmap paramName x_p)
+  letTupExp desc $ Op $ Screma w (toList arrs) (mapSOAC lam)
