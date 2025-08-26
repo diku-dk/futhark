@@ -637,7 +637,7 @@ inKernelOperations env mode body =
     kernelOps (MemFence FenceGlobal) =
       GC.stm [C.cstm|mem_fence_global();|]
     kernelOps (SharedAlloc name size) = do
-      name' <- newVName $ prettyString name ++ "_backing"
+      name' <- newVName $ nameFromText $ prettyText name <> "_backing"
       GC.modifyUserState $ \s ->
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]

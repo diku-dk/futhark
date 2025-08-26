@@ -161,7 +161,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
         iota <- letExp "iota" $ BasicOp $ Iota inv_dim_len (intConst Int64 0) (intConst Int64 1) Int64
         let op_exp = Op (OtherOp (Screma inv_dim_len [iota] (ScremaForm map_lam [] [red])))
         res_redmap <- letTupExp "res_mapred" op_exp
-        letSubExp (baseString pat_acc_nm ++ "_big_update") $
+        letSubExp (baseName pat_acc_nm <> "_big_update") $
           BasicOp (UpdateAcc safety acc_nm acc_inds $ map Var res_redmap)
 
       -- 1.3. build the kernel expression and rename it!
@@ -269,8 +269,8 @@ transposeFVs fvs variance gid stms = do
         ii /= length dims - 1,
         perm <- [0 .. ii - 1] ++ [ii + 1 .. length dims - 1] ++ [ii] = do
           (arr_tr, stms_tr) <- runBuilderT' $ do
-            arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange arr perm
-            letExp (baseString arr' ++ "_opaque") $ BasicOp $ Opaque OpaqueNil $ Var arr'
+            arr' <- letExp (baseName arr <> "_trsp") $ BasicOp $ Rearrange arr perm
+            letExp (baseName arr' <> "_opaque") $ BasicOp $ Opaque OpaqueNil $ Var arr'
           let tab' = M.insert arr (perm, arr_tr, stms_tr) tab
               slc' = Slice $ map (dims !!) perm
               stm' = Let pat aux $ BasicOp $ Index arr_tr slc'

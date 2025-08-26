@@ -257,7 +257,7 @@ internaliseTypeM exts orig_t =
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar u tn [E.TypeArgType arr_t])
       | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
-        baseString (E.qualLeaf tn) == "acc" -> do
+        baseName (E.qualLeaf tn) == "acc" -> do
           ts <-
             foldMap (toList . fmap (fromDecl . onAccType))
               <$> internaliseTypeM exts (E.toRes Nonunique arr_t)

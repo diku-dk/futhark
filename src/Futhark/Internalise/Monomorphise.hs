@@ -343,8 +343,8 @@ addLifted fname il liftf =
 lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
 lookupLifted fname t = lookup (fname, t) <$> getLifts
 
-sizeVarName :: Exp -> String
-sizeVarName e = "d<{" <> prettyString (bareExp e) <> "}>"
+sizeVarName :: Exp -> Name
+sizeVarName e = "d<{" <> nameFromText (prettyText (bareExp e)) <> "}>"
 
 -- | Creates a new expression replacement if needed, this always produces normalised sizes.
 -- (e.g. single variable or constant)
@@ -360,7 +360,7 @@ replaceExp e =
         (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
-          vn <- newNameFromString $ sizeVarName e
+          vn <- newVName $ sizeVarName e
           modify ((e', vn) :)
           pure $ sizeFromName (qualName vn) (srclocOf e)
   where
@@ -571,7 +571,7 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
 
     makeVarParam arg = do
       let argtype = typeOf arg
-      x <- newNameFromString "binop_p"
+      x <- newVName "binop_p"
       pure
         ( Var (qualName x) (Info argtype) mempty,
           Id x (Info argtype) mempty
@@ -590,7 +590,7 @@ transformAppExp (Match e cs loc) res = do
   if S.null implicitDims
     then pure $ AppExp (Match e' cs' loc) (Info res')
     else do
-      tmpVar <- newNameFromString "matched_variable"
+      tmpVar <- newVName "matched_variable"
       pure $
         AppExp
           ( LetPat
@@ -752,7 +752,7 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
     Lambda (p1 ++ p2) body Nothing (Info rettype'') loc
   where
     patAndVar argtype = do
-      x <- newNameFromString "x"
+      x <- newVName "x"
       pure
         ( x,
           Id x (Info argtype) mempty,

@@ -93,7 +93,7 @@ splitScanOrRedomap pes w map_lam nes = do
   pure (map_pat, Pat acc_pes, map identName map_accpat)
   where
     accMapPatElem pe acc_t =
-      newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w
+      newIdent (baseName (patElemName pe) <> "_map_acc") $ acc_t `arrayOfRow` w
     arrMapPatElem = pure . patElemIdent
 
 -- | Turn a Screma into a Scanomap (possibly with mapout parts) and a
@@ -207,7 +207,7 @@ withAcc dest rank mk = do
 -- | Perform a scatter-like operation using accumulators and map.
 doScatter ::
   (MonadBuilder m, Buildable (Rep m), Op (Rep m) ~ SOAC (Rep m)) =>
-  String ->
+  Name ->
   Int ->
   [VName] ->
   [VName] ->

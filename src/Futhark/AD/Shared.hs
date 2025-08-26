@@ -42,7 +42,7 @@ mapNest shape x f = do
 
 mkMap ::
   (MonadBuilder m, Rep m ~ SOACS, Traversable f) =>
-  String ->
+  Name ->
   f VName ->
   (f VName -> m [VName]) ->
   m [VName]

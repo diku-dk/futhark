@@ -26,6 +26,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Util (mapAccumLM, nubOrd)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
@@ -826,9 +827,9 @@ instantiateDimsInReturnType loc fname (RetType dims t)
   where
     new =
       newRigidDim loc (RigidRet fname)
-        . nameFromString
-        . takeWhile isAscii
-        . baseString
+        . nameFromText
+        . T.takeWhile isAscii
+        . baseText
     onDim dims' = applySubst (`lookup` dims')
 
 -- Some information about the function/operator we are trying to

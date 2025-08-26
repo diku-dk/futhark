@@ -89,7 +89,7 @@ pushAdjShape v = do
     then pure v
     else do
       let perm = vecPerm adj_shape v_t
-      letExp (baseString v <> "_tr") $ BasicOp $ Rearrange v perm
+      letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
 
 -- | Perform VJP on a Map.  The 'Adj' list is the adjoints of the
 -- result of the map.
@@ -254,6 +254,6 @@ vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
           zero <- letSubExp "zero" $ zeroExp t
           reduce <- reduceSOAC [Reduce Commutative lam [zero]]
           contrib_sum <-
-            letExp (baseString v <> "_contrib_sum") . Op $
+            letExp (baseName v <> "_contrib_sum") . Op $
               Screma w [contribs] reduce
           void $ updateAdj v contrib_sum

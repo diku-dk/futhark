@@ -860,7 +860,7 @@ simplifyMapIota vtable screma_pat aux op
     properArr [] arr = pure arr
     properArr js arr = do
       arr_t <- lookupType arr
-      letExp (baseString arr) $ BasicOp $ Index arr $ fullSlice arr_t $ map DimFix js
+      letExp (baseName arr) $ BasicOp $ Index arr $ fullSlice arr_t $ map DimFix js
 
     mapOverArr w (pat, js, ArrayIndexing cs arr slice) = do
       arr' <- properArr js arr
@@ -869,9 +869,9 @@ simplifyMapIota vtable screma_pat aux op
         if arraySize 0 arr_t == w
           then pure arr'
           else
-            certifying cs . letExp (baseString arr ++ "_prefix") . BasicOp . Index arr' $
+            certifying cs . letExp (baseName arr <> "_prefix") . BasicOp . Index arr' $
               fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
-      arr_elem_param <- newParam (baseString arr ++ "_elem") (rowType arr_t)
+      arr_elem_param <- newParam (baseName arr <> "_elem") (rowType arr_t)
       pure $
         Just
           ( arr'',
@@ -943,7 +943,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
           arr_t <- lookupType arr
           let whole_dim = DimSlice (intConst Int64 0) (arraySize 0 arr_t) (intConst Int64 1)
           arr_transformed <- certifying (arrayOpCerts op) $
-            letExp (baseString arr ++ "_transformed") $
+            letExp (baseName arr <> "_transformed") $
               case op of
                 ArrayIndexing _ _ (Slice slice) ->
                   BasicOp $ Index arr $ Slice $ whole_dim : slice
@@ -956,7 +956,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
                 ArrayVar {} ->
                   BasicOp $ SubExp $ Var arr
           arr_transformed_t <- lookupType arr_transformed
-          arr_transformed_row <- newVName $ baseString arr ++ "_transformed_row"
+          arr_transformed_row <- newVName $ baseName arr <> "_transformed_row"
           pure $
             Just
               ( arr_transformed,
@@ -1034,7 +1034,7 @@ moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm ma
       (transformed, map_infos, stms <> oneStm stm)
 
     mkTransformed (t, pe, (arr, cs, f)) = do
-      v <- newVName (baseString (patElemName pe) <> "_pretr")
+      v <- newVName (baseName (patElemName pe) <> "_pretr")
       let bind = letBindNames [patElemName pe] $ f v
       pure (SubExpRes cs (Var arr), t, v, bind)
 moveTransformToOutput _ _ _ _ =

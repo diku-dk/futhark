@@ -27,11 +27,11 @@ eReverse arr = do
       BinOp (Sub Int64 OverflowUndef) w (intConst Int64 1)
   let stride = intConst Int64 (-1)
       slice = fullSlice arr_t [DimSlice start w stride]
-  letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice
+  letExp (baseName arr <> "_rev") $ BasicOp $ Index arr slice
 
 scanExc ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  String ->
+  Name ->
   Scan SOACS ->
   [VName] ->
   m [VName]
@@ -80,7 +80,7 @@ diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isAdd op = do
       adj_rep <-
-        transposeIfNeeded <=< letExp (baseString adj <> "_rep") $
+        transposeIfNeeded <=< letExp (baseName adj <> "_rep") $
           BasicOp (Replicate (Shape [w]) (Var adj))
       void $ updateAdj a adj_rep
   where
@@ -91,7 +91,7 @@ diffReduce _ops [adj] w [a] red
         else do
           v_t <- lookupType v
           let perm = [1 .. shapeRank adj_shape] ++ [0] ++ [shapeRank adj_shape + 1 .. arrayRank v_t - 1]
-          letExp (baseString v <> "_tr") $ BasicOp $ Rearrange v perm
+          letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
 
     isAdd FAdd {} = True
     isAdd Add {} = True
@@ -137,7 +137,7 @@ diffReduce ops pat_adj w as red = do
         then pure v
         else do
           v_t <- lookupType v
-          letExp (baseString v <> "_tr") $ BasicOp $ Rearrange v (auxPerm adj_shape v_t)
+          letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v (auxPerm adj_shape v_t)
 
     renameRed (Reduce comm lam nes) =
       Reduce comm <$> renameLambda lam <*> pure nes
@@ -201,7 +201,7 @@ diffMinMaxReduce _ops x aux w minmax ne as m = do
       BasicOp $
         Iota w (intConst Int64 0) (intConst Int64 1) Int64
   form <- reduceSOAC [Reduce Commutative red_lam [ne, intConst Int64 (-1)]]
-  x_ind <- newVName (baseString x <> "_ind")
+  x_ind <- newVName (baseName x <> "_ind")
   auxing aux $ letBindNames [x, x_ind] $ Op $ Screma w [as, red_iota] form
 
   m

@@ -93,7 +93,7 @@ runADM shape (ADM m) =
         (RState mempty vn)
 
 tanVName :: VName -> ADM VName
-tanVName v = newVName (baseString v <> "_tan")
+tanVName v = newVName (baseName v <> "_tan")
 
 insertTan :: VName -> VName -> ADM ()
 insertTan v v' =
@@ -161,7 +161,7 @@ instance Tangent VName where
           error $
             "Missing tangent for accumulator " <> prettyString v
         tan_shape <- askShape
-        letExp (baseString v <> "_implicit_tan") $ zeroExp $ t `arrayOfShape` tan_shape
+        letExp (baseName v <> "_implicit_tan") $ zeroExp $ t `arrayOfShape` tan_shape
   bundleTan v = do
     v_tan <- tangent v
     pure (v, v_tan)
@@ -377,7 +377,7 @@ pushTanShape v = do
     then pure v
     else do
       let perm = vecPerm tan_shape v_t
-      letExp (baseString v <> "_tr") $ BasicOp $ Rearrange v perm
+      letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
 
 soacInputsWithTangents :: [VName] -> ADM [VName]
 soacInputsWithTangents xs = do

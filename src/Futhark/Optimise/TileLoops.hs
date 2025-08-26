@@ -394,7 +394,7 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
             doPrelude tiling privstms precomputed_variant_prestms live_set
 
         mergeparams' <- forM mergeparams $ \(Param attrs pname pt) ->
-          Param attrs <$> newVName (baseString pname ++ "_group") <*> pure (tileDim pt)
+          Param attrs <$> newVName (baseName pname <> "_group") <*> pure (tileDim pt)
 
         let merge_ts = map paramType mergeparams
 
@@ -577,7 +577,7 @@ data ResidualTileArgs = ResidualTileArgs
 -- the kernel.
 data Tiling = Tiling
   { tilingSegMap ::
-      String ->
+      Name ->
       ResultManifest ->
       (PrimExp VName -> [DimIndex SubExp] -> Builder GPU Result) ->
       Builder GPU [VName],
@@ -606,7 +606,7 @@ type DoTiling gtids kdims =
   gtids -> kdims -> SubExp -> Builder GPU Tiling
 
 protectOutOfBounds ::
-  String ->
+  Name ->
   PrimExp VName ->
   [Type] ->
   Builder GPU Result ->
@@ -694,7 +694,7 @@ tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res 
       merge <- forM (zip (lambdaParams red_lam) mergeinits) $ \(p, mergeinit) ->
         (,)
           <$> newParam
-            (baseString (paramName p) ++ "_merge")
+            (baseName (paramName p) <> "_merge")
             (paramType p `arrayOfShape` tile_shape `toDecl` Unique)
           <*> pure (Var mergeinit)
 
@@ -740,7 +740,7 @@ tileReturns dims_on_top dims arr = do
       then pure arr
       else do
         let new_shape = Shape $ unit_dims ++ arrayDims arr_t
-        letExp (baseString arr) . BasicOp $
+        letExp (baseName arr) . BasicOp $
           Reshape arr (reshapeAll (arrayShape arr_t) new_shape)
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
   pure $ TileReturns mempty tile_dims arr'
@@ -913,7 +913,7 @@ tiling1d dims_on_top gtid kdim w = do
   gid <- newVName "gid"
   gid_flat <- newVName "gid_flat"
 
-  tile_size_key <- nameFromString . prettyString <$> newVName "tile_size"
+  tile_size_key <- nameFromText . prettyText <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeThreadBlock
   let tblock_size = tile_size
 

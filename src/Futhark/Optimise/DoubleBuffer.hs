@@ -268,21 +268,21 @@ optimiseLoop (Pat pes) merge body@(Body _ body_stms body_res) = do
           num_bytes <-
             letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + LMAD.range arr_lmad))
           arr_mem_in <-
-            letExp (baseString arg_v <> "_in") $ Op $ Alloc num_bytes space
+            letExp (baseName arg_v <> "_in") $ Op $ Alloc num_bytes space
           addStm arr_mem_out_alloc
 
           -- Construct additional pattern element and parameter for
           -- the memory block that is not used afterwards.
           pe_unused <-
             PatElem
-              <$> newVName (baseString (patElemName pe) <> "_unused")
+              <$> newVName (baseName (patElemName pe) <> "_unused")
               <*> pure (MemMem space)
           param_out <-
-            newParam (baseString (paramName param) <> "_out") (MemMem space)
+            newParam (baseName (paramName param) <> "_out") (MemMem space)
 
           -- Copy the initial array value to the input memory, with
           -- the same index function as the result.
-          arr_v_copy <- newVName $ baseString arr_v <> "_db_copy"
+          arr_v_copy <- newVName $ baseName arr_v <> "_db_copy"
           let arr_initial_info =
                 MemArray pt shape NoUniqueness $ ArrayIn arr_mem_in arr_lmad
               arr_initial_pe =

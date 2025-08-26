@@ -137,7 +137,7 @@ import Futhark.Util (maybeNth)
 -- 'letTupExp'.
 letSubExp ::
   (MonadBuilder m) =>
-  String ->
+  Name ->
   Exp (Rep m) ->
   m SubExp
 letSubExp _ (BasicOp (SubExp se)) = pure se
@@ -146,7 +146,7 @@ letSubExp desc e = Var <$> letExp desc e
 -- | Like 'letSubExp', but returns a name rather than a t'SubExp'.
 letExp ::
   (MonadBuilder m) =>
-  String ->
+  Name ->
   Exp (Rep m) ->
   m VName
 letExp _ (BasicOp (SubExp (Var v))) =
@@ -164,19 +164,19 @@ letExp desc e = do
 -- updated array is returned.
 letInPlace ::
   (MonadBuilder m) =>
-  String ->
+  Name ->
   VName ->
   Slice SubExp ->
   Exp (Rep m) ->
   m VName
 letInPlace desc src slice e = do
-  tmp <- letSubExp (desc ++ "_tmp") e
+  tmp <- letSubExp (desc <> "_tmp") e
   letExp desc $ BasicOp $ Update Unsafe src slice tmp
 
 -- | Like 'letExp', but the expression may return multiple values.
 letTupExp ::
   (MonadBuilder m) =>
-  String ->
+  Name ->
   Exp (Rep m) ->
   m [VName]
 letTupExp _ (BasicOp (SubExp (Var v))) =
@@ -190,7 +190,7 @@ letTupExp name e = do
 -- | Like 'letTupExp', but returns t'SubExp's instead of 'VName's.
 letTupExp' ::
   (MonadBuilder m) =>
-  String ->
+  Name ->
   Exp (Rep m) ->
   m [SubExp]
 letTupExp' _ (BasicOp (SubExp se)) = pure [se]
@@ -474,8 +474,8 @@ asInt ext to_it e = do
     _ -> error "asInt: wrong type"
   where
     s = case e of
-      Var v -> baseString v
-      _ -> "to_" ++ prettyString to_it
+      Var v -> baseName v
+      _ -> nameFromText $ "to_" <> prettyText to_it
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp ::
@@ -725,5 +725,5 @@ instance ToExp VName where
   toExp = pure . BasicOp . SubExp . Var
 
 -- | A convenient composition of 'letSubExp' and 'toExp'.
-toSubExp :: (MonadBuilder m, ToExp a) => String -> a -> m SubExp
+toSubExp :: (MonadBuilder m, ToExp a) => Name -> a -> m SubExp
 toSubExp s e = letSubExp s =<< toExp e
