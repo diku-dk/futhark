@@ -46,8 +46,10 @@ mkMap ::
   f VName ->
   (f VName -> m [VName]) ->
   m [VName]
-mkMap desc arrs f = do
-  w <- arraySize 0 <$> lookupType (head $ toList arrs)
-  x_p <- traverse (newParam "xp" . rowType <=< lookupType) arrs
-  lam <- mkLambda (toList x_p) $ varsRes <$> f (fmap paramName x_p)
-  letTupExp desc $ Op $ Screma w (toList arrs) (mapSOAC lam)
+mkMap desc arrs f
+  | null arrs = pure []
+  | otherwise = do
+      w <- arraySize 0 <$> lookupType (head $ toList arrs)
+      x_p <- traverse (newParam "xp" . rowType <=< lookupType) arrs
+      lam <- mkLambda (toList x_p) $ varsRes <$> f (fmap paramName x_p)
+      letTupExp desc $ Op $ Screma w (toList arrs) (mapSOAC lam)
