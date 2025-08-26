@@ -44,7 +44,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
     alloc x y =
       case paramType x of
         Array pt shape u -> do
-          let name = maybe "num_threads" baseString (subExpVar num_threads)
+          let name = maybe "num_threads" baseName (subExpVar num_threads)
           twice_num_threads <-
             letSubExp ("twice_" <> name) . BasicOp $
               BinOp (Mul Int64 OverflowUndef) num_threads (intConst Int64 2)

@@ -38,13 +38,13 @@ data TileKind = TilePartial | TileFull
 
 -- index an array with indices given in outer_indices; any inner
 -- dims of arr not indexed by outer_indices are sliced entirely
-index :: (MonadBuilder m) => String -> VName -> [VName] -> m VName
+index :: (MonadBuilder m) => Name -> VName -> [VName] -> m VName
 index se_desc arr outer_indices = do
   arr_t <- lookupType arr
   let slice = fullSlice arr_t $ map (DimFix . Var) outer_indices
   letExp se_desc $ BasicOp $ Index arr slice
 
-update :: (MonadBuilder m) => String -> VName -> [VName] -> SubExp -> m VName
+update :: (MonadBuilder m) => Name -> VName -> [VName] -> SubExp -> m VName
 update se_desc arr indices new_elem =
   letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) indices) new_elem
 
@@ -82,7 +82,7 @@ forLoop i_bound merge body = do
   pure $ head res_list
 
 segMap1D ::
-  String ->
+  Name ->
   SegLevel ->
   ResultManifest ->
   SubExp -> -- dim_x
@@ -104,7 +104,7 @@ segMap1D desc lvl manifest w f = do
     SegMap lvl space ts (Body () stms' $ map ret res')
 
 segMap2D ::
-  String -> -- desc
+  Name -> -- desc
   SegLevel -> -- lvl
   ResultManifest -> -- manifest
   (SubExp, SubExp) -> -- (dim_x, dim_y)
@@ -129,7 +129,7 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
       Body () stms (map ret res)
 
 segMap3D ::
-  String -> -- desc
+  Name -> -- desc
   SegLevel -> -- lvl
   ResultManifest -> -- manifest
   (SubExp, SubExp, SubExp) -> -- (dim_z, dim_y, dim_x)
@@ -155,7 +155,7 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
       Body () stms (map ret res)
 
 segScatter2D ::
-  String ->
+  Name ->
   VName ->
   [SubExp] -> -- dims of sequential loop on top
   (SubExp, SubExp) -> -- (dim_y, dim_x)
