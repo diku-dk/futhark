@@ -100,7 +100,7 @@ transformPat _ (Id v (Info (Scalar (Record fs))) loc) = do
   let fs' = M.toList fs
   (fs_ks, fs_ts) <- fmap unzip $
     forM fs' $ \(f, ft) ->
-      (,) <$> newVName (nameToString f) <*> pure ft
+      (,) <$> newVName f <*> pure ft
   pure
     ( RecordPat
         (zip (map (L noLoc . fst) fs') (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))

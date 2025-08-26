@@ -105,14 +105,14 @@ computeHistoUsage space op = do
     dest_mem <- entryArrayLoc <$> lookupArray dest
 
     subhistos_mem <-
-      sDeclareMem (baseString dest ++ "_subhistos_mem") (Space "device")
+      sDeclareMem (baseName dest <> "_subhistos_mem") (Space "device")
 
     let subhistos_shape =
           Shape (map snd segment_dims ++ [tvSize num_subhistos])
             <> stripDims num_segments (arrayShape dest_t)
     subhistos <-
       sArray
-        (baseString dest ++ "_subhistos")
+        (baseName dest <> "_subhistos")
         (elemType dest_t)
         subhistos_shape
         subhistos_mem

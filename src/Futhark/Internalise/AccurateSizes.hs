@@ -85,7 +85,7 @@ ensureResultExtShapeNoCtx msg rettype es = do
 ensureExtShape ::
   ErrorMsg SubExp ->
   ExtType ->
-  String ->
+  Name ->
   SubExp ->
   InternaliseM SubExp
 ensureExtShape msg t name orig
@@ -97,7 +97,7 @@ ensureExtShape msg t name orig
 ensureShape ::
   ErrorMsg SubExp ->
   Type ->
-  String ->
+  Name ->
   SubExp ->
   InternaliseM SubExp
 ensureShape msg = ensureExtShape msg . staticShapes1
@@ -119,12 +119,12 @@ ensureArgShapes msg shapes paramts args =
     ensureArgShape t (Var v)
       | arrayRank t < 1 = pure $ Var v
       | otherwise =
-          ensureShape msg t (baseString v) $ Var v
+          ensureShape msg t (baseName v) $ Var v
 
 ensureShapeVar ::
   ErrorMsg SubExp ->
   ExtType ->
-  String ->
+  Name ->
   VName ->
   InternaliseM VName
 ensureShapeVar msg t name v

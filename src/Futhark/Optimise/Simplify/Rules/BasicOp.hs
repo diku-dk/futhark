@@ -191,7 +191,7 @@ ruleBasicOp vtable pat aux (Update Unsafe dest is se)
         Var v | not $ null $ sliceDims is -> do
           v_t <- lookupType v
           v_reshaped <-
-            letSubExp (baseString v ++ "_reshaped") . BasicOp $
+            letSubExp (baseName v <> "_reshaped") . BasicOp $
               Reshape v $
                 reshapeAll (arrayShape v_t) (arrayShape dest_t)
           letBind pat $ BasicOp $ Replicate mempty v_reshaped
@@ -368,13 +368,13 @@ ruleBasicOp vtable pat aux (Reshape v2 v3_shape)
              flipRearrangeReshape perm v3_shape
            ) of
         (Just perm', _) -> Simplify $ do
-          v1' <- letExp (baseString v1) $ BasicOp $ Rearrange v0 perm'
+          v1' <- letExp (baseName v1) $ BasicOp $ Rearrange v0 perm'
           v1_shape' <- arrayShape <$> lookupType v1'
           auxing aux . certifying (v1_cs <> v2_cs) . letBind pat $
             BasicOp (Reshape v1' (reshapeAll v1_shape' (newShape v3_shape)))
         (_, Just (v3_shape', perm')) -> Simplify $ do
           v2' <-
-            auxing aux . certifying (v1_cs <> v2_cs) . letExp (baseString v2) $
+            auxing aux . certifying (v1_cs <> v2_cs) . letExp (baseName v2) $
               BasicOp (Reshape v1 v3_shape')
           letBind pat $ BasicOp (Rearrange v2' perm')
         _ ->
@@ -387,7 +387,7 @@ ruleBasicOp vtable pat aux (Reshape v2 newshape)
     ST.available v1 vtable =
       Simplify $ do
         v1' <-
-          certifying cs . auxing aux . letExp (baseString v1) . BasicOp $
+          certifying cs . auxing aux . letExp (baseName v1) . BasicOp $
             Reshape v1 newshape
         letBind pat $ BasicOp $ Replicate (Shape []) (Var v1')
 ruleBasicOp vtable pat aux (Rearrange v2 perm)
@@ -395,7 +395,7 @@ ruleBasicOp vtable pat aux (Rearrange v2 perm)
     ST.available v1 vtable =
       Simplify $ do
         v1' <-
-          certifying cs . auxing aux . letExp (baseString v1) . BasicOp $
+          certifying cs . auxing aux . letExp (baseName v1) . BasicOp $
             Rearrange v1 perm
         letBind pat $ BasicOp $ Replicate (Shape []) (Var v1')
 ruleBasicOp _ _ _ _ =

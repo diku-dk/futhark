@@ -42,7 +42,7 @@ type DistRep rep =
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
 
 type MkSegLevel rep m =
-  [SubExp] -> String -> ThreadRecommendation -> BuilderT rep m (SegOpLevel rep)
+  [SubExp] -> Name -> ThreadRecommendation -> BuilderT rep m (SegOpLevel rep)
 
 mkSegSpace :: (MonadFreshNames m) => [(VName, SubExp)] -> m SegSpace
 mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims

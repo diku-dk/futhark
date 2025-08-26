@@ -658,7 +658,7 @@ cachingMemory lexical f = do
   let cached = M.keys $ M.filter (== DefaultSpace) lexical
 
   cached' <- forM cached $ \mem -> do
-    size <- newVName $ prettyString mem <> "_cached_size"
+    size <- newVName $ nameFromText (prettyText mem) <> "_cached_size"
     pure (mem, size)
 
   let lexMem env =

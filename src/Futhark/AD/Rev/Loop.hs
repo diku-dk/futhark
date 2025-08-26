@@ -204,7 +204,7 @@ fwdLoop pat aux loop =
 
     empty_saved_array <-
       forM loop_params_to_copy $ \p ->
-        letSubExp (baseString (paramName p) <> "_empty_saved")
+        letSubExp (baseName (paramName p) <> "_empty_saved")
           =<< eBlank (arrayOf (paramDec p) (Shape [bound64]) NoUniqueness)
 
     (body', (saved_pats, saved_params)) <- buildBody $
@@ -217,15 +217,15 @@ fwdLoop pat aux loop =
             forM loop_params_to_copy $ \p -> do
               let v = paramName p
                   t = paramDec p
-              saved_param_v <- newVName $ baseString v <> "_saved"
-              saved_pat_v <- newVName $ baseString v <> "_saved"
+              saved_param_v <- newVName $ baseName v <> "_saved"
+              saved_pat_v <- newVName $ baseName v <> "_saved"
               setLoopTape v saved_pat_v
               let saved_param = Param mempty saved_param_v $ arrayOf t (Shape [bound64]) Unique
                   saved_pat = PatElem saved_pat_v $ arrayOf t (Shape [bound64]) NoUniqueness
               saved_update <-
                 localScope (scopeOfFParams [saved_param])
                   $ letInPlace
-                    (baseString v <> "_saved_update")
+                    (baseName v <> "_saved_update")
                     saved_param_v
                     (fullSlice (fromDecl $ paramDec saved_param) [DimFix i_i64])
                   $ substituteNames copy_substs
@@ -262,7 +262,7 @@ reverseIndices loop = do
 
     (i_rev, i_stms) <- collectStms $
       localScope (scopeOfLoopForm form) $ do
-        letExp (baseString i <> "_rev") $
+        letExp (baseName i <> "_rev") $
           BasicOp $
             BinOp (Sub it OverflowWrap) bound_minus_one (Var i)
 

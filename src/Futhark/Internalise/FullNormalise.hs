@@ -27,6 +27,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.MonadFreshNames
+import Futhark.Util (showText)
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
@@ -62,9 +63,9 @@ type NormState = (([Binding], [BindModifier]), VNameSource)
 --   they have to be in the same list to conserve their order
 -- Direct interaction with the inside state should be done with caution, that's why their
 -- no instance of `MonadState`.
-newtype OrderingM a = OrderingM (StateT NormState (Reader String) a)
+newtype OrderingM a = OrderingM (StateT NormState (Reader Name) a)
   deriving
-    (Functor, Applicative, Monad, MonadReader String, MonadState NormState)
+    (Functor, Applicative, Monad, MonadReader Name, MonadState NormState)
 
 instance MonadFreshNames OrderingM where
   getNameSource = OrderingM $ gets snd
@@ -97,7 +98,7 @@ runOrdering (OrderingM m) =
         then ((a, binds), src)
         else error "not all bind modifiers were freed"
 
-naming :: String -> OrderingM a -> OrderingM a
+naming :: Name -> OrderingM a -> OrderingM a
 naming s = local (const s)
 
 -- | From now, we say an expression is "final" if it's going to be stored in a let-bind
@@ -107,7 +108,7 @@ naming s = local (const s)
 nameExp :: Bool -> Exp -> OrderingM Exp
 nameExp True e = pure e
 nameExp False e = do
-  name <- newNameFromString =<< ask -- "e<{" ++ prettyString e ++ "}>"
+  name <- newVName =<< ask -- "e<{" ++ prettyString e ++ "}>"
   let ty = typeOf e
       loc = srclocOf e
       pat = Id name (Info ty) loc
@@ -116,18 +117,18 @@ nameExp False e = do
 
 -- An evocative name to use when naming subexpressions of the
 -- expression bound to this pattern.
-patRepName :: Pat t -> String
+patRepName :: Pat t -> Name
 patRepName (PatAscription p _ _) = patRepName p
-patRepName (Id v _ _) = baseString v
+patRepName (Id v _ _) = baseName v
 patRepName _ = "tmp"
 
-expRepName :: Exp -> String
-expRepName (Var v _ _) = prettyString v
-expRepName e = "d<{" ++ prettyString (bareExp e) ++ "}>"
+expRepName :: Exp -> Name
+expRepName (Var v _ _) = nameFromText $ prettyText v
+expRepName e = "d<{" <> nameFromText (prettyText (bareExp e)) <> "}>"
 
 -- An evocative name to use when naming arguments to an application.
-argRepName :: Exp -> Int -> String
-argRepName e i = expRepName e <> "_arg" <> show i
+argRepName :: Exp -> Int -> Name
+argRepName e i = expRepName e <> "_arg" <> nameFromText (showText i)
 
 -- Modify an expression as describe in module introduction,
 -- introducing the let-bindings in the state.
@@ -214,7 +215,7 @@ getOrdering _ (OpSection qn ty loc) =
   pure $ Var qn ty loc
 getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (Info (RetType dims ret), Info exts) loc) = do
   x <- getOrdering False e
-  yn <- newNameFromString "y"
+  yn <- newVName "y"
   let y = Var (qualName yn) (Info $ toStruct yty) mempty
       ret' = applySubst (pSubst x y) ret
       body =
@@ -227,7 +228,7 @@ getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (I
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
 getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (Info (RetType dims ret)) loc) = do
-  xn <- newNameFromString "x"
+  xn <- newVName "x"
   y <- getOrdering False e
   let x = Var (qualName xn) (Info $ toStruct xty) mempty
       ret' = applySubst (pSubst x y) ret
@@ -239,7 +240,7 @@ getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
 getOrdering final (ProjectSection names (Info ty) loc) = do
-  xn <- newNameFromString "x"
+  xn <- newVName "x"
   let (xty, RetType dims ret) = case ty of
         Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
         _ -> error $ "not a function type for project section: " ++ prettyString ty
@@ -260,7 +261,7 @@ getOrdering final (ProjectSection names (Info ty) loc) = do
               ++ prettyString field
 getOrdering final (IndexSection slice (Info ty) loc) = do
   slice' <- astMap mapper slice
-  xn <- newNameFromString "x"
+  xn <- newVName "x"
   let (xty, RetType dims ret) = case ty of
         Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
         _ -> error $ "not a function type for index section: " ++ prettyString ty
@@ -318,8 +319,8 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
       er' <- naming "and_rhs" $ transformBody er
       pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
     (False, False) -> do
-      el' <- naming (prettyString op <> "_lhs") $ getOrdering False el
-      er' <- naming (prettyString op <> "_rhs") $ getOrdering False er
+      el' <- naming (nameFromText (prettyText op) <> "_lhs") $ getOrdering False el
+      er' <- naming (nameFromText (prettyText op) <> "_rhs") $ getOrdering False er
       pure $ mkApply (Var op opT oloc) [(elp, el'), (erp, er')] resT
   nameExp final expr'
   where

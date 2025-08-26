@@ -10,7 +10,6 @@ module Futhark.MonadFreshNames
   ( MonadFreshNames (..),
     modifyNameSource,
     newName,
-    newNameFromString,
     newVName,
     newIdent,
     newIdent',
@@ -80,49 +79,34 @@ modifyNameSource m = do
 newName :: (MonadFreshNames m) => VName -> m VName
 newName = modifyNameSource . flip FreshNames.newName
 
--- | As @newName@, but takes a 'String' for the name template.
-newNameFromString :: (MonadFreshNames m) => String -> m VName
-newNameFromString s = newName $ VName (nameFromString s) 0
-
 -- | Produce a fresh 'VName', using the given base name as a template.
-newID :: (MonadFreshNames m) => Name -> m VName
-newID s = newName $ VName s 0
-
--- | Produce a fresh 'VName', using the given base name as a template.
-newVName :: (MonadFreshNames m) => String -> m VName
-newVName = newID . nameFromString
+newVName :: (MonadFreshNames m) => Name -> m VName
+newVName s = newName $ VName s 0
 
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent ::
-  (MonadFreshNames m) =>
-  String ->
-  Type ->
-  m Ident
-newIdent s t = do
-  s' <- newID $ nameFromString s
-  pure $ Ident s' t
+  (MonadFreshNames m) => Name -> Type -> m Ident
+newIdent s t = Ident <$> newVName s <*> pure t
 
 -- | Produce a fresh 'Ident', using the given 'Ident' as a template,
 -- but possibly modifying the name.
 newIdent' ::
   (MonadFreshNames m) =>
-  (String -> String) ->
+  (Name -> Name) ->
   Ident ->
   m Ident
 newIdent' f ident =
   newIdent
-    (f $ nameToString $ baseName $ identName ident)
+    (f $ baseName $ identName ident)
     (identType ident)
 
 -- | Produce a fresh 'Param', using the given name as a template.
 newParam ::
   (MonadFreshNames m) =>
-  String ->
+  Name ->
   dec ->
   m (Param dec)
-newParam s t = do
-  s' <- newID $ nameFromString s
-  pure $ Param mempty s' t
+newParam s t = Param mempty <$> newVName s <*> pure t
 
 -- Utility instance defintions for MTL classes.  This requires
 -- UndecidableInstances, but saves on typing elsewhere.

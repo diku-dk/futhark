@@ -873,12 +873,12 @@ evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
   binding <- evalFunctionBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
 evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
-  | baseString (qualLeaf op) == "&&" = do
+  | baseName (qualLeaf op) == "&&" = do
       x' <- asBool <$> eval env x
       if x'
         then eval env y
         else pure $ ValuePrim $ BoolValue False
-  | baseString (qualLeaf op) == "||" = do
+  | baseName (qualLeaf op) == "||" = do
       x' <- asBool <$> eval env x
       if x'
         then pure $ ValuePrim $ BoolValue True

@@ -371,7 +371,7 @@ instantiateTypeParam ::
   TermTypeM (VName, Subst (RetTypeBase dim as))
 instantiateTypeParam qn loc tparam = do
   i <- incCounter
-  let name = nameFromString (takeWhile isAscii (baseString (typeParamName tparam)))
+  let name = nameFromText (T.takeWhile isAscii (baseText (typeParamName tparam)))
   v <- newID $ mkTypeVarName name i
   case tparam of
     TypeParamType x _ _ -> do

@@ -240,7 +240,7 @@ ensureTransformedAccess perm_table p seg_name idx_name arr slice = do
       pure $ Just (arr', slice)
 
     manifest perm array =
-      auxing aux . letExp (baseString array ++ "_coalesced") $
+      auxing aux . letExp (baseName array <> "_coalesced") $
         BasicOp (Manifest array perm)
 
 lookupPermutation :: LayoutTable -> VName -> IndexExprName -> VName -> Maybe Permutation

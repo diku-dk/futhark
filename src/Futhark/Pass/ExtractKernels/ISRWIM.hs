@@ -157,7 +157,7 @@ transposedArrays :: (MonadBuilder m) => [VName] -> m [VName]
 transposedArrays arrs = forM arrs $ \arr -> do
   t <- lookupType arr
   let perm = [1, 0] ++ [2 .. arrayRank t - 1]
-  letExp (baseString arr) $ BasicOp $ Rearrange arr perm
+  letExp (baseName arr) $ BasicOp $ Rearrange arr perm
 
 removeParamOuterDim :: LParam SOACS -> LParam SOACS
 removeParamOuterDim param =

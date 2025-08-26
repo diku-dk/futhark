@@ -38,7 +38,7 @@ lamBody :: SegBinOp MCMem -> Body MCMem
 lamBody = lambdaBody . segBinOpLambda
 
 -- Arrays for storing worker results.
-carryArrays :: String -> TV Int32 -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
+carryArrays :: Name -> TV Int32 -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
 carryArrays s nsubtasks segops =
   forM segops $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do

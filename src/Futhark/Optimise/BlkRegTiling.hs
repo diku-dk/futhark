@@ -59,7 +59,7 @@ isInnerCoal (_, ixfn_env) slc_X (Let (Pat [pe]) _ (BasicOp (Index x _)))
 isInnerCoal _ _ _ =
   error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
 
-scratch :: (MonadBuilder m) => String -> PrimType -> [SubExp] -> m VName
+scratch :: (MonadBuilder m) => Name -> PrimType -> [SubExp] -> m VName
 scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 
 -- | Main helper function for Register-and-Block Tiling
@@ -190,15 +190,15 @@ kkLoopBody
       copyGlb2ShMem is_B kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, x_loc_init') = do
         let (t_par, r_par, tseq_div_tpar) = (tx, rx, tk_div_tx)
             is_inner_coal = isInnerCoal env inp_X load_X
-            str_A = baseString inp_X
+            str_A = baseName inp_X
         x_loc <-
-          segScatter2D (str_A ++ "_glb2loc") x_loc_init' [r_par, tseq_div_tpar] (t_par, t_par) $
+          segScatter2D (str_A <> "_glb2loc") x_loc_init' [r_par, tseq_div_tpar] (t_par, t_par) $
             scatterFun is_inner_coal
         pure (x_loc, indexLocMem is_inner_coal str_A x_loc)
         where
           indexLocMem ::
             Bool ->
-            String ->
+            Name ->
             VName ->
             VName ->
             VName ->
@@ -208,13 +208,13 @@ kkLoopBody
             let (r_par, t_seq, tr_par) = (rx, tk, tx_rx)
             let pad_term = if is_B then pe64 se1 else pe64 se0
             x_loc_ind_32 <-
-              letExp (str_A ++ "_loc_ind_64")
+              letExp (str_A <> "_loc_ind_64")
                 =<< toExp
                   ( if is_inner_coal -- ToDo: check this is correct + turn to i32
                       then le64 k + (le64 ltid_yx * pe64 r_par + le64 ij) * (pe64 t_seq + pad_term)
                       else le64 ij + le64 ltid_yx * pe64 r_par + le64 k * pe64 tr_par
                   )
-            index (str_A ++ "_loc_elem") x_loc [x_loc_ind_32]
+            index (str_A <> "_loc_elem") x_loc [x_loc_ind_32]
           --
           scatterFun ::
             Bool ->
@@ -222,14 +222,14 @@ kkLoopBody
             (VName, VName) ->
             Builder GPU (SubExp, SubExp)
           scatterFun is_inner_coal [i0, k0] (thd_y, thd_x) = do
-            let str_A = baseString inp_X
+            let str_A = baseName inp_X
                 t_seq = tk
             (i, k, epx_loc_fi) <- mk_ik is_B is_inner_coal (thd_y, thd_x) (i0, k0)
             letBindNames [gtid] =<< toExp (le64 ii + le64 i)
-            a_seqdim_idx <- letExp (str_A ++ "_seqdim_idx") =<< toExp (le64 kk + le64 k)
+            a_seqdim_idx <- letExp (str_A <> "_seqdim_idx") =<< toExp (le64 kk + le64 k)
 
             a_elem <-
-              letSubExp (str_A ++ "_elem")
+              letSubExp (str_A <> "_elem")
                 =<< eIf
                   ( toExp $
                       le64 gtid
@@ -246,7 +246,7 @@ kkLoopBody
                   (eBody [eBlank $ Prim ptp_X_el])
 
             a_loc_ind <-
-              letSubExp (str_A ++ "_loc_ind")
+              letSubExp (str_A <> "_loc_ind")
                 =<< eIf
                   (toExp $ le64 k .<. pe64 t_seq)
                   (eBody [toExp epx_loc_fi])
@@ -718,8 +718,8 @@ mkTileMemSizes ::
       SubExp
     )
 mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
-  tk_name <- nameFromString . prettyString <$> newVName "Tk"
-  ty_name <- nameFromString . prettyString <$> newVName "Ty"
+  tk_name <- nameFromText . prettyText <$> newVName "Tk"
+  ty_name <- nameFromText . prettyText <$> newVName "Ty"
   ry_name <- nameFromString . prettyString <$> newVName "Ry"
 
   -- until we change the copying to use lmads we need to
@@ -892,7 +892,7 @@ processIndirections _ res_red_var acc stm'@(Let patt _ _)
       Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
 
-getParTiles :: (String, String) -> (Name, Name) -> SubExp -> Builder GPU (SubExp, SubExp)
+getParTiles :: (Name, Name) -> (Name, Name) -> SubExp -> Builder GPU (SubExp, SubExp)
 getParTiles (t_str, r_str) (t_name, r_name) len_dim =
   case len_dim of
     Constant (IntValue (Int64Value 8)) ->
@@ -906,7 +906,7 @@ getParTiles (t_str, r_str) (t_name, r_name) len_dim =
       r <- letSubExp r_str $ Op $ SizeOp $ GetSize r_name SizeRegTile
       pure (t, r)
 
-getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Builder GPU SubExp
+getSeqTile :: Name -> Name -> SubExp -> SubExp -> SubExp -> Builder GPU SubExp
 getSeqTile tk_str tk_name len_dim tx ty =
   case (tx, ty) of
     (Constant (IntValue (Int64Value v_x)), Constant (IntValue (Int64Value v_y))) ->
@@ -1100,7 +1100,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
           -- scratch the shared-memory arrays corresponding to the arrays that are
           --   input to the redomap and are invariant to the outermost parallel dimension.
           loc_arr_nms <- forM (M.toList tab_out) $ \(nm, (ptp, _)) ->
-            scratch (baseString nm ++ "_loc") ptp [rz]
+            scratch (baseName nm <> "_loc") ptp [rz]
 
           prologue_res_list <-
             forLoop' common_dim (reg_arr_nms ++ loc_arr_nms) $
@@ -1138,7 +1138,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                                   (toExp $ le64 loc_ind .<. pe64 rz)
                                   (toExp loc_ind >>= letTupExp' "loc_fi" >>= resultBodyM)
                                   (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
-                            acc' <- letExp (baseString acc) $ BasicOp $ UpdateAcc Safe acc [y_ind] [y_elm]
+                            acc' <- letExp (baseName acc) $ BasicOp $ UpdateAcc Safe acc [y_ind] [y_elm]
                             pure [Returns ResultMaySimplify mempty $ Var acc']
 
                           acc_t <- lookupType acc
@@ -1162,7 +1162,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                               inp_scals_invar_outer <-
                                 forM (M.toList tab_inn) $ \(inp_arr_nm, load_stm) -> do
                                   addStm load_stm
-                                  index (baseString inp_arr_nm) inp_arr_nm [q]
+                                  index (baseName inp_arr_nm) inp_arr_nm [q]
                               -- build the loop of count R whose body is semantically the redomap code
                               reg_arr_merge_nms' <-
                                 forLoop' rz reg_arr_merge_nms_slc $ \i reg_arr_mm_nms -> do
@@ -1191,7 +1191,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                                           map_res_scals <- eLambda map_lam' (map (eSubExp . Var) map_inp_scals)
                                           red_res <- eLambda red_lam' (map eSubExp (map Var cs ++ map resSubExp map_res_scals))
                                           css <- forM (zip reg_arr_mm_nms red_res) $ \(reg_arr_nm, c) ->
-                                            update (baseString reg_arr_nm) reg_arr_nm [i] (resSubExp c)
+                                            update (baseName reg_arr_nm) reg_arr_nm [i] (resSubExp c)
                                           resultBodyM $ map Var css
                                       )
                                       (resultBodyM $ map Var reg_arr_mm_nms)
@@ -1285,7 +1285,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     getResNm (Returns ResultMaySimplify _ (Var res_nm)) = Just res_nm
     getResNm _ = Nothing
 
-    limitTile :: String -> SubExp -> SubExp -> Builder GPU SubExp
+    limitTile :: Name -> SubExp -> SubExp -> Builder GPU SubExp
     limitTile t_str t d_K = letSubExp t_str $ BasicOp $ BinOp (SMin Int64) t d_K
     insertTranspose ::
       VarianceTable ->
@@ -1302,7 +1302,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
             i : _ -> do
               arr_tp <- lookupType arr_nm
               let perm = [i + 1 .. arrayRank arr_tp - 1] ++ [0 .. i]
-              let arr_tr_str = baseString arr_nm ++ "_transp"
+              let arr_tr_str = baseName arr_nm <> "_transp"
               arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest arr_nm perm
               let e_ind' = BasicOp $ Index arr_tr_nm slc
               let stm' = Let patt yy e_ind'

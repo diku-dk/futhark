@@ -191,7 +191,7 @@ bindConstant cname fd = do
 -- | Construct an 'Assert' statement, but taking attributes into account. Always
 -- use this function, and never construct 'Assert' directly in the internaliser!
 assert ::
-  String ->
+  Name ->
   SubExp ->
   ErrorMsg SubExp ->
   InternaliseM Certs
