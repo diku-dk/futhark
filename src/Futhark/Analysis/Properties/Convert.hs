@@ -489,7 +489,8 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
                       singleCase . sym2SoP $
                         Apply (Var hist_vn) (map sVar arg_names)
                   }
-          (:[]) <$> substParams g_fn (zip arg_names arg_fns)
+          fn <- substParams g_fn (zip arg_names arg_fns)
+          pure [fn]
         _ ->
           undefined
   | Just "sized" <- getFun e_f,
@@ -540,7 +541,8 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
                       singleCase . sym2SoP $
                         Apply (Var g) (map sVar arg_names)
                   }
-          substParams_ g_fn (zip arg_names arg_fns)
+          fn <- substParams g_fn (zip arg_names arg_fns)
+          pure [fn]
 forward e@(E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _) = do
   let i = E.identName ident
   f_szs <- forward e_sz
@@ -605,9 +607,9 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       let name_rep = renamingRep (mconcat actual_args)
       size_rep <- checkPreconditions g pats (actual_args, actual_sizes) name_rep
 
-      fs <- fmap mconcat . forM indexfns $ \fn -> do
-        substParams_ (repIndexFn size_rep fn) (mconcat actual_args)
-          >>= mapM rewrite
+      fs <- forM indexfns $ \fn -> do
+        substParams (repIndexFn size_rep fn) (mconcat actual_args)
+          >>= rewrite
       pure (mkEffectFromTypeExp te size_rep (mconcat actual_args), fs)
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow {}) <- E.unInfo info,
@@ -895,7 +897,7 @@ scatterSc1 xs@(IndexFn (Forall i dom_dest : _) _) (e_is, is) vs
           -- let inv_i = Apply (Var vn_inv) (sVar . boundVar <$> shape xs)
           let inv_i = sym2SoP (Apply (Var vn_inv) [sVar i])
           let inner_dims = drop 1 (sVar . boundVar <$> shape xs)
-          fmap (:[]) . lift $
+          lift $
             xs {body = singleCase (sym2SoP (Apply (Var vn_vs) $ inv_i : inner_dims))}
               @ (vn_vs, vs)
   where
@@ -983,13 +985,11 @@ scatterSc3 xs@(IndexFn [Forall i dom_dest] _) (e_is, is) vs = do
   safe <- lift $ scatterSafe xs (e_is, is) vs
   when (isUnknown safe) (failMsg "scatterSc3: unable to show safety")
   uninterpreted <- newNameFromString "safe_scatter"
-  lift $
-    pure
-      [ IndexFn
-          { shape = [Forall i dom_dest],
-            body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
-          }
-      ]
+  lift . pure $
+    IndexFn
+      { shape = [Forall i dom_dest],
+        body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
+      }
 scatterSc3 _ _ _ = fail ""
 
 {-
@@ -1180,7 +1180,7 @@ zipArgs ::
   E.SrcLoc ->
   [E.Pat E.ParamType] ->
   NE.NonEmpty (a, E.Exp) ->
-  IndexFnM ([[(E.VName, [IndexFn])]], [[(E.VName, SoP Symbol)]])
+  IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
 zipArgs loc formal_args actual_args =
   zipArgs' loc formal_args =<< mapM forward (getArgs actual_args)
 
@@ -1188,7 +1188,7 @@ zipArgs' ::
   E.SrcLoc ->
   [E.Pat E.ParamType] ->
   [[IndexFn]] ->
-  IndexFnM ([[(E.VName, [IndexFn])]], [[(E.VName, SoP Symbol)]])
+  IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
 zipArgs' loc formal_args actual_args = do
   let pats = map patternMapAligned formal_args
   -- Each name in the pattern may partially deconstruct tuple arguments.
@@ -1197,7 +1197,6 @@ zipArgs' loc formal_args actual_args = do
   -- deconstruction using `alignWithPattern`, biggest question is
   -- how to bind one name to multiple index functions in the functions
   -- that use zipArgs's output (e.g., substParams).
-  -- I think substParams would need to return a list of index functions.
   printM 2 $ "# zipArgs pats " <> show pats
   unless (length pats == length actual_args) . error $
     errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
@@ -1208,7 +1207,7 @@ zipArgs' loc formal_args actual_args = do
   let aligned_args = do
         (pat, arg) <- zip pats actual_args
         let _TODO = alignWithPattern pat arg
-        pure . catMaybes $ zipWith (\vn fn -> (,[fn]) <$> vn) (map fst pat) arg -- XXX [fn]
+        pure . catMaybes $ zipWith (\vn fn -> (,fn) <$> vn) (map fst pat) arg
 
   -- When applying top-level functions size parameters must be replaced as well.
   aligned_sizes <-
@@ -1236,21 +1235,13 @@ zipArgs' loc formal_args actual_args = do
       where
         n = length (toTupleOfArrays t)
 
-substParams :: IndexFn -> [(E.VName, IndexFn)] -> IndexFnM IndexFn
+substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
 substParams = foldM substParam
   where
     -- We want to simplify, but avoid rewriting recurrences during
     -- paramter-substitution.
-    substParam f (paramName, paramIndexFn) =
-      (f @ (paramName, paramIndexFn)) >>= rewriteWithoutRules
-
-substParams_ :: IndexFn -> [(E.VName, [IndexFn])] -> IndexFnM [IndexFn]
-substParams_ fn params = mapM (substParams fn) (tuple_of_params params)
-  where
-    tuple_of_params :: [(k, [v])] -> [[(k, v)]]
-    tuple_of_params [] = [[]]
-    tuple_of_params ((vn, fs) : ps) =
-      [ (vn, f) : rest | f <- fs, rest <- tuple_of_params ps ]
+    substParam fn (paramName, paramIndexFn) =
+      (fn @ (paramName, paramIndexFn)) >>= rewriteWithoutRules
 
 failMsg :: (MonadFail m) => String -> m b
 failMsg msg = do
