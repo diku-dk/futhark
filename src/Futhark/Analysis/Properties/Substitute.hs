@@ -9,7 +9,7 @@ import Control.Monad.RWS (lift)
 import Control.Monad.Trans.Maybe (hoistMaybe, runMaybeT)
 import Data.Functor ((<&>))
 import Data.Map qualified as M
-import Data.Maybe (fromJust, isJust, fromMaybe)
+import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
@@ -99,11 +99,13 @@ subst indexfn = do
 -- This happens when xs is a formal argument.
 trivialSub :: (ReplacementBuilder v Symbol) => IndexFn -> Symbol -> [v] -> Bool
 trivialSub (IndexFn [] _) _ _ = False
-trivialSub (IndexFn [Forall i _] gs) e [arg] =
-  repCases (mkRep i arg) gs == cases [(Bool True, sym2SoP e)]
-trivialSub (IndexFn [Forall i _, Forall j _] gs) e [arg_i, arg_j] =
-  repCases (addRep j arg_j $ mkRep i arg_i) gs == cases [(Bool True, sym2SoP e)]
-trivialSub _ _ _ = error "trivialSub: multi-dim not implemented yet"
+trivialSub f e args
+  | length (shape f) == length args =
+      repCases dims2args (body f) == cases [(Bool True, sym2SoP e)]
+  | otherwise = False
+  where
+    dims2args =
+      mkRepFromList $ zipWith (\dim arg -> (boundVar dim, arg)) (shape f) args
 
 subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
 subber argCheck g = do
