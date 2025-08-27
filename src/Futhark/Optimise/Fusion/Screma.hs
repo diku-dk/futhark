@@ -3,16 +3,20 @@ module Futhark.Optimise.Fusion.Screma
   )
 where
 
+import Data.Bifunctor
 import Data.List (mapAccumL)
+import Data.List qualified as L
+import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Builder (Buildable (..), insertStm, insertStms, mkLet)
-import Futhark.Construct
 import Futhark.Construct (mapResult)
 import Futhark.IR
+import Futhark.IR.Prop.Names
 import Futhark.IR.SOACS
+import Futhark.MonadFreshNames
 import Futhark.Util (dropLast, splitAt3, takeLast)
 
 fuseLambda ::
@@ -88,6 +92,50 @@ isFusable :: [SOAC.Input] -> [VName] -> [Bool]
 isFusable inp_c out_p = (`S.member` inp_c_set) <$> out_p
   where
     inp_c_set = S.fromList $ SOAC.inputArray <$> inp_c
+
+data MultiMap k v
+  = MultiMap
+  { keyToInt :: Map k Integer,
+    intToVals :: Map Integer v
+  }
+  deriving (Show, Ord, Eq)
+
+mmFromList :: (Ord k) => [(k, v)] -> MultiMap k v
+mmFromList kvs =
+  MultiMap (M.fromList $ zip ks [0 ..]) (M.fromList $ zip [0 ..] vs)
+  where
+    (ks, vs) = unzip kvs
+
+mmCombine :: (Ord k) => (v -> v -> v) -> v -> [k] -> MultiMap k v -> MultiMap k v
+mmCombine op ne ks (MultiMap kti itv) =
+  MultiMap kti' itv'
+  where
+    kis =
+      fmap (second fromJust) $
+        filter (isJust . snd) $
+          (\k -> (k, k `M.lookup` kti)) <$> ks
+    i =
+      case kis of
+        [] -> if null itv then 0 else succ $ fst $ M.findMax itv
+        (_, j) : _ -> j
+    is = snd <$> kis
+    v = foldl op ne $ (itv M.!) <$> is
+    kti' = M.fromList (map (,i) ks) `M.union` kti
+    itv' =
+      M.insert i v $
+        foldl (flip M.delete) itv is
+
+partitionLambda ::
+  Lambda rep ->
+  [Lambda rep]
+partitionLambda lam =
+  undefined
+  where
+    body = lambdaBody lam
+    pars = paramName <$> lambdaParams lam
+    mm = mmFromList $ map (,[]) pars
+    stms = zip [0 ..] $ stmsToList $ bodyStms body
+    res = bodyResult body
 
 fuseScrema ::
   (MonadFreshNames m) =>
