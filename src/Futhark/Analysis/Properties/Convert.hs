@@ -218,12 +218,16 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
     _ -> newIndexFn vn (E.typeOf e)
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
-forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
+forward expr@(E.AppExp (E.Index e_xs slice loc) _)
+  -- Indexing on the form e_1[e_2].
   | [E.DimFix e_idx] <- slice = do
       f_xss <- forward e_xs
       f_idxs <- forward e_idx
       forM (zip f_xss f_idxs) $ \(f_xs, f_idx) -> do
-        checkBounds expr f_xs [f_idx]
+        unless (rank f_xs == 1) $
+          error "Not implemented yet: implicit indexing dimensions. Use `:`."
+
+        checkBounds expr f_xs [Just f_idx]
         xs <- case justVName e_xs of
           Just vn -> pure vn
           Nothing -> do
@@ -240,7 +244,46 @@ forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
         insertIndexFn idx [IndexFn [Forall i (Iota $ int2SoP 1)] (body f_idx)]
         subst
           (IndexFn [] $ singleCase . sym2SoP $ Apply (Var xs) [sym2SoP (Apply (Var idx) [int2SoP 0])])
-  | _ <- slice = error $ "Not implemented yet: " <> prettyStr expr
+  -- Indexing x[e_1, :, e_2] (multi-dim, no implicit dims, : allowed).
+  | Just xs <- justVName e_xs,
+    all supportedDim slice = do
+      f_xss <- forward e_xs
+      let [f_xs] = f_xss
+      unless (rank f_xs == length slice) . error $
+        errorMsg loc "Not implemented yet."
+
+      slice' <- mapM forwardDim slice
+      checkBounds expr f_xs slice'
+      (new_dims, idxs) <- fmap unzip . forM (zip (shape f_xs) slice') $
+        \cases
+          -- Single value taken from dimension.
+          (_, Just f_idx) -> do
+            idx <- newVName "#idx"
+            i <- newVName "i"
+            insertIndexFn idx [f_idx {shape = [Forall i (Iota $ int2SoP 1)]}]
+            pure (Nothing, sym2SoP (Apply (Var idx) [int2SoP 0]))
+          -- All values taken from dimension (using `:`).
+          (d_xs, Nothing) -> do
+            pure (Just d_xs, sym2SoP (Var (boundVar d_xs)))
+      (: [])
+        <$> subst
+          IndexFn
+            { shape = catMaybes new_dims,
+              body = singleCase . sym2SoP $ Apply (Var xs) idxs
+            }
+  | otherwise = do
+      error $ "Not implemented yet: " <> prettyStr expr
+  where
+    supportedDim E.DimFix {} = True
+    supportedDim (E.DimSlice Nothing Nothing Nothing) = True
+    supportedDim _ = False
+
+    forwardDim (E.DimFix e) = do
+      fs <- forward e
+      let [f] = fs
+      unless (null $ shape f) $ error "E.Index: internal error"
+      pure $ Just f
+    forwardDim (E.DimSlice {}) = pure Nothing
 forward (E.Not e _) = do
   mapM negf =<< forward e
   where
@@ -1404,7 +1447,7 @@ parseOpVName vn =
 {-
     Bounds checking.
 -}
-checkBounds :: E.Exp -> IndexFn -> [IndexFn] -> IndexFnM ()
+checkBounds :: E.Exp -> IndexFn -> [Maybe IndexFn] -> IndexFnM ()
 checkBounds _ (IndexFn [] _) _ =
   error "E.Index: Indexing into scalar"
 checkBounds e f_xs idxs =
@@ -1412,11 +1455,12 @@ checkBounds e f_xs idxs =
     forM_ (zip (shape f_xs) idxs) checkIndexInDomain
     printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " OK"
   where
-    checkIndexInDomain (Forall _ d, f_idx) =
+    checkIndexInDomain (_, Nothing) = pure ()
+    checkIndexInDomain (Forall _ d, Just f_idx) =
       algebraContext f_idx $ do
         bounds <- getBounds d
-        foreachCase f_idx $ \n -> do
-          forM_ bounds $ \bound -> do
+        void . foreachCase f_idx $ \n -> do
+          forM bounds $ \bound -> do
             c <- isYes <$> queryCase (CaseCheck bound) f_idx n
             unless c $ emitFailure n bound f_idx
 

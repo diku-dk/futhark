@@ -114,7 +114,7 @@ def tabulate 't (n: i64) (f: i64 -> t): *[n]t =
 def expand_hull [num_segs] [num_points]
                 (segs0 : [num_segs]point)
                 (segs1 : [num_segs]point)
-                (points0 : [num_points]i64)
+                (points0 : {[num_points]i64 | \x -> Range x (0,num_segs)})
                 (points1 : [num_points]point)
               : {([](point, point), [](i64, point)) | \_ -> true} =
               -- : ([](point, point), [](i64, point)) =
@@ -124,7 +124,8 @@ def expand_hull [num_segs] [num_points]
   -- bounds checks of array `segs` are verifiable by precondition
   let dists = map2
               (\seg_ix p ->
-                 let (a, b) = segs[seg_ix]
+                 let a = segs0[seg_ix, :]
+                 let b = segs1[seg_ix, :]
                  in signed_dist_to_line a b p)
               points0 points1
   
@@ -155,7 +156,7 @@ def expand_hull [num_segs] [num_points]
   -- 
   let segs'' = tabulate num_segs
                        (\i -> [(segs0[i], points1[extrema_ix0[i]]),
-                               (points[extrema_ix0[i]].1, segs1[i])])
+                               (points1[extrema_ix0[i]], segs1[i])])
   let segs' = flatten segs''
   -- ^ Length of segs' is clearly `2*num_segs`
 
