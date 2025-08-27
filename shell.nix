@@ -22,7 +22,6 @@ pkgs.stdenv.mkDerivation {
       haskell.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
-      xdot
       hlint
       pkg-config
       zlib
@@ -30,13 +29,11 @@ pkgs.stdenv.mkDerivation {
       cabal2nix
       ghcid
       niv
-      ispc
       python.python
       python.mypy
       python.black
       python.cycler
       python.numpy
-      python.pyopencl
       python.matplotlib
       python.jsonschema
       python.sphinx
@@ -48,6 +45,9 @@ pkgs.stdenv.mkDerivation {
         ocl-icd
         oclgrind
         rocmPackages.clr
+        python.pyopencl
+        xdot
+        ispc
       ]
   ;
 }
