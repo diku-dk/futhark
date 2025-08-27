@@ -4,6 +4,7 @@ module Futhark.Optimise.Fusion.Screma
 where
 
 import Data.Bifunctor
+import Data.Function (on)
 import Data.List (mapAccumL)
 import Data.List qualified as L
 import Data.Map.Strict (Map)
@@ -100,6 +101,16 @@ data MultiMap k v
   }
   deriving (Show, Ord, Eq)
 
+instance Functor (MultiMap k) where
+  fmap f (MultiMap kti itv) = MultiMap kti $ f <$> itv
+
+mmEquivKeys :: MultiMap k v -> [[k]]
+mmEquivKeys (MultiMap kti _) =
+  fmap (fmap fst)
+    . L.groupBy ((==) `on` snd)
+    . L.sortOn snd
+    $ M.toList kti
+
 mmFromList :: (Ord k) => [(k, v)] -> MultiMap k v
 mmFromList kvs =
   MultiMap (M.fromList $ zip ks [0 ..]) (M.fromList $ zip [0 ..] vs)
@@ -126,16 +137,27 @@ mmCombine op ne ks (MultiMap kti itv) =
         foldl (flip M.delete) itv is
 
 partitionLambda ::
-  Lambda rep ->
-  [Lambda rep]
+  Lambda SOACS ->
+  [Lambda SOACS]
 partitionLambda lam =
   undefined
   where
     body = lambdaBody lam
-    pars = paramName <$> lambdaParams lam
-    mm = mmFromList $ map (,[]) pars
+    pars = lambdaParams lam
+    par_names = paramName <$> pars
+    mm = mmFromList $ map (,[]) par_names
     stms = zip [0 ..] $ stmsToList $ bodyStms body
     res = bodyResult body
+
+    partitioned_stms =
+      stmsFromList . fmap snd . L.sortOn fst <$> auxiliary mm stms
+
+    auxiliary mm' [] = mm'
+    auxiliary mm' (s@(_, st) : istms) =
+      auxiliary mm'' istms
+      where
+        mm'' = mmCombine (<>) [s] names mm'
+        names = namesToList $ freeIn st
 
 fuseScrema ::
   (MonadFreshNames m) =>
