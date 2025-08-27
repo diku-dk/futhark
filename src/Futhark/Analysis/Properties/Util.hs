@@ -19,21 +19,12 @@ import Data.List (subsequences, (\\))
 import Data.String (IsString)
 import Futhark.Util.Pretty
 import Language.Futhark (Located, VName (VName), locText, srclocOf)
+import Data.Maybe (fromJust)
 
 prettyName :: VName -> Doc ann
-prettyName (VName vn i) = pretty vn <> pretty (subscript i) -- <> pretty (map (fromJust . subscript) (show i))
+prettyName (VName vn i) = pretty vn <> pretty (map subscript (show i))
   where
-    subscript n
-      | n < 0 = undefined
-      | otherwise = reverse $ encode n
-
-    -- chars = ['ₐ', 'ₑ', 'ₕ', 'ₖ', 'ₘ', 'ₙ', 'ₒ', 'ₚ', 'ᵣ', 'ₛ', 'ᵤ', 'ᵥ', 'ₓ', 'ᵦ', 'ᵧ', 'ᵨ', '₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉']
-    chars = ['ₐ', 'ₑ', 'ₕ', 'ₖ', 'ₘ', 'ₙ', 'ₒ', 'ₚ', 'ᵣ', 'ₛ', 'ᵤ', 'ᵥ', 'ₓ', 'ᵦ', 'ᵧ', 'ᵨ', '₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉']
-
-    encode 0 = []
-    encode x =
-      let (q, r) = x `divMod` length chars
-       in chars !! fromIntegral r : encode q
+    subscript = fromJust . flip lookup (zip "0123456789" "₀₁₂₃₄₅₆₇₈₉")
 
 prettyHole :: VName -> Doc ann
 prettyHole x = "\ESC[4m•" <> prettyName x <> "\ESC[24m"
