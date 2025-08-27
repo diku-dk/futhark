@@ -649,6 +649,16 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/lolhull.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota (sHole n))],
+                  -- matches anything; we're just checking the program.
+                  body = cases [(Bool True, sHole xs)]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/part3indices_alternative.fut"
         ( newNameFromString "q" >>= \q -> pure $ \(i, n, p, j) ->
             let p_i = Apply (Hole p) [sHole i]
