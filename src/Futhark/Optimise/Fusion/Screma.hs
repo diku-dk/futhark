@@ -97,6 +97,9 @@ isFusable inp_c out_p = (`S.member` inp_c_set) <$> out_p
   where
     inp_c_set = S.fromList $ SOAC.inputArray <$> inp_c
 
+-- | Given a set of names which are interpreted as the resulting
+-- variables found from the given Stms, eliminate all Stms which are
+-- not use to compute the value of the names.
 eliminate :: Names -> Stms SOACS -> Stms SOACS
 eliminate = auxiliary (stmsFromList [])
   where
@@ -109,9 +112,18 @@ eliminate = auxiliary (stmsFromList [])
               auxiliary stms' deps stms''
       | otherwise = stms'
 
+-- | Given a list of result values eliminate Stms which are not used
+-- to compute these result values.
 eliminateByRes :: [SubExpRes] -> Stms SOACS -> Stms SOACS
 eliminateByRes = eliminate . namesFromList . mapMaybe subExpResVName
 
+-- | Given a list of parameter variable names and a lambda, split the
+-- lambda function into two where the first function will dependt on
+-- the paramter variables given if they exist plus additional
+-- parameters if they are need for some computation. The other lambda
+-- will have all the other parameters and do the remaining
+-- computational work. The two lambda will overlap in computational
+-- work.
 splitLambdaByPar :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
 splitLambdaByPar names lam =
   ( Lambda
@@ -150,6 +162,11 @@ splitLambdaByPar names lam =
         . L.partition (namesIntersect (namesFromList names) . (\(a, _, _) -> a))
         $ zip3 par_deps (bodyResult body) (lambdaReturnType lam)
 
+-- | Given a list of result variable names and a lambda, split the
+-- lambda function into two where the first function will compute
+-- values from the list of result variables given and the other will
+-- compute the remaining result. The two lambda will overlap in
+-- computational work.
 splitLambdaByRes :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
 splitLambdaByRes names lam =
   ( Lambda
