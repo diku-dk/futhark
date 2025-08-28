@@ -1,5 +1,6 @@
 module Futhark.Optimise.Fusion.Screma
   ( fuseLambda,
+    splitLambdaByPar,
   )
 where
 
@@ -137,8 +138,21 @@ mmCombine op ne ks (MultiMap kti itv) =
       M.insert i v $
         foldl (flip M.delete) itv is
 
-splitLambda :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
-splitLambda names lam =
+addStmsByDeps :: Names -> Stms SOACS -> Stms SOACS
+addStmsByDeps = auxiliary (stmsFromList [])
+  where
+    auxiliary stms' deps stms
+      | Just (stm, stms'') <- stmsHead stms =
+          let free = freeIn stm
+           in if all (`nameIn` deps) $ namesToList free
+                then
+                  auxiliary (stms' <> oneStm stm) (free <> deps) stms''
+                else
+                  auxiliary stms' deps stms''
+      | otherwise = stms'
+
+splitLambdaByPar :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
+splitLambdaByPar names lam =
   ( lam
       { lambdaParams = new_params,
         lambdaBody = new_body,
@@ -152,31 +166,21 @@ splitLambda names lam =
   )
   where
     pars = lambdaParams lam
-    inps = replicate (length pars) mempty
-    (deps, deps') =
-      bimap mconcat mconcat $
-        L.partition (any (`elem` names) . namesToList) $
-          lambdaDependencies mempty lam inps
+    inps = paramName <$> pars
+    par_deps = lambdaDependencies mempty lam (oneName <$> inps)
     body = lambdaBody lam
     stms = bodyStms body
     res = bodyResult body
     ts = lambdaReturnType lam
-    new_stms =
-      stmsFromList $
-        filter (any (`nameIn` deps) . namesToList . freeIn) $
-          stmsToList stms
-    new_stms' =
-      stmsFromList $
-        filter (any (`nameIn` deps') . namesToList . freeIn) $
-          stmsToList stms
+    new_stms = addStmsByDeps deps stms
+    new_stms' = addStmsByDeps deps' stms
     new_params = filter ((`nameIn` deps) . paramName) pars
     new_params' = filter ((`nameIn` deps') . paramName) pars
-    p d t r =
-      case subExpResVName r of
-        Just x -> x `nameIn` d
-        Nothing -> t
-    (new_res, new_ts) = unzip $ filter (p deps False . fst) $ zip res ts
-    (new_res', new_ts') = unzip $ filter (p deps True . fst) $ zip res ts
+    auxiliary = (\(a, b, c) -> (mconcat a, b, c)) . unzip3
+    ((deps, new_res, new_ts), (deps', new_res', new_ts')) =
+      bimap auxiliary auxiliary $
+        L.partition (namesIntersect (namesFromList names) . (\(a, _, _) -> a)) $
+          zip3 par_deps res ts
     new_body =
       Body
         { bodyDec = bodyDec body,
