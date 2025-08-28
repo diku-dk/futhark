@@ -150,48 +150,46 @@ eliminate = auxiliary (stmsFromList [])
               auxiliary stms' deps stms''
       | otherwise = stms'
 
+eliminateByRes :: [SubExpRes] -> Stms SOACS -> Stms SOACS
+eliminateByRes = eliminate . namesFromList . mapMaybe subExpResVName
+
 splitLambdaByPar :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
 splitLambdaByPar names lam =
   ( lam
       { lambdaParams = new_params,
-        lambdaBody = new_body,
+        lambdaBody =
+          Body
+            { bodyDec = bodyDec body,
+              bodyResult = new_res,
+              bodyStms = new_stms
+            },
         lambdaReturnType = new_ts
       },
     lam
       { lambdaParams = new_params',
-        lambdaBody = new_body',
+        lambdaBody =
+          Body
+            { bodyDec = bodyDec body,
+              bodyResult = new_res',
+              bodyStms = new_stms'
+            },
         lambdaReturnType = new_ts'
       }
   )
   where
     pars = lambdaParams lam
-    inps = paramName <$> pars
-    par_deps = lambdaDependencies mempty lam (oneName <$> inps)
+    par_deps = lambdaDependencies mempty lam (oneName . paramName <$> pars)
     body = lambdaBody lam
     stms = bodyStms body
-    res = bodyResult body
-    ts = lambdaReturnType lam
-    new_stms = eliminate (namesFromList $ mapMaybe subExpResVName new_res) stms
-    new_stms' = eliminate (namesFromList $ mapMaybe subExpResVName new_res') stms
+    new_stms = eliminateByRes new_res stms
+    new_stms' = eliminateByRes new_res' stms
     new_params = filter ((`nameIn` deps) . paramName) pars
     new_params' = filter ((`nameIn` deps') . paramName) pars
     auxiliary = (\(a, b, c) -> (mconcat a, b, c)) . unzip3
     ((deps, new_res, new_ts), (deps', new_res', new_ts')) =
       bimap auxiliary auxiliary $
         L.partition (namesIntersect (namesFromList names) . (\(a, _, _) -> a)) $
-          zip3 par_deps res ts
-    new_body =
-      Body
-        { bodyDec = bodyDec body,
-          bodyResult = new_res,
-          bodyStms = new_stms
-        }
-    new_body' =
-      Body
-        { bodyDec = bodyDec body,
-          bodyResult = new_res',
-          bodyStms = new_stms'
-        }
+          zip3 par_deps (bodyResult body) (lambdaReturnType lam)
 
 partitionLambda ::
   Lambda SOACS ->
