@@ -11,6 +11,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Builder (Buildable (..), insertStm, insertStms, mkLet)
 import Futhark.Construct (mapResult)
@@ -135,6 +136,59 @@ mmCombine op ne ks (MultiMap kti itv) =
     itv' =
       M.insert i v $
         foldl (flip M.delete) itv is
+
+splitLambda :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
+splitLambda names lam =
+  ( lam
+      { lambdaParams = new_params,
+        lambdaBody = new_body,
+        lambdaReturnType = new_ts
+      },
+    lam
+      { lambdaParams = new_params',
+        lambdaBody = new_body',
+        lambdaReturnType = new_ts'
+      }
+  )
+  where
+    pars = lambdaParams lam
+    inps = replicate (length pars) mempty
+    (deps, deps') =
+      bimap mconcat mconcat $
+        L.partition (any (`elem` names) . namesToList) $
+          lambdaDependencies mempty lam inps
+    body = lambdaBody lam
+    stms = bodyStms body
+    res = bodyResult body
+    ts = lambdaReturnType lam
+    new_stms =
+      stmsFromList $
+        filter (any (`nameIn` deps) . namesToList . freeIn) $
+          stmsToList stms
+    new_stms' =
+      stmsFromList $
+        filter (any (`nameIn` deps') . namesToList . freeIn) $
+          stmsToList stms
+    new_params = filter ((`nameIn` deps) . paramName) pars
+    new_params' = filter ((`nameIn` deps') . paramName) pars
+    p d t r =
+      case subExpResVName r of
+        Just x -> x `nameIn` d
+        Nothing -> t
+    (new_res, new_ts) = unzip $ filter (p deps False . fst) $ zip res ts
+    (new_res', new_ts') = unzip $ filter (p deps True . fst) $ zip res ts
+    new_body =
+      Body
+        { bodyDec = bodyDec body,
+          bodyResult = new_res,
+          bodyStms = new_stms
+        }
+    new_body' =
+      Body
+        { bodyDec = bodyDec body,
+          bodyResult = new_res',
+          bodyStms = new_stms'
+        }
 
 partitionLambda ::
   Lambda SOACS ->
