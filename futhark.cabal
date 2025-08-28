@@ -511,6 +511,7 @@ library futhark-testing
   exposed-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
+      Futhark.Analysis.DataDependenciesTests
       Futhark.Analysis.PrimExp.TableTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
@@ -522,6 +523,7 @@ library futhark-testing
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
+      Futhark.IR.SOACSTests
       Futhark.IR.Syntax.CoreTests
       Futhark.IR.SyntaxTests
       Futhark.Internalise.TypesValuesTests
