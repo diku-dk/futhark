@@ -234,16 +234,16 @@ forward expr@(E.AppExp (E.Index e_xs slice loc) _)
             vn <- newVName "#xs"
             insertIndexFn vn [f_xs]
             pure vn
-        idx <- newVName "#idx"
 
         -- We don't use substParams on f_xs because the substitution
         -- might fail here (e.g., if we are inside a map lambda).
         -- Lift idx.
         unless (null $ shape f_idx) $ error "E.Index: internal error"
-        i <- newVName "i"
-        insertIndexFn idx [IndexFn [Forall i (Iota $ int2SoP 1)] (body f_idx)]
         subst
-          (IndexFn [] $ singleCase . sym2SoP $ Apply (Var xs) [sym2SoP (Apply (Var idx) [int2SoP 0])])
+          IndexFn
+            { shape = [],
+              body = cmapValues (\e -> sym2SoP $ Apply (Var xs) [e]) (body f_idx)
+            }
   -- Indexing x[e_1, :, e_2] (multi-dim, no implicit dims, : allowed).
   | Just xs <- justVName e_xs,
     all supportedDim slice = do
