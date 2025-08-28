@@ -138,17 +138,16 @@ mmCombine op ne ks (MultiMap kti itv) =
       M.insert i v $
         foldl (flip M.delete) itv is
 
-addStmsByDeps :: Names -> Stms SOACS -> Stms SOACS
-addStmsByDeps = auxiliary (stmsFromList [])
+eliminate :: Names -> Stms SOACS -> Stms SOACS
+eliminate = auxiliary (stmsFromList [])
   where
     auxiliary stms' deps stms
-      | Just (stm, stms'') <- stmsHead stms =
-          let free = freeIn stm
-           in if all (`nameIn` deps) $ namesToList free
-                then
-                  auxiliary (stms' <> oneStm stm) (free <> deps) stms''
-                else
-                  auxiliary stms' deps stms''
+      | Just (stms'', stm@(Let v _ _)) <- stmsLast stms =
+          if namesIntersect deps $ namesFromList $ patNames v
+            then
+              auxiliary (oneStm stm <> stms') (freeIn stm <> deps) stms''
+            else
+              auxiliary stms' deps stms''
       | otherwise = stms'
 
 splitLambdaByPar :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
@@ -172,8 +171,8 @@ splitLambdaByPar names lam =
     stms = bodyStms body
     res = bodyResult body
     ts = lambdaReturnType lam
-    new_stms = addStmsByDeps deps stms
-    new_stms' = addStmsByDeps deps' stms
+    new_stms = eliminate (namesFromList $ mapMaybe subExpResVName new_res) stms
+    new_stms' = eliminate (namesFromList $ mapMaybe subExpResVName new_res') stms
     new_params = filter ((`nameIn` deps) . paramName) pars
     new_params' = filter ((`nameIn` deps') . paramName) pars
     auxiliary = (\(a, b, c) -> (mconcat a, b, c)) . unzip3

@@ -39,5 +39,21 @@ tests =
               \  in {x_2}"
             lam_y = "\\{x_0 : i32} : {i32} -> {x_0}"
             names = ["x_1"]
+         in splitLambdaByPar names lam @?= (lam_x, lam_y),
+      testCase "splitLamda" $
+        let lam =
+              "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> \
+              \  let {x_2 : i32} = add32(x_0, x_1) \
+              \  let {x_3 : i32} = add32(1i32, x_0) \
+              \  in {x_3, x_2}"
+            lam_x =
+              "\\{x_0 : i32, x_1 : i32} : {i32} -> \
+              \  let {x_2 : i32} = add32(x_0, x_1) \
+              \  in {x_2}"
+            lam_y =
+              "\\{x_0 : i32} : {i32} -> \
+              \  let {x_3 : i32} = add32(1i32, x_0) \
+              \  in {x_3}"
+            names = ["x_1"]
          in splitLambdaByPar names lam @?= (lam_x, lam_y)
     ]
