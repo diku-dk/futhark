@@ -36,7 +36,7 @@ mapNest shape x f = do
       x_v <- traverse asVName x
       x_p <- traverse (newParam "xp" . rowType <=< lookupType) x_v
       lam <- mkLambda (toList x_p) $ do
-        fmap (subExpsRes . pure) . letSubExp "tan"
+        fmap (subExpsRes . pure) . letSubExp "mapnest_res"
           =<< f (fmap (Var . paramName) x_p)
       pure $ Op $ Screma w (toList x_v) (mapSOAC lam)
 

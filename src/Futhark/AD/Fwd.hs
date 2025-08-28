@@ -438,16 +438,23 @@ fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds)) = do
 fwdSOAC pat aux (Stream size xs nes lam) = do
   pat' <- bundleNewPat pat
   lam' <- fwdStreamLambda lam
-  xs' <- bundleTangents xs
+  xs' <- soacInputsWithTangents xs
   nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
   let nes' = interleave nes nes_tan
   addStm $ Let pat' aux $ Op $ Stream size xs' nes' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
-  pat' <- bundleNewPat pat
+  -- TODO: this is probably not very efficient in the vectorised case as we end
+  -- up with a dreadful update operator that involves arrays.
+  (pat', to_transpose) <- soacResPat 0 0 pat
   ops' <- mapM fwdHist ops
   bucket_fun' <- fwdHistBucket bucket_fun
-  arrs' <- bundleTangents arrs
+  arrs' <- soacInputsWithTangents arrs
   addStm $ Let pat' aux $ Op $ Hist w arrs' ops' bucket_fun'
+  tan_shape <- askShape
+  forM_ to_transpose $ \(rpat, v) -> do
+    v_t <- lookupType v
+    let perm = rearrangeInverse $ vecPerm tan_shape v_t
+    letBind rpat $ BasicOp $ Rearrange v perm
   where
     n_indices = sum $ map (shapeRank . histShape) ops
     fwdBodyHist (Body _ stms res) = buildBody_ $ do
@@ -463,8 +470,8 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
 
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
     fwdHist (HistOp shape rf dest nes op) = do
-      dest' <- bundleTangents dest
-      nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+      dest' <- soacInputsWithTangents dest
+      nes_tan <- mapM (letSubExp "zero" . zeroExp <=< tanType) $ lambdaReturnType op
       op' <- fwdLambda op
       pure $
         HistOp
