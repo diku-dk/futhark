@@ -32,13 +32,13 @@ tests =
         ],
       testGroup
         "splitLambdaByPar"
-        [ testCase "no good name" $
+        [ testCase "splitLambdaByPar keeps params and result." $
             let lam = "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> {x_0, x_1}"
                 lam_x = "\\{x_0 : i32} : {i32} -> {x_0}"
                 lam_y = "\\{x_1 : i32} : {i32} -> {x_1}"
                 names = ["x_0"]
              in splitLambdaByPar names lam @?= (lam_x, lam_y),
-          testCase "no good name" $
+          testCase "splitLambdaByPar keeps computation in first lambda." $
             let lam =
                   fromLines
                     [ "\\{x_0 : i32, x_1 : i32} : {i32, i32} ->",
@@ -54,7 +54,7 @@ tests =
                 lam_y = "\\{x_0 : i32} : {i32} -> {x_0}"
                 names = ["x_1"]
              in splitLambdaByPar names lam @?= (lam_x, lam_y),
-          testCase "no good name" $
+          testCase "splitLambdaByPar keeps computations in both lambdas." $
             let lam =
                   fromLines
                     [ "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> ",
@@ -76,7 +76,7 @@ tests =
                     ]
                 names = ["x_1"]
              in splitLambdaByPar names lam @?= (lam_x, lam_y),
-          testCase "no good name" $
+          testCase "splitLambdaByPar keeps line order." $
             let lam =
                   fromLines
                     [ "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> ",
@@ -99,17 +99,40 @@ tests =
                       "  in {x_4}"
                     ]
                 names = ["x_1"]
+             in splitLambdaByPar names lam @?= (lam_x, lam_y),
+          testCase "splitLambdaByPar does redundant work." $
+            let lam =
+                  fromLines
+                    [ "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> ",
+                      "  let {x_2 : i32} = add32(1i32, x_0) ",
+                      "  let {x_3 : i32} = add32(x_2, x_1) ",
+                      "  in {x_3, x_2}"
+                    ]
+                lam_x =
+                  fromLines
+                    [ "\\{x_0 : i32, x_1 : i32} : {i32} -> ",
+                      "  let {x_2 : i32} = add32(1i32, x_0) ",
+                      "  let {x_3 : i32} = add32(x_2, x_1) ",
+                      "  in {x_3}"
+                    ]
+                lam_y =
+                  fromLines
+                    [ "\\{x_0 : i32} : {i32} -> ",
+                      "  let {x_2 : i32} = add32(1i32, x_0) ",
+                      "  in {x_2}"
+                    ]
+                names = ["x_1"]
              in splitLambdaByPar names lam @?= (lam_x, lam_y)
         ],
       testGroup
         "splitLambdaByRes"
-        [ testCase "no good name" $
+        [ testCase "splitLambdaByRes keeps params and result." $
             let lam = "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> {x_0, x_1}"
                 lam_x = "\\{x_0 : i32} : {i32} -> {x_0}"
                 lam_y = "\\{x_1 : i32} : {i32} -> {x_1}"
                 names = ["x_0"]
              in splitLambdaByRes names lam @?= (lam_x, lam_y),
-          testCase "no good name" $
+          testCase "splitLambdaByRes keeps computation in first lambda." $
             let lam =
                   fromLines
                     [ "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> ",
@@ -125,7 +148,7 @@ tests =
                 lam_y = "\\{x_0 : i32} : {i32} -> {x_0}"
                 names = ["x_2"]
              in splitLambdaByRes names lam @?= (lam_x, lam_y),
-          testCase "no good name" $
+          testCase "splitLambdaByRes keeps computations in both lambdas." $
             let lam =
                   fromLines
                     [ "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> ",
@@ -147,7 +170,7 @@ tests =
                     ]
                 names = ["x_2"]
              in splitLambdaByRes names lam @?= (lam_x, lam_y),
-          testCase "no good name" $
+          testCase "splitLambdaByRes keeps line order." $
             let lam =
                   fromLines
                     [ "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> ",
@@ -170,6 +193,29 @@ tests =
                       "  in {x_4}"
                     ]
                 names = ["x_2"]
+             in splitLambdaByRes names lam @?= (lam_x, lam_y),
+          testCase "splitLambdaByRes does redundant work." $
+            let lam =
+                  fromLines
+                    [ "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> ",
+                      "  let {x_2 : i32} = add32(1i32, x_0) ",
+                      "  let {x_3 : i32} = add32(x_2, x_1) ",
+                      "  in {x_3, x_2}"
+                    ]
+                lam_x =
+                  fromLines
+                    [ "\\{x_0 : i32, x_1 : i32} : {i32} -> ",
+                      "  let {x_2 : i32} = add32(1i32, x_0) ",
+                      "  let {x_3 : i32} = add32(x_2, x_1) ",
+                      "  in {x_3}"
+                    ]
+                lam_y =
+                  fromLines
+                    [ "\\{x_0 : i32} : {i32} -> ",
+                      "  let {x_2 : i32} = add32(1i32, x_0) ",
+                      "  in {x_2}"
+                    ]
+                names = ["x_3"]
              in splitLambdaByRes names lam @?= (lam_x, lam_y)
         ]
     ]
