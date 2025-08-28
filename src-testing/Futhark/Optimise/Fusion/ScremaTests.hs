@@ -39,5 +39,5 @@ tests =
               \  in {x_2}"
             lam_y = "\\{x_0 : i32} : {i32} -> {x_0}"
             names = ["x_1"]
-         in snd (splitLambdaByPar names lam) @?= snd (lam_x, lam_y)
+         in splitLambdaByPar names lam @?= (lam_x, lam_y)
     ]
