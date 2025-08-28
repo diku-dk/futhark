@@ -97,48 +97,6 @@ isFusable inp_c out_p = (`S.member` inp_c_set) <$> out_p
   where
     inp_c_set = S.fromList $ SOAC.inputArray <$> inp_c
 
-data MultiMap k v
-  = MultiMap
-  { keyToInt :: Map k Integer,
-    intToVals :: Map Integer v
-  }
-  deriving (Show, Ord, Eq)
-
-instance Functor (MultiMap k) where
-  fmap f (MultiMap kti itv) = MultiMap kti $ f <$> itv
-
-mmEquivKeys :: MultiMap k v -> [[k]]
-mmEquivKeys (MultiMap kti _) =
-  fmap (fmap fst)
-    . L.groupBy ((==) `on` snd)
-    . L.sortOn snd
-    $ M.toList kti
-
-mmFromList :: (Ord k) => [(k, v)] -> MultiMap k v
-mmFromList kvs =
-  MultiMap (M.fromList $ zip ks [0 ..]) (M.fromList $ zip [0 ..] vs)
-  where
-    (ks, vs) = unzip kvs
-
-mmCombine :: (Ord k) => (v -> v -> v) -> v -> [k] -> MultiMap k v -> MultiMap k v
-mmCombine op ne ks (MultiMap kti itv) =
-  MultiMap kti' itv'
-  where
-    kis =
-      fmap (second fromJust) $
-        filter (isJust . snd) $
-          (\k -> (k, k `M.lookup` kti)) <$> ks
-    i =
-      case kis of
-        [] -> if null itv then 0 else succ $ fst $ M.findMax itv
-        (_, j) : _ -> j
-    is = snd <$> kis
-    v = foldl op ne $ (itv M.!) <$> is
-    kti' = M.fromList (map (,i) ks) `M.union` kti
-    itv' =
-      M.insert i v $
-        foldl (flip M.delete) itv is
-
 eliminate :: Names -> Stms SOACS -> Stms SOACS
 eliminate = auxiliary (stmsFromList [])
   where
@@ -229,29 +187,6 @@ splitLambdaByRes names lam =
       bimap unzip unzip
         . L.partition (maybe False (`elem` names) . subExpResVName . fst)
         $ zip (bodyResult body) (lambdaReturnType lam)
-
-partitionLambda ::
-  Lambda SOACS ->
-  [Lambda SOACS]
-partitionLambda lam =
-  undefined
-  where
-    body = lambdaBody lam
-    pars = lambdaParams lam
-    par_names = paramName <$> pars
-    mm = mmFromList $ map (,[]) par_names
-    stms = zip [0 ..] $ stmsToList $ bodyStms body
-    res = bodyResult body
-
-    partitioned_stms =
-      stmsFromList . fmap snd . L.sortOn fst <$> auxiliary mm stms
-
-    auxiliary mm' [] = mm'
-    auxiliary mm' (s@(_, st) : istms) =
-      auxiliary mm'' istms
-      where
-        mm'' = mmCombine (<>) [s] names mm'
-        names = namesToList $ freeIn st
 
 fuseScrema ::
   (MonadFreshNames m) =>
