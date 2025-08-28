@@ -1,6 +1,7 @@
 module Futhark.Optimise.Fusion.Screma
   ( fuseLambda,
     splitLambdaByPar,
+    splitLambdaByRes,
   )
 where
 
@@ -155,7 +156,7 @@ eliminateByRes = eliminate . namesFromList . mapMaybe subExpResVName
 
 splitLambdaByPar :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
 splitLambdaByPar names lam =
-  ( lam
+  ( Lambda
       { lambdaParams = new_params,
         lambdaBody =
           Body
@@ -165,7 +166,7 @@ splitLambdaByPar names lam =
             },
         lambdaReturnType = new_ts
       },
-    lam
+    Lambda
       { lambdaParams = new_params',
         lambdaBody =
           Body
@@ -187,9 +188,47 @@ splitLambdaByPar names lam =
     new_params' = filter ((`nameIn` deps') . paramName) pars
     auxiliary = (\(a, b, c) -> (mconcat a, b, c)) . unzip3
     ((deps, new_res, new_ts), (deps', new_res', new_ts')) =
-      bimap auxiliary auxiliary $
-        L.partition (namesIntersect (namesFromList names) . (\(a, _, _) -> a)) $
-          zip3 par_deps (bodyResult body) (lambdaReturnType lam)
+      bimap auxiliary auxiliary
+        . L.partition (namesIntersect (namesFromList names) . (\(a, _, _) -> a))
+        $ zip3 par_deps (bodyResult body) (lambdaReturnType lam)
+
+splitLambdaByRes :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
+splitLambdaByRes names lam =
+  ( Lambda
+      { lambdaParams = new_params,
+        lambdaBody =
+          Body
+            { bodyDec = bodyDec body,
+              bodyResult = new_res,
+              bodyStms = new_stms
+            },
+        lambdaReturnType = new_ts
+      },
+    Lambda
+      { lambdaParams = new_params',
+        lambdaBody =
+          Body
+            { bodyDec = bodyDec body,
+              bodyResult = new_res',
+              bodyStms = new_stms'
+            },
+        lambdaReturnType = new_ts'
+      }
+  )
+  where
+    pars = lambdaParams lam
+    body = lambdaBody lam
+    stms = bodyStms body
+    new_stms = eliminateByRes new_res stms
+    new_stms' = eliminateByRes new_res' stms
+    deps = freeIn new_stms <> namesFromList (mapMaybe subExpResVName new_res)
+    deps' = freeIn new_stms' <> namesFromList (mapMaybe subExpResVName new_res')
+    new_params = filter ((`nameIn` deps) . paramName) pars
+    new_params' = filter ((`nameIn` deps') . paramName) pars
+    ((new_res, new_ts), (new_res', new_ts')) =
+      bimap unzip unzip
+        . L.partition (maybe False (`elem` names) . subExpResVName . fst)
+        $ zip (bodyResult body) (lambdaReturnType lam)
 
 partitionLambda ::
   Lambda SOACS ->
