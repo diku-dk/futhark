@@ -523,6 +523,7 @@ library futhark-testing
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
+      Futhark.IR.SOACSTests
       Futhark.IR.Syntax.CoreTests
       Futhark.IR.SyntaxTests
       Futhark.Internalise.TypesValuesTests
