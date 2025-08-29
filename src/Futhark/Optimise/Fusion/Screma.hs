@@ -92,11 +92,6 @@ fuseLambda lam_c inp_c out_c lam_p out_p =
     params_c = lambdaParams lam_c
     params_p = lambdaParams lam_p
 
-isVerticallyFusable :: [SOAC.Input] -> [VName] -> [Bool]
-isVerticallyFusable inp_c out_p = (`S.member` inp_c_set) <$> out_p
-  where
-    inp_c_set = S.fromList $ SOAC.inputArray <$> inp_c
-
 -- | Given a set of names which are interpreted as the resulting
 -- variables found from the given Stms, eliminate all Stms which are
 -- not use to compute the value of the names.
@@ -205,30 +200,41 @@ splitLambdaByRes names lam =
         . L.partition (maybe False (`elem` names) . subExpResVName . fst)
         $ zip (bodyResult body) (lambdaReturnType lam)
 
+-- | Create a mapping from lambda results expression to their output
+-- array.
 resToOut :: [VName] -> Lambda SOACS -> SubExpRes -> VName
 resToOut out lam = (m M.!)
   where
     m = M.fromList $ flip zip out $ bodyResult $ lambdaBody lam
 
+-- | Create a mapping from lambda parameter names to their input
+-- array.
 parToInp :: [SOAC.Input] -> Lambda SOACS -> VName -> SOAC.Input
 parToInp inp lam = (m M.!)
   where
     m = M.fromList $ flip zip inp $ paramName <$> lambdaParams lam
 
+-- | Check that all inputs and outputs are fusible for a producer and
+-- consumer.
 fuseIsVarish :: [SOAC.Input] -> [VName] -> Bool
 fuseIsVarish inp_c =
   all (maybe True (isJust . SOAC.isVarishInput) . flip M.lookup name_to_inp_c)
   where
     name_to_inp_c = M.fromList $ zip (SOAC.inputArray <$> inp_c) inp_c
 
-fusable ::
+-- | Check that two scremas are fusible if they are give back the
+-- producer scremas post lambda that has been split into the scan
+-- lambda and map lambda. It is not fusible if inputs and outputs are
+-- being transformed and if the producers scan result is used for the
+-- consumers scans or reduces.
+fusible ::
   [SOAC.Input] ->
   ScremaForm SOACS ->
   [VName] ->
   ScremaForm SOACS ->
   Maybe (Lambda SOACS, Lambda SOACS)
-fusable inp_c form_c out_p form_p =
-  if fuseIsVarish inp_c out_p && forbidden_c `namesIntersect` forbidden_p
+fusible inp_c form_c out_p form_p =
+  if not (fuseIsVarish inp_c out_p) || forbidden_c `namesIntersect` forbidden_p
     then
       Nothing
     else
@@ -263,5 +269,11 @@ fuseScrema ::
   [VName] ->
   m (Maybe ([SOAC.Input], ScremaForm SOACS, [VName]))
 fuseScrema inp_c form_c out_c inp_p form_p out_p
-  | Just (post_scan_p, post_map_p) <- fusable inp_c form_c out_p form_p = pure Nothing
+  | Just (post_scan_p, post_map_p) <- fusible inp_c form_c out_p form_p = do
+      pure Nothing
   | otherwise = pure Nothing
+  where
+    pre_c = scremaLambda form_c
+    (pre_fuse_p, pre_unfuse_p) = splitLambdaByPar pre_c undefined
+    scans_f = on (<>) scremaScans form_c form_p
+    reds_f = on (<>) scremaReduces form_c form_p
