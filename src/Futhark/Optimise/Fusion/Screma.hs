@@ -92,8 +92,8 @@ fuseLambda lam_c inp_c out_c lam_p out_p =
     params_c = lambdaParams lam_c
     params_p = lambdaParams lam_p
 
-isFusable :: [SOAC.Input] -> [VName] -> [Bool]
-isFusable inp_c out_p = (`S.member` inp_c_set) <$> out_p
+isVerticallyFusable :: [SOAC.Input] -> [VName] -> [Bool]
+isVerticallyFusable inp_c out_p = (`S.member` inp_c_set) <$> out_p
   where
     inp_c_set = S.fromList $ SOAC.inputArray <$> inp_c
 
@@ -205,6 +205,54 @@ splitLambdaByRes names lam =
         . L.partition (maybe False (`elem` names) . subExpResVName . fst)
         $ zip (bodyResult body) (lambdaReturnType lam)
 
+resToOut :: [VName] -> Lambda SOACS -> SubExpRes -> VName
+resToOut out lam = (m M.!)
+  where
+    m = M.fromList $ flip zip out $ bodyResult $ lambdaBody lam
+
+parToInp :: [SOAC.Input] -> Lambda SOACS -> VName -> SOAC.Input
+parToInp inp lam = (m M.!)
+  where
+    m = M.fromList $ flip zip inp $ paramName <$> lambdaParams lam
+
+fuseIsVarish :: [SOAC.Input] -> [VName] -> Bool
+fuseIsVarish inp_c =
+  all (maybe True (isJust . SOAC.isVarishInput) . flip M.lookup name_to_inp_c)
+  where
+    name_to_inp_c = M.fromList $ zip (SOAC.inputArray <$> inp_c) inp_c
+
+fusable ::
+  [SOAC.Input] ->
+  ScremaForm SOACS ->
+  [VName] ->
+  ScremaForm SOACS ->
+  Maybe (Lambda SOACS, Lambda SOACS)
+fusable inp_c form_c out_p form_p =
+  if fuseIsVarish inp_c out_p && forbidden_c `namesIntersect` forbidden_p
+    then
+      Nothing
+    else
+      Just (post_scan_p, post_map_p)
+  where
+    pre_pars_c = oneName . paramName <$> lambdaParams pre_c
+    (pre_scan_deps_c, pre_red_deps_c, _) =
+      splitAt3 num_scan_c num_red_c $
+        lambdaDependencies mempty pre_c pre_pars_c
+    forbidden_c =
+      namesFromList
+        . fmap (SOAC.inputArray . parToInp inp_c pre_c)
+        . namesToList
+        $ mconcat (pre_scan_deps_c <> pre_red_deps_c)
+    pre_c = scremaLambda form_c
+    post_p = scremaPostLambda form_p
+    post_scan_pars_p = take num_scan_p $ paramName <$> lambdaParams post_p
+    num_scan_c = scanResults $ scremaScans form_c
+    num_red_c = redResults $ scremaReduces form_c
+    num_scan_p = scanResults $ scremaScans form_p
+    post_scan_res_p = bodyResult $ lambdaBody post_scan_p
+    forbidden_p = namesFromList $ resToOut out_p post_p <$> post_scan_res_p
+    (post_scan_p, post_map_p) = splitLambdaByPar post_scan_pars_p post_p
+
 fuseScrema ::
   (MonadFreshNames m) =>
   [SOAC.Input] ->
@@ -215,22 +263,5 @@ fuseScrema ::
   [VName] ->
   m (Maybe ([SOAC.Input], ScremaForm SOACS, [VName]))
 fuseScrema inp_c form_c out_c inp_p form_p out_p
-  | Just (extra_inp, post_lam', out) <-
-      fuseLambda
-        lam_c
-        inp_c
-        out_c
-        post_p
-        out_p =
-      pure Nothing
+  | Just (post_scan_p, post_map_p) <- fusable inp_c form_c out_p form_p = pure Nothing
   | otherwise = pure Nothing
-  where
-    lam_c = scremaLambda form_c
-    post_p = scremaPostLambda form_p
-    is_fusable = isFusable inp_c out_p
-    reds_c = scremaReduces form_c
-    reds_p = scremaReduces form_p
-    reds_f = reds_c <> reds_p
-    (reds_out_c, post_out_c) = splitAt (redResults reds_c) out_c
-    (reds_out_p, post_out_p) = splitAt (redResults reds_p) out_p
-    reds_out_f = reds_out_c <> reds_out_p
