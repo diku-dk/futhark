@@ -274,6 +274,9 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
   | otherwise = pure Nothing
   where
     pre_c = scremaLambda form_c
-    (pre_fuse_p, pre_unfuse_p) = splitLambdaByPar undefined pre_c
+    num_scan_c = scanResults $ scremaScans form_c
+    num_red_c = redResults $ scremaReduces form_c
+    pre_res_names_c = take (num_scan_c + num_scan_c) $ mapMaybe subExpResVName $ bodyResult $ lambdaBody pre_c
+    (pre_scan_red_c, pre_map_c) = splitLambdaByRes pre_res_names_c pre_c
     scans_f = on (<>) scremaScans form_c form_p
     reds_f = on (<>) scremaReduces form_c form_p
