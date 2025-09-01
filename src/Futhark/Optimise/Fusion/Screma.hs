@@ -21,40 +21,48 @@ import Futhark.IR
 import Futhark.IR.Prop.Names
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
+import Futhark.Transform.Rename
 import Futhark.Util (dropLast, splitAt3, takeLast)
+import Numeric.Natural
+
+fuseLambdaNoExtra ::
+  (Ord a) =>
+  Lambda SOACS ->
+  [a] ->
+  [a] ->
+  Lambda SOACS ->
+  [a] ->
+  (Lambda SOACS, [a])
+fuseLambdaNoExtra lam_c inp_c out_c lam_p out_p
+  | ([], lam, out) <- fuseLambda lam_c inp_c out_c lam_p out_p = (lam, out)
+  | otherwise = error "Use of lambda fusion with no extra input is wrong."
 
 fuseLambda ::
+  (Ord a) =>
   Lambda SOACS ->
-  [SOAC.Input] ->
-  [VName] ->
+  [a] ->
+  [a] ->
   Lambda SOACS ->
-  [VName] ->
-  Maybe ([SOAC.Input], Lambda SOACS, [VName])
+  [a] ->
+  ([a], Lambda SOACS, [a])
 fuseLambda lam_c inp_c out_c lam_p out_p =
-  if all (isJust . SOAC.isVarishInput . snd) $
-    mapMaybe (`M.lookup` inp_c_map) out_p
-    then
-      Just
-        ( extra_inp,
-          Lambda
-            { lambdaBody = new_body,
-              lambdaParams = new_params,
-              lambdaReturnType = new_ts
-            },
-          new_out
-        )
-    else Nothing
+  ( extra_inp,
+    Lambda
+      { lambdaBody = new_body,
+        lambdaParams = new_params,
+        lambdaReturnType = new_ts
+      },
+    new_out
+  )
   where
     new_params = params_p <> extra_params
     inp_c_map =
       M.fromList $
-        zip
-          (SOAC.inputArray <$> inp_c)
-          (zip (paramName <$> params_c) inp_c)
+        zip inp_c (paramName <$> params_c)
 
     bindResToPar (out, res, t) =
       case M.lookup out inp_c_map of
-        Just (name, _) ->
+        Just name ->
           Just $ certify cs $ mkLet [Ident name t] $ BasicOp $ SubExp e
           where
             SubExpRes cs e = res
@@ -71,7 +79,7 @@ fuseLambda lam_c inp_c out_c lam_p out_p =
     (extra_params, extra_inp) =
       unzip $
         filter
-          ((`notElem` out_p) . SOAC.inputArray . snd)
+          ((`notElem` out_p) . snd)
           (zip params_c inp_c)
 
     ts_c = lambdaReturnType lam_c
@@ -119,43 +127,57 @@ eliminateByRes = eliminate . namesFromList . mapMaybe subExpResVName
 -- will have all the other parameters and do the remaining
 -- computational work. The two lambda will overlap in computational
 -- work.
-splitLambdaByPar :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
-splitLambdaByPar names lam =
-  ( Lambda
-      { lambdaParams = new_params,
-        lambdaBody =
-          Body
-            { bodyDec = bodyDec body,
-              bodyResult = new_res,
-              bodyStms = new_stms
-            },
-        lambdaReturnType = new_ts
-      },
-    Lambda
-      { lambdaParams = new_params',
-        lambdaBody =
-          Body
-            { bodyDec = bodyDec body,
-              bodyResult = new_res',
-              bodyStms = new_stms'
-            },
-        lambdaReturnType = new_ts'
-      }
+splitLambdaByPar ::
+  [VName] ->
+  [a] ->
+  Lambda SOACS ->
+  [b] ->
+  (([a], Lambda SOACS, [b]), ([a], Lambda SOACS, [b]))
+splitLambdaByPar names inps lam outs =
+  ( ( new_inps,
+      Lambda
+        { lambdaParams = new_params,
+          lambdaBody =
+            Body
+              { bodyDec = bodyDec body,
+                bodyResult = new_res,
+                bodyStms = new_stms
+              },
+          lambdaReturnType = new_ts
+        },
+      new_outs
+    ),
+    ( new_inps',
+      Lambda
+        { lambdaParams = new_params',
+          lambdaBody =
+            Body
+              { bodyDec = bodyDec body,
+                bodyResult = new_res',
+                bodyStms = new_stms'
+              },
+          lambdaReturnType = new_ts'
+        },
+      new_outs'
+    )
   )
   where
     pars = lambdaParams lam
+    m = M.fromList $ zip pars inps
     par_deps = lambdaDependencies mempty lam (oneName . paramName <$> pars)
     body = lambdaBody lam
     stms = bodyStms body
     new_stms = eliminateByRes new_res stms
     new_stms' = eliminateByRes new_res' stms
+    new_inps = (m M.!) <$> new_params
+    new_inps' = (m M.!) <$> new_params'
     new_params = filter ((`nameIn` deps) . paramName) pars
     new_params' = filter ((`nameIn` deps') . paramName) pars
-    auxiliary = (\(a, b, c) -> (mconcat a, b, c)) . unzip3
-    ((deps, new_res, new_ts), (deps', new_res', new_ts')) =
+    auxiliary = (\(a, b, c, d) -> (mconcat a, b, c, d)) . L.unzip4
+    ((deps, new_res, new_ts, new_outs), (deps', new_res', new_ts', new_outs')) =
       bimap auxiliary auxiliary
-        . L.partition (namesIntersect (namesFromList names) . (\(a, _, _) -> a))
-        $ zip3 par_deps (bodyResult body) (lambdaReturnType lam)
+        . L.partition (namesIntersect (namesFromList names) . (\(a, _, _, _) -> a))
+        $ L.zip4 par_deps (bodyResult body) (lambdaReturnType lam) outs
 
 -- | Given a list of result variable names and a lambda, split the
 -- lambda function into two where the first function will compute
@@ -231,14 +253,16 @@ fusible ::
   [SOAC.Input] ->
   ScremaForm SOACS ->
   [VName] ->
+  [a] ->
   ScremaForm SOACS ->
-  Maybe (Lambda SOACS, Lambda SOACS)
-fusible inp_c form_c out_p form_p =
+  [b] ->
+  Maybe (([a], Lambda SOACS, [b]), ([a], Lambda SOACS, [b]))
+fusible inp_c form_c out_p inps form_p outs =
   if not (fuseIsVarish inp_c out_p) || forbidden_c `namesIntersect` forbidden_p
     then
       Nothing
     else
-      Just (post_scan_p, post_map_p)
+      Just result
   where
     pre_pars_c = oneName . paramName <$> lambdaParams pre_c
     (pre_scan_deps_c, pre_red_deps_c, _) =
@@ -257,7 +281,67 @@ fusible inp_c form_c out_p form_p =
     num_scan_p = scanResults $ scremaScans form_p
     post_scan_res_p = bodyResult $ lambdaBody post_scan_p
     forbidden_p = namesFromList $ resToOut out_p post_p <$> post_scan_res_p
-    (post_scan_p, post_map_p) = splitLambdaByPar post_scan_pars_p post_p
+    result@((_, post_scan_p, _), _) =
+      splitLambdaByPar post_scan_pars_p inps post_p outs
+
+data InOut
+  = External !VName
+  | Internal !Natural
+  deriving (Show, Ord, Eq)
+
+external :: VName -> InOut
+external = External
+
+internal :: Natural -> InOut
+internal = Internal
+
+fromInternal :: InOut -> Maybe Natural
+fromInternal (Internal n) = Just n
+fromInternal (External _) = Nothing
+
+prePostInOut ::
+  Natural ->
+  [SOAC.Input] ->
+  ScremaForm rep ->
+  [VName] ->
+  (([InOut], [InOut]), ([InOut], [InOut]))
+prePostInOut start inp form out =
+  ((pre_inp, pre_out), (post_inp, post_out))
+  where
+    pre_inp = external . SOAC.inputArray <$> inp
+    post_out = external <$> out
+    pre = scremaLambda form
+    num_scan = scanResults $ scremaScans form
+    num_red = redResults $ scremaReduces form
+    num_pre_rets = length $ lambdaReturnType pre
+    pre_out = internal <$> [start .. fromIntegral num_pre_rets]
+    (scan_inout, _, map_inout) = splitAt3 num_scan num_red pre_out
+    post_inp = scan_inout <> map_inout
+
+scremaFuseInOut ::
+  [SOAC.Input] ->
+  ScremaForm rep ->
+  [VName] ->
+  [SOAC.Input] ->
+  ScremaForm rep ->
+  [VName] ->
+  ( ( ([InOut], [InOut]),
+      ([InOut], [InOut])
+    ),
+    ( ([InOut], [InOut]),
+      ([InOut], [InOut])
+    )
+  )
+scremaFuseInOut inp_c form_c out_c inp_p form_p out_p =
+  ( ((pre_inp_c, pre_out_c), (post_inp_c, post_out_c)),
+    ((pre_inp_p, pre_out_p), (post_inp_p, post_out_p))
+  )
+  where
+    ((pre_inp_c, pre_out_c), (post_inp_c, post_out_c)) =
+      prePostInOut 0 inp_c form_c out_c
+    s = succ $ maximum $ (0 :) $ mapMaybe fromInternal pre_out_c
+    ((pre_inp_p, pre_out_p), (post_inp_p, post_out_p)) =
+      prePostInOut s inp_p form_p out_p
 
 fuseScrema ::
   (MonadFreshNames m) =>
@@ -269,10 +353,23 @@ fuseScrema ::
   [VName] ->
   m (Maybe ([SOAC.Input], ScremaForm SOACS, [VName]))
 fuseScrema inp_c form_c out_c inp_p form_p out_p
-  | Just (post_scan_p, post_map_p) <- fusible inp_c form_c out_p form_p = do
+  | Just
+      ( (post_scan_inp_p, post_scan_p, post_scan_out_p),
+        (post_map_inp_p, post_map_p, post_map_out_p)
+        ) <-
+      fusible inp_c form_c out_p post_inp_p form_p post_out_p = do
+      post_map_p' <- renameLambda post_map_p
+      let (pre_p', pre_out_p') = fuseLambdaNoExtra post_map_p' post_map_inp_p post_map_out_p pre_p pre_out_p
+          (extra_inp, pre, pre_out) = fuseLambda pre_c pre_inp_c pre_out_c pre_p' pre_out_p'
+
       pure Nothing
   | otherwise = pure Nothing
   where
+    ( ((pre_inp_c, pre_out_c), (post_inp_c, post_out_c)),
+      ((pre_inp_p, pre_out_p), (post_inp_p, post_out_p))
+      ) =
+        scremaFuseInOut inp_c form_c out_c inp_p form_p out_p
+    pre_p = scremaLambda form_p
     pre_c = scremaLambda form_c
     num_scan_c = scanResults $ scremaScans form_c
     num_red_c = redResults $ scremaReduces form_c

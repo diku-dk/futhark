@@ -368,31 +368,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                  w
                  new_inp
                  (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c) post_lam) -}
-    ( SOAC.Screma _ _ form_c,
-      SOAC.Screma _ _ form_p,
-      _
-      )
-        | Just map_lam <- isMapSOAC form_c,
-          not $ null $ scremaScans form_p,
-          all (`notNameIn` unfus_set) $ fsOutNames ker,
-          Just (extra_inp, post_lam', out) <-
-            fuseLambda
-              map_lam
-              inp_c_arr
-              (fsOutNames ker)
-              post_lam
-              outVars -> do
-            let new_inp = inp_p_arr <> extra_inp
-            extra_pars <- mapM (newParam "x" . stripArray 1 . SOAC.inputType) extra_inp
-            let form =
-                  form_p
-                    { scremaPostLambda = post_lam',
-                      scremaLambda = extendLambda map_lam_p extra_pars
-                    }
-            success out $ SOAC.Screma w new_inp form
-        where
-          post_lam = scremaPostLambda form_p
-          map_lam_p = scremaLambda form_p
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
