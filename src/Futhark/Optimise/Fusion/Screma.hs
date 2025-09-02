@@ -244,6 +244,12 @@ fuseIsVarish inp_c =
   where
     name_to_inp_c = M.fromList $ zip (SOAC.inputArray <$> inp_c) inp_c
 
+fuseInputs :: [SOAC.Input] -> [VName] -> [VName]
+fuseInputs inp_c =
+  filter (`M.member` name_to_inp_c)
+  where
+    name_to_inp_c = M.fromList $ zip (SOAC.inputArray <$> inp_c) inp_c
+
 -- | Check that two scremas are fusible if they are give back the
 -- producer scremas post lambda that has been split into the scan
 -- lambda and map lambda. It is not fusible if inputs and outputs are
@@ -253,16 +259,16 @@ fusible ::
   [SOAC.Input] ->
   ScremaForm SOACS ->
   [VName] ->
-  [a] ->
+  [SOAC.Input] ->
   ScremaForm SOACS ->
-  [b] ->
-  Maybe (([a], Lambda SOACS, [b]), ([a], Lambda SOACS, [b]))
-fusible inp_c form_c out_p inps form_p outs =
+  [VName] ->
+  Maybe [VName]
+fusible inp_c form_c out_c inp_p form_p out_p =
   if not (fuseIsVarish inp_c out_p) || forbidden_c `namesIntersect` forbidden_p
     then
       Nothing
     else
-      Just result
+      Just $ fuseInputs inp_c out_p
   where
     pre_pars_c = oneName . paramName <$> lambdaParams pre_c
     (pre_scan_deps_c, pre_red_deps_c, _) =
@@ -281,8 +287,8 @@ fusible inp_c form_c out_p inps form_p outs =
     num_scan_p = scanResults $ scremaScans form_p
     post_scan_res_p = bodyResult $ lambdaBody post_scan_p
     forbidden_p = namesFromList $ resToOut out_p post_p <$> post_scan_res_p
-    result@((_, post_scan_p, _), _) =
-      splitLambdaByPar post_scan_pars_p inps post_p outs
+    ((_, post_scan_p, _), _) =
+      splitLambdaByPar post_scan_pars_p inp_p post_p out_c
 
 data InOut
   = External !VName
@@ -354,14 +360,11 @@ fuseScrema ::
   m (Maybe ([SOAC.Input], ScremaForm SOACS, [VName]))
 fuseScrema inp_c form_c out_c inp_p form_p out_p
   | Just
-      ( (post_scan_inp_p, post_scan_p, post_scan_out_p),
-        (post_map_inp_p, post_map_p, post_map_out_p)
-        ) <-
-      fusible inp_c form_c out_p post_inp_p form_p post_out_p = do
-      post_map_p' <- renameLambda post_map_p
-      let (pre_p', pre_out_p') = fuseLambdaNoExtra post_map_p' post_map_inp_p post_map_out_p pre_p pre_out_p
-          (extra_inp, pre, pre_out) = fuseLambda pre_c pre_inp_c pre_out_c pre_p' pre_out_p'
-
+      post_lam_fuse <-
+      fusible inp_c form_c out_p inp_p form_p out_p = do
+      let ( (fusible_c, fusisble_c, fusible_out_c),
+            (other_inp_c, other_c, other_out_c)
+            ) = splitLambdaByPar post_lam_fuse pre_inp_c pre_c pre_out_c
       pure Nothing
   | otherwise = pure Nothing
   where
@@ -369,11 +372,4 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
       ((pre_inp_p, pre_out_p), (post_inp_p, post_out_p))
       ) =
         scremaFuseInOut inp_c form_c out_c inp_p form_p out_p
-    pre_p = scremaLambda form_p
     pre_c = scremaLambda form_c
-    num_scan_c = scanResults $ scremaScans form_c
-    num_red_c = redResults $ scremaReduces form_c
-    pre_res_names_c = take (num_scan_c + num_scan_c) $ mapMaybe subExpResVName $ bodyResult $ lambdaBody pre_c
-    (pre_scan_red_c, pre_map_c) = splitLambdaByRes pre_res_names_c pre_c
-    scans_f = on (<>) scremaScans form_c form_p
-    reds_f = on (<>) scremaReduces form_c form_p
