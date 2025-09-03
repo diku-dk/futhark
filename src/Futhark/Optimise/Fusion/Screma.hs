@@ -290,6 +290,25 @@ fusible inp_c form_c out_c inp_p form_p out_p =
     ((_, post_scan_p, _), _) =
       splitLambdaByPar post_scan_pars_p inp_p post_p out_c
 
+simplifyPrePost ::
+  ScremaForm SOACS ->
+  ([InOut], [InOut]) ->
+  ([InOut], [InOut]) ->
+  ( ([InOut], Lambda SOACS, [InOut]),
+    ([InOut], Lambda SOACS, [InOut])
+  )
+simplifyPrePost form (pre_inp, pre_out) (post_inp, post_out)
+  | ([], pre', pre_out') <- fuseLambda post_map post_map_inp post_map_out pre pre_out =
+      ((pre_inp, pre', pre_out'), post_scan)
+  | otherwise = error "No extra inputs should be created for post."
+  where
+    pre = scremaLambda form
+    post = scremaPostLambda form
+    num_scan = scanResults $ scremaScans form
+    scan_names = fmap paramName . drop num_scan $ lambdaParams post
+    (post_scan, (post_map_inp, post_map, post_map_out)) =
+      splitLambdaByPar scan_names post_inp post post_out
+
 data InOut
   = External !VName
   | Internal !Natural
@@ -362,14 +381,16 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
   | Just
       post_lam_fuse <-
       fusible inp_c form_c out_p inp_p form_p out_p = do
-      let ( (fusible_c, fusisble_c, fusible_out_c),
-            (other_inp_c, other_c, other_out_c)
-            ) = splitLambdaByPar post_lam_fuse pre_inp_c pre_c pre_out_c
       pure Nothing
   | otherwise = pure Nothing
   where
-    ( ((pre_inp_c, pre_out_c), (post_inp_c, post_out_c)),
-      ((pre_inp_p, pre_out_p), (post_inp_p, post_out_p))
+    ( (pre_inout_c, post_inout_c),
+      (pre_inout_p, post_inout_p)
       ) =
         scremaFuseInOut inp_c form_c out_c inp_p form_p out_p
-    pre_c = scremaLambda form_c
+    ( (pre_inp_c, pre_c, pre_out_c),
+      (post_inp_c, post_c, post_out_c)
+      ) = simplifyPrePost form_c pre_inout_c post_inout_c
+    ( (pre_inp_p, pre_p, pre_out_p),
+      (post_inp_p, post_p, post_out_p)
+      ) = simplifyPrePost form_p pre_inout_p post_inout_p
