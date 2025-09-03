@@ -2,7 +2,7 @@
 module Futhark.CLI.Script (main) where
 
 import Control.Monad.Except
-import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.IO.Class (MonadIO)
 import Data.Binary qualified as Bin
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.Char (chr)
@@ -15,7 +15,7 @@ import Futhark.CLI.Literate
     scriptCommandLineOptions,
   )
 import Futhark.Script
-import Futhark.Test.Values (Compound (..), getValue, valueType)
+import Futhark.Test.Values (Compound (..))
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
 import System.Exit
@@ -86,17 +86,23 @@ getExp (Right s) = case parseExpFromText "command line option" s of
 
 -- A few extra procedures that are not handled by scriptBuiltin.
 extScriptBuiltin :: (MonadError T.Text m, MonadIO m) => EvalBuiltin m
-extScriptBuiltin "store" [ValueAtom fv, ValueAtom vv]
-  | Just path <- getValue fv = do
-      let path' = map (chr . fromIntegral) (path :: [Bin.Word8])
-      liftIO $ BS.writeFile path' $ Bin.encode vv
-      pure $ ValueTuple []
-extScriptBuiltin "store" vs =
-  throwError $
-    "$store does not accept arguments of types: "
-      <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
-extScriptBuiltin f vs =
-  scriptBuiltin "." f vs
+extScriptBuiltin server "store" vs
+  | [fv, v@(ValueAtom (SValue _ _))] <- vs = do
+      fv' <- getHaskellValue server fv
+      case fv' of
+        Just path -> do
+          let path' = map (chr . fromIntegral) (path :: [Bin.Word8])
+          storeExpValue server path' v
+          pure $ ValueTuple []
+        _ -> bad
+  | otherwise = bad
+  where
+    bad =
+      throwError $
+        "$store does not accept arguments of types: "
+          <> T.intercalate ", " (map (prettyText . fmap scriptValueType) vs)
+extScriptBuiltin server f vs =
+  scriptBuiltin "." server f vs
 
 -- | Run @futhark script@.
 main :: String -> [String] -> IO ()

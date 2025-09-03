@@ -637,28 +637,36 @@ loadAudio audiofile = do
     _ -> throwError "$loadImg failed to detect the number of channels in the audio input"
 
 literateBuiltin :: EvalBuiltin ScriptM
-literateBuiltin "loadimg" vs =
-  case vs of
-    [ValueAtom v]
-      | Just path <- getValue v -> do
+literateBuiltin server "loadimg" vs
+  | [v] <- vs = do
+      v' <- getHaskellValue server v
+      case v' of
+        Just path -> do
           let path' = map (chr . fromIntegral) (path :: [Word8])
-          loadImage path'
-    _ ->
+          valToExpValue <$> loadImage path'
+        _ -> bad
+  | otherwise = bad
+  where
+    bad =
       throwError $
         "$loadimg does not accept arguments of types: "
-          <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
-literateBuiltin "loadaudio" vs =
-  case vs of
-    [ValueAtom v]
-      | Just path <- getValue v -> do
+          <> T.intercalate ", " (map (prettyText . fmap scriptValueType) vs)
+literateBuiltin server "loadaudio" vs
+  | [v] <- vs = do
+      v' <- getHaskellValue server v
+      case v' of
+        Just path -> do
           let path' = map (chr . fromIntegral) (path :: [Word8])
-          loadAudio path'
-    _ ->
+          valToExpValue <$> loadAudio path'
+        _ -> bad
+  | otherwise = bad
+  where
+    bad =
       throwError $
         "$loadaudio does not accept arguments of types: "
-          <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
-literateBuiltin f vs =
-  scriptBuiltin "." f vs
+          <> T.intercalate ", " (map (prettyText . fmap scriptValueType) vs)
+literateBuiltin server f vs =
+  scriptBuiltin "." server f vs
 
 -- | Some of these only make sense for @futhark literate@, but enough
 -- are also sensible for @futhark script@ that we can share them.

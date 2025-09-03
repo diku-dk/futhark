@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * C types corresponding to records now have nicer names.
 
+* ``futhark script`` now has a ``$restore`` procedure, and the ``$store``
+  procedure has been augmented with support for opaque types.
+
 ### Removed
 
 ### Changed

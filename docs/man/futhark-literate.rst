@@ -278,6 +278,10 @@ Futhark.  The following builtins are supported:
   soundfile. Most common audio-formats are supported, including mp3, ogg, wav,
   flac and opus.
 
+* ``$restore "type" "file"`` loads a serialised value of type ``type`` from
+  ``file``. The usual caveats apply regarding the stability of the value
+  serialisation format.
+
 FutharkScript supports a form of automatic uncurrying. If a function
 taking *n* parameters is applied to a single argument that is an
 *n*-element tuple, the function is applied to the elements of the

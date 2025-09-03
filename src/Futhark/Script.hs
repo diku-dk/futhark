@@ -19,12 +19,16 @@ module Futhark.Script
     serverVarsInValue,
     ValOrVar (..),
     ExpValue,
+    valToExpValue,
+    storeExpValue,
 
     -- * Evaluation
     EvalBuiltin,
     scriptBuiltin,
     evalExp,
+    getScriptValue,
     getExpValue,
+    getHaskellValue,
     evalExpToGround,
     valueToExp,
     freeValue,
@@ -35,6 +39,7 @@ import Control.Monad
 import Control.Monad.Except (MonadError (..))
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bifunctor (bimap)
+import Data.Binary qualified as Bin
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
@@ -84,7 +89,8 @@ isTuple t m = areTupleFields . M.fromList =<< isRecord t m
 data ScriptServer = ScriptServer
   { scriptServer :: Server,
     scriptCounter :: IORef Int,
-    scriptTypes :: TypeMap
+    scriptTypes :: TypeMap,
+    scriptVars :: IORef [VarName]
   }
 
 -- | Run an action with a 'ScriptServer' produced by an existing
@@ -92,8 +98,9 @@ data ScriptServer = ScriptServer
 withScriptServer' :: (MonadIO m) => Server -> (ScriptServer -> m a) -> m a
 withScriptServer' server f = do
   counter <- liftIO $ newIORef 0
+  vars <- liftIO $ newIORef []
   types <- typeMap server
-  f $ ScriptServer server counter types
+  f $ ScriptServer server counter types vars
 
 -- | Start a server, execute an action, then shut down the server.
 -- Similar to 'withServer'.
@@ -274,6 +281,11 @@ data ValOrVar = VVal V.Value | VVar VarName
 -- particular, these may not be on the server.
 type ExpValue = V.Compound (ScriptValue ValOrVar)
 
+-- | Turn a purely manifested value into an 'ExpValue'.
+valToExpValue :: V.CompoundValue -> ExpValue
+valToExpValue = fmap $ \v ->
+  SValue (V.valueTypeTextNoDims (V.valueType v)) $ VVal v
+
 -- | The type of a 'ScriptValue'.
 scriptValueType :: ScriptValue v -> ScriptValueType
 scriptValueType (SValue t _) = STValue t
@@ -344,13 +356,32 @@ coerceValue t v = do
     coerceInts _ _ =
       const Nothing
 
+-- | Store the provided value to the specified file. Fails if `ExpValue` is not
+-- either a primitive or a single variable stored on the server. TODO: make this
+-- handle arbitrary values.
+storeExpValue ::
+  (MonadIO m, MonadError T.Text m) =>
+  ScriptServer ->
+  FilePath ->
+  ExpValue ->
+  m ()
+storeExpValue server path (V.ValueAtom (SValue _ v)) = do
+  case v of
+    VVal vv' ->
+      liftIO $ LBS.writeFile path $ Bin.encode vv'
+    VVar vv' ->
+      cmdMaybe $ cmdStore (scriptServer server) path [vv']
+storeExpValue _ _ v =
+  throwError $
+    "Cannot store value of type " <> prettyText (fmap scriptValueType v)
+
 -- | How to evaluate a builtin function.
-type EvalBuiltin m = T.Text -> [V.CompoundValue] -> m V.CompoundValue
+type EvalBuiltin m = ScriptServer -> T.Text -> [ExpValue] -> m ExpValue
 
 loadData ::
   (MonadIO m, MonadError T.Text m) =>
   FilePath ->
-  m (V.Compound V.Value)
+  m ExpValue
 loadData datafile = do
   contents <- liftIO $ LBS.readFile datafile
   let maybe_vs = V.readValues contents
@@ -358,42 +389,95 @@ loadData datafile = do
     Nothing ->
       throwError $ "Failed to read data file " <> T.pack datafile
     Just [v] ->
-      pure $ V.ValueAtom v
+      pure $ valToExpValue $ V.ValueAtom v
     Just vs ->
-      pure $ V.ValueTuple $ map V.ValueAtom vs
+      pure $ valToExpValue $ V.ValueTuple $ map V.ValueAtom vs
+
+wrongArguments ::
+  (MonadError T.Text m) => T.Text -> [ExpValue] -> m a
+wrongArguments fname vs =
+  throwError $
+    "$"
+      <> fname
+      <> " does not accept arguments of types: "
+      <> T.intercalate ", " (map (prettyText . fmap scriptValueType) vs)
 
 pathArg ::
-  (MonadError T.Text f) =>
+  (MonadIO m, MonadError T.Text m) =>
   FilePath ->
+  ScriptServer ->
   T.Text ->
-  [V.Compound V.Value] ->
-  f FilePath
-pathArg dir cmd vs =
-  case vs of
-    [V.ValueAtom v]
-      | Just path <- V.getValue v ->
-          pure $ dir </> map (chr . fromIntegral) (path :: [Word8])
+  [ExpValue] ->
+  m FilePath
+pathArg dir server cmd vs@[v] = do
+  v' <- getHaskellValue server v
+  case v' of
+    Just path ->
+      pure $ dir </> map (chr . fromIntegral) (path :: [Word8])
     _ ->
-      throwError $
-        "$"
-          <> cmd
-          <> " does not accept arguments of types: "
-          <> T.intercalate ", " (map (prettyText . fmap V.valueType) vs)
+      wrongArguments cmd vs
+pathArg _ _ cmd vs =
+  wrongArguments cmd vs
+
+newVar :: (MonadIO m) => ScriptServer -> T.Text -> m T.Text
+newVar server base = liftIO $ do
+  x <- readIORef counter
+  modifyIORef counter (+ 1)
+  let v = base <> prettyText x
+  modifyIORef vars (v :)
+  pure v
+  where
+    vars = scriptVars server
+    counter = scriptCounter server
 
 -- | Handles the following builtin functions: @loaddata@, @loadbytes@.
 -- Fails for everything else. The 'FilePath' indicates the directory
 -- that files should be read relative to.
 scriptBuiltin :: (MonadIO m, MonadError T.Text m) => FilePath -> EvalBuiltin m
-scriptBuiltin dir "loaddata" vs = do
-  loadData =<< pathArg dir "loaddata" vs
-scriptBuiltin dir "loadbytes" vs = do
-  fmap (V.ValueAtom . V.putValue1) . liftIO . BS.readFile
-    =<< pathArg dir "loadbytes" vs
-scriptBuiltin _ f _ =
+scriptBuiltin dir server "loaddata" vs =
+  loadData =<< pathArg dir server "loaddata" vs
+scriptBuiltin dir server "loadbytes" vs =
+  fmap (V.ValueAtom . SValue "[]u8" . VVal . V.putValue1) . liftIO . BS.readFile
+    =<< pathArg dir server "loadbytes" vs
+scriptBuiltin dir server "restore" vs
+  | [tv, fv] <- vs = do
+      tv' <- getHaskellValue server tv
+      fv' <- getHaskellValue server fv
+      case (tv', fv') of
+        (Just tname, Just fname) -> do
+          let tname' = T.pack $ map (chr . fromIntegral) (tname :: [Word8])
+              fname' = dir </> map (chr . fromIntegral) (fname :: [Word8])
+          v <- newVar server "restore"
+          cmdMaybe $ cmdRestore (scriptServer server) fname' [(v, tname')]
+          pure $ V.ValueAtom $ SValue tname' $ VVar v
+        _ ->
+          wrongArguments "restore" vs
+  | otherwise =
+      wrongArguments "restore" vs
+scriptBuiltin _ _ f _ =
   throwError $ "Unknown builtin function $" <> prettyText f
 
 -- | Symbol table used for local variable lookups during expression evaluation.
 type VTable = M.Map VarName ExpValue
+
+cannotApply ::
+  (MonadError T.Text m, Pretty a, Pretty b) =>
+  T.Text ->
+  [a] ->
+  [b] ->
+  m c
+cannotApply fname expected actual =
+  throwError $
+    "Function \""
+      <> fname
+      <> "\" expects "
+      <> prettyText (length expected)
+      <> " argument(s) of types:\n"
+      <> T.intercalate "\n" (map prettyTextOneLine expected)
+      <> "\nBut applied to "
+      <> prettyText (length actual)
+      <> " argument(s) of types:\n"
+      <> T.intercalate "\n" (map prettyTextOneLine actual)
 
 -- | Evaluate a FutharkScript expression relative to some running server.
 evalExp ::
@@ -404,38 +488,29 @@ evalExp ::
   Exp ->
   m ExpValue
 evalExp builtin sserver top_level_e = do
-  vars <- liftIO $ newIORef []
   let ( ScriptServer
           { scriptServer = server,
-            scriptCounter = counter,
-            scriptTypes = types
+            scriptTypes = types,
+            scriptVars = vars
           }
         ) = sserver
-      newVar base = liftIO $ do
-        x <- readIORef counter
-        modifyIORef counter (+ 1)
-        let v = base <> prettyText x
-        modifyIORef vars (v :)
-        pure v
+  old_vars <- liftIO $ readIORef vars
+  let newVar' = newVar sserver
 
       mkRecord t vs = do
-        v <- newVar "record"
+        v <- newVar' "record"
         cmdMaybe $ cmdNew server v t vs
         pure v
 
       getField from (f, _) = do
-        to <- newVar "field"
+        to <- newVar' "field"
         cmdMaybe $ cmdProject server to from $ nameToText f
         pure to
-
-      toVal :: ValOrVar -> m V.Value
-      toVal (VVal v) = pure v
-      toVal (VVar v) = readVar server v
 
       toVar :: ValOrVar -> m VarName
       toVar (VVar v) = pure v
       toVar (VVal val) = do
-        v <- newVar "const"
+        v <- newVar' "const"
         writeVar server v val
         pure v
 
@@ -444,14 +519,8 @@ evalExp builtin sserver top_level_e = do
       scriptValueToValOrVar (SValue _ v) =
         pure v
 
-      scriptValueToVal :: ScriptValue ValOrVar -> m V.Value
-      scriptValueToVal = toVal <=< scriptValueToValOrVar
-
       scriptValueToVar :: ScriptValue ValOrVar -> m VarName
       scriptValueToVar = toVar <=< scriptValueToValOrVar
-
-      interValToVal :: ExpValue -> m V.CompoundValue
-      interValToVal = traverse scriptValueToVal
 
       -- Apart from type checking, this function also converts
       -- FutharkScript tuples/records to Futhark-level tuples/records,
@@ -480,10 +549,6 @@ evalExp builtin sserver top_level_e = do
             scriptValueToVar $ SValue t $ VVal v'
       interValToVar bad _ _ = bad
 
-      valToInterVal :: V.CompoundValue -> ExpValue
-      valToInterVal = fmap $ \v ->
-        SValue (V.valueTypeTextNoDims (V.valueType v)) $ VVal v
-
       letMatch :: [VarName] -> ExpValue -> m VTable
       letMatch vs val
         | vals <- V.unCompound val,
@@ -499,56 +564,42 @@ evalExp builtin sserver top_level_e = do
       evalExp' :: VTable -> Exp -> m ExpValue
       evalExp' _ (ServerVar t v) =
         pure $ V.ValueAtom $ SValue t $ VVar v
-      evalExp' vtable (Call (FuncBuiltin name) es) = do
-        v <- builtin name =<< mapM (interValToVal <=< evalExp' vtable) es
-        pure $ valToInterVal v
+      evalExp' vtable (Call (FuncBuiltin name) es) =
+        builtin sserver name =<< mapM (evalExp' vtable) es
       evalExp' vtable (Call (FuncFut name) es)
         | Just e <- M.lookup name vtable = do
             unless (null es) $
               throwError $
                 "Locally bound name cannot be invoked as a function: " <> prettyText name
             pure e
-      evalExp' vtable (Call (FuncFut name) es) = do
-        in_types <- fmap (map inputType) $ cmdEither $ cmdInputs server name
-        out_types <- fmap (map outputType) $ cmdEither $ cmdOutputs server name
+        | otherwise = do
+            in_types <- fmap (map inputType) $ cmdEither $ cmdInputs server name
+            out_types <- fmap (map outputType) $ cmdEither $ cmdOutputs server name
 
-        es' <- mapM (evalExp' vtable) es
-        let es_types = map (fmap scriptValueType) es'
+            es' <- mapM (evalExp' vtable) es
 
-        let cannotApply =
-              throwError $
-                "Function \""
-                  <> name
-                  <> "\" expects "
-                  <> prettyText (length in_types)
-                  <> " argument(s) of types:\n"
-                  <> T.intercalate "\n" (map prettyTextOneLine in_types)
-                  <> "\nBut applied to "
-                  <> prettyText (length es_types)
-                  <> " argument(s) of types:\n"
-                  <> T.intercalate "\n" (map prettyTextOneLine es_types)
+            let bad = cannotApply name in_types $ map (fmap scriptValueType) es'
+                tryApply args = do
+                  arg_types <- zipWithM (interValToVar bad) in_types args
 
-            tryApply args = do
-              arg_types <- zipWithM (interValToVar cannotApply) in_types args
+                  if length in_types == length arg_types
+                    then do
+                      outs <- replicateM (length out_types) $ newVar' "out"
+                      void $ cmdEither $ cmdCall server name outs arg_types
+                      pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
+                    else
+                      pure . V.ValueAtom . SFun name in_types out_types $
+                        zipWith SValue in_types $
+                          map VVar arg_types
 
-              if length in_types == length arg_types
-                then do
-                  outs <- replicateM (length out_types) $ newVar "out"
-                  void $ cmdEither $ cmdCall server name outs arg_types
-                  pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
-                else
-                  pure . V.ValueAtom . SFun name in_types out_types $
-                    zipWith SValue in_types $
-                      map VVar arg_types
+            -- Careful to not require saturated application, but do still
+            -- check for over-saturation.
+            when (length es > length in_types) bad
 
-        -- Careful to not require saturated application, but do still
-        -- check for over-saturation.
-        when (length es_types > length in_types) cannotApply
-
-        -- Allow automatic uncurrying if applicable.
-        case es' of
-          [V.ValueTuple es''] | length es'' == length in_types -> tryApply es''
-          _ -> tryApply es'
+            -- Allow automatic uncurrying if applicable.
+            case es' of
+              [V.ValueTuple es''] | length es'' == length in_types -> tryApply es''
+              _ -> tryApply es'
       evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->
@@ -569,9 +620,10 @@ evalExp builtin sserver top_level_e = do
         evalExp' (pat_vtable <> vtable) e2
 
   let freeNonresultVars v = do
-        let v_vars = serverVarsInValue v
-        to_free <- liftIO $ filter (`S.notMember` v_vars) <$> readIORef vars
+        let keep_vars = serverVarsInValue v <> S.fromList old_vars
+        to_free <- liftIO $ filter (`S.notMember` keep_vars) <$> readIORef vars
         cmdMaybe $ cmdFree server to_free
+        liftIO $ writeIORef vars $ S.toList keep_vars
         pure v
       freeVarsOnError e = do
         -- We are intentionally ignoring any errors produced by
@@ -583,18 +635,32 @@ evalExp builtin sserver top_level_e = do
         throwError e
   (freeNonresultVars =<< evalExp' mempty top_level_e) `catchError` freeVarsOnError
 
--- | Read actual values from the server.  Fails for values that have
--- no well-defined external representation.
-getExpValue ::
-  (MonadError T.Text m, MonadIO m) => ScriptServer -> ExpValue -> m V.CompoundValue
-getExpValue server e =
-  traverse toGround =<< traverse (traverse onLeaf) e
+-- | Read actual values from the server. Fails for values that have no
+-- well-defined external representation.
+getScriptValue :: (MonadError T.Text m, MonadIO m) => ScriptServer -> ScriptValue ValOrVar -> m V.Value
+getScriptValue server = toGround <=< traverse onLeaf
   where
     onLeaf (VVar v) = readVar (scriptServer server) v
     onLeaf (VVal v) = pure v
     toGround (SFun fname _ _ _) =
       throwError $ "Function " <> fname <> " not fully applied."
     toGround (SValue _ v) = pure v
+
+-- | Read actual compound values from the server. Fails for values that have no
+-- well-defined external representation.
+getExpValue ::
+  (MonadError T.Text m, MonadIO m) => ScriptServer -> ExpValue -> m V.CompoundValue
+getExpValue server = traverse (getScriptValue server)
+
+-- | Retrieve a Haskell value from an 'ExpValue'. This returns 'Just' if the
+-- 'ExpValue' is an atom with a non-opaque type.
+getHaskellValue :: (V.GetValue t, MonadError T.Text m, MonadIO m) => ScriptServer -> ExpValue -> m (Maybe t)
+getHaskellValue server v = do
+  v' <- getExpValue server v
+  case v' of
+    V.ValueAtom v'' ->
+      pure $ V.getValue v''
+    _ -> pure Nothing
 
 -- | Like 'evalExp', but requires all values to be non-functional.  If
 -- the value has a bad type, return that type instead.  Other
