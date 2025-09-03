@@ -100,6 +100,39 @@ fuseLambda lam_c inp_c out_c lam_p out_p =
     params_c = lambdaParams lam_c
     params_p = lambdaParams lam_p
 
+concatLambda ::
+  Lambda SOACS ->
+  Lambda SOACS ->
+  Lambda SOACS
+concatLambda lam lam' =
+  Lambda
+    { lambdaBody = new_body,
+      lambdaParams = new_params,
+      lambdaReturnType = new_ts
+    }
+  where
+    new_params = params_p <> params_c
+
+    new_res = res_p <> res_c
+    new_ts = ts_p <> ts_c
+
+    ts_c = lambdaReturnType lam
+    ts_p = lambdaReturnType lam'
+    res_c = bodyResult $ lambdaBody lam
+    res_p = bodyResult $ lambdaBody lam'
+    body_stms_c = bodyStms $ lambdaBody lam
+    body_stms_p = bodyStms $ lambdaBody lam'
+    new_body_stms =
+      body_stms_p
+        <> body_stms_c
+    new_body =
+      (lambdaBody lam)
+        { bodyStms = new_body_stms,
+          bodyResult = new_res
+        }
+    params_c = lambdaParams lam
+    params_p = lambdaParams lam'
+
 -- | Given a set of names which are interpreted as the resulting
 -- variables found from the given Stms, eliminate all Stms which are
 -- not use to compute the value of the names.
@@ -291,16 +324,20 @@ fusible inp_c form_c out_c inp_p form_p out_p =
       splitLambdaByPar post_scan_pars_p inp_p post_p out_c
 
 simplifyPrePost ::
+  (MonadFreshNames m) =>
   ScremaForm SOACS ->
   ([InOut], [InOut]) ->
   ([InOut], [InOut]) ->
-  ( ([InOut], Lambda SOACS, [InOut]),
-    ([InOut], Lambda SOACS, [InOut])
-  )
-simplifyPrePost form (pre_inp, pre_out) (post_inp, post_out)
-  | ([], pre', pre_out') <- fuseLambda post_map post_map_inp post_map_out pre pre_out =
-      ((pre_inp, pre', pre_out'), post_scan)
-  | otherwise = error "No extra inputs should be created for post."
+  m
+    ( ([InOut], Lambda SOACS, [InOut]),
+      ([InOut], Lambda SOACS, [InOut])
+    )
+simplifyPrePost form (pre_inp, pre_out) (post_inp, post_out) = do
+  post_map' <- renameLambda post_map
+
+  case fuseLambda post_map' post_map_inp post_map_out pre pre_out of
+    ([], pre', pre_out') -> pure ((pre_inp, pre', pre_out'), post_scan)
+    _any -> error "No extra inputs should be created for post."
   where
     pre = scremaLambda form
     post = scremaPostLambda form
@@ -381,6 +418,26 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
   | Just
       post_lam_fuse <-
       fusible inp_c form_c out_p inp_p form_p out_p = do
+      ( (pre_inp_c, pre_c, pre_out_c),
+        (post_inp_c, post_c, post_out_c)
+        ) <-
+        simplifyPrePost form_c pre_inout_c post_inout_c
+      ( (pre_inp_p, pre_p, pre_out_p),
+        (post_inp_p, post_p, post_out_p)
+        ) <-
+        simplifyPrePost form_p pre_inout_p post_inout_p
+
+      let ( (post_fuse_inp_c, post_fuse_c, post_fuse_out_c),
+            (pre_rest_inp_c, pre_rest_c, pre_rest_out_c)
+            ) = splitLambdaByPar post_lam_fuse pre_inp_c pre_c pre_out_c
+          (extra_pre_inp, pre_f', pre_out_f') =
+            fuseLambda pre_rest_c pre_rest_inp_c pre_out_c pre_p pre_out_p
+          pre_inp_f' = pre_inp_p <> extra_pre_inp
+          (extra_post_inp, post_p', post_out_p') =
+            fuseLambda post_fuse_c post_inp_p post_out_p pre_p pre_out_p
+          post_inp_f' = post_inp_p <> extra_post_inp
+          post_f' = concatLambda post_c post_p'
+
       pure Nothing
   | otherwise = pure Nothing
   where
@@ -388,11 +445,5 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
       (pre_inout_p, post_inout_p)
       ) =
         scremaFuseInOut inp_c form_c out_c inp_p form_p out_p
-    ( (pre_inp_c, pre_c, pre_out_c),
-      (post_inp_c, post_c, post_out_c)
-      ) = simplifyPrePost form_c pre_inout_c post_inout_c
-    ( (pre_inp_p, pre_p, pre_out_p),
-      (post_inp_p, post_p, post_out_p)
-      ) = simplifyPrePost form_p pre_inout_p post_inout_p
     scans_f = on (<>) scremaScans form_c form_p
     reds_f = on (<>) scremaReduces form_c form_p
