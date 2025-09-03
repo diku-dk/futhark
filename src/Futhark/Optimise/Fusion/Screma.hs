@@ -394,3 +394,5 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
     ( (pre_inp_p, pre_p, pre_out_p),
       (post_inp_p, post_p, post_out_p)
       ) = simplifyPrePost form_p pre_inout_p post_inout_p
+    scans_f = on (<>) scremaScans form_c form_p
+    reds_f = on (<>) scremaReduces form_c form_p
