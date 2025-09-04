@@ -405,6 +405,15 @@ scremaFuseInOut inp_c form_c out_c inp_p form_p out_p =
     ((pre_inp_p, pre_out_p), (post_inp_p, post_out_p)) =
       prePostInOut s inp_p form_p out_p
 
+toScrema ::
+  (MonadFreshNames m) =>
+  ([InOut], Lambda SOACS, [InOut]) ->
+  ([InOut], [Reduce SOACS], [InOut]) ->
+  ([InOut], [Scan SOACS], [InOut]) ->
+  ([InOut], Lambda SOACS, [InOut]) ->
+  m (ScremaForm SOACS)
+toScrema pre reds scans post = undefined
+
 fuseScrema ::
   (MonadFreshNames m) =>
   [SOAC.Input] ->
@@ -431,12 +440,14 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
             (pre_rest_inp_c, pre_rest_c, pre_rest_out_c)
             ) = splitLambdaByPar post_lam_fuse pre_inp_c pre_c pre_out_c
           (extra_pre_inp, pre_f', pre_out_f') =
-            fuseLambda pre_rest_c pre_rest_inp_c pre_out_c pre_p pre_out_p
+            fuseLambda pre_rest_c pre_rest_inp_c pre_rest_out_c pre_p pre_out_p
           pre_inp_f' = pre_inp_p <> extra_pre_inp
           (extra_post_inp, post_p', post_out_p') =
-            fuseLambda post_fuse_c post_inp_p post_out_p pre_p pre_out_p
-          post_inp_f' = post_inp_p <> extra_post_inp
+            fuseLambda post_fuse_c post_fuse_inp_c post_fuse_out_c post_p post_out_p
+          post_inp_p' = post_inp_p <> extra_post_inp
+          post_inp_f' = post_inp_c <> post_inp_p'
           post_f' = concatLambda post_c post_p'
+          post_out_f' = post_out_c <> post_out_p'
 
       pure Nothing
   | otherwise = pure Nothing
