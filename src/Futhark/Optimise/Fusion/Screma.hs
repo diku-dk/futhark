@@ -408,8 +408,8 @@ scremaFuseInOut inp_c form_c out_c inp_p form_p out_p =
 toScrema ::
   (MonadFreshNames m) =>
   ([InOut], Lambda SOACS, [InOut]) ->
-  ([InOut], [Reduce SOACS], [InOut]) ->
   ([InOut], [Scan SOACS], [InOut]) ->
+  ([InOut], [Reduce SOACS], [InOut]) ->
   ([InOut], Lambda SOACS, [InOut]) ->
   m (ScremaForm SOACS)
 toScrema pre reds scans post = undefined
@@ -458,3 +458,16 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
         scremaFuseInOut inp_c form_c out_c inp_p form_p out_p
     scans_f = on (<>) scremaScans form_c form_p
     reds_f = on (<>) scremaReduces form_c form_p
+    num_scans_c = scanResults $ scremaScans form_c
+    num_scans_p = scanResults $ scremaScans form_p
+    num_reds_p = redResults $ scremaReduces form_p
+    num_reds_c = redResults $ scremaReduces form_c
+    scans_inp_f = splitAt3 num_scans_c num_reds_c $ snd pre_inout_c
+
+scanInOut ::
+  ScremaForm rep ->
+  [InOut] ->
+  [InOut] ->
+  ([InOut], [InOut])
+scanInOut form pre_out post_inp =
+  undefined
