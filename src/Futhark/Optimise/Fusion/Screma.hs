@@ -408,11 +408,27 @@ scremaFuseInOut inp_c form_c out_c inp_p form_p out_p =
 toScrema ::
   (MonadFreshNames m) =>
   ([InOut], Lambda SOACS, [InOut]) ->
-  ([InOut], [Scan SOACS], [InOut]) ->
-  ([InOut], [Reduce SOACS], [InOut]) ->
+  ([Scan SOACS], [InOut]) ->
+  ([Reduce SOACS], [InOut]) ->
   ([InOut], Lambda SOACS, [InOut]) ->
-  m (ScremaForm SOACS)
-toScrema pre reds scans post = undefined
+  m ([SOAC.Input], ScremaForm SOACS, [VName])
+toScrema
+  (pre_inp, pre, pre_out)
+  (reds, reds_inout)
+  (scans, scans_inout)
+  (post_inp, post, post_out) = undefined
+
+alignLambdaRes ::
+  (Lambda SOACS, [InOut]) ->
+  [InOut] ->
+  (Lambda SOACS, [InOut])
+alignLambdaRes (lam, inout) inout' =
+  undefined
+  where
+    res = bodyResult $ lambdaBody lam
+
+    insertionSort []
+    insertionSort ((r, i):rs) (i':is) =
 
 fuseScrema ::
   (MonadFreshNames m) =>
@@ -458,16 +474,13 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
         scremaFuseInOut inp_c form_c out_c inp_p form_p out_p
     scans_f = on (<>) scremaScans form_c form_p
     reds_f = on (<>) scremaReduces form_c form_p
+    scans_inout = scans_inout_c <> scans_inout_p
+    reds_inout = reds_inout_c <> reds_inout_p
     num_scans_c = scanResults $ scremaScans form_c
     num_scans_p = scanResults $ scremaScans form_p
     num_reds_p = redResults $ scremaReduces form_p
     num_reds_c = redResults $ scremaReduces form_c
-    scans_inp_f = splitAt3 num_scans_c num_reds_c $ snd pre_inout_c
-
-scanInOut ::
-  ScremaForm rep ->
-  [InOut] ->
-  [InOut] ->
-  ([InOut], [InOut])
-scanInOut form pre_out post_inp =
-  undefined
+    (scans_inout_c, reds_inout_c, _) =
+      splitAt3 num_scans_c num_reds_c $ snd pre_inout_c
+    (scans_inout_p, reds_inout_p, _) =
+      splitAt3 num_scans_p num_reds_p $ snd pre_inout_p
