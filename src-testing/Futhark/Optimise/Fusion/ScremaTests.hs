@@ -11,6 +11,12 @@ import Test.Tasty.HUnit
 fromLines :: [String] -> Lambda SOACS
 fromLines = fromString . unlines
 
+splitLambdaByParTester :: [VName] -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
+splitLambdaByParTester names lam = (lam_x', lam_y')
+  where
+    ((_, lam_x', _), (_, lam_y', _)) =
+      splitLambdaByPar names (lambdaParams lam) lam (lambdaReturnType lam)
+
 tests :: TestTree
 tests =
   testGroup
@@ -38,7 +44,7 @@ tests =
                 lam_x = "\\{x_0 : i32} : {i32} -> {x_0}"
                 lam_y = "\\{x_1 : i32} : {i32} -> {x_1}"
                 names = ["x_0"]
-             in splitLambdaByPar names lam @?= (lam_x, lam_y),
+             in splitLambdaByParTester names lam @?= (lam_x, lam_y),
           testCase "keeps computation in first lambda." $
             let lam =
                   fromLines
@@ -54,7 +60,7 @@ tests =
                     ]
                 lam_y = "\\{x_0 : i32} : {i32} -> {x_0}"
                 names = ["x_1"]
-             in splitLambdaByPar names lam @?= (lam_x, lam_y),
+             in splitLambdaByParTester names lam @?= (lam_x, lam_y),
           testCase "keeps computations in both lambdas." $
             let lam =
                   fromLines
@@ -76,7 +82,7 @@ tests =
                       "  in {x_3}"
                     ]
                 names = ["x_1"]
-             in splitLambdaByPar names lam @?= (lam_x, lam_y),
+             in splitLambdaByParTester names lam @?= (lam_x, lam_y),
           testCase "keeps line order." $
             let lam =
                   fromLines
@@ -100,7 +106,7 @@ tests =
                       "  in {x_4}"
                     ]
                 names = ["x_1"]
-             in splitLambdaByPar names lam @?= (lam_x, lam_y),
+             in splitLambdaByParTester names lam @?= (lam_x, lam_y),
           testCase "does redundant work." $
             let lam =
                   fromLines
@@ -123,7 +129,7 @@ tests =
                       "  in {x_2}"
                     ]
                 names = ["x_1"]
-             in splitLambdaByPar names lam @?= (lam_x, lam_y)
+             in splitLambdaByParTester names lam @?= (lam_x, lam_y)
         ],
       testGroup
         "splitLambdaByRes"

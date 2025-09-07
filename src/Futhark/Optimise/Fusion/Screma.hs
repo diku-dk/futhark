@@ -2,9 +2,11 @@ module Futhark.Optimise.Fusion.Screma
   ( fuseLambda,
     splitLambdaByPar,
     splitLambdaByRes,
+    fuseScrema,
   )
 where
 
+import Control.Monad
 import Data.Bifunctor
 import Data.Function (on)
 import Data.List (mapAccumL)
@@ -361,6 +363,13 @@ fromInternal :: InOut -> Maybe Natural
 fromInternal (Internal n) = Just n
 fromInternal (External _) = Nothing
 
+fromExternal :: InOut -> Maybe VName
+fromExternal (External n) = Just n
+fromExternal (Internal _) = Nothing
+
+fromExternalUnsafe :: InOut -> VName
+fromExternalUnsafe = fromMaybe (error "error") . fromExternal
+
 prePostInOut ::
   Natural ->
   [SOAC.Input] ->
@@ -407,28 +416,125 @@ scremaFuseInOut inp_c form_c out_c inp_p form_p out_p =
 
 toScrema ::
   (MonadFreshNames m) =>
+  [SOAC.Input] ->
   ([InOut], Lambda SOACS, [InOut]) ->
   ([Scan SOACS], [InOut]) ->
   ([Reduce SOACS], [InOut]) ->
   ([InOut], Lambda SOACS, [InOut]) ->
   m ([SOAC.Input], ScremaForm SOACS, [VName])
 toScrema
+  soac_inps
   (pre_inp, pre, pre_out)
   (reds, reds_inout)
   (scans, scans_inout)
-  (post_inp, post, post_out) = undefined
+  (post_inp, post, post_out) = do
+    (post', post_out') <-
+      alignPrePost (pre', pre_out') (post_inp, post, post_out)
+    let out = fmap fromExternalUnsafe reds_inout <> post_out'
+        inp = (mapping M.!) . fromExternalUnsafe <$> pre_inp
+    pure
+      ( inp,
+        ScremaForm pre' reds scans post',
+        out
+      )
+    where
+      mapping =
+        M.fromList $
+          zip
+            (SOAC.inputArray <$> soac_inps)
+            soac_inps
+      (pre', pre_out') =
+        alignLambdaRes (pre, pre_out) (scans_inout <> reds_inout)
+
+alignPrePost ::
+  (MonadFreshNames m) =>
+  (Lambda SOACS, [InOut]) ->
+  ([InOut], Lambda SOACS, [InOut]) ->
+  m (Lambda SOACS, [VName])
+alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
+  (post_inp', pars', ts') <-
+    unzip3 <$> auxiliary (pure []) _is_pars _is_ts
+  let (id_out, id_res, id_ts) =
+        unzip3
+          . mapMaybe (\(i, p, t) -> (,varRes $ paramName p,t) <$> fromExternal i)
+          . L.nubBy ((==) `on` fst3)
+          . filter ((`notElem` post_out) . fst3)
+          $ zip3 post_inp' pars' ts'
+  pure $
+    ( post
+        { lambdaParams = pars <> pars',
+          lambdaReturnType = ts <> id_ts,
+          lambdaBody =
+            body {bodyResult = res <> id_res}
+        },
+      map fromExternalUnsafe post_out <> id_out
+    )
+  where
+    fst3 (a, _, _) = a
+    body = lambdaBody post
+    pars = lambdaParams post
+    ts = lambdaReturnType post
+    res = bodyResult body
+    _is_pars = zip post_inp pars
+    _is_ts = zip pre_out $ lambdaReturnType pre
+
+    auxiliary as _ [] = as
+    auxiliary as is_pars ((i, t) : is_ts) =
+      case pop ((i ==) . fst) is_pars of
+        Just ((_, par), is_pars') ->
+          let as' = ((i, par, t) :) <$> as
+           in auxiliary as' is_pars' is_ts
+        Nothing ->
+          let as' = do
+                par <- newParam "x" t
+                ((i, par, t) :) <$> as
+           in auxiliary as' is_pars is_ts
+
+pop :: (a -> Bool) -> [a] -> Maybe (a, [a])
+pop _ as = Nothing
+pop p (a : as)
+  | p a = Just (a, as)
+  | otherwise = pop p as
+
+align ::
+  (Eq a) =>
+  [(a, b)] ->
+  [a] ->
+  [(a, b)]
+align as_bs as'' = uncurry (<>) $ auxiliary as_bs as''
+  where
+    auxiliary is_res [] = (is_res, [])
+    auxiliary is_res (i : is) =
+      case pop ((i ==) . fst) is_res of
+        Just (i_res, is_res') -> (i_res :) <$> auxiliary is_res' is
+        Nothing -> error "If this happend then the developer used this function incorrectly."
 
 alignLambdaRes ::
-  (Lambda SOACS, [InOut]) ->
-  [InOut] ->
-  (Lambda SOACS, [InOut])
-alignLambdaRes (lam, inout) inout' =
-  undefined
+  (Eq a) =>
+  (Lambda SOACS, [a]) ->
+  [a] ->
+  (Lambda SOACS, [a])
+alignLambdaRes (lam, inout) inout'' =
+  ( lam {lambdaBody = body {bodyResult = res'}},
+    inout'
+  )
   where
-    res = bodyResult $ lambdaBody lam
+    body = lambdaBody lam
+    res = bodyResult body
+    (inout', res') = unzip $ align (zip inout res) inout''
 
-    insertionSort []
-    insertionSort ((r, i):rs) (i':is) =
+alignLambdaPar ::
+  (Eq a) =>
+  ([a], Lambda SOACS) ->
+  [a] ->
+  ([a], Lambda SOACS)
+alignLambdaPar (inout, lam) inout'' =
+  ( inout',
+    lam {lambdaParams = par'}
+  )
+  where
+    par = lambdaParams lam
+    (inout', par') = unzip $ align (zip inout par) inout''
 
 fuseScrema ::
   (MonadFreshNames m) =>
@@ -465,7 +571,13 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
           post_f' = concatLambda post_c post_p'
           post_out_f' = post_out_c <> post_out_p'
 
-      pure Nothing
+      Just
+        <$> toScrema
+          (inp_c <> inp_p)
+          (pre_inp_f', pre_f', pre_out_f')
+          (scans_f, scans_inout)
+          (reds_f, reds_inout)
+          (post_inp_f', post_f', post_out_f')
   | otherwise = pure Nothing
   where
     ( (pre_inout_c, post_inout_c),

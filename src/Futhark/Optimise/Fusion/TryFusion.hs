@@ -317,57 +317,15 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
         not (SOAC.nullTransforms $ fsOutputTransform ker) ->
           fail
             "Cannot perform diagonal fusion in the presence of output transforms."
-    {- ( SOAC.Screma _ _ (ScremaForm _ scans_c reds_c _),
-       SOAC.Screma _ _ (ScremaForm _ scans_p reds_p _),
-       _
-       )
-         | scremaFusionOK
-             ( splitAt
-                 ( Futhark.scanResults scans_p
-                     + Futhark.redResults reds_p
-                 )
-                 outVars
-             )
-             ker -> do
-             let red_nes_p = concatMap redNeutral reds_p
-                 red_nes_c = concatMap redNeutral reds_c
-                 scan_nes_p = concatMap scanNeutral scans_p
-                 scan_nes_c = concatMap scanNeutral scans_c
-                 (res_lam', new_inp) =
-                   fuseRedomap
-                     unfus_set
-                     outVars
-                     lam_p
-                     scan_nes_p
-                     red_nes_p
-                     inp_p_arr
-                     outPairs
-                     lam_c
-                     scan_nes_c
-                     red_nes_c
-                     inp_c_arr
-                 (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
-                   splitAt3 (length scan_nes_p) (length red_nes_p) outVars
-                 (soac_c_scanout, soac_c_redout, soac_c_mapout) =
-                   splitAt3 (length scan_nes_c) (length red_nes_c) $ fsOutNames ker
-                 unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
-                 post_lam_ts =
-                   soac_p_scanout
-                     ++ soac_c_scanout
-                     ++ soac_c_mapout
-                     ++ unfus_arrs
-             post_lam <-
-               mkIdentityLambda
-                 =<< mapM (fmap (stripArray 1) . lookupType) post_lam_ts
-             success
-               ( soac_p_redout
-                   ++ soac_c_redout
-                   ++ post_lam_ts
-               )
-               $ SOAC.Screma
-                 w
-                 new_inp
-                 (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c) post_lam) -}
+    ( SOAC.Screma _ inp_c form_c,
+      SOAC.Screma _ inp_p form_p,
+      _
+      ) -> do
+        m <- fuseScrema inp_c form_c (fsOutNames ker) inp_p form_p returned_outvars
+        case m of
+          Just (inp, form, out) ->
+            success out $ SOAC.Screma w inp form
+          Nothing -> fail "Can not fuse"
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
