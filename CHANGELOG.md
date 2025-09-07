@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Unpacking a unary sum type directly in a parameter or `let`-binding was
   defective. (#2314)
 
+* The derivative of `x**1` for `x==0` would be NaN.
+
 ## [0.25.32]
 
 ### Added
