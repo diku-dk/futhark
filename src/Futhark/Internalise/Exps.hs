@@ -837,8 +837,11 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) loc) = locating loc
   ts' <- instantiateShapes noExt $ map fromDecl ts
 
   case lookupWithIndex c constr_map of
-    Just (i, js) ->
-      (intConst Int8 (toInteger i) :) <$> clauses 0 ts' (zip js es')
+    Just (i, js)
+      | length fs == 1 ->
+          clauses 0 ts' (zip js es')
+      | otherwise ->
+          (intConst Int8 (toInteger i) :) <$> clauses 0 ts' (zip js es')
     Nothing ->
       error "internaliseExp Constr: missing constructor"
   where
@@ -937,7 +940,10 @@ generateCond orig_p orig_ses = do
   where
     compares (E.PatLit l (Info t) _) (se : ses) =
       pure ([Just $ internalisePatLit l t], [se], ses)
-    compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (_ : ses) = do
+    compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) sum_ses = do
+      -- Handle the unary sum type special case.
+      let unary = length fs == 1
+          ses = if unary then sum_ses else tail sum_ses
       (payload_ts, m) <- internaliseSumType $ M.map (map toStruct) fs
       case lookupWithIndex c m of
         Just (tag, payload_is) -> do
@@ -949,8 +955,8 @@ generateCond orig_p orig_ses = do
                   Just j -> cmps !! j
                   Nothing -> Nothing
           pure
-            ( Just (I.IntValue $ intValue Int8 $ toInteger tag)
-                : zipWith missingCmps [0 ..] payload_ses,
+            ( [Just (I.IntValue $ intValue Int8 $ toInteger tag) | not unary]
+                <> zipWith missingCmps [0 ..] payload_ses,
               pertinent,
               ses'
             )
