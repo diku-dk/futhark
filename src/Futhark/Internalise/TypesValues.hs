@@ -274,7 +274,10 @@ internaliseTypeM exts orig_t =
       (ts, _) <-
         internaliseConstructors
           <$> traverse (fmap concat . mapM (internaliseTypeM exts)) cs
-      pure $ Pure (I.Prim (I.IntType I.Int8)) : ts
+      pure $
+        if length cs == 1
+          then ts
+          else Pure (I.Prim (I.IntType I.Int8)) : ts
   where
     internaliseShape = mapM (internaliseDim exts) . E.shapeDims
     array [Free ts] = Free ts

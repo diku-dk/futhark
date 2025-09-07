@@ -257,6 +257,12 @@ is represented as
 which is not great.  Take caution when you use sum types with large
 arrays in their payloads.
 
+Unary sum types
+!!!!!!!!!!!!!!!
+
+As an optimisation, the ``i8`` tag is elided when a sum type has only a single
+constructor. This means you can always use unary sum types with zero overhead.
+
 Functions
 ~~~~~~~~~
 

@@ -9,6 +9,20 @@ int main() {
   struct futhark_context_config *cfg = futhark_context_config_new();
   struct futhark_context *ctx = futhark_context_new(cfg);
 
+
+  struct futhark_opaque_unary *u1, *u2;
+  int32_t x;
+
+  // Check that unary variants work OK.
+  assert(futhark_new_opaque_unary_unary(ctx, &u1, 1337) == FUTHARK_SUCCESS);
+  assert(futhark_variant_opaque_unary(ctx, u1) == 0);
+  assert(futhark_entry_unary_id(ctx, &u2, u1) == FUTHARK_SUCCESS);
+  assert(futhark_context_sync(ctx) == FUTHARK_SUCCESS);
+  assert(futhark_variant_opaque_unary(ctx, u2) == 0);
+  assert(futhark_destruct_opaque_unary_unary(ctx, &x, u1) == FUTHARK_SUCCESS);
+  assert(x == 1337);
+  assert(futhark_destruct_opaque_unary_unary(ctx, &x, u2) == FUTHARK_SUCCESS);
+
   struct futhark_opaque_contrived* v;
   {
     int32_t data[] = { 1, 2, 3 };

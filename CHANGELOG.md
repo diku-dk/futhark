@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Correct source locations when warning about unused local functions.
 
+* Unpacking a unary sum type directly in a parameter or `let`-binding was
+  defective. (#2314)
+
 ## [0.25.32]
 
 ### Added

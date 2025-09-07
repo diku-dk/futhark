@@ -641,12 +641,17 @@ sumVariants desc variants vds = do
 
   zipWithM onVariant [0 :: Int ..] variants
   where
+    unary = length variants == 1
+
     constructFunction ops ctx_ty opaque_ty i fname payload = do
       (params, new_stms) <- unzip <$> zipWithM constructPayload [0 ..] payload
 
       let used = concatMap snd payload
       set_unused_stms <-
         mapM setUnused $ filter ((`notElem` used) . fst) (zip [0 ..] vds)
+
+      let set_variant =
+            [[C.cstm|v->$id:(tupleField 0) = $int:i;|] | not unary]
 
       headerDecl
         (OpaqueDecl desc)
@@ -660,7 +665,7 @@ sumVariants desc variants vds = do
                                 $params:params) {
                     (void)ctx;
                     $ty:opaque_ty* v = malloc(sizeof($ty:opaque_ty));
-                    v->$id:(tupleField 0) = $int:i;
+                    $stms:set_variant
                     { $items:(criticalSection ops new_stms) }
                     // Set other fields
                     { $items:set_unused_stms }
@@ -711,6 +716,8 @@ sumVariants desc variants vds = do
 
     destructFunction ops ctx_ty opaque_ty i fname payload = do
       (params, destruct_stms) <- unzip <$> zipWithM (destructPayload ops) [0 ..] payload
+      let check_stms =
+            [[C.cstm|assert(obj->$id:(tupleField 0) == $int:i);|] | not unary]
       headerDecl
         (OpaqueDecl desc)
         [C.cedecl|int $id:fname($ty:ctx_ty *ctx,
@@ -722,7 +729,7 @@ sumVariants desc variants vds = do
                                 $params:params,
                                 const $ty:opaque_ty *obj) {
                     (void)ctx;
-                    assert(obj->$id:(tupleField 0) == $int:i);
+                    $stms:check_stms
                     $stms:destruct_stms
                     return FUTHARK_SUCCESS;
                   }|]
@@ -738,20 +745,25 @@ sumVariants desc variants vds = do
                   }|]
         )
 
-sumVariantFunction :: Name -> CompilerM op s Manifest.CFuncName
-sumVariantFunction desc = do
+sumVariantFunction :: Int -> Name -> CompilerM op s Manifest.CFuncName
+sumVariantFunction num_cs desc = do
   opaque_ty <- opaqueToCType desc
   ctx_ty <- contextType
   variant <- publicName $ "variant_" <> opaqueName desc
   headerDecl
     (OpaqueDecl desc)
     [C.cedecl|int $id:variant($ty:ctx_ty *ctx, const $ty:opaque_ty* v);|]
-  -- This depends on the assumption that the first value always
-  -- encodes the variant.
+  -- This depends on the assumption that the first value always encodes the
+  -- variant, which means we need to treat the unary case specially.
+  let e =
+        if num_cs == 1
+          then [C.cexp|0|]
+          else
+            [C.cexp|v->$id:(tupleField 0)|]
   libDecl
     [C.cedecl|int $id:variant($ty:ctx_ty *ctx, const $ty:opaque_ty* v) {
-                (void)ctx;
-                return v->$id:(tupleField 0);
+                (void)ctx; (void)v;
+                return $exp:e;
               }|]
   pure variant
 
@@ -768,7 +780,7 @@ opaqueExtraOps _ _types desc (OpaqueSum _ cs) vds =
   Just . Manifest.OpaqueSum
     <$> ( Manifest.SumOps
             <$> sumVariants desc cs vds
-            <*> sumVariantFunction desc
+            <*> sumVariantFunction (length cs) desc
         )
 opaqueExtraOps _ types desc (OpaqueRecord fs) vds =
   Just . Manifest.OpaqueRecord
