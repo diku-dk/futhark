@@ -368,8 +368,8 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
                       _ -> error $ "fwdStm.convertTo: " ++ prettyString (f, tt, e_t)
                 where
                   e_t = primExpType e
-          zipWithM_ (letBindNames . pure) (patNames pat_tan)
-            =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
+          letBindNames (patNames pat_tan)
+            =<< toExp (foldl1 (~+~) $ zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
 fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
   cases' <- slocal' $ mapM (traverse fwdBody) cases
   defbody' <- slocal' $ fwdBody defbody
