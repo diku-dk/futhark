@@ -101,6 +101,10 @@ constantFoldPrimFun _ (Let pat aux (Apply fname args _ _))
     Just result <- fun args' =
       Simplify . auxing aux . letBind pat $
         BasicOp (SubExp $ Constant result)
+  | [(Constant (BoolValue b), _), (x, _), (y, _)] <- args,
+    Just _ <- isCondFun $ nameToText fname =
+      Simplify . auxing aux . letBind pat $
+        BasicOp (SubExp $ if b then x else y)
   where
     isConst (Constant v) = Just v
     isConst _ = Nothing
