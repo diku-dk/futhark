@@ -135,7 +135,7 @@ pdBinOp (FPow ft) a b =
   floatBinOp derivs derivs derivs ft a b
   where
     derivs x y =
-      ( y * (x ** (y - 1)),
+      ( condExp (x .==. 0 .&&. y .<. 1) 0 (y * (x ** (y - 1))),
         (x ** y) * condExp (x .<=. 0) 0 (log x)
       )
 pdBinOp (FMax ft) a b =
