@@ -2,5 +2,8 @@
 
 def norm [n] (xs: [n]f32) =
   assert (n > 0)
-  (let m = f32.maximum
-   in map (/ m) xs)
+  assert (f32.maximum xs != 0)
+  let m = f32.maximum xs
+  in map (/ m) xs
+
+def singleline x y = assert (y != 0) y

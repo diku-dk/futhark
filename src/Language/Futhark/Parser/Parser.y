@@ -563,7 +563,8 @@ Exp2 :: { UncheckedExp }
      | LetExp %prec letprec { $1 }
      | MatchExp             { $1 }
 
-     | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
+     | assert Atom Exp %prec letprec
+                           { Assert $2 $3 NoInfo (srcspan $1 $>) }
      | '#[' AttrInfo ']' Exp %prec bottom
                            { Attr $2 $4 (srcspan $1 $>) }
 

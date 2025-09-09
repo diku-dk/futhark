@@ -503,7 +503,7 @@ literals and variables, but also more complicated forms.
       : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
       : | "unsafe" `exp`
-      : | "assert" `atom` `atom`
+      : | "assert" `atom` `exp`
       : | `exp` "with" `slice` "=" `exp`
       : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
       : | "match" `exp` ("case" `pat` "->" `exp`)+
@@ -590,8 +590,8 @@ in natural text.
   ``t``.  To pass a single array-typed parameter, enclose it in
   parens.
 
-* The bodies of ``let``, ``if``, and ``loop`` extend as far to the
-  right as possible.
+* The bodies of ``let``, ``if``, and ``loop`` extend as far to the right as
+  possible, as does the expression guarded by an ``assert``.
 
 * The following table describes the precedence and associativity of
   infix operators in both expressions and type expressions.  All
