@@ -15,6 +15,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Debug.Trace (traceShow)
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Builder (Buildable (..), insertStm, insertStms, mkLet)
@@ -25,22 +26,15 @@ import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, splitAt3, takeLast)
+import Futhark.Util.Pretty (pretty)
 import Numeric.Natural
 
-fuseLambdaNoExtra ::
-  (Ord a) =>
-  Lambda SOACS ->
-  [a] ->
-  [a] ->
-  Lambda SOACS ->
-  [a] ->
-  (Lambda SOACS, [a])
-fuseLambdaNoExtra lam_c inp_c out_c lam_p out_p
-  | ([], lam, out) <- fuseLambda lam_c inp_c out_c lam_p out_p = (lam, out)
-  | otherwise = error "Use of lambda fusion with no extra input is wrong."
+debug a = traceShow a a
+
+debugPretty text a = traceShow (text <> pretty a) a
 
 fuseLambda ::
-  (Ord a) =>
+  (Ord a, Show a) =>
   Lambda SOACS ->
   [a] ->
   [a] ->
@@ -336,15 +330,18 @@ simplifyPrePost ::
     )
 simplifyPrePost form (pre_inp, pre_out) (post_inp, post_out) = do
   post_map' <- renameLambda post_map
-
-  case fuseLambda post_map' post_map_inp post_map_out pre pre_out of
+  let (a, b, c) = fuseLambda post_map' post_map_inp post_map_out pre pre_out
+      !z = debugPretty "post: " post
+      !x = debugPretty "post_scan: " $ (\(_, t, _) -> t) post_scan
+      !y = debugPretty "post_map: " post_map
+  case (a, b, c) of
     ([], pre', pre_out') -> pure ((pre_inp, pre', pre_out'), post_scan)
     _any -> error "No extra inputs should be created for post."
   where
     pre = scremaLambda form
     post = scremaPostLambda form
     num_scan = scanResults $ scremaScans form
-    scan_names = fmap paramName . drop num_scan $ lambdaParams post
+    scan_names = debug $ fmap paramName . take num_scan $ lambdaParams post
     (post_scan, (post_map_inp, post_map, post_map_out)) =
       splitLambdaByPar scan_names post_inp post post_out
 
@@ -491,7 +488,7 @@ alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
            in auxiliary as' is_pars is_ts
 
 pop :: (a -> Bool) -> [a] -> Maybe (a, [a])
-pop _ as = Nothing
+pop _ [] = Nothing
 pop p (a : as)
   | p a = Just (a, as)
   | otherwise = pop p as
@@ -557,12 +554,12 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
         (post_inp_p, post_p, post_out_p)
         ) <-
         simplifyPrePost form_p pre_inout_p post_inout_p
-
-      let ( (post_fuse_inp_c, post_fuse_c, post_fuse_out_c),
-            (pre_rest_inp_c, pre_rest_c, pre_rest_out_c)
-            ) = splitLambdaByPar post_lam_fuse pre_inp_c pre_c pre_out_c
-          (extra_pre_inp, pre_f', pre_out_f') =
+      let !( (post_fuse_inp_c, post_fuse_c, post_fuse_out_c),
+             (pre_rest_inp_c, pre_rest_c, pre_rest_out_c)
+             ) = splitLambdaByPar post_lam_fuse pre_inp_c pre_c pre_out_c
+          !(extra_pre_inp, pre_f', pre_out_f') =
             fuseLambda pre_rest_c pre_rest_inp_c pre_rest_out_c pre_p pre_out_p
+
           pre_inp_f' = pre_inp_p <> extra_pre_inp
           (extra_post_inp, post_p', post_out_p') =
             fuseLambda post_fuse_c post_fuse_inp_c post_fuse_out_c post_p post_out_p
