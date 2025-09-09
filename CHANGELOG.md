@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * ``futhark script`` now has a ``$restore`` procedure, and the ``$store``
   procedure has been augmented with support for opaque types.
 
+* The expression guarded by an `assert` may now be any expression, and need no
+  longer be an atom.
+
 ### Removed
 
 ### Changed
