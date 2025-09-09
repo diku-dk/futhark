@@ -934,18 +934,6 @@ Apply the given attribute to the expression.  Attributes are an ad-hoc
 and optional mechanism for providing extra information, directives, or
 hints to the compiler.  See :ref:`attributes` for more information.
 
-``unsafe e``
-............
-
-Elide safety checks and assertions (such as bounds checking) that
-occur during execution of ``e``.  This is useful if the compiler is
-otherwise unable to avoid bounds checks (e.g. when using indirect
-indexes), but you really do not want them there.  Make very sure that
-the code is correct; eliding such checks can lead to memory
-corruption.
-
-This construct is deprecated.  Use the ``#[unsafe]`` attribute instead.
-
 .. _assert:
 
 ``assert cond e``
