@@ -267,6 +267,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   let soac_c = fsSOAC ker
       inp_p_arr = SOAC.inputs soac_p
       inp_c_arr = SOAC.inputs soac_c
+      out_p = outVars
+      out_c = fsOutNames ker
       lam_p = SOAC.lambda soac_p
       lam_c = SOAC.lambda soac_c
       w = SOAC.width soac_p
@@ -321,7 +323,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       SOAC.Screma _ inp_p form_p,
       _
       ) -> do
-        m <- fuseScrema inp_c form_c (fsOutNames ker) inp_p form_p returned_outvars
+        m <- fuseScrema inp_c form_c out_c inp_p form_p out_p
         case m of
           Just (inp, form, out) ->
             success out $ SOAC.Screma w inp form

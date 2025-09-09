@@ -29,7 +29,9 @@ import Futhark.Util (dropLast, splitAt3, takeLast)
 import Futhark.Util.Pretty (pretty)
 import Numeric.Natural
 
-debug a = traceShow a a
+debug text a = traceShow (text <> show a) a
+
+debugWith text f a = traceShow (text <> show (f a)) a
 
 debugPretty text a = traceShow (text <> pretty a) a
 
@@ -330,18 +332,15 @@ simplifyPrePost ::
     )
 simplifyPrePost form (pre_inp, pre_out) (post_inp, post_out) = do
   post_map' <- renameLambda post_map
-  let (a, b, c) = fuseLambda post_map' post_map_inp post_map_out pre pre_out
-      !z = debugPretty "post: " post
-      !x = debugPretty "post_scan: " $ (\(_, t, _) -> t) post_scan
-      !y = debugPretty "post_map: " post_map
-  case (a, b, c) of
+
+  case fuseLambda post_map' post_map_inp post_map_out pre pre_out of
     ([], pre', pre_out') -> pure ((pre_inp, pre', pre_out'), post_scan)
     _any -> error "No extra inputs should be created for post."
   where
     pre = scremaLambda form
     post = scremaPostLambda form
     num_scan = scanResults $ scremaScans form
-    scan_names = debug $ fmap paramName . take num_scan $ lambdaParams post
+    scan_names = fmap paramName . take num_scan $ lambdaParams post
     (post_scan, (post_map_inp, post_map, post_map_out)) =
       splitLambdaByPar scan_names post_inp post post_out
 
@@ -382,7 +381,7 @@ prePostInOut start inp form out =
     num_scan = scanResults $ scremaScans form
     num_red = redResults $ scremaReduces form
     num_pre_rets = length $ lambdaReturnType pre
-    pre_out = internal <$> [start .. fromIntegral num_pre_rets]
+    pre_out = internal <$> [start .. start + fromIntegral num_pre_rets]
     (scan_inout, _, map_inout) = splitAt3 num_scan num_red pre_out
     post_inp = scan_inout <> map_inout
 
@@ -546,20 +545,19 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
   | Just
       post_lam_fuse <-
       fusible inp_c form_c out_p inp_p form_p out_p = do
-      ( (pre_inp_c, pre_c, pre_out_c),
-        (post_inp_c, post_c, post_out_c)
-        ) <-
+      !( (pre_inp_c, pre_c, pre_out_c),
+         (post_inp_c, post_c, post_out_c)
+         ) <-
         simplifyPrePost form_c pre_inout_c post_inout_c
-      ( (pre_inp_p, pre_p, pre_out_p),
-        (post_inp_p, post_p, post_out_p)
-        ) <-
+      !( (pre_inp_p, pre_p, pre_out_p),
+         (post_inp_p, post_p, post_out_p)
+         ) <-
         simplifyPrePost form_p pre_inout_p post_inout_p
-      let !( (post_fuse_inp_c, post_fuse_c, post_fuse_out_c),
-             (pre_rest_inp_c, pre_rest_c, pre_rest_out_c)
-             ) = splitLambdaByPar post_lam_fuse pre_inp_c pre_c pre_out_c
-          !(extra_pre_inp, pre_f', pre_out_f') =
+      let ( (post_fuse_inp_c, post_fuse_c, post_fuse_out_c),
+            (pre_rest_inp_c, pre_rest_c, pre_rest_out_c)
+            ) = splitLambdaByPar post_lam_fuse pre_inp_c pre_c pre_out_c
+          (extra_pre_inp, pre_f', pre_out_f') =
             fuseLambda pre_rest_c pre_rest_inp_c pre_rest_out_c pre_p pre_out_p
-
           pre_inp_f' = pre_inp_p <> extra_pre_inp
           (extra_post_inp, post_p', post_out_p') =
             fuseLambda post_fuse_c post_fuse_inp_c post_fuse_out_c post_p post_out_p
@@ -567,7 +565,6 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
           post_inp_f' = post_inp_c <> post_inp_p'
           post_f' = concatLambda post_c post_p'
           post_out_f' = post_out_c <> post_out_p'
-
       Just
         <$> toScrema
           (inp_c <> inp_p)
