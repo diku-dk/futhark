@@ -36,7 +36,7 @@ debugWith text f a = traceShow (text <> show (f a)) a
 debugPretty text a = traceShow (text <> pretty a) a
 
 fuseLambda ::
-  (Ord a, Show a) =>
+  (Ord a) =>
   Lambda SOACS ->
   [a] ->
   [a] ->
@@ -545,13 +545,13 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
   | Just
       post_lam_fuse <-
       fusible inp_c form_c out_p inp_p form_p out_p = do
-      !( (pre_inp_c, pre_c, pre_out_c),
-         (post_inp_c, post_c, post_out_c)
-         ) <-
+      ( (pre_inp_c, pre_c, pre_out_c),
+        (post_inp_c, post_c, post_out_c)
+        ) <-
         simplifyPrePost form_c pre_inout_c post_inout_c
-      !( (pre_inp_p, pre_p, pre_out_p),
-         (post_inp_p, post_p, post_out_p)
-         ) <-
+      ( (pre_inp_p, pre_p, pre_out_p),
+        (post_inp_p, post_p, post_out_p)
+        ) <-
         simplifyPrePost form_p pre_inout_p post_inout_p
       let ( (post_fuse_inp_c, post_fuse_c, post_fuse_out_c),
             (pre_rest_inp_c, pre_rest_c, pre_rest_out_c)
