@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The derivative of `x**1` for `x==0` would be NaN.
 
+* `futhark fmt` now prints multi-line `assert` in a less horrible way.
+
 ## [0.25.32]
 
 ### Added

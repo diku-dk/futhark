@@ -273,7 +273,7 @@ instance Format UncheckedExp where
   fmt e@Update {} = fmtUpdate e
   fmt e@RecordUpdate {} = fmtUpdate e
   fmt (Assert e1 e2 _ loc) =
-    addComments loc $ "assert" <+> fmt e1 <+> fmt e2
+    addComments loc $ "assert" <+> fmt e1 </> fmt e2
   fmt (Lambda params body rettype _ loc) =
     addComments loc $
       "\\"
