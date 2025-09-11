@@ -483,8 +483,13 @@ rawMemCType DefaultSpace = pure defaultMemBlockType
 rawMemCType (Space sid) = join $ asks (opsMemoryType . envOperations) <*> pure sid
 rawMemCType (ScalarSpace [] t) =
   pure [C.cty|$ty:(primTypeToCType t)[1]|]
-rawMemCType (ScalarSpace ds t) =
-  pure [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
+rawMemCType (ScalarSpace ds t)
+  | null ds || Constant (IntValue (Int64Value 0)) `elem` ds =
+      -- The case where a 0 ends up here is pretty obscure, but it can occur for
+      -- some empty array literals.
+      pure [C.cty|$ty:(primTypeToCType t)[1]|]
+  | otherwise =
+      pure [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
   where
     ds' = map (`C.toExp` noLoc) ds
 
