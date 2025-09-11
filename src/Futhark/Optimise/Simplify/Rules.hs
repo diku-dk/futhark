@@ -38,7 +38,7 @@ topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
   [ RuleGeneric constantFoldPrimFun,
     RuleGeneric withAccTopDown,
-    RuleGeneric emptyArrayToScratch
+    RuleGeneric toScratch
   ]
 
 bottomUpRules :: (BuilderOps rep, TraverseOpStms rep) => [BottomUpRule rep]
@@ -110,17 +110,37 @@ constantFoldPrimFun _ (Let pat aux (Apply fname args _ _))
     isConst _ = Nothing
 constantFoldPrimFun _ _ = Skip
 
--- | If an expression produces an array with a constant zero anywhere
--- in its shape, just turn that into a Scratch.
-emptyArrayToScratch :: (BuilderOps rep) => TopDownRuleGeneric rep
-emptyArrayToScratch _ (Let pat@(Pat [pe]) aux e)
-  | Just (pt, shape) <- isEmptyArray $ patElemType pe,
-    not $ isScratch e =
+isScratch :: Exp rep -> Bool
+isScratch (BasicOp Scratch {}) = True
+isScratch _ = False
+
+-- | Some expressions can never produce a meaningful value - these we turn into
+-- Scratch, and maybe that helps remove more code.
+toScratch :: (BuilderOps rep) => TopDownRuleGeneric rep
+-- If an expression produces an array with a constant zero anywhere in its
+-- shape, just turn that into a Scratch.
+toScratch _ (Let pat@(Pat [pe]) aux e)
+  | not $ isScratch e,
+    Just (pt, shape) <- isEmptyArray $ patElemType pe =
       Simplify $ auxing aux $ letBind pat $ BasicOp $ Scratch pt $ shapeDims shape
+-- If we depend on a certificate that is constant False (and so will always
+-- fail), then clearly there is no need to compute this.
+toScratch vtable (Let pat aux e)
+  | any doomed $ unCerts $ stmAuxCerts aux,
+    not $ isScratch e,
+    not $ isConst e,
+    not $ any accOrMem $ patTypes pat =
+      Simplify . auxing aux $
+        forM_ (zip (patNames pat) (patTypes pat)) $ \(v, t) ->
+          letBindNames [v] =<< eBlank t
   where
-    isScratch (BasicOp Scratch {}) = True
-    isScratch _ = False
-emptyArrayToScratch _ _ = Skip
+    doomed v = case ST.lookupBasicOp v vtable of
+      Just (Assert (Constant (BoolValue False)) _, _) -> True
+      _ -> False
+    accOrMem t = isAcc t || isMem t
+    isConst (BasicOp (SubExp (Constant _))) = True
+    isConst _ = False
+toScratch _ _ = Skip
 
 simplifyIndex :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pat [pe]) aux (Index idd inds)
