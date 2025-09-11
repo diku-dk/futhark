@@ -68,6 +68,12 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
       where
         isIndex DimFix {} = True
         isIndex _ = False
+    Just (Scratch pt _, cs) ->
+      -- Indexing a Scratch just becomes a different scratch.
+      Just $
+        fmap (SubExpResult cs)
+          . letSubExp (baseName idd <> "_idx")
+          =<< eBlank (arrayOfShape (Prim pt) (sliceShape $ Slice inds))
     _
       | Just t <- seType (Var idd),
         Slice inds == fullSlice t [] ->
