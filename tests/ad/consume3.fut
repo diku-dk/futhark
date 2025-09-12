@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def test [n] (xs: [n]f64) =
   let xs' = copy xs
   let xs'' = copy xs

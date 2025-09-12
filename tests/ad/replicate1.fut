@@ -2,6 +2,9 @@
 -- it should at least not crash.
 
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: f_jvp
 -- input { 3i64 2i64 }
 -- output { [0i64,0i64,0i64] }

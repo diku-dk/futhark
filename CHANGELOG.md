@@ -9,17 +9,47 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Futhark now implements the cachedir specification, such that e.g. the `data`
-  directories created by `futhark test` and `futhark bench` contain a
-  `CACHEDIR.TAG` file.
-
 ### Removed
 
 ### Changed
 
 ### Fixed
 
+* Declaration of zero-length arrays in GPU kernels.
+
+## [0.25.33]
+
+### Added
+
+* Futhark now implements the cachedir specification, such that e.g. the `data`
+  directories created by `futhark test` and `futhark bench` contain a
+  `CACHEDIR.TAG` file.
+
+* C types corresponding to records now have nicer names.
+
+* ``futhark script`` now has a ``$restore`` procedure, and the ``$store``
+  procedure has been augmented with support for opaque types.
+
+* The expression guarded by an `assert` may now be any expression, and need no
+  longer be an atom.
+
+### Fixed
+
 * `futhark fmt --check` no longer prints the program on failure.
+
+* Use of unsigned types in entry points could cause invalid C to be generated.
+  (#2306)
+
+* `futhark script` now frees values before terminating.
+
+* Correct source locations when warning about unused local functions.
+
+* Unpacking a unary sum type directly in a parameter or `let`-binding was
+  defective. (#2314)
+
+* The derivative of `x**1` for `x==0` would be NaN.
+
+* `futhark fmt` now prints multi-line `assert` in a less horrible way.
 
 ## [0.25.32]
 

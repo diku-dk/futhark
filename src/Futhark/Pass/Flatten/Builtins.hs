@@ -50,7 +50,14 @@ segMap segments f = do
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
-genScanomap :: (Traversable f) => String -> f SubExp -> Lambda GPU -> [SubExp] -> (f SubExp -> Builder GPU [SubExp]) -> Builder GPU [VName]
+genScanomap ::
+  (Traversable f) =>
+  Name ->
+  f SubExp ->
+  Lambda GPU ->
+  [SubExp] ->
+  (f SubExp -> Builder GPU [SubExp]) ->
+  Builder GPU [VName]
 genScanomap desc segments lam nes m = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
@@ -64,13 +71,13 @@ genScanomap desc segments lam nes m = do
   where
     lvl = SegThread SegVirt Nothing
 
-genScan :: (Traversable f) => String -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genScan :: (Traversable f) => Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
 genScan desc segments lam nes arrs =
   genScanomap desc segments lam nes $ \gtids -> forM arrs $ \arr ->
-    letSubExp (baseString arr <> "_elem") =<< eIndex arr (toList $ fmap eSubExp gtids)
+    letSubExp (baseName arr <> "_elem") =<< eIndex arr (toList $ fmap eSubExp gtids)
 
 -- Also known as a prescan.
-genExScan :: (Traversable f) => String -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genExScan :: (Traversable f) => Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
 genExScan desc segments lam nes arrs =
   genScanomap desc segments lam nes $ \gtids ->
     let Just (outerDims, innerDim) = unsnoc $ toList gtids
@@ -99,25 +106,25 @@ segScanLambda lam = do
             (pure $ lambdaBody lam)
         ]
 
-genSegScan :: String -> Lambda GPU -> [SubExp] -> VName -> [VName] -> Builder GPU [VName]
+genSegScan :: Name -> Lambda GPU -> [SubExp] -> VName -> [VName] -> Builder GPU [VName]
 genSegScan desc lam nes flags arrs = do
   w <- arraySize 0 <$> lookupType flags
   lam' <- segScanLambda lam
   drop 1 <$> genScan desc [w] lam' (constant False : nes) (flags : arrs)
 
-genPrefixSum :: String -> VName -> Builder GPU VName
+genPrefixSum :: Name -> VName -> Builder GPU VName
 genPrefixSum desc ns = do
   ws <- arrayDims <$> lookupType ns
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
   head <$> genScan desc ws add_lam [intConst Int64 0] [ns]
 
-genExPrefixSum :: String -> VName -> Builder GPU VName
+genExPrefixSum :: Name -> VName -> Builder GPU VName
 genExPrefixSum desc ns = do
   ws <- arrayDims <$> lookupType ns
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
   head <$> genExScan desc ws add_lam [intConst Int64 0] [ns]
 
-genSegPrefixSum :: String -> VName -> VName -> Builder GPU VName
+genSegPrefixSum :: Name -> VName -> VName -> Builder GPU VName
 genSegPrefixSum desc flags ns = do
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
   head <$> genSegScan desc add_lam [intConst Int64 0] flags [ns]
@@ -129,7 +136,7 @@ genScatter dest n f = do
   withAcc [dest] 1 $ \ ~[acc] -> do
     kbody <- buildBody_ $ localScope (scopeOfSegSpace space) $ do
       (i, v) <- f $ Var gtid
-      acc' <- letExp (baseString acc) $ BasicOp $ UpdateAcc Safe acc [Var i] [v]
+      acc' <- letExp (baseName acc) $ BasicOp $ UpdateAcc Safe acc [Var i] [v]
       pure [Returns ResultMaySimplify mempty $ Var acc']
     acc_t <- lookupType acc
     letTupExp' "scatter" $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space [acc_t] kbody

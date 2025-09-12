@@ -78,7 +78,7 @@ mkScanFusedMapLam ops w scn_lam xs ys ys_adj s d = do
         ( buildBody_ $ do
             j <- letSubExp "j" =<< toExp (pe64 w - (le64 i + 1))
             y_s <- forM ys_adj $ \y_ ->
-              letSubExp (baseString y_ ++ "_j") =<< eIndex y_ [eSubExp j]
+              letSubExp (baseName y_ <> "_j") =<< eIndex y_ [eSubExp j]
             let zso = orderArgs s y_s
             let ido = orderArgs s $ caseJac k sc idmat
             pure $ subExpsRes $ concat $ zipWith (++) zso $ fmap concat ido
@@ -87,7 +87,7 @@ mkScanFusedMapLam ops w scn_lam xs ys ys_adj s d = do
             j <- letSubExp "j" =<< toExp (pe64 w - (le64 i + 1))
             j1 <- letSubExp "j1" =<< toExp (pe64 w - le64 i)
             y_s <- forM ys_adj $ \y_ ->
-              letSubExp (baseString y_ ++ "_j") =<< eIndex y_ [eSubExp j]
+              letSubExp (baseName y_ <> "_j") =<< eIndex y_ [eSubExp j]
 
             let args =
                   map (`eIndex` [eSubExp j]) ys ++ map (`eIndex` [eSubExp j1]) xs
@@ -158,7 +158,7 @@ mkScanFinalMap ops w scan_lam xs ys ds = do
 
   par_i <- newParam "i" $ Prim int64
   let i = paramName par_i
-  par_x <- zipWithM (\x -> newParam (baseString x ++ "_par_x")) xs eltps
+  par_x <- zipWithM (\x -> newParam (baseName x <> "_par_x")) xs eltps
 
   map_lam <-
     mkLambda (par_i : par_x) $ do
@@ -166,7 +166,7 @@ mkScanFinalMap ops w scan_lam xs ys ds = do
 
       dj <-
         forM ds $ \dd ->
-          letExp (baseString dd ++ "_dj") =<< eIndex dd [eSubExp j]
+          letExp (baseName dd <> "_dj") =<< eIndex dd [eSubExp j]
 
       fmap varsRes . letTupExp "scan_contribs"
         =<< eIf
@@ -177,7 +177,7 @@ mkScanFinalMap ops w scan_lam xs ys ds = do
 
               im1 <- letSubExp "im1" =<< toExp (le64 i - 1)
               ys_im1 <- forM ys $ \y ->
-                letSubExp (baseString y <> "_im1") =<< eIndex y [eSubExp im1]
+                letSubExp (baseName y <> "_im1") =<< eIndex y [eSubExp im1]
 
               let args = map eSubExp $ ys_im1 ++ map (Var . paramName) par_x
               eLambda lam args
@@ -269,8 +269,8 @@ scanRight as w scan = do
   as_types <- mapM lookupType as
   let arg_type_row = map rowType as_types
 
-  par_a1 <- zipWithM (\x -> newParam (baseString x <> "_par_a1")) as arg_type_row
-  par_a2 <- zipWithM (\x -> newParam (baseString x <> "_par_a2")) as arg_type_row
+  par_a1 <- zipWithM (\x -> newParam (baseName x <> "_par_a1")) as arg_type_row
+  par_a2 <- zipWithM (\x -> newParam (baseName x <> "_par_a2")) as arg_type_row
   -- Just the original operator but with par_a1 and par_a2 swapped.
   rev_op <- mkLambda (par_a1 <> par_a2) $ do
     op <- renameLambda $ scanLambda scan
@@ -303,12 +303,12 @@ mkPPADOpLifted :: VjpOps -> [VName] -> Scan SOACS -> ADM (Lambda SOACS)
 mkPPADOpLifted ops as scan = do
   as_types <- mapM lookupType as
   let arg_type_row = map rowType as_types
-  par_x1 <- zipWithM (\x -> newParam (baseString x ++ "_par_x1")) as arg_type_row
-  par_x2_unused <- zipWithM (\x -> newParam (baseString x ++ "_par_x2_unused")) as arg_type_row
-  par_a1 <- zipWithM (\x -> newParam (baseString x ++ "_par_a1")) as arg_type_row
-  par_a2 <- zipWithM (\x -> newParam (baseString x ++ "_par_a2")) as arg_type_row
-  par_y1_h <- zipWithM (\x -> newParam (baseString x ++ "_par_y1_h")) as arg_type_row
-  par_y2_h <- zipWithM (\x -> newParam (baseString x ++ "_par_y2_h")) as arg_type_row
+  par_x1 <- zipWithM (\x -> newParam (baseName x <> "_par_x1")) as arg_type_row
+  par_x2_unused <- zipWithM (\x -> newParam (baseName x <> "_par_x2_unused")) as arg_type_row
+  par_a1 <- zipWithM (\x -> newParam (baseName x <> "_par_a1")) as arg_type_row
+  par_a2 <- zipWithM (\x -> newParam (baseName x <> "_par_a2")) as arg_type_row
+  par_y1_h <- zipWithM (\x -> newParam (baseName x <> "_par_y1_h")) as arg_type_row
+  par_y2_h <- zipWithM (\x -> newParam (baseName x <> "_par_y2_h")) as arg_type_row
 
   add_lams <- mapM addLambda arg_type_row
 
@@ -373,9 +373,9 @@ finalMapPPAD :: VjpOps -> [VName] -> Scan SOACS -> ADM (Lambda SOACS)
 finalMapPPAD ops as scan = do
   as_types <- mapM lookupType as
   let arg_type_row = map rowType as_types
-  par_y_right <- zipWithM (\x -> newParam (baseString x ++ "_par_y_right")) as arg_type_row
-  par_a <- zipWithM (\x -> newParam (baseString x ++ "_par_a")) as arg_type_row
-  par_r_adj <- zipWithM (\x -> newParam (baseString x ++ "_par_r_adj")) as arg_type_row
+  par_y_right <- zipWithM (\x -> newParam (baseName x <> "_par_y_right")) as arg_type_row
+  par_a <- zipWithM (\x -> newParam (baseName x <> "_par_a")) as arg_type_row
+  par_r_adj <- zipWithM (\x -> newParam (baseName x <> "_par_r_adj")) as arg_type_row
 
   mkLambda (par_y_right ++ par_a ++ par_r_adj) $ do
     op_bar_2 <- mkScanAdjointLam ops (scanLambda scan) WrtSecond (Var . paramName <$> par_r_adj)
@@ -446,7 +446,7 @@ diffScanVec ops ys aux w lam ne as m = do
 
     transp_as <-
       forM as $ \a ->
-        letExp (baseString a ++ "_transp") $ BasicOp $ Rearrange a rear
+        letExp (baseName a <> "_transp") $ BasicOp $ Rearrange a rear
 
     ts <- traverse lookupType transp_as
     let n = arraysSize 0 ts

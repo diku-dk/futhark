@@ -1,6 +1,7 @@
 -- Scan with 2x2 matrix multiplication.
 -- MatrixMul case
 -- ==
+-- tags { autodiff }
 -- entry: fwd_J rev_J
 -- input { [[1f32,2f32,3f32,4f32], [4f32,3f32,2f32,1f32], [1f32,2f32,3f32,4f32], [4f32,3f32,2f32,1f32]] }
 -- output {

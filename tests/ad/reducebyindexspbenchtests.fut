@@ -1,4 +1,7 @@
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: add mul max
 -- compiled random input { [100]i32 [1000]u64 [1000]i32 }
 

@@ -706,7 +706,7 @@ intrinsics =
                   [Scalar $ t_a mempty]
                   $ RetType []
                   $ Scalar
-                  $ t_a mempty
+                  $ t_a Unique
               ),
               ( "flatten",
                 IntrinsicPolyFun

@@ -9,15 +9,20 @@ module Futhark.IR.Parse
     parseSeq,
     parseSeqMem,
 
-    -- * Fragments
+    -- * Representation-agnostic fragments
     parseType,
     parseDeclExtType,
     parseDeclType,
     parseVName,
     parseSubExp,
     parseSubExpRes,
+
+    -- * Representation-specific fragments
+    parseLambdaSOACS,
+    parseBodySOACS,
     parseBodyGPU,
     parseBodyMC,
+    parseStmSOACS,
     parseStmGPU,
     parseStmMC,
   )
@@ -1197,6 +1202,17 @@ parseSubExp = parseFull pSubExp
 
 parseSubExpRes :: FilePath -> T.Text -> Either T.Text SubExpRes
 parseSubExpRes = parseFull pSubExpRes
+
+-- Rep-specific fragment parsers
+
+parseLambdaSOACS :: FilePath -> T.Text -> Either T.Text (Lambda SOACS)
+parseLambdaSOACS = parseFull $ pLambda prSOACS
+
+parseBodySOACS :: FilePath -> T.Text -> Either T.Text (Body SOACS)
+parseBodySOACS = parseFull $ pBody prSOACS
+
+parseStmSOACS :: FilePath -> T.Text -> Either T.Text (Stm SOACS)
+parseStmSOACS = parseFull $ pStm prSOACS
 
 parseBodyGPU :: FilePath -> T.Text -> Either T.Text (Body GPU)
 parseBodyGPU = parseFull $ pBody prGPU
