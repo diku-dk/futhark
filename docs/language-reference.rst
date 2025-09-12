@@ -1804,7 +1804,7 @@ backends from generating working code.
 ``scratch``
 ...........
 
-Like ``blank``, but the resulting values (if arrays) will comprise initialised
+Like ``blank``, but the resulting values (if arrays) will comprise uninitialised
 memory. Reading from such arrays is potentially dangerous, as the elements are
 completely undefined until they are updated with a ``scatter`` or similar.
 
