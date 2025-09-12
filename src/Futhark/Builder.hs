@@ -45,7 +45,7 @@ class (ASTRep rep) => BuilderOps rep where
     Exp rep ->
     m (ExpDec rep)
   mkBodyB ::
-    (MonadBuilder m, Rep m ~ rep, FreeIn res) =>
+    (MonadBuilder m, Rep m ~ rep, IsResult res) =>
     Stms rep ->
     [res] ->
     m (GBody rep res)
@@ -63,7 +63,7 @@ class (ASTRep rep) => BuilderOps rep where
   mkExpDecB pat e = pure $ mkExpDec pat e
 
   default mkBodyB ::
-    (MonadBuilder m, Buildable rep, FreeIn res) =>
+    (MonadBuilder m, Buildable rep, IsResult res) =>
     Stms rep ->
     [res] ->
     m (GBody rep res)
@@ -202,7 +202,7 @@ runBodyBuilder ::
     MonadFreshNames m,
     HasScope somerep m,
     SameScope somerep rep,
-    FreeIn res
+    IsResult res
   ) =>
   Builder rep [res] ->
   m (GBody rep res)

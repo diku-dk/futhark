@@ -135,7 +135,7 @@ readGroupKernelInput ::
   m ()
 readGroupKernelInput inp
   | Array {} <- kernelInputType inp = do
-      v <- newVName $ baseString $ kernelInputName inp
+      v <- newName $ kernelInputName inp
       readKernelInput inp {kernelInputName = v}
       letBindNames [kernelInputName inp] $ BasicOp $ Replicate mempty $ Var v
   | otherwise =

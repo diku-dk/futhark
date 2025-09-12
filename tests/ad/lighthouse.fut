@@ -1,5 +1,6 @@
 -- From [Griewank 2008].
 -- ==
+-- tags { autodiff }
 -- entry: lighthouse_jvp lighthouse_vjp
 -- input { 2.0 1.5 0.4 2.1 }
 -- output { 2.902513633461043f64 -15.102798701184362f64 95.71780341846966f64 18.23196255589898f64

@@ -87,7 +87,7 @@ expDefs e =
           foldMap sizeDefs sizes <> patternDefs pat
         Lambda params _ _ _ _ ->
           mconcat (map patternDefs params)
-        AppExp (LetFun name (tparams, params, _, Info ret, _) _ loc) _ ->
+        AppExp (LetFun (name, _) (tparams, params, _, Info ret, _) _ loc) _ ->
           let name_t = funType params ret
            in M.singleton name (DefBound $ BoundTerm name_t (locOf loc))
                 <> mconcat (map typeParamDefs tparams)

@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def test [n] (xs: [n]i32) =
   loop #[true_dep] xs' = copy xs
   for i < (n - 1) do

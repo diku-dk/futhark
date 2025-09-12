@@ -24,6 +24,7 @@ entry pointsToSegmentsGrad [n] [m]
   in (grad ++ [loss])
 
 -- ==
+-- tags { autodiff }
 -- input { [[1f32,2,3],[4f32,5,6]] }
 -- output { [-2.0f32, 0.0, -2.0, 22.0] }
 entry main pcd = pointsToSegmentsGrad [0.0, 0, 0] [[[0.0, 0.0], [2.0, 2.0]]] pcd

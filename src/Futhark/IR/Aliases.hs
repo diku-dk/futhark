@@ -272,7 +272,7 @@ mkAliasedBody ::
   ( ASTRep rep,
     AliasedOp (OpC rep),
     ASTConstraints (OpC rep (Aliases rep)),
-    FreeIn res
+    IsResult res
   ) =>
   BodyDec rep ->
   Stms (Aliases rep) ->
@@ -305,7 +305,7 @@ mkAliasedPat (Pat pes) e =
 -- in scope outside of it.  Note that this does *not* include aliases
 -- of results that are not bound in the statements!
 mkBodyAliasing ::
-  (Aliased rep, FreeIn res) =>
+  (Aliased rep, IsResult res) =>
   Stms rep ->
   [res] ->
   BodyAliasing
@@ -322,14 +322,14 @@ mkBodyAliasing stms res =
 -- | The aliases of the result and everything consumed in the given
 -- statements.
 mkStmsAliases ::
-  (Aliased rep, FreeIn res) =>
+  (Aliased rep, IsResult res) =>
   Stms rep ->
   [res] ->
   ([Names], Names)
 mkStmsAliases stms res = delve mempty $ stmsToList stms
   where
     delve (aliasmap, consumed) [] =
-      ( map (aliasClosure aliasmap . freeIn) res,
+      ( map (aliasClosure aliasmap . resAliases) res,
         consumed
       )
     delve (aliasmap, consumed) (stm : stms') =

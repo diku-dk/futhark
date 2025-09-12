@@ -1,4 +1,7 @@
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: fwd
 -- input { 1f64 }
 -- output { 1i32 }

@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: main
 -- compiled random input { [50][66]f32 } output { true }
 -- compiled random input { [23][45]f32} output { true }

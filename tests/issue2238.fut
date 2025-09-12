@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- input { 2.0 }
 
 type sum = #a f64 | #b f64

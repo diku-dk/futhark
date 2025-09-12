@@ -1,4 +1,5 @@
--- =
+-- ==
+-- tags { autodiff }
 -- entry: kmeansSpAD
 
 def costSparse [nnz] [np1] [cols] [k]

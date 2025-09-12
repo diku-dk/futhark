@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def lv_step (growth_prey: f32)
             (predation: f32)
             (growth_pred: f32)

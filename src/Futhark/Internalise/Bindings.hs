@@ -147,7 +147,7 @@ processFlatPat x y = processFlatPat' [] x y
       let name = E.identName bindee
       case internalisedTypeSize $ E.unInfo $ E.identType bindee of
         1 -> pure [name]
-        n -> replicateM n $ newVName $ baseString name
+        n -> replicateM n $ newName name
 
 bindingFlatPat ::
   (Show t) =>

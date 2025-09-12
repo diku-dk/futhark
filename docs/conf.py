@@ -62,7 +62,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "Futhark"
-copyright = "2013-2020, DIKU, University of Copenhagen"
+copyright = "2013-2025, DIKU, University of Copenhagen"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -287,13 +287,22 @@ highlight_language = "text"
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = "futhark"
-html_theme_path = ["_theme"]
+html_theme = "classic"
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-html_theme_options: Dict[Any, Any] = {}
+html_theme_options: Dict[str, str] = {
+    "sidebarbgcolor": "#5f021f",
+    "footerbgcolor": "#5f021f",
+    "relbarbgcolor": "#5f021f",
+    "bgcolor": "#fff9e5",
+    "linkcolor": "#5f021f",
+    "headbgcolor": "#eeeeee",
+    "sidebartextcolor": "white",
+    "sidebarlinkcolor": "white",
+    "codebgcolor": "#eeeeee",
+}
 
 # Add any paths that contain custom themes here, relative to this directory.
 # html_theme_path = []

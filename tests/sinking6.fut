@@ -1,6 +1,9 @@
 -- At one point this did an incorrect sinking due to not looking
 -- properly at WithAccs.
 
+-- ==
+-- tags { autodiff }
+
 def pointToRoller (model: [2]f32) (p: f32) : f32 =
   let radius = model[0]
   let alpha = model[1]

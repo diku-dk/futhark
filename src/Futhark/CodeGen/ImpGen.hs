@@ -717,7 +717,7 @@ compileLoopBody mergeparams (Body _ stms ses) = do
   -- variables mirroring the merge parameters, and then copy this
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
-  tmpnames <- mapM (newVName . (++ "_tmp") . baseString . paramName) mergeparams
+  tmpnames <- mapM (newVName . (<> "_tmp") . baseName . paramName) mergeparams
   compileStms (freeIn ses) stms $ do
     copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p, tmp, SubExpRes _ se) ->
       case typeOf p of
@@ -1076,7 +1076,7 @@ dFParams = dScope Nothing . scopeOfFParams
 dLParams :: (Mem rep inner) => [LParam rep] -> ImpM rep r op ()
 dLParams = dScope Nothing . scopeOfLParams
 
-dPrimVol :: String -> PrimType -> Imp.TExp t -> ImpM rep r op (TV t)
+dPrimVol :: Name -> PrimType -> Imp.TExp t -> ImpM rep r op (TV t)
 dPrimVol name t e = do
   name' <- newVName name
   emit $ Imp.DeclareScalar name' Imp.Volatile t
@@ -1092,7 +1092,7 @@ dPrim_ name t = do
 -- | Create variable of some provided dynamic type. You'll need this
 -- when you are compiling program code of Haskell-level unknown type.
 -- For other things, use other functions.
-dPrimS :: String -> PrimType -> ImpM rep r op VName
+dPrimS :: Name -> PrimType -> ImpM rep r op VName
 dPrimS name t = do
   name' <- newVName name
   dPrim_ name' t
@@ -1100,11 +1100,11 @@ dPrimS name t = do
 
 -- | Create 'TV' of some provided dynamic type. No guarantee that the
 -- dynamic type matches the inferred type.
-dPrimSV :: String -> PrimType -> ImpM rep r op (TV t)
+dPrimSV :: Name -> PrimType -> ImpM rep r op (TV t)
 dPrimSV name t = TV <$> dPrimS name t <*> pure t
 
 -- | Create 'TV' of some fixed type.
-dPrim :: (MkTV t) => String -> ImpM rep r op (TV t)
+dPrim :: (MkTV t) => Name -> ImpM rep r op (TV t)
 dPrim name = do
   name' <- newVName name
   let tv = mkTV name'
@@ -1118,7 +1118,7 @@ dPrimV_ name e = do
   where
     t = primExpType $ untyped e
 
-dPrimV :: String -> Imp.TExp t -> ImpM rep r op (TV t)
+dPrimV :: Name -> Imp.TExp t -> ImpM rep r op (TV t)
 dPrimV name e = do
   name' <- dPrimS name pt
   let tv = TV name' pt
@@ -1127,7 +1127,7 @@ dPrimV name e = do
   where
     pt = primExpType $ untyped e
 
-dPrimVE :: String -> Imp.TExp t -> ImpM rep r op (Imp.TExp t)
+dPrimVE :: Name -> Imp.TExp t -> ImpM rep r op (Imp.TExp t)
 dPrimVE name e = do
   name' <- dPrimS name pt
   let tv = TV name' pt
@@ -1309,16 +1309,16 @@ askFunction :: ImpM rep r op (Maybe Name)
 askFunction = asks envFunction
 
 -- | Generate a 'VName', prefixed with 'askFunction' if it exists.
-newVNameForFun :: String -> ImpM rep r op VName
+newVNameForFun :: Name -> ImpM rep r op VName
 newVNameForFun s = do
-  fname <- fmap nameToString <$> askFunction
-  newVName $ maybe "" (++ ".") fname ++ s
+  fname <- askFunction
+  newVName $ maybe "" (<> ".") fname <> s
 
 -- | Generate a 'Name', prefixed with 'askFunction' if it exists.
-nameForFun :: String -> ImpM rep r op Name
+nameForFun :: Name -> ImpM rep r op Name
 nameForFun s = do
   fname <- askFunction
-  pure $ maybe "" (<> ".") fname <> nameFromString s
+  pure $ maybe "" (<> ".") fname <> s
 
 askEnv :: ImpM rep r op r
 askEnv = asks envEnv
@@ -1749,7 +1749,7 @@ sFor' i bound body = do
   body' <- collect body
   emit $ Imp.For i bound body'
 
-sFor :: String -> Imp.TExp t -> (Imp.TExp t -> ImpM rep r op ()) -> ImpM rep r op ()
+sFor :: Name -> Imp.TExp t -> (Imp.TExp t -> ImpM rep r op ()) -> ImpM rep r op ()
 sFor i bound body = do
   i' <- newVName i
   sFor' i' (untyped bound) $
@@ -1793,7 +1793,7 @@ sUnless cond = sIf cond (pure ())
 sOp :: op -> ImpM rep r op ()
 sOp = emit . Imp.Op
 
-sDeclareMem :: String -> Space -> ImpM rep r op VName
+sDeclareMem :: Name -> Space -> ImpM rep r op VName
 sDeclareMem name space = do
   name' <- newVName name
   emit $ Imp.DeclareMem name' space
@@ -1807,20 +1807,20 @@ sAlloc_ name' size' space = do
     Nothing -> emit $ Imp.Allocate name' size' space
     Just allocator' -> allocator' name' size'
 
-sAlloc :: String -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM rep r op VName
+sAlloc :: Name -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM rep r op VName
 sAlloc name size space = do
   name' <- sDeclareMem name space
   sAlloc_ name' size space
   pure name'
 
-sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
+sArray :: Name -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
 sArray name bt shape mem lmad = do
   name' <- newVName name
   dArray name' bt shape mem lmad
   pure name'
 
 -- | Declare an array in row-major order in the given memory block.
-sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName
+sArrayInMem :: Name -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName
 sArrayInMem name pt shape mem =
   sArray name pt shape mem $
     LMAD.iota 0 $
@@ -1828,28 +1828,28 @@ sArrayInMem name pt shape mem =
         shapeDims shape
 
 -- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
-sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
+sAllocArrayPerm :: Name -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
-  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
+  mem <- sAlloc (name <> "_mem") (typeSize (Array pt shape NoUniqueness)) space
   let iota_lmad = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
     LMAD.permute iota_lmad $
       rearrangeInverse perm
 
 -- | Uses linear/iota index function.
-sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM rep r op VName
+sAllocArray :: Name -> PrimType -> ShapeBase SubExp -> Space -> ImpM rep r op VName
 sAllocArray name pt shape space =
   sAllocArrayPerm name pt shape space [0 .. shapeRank shape - 1]
 
 -- | Uses linear/iota index function.
-sStaticArray :: String -> PrimType -> Imp.ArrayContents -> ImpM rep r op VName
+sStaticArray :: Name -> PrimType -> Imp.ArrayContents -> ImpM rep r op VName
 sStaticArray name pt vs = do
   let num_elems = case vs of
         Imp.ArrayValues vs' -> length vs'
         Imp.ArrayZeros n -> fromIntegral n
       shape = Shape [intConst Int64 $ toInteger num_elems]
-  mem <- newVNameForFun $ name ++ "_mem"
+  mem <- newVNameForFun $ name <> "_mem"
   emit $ Imp.DeclareArray mem pt vs
   addVar mem $ MemVar Nothing $ MemEntry DefaultSpace
   sArray name pt shape mem $ LMAD.iota 0 [fromIntegral num_elems]
@@ -1977,7 +1977,7 @@ dIndexSpace vs_ds j = do
 -- | Like 'dIndexSpace', but invent some new names for the indexes
 -- based on the given template.
 dIndexSpace' ::
-  String ->
+  Name ->
   [Imp.TExp Int64] ->
   Imp.TExp Int64 ->
   ImpM rep r op [Imp.TExp Int64]

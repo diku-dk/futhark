@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def pow y x =
   loop acc = 1
   for _i < y do

@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: f_jvp f_vjp
 -- input { 5.0 7.0 }
 -- output { 7.0 5.0 }

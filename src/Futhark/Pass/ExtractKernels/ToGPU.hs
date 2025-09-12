@@ -22,24 +22,24 @@ import Futhark.Tools
 
 getSize ::
   (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
-  String ->
+  Name ->
   SizeClass ->
   m SubExp
 getSize desc size_class = do
-  size_key <- nameFromString . prettyString <$> newVName desc
+  size_key <- nameFromText . prettyText <$> newVName desc
   letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
 
 segThread ::
   (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
-  String ->
+  Name ->
   m SegLevel
 segThread desc =
   SegThread SegVirt <$> (Just <$> kernelGrid)
   where
     kernelGrid =
       KernelGrid
-        <$> (Count <$> getSize (desc ++ "_num_tblocks") SizeGrid)
-        <*> (Count <$> getSize (desc ++ "_tblock_size") SizeThreadBlock)
+        <$> (Count <$> getSize (desc <> "_num_tblocks") SizeGrid)
+        <*> (Count <$> getSize (desc <> "_tblock_size") SizeThreadBlock)
 
 injectSOACS ::
   ( Monad m,

@@ -30,7 +30,6 @@ module Language.Futhark.Core
     VName (..),
     baseTag,
     baseName,
-    baseString,
     baseText,
     quote,
 
@@ -207,10 +206,6 @@ baseTag (VName _ tag) = tag
 -- | Return the name contained in the 'VName'.
 baseName :: VName -> Name
 baseName (VName vn _) = vn
-
--- | Return the base 'Name' converted to a string.
-baseString :: VName -> String
-baseString = nameToString . baseName
 
 -- | Return the base 'Name' converted to a text.
 baseText :: VName -> T.Text

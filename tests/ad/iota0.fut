@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: rev
 -- compiled input { 5i64 }
 -- output { 5i64 }

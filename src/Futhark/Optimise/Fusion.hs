@@ -211,7 +211,7 @@ makeCopyStms vs = do
     mkLetNames [name'] $ BasicOp $ Replicate mempty $ Var name
   pure (stmsFromList copies, M.fromList $ zip vs vs')
   where
-    makeNewName name = newVName $ baseString name <> "_copy"
+    makeNewName name = newVName $ baseName name <> "_copy"
 
 okToFuseProducer :: H.SOAC SOACS -> FusionM Bool
 okToFuseProducer (H.Screma _ _ form) = do

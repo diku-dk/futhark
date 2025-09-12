@@ -260,7 +260,7 @@ prettyAppExp p (LetPat sizes pat e body _) =
       ArrayLit {} -> False
       Lambda {} -> True
       _ -> hasArrayLit e
-prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
+prettyAppExp _ (LetFun (fname, _) (tparams, params, retdecl, rettype, e) body _) =
   "let"
     <+> hsep (prettyName fname : map pretty tparams ++ map pretty params)
     <> retdecl'

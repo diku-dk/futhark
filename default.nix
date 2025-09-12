@@ -72,6 +72,7 @@ let
                   "--extra-lib-dirs=${pkgs.glibc.static}/lib"
                   "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
                   "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
+                  "--extra-lib-dirs=${pkgs.numactl.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
                   # The ones below are due to GHC's runtime system
                   # depending on libdw (DWARF info), which depends on
                   # a bunch of compression algorithms.

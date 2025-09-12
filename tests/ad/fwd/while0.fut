@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def pow y x =
   let (_, res) =
     loop (i, acc) = (0, 1)

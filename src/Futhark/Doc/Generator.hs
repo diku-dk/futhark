@@ -68,6 +68,10 @@ type NoLink = S.Set VName
 -- name.
 type FileMap = M.Map VName (FilePath, String)
 
+-- | Return the base 'Name' converted to a string.
+baseString :: VName -> String
+baseString = nameToString . baseName
+
 vnameToFileMap :: Imports -> FileMap
 vnameToFileMap = mconcat . map forFile
   where

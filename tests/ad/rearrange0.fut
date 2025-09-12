@@ -1,4 +1,7 @@
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: f_jvp
 -- input { [[1,2],[3,4]] }
 -- output { [[1,3],[2,4]] }

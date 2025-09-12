@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 entry test [n] [m] (xss: [n][m]f32) =
   loop #[true_dep] xss' = copy xss
   for i < n do

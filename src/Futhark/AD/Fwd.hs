@@ -81,7 +81,7 @@ runADM (ADM m) =
         (RState mempty vn)
 
 tanVName :: VName -> ADM VName
-tanVName v = newVName (baseString v <> "_tan")
+tanVName v = newVName (baseName v <> "_tan")
 
 insertTan :: VName -> VName -> ADM ()
 insertTan v v' =
@@ -160,7 +160,7 @@ instance Tangent VName where
       Just v_tan -> pure v_tan
       Nothing -> do
         t <- lookupType v
-        letExp (baseString v <> "_implicit_tan") $ zeroExp t
+        letExp (baseName v <> "_implicit_tan") $ zeroExp t
   bundleTan v = do
     t <- lookupType v
     if isAcc t
@@ -368,8 +368,8 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
                       _ -> error $ "fwdStm.convertTo: " ++ prettyString (f, tt, e_t)
                 where
                   e_t = primExpType e
-          zipWithM_ (letBindNames . pure) (patNames pat_tan)
-            =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
+          letBindNames (patNames pat_tan)
+            =<< toExp (foldl1 (~+~) $ zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
 fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
   cases' <- slocal' $ mapM (traverse fwdBody) cases
   defbody' <- slocal' $ fwdBody defbody

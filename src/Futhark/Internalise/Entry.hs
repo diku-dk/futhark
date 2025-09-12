@@ -179,7 +179,10 @@ opaqueSum types cs ts = mapM (traverse f) cs
       let ns = map (internalisedTypeSize . E.entryType) ets
           is' = chunks ns is
       ets' <- map snd <$> zipWithM (entryPointType types) ets (map (map (ts !!)) is')
-      pure $ zip ets' $ map (map (+ 1)) is' -- Adjust for tag.
+      pure . zip ets' $
+        if length cs == 1
+          then is'
+          else map (map (+ 1)) is' -- Adjust for tag.
 
 entryPointTypeName :: I.EntryPointType -> Name
 entryPointTypeName (I.TypeOpaque v) = v
@@ -223,8 +226,9 @@ entryPointType types t ts
           let (_, places) = internaliseSumTypeRep cs
               cs' = sumConstrs types cs $ E.entryAscribed t
               cs'' = zip (map fst cs') (zip (map snd cs') (map snd places))
+              ts' = if length cs == 1 then ts else drop 1 ts
           addType desc . I.OpaqueSum (map valueType ts)
-            =<< opaqueSum types cs'' (drop 1 ts)
+            =<< opaqueSum types cs'' ts'
         E.Array _ shape (E.Record fs)
           | not $ null fs -> do
               let fs' = recordFields types fs $ E.entryAscribed t

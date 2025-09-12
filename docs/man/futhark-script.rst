@@ -87,8 +87,8 @@ OPTIONS
 ADDITIONAL BUILTINS
 ===================
 
-* ``$store "file" v`` store the value *v* (which must be a primitive
-  or an array) as a binary value in the given file.
+* ``$store "file" v`` store the value *v* as a binary value in the given file.
+  It can be restored again with ``$restore``.
 
 BUGS
 ====

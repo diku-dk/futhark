@@ -41,6 +41,7 @@ def fun atom_coords : real =
   in f32.sum dists
 
 -- ==
+-- tags { autodiff }
 -- compiled random input { [1][32][20][3]f32 }
 -- auto output
 entry main coords =

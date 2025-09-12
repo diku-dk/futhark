@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: rev_J
 -- no_oclgrind input {
 --   [[1.0,2.0],[3.0,4.0]]

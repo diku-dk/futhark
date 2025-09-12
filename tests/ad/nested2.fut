@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: f_vjp
 -- input { [1,2,3] [0,1,2] }
 -- output { [24,48,72] [0,0,0] }

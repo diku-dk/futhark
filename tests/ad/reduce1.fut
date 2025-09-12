@@ -1,5 +1,6 @@
 -- Reduce with a fancier operator.
 -- ==
+-- tags { autodiff }
 -- entry: rev
 -- input { [1.0,2.0,3.0] [2.0,3.0,4.0] [3.0,4.0,5.0] [4.0,5.0,6.0] }
 -- output { [47.0, 28.0, 32.0]

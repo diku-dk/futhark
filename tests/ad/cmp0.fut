@@ -2,6 +2,9 @@
 -- least not crash.
 
 -- ==
+-- tags { autodiff }
+
+-- ==
 -- entry: fwd
 -- input { 1.0 2.0 }
 -- output { false false }

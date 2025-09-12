@@ -814,7 +814,7 @@ checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), fu
         als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure ((ret', funbody'), ftype)
-  (letbody', letbody_als) <- bindingFun fname ftype $ checkExp letbody
+  (letbody', letbody_als) <- bindingFun (fst fname) ftype $ checkExp letbody
   pure
     ( AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret'), funbody') letbody' loc) appres,
       letbody_als

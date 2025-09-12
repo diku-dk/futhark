@@ -1,3 +1,6 @@
+-- ==
+-- tags { autodiff }
+
 def pow y x =
   let (_, res) =
     #[bound(1000)]
