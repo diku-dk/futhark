@@ -331,7 +331,7 @@ simplifyPrePost ::
       ([InOut], Lambda SOACS, [InOut])
     )
 simplifyPrePost form (pre_inp, pre_out) (post_inp, post_out) = do
-  post_map' <- renameLambda post_map
+  !post_map' <- renameLambda post_map
 
   case fuseLambda post_map' post_map_inp post_map_out pre pre_out of
     ([], pre', pre_out') -> pure ((pre_inp, pre', pre_out'), post_scan)
@@ -364,7 +364,8 @@ fromExternal (External n) = Just n
 fromExternal (Internal _) = Nothing
 
 fromExternalUnsafe :: InOut -> VName
-fromExternalUnsafe = fromMaybe (error "error") . fromExternal
+fromExternalUnsafe =
+  fromMaybe (error "Can not get VName from Internal.") . fromExternal
 
 prePostInOut ::
   Natural ->
@@ -376,14 +377,19 @@ prePostInOut start inp form out =
   ((pre_inp, pre_out), (post_inp, post_out))
   where
     pre_inp = external . SOAC.inputArray <$> inp
-    post_out = external <$> out
+    (red_out, post_out) = splitAt num_red (external <$> out)
     pre = scremaLambda form
     num_scan = scanResults $ scremaScans form
     num_red = redResults $ scremaReduces form
     num_pre_rets = length $ lambdaReturnType pre
-    pre_out = internal <$> [start .. start + fromIntegral num_pre_rets]
-    (scan_inout, _, map_inout) = splitAt3 num_scan num_red pre_out
-    post_inp = scan_inout <> map_inout
+    num_map = num_pre_rets - num_scan - num_red
+    nat_num_scan = fromIntegral num_scan
+    nat_num_map = fromIntegral num_map
+    (scan_out, map_out) =
+      splitAt num_scan $
+        internal <$> take (nat_num_scan + nat_num_map) [start ..]
+    pre_out = scan_out <> red_out <> map_out
+    post_inp = scan_out <> map_out
 
 scremaFuseInOut ::
   [SOAC.Input] ->
@@ -421,8 +427,8 @@ toScrema ::
 toScrema
   soac_inps
   (pre_inp, pre, pre_out)
-  (reds, reds_inout)
   (scans, scans_inout)
+  (reds, reds_inout)
   (post_inp, post, post_out) = do
     (post', post_out') <-
       alignPrePost (pre', pre_out') (post_inp, post, post_out)
@@ -430,7 +436,7 @@ toScrema
         inp = (mapping M.!) . fromExternalUnsafe <$> pre_inp
     pure
       ( inp,
-        ScremaForm pre' reds scans post',
+        ScremaForm pre' scans reds post',
         out
       )
     where
@@ -448,25 +454,24 @@ alignPrePost ::
   ([InOut], Lambda SOACS, [InOut]) ->
   m (Lambda SOACS, [VName])
 alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
-  (post_inp', pars', ts') <-
-    unzip3 <$> auxiliary (pure []) _is_pars _is_ts
-  let (id_out, id_res, id_ts) =
-        unzip3
-          . mapMaybe (\(i, p, t) -> (,varRes $ paramName p,t) <$> fromExternal i)
-          . L.nubBy ((==) `on` fst3)
-          . filter ((`notElem` post_out) . fst3)
-          $ zip3 post_inp' pars' ts'
+  (post_inp', pars') <-
+    unzip <$> auxiliary (pure []) _is_pars _is_ts
+  let (id_out, id_res) =
+        unzip
+          . mapMaybe (\(i, p) -> (,varRes $ paramName p) <$> fromExternal i)
+          . L.nubBy ((==) `on` fst)
+          . filter ((`notElem` post_out) . fst)
+          $ zip post_inp' pars'
   pure $
     ( post
-        { lambdaParams = pars <> pars',
-          lambdaReturnType = ts <> id_ts,
+        { lambdaParams = pars',
+          lambdaReturnType = ts,
           lambdaBody =
             body {bodyResult = res <> id_res}
         },
       map fromExternalUnsafe post_out <> id_out
     )
   where
-    fst3 (a, _, _) = a
     body = lambdaBody post
     pars = lambdaParams post
     ts = lambdaReturnType post
@@ -478,31 +483,31 @@ alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
     auxiliary as is_pars ((i, t) : is_ts) =
       case pop ((i ==) . fst) is_pars of
         Just ((_, par), is_pars') ->
-          let as' = ((i, par, t) :) <$> as
+          let as' = ((i, par) :) <$> as
            in auxiliary as' is_pars' is_ts
         Nothing ->
           let as' = do
                 par <- newParam "x" t
-                ((i, par, t) :) <$> as
+                ((i, par) :) <$> as
            in auxiliary as' is_pars is_ts
 
 pop :: (a -> Bool) -> [a] -> Maybe (a, [a])
 pop _ [] = Nothing
 pop p (a : as)
   | p a = Just (a, as)
-  | otherwise = pop p as
+  | otherwise = fmap (a :) <$> pop p as
 
 align ::
   (Eq a) =>
   [(a, b)] ->
   [a] ->
   [(a, b)]
-align as_bs as'' = uncurry (<>) $ auxiliary as_bs as''
+align = auxiliary []
   where
-    auxiliary is_res [] = (is_res, [])
-    auxiliary is_res (i : is) =
+    auxiliary xs is_res [] = reverse xs <> is_res
+    auxiliary xs is_res (i : is) =
       case pop ((i ==) . fst) is_res of
-        Just (i_res, is_res') -> (i_res :) <$> auxiliary is_res' is
+        Just (i_res, is_res') -> auxiliary (i_res : xs) is_res' is
         Nothing -> error "If this happend then the developer used this function incorrectly."
 
 alignLambdaRes ::
@@ -511,13 +516,18 @@ alignLambdaRes ::
   [a] ->
   (Lambda SOACS, [a])
 alignLambdaRes (lam, inout) inout'' =
-  ( lam {lambdaBody = body {bodyResult = res'}},
+  ( lam
+      { lambdaBody = body {bodyResult = res'},
+        lambdaReturnType = ts'
+      },
     inout'
   )
   where
     body = lambdaBody lam
     res = bodyResult body
-    (inout', res') = unzip $ align (zip inout res) inout''
+    ts = lambdaReturnType lam
+    (inout', (res', ts')) =
+      fmap unzip . unzip $ align (zip inout (zip res ts)) inout''
 
 alignLambdaPar ::
   (Eq a) =>
