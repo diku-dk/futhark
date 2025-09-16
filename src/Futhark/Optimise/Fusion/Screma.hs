@@ -267,6 +267,14 @@ parToInp inp lam = (m M.!)
   where
     m = M.fromList $ flip zip inp $ paramName <$> lambdaParams lam
 
+vnameInpToPar :: [VName] -> Lambda SOACS -> VName -> VName
+vnameInpToPar inp lam = (m M.!)
+  where
+    m =
+      M.fromList
+        . zip inp
+        $ paramName <$> lambdaParams lam
+
 -- | Check that all inputs and outputs are fusible for a producer and
 -- consumer.
 fuseIsVarish :: [SOAC.Input] -> [VName] -> Bool
@@ -416,6 +424,24 @@ scremaFuseInOut inp_c form_c out_c inp_p form_p out_p =
     ((pre_inp_p, pre_out_p), (post_inp_p, post_out_p)) =
       prePostInOut s inp_p form_p out_p
 
+prunePostOut :: Lambda SOACS -> [InOut] -> (Lambda SOACS, [InOut])
+prunePostOut lam out =
+  ( lam
+      { lambdaBody = body {bodyResult = res'},
+        lambdaReturnType = ts'
+      },
+    out'
+  )
+  where
+    ts = lambdaReturnType lam
+    body = lambdaBody lam
+    res = bodyResult body
+
+    (ts', res', out') =
+      unzip3
+        . mapMaybe (\(t, r, o) -> (t,r,) . External <$> fromExternal o)
+        $ zip3 ts res out
+
 toScrema ::
   (MonadFreshNames m) =>
   [SOAC.Input] ->
@@ -454,24 +480,25 @@ alignPrePost ::
   ([InOut], Lambda SOACS, [InOut]) ->
   m (Lambda SOACS, [VName])
 alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
-  (post_inp', pars') <-
-    unzip <$> auxiliary (pure []) _is_pars _is_ts
-  let (id_out, id_res) =
-        unzip
-          . mapMaybe (\(i, p) -> (,varRes $ paramName p) <$> fromExternal i)
-          . L.nubBy ((==) `on` fst)
-          . filter ((`notElem` post_out) . fst)
-          $ zip post_inp' pars'
+  (post_inp', pars', ts') <-
+    unzip3 <$> auxiliary (pure []) _is_pars _is_ts
+  let (id_out, id_res, id_ts) =
+        unzip3
+          . mapMaybe (\(i, p, t) -> (,varRes $ paramName p,t) <$> fromExternal i)
+          . L.nubBy ((==) `on` fst3)
+          . filter ((`notElem` post_out) . fst3)
+          $ zip3 post_inp' pars' ts'
   pure $
     ( post
         { lambdaParams = pars',
-          lambdaReturnType = ts,
+          lambdaReturnType = ts <> id_ts,
           lambdaBody =
             body {bodyResult = res <> id_res}
         },
       map fromExternalUnsafe post_out <> id_out
     )
   where
+    fst3 (a, _, _) = a
     body = lambdaBody post
     pars = lambdaParams post
     ts = lambdaReturnType post
@@ -483,12 +510,12 @@ alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
     auxiliary as is_pars ((i, t) : is_ts) =
       case pop ((i ==) . fst) is_pars of
         Just ((_, par), is_pars') ->
-          let as' = ((i, par) :) <$> as
+          let as' = ((i, par, t) :) <$> as
            in auxiliary as' is_pars' is_ts
         Nothing ->
           let as' = do
                 par <- newParam "x" t
-                ((i, par) :) <$> as
+                ((i, par, t) :) <$> as
            in auxiliary as' is_pars is_ts
 
 pop :: (a -> Bool) -> [a] -> Maybe (a, [a])
@@ -559,26 +586,30 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
         (post_inp_c, post_c, post_out_c)
         ) <-
         simplifyPrePost form_c pre_inout_c post_inout_c
+      let param_fuse_names =
+            vnameInpToPar (fromExternalUnsafe <$> pre_inp_c) pre_c <$> post_lam_fuse
       ( (pre_inp_p, pre_p, pre_out_p),
         (post_inp_p, post_p, post_out_p)
         ) <-
         simplifyPrePost form_p pre_inout_p post_inout_p
       let ( (post_fuse_inp_c, post_fuse_c, post_fuse_out_c),
             (pre_rest_inp_c, pre_rest_c, pre_rest_out_c)
-            ) = splitLambdaByPar post_lam_fuse pre_inp_c pre_c pre_out_c
+            ) = splitLambdaByPar param_fuse_names pre_inp_c pre_c pre_out_c
           (extra_pre_inp, pre_f', pre_out_f') =
-            fuseLambda pre_rest_c pre_rest_inp_c pre_rest_out_c pre_p pre_out_p
+            fuseLambda pre_rest_c pre_rest_inp_c pre_rest_out_c (debugPretty "pre:\n" pre_p) pre_out_p
           pre_inp_f' = pre_inp_p <> extra_pre_inp
           (extra_post_inp, post_p', post_out_p') =
             fuseLambda post_fuse_c post_fuse_inp_c post_fuse_out_c post_p post_out_p
           post_inp_p' = post_inp_p <> extra_post_inp
           post_inp_f' = post_inp_c <> post_inp_p'
-          post_f' = concatLambda post_c post_p'
-          post_out_f' = post_out_c <> post_out_p'
+          post_f'' = concatLambda post_c post_p'
+          post_out_f'' = post_out_c <> post_out_p'
+          (post_f', post_out_f') = prunePostOut post_f'' post_out_f''
+      let !t = (debug "inp: " pre_inp_f', pre_f', debug "out: " pre_out_f')
       Just
         <$> toScrema
           (inp_c <> inp_p)
-          (pre_inp_f', pre_f', pre_out_f')
+          t
           (scans_f, scans_inout)
           (reds_f, reds_inout)
           (post_inp_f', post_f', post_out_f')
