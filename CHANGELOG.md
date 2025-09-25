@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Declaration of zero-length arrays in GPU kernels.
 
+* Handling of size closures of type abbreviations in interpreter (#2316).
+
 ## [0.25.33]
 
 ### Added
