@@ -297,6 +297,14 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@v10
+      with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
     - uses: actions/checkout@v4
 
     - name: Install dependencies
