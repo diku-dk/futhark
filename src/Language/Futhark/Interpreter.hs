@@ -1147,7 +1147,10 @@ substituteInModule substs = onModule
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
-    onType (TypeBinding env ps t) = TypeBinding (onEnv env) ps t
+    onType (TypeBinding env ps t) =
+      -- It is intentional that we do not apply a substitution on this env as it
+      -- must refer to the internal names.
+      TypeBinding env ps t
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
