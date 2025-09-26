@@ -319,8 +319,8 @@ jobs:
 
     - run: |
         export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O"
-        nix-shell --run 'futhark test -c --backend=ispc tests --no-tuning'
-        nix-shell --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
+        nix-shell -E 'with import (import ./nix/sources.nix {}).nixpkgs {}; mkShell { buildInputs = [ ispc python3Packages.jsonschema ]; }' --run 'futhark test -c --backend=ispc tests --no-tuning'
+        nix-shell -E 'with import (import ./nix/sources.nix {}).nixpkgs {}; mkShell { buildInputs = [ ispc python3Packages.jsonschema ]; }' --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 
   test-python:
     runs-on: ubuntu-22.04
