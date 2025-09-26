@@ -297,14 +297,6 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@v10
-      with:
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-
     - uses: actions/checkout@v4
 
     - name: Install dependencies
@@ -327,8 +319,8 @@ jobs:
 
     - run: |
         export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O"
-        nix-shell --run 'futhark test -c --backend=ispc tests --no-tuning'
-        nix-shell --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
+        nix-shell -p ispc --run 'futhark test -c --backend=ispc tests --no-tuning'
+        nix-shell -p ispc python3Packages.jsonschema --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 
   test-python:
     runs-on: ubuntu-22.04
