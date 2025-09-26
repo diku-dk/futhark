@@ -862,9 +862,9 @@ inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> M
 inferSizeArgs tparams bind_t bind_r t = do
   r <- gets (<>) <*> asks envParametrized
   let dinst = dimMapping bind_t t bind_r r
-  mapM (tparamArg dinst) tparams
+  mapM (tparamArg dinst bind_r) tparams
   where
-    tparamArg dinst tp =
+    tparamArg dinst bind_r tp =
       case M.lookup (typeParamName tp) dinst of
         Just e
           -- In some cases we infer anySizes for size arguments. This
@@ -873,8 +873,27 @@ inferSizeArgs tparams bind_t bind_r t = do
           -- as a concrete argument.
           | e /= anySize ->
               replaceExp e
-        _ ->
-          pure $ sizeFromInteger 0 mempty
+        _ -> do
+          -- If the dimension mapping doesn't contain the type parameter,
+          -- try to find it in the bind_r (bound replacements) which might
+          -- contain the original expression that should be used.
+          case find (\(ReplacedExp e', vn') -> 
+                     case e' of
+                       -- Look for complex expressions that aren't simple variables or constants
+                       AppExp (BinOp _ _ _ _ _) _ -> True
+                       _ -> False
+                     ) bind_r of
+            Just (ReplacedExp e', _) -> replaceExp e'
+            Nothing -> 
+              -- As a last resort, check current replacements for complex expressions
+              do r <- gets (<>) <*> asks envParametrized
+                 case find (\(ReplacedExp e', _) -> 
+                           case e' of
+                             AppExp (BinOp _ _ _ _ _) _ -> True
+                             _ -> False
+                           ) r of
+                   Just (ReplacedExp e', _) -> replaceExp e'
+                   Nothing -> pure $ sizeFromInteger 0 mempty
 
 -- Monomorphising higher-order functions can result in function types
 -- where the same named parameter occurs in multiple spots.  When
