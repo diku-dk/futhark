@@ -875,8 +875,15 @@ inferSizeArgs tparams bind_t bind_r t = do
               replaceExp e
         _ -> do
           -- If the dimension mapping doesn't contain the type parameter,
-          -- try to find it in the bind_r (bound replacements) which might
-          -- contain the original expression that should be used.
+          -- this likely indicates that complex size expressions (like m ** n) 
+          -- failed to be properly mapped between function signatures and call sites.
+          -- 
+          -- As a fallback, search for complex expressions in the replacement contexts:
+          -- 1. First try bound replacements (from the original function)  
+          -- 2. Then try current replacements (from the instantiation context)
+          -- 
+          -- This handles the specific case where identical complex expressions
+          -- should match but dimension mapping failed to establish the connection.
           case find (\(ReplacedExp e', vn') -> 
                      case e' of
                        -- Look for complex expressions that aren't simple variables or constants
