@@ -22,7 +22,7 @@ compileSegRed ::
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 compileSegRed pat space reds kbody nsubtasks =
   compileSegRed' pat space reds nsubtasks $ \red_cont ->
     compileStms mempty (bodyStms kbody) $ do
@@ -41,7 +41,7 @@ compileSegRed' ::
   [SegBinOp MCMem] ->
   TV Int32 ->
   DoSegBody ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 compileSegRed' pat space reds nsubtasks kbody
   | [_] <- unSegSpace space =
       nonsegmentedReduction pat space reds nsubtasks kbody
@@ -98,8 +98,8 @@ nonsegmentedReduction ::
   [SegBinOp MCMem] ->
   TV Int32 ->
   DoSegBody ->
-  MulticoreGen Imp.MCCode
-nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
+  MulticoreGen ()
+nonsegmentedReduction pat space reds nsubtasks kbody = do
   thread_res_arrs <- groupResultArrays "reduce_stage_1_tid_res_arr" (tvSize nsubtasks) reds
   let slugs1 = zipWith SegBinOpSlug reds thread_res_arrs
       nsubtasks' = tvExp nsubtasks
@@ -384,12 +384,11 @@ segmentedReduction ::
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
-  MulticoreGen Imp.MCCode
-segmentedReduction pat space reds kbody =
-  collect $ do
-    body <- compileSegRedBody pat space reds kbody
-    free_params <- freeParams body
-    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" body free_params
+  MulticoreGen ()
+segmentedReduction pat space reds kbody = do
+  body <- collect $ compileSegRedBody pat space reds kbody
+  free_params <- freeParams body
+  emit $ Imp.Op $ Imp.ParLoop "segmented_segred" body free_params
 
 -- Currently, this is only used as part of SegHist calculations, never alone.
 compileSegRedBody ::
@@ -397,7 +396,7 @@ compileSegRedBody ::
   SegSpace ->
   [SegBinOp MCMem] ->
   DoSegBody ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 compileSegRedBody pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map pe64 ns
@@ -407,40 +406,39 @@ compileSegRedBody pat space reds kbody = do
 
   let per_red_pes = segBinOpChunks reds $ patElems pat
   -- Perform sequential reduce on inner most dimension
-  collect . inISPC $
-    generateChunkLoop "SegRed" Vectorized $ \n_segments -> do
-      flat_idx <- dPrimVE "flat_idx" $ n_segments * inner_bound
-      zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
-      sComment "neutral-initialise the accumulators" $
-        forM_ (zip per_red_pes reds) $ \(pes, red) ->
-          forM_ (zip pes (segBinOpNeutral red)) $ \(pe, ne) ->
-            sLoopNest (segBinOpShape red) $ \vec_is ->
-              copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) ne []
+  inISPC $ generateChunkLoop "SegRed" Vectorized $ \n_segments -> do
+    flat_idx <- dPrimVE "flat_idx" $ n_segments * inner_bound
+    zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
+    sComment "neutral-initialise the accumulators" $
+      forM_ (zip per_red_pes reds) $ \(pes, red) ->
+        forM_ (zip pes (segBinOpNeutral red)) $ \(pe, ne) ->
+          sLoopNest (segBinOpShape red) $ \vec_is ->
+            copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) ne []
 
-      sComment "main body" $ do
-        dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
-        sFor "i" inner_bound $ \i -> do
-          zipWithM_
-            (<--)
-            (map mkTV $ init is)
-            (unflattenIndex (init ns_64) (sExt64 n_segments))
-          dPrimV_ (last is) i
-          kbody $ \red_res' -> do
-            forM_ (zip3 per_red_pes reds red_res') $ \(pes, red, res') ->
-              sLoopNest (segBinOpShape red) $ \vec_is -> do
-                sComment "load accum" $ do
-                  let acc_params = take (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
-                  forM_ (zip acc_params pes) $ \(p, pe) ->
-                    copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.le64 (init is) ++ vec_is)
+    sComment "main body" $ do
+      dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
+      sFor "i" inner_bound $ \i -> do
+        zipWithM_
+          (<--)
+          (map mkTV $ init is)
+          (unflattenIndex (init ns_64) (sExt64 n_segments))
+        dPrimV_ (last is) i
+        kbody $ \red_res' -> do
+          forM_ (zip3 per_red_pes reds red_res') $ \(pes, red, res') ->
+            sLoopNest (segBinOpShape red) $ \vec_is -> do
+              sComment "load accum" $ do
+                let acc_params = take (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
+                forM_ (zip acc_params pes) $ \(p, pe) ->
+                  copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.le64 (init is) ++ vec_is)
 
-                sComment "load new val" $ do
-                  let next_params = drop (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
-                  forM_ (zip next_params res') $ \(p, (res, res_is)) ->
-                    copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+              sComment "load new val" $ do
+                let next_params = drop (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
+                forM_ (zip next_params res') $ \(p, (res, res_is)) ->
+                  copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
 
-                sComment "apply reduction" $ do
-                  let lbody = (lambdaBody . segBinOpLambda) red
-                  compileStms mempty (bodyStms lbody) $
-                    sComment "write back to res" $
-                      forM_ (zip pes $ map resSubExp $ bodyResult lbody) $
-                        \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) se' []
+              sComment "apply reduction" $ do
+                let lbody = (lambdaBody . segBinOpLambda) red
+                compileStms mempty (bodyStms lbody) $
+                  sComment "write back to res" $
+                    forM_ (zip pes $ map resSubExp $ bodyResult lbody) $
+                      \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) se' []
