@@ -42,7 +42,7 @@ import Futhark.Optimise.Fusion.GraphRep
 --import Debug.Trace
 
 -----------------------------------
---- names of special functions
+--- names of special functions  ---
 -----------------------------------
 
 tileFuns :: [String]

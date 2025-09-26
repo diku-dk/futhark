@@ -259,9 +259,10 @@ stripmineStmt fenv k env sched (Let pat aux (Loop fpar_inis (ForLoop liter inttp
         newParam (base_par_str++show (0::Int)) (paramDec fpar)
       (prol, env2, stm) <- recStripLoop dim_lens env1 dim_lens body1 (pat,fpars',inis) pe0
       pure $ Just (prol <> prologue_lam, env2, Sq.singleton stm)
+    -- recStripLoop :: [PrimExp VName] -> Env -> [PrimExp VName] -> Body SOACS -> ()
     -- Core Function for Stripmining a Normalized DO Loop
     recStripLoop _ _ [] _ _ _ =
-      error "Unreachable case reached in loop stripmining"
+      error "Unreachable case reached in loop stripmining!"
     recStripLoop dlens env1 (w:ws) body1 (lpat, fpars, inis) cur_ind = do
       scope <- askScope
       i_p <- newParam ("i_strip"++show k) (Prim $ IntType inttp)
@@ -287,6 +288,8 @@ stripmineStmt fenv k env sched (Let pat aux (Loop fpar_inis (ForLoop liter inttp
               pure (rec_prologue, rec_env, Loop (zip fpars inis) (ForLoop i_p_nm inttp w_se) loop_body')
         pure (prologue <> w_stms, env2, Let lpat aux loop_e)
     --
+    mkStripminedBody :: (LocalScope SOACS m, MonadFreshNames m) =>
+        [PrimExp VName] -> Body SOACS -> PrimExp VName -> m (Body SOACS)
     mkStripminedBody dim_lens body1 cur_ind = do
       scope <- askScope
       runBodyBuilder $ localScope scope $ do
@@ -377,7 +380,7 @@ stripmineStmt fenv k env sched (Let pat aux
             runLambdaBuilder [i_p] $ localScope (scope <> scopeOfLParams red_acc') $ do
               addStms rec_stms; pure rec_res'
           new_lam' <- renameLambda new_lam >>= simplifyLambda 0
-          let map_stm = soacStm (pat_nms, map (`arrayOfRow` w) $ lambdaReturnType red_lam)
+          let map_stm = scremaStm (pat_nms, map (`arrayOfRow` w) $ lambdaReturnType red_lam)
                 (w,iotnm) $ ScremaForm new_lam' [] []
           pure $ Just (new_prologue <> rec_prologue, rec_env, Sq.singleton map_stm)
         -- The case of a parallel dimension, i.e., generating a redomap
@@ -390,7 +393,7 @@ stripmineStmt fenv k env sched (Let pat aux
           red_lam' <- renameLambda red_lam
           new_stms <- flip runBuilderT_ scope $ do
               soac_res <- forM pat_nms $ \_ -> newVName $ "redomap_res" ++ show k
-              addStm $ soacStm (soac_res, lambdaReturnType red_lam) (w,iotnm) $
+              addStm $ scremaStm (soac_res, lambdaReturnType red_lam) (w,iotnm) $
                 ScremaForm new_lam' [] [Reduce com red_lam' nes]
               applyRedLam (red_lam, nes) acc_ini (map Var soac_res) pat_nms >>= addStms
           pure $ Just (new_prologue <> rec_prologue, rec_env, new_stms)
@@ -410,7 +413,8 @@ stripmineStmt fenv k env sched (Let pat aux
           pure $ Just (w_stms <> rec_prologue, rec_env, Sq.singleton loop_stm)
 --}
         _ -> pure Nothing
-    soacStm (pat_nms,tps) (w, iotnm) form =
+    scremaStm :: ([VName], [Type]) -> (SubExp, VName) -> ScremaForm SOACS -> Stm SOACS
+    scremaStm (pat_nms,tps) (w, iotnm) form =
       let pat_res = Pat $ zipWith PatElem pat_nms tps
       in  Let pat_res aux $ Op $ F.Screma w [iotnm] form
 --------------------------------------------------------------------------
