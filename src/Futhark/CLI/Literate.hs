@@ -1082,7 +1082,8 @@ processScript :: Env -> [Block] -> IO (Failure, T.Text)
 processScript env script = do
   (failures, outputs, files) <-
     unzip3 <$> mapM (processBlock env) script
-  cleanupImgDir env $ mconcat files
+  cleanupImgDir env $
+    (envImgDir env </> "CACHEDIR.TAG") `S.insert` mconcat files
   pure (L.foldl' min Success failures, T.intercalate "\n" outputs)
 
 -- | Common command line options that transform 'Options'.
