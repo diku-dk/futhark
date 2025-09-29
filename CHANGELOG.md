@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Handling of size closures of type abbreviations in interpreter (#2316).
 
+* `futhark literate` deleted `CACHEDIR.TAG` files.
+
 ## [0.25.33]
 
 ### Added
