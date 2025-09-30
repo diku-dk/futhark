@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark literate` deleted `CACHEDIR.TAG` files.
 
+* `futhark literate` now prints records and tuples properly.
+
 ## [0.25.33]
 
 ### Added
