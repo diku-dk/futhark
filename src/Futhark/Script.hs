@@ -60,7 +60,7 @@ import Futhark.Test.Values qualified as V
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (line, sep, space, (</>))
 import Language.Futhark.Core (Name, nameFromText, nameToText)
-import Language.Futhark.Tuple (areTupleFields)
+import Language.Futhark.Tuple (areTupleFields, tupleFieldNames)
 import System.FilePath ((</>))
 import Text.Megaparsec
 import Text.Megaparsec.Char (space)
@@ -478,6 +478,29 @@ cannotApply fname expected actual =
       <> " argument(s) of types:\n"
       <> T.intercalate "\n" (map prettyTextOneLine actual)
 
+getField ::
+  (MonadIO m, MonadError T.Text m) =>
+  ScriptServer ->
+  T.Text ->
+  (Name, b) ->
+  m VarName
+getField server from (f, _) = do
+  to <- newVar server "field"
+  cmdMaybe $ cmdProject (scriptServer server) to from $ nameToText f
+  pure to
+
+unTuple ::
+  (MonadIO f, MonadError T.Text f) =>
+  ScriptServer ->
+  ExpValue ->
+  f [ExpValue]
+unTuple _ (V.ValueTuple vs) = pure vs
+unTuple server (V.ValueAtom (SValue t (VVar v)))
+  | Just ts <- isTuple t $ scriptTypes server =
+      forM (zip tupleFieldNames ts) $ \(k, kt) ->
+        V.ValueAtom . SValue kt . VVar <$> getField server v (k, kt)
+unTuple _ v = pure [v]
+
 -- | Evaluate a FutharkScript expression relative to some running server.
 evalExp ::
   forall m.
@@ -500,11 +523,6 @@ evalExp builtin sserver top_level_e = do
         v <- newVar' "record"
         cmdMaybe $ cmdNew server v t vs
         pure v
-
-      getField from (f, _) = do
-        to <- newVar' "field"
-        cmdMaybe $ cmdProject server to from $ nameToText f
-        pure to
 
       toVar :: ValOrVar -> m VarName
       toVar (VVar v) = pure v
@@ -542,18 +560,19 @@ evalExp builtin sserver top_level_e = do
         | Just t_fs <- isRecord t types,
           Just vt_fs <- isRecord vt types,
           vt_fs == t_fs =
-            mkRecord t =<< mapM (getField v) vt_fs
+            mkRecord t =<< mapM (getField sserver v) vt_fs
       interValToVar _ t (V.ValueAtom (SValue _ (VVal v)))
         | Just v' <- coerceValue t v =
             scriptValueToVar $ SValue t $ VVal v'
       interValToVar bad _ _ = bad
 
       letMatch :: [VarName] -> ExpValue -> m VTable
-      letMatch vs val
-        | vals <- V.unCompound val,
-          length vs == length vals =
+      letMatch vs val = do
+        vals <- unTuple sserver val
+        if length vs == length vs
+          then
             pure $ M.fromList (zip vs vals)
-        | otherwise =
+          else
             throwError $
               "Pat: "
                 <> prettyTextOneLine vs
@@ -585,11 +604,11 @@ evalExp builtin sserver top_level_e = do
                     then do
                       outs <- replicateM (length out_types) $ newVar' "out"
                       void $ cmdEither $ cmdCall server name outs arg_types
-                      pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
+                      pure . V.mkCompound . map V.ValueAtom $
+                        zipWith SValue out_types (map VVar outs)
                     else
                       pure . V.ValueAtom . SFun name in_types out_types $
-                        zipWith SValue in_types $
-                          map VVar arg_types
+                        zipWith SValue in_types (map VVar arg_types)
 
             -- Careful to not require saturated application, but do still
             -- check for over-saturation.
@@ -648,7 +667,7 @@ getExpValue _ (V.ValueAtom (SFun fname _ _ _)) =
 getExpValue server (V.ValueAtom (SValue t (VVar v)))
   | Just fs <- isRecord t types =
       tupleOrRecord . M.fromList . zip (map fst fs)
-        <$> mapM (getField v) fs
+        <$> mapM (onField v) fs
   | not $ primArrayType t =
       throwError $ "Type " <> t <> " has no external representation."
   | otherwise =
@@ -659,9 +678,8 @@ getExpValue server (V.ValueAtom (SValue t (VVar v)))
     tupleOrRecord m =
       maybe (V.ValueRecord $ M.mapKeys nameToText m) V.ValueTuple $ areTupleFields m
 
-    getField from (f, ft) = do
-      to <- newVar server "field"
-      cmdMaybe $ cmdProject (scriptServer server) to from $ nameToText f
+    onField from (f, ft) = do
+      to <- getField server from (f, ft)
       getExpValue server $ V.ValueAtom $ SValue ft $ VVar to
 getExpValue server (V.ValueTuple vs) =
   V.ValueTuple <$> traverse (getExpValue server) vs

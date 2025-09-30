@@ -13,3 +13,5 @@ entry f' (x: i32) (y: i32) (z: i32) = (x, (y, z))
 entry g' (x: i32) (y: i32) (z: i32) = {x, y = (y, z)}
 
 -- > g' 10 7 2
+
+-- > let (a, r) = f' 1 2 3 let (b, c) = r in (c, b, a)
