@@ -146,7 +146,7 @@ simplifyConcat _ _ _ _ = Skip
 ruleBasicOp :: (BuilderOps rep) => TopDownRuleBasicOp rep
 ruleBasicOp vtable pat aux op
   | Just (op', cs) <- applySimpleRules defOf seType op =
-      Simplify $ certifying (cs <> stmAuxCerts aux) $ letBind pat $ BasicOp op'
+      Simplify $ auxing aux $ certifying cs $ letBind pat $ BasicOp op'
   where
     defOf = (`ST.lookupExp` vtable)
     seType (Var v) = ST.lookupType v vtable
