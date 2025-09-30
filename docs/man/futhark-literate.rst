@@ -241,16 +241,17 @@ FUTHARKSCRIPT
 Only an extremely limited subset of Futhark is supported:
 
 .. productionlist::
-   script_exp:   `fun` `script_exp`*
-            : | "(" `script_exp` ")"
-            : | "(" `script_exp` ( "," `script_exp` )+ ")"
-            : | "[" `script_exp` ( "," `script_exp` )+ "]"
-            : | "empty" "(" ("[" `decimal` "]" )+ `script_type` ")"
-            : | "{" "}"
-            : | "{" (`id` = `script_exp`) ("," `id` = `script_exp`)* "}"
-            : | "let" `script_pat` "=" `script_exp` "in" `script_exp`
-            : | `literal`
-   script_pat:  `id` | "(" `id` ("," `id`) ")"
+   script_exp:   `script_fun` `script_exp`*
+             : | "let" `script_pat` "=" `script_exp` "in" `script_exp`
+             : | `script_atom` ( "." `fieldid` )*
+   script_atom: `script_fun`
+              : | "(" `script_exp` ")"
+              : | "(" `script_exp` ( "," `script_exp` )+ ")"
+              : | "[" `script_exp` ( "," `script_exp` )+ "]"
+              : | "empty" "(" ("[" `decimal` "]" )+ `script_type` ")"
+              : | "{" "}"
+              : | "{" (`id` = `script_exp`) ("," `id` = `script_exp`)* "}"
+   script_pat:  `id` | "(" `id` ("," `id`)* ")"
    script_fun:  `id` | "$" `id`
    script_type: `int_type` | `float_type` | "bool"
 
