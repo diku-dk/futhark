@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Some optimisations would throw away source location information, resulting in
   worse profiling data.
 
+* Tighter source locations for `let x[i] = ...` expressions.
+
 ## [0.25.33]
 
 ### Added
