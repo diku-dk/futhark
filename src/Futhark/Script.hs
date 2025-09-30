@@ -121,6 +121,7 @@ data Exp
   | Const V.Value
   | Tuple [Exp]
   | Record [(T.Text, Exp)]
+  | Project Exp T.Text
   | StringLit T.Text
   | Let [VarName] Exp Exp
   | -- | Server-side variable, *not* Futhark variable (these are
@@ -148,6 +149,8 @@ instance Pretty Exp where
         parensIf (i > 0) $ pretty v <+> hsep (map (align . pprPrec 1) args)
       pprPrec _ (Tuple vs) =
         parens $ commasep $ map (align . pretty) vs
+      pprPrec _ (Project e f) =
+        pprPrec 1 e <> "." <> pretty f
       pprPrec _ (StringLit s) = pretty $ show s
       pprPrec _ (Record m) = braces $ align $ commasep $ map field m
         where
@@ -169,12 +172,12 @@ parseExp :: Parsec Void T.Text () -> Parsec Void T.Text Exp
 parseExp sep =
   choice
     [ pLet,
-      try $ Call <$> parseFunc <*> many pAtom,
+      try $ Call <$> pFunc <*> some pAtom,
       pAtom
     ]
     <?> "expression"
   where
-    pField = (,) <$> pVarName <*> (pEquals *> parseExp sep)
+    pField = (,) <$> lVarName <*> (pEquals *> parseExp sep)
     pEquals = lexeme sep "="
     pComma = lexeme sep ","
     mkTuple [v] = v
@@ -191,6 +194,12 @@ parseExp sep =
             pLet
           ]
 
+    pProject e =
+      choice
+        [ lexeme sep "." *> (pFieldName >>= pProject . Project e),
+          pure e
+        ]
+
     pAtom =
       choice
         [ try $ inParens sep (mkTuple <$> (parseExp sep `sepEndBy` pComma)),
@@ -198,29 +207,34 @@ parseExp sep =
           inBraces sep (Record <$> (pField `sepEndBy` pComma)),
           StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\""),
           Const <$> V.parseValue sep,
-          Call <$> parseFunc <*> pure []
+          Call <$> pFunc <*> pure []
         ]
+        >>= pProject
 
     pPat =
       choice
-        [ inParens sep $ pVarName `sepEndBy` pComma,
-          pure <$> pVarName
+        [ inParens sep $ lVarName `sepEndBy` pComma,
+          pure <$> lVarName
         ]
 
-    parseFunc =
+    pFunc =
       choice
-        [ FuncBuiltin <$> ("$" *> pVarName),
-          FuncFut <$> pVarName
+        [ FuncBuiltin <$> ("$" *> lVarName),
+          FuncFut <$> lVarName
         ]
 
     reserved = ["let", "in"]
 
-    pVarName = lexeme sep . try $ do
+    lVarName = lexeme sep . try $ do
       v <- fmap T.pack $ (:) <$> satisfy isAlpha <*> many (satisfy constituent)
       guard $ v `notElem` reserved
       pure v
       where
         constituent c = isAlphaNum c || c == '\'' || c == '_'
+
+    lIntStr = lexeme sep . try . fmap T.pack $ some $ satisfy isDigit
+
+    pFieldName = lVarName <|> lIntStr
 
 -- | Parse a FutharkScript expression with normal whitespace handling.
 parseExpFromText :: FilePath -> T.Text -> Either T.Text Exp
@@ -490,16 +504,37 @@ getField server from (f, _) = do
   pure to
 
 unTuple ::
-  (MonadIO f, MonadError T.Text f) =>
+  (MonadIO m, MonadError T.Text m) =>
   ScriptServer ->
   ExpValue ->
-  f [ExpValue]
+  m [ExpValue]
 unTuple _ (V.ValueTuple vs) = pure vs
 unTuple server (V.ValueAtom (SValue t (VVar v)))
   | Just ts <- isTuple t $ scriptTypes server =
       forM (zip tupleFieldNames ts) $ \(k, kt) ->
         V.ValueAtom . SValue kt . VVar <$> getField server v (k, kt)
 unTuple _ v = pure [v]
+
+project ::
+  (MonadIO m, MonadError T.Text m) =>
+  ScriptServer ->
+  ExpValue ->
+  T.Text ->
+  m ExpValue
+project _ (V.ValueRecord fs) k =
+  case M.lookup k fs of
+    Nothing -> throwError $ "Unknown field: " <> k
+    Just v -> pure v
+project server (V.ValueAtom (SValue t (VVar v))) f
+  | Just fs <- isRecord t $ scriptTypes server =
+      case lookup f' fs of
+        Nothing -> throwError $ "Type " <> t <> " does not have a field " <> f <> "."
+        Just ft ->
+          V.ValueAtom . SValue ft . VVar <$> getField server v (f', ft)
+  where
+    f' = nameFromText f
+project _ _ _ =
+  throwError "Cannot project from non-record."
 
 -- | Evaluate a FutharkScript expression relative to some running server.
 evalExp ::
@@ -582,6 +617,9 @@ evalExp builtin sserver top_level_e = do
       evalExp' :: VTable -> Exp -> m ExpValue
       evalExp' _ (ServerVar t v) =
         pure $ V.ValueAtom $ SValue t $ VVar v
+      evalExp' vtable (Project e f) = do
+        e' <- evalExp' vtable e
+        project sserver e' f
       evalExp' vtable (Call (FuncBuiltin name) es) =
         builtin sserver name =<< mapM (evalExp' vtable) es
       evalExp' vtable (Call (FuncFut name) es)
@@ -718,6 +756,7 @@ evalExpToGround builtin server e = do
 -- program.
 varsInExp :: Exp -> S.Set EntryName
 varsInExp ServerVar {} = mempty
+varsInExp (Project e _) = varsInExp e
 varsInExp (Call (FuncFut v) es) = S.insert v $ foldMap varsInExp es
 varsInExp (Call (FuncBuiltin _) es) = foldMap varsInExp es
 varsInExp (Tuple es) = foldMap varsInExp es
