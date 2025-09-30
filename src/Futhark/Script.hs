@@ -26,7 +26,6 @@ module Futhark.Script
     EvalBuiltin,
     scriptBuiltin,
     evalExp,
-    getScriptValue,
     getExpValue,
     getHaskellValue,
     evalExpToGround,
@@ -635,22 +634,40 @@ evalExp builtin sserver top_level_e = do
         throwError e
   (freeNonresultVars =<< evalExp' mempty top_level_e) `catchError` freeVarsOnError
 
--- | Read actual values from the server. Fails for values that have no
--- well-defined external representation.
-getScriptValue :: (MonadError T.Text m, MonadIO m) => ScriptServer -> ScriptValue ValOrVar -> m V.Value
-getScriptValue server = toGround <=< traverse onLeaf
-  where
-    onLeaf (VVar v) = readVar (scriptServer server) v
-    onLeaf (VVal v) = pure v
-    toGround (SFun fname _ _ _) =
-      throwError $ "Function " <> fname <> " not fully applied."
-    toGround (SValue _ v) = pure v
+primArrayType :: TypeName -> Bool
+primArrayType s = case fmap T.uncons <$> T.uncons s of
+  Just ('[', Just (']', s')) -> primArrayType s'
+  _ -> s `elem` ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f16", "f32", "f64", "bool"]
 
 -- | Read actual compound values from the server. Fails for values that have no
 -- well-defined external representation.
 getExpValue ::
   (MonadError T.Text m, MonadIO m) => ScriptServer -> ExpValue -> m V.CompoundValue
-getExpValue server = traverse (getScriptValue server)
+getExpValue _ (V.ValueAtom (SFun fname _ _ _)) =
+  throwError $ "Function " <> fname <> " not fully applied."
+getExpValue server (V.ValueAtom (SValue t (VVar v)))
+  | Just fs <- isRecord t types =
+      tupleOrRecord . M.fromList . zip (map fst fs)
+        <$> mapM (getField v) fs
+  | not $ primArrayType t =
+      throwError $ "Type " <> t <> " has no external representation."
+  | otherwise =
+      V.ValueAtom <$> readVar (scriptServer server) v
+  where
+    types = scriptTypes server
+
+    tupleOrRecord m =
+      maybe (V.ValueRecord $ M.mapKeys nameToText m) V.ValueTuple $ areTupleFields m
+
+    getField from (f, ft) = do
+      to <- newVar server "field"
+      cmdMaybe $ cmdProject (scriptServer server) to from $ nameToText f
+      getExpValue server $ V.ValueAtom $ SValue ft $ VVar to
+getExpValue server (V.ValueTuple vs) =
+  V.ValueTuple <$> traverse (getExpValue server) vs
+getExpValue server (V.ValueRecord fs) =
+  V.ValueRecord <$> traverse (getExpValue server) fs
+getExpValue _ (V.ValueAtom (SValue _ (VVal v))) = pure $ V.ValueAtom v
 
 -- | Retrieve a Haskell value from an 'ExpValue'. This returns 'Just' if the
 -- 'ExpValue' is an atom with a non-opaque type.
