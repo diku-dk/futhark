@@ -563,14 +563,6 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
                 loop_initial_cond : mergeinit
               )
             )
-internaliseAppExp desc _ (E.LetWith name src idxs ve body loc) = do
-  let pat = E.Id (E.identName name) (E.identType name) loc
-      src_t = E.identType src
-      e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
-  internaliseExp desc $
-    E.AppExp
-      (E.LetPat [] pat e body loc)
-      (Info (AppRes (E.typeOf body) mempty))
 internaliseAppExp desc _ (E.Match e orig_cs _) = do
   ses <- internaliseExp (desc <> "_scrutinee") e
   cs <- mapM (onCase ses) orig_cs
@@ -593,6 +585,8 @@ internaliseAppExp desc _ (E.If ce te fe _) =
       (internaliseBody (desc <> "_f") fe)
 internaliseAppExp _ _ e@E.BinOp {} =
   error $ "internaliseAppExp: Unexpected BinOp " ++ prettyString e
+internaliseAppExp _ _ e@(E.LetWith {}) =
+  error $ "internaliseAppExp: Unexpected LetWith at " ++ locStr (srclocOf e)
 
 internaliseExp :: Name -> E.Exp -> InternaliseM [I.SubExp]
 internaliseExp desc (E.Parens e _) =

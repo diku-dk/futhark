@@ -28,6 +28,7 @@ import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.MonadFreshNames
 import Futhark.Util (showText)
+import Futhark.Util.Loc (srcspan)
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
@@ -326,10 +327,13 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
   where
     isOr = baseName (qualLeaf op) == "||"
     isAnd = baseName (qualLeaf op) == "&&"
-getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
+getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body _) _) = do
   e' <- getOrdering False e
   slice' <- astMap mapper slice
-  addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc)
+  -- Carefully synthesize a location that does not have the body in it -
+  -- this is so profiling information will be more precise.
+  let loc' = srcspan dloc e
+  addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc')
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
