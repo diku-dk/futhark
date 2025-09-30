@@ -11,7 +11,7 @@ import Control.Monad (foldM, msum, unless, (<=<))
 import Data.List (subsequences, (\\))
 import Futhark.Analysis.Properties.IndexFn (Domain (..), IndexFn (..), Quantified (..), cases, casesToList)
 import Futhark.Analysis.Properties.IndexFnPlus (subIndexFn, unifyIndexFnWith)
-import Futhark.Analysis.Properties.Monad (IndexFnM, debugPrettyM, debugT')
+import Futhark.Analysis.Properties.Monad (IndexFnM, debugPrettyM, debugT', printM)
 import Futhark.Analysis.Properties.Symbol (Symbol (..))
 import Futhark.Analysis.Properties.SymbolPlus (repVName, toSumOfSums)
 import Futhark.Analysis.Properties.Unify (Rep (rep), Substitution (mapping), Unify (unify), mkRep, renameAnd, sub, unifies, unifies_)
@@ -307,7 +307,7 @@ rulesIndexFn = do
         },
       -- TODO deduplicate Iota/Cat rules
       Rule
-        { name = "Prefix sum",
+        { name = "Segmented prefix sum",
           from =
             IndexFn
               { shape = [Forall i (Cat k (hole m) (hole b))],

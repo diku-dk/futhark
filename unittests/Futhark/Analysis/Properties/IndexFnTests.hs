@@ -155,6 +155,21 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/scan_lambda.fut"
+        ( pure $ \(i, n, xs, j) ->
+            [ IndexFn
+                { shape = [Forall i (Iota (sHole n))],
+                  body =
+                    cases
+                      [ ( Bool True,
+                          sym2SoP $
+                            Sum j (int2SoP 0) (sHole i) (Apply (Hole xs) [sHole j])
+                        )
+                      ]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/scan2.fut"
         ( pure $ \(i, n, xs, j) ->
             [ IndexFn
