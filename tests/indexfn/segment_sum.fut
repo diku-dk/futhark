@@ -1,4 +1,5 @@
 def segment_sum [n] 't
+      -- (flags: {[n]bool | \x -> x[0] == true})
       (flags: [n]bool)
       (xs: [n]i64) : {[n]i64 | \_ -> true} =
   let zipped = zip flags xs

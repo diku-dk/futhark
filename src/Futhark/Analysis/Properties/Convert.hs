@@ -471,7 +471,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
         y @ (x, fn)
           >>= rewrite
   | Just "scan" <- getFun e_f,
-    [E.Lambda params lam_body _ _ _, _ne, _xs] <- getArgs args,
+    [E.Lambda params lam_body _ _ _, ne, _xs] <- getArgs args,
     xs <- NE.fromList [NE.last args],
     [pat_acc, pat_x] <- params = do
       -- The first argument of the lambda is the accumulator
@@ -479,13 +479,28 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
       (outer_dim, aligned_args) <- zipArgsSOAC loc [pat_x] xs
 
       bindLambdaBodyParams (mconcat aligned_args)
-      let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
+      -- let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
+      let acc_vns = E.patNames pat_acc
       bodies <- rollbackAlgEnv $ do
         addRelIterator outer_dim
-        map (repIndexFn accToRec) <$> forward lam_body
+        forward lam_body
 
-      forM bodies $ \f_body ->
-        subst (f_body {shape = outer_dim : shape f_body}) >>= rewrite
+      neutrals <- forward ne
+
+      -- unless (length bodies == length acc_vns == length neutrals)
+      forM (zip3 bodies acc_vns neutrals) $ \(f_body, acc, f_ne) -> do
+        let f_rec = repIndexFn (mkRep acc (sym2SoP Recurrence)) f_body
+        f_base <- f_body @ (acc, f_ne)
+        base_case <- newVName "#base_case"
+        rec_case <- newVName "#rec_case"
+        f_scan <- (IndexFn {
+            shape = outer_dim : shape f_body,
+            body = cases [
+                (sVar (boundVar outer_dim) :== int2SoP 0, sVar base_case),
+                (sVar (boundVar outer_dim) :/= int2SoP 0, sVar rec_case)
+              ]
+          }) `substParams` [(base_case, f_base), (rec_case, f_rec)]
+        subst f_scan >>= rewrite
   | Just "scatter" <- getFun e_f,
     [e_dest, e_inds, e_vals] <- getArgs args = do
       -- `scatter dest is vs` calculates the equivalent of this imperative code:

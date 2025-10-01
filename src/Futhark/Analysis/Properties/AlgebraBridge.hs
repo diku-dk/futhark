@@ -17,9 +17,21 @@ import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Rule (Rule (..), applyRuleBook, vacuous)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals (ASTMappable (..), ASTMapper (..))
-import Futhark.Analysis.Properties.Unify (Substitution, sub, unify)
+import Futhark.Analysis.Properties.Unify (Substitution, Unify, renameSame, sub, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sym2SoP, (.+.), (.-.))
+
+eq :: Symbol -> Symbol -> IndexFnM Bool
+eq a b = do
+  s :: Maybe (Substitution Symbol) <- unify a b
+  pure $ isJust s
+
+or' :: (Monad m) => m Bool -> m Bool -> m Bool
+or' m1 m2 = do
+  a1 <- m1
+  if a1
+    then pure True
+    else m2
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -71,60 +83,128 @@ simplify = astMap m
       _ :>= _ -> refine symbol
       _ :< _ -> refine symbol
       _ :<= _ -> refine symbol
+      -- Solver can't directly disprove queries; handle cheap special cases here.
+      -- a :/= b
+      --   -- | a == b -> pure $ Bool False
+      --   | otherwise -> refine symbol
+      -- a :> b
+      --   -- | a == b -> pure $ Bool False
+      --   | otherwise -> refine symbol
+      -- a :< b
+      --   -- | a == b -> pure $ Bool False
+      --   | otherwise -> refine symbol
       (p :&& q) -> do
+        -- TODO clean up "fast paths" that don't use unification. I don't think
+        -- they actually speed up things. They are covered by unification cases.
         case (p, q) of
           (Bool True, _) -> pure q -- Identity.
           (_, Bool True) -> pure p
           (Bool False, _) -> pure $ Bool False -- Annihilation.
           (_, Bool False) -> pure $ Bool False
           (_, _) | p == q -> pure p -- Idempotence.
-          (_, _) | p == neg q -> pure $ Bool False -- A contradiction.
+          (_, _) | p == neg q -> pure $ Bool False -- Contradiction.
+          (a :&& b, c)
+            | a == c -> pure p
+            | b == c -> pure p
+            | a == neg c -> pure $ Bool False
+            | b == neg c -> pure $ Bool False
+            | otherwise -> do
+                idempotence <- (a `eq` c) `or'` (b `eq` c)
+                if idempotence
+                  then pure p
+                  else do
+                    contradiction <- (a `eq` neg c) `or'` (b `eq` neg c)
+                    pure $
+                      if contradiction
+                        then Bool False
+                        else p :&& q
+          (c, a :&& b)
+            | a == c -> pure q
+            | b == c -> pure q
+            | a == neg c -> pure $ Bool False
+            | b == neg c -> pure $ Bool False
+            | otherwise -> do
+                idempotence <- (a `eq` c) `or'` (b `eq` c)
+                if idempotence
+                  then pure q
+                  else do
+                    contradiction <- (a `eq` neg c) `or'` (b `eq` neg c)
+                    if contradiction
+                      then pure $ Bool False
+                      else pure $ p :&& q
           (_, _) -> do
             -- TODO should we treat all ps at once or is this enough?
             --      let ps = cnfToList symbol
             --      ... check all p,q in ps.
-            s :: Maybe (Substitution Symbol) <- unify p q
-            let p_equiv_q = isJust s
-            -- Check if p => q or q => p. Simplify accordingly.
-            let p_implies_q = rollbackAlgEnv $ do
-                  assume p
-                  isTrue q
-            let q_implies_p = rollbackAlgEnv $ do
-                  assume q
-                  isTrue p
-            if p_equiv_q
+            idempotence <- p `eq` q
+            if idempotence
               then pure p
               else do
-                p_implies_q' <- p_implies_q
-                case p_implies_q' of
-                  Yes -> pure p
-                  Unknown -> do
-                    q_implies_p' <- q_implies_p
-                    case q_implies_p' of
-                      Yes -> pure q
-                      Unknown -> pure (p :&& q)
+                contradiction <- p `eq` neg q
+                if contradiction
+                  then pure $ Bool False
+                  else do
+                    -- Check if p => q or q => p. Simplify accordingly.
+                    p_implies_q <- rollbackAlgEnv $ do
+                      assume p
+                      isTrue q
+                    case p_implies_q of
+                      Yes -> pure p
+                      Unknown -> do
+                        q_implies_p <- rollbackAlgEnv $ do
+                          assume q
+                          isTrue p
+                        case q_implies_p of
+                          Yes -> pure q
+                          Unknown -> pure (p :&& q)
       (p :|| q) -> do
-        pure $ case (p, q) of
-          (Bool False, _) -> q -- Identity.
-          (_, Bool False) -> p
-          (Bool True, _) -> Bool True -- Annihilation.
-          (_, Bool True) -> Bool True
-          (_, _) | p == q -> p -- Idempotence.
-          (_, _) | p == neg q -> Bool True -- A tautology.
+        case (p, q) of
+          (Bool False, _) -> pure q -- Identity.
+          (_, Bool False) -> pure p
+          (Bool True, _) -> pure $ Bool True -- Annihilation.
+          (_, Bool True) -> pure $ Bool True
+          (_, _) | p == q -> pure p -- Idempotence.
+          (_, _) | p == neg q -> pure $ Bool True -- A tautology.
           -- Check for factoring opportunity, e.g., (a ^ b) v (a ^ !b).
           (a :&& b, c :&& d)
-            | a == c && b == neg d -> a
-            | a == d && b == neg c -> a
-            | b == c && a == neg d -> b
-            | b == d && a == neg c -> b
-          (_, _) -> p :|| q
+            | a == c && b == neg d -> pure a
+            | a == d && b == neg c -> pure a
+            | b == c && a == neg d -> pure b
+            | b == d && a == neg c -> pure b
+          -- Check for implications, e.g.,
+          (_, a :&& b) | p == neg a -> pure $ p :|| b -- !p v (p ^ q) is !p v q
+          (_, b :&& a) | p == neg a -> pure $ p :|| b -- !p v (q ^ p) is !p v q
+          (a :&& b, _) | q == neg a -> pure $ b :|| q -- (p ^ q) v !p is q v !p
+          (b :&& a, _) | q == neg a -> pure $ b :|| q -- (q ^ p) v !p is q v !p
+          (_, _) -> do
+            idempotence <- p `eq` q
+            if idempotence
+              then pure p
+              else do
+                -- Check if p => q or q => p. Simplify accordingly.
+                p_implies_q <- rollbackAlgEnv $ do
+                  assume p
+                  isTrue q
+                case p_implies_q of
+                  Yes -> pure q
+                  Unknown -> do
+                    q_implies_p <- rollbackAlgEnv $ do
+                      assume q
+                      isTrue p
+                    case q_implies_p of
+                      Yes -> pure p
+                      Unknown -> pure (p :|| q)
       x -> pure x
 
     refine relation = do
       b <- solve relation
       case b of
         Yes -> pure $ Bool True
-        Unknown -> pure relation
+        Unknown -> do
+          not_b <- solve (neg relation)
+          case not_b of
+            Yes -> pure $ Bool False
+            Unknown -> pure relation
 
     -- Use Fourier-Motzkin elimination to determine the truth value
     -- of an expresion, if it can be determined in the given environment.

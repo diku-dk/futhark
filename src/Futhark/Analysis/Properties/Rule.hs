@@ -305,6 +305,28 @@ rulesIndexFn = do
             e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
             pure $ Recurrence `notElem` (e1_symbols <> e2_symbols)
         },
+      -- Rule
+      --   { name = "Prefix sum",
+      --     from =
+      --       IndexFn
+      --         { shape = [Forall i (Iota (hole n))],
+      --           body = cases [ (Bool True, Recurrence ~+~ Hole h2) ]
+      --         },
+      --     to = \s -> do
+      --       let iter = repVName (mapping s) i
+      --       e2 <- sub s (hole h2)
+      --       j <- newVName "j"
+      --       let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
+      --       let e2_sum = toSumOfSums j (int2SoP 0) (sym2SoP $ Var iter) e2_j
+      --       subIndexFn s $
+      --         IndexFn
+      --           { shape = [Forall i (Iota (hole n))],
+      --             body = cases [(Bool True, e2_sum)]
+      --           },
+      --     sideCondition = \s -> do
+      --       e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
+      --       pure $ Recurrence `notElem` e2_symbols
+      --   },
       -- TODO deduplicate Iota/Cat rules
       Rule
         { name = "Segmented prefix sum",
