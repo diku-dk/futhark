@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Declaration of zero-length arrays in GPU kernels.
 
+* Handling of size closures of type abbreviations in interpreter (#2316).
+
+* `futhark literate` deleted `CACHEDIR.TAG` files.
+
+* `futhark literate` now prints records and tuples properly.
+
+* Some optimisations would throw away source location information, resulting in
+  worse profiling data.
+
+* Tighter source locations for `let x[i] = ...` expressions.
+
 ## [0.25.33]
 
 ### Added
