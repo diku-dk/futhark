@@ -83,16 +83,6 @@ simplify = astMap m
       _ :>= _ -> refine symbol
       _ :< _ -> refine symbol
       _ :<= _ -> refine symbol
-      -- Solver can't directly disprove queries; handle cheap special cases here.
-      -- a :/= b
-      --   -- | a == b -> pure $ Bool False
-      --   | otherwise -> refine symbol
-      -- a :> b
-      --   -- | a == b -> pure $ Bool False
-      --   | otherwise -> refine symbol
-      -- a :< b
-      --   -- | a == b -> pure $ Bool False
-      --   | otherwise -> refine symbol
       (p :&& q) -> do
         -- TODO clean up "fast paths" that don't use unification. I don't think
         -- they actually speed up things. They are covered by unification cases.
@@ -101,49 +91,17 @@ simplify = astMap m
           (_, Bool True) -> pure p
           (Bool False, _) -> pure $ Bool False -- Annihilation.
           (_, Bool False) -> pure $ Bool False
-          (_, _) | p == q -> pure p -- Idempotence.
-          (_, _) | p == neg q -> pure $ Bool False -- Contradiction.
-          (a :&& b, c)
-            | a == c -> pure p
-            | b == c -> pure p
-            | a == neg c -> pure $ Bool False
-            | b == neg c -> pure $ Bool False
-            | otherwise -> do
-                idempotence <- (a `eq` c) `or'` (b `eq` c)
-                if idempotence
-                  then pure p
-                  else do
-                    contradiction <- (a `eq` neg c) `or'` (b `eq` neg c)
-                    pure $
-                      if contradiction
-                        then Bool False
-                        else p :&& q
-          (c, a :&& b)
-            | a == c -> pure q
-            | b == c -> pure q
-            | a == neg c -> pure $ Bool False
-            | b == neg c -> pure $ Bool False
-            | otherwise -> do
-                idempotence <- (a `eq` c) `or'` (b `eq` c)
-                if idempotence
-                  then pure q
-                  else do
-                    contradiction <- (a `eq` neg c) `or'` (b `eq` neg c)
-                    if contradiction
-                      then pure $ Bool False
-                      else pure $ p :&& q
           (_, _) -> do
             -- TODO should we treat all ps at once or is this enough?
-            --      let ps = cnfToList symbol
-            --      ... check all p,q in ps.
-            idempotence <- p `eq` q
-            if idempotence
-              then pure p
-              else do
-                contradiction <- p `eq` neg q
-                if contradiction
-                  then pure $ Bool False
-                  else do
+            --      let ps = cnfToList symbol ... check all p,q in ps.
+            symbol' <- idempotence symbol
+            case symbol' of
+              Just s -> pure s
+              _ -> do
+                symbol'' <- contradiction symbol
+                case symbol'' of
+                  Just s -> pure s
+                  _ -> do
                     -- Check if p => q or q => p. Simplify accordingly.
                     p_implies_q <- rollbackAlgEnv $ do
                       assume p
@@ -176,25 +134,38 @@ simplify = astMap m
           (_, b :&& a) | p == neg a -> pure $ p :|| b -- !p v (q ^ p) is !p v q
           (a :&& b, _) | q == neg a -> pure $ b :|| q -- (p ^ q) v !p is q v !p
           (b :&& a, _) | q == neg a -> pure $ b :|| q -- (q ^ p) v !p is q v !p
-          (_, _) -> do
-            idempotence <- p `eq` q
-            if idempotence
-              then pure p
-              else do
-                -- Check if p => q or q => p. Simplify accordingly.
-                p_implies_q <- rollbackAlgEnv $ do
-                  assume p
-                  isTrue q
-                case p_implies_q of
-                  Yes -> pure q
-                  Unknown -> do
-                    q_implies_p <- rollbackAlgEnv $ do
-                      assume q
-                      isTrue p
-                    case q_implies_p of
-                      Yes -> pure p
-                      Unknown -> pure (p :|| q)
+          (_, _) -> pure (p :|| q)
       x -> pure x
+
+    idempotence sym@(p :&& q)
+      | p == q = pure (Just p)
+      | otherwise = do
+          same <- p `eq` q
+          if same then pure (Just p) else idempotence2 sym
+    idempotence _ = pure Nothing
+
+    idempotence2 (p@(a :&& b) :&& q)
+      | a == q || b == q = pure (Just p)
+      | otherwise = do
+          same <- (a `eq` q) `or'` (b `eq` q)
+          pure $ if same then Just p else Nothing
+    idempotence2 (q :&& p@(_ :&& _)) = idempotence2 (p :&& q)
+    idempotence2 _ = pure Nothing
+
+    contradiction sym@(p :&& q)
+      | p == neg q = pure (Just (Bool False))
+      | otherwise = do
+          opposites <- p `eq` neg q
+          if opposites then pure (Just (Bool False)) else contradiction2 sym
+    contradiction _ = pure Nothing
+
+    contradiction2 ((a :&& b) :&& q)
+      | a == neg q || b == neg q = pure (Just (Bool False))
+      | otherwise = do
+          opposites <- (a `eq` neg q) `or'` (b `eq` neg q)
+          pure $ if opposites then Just (Bool False) else Nothing
+    contradiction2 (q :&& p@(_ :&& _)) = contradiction2 (p :&& q)
+    contradiction2 _ = pure Nothing
 
     refine relation = do
       b <- solve relation
