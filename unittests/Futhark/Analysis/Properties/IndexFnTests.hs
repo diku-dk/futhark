@@ -21,6 +21,15 @@ tests =
   testGroup
     "Properties.IndexFn"
     [ mkTest
+        "tests/indexfn/cooley-tukey-fft-par.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota (sHole n))],
+                  body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Apply (Hole xs) [sHole i]))]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/map.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
