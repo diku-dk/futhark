@@ -115,7 +115,7 @@ repProperty :: Replacement Symbol -> Property Symbol -> Property Symbol
 repProperty _ Boolean = Boolean
 repProperty s (Disjoint x) = Disjoint $ S.map (repVName s) x
 repProperty s (Monotonic x dir) = Monotonic (repVName s x) dir
-repProperty s (Rng x (a,b)) =
+repProperty s (Rng x (a, b)) =
   Rng (repVName s x) (rep s <$> a, rep s <$> b)
 repProperty s (Injective x (Just rcd)) =
   Injective (repVName s x) (Just $ repTuple s rcd)

@@ -11,7 +11,7 @@ where
 
 import Control.Monad (foldM)
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Properties.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator, cases, casesToList, Quantified (..))
+import Futhark.Analysis.Properties.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator, Quantified (..), cases, casesToList)
 import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
 import Futhark.Analysis.Properties.Symbol
 import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
@@ -84,7 +84,7 @@ instance ASTMappable Symbol Symbol where
   astMap m (x :<= y) = mapOnSymbol m =<< (:<=) <$> astMap m x <*> astMap m y
   astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> astMap m x <*> astMap m y
   astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> astMap m x <*> astMap m y
-  astMap m (Pow i x) = mapOnSymbol m . (Pow i) =<< astMap m x
+  astMap m (Pow i x) = mapOnSymbol m . Pow i =<< astMap m x
   astMap m (Prop p) = Prop <$> astMap m p
   astMap m (Assume p) = Assume <$> astMap m p
 
@@ -177,7 +177,7 @@ instance ASTFoldable Symbol Symbol where
     astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
   astFold m acc e@(x :|| y) =
     astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
-  astFold m acc e@(Pow i x) =
+  astFold m acc e@(Pow _ x) =
     astFold m acc x >>= flip (foldOnSymbol m) e
   astFold m acc Recurrence = foldOnSymbol m acc Recurrence
   astFold m acc (Var x) = foldOnSymbol m acc (Var x)

@@ -10,11 +10,11 @@ module Futhark.Analysis.Properties.Symbol
   )
 where
 
+import Futhark.Analysis.Properties.Property (Property)
 import Futhark.Analysis.Properties.Util (prettyHole, prettyName)
-import Futhark.SoP.SoP (SoP, justConstant, justSym, justAffine)
+import Futhark.SoP.SoP (SoP, justAffine, justConstant, justSym)
 import Futhark.Util.Pretty (Pretty, apply, parens, pretty, prettyString, softline, (<+>))
 import Language.Futhark (VName)
-import Futhark.Analysis.Properties.Property (Property)
 
 data Symbol
   = Var VName

@@ -31,8 +31,7 @@ import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSymAndConstant, justSingleTerm, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.*.), (.-.), (~*~), (~+~), (~-~))
-import Futhark.Util (fixPoint)
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (./.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
@@ -303,8 +302,6 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
                 (IndexFn [] (singleCase $ op (Var a) (Var b)))
                 [(a, vx), (b, vy)]
         case bop of
-          E.ShiftL ->
-            doOp (\ x y -> sym2SoP x .*. sym2SoP (Pow 2 (sym2SoP y))) -- x * 2^y
           E.Plus -> doOp (~+~)
           E.Times -> doOp (~*~)
           E.Minus -> doOp (~-~)
@@ -316,32 +313,33 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
           E.Geq -> doOp (~>=~)
           E.LogAnd -> doOp (~&&~)
           E.LogOr -> doOp (~||~)
+          E.ShiftL -> doOp (\x y -> sym2SoP x .*. sym2SoP (Pow 2 $ sym2SoP y))
           E.Divide
             | Just x_sop <- justSingleCase vx,
-              Just (Pow i x, k1) <- justSymAndConstant x_sop,
-              Just j_sop <- justSingleCase vy,
-              Just j <- justConstant j_sop,
-              i == j -> do
-              ok <- x $>= (int2SoP 1)
-              if k1 == 1 && i == j && ok == Yes
-              then pure $ IndexFn [] $ singleCase $ sym2SoP $ Pow i $ x .-. (int2SoP 1)
-              else if k1 == j 
-                   then pure $ IndexFn [] $ singleCase $ sym2SoP $ Pow i x
-                   else doOp $ \a' b' -> sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a', sym2SoP b']
-            | Just x_sop <- justSingleCase vx,
-              Just (Pow i x, k1) <- justSymAndConstant x_sop,
-              Just y_sop <- justSingleCase vy,
-              Just (Pow j y, k2) <- justSymAndConstant y_sop,
-              k1 == 1 && k2 == 1 && i == j -> do
-              ok <- x $>= y
-              case ok of
-                Yes -> -- i ^ (x - y)
-                  pure $ IndexFn [] $ singleCase $ sym2SoP $ Pow i $ x .-. y
-                Unknown -> 
-                  doOp $ \a' b' -> sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a', sym2SoP b']
-            | True ->
-              doOp $ \a' b' -> sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a', sym2SoP b']
+              Just y_sop <- justSingleCase vy ->
+                case x_sop ./. y_sop of
+                  Just z -> pure $ IndexFn [] (singleCase z)
+                  Nothing
+                    -- i^x / i = i^(x - 1)
+                    | Just (Pow i x) <- justSym x_sop,
+                      Just j <- justConstant y_sop,
+                      i == j -> do
+                        ok <- x $>= int2SoP 1
+                        case ok of
+                          Yes -> pure . IndexFn [] . singleCase . sym2SoP $ Pow i (x .-. int2SoP 1)
+                          Unknown -> doOp uninterpretedOp
+                    -- i^x / i^y = i^(x - y)
+                    | Just (Pow i x) <- justSym x_sop,
+                      Just (Pow j y) <- justSym y_sop,
+                      i == j -> do
+                        ok <- x $>= y
+                        case ok of
+                          Yes -> pure $ IndexFn [] $ singleCase $ sym2SoP $ Pow i $ x .-. y
+                          Unknown -> doOp uninterpretedOp
+                    | otherwise -> doOp uninterpretedOp
           _ -> error ("forward not implemented for bin op: " <> show bop)
+  where
+    uninterpretedOp a b = sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a, sym2SoP b]
 forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   cs <- forward e_c
   let f_c = case cs of
@@ -518,13 +516,17 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
         f_base <- f_body @ (acc, f_ne)
         base_case <- newVName "#base_case"
         rec_case <- newVName "#rec_case"
-        f_scan <- (IndexFn {
-            shape = outer_dim : shape f_body,
-            body = cases [
-                (sVar (boundVar outer_dim) :== int2SoP 0, sVar base_case),
-                (sVar (boundVar outer_dim) :/= int2SoP 0, sVar rec_case)
-              ]
-          }) `substParams` [(base_case, f_base), (rec_case, f_rec)]
+        f_scan <-
+          ( IndexFn
+              { shape = outer_dim : shape f_body,
+                body =
+                  cases
+                    [ (sVar (boundVar outer_dim) :== int2SoP 0, sVar base_case),
+                      (sVar (boundVar outer_dim) :/= int2SoP 0, sVar rec_case)
+                    ]
+              }
+            )
+            `substParams` [(base_case, f_base), (rec_case, f_rec)]
         subst f_scan >>= rewrite
   | Just "scatter" <- getFun e_f,
     [e_dest, e_inds, e_vals] <- getArgs args = do
