@@ -3,7 +3,26 @@
 -- that is not aimed at tensor cores, e.g., element type: f32 / f64
 ----------------------------------------------------------------------
 
-import "utils"
+def imap xs f = map f xs 
+
+type real = f32
+
+def pad1D 't [m] (xs: [m]t) (n : i64) (v: t) : [n]t =
+  imap (iota n) (\i -> if i < m then xs[i] else v)
+  
+def strip2 (n: i64) = (n/64, 4i64, 16i64)
+def strip1 (n: i64) = (n/16, 16i64)
+
+def hlSched2D 't [m][n] ( xs : [m][n]t ) 
+                        ( _offs: i64
+                        , _lens: []i64
+                        , _orig: []i64
+                        , _perm: []i64
+                        , _sigs: []i64
+                        , _strs: []i64
+                        ) : [m][n]t = xs
+
+-- import "utils"
 
 def padDotProd [M] (N: i64) (v: real) (xs: [M]real) (ys: [M]real) : real =
   map2 (*) (pad1D xs N v) (pad1D ys N v) |> reduce (+) 0
