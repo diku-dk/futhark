@@ -6,7 +6,7 @@ type num = f32
 def fft2Par (lgn: { i64 | \ x -> x > 0 }) (omega: num) (x: *[1<<lgn]num) 
             : { *[1<<lgn]num | \ _ -> true } =
     let n = 1 << lgn  -- 2^lgn
-    let omega_pows = map (\i -> if i==0 then 1 else omega) (iota n) |> scan (*) 1
+    let omega_pows = scan (*) 1 (map (\i -> if i==0 then 1 else omega) (iota n)) 
     in
       loop (x : *[1<<lgn]num) -- this should be [n]num
       for qm1 < lgn do
@@ -26,5 +26,7 @@ def fft2Par (lgn: { i64 | \ x -> x > 0 }) (omega: num) (x: *[1<<lgn]num)
                  ) (iota Ld2)
                ) (iota r)
         --
-        let (is1, vs1, is2, vs2) = unzip4 (flatten res_nested) 
-        in  scatter x (is1++is2) (vs1++vs2)
+        -- let (is1, vs1, is2, vs2) = unzip4 (flatten res_nested) 
+        -- in  scatter x (is1++is2) (vs1++vs2)
+        let (is1, vs1, is2, vs2) = unzip4 (map unzip4 res_nested) 
+        in is1 -- is bijective in [0, n/2)

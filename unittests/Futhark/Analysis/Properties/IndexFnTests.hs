@@ -30,6 +30,15 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/cooley-tukey-fft-seq.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota (sHole n))],
+                  body = cases [(Bool True, int2SoP 0)]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/map.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn

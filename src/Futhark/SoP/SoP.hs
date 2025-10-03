@@ -35,6 +35,7 @@ module Futhark.SoP.SoP
     sopFactors,
     numTerms,
     justSym,
+    justSymAndConstant,
     justConstant,
     justAffine,
     justSingleTerm,
@@ -405,6 +406,12 @@ justConstant sop
 justSym :: (Ord u) => SoP u -> Maybe u
 justSym sop
   | [([x], 1)] <- sopToLists $ normalize sop = Just x
+  | otherwise = Nothing
+
+
+justSymAndConstant :: (Ord u) => SoP u -> Maybe (u, Integer)
+justSymAndConstant sop
+  | [([x], c)] <- sopToLists $ normalize sop = Just (x,c)
   | otherwise = Nothing
 
 -- | Is the 'SoP' of the form a*x + b?

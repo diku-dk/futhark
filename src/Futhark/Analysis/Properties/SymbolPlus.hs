@@ -38,6 +38,7 @@ instance FreeVariables Symbol where
     x :/= y -> fv x <> fv y
     x :&& y -> fv x <> fv y
     x :|| y -> fv x <> fv y
+    Pow _ y -> fv y
     Recurrence -> mempty
     Prop p -> fv p
     Assume p -> fv p
@@ -64,6 +65,7 @@ instance Renameable Symbol where
     x :/= y -> g (:/=) x y
     x :&& y -> g (:&&) x y
     x :|| y -> g (:||) x y
+    Pow i y -> Pow i <$> rename_ vns tau y
     Recurrence -> pure Recurrence
     Prop p -> Prop <$> rename_ vns tau p
     Assume p -> Assume <$> rename_ vns tau p
@@ -99,6 +101,7 @@ instance Rep Symbol Symbol where
     x :/= y -> binop (:/=) x y
     x :&& y -> binopS (:&&) x y
     x :|| y -> binopS (:||) x y
+    Pow i x -> sym2SoP . (Pow i) $ rep s x
     Recurrence -> sym2SoP Recurrence
     Prop p -> sym2SoP $ Prop (repProperty s p)
     Assume p -> sym2SoP $ Assume (sop2Symbol $ rep s p)
@@ -169,6 +172,7 @@ instance Unify Symbol Symbol where
     (s <>) <$> unify_ k (rep s f) (rep s g)
   unify_ _ (Bool x) (Bool y) | x == y = pure mempty
   unify_ k (Not x) (Not y) = unify_ k x y
+  unify_ k (Pow i x) (Pow j y) | i == j = unify_ k x y
   unify_ _ Recurrence Recurrence = pure mempty
   unify_ k (Prop p) (Prop q) = unify_ k p q
   unify_ k (Assume p) (Assume q) = unify_ k p q

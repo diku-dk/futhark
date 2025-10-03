@@ -28,7 +28,7 @@ import Language.Futhark (VName)
 import Data.Bifunctor (second)
 
 data IndexFn = IndexFn
-  { shape :: [Quantified Domain],
+  { shape :: [Quantified Domain],     --- [[ Quantified Domain ]]
     body :: Cases Symbol (SoP Symbol)
   }
   deriving (Show, Eq)

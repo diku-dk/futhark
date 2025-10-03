@@ -35,6 +35,7 @@ data Symbol
   | SoP Symbol :/= SoP Symbol
   | Symbol :&& Symbol
   | Symbol :|| Symbol
+  | Pow Integer (SoP Symbol)
   | Recurrence
   | -- Properties are used only in index functions for pre-/post-conditions.
     Prop (Property Symbol)
@@ -142,6 +143,7 @@ instance Pretty Symbol where
     x :/= y -> prettyOp "≠" x y
     x :&& y -> autoParens x <+> "^" <+> autoParens y
     x :|| y -> prettyOp "∨" x y
+    Pow i y -> (pretty i) <> "**" <> parens (pretty y)
     Recurrence -> "↺ "
     Prop p -> pretty p
     Assume p -> "Assume" <+> autoParens p

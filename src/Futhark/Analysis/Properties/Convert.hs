@@ -31,7 +31,7 @@ import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSymAndConstant, justSingleTerm, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.*.), (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util (fixPoint)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -303,6 +303,8 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
                 (IndexFn [] (singleCase $ op (Var a) (Var b)))
                 [(a, vx), (b, vy)]
         case bop of
+          E.ShiftL ->
+            doOp (\ x y -> sym2SoP x .*. sym2SoP (Pow 2 (sym2SoP y))) -- x * 2^y
           E.Plus -> doOp (~+~)
           E.Times -> doOp (~*~)
           E.Minus -> doOp (~-~)
@@ -314,8 +316,31 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
           E.Geq -> doOp (~>=~)
           E.LogAnd -> doOp (~&&~)
           E.LogOr -> doOp (~||~)
-          E.Divide ->
-            doOp $ \a' b' -> sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a', sym2SoP b']
+          E.Divide
+            | Just x_sop <- justSingleCase vx,
+              Just (Pow i x, k1) <- justSymAndConstant x_sop,
+              Just j_sop <- justSingleCase vy,
+              Just j <- justConstant j_sop,
+              i == j -> do
+              ok <- x $>= (int2SoP 1)
+              if k1 == 1 && i == j && ok == Yes
+              then pure $ IndexFn [] $ singleCase $ sym2SoP $ Pow i $ x .-. (int2SoP 1)
+              else if k1 == j 
+                   then pure $ IndexFn [] $ singleCase $ sym2SoP $ Pow i x
+                   else doOp $ \a' b' -> sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a', sym2SoP b']
+            | Just x_sop <- justSingleCase vx,
+              Just (Pow i x, k1) <- justSymAndConstant x_sop,
+              Just y_sop <- justSingleCase vy,
+              Just (Pow j y, k2) <- justSymAndConstant y_sop,
+              k1 == 1 && k2 == 1 && i == j -> do
+              ok <- x $>= y
+              case ok of
+                Yes -> -- i ^ (x - y)
+                  pure $ IndexFn [] $ singleCase $ sym2SoP $ Pow i $ x .-. y
+                Unknown -> 
+                  doOp $ \a' b' -> sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a', sym2SoP b']
+            | True ->
+              doOp $ \a' b' -> sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a', sym2SoP b']
           _ -> error ("forward not implemented for bin op: " <> show bop)
 forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   cs <- forward e_c
