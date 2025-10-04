@@ -18,7 +18,7 @@ module Futhark.Pkg.Info
   )
 where
 
-import Control.Monad (unless, void)
+import Control.Monad (unless, void, (<=<))
 import Control.Monad.IO.Class
 import Data.ByteString qualified as BS
 import Data.IORef
@@ -162,25 +162,30 @@ revInfo ::
   FilePath ->
   PkgPath ->
   Ref ->
-  m (PkgRevInfo m)
+  m (Maybe (PkgRevInfo m))
 revInfo gitdir path ref = do
   gitCmd_ ["-C", gitdir, "rev-parse", ref, "--"]
-  [sha] <- gitCmdLines ["-C", gitdir, "rev-list", "-n1", ref]
-  [time] <- gitCmdLines ["-C", gitdir, "show", "-s", "--format=%cI", ref]
-  utc <-
-    -- Git sometimes produces timestamps with Z time zone, which are
-    -- not valid ZonedTimes.
-    if 'Z' `T.elem` time
-      then iso8601ParseM (T.unpack time)
-      else zonedTimeToUTC <$> iso8601ParseM (T.unpack time)
-  gm <- memoiseGetManifest getManifest'
-  pure $
-    PkgRevInfo
-      { pkgGetFiles = getFiles gm,
-        pkgRevCommit = sha,
-        pkgRevGetManifest = gm,
-        pkgRevTime = utc
-      }
+  sha_out <- gitCmdLines ["-C", gitdir, "rev-list", "-n1", ref]
+  time_out <- gitCmdLines ["-C", gitdir, "show", "-s", "--format=%cI", ref]
+  case (sha_out, time_out) of
+    ([sha], [time]) -> do
+      utc <-
+        -- Git sometimes produces timestamps with Z time zone, which are
+        -- not valid ZonedTimes.
+        if 'Z' `T.elem` time
+          then iso8601ParseM (T.unpack time)
+          else zonedTimeToUTC <$> iso8601ParseM (T.unpack time)
+      gm <- memoiseGetManifest getManifest'
+      pure . Just $
+        PkgRevInfo
+          { pkgGetFiles = getFiles gm,
+            pkgRevCommit = sha,
+            pkgRevGetManifest = gm,
+            pkgRevTime = utc
+          }
+    _ -> do
+      logMsg $ "Invalid repository state for " <> path <> "-" <> T.pack ref
+      pure Nothing
   where
     noPkgDir pdir =
       fail $
@@ -235,7 +240,7 @@ pkgInfo cachedir path = do
   gitdir <- ensureGit cachedir url
   versions <- mapMaybe isVersionRef <$> gitCmdLines ["-C", gitdir, "tag"]
   versions' <-
-    M.fromList . zip versions
+    M.fromList . mapMaybe sequenceA . zip versions
       <$> mapM (revInfo gitdir path . versionRef) versions
   pure $ PkgInfo versions' $ lookupCommit gitdir
   where
@@ -247,7 +252,10 @@ pkgInfo cachedir path = do
           Just v
       | otherwise = Nothing
 
-    lookupCommit gitdir = revInfo gitdir path . maybe "HEAD" T.unpack
+    lookupCommit gitdir =
+      maybe (fail $ "Cannot obtain HEAD info for " <> T.unpack path) pure
+        <=< revInfo gitdir path
+          . maybe "HEAD" T.unpack
 
 -- | A package registry is a mapping from package paths to information
 -- about the package.  It is unlikely that any given registry is
