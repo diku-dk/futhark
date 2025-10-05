@@ -8,7 +8,7 @@ module Futhark.Optimise.Fusion.HLsched.Permute
 where
 
 import Data.List qualified as L
---import Control.Monad
+-- import Control.Monad
 --import Data.Graph.Inductive.Graph qualified as G
 import Data.Sequence qualified as Sq
 import Data.Map.Strict qualified as M
@@ -138,17 +138,18 @@ transposeTopOfNest _fenv _env _sched outer_rec_stm
       res_nms_aft_sched = namesIntersection (getPatNames aft_sched) $ res_nms <> (namesSubtract fv2 inl_nms_aft)
       res_nms_aft_rec   = namesIntersection (getPatNames aft_rec) res_nms
   --
+  --  TAB has bindings of form: map_lam_res_name -> (map_array_res_name, map_array_res_type)
       tab0 = M.fromList $ zip (namesToList res_nms) $ map (\p -> (patElemName p, patElemType p)) $ patElems pat
   (tab_bef, map_stms_bef) <- distributeMapOnStmts tab0 outer_rec_stm (bef_sched, mempty) res_nms_bef_sched
   --
   let tab1 = tab0 `M.union` tab_bef
-  (tab_schd, sched_stms)  <- distributeMapOnSched tab1 outer_rec_stm (msched, inl_nms_bef) res_nms
+  (tab_schd, sched_stms)  <- distributeMapOnSched tab1 outer_rec_stm (msched, inl_nms_bef, inl_stms_bef) res_nms
   --
   let tab2 = tab_bef `M.union` tab_schd
   (tab_aft, map_stms_aft) <- distributeMapOnStmts tab2 outer_rec_stm (aft_sched, inl_stms_bef) res_nms_aft_sched
   let tab3 = tab2 `M.union` tab_aft
   --
-  (tab_rec, map_stm_rec) <- interchangeInwards tab3 outer_rec_stm (rec_stm, inl_stms_aft) res_nms
+  (tab_rec, (nes_stms, map_stm_rec)) <- interchangeInwards tab3 outer_rec_stm (rec_stm, inl_stms_aft) res_nms
   let tab4 = tab3 `M.union` tab_rec
   --
   -- ToDo: we need to transpose the result or/and to substitute in the `aft_rec` statements;
@@ -157,14 +158,15 @@ transposeTopOfNest _fenv _env _sched outer_rec_stm
   (_tab_fin, map_stms_fin) <- distributeMapOnStmts tab4 outer_rec_stm (aft_rec, inl_stms_aft) res_nms_aft_rec
   -- let tab5 = tab4 `M.union` tab_fin
   --
-  pure (map_stms_bef <> sched_stms <> map_stms_aft, map_stm_rec, map_stms_fin)
+  pure (map_stms_bef <> sched_stms <> map_stms_aft <> nes_stms, map_stm_rec, map_stms_fin)
   --
-  where
-    se2VName (Var nm) = Just nm
-    se2VName _ = Nothing
   -- map (Var . patElemName) $ patElems pat
 transposeTopOfNest _fenv _env _sched outer_rec_stm =
   error ("Yet unsuported case for function transposeTopOfNest in Permute.hs, stmt: "++prettyString outer_rec_stm)
+
+----------------------------------------------------------
+----------------------------------------------------------
+----------------------------------------------------------
 
 distributeMapOnStmts :: (LocalScope SOACS m, MonadFreshNames m) =>
     LftTab -> Stm SOACS -> (Stms SOACS, Stms SOACS) -> Names -> m (LftTab, Stms SOACS)
@@ -173,24 +175,26 @@ distributeMapOnStmts _ _ (inner_stms, _) _
 distributeMapOnStmts tab outer_stm (inner_stms, to_inline) res_nms
   | Let _pat aux (Op (Screma m inp_nms (ScremaForm map_lam [] []))) <- outer_stm = do
   --
-  let lam_pars = lambdaParams map_lam
+  let (new_pars, arr_nms, _arr_tps) = unzip3 $ getCommonInp tab map_lam (inner_stms, to_inline)
+{--
       fvs0 = namesSubtract (freeInStms inner_stms) $ getPatNames to_inline
       fvs1 = namesSubtract fvs0 $ freeIn (lambdaBody map_lam)
       fvs  = namesSubtract fvs1 $ namesFromList $ map paramName lam_pars
       tab_nms = namesFromList $ M.keys tab
-      (new_pars, arr_nms, arr_tps) =
+      (new_pars, arr_nms, _arr_tps) =
         if null $ namesToList $ namesSubtract fvs tab_nms
         then let com_nms = namesToList $ namesIntersection fvs tab_nms
-                 (_arrnms, arrtps) = unzip $ mapMaybe (`M.lookup` tab) com_nms
+                 (arrnms, arrtps) = unzip $ mapMaybe (`M.lookup` tab) com_nms
                  params  = zipWith (\p_nm arr_tp -> Param mempty p_nm (stripArray 1 arr_tp)) com_nms arrtps
-             in  (params, arr_nms, arr_tps)
+             in  (params, arrnms, arrtps)
         else error ("Error in distributeMapOnStmts: " ++
                     "names in tab do not cover all interm arrays! " ++
                     prettyString (namesSubtract fvs tab_nms)
                    )
+--}
   scope <- askScope
   new_lam <-
-    runLambdaBuilder (lam_pars ++ new_pars) $ localScope scope $ do
+    runLambdaBuilder ((lambdaParams map_lam) ++ new_pars) $ localScope scope $ do
       addStms to_inline; addStms inner_stms; pure (map (subExpRes . Var) (namesToList res_nms))
   new_lam' <- renameLambda new_lam >>= simplifyLambda 0
   
@@ -217,33 +221,185 @@ distributeMapOnStmts tab outer_stm (inner_stms, to_inline) res_nms
       case L.find (\ p -> patElemName p == nm) (patElems pat) of
         Nothing -> findPatElemInStms nm stms
         Just pel-> patElemType pel
-    
-      
-      
 --
 distributeMapOnStmts _ outer_stm _ _ =
   error ("Compiler shortcoming: distribution of statements other than map-reduce " ++
          "is not currently supported. Current Stm is: \n" ++ prettyString outer_stm ++ "\n\n")
 
 distributeMapOnSched :: (LocalScope SOACS m, MonadFreshNames m) =>
-    LftTab -> Stm SOACS -> (Maybe (Names, Stm SOACS), Names) -> Names -> m (LftTab, Stms SOACS)
-distributeMapOnSched tab outer_rec_stm (msched, inl_nms_bef) res_nms =
+    LftTab -> Stm SOACS -> (Maybe (Names, Stm SOACS), Names, Stms SOACS) -> Names -> m (LftTab, Stms SOACS)
+distributeMapOnSched _ _ (Nothing, _, _) _ =
   pure (mempty, mempty)
+distributeMapOnSched tab _outer_rec_stm (msched, _inl_nms_bef, inl_stms_bef) _res_nms
+  | Just (tgt_inp_nms, stm) <- msched,
+    Let pat aux (Apply fnm arg_diets ret_tps safety_arg) <- stm = do
+  let tgt_inp_l_nms = namesToList tgt_inp_nms
+      inp_arr_nms_tps = mapMaybe (`M.lookup` tab) tgt_inp_l_nms
+      n = length inp_arr_nms_tps
+  if not (n == length tgt_inp_l_nms)
+  then error "In distributeMapOnSched: not all target array input were found in Tab!"
+  else -- we need to replace `tgt_inp_l_nms` with `inp_arr_nms_tps` in actual args
+       -- and to lift the args of the pattern as well and record the lifting in the result Table
+    do let pat_nms = map patElemName $ patElems pat
+       pat_nms' <- mapM (\nm -> newVName (baseString nm ++ "lifted")) pat_nms 
+       let (inp_arr_nms, inp_arr_tps) = unzip inp_arr_nms_tps
+           (_, orig_n_diets) = unzip $ take n arg_diets
+           arg_diets' = (zip (map Var inp_arr_nms) orig_n_diets) ++ drop n arg_diets
+           (_, ret_als) = unzip ret_tps
+           ret_tps' = map tp2ExtTp inp_arr_tps -- ret_tps -- ToDo: implement this!
+           pat' = Pat $ zipWith PatElem pat_nms' inp_arr_tps
+           stm' = Let pat' aux $ Apply fnm arg_diets' (zip ret_tps' ret_als) safety_arg
+           tab' = M.fromList $ zip pat_nms $ zip pat_nms' inp_arr_tps
+       pure (tab', inl_stms_bef <> Sq.singleton stm')
+  where
+    tp2ExtTp :: Type -> DeclExtType
+    tp2ExtTp (Prim ptp) = Prim ptp
+    tp2ExtTp (Array ptp shape _u) = Array ptp (shp2ExtShp shape) Unique -- Nonunique
+    tp2ExtTp _ = error "Accumulators and Memory Types not supported!" 
+    shp2ExtShp (Shape dims_se) = Shape $ map Free dims_se
+--
+distributeMapOnSched _ _ _ _ =
+  error ("Illegal schedule encountered in distributeMapOnSched")
 
--- | ToDo: this should support a special case of a redomap perfectly
---         nested inside a redomap, both featuring the same assoc &
---         commutative reduce operator, in which case we can just
---         interchange the maps. Hence the result should be expanded
---         to indicate whether the outer reduce was already performed!
+-- | ToDo: there are very many code clones across the three supported cases;
+--         please try to polish a little (by providing functions for clones).
+--   Supported Cases:
+--   1. map-map assumes enpty code after it, i.e.,
+--        it is the last recurrence which gives the result
+--   2. map-redomap assumes that EITHER:
+--        (a) the code after is empty (hence full result) OR
+--        (b) the map-redomap result is fully consumed by the code after,
+--            hence not at all part of the result
+--   3. redomap-redomap assumes that:
+--        (a) each reduce fully consumes the corresponding map result AND
+--        (b) the reduce operators are one and the same and also commutative
+--      hence the maps can be safely/simply interchanged
 --
 interchangeInwards :: (LocalScope SOACS m, MonadFreshNames m) =>
-    LftTab -> Stm SOACS -> (Stm SOACS, Stms SOACS) -> Names -> m (LftTab, Stm SOACS)
-interchangeInwards tab outer_rec_stm (rec_stm, inl_stms_aft) res_nms =
-  pure (mempty, rec_stm)
+    LftTab -> Stm SOACS -> (Stm SOACS, Stms SOACS) -> Names -> m (LftTab, (Stms SOACS, Stm SOACS))
+-- | Map - Map case: assumes empty code after it, HENCE res_nms == inn_pat
+interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
+  | Let out_pat out_aux (Op (Screma m out_inp_nms (ScremaForm out_map_lam [] []))) <- out_rec_stm,
+    Let inn_pat inn_aux (Op (Screma n inn_inp_nms (ScremaForm inn_map_lam [] []))) <- inn_rec_stm,
+    out_pat_nms <- map patElemName $ patElems out_pat,
+    inn_pat_nms <- map patElemName $ patElems inn_pat,
+    res_nms == namesFromList inn_pat_nms = do
+  --
+  let (new_params, arr_nms, _arr_tps) =
+        unzip3 $ getCommonInp tab out_map_lam (Sq.singleton inn_rec_stm, inline_stms)
+  scope <- askScope
+  --
+  new_lam_inner <-
+    runLambdaBuilder (lambdaParams out_map_lam ++ new_params) $ localScope scope $ do
+      addStms inline_stms
+      addStms (bodyStms $ lambdaBody inn_map_lam)
+      pure $ bodyResult $ lambdaBody $ inn_map_lam
+  new_lam_inner' <- renameLambda new_lam_inner >>= simplifyLambda 0
+  new_inn_res_nms <- mapM (\ nm -> newVName (baseString nm ++ "_ichg")) inn_pat_nms
+  let inn_tps'= map (`arrayOfRow` m) $ lambdaReturnType inn_map_lam
+      tmp_pat = Pat $ zipWith PatElem new_inn_res_nms inn_tps'
+      inn_stm'= Let tmp_pat out_aux $ Op $ Screma m (out_inp_nms++arr_nms) $ ScremaForm new_lam_inner' [] []
+  new_lam_outer <-
+    runLambdaBuilder (lambdaParams inn_map_lam) $ localScope scope $ do
+      addStm inn_stm'; pure $ map (subExpRes . Var) new_inn_res_nms
+      -- prev_soac_res <- letTupExp' ("tmp_soac_ichg") $ Op $ 
+      -- pure $ map subExpRes prev_soac_res
+  new_lam_outer' <- renameLambda new_lam_outer >>= simplifyLambda 0
+  let out_pat'= Pat $ zipWith PatElem out_pat_nms $ map (`arrayOfRow` n) inn_tps'
+      out_stm'= Let out_pat' inn_aux $ Op $ Screma n inn_inp_nms $ ScremaForm new_lam_outer' [] []
+  pure (tab, (mempty, out_stm'))
+--
+-- | Map - RedoMap case
+interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
+  | Let out_pat out_aux (Op (Screma m out_inp_nms (ScremaForm out_map_lam [] []))) <- out_rec_stm,
+    Let inn_pat inn_aux (Op (Screma n inn_inp_nms frm@(ScremaForm inn_map_lam [] [red]))) <- inn_rec_stm,
+    out_pat_nms <- map patElemName $ patElems out_pat,
+    inn_pat_nms <- map patElemName $ patElems inn_pat,
+    Just _ <- oneFullyConsumedMapRed frm, -- Changed
+    (res_nms == namesFromList inn_pat_nms) ||
+      (not $ namesIntersect res_nms $ namesFromList inn_pat_nms) = do
+  -- ^ either original result names all come from this nest or they do not overlap at all, i.e.,
+  --     the result of this nest is fully consumed by the code after it
+  let rep_tab = M.fromList $ mapMaybe bindReplicateStm $ stmsToList $
+                             bodyStms $ lambdaBody out_map_lam 
+  let (new_params, arr_nms, _arr_tps) =
+        unzip3 $ getCommonInp tab out_map_lam (Sq.singleton inn_rec_stm, inline_stms)
+  scope <- askScope
+  --
+  new_lam_inner <-
+    runLambdaBuilder (lambdaParams out_map_lam ++ new_params) $ localScope scope $ do
+      addStms inline_stms
+      addStms (bodyStms $ lambdaBody inn_map_lam)
+      pure $ bodyResult $ lambdaBody $ inn_map_lam
+  new_lam_inner' <- renameLambda new_lam_inner >>= simplifyLambda 0
+  new_inn_res_nms <- mapM (\ nm -> newVName (baseString nm ++ "_ichg")) inn_pat_nms
+  let inn_tps'= map (`arrayOfRow` m) $ lambdaReturnType inn_map_lam
+      tmp_pat = Pat $ zipWith PatElem new_inn_res_nms inn_tps'
+      inn_stm'= Let tmp_pat out_aux $ Op $ Screma m (out_inp_nms++arr_nms) $ ScremaForm new_lam_inner' [] []
+  new_lam_outer <-
+    runLambdaBuilder (lambdaParams inn_map_lam) $ localScope scope $ do
+      addStm inn_stm'; pure $ map (subExpRes . Var) new_inn_res_nms
+  new_lam_outer' <- renameLambda new_lam_outer >>= simplifyLambda 0
+  (tab', out_pat_nms') <-
+      if res_nms == namesFromList inn_pat_nms
+      then pure (mempty, out_pat_nms) -- CHANGED map (`arrayOfRow` n) inn_tps')
+      else do -- assumes res_nms do not overlap with inn_pat_nms
+        new_pat_nms <- mapM (\ nm -> newVName (baseString nm ++ "_vct_red")) inn_pat_nms
+        pure (M.fromList $ zip inn_pat_nms $ zip new_pat_nms inn_tps', new_pat_nms)
+  (ne_stms, vct_red) <- vectorizeRed rep_tab m red
+  let out_pat'= Pat $ zipWith PatElem out_pat_nms' inn_tps'
+      out_stm'= Let out_pat' inn_aux $ Op $ Screma n inn_inp_nms $ ScremaForm new_lam_outer' [] [vct_red]
+  pure (tab', (ne_stms, out_stm'))
+  where
+    bindReplicateStm (Let (Pat [patel]) _aux (BasicOp (Replicate shp se))) =
+      Just (patElemName patel, (patel, shp, se))
+    bindReplicateStm _ = Nothing
+--
+-- Redomap - Redomap Case: was implemented in a hurry, please check for BUGS!
+interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
+  | Let out_pat out_aux (Op (Screma m out_inp_nms out_frm@(ScremaForm out_map_lam [] [out_red]))) <- out_rec_stm,
+    Let inn_pat inn_aux (Op (Screma n inn_inp_nms inn_frm@(ScremaForm inn_map_lam [] [inn_red]))) <- inn_rec_stm,
+    -- out_pat_nms <- map patElemName $ patElems out_pat,
+    inn_pat_nms <- map patElemName $ patElems inn_pat,
+    Just _ <- oneFullyConsumedMapRed out_frm,
+    Just _ <- oneFullyConsumedMapRed inn_frm,
+    equivLambdas (redLambda out_red) (redLambda inn_red),
+    (res_nms == namesFromList inn_pat_nms) = do
+  let (new_params, arr_nms, _arr_tps) =
+        unzip3 $ getCommonInp tab out_map_lam (Sq.singleton inn_rec_stm, inline_stms)
+  scope <- askScope
+  --
+  new_lam_inner <-
+    runLambdaBuilder (lambdaParams out_map_lam ++ new_params) $ localScope scope $ do
+      addStms inline_stms
+      addStms (bodyStms $ lambdaBody inn_map_lam)
+      pure $ bodyResult $ lambdaBody $ inn_map_lam
+  new_lam_inner' <- renameLambda new_lam_inner >>= simplifyLambda 0
+  let inn_stm'= Let inn_pat out_aux $ Op $ Screma m (out_inp_nms++arr_nms) $ ScremaForm new_lam_inner' [] [out_red]
+  new_lam_outer <-
+    runLambdaBuilder (lambdaParams inn_map_lam) $ localScope scope $ do
+      addStm inn_stm'; pure $ map (subExpRes . Var . patElemName) $ patElems inn_pat
+  new_lam_outer' <- renameLambda new_lam_outer >>= simplifyLambda 0
+  let out_stm'= Let out_pat inn_aux $ Op $ Screma n inn_inp_nms $ ScremaForm new_lam_outer' [] [out_red]
+  -- POTENTIAL BUG: should it really be `inn_inp_nms` above ???
+  pure (tab, (mempty, out_stm'))
+--
+interchangeInwards _tab _out_rec_stm (_inn_rec_stm, _inline_stms) _res_nms =
+  error "Unsupported case of recurrence interchange in interchangeInwards"
 
 --------------------------------------------------------------
 --- Simple Helper functions: sep3/5LastRec & mkRecWithBody ---
 --------------------------------------------------------------
+
+se2VName :: SubExp -> Maybe VName
+se2VName (Var nm) = Just nm
+se2VName _ = Nothing
+
+{--
+se2Const :: SubExp -> Maybe PrimValue
+se2Const (Constant pv) = Just pv
+se2Const (Var _) = Nothing
+--}
 
 getPatNames :: Stms SOACS -> Names
 getPatNames = foldl mergeWithPatNames mempty
@@ -321,6 +477,27 @@ sep5LastRecBody body =
         getVName _ = error ("Target array argument to HL-schedule is a constant!")
     isSchedStm _ = Nothing
 
+-- | Finds the common names inside `inner_stms` that have been lifted
+--   (with one more array dimension) by map distribution on the previous code.
+--   The to-be-inlined code is excluded. This is used to determine which additional
+--   input parameters are necessary when applying the `map` on top of `inner_stms`.
+getCommonInp :: LftTab -> Lambda SOACS -> (Stms SOACS, Stms SOACS) -> [(LParam SOACS, VName, Type)]
+getCommonInp tab map_lam (inner_stms, inline_stms) =
+  let lam_pars = lambdaParams map_lam
+      fvs0 = namesSubtract (freeInStms inner_stms) $ getPatNames inline_stms
+      fvs1 = namesSubtract fvs0 $ freeIn (lambdaBody map_lam)
+      fvs  = namesSubtract fvs1 $ namesFromList $ map paramName lam_pars
+      tab_nms = namesFromList $ M.keys tab
+   in if null $ namesToList $ namesSubtract fvs tab_nms
+      then let com_nms = namesToList $ namesIntersection fvs tab_nms
+               (arrnms, arrtps) = unzip $ mapMaybe (`M.lookup` tab) com_nms
+               params  = zipWith (\p_nm arr_tp -> Param mempty p_nm (stripArray 1 arr_tp)) com_nms arrtps
+           in  zip3 params arrnms arrtps
+      else error ("Error in distributeMapOnStmts: " ++
+                  "names in tab do not cover all interm arrays! " ++
+                  prettyString (namesSubtract fvs tab_nms)
+                 )
+
 -- | This is supposed to make a body from `stms_bef`, `new_stms_rec` and
 --     `stms_aft`, where `new_stms_rec` are the statements generated by
 --     a `permuteNest` call on an inner recurrence `stm_rec`.
@@ -371,16 +548,54 @@ findCheapStms2Inline fvs_body parts
   where
     findCheapStm :: (Names, Stms SOACS) -> Stm SOACS -> (Names, Stms SOACS)
     findCheapStm (cheap_nms, cheap_stms) stm@(Let pat _ e) =
-      let ok_to_add =
-           case e of
-             BasicOp (SubExp (Constant _)) -> True
-             BasicOp (SubExp (Var nm)) ->
-               nameIn nm cheap_nms || nameIn nm fvs_body
-             _ -> False
-      in  if ok_to_add
+      let (ok_stm2inline, used_nms) = namesInInlineStm e
+          ok_deps = all (\nm -> nameIn nm cheap_nms || nameIn nm fvs_body) used_nms
+      in  if ok_stm2inline && ok_deps
           then (addPat2Names pat cheap_nms, cheap_stms Sq.|> stm)
           else (cheap_nms, cheap_stms)
+    --
     addPat2Names pat nms =
       nms <> (namesFromList $ map patElemName $ patElems pat)
+    --
+    namesInInlineStm (BasicOp (SubExp (Constant _))) = (True, [])
+    namesInInlineStm (BasicOp (SubExp (Var nm))) = (True, [nm])
+    namesInInlineStm (BasicOp (UnOp _ se))       = (True, mapMaybe se2VName [se])
+    namesInInlineStm (BasicOp (ConvOp _ se))     = (True, mapMaybe se2VName [se])
+    namesInInlineStm (BasicOp (BinOp _ se1 se2)) = (True, mapMaybe se2VName [se1,se2])
+    namesInInlineStm (BasicOp (CmpOp _ se1 se2)) = (True, mapMaybe se2VName [se1,se2])
+    namesInInlineStm (BasicOp (Assert se _ _))   = (True, mapMaybe se2VName [se])
+    namesInInlineStm _ = (False, [])
+    --
 findCheapStms2Inline _ _ = ((mempty, mempty), (mempty, mempty))
-      
+
+type ReplicateTab = M.Map VName (PatElem (LetDec SOACS), Shape, SubExp)
+
+vectorizeRed :: (LocalScope SOACS m, MonadFreshNames m) =>
+    ReplicateTab -> SubExp -> Reduce SOACS -> m (Stms SOACS, Reduce SOACS)
+vectorizeRed rep_tab n (Reduce comm lam nes) = do
+  (nes_ses, nes_stms) <- mapM mkVectNe nes >>= pure . unzip
+  let lft_tps = map (`arrayOfRow` n) $ lambdaReturnType lam
+  new_pars <- mapM (newParam "arg_red") lft_tps
+  scope <- askScope
+  new_lam  <-
+    runLambdaBuilder new_pars $ localScope scope $ do
+      prev_soac_res <- letTupExp' ("vect_red_res") $ Op $
+        Screma n (map paramName new_pars) $ ScremaForm lam [] []
+      pure $ map subExpRes prev_soac_res
+  new_lam' <- renameLambda new_lam >>= simplifyLambda 0
+  pure (foldl (<>) mempty nes_stms, Reduce comm new_lam' nes_ses)
+  where
+    mkVectNe (Constant v) = do
+      scope <- askScope
+      runBuilder $ localScope scope $ do
+        letSubExp "ne_vect" $ BasicOp $ Replicate (Shape [n]) $ Constant v
+    mkVectNe (Var nm)
+      | Just (_patel, Shape ns, se) <- M.lookup nm rep_tab,
+        Constant v <- se = do
+      scope <- askScope
+      runBuilder $ localScope scope $ do
+        letSubExp "ne_vect" $ BasicOp $ Replicate (Shape (n:ns)) $ Constant v
+    mkVectNe se =
+      error ("Failed to compute vectorized neutral element for: " ++
+             prettyString se ++ " Replicate Tab: " ++ show rep_tab )
+

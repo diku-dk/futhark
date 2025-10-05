@@ -17,6 +17,7 @@ module Futhark.Optimise.Fusion.HLsched.SchedUtils
   , sortByPerm
   , append2Sched
   , oneFullyConsumedMapRed
+  , equivLambdas
   , fromFParam
   , toFParam
   )
@@ -249,6 +250,19 @@ oneFullyConsumedMapRed :: ScremaForm SOACS -> Maybe (Lambda SOACS)
 oneFullyConsumedMapRed (ScremaForm map_lam [] [Reduce _com red_lam _ne])
   | lambdaReturnType red_lam == lambdaReturnType map_lam = Just red_lam
 oneFullyConsumedMapRed _ = Nothing
+
+-- | ToDo: extend for map-nest on top of the same binary operator.
+equivLambdas :: (Lambda SOACS) -> (Lambda SOACS) -> Bool 
+equivLambdas lam1 lam2
+  | lambdaReturnType lam1 == lambdaReturnType lam2,
+    [Let (Pat [pat1]) _ (BasicOp (BinOp bop1 se11 se12))] <- stmsToList $ bodyStms $ lambdaBody lam1,
+    [Let (Pat [pat2]) _ (BasicOp (BinOp bop2 se21 se22))] <- stmsToList $ bodyStms $ lambdaBody lam1,
+    [se11, se12] == map (Var . paramName) (lambdaParams lam1),
+    [se21, se22] == map (Var . paramName) (lambdaParams lam2) =
+  let res12  = concat $ map (bodyResult . lambdaBody) [lam1, lam2]
+      res12' = map (subExpRes . Var . patElemName) [pat1, pat2]
+  in  bop1 == bop2 && res12 == res12' 
+equivLambdas _ _ = False
 
 toFParam :: LParam SOACS -> FParam SOACS
 toFParam p = Param (paramAttrs p) (paramName p) $ toDecl (paramDec p) Unique
