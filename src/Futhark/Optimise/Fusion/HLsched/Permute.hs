@@ -349,7 +349,8 @@ interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
   (ne_stms, vct_red) <- vectorizeRed rep_tab m red
   let out_pat'= Pat $ zipWith PatElem out_pat_nms' inn_tps'
       out_stm'= Let out_pat' inn_aux $ Op $ Screma n inn_inp_nms $ ScremaForm new_lam_outer' [] [vct_red]
-  pure (tab', (ne_stms, out_stm'))
+  trace ("ICHG Map-Redomap, OUTER-REC:\n " ++ prettyString out_rec_stm++"\nICHG-NEST: "++prettyString out_stm') $
+    pure (tab', (ne_stms, out_stm'))
   where
     bindReplicateStm (Let (Pat [patel]) _aux (BasicOp (Replicate shp se))) =
       Just (patElemName patel, (patel, shp, se))
@@ -575,7 +576,7 @@ vectorizeRed :: (LocalScope SOACS m, MonadFreshNames m) =>
 vectorizeRed rep_tab n (Reduce comm lam nes) = do
   (nes_ses, nes_stms) <- mapM mkVectNe nes >>= pure . unzip
   let lft_tps = map (`arrayOfRow` n) $ lambdaReturnType lam
-  new_pars <- mapM (newParam "arg_red") lft_tps
+  new_pars <- mapM (newParam "arg_red") $ lft_tps ++ lft_tps
   scope <- askScope
   new_lam  <-
     runLambdaBuilder new_pars $ localScope scope $ do
