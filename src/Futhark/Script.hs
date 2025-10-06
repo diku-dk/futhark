@@ -26,7 +26,6 @@ module Futhark.Script
     EvalBuiltin,
     scriptBuiltin,
     evalExp,
-    getScriptValue,
     getExpValue,
     getHaskellValue,
     evalExpToGround,
@@ -61,7 +60,7 @@ import Futhark.Test.Values qualified as V
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (line, sep, space, (</>))
 import Language.Futhark.Core (Name, nameFromText, nameToText)
-import Language.Futhark.Tuple (areTupleFields)
+import Language.Futhark.Tuple (areTupleFields, tupleFieldNames)
 import System.FilePath ((</>))
 import Text.Megaparsec
 import Text.Megaparsec.Char (space)
@@ -122,6 +121,7 @@ data Exp
   | Const V.Value
   | Tuple [Exp]
   | Record [(T.Text, Exp)]
+  | Project Exp T.Text
   | StringLit T.Text
   | Let [VarName] Exp Exp
   | -- | Server-side variable, *not* Futhark variable (these are
@@ -149,6 +149,8 @@ instance Pretty Exp where
         parensIf (i > 0) $ pretty v <+> hsep (map (align . pprPrec 1) args)
       pprPrec _ (Tuple vs) =
         parens $ commasep $ map (align . pretty) vs
+      pprPrec _ (Project e f) =
+        pprPrec 1 e <> "." <> pretty f
       pprPrec _ (StringLit s) = pretty $ show s
       pprPrec _ (Record m) = braces $ align $ commasep $ map field m
         where
@@ -170,12 +172,12 @@ parseExp :: Parsec Void T.Text () -> Parsec Void T.Text Exp
 parseExp sep =
   choice
     [ pLet,
-      try $ Call <$> parseFunc <*> many pAtom,
+      try $ Call <$> pFunc <*> some pAtom,
       pAtom
     ]
     <?> "expression"
   where
-    pField = (,) <$> pVarName <*> (pEquals *> parseExp sep)
+    pField = (,) <$> lVarName <*> (pEquals *> parseExp sep)
     pEquals = lexeme sep "="
     pComma = lexeme sep ","
     mkTuple [v] = v
@@ -192,6 +194,12 @@ parseExp sep =
             pLet
           ]
 
+    pProject e =
+      choice
+        [ lexeme sep "." *> (pFieldName >>= pProject . Project e),
+          pure e
+        ]
+
     pAtom =
       choice
         [ try $ inParens sep (mkTuple <$> (parseExp sep `sepEndBy` pComma)),
@@ -199,29 +207,34 @@ parseExp sep =
           inBraces sep (Record <$> (pField `sepEndBy` pComma)),
           StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\""),
           Const <$> V.parseValue sep,
-          Call <$> parseFunc <*> pure []
+          Call <$> pFunc <*> pure []
         ]
+        >>= pProject
 
     pPat =
       choice
-        [ inParens sep $ pVarName `sepEndBy` pComma,
-          pure <$> pVarName
+        [ inParens sep $ lVarName `sepEndBy` pComma,
+          pure <$> lVarName
         ]
 
-    parseFunc =
+    pFunc =
       choice
-        [ FuncBuiltin <$> ("$" *> pVarName),
-          FuncFut <$> pVarName
+        [ FuncBuiltin <$> ("$" *> lVarName),
+          FuncFut <$> lVarName
         ]
 
     reserved = ["let", "in"]
 
-    pVarName = lexeme sep . try $ do
+    lVarName = lexeme sep . try $ do
       v <- fmap T.pack $ (:) <$> satisfy isAlpha <*> many (satisfy constituent)
       guard $ v `notElem` reserved
       pure v
       where
         constituent c = isAlphaNum c || c == '\'' || c == '_'
+
+    lIntStr = lexeme sep . try . fmap T.pack $ some $ satisfy isDigit
+
+    pFieldName = lVarName <|> lIntStr
 
 -- | Parse a FutharkScript expression with normal whitespace handling.
 parseExpFromText :: FilePath -> T.Text -> Either T.Text Exp
@@ -479,6 +492,50 @@ cannotApply fname expected actual =
       <> " argument(s) of types:\n"
       <> T.intercalate "\n" (map prettyTextOneLine actual)
 
+getField ::
+  (MonadIO m, MonadError T.Text m) =>
+  ScriptServer ->
+  T.Text ->
+  (Name, b) ->
+  m VarName
+getField server from (f, _) = do
+  to <- newVar server "field"
+  cmdMaybe $ cmdProject (scriptServer server) to from $ nameToText f
+  pure to
+
+unTuple ::
+  (MonadIO m, MonadError T.Text m) =>
+  ScriptServer ->
+  ExpValue ->
+  m [ExpValue]
+unTuple _ (V.ValueTuple vs) = pure vs
+unTuple server (V.ValueAtom (SValue t (VVar v)))
+  | Just ts <- isTuple t $ scriptTypes server =
+      forM (zip tupleFieldNames ts) $ \(k, kt) ->
+        V.ValueAtom . SValue kt . VVar <$> getField server v (k, kt)
+unTuple _ v = pure [v]
+
+project ::
+  (MonadIO m, MonadError T.Text m) =>
+  ScriptServer ->
+  ExpValue ->
+  T.Text ->
+  m ExpValue
+project _ (V.ValueRecord fs) k =
+  case M.lookup k fs of
+    Nothing -> throwError $ "Unknown field: " <> k
+    Just v -> pure v
+project server (V.ValueAtom (SValue t (VVar v))) f
+  | Just fs <- isRecord t $ scriptTypes server =
+      case lookup f' fs of
+        Nothing -> throwError $ "Type " <> t <> " does not have a field " <> f <> "."
+        Just ft ->
+          V.ValueAtom . SValue ft . VVar <$> getField server v (f', ft)
+  where
+    f' = nameFromText f
+project _ _ _ =
+  throwError "Cannot project from non-record."
+
 -- | Evaluate a FutharkScript expression relative to some running server.
 evalExp ::
   forall m.
@@ -501,11 +558,6 @@ evalExp builtin sserver top_level_e = do
         v <- newVar' "record"
         cmdMaybe $ cmdNew server v t vs
         pure v
-
-      getField from (f, _) = do
-        to <- newVar' "field"
-        cmdMaybe $ cmdProject server to from $ nameToText f
-        pure to
 
       toVar :: ValOrVar -> m VarName
       toVar (VVar v) = pure v
@@ -543,18 +595,19 @@ evalExp builtin sserver top_level_e = do
         | Just t_fs <- isRecord t types,
           Just vt_fs <- isRecord vt types,
           vt_fs == t_fs =
-            mkRecord t =<< mapM (getField v) vt_fs
+            mkRecord t =<< mapM (getField sserver v) vt_fs
       interValToVar _ t (V.ValueAtom (SValue _ (VVal v)))
         | Just v' <- coerceValue t v =
             scriptValueToVar $ SValue t $ VVal v'
       interValToVar bad _ _ = bad
 
       letMatch :: [VarName] -> ExpValue -> m VTable
-      letMatch vs val
-        | vals <- V.unCompound val,
-          length vs == length vals =
+      letMatch vs val = do
+        vals <- unTuple sserver val
+        if length vs == length vs
+          then
             pure $ M.fromList (zip vs vals)
-        | otherwise =
+          else
             throwError $
               "Pat: "
                 <> prettyTextOneLine vs
@@ -564,6 +617,9 @@ evalExp builtin sserver top_level_e = do
       evalExp' :: VTable -> Exp -> m ExpValue
       evalExp' _ (ServerVar t v) =
         pure $ V.ValueAtom $ SValue t $ VVar v
+      evalExp' vtable (Project e f) = do
+        e' <- evalExp' vtable e
+        project sserver e' f
       evalExp' vtable (Call (FuncBuiltin name) es) =
         builtin sserver name =<< mapM (evalExp' vtable) es
       evalExp' vtable (Call (FuncFut name) es)
@@ -586,11 +642,11 @@ evalExp builtin sserver top_level_e = do
                     then do
                       outs <- replicateM (length out_types) $ newVar' "out"
                       void $ cmdEither $ cmdCall server name outs arg_types
-                      pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
+                      pure . V.mkCompound . map V.ValueAtom $
+                        zipWith SValue out_types (map VVar outs)
                     else
                       pure . V.ValueAtom . SFun name in_types out_types $
-                        zipWith SValue in_types $
-                          map VVar arg_types
+                        zipWith SValue in_types (map VVar arg_types)
 
             -- Careful to not require saturated application, but do still
             -- check for over-saturation.
@@ -635,22 +691,39 @@ evalExp builtin sserver top_level_e = do
         throwError e
   (freeNonresultVars =<< evalExp' mempty top_level_e) `catchError` freeVarsOnError
 
--- | Read actual values from the server. Fails for values that have no
--- well-defined external representation.
-getScriptValue :: (MonadError T.Text m, MonadIO m) => ScriptServer -> ScriptValue ValOrVar -> m V.Value
-getScriptValue server = toGround <=< traverse onLeaf
-  where
-    onLeaf (VVar v) = readVar (scriptServer server) v
-    onLeaf (VVal v) = pure v
-    toGround (SFun fname _ _ _) =
-      throwError $ "Function " <> fname <> " not fully applied."
-    toGround (SValue _ v) = pure v
+primArrayType :: TypeName -> Bool
+primArrayType s = case fmap T.uncons <$> T.uncons s of
+  Just ('[', Just (']', s')) -> primArrayType s'
+  _ -> s `elem` ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f16", "f32", "f64", "bool"]
 
 -- | Read actual compound values from the server. Fails for values that have no
 -- well-defined external representation.
 getExpValue ::
   (MonadError T.Text m, MonadIO m) => ScriptServer -> ExpValue -> m V.CompoundValue
-getExpValue server = traverse (getScriptValue server)
+getExpValue _ (V.ValueAtom (SFun fname _ _ _)) =
+  throwError $ "Function " <> fname <> " not fully applied."
+getExpValue server (V.ValueAtom (SValue t (VVar v)))
+  | Just fs <- isRecord t types =
+      tupleOrRecord . M.fromList . zip (map fst fs)
+        <$> mapM (onField v) fs
+  | not $ primArrayType t =
+      throwError $ "Type " <> t <> " has no external representation."
+  | otherwise =
+      V.ValueAtom <$> readVar (scriptServer server) v
+  where
+    types = scriptTypes server
+
+    tupleOrRecord m =
+      maybe (V.ValueRecord $ M.mapKeys nameToText m) V.ValueTuple $ areTupleFields m
+
+    onField from (f, ft) = do
+      to <- getField server from (f, ft)
+      getExpValue server $ V.ValueAtom $ SValue ft $ VVar to
+getExpValue server (V.ValueTuple vs) =
+  V.ValueTuple <$> traverse (getExpValue server) vs
+getExpValue server (V.ValueRecord fs) =
+  V.ValueRecord <$> traverse (getExpValue server) fs
+getExpValue _ (V.ValueAtom (SValue _ (VVal v))) = pure $ V.ValueAtom v
 
 -- | Retrieve a Haskell value from an 'ExpValue'. This returns 'Just' if the
 -- 'ExpValue' is an atom with a non-opaque type.
@@ -683,6 +756,7 @@ evalExpToGround builtin server e = do
 -- program.
 varsInExp :: Exp -> S.Set EntryName
 varsInExp ServerVar {} = mempty
+varsInExp (Project e _) = varsInExp e
 varsInExp (Call (FuncFut v) es) = S.insert v $ foldMap varsInExp es
 varsInExp (Call (FuncBuiltin _) es) = foldMap varsInExp es
 varsInExp (Tuple es) = foldMap varsInExp es
