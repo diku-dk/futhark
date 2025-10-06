@@ -24,7 +24,7 @@ import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify (Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, sym2SoP)
+import Futhark.SoP.SoP (SoP, sym2SoP, (.*.), (.+.))
 import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
 
@@ -32,7 +32,7 @@ import Language.Futhark (VName)
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
 legalArg :: VName -> IndexFn -> IndexFn -> Symbol -> [SoP Symbol] -> Bool
 legalArg k g f e args =
-  let notQuantifier vn = vn < k || or [Just vn == catVar it | it <- shape g]
+  let notQuantifier vn = vn < k || or [Just vn == catVar it | it <- concat $ shape g]
    in (hasSingleCase f || all (all notQuantifier . fv) args)
         || warning
   where
@@ -105,7 +105,8 @@ trivialSub f e args
   | otherwise = False
   where
     dims2args =
-      mkRepFromList $ zipWith (\dim arg -> (boundVar dim, arg)) (shape f) args
+      mkRepFromList $ zipWith (\[dim] arg -> (boundVar dim, arg)) (shape f) args
+      -- TODO implement flattened ^dim.
 
 subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
 subber argCheck g = do
@@ -174,16 +175,19 @@ substituteOnce f g_presub (f_apply, actual_args) = do
   traverse simplify <=< applySubRules $
     g
       { shape =
-          shape g <&> \case
-            Forall j dg
-              -- f(args) is not in dom(g).
-              | vn `notElem` fv dg -> Forall j dg
-              -- f(args) is in dom(g) and f has only one case.
-              | Just e_f <- justSingleCase f ->
-                  Forall j $ repDomain (mkRep vn (rep args e_f)) dg
-              -- f(args) is in dom(g) and f has multiple cases.
-              | e_f <- flattenCases (body f) ->
-                  Forall j $ repDomain (mkRep vn (rep args e_f)) dg,
+          shape g
+            <&> map
+              ( \case
+                  Forall j dg
+                    -- f(args) is not in dom(g).
+                    | vn `notElem` fv dg -> Forall j dg
+                    -- f(args) is in dom(g) and f has only one case.
+                    | Just e_f <- justSingleCase f ->
+                        Forall j $ repDomain (mkRep vn (rep args e_f)) dg
+                    -- f(args) is in dom(g) and f has multiple cases.
+                    | e_f <- flattenCases (body f) ->
+                        Forall j $ repDomain (mkRep vn (rep args e_f)) dg
+              ),
         body = cases $ do
           (p_f, e_f) <- guards f
           (p_g, e_g) <- guards g
@@ -192,7 +196,6 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       }
   where
     -- Construct replacement from formal arguments of f to actual arguments.
-    -- (`actual_args` may be empty for convience; used internally in Convert).
     args :: Replacement Symbol =
       case actual_args of
         []
@@ -200,25 +203,31 @@ substituteOnce f g_presub (f_apply, actual_args) = do
               -- All source-program variable references should hit this case.
               mempty
           | [] <- shape g_presub ->
-              -- This case is a HACK to allow substitution into preconditions.
-              --   Checking precondition ((shape: [m]{i64| (>= 0)}): [m]nat_i64) for mk_flag_array_4631
+              -- This case is a HACK to allow substitution into preconditions:
+              --   (shape: [m]{i64| (>= 0)})
+              -- gives
               --   • | True ⇒    shape₄₆₁₉ ≥ 0
               --   	@
               --   	  where shape_4619 =
               --                   i₁₆₄₂₄ :: 0 .. m₄₆₈₇
               --                   forall i₁₆₄₂₄ . | True ⇒    shape₄₆₈₈[i₁₆₄₂₄]
               mempty
-          | length (shape f) == length (shape g_presub) ->
-              -- Case used internally in Convert (empty args for convenience).
-              map_formal_args_to (shape g_presub <&> sym2SoP . Var . boundVar)
+          | rank f == rank g_presub,
+            map length (shape f) == map length (shape g_presub) ->
+              -- This case is a convenience HACK to allow empty arguments in Convert.
+              map_formal_args_to (concat (shape g_presub) <&> sym2SoP . Var . boundVar)
         _
-          | length (shape f) == length actual_args ->
+          | rank f == length actual_args ->
               -- All source-program indexing should hit this case.
               map_formal_args_to actual_args
           | otherwise ->
               error "Argument mismatch."
       where
-        map_formal_args_to = mconcat . zipWith (mkRep . boundVar) (shape f)
+        map_formal_args_to
+          | all (\d -> length d == 1) (shape f) =
+              mconcat . zipWith (mkRep . boundVar) (concat $ shape f)
+          -- TODO implement flattened case.
+          | otherwise = error "Not implemented yet."
 
     repApply vn =
       astMap
@@ -231,7 +240,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
     -- Side condition for Sub 2 and Sub 3:
     -- If f has a segmented domain, is f(arg) inside the k'th segment?
     arg_in_segment_of_f n = case (shape f !! n, shape g_presub !! n) of
-      (Forall i df, Forall j _) -> do
+      ([Forall i df], [Forall j _]) -> do
         let arg_eq_j = pure . answerFromBool $ args M.! i == sym2SoP (Var j)
         let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
         let arg_in_segment_bounds =
@@ -239,6 +248,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
                 (CaseCheck (\_ -> bounds $ args M.! i))
                 g_presub
         arg_eq_j `orM` arg_in_segment_bounds
+      _ -> error "Not implemented yet"
 
     -- Apply first matching rule for each dimension in f.
     applySubRules g =
@@ -256,37 +266,64 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       [] -> pure g
       _ -> fail "No match."
 
+    -- Substituting into Iota domain.
     sub1 n g = case shape f !! n of
-      Forall _ Iota {} -> pure g
+      [Forall _ Iota {}] -> pure g
+      _ -> fail "No match."
+      -- jk
+
+    -- Propagate flattened domain from f to g.
+    --
+    -- TODO this only tries to align the n'th
+    -- dimension of f with the k'th dimension of g.
+    -- But we could try any dimension in g.
+    propagateFlatten k g = case (shape g !! k, shape f !! k) of
+      ([Forall i_1 (Iota e_1)], df@[Forall i_2 (Iota e_2), Forall i_3 (Iota e_3)])
+          -- PropFlatten-Simplified from the supplementary material.
+          -- (The case where `e_3` may depend on `i_2` is still handled by Cat in
+          -- this implementation.)
+          | i_2 `S.notMember` fv e_3 -> do
+        Yes <- lift (e_1 $== e_2 .*. e_3)
+        e_row <- rewrite $ sym2SoP (Var i_2) .*. e_3
+        let s :: Replacement Symbol = mkRep i_1 (e_row .+. sym2SoP (Var i_3))
+        -- XXX safe to use rep instead of sub? Think so bc f and g were renamed before calling this func?
+        pure $ g {shape = l <> (df : r), body = repCases s (body g)}
+        where
+          (l, _old_iter : r) = splitAt k (shape g)
       _ -> fail "No match."
 
+    -- Substituting into Cat domain.
+    --
     -- TODO this only tries to align the n'th
     -- dimension of f with the n'th dimension of g.
     -- But we could try any dimension in g.
     sub2 n g | n >= rank g = fail "No match."
     sub2 n g = case (shape f !! n, shape g !! n) of
-      (Forall i df@Cat {}, Forall j dg@Iota {}) -> do
+      ([Forall i df@Cat {}], [Forall j dg@Iota {}]) -> do
         Yes <- lift (rewrite (domainEnd df) >>= ($== domainEnd dg))
         Yes <- lift (arg_in_segment_of_f n)
-        pure $ g {shape = l <> [Forall j (repDomain (mkRep i $ Var j) df)] <> r}
+        pure $ g {shape = l <> [[Forall j (repDomain (mkRep i $ Var j) df)]] <> r}
         where
           (l, _old_iter : r) = splitAt n (shape g)
       _ -> fail "No match."
 
+    -- Substituting into Cat domain.
+    --
     -- TODO this only tries to align the n'th
     -- dimension of f with the n'th dimension of g.
     -- But we could try any dimension in g.
     sub3 n g | n >= rank g = fail "No match."
     sub3 n g = case (shape f !! n, shape g !! n) of
-      (Forall _ df@(Cat k _ _), Forall _ dg@(Cat k' _ _))
+      ([Forall _ df@(Cat k _ _)], [Forall _ dg@(Cat k' _ _)])
         | k `S.member` fv (body g) -> do
             True <- lift (df `unifiesWith` dg)
             Yes <- lift (arg_in_segment_of_f n)
             pure $ repIndexFn (mkRep k (sym2SoP $ Var k')) g
       _ -> fail "No match."
 
+    -- Substituting into Cat domain.
     sub4 n g = case shape f !! n of
-      Forall i df@(Cat k _ _) -> do
+      [Forall i df@(Cat k _ _)] -> do
         if k `S.member` fv (body g)
           then do
             Just arg <- hoistMaybe . pure $ args M.!? i
@@ -297,8 +334,10 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           else pure g
       _ -> fail "No match."
 
+    -- Substituting into Cat domain.
+    -- 
     subX n g = case shape f !! n of
-      Forall i df@(Cat k _ _) | k `S.member` fv (body g) -> do
+      [Forall i df@(Cat k _ _)] | k `S.member` fv (body g) -> do
         Just arg <- hoistMaybe . pure $ args M.!? i
         -- Create/lookup II array.
         let def_II = f {body = cases [(Bool True, sym2SoP (Var k))]}

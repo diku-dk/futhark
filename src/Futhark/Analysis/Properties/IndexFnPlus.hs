@@ -22,7 +22,7 @@ import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (repVName)
 import Futhark.Analysis.Properties.Unify (FreeVariables (..), Renameable (..), Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
-import Futhark.Analysis.Properties.Util (prettyName)
+import Futhark.Analysis.Properties.Util (flatten, prettyName, unflatten)
 import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), align, comma, commastack, hang, indent, line, parens, punctuate, sep, softline, stack, (<+>))
 import Language.Futhark (VName)
@@ -108,7 +108,7 @@ instance FreeVariables (Cases Symbol (SoP Symbol)) where
   fv cs = mconcat $ map (\(c, v) -> fv c <> fv v) $ casesToList cs
 
 instance FreeVariables IndexFn where
-  fv (IndexFn dims cs) = mconcat (map fv dims) <> fv cs
+  fv (IndexFn dims cs) = mconcat (map fv $ concat dims) <> fv cs
 
 -------------------------------------------------------------------------------
 -- Unification.
@@ -126,7 +126,7 @@ repIterator :: Replacement Symbol -> Quantified Domain -> Quantified Domain
 repIterator s (Forall i dom) = Forall (repVName s i) (repDomain s dom)
 
 repIndexFn :: Replacement Symbol -> IndexFn -> IndexFn
-repIndexFn s (IndexFn dims body) = IndexFn (map (repIterator s) dims) (repCases s body)
+repIndexFn s (IndexFn dims body) = IndexFn (map (map (repIterator s)) dims) (repCases s body)
 
 subIndexFn :: Substitution Symbol -> IndexFn -> IndexFnM IndexFn
 subIndexFn s indexfn = repIndexFn (mapping s) <$> rename (vns s) indexfn
@@ -148,10 +148,11 @@ instance Renameable Iterator where
   rename_ vns tau (Forall i dom) = Forall i <$> rename_ vns tau dom
 
 instance Renameable IndexFn where
-  rename_ vns tau (IndexFn dims body) = do
+  rename_ vns tau (IndexFn dimss body) = do
+    let (ns, dims) = flatten dimss
     (vns', tau', xs) <- foldM (\(v, t, ds) d -> append3rd ds <$> renameIter v t d) (vns, tau, []) dims
     let dims' = reverse xs
-    IndexFn dims' <$> rename_ vns' tau' body
+    IndexFn (unflatten ns dims') <$> rename_ vns' tau' body
     where
       append3rd cs (a, b, c) = (a, b, c : cs)
       -- Wraps rename_ on Iterator to also return new state for renaming k in body.
@@ -183,7 +184,6 @@ instance Unify Iterator Symbol where
   unify_ k (Forall i d1) (Forall j d2) = do
     s <- if i == j then pure mempty else unify_ k (Hole i) (Var j)
     (s <>) <$> unify_ k (repDomain s d1) (repDomain s d2)
-  unify_ _ _ _ = fail "Incompatible iterators"
 
 instance Unify IndexFn Symbol where
   unify_ = unifyIndexFnWith unify_
@@ -198,8 +198,14 @@ unifyIndexFnWith unifyBody k (IndexFn dims1 body1) (IndexFn dims2 body2) = do
   s <- unifiesIter_ k dims1 dims2
   (s <>) <$> unifyBody k (repCases s body1) (repCases s body2)
 
-unifiesIter_ :: VName -> [Iterator] -> [Iterator] -> MaybeT IndexFnM (Replacement Symbol)
-unifiesIter_ k xs ys
+unifiesIter_ :: (Foldable t1, Foldable t2) => VName -> t1 [Iterator] -> t2 [Iterator] -> MaybeT IndexFnM (Replacement Symbol)
+unifiesIter_ k xss yss
+  | length xss == length yss =
+      unifiesFlatIter_ k (concat xss) (concat yss)
+  | otherwise = fail "different lengths"
+
+unifiesFlatIter_ :: VName -> [Iterator] -> [Iterator] -> MaybeT IndexFnM (Replacement Symbol)
+unifiesFlatIter_ k xs ys
   | length xs == length ys = do
       go (zip xs ys)
   | otherwise = fail "different lengths"
