@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Tighter source locations for `let x[i] = ...` expressions.
 
+* Oversight in size expressions in let-bindings. (#2322)
+
+* `futhark pkg` is now more robust against errors in package data.
+
 ## [0.25.33]
 
 ### Added
