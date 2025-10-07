@@ -15,7 +15,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Debug.Trace (traceShow)
+import Debug.Trace (trace, traceShow)
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Builder (Buildable (..), insertStm, insertStms, mkLet)
@@ -102,34 +102,22 @@ concatLambda ::
   Lambda SOACS ->
   Lambda SOACS ->
   Lambda SOACS
-concatLambda lam lam' =
+concatLambda lam_c lam_p =
   Lambda
-    { lambdaBody = new_body,
-      lambdaParams = new_params,
-      lambdaReturnType = new_ts
+    { lambdaBody = mkBody new_body_stms $ res_p <> res_c,
+      lambdaParams = params_p <> params_c,
+      lambdaReturnType = ts_p <> ts_c
     }
   where
-    new_params = params_p <> params_c
-
-    new_res = res_p <> res_c
-    new_ts = ts_p <> ts_c
-
-    ts_c = lambdaReturnType lam
-    ts_p = lambdaReturnType lam'
-    res_c = bodyResult $ lambdaBody lam
-    res_p = bodyResult $ lambdaBody lam'
-    body_stms_c = bodyStms $ lambdaBody lam
-    body_stms_p = bodyStms $ lambdaBody lam'
-    new_body_stms =
-      body_stms_p
-        <> body_stms_c
-    new_body =
-      (lambdaBody lam)
-        { bodyStms = new_body_stms,
-          bodyResult = new_res
-        }
-    params_c = lambdaParams lam
-    params_p = lambdaParams lam'
+    ts_c = lambdaReturnType lam_c
+    ts_p = lambdaReturnType lam_p
+    res_c = bodyResult $ lambdaBody lam_c
+    res_p = bodyResult $ lambdaBody lam_p
+    body_stms_c = bodyStms $ lambdaBody lam_c
+    body_stms_p = bodyStms $ lambdaBody lam_p
+    new_body_stms = body_stms_p <> body_stms_c
+    params_c = lambdaParams lam_c
+    params_p = lambdaParams lam_p
 
 -- | Given a set of names which are interpreted as the resulting
 -- variables found from the given Stms, eliminate all Stms which are
@@ -488,12 +476,11 @@ alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
           . L.nubBy ((==) `on` fst3)
           . filter ((`notElem` post_out) . fst3)
           $ zip3 post_inp' pars' ts'
-  pure $
+  pure
     ( post
         { lambdaParams = pars',
           lambdaReturnType = ts <> id_ts,
-          lambdaBody =
-            body {bodyResult = res <> id_res}
+          lambdaBody = body {bodyResult = res <> id_res}
         },
       map fromExternalUnsafe post_out <> id_out
     )
@@ -596,7 +583,7 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
             (pre_rest_inp_c, pre_rest_c, pre_rest_out_c)
             ) = splitLambdaByPar param_fuse_names pre_inp_c pre_c pre_out_c
           (extra_pre_inp, pre_f', pre_out_f') =
-            fuseLambda pre_rest_c pre_rest_inp_c pre_rest_out_c (debugPretty "pre:\n" pre_p) pre_out_p
+            fuseLambda pre_rest_c pre_rest_inp_c pre_rest_out_c pre_p pre_out_p
           pre_inp_f' = pre_inp_p <> extra_pre_inp
           (extra_post_inp, post_p', post_out_p') =
             fuseLambda post_fuse_c post_fuse_inp_c post_fuse_out_c post_p post_out_p
@@ -605,22 +592,22 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
           post_f'' = concatLambda post_c post_p'
           post_out_f'' = post_out_c <> post_out_p'
           (post_f', post_out_f') = prunePostOut post_f'' post_out_f''
-      let !t = (debug "inp: " pre_inp_f', pre_f', debug "out: " pre_out_f')
-      Just
-        <$> toScrema
-          (inp_c <> inp_p)
-          t
-          (scans_f, scans_inout)
-          (reds_f, reds_inout)
-          (post_inp_f', post_f', post_out_f')
+      trace ("post_f'':\n" <> prettyString post_f') $
+        Just
+          <$> toScrema
+            (inp_c <> inp_p)
+            (pre_inp_f', pre_f', pre_out_f')
+            (scans_f, scans_inout)
+            (reds_f, reds_inout)
+            (post_inp_f', post_f', post_out_f')
   | otherwise = pure Nothing
   where
     ( (pre_inout_c, post_inout_c),
       (pre_inout_p, post_inout_p)
       ) =
         scremaFuseInOut inp_c form_c out_c inp_p form_p out_p
-    scans_f = on (<>) scremaScans form_c form_p
-    reds_f = on (<>) scremaReduces form_c form_p
+    scans_f = scremaScans form_c <> scremaScans form_p
+    reds_f = scremaReduces form_c <> scremaReduces form_p
     scans_inout = scans_inout_c <> scans_inout_p
     reds_inout = reds_inout_c <> reds_inout_p
     num_scans_c = scanResults $ scremaScans form_c

@@ -246,8 +246,7 @@ tests =
         ],
       testGroup
         "fuseScrema"
-        [ -- NOTE: this test really should not succeed! The result looks like bullshit.
-          testCase "map-scan" $
+        [ testCase "map-scan" $
             SP
               ( freshNames
                   ( fuseScrema
@@ -293,7 +292,7 @@ tests =
                               [ "\\ {x_5570 : i32, eta_p_5566 : i32} : {i32, i32, i32} ->",
                                 "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
                                 "let {x_10000 : i32} = lifted_lambda_res_5567",
-                                "in {x_5570, x_10000}"
+                                "in {x_5570, lifted_lambda_res_5567, x_10000}"
                               ],
                           scremaScans =
                             [ Scan
@@ -308,8 +307,8 @@ tests =
                           scremaReduces = [],
                           scremaPostLambda =
                             fromLines
-                              [ "\\ {x_10001 : i32, x_5574 : i32} : {i32, i32} -> ",
-                                "{x_10001, x_5574}"
+                              [ "\\ {x_5574 : i32, x_10001 : i32, x_10002 : i32} : {i32, i32} -> ",
+                                "{x_5574, x_10001}"
                               ]
                         },
                       [ "defunc_0_scan_res_5569",
