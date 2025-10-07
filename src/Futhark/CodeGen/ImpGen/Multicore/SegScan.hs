@@ -23,7 +23,7 @@ compileSegScan ::
   [SegBinOp MCMem] ->
   SegPostOp MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 compileSegScan pat space ts kbody reds post_op nsubtasks
   | [_] <- unSegSpace space =
       nonsegmentedScan pat space ts kbody reds post_op nsubtasks
@@ -40,7 +40,7 @@ lamBody :: SegBinOp MCMem -> Body MCMem
 lamBody = lambdaBody . segBinOpLambda
 
 -- Arrays for storing worker results.
-carryArrays :: String -> TV Int32 -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
+carryArrays :: Name -> TV Int32 -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
 carryArrays s nsubtasks segops =
   forM segops $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
@@ -59,56 +59,55 @@ nonsegmentedScan ::
   [SegBinOp MCMem] ->
   SegPostOp MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 nonsegmentedScan pat space ts kbody scan_ops post_op nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
-  collect $ do
-    -- Are we working with nested arrays
-    let dims = map (shapeDims . segBinOpShape) scan_ops
-    -- Are we only working on scalars
-    let scalars = all (all (primType . typeOf . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all null dims
-    -- Do we have nested vector operations
-    let vectorize = [] `notElem` dims
+  -- Are we working with nested arrays
+  let dims = map (shapeDims . segBinOpShape) scan_ops
+  -- Are we only working on scalars
+  let scalars = all (all (primType . typeOf . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all null dims
+  -- Do we have nested vector operations
+  let vectorize = [] `notElem` dims
 
-    let param_types = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
-    let no_array_param = all primType param_types
+  let param_types = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
+  let no_array_param = all primType param_types
 
-    let shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
-    let scan_ts = concatMap shpT scan_ops
-    let shpOfT t s =
-          arrayShape $
-            foldr (flip arrayOfRow) (arrayOfShape t s) $
-              segSpaceDims space
-    let (scanStage1, scanStage3, scan1Subtask)
-          | scalars = (scanStage1Scalar, scanStage3Scalar, scanScalar1Subtask)
-          | vectorize && no_array_param = (scanStage1Nested, scanStage3Nested, scanNested1Subtask)
-          | otherwise = (scanStage1Fallback, scanStage3Fallback, scanFallback1Subtask)
+  let shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
+  let scan_ts = concatMap shpT scan_ops
+  let shpOfT t s =
+        arrayShape $
+          foldr (flip arrayOfRow) (arrayOfShape t s) $
+            segSpaceDims space
+  let (scanStage1, scanStage3, scan1Subtask)
+        | scalars = (scanStage1Scalar, scanStage3Scalar, scanScalar1Subtask)
+        | vectorize && no_array_param = (scanStage1Nested, scanStage3Nested, scanNested1Subtask)
+        | otherwise = (scanStage1Fallback, scanStage3Fallback, scanFallback1Subtask)
 
-    let nsubtasks' = tvExp nsubtasks
-    sIf
-      (nsubtasks' .>. 1)
-      ( do
-          scan_out <- forM scan_ts $ \(s, t) ->
-            sAllocArray "scan_out" (elemType t) (shpOfT t s) DefaultSpace
+  let nsubtasks' = tvExp nsubtasks
+  sIf
+    (nsubtasks' .>. 1)
+    ( do
+        scan_out <- forM scan_ts $ \(s, t) ->
+          sAllocArray "scan_out" (elemType t) (shpOfT t s) DefaultSpace
 
-          map_out <- forM (drop (segBinOpResults scan_ops) ts) $ \t ->
-            sAllocArray "map_out" (elemType t) (shpOfT t mempty) DefaultSpace
+        map_out <- forM (drop (segBinOpResults scan_ops) ts) $ \t ->
+          sAllocArray "map_out" (elemType t) (shpOfT t mempty) DefaultSpace
 
-          emit $ Imp.DebugPrint "Scan stage 1" Nothing
-          scanStage1 space kbody scan_ops scan_out map_out
-          scan_ops2 <- renameSegBinOp scan_ops
-          emit $ Imp.DebugPrint "Scan stage 2" Nothing
-          carries <- scanStage2 nsubtasks space scan_ops2 scan_out
-          scan_ops3 <- renameSegBinOp scan_ops
-          emit $ Imp.DebugPrint "Scan stage 3" Nothing
-          scanStage3 pat space scan_ops3 carries post_op scan_out map_out
-      )
-      ( do
-          scan_ops_1_subtask <- renameSegBinOp scan_ops
-          post_op_1_subtask <- renameSegPostOp post_op
-          emit $ Imp.DebugPrint "Scan 1 subtask" Nothing
-          scan1Subtask pat space kbody scan_ops_1_subtask post_op_1_subtask
-      )
+        emit $ Imp.DebugPrint "Scan stage 1" Nothing
+        scanStage1 space kbody scan_ops scan_out map_out
+        scan_ops2 <- renameSegBinOp scan_ops
+        emit $ Imp.DebugPrint "Scan stage 2" Nothing
+        carries <- scanStage2 nsubtasks space scan_ops2 scan_out
+        scan_ops3 <- renameSegBinOp scan_ops
+        emit $ Imp.DebugPrint "Scan stage 3" Nothing
+        scanStage3 pat space scan_ops3 carries post_op scan_out map_out
+    )
+    ( do
+        scan_ops_1_subtask <- renameSegBinOp scan_ops
+        post_op_1_subtask <- renameSegPostOp post_op
+        emit $ Imp.DebugPrint "Scan 1 subtask" Nothing
+        scan1Subtask pat space kbody scan_ops_1_subtask post_op_1_subtask
+    )
 
 -- Different ways to generate code for a scan loop
 data ScanLoopType
@@ -273,8 +272,7 @@ genScanLoop ::
 genScanLoop typ space kbody scan_ops local_accs scan_out map_out i = do
   let (all_scan_res, all_map_res) =
         splitAt (segBinOpResults scan_ops) $
-          fmap kernelResultSubExp $
-            bodyResult kbody
+          kernelResultSubExp <$> bodyResult kbody
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
@@ -664,13 +662,12 @@ segmentedScan ::
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
   SegPostOp MCMem ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 segmentedScan pat space kbody scan_ops post_op = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
-  collect $ do
-    body <- compileSegScanBody pat space kbody scan_ops post_op
-    free_params <- freeParams body
-    emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
+  body <- compileSegScanBody pat space kbody scan_ops post_op
+  free_params <- freeParams body
+  emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
 
 -- Note: This should use the post op but it is not
 -- used so it is therefore not implemented.

@@ -111,7 +111,7 @@ interchangeLoop
         expanded_init <- expandedInit param_name merge_init
         pure (expanded_param, expanded_init)
         where
-          param_name = baseString $ paramName merge_param
+          param_name = baseName $ paramName merge_param
 
       expandPatElem (PatElem name t) =
         PatElem name $ arrayOfRow t w
@@ -132,7 +132,7 @@ maybeCopyInitial isMapInput (SeqLoop perm loop_pat merge form body) =
         Array {} <- paramType p =
           (p,)
             <$> letSubExp
-              (baseString (paramName p) <> "_inter_copy")
+              (baseName (paramName p) <> "_inter_copy")
               (BasicOp $ Replicate mempty $ Var arg)
     f (p, arg) =
       pure (p, arg)
@@ -281,7 +281,7 @@ interchangeWithAcc1
         let (cert_ps, acc_ps) = splitAt (length ps `div` 2) ps
         -- Should not rename the certificates.
         acc_ps' <- forM acc_ps $ \(Param attrs v t) ->
-          Param attrs <$> newVName (baseString v) <*> pure t
+          Param attrs <$> newName v <*> pure t
         pure $ cert_ps <> acc_ps'
 
       num_accs = length inputs

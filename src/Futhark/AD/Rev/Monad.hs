@@ -245,7 +245,7 @@ insAdj :: VName -> VName -> ADM ()
 insAdj v = setAdj v . AdjVal . Var
 
 adjVName :: VName -> ADM VName
-adjVName v = newVName (baseString v <> "_adj")
+adjVName v = newVName (baseName v <> "_adj")
 
 -- | Create copies of all arrays consumed in the given statement, and
 -- return statements which include copies of the consumed arrays.
@@ -260,7 +260,7 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
             case v_t of
               Array {} -> do
                 v' <-
-                  letExp (baseString v <> "_ad_copy") . BasicOp $
+                  letExp (baseName v <> "_ad_copy") . BasicOp $
                     Replicate mempty (Var v)
                 addSubstitution v' v
                 pure [(v, v')]
@@ -282,7 +282,7 @@ copyConsumedArrsInBody dontCopy b =
         Array {} ->
           M.singleton v
             <$> letExp
-              (baseString v <> "_ad_copy")
+              (baseName v <> "_ad_copy")
               (BasicOp $ Replicate mempty (Var v))
         _ -> pure mempty
 
@@ -331,7 +331,7 @@ tabNest = tabNest' []
           Iota w (intConst Int64 0) (intConst Int64 1) Int64
       iparam <- newParam "i" $ Prim int64
       params <- forM vs $ \v ->
-        newParam (baseString v <> "_p") . rowType =<< lookupType v
+        newParam (baseName v <> "_p") . rowType =<< lookupType v
       ((ret, res), stms) <- collectStms . localScope (scopeOfLParams (iparam : params)) $ do
         res <- tabNest' (paramName iparam : is) (n - 1) (map paramName params) f
         ret <- mapM lookupType res
@@ -424,11 +424,11 @@ updateAdjIndex v (check, i) se = do
           _ -> do
             let stms s = do
                   v_adj_i <-
-                    letExp (baseString v_adj <> "_i") . BasicOp $
+                    letExp (baseName v_adj <> "_i") . BasicOp $
                       Index v_adj $
                         fullSlice v_adj_t [DimFix i]
                   se_update <- letSubExp "updated_adj_i" =<< addExp se_v v_adj_i
-                  letExp (baseString v_adj) . BasicOp $
+                  letExp (baseName v_adj) . BasicOp $
                     Update s v_adj (fullSlice v_adj_t [DimFix i]) se_update
             case check of
               CheckBounds _ -> stms Safe
@@ -453,7 +453,7 @@ updateAdjWithSafety v d safety = do
                 UpdateAcc safety v_adj' (map Var is) [Var d']
           insAdj v v_adj'
         _ -> do
-          v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
+          v_adj' <- letExp (baseName v <> "_adj") =<< addExp v_adj d
           insAdj v v_adj'
 
 updateAdjSliceWithSafety :: Slice SubExp -> VName -> VName -> Safety -> ADM ()
@@ -476,14 +476,14 @@ updateAdjSliceWithSafety slice v d safety = do
             traverse (toSubExp "index") $
               fixSlice (fmap pe64 slice) $
                 map le64 is
-          letTupExp (baseString v_adj') . BasicOp $
+          letTupExp (baseName v_adj') . BasicOp $
             UpdateAcc safety v_adj' slice' [Var d']
       pure v_adj'
     _ -> do
       v_adjslice <-
         if primType t
           then pure v_adj
-          else letExp (baseString v ++ "_slice") $ BasicOp $ Index v_adj slice
+          else letExp (baseName v <> "_slice") $ BasicOp $ Index v_adj slice
       letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
   insAdj v v_adj'
 

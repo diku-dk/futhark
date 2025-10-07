@@ -172,7 +172,7 @@ transformSOAC pat soac@(Screma w arrs (ScremaForm map_lam scans reds post_lam)) 
           Nothing
             | paramName p `nameIn` lam_cons -> do
                 p' <-
-                  letExp (baseString (paramName p)) . BasicOp $
+                  letExp (baseName (paramName p)) . BasicOp $
                     Index arr $
                       fullSlice arr_t [DimFix $ Var i]
                 letBindNames [paramName p] $ BasicOp $ Replicate mempty $ Var p'
@@ -250,7 +250,7 @@ transformSOAC pat (Stream w arrs nes lam) = do
         se_t <- subExpType se
         case (se_t, se) of
           (Array {}, Var v) ->
-            letSubExp (baseString v) $ BasicOp $ Replicate mempty se
+            letSubExp (baseName v) $ BasicOp $ Replicate mempty se
           _ -> pure se
   nes' <- mapM copyIfArray nes
 

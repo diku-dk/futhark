@@ -241,7 +241,7 @@ combineInputs ::
     )
 combineInputs inp lam out inp' = do
   new_inputs <- mapM toNewParamPair =<< filterM (isOutput out) inp'
-  pure $ (old_inputs, new_inputs)
+  pure (old_inputs, new_inputs)
   where
     old_inputs = zip inp $ lambdaParams lam
     toNewParamPair inp'' =
@@ -295,7 +295,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   guard $ all inputOrUnfus outVars
 
   outPairs <- forM (zip outVars $ map rowType $ SOAC.typeOf soac_p) $ \(outVar, t) -> do
-    outVar' <- newVName $ baseString outVar ++ "_elem"
+    outVar' <- newVName $ baseName outVar <> "_elem"
     pure (outVar, Ident outVar' t)
 
   let mapLikeFusionCheck =
@@ -657,7 +657,7 @@ pullIndex (SOAC.Screma _ inps form) ots
           sliceRes (SubExpRes rcs (Var v)) =
             certifying rcs
               . fmap subExpRes
-              . letSubExp (baseString v <> "_sliced")
+              . letSubExp (baseName v <> "_sliced")
               $ BasicOp (Index v (Slice inner_ds))
           sliceRes r = pure r
           inner_changed =

@@ -564,11 +564,11 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape (Var stm_arr)))) acc
             res_r = arr_r + shapeRank shape
         -- Move the to-be-replicated dimensions outermost.
         arr_tr <-
-          letExp (baseString arr <> "_tr") . BasicOp $
+          letExp (baseName arr <> "_tr") . BasicOp $
             Rearrange arr ([nest_r .. arr_r - 1] ++ [0 .. nest_r - 1])
         -- Replicate the now-outermost dimensions appropriately.
         arr_tr_rep <-
-          letExp (baseString arr <> "_tr_rep") . BasicOp $
+          letExp (baseName arr <> "_tr_rep") . BasicOp $
             Replicate shape (Var arr_tr)
         -- Move the replicated dimensions back where they belong.
         letBind outerpat . BasicOp $
@@ -597,7 +597,7 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Rearrange stm_arr perm))) acc =
         perm' = [0 .. r - 1] ++ map (+ r) perm
     -- We need to add a copy, because the original map nest
     -- will have produced an array without aliases, and so must we.
-    arr' <- newVName $ baseString arr
+    arr' <- newName arr
     arr_t <- lookupType arr
     pure $
       stmsFromList
@@ -1046,7 +1046,7 @@ isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
                 -- it.
                 pure $
                   letExp
-                    (baseString arr ++ "_repd")
+                    (baseName arr <> "_repd")
                     (BasicOp $ Replicate (Shape $ map snd ispace) $ Var arr)
           _ ->
             fail "Input not free, perfectly mapped, or outermost."
@@ -1098,7 +1098,7 @@ expandKernelNest pes (outer_nest, inner_nests) = do
           }
 
     expandPatElemWith dims pe = do
-      name <- newVName $ baseString $ patElemName pe
+      name <- newName $ patElemName pe
       pure
         pe
           { patElemName = name,

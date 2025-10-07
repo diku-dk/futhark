@@ -252,8 +252,8 @@ evalResolved (ts, ds) = do
   ds' <- mapM (traverse $ \(SizeClosure env e) -> asInt64 <$> evalWithExts env e) ds
   pure $ typeEnv (M.fromList ts') <> i64Env (M.fromList ds')
   where
-    onDim (Left x) = sizeFromInteger (toInteger x) mempty
-    onDim (Right (SizeClosure _ e)) = e -- FIXME
+    onDim (Left x) = SizeClosure mempty $ sizeFromInteger (toInteger x) mempty
+    onDim (Right e) = e
 
 resolveExistentials :: [VName] -> StructType -> ValueShape -> M.Map VName Int64
 resolveExistentials names = match
@@ -348,9 +348,8 @@ lookupType = lookupInEnv envType
 -- an existential.
 data TermBinding
   = TermValue (Maybe T.BoundV) Value
-  | -- | A polymorphic value that must be instantiated.  The
-    --  'StructType' provided is un-evaluated, but parts of it can be
-    --  evaluated using the provided 'Eval' function.
+  | -- | A polymorphic value that must be instantiated. The 'EvalType' provided
+    --  is the type of the instantiation.
     TermPoly (Maybe T.BoundV) (EvalType -> EvalM Value)
   | TermModule Module
 
@@ -359,7 +358,13 @@ instance Show TermBinding where
   show (TermPoly bv _) = unwords ["TermPoly", show bv]
   show (TermModule m) = unwords ["TermModule", show m]
 
-data TypeBinding = TypeBinding Env [TypeParam] StructRetType
+data TypeBinding
+  = TypeConBinding
+      Env
+      [TypeParam]
+      (RetTypeBase Size NoUniqueness)
+  | TypeBinding
+      EvalType
   deriving (Show)
 
 data Module
@@ -406,14 +411,12 @@ modEnv m =
       envType = mempty
     }
 
-typeEnv :: M.Map VName StructType -> Env
+typeEnv :: M.Map VName EvalType -> Env
 typeEnv m =
   Env
     { envTerm = mempty,
-      envType = M.map tbind m
+      envType = M.map TypeBinding m
     }
-  where
-    tbind = TypeBinding mempty [] . RetType []
 
 i64Env :: M.Map VName Int64 -> Env
 i64Env = valEnv . M.map f
@@ -665,12 +668,14 @@ expandType env t@(Array u shape _) =
    in second (const u) (arrayOf shape' $ toStruct et')
 expandType env (Scalar (TypeVar u tn args)) =
   case lookupType tn env of
-    Just (TypeBinding tn_env ps (RetType ext t')) ->
+    Just (TypeBinding t') ->
+      second (const u) t'
+    Just (TypeConBinding tn_env ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
           onDim (SizeClosure dim_env dim)
             | any (`elem` ext) $ fvVars $ freeInExp dim =
-                -- The case can occur when a type with existential
-                -- size has been hidden by a module ascription, e.g.
+                -- The case can occur when a type with existential size has been
+                -- hidden by a module ascription, e.g.
                 -- tests/modules/sizeparams4.fut.
                 SizeClosure mempty anySize
             | otherwise =
@@ -685,8 +690,8 @@ expandType env (Scalar (TypeVar u tn args)) =
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
       (M.singleton p $ ExpSubst e, mempty)
     matchPtoA (TypeParamType _ p _) (TypeArgType t') =
-      let t'' = evalToStruct $ expandType env t' -- FIXME, we are throwing away the closure here.
-       in (mempty, M.singleton p (TypeBinding mempty [] $ RetType [] t''))
+      let t'' = expandType env t'
+       in (mempty, M.singleton p (TypeBinding t''))
     matchPtoA _ _ = mempty
     expandArg (TypeArgDim s) = TypeArgDim $ SizeClosure env s
     expandArg (TypeArgType t) = TypeArgType $ expandType env t
@@ -869,16 +874,16 @@ evalAppExp env (LetPat sizes p e body _) = do
       v_s = valueShape v
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
-evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
+evalAppExp env (LetFun (f, _) (tparams, ps, _, Info ret, fbody) body _) = do
   binding <- evalFunctionBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
 evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
-  | baseString (qualLeaf op) == "&&" = do
+  | baseName (qualLeaf op) == "&&" = do
       x' <- asBool <$> eval env x
       if x'
         then eval env y
         else pure $ ValuePrim $ BoolValue False
-  | baseString (qualLeaf op) == "||" = do
+  | baseName (qualLeaf op) == "||" = do
       x' <- asBool <$> eval env x
       if x'
         then pure $ ValuePrim $ BoolValue True
@@ -1139,7 +1144,7 @@ substituteInModule substs = onModule
       k' <- replace k
       pure (k', f v)
     onEnv (Env terms types) =
-      Env (replaceM onTerm terms) (replaceM onType types)
+      Env (replaceM onTerm terms) (replaceM id types)
     onModule (Module env) =
       Module $ onEnv env
     onModule (ModuleFun f) =
@@ -1147,7 +1152,6 @@ substituteInModule substs = onModule
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
-    onType (TypeBinding env ps t) = TypeBinding (onEnv env) ps t
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1228,7 +1232,7 @@ evalDec env (ImportDec name name' loc) =
 evalDec env (LocalDec d _) = evalDec env d
 evalDec _env ModTypeDec {} = pure mempty
 evalDec env (TypeDec (TypeBind v _ ps _ (Info (RetType dims t)) _ _)) = do
-  let abbr = TypeBinding env ps $ RetType dims t
+  let abbr = TypeConBinding env ps $ RetType dims t
   pure mempty {envType = M.singleton v abbr}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   (mod_env, mod) <- evalModExp env $ wrapInLambda ps
@@ -2143,7 +2147,7 @@ initialCtx =
     tdef :: Name -> Maybe TypeBinding
     tdef s = do
       t <- s `M.lookup` namesToPrimTypes
-      pure $ TypeBinding mempty [] $ RetType [] $ Scalar $ Prim t
+      pure $ TypeConBinding mempty [] $ RetType [] $ Scalar $ Prim t
 
 intrinsicVal :: Name -> Value
 intrinsicVal name =

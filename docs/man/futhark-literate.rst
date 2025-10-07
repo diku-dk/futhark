@@ -241,16 +241,17 @@ FUTHARKSCRIPT
 Only an extremely limited subset of Futhark is supported:
 
 .. productionlist::
-   script_exp:   `fun` `script_exp`*
-            : | "(" `script_exp` ")"
-            : | "(" `script_exp` ( "," `script_exp` )+ ")"
-            : | "[" `script_exp` ( "," `script_exp` )+ "]"
-            : | "empty" "(" ("[" `decimal` "]" )+ `script_type` ")"
-            : | "{" "}"
-            : | "{" (`id` = `script_exp`) ("," `id` = `script_exp`)* "}"
-            : | "let" `script_pat` "=" `script_exp` "in" `script_exp`
-            : | `literal`
-   script_pat:  `id` | "(" `id` ("," `id`) ")"
+   script_exp:   `script_fun` `script_exp`*
+             : | "let" `script_pat` "=" `script_exp` "in" `script_exp`
+             : | `script_atom` ( "." `fieldid` )*
+   script_atom: `script_fun`
+              : | "(" `script_exp` ")"
+              : | "(" `script_exp` ( "," `script_exp` )+ ")"
+              : | "[" `script_exp` ( "," `script_exp` )+ "]"
+              : | "empty" "(" ("[" `decimal` "]" )+ `script_type` ")"
+              : | "{" "}"
+              : | "{" (`id` = `script_exp`) ("," `id` = `script_exp`)* "}"
+   script_pat:  `id` | "(" `id` ("," `id`)* ")"
    script_fun:  `id` | "$" `id`
    script_type: `int_type` | `float_type` | "bool"
 
@@ -277,6 +278,10 @@ Futhark.  The following builtins are supported:
   ``[][]f64``, where each row corresponds to a channel of the original
   soundfile. Most common audio-formats are supported, including mp3, ogg, wav,
   flac and opus.
+
+* ``$restore "type" "file"`` loads a serialised value of type ``type`` from
+  ``file``. The usual caveats apply regarding the stability of the value
+  serialisation format.
 
 FutharkScript supports a form of automatic uncurrying. If a function
 taking *n* parameters is applied to a single argument that is an

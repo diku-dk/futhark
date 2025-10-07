@@ -765,7 +765,7 @@ etaExpand e_t e = do
       let t' = second (const d) t
       x <- case p of
         Named x | x `notElem` prev -> pure x
-        _ -> newNameFromString "eta_p"
+        _ -> newVName "eta_p"
       pure
         ( x : prev,
           ( Id x (Info t') mempty,
@@ -874,8 +874,8 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           (params, body, ret) <- etaExpand (RetType [] $ toRes Nonunique t) e
           defuncFun [] params body ret mempty
       | otherwise -> do
-          fname <- newVName $ "dyn_" <> baseString (qualLeaf qn)
-          let (pats, e0, sv') = liftDynFun (prettyString qn) sv num_args
+          fname <- newVName $ "dyn_" <> baseName (qualLeaf qn)
+          let (pats, e0, sv') = liftDynFun (nameFromText (prettyText qn)) sv num_args
               (argtypes', rettype') = dynamicFunType sv' argtypes
               dims' = mempty
 
@@ -902,15 +902,15 @@ defuncApplyFunction e _ = defuncExp e
 -- Embed some information about the original function
 -- into the name of the lifted function, to make the
 -- result slightly more human-readable.
-liftedName :: Int -> Exp -> String
+liftedName :: Int -> Exp -> Name
 liftedName i (Var f _ _) =
-  "defunc_" ++ show i ++ "_" ++ baseString (qualLeaf f)
+  "defunc_" <> nameFromString (show i) <> "_" <> baseName (qualLeaf f)
 liftedName i (AppExp (Apply f _ _) _) =
   liftedName (i + 1) f
 liftedName _ _ = "defunc"
 
 defuncApplyArg ::
-  (String, SrcLoc) ->
+  (Name, SrcLoc) ->
   (Exp, StaticVal) ->
   ((Maybe VName, Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
@@ -950,7 +950,7 @@ defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) ((ar
   let bound_sizes = S.fromList (dims <> more_dims) <> globals
   params' <- instAnySizes params
 
-  fname <- newNameFromString fname_s
+  fname <- newVName fname_s
   liftValDec
     fname
     lifted_rettype
@@ -1037,7 +1037,7 @@ fullyApplied _ _ = True
 -- dimensions, a list of parameters, a function body, and the
 -- appropriate static value for applying the function at the given
 -- depth of partial application.
-liftDynFun :: String -> StaticVal -> Int -> ([Pat ParamType], Exp, StaticVal)
+liftDynFun :: Name -> StaticVal -> Int -> ([Pat ParamType], Exp, StaticVal)
 liftDynFun _ (DynamicFun (e, sv) _) 0 = ([], e, sv)
 liftDynFun s (DynamicFun clsr@(_, LambdaSV pat _ _ _) sv) d
   | d > 0 =
@@ -1045,7 +1045,7 @@ liftDynFun s (DynamicFun clsr@(_, LambdaSV pat _ _ _) sv) d
        in (pat : pats, e', DynamicFun clsr sv')
 liftDynFun s sv d =
   error $
-    s
+    nameToString s
       ++ " Tried to lift a StaticVal "
       ++ take 100 (show sv)
       ++ ", but expected a dynamic function.\n"

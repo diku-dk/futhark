@@ -162,7 +162,7 @@ fromSOAC' bound soac = do
                     Nothing
               boundUsedInBody =
                 mapMaybe isBound $ namesToList $ freeIn lam
-          newParams <- mapM (newIdent' (++ "_wasfree")) boundUsedInBody
+          newParams <- mapM (newIdent' (<> "_wasfree")) boundUsedInBody
           let subst =
                 M.fromList $
                   zip (map identName boundUsedInBody) (map identName newParams)
@@ -220,7 +220,7 @@ fixInputs w ourInps = mapM inspect
           p' <- newName p
           pure (p', pInp')
     inspect (param, SOAC.Input ts a t) = do
-      param' <- newNameFromString (baseString param ++ "_rep")
+      param' <- newVName (baseName param <> "_rep")
       pure (param', SOAC.Input (ts SOAC.|> SOAC.Replicate mempty (Shape [w])) a t)
 
 -- | Reshape a map nest. It is assumed that any validity tests have
@@ -242,9 +242,7 @@ reshape aux shape (MapNest _ map_lam _ inps) =
       | shapeRank nest_shape == 0 =
           pure $ MapNest w map_lam nests inps'
       | otherwise = do
-          nest_params <-
-            mapM (newVName . baseString . paramName) $
-              lambdaParams map_lam
+          nest_params <- mapM (newName . paramName) $ lambdaParams map_lam
           res <-
             replicateM
               (length $ lambdaReturnType map_lam)

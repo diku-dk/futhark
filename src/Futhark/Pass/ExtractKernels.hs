@@ -302,14 +302,14 @@ sequentialisedUnbalancedStm _ =
   pure Nothing
 
 cmpSizeLe ::
-  String ->
+  Name ->
   SizeClass ->
   [SubExp] ->
   DistribM ((SubExp, Name), Stms GPU)
 cmpSizeLe desc size_class to_what = do
   x <- gets stateThresholdCounter
   modify $ \s -> s {stateThresholdCounter = x + 1}
-  let size_key = nameFromString $ desc ++ "_" ++ show x
+  let size_key = desc <> "_" <> nameFromString (show x)
   runBuilder $ do
     to_what' <-
       letSubExp "comparatee"
@@ -329,7 +329,7 @@ kernelAlternatives pat default_body [] = runBuilder_ $ do
     certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
 kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   alts_pat <- fmap Pat . forM (patElems pat) $ \pe -> do
-    name <- newVName $ baseString $ patElemName pe
+    name <- newName $ patElemName pe
     pure pe {patElemName = name}
 
   alt_stms <- kernelAlternatives alts_pat default_body alts
@@ -497,7 +497,7 @@ transformStm _ stm =
   runBuilder_ $ FOT.transformStmRecursively stm
 
 sufficientParallelism ::
-  String ->
+  Name ->
   [SubExp] ->
   KernelPath ->
   Maybe Int64 ->

@@ -269,8 +269,8 @@ shortCircuitGPUMem _ _ _ (Alloc _ _) _ bu_env = pure bu_env
 shortCircuitGPUMem lutab pat certs (Inner (GPU.SegOp op)) td_env bu_env =
   shortCircuitSegOp isSegThread lutab pat certs op td_env bu_env
 shortCircuitGPUMem lutab pat certs (Inner (GPU.GPUBody _ body)) td_env bu_env = do
-  fresh1 <- newNameFromString "gpubody"
-  fresh2 <- newNameFromString "gpubody"
+  fresh1 <- newVName "gpubody"
+  fresh2 <- newVName "gpubody"
   shortCircuitSegOpHelper
     0
     isSegThread

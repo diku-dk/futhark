@@ -39,7 +39,7 @@ flattenArray :: Int -> TV Int64 -> VName -> ImpM rep r op VName
 flattenArray k flat arr = do
   ArrayEntry arr_loc pt <- lookupArray arr
   let flat_shape = Shape $ Var (tvVar flat) : drop k (memLocShape arr_loc)
-  sArray (baseString arr ++ "_flat") pt flat_shape (memLocName arr_loc) $
+  sArray (baseName arr <> "_flat") pt flat_shape (memLocName arr_loc) $
     fromMaybe (error "flattenArray") $
       LMAD.reshape (memLocLMAD arr_loc) (map pe64 $ shapeDims flat_shape)
 
@@ -52,7 +52,7 @@ sliceArray start size arr = do
           (map Imp.pe64 (arrayDims arr_t))
           [DimSlice start (tvExp size) 1]
   sArray
-    (baseString arr ++ "_chunk")
+    (baseName arr <> "_chunk")
     (elemType arr_t)
     (arrayShape arr_t `setOuterDim` Var (tvVar size))
     mem
@@ -636,7 +636,7 @@ arrayInSharedMemory Constant {} = pure False
 
 -- | Create a kernel with GPU operations at the block level.
 sKernelBlock ::
-  String ->
+  Name ->
   VName ->
   KernelAttrs ->
   InKernelGen () ->

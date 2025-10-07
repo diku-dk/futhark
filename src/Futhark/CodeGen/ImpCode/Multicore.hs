@@ -22,8 +22,8 @@ type Program = Functions Multicore
 
 -- | A multicore operation.
 data Multicore
-  = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
-  | ParLoop String MCCode [Param]
+  = SegOp Name [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
+  | ParLoop Name MCCode [Param]
   | -- | A kernel of ISPC code, or a scoped block in regular C.
     ISPCKernel MCCode [Param]
   | -- | A foreach loop in ISPC, or a regular for loop in C.

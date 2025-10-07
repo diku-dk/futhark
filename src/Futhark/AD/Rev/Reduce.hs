@@ -25,11 +25,11 @@ eReverse arr = do
       BinOp (Sub Int64 OverflowUndef) w (intConst Int64 1)
   let stride = intConst Int64 (-1)
       slice = fullSlice arr_t [DimSlice start w stride]
-  letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice
+  letExp (baseName arr <> "_rev") $ BasicOp $ Index arr slice
 
 scanExc ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  String ->
+  Name ->
   Scan SOACS ->
   [VName] ->
   m [VName]
@@ -78,7 +78,7 @@ diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isAdd op = do
       adj_rep <-
-        letExp (baseString adj <> "_rep") $
+        letExp (baseName adj <> "_rep") $
           BasicOp $
             Replicate (Shape [w]) $
               Var adj
@@ -185,7 +185,7 @@ diffMinMaxReduce _ops x aux w minmax ne as m = do
       BasicOp $
         Iota w (intConst Int64 0) (intConst Int64 1) Int64
   form <- reduceSOAC [Reduce Commutative red_lam [ne, intConst Int64 (-1)]]
-  x_ind <- newVName (baseString x <> "_ind")
+  x_ind <- newVName (baseName x <> "_ind")
   auxing aux $ letBindNames [x, x_ind] $ Op $ Screma w [as, red_iota] form
 
   m

@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 module Futhark.IR.SOACSTests () where
 
 import Data.String

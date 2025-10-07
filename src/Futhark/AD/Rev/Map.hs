@@ -241,6 +241,6 @@ vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
           zero <- letSubExp "zero" $ zeroExp t
           reduce <- reduceSOAC [Reduce Commutative lam [zero]]
           contrib_sum <-
-            letExp (baseString v <> "_contrib_sum") . Op $
+            letExp (baseName v <> "_contrib_sum") . Op $
               Screma w [contribs] reduce
           void $ updateAdj v contrib_sum
