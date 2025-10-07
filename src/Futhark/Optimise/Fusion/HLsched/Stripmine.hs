@@ -335,8 +335,8 @@ stripmineStmt fenv k env sched (Let pat aux
       mres <- recStripRedomap env1 sig_lens map_lam1 (pat_nms,nes) pe0
       maybe (pure Nothing) (joinMbRes prologue_stms1) mres
     -- Core Function for Stripmining a Red o Map: Base Case
-    recStripRedomap env1 [] map_lam1 _ cur_ind = do
-      let (red_acc, _red_els) = splitAt (length (lambdaReturnType red_lam)) $ lambdaParams red_lam
+    recStripRedomap env1 [] map_lam1 (_,acc_inis) cur_ind = do
+      let (red_acc, red_els) = splitAt (length (lambdaReturnType red_lam)) $ lambdaParams red_lam
       scope <- askScope
       inp_tps <- mapM lookupType inp_nms
       loop_body <-
@@ -348,18 +348,18 @@ stripmineStmt fenv k env sched (Let pat aux
             letBind (Pat [PatElem (paramName arg) (paramDec arg)]) $
                 mkArrIndexingExp env arr tp i_flat
           addStms $ bodyStms $ lambdaBody map_lam1
-          pure $ bodyResult $ lambdaBody map_lam1
-{--
-          -- THIS CODE IS WRONG! IT MIGHT MAKE SENSE FOR A LOOP TRANSLATION ...
+          -- pure $ bodyResult $ lambdaBody map_lam1
+          -- THIS CODE IS TOO MUCH! MAYBE NEEDED FOR A LOOP TRANSLATION AT SOME POINT ...
           forM_ (zip red_els $ bodyResult $ lambdaBody map_lam1) $ \ (rlam_p, map_res) ->
             -- codegen of copy stamts connecting the map's lambda res with reduce's inp
             letBind (Pat [PatElem (paramName rlam_p) (paramDec rlam_p)]) $
                 BasicOp $ SubExp $ resSubExp map_res
+          forM_ (zip red_acc acc_inis) $ \ (acc_p, ne) ->
+            -- codegen of copy stamts connecting the map's lambda res with reduce's inp
+            letBind (Pat [PatElem (paramName acc_p) (paramDec acc_p)]) $ BasicOp $ SubExp ne
           addStms $ bodyStms $ lambdaBody red_lam
           pure $ bodyResult $ lambdaBody red_lam
---}
-      trace ("BASE-STRIP-REDOMAP: "++prettyString loop_body) $
-        pure $ Just (Sq.empty, env1, bodyStms loop_body)
+      pure $ Just (Sq.empty, env1, bodyStms loop_body)
     --
     -- Core Function for Stripmining a Red o Map: Recursive Case
     recStripRedomap env1 ((sig,dlen): schd') map_lam1 (pat_nms, acc_ini) cur_ind = do
@@ -404,10 +404,10 @@ stripmineStmt fenv k env sched (Let pat aux
               addStm $ scremaStm (soac_res, lambdaReturnType red_lam) (w,iotnm) $
                 ScremaForm new_lam' [] [Reduce com red_lam' nes]
               applyRedLam (red_lam, nes) acc_ini (map Var soac_res) pat_nms >>= addStms
-          trace ("\nStripRedoMap RECURSIVE: \n"++prettyString rec_stms++
-                 "\nStripRedoMap RECURSIVE: \n"++prettyString new_stms++
-                 "\nPROLOGUE:\n"++prettyString (new_prologue <> rec_prologue)) $
-            pure $ Just (new_prologue <> rec_prologue, rec_env, new_stms)
+          -- trace ("\nStripRedoMap RECURSIVE: \n"++prettyString rec_stms++
+          --       "\nStripRedoMap RECURSIVE: \n"++prettyString new_stms++
+          --       "\nPROLOGUE:\n"++prettyString (new_prologue <> rec_prologue)) $
+          pure $ Just (new_prologue <> rec_prologue, rec_env, new_stms)
 {--
         -- This is commented out because we do not want to sequentialize at this stage,
         --   e.g., for SpMV we would like to stripmine and then to interchange!
