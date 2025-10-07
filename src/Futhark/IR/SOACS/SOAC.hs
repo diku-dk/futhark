@@ -726,7 +726,7 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
       <> " wrong for given scan and reduction functions."
   let (scan_ts, _, map_ts) =
         splitAt3 (length scan_nes') (length red_nes') map_lam_ts
-      post_lam_args = (,mempty) <$> (scan_ts <> map_ts)
+      post_lam_args = map (,mempty) $ scan_ts <> map_ts
   TC.checkLambda post_lam post_lam_args
 
 typeCheckScan :: (TC.Checkable rep) => Scan (Aliases rep) -> TC.TypeM rep [(Type, Names)]
@@ -929,3 +929,15 @@ ppHist w arrs ops bucket_fun =
           </> ppTuple' (map pretty nes)
         <> comma
           </> pretty op
+
+instance (PrettyRep rep) => PP.Pretty (ScremaForm rep) where
+  pretty (ScremaForm pre_lam scans reds post_lam) =
+    "screma"
+      <> (parens . align)
+        ( pretty pre_lam
+            <> comma
+              </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty scans)
+            <> comma
+              </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds)
+            <> comma </> pretty post_lam
+        )
