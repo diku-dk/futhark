@@ -15,7 +15,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Debug.Trace (trace, traceShow)
+import Debug.Trace (trace, traceM, traceShow)
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Builder (Buildable (..), insertStm, insertStms, mkLet)
@@ -139,13 +139,15 @@ eliminate = auxiliary (stmsFromList [])
 eliminateByRes :: [SubExpRes] -> Stms SOACS -> Stms SOACS
 eliminateByRes = eliminate . namesFromList . mapMaybe subExpResVName
 
--- | Given a list of parameter variable names and a lambda, split the
--- lambda function into two where the first function will dependt on
--- the paramter variables given if they exist plus additional
--- parameters if they are need for some computation. The other lambda
--- will have all the other parameters and do the remaining
--- computational work. The two lambda will overlap in computational
--- work.
+-- | Given a list of parameter names and a lambda, split the lambda into two
+-- where the first function will depend on the given parameters given if they
+-- exist plus additional parameters if they are need for some computation. The
+-- other lambda will have all the other parameters and do the remaining
+-- computational work. Some statements may be present in both lambdas.
+--
+-- Further, each parameter is associated with some additional information @a@,
+-- and each result with some additional information @b@. This is also
+-- partitioned and returned appropriately.
 splitLambdaByPar ::
   [VName] ->
   [a] ->
@@ -468,6 +470,12 @@ alignPrePost ::
   ([InOut], Lambda SOACS, [InOut]) ->
   m (Lambda SOACS, [VName])
 alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
+  traceM $
+    unlines
+      [ "alignPrePost",
+        prettyString (pre, show pre_out),
+        prettyString (show post_inp, post, show post_out)
+      ]
   (post_inp', pars', ts') <-
     unzip3 <$> auxiliary (pure []) _is_pars _is_ts
   let (id_out, id_res, id_ts) =
