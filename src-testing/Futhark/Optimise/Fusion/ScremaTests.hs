@@ -307,7 +307,7 @@ tests =
                           scremaReduces = [],
                           scremaPostLambda =
                             fromLines
-                              [ "\\ {x_5574 : i32, x_10001 : i32, x_10002 : i32} : {i32, i32} -> ",
+                              [ "\\ {x_5574 : i32, x_10002 : i32, x_10001 : i32} : {i32, i32} -> ",
                                 "{x_5574, x_10001}"
                               ]
                         },

@@ -501,7 +501,7 @@ alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
     _is_pars = zip post_inp pars
     _is_ts = zip pre_out $ lambdaReturnType pre
 
-    auxiliary as _ [] = as
+    auxiliary as _ [] = reverse <$> as
     auxiliary as is_pars ((i, t) : is_ts) =
       case pop ((i ==) . fst) is_pars of
         Just ((_, par), is_pars') ->
