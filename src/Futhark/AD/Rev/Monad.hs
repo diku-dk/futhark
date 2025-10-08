@@ -433,11 +433,13 @@ updateAdjIndex v (check, i) se = do
         =<< case v_adj_t of
           Acc {} -> do
             let stms s = do
+                  vec_shape <- askShape
                   dims <- arrayDims <$> lookupType se_v
                   ~[v_adj'] <-
-                    tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
+                    tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] -> do
+                      let (vec_is, val_is) = splitAt (shapeRank vec_shape) $ map Var is
                       letTupExp "acc" . BasicOp $
-                        UpdateAcc s v_adj' (i : map Var is) [Var se_v']
+                        UpdateAcc s v_adj' (vec_is ++ i : val_is) [Var se_v']
                   pure v_adj'
             case check of
               CheckBounds _ -> stms Safe
