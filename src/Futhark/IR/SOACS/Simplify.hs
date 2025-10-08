@@ -32,6 +32,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
@@ -46,6 +47,7 @@ import Futhark.Optimise.Simplify.Rules
 import Futhark.Optimise.Simplify.Rules.ClosedForm
 import Futhark.Pass
 import Futhark.Tools
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Util
 
@@ -617,7 +619,7 @@ simplifyClosedFormReduce _ _ _ _ = Skip
 
 -- For now we just remove singleton SOACs and those with unroll attributes.
 simplifyKnownIterationSOAC ::
-  (Buildable rep, BuilderOps rep, HasSOAC rep) =>
+  (Buildable rep, BuilderOps rep, HasSOAC rep, Alias.AliasableRep rep) =>
   TopDownRuleOp rep
 simplifyKnownIterationSOAC _ pat _ op
   | Just (Screma (Constant k) arrs (ScremaForm map_lam scans reds)) <- asSOAC op,
@@ -675,16 +677,16 @@ simplifyKnownIterationSOAC _ pat _ op
         certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 --
 simplifyKnownIterationSOAC _ pat aux op
-  | Just (Screma (Constant (IntValue (Int64Value k))) arrs (ScremaForm map_lam [] [])) <- asSOAC op,
-    "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
-      arrs_elems <- fmap transpose . forM [0 .. k - 1] $ \i -> do
-        map_lam' <- renameLambda map_lam
-        eLambda map_lam' $ map (`eIndex` [eSubExp (constant i)]) arrs
-      forM_ (zip3 (patNames pat) arrs_elems (lambdaReturnType map_lam)) $
-        \(v, arr_elems, t) ->
-          certifying (mconcat (map resCerts arr_elems)) $
-            letBindNames [v] . BasicOp $
-              ArrayLit (map resSubExp arr_elems) t
+  | Just (Screma w arrs form) <- asSOAC op,
+    Constant (IntValue (Int64Value k)) <- w,
+    "unroll" `inAttrs` stmAuxAttrs aux =
+      Simplify $
+        auxing aux $
+          FOT.transformScrema
+            pat
+            (Constant (IntValue (Int64Value k)))
+            arrs
+            form
 --
 simplifyKnownIterationSOAC _ _ _ _ = Skip
 
