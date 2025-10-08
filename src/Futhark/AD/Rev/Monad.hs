@@ -9,6 +9,7 @@
 module Futhark.AD.Rev.Monad
   ( ADM,
     RState (..),
+    REnv,
     runADM,
     Adj (..),
     InBounds (..),
@@ -204,13 +205,18 @@ data RState = RState
     stateNameSource :: VNameSource
   }
 
-newtype ADM a = ADM (BuilderT SOACS (ReaderT Shape (State RState)) a)
+data REnv = REnv
+  { envAdjShape :: Shape,
+    envAttrs :: Attrs
+  }
+
+newtype ADM a = ADM (BuilderT SOACS (ReaderT REnv (State RState)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadState RState,
-      MonadReader Shape,
+      MonadReader REnv,
       MonadFreshNames,
       HasScope SOACS,
       LocalScope SOACS
@@ -230,14 +236,16 @@ instance MonadFreshNames (State RState) where
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
 askShape :: ADM Shape
-askShape = ADM $ lift ask
+askShape = ADM $ lift $ asks envAdjShape
 
-runADM :: (MonadFreshNames m) => Shape -> ADM a -> m a
-runADM shape (ADM m) =
+runADM :: (MonadFreshNames m) => Shape -> Attrs -> ADM a -> m a
+runADM shape attrs (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
       runState
-        (runReaderT (fst <$> runBuilderT m mempty) shape)
+        ( runReaderT (fst <$> runBuilderT m mempty) $
+            REnv shape attrs
+        )
         (RState mempty mempty mempty vn)
 
 adjVal :: Adj -> ADM VName
@@ -434,12 +442,14 @@ updateAdjIndex v (check, i) se = do
           Acc {} -> do
             let stms s = do
                   vec_shape <- askShape
+                  attrs <- asks envAttrs
                   dims <- arrayDims <$> lookupType se_v
                   ~[v_adj'] <-
-                    tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] -> do
-                      let (vec_is, val_is) = splitAt (shapeRank vec_shape) $ map Var is
-                      letTupExp "acc" . BasicOp $
-                        UpdateAcc s v_adj' (vec_is ++ i : val_is) [Var se_v']
+                    attributing attrs $
+                      tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] -> do
+                        let (vec_is, val_is) = splitAt (shapeRank vec_shape) $ map Var is
+                        letTupExp "acc" . BasicOp $
+                          UpdateAcc s v_adj' (vec_is ++ i : val_is) [Var se_v']
                   pure v_adj'
             case check of
               CheckBounds _ -> stms Safe
@@ -590,7 +600,7 @@ locallyNonvectorised e m = do
       e_adjs_vals <- mapM lookupAdjVal e_adjs
       e_free_adjs <- mkMap "nonvec_adj" e_adjs_vals $ \e_adjs_vals' -> do
         zipWithM_ insAdj e_adjs e_adjs_vals'
-        local (const mempty) m
+        local (\env -> env {envAdjShape = mempty}) m
         mapM lookupAdjVal e_free
       zipWithM_ insAdj e_free e_free_adjs
   where

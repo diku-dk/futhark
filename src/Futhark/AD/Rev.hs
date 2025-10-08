@@ -381,9 +381,15 @@ diffLambda res_adjs get_adjs_for (Lambda params _ body) =
     res <- bodyBind =<< diffBody res_adjs get_adjs_for body
     pure $ takeLast (length get_adjs_for) res
 
-revVJP :: (MonadFreshNames m) => Scope SOACS -> Shape -> Lambda SOACS -> m (Lambda SOACS)
-revVJP scope shape (Lambda params ts body) = do
-  runADM shape . localScope (scope <> scopeOfLParams params) $ do
+revVJP ::
+  (MonadFreshNames m) =>
+  Scope SOACS ->
+  Shape ->
+  Attrs ->
+  Lambda SOACS ->
+  m (Lambda SOACS)
+revVJP scope shape attrs (Lambda params ts body) = do
+  runADM shape attrs . localScope (scope <> scopeOfLParams params) $ do
     adj_shape <- askShape
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->
       Param mempty

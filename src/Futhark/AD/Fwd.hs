@@ -57,12 +57,18 @@ data RState = RState
     stateNameSource :: VNameSource
   }
 
-newtype ADM a = ADM (BuilderT SOACS (ReaderT Shape (State RState)) a)
+data FEnv = FEnv
+  { envTanShape :: Shape,
+    envAttrs :: Attrs
+  }
+
+newtype ADM a = ADM (BuilderT SOACS (ReaderT FEnv (State RState)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadState RState,
+      MonadReader FEnv,
       MonadFreshNames,
       HasScope SOACS,
       LocalScope SOACS
@@ -82,14 +88,17 @@ instance MonadFreshNames (State RState) where
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
 askShape :: ADM Shape
-askShape = ADM $ lift ask
+askShape = ADM $ lift $ asks envTanShape
 
-runADM :: (MonadFreshNames m) => Shape -> ADM a -> m a
-runADM shape (ADM m) =
+runADM :: (MonadFreshNames m) => Shape -> Attrs -> ADM a -> m a
+runADM shape attrs (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
       runState
-        (runReaderT (fst <$> runBuilderT m mempty) shape)
+        ( runReaderT
+            (fst <$> runBuilderT m mempty)
+            (FEnv shape attrs)
+        )
         (RState mempty vn)
 
 tanVName :: VName -> ADM VName
@@ -247,6 +256,31 @@ withAnyTans xs f = do
       pure $ primExpFromSubExp t se
     toExp $ f $ toList xs_tan''
 
+bindTanPat :: Pat Type -> StmAux () -> Exp SOACS -> ADM ()
+bindTanPat pat_tan aux e = do
+  attrs <- asks envAttrs
+  auxing aux . attributing attrs . letBind pat_tan $ e
+
+bindTan ::
+  Pat Type ->
+  StmAux () ->
+  SubExp ->
+  (SubExp -> ADM (Exp SOACS)) ->
+  ADM ()
+bindTan pat_tan aux x f = do
+  bindTanPat pat_tan aux =<< withTan x f
+
+bindTans ::
+  Pat Type ->
+  StmAux () ->
+  PrimType ->
+  SubExp ->
+  SubExp ->
+  (PrimExp VName -> PrimExp VName -> PrimExp VName) ->
+  ADM ()
+bindTans pat_tan aux t x y f = do
+  bindTanPat pat_tan aux =<< withTans t x y f
+
 basicFwd :: Pat Type -> StmAux () -> BasicOp -> ADM ()
 basicFwd pat aux op = do
   pat_tan <- newTanPat pat
@@ -272,20 +306,19 @@ basicFwd pat aux op = do
       let t = unOpType unop
           x_pe = primExpFromSubExp t x
           dx = pdUnOp unop x_pe
-      auxing aux $ letBind pat_tan <=< withTan x $ \x_tan ->
+      bindTan pat_tan aux x $ \x_tan ->
         toExp $ primExpFromSubExp t x_tan ~*~ dx
     BinOp bop x y -> do
       let t = binOpType bop
-      auxing aux . letBind pat_tan <=< withTans t x y $
-        \x_tan y_tan ->
-          let (wrt_x, wrt_y) =
-                pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
-           in x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
+      bindTans pat_tan aux t x y $ \x_tan y_tan ->
+        let (wrt_x, wrt_y) =
+              pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
+         in x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
     CmpOp {} -> do
       tan_shape <- askShape
       addStm $ Let pat_tan aux $ zeroExp $ Prim Bool `arrayOfShape` tan_shape
     ConvOp cop x ->
-      auxing aux $ letBind pat_tan <=< withTan x $ \x_tan ->
+      bindTan pat_tan aux x $ \x_tan ->
         pure $ BasicOp $ ConvOp cop x_tan
     Assert {} -> pure ()
     Index arr slice -> do
@@ -314,7 +347,7 @@ basicFwd pat aux op = do
       addStm . Let pat_tan aux . BasicOp $
         Replicate (shape <> Shape [n]) (intConst it 0)
     Replicate n x ->
-      auxing aux $ letBind pat_tan <=< withTan x $ \x_tan ->
+      bindTan pat_tan aux x $ \x_tan ->
         pure $ BasicOp $ Replicate n x_tan
     Scratch t shape -> do
       tan_shape <- askShape
@@ -577,10 +610,11 @@ fwdJVP ::
   (MonadFreshNames m) =>
   Scope SOACS ->
   Shape ->
+  Attrs ->
   Lambda SOACS ->
   m (Lambda SOACS)
-fwdJVP scope shape (Lambda params _ body) =
-  runADM shape . localScope scope $ do
+fwdJVP scope shape attrs (Lambda params _ body) =
+  runADM shape attrs . localScope scope $ do
     params_tan <- mapM newTan params
     mkLambda (params <> params_tan) $
       bodyBind =<< fwdBodyTansLast body

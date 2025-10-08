@@ -108,13 +108,15 @@ def jvp2 'a 'b (f: a -> b) (x: a) (x': a) : (b, b) =
 def vjp2 'a 'b (f: a -> b) (x: a) (y': b) : (b, a) =
   intrinsics.vjp2 f x y'
 
--- | As `jvp2`, but accepts a vector of seed values. Semantically
--- equivalent to mapping, but may be more efficient.
+-- | As `jvp2`, but accepts a vector of seed values. Semantically equivalent to
+-- mapping, but may be more efficient. If used with `#[unroll]`, tangent
+-- calculations are unrolled when possible.
 def jvp2_vec 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : (b, [n]b) =
   intrinsics.jvp2_vec f x x'
 
--- | As `vjp2`, but accepts a vector of seed values. Semantically
--- equivalent to mapping, but may be more efficient.
+-- | As `vjp2`, but accepts a vector of seed values. Semantically equivalent to
+-- mapping, but may be more efficient. If used with `#[unroll]`, adjoint
+-- calculations are unrolled when possible.
 def vjp2_vec 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : (b, [n]a) =
   intrinsics.vjp2_vec f x y'
 

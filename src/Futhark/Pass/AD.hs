@@ -49,7 +49,7 @@ onStm mode scope (Let pat aux (Op (JVP shape args vec lam))) = do
   lam' <- onLambda mode scope lam
   if mode == All || lam == lam'
     then do
-      lam'' <- fwdJVP scope shape lam'
+      lam'' <- fwdJVP scope shape (stmAuxAttrs aux) lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
     else pure $ oneStm $ Let pat aux $ Op $ JVP shape args vec lam'
 onStm mode scope (Let pat aux e) = oneStm . Let pat aux <$> mapExpM mapper e
