@@ -94,7 +94,7 @@ queryCase query fn case_idx = algebraContext fn $ do
     CaseIsMonotonic dir ->
       debugT "  " $
         case shape fn of
-          [[Forall i _]] -> do
+          [Forall i _] -> do
             -- Check j < i ^ p(j) ^ p(i) => q(j) `rel` q(i).
             j <- newVName "j"
             j +< i
@@ -221,7 +221,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           res2 <- askFiltPartInv (Algebra.Var y)
           f <- getFn y
           case (res2, f) of
-            (Just (FiltPartInv y' pf' _), IndexFn [[Forall _ d]] _) | y' == y -> do
+            (Just (FiltPartInv y' pf' _), IndexFn [Forall _ d] _) | y' == y -> do
               pf :: Predicate Symbol <- fromAlgebra pf'
               m <- inferFiltPartInvSize (predToFun pf) d
               s1 :: Maybe (Substitution Symbol) <- unify (int2SoP 0) a
@@ -246,7 +246,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           res2 <- askFiltPartInv (Algebra.Var y)
           f <- getFn y
           case (res2, f) of
-            (Just (FiltPartInv y' pf' _), IndexFn [[Forall _ d]] _) | y' == y -> do
+            (Just (FiltPartInv y' pf' _), IndexFn [Forall _ d] _) | y' == y -> do
               pf :: Predicate Symbol <- fromAlgebra pf'
               m <- inferFiltPartInvSize (predToFun pf) d
               s1 :: Maybe (Substitution Symbol) <- unify (int2SoP 0) (fst img)
@@ -285,7 +285,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     matchProof (Monotonic x dir) = do
       f <- getFn x
       case f of
-        IndexFn [[Forall i d]] ges -> do
+        IndexFn [Forall i d] ges -> do
           j <- newNameFromString "j"
           nextGenProver (MonGe (fromMonDir dir) i j d ges)
         _ -> error "Not implemented yet."
@@ -304,7 +304,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       case fp of
         Just (FiltPart y' x pf _ :: Property Symbol)
           | y' == y,
-            Just [f_x@(IndexFn [[Forall i d]] _)] <- M.lookup x indexfns -> do
+            Just [f_x@(IndexFn [Forall i d] _)] <- M.lookup x indexfns -> do
               -- y is a filtering/partition of x, hence x will be "opaque"
               -- (a gather on inverse indices), but we can try two strategies:
               --
@@ -327,7 +327,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           let strat1 = proveFn (PInjective rcd) f_y
           let strat2 = case f_y of
                 IndexFn [] _ -> pure Yes
-                IndexFn [[Forall i d]] gs -> algebraContext f_y $ do
+                IndexFn [Forall i d] gs -> algebraContext f_y $ do
                   j <- newNameFromString "j"
                   let y_at ident = sym2SoP $ Apply (Var y) [sym2SoP (Var ident)]
                   nextGenProver (InjGe i j d gs rcd (y_at i :== y_at j))
@@ -351,7 +351,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       sop2Symbol $ rep (mkRep vn (sym2SoP $ Var arg)) e
 
 proveFn :: Statement -> IndexFn -> IndexFnM Answer
-proveFn (ForallSegments fprop) f@(IndexFn [[Forall _ (Cat k _ _)]] _) =
+proveFn (ForallSegments fprop) f@(IndexFn [Forall _ (Cat k _ _)] _) =
   prove_ True (fprop k) f
 proveFn prop f = prove_ False prop f
 
@@ -443,7 +443,7 @@ nextGenProver (FPV2 f_Y x pf pps) = do
   is_inv_hole <- newNameFromString "is^-1"
   let pattern_Y =
         IndexFn
-          { shape = [[Forall i $ Iota n]],
+          { shape = [Forall i $ Iota n],
             body =
               cases
                 [ ( Bool True,
@@ -460,7 +460,7 @@ nextGenProver (FPV2 f_Y x pf pps) = do
     Nothing -> pure Unknown
 
 prove_ :: Bool -> Statement -> IndexFn -> IndexFnM Answer
-prove_ _ (PInjective rcd) fn@(IndexFn [[Forall i0 dom]] _) = algebraContext fn $ do
+prove_ _ (PInjective rcd) fn@(IndexFn [Forall i0 dom] _) = algebraContext fn $ do
   printM 10 $
     title "Proving InjectiveRCD "
       <> "\n  RCD = "
@@ -541,7 +541,7 @@ prove_ _ (PInjective rcd) fn@(IndexFn [[Forall i0 dom]] _) = algebraContext fn $
   step1 `andM` step2 `andM` step3
   where
     f @ x = rep (mkRep i0 (Var x)) f
-prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn [[Forall i dom]] _) = rollbackAlgEnv $ do
+prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn [Forall i dom] _) = rollbackAlgEnv $ do
   printM 1000 $
     title "Proving BijectiveRCD "
       <> "\n  RCD (a,b) = "
@@ -607,7 +607,7 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn [[Forall i dom]] _)
                 (\(p, e) ans -> if isYes ans then (p, e) else (p, infinity))
                 (guards f)
                 answers
-        fX <- simplify $ IndexFn [[Forall i dom]] (cases guards')
+        fX <- simplify $ IndexFn [Forall i dom] (cases guards')
 
         let guards_in_RCD = [(p, e) | (p, e) <- guards fX, e /= infinity]
 
@@ -646,7 +646,7 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn [[Forall i dom]] _)
   step1 `andM` step2
   where
     e @ x = rep (mkRep i (Var x)) e
-prove_ baggage (PFiltPartInv pf pps') f@(IndexFn [[Forall i dom]] _) = algebraContext f $ do
+prove_ baggage (PFiltPartInv pf pps') f@(IndexFn [Forall i dom] _) = algebraContext f $ do
   let p_otherwise x = foldl1 (:&&) [neg (pp x) | pp <- pps']
   let pps = pps' <> [p_otherwise]
   printM 1000 $

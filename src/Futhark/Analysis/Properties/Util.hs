@@ -11,17 +11,15 @@ module Futhark.Analysis.Properties.Util
     locMsg,
     greenString,
     blueString,
-    flatten,
-    unflatten,
   )
 where
 
 import Control.Monad (guard)
 import Data.List (subsequences, (\\))
-import Data.Maybe (fromJust)
 import Data.String (IsString)
 import Futhark.Util.Pretty
 import Language.Futhark (Located, VName (VName), locText, srclocOf)
+import Data.Maybe (fromJust)
 
 prettyName :: VName -> Doc ann
 prettyName (VName vn i) = pretty vn <> pretty (map subscript (show i))
@@ -83,12 +81,3 @@ greenString s = "\ESC[92m" <> s <> "\ESC[0m"
 
 blueString :: (Semigroup a, IsString a) => a -> a
 blueString s = "\ESC[96m" <> s <> "\ESC[0m"
-
-flatten :: [[a]] -> ([Int], [a])
-flatten xss = (map length xss, concat xss)
-
-unflatten :: [Int] -> [a] -> [[a]]
-unflatten [] _ = []
-unflatten (n : ns) xs =
-  let (chunk, rest) = splitAt n xs
-   in chunk : unflatten ns rest

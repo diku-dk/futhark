@@ -72,7 +72,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     Boolean -> pure Boolean
     (Disjoint vns) -> pure (Disjoint vns)
     (Monotonic x dir) -> pure (Monotonic x dir)
-    (Rng x (a, b)) -> do
+    (Rng x (a,b)) -> do
       a' <- traverse fromAlgebra a
       b' <- traverse fromAlgebra b
       pure $ Rng x (a', b')
@@ -85,7 +85,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     Boolean -> pure Boolean
     (Disjoint vns) -> pure (Disjoint vns)
     (Monotonic x dir) -> pure (Monotonic x dir)
-    (Rng x (a, b)) -> do
+    (Rng x (a,b)) -> do
       a' <- traverse toAlgebra a
       b' <- traverse toAlgebra b
       pure $ Rng x (a', b')
@@ -122,7 +122,7 @@ algebraContext :: IndexFn -> IndexFnM b -> IndexFnM b
 algebraContext fn m = rollbackAlgEnv $ do
   let ps = getPredicates fn
   mapM_ trackBooleanNames ps
-  case map boundVar (concat $ shape fn) of
+  case map boundVar (shape fn) of
     [] -> pure ()
     is -> do
       mapM_ (handlePreds is) ps
@@ -184,7 +184,7 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
       -- Corresponding back-translation for 2D-as-1D HACK in toAlgebra_.
       fs <- lookupIndexFn vn
       idx' <- case fs of
-        Just [IndexFn [[Forall i (Iota n)], [Forall j (Iota m)]] _] -> do
+        Just [IndexFn [Forall i (Iota n), Forall j (Iota m)] _] -> do
           -- printM 1337 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
           case filterSoP (\t c -> isJust (term2SoP t c ./. m)) idx of
             offset
@@ -443,7 +443,7 @@ toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
   -- HACK to support 2D arrays in Algebra layer. Tries to translate sym to 1D.
   fns <- lookupIndexFn f
   case fns of
-    Just [IndexFn [[Forall i (Iota {})], [Forall _ (Iota m)]] _] -> do
+    Just [IndexFn [Forall i (Iota {}), Forall _ (Iota m)] _] -> do
       j' <- newNameFromString "j"
       let arg1d =
             if i `S.member` fv m
