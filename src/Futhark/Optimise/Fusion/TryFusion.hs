@@ -323,7 +323,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       SOAC.Screma _ inp_p form_p,
       _
       ) -> do
-        m <- fuseScrema inp_c form_c out_c inp_p form_p out_p
+        m <- fuseScrema w inp_c form_c out_c inp_p form_p out_p
         case m of
           Just (inp, form, out) ->
             success out $ SOAC.Screma w inp form

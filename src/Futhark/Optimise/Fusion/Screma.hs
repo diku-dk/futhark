@@ -14,6 +14,7 @@ import Data.List qualified as L
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Data.Ord (comparing)
 import Data.Set qualified as S
 import Debug.Trace (trace, traceM, traceShow)
 import Futhark.Analysis.DataDependencies
@@ -26,8 +27,113 @@ import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, splitAt3, takeLast)
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty
 import Numeric.Natural
+
+data SuperScrema rep
+  = SuperScrema
+      SubExp
+      [SOAC.Input]
+      (Lambda rep)
+      [Scan rep]
+      [Reduce rep]
+      (Lambda rep)
+      [Scan rep]
+      [Reduce rep]
+      (Lambda rep)
+  deriving (Eq, Ord, Show)
+
+instance (PrettyRep rep) => Pretty (SuperScrema rep) where
+  pretty (SuperScrema w inps lam1 scans1 reds1 lam2 scans2 reds2 lam3) =
+    "superscrema"
+      <> (parens . align)
+        ( (pretty w <> comma)
+            </> ppTuple' (map pretty inps)
+            </> pretty lam1
+            <> comma
+              </> p' scans1
+            <> comma
+              </> p' reds1
+            <> comma
+              </> pretty lam2
+            <> comma
+              </> p' scans2
+            <> comma
+              </> p' reds2
+            <> comma
+              </> pretty lam3
+        )
+    where
+      p' xs = braces (mconcat $ L.intersperse (comma <> line) $ map pretty xs)
+
+pick :: [Bool] -> [a] -> [a]
+pick bs xs = map snd $ filter fst $ zip bs xs
+
+-- WIP: NOT FINISHED
+fuseSuperScrema ::
+  (MonadFreshNames m) =>
+  SubExp ->
+  [SOAC.Input] ->
+  ScremaForm SOACS ->
+  [VName] ->
+  [SOAC.Input] ->
+  ScremaForm SOACS ->
+  [VName] ->
+  m (SuperScrema SOACS)
+fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
+  let inp_c_real_map = map (not . inputFromOutput) inp_c
+      inp_c_real = pick inp_c_real_map inp_c
+      inp_r = inp_p <> inp_c_real
+
+  forward_params <- forM (pick inp_c_real_map (lambdaParams (scremaLambda form_c))) $ \p ->
+    newParam (baseName (paramName p)) (paramType p)
+
+  let params_c_sorted =
+        L.sortBy (comparing fst) $ zip inp_c_real_map $ lambdaParams $ scremaLambda form_p
+
+  let lam1 =
+        Lambda
+          { lambdaParams =
+              lambdaParams (scremaLambda form_p) <> forward_params,
+            lambdaReturnType =
+              lambdaReturnType (scremaLambda form_p)
+                <> map paramType forward_params,
+            lambdaBody =
+              mkBody
+                (bodyStms (lambdaBody (scremaLambda form_p)))
+                (bodyResult (lambdaBody (scremaLambda form_p)) <> varsRes (map paramName forward_params))
+          }
+
+  let lam2 =
+        Lambda
+          { lambdaParams =
+              lambdaParams (scremaPostLambda form_p)
+                <> lambdaParams (scremaLambda form_c),
+            lambdaReturnType = lambdaReturnType (scremaPostLambda form_p),
+            lambdaBody =
+              mkBody
+                ( bodyStms (lambdaBody (scremaPostLambda form_p))
+                    <> bodyStms (lambdaBody (scremaLambda form_c))
+                )
+                ( bodyResult (lambdaBody (scremaPostLambda form_p))
+                    <> bodyResult (lambdaBody (scremaLambda form_c))
+                )
+          }
+
+  let lam3 = scremaPostLambda form_c
+  pure $
+    SuperScrema
+      w
+      inp_r
+      lam1
+      (scremaScans form_p)
+      (scremaReduces form_p)
+      lam2
+      (scremaScans form_c)
+      (scremaReduces form_c)
+      lam3
+  where
+    inputFromOutput inp = SOAC.inputArray inp `elem` out_p
 
 debug text a = traceShow (text <> show a) a
 
@@ -519,12 +625,12 @@ pop p (a : as)
   | p a = Just (a, as)
   | otherwise = fmap (a :) <$> pop p as
 
-align ::
+alignInOuts ::
   (Eq a) =>
   [(a, b)] ->
   [a] ->
   [(a, b)]
-align = auxiliary []
+alignInOuts = auxiliary []
   where
     auxiliary xs is_res [] = reverse xs <> is_res
     auxiliary xs is_res (i : is) =
@@ -549,7 +655,7 @@ alignLambdaRes (lam, inout) inout'' =
     res = bodyResult body
     ts = lambdaReturnType lam
     (inout', (res', ts')) =
-      fmap unzip . unzip $ align (zip inout (zip res ts)) inout''
+      fmap unzip . unzip $ alignInOuts (zip inout (zip res ts)) inout''
 
 alignLambdaPar ::
   (Eq a) =>
@@ -562,10 +668,11 @@ alignLambdaPar (inout, lam) inout'' =
   )
   where
     par = lambdaParams lam
-    (inout', par') = unzip $ align (zip inout par) inout''
+    (inout', par') = unzip $ alignInOuts (zip inout par) inout''
 
 fuseScrema ::
   (MonadFreshNames m) =>
+  SubExp ->
   [SOAC.Input] ->
   ScremaForm SOACS ->
   [VName] ->
@@ -573,10 +680,13 @@ fuseScrema ::
   ScremaForm SOACS ->
   [VName] ->
   m (Maybe ([SOAC.Input], ScremaForm SOACS, [VName]))
-fuseScrema inp_c form_c out_c inp_p form_p out_p
+fuseScrema w inp_c form_c out_c inp_p form_p out_p
   | Just
       post_lam_fuse <-
       fusible inp_c form_c out_p inp_p form_p out_p = do
+      ss <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
+      traceM $ "\n" <> prettyString ss
+
       ( (pre_inp_c, pre_c, pre_out_c),
         (post_inp_c, post_c, post_out_c)
         ) <-
@@ -600,14 +710,13 @@ fuseScrema inp_c form_c out_c inp_p form_p out_p
           post_f'' = concatLambda post_c post_p'
           post_out_f'' = post_out_c <> post_out_p'
           (post_f', post_out_f') = prunePostOut post_f'' post_out_f''
-      trace ("post_f'':\n" <> prettyString post_f') $
-        Just
-          <$> toScrema
-            (inp_c <> inp_p)
-            (pre_inp_f', pre_f', pre_out_f')
-            (scans_f, scans_inout)
-            (reds_f, reds_inout)
-            (post_inp_f', post_f', post_out_f')
+      Just
+        <$> toScrema
+          (inp_c <> inp_p)
+          (pre_inp_f', pre_f', pre_out_f')
+          (scans_f, scans_inout)
+          (reds_f, reds_inout)
+          (post_inp_f', post_f', post_out_f')
   | otherwise = pure Nothing
   where
     ( (pre_inout_c, post_inout_c),

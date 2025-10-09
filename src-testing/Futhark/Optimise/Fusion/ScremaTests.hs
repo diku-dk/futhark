@@ -250,6 +250,7 @@ tests =
             SP
               ( freshNames
                   ( fuseScrema
+                      "d_5537"
                       [SOAC.Input mempty "a_5538" "[d_5537]i32"]
                       ( ScremaForm
                           ( fromLines
