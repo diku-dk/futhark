@@ -13,6 +13,7 @@ module Futhark.Transform.FirstOrderTransform
     transformStmRecursively,
     transformLambda,
     transformSOAC,
+    transformScrema,
   )
 where
 
@@ -113,19 +114,15 @@ resultArray arrs ts = do
         letExp "result" =<< eBlank t
   mapM oneArray ts
 
--- | Transform a single 'SOAC' into a do-loop.  The body of the lambda
--- is untouched, and may or may not contain further 'SOAC's depending
--- on the given rep.
-transformSOAC ::
+-- | Sequentialise a single Screma.
+transformScrema ::
   (Transformer m) =>
-  Pat (LetDec (Rep m)) ->
-  SOAC (Rep m) ->
+  Pat dec ->
+  SubExp ->
+  [VName] ->
+  ScremaForm (Rep m) ->
   m ()
-transformSOAC _ JVP {} =
-  error "transformSOAC: unhandled JVP"
-transformSOAC _ VJP {} =
-  error "transformSOAC: unhandled VJP"
-transformSOAC pat soac@(Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
+transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
   -- See Note [Translation of Screma].
   --
   -- Start by combining all the reduction and scan parts into a single
@@ -133,7 +130,7 @@ transformSOAC pat soac@(Screma w arrs (ScremaForm map_lam scans reds post_lam)) 
   let Reduce _ red_lam red_nes = singleReduce reds
       Scan scan_lam scan_nes = singleScan scans
       (_red_ts, post_ts) =
-        splitAt (length red_nes) $ soacType soac
+        splitAt (length red_nes) $ scremaType w form
 
   post_arrs <- resultArray arrs post_ts
 
@@ -224,6 +221,21 @@ transformSOAC pat soac@(Screma w arrs (ScremaForm map_lam scans reds post_lam)) 
     (++ patNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ Loop merge loopform loop_body
+
+-- | Transform a single 'SOAC' into a do-loop.  The body of the lambda
+-- is untouched, and may or may not contain further 'SOAC's depending
+-- on the given rep.
+transformSOAC ::
+  (Transformer m) =>
+  Pat (LetDec (Rep m)) ->
+  SOAC (Rep m) ->
+  m ()
+transformSOAC _ JVP {} =
+  error "transformSOAC: unhandled JVP"
+transformSOAC _ VJP {} =
+  error "transformSOAC: unhandled VJP"
+transformSOAC pat (Screma w arrs form) =
+  transformScrema pat w arrs form
 transformSOAC pat (Stream w arrs nes lam) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
