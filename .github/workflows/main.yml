@@ -161,7 +161,7 @@ jobs:
         key: ${{ runner.os }}-${{ hashFiles('nix/sources.json') }}-style
 
     - name: Style check
-      run: nix-shell --pure --run "make check"
+      run: nix-shell shell-style.nix --pure --run "make check"
 
 
   python-test-style:
@@ -174,10 +174,10 @@ jobs:
       uses: cachix/install-nix-action@v27
 
     - name: Style check
-      run: nix-shell --pure --run "black --check ."
+      run: nix-shell shell-style.nix --pure --run "black --check rts docs"
 
     - name: Type check
-      run: nix-shell --pure --run "mypy ."
+      run: nix-shell shell-style.nix --pure --run "mypy rts"
 
   # Fails mysteriously right now.
   #
