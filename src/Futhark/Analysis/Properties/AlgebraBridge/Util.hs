@@ -18,6 +18,7 @@ module Futhark.Analysis.Properties.AlgebraBridge.Util
     isUnknown,
     isYes,
     addRelShape,
+    addRelDim,
   )
 where
 
@@ -174,8 +175,11 @@ addRelSymbol p = do
     addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 
 -- | Add relations derived from the iterator to the algebraic environment.
-addRelShape :: [Iterator] -> IndexFnM ()
-addRelShape = mapM_ addRelIterator
+addRelShape :: [[Iterator]] -> IndexFnM ()
+addRelShape = mapM_ addRelIterator . mconcat
+
+addRelDim :: [Iterator] -> IndexFnM ()
+addRelDim = mapM_ addRelIterator
 
 addRelIterator :: Iterator -> IndexFnM ()
 addRelIterator (Forall i dom) = case dom of

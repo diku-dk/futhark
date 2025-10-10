@@ -91,7 +91,7 @@ instance ASTMappable Symbol Symbol where
 instance ASTMappable Symbol IndexFn where
   astMap m (IndexFn dom body) = IndexFn <$> astMap m dom <*> astMap m body
 
-instance ASTMappable Symbol [Iterator] where
+instance ASTMappable Symbol t => ASTMappable Symbol [t] where
   astMap m = mapM (astMap m)
 
 instance ASTMappable Symbol Iterator where
@@ -189,7 +189,7 @@ instance ASTFoldable Symbol Symbol where
 instance ASTFoldable Symbol IndexFn where
   astFold m acc (IndexFn dom body) = astFold m acc dom >>= astFoldF m body
 
-instance ASTFoldable Symbol [Iterator] where
+instance ASTFoldable Symbol t => ASTFoldable Symbol [t] where
   astFold m = foldM (astFold m)
 
 instance ASTFoldable Symbol Iterator where

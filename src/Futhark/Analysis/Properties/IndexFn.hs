@@ -28,13 +28,14 @@ import Language.Futhark (VName)
 import Data.Bifunctor (second)
 
 data IndexFn = IndexFn
-  { shape :: [Quantified Domain],     --- [[ Quantified Domain ]]
+  { shape :: [[Quantified Domain]],
     body :: Cases Symbol (SoP Symbol)
   }
   deriving (Show, Eq)
 
 data Domain
   = Iota (SoP Symbol) -- [0, ..., n-1]
+  -- TODO remove Cat; subsumed by flatten-theory.
   | Cat -- Catenate_{k=0}^{m-1} [b_k, ..., b_{k+1})
       VName -- k
       (SoP Symbol) -- m

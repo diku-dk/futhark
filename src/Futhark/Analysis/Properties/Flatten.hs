@@ -12,13 +12,14 @@ import Futhark.Util.Pretty (Pretty)
 import Language.Futhark (VName)
 
 flatten2d :: VName -> SoP Symbol -> SoP Symbol -> IndexFnM (VName, Iterator)
-flatten2d k m n = do
-  i <- newVName "i"
-  let d = Cat k m (sym2SoP (Var k) .*. n)
-  (vn_II, f_II) <-
-    lookupII d $ IndexFn [Forall i d] (cases [(Bool True, sym2SoP (Var k))])
-  insertIndexFn vn_II [f_II]
-  pure (vn_II, Forall i d)
+flatten2d k m n =
+  undefined
+  -- i <- newVName "i"
+  -- let d = Cat k m (sym2SoP (Var k) .*. n)
+  -- (vn_II, f_II) <-
+  --   lookupII d $ IndexFn [[Forall i d]] (cases [(Bool True, sym2SoP (Var k))])
+  -- insertIndexFn vn_II [f_II]
+  -- pure (vn_II, Forall i d)
 
 lookupII :: Domain -> IndexFn -> IndexFnM (VName, IndexFn)
 lookupII dom def = do

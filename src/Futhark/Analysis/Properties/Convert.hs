@@ -79,7 +79,7 @@ createUninterpretedIndexFn array_shape vn = do
   ids <- mapM newVName (take (length array_shape) $ cycle ["i", "j", "k"])
   pure $
     IndexFn
-      { shape = zipWith (\sz i -> Forall i (Iota sz)) array_shape ids,
+      { shape = zipWith (\sz i -> [Forall i (Iota sz)]) array_shape ids,
         body = singleCase . sym2SoP $ Apply (Var vn) (map sVar ids)
       }
 
@@ -259,11 +259,12 @@ forward expr@(E.AppExp (E.Index e_xs slice loc) _)
           (_, Just f_idx) -> do
             idx <- newVName "#idx"
             i <- newVName "i"
-            insertIndexFn idx [f_idx {shape = [Forall i (Iota $ int2SoP 1)]}]
+            insertIndexFn idx [f_idx {shape = [[Forall i (Iota $ int2SoP 1)]]}]
             pure (Nothing, sym2SoP (Apply (Var idx) [int2SoP 0]))
           -- All values taken from dimension (using `:`).
-          (d_xs, Nothing) -> do
-            pure (Just d_xs, sym2SoP (Var (boundVar d_xs)))
+          ([d_xs], Nothing) -> do
+            pure (Just [d_xs], sym2SoP (Var (boundVar d_xs)))
+          (_, Nothing) -> error "Not implemented yet indexing flattened dim."
       (: [])
         <$> subst
           IndexFn
@@ -384,7 +385,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
       (outer_dim, aligned_args) <- zipArgsSOAC loc params arrays
       bindLambdaBodyParams (mconcat aligned_args)
       bodies <- rollbackAlgEnv $ do
-        addRelIterator outer_dim
+        addRelDim outer_dim
         forward lam_body
 
       forM bodies $ \f_body ->
