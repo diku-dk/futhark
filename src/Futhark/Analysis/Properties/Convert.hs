@@ -17,7 +17,7 @@ import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Flatten (flatten2d)
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn)
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn, index)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (MonDir (..))
 import Futhark.Analysis.Properties.Property qualified as Property
@@ -1242,7 +1242,7 @@ zipArgsSOAC loc formal_args actual_args = do
     let new_shape = new_outer_dim : tail (shape f)
     IndexFn
       { shape = new_shape,
-        body = singleCase . sym2SoP $ Apply (Var vn) (iters new_shape)
+        body = singleCase . sym2SoP $ Apply (Var vn) (map index new_shape)
       }
       @ (vn, f)
   -- Substitutions may have renamed Cat `k`s; do a common rename again.
@@ -1254,7 +1254,6 @@ zipArgsSOAC loc formal_args actual_args = do
   pure (new_outer_dim', aligned_args)
   where
     dropOuterDim f = f {shape = drop 1 (shape f)}
-    iters = map (sVar . boundVar)
 
 -- Align parameter patterns with their arguments---or raise an error.
 -- A parameter pattern reduces to a list of (optional) names with type information.

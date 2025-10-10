@@ -10,6 +10,7 @@ module Futhark.Analysis.Properties.IndexFnPlus
     repDomain,
     unifyIndexFnWith,
     intervalStart,
+    index,
   )
 where
 
@@ -17,13 +18,14 @@ import Control.Monad (foldM)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
+import Data.Set qualified as S
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (repVName)
 import Futhark.Analysis.Properties.Unify (FreeVariables (..), Renameable (..), Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
 import Futhark.Analysis.Properties.Util (prettyName)
-import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.+.), (.-.))
+import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), align, comma, commastack, hang, indent, line, parens, punctuate, sep, softline, stack, (<+>))
 import Language.Futhark (VName)
 
@@ -42,6 +44,16 @@ intervalStart (Iota _) = error "intervalEnd on iota"
 intervalEnd :: Domain -> SoP Symbol
 intervalEnd (Cat k _ b) = rep (mkRep k (sym2SoP (Var k) .+. int2SoP 1)) b .-. int2SoP 1
 intervalEnd (Iota _) = error "intervalEnd on iota"
+
+index :: Quantified Domain -> SoP Symbol
+index (Forall i _) = sym2SoP (Var i)
+-- index :: [Quantified Domain] -> SoP Symbol
+-- index [Forall i _] = sym2SoP (Var i)
+-- index [Forall i _, Forall j (Iota m)]
+--   -- Flat regular dimension.
+--   | i `S.notMember` fv m =
+--       sym2SoP (Var i) .*. m
+-- index _ = undefined
 
 -------------------------------------------------------------------------------
 -- Pretty.
