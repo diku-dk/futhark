@@ -540,6 +540,7 @@ library futhark-testing
       Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
+      Language.Futhark.TypeChecker.ConsumptionTests
       Language.Futhark.TypeCheckerTests
   build-depends:
       QuickCheck >=2.8
