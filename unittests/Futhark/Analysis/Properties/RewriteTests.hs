@@ -269,7 +269,7 @@ tests =
           ( \(x, _, _, _, a, b, _, _) ->
               rewrite
                 ( IndexFn
-                    { shape = [Forall x (Iota (sVar a))],
+                    { shape = [[Forall x (Iota (sVar a))]],
                       body =
                         cases
                           [ (sVar x :== int 0, sVar b),
@@ -279,7 +279,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { shape = [Forall x (Iota (sVar a))],
+                   { shape = [[Forall x (Iota (sVar a))]],
                      body = cases [(Bool True, sVar b)]
                    }
                ),
@@ -288,7 +288,7 @@ tests =
           ( \(x, _, _, _, a, _, _, _) ->
               rewrite
                 ( IndexFn
-                    { shape = [Forall x (Iota (sVar a))],
+                    { shape = [[Forall x (Iota (sVar a))]],
                       body =
                         cases
                           [ (sVar x :== int 0, sVar x),
@@ -298,7 +298,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { shape = [Forall x (Iota (sVar a))],
+                   { shape = [[Forall x (Iota (sVar a))]],
                      body = cases [(Bool True, int 0)]
                    }
                ),
@@ -307,7 +307,7 @@ tests =
           ( \(x, _, _, _, _, _, _, _) ->
               rewrite
                 ( IndexFn
-                    { shape = [Forall x (Iota (sVar a))],
+                    { shape = [[Forall x (Iota (sVar a))]],
                       body =
                         cases
                           [ (sVar b :== int 0, int 0),
@@ -317,7 +317,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { shape = [Forall x (Iota (sVar a))],
+                   { shape = [[Forall x (Iota (sVar a))]],
                      body =
                        cases
                          [ (sVar b :== int 0, int 0),
@@ -330,7 +330,7 @@ tests =
           ( \(x, y, _, _, a, b, _, _) ->
               rewrite
                 ( IndexFn
-                    { shape = [Forall x (Cat y (sVar a) (sym2SoP $ Apply (Var b) [sVar y]))],
+                    { shape = [[Forall x (Cat y (sVar a) (sym2SoP $ Apply (Var b) [sVar y]))]],
                       body =
                         cases
                           [ (sVar x :== sym2SoP (Apply (Var b) [sVar y]), sVar y),
@@ -340,7 +340,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { shape = [Forall x (Cat y (sVar a) (sym2SoP $ Apply (Var b) [sVar y]))],
+                   { shape = [[Forall x (Cat y (sVar a) (sym2SoP $ Apply (Var b) [sVar y]))]],
                      body = cases [(Bool True, sVar y)]
                    }
                ),
@@ -349,7 +349,7 @@ tests =
           ( \(x, y, _, _, a, b, _, _) -> do
               rewrite
                 ( IndexFn
-                    { shape = [Forall x (Iota (sVar y))],
+                    { shape = [[Forall x (Iota (sVar y))]],
                       body =
                         cases
                           [ (sVar x :== int 0, sVar a),
@@ -359,7 +359,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { shape = [Forall x (Iota (sVar y))],
+                   { shape = [[Forall x (Iota (sVar y))]],
                      body = cases [(Bool True, Var a ~+~ Sum c (int 1) (sVar x) (Apply (Var b) [sVar c]))]
                    }
                ),
@@ -368,7 +368,7 @@ tests =
           ( \(x, y, _, _, _, b, _, _) ->
               rewrite
                 ( IndexFn
-                    { shape = [Forall x (Iota (sVar y))],
+                    { shape = [[Forall x (Iota (sVar y))]],
                       body =
                         cases
                           [ (sVar x :== int 0, sym2SoP $ Apply (Var b) [sVar x]),
@@ -378,7 +378,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { shape = [Forall x (Iota (sVar y))],
+                   { shape = [[Forall x (Iota (sVar y))]],
                      body = cases [(Bool True, sym2SoP $ Sum c (int 0) (sVar x) (Apply (Var b) [sVar c]))]
                    }
                ),
@@ -387,7 +387,7 @@ tests =
           ( \(x, y, _, _, _, b, _, _) ->
               rewrite
                 ( IndexFn
-                    { shape = [Forall x (Iota (sVar y))],
+                    { shape = [[Forall x (Iota (sVar y))]],
                       body =
                         cases
                           [ (sVar x :== int 0, int2SoP (-1) .*. sym2SoP (Apply (Var b) [sVar x])),
@@ -397,7 +397,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { shape = [Forall x (Iota (sVar y))],
+                   { shape = [[Forall x (Iota (sVar y))]],
                      body = cases [(Bool True, int2SoP (-1) .*. sym2SoP (Apply (Var b) [int 0]) .+. sym2SoP (Sum c (int 1) (sVar x) (Apply (Var b) [sVar c])))]
                    }
                ),
@@ -406,7 +406,7 @@ tests =
           ( \(x, y, _, _, _, b, _, _) ->
               rewrite
                 ( IndexFn
-                    { shape = [Forall x (Iota (sVar y))],
+                    { shape = [[Forall x (Iota (sVar y))]],
                       body =
                         cases
                           [ (sVar x :== int 0, int2SoP (-1) .*. sym2SoP (Apply (Var b) [sVar x])),
@@ -416,7 +416,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { shape = [Forall x (Iota (sVar y))],
+                   { shape = [[Forall x (Iota (sVar y))]],
                      body = cases [(Bool True, int2SoP (-1) .*. sym2SoP (Sum c (int 0) (sVar x) (Apply (Var b) [sVar c])))]
                    }
                ),
@@ -425,7 +425,7 @@ tests =
           ( \(x, y, _, _, _, b, _, _) ->
               rewrite
                 ( IndexFn
-                    { shape = [Forall x (Iota (sVar y))],
+                    { shape = [[Forall x (Iota (sVar y))]],
                       body =
                         cases
                           [ (sVar x :== int 0, sym2SoP $ Apply (Var b) [sVar x]),
@@ -435,7 +435,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { shape = [Forall x (Iota (sVar y))],
+                   { shape = [[Forall x (Iota (sVar y))]],
                      body = cases [(Bool True, sym2SoP (Apply (Var b) [int 0]) .+. int2SoP (-1) .*. sym2SoP (Sum c (int 1) (sVar x) (Apply (Var b) [sVar c])))]
                    }
                )

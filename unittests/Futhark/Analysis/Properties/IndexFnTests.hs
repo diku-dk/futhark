@@ -24,7 +24,7 @@ tests =
         "tests/indexfn/cooley-tukey-fft-par.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Apply (Hole xs) [sHole i]))]
                 }
             ]
@@ -33,7 +33,7 @@ tests =
         "tests/indexfn/cooley-tukey-fft-seq.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body = cases [(Bool True, int2SoP 0)]
                 }
             ]
@@ -42,7 +42,7 @@ tests =
         "tests/indexfn/map.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Apply (Hole xs) [sHole i]))]
                 }
             ]
@@ -51,7 +51,7 @@ tests =
         "tests/indexfn/scatter_perm.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i])]
@@ -62,7 +62,7 @@ tests =
         "tests/indexfn/reverse.fut"
         ( pure $ \(i, n, xs, sigma) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole sigma) [sHole i]])]
@@ -86,11 +86,11 @@ tests =
         "tests/indexfn/map-tuple.fut"
         ( pure $ \(i, n, xs, ys) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body = cases [(Bool True, int2SoP 2 .+. sym2SoP (Apply (Hole xs) [sHole i]))]
                 },
               IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body = cases [(Bool True, int2SoP 3 .+. sym2SoP (Apply (Hole ys) [sHole i]))]
                 }
             ]
@@ -101,11 +101,11 @@ tests =
             let xs_i = sym2SoP $ Apply (Hole xs) [sHole i]
                 ys_i = sym2SoP $ Apply (Hole ys) [sHole i]
              in [ IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body = cases [(Bool True, xs_i .*. ys_i)]
                     },
                   IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body = cases [(Bool True, xs_i .+. ys_i)]
                     }
                 ]
@@ -115,7 +115,7 @@ tests =
         ( pure $ \(i, n, xs, _) ->
             let xs_i = sym2SoP (Apply (Hole xs) [sHole i])
              in [ IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body =
                         cases
                           [ (xs_i :> int2SoP 100, int2SoP 2 .*. xs_i),
@@ -129,7 +129,7 @@ tests =
         ( pure $ \(i, n, xs, _) ->
             let xs_i = sym2SoP (Apply (Hole xs) [sHole i])
              in [ IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body =
                         cases
                           [ (xs_i :> int2SoP 100, int2SoP 2 .*. xs_i),
@@ -143,7 +143,7 @@ tests =
         ( pure $ \(i, n, xs, _) ->
             let xs_i = sym2SoP (Apply (Hole xs) [sHole i])
              in [ IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body = cases [(Bool True, int2SoP 2 .*. xs_i)]
                     }
                 ]
@@ -152,7 +152,7 @@ tests =
         "tests/indexfn/scalar.fut"
         ( pure $ \(i, _, x, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole x))],
+                { shape = [[Forall i (Iota (sHole x))]],
                   body = cases [(Bool True, int2SoP 2 .*. sHole x)]
                 }
             ]
@@ -161,7 +161,7 @@ tests =
         "tests/indexfn/scan.fut"
         ( pure $ \(i, n, xs, j) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [ ( Bool True,
@@ -176,7 +176,7 @@ tests =
         "tests/indexfn/scan_lambda.fut"
         ( pure $ \(i, n, xs, j) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [ ( Bool True,
@@ -191,7 +191,7 @@ tests =
         "tests/indexfn/scan2.fut"
         ( pure $ \(i, n, xs, j) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [ ( Bool True,
@@ -230,7 +230,7 @@ tests =
                           ]
                     },
                   IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body =
                         cases
                           [ ( xs_i,
@@ -249,7 +249,7 @@ tests =
             let inds_i = sym2SoP $ Apply (Hole h2) [sHole i]
                 p = int2SoP 0 :< inds_i :&& inds_i :<= sHole n
              in [ IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body =
                         cases
                           [ (p, sym2SoP $ Apply (Hole h1) [inds_i .-. int2SoP 1]),
@@ -264,7 +264,7 @@ tests =
             let xs_i = sym2SoP $ Apply (Hole xs) [sHole i]
                 xs_j = sym2SoP $ Apply (Hole xs) [sHole j]
              in [ IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body =
                         cases
                           [ ( xs_i :== int2SoP 1,
@@ -283,7 +283,7 @@ tests =
             let xs_i = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole i]]
                 xs_j = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole j]]
              in [ IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body =
                         cases
                           [ ( xs_i,
@@ -302,7 +302,7 @@ tests =
             let xs_i = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole i]]
                 xs_j = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole j]]
              in [ IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body =
                         cases
                           [ ( xs_i,
@@ -340,7 +340,7 @@ tests =
                           ]
                     },
                   IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body =
                         cases
                           [ ( cs_i :== int2SoP 2,
@@ -373,7 +373,7 @@ tests =
                           body = cases [(Bool True, sum_mm1)]
                         },
                       IndexFn
-                        { shape = [Forall i (Cat k (sHole m) sum_km1)],
+                        { shape = [[Forall i (Cat k (sHole m) sum_km1)]],
                           body =
                             cases
                               [ (sVar i :== sum_km1, sym2SoP $ Apply (Hole xs) [sVar k]),
@@ -394,7 +394,7 @@ tests =
                           body = cases [(Bool True, sum_mm1)]
                         },
                       IndexFn
-                        { shape = [Forall i (Cat k (sHole m) sum_km1)],
+                        { shape = [[Forall i (Cat k (sHole m) sum_km1)]],
                           body =
                             cases
                               [ (sVar i :== sum_km1, sym2SoP $ Apply (Hole xs) [sVar k]),
@@ -409,7 +409,7 @@ tests =
             let xs_i = sym2SoP $ Apply (Hole xs) [sHole i]
                 flags_i = Apply (Hole flags) [sHole i]
              in [ IndexFn
-                    { shape = [Forall i (Iota (sHole n))],
+                    { shape = [[Forall i (Iota (sHole n))]],
                       body =
                         cases
                           [ ((sVar i :== int2SoP 0) :|| flags_i, xs_i),
@@ -422,7 +422,7 @@ tests =
         "tests/indexfn/segment_ids.fut"
         ( pure $ \(i, m, k, b) ->
             [ IndexFn
-                { shape = [Forall i (Cat k (sHole m) (sHole b))],
+                { shape = [[Forall i (Cat k (sHole m) (sHole b))]],
                   body = cases [(Bool True, sHole k)]
                 }
             ]
@@ -431,7 +431,7 @@ tests =
         "tests/indexfn/segment_ids2.fut"
         ( pure $ \(i, m, k, b) ->
             [ IndexFn
-                { shape = [Forall i (Cat k (sHole m) (sHole b))],
+                { shape = [[Forall i (Cat k (sHole m) (sHole b))]],
                   body = cases [(Bool False, sHole k)] --- XXX dummy
                 }
             ]
@@ -446,7 +446,7 @@ tests =
                     seg_k_start = sym2SoP $ Sum j (int 0) (sHole k .-. int 1) (Apply (Hole shape) [sHole j])
                     seg_k_end = int (-1) .+. sym2SoP (Sum j (int 0) (sHole k) (Apply (Hole shape) [sHole j]))
                  in [ IndexFn
-                        { shape = [Forall i (Cat k (sHole m) (sHole b))],
+                        { shape = [[Forall i (Cat k (sHole m) (sHole b))]],
                           body =
                             cases
                               [ ( csL_i,
@@ -481,7 +481,7 @@ tests =
                               ]
                         },
                       IndexFn
-                        { shape = [Forall i (Iota (sHole n))],
+                        { shape = [[Forall i (Iota (sHole n))]],
                           body =
                             cases
                               [ ( p_xs i,
@@ -508,7 +508,7 @@ tests =
                         ]
                   },
                 IndexFn
-                  { shape = [Forall i (Iota (sHole n))],
+                  { shape = [[Forall i (Iota (sHole n))]],
                     body =
                       cases
                         [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
@@ -519,7 +519,7 @@ tests =
         "tests/indexfn/partition2_alt.fut"
         ( pure $ \(i, n, xs, is_inv) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
@@ -530,7 +530,7 @@ tests =
         "tests/indexfn/partition2L.fut"
         ( pure $ \(i, n, xs, is_inv) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
@@ -541,7 +541,7 @@ tests =
         "tests/indexfn/partition3.fut"
         ( pure $ \(i, n, xs, is_inv) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
@@ -552,7 +552,7 @@ tests =
         "tests/indexfn/filter.fut"
         ( pure $ \(i, n, xs, is_inv) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
@@ -563,7 +563,7 @@ tests =
         "tests/indexfn/filter_segmented_array.fut"
         ( pure $ \(i, n, xs, is_inv) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
@@ -574,7 +574,7 @@ tests =
         "tests/indexfn/maxMatch.fut"
         ( pure $ \(i, n, is_inv, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [(Bool True, sym2SoP $ Apply (Hole is_inv) [sHole i])]
@@ -585,7 +585,7 @@ tests =
         "tests/indexfn/maxMatch_2d.fut"
         ( pure $ \(i, n, is_inv, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   body =
                     cases
                       [(Bool True, sym2SoP $ Apply (Hole is_inv) [sHole i])]
@@ -608,7 +608,7 @@ tests =
         "tests/indexfn/nd_map-map.fut"
         ( newNameFromString "j" >>= \j -> pure $ \(i, n, xs, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ int2SoP 2)],
+                { shape = [[Forall i (Iota $ sHole n)], [Forall j (Iota $ int2SoP 2)]],
                   body =
                     cases
                       [(Bool True, sym2SoP (Apply (Hole xs) [sHole i]) .+. sHole j)]
@@ -619,7 +619,7 @@ tests =
         "tests/indexfn/nd_map-scan.fut"
         ( newNameFromString "j" >>= \j -> pure $ \(i, n, _, k) ->
             [ IndexFn
-                { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ int2SoP 2)],
+                { shape = [[Forall i (Iota $ sHole n)], [Forall j (Iota $ int2SoP 2)]],
                   body =
                     cases
                       [(Bool True, sym2SoP (Sum k (int2SoP 1) (sHole j) (Hole k)))]
@@ -630,7 +630,7 @@ tests =
         "tests/indexfn/nd_expansion.fut"
         ( newNameFromString "j" >>= \j -> pure $ \(i, n, xs, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ int2SoP 2)],
+                { shape = [[Forall i (Iota $ sHole n)], [Forall j (Iota $ int2SoP 2)]],
                   body =
                     cases
                       [(Bool True, int2SoP 2 .*. sym2SoP (Apply (Hole xs) [sVar i]) .+. sHole j)]
@@ -641,13 +641,13 @@ tests =
         "tests/indexfn/if-array-type.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota $ sHole n)],
+                { shape = [[Forall i (Iota $ sHole n)]],
                   body =
                     cases
                       [(Bool True, sym2SoP (Apply (Hole xs) [sVar i]))]
                 },
               IndexFn
-                { shape = [Forall i (Iota $ sHole n)],
+                { shape = [[Forall i (Iota $ sHole n)]],
                   body =
                     cases
                       [(Bool True, sym2SoP (Apply (Hole xs) [sVar i]))]
@@ -658,7 +658,7 @@ tests =
         "tests/indexfn/zipArgs2d.fut"
         ( newNameFromString "j" >>= \j -> pure $ \(i, n, m, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ sHole m)],
+                { shape = [[Forall i (Iota $ sHole n)], [Forall j (Iota $ sHole m)]],
                   body =
                     cases
                       [(Bool True, sHole i .+. sHole j .+. int2SoP 1)]
@@ -669,7 +669,7 @@ tests =
         "tests/indexfn/primes.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   -- matches anything; we're just checking the program.
                   body = cases [(Bool True, sHole xs)]
                 }
@@ -679,7 +679,7 @@ tests =
         "tests/indexfn/quickhull-anormal.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
+                { shape = [[Forall i (Iota (sHole n))]],
                   -- matches anything; we're just checking the program.
                   body = cases [(Bool True, sHole xs)]
                 }

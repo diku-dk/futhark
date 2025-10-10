@@ -11,10 +11,11 @@ module Futhark.Analysis.Properties.IndexFnPlus
     unifyIndexFnWith,
     intervalStart,
     index,
+    dimSize,
   )
 where
 
-import Control.Monad (foldM)
+import Control.Monad (foldM, zipWithM_)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
@@ -45,15 +46,29 @@ intervalEnd :: Domain -> SoP Symbol
 intervalEnd (Cat k _ b) = rep (mkRep k (sym2SoP (Var k) .+. int2SoP 1)) b .-. int2SoP 1
 intervalEnd (Iota _) = error "intervalEnd on iota"
 
-index :: Quantified Domain -> SoP Symbol
-index (Forall i _) = sym2SoP (Var i)
--- index :: [Quantified Domain] -> SoP Symbol
--- index [Forall i _] = sym2SoP (Var i)
--- index [Forall i _, Forall j (Iota m)]
---   -- Flat regular dimension.
---   | i `S.notMember` fv m =
---       sym2SoP (Var i) .*. m
--- index _ = undefined
+dimStart :: [Quantified Domain] -> SoP Symbol
+dimStart [] = undefined
+dimStart (dim : _) = domainStart (formula dim)
+
+dimEnd :: [Quantified Domain] -> SoP Symbol
+dimEnd [] = undefined
+dimEnd [d] = domainEnd (formula d)
+dimEnd [Forall i (Iota n), Forall _ (Iota m)]
+  -- Flat regular dimension.
+  | i `S.notMember` fv m =
+      n .*. m .-. int2SoP 1
+dimEnd _ = error "Not implemented yet"
+
+dimSize :: [Quantified Domain] -> SoP Symbol
+dimSize d = dimEnd d .-. dimStart d .+. int2SoP 1
+
+index :: [Quantified Domain] -> SoP Symbol
+index [Forall i _] = sym2SoP (Var i)
+index [Forall i _, Forall j (Iota m)]
+  -- Flat regular dimension.
+  | i `S.notMember` fv m =
+      sym2SoP (Var i) .*. m .+. sym2SoP (Var j)
+index _ = undefined
 
 -------------------------------------------------------------------------------
 -- Pretty.

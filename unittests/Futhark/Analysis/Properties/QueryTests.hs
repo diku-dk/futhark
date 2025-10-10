@@ -23,7 +23,7 @@ tests =
             ( \(i, _, _, n, _, _, _) -> do
                 let fn =
                       IndexFn
-                        { shape = [Forall i (Iota (sVar n))],
+                        { shape = [[Forall i (Iota (sVar n))]],
                           body =
                             cases [(Bool True, sVar i)]
                         }
@@ -35,7 +35,7 @@ tests =
             ( \(i, _, _, n, _, _, _) -> do
                 let fn =
                       IndexFn
-                        { shape = [Forall i (Iota (sVar n))],
+                        { shape = [[Forall i (Iota (sVar n))]],
                           body =
                             cases [(Bool True, Var n ~-~ Var i)]
                         }
@@ -47,7 +47,7 @@ tests =
             ( \(i, _, _, n, x, _, _) -> do
                 let fn =
                       IndexFn
-                        { shape = [Forall i (Iota (sVar n))],
+                        { shape = [[Forall i (Iota (sVar n))]],
                           body =
                             cases [(Bool True, sym2SoP $ Apply (Var x) [sVar i])]
                         }
@@ -59,7 +59,7 @@ tests =
             ( \(i, _, _, n, x, _, _) -> do
                 let fn =
                       IndexFn
-                        { shape = [Forall i (Iota (sVar n))],
+                        { shape = [[Forall i (Iota (sVar n))]],
                           body =
                             cases [(Bool True, Var x ~-~ Var i)]
                         }
@@ -71,7 +71,7 @@ tests =
             ( \(i, _, _, n, x, _, _) -> do
                 let fn =
                       IndexFn
-                        { shape = [Forall i (Iota (sVar n))],
+                        { shape = [[Forall i (Iota (sVar n))]],
                           body =
                             cases [(Bool True, sVar x)]
                         }
@@ -85,7 +85,7 @@ tests =
                 let xs_j = Apply (Var x) [sVar j]
                 let fn =
                       IndexFn
-                        { shape = [Forall i (Iota (sVar n))],
+                        { shape = [[Forall i (Iota (sVar n))]],
                           body =
                             cases
                               [ ( xs_i,
@@ -105,7 +105,7 @@ tests =
                ( \(i, _, _, n, _, _, _) -> do
                    let fn =
                          IndexFn
-                           { shape = [Forall i (Iota (sVar n))],
+                           { shape = [[Forall i (Iota (sVar n))]],
                              body =
                                cases
                                  [(Bool True, sVar i .+. int2SoP 1)]

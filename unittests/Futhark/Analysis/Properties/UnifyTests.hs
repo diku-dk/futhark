@@ -137,7 +137,7 @@ tests =
           ( \(x, y, z, w, a, b, c, d, _) ->
               unify
                 ( IndexFn
-                    { shape = [Forall x (Iota (hole y))],
+                    { shape = [[Forall x (Iota (hole y))]],
                       body =
                         cases
                           [ (name2SoP x :== int2SoP 0, hole z),
@@ -146,7 +146,7 @@ tests =
                     }
                 )
                 ( IndexFn
-                    { shape = [Forall a (Iota (name2SoP b))],
+                    { shape = [[Forall a (Iota (name2SoP b))]],
                       body =
                         cases
                           [ (name2SoP a :== int2SoP 0, name2SoP c),

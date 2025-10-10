@@ -17,7 +17,7 @@ import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Flatten (flatten2d)
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn, index)
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn, dimSize)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (MonDir (..))
 import Futhark.Analysis.Properties.Property qualified as Property
@@ -365,7 +365,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   -- TODO support branches of same rank (type), but different dimensions.
   -- (E.g., use "outer" guards or bool-multiplication tricks on domain sizes.)
   let eq x y = isJust <$> (unify x y :: IndexFnM (Maybe (Substitution Symbol)))
-  dims_eq <- and <$> zipWithM eq (concatMap shape ts) (concatMap shape fs)
+  dims_eq <- and . mconcat <$> zipWithM (zipWithM eq) (concatMap shape ts) (concatMap shape fs)
   unless dims_eq $ error "Branches with different dimensions not supported yet."
 
   c <- newVName "if-condition"
@@ -403,7 +403,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
         i <- newVName "i"
         unless (rank n == 0) . error $ errorMsg loc "type error"
         m <- rewrite $ flattenCases (body n)
-        rewrite $ IndexFn (Forall i (Iota m) : shape x) (body x)
+        rewrite $ IndexFn ([Forall i (Iota m)] : shape x) (body x)
   | Just "iota" <- getFun e_f,
     [e_n] <- getArgs args = do
       ns <- forward e_n
@@ -412,7 +412,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
         case n of
           IndexFn [] cs -> do
             m <- rewrite $ flattenCases cs
-            rewrite $ IndexFn [Forall i (Iota m)] (singleCase $ sVar i)
+            rewrite $ IndexFn [[Forall i (Iota m)]] (singleCase $ sVar i)
           _ ->
             error $ errorMsg loc "type error"
   | Just fname <- getFun e_f,
@@ -430,49 +430,19 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
       forM fs $ \f ->
         case shape f of
           ds | length ds <= 1 -> error $ "Flatten on less-than-2d array." <> prettyStr f
-          Forall k (Iota m) : Forall j (Iota n) : shp -> do
-            -- HACK j === (i' mod n), but we don't have modulo, so we convert to Cat domain.
-            -- TODO use the multi-dim theory instead.
-            k' <- newNameFromString "k"
-            (_, flat_dim) <- flatten2d k' m n
-            let Forall i (Cat _ _ e_k) = flat_dim
-            let j' = sVar i .-. e_k
-            pure $
-              f
-                { shape = flat_dim : shp,
-                  body = repCases (addRep j j' $ mkRep k (sVar k')) (body f)
-                }
-          -- ALTERNATIVE: using II(i) with domain Iota (m * n).
-          -- k' <- newNameFromString "k"
-          -- let b i = i .*. n
-          -- let flat_dim = Cat k' m (b (sVar k'))
-          -- -- Also add II array; if this flattened array is substituted into a
-          -- -- top-level definition it will be needed during substitution:
-          -- --   def f flat_x =
-          -- --     ...
-          -- --   def g x =
-          -- --     f (flatten x)
-          -- -- because flat_x[i] gets substituted for, e.g., x(II(i), i - II(i) * n).
-          -- i <- newNameFromString "i"
-          -- let f_II = IndexFn [Forall i flat_dim] (cases [(Bool True, sym2SoP (Var k))])
-          -- (vn_II, _) <- lookupII flat_dim f_II
-          -- addRelSymbol (Prop (Property.Monotonic vn_II Inc))
-          -- let ii = sym2SoP (Apply (Var vn_II) [sVar i])
-          -- let j' = sVar i .-. b ii
-          -- pure $
-          --   f
-          --     { shape = Forall i (Iota $ m .*. n) : shp,
-          --       body = repCases (addRep j j' $ mkRep k ii) (body f)
-          --     }
+          [Forall i (Iota n)] : [Forall j (Iota m)] : shp -> do
+            pure $ f {shape = [Forall i (Iota n), Forall j (Iota m)] : shp}
           _ -> error "Not implemented yet."
   | Just "scan" <- getFun e_f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       -- Scan with basic operator.
+      -- TODO stop using this case and require all scans to eta expand...
       fns <- forward xs'
       forM fns $ \fn -> do
         let i = case shape fn of
               [] -> error "scan array is empty?"
-              [Forall i' _] -> i'
+              [[Forall i' _]] -> i'
+              _ -> error "Not implemented yet"
         -- TODO should we verify that _ne matches op?
         op <-
           case E.baseString vn of
@@ -506,7 +476,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
       -- let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
       let acc_vns = E.patNames pat_acc
       bodies <- rollbackAlgEnv $ do
-        addRelIterator outer_dim
+        addRelDim outer_dim
         forward lam_body
 
       neutrals <- forward ne
@@ -522,8 +492,8 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
               { shape = outer_dim : shape f_body,
                 body =
                   cases
-                    [ (sVar (boundVar outer_dim) :== int2SoP 0, sVar base_case),
-                      (sVar (boundVar outer_dim) :/= int2SoP 0, sVar rec_case)
+                    [ (index outer_dim :== int2SoP 0, sVar base_case),
+                      (index outer_dim :/= int2SoP 0, sVar rec_case)
                     ]
               }
             )
@@ -570,7 +540,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
           arg_names <- forM arg_fns (const $ newVName "x")
           let g_fn =
                 IndexFn
-                  { shape = [Forall i (Iota k)],
+                  { shape = [[Forall i (Iota k)]],
                     body =
                       singleCase . sym2SoP $
                         Apply (Var hist_vn) (map sVar arg_names)
@@ -614,8 +584,9 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
           iter <- case size of
             [] ->
               pure []
-            [sz] ->
-              (: []) . flip Forall (Iota sz) <$> newVName "i"
+            [sz] -> do
+              i <- newVName "i"
+              pure [[Forall i (Iota sz)]]
             _ ->
               error "multi-dim not implemented yet"
           when (typeIsBool return_type) $ addProperty (Algebra.Var g) Property.Boolean
@@ -907,7 +878,7 @@ forwardPropertyPrelude f args =
       -- f_X could simply be the trivial function: for i < n . true => X[i].)
       res <- lookupIndexFn x
       case res of
-        Just [f_X] | [Forall i _] <- shape f_X -> rollbackAlgEnv $ do
+        Just [f_X] | [[Forall i _]] <- shape f_X -> rollbackAlgEnv $ do
           let idx = IndexFn [] (cases [(Bool True, sVar i)])
           bindLambdaBodyParams $ (param_filt, idx) : map ((,idx) . fst) parts
           addRelShape (shape f_X)
@@ -932,7 +903,7 @@ forwardPropertyPrelude f args =
           error "Applying property to name bound to tuple?"
 
 scatterSs1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFnM Answer
-scatterSs1 (IndexFn (Forall _ d_xs : _) _) (e_is, is) = do
+scatterSs1 (IndexFn ([Forall _ d_xs] : _) _) (e_is, is) = do
   dest_size <- rewrite $ domainEnd d_xs
   case justVName e_is of
     Just vn_is -> do
@@ -944,7 +915,7 @@ scatterSs1 _ _ = pure Unknown
 
 scatterSs2 :: IndexFn -> Answer
 scatterSs2 vs =
-  answerFromBool $ all ((`S.notMember` fv (body vs)) . boundVar) (shape vs)
+  answerFromBool $ all ((`S.notMember` fv (body vs)) . boundVar) (mconcat $ shape vs)
 
 -- TODO implement (extract vn for values and lookup Range property).
 scatterSs3 :: (Applicative f) => p -> f Answer
@@ -955,7 +926,7 @@ scatterSafe xs is vs = scatterSs1 xs is `orM` pure (scatterSs2 vs) `orM` scatter
 
 -- TODO also look up in env to see if there is a `Bij is Y Z` property with Z <= (0, dest_size) <= Y.
 scatterSc1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc1 xs@(IndexFn (Forall i dom_dest : _) _) (e_is, is) vs
+scatterSc1 xs@(IndexFn ([Forall i dom_dest] : _) _) (e_is, is) vs
   | rank is == 1,
     rank xs == rank vs = do
       safe <- lift $ scatterSafe xs (e_is, is) vs
@@ -982,7 +953,7 @@ scatterSc1 xs@(IndexFn (Forall i dom_dest : _) _) (e_is, is) vs
 
           -- let inv_i = Apply (Var vn_inv) (sVar . boundVar <$> shape xs)
           let inv_i = sym2SoP (Apply (Var vn_inv) [sVar i])
-          let inner_dims = drop 1 (sVar . boundVar <$> shape xs)
+          let inner_dims = map index (drop 1 (shape xs))
           lift $
             xs {body = singleCase (sym2SoP (Apply (Var vn_vs) $ inv_i : inner_dims))}
               @ (vn_vs, vs)
@@ -998,7 +969,7 @@ scatterSc1 xs@(IndexFn (Forall i dom_dest : _) _) (e_is, is) vs
 scatterSc1 _ _ _ = fail ""
 
 scatterSc2 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc2 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)] _)) vs = do
+scatterSc2 xs@(IndexFn [[Forall _ d_xs]] _) (e_is, is@(IndexFn [[Forall k (Iota m)]] _)) vs = do
   safe <- lift $ scatterSafe xs (e_is, is) vs
   when (isUnknown safe) (failMsg "scatterSc2: unable to show safety")
   n <- lift $ rewrite $ domainEnd d_xs .+. int2SoP 1
@@ -1054,7 +1025,7 @@ scatterSc2 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)]
       let p = sVar i :== e :&& c'
       let f =
             IndexFn
-              { shape = [Forall i (Cat k m e)],
+              { shape = [[Forall i (Cat k m e)]],
                 body =
                   cases
                     [ (p, sym2SoP $ Apply (Var hole_vs) [sVar k]),
@@ -1067,13 +1038,13 @@ scatterSc2 _ _ _ = fail ""
 
 -- Scatter fallback: result is uninterpreted, but safe.
 scatterSc3 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc3 xs@(IndexFn [Forall i dom_dest] _) (e_is, is) vs = do
+scatterSc3 xs@(IndexFn [[Forall i dom_dest]] _) (e_is, is) vs = do
   safe <- lift $ scatterSafe xs (e_is, is) vs
   when (isUnknown safe) (failMsg "scatterSc3: unable to show safety")
   uninterpreted <- newNameFromString "safe_scatter"
   lift . pure $
     IndexFn
-      { shape = [Forall i dom_dest],
+      { shape = [[Forall i dom_dest]],
         body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
       }
 scatterSc3 _ _ _ = fail ""
@@ -1231,7 +1202,7 @@ zipArgsSOAC ::
   E.SrcLoc ->
   [E.Pat E.ParamType] ->
   NE.NonEmpty (a, E.Exp) ->
-  IndexFnM (Iterator, [[(E.VName, IndexFn)]])
+  IndexFnM ([Iterator], [[(E.VName, IndexFn)]])
 zipArgsSOAC loc formal_args actual_args = do
   -- Renaming makes sure all Cat k bound in iterators are identical, so that
   -- a new common outer iterator can be used.
@@ -1303,7 +1274,7 @@ zipArgs' loc formal_args actual_args = do
         unless (length array_shape == rank f) . error $
           errorMsg loc "Internal error: parameter and argument sizes do not align."
         let size_vars = map getVName array_shape
-        sizes <- mapM (domainSize . formula) (shape f)
+        sizes <- mapM (rewrite . dimSize) (shape f)
         pure . catMaybes $ zipWith (\sz -> fmap (,sz)) sizes size_vars
 
   pure (aligned_args, aligned_sizes)
@@ -1311,8 +1282,6 @@ zipArgs' loc formal_args actual_args = do
     getVName x
       | Just (Var vn) <- justSym x = Just vn
       | otherwise = Nothing
-
-    domainSize d = rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
 
     alignWithPattern [] arg = [arg]
     alignWithPattern ((_vn, t) : pat) arg =
@@ -1498,13 +1467,14 @@ checkBounds e f_xs idxs =
     printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " OK"
   where
     checkIndexInDomain (_, Nothing) = pure ()
-    checkIndexInDomain (Forall _ d, Just f_idx) =
+    checkIndexInDomain ([Forall _ d], Just f_idx) =
       algebraContext f_idx $ do
         bounds <- getBounds d
         void . foreachCase f_idx $ \n -> do
           forM bounds $ \bound -> do
             c <- isYes <$> queryCase (CaseCheck bound) f_idx n
             unless c $ emitFailure n bound f_idx
+    checkIndexInDomain (_dims, Just _) = undefined
 
     getBounds d = do
       d_start <- rewrite $ domainStart d
