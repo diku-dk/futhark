@@ -322,8 +322,10 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
         Just prev ->
           pure $ MonoKnown prev
         Nothing -> do
-          -- Ensure that each instance of anySize is treated distinctly.
-          put (i + 1, if d == anySize then m else M.insert d i m)
+          put
+            ( i + 1,
+              M.insert d i m
+            )
           pure $ MonoKnown i
 
 -- Mapping from function name and instance list to a new function name in case
@@ -445,7 +447,7 @@ transformType typ =
     transformScalarSizes ty@Prim {} = pure ty
 
     onDim e
-      | e == anySize = pure e
+      | Just _ <- isAnySize e = pure e
       | otherwise = replaceExp =<< transformExp e
 
 transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
@@ -458,13 +460,18 @@ transformRetTypeSizes argset (RetType dims ty) = do
 sizesForPat :: (MonadFreshNames m) => Pat ParamType -> m ([VName], Pat ParamType)
 sizesForPat pat = do
   (params', sizes) <- runStateT (traverse (bitraverse onDim pure) pat) []
-  pure (sizes, params')
+  pure (map snd sizes, params')
   where
     onDim d
-      | d == anySize = do
-          v <- lift $ newVName "size"
-          modify (v :)
-          pure $ sizeFromName (qualName v) mempty
+      | Just k <- isAnySize d = do
+          prev <- gets $ lookup k
+          case prev of
+            Nothing -> do
+              v <- lift $ newVName "size"
+              modify ((k, v) :)
+              pure $ sizeFromName (qualName v) mempty
+            Just v ->
+              pure $ sizeFromName (qualName v) mempty
       | otherwise = pure d
 
 transformAppRes :: AppRes -> MonoM AppRes
@@ -871,7 +878,7 @@ inferSizeArgs tparams bind_t bind_r t = do
           -- only occurs when those sizes don't actually matter (knock
           -- on wood...), but we should never actually insert anySize
           -- as a concrete argument.
-          | e /= anySize ->
+          | Nothing <- isAnySize e ->
               replaceExp e
         _ ->
           pure $ sizeFromInteger 0 mempty
@@ -1161,7 +1168,7 @@ typeSubstsM loc orig_t1 orig_t2 =
     onDim (MonoAnon i) = do
       (_, sizes) <- get
       case M.lookup i sizes of
-        Nothing -> pure anySize
+        Nothing -> pure $ anySize i
         Just d -> pure d
 
 -- Perform a given substitution on the types in a pattern.
