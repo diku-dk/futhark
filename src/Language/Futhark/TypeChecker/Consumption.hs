@@ -452,6 +452,10 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
       Scalar $ Record $ M.intersectionWith delve fs1 fs2
     delve (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
       Scalar $ Sum $ M.intersectionWith (zipWith delve) cs1 cs2
+    -- For abstract types (TypeVar), we cannot see the internal structure,
+    -- so we must be conservative and not infer uniqueness.
+    delve t (Scalar (TypeVar _ _ _)) =
+      t `setUniqueness` Nonunique
     delve t t_als
       | all (`S.member` consumings) $ boundAliases (arrayAliases t_als),
         not $ any ((`S.member` forbidden) . aliasVar) (aliases t_als) =
