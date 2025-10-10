@@ -533,7 +533,9 @@ substTypesAny lookupSubst ot =
       -- AnySize.  This should _never_ happen during type-checking, but
       -- may happen as we substitute types during monomorphisation and
       -- defunctorisation later on. See Note [AnySize]
-      let toAny (Var v _ _) | qualLeaf v `elem` dims = anySize
+      let toAny (Var v _ _)
+            | qualLeaf v `elem` dims =
+                anySize (baseTag (qualLeaf v))
           toAny d = d
        in first toAny ot'
 

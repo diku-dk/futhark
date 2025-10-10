@@ -833,7 +833,7 @@ instAnySizes :: (MonadFreshNames m) => [Pat ParamType] -> m [Pat ParamType]
 instAnySizes = traverse $ traverse $ bitraverse onDim pure
   where
     onDim d
-      | d == anySize = do
+      | Just _ <- isAnySize d = do
           v <- newVName "size"
           pure $ sizeFromName (qualName v) mempty
     onDim d = pure d
