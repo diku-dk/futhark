@@ -676,17 +676,7 @@ tests =
             ]
         ),
       mkTest
-        "tests/indexfn/quickhull.fut"
-        ( pure $ \(i, n, xs, _) ->
-            [ IndexFn
-                { shape = [Forall i (Iota (sHole n))],
-                  -- matches anything; we're just checking the program.
-                  body = cases [(Bool True, sHole xs)]
-                }
-            ]
-        ),
-      mkTest
-        "tests/indexfn/lolhull.fut"
+        "tests/indexfn/quickhull-anormal.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [Forall i (Iota (sHole n))],
@@ -695,6 +685,26 @@ tests =
                 }
             ]
         )
+      -- mkTest
+      --   "tests/indexfn/quickhull.fut"
+      --   ( pure $ \(i, n, xs, _) ->
+      --       [ IndexFn
+      --           { shape = [Forall i (Iota (sHole n))],
+      --             -- matches anything; we're just checking the program.
+      --             body = cases [(Bool True, sHole xs)]
+      --           }
+      --       ]
+      --   ),
+      -- mkTest
+      --   "tests/indexfn/lolhull.fut"
+      --   ( pure $ \(i, n, xs, _) ->
+      --       [ IndexFn
+      --           { shape = [Forall i (Iota (sHole n))],
+      --             -- matches anything; we're just checking the program.
+      --             body = cases [(Bool True, sHole xs)]
+      --           }
+      --       ]
+      --   )
         -- mkTest
         --   "tests/indexfn/part3indices_alternative.fut"
         --   ( newNameFromString "q" >>= \q -> pure $ \(i, n, p, j) ->

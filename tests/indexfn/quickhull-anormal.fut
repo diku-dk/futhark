@@ -8,11 +8,10 @@ def to_i64 c : i64 = if c then 1 else 0
 
 def filter_indices [n]
   (cs: [n]bool)
-  : (i64, [n]i64) =
---  : {(i64, [n]i64) | \(m, is) ->
---      FiltPartInv is (\i -> cs[i]) (\_i -> true)
---        && (m == sum (map (\x -> to_i64 x) cs))
---    } =
+ : {(i64, [n]i64) | \(m, is) ->
+     FiltPartInv is (\i -> cs[i]) (\_i -> true)
+       && (m == sum (map (\x -> to_i64 x) cs))
+   } =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) cs)
   let new_size = if n > 0 then num_trues[n-1] else 0
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
@@ -20,11 +19,10 @@ def filter_indices [n]
 
 def partition_indices [n]
   (conds: [n]bool)
-  : (i64, [n]i64) =
---  : {(i64, [n]i64) | \(split, inds) ->
---      FiltPartInv inds (\_i -> true) (\i -> conds[i])
---        && split == sum (map (\c -> if c then 1 else 0) conds)
---    } =
+ : {(i64, [n]i64) | \(split, inds) ->
+     FiltPartInv inds (\_i -> true) (\i -> conds[i])
+       && split == sum (map (\c -> if c then 1 else 0) conds)
+   } =
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs
   let indsT = scan (+) 0 tflgs
@@ -35,10 +33,9 @@ def partition_indices [n]
   in  (lst, inds)
 
 def partition3_indices [n] 't (conds: [n]i8) 
-   : (i64,i64,[n]i64) =
---   : {(i64,i64,[n]i64) | \(_,_,is) ->
---       FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
---    } =
+  : {(i64,i64,[n]i64) | \(_,_,is) ->
+      FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
+   } =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
   let eflags = map (\c -> if c == 2 then 1 else 0 ) conds
 
@@ -56,11 +53,10 @@ def partition3_indices [n] 't (conds: [n]i8)
   in  (s1, s1+s2, inds)
 
 def partition3 't [n] (p: t -> i8) (xs: [n]t)
-    : (i64,i64,[]t) =
---    : {(i64,i64,[]t) | \(_, _, ys) ->
---      let conds = map (\x -> p x) xs
---      in FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
---    } =
+   : {(i64,i64,[]t) | \(_, _, ys) ->
+     let conds = map (\x -> p x) xs
+     in FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
+   } =
   let conds = map (\x -> p x) xs
   let (a, b, inds) = partition3_indices conds
   let scratch = map (\x -> x) xs -- copy xs.
@@ -104,8 +100,11 @@ def signed_dist_to_line (px: real, py: real) (qx: real, qy: real) (rx: real, ry:
   let by = ry - py
   in ssqr (ax * by - ay * bx) / (sqr ax + sqr ay)
 
-def tabulate 't (n: i64) (f: i64 -> t): *[n]t =
-  map (\i -> f i) (iota n)
+-- def tabulate 't (n: i64) (f: i64 -> t): *[n]t =
+--   map (\i -> f i) (iota n)
+
+def max (i,id) (j,jd) =
+  if dist_less jd id then (i,id) else (j,jd)
 
 -- Precondition:  Range points.0 = [0, num_segs-1]
 -- Postcondition: \ (xs, ys) -> length xs = 2*num_segs &&
@@ -113,15 +112,23 @@ def tabulate 't (n: i64) (f: i64 -> t): *[n]t =
 --                              Filt ys.1 points.1 (\_ -> false)
 --                  -- ^ meaning some filtering with unknown pred
 def expand_hull [num_segs] [num_points]
+                (f_dist : (real, real) -> (real, real) -> (real, real) -> dist)
                 (segs   : [num_segs](real,real,real,real))
-                (points : [num_points](i64, real, real))
-              : ( [](real,real,real,real) -- segs'
+                -- (segs_begx : [num_segs]real)
+                -- (segs_begy : [num_segs]real)
+                -- (segs_endx : [num_segs]real)
+                -- (segs_endy : [num_segs]real)
+                -- (points : [num_points](i64, real, real))
+                (points_idx : {[num_points]i64 | \x -> Range x (0, num_segs)})
+                (points_x : [num_points]real)
+                (points_y : [num_points]real)
+              : {( [](real,real,real,real) -- segs'
                 , [](i64, real, real)     -- points'
-                ) =
+                ) | \_ -> true} =
               -- : {([](point, point), [](i64, point)) | \_ -> true} =
   --
   let (segs_begx, segs_begy, segs_endx, segs_endy) = unzip4 segs
-  let (points_idx, points_x, points_y) = unzip3 points
+  -- let (points_idx, points_x, points_y) = unzip3 points
 
   -- bounds checks of array `segs` are verifiable by precondition
   let dists = map3
@@ -130,13 +137,10 @@ def expand_hull [num_segs] [num_points]
                  let ay = segs_begy[seg_ix]
                  let bx = segs_endx[seg_ix]
                  let by = segs_endy[seg_ix]
-                 in signed_dist_to_line (ax, ay) (bx, by) (px, py)
+                 in f_dist (ax, ay) (bx, by) (px, py)
               )
               points_idx points_x points_y
   
-  let max (i,id) (j,jd) =
-    if dist_less jd id then (i,id) else (j,jd)
-
   let ne = (0, zero_dist)
   let bins = replicate num_segs ne
   let inds = points_idx
@@ -159,7 +163,7 @@ def expand_hull [num_segs] [num_points]
   --        and the postcondition for the first return as also
   --        Range [0,num_points-1]
   -- 
-  let segs'' = tabulate num_segs
+  let segs'' = map
                  (\i -> let pbx = segs_begx[i]
                         let pby = segs_begy[i]
                         let pext_x = points_x[ extrema_ix_inds[i] ]
@@ -174,6 +178,7 @@ def expand_hull [num_segs] [num_points]
                         -- [(segs[i].0, points[extrema_ix[i].0].1),
                         -- (points[extrema_ix[i].0].1, segs[i].1)]
                  )
+                (iota num_segs)
   let (segs0'', segs1'', segs2'', segs3'') = unzip4 segs''
   let segs_begx' = flatten segs0''
   let segs_begy' = flatten segs1''
@@ -193,8 +198,8 @@ def expand_hull [num_segs] [num_points]
         let by = segs_endy[seg_ix]
         let qx = points_x[extreme_ix]
         let qy = points_y[extreme_ix]
-        let daq = signed_dist_to_line (ax,ay) (qx,qy) (px,py)
-        let dqb = signed_dist_to_line (qx,qy) (bx,by) (px,py)
+        let daq = f_dist (ax,ay) (qx,qy) (px,py)
+        let dqb = f_dist (qx,qy) (bx,by) (px,py)
         in if dist_less zero_dist daq then (seg_ix * 2)
            else if dist_less zero_dist dqb then (seg_ix * 2 + 1)
            else (-1)
@@ -297,7 +302,10 @@ def semihull (startx: real, starty: real) (endx: real, endy: real) (points : [](
        loop (hull, segs, points) =
          ([], [(startx,starty, endx,endy)], map (\(x,y) -> (0, x, y)) points)
        while !null points do
-         let (segs', points') = expand_hull segs points
+         -- let (segs_begx, segs_begy, segs_endx, segs_endy) = unzip4 segs
+         -- let (segs', points') = expand_hull segs_begx segs_begy segs_endx segs_endy points
+         let (points_idx, points_x, points_y) = unzip3 points
+         let (segs', points') = expand_hull signed_dist_to_line segs points_idx points_x points_y
          let (seg_inds', pointsx', pointsy') = unzip3 points'
          let (hull', segs'', sgm_inds'') = extract_empty_segments hull segs' seg_inds'
          in  (hull', segs'', zip3 sgm_inds'' pointsx' pointsy')
@@ -306,7 +314,8 @@ def semihull (startx: real, starty: real) (endx: real, endy: real) (points : [](
 def pmin p q = if point_less p q then p else q
 def pmax p q = if point_less p q then q else p
 
-def compute (ps : []point) =
+def compute (ps : []point)
+    : {([](f64,f64), [](f64,f64)) | \_ -> true} =
   if length ps <= 3 then (ps, []) else
   let leftmost = reduce (\p q -> if point_less p q then p else q) ps[0] ps
   let rightmost = reduce (\p q -> if point_less p q then q else p) ps[0] ps
