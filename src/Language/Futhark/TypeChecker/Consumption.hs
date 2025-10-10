@@ -2,6 +2,12 @@
 -- constraints.
 module Language.Futhark.TypeChecker.Consumption
   ( checkValDef,
+
+    -- * For testing
+    Alias (..),
+    Aliases,
+    TypeAliases,
+    inferReturnUniqueness,
   )
 where
 
@@ -414,6 +420,10 @@ aliasesMultipleTimes = S.fromList . map fst . filter ((> 1) . snd) . M.toList . 
   where
     delve (Scalar (Record fs)) =
       foldl' (M.unionWith (+)) mempty $ map delve $ M.elems fs
+    delve (Scalar (TypeVar als _ _)) =
+      -- We cannot know anything about abstract types, but must conservatively
+      -- assume the worst.
+      M.fromList $ map ((,2 :: Int) . aliasVar) $ S.toList als
     delve t =
       M.fromList $ map ((,1 :: Int) . aliasVar) $ S.toList $ aliases t
 
@@ -1012,7 +1022,10 @@ checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (l
           addError retdecl' mempty "A top-level constant cannot have a unique type."
         pure $ RetType ext ret
       Nothing ->
-        pure $ RetType ext $ inferReturnUniqueness params ret body_als
+        pure $
+          RetType ext $
+            inferReturnUniqueness params ret body_als
+
     pure
       ( (body', ret'),
         body_als -- Don't matter.
