@@ -147,6 +147,7 @@ stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
                     -- BasicOp $ Index inp_nm (Slice [DimFix i_flat])
           addStms $ bodyStms $ lambdaBody lam
           pure $ bodyResult $ lambdaBody lam
+      -- BUG in `simplifyLambda 0` ??? : a row of D is said to be a point.
       new_lam' <- renameLambda new_lam >>= simplifyLambda 0
       let soac = F.Screma w [iotnm] $ ScremaForm new_lam' [] []
       pure $ Just (prologue_stms, env, soac)
@@ -480,8 +481,15 @@ mkArrIndexingExp env inp_nm inp_tp i_flat
         perm_slice = map (\i -> slice_dims !! i) $ invPerm sigma
         index_exp  = BasicOp $ Index base_arr $ Slice perm_slice
     in  index_exp
-mkArrIndexingExp _ inp_nm _ i_flat =
-  BasicOp $ Index inp_nm (Slice [DimFix i_flat])
+mkArrIndexingExp _ inp_nm inp_tp i_flat
+  | Array _ptp shp _u <- inp_tp,
+    _d:ds <- shapeDims shp =
+  BasicOp $ Index inp_nm $ Slice $ (DimFix i_flat) : map (\d -> DimSlice se0 d se1) ds
+mkArrIndexingExp _ inp_nm inp_tp i_flat =
+  error ( "Illegal/Unsupported case in mkArrIndexingExp for array "++
+          prettyString inp_nm ++ " of type " ++ prettyString inp_tp ++
+          "flat index: " ++ prettyString i_flat
+        )
 
 joinMbRes :: (Applicative m) =>
   Stms SOACS -> (Stms SOACS, a, b) -> m (Maybe (Stms SOACS, a, b))
