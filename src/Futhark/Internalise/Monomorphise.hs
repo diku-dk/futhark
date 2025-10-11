@@ -142,13 +142,6 @@ data Env = Env
     envParametrized :: ExpReplacements
   }
 
-instance Semigroup Env where
-  Env pb1 sc1 gs1 pr1 <> Env pb2 sc2 gs2 pr2 =
-    Env (pb1 <> pb2) (sc1 <> sc2) (gs1 <> gs2) (pr1 <> pr2)
-
-instance Monoid Env where
-  mempty = Env mempty mempty mempty mempty
-
 isolateNormalisation :: MonoM a -> MonoM a
 isolateNormalisation m = do
   prevRepl <- getExpReplacements
@@ -213,8 +206,9 @@ runMonoM src (MonoM m) =
     sVNameSource final_state
   )
   where
-    ((), final_state) = runState (runReaderT m mempty) initial_state
+    ((), final_state) = runState (runReaderT m initial_env) initial_state
     initial_state = MonoState src mempty mempty mempty mempty
+    initial_env = Env mempty mempty mempty mempty
 
 lookupFun :: VName -> MonoM (Maybe PolyBinding)
 lookupFun vn = do
@@ -1229,18 +1223,23 @@ transformValBind valbind = do
         if null (valBindParams valbind)
           then S.fromList $ retDims $ unInfo $ valBindRetType valbind
           else mempty
+
+  env <- ask
+
   pure
-    mempty
-      { envPolyBindings = M.singleton (valBindName valbind) valbind',
-        envGlobalScope = global,
-        envScope = S.insert (valBindName valbind) global
+    env
+      { envPolyBindings = M.insert (valBindName valbind) valbind' $ envPolyBindings env,
+        envGlobalScope = global <> envGlobalScope env,
+        envScope =
+          S.insert (valBindName valbind) global
+            <> envScope env
       }
 
 transformValBinds :: [ValBind] -> MonoM ()
 transformValBinds [] = pure ()
 transformValBinds (valbind : ds) = do
   env <- transformValBind valbind
-  local (env <>) $ transformValBinds ds
+  local (const env) $ transformValBinds ds
 
 -- | Statistics about which functions were monomorphised.
 newtype MonoStats = MonoStats [(VName, [MonoType])]
