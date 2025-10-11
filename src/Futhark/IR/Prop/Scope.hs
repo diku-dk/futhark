@@ -39,6 +39,7 @@ import Control.Monad.Except
 import Control.Monad.RWS.Lazy qualified
 import Control.Monad.RWS.Strict qualified
 import Control.Monad.Reader
+import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Types
@@ -161,10 +162,21 @@ instance (Scoped rep a) => Scoped rep [a] where
   scopeOf = mconcat . map scopeOf
 
 instance Scoped rep (Stms rep) where
-  scopeOf = foldMap scopeOf
+  scopeOf = foldl' grow mempty
+    where
+      grow env' = extendWithPat env' . stmPat
+
+-- A minor optimisation to avoid allocating scopes just to union them with other
+-- scopes later.
+extendWithPat :: Scope rep -> Pat (LetDec rep) -> Scope rep
+extendWithPat env (Pat pes) =
+  foldl'
+    (\env' (PatElem name dec) -> M.insert name (LetName dec) env')
+    env
+    pes
 
 instance Scoped rep (Stm rep) where
-  scopeOf = scopeOfPat . stmPat
+  scopeOf = extendWithPat mempty . stmPat
 
 instance Scoped rep (FunDef rep) where
   scopeOf = scopeOfFParams . funDefParams
@@ -179,8 +191,7 @@ scopeOfLoopForm (ForLoop i it _) = M.singleton i $ IndexName it
 
 -- | The scope of a pattern.
 scopeOfPat :: (LetDec rep ~ dec) => Pat dec -> Scope rep
-scopeOfPat =
-  mconcat . map scopeOfPatElem . patElems
+scopeOfPat = extendWithPat mempty
 
 -- | The scope of a pattern element.
 scopeOfPatElem :: (LetDec rep ~ dec) => PatElem dec -> Scope rep
