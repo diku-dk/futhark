@@ -21,21 +21,27 @@
 --
 -- Note that these changes are unfortunately not visible in the AST
 -- representation.
-module Futhark.Internalise.Monomorphise (transformProg) where
+module Futhark.Internalise.Monomorphise
+  ( transformProg,
+    MonoType,
+    MonoStats,
+  )
+where
 
 import Control.Monad
 import Control.Monad.Identity
-import Control.Monad.RWS (MonadReader (..), MonadWriter (..), RWST, asks, runRWST)
+import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Writer (Writer, runWriter, runWriterT)
+import Control.Monad.Writer
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
-import Data.List (partition)
+import Data.Function
+import Data.List (intersperse, partition, sortBy)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust, isNothing)
-import Data.Sequence qualified as Seq
+import Data.Ord (Down (..), comparing)
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
 import Futhark.Util (nubOrd, topologicalSort)
@@ -137,7 +143,8 @@ data Env = Env
   }
 
 instance Semigroup Env where
-  Env pb1 sc1 gs1 pr1 <> Env pb2 sc2 gs2 pr2 = Env (pb1 <> pb2) (sc1 <> sc2) (gs1 <> gs2) (pr1 <> pr2)
+  Env pb1 sc1 gs1 pr1 <> Env pb2 sc2 gs2 pr2 =
+    Env (pb1 <> pb2) (sc1 <> sc2) (gs1 <> gs2) (pr1 <> pr2)
 
 instance Monoid Env where
   mempty = Env mempty mempty mempty mempty
@@ -168,36 +175,44 @@ withArgs args = localEnv $ mempty {envScope = args}
 withParams :: ExpReplacements -> MonoM a -> MonoM a
 withParams params = localEnv $ mempty {envParametrized = params}
 
+data MonoState = MonoState
+  { sVNameSource :: !VNameSource,
+    sExpReplacements :: ExpReplacements,
+    sLifts :: Lifts,
+    sValBinds :: [ValBind]
+  }
+
 -- The monomorphization monad.
 newtype MonoM a
   = MonoM
-      ( RWST
+      ( ReaderT
           Env
-          (Seq.Seq (VName, ValBind))
-          (ExpReplacements, VNameSource)
-          (State Lifts)
+          (State MonoState)
           a
       )
   deriving
     ( Functor,
       Applicative,
       Monad,
-      MonadReader Env,
-      MonadWriter (Seq.Seq (VName, ValBind))
+      MonadReader Env
     )
 
 instance MonadFreshNames MonoM where
-  getNameSource = MonoM $ gets snd
-  putNameSource = MonoM . modify . second . const
+  getNameSource = MonoM $ gets sVNameSource
+  putNameSource src = MonoM $ modify $ \s -> s {sVNameSource = src}
 
 instance MonadState ExpReplacements MonoM where
-  get = MonoM $ gets fst
-  put = MonoM . modify . first . const
+  get = MonoM $ gets sExpReplacements
+  put x = MonoM $ modify $ \s -> s {sExpReplacements = x}
 
-runMonoM :: VNameSource -> MonoM a -> ((a, Seq.Seq (VName, ValBind)), VNameSource)
-runMonoM src (MonoM m) = ((a, defs), src')
+runMonoM :: VNameSource -> MonoM () -> (([ValBind], Lifts), VNameSource)
+runMonoM src (MonoM m) =
+  ( (reverse (sValBinds final_state), sLifts final_state),
+    sVNameSource final_state
+  )
   where
-    (a, (_, src'), defs) = evalState (runRWST m mempty (mempty, src)) mempty
+    ((), final_state) = runState (runReaderT m mempty) initial_state
+    initial_state = MonoState src mempty mempty mempty
 
 lookupFun :: VName -> MonoM (Maybe PolyBinding)
 lookupFun vn = do
@@ -205,6 +220,10 @@ lookupFun vn = do
   case M.lookup vn env of
     Just valbind -> pure $ Just valbind
     Nothing -> pure Nothing
+
+addValBind :: ValBind -> MonoM ()
+addValBind funbind =
+  MonoM $ modify $ \s -> s {sValBinds = funbind : sValBinds s}
 
 askScope :: MonoM (S.Set VName)
 askScope = do
@@ -289,9 +308,9 @@ instance Pretty MonoSize where
 instance Pretty (Shape MonoSize) where
   pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
 
--- The kind of type relative to which we monomorphise.  What is most
--- important to us is not the specific dimensions, but merely whether
--- they are known or anonymous/local.
+-- | The kind of type relative to which we monomorphise. What is most important
+-- to us is not the specific dimensions, but merely whether they are known or
+-- anonymous/local.
 type MonoType = TypeBase MonoSize NoUniqueness
 
 monoType :: TypeBase Size als -> MonoType
@@ -333,10 +352,10 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
 type Lifts = [((VName, MonoType), (VName, InferSizeArgs))]
 
 getLifts :: MonoM Lifts
-getLifts = MonoM $ lift get
+getLifts = MonoM $ gets sLifts
 
 modifyLifts :: (Lifts -> Lifts) -> MonoM ()
-modifyLifts = MonoM . lift . modify
+modifyLifts f = MonoM $ modify $ \s -> s {sLifts = f $ sLifts s}
 
 addLifted :: VName -> MonoType -> (VName, InferSizeArgs) -> MonoM ()
 addLifted fname il liftf =
@@ -391,7 +410,7 @@ transformFName loc fname ft = do
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
           (fname', infer, funbind') <- monomorphiseBinding funbind mono_t
-          tell $ Seq.singleton (qualLeaf fname, funbind')
+          addValBind funbind'
           addLifted (qualLeaf fname) mono_t (fname', infer)
           applySizeArgs fname' (toRes Nonunique t') <$> infer t'
   where
@@ -945,10 +964,9 @@ arrowArg scope argset args_params rety =
         notIntrisic vn = baseTag vn > maxIntrinsicTag
         argset' = fvVars $ freeInType argT
         fullArgset =
-          argset'
-            <> case argName of
-              Unnamed -> mempty
-              Named vn -> S.singleton vn
+          case argName of
+            Unnamed -> argset'
+            Named vn -> S.insert vn argset'
     arrowArgScalar env (TypeVar u qn args) =
       TypeVar u qn <$> mapM arrowArgArg args
       where
@@ -1200,7 +1218,7 @@ transformValBind valbind = do
             unInfo $
               valBindRetType valbind
     (name, infer, valbind'') <- monomorphiseBinding valbind' $ monoType t
-    tell $ Seq.singleton (name, valbind'')
+    addValBind valbind''
     addLifted (valBindName valbind) (monoType t) (name, infer)
 
   pure
@@ -1218,9 +1236,31 @@ transformValBinds (valbind : ds) = do
   env <- transformValBind valbind
   localEnv env $ transformValBinds ds
 
+-- | Statistics about which functions were monomorphised.
+newtype MonoStats = MonoStats [(VName, [MonoType])]
+
+instance Pretty MonoStats where
+  pretty (MonoStats l) =
+    stack $ intersperse "" $ map pf l
+    where
+      comment = ("-- " <>)
+      pf (name, ts) =
+        comment (pretty (baseName name) <> "_" <> pretty (baseTag name))
+          <+> parens (pretty (length ts) <+> "instantiations")
+          <> ":"
+            </> stack (map (comment . indent 2 . pretty) ts)
+
 -- | Monomorphise a list of top-level value bindings.
-transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
-transformProg decs =
-  fmap (toList . fmap snd . snd) $
+transformProg :: (MonadFreshNames m) => [ValBind] -> m ([ValBind], MonoStats)
+transformProg decs = do
+  (a, b) <-
     modifyNameSource $ \namesrc ->
       runMonoM namesrc $ transformValBinds decs
+  pure
+    ( toList a,
+      MonoStats . sortBy (comparing (Down . length . snd)) $
+        map (\l -> (fst (NE.head l), NE.toList $ fmap snd l)) $
+          NE.groupBy ((==) `on` fst) $
+            sortBy (comparing fst) $
+              map fst b
+    )
