@@ -149,15 +149,20 @@ instance Semigroup Env where
 instance Monoid Env where
   mempty = Env mempty mempty mempty mempty
 
-localEnv :: Env -> MonoM a -> MonoM a
-localEnv env = local (env <>)
-
 isolateNormalisation :: MonoM a -> MonoM a
 isolateNormalisation m = do
-  prevRepl <- get
-  put mempty
-  ret <- local (\env -> env {envScope = mempty, envParametrized = mempty}) m
-  put prevRepl
+  prevRepl <- getExpReplacements
+  putExpReplacements mempty
+  ret <-
+    local
+      ( \env ->
+          env
+            { envScope = envGlobalScope env <> M.keysSet (envPolyBindings env),
+              envParametrized = mempty
+            }
+      )
+      m
+  putExpReplacements prevRepl
   pure ret
 
 -- | These now have monomorphic types in the given action. This is
@@ -170,40 +175,37 @@ withMono vs = local $ \env ->
     keep v _ = v `notElem` vs
 
 withArgs :: S.Set VName -> MonoM a -> MonoM a
-withArgs args = localEnv $ mempty {envScope = args}
+withArgs args = local $ \env -> env {envScope = args <> envScope env}
 
 withParams :: ExpReplacements -> MonoM a -> MonoM a
-withParams params = localEnv $ mempty {envParametrized = params}
+withParams params = local $ \env -> env {envParametrized = params <> envParametrized env}
+
+-- Mapping from function name and instance list to a new function name in case
+-- the function has already been instantiated with those concrete types.
+type Lifts = [((VName, MonoType), (VName, InferSizeArgs))]
 
 data MonoState = MonoState
   { sVNameSource :: !VNameSource,
     sExpReplacements :: ExpReplacements,
     sLifts :: Lifts,
+    sLiftedNames :: S.Set VName,
     sValBinds :: [ValBind]
   }
 
 -- The monomorphization monad.
 newtype MonoM a
-  = MonoM
-      ( ReaderT
-          Env
-          (State MonoState)
-          a
-      )
+  = MonoM (ReaderT Env (State MonoState) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
-      MonadReader Env
+      MonadReader Env,
+      MonadState MonoState
     )
 
 instance MonadFreshNames MonoM where
-  getNameSource = MonoM $ gets sVNameSource
-  putNameSource src = MonoM $ modify $ \s -> s {sVNameSource = src}
-
-instance MonadState ExpReplacements MonoM where
-  get = MonoM $ gets sExpReplacements
-  put x = MonoM $ modify $ \s -> s {sExpReplacements = x}
+  getNameSource = gets sVNameSource
+  putNameSource src = modify $ \s -> s {sVNameSource = src}
 
 runMonoM :: VNameSource -> MonoM () -> (([ValBind], Lifts), VNameSource)
 runMonoM src (MonoM m) =
@@ -212,7 +214,7 @@ runMonoM src (MonoM m) =
   )
   where
     ((), final_state) = runState (runReaderT m mempty) initial_state
-    initial_state = MonoState src mempty mempty mempty
+    initial_state = MonoState src mempty mempty mempty mempty
 
 lookupFun :: VName -> MonoM (Maybe PolyBinding)
 lookupFun vn = do
@@ -223,14 +225,34 @@ lookupFun vn = do
 
 addValBind :: ValBind -> MonoM ()
 addValBind funbind =
-  MonoM $ modify $ \s -> s {sValBinds = funbind : sValBinds s}
+  modify $ \s -> s {sValBinds = funbind : sValBinds s}
 
 askScope :: MonoM (S.Set VName)
 askScope = do
   scope <- asks envScope
-  scope' <- asks $ S.union scope . envGlobalScope
-  scope'' <- asks $ S.union scope' . M.keysSet . envPolyBindings
-  S.union scope'' . S.fromList . map (fst . snd) <$> getLifts
+  gets $ S.union scope . sLiftedNames
+
+getExpReplacements :: MonoM ExpReplacements
+getExpReplacements = gets sExpReplacements
+
+putExpReplacements :: ExpReplacements -> MonoM ()
+putExpReplacements x = modify $ \s -> s {sExpReplacements = x}
+
+getLifts :: MonoM Lifts
+getLifts = gets sLifts
+
+addLifted :: VName -> MonoType -> (VName, InferSizeArgs) -> MonoM ()
+addLifted fname il liftf =
+  modify $ \s ->
+    s
+      { sLifts = ((fname, il), liftf) : sLifts s,
+        sLiftedNames = S.insert (fst liftf) $ sLiftedNames s
+      }
+
+lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
+lookupLifted fname t = lookup (fname, t) <$> getLifts
+
+-- pure scope
 
 -- | Asks the introduced variables in a set of argument,
 -- that is arguments not currently in scope.
@@ -247,8 +269,9 @@ parametrizing :: S.Set VName -> MonoM ExpReplacements
 parametrizing argset = do
   intros <- askIntros argset
   let usesIntros = not . S.disjoint intros . fvVars . freeInExp
-  (params, nxtBind) <- gets $ partition (usesIntros . unReplaced . fst)
-  put nxtBind
+  (params, nxtBind) <-
+    partition (usesIntros . unReplaced . fst) <$> getExpReplacements
+  putExpReplacements nxtBind
   pure params
 
 calculateDims :: Exp -> ExpReplacements -> MonoM Exp
@@ -347,23 +370,6 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
             )
           pure $ MonoKnown i
 
--- Mapping from function name and instance list to a new function name in case
--- the function has already been instantiated with those concrete types.
-type Lifts = [((VName, MonoType), (VName, InferSizeArgs))]
-
-getLifts :: MonoM Lifts
-getLifts = MonoM $ gets sLifts
-
-modifyLifts :: (Lifts -> Lifts) -> MonoM ()
-modifyLifts f = MonoM $ modify $ \s -> s {sLifts = f $ sLifts s}
-
-addLifted :: VName -> MonoType -> (VName, InferSizeArgs) -> MonoM ()
-addLifted fname il liftf =
-  modifyLifts (((fname, il), liftf) :)
-
-lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
-lookupLifted fname t = lookup (fname, t) <$> getLifts
-
 sizeVarName :: Exp -> Name
 sizeVarName e = "d<{" <> nameFromText (prettyText (bareExp e)) <> "}>"
 
@@ -375,14 +381,14 @@ replaceExp e =
     Just e' -> pure e'
     Nothing -> do
       let e' = ReplacedExp e
-      prev <- gets $ lookup e'
+      prev <- lookup e' <$> getExpReplacements
       prev_param <- asks $ lookup e' . envParametrized
       case (prev_param, prev) of
         (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
           vn <- newVName $ sizeVarName e
-          modify ((e', vn) :)
+          void $ putExpReplacements . ((e', vn) :) <$> getExpReplacements
           pure $ sizeFromName (qualName vn) (srclocOf e)
   where
     -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
@@ -886,7 +892,7 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
 
 inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> MonoM [Exp]
 inferSizeArgs tparams bind_t bind_r t = do
-  r <- gets (<>) <*> asks envParametrized
+  r <- (<>) <$> getExpReplacements <*> asks envParametrized
   let dinst = dimMapping bind_t t bind_r r
   mapM (tparamArg dinst) tparams
   where
@@ -1028,7 +1034,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
         substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
       params' = map (substPat substStructType) params
   params'' <- withArgs shape_names $ mapM transformPat params'
-  exp_naming <- get <* put mempty
+  exp_naming <- getExpReplacements <* putExpReplacements mempty
 
   let args = S.fromList $ foldMap patNames params
       arg_params = map snd exp_naming
@@ -1037,7 +1043,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
     withParams exp_naming $
       withArgs (args <> shape_names) $
         hardTransformRetType (applySubst (`M.lookup` substs') rettype)
-  extNaming <- get <* put mempty
+  extNaming <- getExpReplacements <* putExpReplacements mempty
   scope <- S.union shape_names <$> askScope'
   let (rettype'', new_params) = arrowArg scope args arg_params rettype'
       bind_t' = substTypesAny (`M.lookup` substs') bind_t
@@ -1056,7 +1062,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
   body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
   scope' <- S.union (shape_names <> args) <$> askScope'
   body''' <-
-    expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< get)
+    expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< getExpReplacements)
 
   seen_before <- elem name . map (fst . fst) <$> getLifts
   name' <-
@@ -1221,20 +1227,22 @@ transformValBind valbind = do
     addValBind valbind''
     addLifted (valBindName valbind) (monoType t) (name, infer)
 
+  let global =
+        if null (valBindParams valbind)
+          then S.fromList $ retDims $ unInfo $ valBindRetType valbind
+          else mempty
   pure
     mempty
       { envPolyBindings = M.singleton (valBindName valbind) valbind',
-        envGlobalScope =
-          if null (valBindParams valbind)
-            then S.fromList $ retDims $ unInfo $ valBindRetType valbind
-            else mempty
+        envGlobalScope = global,
+        envScope = S.insert (valBindName valbind) global
       }
 
 transformValBinds :: [ValBind] -> MonoM ()
 transformValBinds [] = pure ()
 transformValBinds (valbind : ds) = do
   env <- transformValBind valbind
-  localEnv env $ transformValBinds ds
+  local (env <>) $ transformValBinds ds
 
 -- | Statistics about which functions were monomorphised.
 newtype MonoStats = MonoStats [(VName, [MonoType])]
