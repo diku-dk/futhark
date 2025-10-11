@@ -182,7 +182,7 @@ withParams params = local $ \env -> env {envParametrized = params <> envParametr
 
 -- Mapping from function name and instance list to a new function name in case
 -- the function has already been instantiated with those concrete types.
-type Lifts = [((VName, MonoType), (VName, InferSizeArgs))]
+type Lifts = M.Map (VName, MonoType) (VName, InferSizeArgs)
 
 data MonoState = MonoState
   { sVNameSource :: !VNameSource,
@@ -245,12 +245,12 @@ addLifted :: VName -> MonoType -> (VName, InferSizeArgs) -> MonoM ()
 addLifted fname il liftf =
   modify $ \s ->
     s
-      { sLifts = ((fname, il), liftf) : sLifts s,
+      { sLifts = M.insert (fname, il) liftf (sLifts s),
         sLiftedNames = S.insert (fst liftf) $ sLiftedNames s
       }
 
 lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
-lookupLifted fname t = lookup (fname, t) <$> getLifts
+lookupLifted fname t = M.lookup (fname, t) <$> getLifts
 
 -- | Asks the introduced variables in a set of argument,
 -- that is arguments not currently in scope.
@@ -320,7 +320,7 @@ type InferSizeArgs = StructType -> MonoM [Exp]
 data MonoSize
   = MonoKnown Int
   | MonoAnon Int
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 instance Pretty MonoSize where
   pretty (MonoKnown i) = "?" <> pretty i
@@ -1062,7 +1062,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
   body''' <-
     expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< getExpReplacements)
 
-  seen_before <- elem name . map (fst . fst) <$> getLifts
+  seen_before <- elem name . map fst . M.keys <$> getLifts
   name' <-
     if null tparams && isNothing entry && not seen_before
       then pure name
@@ -1268,5 +1268,6 @@ transformProg decs = do
         map (\l -> (fst (NE.head l), NE.toList $ fmap snd l)) $
           NE.groupBy ((==) `on` fst) $
             sortBy (comparing fst) $
-              map fst b
+              map fst $
+                M.toList b
     )
