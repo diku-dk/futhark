@@ -252,8 +252,6 @@ addLifted fname il liftf =
 lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
 lookupLifted fname t = lookup (fname, t) <$> getLifts
 
--- pure scope
-
 -- | Asks the introduced variables in a set of argument,
 -- that is arguments not currently in scope.
 askIntros :: S.Set VName -> MonoM (S.Set VName)
@@ -388,7 +386,7 @@ replaceExp e =
         (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
           vn <- newVName $ sizeVarName e
-          void $ putExpReplacements . ((e', vn) :) <$> getExpReplacements
+          putExpReplacements . ((e', vn) :) =<< getExpReplacements
           pure $ sizeFromName (qualName vn) (srclocOf e)
   where
     -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
