@@ -98,7 +98,7 @@ blockers =
   Engine.noExtraHoistBlockers
     { Engine.blockHoistPar = isAlloc,
       Engine.blockHoistSeq = isResultAlloc,
-      Engine.isAllocation = isAlloc mempty mempty
+      Engine.isAllocation = isAlloc ST.empty mempty
     }
 
 -- If an allocation is statically known to be safe, then we can remove

@@ -109,7 +109,7 @@ emptyEnv rules blockers =
   Env
     { envRules = rules,
       envHoistBlockers = blockers,
-      envVtable = mempty
+      envVtable = ST.empty
     }
 
 -- | A function that protects a hoisted operation (if possible).  The
@@ -185,7 +185,7 @@ instance
   (SimplifiableRep rep) =>
   LocalScope (Wise rep) (SimpleM rep)
   where
-  localScope types = localVtable (<> ST.fromScope types)
+  localScope types = localVtable (ST.insertScope types)
 
 runSimpleM ::
   SimpleM rep a ->

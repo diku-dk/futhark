@@ -923,7 +923,7 @@ simplifyKernelBody space (Body _ stms res) = do
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
-    Engine.localVtable (<> scope_vtable)
+    Engine.localVtable (segSpaceSymbolTable space)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
       . Engine.enterLoop
       $ Engine.blockIf blocker stms
@@ -935,7 +935,6 @@ simplifyKernelBody space (Body _ stms res) = do
 
   pure (mkWiseBody () body_stms body_res, hoisted)
   where
-    scope_vtable = segSpaceSymbolTable space
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
 simplifyLambda ::
@@ -945,9 +944,9 @@ simplifyLambda ::
   Engine.SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
 simplifyLambda bound = Engine.blockMigrated . Engine.simplifyLambda bound
 
-segSpaceSymbolTable :: (ASTRep rep) => SegSpace -> ST.SymbolTable rep
-segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
-  foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int64) gtids_and_dims
+segSpaceSymbolTable :: (ASTRep rep) => SegSpace -> ST.SymbolTable rep -> ST.SymbolTable rep
+segSpaceSymbolTable (SegSpace flat gtids_and_dims) st =
+  foldl' f (ST.insertFreeVar flat (IndexName Int64) st) gtids_and_dims
   where
     f vtable (gtid, dim) = ST.insertLoopVar gtid Int64 dim vtable
 
@@ -982,7 +981,7 @@ simplifySegOp (SegMap lvl space ts kbody) = do
 simplifySegOp (SegRed lvl space ts kbody reds) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (reds', reds_hoisted) <-
-    Engine.localVtable (<> scope_vtable) $
+    Engine.localVtable (ST.insertScope scope) $
       mapAndUnzipM (simplifySegBinOp (segFlat space)) reds
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
@@ -992,11 +991,10 @@ simplifySegOp (SegRed lvl space ts kbody reds) = do
     )
   where
     scope = scopeOfSegSpace space
-    scope_vtable = ST.fromScope scope
 simplifySegOp (SegScan lvl space ts kbody scans) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (scans', scans_hoisted) <-
-    Engine.localVtable (<> scope_vtable) $
+    Engine.localVtable (ST.insertScope scope) $
       mapAndUnzipM (simplifySegBinOp (segFlat space)) scans
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
@@ -1006,7 +1004,6 @@ simplifySegOp (SegScan lvl space ts kbody scans) = do
     )
   where
     scope = scopeOfSegSpace space
-    scope_vtable = ST.fromScope scope
 simplifySegOp (SegHist lvl space ts kbody ops) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
 
@@ -1019,7 +1016,7 @@ simplifySegOp (SegHist lvl space ts kbody ops) = do
         nes' <- Engine.simplify nes
         dims' <- Engine.simplify dims
         (lam', op_hoisted) <-
-          Engine.localVtable (<> scope_vtable) $
+          Engine.localVtable (ST.insertScope scope) $
             Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
               simplifyLambda (oneName (segFlat space)) lam
         pure
@@ -1035,7 +1032,6 @@ simplifySegOp (SegHist lvl space ts kbody ops) = do
       )
   where
     scope = scopeOfSegSpace space
-    scope_vtable = ST.fromScope scope
 
 -- | Does this rep contain 'SegOp's in its t'Op's?  A rep must be an
 -- instance of this class for the simplification rules to work.
