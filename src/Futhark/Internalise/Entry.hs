@@ -144,7 +144,7 @@ opaqueRecordArray types rank ((f, t) : fs) ts = do
     opaqueField (E.EntryType e_t _) i_ts =
       snd <$> entryPointType types (E.EntryType e_t' Nothing) i_ts
       where
-        e_t' = E.arrayOf (E.Shape (replicate rank E.anySize)) e_t
+        e_t' = E.arrayOf (E.Shape (replicate rank $ E.anySize 0)) e_t
 
 isSum ::
   VisibleTypes ->

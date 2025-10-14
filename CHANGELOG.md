@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark pkg` is now more robust against errors in package data.
 
+* Incorrect uniqueness inference for functions returning abstract types. (#2324)
+
+* Duplication of entry points in some cases. (#2326)
+
 ## [0.25.33]
 
 ### Added

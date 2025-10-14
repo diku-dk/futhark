@@ -48,7 +48,7 @@ class (Eq v) => IsName v where
 instance IsName VName where
   prettyName
     | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
-        \(VName vn i) -> pretty vn <> "_" <> pretty (show i)
+        \(VName vn i) -> pretty vn <> "_" <> pretty i
     | otherwise = pretty . baseName
   toName = baseName
 
