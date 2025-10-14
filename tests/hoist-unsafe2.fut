@@ -6,4 +6,4 @@
 -- structure { /Loop/BinOp 2 }
 
 def main [n] (a: i64) (xs: [n]i64) =
-  loop acc = 0 for x in xs do acc + x*(a/n)
+  loop acc = 0 for x in xs do acc + x * (a / n)

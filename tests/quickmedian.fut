@@ -17,14 +17,17 @@
 -- input { [4, -8, 2, 2, 0, 0, 5, 9, -6, 2] }
 -- output { 0 }
 
-def quickmedian [n] (xs: [n]i32): i32 =
+def quickmedian [n] (xs: [n]i32) : i32 =
   let (_, ys) =
-    loop (i, ys : []i32) = (0, xs) while length ys > 1 do
-      let pivot = ys[length ys/2]
-      let (lt, gte) = partition (<pivot) ys
-      in if null lt then (i + 1, tail gte)
-         else if i + length lt > n/2 then (i, lt)
+    loop (i, ys: []i32) = (0, xs)
+    while length ys > 1 do
+      let pivot = ys[length ys / 2]
+      let (lt, gte) = partition (< pivot) ys
+      in if null lt
+         then (i + 1, tail gte)
+         else if i + length lt > n / 2
+         then (i, lt)
          else (i + length lt, gte)
   in ys[0]
 
-def main [n] (xs: [n]i32): i32 = quickmedian xs
+def main [n] (xs: [n]i32) : i32 = quickmedian xs

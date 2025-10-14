@@ -17,18 +17,22 @@
 
 -- This is blk-chain2.fut with the alternative ind1
 
-let main [m] [n] (i1: i32) (i2: i32) (k: i32)
-                 (a: [n]i32) (v: [m][n]i32)
-                 (z: *[n][m][n]i32)
-                 : *[n][m][n]i32 =
-  let u          = map (\x -> map (+1) x) v
+def main [m] [n]
+         (i1: i32)
+         (i2: i32)
+         (k: i32)
+         (a: [n]i32)
+         (v: [m][n]i32)
+         (z: *[n][m][n]i32) : *[n][m][n]i32 =
+  let u = map (\x -> map (+ 1) x) v
+  let b = map (+ i1) a
+  let ind1 = i1 + 1
+  let u[ind1] = b
+  -- Coalescing.
 
-  let b          = map (+i1) a
-  let ind1       = i1 + 1
-  let u[ind1]    = b -- Coalescing.
+  let c = map (+ i2) a
+  let u[i1 + 2] = c
+  -- Coalescing
 
-  let c          = map (+i2) a
-  let u[i1+2]   = c -- Coalescing
-
-  let z[i1+i2+k] = u
-  in  z
+  let z[i1 + i2 + k] = u
+  in z

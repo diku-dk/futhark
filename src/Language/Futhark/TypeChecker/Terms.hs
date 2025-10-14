@@ -41,6 +41,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Util (debugTraceM, mapAccumLM, nubOrd)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
@@ -496,16 +497,16 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
         (Info $ AppRes body_t' retext)
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, _, e) body loc) _) = do
   (tparams', params', maybe_retdecl', rettype, e') <-
-    checkBinding (name, maybe_retdecl, tparams, params, e, loc)
+    checkBinding (fst name, maybe_retdecl, tparams, params, e, loc)
 
   let entry = BoundV tparams' $ funType params' rettype
       bindF scope =
         scope
-          { scopeVtable = M.insert name entry $ scopeVtable scope
+          { scopeVtable = M.insert (fst name) entry $ scopeVtable scope
           }
   body' <- localScope bindF $ checkExp body
 
-  (body_t, ext) <- unscopeType loc [name] =<< expTypeFully body'
+  (body_t, ext) <- unscopeType loc [fst name] =<< expTypeFully body'
 
   pure $
     AppExp
@@ -823,9 +824,9 @@ instantiateDimsInReturnType loc fname (RetType dims t)
   where
     new =
       newRigidDim loc (RigidRet fname)
-        . nameFromString
-        . takeWhile isAscii
-        . baseString
+        . nameFromText
+        . T.takeWhile isAscii
+        . baseText
     onDim dims' = applySubst (`lookup` dims')
 
 -- Some information about the function/operator we are trying to

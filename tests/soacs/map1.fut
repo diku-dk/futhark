@@ -7,6 +7,6 @@
 --   [1, 2, 3, 4, 5, 6, 7, 8, 9]
 --   [1, 2, 3, 4, 5, 6, 7, 8, 9]
 -- }
-def main (a: []i32) (b: []i32): ([]i32,[]i32) =
-    let arr = zip a b
-    in unzip(map (\(x: (i32,i32)): (i32,i32)  -> x) arr)
+def main (a: []i32) (b: []i32) : ([]i32, []i32) =
+  let arr = zip a b
+  in unzip (map (\(x: (i32, i32)) : (i32, i32) -> x) arr)

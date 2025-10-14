@@ -46,4 +46,3 @@ entry popcu8 = map (\x -> u8.popc (u8.u64 x))
 entry popcu16 = map (\x -> u16.popc (u16.u64 x))
 entry popcu32 = map (\x -> u32.popc (u32.u64 x))
 entry popcu64 = map (\x -> u64.popc (u64.u64 x))
-

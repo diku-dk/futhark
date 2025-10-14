@@ -1,9 +1,10 @@
 def test [n] (xs: [n]i32) =
   let xs' = copy xs
-  let foo = xs' with [1] =  i32.sum xs'
-  in map (*2) foo
+  let foo = xs' with [1] = i32.sum xs'
+  in map (* 2) foo
 
 -- ==
+-- tags { autodiff }
 -- entry: f_vjp
 -- input { [1, 2, 3] }
 -- output { [4, 2, 4] }

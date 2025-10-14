@@ -27,12 +27,12 @@ import Prelude hiding (mod)
 
 nonrigidFor :: [(SizeBinder VName, QualName VName)] -> StructType -> StructType
 nonrigidFor [] = id -- Minor optimisation.
-nonrigidFor sizes = first onDim
+nonrigidFor sizes = applySubst onDim
   where
-    onDim (Var (QualName _ v) info loc)
-      | Just (_, v') <- find ((== v) . sizeName . fst) sizes =
-          Var v' info loc
-    onDim d = d
+    onDim v
+      | Just (s, v') <- find ((== v) . sizeName . fst) sizes =
+          Just $ ExpSubst $ sizeFromName v' (srclocOf s)
+    onDim _ = Nothing
 
 -- | Bind these identifiers locally while running the provided action.
 binding ::

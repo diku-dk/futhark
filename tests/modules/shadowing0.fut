@@ -8,12 +8,14 @@
 --  2
 -- }
 
-def number(): i32 = 1
+def number () : i32 = 1
+
 module M0 = {
-  def number(): i32 = 2
+  def number () : i32 = 2
+
   module M1 = {
-    def foo(): i32 = number()
+    def foo () : i32 = number ()
   }
 }
 
-def main: i32 = M0.M1.foo()
+def main : i32 = M0.M1.foo ()

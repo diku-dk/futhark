@@ -964,6 +964,8 @@ checkBasicOp (UpdateAcc _ acc is ses) = do
         <> prettyText (length is)
         <> " provided."
 
+  mapM_ (require [Prim int64]) is
+
   zipWithM_ require (map pure ts) ses
   consume =<< lookupAliases acc
 

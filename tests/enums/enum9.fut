@@ -5,11 +5,11 @@
 
 type animal = #dog | #cat | #mouse | #bird
 
-def f (x : animal) : i32 =
+def f (x: animal) : i32 =
   match x
-    case #dog   -> 1
-    case #cat   -> 2
-    case #mouse -> 3
-    case #bird  -> 4
+  case #dog -> 1
+  case #cat -> 2
+  case #mouse -> 3
+  case #bird -> 4
 
 def main : []i32 = map f [#dog, #cat, #mouse, #bird]

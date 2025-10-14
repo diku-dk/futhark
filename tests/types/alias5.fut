@@ -2,5 +2,5 @@
 
 type uniqlist [n] = *[n]i32
 
-def main(p: [][]i32): [](uniqlist []) =
+def main (p: [][]i32) : [](uniqlist []) =
   p

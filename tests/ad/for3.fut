@@ -1,6 +1,10 @@
+-- ==
+-- tags { autodiff }
+
 def square [n] (xs: [n]i32) =
   let xs' = copy xs
-  in loop xs'' = xs' for i < n do
+  in loop xs'' = xs'
+     for i < n do
        let a = xs''[i]
        in xs'' with [i] = a * a
 
@@ -18,7 +22,8 @@ entry prim [n] (xs: [n]i32) = square xs
 --           [0,0,0,8,0],
 --           [0,0,0,0,10]]
 --        }
-entry f_jvp [n] (xs :[n]i32) =
+entry f_jvp [n] (xs: [n]i32) =
   tabulate n (\i -> jvp square xs (replicate n 0 with [i] = 1)) |> transpose
-entry f_vjp [n] (xs :[n]i32) =
+
+entry f_vjp [n] (xs: [n]i32) =
   tabulate n (\i -> vjp square xs (replicate n 0 with [i] = 1))

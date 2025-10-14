@@ -26,7 +26,7 @@ import Futhark.Construct (sliceDim)
 import Futhark.Error
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
-import Futhark.MonadFreshNames hiding (newName)
+import Futhark.MonadFreshNames qualified
 import Futhark.Pass
 
 -- | An optimization pass that reorders and merges 'GPUBody' statements to
@@ -635,5 +635,5 @@ referConst c = do
   pure name
 
 -- | Produce a fresh name, using the given string as a template.
-newName :: String -> RewriteM VName
-newName s = lift $ lift (newNameFromString s)
+newName :: Name -> RewriteM VName
+newName s = lift $ lift $ Futhark.MonadFreshNames.newVName s

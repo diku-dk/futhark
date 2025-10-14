@@ -10,7 +10,7 @@
 -- }
 
 def main (A: *[1]i32) (a: i32) : *[1]i32 =
-  let b = a*2
+  let b = a * 2
   let x = A[0]
-  let y = if x == b then b+3 else b
+  let y = if x == b then b + 3 else b
   in A with [0] = y

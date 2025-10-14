@@ -4,5 +4,5 @@
 -- random input { [2][12]i64 } auto output
 -- structure gpu { SegMap/Update 0 }
 
-def main [n][m] (xss: *[n][m]i64) =
+def main [n] [m] (xss: *[n][m]i64) =
   map (\xs -> copy xs with [0:10] = iota 10) xss

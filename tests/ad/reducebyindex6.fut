@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 --  entry: rev
 --  input {
 --    [1i64,-3i64,1i64,5i64,1i64,-3i64,1i64,5i64]
@@ -7,7 +8,7 @@
 --    [840f32,0f32,280f32,0f32,168f32,0f32,120f32,0f32] }
 
 def f [n] (is: [n]i64) (as: [n]f32) =
-  reduce_by_index (replicate 2 0.5) (\x y -> x*y*2) 0.5 is as
+  reduce_by_index (replicate 2 0.5) (\x y -> x * y * 2) 0.5 is as
 
 entry rev [n] (is: [n]i64) (as: [n]f32) =
   vjp (f is) as (replicate 2 0 with [1] = 1)

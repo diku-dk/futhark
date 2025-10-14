@@ -5,4 +5,4 @@
 -- output { 150 }
 
 def main (xs: []i32) =
-  reduce (+) 0 (map (\x -> reduce (+) 0 (map (+x) xs)) xs)
+  reduce (+) 0 (map (\x -> reduce (+) 0 (map (+ x) xs)) xs)

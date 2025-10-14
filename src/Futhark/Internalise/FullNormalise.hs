@@ -30,6 +30,8 @@ import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.MonadFreshNames
+import Futhark.Util (showText)
+import Futhark.Util.Loc (srcspan)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Primitive (intValue)
@@ -67,9 +69,9 @@ type NormState = (([Binding], [BindModifier]), VNameSource)
 --   they have to be in the same list to conserve their order
 -- Direct interaction with the inside state should be done with caution, that's why their
 -- no instance of `MonadState`.
-newtype OrderingM a = OrderingM (StateT NormState (Reader String) a)
+newtype OrderingM a = OrderingM (StateT NormState (Reader Name) a)
   deriving
-    (Functor, Applicative, Monad, MonadReader String, MonadState NormState)
+    (Functor, Applicative, Monad, MonadReader Name, MonadState NormState)
 
 instance MonadFreshNames OrderingM where
   getNameSource = OrderingM $ gets snd
@@ -102,7 +104,7 @@ runOrdering (OrderingM m) =
         then ((a, binds), src)
         else error "not all bind modifiers were freed"
 
-naming :: String -> OrderingM a -> OrderingM a
+naming :: Name -> OrderingM a -> OrderingM a
 naming s = local (const s)
 
 -- | From now, we say an expression is "final" if it's going to be stored in a let-bind
@@ -112,7 +114,7 @@ naming s = local (const s)
 nameExp :: Bool -> Exp -> OrderingM Exp
 nameExp True e = pure e
 nameExp False e = do
-  name <- newNameFromString =<< ask -- "e<{" ++ prettyString e ++ "}>"
+  name <- newVName =<< ask -- "e<{" ++ prettyString e ++ "}>"
   let ty = typeOf e
       loc = srclocOf e
       pat = Id name (Info ty) loc
@@ -121,18 +123,18 @@ nameExp False e = do
 
 -- An evocative name to use when naming subexpressions of the
 -- expression bound to this pattern.
-patRepName :: Pat t -> String
+patRepName :: Pat t -> Name
 patRepName (PatAscription p _ _) = patRepName p
-patRepName (Id v _ _) = baseString v
+patRepName (Id v _ _) = baseName v
 patRepName _ = "tmp"
 
-expRepName :: Exp -> String
-expRepName (Var v _ _) = prettyString v
-expRepName e = "d<{" ++ prettyString (bareExp e) ++ "}>"
+expRepName :: Exp -> Name
+expRepName (Var v _ _) = nameFromText $ prettyText v
+expRepName e = "d<{" <> nameFromText (prettyText (bareExp e)) <> "}>"
 
 -- An evocative name to use when naming arguments to an application.
-argRepName :: Exp -> Int -> String
-argRepName e i = expRepName e <> "_arg" <> show i
+argRepName :: Exp -> Int -> Name
+argRepName e i = expRepName e <> "_arg" <> nameFromText (showText i)
 
 -- Modify an expression as describe in module introduction,
 -- introducing the let-bindings in the state.
@@ -219,7 +221,7 @@ getOrdering _ (OpSection qn ty loc) =
   pure $ Var qn ty loc
 getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext, _), Info (yp, yty)) (Info (RetType dims ret), Info exts) loc) = do
   x <- getOrdering False e
-  yn <- newNameFromString "y"
+  yn <- newVName "y"
   let y = Var (qualName yn) (Info $ toStruct yty) mempty
       ret' = applySubst (pSubst x y) ret
       body =
@@ -232,7 +234,7 @@ getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext, _), Info (yp, yty))
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
 getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext, _)) (Info (RetType dims ret)) loc) = do
-  xn <- newNameFromString "x"
+  xn <- newVName "x"
   y <- getOrdering False e
   let x = Var (qualName xn) (Info $ toStruct xty) mempty
       ret' = applySubst (pSubst x y) ret
@@ -244,7 +246,7 @@ getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext, _)
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
 getOrdering final (ProjectSection names (Info ty) loc) = do
-  xn <- newNameFromString "x"
+  xn <- newVName "x"
   let (xty, RetType dims ret) = case ty of
         Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
         _ -> error $ "not a function type for project section: " ++ prettyString ty
@@ -265,7 +267,7 @@ getOrdering final (ProjectSection names (Info ty) loc) = do
               ++ prettyString field
 getOrdering final (IndexSection slice (Info ty) loc) = do
   slice' <- astMap mapper slice
-  xn <- newNameFromString "x"
+  xn <- newVName "x"
   let (xty, RetType dims ret) = case ty of
         Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
         _ -> error $ "not a function type for index section: " ++ prettyString ty
@@ -295,7 +297,7 @@ getOrdering final (AppExp (LetPat sizes pat expr body _) _) = do
   expr' <- naming (patRepName pat) $ getOrdering True expr
   addBind $ PatBind sizes pat expr'
   getOrdering final body
-getOrdering final (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
+getOrdering final (AppExp (LetFun (vn, _) (tparams, params, mrettype, rettype, body) e _) _) = do
   body' <- transformBody body
   addBind $ FunBind vn (tparams, params, mrettype, rettype, body')
   getOrdering final e
@@ -326,17 +328,20 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (elp, _)) (er, Info (e
       er' <- naming "and_rhs" $ transformBody er
       pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
     (False, False) -> do
-      el' <- naming (prettyString op <> "_lhs") $ getOrdering False el
-      er' <- naming (prettyString op <> "_rhs") $ getOrdering False er
+      el' <- naming (baseName (qualLeaf op) <> "_lhs") $ getOrdering False el
+      er' <- naming (baseName (qualLeaf op) <> "_rhs") $ getOrdering False er
       pure $ mkApply (Var op opT oloc) [(elp, mempty, el'), (erp, mempty, er')] resT
   nameExp final expr'
   where
     isOr = baseName (qualLeaf op) == "||"
     isAnd = baseName (qualLeaf op) == "&&"
-getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
+getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body _) _) = do
   e' <- getOrdering False e
   slice' <- astMap mapper slice
-  addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc)
+  -- Carefully synthesize a location that does not have the body in it -
+  -- this is so profiling information will be more precise.
+  let loc' = srcspan dloc e
+  addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc')
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
@@ -371,7 +376,7 @@ transformBody e = do
     f body (PatBind sizes p expr) =
       AppExp (LetPat sizes p expr body mempty) appRes
     f body (FunBind vn infos) =
-      AppExp (LetFun vn infos body mempty) appRes
+      AppExp (LetFun (vn, mempty) infos body mempty) appRes
 
 transformValBind :: (MonadFreshNames m) => ValBind -> m ValBind
 transformValBind valbind = do
@@ -633,7 +638,7 @@ withMapNest nest_args f = do
           | otherwise = error "Impossible."
 
         mkAMParam t level =
-          mkParam ("p_" <> show level) $ argType (level - 1) am t
+          mkParam ("p_" <> nameFromText (showText level)) $ argType (level - 1) am t
 
     trueLevel :: AutoMap -> Int
     trueLevel am
@@ -648,7 +653,7 @@ withMapNest nest_args f = do
 
     argType level am = stripArray (trueLevel am - level)
 
-mkParam :: (MonadFreshNames m) => String -> TypeBase Size u -> m (Pat ParamType)
+mkParam :: (MonadFreshNames m) => Name -> TypeBase Size u -> m (Pat ParamType)
 mkParam desc t = do
   x <- newVName desc
   pure $ Id x (Info $ toParam Observe t) mempty

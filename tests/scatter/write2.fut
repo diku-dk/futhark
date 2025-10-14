@@ -16,7 +16,8 @@
 --    [[0, 0, 1], [5, 6, 7]]]
 -- }
 
-def main [k][t][m][n] (indexes: [k]i32)
-                      (values: [k][t][m]i32)
-                      (array: *[n][t][m]i32): [n][t][m]i32 =
+def main [k] [t] [m] [n]
+         (indexes: [k]i32)
+         (values: [k][t][m]i32)
+         (array: *[n][t][m]i32) : [n][t][m]i32 =
   scatter array (map i64.i32 indexes) values

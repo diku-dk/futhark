@@ -6,16 +6,16 @@ module type colour = {
   type colour
 }
 
-module rgba_colour: colour = {
+module rgba_colour : colour = {
   type colour = i32
 }
 
-module colourspace(C: colour) = {
+module colourspace (C: colour) = {
   open C
 
-  def frob (x: colour): colour = x
+  def frob (x: colour) : colour = x
 }
 
-module rgba = colourspace(rgba_colour)
+module rgba = colourspace (rgba_colour)
 
 def main = 2

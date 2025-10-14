@@ -22,7 +22,7 @@ compileSegHist ::
   [HistOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 compileSegHist pat space histops kbody nsubtasks
   | [_] <- unSegSpace space =
       nonsegmentedHist pat space histops kbody nsubtasks
@@ -53,7 +53,7 @@ nonsegmentedHist ::
   [HistOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 nonsegmentedHist pat space histops kbody num_histos = do
   let ns = map snd $ unSegSpace space
       ns_64 = map pe64 ns
@@ -64,12 +64,11 @@ nonsegmentedHist pat space histops kbody num_histos = do
   histops' <- renameHistOpLambda histops
 
   -- Only do something if there is actually input.
-  collect $
-    sUnless (product ns_64 .==. 0) $ do
-      sIf
-        use_subhistogram
-        (subHistogram pat space histops num_histos kbody)
-        (atomicHistogram pat space histops' kbody)
+  sUnless (product ns_64 .==. 0) $
+    sIf
+      use_subhistogram
+      (subHistogram pat space histops num_histos kbody)
+      (atomicHistogram pat space histops' kbody)
 
 -- |
 -- Atomic Histogram approach
@@ -120,9 +119,9 @@ atomicHistogram pat space histops kbody = do
     sOp $ Imp.GetTaskId (segFlat space)
     generateChunkLoop "SegHist" Scalar $ \flat_idx -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
-      compileStms mempty (kernelBodyStms kbody) $ do
+      compileStms mempty (bodyStms kbody) $ do
         let (red_res, map_res) =
-              splitFromEnd (length map_pes) $ kernelBodyResult kbody
+              splitFromEnd (length map_pes) $ bodyResult kbody
             red_res_split = splitHistResults histops $ map kernelResultSubExp red_res
 
         let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
@@ -230,11 +229,11 @@ subHistogram pat space histops num_histos kbody = do
     inISPC $
       generateChunkLoop "SegRed" Vectorized $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns_64 i
-        compileStms mempty (kernelBodyStms kbody) $ do
+        compileStms mempty (bodyStms kbody) $ do
           let (red_res, map_res) =
                 splitFromEnd (length map_pes) $
                   map kernelResultSubExp $
-                    kernelBodyResult kbody
+                    bodyResult kbody
 
           sComment "save map-out results" $
             forM_ (zip map_pes map_res) $ \(pe, res) ->
@@ -300,7 +299,7 @@ subHistogram pat space histops num_histos kbody = do
     red_code <- collect $ do
       nsubtasks <- dPrim "nsubtasks"
       sOp $ Imp.GetNumTasks $ tvVar nsubtasks
-      emit <=< compileSegRed' (Pat red_pes) segred_space [segred_op] nsubtasks $ \red_cont ->
+      compileSegRed' (Pat red_pes) segred_space [segred_op] nsubtasks $ \red_cont ->
         red_cont $
           segBinOpChunks [segred_op] $
             flip map hists $ \subhisto ->
@@ -329,13 +328,12 @@ segmentedHist ::
   SegSpace ->
   [HistOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 segmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
-  collect $ do
-    body <- compileSegHistBody pat space histops kbody
-    free_params <- freeParams body
-    emit $ Imp.Op $ Imp.ParLoop "segmented_hist" body free_params
+  body <- compileSegHistBody pat space histops kbody
+  free_params <- freeParams body
+  emit $ Imp.Op $ Imp.ParLoop "segmented_hist" body free_params
 
 compileSegHistBody ::
   Pat LetDecMem ->
@@ -360,11 +358,11 @@ compileSegHistBody pat space histops kbody = collect $ do
       zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns_64) idx
       dPrimV_ (last is) i
 
-      compileStms mempty (kernelBodyStms kbody) $ do
+      compileStms mempty (bodyStms kbody) $ do
         let (red_res, map_res) =
               splitFromEnd (length map_pes) $
                 map kernelResultSubExp $
-                  kernelBodyResult kbody
+                  bodyResult kbody
         forM_ (zip3 per_red_pes histops (splitHistResults histops red_res)) $
           \(red_pes, HistOp dest_shape _ _ _ shape lam, (bucket, vs')) -> do
             let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam

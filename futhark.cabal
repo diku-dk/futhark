@@ -123,7 +123,6 @@ library
       Futhark.AD.Rev.Monad
       Futhark.AD.Rev.Reduce
       Futhark.AD.Rev.Scan
-      Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
       Futhark.Analysis.AccessPattern
       Futhark.Analysis.AlgSimplify
@@ -521,6 +520,7 @@ library futhark-testing
       Generated.AllFutBenchmarks.Accelerate.Nbody.Nbodybh
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
+      Futhark.Analysis.DataDependenciesTests
       Futhark.Analysis.PrimExp.TableTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
@@ -532,6 +532,7 @@ library futhark-testing
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
+      Futhark.IR.SOACSTests
       Futhark.IR.Syntax.CoreTests
       Futhark.IR.SyntaxTests
       Futhark.Internalise.TypesValuesTests
@@ -550,6 +551,7 @@ library futhark-testing
       Language.Futhark.TypeChecker.TypesTests
       Language.Futhark.TypeChecker.TySolveBenchmarks
       Language.Futhark.TypeChecker.TySolveTests
+      Language.Futhark.TypeChecker.ConsumptionTests
       Language.Futhark.TypeCheckerTests
   build-depends:
       QuickCheck >=2.8

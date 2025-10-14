@@ -1,7 +1,9 @@
 -- Fancy size-dependent programming via the module system; the
 -- interpreter had a far too naive idea of how size expressions were
 -- handled.
+
 -- ==
+-- tags { autodiff }
 -- entry: test_adam
 -- input { [42f32,43f32] }
 
@@ -13,7 +15,7 @@ module type vspace = {
   val zero : vector
   val scale : scalar -> vector -> vector
   val dot : vector -> vector -> scalar
-  val + : vector -> vector -> vector
+  val (+) : vector -> vector -> vector
   val neg : vector -> vector
   val to_array : vector -> []scalar
 }

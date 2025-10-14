@@ -40,7 +40,6 @@ main = mainWithOptions initialFmtCfg fmtOptions "[FILES]" $ \args cfg ->
         if cfgCheck cfg
           then unless (docText doc == file_s) $ do
             T.hPutStrLn stderr $ T.pack file <> ": not formatted correctly."
-            T.hPutStr stderr $ docText doc
             exitFailure
           else withFile file WriteMode $ \h -> hPutDoc h doc
   where
