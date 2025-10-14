@@ -155,7 +155,8 @@ optimiseGPUOp (Inner (SegOp op)) =
   where
     mapper =
       identitySegOpMapper
-        { mapOnSegOpLambda = optimiseLambda,
+        { mapOnSegBinOpLambda = optimiseLambda,
+          mapOnSegPostOpLambda = optimiseLambda,
           mapOnSegOpBody = optimiseKernelBody
         }
     inSegOp env = env {envOptimiseLoop = optimiseLoop}
@@ -169,7 +170,8 @@ optimiseMCOp (Inner (ParOp par_op op)) =
   where
     mapper =
       identitySegOpMapper
-        { mapOnSegOpLambda = optimiseLambda,
+        { mapOnSegBinOpLambda = optimiseLambda,
+          mapOnSegPostOpLambda = optimiseLambda,
           mapOnSegOpBody = optimiseKernelBody
         }
     inSegOp env = env {envOptimiseLoop = optimiseLoop}
