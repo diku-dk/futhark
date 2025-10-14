@@ -389,7 +389,7 @@ instTypeScheme _qn loc tparams t = do
     forM tparams $ \tparam ->
       case tparam of
         TypeParamType l v _ -> do
-          v' <- newTyVar loc l $ nameFromString $ takeWhile isAscii $ baseString v
+          v' <- newTyVar loc l $ nameFromText $ T.takeWhile isAscii $ nameToText $ baseName v
           pure $ Just (v, (typeParamName tparam, tyVarType NoUniqueness v'))
         TypeParamDim {} ->
           pure Nothing
@@ -1066,7 +1066,7 @@ checkExp (AppExp (LetFun name (tparams, params, retdecl, NoInfo, e) body loc) _)
   let entry = BoundV tparams' $ funType params'' $ RetType [] rettype
       bindF scope =
         scope
-          { scopeVtable = M.insert name entry $ scopeVtable scope
+          { scopeVtable = M.insert (fst name) entry $ scopeVtable scope
           }
   body' <- localScope bindF $ checkExp body
   body_t <- expType body'

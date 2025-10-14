@@ -40,6 +40,7 @@ import Futhark.Test
 import Futhark.Test.Values
 import Futhark.Util
   ( directoryContents,
+    ensureCacheDirectory,
     fancyTerminal,
     hashText,
     nubOrd,
@@ -52,7 +53,6 @@ import Futhark.Util.Pretty qualified as PP
 import Futhark.Util.ProgressBar
 import System.Directory
   ( copyFile,
-    createDirectoryIfMissing,
     doesFileExist,
     getCurrentDirectory,
     removePathForcibly,
@@ -637,28 +637,36 @@ loadAudio audiofile = do
     _ -> throwError "$loadImg failed to detect the number of channels in the audio input"
 
 literateBuiltin :: EvalBuiltin ScriptM
-literateBuiltin "loadimg" vs =
-  case vs of
-    [ValueAtom v]
-      | Just path <- getValue v -> do
+literateBuiltin server "loadimg" vs
+  | [v] <- vs = do
+      v' <- getHaskellValue server v
+      case v' of
+        Just path -> do
           let path' = map (chr . fromIntegral) (path :: [Word8])
-          loadImage path'
-    _ ->
+          valToExpValue <$> loadImage path'
+        _ -> bad
+  | otherwise = bad
+  where
+    bad =
       throwError $
         "$loadimg does not accept arguments of types: "
-          <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
-literateBuiltin "loadaudio" vs =
-  case vs of
-    [ValueAtom v]
-      | Just path <- getValue v -> do
+          <> T.intercalate ", " (map (prettyText . fmap scriptValueType) vs)
+literateBuiltin server "loadaudio" vs
+  | [v] <- vs = do
+      v' <- getHaskellValue server v
+      case v' of
+        Just path -> do
           let path' = map (chr . fromIntegral) (path :: [Word8])
-          loadAudio path'
-    _ ->
+          valToExpValue <$> loadAudio path'
+        _ -> bad
+  | otherwise = bad
+  where
+    bad =
       throwError $
         "$loadaudio does not accept arguments of types: "
-          <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
-literateBuiltin f vs =
-  scriptBuiltin "." f vs
+          <> T.intercalate ", " (map (prettyText . fmap scriptValueType) vs)
+literateBuiltin server f vs =
+  scriptBuiltin "." server f vs
 
 -- | Some of these only make sense for @futhark literate@, but enough
 -- are also sensible for @futhark script@ that we can share them.
@@ -703,7 +711,7 @@ newFile env (fname_desired, template) m = do
   let fname_base = fromMaybe (T.unpack (envHash env) <> "-" <> template) fname_desired
       fname = envImgDir env </> fname_base
   exists <- liftIO $ doesFileExist fname
-  liftIO $ createDirectoryIfMissing True $ envImgDir env
+  liftIO $ ensureCacheDirectory $ envImgDir env
   when (exists && scriptVerbose (envOpts env) > 0) $
     liftIO . T.hPutStrLn stderr $
       "Using existing file: " <> T.pack fname
@@ -1074,7 +1082,8 @@ processScript :: Env -> [Block] -> IO (Failure, T.Text)
 processScript env script = do
   (failures, outputs, files) <-
     unzip3 <$> mapM (processBlock env) script
-  cleanupImgDir env $ mconcat files
+  cleanupImgDir env $
+    (envImgDir env </> "CACHEDIR.TAG") `S.insert` mconcat files
   pure (L.foldl' min Success failures, T.intercalate "\n" outputs)
 
 -- | Common command line options that transform 'Options'.

@@ -13,6 +13,7 @@ import Data.List qualified as L
 import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Text qualified as T
 import Futhark.IR.Pretty ()
 import Futhark.Solve.GLPK
 import Futhark.Solve.LP hiding (Constraint, LSum, LinearProg)
@@ -202,7 +203,7 @@ ambigCheckLinearProg prog (opt, ranks) =
     }
   where
     -- We really need to track which variables are binary in the LinearProg
-    is_bin_var = ("b_" `L.isPrefixOf`) . baseString
+    is_bin_var = ("b_" `T.isPrefixOf`) . nameToText . baseName
     one_bins = M.filterWithKey (\k v -> is_bin_var k && v == 1) ranks
     zero_bins = M.filterWithKey (\k v -> is_bin_var k && v == 0) ranks
     lsum = foldr (~+~) (constant 0)

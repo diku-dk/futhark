@@ -739,7 +739,7 @@ data AppExpBase f vn
       (ExpBase f vn)
       SrcLoc
   | LetFun
-      vn
+      (vn, SrcLoc)
       ( [TypeParamBase vn],
         [PatBase f vn ParamType],
         Maybe (TypeExp (ExpBase f vn) vn),

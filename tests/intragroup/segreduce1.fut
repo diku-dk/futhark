@@ -8,5 +8,6 @@
 def main xsss =
   #[incremental_flattening(only_intra)]
   xsss
-  |> map (\xss ->map (\xs -> (i32.sum xs, i32.product xs)) xss)
-  |> map unzip |> unzip
+  |> map (\xss -> map (\xs -> (i32.sum xs, i32.product xs)) xss)
+  |> map unzip
+  |> unzip

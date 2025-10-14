@@ -252,7 +252,7 @@ constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
       pat = loopNestingPat first_nest
       rts = map (stripArray (length ispace)) $ patTypes pat
 
-  inner_body' <- fmap (uncurry (flip (KernelBody ()))) $
+  inner_body' <- fmap (uncurry (flip (Body ()))) $
     runBuilder . localScope ispace_scope $ do
       mapM_ readKernelInput $ filter inputIsUsed inps
       res <- bodyBind inner_body
@@ -405,7 +405,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
                 case M.lookup pname identity_map of
                   Nothing -> do
                     arr <-
-                      newIdent (baseString pname ++ "_r") $ arrayOfRow ptype w
+                      newIdent (baseName pname <> "_r") $ arrayOfRow ptype w
                     pure
                       ( Param mempty pname ptype,
                         arr,

@@ -4,4 +4,4 @@
 
 def id x = x
 
-def main (x: i32) (y: bool): (bool, i32) = (id y, id x)
+def main (x: i32) (y: bool) : (bool, i32) = (id y, id x)

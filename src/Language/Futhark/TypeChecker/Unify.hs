@@ -810,11 +810,13 @@ unifyMostCommon usage t1 t2 = do
             mapM_ (uncurry $ onDims bcs bound nonrigid) es
       onDims bcs _ nonrigid (Var v1 _ _) e2
         | Just lvl1 <- nonrigid (qualLeaf v1),
-          expLevel e2 < lvl1 =
+          expLevel e2 <= lvl1,
+          not $ qualLeaf v1 `S.member` fvVars (freeInExp e2) =
             linkVarToDim usage bcs (qualLeaf v1) lvl1 e2
       onDims bcs _ nonrigid e1 (Var v2 _ _)
         | Just lvl2 <- nonrigid (qualLeaf v2),
-          expLevel e1 < lvl2 =
+          expLevel e1 <= lvl2,
+          not $ qualLeaf v2 `S.member` fvVars (freeInExp e1) =
             linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
       onDims _ _ _ _ _ = pure ()
 

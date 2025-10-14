@@ -10,9 +10,9 @@
 --   [[0,0,0], [0,0,0], [0,42,0]]
 -- }
 
-def main (n: i64) (i: i32) (j: i32) (x: i32): [][]i32 =
+def main (n: i64) (i: i32) (j: i32) (x: i32) : [][]i32 =
   let a = replicate n (replicate n 0)
   let b = replicate n 0
   let b[i] = x
-  let a[j] = b in
-  a
+  let a[j] = b
+  in a

@@ -52,20 +52,17 @@ data Binding = Binding
 -- value.
 type Env = M.Map VName Binding
 
-localEnv :: Env -> DefM a -> DefM a
-localEnv env = local $ second (env <>)
+localEnv :: (Env -> Env) -> DefM a -> DefM a
+localEnv f = local $ second f
 
 -- Even when using a "new" environment (for evaluating closures) we
 -- still ram the global environment of DynamicFuns in there.
 localNewEnv :: Env -> DefM a -> DefM a
-localNewEnv env = local $ \(globals, old_env) ->
-  (globals, M.filterWithKey (\k _ -> k `S.member` globals) old_env <> env)
+localNewEnv env = local $ \(globals, _old_env) ->
+  (globals, globals <> env)
 
 askEnv :: DefM Env
 askEnv = asks snd
-
-areGlobal :: [VName] -> DefM a -> DefM a
-areGlobal vs = local $ first (S.fromList vs <>)
 
 replaceTypeSizes ::
   M.Map VName SizeSubst ->
@@ -163,7 +160,7 @@ restrictEnvTo fv = asks restrict
     restrict (globals, env) = M.mapMaybeWithKey keep env
       where
         keep k (Binding t sv) = do
-          guard $ not (k `S.member` globals) && S.member k (fvVars fv)
+          guard $ not (k `M.member` globals) && S.member k (fvVars fv)
           Just $ Binding t $ restrict' sv
     restrict' (Dynamic t) =
       Dynamic t
@@ -179,17 +176,16 @@ restrictEnvTo fv = asks restrict
     restrict' (HoleSV t loc) = HoleSV t loc
     restrict'' (Binding t sv) = Binding t $ restrict' sv
 
--- | Defunctionalization monad.  The Reader environment tracks both
--- the current Env as well as the set of globally defined dynamic
--- functions.  This is used to avoid unnecessarily large closure
--- environments.
+-- | Defunctionalization monad. The Reader environment tracks both the global
+-- Env and the current Env. This is used to avoid unnecessarily large closure
+-- environments (no need to capture the global one).
 newtype DefM a
-  = DefM (ReaderT (S.Set VName, Env) (State ([ValBind], VNameSource)) a)
+  = DefM (ReaderT (Env, Env) (State ([ValBind], VNameSource)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
-      MonadReader (S.Set VName, Env),
+      MonadReader (Env, Env),
       MonadState ([ValBind], VNameSource)
     )
 
@@ -244,7 +240,7 @@ lookupVar t x = do
   case M.lookup x env of
     Just (Binding (Just (dims, sv_t)) sv) -> do
       globals <- asks fst
-      instStaticVal globals dims t sv_t sv
+      instStaticVal (M.keysSet globals) dims t sv_t sv
     Just (Binding Nothing sv) ->
       pure sv
     Nothing -- If the variable is unknown, it may refer to the 'intrinsics'
@@ -557,9 +553,9 @@ defuncExp (Coerce e0 tydecl t loc)
   | otherwise = defuncExp e0
 defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   (e1', sv1) <- defuncExp e1
-  let env = alwaysMatchPatSV (fmap (toParam Observe) pat) sv1
+  let extEnv env = alwaysMatchPatSV env (fmap (toParam Observe) pat) sv1
       pat' = updatePat (fmap (toParam Observe) pat) sv1
-  (e2', sv2) <- localEnv env $ defuncExp e2
+  (e2', sv2) <- localEnv extEnv $ defuncExp e2
   -- To maintain any sizes going out of scope, we need to compute the
   -- old size substitution induced by retext and also apply it to the
   -- newly computed body type.
@@ -593,22 +589,26 @@ defuncExp ProjectSection {} = error "defuncExp: unexpected projection section."
 defuncExp IndexSection {} = error "defuncExp: unexpected projection section."
 defuncExp (AppExp (Loop sparams pat loopinit form e3 loc) res) = do
   (e1', sv1) <- defuncExp $ loopInitExp loopinit
-  let env1 = alwaysMatchPatSV pat sv1
+  env <- askEnv
+  let env1 = alwaysMatchPatSV env pat sv1
   (form', env2) <- case form of
     For v e2 -> do
       e2' <- defuncExp' e2
-      pure (For v e2', envFromIdent v)
+      pure (For v e2', insertIdent v env1)
     ForIn pat2 e2 -> do
       e2' <- defuncExp' e2
-      pure (ForIn pat2 e2', envFromPat $ fmap (toParam Observe) pat2)
+      pure
+        ( ForIn pat2 e2',
+          envFromPat env1 (fmap (toParam Observe) pat2)
+        )
     While e2 -> do
-      e2' <- localEnv env1 $ defuncExp' e2
-      pure (While e2', mempty)
-  (e3', sv) <- localEnv (env1 <> env2) $ defuncExp e3
+      e2' <- local (second (const env1)) $ defuncExp' e2
+      pure (While e2', env1)
+  (e3', sv) <- local (second (const env2)) $ defuncExp e3
   pure (AppExp (Loop sparams pat (LoopInitExplicit e1') form' e3' loc) res, sv)
   where
-    envFromIdent (Ident vn (Info tp) _) =
-      M.singleton vn $ Binding Nothing $ Dynamic $ toParam Observe tp
+    insertIdent (Ident vn (Info tp) _) =
+      M.insert vn $ Binding Nothing $ Dynamic $ toParam Observe tp
 defuncExp e@(AppExp BinOp {} _) =
   error $ "defuncExp: unexpected binary operator: " ++ prettyString e
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
@@ -713,9 +713,10 @@ defuncExp' = fmap fst . defuncExp
 defuncCase :: StaticVal -> Case -> DefM (Maybe (Case, StaticVal))
 defuncCase sv (CasePat p e loc) = do
   let p' = updatePat (fmap (toParam Observe) p) sv
-  case matchPatSV (fmap (toParam Observe) p) sv of
-    Just env -> do
-      (e', sv') <- localEnv env $ defuncExp e
+  env <- askEnv
+  case matchPatSV env (fmap (toParam Observe) p) sv of
+    Just env' -> do
+      (e', sv') <- local (second (const env')) $ defuncExp e
       pure $ Just (CasePat (fmap toStruct p') e' loc, sv')
     Nothing ->
       pure Nothing
@@ -730,14 +731,16 @@ defuncSoacExp e@ProjectSection {} = pure e
 defuncSoacExp (Parens e loc) =
   Parens <$> defuncSoacExp e <*> pure loc
 defuncSoacExp (Lambda params e0 decl tp loc) = do
-  let env = foldMap envFromPat params
-  e0' <- localEnv env $ defuncSoacExp e0
+  env <- askEnv
+  let env' = foldl' envFromPat env params
+  e0' <- local (second (const env')) $ defuncSoacExp e0
   pure $ Lambda params e0' decl tp loc
 defuncSoacExp e
   | Scalar Arrow {} <- typeOf e = do
       (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique $ typeOf e) e
-      let env = foldMap envFromPat pats
-      body' <- localEnv env $ defuncExp' body
+      env <- askEnv
+      let env' = foldl' envFromPat env pats
+      body' <- local (second (const env')) $ defuncExp' body
       pure $ Lambda pats body' Nothing (Info tp) (srclocOf e)
   | otherwise = defuncExp' e
 
@@ -765,7 +768,7 @@ etaExpand e_t e = do
       let t' = second (const d) t
       x <- case p of
         Named x | x `notElem` prev -> pure x
-        _ -> newNameFromString "eta_p"
+        _ -> newVName "eta_p"
       pure
         ( x : prev,
           ( Id x (Info t') mempty,
@@ -796,12 +799,13 @@ defuncLet ::
   DefM ([VName], [Pat ParamType], Exp, StaticVal, ResType)
 defuncLet dims ps@(pat : pats) body (RetType ret_dims rettype)
   | patternOrderZero pat = do
+      env <- askEnv
       let bound_by_pat = (`S.member` fvVars (freeInPat pat))
           -- Take care to not include more size parameters than necessary.
           (pat_dims, rest_dims) = partition bound_by_pat dims
-          env = envFromPat pat <> envFromDimNames pat_dims
+          env' = envFromPat env pat <> envFromDimNames pat_dims
       (rest_dims', pats', body', sv, sv_t) <-
-        localEnv env $ defuncLet rest_dims pats body $ RetType ret_dims rettype
+        local (second (const env')) $ defuncLet rest_dims pats body $ RetType ret_dims rettype
       closure <- defuncFun dims ps body (RetType ret_dims rettype) mempty
       pure
         ( pat_dims ++ rest_dims',
@@ -833,7 +837,7 @@ instAnySizes :: (MonadFreshNames m) => [Pat ParamType] -> m [Pat ParamType]
 instAnySizes = traverse $ traverse $ bitraverse onDim pure
   where
     onDim d
-      | d == anySize = do
+      | Just _ <- isAnySize d = do
           v <- newVName "size"
           pure $ sizeFromName (qualName v) mempty
     onDim d = pure d
@@ -874,15 +878,15 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           (params, body, ret) <- etaExpand (RetType [] $ toRes Nonunique t) e
           defuncFun [] params body ret mempty
       | otherwise -> do
-          fname <- newVName $ "dyn_" <> baseString (qualLeaf qn)
-          let (pats, e0, sv') = liftDynFun (prettyString qn) sv num_args
+          fname <- newVName $ "dyn_" <> baseName (qualLeaf qn)
+          let (pats, e0, sv') = liftDynFun (nameFromText (prettyText qn)) sv num_args
               (argtypes', rettype') = dynamicFunType sv' argtypes
               dims' = mempty
 
           -- Ensure that no parameter sizes are AnySize.  The internaliser
           -- expects this.  This is easy, because they are all
           -- first-order.
-          globals <- asks fst
+          globals <- asks $ M.keysSet . fst
           let bound_sizes = S.fromList dims' <> globals
           pats' <- instAnySizes pats
           let dims'' = dims' ++ unboundSizes bound_sizes pats'
@@ -902,30 +906,30 @@ defuncApplyFunction e _ = defuncExp e
 -- Embed some information about the original function
 -- into the name of the lifted function, to make the
 -- result slightly more human-readable.
-liftedName :: Int -> Exp -> String
+liftedName :: Int -> Exp -> Name
 liftedName i (Var f _ _) =
-  "defunc_" ++ show i ++ "_" ++ baseString (qualLeaf f)
+  "defunc_" <> nameFromString (show i) <> "_" <> baseName (qualLeaf f)
 liftedName i (AppExp (Apply f _ _) _) =
   liftedName (i + 1) f
 liftedName _ _ = "defunc"
 
 defuncApplyArg ::
-  (String, SrcLoc) ->
+  (Name, SrcLoc) ->
   (Exp, StaticVal) ->
   (((Maybe VName, AutoMap), Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
 defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, _), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
-  let env' = alwaysMatchPatSV pat arg_sv
+  let env' = alwaysMatchPatSV closure_env pat arg_sv
       dims = mempty
   (lam_e', sv) <-
-    localNewEnv (env' <> closure_env) $
+    localNewEnv env' $
       defuncExp lam_e
 
   let closure_pat = buildEnvPat dims closure_env
       pat' = updatePat pat arg_sv
 
-  globals <- asks fst
+  globals <- asks $ M.keysSet . fst
 
   -- Lift lambda to top-level function definition.  We put in
   -- a lot of effort to try to infer the uniqueness attributes
@@ -950,7 +954,7 @@ defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) (((a
   let bound_sizes = S.fromList (dims <> more_dims) <> globals
   params' <- instAnySizes params
 
-  fname <- newNameFromString fname_s
+  fname <- newVName fname_s
   liftValDec
     fname
     lifted_rettype
@@ -1037,7 +1041,7 @@ fullyApplied _ _ = True
 -- dimensions, a list of parameters, a function body, and the
 -- appropriate static value for applying the function at the given
 -- depth of partial application.
-liftDynFun :: String -> StaticVal -> Int -> ([Pat ParamType], Exp, StaticVal)
+liftDynFun :: Name -> StaticVal -> Int -> ([Pat ParamType], Exp, StaticVal)
 liftDynFun _ (DynamicFun (e, sv) _) 0 = ([], e, sv)
 liftDynFun s (DynamicFun clsr@(_, LambdaSV pat _ _ _) sv) d
   | d > 0 =
@@ -1045,7 +1049,7 @@ liftDynFun s (DynamicFun clsr@(_, LambdaSV pat _ _ _) sv) d
        in (pat : pats, e', DynamicFun clsr sv')
 liftDynFun s sv d =
   error $
-    s
+    nameToString s
       ++ " Tried to lift a StaticVal "
       ++ take 100 (show sv)
       ++ ", but expected a dynamic function.\n"
@@ -1053,17 +1057,17 @@ liftDynFun s sv d =
 
 -- | Converts a pattern to an environment that binds the individual names of the
 -- pattern to their corresponding types wrapped in a 'Dynamic' static value.
-envFromPat :: Pat ParamType -> Env
-envFromPat pat = case pat of
-  TuplePat ps _ -> foldMap envFromPat ps
-  RecordPat fs _ -> foldMap (envFromPat . snd) fs
-  PatParens p _ -> envFromPat p
-  PatAttr _ p _ -> envFromPat p
-  Id vn (Info t) _ -> M.singleton vn $ Binding Nothing $ Dynamic t
-  Wildcard _ _ -> mempty
-  PatAscription p _ _ -> envFromPat p
-  PatLit {} -> mempty
-  PatConstr _ _ ps _ -> foldMap envFromPat ps
+envFromPat :: Env -> Pat ParamType -> Env
+envFromPat env pat = case pat of
+  TuplePat ps _ -> foldl' envFromPat env ps
+  RecordPat fs _ -> foldl' envFromPat env $ map snd fs
+  PatParens p _ -> envFromPat env p
+  PatAttr _ p _ -> envFromPat env p
+  Id vn (Info t) _ -> M.insert vn (Binding Nothing $ Dynamic t) env
+  Wildcard _ _ -> env
+  PatAscription p _ _ -> envFromPat env p
+  PatLit {} -> env
+  PatConstr _ _ ps _ -> foldl' envFromPat env ps
 
 -- | Given a closure environment, construct a record pattern that
 -- binds the closed over variables.  Insert wildcard for any patterns
@@ -1122,24 +1126,24 @@ dynamicFunType sv _ = ([], resTypeFromSV sv)
 -- corresponding subcomponents of the static value.  If this function
 -- returns 'Nothing', then it corresponds to an unmatchable case.
 -- These should only occur for 'Match' expressions.
-matchPatSV :: Pat ParamType -> StaticVal -> Maybe Env
-matchPatSV (TuplePat ps _) (RecordSV ls) =
-  mconcat <$> zipWithM (\p (_, sv) -> matchPatSV p sv) ps ls
-matchPatSV (RecordPat ps _) (RecordSV ls)
+matchPatSV :: Env -> Pat ParamType -> StaticVal -> Maybe Env
+matchPatSV env (TuplePat ps _) (RecordSV ls) =
+  foldM (\env' (p, (_, sv)) -> matchPatSV env' p sv) env $ zip ps ls
+matchPatSV env (RecordPat ps _) (RecordSV ls)
   | ps' <- sortOn fst $ map (first unLoc) ps,
     ls' <- sortOn fst ls,
     map fst ps' == map fst ls' =
-      mconcat <$> zipWithM (\(_, p) (_, sv) -> matchPatSV p sv) ps' ls'
-matchPatSV (PatParens pat _) sv = matchPatSV pat sv
-matchPatSV (PatAttr _ pat _) sv = matchPatSV pat sv
-matchPatSV (Id vn (Info t) _) sv =
+      foldM (\env' ((_, p), (_, sv)) -> matchPatSV env' p sv) env $ zip ps' ls'
+matchPatSV env (PatParens pat _) sv = matchPatSV env pat sv
+matchPatSV env (PatAttr _ pat _) sv = matchPatSV env pat sv
+matchPatSV env (Id vn (Info t) _) sv =
   -- When matching a zero-order pattern with a StaticVal, the type of
   -- the pattern wins out.  This is important for propagating sizes
   -- (but probably reveals a flaw in our bookkeeping).
   pure $
     if orderZero t
-      then dim_env <> M.singleton vn (Binding Nothing $ Dynamic t)
-      else dim_env <> M.singleton vn (Binding Nothing sv)
+      then dim_env <> M.insert vn (Binding Nothing $ Dynamic t) env
+      else dim_env <> M.insert vn (Binding Nothing sv) env
   where
     -- Extract all sizes that are potentially bound here. This is
     -- different from all free variables (see #2040).
@@ -1147,35 +1151,35 @@ matchPatSV (Id vn (Info t) _) sv =
     onDim (Var v _ _) = M.singleton (qualLeaf v) i64
     onDim _ = mempty
     i64 = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
-matchPatSV (Wildcard _ _) _ = pure mempty
-matchPatSV (PatAscription pat _ _) sv = matchPatSV pat sv
-matchPatSV PatLit {} _ = pure mempty
-matchPatSV (PatConstr c1 _ ps _) (SumSV c2 ls fs)
+matchPatSV env (Wildcard _ _) _ = Just env
+matchPatSV env (PatAscription pat _ _) sv = matchPatSV env pat sv
+matchPatSV env PatLit {} _ = Just env
+matchPatSV env (PatConstr c1 _ ps _) (SumSV c2 ls fs)
   | c1 == c2 =
-      mconcat <$> zipWithM matchPatSV ps ls
+      foldM (\env' (p, l) -> matchPatSV env' p l) env $ zip ps ls
   | Just _ <- lookup c1 fs =
       Nothing
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
-matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
+matchPatSV env (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
   | Just ts <- M.lookup c1 fs =
       -- A higher-order pattern can only match an appropriate SumSV.
       if all orderZero ts
-        then mconcat <$> zipWithM matchPatSV ps (map svFromType ts)
+        then foldM (\env' (p, sv) -> matchPatSV env' p sv) env $ zip ps $ map svFromType ts
         else Nothing
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
-matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
-matchPatSV pat (HoleSV t _) = matchPatSV pat $ svFromType $ toParam Observe t
-matchPatSV pat sv =
+matchPatSV env pat (Dynamic t) = matchPatSV env pat $ svFromType t
+matchPatSV env pat (HoleSV t _) = matchPatSV env pat $ svFromType $ toParam Observe t
+matchPatSV _ pat sv =
   error $
     "Tried to match pattern\n"
       ++ prettyString pat
       ++ "\n with static value\n"
       ++ show sv
 
-alwaysMatchPatSV :: Pat ParamType -> StaticVal -> Env
-alwaysMatchPatSV pat sv = fromMaybe bad $ matchPatSV pat sv
+alwaysMatchPatSV :: Env -> Pat ParamType -> StaticVal -> Env
+alwaysMatchPatSV env pat sv = fromMaybe bad $ matchPatSV env pat sv
   where
     bad = error $ unlines [prettyString pat, "cannot match StaticVal", show sv]
 
@@ -1263,7 +1267,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
         ++ "but the defunctionaliser expects a monomorphic input program."
   (tparams', params', body', sv, sv_t) <-
     defuncLet (map typeParamName tparams) params body $ RetType ret_dims rettype
-  globals <- asks fst
+  globals <- asks $ M.keysSet . fst
   let bound_sizes = S.fromList (foldMap patNames params') <> S.fromList tparams' <> globals
   params'' <- instAnySizes params'
   let rettype' = combineTypeShapes rettype sv_t
@@ -1294,8 +1298,7 @@ defuncVals [] = pure ()
 defuncVals (valbind : ds) = do
   (valbind', env) <- defuncValBind valbind
   addValBind valbind'
-  let globals = valBindBound valbind'
-  localEnv env $ areGlobal globals $ defuncVals ds
+  local (bimap (env <>) (env <>)) $ defuncVals ds
 
 {-# NOINLINE transformProg #-}
 

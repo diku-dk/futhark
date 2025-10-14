@@ -218,6 +218,14 @@ instance IsString StructType where
   fromString =
     fromStringParse (second (const NoUniqueness) <$> pType pSize) "StructType"
 
+instance IsString ParamType where
+  fromString =
+    fromStringParse (resToParam <$> pType pSize) "ParamType"
+
+instance IsString ResType where
+  fromString =
+    fromStringParse (pType pSize) "ResType"
+
 instance IsString StructRetType where
   fromString =
     fromStringParse (second (pure NoUniqueness) <$> pRetType pSize) "StructRetType"
@@ -226,4 +234,7 @@ instance IsString ResRetType where
   fromString = fromStringParse (pRetType pSize) "ResRetType"
 
 instance IsString UncheckedExp where
-  fromString = either (error . T.unpack . syntaxErrorMsg) id . parseExp "string literal" . T.pack
+  fromString =
+    either (error . T.unpack . syntaxErrorMsg) id
+      . parseExp "string literal"
+      . T.pack

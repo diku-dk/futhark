@@ -45,20 +45,20 @@ compileSegMap pat lvl space kbody = do
           dIndexSpace (zip is dims') global_tid
 
           sWhen (isActive $ unSegSpace space) $
-            compileStms mempty (kernelBodyStms kbody) $
+            compileStms mempty (bodyStms kbody) $
               zipWithM_ (compileThreadResult space) (patElems pat) $
-                kernelBodyResult kbody
+                bodyResult kbody
     SegBlock {} -> do
-      pc <- precomputeConstants tblock_size' $ kernelBodyStms kbody
+      pc <- precomputeConstants tblock_size' $ bodyStms kbody
       virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ sExt32 $ product dims'
       sKernelBlock "segmap_intrablock" (segFlat space) attrs $ do
         precomputedConstants pc $
           virtualiseBlocks (segVirt lvl) virt_num_tblocks $ \tblock_id -> do
             dIndexSpace (zip is dims') $ sExt64 tblock_id
 
-            compileStms mempty (kernelBodyStms kbody) $
+            compileStms mempty (bodyStms kbody) $
               zipWithM_ (compileBlockResult space) (patElems pat) $
-                kernelBodyResult kbody
+                bodyResult kbody
     SegThreadInBlock {} ->
       error "compileSegMap: SegThreadInBlock"
   emit $ Imp.DebugPrint "" Nothing

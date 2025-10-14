@@ -39,7 +39,7 @@ flattenArray :: Int -> TV Int64 -> VName -> ImpM rep r op VName
 flattenArray k flat arr = do
   ArrayEntry arr_loc pt <- lookupArray arr
   let flat_shape = Shape $ Var (tvVar flat) : drop k (memLocShape arr_loc)
-  sArray (baseString arr ++ "_flat") pt flat_shape (memLocName arr_loc) $
+  sArray (baseName arr <> "_flat") pt flat_shape (memLocName arr_loc) $
     fromMaybe (error "flattenArray") $
       LMAD.reshape (memLocLMAD arr_loc) (map pe64 $ shapeDims flat_shape)
 
@@ -52,7 +52,7 @@ sliceArray start size arr = do
           (map Imp.pe64 (arrayDims arr_t))
           [DimSlice start (tvExp size) 1]
   sArray
-    (baseString arr ++ "_chunk")
+    (baseName arr <> "_chunk")
     (elemType arr_t)
     (arrayShape arr_t `setOuterDim` Var (tvVar size))
     mem
@@ -361,9 +361,9 @@ compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   compileFlatId space
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $
+    compileStms mempty (bodyStms body) $
       zipWithM_ (compileThreadResult space) (patElems pat) $
-        kernelBodyResult body
+        bodyResult body
   sOp $ Imp.ErrorSync Imp.FenceLocal
 compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans))) = do
   compileFlatId space
@@ -372,8 +372,8 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans))) = do
       dims' = map pe64 dims
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $
-      forM_ (zip (patNames pat) $ kernelBodyResult body) $ \(dest, res) ->
+    compileStms mempty (bodyStms body) $
+      forM_ (zip (patNames pat) $ bodyResult body) $ \(dest, res) ->
         copyDWIMFix
           dest
           (map Imp.le64 ltids)
@@ -421,9 +421,9 @@ compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
 
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $ do
+    compileStms mempty (bodyStms body) $ do
       let (red_res, map_res) =
-            splitAt (segBinOpResults ops) $ kernelBodyResult body
+            splitAt (segBinOpResults ops) $ bodyResult body
       forM_ (zip tmp_arrs red_res) $ \(dest, res) ->
         copyDWIMFix dest (map Imp.le64 ltids) (kernelResultSubExp res) []
       zipWithM_ (compileThreadResult space) map_pes map_res
@@ -551,8 +551,8 @@ compileBlockOp pat (Inner (SegOp (SegHist lvl space _ kbody ops))) = do
   sOp $ Imp.Barrier Imp.FenceLocal
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms kbody) $ do
-      let (red_res, map_res) = splitAt num_red_res $ kernelBodyResult kbody
+    compileStms mempty (bodyStms kbody) $ do
+      let (red_res, map_res) = splitAt num_red_res $ bodyResult kbody
           (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
       zipWithM_ (compileThreadResult space) map_pes map_res
 
@@ -601,7 +601,7 @@ arrayInSharedMemory Constant {} = pure False
 
 -- | Create a kernel with GPU operations at the block level.
 sKernelBlock ::
-  String ->
+  Name ->
   VName ->
   KernelAttrs ->
   InKernelGen () ->
@@ -698,8 +698,6 @@ compileBlockResult space pe (Returns _ _ what) = do
     -- block.  TODO: also do this if the array is in global memory
     -- (but this is a bit more tricky, synchronisation-wise).
       copyDWIMFix (patElemName pe) gids what []
-compileBlockResult _ _ WriteReturns {} =
-  compilerLimitationS "compileBlockResult: WriteReturns not handled yet."
 
 -- | The sizes of nested iteration spaces in the kernel.
 type SegOpSizes = S.Set [SubExp]

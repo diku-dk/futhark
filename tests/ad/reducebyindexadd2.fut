@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 --  entry: main
 --  input {
 --    [4i64,5i64,2i64,4i64,5i64,2i64,0i64,0i64,4i64,5i64,1i64,4i64,1i64,3i64,3i64,1i64,8i64,-1i64]
@@ -18,9 +19,9 @@
 --    [0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32]
 --    [0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32,0f32]
 --    [4f32,14f32,13f32,13f32,29f32,30f32,9f32,0f32] }
-def f [n][m] (is: [n]i64) (dst: [m]f32,vs: [n]f32,c: [m]f32) =
+def f [n] [m] (is: [n]i64) (dst: [m]f32, vs: [n]f32, c: [m]f32) =
   let tmp = reduce_by_index (copy dst) (+) 0 is vs
   in map2 (*) tmp c
 
-def main [n][m] (is: [n]i64) (dst: [m]f32) (vs: [n]f32) (c: [m]f32) =
-  vjp (f is) (dst,vs,c) (replicate m 1)
+def main [n] [m] (is: [n]i64) (dst: [m]f32) (vs: [n]f32) (c: [m]f32) =
+  vjp (f is) (dst, vs, c) (replicate m 1)

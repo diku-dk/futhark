@@ -113,7 +113,7 @@ instance (Substitutable rep) => Substitute (Stm rep) where
       (substituteNames substs annot)
       (substituteNames substs e)
 
-instance (Substitutable rep) => Substitute (Body rep) where
+instance (Substitutable rep, Substitute res) => Substitute (GBody rep res) where
   substituteNames substs (Body dec stms res) =
     Body
       (substituteNames substs dec)

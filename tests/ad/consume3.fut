@@ -1,7 +1,10 @@
+-- ==
+-- tags { autodiff }
+
 def test [n] (xs: [n]f64) =
   let xs' = copy xs
   let xs'' = copy xs
-  in xs' with [1] =  xs''[1]
+  in xs' with [1] = xs''[1]
 
 -- ==
 -- entry: prim

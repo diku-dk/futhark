@@ -40,6 +40,7 @@ module Futhark.AD.Rev.Monad
     tabNest,
     oneExp,
     zeroExp,
+    zeroArray,
     unitAdjOfType,
     addLambda,
     --
@@ -126,6 +127,9 @@ instance Substitute Adj where
   substituteNames m (AdjVal (Var v)) = AdjVal $ Var $ substituteNames m v
   substituteNames _ adj = adj
 
+-- | Create an array of the given shape and element type consisting of zeroes.
+-- The shape may be empty, meaning this function can (despite its name) also
+-- create non-arrays.
 zeroArray :: (MonadBuilder m) => Shape -> Type -> m VName
 zeroArray shape t
   | shapeRank shape == 0 =
@@ -241,7 +245,7 @@ insAdj :: VName -> VName -> ADM ()
 insAdj v = setAdj v . AdjVal . Var
 
 adjVName :: VName -> ADM VName
-adjVName v = newVName (baseString v <> "_adj")
+adjVName v = newVName (baseName v <> "_adj")
 
 -- | Create copies of all arrays consumed in the given statement, and
 -- return statements which include copies of the consumed arrays.
@@ -256,13 +260,16 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
             case v_t of
               Array {} -> do
                 v' <-
-                  letExp (baseString v <> "_ad_copy") . BasicOp $
+                  letExp (baseName v <> "_ad_copy") . BasicOp $
                     Replicate mempty (Var v)
                 addSubstitution v' v
                 pure [(v, v')]
               _ -> pure mempty
-       in M.fromList . mconcat
-            <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
+
+          consumed =
+            namesToList . consumedInStms $
+              fst (Alias.analyseStms mempty (oneStm stm))
+       in M.fromList . mconcat <$> mapM onConsumed consumed
 
 copyConsumedArrsInBody :: [VName] -> Body SOACS -> ADM Substitutions
 copyConsumedArrsInBody dontCopy b =
@@ -275,7 +282,7 @@ copyConsumedArrsInBody dontCopy b =
         Array {} ->
           M.singleton v
             <$> letExp
-              (baseString v <> "_ad_copy")
+              (baseName v <> "_ad_copy")
               (BasicOp $ Replicate mempty (Var v))
         _ -> pure mempty
 
@@ -324,7 +331,7 @@ tabNest = tabNest' []
           Iota w (intConst Int64 0) (intConst Int64 1) Int64
       iparam <- newParam "i" $ Prim int64
       params <- forM vs $ \v ->
-        newParam (baseString v <> "_p") . rowType =<< lookupType v
+        newParam (baseName v <> "_p") . rowType =<< lookupType v
       ((ret, res), stms) <- collectStms . localScope (scopeOfLParams (iparam : params)) $ do
         res <- tabNest' (paramName iparam : is) (n - 1) (map paramName params) f
         ret <- mapM lookupType res
@@ -374,6 +381,8 @@ lookupAdj v = do
       v_t <- lookupType v
       case v_t of
         Acc _ shape [Prim t] _ -> pure $ AdjZero shape t
+        Acc _ shape [t] _ -> pure $ AdjZero (shape <> arrayShape t) (elemType t)
+        Acc {} -> error $ "lookupAdj: Non-singleton accumulator adjoint: " <> prettyString v_t
         _ -> pure $ AdjZero (arrayShape v_t) (elemType v_t)
     Just v_adj -> pure v_adj
 
@@ -413,11 +422,11 @@ updateAdjIndex v (check, i) se = do
           _ -> do
             let stms s = do
                   v_adj_i <-
-                    letExp (baseString v_adj <> "_i") . BasicOp $
+                    letExp (baseName v_adj <> "_i") . BasicOp $
                       Index v_adj $
                         fullSlice v_adj_t [DimFix i]
                   se_update <- letSubExp "updated_adj_i" =<< addExp se_v v_adj_i
-                  letExp (baseString v_adj) . BasicOp $
+                  letExp (baseName v_adj) . BasicOp $
                     Update s v_adj (fullSlice v_adj_t [DimFix i]) se_update
             case check of
               CheckBounds _ -> stms Safe
@@ -442,7 +451,7 @@ updateAdjWithSafety v d safety = do
                 UpdateAcc safety v_adj' (map Var is) [Var d']
           insAdj v v_adj'
         _ -> do
-          v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
+          v_adj' <- letExp (baseName v <> "_adj") =<< addExp v_adj d
           insAdj v v_adj'
 
 updateAdjSliceWithSafety :: Slice SubExp -> VName -> VName -> Safety -> ADM ()
@@ -465,14 +474,14 @@ updateAdjSliceWithSafety slice v d safety = do
             traverse (toSubExp "index") $
               fixSlice (fmap pe64 slice) $
                 map le64 is
-          letTupExp (baseString v_adj') . BasicOp $
+          letTupExp (baseName v_adj') . BasicOp $
             UpdateAcc safety v_adj' slice' [Var d']
       pure v_adj'
     _ -> do
       v_adjslice <-
         if primType t
           then pure v_adj
-          else letExp (baseString v ++ "_slice") $ BasicOp $ Index v_adj slice
+          else letExp (baseName v <> "_slice") $ BasicOp $ Index v_adj slice
       letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
   insAdj v v_adj'
 

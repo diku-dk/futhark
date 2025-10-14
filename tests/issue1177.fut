@@ -4,5 +4,6 @@
 -- statements.
 
 def main n =
-  loop acc = [([1], 1)] for i < n do
-    replicate i (replicate (n-i) 1, i)
+  loop acc = [([1], 1)]
+  for i < n do
+    replicate i (replicate (n - i) 1, i)

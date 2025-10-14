@@ -5,4 +5,4 @@
 def map_length [n] (f: i32 -> i32) (xs: [n]i32) : ([n]i32, i64) =
   (map f xs, n)
 
-def main (xs: []i32) = map_length (\(x:i32) -> x+1) xs
+def main (xs: []i32) = map_length (\(x: i32) -> x + 1) xs

@@ -49,7 +49,7 @@ class (Eq v) => IsName v where
 instance IsName VName where
   prettyName
     | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
-        \(VName vn i) -> pretty vn <> "_" <> pretty (show i)
+        \(VName vn i) -> pretty vn <> "_" <> pretty i
     | otherwise = pretty . baseName
   toName = baseName
 
@@ -271,7 +271,7 @@ prettyAppExp p (LetPat sizes pat e body _) =
       ArrayLit {} -> False
       Lambda {} -> True
       _ -> hasArrayLit e
-prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
+prettyAppExp _ (LetFun (fname, _) (tparams, params, retdecl, rettype, e) body _) =
   "let"
     <+> hsep (prettyName fname : map pretty tparams ++ map pretty params)
     <> retdecl'

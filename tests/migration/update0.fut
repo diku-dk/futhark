@@ -11,4 +11,4 @@
 def main (A: *[9]f32) : *[9]f32 =
   let x = A[4]
   let x' = x / 7
-   in A with [4] = x'
+  in A with [4] = x'

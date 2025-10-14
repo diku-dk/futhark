@@ -269,11 +269,15 @@ removePatAliases = runIdentity . rephrasePat (pure . snd)
 -- | Augment a body decoration with aliasing information provided by
 -- the statements and result of that body.
 mkAliasedBody ::
-  (ASTRep rep, AliasedOp (OpC rep), ASTConstraints (OpC rep (Aliases rep))) =>
+  ( ASTRep rep,
+    AliasedOp (OpC rep),
+    ASTConstraints (OpC rep (Aliases rep)),
+    IsResult res
+  ) =>
   BodyDec rep ->
   Stms (Aliases rep) ->
-  Result ->
-  Body (Aliases rep)
+  [res] ->
+  GBody (Aliases rep) res
 mkAliasedBody dec stms res =
   Body (mkBodyAliasing stms res, dec) stms res
 
@@ -301,9 +305,9 @@ mkAliasedPat (Pat pes) e =
 -- in scope outside of it.  Note that this does *not* include aliases
 -- of results that are not bound in the statements!
 mkBodyAliasing ::
-  (Aliased rep) =>
+  (Aliased rep, IsResult res) =>
   Stms rep ->
-  Result ->
+  [res] ->
   BodyAliasing
 mkBodyAliasing stms res =
   -- We need to remove the names that are bound in stms from the alias
@@ -318,14 +322,14 @@ mkBodyAliasing stms res =
 -- | The aliases of the result and everything consumed in the given
 -- statements.
 mkStmsAliases ::
-  (Aliased rep) =>
+  (Aliased rep, IsResult res) =>
   Stms rep ->
-  Result ->
+  [res] ->
   ([Names], Names)
 mkStmsAliases stms res = delve mempty $ stmsToList stms
   where
     delve (aliasmap, consumed) [] =
-      ( map (aliasClosure aliasmap . subExpAliases . resSubExp) res,
+      ( map (aliasClosure aliasmap . resAliases) res,
         consumed
       )
     delve (aliasmap, consumed) (stm : stms') =
@@ -344,7 +348,7 @@ type AliasesAndConsumed =
 
 -- | The variables consumed in these statements.
 consumedInStms :: (Aliased rep) => Stms rep -> Names
-consumedInStms = snd . flip mkStmsAliases []
+consumedInStms = snd . flip mkStmsAliases ([] :: [()])
 
 -- | A helper function for computing the aliases of a sequence of
 -- statements.  You'd use this while recursing down the statements

@@ -3,6 +3,6 @@
 -- ==
 -- error: ascription
 
-def main (x: i32, y: i32) : (bool, bool) =
+def main (x: i32, y: i32) : i32 =
   let (((a): i32), b: i32): (bool, bool) = (x, y)
   in (a, b)

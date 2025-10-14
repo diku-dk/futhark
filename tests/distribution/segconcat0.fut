@@ -5,6 +5,6 @@
 --           [4,5,6,6,5,4]] }
 -- structure gpu { Kernel 0 }
 
-def main [n][m] (xss: [][n]i32) (yss: [][m]i32) =
-  let k = n + m in
-  map (\(xs, ys) -> concat xs ys :> [k]i32) (zip xss yss)
+def main [n] [m] (xss: [][n]i32) (yss: [][m]i32) =
+  let k = n + m
+  in map (\(xs, ys) -> concat xs ys :> [k]i32) (zip xss yss)

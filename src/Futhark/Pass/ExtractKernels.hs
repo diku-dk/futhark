@@ -302,14 +302,14 @@ sequentialisedUnbalancedStm _ =
   pure Nothing
 
 cmpSizeLe ::
-  String ->
+  Name ->
   SizeClass ->
   [SubExp] ->
   DistribM ((SubExp, Name), Stms GPU)
 cmpSizeLe desc size_class to_what = do
   x <- gets stateThresholdCounter
   modify $ \s -> s {stateThresholdCounter = x + 1}
-  let size_key = nameFromString $ desc ++ "_" ++ show x
+  let size_key = desc <> "_" <> nameFromString (show x)
   runBuilder $ do
     to_what' <-
       letSubExp "comparatee"
@@ -329,7 +329,7 @@ kernelAlternatives pat default_body [] = runBuilder_ $ do
     certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
 kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   alts_pat <- fmap Pat . forM (patElems pat) $ \pe -> do
-    name <- newVName $ baseString $ patElemName pe
+    name <- newName $ patElemName pe
     pure pe {patElemName = name}
 
   alt_stms <- kernelAlternatives alts_pat default_body alts
@@ -481,79 +481,6 @@ transformStm path (Let pat _ (Op (Stream w arrs nes fold_fun))) = do
   types <- asksScope scopeForSOACs
   transformStms path . stmsToList . snd
     =<< runBuilderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
---
--- When we are scattering into a multidimensional array, we want to
--- fully parallelise, such that we do not have threads writing
--- potentially large rows. We do this by fissioning the scatter into a
--- map part and a scatter part, where the former is flattened as
--- usual, and the latter has a thread per primitive element to be
--- written.
---
--- TODO: this could be slightly smarter. If we are dealing with a
--- horizontally fused Scatter that targets both single- and
--- multi-dimensional arrays, we could handle the former in the map
--- stage. This would save us from having to store all the intermediate
--- results to memory. Troels suspects such cases are very rare, but
--- they may appear some day.
-transformStm path (Let pat aux (Op (Scatter w arrs as lam)))
-  | not $ all primType $ lambdaReturnType lam = do
-      -- Produce map stage.
-      map_pat <- fmap Pat $ forM (lambdaReturnType lam) $ \t ->
-        PatElem <$> newVName "scatter_tmp" <*> pure (t `arrayOfRow` w)
-      map_stms <- onMap path $ MapLoop map_pat aux w lam arrs
-
-      -- Now do the scatters.
-      runBuilder_ $ do
-        addStms map_stms
-        zipWithM_ doScatter (patElems pat) $ groupScatterResults as $ patNames map_pat
-  where
-    -- Generate code for a scatter where each thread writes only a scalar.
-    doScatter res_pe (scatter_space, arr, is_vs) = do
-      kernel_i <- newVName "write_i"
-      arr_t <- lookupType arr
-      val_t <- stripArray (shapeRank scatter_space) <$> lookupType arr
-      val_is <- replicateM (arrayRank val_t) (newVName "val_i")
-      (kret, kstms) <- collectStms $ do
-        is_vs' <- forM is_vs $ \(is, v) -> do
-          v' <- letSubExp (baseString v <> "_elem") $ BasicOp $ Index v $ Slice $ map (DimFix . Var) $ kernel_i : val_is
-          is' <- forM is $ \i' ->
-            letSubExp (baseString i' <> "_i") $ BasicOp $ Index i' $ Slice [DimFix $ Var kernel_i]
-          pure (Slice $ map DimFix $ is' <> map Var val_is, v')
-        pure $ WriteReturns mempty arr is_vs'
-      (kernel, stms) <-
-        mapKernel
-          segThreadCapped
-          ((kernel_i, w) : zip val_is (arrayDims val_t))
-          mempty
-          [arr_t]
-          (KernelBody () kstms [kret])
-      addStms stms
-      letBind (Pat [res_pe]) $ Op $ SegOp kernel
---
-transformStm _ (Let pat aux (Op (Scatter w ivs as lam))) = runBuilder_ $ do
-  let lam' = soacsLambdaToGPU lam
-  write_i <- newVName "write_i"
-  let krets = do
-        (_a_w, a, is_vs) <- groupScatterResults as $ bodyResult $ lambdaBody lam'
-        let res_cs =
-              foldMap (foldMap resCerts . fst) is_vs
-                <> foldMap (resCerts . snd) is_vs
-            is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-        pure $ WriteReturns res_cs a is_vs'
-      body = KernelBody () (bodyStms $ lambdaBody lam') krets
-      inputs = do
-        (p, p_a) <- zip (lambdaParams lam') ivs
-        pure $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
-  (kernel, stms) <-
-    mapKernel
-      segThreadCapped
-      [(write_i, w)]
-      inputs
-      (patTypes pat)
-      body
-  certifying (stmAuxCerts aux) $ do
-    addStms stms
-    letBind pat $ Op $ SegOp kernel
 transformStm _ (Let orig_pat aux (Op (Hist w imgs ops bucket_fun))) = do
   let bfun' = soacsLambdaToGPU bucket_fun
 
@@ -569,7 +496,7 @@ transformStm _ stm =
   runBuilder_ $ FOT.transformStmRecursively stm
 
 sufficientParallelism ::
-  String ->
+  Name ->
   [SubExp] ->
   KernelPath ->
   Maybe Int64 ->
@@ -591,8 +518,6 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
       | Op (Screma w _ form) <- stmExp stm,
         Just lam' <- isMapSOAC form =
           mapLike w lam'
-      | Op (Scatter w _ _ lam') <- stmExp stm =
-          mapLike w lam'
       | Loop _ _ body <- stmExp stm =
           bodyInterest body * 10
       | Match _ cases defbody _ <- stmExp stm =
@@ -603,6 +528,8 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
       | Op (Screma w _ (ScremaForm lam' _ _)) <- stmExp stm =
           zeroIfTooSmall w + bodyInterest (lambdaBody lam')
       | Op (Stream _ _ _ lam') <- stmExp stm =
+          bodyInterest $ lambdaBody lam'
+      | WithAcc _ lam' <- stmExp stm =
           bodyInterest $ lambdaBody lam'
       | otherwise =
           0
@@ -634,8 +561,6 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
           if sequential_inner
             then 0
             else bodyInterest (depth + 1) (lambdaBody lam')
-      | Op Scatter {} <- stmExp stm =
-          0 -- Basically a map.
       | Loop _ ForLoop {} body <- stmExp stm =
           bodyInterest (depth + 1) body * 10
       | WithAcc _ withacc_lam <- stmExp stm =
