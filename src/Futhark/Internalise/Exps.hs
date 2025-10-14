@@ -2146,7 +2146,7 @@ partitionWithSOACS k lam arrs = do
 
 sizeExpForError :: E.Size -> InternaliseM [ErrorMsgPart SubExp]
 sizeExpForError e
-  | e == anySize = pure ["[]"]
+  | Just _ <- isAnySize e = pure ["[]"]
   | otherwise = do
       e' <- internaliseExp1 "size" e
       pure ["[", ErrorVal int64 e', "]"]

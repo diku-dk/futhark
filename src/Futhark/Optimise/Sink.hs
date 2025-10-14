@@ -118,7 +118,7 @@ optimiseLoop onOp vtable sinking (merge, form, body0) =
     scope = case form of
       WhileLoop {} -> scopeOfFParams params
       ForLoop i it _ -> M.insert i (IndexName it) $ scopeOfFParams params
-    vtable' = ST.fromScope scope <> vtable
+    vtable' = ST.insertScope scope vtable
 
 optimiseStms ::
   (Constraints rep) =>
@@ -189,7 +189,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
                 let (body', sunk) =
                       optimiseBody
                         onOp
-                        (ST.fromScope scope <> vtable)
+                        (ST.insertScope scope vtable)
                         sinking
                         body
                 modify (<> sunk)
@@ -241,7 +241,7 @@ optimiseSegOp onOp vtable sinking op =
             pure body'
         }
       where
-        op_vtable = ST.fromScope scope <> vtable
+        op_vtable = ST.insertScope scope vtable
 
 type SinkRep rep = Aliases rep
 
@@ -259,14 +259,14 @@ sink onOp =
       . Alias.aliasAnalysis
   where
     onFun _ fd = do
-      let vtable = ST.insertFParams (funDefParams fd) mempty
+      let vtable = ST.insertFParams (funDefParams fd) ST.empty
           (body, _) = optimiseBody onOp vtable mempty $ funDefBody fd
       pure fd {funDefBody = body}
 
     onConsts consts =
       pure $
         fst $
-          optimiseStms onOp mempty mempty consts $
+          optimiseStms onOp ST.empty mempty consts $
             namesFromList $
               M.keys $
                 scopeOf consts

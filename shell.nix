@@ -8,22 +8,20 @@ in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
   buildInputs =
-    with pkgs;
+    (import ./nix/pkgs-style.nix {pkgs=pkgs; haskell=haskell; python=python;}) ++
+    (with pkgs;
     [
       cabal-install
       cacert
       curl
       file
       git
-      parallel
       haskell.ghc
-      ormolu
       haskell.weeder
       haskell.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
       xdot
-      hlint
       pkg-config
       zlib
       zlib.out
@@ -49,6 +47,6 @@ pkgs.stdenv.mkDerivation {
         ocl-icd
         oclgrind
         rocmPackages.clr
-      ]
+      ])
   ;
 }
