@@ -18,7 +18,7 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Properties.Flatten (flatten2d, from1Dto2D)
+import Futhark.Analysis.Properties.Flatten (from1Dto2D)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus ()
 import Futhark.Analysis.Properties.Monad

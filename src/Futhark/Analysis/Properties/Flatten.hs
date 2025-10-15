@@ -1,4 +1,4 @@
-module Futhark.Analysis.Properties.Flatten (flatten2d, lookupII, from1Dto2D) where
+module Futhark.Analysis.Properties.Flatten (lookupII, from1Dto2D) where
 
 import Data.Map qualified as M
 import Data.Set qualified as S
@@ -19,10 +19,6 @@ from1Dto2D (Forall i (Iota n)) (Forall j (Iota m)) e_idx
        in [(i, idx), (j, e_idx .-. idx .*. m)]
   | otherwise = error "Not implemented yet."
 from1Dto2D _ _ _ = undefined
-
-flatten2d :: VName -> SoP Symbol -> SoP Symbol -> IndexFnM (VName, Iterator)
-flatten2d k m n =
-  undefined
 
 lookupII :: Domain -> IndexFn -> IndexFnM (VName, IndexFn)
 lookupII dom def = do
