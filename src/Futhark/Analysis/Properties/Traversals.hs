@@ -85,13 +85,14 @@ instance ASTMappable Symbol Symbol where
   astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> astMap m x <*> astMap m y
   astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> astMap m x <*> astMap m y
   astMap m (Pow i x) = mapOnSymbol m . Pow i =<< astMap m x
+  astMap m (Ix x y z) = mapOnSymbol m =<< Ix <$> astMap m x <*> astMap m y <*> astMap m z
   astMap m (Prop p) = Prop <$> astMap m p
   astMap m (Assume p) = Assume <$> astMap m p
 
 instance ASTMappable Symbol IndexFn where
   astMap m (IndexFn dom body) = IndexFn <$> astMap m dom <*> astMap m body
 
-instance ASTMappable Symbol t => ASTMappable Symbol [t] where
+instance (ASTMappable Symbol t) => ASTMappable Symbol [t] where
   astMap m = mapM (astMap m)
 
 instance ASTMappable Symbol Iterator where
@@ -179,6 +180,8 @@ instance ASTFoldable Symbol Symbol where
     astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
   astFold m acc e@(Pow _ x) =
     astFold m acc x >>= flip (foldOnSymbol m) e
+  astFold m acc e@(Ix x y z) =
+    astFold m acc x >>= astFoldF m y >>= astFoldF m z >>= flip (foldOnSymbol m) e
   astFold m acc Recurrence = foldOnSymbol m acc Recurrence
   astFold m acc (Var x) = foldOnSymbol m acc (Var x)
   astFold m acc (Hole x) = foldOnSymbol m acc (Hole x)
@@ -189,7 +192,7 @@ instance ASTFoldable Symbol Symbol where
 instance ASTFoldable Symbol IndexFn where
   astFold m acc (IndexFn dom body) = astFold m acc dom >>= astFoldF m body
 
-instance ASTFoldable Symbol t => ASTFoldable Symbol [t] where
+instance (ASTFoldable Symbol t) => ASTFoldable Symbol [t] where
   astFold m = foldM (astFold m)
 
 instance ASTFoldable Symbol Iterator where

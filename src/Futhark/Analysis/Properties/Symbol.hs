@@ -11,7 +11,7 @@ module Futhark.Analysis.Properties.Symbol
 where
 
 import Futhark.Analysis.Properties.Property (Property)
-import Futhark.Analysis.Properties.Util (prettyHole, prettyName)
+import Futhark.Analysis.Properties.Util (blueString, prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, justAffine, justConstant, justSym)
 import Futhark.Util.Pretty (Pretty, apply, parens, pretty, prettyString, softline, (<+>))
 import Language.Futhark (VName)
@@ -36,6 +36,7 @@ data Symbol
   | Symbol :&& Symbol
   | Symbol :|| Symbol
   | Pow Integer (SoP Symbol)
+  | Ix (SoP Symbol) (SoP Symbol) (SoP Symbol)
   | Recurrence
   | -- Properties are used only in index functions for pre-/post-conditions.
     Prop (Property Symbol)
@@ -143,7 +144,8 @@ instance Pretty Symbol where
     x :/= y -> prettyOp "≠" x y
     x :&& y -> autoParens x <+> "^" <+> autoParens y
     x :|| y -> prettyOp "∨" x y
-    Pow i y -> (pretty i) <> "**" <> parens (pretty y)
+    Pow i y -> pretty i <> "**" <> parens (pretty y)
+    Ix x y z -> blueString "Ix" <> apply (map pretty [x, y, z])
     Recurrence -> "↺ "
     Prop p -> pretty p
     Assume p -> "Assume" <+> autoParens p
