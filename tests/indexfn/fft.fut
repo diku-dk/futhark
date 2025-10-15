@@ -24,4 +24,7 @@ def fft2Par (lgn: { i64 | \ x -> x > 0 }) (omega: f32) (x: *[1<<lgn]f32)
                ) (iota r)
         
         let (is1, vs1, is2, vs2) = unzip4 (flatten res_nested) 
-        in  scatter x (is1++is2) (vs1++vs2)
+        let is = is1 ++ is2
+        let vs = vs1 ++ vs2
+        let x' = scatter x is vs
+        in  x'

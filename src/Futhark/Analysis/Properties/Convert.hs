@@ -289,6 +289,12 @@ forward (E.Not e _) = do
   where
     negf f =
       rewrite $ f {body = cmapValues (mapSymSoP (sym2SoP . neg)) (body f)}
+forward (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
+  | "++" <- E.baseString $ E.qualLeaf vn_op = do
+      f_x <- forward e_x
+      f_y <- forward e_y
+      printM 2 $ "f_y " <> prettyStr f_x
+      undefined
 forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op',
