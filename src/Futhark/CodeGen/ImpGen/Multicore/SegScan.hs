@@ -84,9 +84,13 @@ nonsegmentedScan
     aggrArr  <- sAllocArray "scan_aggr"  pt    (Shape [nblocks_se]) DefaultSpace
     prefArr  <- sAllocArray "scan_pref"  pt    (Shape [nblocks_se]) DefaultSpace
 
-    accLili  <- sAllocArray "accLili"  int64    (Shape [intConst Int64 1]) DefaultSpace
-    z <- dPrimV "z" (0 :: Imp.TExp Int64)
-    copyDWIMFix accLili [0] (Var (tvVar z)) []
+    acc_mem <- sAlloc "acc_mem" (Imp.bytes 8) Imp.DefaultSpace
+    emit $ Imp.Write acc_mem
+                    (Imp.elements (0 :: Imp.TExp Int64)) 
+                    (IntType Int64)
+                    Imp.DefaultSpace
+                    Imp.Nonvolatile
+                    (untyped (0 :: Imp.TExp Int64))
 
 
     -- initialise
@@ -95,17 +99,18 @@ nonsegmentedScan
       copyDWIMFix aggrArr  [j] ne []
       copyDWIMFix prefArr  [j] ne []
 
+    num_tasks <- dPrimSV "num_tasks" int64
+    sOp $ Imp.GetNumTasks $ tvVar num_tasks
+    blockSize643 <- dPrim "blockSize64"
+    blockSize643 <-- (pe64 n  `divUp` tvExp num_tasks)
+
 
     -- let's create the seg
     fbody <- collect $ do
       blockID <- dPrim "blockID" :: MulticoreGen (TV Int64)
       sOp $ Imp.GetTaskId (tvVar blockID)
-      num_tasks <- dPrimSV "num_tasks" int64
-      -- sOp $ Imp.GetNumTasks $ tvVar nt
-      blockSize643 <- dPrim "blockSize64"
-      blockSize643 <-- (pe64 n  `divUp` tvExp blockID)
       emit $ Imp.DebugPrint "the number of blocks" (Just $ untyped (tvExp num_tasks))
-      chunk_no <- dPrimV "chunk_no" (tvExp blockID * tvExp num_tasks)
+      chunk_no <- dPrimV "chunk_no" (tvExp blockID * tvExp blockSize643)
       chunk_length <- dPrimV "chunk_length" (min (tvExp blockSize643) (pe64 n - tvExp chunk_no))
 
       sFor "j" (tvExp chunk_length) $ \j -> do
@@ -115,17 +120,16 @@ nonsegmentedScan
         -- acc <-- (0 :: Imp.TExp Int64)
         -- accMem <- sAlloc "acc" (Imp.bytes 8) Imp.DefaultSpace
 
-        memAcc <- memLocName . entryArrayLoc <$> lookupArray accLili
         let idx0 = Imp.elements (0 :: Imp.TExp Int32)
-
-        sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar oldVal) memAcc idx0 (untyped one)
- 
 
         -- sOp $ Imp.Atomic (Imp.AtomicAdd Int64 (tvVar oldVal) accLili (Imp.elements (1 :: Imp.TExp Int32)) (untyped one) )
         -- print the value of accmem
-        emit $ Imp.DebugPrint "the value of accmem" (Just $ untyped (tvExp oldVal))
         -- emit $ Imp.DebugPrint "entering the loop" Nothing
         sWhen (tvExp chunk_no + j .<. pe64 n) $ do
+          sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar oldVal) acc_mem idx0 (untyped one)
+          emit $ Imp.DebugPrint "the value of accmem" (Just $ untyped (tvExp oldVal))
+
+
           i_val <- dPrimV "i" (tvExp chunk_no + j)
           dPrimV_ i (tvExp i_val)
           emit $ Imp.DebugPrint "the value of loop index" (Just $ untyped (tvExp i_val))
