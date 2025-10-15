@@ -147,6 +147,16 @@ getRng props
     f (Rng {}) = True
     f _ = False
 
+getMonotonic :: S.Set (Property u) -> Maybe (Property u)
+getMonotonic props
+  | fp@(Monotonic {}) : rest <- filter f (S.toList props) = do
+      unless (null rest) $ error "getMonotonic multiple Monotonic"
+      Just fp
+  | otherwise = Nothing
+  where
+    f (Monotonic {}) = True
+    f _ = False
+
 getInjectiveRCD :: S.Set (Property u) -> Maybe (Property u)
 getInjectiveRCD props
   | fp@(Injective {}) : rest <- filter f (S.toList props) = do

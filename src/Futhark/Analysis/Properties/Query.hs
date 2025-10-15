@@ -43,6 +43,8 @@ import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
+import Data.Functor ((<&>))
+import Control.Applicative ((<|>))
 
 data Query
   = CaseIsMonotonic MonDir
@@ -207,8 +209,9 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 else pure Unknown
         _ -> pure Unknown
     alreadyKnown wts@(Injective y rcd) = do
-      res <- askInjectiveRCD (Algebra.Var y)
-      case res of
+      minj <- askInjectiveRCD (Algebra.Var y)
+      mmono <- fmap (Monotonic y) <$> askMonotonic (Algebra.Var y)
+      case minj <|> mmono of
         Just (Injective y' rcd')
           | y' == y,
             Nothing <- rcd' ->
@@ -220,6 +223,8 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               if isJust (s :: Maybe (Substitution Symbol))
                 then pure Yes
                 else pure Unknown
+        Just (Monotonic _ dir) | dir == IncS || dir == DecS -> do
+          pure Yes
         _ | Just (a, b) <- rcd -> do
           res2 <- askFiltPartInv (Algebra.Var y)
           f <- getFn y
