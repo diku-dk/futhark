@@ -19,7 +19,8 @@ module Futhark.Analysis.Properties.Query
   )
 where
 
-import Control.Monad (forM, forM_, join, replicateM, when, zipWithM_)
+import Control.Applicative ((<|>))
+import Control.Monad (forM, join, replicateM, when, zipWithM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition, tails)
@@ -43,8 +44,6 @@ import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
-import Data.Functor ((<&>))
-import Control.Applicative ((<|>))
 
 data Query
   = CaseIsMonotonic MonDir
@@ -294,12 +293,13 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       f <- getFn x
       case f of
         IndexFn [[Forall i d]] ges -> do
+          -- TODO this case is only kept for now because it handles Cat.
+          -- Remove this after getting rid of Cat.
           j <- newNameFromString "j"
           newProver (MonGe (fromMonDir dir) i j d ges)
         IndexFn shape ges -> do
           -- Concat because dimension flatness is irrelevant.
           newProver (MonGeNd (fromMonDir dir) (concat shape) ges)
-        _ -> error "Not implemented yet."
     matchProof (Rng x (Just a, Just b)) =
       askQ (CaseCheck (\e -> a :<= e :&& e :< b)) =<< getFn x
     matchProof (Rng x (Nothing, Just b)) =
@@ -342,6 +342,11 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                   j <- newNameFromString "j"
                   let y_at ident = sym2SoP $ Apply (Var y) [sym2SoP (Var ident)]
                   newProver (InjGe i j d gs rcd (y_at i :== y_at j))
+                IndexFn _shape _ges -> do
+                  -- TODO implement InjGe for n-dimensional arrays.
+                  -- Concat because dimension flatness is irrelevant.
+                  -- newProver (InjGeNd rcd (concat shape) ges)
+                  pure Unknown
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
@@ -455,10 +460,13 @@ newProver (MonGeNd order dom ges) = do
   let intercase = forallLT dom $ \i_to_j -> do
         printM 6 $ "MonGeNd intercase : " <> prettyStr i_to_j
         printAlgEnv 6
-        printM 6 $ "MonGeNd intercase : " <> prettyStr (
-          [ prettyStr (p :&& repSelf i_to_j p) <> " => " <> prettyStr (e `rel` rep i_to_j e)
-            | (p, e) <- casesToList ges
-          ])
+        printM 6 $
+          "MonGeNd intercase : "
+            <> prettyStr
+              ( [ prettyStr (p :&& repSelf i_to_j p) <> " => " <> prettyStr (e `rel` rep i_to_j e)
+                  | (p, e) <- casesToList ges
+                ]
+              )
         allM
           [ (p :&& repSelf i_to_j p) =>? e `rel` rep i_to_j e
             | (p, e) <- casesToList ges
@@ -755,7 +763,7 @@ prove_ baggage (PermutationOfZeroTo m) fn =
   prove_ baggage (PermutationOfRange (int2SoP 0) m) fn
 prove_ _ (ForallSegments _) _ =
   undefined
-prove_ _ _ _ = error "Not implemented yet."
+prove_ _ _ _ = pure Unknown -- error "Not implemented yet."
 
 data Order = LT | GT | Undefined
   deriving (Eq, Show)
