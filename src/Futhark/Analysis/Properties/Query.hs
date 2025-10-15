@@ -1,4 +1,7 @@
 -- Answer queries on index functions using algebraic solver.
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
+{-# HLINT ignore "Use camelCase" #-}
 
 module Futhark.Analysis.Properties.Query
   ( Answer (..),
@@ -16,7 +19,7 @@ module Futhark.Analysis.Properties.Query
   )
 where
 
-import Control.Monad (forM, join, when)
+import Control.Monad (forM, forM_, join, replicateM, when, zipWithM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition, tails)
@@ -288,14 +291,18 @@ prove prop = alreadyKnown prop `orM` matchProof prop
         IndexFn [[Forall i d]] ges -> do
           j <- newNameFromString "j"
           nextGenProver (MonGe (fromMonDir dir) i j d ges)
+        IndexFn shape ges -> do
+          -- Concat because dimension flatness is irrelevant.
+          dims <- mapM (\dim -> (dim,) <$> newNameFromString "j") (concat shape)
+          nextGenProver (MonGeNd (fromMonDir dir) dims ges)
         _ -> error "Not implemented yet."
     matchProof (Rng x (Just a, Just b)) =
       askQ (CaseCheck (\e -> a :<= e :&& e :< b)) =<< getFn x
     matchProof (Rng x (Nothing, Just b)) =
       askQ (CaseCheck (:< b)) =<< getFn x
-    matchProof (Rng x (Just a , Nothing)) =
+    matchProof (Rng x (Just a, Nothing)) =
       askQ (CaseCheck (a :<=)) =<< getFn x
-    matchProof (Rng _ (Nothing , Nothing)) =
+    matchProof (Rng _ (Nothing, Nothing)) =
       pure Yes
     matchProof (Injective y rcd) = do
       -- InjV2
@@ -360,6 +367,7 @@ data PRule
     InjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol)) Symbol
   | -- Relation; i of index function; fresh j; domain of index function; cases of index function.
     MonGe Order VName VName Domain (Cases Symbol (SoP Symbol))
+  | MonGeNd Order [(Quantified Domain, VName)] (Cases Symbol (SoP Symbol))
   | -- Indexfn of y; x; pf; pps
     FPV2 IndexFn VName (Predicate Symbol) [Predicate Symbol]
 
@@ -437,6 +445,13 @@ nextGenProver (MonGe order i j d ges') = do
       LT -> (:<)
       GT -> (:>)
       _ -> error "Not implemented yet."
+nextGenProver (MonGeNd order dims ges) = do
+  -- 1. Lexical expansion
+  -- 2. check intercase x(i) < x(j)
+  let intercase = undefined
+  -- 3. check intracase x(i) < x(j)   (by sorting ges)
+  let intracase = undefined
+  intercase `andM` intracase
 nextGenProver (FPV2 f_Y x pf pps) = do
   i <- newNameFromString "i"
   n <- sym2SoP . Hole <$> newNameFromString "n"
@@ -748,6 +763,85 @@ sorted cmp = runMaybeT . quicksort
       case ord of
         Undefined -> fail ""
         _ -> pure ord
+
+-- Perform a query of the form `forall i,j in D . i < j => q`
+-- where i and j are vectors in a multi-dimensional domain D.
+-- WARNING j should be fresh (no equivalences in the algebraic environment).
+forall_i_LT_j :: [(VName, VName, Domain)] -> IndexFnM Answer -> IndexFnM Answer
+forall_i_LT_j dims query = do
+  let all_possible_i_lt_j = lexicalOrdering dims
+  allM
+    [ rollbackAlgEnv $ do
+        i_lt_j
+        query
+      | i_lt_j <- all_possible_i_lt_j
+    ]
+
+
+forAll :: ((VName, VName) -> IndexFnM Answer) -> IndexFnM Answer
+forAll query = do
+  undefined
+-- Spells out the lexical ordering i < j for vectors i and j from an
+-- n-dimensional domain. Results in 2^n - 1 distinct relations.
+--
+-- For example, if n = 3:
+--   i_1 < j_1  &&  i_2 <  j_2  &&  i_3 <  j_3
+--   i_1 < j_1  &&  i_2 <  j_2  &&  i_3 >= j_3
+--   i_1 < j_1  &&  i_2 >= j_2  &&  i_3 <  j_3
+--   i_1 < j_1  &&  i_2 >= j_2  &&  i_3 >= j_3
+--
+--   i_1 = j_1  &&  i_2 < j_2   &&  i_3 < j_3
+--   i_1 = j_1  &&  i_2 < j_2   &&  i_3 >= j_3
+--
+--   i_1 = j_1  &&  i_2 = j_2   &&  i_3 < j_3
+lexicalOrdering :: [Quantified Domain] -> [IndexFnM [(VName, VName)]]
+lexicalOrdering dims =
+  [ mkOrder rels
+    | dim_idx <- [0 .. n - 1],
+      suffixRels <- replicateM (n - 1 - dim_idx) [(#<), (#>=)],
+      let rels = replicate dim_idx (#==) ++ [(#<)] ++ suffixRels
+  ]
+  where
+    n = length dims
+
+    mkOrder rels = do
+      js <- forM dims (const $ newNameFromString "j")
+      forM (zip3 dims js rels) $ \(Forall i d, j, rel) ->
+        (i `rel` j) d >> pure (i, j)
+
+    -- This requires `j` to be fresh.
+    i #== j = \d -> do
+      addRelIterator (Forall i d)
+      addEquiv (Algebra.Var j) (sym2SoP (Algebra.Var i))
+
+    i #< j = \d -> do
+      addRelIterator (Forall j d)
+      i +< j
+
+    i #>= j = \d -> do
+      addRelIterator (Forall i d)
+      j +< i
+
+strictSort :: IndexFn -> IndexFnM (Maybe [(Symbol, SoP Symbol)])
+strictSort (IndexFn shape ges) = do
+  js <- forM is (const $ newNameFromString "j")
+  let i_to_j = mkRepFromList [(i, sym2SoP (Var j)) | (i, j) <- zip is js]
+  let dims = zip3 is js doms
+  let cmpGes (p1, e1) (p2, e2) = rollbackAlgEnv $ do
+        let p = p1 :&& repSelf i_to_j p2
+        let e2' = rep i_to_j e2
+        lt <- forall_i_LT_j dims (p =>? (e1 :< e2'))
+        case lt of
+          Yes -> pure LT
+          Unknown -> do
+            gt <- forall_i_LT_j dims (p =>? (e1 :> e2'))
+            case gt of
+              Yes -> pure GT
+              Unknown -> pure Undefined
+  sorted cmpGes (casesToList ges)
+  where
+    is = map boundVar (concat shape)
+    doms = map formula (concat shape)
 
 -- Strict sorting of guarded expressions.
 sortGes :: (Rep b Symbol, Rep a Symbol) => VName -> VName -> Domain -> [(a, b)] -> IndexFnM (Maybe [(a, b)])
