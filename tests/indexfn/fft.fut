@@ -1,14 +1,11 @@
-
-type num = f32
-
 -- assumes `x` has been already permuted (under bit-reverse)
 -- Precondition: lgn >= 1
-def fft2Par (lgn: { i64 | \ x -> x > 0 }) (omega: num) (x: *[1<<lgn]num) 
-            : { *[1<<lgn]num | \ _ -> true } =
+def fft2Par (lgn: { i64 | \ x -> x > 0 }) (omega: f32) (x: *[1<<lgn]f32)
+            : { *[1<<lgn]f32 | \ _ -> true } =
     let n = 1 << lgn  -- 2^lgn
     let omega_pows = scan (*) 1 (map (\i -> if i==0 then 1 else omega) (iota n)) 
     in
-      loop (x : *[1<<lgn]num) -- this should be [n]num
+      loop (x : *[1<<lgn]f32) -- this should be [n]f32
       for qm1 < lgn do
         let q = qm1 + 1   -- q in [1..lgn]
         let L = 1i64 << q -- 2^q
