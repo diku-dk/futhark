@@ -293,8 +293,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           nextGenProver (MonGe (fromMonDir dir) i j d ges)
         IndexFn shape ges -> do
           -- Concat because dimension flatness is irrelevant.
-          dims <- mapM (\dim -> (dim,) <$> newNameFromString "j") (concat shape)
-          nextGenProver (MonGeNd (fromMonDir dir) dims ges)
+          nextGenProver (MonGeNd (fromMonDir dir) (concat shape) ges)
         _ -> error "Not implemented yet."
     matchProof (Rng x (Just a, Just b)) =
       askQ (CaseCheck (\e -> a :<= e :&& e :< b)) =<< getFn x
@@ -367,7 +366,7 @@ data PRule
     InjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol)) Symbol
   | -- Relation; i of index function; fresh j; domain of index function; cases of index function.
     MonGe Order VName VName Domain (Cases Symbol (SoP Symbol))
-  | MonGeNd Order [(Quantified Domain, VName)] (Cases Symbol (SoP Symbol))
+  | MonGeNd Order [Quantified Domain] (Cases Symbol (SoP Symbol))
   | -- Indexfn of y; x; pf; pps
     FPV2 IndexFn VName (Predicate Symbol) [Predicate Symbol]
 
@@ -445,13 +444,28 @@ nextGenProver (MonGe order i j d ges') = do
       LT -> (:<)
       GT -> (:>)
       _ -> error "Not implemented yet."
-nextGenProver (MonGeNd order dims ges) = do
+nextGenProver (MonGeNd order dom ges) = do
   -- 1. Lexical expansion
   -- 2. check intercase x(i) < x(j)
-  let intercase = undefined
+  let intercase = forallLT dom $ \i_to_j -> do
+        printM 6 $ "MonGeNd intercase : " <> prettyStr i_to_j
+        printAlgEnv 6
+        printM 6 $ "MonGeNd intercase : " <> prettyStr (
+          [ prettyStr (p :&& repSelf i_to_j p) <> " => " <> prettyStr (e `rel` rep i_to_j e)
+            | (p, e) <- casesToList ges
+          ])
+        allM
+          [ (p :&& repSelf i_to_j p) =>? e `rel` rep i_to_j e
+            | (p, e) <- casesToList ges
+          ]
   -- 3. check intracase x(i) < x(j)   (by sorting ges)
-  let intracase = undefined
+  let intracase = answerFromBool . isJust <$> sortStrict dom ges
   intercase `andM` intracase
+  where
+    rel = case order of
+      LT -> (:<)
+      GT -> (:>)
+      _ -> error "Not implemented yet."
 nextGenProver (FPV2 f_Y x pf pps) = do
   i <- newNameFromString "i"
   n <- sym2SoP . Hole <$> newNameFromString "n"
@@ -766,21 +780,22 @@ sorted cmp = runMaybeT . quicksort
 
 -- Perform a query of the form `forall i,j in D . i < j => q`
 -- where i and j are vectors in a multi-dimensional domain D.
+forallLT :: [Quantified Domain] -> (Replacement Symbol -> IndexFnM Answer) -> IndexFnM Answer
+forallLT dom query = do
+  js <- forM is (const $ newNameFromString "j")
+  let q = query (mkRepFromList (zipWith (\i j -> (i, sym2SoP $ Var j)) is js))
+  forallLT' (zip3 is js doms) q
+  where
+    is = map boundVar dom
+    doms = map formula dom
+
+-- Perform a query of the form `forall i,j in D . i < j => q`
+-- where i and j are vectors in a multi-dimensional domain D.
 -- WARNING j should be fresh (no equivalences in the algebraic environment).
-forall_i_LT_j :: [(VName, VName, Domain)] -> IndexFnM Answer -> IndexFnM Answer
-forall_i_LT_j dims query = do
-  let all_possible_i_lt_j = lexicalOrdering dims
-  allM
-    [ rollbackAlgEnv $ do
-        i_lt_j
-        query
-      | i_lt_j <- all_possible_i_lt_j
-    ]
+forallLT' :: [(VName, VName, Domain)] -> IndexFnM Answer -> IndexFnM Answer
+forallLT' dims query =
+  allM [rollbackAlgEnv (i_lt_j >> query) | i_lt_j <- lexicalLT dims]
 
-
-forAll :: ((VName, VName) -> IndexFnM Answer) -> IndexFnM Answer
-forAll query = do
-  undefined
 -- Spells out the lexical ordering i < j for vectors i and j from an
 -- n-dimensional domain. Results in 2^n - 1 distinct relations.
 --
@@ -794,9 +809,10 @@ forAll query = do
 --   i_1 = j_1  &&  i_2 < j_2   &&  i_3 >= j_3
 --
 --   i_1 = j_1  &&  i_2 = j_2   &&  i_3 < j_3
-lexicalOrdering :: [Quantified Domain] -> [IndexFnM [(VName, VName)]]
-lexicalOrdering dims =
-  [ mkOrder rels
+-- Expands to 2^n - 1 queries.
+lexicalLT :: [(VName, VName, Domain)] -> [IndexFnM ()]
+lexicalLT dims =
+  [ zipWithM_ (\(i, j, d) rel -> (i `rel` j) d) dims rels
     | dim_idx <- [0 .. n - 1],
       suffixRels <- replicateM (n - 1 - dim_idx) [(#<), (#>=)],
       let rels = replicate dim_idx (#==) ++ [(#<)] ++ suffixRels
@@ -804,12 +820,6 @@ lexicalOrdering dims =
   where
     n = length dims
 
-    mkOrder rels = do
-      js <- forM dims (const $ newNameFromString "j")
-      forM (zip3 dims js rels) $ \(Forall i d, j, rel) ->
-        (i `rel` j) d >> pure (i, j)
-
-    -- This requires `j` to be fresh.
     i #== j = \d -> do
       addRelIterator (Forall i d)
       addEquiv (Algebra.Var j) (sym2SoP (Algebra.Var i))
@@ -822,26 +832,22 @@ lexicalOrdering dims =
       addRelIterator (Forall i d)
       j +< i
 
-strictSort :: IndexFn -> IndexFnM (Maybe [(Symbol, SoP Symbol)])
-strictSort (IndexFn shape ges) = do
-  js <- forM is (const $ newNameFromString "j")
-  let i_to_j = mkRepFromList [(i, sym2SoP (Var j)) | (i, j) <- zip is js]
-  let dims = zip3 is js doms
+sortStrict :: [Quantified Domain] -> Cases Symbol (SoP Symbol) -> IndexFnM (Maybe [(Symbol, SoP Symbol)])
+sortStrict dom ges = do
+  dims <- mapM (\(Forall i d) -> (i,,d) <$> newNameFromString "j") dom
+  let i_to_j = mkRepFromList [(i, sym2SoP (Var j)) | (i, j, _) <- dims]
   let cmpGes (p1, e1) (p2, e2) = rollbackAlgEnv $ do
         let p = p1 :&& repSelf i_to_j p2
         let e2' = rep i_to_j e2
-        lt <- forall_i_LT_j dims (p =>? (e1 :< e2'))
+        lt <- forallLT' dims (p =>? (e1 :< e2'))
         case lt of
           Yes -> pure LT
           Unknown -> do
-            gt <- forall_i_LT_j dims (p =>? (e1 :> e2'))
+            gt <- forallLT' dims (p =>? (e1 :> e2'))
             case gt of
               Yes -> pure GT
               Unknown -> pure Undefined
   sorted cmpGes (casesToList ges)
-  where
-    is = map boundVar (concat shape)
-    doms = map formula (concat shape)
 
 -- Strict sorting of guarded expressions.
 sortGes :: (Rep b Symbol, Rep a Symbol) => VName -> VName -> Domain -> [(a, b)] -> IndexFnM (Maybe [(a, b)])
