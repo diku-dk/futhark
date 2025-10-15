@@ -169,7 +169,9 @@ subber argCheck g = do
 -- Substitute `f(args)` for its value in `g`.
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
 substituteOnce f g_presub (f_apply, actual_args) = do
+  printM 6 $ "substituteOnce \n  " <> prettyStr f <> "\n  " <> prettyStr g_presub <> "\n  " <> prettyStr (f_apply, actual_args)
   vn <- newVName ("<" <> prettyString f_apply <> ">")
+  printM 6 $ "  args: " <> prettyStr args
   g <- repApply vn g_presub
 
   traverse simplify <=< applySubRules $
@@ -222,12 +224,16 @@ substituteOnce f g_presub (f_apply, actual_args) = do
               map_formal_args_to actual_args
           | otherwise ->
               error "Argument mismatch."
-      where
-        map_formal_args_to
-          | all (\d -> length d == 1) (shape f) =
-              mconcat . zipWith (mkRep . boundVar) (concat $ shape f)
-          -- TODO implement flattened case.
-          | otherwise = error "Not implemented yet."
+
+    -- Map the formal arguments of `f` to the corresponding actual arguments.
+    map_formal_args_to = mconcat . zipWith mkArg (shape f)
+
+    mkArg [Forall i _] = mkRep i
+    mkArg [Forall i _, Forall j (Iota m)] =
+      \e_idx ->
+        -- mkRep [(i, s]
+        undefined
+    mkArg _ = error "nd flatten not implemented yet."
 
     repApply vn =
       astMap
@@ -270,7 +276,6 @@ substituteOnce f g_presub (f_apply, actual_args) = do
     sub1 n g = case shape f !! n of
       [Forall _ Iota {}] -> pure g
       _ -> fail "No match."
-      -- jk
 
     -- Propagate flattened domain from f to g.
     --
