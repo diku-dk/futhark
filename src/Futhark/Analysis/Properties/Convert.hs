@@ -599,7 +599,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
                   }
           fn <- substParams g_fn (zip arg_names arg_fns)
           pure [fn]
-forward e@(E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _) = do
+forward (E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _) = do
   let i = E.identName ident
   f_szs <- forward e_sz
   case map justSingleCase f_szs of
