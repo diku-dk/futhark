@@ -175,7 +175,8 @@ fromAlgebra_ (Algebra.Var vn) = do
   case x of
     Just x' -> pure . sym2SoP $ x'
     Nothing -> pure . sym2SoP $ Var vn
-fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
+fromAlgebra_ e@(Algebra.Idx (Algebra.One vn) alg_idx) = do
+  printM 6 $ "fromAlgebra_ " <> prettyStr e
   x <- lookupUntransSym (Algebra.Var vn)
   idx <- fromAlgebra alg_idx
   case x of
@@ -185,7 +186,6 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
       fs <- lookupIndexFn vn
       idx' <- case fs of
         Just [IndexFn [[Forall i (Iota n)], [Forall j (Iota m)]] _] -> do
-          -- printM 1337 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
           case filterSoP (\t c -> isJust (term2SoP t c ./. m)) idx of
             offset
               -- Information about offset was destroyed.
@@ -194,11 +194,11 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
               | otherwise -> do
                   let e_i = fromJust (offset ./. m)
                   let e_j = idx .-. offset
-                  -- printM 1337 ("(ﾉ◕ヮ◕)ﾉ  (e_i, e_j) " <> prettyStr (e_i, e_j))
                   valid <- (&&) <$> checkRange e_i i n <*> checkRange e_j j m
                   if valid then pure [e_i, e_j] else useII
           where
             useII = do
+              printM 6 "useII"
               k <- newNameFromString "k"
               ii <- Var . fst <$> flatten2d k n m
               pure [sym2SoP (Apply ii [idx]), idx .-. (sym2SoP (Apply ii [idx]) .*. m)]
@@ -413,7 +413,7 @@ toAlgebra_ (Var x) = do
     Nothing -> pure $ Algebra.Var x
     Just alg_x -> pure alg_x
 toAlgebra_ e@(Hole _) = error ("toAlgebra_ on Hole " <> prettyStr e)
-toAlgebra_ (Sum j lb ub x) = do
+toAlgebra_ e@(Sum j lb ub x) = do
   res <- search x
   case res of
     Just (vn, match) -> do
@@ -426,8 +426,8 @@ toAlgebra_ (Sum j lb ub x) = do
       -- Either handle quantifiers needs to be run on the symbol first
       -- or x did not depend j. Both cases would be odd, and I'd like
       -- to know why it would happen.
-      -- printM 1337 $ "toAlgebra_: " <> prettyString (Sum j lb ub x)
-      error "handleQuantifiers need to be run"
+      error $
+        "handleQuantifiers need to be run (toAlgebra_ " <> prettyStr e <> ")"
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
   vn <- case fst <$> res of
@@ -449,8 +449,6 @@ toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
             if i `S.member` fv m
               then e_j .+. toSumOfSums j' (int2SoP 0) (e_i .-. int2SoP 1) (rep (mkRep i (sym2SoP $ Var j')) m)
               else e_j .+. e_i .*. m
-      -- printM 1 ("💩" <> prettyStr sym)
-      -- printM 1 ("💩arg1d: " <> prettyStr arg1d)
       _ <- handleQuantifiers arg1d
       res <- search (Apply (Var f) [arg1d])
       vn <- case fst <$> res of

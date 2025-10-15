@@ -12,7 +12,7 @@ import Data.Map qualified as M
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
+import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==), toAlgebra)
 import Futhark.Analysis.Properties.Flatten (lookupII)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
@@ -24,9 +24,10 @@ import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify (Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, sym2SoP, (.*.), (.+.))
+import Futhark.SoP.SoP (SoP, sym2SoP, (.*.), (.+.), (.-.), justSym)
 import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
+import qualified Futhark.Analysis.Properties.Symbol as Algebra
 
 -- If f has multiple cases, we would not know which case to substitute
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
@@ -106,7 +107,8 @@ trivialSub f e args
   where
     dims2args =
       mkRepFromList $ zipWith (\[dim] arg -> (boundVar dim, arg)) (shape f) args
-      -- TODO implement flattened ^dim.
+
+-- TODO implement flattened ^dim.
 
 subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
 subber argCheck g = do
@@ -217,22 +219,22 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           | rank f == rank g_presub,
             map length (shape f) == map length (shape g_presub) ->
               -- This case is a convenience HACK to allow empty arguments in Convert.
-              map_formal_args_to (concat (shape g_presub) <&> sym2SoP . Var . boundVar)
+              mconcat . zipWith mkArg (shape f) $
+                concat (shape g_presub) <&> sym2SoP . Var . boundVar
         _
           | rank f == length actual_args ->
               -- All source-program indexing should hit this case.
-              map_formal_args_to actual_args
+              mconcat $ zipWith mkArg (shape f) actual_args
           | otherwise ->
               error "Argument mismatch."
 
-    -- Map the formal arguments of `f` to the corresponding actual arguments.
-    map_formal_args_to = mconcat . zipWith mkArg (shape f)
-
     mkArg [Forall i _] = mkRep i
-    mkArg [Forall i _, Forall j (Iota m)] =
-      \e_idx ->
-        -- mkRep [(i, s]
-        undefined
+    mkArg [Forall i (Iota n), Forall j (Iota m)]
+      -- SubFlat-Simplified from the supplementary material.
+      | i `S.notMember` fv m =
+          \e_idx ->
+            let idx = sym2SoP (Ix n m e_idx)
+             in mkRepFromList [(i, idx), (j, e_idx .-. idx .*. m)]
     mkArg _ = error "nd flatten not implemented yet."
 
     repApply vn =
@@ -264,7 +266,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           else foldM subRules g [0 .. rank f - 1]
 
     subRules g n =
-      sub0 g <|> sub1 n g <|> sub2 n g <|> sub3 n g <|> sub4 n g <|> subX n g
+      sub0 g <|> sub1 n g <|> propFlattenSimplified n g <|> sub2 n g <|> sub3 n g <|> sub4 n g <|> subX n g
 
     -- This is rule is needed because we represent scalars as empty shapes rather
     -- than `for i < 1`, as is done in the paper.
@@ -279,29 +281,34 @@ substituteOnce f g_presub (f_apply, actual_args) = do
 
     -- Propagate flattened domain from f to g.
     --
-    -- TODO this only tries to align the n'th
-    -- dimension of f with the k'th dimension of g.
-    -- But we could try any dimension in g.
-    propagateFlatten k g = case (shape g !! k, shape f !! k) of
+    -- TODO this only tries to align the n'th dimension of f with the k'th
+    -- dimension of g. But we could try any dimension in g.
+    propFlattenSimplified n g | n >= rank g = fail "No match."
+    propFlattenSimplified k g = case (shape g !! k, shape f !! k) of
       ([Forall i_1 (Iota e_1)], df@[Forall i_2 (Iota e_2), Forall i_3 (Iota e_3)])
-          -- PropFlatten-Simplified from the supplementary material.
-          -- (The case where `e_3` may depend on `i_2` is still handled by Cat in
-          -- this implementation.)
-          | i_2 `S.notMember` fv e_3 -> do
-        Yes <- lift (e_1 $== e_2 .*. e_3)
-        e_row <- rewrite $ sym2SoP (Var i_2) .*. e_3
-        let s :: Replacement Symbol = mkRep i_1 (e_row .+. sym2SoP (Var i_3))
-        -- XXX safe to use rep instead of sub? Think so bc f and g were renamed before calling this func?
-        pure $ g {shape = l <> (df : r), body = repCases s (body g)}
+        -- PropFlatten-Simplified from the supplementary material.
+        -- (The case where `e_3` may depend on `i_2` is still handled by Cat in
+        -- this implementation.)
+        | i_2 `S.notMember` fv e_3 -> do
+            printM 6 $ "propFlattenSimplified\n  |_ e_1 " <> prettyStr e_1
+            printM 6 $ "  |_ e_2 " <> prettyStr e_2
+            printM 6 $ "  |_ e_3 " <> prettyStr e_3
+            ans <- lift (e_1 $== e_2 .*. e_3)
+            case ans of
+              Yes -> do
+                e_row <- lift . rewrite $ sym2SoP (Var i_2) .*. e_3
+                let s = mkRep i_1 (e_row .+. sym2SoP (Var i_3))
+                pure $ g {shape = l <> (df : r), body = repCases s (body g)}
+                error "propFlattenSimplified succeeded (I'd like to know first time)"
+              Unknown -> pure g
         where
           (l, _old_iter : r) = splitAt k (shape g)
       _ -> fail "No match."
 
     -- Substituting into Cat domain.
     --
-    -- TODO this only tries to align the n'th
-    -- dimension of f with the n'th dimension of g.
-    -- But we could try any dimension in g.
+    -- TODO this only tries to align the n'th dimension of f with the n'th
+    -- dimension of g. But we could try any dimension in g.
     sub2 n g | n >= rank g = fail "No match."
     sub2 n g = case (shape f !! n, shape g !! n) of
       ([Forall i df@Cat {}], [Forall j dg@Iota {}]) -> do
@@ -314,9 +321,8 @@ substituteOnce f g_presub (f_apply, actual_args) = do
 
     -- Substituting into Cat domain.
     --
-    -- TODO this only tries to align the n'th
-    -- dimension of f with the n'th dimension of g.
-    -- But we could try any dimension in g.
+    -- TODO this only tries to align the n'th dimension of f with the n'th
+    -- dimension of g. But we could try any dimension in g.
     sub3 n g | n >= rank g = fail "No match."
     sub3 n g = case (shape f !! n, shape g !! n) of
       ([Forall _ df@(Cat k _ _)], [Forall _ dg@(Cat k' _ _)])
@@ -340,7 +346,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       _ -> fail "No match."
 
     -- Substituting into Cat domain.
-    -- 
+    --
     subX n g = case shape f !! n of
       [Forall i df@(Cat k _ _)] | k `S.member` fv (body g) -> do
         Just arg <- hoistMaybe . pure $ args M.!? i

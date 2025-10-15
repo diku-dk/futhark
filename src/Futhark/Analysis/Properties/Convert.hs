@@ -1271,7 +1271,6 @@ zipArgs' loc formal_args actual_args = do
   -- deconstruction using `alignWithPattern`, biggest question is
   -- how to bind one name to multiple index functions in the functions
   -- that use zipArgs's output (e.g., substParams).
-  printM 2 $ "# zipArgs pats " <> show pats
   unless (length pats == length actual_args) . error $
     errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
   unless (map length pats == map length actual_args) . error $
@@ -1287,7 +1286,6 @@ zipArgs' loc formal_args actual_args = do
   aligned_sizes <-
     forM (zip pats actual_args) $ \(pat, arg) -> do
       fmap mconcat . forM (zip (map snd pat) arg) $ \(pat_type, f) -> do
-        printM 2 $ "zipArgs (pat_type, f) " <> prettyStr (pat_type, f)
         array_shape <- shapeOf pat_type
         unless (length array_shape == rank f) . error $
           errorMsg loc "Internal error: parameter and argument sizes do not align."

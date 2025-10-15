@@ -179,6 +179,7 @@ instance Unify Symbol Symbol where
   unify_ k (Pow i x) (Pow j y) | i == j = unify_ k x y
   unify_ _ Recurrence Recurrence = pure mempty
   unify_ k (Prop p) (Prop q) = unify_ k p q
+  unify_ k (Ix x1 y1 z1) (Ix x2 y2 z2) = unifies_ k [x1, y1, z1] [x2, y2, z2]
   unify_ k (Assume p) (Assume q) = unify_ k p q
   unify_ k a b = case (a, b) of
     (x1 :< y1, x2 :< y2) -> unifies_ k [x1, y1] [x2, y2]
