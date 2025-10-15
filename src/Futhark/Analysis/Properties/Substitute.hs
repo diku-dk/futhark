@@ -13,7 +13,7 @@ import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==), toAlgebra)
-import Futhark.Analysis.Properties.Flatten (lookupII)
+import Futhark.Analysis.Properties.Flatten (lookupII, from1Dto2D)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
@@ -229,12 +229,9 @@ substituteOnce f g_presub (f_apply, actual_args) = do
               error "Argument mismatch."
 
     mkArg [Forall i _] = mkRep i
-    mkArg [Forall i (Iota n), Forall j (Iota m)]
-      -- SubFlat-Simplified from the supplementary material.
-      | i `S.notMember` fv m =
-          \e_idx ->
-            let idx = sym2SoP (Ix n m e_idx)
-             in mkRepFromList [(i, idx), (j, e_idx .-. idx .*. m)]
+    mkArg [d1, d2] =
+      -- Essentially SubFlat-Simplified from the supplementary material.
+      mkRepFromList . from1Dto2D d1 d2
     mkArg _ = error "nd flatten not implemented yet."
 
     repApply vn =

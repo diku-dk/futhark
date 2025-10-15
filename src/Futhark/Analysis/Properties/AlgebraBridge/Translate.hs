@@ -18,7 +18,7 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Properties.Flatten (flatten2d)
+import Futhark.Analysis.Properties.Flatten (flatten2d, from1Dto2D)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus ()
 import Futhark.Analysis.Properties.Monad
@@ -175,8 +175,7 @@ fromAlgebra_ (Algebra.Var vn) = do
   case x of
     Just x' -> pure . sym2SoP $ x'
     Nothing -> pure . sym2SoP $ Var vn
-fromAlgebra_ e@(Algebra.Idx (Algebra.One vn) alg_idx) = do
-  printM 6 $ "fromAlgebra_ " <> prettyStr e
+fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
   x <- lookupUntransSym (Algebra.Var vn)
   idx <- fromAlgebra alg_idx
   case x of
@@ -185,23 +184,19 @@ fromAlgebra_ e@(Algebra.Idx (Algebra.One vn) alg_idx) = do
       -- Corresponding back-translation for 2D-as-1D HACK in toAlgebra_.
       fs <- lookupIndexFn vn
       idx' <- case fs of
-        Just [IndexFn [[Forall i (Iota n)], [Forall j (Iota m)]] _] -> do
+        Just [IndexFn [[d1@(Forall i (Iota n))], [d2@(Forall j (Iota m))]] _] -> do
           case filterSoP (\t c -> isJust (term2SoP t c ./. m)) idx of
             offset
               -- Information about offset was destroyed.
-              | isZero offset -> useII
+              | isZero offset -> useIx
               -- Try to determine i and j from offset.
               | otherwise -> do
                   let e_i = fromJust (offset ./. m)
                   let e_j = idx .-. offset
                   valid <- (&&) <$> checkRange e_i i n <*> checkRange e_j j m
-                  if valid then pure [e_i, e_j] else useII
+                  if valid then pure [e_i, e_j] else useIx
           where
-            useII = do
-              printM 6 "useII"
-              k <- newNameFromString "k"
-              ii <- Var . fst <$> flatten2d k n m
-              pure [sym2SoP (Apply ii [idx]), idx .-. (sym2SoP (Apply ii [idx]) .*. m)]
+            useIx = pure $ map snd $ from1Dto2D d1 d2 idx
 
             checkRange e k ub
               | justSym e == Just (Var k) = pure True
@@ -211,6 +206,8 @@ fromAlgebra_ e@(Algebra.Idx (Algebra.One vn) alg_idx) = do
                   (&&) <$> (int2SoP 0 $<=$ e') <*> (e' $<$ ub')
         _ ->
           pure [idx]
+      -- printM 2 $ "fromAlgebra_ " <> prettyStr e
+      -- printM 2 $ "fromAlgebra_ " <> prettyStr (Apply (Var vn) idx')
       pure . sym2SoP $ Apply (Var vn) idx'
 fromAlgebra_ (Algebra.Idx (Algebra.POR vns) i) = do
   foldr1 (.+.)
@@ -450,12 +447,15 @@ toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
               then e_j .+. toSumOfSums j' (int2SoP 0) (e_i .-. int2SoP 1) (rep (mkRep i (sym2SoP $ Var j')) m)
               else e_j .+. e_i .*. m
       _ <- handleQuantifiers arg1d
+      -- printM 2 $ "toAlgebra_ " <> prettyStr sym
+      -- printM 2 $ "  |_ 1D " <> prettyStr (Apply (Var f) [arg1d])
       res <- search (Apply (Var f) [arg1d])
       vn <- case fst <$> res of
         Just vn -> pure vn
         Nothing -> addUntrans (Var f)
       let idx = fromMaybe arg1d (snd =<< res)
       idx' <- mapSymM toAlgebra_ idx
+      -- printM 2 $ "  |_ idx' " <> prettyStr idx'
       f_is_bool <- askProperty (Algebra.Var f) Boolean
       when f_is_bool $ addProperty (Algebra.Var vn) Boolean
       booltype <- askProperty (Algebra.Var vn) Boolean
