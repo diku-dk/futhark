@@ -7,6 +7,7 @@ import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM, 
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT (runMaybeT))
 import Data.Bifunctor
+import Data.Functor ((<&>))
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
@@ -17,9 +18,9 @@ import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Flatten (flatten2d)
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn, dimSize)
+import Futhark.Analysis.Properties.IndexFnPlus (dimSize, domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Property (MonDir (..))
+import Futhark.Analysis.Properties.Property (MonDir (..), cloneProperty)
 import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
@@ -423,8 +424,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
     [xs'] <- getArgs args =
       -- XXX unzip is a no-op.
       forward xs'
-  | Just fname <- getFun e_f,
-    "flatten" `L.isPrefixOf` fname,
+  | Just "flatten" <- getFun e_f,
     [e_x] <- getArgs args = do
       fs <- forward e_x
       forM fs $ \f ->
@@ -628,6 +628,24 @@ forwardLetEffects [Just _] e@(E.Var (E.QualName _ _) _ loc) = do
   printM 2 . warningMsg loc $
     "Warning: Aliasing " <> prettyStr e <> " strips property information."
   forward e
+forwardLetEffects [Just vn] e@(E.AppExp (E.Apply e_f args _) _)
+  | Just "flatten" <- getFun e_f,
+    [E.Var (E.QualName _ x) _ _] <- getArgs args = do
+      p <- fromMaybe mempty <$> (getProperties <&> (M.!? Algebra.Var x))
+      f <- forward e
+      mapM_ addProp (S.filter propagatesOverFlatten p)
+      pure f
+  where
+    addProp = addProperty (Algebra.Var vn) . cloneProperty vn
+
+    propagatesOverFlatten p = case p of
+      Property.Monotonic {} -> True
+      Property.Rng {} -> True
+      Property.Injective {} -> True
+      Property.BijectiveRCD {} -> True
+      Property.FiltPartInv {} -> True
+      Property.FiltPart {} -> True
+      _ -> False
 forwardLetEffects bound_names x = do
   toplevel_fns <- getTopLevelIndexFns
   defs <- getTopLevelDefs

@@ -17,6 +17,7 @@ module Futhark.Analysis.Properties.Property
     askSimProp,
     askRng,
     askBijectiveRCD,
+    cloneProperty,
   )
 where
 
@@ -194,3 +195,12 @@ nameAffectedBy (BijectiveRCD x _ _) = x
 nameAffectedBy (FiltPartInv x _ _) = x
 nameAffectedBy (FiltPart y _x _ _) = y
 nameAffectedBy _ = undefined
+
+cloneProperty :: VName -> Property u -> Property u
+cloneProperty x (Rng _ a) = Rng x a
+cloneProperty x (Monotonic _ a) = Monotonic x a
+cloneProperty x (Injective _ a) = Injective x a
+cloneProperty x (BijectiveRCD _ a b) = BijectiveRCD x a b
+cloneProperty x (FiltPartInv _ a b) = FiltPartInv x a b
+cloneProperty x (FiltPart _ a b c) = FiltPart x a b c
+cloneProperty _ _ = undefined

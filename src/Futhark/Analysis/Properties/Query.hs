@@ -290,10 +290,10 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       case f of
         IndexFn [[Forall i d]] ges -> do
           j <- newNameFromString "j"
-          nextGenProver (MonGe (fromMonDir dir) i j d ges)
+          newProver (MonGe (fromMonDir dir) i j d ges)
         IndexFn shape ges -> do
           -- Concat because dimension flatness is irrelevant.
-          nextGenProver (MonGeNd (fromMonDir dir) (concat shape) ges)
+          newProver (MonGeNd (fromMonDir dir) (concat shape) ges)
         _ -> error "Not implemented yet."
     matchProof (Rng x (Just a, Just b)) =
       askQ (CaseCheck (\e -> a :<= e :&& e :< b)) =<< getFn x
@@ -326,7 +326,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                     j <- newNameFromString "j"
                     gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
                     let x_at ident = sym2SoP $ Apply (Var x) [sym2SoP (Var ident)]
-                    nextGenProver (InjGe i j d gs rcd (x_at i :== x_at j))
+                    newProver (InjGe i j d gs rcd (x_at i :== x_at j))
               strat1 `orM` strat2
         _ -> do
           f_y <- getFn y
@@ -336,7 +336,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 IndexFn [[Forall i d]] gs -> algebraContext f_y $ do
                   j <- newNameFromString "j"
                   let y_at ident = sym2SoP $ Apply (Var y) [sym2SoP (Var ident)]
-                  nextGenProver (InjGe i j d gs rcd (y_at i :== y_at j))
+                  newProver (InjGe i j d gs rcd (y_at i :== y_at j))
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
@@ -345,7 +345,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       proveFn (PFiltPartInv (predToFun pf) (map predToFun pps)) f_X
     matchProof (FiltPart y x pf pps) = do
       f_Y <- getFn y
-      nextGenProver (FPV2 f_Y x pf pps)
+      newProver (FPV2 f_Y x pf pps)
 
     getFn vn = do
       fs <- lookupIndexFn vn
@@ -370,8 +370,8 @@ data PRule
   | -- Indexfn of y; x; pf; pps
     FPV2 IndexFn VName (Predicate Symbol) [Predicate Symbol]
 
-nextGenProver :: PRule -> IndexFnM Answer
-nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
+newProver :: PRule -> IndexFnM Answer
+newProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
   printM 10 $ title "InjGe " <> prettyStr (i, j) <> " " <> prettyStr d <> " " <> prettyStr ges <> " " <> prettyStr rcd <> " " <> prettyStr guide
 
   -- If the domain is segmented, make sure there are two distinct `k`s.
@@ -402,7 +402,7 @@ nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
                 out_of_range x = x :< a :|| b :< x
             Nothing -> pure Unknown
       oob `orM` (p =>? (sym2SoP (Var i) :== sym2SoP (Var j)))
-nextGenProver (MonGe order i j d ges') = do
+newProver (MonGe order i j d ges') = do
   -- WTS: forall ((c1,e1), (c2,e2)) in ges x ges .
   --        i < j ^ c1(i) ^ c2(j) => e1(i) `rel` e2(j).
   let intercase = rollbackAlgEnv $ do
@@ -444,7 +444,7 @@ nextGenProver (MonGe order i j d ges') = do
       LT -> (:<)
       GT -> (:>)
       _ -> error "Not implemented yet."
-nextGenProver (MonGeNd order dom ges) = do
+newProver (MonGeNd order dom ges) = do
   -- 1. Lexical expansion
   -- 2. check intercase x(i) < x(j)
   let intercase = forallLT dom $ \i_to_j -> do
@@ -466,7 +466,7 @@ nextGenProver (MonGeNd order dom ges) = do
       LT -> (:<)
       GT -> (:>)
       _ -> error "Not implemented yet."
-nextGenProver (FPV2 f_Y x pf pps) = do
+newProver (FPV2 f_Y x pf pps) = do
   i <- newNameFromString "i"
   n <- sym2SoP . Hole <$> newNameFromString "n"
   is_inv_hole <- newNameFromString "is^-1"
@@ -709,7 +709,7 @@ prove_ baggage (PFiltPartInv pf pps') f@(IndexFn [[Forall i dom]] _) = algebraCo
   --   j < i ^  c(i)  ^  c(j)  ^  pf(i)  ^ pf(j)  =>?  e(i) < e(j)
   j <- newNameFromString "j"
   let filtered_guards = [(c :&& pf i, e) | (c, e) <- guards f]
-  let step3 = nextGenProver (MonGe LT i j dom (cases filtered_guards))
+  let step3 = newProver (MonGe LT i j dom (cases filtered_guards))
 
   -- (4) Partition predicates impose an ordering.
   -- WTS:
