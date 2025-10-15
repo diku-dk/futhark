@@ -50,7 +50,7 @@ def segment_ids [m]
       --   }, {[]bool | \flags -> length flags == sum shape}) =
 
   let flags1 = map (\i -> i + 1) (iota m)
-  let flags = mk_flag_array shape 0i64 flags1
+  let flags = mk_flag_array shape 0 flags1
   let flags_sgmind = map (\f -> if f == 0 then 0 else f-1) flags
   let flags_bool = map (\f -> f > 0) flags
   let ids = sgm_sum flags_bool flags_sgmind
@@ -77,5 +77,5 @@ def filter_segmented_array [m][n]
   let (II, _) = segment_ids shape
   let cs = map (\i -> xs[i] < pivots[II[i]]) (iota n)
   let (new_n, is) = filter_indices cs
-  let scratch = replicate new_n 0f32
+  let scratch = replicate new_n 0
   in scatter scratch is xs

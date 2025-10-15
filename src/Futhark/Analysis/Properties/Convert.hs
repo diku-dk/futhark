@@ -607,18 +607,23 @@ forward e@(E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _
       assume (int2SoP 0 :<= sVar i :&& sVar i :< sz)
       printM 1 $
         warningMsg loc "Analyzing loop body, but resulting index function will be uninterpreted."
-      _ <- forward e_body
-      vn <- newVName $ "untrans(" <> prettyStr e <> ")"
-      pure [IndexFn [] (cases [(Bool True, sVar vn)])]
+      fs <- forward e_body
+      -- Create uninterpreted functions that vary like the
+      -- actual loop body's result. (If we just create scalars
+      -- we can prove injectivity erroneously etc.)
+      let mkUntransFun f = do
+            vn <- newVName "untranslatable_loop"
+            pure $ f {body = singleCase . sym2SoP $ Apply (Var vn) (map (sVar . boundVar) (concat $ shape f))}
+      mapM mkUntransFun fs
     _ -> error "not implemented yet"
 forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
   forward e
 forward e = do
-  -- This is untranslatable; not even uninterpreted.
-  printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
-  vn <- newVName $ "untrans(" <> prettyStr e <> ")"
-  pure [IndexFn [] (cases [(Bool True, sVar vn)])]
+  -- XXX Need to know the size of e to create uninterpreted functions;
+  -- otherwise verification breaks (we can prove lots of array properties
+  -- erroneously on a single element/scalar array).
+  error $ "forward on unimplemented source expression: " <> prettyStr e
 
 -- Propagate postcondition effects, such as adding properties.
 -- Fires binding applications of top-level defs to names.

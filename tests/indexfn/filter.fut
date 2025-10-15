@@ -20,5 +20,5 @@ def filter [n] (p: f32 -> bool) (xs: [n]f32)
   =
   let cs = map (\x -> p x) xs
   let (new_n, is) = filter_indices cs
-  let scratch = replicate new_n 0f32
+  let scratch = replicate new_n 0
   in scatter scratch is xs
