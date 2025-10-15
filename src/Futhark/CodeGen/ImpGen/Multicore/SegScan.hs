@@ -19,8 +19,8 @@ import Futhark.Util.Pretty (prettyString)
 
 
 -- the final implementation should use this
-blockSize64 :: Imp.TExp Int64
-blockSize64 = 2
+blockSize :: Imp.TExp Int64
+blockSize = 2
 
 
 
@@ -71,21 +71,20 @@ nonsegmentedScan
     genBinOpParams [scan_op]
 
 
-    nblocks <- dPrim "nblocks"
-    nblocks <-- ((pe64 n + blockSize64 - 1) `quot` blockSize64)
+    block_no <- dPrim "nblocks"
+    block_no <-- pe64 n  `divUp` blockSize
 
     -- for now using head and considering only one
     let pt  = elemType (head (lambdaReturnType (segBinOpLambda scan_op)))
     let ne = head (segBinOpNeutral scan_op)
 
     -- allocate flags/aggr/prefix arrays of length nblocks
-    let nblocks_se = Var (tvVar nblocks)
-    flagsArr <- sAllocArray "scan_flags" int8 (Shape [nblocks_se]) DefaultSpace
-    aggrArr  <- sAllocArray "scan_aggr"  pt    (Shape [nblocks_se]) DefaultSpace
-    prefArr  <- sAllocArray "scan_pref"  pt    (Shape [nblocks_se]) DefaultSpace
+    flagsArr <- sAllocArray "scan_flags" int8 (Shape [Var (tvVar block_no)]) DefaultSpace
+    aggrArr  <- sAllocArray "scan_aggr"  pt    (Shape [Var (tvVar block_no)]) DefaultSpace
+    prefArr  <- sAllocArray "scan_pref"  pt    (Shape [Var (tvVar block_no)]) DefaultSpace
 
-    acc_mem <- sAlloc "acc_mem" (Imp.bytes 8) Imp.DefaultSpace
-    emit $ Imp.Write acc_mem
+    work_index <- sAlloc "work_index" (Imp.bytes 8) Imp.DefaultSpace
+    emit $ Imp.Write work_index
                     (Imp.elements (0 :: Imp.TExp Int64)) 
                     (IntType Int64)
                     Imp.DefaultSpace
@@ -94,47 +93,51 @@ nonsegmentedScan
 
 
     -- initialise
-    sFor "init" (tvExp nblocks) $ \j -> do
+    sFor "init" (tvExp block_no) $ \j -> do
       copyDWIMFix flagsArr [j] (intConst Int8 0) []
       copyDWIMFix aggrArr  [j] ne []
       copyDWIMFix prefArr  [j] ne []
 
     num_tasks <- dPrimSV "num_tasks" int64
     sOp $ Imp.GetNumTasks $ tvVar num_tasks
-    blockSize643 <- dPrim "blockSize64"
-    blockSize643 <-- (pe64 n  `divUp` tvExp num_tasks)
 
 
     -- let's create the seg
     fbody <- collect $ do
-      blockID <- dPrim "blockID" :: MulticoreGen (TV Int64)
-      sOp $ Imp.GetTaskId (tvVar blockID)
-      emit $ Imp.DebugPrint "the number of blocks" (Just $ untyped (tvExp num_tasks))
-      chunk_no <- dPrimV "chunk_no" (tvExp blockID * tvExp blockSize643)
-      chunk_length <- dPrimV "chunk_length" (min (tvExp blockSize643) (pe64 n - tvExp chunk_no))
+      
+      -- blockID <- dPrim "blockID" :: MulticoreGen (TV Int64)
+      -- sOp $ Imp.GetTaskId (tvVar blockID)
+      emit $ Imp.DebugPrint "the block_ID" (Just $ untyped (tvExp num_tasks))
+      
+      let one = (1 :: Imp.TExp Int64)
+      let idx0 = Imp.elements (0 :: Imp.TExp Int32)
+     
+      block_idx <- dPrim "block_idx" :: MulticoreGen (TV Int64)
+      sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) work_index idx0 (untyped one)
+      sWhile (tvExp block_idx .<. tvExp block_no) $ do
+        start <- dPrimV "start" (tvExp block_idx * blockSize)
+        chunk_length <- dPrimV "chunk_length" (min blockSize (pe64 n - tvExp start))
 
-      sFor "j" (tvExp chunk_length) $ \j -> do
-        let one = (1 :: Imp.TExp Int64)
-        oldVal <- dPrim "oldVal" :: MulticoreGen (TV Int64)
+        j <- dPrimV "j" (0 :: Imp.TExp Int64)
+
+        sWhile (tvExp j .<. tvExp chunk_length) $ do
+          dPrimV_ i (tvExp start + tvExp j)
+          emit $ Imp.DebugPrint "the value of loop index" (Just $ untyped (tvExp start + tvExp j))
+          compileStms mempty kstms $ do
+            forM_ [res] $ \se -> copyDWIMFix (patElemName pe) [tvExp start + tvExp j] se []
+          j <-- tvExp j + 1
+        sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) work_index idx0 (untyped one)
+
+
         -- acc <- dPrim "acc" :: MulticoreGen (TV Int64)
         -- acc <-- (0 :: Imp.TExp Int64)
         -- accMem <- sAlloc "acc" (Imp.bytes 8) Imp.DefaultSpace
 
-        let idx0 = Imp.elements (0 :: Imp.TExp Int32)
 
         -- sOp $ Imp.Atomic (Imp.AtomicAdd Int64 (tvVar oldVal) accLili (Imp.elements (1 :: Imp.TExp Int32)) (untyped one) )
         -- print the value of accmem
         -- emit $ Imp.DebugPrint "entering the loop" Nothing
-        sWhen (tvExp chunk_no + j .<. pe64 n) $ do
-          sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar oldVal) acc_mem idx0 (untyped one)
-          emit $ Imp.DebugPrint "the value of accmem" (Just $ untyped (tvExp oldVal))
 
-
-          i_val <- dPrimV "i" (tvExp chunk_no + j)
-          dPrimV_ i (tvExp i_val)
-          emit $ Imp.DebugPrint "the value of loop index" (Just $ untyped (tvExp i_val))
-          compileStms mempty kstms $ do
-            forM_ [res] $ \se -> copyDWIMFix (patElemName pe) [tvExp i_val] se []
 
       -- emit $ Imp.DebugPrint "Inside block loop" (Just $ untyped (tvExp blockID))
       -- emit $ Imp.DebugPrint "HEllo World" (Just $ untyped (tvExp nblocks))
