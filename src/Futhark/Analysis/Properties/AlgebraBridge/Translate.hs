@@ -235,7 +235,7 @@ fromAlgebra_ (Algebra.Sum (Algebra.POR vns) lb ub) = do
     <$> mapM
       (\vn -> fromAlgebra_ $ Algebra.Sum (Algebra.One vn) lb ub)
       (S.toList vns)
-fromAlgebra_ (Algebra.Pow {}) = undefined
+fromAlgebra_ (Algebra.Pow (c, e)) = sym2SoP . Pow c <$> fromAlgebra e
 
 -- Like lookupUntransSym, but if the name is not in the untranslatable
 -- environment, assume that it is a variable with the same name
@@ -462,6 +462,7 @@ toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
       pure $ Algebra.Idx (idxSym booltype vn) idx'
     _ -> lookupUntransPE sym
 toAlgebra_ x@(Apply {}) = lookupUntransPE x
+toAlgebra_ (Pow c e) = Algebra.Pow . (c,) <$> toAlgebra e
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
 -- The rest are boolean statements.
 toAlgebra_ x = handleBoolean x

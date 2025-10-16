@@ -312,12 +312,14 @@ forward (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
         let (Forall i (Iota n) : dim) : trailing_dims = shape f
         let Forall _ (Iota m) = head (head (shape g))
         let new_shape = (Forall i (Iota (n .+. m)) : dim) : trailing_dims
-        -- 3. create guards for to toggle each array in each dimension
+        let leading_dim_offset = foldl (.*.) n [sz | Forall _ (Iota sz) <- dim]
+        -- 3. create guards that toggle each array
         let select_x = sVar i :< n
         x <- newNameFromString "#x"
         y <- newNameFromString "#y"
         let idxs = indices new_shape
-        let idx' = head idxs .-. rep (mkRep i n) (head idxs)
+        let idx' = head idxs .-. leading_dim_offset
+        -- error $ prettyStr (n, leading_dim_offset, idx')
         IndexFn
           { shape = new_shape,
             body =

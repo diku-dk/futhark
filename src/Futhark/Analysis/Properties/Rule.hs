@@ -145,6 +145,10 @@ rulesIndexFn = do
   h2 <- newVName "h"
   h3 <- newVName "h"
   h4 <- newVName "h"
+  i1 <- newVName "i1"
+  i2 <- newVName "i2"
+  e1 <- newVName "e1"
+  e2 <- newVName "e2"
   pure
     [ Rule
         { name = "Rule 5 (carry)",
@@ -382,5 +386,29 @@ rulesIndexFn = do
             e_1 <- sub s (hole h3)
             e_2 <- sub s (hole h4)
             pure $ isJust (justConstant e_1) && isJust (justConstant e_2)
+        },
+      Rule
+        { name = "SolveIdx1-Simplified",
+          from =
+            IndexFn
+              { shape = [[Forall i1 (Iota (hole e1)), Forall i2 (Iota (hole e2))]],
+                body =
+                  cases
+                    [ (hole i :== int 0, hole h1),
+                      (hole i :/= int 0, sym2SoP Recurrence)
+                    ]
+              },
+          -- Indexing variable i replaced by 0 in e1.
+          to = \s ->
+            subIndexFn s =<< do
+              let i' = repVName (mapping s) i
+              e1 <- sub s (hole h1)
+              let e1_b = rep (mkRep i' (int 0)) e1
+              pure $
+                IndexFn
+                  { shape = [[Forall i (Iota (hole n))]],
+                    body = cases [(Bool True, e1_b)]
+                  },
+          sideCondition = vacuous
         }
     ]

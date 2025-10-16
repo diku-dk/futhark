@@ -14,6 +14,7 @@ import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty)
 import Language.Futhark (VName)
+import Data.Maybe (isJust)
 
 from1Dto2D :: Quantified Domain -> Quantified Domain -> SoP Symbol -> [(VName, SoP Symbol)]
 from1Dto2D (Forall i (Iota n)) (Forall j (Iota m)) e_idx

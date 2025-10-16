@@ -12,22 +12,22 @@ import Data.Map qualified as M
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==), toAlgebra)
-import Futhark.Analysis.Properties.Flatten (lookupII, from1Dto2D)
+import Futhark.Analysis.Properties.AlgebraBridge (addRelDim, answerFromBool, orM, simplify, toAlgebra, ($==))
+import Futhark.Analysis.Properties.Flatten (from1Dto2D, lookupII)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ)
-import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
+import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ, (=>?))
+import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, unifiesWith, solveIx)
 import Futhark.Analysis.Properties.Symbol
+import Futhark.Analysis.Properties.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify (Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, sym2SoP, (.*.), (.+.), (.-.), justSym)
+import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
-import qualified Futhark.Analysis.Properties.Symbol as Algebra
 
 -- If f has multiple cases, we would not know which case to substitute
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
@@ -173,7 +173,10 @@ subber argCheck g = do
 -- Substitute `f(args)` for its value in `g`.
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
 substituteOnce f g_presub (f_apply, actual_args) = do
-  printM 6 $ "substituteOnce \n  " <> prettyStr f <> "\n  " <> prettyStr g_presub <> "\n  " <> prettyStr (f_apply, actual_args)
+  printM 6 $ "substituteOnce \n  |_ f " <> prettyStr f
+  printM 6 $ "  |_ g_presub " <> prettyStr g_presub
+  printM 6 $ "  |_ f_apply " <> prettyStr f_apply
+  printM 6 $ "  |_ actual_args " <> prettyStr actual_args
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   printM 6 $ "  args: " <> prettyStr args
   g <- repApply vn g_presub
@@ -265,17 +268,12 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           else foldM subRules g [0 .. rank f - 1]
 
     subRules g n =
-      sub0 g <|> sub1 n g <|> propFlattenSimplified n g <|> sub2 n g <|> sub3 n g <|> sub4 n g <|> subX n g
+      sub0 g <|> propFlattenSimplified n g <|> sub1 n g <|> sub2 n g <|> sub3 n g <|> sub4 n g <|> subX n g
 
     -- This is rule is needed because we represent scalars as empty shapes rather
     -- than `for i < 1`, as is done in the paper.
     sub0 g = case shape f of
       [] -> pure g
-      _ -> fail "No match."
-
-    -- Substituting into Iota domain.
-    sub1 n g = case shape f !! n of
-      [Forall _ Iota {}] -> pure g
       _ -> fail "No match."
 
     -- Propagate flattened domain from f to g.
@@ -304,7 +302,12 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           (l, _old_iter : r) = splitAt k (shape g)
       _ -> fail "No match."
 
-    -- Substituting into Cat domain.
+    sub1 n g =
+      if all (\case (Forall _ Iota {}) -> True; _ -> False) (shape f !! n)
+        then pure g
+        else fail "No match."
+
+    -- Propagate Cat domain from f to g.
     --
     -- TODO this only tries to align the n'th dimension of f with the n'th
     -- dimension of g. But we could try any dimension in g.
@@ -318,7 +321,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           (l, _old_iter : r) = splitAt n (shape g)
       _ -> fail "No match."
 
-    -- Substituting into Cat domain.
+    -- f and g's Cat domains unify.
     --
     -- TODO this only tries to align the n'th dimension of f with the n'th
     -- dimension of g. But we could try any dimension in g.
@@ -331,7 +334,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
             pure $ repIndexFn (mkRep k (sym2SoP $ Var k')) g
       _ -> fail "No match."
 
-    -- Substituting into Cat domain.
+    -- f's Cat domain can be simplified away.
     sub4 n g = case shape f !! n of
       [Forall i df@(Cat k _ _)] -> do
         if k `S.member` fv (body g)
@@ -344,8 +347,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           else pure g
       _ -> fail "No match."
 
-    -- Substituting into Cat domain.
-    --
+    -- f's Cat domain handled using II array.
     subX n g = case shape f !! n of
       [Forall i df@(Cat k _ _)] | k `S.member` fv (body g) -> do
         Just arg <- hoistMaybe . pure $ args M.!? i
@@ -356,7 +358,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
         (vn_II, f_II) <- lift $ lookupII df def_II
         lift $ insertIndexFn vn_II [f_II]
         pure (repIndexFn (mkRep k (sym2SoP (Apply (Var vn_II) [arg]))) g)
-      _ -> fail "No match."
+      _ -> error "substitution rules non-exhaustive."
 
 {-
               Utilities
@@ -380,8 +382,3 @@ firstAlt (m : ms) = do
 
 gray :: String -> String
 gray s = "\ESC[2m" <> s <> "\ESC[0m"
-
-unifiesWith :: (Unify v Symbol, Pretty v) => v -> v -> IndexFnM Bool
-unifiesWith a b = do
-  equiv :: Maybe (Substitution Symbol) <- unify a b
-  pure $ isJust equiv

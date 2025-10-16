@@ -13,7 +13,7 @@ where
 import Futhark.Analysis.Properties.Property (Property)
 import Futhark.Analysis.Properties.Util (blueString, prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, justAffine, justConstant, justSym)
-import Futhark.Util.Pretty (Pretty, apply, parens, pretty, prettyString, softline, (<+>))
+import Futhark.Util.Pretty (Pretty, apply, braces, parens, pretty, prettyString, softline, (<+>))
 import Language.Futhark (VName)
 
 data Symbol
@@ -145,7 +145,7 @@ instance Pretty Symbol where
     x :&& y -> autoParens x <+> "^" <+> autoParens y
     x :|| y -> prettyOp "∨" x y
     Pow i y -> pretty i <> "**" <> parens (pretty y)
-    Ix x y z -> blueString "Ix" <> apply (map pretty [x, y, z])
+    Ix x y z -> blueString ("Ix" <> pretty [x, y]) <> apply [pretty z]
     Recurrence -> "↺ "
     Prop p -> pretty p
     Assume p -> "Assume" <+> autoParens p
