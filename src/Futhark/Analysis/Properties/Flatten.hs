@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module Futhark.Analysis.Properties.Flatten (lookupII, from1Dto2D, indices) where
+module Futhark.Analysis.Properties.Flatten (lookupII, from1Dto2D, indices, unflatten) where
 
 import Data.List (tails)
 import Data.Map qualified as M
@@ -40,6 +40,9 @@ flattenIndex dim
     multiply i [] = sym2SoP (Var i)
     multiply i ns = sym2SoP (Var i) .*. foldl1 (.*.) ns
 flattenIndex _ = undefined
+
+unflatten :: IndexFn -> IndexFn
+unflatten f = f { shape = map (:[]) (concat (shape f))}
 
 lookupII :: Domain -> IndexFn -> IndexFnM (VName, IndexFn)
 lookupII dom def = do

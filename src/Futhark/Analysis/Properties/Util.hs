@@ -11,8 +11,6 @@ module Futhark.Analysis.Properties.Util
     locMsg,
     greenString,
     blueString,
-    flatten,
-    unflatten,
   )
 where
 
@@ -83,12 +81,3 @@ greenString s = "\ESC[92m" <> s <> "\ESC[0m"
 
 blueString :: (Semigroup a, IsString a) => a -> a
 blueString s = "\ESC[96m" <> s <> "\ESC[0m"
-
-flatten :: [[a]] -> ([Int], [a])
-flatten xss = (map length xss, concat xss)
-
-unflatten :: [Int] -> [a] -> [[a]]
-unflatten [] _ = []
-unflatten (n : ns) xs =
-  let (chunk, rest) = splitAt n xs
-   in chunk : unflatten ns rest

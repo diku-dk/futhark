@@ -16,7 +16,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, paramToAlgebra, simplify, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Properties.Flatten (indices)
+import Futhark.Analysis.Properties.Flatten (unflatten)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (dimSize, domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
@@ -295,8 +295,6 @@ forward (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
   | "++" <- E.baseString $ E.qualLeaf vn_op = do
       fs <- forward e_x
       gs <- forward e_y
-      printM 2 $ "fs " <> prettyStr fs
-      printM 2 $ "gs " <> prettyStr gs
       unless (length fs == length gs) (error "Internal error.")
       forM (zip fs gs) $ \(f, g) -> do
         when (any (\case (Forall _ (Cat {})) -> True; _ -> False) $ concat (shape f) ++ concat (shape g)) $
@@ -317,18 +315,20 @@ forward (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
         let select_x = sVar i :< n
         x <- newNameFromString "#x"
         y <- newNameFromString "#y"
-        let idxs = indices new_shape
-        let idx' = head idxs .-. leading_dim_offset
-        -- error $ prettyStr (n, leading_dim_offset, idx')
+        -- Unflatten f and g so that we can index it without first
+        -- converting to flat indexing...
+        let indices = map (sym2SoP . Var . boundVar) (concat new_shape)
+        let i1 = head indices .-. leading_dim_offset
+        -- error $ prettyStr ( n, leading_dim_offset, idx')
         IndexFn
           { shape = new_shape,
             body =
               cases
-                [ (select_x, sym2SoP $ Apply (Var x) idxs),
-                  (neg select_x, sym2SoP $ Apply (Var y) (idx' : drop 1 idxs))
+                [ (select_x, sym2SoP $ Apply (Var x) indices),
+                  (neg select_x, sym2SoP $ Apply (Var y) (i1 : drop 1 indices))
                 ]
           }
-          `substParams` [(x, f), (y, g)]
+          `substParams` [(x, unflatten f), (y, unflatten g)]
   where
     -- (++) : [n]t -> [m]t -> [n+m]t
     -- The first dimension in both arrays may differ (i.e., n and m), remaining

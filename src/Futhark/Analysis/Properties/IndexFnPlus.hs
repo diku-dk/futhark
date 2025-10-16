@@ -25,7 +25,7 @@ import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (repVName)
 import Futhark.Analysis.Properties.Unify (FreeVariables (..), Renameable (..), Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
-import Futhark.Analysis.Properties.Util (flatten, prettyName, unflatten)
+import Futhark.Analysis.Properties.Util (prettyName)
 import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), align, comma, commastack, hang, indent, line, parens, punctuate, sep, softline, stack, (<+>))
 import Language.Futhark (VName)
@@ -190,6 +190,15 @@ instance Renameable IndexFn where
         pure (v', t', Forall i dom)
       renameIter v t it =
         (v,t,) <$> rename_ v t it
+
+      flatten :: [[a]] -> ([Int], [a])
+      flatten xss = (map length xss, concat xss)
+
+      unflatten :: [Int] -> [a] -> [[a]]
+      unflatten [] _ = []
+      unflatten (n : ns) xs =
+        let (chunk, rest) = splitAt n xs
+         in chunk : unflatten ns rest
 
 instance Unify Domain Symbol where
   unify_ k (Iota n) (Iota m) = unify_ k n m
