@@ -212,6 +212,21 @@ instance Unify Iterator Symbol where
     s <- if i == j then pure mempty else unify_ k (Hole i) (Var j)
     (s <>) <$> unify_ k (repDomain s d1) (repDomain s d2)
 
+instance Unify [[Iterator]] Symbol where
+  unify_ k xss yss
+    | length xss == length yss,
+      map length xss == map length yss =
+        go (zip (concat xss) (concat yss))
+    | otherwise = fail "different lengths"
+    where
+      go [] = pure mempty
+      go (u : us) = do
+        s0 <- uncurry (unify_ k) u
+        foldM
+          (\s (a, b) -> (s <>) <$> unify_ k (repIterator s a) (repIterator s b))
+          s0
+          us
+
 instance Unify IndexFn Symbol where
   unify_ = unifyIndexFnWith unify_
 
@@ -222,22 +237,5 @@ unifyIndexFnWith ::
   IndexFn ->
   MaybeT IndexFnM (Replacement Symbol)
 unifyIndexFnWith unifyBody k (IndexFn dims1 body1) (IndexFn dims2 body2) = do
-  s <- unifiesIter_ k dims1 dims2
+  s <- unify_ k dims1 dims2
   (s <>) <$> unifyBody k (repCases s body1) (repCases s body2)
-
-unifiesIter_ :: (Foldable t1, Foldable t2) => VName -> t1 [Iterator] -> t2 [Iterator] -> MaybeT IndexFnM (Replacement Symbol)
-unifiesIter_ k xss yss
-  | length xss == length yss =
-      unifiesFlatIter_ k (concat xss) (concat yss)
-  | otherwise = fail "different lengths"
-
-unifiesFlatIter_ :: VName -> [Iterator] -> [Iterator] -> MaybeT IndexFnM (Replacement Symbol)
-unifiesFlatIter_ k xs ys
-  | length xs == length ys = do
-      go (zip xs ys)
-  | otherwise = fail "different lengths"
-  where
-    go [] = pure mempty
-    go (u : us) = do
-      s0 <- uncurry (unify_ k) u
-      foldM (\s (a, b) -> (s <>) <$> unify_ k (repIterator s a) (repIterator s b)) s0 us

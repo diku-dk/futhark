@@ -16,6 +16,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, paramToAlgebra, simplify, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
+import Futhark.Analysis.Properties.Flatten (indices)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (dimSize, domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
@@ -32,6 +33,7 @@ import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (./.), (~*~), (~+~), (~-~))
+import Futhark.Util.Pretty (Pretty)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
@@ -291,10 +293,52 @@ forward (E.Not e _) = do
       rewrite $ f {body = cmapValues (mapSymSoP (sym2SoP . neg)) (body f)}
 forward (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
   | "++" <- E.baseString $ E.qualLeaf vn_op = do
-      f_x <- forward e_x
-      f_y <- forward e_y
-      printM 2 $ "f_y " <> prettyStr f_x
-      undefined
+      fs <- forward e_x
+      gs <- forward e_y
+      printM 2 $ "fs " <> prettyStr fs
+      printM 2 $ "gs " <> prettyStr gs
+      unless (length fs == length gs) (error "Internal error.")
+      forM (zip fs gs) $ \(f, g) -> do
+        when (any (\case (Forall _ (Cat {})) -> True; _ -> False) $ concat (shape f) ++ concat (shape g)) $
+          error "Internal error (get rid of Cat domain)."
+        -- 1. they are shape compatible
+        shapes_are_compatible <- shapeCompatible (shape f) (shape g)
+        -- The operation type-checked, so this error should never hit.
+        -- (TODO handle the case where we have inferred that one dimension has
+        -- been flattened in one function, but not in the other, in which case
+        -- the other should simply adopt that.)
+        unless shapes_are_compatible (error "Not implemented yet.")
+        -- 2. concatenate leading dimension
+        let (Forall i (Iota n) : dim) : trailing_dims = shape f
+        let Forall _ (Iota m) = head (head (shape g))
+        let new_shape = (Forall i (Iota (n .+. m)) : dim) : trailing_dims
+        -- 3. create guards for to toggle each array in each dimension
+        let select_x = sVar i :< n
+        x <- newNameFromString "#x"
+        y <- newNameFromString "#y"
+        let idxs = indices new_shape
+        let idx' = head idxs .-. rep (mkRep i n) (head idxs)
+        IndexFn
+          { shape = new_shape,
+            body =
+              cases
+                [ (select_x, sym2SoP $ Apply (Var x) idxs),
+                  (neg select_x, sym2SoP $ Apply (Var y) (idx' : drop 1 idxs))
+                ]
+          }
+          `substParams` [(x, f), (y, g)]
+  where
+    -- (++) : [n]t -> [m]t -> [n+m]t
+    -- The first dimension in both arrays may differ (i.e., n and m), remaining
+    -- dimensions have to be identical (type t).
+    -- If the first dimension is flattened in the index function representation
+    -- (i.e., has multiple iterators), then the first iterator of that dimension
+    -- may differ, and the others have to be identical to preserve the flattened
+    -- structure. (TODO If they're not identical, we could flatten all the
+    -- iterators into one.)
+    shapeCompatible (x : xs) (y : ys) =
+      (drop 1 x : xs) `unifiesWith` (drop 1 y : ys)
+    shapeCompatible _ _ = undefined
 forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op',
@@ -1525,3 +1569,8 @@ checkBounds e f_xs idxs =
               <> " => "
               <> prettyStr (bound e_idx)
               <> ")."
+
+unifiesWith :: (Unify v Symbol, Pretty v) => v -> v -> IndexFnM Bool
+unifiesWith a b = do
+  equiv :: Maybe (Substitution Symbol) <- unify a b
+  pure $ isJust equiv

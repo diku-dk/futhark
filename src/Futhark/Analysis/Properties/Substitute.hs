@@ -98,11 +98,13 @@ subst indexfn = do
 
 -- Are you substituting xs[i] for xs = for i < e . true => xs[i]?
 -- This happens when xs is a formal argument.
-trivialSub :: (ReplacementBuilder v Symbol) => IndexFn -> Symbol -> [v] -> Bool
-trivialSub (IndexFn [] _) _ _ = False
-trivialSub f e args
-  | length (shape f) == length args =
-      repCases dims2args (body f) == cases [(Bool True, sym2SoP e)]
+trivialSub :: Symbol -> IndexFn -> [SoP Symbol] -> Bool
+trivialSub _ (IndexFn [] _) _ = False
+trivialSub e f args
+  | length (shape f) == length args,
+    all ((== 1) . length) (shape f),
+    Just e' <- justSym =<< justSingleCase f =
+      sym2SoP e == rep dims2args e'
   | otherwise = False
   where
     dims2args =
@@ -124,7 +126,7 @@ subber argCheck g = do
       case apply of
         Just (e, vn, args)
           | Just [f] <- ixfns M.!? vn,
-            not (trivialSub f e args),
+            not (trivialSub e f args),
             argCheck f e args -> do
               g' <- substituteOnce f g (e, args)
               case g' of

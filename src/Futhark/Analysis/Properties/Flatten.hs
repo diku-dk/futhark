@@ -1,5 +1,8 @@
-module Futhark.Analysis.Properties.Flatten (lookupII, from1Dto2D) where
+{-# LANGUAGE LambdaCase #-}
 
+module Futhark.Analysis.Properties.Flatten (lookupII, from1Dto2D, indices) where
+
+import Data.List (tails)
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.IndexFn
@@ -8,7 +11,7 @@ import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Unify
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, sym2SoP, (.*.), (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty)
 import Language.Futhark (VName)
 
@@ -19,6 +22,23 @@ from1Dto2D (Forall i (Iota n)) (Forall j (Iota m)) e_idx
        in [(i, idx), (j, e_idx .-. idx .*. m)]
   | otherwise = error "Not implemented yet."
 from1Dto2D _ _ _ = undefined
+
+indices :: [[Quantified Domain]] -> [SoP Symbol]
+indices = map flattenIndex
+
+flattenIndex :: [Quantified Domain] -> SoP Symbol
+flattenIndex dim
+  | S.fromList (map boundVar dim) `S.disjoint` mconcat (map fv dim),
+    all (\case (Forall _ (Iota {})) -> True; _ -> False) dim =
+      let nss = drop 1 (tails [n | Forall _ (Iota n) <- dim])
+       in foldl
+            (.+.)
+            (int2SoP 0)
+            [multiply i ns | (i, ns) <- zip (map boundVar dim) nss]
+  where
+    multiply i [] = sym2SoP (Var i)
+    multiply i ns = sym2SoP (Var i) .*. foldl1 (.*.) ns
+flattenIndex _ = undefined
 
 lookupII :: Domain -> IndexFn -> IndexFnM (VName, IndexFn)
 lookupII dom def = do
