@@ -1,15 +1,3 @@
--- TODO extract loop body into a function; otherwise I dont think
--- the analysis is sane? do the index functions inside reflect that
--- there may be several iterations? i.e., x cannot be assumed
--- to have its initial value for the analysis, but should
--- instead be treated as an argument.
--- This should really be done in Convert.hs so as to not
--- make such a mistake.
---
-
--- def cat [n][m] 't (xs: [n]t) (ys: [m]t): [n+m]t =
---   map (\i -> if i < n then xs[i] else ys[i - n]) (iota (n+m))
-
 def loop_body (lgn: i64) (x: *[1<<lgn]f32) (qm1: {i64 | \qm1' -> Range qm1' (0,lgn)}) (omega_pows: [1<<lgn]f32): {*[1<<lgn]f32 | \_ -> true} =
     let q = qm1 + 1   -- q in [1..lgn]
     let L = 1i64 << q -- 2^q
@@ -44,4 +32,5 @@ def fft2Par (lgn: { i64 | \ x -> x > 0 }) (omega: f32) (x: *[1<<lgn]f32)
     in
       loop (x : *[1<<lgn]f32) -- this should be [n]f32
       for qm1 < lgn do
-        loop_body lgn x qm1 (sized (1 << lgn) omega_pows)
+        let omega_pows_type_fix = omega_pows :> [1 << lgn]f32
+        in loop_body lgn x qm1 omega_pows_type_fix
