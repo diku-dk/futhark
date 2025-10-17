@@ -522,7 +522,6 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
       (outer_dim, aligned_args) <- zipArgsSOAC loc [pat_x] xs
 
       bindLambdaBodyParams (mconcat aligned_args)
-      -- let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
       let acc_vns = E.patNames pat_acc
       bodies <- rollbackAlgEnv $ do
         addRelDim outer_dim
@@ -530,7 +529,6 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
 
       neutrals <- forward ne
 
-      -- unless (length bodies == length acc_vns == length neutrals)
       forM (zip3 bodies acc_vns neutrals) $ \(f_body, acc, f_ne) -> do
         let f_rec = repIndexFn (mkRep acc (sym2SoP Recurrence)) f_body
         f_base <- f_body @ (acc, f_ne)
