@@ -122,11 +122,14 @@ algebraContext :: IndexFn -> IndexFnM b -> IndexFnM b
 algebraContext fn m = rollbackAlgEnv $ do
   let ps = getPredicates fn
   mapM_ trackBooleanNames ps
+  -- NOTE current implementation can only handle one Hole. Without compromising
+  -- correctness (only precision), we simply pick the outermost dimension's
+  -- index variable.
   case map boundVar (concat $ shape fn) of
     [] -> pure ()
     is -> do
-      mapM_ (handlePreds is) ps
-      addDisjointedness is ps
+      mapM_ (handlePreds (take 1 is)) ps
+      addDisjointedness (take 1 is) ps
   _ <- handleQuantifiers fn
   m
   where
@@ -206,8 +209,6 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
                   (&&) <$> (int2SoP 0 $<=$ e') <*> (e' $<$ ub')
         _ ->
           pure [idx]
-      -- printM 2 $ "fromAlgebra_ " <> prettyStr e
-      -- printM 2 $ "fromAlgebra_ " <> prettyStr (Apply (Var vn) idx')
       pure . sym2SoP $ Apply (Var vn) idx'
 fromAlgebra_ (Algebra.Idx (Algebra.POR vns) i) = do
   foldr1 (.+.)
