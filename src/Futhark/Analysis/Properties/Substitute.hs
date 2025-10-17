@@ -173,12 +173,12 @@ subber argCheck g = do
 -- Substitute `f(args)` for its value in `g`.
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
 substituteOnce f g_presub (f_apply, actual_args) = do
-  printM 6 $ "substituteOnce \n  |_ f " <> prettyStr f
-  printM 6 $ "  |_ g_presub " <> prettyStr g_presub
-  printM 6 $ "  |_ f_apply " <> prettyStr f_apply
-  printM 6 $ "  |_ actual_args " <> prettyStr actual_args
+  printM 10 $ "substituteOnce \n  |_ f " <> prettyStr f
+  printM 10 $ "  |_ g_presub " <> prettyStr g_presub
+  printM 10 $ "  |_ f_apply " <> prettyStr f_apply
+  printM 10 $ "  |_ actual_args " <> prettyStr actual_args
   vn <- newVName ("<" <> prettyString f_apply <> ">")
-  printM 6 $ "  args: " <> prettyStr args
+  printM 10 $ "  args: " <> prettyStr args
   g <- repApply vn g_presub
 
   traverse simplify <=< applySubRules $
@@ -287,9 +287,9 @@ substituteOnce f g_presub (f_apply, actual_args) = do
         -- (The case where `e_3` may depend on `i_2` is still handled by Cat in
         -- this implementation.)
         | i_2 `S.notMember` fv e_3 -> do
-            printM 6 $ "propFlattenSimplified\n  |_ e_1 " <> prettyStr e_1
-            printM 6 $ "  |_ e_2 " <> prettyStr e_2
-            printM 6 $ "  |_ e_3 " <> prettyStr e_3
+            printM 10 $ "propFlattenSimplified\n  |_ e_1 " <> prettyStr e_1
+            printM 10 $ "  |_ e_2 " <> prettyStr e_2
+            printM 10 $ "  |_ e_3 " <> prettyStr e_3
             ans <- lift (e_1 $== e_2 .*. e_3)
             case ans of
               Yes -> do

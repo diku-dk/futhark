@@ -27,6 +27,7 @@ import Data.List (partition, tails)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
+import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.EqSimplifier
@@ -40,7 +41,7 @@ import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad
-import Futhark.SoP.Refine (addRels)
+import Futhark.SoP.Refine (addRel, addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
@@ -125,7 +126,7 @@ dnfQuery p query =
 p =>? q | p == q = pure Yes
 p =>? q = do
   p' <- simplify p
-  printTrace 1337 (prettyIndent 2 p' <> " =>?\n" <> prettyIndent 4 q) $
+  printTrace 6 (prettyIndent 2 p' <> " =>?\n" <> prettyIndent 4 q) $
     pure (answerFromBool $ p' == q)
       `orM` isFalse p'
       `orM` dnfQuery p (check q) -- NOTE uses unsimplified p in query.
@@ -193,6 +194,7 @@ data Statement
   | PFiltPartInv (VName -> Symbol) [VName -> Symbol]
 
 prove :: Property Symbol -> IndexFnM Answer
+-- prove prop | trace ("prove " <> prettyStr prop) False = undefined
 prove prop = alreadyKnown prop `orM` matchProof prop
   where
     alreadyKnown wts@(Rng y _) = do
@@ -292,12 +294,12 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     matchProof (Monotonic x dir) = do
       f <- getFn x
       case f of
-        IndexFn [[Forall i d]] ges -> do
+        IndexFn [[Forall i d]] ges -> algebraContext f $ do
           -- TODO this case is only kept for now because it handles Cat.
           -- Remove this after getting rid of Cat.
           j <- newNameFromString "j"
           newProver (MonGe (fromMonDir dir) i j d ges)
-        IndexFn shape ges -> do
+        IndexFn shape ges -> algebraContext f $ do
           -- Concat because dimension flatness is irrelevant.
           newProver (MonGeNd (fromMonDir dir) (concat shape) ges)
     matchProof (Rng x (Just a, Just b)) =
@@ -342,11 +344,13 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                   j <- newNameFromString "j"
                   let y_at ident = sym2SoP $ Apply (Var y) [sym2SoP (Var ident)]
                   newProver (InjGe i j d gs rcd (y_at i :== y_at j))
-                IndexFn _shape _ges -> do
+                IndexFn shape ges -> algebraContext f_y $ do
                   -- TODO implement InjGe for n-dimensional arrays.
                   -- Concat because dimension flatness is irrelevant.
                   -- newProver (InjGeNd rcd (concat shape) ges)
-                  pure Unknown
+                  newProver (MonGeNd LT (concat shape) ges)
+          -- XXX enable the blow (disabled to reduce vomit while developing)
+          -- `orM` newProver (MonGeNd GT (concat shape) ges)
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
@@ -457,11 +461,11 @@ newProver (MonGe order i j d ges') = do
 newProver (MonGeNd order dom ges) = do
   -- 1. Lexical expansion
   -- 2. check intercase x(i) < x(j)
+  printM 6 $ "MonGeNd " <> show order
   let intercase = forallLT dom $ \i_to_j -> do
-        printM 6 $ "MonGeNd intercase : " <> prettyStr i_to_j
-        printAlgEnv 6
+        printM 6 $ "  |_ i_to_j " <> prettyStr i_to_j
         printM 6 $
-          "MonGeNd intercase : "
+          "  |_ queries "
             <> prettyStr
               ( [ prettyStr (p :&& repSelf i_to_j p) <> " => " <> prettyStr (e `rel` rep i_to_j e)
                   | (p, e) <- casesToList ges
@@ -838,15 +842,31 @@ lexicalLT dims =
       addEquiv (Algebra.Var j) (sym2SoP (Algebra.Var i))
 
     i #< j = \d -> do
-      addRelIterator (Forall j d)
-      i +< j
+      case d of
+        Iota m -> do
+          m' <- toAlgebra m
+          addRels $
+            S.fromList
+              [ sym2SoP (Algebra.Var i) :<=: sym2SoP (Algebra.Var j) .-. int2SoP 1,
+                sym2SoP (Algebra.Var j) :<=: m' .-. int2SoP 1,
+                int2SoP 2 :<=: m'
+              ]
+          addRel $ int2SoP 0 :<=: sym2SoP (Algebra.Var i)
+        _ -> do
+          addRelIterator (Forall j d)
+          addRelIterator (Forall i (Iota (sym2SoP $ Var j)))
+    -- i +< j
 
     i #>= j = \d -> do
       addRelIterator (Forall i d)
-      j +< i
+      addRelIterator (Forall j (Iota (sym2SoP $ Var i)))
+
+-- j +< i
 
 sortStrict :: [Quantified Domain] -> Cases Symbol (SoP Symbol) -> IndexFnM (Maybe [(Symbol, SoP Symbol)])
 sortStrict dom ges = do
+  printM 6 $ "sortStrict \n  |_ dom " <> prettyStr dom
+  printM 6 $ "  |_ ges " <> prettyStr ges
   dims <- mapM (\(Forall i d) -> (i,,d) <$> newNameFromString "j") dom
   let i_to_j = mkRepFromList [(i, sym2SoP (Var j)) | (i, j, _) <- dims]
   let cmpGes (p1, e1) (p2, e2) = rollbackAlgEnv $ do
@@ -856,7 +876,17 @@ sortStrict dom ges = do
         case lt of
           Yes -> pure LT
           Unknown -> do
-            gt <- forallLT' dims (p =>? (e1 :> e2'))
+            gt <-
+              forallLT'
+                dims
+                ( do
+                    printAlgEnv 6
+                    a :: SoP Algebra.Symbol <- toAlgebra e1
+                    b :: SoP Algebra.Symbol <- toAlgebra e2'
+                    printM 6 ("  |_ a " <> prettyStr a)
+                    printM 6 ("  |_ b " <> prettyStr b)
+                    p =>? (e1 :> e2')
+                )
             case gt of
               Yes -> pure GT
               Unknown -> pure Undefined
