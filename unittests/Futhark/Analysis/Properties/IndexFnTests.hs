@@ -684,6 +684,16 @@ tests =
                   body = cases [(Bool True, sHole xs)]
                 }
             ]
+        ),
+      mkTest
+        "tests/indexfn/srad.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))]],
+                  -- matches anything; we're just checking the program.
+                  body = cases [(Bool True, sHole xs)]
+                }
+            ]
         )
       -- mkTest
       --   "tests/indexfn/quickhull.fut"
