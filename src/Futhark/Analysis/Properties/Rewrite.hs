@@ -5,9 +5,9 @@ module Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, unifie
 import Control.Monad (filterM, (<=<))
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraBridge (Answer (..), addRelDim, addRelShape, algebraContext, andM, assume, isFalse, isUnknown, simplify)
+import Futhark.Analysis.Properties.AlgebraBridge (Answer (..), addRelShape, algebraContext, andM, assume, isFalse, isUnknown, simplify)
 import Futhark.Analysis.Properties.IndexFn (Domain (Iota), IndexFn (..), Quantified (..), cases, casesToList)
-import Futhark.Analysis.Properties.Monad (IndexFnM, prettyStr, printAlgEnv, printM, rollbackAlgEnv)
+import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Properties.Query ((=>?))
 import Futhark.Analysis.Properties.Rule (Rule (..), applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
@@ -139,34 +139,19 @@ solveIx [dim] =
 solveIx _shape = pure
 
 solveIdx0sidecond :: [Quantified Domain] -> Symbol -> IndexFnM Bool
-solveIdx0sidecond [d1@(Forall _ (Iota _)), d2@(Forall _ (Iota e2))] sym@(Ix _ m e_idx) = do
+solveIdx0sidecond [Forall _ (Iota _), Forall _ (Iota e2)] (Ix _ m e_idx) = do
   dimensions_match <- e2 `unifiesWith` m
   let multiples_of_m = filterSoP (\t c -> isJust (term2SoP t c ./. m)) e_idx
   pure $ dimensions_match && not (isZero multiples_of_m)
 solveIdx0sidecond _ _ = pure False
 
 solveIdx0 :: [Quantified Domain] -> Symbol -> IndexFnM (SoP Symbol)
-solveIdx0 [d1@(Forall i1 (Iota _)), d2@(Forall i2 (Iota e2))] sym@(Ix n m e_idx)
+solveIdx0 [Forall i1 (Iota _), Forall i2 (Iota e2)] sym@(Ix n m e_idx)
   | i1 `S.notMember` fv e2 = do
-      printM 2 $ "solveIdx0 \n  |_ d1 " <> prettyStr d1
-      printM 2 $ "  |_ d2 " <> prettyStr d2
-      printM 2 $ "  |_ sym " <> prettyStr sym
       let multiples_of_m = filterSoP (\t c -> isJust (term2SoP t c ./. m)) e_idx
-      printM 2 $ "  |_ multiples_of_m " <> prettyStr multiples_of_m
       -- The rest assumes solveIdx0sidecond is true.
       let e_i = fromJust (multiples_of_m ./. m)
       let e_j = e_idx .-. multiples_of_m
-      printM 2 $ "  |_ e_i " <> prettyStr e_i
-      printM 2 $ "  |_ e_j " <> prettyStr e_j
-
--- TODO
--- * need to do this before e_idx has been simplified
---      ((i₅₀₉₁)*(2**(qm1₄₆₀₄)) + i₅₂₁₀ + -1*(2**(-1 + lgn₄₆₀₂ + -1*qm1₄₆₀₄))*(2**(qm1₄₆₀₄)))
---    gets simplified to
---      ((i₅₀₆₇)*(2**(qm1₄₆₀₄)) + i₅₁₇₉ + -1*2**(-1 + lgn₄₆₀₂))
---    by the algebra layer.
--- * can solveIdx0 be invoked already in Convert of (++)? (or in Substitute before simplifications)
-      
       equation_solved <- checkRange e_i i1 n `andM` checkRange e_j i2 m
       case equation_solved of
         Yes -> pure e_i
@@ -178,7 +163,7 @@ solveIdx0 [d1@(Forall i1 (Iota _)), d2@(Forall i2 (Iota e2))] sym@(Ix n m e_idx)
 solveIdx0 _ sym = pure (sym2SoP sym)
 
 solveIdx1 :: [Quantified Domain] -> Symbol -> IndexFnM Symbol
-solveIdx1 [d1@(Forall i1 (Iota e1)), d2@(Forall _ (Iota e2))] sym@(Ix n m e_idx)
+solveIdx1 [Forall i1 (Iota _), Forall _ (Iota e2)] sym@(Ix _ m e_idx)
   -- SolveIdx1-Simplified from the supplementary material.
   | i1 `S.notMember` fv e2 = do
       dimensions_match <- e2 `unifiesWith` m

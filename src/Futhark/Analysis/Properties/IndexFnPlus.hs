@@ -15,7 +15,7 @@ module Futhark.Analysis.Properties.IndexFnPlus
   )
 where
 
-import Control.Monad (foldM, zipWithM_)
+import Control.Monad (foldM)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M

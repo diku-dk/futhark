@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module Futhark.Analysis.Properties.Flatten (lookupII, from1Dto2D, indices, unflatten) where
+module Futhark.Analysis.Properties.Flatten (lookupII, from1Dto2D, unflatten) where
 
 import Data.List (tails)
 import Data.Map qualified as M
@@ -14,7 +14,6 @@ import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty)
 import Language.Futhark (VName)
-import Data.Maybe (isJust)
 
 from1Dto2D :: Quantified Domain -> Quantified Domain -> SoP Symbol -> [(VName, SoP Symbol)]
 from1Dto2D (Forall i (Iota n)) (Forall j (Iota m)) e_idx
@@ -24,8 +23,8 @@ from1Dto2D (Forall i (Iota n)) (Forall j (Iota m)) e_idx
   | otherwise = error "Not implemented yet."
 from1Dto2D _ _ _ = undefined
 
-indices :: [[Quantified Domain]] -> [SoP Symbol]
-indices = map flattenIndex
+flatIndices :: [[Quantified Domain]] -> [SoP Symbol]
+flatIndices = map flattenIndex
 
 flattenIndex :: [Quantified Domain] -> SoP Symbol
 flattenIndex dim
@@ -42,7 +41,7 @@ flattenIndex dim
 flattenIndex _ = undefined
 
 unflatten :: IndexFn -> IndexFn
-unflatten f = f { shape = map (:[]) (concat (shape f))}
+unflatten f = f {shape = map (: []) (concat (shape f))}
 
 lookupII :: Domain -> IndexFn -> IndexFnM (VName, IndexFn)
 lookupII dom def = do

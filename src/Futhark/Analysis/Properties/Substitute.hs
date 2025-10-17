@@ -12,21 +12,20 @@ import Data.Map qualified as M
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (addRelDim, answerFromBool, orM, simplify, toAlgebra, ($==))
+import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
 import Futhark.Analysis.Properties.Flatten (from1Dto2D, lookupII)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ, (=>?))
-import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, unifiesWith, solveIx)
+import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ)
+import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, unifiesWith)
 import Futhark.Analysis.Properties.Symbol
-import Futhark.Analysis.Properties.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify (Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
-import Futhark.Util.Pretty (Pretty, prettyString)
+import Futhark.SoP.SoP (SoP, justSym, sym2SoP, (.*.), (.+.))
+import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
 -- If f has multiple cases, we would not know which case to substitute
@@ -97,7 +96,7 @@ subst indexfn = do
   subber (legalArg k g) g
 
 -- Are you substituting xs[i] for xs = for i < e . true => xs[i]?
--- This happens when xs is a formal argument.
+-- This happens when xs is a formal argument. (So not relevant for flattened arrays.)
 trivialSub :: Symbol -> IndexFn -> [SoP Symbol] -> Bool
 trivialSub _ (IndexFn [] _) _ = False
 trivialSub e f args
@@ -109,8 +108,6 @@ trivialSub e f args
   where
     dims2args =
       mkRepFromList $ zipWith (\[dim] arg -> (boundVar dim, arg)) (shape f) args
-
--- TODO implement flattened ^dim.
 
 subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
 subber argCheck g = do
@@ -173,12 +170,7 @@ subber argCheck g = do
 -- Substitute `f(args)` for its value in `g`.
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
 substituteOnce f g_presub (f_apply, actual_args) = do
-  printM 10 $ "substituteOnce \n  |_ f " <> prettyStr f
-  printM 10 $ "  |_ g_presub " <> prettyStr g_presub
-  printM 10 $ "  |_ f_apply " <> prettyStr f_apply
-  printM 10 $ "  |_ actual_args " <> prettyStr actual_args
   vn <- newVName ("<" <> prettyString f_apply <> ">")
-  printM 10 $ "  args: " <> prettyStr args
   g <- repApply vn g_presub
 
   traverse simplify <=< applySubRules $
@@ -296,7 +288,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
                 e_row <- lift . rewrite $ sym2SoP (Var i_2) .*. e_3
                 let s = mkRep i_1 (e_row .+. sym2SoP (Var i_3))
                 pure $ g {shape = l <> (df : r), body = repCases s (body g)}
-                error "propFlattenSimplified succeeded (I'd like to know first time)"
+                error "propFlattenSimplified succeeded (I'd like to know first time when getting rid of Cat)"
               Unknown -> pure g
         where
           (l, _old_iter : r) = splitAt k (shape g)

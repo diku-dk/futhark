@@ -299,27 +299,25 @@ forward (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
       forM (zip fs gs) $ \(f, g) -> do
         when (any (\case (Forall _ (Cat {})) -> True; _ -> False) $ concat (shape f) ++ concat (shape g)) $
           error "Internal error (get rid of Cat domain)."
-        -- 1. they are shape compatible
         shapes_are_compatible <- shapeCompatible (shape f) (shape g)
         -- The operation type-checked, so this error should never hit.
         -- (TODO handle the case where we have inferred that one dimension has
         -- been flattened in one function, but not in the other, in which case
         -- the other should simply adopt that.)
         unless shapes_are_compatible (error "Not implemented yet.")
-        -- 2. concatenate leading dimension
+        -- Concatenate leading dimension.
         let (Forall i (Iota n) : dim) : trailing_dims = shape f
         let Forall _ (Iota m) = head (head (shape g))
         let new_shape = (Forall i (Iota (n .+. m)) : dim) : trailing_dims
         let leading_dim_offset = foldl (.*.) n [sz | Forall _ (Iota sz) <- dim]
-        -- 3. create guards that toggle each array
+        -- Create guards that toggle each array. We unflatten f and g for the
+        -- substitution, so that we can index it without first converting to
+        -- flat indexing.
         let select_x = sVar i :< n
         x <- newNameFromString "#x"
         y <- newNameFromString "#y"
-        -- Unflatten f and g so that we can index it without first
-        -- converting to flat indexing...
         let indices = map (sym2SoP . Var . boundVar) (concat new_shape)
         let i1 = head indices .-. leading_dim_offset
-        -- error $ prettyStr ( n, leading_dim_offset, idx')
         IndexFn
           { shape = new_shape,
             body =
@@ -1010,7 +1008,6 @@ scatterSc1 xs@(IndexFn ([Forall i dom_dest] : _) _) (e_is, is) vs
   | rank is == 1,
     rank xs == rank vs = do
       dest_size <- lift $ rewrite $ domainEnd dom_dest
-      printM 100 $ "scatterSc1: dest_size " <> prettyStr dest_size
       vn_inds <- warningInds
       perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
       case perm of
@@ -1205,40 +1202,6 @@ toTupleOfArrays (E.Scalar ty) = project ty
 
 newtype Tree a = Node [Tree a]
   deriving (Show)
-
-tupleToShape :: E.ScalarTypeBase dim u -> [[Integer]]
-tupleToShape = map (map toInteger) . count . Node . (: []) . toTree
-  where
-    count (Node xs)
-      | all (\(Node x) -> null x) xs = []
-      | otherwise =
-          let shape = map (\case Node [] -> 1; Node ys -> length ys) xs
-           in shape : concatMap count xs
-
-    toTree (E.Record ts) = Node (map unpack (M.elems ts))
-    toTree _ = Node []
-
-    unpack E.Array {} = error "Arrays of structures is not supported."
-    unpack (E.Scalar t) = toTree t
-
--- Transform a pattern like `((x: t), ((y: t), (z: t)))` into the corresponding
--- projections on the tupled valued: `[[0], [1,0], [1,1]]`.
-patToProjections :: E.Pat t -> [[Integer]]
-patToProjections = project
-  where
-    project E.Id {} = pure mempty
-    project (E.PatParens p _) = project p
-    project (E.TuplePat pats _) = do
-      (i, p) <- zip [0 ..] pats
-      map (i :) (project p)
-    -- indices <- map project pats
-    -- zipWith (:) [0..] indices
-    project (E.RecordPat fs _) = foldMap (project . snd) fs
-    project E.Wildcard {} = pure mempty
-    project (E.PatAscription p _ _) = project p
-    project E.PatLit {} = pure mempty
-    project E.PatConstr {} = error "what is this"
-    project (E.PatAttr _ p _) = project p
 
 -- HACK this lets us propagate any properties on the output names
 -- to the postcondition. For example, in the below we want to

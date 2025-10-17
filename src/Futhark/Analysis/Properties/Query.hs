@@ -27,7 +27,6 @@ import Data.List (partition, tails)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
-import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.EqSimplifier
@@ -194,7 +193,6 @@ data Statement
   | PFiltPartInv (VName -> Symbol) [VName -> Symbol]
 
 prove :: Property Symbol -> IndexFnM Answer
--- prove prop | trace ("prove " <> prettyStr prop) False = undefined
 prove prop = alreadyKnown prop `orM` matchProof prop
   where
     alreadyKnown wts@(Rng y _) = do
@@ -349,8 +347,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                   -- Concat because dimension flatness is irrelevant.
                   -- newProver (InjGeNd rcd (concat shape) ges)
                   newProver (MonGeNd LT (concat shape) ges)
-          -- XXX enable the blow (disabled to reduce vomit while developing)
-          -- `orM` newProver (MonGeNd GT (concat shape) ges)
+                    `orM` newProver (MonGeNd GT (concat shape) ges)
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
@@ -459,23 +456,12 @@ newProver (MonGe order i j d ges') = do
       GT -> (:>)
       _ -> error "Not implemented yet."
 newProver (MonGeNd order dom ges) = do
-  -- 1. Lexical expansion
-  -- 2. check intercase x(i) < x(j)
   printM 6 $ "MonGeNd " <> show order
   let intercase = forallLT dom $ \i_to_j -> do
-        printM 6 $ "  |_ i_to_j " <> prettyStr i_to_j
-        printM 6 $
-          "  |_ queries "
-            <> prettyStr
-              ( [ prettyStr (p :&& repSelf i_to_j p) <> " => " <> prettyStr (e `rel` rep i_to_j e)
-                  | (p, e) <- casesToList ges
-                ]
-              )
         allM
           [ (p :&& repSelf i_to_j p) =>? e `rel` rep i_to_j e
             | (p, e) <- casesToList ges
           ]
-  -- 3. check intracase x(i) < x(j)   (by sorting ges)
   let intracase = answerFromBool . isJust <$> sortStrict dom ges
   intercase `andM` intracase
   where
@@ -767,7 +753,7 @@ prove_ baggage (PermutationOfZeroTo m) fn =
   prove_ baggage (PermutationOfRange (int2SoP 0) m) fn
 prove_ _ (ForallSegments _) _ =
   undefined
-prove_ _ _ _ = pure Unknown -- error "Not implemented yet."
+prove_ _ _ _ = pure Unknown
 
 data Order = LT | GT | Undefined
   deriving (Eq, Show)
@@ -844,6 +830,7 @@ lexicalLT dims =
     i #< j = \d -> do
       case d of
         Iota m -> do
+          -- Gives us greater control over how the ranges are added.
           m' <- toAlgebra m
           addRels $
             S.fromList
@@ -855,13 +842,10 @@ lexicalLT dims =
         _ -> do
           addRelIterator (Forall j d)
           addRelIterator (Forall i (Iota (sym2SoP $ Var j)))
-    -- i +< j
 
     i #>= j = \d -> do
       addRelIterator (Forall i d)
       addRelIterator (Forall j (Iota (sym2SoP $ Var i)))
-
--- j +< i
 
 sortStrict :: [Quantified Domain] -> Cases Symbol (SoP Symbol) -> IndexFnM (Maybe [(Symbol, SoP Symbol)])
 sortStrict dom ges = do
@@ -876,17 +860,7 @@ sortStrict dom ges = do
         case lt of
           Yes -> pure LT
           Unknown -> do
-            gt <-
-              forallLT'
-                dims
-                ( do
-                    printAlgEnv 6
-                    a :: SoP Algebra.Symbol <- toAlgebra e1
-                    b :: SoP Algebra.Symbol <- toAlgebra e2'
-                    printM 6 ("  |_ a " <> prettyStr a)
-                    printM 6 ("  |_ b " <> prettyStr b)
-                    p =>? (e1 :> e2')
-                )
+            gt <- forallLT' dims (p =>? (e1 :> e2'))
             case gt of
               Yes -> pure GT
               Unknown -> pure Undefined
