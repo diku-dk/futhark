@@ -571,14 +571,20 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
       valss <- forward e_vals >>= mapM rewrite
 
       forM (zip3 dests indss valss) $ \(dest, inds, vals) -> do
-        -- 1. Scatter in-bounds-monotonic indices:
-        rule1 <- runMaybeT $ scatterSc1 dest (e_inds, inds) vals
-        rule2 <- runMaybeT $ scatterSc2 dest (e_inds, inds) vals
-        rule3 <- runMaybeT $ scatterSc3 dest (e_inds, inds) vals
+        safety <- scatterSafe dest (e_inds, inds) vals
+        f <- case safety of
+          Unknown -> do
+            printM 10 "scatter: unable to show safety"
+            pure Nothing
+          Yes ->
+            runMaybeT $
+              scatterSc1 dest (e_inds, inds) vals
+                <|> scatterSc2 dest inds vals
+                <|> scatterSc3 dest
         maybe
           (error $ errorMsg loc "Failed to infer index function for scatter.")
           pure
-          (rule1 <|> rule2 <|> rule3)
+          f
   | Just "hist" <- getFun e_f,
     Just hist_vn <- justVName e_f,
     [_, _, e_k, _, _] <- getArgs args = do
@@ -1003,10 +1009,8 @@ scatterSc1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
 scatterSc1 xs@(IndexFn ([Forall i dom_dest] : _) _) (e_is, is) vs
   | rank is == 1,
     rank xs == rank vs = do
-      safe <- lift $ scatterSafe xs (e_is, is) vs
-      when (isUnknown safe) (failMsg "scatterSc1: unable to show safety")
       dest_size <- lift $ rewrite $ domainEnd dom_dest
-      printM 1337 $ "scatterSc1: dest_size " <> prettyStr dest_size
+      printM 100 $ "scatterSc1: dest_size " <> prettyStr dest_size
       vn_inds <- warningInds
       perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
       case perm of
@@ -1042,10 +1046,8 @@ scatterSc1 xs@(IndexFn ([Forall i dom_dest] : _) _) (e_is, is) vs
           fail ""
 scatterSc1 _ _ _ = fail ""
 
-scatterSc2 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc2 xs@(IndexFn [[Forall _ d_xs]] _) (e_is, is@(IndexFn [[Forall k (Iota m)]] _)) vs = do
-  safe <- lift $ scatterSafe xs (e_is, is) vs
-  when (isUnknown safe) (failMsg "scatterSc2: unable to show safety")
+scatterSc2 :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterSc2 xs@(IndexFn [[Forall _ d_xs]] _) is@(IndexFn [[Forall k (Iota m)]] _) vs = do
   n <- lift $ rewrite $ domainEnd d_xs .+. int2SoP 1
   -- Check that we can show whether each case is in domain of xs or not.
   let in_dom_xs y = int2SoP 0 :<= y :&& y :< n
@@ -1111,17 +1113,15 @@ scatterSc2 xs@(IndexFn [[Forall _ d_xs]] _) (e_is, is@(IndexFn [[Forall k (Iota 
 scatterSc2 _ _ _ = fail ""
 
 -- Scatter fallback: result is uninterpreted, but safe.
-scatterSc3 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc3 xs@(IndexFn [[Forall i dom_dest]] _) (e_is, is) vs = do
-  safe <- lift $ scatterSafe xs (e_is, is) vs
-  when (isUnknown safe) (failMsg "scatterSc3: unable to show safety")
+scatterSc3 :: IndexFn -> MaybeT IndexFnM IndexFn
+scatterSc3 (IndexFn [[Forall i dom_dest]] _) = do
   uninterpreted <- newNameFromString "safe_scatter"
   lift . pure $
     IndexFn
       { shape = [[Forall i dom_dest]],
         body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
       }
-scatterSc3 _ _ _ = fail ""
+scatterSc3 _ = fail ""
 
 {-
     Utilities.
