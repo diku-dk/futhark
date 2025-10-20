@@ -115,7 +115,7 @@ queryCase query fn case_idx = algebraContext fn $ do
 dnfQuery :: Symbol -> IndexFnM Answer -> IndexFnM Answer
 dnfQuery p query =
   allM $
-    map (\p' -> rollbackAlgEnv (assume p' >> printAlgEnv 6 >> query)) (disjToList $ toDNF p)
+    map (\p' -> rollbackAlgEnv (assume p' >> query)) (disjToList $ toDNF p)
   where
     disjToList (a :|| b) = disjToList a <> disjToList b
     disjToList x = [x]
@@ -126,7 +126,7 @@ p =>? q | p == q = pure Yes
 p =>? q = do
   p' <- simplify p
   printAlgEnv 6
-  printM 6 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q)
+  -- printM 6 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q)
   printTrace 6 (prettyIndent 2 p' <> " =>?\n" <> prettyIndent 4 q) $
     pure (answerFromBool $ p' == q)
       `orM` isFalse p'
@@ -828,6 +828,7 @@ lexicalLT dims =
     i #== j = \d -> do
       addRelIterator (Forall i d)
       addEquiv (Algebra.Var j) (sym2SoP (Algebra.Var i))
+      printM 6 $ "# ASSUMING " <> prettyStr (sym2SoP (Var i) :== sym2SoP (Var j))
 
     i #< j = \d -> do
       case d of
@@ -841,13 +842,16 @@ lexicalLT dims =
                 int2SoP 2 :<=: m'
               ]
           addRel $ int2SoP 0 :<=: sym2SoP (Algebra.Var i)
+          printM 6 $ "# ASSUMING " <> prettyStr (sym2SoP (Var i) :< sym2SoP (Var j))
         _ -> do
           addRelIterator (Forall j d)
           addRelIterator (Forall i (Iota (sym2SoP $ Var j)))
+          printM 6 $ "# ASSUMING " <> prettyStr (sym2SoP (Var i) :< sym2SoP (Var j))
 
     i #>= j = \d -> do
       addRelIterator (Forall i d)
       addRelIterator (Forall j (Iota (sym2SoP $ Var i)))
+      printM 6 $ "# ASSUMING " <> prettyStr (sym2SoP (Var i) :>= sym2SoP (Var j))
 
 sortStrict :: [Quantified Domain] -> Cases Symbol (SoP Symbol) -> IndexFnM (Maybe [(Symbol, SoP Symbol)])
 sortStrict dom ges = do
@@ -855,14 +859,16 @@ sortStrict dom ges = do
   printM 6 $ "  |_ ges:\n" <> prettyIndent 8 ges
   dims <- mapM (\(Forall i d) -> (i,,d) <$> newNameFromString "j") dom
   let i_to_j = mkRepFromList [(i, sym2SoP (Var j)) | (i, j, _) <- dims]
-  let cmpGes (p1, e1) (p2, e2) = rollbackAlgEnv $ do
-        let p = p1 :&& repSelf i_to_j p2
-        let e2' = rep i_to_j e2
-        lt <- forallLT' dims (p =>? (e1 :< e2'))
+  let cmpGes (p1_i, e1_i) (p2_i, e2_i) = rollbackAlgEnv $ do
+        let p1_j = repSelf i_to_j p1_i
+        let p2_j = repSelf i_to_j p2_i
+        let e1_j = rep i_to_j e1_i
+        let e2_j = rep i_to_j e2_i
+        lt <- forallLT' dims ((p1_i :&& p2_j) =>? (e1_i :< e2_j)) `andM` forallLT' dims ((p1_j :&& p2_i) =>? (e1_j :< e2_i))
         case lt of
           Yes -> pure LT
           Unknown -> do
-            gt <- forallLT' dims (p =>? (e1 :> e2'))
+            gt <- forallLT' dims ((p1_i :&& p2_j) =>? (e1_i :> e2_j)) `andM` forallLT' dims ((p1_j :&& p2_i) =>? (e1_j :> e2_i))
             case gt of
               Yes -> pure GT
               Unknown -> pure Undefined
