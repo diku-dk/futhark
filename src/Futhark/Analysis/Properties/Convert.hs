@@ -388,6 +388,7 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
                           Yes -> pure $ IndexFn [] $ singleCase $ sym2SoP $ Pow i $ x .-. y
                           Unknown -> doOp uninterpretedOp
                     | otherwise -> doOp uninterpretedOp
+            | otherwise -> doOp uninterpretedOp
           _ -> error ("forward not implemented for bin op: " <> show bop)
   where
     uninterpretedOp a b = sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a, sym2SoP b]
