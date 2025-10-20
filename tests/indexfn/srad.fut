@@ -21,27 +21,26 @@
 -- compiled input @ data/image.in.gz
 -- output @ data/image.out.gz
 
-def indexN(_rows: i64, i: i32): i32 =
+def indexN(_rows: i64, i: i64): i64 =
   if i == 0 then i else i - 1
 
-def indexS(rows: i64, i: i32): i32 =
-  if i == i32.i64 rows-1 then i else i + 1
+def indexS(rows: i64, i: i64): i64 =
+  if i == rows-1 then i else i + 1
 
-def indexW(_cols: i64, j: i32): i32 =
+def indexW(_cols: i64, j: i64): i64 =
   if j == 0 then j else j - 1
 
-def indexE(cols: i64, j: i32): i32 =
-  if j == i32.i64 cols-1 then j else j + 1
+def indexE(cols: i64, j: i64): i64 =
+  if j == cols-1 then j else j + 1
 
 def sumf32 [n] (xs: [n]f32): f32 =
   if n > 0 then (scan (\x y -> x + y) 0 xs)[n-1] else 0
 
-def loop_body [rows][cols] (lambda: f32, image: [rows][cols]f32) (neROI: i64): {[rows][cols]f32 | \_ -> true} =
+def loop_body [rows][cols] (lambda: f32, image: [rows][cols]f32) (neROI: {i64 | \x -> Range x (0,inf) && Range rows (1,inf) && Range cols (1,inf)}): {[rows][cols]f32 | \_ -> true} =
     -- ROI statistics for entire ROI (single number for ROI)
     let flatten_image = flatten image
-    let lolz = scan (\x y -> x + y) 0 flatten_image
     let sum = sumf32 flatten_image
-    let sum2 = sumf32 (map (**2.0) flatten_image)
+    let sum2 = sumf32 (map (\x -> x*x) flatten_image)
     -- get mean (average) value of element in ROI
     let meanROI = sum / f32.i64 neROI
     -- gets variance of ROI
@@ -50,10 +49,10 @@ def loop_body [rows][cols] (lambda: f32, image: [rows][cols]f32) (neROI: i64): {
     let q0sqr = varROI / (meanROI*meanROI)
 
     let (dN, dS, dW, dE, c) =
-      unzip5 (map2 (\i_64 row ->
-                unzip5 (map2 (\j_64 jc ->
-                        let i = i32.i64 i_64
-                        let j = i32.i64 j_64
+      unzip5 (map2 (\i row ->
+                unzip5 (map2 (\j jc ->
+                        -- let i = i32.i64 i_64
+                        -- let j = i32.i64 j_64
                         let dN_k = #[unsafe] image[indexN(rows,i),j] - jc
                         let dS_k = #[unsafe] image[indexS(rows,i),j] - jc
                         let dW_k = #[unsafe] image[i, indexW(cols,j)] - jc
@@ -75,10 +74,10 @@ def loop_body [rows][cols] (lambda: f32, image: [rows][cols]f32) (neROI: i64): {
              (iota rows) image)
 
     let image =
-      map4 (\i_64 image_row c_row (dN_row, dS_row, dW_row, dE_row) ->
-                map4 (\j_64 pixel c_k (dN_k, dS_k, dW_k, dE_k)  ->
-                          let i = i32.i64 i_64
-                          let j = i32.i64 j_64
+      map4 (\i image_row c_row (dN_row, dS_row, dW_row, dE_row) ->
+                map4 (\j pixel c_k (dN_k, dS_k, dW_k, dE_k)  ->
+                          -- let i = i32.i64 i_64
+                          -- let j = i32.i64 j_64
                           let cN = c_k
                           let cS = #[unsafe] c[indexS(rows, i), j]
                           let cW = c_k
