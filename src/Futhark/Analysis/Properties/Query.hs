@@ -115,7 +115,7 @@ queryCase query fn case_idx = algebraContext fn $ do
 dnfQuery :: Symbol -> IndexFnM Answer -> IndexFnM Answer
 dnfQuery p query =
   allM $
-    map (\p' -> rollbackAlgEnv (assume p' >> query)) (disjToList $ toDNF p)
+    map (\p' -> rollbackAlgEnv (assume p' >> printAlgEnv 6 >> query)) (disjToList $ toDNF p)
   where
     disjToList (a :|| b) = disjToList a <> disjToList b
     disjToList x = [x]
@@ -125,6 +125,8 @@ dnfQuery p query =
 p =>? q | p == q = pure Yes
 p =>? q = do
   p' <- simplify p
+  printAlgEnv 6
+  printM 6 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q)
   printTrace 6 (prettyIndent 2 p' <> " =>?\n" <> prettyIndent 4 q) $
     pure (answerFromBool $ p' == q)
       `orM` isFalse p'
@@ -456,7 +458,7 @@ newProver (MonGe order i j d ges') = do
       GT -> (:>)
       _ -> error "Not implemented yet."
 newProver (MonGeNd order dom ges) = do
-  printM 6 $ "MonGeNd " <> show order
+  printM 6 $ title "MonGeNd " <> show order
   let intercase = forallLT dom $ \i_to_j -> do
         allM
           [ (p :&& repSelf i_to_j p) =>? e `rel` rep i_to_j e
@@ -850,7 +852,7 @@ lexicalLT dims =
 sortStrict :: [Quantified Domain] -> Cases Symbol (SoP Symbol) -> IndexFnM (Maybe [(Symbol, SoP Symbol)])
 sortStrict dom ges = do
   printM 6 $ "sortStrict \n  |_ dom " <> prettyStr dom
-  printM 6 $ "  |_ ges " <> prettyStr ges
+  printM 6 $ "  |_ ges:\n" <> prettyIndent 8 ges
   dims <- mapM (\(Forall i d) -> (i,,d) <$> newNameFromString "j") dom
   let i_to_j = mkRepFromList [(i, sym2SoP (Var j)) | (i, j, _) <- dims]
   let cmpGes (p1, e1) (p2, e2) = rollbackAlgEnv $ do

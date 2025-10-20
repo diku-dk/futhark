@@ -209,7 +209,6 @@ isTrue sym = do
 isFalse :: Symbol -> IndexFnM Answer
 isFalse (Bool False) = pure Yes
 isFalse p = do
-  printM 6 ("isFalse " <> prettyStr p)
   -- If we convert p to CNF, a sufficient condition for p to be false
   -- is that some clause q in p is false. Hence we can pick a clause q,
   -- assume all other clauses to be true, and use that information when
@@ -220,11 +219,7 @@ isFalse p = do
     falsify (q : left) right = do
       ans <- rollbackAlgEnv $ do
         mapM_ assume (left <> right)
-        printAlgEnv 6
-        printM 6 ("  |_ trying to falsify: " <> prettyStr q)
-        printM 6 ("  |_ by proving: " <> prettyStr (neg q))
-        printTrace 6 "  |_" $
-          isTrue (neg q)
+        isTrue (neg q)
       case ans of
         Yes -> pure Yes
         Unknown -> falsify left (q : right)

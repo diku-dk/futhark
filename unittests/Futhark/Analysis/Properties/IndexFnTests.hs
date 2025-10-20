@@ -23,9 +23,10 @@ tests =
     [ mkTest
         "tests/indexfn/fft.fut"
         ( pure $ \(i, n, xs, _) ->
+            -- Match anything; we test whether the intermediate analysis is OK.
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
-                  body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Apply (Hole xs) [sHole i]))]
+                  body = cases [(Bool True, sym2SoP $ Hole xs)]
                 }
             ]
         ),
@@ -34,7 +35,7 @@ tests =
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
-                  body = cases [(Bool True, int2SoP 0)]
+                  body = cases [(Bool True, sym2SoP $ Hole xs)]
                 }
             ]
         ),

@@ -18,8 +18,6 @@ def loop_body (lgn: i64) (x: *[1<<lgn]f32) (qm1: {i64 | \qm1' -> Range qm1' (0,l
     let (is1, vs1, is2, vs2) = unzip4 (flatten res_nested)
     let is = is1 ++ is2
     let vs = vs1 ++ vs2
-    -- let is = cat is1 is2
-    -- let vs = cat vs1 vs2
     let x' = scatter x is vs
     in  x'
 
