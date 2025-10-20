@@ -309,7 +309,6 @@ forward (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
         let (Forall i (Iota n) : dim) : trailing_dims = shape f
         let Forall _ (Iota m) = head (head (shape g))
         let new_shape = (Forall i (Iota (n .+. m)) : dim) : trailing_dims
-        let leading_dim_offset = foldl (.*.) n [sz | Forall _ (Iota sz) <- dim]
         -- Create guards that toggle each array. We unflatten f and g for the
         -- substitution, so that we can index it without first converting to
         -- flat indexing.
@@ -317,7 +316,7 @@ forward (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
         x <- newNameFromString "#x"
         y <- newNameFromString "#y"
         let indices = map (sym2SoP . Var . boundVar) (concat new_shape)
-        let i1 = head indices .-. leading_dim_offset
+        let i1 = head indices .-. n
         IndexFn
           { shape = new_shape,
             body =
