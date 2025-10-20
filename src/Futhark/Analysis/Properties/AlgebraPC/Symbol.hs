@@ -62,7 +62,7 @@ instance RangeRelated Symbol where
   rangeRelatedTo = leadingNames
     where
       leadingNames (Var vn) = S.singleton (Var vn)
-      leadingNames (Pow _ ) = S.empty
+      leadingNames (Pow (_, x)) = mconcat $ map leadingNames $ S.toList (free x)
       leadingNames (Idx ix _ ) = leadingIdxNames ix
       leadingNames (Mdf _ vn _ _ ) = S.singleton (Var vn)
       leadingNames (Sum ix _ _ ) = leadingIdxNames ix
