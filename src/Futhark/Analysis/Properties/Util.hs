@@ -36,7 +36,7 @@ prettyBinding vn e =
       <+> prettyName vn
       <+> "="
       <> line
-      <> "    "
+      <> "  "
       <> align (ppTupleLines' $ map pretty e)
 
 prettyIndent :: (Pretty a) => Int -> a -> String

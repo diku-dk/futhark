@@ -27,7 +27,7 @@ import Futhark.Analysis.Properties.SymbolPlus (repVName)
 import Futhark.Analysis.Properties.Unify (FreeVariables (..), Renameable (..), Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
 import Futhark.Analysis.Properties.Util (prettyName)
 import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.*.), (.+.), (.-.))
-import Futhark.Util.Pretty (Pretty (pretty), align, comma, commastack, hang, indent, line, parens, punctuate, sep, softline, stack, (<+>))
+import Futhark.Util.Pretty (Pretty (pretty), align, comma, commastack, hang, indent, line, parens, punctuate, sep, softline, stack, (<+>), (</>))
 import Language.Futhark (VName)
 
 domainStart :: Domain -> SoP Symbol
@@ -121,7 +121,7 @@ instance Pretty Iterator where
 
 instance Pretty IndexFn where
   pretty (IndexFn [] e) = "•" <+> pretty e
-  pretty (IndexFn iter e) = stack (map pretty iter) <+> pretty e
+  pretty (IndexFn iter e) = stack (map pretty iter) </> indent 2 (pretty e)
 
 instance FreeVariables Domain where
   fv (Iota n) = fv n
