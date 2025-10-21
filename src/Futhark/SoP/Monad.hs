@@ -361,9 +361,8 @@ instance (Ord u, Ord e) => Monoid (AlgEnv u e p) where
 
 instance (Pretty u, Pretty e, Pretty p) => Pretty (AlgEnv u e p) where
   pretty env =
-    hang 4 $
-      line
-        <> "Untranslatable: "
+    indent 4 $
+        "Untranslatable: "
         <> pretty (untrans env)
         <> line
         <> "Equivalences: "
