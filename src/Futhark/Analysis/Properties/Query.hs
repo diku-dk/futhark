@@ -125,9 +125,8 @@ dnfQuery p query =
 p =>? q | p == q = pure Yes
 p =>? q = do
   p' <- simplify p
-  printAlgEnv 6
-  -- printM 6 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q)
-  printTrace 6 (prettyIndent 2 p' <> " =>?\n" <> prettyIndent 4 q) $
+  printM 6 "  * ENV" >> printAlgEnv 6
+  printTrace 6 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q) $
     pure (answerFromBool $ p' == q)
       `orM` isFalse p'
       `orM` dnfQuery p (check q) -- NOTE uses unsimplified p in query.
@@ -338,19 +337,36 @@ prove prop = alreadyKnown prop `orM` matchProof prop
         _ -> do
           f_y <- getFn y
           let strat1 = proveFn (PInjective rcd) f_y
-          let strat2 = case f_y of
+          let strat2 = do
+                maybe_gs <- lookupConcat y
+                case maybe_gs of
+                  Just [g1, g2] ->
+                    -- 1. prove each g is injective
+                    -- 2. prove no overlap between gs
+                    newProver (InjGeNd rcd (concat (shape g1)) (body g1))
+                      `andM` newProver
+                        ( InjGeNd
+                            rcd
+                            (concat (shape g2))
+                            (body g2)
+                        )
+                      `andM` newProver
+                        ( NoOverlapGe
+                            rcd
+                            (concat (shape g1), body g1)
+                            (concat (shape g2), body g2)
+                        )
+                  _ -> pure Unknown -- TODO Not implemented yet.
+          let strat3 = case f_y of
                 IndexFn [] _ -> pure Yes
                 IndexFn [[Forall i d]] gs -> algebraContext f_y $ do
                   j <- newNameFromString "j"
                   let y_at ident = sym2SoP $ Apply (Var y) [sym2SoP (Var ident)]
                   newProver (InjGe i j d gs rcd (y_at i :== y_at j))
                 IndexFn shape ges -> algebraContext f_y $ do
-                  -- TODO implement InjGe for n-dimensional arrays.
                   -- Concat because dimension flatness is irrelevant.
-                  -- newProver (InjGeNd rcd (concat shape) ges)
-                  newProver (MonGeNd LT (concat shape) ges)
-                    `orM` newProver (MonGeNd GT (concat shape) ges)
-          strat1 `orM` strat2
+                  newProver (InjGeNd rcd (concat shape) ges)
+          strat1 `orM` strat2 `orM` strat3
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
     matchProof (FiltPartInv x pf pps) = do
@@ -376,12 +392,26 @@ proveFn prop f = prove_ False prop f
 
 data PRule
   = -- i of index function; fresh j; domain of index function; cases of index function; RCD; guiding equation.
-    InjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol)) Symbol
+    InjGe
+      VName
+      VName
+      Domain
+      (Cases Symbol (SoP Symbol))
+      (Maybe (SoP Symbol, SoP Symbol))
+      Symbol
+  | InjGeNd
+      (Maybe (SoP Symbol, SoP Symbol))
+      [Quantified Domain]
+      (Cases Symbol (SoP Symbol))
   | -- Relation; i of index function; fresh j; domain of index function; cases of index function.
     MonGe Order VName VName Domain (Cases Symbol (SoP Symbol))
   | MonGeNd Order [Quantified Domain] (Cases Symbol (SoP Symbol))
   | -- Indexfn of y; x; pf; pps
     FPV2 IndexFn VName (Predicate Symbol) [Predicate Symbol]
+  | NoOverlapGe
+      (Maybe (SoP Symbol, SoP Symbol))
+      ([Quantified Domain], Cases Symbol (SoP Symbol))
+      ([Quantified Domain], Cases Symbol (SoP Symbol))
 
 newProver :: PRule -> IndexFnM Answer
 newProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
@@ -415,6 +445,51 @@ newProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
                 out_of_range x = x :< a :|| b :< x
             Nothing -> pure Unknown
       oob `orM` (p =>? (sym2SoP (Var i) :== sym2SoP (Var j)))
+newProver (InjGeNd rcd dom ges) = algebraContext (IndexFn [dom] ges) $ do
+  printM 6 $ title "InjGeNd " <> prettyStr rcd
+  printM 6 $ "  * " <> prettyStr dom <> "\n  * ges:\n" <> prettyIndent 4 ges
+  -- TODO Optimization: filter expressions not in RCD.
+  -- TODO Optimization: in RCD check and /= query can be fused, but
+  -- I don't do this to keep debugging output clear.
+  forallLT dom $ \i_to_j -> do
+    allM
+      [ ((p1 :&& p2) =>? (e1 :/= e2))
+          `orM` ((p1 :&& p2) =>? (not_in_rcd e1 :|| not_in_rcd e2))
+        | (p1, e1) <- casesToList ges,
+          (p2, e2) <- casesToList (repCases i_to_j ges)
+      ]
+  where
+    not_in_rcd x = case rcd of
+      Just (a, b) -> x :< a :|| b :< x
+      Nothing -> Bool False
+newProver (NoOverlapGe rcd (dom1, ges1) (dom2, ges2))
+  | dom1 == dom2 = rollbackAlgEnv $ do
+      printM 6 $ title "NoOverlapGe " <> prettyStr rcd
+      printM 6 $ "  * " <> prettyStr dom1 <> "\n" <> prettyIndent 4 ges1
+      printM 6 $ "  * " <> prettyStr dom2 <> "\n" <> prettyIndent 4 ges2
+      let q (p1, e1) (p2, e2) =
+            ((p1 :&& p2) =>? (e1 :/= e2))
+              `orM` ((p1 :&& p2) =>? (not_in_rcd e1 :|| not_in_rcd e2))
+      let case_i_eq_j = rollbackAlgEnv $ do
+            printM 6 "  * ASSUME i = j"
+            addRelDim dom1
+            allM
+              [ q (p1, e1) (p2, e2)
+                | (p1, e1) <- casesToList ges1,
+                  (p2, e2) <- casesToList ges2
+              ]
+      let case_i_neq_j = forallNEQ dom1 $ \i_to_j -> do
+            allM
+              [ q (p1, e1) (p2, e2)
+                | (p1, e1) <- casesToList ges1,
+                  (p2, e2) <- casesToList (repCases i_to_j ges2)
+              ]
+      case_i_eq_j `andM` case_i_neq_j
+  | otherwise = pure Unknown -- Not implemented yet.
+  where
+    not_in_rcd x = case rcd of
+      Just (a, b) -> x :< a :|| b :< x
+      Nothing -> Bool False
 newProver (MonGe order i j d ges') = do
   -- WTS: forall ((c1,e1), (c2,e2)) in ges x ges .
   --        i < j ^ c1(i) ^ c2(j) => e1(i) `rel` e2(j).
@@ -783,6 +858,16 @@ sorted cmp = runMaybeT . quicksort
         Undefined -> fail ""
         _ -> pure ord
 
+forallNEQ :: [Quantified Domain] -> (Replacement Symbol -> IndexFnM Answer) -> IndexFnM Answer
+forallNEQ dom query = do
+  js <- forM is (const $ newNameFromString "j")
+  let q = query (mkRepFromList (zipWith (\i j -> (i, sym2SoP $ Var j)) is js))
+  forallLT' (zip3 is js doms) q
+    `andM` forallLT' (zip3 js is doms) q
+  where
+    is = map boundVar dom
+    doms = map formula dom
+
 -- Perform a query of the form `forall i,j in D . i < j => q`
 -- where i and j are vectors in a multi-dimensional domain D.
 forallLT :: [Quantified Domain] -> (Replacement Symbol -> IndexFnM Answer) -> IndexFnM Answer
@@ -828,7 +913,7 @@ lexicalLT dims =
     i #== j = \d -> do
       addRelIterator (Forall i d)
       addEquiv (Algebra.Var j) (sym2SoP (Algebra.Var i))
-      printM 6 $ "# ASSUMING " <> prettyStr (sym2SoP (Var i) :== sym2SoP (Var j))
+      printM 6 $ "  * ASSUME " <> prettyStr (sym2SoP (Var i) :== sym2SoP (Var j))
 
     i #< j = \d -> do
       case d of
@@ -842,16 +927,16 @@ lexicalLT dims =
                 int2SoP 2 :<=: m'
               ]
           addRel $ int2SoP 0 :<=: sym2SoP (Algebra.Var i)
-          printM 6 $ "# ASSUMING " <> prettyStr (sym2SoP (Var i) :< sym2SoP (Var j))
+          printM 6 $ "  * ASSUME " <> prettyStr (sym2SoP (Var i) :< sym2SoP (Var j))
         _ -> do
           addRelIterator (Forall j d)
           addRelIterator (Forall i (Iota (sym2SoP $ Var j)))
-          printM 6 $ "# ASSUMING " <> prettyStr (sym2SoP (Var i) :< sym2SoP (Var j))
+          printM 6 $ "  * ASSUME " <> prettyStr (sym2SoP (Var i) :< sym2SoP (Var j))
 
     i #>= j = \d -> do
       addRelIterator (Forall i d)
       addRelIterator (Forall j (Iota (sym2SoP $ Var i)))
-      printM 6 $ "# ASSUMING " <> prettyStr (sym2SoP (Var i) :>= sym2SoP (Var j))
+      printM 6 $ "  * ASSUME " <> prettyStr (sym2SoP (Var i) :>= sym2SoP (Var j))
 
 sortStrict :: [Quantified Domain] -> Cases Symbol (SoP Symbol) -> IndexFnM (Maybe [(Symbol, SoP Symbol)])
 sortStrict dom ges = do

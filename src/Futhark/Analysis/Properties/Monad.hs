@@ -36,6 +36,8 @@ module Futhark.Analysis.Properties.Monad
     whenBoundsChecking,
     withoutBoundsChecks,
     lookupUninterpreted,
+    lookupConcat,
+    insertConcat,
   )
 where
 
@@ -65,6 +67,7 @@ data VEnv = VEnv
     invalias :: M.Map VName VName,
     uninterpreted :: M.Map E.Exp VName,
     outputNames :: [VName],
+    concats :: M.Map VName [IndexFn],
     checkBounds :: Bool,
     debug :: Bool
   }
@@ -82,7 +85,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty mempty False False
+    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty mempty mempty False False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -138,6 +141,13 @@ insertTopLevelDef vn (args, e) =
 insertII :: Domain -> (VName, IndexFn) -> IndexFnM ()
 insertII dom (vn, f) = do
   modify $ \env -> env {ii = M.insert dom (vn, f) $ ii env}
+
+lookupConcat :: MonadState VEnv f => VName -> f (Maybe [IndexFn])
+lookupConcat vn = M.lookup vn <$> gets concats
+
+insertConcat :: MonadState VEnv m => VName -> [IndexFn] -> m ()
+insertConcat vn fs =
+  modify $ \env -> env {concats = M.insert vn fs $ concats env}
 
 clearAlgEnv :: IndexFnM ()
 clearAlgEnv =

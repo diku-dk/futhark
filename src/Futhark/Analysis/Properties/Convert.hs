@@ -291,53 +291,9 @@ forward (E.Not e _) = do
   where
     negf f =
       rewrite $ f {body = cmapValues (mapSymSoP (sym2SoP . neg)) (body f)}
-forward (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
+forward (E.AppExp (E.BinOp (vn_op, _) _ (_, _) (_, _) _) _)
   | "++" <- E.baseString $ E.qualLeaf vn_op = do
-      fs <- forward e_x
-      gs <- forward e_y
-      unless (length fs == length gs) (error "Internal error.")
-      forM (zip fs gs) $ \(f, g) -> do
-        when (any (\case (Forall _ (Cat {})) -> True; _ -> False) $ concat (shape f) ++ concat (shape g)) $
-          error "Internal error (get rid of Cat domain)."
-        shapes_are_compatible <- shapeCompatible (shape f) (shape g)
-        -- The operation type-checked, so this error should never hit.
-        -- (TODO handle the case where we have inferred that one dimension has
-        -- been flattened in one function, but not in the other, in which case
-        -- the other should simply adopt that.)
-        unless shapes_are_compatible (error "Not implemented yet.")
-        -- Concatenate leading dimension.
-        let (Forall i (Iota n) : dim) : trailing_dims = shape f
-        let Forall _ (Iota m) = head (head (shape g))
-        let new_shape = (Forall i (Iota (n .+. m)) : dim) : trailing_dims
-        -- Create guards that toggle each array. We unflatten f and g for the
-        -- substitution, so that we can index it without first converting to
-        -- flat indexing.
-        let select_x = sVar i :< n
-        x <- newNameFromString "#x"
-        y <- newNameFromString "#y"
-        let indices = map (sym2SoP . Var . boundVar) (concat new_shape)
-        let i1 = head indices .-. n
-        IndexFn
-          { shape = new_shape,
-            body =
-              cases
-                [ (select_x, sym2SoP $ Apply (Var x) indices),
-                  (neg select_x, sym2SoP $ Apply (Var y) (i1 : drop 1 indices))
-                ]
-          }
-          `substParams` [(x, unflatten f), (y, unflatten g)]
-  where
-    -- (++) : [n]t -> [m]t -> [n+m]t
-    -- The first dimension in both arrays may differ (i.e., n and m), remaining
-    -- dimensions have to be identical (type t).
-    -- If the first dimension is flattened in the index function representation
-    -- (i.e., has multiple iterators), then the first iterator of that dimension
-    -- may differ, and the others have to be identical to preserve the flattened
-    -- structure. (TODO If they're not identical, we could flatten all the
-    -- iterators into one.)
-    shapeCompatible (x : xs) (y : ys) =
-      (drop 1 x : xs) `unifiesWith` (drop 1 y : ys)
-    shapeCompatible _ _ = undefined
+      error "Limitation: Must bind (++) result to a name."
 forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op',
@@ -686,6 +642,52 @@ forwardLetEffects [Just _] e@(E.Var (E.QualName _ _) _ loc) = do
   printM 2 . warningMsg loc $
     "Warning: Aliasing " <> prettyStr e <> " strips property information."
   forward e
+forwardLetEffects [Just vn] (E.AppExp (E.BinOp (vn_op, _) _ (e_x, _) (e_y, _) _) _)
+  | "++" <- E.baseString $ E.qualLeaf vn_op = do
+      fs <- forward e_x
+      gs <- forward e_y
+      unless (length fs == length gs) (error "Internal error.")
+      forM (zip fs gs) $ \(f, g) -> do
+        insertConcat vn [f, g]
+        when (any (\case (Forall _ (Cat {})) -> True; _ -> False) $ concat (shape f) ++ concat (shape g)) $
+          error "Internal error (get rid of Cat domain)."
+        shapes_are_compatible <- shapeCompatible (shape f) (shape g)
+        -- The operation type-checked, so this error should never hit.
+        unless shapes_are_compatible (error "Not implemented yet.")
+        -- Concatenate leading dimension.
+        let (Forall i (Iota n) : dim) : trailing_dims = shape f
+        let Forall _ (Iota m) = head (head (shape g))
+        let new_shape = (Forall i (Iota (n .+. m)) : dim) : trailing_dims
+        -- Create guards that toggle each array. We unflatten f and g for the
+        -- substitution, so that we can index it without first converting to
+        -- flat indexing.
+        let select_x = sVar i :< n
+        x <- newNameFromString "#x"
+        y <- newNameFromString "#y"
+        let indices = map (sym2SoP . Var . boundVar) (concat new_shape)
+        let i1 = head indices .-. n
+        IndexFn
+          { shape = new_shape,
+            body =
+              cases
+                [ (select_x, sym2SoP $ Apply (Var x) indices),
+                  (neg select_x, sym2SoP $ Apply (Var y) (i1 : drop 1 indices))
+                ]
+          }
+          `substParams` [(x, unflatten f), (y, unflatten g)]
+  where
+    -- (++) : [n]t -> [m]t -> [n+m]t
+    -- The first dimension in both arrays may differ (i.e., n and m), remaining
+    -- dimensions have to be identical (type t). If the first dimension is
+    -- flattened in the index function representation (i.e., has multiple
+    -- iterators), then the first iterator of that dimension may differ, and
+    -- the others have to be identical to preserve the flattened structure.
+    -- (TODO handle the case where we have inferred that one dimension has been
+    -- flattened in one function, but not in the other, in which case the other
+    -- should simply adopt that.)
+    shapeCompatible (x : xs) (y : ys) =
+      (drop 1 x : xs) `unifiesWith` (drop 1 y : ys)
+    shapeCompatible _ _ = undefined
 forwardLetEffects [Just vn] e@(E.AppExp (E.Apply e_f args _) _)
   | Just "flatten" <- getFun e_f,
     [E.Var (E.QualName _ x) _ _] <- getArgs args = do
