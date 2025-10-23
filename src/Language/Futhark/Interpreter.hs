@@ -78,7 +78,7 @@ instance Located StackFrame where
 data BreakReason
   = -- | An explicit breakpoint in the program.
     BreakPoint
-  | -- | A
+  | -- | An arithmetic operation produced a fresh NaN.
     BreakNaN
 
 data ExtOp a
