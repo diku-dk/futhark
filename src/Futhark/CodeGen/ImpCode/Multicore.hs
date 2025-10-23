@@ -59,6 +59,8 @@ data AtomicOp
   | AtomicXor IntType VName VName (Count Elements (TExp Int32)) Exp
   | AtomicXchg PrimType VName VName (Count Elements (TExp Int32)) Exp
   | AtomicCmpXchg PrimType VName VName (Count Elements (TExp Int32)) VName Exp
+  | AtomicLoad PrimType VName VName (Count Elements (TExp Int32))
+  | AtomicStore PrimType VName (Count Elements (TExp Int32)) Exp
   deriving (Show)
 
 instance FreeIn AtomicOp where
@@ -69,6 +71,8 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicXor _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
   freeIn' (AtomicCmpXchg _ _ arr i retval x) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' retval
   freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicLoad _ _ arr i) = freeIn' arr <> freeIn' i
+  freeIn' (AtomicStore _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 -- | Information about parallel work that is do be done.  This is
 -- passed to the scheduler to help it make scheduling decisions.
