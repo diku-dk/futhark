@@ -77,6 +77,21 @@ def filter_by [n] 't (cs: [n]bool) (xs: [n]t) (dummy: t)
 -- 
 --            Program
 --
+def getSmallestPairs_H_as_arg [arraySize]
+    (nVerts: i64)
+    (H: [nVerts]i64)
+    (flat_edges: {[arraySize*2]i64 | \x -> Range x (0, nVerts)})
+    (flat_edge2Ids: {[arraySize*2]i64 | \x -> Injective x})
+    : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
+         Injective new_edges && Injective new_edgeIds
+      }
+    =
+    let cs = map2 (\i j -> H[i] == j) flat_edges flat_edge2Ids
+    let dummy = 0i64
+    let (newSize, ys) = filter_by cs flat_edges dummy
+    let (_, zs) = filter_by cs flat_edge2Ids dummy
+    in (ys :> [newSize]i64, zs :> [newSize]i64)
+
 def getSmallestPairs_core [arraySize]
     (nVerts: i64)
     (nEdges: i64)

@@ -294,9 +294,11 @@ paramToAlgebra vn wrapper = do
 
 -- Replace bound variable `k` in `e` by Hole.
 removeQuantifier :: Symbol -> VName -> IndexFnM Symbol
-e `removeQuantifier` k = do
-  hole <- sym2SoP . Hole <$> newVName "h"
-  pure . fromJust . justSym $ rep (M.insert k hole mempty) e
+e `removeQuantifier` k
+  | e == Var k = pure (Var k)
+  | otherwise = do
+      hole <- sym2SoP . Hole <$> newVName "h"
+      pure . fromJust . justSym $ rep (M.insert k hole mempty) e
 
 -- Add quantified symbols to the untranslatable environement
 -- with quantifiers replaced by holes. Subsequent lookups
@@ -411,21 +413,23 @@ toAlgebra_ (Var x) = do
     Nothing -> pure $ Algebra.Var x
     Just alg_x -> pure alg_x
 toAlgebra_ e@(Hole _) = error ("toAlgebra_ on Hole " <> prettyStr e)
-toAlgebra_ e@(Sum j lb ub x) = do
-  res <- search x
-  case res of
-    Just (vn, match) -> do
-      let idx = fromMaybe (sym2SoP $ Var j) match
-      a <- mapSymM toAlgebra_ (rep (mkRep j lb) idx)
-      b <- mapSymM toAlgebra_ (rep (mkRep j ub) idx)
-      booltype <- askProperty (Algebra.Var vn) Boolean
-      pure $ Algebra.Sum (idxSym booltype vn) a b
-    Nothing -> do
-      -- Either handle quantifiers needs to be run on the symbol first
-      -- or x did not depend j. Both cases would be odd, and I'd like
-      -- to know why it would happen.
-      error $
-        "handleQuantifiers need to be run (toAlgebra_ " <> prettyStr e <> ")"
+toAlgebra_ e@(Sum j lb ub x)
+  | x == Var j = lookupUntransPE e -- This is n(n+1)/2 where n = ub - lb + 1, but we can't divide by 2.
+  | otherwise = do
+      res <- search x
+      case res of
+        Just (vn, match) -> do
+          let idx = fromMaybe (sym2SoP $ Var j) match
+          a <- mapSymM toAlgebra_ (rep (mkRep j lb) idx)
+          b <- mapSymM toAlgebra_ (rep (mkRep j ub) idx)
+          booltype <- askProperty (Algebra.Var vn) Boolean
+          pure $ Algebra.Sum (idxSym booltype vn) a b
+        Nothing -> do
+          -- Either handle quantifiers needs to be run on the symbol first
+          -- or x did not depend j. Both cases would be odd, and I'd like
+          -- to know why it would happen.
+          error $
+            "handleQuantifiers need to be run (toAlgebra_ " <> prettyStr e <> ")"
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
   vn <- case fst <$> res of
@@ -465,6 +469,7 @@ toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
 toAlgebra_ x@(Apply {}) = lookupUntransPE x
 toAlgebra_ (Pow c e) = Algebra.Pow . (c,) <$> toAlgebra e
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
+toAlgebra_ x@(Ix {}) = lookupUntransPE x
 -- The rest are boolean statements.
 toAlgebra_ x = handleBoolean x
 

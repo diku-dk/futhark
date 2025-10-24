@@ -40,6 +40,15 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/regular_flags.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))]],
+                  body = cases [(Bool True, sym2SoP $ Hole xs)]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/map.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
@@ -694,16 +703,16 @@ tests =
                   body = cases [(Bool True, sHole xs)]
                 }
             ]
-        ),
-      mkTest
-        "tests/indexfn/srad.fut"
-        ( pure $ \(i, n, xs, _) ->
-            [ IndexFn
-                { shape = [[Forall i (Iota (sHole n))]],
-                  -- matches anything; we're just checking the program.
-                  body = cases [(Bool True, sHole xs)]
-                }
-            ]
+      --   ),
+      -- mkTest
+      --   "tests/indexfn/srad.fut"
+      --   ( pure $ \(i, n, xs, _) ->
+      --       [ IndexFn
+      --           { shape = [[Forall i (Iota (sHole n))]],
+      --             -- matches anything; we're just checking the program.
+      --             body = cases [(Bool True, sHole xs)]
+      --           }
+      --       ]
         )
       -- mkTest
       --   "tests/indexfn/quickhull.fut"

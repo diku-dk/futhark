@@ -18,7 +18,7 @@ import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ)
-import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, unifiesWith)
+import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, unifiesWith, solveIx)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify (Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)
@@ -173,22 +173,25 @@ substituteOnce f g_presub (f_apply, actual_args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   g <- repApply vn g_presub
 
-  traverse simplify <=< applySubRules $
+  let new_shape =
+        shape g
+          <&> map
+            ( \case
+                Forall j dg
+                  -- f(args) is not in dom(g).
+                  | vn `notElem` fv dg -> Forall j dg
+                  -- f(args) is in dom(g) and f has only one case.
+                  | Just e_f <- justSingleCase f ->
+                      Forall j $ repDomain (mkRep vn (rep args e_f)) dg
+                  -- f(args) is in dom(g) and f has multiple cases.
+                  | e_f <- flattenCases (body f) ->
+                      Forall j $ repDomain (mkRep vn (rep args e_f)) dg
+            )
+  traverse (simplify <=< solveIx new_shape) <=< applySubRules $
+  -- traverse (solveIx new_shape <=< simplify) <=< applySubRules $
+  -- traverse simplify <=< applySubRules $
     g
-      { shape =
-          shape g
-            <&> map
-              ( \case
-                  Forall j dg
-                    -- f(args) is not in dom(g).
-                    | vn `notElem` fv dg -> Forall j dg
-                    -- f(args) is in dom(g) and f has only one case.
-                    | Just e_f <- justSingleCase f ->
-                        Forall j $ repDomain (mkRep vn (rep args e_f)) dg
-                    -- f(args) is in dom(g) and f has multiple cases.
-                    | e_f <- flattenCases (body f) ->
-                        Forall j $ repDomain (mkRep vn (rep args e_f)) dg
-              ),
+      { shape = new_shape,
         body = cases $ do
           (p_f, e_f) <- guards f
           (p_g, e_g) <- guards g
@@ -279,9 +282,9 @@ substituteOnce f g_presub (f_apply, actual_args) = do
         -- (The case where `e_3` may depend on `i_2` is still handled by Cat in
         -- this implementation.)
         | i_2 `S.notMember` fv e_3 -> do
-            printM 10 $ "propFlattenSimplified\n  |_ e_1 " <> prettyStr e_1
-            printM 10 $ "  |_ e_2 " <> prettyStr e_2
-            printM 10 $ "  |_ e_3 " <> prettyStr e_3
+            printM 3 $ "propFlattenSimplified\n  |_ e_1 " <> prettyStr e_1
+            printM 3 $ "  |_ e_2 " <> prettyStr e_2
+            printM 3 $ "  |_ e_3 " <> prettyStr e_3
             ans <- lift (e_1 $== e_2 .*. e_3)
             case ans of
               Yes -> do
