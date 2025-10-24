@@ -1,7 +1,7 @@
+{-# HLINT ignore "Use camelCase" #-}
+{-# LANGUAGE LambdaCase #-}
 -- Answer queries on index functions using algebraic solver.
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
-{-# HLINT ignore "Use camelCase" #-}
 
 module Futhark.Analysis.Properties.Query
   ( Answer (..),
@@ -336,7 +336,13 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               strat1 `orM` strat2
         _ -> do
           f_y <- getFn y
-          let strat1 = proveFn (PInjective rcd) f_y
+          let strat1 = case f_y of
+                IndexFn shape ges | noCats (concat shape) -> algebraContext f_y $ do
+                  -- Concat because dimension flatness is irrelevant.
+                  newProver (InjGeNd rcd (concat shape) ges)
+                _ -> proveFn (PInjective rcd) f_y
+                where
+                  noCats = all (\case (Forall _ (Cat {})) -> False; _ -> True)
           let strat2 = do
                 maybe_gs <- lookupConcat y
                 case maybe_gs of
@@ -363,9 +369,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                   j <- newNameFromString "j"
                   let y_at ident = sym2SoP $ Apply (Var y) [sym2SoP (Var ident)]
                   newProver (InjGe i j d gs rcd (y_at i :== y_at j))
-                IndexFn shape ges -> algebraContext f_y $ do
-                  -- Concat because dimension flatness is irrelevant.
-                  newProver (InjGeNd rcd (concat shape) ges)
+                _ -> pure Unknown
           strat1 `orM` strat2 `orM` strat3
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
