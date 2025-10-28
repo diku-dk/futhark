@@ -1,5 +1,5 @@
 -- ==
--- tags { no_cuda no_hip no_opencl }
+-- tags { no_cuda no_hip no_opencl no_pyopencl }
 -- entry: mmm_intra16
 -- compiled random input {[128][16][16]f16 [128][16][16]f16} auto output
 

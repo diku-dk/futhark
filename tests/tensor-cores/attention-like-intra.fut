@@ -1,5 +1,5 @@
 -- ==
--- tags { no_cuda no_hip no_opencl }
+-- tags { no_cuda no_hip no_opencl no_pyopencl }
 -- entry: test16
 -- compiled nobench random input {[32][16][16]f16 [32][4][16][16]f16} auto output
 

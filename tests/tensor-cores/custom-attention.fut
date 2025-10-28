@@ -1,5 +1,5 @@
 -- ==
--- tags { no_cuda no_hip no_opencl }
+-- tags { no_cuda no_hip no_opencl no_pyopencl }
 -- entry: run16
 -- only_intra compiled script input { (mk_input 128 16) } output { true }
 
