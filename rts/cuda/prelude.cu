@@ -4,7 +4,9 @@
 #define FUTHARK_FUN_ATTR __device__ static
 #define FUTHARK_F64_ENABLED
 
+#if !defined(__HIPCC_RTC__)
 #include <cuda/std/cstdint>
+#endif
 
 #define __global
 #define __local
