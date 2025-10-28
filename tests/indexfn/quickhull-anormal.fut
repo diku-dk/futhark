@@ -144,8 +144,10 @@ def expand_hull [num_segs] [num_points]
   let ne = (0, zero_dist)
   let bins = replicate num_segs ne
   let inds = points_idx
-  let vals = zip (iota num_points) dists
-  let extrema_ix = reduce_by_index bins max ne inds vals
+  let x = iota num_points
+  let vals = zip x dists
+  let extrema_ix =
+    reduce_by_index bins (\(i,id) (j,jd) -> if dist_less jd id then (i,id) else (j,jd)) ne inds vals
   let (extrema_ix_inds, _extrema_ix_dsts) = unzip extrema_ix
   -- ^ 1. The length of `extrema_ix` is `num_segs` (from above)
   -- V 2. Bounds checks for `extrema_ix[i]` and `segs[i]` are verifiable,
@@ -283,10 +285,10 @@ def extract_empty_segments [num_segs] [num_points]
   let segs' = zip4 segs_true_bx segs_true_by segs_true_ex segs_true_ey
   let sgm_inds' = 
       -- map (\seg_ix -> new_segs_ix[seg_ix] + segs_indicator[seg_ix] - 1) sgm_inds
-      map (\seg_ix -> if segs_inhabited[seg_ix] == 1
+      map (\seg_ix -> if segs_inhabited[seg_ix]
                       then new_segs_ix[seg_ix]
                       else 0
-          )
+          ) sgm_inds
   -- ^ Bounds check for `new_segs_ix[seg_ix]` should succeed, since
   --     precondition dictates `0 <= seg_ix < num_segs`
   --   Array `sgm_inds'` has index function:

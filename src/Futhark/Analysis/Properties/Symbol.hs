@@ -7,6 +7,7 @@ module Futhark.Analysis.Properties.Symbol
     toCNF,
     neg,
     conjToList,
+    justVar,
   )
 where
 
@@ -78,6 +79,10 @@ isBoolean (_ :/= _) = True
 isBoolean (_ :&& _) = True
 isBoolean (_ :|| _) = True
 isBoolean _ = False
+
+justVar :: Symbol -> Maybe VName
+justVar (Var vn) = Just vn
+justVar _ = Nothing
 
 sop2Symbol :: SoP Symbol -> Symbol
 sop2Symbol sop

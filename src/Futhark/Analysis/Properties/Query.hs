@@ -373,6 +373,14 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           strat1 `orM` strat2 `orM` strat3
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
+      -- f_x <- getFn x
+      -- case f_x of
+      --       IndexFn shape ges | noCats (concat shape) -> algebraContext f_x $ do
+      --         -- Concat because dimension flatness is irrelevant.
+      --         newProver (BijGeNd rcd (concat shape) ges)
+      --       _ -> proveFn (PBijectiveRCD rcd img) f_x
+      --       where
+      --         noCats = all (\case (Forall _ (Cat {})) -> False; _ -> True)
     matchProof (FiltPartInv x pf pps) = do
       f_X <- getFn x
       proveFn (PFiltPartInv (predToFun pf) (map predToFun pps)) f_X

@@ -20,12 +20,12 @@ import Futhark.Analysis.Properties.Flatten (unflatten)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (dimSize, domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Property (MonDir (..), cloneProperty)
+import Futhark.Analysis.Properties.Property (MonDir (..), askRng, cloneProperty, nameAffectedBy)
 import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Substitute (subst, (@))
-import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
+import Futhark.Analysis.Properties.Symbol (Symbol (..), justVar, neg, sop2Symbol)
 import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
@@ -558,6 +558,58 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
           pure [fn]
         _ ->
           undefined
+  | Just "reduce_by_index" <- getFun e_f,
+    [_dest, e_op, _ne, _is, _xs] <- getArgs args,
+    E.AppExp (E.BinOp (vn_op, _) _ (_, _) (_, _) _) _ <- e_op,
+    E.baseTag (E.qualLeaf vn_op) <= E.maxIntrinsicTag,
+    name <- E.baseString $ E.qualLeaf vn_op,
+    Just E.Plus <- L.find ((name ==) . prettyStr) [minBound .. maxBound :: E.BinOp] = do
+      undefined
+  | Just "reduce_by_index" <- getFun e_f,
+    [_dest, e_op, _ne, _is, _xs] <- getArgs args,
+    E.Lambda params lam_body _ _ _ <- e_op,
+    xs <- NE.last args,
+    [pat_acc, pat_x] <- params = do
+      -- "min/max/id" rule: if each branch in the body of e_op returns a variable,
+      -- inherit the union of the variables' ranges.
+      --
+      -- For the purpose of inferring ranges, it doesn't matter that there's an
+      -- accumulator because we don't allow e_op to actually do any arithmetic
+      -- anyway---only to return one of the params (possibly in a conditional).
+      (outer_dim, aligned_args) <- zipArgsSOAC loc [pat_acc, pat_x] (NE.fromList [xs, xs])
+      bindLambdaBodyParams (mconcat aligned_args)
+      ops <- rollbackAlgEnv $ do
+        addRelDim outer_dim
+        forward lam_body
+
+      h <- newNameFromString "h"
+      -- Infer ranges.
+      forM_ ops $ \op -> do
+        printM 0 (prettyStr op)
+        case mapM ((justVar <=< justSym) . snd) $ casesToList (body op) of
+          Just vns -> do
+            printM 0 (prettyStr vns)
+            ranges <- rollbackAlgEnv $ do
+              -- Add outer_dim range as property in case vns is just the iterator.
+              mapM_
+                ( \d -> do
+                    n <- toAlgebra (domainEnd (formula d))
+                    addProperty (Algebra.Var $ boundVar d) (Property.Rng (boundVar d) (Just $ int2SoP 0, Just n))
+                )
+                outer_dim
+              sequence <$> mapM (askRng . Algebra.Var) vns
+            forM_ ranges (mapM_ (addProperty (Algebra.Var h) . cloneProperty h))
+          Nothing -> pure ()
+
+      printAlgEnv 0
+
+      -- TODO got the range; it needs to be applied ot the let-bound
+      -- name though, so this should probably move to forwardLetEffects
+      -- and then we don't have to define the uninterpreted function, I think
+      -- (will hit the default case for that).
+      -- TODO pretty sure this could be a histogram in the code, so I think
+      -- we should use that instead, if possible.
+      error $ "reduce_by_index " <> prettyStr params <> " ; " <> prettyStr ops
   | Just "sized" <- getFun e_f,
     [_, e] <- getArgs args = do
       -- No-op.
