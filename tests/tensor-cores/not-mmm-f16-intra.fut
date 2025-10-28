@@ -4,7 +4,6 @@
 -- compiled random input {[128][16][16]f16 [128][16][16]f16} error: CUDA call.*
 
 -- ==
--- tags { no_python no_pyopencl no_c no_multicore no_ispc no_wasm no_wasm-multicore no_hip no_opencl no_cuda }
 -- entry: test_wrong_types
 -- compiled random input {[128][16][16]f32 [128][16][16]f32} error: CUDA call.*
 
