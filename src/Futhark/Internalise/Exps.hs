@@ -363,21 +363,6 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       -- Some functions are magical (overloaded) and we handle that here.
       case () of
         ()
-          -- Short-circuiting operators are magical.
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            baseName (qualLeaf qfname) == "&&",
-            [(x, _), (y, _)] <- args ->
-              internaliseExp desc $
-                E.AppExp
-                  (E.If x y (E.Literal (E.BoolValue False) mempty) mempty)
-                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            baseName (qualLeaf qfname) == "||",
-            [(x, _), (y, _)] <- args ->
-              internaliseExp desc $
-                E.AppExp
-                  (E.If x (E.Literal (E.BoolValue True) mempty) y mempty)
-                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
           -- Overloaded and intrinsic functions never take array
           -- arguments (except equality, but those cannot be
           -- existential), so we can safely ignore the existential
@@ -1513,7 +1498,7 @@ findFuncall (E.Apply f args _)
   | E.Hole (Info _) loc <- f =
       (FunctionHole loc, map onArg $ NE.toList args)
   where
-    onArg (Info argext, e) = (e, argext)
+    onArg (Info (argext, _), e) = (e, argext)
 findFuncall e =
   error $ "Invalid function expression in application:\n" ++ prettyString e
 
@@ -1613,11 +1598,14 @@ isOverloadedFunction qname desc = do
             ((name ==) . nameFromText . prettyText)
             [minBound .. maxBound :: E.BinOp] =
           Just $ \[(x_t, [x']), (y_t, [y'])] ->
-            case (x_t, y_t) of
+            case (arrayElem x_t, arrayElem y_t) of
               (E.Scalar (E.Prim t1), E.Scalar (E.Prim t2)) ->
                 internaliseBinOp desc bop x' y' t1 t2
               _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
     handle _ = Nothing
+
+    arrayElem (E.Array _ _ t) = E.Scalar t
+    arrayElem t = t
 
 scatterF :: Int -> E.Exp -> E.Exp -> E.Exp -> Name -> InternaliseM [SubExp]
 scatterF rank dest is v desc = do
@@ -1634,7 +1622,7 @@ isIntrinsicFunction ::
   E.QualName VName ->
   [E.Exp] ->
   Maybe (Name -> InternaliseM [SubExp])
-isIntrinsicFunction qname args = do
+isIntrinsicFunction qname all_args = do
   guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
   let handlers =
         [ handleSign,
@@ -1644,7 +1632,7 @@ isIntrinsicFunction qname args = do
           handleAD,
           handleRest
         ]
-  msum [h args $ baseName $ qualLeaf qname | h <- handlers]
+  msum [h all_args $ baseName $ qualLeaf qname | h <- handlers]
   where
     handleSign [x] "sign_i8" = Just $ toSigned I.Int8 x
     handleSign [x] "sign_i16" = Just $ toSigned I.Int16 x
@@ -1675,12 +1663,23 @@ isIntrinsicFunction qname args = do
           fmap pure $ letSubExp desc $ I.BasicOp $ I.ConvOp conv x'
     handleOps _ _ = Nothing
 
-    handleSOACs [lam, arr] "map" = Just $ \desc -> do
-      arr' <- internaliseExpToVars "map_arr" arr
-      arr_ts <- mapM lookupType arr'
-      lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
-      let w = arraysSize 0 arr_ts
-      letTupExp' desc $ I.Op $ I.Screma w arr' (I.mapSOAC lam')
+    handleSOACs (lam : args) "map" = Just $ \desc -> do
+      arg_ses <- concat <$> mapM (internaliseExp "arg") args
+      arg_ts <- mapM subExpType arg_ses
+      let param_ts = map rowType arg_ts
+          map_dim = head $ I.shapeDims $ I.arrayShape $ head arg_ts
+
+      arg_ses' <-
+        zipWithM
+          (\p a -> ensureShape "" (arrayOfRow p map_dim) "" a)
+          param_ts
+          arg_ses
+
+      args_v'' <- mapM (letExp "" . BasicOp . SubExp) arg_ses'
+
+      lambda <- internaliseLambdaCoerce lam param_ts
+
+      letTupExp' desc $ Op $ Screma map_dim args_v'' $ mapSOAC lambda
     handleSOACs [k, lam, arr] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do

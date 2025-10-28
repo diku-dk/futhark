@@ -51,7 +51,7 @@ instance Arbitrary PrimValue where
 
 instance IsString VName where
   fromString s =
-    let (s', '_' : tag) = span (/= '_') s
+    let (tag, s') = bimap reverse (reverse . tail) $ span (/= '_') $ reverse s
      in VName (fromString s') (read tag)
 
 instance (IsString v) => IsString (QualName v) where
@@ -112,78 +112,84 @@ pPrimType =
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [lexeme "*" $> Unique, pure Nonunique]
 
+pDim :: Parser d -> Parser d
+pDim = brackets
+
 pSize :: Parser Size
 pSize =
-  brackets $
-    choice
-      [ flip sizeFromInteger mempty <$> lexeme L.decimal,
-        flip sizeFromName mempty <$> pQualName
-      ]
+  choice
+    [ flip sizeFromInteger mempty <$> lexeme L.decimal,
+      flip sizeFromName mempty <$> pQualName
+    ]
 
-pScalarNonFun :: Parser (ScalarTypeBase Size Uniqueness)
-pScalarNonFun =
+pScalarNonFun :: Parser d -> Parser (ScalarTypeBase d Uniqueness)
+pScalarNonFun pd =
   choice
     [ Prim <$> pPrimType,
       pTypeVar,
-      tupleRecord <$> parens (pType `sepBy` lexeme ","),
+      tupleRecord <$> parens (pType pd `sepBy` lexeme ","),
       Record . M.fromList <$> braces (pField `sepBy1` lexeme ",")
     ]
   where
-    pField = (,) <$> pName <* lexeme ":" <*> pType
+    pField = (,) <$> pName <* lexeme ":" <*> pType pd
     pTypeVar = TypeVar <$> pUniqueness <*> pQualName <*> many pTypeArg
     pTypeArg =
       choice
-        [ TypeArgDim <$> pSize,
+        [ TypeArgDim <$> pDim pd,
           TypeArgType . second (const NoUniqueness) <$> pTypeArgType
         ]
     pTypeArgType =
       choice
         [ Scalar . Prim <$> pPrimType,
-          parens pType
+          parens $ pType pd
         ]
 
-pArrayType :: Parser ResType
-pArrayType =
+pArrayType :: Parser d -> Parser (TypeBase d Uniqueness)
+pArrayType pd =
   Array
     <$> pUniqueness
-    <*> (Shape <$> some pSize)
-    <*> (second (const NoUniqueness) <$> pScalarNonFun)
+    <*> (Shape <$> some (pDim pd))
+    <*> (second (const NoUniqueness) <$> pScalarNonFun pd)
 
-pNonFunType :: Parser ResType
-pNonFunType =
+pNonFunType :: Parser d -> Parser (TypeBase d Uniqueness)
+pNonFunType pd =
   choice
-    [ try pArrayType,
-      try $ parens pType,
-      Scalar <$> pScalarNonFun
+    [ try $ pArrayType pd,
+      try $ parens $ pType pd,
+      Scalar <$> pScalarNonFun pd
     ]
 
-pScalarType :: Parser (ScalarTypeBase Size Uniqueness)
-pScalarType = choice [try pFun, pScalarNonFun]
+uniquenessToDiet :: Uniqueness -> Diet
+uniquenessToDiet Unique = Consume
+uniquenessToDiet Nonunique = Observe
+
+pScalarType :: Parser d -> Parser (ScalarTypeBase d Uniqueness)
+pScalarType pd = choice [try pFun, pScalarNonFun pd]
   where
     pFun =
-      pParam <* lexeme "->" <*> pRetType
+      pParam <* lexeme "->" <*> pRetType pd
     pParam =
       choice
         [ try pNamedParam,
           do
-            t <- pNonFunType
-            pure $ Arrow Nonunique Unnamed (diet $ resToParam t) (toStruct t)
+            t <- pNonFunType pd
+            pure $ Arrow Nonunique Unnamed (diet $ second uniquenessToDiet t) (toStruct t)
         ]
     pNamedParam = parens $ do
       v <- pVName <* lexeme ":"
-      t <- pType
-      pure $ Arrow Nonunique (Named v) (diet $ resToParam t) (toStruct t)
+      t <- pType pd
+      pure $ Arrow Nonunique (Named v) (diet $ second uniquenessToDiet t) (toStruct t)
 
-pRetType :: Parser ResRetType
-pRetType =
+pRetType :: Parser d -> Parser (RetTypeBase d Uniqueness)
+pRetType pd =
   choice
-    [ lexeme "?" *> (RetType <$> some (brackets pVName) <* lexeme "." <*> pType),
-      RetType [] <$> pType
+    [ lexeme "?" *> (RetType <$> some (brackets pVName) <* lexeme "." <*> pType pd),
+      RetType [] <$> pType pd
     ]
 
-pType :: Parser ResType
-pType =
-  choice [try $ Scalar <$> pScalarType, pArrayType, parens pType]
+pType :: Parser d -> Parser (TypeBase d Uniqueness)
+pType pd =
+  choice [try $ Scalar <$> pScalarType pd, pArrayType pd, parens (pType pd)]
 
 fromStringParse :: Parser a -> String -> String -> a
 fromStringParse p what s =
@@ -194,26 +200,38 @@ fromStringParse p what s =
 
 instance IsString (ScalarTypeBase Size NoUniqueness) where
   fromString =
-    fromStringParse (second (const NoUniqueness) <$> pScalarType) "ScalarType"
+    fromStringParse
+      (second (const NoUniqueness) <$> pScalarType pSize)
+      "ScalarType"
+
+instance IsString (ScalarTypeBase () NoUniqueness) where
+  fromString =
+    fromStringParse
+      (second (const NoUniqueness) <$> pScalarType (pure ()))
+      "ScalarType"
+
+instance IsString (TypeBase () NoUniqueness) where
+  fromString =
+    fromStringParse (second (const NoUniqueness) <$> pType (pure ())) "Type"
 
 instance IsString StructType where
   fromString =
-    fromStringParse (second (const NoUniqueness) <$> pType) "StructType"
+    fromStringParse (second (const NoUniqueness) <$> pType pSize) "StructType"
 
 instance IsString ParamType where
   fromString =
-    fromStringParse (resToParam <$> pType) "ParamType"
+    fromStringParse (resToParam <$> pType pSize) "ParamType"
 
 instance IsString ResType where
   fromString =
-    fromStringParse pType "ResType"
+    fromStringParse (pType pSize) "ResType"
 
 instance IsString StructRetType where
   fromString =
-    fromStringParse (second (pure NoUniqueness) <$> pRetType) "StructRetType"
+    fromStringParse (second (pure NoUniqueness) <$> pRetType pSize) "StructRetType"
 
 instance IsString ResRetType where
-  fromString = fromStringParse pRetType "ResRetType"
+  fromString = fromStringParse (pRetType pSize) "ResRetType"
 
 instance IsString UncheckedExp where
   fromString =

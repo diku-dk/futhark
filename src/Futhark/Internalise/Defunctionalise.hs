@@ -756,7 +756,7 @@ etaExpand e_t e = do
         M.fromList . zip (retDims ret) $
           map (ExpSubst . flip sizeFromName mempty . qualName) ext'
       ret' = applySubst (`M.lookup` extsubst) ret
-      e' = mkApply e (map (Nothing,) vars) $ AppRes (toStruct $ retType ret') ext'
+      e' = mkApply e (map (\v -> (Nothing, mempty, v)) vars) $ AppRes (toStruct $ retType ret') ext'
   pure (params, e', ret)
   where
     getType (RetType _ (Scalar (Arrow _ p d t1 t2))) =
@@ -863,7 +863,7 @@ unRetType (RetType ext t) = do
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)
 defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
-  let (argtypes, rettype) = unfoldFunType t
+  let (argtypes, rettype) = first (map snd) $ unfoldFunType t
   sv <- lookupVar (toStruct t) (qualLeaf qn)
 
   case sv of
@@ -916,9 +916,9 @@ liftedName _ _ = "defunc"
 defuncApplyArg ::
   (Name, SrcLoc) ->
   (Exp, StaticVal) ->
-  ((Maybe VName, Exp), [ParamType]) ->
+  (((Maybe VName, AutoMap), Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
-defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) ((argext, arg), _) = do
+defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, _), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
   let env' = alwaysMatchPatSV closure_env pat arg_sv
       dims = mempty
@@ -969,18 +969,18 @@ defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) ((ar
   callret <- unRetType lifted_rettype
 
   pure
-    ( mkApply fname' [(Nothing, f'), (argext, arg')] callret,
+    ( mkApply fname' [(Nothing, mempty, f'), (argext, mempty, arg')] callret,
       sv
     )
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
 -- applied or return a higher-order value.
-defuncApplyArg _ (f', DynamicFun _ sv) ((argext, arg), argtypes) = do
+defuncApplyArg _ (f', DynamicFun _ sv) (((argext, _), arg), argtypes) = do
   (arg', _) <- defuncExp arg
   let (argtypes', rettype) = dynamicFunType sv argtypes
       restype = foldFunType argtypes' (RetType [] rettype)
       callret = AppRes restype []
-      apply_e = mkApply f' [(argext, arg')] callret
+      apply_e = mkApply f' [(argext, mempty, arg')] callret
   pure (apply_e, sv)
 --
 defuncApplyArg (fname_s, _) (_, sv) ((_, arg), _) =
@@ -997,7 +997,7 @@ updateReturn (AppRes ret1 ext1) (AppExp apply (Info (AppRes ret2 ext2))) =
   AppExp apply $ Info $ AppRes (combineTypeShapes ret1 ret2) (ext1 <> ext2)
 updateReturn _ e = e
 
-defuncApply :: Exp -> NE.NonEmpty (Maybe VName, Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
+defuncApply :: Exp -> NE.NonEmpty ((Maybe VName, AutoMap), Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
 defuncApply f args appres loc = do
   (f', f_sv) <- defuncApplyFunction f (length args)
   case f_sv of
@@ -1014,8 +1014,8 @@ defuncApply f args appres loc = do
           (argtypes, _) = unfoldFunType $ typeOf f
       fmap (first $ updateReturn appres) $
         foldM (defuncApplyArg (fname, loc)) (f', f_sv) $
-          NE.zip args $
-            NE.tails argtypes
+          NE.zip args . NE.tails . map snd $
+            argtypes
   where
     intrinsicOrHole e' = do
       -- If the intrinsic is fully applied, then we are done.

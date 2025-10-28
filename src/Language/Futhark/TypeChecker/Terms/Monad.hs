@@ -25,12 +25,15 @@ module Language.Futhark.TypeChecker.Terms.Monad
     constrain,
     newArrayType,
     allDimsFreshInType,
+    instTyVars,
+    replaceTyVars,
     updateTypes,
     Names,
+    mustBeOrderZero,
+    mustBeUnlifted,
 
     -- * Primitive checking
     unifies,
-    require,
     checkTypeExpNonrigid,
     lookupVar,
     lookupMod,
@@ -50,8 +53,9 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State.Strict
+import Data.Bifunctor
 import Data.Bitraversable
-import Data.Char (isAscii)
+import Data.Foldable
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -61,6 +65,8 @@ import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Traversals
+import Language.Futhark.TypeChecker.Constraints (TyVar)
+import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod, stateNameSource)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
@@ -83,6 +89,7 @@ unusedSize p =
 data Inferred t
   = NoneInferred
   | Ascribed t
+  deriving (Show)
 
 instance Functor Inferred where
   fmap _ NoneInferred = NoneInferred
@@ -94,7 +101,7 @@ data Checking
   | CheckingAscription StructType StructType
   | CheckingLetGeneralise Name
   | CheckingParams (Maybe Name)
-  | CheckingPat (PatBase NoInfo VName StructType) (Inferred StructType)
+  | CheckingPat (PatBase Info VName StructType) (Inferred StructType)
   | CheckingLoopBody StructType StructType
   | CheckingLoopInitial StructType StructType
   | CheckingRecordUpdate [Name] StructType StructType
@@ -196,8 +203,9 @@ data TermEnv = TermEnv
   { termScope :: TermScope,
     termChecking :: Maybe Checking,
     termLevel :: Level,
-    termChecker :: ExpBase NoInfo VName -> TermTypeM Exp,
+    termCheckExp :: ExpBase Info VName -> TermTypeM Exp,
     termOuterEnv :: Env,
+    termTyVars :: M.Map TyVar (TypeBase () NoUniqueness),
     termImportName :: ImportName
   }
 
@@ -345,43 +353,120 @@ instance MonadUnify TermTypeM where
           </> indent 2 (pretty t2)
           </> "do not match."
 
--- | Instantiate a type scheme with fresh type variables for its type
--- parameters. Returns the names of the fresh type variables, the
--- instance list, and the instantiated type.
-instantiateTypeScheme ::
+replaceTyVars :: SrcLoc -> TypeBase Size u -> TermTypeM (TypeBase Size u)
+replaceTyVars loc orig_t = do
+  tyvars <- asks termTyVars
+  let f :: TypeBase Size u -> TermTypeM (TypeBase Size u)
+      f (Scalar (Prim t)) = pure $ Scalar $ Prim t
+      f
+        (Scalar (TypeVar u (QualName [] v) []))
+          | Just t <- M.lookup v tyvars =
+              fst <$> allDimsFreshInType (mkUsage loc "replaceTyVars") Nonrigid "dv" (second (const u) t)
+          | otherwise =
+              pure $ Scalar (TypeVar u (QualName [] v) [])
+      f (Scalar (TypeVar u qn targs)) =
+        Scalar . TypeVar u qn <$> mapM onTyArg targs
+        where
+          onTyArg (TypeArgDim e) = pure $ TypeArgDim e
+          onTyArg (TypeArgType t) = TypeArgType <$> f t
+      f (Scalar (Record fs)) =
+        Scalar . Record <$> traverse f fs
+      f (Scalar (Sum fs)) =
+        Scalar . Sum <$> traverse (mapM f) fs
+      f (Scalar (Arrow u pname d ta (RetType ext tr))) = do
+        ta' <- f ta
+        tr' <- f tr
+        pure $ Scalar $ Arrow u pname d ta' $ RetType ext tr'
+      f (Array u shape t) =
+        arrayOfWithAliases u shape <$> f (Scalar t)
+
+  f orig_t
+
+instTyVars ::
+  SrcLoc ->
+  [VName] ->
+  TypeBase () u ->
+  TypeBase Size u ->
+  TermTypeM (TypeBase Size u)
+instTyVars loc names orig_t1 orig_t2 = do
+  tyvars <- asks termTyVars
+  let f ::
+        TypeBase d u ->
+        TypeBase Size u ->
+        StateT (M.Map VName (TypeBase Size NoUniqueness)) TermTypeM (TypeBase Size u)
+      f
+        (Scalar (TypeVar u (QualName [] v1) []))
+        t2
+          | Just t <- M.lookup v1 tyvars =
+              f (second (const u) t) t2
+      f (Scalar (Record fs1)) (Scalar (Record fs2)) =
+        Scalar . Record <$> sequence (M.intersectionWith f fs1 fs2)
+      f (Scalar (Sum fs1)) (Scalar (Sum fs2)) =
+        Scalar . Sum <$> sequence (M.intersectionWith (zipWithM f) fs1 fs2)
+      f
+        (Scalar (Arrow u _ _ t1a (RetType _ t1r)))
+        (Scalar (Arrow _ pname d t2a (RetType ext t2r))) = do
+          ta <- f t1a t2a
+          tr <- f t1r t2r
+          pure $ Scalar $ Arrow u pname d ta $ RetType ext tr
+      f
+        (Array u (Shape (_ : ds1)) t1)
+        (Array _ (Shape (d : ds2)) t2) =
+          arrayOfWithAliases u (Shape [d])
+            <$> f (arrayOf (Shape ds1) (Scalar t1)) (arrayOf (Shape ds2) (Scalar t2))
+      f
+        (Scalar (TypeVar u v1 targs1))
+        (Scalar (TypeVar _ _ targs2))
+          | length targs1 == length targs2 =
+              Scalar . TypeVar u v1 <$> zipWithM g targs1 targs2
+          where
+            g (TypeArgType t1) (TypeArgType t2) =
+              TypeArgType <$> f t1 t2
+            g _ targ = pure targ
+      f t1 t2 = do
+        let mkNew =
+              fst <$> lift (allDimsFreshInType (mkUsage loc "instantiation") Nonrigid "dv" t1)
+        case t2 of
+          Scalar (TypeVar u (QualName [] v2) [])
+            | v2 `elem` names -> do
+                seen <- get
+                case M.lookup v2 seen of
+                  Nothing -> do
+                    t <- mkNew
+                    modify $ M.insert v2 $ second (const NoUniqueness) t
+                    pure t
+                  Just t ->
+                    pure $ second (const u) t
+          _ -> mkNew
+
+  evalStateT (f orig_t1 orig_t2) mempty
+
+-- | Instantiate a type scheme with fresh variables for its size and
+-- type parameters. Returns the names of the fresh size and type
+-- variables and the instantiated type.
+instTypeScheme ::
   QualName VName ->
   SrcLoc ->
   [TypeParam] ->
   StructType ->
   TermTypeM ([VName], StructType)
-instantiateTypeScheme qn loc tparams t = do
-  let tnames = map typeParamName tparams
-  (tparam_names, tparam_substs) <- mapAndUnzipM (instantiateTypeParam qn loc) tparams
-  let substs = M.fromList $ zip tnames tparam_substs
-      t' = applySubst (`M.lookup` substs) t
-  pure (tparam_names, t')
+instTypeScheme qn loc tparams scheme_t = do
+  (names, substs) <- fmap unzip . forM tparams $ \tparam -> do
+    case tparam of
+      TypeParamType l v _ -> do
+        i <- incCounter
+        v' <- newID $ mkTypeVarName (baseName v) i
+        constrain v' . NoConstraint l . mkUsage loc . docText $
+          "instantiated type parameter of " <> dquotes (pretty qn)
+        pure (v', (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty (qualName v') []))
+      TypeParamDim v _ -> do
+        i <- incCounter
+        v' <- newID $ mkTypeVarName (baseName v) i
+        constrain v' . Size Nothing . mkUsage loc . docText $
+          "instantiated size parameter of " <> dquotes (pretty qn)
+        pure (v', (v, ExpSubst $ sizeFromName (qualName v') loc))
 
--- | Create a new type name and insert it (unconstrained) in the
--- substitution map.
-instantiateTypeParam ::
-  (Monoid as) =>
-  QualName VName ->
-  SrcLoc ->
-  TypeParam ->
-  TermTypeM (VName, Subst (RetTypeBase dim as))
-instantiateTypeParam qn loc tparam = do
-  i <- incCounter
-  let name = nameFromText (T.takeWhile isAscii (baseText (typeParamName tparam)))
-  v <- newID $ mkTypeVarName name i
-  case tparam of
-    TypeParamType x _ _ -> do
-      constrain v . NoConstraint x . mkUsage loc . docText $
-        "instantiated type parameter of " <> dquotes (pretty qn)
-      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty (qualName v) [])
-    TypeParamDim {} -> do
-      constrain v . Size Nothing . mkUsage loc . docText $
-        "instantiated size parameter of " <> dquotes (pretty qn)
-      pure (v, ExpSubst $ sizeFromName (qualName v) loc)
+  pure (names, applySubst (`lookup` substs) scheme_t)
 
 lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
 lookupQualNameEnv (QualName [q] _)
@@ -446,41 +531,23 @@ instance MonadTypeChecker TermTypeM where
       Nothing ->
         throwError $ TypeError (locOf loc) notes s
 
-lookupVar :: SrcLoc -> QualName VName -> TermTypeM StructType
-lookupVar loc qn@(QualName qs name) = do
+lookupVar :: SrcLoc -> QualName VName -> StructType -> TermTypeM StructType
+lookupVar loc qn@(QualName qs name) inst_t = do
   scope <- lookupQualNameEnv qn
-  let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
-
   case M.lookup name $ scopeVtable scope of
     Nothing ->
       error $ "lookupVar: " <> show qn
-    Just (BoundV tparams t) -> do
+    Just (BoundV tparams bound_t) ->
       if null tparams && null qs
-        then pure t
+        then pure bound_t
         else do
-          (tnames, t') <- instantiateTypeScheme qn loc tparams t
+          (tnames, t) <- instTypeScheme qn loc tparams bound_t
           outer_env <- asks termOuterEnv
-          pure $ qualifyTypeVars outer_env tnames qs t'
-    Just EqualityF -> do
-      argtype <- newTypeVar loc "t"
-      equalityType usage argtype
-      pure $
-        Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
-          Scalar $
-            Arrow mempty Unnamed Observe argtype $
-              RetType [] $
-                Scalar $
-                  Prim Bool
-    Just (OverloadedF ts pts rt) -> do
-      argtype <- newTypeVar loc "t"
-      mustBeOneOf ts usage argtype
-      let (pts', rt') = instOverloaded argtype pts rt
-      pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
-  where
-    instOverloaded argtype pts rt =
-      ( map (maybe (toStruct argtype) (Scalar . Prim)) pts,
-        maybe (toStruct argtype) (Scalar . Prim) rt
-      )
+          pure $ qualifyTypeVars outer_env tnames qs t
+    Just EqualityF ->
+      replaceTyVars loc inst_t
+    Just OverloadedF {} ->
+      replaceTyVars loc inst_t
 
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env {termChecking = Just c}
@@ -531,8 +598,8 @@ allDimsFreshInType ::
   Usage ->
   Rigidity ->
   Name ->
-  TypeBase Size als ->
-  TermTypeM (TypeBase Size als, M.Map VName Size)
+  TypeBase d als ->
+  TermTypeM (TypeBase Size als, M.Map VName d)
 allDimsFreshInType usage r desc t =
   runStateT (bitraverse onDim pure t) mempty
   where
@@ -554,6 +621,33 @@ updateTypes = astMap tv
           mapOnResRetType = normTypeFully
         }
 
+mustBeOrderZero :: Loc -> StructType -> TermTypeM ()
+mustBeOrderZero loc t = do
+  constraints <- getConstraints
+  let liftedType v =
+        case M.lookup v constraints of
+          Just (_, ParamType Lifted _) -> True
+          _ -> False
+  when (not (orderZero t) || any liftedType (typeVars t)) $
+    typeError loc mempty $
+      textwrap "This expression may not be of function type, but is inferred to be of type"
+        </> indent 2 (align (pretty t))
+        </> "which may be a function."
+
+mustBeUnlifted :: Loc -> StructType -> TermTypeM ()
+mustBeUnlifted loc t = do
+  constraints <- getConstraints
+  let liftedType v =
+        case M.lookup v constraints of
+          Just (_, ParamType Lifted _) -> True
+          Just (_, ParamType SizeLifted _) -> True
+          _ -> False
+  when (not (orderZero t) || any liftedType (typeVars t)) $
+    typeError loc mempty $
+      textwrap "This expression must be of unlifted type, but is inferred to be of type"
+        </> indent 2 (align (pretty t))
+        </> "which may be a function or a value with hidden sizes."
+
 --- Basic checking
 
 unifies :: T.Text -> StructType -> Exp -> TermTypeM Exp
@@ -561,24 +655,15 @@ unifies why t e = do
   unify (mkUsage (srclocOf e) why) t . toStruct =<< expType e
   pure e
 
--- | @require ts e@ causes a 'TypeError' if @expType e@ is not one of
--- the types in @ts@.  Otherwise, simply returns @e@.
-require :: T.Text -> [PrimType] -> Exp -> TermTypeM Exp
-require why ts e = do
-  mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
-  pure e
-
-checkExpForSize :: ExpBase NoInfo VName -> TermTypeM Exp
+checkExpForSize :: ExpBase Info VName -> TermTypeM Exp
 checkExpForSize e = do
-  checker <- asks termChecker
+  checker <- asks termCheckExp
   e' <- checker e
   let t = toStruct $ typeOf e'
   unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
   updateTypes e'
 
-checkTypeExpNonrigid ::
-  TypeExp (ExpBase NoInfo VName) VName ->
-  TermTypeM (TypeExp Exp VName, ResType, [VName])
+checkTypeExpNonrigid :: TypeExp Exp VName -> TermTypeM (TypeExp Exp VName, ResType, [VName])
 checkTypeExpNonrigid te = do
   (te', svars, rettype, _l) <- checkTypeExp checkExpForSize te
 
@@ -632,8 +717,8 @@ initialTermScope =
       Just (name, EqualityF)
     addIntrinsicF _ = Nothing
 
-runTermTypeM :: (ExpBase NoInfo VName -> TermTypeM Exp) -> TermTypeM a -> TypeM a
-runTermTypeM checker (TermTypeM m) = do
+runTermTypeM :: (ExpBase Info VName -> TermTypeM Exp) -> M.Map TyVar (TypeBase () NoUniqueness) -> TermTypeM a -> TypeM a
+runTermTypeM checker tyvars (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
   name <- askImportName
   outer_env <- askEnv
@@ -643,9 +728,10 @@ runTermTypeM checker (TermTypeM m) = do
           { termScope = initial_scope,
             termChecking = Nothing,
             termLevel = 0,
-            termChecker = checker,
+            termCheckExp = checker,
             termImportName = name,
-            termOuterEnv = outer_env
+            termOuterEnv = outer_env,
+            termTyVars = tyvars
           }
       initial_state =
         TermTypeState

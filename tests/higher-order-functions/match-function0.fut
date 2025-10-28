@@ -1,6 +1,6 @@
 -- We cannot return a function from a pattern match.
 -- ==
--- error: returned from pattern match
+-- error: may not be of function type
 
 def f (x: i32) : i32 = x + x
 def g (x: i32) : i32 = x + 1

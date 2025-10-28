@@ -2,7 +2,17 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
-  python = pkgs.python313Packages;
+  python = pkgs.python313.withPackages (ps: with ps; [
+    ps.mypy
+    black
+    cycler
+    numpy
+    pyopencl
+    matplotlib
+    jsonschema
+    sphinx
+    sphinxcontrib-bibtex
+  ]);
   haskell = pkgs.haskell.packages.ghc98;
 in
 pkgs.stdenv.mkDerivation {
@@ -21,6 +31,7 @@ pkgs.stdenv.mkDerivation {
       haskell.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
+      python
       xdot
       pkg-config
       zlib
@@ -29,16 +40,6 @@ pkgs.stdenv.mkDerivation {
       ghcid
       niv
       ispc
-      python.python
-      python.mypy
-      python.black
-      python.cycler
-      python.numpy
-      python.pyopencl
-      python.matplotlib
-      python.jsonschema
-      python.sphinx
-      python.sphinxcontrib-bibtex
       imagemagick # needed for literate tests
     ]
     ++ lib.optionals (stdenv.isLinux)
