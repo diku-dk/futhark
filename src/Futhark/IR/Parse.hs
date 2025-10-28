@@ -9,15 +9,20 @@ module Futhark.IR.Parse
     parseSeq,
     parseSeqMem,
 
-    -- * Fragments
+    -- * Representation-agnostic fragments
     parseType,
     parseDeclExtType,
     parseDeclType,
     parseVName,
     parseSubExp,
     parseSubExpRes,
+
+    -- * Representation-specific fragments
+    parseLambdaSOACS,
+    parseBodySOACS,
     parseBodyGPU,
     parseBodyMC,
+    parseStmSOACS,
     parseStmGPU,
     parseStmMC,
   )
@@ -747,7 +752,6 @@ pSOAC pr =
       keyword "screma" *> pScrema pScremaForm,
       keyword "vjp" *> pVJP,
       keyword "jvp" *> pJVP,
-      pScatter,
       pHist,
       pStream
     ]
@@ -781,20 +785,6 @@ pSOAC pr =
         <*> pure []
     pMapForm =
       SOAC.ScremaForm <$> pLambda pr <*> pure mempty <*> pure mempty
-    pScatter =
-      keyword "scatter"
-        *> parens
-          ( SOAC.Scatter
-              <$> pSubExp
-              <* pComma
-              <*> braces (pVName `sepBy` pComma)
-              <* pComma
-              <*> many (pDest <* pComma)
-              <*> pLambda pr
-          )
-      where
-        pDest =
-          parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
     pHist =
       keyword "hist"
         *> parens
@@ -916,11 +906,6 @@ pKernelResult = do
           ]
         <*> pure cs
         <*> pSubExp,
-      try $
-        SegOp.WriteReturns cs
-          <$> pVName
-          <* keyword "with"
-          <*> parens (pWrite `sepBy` pComma),
       try "tile"
         *> parens (SegOp.TileReturns cs <$> (pTile `sepBy` pComma))
         <*> pVName,
@@ -936,11 +921,10 @@ pKernelResult = do
         blk_tile <- pSubExp <* pAsterisk
         reg_tile <- pSubExp
         pure (dim, blk_tile, reg_tile)
-    pWrite = (,) <$> pSlice <* pEqual <*> pSubExp
 
 pKernelBody :: PR rep -> Parser (SegOp.KernelBody rep)
 pKernelBody pr =
-  SegOp.KernelBody (pBodyDec pr)
+  Body (pBodyDec pr)
     <$> pStms pr
     <* keyword "return"
     <*> braces (pKernelResult `sepBy` pComma)
@@ -1218,6 +1202,17 @@ parseSubExp = parseFull pSubExp
 
 parseSubExpRes :: FilePath -> T.Text -> Either T.Text SubExpRes
 parseSubExpRes = parseFull pSubExpRes
+
+-- Rep-specific fragment parsers
+
+parseLambdaSOACS :: FilePath -> T.Text -> Either T.Text (Lambda SOACS)
+parseLambdaSOACS = parseFull $ pLambda prSOACS
+
+parseBodySOACS :: FilePath -> T.Text -> Either T.Text (Body SOACS)
+parseBodySOACS = parseFull $ pBody prSOACS
+
+parseStmSOACS :: FilePath -> T.Text -> Either T.Text (Stm SOACS)
+parseStmSOACS = parseFull $ pStm prSOACS
 
 parseBodyGPU :: FilePath -> T.Text -> Either T.Text (Body GPU)
 parseBodyGPU = parseFull $ pBody prGPU

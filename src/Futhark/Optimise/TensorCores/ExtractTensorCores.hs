@@ -494,7 +494,7 @@ transformExp e = pure e
 transformCase :: Case (Body GPU) -> TensorCoreM (Case (Body GPU))
 transformCase (Case pat body) = Case pat <$> transformBody body
 
-transformBody :: Body GPU -> TensorCoreM (Body GPU)
+transformBody :: GBody GPU res -> TensorCoreM (GBody GPU res)
 transformBody (Body dec stms res) =
   Body dec
     <$> transformStms stms
@@ -515,14 +515,14 @@ transformSegOp
             )
           space@(SegSpace _ _)
           ts
-          body@(KernelBody _ stms _)
+          body@(Body _ stms _)
         ) = do
     scope <- askScope
     case execWriter $ runReaderT (maxBlockSizeStms stms) scope of
       Known (Max maxBlockSize) -> do
         transformedBody <-
           localBlockSize (const $ Just maxBlockSize) $
-            transformKernelBody body
+            transformBody body
         let blocks = Count numBlocks
         let blocksize = Count $ mkInt64Const maxBlockSize
         let grid = KernelGrid blocks blocksize
@@ -534,19 +534,13 @@ transformSegOp sOp = transformSegOpDefault sOp
 transformSegOpDefault :: SegOp SegLevel GPU -> TensorCoreM (SegOp SegLevel GPU)
 transformSegOpDefault (SegMap level space ts body) =
   SegMap level space ts
-    <$> transformKernelBody body
+    <$> transformBody body
 transformSegOpDefault (SegRed level space ts body ops) =
-  SegRed level space ts <$> transformKernelBody body <*> pure ops
+  SegRed level space ts <$> transformBody body <*> pure ops
 transformSegOpDefault (SegScan level space ts body ops) =
-  SegScan level space ts <$> transformKernelBody body <*> pure ops
+  SegScan level space ts <$> transformBody body <*> pure ops
 transformSegOpDefault (SegHist level space ts body histOps) =
-  SegHist level space ts <$> transformKernelBody body <*> pure histOps
-
-transformKernelBody :: KernelBody GPU -> TensorCoreM (KernelBody GPU)
-transformKernelBody (KernelBody desc stms res) =
-  KernelBody desc
-    <$> transformStms stms
-    <*> pure res
+  SegHist level space ts <$> transformBody body <*> pure histOps
 
 -- | Do we know the block size or not?
 data KnownUnknown a = Known a | Unknown
@@ -732,7 +726,7 @@ inBlockKernelBodyMatch ::
 inBlockKernelBodyMatch
   indexVars@[_, _, indexVar3]
   freeVars
-  (KernelBody _ stms [Returns _ _ (Var res)])
+  (Body _ stms [Returns _ _ (Var res)])
   scope = do
     let f16_type = FloatType Float16
     let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope

@@ -37,5 +37,5 @@
 --   [1f16, f16.nan, 3f16, 4f16, 17f16]
 -- }
 
-def main [m][n] (hist : *[n]f16) (is: [m]i16) (image : [m]f16) : [n]f16 =
+def main [m] [n] (hist: *[n]f16) (is: [m]i16) (image: [m]f16) : [n]f16 =
   reduce_by_index hist (+) 0f16 (map i64.i16 is) image

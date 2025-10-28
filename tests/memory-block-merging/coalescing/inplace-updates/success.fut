@@ -5,7 +5,7 @@
 -- structure gpu-mem { Alloc 0 }
 -- structure seq-mem { Alloc 0 }
 
-entry success [n] (xs: *[n]i64): *[n]i64 =
+entry success [n] (xs: *[n]i64) : *[n]i64 =
   let b = replicate 4 0
   let b[1:3] = xs[6:8]
   in xs with [:4] = b

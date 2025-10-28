@@ -10,4 +10,4 @@ def main : i32 =
   case #bar 5 -> 1
   case #foo 4 -> 2
   case (#foo x) -> x
-  case _        -> 3
+  case _ -> 3

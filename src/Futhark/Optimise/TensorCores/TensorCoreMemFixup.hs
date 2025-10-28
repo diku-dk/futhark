@@ -276,7 +276,7 @@ fixExp e = pure e
 fixCase :: Case (Body GPUMem) -> FixM (Case (Body GPUMem))
 fixCase (Case pat body) = Case pat <$> fixBody body
 
-fixBody :: Body GPUMem -> FixM (Body GPUMem)
+fixBody :: GBody GPUMem res -> FixM (GBody GPUMem res)
 fixBody (Body dec stms res) = Body dec <$> fixStmts stms <*> pure res
 
 fixOp :: Op GPUMem -> FixM (Op GPUMem)
@@ -289,14 +289,10 @@ fixHostOp op = pure op
 
 fixSegOp :: SegOp SegLevel GPUMem -> FixM (SegOp SegLevel GPUMem)
 fixSegOp (SegMap level space ts body) =
-  SegMap level space ts <$> fixKernelBody body
+  SegMap level space ts <$> fixBody body
 fixSegOp (SegRed level space ts body ops) =
-  SegRed level space ts <$> fixKernelBody body <*> pure ops
+  SegRed level space ts <$> fixBody body <*> pure ops
 fixSegOp (SegScan level space ts body ops) =
-  SegScan level space ts <$> fixKernelBody body <*> pure ops
+  SegScan level space ts <$> fixBody body <*> pure ops
 fixSegOp (SegHist level space ts body histOps) =
-  SegHist level space ts <$> fixKernelBody body <*> pure histOps
-
-fixKernelBody :: KernelBody GPUMem -> FixM (KernelBody GPUMem)
-fixKernelBody (KernelBody desc stms res) =
-  KernelBody desc <$> fixStmts stms <*> pure res
+  SegHist level space ts <$> fixBody body <*> pure histOps

@@ -218,7 +218,7 @@ internaliseDim ::
   InternaliseTypeM ExtSize
 internaliseDim exts d =
   case d of
-    e | e == E.anySize -> Ext <$> newId
+    e | Just _ <- E.isAnySize e -> Ext <$> newId
     (E.IntLit n _ _) -> pure $ I.Free $ intConst I.Int64 n
     (E.Var name _ _) -> pure $ namedDim name
     e -> error $ "Unexpected size expression: " ++ prettyString e
@@ -257,7 +257,7 @@ internaliseTypeM exts orig_t =
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar u tn [E.TypeArgType arr_t])
       | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
-        baseString (E.qualLeaf tn) == "acc" -> do
+        baseName (E.qualLeaf tn) == "acc" -> do
           ts <-
             foldMap (toList . fmap (fromDecl . onAccType))
               <$> internaliseTypeM exts (E.toRes Nonunique arr_t)
@@ -274,7 +274,10 @@ internaliseTypeM exts orig_t =
       (ts, _) <-
         internaliseConstructors
           <$> traverse (fmap concat . mapM (internaliseTypeM exts)) cs
-      pure $ Pure (I.Prim (I.IntType I.Int8)) : ts
+      pure $
+        if length cs == 1
+          then ts
+          else Pure (I.Prim (I.IntType I.Int8)) : ts
   where
     internaliseShape = mapM (internaliseDim exts) . E.shapeDims
     array [Free ts] = Free ts

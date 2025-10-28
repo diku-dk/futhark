@@ -74,5 +74,9 @@ test-interpreter:
 test-structure:
 	cabal run -- futhark test tests -s
 
+# Note: does not do cabal run.
+test-literate:
+	cd tests_literate && sh test.sh
+
 clean:
 	cabal clean

@@ -1,6 +1,12 @@
+-- ==
+-- tags { autodiff }
+
 -- computes x^2*y^3
-def pow y x = loop acc = 1 for i in [y, y*y] do
-                acc * x * i
+def pow y x =
+  loop acc = 1
+  for i in [y, y * y] do
+    acc * x * i
+
 -- ==
 -- entry: prim
 -- input { 3 4 } output { 432 }

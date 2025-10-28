@@ -21,7 +21,7 @@ compileSegScan ::
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 compileSegScan pat space reds kbody nsubtasks
   | [_] <- unSegSpace space =
       nonsegmentedScan pat space reds kbody nsubtasks
@@ -38,7 +38,7 @@ lamBody :: SegBinOp MCMem -> Body MCMem
 lamBody = lambdaBody . segBinOpLambda
 
 -- Arrays for storing worker results.
-carryArrays :: String -> TV Int32 -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
+carryArrays :: Name -> TV Int32 -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
 carryArrays s nsubtasks segops =
   forM segops $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
@@ -55,36 +55,35 @@ nonsegmentedScan ::
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 nonsegmentedScan pat space scan_ops kbody nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
-  collect $ do
-    -- Are we working with nested arrays
-    let dims = map (shapeDims . segBinOpShape) scan_ops
-    -- Are we only working on scalars
-    let scalars = all (all (primType . typeOf . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all null dims
-    -- Do we have nested vector operations
-    let vectorize = [] `notElem` dims
+  -- Are we working with nested arrays
+  let dims = map (shapeDims . segBinOpShape) scan_ops
+  -- Are we only working on scalars
+  let scalars = all (all (primType . typeOf . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all null dims
+  -- Do we have nested vector operations
+  let vectorize = [] `notElem` dims
 
-    let param_types = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
-    let no_array_param = all primType param_types
+  let param_types = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
+  let no_array_param = all primType param_types
 
-    let (scanStage1, scanStage3)
-          | scalars = (scanStage1Scalar, scanStage3Scalar)
-          | vectorize && no_array_param = (scanStage1Nested, scanStage3Nested)
-          | otherwise = (scanStage1Fallback, scanStage3Fallback)
+  let (scanStage1, scanStage3)
+        | scalars = (scanStage1Scalar, scanStage3Scalar)
+        | vectorize && no_array_param = (scanStage1Nested, scanStage3Nested)
+        | otherwise = (scanStage1Fallback, scanStage3Fallback)
 
-    emit $ Imp.DebugPrint "Scan stage 1" Nothing
-    scanStage1 pat space kbody scan_ops
+  emit $ Imp.DebugPrint "Scan stage 1" Nothing
+  scanStage1 pat space kbody scan_ops
 
-    let nsubtasks' = tvExp nsubtasks
-    sWhen (nsubtasks' .>. 1) $ do
-      scan_ops2 <- renameSegBinOp scan_ops
-      emit $ Imp.DebugPrint "Scan stage 2" Nothing
-      carries <- scanStage2 pat nsubtasks space scan_ops2
-      scan_ops3 <- renameSegBinOp scan_ops
-      emit $ Imp.DebugPrint "Scan stage 3" Nothing
-      scanStage3 pat space scan_ops3 carries
+  let nsubtasks' = tvExp nsubtasks
+  sWhen (nsubtasks' .>. 1) $ do
+    scan_ops2 <- renameSegBinOp scan_ops
+    emit $ Imp.DebugPrint "Scan stage 2" Nothing
+    carries <- scanStage2 pat nsubtasks space scan_ops2
+    scan_ops3 <- renameSegBinOp scan_ops
+    emit $ Imp.DebugPrint "Scan stage 3" Nothing
+    scanStage3 pat space scan_ops3 carries
 
 -- Different ways to generate code for a scan loop
 data ScanLoopType
@@ -184,12 +183,12 @@ genScanLoop ::
   ImpM MCMem HostEnv Imp.Multicore ()
 genScanLoop typ pat space kbody scan_ops local_accs i = do
   let (all_scan_res, map_res) =
-        splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
+        splitAt (segBinOpResults scan_ops) $ bodyResult kbody
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
 
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-  compileStms mempty (kernelBodyStms kbody) $ do
+  compileStms mempty (bodyStms kbody) $ do
     let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
     sComment "write mapped values results to memory" $
       zipWithM_ (compileThreadResult space) map_arrs map_res
@@ -425,13 +424,12 @@ segmentedScan ::
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.MCCode
+  MulticoreGen ()
 segmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
-  collect $ do
-    body <- compileSegScanBody pat space scan_ops kbody
-    free_params <- freeParams body
-    emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
+  body <- compileSegScanBody pat space scan_ops kbody
+  free_params <- freeParams body
+  emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
 
 compileSegScanBody ::
   Pat LetDecMem ->
@@ -460,8 +458,8 @@ compileSegScanBody pat space scan_ops kbody = collect $ do
       sFor "i" inner_bound $ \i -> do
         zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns_64) segment_i
         dPrimV_ (last is) i
-        compileStms mempty (kernelBodyStms kbody) $ do
-          let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ kernelBodyResult kbody
+        compileStms mempty (bodyStms kbody) $ do
+          let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ bodyResult kbody
           sComment "write to-scan values to parameters" $
             forM_ (zip scan_y_params scan_res) $ \(p, se) ->
               copyDWIMFix (paramName p) [] (kernelResultSubExp se) []

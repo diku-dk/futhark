@@ -338,7 +338,7 @@ allocInFParam ::
 allocInFParam param pspace =
   case paramDeclType param of
     Array pt shape u -> do
-      let memname = baseString (paramName param) <> "_mem"
+      let memname = baseName (paramName param) <> "_mem"
           lmad = LMAD.iota 0 $ map pe64 $ shapeDims shape
       mem <- lift $ newVName memname
       tell ([Param (paramAttrs param) mem $ MemMem pspace], [])
@@ -362,7 +362,7 @@ ensureRowMajorArray space_ok v = do
   let space = fromMaybe default_space space_ok
   if maybe True (== mem_space) space_ok
     then pure (mem, v)
-    else allocLinearArray space (baseString v) v
+    else allocLinearArray space (baseName v) v
 
 ensureArrayIn ::
   (Allocable fromrep torep inner) =>
@@ -443,7 +443,7 @@ allocInLoopParams merge m = do
                   -- Arrays with loop-variant shape cannot be in scalar
                   -- space, so copy them elsewhere and try again.
                   space <- lift askDefaultSpace
-                  (_, v') <- lift $ allocLinearArray space (baseString v) v
+                  (_, v') <- lift $ allocLinearArray space (baseName v) v
                   allocInLoopParam (mergeparam, Var v')
                 else do
                   p <- newParam "mem_param" $ MemMem v_mem_space
@@ -496,7 +496,7 @@ arrayWithLMAD ::
 arrayWithLMAD space lmad v_t v = do
   let Array pt shape u = v_t
   mem <- allocForArray' v_t space
-  v_copy <- newVName $ baseString v <> "_scalcopy"
+  v_copy <- newVName $ baseName v <> "_scalcopy"
   let pe = PatElem v_copy $ MemArray pt shape u $ ArrayIn mem lmad
   letBind (Pat [pe]) $ BasicOp $ Replicate mempty $ Var v
   pure (mem, v_copy)
@@ -517,13 +517,13 @@ ensureDirectArray space_ok v = do
     needCopy space =
       -- We need to do a new allocation, copy 'v', and make a new
       -- binding for the size of the memory block.
-      allocLinearArray space (baseString v) v
+      allocLinearArray space (baseName v) v
 
 allocPermArray ::
   (Allocable fromrep torep inner) =>
   Space ->
   [Int] ->
-  String ->
+  Name ->
   VName ->
   AllocM fromrep torep (VName, VName)
 allocPermArray space perm s v = do
@@ -553,12 +553,12 @@ ensurePermArray space_ok perm v = do
   default_space <- askDefaultSpace
   if maybe True (== mem_space) space_ok
     then pure (mem, v)
-    else allocPermArray (fromMaybe default_space space_ok) perm (baseString v) v
+    else allocPermArray (fromMaybe default_space space_ok) perm (baseName v) v
 
 allocLinearArray ::
   (Allocable fromrep torep inner) =>
   Space ->
-  String ->
+  Name ->
   VName ->
   AllocM fromrep torep (VName, VName)
 allocLinearArray space s v = do

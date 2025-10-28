@@ -28,4 +28,3 @@ entry divide = map2 (u32./)
 entry mod = map2 (u32.%)
 entry quot = map2 (u32.//)
 entry rem = map2 (u32.%%)
-

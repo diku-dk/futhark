@@ -81,7 +81,7 @@ internaliseProg config prog = do
   maybeLog "Lifting lambdas"
   prog_decs3 <- LiftLambdas.transformProg prog_decs2
   maybeLog "Monomorphising"
-  prog_decs4 <- Monomorphise.transformProg prog_decs3
+  (prog_decs4, _) <- Monomorphise.transformProg prog_decs3
   maybeLog "Defunctionalising"
   prog_decs5 <- Defunctionalise.transformProg prog_decs4
   maybeLog "Converting to core IR"

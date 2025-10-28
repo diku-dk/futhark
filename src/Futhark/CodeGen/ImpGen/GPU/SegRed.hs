@@ -113,8 +113,8 @@ compileSegRed pat lvl space segbinops map_kbody = do
 
   compileSegRed' pat grid space segbinops $ \red_cont ->
     sComment "apply map function" $
-      compileStms mempty (kernelBodyStms map_kbody) $ do
-        let (red_res, map_res) = splitAt (segBinOpResults segbinops) $ kernelBodyResult map_kbody
+      compileStms mempty (bodyStms map_kbody) $ do
+        let (red_res, map_res) = splitAt (segBinOpResults segbinops) $ bodyResult map_kbody
 
         let mapout_arrs = drop (segBinOpResults segbinops) $ patElems pat
         unless (null mapout_arrs) $
@@ -222,7 +222,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
       lmem <- sAlloc "local_mem" lmem_total_size (Space "shared")
       let arrInLMem ptype name len_se offset =
             sArray
-              (name ++ "_" ++ prettyString ptype)
+              (name <> "_" <> nameFromString (prettyString ptype))
               ptype
               (Shape [len_se])
               lmem
@@ -236,7 +236,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
               <$> arrInLMem ptype "coll_copy_arr" block_worksize 0
               <*> arrInLMem ptype "block_red_arr" tblock_size offset
               <*> sAllocArray
-                ("chunk_" ++ prettyString ptype)
+                ("chunk_" <> nameFromText (prettyText ptype))
                 ptype
                 (Shape [chunk])
                 (ScalarSpace [chunk] ptype)
@@ -262,7 +262,7 @@ generalSegRedInterms segmented tblock_id tblock_size segbinops =
       MemArray pt shape _ (ArrayIn mem ixfun) -> do
         let shape' = Shape [tblock_size] <> shape
         let shape_E = map pe64 $ shapeDims shape'
-        sArray ("red_arr_" ++ prettyString pt) pt shape' mem $
+        sArray ("red_arr_" <> nameFromText (prettyText pt)) pt shape' mem $
           -- This 'segmented' thing here is a hack, related to #2227.
           -- There absolutely must be some unifying principle we are
           -- missing.
@@ -272,7 +272,7 @@ generalSegRedInterms segmented tblock_id tblock_size segbinops =
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [tblock_size]
-        sAllocArray ("red_arr_" ++ prettyString pt) pt shape $ Space "shared"
+        sAllocArray ("red_arr_" <> nameFromText (prettyText pt)) pt shape $ Space "shared"
 
 -- | Arrays for storing block results.
 --
@@ -647,7 +647,7 @@ segBinOpSlug ltid tblock_id (op, interms, block_res_arrs) = do
     mkAcc p block_res_arr
       | Prim t <- paramType p,
         shapeRank (segBinOpShape op) == 0 = do
-          block_res_acc <- dPrimS (baseString (paramName p) <> "_block_res_acc") t
+          block_res_acc <- dPrimS (baseName (paramName p) <> "_block_res_acc") t
           pure (block_res_acc, [])
       -- if this is a non-primitive reduction, the global mem result array will
       -- double as accumulator.

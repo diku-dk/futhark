@@ -4,5 +4,5 @@
 
 def main (x: f32) =
   let y = 0.001
-  let f (z: f32) = y*z
+  let f (z: f32) = y * z
   in f x

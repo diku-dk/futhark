@@ -3,5 +3,5 @@
 -- ==
 -- error: Consuming
 
-def main(a: []i32): []i32 =
+def main (a: []i32) : []i32 =
   scatter a [0] [1]

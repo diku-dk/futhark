@@ -3,4 +3,4 @@
 -- ==
 -- error: non-lifted
 
-module m = { type^ t = i32 -> i32 } : { type t }
+module m = {type^ t = i32 -> i32}: {type t}

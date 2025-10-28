@@ -2,4 +2,4 @@
 -- ==
 -- input {} output {3.14}
 
-def main: f64 = 3.14
+def main : f64 = 3.14

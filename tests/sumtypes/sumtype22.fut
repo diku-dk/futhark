@@ -4,6 +4,6 @@
 type sum = #foo ([3]i32) | #bar ([2]i32)
 
 def main (xs: *[3]i32) =
-  let v : sum = #foo xs
+  let v: sum = #foo xs
   let xs[0] = 0
   in xs

@@ -64,7 +64,7 @@ import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.Fusion.GraphRep qualified
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
-import Futhark.Util.Pretty (Doc, pretty, putDoc, (</>))
+import Futhark.Util.Pretty (Doc, pretty, putDocLn, (</>))
 import Futhark.Version (versionString)
 import System.Directory
 import System.Exit
@@ -83,7 +83,7 @@ printAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
-      actionProcedure = liftIO . putDoc <=< progDoc
+      actionProcedure = liftIO . putDocLn <=< progDoc
     }
 
 -- | Print the result to stdout, alias annotations.
@@ -92,7 +92,7 @@ printAliasesAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
-      actionProcedure = liftIO . putDoc . pretty . aliasAnalysis
+      actionProcedure = liftIO . putDocLn . pretty . aliasAnalysis
     }
 
 -- | Print last use information to stdout.

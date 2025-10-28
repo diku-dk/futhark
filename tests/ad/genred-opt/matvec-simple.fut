@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: rev_J
 -- compiled random input { [1024][80]f32 [1024][80]f32 [1024][1024]f32} auto output
 -- compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32} auto output
@@ -10,16 +11,15 @@
 -- }
 
 type real = f32
-let real_sum = f32.sum
+def real_sum = f32.sum
 
-let dotprod xs ys = real_sum (map2 (*) xs ys)
+def dotprod xs ys = real_sum (map2 (*) xs ys)
 
-let matvec [n][q] (mat: [n][q]real) (vct: [q]real) : [n]real =
+def matvec [n] [q] (mat: [n][q]real) (vct: [q]real) : [n]real =
   map (dotprod vct) mat
 
-let matmat [m][n][q] (mat1: [m][q]real, mat2: [n][q]real) : [m][n]real =
+def matmat [m] [n] [q] (mat1: [m][q]real, mat2: [n][q]real) : [m][n]real =
   map (matvec mat2) mat1
 
-entry rev_J [m][n][q] (mat1: [m][q]real) (mat2: [n][q]real) (res_adj: [m][n]real) =
+entry rev_J [m] [n] [q] (mat1: [m][q]real) (mat2: [n][q]real) (res_adj: [m][n]real) =
   vjp matmat (mat1, mat2) res_adj
-

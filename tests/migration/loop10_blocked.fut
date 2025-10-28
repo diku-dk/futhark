@@ -7,5 +7,6 @@
 -- }
 
 def main (A: [5]i64) : [5]i64 =
-  loop (B: [5]i64) = A for i < A[0] do
-    if i%4 != 0 then B else [1, 2, i, 4, 5]
+  loop (B: [5]i64) = A
+  for i < A[0] do
+    if i % 4 != 0 then B else [1, 2, i, 4, 5]

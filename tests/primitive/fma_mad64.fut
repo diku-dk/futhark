@@ -10,5 +10,6 @@
 --        }
 
 def main (as: []f64) (bs: []f64) (cs: []f64) =
-  (map3 f64.fma as bs cs,
-   map3 f64.mad as bs cs)
+  ( map3 f64.fma as bs cs
+  , map3 f64.mad as bs cs
+  )

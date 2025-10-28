@@ -1,7 +1,8 @@
-module m : {
-  type~ t '~a
-  val mk '~a : () -> t a
-} = {
+module m
+  : {
+      type~ t '~a
+      val mk '~a : () -> t a
+    } = {
   type~ t '~a = ()
   def mk () = ()
 }

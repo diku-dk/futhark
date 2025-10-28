@@ -1,7 +1,10 @@
+-- ==
+-- tags { autodiff }
+
 def test [n] (xs: [n]i32) =
   let xs' = copy xs
-  let xs'' = map (*2) xs'
-  in xs' with [1] =  xs''[1]
+  let xs'' = map (* 2) xs'
+  in xs' with [1] = xs''[1]
 
 -- ==
 -- entry: prim

@@ -140,7 +140,7 @@ removeScalarCopy vtable pat aux (Update safety arr_x (Slice slice_x) (Var v))
     Just (slice_y_bef, DimFix j, []) <- focusNth (length slice_y - 1) slice_y = Simplify $ do
       let slice_x' = Slice $ slice_x_bef ++ [DimSlice i (intConst Int64 1) (intConst Int64 1)]
           slice_y' = Slice $ slice_y_bef ++ [DimSlice j (intConst Int64 1) (intConst Int64 1)]
-      v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
+      v' <- letExp (baseName v <> "_slice") $ BasicOp $ Index arr_y slice_y'
       certifying cs_y . auxing aux $
         letBind pat $
           BasicOp $

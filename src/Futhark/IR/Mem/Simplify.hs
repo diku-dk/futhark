@@ -98,7 +98,7 @@ blockers =
   Engine.noExtraHoistBlockers
     { Engine.blockHoistPar = isAlloc,
       Engine.blockHoistSeq = isResultAlloc,
-      Engine.isAllocation = isAlloc mempty mempty
+      Engine.isAllocation = isAlloc ST.empty mempty
     }
 
 -- If an allocation is statically known to be safe, then we can remove
@@ -126,7 +126,7 @@ copyManifest vtable pat aux (Replicate (Shape []) (Var v2))
     Pat [PatElem _ (_, MemArray _ _ _ (ArrayIn mem _))] <- pat =
       Simplify $ do
         ~(MemArray pt shape u (ArrayIn _ v1_lmad)) <- lookupMemInfo v1
-        v0' <- newVName (baseString v1 <> "_manifest")
+        v0' <- newVName (baseName v1 <> "_manifest")
         let manifest_pat =
               Pat [PatElem v0' $ MemArray pt shape u $ ArrayIn mem v1_lmad]
             stm = mkWiseStm manifest_pat mempty $ BasicOp $ Manifest v0 perm

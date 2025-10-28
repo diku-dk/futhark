@@ -4,4 +4,4 @@
 
 module M = import "importee-qualified"
 
-def main(a: i32): i32 = M.whatever 1
+def main (a: i32) : i32 = M.whatever 1

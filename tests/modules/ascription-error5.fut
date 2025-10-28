@@ -3,15 +3,16 @@
 -- error: bar.t
 
 module type mt = {
-  module foo : {
+  module foo: {
     type t = i32
   }
-  module bar : {
+
+  module bar: {
     type t = bool
   }
 }
 
 module m : mt = {
-  module foo = { type t = i32 }
-  module bar = { type t = i32 }
+  module foo = {type t = i32}
+  module bar = {type t = i32}
 }

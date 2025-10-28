@@ -3,6 +3,6 @@
 -- ==
 -- error: match
 
-def main() =
-  let r:{a:i32,b:i32} = {a=0}
+def main () =
+  let r: {a: i32, b: i32} = {a = 0}
   in 0

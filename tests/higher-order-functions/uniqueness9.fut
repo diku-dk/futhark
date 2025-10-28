@@ -1,6 +1,6 @@
 -- This requires care to maintain the right uniqueness attributes.
 
-def singleton (f: i32 -> []i32): ([]i32, *[]i32) =
+def singleton (f: i32 -> []i32) : ([]i32, *[]i32) =
   let xs = f 1
   in (xs, [1])
 

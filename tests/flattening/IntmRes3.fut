@@ -22,15 +22,15 @@
 --    [[[32, 31, 30],
 --      [35, 34, 33]]]]
 -- }
-def addToRow [n] (xs: [n]i32, y: i32): [n]i32 =
-  map (\(x: i32): i32  -> x+y) xs
+def addToRow [n] (xs: [n]i32, y: i32) : [n]i32 =
+  map (\(x: i32) : i32 -> x + y) xs
 
-def main (xssss: [][][][]i32) (cs: []i32) (y: i32): [][][][]i32 =
-  map  (\(xsss: [][][]i32, c: i32)  ->
-         let y' = y * c + c in
-         map  (\(xss: [][]i32)  ->
-                map (\(xs: []i32)  ->
-                      addToRow(xs,y')
-                   ) xss
-            ) xsss
-      ) (zip  xssss cs)
+def main (xssss: [][][][]i32) (cs: []i32) (y: i32) : [][][][]i32 =
+  map (\(xsss: [][][]i32, c: i32) ->
+         let y' = y * c + c
+         in map (\(xss: [][]i32) ->
+                   map (\(xs: []i32) ->
+                          addToRow (xs, y'))
+                       xss)
+                xsss)
+      (zip xssss cs)

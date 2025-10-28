@@ -45,7 +45,7 @@ class (ASTRep rep, AliasedOp (OpC rep), AliasesOf (LetDec rep)) => Aliased rep w
   bodyAliases :: Body rep -> [Names]
 
   -- | The variables consumed in the body.
-  consumedInBody :: Body rep -> Names
+  consumedInBody :: GBody rep res -> Names
 
 vnameAliases :: VName -> Names
 vnameAliases = oneName

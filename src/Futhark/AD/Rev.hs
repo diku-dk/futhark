@@ -9,6 +9,7 @@
 module Futhark.AD.Rev (revVJP) where
 
 import Control.Monad
+import Control.Monad.Identity
 import Data.List ((\\))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map qualified as M
@@ -22,7 +23,7 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (takeLast)
+import Futhark.Util (chunks, takeLast)
 
 patName :: Pat Type -> ADM VName
 patName (Pat [pe]) = pure $ patElemName pe
@@ -33,8 +34,7 @@ copyIfArray v = do
   v_t <- lookupType v
   case v_t of
     Array {} ->
-      letExp (baseString v <> "_copy") . BasicOp $
-        Replicate mempty (Var v)
+      letExp (baseName v <> "_copy") . BasicOp $ Replicate mempty (Var v)
     _ -> pure v
 
 -- The vast majority of BasicOps require no special treatment in the
@@ -144,7 +144,7 @@ diffBasicOp pat aux e m =
         ne <- letSubExp "zero" $ zeroExp x_t
         n <- letSubExp "rep_size" =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ns
         pat_adj_flat <-
-          letExp (baseString pat_adj <> "_flat") . BasicOp $
+          letExp (baseName pat_adj <> "_flat") . BasicOp $
             Reshape pat_adj (reshapeAll (Shape ns) (Shape $ n : arrayDims x_t))
         reduce <- reduceSOAC [Reduce Commutative lam [ne]]
         updateSubExpAdj x
@@ -159,7 +159,7 @@ diffBasicOp pat aux e m =
               let w = arraySize 0 v_t
                   slice = DimSlice start w (intConst Int64 1)
               pat_adj_slice <-
-                letExp (baseString pat_adj <> "_slice") $
+                letExp (baseName pat_adj <> "_slice") $
                   BasicOp $
                     Index pat_adj (sliceAt v_t d [slice])
               start' <- letSubExp "start" $ BasicOp $ BinOp (Add Int64 OverflowUndef) start w
@@ -203,7 +203,8 @@ diffBasicOp pat aux e m =
       pat_adjs <- mapM lookupAdjVal (patNames pat)
       returnSweepCode $ do
         forM_ (zip pat_adjs vs) $ \(adj, v) -> do
-          adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ Slice $ map DimFix is
+          adj_t <- lookupType adj
+          adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
           updateSubExpAdj v adj_i
 
 vjpOps :: VjpOps
@@ -212,6 +213,27 @@ vjpOps =
     { vjpLambda = diffLambda,
       vjpStm = diffStm
     }
+
+-- | Transform updates on accumulators matching the given certificates into
+-- updates that write provided zero values.
+zeroOutUpdates :: [(VName, [SubExp])] -> Lambda SOACS -> Lambda SOACS
+zeroOutUpdates certs_to_zeroes lam = lam {lambdaBody = onBody $ lambdaBody lam}
+  where
+    onExp = runIdentity . mapExpM mapper
+      where
+        mapper =
+          (identityMapper :: (Monad m) => Mapper SOACS SOACS m)
+            { mapOnOp = traverseSOACStms (\_ stms -> pure $ onStms stms),
+              mapOnBody = \_ body -> pure $ onBody body
+            }
+    onStms = fmap onStm
+    onStm (Let (Pat [pe]) aux (BasicOp (UpdateAcc safety acc is _)))
+      | Acc c _ _ _ <- patElemType pe,
+        Just zero <- lookup c certs_to_zeroes =
+          Let (Pat [pe]) aux (BasicOp (UpdateAcc safety acc is zero))
+    onStm (Let pat aux e) = Let pat aux $ onExp e
+
+    onBody body = body {bodyStms = onStms $ bodyStms body}
 
 diffStm :: Stm SOACS -> ADM () -> ADM ()
 diffStm (Let pat aux (BasicOp e)) m =
@@ -285,16 +307,20 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
     free_accs <- filterM (fmap isAcc . lookupType) free_vars
     let free_vars' = free_vars \\ free_accs
     lam'' <- diffLambda' adjs free_vars' lam'
-    inputs' <- mapM renameInputLambda inputs
-    free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' lam''
+    (inputs_zeroes, inputs') <-
+      unzip <$> zipWithM renameInputLambda (chunks lengths adjs) inputs
+    let certs = map paramName $ take (length inputs) $ lambdaParams lam''
+    free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' $ zeroOutUpdates (zip certs inputs_zeroes) lam''
     zipWithM_ insAdj (arrs <> free_vars') free_adjs
   where
+    lengths = map (\(_, as, _) -> length as) inputs
     arrs = concatMap (\(_, as, _) -> as) inputs
-    renameInputLambda (shape, as, Just (f, nes)) = do
-      f' <- renameLambda f
-      pure (shape, as, Just (f', nes))
-    renameInputLambda input = pure input
-    diffLambda' res_adjs get_adjs_for (Lambda params ts body) =
+    renameInputLambda as_adj (shape, as, _) = do
+      nes_ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) as
+      zeroes <- mapM (zeroArray mempty) nes_ts
+      as' <- mapM adjVal as_adj
+      pure (map Var zeroes, (shape, as', Nothing))
+    diffLambda' res_adjs get_adjs_for (Lambda params ts body) = do
       localScope (scopeOfLParams params) $ do
         Body () stms res <- diffBody res_adjs get_adjs_for body
         let body' = Body () stms $ take (length inputs) res <> takeLast (length get_adjs_for) res
@@ -358,9 +384,15 @@ revVJP scope (Lambda params ts body) =
 -- some assumptions and lay down a basic design.
 --
 -- First, we assume that any WithAccs that occur in the program are
--- the result of previous invocations of VJP.  This means we can rely
--- on the operator having a constant adjoint (it's some kind of
--- addition).
+-- come from one of these sources:
+--
+-- - A previous instance of VJP, which means we can rely on the operator having
+--   a constant adjoint (it's addition as appropriate to the type).
+--
+-- - A scatter, meaning there is no operator.
+--
+-- (These can actually be distinguished by the presence of an operator, although
+-- we do not currently bother.)
 --
 -- Second, the adjoint of an accumulator is an array of the same type
 -- as the underlying array.  For example, the adjoint type of the
@@ -369,23 +401,38 @@ revVJP scope (Lambda params ts body) =
 -- '[]f64', '[]f32'.  Our current design assumes that adjoints are
 -- single variables.  This is fixable.
 --
+-- In the return sweep, when inserting the with_acc, we still compute the
+-- "original" accumulator result, but modified such that its initial value is
+-- the adjoint of the result of the accumulator. We also modify the update_accs
+-- of these accumulators to be with zero values. This means that the array that
+-- is produced will be equal to the adjoint of the result, except for those
+-- places that have been updated, where it will be zero. This is intuitively
+-- sensible - values that have been overwritten (and so do not contribute to the
+-- result) should obviously have zero sensitivity.
+--
 -- # Adjoint of UpdateAcc
 --
---   Consider primal code
+-- Consider primal code
 --
 --     update_acc(acc, i, v)
 --
---   Interpreted as an imperative statement, this means
+-- Interpreted as an imperative statement, this means
 --
 --     acc[i] ⊕= v
 --
---   for some '⊕'.  Normally all the compiler knows of '⊕' is that it
---   is associative and commutative, but because we assume that all
---   accumulators are the result of previous AD transformations, we
---   can assume that '⊕' actually behaves like addition - that is, has
---   unit partial derivatives.  So the return sweep is
+-- for some '⊕'.  Normally all the compiler knows of '⊕' is that it
+-- is associative and commutative, but because we assume that all
+-- accumulators are the result of previous AD transformations, we
+-- can assume that '⊕' actually behaves like addition - that is, has
+-- unit partial derivatives.  So the return sweep is
 --
---     v += acc_adj[i]
+--     v_adj += acc_adj[i]
+--
+-- Further, we modify the primal code so that it becomes
+--
+--     update_acc(acc, i, 0)
+--
+-- for some appropriate notion of zero.
 --
 -- # Adjoint of Map
 --
