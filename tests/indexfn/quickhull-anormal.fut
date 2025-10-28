@@ -282,15 +282,22 @@ def extract_empty_segments [num_segs] [num_points]
 --  let segs' = segs_true
   let segs' = zip4 segs_true_bx segs_true_by segs_true_ex segs_true_ey
   let sgm_inds' = 
-    map (\seg_ix -> new_segs_ix[seg_ix] + segs_indicator[seg_ix] - 1) sgm_inds
+      -- map (\seg_ix -> new_segs_ix[seg_ix] + segs_indicator[seg_ix] - 1) sgm_inds
+      map (\seg_ix -> if segs_inhabited[seg_ix] == 1
+                      then new_segs_ix[seg_ix]
+                      else 0
+          )
   -- ^ Bounds check for `new_segs_ix[seg_ix]` should succeed, since
   --     precondition dictates `0 <= seg_ix < num_segs`
   --   Array `sgm_inds'` has index function:
   --       `forall i < num_segs . true => Sum(segs_inhabited[0 : sgm_inds[i]]) - 1`
   --   The postcondition reduces to proving that
-  --       `Sum(segs_inhabited[0 : sgm_inds[i]]) - 1 < SUM(segs_inhabited[0 : num_segs-1])`
-  --     which NOW (after the modification) works because it simplifies to
-  --       `SUM(segs_inhabited[sgm_inds[i]+1 : num_segs-1]) + 1 > 0`
+  --       `Sum(segs_inhabited[0 : sgm_inds[i]-1]) < SUM(segs_inhabited[0 : num_segs-1])`
+  --   After subtraction it becomes:
+  --       `Sum(segs_inhabited[sgm_inds[i] : num_segs-1]) > 0`
+  --   After expanding with known indices it becomes:
+  --       `1 + Sum(segs_inhabited[sgm_inds[i] : num_segs-1]) > 0`
+  --     which NOW (after the modification) works!
   --
   in (hull', segs', sgm_inds')
 
