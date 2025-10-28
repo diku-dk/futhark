@@ -33,9 +33,9 @@
 --    2.726331, -1.618253, 1.472878]
 -- }
 
-def tridag ( nn: i32
-           , b: *[]f64
-           , d: *[]f64
+def tridag [nn]
+           ( b: *[]f64
+           , d: *[nn]f64
            , a: []f64
            , c: []f64
            ) : ([]f64, []f64) =
@@ -62,4 +62,4 @@ def main : ([]f64, []f64) =
   let b = map (\x -> f64.i64 (x) + 1.0) (iota (nn))
   let c = map (\x -> 1.11 * f64.i64 (x) + 0.5) (iota (nn))
   let d = map (\x -> 1.01 * f64.i64 (x) + 0.25) (iota (nn))
-  in tridag (i32.i64 nn, b, d, a, c)
+  in tridag (b, d, a, c)

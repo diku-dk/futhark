@@ -381,6 +381,11 @@ library
       Futhark.Pkg.Types
       Futhark.Profile
       Futhark.Script
+      Futhark.Solve.GLPK
+      Futhark.Solve.LP
+      Futhark.Solve.Matrix
+      Futhark.Solve.Simplex
+      Futhark.Solve.BranchAndBound
       Futhark.Test
       Futhark.Test.Spec
       Futhark.Test.Values
@@ -421,14 +426,21 @@ library
       Language.Futhark.Tuple
       Language.Futhark.TypeChecker
       Language.Futhark.TypeChecker.Consumption
+      Language.Futhark.TypeChecker.Constraints
+      Language.Futhark.TypeChecker.TySolve
+      Language.Futhark.TypeChecker.TySolveOld
+      Language.Futhark.TypeChecker.UnionFind
+      Language.Futhark.TypeChecker.Error
       Language.Futhark.TypeChecker.Names
       Language.Futhark.TypeChecker.Match
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
+      Language.Futhark.TypeChecker.Rank
       Language.Futhark.TypeChecker.Terms
       Language.Futhark.TypeChecker.Terms.Loop
       Language.Futhark.TypeChecker.Terms.Monad
       Language.Futhark.TypeChecker.Terms.Pat
+      Language.Futhark.TypeChecker.Terms.Unsized
       Language.Futhark.TypeChecker.Types
       Language.Futhark.TypeChecker.Unify
       Language.Futhark.Warnings
@@ -498,6 +510,9 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
+     -- remove me later
+    , glpk-hs
+    , silently
 
 executable futhark
   import: common
@@ -509,6 +524,8 @@ library futhark-testing
   import: common
   hs-source-dirs: src-testing
   exposed-modules:
+      Generated.AllFutBenchmarks
+      Generated.AllFutBenchmarks.Accelerate.Nbody.Nbodybh
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.DataDependenciesTests
@@ -533,6 +550,8 @@ library futhark-testing
       Futhark.Optimise.ArrayLayoutTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
+      Futhark.Solve.BranchAndBoundTests
+      Futhark.Solve.SimplexTests
       Language.Futhark.CoreTests
       Language.Futhark.PrettyTests
       Language.Futhark.ParserBenchmarks
@@ -540,6 +559,8 @@ library futhark-testing
       Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
+      Language.Futhark.TypeChecker.TySolveBenchmarks
+      Language.Futhark.TypeChecker.TySolveTests
       Language.Futhark.TypeChecker.ConsumptionTests
       Language.Futhark.TypeCheckerTests
   build-depends:
@@ -551,11 +572,14 @@ library futhark-testing
     , free
     , futhark
     , megaparsec
-    , srcloc
+    , srcloc >=0.4
     , tasty
     , tasty-hunit
     , tasty-quickcheck
     , text
+    , vector >=0.12
+    , srcloc
+    , regex-tdfa ^>= 1.3.2
 
 test-suite unit
   import: common

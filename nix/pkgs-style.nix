@@ -3,6 +3,6 @@ with pkgs;
 [hlint
  ormolu
  parallel
- python.mypy
- python.black
+ mypy
+ black
 ]

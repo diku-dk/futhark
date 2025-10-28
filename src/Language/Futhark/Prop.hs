@@ -33,6 +33,9 @@ module Language.Futhark.Prop
     subExps,
     similarExps,
     sameExp,
+    frameOf,
+    shapePrefix,
+    typeShapePrefix,
 
     -- * Queries on patterns and params
     patIdents,
@@ -51,9 +54,11 @@ module Language.Futhark.Prop
     arrayShape,
     orderZero,
     unfoldFunType,
+    unfoldFunTypeWithRet,
     foldFunType,
     typeVars,
     isAccType,
+    recordField,
 
     -- * Operations on types
     peelArray,
@@ -247,6 +252,14 @@ diet (Array d _ _) = d
 diet (Scalar (TypeVar d _ _)) = d
 diet (Scalar (Sum cs)) = foldl max Observe $ foldMap (map diet) cs
 
+-- | Look up this record field if it exists.
+recordField :: [Name] -> TypeBase dim u -> Maybe (TypeBase dim u)
+recordField [] t = Just t
+recordField (f : fs) (Scalar (Record fts))
+  | Just ft <- M.lookup f fts =
+      recordField fs ft
+recordField _ _ = Nothing
+
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
 toStructural ::
@@ -315,7 +328,9 @@ arrayOfWithAliases ::
 arrayOfWithAliases u shape2 (Array _ shape1 et) =
   Array u (shape2 <> shape1) et
 arrayOfWithAliases u shape (Scalar t) =
-  Array u shape (second (const mempty) t)
+  if shapeRank shape == 0
+    then Scalar t `setUniqueness` u
+    else Array u shape (second (const mempty) t)
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
@@ -498,7 +513,7 @@ typeOf (Attr _ e _) = typeOf e
 typeOf (AppExp _ (Info res)) = appResType res
 
 -- | The type of a function with the given parameters and return type.
-funType :: [Pat ParamType] -> ResRetType -> StructType
+funType :: [Pat (TypeBase d Diet)] -> RetTypeBase d Uniqueness -> TypeBase d NoUniqueness
 funType params ret =
   let RetType _ t = foldr (arrow . patternParam) ret params
    in toStruct t
@@ -508,7 +523,7 @@ funType params ret =
 
 -- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
 -- @ts@ as parameters and returns @ret@.
-foldFunType :: [ParamType] -> ResRetType -> StructType
+foldFunType :: [TypeBase d Diet] -> RetTypeBase d Uniqueness -> TypeBase d NoUniqueness
 foldFunType ps ret =
   let RetType _ t = foldr arrow ret ps
    in toStruct t
@@ -518,11 +533,23 @@ foldFunType ps ret =
 
 -- | Extract the parameter types and return type from a type.
 -- If the type is not an arrow type, the list of parameter types is empty.
-unfoldFunType :: TypeBase dim as -> ([TypeBase dim Diet], TypeBase dim NoUniqueness)
-unfoldFunType (Scalar (Arrow _ _ d t1 (RetType _ t2))) =
+unfoldFunType :: TypeBase dim as -> ([(PName, TypeBase dim Diet)], TypeBase dim NoUniqueness)
+unfoldFunType (Scalar (Arrow _ p d t1 (RetType _ t2))) =
   let (ps, r) = unfoldFunType t2
-   in (second (const d) t1 : ps, r)
+   in ((p, second (const d) t1) : ps, r)
 unfoldFunType t = ([], toStruct t)
+
+-- | Extract the parameter types and 'RetTypeBase' from a function type.
+-- If the type is not an arrow type, returns 'Nothing'.
+unfoldFunTypeWithRet ::
+  TypeBase dim as ->
+  Maybe ([(PName, TypeBase dim Diet)], RetTypeBase dim Uniqueness)
+unfoldFunTypeWithRet (Scalar (Arrow _ p d t1 (RetType _ t2@(Scalar Arrow {})))) = do
+  (ps, r) <- unfoldFunTypeWithRet t2
+  pure ((p, second (const d) t1) : ps, r)
+unfoldFunTypeWithRet (Scalar (Arrow _ p d t1 r@RetType {})) =
+  Just ([(p, second (const d) t1)], r)
+unfoldFunTypeWithRet _ = Nothing
 
 -- | The type scheme of a value binding, comprising the type
 -- parameters and the actual type.
@@ -614,7 +641,7 @@ patternStructType = toStruct . patternType
 
 -- | When viewed as a function parameter, does this pattern correspond
 -- to a named parameter of some type?
-patternParam :: Pat ParamType -> (PName, Diet, StructType)
+patternParam :: Pat (TypeBase d Diet) -> (PName, Diet, TypeBase d NoUniqueness)
 patternParam (PatParens p _) =
   patternParam p
 patternParam (PatAttr _ p _) =
@@ -687,8 +714,8 @@ mkBinOp op t x y =
     ( BinOp
         (qualName (intrinsicVar op), mempty)
         (Info t)
-        (x, Info Nothing)
-        (y, Info Nothing)
+        (x, Info (Nothing, mempty))
+        (y, Info (Nothing, mempty))
         mempty
     )
     (Info $ AppRes t [])
@@ -842,16 +869,6 @@ intrinsics =
                   $ RetType []
                   $ array_a Unique
                   $ shape [m, k, l]
-              ),
-              ( "map",
-                IntrinsicPolyFun
-                  [tp_a, tp_b, sp_n]
-                  [ Scalar (t_a mempty) `arr` Scalar (t_b Nonunique),
-                    array_a Observe $ shape [n]
-                  ]
-                  $ RetType []
-                  $ array_b Unique
-                  $ shape [n]
               ),
               ( "reduce",
                 IntrinsicPolyFun
@@ -1468,6 +1485,23 @@ sameExp e1 e2
   | Just es <- similarExps e1 e2 =
       all (uncurry sameExp) es
   | otherwise = False
+
+frameOf :: Exp -> Shape Size
+frameOf (AppExp (Apply _ args _) _) =
+  ((\(_, am) -> autoFrame am) . unInfo . fst) $ NE.last args
+frameOf _ = mempty
+
+-- | @s1 `shapePrefix` s2@ assumes @s1 = prefix <> s2@ and
+-- returns @prefix@.
+shapePrefix :: Shape dim -> Shape dim -> Shape dim
+shapePrefix (Shape ss1) (Shape ss2) =
+  Shape $ take (length ss1 - length ss2) ss1
+
+typeShapePrefix :: TypeBase dim as1 -> TypeBase dim as2 -> Shape dim
+typeShapePrefix (Array _ s _) Scalar {} = s
+typeShapePrefix (Array _ s1 _) (Array _ s2 _) =
+  s1 `shapePrefix` s2
+typeShapePrefix _ _ = mempty
 
 -- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName
