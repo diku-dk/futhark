@@ -106,6 +106,9 @@ def signed_dist_to_line (px: real, py: real) (qx: real, qy: real) (rx: real, ry:
 def max (i,id) (j,jd) =
   if dist_less jd id then (i,id) else (j,jd)
 
+def mk2vec x y =
+  map (\i -> if i == 0 then x else y) (iota 2)
+
 -- Precondition:  Range points.0 = [0, num_segs-1]
 -- Postcondition: \ (xs, ys) -> length xs = 2*num_segs &&
 --                              Range ys.0 = [0, 2*num_segs-1] &&
@@ -172,10 +175,10 @@ def expand_hull [num_segs] [num_points]
                         let pext_y = points_y[ extrema_ix_inds[i] ]
                         let pex = segs_endx[i]
                         let pey = segs_endy[i]
-                        in  ( [pbx, pext_x]
-                            , [pby, pext_y]
-                            , [pext_x, pex]
-                            , [pext_y, pey]
+                        in  ( mk2vec pbx pext_x
+                            , mk2vec pby pext_y
+                            , mk2vec pext_x pex
+                            , mk2vec pext_y pey
                             )
                         -- [(segs[i].0, points[extrema_ix[i].0].1),
                         -- (points[extrema_ix[i].0].1, segs[i].1)]
@@ -212,7 +215,8 @@ def expand_hull [num_segs] [num_points]
   --     the range of points'.0 should be `[0, 2*num_segs-1]`
   --   Finally, it should be trivial that `points'.1` is some filtering of `points.1`
   -- let points' = filter (\(i,_) -> i >= 0) (zip new_seg_inds only_points)
-  let (n, is) = filter_indices (map (\i -> i >= 0) new_seg_inds)
+  let bs = map (\i -> i >= 0) new_seg_inds
+  let (n, is) = filter_indices bs
   let zeros = replicate n 0i64
   let ids = scatter zeros is new_seg_inds
   let zeros = replicate n 0f64
