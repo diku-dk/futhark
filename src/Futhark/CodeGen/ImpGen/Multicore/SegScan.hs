@@ -20,8 +20,14 @@ import Prelude hiding (quot, rem)
 
 -- the final implementation should use this
 blockSize :: Imp.TExp Int64
-blockSize = 2
+blockSize = 4096
 
+-- 29467μs
+-- 11102μs
+
+
+-- 3422μs
+-- 2937μs
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
 xParams scan =
   take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
@@ -70,6 +76,8 @@ nonsegmentedScan
 
     block_no <- dPrim "nblocks"
     block_no <-- pe64 n `divUp` blockSize
+    emit $ Imp.DebugPrint "number of blocks" (Just $ untyped (tvExp block_no))
+
 
     -- for now using head and considering only one
     let pt = elemType (head (lambdaReturnType (segBinOpLambda scan_op)))
@@ -90,7 +98,7 @@ nonsegmentedScan
         (Imp.elements (0 :: Imp.TExp Int64))
         (IntType Int64)
         Imp.DefaultSpace
-        Imp.Volatile
+        Imp.Nonvolatile
         (untyped (0 :: Imp.TExp Int64))
 
     -- initialise
@@ -110,9 +118,13 @@ nonsegmentedScan
 
       -- Maybe we don't need this and can just get it from number of subtask?
       seq_flag <- dPrimV "seq_flag" (true :: Imp.TExp Bool)
+      vvv <- dPrim "vvv" :: MulticoreGen (TV Int64)
+      sOp $ Imp.GetTaskId (tvVar vvv)
+      emit $ Imp.DebugPrint "the task id" (Just $ untyped (tvExp vvv))
 
       block_idx <- dPrim "block_idx" :: MulticoreGen (TV Int64)
       sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) work_index idx0 (untyped one)
+      
       sWhile (tvExp block_idx .<. tvExp block_no) $ do
         start <- dPrimV "start" (tvExp block_idx * blockSize)
         chunk_length <- dPrimV "chunk_length" (min blockSize (pe64 n - tvExp start))
@@ -121,6 +133,7 @@ nonsegmentedScan
         flags_loc <- entryArrayLoc <$> lookupArray flagsArr
         let memF = memLocName flags_loc
         let block_idx_32 = TPrimExp $ sExt Int32 (untyped $ tvExp block_idx)
+        -- emit $ Imp.DebugPrint "reacehd here" Nothing
 
         sWhen
           (tvExp seq_flag .==. true)
@@ -190,7 +203,8 @@ nonsegmentedScan
                   forM_ (zip (xParams scan_op) [res]) $ \(p, se) ->
                     copyDWIMFix (paramName p) [] se []
 
-              
+              emit $ Imp.DebugPrint "reacehd here" Nothing
+
               j <- dPrimV "j" (1 :: Imp.TExp Int64)
               sWhile (tvExp j .<. tvExp chunk_length) $ do
                 dPrimV_ i (tvExp start + tvExp j)
@@ -319,6 +333,10 @@ nonsegmentedScan
           )
 
         sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) work_index idx0 (untyped one)
+      vvv <- dPrim "vvv" :: MulticoreGen (TV Int64)
+      sOp $ Imp.GetTaskId (tvVar vvv)
+      emit $ Imp.DebugPrint "the tak id done working low key" (Just $ untyped (tvExp vvv))
+
 
     free_params <- freeParams fbody
     emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
