@@ -119,7 +119,7 @@ def expand_hull [num_segs] [num_points]
                 -- (segs_endx : [num_segs]real)
                 -- (segs_endy : [num_segs]real)
                 -- (points : [num_points](i64, real, real))
-                (points_idx : {[num_points]i64 | \x -> Range x (0, num_segs)})
+                (points_idx : {[num_points]i64 | \x -> Range num_segs (0, num_points) && Range x (0, num_segs)})
                 (points_x : [num_points]real)
                 (points_y : [num_points]real)
               : {( [](real,real,real,real) -- segs'
