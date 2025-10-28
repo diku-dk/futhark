@@ -66,7 +66,7 @@ def remove_neighbour_and_self [nVerts] (marked: []i64) (targets: []i64) (C: *[nV
     let C = scatter C targets zeros2
     in scatter C marked zeros1
 
-def repl_segm_iota = ???
+def repl_segm_iota x = (x,x) -- used to be ???
 
 def expand 'a 'b (sz: a -> i64) (get: a -> i64 -> b) (arr:[]a) : []b =
   let szs = map sz arr
@@ -84,7 +84,9 @@ def loop_body [nVerts] (vertexes: [nVerts]i64) (edges: []i64) (random_state: [nV
   in (C, I)
 
 -- Can probably be done without mapping over every vertex each loop, by keeping track of a queue-like array
-let MIS [nVerts] (vertexes: [nVerts]i64) (edges: []i64) (random_state: [nVerts]i64) (C: *[nVerts]i64) (I: *[nVerts]i64) (indexes: {[]i64 | \x -> Injective x}) (nEdges: i64) =
+let MIS [nVerts] (vertexes: [nVerts]i64) (edges: []i64) (random_state: [nVerts]i64) (C: *[nVerts]i64) (I: *[nVerts]i64) (indexes: {[]i64 | \x -> Injective x}) (nEdges: i64)
+    : { []i64 | \ _ -> true } =
+    --
     -- Loop until every vertex is added to or excluded from the MIS
     let (_, I) = loop (C, I) while (i64.sum C) > 0 do
         -- Get an array of flags for which vertexes can be added to MIS
@@ -101,3 +103,6 @@ let MIS [nVerts] (vertexes: [nVerts]i64) (edges: []i64) (random_state: [nVerts]i
         let C = remove_neighbour_and_self marked targets C
         in (C, I)
     in I |> (map i64.i64)
+    
+-- verify with:
+-- FUTHARK_INDEXFN=1 cabal test --test-option="--pattern=Properties.IndexFn.mis"
