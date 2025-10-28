@@ -4,8 +4,29 @@
 #define FUTHARK_FUN_ATTR __device__ static
 #define FUTHARK_F64_ENABLED
 
-#if !defined(__HIPCC_RTC__)
+#if defined(__CUDACC_RTC__)
 #include <cuda/std/cstdint>
+typedef uint64_t uintptr_t;
+#elif defined(__HIPCC_RTC__)
+typedef char int8_t;
+typedef short int16_t;
+typedef int int32_t;
+typedef long long int64_t;
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
+typedef uint64_t uintptr_t;
+#else
+// This is for the benefit of offline compilation with clang.
+typedef signed char int8_t;
+typedef short int16_t;
+typedef int int32_t;
+typedef long int64_t;
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long uint64_t;
 #endif
 
 #define __global
