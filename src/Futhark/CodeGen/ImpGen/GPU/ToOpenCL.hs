@@ -5,6 +5,7 @@
 module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
   ( kernelsToOpenCL,
     kernelsToCUDA,
+    kernelsToCUDATC,
     kernelsToHIP,
   )
 where
@@ -27,15 +28,18 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
-import Futhark.CodeGen.RTS.CUDA (preludeCU)
+import Futhark.CodeGen.RTS.CUDA (preludeCU, preludeTC)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
+import Futhark.Optimise.TensorCores.Utils qualified as TC
 import Futhark.Util (zEncodeText)
 import Futhark.Util.IntegralExp (rem)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
+import Text.PrettyPrint.Mainland (prettyCompact)
+import Text.PrettyPrint.Mainland.Class (Pretty (ppr))
 import Prelude hiding (rem)
 
 -- | Generate HIP host and device code.
@@ -45,6 +49,10 @@ kernelsToHIP = translateGPU TargetHIP
 -- | Generate CUDA host and device code.
 kernelsToCUDA :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateGPU TargetCUDA
+
+-- | Like @kernelsToCUDA@, but also supports tensor cores
+kernelsToCUDATC :: ImpGPU.Program -> ImpOpenCL.Program
+kernelsToCUDATC = translateGPU TargetCUDATC
 
 -- | Generate OpenCL host and device code.
 kernelsToOpenCL :: ImpGPU.Program -> ImpOpenCL.Program
@@ -97,6 +105,7 @@ translateGPU target prog =
         }
   where
     genPrelude TargetOpenCL = genOpenClPrelude
+    genPrelude TargetCUDATC = const genCUDATCPrelude
     genPrelude TargetCUDA = const genCUDAPrelude
     genPrelude TargetHIP = const genHIPPrelude
 
@@ -257,6 +266,10 @@ genGPUCode env mode body failures =
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
+generateDeviceFun fname _
+  | TC.isTCName fname =
+      --  Don't compile Tensor Core functions
+      pure ()
 generateDeviceFun fname device_func = do
   when (any memParam $ functionInput device_func) bad
 
@@ -418,6 +431,7 @@ onKernel target kernel = do
             ( [[C.cparam|__local typename uint64_t* shared_mem_aligned|]],
               [C.citems|__local unsigned char* shared_mem = (__local unsigned char*)shared_mem_aligned;|]
             )
+          TargetCUDATC -> (mempty, mempty)
           TargetCUDA -> (mempty, mempty)
           TargetHIP -> (mempty, mempty)
 
@@ -556,6 +570,15 @@ genCUDAPrelude =
   "#define FUTHARK_CUDA\n"
     <> preludeCU
     <> commonPrelude
+
+genCUDATCPrelude :: T.Text
+genCUDATCPrelude =
+  "#define FUTHARK_CUDA\n"
+    <> "#define FUTHARK_CUDATC\n"
+    <> "#include <cute/tensor.hpp>\n"
+    <> preludeCU
+    <> commonPrelude
+    <> preludeTC
 
 genHIPPrelude :: T.Text
 genHIPPrelude =
@@ -835,6 +858,14 @@ inKernelOperations env mode body =
 
           what_next <- whatNext
           GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
+      | Just mmmName <- TC.getTCName fname = do
+          let numStaticArgs = if mmmName == TC.gemmName then 7 else 4
+              (dynamicArgs, staticArgs) =
+                splitAt (length args - numStaticArgs) args
+              convertedArgs = dynamicArgs <> fmap templateStatic staticArgs
+              out_args = [[C.cexp|&$id:d|] | d <- dests]
+              args' = out_args ++ convertedArgs
+          GC.item [C.citem|$id:(funName mmmName)($args:args');|]
       | otherwise = do
           let out_args = [[C.cexp|&$id:d|] | d <- dests]
               args' = out_args ++ args
@@ -860,6 +891,9 @@ inKernelOperations env mode body =
                                  { $stms:argstms; }
                                  $items:what_next
                                }|]
+
+templateStatic :: C.Exp -> C.Exp
+templateStatic e = [C.cexp|$esc:("Int<" <> (prettyCompact $ ppr e) <> ">{}")|]
 
 --- Checking requirements
 
