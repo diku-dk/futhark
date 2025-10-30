@@ -22,12 +22,7 @@ import Prelude hiding (quot, rem)
 blockSize :: Imp.TExp Int64
 blockSize = 4096
 
--- 29467μs
--- 11102μs
 
-
--- 3422μs
--- 2937μs
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
 xParams scan =
   take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
@@ -110,14 +105,14 @@ nonsegmentedScan
     num_tasks <- dPrimSV "num_tasks" int64
     sOp $ Imp.GetNumTasks $ tvVar num_tasks
     emit $ Imp.DebugPrint "the number of tasks" (Just $ untyped (tvExp num_tasks))
-
-    -- let's create the seg
+    emit $ Imp.DebugPrint "the number of tasks" (Just $ untyped (tvExp _nsubtasks))
+    
     fbody <- collect $ do
       let one = (1 :: Imp.TExp Int64)
       let idx0 = Imp.elements (0 :: Imp.TExp Int32)
 
-      -- Maybe we don't need this and can just get it from number of subtask?
       seq_flag <- dPrimV "seq_flag" (true :: Imp.TExp Bool)
+      
       vvv <- dPrim "vvv" :: MulticoreGen (TV Int64)
       sOp $ Imp.GetTaskId (tvVar vvv)
       emit $ Imp.DebugPrint "the task id" (Just $ untyped (tvExp vvv))
@@ -127,7 +122,18 @@ nonsegmentedScan
       
       sWhile (tvExp block_idx .<. tvExp block_no) $ do
         start <- dPrimV "start" (tvExp block_idx * blockSize)
-        chunk_length <- dPrimV "chunk_length" (min blockSize (pe64 n - tvExp start))
+        
+        wtf <- dPrimV "wtf" (pe64 n - tvExp start)
+        emit $ Imp.DebugPrint "the value of wtf" (Just $ untyped (tvExp wtf))
+
+        chunk_length <- dPrim "chunk_length" 
+        sIf (tvExp wtf .<. blockSize)
+          (chunk_length <-- tvExp wtf)
+          (chunk_length <-- blockSize)
+
+        emit $ Imp.DebugPrint "the chunk_length" (Just $ untyped (tvExp chunk_length))
+        
+        
         emit $ Imp.DebugPrint "the value of start" (Just $ untyped (tvExp start))
         prefix_seq <- dPrimSV "prefix_seq" pt
         flags_loc <- entryArrayLoc <$> lookupArray flagsArr
