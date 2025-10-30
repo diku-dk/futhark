@@ -123,12 +123,12 @@ nonsegmentedScan
       sWhile (tvExp block_idx .<. tvExp block_no) $ do
         start <- dPrimV "start" (tvExp block_idx * blockSize)
         
-        wtf <- dPrimV "wtf" (pe64 n - tvExp start)
-        emit $ Imp.DebugPrint "the value of wtf" (Just $ untyped (tvExp wtf))
+        diff_start <- dPrimV "wtf" (pe64 n - tvExp start)
+        emit $ Imp.DebugPrint "the value of wtf" (Just $ untyped (tvExp diff_start))
 
         chunk_length <- dPrim "chunk_length" 
-        sIf (tvExp wtf .<. blockSize)
-          (chunk_length <-- tvExp wtf)
+        sIf (tvExp diff_start .<. blockSize)
+          (chunk_length <-- tvExp diff_start)
           (chunk_length <-- blockSize)
 
         emit $ Imp.DebugPrint "the chunk_length" (Just $ untyped (tvExp chunk_length))
