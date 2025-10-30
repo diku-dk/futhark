@@ -19,10 +19,11 @@ module Futhark.Analysis.Properties.AlgebraBridge.Util
     isYes,
     addRelShape,
     addRelDim,
+    printAlgebra,
   )
 where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
@@ -260,3 +261,22 @@ infixr 4 $>=
 infixr 4 $==
 
 infixr 4 $/=
+
+printAlgebra :: Int -> Symbol -> IndexFnM ()
+printAlgebra level = printM level <=< printAlg
+
+printAlg :: Symbol -> IndexFnM String
+printAlg (a :&& b) = (\x y -> x <> " ^ " <> y) <$> printAlg a <*> printAlg b
+printAlg (a :|| b) = (\x y -> x <> " v " <> y) <$> printAlg a <*> printAlg b
+printAlg (a :< b) = (\x y -> x <> " < " <> y) <$> toStrAlg a <*> toStrAlg b
+printAlg (a :> b) = (\x y -> x <> " > " <> y) <$> toStrAlg a <*> toStrAlg b
+printAlg (a :<= b) = (\x y -> x <> " <= " <> y) <$> toStrAlg a <*> toStrAlg b
+printAlg (a :>= b) = (\x y -> x <> " >= " <> y) <$> toStrAlg a <*> toStrAlg b
+printAlg (a :== b) = (\x y -> x <> " == " <> y) <$> toStrAlg a <*> toStrAlg b
+printAlg (a :/= b) = (\x y -> x <> " /= " <> y) <$> toStrAlg a <*> toStrAlg b
+printAlg e = toStrAlg (sym2SoP e)
+
+toStrAlg :: SoP Symbol -> IndexFnM String
+toStrAlg e = do
+  alg_e :: SoP Algebra.Symbol <- toAlgebra e
+  pure $ prettyStr alg_e

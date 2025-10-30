@@ -30,10 +30,10 @@ import Futhark.Analysis.Properties.Unify (Substitution (mapping), fv, mkRep, rep
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
-import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym)
+import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, addRange)
 import Futhark.SoP.Monad qualified as SoPM (addUntrans)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~), Range (..))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName, baseString)
 
@@ -414,7 +414,20 @@ toAlgebra_ (Var x) = do
     Just alg_x -> pure alg_x
 toAlgebra_ e@(Hole _) = error ("toAlgebra_ on Hole " <> prettyStr e)
 toAlgebra_ e@(Sum j lb ub x)
-  | x == Var j = lookupUntransPE e -- This is n(n+1)/2 where n = ub - lb + 1, but we can't divide by 2.
+  | x == Var j = do
+    -- This is n(n+1)/2 - m(m+1)/2 where n = ub, m = lb - 1,
+    -- but we can't divide by 2.
+    alg_e <- lookupUntransPE e
+    -- We can, however, express its range because ranges allow constant factors
+    -- on the bounded symbol:
+    -- (n * n + n) - (m * m + m) <= 2 * vn <= (n * n + n) - (m * m + m)
+    let m = lb .-. int2SoP 1
+    v <- toAlgebra (ub .*. ub .+. ub .-. m .*. m .+. m) -- TODO simplify?
+    addRange alg_e $
+      Range {
+        lowerBound = S.singleton v, rangeMult = 2, upperBound = S.singleton v
+      }
+    pure alg_e
   | otherwise = do
       res <- search x
       case res of

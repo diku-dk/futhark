@@ -125,7 +125,12 @@ dnfQuery p query =
 p =>? q | p == q = pure Yes
 p =>? q = do
   p' <- simplify p
-  printM 6 "  * ENV" >> printAlgEnv 6
+  rollbackAlgEnv (do
+      printM 7 "  * ALGEBRA "
+      printAlgebra 7 p
+      printAlgebra 7 q
+      printAlgEnv 7
+    )
   printTrace 6 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q) $
     pure (answerFromBool $ p' == q)
       `orM` isFalse p'
