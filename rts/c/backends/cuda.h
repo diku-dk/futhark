@@ -768,7 +768,12 @@ int backend_context_setup(struct futhark_context* ctx) {
   if (cuda_device_setup(ctx) != 0) {
     futhark_panic(-1, "No suitable CUDA device found.\n");
   }
+  // cuCtxCreate grew a new parameter in CUDA 13.
+#if (CUDART_VERSION >= 13000)
+  CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, NULL, 0, ctx->dev));
+#else
   CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
+#endif
 
   free_list_init(&ctx->gpu_free_list);
 
