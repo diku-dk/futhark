@@ -708,14 +708,24 @@ forwardLetEffects [Just vn] e@(E.AppExp (E.Apply e_f args _) _)
       _ -> False
 forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
   | Just "reduce_by_index" <- getFun e_f,
-    [_dest, e_op, _ne, e_is, e_xs] <- getArgs args,
-    Just vn_is <- justVName e_is,
-    Just vn_xs <- justVName e_xs,
-    E.AppExp (E.BinOp (vn_op, _) _ (_, _) (_, _) _) _ <- e_op,
+    [e_dest, e_op, _e_ne, _e_is, e_xs] <- getArgs args,
+    E.OpSection vn_op _ _ <- e_op,
     E.baseTag (E.qualLeaf vn_op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf vn_op,
     Just E.Plus <- L.find ((name ==) . prettyStr) [minBound .. maxBound :: E.BinOp] = do
-      undefined
+      f_xs <- forward e_xs
+      f_dest <- forward e_dest
+      unless (length f_xs == length f_dest) $ error "not implemented yet"
+      forM (zip f_dest f_xs) $ \(y, x) -> do
+        case (justConstant =<< justSingleCase x, shape x) of
+          (Just 1, [d]) -> do
+            addRelSymbol (Prop $ Property.Rng h (Just $ int2SoP 0, Just $ dimSize d .+. int2SoP 1))
+            printAlgEnv 5
+          _ -> pure ()
+        pure $ y {
+          body = singleCase . sym2SoP $
+            Apply (Var h) (map (sVar . boundVar) (mconcat $ shape y))
+        }
   | Just "reduce_by_index" <- getFun e_f,
     [_dest, e_op, e_ne, _is, _xs] <- getArgs args,
     E.Lambda params lam_body _ _ _ <- e_op,
@@ -780,8 +790,8 @@ forwardLetEffects bound_names x = do
       bound_names' <- forM bound_names $ \case
         Just vn -> pure vn
         Nothing -> newNameFromString "_" -- HACK Apply effects to unusable wildcard.
-      effect bound_names'
       printM 3 $ "Propating effects on " <> prettyStr bound_names'
+      effect bound_names'
       printAlgEnv 3
       pure fns
     Nothing -> forward x
