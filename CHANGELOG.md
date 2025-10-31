@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Duplication of entry points in some cases. (#2326)
 
+* A race condition in the creation of `CACHEDIR.TAG` files that could cause
+  `futhark bench` and `futhark test` to crash.
+
 ## [0.25.33]
 
 ### Added
