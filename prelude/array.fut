@@ -57,6 +57,12 @@ def drop [n] 't (i: i64) (x: [n]t) : [n - i]t = x[i:]
 #[inline]
 def sized [m] 't (n: i64) (xs: [m]t) : [n]t = xs :> [n]t
 
+-- | Statically change the size of an array.  Fail at runtime if the
+-- imposed size does not match the actual size.  Essentially syntactic
+-- sugar for a size coercion.
+#[inline]
+def sized_like [n][m] 'a 'b (_: [n]a) (ys: [m]b) : [n]b = ys :> [n]b
+
 -- | Split an array at a given position.
 --
 -- **Complexity:** O(1).
