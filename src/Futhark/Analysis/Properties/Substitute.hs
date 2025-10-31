@@ -12,13 +12,13 @@ import Data.Map qualified as M
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
+import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==), toAlgebra, printAlgebra)
 import Futhark.Analysis.Properties.Flatten (from1Dto2D, lookupII)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ)
-import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, unifiesWith, solveIx)
+import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, solveIx, unifiesWith)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify (Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)
@@ -27,13 +27,15 @@ import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, justSym, sym2SoP, (.*.), (.+.))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
+import qualified Language.Futhark.Core as E
+import Data.List (isInfixOf)
 
 -- If f has multiple cases, we would not know which case to substitute
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
 legalArg :: VName -> IndexFn -> IndexFn -> Symbol -> [SoP Symbol] -> Bool
 legalArg k g f e args =
   let notQuantifier vn = vn < k || or [Just vn == catVar it | it <- concat $ shape g]
-   in (hasSingleCase f || all (all notQuantifier . fv) args)
+   in (hasSingleCase f || (not . any (any (isInfixOf "⁻¹" . E.baseString) . fv)) args && all (all notQuantifier . fv) args)
         || warning
   where
     warning =
@@ -62,33 +64,58 @@ dest_fn @ (f_name, f) = do
   k <- newVName "variables after this are quantifiers"
   g <- renameM dest_fn
 
-  app <- getApply (legalArg k g f) g
-  printM 1337 . gray $ prettyString g
-  printM 1337 $ warningString "\t@ " <> gray (prettyString (fst <$> app))
-  printM 1337 . gray $ "\t  where " <> prettyString f_name <> " =\n" <> prettyIndent 16 f
-  case app of
-    Just apply -> do
-      h <- substituteOnce f g apply
-      h' <- fromJust h @ (f_name, f)
-      printM 1337 . gray $ "\t  ->\n" <> prettyIndent 16 h'
-      pure h'
-    Nothing ->
-      -- When converting expressions a function may be substituted without arguments.
-      -- This may fail when substituting into an uninterpreted function.
-      fromMaybe dest_fn <$> substituteOnce f g (Var f_name, [])
+  go mempty g (legalArg k g f)
   where
-    getApply argCheck = astFold (ASTFolder {foldOnSymbol = getApply_ argCheck}) Nothing
+    go _ g _ | f_name `S.notMember` fv g = pure g
+    go seen g argCheck = do
+      app <- getApply seen g
+      printM 1337 . gray $ prettyString g
+      printM 1337 $ warningString "\t@ " <> gray (prettyString (fst <$> app))
+      printM 1337 . gray $ "\t  where " <> prettyString f_name <> " =\n" <> prettyIndent 16 f
+      printM 9 $ "###################################################### go " <> prettyStr f_name
+      case app of
+        Just apply@(e, args)
+          | argCheck e args -> do
+              printM 9 $ "###################################################### Apply " <> prettyStr apply
+              printM 9 $ "###################################################### f " <> prettyStr f
+              printM 9 $ "###################################################### g " <> prettyStr g
+              h <- substituteOnce f g apply
+              h' <- go (S.insert (f_name, args) seen) (fromJust h) argCheck
+              printM 1337 . gray $ "\t  ->\n" <> prettyIndent 16 h'
+              pure h'
+          | otherwise -> do
+              printM 9 $ "###################################################### (Just otherwise) Apply " <> prettyStr apply
+              go (S.insert (f_name, args) seen) g argCheck
+        Nothing
+          | S.null seen -> do
+              printM 9 $ "###################################################### (Nothing case) f " <> prettyStr f
+              printM 9 $ "###################################################### (Nothing case) g " <> prettyStr g
+              -- When converting expressions a function may be substituted without arguments.
+              -- This may fail when substituting into an uninterpreted function.
+              fromMaybe g <$> substituteOnce f g (Var f_name, [])
+          | otherwise -> do
+              printM 9 $ "###################################################### Nothing otherwise: " <> prettyStr g
+              pure g
 
-    getApply_ argCheck Nothing e@(Apply (Var vn) args)
+    getApply seen = astFold (ASTFolder {foldOnSymbol = getApply_ seen}) Nothing
+
+    getApply_ seen Nothing e@(Apply (Var vn) args)
       | vn == f_name,
-        argCheck e args =
+        (vn, args) `S.notMember` seen =
           pure $ Just (e, args)
     getApply_ _ acc _ = pure acc
+
+-- getApply = astFold (ASTFolder {foldOnSymbol = getApply_}) Nothing
+
+-- getApply_ Nothing e@(Apply (Var vn) args)
+--   | vn == f_name,
+--     argCheck e args =
+--       pure $ Just (e, args)
+-- getApply_ acc _ = pure acc
 
 -- Substitution as defined in the paper.
 -- Unlike @ this will attempt to substitute all indexing/applications
 -- in the index function and allows those substitutions to fail (no-op).
--- Unlike @ this also checks bounds.
 subst :: IndexFn -> IndexFnM IndexFn
 subst indexfn = do
   k <- newVName "variables after this are quantifiers"
@@ -188,8 +215,8 @@ substituteOnce f g_presub (f_apply, actual_args) = do
                       Forall j $ repDomain (mkRep vn (rep args e_f)) dg
             )
   traverse (simplify <=< solveIx new_shape) <=< applySubRules $
-  -- traverse (solveIx new_shape <=< simplify) <=< applySubRules $
-  -- traverse simplify <=< applySubRules $
+    -- traverse (solveIx new_shape <=< simplify) <=< applySubRules $
+    -- traverse simplify <=< applySubRules $
     g
       { shape = new_shape,
         body = cases $ do
@@ -282,15 +309,18 @@ substituteOnce f g_presub (f_apply, actual_args) = do
         -- (The case where `e_3` may depend on `i_2` is still handled by Cat in
         -- this implementation.)
         | i_2 `S.notMember` fv e_3 -> do
-            printM 3 $ "propFlattenSimplified\n  |_ e_1 " <> prettyStr e_1
-            printM 3 $ "  |_ e_2 " <> prettyStr e_2
-            printM 3 $ "  |_ e_3 " <> prettyStr e_3
+            printM 1 $ "propFlattenSimplified\n  |_ e_1 " <> prettyStr e_1
+            printM 1 $ "  |_ e_2 " <> prettyStr e_2
+            printM 1 $ "  |_ e_3 " <> prettyStr e_3
             ans <- lift (e_1 $== e_2 .*. e_3)
+            printM 1 $ "  |_ ans " <> prettyStr ans
             case ans of
               Yes -> do
                 e_row <- lift . rewrite $ sym2SoP (Var i_2) .*. e_3
+                printM 1 $ "  |_ e_row " <> prettyStr e_row
                 let s = mkRep i_1 (e_row .+. sym2SoP (Var i_3))
                 pure $ g {shape = l <> (df : r), body = repCases s (body g)}
+                printM 1 $ "  |_ g " <> prettyStr (g {shape = l <> (df : r), body = repCases s (body g)})
                 error "propFlattenSimplified succeeded (I'd like to know first time when getting rid of Cat)"
               Unknown -> pure g
         where

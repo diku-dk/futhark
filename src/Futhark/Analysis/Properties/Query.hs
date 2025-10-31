@@ -306,14 +306,22 @@ prove prop = alreadyKnown prop `orM` matchProof prop
         IndexFn shape ges -> algebraContext f $ do
           -- Concat because dimension flatness is irrelevant.
           newProver (MonGeNd (fromMonDir dir) (concat shape) ges)
-    matchProof (Rng x (Just a, Just b)) =
-      askQ (CaseCheck (\e -> a :<= e :&& e :< b)) =<< getFn x
-    matchProof (Rng x (Nothing, Just b)) =
-      askQ (CaseCheck (:< b)) =<< getFn x
-    matchProof (Rng x (Just a, Nothing)) =
-      askQ (CaseCheck (a :<=)) =<< getFn x
     matchProof (Rng _ (Nothing, Nothing)) =
       pure Yes
+    matchProof (Rng x (a, b)) = do
+      let lb c = maybe (Bool True) (:<= c) a
+      let ub c = maybe (Bool True) (c :<=) b
+      -- InjV2
+      indexfns <- getIndexFns
+      fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var x)
+      case fp of
+        Just (FiltPart x' y pf _ :: Property Symbol)
+          | x' == x,
+            Just [f@(IndexFn [[Forall i _]] _)] <- M.lookup y indexfns -> algebraContext f $ do
+              gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f]
+              askQ (CaseCheck (\c -> lb c :&& ub c)) (f { body = gs })
+        _ ->
+          askQ (CaseCheck (\c -> lb c :&& ub c)) =<< getFn x
     matchProof (Injective y rcd) = do
       -- InjV2
       indexfns <- getIndexFns

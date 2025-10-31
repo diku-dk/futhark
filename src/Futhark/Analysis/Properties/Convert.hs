@@ -816,10 +816,12 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       -- to check preconditions.
       let name_rep = renamingRep (mconcat actual_args)
       size_rep <- checkPreconditions g pats (actual_args, actual_sizes) name_rep
+      printM 0 "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX preconds OK"
 
       fs <- forM indexfns $ \fn -> do
         substParams (repIndexFn size_rep fn) (mconcat actual_args)
           >>= rewrite
+      printM 0 "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX subs OK"
       pure (mkEffectFromTypeExp te size_rep (mconcat actual_args), fs)
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow {}) <- E.unInfo info,

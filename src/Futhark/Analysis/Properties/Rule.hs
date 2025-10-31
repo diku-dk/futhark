@@ -382,5 +382,27 @@ rulesIndexFn = do
             e_1 <- sub s (hole h3)
             e_2 <- sub s (hole h4)
             pure $ isJust (justConstant e_1) && isJust (justConstant e_2)
+        },
+      Rule
+        { name = "Bool to Int",
+          from =
+            IndexFn
+              { shape = [[Forall i (Iota (hole n))]],
+                body =
+                  cases
+                    [ (Hole h1, hole h3),
+                      (Hole h2, hole h4)
+                    ]
+              },
+          to = \s ->
+            subIndexFn s $
+              IndexFn
+                { shape = [[Forall i (Iota (hole n))]],
+                  body = cases [(Bool True, hole h1 .*. hole h3 .+. hole h2 .*. hole h4)]
+                },
+          sideCondition = \s -> do
+            e_1 <- sub s (hole h3)
+            e_2 <- sub s (hole h4)
+            pure $ isJust (justConstant e_1) && isJust (justConstant e_2)
         }
     ]
