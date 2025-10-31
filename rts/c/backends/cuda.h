@@ -344,7 +344,8 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
     { 9, 0, "compute_90" },
     { 10, 0, "compute_100" },
     { 10, 1, "compute_101" },
-    { 12, 0, "compute_120" }
+    { 12, 0, "compute_120" },
+    { 12, 1, "compute_121" }
   };
 
   int major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
