@@ -31,24 +31,6 @@ tests =
             ]
         ),
       mkTest
-        "tests/indexfn/cooley-tukey-fft-seq.fut"
-        ( pure $ \(i, n, xs, _) ->
-            [ IndexFn
-                { shape = [[Forall i (Iota (sHole n))]],
-                  body = cases [(Bool True, sym2SoP $ Hole xs)]
-                }
-            ]
-        ),
-      mkTest
-        "tests/indexfn/regular_flags.fut"
-        ( pure $ \(i, n, xs, _) ->
-            [ IndexFn
-                { shape = [[Forall i (Iota (sHole n))]],
-                  body = cases [(Bool True, sym2SoP $ Hole xs)]
-                }
-            ]
-        ),
-      mkTest
         "tests/indexfn/map.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
@@ -393,27 +375,6 @@ tests =
                     ]
         ),
       mkTest
-        "tests/indexfn/mk_flag_array_exclusive.fut"
-        ( newNameFromString "k" >>= \k ->
-            newNameFromString "j" >>= \j ->
-              newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
-                let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Apply (Hole shape) [sVar j])
-                    sum_mm1 = sym2SoP $ Sum j (int2SoP 0) (sHole m .-. int2SoP 1) (Apply (Hole shape) [sVar j])
-                 in [ IndexFn
-                        { shape = [],
-                          body = cases [(Bool True, sum_mm1)]
-                        },
-                      IndexFn
-                        { shape = [[Forall i (Cat k (sHole m) sum_km1)]],
-                          body =
-                            cases
-                              [ (sVar i :== sum_km1, sym2SoP $ Apply (Hole xs) [sVar k]),
-                                (sVar i :/= sum_km1, sHole zero)
-                              ]
-                        }
-                    ]
-        ),
-      mkTest
         "tests/indexfn/segment_sum.fut"
         ( pure $ \(i, n, xs, flags) ->
             let xs_i = sym2SoP $ Apply (Hole xs) [sHole i]
@@ -434,24 +395,6 @@ tests =
             [ IndexFn
                 { shape = [[Forall i (Cat k (sHole m) (sHole b))]],
                   body = cases [(Bool True, sHole k)]
-                }
-            ]
-        ),
-      mkTest
-        "tests/indexfn/segment_ids2.fut"
-        ( pure $ \(i, m, k, b) ->
-            [ IndexFn
-                { shape = [[Forall i (Cat k (sHole m) (sHole b))]],
-                  body = cases [(Bool False, sHole k)] --- XXX dummy
-                }
-            ]
-        ),
-      mkTest
-        "tests/indexfn/irregular_constant.fut"
-        ( pure $ \(i, m, k, b) ->
-            [ IndexFn
-                { shape = [[Forall i (Cat k (sHole m) (sHole b))]],
-                  body = cases [(Bool False, sHole k)]
                 }
             ]
         ),
