@@ -82,7 +82,7 @@ tests =
               pure [succ_lb, succ_ub1, succ_ub2, succ_rj_lb, succ_rj_ub]
           )
           @??= [True, True, True, True, True],
-      testCase "FFT ranges falsify intracase antecedent" $
+      testCase "FFT.bounds" $
         run
           ( do
               -- (1) Given ranges
@@ -95,36 +95,24 @@ tests =
               -- and then showing that the negation of (i >= 2**(-1 + lgn - qm1)) is true:
               --   i < 2**(-1 + lgn - qm1)
               clearAlgEnv
-              qm1 <- newNameFromString "qm1"
-              lgn <- newNameFromString "lgn"
+              q <- newNameFromString "q"
+              n <- newNameFromString "n"
               i <- newNameFromString "i"
               j <- newNameFromString "j"
-              let m = Pow (2, sVar lgn .-. sVar qm1 .-. int  1)
-              addRange (Var qm1) $ mkRange' (int 0) (pow2 (sVar lgn .-. int2SoP 1))
-              addRange (Var i) $ mkRange' (int 0) (sVar j .-. int2SoP 1)
-              addRange (Var j) $ mkRange' (int 1) (pow2 (sVar lgn .-. sVar qm1) .-. int  1)
-              printM 1 "=======\n(1) Environment we get from i < j:"
+              addRange (Var n) $ mkRangeLB (int 1)
+              addRange (Var q) $ mkRange' (int 0) (sVar n .-. int2SoP 1)
+              let m = sym2SoP $ Pow (2, sVar n .-. sVar q .-. int  1)
+              addRange (Var i) $ mkRange' (int 0) m
+              let p = Pow (2, sVar q .-. int  1)
+              addRange (Var j) $ mkRange' (int 1) (sym2SoP p)
+
+              let a = sVar j .*. m
+              let b = sym2SoP (Pow (2, sVar n))
+
               printAlgEnv 1
-              rollbackAlgEnv $ do
-                printM 1 "=======\n(2) Environment I want when later adding another range: (query would succeed)"
-                addRange (Var j) $ mkRange' (int 1) (sym2SoP m .-. int  1)
-                printAlgEnv 1
-              printM 1 "=======\n(2) How the ranges actually turn out: (query fails)"
-              -- Ranges also turn out like this if we add all the ranges at once safely:
-              -- addRels $ S.fromList [
-              --     int 0 :<=: sVar qm1,
-              --     sVar qm1 :<=: pow2 (sVar lgn .-. int2SoP 1),
-              --     int 0 :<=: sVar i,
-              --     sVar i :<=: sVar j .-. int2SoP 1,
-              --     int 1 :<=: sVar j,
-              --     sVar j :<=: pow2 (sVar lgn .-. sVar qm1) .-. int  1,
-              --     sVar j :<=: sym2SoP m .-. int  1
-              --   ]
-              addRange m $ mkRange (Just $ sVar j .+. int 1) Nothing
-              printAlgEnv 1
-              e <- simplify (sVar i .-. sym2SoP m)
-              printM 1 (prettyString e <> " < 0")
-              sVar i FM.$<$ sym2SoP m
+              printM 1 $ prettyString a <> " < " <> prettyString b
+
+              a FM.$<$ b
           )
           @??= True,
       --
