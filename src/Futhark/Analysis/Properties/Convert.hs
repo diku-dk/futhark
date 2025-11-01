@@ -228,6 +228,8 @@ forward expr@(E.AppExp (E.Index e_xs slice loc) _)
         unless (rank f_xs == 1) $
           error "Not implemented yet: implicit indexing dimensions. Use `:`."
 
+        printM 1 $ "checking " <> prettyStr e_xs
+        whenBoundsChecking $ printM 1 $ "with boundschecking! " <> prettyStr e_xs
         checkBounds expr f_xs [Just f_idx]
         xs <- case justVName e_xs of
           Just vn -> pure vn
@@ -609,23 +611,26 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
                   }
           fn <- substParams g_fn (zip arg_names arg_fns)
           pure [fn]
-forward (E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _) = do
-  let i = E.identName ident
-  f_szs <- forward e_sz
-  case map justSingleCase f_szs of
-    [Just sz] -> do
-      assume (int2SoP 0 :<= sVar i :&& sVar i :< sz)
-      printM 1 $
-        warningMsg loc "Analyzing loop body, but resulting index function will be uninterpreted."
-      fs <- forward e_body
-      -- Create uninterpreted functions that vary like the
-      -- actual loop body's result. (If we just create scalars
-      -- we can prove injectivity erroneously etc.)
-      let mkUntransFun f = do
-            vn <- newVName "untranslatable_loop"
-            pure $ f {body = singleCase . sym2SoP $ Apply (Var vn) (map (sVar . boundVar) (concat $ shape f))}
-      mapM mkUntransFun fs
-    _ -> error "not implemented yet"
+forward (E.AppExp (E.Loop _sz _init_pat _init form e_body _loc) _) = do
+  fs <- rollbackAlgEnv $ do
+    case form of
+      (E.For ident e_sz) -> do
+        let i = E.identName ident
+        sizes <- map justSingleCase <$> forward e_sz
+        forM_ sizes . mapM_ $ \sz ->
+          assume (int2SoP 0 :<= sVar i :&& sVar i :< sz)
+      (E.While e_condition) -> do
+        conds <- map justSingleCase <$> forward e_condition
+        forM_ conds . mapM_ $ assume . sop2Symbol
+      _ -> error "not implemented"
+    forward e_body
+  -- Create uninterpreted functions that vary like the actual loop body's
+  -- result. (If we just create scalars we can prove injectivity erroneously
+  -- etc.)
+  let mkUntransFun f = do
+        vn <- newVName "untranslatable_loop"
+        pure $ f {body = singleCase . sym2SoP $ Apply (Var vn) (map (sVar . boundVar) (concat $ shape f))}
+  mapM mkUntransFun fs
 forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
   forward e
@@ -722,10 +727,12 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
             addRelSymbol (Prop $ Property.Rng h (Just $ int2SoP 0, Just $ dimSize d .+. int2SoP 1))
             printAlgEnv 5
           _ -> pure ()
-        pure $ y {
-          body = singleCase . sym2SoP $
-            Apply (Var h) (map (sVar . boundVar) (mconcat $ shape y))
-        }
+        pure $
+          y
+            { body =
+                singleCase . sym2SoP $
+                  Apply (Var h) (map (sVar . boundVar) (mconcat $ shape y))
+            }
   | Just "reduce_by_index" <- getFun e_f,
     [_dest, e_op, e_ne, _is, _xs] <- getArgs args,
     E.Lambda params lam_body _ _ _ <- e_op,
@@ -764,23 +771,29 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
             -- so we make sure that the ranges include ne, in order to disregard
             -- ne's range.
             forM_ ranges $ \rs -> do
-                ans <- allM $ map (\(Property.Rng _ (a, b)) -> do
-                    let lb c = maybe (Bool True) (:<= c) a
-                    let ub c = maybe (Bool True) (c :<=) b
-                    askQ (CaseCheck (\c -> lb c :&& ub c)) ne
-                  ) rs
-                when (isYes ans) $
-                  forM_ rs (addRelSymbol . Prop . cloneProperty h) 
+              ans <-
+                allM $
+                  map
+                    ( \(Property.Rng _ (a, b)) -> do
+                        let lb c = maybe (Bool True) (:<= c) a
+                        let ub c = maybe (Bool True) (c :<=) b
+                        askQ (CaseCheck (\c -> lb c :&& ub c)) ne
+                    )
+                    rs
+              when (isYes ans) $
+                forM_ rs (addRelSymbol . Prop . cloneProperty h)
           Nothing -> pure ()
-        pure $ IndexFn {
-          shape = [outer_dim],
-          body = singleCase . sym2SoP $
-            Apply (Var h) (map (sVar . boundVar) outer_dim)
-        }
+        pure $
+          IndexFn
+            { shape = [outer_dim],
+              body =
+                singleCase . sym2SoP $
+                  Apply (Var h) (map (sVar . boundVar) outer_dim)
+            }
 
-      -- TODO pretty sure this could be a histogram in the code, so I think
-      -- we should use that instead, if possible.
-      -- error $ "reduce_by_index " <> prettyStr params <> " ; " <> prettyStr ops
+-- TODO pretty sure this could be a histogram in the code, so I think
+-- we should use that instead, if possible.
+-- error $ "reduce_by_index " <> prettyStr params <> " ; " <> prettyStr ops
 forwardLetEffects bound_names x = do
   toplevel_fns <- getTopLevelIndexFns
   defs <- getTopLevelDefs
@@ -816,12 +829,10 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       -- to check preconditions.
       let name_rep = renamingRep (mconcat actual_args)
       size_rep <- checkPreconditions g pats (actual_args, actual_sizes) name_rep
-      printM 0 "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX preconds OK"
 
       fs <- forM indexfns $ \fn -> do
         substParams (repIndexFn size_rep fn) (mconcat actual_args)
           >>= rewrite
-      printM 0 "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX subs OK"
       pure (mkEffectFromTypeExp te size_rep (mconcat actual_args), fs)
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow {}) <- E.unInfo info,
@@ -1313,7 +1324,7 @@ bindLambdaBodyParams = mapM_ (\(vn, f) -> insertIndexFn vn [f])
 --   * a new common outer dimension is returned (corresponding to the
 --     most complex outer dimension of the arrays)
 zipArgsSOAC ::
-  E.Located a =>
+  (E.Located a) =>
   a ->
   [E.Pat E.ParamType] ->
   NE.NonEmpty (b, E.Exp) ->
@@ -1348,7 +1359,7 @@ zipArgsSOAC loc formal_args actual_args = do
 -- of index functions for.
 -- For each pattern and argument, the two lists must correspond.
 zipArgs ::
-  E.Located a =>
+  (E.Located a) =>
   a ->
   [E.Pat E.ParamType] ->
   NE.NonEmpty (b, E.Exp) ->
@@ -1357,7 +1368,7 @@ zipArgs loc formal_args actual_args =
   zipArgs' loc formal_args =<< mapM forward (getArgs actual_args)
 
 zipArgs' ::
-  E.Located a =>
+  (E.Located a) =>
   a ->
   [E.Pat E.ParamType] ->
   [[IndexFn]] ->
