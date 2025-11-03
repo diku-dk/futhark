@@ -63,7 +63,7 @@ permuteNest fenv env sched orig_nest_stm@(Let _pat _aux e_soac)
     -- ^ check that either `_pat_rec` is of scalar type or it is not used by code_after
     let sched_tail = tailOfSched sched
         sched' = sched_tail { sigma = map (\x -> x - 1) (sigma sched_tail) }
-    last_rec_stms <- trace ("Permute, Case head==0, tail-sched: "++show (sigma sched')++" orig_sched: "++show (sigma sched)) $
+    last_rec_stms <- trace ("Permute, Case head==0, tail-sched: "++show (sigma sched')++" orig_sched: "++show (sigma sched) ++ "\nREC-CALL permuteNest 1 on:\n"++prettyString rec_stm) $
       permuteNest fenv env sched' rec_stm
     mkRecWithBody orig_nest_stm (code_bef, last_rec_stms, code_after, res_ses) >>= pure . oneStm
     -- ^ this also need to fix the code_after to use the result of last_rec'
@@ -81,12 +81,12 @@ permuteNest fenv env sched orig_nest_stm@(Let _pat _aux e_soac)
     let tail_sched = tailOfSched sched
         sigma_rec = map (\x -> if x > s0 then x-1 else x) (sigma tail_sched)
         sched_rec = tail_sched { sigma = sigma_rec}
-    last_rec_stms <- trace ("Permute Case 1.0, s0 < s1, rec-sched: "++show (sigma sched_rec)++" orig_sched: "++show (sigma sched)) $
+    last_rec_stms <- trace ("Permute Case 1.0, s0 < s1, rec-sched: "++show (sigma sched_rec)++" orig_sched: "++show (sigma sched) ++ "\nREC-CALL permuteNest 2 on:\n"++prettyString rec_stm ) $
       permuteNest fenv env sched_rec rec_stm
     rec_stm' <- mkRecWithBody orig_nest_stm (code_bef, last_rec_stms, code_after, res_ses)
     --
     let sched' = append2Sched (headOfSched sched) $ sortByPerm $ tailOfSched sched
-    trace ("Permute Case 1.1, s0 < s1, repositionaing first dim: "++show (sigma sched')++" orig_sched: "++show (sigma sched)++" sorted sched: "++show (sigma $ sortByPerm $ tailOfSched sched)) $
+    trace ("Permute Case 1.1, s0 < s1, repositionaing first dim: "++show (sigma sched')++" orig_sched: "++show (sigma sched)++" sorted sched: "++show (sigma $ sortByPerm $ tailOfSched sched) ++ "\nREC-CALL permuteNest 3 on:\n"++prettyString rec_stm') $
       permuteNest fenv env sched' rec_stm'
   --
   | s0 : s1 : _rest <- sigma sched,
@@ -95,7 +95,7 @@ permuteNest fenv env sched orig_nest_stm@(Let _pat _aux e_soac)
     -- let (code_bef, last_rec, code_after) = sep3LastRec soac
     (before_stms, last_rec_stm, after_stms) <- trace ("Permute Case 2.0, s0 > s1, transpose top"++" orig_sched: "++show (sigma sched)) $
       transposeTopOfNest fenv env sched orig_nest_stm
-    last_rec_stms' <- trace ("Permute Case 2.0, s0 > s1, recurse on sched: "++show (sigma (interchangeTop sched))++" orig_sched: "++show (sigma sched)) $
+    last_rec_stms' <- trace ("Permute Case 2.0, s0 > s1, recurse on sched: "++show (sigma (interchangeTop sched))++" orig_sched: "++show (sigma sched) ++ "\nREC-CALL permuteNest 4 on:\n"++prettyString last_rec_stm) $
       permuteNest fenv env (interchangeTop sched) last_rec_stm
     pure $ before_stms <> last_rec_stms' <> after_stms
     -- ^ something is not OK here: how do you identify the result?
@@ -129,7 +129,8 @@ transposeTopOfNest _fenv _env _sched outer_rec_stm
     PartStms bef_sched msched aft_sched (Just rec_stm) aft_rec <- parts = do
   let ((inl_nms_bef, inl_stms_bef), (inl_nms_aft, inl_stms_aft)) =
         findCheapStms2Inline (freeIn $ lambdaBody map_lam) parts
-      res_nms = namesFromList $ mapMaybe se2VName res_ses
+      res_nms = trace ("\n\n\ntransposeTopOfNest BEGIN for outer-rec-stm:\n"++prettyString pat) $
+                  namesFromList $ mapMaybe se2VName res_ses
       fv3 = freeInStms aft_rec
       fv2 = fv3 <> freeIn rec_stm
       fv1 = fv2 <> freeInStms aft_sched
@@ -145,7 +146,7 @@ transposeTopOfNest _fenv _env _sched outer_rec_stm
   let tab1 = tab0 `M.union` tab_bef
   (tab_schd, sched_stms)  <- distributeMapOnSched tab1 outer_rec_stm (msched, inl_nms_bef, inl_stms_bef) res_nms
   --
-  let tab2 = tab_bef `M.union` tab_schd
+  let tab2 = tab1 `M.union` tab_schd
   (tab_aft, map_stms_aft) <- distributeMapOnStmts tab2 outer_rec_stm (aft_sched, inl_stms_bef) res_nms_aft_sched
   let tab3 = tab2 `M.union` tab_aft
   --
@@ -158,11 +159,12 @@ transposeTopOfNest _fenv _env _sched outer_rec_stm
   (_tab_fin, map_stms_fin) <- distributeMapOnStmts tab4 outer_rec_stm (aft_rec, inl_stms_aft) res_nms_aft_rec
   -- let tab5 = tab4 `M.union` tab_fin
   --
-  pure (map_stms_bef <> sched_stms <> map_stms_aft <> nes_stms, map_stm_rec, map_stms_fin)
+  trace ("transposeTopOfNest END for outer-rec-stm-pat: "++prettyString pat ++ "\nbef-stms:\n" ++ prettyString (map_stms_bef <> sched_stms <> map_stms_aft <> nes_stms) ++"\nintchg-rec:\n" ++ prettyString map_stm_rec ++ "\n\n\n") $
+    pure (map_stms_bef <> sched_stms <> map_stms_aft <> nes_stms, map_stm_rec, map_stms_fin)
   --
   -- map (Var . patElemName) $ patElems pat
 transposeTopOfNest _fenv _env _sched outer_rec_stm =
-  error ("Yet unsuported case for function transposeTopOfNest in Permute.hs, stmt: "++prettyString outer_rec_stm)
+  error ("Yet unsuported case for function transposeTopOfNest in Permute.hs, stmt:\n"++prettyString outer_rec_stm++"\n\n")
 
 ----------------------------------------------------------
 ----------------------------------------------------------
@@ -209,7 +211,7 @@ distributeMapOnStmts tab outer_stm (inner_stms, to_inline) res_nms
   where
     mkPatElm w nm
       | Just (arr_nm, arr_tp) <- M.lookup nm tab = pure (Nothing, PatElem arr_nm arr_tp)
-      | True = do
+      | otherwise = do
       let pat_el_tp = findPatElemInStms nm $ stmsToList inner_stms
           arr_tp    = arrayOfRow pat_el_tp w
       arr_nm <- newVName (baseString nm ++ "lifted")
@@ -294,7 +296,7 @@ interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
       addStms inline_stms
       addStms (bodyStms $ lambdaBody inn_map_lam)
       pure $ bodyResult $ lambdaBody $ inn_map_lam
-  new_lam_inner' <- renameLambda new_lam_inner >>= simplifyLambda 0
+  new_lam_inner' <- trace ("IXCHG INNER-LAM:\n"++prettyString new_lam_inner) $ renameLambda new_lam_inner >>= simplifyLambda 0
   new_inn_res_nms <- mapM (\ nm -> newVName (baseString nm ++ "_ichg")) inn_pat_nms
   let inn_tps'= map (`arrayOfRow` m) $ lambdaReturnType inn_map_lam
       tmp_pat = Pat $ zipWith PatElem new_inn_res_nms inn_tps'
@@ -342,6 +344,7 @@ interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
   new_lam_outer' <- renameLambda new_lam_outer >>= simplifyLambda 0
   (tab', out_pat_nms') <-
       if res_nms == namesFromList inn_pat_nms
+      -- the result of the outer map lambda is exactly the result of the inner redomap
       then pure (mempty, out_pat_nms) -- CHANGED map (`arrayOfRow` n) inn_tps')
       else do -- assumes res_nms do not overlap with inn_pat_nms
         new_pat_nms <- mapM (\ nm -> newVName (baseString nm ++ "_vct_red")) inn_pat_nms
