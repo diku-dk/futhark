@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.25.34]
+
+### Added
+
+* Support for CUDA 13.
+
+### Fixed
+
 * Declaration of zero-length arrays in GPU kernels.
 
 * Handling of size closures of type abbreviations in interpreter (#2316).
@@ -35,6 +43,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Incorrect uniqueness inference for functions returning abstract types. (#2324)
 
 * Duplication of entry points in some cases. (#2326)
+
+* A race condition in the creation of `CACHEDIR.TAG` files that could cause
+  `futhark bench` and `futhark test` to crash.
 
 ## [0.25.33]
 
