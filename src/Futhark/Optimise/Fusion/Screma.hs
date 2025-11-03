@@ -3,6 +3,8 @@ module Futhark.Optimise.Fusion.Screma
     splitLambdaByPar,
     splitLambdaByRes,
     fuseScrema,
+    fuseSuperScrema,
+    SuperScrema (..),
   )
 where
 
@@ -576,12 +578,6 @@ alignPrePost ::
   ([InOut], Lambda SOACS, [InOut]) ->
   m (Lambda SOACS, [VName])
 alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
-  traceM $
-    unlines
-      [ "alignPrePost",
-        prettyString (pre, show pre_out),
-        prettyString (show post_inp, post, show post_out)
-      ]
   (post_inp', pars', ts') <-
     unzip3 <$> auxiliary (pure []) _is_pars _is_ts
   let (id_out, id_res, id_ts) =
@@ -685,8 +681,6 @@ fuseScrema w inp_c form_c out_c inp_p form_p out_p
       post_lam_fuse <-
       fusible inp_c form_c out_p inp_p form_p out_p = do
       ss <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
-      traceM $ "\n" <> prettyString ss
-
       ( (pre_inp_c, pre_c, pre_out_c),
         (post_inp_c, post_c, post_out_c)
         ) <-
