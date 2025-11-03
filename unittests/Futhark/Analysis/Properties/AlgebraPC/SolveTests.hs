@@ -85,34 +85,27 @@ tests =
       testCase "FFT.bounds" $
         run
           ( do
-              -- (1) Given ranges
-              --   0 <= i < j < 2**(lgn - qm1)
-              -- I need to DISPROVE the query:
-              --   i >= 2**(-1 + lgn - qm1)  &&  j < 2**(-1 + lgn - qm1)
-              --
-              -- (2) This is done by assuming
-              --   j < 2**(-1 + lgn - qm1)
-              -- and then showing that the negation of (i >= 2**(-1 + lgn - qm1)) is true:
-              --   i < 2**(-1 + lgn - qm1)
               clearAlgEnv
-              q <- newNameFromString "q"
               n <- newNameFromString "n"
+              q <- newNameFromString "q"
               i <- newNameFromString "i"
               j <- newNameFromString "j"
               addRange (Var n) $ mkRangeLB (int 1)
               addRange (Var q) $ mkRange' (int 0) (sVar n .-. int2SoP 1)
-              let m = sym2SoP $ Pow (2, sVar n .-. sVar q .-. int  1)
-              addRange (Var i) $ mkRange' (int 0) m
-              let p = Pow (2, sVar q .-. int  1)
-              addRange (Var j) $ mkRange' (int 1) (sym2SoP p)
+              let m = Pow (2, sVar n .-. sVar q .-. int  1)
+              addRange (Var i) $ mkRange' (int 0) (sym2SoP m .-. int 1)
+              let p = Pow (2, sVar q)
+              addRange (Var j) $ mkRange' (int 0) (sym2SoP p .-. int 1)
+              addRange m $ mkRangeLB (int 1)
+              addRange p $ mkRangeLB (int 1)
 
-              let a = sVar j .*. m
+              let a = sVar j .*. sym2SoP m
               let b = sym2SoP (Pow (2, sVar n))
 
               printAlgEnv 1
               printM 1 $ prettyString a <> " < " <> prettyString b
 
-              a FM.$<$ b
+              a FM.$<=$ (b .-. int 1)
           )
           @??= True,
       --
