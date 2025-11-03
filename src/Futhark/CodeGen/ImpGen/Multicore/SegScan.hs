@@ -18,9 +18,8 @@ import Futhark.Util.IntegralExp (divUp, quot)
 import Futhark.Util.Pretty (prettyString)
 import Prelude hiding (quot, rem)
 
--- the final implementation should use this
 blockSize :: Imp.TExp Int64
-blockSize = 4096
+blockSize = 16384 
 
 
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
@@ -82,25 +81,31 @@ nonsegmentedScan
     -- emit $ Imp.DebugPrint "the neutral elements" (Just exne)
 
     -- allocate flags/aggr/prefix arrays of length nblocks
-    flagsArr <- sAllocArray "scan_flags" int8 (Shape [Var (tvVar block_no)]) DefaultSpace
+    flagsArr <- sAllocArray "scan_flags" int64 (Shape [Var (tvVar block_no)]) DefaultSpace
     aggrArr <- sAllocArray "scan_aggr" pt (Shape [Var (tvVar block_no)]) DefaultSpace
     prefArr <- sAllocArray "scan_pref" pt (Shape [Var (tvVar block_no)]) DefaultSpace
 
-    work_index <- sAlloc "work_index" (Imp.bytes 8) Imp.DefaultSpace
-    emit $
-      Imp.Write
-        work_index
-        (Imp.elements (0 :: Imp.TExp Int64))
-        (IntType Int64)
-        Imp.DefaultSpace
-        Imp.Nonvolatile
-        (untyped (0 :: Imp.TExp Int64))
+    work_index <- sAllocArray "work_index" int64 (Shape [intConst Int64 1]) DefaultSpace
+
+    -- work_index <- sAlloc "work_index" (Imp.bytes 8) Imp.DefaultSpace
+    -- emit $
+    --   Imp.Write
+    --     work_index
+    --     (Imp.elements (0 :: Imp.TExp Int64))
+    --     (IntType Int64)
+    --     Imp.DefaultSpace
+    --     Imp.Nonvolatile
+    --     (untyped (0 :: Imp.TExp Int64))
 
     -- initialise
     sFor "init" (tvExp block_no) $ \j -> do
-      copyDWIMFix flagsArr [j] (intConst Int8 0) []
+      copyDWIMFix flagsArr [j] (intConst Int64 0) []
       copyDWIMFix aggrArr [j] ne []
       copyDWIMFix prefArr [j] ne []
+    
+    copyDWIMFix work_index [0] (intConst Int64 0) []
+
+     -- launch parallel tasks
 
     num_tasks <- dPrimSV "num_tasks" int64
     sOp $ Imp.GetNumTasks $ tvVar num_tasks
@@ -118,7 +123,10 @@ nonsegmentedScan
       emit $ Imp.DebugPrint "the task id" (Just $ untyped (tvExp vvv))
 
       block_idx <- dPrim "block_idx" :: MulticoreGen (TV Int64)
-      sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) work_index idx0 (untyped one)
+      work_index_loc <- entryArrayLoc <$> lookupArray work_index
+      let workF = memLocName work_index_loc
+      
+      sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) workF idx0 (untyped one)
       
       sWhile (tvExp block_idx .<. tvExp block_no) $ do
         start <- dPrimV "start" (tvExp block_idx * blockSize)
@@ -138,6 +146,9 @@ nonsegmentedScan
         prefix_seq <- dPrimSV "prefix_seq" pt
         flags_loc <- entryArrayLoc <$> lookupArray flagsArr
         let memF = memLocName flags_loc
+
+
+        
         let block_idx_32 = TPrimExp $ sExt Int32 (untyped $ tvExp block_idx)
         -- emit $ Imp.DebugPrint "reacehd here" Nothing
 
@@ -150,13 +161,13 @@ nonsegmentedScan
                     copyDWIMFix (tvVar prefix_seq) [] p []
               )
               ( do
-                  prev_flag <- dPrim "prev_flag" :: MulticoreGen (TV Int8)
+                  prev_flag <- dPrim "prev_flag" :: MulticoreGen (TV Int64)
                   -- not sure if this is a good idea
                   -- prefix_loc <- entryArrayLoc <$> lookupArray prefArr
                   -- let memP = memLocName prefix_loc
                   -- probably need to change this
                   -- simulating a read with add 0?
-                  sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int8) (tvVar prev_flag) memF (Imp.elements $ block_idx_32 - 1)
+                  sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) (tvVar prev_flag) memF (Imp.elements $ block_idx_32 - 1)
                   -- copyDWIMFix (tvVar prefix) [] (Var prefArr)  [tvExp block_idx - 1]
                   sIf
                     (tvExp prev_flag .==. 2)
@@ -189,7 +200,7 @@ nonsegmentedScan
               -- TODO: again head now that we need to change
               copyDWIMFix prefArr [tvExp block_idx] (Var $ paramName $ head $ xParams scan_op) []
               -- copyDWIMFix flagsArr [tvExp block_idx] (intConst Int8 2) []
-              sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int8) memF (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int8))
+              sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) memF (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int64))
 
               emit $ Imp.DebugPrint "the value of start after seq scan is done" (Just $ untyped (tvExp start))
               emit $ Imp.DebugPrint "the value of index of block" (Just $ untyped block_idx_32)
@@ -224,9 +235,9 @@ nonsegmentedScan
               -- write to aggr array
               copyDWIMFix aggrArr [tvExp block_idx] (Var $ paramName $ head $ xParams scan_op) []
               -- write flag as 1
-              old_flag <- dPrim "old_flag" :: MulticoreGen (TV Int8)
+              old_flag <- dPrim "old_flag" :: MulticoreGen (TV Int64)
               old_flag <-- 0
-              sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int8) memF (Imp.elements block_idx_32) (untyped (1 :: Imp.TExp Int8))
+              sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) memF (Imp.elements block_idx_32) (untyped (1 :: Imp.TExp Int64))
 
               -- should change this. not Int64 but the type of scan op
               prefix <- dPrimS "prefix" pt
@@ -237,7 +248,7 @@ nonsegmentedScan
 
 
               sWhile (bNot (tvExp old_flag .==. 2)) $ do
-                sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int8) (tvVar old_flag) memF (Imp.elements $ TPrimExp $ sExt Int32 (untyped $ tvExp lb))
+                sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) (tvVar old_flag) memF (Imp.elements $ TPrimExp $ sExt Int32 (untyped $ tvExp lb))
 
                 vvv <- dPrim "vvv" :: MulticoreGen (TV Int64)
                 sOp $ Imp.GetTaskId (tvVar vvv)
@@ -315,7 +326,7 @@ nonsegmentedScan
               
               emit $ Imp.DebugPrint "the start value that is ready" (Just $ untyped (tvExp start))
 
-              sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int8) memF (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int8))
+              sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) memF (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int64))
 
 
               scan_ops2 <- renameSegBinOp [scan_op]
@@ -338,7 +349,7 @@ nonsegmentedScan
                 z <-- tvExp z + 1
           )
 
-        sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) work_index idx0 (untyped one)
+        sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) workF idx0 (untyped one)
       vvv <- dPrim "vvv" :: MulticoreGen (TV Int64)
       sOp $ Imp.GetTaskId (tvVar vvv)
       emit $ Imp.DebugPrint "the tak id done working low key" (Just $ untyped (tvExp vvv))
@@ -346,3 +357,5 @@ nonsegmentedScan
 
     free_params <- freeParams fbody
     emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
+
+
