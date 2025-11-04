@@ -34,7 +34,8 @@ simplifyPows ::
   (SoP Symbol  -> m (SoP Symbol)) -> SoP Symbol -> m (SoP Symbol)
 simplifyPows simplifyLevel sop = do
   lst <- mapM simplifyTerm $ M.toList $ getTerms sop
-  pure $ normalize $ SoP $ foldl ff M.empty lst
+  let sop' =  normalize $ SoP $ foldl ff M.empty lst
+  pure $ reducePairPows sop'
   -- pure $ SoP $ M.fromList lst   -- BIG BUG!!!
   -- pure $ foldl (.+.) sop_zero $ map (\ (t,i) -> term2SoP t i) lst
   where
@@ -58,9 +59,10 @@ simplifyPows simplifyLevel sop = do
     normalizePow :: ((Integer, SoP Symbol), Int) -> (Integer, SoP Symbol)
     normalizePow ((base, expnt), p) =
       (base, (int2SoP (fromIntegral p)) .*. expnt)
-    mpowAsTup :: Symbol -> Maybe (Integer, SoP Symbol)
-    mpowAsTup (Pow (base, expnt)) = Just (base, expnt)
-    mpowAsTup _ = Nothing
+
+mpowAsTup :: Symbol -> Maybe (Integer, SoP Symbol)
+mpowAsTup (Pow (base, expnt)) = Just (base, expnt)
+mpowAsTup _ = Nothing
 
 combineSamePow ::
   (Integer, M.Map Integer (SoP Symbol)) ->
@@ -80,6 +82,46 @@ combineSamePow (q, tab) (b, sop) =
       | qq `mod` bb /= 0 = (qq, pr)
     getPowOfFactorTR qq bb pr =
       getPowOfFactorTR (qq `div` bb) bb (pr + 1)
+
+reducePairPows :: SoP Symbol -> SoP Symbol
+reducePairPows sop =
+  let lst  = M.toList $ getTerms sop
+      lst' = filter (any hasPow . MS.elems . getTerm . fst) lst
+  in case findSatisfyingPair hasPattern lst' of
+       Nothing -> sop
+       Just (t1,t2,r) -> 
+         reducePairPows $ foldl (.+.) (int2SoP 0) $ map (\ (t,i) -> term2SoP t i) (t1:t2:r:lst)
+  where
+    findSatisfyingPair _ [] = Nothing
+    findSatisfyingPair p (a:as) =
+      case findPairHelper p a as of
+        Just r  -> Just r
+        Nothing -> findSatisfyingPair p as
+    --
+    findPairHelper _ _ [] = Nothing
+    findPairHelper p x (y:ys) =
+      case p x y of
+        Just r -> Just r
+        Nothing-> findPairHelper p x ys
+    --
+    hasPattern (t1,i1) (t2,i2)
+      | i1 == -i2,
+        (msetpows1, others1) <- MS.partition hasPow (getTerm t1),
+        (msetpows2, others2) <- MS.partition hasPow (getTerm t2),
+        others1 == others2,
+        [(base1, expnt1)] <- MS.toList (MS.mapMaybe mpowAsTup msetpows1),
+        [(base2, expnt2)] <- MS.toList (MS.mapMaybe mpowAsTup msetpows2),
+        base1 == base2 && base1 == 2 =
+      let diff = expnt1 .-. expnt2
+          mr = if diff == int2SoP 1
+               then Just (Pow (base1, expnt2), i1)
+               else if diff == int2SoP (0-1)
+                    then Just (Pow (base1, expnt1), i2)
+                    else Nothing
+      in case mr of
+           Nothing -> Nothing
+           Just (r,i) -> Just ((t1,-i1), (t2, -i2), (Term (MS.insert r others1), i))
+    hasPattern _ _ = Nothing
 
 ---------------------------------------------------------------
 --- 2. Pre Simplification of each (individual) slice sum:   ---

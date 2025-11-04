@@ -109,6 +109,33 @@ tests =
           )
           @??= True,
       --
+      testCase "FFT-inspired-bounds" $
+        run
+          ( do
+              clearAlgEnv
+              n <- newNameFromString "n"
+              q <- newNameFromString "q"
+              i <- newNameFromString "i"
+              j <- newNameFromString "j"
+              addRange (Var n) $ mkRangeLB (int 2)
+              addRange (Var q) $ mkRange' (int 1) (sVar n .-. int2SoP 1)
+              let m = Pow (2, sVar n .-. sVar q .-. int  1)
+              addRange (Var i) $ mkRange' (int 0) (sym2SoP m .-. int 1)
+              let p = Pow (2, sVar q)
+              addRange (Var j) $ mkRange' (int 0) (sym2SoP p .+. int 1)
+              addRange m $ mkRangeLB (int 1)
+              addRange p $ mkRangeLB (int 1)
+
+              let a = sVar j .*. sym2SoP m
+              let b = sym2SoP (Pow (2, sVar n))
+
+              printAlgEnv 1
+              printM 1 $ prettyString a <> " < " <> prettyString b
+
+              a FM.$<=$ (b .-. int 1)
+          )
+          @??= True,
+      --
       testCase "Sum subtraction and Peel off (from partition2)" $
         run
           ( do

@@ -57,7 +57,7 @@ simplifyLevel sop_orig = do
   -- unite sums with known indices from the equivalence table
   (_s2, sop2) <- simplifyOneSumBef sop1
   -- index & sum-expansion & sum-sum simplifications
-  (_s3, sop3) <- -- trace ("Before All-To-All" ++ prettyString sop2) $
+  (_s3, sop3) <-
     if S.null $ S.filter hasIdxOrSum fvs
       then pure (False, sop2)
       else simplifyAll2All sop2
@@ -83,13 +83,11 @@ findSymbolLEq0 sop = do
   -- peel off the end indices of sums if they have more specialized ranges.
   (_, sop''') <- simplifyPeelSumForFM sop''
   -- find me a symbol to eliminate
-  -- trace("Begin Sym2Elim for SOP: "++prettyString sop) $
   let (syms_pow, syms) = S.partition hasPow $ free sop'''
       -- is = map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) $ S.toList syms
   is <- forM (S.toList syms) $ \ s -> do
           nms <- transClosInRangesSym s
           pure (S.size nms, s)
-  -- trace("After Sym2Elim for SOP: "++prettyString sop ++ " " ++ prettyString is)
   case (is, S.size syms_pow) of
     ([], 0) -> pure (sop''', Nothing)
     _ -> do
@@ -177,6 +175,20 @@ powEquiv sop
           if t_lt0
             then simplify $ e2 .-. e1
             else pure sop
+  -- The case k + k*2^y - k*2^x <= 0 has sufficient condition:
+  --          k > 0 && y + 1 - x <= 0
+  | [(Term ms0, k0), (Term ms1, k1), (Term ms2, k2)] <- sopToList sop,
+    MS.null ms0 && k0 > 0 && k1 == 0 - k2 && (k0 == k1 || k0 == k2),
+    (mset1_pow, mset1_others) <- MS.partition hasPow ms1,
+    (mset2_pow, mset2_others) <- MS.partition hasPow ms2,
+    MS.null mset1_others && MS.null mset2_others,
+    [(pow1, m1)] <- MS.toOccurList mset1_pow,
+    [(pow2, m2)] <- MS.toOccurList mset2_pow,
+    (Pow (b1, expo1), Pow (b2, expo2)) <- (pow1, pow2),
+    b1 == b2 && b1 > 1 && m1 == 1 && m2 == 1 = do
+    if k0 == k1
+    then pure $ expo1 .+. int2SoP 1 .-. expo2
+    else pure $ expo2 .+. int2SoP 1 .-. expo1
   -- The case: kfree + k*b^{expo} <= 0,
   --   where kfree and k are constants.
   | [(Term ms1, k1), (Term ms2, k2)] <- sopToList sop,
