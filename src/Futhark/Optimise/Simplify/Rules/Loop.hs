@@ -105,32 +105,28 @@ hoistLoopInvariantLoopParams vtable pat aux (merge, form, loopbody) = do
 
     namesOfLoopParams = namesFromList $ map (paramName . fst) merge
 
-    removeFromResult cs (mergeParam, mergeInit) explpat' =
+    removeFromResult (mergeParam, mergeInit) explpat' =
       case partition ((== paramName mergeParam) . snd) explpat' of
         ([(patelem, _)], rest) ->
-          (Just (patElemIdent patelem, (mergeInit, cs)), rest)
+          (Just (patElemIdent patelem, (mergeInit, mempty)), rest)
         (_, _) ->
           (Nothing, explpat')
 
     checkInvariance
       (pat_name, (mergeParam, mergeInit), resExp)
       (invariant, explpat', merge', resExps)
-        | isInvariant,
-          -- Certificates must be available.
-          all (`ST.elem` vtable) $ unCerts $ resCerts resExp =
-            let (stm, explpat'') =
-                  removeFromResult
-                    (resCerts resExp)
-                    (mergeParam, mergeInit)
-                    explpat'
+        | isInvariant =
+            let -- Remove certificates (some of which may be loop-variant)
+                -- because this corresponds to dead code anyway.
+                (stm, explpat'') = removeFromResult (mergeParam, mergeInit) explpat'
              in ( maybe id (:) stm $
-                    (paramIdent mergeParam, (mergeInit, resCerts resExp)) : invariant,
+                    (paramIdent mergeParam, (mergeInit, mempty)) : invariant,
                   explpat'',
                   merge',
                   resExps
                 )
         where
-          -- A non-unique merge variable is invariant if one of the
+          -- A loop parameter is invariant if one of the
           -- following is true:
           isInvariant
             -- (0) The result is a variable of the same name as the
