@@ -87,7 +87,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
                 consts' <-
                   simplifyConsts . performCSEOnStms
                     =<< inlineInStms inlinemap consts
-                pure (ST.insertStms (informStms consts') mempty, consts')
+                pure (ST.insertStms (informStms consts') ST.empty, consts')
               else pure (vtable, consts)
 
           let simplifyFun' fd

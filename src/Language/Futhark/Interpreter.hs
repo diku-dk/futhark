@@ -78,7 +78,7 @@ instance Located StackFrame where
 data BreakReason
   = -- | An explicit breakpoint in the program.
     BreakPoint
-  | -- | A
+  | -- | An arithmetic operation produced a fresh NaN.
     BreakNaN
 
 data ExtOp a
@@ -225,7 +225,7 @@ resolveTypeParams names orig_t1 orig_t2 =
     match _ _ _ = pure mempty
 
     matchDims bound e1 (SizeClosure env e2)
-      | e1 == anySize || e2 == anySize = pure mempty
+      | isJust (isAnySize e1) || isJust (isAnySize e2) = pure mempty
       | otherwise = matchExps bound env e1 e2
 
     matchExps bound env (Var (QualName _ d1) _ _) e
@@ -677,7 +677,7 @@ expandType env (Scalar (TypeVar u tn args)) =
                 -- The case can occur when a type with existential size has been
                 -- hidden by a module ascription, e.g.
                 -- tests/modules/sizeparams4.fut.
-                SizeClosure mempty anySize
+                SizeClosure mempty $ anySize 0
             | otherwise =
                 SizeClosure (env <> dim_env) $
                   applySubst (`M.lookup` substs) dim
