@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Unit types now behave like records/tuples in the C interface and derived
+  interface, such as server-mode and `futhark literate`. (#2332)
+
 ## [0.25.34]
 
 ### Added

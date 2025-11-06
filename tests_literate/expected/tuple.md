@@ -91,3 +91,15 @@ Cannot project from non-record.
 ```
 2i32
 ```
+
+```futhark
+entry h () (x: i32) = (x, ())
+```
+
+```
+> h () 2
+```
+
+```
+(2i32, ())
+```

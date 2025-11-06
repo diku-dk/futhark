@@ -774,6 +774,19 @@ opaqueExtraOps ::
   OpaqueType ->
   [ValueType] ->
   CompilerM op s (Maybe Manifest.OpaqueExtraOps)
+-- Special-case () as a 0-ary record. It isn't really in the IR, but otherwise
+-- we cannot construct them from the outside.
+opaqueExtraOps
+  _
+  types
+  "()"
+  (OpaqueType [ValueType Signed (Rank 0) Unit])
+  [ValueType Signed (Rank 0) Unit] =
+    Just . Manifest.OpaqueRecord
+      <$> ( Manifest.RecordOps
+              <$> recordProjectFunctions types "()" [] []
+              <*> recordNewFunctions types "()" [] []
+          )
 opaqueExtraOps _ _ _ (OpaqueType _) _ =
   pure Nothing
 opaqueExtraOps _ _types desc (OpaqueSum _ cs) vds =
