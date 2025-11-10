@@ -151,7 +151,7 @@ tests =
                      sum2 = sym2SoP $ Sum a (sVar i1 .+. int 1) $ sVar n .+. int (-1)
                  in  sum2 .+. sVar i2 .+. int 1 .-. sum1
                ),
-      testCase "Unite sums (fromNikolaj)" $
+      testCase "Unite sums" $
         run
           ( do
               addRange (Var n) $ mkRangeLB (int 0)

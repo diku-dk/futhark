@@ -52,31 +52,6 @@ data Query
   | -- Check whether case is true.
     Truth
 
--- NOTE rewriting askQ so that it can also check proof obligations.
---
--- Want to also parse prelude properties into index functions
--- to allow for substitution of formal arguments.
---
---   f = for i < n . true => x[i] >= 0 && IsTrue (InjectiveRCD x (0, n))
---
--- Then askQ can discharge proofs of properties inside IsTrue () to Prove.hs.
---
--- - Need to be able to add properties nested inside symbols to env:
---     x[i] >= 0 && IsTrue prop
---   Does this work simply by extending addRelSymbol to also handle IsTrue prop?
---   This might even make sense in the paper; \Alg is a conjunction of boolean symbols,
---   but a property is just a relation, hence (when fully applied) it too is just a
---   boolean. So \Alg ^ x[i] >= 0 ^ InjectiveRCD x (0, n) is naturally valid.
--- - Possible to use Properties.Property? (Defined in terms of Algebra symbols.)
---   E.g., by making Properties.Property parametric over the symbol type;
---   then we can just translate between Algebra and IndexFn symbols?
---   For example, index fns can have (Property Symbol), and then when
---   addRelSymbol is called this Property gets translated into (Property Algebra.Symbol)
---   and is added to the Alg env.
---
--- [x] Add Property to IndexFn Symbol.
--- [ ] Parse property prelude into IndexFn symbols; i.e., don't check immediately.
---     - should allow for properties in preconditions
 askQ :: Query -> IndexFn -> IndexFnM Answer
 askQ query fn =
   allM $ zipWith (\_ i -> queryCase query fn i) (guards fn) [0 ..]
@@ -799,7 +774,6 @@ prove_ baggage (PFiltPartInv pf pps') f@(IndexFn [[Forall i dom]] _) = algebraCo
   step1 <- prove_ baggage (PBijectiveRCD img img) f
 
   -- (2) f maps filtered-away indices to values that are not in [0, m - 1].
-  -- TODO looks like Cosmin removed this query from the paper?
   -- (I guess (1) kinda implies this together with |Img| = sum over pf??
   -- maybe I should replace this check by something like this?
   -- Summing over pf seems more complex though?)
