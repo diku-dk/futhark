@@ -2,6 +2,7 @@ module Main (main) where
 
 import Futhark.AD.DerivativesTests qualified
 import Futhark.Analysis.AlgSimplifyTests qualified
+import Futhark.Analysis.Properties.Artifact qualified
 import Futhark.Analysis.Properties.EndToEndTests qualified
 import Futhark.Analysis.Properties.IndexFnTests qualified
 import Futhark.Analysis.Properties.QueryTests qualified
@@ -33,6 +34,7 @@ allTests =
     ""
     [ Language.Futhark.SyntaxTests.tests,
       Futhark.AD.DerivativesTests.tests,
+      Futhark.Analysis.Properties.Artifact.tests,
       Futhark.Analysis.Properties.EndToEndTests.tests,
       Futhark.Analysis.Properties.IndexFnTests.tests,
       Futhark.Analysis.Properties.QueryTests.tests,

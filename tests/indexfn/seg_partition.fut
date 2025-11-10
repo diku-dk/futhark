@@ -79,7 +79,7 @@ let part2indicesL 't [m][n]
                   ) csL indsT indsF offs
   in inds
 
-let partition2L 't [m][n]
+let seg_partition 't [m][n]
       (shape: [m]nat64)
       (csL: {[n]bool | \_ -> n == sum shape})
       (xs: [n]i64)

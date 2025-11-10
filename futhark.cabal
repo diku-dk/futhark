@@ -548,6 +548,7 @@ test-suite unit
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
+      Futhark.Analysis.Properties.Artifact
       Futhark.Analysis.Properties.EndToEndTests
       Futhark.Analysis.Properties.IndexFnTests
       Futhark.Analysis.Properties.QueryTests

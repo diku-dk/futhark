@@ -2,7 +2,7 @@
 def sum [n] (xs: [n]i64) =
   if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
-def partition2 [n] (p: f32 -> bool) (xs: [n]f32)
+def partition [n] (p: f32 -> bool) (xs: [n]f32)
     : {(i64, [n]f32) | \(num_true, ys)->
       FiltPart ys xs (\_i -> true) (\i -> p xs[i])
         && num_true == sum (map (\x -> if p x then 1 else 0) xs)
