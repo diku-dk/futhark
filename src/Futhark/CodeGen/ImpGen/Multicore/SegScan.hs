@@ -18,8 +18,9 @@ import Futhark.Util.IntegralExp (divUp, quot)
 import Futhark.Util.Pretty (prettyString)
 import Prelude hiding (quot, rem)
 
-blockSize :: Imp.TExp Int64
-blockSize = 16384 
+
+cacheSize :: Imp.TExp Int64
+cacheSize = 65536 -- 64 KB
 
 
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
@@ -65,15 +66,20 @@ nonsegmentedScan
   (Body _ kstms [Returns _ _ res])
   _nsubtasks = do
 
-    -- genBinOpParams [scan_op]
-
-    block_no <- dPrim "nblocks"
-    block_no <-- pe64 n `divUp` blockSize
-
 
     -- for now using head and considering only one
     let pt = elemType (head (lambdaReturnType (segBinOpLambda scan_op)))
     let ne = head (segBinOpNeutral scan_op)
+
+    let blockSize = cacheSize `quot` primByteSize pt
+    
+    
+    -- genBinOpParams [scan_op]
+    -- blockSize <- cacheSize `div` 4 :: Imp.TExp Int64
+    
+    block_no <- dPrim "nblocks"
+    block_no <-- pe64 n `divUp` blockSize
+
     -- exne <- toExp ne
 
 
@@ -81,18 +87,9 @@ nonsegmentedScan
     flagsArr <- sAllocArray "scan_flags" int64 (Shape [Var (tvVar block_no)]) DefaultSpace
     aggrArr <- sAllocArray "scan_aggr" pt (Shape [Var (tvVar block_no)]) DefaultSpace
     prefArr <- sAllocArray "scan_pref" pt (Shape [Var (tvVar block_no)]) DefaultSpace
-
     work_index <- sAllocArray "work_index" int64 (Shape [intConst Int64 1]) DefaultSpace
 
-    -- work_index <- sAlloc "work_index" (Imp.bytes 8) Imp.DefaultSpace
-    -- emit $
-    --   Imp.Write
-    --     work_index
-    --     (Imp.elements (0 :: Imp.TExp Int64))
-    --     (IntType Int64)
-    --     Imp.DefaultSpace
-    --     Imp.Nonvolatile
-    --     (untyped (0 :: Imp.TExp Int64))
+
 
     -- initialise
     sFor "init" (tvExp block_no) $ \j -> do
@@ -102,7 +99,6 @@ nonsegmentedScan
     
     copyDWIMFix work_index [0] (intConst Int64 0) []
 
-     -- launch parallel tasks
 
     num_tasks <- dPrimSV "num_tasks" int64
     sOp $ Imp.GetNumTasks $ tvVar num_tasks
@@ -306,7 +302,6 @@ nonsegmentedScan
               scan_ops2 <- renameSegBinOp [scan_op]
               genBinOpParams scan_ops2
               let scan_op2 = head scan_ops2
-              -- Todo: need to change this
               forM_ (xParams scan_op2) $ \p ->
                 copyDWIMFix (paramName p) [] (Var prefix) []
 
