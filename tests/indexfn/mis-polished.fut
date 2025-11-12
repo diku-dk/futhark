@@ -64,13 +64,13 @@ def repl_segm_iota x = (x,x) -- used to be ???
 --   0 <= vertexes <= nEdges
 --   0 <= indexes < nVerts
 --   
-def expand [nVerts] [nEdges] [nInds]
+def expand [nEdges] [nInds]
            (nVerts: {i64 | \x -> 0 <= x)
            (vertexes: [nVerts+1]i64) 
            (edges: []i64) 
-           (newI: []i64) 
-           (indexes: [nInds]i64) : []i64
-  let szs = map (\ ind -> if (newI[ind] == 0) then 0 else vertexes[ind+1] = vertexes[ind] ) indexes
+           (newI: { []i64 | \ x -> Range x (0,1)}) 
+           (indexes: { [nInds]i64 | \ x -> Range x (0,nVerts-1)}) : []i64
+  let szs = map (\ ind -> if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind] ) indexes
   -- (unsupported) postcondition should be
   --   0 <= szs[i] <= vertexes[indexes[i]+1] - vertexes[indexes[i]]
   let (idxs, iotas) = repl_segm_iota szs
@@ -110,18 +110,14 @@ def loop_body (nVerts: { i64 | \ x -> 0 <= x })
   in (C, I)
 
 -- Preconditions:
---   0 <= nVerts
---   0 <= nEdges
---   0 <= nInds <= nVerts
---   vertexes is monotonically increasing
+--   vertexes is monotonically increasing (not strictly) and is padded to have `nEdges` as last element (it also starts from 0)
 --   0 <= vertexes <= nEdges
---   i.e., vertexes is padded with the last element which is precisely nEdges.
 -- Can probably be done without mapping over every vertex each loop, by keeping track of a queue-like array
-let MIS (nVerts: i64) 
-        (nEdges: i64) 
-        (nInds: {i64 | \ nInds' -> Range nInds' (0,nVerts) })
+let MIS (nVerts: { i64 | x -> 0 <= x }) 
+        (nEdges: { i64 | x -> 0 <= x }) 
+        (nInds: {i64 | \ x -> Range x (0,nVerts) })
         (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges) && Monotonic x})
-        (edges: [nEdges]i64)  -- in principle Range edges (0, nVerts-1)
+        (edges: [nEdges]i64)  -- in principle `Range edges (0, nVerts-1)` but don't think it is used
         (random_state: [nVerts]i64) 
         (C: *[nVerts]i64) 
         (I: *[nVerts]i64) 
