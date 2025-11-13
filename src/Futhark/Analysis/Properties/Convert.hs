@@ -228,8 +228,6 @@ forward expr@(E.AppExp (E.Index e_xs slice loc) _)
         unless (rank f_xs == 1) $
           error "Not implemented yet: implicit indexing dimensions. Use `:`."
 
-        printM 1 $ "checking " <> prettyStr e_xs
-        whenBoundsChecking $ printM 1 $ "with boundschecking! " <> prettyStr e_xs
         checkBounds expr f_xs [Just f_idx]
         xs <- case justVName e_xs of
           Just vn -> pure vn
