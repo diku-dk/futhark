@@ -188,6 +188,11 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 then pure Yes
                 else pure Unknown
         _ -> pure Unknown
+    alreadyKnown (Monotonic x dir) = do
+      dir' <- askMonotonic (Algebra.Var x)
+      if Just dir == dir'
+      then pure Yes
+      else pure Unknown
     alreadyKnown wts@(Injective y rcd) = do
       minj <- askInjectiveRCD (Algebra.Var y)
       mmono <- fmap (Monotonic y) <$> askMonotonic (Algebra.Var y)
