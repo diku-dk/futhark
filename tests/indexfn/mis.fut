@@ -38,7 +38,7 @@ def slice [n] 't
 
 def can_add [nEdges]
             (nVerts: { i64 | \ x -> 0 <= x })
-            (vertexes: [nVerts+1]i64)
+            (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
             (edges: [nEdges]i64)
             (random_state: [nVerts]i64)
             (C: [nVerts]i64)
@@ -69,13 +69,11 @@ def repl_segm_iota x = (x,x) -- used to be ???
 -- pre-conditions:
 --   0 <= nInds <= nVerts
 --   0 <= newI <= 1
---   vertexes is monotonically increasing
---   0 <= vertexes <= nEdges
 --   0 <= indexes < nVerts
 --
 def expand [nEdges] [nInds]
            (nVerts: {i64 | \x -> 0 <= x})
-           (vertexes: [nVerts+1]i64)
+           (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
            (edges: [nEdges]i64)
            (newI: { []i64 | \ x -> Range x (0,1)})
            (indexes: { [nInds]i64 | \ x -> Range x (0,nVerts-1)})
@@ -101,13 +99,14 @@ def expand [nEdges] [nInds]
   --   eliminate vertexes[indexes[i]+1]:  nEdges - 1 < nEdges hence success.
 
 
-def loop_body (nVerts: { i64 | \ x -> 0 <= x })
-              (vertexes: [nVerts+1]i64)
-              (edges: []i64)
+def loop_body [nEdges]
+              (nVerts: { i64 | \ x -> 0 <= x })
+              (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
+              (edges: [nEdges]i64)
               (random_state: [nVerts]i64)
               (C: *[nVerts]i64)
               (I: *[nVerts]i64)
-              (indexes: {[]i64 | \x -> Injective x}) (nEdges: i64)
+              (indexes: {[]i64 | \x -> Injective x})
             : {([]i64, []i64) | \_ -> true} =
   let newI = map (\i -> can_add nVerts vertexes edges random_state C i) indexes
   -- XXX this is what we need to prove inj
@@ -119,14 +118,10 @@ def loop_body (nVerts: { i64 | \ x -> 0 <= x })
   let C = remove_neighbour_and_self marked targets C
   in (C, I)
 
--- Preconditions:
---   vertexes is monotonically increasing (not strictly) and is padded to have `nEdges` as last element (it also starts from 0)
---   0 <= vertexes <= nEdges
--- Can probably be done without mapping over every vertex each loop, by keeping track of a queue-like array
 let MIS (nVerts: { i64 | \x -> 0 <= x })
         (nEdges: { i64 | \x -> 0 <= x })
         (nInds: {i64 | \x -> Range x (0,nVerts) })
-        (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges) && Monotonic (<=) x})
+        (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
         (edges: [nEdges]i64)  -- in principle `Range edges (0, nVerts-1)` but don't think it is used
         (random_state: [nVerts]i64)
         (C: *[nVerts]i64)
@@ -136,7 +131,7 @@ let MIS (nVerts: { i64 | \x -> 0 <= x })
     --
     -- Loop until every vertex is added to or excluded from the MIS
     let (_, I) = loop (C, I) while (i64.sum C) > 0 do
-        loop_body nVerts vertexes edges random_state C I indexes nEdges
+        loop_body nVerts vertexes edges random_state C I indexes
     in I
  
 -- verify with:
