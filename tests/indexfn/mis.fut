@@ -118,7 +118,7 @@ def loop_body [nEdges]
 
 let MIS (nVerts: { i64 | \x -> 0 <= x })
         (nEdges: { i64 | \x -> 0 <= x })
-        (nInds: {i64 | \x -> Range x (0,nVerts) })
+        (nInds: {i64 | \x -> Range x (0,nVerts+1) })
         (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
         (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
         (random_state: [nVerts]i64)
