@@ -22,29 +22,22 @@ def valid_neighbour (random_state: []i64) (C: []i64) (state: i64) (neighbour: i6
     else
         0
 
-def singleton x = map (\_ -> x) (iota 1)
-
-def edges_of_vertex (verts: []i64) (nEdges: i64) (vert: i64): i64 =
-    let nEdges_arr = singleton nEdges
-    let extended = verts ++ nEdges_arr
-    in i64.i64 (extended[vert + 1] - extended[vert])
-
-def edges_of_vertex_or_0 (verts: []i64) (nEdges: i64) (newI: []i64) (vert: i64): i64 =
-    if (newI[vert] == 0) then
-        0
-    else 
-        edges_of_vertex verts nEdges vert
-
 def sum [n] (xs: [n]i64): i64 =
   if n > 0 then (scan (\x y -> x + y) 0 xs)[n-1] else 0
 
 def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -> Range b' (0,n+1)}) =
   map (\i -> x[i]) (iota (b - a))
 
-def can_add [nVerts] [nEdges] (vertexes: [nVerts]i64) (edges: [nEdges]i64) (random_state: [nVerts]i64) (C: [nVerts]i64) (index: i64): bool =
+def can_add [nEdges] 
+            (nVerts: { i64 | \ x -> 0 <= x }) 
+            (vertexes: [nVerts+1]i64) 
+            (edges: [nEdges]i64) 
+            (random_state: [nVerts]i64) 
+            (C: [nVerts]i64) 
+            (index: { i64 | \ x -> Range x (0,nVerts-1) }) : bool =
     C[index] == 0 || (
         let vEntry = vertexes[index]
-        let end = vEntry + (edges_of_vertex vertexes nEdges index)
+        let end = vEntry + vertexes[index+1] - vertexes[index]
         let currentEdges = slice edges vEntry end
 
         let arr = map (\x -> valid_neighbour random_state C random_state[index] x) currentEdges
@@ -64,29 +57,76 @@ def remove_neighbour_and_self [nVerts] (marked: []i64) (targets: []i64) (C: *[nV
 
 def repl_segm_iota x = (x,x) -- used to be ???
 
-def expand 'a 'b (sz: a -> i64) (get: a -> i64 -> b) (arr:[]a) : []b =
-  let szs = map sz arr
+-- pre-conditions:
+--   0 <= nInds <= nVerts
+--   0 <= newI <= 1
+--   vertexes is monotonically increasing
+--   0 <= vertexes <= nEdges
+--   0 <= indexes < nVerts
+--   
+def expand [nEdges] [nInds]
+           (nVerts: {i64 | \x -> 0 <= x)
+           (vertexes: [nVerts+1]i64) 
+           (edges: []i64) 
+           (newI: { []i64 | \ x -> Range x (0,1)}) 
+           (indexes: { [nInds]i64 | \ x -> Range x (0,nVerts-1)}) : []i64
+  let szs = map (\ ind -> if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind] ) indexes
+  -- (unsupported) postcondition should be
+  --   0 <= szs[i] <= vertexes[indexes[i]+1] - vertexes[indexes[i]]
   let (idxs, iotas) = repl_segm_iota szs
-  in map2 (\i j -> get arr[i] j) idxs iotas
+  -- ^ postconditions of repl_segm_iota:
+  --   idxs and iotas are segmented arrays of outer dim nInds
+  --   idxs = for i < nInds, j < szs[i]. true => i
+  --   iotas= for i < nInds, j < szs[i]. true => j
+  --   Hence it should be able to prove that
+  --   0 <= iotas[i,j] < vertexes[indexes[i]+1] - vertexes[indexes[i]]
+  --  
+  in  map2 (\i j -> edges[ vertexes[ indexes[i] ] + j] ) idxs iotas
+  -- IxFn of idxs ensure `0 <= indexes[i] < nInds`, i.e., indexes[i] is in range
+  -- From the range post-condition on iotas we have that:
+  --     0 <= j < vertexes[indexes[i]+1] - vertexes[indexes[i]]
+  -- hence proving index within bounds of `edges` by Fourier Motzkin
+  --   eliminates `j`:  vertexes[ indexes[i] ] + vertexes[indexes[i]+1] - vertexes[indexes[i]] - 1 < nEdges
+  --   simplification:  vertexes[indexes[i]+1] - 1 < nEdges
+  --   eliminate vertexes[indexes[i]+1]:  nEdges - 1 < nEdges hence success.
 
-def loop_body [nVerts] (vertexes: [nVerts]i64) (edges: []i64) (random_state: [nVerts]i64) (C: *[nVerts]i64) (I: *[nVerts]i64) (indexes: {[]i64 | \x -> Injective x}) (nEdges: i64): {([]i64, []i64) | \_ -> true} =
-  let newI = map (\i -> can_add vertexes edges random_state C i) indexes
+
+def loop_body (nVerts: { i64 | \ x -> 0 <= x }) 
+              (vertexes: [nVerts+1]i64) 
+              (edges: []i64) 
+              (random_state: [nVerts]i64) 
+              (C: *[nVerts]i64) 
+              (I: *[nVerts]i64) 
+              (indexes: {[]i64 | \x -> Injective x}) (nEdges: i64)
+            : {([]i64, []i64) | \_ -> true} =
+  let newI = map (\i -> can_add nVerts vertexes edges random_state C i) indexes
   -- XXX this is what we need to prove inj
   let targets = map2 (\i j -> if i then j else -1) newI indexes
   let newI_int = map (\i -> if i then 1 else 0) newI
   let I = scatter I targets newI_int
 
-  let marked = expand (edges_of_vertex_or_0 vertexes nEdges newI_int) (mark_neighbour vertexes edges) indexes
+  let marked = expand nVerts vertexes edges newI_int indexes
   let C = remove_neighbour_and_self marked targets C
   in (C, I)
 
+-- Preconditions:
+--   vertexes is monotonically increasing (not strictly) and is padded to have `nEdges` as last element (it also starts from 0)
+--   0 <= vertexes <= nEdges
 -- Can probably be done without mapping over every vertex each loop, by keeping track of a queue-like array
-let MIS [nVerts] (vertexes: [nVerts]i64) (edges: []i64) (random_state: [nVerts]i64) (C: *[nVerts]i64) (I: *[nVerts]i64) (indexes: {[]i64 | \x -> Injective x}) (nEdges: i64)
+let MIS (nVerts: { i64 | x -> 0 <= x }) 
+        (nEdges: { i64 | x -> 0 <= x }) 
+        (nInds: {i64 | \ x -> Range x (0,nVerts) })
+        (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges) && Monotonic x})
+        (edges: [nEdges]i64)  -- in principle `Range edges (0, nVerts-1)` but don't think it is used
+        (random_state: [nVerts]i64) 
+        (C: *[nVerts]i64) 
+        (I: *[nVerts]i64) 
+        (indexes: {[]i64 | \x -> Range x (0,nVerts-1) && Injective x})
     : { []i64 | \ _ -> true } =
     --
     -- Loop until every vertex is added to or excluded from the MIS
     let (_, I) = loop (C, I) while (i64.sum C) > 0 do
-        loop_body vertexes edges random_state C I indexes nEdges
+        loop_body nVerts vertexes edges random_state C I indexes nEdges
     in I
     
 -- verify with:
