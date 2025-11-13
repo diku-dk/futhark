@@ -16,25 +16,34 @@
 ----------------------------------------------------------------------------
 
 
-def valid_neighbour (random_state: []i64) (C: []i64) (state: i64) (neighbour: i64): i64 =
+def valid_neighbour [nVerts]
+                    (random_state: [nVerts]i64)
+                    (C: [nVerts]i64)
+                    (state: i64)
+                    (neighbour: i64)
+                    : i64 =
     if (C[neighbour] == 1) && (random_state[neighbour] < state) then
         1
     else
         0
 
-def sum [n] (xs: [n]i64): i64 =
+def sum [n] (xs: [n]i64): {i64 | \_ -> true }=
   if n > 0 then (scan (\x y -> x + y) 0 xs)[n-1] else 0
 
-def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -> Range b' (0,n+1)}) =
+def slice [n] 't
+          (x: [n]t)
+          (a: {i64 | \a' -> Range a' (0,inf)})
+          (b: {i64 | \b' -> Range b' (0,n+1)}) =
   map (\i -> x[i]) (iota (b - a))
 
-def can_add [nEdges] 
-            (nVerts: { i64 | \ x -> 0 <= x }) 
-            (vertexes: [nVerts+1]i64) 
-            (edges: [nEdges]i64) 
-            (random_state: [nVerts]i64) 
-            (C: [nVerts]i64) 
-            (index: { i64 | \ x -> Range x (0,nVerts-1) }) : bool =
+def can_add [nEdges]
+            (nVerts: { i64 | \ x -> 0 <= x })
+            (vertexes: [nVerts+1]i64)
+            (edges: [nEdges]i64)
+            (random_state: [nVerts]i64)
+            (C: [nVerts]i64)
+            (index: { i64 | \ x -> Range x (0,nVerts-1) })
+            : {bool | \_ -> true} =
     C[index] == 0 || (
         let vEntry = vertexes[index]
         let end = vEntry + vertexes[index+1] - vertexes[index]
@@ -63,13 +72,14 @@ def repl_segm_iota x = (x,x) -- used to be ???
 --   vertexes is monotonically increasing
 --   0 <= vertexes <= nEdges
 --   0 <= indexes < nVerts
---   
+--
 def expand [nEdges] [nInds]
-           (nVerts: {i64 | \x -> 0 <= x)
-           (vertexes: [nVerts+1]i64) 
-           (edges: []i64) 
-           (newI: { []i64 | \ x -> Range x (0,1)}) 
-           (indexes: { [nInds]i64 | \ x -> Range x (0,nVerts-1)}) : []i64
+           (nVerts: {i64 | \x -> 0 <= x})
+           (vertexes: [nVerts+1]i64)
+           (edges: [nEdges]i64)
+           (newI: { []i64 | \ x -> Range x (0,1)})
+           (indexes: { [nInds]i64 | \ x -> Range x (0,nVerts-1)})
+           : {[]i64 | \_ -> true} =
   let szs = map (\ ind -> if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind] ) indexes
   -- (unsupported) postcondition should be
   --   0 <= szs[i] <= vertexes[indexes[i]+1] - vertexes[indexes[i]]
@@ -80,7 +90,7 @@ def expand [nEdges] [nInds]
   --   iotas= for i < nInds, j < szs[i]. true => j
   --   Hence it should be able to prove that
   --   0 <= iotas[i,j] < vertexes[indexes[i]+1] - vertexes[indexes[i]]
-  --  
+  -- 
   in  map2 (\i j -> edges[ vertexes[ indexes[i] ] + j] ) idxs iotas
   -- IxFn of idxs ensure `0 <= indexes[i] < nInds`, i.e., indexes[i] is in range
   -- From the range post-condition on iotas we have that:
@@ -91,12 +101,12 @@ def expand [nEdges] [nInds]
   --   eliminate vertexes[indexes[i]+1]:  nEdges - 1 < nEdges hence success.
 
 
-def loop_body (nVerts: { i64 | \ x -> 0 <= x }) 
-              (vertexes: [nVerts+1]i64) 
-              (edges: []i64) 
-              (random_state: [nVerts]i64) 
-              (C: *[nVerts]i64) 
-              (I: *[nVerts]i64) 
+def loop_body (nVerts: { i64 | \ x -> 0 <= x })
+              (vertexes: [nVerts+1]i64)
+              (edges: []i64)
+              (random_state: [nVerts]i64)
+              (C: *[nVerts]i64)
+              (I: *[nVerts]i64)
               (indexes: {[]i64 | \x -> Injective x}) (nEdges: i64)
             : {([]i64, []i64) | \_ -> true} =
   let newI = map (\i -> can_add nVerts vertexes edges random_state C i) indexes
@@ -113,14 +123,14 @@ def loop_body (nVerts: { i64 | \ x -> 0 <= x })
 --   vertexes is monotonically increasing (not strictly) and is padded to have `nEdges` as last element (it also starts from 0)
 --   0 <= vertexes <= nEdges
 -- Can probably be done without mapping over every vertex each loop, by keeping track of a queue-like array
-let MIS (nVerts: { i64 | x -> 0 <= x }) 
-        (nEdges: { i64 | x -> 0 <= x }) 
-        (nInds: {i64 | \ x -> Range x (0,nVerts) })
-        (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges) && Monotonic x})
+let MIS (nVerts: { i64 | \x -> 0 <= x })
+        (nEdges: { i64 | \x -> 0 <= x })
+        (nInds: {i64 | \x -> Range x (0,nVerts) })
+        (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges) && Monotonic (<=) x})
         (edges: [nEdges]i64)  -- in principle `Range edges (0, nVerts-1)` but don't think it is used
-        (random_state: [nVerts]i64) 
-        (C: *[nVerts]i64) 
-        (I: *[nVerts]i64) 
+        (random_state: [nVerts]i64)
+        (C: *[nVerts]i64)
+        (I: *[nVerts]i64)
         (indexes: {[]i64 | \x -> Range x (0,nVerts-1) && Injective x})
     : { []i64 | \ _ -> true } =
     --
@@ -128,6 +138,6 @@ let MIS (nVerts: { i64 | x -> 0 <= x })
     let (_, I) = loop (C, I) while (i64.sum C) > 0 do
         loop_body nVerts vertexes edges random_state C I indexes nEdges
     in I
-    
+ 
 -- verify with:
 -- FUTHARK_INDEXFN=1 cabal test --test-option="--pattern=Properties.IndexFn.mis"
