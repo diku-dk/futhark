@@ -9,15 +9,11 @@ where
 
 import Control.Monad
 import Data.List (zip4)
-import Data.Text.Internal.Lazy (chunk)
-import Data.Traversable (for)
 import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
-import Futhark.Transform.Rename (renameStm)
-import Futhark.Util.IntegralExp (divUp, quot)
-import Futhark.Util.Pretty (prettyString)
+import Futhark.Util.IntegralExp (divUp, )
 import Prelude hiding (quot, rem)
 
 cacheSize :: Imp.TExp Int64
