@@ -39,7 +39,7 @@ def slice [n] 't
 def can_add [nEdges]
             (nVerts: { i64 | \ x -> 0 <= x })
             (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
-            (edges: [nEdges]i64)
+            (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
             (random_state: [nVerts]i64)
             (C: [nVerts]i64)
             (index: { i64 | \ x -> Range x (0,nVerts) })
@@ -72,7 +72,7 @@ def repl_segm_iota x = (x,x) -- used to be ???
 def expand [nEdges] [nInds]
            (nVerts: {i64 | \x -> 0 <= x})
            (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
-           (edges: [nEdges]i64)
+           (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
            (newI: { []i64 | \ x -> Range x (0,2)})
            (indexes: { [nInds]i64 | \ x -> Range x (0,nVerts)})
            : {[]i64 | \_ -> true} =
@@ -100,7 +100,7 @@ def expand [nEdges] [nInds]
 def loop_body [nEdges]
               (nVerts: { i64 | \ x -> 0 <= x })
               (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
-              (edges: [nEdges]i64)
+              (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
               (random_state: [nVerts]i64)
               (C: *[nVerts]i64)
               (I: *[nVerts]i64)
@@ -120,7 +120,7 @@ let MIS (nVerts: { i64 | \x -> 0 <= x })
         (nEdges: { i64 | \x -> 0 <= x })
         (nInds: {i64 | \x -> Range x (0,nVerts) })
         (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
-        (edges: [nEdges]i64)  -- in principle `Range edges (0, nVerts-1)` but don't think it is used
+        (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
         (random_state: [nVerts]i64)
         (C: *[nVerts]i64)
         (I: *[nVerts]i64)
