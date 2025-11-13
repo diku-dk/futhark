@@ -68,14 +68,13 @@ def repl_segm_iota x = (x,x) -- used to be ???
 
 -- pre-conditions:
 --   0 <= nInds <= nVerts
---   0 <= newI <= 1
 --   0 <= indexes < nVerts
 --
 def expand [nEdges] [nInds]
            (nVerts: {i64 | \x -> 0 <= x})
            (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
            (edges: [nEdges]i64)
-           (newI: { []i64 | \ x -> Range x (0,1)})
+           (newI: { []i64 | \ x -> Range x (0,2)})
            (indexes: { [nInds]i64 | \ x -> Range x (0,nVerts-1)})
            : {[]i64 | \_ -> true} =
   let szs = map (\ ind -> if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind] ) indexes
