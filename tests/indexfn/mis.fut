@@ -69,12 +69,12 @@ def repl_segm_iota x = (x,x) -- used to be ???
 -- pre-conditions:
 --   0 <= nInds <= nVerts
 --
-def expand [nEdges] [nInds]
+def expand [nEdges]
            (nVerts: {i64 | \x -> 0 <= x})
            (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
            (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
-           (newI: { []i64 | \ x -> Range x (0,2)})
-           (indexes: {[nInds]i64 | \x -> Range x (0,nVerts) && Injective x})
+           (newI: { [nVerts]i64 | \ x -> Range x (0,2)})
+           (indexes: {[nVerts]i64 | \x -> Range x (0,nVerts) && Injective x})
            : {[]i64 | \_ -> true} =
   let szs = map (\ ind -> if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind] ) indexes
   -- (unsupported) postcondition should be
@@ -104,7 +104,7 @@ def loop_body [nEdges]
               (random_state: [nVerts]i64)
               (C: *[nVerts]i64)
               (I: *[nVerts]i64)
-              (indexes: {[]i64 | \x -> Range x (0,nVerts) && Injective x})
+              (indexes: {[nVerts]i64 | \x -> Range x (0,nVerts) && Injective x})
             : {([]i64, []i64) | \_ -> true} =
   let newI = map (\i -> can_add nVerts vertexes edges random_state C i) indexes
   -- XXX this is what we need to prove inj
@@ -124,7 +124,7 @@ let MIS (nVerts: { i64 | \x -> 0 <= x })
         (random_state: [nVerts]i64)
         (C: *[nVerts]i64)
         (I: *[nVerts]i64)
-        (indexes: {[]i64 | \x -> Range x (0,nVerts) && Injective x})
+        (indexes: {[nVerts]i64 | \x -> Range x (0,nVerts) && Injective x})
     : { []i64 | \ _ -> true } =
     --
     -- Loop until every vertex is added to or excluded from the MIS
