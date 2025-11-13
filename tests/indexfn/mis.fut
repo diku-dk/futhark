@@ -74,7 +74,7 @@ def expand [nEdges] [nInds]
            (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
            (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
            (newI: { []i64 | \ x -> Range x (0,2)})
-           (indexes: { [nInds]i64 | \ x -> Range x (0,nVerts)})
+           (indexes: {[nInds]i64 | \x -> Range x (0,nVerts) && Injective x})
            : {[]i64 | \_ -> true} =
   let szs = map (\ ind -> if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind] ) indexes
   -- (unsupported) postcondition should be
