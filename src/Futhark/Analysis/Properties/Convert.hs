@@ -404,8 +404,10 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
   | Just "replicate" <- getFun e_f,
     [e_n, e_x] <- getArgs args = do
       ns <- forward e_n
+      unless (length ns == 1) . error $ errorMsg loc "type error"
+      let n = head ns
       xs <- forward e_x
-      forM (zip ns xs) $ \(n, x) -> do
+      forM xs $ \x -> do
         i <- newVName "i"
         unless (rank n == 0) . error $ errorMsg loc "type error"
         m <- rewrite $ flattenCases (body n)
