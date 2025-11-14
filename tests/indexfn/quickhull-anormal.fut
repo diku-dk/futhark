@@ -134,7 +134,7 @@ def expand_hull [num_segs] [num_points]
                 (segs_endx : [num_segs]real)
                 (segs_endy : [num_segs]real)
                 -- (points : [num_points](i64, real, real))
-                (points_idx : {[num_points]i64 | \x -> Range num_segs (0, num_points) && Range x (0, num_segs)})
+                (points_idx : {[num_points]i64 | \x -> Range x (0, num_segs)})
                 (points_x : [num_points]real)
                 (points_y : [num_points]real)
               : {( []real,[]real,[]real,[]real -- segs'
@@ -331,13 +331,13 @@ def semihull_loop [num_segs] [num_points]
                   (segs_endx : [num_segs]real)
                   (segs_endy : [num_segs]real)
                   -- (points : [num_points](i64, real, real))
-                  (points_idx : {[num_points]i64 | \x -> Range num_segs (0, num_points) && Range x (0, num_segs)})
+                  (points_idx : {[num_points]i64 | \x -> Range x (0,num_segs)})
                   (points_x : [num_points]real)
                   (points_y : [num_points]real)
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
        , []i64,[]real,[]real         -- points
-      ) | \(_,_, _,_,_,_, points0,_,_) -> Range points0 (0,num_segs)}
+      ) | \(_,_, segs_begx',_,_,_, points_idx',_,_) -> Range points_idx' (0,length segs_begx')}
     =
    let (segs_begx', segs_begy', segs_endx', segs_endy',
         seg_inds', pointsx', pointsy') = expand_hull f_dist f_dist_less segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
