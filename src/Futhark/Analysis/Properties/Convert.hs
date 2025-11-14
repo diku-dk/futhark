@@ -734,7 +734,7 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
                   Apply (Var h) (map (sVar . boundVar) (mconcat $ shape y))
             }
   | Just "reduce_by_index" <- getFun e_f,
-    [_dest, e_op, e_ne, _is, _xs] <- getArgs args,
+    [dest, e_op, e_ne, _is, _xs] <- getArgs args,
     E.Lambda params lam_body _ _ _ <- e_op,
     xs <- NE.last args,
     [pat_acc, pat_x] <- params = do
@@ -751,8 +751,11 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
         forward lam_body
       neutrals <- forward e_ne
 
+      bins <- forward dest
+      unless (length bins == length neutrals) $ error "not implemented yet"
+
       -- Infer ranges.
-      forM (zip ops neutrals) $ \(op, ne) -> do
+      forM (zip3 bins ops neutrals) $ \(bin, op, ne) -> do
         printM 0 (prettyStr op)
         case mapM ((justVar <=< justSym) . snd) $ guards op of
           Just vns -> do
@@ -785,7 +788,7 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
           Nothing -> pure ()
         pure $
           IndexFn
-            { shape = [outer_dim],
+            { shape = shape bin,
               body =
                 singleCase . sym2SoP $
                   Apply (Var h) (map (sVar . boundVar) outer_dim)
