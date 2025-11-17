@@ -317,11 +317,13 @@ lastUseSegOp (SegRed _ _ tps kbody sbos) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
-lastUseSegOp (SegScan _ _ tps kbody sbos) used_nms = do
+lastUseSegOp (SegScan _ _ tps kbody sbos post_op) used_nms = do
+  (lutab_spo, lu_vars_spo, used_nms_spo) <- lastUseSegPostOp post_op used_nms
+  (used_nms', lu_vars) <- lastUsedInNames used_nms_spo $ freeIn tps
   (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseSegBinOp sbos used_nms
-  (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
-  (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
-  pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
+  (used_nms'', lu_vars') <- lastUsedInNames used_nms_spo $ freeIn tps
+  (body_lutab, used_nms''') <- lastUseKernelBody kbody (mempty, used_nms')
+  pure (M.unions [lutab_spo, lutab_sbo, body_lutab], lu_vars <> lu_vars' <> lu_vars_sbo <> lu_vars_spo, used_nms_spo <> used_nms_sbo <> used_nms' <> used_nms'' <> used_nms''')
 lastUseSegOp (SegHist _ _ tps kbody hos) used_nms = do
   (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseHistOp hos used_nms
   (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
@@ -382,6 +384,17 @@ lastUseHistOp hos used_nms = do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn shp <> freeIn rf <> freeIn dest <> freeIn neutral <> freeIn shp'
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')
+
+lastUseSegPostOp ::
+  (Constraints rep) =>
+  SegPostOp (Aliases rep) ->
+  Names ->
+  LastUseM rep (LUTabFun, Names, Names)
+lastUseSegPostOp (SegPostOp l@(Lambda _ _ body)) used_nms =
+  inScopeOf l $ do
+    (body_lutab, used_nms') <- lastUseBody body (mempty, used_nms)
+    -- NOTE: Assume this should be mempty?
+    pure (body_lutab, mempty, used_nms')
 
 lastUseSeqOp :: Op (Aliases SeqMem) -> Names -> LastUseM SeqMem (LUTabFun, Names, Names)
 lastUseSeqOp (Alloc se sp) used_nms = do

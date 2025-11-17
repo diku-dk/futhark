@@ -18,7 +18,7 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, (\\))
+import Data.List (find, partition, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.HORep.MapNest (MapNest)
@@ -28,6 +28,7 @@ import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.IR.SOACS qualified as Futhark
 import Futhark.Optimise.Fusion.Composing
+import Futhark.Optimise.Fusion.Screma
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
@@ -198,6 +199,60 @@ mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
   where
     inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
+extendLambda ::
+  Lambda SOACS ->
+  [Param Type] ->
+  Lambda SOACS
+extendLambda lam extra_params =
+  lam
+    { lambdaBody = new_body,
+      lambdaReturnType = new_rets,
+      lambdaParams = new_params
+    }
+  where
+    params = lambdaParams lam
+    extra_rets = varRes . paramName <$> extra_params
+    extra_ts = paramType <$> extra_params
+    body = lambdaBody lam
+    new_body = body {bodyResult = bodyResult body <> extra_rets}
+    new_rets = lambdaReturnType lam <> extra_ts
+    new_params = params <> filter (`notElem` params) extra_params
+
+fusability :: Names -> [VName] -> ([VName], [VName])
+fusability unfus_set = partition (`notNameIn` unfus_set)
+
+vNameToNewParam :: VName -> TryFusion (Param Type)
+vNameToNewParam = lookupType >=> newParam "x" . rowType
+
+inputToVName :: SOAC.Input -> TryFusion VName
+inputToVName = liftMaybe . SOAC.isVarishInput
+
+inputToNewParam :: SOAC.Input -> TryFusion (Param Type)
+inputToNewParam = inputToVName >=> vNameToNewParam
+
+combineInputs ::
+  [SOAC.Input] ->
+  Lambda SOACS ->
+  [VName] ->
+  [SOAC.Input] ->
+  TryFusion
+    ( [(SOAC.Input, Param Type)],
+      [(SOAC.Input, Param Type)]
+    )
+combineInputs inp lam out inp' = do
+  new_inputs <- mapM toNewParamPair =<< filterM (isOutput out) inp'
+  pure (old_inputs, new_inputs)
+  where
+    old_inputs = zip inp $ lambdaParams lam
+    toNewParamPair inp'' =
+      maybe
+        ((inp'',) <$> inputToNewParam inp'')
+        (pure . (inp'',))
+        (lookup inp'' old_inputs)
+
+isOutput :: (Foldable t) => t VName -> SOAC.Input -> TryFusion Bool
+isOutput out = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
+
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
   Mode ->
@@ -212,6 +267,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   let soac_c = fsSOAC ker
       inp_p_arr = SOAC.inputs soac_p
       inp_c_arr = SOAC.inputs soac_c
+      out_p = outVars
+      out_c = fsOutNames ker
       lam_p = SOAC.lambda soac_p
       lam_c = SOAC.lambda soac_c
       w = SOAC.width soac_p
@@ -260,54 +317,17 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
     (_, _, Vertical)
       | unfus_set /= mempty,
         not (SOAC.nullTransforms $ fsOutputTransform ker) ->
-          fail "Cannot perform diagonal fusion in the presence of output transforms."
-    ( SOAC.Screma _ _ (ScremaForm _ scans_c reds_c),
-      SOAC.Screma _ _ (ScremaForm _ scans_p reds_p),
+          fail
+            "Cannot perform diagonal fusion in the presence of output transforms."
+    ( SOAC.Screma _ inp_c form_c,
+      SOAC.Screma _ inp_p form_p,
       _
-      )
-        | scremaFusionOK
-            ( splitAt
-                ( Futhark.scanResults scans_p
-                    + Futhark.redResults reds_p
-                )
-                outVars
-            )
-            ker -> do
-            let red_nes_p = concatMap redNeutral reds_p
-                red_nes_c = concatMap redNeutral reds_c
-                scan_nes_p = concatMap scanNeutral scans_p
-                scan_nes_c = concatMap scanNeutral scans_c
-                (res_lam', new_inp) =
-                  fuseRedomap
-                    unfus_set
-                    outVars
-                    lam_p
-                    scan_nes_p
-                    red_nes_p
-                    inp_p_arr
-                    outPairs
-                    lam_c
-                    scan_nes_c
-                    red_nes_c
-                    inp_c_arr
-                (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
-                  splitAt3 (length scan_nes_p) (length red_nes_p) outVars
-                (soac_c_scanout, soac_c_redout, soac_c_mapout) =
-                  splitAt3 (length scan_nes_c) (length red_nes_c) $ fsOutNames ker
-                unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
-            success
-              ( soac_p_scanout
-                  ++ soac_c_scanout
-                  ++ soac_p_redout
-                  ++ soac_c_redout
-                  ++ soac_c_mapout
-                  ++ unfus_arrs
-              )
-              $ SOAC.Screma
-                w
-                new_inp
-                (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c))
-
+      ) -> do
+        m <- fuseScrema w inp_c form_c out_c inp_p form_p out_p
+        case m of
+          Just (inp, form, out) ->
+            success out $ SOAC.Screma w inp form
+          Nothing -> fail "Can not fuse"
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
@@ -544,10 +564,9 @@ iswim _ (SOAC.Screma w arrs form) ots
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 
-      pure
-        ( SOAC.Screma map_w map_arrs' (mapSOAC map_fun'),
-          ots SOAC.|> SOAC.Rearrange map_aux perm
-        )
+      (,ots SOAC.|> SOAC.Rearrange map_aux perm)
+        . SOAC.Screma map_w map_arrs'
+        <$> mapSOAC map_fun'
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
@@ -651,7 +670,7 @@ pullIndex (SOAC.Screma _ inps form) ots
           else
             runLambdaBuilder (lambdaParams lam) $
               mapM sliceRes =<< bodyBind (lambdaBody lam)
-      pure (SOAC.Screma w' (map sliceInput inps) (mapSOAC lam'), ots')
+      (,ots') . SOAC.Screma w' (map sliceInput inps) <$> mapSOAC lam'
 pullIndex _ _ = fail "Cannot pull index"
 
 pushRearrange ::

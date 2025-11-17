@@ -398,16 +398,17 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
     Just do_iswim <- iswim pat w scan_lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       transformStms path . stmsToList . snd =<< runBuilderT (certifying cs do_iswim) types
-  | Just (scans, map_lam) <- isScanomapSOAC form = do
+  | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form = do
       let paralleliseOuter = runBuilder_ $ do
             scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
               (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
               let scan_lam'' = soacsLambdaToGPU scan_lam'
               pure $ SegBinOp Noncommutative scan_lam'' nes' shape
             let map_lam_sequential = soacsLambdaToGPU map_lam
+                post_op = SegPostOp $ soacsLambdaToGPU post_lam
             lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
             addStms . fmap (certify cs)
-              =<< segScan lvl pat mempty w scan_ops map_lam_sequential arrs [] []
+              =<< segScan lvl pat mempty w scan_ops post_op map_lam_sequential arrs [] []
 
           outerParallelBody =
             renameBody
@@ -525,7 +526,7 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
             max
             (bodyInterest defbody)
             (map (bodyInterest . caseBody) cases)
-      | Op (Screma w _ (ScremaForm lam' _ _)) <- stmExp stm =
+      | Op (Screma w _ (ScremaForm lam' _ _ _)) <- stmExp stm =
           zeroIfTooSmall w + bodyInterest (lambdaBody lam')
       | Op (Stream _ _ _ lam') <- stmExp stm =
           bodyInterest $ lambdaBody lam'
@@ -556,7 +557,7 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
     interest depth stm
       | "sequential" `inAttrs` attrs =
           0 :: Int
-      | Op (Screma _ _ form@(ScremaForm lam' _ _)) <- stmExp stm,
+      | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm,
         isJust $ isMapSOAC form =
           if sequential_inner
             then 0
@@ -565,7 +566,7 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
           bodyInterest (depth + 1) body * 10
       | WithAcc _ withacc_lam <- stmExp stm =
           bodyInterest (depth + 1) (lambdaBody withacc_lam)
-      | Op (Screma _ _ form@(ScremaForm lam' _ _)) <- stmExp stm =
+      | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm =
           1
             + bodyInterest (depth + 1) (lambdaBody lam')
             +
@@ -809,9 +810,9 @@ onInnerMap ::
 onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
   | unbalancedLambda lam,
     lambdaContainsParallelism lam =
-      addStmToAcc (mapLoopStm maploop) acc
+      flip addStmToAcc acc =<< mapLoopStm maploop
   | otherwise =
-      distributeSingleStm acc (mapLoopStm maploop) >>= \case
+      (distributeSingleStm acc =<< mapLoopStm maploop) >>= \case
         Just (post_kernels, res, nest, acc')
           | Just (perm, pat', lam') <- removeUnusedMapResults pat res lam -> do
               addPostStms post_kernels

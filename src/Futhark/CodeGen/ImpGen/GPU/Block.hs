@@ -365,23 +365,46 @@ compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
       zipWithM_ (compileThreadResult space) (patElems pat) $
         bodyResult body
   sOp $ Imp.ErrorSync Imp.FenceLocal
-compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans))) = do
+compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
   compileFlatId space
 
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
+      scan = head scans
+      shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
+      scan_ts = concatMap shpT scans
+      shpOfT t s =
+        arrayShape $
+          foldr (flip arrayOfRow) (arrayOfShape t s) $
+            segSpaceDims space
+      (scan_pars, map_pars) =
+        splitAt (length $ segBinOpNeutral scan) $ lambdaParams $ segPostOpLambda post_op
+      (body_scan_res, body_map_res) =
+        splitAt (length $ segBinOpNeutral scan) $ bodyResult body
+
+  scan_out <- forM scan_ts $ \(s, t) ->
+    sAllocArray "scan_out" (elemType t) (shpOfT t s) $ Space "shared"
+
+  dScope Nothing $ scopeOfLParams $ lambdaParams $ segPostOpLambda post_op
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (bodyStms body) $
-      forM_ (zip (patNames pat) $ bodyResult body) $ \(dest, res) ->
+    compileStms mempty (bodyStms body) $ do
+      forM_ (zip scan_out body_scan_res) $ \(dest, res) ->
         copyDWIMFix
           dest
           (map Imp.le64 ltids)
           (kernelResultSubExp res)
           []
 
-  fence <- fenceForArrays $ patNames pat
-  sOp $ Imp.ErrorSync fence
+      sComment "bind map results to post lambda params" $
+        forM_ (zip map_pars body_map_res) $ \(par, res) ->
+          copyDWIMFix
+            (paramName par)
+            []
+            (kernelResultSubExp res)
+            []
+
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
   let segment_size = last dims'
       crossesSegment from to =
@@ -391,12 +414,8 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans))) = do
   -- array of scan elements, so we invent some new flattened arrays
   -- here.
   dims_flat <- dPrimV "dims_flat" $ product dims'
-  let scan = head scans
-      num_scan_results = length $ segBinOpNeutral scan
   arrs_flat <-
-    mapM (flattenArray (length dims') dims_flat) $
-      take num_scan_results $
-        patNames pat
+    mapM (flattenArray (length dims') dims_flat) scan_out
 
   case segVirt lvl of
     SegVirt ->
@@ -412,6 +431,22 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans))) = do
         (product dims')
         (segBinOpLambda scan)
         arrs_flat
+
+  -- FIXME: we actually need something like blockCoverSegSpacee here, although in
+  -- practice we currently do not generate virtualised scans.
+  sWhen (isActive $ zip ltids dims) $ do
+    sComment "bind scan results to post lambda params" $
+      forM_ (zip scan_pars scan_out) $ \(par, acc) ->
+        copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 ltids)
+
+    let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+    sComment "compute post op." $
+      compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+        sComment "write values" $
+          forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
+            copyDWIMFix (patElemName pe) (map le64 ltids) subexp []
+
+  sOp $ Imp.Barrier Imp.FenceGlobal
 compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
   compileFlatId space
 

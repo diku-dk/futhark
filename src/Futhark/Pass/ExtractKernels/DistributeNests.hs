@@ -60,9 +60,9 @@ scopeForSOACs = castScope
 
 data MapLoop = MapLoop (Pat Type) (StmAux ()) SubExp (Lambda SOACS) [VName]
 
-mapLoopStm :: MapLoop -> Stm SOACS
+mapLoopStm :: (MonadFreshNames m) => MapLoop -> m (Stm SOACS)
 mapLoopStm (MapLoop pat aux w lam arrs) =
-  Let pat aux $ Op $ Screma w arrs $ mapSOAC lam
+  Let pat aux . Op . Screma w arrs <$> mapSOAC lam
 
 data DistEnv rep m = DistEnv
   { distNest :: Nestings,
@@ -243,9 +243,11 @@ leavingNesting acc =
                     lambdaReturnType = map rowType $ patTypes pat
                   }
           stms <-
-            runBuilder_ . auxing aux . FOT.transformSOAC pat $
-              Screma w used_arrs $
-                mapSOAC lam'
+            runBuilder_
+              . auxing aux
+              . FOT.transformSOAC pat
+              . Screma w used_arrs
+              =<< mapSOAC lam'
 
           pure $ acc {distTargets = newtargets, distStms = stms}
       | otherwise -> do
@@ -495,7 +497,7 @@ maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Index arr slice))) acc
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
 maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
-  | Just (scans, map_lam) <- isScanomapSOAC form,
+  | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     Scan lam nes <- singleScan scans =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
@@ -506,7 +508,7 @@ maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
                 nest' <- expandKernelNest pat_unused nest
                 map_lam' <- soacsLambda map_lam
                 localScope (typeEnvFromDistAcc acc') $
-                  segmentedScanomapKernel nest' perm (stmAuxCerts aux) w lam map_lam' nes arrs
+                  segmentedScanomapKernel nest' perm (stmAuxCerts aux) w lam post_lam map_lam' nes arrs
                     >>= kernelOrNot mempty stm acc kernels acc'
         _ ->
           addStmToAcc stm acc
@@ -949,11 +951,12 @@ segmentedScanomapKernel ::
   Certs ->
   SubExp ->
   Lambda SOACS ->
+  Lambda SOACS ->
   Lambda rep ->
   [SubExp] ->
   [VName] ->
   DistNestT rep m (Maybe (Stms rep))
-segmentedScanomapKernel nest perm cs segment_size lam map_lam nes arrs = do
+segmentedScanomapKernel nest perm cs segment_size lam post_lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
   onLambda <- asks distOnSOACSLambda
   let onLambda' = fmap fst . runBuilder . onLambda
@@ -962,10 +965,13 @@ segmentedScanomapKernel nest perm cs segment_size lam map_lam nes arrs = do
       (lam', nes'', shape) <- determineReduceOp lam nes'
       lam'' <- onLambda' lam'
       let scan_op = SegBinOp Noncommutative lam'' nes'' shape
+      let (_, scatter_op') = isVectorMap post_lam
+      scatter_op'' <- onLambda' scatter_op'
+      let post_op = SegPostOp scatter_op''
       lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
       addStms
         =<< traverse renameStm
-        =<< segScan lvl pat cs segment_size [scan_op] map_lam arrs ispace inps
+        =<< segScan lvl pat cs segment_size [scan_op] post_op map_lam arrs ispace inps
 
 regularSegmentedRedomapKernel ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>
