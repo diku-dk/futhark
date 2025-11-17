@@ -4,6 +4,31 @@ import "soacs"
 
 -- | Describes types of values that can be created from the primitive
 -- numeric types (and bool).
+--
+-- This is a somewhat lawless module, and the precise semantics of these
+-- conversions depend on the modules in question, but the following rules apply
+-- for the modules in prelude:
+--
+-- * Creating a `bool` from a number produces `false` if the number is 0 and
+--   `true` otherwise.
+--
+-- * Creating a number from `true` produces 1, and `false` produces 0.
+--
+-- * Creating an integer from a larger integer type is by bitwise truncation.
+--
+-- * Creating a signed integer from a smaller integer type is by sign extension.
+--
+-- * Creating an unsigned integer from a smaller integer type is by zero
+--   extension.
+--
+-- * Creating an integer from a floating point number is by numerical
+--   truncation. If the floating-point number is infinity or NaN, then the
+--   integer value is not meaningful. Use `to_bits` if you want to inspect the
+--   bitwise representation of a float.
+--
+-- * Creating a floating-point number from an integer is by numerical conversion
+--   (which may introduce roundoff error). Use `from_bits` if you want to
+--   construct a float from its bitwise representation.
 module type from_prim = {
   type t
 
