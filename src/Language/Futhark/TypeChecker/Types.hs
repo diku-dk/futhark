@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker.Types
     TypeSubs,
     Substitutable (..),
     substTypesAny,
+    substTyVars,
 
     -- * Witnesses
     mustBeExplicitInType,
@@ -59,7 +60,7 @@ mustBeExplicitInBinding :: StructType -> S.Set VName
 mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
       alsoRet = M.unionWith (&&) $ M.fromList $ map (,True) (S.toList (fvVars (freeInType ret)))
-   in S.fromList $ M.keys $ M.filter id $ alsoRet $ L.foldl' onType mempty $ map toStruct ts
+   in S.fromList $ M.keys $ M.filter id $ alsoRet $ L.foldl' onType mempty $ map (toStruct . snd) ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
 
@@ -442,6 +443,32 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
     mkSubst p a =
       error $ "applyType mkSubst: cannot substitute " ++ prettyString a ++ " for " ++ prettyString p
 
+-- In case we are substituting the same RetType in multiple
+-- places, we must ensure each instance is given distinct
+-- dimensions.  E.g. substituting 'a ↦ ?[n].[n]bool' into '(a,a)'
+-- should give '?[n][m].([n]bool,[m]bool)'.
+--
+-- XXX: the size names we invent here not globally unique.  This
+-- is _probably_ not a problem, since substituting types with
+-- outermost non-null existential sizes is done only when type
+-- checking modules and monomorphising.
+freshDims ::
+  (Monoid as) =>
+  RetTypeBase Size as ->
+  State [VName] (RetTypeBase Size as)
+freshDims (RetType [] t) = pure $ RetType [] t
+freshDims (RetType ext t) = do
+  seen_ext <- get
+  if not $ any (`elem` seen_ext) ext
+    then pure $ RetType ext t
+    else do
+      let start = maximum $ map baseTag seen_ext
+          ext' = zipWith VName (map baseName ext) [start + 1 ..]
+          mkSubst = ExpSubst . flip sizeFromName mempty . qualName
+          extsubsts = M.fromList $ zip ext $ map mkSubst ext'
+          RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
+      pure $ RetType ext' t'
+
 substTypesRet ::
   (Monoid u) =>
   (VName -> Maybe (Subst (RetTypeBase Size u))) ->
@@ -450,28 +477,6 @@ substTypesRet ::
 substTypesRet lookupSubst ot =
   uncurry (flip RetType) $ runState (onType ot) []
   where
-    -- In case we are substituting the same RetType in multiple
-    -- places, we must ensure each instance is given distinct
-    -- dimensions.  E.g. substituting 'a ↦ ?[n].[n]bool' into '(a,a)'
-    -- should give '?[n][m].([n]bool,[m]bool)'.
-    --
-    -- XXX: the size names we invent here not globally unique.  This
-    -- is _probably_ not a problem, since substituting types with
-    -- outermost non-null existential sizes is done only when type
-    -- checking modules and monomorphising.
-    freshDims (RetType [] t) = pure $ RetType [] t
-    freshDims (RetType ext t) = do
-      seen_ext <- get
-      if not $ any (`elem` seen_ext) ext
-        then pure $ RetType ext t
-        else do
-          let start = maximum $ map baseTag seen_ext
-              ext' = zipWith VName (map baseName ext) [start + 1 ..]
-              mkSubst = ExpSubst . flip sizeFromName mempty . qualName
-              extsubsts = M.fromList $ zip ext $ map mkSubst ext'
-              RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
-          pure $ RetType ext' t'
-
     onType ::
       forall as.
       (Monoid as) =>
@@ -538,6 +543,26 @@ substTypesAny lookupSubst ot =
                 anySize (baseTag (qualLeaf v))
           toAny d = d
        in first toAny ot'
+
+-- | Substitution without caring about sizes.
+substTyVars :: (Monoid u) => (VName -> Maybe (TypeBase d NoUniqueness)) -> TypeBase d u -> TypeBase d u
+substTyVars f (Scalar (TypeVar u qn args)) =
+  case f $ qualLeaf qn of
+    Just t' -> second (const mempty) $ substTyVars f t'
+    Nothing -> Scalar (TypeVar u qn (map onArg args))
+      where
+        onArg (TypeArgType t) = TypeArgType $ substTyVars f t
+        onArg (TypeArgDim e) = TypeArgDim e
+substTyVars _ (Scalar (Prim pt)) = Scalar $ Prim pt
+substTyVars f (Scalar (Record fs)) = Scalar $ Record $ M.map (substTyVars f) fs
+substTyVars f (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map $ substTyVars f) cs
+substTyVars f (Scalar (Arrow u pname d t1 (RetType ext t2))) =
+  Scalar $
+    Arrow u pname d (substTyVars f t1) $
+      RetType ext $
+        substTyVars f t2 `setUniqueness` uniqueness t2
+substTyVars f (Array u shape elemt) =
+  arrayOfWithAliases u shape $ substTyVars f $ Scalar elemt
 
 -- Note [AnySize]
 --

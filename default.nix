@@ -34,6 +34,12 @@ let
           futhark-manifest =
             haskellPackagesNew.callPackage ./nix/futhark-manifest.nix { };
 
+          gasp =
+            haskellPackagesNew.callPackage ./nix/gasp.nix {};
+
+          glpk-hs =
+            haskellPackagesNew.callPackage ./nix/glpk-hs.nix {};
+
           futhark =
             # callCabal2Nix does not do a great job at determining
             # which files must be included as source, which causes
@@ -72,6 +78,7 @@ let
                   "--extra-lib-dirs=${pkgs.glibc.static}/lib"
                   "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
                   "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
+                  "--extra-lib-dirs=${pkgs.glpk.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
                   "--extra-lib-dirs=${pkgs.numactl.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
                   # The ones below are due to GHC's runtime system
                   # depending on libdw (DWARF info), which depends on

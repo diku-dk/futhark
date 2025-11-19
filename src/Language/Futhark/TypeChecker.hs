@@ -27,6 +27,7 @@ import Data.Maybe
 import Data.Ord
 import Data.Set qualified as S
 import Futhark.FreshNames hiding (newName)
+import Futhark.Util (debugTraceM)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
@@ -671,7 +672,7 @@ checkEntryPoint loc tparams params rettype
   where
     (RetType _ rettype_t) = rettype
     (rettype_params, rettype') = unfoldFunType rettype_t
-    param_ts = map patternType params ++ rettype_params
+    param_ts = map patternType params ++ map snd rettype_params
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind vb = do
@@ -689,11 +690,14 @@ checkValBind vb = do
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
+      vb' = ValBind entry' fname maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
+
+  debugTraceM 3 $ unlines ["# Inferred:", prettyString vb']
+
   case entry' of
     Just _ -> checkEntryPoint loc tparams' params' rettype
     _ -> pure ()
 
-  let vb' = ValBind entry' fname maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
   pure
     ( mempty
         { envVtable =

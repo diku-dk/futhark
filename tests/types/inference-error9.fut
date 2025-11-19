@@ -2,4 +2,4 @@
 -- ==
 -- error: equality
 
-def main 't (x: t) = x == x
+def f 't (x: t) = x == x

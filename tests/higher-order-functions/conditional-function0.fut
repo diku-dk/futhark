@@ -1,6 +1,6 @@
 -- We cannot return a function from a conditional.
 -- ==
--- error: returned from branch
+-- error: may not be of function type
 
 def f (x: i32) : i32 = x + x
 def g (x: i32) : i32 = x + 1

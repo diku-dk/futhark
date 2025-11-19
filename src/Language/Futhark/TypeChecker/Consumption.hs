@@ -496,9 +496,10 @@ consumeAsNeeded loc (Scalar (Record fs1)) (Scalar (Record fs2)) =
 consumeAsNeeded loc pt t =
   when (diet pt == Consume) $ consumeAliases loc $ aliases t
 
-checkArg :: [(Exp, TypeAliases)] -> ParamType -> Exp -> CheckM (Exp, TypeAliases)
-checkArg prev p_t e = do
-  ((e', e_als), e_cons) <- contain $ checkExp e
+checkArg :: [(Exp, TypeAliases)] -> ParamType -> AutoMap -> Exp -> CheckM (Exp, TypeAliases)
+checkArg prev p_t am e = do
+  ((e', e_als), e_cons) <-
+    contain $ if autoRep am /= mempty then noAliases e else checkExp e
   consumed e_cons
   let e_t = typeOf e'
   when (e_cons /= mempty && not (orderZero e_t)) $
@@ -552,9 +553,11 @@ returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Observe arg =
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
 
-applyArg :: TypeAliases -> TypeAliases -> TypeAliases
-applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
-  returnType closure_als rettype d arg_als
+applyArg :: TypeAliases -> (AutoMap, TypeAliases) -> TypeAliases
+applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) (am, arg_als) =
+  if autoMap am /= mempty
+    then second (const mempty) rettype
+    else returnType closure_als rettype d arg_als
 applyArg t _ = error $ "applyArg: " <> show t
 
 boundFreeInExp :: Exp -> CheckM (M.Map VName TypeAliases)
@@ -680,9 +683,9 @@ checkLoop loop_loc (param, arg, form, body) = do
   let param_t = patternType param'
   ((arg', arg_als), arg_cons) <- case arg of
     LoopInitImplicit (Info e) ->
-      contain $ first (LoopInitImplicit . Info) <$> checkArg [] param_t e
+      contain $ first (LoopInitImplicit . Info) <$> checkArg [] param_t mempty e
     LoopInitExplicit e ->
-      contain $ first LoopInitExplicit <$> checkArg [] param_t e
+      contain $ first LoopInitExplicit <$> checkArg [] param_t mempty e
   consumed arg_cons
 
   let checkFree what e = do
@@ -712,7 +715,7 @@ checkLoop loop_loc (param, arg, form, body) = do
           `setAliases` S.singleton (AliasFree v)
   pure
     ( (param', arg', form', body'),
-      applyArg loopt arg_als `combineAliases` body_als
+      applyArg loopt (mempty, arg_als) `combineAliases` body_als
     )
 
 checkFuncall ::
@@ -720,7 +723,7 @@ checkFuncall ::
   SrcLoc ->
   Maybe (QualName VName) ->
   TypeAliases ->
-  f TypeAliases ->
+  f (AutoMap, TypeAliases) ->
   CheckM TypeAliases
 checkFuncall loc fname f_als arg_als = do
   v <- VName "internal_app_result" <$> incCounter
@@ -734,15 +737,17 @@ checkExp :: Exp -> CheckM (Exp, TypeAliases)
 checkExp (AppExp (Apply f args loc) appres) = do
   (f', f_als) <- checkExp f
   (args', args_als) <- NE.unzip <$> checkArgs (toRes Nonunique f_als) args
-  res_als <- checkFuncall loc (fname f) f_als args_als
+  res_als <-
+    checkFuncall loc (fname f) f_als $
+      NE.zip (fmap (snd . unInfo . fst) args') args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
   where
     fname (Var v _ _) = Just v
     fname (AppExp (Apply e _ _) _) = fname e
     fname _ = Nothing
-    checkArg' prev d (Info p, e) = do
-      (e', e_als) <- checkArg prev (second (const d) (typeOf e)) e
-      pure ((Info p, e'), e_als)
+    checkArg' prev d (Info (p, am), e) = do
+      (e', e_als) <- checkArg prev (second (const d) (typeOf e)) am e
+      pure ((Info (p, am), e'), e_als)
 
     checkArgs (Scalar (Arrow _ _ d _ (RetType _ rt))) (x NE.:| args') = do
       -- Note Futhark uses right-to-left evaluation of applications.
@@ -833,10 +838,10 @@ checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), fu
 --
 checkExp (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
   op_als <- observeVar (locOf oploc) (qualLeaf op) (unInfo opt)
-  let at1 : at2 : _ = fst $ unfoldFunType op_als
-  (x', x_als) <- checkArg [] at1 x
-  (y', y_als) <- checkArg [(x', x_als)] at2 y
-  res_als <- checkFuncall loc (Just op) op_als [x_als, y_als]
+  let (_, at1) : (_, at2) : _ = fst $ unfoldFunType op_als
+  (x', x_als) <- checkArg [] at1 mempty x
+  (y', y_als) <- checkArg [(x', x_als)] at2 mempty y
+  res_als <- checkFuncall loc (Just op) op_als [(mempty, x_als), (mempty, y_als)]
   pure
     ( AppExp (BinOp (op, oploc) opt (x', xp) (y', yp) loc) appres,
       res_als
