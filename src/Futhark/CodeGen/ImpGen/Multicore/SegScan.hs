@@ -211,10 +211,10 @@ seqAggregate pat i scan_ops kbody start chunk_length aggrArrs block_idx = do
         copyDWIMFix arr [tvExp start] res []
 
     forM_ (zip3 scan_ops_renamed per_scan_res aggrArrs) $ \(op, scan_res_op, aggrArr) -> do
-      forM_ (zip3 (xParams op) scan_res_op aggrArr) $ \(p, kr, agg) -> do
         let shape = segBinOpShape op
         sLoopNest shape $ \vec_is -> do
-          copyDWIMFix agg (tvExp block_idx : vec_is) (kernelResultSubExp kr) vec_is
+          forM_ (zip scan_res_op aggrArr) $ \(kr, agg) -> do
+            copyDWIMFix agg (tvExp block_idx : vec_is) (kernelResultSubExp kr) vec_is
 
   j <- dPrimV "j" (1 :: Imp.TExp Int64)
   sWhile (tvExp j .<. tvExp chunk_length) $ do
@@ -385,6 +385,11 @@ nonsegmentedScan
 
     free_params <- freeParams fbody
     emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
+   
+   
+   
+    -- compileStms mempty (bodyStms kbody) $ do 
+    --   pure()
 
 
     -- forM_ scan_ops $ \scan_op -> do
