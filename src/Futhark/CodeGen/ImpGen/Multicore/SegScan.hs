@@ -223,7 +223,6 @@ seqAggregate pat i scan_ops kbody start chunk_length aggrArrs block_idx = do
   let (all_scan_res, map_res) = splitAt n_scan results
 
   let per_scan_res = segBinOpChunks scan_ops all_scan_res
-  let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
   scan_ops2 <- renameSegBinOp scan_ops
   genBinOpParams scan_ops2
   dPrimV_ i (tvExp start)
@@ -459,19 +458,18 @@ nonsegmentedScan
               scan_ops1 <- renameSegBinOp scan_ops
               genBinOpParams scan_ops1
 
-              forM_ (zip3 scan_ops1 prefix_vars aggrArrs) $ \(scan_op, prefix_vars_op, aggrArrs_op) -> do
+              forM_ (zip4 scan_ops1 prefix_vars aggrArrs prefArrs) $ \(scan_op, prefix_vars_op, aggrArrs_op, prefArrs_op) -> do
                 sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+
                   forM_ (zip (xParams scan_op) aggrArrs_op) $ \(xs, aggrArr) -> do
                     copyDWIMFix (paramName xs) [] (Var aggrArr) (tvExp block_idx : vec_is)
                   forM_ (zip (yParams scan_op) prefix_vars_op) $ \(ys, prefix_var) -> do
                     copyDWIMFix (paramName ys) [] (Var prefix_var) vec_is
-
-              forM_ (zip scan_ops1 prefArrs) $ \(scan_op, prefArrs_op) -> do
-                sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
                   compileStms mempty (bodyStms $ lamBody scan_op) $ do
                     forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) prefArrs_op) $ \(op_res, prefArr) -> do
                       copyDWIMFix prefArr (tvExp block_idx : vec_is) op_res []
 
+        
               sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) memF (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int64))
 
               _ <- seqScan pat i scan_ops kbody prefix_vars start chunk_length
