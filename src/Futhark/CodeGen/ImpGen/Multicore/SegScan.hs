@@ -85,15 +85,15 @@ seqScan ::
   Maybe ([[VName]], TV Int64) ->
   MulticoreGen ()
 seqScan pat i scan_ops kbody per_op_prefixes_var start chunk_length mprefArrs_block_idx = do
-  scan_ops2 <- renameSegBinOp scan_ops
-  genBinOpParams scan_ops2
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
 
   let results = bodyResult kbody
-  let n_scan = segBinOpResults scan_ops2
+  let n_scan = segBinOpResults scan_ops_renamed
   let (all_scan_res, map_res) = splitAt n_scan results
 
-  let per_scan_res = segBinOpChunks scan_ops2 all_scan_res
-  let per_scan_pes = segBinOpChunks scan_ops2 $ patElems pat
+  let per_scan_res = segBinOpChunks scan_ops_renamed all_scan_res
+  let per_scan_pes = segBinOpChunks scan_ops_renamed $ patElems pat
 
 
   z <- dPrimV "z" (0 :: Imp.TExp Int64)
@@ -101,7 +101,7 @@ seqScan pat i scan_ops kbody per_op_prefixes_var start chunk_length mprefArrs_bl
     dPrimV_ i (tvExp start + tvExp z)
 
     compileStms mempty (bodyStms kbody) $ do
-      let map_arrs = drop (segBinOpResults scan_ops2) $ patElems pat
+      let map_arrs = drop (segBinOpResults scan_ops_renamed) $ patElems pat
       -- recheck this part
       sComment "write mapped values results to memory" $
         forM_ (zip (map patElemName map_arrs) (map kernelResultSubExp map_res)) $ \(arr, res) ->
@@ -109,7 +109,7 @@ seqScan pat i scan_ops kbody per_op_prefixes_var start chunk_length mprefArrs_bl
 
       case mprefArrs_block_idx of
         Just (prefArrs, block_idx) ->
-          forM_ (zip5 per_scan_pes scan_ops2 per_scan_res prefArrs per_op_prefixes_var) $ \(pes, scan_op, scan_res, prefArr, prefixes) ->
+          forM_ (zip5 per_scan_pes scan_ops_renamed per_scan_res prefArrs per_op_prefixes_var) $ \(pes, scan_op, scan_res, prefArr, prefixes) ->
             sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
               forM_ (zip (xParams scan_op) prefixes) $ \(p, acc') -> do
                 copyDWIMFix (paramName p) [] (Var acc') vec_is
@@ -121,7 +121,7 @@ seqScan pat i scan_ops kbody per_op_prefixes_var start chunk_length mprefArrs_bl
                   copyDWIMFix acc' vec_is se []
                   copyDWIMFix pref (tvExp block_idx : vec_is) se []
         Nothing ->
-          forM_ (zip4 per_scan_pes scan_ops2 per_scan_res per_op_prefixes_var) $ \(pes, scan_op, scan_res, prefixes) ->
+          forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_prefixes_var) $ \(pes, scan_op, scan_res, prefixes) ->
             sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
               forM_ (zip (xParams scan_op) prefixes) $ \(p, acc') -> do
                 copyDWIMFix (paramName p) [] (Var acc') vec_is
@@ -135,7 +135,9 @@ seqScan pat i scan_ops kbody per_op_prefixes_var start chunk_length mprefArrs_bl
 
 copyFromDescToLocal :: [SegBinOp MCMem] -> [[VName]] -> [[VName]] -> TV Int64 -> MulticoreGen ()
 copyFromDescToLocal scan_ops local_arrays description_arrays lb = do
-  forM_ scan_ops $ \scan_op -> do
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
+  forM_ scan_ops_renamed $ \scan_op -> do
     let shape = segBinOpShape scan_op
     forM_ (zip local_arrays description_arrays) $ \(local_array, description_array) -> do
       forM_ (zip local_array description_array) $ \(local_var, desc_var) -> do
@@ -149,7 +151,9 @@ applyScanFromDescToLocal ::
   TV Int64 ->
   MulticoreGen ()
 applyScanFromDescToLocal scan_ops local_arrays description_arrays lb = do
-  forM_ (zip3 scan_ops local_arrays description_arrays) $ \(scan_op, local_array, description_array) -> do
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
+  forM_ (zip3 scan_ops_renamed local_arrays description_arrays) $ \(scan_op, local_array, description_array) -> do
     sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
       forM_ (zip (xParams scan_op) description_array) $ \(xs, desc_var) -> do
         copyDWIMFix (paramName xs) [] (Var desc_var) (tvExp lb : vec_is)
@@ -167,7 +171,9 @@ applyScanAggregateToPrefix ::
   TV Int64 ->
   MulticoreGen ()
 applyScanAggregateToPrefix scan_ops prefix_vars aggrArrs prefArrs block_idx = do
-  forM_ (zip4 scan_ops prefix_vars aggrArrs prefArrs) $ \(scan_op, prefix_vars_op, aggrArrs_op, prefArrs_op) -> do
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
+  forM_ (zip4 scan_ops_renamed prefix_vars aggrArrs prefArrs) $ \(scan_op, prefix_vars_op, aggrArrs_op, prefArrs_op) -> do
     sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
       forM_ (zip (xParams scan_op) aggrArrs_op) $ \(xs, aggrArr) -> do
         copyDWIMFix (paramName xs) [] (Var aggrArr) (tvExp block_idx : vec_is)
@@ -188,22 +194,23 @@ seqAggregate ::
   TV Int64 ->
   MulticoreGen ()
 seqAggregate pat i scan_ops kbody start chunk_length aggrArrs block_idx = do
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
   let results = bodyResult kbody
-  let n_scan = segBinOpResults scan_ops
+  let n_scan = segBinOpResults scan_ops_renamed
   let (all_scan_res, map_res) = splitAt n_scan results
 
-  let per_scan_res = segBinOpChunks scan_ops all_scan_res
-  scan_ops2 <- renameSegBinOp scan_ops
-  genBinOpParams scan_ops2
+  let per_scan_res = segBinOpChunks scan_ops_renamed all_scan_res
+
   dPrimV_ i (tvExp start)
   compileStms mempty (bodyStms kbody) $ do
-    let map_arrs = drop (segBinOpResults scan_ops2) $ patElems pat
+    let map_arrs = drop (segBinOpResults scan_ops_renamed) $ patElems pat
     -- recheck this part
     sComment "write mapped values results to memory" $
       forM_ (zip (map patElemName map_arrs) (map kernelResultSubExp map_res)) $ \(arr, res) ->
         copyDWIMFix arr [tvExp start] res []
 
-    forM_ (zip3 scan_ops2 per_scan_res aggrArrs) $ \(op, scan_res_op, aggrArr) -> do
+    forM_ (zip3 scan_ops_renamed per_scan_res aggrArrs) $ \(op, scan_res_op, aggrArr) -> do
       forM_ (zip3 (xParams op) scan_res_op aggrArr) $ \(p, kr, agg) -> do
         let shape = segBinOpShape op
         sLoopNest shape $ \vec_is -> do
@@ -213,14 +220,14 @@ seqAggregate pat i scan_ops kbody start chunk_length aggrArrs block_idx = do
   sWhile (tvExp j .<. tvExp chunk_length) $ do
     dPrimV_ i (tvExp start + tvExp j)
     compileStms mempty (bodyStms kbody) $ do
-      let map_arrs = drop (segBinOpResults scan_ops2) $ patElems pat
+      let map_arrs = drop (segBinOpResults scan_ops_renamed) $ patElems pat
 
       -- recheck this part
       sComment "write mapped values results to memory" $
         forM_ (zip (map patElemName map_arrs) (map kernelResultSubExp map_res)) $ \(arr, res) ->
           copyDWIMFix arr [tvExp start + tvExp j] res []
 
-      forM_ (zip3 scan_ops2 per_scan_res aggrArrs) $ \(scan_op, scan_res, aggrArr) ->
+      forM_ (zip3 scan_ops_renamed per_scan_res aggrArrs) $ \(scan_op, scan_res, aggrArr) ->
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           forM_ (zip (xParams scan_op) aggrArr) $ \(p, acc') -> do
             copyDWIMFix (paramName p) [] (Var acc') (tvExp block_idx : vec_is)
@@ -349,37 +356,29 @@ nonsegmentedScan
                   (tvExp old_flag .==. 2)
                   ( do
                       
-                      renamed_scan_ops <- renameSegBinOp scan_ops
-                      genBinOpParams renamed_scan_ops
-
                       sIf
                         (tvExp has_acc .==. false)
-                        (copyFromDescToLocal renamed_scan_ops prefix_vars prefArrs lb)
-                        (applyScanFromDescToLocal renamed_scan_ops prefix_vars prefArrs lb)
+                        (copyFromDescToLocal scan_ops prefix_vars prefArrs lb)
+                        (applyScanFromDescToLocal scan_ops prefix_vars prefArrs lb)
                   )
                 sWhen
                   (tvExp old_flag .==. 1)
                   ( do
-                      renamed_scan_ops <- renameSegBinOp scan_ops
-                      genBinOpParams renamed_scan_ops
 
                       sIf
                         (tvExp has_acc .==. false)
-                        (copyFromDescToLocal renamed_scan_ops prefix_vars aggrArrs lb)
-                        (applyScanFromDescToLocal renamed_scan_ops prefix_vars aggrArrs lb)
+                        (copyFromDescToLocal scan_ops prefix_vars aggrArrs lb)
+                        (applyScanFromDescToLocal scan_ops prefix_vars aggrArrs lb)
                       has_acc <-- true
                       lb <-- tvExp lb - 1
                   )
 
-              scan_ops1 <- renameSegBinOp scan_ops
-              genBinOpParams scan_ops1
 
-              applyScanAggregateToPrefix scan_ops1 prefix_vars aggrArrs prefArrs block_idx
+              applyScanAggregateToPrefix scan_ops prefix_vars aggrArrs prefArrs block_idx
 
               sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) memF (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int64))
 
               seqScan pat i scan_ops kbody prefix_vars start chunk_length Nothing
-              pure ()
           )
 
         sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) workF idx0 (untyped one)
