@@ -423,6 +423,11 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
             rewrite $ IndexFn [[Forall i (Iota m)]] (singleCase $ sVar i)
           _ ->
             error $ errorMsg loc "type error"
+  | Just "length" <- getFun e_f,
+    [e_arg] <- getArgs args = do
+      fs <- forward e_arg
+      forM fs $ \f -> do
+        pure $ IndexFn [] (singleCase $ dimSize $ head $ shape f)
   | Just fname <- getFun e_f,
     "zip" `L.isPrefixOf` fname = do
       mconcat <$> mapM forward (getArgs args)

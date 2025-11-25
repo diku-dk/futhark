@@ -117,7 +117,9 @@ check :: Symbol -> IndexFnM Answer
 check (a :&& b) = do
   ans <- check a
   case ans of
-    Yes -> addRelSymbol a >> check b
+    Yes -> do
+      printM 7 (prettyStr a <> " OK")
+      addRelSymbol a >> check b
     Unknown -> pure Unknown
 check (a :|| b) = check a `orM` check b
 check (a :== b) = a $== b

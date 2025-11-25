@@ -106,7 +106,7 @@ def max (i,id) (j,jd) =
 def mk2vec x y =
   map (\i -> if i == 0 then x else y) (iota 2)
 
-def remove_negatives [num_points] num_segs (x: {[num_points]i64 | \x -> Range x (inf, 2*num_segs)}) points_x points_y
+def remove_negatives [num_points] num_segs (x: {[num_points]i64 | \x -> Range x (-1, 2*num_segs)}) points_x points_y
   : {([]i64, []real, []real) | \(y0,_,_) ->
     FiltPart y0 x (\i -> x[i] >= 0) (\_i -> true) && Range y0 (0, 2*num_segs)
   }  =
@@ -337,12 +337,12 @@ def semihull_loop [num_segs] [num_points]
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
        , []i64,[]real,[]real         -- points
-      ) | \(_,_, segs_begx',_,_,_, points_idx',_,_) -> Range points_idx' (0,length segs_begx')}
+      ) | \(_,_, out_segs_begx,_,_,_, out_points_idx,_,_) -> Range out_points_idx (0,length out_segs_begx)}
     =
    let (segs_begx', segs_begy', segs_endx', segs_endy',
-        seg_inds', pointsx', pointsy') = expand_hull f_dist f_dist_less segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
-   let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds'') = extract_empty_segments hull_x hull_y segs_begx' segs_begy' segs_endx' segs_endy' seg_inds'
-   in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds'', pointsx', pointsy')
+        points_idx', points_x', points_y') = expand_hull f_dist f_dist_less segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
+   let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'') = extract_empty_segments hull_x hull_y segs_begx' segs_begy' segs_endx' segs_endy' points_idx'
+   in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 
 def semihull (startx: real, starty: real) (endx: real, endy: real) (points : [](real,real)) =
   if null points then [(startx,starty)]
