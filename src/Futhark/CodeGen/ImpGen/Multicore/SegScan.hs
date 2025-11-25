@@ -15,6 +15,7 @@ import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Util.IntegralExp (divUp)
 import Prelude hiding (quot, rem)
+import Futhark.Transform.Rename (renameBody)
 
 cacheSize :: Imp.TExp Int64
 cacheSize = 65536 -- 64 KB
@@ -85,10 +86,11 @@ seqScan ::
   Maybe ([[VName]], TV Int64) ->
   MulticoreGen ()
 seqScan pat i scan_ops kbody per_op_prefixes_var start chunk_length mprefArrs_block_idx = do
+  kbody_renamed <- renameBody kbody
   scan_ops_renamed <- renameSegBinOp scan_ops
   genBinOpParams scan_ops_renamed
 
-  let results = bodyResult kbody
+  let results = bodyResult kbody_renamed
   let n_scan = segBinOpResults scan_ops_renamed
   let (all_scan_res, map_res) = splitAt n_scan results
 
@@ -100,7 +102,7 @@ seqScan pat i scan_ops kbody per_op_prefixes_var start chunk_length mprefArrs_bl
   sWhile (tvExp z .<. tvExp chunk_length) $ do
     dPrimV_ i (tvExp start + tvExp z)
 
-    compileStms mempty (bodyStms kbody) $ do
+    compileStms mempty (bodyStms kbody_renamed) $ do
       let map_arrs = drop (segBinOpResults scan_ops_renamed) $ patElems pat
       -- recheck this part
       sComment "write mapped values results to memory" $
@@ -195,15 +197,16 @@ seqAggregate ::
   MulticoreGen ()
 seqAggregate pat i scan_ops kbody start chunk_length aggrArrs block_idx = do
   scan_ops_renamed <- renameSegBinOp scan_ops
+  kbody_renamed <- renameBody kbody
   genBinOpParams scan_ops_renamed
-  let results = bodyResult kbody
+  let results = bodyResult kbody_renamed
   let n_scan = segBinOpResults scan_ops_renamed
   let (all_scan_res, map_res) = splitAt n_scan results
 
   let per_scan_res = segBinOpChunks scan_ops_renamed all_scan_res
 
   dPrimV_ i (tvExp start)
-  compileStms mempty (bodyStms kbody) $ do
+  compileStms mempty (bodyStms kbody_renamed) $ do
     let map_arrs = drop (segBinOpResults scan_ops_renamed) $ patElems pat
     -- recheck this part
     sComment "write mapped values results to memory" $
@@ -217,17 +220,20 @@ seqAggregate pat i scan_ops kbody start chunk_length aggrArrs block_idx = do
             copyDWIMFix agg (tvExp block_idx : vec_is) (kernelResultSubExp kr) vec_is
 
   j <- dPrimV "j" (1 :: Imp.TExp Int64)
+  kbody_renamed' <- renameBody kbody
+  let (all_scan_res', map_res') = splitAt (segBinOpResults scan_ops_renamed) (bodyResult kbody_renamed')
+  let per_scan_res' = segBinOpChunks scan_ops_renamed all_scan_res'
   sWhile (tvExp j .<. tvExp chunk_length) $ do
     dPrimV_ i (tvExp start + tvExp j)
-    compileStms mempty (bodyStms kbody) $ do
+    compileStms mempty (bodyStms kbody_renamed') $ do
       let map_arrs = drop (segBinOpResults scan_ops_renamed) $ patElems pat
 
       -- recheck this part
       sComment "write mapped values results to memory" $
-        forM_ (zip (map patElemName map_arrs) (map kernelResultSubExp map_res)) $ \(arr, res) ->
+        forM_ (zip (map patElemName map_arrs) (map kernelResultSubExp map_res')) $ \(arr, res) ->
           copyDWIMFix arr [tvExp start + tvExp j] res []
 
-      forM_ (zip3 scan_ops_renamed per_scan_res aggrArrs) $ \(scan_op, scan_res, aggrArr) ->
+      forM_ (zip3 scan_ops_renamed per_scan_res' aggrArrs) $ \(scan_op, scan_res, aggrArr) ->
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           forM_ (zip (xParams scan_op) aggrArr) $ \(p, acc') -> do
             copyDWIMFix (paramName p) [] (Var acc') (tvExp block_idx : vec_is)
