@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Unit types now behave like records/tuples in the C interface and derived
   interface, such as server-mode and `futhark literate`. (#2332)
 
+* `futhark bench`: JSON output now contains results for all test stanzas that
+  use a given entry point, rather than just the last one.
+
 ## [0.25.34]
 
 ### Added
