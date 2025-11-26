@@ -198,8 +198,16 @@ valuesAsVars server names_and_types _ dir (InFile file)
   | otherwise =
       cmdMaybe $ cmdRestore server (dir </> file) names_and_types
 valuesAsVars server names_and_types futhark dir (GenValues gens) = do
-  unless (length gens == length names_and_types) $
-    throwError "Mismatch between number of expected and generated values."
+  unless (length gens == length names_and_types) . throwError . T.unlines $
+    [ "Expected "
+        <> showText (length names_and_types)
+        <> " input values of types",
+      "  " <> T.unwords (map snd names_and_types),
+      "Provided "
+        <> showText (length gens)
+        <> " input values of types",
+      "  " <> T.unwords (map genValueType gens)
+    ]
   gen_fs <- mapM (getGenFile futhark dir) gens
   forM_ (zip gen_fs names_and_types) $ \(file, (v, t)) ->
     cmdMaybe $ cmdRestore server (dir </> file) [(v, t)]
