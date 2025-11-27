@@ -508,6 +508,7 @@ executable futhark
 library futhark-testing
   import: common
   hs-source-dirs: src-testing
+  visibility: private
   exposed-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
