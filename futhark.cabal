@@ -421,14 +421,21 @@ library
       Language.Futhark.Tuple
       Language.Futhark.TypeChecker
       Language.Futhark.TypeChecker.Consumption
+      Language.Futhark.TypeChecker.Constraints
+      Language.Futhark.TypeChecker.TySolve
+      Language.Futhark.TypeChecker.TySolveOld
+      Language.Futhark.TypeChecker.UnionFind
+      Language.Futhark.TypeChecker.Error
       Language.Futhark.TypeChecker.Names
       Language.Futhark.TypeChecker.Match
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
+      Language.Futhark.TypeChecker.Rank
       Language.Futhark.TypeChecker.Terms
       Language.Futhark.TypeChecker.Terms.Loop
       Language.Futhark.TypeChecker.Terms.Monad
       Language.Futhark.TypeChecker.Terms.Pat
+      Language.Futhark.TypeChecker.Terms.Unsized
       Language.Futhark.TypeChecker.Types
       Language.Futhark.TypeChecker.Unify
       Language.Futhark.Warnings
@@ -510,6 +517,8 @@ library futhark-testing
   hs-source-dirs: src-testing
   visibility: private
   exposed-modules:
+      Generated.AllFutBenchmarks
+      Generated.AllFutBenchmarks.Accelerate.Nbody.Nbodybh
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.DataDependenciesTests
@@ -541,6 +550,8 @@ library futhark-testing
       Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
+      Language.Futhark.TypeChecker.TySolveBenchmarks
+      Language.Futhark.TypeChecker.TySolveTests
       Language.Futhark.TypeChecker.ConsumptionTests
       Language.Futhark.TypeCheckerTests
   build-depends:
@@ -552,11 +563,13 @@ library futhark-testing
     , free
     , futhark
     , megaparsec
-    , srcloc
+    , srcloc >=0.4
     , tasty
     , tasty-hunit
     , tasty-quickcheck
     , text
+    , srcloc
+    , regex-tdfa ^>= 1.3.2
 
 test-suite unit
   import: common

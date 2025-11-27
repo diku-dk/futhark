@@ -1,6 +1,6 @@
--- Inference for a local function.
+-- let should not be generalised
 -- ==
--- input { 2 } output { 4 }
+-- error: Cannot apply "apply"
 
 def main x =
   let apply f x = f x

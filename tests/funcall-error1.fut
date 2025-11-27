@@ -1,6 +1,6 @@
 -- Test that functions accept only the right number of arguments.
 -- ==
--- error: Cannot apply "f"
+-- error: 2 arguments
 
 def f (x: i32) (y: f64) : f64 = f64.i32 (x) + y
 
