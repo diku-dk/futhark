@@ -63,7 +63,7 @@ permuteNest fenv env sched orig_nest_stm@(Let _pat _aux e_soac)
     -- ^ check that either `_pat_rec` is of scalar type or it is not used by code_after
     let sched_tail = tailOfSched sched
         sched' = sched_tail { sigma = map (\x -> x - 1) (sigma sched_tail) }
-    last_rec_stms <- trace ("Permute, Case head==0, tail-sched: "++show (sigma sched')++" orig_sched: "++show (sigma sched) ++ "\nREC-CALL permuteNest 1 on:\n"++prettyString rec_stm) $
+    last_rec_stms <- trace ("Permute, Case head==0 BEGIN\ntail-sched: "++show (sigma sched')++" orig_sched: "++show (sigma sched) ++ "\n\tSTM:\n" ++ prettyString orig_nest_stm++"\n\tREC-STM: (permuteNest 1):\n"++prettyString rec_stm++"\nEND") $
       permuteNest fenv env sched' rec_stm
     mkRecWithBody orig_nest_stm (code_bef, last_rec_stms, code_after, res_ses) >>= pure . oneStm
     -- ^ this also need to fix the code_after to use the result of last_rec'
@@ -159,7 +159,7 @@ transposeTopOfNest _fenv _env _sched outer_rec_stm
   (_tab_fin, map_stms_fin) <- distributeMapOnStmts tab4 outer_rec_stm (aft_rec, inl_stms_aft) res_nms_aft_rec
   -- let tab5 = tab4 `M.union` tab_fin
   --
-  trace ("transposeTopOfNest END for outer-rec-stm-pat: "++prettyString pat ++ "\nbef-stms:\n" ++ prettyString (map_stms_bef <> sched_stms <> map_stms_aft <> nes_stms) ++"\nintchg-rec:\n" ++ prettyString map_stm_rec ++ "\n\n\n") $
+  trace ("transposeTopOfNest END for outer-rec-stm-pat: "++prettyString pat ++ "outer stm:\n" ++ prettyString outer_rec_stm ++ "\nTAB: "++show tab3++"\nbef-stms:\n" ++ prettyString (map_stms_bef <> sched_stms <> map_stms_aft <> nes_stms) ++"\nintchg-rec:\n" ++ prettyString map_stm_rec ++ "\n(rec stm,inl_stm_aft):\n" ++ prettyString rec_stm ++ "\n aft:\n" ++ prettyString inl_stms_aft ++ "\n\n\n") $
     pure (map_stms_bef <> sched_stms <> map_stms_aft <> nes_stms, map_stm_rec, map_stms_fin)
   --
   -- map (Var . patElemName) $ patElems pat
@@ -497,6 +497,7 @@ getCommonInp tab map_lam (inner_stms, inline_stms) =
                (arrnms, arrtps) = unzip $ mapMaybe (`M.lookup` tab) com_nms
                params  = zipWith (\p_nm arr_tp -> Param mempty p_nm (stripArray 1 arr_tp)) com_nms arrtps
            in  zip3 params arrnms arrtps
+      -- trace ("getCommonInp params: "++prettyString (zip3 params arrnms arrtps)++"\n\n") $ 
       else error ("Error in distributeMapOnStmts: " ++
                   "names in tab do not cover all interm arrays! " ++
                   prettyString (namesSubtract fvs tab_nms)
