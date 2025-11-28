@@ -20,6 +20,7 @@ module Futhark.Optimise.Fusion.HLsched.SchedUtils
   , equivLambdas
   , fromFParam
   , toFParam
+  , stmtMatchesSchedule
   )
 where
 
@@ -27,10 +28,10 @@ import Data.List qualified as L
 --import Control.Monad
 import Data.Graph.Inductive.Graph qualified as G
 --import Data.Map.Strict qualified as M
---import Data.Maybe
+import Data.Maybe
 import Futhark.Analysis.HORep.SOAC qualified as H
 -- import Futhark.Construct
-import Futhark.IR.SOACS hiding (SOAC (..))
+import Futhark.IR.SOACS -- hiding (SOAC (..))
 -- import Futhark.IR.SOACS qualified as F
 import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Tools
@@ -270,6 +271,45 @@ toFParam p = Param (paramAttrs p) (paramName p) $ toDecl (paramDec p) Unique
 fromFParam :: FParam SOACS -> LParam SOACS
 fromFParam p = Param (paramAttrs p) (paramName p) $ fromDecl (paramDec p)
 
+---------------------------------------------------------
+--- Checking if a statement conforms with a schedule, ---
+---   in particular because we need to find the       ---
+---   statements that are part of the target chain of ---
+---   recurrences of a schedule                       ---
+---------------------------------------------------------
+
+stmtMatchesSchedule :: Env -> Stm SOACS -> HLSched -> Bool
+stmtMatchesSchedule _ _ sched
+  | length (dimlens sched) == 0  = True
+  -- error "In stmMatchesSchedule: empty schedule as argument!"
+stmtMatchesSchedule env stm sched =
+  case getMBody stm of
+    Nothing   -> False
+    Just body -> bodyMatchesSchedule env body (tailOfSched sched)
+  where
+    getMBody (Let _ _ (Loop _ ForLoop{} loop_body)) = Just loop_body
+    getMBody (Let _ _ (Op (Screma _ _ (ScremaForm lam [] [])))) = Just $ lambdaBody lam
+    getMBody (Let _ _ (Op (Screma _ _ form@(ScremaForm lam _ _)))) =
+      if isJust (oneFullyConsumedMapRed form) then Just (lambdaBody lam) else Nothing
+    getMBody _ = Nothing
+{--
+    i64ptp = IntType Int64
+    validSize m dims
+      | m_pe <- peFromSe env i64ptp m,
+        Just nms <- M.lookup m_pe (appTilesFwd env),
+        penms <- S.fromList $ map (`LeafExp` i64ptp) $ namesToList nms,
+        length dims == S.size penms,
+        penms == S.fromList dims = True
+    validSize m dims =
+      eqPEs (expandSE env m i64ptp) (foldl mulPes pe1 dims)
+--}
+
+bodyMatchesSchedule :: Env -> Body SOACS -> HLSched -> Bool
+bodyMatchesSchedule env body sched =
+  foldl f False $ reverse $ stmsToList $ bodyStms body
+  where
+    f True _ = True
+    f _ stm = stmtMatchesSchedule env stm sched  
 -----------------------------------------------------------
 --  GARBAGE CODE BELOW, i.e., replaced with simpler one
 -----------------------------------------------------------

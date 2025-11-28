@@ -58,7 +58,7 @@ permuteNest fenv env sched orig_nest_stm@(Let _pat _aux e_soac)
   | not (null (sigma sched)) && 0 == head (sigma sched),
   -- ^ if the first element of the permutation is 0 then it comes
   --   down to permuting the last recurrence of the current soac. 
-    Just (code_bef, rec_stm, code_after, res_ses) <- sep3LastRec e_soac = do
+    Just (code_bef, rec_stm, code_after, res_ses) <- sep3LastRec env sched e_soac = do
     -- Let _pat_rec _aux_rec e_rec <- rec_stm = do
     -- ^ check that either `_pat_rec` is of scalar type or it is not used by code_after
     let sched_tail = tailOfSched sched
@@ -71,7 +71,7 @@ permuteNest fenv env sched orig_nest_stm@(Let _pat _aux e_soac)
     --
   | s0 : s1 : _rest <- sigma sched,
     s0 < s1,
-    Just (code_bef, rec_stm, code_after, res_ses) <- sep3LastRec e_soac = do
+    Just (code_bef, rec_stm, code_after, res_ses) <- sep3LastRec env sched e_soac = do
   -- ^ s0 cannot be directly interchanged. Treated in two steps:
   --   1. build a permutation for (s1:_rest) nest by subtracting 1 from each
   --       element greater than s0; call the resulted permutation `sigma_rec`
@@ -92,7 +92,7 @@ permuteNest fenv env sched orig_nest_stm@(Let _pat _aux e_soac)
   | s0 : s1 : _rest <- sigma sched,
     s0 > s1 = do
   -- ^ interchange the front dimensions, then call recursively on the top soac
-    -- let (code_bef, last_rec, code_after) = sep3LastRec soac
+    -- let (code_bef, last_rec, code_after) = sep3LastRec env sched e_soac
     (before_stms, last_rec_stm, after_stms) <- trace ("Permute Case 2.0, s0 > s1, transpose top"++" orig_sched: "++show (sigma sched)) $
       transposeTopOfNest fenv env sched orig_nest_stm
     last_rec_stms' <- trace ("Permute Case 2.0, s0 > s1, recurse on sched: "++show (sigma (interchangeTop sched))++" orig_sched: "++show (sigma sched) ++ "\nREC-CALL permuteNest 4 on:\n"++prettyString last_rec_stm) $
@@ -123,9 +123,9 @@ type LftTab = M.Map VName (VName, Type)
 --   To be extended later at least with redomap, if not also with loops
 transposeTopOfNest :: (LocalScope SOACS m, MonadFreshNames m) =>
     FuseEnv m -> Env -> HLSched -> Stm SOACS -> m (Stms SOACS, Stm SOACS, Stms SOACS)
-transposeTopOfNest _fenv _env _sched outer_rec_stm
+transposeTopOfNest _fenv env sched outer_rec_stm
   | Let pat _aux (Op (Screma _m _inp_nms (ScremaForm map_lam [] []))) <- outer_rec_stm,
-    (parts, res_ses) <- sep5LastRecBody (lambdaBody map_lam),
+    (parts, res_ses) <- sep5LastRecBody env (tailOfSched sched) (lambdaBody map_lam),
     PartStms bef_sched msched aft_sched (Just rec_stm) aft_rec <- parts = do
   let ((inl_nms_bef, inl_stms_bef), (inl_nms_aft, inl_stms_aft)) =
         findCheapStms2Inline (freeIn $ lambdaBody map_lam) parts
@@ -285,7 +285,8 @@ interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
     Let inn_pat inn_aux (Op (Screma n inn_inp_nms (ScremaForm inn_map_lam [] []))) <- inn_rec_stm,
     out_pat_nms <- map patElemName $ patElems out_pat,
     inn_pat_nms <- map patElemName $ patElems inn_pat,
-    res_nms == namesFromList inn_pat_nms = do
+    res_nms == namesFromList inn_pat_nms,
+    sanityIxchg1 tab inn_inp_nms = do
   --
   let (new_params, arr_nms, _arr_tps) =
         unzip3 $ getCommonInp tab out_map_lam (Sq.singleton inn_rec_stm, inline_stms)
@@ -319,7 +320,8 @@ interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
     inn_pat_nms <- map patElemName $ patElems inn_pat,
     Just _ <- oneFullyConsumedMapRed frm, -- Changed
     (res_nms == namesFromList inn_pat_nms) ||
-      (not $ namesIntersect res_nms $ namesFromList inn_pat_nms) = do
+      (not $ namesIntersect res_nms $ namesFromList inn_pat_nms),
+    sanityIxchg1 tab inn_inp_nms = do
   -- ^ either original result names all come from this nest or they do not overlap at all, i.e.,
   --     the result of this nest is fully consumed by the code after it
   let rep_tab = M.fromList $ mapMaybe bindReplicateStm $ stmsToList $
@@ -368,7 +370,8 @@ interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
     Just _ <- oneFullyConsumedMapRed out_frm,
     Just _ <- oneFullyConsumedMapRed inn_frm,
     equivLambdas (redLambda out_red) (redLambda inn_red),
-    (res_nms == namesFromList inn_pat_nms) = do
+    (res_nms == namesFromList inn_pat_nms),
+    sanityIxchg1 tab inn_inp_nms = do
   let (new_params, arr_nms, _arr_tps) =
         unzip3 $ getCommonInp tab out_map_lam (Sq.singleton inn_rec_stm, inline_stms)
   scope <- askScope
@@ -390,6 +393,16 @@ interchangeInwards tab out_rec_stm (inn_rec_stm, inline_stms) res_nms
 --
 interchangeInwards _tab _out_rec_stm (_inn_rec_stm, _inline_stms) _res_nms =
   error "Unsupported case of recurrence interchange in interchangeInwards"
+
+sanityIxchg1 :: LftTab -> [VName] -> Bool
+sanityIxchg1 tab inp_arrs =
+  if any (isJust . (`M.lookup` tab)) inp_arrs
+  then error ( "Permute algorithm should prevent the case " ++
+               "in which the inner recurrence subject to "  ++
+               "interchange maps one of the arrays that is "++
+               "lifted by the distribution of the outer map" )
+  else True
+    
 
 --------------------------------------------------------------
 --- Simple Helper functions: sep3/5LastRec & mkRecWithBody ---
@@ -422,8 +435,10 @@ data PartStms = PartStms
     aft_tgtrec:: Stms SOACS
   } deriving Show
 
-sep3LastRec :: Exp SOACS -> Maybe (Stms SOACS, Stm SOACS, Stms SOACS, [SubExp])
-sep3LastRec e =
+-- stmtMatchesSchedule :: Env -> Stm SOACS -> HLSched -> Bool
+
+sep3LastRec :: Env -> HLSched -> Exp SOACS -> Maybe (Stms SOACS, Stm SOACS, Stms SOACS, [SubExp])
+sep3LastRec env sched e =
   case e of
     Op (Screma _mm _inps (ScremaForm map_lam [] _reds)) ->
       sep3LastRecBody $ lambdaBody map_lam
@@ -432,18 +447,19 @@ sep3LastRec e =
     _ ->
       error ("Unimplementated case for function sepLastRec3Ways in Permute.hs, expression: "++prettyString e)
   where
-    -- sep3LastRecBody Body SOACS -> Maybe (Stms SOACS, Stm SOACS, Stms SOACS, [SubExp])
+    sep3LastRecBody :: Body SOACS -> Maybe (Stms SOACS, Stm SOACS, Stms SOACS, [SubExp])
     sep3LastRecBody body =
-      let (parts, se_res) = sep5LastRecBody body 
-          sched = case lst_sched parts of
-                    Nothing  -> mempty
-                    Just (_,stm) -> Sq.singleton stm
+      let (parts, se_res) = sep5LastRecBody env (tailOfSched sched) body 
+          sched_stms =
+            case lst_sched parts of
+              Nothing  -> mempty
+              Just (_,stm) -> Sq.singleton stm
       in  case tgt_recstm parts of
-            Just rec -> Just ( bef_sched parts <> sched <> aft_sched parts, rec, aft_tgtrec parts, se_res)
+            Just rec -> Just ( bef_sched parts <> sched_stms <> aft_sched parts, rec, aft_tgtrec parts, se_res)
             Nothing  -> Nothing
 
-sep5LastRecBody :: Body SOACS -> (PartStms, [SubExp])
-sep5LastRecBody body =
+sep5LastRecBody :: Env -> HLSched -> Body SOACS -> (PartStms, [SubExp])
+sep5LastRecBody env sched body =
   ( sepLastRecStms (Sq.reverse (bodyStms body))
   , map resSubExp $ bodyResult body
   )
@@ -451,10 +467,24 @@ sep5LastRecBody body =
     sepLastRecStms rev_stms =
       foldl processStm (PartStms mempty Nothing mempty Nothing mempty) rev_stms
     processStm acc curr_stm
-      | isNothing (tgt_recstm acc) && not (isSupportedRec curr_stm) =
+      | isNothing (tgt_recstm acc) && not (stmtMatchesSchedule env curr_stm sched) =
           acc { aft_tgtrec = curr_stm Sq.<| (aft_tgtrec acc) }
-      | isNothing (tgt_recstm acc) && isSupportedRec curr_stm =
+      | isNothing (tgt_recstm acc) && stmtMatchesSchedule env curr_stm sched =
           acc { tgt_recstm = Just curr_stm }
+{--
+      | isNothing (tgt_recstm acc) && not (isSupportedRec curr_stm) =
+          if stmtMatchesSchedule env curr_stm sched
+          then error ( "In sep5LastRecBody: stmt that shouldn't, actually matches schedule: " ++
+                       prettyString sched ++ " body\n" ++ prettyString body
+                     )
+          else acc { aft_tgtrec = curr_stm Sq.<| (aft_tgtrec acc) }
+      | isNothing (tgt_recstm acc) && isSupportedRec curr_stm =
+          if not (stmtMatchesSchedule env curr_stm sched)
+          then error ( "In sep5LastRecBody: stmt that should match schedule, does not: " ++
+                       prettyString sched ++ " body\n" ++ prettyString curr_stm
+                     )
+          else acc { tgt_recstm = Just curr_stm }
+--}
       | isJust (tgt_recstm acc) && isNothing (lst_sched acc) && isNothing (isSchedStm curr_stm) =
           acc { aft_sched  = curr_stm Sq.<| (aft_sched acc) }
       | isJust (tgt_recstm acc) && isNothing (lst_sched acc),
