@@ -61,7 +61,14 @@ propertyPrelude =
       "and"
     ]
 
-newIndexFn :: E.VName -> E.TypeBase E.Exp u -> IndexFnM [IndexFn]
+newIndexFn :: Pretty u => E.VName -> E.TypeBase E.Exp u -> IndexFnM [IndexFn]
+newIndexFn _ (E.Scalar (E.Arrow {})) =
+  -- Don't create index functions for function arguments---they're
+  -- handled specially in `forward`. If we create an index function,
+  -- `Substitute.subst` will attempt to substitute applications of this
+  -- function, but its domain is undefined/scalar so the arguments
+  -- will mismatch.
+  pure []
 newIndexFn vn t = do
   -- x :: [n](t, (t, t))
   --  -->
@@ -69,6 +76,7 @@ newIndexFn vn t = do
   --    for i < n . x.1.0(i),
   --    for i < n . x.1.1(i)]
   array_shape <- shapeOf t
+  printM 2 $ "### newIndexFn t " <> prettyStr t
   printM 2 $ "### tuple projections " <> prettyStr vn <> prettyStr (toTupleOfArrays t)
   fs <- mapM (createUninterpretedIndexFn array_shape <=< dots vn) (toTupleOfArrays t)
   printM 2 $ "### fs " <> prettyStr vn <> prettyStr fs

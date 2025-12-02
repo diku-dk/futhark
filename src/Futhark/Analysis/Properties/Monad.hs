@@ -47,6 +47,7 @@ where
 
 import Control.Monad (when)
 import Control.Monad.RWS.Strict
+import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Debug.Trace (traceM)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
@@ -60,9 +61,9 @@ import Futhark.Util (isEnvVarAtLeast)
 import Futhark.Util.Pretty (Pretty, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
-import qualified Data.List.NonEmpty as NE
 
 type EArgs = NE.NonEmpty (E.Info (Maybe E.VName), E.Exp)
+
 type ApplyEffect = [VName] -> IndexFnM ()
 
 data VEnv = VEnv
@@ -158,10 +159,10 @@ insertII :: Domain -> (VName, IndexFn) -> IndexFnM ()
 insertII dom (vn, f) = do
   modify $ \env -> env {ii = M.insert dom (vn, f) $ ii env}
 
-lookupConcat :: MonadState VEnv f => VName -> f (Maybe [IndexFn])
+lookupConcat :: (MonadState VEnv f) => VName -> f (Maybe [IndexFn])
 lookupConcat vn = M.lookup vn <$> gets concats
 
-insertConcat :: MonadState VEnv m => VName -> [IndexFn] -> m ()
+insertConcat :: (MonadState VEnv m) => VName -> [IndexFn] -> m ()
 insertConcat vn fs =
   modify $ \env -> env {concats = M.insert vn fs $ concats env}
 
@@ -185,14 +186,14 @@ addInvAlias vn vn' =
 getInvAlias :: VName -> IndexFnM (Maybe VName)
 getInvAlias vn = (M.!? vn) <$> gets invalias
 
-setOutputNames :: MonadState VEnv m => [VName] -> m ()
+setOutputNames :: (MonadState VEnv m) => [VName] -> m ()
 setOutputNames vns =
   modify $ \env -> env {outputNames = vns}
 
-getOutputNames :: MonadState VEnv m => m [VName]
+getOutputNames :: (MonadState VEnv m) => m [VName]
 getOutputNames = gets outputNames
 
-whenBoundsChecking :: MonadState VEnv m => m () -> m ()
+whenBoundsChecking :: (MonadState VEnv m) => m () -> m ()
 whenBoundsChecking m = do
   c <- gets checkBounds
   when c m
@@ -205,6 +206,7 @@ withoutBoundsChecks m = do
   pure res
 
 lookupUninterpreted :: (MonadState VEnv m, MonadFreshNames m) => E.Exp -> m VName
+lookupUninterpreted (E.Var (E.QualName [] vn) _ _) = pure vn
 lookupUninterpreted e = do
   unint <- gets uninterpreted
   case M.lookup e unint of
