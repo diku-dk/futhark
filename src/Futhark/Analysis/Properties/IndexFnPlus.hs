@@ -19,6 +19,7 @@ import Control.Monad (foldM)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
+import Data.Maybe (mapMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.Monad
@@ -125,10 +126,9 @@ instance Pretty IndexFn where
 
 instance FreeVariables Domain where
   fv (Iota n) = fv n
-  fv (Cat _ m b) = fv m <> fv b
+  fv (Cat k m b) = fv m <> fv b S.\\ S.singleton k
 
 instance FreeVariables Iterator where
-  -- fv (Forall _ d) = fv d -- FIXME kept existing behaviour, but shouldn't it be as below?
   fv (Forall i d) = fv d S.\\ S.singleton i
 
 instance FreeVariables [[Iterator]] where
@@ -139,7 +139,10 @@ instance FreeVariables (Cases Symbol (SoP Symbol)) where
 
 instance FreeVariables IndexFn where
   fv (IndexFn dims cs) =
-    mconcat (map fv $ concat dims) <> fv cs S.\\ S.fromList (boundVar <$> concat dims)
+    fv dims <> (fv cs S.\\ S.fromList dims_bound_vars)
+    where
+      dims_bound_vars =
+        map boundVar (concat dims) <> mapMaybe catVar (concat dims)
 
 -------------------------------------------------------------------------------
 -- Unification.
