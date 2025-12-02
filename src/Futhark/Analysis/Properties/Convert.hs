@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 
--- -1. k is in fv in exitscope
--- 0. go over indexfn tests to see which ones need to be updated; in many cases the output is now uninterpreted.
+-- -1. go over indexfn tests to see which ones need to be updated; in many cases the output is now uninterpreted.
+-- 0. fix errors
 -- 1. remove old insertTopLevel functionality
 -- 2. make sure everything works as before
 -- 3. clean up
@@ -204,8 +204,8 @@ checkPostcondition vn indexfns te = do
 -- (i.e., that must reference local variables that go out of scope).
 -- exitScope :: [E.VName] -> IndexFn -> IndexFnM IndexFn
 exitScope scope f
-  | fv f == scope = pure f
-  | S.null (fv (shape f) S.\\ scope) = do
+  | fv f `S.isSubsetOf` scope = pure f
+  | fv (shape f) `S.isSubsetOf` scope = do
       -- Preserve domain.
       g <- mkUinterpreted
       pure $ f {body = body g}
