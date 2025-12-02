@@ -1,7 +1,13 @@
 {-# LANGUAGE LambdaCase #-}
 
--- k is in fv in exitscope
--- go over indexfn tests to see which ones need to be updated; in many cases the output is now uninterpreted.
+-- -1. k is in fv in exitscope
+-- 0. go over indexfn tests to see which ones need to be updated; in many cases the output is now uninterpreted.
+-- 1. remove old insertTopLevel functionality
+-- 2. make sure everything works as before
+-- 3. clean up
+-- 4. get back to exitScope functionality
+-- 5. test quickhull
+
 
 module Futhark.Analysis.Properties.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
@@ -122,9 +128,10 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
       checkPostcondition vn indexfns te
       insertTopLevel vn (params, indexfns, te)
       insertTopLevel1 vn (mkApplyIndexFn vn size_vars params te indexfns)
-      mapM (exitScope (S.fromList $ size_vars <> map fst formal_args)) indexfns
+      mapM (exitScope (S.fromList $ size_vars <> arg_vars)) indexfns
   where
     formal_args = concatMap E.patternMap params
+    arg_vars = map fst formal_args
     size_vars =
       mapMaybe
         ( \case
@@ -142,12 +149,6 @@ mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
   insertTopLevelDef vn (params, body)
   insertTopLevel1 vn (mkApplyDef vn params body)
   pure []
-
--- 1. now actually insret into toplevel1 using mkApplyIndexFn and mkApplyDef
--- 2. make sure everything works as before
--- 3. clean up
--- 4. get back to exitScope functionality
--- 5. test quickhull
 
 bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
 bindfn = bindfn_ 1
@@ -213,7 +214,7 @@ exitScope scope f
   --     g <- mkUinterpreted
   --     pure $ f {shape = shape g}
   | otherwise =
-      error $ "exitScope\n  * " <> prettyStr scope <> "\n  * " <> prettyStr (fv f) <> "\n  * " <> prettyStr f
+      error $ "exitScope\n  * scope " <> prettyStr scope <> "\n  * fv f  " <> prettyStr (fv f) <> "\n  * " <> prettyStr f
   where
     indices = map (sym2SoP . Var . boundVar) (concat (shape f))
 
