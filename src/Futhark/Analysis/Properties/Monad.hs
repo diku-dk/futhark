@@ -3,6 +3,8 @@
 module Futhark.Analysis.Properties.Monad
   ( VEnv,
     IndexFnM (..),
+    EArgs,
+    ApplyEffect,
     runIndexFnM,
     insertIndexFn,
     insertTopLevel,
@@ -38,6 +40,8 @@ module Futhark.Analysis.Properties.Monad
     lookupUninterpreted,
     lookupConcat,
     insertConcat,
+    insertTopLevel1,
+    getTopLevel1,
   )
 where
 
@@ -56,12 +60,17 @@ import Futhark.Util (isEnvVarAtLeast)
 import Futhark.Util.Pretty (Pretty, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
+import qualified Data.List.NonEmpty as NE
+
+type EArgs = NE.NonEmpty (E.Info (Maybe E.VName), E.Exp)
+type ApplyEffect = [VName] -> IndexFnM ()
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Algebra.Symbol Symbol (Property Algebra.Symbol),
     indexfns :: M.Map VName [IndexFn],
     toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn], E.TypeExp E.Exp VName),
+    toplevel1 :: M.Map VName (E.SrcLoc -> EArgs -> IndexFnM (ApplyEffect, [IndexFn])),
     defs :: M.Map VName ([E.Pat E.ParamType], E.Exp),
     ii :: M.Map Domain (VName, IndexFn),
     invalias :: M.Map VName VName,
@@ -85,7 +94,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty mempty mempty True False
+    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty mempty mempty mempty True False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -108,6 +117,13 @@ instance Expression Symbol where
 
 getIndexFns :: IndexFnM (M.Map VName [IndexFn])
 getIndexFns = gets indexfns
+
+getTopLevel1 :: IndexFnM (M.Map VName (E.SrcLoc -> EArgs -> IndexFnM (ApplyEffect, [IndexFn])))
+getTopLevel1 = gets toplevel1
+
+insertTopLevel1 :: E.VName -> (E.SrcLoc -> EArgs -> IndexFnM (ApplyEffect, [IndexFn])) -> IndexFnM ()
+insertTopLevel1 vn x =
+  modify $ \env -> env {toplevel1 = M.insert vn x $ toplevel1 env}
 
 getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], [IndexFn], E.TypeExp E.Exp VName))
 getTopLevelIndexFns = gets toplevel

@@ -128,14 +128,18 @@ instance FreeVariables Domain where
   fv (Cat _ m b) = fv m <> fv b
 
 instance FreeVariables Iterator where
-  fv (Forall _ d) = fv d -- FIXME kept existing behaviour, but shouldn't it be as below?
-  -- fv (Forall i d) = fv d S.\\ S.singleton i
+  -- fv (Forall _ d) = fv d -- FIXME kept existing behaviour, but shouldn't it be as below?
+  fv (Forall i d) = fv d S.\\ S.singleton i
+
+instance FreeVariables [[Iterator]] where
+  fv shape = mconcat (map fv $ concat shape)
 
 instance FreeVariables (Cases Symbol (SoP Symbol)) where
   fv cs = mconcat $ map (\(c, v) -> fv c <> fv v) $ casesToList cs
 
 instance FreeVariables IndexFn where
-  fv (IndexFn dims cs) = mconcat (map fv $ concat dims) <> fv cs
+  fv (IndexFn dims cs) =
+    mconcat (map fv $ concat dims) <> fv cs S.\\ S.fromList (boundVar <$> concat dims)
 
 -------------------------------------------------------------------------------
 -- Unification.

@@ -1,9 +1,12 @@
 {-# LANGUAGE LambdaCase #-}
 
+-- k is in fv in exitscope
+-- go over indexfn tests to see which ones need to be updated; in many cases the output is now uninterpreted.
+
 module Futhark.Analysis.Properties.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM, (<=<))
+import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM, zipWithM_, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT (runMaybeT))
 import Data.Bifunctor
@@ -11,7 +14,7 @@ import Data.Functor ((<&>))
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, mapMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, paramToAlgebra, simplify, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraBridge.Util
@@ -104,22 +107,31 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 mkIndexFnValBind :: E.ValBind -> IndexFnM [IndexFn]
-mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
+mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val_loc)
   | hasRefinement te = do
       clearAlgEnv
       setOutputNames []
       printM 1 $
         emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
           <> prettyStr val
-      forM_ (concatMap E.patternMap params) (uncurry newIndexFn)
+      forM_ formal_args (uncurry newIndexFn)
       forM_ params addPreconditions
       forM_ params addBooleanNames
       forM_ params addSizeVariables
       indexfns <- forward body >>= mapM rewrite >>= bindfn vn
       checkPostcondition vn indexfns te
       insertTopLevel vn (params, indexfns, te)
-      pure indexfns
+      insertTopLevel1 vn (mkApplyIndexFn vn size_vars params te indexfns)
+      mapM (exitScope (S.fromList $ size_vars <> map fst formal_args)) indexfns
   where
+    formal_args = concatMap E.patternMap params
+    size_vars =
+      mapMaybe
+        ( \case
+            E.TypeParamDim vn_dim _ -> Just vn_dim
+            E.TypeParamType {} -> Nothing
+        )
+        type_params
     -- Adds the effect of a precondition without checking that it holds.
     addPreconditions pat = do
       printM 1 $ "+ Adding precondition on " <> prettyStr pat
@@ -128,7 +140,14 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
       printAlgEnv 3
 mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
   insertTopLevelDef vn (params, body)
+  insertTopLevel1 vn (mkApplyDef vn params body)
   pure []
+
+-- 1. now actually insret into toplevel1 using mkApplyIndexFn and mkApplyDef
+-- 2. make sure everything works as before
+-- 3. clean up
+-- 4. get back to exitScope functionality
+-- 5. test quickhull
 
 bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
 bindfn = bindfn_ 1
@@ -146,7 +165,7 @@ checkPostcondition vn indexfns te = do
       actual_names <- getOutputNames
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       -- Propagate properties on the final let-body expression
-      -- to the postcondition lambda parameterslambda parameters
+      -- to the postcondition lambda parameters
       -- WARN Assumes that the final let-body is in ANF: let ... in (x,...,z).
       when (length actual_names == length param_names) $ do
         let aligned = catMaybes $ zipWith (\x y -> (x,) <$> (sym2SoP . Var <$> y)) actual_names param_names
@@ -177,6 +196,154 @@ checkPostcondition vn indexfns te = do
           error . errorMsg (E.locOf e) $
             "Failed to show postcondition:\n" <> prettyStr e <> "\n" <> prettyStr postconds
     _ -> error "Tuples of postconditions not implemented yet."
+
+-- When exiting g's scope, we create uninterpreted functions of the form
+--   for i < e . x(i)
+-- for any return that cannot be expressed only over the formal arguments
+-- (i.e., that must reference local variables that go out of scope).
+-- exitScope :: [E.VName] -> IndexFn -> IndexFnM IndexFn
+exitScope scope f
+  | fv f == scope = pure f
+  | S.null (fv (shape f) S.\\ scope) = do
+      -- Preserve domain.
+      g <- mkUinterpreted
+      pure $ f {body = body g}
+  -- \| S.null (fv (body f) S.\\ formal_args) = do
+  --     -- Preserve body.
+  --     g <- mkUinterpreted
+  --     pure $ f {shape = shape g}
+  | otherwise =
+      error $ "exitScope\n  * " <> prettyStr scope <> "\n  * " <> prettyStr (fv f) <> "\n  * " <> prettyStr f
+  where
+    indices = map (sym2SoP . Var . boundVar) (concat (shape f))
+
+    mkUinterpreted = do
+      new_shape <- forM (shape f) . mapM $ \(Forall i _) ->
+        Forall i . Iota . sym2SoP . Var <$> newNameFromString "x"
+      x <- newNameFromString "x"
+      pure $
+        IndexFn
+          { shape = new_shape,
+            body = singleCase (sym2SoP $ Apply (Var x) indices)
+          }
+
+-- pat_type = snd pat
+-- array_shape <- shapeOf pat_type
+-- unless (length array_shape == rank f) . error $
+--   errorMsg loc "Internal error: parameter and argument sizes do not align."
+-- let size_vars = map getVName array_shape
+
+getVName x
+  | Just (Var vn) <- justSym x = Just vn
+  | otherwise = Nothing
+
+-- Applying a top-level definition with an index function.
+mkApplyIndexFn g size_vars pats te indexfns loc args = do
+  printM 5 $ "✨ Using index fn " <> prettyStr g
+
+  -- Because g is applied to args and uninterpreted functions are of the form
+  --   for i < e . x(i)
+  -- the uninterpreted function names must be generated afresh because they do
+  -- not capture args. Otherwise, two applications of g would lead to equivalent
+  -- uninterpreted functions due to function congruence over the index domain
+  -- i = j => x(i) = x(j).
+  --
+  indexfns <- mapM (exitScope (S.fromList $ size_vars <> (fst <$> concatMap E.patternMap pats))) indexfns
+
+  (actual_args, actual_sizes) <- zipArgs loc pats args
+
+  -- Application is in ANF; rename formal arguments to actual arguments
+  -- to check preconditions.
+  let name_rep = renamingRep (mconcat actual_args) args
+  size_rep <- checkPreconditions loc g pats (actual_args, actual_sizes) name_rep
+
+  fs <- forM indexfns $ \fn -> do
+    substParams (repIndexFn size_rep fn) (mconcat actual_args)
+      >>= rewrite
+  pure (mkEffectFromTypeExp size_rep (mconcat actual_args), fs)
+  where
+    mkEffectFromTypeExp size_rep actual_args vns =
+      forM_ (getTERefine te) $ \ref_exp -> do
+        -- Bounds checking is disabled because the bounds in the refinement
+        -- of te was already checked previously (when creating the
+        -- top level index funciton used here).
+        -- We don't simply check bounds again because they might rely on a
+        -- context that is now out of scope.
+        (_check, effect) <- withoutBoundsChecks (mkRef vns Var ref_exp)
+        effect (size_rep, actual_args, renamingRep actual_args args)
+
+-- Applying a top-level definition without an index function (no postcondition).
+mkApplyDef g pats e loc args = do
+  -- NOTE This "inlines" the definition of the top-level definition,
+  -- as opposed to the treatment for "top-level index functions"
+  -- where the args are substituted into the previously analyzed
+  -- index function.
+  printM 5 $ "✨ Using top-level def " <> prettyStr g
+  (actual_args, actual_sizes) <- zipArgs loc pats args
+  let name_rep = renamingRep (mconcat actual_args) args
+  _ <- checkPreconditions loc g pats (actual_args, actual_sizes) name_rep
+
+  forM_ (mconcat actual_sizes) $ \(n, sz) -> do
+    addEquiv (Algebra.Var n) =<< toAlgebra sz
+  forM_ (mconcat actual_args) $ \(vn, fn) ->
+    void $ bindfn_ 1337 vn [fn]
+  (const $ pure (),) <$> forward e
+
+-- Assume ANF to handle name substitutions in Properties.
+--
+-- HINT This limitation only exists because FiltPart Y X needs to substitute
+-- the name X for the corresponding argument, for instance, in
+--   def filter X p : \Y -> FiltPart Y X p _ = ...
+--   def f ... =
+--     let ys = filter p x
+--     --> FiltPart ys x p _
+-- and we want x to be meaningful to the user (i.e., to not bind X to fresh X'
+-- and X' to x).
+renamingRep actual_args actual_arg_exprs =
+  let arg_vns = checkANF (getArgs actual_arg_exprs)
+   in mkRepFromList
+        (zipWith (\k v -> (fst k, sym2SoP $ Var v)) actual_args arg_vns)
+
+checkANF [] = []
+checkANF (arg : as) =
+  case justVName arg of
+    Just vn -> vn : checkANF as
+    _ ->
+      error . errorMsg (E.locOf arg) $
+        "Limitation: Application of top-level definitions"
+          <> " with postconditions must be in A-normal form: "
+          <> prettyStr arg
+
+-- Puts parameters in scope one-by-one before checking preconditions;
+-- the refinement of a parameter can use previous parameters:
+--   (x : []i64) (n : {i64 | (== sum x))
+checkPreconditions loc g pats (actual_args, actual_sizes) name_rep = do
+  let size_rep = M.fromList $ mconcat actual_sizes
+  foldM_
+    ( \args_in_scope (pat, arg) -> do
+        let scope = args_in_scope <> arg
+        checkPatPrecondition scope pat size_rep
+        pure scope
+    )
+    []
+    (zip pats actual_args)
+
+  pure size_rep
+  where
+    -- TODO could probably be deduplicated by merging with mkEffectFromTypeExp.
+    checkPatPrecondition scope pat size_rep = do
+      conds <- getPrecondition pat
+      answers <- forM conds $ \check -> do
+        printM 1 $
+          "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
+        check (size_rep, scope, name_rep)
+      unless (all isYes answers) $ do
+        printAlgEnv 3
+        error . errorMsg loc $
+          "Failed to show precondition "
+            <> prettyStr pat
+            <> " in context: "
+            <> prettyStr scope
 
 {-
     Construct index function for source expression.
@@ -581,12 +748,11 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
       (: []) <$> forwardPropertyPrelude vn args
   -- Applying other functions, for instance, user-defined ones.
   | otherwise = do
-      toplevel_fns <- getTopLevelIndexFns
-      defs <- getTopLevelDefs
-      case forwardApplyDef toplevel_fns defs expr of
-        Just effect_and_fs ->
+      y <- forwardApplyDef1 expr
+      case y of
+        Just (_effect, fns) ->
           -- e_f is a top-level definition; we "inline" it.
-          snd <$> effect_and_fs
+          pure fns
         Nothing -> do
           g <- lookupUninterpreted e_f
           -- We treat g as an uninterpreted function. Function congruence
@@ -798,16 +964,10 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
                 singleCase . sym2SoP $
                   Apply (Var h) (map (sVar . boundVar) outer_dim)
             }
-
--- TODO pretty sure this could be a histogram in the code, so I think
--- we should use that instead, if possible.
--- error $ "reduce_by_index " <> prettyStr params <> " ; " <> prettyStr ops
 forwardLetEffects bound_names x = do
-  toplevel_fns <- getTopLevelIndexFns
-  defs <- getTopLevelDefs
-  case forwardApplyDef toplevel_fns defs x of
-    Just effect_and_fns -> do
-      (effect, fns) <- effect_and_fns
+  y <- forwardApplyDef1 x
+  case y of
+    Just (effect, fns) -> do
       bound_names' <- forM bound_names $ \case
         Just vn -> pure vn
         Nothing -> newNameFromString "_" -- HACK Apply effects to unusable wildcard.
@@ -816,6 +976,16 @@ forwardLetEffects bound_names x = do
       printAlgEnv 3
       pure fns
     Nothing -> forward x
+
+forwardApplyDef1 :: E.Exp -> IndexFnM (Maybe (ApplyEffect, [IndexFn]))
+forwardApplyDef1 (E.AppExp (E.Apply f args loc) _)
+  | (E.Var (E.QualName [] g) info _loc) <- f,
+    E.Scalar (E.Arrow {}) <- E.unInfo info = do
+      t <- getTopLevel1
+      case M.lookup g t of
+        Just mkEffectAndFns -> Just <$> mkEffectAndFns loc args
+        Nothing -> pure Nothing
+forwardApplyDef1 _ = pure Nothing
 
 -- Applying top-level definitions of functions.
 -- Returns nothing if the function is not defined at top-level.
@@ -1413,10 +1583,6 @@ zipArgs' loc formal_args actual_args = do
 
   pure (aligned_args, aligned_sizes)
   where
-    getVName x
-      | Just (Var vn) <- justSym x = Just vn
-      | otherwise = Nothing
-
     alignWithPattern [] arg = [arg]
     alignWithPattern ((_vn, t) : pat) arg =
       take n arg : alignWithPattern pat (drop n arg)
