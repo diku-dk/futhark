@@ -125,8 +125,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
       forM_ params addSizeVariables
       indexfns <- forward body >>= mapM rewrite >>= bindfn vn
       checkPostcondition vn indexfns te
-      insertTopLevel vn (params, indexfns, te)
-      insertTopLevel1 vn (mkApplyIndexFn vn size_vars params te indexfns)
+      insertTopLevel vn (mkApplyIndexFn vn size_vars params te indexfns)
       mapM (changeScope (S.fromList $ size_vars <> arg_vars)) indexfns
   where
     formal_args = concatMap E.patternMap params
@@ -145,8 +144,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
       forM_ ref $ \(_, effect) -> effect emptyCheckContext
       printAlgEnv 3
 mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
-  insertTopLevelDef vn (params, body)
-  insertTopLevel1 vn (mkApplyDef vn params body)
+  insertTopLevel vn (mkApplyDef vn params body)
   pure []
 
 bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
@@ -988,7 +986,7 @@ forwardApplyDef1 :: E.Exp -> IndexFnM (Maybe (ApplyEffect, [IndexFn]))
 forwardApplyDef1 (E.AppExp (E.Apply f args loc) _)
   | (E.Var (E.QualName [] g) info _loc) <- f,
     E.Scalar (E.Arrow {}) <- E.unInfo info = do
-      t <- getTopLevel1
+      t <- getTopLevel
       case M.lookup g t of
         Just mkEffectAndFns -> Just <$> mkEffectAndFns loc args
         Nothing -> pure Nothing

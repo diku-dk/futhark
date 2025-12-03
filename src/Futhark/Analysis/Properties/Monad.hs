@@ -7,7 +7,6 @@ module Futhark.Analysis.Properties.Monad
     ApplyEffect,
     runIndexFnM,
     insertIndexFn,
-    insertTopLevel,
     clearAlgEnv,
     whenDebug,
     debugM,
@@ -20,10 +19,7 @@ module Futhark.Analysis.Properties.Monad
     withoutDebug,
     rollbackAlgEnv,
     getIndexFns,
-    getTopLevelIndexFns,
     prettyStr,
-    insertTopLevelDef,
-    getTopLevelDefs,
     printM,
     getAlgEnv,
     printTrace,
@@ -40,8 +36,8 @@ module Futhark.Analysis.Properties.Monad
     lookupUninterpreted,
     lookupConcat,
     insertConcat,
-    insertTopLevel1,
-    getTopLevel1,
+    insertTopLevel,
+    getTopLevel,
   )
 where
 
@@ -70,9 +66,7 @@ data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Algebra.Symbol Symbol (Property Algebra.Symbol),
     indexfns :: M.Map VName [IndexFn],
-    toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn], E.TypeExp E.Exp VName),
-    toplevel1 :: M.Map VName (E.SrcLoc -> EArgs -> IndexFnM (ApplyEffect, [IndexFn])),
-    defs :: M.Map VName ([E.Pat E.ParamType], E.Exp),
+    toplevel :: M.Map VName (E.SrcLoc -> EArgs -> IndexFnM (ApplyEffect, [IndexFn])),
     ii :: M.Map Domain (VName, IndexFn),
     invalias :: M.Map VName VName,
     uninterpreted :: M.Map E.Exp VName,
@@ -95,7 +89,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty mempty mempty mempty True False
+    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty mempty True False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -119,18 +113,12 @@ instance Expression Symbol where
 getIndexFns :: IndexFnM (M.Map VName [IndexFn])
 getIndexFns = gets indexfns
 
-getTopLevel1 :: IndexFnM (M.Map VName (E.SrcLoc -> EArgs -> IndexFnM (ApplyEffect, [IndexFn])))
-getTopLevel1 = gets toplevel1
+getTopLevel :: IndexFnM (M.Map VName (E.SrcLoc -> EArgs -> IndexFnM (ApplyEffect, [IndexFn])))
+getTopLevel = gets toplevel
 
-insertTopLevel1 :: E.VName -> (E.SrcLoc -> EArgs -> IndexFnM (ApplyEffect, [IndexFn])) -> IndexFnM ()
-insertTopLevel1 vn x =
-  modify $ \env -> env {toplevel1 = M.insert vn x $ toplevel1 env}
-
-getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], [IndexFn], E.TypeExp E.Exp VName))
-getTopLevelIndexFns = gets toplevel
-
-getTopLevelDefs :: IndexFnM (M.Map VName ([E.Pat E.ParamType], E.Exp))
-getTopLevelDefs = gets defs
+insertTopLevel :: E.VName -> (E.SrcLoc -> EArgs -> IndexFnM (ApplyEffect, [IndexFn])) -> IndexFnM ()
+insertTopLevel vn x =
+  modify $ \env -> env {toplevel = M.insert vn x $ toplevel env}
 
 getAlgEnv :: IndexFnM (AlgEnv Algebra.Symbol Symbol (Property Algebra.Symbol))
 getAlgEnv = gets algenv
@@ -144,16 +132,6 @@ lookupIndexFn vn = M.lookup vn <$> getIndexFns
 insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =
   modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
-
-insertTopLevel :: E.VName -> ([E.Pat E.ParamType], [IndexFn], E.TypeExp E.Exp VName) -> IndexFnM ()
-insertTopLevel vn (args, fns, te) =
-  modify $
-    \env -> env {toplevel = M.insert vn (args, fns, te) $ toplevel env}
-
-insertTopLevelDef :: E.VName -> ([E.Pat E.ParamType], E.Exp) -> IndexFnM ()
-insertTopLevelDef vn (args, e) =
-  modify $
-    \env -> env {defs = M.insert vn (args, e) $ defs env}
 
 insertII :: Domain -> (VName, IndexFn) -> IndexFnM ()
 insertII dom (vn, f) = do
