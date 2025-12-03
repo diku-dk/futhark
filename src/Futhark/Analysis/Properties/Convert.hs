@@ -126,7 +126,9 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
       indexfns <- forward body >>= mapM rewrite >>= bindfn vn
       checkPostcondition vn indexfns te
       insertTopLevel vn (mkApplyIndexFn vn size_vars params te indexfns)
-      mapM (changeScope (S.fromList $ size_vars <> arg_vars)) indexfns
+      out <- mapM (changeScope (S.fromList $ size_vars <> arg_vars)) indexfns
+      printM 1 $ prettyBinding vn out
+      pure out
   where
     formal_args = concatMap E.patternMap params
     arg_vars = map fst formal_args
@@ -235,19 +237,25 @@ mkApplyIndexFn ::
 mkApplyIndexFn g size_vars pats te indexfns loc args = do
   printM 5 $ "✨ Using index fn " <> prettyStr g
 
-  -- Because g is applied to args and uninterpreted functions are of the form
-  --   for i < e . x(i)
-  -- the uninterpreted function names must be generated afresh because they do
-  -- not capture args. Otherwise, two applications of g would lead to equivalent
-  -- uninterpreted functions due to function congruence over the index domain
-  -- i = j => x(i) = x(j).
+  -- NOTE on why changeScope is called here.
+  -- 
+  -- 1. `g` may be uninterpreted when exiting the scope of its body.
+  -- 2. Uninterpreted functions are of the form
+  --          g = [for i < e . x(i), ...]
+  -- 3. When `g` is applied to `args`, the arguments are not captured
+  -- in the above uninterpreted function(s).
+  -- 4. Therefore, two applications of `g` with different arguments are equal
+  -- over the index domain: i = j => x(i) = x(j).
+  -- 
+  -- To fix this, the uninterpreted function name (`x`) must be generated
+  -- afresh at _each application site_.
   --
   indexfns_scoped <- mapM (changeScope scope) indexfns
 
   (actual_args, actual_sizes) <- zipArgs loc pats args
 
-  -- Application is in ANF; rename formal arguments to actual arguments
-  -- to check preconditions.
+  -- Assert that application is in ANF; rename formal arguments to actual
+  -- arguments to check preconditions.
   let name_rep = renamingRep (mconcat actual_args) args
   size_rep <- checkPreconditions loc g pats (actual_args, actual_sizes) name_rep
 
@@ -260,11 +268,11 @@ mkApplyIndexFn g size_vars pats te indexfns loc args = do
 
     mkEffectFromTypeExp size_rep actual_args vns =
       forM_ (getTERefine te) $ \ref_exp -> do
-        -- Bounds checking is disabled because the bounds in the refinement
-        -- of te was already checked previously (when creating the
-        -- top level index funciton used here).
-        -- We don't simply check bounds again because they might rely on a
-        -- context that is now out of scope.
+        -- Bounds checking is disabled here because the bounds in the refinement
+        -- of te was already checked previously (when creating the top level
+        -- index funciton used here).
+        -- We don't check bounds again because they might rely on a context
+        -- that is now out of scope.
         (_check, effect) <- withoutBoundsChecks (mkRef vns Var ref_exp)
         effect (size_rep, actual_args, renamingRep actual_args args)
 
@@ -751,16 +759,12 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
       (: []) <$> forwardPropertyPrelude vn args
   -- Applying other functions, for instance, user-defined ones.
   | otherwise = do
-      y <- forwardApplyDef1 expr
+      y <- forwardApplyDef expr
       case y of
-        Just (_effect, fns) ->
-          -- e_f is a top-level definition; we "inline" it.
-          pure fns
+        Just (_effect, fns) -> pure fns
         Nothing -> do
           g <- lookupUninterpreted e_f
-          -- We treat g as an uninterpreted function. Function congruence
-          -- lets us check equality on g regardless:
-          --   forall i,j . i = j => g(i) = g(j).
+          -- We treat g as an uninterpreted function.
           printM 1 $ warningMsg loc ("g: " <> prettyStr g)
           arg_fns <- mconcat <$> mapM forward (getArgs args)
           let return_type = E.appResType (E.unInfo appres)
@@ -968,7 +972,7 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
                   Apply (Var h) (map (sVar . boundVar) outer_dim)
             }
 forwardLetEffects bound_names x = do
-  y <- forwardApplyDef1 x
+  y <- forwardApplyDef x
   case y of
     Just (effect, fns) -> do
       bound_names' <- forM bound_names $ \case
@@ -982,15 +986,20 @@ forwardLetEffects bound_names x = do
 
 -- Applying top-level definitions of functions.
 -- Returns nothing if the function is not defined at top-level.
-forwardApplyDef1 :: E.Exp -> IndexFnM (Maybe (ApplyEffect, [IndexFn]))
-forwardApplyDef1 (E.AppExp (E.Apply f args loc) _)
+--
+-- BUG: this allows capturing the names of formal arguments of the top-level
+-- definition being applied. (We should call changeScope on the resulting list
+-- of index functions, but we don't know the names of all variables in scope
+-- here.) This is a minor bug.
+forwardApplyDef :: E.Exp -> IndexFnM (Maybe (ApplyEffect, [IndexFn]))
+forwardApplyDef (E.AppExp (E.Apply f args loc) _)
   | (E.Var (E.QualName [] g) info _loc) <- f,
     E.Scalar (E.Arrow {}) <- E.unInfo info = do
       t <- getTopLevel
       case M.lookup g t of
-        Just mkEffectAndFns -> Just <$> mkEffectAndFns loc args
+        Just apply -> Just <$> apply loc args
         Nothing -> pure Nothing
-forwardApplyDef1 _ = pure Nothing
+forwardApplyDef _ = pure Nothing
 
 -- TODO make it return a list of functions just to remove the many undefined cases
 -- (it should never happen in practice as these functions are type checked).
@@ -1459,7 +1468,6 @@ zipArgs' loc formal_args actual_args = do
   -- Discard unused parameters such as wildcards while maintaining alignment.
   let aligned_args = do
         (pat, arg) <- zip pats actual_args
-        let _TODO = alignWithPattern pat arg
         pure . catMaybes $ zipWith (\vn fn -> (,fn) <$> vn) (map fst pat) arg
 
   -- When applying top-level functions size parameters must be replaced as well.
@@ -1475,12 +1483,6 @@ zipArgs' loc formal_args actual_args = do
 
   pure (aligned_args, aligned_sizes)
   where
-    alignWithPattern [] arg = [arg]
-    alignWithPattern ((_vn, t) : pat) arg =
-      take n arg : alignWithPattern pat (drop n arg)
-      where
-        n = length (toTupleOfArrays t)
-
     getVName x
       | Just (Var vn) <- justSym x = Just vn
       | otherwise = Nothing
