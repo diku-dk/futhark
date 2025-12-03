@@ -30,7 +30,8 @@ def partition_indices [n]
   in  (lst, inds)
 
 def partition3_indices [n] 't (conds: [n]i8) 
-  : {(i64,i64,[n]i64) | \(_,_,is) ->
+  : {(i64,i64,[n]i64) | \(a,b,is) ->
+      Range a (0,n) && Range b (0,n) &&
       FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
    } =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
@@ -49,12 +50,11 @@ def partition3_indices [n] 't (conds: [n]i8)
                    ) conds indsL indsE (iota n)
   in  (s1, s1+s2, inds)
 
-def partition3 't [n] (p: t -> i8) (xs: [n]t)
-   : {(i64,i64,[]t) | \(_, _, ys) ->
-     let conds = map (\x -> p x) xs
-     in FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
+def partition3 't [n] (conds: [n]i8) (xs: [n]t)
+   : {(i64,i64,[]t) | \(a, b, ys) ->
+     Range a (0,n) && Range b (0,n) &&
+     FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
    } =
-  let conds = map (\x -> p x) xs
   let (a, b, inds) = partition3_indices conds
   let scratch = map (\x -> x) xs -- copy xs.
   let ys = scatter scratch inds xs
@@ -349,11 +349,11 @@ def semihull_loop [num_segs] [num_points]
    let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'') = extract_empty_segments hull_x hull_y segs_inhabited segs_begx' segs_begy' segs_endx' segs_endy' points_idx'
    in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 
-def semihull (startx: real, starty: real) (endx: real, endy: real) (points : [](real,real)) =
-  if null points then [(startx,starty)]
+def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 : [n]real) (points1 : [n]real) =
+  if null points0 then [(startx,starty)]
   else
     -- establish the loop property that `RANGE(points.0) = [0, length segs-1]
-    let (hull, segs, points) = ([], [(startx,starty, endx,endy)], map (\(x,y) -> (0, x, y)) points)
+    let (hull, segs, points) = ([], [(startx,starty, endx,endy)], map2 (\x y -> (0, x, y)) points0 points1)
     let (points_idx, points_x, points_y) = unzip3 points
     let (segs_begx, segs_begy, segs_endx, segs_endy) = unzip4 segs
     let (hullx, hully) = unzip hull
@@ -368,22 +368,33 @@ def semihull (startx: real, starty: real) (endx: real, endy: real) (points : [](
 def pmin p q = if point_less p q then p else q
 def pmax p q = if point_less p q then q else p
 
-def compute [n] (ps0 : {[n]f64 | \_ -> Range n (3,inf)})
-    (ps1 : [n]f64)
-    : {([](f64,f64), [](f64,f64)) | \_ -> true} =
-  -- if length ps <= 3 then (ps, []) else
+def get_leftmost_rightmost [n] (ps0: {[n]f64 | \_ -> Range n (1,inf)}) (ps1: [n]f64): {((f64, f64), (f64, f64)) | \_ -> true} =
   let ps = zip ps0 ps1
   let ne = ps[0]
   let leftmosts = scan (\(p1,p2) (q1,q2) -> if point_less (p1,p2) (q1,q2) then (p1,p2) else (q1,q2)) ne ps
-  let leftmost = leftmosts[n-1]
   let rightmosts = scan (\(p1,p2) (q1,q2) -> if point_less (p1,p2) (q1,q2) then (p1,p2) else (q1,q2)) ne ps
-  let rightmost = rightmosts[n-1]
-  -- let (_, upper_points, lower_points) =
-  let (a, b, points_parted) =
-    partition3
-    (\p -> if point_eq p leftmost || point_eq p rightmost then 1 else if dist_less zero_dist (signed_dist_to_line leftmost rightmost p) then 2 else 0)
-    ps
-  let (_, upper_points, lower_points) = (points_parted[:a], points_parted[a:b], points_parted[b:])
-  let upper_hull = semihull leftmost rightmost upper_points
-  let lower_hull = semihull rightmost leftmost lower_points
+  let (leftmosts1, leftmosts2) = unzip leftmosts
+  let (rightmosts1, rightmosts2) = unzip rightmosts
+  in ((leftmosts1[n-1], leftmosts2[n-1]), (rightmosts1[n-1], rightmosts2[n-1]))
+
+def compute [n] (ps0 : {[n]f64 | \_ -> Range n (3,inf)})
+    (ps1 : [n]f64)
+    : {([](f64,f64), [](f64,f64)) | \_ -> true} =
+  let ((leftmost1, leftmost2), (rightmost1, rightmost2)) = get_leftmost_rightmost ps0 ps1
+  let conds = map2 (\p1 p2 ->
+      if point_eq (p1,p2) (leftmost1,leftmost2) || point_eq (p1,p2) (rightmost1,rightmost2)
+      then 1
+      else if dist_less zero_dist (signed_dist_to_line (leftmost1,leftmost2) (rightmost1,rightmost2) (p1,p2))
+           then 2
+           else 0
+    ) ps0 ps1
+  let (a, b, points_parted0) = partition3 conds ps0
+  let (_, _, points_parted1) = partition3 conds ps1
+  -- let _discard = slice points_parted 0 a
+  let upper_points0 = slice points_parted0 a b
+  let upper_points1 = slice points_parted1 a b
+  let lower_points0 = slice points_parted0 b n
+  let lower_points1 = slice points_parted1 b n
+  let upper_hull = semihull (leftmost1,leftmost2) (rightmost1,rightmost2) upper_points0 upper_points1
+  let lower_hull = semihull (rightmost1,rightmost2) (leftmost1,leftmost2) lower_points0 lower_points1
   in (upper_hull, lower_hull)
