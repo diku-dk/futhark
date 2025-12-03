@@ -90,7 +90,7 @@ def point_less (px: real, py: real) (qx: real, qy: real) =
 def sqr  (x : f64) = x * x
 def ssqr (x : f64) = f64.abs x * x
 
-def signed_dist_to_line (px: real, py: real) (qx: real, qy: real) (rx: real, ry: real) : dist =
+def signed_dist_to_line (px: real, py: real) (qx: real, qy: real) (rx: real, ry: real) : {dist | \_ -> true} =
   let ax = qx - px
   let ay = qy - py
   let bx = rx - px
@@ -126,8 +126,6 @@ def remove_negatives [num_points] num_segs (x: {[num_points]i64 | \x -> Range x 
 --                              Filt ys.1 points.1 (\_ -> false)
 --                  -- ^ meaning some filtering with unknown pred
 def expand_hull [num_segs] [num_points]
-                (f_dist : (real, real) -> (real, real) -> (real, real) -> dist)
-                (f_dist_less : real -> real -> bool)
                 -- (segs   : [num_segs](real,real,real,real))
                 (segs_begx : [num_segs]real)
                 (segs_begy : [num_segs]real)
@@ -149,7 +147,7 @@ def expand_hull [num_segs] [num_points]
                  let ay = segs_begy[seg_ix]
                  let bx = segs_endx[seg_ix]
                  let by = segs_endy[seg_ix]
-                 in f_dist (ax, ay) (bx, by) (px, py)
+                 in signed_dist_to_line (ax, ay) (bx, by) (px, py)
               )
               points_idx points_x points_y
   
@@ -159,7 +157,7 @@ def expand_hull [num_segs] [num_points]
   let x = iota num_points
   let vals = zip x dists
   let extrema_ix =
-    reduce_by_index bins (\(i,id) (j,jd) -> if f_dist_less jd id then (i,id) else (j,jd)) ne inds vals
+    reduce_by_index bins (\(i,id) (j,jd) -> if dist_less jd id then (i,id) else (j,jd)) ne inds vals
   let (extrema_ix_inds, _extrema_ix_dsts) = unzip extrema_ix
   -- ^ 1. The length of `extrema_ix` is `num_segs` (from above)
   -- V 2. Bounds checks for `extrema_ix[i]` and `segs[i]` are verifiable,
@@ -212,10 +210,10 @@ def expand_hull [num_segs] [num_points]
         let by = segs_endy[seg_ix]
         let qx = points_x[extreme_ix]
         let qy = points_y[extreme_ix]
-        let daq = f_dist (ax,ay) (qx,qy) (px,py)
-        let dqb = f_dist (qx,qy) (bx,by) (px,py)
-        in if f_dist_less zero_dist daq then (seg_ix * 2)
-           else if f_dist_less zero_dist dqb then (seg_ix * 2 + 1)
+        let daq = signed_dist_to_line (ax,ay) (qx,qy) (px,py)
+        let dqb = signed_dist_to_line (qx,qy) (bx,by) (px,py)
+        in if dist_less zero_dist daq then (seg_ix * 2)
+           else if dist_less zero_dist dqb then (seg_ix * 2 + 1)
            else (-1)
       ) (iota num_points) points_idx points_x points_y
   -- ^ From the map above, it should be provable that the range of
@@ -321,8 +319,6 @@ def extract_empty_segments [num_segs] [num_points]
   in (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds')
 
 def semihull_loop [num_segs] [num_points]
-                  (f_dist : (real, real) -> (real, real) -> (real, real) -> dist)
-                  (f_dist_less : real -> real -> bool)
                   (hull_x : []real)
                   (hull_y : []real)
                   -- (segs   : [num_segs](real,real,real,real))
@@ -340,7 +336,7 @@ def semihull_loop [num_segs] [num_points]
       ) | \(_,_, out_segs_begx,_,_,_, out_points_idx,_,_) -> Range out_points_idx (0,length out_segs_begx)}
     =
    let (segs_begx', segs_begy', segs_endx', segs_endy',
-        points_idx', points_x', points_y') = expand_hull f_dist f_dist_less segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
+        points_idx', points_x', points_y') = expand_hull segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
    let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'') = extract_empty_segments hull_x hull_y segs_begx' segs_begy' segs_endx' segs_endy' points_idx'
    in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 
@@ -356,7 +352,7 @@ def semihull (startx: real, starty: real) (endx: real, endy: real) (points : [](
        -- loop (hull, segs, points) =
        --   ([], [(startx,starty, endx,endy)], map (\(x,y) -> (0, x, y)) points)
        -- while !null points do
-         semihull_loop signed_dist_to_line dist_less hullx hully segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
+         semihull_loop hullx hully segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
     let hull' = zip hullx' (sized_like hullx' hully')
     in hull'
 
