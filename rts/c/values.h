@@ -259,7 +259,7 @@ static int read_str_array(FILE *f,
     return 1;                                                           \
   }
 
-static int read_str_i8(char *buf, void* dest) {
+static int read_str_i8(const char *buf, void* dest) {
   // Some platforms (WINDOWS) does not support scanf %hhd or its
   // cousin, %SCNi8.  Read into int first to avoid corrupting
   // memory.
@@ -275,7 +275,7 @@ static int read_str_i8(char *buf, void* dest) {
   }
 }
 
-static int read_str_u8(char *buf, void* dest) {
+static int read_str_u8(const char *buf, void* dest) {
   // Some platforms (WINDOWS) does not support scanf %hhd or its
   // cousin, %SCNu8.  Read into int first to avoid corrupting
   // memory.
@@ -291,34 +291,34 @@ static int read_str_u8(char *buf, void* dest) {
   }
 }
 
-static int read_str_i16(char *buf, void* dest) {
+static int read_str_i16(const char *buf, void* dest) {
   READ_STR(SCNi16, int16_t, "i16");
 }
 
-static int read_str_u16(char *buf, void* dest) {
+static int read_str_u16(const char *buf, void* dest) {
   READ_STR(SCNi16, int16_t, "u16");
 }
 
-static int read_str_i32(char *buf, void* dest) {
+static int read_str_i32(const char *buf, void* dest) {
   READ_STR(SCNi32, int32_t, "i32");
 }
 
-static int read_str_u32(char *buf, void* dest) {
+static int read_str_u32(const char *buf, void* dest) {
   READ_STR(SCNi32, int32_t, "u32");
 }
 
-static int read_str_i64(char *buf, void* dest) {
+static int read_str_i64(const char *buf, void* dest) {
   READ_STR(SCNi64, int64_t, "i64");
 }
 
-static int read_str_u64(char *buf, void* dest) {
+static int read_str_u64(const char *buf, void* dest) {
   // FIXME: This is not correct, as SCNu64 only permits decimal
   // literals.  However, SCNi64 does not handle very large numbers
   // correctly (it's really for signed numbers, so that's fair).
   READ_STR(SCNu64, uint64_t, "u64");
 }
 
-static int read_str_f16(char *buf, void* dest) {
+static int read_str_f16(const char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f16.nan") == 0) {
     *(uint16_t*)dest = float2halfbits(NAN);
@@ -342,7 +342,7 @@ static int read_str_f16(char *buf, void* dest) {
   }
 }
 
-static int read_str_f32(char *buf, void* dest) {
+static int read_str_f32(const char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f32.nan") == 0) {
     *(float*)dest = (float)NAN;
@@ -358,7 +358,7 @@ static int read_str_f32(char *buf, void* dest) {
   }
 }
 
-static int read_str_f64(char *buf, void* dest) {
+static int read_str_f64(const char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f64.nan") == 0) {
     *(double*)dest = (double)NAN;
@@ -374,7 +374,7 @@ static int read_str_f64(char *buf, void* dest) {
   }
 }
 
-static int read_str_bool(char *buf, void* dest) {
+static int read_str_bool(const char *buf, void* dest) {
   if (strcmp(buf, "true") == 0) {
     *(char*)dest = 1;
     return 0;
@@ -386,39 +386,39 @@ static int read_str_bool(char *buf, void* dest) {
   }
 }
 
-static int write_str_i8(FILE *out, int8_t *src) {
+static int write_str_i8(FILE *out, const int8_t *src) {
   return fprintf(out, "%hhdi8", *src);
 }
 
-static int write_str_u8(FILE *out, uint8_t *src) {
+static int write_str_u8(FILE *out, const uint8_t *src) {
   return fprintf(out, "%hhuu8", *src);
 }
 
-static int write_str_i16(FILE *out, int16_t *src) {
+static int write_str_i16(FILE *out, const int16_t *src) {
   return fprintf(out, "%hdi16", *src);
 }
 
-static int write_str_u16(FILE *out, uint16_t *src) {
+static int write_str_u16(FILE *out, const uint16_t *src) {
   return fprintf(out, "%huu16", *src);
 }
 
-static int write_str_i32(FILE *out, int32_t *src) {
+static int write_str_i32(FILE *out, const int32_t *src) {
   return fprintf(out, "%di32", *src);
 }
 
-static int write_str_u32(FILE *out, uint32_t *src) {
+static int write_str_u32(FILE *out, const uint32_t *src) {
   return fprintf(out, "%uu32", *src);
 }
 
-static int write_str_i64(FILE *out, int64_t *src) {
+static int write_str_i64(FILE *out, const int64_t *src) {
   return fprintf(out, "%"PRIi64"i64", *src);
 }
 
-static int write_str_u64(FILE *out, uint64_t *src) {
+static int write_str_u64(FILE *out, const uint64_t *src) {
   return fprintf(out, "%"PRIu64"u64", *src);
 }
 
-static int write_str_f16(FILE *out, uint16_t *src) {
+static int write_str_f16(FILE *out, const uint16_t *src) {
   float x = halfbits2float(*src);
   if (isnan(x)) {
     return fprintf(out, "f16.nan");
@@ -431,7 +431,7 @@ static int write_str_f16(FILE *out, uint16_t *src) {
   }
 }
 
-static int write_str_f32(FILE *out, float *src) {
+static int write_str_f32(FILE *out, const float *src) {
   float x = *src;
   if (isnan(x)) {
     return fprintf(out, "f32.nan");
@@ -444,7 +444,7 @@ static int write_str_f32(FILE *out, float *src) {
   }
 }
 
-static int write_str_f64(FILE *out, double *src) {
+static int write_str_f64(FILE *out, const double *src) {
   double x = *src;
   if (isnan(x)) {
     return fprintf(out, "f64.nan");
@@ -457,7 +457,7 @@ static int write_str_f64(FILE *out, double *src) {
   }
 }
 
-static int write_str_bool(FILE *out, void *src) {
+static int write_str_bool(FILE *out, const void *src) {
   return fprintf(out, *(char*)src ? "true" : "false");
 }
 
