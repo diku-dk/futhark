@@ -27,7 +27,7 @@ import Control.Monad (forM_, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, paramToAlgebra, toAlgebra, addProperty_)
+import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, paramToAlgebra, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Domain (..), Iterator, Quantified (..), rank)
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
@@ -156,6 +156,24 @@ addRelSymbol p = do
         getProps (Prop prop) = [prop]
         getProps (a :&& b) = getProps a <> getProps b
         getProps _ = []
+
+    addProperty_ (Rng x (a, b)) = do
+      addRange (Algebra.Var x) (mkRange a ((.-. int2SoP 1) <$> b))
+      -- If x is an array, also add range on x[hole] due to the way sums and
+      -- predicates are handled in toAlgebra.
+      fs <- lookupIndexFn x
+      case fs of
+        Just [f]
+          | rank f == 0 -> pure ()
+          | rank f == 1 -> do
+              hole <- sym2SoP . Hole <$> newVName "h"
+              alg_x <- paramToAlgebra x ((`Apply` [hole]) . Var)
+              addRange (Algebra.Var alg_x) (mkRange a ((.-. int2SoP 1) <$> b))
+          | rank f > 1 -> pure () -- Not implemented yet; skipping is safe.
+        Nothing -> pure () -- We don't know whether x is an array.
+        _ -> error "Range on tuple type"
+      addProperty (Algebra.Var x) (Rng x (a, b))
+    addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 
 -- | Add relations derived from the iterator to the algebraic environment.
 addRelShape :: [[Iterator]] -> IndexFnM ()
