@@ -100,11 +100,12 @@ dnfQuery p query =
 p =>? q | p == q = pure Yes
 p =>? q = do
   p' <- simplify p
-  rollbackAlgEnv (do
-      printM 7 "  * ALGEBRA "
-      printAlgebra 7 p
-      printAlgebra 7 q
-      printAlgEnv 7
+  rollbackAlgEnv
+    ( do
+        printM 7 "  * ALGEBRA "
+        printAlgebra 7 p
+        printAlgebra 7 q
+        printAlgEnv 7
     )
   printTrace 6 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q) $
     pure (answerFromBool $ p' == q)
@@ -178,6 +179,13 @@ data Statement
 prove :: Property Symbol -> IndexFnM Answer
 prove prop = alreadyKnown prop `orM` matchProof prop
   where
+    alreadyKnown (Disjoint x) = do
+      answerFromBool . and
+        <$> mapM
+          ( \vn ->
+              askProperty (Algebra.Var vn) (Disjoint (S.delete vn x))
+          )
+          (S.toList x)
     alreadyKnown wts@(Rng y _) = do
       res <- askRng (Algebra.Var y)
       case res of
@@ -193,8 +201,8 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     alreadyKnown (Monotonic x dir) = do
       dir' <- askMonotonic (Algebra.Var x)
       if Just dir == dir'
-      then pure Yes
-      else pure Unknown
+        then pure Yes
+        else pure Unknown
     alreadyKnown wts@(Injective y rcd) = do
       minj <- askInjectiveRCD (Algebra.Var y)
       mmono <- fmap (Monotonic y) <$> askMonotonic (Algebra.Var y)
@@ -276,7 +284,17 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     alreadyKnown _ = pure Unknown
 
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
-    matchProof Disjoint {} = error "prove called on Disjoint property (nothing to prove)"
+    matchProof (Disjoint x) = do
+      preds <-
+        mapM (fmap sop2Symbol . fromAlgebra . sym2SoP . Algebra.Var) (S.toList x)
+      printM 0 $ "matchProof Disjoint preds " <> prettyStr preds
+      allM $
+        map
+          ( \(p : ps) -> rollbackAlgEnv $ do
+              assume p
+              allM (map (isTrue . neg) ps)
+          )
+          (rotations preds)
     matchProof (Monotonic x dir) = do
       f <- getFn x
       case f of
@@ -301,7 +319,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           | x' == x,
             Just [f@(IndexFn [[Forall i _]] _)] <- M.lookup y indexfns -> algebraContext f $ do
               gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f]
-              askQ (CaseCheck (\c -> lb c :&& ub c)) (f { body = gs })
+              askQ (CaseCheck (\c -> lb c :&& ub c)) (f {body = gs})
         _ ->
           askQ (CaseCheck (\c -> lb c :&& ub c)) =<< getFn x
     matchProof (Injective y rcd) = do
@@ -368,14 +386,14 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           strat1 `orM` strat2 `orM` strat3
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
-      -- f_x <- getFn x
-      -- case f_x of
-      --       IndexFn shape ges | noCats (concat shape) -> algebraContext f_x $ do
-      --         -- Concat because dimension flatness is irrelevant.
-      --         newProver (BijGeNd rcd (concat shape) ges)
-      --       _ -> proveFn (PBijectiveRCD rcd img) f_x
-      --       where
-      --         noCats = all (\case (Forall _ (Cat {})) -> False; _ -> True)
+    -- f_x <- getFn x
+    -- case f_x of
+    --       IndexFn shape ges | noCats (concat shape) -> algebraContext f_x $ do
+    --         -- Concat because dimension flatness is irrelevant.
+    --         newProver (BijGeNd rcd (concat shape) ges)
+    --       _ -> proveFn (PBijectiveRCD rcd img) f_x
+    --       where
+    --         noCats = all (\case (Forall _ (Cat {})) -> False; _ -> True)
     matchProof (FiltPartInv x pf pps) = do
       f_X <- getFn x
       proveFn (PFiltPartInv (predToFun pf) (map predToFun pps)) f_X

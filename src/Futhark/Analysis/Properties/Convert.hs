@@ -36,12 +36,14 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSym, mapSymSoP
 import Futhark.Util.Pretty (Pretty)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
+import qualified Futhark.Analysis.Properties.AlgebraBridge as AlgebraBridge
 
 propertyPrelude :: S.Set String
 propertyPrelude =
   S.fromList
     [ "Monotonic",
       "Range",
+      "Disjoint",
       "Injective",
       "InjectiveRCD",
       "BijectiveRCD",
@@ -238,7 +240,7 @@ mkApplyIndexFn g size_vars pats te indexfns loc args = do
   printM 5 $ "✨ Using index fn " <> prettyStr g
 
   -- NOTE on why changeScope is called here.
-  -- 
+  --
   -- 1. `g` may be uninterpreted when exiting the scope of its body.
   -- 2. Uninterpreted functions are of the form
   --          g = [for i < e . x(i), ...]
@@ -246,7 +248,7 @@ mkApplyIndexFn g size_vars pats te indexfns loc args = do
   -- in the above uninterpreted function(s).
   -- 4. Therefore, two applications of `g` with different arguments are equal
   -- over the index domain: i = j => x(i) = x(j).
-  -- 
+  --
   -- To fix this, the uninterpreted function name (`x`) must be generated
   -- afresh at _each application site_.
   --
@@ -1030,6 +1032,38 @@ forwardPropertyPrelude f args =
                 pure (p_a :&& p_b, pr $ Property.Rng x (inf2Nothing a, inf2Nothing b))
             _ ->
               undefined
+    "Disjoint"
+      | [e_preds] <- getArgs args,
+        Just (param, lam) <- parsePredicate e_preds -> do
+          printM 0 $ "* param " <> prettyStr param
+          printM 0 $ "* lam " <> prettyStr lam
+          f_preds <- withoutBoundsChecks (forward lam)
+          printM 0 $ "* f_preds " <> prettyStr f_preds
+          case mapM (justSym <=< justSingleCase) f_preds of
+            Just ps | length ps > 1 -> do
+              xs <- mapM (AlgebraBridge.lookupUntransBool [param]) ps
+              printM 0 $ "* xs " <> prettyStr xs
+              printAlgEnv 0
+              let x = S.fromList xs
+              pure (IndexFn [] $ cases [(Bool True, pr $ Property.Disjoint x)])
+            _ -> undefined
+          -- XXX put the below in the Query module proof of Disjoint
+          -- case mapM (justSym <=< justSingleCase) f_preds of
+          --   Just ps | length ps > 1 -> do
+          --     ans <- allM $ map (\(p : ps') -> rollbackAlgEnv $ do
+          --       assume p
+          --       allM $ mapM (isTrue . neg) ps'
+          --       )
+          --       (rotations ps)
+          --     case ans of
+          --   _ -> undefined
+    -- XXX
+    -- 1. turn lambda into an array of sops
+    -- 2. cast sops to symbols
+    -- 3. prove that if one is true the others are not
+    --    (assume one true and show that others are false, iterate)
+    -- 4. add uninterpreted names for them ala Algebra.Translate
+    -- 5. add disjoint property
     "Injective"
       | [e_X] <- getArgs args,
         Just x <- justVName e_X -> do

@@ -31,8 +31,9 @@ def partition_indices [n]
 
 def partition3_indices [n] 't (conds: [n]i8) 
   : {(i64,i64,[n]i64) | \(a,b,is) ->
-      Range a (0,n) && Range b (0,n) &&
       FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
+      && Disjoint (\i -> (conds[i] == 1, conds[i] == 2))
+      && Range a (0,n) && Range b (0,n)
    } =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
   let eflags = map (\c -> if c == 2 then 1 else 0 ) conds
@@ -52,7 +53,8 @@ def partition3_indices [n] 't (conds: [n]i8)
 
 def partition3 't [n] (conds: [n]i8) (xs: [n]t)
    : {(i64,i64,[]t) | \(a, b, ys) ->
-     Range a (0,n) && Range b (0,n) &&
+     Assume (Disjoint (\i -> (conds[i] == 1, conds[i] == 2)))
+     && Range a (0,n) && Range b (0,n) &&
      FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
    } =
   let (a, b, inds) = partition3_indices conds

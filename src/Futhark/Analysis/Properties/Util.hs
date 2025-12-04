@@ -11,6 +11,7 @@ module Futhark.Analysis.Properties.Util
     locMsg,
     greenString,
     blueString,
+    rotations,
   )
 where
 
@@ -81,3 +82,7 @@ greenString s = "\ESC[92m" <> s <> "\ESC[0m"
 
 blueString :: (Semigroup a, IsString a) => a -> a
 blueString s = "\ESC[96m" <> s <> "\ESC[0m"
+
+rotations :: [a] -> [[a]]
+rotations xs = [take n (drop i (cycle xs)) | i <- [0..n-1]]
+  where n = length xs
