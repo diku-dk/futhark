@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark bench`: JSON output now contains results for all test stanzas that
   use a given entry point, rather than just the last one.
 
+* A bug in internalisation of `while` loops that could occur when one result of
+  the loop was syntactically the same as a loop parameter. (#2335)
+
 ## [0.25.34]
 
 ### Added

@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -544,14 +545,24 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
                 letBindNames [I.paramName p] $
                   BasicOp $
                     SubExp se
-            forM_ (zip mergepat' ses) $ \(p, se) ->
-              unless (se == I.Var (I.paramName p)) $
-                letBindNames [I.paramName p] $
-                  case se of
-                    I.Var v
-                      | not $ primType $ paramType p ->
-                          shapeCoerce (I.arrayDims $ paramType p) v
-                    _ -> BasicOp $ SubExp se
+            -- Is may be that one of the names in mergepat' are also in ses (and
+            -- not in the same position), in which case we must be careful to
+            -- avoid clobbering.
+            let mergepat_names = map I.paramName mergepat'
+            ses' <- forM ses $ \case
+              I.Var v
+                | v `elem` mergepat_names -> do
+                    v' <- newVName $ baseName v <> "_tmp"
+                    letBindNames [v'] $ I.BasicOp (I.SubExp $ I.Var v)
+                    pure $ I.Var v'
+              se -> pure se
+            forM_ (zip mergepat' ses') $ \(p, se) ->
+              letBindNames [I.paramName p] $
+                case se of
+                  I.Var v
+                    | not $ primType $ paramType p ->
+                        shapeCoerce (I.arrayDims $ paramType p) v
+                  _ -> BasicOp $ SubExp se
             subExpsRes <$> internaliseExp "loop_cond" cond
           loop_end_cond <- bodyBind loop_end_cond_body
 
