@@ -98,8 +98,8 @@ applyPermute fenv env sched aux msoac
   let strip_tmp_pat = Pat $ map (\ (Param _ nm dec) -> PatElem nm dec) strip_params
       sched' = sched { sigma = invPerm (sigma sched) }
   perm_soac_stms <- permuteNest fenv env sched' $ Let strip_tmp_pat aux $ Op soac
-  trace ( "Stripmined soac:\n" ++ prettyString soac ++
-          "Permuted   soac:\n" ++ prettyString perm_soac_stms
+  trace ( "\nStripmined soac:\n" ++ prettyString soac ++
+          "\nPermuted   soac:\n" ++ prettyString perm_soac_stms
         ) $
       pure perm_soac_stms
   where
