@@ -32,9 +32,14 @@ import Language.Futhark (VName)
 data Property u
   = Boolean
   | -- These predicates are pairwise disjoint and collectively exhaustive.
-    -- TODO Disjoint ought to take a (Maybe) domain (the domain over which
-    -- the predicates are disjoint).
+    -- TODO used internally only. Rename to MECE.
     Disjoint (S.Set VName)
+  | -- Pairwise disjointness annotated in the source code. Takes a domain.
+    -- (The internal Disjoint was not initially supposed to be user-facing;
+    -- it both lacks a domain and more flexible representation
+    -- beyond variable names to support proofs outside the context
+    -- of an index function.)
+    UserFacingDisjoint (SoP u, SoP u) [Predicate u]
   | Monotonic VName MonDir
   | -- Rng x (0, n) means x[i] is in [0, ..., n-1].
     Rng VName (Maybe (SoP u), Maybe (SoP u))
@@ -59,7 +64,9 @@ instance Pretty MonDir where
 instance (Pretty u) => Pretty (Property u) where
   pretty Boolean = "Boolean"
   pretty (Disjoint s) =
-    "Disjoint" <+> parens (commasep $ map prettyName $ S.toList s)
+    "MECE" <+> parens (commasep $ map prettyName $ S.toList s)
+  pretty (UserFacingDisjoint d p) =
+    blueString "Disjoint"  <+> pretty d <+> pretty p
   pretty (Monotonic x dir) = "Mono" <+> prettyName x <+> pretty dir
   pretty (Rng x rng) =
     blueString "Range" <+> prettyName x <+> parens (pretty rng)

@@ -36,7 +36,6 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSym, mapSymSoP
 import Futhark.Util.Pretty (Pretty)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
-import qualified Futhark.Analysis.Properties.AlgebraBridge as AlgebraBridge
 
 propertyPrelude :: S.Set String
 propertyPrelude =
@@ -1033,37 +1032,23 @@ forwardPropertyPrelude f args =
             _ ->
               undefined
     "Disjoint"
-      | [e_preds] <- getArgs args,
-        Just (param, lam) <- parsePredicate e_preds -> do
-          printM 0 $ "* param " <> prettyStr param
-          printM 0 $ "* lam " <> prettyStr lam
-          f_preds <- withoutBoundsChecks (forward lam)
-          printM 0 $ "* f_preds " <> prettyStr f_preds
+      | [e_rng, e_preds] <- getArgs args,
+        Just (i, lam) <- parsePredicate e_preds -> do
+          f_rng <- forward e_rng
+          let Just (a, b) = case f_rng of
+                [f_a, f_b]
+                  | null (shape f_a),
+                    null (shape f_b) ->
+                      (,) <$> justSingleCase f_a <*> justSingleCase f_b
+                _ -> undefined
+          f_preds <- rollbackAlgEnv $ do
+            addRelSymbol (a :<= sVar i :&& sVar i :< b)
+            forward lam
           case mapM (justSym <=< justSingleCase) f_preds of
             Just ps | length ps > 1 -> do
-              xs <- mapM (AlgebraBridge.lookupUntransBool [param]) ps
-              printM 0 $ "* xs " <> prettyStr xs
-              printAlgEnv 0
-              let x = S.fromList xs
-              pure (IndexFn [] $ cases [(Bool True, pr $ Property.Disjoint x)])
+              let preds = map (Property.Predicate i) ps
+              pure (IndexFn [] $ cases [(Bool True, pr $ Property.UserFacingDisjoint (a, b) preds)])
             _ -> undefined
-          -- XXX put the below in the Query module proof of Disjoint
-          -- case mapM (justSym <=< justSingleCase) f_preds of
-          --   Just ps | length ps > 1 -> do
-          --     ans <- allM $ map (\(p : ps') -> rollbackAlgEnv $ do
-          --       assume p
-          --       allM $ mapM (isTrue . neg) ps'
-          --       )
-          --       (rotations ps)
-          --     case ans of
-          --   _ -> undefined
-    -- XXX
-    -- 1. turn lambda into an array of sops
-    -- 2. cast sops to symbols
-    -- 3. prove that if one is true the others are not
-    --    (assume one true and show that others are false, iterate)
-    -- 4. add uninterpreted names for them ala Algebra.Translate
-    -- 5. add disjoint property
     "Injective"
       | [e_X] <- getArgs args,
         Just x <- justVName e_X -> do

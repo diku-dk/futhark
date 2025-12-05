@@ -284,10 +284,17 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     alreadyKnown _ = pure Unknown
 
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
+    matchProof (UserFacingDisjoint (a,b) ps) = do
+      i <- newNameFromString "i"
+      -- rollbackAlgEnv $ do
+      --   addRelSymbol (p i) -- this adds e.g. c[i] = 1 to the Equiv table
+      --   disprove rest
+      undefined
     matchProof (Disjoint x) = do
       preds <-
         mapM (fmap sop2Symbol . fromAlgebra . sym2SoP . Algebra.Var) (S.toList x)
       printM 0 $ "matchProof Disjoint preds " <> prettyStr preds
+      printAlgEnv 0
       allM $
         map
           ( \(p : ps) -> rollbackAlgEnv $ do
