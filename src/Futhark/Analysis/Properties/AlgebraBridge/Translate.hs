@@ -8,6 +8,8 @@ module Futhark.Analysis.Properties.AlgebraBridge.Translate
     isBooleanM,
     getDisjoint,
     paramToAlgebra,
+    lookupUntransBool,
+    addProperty_
   )
 where
 
@@ -15,7 +17,7 @@ import Control.Monad (foldM, forM_, when, (<=<))
 import Data.Function (on)
 import Data.List (sortBy)
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Flatten (from1Dto2D)
@@ -30,7 +32,7 @@ import Futhark.Analysis.Properties.Unify (Substitution (mapping), fv, mkRep, rep
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
-import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, addRange)
+import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, addRange, mkRange)
 import Futhark.SoP.Monad qualified as SoPM (addUntrans)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~), Range (..))
@@ -143,9 +145,7 @@ algebraContext fn m = rollbackAlgEnv $ do
       -- If p is on the form p && q, then p and q probably already
       -- have untranslatable names, but p && q does not.
       vns <- mapM (lookupUntransBool is) ps
-      forM_ vns $ \vn ->
-        addProperty (Algebra.Var vn) $
-          Disjoint (S.fromList vns S.\\ S.singleton vn)
+      addProperty_ (Disjoint (S.fromList vns))
 
     -- Add boolean tag to IndexFn layer names where applicable.
     trackBooleanNames (Var vn) = do
@@ -157,6 +157,9 @@ algebraContext fn m = rollbackAlgEnv $ do
     trackBooleanNames (x :|| y) = trackBooleanNames x >> trackBooleanNames y
     trackBooleanNames _ = pure ()
 
+-- Lookup an untranslatable boolean expression parameterised by `is`.
+-- If no matching untranslatable expression exists, a fresh name
+-- is created for it (which is recorded for future lookups).
 lookupUntransBool :: (Foldable t) => t VName -> Symbol -> IndexFnM VName
 lookupUntransBool is x = do
   res <- search x
@@ -165,6 +168,31 @@ lookupUntransBool is x = do
     Just vn -> pure vn
   addProperty (Algebra.Var vn) Boolean
   pure vn
+
+-- Add a property to the environment.
+addProperty_ :: Property Algebra.Symbol -> IndexFnM ()
+addProperty_ (Rng x (a, b)) = do
+  addRange (Algebra.Var x) (mkRange a ((.-. int2SoP 1) <$> b))
+  -- If x is an array, also add range on x[hole] due to the way sums and
+  -- predicates are handled in toAlgebra.
+  fs <- lookupIndexFn x
+  case fs of
+    Just [f]
+      | rank f == 0 -> pure ()
+      | rank f == 1 -> do
+          hole <- sym2SoP . Hole <$> newVName "h"
+          alg_x <- paramToAlgebra x ((`Apply` [hole]) . Var)
+          addRange (Algebra.Var alg_x) (mkRange a ((.-. int2SoP 1) <$> b))
+      | rank f > 1 -> pure () -- TODO Not implemented yet; skipping is safe.
+    Nothing -> pure () -- We don't know whether x is an array.
+    _ -> error "Range on tuple type"
+  addProperty (Algebra.Var x) (Rng x (a, b))
+addProperty_ (Disjoint x) =
+  forM_ x $ \vn -> do
+    p <- askDisjoint (Algebra.Var vn)
+    when (isNothing p) $ -- TODO make this more precise.
+      addProperty (Algebra.Var vn) (Disjoint (S.delete vn x))
+addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 
 -----------------------------------------------------------------------------
 -- Translation from Algebra to IndexFn layer.

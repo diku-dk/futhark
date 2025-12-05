@@ -32,6 +32,8 @@ import Language.Futhark (VName)
 data Property u
   = Boolean
   | -- These predicates are pairwise disjoint and collectively exhaustive.
+    -- TODO Disjoint ought to take a (Maybe) domain (the domain over which
+    -- the predicates are disjoint).
     Disjoint (S.Set VName)
   | Monotonic VName MonDir
   | -- Rng x (0, n) means x[i] is in [0, ..., n-1].

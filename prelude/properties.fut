@@ -4,6 +4,8 @@ def inf = ???
 
 def Assume (_: bool) : bool = ???
 
+def Disjoint 't (_: i64 -> t) : bool = ???
+
 def Monotonic 't (_ : t -> t -> bool) _ : bool = ???
 
 def Range 't (_: t) (_ : (i64, i64)) : bool = ???
