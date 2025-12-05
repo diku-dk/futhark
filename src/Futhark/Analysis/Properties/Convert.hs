@@ -1032,22 +1032,15 @@ forwardPropertyPrelude f args =
             _ ->
               undefined
     "Disjoint"
-      | [e_rng, e_preds] <- getArgs args,
+      | [e_preds] <- getArgs args,
         Just (i, lam) <- parsePredicate e_preds -> do
-          f_rng <- forward e_rng
-          let Just (a, b) = case f_rng of
-                [f_a, f_b]
-                  | null (shape f_a),
-                    null (shape f_b) ->
-                      (,) <$> justSingleCase f_a <*> justSingleCase f_b
-                _ -> undefined
-          f_preds <- rollbackAlgEnv $ do
-            addRelSymbol (a :<= sVar i :&& sVar i :< b)
-            forward lam
+          -- TODO add domain to this property to get with bounds checking
+          -- below?
+          f_preds <- withoutBoundsChecks (forward lam)
           case mapM (justSym <=< justSingleCase) f_preds of
             Just ps | length ps > 1 -> do
               let preds = map (Property.Predicate i) ps
-              pure (IndexFn [] $ cases [(Bool True, pr $ Property.UserFacingDisjoint (a, b) preds)])
+              pure (IndexFn [] $ cases [(Bool True, pr $ Property.UserFacingDisjoint preds)])
             _ -> undefined
     "Injective"
       | [e_X] <- getArgs args,
@@ -1716,8 +1709,3 @@ checkBounds e f_xs idxs =
               <> " => "
               <> prettyStr (bound e_idx)
               <> ")."
-
-unifiesWith :: (Unify v Symbol, Pretty v) => v -> v -> IndexFnM Bool
-unifiesWith a b = do
-  equiv :: Maybe (Substitution Symbol) <- unify a b
-  pure $ isJust equiv

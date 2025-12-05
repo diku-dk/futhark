@@ -49,6 +49,8 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (Maybe (SoP a)) where
 instance (Ord a, ASTMappable a a) => ASTMappable a (Property a) where
   astMap _ Boolean = pure Boolean
   astMap _ (Disjoint vns) = pure (Disjoint vns)
+  astMap m (UserFacingDisjoint ps) = do
+    UserFacingDisjoint <$> mapM (astMap m) ps
   astMap _ (Monotonic x dir) = pure (Monotonic x dir)
   astMap m (Rng x (a, b)) = curry (Rng x) <$> astMap m a <*> astMap m b
   astMap m (Injective x (Just (a, b))) = curry (Injective x . Just) <$> astMap m a <*> astMap m b
@@ -142,6 +144,7 @@ instance ASTFoldable Symbol (Property Symbol) where
   -- astFold _m _acc = undefined
   astFold _ acc Boolean = pure acc
   astFold _ acc Disjoint {} = pure acc
+  astFold m acc (UserFacingDisjoint ps) = foldM (astFold m) acc ps
   astFold _ acc Monotonic {} = pure acc
   astFold m acc (Rng _ (a, b)) = astFold m acc a >>= astFoldF m b
   astFold m acc (Injective _ (Just (a, b))) = astFold m acc a >>= astFoldF m b

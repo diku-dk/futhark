@@ -33,7 +33,7 @@ import Futhark.Analysis.Properties.IndexFn (Domain (..), Iterator, Quantified (.
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (Property (..), nameAffectedBy)
-import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
+import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF, neg)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Monad (addProperty, addRange, mkRange)
@@ -98,7 +98,11 @@ assume sym = do
       -- Add that pairwise disjoint symbols are false.
       mapM_ (addEq 0) =<< getDisjoint p
       case p of
-        p1 :&& p2 -> assume_ p1 >> assume_ p2
+        p1 :&& p2 -> do
+          assume_ p1
+          assume_ p2
+          addEq 0 (neg p1)
+          addEq 0 (neg p2)
         _ -> pure ()
 
     addEq n e = do

@@ -16,6 +16,7 @@ module Futhark.Analysis.Properties.Query
     Statement (..),
     prove,
     proveFn,
+    unifiesWith,
   )
 where
 
@@ -23,10 +24,11 @@ import Control.Applicative ((<|>))
 import Control.Monad (forM, join, replicateM, when, zipWithM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
-import Data.List (partition, tails)
+import Data.List (find, nub, partition, tails)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
+import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.EqSimplifier
@@ -38,10 +40,12 @@ import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
+import Futhark.IR (Pretty)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad
 import Futhark.SoP.Refine (addRel, addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
+import Futhark.Util (nubOrd)
 import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
 
@@ -186,15 +190,23 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               askProperty (Algebra.Var vn) (Disjoint (S.delete vn x))
           )
           (S.toList x)
-    alreadyKnown wts@(Rng y _) = do
+    alreadyKnown wts@(Rng y rng) = do
       res <- askRng (Algebra.Var y)
       case res of
-        Just (Rng y' rng')
+        Just known@(Rng y' rng')
           | y' == y -> do
-              -- Check equivalent rngs.
-              -- TODO could check that rng is a subset of rng'.
-              s <- unify wts =<< fromAlgebra (Rng y rng')
-              if isJust (s :: Maybe (Substitution Symbol))
+              let lb = case (fst rng, fst rng') of
+                    (_, Nothing) -> pure Yes
+                    (Just a, Just a') -> (a $<=) =<< fromAlgebra a'
+                    _ -> pure Unknown
+              let ub = case (snd rng, snd rng') of
+                    (_, Nothing) -> pure Yes
+                    (Just b, Just b') -> ($<= b) =<< fromAlgebra b'
+                    _ -> pure Unknown
+              let same_range =
+                    answerFromBool <$> ((wts `unifiesWith`) =<< fromAlgebra known)
+              range_subset <- isYes <$> same_range `orM` (lb `andM` ub)
+              if range_subset
                 then pure Yes
                 else pure Unknown
         _ -> pure Unknown
@@ -284,12 +296,36 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     alreadyKnown _ = pure Unknown
 
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
-    matchProof (UserFacingDisjoint (a,b) ps) = do
-      i <- newNameFromString "i"
-      -- rollbackAlgEnv $ do
-      --   addRelSymbol (p i) -- this adds e.g. c[i] = 1 to the Equiv table
-      --   disprove rest
-      undefined
+    matchProof (UserFacingDisjoint ps)
+      | allUnique ps = do
+          -- Just (ps', _otherwise) <- splitNegation [p | Predicate _ p <- ps] = do
+          allM $
+            map
+              ( \(p : qs) ->
+                  rollbackAlgEnv
+                    ( do
+                        assume p
+                        printM 0 $ "* proving " <> prettyStr p
+                        printM 0 $ "*         " <> prettyStr (neg (foldl1 (:&&) qs))
+                        printAlgEnv 0
+                        allM (map (isTrue . neg) qs)
+                    )
+                    `orM` (answerFromBool <$> p `unifiesWith` neg (foldl1 (:||) qs))
+              )
+              (rotations [p | Predicate _ p <- ps])
+      | otherwise =
+          error $ "ps " <> prettyStr ps <> "\n * allUnique " <> show (allUnique ps) <> " \n* " <> prettyStr (splitNegation [p | Predicate _ p <- ps])
+      where
+        -- undefined
+
+        allUnique xs = length xs == length (nubOrd xs)
+
+        -- Find the predicate that negates all the others.
+        -- This predicate does not need to be checked as it is clearly MECE.
+        splitNegation preds =
+          find
+            (\(others, p) -> p == neg (foldr1 (:&&) others))
+            (trace (prettyStr [(filter (/= p) preds, p) | p <- preds]) $ [(filter (/= p) preds, p) | p <- preds])
     matchProof (Disjoint x) = do
       preds <-
         mapM (fmap sop2Symbol . fromAlgebra . sym2SoP . Algebra.Var) (S.toList x)
@@ -1035,3 +1071,8 @@ title s = "\ESC[4m" <> s <> "\ESC[0m"
 justName :: SoP Symbol -> Maybe VName
 justName e | Just (Var vn) <- justSym e = Just vn
 justName _ = Nothing
+
+unifiesWith :: (Unify v Symbol, Pretty v) => v -> v -> IndexFnM Bool
+unifiesWith a b = do
+  equiv :: Maybe (Substitution Symbol) <- unify a b
+  pure $ isJust equiv

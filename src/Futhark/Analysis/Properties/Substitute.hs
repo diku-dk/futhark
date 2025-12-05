@@ -12,13 +12,13 @@ import Data.Map qualified as M
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==), toAlgebra, printAlgebra)
+import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
 import Futhark.Analysis.Properties.Flatten (from1Dto2D, lookupII)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ)
-import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, solveIx, unifiesWith)
+import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ, unifiesWith)
+import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, solveIx)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify (Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)

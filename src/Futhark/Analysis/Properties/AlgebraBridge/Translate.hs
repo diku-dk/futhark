@@ -9,11 +9,11 @@ module Futhark.Analysis.Properties.AlgebraBridge.Translate
     getDisjoint,
     paramToAlgebra,
     lookupUntransBool,
-    addProperty_
+    addProperty_,
   )
 where
 
-import Control.Monad (foldM, forM_, when, (<=<))
+import Control.Monad (foldM, forM, forM_, when, (<=<))
 import Data.Function (on)
 import Data.List (sortBy)
 import Data.Map qualified as M
@@ -32,10 +32,10 @@ import Futhark.Analysis.Properties.Unify (Substitution (mapping), fv, mkRep, rep
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
-import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, addRange, mkRange)
+import Futhark.SoP.Monad (addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
 import Futhark.SoP.Monad qualified as SoPM (addUntrans)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~), Range (..))
+import Futhark.SoP.SoP (Range (..), Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName, baseString)
 
@@ -74,6 +74,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     Boolean -> pure Boolean
     (Disjoint vns) -> pure (Disjoint vns)
     (Monotonic x dir) -> pure (Monotonic x dir)
+    (UserFacingDisjoint ps) -> UserFacingDisjoint <$> mapM fromAlgebra ps
     (Rng x (a, b)) -> do
       a' <- traverse fromAlgebra a
       b' <- traverse fromAlgebra b
@@ -86,6 +87,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
   toAlgebra = \case
     Boolean -> pure Boolean
     (Disjoint vns) -> pure (Disjoint vns)
+    (UserFacingDisjoint ps) -> UserFacingDisjoint <$> mapM toAlgebra ps
     (Monotonic x dir) -> pure (Monotonic x dir)
     (Rng x (a, b)) -> do
       a' <- traverse toAlgebra a
@@ -192,6 +194,23 @@ addProperty_ (Disjoint x) =
     p <- askDisjoint (Algebra.Var vn)
     when (isNothing p) $ -- TODO make this more precise.
       addProperty (Algebra.Var vn) (Disjoint (S.delete vn x))
+addProperty_ (UserFacingDisjoint ps) = do
+  -- TODO skipping for now; should add Disjoint prop if d allows
+  -- should use lookupUntransBool on the symbol part of Predicate
+  -- to get the corresponding thign. use the lambda param for is
+  --
+  --
+  -- FIX This is a very backwards way of getting the untranslatable
+  -- names for each predicate. (A predicate p is of the form x[i]
+  -- when its an algebra symbol.)
+  x <- fmap S.fromList <$> forM ps $ \(Predicate i p) ->
+    lookupUntransBool [i] . sop2Symbol =<< fromAlgebra (sym2SoP p)
+
+  forM_ x $ \vn -> do
+    prop <- askDisjoint (Algebra.Var vn)
+    when (isNothing prop) $ -- TODO make this more precise.
+      addProperty (Algebra.Var vn) (Disjoint (S.delete vn x))
+  printAlgEnv 0
 addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 
 -----------------------------------------------------------------------------
@@ -443,19 +462,21 @@ toAlgebra_ (Var x) = do
 toAlgebra_ e@(Hole _) = error ("toAlgebra_ on Hole " <> prettyStr e)
 toAlgebra_ e@(Sum j lb ub x)
   | x == Var j = do
-    -- This is n(n+1)/2 - m(m+1)/2 where n = ub, m = lb - 1,
-    -- but we can't divide by 2.
-    alg_e <- lookupUntransPE e
-    -- We can, however, express its range because ranges allow constant factors
-    -- on the bounded symbol:
-    -- (n * n + n) - (m * m + m) <= 2 * vn <= (n * n + n) - (m * m + m)
-    let m = lb .-. int2SoP 1
-    v <- toAlgebra (ub .*. ub .+. ub .-. m .*. m .+. m) -- TODO simplify?
-    addRange alg_e $
-      Range {
-        lowerBound = S.singleton v, rangeMult = 2, upperBound = S.singleton v
-      }
-    pure alg_e
+      -- This is n(n+1)/2 - m(m+1)/2 where n = ub, m = lb - 1,
+      -- but we can't divide by 2.
+      alg_e <- lookupUntransPE e
+      -- We can, however, express its range because ranges allow constant factors
+      -- on the bounded symbol:
+      -- (n * n + n) - (m * m + m) <= 2 * vn <= (n * n + n) - (m * m + m)
+      let m = lb .-. int2SoP 1
+      v <- toAlgebra (ub .*. ub .+. ub .-. m .*. m .+. m) -- TODO simplify?
+      addRange alg_e $
+        Range
+          { lowerBound = S.singleton v,
+            rangeMult = 2,
+            upperBound = S.singleton v
+          }
+      pure alg_e
   | otherwise = do
       res <- search x
       case res of

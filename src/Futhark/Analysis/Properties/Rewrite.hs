@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, unifiesWith, solveIx) where
+module Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, solveIx) where
 
 import Control.Monad (filterM, (<=<))
 import Data.Maybe (fromJust, isJust)
@@ -8,7 +8,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge (Answer (..), addRelShape, algebraContext, andM, assume, isFalse, isUnknown, simplify, addRelDim)
 import Futhark.Analysis.Properties.IndexFn (Domain (Iota), IndexFn (..), Quantified (..), cases, casesToList)
 import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv, prettyStr, printM)
-import Futhark.Analysis.Properties.Query ((=>?))
+import Futhark.Analysis.Properties.Query ((=>?), unifiesWith)
 import Futhark.Analysis.Properties.Rule (Rule (..), applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
 import Futhark.Analysis.Properties.Traversals
@@ -182,8 +182,3 @@ solveIdx1 _ sym = pure sym
 
 sVar :: VName -> SoP Symbol
 sVar = sym2SoP . Var
-
-unifiesWith :: (Unify v Symbol, Pretty v) => v -> v -> IndexFnM Bool
-unifiesWith a b = do
-  equiv :: Maybe (Substitution Symbol) <- unify a b
-  pure $ isJust equiv

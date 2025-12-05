@@ -4,7 +4,7 @@ def inf = ???
 
 def Assume (_: bool) : bool = ???
 
-def Disjoint 't1 't2 (_: t1) (_: i64 -> t2) : bool = ???
+def Disjoint 't (_: i64 -> t) : bool = ???
 
 def Monotonic 't (_ : t -> t -> bool) _ : bool = ???
 

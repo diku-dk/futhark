@@ -323,6 +323,8 @@ instance (Ord a, Renameable a) => Renameable (Property a) where
   rename_ _ _ Boolean = pure Boolean
   rename_ vns tau (Disjoint s) =
     Disjoint . S.fromList <$> mapM (rename_ vns tau) (S.toList s)
+  rename_ vns tau (UserFacingDisjoint ps) =
+    UserFacingDisjoint <$> mapM (rename_ vns tau) ps
   rename_ _ _ p@(Monotonic {}) = pure p
   rename_ vns tau (Rng x rng) =
     Rng x <$> rename_ vns tau rng
@@ -412,6 +414,7 @@ instance (FreeVariables u) => FreeVariables (Maybe u) where
 instance (FreeVariables u, Ord u) => FreeVariables (Property u) where
   fv Boolean = mempty
   fv (Disjoint x) = x
+  fv (UserFacingDisjoint ps) = S.unions (map fv ps)
   fv Monotonic {} = mempty
   fv (Rng x rng) = fv x <> fv rng
   fv (Injective x (Just rcd)) = fv x <> fv rcd
