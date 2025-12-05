@@ -352,12 +352,18 @@ def semihull_loop [num_segs] [num_points]
    let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'') = extract_empty_segments hull_x hull_y segs_inhabited segs_begx' segs_begy' segs_endx' segs_endy' points_idx'
    in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 
-def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 : [n]real) (points1 : [n]real) =
-  if null points0 then [(startx,starty)]
-  else
-    -- establish the loop property that `RANGE(points.0) = [0, length segs-1]
-    let (hull, segs, points) = ([], [(startx,starty, endx,endy)], map2 (\x y -> (0, x, y)) points0 points1)
-    let (points_idx, points_x, points_y) = unzip3 points
+def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 : [n]real) (points1 : [n]real) : {[](real, real) | \_ -> true}  =
+  -- We don't support branches with different sizes in the index
+  -- function implementation yet, so I comment out the case
+  -- that handles empty inputs below.
+  --
+  -- if n == 0 then map (\_ -> (startx,starty)) (iota 1)
+  -- else
+    let hull = map (\_ -> (0,0)) (iota 0)
+    let segs = map (\_ -> (startx,starty, endx,endy)) (iota 1)
+    let points_idx = map (\_ -> 0) points0
+    let points_x = points0
+    let points_y = points1
     let (segs_begx, segs_begy, segs_endx, segs_endy) = unzip4 segs
     let (hullx, hully) = unzip hull
     let (hullx', hully', _,_,_,_, _,_,_) =
