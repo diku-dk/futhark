@@ -116,7 +116,8 @@ optimiseSegOp onOp op =
     optimise =
       identitySegOpMapper
         { mapOnSegOpBody = optimiseBody onOp,
-          mapOnSegOpLambda = optimiseLambda onOp
+          mapOnSegBinOpLambda = optimiseLambda onOp,
+          mapOnSegPostOpLambda = optimiseLambda onOp
         }
 
 onMCOp :: Stage -> OnOp MC
