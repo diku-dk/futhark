@@ -490,6 +490,7 @@ tests =
       mkTest
         "tests/indexfn/seg_partition.fut"
         ( pure $ \(i, n, xs, _) ->
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
                   body =

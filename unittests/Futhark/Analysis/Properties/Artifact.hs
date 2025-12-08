@@ -23,7 +23,7 @@ tests =
     [ mkTest
         "tests/indexfn/fft.fut"
         ( pure $ \(i, n, xs, _) ->
-            -- Match anything; we test whether the intermediate analysis is OK.
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
                   body = cases [(Bool True, sym2SoP $ Hole xs)]
@@ -33,7 +33,7 @@ tests =
       mkTest
         "tests/indexfn/partition.fut"
         ( newNameFromString "j" >>= \j ->
-            newNameFromString "p" >>= \p -> pure $ \(i, n, xs, is_inv) ->
+            newNameFromString "p" >>= \p -> pure $ \(i, n, xs, _) ->
               [ IndexFn
                   { shape = [],
                     body =
@@ -46,43 +46,43 @@ tests =
                 IndexFn
                   { shape = [[Forall i (Iota (sHole n))]],
                     body =
-                      cases
-                        [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
+                      cases [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i])]
                   }
               ]
         ),
       mkTest
         "tests/indexfn/seg_partition.fut"
-        ( pure $ \(i, n, xs, is_inv) ->
+        ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
                   body =
-                    cases
-                      [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
+                    cases [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i])]
                 }
             ]
         ),
       mkTest
         "tests/indexfn/partition3.fut"
-        ( pure $ \(i, n, xs, is_inv) ->
+        ( pure $ \(i, n, xs, _) ->
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
                   body =
-                    cases
-                      [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
+                    cases [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i])]
                 }
             ]
         ),
       mkTest
         "tests/indexfn/filter.fut"
-        ( pure $ \(i, n, xs, is_inv) ->
-            [ IndexFn
-                { shape = [[Forall i (Iota (sHole n))]],
-                  body =
-                    cases
-                      [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
-                }
-            ]
+        ( newNameFromString "x" >>= \x ->
+            newNameFromString "j" >>= \j -> pure $ \(i, n, xs, p) ->
+              let xs_j = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole j]]
+                  m = sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) xs_j)
+               in [ IndexFn
+                      { shape = [[Forall i (Iota m)]],
+                        body =
+                          cases [(Bool True, sym2SoP $ Apply (Hole x) [sHole i])]
+                      }
+                  ]
         ),
       mkTest
         "tests/indexfn/filter_segmented_array.fut"
@@ -98,6 +98,7 @@ tests =
       mkTest
         "tests/indexfn/maxMatch_2d.fut"
         ( pure $ \(i, n, is_inv, _) ->
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
                   body =
@@ -109,7 +110,7 @@ tests =
       mkTest
         "tests/indexfn/kmeans_kernel.fut"
         ( pure $ \(anything, _, _, _) ->
-            -- Match anything here; this test merely checks bounds in the program.
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
             [ IndexFn
                 { shape = [],
                   body =
@@ -121,19 +122,29 @@ tests =
       mkTest
         "tests/indexfn/primes.fut"
         ( pure $ \(i, n, xs, _) ->
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
-                  -- matches anything; we're just checking the program.
                   body = cases [(Bool True, sHole xs)]
                 }
             ]
-      ),
+        ),
       mkTest
         "tests/indexfn/mis.fut"
         ( pure $ \(i, n, xs, _) ->
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
-                  -- matches anything; we're just checking the program.
+                  body = cases [(Bool True, sHole xs)]
+                }
+            ]
+        ),
+      mkTest
+        "tests/indexfn/quickhull.fut"
+        ( pure $ \(i, n, xs, _) ->
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))]],
                   body = cases [(Bool True, sHole xs)]
                 }
             ]
