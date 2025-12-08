@@ -11,7 +11,6 @@ import Data.Functor ((<&>))
 import Data.Map qualified as M
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
-import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
 import Futhark.Analysis.Properties.Flatten (from1Dto2D, lookupII)
 import Futhark.Analysis.Properties.IndexFn
@@ -27,27 +26,14 @@ import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, justSym, sym2SoP, (.*.), (.+.))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
-import qualified Language.Futhark.Core as E
-import Data.List (isInfixOf)
 
 -- If f has multiple cases, we would not know which case to substitute
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
-legalArg :: VName -> IndexFn -> IndexFn -> Symbol -> [SoP Symbol] -> Bool
-legalArg k g f e args =
+legalArg :: VName -> IndexFn -> IndexFn -> [SoP Symbol] -> Bool
+legalArg k g f args =
   let notQuantifier vn = vn < k || or [Just vn == catVar it | it <- concat $ shape g]
-   in (hasSingleCase f || (not . any (any (isInfixOf "⁻¹" . E.baseString) . fv)) args && all (all notQuantifier . fv) args)
-        || warning
+   in (hasSingleCase f || all (all notQuantifier . fv) args)
   where
-    warning =
-      flip trace False $
-        warningString $
-          "Warning: Unable to substitute "
-            <> prettyString e
-            <> " in\n"
-            <> prettyString g
-            <> "\nfor\n"
-            <> prettyString f
-
     hasSingleCase = isJust . justSingleCase
 
 -- Substitute applications of (f_name = f) into g.
@@ -74,8 +60,8 @@ dest_fn @ (f_name, f) = do
       printM 1337 . gray $ "\t  where " <> prettyString f_name <> " =\n" <> prettyIndent 16 f
       printM 9 $ "###################################################### go " <> prettyStr f_name
       case app of
-        Just apply@(e, args)
-          | argCheck e args -> do
+        Just apply@(_, args)
+          | argCheck args -> do
               printM 9 $ "###################################################### Apply " <> prettyStr apply
               printM 9 $ "###################################################### f " <> prettyStr f
               printM 9 $ "###################################################### g " <> prettyStr g
@@ -136,7 +122,7 @@ trivialSub e f args
     dims2args =
       mkRepFromList $ zipWith (\[dim] arg -> (boundVar dim, arg)) (shape f) args
 
-subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
+subber :: (IndexFn -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
 subber argCheck g = do
   go mempty
   where
@@ -151,7 +137,7 @@ subber argCheck g = do
         Just (e, vn, args)
           | Just [f] <- ixfns M.!? vn,
             not (trivialSub e f args),
-            argCheck f e args -> do
+            argCheck f args -> do
               g' <- substituteOnce f g (e, args)
               case g' of
                 Just new_fn | new_fn /= g -> do
@@ -319,8 +305,8 @@ substituteOnce f g_presub (f_apply, actual_args) = do
                 e_row <- lift . rewrite $ sym2SoP (Var i_2) .*. e_3
                 printM 1 $ "  |_ e_row " <> prettyStr e_row
                 let s = mkRep i_1 (e_row .+. sym2SoP (Var i_3))
-                pure $ g {shape = l <> (df : r), body = repCases s (body g)}
-                printM 1 $ "  |_ g " <> prettyStr (g {shape = l <> (df : r), body = repCases s (body g)})
+                let res = g {shape = l <> (df : r), body = repCases s (body g)}
+                printM 1 $ "  |_ g " <> prettyStr res
                 error "propFlattenSimplified succeeded (I'd like to know first time when getting rid of Cat)"
               Unknown -> pure g
         where

@@ -7,15 +7,14 @@ import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge (Answer (..), addRelShape, algebraContext, andM, assume, isFalse, isUnknown, simplify, addRelDim)
 import Futhark.Analysis.Properties.IndexFn (Domain (Iota), IndexFn (..), Quantified (..), cases, casesToList)
-import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv, prettyStr, printM)
+import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Properties.Query ((=>?), unifiesWith)
 import Futhark.Analysis.Properties.Rule (Rule (..), applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
 import Futhark.Analysis.Properties.Traversals
-import Futhark.Analysis.Properties.Unify (Renameable, Substitution, Unify, fv, renameSame, sub, unify)
+import Futhark.Analysis.Properties.Unify (Renameable, fv, renameSame)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, filterSoP, int2SoP, isZero, justConstant, justSym, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.))
-import Futhark.Util.Pretty (Pretty)
 import Language.Futhark (VName)
 
 class (Monad m) => Rewritable v m where

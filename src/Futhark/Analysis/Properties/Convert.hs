@@ -935,10 +935,8 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
 
       -- Infer ranges.
       forM (zip3 bins ops neutrals) $ \(bin, op, ne) -> do
-        printM 0 (prettyStr op)
         case mapM ((justVar <=< justSym) . snd) $ guards op of
           Just vns -> do
-            printM 0 (prettyStr vns)
             alg_ranges <- rollbackAlgEnv $ do
               -- Add outer_dim range as property in case vns is just the iterator.
               mapM_

@@ -24,7 +24,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (forM, join, replicateM, when, zipWithM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
-import Data.List (find, nub, partition, tails)
+import Data.List (find, partition, tails)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
@@ -305,9 +305,6 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                   rollbackAlgEnv
                     ( do
                         assume p
-                        printM 0 $ "* proving " <> prettyStr p
-                        printM 0 $ "*         " <> prettyStr (neg (foldl1 (:&&) qs))
-                        printAlgEnv 0
                         allM (map (isTrue . neg) qs)
                     )
                     `orM` (answerFromBool <$> p `unifiesWith` neg (foldl1 (:||) qs))
@@ -326,18 +323,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           find
             (\(others, p) -> p == neg (foldr1 (:&&) others))
             (trace (prettyStr [(filter (/= p) preds, p) | p <- preds]) $ [(filter (/= p) preds, p) | p <- preds])
-    matchProof (Disjoint x) = do
-      preds <-
-        mapM (fmap sop2Symbol . fromAlgebra . sym2SoP . Algebra.Var) (S.toList x)
-      printM 0 $ "matchProof Disjoint preds " <> prettyStr preds
-      printAlgEnv 0
-      allM $
-        map
-          ( \(p : ps) -> rollbackAlgEnv $ do
-              assume p
-              allM (map (isTrue . neg) ps)
-          )
-          (rotations preds)
+    matchProof (Disjoint {}) = undefined
     matchProof (Monotonic x dir) = do
       f <- getFn x
       case f of

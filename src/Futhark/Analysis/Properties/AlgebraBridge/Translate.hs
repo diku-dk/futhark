@@ -210,7 +210,6 @@ addProperty_ (UserFacingDisjoint ps) = do
     prop <- askDisjoint (Algebra.Var vn)
     when (isNothing prop) $ -- TODO make this more precise.
       addProperty (Algebra.Var vn) (Disjoint (S.delete vn x))
-  printAlgEnv 0
 addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 
 -----------------------------------------------------------------------------
