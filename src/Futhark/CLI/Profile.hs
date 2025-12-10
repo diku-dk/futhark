@@ -2,28 +2,34 @@
 module Futhark.CLI.Profile (main) where
 
 import Control.Exception (catch)
+import Data.Bifunctor (first)
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Bench
-    ( ProfilingReport(profilingEvents, profilingMemory),
-      ProfilingEvent(ProfilingEvent),
-      decodeProfilingReport,
-      BenchResult(BenchResult, benchResultProg),
-      DataResult(DataResult),
-      Result(report, stdErr),
-      decodeBenchResults )
+  ( BenchResult (BenchResult, benchResultProg),
+    DataResult (DataResult),
+    ProfilingEvent (ProfilingEvent),
+    ProfilingReport (profilingEvents, profilingMemory),
+    Result (report, stdErr),
+    decodeBenchResults,
+    decodeProfilingReport,
+  )
 import Futhark.Util (showText)
-import Futhark.Util.Options ( mainWithOptions )
+import Futhark.Util.Options (mainWithOptions)
 import System.Directory (createDirectoryIfMissing, removePathForcibly)
-import System.Exit ( ExitCode(ExitFailure), exitWith )
+import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.FilePath
-    ( (-<.>), (<.>), (</>), dropExtension, takeFileName )
-import System.IO ( hPutStrLn, stderr )
-import Text.Printf ( printf )
-import Data.Bifunctor (first)
+  ( dropExtension,
+    takeFileName,
+    (-<.>),
+    (<.>),
+    (</>),
+  )
+import System.IO (hPutStrLn, stderr)
+import Text.Printf (printf)
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -57,7 +63,7 @@ data EvSummary = EvSummary
 tabulateEvents :: [ProfilingEvent] -> T.Text
 tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
   where
-    pair (ProfilingEvent name dur provenance _details) = 
+    pair (ProfilingEvent name dur provenance _details) =
       ((name, provenance), EvSummary 1 dur dur dur)
     comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
       EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
@@ -73,22 +79,21 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
                 "events with a total runtime of",
                 T.pack $ printf "%.2fμs" total
               ]
-          costCentreSources = let
-            costCentreSourceBlocks = 
-              map (costCentreSourceLines . fst) 
-              . L.sortOn (fst . fst)
-              $ rows
-            costCentreHeaderTitle = T.pack " Cost Centre Source Locations "
-            costCentreHeader = T.center (T.length header) '=' costCentreHeaderTitle
-            in concat
-              $ [costCentreHeader, T.empty]
-              : L.intersperse [T.empty] costCentreSourceBlocks
-          costCentreSourceLines (name, provenance) = let
-            sources = T.splitOn (T.pack "->") provenance
-            orderedSources = L.sort sources
-            in 
-            name
-              : map (T.pack "- " <>) orderedSources
+          costCentreSources =
+            let costCentreSourceBlocks =
+                  map (costCentreSourceLines . fst)
+                    . L.sortOn (fst . fst)
+                    $ rows
+                costCentreHeaderTitle = T.pack " Cost Centre Source Locations "
+                costCentreHeader = T.center (T.length header) '=' costCentreHeaderTitle
+             in concat $
+                  [costCentreHeader, T.empty]
+                    : L.intersperse [T.empty] costCentreSourceBlocks
+          costCentreSourceLines (name, provenance) =
+            let sources = T.splitOn (T.pack "->") provenance
+                orderedSources = L.sort sources
+             in name
+                  : map (T.pack "- " <>) orderedSources
        in T.unlines $
             header
               : splitter
