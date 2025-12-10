@@ -74,7 +74,10 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
                 T.pack $ printf "%.2fμs" total
               ]
           costCentreSources = let
-            costCentreSourceBlocks = map (costCentreSourceLines . fst) rows
+            costCentreSourceBlocks = 
+              map (costCentreSourceLines . fst) 
+              . L.sortOn (fst . fst)
+              $ rows
             costCentreHeaderTitle = T.pack " Cost Centre Source Locations "
             costCentreHeader = T.center (T.length header) '=' costCentreHeaderTitle
             in concat
@@ -82,9 +85,10 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
               : L.intersperse [T.empty] costCentreSourceBlocks
           costCentreSourceLines (name, provenance) = let
             sources = T.splitOn (T.pack "->") provenance
+            orderedSources = L.sort sources
             in 
             name
-              : map (T.pack "- " <>) sources
+              : map (T.pack "- " <>) orderedSources
        in T.unlines $
             header
               : splitter
