@@ -8,13 +8,22 @@ import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Bench
+    ( ProfilingReport(profilingEvents, profilingMemory),
+      ProfilingEvent(ProfilingEvent),
+      decodeProfilingReport,
+      BenchResult(BenchResult, benchResultProg),
+      DataResult(DataResult),
+      Result(report, stdErr),
+      decodeBenchResults )
 import Futhark.Util (showText)
-import Futhark.Util.Options
+import Futhark.Util.Options ( mainWithOptions )
 import System.Directory (createDirectoryIfMissing, removePathForcibly)
-import System.Exit
+import System.Exit ( ExitCode(ExitFailure), exitWith )
 import System.FilePath
-import System.IO
-import Text.Printf
+    ( (-<.>), (<.>), (</>), dropExtension, takeFileName )
+import System.IO ( hPutStrLn, stderr )
+import Text.Printf ( printf )
+import Data.Bifunctor (first)
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -48,26 +57,41 @@ data EvSummary = EvSummary
 tabulateEvents :: [ProfilingEvent] -> T.Text
 tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
   where
-    pair (ProfilingEvent name dur _ _details) = (name, EvSummary 1 dur dur dur)
+    pair (ProfilingEvent name dur provenance _details) = 
+      ((name, provenance), EvSummary 1 dur dur dur)
     comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
       EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
     numpad = 15
     mkRows rows =
-      let longest = foldl max numpad $ map (T.length . fst) rows
+      let longest = foldl max numpad $ map (T.length . fst . fst) rows
           total = sum $ map (evSum . snd) rows
           header = headerRow longest
           splitter = T.map (const '-') header
-          bottom =
+          eventSummary =
             T.unwords
               [ showText (sum (map (evCount . snd) rows)),
                 "events with a total runtime of",
                 T.pack $ printf "%.2fμs" total
               ]
+          costCentreSources = let
+            costCentreSourceBlocks = map (costCentreSourceLines . fst) rows
+            costCentreHeaderTitle = T.pack " Cost Centre Source Locations "
+            costCentreHeader = T.center (T.length header) '=' costCentreHeaderTitle
+            in concat
+              $ [costCentreHeader, T.empty]
+              : L.intersperse [T.empty] costCentreSourceBlocks
+          costCentreSourceLines (name, provenance) = let
+            sources = T.splitOn (T.pack "->") provenance
+            in 
+            name
+              : map (T.pack "- " <>) sources
        in T.unlines $
             header
               : splitter
-              : map (mkRow longest total) rows
-                <> [splitter, bottom]
+              : map (mkRow longest total . first fst) rows
+                <> [splitter, eventSummary]
+                <> replicate 5 T.empty
+                <> costCentreSources
     headerRow longest =
       T.unwords
         [ padLeft longest "Cost centre",
