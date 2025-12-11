@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Per Cost-Centre Source Location Listings in the `.summary`-file output of `futhark profile`. (By VegOwOtenks)
+
 ### Removed
 
 ### Changed
