@@ -89,6 +89,7 @@ compileSegScan pat space reds kbody nsubtasks
 seqScanFastPath ::
   Pat LetDecMem ->
   VName ->
+  VName ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   [[VName]] ->
@@ -96,7 +97,7 @@ seqScanFastPath ::
   TV Int64 ->
   Maybe ([[VName]], TV Int64) ->
   MulticoreGen ()
-seqScanFastPath pat i scan_ops kbody per_op_prefixes_var start chunk_length prefArrs_block_idx = do
+seqScanFastPath pat i fid scan_ops kbody per_op_prefixes_var start chunk_length prefArrs_block_idx = do
   kbody_renamed <- renameBody kbody
   scan_ops_renamed <- renameSegBinOp scan_ops
   genBinOpParams scan_ops_renamed
@@ -150,13 +151,14 @@ seqScanFastPath pat i scan_ops kbody per_op_prefixes_var start chunk_length pref
 seqScanLB ::
   Pat LetDecMem ->
   VName ->
+  VName ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   [[VName]] ->
   TV Int64 ->
   TV Int64 ->
   MulticoreGen ()
-seqScanLB pat i scan_ops kbody per_op_prefixes_var start chunk_length = do
+seqScanLB pat i fid scan_ops kbody per_op_prefixes_var start chunk_length = do
   kbody_renamed <- renameBody kbody
   scan_ops_renamed <- renameSegBinOp scan_ops
   genBinOpParams scan_ops_renamed
@@ -241,6 +243,7 @@ applyScanAggregateToPrefix scan_ops per_op_local_vars per_op_aggr_arrs prefArrs 
 seqAggregate ::
   Pat LetDecMem ->
   VName ->
+  VName ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int64 ->
@@ -248,7 +251,7 @@ seqAggregate ::
   [[VName]] ->
   TV Int64 ->
   MulticoreGen ()
-seqAggregate pat i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx = do
+seqAggregate pat i fid scan_ops kbody start chunk_length per_op_aggr_arrs block_idx = do
   scan_ops_renamed <- renameSegBinOp scan_ops
   kbody_renamed <- renameBody kbody
   genBinOpParams scan_ops_renamed
@@ -308,7 +311,7 @@ nonsegmentedScan ::
   MulticoreGen ()
 nonsegmentedScan
   pat
-  (SegSpace _ [(i, n)])
+  (SegSpace fid [(i, n)])
   scan_ops
   kbody
   _nsubtasks = do
@@ -318,9 +321,9 @@ nonsegmentedScan
     let pt0 = case pts of
           (pt : _) -> pt
           [] -> int32
-    -- let blockSize = cacheSize `divUp` primByteSize pt0 * 2
+    let blockSize = cacheSize `divUp` (primByteSize pt0 * 5)
     emit $ Imp.DebugPrint "n value: " (Just $ untyped $ pe64 n)
-    let blockSize = 1 :: Imp.TExp Int64
+    -- let blockSize = 1 :: Imp.TExp Int64
 
     block_no <- dPrim "nblocks"
     block_no <-- pe64 n `divUp` blockSize
@@ -350,6 +353,7 @@ nonsegmentedScan
 
       vvv <- dPrim "vvv" :: MulticoreGen (TV Int64)
       sOp $ Imp.GetTaskId (tvVar vvv)
+      dPrimV_ fid (tvExp vvv)
 
       block_idx <- dPrim "block_idx" :: MulticoreGen (TV Int64)
       work_index_loc <- entryArrayLoc <$> lookupArray work_index
@@ -392,12 +396,12 @@ nonsegmentedScan
         sIf
           (tvExp seq_flag .==. true)
           ( do
-              seqScanFastPath pat i scan_ops kbody prefix_seqs start chunk_length (Just (prefArrs, block_idx))
+              seqScanFastPath pat i fid scan_ops kbody prefix_seqs start chunk_length (Just (prefArrs, block_idx))
 
               sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) memF (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int64))
           )
           ( do
-              seqAggregate pat i scan_ops kbody start chunk_length aggrArrs block_idx
+              seqAggregate pat i fid scan_ops kbody start chunk_length aggrArrs block_idx
 
               -- write flag as 1
               old_flag <- dPrim "old_flag" :: MulticoreGen (TV Int64)
@@ -436,10 +440,34 @@ nonsegmentedScan
 
               sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) memF (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int64))
 
-              seqScanLB pat i scan_ops kbody prefix_vars start chunk_length
+              seqScanLB pat i fid scan_ops kbody prefix_vars start chunk_length
           )
 
         sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) workF idx0 (untyped one)
 
     free_params <- freeParams fbody
     emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
+    forM_ scan_ops $ \scan_op -> do
+      let ts = lambdaReturnType $ segBinOpLambda scan_op
+
+      forM_ ts $ \t -> do
+        let arshape = arrayShape t
+        let dims = shapeDims arshape
+        forM_ (zip [(0 :: Int) ..] dims) $ \(i, d) -> do
+          emit $
+            Imp.DebugPrint
+              "SegScan result shape: "
+              (Just $ untyped $ pe64 d)
+    forM_ scan_ops $ \scan_op -> do
+      let dims = shapeDims $ segBinOpShape scan_op
+
+      forM_ (zip [(0 :: Int) ..] dims) $ \(i, d) -> do
+        emit $
+          Imp.DebugPrint
+            "SegScan shape: "
+            (Just $ untyped $ pe64 d)
+
+    forM_ scan_ops $ \scan_op -> do
+      emit $ Imp.DebugPrint "#############" Nothing
+    forM_ scan_ops $ \scan_op -> do
+      emit $ Imp.DebugPrint "SegScan ********" Nothing
