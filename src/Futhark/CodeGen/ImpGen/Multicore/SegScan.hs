@@ -81,10 +81,8 @@ totalBytes scan_ops =
         let scan_shape = segBinOpShape op,
         t <- lambdaReturnType lam
     ]
-
-bytesOfShape :: PrimType -> Shape -> Imp.TExp Int64
-bytesOfShape pt sh =
-  primByteSize pt * product (map pe64 (shapeDims sh))
+  where
+    bytesOfShape pt sh = primByteSize pt * product (map pe64 (shapeDims sh))
 
 -- | Compile a SegScan construct.
 compileSegScan ::
@@ -200,9 +198,9 @@ seqScanLB pat i scan_ops kbody per_op_prefixes_var start chunk_length = do
           -- reading from output array
           copyDWIMFix (paramName py) [] (Var (patElemName pe)) ((tvExp start + tvExp z) : vec_is)
         compileStms mempty (bodyStms $ lamBody scan_op) $ do
-          forM_ (zip3 local_accums (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(acc, se, pe) -> do
+          forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(se, pe) -> do
             copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
-            -- copyDWIMFix acc vec_is se []
+    -- copyDWIMFix acc vec_is se []
     z <-- tvExp z + 1
 
 copyFromDescToLocal :: [SegBinOp MCMem] -> [[VName]] -> [[VName]] -> TV Int64 -> MulticoreGen ()
@@ -297,12 +295,12 @@ seqAggregate pat i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx 
             sLoopNestVectorized (segBinOpShape scan_op) $ \vec_is -> do
               forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
                 copyDWIMFix (paramName px) [] (Var acc) vec_is
-              forM_ (zip3 (yParams scan_op) scan_res pes) $ \(py, kr, pe) -> do
+              forM_ (zip (yParams scan_op) scan_res ) $ \(py, kr) -> do
                 copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
-                -- storing kernel result in output array
-                -- copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) (kernelResultSubExp kr) vec_is
+              -- storing kernel result in output array
+              -- copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) (kernelResultSubExp kr) vec_is
               compileStms mempty (bodyStms $ lamBody scan_op) $ do
-                forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op ) local_accums pes) $ \(se, acc, pe) -> do
+                forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) local_accums pes) $ \(se, acc, pe) -> do
                   copyDWIMFix acc vec_is se []
                   copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) se []
         )
@@ -327,15 +325,11 @@ nonsegmentedScan
   scan_ops
   kbody
   _nsubtasks = do
-    let comp_tys = concatMap (lambdaReturnType . segBinOpLambda) scan_ops
-    let pts = map elemType comp_tys
-
-    let pt0 = case pts of
-          (pt : _) -> pt
-          [] -> int32
-    -- let blockSize = cacheSize `divUp` (primByteSize pt0 * 1)
-    let blockSize = cacheSize `divUp` (totalBytes scan_ops `divUp` 2)
+    let blockSize = cacheSize `divUp` (totalBytes scan_ops * 1)
     emit $ Imp.DebugPrint "n value: " (Just $ untyped $ pe64 n)
+    emit $ Imp.DebugPrint "block size: " (Just $ untyped blockSize)
+    emit $ Imp.DebugPrint "total bytes per block: " (Just $ untyped $ totalBytes scan_ops)
+
     -- let blockSize = 1 :: Imp.TExp Int64
 
     block_no <- dPrim "nblocks"
@@ -358,7 +352,7 @@ nonsegmentedScan
 
     copyDWIMFix work_index [0] (intConst Int64 0) []
 
-    fbody <-  collect $ inISPC $ do
+    fbody <- collect $ inISPC $ do
       let one = (1 :: Imp.TExp Int64)
       let idx0 = Imp.elements (0 :: Imp.TExp Int32)
 
@@ -458,30 +452,5 @@ nonsegmentedScan
 
         sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) workF idx0 (untyped one)
 
-     
     free_params <- freeParams fbody
     emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
-    -- forM_ scan_ops $ \scan_op -> do
-    --   let ts = lambdaReturnType $ segBinOpLambda scan_op
-
-    --   forM_ ts $ \t -> do
-    --     let arshape = arrayShape t
-    --     let dims = shapeDims arshape
-    --     forM_ (zip [(0 :: Int) ..] dims) $ \(i, d) -> do
-    --       emit $
-    --         Imp.DebugPrint
-    --           "SegScan result shape: "
-    --           (Just $ untyped $ pe64 d)
-    -- forM_ scan_ops $ \scan_op -> do
-    --   let dims = shapeDims $ segBinOpShape scan_op
-
-    --   forM_ (zip [(0 :: Int) ..] dims) $ \(i, d) -> do
-    --     emit $
-    --       Imp.DebugPrint
-    --         "SegScan shape: "
-    --         (Just $ untyped $ pe64 d)
-
-    -- forM_ scan_ops $ \scan_op -> do
-    --   emit $ Imp.DebugPrint "#############" Nothing
-    -- forM_ scan_ops $ \scan_op -> do
-    --   emit $ Imp.DebugPrint "SegScan ********" Nothing
