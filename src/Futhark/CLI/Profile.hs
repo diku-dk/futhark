@@ -60,13 +60,18 @@ data EvSummary = EvSummary
     evMax :: Double
   }
 
-tabulateEvents :: [ProfilingEvent] -> T.Text
-tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
+eventSummaries :: [ProfilingEvent] -> M.Map (T.Text, T.Text) EvSummary
+eventSummaries = M.fromListWith comb . map pair
   where
     pair (ProfilingEvent name dur provenance _details) =
       ((name, provenance), EvSummary 1 dur dur dur)
     comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
       EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
+
+
+tabulateEvents :: M.Map (T.Text, T.Text) EvSummary -> T.Text
+tabulateEvents = mkRows . M.toList
+  where
     numpad = 15
     mkRows rows =
       let longest = foldl max numpad $ map (T.length . fst . fst) rows
@@ -131,19 +136,32 @@ timeline = T.unlines . L.intercalate [""] . map onEvent
         "At: " <> provenance
       ]
 
-data TargetFiles = TargetFiles
+data TargetPaths = TargetPaths
   { summaryFile :: FilePath,
-    timelineFile :: FilePath
+    timelineFile :: FilePath,
+    htmlDir :: FilePath
   }
 
-writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
+writeAnalysis :: TargetPaths -> ProfilingReport -> IO ()
 writeAnalysis tf r = do
+  let evSummaryMap = eventSummaries $ profilingEvents r
+
+  -- profile.summary
   T.writeFile (summaryFile tf) $
     memoryReport (profilingMemory r)
       <> "\n\n"
-      <> tabulateEvents (profilingEvents r)
+      <> tabulateEvents evSummaryMap
+
+  -- heatmap html
+  writeHtml (htmlDir tf) evSummaryMap
+
+  -- profile.timeline
   T.writeFile (timelineFile tf) $
     timeline (profilingEvents r)
+
+writeHtml :: FilePath -> M.Map (T.Text, T.Text) EvSummary -> IO ()
+writeHtml htmlDirPath evSummaryMap = do
+  pure ()
 
 prepareDir :: FilePath -> IO FilePath
 prepareDir json_path = do
@@ -157,9 +175,10 @@ analyseProfilingReport json_path r = do
   top_dir <- prepareDir json_path
   createDirectoryIfMissing True top_dir
   let tf =
-        TargetFiles
+        TargetPaths
           { summaryFile = top_dir </> "summary",
-            timelineFile = top_dir </> "timeline"
+            timelineFile = top_dir </> "timeline",
+            htmlDir = top_dir </> "html/"
           }
   writeAnalysis tf r
 
@@ -196,7 +215,7 @@ analyseBenchResults json_path bench_results = do
         Nothing -> problem prog_name name "no profiling information"
         Just r ->
           let tf =
-                TargetFiles
+                TargetPaths
                   { summaryFile = name' <> ".summary",
                     timelineFile = name' <> ".timeline"
                   }
