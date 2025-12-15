@@ -53,7 +53,6 @@ import Data.Bifunctor (first)
 import Data.Bitraversable
 import Data.List
   ( elemIndex,
-    foldl',
     groupBy,
     intersperse,
     isPrefixOf,
