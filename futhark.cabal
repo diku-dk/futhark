@@ -509,6 +509,7 @@ executable futhark
 library futhark-testing
   import: common
   hs-source-dirs: src-testing
+  visibility: private
   exposed-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
@@ -541,6 +542,7 @@ library futhark-testing
       Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
+      Language.Futhark.TypeChecker.ConsumptionTests
       Language.Futhark.TypeCheckerTests
   build-depends:
       QuickCheck >=2.8

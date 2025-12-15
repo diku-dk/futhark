@@ -9,9 +9,28 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Per Cost-Centre Source Location Listings in the `.summary`-file output of `futhark profile`. (By VegOwOtenks)
+
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* Unit types now behave like records/tuples in the C interface and derived
+  interface, such as server-mode and `futhark literate`. (#2332)
+
+* `futhark bench`: JSON output now contains results for all test stanzas that
+  use a given entry point, rather than just the last one.
+
+* A bug in internalisation of `while` loops that could occur when one result of
+  the loop was syntactically the same as a loop parameter. (#2335)
+
+## [0.25.34]
+
+### Added
+
+* Support for CUDA 13.
 
 ### Fixed
 
@@ -27,6 +46,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   worse profiling data.
 
 * Tighter source locations for `let x[i] = ...` expressions.
+
+* Oversight in size expressions in let-bindings. (#2322)
+
+* `futhark pkg` is now more robust against errors in package data.
+
+* Incorrect uniqueness inference for functions returning abstract types. (#2324)
+
+* Duplication of entry points in some cases. (#2326)
+
+* A race condition in the creation of `CACHEDIR.TAG` files that could cause
+  `futhark bench` and `futhark test` to crash.
 
 ## [0.25.33]
 

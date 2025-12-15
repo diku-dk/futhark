@@ -93,7 +93,7 @@ import System.FilePath ((</>))
 import System.FilePath qualified as Native
 import System.FilePath.Posix qualified as Posix
 import System.IO (Handle, hIsTerminalDevice, stdout)
-import System.IO.Error (isDoesNotExistError)
+import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import System.IO.Unsafe
 import System.Process.ByteString
 import Text.Read (readMaybe)
@@ -545,9 +545,15 @@ ensureCacheDirectory :: FilePath -> IO ()
 ensureCacheDirectory fpath = do
   createDirectoryIfMissing True fpath
   l <- listDirectory fpath
-  when (null l) . T.writeFile (fpath </> "CACHEDIR.TAG") . T.unlines $
+  when (null l) . okIfInUse . T.writeFile (fpath </> "CACHEDIR.TAG") . T.unlines $
     [ "Signature: 8a477f597d28d172789f06886806bc55",
       "# This file is a cache directory tag created by futhark.",
       "# For information about cache directory tags, see:",
       "#     https://bford.info/cachedir/"
     ]
+  where
+    -- Several threads may be trying to create this file concurrently, which
+    -- will normally result in an exception due to locking - but it is actually
+    -- fine. They will all be trying to write the same thing anyway.
+    okIfInUse m =
+      catchJust (guard . isAlreadyInUseError) m (const $ pure ())

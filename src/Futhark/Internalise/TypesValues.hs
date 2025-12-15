@@ -218,7 +218,7 @@ internaliseDim ::
   InternaliseTypeM ExtSize
 internaliseDim exts d =
   case d of
-    e | e == E.anySize -> Ext <$> newId
+    e | Just _ <- E.isAnySize e -> Ext <$> newId
     (E.IntLit n _ _) -> pure $ I.Free $ intConst I.Int64 n
     (E.Var name _ _) -> pure $ namedDim name
     e -> error $ "Unexpected size expression: " ++ prettyString e
