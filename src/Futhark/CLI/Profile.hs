@@ -136,13 +136,13 @@ timeline = T.unlines . L.intercalate [""] . map onEvent
         "At: " <> provenance
       ]
 
-data TargetPaths = TargetPaths
+data TargetFiles = TargetFiles
   { summaryFile :: FilePath,
     timelineFile :: FilePath,
     htmlDir :: FilePath
   }
 
-writeAnalysis :: TargetPaths -> ProfilingReport -> IO ()
+writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
 writeAnalysis tf r = do
   let evSummaryMap = eventSummaries $ profilingEvents r
 
@@ -175,7 +175,7 @@ analyseProfilingReport json_path r = do
   top_dir <- prepareDir json_path
   createDirectoryIfMissing True top_dir
   let tf =
-        TargetPaths
+        TargetFiles
           { summaryFile = top_dir </> "summary",
             timelineFile = top_dir </> "timeline",
             htmlDir = top_dir </> "html/"
@@ -215,9 +215,10 @@ analyseBenchResults json_path bench_results = do
         Nothing -> problem prog_name name "no profiling information"
         Just r ->
           let tf =
-                TargetPaths
+                TargetFiles
                   { summaryFile = name' <> ".summary",
-                    timelineFile = name' <> ".timeline"
+                    timelineFile = name' <> ".timeline",
+                    htmlDir = name' <> "html/"
                   }
            in writeAnalysis tf r
 
