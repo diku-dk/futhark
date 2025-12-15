@@ -634,11 +634,11 @@ namesToPrimTypes :: M.Map Name PrimType
 namesToPrimTypes =
   M.fromList
     [ (nameFromString $ prettyString t, t)
-      | t <-
-          Bool
-            : map Signed [minBound .. maxBound]
-            ++ map Unsigned [minBound .. maxBound]
-            ++ map FloatType [minBound .. maxBound]
+    | t <-
+        Bool
+          : map Signed [minBound .. maxBound]
+          ++ map Unsigned [minBound .. maxBound]
+          ++ map FloatType [minBound .. maxBound]
     ]
 
 -- | The nature of something predefined.  For functions, these can

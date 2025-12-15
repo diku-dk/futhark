@@ -410,7 +410,7 @@ loopMerge vars = loopMerge' $ map (,Unique) vars
 loopMerge' :: [(Ident, Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
 loopMerge' vars vals =
   [ (Param mempty pname $ toDecl ptype u, val)
-    | ((Ident pname ptype, u), val) <- zip vars vals
+  | ((Ident pname ptype, u), val) <- zip vars vals
   ]
 
 -- Note [Translation of Screma]

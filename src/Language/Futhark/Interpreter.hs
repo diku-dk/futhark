@@ -38,7 +38,6 @@ import Data.Bitraversable
 import Data.Functor (($>), (<&>))
 import Data.List
   ( find,
-    foldl',
     genericLength,
     genericTake,
     transpose,

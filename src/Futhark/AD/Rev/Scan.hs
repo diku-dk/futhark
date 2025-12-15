@@ -343,8 +343,7 @@ asLiftPPAD as w e = do
                 nm1 <- toSubExp "n_minus_one" $ pe64 w - 1
                 pure $ BasicOp $ CmpOp (CmpSlt Int64) (Var $ paramName par_i) nm1
             )
-            ( buildBody_ $ (\x -> [subExpRes x]) <$> (letSubExp "val" =<< eIndex arr [toExp $ le64 (paramName par_i) + 1])
-            )
+            (buildBody_ $ (\x -> [subExpRes x]) <$> (letSubExp "val" =<< eIndex arr [toExp $ le64 (paramName par_i) + 1]))
             (buildBody_ $ pure [subExpRes arr_e])
       pure $ varRes a_lift
 
@@ -359,11 +358,9 @@ ysRightPPAD ys w e = do
       a_lift <-
         letExp "y_right"
           =<< eIf
-            ( pure $ BasicOp $ CmpOp (CmpEq int64) (Var $ paramName par_i) (constant (0 :: Int64))
-            )
+            (pure $ BasicOp $ CmpOp (CmpEq int64) (Var $ paramName par_i) (constant (0 :: Int64)))
             (buildBody_ $ pure [subExpRes arr_e])
-            ( buildBody_ $ (\x -> [subExpRes x]) <$> (letSubExp "val" =<< eIndex arr [toExp $ le64 (paramName par_i) - 1])
-            )
+            (buildBody_ $ (\x -> [subExpRes x]) <$> (letSubExp "val" =<< eIndex arr [toExp $ le64 (paramName par_i) - 1]))
       pure $ varRes a_lift
 
   iota <- letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64

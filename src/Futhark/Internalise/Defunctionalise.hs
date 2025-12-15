@@ -8,7 +8,6 @@ import Control.Monad.State
 import Data.Bifoldable (bifoldMap)
 import Data.Bifunctor
 import Data.Bitraversable
-import Data.Foldable
 import Data.List (partition, sortOn)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M

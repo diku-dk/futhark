@@ -273,11 +273,11 @@ contextContents = do
     gets $ unzip4 . DL.toList . compCtxFields
   let fields =
         [ [C.csdecl|$ty:ty $id:name;|]
-          | (name, ty) <- zip field_names field_types
+        | (name, ty) <- zip field_names field_types
         ]
       init_fields =
         [ [C.cstm|ctx->program->$id:name = $exp:e;|]
-          | (name, Just e) <- zip field_names field_values
+        | (name, Just e) <- zip field_names field_values
         ]
       (setup, free) = unzip $ catMaybes field_frees
   pure (fields, init_fields <> setup, free)

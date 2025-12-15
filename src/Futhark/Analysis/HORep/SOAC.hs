@@ -442,7 +442,7 @@ typeOf (Stream w _ nes lam) =
   let accrtps = take (length nes) $ lambdaReturnType lam
       arrtps =
         [ arrayOf (stripArray 1 t) (Shape [w]) NoUniqueness
-          | t <- drop (length nes) (lambdaReturnType lam)
+        | t <- drop (length nes) (lambdaReturnType lam)
         ]
    in accrtps ++ arrtps
 typeOf (Screma w _ form) =

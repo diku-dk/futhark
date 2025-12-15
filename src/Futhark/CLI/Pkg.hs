@@ -415,7 +415,7 @@ main prog args = do
             usageMsg . T.unlines $
               ["<command> ...:", "", "Commands:"]
                 ++ [ "   " <> T.pack cmd <> T.pack (replicate (k - length cmd) ' ') <> desc
-                     | (cmd, (_, desc)) <- commands
+                   | (cmd, (_, desc)) <- commands
                    ]
 
       mainWithOptions () [] usage bad prog args

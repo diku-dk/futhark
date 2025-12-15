@@ -26,7 +26,7 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   (params, body, rettype) <- internaliseLambda lam $ acctypes ++ rowtypes
   let rettype' =
         [ t `I.setArrayShape` I.arrayShape shape
-          | (t, shape) <- zip rettype acctypes
+        | (t, shape) <- zip rettype acctypes
         ]
   -- The result of the body must have the exact same shape as the
   -- initial accumulator.

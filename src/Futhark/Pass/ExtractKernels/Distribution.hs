@@ -280,7 +280,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, []) = do
   i <- newVName "gtid"
   let inps =
         [ KernelInput pname ptype arr [Var i]
-          | (Param _ pname ptype, arr) <- params_and_arrs
+        | (Param _ pname ptype, arr) <- params_and_arrs
         ]
   pure ([(i, nesting_w)], inps)
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
@@ -303,7 +303,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   where
     extra_inps i =
       [ KernelInput pname ptype arr [Var i]
-        | (Param _ pname ptype, arr) <- params_and_arrs
+      | (Param _ pname ptype, arr) <- params_and_arrs
       ]
 
 -- | Description of distribution to do.

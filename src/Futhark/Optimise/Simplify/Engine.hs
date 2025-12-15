@@ -68,7 +68,7 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bitraversable
 import Data.Either
-import Data.List (find, foldl', inits, mapAccumL)
+import Data.List (find, inits, mapAccumL)
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.Analysis.SymbolTable qualified as ST

@@ -7,7 +7,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
-import Data.Foldable
 import Data.List (partition)
 import Data.Map.Strict qualified as M
 import Data.Maybe

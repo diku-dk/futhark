@@ -133,7 +133,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       in_bounds =
         allTrue
           [ [C.cexp|$id:p >= 0 && $id:p < arr->shape[$int:i]|]
-            | (p, i) <- zip index_names [0 .. rank - 1]
+          | (p, i) <- zip index_names [0 .. rank - 1]
           ]
   index_body <-
     collect $
@@ -547,7 +547,7 @@ recordArrayIndexFunctions space _types desc rank elemtype vds = do
     in_bounds =
       allTrue
         [ [C.cexp|$id:p >= 0 && $id:p < arr->$id:(tupleField 0)->shape[$int:i]|]
-          | (p, i) <- zip index_names [0 .. rank - 1]
+        | (p, i) <- zip index_names [0 .. rank - 1]
         ]
 
     setField copy j (ValueType _ (Rank r) pt)

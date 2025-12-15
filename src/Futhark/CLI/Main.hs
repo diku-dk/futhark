@@ -96,7 +96,7 @@ msg =
   unlines $
     ["<command> options...", "Commands:", ""]
       ++ [ "   " <> cmd <> replicate (k - length cmd) ' ' <> desc
-           | (cmd, (_, desc)) <- commands
+         | (cmd, (_, desc)) <- commands
          ]
   where
     k = maxinum (map (length . fst) commands) + 3

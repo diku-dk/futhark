@@ -10,7 +10,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor
 import Data.Either (rights)
-import Data.List (find, foldl')
+import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq

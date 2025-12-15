@@ -56,7 +56,6 @@ where
 import Control.Monad
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
-import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias

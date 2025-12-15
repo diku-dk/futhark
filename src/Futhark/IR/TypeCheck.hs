@@ -638,8 +638,8 @@ checkFun (FunDef _ _ fname rettype params body) =
   where
     consumable =
       [ (paramName param, mempty)
-        | param <- params,
-          unique $ paramDeclType param
+      | param <- params,
+        unique $ paramDeclType param
       ]
 
 funParamsToNameInfos ::
@@ -1046,8 +1046,8 @@ checkExp (Loop merge form loopbody) = do
     let rettype = map paramDeclType mergepat
         consumable =
           [ (paramName param, mempty)
-            | param <- mergepat,
-              unique $ paramDeclType param
+          | param <- mergepat,
+            unique $ paramDeclType param
           ]
             ++ form_consumable
 

@@ -410,11 +410,9 @@ disjoint2 _ _ less_thans non_negatives lmad1 lmad2 =
            ) of
         (Just interval1'', Just interval2'') ->
           isNothing
-            ( selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval1''
-            )
+            (selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval1'')
             && isNothing
-              ( selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval2''
-              )
+              (selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval2'')
             && not
               ( all
                   (uncurry (intervalOverlap less_thans non_negatives))

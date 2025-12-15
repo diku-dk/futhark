@@ -217,8 +217,8 @@ cseInStm consumed (Let pat aux e) m = do
           let lets =
                 [ Let (Pat [patElem']) aux $
                     BasicOp (SubExp $ Var $ patElemName patElem)
-                  | (name, patElem) <- zip (patNames pat') $ patElems subpat,
-                    let patElem' = patElem {patElemName = name}
+                | (name, patElem) <- zip (patNames pat') $ patElems subpat,
+                  let patElem' = patElem {patElemName = name}
                 ]
           m lets
       _ ->

@@ -39,7 +39,6 @@ import Control.Monad.Except
 import Control.Monad.RWS.Lazy qualified
 import Control.Monad.RWS.Strict qualified
 import Control.Monad.Reader
-import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Types

@@ -688,7 +688,7 @@ instance Pretty (DimAccess rep) where
       Nothing -> True
       Just n ->
         length (dependencies dim_access) == 1 && n == head (map fst $ M.toList $ dependencies dim_access)
-        -- Only print the original name if it is different from the first (and single) dependency
+      -- Only print the original name if it is different from the first (and single) dependency
       then
         "dependencies"
           <+> equals

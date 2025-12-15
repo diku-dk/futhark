@@ -386,6 +386,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark script` now supports the builtin procedure `$store`.
 
+* Compiling the Futhark compiler now requires GHC 9.10.
+
 ### Fixed
 
 * An error in tuning file validation.

@@ -3,7 +3,7 @@ let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
   python = pkgs.python313Packages;
-  haskell = pkgs.haskell.packages.ghc98;
+  haskell = pkgs.haskell.packages.ghc910;
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
@@ -20,7 +20,7 @@ pkgs.stdenv.mkDerivation {
       haskell.weeder
       haskell.haskell-language-server
       haskellPackages.graphmod
-      haskellPackages.apply-refact
+#      haskellPackages.apply-refact
       xdot
       pkg-config
       zlib
@@ -44,7 +44,7 @@ pkgs.stdenv.mkDerivation {
     ++ lib.optionals (stdenv.isLinux)
       [ opencl-headers
         ocl-icd
-        oclgrind
+        (pkgs.callPackage ./nix/oclgrind.nix {})
         rocmPackages.clr
       ])
   ;

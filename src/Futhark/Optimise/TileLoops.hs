@@ -1108,8 +1108,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size tile_ar
       fmap varsRes $
         letTupExp "acc"
           =<< eIf
-            ( toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
-            )
+            (toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y)
             (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size tiles' form'])
             (resultBodyM thread_accs)
 
