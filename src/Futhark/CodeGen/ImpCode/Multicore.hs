@@ -43,6 +43,9 @@ data Multicore
   | -- | Retrieve the number of subtasks to execute.  Only valid
     -- immediately inside a 'SegOp' or 'ParLoop' construct!
     GetNumTasks VName
+  | -- | If the context is currently in an error state (e.g. because some other
+    -- task has died), put @True@ in the given variable, otherwise @False@.
+    GetError VName
   | Atomic AtomicOp
 
 -- | Multicore code.
@@ -150,6 +153,8 @@ instance Pretty Multicore where
       <+> nestedBlock "{" "}" (pretty body)
   pretty (ExtractLane dest tar lane) =
     pretty dest <+> "<-" <+> "extract" <+> parens (commasep $ map pretty [tar, lane])
+  pretty (GetError v) =
+    pretty v <+> "<-" <+> "get_error()"
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -178,6 +183,8 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body)
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
+  freeIn' (GetError v) =
+    freeIn' v
 
 -- | Whether 'lexicalMemoryUsageMC' should look inside nested kernels
 -- or not.

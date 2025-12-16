@@ -446,6 +446,8 @@ compileOp (ForEachActive i body) = do
 compileOp (ExtractLane dest tar _) = do
   tar' <- GC.compileExp tar
   GC.stm [C.cstm|$id:dest = $exp:tar';|]
+compileOp (GetError v) =
+  GC.stm [C.cstm|$id:v = ctx->error != NULL;|]
 
 scopedBlock :: MCCode -> GC.CompilerM Multicore s ()
 scopedBlock code = do
@@ -491,24 +493,21 @@ atomicOps (AtomicXchg t old arr ind val) castf = do
   where
     op :: String
     op = "__atomic_exchange_n"
-
-atomicOps (AtomicLoad t ret arr ind ) castf = do
+atomicOps (AtomicLoad t ret arr ind) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
   GC.stm [C.cstm|$id:ret = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], __ATOMIC_ACQUIRE);|]
   where
     op :: String
     op = "__atomic_load_n"
-
-atomicOps (AtomicStore t  arr ind val) castf = do
+atomicOps (AtomicStore t arr ind val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
   GC.stm [C.cstm|$id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_RELEASE);|]
   where
     op :: String
-    op = "__atomic_store_n" 
-
+    op = "__atomic_store_n"
 atomicOps (AtomicAdd t old arr ind val) castf =
   doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|] castf
 atomicOps (AtomicSub t old arr ind val) castf =
