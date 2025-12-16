@@ -3,8 +3,10 @@ module Futhark.CLI.Profile (main) where
 
 import Control.Arrow ((>>>))
 import Control.Exception (catch)
-import Control.Monad (void)
-import Data.Bifunctor (bimap, first)
+import Control.Monad (void, when, (>=>))
+import Control.Monad.Except (ExceptT, runExceptT)
+import Control.Monad.IO.Class (liftIO)
+import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.List qualified as L
 import Data.Loc (Pos (Pos))
@@ -148,21 +150,26 @@ data TargetFiles = TargetFiles
   }
 
 writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
-writeAnalysis tf r = do
+writeAnalysis tf r = runExceptT >=> handleException $ do
   let evSummaryMap = eventSummaries $ profilingEvents r
-
-  -- profile.summary
-  T.writeFile (summaryFile tf) $
-    memoryReport (profilingMemory r)
-      <> "\n\n"
-      <> tabulateEvents evSummaryMap
 
   -- heatmap html
   writeHtml (htmlDir tf) evSummaryMap
 
+  -- profile.summary
+  liftIO $
+    T.writeFile (summaryFile tf) $
+      memoryReport (profilingMemory r)
+        <> "\n\n"
+        <> tabulateEvents evSummaryMap
+
   -- profile.timeline
-  T.writeFile (timelineFile tf) $
-    timeline (profilingEvents r)
+  liftIO $
+    T.writeFile (timelineFile tf) $
+      timeline (profilingEvents r)
+  where
+    handleException :: Either T.Text () -> IO ()
+    handleException = either (T.hPutStrLn stderr) pure
 
 expandEvSummaryMap :: M.Map (T.Text, T.Text) EvSummary -> M.Map (T.Text, T.Text) EvSummary
 expandEvSummaryMap =
@@ -189,16 +196,26 @@ expandEvSummaryMap =
 
 -- | I chose this representation over `Loc` from `srcLoc` because it guarantees the presence of a range.
 -- Loc is essentially a 'Maybe (Pos, Pos)', because of the 'NoLoc' constructor.
+-- I cannot even imagine dealing with cross-file ranges anyway.
+
+-- Both ends of the range are inclusive
 data SourceRange = SourceRange
   { start :: !Pos,
-    endLine :: !Int,
-    endColumn :: !Int
+    endLine :: !Int, -- invariant: at least a big as start.line
+    endColumn :: !Int -- invariant: at least as big as start.col
   }
+  deriving (Eq, Ord)
 
 parseSourceRange :: T.Text -> Either T.Text SourceRange
-parseSourceRange text = first (T.pack . P.errorBundlePretty) $ P.parse pSourceRange fname text
+parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
   where
     fname = ""
+    textErrorBundle = T.pack . P.errorBundlePretty
+
+    lineRangeInvariantMessage =
+      "End of Line Range is not bigger than or equal to Start of Line Range."
+    columnRangeInvariantMessage =
+      "End of Column Range is not bigger than or equal to Start of Column Range"
 
     pSourceRange :: P.Parsec Void T.Text SourceRange
     pSourceRange = do
@@ -219,18 +236,26 @@ parseSourceRange text = first (T.pack . P.errorBundlePretty) $ P.parse pSourceRa
             pure (startLine, rangeEnd1)
           ]
 
-      pure $ SourceRange {start = Pos fileName startLine startCol (-1), endLine = endLine_, endColumn = endColumn_}
+      when (startLine > endLine_) $ fail lineRangeInvariantMessage
+      when (startCol > endColumn_) $ fail columnRangeInvariantMessage
+
+      pure $
+        SourceRange
+          { start = Pos fileName startLine startCol (-1),
+            endLine = endLine_,
+            endColumn = endColumn_
+          }
 
 writeHtml ::
   -- | target directory path
   FilePath ->
   -- | mapping keys are (name, provenance)
   M.Map (T.Text, T.Text) EvSummary ->
-  IO ()
+  ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
   -- there are no compound provenance blocks in this map anymore
   let singleSourceEvSummaryMap = expandEvSummaryMap evSummaryMap
-  let provenanceEvSummaryMap = M.mapKeys _ singleSourceEvSummaryMap
+  let provenanceEvSummaryMap = M.mapKeys (second parseSourceRange) singleSourceEvSummaryMap
   pure ()
 
 prepareDir :: FilePath -> IO FilePath
