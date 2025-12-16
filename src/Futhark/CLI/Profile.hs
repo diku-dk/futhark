@@ -4,10 +4,11 @@ module Futhark.CLI.Profile (main) where
 import Control.Arrow ((>>>))
 import Control.Exception (catch)
 import Control.Monad (void, when, (>=>))
-import Control.Monad.Except (ExceptT, runExceptT)
+import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.Function ((&))
 import Data.List qualified as L
 import Data.Loc (Pos (Pos))
 import Data.Map qualified as M
@@ -201,11 +202,21 @@ expandEvSummaryMap =
 -- Both ends of the range are inclusive
 data SourceRange = SourceRange
   { start :: !Pos,
-    endLine :: !Int, -- invariant: at least a big as start.line
-    endColumn :: !Int -- invariant: at least as big as start.col
+    -- | invariant: at least a big as start.line
+    endLine :: !Int,
+    -- | invariant: at least as big as start.col, unless the range spans multiple lines
+    endColumn :: !Int
   }
-  deriving (Eq, Ord)
+  deriving (Show, Eq, Ord)
 
+-- | Parse a source range, respect the invariants noted in the definition
+-- and print the MegaParsec errorbundle into a Text.
+--
+-- >>> parseSourceRange "example.fut:1:1-5"
+-- Right (SourceRange {start = Pos "example.fut" 1 1 (-1), endLine = 1, endColumn = 5})
+--
+-- >>> parseSourceRange "directory/example.fut:15:12-17:1"
+-- Right (SourceRange {start = Pos "directory/example.fut" 15 12 (-1), endLine = 17, endColumn = 1})
 parseSourceRange :: T.Text -> Either T.Text SourceRange
 parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
   where
@@ -236,8 +247,12 @@ parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
             pure (startLine, rangeEnd1)
           ]
 
-      when (startLine > lineRangeEnd) $ fail lineRangeInvariantMessage
-      when (startCol > columnRangeEnd) $ fail columnRangeInvariantMessage
+      let lineRangeInvalid = startLine > lineRangeEnd
+      when lineRangeInvalid $ fail lineRangeInvariantMessage
+
+      let columnRangeInvalid =
+            startLine == lineRangeEnd && startCol > columnRangeEnd
+      when columnRangeInvalid $ fail columnRangeInvariantMessage
 
       pure $
         SourceRange
@@ -246,6 +261,24 @@ parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
             endColumn = columnRangeEnd
           }
 
+buildProvenanceSummaryMap ::
+  -- | Keys are: (ccName, ccProvenance)
+  M.Map (T.Text, T.Text) EvSummary ->
+  ExceptT T.Text IO (M.Map (T.Text, SourceRange) EvSummary)
+buildProvenanceSummaryMap evSummaryMap =
+  let -- there are no compound provenance blocks in this map anymore
+      singleSourceEvSummaryMap = expandEvSummaryMap evSummaryMap
+      -- parse the provenance text
+      provenanceEvSummaryMap =
+        M.mapKeys (second parseSourceRange) singleSourceEvSummaryMap
+
+      -- throw error text on parse failure, will short-circuit
+      filterBadSourceRangeParses ((name, parseResult), evSummary) = case parseResult of
+        Left err -> throwError $ "Parse failure in provenance information\n" <> err
+        Right sourceRange -> pure ((name, sourceRange), evSummary)
+   in mapM filterBadSourceRangeParses (M.toList provenanceEvSummaryMap)
+        & fmap M.fromList
+
 writeHtml ::
   -- | target directory path
   FilePath ->
@@ -253,9 +286,7 @@ writeHtml ::
   M.Map (T.Text, T.Text) EvSummary ->
   ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
-  -- there are no compound provenance blocks in this map anymore
-  let singleSourceEvSummaryMap = expandEvSummaryMap evSummaryMap
-  let provenanceEvSummaryMap = M.mapKeys (second parseSourceRange) singleSourceEvSummaryMap
+  provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
   pure ()
 
 prepareDir :: FilePath -> IO FilePath
