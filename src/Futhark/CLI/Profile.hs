@@ -1,13 +1,17 @@
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
+import Control.Arrow ((>>>))
 import Control.Exception (catch)
-import Data.Bifunctor (first)
+import Control.Monad (void)
+import Data.Bifunctor (bimap, first)
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.List qualified as L
+import Data.Loc (Pos (Pos))
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Data.Void (Void)
 import Futhark.Bench
   ( BenchResult (BenchResult, benchResultProg),
     DataResult (DataResult),
@@ -29,6 +33,8 @@ import System.FilePath
     (</>),
   )
 import System.IO (hPutStrLn, stderr)
+import Text.Megaparsec qualified as P
+import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Printf (printf)
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
@@ -67,7 +73,6 @@ eventSummaries = M.fromListWith comb . map pair
       ((name, provenance), EvSummary 1 dur dur dur)
     comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
       EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
-
 
 tabulateEvents :: M.Map (T.Text, T.Text) EvSummary -> T.Text
 tabulateEvents = mkRows . M.toList
@@ -159,8 +164,73 @@ writeAnalysis tf r = do
   T.writeFile (timelineFile tf) $
     timeline (profilingEvents r)
 
-writeHtml :: FilePath -> M.Map (T.Text, T.Text) EvSummary -> IO ()
+expandEvSummaryMap :: M.Map (T.Text, T.Text) EvSummary -> M.Map (T.Text, T.Text) EvSummary
+expandEvSummaryMap =
+  M.toList
+    >>> concatMap expandEvSummary
+    >>> M.fromList
+  where
+    expandEvSummary ((name, provenance), evSummary) =
+      map (\(sourceLoc, splitSummary) -> ((name, sourceLoc), splitSummary)) $
+        splitEvSummarySources provenance evSummary
+
+    splitEvSummarySources :: T.Text -> EvSummary -> [(T.Text, EvSummary)]
+    splitEvSummarySources provenance summary =
+      let sourceLocations = T.splitOn "->" provenance
+          locationCount = length sourceLocations
+          splitSummary =
+            EvSummary
+              { evCount = evCount summary,
+                evSum = evSum summary / fromIntegral locationCount,
+                evMin = evMin summary / fromIntegral locationCount,
+                evMax = evMax summary / fromIntegral locationCount
+              }
+       in map (,splitSummary) sourceLocations
+
+-- | I chose this representation over `Loc` from `srcLoc` because it guarantees the presence of a range.
+-- Loc is essentially a 'Maybe (Pos, Pos)', because of the 'NoLoc' constructor.
+data SourceRange = SourceRange
+  { start :: !Pos,
+    endLine :: !Int,
+    endColumn :: !Int
+  }
+
+parseSourceRange :: T.Text -> Either T.Text SourceRange
+parseSourceRange text = first (T.pack . P.errorBundlePretty) $ P.parse pSourceRange fname text
+  where
+    fname = ""
+
+    pSourceRange :: P.Parsec Void T.Text SourceRange
+    pSourceRange = do
+      fileName <- L.charLiteral `P.manyTill` P.single ':' -- separator
+      startLine <- L.decimal
+      void $ P.single ':' -- separator
+      startCol <- L.decimal
+
+      void $ P.single '-' -- range begin
+      rangeEnd1 <- L.decimal
+      -- we can't know yet whether this is going to be a line or column position
+
+      (endLine_, endColumn_) <-
+        P.choice
+          [ do
+              endCol <- P.single ':' *> L.decimal
+              pure (rangeEnd1, endCol),
+            pure (startLine, rangeEnd1)
+          ]
+
+      pure $ SourceRange {start = Pos fileName startLine startCol (-1), endLine = endLine_, endColumn = endColumn_}
+
+writeHtml ::
+  -- | target directory path
+  FilePath ->
+  -- | mapping keys are (name, provenance)
+  M.Map (T.Text, T.Text) EvSummary ->
+  IO ()
 writeHtml htmlDirPath evSummaryMap = do
+  -- there are no compound provenance blocks in this map anymore
+  let singleSourceEvSummaryMap = expandEvSummaryMap evSummaryMap
+  let provenanceEvSummaryMap = M.mapKeys _ singleSourceEvSummaryMap
   pure ()
 
 prepareDir :: FilePath -> IO FilePath
