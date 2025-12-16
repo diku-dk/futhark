@@ -1,16 +1,16 @@
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
-import Control.Arrow ((>>>))
+import Control.Arrow ((>>>), (&&&))
 import Control.Exception (catch)
 import Control.Monad (void, when, (>=>))
-import Control.Monad.Except (ExceptT, runExceptT, throwError)
+import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither)
 import Control.Monad.IO.Class (liftIO)
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.Function ((&))
 import Data.List qualified as L
-import Data.Loc (Pos (Pos))
+import Data.Loc (Pos (Pos), posFile)
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -39,6 +39,7 @@ import System.IO (hPutStrLn, stderr)
 import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Printf (printf)
+import qualified Data.Text.Encoding as T
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -201,7 +202,7 @@ expandEvSummaryMap =
 
 -- Both ends of the range are inclusive
 data SourceRange = SourceRange
-  { start :: !Pos,
+  { rangeStartPos :: !Pos,
     -- | invariant: at least a big as start.line
     endLine :: !Int,
     -- | invariant: at least as big as start.col, unless the range spans multiple lines
@@ -256,15 +257,15 @@ parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
 
       pure $
         SourceRange
-          { start = Pos fileName startLine startCol (-1),
+          { rangeStartPos = Pos fileName startLine startCol (-1),
             endLine = lineRangeEnd,
             endColumn = columnRangeEnd
           }
 
-buildProvenanceSummaryMap ::
+buildProvenanceSummaryMap :: Monad m =>
   -- | Keys are: (ccName, ccProvenance)
   M.Map (T.Text, T.Text) EvSummary ->
-  ExceptT T.Text IO (M.Map (T.Text, SourceRange) EvSummary)
+  ExceptT T.Text m (M.Map (T.Text, SourceRange) EvSummary)
 buildProvenanceSummaryMap evSummaryMap =
   let -- there are no compound provenance blocks in this map anymore
       singleSourceEvSummaryMap = expandEvSummaryMap evSummaryMap
@@ -287,7 +288,16 @@ writeHtml ::
   ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
+  sourceFiles <- loadAllFiles (posFile . rangeStartPos . snd <$> M.keys provenanceSummaries)
   pure ()
+
+loadAllFiles :: [FilePath] -> ExceptT T.Text IO (M.Map FilePath T.Text)
+loadAllFiles = fmap M.fromList . mapM (\ path -> (path, ) <$> tryLoadFile path)
+  where
+    tryLoadFile filePath = do
+      bytes <- liftIO $ readFileSafely filePath
+      bytes' <- liftEither . first T.pack $ bytes
+      liftEither . first T.show $ T.decodeUtf8' (BS.toStrict bytes')
 
 prepareDir :: FilePath -> IO FilePath
 prepareDir json_path = do
