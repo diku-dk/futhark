@@ -84,6 +84,21 @@ totalBytes scan_ops =
   where
     bytesOfShape pt sh = primByteSize pt * product (map pe64 (shapeDims sh))
 
+-- | Determine whether this kernel body should be recomputed. Involves both
+-- correctness checks and (crude) efficiency checks. Basically, recomputation is
+-- only safe if nothing is consumed in the body, and considered efficient only
+-- if the body has no loops.
+shouldRecompute :: KernelBody MCMem -> Bool
+shouldRecompute = not . any (bad . stmExp) . bodyStms
+  where
+    bad (BasicOp Update {}) = True
+    bad (BasicOp UpdateAcc {}) = True
+    bad (WithAcc {}) = True
+    bad Loop {} = True
+    bad (Match _ cases def_body _) =
+      any (any (bad . stmExp) . bodyStms) (def_body : map caseBody cases)
+    bad _ = False
+
 -- | Compile a SegScan construct.
 compileSegScan ::
   Pat LetDecMem ->
