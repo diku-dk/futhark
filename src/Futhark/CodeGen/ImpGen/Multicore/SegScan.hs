@@ -352,7 +352,7 @@ nonsegmentedScan
 
     copyDWIMFix work_index [0] (intConst Int64 0) []
 
-    fbody <- collect $ inISPC $ do
+    fbody <- collect $ do
       let one = (1 :: Imp.TExp Int64)
       let idx0 = Imp.elements (0 :: Imp.TExp Int32)
 
