@@ -228,7 +228,7 @@ parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
       rangeEnd1 <- L.decimal
       -- we can't know yet whether this is going to be a line or column position
 
-      (endLine_, endColumn_) <-
+      (lineRangeEnd, columnRangeEnd) <-
         P.choice
           [ do
               endCol <- P.single ':' *> L.decimal
@@ -236,14 +236,14 @@ parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
             pure (startLine, rangeEnd1)
           ]
 
-      when (startLine > endLine_) $ fail lineRangeInvariantMessage
-      when (startCol > endColumn_) $ fail columnRangeInvariantMessage
+      when (startLine > lineRangeEnd) $ fail lineRangeInvariantMessage
+      when (startCol > columnRangeEnd) $ fail columnRangeInvariantMessage
 
       pure $
         SourceRange
           { start = Pos fileName startLine startCol (-1),
-            endLine = endLine_,
-            endColumn = endColumn_
+            endLine = lineRangeEnd,
+            endColumn = columnRangeEnd
           }
 
 writeHtml ::
