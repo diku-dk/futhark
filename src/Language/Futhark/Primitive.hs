@@ -1581,7 +1581,7 @@ primFuns =
                  _ -> Nothing
              )
            )
-           | t <- allPrimTypes
+         | t <- allPrimTypes
          ]
   where
     i8 s f = (s, ([IntType Int8], IntType Int32, i8PrimFun f))

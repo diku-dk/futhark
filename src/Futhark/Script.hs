@@ -42,7 +42,6 @@ import Data.Binary qualified as Bin
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
-import Data.Foldable (toList)
 import Data.Functor
 import Data.IORef
 import Data.List (intersperse)
@@ -306,11 +305,11 @@ scriptValueType (SFun _ ins outs _) = STFun ins outs
 
 -- | The set of server-side variables in the value.
 serverVarsInValue :: ExpValue -> S.Set VarName
-serverVarsInValue = S.fromList . concatMap isVar . toList
+serverVarsInValue = S.fromList . concatMap isVar
   where
     isVar (SValue _ (VVar x)) = [x]
     isVar (SValue _ (VVal _)) = []
-    isVar (SFun _ _ _ closure) = concatMap isVar $ toList closure
+    isVar (SFun _ _ _ closure) = concatMap isVar closure
 
 -- | Convert a value into a corresponding expression.
 valueToExp :: ExpValue -> Exp

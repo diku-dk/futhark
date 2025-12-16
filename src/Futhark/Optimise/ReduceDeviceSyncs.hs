@@ -11,7 +11,6 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State hiding (State)
 import Data.Bifunctor (second)
-import Data.Foldable
 import Data.IntMap.Strict qualified as IM
 import Data.List (transpose, zip4)
 import Data.Map.Strict qualified as M

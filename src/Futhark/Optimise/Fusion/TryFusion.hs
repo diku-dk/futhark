@@ -574,7 +574,7 @@ commonTransforms interesting inps = commonTransforms' inps'
   where
     inps' =
       [ (SOAC.inputArray inp `elem` interesting, inp)
-        | inp <- inps
+      | inp <- inps
       ]
 
 commonTransforms' :: [(Bool, SOAC.Input)] -> (SOAC.ArrayTransforms, [SOAC.Input])

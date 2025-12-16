@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Per Cost-Centre Source Location Listings in the `.summary`-file output of `futhark profile`. (By VegOwOtenks)
+
 ### Removed
 
 ### Changed
@@ -17,6 +19,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Unit types now behave like records/tuples in the C interface and derived
   interface, such as server-mode and `futhark literate`. (#2332)
+
+* `futhark bench`: JSON output now contains results for all test stanzas that
+  use a given entry point, rather than just the last one.
+
+* A bug in internalisation of `while` loops that could occur when one result of
+  the loop was syntactically the same as a loop parameter. (#2335)
 
 ## [0.25.34]
 
@@ -377,6 +385,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark script` now supports an `-f` option.
 
 * `futhark script` now supports the builtin procedure `$store`.
+
+* Compiling the Futhark compiler now requires GHC 9.10.
 
 ### Fixed
 

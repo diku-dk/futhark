@@ -30,7 +30,7 @@ install: build
 	install "$$(cabal -v0 list-bin exe:futhark)" $(INSTALLBIN)
 
 docs:
-	cabal haddock \
+	cabal haddock lib:futhark \
 		--enable-documentation \
 		--haddock-html \
 		--haddock-options=--show-all \

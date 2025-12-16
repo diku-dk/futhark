@@ -50,7 +50,7 @@ actualMetrics (CountMetrics metrics) =
   where
     expand (ctx, k) =
       [ (T.intercalate "/" (ctx' ++ [k]), 1)
-        | ctx' <- tails $ "" : ctx
+      | ctx' <- tails $ "" : ctx
       ]
 
 -- | This monad is used for computing metrics.  It internally keeps

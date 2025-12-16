@@ -277,7 +277,7 @@ diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
       ( pure . takeLast (length branches_free)
           <=< letTupExp "branch_adj"
           <=< renameExp
-        )
+      )
         =<< eMatch
           ses
           (map (fmap $ diffBody adjs branches_free) cases)
