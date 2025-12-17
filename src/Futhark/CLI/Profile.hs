@@ -40,6 +40,7 @@ import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Printf (printf)
 import qualified Data.Text.Encoding as T
+import qualified Data.Sequence as Seq
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -187,14 +188,7 @@ expandEvSummaryMap =
     splitEvSummarySources provenance summary =
       let sourceLocations = T.splitOn "->" provenance
           locationCount = length sourceLocations
-          splitSummary =
-            EvSummary
-              { evCount = evCount summary,
-                evSum = evSum summary / fromIntegral locationCount,
-                evMin = evMin summary / fromIntegral locationCount,
-                evMax = evMax summary / fromIntegral locationCount
-              }
-       in map (,splitSummary) sourceLocations
+       in map (,summary) sourceLocations
 
 -- | I chose this representation over `Loc` from `srcLoc` because it guarantees the presence of a range.
 -- Loc is essentially a 'Maybe (Pos, Pos)', because of the 'NoLoc' constructor.
@@ -287,12 +281,22 @@ writeHtml ::
   M.Map (T.Text, T.Text) EvSummary ->
   ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
+
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
   sourceFiles <- loadAllFiles (posFile . rangeStartPos . snd <$> M.keys provenanceSummaries)
+
+  let perFileSummaries = let
+        accumulateSummary m ((fname, provenance), summary) = 
+          -- relies on the fact that all the keys are already present in the map
+          M.adjust (Seq.|> (provenance, summary)) fname m
+        in M.toList provenanceSummaries
+          & foldl' accumulateSummary (M.map (const Seq.empty) sourceFiles)
+
   pure ()
 
-loadAllFiles :: [FilePath] -> ExceptT T.Text IO (M.Map FilePath T.Text)
-loadAllFiles = fmap M.fromList . mapM (\ path -> (path, ) <$> tryLoadFile path)
+loadAllFiles :: [FilePath] -> ExceptT T.Text IO (M.Map T.Text T.Text)
+loadAllFiles files = mapM (\ path -> (T.pack path, ) <$> tryLoadFile path) files
+      & fmap M.fromList
   where
     tryLoadFile filePath = do
       bytes <- liftIO $ readFileSafely filePath
