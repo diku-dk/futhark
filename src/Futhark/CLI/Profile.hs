@@ -1,18 +1,21 @@
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
-import Control.Arrow ((>>>), (&&&))
+import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
 import Control.Monad (void, when, (>=>))
-import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither)
+import Control.Monad.Except (ExceptT, liftEither, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.Function ((&))
 import Data.List qualified as L
-import Data.Loc (Pos (Pos), posFile)
+import Data.Loc (Pos (Pos), posFile, posLine)
 import Data.Map qualified as M
+import Data.Sequence qualified as Seq
+import Data.Set qualified as S
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
 import Data.Void (Void)
 import Futhark.Bench
@@ -39,8 +42,6 @@ import System.IO (hPutStrLn, stderr)
 import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Printf (printf)
-import qualified Data.Text.Encoding as T
-import qualified Data.Sequence as Seq
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -187,7 +188,6 @@ expandEvSummaryMap =
     splitEvSummarySources :: T.Text -> EvSummary -> [(T.Text, EvSummary)]
     splitEvSummarySources provenance summary =
       let sourceLocations = T.splitOn "->" provenance
-          locationCount = length sourceLocations
        in map (,summary) sourceLocations
 
 -- | I chose this representation over `Loc` from `srcLoc` because it guarantees the presence of a range.
@@ -203,6 +203,26 @@ data SourceRange = SourceRange
     endColumn :: !Int
   }
   deriving (Show, Eq, Ord)
+
+sourceRangeOverlapsWith :: SourceRange -> SourceRange -> Bool
+sourceRangeOverlapsWith a b =
+  let rangeOverlaps (sa, ea) (sb, eb) = sa <= eb && sb <= ea
+      rangeStartA = rangeStartPos a
+      rangeStartB = rangeStartPos b
+      fileA = posFile rangeStartA
+      fileB = posFile rangeStartB
+      startLineA = posLine rangeStartA
+      startLineB = posLine rangeStartB
+      endLineA = endLine a
+      endLineB = endLine b
+   in fileA == fileB
+        && rangeOverlaps (startLineA, endLineA) (startLineB, endLineB)
+        && case startLineA == endLineA of
+          -- because of laziness and short-circuiting, we can assume that the lines overlap
+          -- single-line source-range
+          True -> _
+          -- multi-line source-range
+          False -> _
 
 -- | Parse a source range, respect the invariants noted in the definition
 -- and print the MegaParsec errorbundle into a Text.
@@ -256,9 +276,11 @@ parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
             endColumn = columnRangeEnd
           }
 
-buildProvenanceSummaryMap :: Monad m =>
+buildProvenanceSummaryMap ::
+  (Monad m) =>
   -- | Keys are: (ccName, ccProvenance)
   M.Map (T.Text, T.Text) EvSummary ->
+  -- | Keys are: (ccName, ccProvenance)
   ExceptT T.Text m (M.Map (T.Text, SourceRange) EvSummary)
 buildProvenanceSummaryMap evSummaryMap =
   let -- there are no compound provenance blocks in this map anymore
@@ -281,22 +303,59 @@ writeHtml ::
   M.Map (T.Text, T.Text) EvSummary ->
   ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
-
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
   sourceFiles <- loadAllFiles (posFile . rangeStartPos . snd <$> M.keys provenanceSummaries)
 
-  let perFileSummaries = let
-        accumulateSummary m ((fname, provenance), summary) = 
-          -- relies on the fact that all the keys are already present in the map
-          M.adjust (Seq.|> (provenance, summary)) fname m
-        in M.toList provenanceSummaries
-          & foldl' accumulateSummary (M.map (const Seq.empty) sourceFiles)
+  let perFileSummaries =
+        let sourceFileNames = M.keysSet sourceFiles
+         in summarizeAndSplitByFile sourceFileNames provenanceSummaries
 
   pure ()
 
+summarizeAndSplitByFile ::
+  -- | Names of all text files
+  S.Set T.Text ->
+  -- | Mapping from (ccName, ccProvenance) to event summary
+  M.Map (T.Text, SourceRange) EvSummary ->
+  -- | Non-Overlapping Events with SourceRanges separated by file
+  -- invariant: sourcerange.rangeStartPos.file is always equal to the map key
+  M.Map T.Text (M.Map SourceRange (Seq.Seq (T.Text, EvSummary)))
+summarizeAndSplitByFile files summaries =
+  let overlapping =
+        let accumulateSummary m ((ccName, sourceRange), summary) =
+              -- relies on the fact that all the keys are already present in the map
+              M.adjust
+                (Seq.|> (sourceRange, (ccName, summary)))
+                (T.pack . posFile . rangeStartPos $ sourceRange)
+                m
+         in M.toList summaries
+              & foldl' accumulateSummary (M.fromSet (const Seq.empty) files)
+
+      separate ::
+        -- \| All possibly overlapping SourceRanges
+        Seq.Seq (SourceRange, (T.Text, EvSummary)) ->
+        -- \| Ordered non-overlapping sourceranges with merged attached informations
+        M.Map SourceRange (Seq.Seq (T.Text, EvSummary))
+      separate = foldl' accumulateRange M.empty . fmap (second Seq.singleton)
+        where
+          accumulateRange ::
+            -- \| Mapping of non-overlapping ranges, the T.Text is a ccName
+            M.Map SourceRange (Seq.Seq (T.Text, EvSummary)) ->
+            -- \| New SourceRange that must be merged and inserted
+            (SourceRange, Seq.Seq (T.Text, EvSummary)) ->
+            -- \| Mapping of non-overlapping ranges
+            M.Map SourceRange (Seq.Seq (T.Text, EvSummary))
+          accumulateRange ranges (range, aux) = case M.lookupLE range ranges of
+            Nothing -> _
+            Just (lowerRange, lowerAux) -> _
+
+      nonOverlapping = M.map separate overlapping
+   in nonOverlapping
+
 loadAllFiles :: [FilePath] -> ExceptT T.Text IO (M.Map T.Text T.Text)
-loadAllFiles files = mapM (\ path -> (T.pack path, ) <$> tryLoadFile path) files
-      & fmap M.fromList
+loadAllFiles files =
+  mapM (\path -> (T.pack path,) <$> tryLoadFile path) files
+    & fmap M.fromList
   where
     tryLoadFile filePath = do
       bytes <- liftIO $ readFileSafely filePath
