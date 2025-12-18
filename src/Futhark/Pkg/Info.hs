@@ -2,8 +2,6 @@
 module Futhark.Pkg.Info
   ( -- * Package info
     PkgInfo (..),
-    lookupPkgRev,
-    pkgInfo,
     PkgRevInfo (..),
     GetManifest (getManifest),
     GetFiles (getFiles),
