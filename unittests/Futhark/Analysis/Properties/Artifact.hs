@@ -21,6 +21,16 @@ tests =
   testGroup
     "Properties.Artifact"
     [ mkTest
+        "tests/indexfn/bfs.fut"
+        ( pure $ \(i, n, xs, _) ->
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))]],
+                  body = cases [(Bool True, sym2SoP $ Hole xs)]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/fft.fut"
         ( pure $ \(i, n, xs, _) ->
             -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
