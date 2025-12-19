@@ -637,7 +637,7 @@ tests =
             ]
         ),
       mkTest
-        "tests/indexfn/quickhull.fut"
+        "tests/indexfn/mis.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
@@ -647,7 +647,7 @@ tests =
             ]
         ),
       mkTest
-        "tests/indexfn/mis.fut"
+        "tests/indexfn/quickhull.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
