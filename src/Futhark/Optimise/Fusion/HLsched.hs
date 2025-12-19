@@ -13,7 +13,7 @@ where
 import Control.Monad
 --import Data.Graph.Inductive.Graph qualified as G
 --import Data.Map.Strict qualified as M
---import Data.Maybe
+import Data.Maybe
 import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
@@ -26,6 +26,7 @@ import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Optimise.Fusion.HLsched.Env
 import Futhark.Optimise.Fusion.HLsched.SchedUtils
 import Futhark.Optimise.Fusion.HLsched.Stripmine
+import Futhark.Optimise.Fusion.HLsched.AdjustResult
 import Futhark.Optimise.Fusion.HLsched.Permute
 --import Futhark.Util.Pretty hiding (line, sep, (</>))
 -- import Futhark.Analysis.PrimExp.Convert
@@ -51,8 +52,10 @@ applyHLsched fuseInLam node_to_fuse dg = do
     Just (env0, soac_node@(_, SoacNode out_trsfs soac_pat soac soac_aux), sched, patel_sched) -> do
       let (_valid_soac, exact_result) = isSupportedSOAC soac
           env = addInpDeps2Env env0 soac_node dg
-      stripmined_soac <- applyStripmining fenv env sched (soac_pat, soac_aux, soac)
-      _permuted_res_stms <- applyPermute fenv env sched soac_aux stripmined_soac
+      (prologue_strip, env', stripmined_soac) <-
+        (applyStripmining fenv env sched (soac_pat, soac_aux, soac)) >>= (pure . fromJust)
+      (perm_patel, init_stms, withacc_stm) <- manifestResult env' sched $ Pat [patel_sched]
+      _permuted_res_stms <- applyPermute fenv env sched soac_aux $ Just stripmined_soac
       (_prologue, _epilogue) <-
         if exact_result
         then pure (mempty,mempty)
@@ -65,7 +68,9 @@ applyHLsched fuseInLam node_to_fuse dg = do
              "\nHL-Sched: "++prettyString sched++
              "\nSOAC: out-transfs: "++show out_trsfs++
              " pattern: "++prettyString soac_pat++" = "++
-             "\n" ++ prettyString soac
+             "\n" ++ prettyString soac ++
+             "\ninit-withacc:\n" ++ prettyString init_stms ++
+             "\nwithacc_stms:\n" ++ prettyString withacc_stm
             ) $ pure Nothing
     _ -> pure Nothing
 

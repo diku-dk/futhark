@@ -37,6 +37,7 @@ import Debug.Trace
 -- | ToDos:
 --   1. treat iota and scalar dependencies from outside target SOAC                 -- CHECK!
 --   2. need to generate the code for the iota inputs to various soacs              -- partially CHECK
+--   2' need to add the generated iotas to the environment, so that we can reuse them
 --   3. perhaps extend the target SOAC to support redomaps, in addition to maps (?)
 --   4. parse the TARGET SOAC and map the recurrences corresponding to the result
 --   5.   at this stage allow and treat the case of out-transforms on SOAC's result
@@ -49,18 +50,18 @@ applyStripmining ::
     (LocalScope SOACS m, MonadFreshNames m) =>
     FuseEnv m -> Env -> HLSched ->
     (Pat Type, StmAux (ExpDec SOACS), H.SOAC SOACS) ->
-    m (Maybe (H.SOAC SOACS))
+    m (Maybe (Stms SOACS, Env, H.SOAC SOACS))
 applyStripmining fenv env sched (pat, aux, H.Screma mm inps (H.ScremaForm map_lam [] []))
   | not (any hasTransform inps) = do
     let soac = F.Screma mm (map nameFromInp inps) $ F.ScremaForm map_lam [] [] 
     mstmsres <- stripmineStmt fenv 0 env sched (Let pat aux (Op soac))
     case mstmsres of
-      Just (prologue_stms, _env', ( (Let _ _ soac'@(Op (F.Screma m' [nm] form'))) Sq.:<| _ )) -> do
+      Just (prologue_stms, env', ( (Let _ _ soac'@(Op (F.Screma m' [nm] form'))) Sq.:<| _ )) -> do
         let tp = Array i64ptp (Shape [m']) NoUniqueness
             hinp = H.Input H.noTransforms nm tp
         trace ("stripmined soac: \n" ++ prettyString soac' ++
              "\n prologues-stms:\n"++ prettyString prologue_stms ) $
-          pure $ Just $ H.Screma m' [hinp] form'
+          pure $ Just (prologue_stms, env', H.Screma m' [hinp] form')
       _ -> pure Nothing
     where
       hasTransform (H.Input transf _ _) = not $ H.nullTransforms transf 
@@ -150,19 +151,19 @@ stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
       -- BUG in `simplifyLambda 0` ??? : a row of D is said to be a point.
       new_lam' <- renameLambda new_lam >>= simplifyLambda 0
       let soac = F.Screma w [iotnm] $ ScremaForm new_lam' [] []
-      pure $ Just (prologue_stms, env, soac)
+      pure $ Just (prologue_stms, addIota2Env env (iotnm, w, n), soac)
     --
     recuCase scope i_p cur_ind' ((w,iotnm), prologue_stms) = do
       rec_res <- stripmineMap (k, inp_nm_tps, mm) env ns cur_ind' lam
       case rec_res of
-        Just (prev_stms, prev_env, prev_soac) -> do
+        Just (prev_stms, rec_env, prev_soac) -> do
           new_lam <-
             runLambdaBuilder [i_p] $ localScope scope $ do
               prev_soac_res <- letTupExp' ("map"++show k++"strip") $ Op prev_soac
               pure $ map subExpRes prev_soac_res
           new_lam' <- renameLambda new_lam >>= simplifyLambda 0
           let soac = F.Screma w [iotnm] $ ScremaForm new_lam' [] []
-          pure $ Just (prologue_stms <> prev_stms, prev_env, soac)
+          pure $ Just (prologue_stms <> prev_stms, addIota2Env rec_env (iotnm, w, n), soac)
         -- end ^
         _ -> pure Nothing
 stripmineMap _ _ [] _ _ =
@@ -391,7 +392,7 @@ stripmineStmt fenv k env sched (Let pat aux
           new_lam' <- renameLambda new_lam >>= simplifyLambda 0
           let map_stm = scremaStm (pat_nms, map (`arrayOfRow` w) $ lambdaReturnType red_lam)
                 (w,iotnm) $ ScremaForm new_lam' [] []
-          pure $ Just (new_prologue <> rec_prologue, rec_env, Sq.singleton map_stm)
+          pure $ Just (new_prologue <> rec_prologue, addIota2Env rec_env (iotnm, w, dlen), Sq.singleton map_stm)
         -- The case of a parallel dimension, i.e., generating a redomap
         (_, Just (rec_prologue, rec_env, rec_stms)) -> do
           ((w,iotnm), new_prologue) <- mkIota k dlen
@@ -408,7 +409,7 @@ stripmineStmt fenv k env sched (Let pat aux
           -- trace ("\nStripRedoMap RECURSIVE: \n"++prettyString rec_stms++
           --       "\nStripRedoMap RECURSIVE: \n"++prettyString new_stms++
           --       "\nPROLOGUE:\n"++prettyString (new_prologue <> rec_prologue)) $
-          pure $ Just (new_prologue <> rec_prologue, rec_env, new_stms)
+          pure $ Just (new_prologue <> rec_prologue, addIota2Env rec_env (iotnm, w, dlen), new_stms)
 {--
         -- This is commented out because we do not want to sequentialize at this stage,
         --   e.g., for SpMV we would like to stripmine and then to interchange!
@@ -465,6 +466,10 @@ pe1 = ValueExp $ IntValue $ Int64Value 1
 
 i64ptp :: PrimType
 i64ptp = IntType Int64
+
+addIota2Env :: Env -> (VName, SubExp, PrimExp VName) -> Env
+addIota2Env env (iotanm, w, pe_w) =
+  env { iotas = M.insert iotanm (w, pe_w) (iotas env) }
 
 mkArrIndexingExp :: Env -> VName -> Type -> SubExp -> Exp SOACS
 mkArrIndexingExp env inp_nm inp_tp i_flat
