@@ -52,6 +52,7 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (Property a) where
   astMap m (UserFacingDisjoint ps) = do
     UserFacingDisjoint <$> mapM (astMap m) ps
   astMap _ (Monotonic x dir) = pure (Monotonic x dir)
+  astMap m (Equiv x e) = Equiv x <$> astMap m e
   astMap m (Rng x (a, b)) = curry (Rng x) <$> astMap m a <*> astMap m b
   astMap m (Injective x (Just (a, b))) = curry (Injective x . Just) <$> astMap m a <*> astMap m b
   astMap _ (Injective x Nothing) = pure (Injective x Nothing)
@@ -146,6 +147,7 @@ instance ASTFoldable Symbol (Property Symbol) where
   astFold _ acc Disjoint {} = pure acc
   astFold m acc (UserFacingDisjoint ps) = foldM (astFold m) acc ps
   astFold _ acc Monotonic {} = pure acc
+  astFold m acc (Equiv _ e) = astFold m acc e
   astFold m acc (Rng _ (a, b)) = astFold m acc a >>= astFoldF m b
   astFold m acc (Injective _ (Just (a, b))) = astFold m acc a >>= astFoldF m b
   astFold _ acc (Injective _ Nothing) = pure acc

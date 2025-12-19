@@ -122,6 +122,7 @@ repProperty s (Disjoint x) = Disjoint $ S.map (repVName s) x
 repProperty s (UserFacingDisjoint ps) =
   UserFacingDisjoint (map (repPredicate s) ps)
 repProperty s (Monotonic x dir) = Monotonic (repVName s x) dir
+repProperty s (Equiv x e) = Equiv (repVName s x) (rep s e)
 repProperty s (Rng x (a, b)) =
   Rng (repVName s x) (rep s <$> a, rep s <$> b)
 repProperty s (Injective x (Just rcd)) =

@@ -6,14 +6,13 @@ import Control.Applicative ((<|>))
 import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT (runMaybeT))
-import Data.Bifunctor
 import Data.Functor ((<&>))
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, mapMaybe)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, paramToAlgebra, simplify, toAlgebra)
+import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, simplify, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Flatten (unflatten)
@@ -41,6 +40,7 @@ propertyPrelude :: S.Set String
 propertyPrelude =
   S.fromList
     [ "Monotonic",
+      "Equiv",
       "Range",
       "Disjoint",
       "Injective",
@@ -274,7 +274,7 @@ mkApplyIndexFn g size_vars pats te indexfns loc args = do
         -- index funciton used here).
         -- We don't check bounds again because they might rely on a context
         -- that is now out of scope.
-        (_check, effect) <- withoutBoundsChecks (mkRef vns Var ref_exp)
+        (_check, effect) <- withoutBoundsChecks (mkRef vns ref_exp)
         effect (size_rep, actual_args, renamingRep actual_args args)
 
 -- Apply a top-level definition without index function(s) (no postcondition).
@@ -1017,6 +1017,17 @@ forwardPropertyPrelude f args =
         opToMonDir "<" = pure IncS
         opToMonDir "<=" = pure Inc
         opToMonDir _ = Nothing
+    "Equiv"
+      | [e_X, e_y] <- getArgs args,
+        Just x <- justVName e_X -> do
+          y <- forward e_y
+          case y of
+            [IndexFn [] g_a] ->
+              fmap (IndexFn []) . simplify . cases $ do
+                (p_a, a) <- casesToList g_a
+                pure (p_a, pr $ Property.Equiv x a)
+            _ ->
+              undefined
     "Range"
       | [e_X, e_rng] <- getArgs args,
         Just x <- justVName e_X -> do
@@ -1565,34 +1576,13 @@ getRefinement _ = pure []
 getRefinementFromType :: [E.VName] -> E.TypeBase dim u -> IndexFnM [(Check, Effect)]
 getRefinementFromType vns ty = case ty of
   E.Array _ _ (E.Refinement _ ref) -> do
-    hole <- sym2SoP . Hole <$> newVName "h"
-    pure <$> mkRef vns ((`Apply` [hole]) . Var) ref
+    pure <$> mkRef vns ref
   E.Scalar (E.Refinement _ ref) ->
-    pure <$> mkRef vns Var ref
+    pure <$> mkRef vns ref
   _ -> pure []
 
-mkRef :: [E.VName] -> (E.VName -> Symbol) -> E.Exp -> IndexFnM (Check, Effect)
-mkRef vns wrap refexp = case refexp of
-  --- XXX delete this case
-  E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _
-    | [name] <- vns -> do
-        let rel = fromJust $ parseOpVName vn_op
-        g <- forwardRefinementExp e_y
-        -- Create check as an index function whose cases contain the refinement.
-        let check =
-              inContext
-                askRefinement
-                (cases $ map (second (sym2SoP . (sVar name `rel`))) (casesToList g))
-        let effect =
-              inContext
-                ( \f -> do
-                    -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
-                    alg_vn <- paramToAlgebra name wrap
-                    y <- rewrite $ flattenCases (body f)
-                    addRelSymbol $ sVar alg_vn `rel` y
-                )
-                g
-        pure (check, effect)
+mkRef :: [E.VName] -> E.Exp -> IndexFnM (Check, Effect)
+mkRef vns refexp = case refexp of
   E.Lambda lam_params lam_body _ _ loc -> do
     let param_names = map fst $ mconcat $ map patternMapAligned lam_params
     ref <- forwardRefinementExp lam_body
@@ -1650,18 +1640,6 @@ addSizeVariables (E.Id _ (E.Info {E.unInfo = E.Array _ shp _}) _) = do
 addSizeVariables (E.Id param (E.Info {E.unInfo = t}) _) = do
   when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
 addSizeVariables _ = pure ()
-
-parseOpVName :: E.VName -> Maybe (SoP Symbol -> SoP Symbol -> Symbol)
-parseOpVName vn =
-  case E.baseString vn of
-    ">" -> Just (:>)
-    ">=" -> Just (:>=)
-    "<" -> Just (:<)
-    "<=" -> Just (:<=)
-    "==" -> Just (:==)
-    "!=" -> Just (:/=)
-    "+<" -> Just (\x y -> int2SoP 0 :<= x :&& x :< y)
-    _ -> Nothing
 
 {-
     Bounds checking.

@@ -335,6 +335,8 @@ prove prop = alreadyKnown prop `orM` matchProof prop
         IndexFn shape ges -> algebraContext f $ do
           -- Concat because dimension flatness is irrelevant.
           newProver (MonGeNd (fromMonDir dir) (concat shape) ges)
+    matchProof (Equiv x e) =
+      sym2SoP (Var x) $== e
     matchProof (Rng _ (Nothing, Nothing)) =
       pure Yes
     matchProof (Rng x (a, b)) = do

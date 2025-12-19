@@ -8,6 +8,8 @@ def Disjoint 't (_: i64 -> t) : bool = ???
 
 def Monotonic 't (_ : t -> t -> bool) _ : bool = ???
 
+def Equiv 't (_: t) (_ : t) : bool = ???
+
 def Range 't (_: t) (_ : (i64, i64)) : bool = ???
 
 def Injective 't (_: []t) : bool = ???

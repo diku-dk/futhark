@@ -7,7 +7,6 @@ module Futhark.Analysis.Properties.AlgebraBridge.Translate
     algebraContext,
     isBooleanM,
     getDisjoint,
-    paramToAlgebra,
     lookupUntransBool,
     addProperty_,
   )
@@ -33,11 +32,10 @@ import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
 import Futhark.SoP.Monad (addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
-import Futhark.SoP.Monad qualified as SoPM (addUntrans)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justConstant, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~))
 import Futhark.Util.Pretty (prettyString)
-import Language.Futhark (VName, baseString)
+import Language.Futhark (VName)
 
 class AlgTranslatable u v where
   fromAlgebra :: u -> IndexFnM v
@@ -75,6 +73,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     (Disjoint vns) -> pure (Disjoint vns)
     (Monotonic x dir) -> pure (Monotonic x dir)
     (UserFacingDisjoint ps) -> UserFacingDisjoint <$> mapM fromAlgebra ps
+    (Equiv x e) -> Equiv x <$> fromAlgebra e
     (Rng x (a, b)) -> do
       a' <- traverse fromAlgebra a
       b' <- traverse fromAlgebra b
@@ -89,6 +88,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     (Disjoint vns) -> pure (Disjoint vns)
     (UserFacingDisjoint ps) -> UserFacingDisjoint <$> mapM toAlgebra ps
     (Monotonic x dir) -> pure (Monotonic x dir)
+    (Equiv x e) -> Equiv x <$> toAlgebra e
     (Rng x (a, b)) -> do
       a' <- traverse toAlgebra a
       b' <- traverse toAlgebra b
@@ -177,6 +177,9 @@ lookupUntransBool is x = do
 
 -- Add a property to the environment.
 addProperty_ :: Property Algebra.Symbol -> IndexFnM ()
+addProperty_ (Equiv x e) = do
+  addRel (sym2SoP (Algebra.Var x) :==: e)
+  addProperty (Algebra.Var x) (Equiv x e)
 addProperty_ (Rng x (a, b)) = do
   addRange (Algebra.Var x) (mkRange a ((.-. int2SoP 1) <$> b))
   addProperty (Algebra.Var x) (Rng x (a, b))
@@ -309,28 +312,6 @@ repHoles x replacement =
 ------------------------------------------------------------------------------
 toAlgebraSoP :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
 toAlgebraSoP = mapSymM toAlgebra_ <=< handleQuantifiers
-
--- Used to add refinements to the algebra environment in Convert.hs.
--- (The secret is that it allows adding symbols with holes in the environment.)
-paramToAlgebra :: VName -> (VName -> Symbol) -> IndexFnM VName
-paramToAlgebra vn wrapper = do
-  alg_vn <- newVName (baseString vn <> "ª")
-  SoPM.addUntrans (Algebra.Var alg_vn) (wrapper vn)
-  pure alg_vn
-
--- A variation on lookupUntransPE used to add refinements to the algebra
--- environment in Convert.hs. (The secret is that it allows adding symbols with
--- holes in the environment.)
--- paramToAlgebra :: VName -> IndexFnM VName
--- paramToAlgebra vn = do
---   inv_map <- inv <$> SoPM.getUntrans
---   let pe = wrapper vn
---   case inv_map M.!? pe of
---     Nothing -> do
---       alg_vn <- newVName (baseString vn <> "ª")
---       SoPM.addUntrans (Algebra.Var alg_vn) pe
---       pure alg_vn
---     Just alg_vn -> pure alg_vn
 
 -- Replace bound variable `k` in `e` by Hole.
 removeQuantifier :: Symbol -> VName -> IndexFnM Symbol

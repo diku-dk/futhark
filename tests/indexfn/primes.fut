@@ -54,15 +54,15 @@ def replicate_like 't 't2 [n] (_: [n]t) (x: t2): [n]t2 =
 
 
 def divider [nops]
-    (n: {i64 | (>= 1)})
+    (n: {i64 | \n -> Range n (1,inf)})
     (primes: {[nops]i64 | \ys -> Range ys (2,inf)})
     : {[nops]i64 | \ys -> Assume (Range ys (0,inf))} =
   map (\p -> n / p - 1) primes
 
 def irregParKerII1Expl [nops]
-      (n: {i64 | (>= 1)})
+      (n: {i64 | \n -> Range n (1,inf)})
       (primes: {[nops]i64 | \ys -> Range ys (2,inf)})
-      : {[]{i64 | (>= 1)} | \_ -> true} =
+      : {[]i64 | \x -> Range x (1, inf)} =
   let shp = divider n primes
   let (II1, B) = segment_ids shp
   let not_primes = map2 (\sgm_ind i ->
@@ -85,8 +85,8 @@ def filterTrueInds [n] (bs: [n]bool) : {[]i64 | \ys -> Range ys (2,inf)} =
   in  scatter (replicate len 0i64) inds vals
 
 def oneIter [len_sq_primes]
-      (n64: {i64 | (>= 1)})
-      (len: {i64 | (>= 1)})
+      (n64: {i64 | \n -> Range n (1,inf)})
+      (len: {i64 | \n -> Range n (1,inf)})
       (sq_primes : {[len_sq_primes]i64 | \ys -> Range ys (2,inf)})
       : {([]i64, i64) | \(xs,_) -> Range xs (2,inf)} =
   -- this is "len = min n (len*len)" but without running out of i64 bounds
@@ -101,7 +101,7 @@ def oneIter [len_sq_primes]
   let xs = filterTrueInds prime_flags
   in  (xs, len)
   
-def primesFlat (n : {i64 | (>= 1)}) (sq_primes: {[16]i64 | \ys -> Range ys (2,inf)}) : {[]i64 | \_ -> true} =
+def primesFlat (n : {i64 | \n -> Range n (1,inf)}) (sq_primes: {[16]i64 | \ys -> Range ys (2,inf)}) : {[]i64 | \_ -> true} =
   let len = length sq_primes
   let n64 = n
   -- This loop does not typecheck (a complication from the mix of size-types and our annotations
