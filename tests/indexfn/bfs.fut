@@ -1,72 +1,195 @@
--- import "lib/github.com/diku-dk/segmented/segmented"
 
-type queuePair = {vertex: i32, parent: i32}
+-- Helpers
+let to_i64 (b: bool) : i64 = i64.bool b
 
-def remove_duplicates [nQueue]  (nVerts) (queue: [nQueue]queuePair): []queuePair = 
-    let verts = map (\q -> i64.i32 q.vertex) queue
-    let indexes = iota nQueue 
-    let H = hist i64.min nQueue nVerts verts indexes
-    in map2 (\i j -> H[i] == j) verts indexes 
-        |> zip queue
-        |> filter (.1)
-        |> map (.0)
+let sum [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
--- Set the parent of each vertex in the queue. The queue must not contain duplicates
-def update_parents [nVerts] (parents: *[nVerts]i32) (queue: []queuePair): *[nVerts]i32 =
-    let qVerts = map (\q -> i64.i32 q.vertex) queue
-    let qParents = map (\q -> q.parent) queue
-    in scatter parents qVerts qParents
+type nat64 = {i64 | (>= 0)}
 
-def edges_of_vertex (verts: []i32) (nEdges: i32) (edge: queuePair): i64 =
-    let extended = verts ++ [nEdges]
-    in i64.i32 (extended[edge.vertex + 1] - extended[edge.vertex])
 
-def get_ith_edge_from_vert (verts: []i32) (edges: []i32) (parents: []i32) (q: queuePair) (i: i64) : queuePair =
-    -- Get the i'th vertex of the edge
-    let currentVert = edges[i64.i32 verts[q.vertex] + i]
-    -- If it's an unseen vertex, add it to the queue with the current vertex being the parent
-    -- Else return a placeholder that we filter later
-    in if (parents[currentVert] == -1)
-    then {vertex = currentVert, parent = q.vertex}
-    else {vertex = -1, parent = -1}
+-- Creates an array where 'xs' are scattered to the start positions defined by 'shape'.
+-- Annotated with *[]t to indicate a unique return array.
+def mk_flag_array 't [m]
+        (shape: {[m]i64 | \x -> Range x (0,inf)})
+        (zero: t)
+        (xs: [m]t)
+        : {*[]t | \flags -> length flags == sum shape} =
+  let shp_rot = map (\i -> if i==0 then 0i64 else shape[i-1]) (iota m)
+  let shp_scn = scan (+) 0i64 shp_rot
+  let shp_ind =
+        map2 (\ shp ind ->
+                if shp <= 0i64 then -1i64 else ind
+             ) shape shp_scn
+  let aoa_len = if m > 0 then shp_scn[m-1] + shape[m-1] else 0
+  let zeros = replicate aoa_len zero
+  let res = scatter zeros shp_ind xs
+  in  res
 
-def BFS [nVerts] [nEdges] (verts: [nVerts]i32) (edges: [nEdges]i32) (parents: *[nVerts]i32) (queue: *[]queuePair): [nVerts]i32 =
-    -- Loop until we get an empty queue
-    let (parents, _) = loop (parents, queue) while length queue > 0 do
-        -- Setup a function that takes a queuePair, and returns how many vertexes goes out of it
-        let get_edges_of_vert_fun = edges_of_vertex verts (i32.i64 nEdges)
-        -- Setup a function that takes a queuePair and an int i, and returns the vertex pointed to by the i'th edge
-        let get_ith_edge_from_vert_fun = get_ith_edge_from_vert verts edges parents
+-- Segmented Sum (Prefix Sum)
+def sgm_sum [n]
+      (flags: [n]bool)
+      (xs: [n]i64): {[n]i64 | \_ -> true} =
+  let zipped = zip flags xs
+  let flags_ys =
+    scan (\(x_flag,x) (y_flag,y) ->
+           (x_flag || y_flag,
+            if y_flag then y else x + y))
+         (false, 0i64)
+         zipped
+  let (_flags, ys) = unzip flags_ys
+  in ys
 
-        -- Get the vertexes in the next layer
-        let newQueue = expand (get_edges_of_vert_fun) (get_ith_edge_from_vert_fun) queue
-        -- Remove empty placeholders ({-1, -1} queuePairs)
-        let filteredQueue = filter (\q -> q.parent != -1) newQueue
-        -- Remove duplicates from the queue
-        let noDupesQueue = remove_duplicates nVerts filteredQueue
+-- Segmented Copy
+def sgm_copy [n] 't
+      (flags: [n]bool)
+      (zero: t)
+      (xs: [n]t): {[n]t | \_ -> true} =
+  let zipped = zip flags xs
+  let flags_ys =
+    scan (\(x_flag,x) (y_flag,y) ->
+           (x_flag || y_flag,
+            if y_flag then y else x))
+         (false, zero)
+         zipped
+  let (_flags, ys) = unzip flags_ys
+  in ys
 
-        in (update_parents parents noDupesQueue, noDupesQueue)
+-- Top-level filter function for Structure of Arrays (SoA)
+-- Returns unique arrays (*[]i64)
+def filter_soa [n] (flags: [n]bool) (arr1: [n]i64) (arr2: [n]i64) : (*[]i64, *[]i64) =
+    let num_trues = scan (+) 0 (map (\c -> to_i64 c) flags)
+    let new_size = if n > 0 then num_trues[n-1] else 0
+    let ranks = map2 (\c i -> if c then i-1 else -1) flags num_trues
+
+    let out1 = replicate new_size 0i64
+    let out2 = replicate new_size 0i64
+
+    let out1 = scatter out1 ranks arr1
+    let out2 = scatter out2 ranks arr2
+
+    in (out1, out2)
+
+def remove_duplicates [nQueue] (nVerts: i64) (q_verts: [nQueue]i64) (q_parents: [nQueue]i64): (*[]i64, *[]i64) =
+    let indexes = iota nQueue
+
+    let H = hist i64.min nQueue nVerts q_verts indexes
+
+    let flags = map2 (\i j -> H[i] == j) q_verts indexes
+
+    in filter_soa flags q_verts q_parents
+
+def update_parents [nVerts] [nQueue] (parents: *[nVerts]i64) (q_verts: [nQueue]i64) (q_parents: [nQueue]i64): *[nVerts]i64 =
+    scatter parents q_verts q_parents
+
+-- def extend [nVerts] (nEdges: i64) (verts: {[nVerts]i64 | \v -> Range v (0,nVerts)k}) =
+--   let singleton = map (\_ -> nEdges) (iota 1)
+--   in verts ++ singleton
+
+def get_queued_edges_shape [nVerts] [nEdges] [nQueue]
+    (verts: {[nVerts]i64 | \v -> Range v (0,nEdges) && Monotonic (<=) v})
+    (_edges: {[nEdges]i64 | \e -> Range e (0, nVerts)})
+    (queue_v: {[nQueue]i64 | \v -> Range v (0, nVerts)})
+    -- : {*[nQueue]i64 | \r -> Range r (0,nEdges)} =
+    : {*[nQueue]i64 | \r -> Range r (0,inf)} =
+    let shape = map (\i ->
+        if i + 1 < nVerts then verts[i+1] - verts[i] else nEdges - verts[i]
+      ) (iota nVerts)
+    let counts = map (\q -> shape[q]) queue_v
+    in counts
+
+
+-- Specialized Expand Function
+--  expand
+--      (\v ->
+--          let extended = verts ++ [nEdges]
+--          in extended[v + 1] - extended[v])
+--      (\v i ->
+--          let currentVert = edges[verts[v] + i]
+--          in if (parents[currentVert] == -1)
+--          then (currentVert, v)
+--          else (-1, -1))
+--      queue_v
+-- Merges the generic expand logic with the specific edge counting and lookup logic because we don't support lambdas as first-class citizens in the prototype.
+def expand_edge_count [nVerts] [nEdges] [nQueue]
+    -- (verts: {[nVerts]i64 | \v -> Range v (0, nVerts)})
+    (verts: {[nVerts]i64 | \v -> Range v (0,nEdges) && Monotonic (<=) v})
+    (edges: {[nEdges]i64 | \e -> Range e (0, nVerts)})
+    (parents: []i64)
+    (queue_v: {[nQueue]i64 | \v -> Range v (0, nVerts)})
+    : {*[](i64, i64) | \_ -> true} =
+
+    -- 1. Calculate sizes (vertex degrees)
+    -- let shape = map (\i ->
+    --     if i + 1 < nVerts then verts[i+1] - verts[i] else nEdges - verts[i]
+    --   ) (iota nVerts)
+    -- let counts = map (\q -> shape[q]) queue_v
+    let counts = get_queued_edges_shape verts edges queue_v
+
+    -- 2. Create Seeds and Flags together
+    -- Optimization: We call mk_flag_array once. We use -1 as the dummy value.
+    -- Since queue_v contains non-negative vertex IDs, -1 indicates a "gap".
+    let dummy = -1i64
+    let seeds = mk_flag_array counts dummy queue_v
+
+    -- Derive flags from seeds: any valid vertex ID (>= 0) marks the start of a segment.
+    let flags = map (\x -> x != -1) seeds
+
+    -- 3. Segmented Replicate (queue vertices)
+    -- We use -1 as the neutral element, but it is immediately overwritten
+    -- by the seed values at flag positions.
+    let seeds' = map (\x -> if x != -1 then x else 0) seeds
+    let flat_v = sgm_sum flags seeds'
+
+    -- 4. Segmented Iota (edge indices)
+    let ones = map (\_ -> 1) seeds
+    let flat_idxs = map (\x -> x - 1) (sgm_sum flags ones)
+
+    -- 5. Generate edges and check parents
+    in map2 (\v i ->
+        let currentVert = edges[verts[v] + i]
+        in if (parents[currentVert] == -1)
+        then (currentVert, v)
+        else (-1, -1)
+    ) flat_v flat_idxs
+
+def BFS_loop_body [nVerts] [nEdges] [nQueue] (verts: [nVerts]i64) (edges: [nEdges]i64) (parents: *[nVerts]i64) (queue_v: [nQueue]i64): (*[nVerts]i64, *[]i64) =
+    let next_step_aot = expand_edge_count verts edges parents queue_v
+    let (raw_verts, raw_parents) = unzip next_step_aot
+    let valid_flags = map (\p -> p != -1) raw_parents
+    let (filtered_v, filtered_p) = filter_soa valid_flags raw_verts raw_parents
+    let (noDupes_v, noDupes_p) = remove_duplicates nVerts filtered_v filtered_p
+    in (update_parents parents noDupes_v noDupes_p, noDupes_v)
+
+def BFS [nVerts] [nEdges] [nQueue] (verts: [nVerts]i64) (edges: [nEdges]i64) (parents: *[nVerts]i64) (queue_v: [nQueue]i64): [nVerts]i64 =
+
+    let (parents, _) = loop (parents, queue_v) while length queue_v > 0 do
+        BFS_loop_body verts edges parents queue_v
     in parents
 
-def main [nVerts] [nEdges] (vertexes_enc: [nVerts]i32) (edges_enc: [nEdges]i32) =
-    let start = 0
+def fromi32 x = i64.i32 x
 
-    let parents = replicate nVerts (-1)
-    let queue = [{vertex = start, parent = start}]
-    let parents = update_parents parents queue
+-- Input uses the Adjacency graph description:
+--   https://cmuparlay.github.io/pbbsbench/fileFormats/graph.html
+--
+-- Moreover, edges_enc is monotonic within each segment defined by
+-- vertexes_enc. (In the prototype compiler, we cannot encode this yet,
+-- but the paper would use the `For` property.)
+def main [nVerts] [nEdges] (vertexes_enc: {[nVerts]i32 | \v -> Range v (0,nEdges) && Monotonic (<=) v}) (edges_enc: {[nEdges]i32 | \e -> Range e (0, nVerts)}): {[]i32 | \_ -> true} =
+    let vertexes_64 = map (\x -> i64.i32 x) vertexes_enc
+    let edges_64 = map (\x -> i64.i32 x) edges_enc
 
-    in BFS vertexes_enc edges_enc parents queue
+    let start = 0i64
+    let parents = replicate nVerts (-1i64)
+
+    let q_verts = map (\_ -> start) (iota 1)
+    let q_parents = map (\_ -> start) (iota 1)
+
+    let parents = update_parents parents q_verts q_parents
+
+    let parents_64 = BFS vertexes_64 edges_64 parents q_verts
+
+    in map i32.i64 parents_64
 
 -- ==
--- input @ data/randLocalGraph_J_10_20000000.in
--- output @ data/randLocalGraph_J_10_20000000.out
--- mem_16gb input @ data/rMatGraph_J_12_16000000.in
--- output @ data/rMatGraph_J_12_16000000.out
--- input @ data/3Dgrid_J_64000000.in
--- output @ data/3Dgrid_J_64000000.out
-
-
-
-
--- update parents, queue er unique preconditoin allrede en kommentar
---- expand kan goeres med vores segmented ops?
+-- input @ randLocalGraph_J_10_20000000.in
+-- output @ randLocalGraph_J_10_20000000.out
