@@ -2,8 +2,6 @@ let sum [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
 def length [n] 't (_: [n]t) = n
 
-type nat64 = {i64 | (>= 0)}
-
 let mk_flag_array 't 'a [m]
         (shape: {[m]i64 | \x -> Range x (0,inf)})
         (zero: t)
@@ -36,8 +34,9 @@ def sgm_sum [n] 't
 -- Expands a shape array to flat arrays of segment ids and flags.
 let segment_ids [m]
       (shape: {[m]i64 | \x -> Range x (0,inf)})
-      : {([]i64, [m]nat64) | \(ids, _) ->
+      : {([]i64, [m]i64) | \(ids, flags) ->
            length ids == sum shape
+           && Range flags (0,sum shape)
         } =
   let flags1 = map (\i -> i + 1) (iota m)
   let zero = 0i64

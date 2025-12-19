@@ -2,11 +2,8 @@ let sum [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
 def length [n] 't (_: [n]t) = n
 
-type nat64 = {i64 | (>= 0)}
-
-
 let mk_flag_array 't 'a [m]
-        (shape: [m]nat64)
+        (shape: {[m]i64 | \x -> Range x (0, inf) })
         (zero: t)
         (xs: [m]t)
         : {[]t | \flags -> length flags == sum shape} =
@@ -37,19 +34,20 @@ def sgm_sum [n] 't
 
 -- Expands a shape array to flat arrays of segment ids and flags.
 let segment_ids [m]
-      (shape: [m]nat64)
+      (shape: {[m]i64 | \x -> Range x (0, inf) })
       : {([]i64, []bool) | \(ids, flags) ->
            length ids == sum shape
              && length flags == sum shape
         } =
   let flags1 = map (\i -> i + 1) (iota m)
-  let flags = mk_flag_array shape 0i64 flags1
+  let zero = 0
+  let flags = mk_flag_array shape zero flags1
   let flags_sgmind = map (\f -> if f == 0 then 0 else f-1) flags
   let flags_bool = map (\f -> f > 0) flags
   in (sgm_sum flags_bool flags_sgmind, flags_bool)
 
 let part2indicesL 't [m][n]
-      (shape: [m]nat64)
+      (shape: {[m]i64 | \x -> Range x (0, inf) })
       (csL: {[n]bool | \_ -> n == sum shape})
       : {([n]i64, [m]i64, [n]i64, [m]i64) | \(inds, seg_ends, seg_ids, num_trues) ->
           -- Assuming csL is a flat representation of a segmented array of booleans

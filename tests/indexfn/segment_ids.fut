@@ -1,9 +1,7 @@
 let sum_i64 [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
-type nat_i64 = {i64 | (>= 0)}
-
 let mk_flag_array 't 'a [m]
-        (shape: [m]nat_i64)
+        (shape: {[m]i64 | \x -> Range x (0, inf) })
         (n: {i64 | (== sum_i64 shape)})
         (zero: t)
         (xs: [m]t) : {[n]t | \_ -> true} =
@@ -34,11 +32,12 @@ def sgm_sum [n] 't
 
 -- Expands a shape array to a flat array of segment ids.
 let segment_ids [m]
-      (shape: [m]nat_i64)
+      (shape: {[m]i64 | \x -> Range x (0, inf) })
       (n: {i64 | (== sum_i64 shape)})
       : {[]i64 | \_ -> true} =
   let flags1 = map (\i -> i + 1) (iota m)
-  let flags = mk_flag_array shape n 0i64 flags1
+  let zero = 0
+  let flags = mk_flag_array shape n zero flags1
   let flags_sgmind = map (\f -> if f == 0 then 0 else f-1) flags
   let flags_bool = map (\f -> f > 0) flags
   in sgm_sum flags_bool flags_sgmind

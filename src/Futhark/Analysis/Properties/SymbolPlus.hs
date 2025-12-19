@@ -17,8 +17,9 @@ toSumOfSums i lb ub = foldl1 (.+.) . map (mkSum lb ub) . sopToLists
   where
     mkSum a b ([], c) =
       scaleSoP c (b .-. a .+. int2SoP 1)
-    mkSum a b ([u], c) =
-      scaleSoP c (sym2SoP $ Sum i a b u)
+    mkSum a b ([u], c)
+      | u == Bool True = mkSum a b ([], c)
+      | otherwise = scaleSoP c (sym2SoP $ Sum i a b u)
     mkSum _ _ _ =
       error "SoP is not a linear combination."
 

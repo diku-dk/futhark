@@ -5,7 +5,7 @@ def sum_i64 [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
 def mk_flag_array 't [m]
         (zero: t)
-        (shape: [m]{i64 | (>= 0) })
+        (shape: {[m]i64 | \x -> Range x (0, inf) })
         (xs: [m]t) : {(i64, []t) | \(_, flags) -> length flags == sum_i64 shape} =
   let shp_rot = map (\ i -> if i==0 then 0i64 else shape[i-1]) (iota m)
   let shp_scn = scan (\x y -> x + y) 0i64 shp_rot

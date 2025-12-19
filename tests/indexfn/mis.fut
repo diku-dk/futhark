@@ -79,7 +79,7 @@ def sum [n] (xs: [n]i64): {i64 | \_ -> true }=
 def slice [n] 't
           (x: [n]t)
           (a: {i64 | \a' -> Range a' (0,inf)})
-          (b: {i64 | \b' -> Range b' (0,n+1)}) =
+          (b: {i64 | \b' -> Range b' (0,n+1)}): {[]t | \_ -> true} =
   map (\i -> x[i]) (iota (b - a))
 
 def can_add [nEdges]

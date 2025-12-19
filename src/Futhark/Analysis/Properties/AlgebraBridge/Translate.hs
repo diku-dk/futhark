@@ -35,7 +35,7 @@ import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
 import Futhark.SoP.Monad (addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
 import Futhark.SoP.Monad qualified as SoPM (addUntrans)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Range (..), Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~))
+import Futhark.SoP.SoP (Range (..), Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justConstant, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName, baseString)
 
@@ -162,7 +162,11 @@ algebraContext fn m = rollbackAlgEnv $ do
 -- Lookup an untranslatable boolean expression parameterised by `is`.
 -- If no matching untranslatable expression exists, a fresh name
 -- is created for it (which is recorded for future lookups).
-lookupUntransBool :: (Foldable t) => t VName -> Symbol -> IndexFnM VName
+lookupUntransBool :: [VName] -> Symbol -> IndexFnM VName
+lookupUntransBool [i] (Apply (Var vn) [e_i])
+  | rep (mkRep i (sym2SoP (Var i) .+. int2SoP 1)) e_i .-. e_i == int2SoP 1 = do
+      addProperty (Algebra.Var vn) Boolean
+      pure vn
 lookupUntransBool is x = do
   res <- search x
   vn <- case fst <$> res of
@@ -175,19 +179,6 @@ lookupUntransBool is x = do
 addProperty_ :: Property Algebra.Symbol -> IndexFnM ()
 addProperty_ (Rng x (a, b)) = do
   addRange (Algebra.Var x) (mkRange a ((.-. int2SoP 1) <$> b))
-  -- If x is an array, also add range on x[hole] due to the way sums and
-  -- predicates are handled in toAlgebra.
-  fs <- lookupIndexFn x
-  case fs of
-    Just [f]
-      | rank f == 0 -> pure ()
-      | rank f == 1 -> do
-          hole <- sym2SoP . Hole <$> newVName "h"
-          alg_x <- paramToAlgebra x ((`Apply` [hole]) . Var)
-          addRange (Algebra.Var alg_x) (mkRange a ((.-. int2SoP 1) <$> b))
-      | rank f > 1 -> pure () -- TODO Not implemented yet; skipping is safe.
-    Nothing -> pure () -- We don't know whether x is an array.
-    _ -> error "Range on tuple type"
   addProperty (Algebra.Var x) (Rng x (a, b))
 addProperty_ (Disjoint x) =
   forM_ x $ \vn -> do
@@ -272,8 +263,11 @@ fromAlgebra_ (Algebra.Mdf _dir vn i j) = do
 fromAlgebra_ (Algebra.Sum (Algebra.One vn) lb ub) = do
   a <- fromAlgebra lb
   b <- fromAlgebra ub
-  x <- lookupSym vn
   j <- newVName "j"
+  mx <- lookupUntransSym (Algebra.Var vn)
+  let x = case mx of
+        Nothing -> Apply (Var vn) [sym2SoP (Var j)]
+        Just x' -> x'
   xj <- repHoles x (sym2SoP $ Var j)
   pure . sym2SoP $ Sum j a b xj
 fromAlgebra_ (Algebra.Sum (Algebra.POR vns) lb ub) = do
@@ -346,22 +340,30 @@ e `removeQuantifier` k
       hole <- sym2SoP . Hole <$> newVName "h"
       pure . fromJust . justSym $ rep (M.insert k hole mempty) e
 
--- Add quantified symbols to the untranslatable environement
--- with quantifiers replaced by holes. Subsequent lookups
--- must be done using `search`.
+strideOfSum :: Symbol -> Maybe Integer
+strideOfSum (Sum j _ _ (Apply Var {} [e])) =
+  justConstant $ rep (mkRep j (sym2SoP (Var j) .+. int2SoP 1)) e .-. e
+strideOfSum _ = Nothing
+
+-- Add quantified symbols to the untranslatable environement with quantifiers
+-- replaced by holes. Subsequent lookups must be done using `search`.
+-- Sums with stride 1 are ignored and are treated specially in toAlgebra_ to
+-- preserve the name being summed over (e.g., so that properties on it work).
 handleQuantifiers :: (ASTMappable Symbol b) => b -> IndexFnM b
 handleQuantifiers = astMap m
   where
     m = ASTMapper {mapOnSymbol = handleQuant, mapOnSoP = pure}
-    handleQuant sym@(Sum j _ _ x) = do
-      res <- search x
-      case res of
-        Just _ -> pure sym
-        Nothing -> do
-          vn <- addUntrans =<< x `removeQuantifier` j
-          booltype <- isBooleanM x
-          when booltype $ addProperty (Algebra.Var vn) Boolean
-          pure sym
+    handleQuant sym@(Sum j _ _ x)
+      | Just 1 <- strideOfSum sym = pure sym
+      | otherwise = do
+          res <- search x
+          case res of
+            Just _ -> pure sym
+            Nothing -> do
+              vn <- addUntrans =<< x `removeQuantifier` j
+              booltype <- isBooleanM x
+              when booltype $ addProperty (Algebra.Var vn) Boolean
+              pure sym
     handleQuant x = pure x
 
 -- Search for hole-less symbol in untranslatable environment, matching
@@ -476,6 +478,12 @@ toAlgebra_ e@(Sum j lb ub x)
             upperBound = S.singleton v
           }
       pure alg_e
+  | Just 1 <- strideOfSum e,
+    Apply (Var vn) [idx] <- x = do
+      a <- mapSymM toAlgebra_ (rep (mkRep j lb) idx)
+      b <- mapSymM toAlgebra_ (rep (mkRep j ub) idx)
+      booltype <- askProperty (Algebra.Var vn) Boolean
+      pure $ Algebra.Sum (idxSym booltype vn) a b
   | otherwise = do
       res <- search x
       case res of

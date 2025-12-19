@@ -2,13 +2,11 @@ let sum [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
 def length [n] 't (_: [n]t) = n
 
-type nat64 = {i64 | (>= 0)}
-
 def to_i64 c : i64 = if c then 1 else 0
 
 
 def mk_flag_array 't 'a [m]
-        (shape: [m]nat64)
+        (shape: {[m]i64 | \x -> Range x (0, inf) })
         (zero: t)
         (xs: [m]t)
         : {[]t | \flags -> length flags == sum shape} =
@@ -38,7 +36,7 @@ def sgm_sum [n] 't
 
 -- Expands a shape array to flat arrays of segment ids and flags.
 def segment_ids [m]
-      (shape: [m]nat64)
+      (shape: {[m]i64 | \x -> Range x (0, inf) })
       : {([]i64, []bool) | \(ids, flags) ->
            length ids == sum shape
              && length flags == sum shape
@@ -50,7 +48,8 @@ def segment_ids [m]
       --   }, {[]bool | \flags -> length flags == sum shape}) =
 
   let flags1 = map (\i -> i + 1) (iota m)
-  let flags = mk_flag_array shape 0 flags1
+  let zero = 0
+  let flags = mk_flag_array shape zero flags1
   let flags_sgmind = map (\f -> if f == 0 then 0 else f-1) flags
   let flags_bool = map (\f -> f > 0) flags
   let ids = sgm_sum flags_bool flags_sgmind
@@ -69,7 +68,7 @@ def filter_indices [n]
   in (new_size, is)
 
 def filter_segmented_array [m][n]
-      (shape: [m]nat64)
+      (shape: {[m]i64 | \x -> Range x (0, inf) })
       (pivots: [m]f32)
       (xs: {[n]f32 | \_ -> n == sum shape})
       : {[]f32 | \_ -> true} =

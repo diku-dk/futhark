@@ -4,8 +4,6 @@ let to_i64 (b: bool) : i64 = i64.bool b
 
 let sum [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
-type nat64 = {i64 | (>= 0)}
-
 
 -- Creates an array where 'xs' are scattered to the start positions defined by 'shape'.
 -- Annotated with *[]t to indicate a unique return array.
