@@ -37,31 +37,32 @@ def mmm [M][N][Q] (A: [M][Q]real) (B: [Q][N]real) : [M][N]real =
               let Bcol' = pad1D Bcol (q*Tq) 0
               
               let Arow'' = hlSched
-                            ( [Rm, Rn, Tm, Tn, q, Tq] -- dims strip
-                            , [ 0,  1,  2,  3, 4,  4] -- orig dims
-                            , [ 4,  5,  0,  1, 2,  3] -- dims permutation (scatter)
-                            , [vg, rp, vg, rp, f, vg] -- signals
+                            ( [Rm, Rn, Tm, Tn,  q, Tq] -- dims strip
+                            , [ 0,  1,  2,  3,  4,  4] -- orig dims
+                            , [ 4,  5,  0,  1,  2,  3] -- dims permutation (scatter)
+                            , [vg, rp, vg, rp,  f, vg] -- signals
+                            , [-1, -1, -1, -1, -1, -1] -- strides (-1 means infer)
                             , [Tm, Tn] -- available threads (for virtualization)
-                            , SUBSTITURE_RESULT
+                            , 1                        -- SUBSTITURE_RESULT
                             , [ 2, -1,  2, -1, 0,  1] -- flatten
                             , [1] -- padd inner dim(s) with
-                            , 1   -- fuse at first level
+                            , [1] -- fuse the top one level with classical map fusion (1)
                             )
-                            Arow'         
+                            Arow'        
               in  map2 (*) Arow'' Bcol'' |> reduce (+) 0
             )
           ) 
-  in  hlSched2D 
+  in  hlSched2D
         ( [m, Tm, Rm, n, Tn, Rn, q, Tq]  -- dims length
         , [0,  0,  0, 1,  1,  1, 2,  2]  -- orig dimensions
         , [0,  3,  6, 1,  4,  7, 2,  5]  -- dims permutation (scatter)
         , [0,  0,  2, 0,  0,  2, 2,  2]  -- signals, e.g., 3 means "seq+reg"
         , [Tm*Rm*n*Tn*Rn, Rm*n*Tn*Rn, n*Tn*Rn, Tn*Rn, Rn, 1, 0, 0] -- strides
         , [] -- virtualization not used
-        , MANIFEST_RESULT
+        , 0 -- MANIFEST_RESULT
         , [0, 1, 2, 3, 4, 5] -- no permute necessary
-        , [] -- padding does not makes sense for MANIFEST
-        , 2  -- fuse the first two levels
+        , []    -- padding does not makes sense for MANIFEST
+        , [1,1] -- fuse the top two levels with classical map fusion (1)
         )
         C
 

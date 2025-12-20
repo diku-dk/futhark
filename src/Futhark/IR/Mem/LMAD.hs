@@ -10,6 +10,7 @@ module Futhark.IR.Mem.LMAD
     LMAD (..),
     LMADDim (..),
     Permutation,
+    iotaStrided,
     index,
     slice,
     flatSlice,
