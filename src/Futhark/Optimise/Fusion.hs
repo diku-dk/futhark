@@ -4,7 +4,7 @@
 -- /A T2 Graph-Reduction Approach To Fusion/ for the basic idea (some
 -- extensions discussed in /Design and GPGPU Performance of Futhark’s
 -- Redomap Construct/).
-module Futhark.Optimise.Fusion (fuseSOACs) where
+module Futhark.Optimise.Fusion (fuseSOACs, fuseInBody, fuseInLambda) where
 
 import Control.Monad
 import Control.Monad.Reader
@@ -474,7 +474,7 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
   spec_rule_res <- SF.ruleMFScat node_to_fuse dg
   -- \^ specialized fusion rules such as the one
   --   enabling map-flatten-scatter fusion
-  test_hl_sched <- HLS.applyHLsched doFusionInLambda node_to_fuse dg
+  test_hl_sched <- pure $ Nothing -- HLS.applyHLsched doFusionInLambda node_to_fuse dg
   case (spec_rule_res, test_hl_sched) of
     (_, Just dg') -> pure dg' 
     (Just dg', _) -> pure dg'
@@ -611,6 +611,27 @@ fuseFun consts fun = do
       freshFusionEnv
       (fuseGraph (funDefBody fun))
   pure fun {funDefBody = (funDefBody fun) {bodyStms = fun_stms'}}
+
+fuseInBody :: (MonadFreshNames m) => Scope SOACS -> Body SOACS -> m (Body SOACS)
+fuseInBody scope body = do
+  stms' <-
+    runFusionM
+      (scope <> scopeOf (bodyStms body))
+      freshFusionEnv
+      (fuseGraph body)
+  pure $ mkBody stms' $ bodyResult body
+     
+fuseInLambda :: (MonadFreshNames m) => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
+fuseInLambda scope lam = do
+  stms' <-
+    runFusionM
+      (scope <> scopeOf lam)
+      freshFusionEnv
+      (fuseGraph $ lambdaBody lam)
+  pure $ lam { lambdaBody = mkBody stms' $ bodyResult $ lambdaBody lam }
+
+
+-- runFusionM :: (MonadFreshNames m) => Scope SOACS -> FusionEnv -> FusionM a -> m a
 
 -- | The pass definition.
 {-# NOINLINE fuseSOACs #-}

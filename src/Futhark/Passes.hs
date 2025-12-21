@@ -24,6 +24,7 @@ import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
+import Futhark.Optimise.Schedules
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InliningDeadFun
@@ -60,6 +61,9 @@ standardPipeline =
       performCSE True,
       simplifySOACS 0,
       fuseSOACs,
+      simplifySOACS 0,
+      applySchedules,
+      simplifySOACS 1,
       performCSE True,
       simplifySOACS 1,
       removeDeadFunctions

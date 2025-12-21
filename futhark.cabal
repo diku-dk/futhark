@@ -319,6 +319,10 @@ library
       Futhark.Optimise.Schedules
       Futhark.Optimise.Schedules.EnvUtils
       Futhark.Optimise.Schedules.SchedUtils
+      Futhark.Optimise.Schedules.Safety
+      Futhark.Optimise.Schedules.Stripmine
+      Futhark.Optimise.Schedules.Permute
+      Futhark.Optimise.Schedules.AdjustResult
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.GraphRep

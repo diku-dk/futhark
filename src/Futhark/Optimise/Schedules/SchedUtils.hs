@@ -1,9 +1,7 @@
 {-# LANGUAGE Strict #-}
 
--- | This module consists of performing a sequence of
---     code transformations that are defined by users
---     by means of high-level schedules.
---   ... more explanation is comming ...
+-- | This module consists of the representation of
+--   a schedule and related utility functions
 module Futhark.Optimise.Schedules.SchedUtils
   ( AdjustRes(..)
   , BotEnv  (..)
@@ -13,7 +11,6 @@ module Futhark.Optimise.Schedules.SchedUtils
   , splitAtSched
   , parMode
   , mkRegIndStrides
-  , identityPerm
   , headOfSched
   , tailOfSched
   , sortByPerm
@@ -33,21 +30,22 @@ import Futhark.IR.SOACS -- hiding (SOAC (..))
 import Futhark.Tools
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Util.Pretty hiding (line, sep, (</>))
-import Futhark.Optimise.Schedules.EnvUtils
+import Futhark.Optimise.Schedules.EnvUtils( TopEnv(..), mulPes )
 
 --import Debug.Trace
 
 -------------------------------------------------------
---- LMAD-Like Representation of a High-Level Schedule
+--- LMAD-Like Representation of a High-Level Schedule 
 -------------------------------------------------------
 
 type LMAD = LMAD.LMAD (TPrimExp Int64 VName)
 
 -- type LMAD = LMAD.LMAD (PrimExp VName)
 
-data AdjustRes = ManifestRes | SubstituteRes
+data AdjustRes = ExactRes | ManifestRes | SubstituteRes
 
 instance Pretty AdjustRes where
+  pretty ExactRes      = "Exact Result"
   pretty ManifestRes   = "Manifest Result"
   pretty SubstituteRes = "Substitute Result"
 
@@ -65,7 +63,12 @@ data HLSched = HLS
   }
 
 data BotEnv = BotEnv
-  { schedules :: M.Map VName (VName, HLSched, LMAD, Stms SOACS)
+  { schedules :: M.Map VName (PatElem (LetDec SOACS), HLSched, LMAD, Stms SOACS)
+    -- ^ binds the name of the target soac reasult to a quad tuple:
+    --   (1) the result pattern of the schedule, (2) the schedule,
+    --   (3) an LMAD index-function supporting layout transformations,
+    --   (4) the chain of statements until reaching the target soac;
+    --       the last element must be the statement defining the schedule.
   , optstms   :: Stms SOACS
   }
 
@@ -129,16 +132,12 @@ mkRegIndStrides sched =
 --- Other Utility Functions ---
 -------------------------------
 
-identityPerm :: [Int] -> Bool
-identityPerm [] = True
-identityPerm perm = perm == [0 .. length perm - 1]
-
 nullSched :: HLSched -> Bool
 nullSched sched =
   null (dimlens sched) || null (strides sched) ||
   null (origids sched) || null (signals sched) || null (sigma sched)
 
-headOfSched :: HLSched -> (PrimExp VName, PrimExp VName, Int, Int, Int, Int)
+headOfSched :: HLSched -> (PrimExp VName, PrimExp VName, Int, Int, Int)
 headOfSched sched
   | nullSched sched =
     error ("Illegal Schedule passed as argument to headOfSched: "++prettyString sched)
@@ -148,7 +147,6 @@ headOfSched sched =
   , head (origids sched)
   , head (sigma   sched)
   , head (signals sched)
-  , head (permres sched)
   )
 
 tailOfSched :: HLSched -> HLSched
@@ -161,7 +159,6 @@ tailOfSched sched =
         , origids = tail (origids sched)
         , sigma   = tail (sigma   sched)
         , signals = tail (signals sched)
-        , permres = tail (permres sched)
         }
 
 sortByPerm :: HLSched -> HLSched
@@ -175,14 +172,13 @@ sortByPerm sched =
       | p1 > p2 = GT
       | True = GT
 
-append2Sched :: (PrimExp VName, PrimExp VName, Int, Int, Int, Int) -> HLSched -> HLSched
-append2Sched (l, s, o, p, d, r) sched =
+append2Sched :: (PrimExp VName, PrimExp VName, Int, Int, Int) -> HLSched -> HLSched
+append2Sched (l, s, o, p, d) sched =
   sched { dimlens = l : (dimlens sched)
         , strides = s : (strides sched)
         , origids = o : (origids sched)
         , sigma   = p : (sigma   sched)
         , signals = d : (signals sched)
-        , permres = r : (permres sched)
         }
 
 oneFullyConsumedMapRed :: ScremaForm SOACS -> Maybe (Lambda SOACS)

@@ -1,16 +1,16 @@
 {-# LANGUAGE Strict #-}
 
--- | This module consists of performing a sequence of
---     code transformations that are defined by users
---     by means of high-level schedules.
---   ... more explanation is comming ...
+-- | This module contains the definition of the
+--   Top-Down Environment of Schedules and related
+--   utility functions.
 module Futhark.Optimise.Schedules.EnvUtils
   ( FwdTileTab
   , InvTileTab
   , TopEnv (..)
-  , freshTopEnv -- emptyEnv
+  , freshTopEnv
   , addTileBinding
-  -- , addTransf2Env
+  , addIota2Env
+  , addTransf2Env
   , addBinOp2Env
   , tileFuns
   , expandSE
@@ -19,20 +19,18 @@ module Futhark.Optimise.Schedules.EnvUtils
   , mulPes
   , minPes
   , invPerm
+  , identityPerm
   , findType
   , findPType
   , peFromSe
   )
 where
 
---import Control.Monad
 import Data.List qualified as L
 import Data.Maybe
 import Data.Map.Strict qualified as M
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.Tools
-import Futhark.Util.Pretty hiding (line, sep, (</>))
-import Futhark.IR.Mem.LMAD qualified as LMAD
 
 --import Debug.Trace
 
@@ -48,7 +46,7 @@ tileFuns = ["strip1", "strip2"]
 --- Environment
 -----------------------------------
 
-type LMAD = LMAD.LMAD (TPrimExp Int64 VName)
+-- type LMAD = LMAD.LMAD (TPrimExp Int64 VName)
 
 -- | Binds a size expression to its tiled
 --     approximation: `e -> [t1,...,tm]`,
@@ -66,28 +64,31 @@ type FwdTileTab = M.Map (PrimExp VName) Names
 --     produces `m -> (2*M, [m, t1, t2])`
 type InvTileTab = M.Map VName (PrimExp VName, Names)
 
-instance Pretty FwdTileTab where
-  pretty = pretty . M.toList
-
-instance Pretty InvTileTab where
-  pretty = pretty . M.toList
-
 data TopEnv = TopEnv
   { bdy_res     :: [SubExp]
   , appTilesFwd :: FwdTileTab
   , appTilesInv :: InvTileTab
   , iotas       :: M.Map VName (SubExp, PrimExp VName) -- , Stms SOACS
     -- ^ binds the name of an iota array to its size
+  , inv_iotas   :: M.Map (PrimExp VName) (VName, SubExp)
+    -- ^ binds a size pexp to the name of a iota and its SubExp size
   , scalars     :: M.Map VName (PrimExp VName)
     -- ^ binds the name of a scalar var to its expression
   , arrayLits   :: M.Map VName [PrimExp VName]
     -- ^ binds the name of an array literal to its expression 
-  , arrTransf   :: M.Map VName (VName, LMAD)
-    -- ^ binds the name of an array to its transformations
+  , arrTransf   :: M.Map VName (VName, [Int])
+    -- ^ Models a chain of rearrange transformations:
+    --   binds the name of an array to (1) the name of its base array,
+    --   and (2) the complete permutation
   } deriving Show
 
 freshTopEnv :: TopEnv
-freshTopEnv = TopEnv [] mempty mempty mempty mempty mempty mempty
+freshTopEnv = TopEnv [] mempty mempty mempty mempty mempty mempty mempty
+
+addIota2Env :: TopEnv -> (VName, SubExp, PrimExp VName) -> TopEnv
+addIota2Env env (iotnm, w_se, w_pe) =
+  env { iotas     = M.insert iotnm (w_se,  w_pe) (iotas env)
+      , inv_iotas = M.insert w_pe  (iotnm, w_se) (inv_iotas env) }
 
 addTileBinding :: TopEnv -> PrimExp VName -> [VName] -> TopEnv
 addTileBinding env pe tile_nms =
@@ -96,17 +97,16 @@ addTileBinding env pe tile_nms =
       bwdenv = foldl (foldfun nms) (appTilesInv env) tile_nms
   in  env { appTilesFwd = fwdenv, appTilesInv = bwdenv }
   where
-    foldfun nms env_cur nm = M.insert nm (pe, nms) env_cur
+    foldfun nms env_cur nm = M.insert nm (pe, nms) env_cur 
 
-{--
-addTransf2Env :: TopEnv -> VName -> VName -> H.ArrayTransforms -> TopEnv
-addTransf2Env env nm_new nm_old trsfs =
-  let (nm_old', trsfs') =
+addTransf2Env :: TopEnv -> VName -> VName -> [Int] -> TopEnv
+addTransf2Env env nm_new nm_old perm_new =
+  let (nm_old', perm') =
        case M.lookup nm_old (arrTransf env) of
-         Nothing -> (nm_old, H.noTransforms)
-         Just (nm', trsf') -> (nm', trsf')
-  in env { arrTransf = M.insert nm_new (nm_old', trsfs' <> trsfs) (arrTransf env) }
---}
+         Nothing  -> (nm_old, perm_new)
+         Just (nm_old0, perm_old) ->
+           (nm_old0, composePerms perm_new perm_old)
+  in env { arrTransf = M.insert nm_new (nm_old', perm') (arrTransf env) }
 
 expandSE :: TopEnv -> SubExp -> PrimType -> PrimExp  VName
 expandSE _ (Constant pval) _ = ValueExp pval
@@ -120,6 +120,21 @@ addBinOp2Env env (nm,tp) bop s1 s2 =
 -------------------------------------------------------
 --- Simple Utilities
 -------------------------------------------------------
+
+identityPerm :: [Int] -> Bool
+identityPerm [] = True
+identityPerm perm = perm == [0 .. length perm - 1]
+
+invPerm :: [Int] -> [Int]
+invPerm xs =
+  map f [0..length xs-1]
+  where
+    f i | Just ind <- L.elemIndex i xs = ind
+    f _ = error "Violation of assumed permutation semantics"
+
+composePerms :: [Int] -> [Int] -> [Int]
+composePerms perm_new perm_old = 
+  map (\ i -> perm_old !! i) perm_new
 
 eqPEs :: PrimExp VName -> PrimExp VName -> Bool
 eqPEs p1 p2 | p1 == p2 = True
@@ -154,13 +169,6 @@ mulPes e1 e2 = BinOpExp (Mul Int64 OverflowWrap) e1 e2  -- OverflowUndef
 minPes :: PrimExp VName -> PrimExp VName -> PrimExp VName
 minPes e1 e2 | e1 == e2 = e1
 minPes e1 e2 = BinOpExp (SMin Int64) e1 e2
-
-invPerm :: [Int] -> [Int]
-invPerm xs =
-  map f [0..length xs-1]
-  where
-    f i | Just ind <- L.elemIndex i xs = ind
-    f _ = error "Violation of assumed permutation semantics"
 
 findType :: (HasScope SOACS m) => SubExp -> m Type
 findType (Constant pval) = pure $ Prim $ primValueType pval
