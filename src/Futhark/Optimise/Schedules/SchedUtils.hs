@@ -11,6 +11,7 @@ module Futhark.Optimise.Schedules.SchedUtils
   , splitAtSched
   , parMode
   , mkRegIndStrides
+  , parseSchedule
   , headOfSched
   , tailOfSched
   , sortByPerm
@@ -30,7 +31,7 @@ import Futhark.IR.SOACS -- hiding (SOAC (..))
 import Futhark.Tools
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Util.Pretty hiding (line, sep, (</>))
-import Futhark.Optimise.Schedules.EnvUtils( TopEnv(..), mulPes )
+import Futhark.Optimise.Schedules.EnvUtils( TopEnv(..), mulPes, peFromSe )
 
 --import Debug.Trace
 
@@ -127,7 +128,62 @@ mkRegIndStrides sched =
     f carry _ = carry
     g (Flip, carry, _) = carry
     g (_, carry, strd) = mulPes strd carry
- 
+
+-------------------------------
+---   Parsing the Schedule  ---
+-------------------------------
+parseSchedule :: Name -> TopEnv -> [SubExp] -> Pat (LetDec SOACS) -> 
+                 (VName, PatElem (LetDec SOACS), HLSched, LMAD)
+parseSchedule _fnm td_env args pat
+  | [pat_el] <- patElems pat,
+    Array _ptp shp _ <- patElemDec pat_el,
+    arr : fus : pad : fps : ms_res : virt : strds : sigs : perm : oinds : ns : _ <- L.reverse args =
+  let sched =
+          HLS { dimlens = getPrimExpLit ns
+              , origids = getIntegerLit oinds
+              , sigma   = getIntegerLit perm
+              , signals = getIntegerLit sigs
+              , strides = getPrimExpLit strds
+              , virthds = getPrimExpLit virt
+              , whatres = getAdjustRes ms_res
+              , permres = getIntegerLit fps
+              , padinner= getPrimExpLit pad
+              , fuselevs= getIntegerLit fus
+              }
+      shp_pes = map (isInt64 . peFromSe td_env (IntType Int64)) $ shapeDims shp 
+      lmad = LMAD.iotaStrided (isInt64 pe0) (isInt64 pe1) shp_pes
+  in  (getVName arr, pat_el, sched, lmad)
+  where
+    pe0 = ValueExp $ IntValue $ Int64Value 0
+    pe1 = ValueExp $ IntValue $ Int64Value 1
+    --
+    getVName (Var nm) = nm
+    getVName se = error ("Trying to read the soac-result name, but got: "++prettyString se)
+    --
+    getPrimExpLit (Constant _) =
+      error ("The result of an array literal cannot be a constant")
+    getPrimExpLit (Var nm)
+      | Just pes <- M.lookup nm (arrayLits td_env) = pes
+      | otherwise = error ("something went wrong with tracking literals of " ++ prettyString nm)
+    getIntegerLit nm =
+      map toInt $ getPrimExpLit nm
+    --
+    getAdjustRes (Var _) = error "Illegal var name denoting AdjustResult"
+    getAdjustRes (Constant pval)
+      | pval == IntValue (Int64Value 0) = ExactRes
+      | pval == IntValue (Int64Value 1) = ManifestRes
+      | pval == IntValue (Int64Value 2) = SubstituteRes
+      | otherwise = error "Illegal integer for the kind of AdjustResult"
+    --
+    toInt :: PrimExp VName -> Int
+    toInt (ValueExp (IntValue iv)) = valueIntegral iv
+    toInt pe = error ("This was supposed to be a constant int value; instead is "++prettyString pe)
+--
+parseSchedule fnm _env args pat =
+  error ( "Error when parsing the schedule named " ++ nameToString fnm ++
+          " result pattern: " ++ prettyString pat ++ 
+          " arguments in reverse order: " ++ prettyString (L.reverse args)
+        ) 
 -------------------------------
 --- Other Utility Functions ---
 -------------------------------

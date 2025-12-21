@@ -27,7 +27,7 @@ import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Optimise.Schedules.EnvUtils
   (TopEnv (..), freshTopEnv, addTileBinding, addIota2Env, peFromSe)
 import Futhark.Optimise.Schedules.SchedUtils
-  ( HLSched(..), BotEnv(..), AdjustRes(..), freshBotEnv )
+  ( BotEnv(..), freshBotEnv, parseSchedule )
 import Futhark.Optimise.Schedules.Safety(checkValidSched)
 import Futhark.Optimise.Schedules.Stripmine(applyStripmining)
 import Futhark.Optimise.Schedules.Permute(applyPermute)
@@ -145,55 +145,12 @@ applySchedOnStm :: (LocalScope SOACS m, MonadFreshNames m) =>
 applySchedOnStm (td_env, bu_env) stm@(Let pat _aux e)
   | Apply fnm args_diet _rtp _ <- e,
     L.isPrefixOf "hlSched2D" $ nameToString fnm,
-    [pat_el] <- patElems pat,
-    Array _ptp shp _ <- patElemDec pat_el,
-    (args, _diet) <- unzip args_diet,
-    arr : fuse : pad : fps : ms_res : virt : strds : sigs : perm : oinds : ns : _ <- L.reverse args = do
-    let sched =
-          HLS { dimlens = getPrimExpLit ns
-              , origids = getIntegerLit oinds
-              , sigma   = getIntegerLit perm
-              , signals = getIntegerLit sigs
-              , strides = getPrimExpLit strds
-              , virthds = getPrimExpLit virt
-              , whatres = getAdjustRes ms_res
-              , permres = getIntegerLit fps
-              , padinner= getPrimExpLit pad
-              , fuselevs= getIntegerLit fuse
-              }
-        shp_pes = map (isInt64 . peFromSe td_env (IntType Int64)) $ shapeDims shp 
-        lmad = LMAD.iotaStrided (isInt64 pe0) (isInt64 pe1) shp_pes
-        sched_entry = trace ("\n\nFOUND SCHEDULE: "++prettyString sched) (pat_el, sched, lmad, Sq.singleton stm)
-    pure $ bu_env
-      { optstms = stm Sq.<| (optstms bu_env)
-      , schedules = M.insert (getVName arr) sched_entry $ schedules bu_env
-      }
-    -- ^ much of this code should be moved as a helper function in SchedUtils
-  where
-    pe0 = ValueExp $ IntValue $ Int64Value 0
-    pe1 = ValueExp $ IntValue $ Int64Value 1
-    --
-    getVName (Var nm) = nm
-    getVName se = error ("Trying to read the soac-result name, but got: "++prettyString se)
-    --
-    getPrimExpLit (Constant _) =
-      error ("The result of an array literal cannot be a constant")
-    getPrimExpLit (Var nm)
-      | Just pes <- M.lookup nm (arrayLits td_env) = pes
-      | otherwise = error ("something went wrong with tracking literals of " ++ prettyString nm)
-    getIntegerLit nm =
-      map toInt $ getPrimExpLit nm
-    --
-    getAdjustRes (Var _) = error "Illegal var name denoting AdjustResult"
-    getAdjustRes (Constant pval)
-      | pval == IntValue (Int64Value 0) = ExactRes
-      | pval == IntValue (Int64Value 1) = ManifestRes
-      | pval == IntValue (Int64Value 2) = SubstituteRes
-      | otherwise = error "Illegal integer for the kind of AdjustResult"
-    --
-    toInt :: PrimExp VName -> Int
-    toInt (ValueExp (IntValue iv)) = valueIntegral iv
-    toInt pe = error ("This was supposed to be a constant int value; instead is "++prettyString pe)
+    (args, _diet) <- unzip args_diet = do
+  let (arr_nm, pat_el, sched, lmad) = parseSchedule fnm td_env args pat
+      sched_entry = (pat_el, sched, lmad, Sq.singleton stm)
+  pure $ bu_env { optstms = stm Sq.<| (optstms bu_env)
+                , schedules = M.insert arr_nm sched_entry $ schedules bu_env
+                }
 --
 -- The case of transposition (just for demo)
 applySchedOnStm (_, bu_env) stm@(Let (Pat [pat_el]) _aux e)
