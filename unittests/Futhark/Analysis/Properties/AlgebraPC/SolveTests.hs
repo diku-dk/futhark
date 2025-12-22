@@ -23,7 +23,7 @@ import Futhark.Analysis.Properties.Monad (printAlgEnv)
 import Futhark.SoP.SoP (SoP)
 -------------------------------------
 -- Run with:
---  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
+--  $ cabal test --test-option="--pattern=Properties.Algebra"
 -------------------------------------
 runTest :: IndexFnM a -> a
 runTest test = fst $ runIndexFnM test blankNameSource
@@ -44,7 +44,7 @@ mkRange' x y = mkRange (Just x) (Just y)
 tests :: TestTree
 tests =
   testGroup
-    "Properties.AlgebraPC.SolveTests"
+    "Properties.Algebra"
     [
       testCase "Pow Exact Normaliation" $
         run
@@ -82,6 +82,29 @@ tests =
               pure [succ_lb, succ_ub1, succ_ub2, succ_rj_lb, succ_rj_ub]
           )
           @??= [True, True, True, True, True],
+      testCase "mono bug" $
+        run
+          ( do
+              clearAlgEnv
+              n <- newNameFromString "n"
+              v <- newNameFromString "v"
+              i <- newNameFromString "i"
+              addRange (Var n) $ mkRangeLB (int 1)
+              addRange (Var i) $ mkRange' (int 0) (sVar n .-. int 1)
+              addProperty (Var v) (Monotonic v Inc)
+
+              let v_ip1 = sym2SoP (Idx (One v) (sVar i .+. int2SoP 1))
+              let v_i = sym2SoP (Idx (One v) (sVar i))
+              let x = v_ip1 .-. v_i
+
+              printAlgEnv 1
+              printM 1 $ prettyString x
+              y <- simplify x
+              printM 1 $ prettyString y
+
+              y FM.$==$ x
+          )
+          @??= True,
       testCase "FFT.bounds" $
         run
           ( do

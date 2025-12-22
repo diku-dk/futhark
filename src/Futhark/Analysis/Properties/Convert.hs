@@ -12,6 +12,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, mapMaybe)
 import Data.Set qualified as S
+import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, simplify, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
@@ -123,7 +124,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
       forM_ formal_args (uncurry newIndexFn)
       forM_ params addPreconditions
       forM_ params addBooleanNames
-      forM_ params addSizeVariables
+      forM_ size_vars addSizeVariable
       indexfns <- forward body >>= mapM rewrite >>= bindfn vn
       checkPostcondition vn indexfns te
       insertTopLevel vn (mkApplyIndexFn vn size_vars params te indexfns)
@@ -198,34 +199,44 @@ checkPostcondition vn indexfns te = do
             "Failed to show postcondition:\n" <> prettyStr e <> "\n" <> prettyStr postconds
     _ -> error "Tuples of postconditions not implemented yet."
 
--- Restrict `f`'s free variables to be in `newScope`. Returns
+-- Used to ensure that returns of top-level definitions are either expressed
+-- only over the formal arguments or uninterpreted.
+--
+-- Restricts `f`'s free variables to be in `newScope`. Returns
 --  * `f`, if `f` only references variables in `newScope`.
 --  * A fresh uninterpreted function, otherwise.
 -- Preserves f's shape, if this only depends on in-scope variables, regardless.
---
--- Used to ensure that returns of top-level definitions are either expressed
--- only over the formal arguments or uninterpreted.
 changeScope :: S.Set E.VName -> IndexFn -> IndexFnM IndexFn
 changeScope newScope f
   | fv f `S.isSubsetOf` newScope = pure f
   | fv (shape f) `S.isSubsetOf` newScope = do
-      g <- mkUinterpreted
+      g <- mkUinterpreted f
       pure $ g {shape = shape f}
-  | otherwise = mkUinterpreted
-  where
-    indices = map (sym2SoP . Var . boundVar) (concat (shape f))
+  | otherwise = mkUinterpreted f
 
-    mkUinterpreted = do
-      new_shape <- forM (shape f) . mapM $ \(Forall i _) ->
-        Forall i . Iota . sym2SoP . Var <$> newNameFromString "x"
-      x <- newNameFromString "x"
-      pure $
-        IndexFn
-          { shape = new_shape,
-            body = singleCase (sym2SoP $ Apply (Var x) indices)
-          }
+uninterpretedName :: String
+uninterpretedName = "<f>"
+
+mkUinterpreted :: IndexFn -> IndexFnM IndexFn
+mkUinterpreted f = do
+  new_shape <- forM (shape f) . mapM $ \(Forall i _) ->
+    Forall i . Iota . sym2SoP . Var <$> newNameFromString "<d>"
+  x <- newNameFromString uninterpretedName
+  pure $
+    IndexFn
+      { shape = new_shape,
+        body = singleCase (sym2SoP $ Apply (Var x) (indexVars f))
+      }
+
+bodyIsUinterpreted :: IndexFn -> Bool
+bodyIsUinterpreted f
+  | Just (Apply (Var x) _) <- justSym =<< justSingleCase f =
+      E.baseString x == uninterpretedName
+  | otherwise = False
 
 -- Apply a top-level definition with index function(s).
+-- g, size_vars, pats, postcond, indexfns: The top-level definition.
+-- loc, args: The source program apply.
 mkApplyIndexFn ::
   E.VName ->
   [E.VName] ->
@@ -235,7 +246,7 @@ mkApplyIndexFn ::
   E.SrcLoc ->
   EArgs ->
   IndexFnM (ApplyEffect, [IndexFn])
-mkApplyIndexFn g size_vars pats te indexfns loc args = do
+mkApplyIndexFn g size_vars pats postcond indexfns loc args = do
   printM 5 $ "✨ Using index fn " <> prettyStr g
 
   -- NOTE on why changeScope is called here.
@@ -262,13 +273,17 @@ mkApplyIndexFn g size_vars pats te indexfns loc args = do
 
   fs <- forM indexfns_scoped $ \fn -> do
     substParams (repIndexFn size_rep fn) (mconcat actual_args)
-      >>= rewrite
+      >>= fmap (repIndexFn name_rep) . rewrite
+
+  unless (all (\f -> fv f `S.disjoint` scope) fs) $
+    error "mkApplyIndexFn: bound variable(s) captured."
+
   pure (mkEffectFromTypeExp size_rep (mconcat actual_args), fs)
   where
     scope = S.fromList $ size_vars <> (fst <$> concatMap E.patternMap pats)
 
     mkEffectFromTypeExp size_rep actual_args vns =
-      forM_ (getTERefine te) $ \ref_exp -> do
+      forM_ (getTERefine postcond) $ \ref_exp -> do
         -- Bounds checking is disabled here because the bounds in the refinement
         -- of te was already checked previously (when creating the top level
         -- index funciton used here).
@@ -974,13 +989,30 @@ forwardLetEffects bound_names x = do
   y <- forwardApplyDef x
   case y of
     Just (effect, fns) -> do
+      printM 3 $ "Propating effects on " <> prettyStr bound_names
+      -- Apply effect to unusable fresh name if it's a wildcard `let _ = ...`.
       bound_names' <- forM bound_names $ \case
         Just vn -> pure vn
-        Nothing -> newNameFromString "_" -- HACK Apply effects to unusable wildcard.
-      printM 3 $ "Propating effects on " <> prettyStr bound_names'
+        Nothing -> newNameFromString "_wildcard"
       effect bound_names'
       printAlgEnv 3
-      pure fns
+      -- Rename uninterpreted functions to match bound names
+      -- because effects get applied to the bound name.
+      -- Transforms
+      --   indices |-> for i < n . <f>(i)
+      --   Range indices (0, m)
+      -- into
+      --   indices |-> for i < n . indices(i)
+      --   Range indices (0, m)
+      pure $
+        zipWith
+          ( \vn f ->
+              if bodyIsUinterpreted f
+                then f {body = singleCase (sym2SoP $ Apply (Var vn) (indexVars f))}
+                else f
+          )
+          bound_names'
+          fns
     Nothing -> forward x
 
 -- Applying top-level definitions of functions.
@@ -1627,19 +1659,11 @@ addBooleanNames (E.Id param (E.Info {E.unInfo = t}) _) = do
 addBooleanNames _ = pure ()
 
 -- Automatically refines size variables to be non-negative.
-addSizeVariables :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
-addSizeVariables (E.PatParens pat _) = addSizeVariables pat
-addSizeVariables (E.PatAscription pat _ _) = addSizeVariables pat
-addSizeVariables (E.Id _ (E.Info {E.unInfo = E.Array _ shp _}) _) = do
-  mapM_ addSize (E.shapeDims shp)
-  where
-    addSize (E.Var (E.QualName _ d) _ _) = do
-      alg_d <- toAlgebra (sym2SoP $ Var d)
-      addRel (alg_d :>=: int2SoP 0)
-    addSize _ = pure ()
-addSizeVariables (E.Id param (E.Info {E.unInfo = t}) _) = do
-  when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
-addSizeVariables _ = pure ()
+addSizeVariable :: E.VName -> IndexFnM ()
+addSizeVariable d = do
+  alg_d <- toAlgebra (sym2SoP $ Var d)
+  addRel (alg_d :>=: int2SoP 0)
+  addRelSymbol (Prop (Property.Rng d (Just (int2SoP 0), Nothing)))
 
 {-
     Bounds checking.

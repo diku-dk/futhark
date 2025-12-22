@@ -150,7 +150,10 @@ def expand_hull [num_segs] [num_points]
                  let ay = segs_begy[seg_ix]
                  let bx = segs_endx[seg_ix]
                  let by = segs_endy[seg_ix]
-                 in signed_dist_to_line (ax, ay) (bx, by) (px, py)
+                 let axay = (ax, ay)
+                 let bxby = (bx, by)
+                 let pxpy = (px, py)
+                 in signed_dist_to_line axay bxby pxpy
               )
               points_idx points_x points_y
   
@@ -213,8 +216,12 @@ def expand_hull [num_segs] [num_points]
         let by = segs_endy[seg_ix]
         let qx = points_x[extreme_ix]
         let qy = points_y[extreme_ix]
-        let daq = signed_dist_to_line (ax,ay) (qx,qy) (px,py)
-        let dqb = signed_dist_to_line (qx,qy) (bx,by) (px,py)
+        let axay = (ax, ay)
+        let bxby = (bx, by)
+        let pxpy = (px, py)
+        let qxqy = (qx, qy)
+        let daq = signed_dist_to_line axay qxqy pxpy
+        let dqb = signed_dist_to_line qxqy bxby pxpy
         in if dist_less zero_dist daq then (seg_ix * 2)
            else if dist_less zero_dist dqb then (seg_ix * 2 + 1)
            else (-1)
@@ -377,7 +384,7 @@ def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 
 def pmin p q = if point_less p q then p else q
 def pmax p q = if point_less p q then q else p
 
-def get_leftmost_rightmost [n] (ps0: {[n]f64 | \_ -> Range n (1,inf)}) (ps1: [n]f64): {((f64, f64), (f64, f64)) | \_ -> true} =
+def get_leftmost_rightmost (n: {i64 | \n -> Range n (1,inf)}) (ps0: [n]f64) (ps1: [n]f64): {((f64, f64), (f64, f64)) | \_ -> true} =
   let ps = zip ps0 ps1
   let ne = ps[0]
   let leftmosts = scan (\(p1,p2) (q1,q2) -> if point_less (p1,p2) (q1,q2) then (p1,p2) else (q1,q2)) ne ps
@@ -386,14 +393,18 @@ def get_leftmost_rightmost [n] (ps0: {[n]f64 | \_ -> Range n (1,inf)}) (ps1: [n]
   let (rightmosts1, rightmosts2) = unzip rightmosts
   in ((leftmosts1[n-1], leftmosts2[n-1]), (rightmosts1[n-1], rightmosts2[n-1]))
 
-def compute [n] (ps0 : {[n]f64 | \_ -> Range n (3,inf)})
+def compute (n: {i64 | \n -> Range n (3,inf)}) (ps0 : [n]f64)
     (ps1 : [n]f64)
     : {([](f64,f64), [](f64,f64)) | \_ -> true} =
-  let ((leftmost1, leftmost2), (rightmost1, rightmost2)) = get_leftmost_rightmost ps0 ps1
+  let ((leftmost1, leftmost2), (rightmost1, rightmost2)) = get_leftmost_rightmost n ps0 ps1
+  let left = (leftmost1,leftmost2)
+  let right = (rightmost1,rightmost2)
   let conds = map2 (\p1 p2 ->
-      if point_eq (p1,p2) (leftmost1,leftmost2) || point_eq (p1,p2) (rightmost1,rightmost2)
+      let p = (p1,p2)
+      in if point_eq p left || point_eq p right
       then 1
-      else if dist_less zero_dist (signed_dist_to_line (leftmost1,leftmost2) (rightmost1,rightmost2) (p1,p2))
+      else let d = signed_dist_to_line left right p
+           in if dist_less zero_dist d
            then 2
            else 0
     ) ps0 ps1
@@ -404,6 +415,6 @@ def compute [n] (ps0 : {[n]f64 | \_ -> Range n (3,inf)})
   let upper_points1 = slice points_parted1 a b
   let lower_points0 = slice points_parted0 b n
   let lower_points1 = slice points_parted1 b n
-  let upper_hull = semihull (leftmost1,leftmost2) (rightmost1,rightmost2) upper_points0 upper_points1
-  let lower_hull = semihull (rightmost1,rightmost2) (leftmost1,leftmost2) lower_points0 lower_points1
+  let upper_hull = semihull left right upper_points0 upper_points1
+  let lower_hull = semihull right left lower_points0 lower_points1
   in (upper_hull, lower_hull)

@@ -58,29 +58,21 @@ dest_fn @ (f_name, f) = do
       printM 1337 . gray $ prettyString g
       printM 1337 $ warningString "\t@ " <> gray (prettyString (fst <$> app))
       printM 1337 . gray $ "\t  where " <> prettyString f_name <> " =\n" <> prettyIndent 16 f
-      printM 9 $ "###################################################### go " <> prettyStr f_name
       case app of
         Just apply@(_, args)
           | argCheck args -> do
-              printM 9 $ "###################################################### Apply " <> prettyStr apply
-              printM 9 $ "###################################################### f " <> prettyStr f
-              printM 9 $ "###################################################### g " <> prettyStr g
               h <- substituteOnce f g apply
               h' <- go (S.insert (f_name, args) seen) (fromJust h) argCheck
               printM 1337 . gray $ "\t  ->\n" <> prettyIndent 16 h'
               pure h'
           | otherwise -> do
-              printM 9 $ "###################################################### (Just otherwise) Apply " <> prettyStr apply
               go (S.insert (f_name, args) seen) g argCheck
         Nothing
           | S.null seen -> do
-              printM 9 $ "###################################################### (Nothing case) f " <> prettyStr f
-              printM 9 $ "###################################################### (Nothing case) g " <> prettyStr g
               -- When converting expressions a function may be substituted without arguments.
               -- This may fail when substituting into an uninterpreted function.
               fromMaybe g <$> substituteOnce f g (Var f_name, [])
           | otherwise -> do
-              printM 9 $ "###################################################### Nothing otherwise: " <> prettyStr g
               pure g
 
     getApply seen = astFold (ASTFolder {foldOnSymbol = getApply_ seen}) Nothing
@@ -111,10 +103,9 @@ subst indexfn = do
 -- Are you substituting xs[i] for xs = for i < e . true => xs[i]?
 -- This happens when xs is a formal argument. (So not relevant for flattened arrays.)
 trivialSub :: Symbol -> IndexFn -> [SoP Symbol] -> Bool
-trivialSub _ (IndexFn [] _) _ = False
 trivialSub e f args
   | length (shape f) == length args,
-    all ((== 1) . length) (shape f),
+    all ((<= 1) . length) (shape f),
     Just e' <- justSym =<< justSingleCase f =
       sym2SoP e == rep dims2args e'
   | otherwise = False

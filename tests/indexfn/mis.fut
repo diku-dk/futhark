@@ -121,36 +121,49 @@ let repl_segm_iota [m]
   let iotas = map (\x -> x - 1) tmp
   in (ids, iotas)
 
+def make_sizes [nVerts]
+   (nEdges: {i64 | \x -> Range x (0,inf)})
+   (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
+   (newI: { [nVerts]i64 | \ x -> Range x (0,2)})
+   (indexes: {[nVerts]i64 | \x -> Range x (0,nVerts) && Injective x})
+   : {[]i64 | \y -> Range y (0,nEdges+1)} =
+    map (\ind ->
+          if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind]
+        ) indexes
+
+def hm [nVerts]
+   (nEdges: {i64 | \x -> Range x (0,inf)})
+   (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
+   (newI: { [nVerts]i64 | \ x -> Range x (0,2)})
+   (indexes: {[nVerts]i64 | \x -> Range x (0,nVerts) && Injective x})
+   : {([]i64, []i64) | \(idxs,iotas) -> Range idxs (0,nVerts) && Range iotas (0,nEdges)} =
+  let szs = map (\ind ->
+          if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind]
+        ) indexes
+  in repl_segm_iota szs
+
 -- pre-conditions:
 --   0 <= nInds <= nVerts
 --
 def expand [nEdges]
-           (nVerts: {i64 | \x -> 0 <= x})
+           [nVerts]
            (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
            (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
            (newI: { [nVerts]i64 | \ x -> Range x (0,2)})
            (indexes: {[nVerts]i64 | \x -> Range x (0,nVerts) && Injective x})
            : {[]i64 | \_ -> true} =
-  let szs = map (\ ind -> if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind] ) indexes
-  -- (unsupported) postcondition should be
-  --   0 <= szs[i] <= vertexes[indexes[i]+1] - vertexes[indexes[i]]
+  -- let szs = make_sizes nEdges vertexes newI indexes
+  -- let (idxs, iotas) = repl_segm_iota szs
+  -- let shape = map (\ind ->
+  --         if (newI[ind] == 0) then 0 else vertexes[ind+1] - vertexes[ind]
+  --       ) indexes
+  -- let (idxs, flags) = segment_ids shape
+  -- let ones = map (\_ -> 1) flags
+  -- let tmp = sgm_sum flags ones
+  -- let iotas = map (\x -> x - 1) tmp
+  let (idxs, iotas) = hm nEdges vertexes newI indexes
 
-  let (idxs, iotas) = repl_segm_iota szs
-  -- ^ postconditions of repl_segm_iota:
-  --   idxs and iotas are segmented arrays of outer dim nInds
-  --   idxs = for i < nInds, j < szs[i]. true => i
-  --   iotas= for i < nInds, j < szs[i]. true => j
-  --   Hence it should be able to prove that
-  --   0 <= iotas[i,j] < vertexes[indexes[i]+1] - vertexes[indexes[i]]
-  -- 
   in  map2 (\i j -> edges[ vertexes[ indexes[i] ] + j] ) idxs iotas
-  -- IxFn of idxs ensure `0 <= indexes[i] < nInds`, i.e., indexes[i] is in range
-  -- From the range post-condition on iotas we have that:
-  --     0 <= j < vertexes[indexes[i]+1] - vertexes[indexes[i]]
-  -- hence proving index within bounds of `edges` by Fourier Motzkin
-  --   eliminates `j`:  vertexes[ indexes[i] ] + vertexes[indexes[i]+1] - vertexes[indexes[i]] - 1 < nEdges
-  --   simplification:  vertexes[indexes[i]+1] - 1 < nEdges
-  --   eliminate vertexes[indexes[i]+1]:  nEdges - 1 < nEdges hence success.
 
 
 def loop_body [nEdges]
@@ -168,7 +181,7 @@ def loop_body [nEdges]
   let newI_int = map (\i -> if i then 1 else 0) newI
   let I = scatter I targets newI_int
 
-  let marked = expand nVerts vertexes edges newI_int indexes
+  let marked = expand vertexes edges newI_int indexes
   let C = remove_neighbour_and_self marked targets C
   in (C, I)
 

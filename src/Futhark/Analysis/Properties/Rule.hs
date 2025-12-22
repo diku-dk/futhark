@@ -362,6 +362,39 @@ rulesIndexFn = do
             pure $ Recurrence `notElem` (e1_symbols <> e2_symbols)
         },
       Rule
+        { name = "Segmented prefix sum2",
+          from =
+            IndexFn
+              { shape = [[Forall i (Cat k (hole m) (hole b))]],
+                body =
+                  cases
+                    [ ((hole i :== hole b) :|| ((hole i :== int2SoP 0) :&& (hole i :/= hole b)), hole h1),
+                      (Hole h3, Recurrence ~+~ Hole h2)
+                    ]
+              },
+          to = \s -> debugT' "prefix sum cat" $ do
+            let i' = repVName (mapping s) i
+            b' <- sub s (hole b)
+            e1_b <- rep (mkRep i' b') <$> sub s (hole h1)
+            debugPrettyM "e1_b" e1_b
+            e2 <- sub s (hole h2)
+            j <- newVName "j"
+            let e2_j = rep (mkRep i' (sym2SoP $ Var j)) e2
+            let e2_sum = toSumOfSums j (b' .+. int2SoP 1) (sym2SoP $ Var i') e2_j
+            debugPrettyM "e2" e2
+            debugPrettyM "e2_j" e2_j
+            debugPrettyM "e2_sum" e2_sum
+            subIndexFn s $
+              IndexFn
+                { shape = [[Forall i (Cat k (hole m) (hole b))]],
+                  body = cases [(Bool True, e1_b .+. e2_sum)]
+                },
+          sideCondition = \s -> do
+            e1_symbols <- concatMap fst . sopToLists <$> sub s (Hole h1)
+            e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
+            pure $ Recurrence `notElem` (e1_symbols <> e2_symbols)
+        },
+      Rule
         { name = "Bool to Int",
           from =
             IndexFn

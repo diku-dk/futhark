@@ -18,6 +18,7 @@ module Futhark.Analysis.Properties.IndexFn
     Iterator,
     cmapValues,
     rank,
+    indexVars,
   )
 where
 
@@ -71,6 +72,9 @@ newtype Cases a b = Cases (NE.NonEmpty (a, b))
 
 rank :: IndexFn -> Int
 rank = length . shape
+
+indexVars :: IndexFn -> [SoP Symbol]
+indexVars f = map (sym2SoP . Var . boundVar) (concat (shape f))
 
 cases :: [(a, b)] -> Cases a b
 cases = Cases . NE.fromList

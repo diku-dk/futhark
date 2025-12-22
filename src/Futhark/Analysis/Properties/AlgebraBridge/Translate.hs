@@ -259,10 +259,10 @@ fromAlgebra_ (Algebra.Mdf _dir vn i j) = do
   -- TODO add monotonicity property to environment?
   a <- fromAlgebra i
   b <- fromAlgebra j
-  x <- lookupSym vn
-  xa <- repHoles x a
-  xb <- repHoles x b
-  pure $ xa ~-~ xb
+  mx <- lookupUntransSym (Algebra.Var vn)
+  case mx of
+    Nothing -> pure (Apply (Var vn) [a] ~-~ Apply (Var vn) [b])
+    Just x -> (~-~) <$> repHoles x a <*> repHoles x b
 fromAlgebra_ (Algebra.Sum (Algebra.One vn) lb ub) = do
   a <- fromAlgebra lb
   b <- fromAlgebra ub

@@ -31,6 +31,15 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/bug.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))]],
+                  body = cases [(Bool True, sym2SoP (Apply (Hole xs) [sVar i .+. int2SoP 1]) .-. sym2SoP (Apply (Hole xs) [sVar i]) )]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/map.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
