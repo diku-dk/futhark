@@ -39,7 +39,10 @@ pe0 = ValueExp $ IntValue $ Int64Value 0
 --     1. treat the case of an accumulated reduction:
 --          - initialize with replicate of neutral elem instead of scratch
 --          - accumulate with operator instead of simple assignment
---     2. The implementation assumes that all dimensions of the result
+--     2. Treat the case of an originally-reduced dimension being
+--          parallelized with Macc -> that dimnesion should be
+--          mapped in the adjustment of the result, in addition to 1.
+--     3. The implementation assumes that all dimensions of the result
 --          array are mapped; please verify that this is so!
 manifestResult ::
     (LocalScope SOACS m, MonadFreshNames m) =>

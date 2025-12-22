@@ -27,7 +27,7 @@ import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Optimise.Schedules.EnvUtils
   (TopEnv (..), freshTopEnv, addTileBinding, addIota2Env, peFromSe)
 import Futhark.Optimise.Schedules.SchedUtils
-  ( BotEnv(..), freshBotEnv, parseSchedule )
+  ( BotEnv(..), freshBotEnv, parseSchedule, oneFullyConsumedMapRed )
 import Futhark.Optimise.Schedules.Safety(checkValidSched)
 import Futhark.Optimise.Schedules.Stripmine(applyStripmining)
 import Futhark.Optimise.Schedules.Permute(applyPermute)
@@ -92,6 +92,28 @@ applySchedOnStms env stmts = do
       bu_env' <- traverseStms (td_env', bu_env) stms
       applySchedOnStm (td_env', bu_env') stm
 
+-- | Applies schedules in a body of statements:
+--   1. sets the body result in the top-down env and
+--   2. processes the statements by means of @applySchedOnStms@
+applySchedOnBody :: (LocalScope SOACS m, MonadFreshNames m) =>
+  Env -> Body SOACS -> m (Body SOACS)
+applySchedOnBody env body = do
+  let td_env' = (fst env) { bdy_res = map resSubExp $ bodyResult body}
+  scope <- askScope
+  stms' <- localScope (scope <> scopeOf (bodyStms body)) $
+             applySchedOnStms (td_env', freshBotEnv) $ bodyStms body
+  pure $ body { bodyStms = stms' }
+
+-- | Applies schedules in a lambda, essentially by calling
+--     @applySchedOnBody@
+applySchedOnLambda :: (LocalScope SOACS m, MonadFreshNames m) =>
+  Env -> Lambda SOACS -> m (Lambda SOACS)
+applySchedOnLambda env lam = do
+  scope <- askScope
+  bdy <- localScope (scope <> scopeOf lam) $
+           applySchedOnBody env $ lambdaBody lam
+  pure $ lam { lambdaBody = bdy }
+
 -- | The top-down pass records the scalar expansion, iotas,
 --     tiling calls and the like.
 --   ToDos:
@@ -137,6 +159,10 @@ updateTopdownEnv env (Let (Pat [PatElem pat_nm pat_tp]) _aux e)
     i64ptp = IntType Int64
 updateTopdownEnv env _ = env
 
+----------------------------------------
+--- CORE FUNCTION is applySchedOnStm ---
+----------------------------------------
+
 -- | Core function:
 --    1. it identifies and records schedule calls
 --    2. transforms SOACS matching existing schedules
@@ -161,18 +187,19 @@ applySchedOnStm (_, bu_env) stm@(Let (Pat [pat_el]) _aux e)
     Just _ <- Sq.elemIndexL stm' sched_stms = do
     let lmad' = LMAD.permute lmad perm
         sched_entry = (schd_nm, sched, lmad', stm Sq.<| sched_stms)
-    pure $ bu_env 
+    pure $ bu_env
       { optstms = stm Sq.<| (optstms bu_env)
       , schedules = M.insert soac_nm sched_entry $ M.delete pat_nm $ schedules bu_env
       }
 -------------------------------------------------------------------------
--- Core Implementation: the case of a soac target to a schedule!
+-- Core Implementation: case of a redomap soac target to a schedule!  ---
 -------------------------------------------------------------------------
 applySchedOnStm (td_env, bu_env) stm@(Let soac_pat aux e)
-  | Op soac@(Screma _m _inp_nms (ScremaForm _map_lam [] [] )) <- e,
+  | Op soac@(Screma _m _inp_nms form@(ScremaForm _map_lam [] reds )) <- e,
     [pat_el] <- patElems soac_pat,
     Just (patel_sched, sched, _lmad, _stms) <-
-      M.lookup (patElemName pat_el) (schedules bu_env) = do
+      M.lookup (patElemName pat_el) (schedules bu_env),
+    null reds || isJust (oneFullyConsumedMapRed form) = do
     -- 0. Don't forget to apply schedules on the lambda, and to fuse the code.
     --
     -- 1. check the validity of the schedule; in addition find out
@@ -183,17 +210,16 @@ applySchedOnStm (td_env, bu_env) stm@(Let soac_pat aux e)
     -- 2. perform the split of original dimnesions, according schedule's @dimlens@
     --    this refers to simple stripmining, as in the case of matrix multiplication,
     --    or to introducing redundant computation by means of overlapping lmads.
-    (prologue, env', soac') <- applyStripmining td_env sched stm
+    (prologue, env', e_soac') <- applyStripmining td_env sched stm
     -- 3. adjusting the result has 3 cases according to the @whatres@ field of the schedule:
     --    (a) @ExactRes@      -> nothing to be done
     --    (b) @ManifestRes@   -> generate accumulator code that manifest the original result
     --    (c) @SubstituteRes@ -> substitute the result of the rescheduled recurrence in the
     --                             rest of the code
-    (_perm_patel, init_stms, withacc_stm) <- trace ("Stripmined succeeds!!!") $
+    (_perm_patel, init_stms, withacc_stm) <-
         manifestResult env' sched $ Pat [patel_sched]
     -- 4. permute the nest
-    permuted_res_stms <- trace ("AdjustResult succeeds!!!") $
-        applyPermute env' sched aux soac'
+    permuted_res_stms <- applyPermute env' sched aux e_soac'
 
     trace ("\nTop-Down Env:" ++
            "\n\tFwdTileTab: " ++ prettyString (M.toList $ appTilesFwd env') ++ 
@@ -203,7 +229,7 @@ applySchedOnStm (td_env, bu_env) stm@(Let soac_pat aux e)
            "\n\n\nORIGINAL SOAC STMT:" ++
            "\nPattern: "    ++ prettyString soac_pat++" = "++
            "\n" ++ prettyString soac ++
-           "\n\n\nStripmined SOAC:\n"++ prettyString soac' ++
+           "\n\n\nStripmined SOAC:\n"++ prettyString e_soac' ++
            "\n\n\nStripmined Prol:\n"++ prettyString prologue ++
            "\n\n\ninit-withacc:\n" ++ prettyString init_stms ++
            "\n\n\nManifestedRes:\n"++ prettyString withacc_stm ++
@@ -217,7 +243,68 @@ applySchedOnStm (_, bu_env) (Let pat _aux e)
     error ("Implementation shortcomming: scheduling is supported on soacs"++
            " whose top reccurence is a map and producing one array result"++
            "; given expression target to scheduling is:\n:" ++ prettyString e )
--- Just (env0, soac_node@(_, SoacNode out_trsfs soac_pat soac soac_aux), sched, patel_sched)
+-- treatment for If statements
+applySchedOnStm env@(_,bu_env) (Let pat aux e)
+  | Match ses cases def_bdy matchdec <- e = do
+  case_bodies <- forM cases $ \ c -> applySchedOnBody env $ caseBody c
+  def_bdy' <- applySchedOnBody env def_bdy
+  let cases' = zipWith (\c b -> c { caseBody = b } ) cases case_bodies 
+      stm' = Let pat aux $ Match ses cases' def_bdy' matchdec
+  pure $ bu_env { optstms = stm' Sq.<| (optstms bu_env) }
+-- treatment for loops
+applySchedOnStm env@(_,bu_env) (Let pat aux e)
+  | Loop par_inis lform bdy <- e = do
+  bdy' <- applySchedOnBody env bdy
+  let stm' = Let pat aux $ Loop par_inis lform bdy'
+  pure $ bu_env { optstms = stm' Sq.<| (optstms bu_env) }
+-- treatment for withaccs
+applySchedOnStm env@(_,bu_env) (Let pat aux e)
+  | WithAcc wacc_inps lam <- e = do
+  lam' <- applySchedOnLambda env lam
+  let stm' = Let pat aux $ WithAcc wacc_inps lam'
+  pure $ bu_env { optstms = stm' Sq.<| (optstms bu_env) }
+-- treatment for Ops
+applySchedOnStm env@(_,bu_env) (Let pat aux (Op soac))
+  | Screma w nms (ScremaForm map_lam scans reds) <- soac = do
+    map_lam' <- applySchedOnLambda env map_lam
+    scans'   <- forM scans applySchedOnScan
+    reds'    <- forM reds  applySchedOnReduce
+    let stm' = Let pat aux $ Op $ Screma w nms $
+                ScremaForm map_lam' scans' reds'
+    pure $ bu_env { optstms = stm' Sq.<| (optstms bu_env) }
+  where
+    applySchedOnScan (Scan lam ne) = do
+      lam' <- applySchedOnLambda env lam
+      pure $ Scan lam' ne
+    applySchedOnReduce (Reduce com lam ne) = do
+      lam' <- applySchedOnLambda env lam
+      pure $ Reduce com lam' ne
+applySchedOnStm env@(_,bu_env) (Let pat aux (Op e))
+  | Stream w nms ses lam <- e = do
+  lam' <- applySchedOnLambda env lam
+  let stm' = Let pat aux $ Op $ Stream w nms ses lam'
+  pure $ bu_env { optstms = stm' Sq.<| (optstms bu_env) }
+applySchedOnStm env@(_,bu_env) (Let pat aux (Op e))
+  | Scatter w nms spec lam <- e = do
+  lam' <- applySchedOnLambda env lam
+  let stm' = Let pat aux $ Op $ Scatter w nms spec lam'
+  pure $ bu_env { optstms = stm' Sq.<| (optstms bu_env) }
+applySchedOnStm env@(_,bu_env) (Let pat aux (Op e))
+  | Hist w nms bops lam <- e = do
+  lam' <- applySchedOnLambda env lam
+  let stm' = Let pat aux $ Op $ Hist w nms bops lam'
+  pure $ bu_env { optstms = stm' Sq.<| (optstms bu_env) }
+applySchedOnStm env@(_,bu_env) (Let pat aux (Op e))
+  | JVP ses1 ses2 lam <- e = do
+  lam' <- applySchedOnLambda env lam
+  let stm' = Let pat aux $ Op $ JVP ses1 ses2 lam'
+  pure $ bu_env { optstms = stm' Sq.<| (optstms bu_env) }
+applySchedOnStm env@(_,bu_env) (Let pat aux (Op e))
+  | VJP ses1 ses2 lam <- e = do
+  lam' <- applySchedOnLambda env lam
+  let stm' = Let pat aux $ Op $ VJP ses1 ses2 lam'
+  pure $ bu_env { optstms = stm' Sq.<| (optstms bu_env) }
+-- default case
 applySchedOnStm (_, bu_env) stm =
   pure $ bu_env { optstms = stm Sq.<| (optstms bu_env) }
 

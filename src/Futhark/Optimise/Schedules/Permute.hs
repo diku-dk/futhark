@@ -32,15 +32,15 @@ applyPermute env sched aux e_soac
   | Op soac <- e_soac,
     Screma _mm _inps form@(ScremaForm _map_lam [] _reduces) <- soac,
     emptyOrFullyConsumedReduce form = do
-  let inp_soac_type = trace "!!!In PERMUTE!!!" $ findSOACtype soac
+  let inp_soac_type = findSOACtype soac
   strip_params <- forM inp_soac_type $ \ tp -> newParam ("tmp_stripmined_res") tp
   let strip_tmp_pat = Pat $ map (\ (Param _ nm dec) -> PatElem nm dec) strip_params
       sched' = sched { sigma = invPerm (sigma sched) }
   perm_soac_stms <- permuteNest env sched' $ Let strip_tmp_pat aux $ Op soac
-  trace ( "\nStripmined soac:\n" ++ prettyString soac ++
-           "\nPermuted   soac:\n" ++ prettyString perm_soac_stms
-         ) $
-    pure perm_soac_stms
+--  trace ( "\nStripmined soac:\n" ++ prettyString soac ++
+--           "\nPermuted   soac:\n" ++ prettyString perm_soac_stms
+--         ) $
+  pure perm_soac_stms
   where
     emptyOrFullyConsumedReduce (ScremaForm _ [] []) = True
     emptyOrFullyConsumedReduce form

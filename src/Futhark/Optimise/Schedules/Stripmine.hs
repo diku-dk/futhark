@@ -11,7 +11,7 @@ import Control.Monad
 import Data.Sequence qualified as Sq
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
---import Data.Maybe
+import Data.Maybe(isJust)
 import Futhark.Construct
 import Futhark.IR.SOACS
 -- import Futhark.IR.SOACS qualified as F
@@ -42,42 +42,35 @@ import Futhark.Analysis.PrimExp.Convert
 --        what happens if the soac has multiple results?
 --   7. apply fusion recursively at inner level, rename and simplify lambdas        -- CHECK!
 --   8. GET RID OF MAYBE RESULT; SIGNAL ERROR INSTEAD OF NOTHING!!!
+--   9. HANDLE ACCUMULATORS WHEN IMPLICITLY-EXPANDING DIMENSIONS by wrapping them
+--         in if statements that ensures that the accumulator instance is inside the
+--         original iteration space.
 applyStripmining ::
     (LocalScope SOACS m, MonadFreshNames m) =>
     TopEnv -> HLSched -> Stm SOACS ->
     m (Stms SOACS, TopEnv, Exp SOACS)
-applyStripmining env sched (Let pat aux e)
-  | Op soac@(Screma _mm _inps (ScremaForm _map_lam [] [])) <- e = do
-    strip_res <- stripmineStmt 0 env sched (Let pat aux (Op soac))
-    case strip_res of
-      Just (prologue_stms, env', ( (Let _ _ e_soac'@(Op (Screma _m' [_nm] _form'))) Sq.:<| _ )) -> do
+applyStripmining env sched stm@(Let pat aux e)
+  | Op soac@(Screma _ _ (ScremaForm _ [] _)) <- e = do
+    (prologue_stms, env', stms') <- stripmineStmt 0 env sched (Let pat aux (Op soac))
+    case stms' of
+      (Let _ _ e_soac'@(Op (Screma{}))) Sq.:<| Sq.Empty -> do
           -- trace ("stripmined soac: \n" ++ prettyString e_soac' ++
           --        "\n prologues-stms:\n"++ prettyString prologue_stms ) $
           pure $ (prologue_stms, env', e_soac')
-      _ -> error "Unreachable case reached!"
+      _ -> error ("In applyStripmining: stripming\n" ++ prettyString stm ++
+                  "\n\thas the unexpected result:\n" ++ prettyString stm) -- CHANGE THIS TO STMS'
 applyStripmining _ _ _ =
   error ("Unsupported case in Futhark.Optimize.Schedules.applyStripmining")
 
 ----------------------------------------------------------------------------
 ----------------------------------------------------------------------------
 
--- | ToDos: needs to be improved, for example to:
---   0. Modify @mkIota@ to search whether a suitable iota already exists in @env@
---   1. return an expression, not a SOAC, otherwise loops cannot
---      be stripmined; question is how do I get the types in recuCase???
---   2. populate the environment, for example bind the PrimExp
---      of i_flat
---   3. not here, at the very beginning of the pass, need to
---      track all dependencies of the original SOAC and populate
---      the symbol table with bindings for:
---        (a) PrimExp of integral scalar variables
---        (b) transformation on arrays, e.g., transpose
---   4. Remember to rename lambdas!
+-- | Core Utility function that stripmines a Map
 stripmineMap :: (LocalScope SOACS m, MonadFreshNames m) =>
     (Int, [(VName,Type)], SubExp) ->
     TopEnv -> [PrimExp VName] ->
     PrimExp VName -> Lambda SOACS ->
-    m (Maybe (Stms SOACS, TopEnv, SOAC SOACS))
+    m (Stms SOACS, TopEnv, SOAC SOACS)
 stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
   i_p <- newParam ("i"++show k) $ Prim i64ptp
   let i_pe = LeafExp (paramName i_p) i64ptp
@@ -93,7 +86,7 @@ stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
     baseCase scope i_p cur_ind' ((w,iotnm), prologue_stms) = do
       new_lam <-
         runLambdaBuilder [i_p] $ localScope scope $ do
-          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSe env i64ptp mm) pe1 
+          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSe env i64ptp mm) pe1
           i_flat <- letSubExp ("i"++show k++"flat") =<< toExp i_flat_pe
           forM_ (zip (lambdaParams lam) inp_nm_tps) $ \ (lp, (inp_nm, inp_tp)) -> do
             let index_e = mkArrIndexingExp env inp_nm inp_tp i_flat
@@ -104,24 +97,89 @@ stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
       -- BUG in `simplifyLambda 0` ??? : a row of D is said to be a point.
       new_lam' <- renameLambda new_lam >>= simplifyLambda 0
       let soac = Screma w [iotnm] $ ScremaForm new_lam' [] []
-      pure $ Just (prologue_stms, addIota2Env env (iotnm, w, n), soac)
+      pure (prologue_stms, addIota2Env env (iotnm, w, n), soac)
     --
     recuCase scope i_p cur_ind' ((w,iotnm), prologue_stms) = do
-      rec_res <- stripmineMap (k, inp_nm_tps, mm) env ns cur_ind' lam
-      case rec_res of
-        Just (prev_stms, rec_env, prev_soac) -> do
-          new_lam <-
-            runLambdaBuilder [i_p] $ localScope scope $ do
-              prev_soac_res <- letTupExp' ("map"++show k++"strip") $ Op prev_soac
-              pure $ map subExpRes prev_soac_res
-          new_lam' <- renameLambda new_lam >>= simplifyLambda 0
-          let soac = Screma w [iotnm] $ ScremaForm new_lam' [] []
-          pure $ Just (prologue_stms <> prev_stms, addIota2Env rec_env (iotnm, w, n), soac)
-        -- end ^
-        _ -> pure Nothing
+      (prev_stms, rec_env, prev_soac) <- stripmineMap (k, inp_nm_tps, mm) env ns cur_ind' lam
+      new_lam <-
+        runLambdaBuilder [i_p] $ localScope scope $ do
+          prev_soac_res <- letTupExp' ("map"++show k++"strip") $ Op prev_soac
+          pure $ map subExpRes prev_soac_res
+      new_lam' <- renameLambda new_lam >>= simplifyLambda 0
+      let soac = Screma w [iotnm] $ ScremaForm new_lam' [] []
+      pure (prologue_stms <> prev_stms, addIota2Env rec_env (iotnm, w, n), soac)
+--
 stripmineMap _ _ [] _ _ =
   error "stripmineMap: unreachable case reached!"
 
+-- | Core utility function for stripmining a map or a redomap
+--   with one, fully consumed reduce. It is assumed that
+--   it was previously verified that redomap preserves the
+--   original size, while map sizes allows imperfect tiling.
+-- If this works, then functions @stripmineMap@ && @recStripRedomap@
+--   are absolete and should be removed!!!
+stripmineRedoMap :: (LocalScope SOACS m, MonadFreshNames m) =>
+    (Int, [(VName,Type)], SubExp) ->
+    TopEnv -> [(Int,PrimExp VName)] ->
+    PrimExp VName -> ScremaForm SOACS ->
+    m (Stms SOACS, TopEnv, SOAC SOACS)
+stripmineRedoMap (k, inp_nm_tps, mm) env ((s,n):ns) cur_ind form@(ScremaForm lam [] reds)
+  | null reds || isJust (oneFullyConsumedMapRed form) = do
+  i_p <- newParam ("i"++show k) $ Prim i64ptp
+  let i_pe = LeafExp (paramName i_p) i64ptp
+      i_mul_ns = mulPes i_pe $ foldl mulPes pe1 $ map snd ns
+      cur_ind' = addPes cur_ind i_mul_ns
+  -- build the iota for this screma
+  scope <- askScope
+  iota_info <- mkIota env k n
+  if null ns
+  then baseCase scope i_p cur_ind' iota_info
+  else recuCase scope i_p cur_ind' iota_info
+  where
+    baseCase scope i_p cur_ind' ((w,iotnm), prologue_stms) = do
+      new_lam <-
+        runLambdaBuilder [i_p] $ localScope scope $ do
+          let i_flat_pe = 
+               if null reds
+               then minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSe env i64ptp mm) pe1
+               else cur_ind'
+          i_flat <- letSubExp ("i"++show k++"flat") =<< toExp i_flat_pe
+          forM_ (zip (lambdaParams lam) inp_nm_tps) $ \ (lp, (inp_nm, inp_tp)) -> do
+            let index_e = mkArrIndexingExp env inp_nm inp_tp i_flat
+            letBind (Pat [PatElem (paramName lp) (paramDec lp)]) index_e
+                    -- BasicOp $ Index inp_nm (Slice [DimFix i_flat])
+          addStms $ bodyStms $ lambdaBody lam
+          pure $ bodyResult $ lambdaBody lam
+      new_lam' <- renameLambda new_lam >>= simplifyLambda 0
+      reds' <- newReduces reds
+      let soac = Screma w [iotnm] $ ScremaForm new_lam' [] reds'
+      pure (prologue_stms, addIota2Env env (iotnm, w, n), soac)
+    --
+    recuCase scope i_p cur_ind' ((w,iotnm), prologue_stms) = do
+      (prev_stms, rec_env, prev_soac) <- stripmineRedoMap (k, inp_nm_tps, mm) env ns cur_ind' form
+      new_lam <-
+        runLambdaBuilder [i_p] $ localScope scope $ do
+          prev_soac_res <- letTupExp' ("map"++show k++"strip") $ Op prev_soac
+          pure $ map subExpRes prev_soac_res
+      new_lam' <- renameLambda new_lam >>= simplifyLambda 0
+      reds' <- newReduces reds
+      let soac = Screma w [iotnm] $ ScremaForm new_lam' [] reds'
+      pure (prologue_stms <> prev_stms, addIota2Env rec_env (iotnm, w, n), soac)
+    --
+    -- If Macc or Map => Map
+    newReduces rs
+      | parMode s == Macc || null rs = pure []
+    newReduces [Reduce com rlam rne] = do
+      rlam' <- renameLambda rlam
+      pure $ [Reduce com rlam' rne]
+    newReduces rs =
+      error ("In newReduces helper of stripmineRedoMap "++
+             "illegal reduces argument: "++prettyString rs)
+--
+stripmineRedoMap _ _ [] _ _ =
+  error "stripmineRedoMap: unreachable empty case reached!"
+stripmineRedoMap _ _ _ _ (ScremaForm _ scans _) =
+  error ("stripmineRedoMap does not currently handle scanomap, give: "++prettyString scans)
 ----------------------------------------------------------------------------
 ----------------------------------------------------------------------------
 
@@ -131,80 +189,82 @@ stripmineMap _ _ [] _ _ =
 --     to not be transformed.
 stripmineLambda :: (LocalScope SOACS m, MonadFreshNames m) =>
     Int -> TopEnv -> HLSched -> Lambda SOACS ->
-    m (Maybe (Stms SOACS, TopEnv, Lambda SOACS))
+    m (Stms SOACS, TopEnv, Lambda SOACS)
 stripmineLambda _k env sched lam
-  | null (dimlens sched) = pure $ Just (mempty, env, lam)
+  | null (dimlens sched) = pure $ (mempty, env, lam)
 stripmineLambda k env sched lam0 = do
   scope <- askScope
   lam <- fuseInLambda scope lam0
-  mbdyres <- localScope (scope <> scopeOf lam) $
-    stripmineBody k env sched (lambdaBody lam)
-  case mbdyres of
-    Nothing -> pure Nothing
-    Just (prologue_stms, new_env, new_bdy) -> do
-      new_lam <-
-        runLambdaBuilder (lambdaParams lam) $ localScope scope $ do
-          addStms $ bodyStms new_bdy
-          pure $ bodyResult new_bdy
-      new_lam' <- renameLambda new_lam >>= simplifyLambda 0
-      pure $ Just (prologue_stms, new_env, new_lam')
+  (prologue_stms, new_env, new_bdy) <-
+    localScope (scope <> scopeOf lam) $
+      stripmineBody k env sched (lambdaBody lam)
+  new_lam <-
+    runLambdaBuilder (lambdaParams lam) $ localScope scope $ do
+      addStms $ bodyStms new_bdy
+      pure $ bodyResult new_bdy
+  new_lam' <- renameLambda new_lam >>= simplifyLambda 0
+  pure (prologue_stms, new_env, new_lam')
 
 stripmineBody :: (LocalScope SOACS m, MonadFreshNames m) =>
     Int -> TopEnv -> HLSched  -> Body SOACS ->
-    m (Maybe (Stms SOACS, TopEnv, Body SOACS))
+    m (Stms SOACS, TopEnv, Body SOACS)
 stripmineBody k env sched bdy = do
   scope <- askScope
   (localScope (scope <> scopeOf (bodyStms bdy)) $
-     foldM f (Just (mempty, env, mempty)) $ bodyStms bdy)
+     foldM f (mempty, env, mempty) $ bodyStms bdy)
      >>= (pure . g)
   where
-    f Nothing _ = pure Nothing
-    f (Just (acc_prologue, acc_env, acc_stms)) stm = do
-      mresstm <- stripmineStmt k acc_env sched stm
-      case mresstm of
-        Nothing -> pure Nothing
-        Just (new_prologue, new_env, new_stms) ->
-          pure $ Just (acc_prologue <> new_prologue, new_env, acc_stms <> new_stms)
-    g Nothing = Nothing
-    g (Just (prol', env', stms')) = Just (prol', env', bdy { bodyStms = stms' })
+    f (acc_prologue, acc_env, acc_stms) stm = do
+      (new_prologue, new_env, new_stms) <- stripmineStmt k acc_env sched stm
+      pure (acc_prologue <> new_prologue, new_env, acc_stms <> new_stms)
+    g (prol', env', stms') = (prol', env', bdy { bodyStms = stms' })
 
 stripmineStmt :: (LocalScope SOACS m, MonadFreshNames m) =>
     Int -> TopEnv -> HLSched -> Stm SOACS ->
-    m (Maybe (Stms SOACS, TopEnv, Stms SOACS))
+    m (Stms SOACS, TopEnv, Stms SOACS)
 stripmineStmt _ env sched stm
-  | null (dimlens sched) = pure $ Just (Sq.empty, env, Sq.singleton stm)
+  | null (dimlens sched) = pure $ (Sq.empty, env, Sq.singleton stm)
   -- ^ no schedule to apply, just return statement
 stripmineStmt k env sched (Let _ _ e)
   | Op (Screma mm _ _) <- e,
     Nothing <- validStripForDim env k mm sched =
-  pure Nothing
-  -- ^ Illegal Stripmining of Screma
+  error ("Illegal stripmined sizes for dimension: " ++ show k ++
+         " of size " ++ prettyString mm ++ " for schedule:\n" ++
+         prettyString sched++"\ntarget screma:\n"++prettyString e) 
 stripmineStmt k env sched (Let pat aux
-      (Op (Screma mm inp_nms (ScremaForm map_lam [] []))))
+      e_soac@(Op (Screma mm inp_nms (ScremaForm map_lam [] []))))
   | Just (sched', sched'') <- validStripForDim env k mm sched = do
   -- ^ Stripmining a map statement
-  stripmineLambda (k+1) env sched'' map_lam >>=
-    maybe (pure Nothing) (mkResFromMLam sched')
+  stripmineLambda (k+1) env sched'' map_lam >>= mkResFromMLam sched'
   where
     mkResFromMLam schd (prologue_lam, env1, lam1) = do
       inp_tps <- mapM lookupType inp_nms
-      mres_nest <- stripmineMap (k,zip inp_nms inp_tps,mm) env1 (dimlens schd) pe0 lam1
-      case mres_nest of
-        Just (prologue_stms2, env2, soac'@(Screma m' _nms (ScremaForm map_lam' [] []))) -> do
+{--
+      (prologue_stms2, env2, soac') <-
+        stripmineMap (k,zip inp_nms inp_tps,mm) env1 (dimlens schd) pe0 lam1
+--}
+      let (inp_nm_tps, frm1) = (zip inp_nms inp_tps, ScremaForm lam1 [] [])
+          sig_lens = zip (signals schd) (dimlens schd)
+      (prologue_stms2, env2, soac') <-
+        stripmineRedoMap (k, inp_nm_tps, mm) env1 sig_lens pe0 frm1
+      case soac' of
+        Screma m' _nms (ScremaForm map_lam' [] []) -> do
         -- ^ by construction the resulting soac has one iota-array arg
           let rts   = map (`arrayOfRow` m') $ lambdaReturnType map_lam'
               pels' = zipWith adjustPatElType (patElems pat) rts
               stm'  = Let (Pat pels') aux (Op soac')
-          pure $ Just (prologue_stms2 <> prologue_lam, env2, Sq.singleton stm')
-        _ -> pure Nothing
+          pure (prologue_stms2 <> prologue_lam, env2, Sq.singleton stm')
+        _ -> error ("In stripmineStmt, the map case of:\n" ++
+                    prettyString e_soac ++
+                    "\nstripmineMap returned something that is not a map: " ++
+                    prettyString soac') 
     adjustPatElType patel tp = patel { patElemDec = tp}
 ---------------------------------------------
 -- Stripmining a Normalized DO Loop
 ---------------------------------------------
 stripmineStmt k env sched (Let pat aux (Loop fpar_inis (ForLoop liter inttp lcount) loop_body))
   | Just (sched', sched'') <- validStripForDim env k lcount sched = do
-  stripmineBody (k+1) env sched'' loop_body >>=
-    maybe (pure Nothing) (mkResFromMBody sched')
+  stripmineBody (k+1) env sched'' loop_body >>= mkResFromMBody sched'
   where
     mkResFromMBody schd (prologue_lam, env1, body1) = do
       let (fpars, inis) = unzip fpar_inis
@@ -213,7 +273,7 @@ stripmineStmt k env sched (Let pat aux (Loop fpar_inis (ForLoop liter inttp lcou
         let base_par_str = baseString $ paramName fpar
         newParam (base_par_str++show (0::Int)) (paramDec fpar)
       (prol, env2, stm) <- recStripLoop dim_lens env1 dim_lens body1 (pat,fpars',inis) pe0
-      pure $ Just (prol <> prologue_lam, env2, Sq.singleton stm)
+      pure (prol <> prologue_lam, env2, Sq.singleton stm)
     -- recStripLoop :: [PrimExp VName] -> Env -> [PrimExp VName] -> Body SOACS -> ()
     -- Core Function for Stripmining a Normalized DO Loop
     recStripLoop _ _ [] _ _ _ =
@@ -276,21 +336,53 @@ stripmineStmt _ _ _ (Let _pat _aux (Loop{})) =
 --         3. verify that the mapaccums are at the very top,
 --              i.e., loop-mapaccum-loop is ilegal as it would
 --                    need lifting the computation for the top loop.
-stripmineStmt k env sched (Let pat aux
+stripmineStmt k env sched stm@(Let pat aux
     (Op (Screma mm inp_nms frm@(ScremaForm map_lam [] [Reduce com red_lam nes]))))
   |  Just (sched', sched'') <- validStripForDim env k mm sched,
      Just _ <- oneFullyConsumedMapRed frm,
      -- strides  <- mkRegIndStrides sched',
      sig_lens <- zip (signals sched') (dimlens sched') = do
-  stripmineLambda (k+1) env sched'' map_lam >>=
-    maybe (pure Nothing) (mkResFromMLam sig_lens)
+  stripmineLambda (k+1) env sched'' map_lam >>= mkResFromMLam sig_lens
   where
+    f (True, acc) (Macc,n) = (True, acc ++ [n])
+    f (True, acc) (_,_) = (False, acc)
+    f (False, _ ) (Macc,_) =
+      error ("Stripmining a Redomap with a Macc which is not on top is not supported!")
+    f (False, acc ) _ = (False, acc)
+    adjustPatElType patel tp = patel { patElemDec = tp}
+    --
     mkResFromMLam sig_lens (prologue_stms1, env1, map_lam1) = do
+{--
       let pat_nms = map patElemName $ patElems pat
-      mres <- recStripRedomap env1 sig_lens map_lam1 (pat_nms,nes) pe0
-      maybe (pure Nothing) (joinMbRes prologue_stms1) mres
+      (new_prologue, env', new_stms) <-
+        recStripRedomap env1 sig_lens map_lam1 (pat_nms,nes) pe0
+      pure (prologue_stms1 <> new_prologue, env', new_stms)
+         -- maybe (pure Nothing) (joinMbRes prologue_stms1) mres
+--}
+
+      let (_, macc_ns) = foldl f (True, []) $ map (\(s,l) -> (parMode s,l)) sig_lens
+      inp_nm_tps <- mapM lookupType inp_nms >>= pure . (zip inp_nms)
+      let frm' = ScremaForm map_lam1 [] [Reduce com red_lam nes]
+      (new_prologue, env', soac') <- 
+        stripmineRedoMap (k, inp_nm_tps, mm) env1 sig_lens pe0 frm'
+      pat' <-
+        case (macc_ns, soac') of
+          ( _macc_n:_, Screma m' _nms (ScremaForm map_lam' [] []) ) -> do
+            let rts   = map (`arrayOfRow` m') $ lambdaReturnType map_lam'
+            pure $ Pat $ zipWith adjustPatElType (patElems pat) rts
+          ( [], Screma _ _ (ScremaForm _ [] [_]) ) -> do
+            pure pat
+          ( _, _) ->
+            error ("In stripmineStmt, the redomap case of:\n" ++
+                   prettyString stm ++ "\nstripmineRedoMap "  ++
+                   "sig-lens " ++ show sig_lens ++ " illegal result:\n"++
+                   prettyString soac')
+      let stm' = Let pat' aux (Op soac')
+      pure (new_prologue <> prologue_stms1, env', Sq.singleton stm')
+
+    --
     -- Core Function for Stripmining a Red o Map: Base Case
-    recStripRedomap env1 [] map_lam1 (_,acc_inis) cur_ind = do
+    recStripRedomap env1 [] map_lam1 (_, acc_inis) cur_ind = do
       let (red_acc, red_els) = splitAt (length (lambdaReturnType red_lam)) $ lambdaParams red_lam
       scope <- askScope
       inp_tps <- mapM lookupType inp_nms
@@ -314,7 +406,7 @@ stripmineStmt k env sched (Let pat aux
             letBind (Pat [PatElem (paramName acc_p) (paramDec acc_p)]) $ BasicOp $ SubExp ne
           addStms $ bodyStms $ lambdaBody red_lam
           pure $ bodyResult $ lambdaBody red_lam
-      pure $ Just (Sq.empty, env1, bodyStms loop_body)
+      pure (Sq.empty, env1, bodyStms loop_body)
     --
     -- Core Function for Stripmining a Red o Map: Recursive Case
     recStripRedomap env1 ((sig,dlen): schd') map_lam1 (pat_nms, acc_ini) cur_ind = do
@@ -334,10 +426,11 @@ stripmineStmt k env sched (Let pat aux
       let next_inis = nes
          -- BELOW IS A BUG; probably needed if you want to sequentialize by loops
          -- if parMode sig == Seq then map (Var . paramName) red_acc' else nes
-      rec_res <- recStripRedomap env1 schd' map_lam1 (pat_nms', next_inis) cur_ind'
-      case (parMode sig, rec_res) of
+      (rec_prologue, rec_env, rec_stms) <-
+        recStripRedomap env1 schd' map_lam1 (pat_nms', next_inis) cur_ind'
+      case parMode sig of
         -- The case of a mapaccum subdimension, i.e., generating a map:
-        (Macc, Just (rec_prologue, rec_env, rec_stms)) -> do
+        Macc -> do
           ((w,iotnm), new_prologue) <- mkIota env1 k dlen
           new_lam <-
             runLambdaBuilder [i_p] $ localScope (scope <> scopeOfLParams red_acc') $ do
@@ -345,9 +438,9 @@ stripmineStmt k env sched (Let pat aux
           new_lam' <- renameLambda new_lam >>= simplifyLambda 0
           let map_stm = scremaStm (pat_nms, map (`arrayOfRow` w) $ lambdaReturnType red_lam)
                 (w,iotnm) $ ScremaForm new_lam' [] []
-          pure $ Just (new_prologue <> rec_prologue, addIota2Env rec_env (iotnm, w, dlen), Sq.singleton map_stm)
+          pure (new_prologue <> rec_prologue, addIota2Env rec_env (iotnm, w, dlen), Sq.singleton map_stm)
         -- The case of a parallel dimension, i.e., generating a redomap
-        (_, Just (rec_prologue, rec_env, rec_stms)) -> do
+        _otherwise -> do
           ((w,iotnm), new_prologue) <- mkIota env1 k dlen
           new_lam <-
             runLambdaBuilder [i_p] $ localScope (scope <> scopeOfLParams red_acc') $ do
@@ -362,23 +455,7 @@ stripmineStmt k env sched (Let pat aux
           -- trace ("\nStripRedoMap RECURSIVE: \n"++prettyString rec_stms++
           --       "\nStripRedoMap RECURSIVE: \n"++prettyString new_stms++
           --       "\nPROLOGUE:\n"++prettyString (new_prologue <> rec_prologue)) $
-          pure $ Just (new_prologue <> rec_prologue, addIota2Env rec_env (iotnm, w, dlen), new_stms)
-{--
-        -- This is commented out because we do not want to sequentialize at this stage,
-        --   e.g., for SpMV we would like to stripmine and then to interchange!
-        -- The case of a sequential subdimension, i.e., generating a loop:
-        (Seq, Just (rec_prologue, rec_env, rec_stms)) -> do
-          (w, w_stms) <- runBuilder $ localScope scope $ letSubExp ("w"++show k) =<< toExp dlen
-          loop_body <-
-            runBodyBuilder $ localScope (scope <> scopeOfLParams (i_p: red_acc')) $ do
-              addStms rec_stms; pure rec_res'
-          let loop_form  = ForLoop (paramName i_p) Int64 w
-              loop_fargs = map toFParam red_acc'
-              pat_res    = Pat $ zipWith PatElem pat_nms $ lambdaReturnType red_lam
-              loop_stm   = Let pat_res aux $ Loop (zip loop_fargs acc_ini) loop_form loop_body
-          pure $ Just (w_stms <> rec_prologue, rec_env, Sq.singleton loop_stm)
---}
-        _ -> pure Nothing
+          pure (new_prologue <> rec_prologue, addIota2Env rec_env (iotnm, w, dlen), new_stms)
     scremaStm :: ([VName], [Type]) -> (SubExp, VName) -> ScremaForm SOACS -> Stm SOACS
     scremaStm (pat_nms,tps) (w, iotnm) form =
       let pat_res = Pat $ zipWith PatElem pat_nms tps
@@ -396,7 +473,7 @@ stripmineStmt _k env _sched stm@(Let pat _aux e) = do
         ([p_el], BasicOp (BinOp binop e1 e2)) -> do
           addBinOp2Env env (patElemName p_el,(patElemDec p_el)) binop e1 e2
         _ -> env
-  pure $ Just (mempty, env', Sq.singleton stm)
+  pure $ (mempty, env', Sq.singleton stm)
 
 --------------------------------------------------------------------------
 --- Helpers
@@ -477,11 +554,6 @@ mkArrIndexingExp _ inp_nm inp_tp i_flat =
           prettyString inp_nm ++ " of type " ++ prettyString inp_tp ++
           "flat index: " ++ prettyString i_flat
         )
-
-joinMbRes :: (Applicative m) =>
-  Stms SOACS -> (Stms SOACS, a, b) -> m (Maybe (Stms SOACS, a, b))
-joinMbRes stms1 (stms2, x, y) = pure $ Just (stms1 <> stms2, x, y)
-
 
 -- | Checks whether a suitable iota binding is in the environemnt,
 --   and if not, it generates the code for a iota of desired size.
