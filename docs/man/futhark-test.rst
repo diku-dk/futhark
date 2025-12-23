@@ -161,6 +161,10 @@ OPTIONS
   The number of tests to run concurrently.  Defaults to the number of
   (hyper-)cores available.
 
+--entry-point=name
+
+  Only run entry points with this name.
+
 --exclude=tag
 
   Do not run test cases that contain the given tag.  Cases marked with
