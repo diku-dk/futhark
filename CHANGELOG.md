@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Missing inlining for some functions that must be inlined when using GPU
   backends. (#2341)
 
+* An interpreter bug in return size inference for functions returning an
+  abstract type that is concrete at the calling size (#2336).
+
 ## [0.25.34]
 
 ### Added
