@@ -776,6 +776,7 @@ evalFunctionBinding ::
   EvalM TermBinding
 evalFunctionBinding env tparams ps ret fbody = do
   let ftype = funType ps ret
+      ftype_expanded = evalToStruct $ expandType env ftype
       retext = case ps of
         [] -> retDims ret
         _ -> []
@@ -787,7 +788,8 @@ evalFunctionBinding env tparams ps ret fbody = do
         . returned env (retType ret) retext
         =<< evalFunction env [] ps fbody (retType ret)
     else pure . TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
-      let resolved = resolveTypeParams (map typeParamName tparams) ftype ftype'
+      let resolved =
+            resolveTypeParams (map typeParamName tparams) ftype_expanded ftype'
       tparam_env <- evalResolved resolved
       let env' = tparam_env <> env
           -- In some cases (abstract lifted types) there may be
