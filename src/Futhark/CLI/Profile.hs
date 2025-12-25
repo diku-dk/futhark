@@ -1,13 +1,23 @@
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
+import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
-import Data.Bifunctor (first)
+import Control.Monad (void, when, (>=>))
+import Control.Monad.Except (ExceptT, liftEither, runExceptT, throwError)
+import Control.Monad.IO.Class (liftIO)
+import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.Function ((&))
 import Data.List qualified as L
+import Data.Loc (Pos (Pos), posFile, posLine)
 import Data.Map qualified as M
+import Data.Sequence qualified as Seq
+import Data.Set qualified as S
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
+import Data.Void (Void)
 import Futhark.Bench
   ( BenchResult (BenchResult, benchResultProg),
     DataResult (DataResult),
@@ -29,6 +39,8 @@ import System.FilePath
     (</>),
   )
 import System.IO (hPutStrLn, stderr)
+import Text.Megaparsec qualified as P
+import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Printf (printf)
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
@@ -60,13 +72,17 @@ data EvSummary = EvSummary
     evMax :: Double
   }
 
-tabulateEvents :: [ProfilingEvent] -> T.Text
-tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
+eventSummaries :: [ProfilingEvent] -> M.Map (T.Text, T.Text) EvSummary
+eventSummaries = M.fromListWith comb . map pair
   where
     pair (ProfilingEvent name dur provenance _details) =
       ((name, provenance), EvSummary 1 dur dur dur)
     comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
       EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
+
+tabulateEvents :: M.Map (T.Text, T.Text) EvSummary -> T.Text
+tabulateEvents = mkRows . M.toList
+  where
     numpad = 15
     mkRows rows =
       let longest = foldl max numpad $ map (T.length . fst . fst) rows
@@ -133,17 +149,218 @@ timeline = T.unlines . L.intercalate [""] . map onEvent
 
 data TargetFiles = TargetFiles
   { summaryFile :: FilePath,
-    timelineFile :: FilePath
+    timelineFile :: FilePath,
+    htmlDir :: FilePath
   }
 
 writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
-writeAnalysis tf r = do
-  T.writeFile (summaryFile tf) $
-    memoryReport (profilingMemory r)
-      <> "\n\n"
-      <> tabulateEvents (profilingEvents r)
-  T.writeFile (timelineFile tf) $
-    timeline (profilingEvents r)
+writeAnalysis tf r = runExceptT >=> handleException $ do
+  let evSummaryMap = eventSummaries $ profilingEvents r
+
+  -- heatmap html
+  writeHtml (htmlDir tf) evSummaryMap
+
+  -- profile.summary
+  liftIO $
+    T.writeFile (summaryFile tf) $
+      memoryReport (profilingMemory r)
+        <> "\n\n"
+        <> tabulateEvents evSummaryMap
+
+  -- profile.timeline
+  liftIO $
+    T.writeFile (timelineFile tf) $
+      timeline (profilingEvents r)
+  where
+    handleException :: Either T.Text () -> IO ()
+    handleException = either (T.hPutStrLn stderr) pure
+
+expandEvSummaryMap :: M.Map (T.Text, T.Text) EvSummary -> M.Map (T.Text, T.Text) EvSummary
+expandEvSummaryMap =
+  M.toList
+    >>> concatMap expandEvSummary
+    >>> M.fromList
+  where
+    expandEvSummary ((name, provenance), evSummary) =
+      map (\(sourceLoc, splitSummary) -> ((name, sourceLoc), splitSummary)) $
+        splitEvSummarySources provenance evSummary
+
+    splitEvSummarySources :: T.Text -> EvSummary -> [(T.Text, EvSummary)]
+    splitEvSummarySources provenance summary =
+      let sourceLocations = T.splitOn "->" provenance
+       in map (,summary) sourceLocations
+
+-- | I chose this representation over `Loc` from `srcLoc` because it guarantees the presence of a range.
+-- Loc is essentially a 'Maybe (Pos, Pos)', because of the 'NoLoc' constructor.
+-- I cannot even imagine dealing with cross-file ranges anyway.
+
+-- Both ends of the range are inclusive
+data SourceRange = SourceRange
+  { rangeStartPos :: !Pos,
+    -- | invariant: at least a big as start.line
+    endLine :: !Int,
+    -- | invariant: at least as big as start.col, unless the range spans multiple lines
+    endColumn :: !Int
+  }
+  deriving (Show, Eq, Ord)
+
+sourceRangeOverlapsWith :: SourceRange -> SourceRange -> Bool
+sourceRangeOverlapsWith a b =
+  let rangeOverlaps (sa, ea) (sb, eb) = sa <= eb && sb <= ea
+      rangeStartA = rangeStartPos a
+      rangeStartB = rangeStartPos b
+      fileA = posFile rangeStartA
+      fileB = posFile rangeStartB
+      startLineA = posLine rangeStartA
+      startLineB = posLine rangeStartB
+      endLineA = endLine a
+      endLineB = endLine b
+   in fileA == fileB
+        && rangeOverlaps (startLineA, endLineA) (startLineB, endLineB)
+        && case startLineA == endLineA of
+          -- because of laziness and short-circuiting, we can assume that the lines overlap
+          -- single-line source-range
+          True -> _
+          -- multi-line source-range
+          False -> _
+
+-- | Parse a source range, respect the invariants noted in the definition
+-- and print the MegaParsec errorbundle into a Text.
+--
+-- >>> parseSourceRange "example.fut:1:1-5"
+-- Right (SourceRange {start = Pos "example.fut" 1 1 (-1), endLine = 1, endColumn = 5})
+--
+-- >>> parseSourceRange "directory/example.fut:15:12-17:1"
+-- Right (SourceRange {start = Pos "directory/example.fut" 15 12 (-1), endLine = 17, endColumn = 1})
+parseSourceRange :: T.Text -> Either T.Text SourceRange
+parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
+  where
+    fname = ""
+    textErrorBundle = T.pack . P.errorBundlePretty
+
+    lineRangeInvariantMessage =
+      "End of Line Range is not bigger than or equal to Start of Line Range."
+    columnRangeInvariantMessage =
+      "End of Column Range is not bigger than or equal to Start of Column Range"
+
+    pSourceRange :: P.Parsec Void T.Text SourceRange
+    pSourceRange = do
+      fileName <- L.charLiteral `P.manyTill` P.single ':' -- separator
+      startLine <- L.decimal
+      void $ P.single ':' -- separator
+      startCol <- L.decimal
+
+      void $ P.single '-' -- range begin
+      rangeEnd1 <- L.decimal
+      -- we can't know yet whether this is going to be a line or column position
+
+      (lineRangeEnd, columnRangeEnd) <-
+        P.choice
+          [ do
+              endCol <- P.single ':' *> L.decimal
+              pure (rangeEnd1, endCol),
+            pure (startLine, rangeEnd1)
+          ]
+
+      let lineRangeInvalid = startLine > lineRangeEnd
+      when lineRangeInvalid $ fail lineRangeInvariantMessage
+
+      let columnRangeInvalid =
+            startLine == lineRangeEnd && startCol > columnRangeEnd
+      when columnRangeInvalid $ fail columnRangeInvariantMessage
+
+      pure $
+        SourceRange
+          { rangeStartPos = Pos fileName startLine startCol (-1),
+            endLine = lineRangeEnd,
+            endColumn = columnRangeEnd
+          }
+
+buildProvenanceSummaryMap ::
+  (Monad m) =>
+  -- | Keys are: (ccName, ccProvenance)
+  M.Map (T.Text, T.Text) EvSummary ->
+  -- | Keys are: (ccName, ccProvenance)
+  ExceptT T.Text m (M.Map (T.Text, SourceRange) EvSummary)
+buildProvenanceSummaryMap evSummaryMap =
+  let -- there are no compound provenance blocks in this map anymore
+      singleSourceEvSummaryMap = expandEvSummaryMap evSummaryMap
+      -- parse the provenance text
+      provenanceEvSummaryMap =
+        M.mapKeys (second parseSourceRange) singleSourceEvSummaryMap
+
+      -- throw error text on parse failure, will short-circuit
+      filterBadSourceRangeParses ((name, parseResult), evSummary) = case parseResult of
+        Left err -> throwError $ "Parse failure in provenance information\n" <> err
+        Right sourceRange -> pure ((name, sourceRange), evSummary)
+   in mapM filterBadSourceRangeParses (M.toList provenanceEvSummaryMap)
+        & fmap M.fromList
+
+writeHtml ::
+  -- | target directory path
+  FilePath ->
+  -- | mapping keys are (name, provenance)
+  M.Map (T.Text, T.Text) EvSummary ->
+  ExceptT T.Text IO ()
+writeHtml htmlDirPath evSummaryMap = do
+  provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
+  sourceFiles <- loadAllFiles (posFile . rangeStartPos . snd <$> M.keys provenanceSummaries)
+
+  let perFileSummaries =
+        let sourceFileNames = M.keysSet sourceFiles
+         in summarizeAndSplitByFile sourceFileNames provenanceSummaries
+
+  pure ()
+
+summarizeAndSplitByFile ::
+  -- | Names of all text files
+  S.Set T.Text ->
+  -- | Mapping from (ccName, ccProvenance) to event summary
+  M.Map (T.Text, SourceRange) EvSummary ->
+  -- | Non-Overlapping Events with SourceRanges separated by file
+  -- invariant: sourcerange.rangeStartPos.file is always equal to the map key
+  M.Map T.Text (M.Map SourceRange (Seq.Seq (T.Text, EvSummary)))
+summarizeAndSplitByFile files summaries =
+  let overlapping =
+        let accumulateSummary m ((ccName, sourceRange), summary) =
+              -- relies on the fact that all the keys are already present in the map
+              M.adjust
+                (Seq.|> (sourceRange, (ccName, summary)))
+                (T.pack . posFile . rangeStartPos $ sourceRange)
+                m
+         in M.toList summaries
+              & foldl' accumulateSummary (M.fromSet (const Seq.empty) files)
+
+      separate ::
+        -- \| All possibly overlapping SourceRanges
+        Seq.Seq (SourceRange, (T.Text, EvSummary)) ->
+        -- \| Ordered non-overlapping sourceranges with merged attached informations
+        M.Map SourceRange (Seq.Seq (T.Text, EvSummary))
+      separate = foldl' accumulateRange M.empty . fmap (second Seq.singleton)
+        where
+          accumulateRange ::
+            -- \| Mapping of non-overlapping ranges, the T.Text is a ccName
+            M.Map SourceRange (Seq.Seq (T.Text, EvSummary)) ->
+            -- \| New SourceRange that must be merged and inserted
+            (SourceRange, Seq.Seq (T.Text, EvSummary)) ->
+            -- \| Mapping of non-overlapping ranges
+            M.Map SourceRange (Seq.Seq (T.Text, EvSummary))
+          accumulateRange ranges (range, aux) = case M.lookupLE range ranges of
+            Nothing -> _
+            Just (lowerRange, lowerAux) -> _
+
+      nonOverlapping = M.map separate overlapping
+   in nonOverlapping
+
+loadAllFiles :: [FilePath] -> ExceptT T.Text IO (M.Map T.Text T.Text)
+loadAllFiles files =
+  mapM (\path -> (T.pack path,) <$> tryLoadFile path) files
+    & fmap M.fromList
+  where
+    tryLoadFile filePath = do
+      bytes <- liftIO $ readFileSafely filePath
+      bytes' <- liftEither . first T.pack $ bytes
+      liftEither . first T.show $ T.decodeUtf8' (BS.toStrict bytes')
 
 prepareDir :: FilePath -> IO FilePath
 prepareDir json_path = do
@@ -159,7 +376,8 @@ analyseProfilingReport json_path r = do
   let tf =
         TargetFiles
           { summaryFile = top_dir </> "summary",
-            timelineFile = top_dir </> "timeline"
+            timelineFile = top_dir </> "timeline",
+            htmlDir = top_dir </> "html/"
           }
   writeAnalysis tf r
 
@@ -198,7 +416,8 @@ analyseBenchResults json_path bench_results = do
           let tf =
                 TargetFiles
                   { summaryFile = name' <> ".summary",
-                    timelineFile = name' <> ".timeline"
+                    timelineFile = name' <> ".timeline",
+                    htmlDir = name' <> "html/"
                   }
            in writeAnalysis tf r
 
