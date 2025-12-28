@@ -1,17 +1,23 @@
+{-# LANGUAGE MultiWayIf #-}
+
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
-import Control.Arrow ((&&&), (>>>))
+import Control.Arrow ((>>>))
 import Control.Exception (catch)
 import Control.Monad (void, when, (>=>))
 import Control.Monad.Except (ExceptT, liftEither, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
-import Data.Function ((&))
+import Data.Foldable (maximumBy, minimumBy)
+import Data.Function (on, (&))
 import Data.List qualified as L
-import Data.Loc (Pos (Pos), posFile, posLine, posCol)
+import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty qualified as NE
+import Data.Loc (Pos (Pos), posCol, posFile, posLine)
 import Data.Map qualified as M
+import Data.Ord (comparing)
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Data.Text qualified as T
@@ -42,7 +48,6 @@ import System.IO (hPutStrLn, stderr)
 import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Printf (printf)
-import Data.Ix (inRange)
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -195,24 +200,32 @@ expandEvSummaryMap =
 -- Loc is essentially a 'Maybe (Pos, Pos)', because of the 'NoLoc' constructor.
 -- I cannot even imagine dealing with cross-file ranges anyway.
 
--- Both ends of the range are inclusive
+-- The end of the range is exclusive
 data SourceRange = SourceRange
-  { rangeStartPos :: !Pos,
+  { sourceRangeStartPos :: !Pos,
     -- | invariant: at least a big as start.line
-    endLine :: !Int,
+    sourceRangeEndLine :: !Int,
     -- | invariant: at least as big as start.col, unless the range spans multiple lines
-    endColumn :: !Int
+    sourceRangeEndColumn :: !Int
   }
   deriving (Show, Eq, Ord)
+
+-- | Extract start line and column
+sourceRangeStart :: SourceRange -> (Int, Int)
+sourceRangeStart (SourceRange pos _ _) = (posLine pos, posCol pos)
+
+-- | Extract end line and column
+sourceRangeEnd :: SourceRange -> (Int, Int)
+sourceRangeEnd (SourceRange _ line col) = (line, col)
 
 sourceRangeOverlapsWith :: SourceRange -> SourceRange -> Bool
 sourceRangeOverlapsWith a b =
   let rangeOverlaps (sa, ea) (sb, eb) = sa <= eb && sb <= ea
-      startA = (posLine . rangeStartPos $ a, posCol . rangeStartPos $ a)
-      endA = (endLine a, endColumn a)
-      startB = (posLine . rangeStartPos $ b, posCol . rangeStartPos $ b)
-      endB = (endLine b, endColumn b)
-  in rangeOverlaps (startA, endA) (startB, endB)
+      startA = sourceRangeStart a
+      endA = sourceRangeEnd a
+      startB = sourceRangeStart b
+      endB = sourceRangeEnd b
+   in rangeOverlaps (startA, endA) (startB, endB)
 
 -- | Parse a source range, respect the invariants noted in the definition
 -- and print the MegaParsec errorbundle into a Text.
@@ -261,9 +274,9 @@ parseSourceRange text = first textErrorBundle $ P.parse pSourceRange fname text
 
       pure $
         SourceRange
-          { rangeStartPos = Pos fileName startLine startCol (-1),
-            endLine = lineRangeEnd,
-            endColumn = columnRangeEnd
+          { sourceRangeStartPos = Pos fileName startLine startCol (-1),
+            sourceRangeEndLine = lineRangeEnd,
+            sourceRangeEndColumn = columnRangeEnd
           }
 
 buildProvenanceSummaryMap ::
@@ -294,7 +307,7 @@ writeHtml ::
   ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
-  sourceFiles <- loadAllFiles (posFile . rangeStartPos . snd <$> M.keys provenanceSummaries)
+  sourceFiles <- loadAllFiles (posFile . sourceRangeStartPos . snd <$> M.keys provenanceSummaries)
 
   let perFileSummaries =
         let sourceFileNames = M.keysSet sourceFiles
@@ -316,7 +329,7 @@ summarizeAndSplitByFile files summaries =
               -- relies on the fact that all the keys are already present in the map
               M.adjust
                 (Seq.|> (sourceRange, (ccName, summary)))
-                (T.pack . posFile . rangeStartPos $ sourceRange)
+                (T.pack . posFile . sourceRangeStartPos $ sourceRange)
                 m
          in M.toList summaries
               & foldl' accumulateSummary (M.fromSet (const Seq.empty) files)
@@ -328,6 +341,55 @@ summarizeAndSplitByFile files summaries =
         M.Map SourceRange (Seq.Seq (T.Text, EvSummary))
       separate = foldl' accumulateRange M.empty . fmap (second Seq.singleton)
         where
+          -- \| Assumes that the ranges overlap
+          mergeRanges ::
+            (Semigroup s) =>
+            (SourceRange, s) ->
+            (SourceRange, s) ->
+            NonEmpty (SourceRange, s)
+          mergeRanges a@(rangeA, auxA) b@(rangeB, auxB)
+            -- they have exactly the same source-range
+            | rangeA == rangeB = NE.singleton (rangeA, auxA <> auxB)
+            -- they must not be the same, there are a few remaining cases
+            -- - start overlap: ccb
+            -- - middle overlap: aca
+            -- - end overlap: acc
+            -- - start consumption: aca
+            -- - end consumption: cb
+            | otherwise =
+                let earlier =
+                      minimumBy
+                        (comparing $ sourceRangeStart . fst)
+                        [a, b]
+                    earlierRange = fst earlier
+                    earlierEnd = sourceRangeEnd earlierRange
+                    earlierStart = sourceRangeStart earlierRange
+
+                    later =
+                      maximumBy
+                        (comparing $ sourceRangeStart . fst)
+                        [a, b]
+                    laterRange = fst later
+                    laterEnd = sourceRangeEnd laterRange
+                    laterStart = sourceRangeStart laterRange
+                 in if
+                      -- start is the same
+                      | earlierStart == laterStart -> if earlierEnd < laterEnd
+                        -- start overlap
+                        then (earlierRange, auxA <> auxB) NE.:| [(_, auxB)]
+                        -- start consumption
+                        else _
+                      -- none of the three cases
+                      | otherwise ->
+                          error $
+                            "Impossible case: Ranges did not overlap.\n"
+                              <> "First: "
+                              <> show (fst a)
+                              <> "\n"
+                              <> "Second: "
+                              <> show (fst b)
+                              <> "\n"
+
           accumulateRange ::
             -- \| Mapping of non-overlapping ranges, the T.Text is a ccName
             M.Map SourceRange (Seq.Seq (T.Text, EvSummary)) ->
@@ -336,8 +398,20 @@ summarizeAndSplitByFile files summaries =
             -- \| Mapping of non-overlapping ranges
             M.Map SourceRange (Seq.Seq (T.Text, EvSummary))
           accumulateRange ranges (range, aux) = case M.lookupLE range ranges of
-            Nothing -> _
-            Just (lowerRange, lowerAux) -> range `sourceRangeOverlapsWith` lowerRange
+            Nothing -> case M.lookupGE range ranges of
+              Nothing -> M.insert range aux ranges -- nothing to merge at all
+              Just (higherRange, higherAux) ->
+                if range `sourceRangeOverlapsWith` higherRange
+                  then _
+                  else M.insert range aux ranges -- ranges don't overlap, don't merge
+            Just (lowerRange, lowerAux) ->
+              if range `sourceRangeOverlapsWith` lowerRange
+                then
+                  let mergedRanges = _
+                   in _
+                else case M.lookupGE range ranges of -- check the higher bound
+                  Nothing -> M.insert range aux ranges -- nothing to merge
+                  Just (higherRange, higherAux) -> _
 
       nonOverlapping = M.map separate overlapping
    in nonOverlapping
