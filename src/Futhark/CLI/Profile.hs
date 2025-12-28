@@ -10,7 +10,7 @@ import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.Function ((&))
 import Data.List qualified as L
-import Data.Loc (Pos (Pos), posFile, posLine)
+import Data.Loc (Pos (Pos), posFile, posLine, posCol)
 import Data.Map qualified as M
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
@@ -42,6 +42,7 @@ import System.IO (hPutStrLn, stderr)
 import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Printf (printf)
+import Data.Ix (inRange)
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -207,22 +208,11 @@ data SourceRange = SourceRange
 sourceRangeOverlapsWith :: SourceRange -> SourceRange -> Bool
 sourceRangeOverlapsWith a b =
   let rangeOverlaps (sa, ea) (sb, eb) = sa <= eb && sb <= ea
-      rangeStartA = rangeStartPos a
-      rangeStartB = rangeStartPos b
-      fileA = posFile rangeStartA
-      fileB = posFile rangeStartB
-      startLineA = posLine rangeStartA
-      startLineB = posLine rangeStartB
-      endLineA = endLine a
-      endLineB = endLine b
-   in fileA == fileB
-        && rangeOverlaps (startLineA, endLineA) (startLineB, endLineB)
-        && case startLineA == endLineA of
-          -- because of laziness and short-circuiting, we can assume that the lines overlap
-          -- single-line source-range
-          True -> _
-          -- multi-line source-range
-          False -> _
+      startA = (posLine . rangeStartPos $ a, posCol . rangeStartPos $ a)
+      endA = (endLine a, endColumn a)
+      startB = (posLine . rangeStartPos $ b, posCol . rangeStartPos $ b)
+      endB = (endLine b, endColumn b)
+  in rangeOverlaps (startA, endA) (startB, endB)
 
 -- | Parse a source range, respect the invariants noted in the definition
 -- and print the MegaParsec errorbundle into a Text.
@@ -347,7 +337,7 @@ summarizeAndSplitByFile files summaries =
             M.Map SourceRange (Seq.Seq (T.Text, EvSummary))
           accumulateRange ranges (range, aux) = case M.lookupLE range ranges of
             Nothing -> _
-            Just (lowerRange, lowerAux) -> _
+            Just (lowerRange, lowerAux) -> range `sourceRangeOverlapsWith` lowerRange
 
       nonOverlapping = M.map separate overlapping
    in nonOverlapping
