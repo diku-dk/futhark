@@ -185,6 +185,10 @@ inlineBecauseSOACs cg prog =
       any arrayInBody $ defbody : map caseBody cases
     arrayInExp (Loop _ _ body) =
       arrayInBody body
+    -- Might be indexing a global array, see #2341. This one could perhaps be
+    -- fixed.
+    arrayInExp (BasicOp Index {}) =
+      True
     arrayInExp _ = False
 
 -- Conservative inlining of functions that are called just once, or

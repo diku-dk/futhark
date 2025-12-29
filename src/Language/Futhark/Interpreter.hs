@@ -744,13 +744,13 @@ linkMissingSizes missing_sizes p v env =
   where
     p_t = evalToStruct $ expandType env $ patternStructType p
 
-evalFunction :: Env -> [VName] -> [Pat ParamType] -> Exp -> ResType -> EvalM Value
+evalBinding :: Env -> [VName] -> [Pat ParamType] -> Exp -> ResType -> EvalM Value
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
-evalFunction env missing_sizes [] body rettype =
+evalBinding env missing_sizes [] body rettype =
   -- Eta-expand the rest to make any sizes visible.
   etaExpand [] env rettype
   where
@@ -762,20 +762,20 @@ evalFunction env missing_sizes [] body rettype =
     etaExpand vs env' _ = do
       f <- eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
-evalFunction env missing_sizes (p : ps) body rettype =
+evalBinding env missing_sizes (p : ps) body rettype =
   pure . ValueFun $ \v -> do
     env' <- linkMissingSizes missing_sizes p v <$> matchPat env p v
-    evalFunction env' missing_sizes ps body rettype
+    evalBinding env' missing_sizes ps body rettype
 
-evalFunctionBinding ::
+evalValBinding ::
   Env ->
   [TypeParam] ->
   [Pat ParamType] ->
   ResRetType ->
   Exp ->
   EvalM TermBinding
-evalFunctionBinding env tparams ps ret fbody = do
-  let ftype = funType ps ret
+evalValBinding env tparams ps ret fbody = do
+  let ftype = evalToStruct $ expandType env $ funType ps ret
       retext = case ps of
         [] -> retDims ret
         _ -> []
@@ -785,9 +785,10 @@ evalFunctionBinding env tparams ps ret fbody = do
     then
       fmap (TermValue (Just $ T.BoundV [] ftype))
         . returned env (retType ret) retext
-        =<< evalFunction env [] ps fbody (retType ret)
+        =<< evalBinding env [] ps fbody (retType ret)
     else pure . TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
-      let resolved = resolveTypeParams (map typeParamName tparams) ftype ftype'
+      let resolved =
+            resolveTypeParams (map typeParamName tparams) ftype ftype'
       tparam_env <- evalResolved resolved
       let env' = tparam_env <> env
           -- In some cases (abstract lifted types) there may be
@@ -798,7 +799,7 @@ evalFunctionBinding env tparams ps ret fbody = do
             filter (`M.notMember` envTerm env') $
               map typeParamName (filter isSizeParam tparams)
       returned env (retType ret) retext
-        =<< evalFunction env' missing_sizes ps fbody (retType ret)
+        =<< evalBinding env' missing_sizes ps fbody (retType ret)
 
 evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
@@ -874,7 +875,7 @@ evalAppExp env (LetPat sizes p e body _) = do
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
 evalAppExp env (LetFun (f, _) (tparams, ps, _, Info ret, fbody) body _) = do
-  binding <- evalFunctionBinding env tparams ps ret fbody
+  binding <- evalValBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
 evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
   | baseName (qualLeaf op) == "&&" = do
@@ -1071,7 +1072,7 @@ eval env (RecordUpdate src all_fs v _ _) =
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
 eval env (Lambda ps body _ (Info (RetType _ rt)) _) =
-  evalFunction env [] ps body rt
+  evalBinding env [] ps body rt
 eval env (OpSection qv (Info t) _) =
   evalTermVar env qv $ toStruct t
 eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info (RetType _ t), _) loc) = do
@@ -1218,7 +1219,7 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
 
 evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
-  binding <- evalFunctionBinding env tparams ps ret fbody
+  binding <- evalValBinding env tparams ps ret fbody
   sizes <- extEnv
   pure $ mempty {envTerm = M.singleton v binding} <> sizes
 evalDec env (OpenDec me _) = do
