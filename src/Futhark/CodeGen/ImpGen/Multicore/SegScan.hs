@@ -97,7 +97,7 @@ _shouldRecompute = not . any (bad . stmExp) . bodyStms
     bad Loop {} = True
     bad (Match _ cases def_body _) =
       any (any (bad . stmExp) . bodyStms) (def_body : map caseBody cases)
-    bad _ = False
+    bad _ = True
 
 copyFromDescToLocal :: [SegBinOp MCMem] -> [[VName]] -> [[VName]] -> TV Int64 -> MulticoreGen ()
 copyFromDescToLocal scan_ops per_op_local_vars per_op_description_arrays index = do
@@ -235,17 +235,33 @@ seqScanLB pat i scan_ops kbody per_op_prefixes_var start chunk_length = do
   sWhile (tvExp z .<. tvExp chunk_length) $ do
     dPrimV_ i (tvExp start + tvExp z)
 
-    forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, _, local_accums) ->
-      sLoopNestVectorized (segBinOpShape scan_op) $ \vec_is -> do
-        forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
-          copyDWIMFix (paramName px) [] (Var acc) vec_is
-        forM_ (zip (yParams scan_op) pes) $ \(py, pe) ->
-          -- reading from output array
-          copyDWIMFix (paramName py) [] (Var (patElemName pe)) ((tvExp start + tvExp z) : vec_is)
-        compileStms mempty (bodyStms $ lamBody scan_op) $ do
-          forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(se, pe) -> do
-            copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
-    z <-- tvExp z + 1
+    if shouldRecompute kbody_renamed
+    then do
+        compileStms mempty (bodyStms kbody_renamed) $ do
+            forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res , local_accums) ->
+              sLoopNestVectorized (segBinOpShape scan_op) $ \vec_is -> do
+                forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
+                  copyDWIMFix (paramName px) [] (Var acc) vec_is
+                forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
+                  copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
+                compileStms mempty (bodyStms $ lamBody scan_op) $ do
+                  forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) pes local_accums) $ \(se, pe, acc) -> do
+                    copyDWIMFix acc vec_is se []
+                    copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
+        z <-- tvExp z + 1
+    else do
+        forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, _, local_accums) ->
+            sLoopNestVectorized (segBinOpShape scan_op) $ \vec_is -> do
+              forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
+                copyDWIMFix (paramName px) [] (Var acc) vec_is
+              forM_ (zip (yParams scan_op) pes) $ \(py, pe) ->
+                -- reading from output array
+                copyDWIMFix (paramName py) [] (Var (patElemName pe)) ((tvExp start + tvExp z) : vec_is)
+              compileStms mempty (bodyStms $ lamBody scan_op) $ do
+                forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(se, pe) -> do
+                  copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
+        z <-- tvExp z + 1
+
 
 seqAggregate ::
   Pat LetDecMem ->
@@ -285,7 +301,7 @@ seqAggregate pat i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx 
             sLoopNestVectorized shape $ \vec_is -> do
               forM_ (zip3 scan_res_op local_accums pes) $ \(kr, acc, pe) -> do
                 copyDWIMFix acc vec_is (kernelResultSubExp kr) vec_is
-                copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) (kernelResultSubExp kr) vec_is
+                unless (shouldRecompute kbody_renamed) $ copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) (kernelResultSubExp kr) vec_is
         )
         ( forM_ (zip4 scan_ops_renamed per_scan_res per_op_local_accum per_scan_pes) $ \(scan_op, scan_res, local_accums, pes) ->
             sLoopNestVectorized (segBinOpShape scan_op) $ \vec_is -> do
@@ -297,7 +313,7 @@ seqAggregate pat i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx 
               compileStms mempty (bodyStms $ lamBody scan_op) $ do
                 forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) local_accums pes) $ \(se, acc, pe) -> do
                   copyDWIMFix acc vec_is se []
-                  copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) se []
+                  unless ( shouldRecompute kbody_renamed) $ copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) se []
         )
     j <-- tvExp j + 1
 
