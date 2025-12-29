@@ -88,8 +88,8 @@ totalBytes scan_ops =
 -- correctness checks and (crude) efficiency checks. Basically, recomputation is
 -- only safe if nothing is consumed in the body, and considered efficient only
 -- if the body has no loops.
-shouldRecompute :: KernelBody MCMem -> Bool
-shouldRecompute = not . any (bad . stmExp) . bodyStms
+_shouldRecompute :: KernelBody MCMem -> Bool
+_shouldRecompute = not . any (bad . stmExp) . bodyStms
   where
     bad (BasicOp Update {}) = True
     bad (BasicOp UpdateAcc {}) = True
@@ -293,7 +293,7 @@ seqAggregate pat i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx 
                 copyDWIMFix (paramName px) [] (Var acc) vec_is
               forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) -> do
                 copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
-              
+
               compileStms mempty (bodyStms $ lamBody scan_op) $ do
                 forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) local_accums pes) $ \(se, acc, pe) -> do
                   copyDWIMFix acc vec_is se []
@@ -320,7 +320,8 @@ nonsegmentedScan
   scan_ops
   kbody
   _nsubtasks = do
-    let blockSize = cacheSize `divUp` (totalBytes scan_ops * 1)
+    let multiplier = 1 -- For playing with.
+        blockSize = cacheSize `divUp` (totalBytes scan_ops * multiplier)
 
     block_no <- dPrimV "nblocks" (pe64 n `divUp` blockSize)
 
@@ -341,11 +342,11 @@ nonsegmentedScan
     copyDWIMFix work_index [0] (intConst Int64 0) []
 
     fbody <- collect $ do
-      seq_flag <- dPrimV "seq_flag" true 
+      seq_flag <- dPrimV "seq_flag" true
 
       sOp $ Imp.GetTaskId fid
 
-      block_idx <- dPrim "block_idx" 
+      block_idx <- dPrim "block_idx"
       work_index_loc <- entryArrayLoc <$> lookupArray work_index
       let work_index_loc_name = memLocName work_index_loc
 
@@ -436,7 +437,6 @@ nonsegmentedScan
 
     free_params <- freeParams fbody
     emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
-
 
 -- | Compile a SegScan construct.
 compileSegScan ::
