@@ -88,8 +88,8 @@ totalBytes scan_ops =
 -- correctness checks and (crude) efficiency checks. Basically, recomputation is
 -- only safe if nothing is consumed in the body, and considered efficient only
 -- if the body has no loops.
-_shouldRecompute :: KernelBody MCMem -> Bool
-_shouldRecompute = not . any (bad . stmExp) . bodyStms
+shouldRecompute :: KernelBody MCMem -> Bool
+shouldRecompute = not . any (bad . stmExp) . bodyStms
   where
     bad (BasicOp Update {}) = True
     bad (BasicOp UpdateAcc {}) = True
@@ -97,7 +97,7 @@ _shouldRecompute = not . any (bad . stmExp) . bodyStms
     bad Loop {} = True
     bad (Match _ cases def_body _) =
       any (any (bad . stmExp) . bodyStms) (def_body : map caseBody cases)
-    bad _ = True
+    bad _ = False
 
 copyFromDescToLocal :: [SegBinOp MCMem] -> [[VName]] -> [[VName]] -> TV Int64 -> MulticoreGen ()
 copyFromDescToLocal scan_ops per_op_local_vars per_op_description_arrays index = do
@@ -234,7 +234,6 @@ seqScanLB pat i scan_ops kbody per_op_prefixes_var start chunk_length = do
   z <- dPrimV "z" (0 :: Imp.TExp Int64)
   sWhile (tvExp z .<. tvExp chunk_length) $ do
     dPrimV_ i (tvExp start + tvExp z)
-
     if shouldRecompute kbody_renamed
     then do
         compileStms mempty (bodyStms kbody_renamed) $ do
@@ -313,7 +312,7 @@ seqAggregate pat i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx 
               compileStms mempty (bodyStms $ lamBody scan_op) $ do
                 forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) local_accums pes) $ \(se, acc, pe) -> do
                   copyDWIMFix acc vec_is se []
-                  unless ( shouldRecompute kbody_renamed) $ copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) se []
+                  unless (shouldRecompute kbody_renamed) $ copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) se []
         )
     j <-- tvExp j + 1
 
@@ -420,7 +419,10 @@ nonsegmentedScan
               lb <- dPrimV "lb" (tvExp block_idx - 1)
               has_acc <- dPrimV "has_acc" (false :: Imp.TExp Bool)
 
-              sWhile (bNot (tvExp old_flag .==. 2)) $ do
+              error_flag <- dPrim "error_flag" :: MulticoreGen (TV Bool)
+              sOp $ Imp.GetError (tvVar error_flag)
+
+              sWhile (bNot (tvExp old_flag .==. 2 .||. tvExp error_flag)) $ do
                 sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) (tvVar old_flag) flag_loc_name (Imp.elements $ TPrimExp $ sExt Int32 (untyped $ tvExp lb))
 
                 sWhen
