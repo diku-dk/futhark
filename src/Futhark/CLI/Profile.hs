@@ -315,10 +315,12 @@ writeHtml htmlDirPath evSummaryMap = do
   let perFileSummaries =
         let sourceFileNames = M.keysSet sourceFiles
          in summarizeAndSplitByFile sourceFileNames provenanceSummaries
-
-  liftIO $ forM_ perFileSummaries print
+  let htmlFiles = M.map generateHeatmapHtmlFile perFileSummaries
 
   pure ()
+
+generateHeatmapHtmlFile :: M.Map SourceRange (Seq.Seq (T.Text, EvSummary)) -> b
+generateHeatmapHtmlFile = _
 
 data OneTwoThree a = One a | Two a a | Three a a a
   deriving (Show, Functor, Foldable)
