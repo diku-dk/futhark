@@ -109,8 +109,8 @@ shouldRecompute = not . bodyHas bad
     bad Loop {} = True
     bad _ = False
 
-hasAssert :: SegBinOp MCMem -> Bool
-hasAssert = bodyHas isAssert . lambdaBody . segBinOpLambda
+hasAssert :: GBody MCMem res -> Bool
+hasAssert = bodyHas isAssert
   where
     isAssert (BasicOp Assert {}) = True
     isAssert _ = False
@@ -449,7 +449,7 @@ nonsegmentedScan
                 -- One of the other operators may fail, in which case we have to
                 -- bail out to avoid an infinite wait. This is a very rare case,
                 -- so only do it when necessary.
-                when (any hasAssert scan_ops) $
+                when (any (hasAssert . lambdaBody . segBinOpLambda) scan_ops || hasAssert kbody) $
                   sOp $
                     Imp.GetError (tvVar error_flag)
 
