@@ -1,23 +1,17 @@
-{-# LANGUAGE MultiWayIf #-}
-
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
 import Control.Arrow ((&&&), (>>>))
-import Control.Exception (assert, catch)
-import Control.Monad (void, when, (>=>))
+import Control.Exception (catch)
+import Control.Monad (forM_, void, when, (>=>))
 import Control.Monad.Except (ExceptT, liftEither, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
-import Data.Foldable (maximumBy, minimumBy)
-import Data.Function (on, (&))
+import Data.Function ((&))
 import Data.List qualified as L
-import Data.List.NonEmpty (NonEmpty)
-import Data.List.NonEmpty qualified as NE
 import Data.Loc (Pos (Pos), posCol, posFile, posLine)
 import Data.Map qualified as M
-import Data.Ord (comparing)
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Data.Text qualified as T
@@ -77,6 +71,7 @@ data EvSummary = EvSummary
     evMin :: Double,
     evMax :: Double
   }
+  deriving (Show)
 
 eventSummaries :: [ProfilingEvent] -> M.Map (T.Text, T.Text) EvSummary
 eventSummaries = M.fromListWith comb . map pair
@@ -220,12 +215,16 @@ sourceRangeEnd (SourceRange _ line col) = (line, col)
 
 sourceRangeOverlapsWith :: SourceRange -> SourceRange -> Bool
 sourceRangeOverlapsWith a b =
-  let rangeOverlaps (sa, ea) (sb, eb) = sa <= eb && sb <= ea
+  -- since the end is exclusive, I need to use a different operator
+  let rangeOverlaps (sa, ea) (sb, eb) = sa < eb && sb < ea
       startA = sourceRangeStart a
       endA = sourceRangeEnd a
       startB = sourceRangeStart b
       endB = sourceRangeEnd b
    in rangeOverlaps (startA, endA) (startB, endB)
+
+-- >>> sourceRangeIsEmpty $ SourceRange {sourceRangeStartPos = Pos "Futhark.fut" 4 40 (-1), sourceRangeEndLine = 4, sourceRangeEndColumn = 40}
+-- True
 
 sourceRangeIsEmpty :: SourceRange -> Bool
 sourceRangeIsEmpty (SourceRange (Pos _ startLine startCol _) endLine endCol) =
@@ -317,6 +316,8 @@ writeHtml htmlDirPath evSummaryMap = do
         let sourceFileNames = M.keysSet sourceFiles
          in summarizeAndSplitByFile sourceFileNames provenanceSummaries
 
+  liftIO $ forM_ perFileSummaries print
+
   pure ()
 
 data OneTwoThree a = One a | Two a a | Three a a a
@@ -381,7 +382,7 @@ mergeRanges a@(rangeA, auxA) b@(rangeB, auxB) =
           (firstRange, snd startsEarlier)
           (secondRange, auxA <> auxB)
           (thirdRange, snd endsLater)
-   in case filter123 (sourceRangeIsEmpty . fst) rawRanges of
+   in case filter123 (not . sourceRangeIsEmpty . fst) rawRanges of
         Nothing ->
           error . unwords $
             [ "Impossible! `mergeRanges` produced no range at all, input ranges:",
@@ -399,22 +400,22 @@ summarizeAndSplitByFile ::
   -- invariant: sourcerange.rangeStartPos.file is always equal to the map key
   M.Map T.Text (M.Map SourceRange (Seq.Seq (T.Text, EvSummary)))
 summarizeAndSplitByFile files summaries =
-  let overlapping =
-        let accumulateSummary m ((ccName, sourceRange), summary) =
+  let separatedByFile =
+        let accumulateFiles m ((ccName, sourceRange), summary) =
               -- relies on the fact that all the keys are already present in the map
               M.adjust
                 (Seq.|> (sourceRange, (ccName, summary)))
                 (T.pack . posFile . sourceRangeStartPos $ sourceRange)
                 m
          in M.toList summaries
-              & foldl' accumulateSummary (M.fromSet (const Seq.empty) files)
+              & foldl' accumulateFiles (M.fromSet (const Seq.empty) files)
 
-      separate ::
+      separateSourceRanges ::
         -- \| All possibly overlapping SourceRanges
         Seq.Seq (SourceRange, (T.Text, EvSummary)) ->
         -- \| Ordered non-overlapping sourceranges with merged attached informations
         M.Map SourceRange (Seq.Seq (T.Text, EvSummary))
-      separate = foldl' accumulateRange M.empty . fmap (second Seq.singleton)
+      separateSourceRanges = foldl' accumulateRange M.empty . fmap (second Seq.singleton)
         where
           accumulateRange ::
             -- \| Mapping of non-overlapping ranges, the T.Text is a ccName
@@ -445,19 +446,20 @@ summarizeAndSplitByFile files summaries =
                   let mergedRanges = mergeRanges (range, aux) lower
                       rangesWithoutLower = M.delete lowerRange ranges
                    in foldl accumulateRange rangesWithoutLower mergedRanges
+                -- lower range does not overlap
                 else case M.lookupGE range ranges of -- check the higher bound
                 -- nothing to merge
                   Nothing -> M.insert range aux ranges
+                  -- higher range was found
                   Just higher@(higherRange, _) ->
                     if range `sourceRangeOverlapsWith` higherRange
                       then
                         let mergedRanges = mergeRanges (range, aux) higher
                             rangesWithoutHigher = M.delete higherRange ranges
                          in foldl accumulateRange rangesWithoutHigher mergedRanges
+                      -- just insert the range normally
                       else M.insert range aux ranges
-
-      nonOverlapping = M.map separate overlapping
-   in nonOverlapping
+   in M.map separateSourceRanges separatedByFile
 
 loadAllFiles :: [FilePath] -> ExceptT T.Text IO (M.Map T.Text T.Text)
 loadAllFiles files =
