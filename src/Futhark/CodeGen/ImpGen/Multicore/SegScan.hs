@@ -382,7 +382,7 @@ nonsegmentedScan
 
         flags_loc <- entryArrayLoc <$> lookupArray flagsArr
         let flag_loc_name = memLocName flags_loc
-        let block_idx_32 = TPrimExp $ sExt Int32 (untyped $ tvExp block_idx)
+        let block_idx_32 = sExt32 (tvExp block_idx)
 
         sWhen
           (tvExp seq_flag .==. true)
@@ -423,7 +423,7 @@ nonsegmentedScan
               sOp $ Imp.GetError (tvVar error_flag)
 
               sWhile (bNot (tvExp old_flag .==. 2 .||. tvExp error_flag)) $ do
-                sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) (tvVar old_flag) flag_loc_name (Imp.elements $ TPrimExp $ sExt Int32 (untyped $ tvExp lb))
+                sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) (tvVar old_flag) flag_loc_name (Imp.elements $ sExt32 (tvExp lb))
 
                 sWhen
                   (tvExp old_flag .==. 2)
