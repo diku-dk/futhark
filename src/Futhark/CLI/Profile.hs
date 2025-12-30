@@ -384,9 +384,9 @@ mergeRanges a@(rangeA, auxA) b@(rangeB, auxB) =
    in case filter123 (sourceRangeIsEmpty . fst) rawRanges of
         Nothing ->
           error . unwords $
-            [ "Impossible! `mergeRanges` produced no range at all, input ranges:"
-            , show rangeA
-            , show rangeB
+            [ "Impossible! `mergeRanges` produced no range at all, input ranges:",
+              show rangeA,
+              show rangeB
             ]
         Just merged -> merged
 
@@ -424,20 +424,37 @@ summarizeAndSplitByFile files summaries =
             -- \| Mapping of non-overlapping ranges
             M.Map SourceRange (Seq.Seq (T.Text, EvSummary))
           accumulateRange ranges (range, aux) = case M.lookupLE range ranges of
+            -- there is no lower range
             Nothing -> case M.lookupGE range ranges of
+              -- there is no higher range
               Nothing -> M.insert range aux ranges -- nothing to merge at all
-              Just (higherRange, higherAux) ->
+
+              -- higher ranges was found
+              Just higher@(higherRange, _) ->
                 if range `sourceRangeOverlapsWith` higherRange
-                  then _
-                  else M.insert range aux ranges -- ranges don't overlap, don't merge
-            Just (lowerRange, lowerAux) ->
+                  then
+                    let mergedRanges = mergeRanges (range, aux) higher
+                        rangesWithoutHigher = M.delete higherRange ranges
+                     in foldl accumulateRange rangesWithoutHigher mergedRanges
+                  -- ranges don't overlap, don't merge
+                  else M.insert range aux ranges
+            -- lower range was found
+            Just lower@(lowerRange, _) ->
               if range `sourceRangeOverlapsWith` lowerRange
                 then
-                  let mergedRanges = _
-                   in _
+                  let mergedRanges = mergeRanges (range, aux) lower
+                      rangesWithoutLower = M.delete lowerRange ranges
+                   in foldl accumulateRange rangesWithoutLower mergedRanges
                 else case M.lookupGE range ranges of -- check the higher bound
-                  Nothing -> M.insert range aux ranges -- nothing to merge
-                  Just (higherRange, higherAux) -> _
+                -- nothing to merge
+                  Nothing -> M.insert range aux ranges
+                  Just higher@(higherRange, _) ->
+                    if range `sourceRangeOverlapsWith` higherRange
+                      then
+                        let mergedRanges = mergeRanges (range, aux) higher
+                            rangesWithoutHigher = M.delete higherRange ranges
+                         in foldl accumulateRange rangesWithoutHigher mergedRanges
+                      else M.insert range aux ranges
 
       nonOverlapping = M.map separate overlapping
    in nonOverlapping
