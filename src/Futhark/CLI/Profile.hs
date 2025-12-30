@@ -227,6 +227,10 @@ sourceRangeOverlapsWith a b =
       endB = sourceRangeEnd b
    in rangeOverlaps (startA, endA) (startB, endB)
 
+sourceRangeIsEmpty :: SourceRange -> Bool
+sourceRangeIsEmpty (SourceRange (Pos _ startLine startCol _) endLine endCol) =
+  startLine == endLine && startCol == endCol
+
 -- | Parse a source range, respect the invariants noted in the definition
 -- and print the MegaParsec errorbundle into a Text.
 --
@@ -318,13 +322,30 @@ writeHtml htmlDirPath evSummaryMap = do
 data OneTwoThree a = One a | Two a a | Three a a a
   deriving (Show, Functor, Foldable)
 
+filter123 :: (a -> Bool) -> OneTwoThree a -> Maybe (OneTwoThree a)
+filter123 p self@(One x) = if p x then Just self else Nothing
+filter123 p self@(Two x y) = case (p x, p y) of
+  (True, True) -> Just self
+  (True, False) -> Just (One x)
+  (False, True) -> Just (One y)
+  (False, False) -> Nothing
+filter123 p self@(Three x y z) = case (p x, p y, p z) of
+  (False, False, False) -> Nothing
+  (False, False, True) -> Just (One z)
+  (False, True, False) -> Just (One y)
+  (False, True, True) -> Just (Two y z)
+  (True, False, False) -> Just (One x)
+  (True, False, True) -> Just (Two x z)
+  (True, True, False) -> Just (Two x y)
+  (True, True, True) -> Just self
+
 -- | Assumes that the ranges overlap
 mergeRanges ::
   (Semigroup s) =>
   (SourceRange, s) ->
   (SourceRange, s) ->
   OneTwoThree (SourceRange, s)
-mergeRanges a@(rangeA, auxA) b@(_, auxB) =
+mergeRanges a@(rangeA, auxA) b@(rangeB, auxB) =
   let orderedBy f x y = if f x < f y then (x, y) else (y, x)
       (startsEarlier, startsLater) = orderedBy (sourceRangeStart . fst) a b
 
@@ -354,10 +375,20 @@ mergeRanges a@(rangeA, auxA) b@(_, auxB) =
          in (fst endsLater)
               { sourceRangeStartPos = Pos fname startLine endColumn (-1)
               }
-   in Three
-        (firstRange, snd startsEarlier)
-        (secondRange, auxA <> auxB)
-        (thirdRange, snd endsLater)
+
+      rawRanges =
+        Three
+          (firstRange, snd startsEarlier)
+          (secondRange, auxA <> auxB)
+          (thirdRange, snd endsLater)
+   in case filter123 (sourceRangeIsEmpty . fst) rawRanges of
+        Nothing ->
+          error . unwords $
+            [ "Impossible! `mergeRanges` produced no range at all, input ranges:"
+            , show rangeA
+            , show rangeB
+            ]
+        Just merged -> merged
 
 summarizeAndSplitByFile ::
   -- | Names of all text files
