@@ -3,8 +3,8 @@
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
-import Control.Arrow ((>>>))
-import Control.Exception (catch)
+import Control.Arrow ((&&&), (>>>))
+import Control.Exception (assert, catch)
 import Control.Monad (void, when, (>=>))
 import Control.Monad.Except (ExceptT, liftEither, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
@@ -324,62 +324,40 @@ mergeRanges ::
   (SourceRange, s) ->
   (SourceRange, s) ->
   OneTwoThree (SourceRange, s)
-mergeRanges a@(rangeA, auxA) b@(rangeB, auxB)
-  -- they have exactly the same source-range
-  -- ccc
-  | rangeA == rangeB = One (rangeA, auxA <> auxB)
-  -- they must not be the same, there are a few remaining cases
-  -- \* one of the ranges is longer than the other: cca, ccb
-  -- \* one of the ranges
-  -- \* end overlap: acc
-  | otherwise =
-      let earlier =
-            minimumBy
-              (comparing $ sourceRangeStart . fst)
-              [a, b]
-          earlierRange = fst earlier
-          earlierEnd = sourceRangeEnd earlierRange
-          earlierStart = sourceRangeStart earlierRange
+mergeRanges a@(rangeA, auxA) b@(_, auxB) =
+  let orderedBy f x y = if f x < f y then (x, y) else (y, x)
+      (startsEarlier, startsLater) = orderedBy (sourceRangeStart . fst) a b
 
-          later =
-            maximumBy
-              (comparing $ sourceRangeStart . fst)
-              [a, b]
-          laterRange = fst later
-          laterEnd = sourceRangeEnd laterRange
-          laterStart = sourceRangeStart laterRange
-       in if
-            -- ccb
-            | earlierStart == laterStart && earlierEnd < laterEnd ->
-                let SourceRange (Pos fname _ _ _) _ _ = earlierRange
-                    (earlierEndLine, earlierEndCol) = earlierEnd
-                    secondStartPos =
-                      Pos fname earlierEndLine earlierEndCol (-1)
-                    secondSourceRange =
-                      laterRange
-                        { sourceRangeStartPos = secondStartPos
-                        }
-                 in Two (earlierRange, auxA <> auxB) (secondSourceRange, auxB)
-            -- cca
-            | earlierStart == laterStart && laterEnd <= earlierEnd ->
-                let (overlapStartLine, overlapStartCol) = laterStart
-                    firstSourceRange =
-                      earlierRange
-                        { sourceRangeEndLine = overlapStartLine,
-                          sourceRangeEndColumn = overlapStartCol
-                        }
-                 in Two (firstSourceRange, auxA) (laterRange, auxA <> auxB)
-            | False -> _
-            -- none of the three cases
-            | otherwise ->
-                error $
-                  "Impossible case: Ranges did not overlap.\n"
-                    <> "First: "
-                    <> show (fst a)
-                    <> "\n"
-                    <> "Second: "
-                    <> show (fst b)
-                    <> "\n"
+      startsLaterStart = sourceRangeStart . fst $ startsLater
+      fname = posFile . sourceRangeStartPos $ rangeA
+
+      (endsEarlier, endsLater) =
+        orderedBy
+          ((sourceRangeEndLine &&& sourceRangeEndColumn) . fst)
+          a
+          b
+
+      firstRange =
+        (fst startsEarlier)
+          { sourceRangeEndLine = fst startsLaterStart,
+            sourceRangeEndColumn = snd startsLaterStart
+          }
+      secondRange =
+        (fst startsLater)
+          { sourceRangeEndLine = sourceRangeEndLine . fst $ endsEarlier,
+            sourceRangeEndColumn = sourceRangeEndColumn . fst $ endsEarlier
+          }
+
+      thirdRange =
+        let startLine = sourceRangeEndLine secondRange
+            endColumn = sourceRangeEndColumn secondRange
+         in (fst endsLater)
+              { sourceRangeStartPos = Pos fname startLine endColumn (-1)
+              }
+   in Three
+        (firstRange, snd startsEarlier)
+        (secondRange, auxA <> auxB)
+        (thirdRange, snd endsLater)
 
 summarizeAndSplitByFile ::
   -- | Names of all text files
