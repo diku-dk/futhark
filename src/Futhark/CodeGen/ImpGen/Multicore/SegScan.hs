@@ -9,6 +9,7 @@ where
 
 import Control.Monad
 import Data.List (zip4)
+import Data.Maybe (isNothing)
 import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
@@ -84,20 +85,35 @@ totalBytes scan_ops =
   where
     bytesOfShape pt sh = primByteSize pt * product (map pe64 (shapeDims sh))
 
+bodyHas :: (Exp MCMem -> Bool) -> GBody MCMem res -> Bool
+bodyHas f = any (f' . stmExp) . bodyStms
+  where
+    f' e
+      | f e = True
+      | otherwise = isNothing $ walkExpM walker e
+    walker =
+      identityWalker
+        { walkOnBody = const $ guard . not . bodyHas f
+        }
+
 -- | Determine whether this kernel body should be recomputed. Involves both
 -- correctness checks and (crude) efficiency checks. Basically, recomputation is
 -- only safe if nothing is consumed in the body, and considered efficient only
 -- if the body has no loops.
 shouldRecompute :: KernelBody MCMem -> Bool
-shouldRecompute = not . any (bad . stmExp) . bodyStms
+shouldRecompute = bodyHas bad
   where
     bad (BasicOp Update {}) = True
     bad (BasicOp UpdateAcc {}) = True
     bad (WithAcc {}) = True
     bad Loop {} = True
-    bad (Match _ cases def_body _) =
-      any (any (bad . stmExp) . bodyStms) (def_body : map caseBody cases)
     bad _ = False
+
+hasAssert :: SegBinOp MCMem -> Bool
+hasAssert = bodyHas isAssert . lambdaBody . segBinOpLambda
+  where
+    isAssert (BasicOp Assert {}) = True
+    isAssert _ = False
 
 copyFromDescToLocal :: [SegBinOp MCMem] -> [[VName]] -> [[VName]] -> TV Int64 -> MulticoreGen ()
 copyFromDescToLocal scan_ops per_op_local_vars per_op_description_arrays index = do
@@ -235,32 +251,31 @@ seqScanLB pat i scan_ops kbody per_op_prefixes_var start chunk_length = do
   sWhile (tvExp z .<. tvExp chunk_length) $ do
     dPrimV_ i (tvExp start + tvExp z)
     if shouldRecompute kbody_renamed
-    then do
+      then do
         compileStms mempty (bodyStms kbody_renamed) $ do
-            forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res , local_accums) ->
-              sLoopNestVectorized (segBinOpShape scan_op) $ \vec_is -> do
-                forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
-                  copyDWIMFix (paramName px) [] (Var acc) vec_is
-                forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
-                  copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
-                compileStms mempty (bodyStms $ lamBody scan_op) $ do
-                  forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) pes local_accums) $ \(se, pe, acc) -> do
-                    copyDWIMFix acc vec_is se []
-                    copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
-        z <-- tvExp z + 1
-    else do
-        forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, _, local_accums) ->
+          forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res, local_accums) ->
             sLoopNestVectorized (segBinOpShape scan_op) $ \vec_is -> do
               forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
                 copyDWIMFix (paramName px) [] (Var acc) vec_is
-              forM_ (zip (yParams scan_op) pes) $ \(py, pe) ->
-                -- reading from output array
-                copyDWIMFix (paramName py) [] (Var (patElemName pe)) ((tvExp start + tvExp z) : vec_is)
+              forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
+                copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
               compileStms mempty (bodyStms $ lamBody scan_op) $ do
-                forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(se, pe) -> do
+                forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) pes local_accums) $ \(se, pe, acc) -> do
+                  copyDWIMFix acc vec_is se []
                   copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
         z <-- tvExp z + 1
-
+      else do
+        forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, _, local_accums) ->
+          sLoopNestVectorized (segBinOpShape scan_op) $ \vec_is -> do
+            forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
+              copyDWIMFix (paramName px) [] (Var acc) vec_is
+            forM_ (zip (yParams scan_op) pes) $ \(py, pe) ->
+              -- reading from output array
+              copyDWIMFix (paramName py) [] (Var (patElemName pe)) ((tvExp start + tvExp z) : vec_is)
+            compileStms mempty (bodyStms $ lamBody scan_op) $ do
+              forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(se, pe) -> do
+                copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
+        z <-- tvExp z + 1
 
 seqAggregate ::
   Pat LetDecMem ->
@@ -423,7 +438,20 @@ nonsegmentedScan
               sOp $ Imp.GetError (tvVar error_flag)
 
               sWhile (bNot (tvExp old_flag .==. 2 .||. tvExp error_flag)) $ do
-                sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) (tvVar old_flag) flag_loc_name (Imp.elements $ sExt32 (tvExp lb))
+                sOp $
+                  Imp.Atomic $
+                    Imp.AtomicLoad
+                      (IntType Int64)
+                      (tvVar old_flag)
+                      flag_loc_name
+                      (Imp.elements $ sExt32 (tvExp lb))
+
+                -- One of the other operators may fail, in which case we have to
+                -- bail out to avoid an infinite wait. This is a very rare case,
+                -- so only do it when necessary.
+                when (any hasAssert scan_ops) $
+                  sOp $
+                    Imp.GetError (tvVar error_flag)
 
                 sWhen
                   (tvExp old_flag .==. 2)
