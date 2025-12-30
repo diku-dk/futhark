@@ -101,7 +101,7 @@ bodyHas f = any (f' . stmExp) . bodyStms
 -- only safe if nothing is consumed in the body, and considered efficient only
 -- if the body has no loops.
 shouldRecompute :: KernelBody MCMem -> Bool
-shouldRecompute = bodyHas bad
+shouldRecompute = not . bodyHas bad
   where
     bad (BasicOp Update {}) = True
     bad (BasicOp UpdateAcc {}) = True
