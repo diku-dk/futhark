@@ -26,6 +26,8 @@ import Futhark.Bench
     decodeBenchResults,
     decodeProfilingReport,
   )
+import Futhark.Profile.EventSummary qualified as ES
+import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (showText)
 import Futhark.Util.Options (mainWithOptions)
 import System.Directory (createDirectoryIfMissing, removePathForcibly)
@@ -39,8 +41,6 @@ import System.FilePath
   )
 import System.IO (hPutStrLn, stderr)
 import Text.Printf (printf)
-import qualified Futhark.Profile.SourceRange as SR
-import qualified Futhark.Profile.EventSummary as ES
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -207,7 +207,7 @@ writeHtml htmlDirPath evSummaryMap = do
   let perFileSummaries =
         let sourceFileNames = M.keysSet sourceFiles
          in summarizeAndSplitByFile sourceFileNames provenanceSummaries
-  htmlFiles <- M.traverseWithKey (\ fname -> undefined (sourceFiles M.! fname)) perFileSummaries
+  htmlFiles <- M.traverseWithKey (\fname -> undefined (sourceFiles M.! fname)) perFileSummaries
 
   pure ()
 

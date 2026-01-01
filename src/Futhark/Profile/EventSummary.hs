@@ -1,8 +1,8 @@
-module Futhark.Profile.EventSummary (EvSummary(..), eventSummaries) where
+module Futhark.Profile.EventSummary (EvSummary (..), eventSummaries) where
 
-import qualified Data.Map as M (fromListWith, Map)
+import Data.Map qualified as M (Map, fromListWith)
+import Data.Text qualified as T (Text)
 import Futhark.Profile (ProfilingEvent (ProfilingEvent))
-import qualified Data.Text as T (Text)
 
 data EvSummary = EvSummary
   { evCount :: Integer,

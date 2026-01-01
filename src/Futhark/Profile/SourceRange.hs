@@ -1,12 +1,13 @@
-module Futhark.Profile.SourceRange (SourceRange(..), filter123, overlapsWith, mergeSemigroup, parse) where
-import Data.Loc (Pos (Pos), posLine, posCol, posFile)
-import qualified Text.Megaparsec as P
-import Data.Void (Void)
-import qualified Data.Text as T
-import Data.Bifunctor (first)
-import qualified Text.Megaparsec.Char.Lexer as L
-import Control.Monad (void, when)
+module Futhark.Profile.SourceRange (SourceRange (..), filter123, overlapsWith, mergeSemigroup, parse) where
+
 import Control.Arrow ((&&&))
+import Control.Monad (void, when)
+import Data.Bifunctor (first)
+import Data.Loc (Pos (Pos), posCol, posFile, posLine)
+import Data.Text qualified as T
+import Data.Void (Void)
+import Text.Megaparsec qualified as P
+import Text.Megaparsec.Char.Lexer qualified as L
 
 -- | I chose this representation over `Loc` from `srcLoc` because it guarantees the presence of a range.
 -- Loc is essentially a 'Maybe (Pos, Pos)', because of the 'NoLoc' constructor.
@@ -169,4 +170,3 @@ filter123 p self@(Three x y z) = case (p x, p y, p z) of
   (True, False, True) -> Just (Two x z)
   (True, True, False) -> Just (Two x y)
   (True, True, True) -> Just self
-
