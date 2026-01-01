@@ -1,4 +1,4 @@
-module Futhark.Profile.Html () where
+module Futhark.Profile.Html (generateHeatmapHtml) where
 
 import Data.Map qualified as M
 import Data.Sequence qualified as Seq
@@ -8,6 +8,9 @@ import Futhark.Profile.SourceRange qualified as SR
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 import Text.Blaze.Html5 ((!))
+import Futhark.Util.Html (headHtml)
+import Control.Monad.Except (Except)
 
-generateHtmlHeatmapFile :: T.Text -> M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary)) -> a0
-generateHtmlHeatmapFile sourceText sourceRanges = H.docTypeHtml
+generateHeatmapHtml :: T.Text -> T.Text -> M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary)) -> Except T.Text H.Html
+generateHeatmapHtml sourcePath sourceText sourceRanges = pure . H.docTypeHtml $
+  headHtml (T.unpack sourcePath) (T.unpack $ sourcePath <> " - Source-Heatmap")

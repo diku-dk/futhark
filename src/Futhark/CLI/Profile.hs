@@ -3,9 +3,10 @@ module Futhark.CLI.Profile (main) where
 
 import Control.Arrow ((>>>))
 import Control.Exception (catch)
-import Control.Monad ((>=>))
-import Control.Monad.Except (ExceptT, liftEither, runExceptT, throwError)
+import Control.Monad ((>=>), forM_)
+import Control.Monad.Except (ExceptT, liftEither, mapExceptT, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Identity (Identity (runIdentity))
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.Function ((&))
@@ -27,6 +28,7 @@ import Futhark.Bench
     decodeProfilingReport,
   )
 import Futhark.Profile.EventSummary qualified as ES
+import Futhark.Profile.Html (generateHeatmapHtml)
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (showText)
 import Futhark.Util.Options (mainWithOptions)
@@ -37,10 +39,13 @@ import System.FilePath
     takeFileName,
     (-<.>),
     (<.>),
-    (</>),
+    (</>), takeDirectory, makeRelative,
   )
 import System.IO (hPutStrLn, stderr)
 import Text.Printf (printf)
+import qualified Text.Blaze.Html.Renderer.Text as H
+import qualified Data.Text.Lazy as LT
+import qualified Data.Text.Lazy.IO as LT
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -204,12 +209,25 @@ writeHtml htmlDirPath evSummaryMap = do
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
   sourceFiles <- loadAllFiles (posFile . SR.startPos . snd <$> M.keys provenanceSummaries)
 
-  let perFileSummaries =
-        let sourceFileNames = M.keysSet sourceFiles
-         in summarizeAndSplitByFile sourceFileNames provenanceSummaries
-  htmlFiles <- M.traverseWithKey (\fname -> undefined (sourceFiles M.! fname)) perFileSummaries
+  htmlFiles <-
+    let perFileSummaries =
+          let sourceFileNames = M.keysSet sourceFiles
+           in summarizeAndSplitByFile sourceFileNames provenanceSummaries
+        generateSingleFile filePath =
+          generateHeatmapHtml
+            filePath
+            (sourceFiles M.! filePath)
+     in M.traverseWithKey generateSingleFile perFileSummaries
+          & mapExceptT (pure . runIdentity)
 
-  pure ()
+  liftIO $ forM_ (M.toList htmlFiles) $ \ (srcFilePath, html) -> do
+    let absPath = htmlDirPath </> makeRelative "/" (T.unpack $ srcFilePath <> ".html")
+    writeLazyTextFile absPath (H.renderHtml html)
+
+writeLazyTextFile :: FilePath -> LT.Text -> IO ()
+writeLazyTextFile filepath content = do
+  createDirectoryIfMissing True $ takeDirectory filepath
+  LT.writeFile filepath content
 
 summarizeAndSplitByFile ::
   -- | Names of all text files
