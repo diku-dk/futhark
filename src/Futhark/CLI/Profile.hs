@@ -248,11 +248,12 @@ writeHtml htmlDirPath evSummaryMap = do
      in M.traverseWithKey generateSingleFile summariesWithRatio
           & mapExceptT (pure . runIdentity)
   
-  liftIO $ T.writeFile (htmlDirPath </> "style.css") cssFile
-
   liftIO $ forM_ (M.toList htmlFiles) $ \(srcFilePath, html) -> do
     let absPath = htmlDirPath </> makeRelative "/" (T.unpack $ srcFilePath <> ".html")
     writeLazyTextFile absPath (H.renderHtml html)
+
+  liftIO $ T.writeFile (htmlDirPath </> "style.css") cssFile
+
 
 writeLazyTextFile :: FilePath -> LT.Text -> IO ()
 writeLazyTextFile filepath content = do

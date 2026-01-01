@@ -2,7 +2,6 @@
 
 module Futhark.Profile.Html (generateHeatmapHtml) where
 
-import Control.Arrow ((>>>))
 import Control.Monad.Except (Except)
 import Control.Monad.State.Strict (State, evalState, get, modify)
 import Data.Bifunctor (second)
@@ -35,9 +34,9 @@ type AnnotatedRange = (SR.SourceRange, CostCentreAnnotations)
 
 generateHeatmapHtml :: T.Text -> T.Text -> M.Map SR.SourceRange CostCentreAnnotations -> Except T.Text H.Html
 generateHeatmapHtml sourcePath sourceText sourceRanges =
-  pure . H.docTypeHtml $
+  pure . H.docTypeHtml $ do
     headHtml (T.unpack sourcePath) (T.unpack $ sourcePath <> " - Source-Heatmap")
-      <> bodyHtml sourcePath sourceText sourceRanges
+    bodyHtml sourcePath sourceText sourceRanges
 
 bodyHtml :: p -> T.Text -> M.Map SR.SourceRange CostCentreAnnotations -> H.Html
 bodyHtml sourcePath sourceText sourceRanges =
@@ -70,21 +69,22 @@ decorateSpan range fraction evs = span . anchor
     anchor =
       H.a
         ! A.class_ "silent-anchor"
+        ! A.href (fromString $ "#detail-table-" <> spanCssId)
 
-    span =
-      H.span
-        ! A.id (fromString cssId)
-        ! A.style (fromString $ T.unpack cssColorValueText)
-        ! A.title (fromString $ T.unpack cssHoverText)
-      where
-        cssId = printf "range-l%i-c%i" startLine startCol
+    spanCssId = printf "range-l%i-c%i" startLine startCol
           where
             (startLine, startCol) = SR.startLineCol range
 
+    span =
+      H.span
+        ! A.id (fromString spanCssId)
+        ! A.style (fromString $ T.unpack cssColorValueText)
+        ! A.title (fromString $ T.unpack cssHoverText)
+      where
         cssHoverText =
           [NI.trimming|Fraction of the total runtime: $textFraction
           Part of $textEvCount cost centres.
-          (Click to see more)
+          (Click to jump to detail table)
           |]
           where
             textEvCount = T.show $ Seq.length evs
