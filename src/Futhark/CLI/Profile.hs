@@ -40,6 +40,7 @@ import System.FilePath
 import System.IO (hPutStrLn, stderr)
 import Text.Printf (printf)
 import qualified Futhark.Profile.SourceRange as SR
+import qualified Futhark.Profile.EventSummary as ES
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -63,34 +64,18 @@ padRight k s = s <> T.replicate (k - T.length s) " "
 padLeft :: Int -> T.Text -> T.Text
 padLeft k s = T.replicate (k - T.length s) " " <> s
 
-data EvSummary = EvSummary
-  { evCount :: Integer,
-    evSum :: Double,
-    evMin :: Double,
-    evMax :: Double
-  }
-  deriving (Show)
-
-eventSummaries :: [ProfilingEvent] -> M.Map (T.Text, T.Text) EvSummary
-eventSummaries = M.fromListWith comb . map pair
-  where
-    pair (ProfilingEvent name dur provenance _details) =
-      ((name, provenance), EvSummary 1 dur dur dur)
-    comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
-      EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
-
-tabulateEvents :: M.Map (T.Text, T.Text) EvSummary -> T.Text
+tabulateEvents :: M.Map (T.Text, T.Text) ES.EvSummary -> T.Text
 tabulateEvents = mkRows . M.toList
   where
     numpad = 15
     mkRows rows =
       let longest = foldl max numpad $ map (T.length . fst . fst) rows
-          total = sum $ map (evSum . snd) rows
+          total = sum $ map (ES.evSum . snd) rows
           header = headerRow longest
           splitter = T.map (const '-') header
           eventSummary =
             T.unwords
-              [ showText (sum (map (evCount . snd) rows)),
+              [ showText (sum (map (ES.evCount . snd) rows)),
                 "events with a total runtime of",
                 T.pack $ printf "%.2fμs" total
               ]
@@ -129,12 +114,12 @@ tabulateEvents = mkRows . M.toList
     mkRow longest total (name, ev) =
       T.unwords
         [ padRight longest name,
-          padLeft numpad (showText (evCount ev)),
-          padLeft numpad $ T.pack $ printf "%.2fμs" (evSum ev),
-          padLeft numpad $ T.pack $ printf "%.2fμs" $ evSum ev / fromInteger (evCount ev),
-          padLeft numpad $ T.pack $ printf "%.2fμs" (evMin ev),
-          padLeft numpad $ T.pack $ printf "%.2fμs" (evMax ev),
-          padLeft numpad $ T.pack $ printf "%.4f" (evSum ev / total)
+          padLeft numpad (showText (ES.evCount ev)),
+          padLeft numpad $ T.pack $ printf "%.2fμs" (ES.evSum ev),
+          padLeft numpad $ T.pack $ printf "%.2fμs" $ ES.evSum ev / fromInteger (ES.evCount ev),
+          padLeft numpad $ T.pack $ printf "%.2fμs" (ES.evMin ev),
+          padLeft numpad $ T.pack $ printf "%.2fμs" (ES.evMax ev),
+          padLeft numpad $ T.pack $ printf "%.4f" (ES.evSum ev / total)
         ]
 
 timeline :: [ProfilingEvent] -> T.Text
@@ -154,7 +139,7 @@ data TargetFiles = TargetFiles
 
 writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
 writeAnalysis tf r = runExceptT >=> handleException $ do
-  let evSummaryMap = eventSummaries $ profilingEvents r
+  let evSummaryMap = ES.eventSummaries $ profilingEvents r
 
   -- heatmap html
   writeHtml (htmlDir tf) evSummaryMap
@@ -174,7 +159,7 @@ writeAnalysis tf r = runExceptT >=> handleException $ do
     handleException :: Either T.Text () -> IO ()
     handleException = either (T.hPutStrLn stderr) pure
 
-expandEvSummaryMap :: M.Map (T.Text, T.Text) EvSummary -> M.Map (T.Text, T.Text) EvSummary
+expandEvSummaryMap :: M.Map (T.Text, T.Text) ES.EvSummary -> M.Map (T.Text, T.Text) ES.EvSummary
 expandEvSummaryMap =
   M.toList
     >>> concatMap expandEvSummary
@@ -184,7 +169,7 @@ expandEvSummaryMap =
       map (\(sourceLoc, splitSummary) -> ((name, sourceLoc), splitSummary)) $
         splitEvSummarySources provenance evSummary
 
-    splitEvSummarySources :: T.Text -> EvSummary -> [(T.Text, EvSummary)]
+    splitEvSummarySources :: T.Text -> ES.EvSummary -> [(T.Text, ES.EvSummary)]
     splitEvSummarySources provenance summary =
       let sourceLocations = T.splitOn "->" provenance
        in map (,summary) sourceLocations
@@ -192,9 +177,9 @@ expandEvSummaryMap =
 buildProvenanceSummaryMap ::
   (Monad m) =>
   -- | Keys are: (ccName, ccProvenance)
-  M.Map (T.Text, T.Text) EvSummary ->
+  M.Map (T.Text, T.Text) ES.EvSummary ->
   -- | Keys are: (ccName, ccProvenance)
-  ExceptT T.Text m (M.Map (T.Text, SR.SourceRange) EvSummary)
+  ExceptT T.Text m (M.Map (T.Text, SR.SourceRange) ES.EvSummary)
 buildProvenanceSummaryMap evSummaryMap =
   let -- there are no compound provenance blocks in this map anymore
       singleSourceEvSummaryMap = expandEvSummaryMap evSummaryMap
@@ -213,7 +198,7 @@ writeHtml ::
   -- | target directory path
   FilePath ->
   -- | mapping keys are (name, provenance)
-  M.Map (T.Text, T.Text) EvSummary ->
+  M.Map (T.Text, T.Text) ES.EvSummary ->
   ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
@@ -230,10 +215,10 @@ summarizeAndSplitByFile ::
   -- | Names of all text files
   S.Set T.Text ->
   -- | Mapping from (ccName, ccProvenance) to event summary
-  M.Map (T.Text, SR.SourceRange) EvSummary ->
+  M.Map (T.Text, SR.SourceRange) ES.EvSummary ->
   -- | Non-Overlapping Events with SourceRanges separated by file
   -- invariant: sourcerange.rangeStartPos.file is always equal to the map key
-  M.Map T.Text (M.Map SR.SourceRange (Seq.Seq (T.Text, EvSummary)))
+  M.Map T.Text (M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary)))
 summarizeAndSplitByFile files summaries =
   let separatedByFile =
         let accumulateFiles m ((ccName, sourceRange), summary) =
@@ -247,18 +232,18 @@ summarizeAndSplitByFile files summaries =
 
       separateSourceRanges ::
         -- \| All possibly overlapping SourceRanges
-        Seq.Seq (SR.SourceRange, (T.Text, EvSummary)) ->
+        Seq.Seq (SR.SourceRange, (T.Text, ES.EvSummary)) ->
         -- \| Ordered non-overlapping sourceranges with merged attached informations
-        M.Map SR.SourceRange (Seq.Seq (T.Text, EvSummary))
+        M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary))
       separateSourceRanges = foldl' accumulateRange M.empty . fmap (second Seq.singleton)
         where
           accumulateRange ::
             -- \| Mapping of non-overlapping ranges, the T.Text is a ccName
-            M.Map SR.SourceRange (Seq.Seq (T.Text, EvSummary)) ->
+            M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary)) ->
             -- \| New SourceRange that must be merged and inserted
-            (SR.SourceRange, Seq.Seq (T.Text, EvSummary)) ->
+            (SR.SourceRange, Seq.Seq (T.Text, ES.EvSummary)) ->
             -- \| Mapping of non-overlapping ranges
-            M.Map SR.SourceRange (Seq.Seq (T.Text, EvSummary))
+            M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary))
           accumulateRange ranges (range, aux) = case M.lookupLE range ranges of
             -- there is no lower range
             Nothing -> case M.lookupGE range ranges of
