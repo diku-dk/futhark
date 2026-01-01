@@ -3,7 +3,7 @@ module Futhark.CLI.Profile (main) where
 
 import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
-import Control.Monad (forM_, (>=>), (<$!>))
+import Control.Monad (forM_, (<$!>), (>=>))
 import Control.Monad.Except (ExceptT, liftEither, mapExceptT, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Identity (Identity (runIdentity))
@@ -214,8 +214,10 @@ writeHtml htmlDirPath evSummaryMap = do
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
 
   -- text source files
-  sourceFiles <- fmap normalizeNewlines <$!> loadAllFiles 
-    (posFile . SR.startPos . snd <$> M.keys provenanceSummaries)
+  sourceFiles <-
+    fmap normalizeNewlines
+      <$!> loadAllFiles
+        (posFile . SR.startPos . snd <$> M.keys provenanceSummaries)
 
   htmlFiles <-
     -- for each file, for each source range: events
@@ -331,10 +333,10 @@ loadAllFiles files =
       liftEither . first T.show $ T.decodeUtf8' (BS.toStrict bytes')
 
 -- | Multi-Replace, replace all combinations of '\r' and '\n' with only '\n'
-
 normalizeNewlines :: T.Text -> T.Text
-normalizeNewlines = T.replace "\r\n" "\n"
-  >>> T.replace "\r" "\n"
+normalizeNewlines =
+  T.replace "\r\n" "\n"
+    >>> T.replace "\r" "\n"
 
 prepareDir :: FilePath -> IO FilePath
 prepareDir json_path = do

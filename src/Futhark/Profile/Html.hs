@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+
 module Futhark.Profile.Html (generateHeatmapHtml) where
 
 import Control.Monad.Except (Except)
@@ -6,16 +7,17 @@ import Control.Monad.State.Strict (State, evalState, get, modify)
 import Data.Bifunctor (second)
 import Data.Map qualified as M
 import Data.Sequence qualified as Seq
+import Data.String (IsString (fromString))
 import Data.Text qualified as T
 import Data.Word (Word8)
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util.Html (headHtml)
-import Text.Blaze.Html5 qualified as H
-import qualified Text.Blaze.Html5.Attributes as A
+import NeatInterpolation qualified as NI (text, trimming)
 import Text.Blaze.Html5 ((!))
-import NeatInterpolation qualified as NI (text)
-import Data.String (IsString(fromString))
+import Text.Blaze.Html5 qualified as H
+import Text.Blaze.Html5.Attributes qualified as A
+import Text.Printf (printf)
 
 type SourcePos = (Int, Int)
 
@@ -26,6 +28,7 @@ data RenderState = RenderState
 
 -- fraction of total time (in [0; 1]), affected events
 type CostCentreAnnotations = (Double, Seq.Seq (T.Text, ES.EvSummary))
+
 type AnnotatedRange = (SR.SourceRange, CostCentreAnnotations)
 
 generateHeatmapHtml :: T.Text -> T.Text -> M.Map SR.SourceRange CostCentreAnnotations -> Except T.Text H.Html
@@ -52,17 +55,26 @@ renderRanges (RenderState pos text) rs@((range, (fraction, evs)) : rest) =
           let rangeEndPos = SR.endLineCol range
           let (textHtml, text') = renderTextFromUntil pos rangeEndPos text
 
-          decorateSpan fraction textHtml
+          decorateSpan fraction evs textHtml
           renderRanges (RenderState rangeEndPos text') rest
         LT -> do
           let (textHtml, text') = renderTextFromUntil pos rangePos text
           textHtml
           renderRanges (RenderState rangePos text') rs
 
-decorateSpan :: Double -> H.Html -> H.Html
-decorateSpan fraction = H.span 
-  ! A.style (fromString $ T.unpack cssColorValueText)
+decorateSpan :: Double -> Seq.Seq (T.Text, ES.EvSummary) -> H.Html -> H.Html
+decorateSpan fraction evs =
+  H.span
+    ! A.style (fromString $ T.unpack cssColorValueText)
+    ! A.title (fromString $ T.unpack cssHoverText)
   where
+    cssHoverText =
+      [NI.trimming|Fraction of the total runtime: $textFraction
+      Part of $textEvCount cost centres.
+      |]
+      where
+        textEvCount = T.show $ Seq.length evs
+        textFraction = T.pack $ printf "%.4f" fraction
 
     cssColorValueText = [NI.text|background: rgba($textR, $textG, $textB, 1)|]
       where
@@ -72,7 +84,7 @@ decorateSpan fraction = H.span
 -- | Percentage Argument must be smaller in [0; 1]
 interpolateHeatmapColor :: Double -> (Word8, Word8, Word8)
 interpolateHeatmapColor percentage =
-  if percentage <= 0.5
+  if percentage >= 0.5
     then
       let point = percentage * 2
           g = point * 255
@@ -95,7 +107,6 @@ splitTextFromTo startPos endPos t =
   flip evalState startPos $
     T.spanM stepChar t
   where
-    -- TODO: Line Ending checking for DOS-Style Newlines
     -- general category @LineSeparator@ is not used for Newlines
     isNewline c = case c of
       '\n' -> True
