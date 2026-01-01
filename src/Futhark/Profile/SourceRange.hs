@@ -1,4 +1,4 @@
-module Futhark.Profile.SourceRange (SourceRange (..), filter123, overlapsWith, mergeSemigroup, parse) where
+module Futhark.Profile.SourceRange (SourceRange (..), startLineCol, endLineCol, filter123, overlapsWith, mergeSemigroup, parse) where
 
 import Control.Arrow ((&&&))
 import Control.Monad (void, when)
