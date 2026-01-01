@@ -395,6 +395,7 @@ library
       Futhark.Util
       Futhark.Util.CMath
       Futhark.Util.IntegralExp
+      Futhark.Util.Html
       Futhark.Util.Loc
       Futhark.Util.Log
       Futhark.Util.Options
