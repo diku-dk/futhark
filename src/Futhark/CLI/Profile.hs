@@ -364,7 +364,7 @@ analyseBenchResults json_path bench_results = do
                 TargetFiles
                   { summaryFile = name' <> ".summary",
                     timelineFile = name' <> ".timeline",
-                    htmlDir = name' <> "html/"
+                    htmlDir = name' <> ".html/"
                   }
            in writeAnalysis tf r
 
