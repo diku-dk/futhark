@@ -1,3 +1,4 @@
+{-# LANGUAGE QuasiQuotes #-}
 module Futhark.Profile.Html (generateHeatmapHtml) where
 
 import Control.Monad.Except (Except)
@@ -11,6 +12,10 @@ import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util.Html (headHtml)
 import Text.Blaze.Html5 qualified as H
+import qualified Text.Blaze.Html5.Attributes as A
+import Text.Blaze.Html5 ((!))
+import NeatInterpolation qualified as NI (text)
+import Data.String (IsString(fromString))
 
 type SourcePos = (Int, Int)
 
@@ -19,7 +24,8 @@ data RenderState = RenderState
     remainingText :: !T.Text
   }
 
-type CostCentreAnnotations = Seq.Seq (T.Text, ES.EvSummary)
+-- fraction of total time (in [0; 1]), affected events
+type CostCentreAnnotations = (Double, Seq.Seq (T.Text, ES.EvSummary))
 type AnnotatedRange = (SR.SourceRange, CostCentreAnnotations)
 
 generateHeatmapHtml :: T.Text -> T.Text -> M.Map SR.SourceRange CostCentreAnnotations -> Except T.Text H.Html
@@ -38,23 +44,30 @@ bodyHtml sourcePath sourceText sourceRanges =
 -- | Assumes that the annotated ranges are non-overlapping and in ascending order
 renderRanges :: RenderState -> [AnnotatedRange] -> H.Html
 renderRanges state [] = H.text . remainingText $ state
-renderRanges (RenderState pos text) rs@(annRange : rest) =
-  let rangePos = SR.startLineCol (fst annRange)
+renderRanges (RenderState pos text) rs@((range, (fraction, evs)) : rest) =
+  let rangePos = SR.startLineCol range
    in case pos `compare` rangePos of
         GT -> error "Impossible: Ranges were not in ascending order"
         EQ -> do
-          let rangeEndPos = SR.endLineCol (fst annRange)
+          let rangeEndPos = SR.endLineCol range
           let (textHtml, text') = renderTextFromUntil pos rangeEndPos text
 
-          H.span textHtml
+          decorateSpan fraction textHtml
           renderRanges (RenderState rangeEndPos text') rest
         LT -> do
           let (textHtml, text') = renderTextFromUntil pos rangePos text
           textHtml
           renderRanges (RenderState rangePos text') rs
 
-decorateSpan :: H.Html -> H.Html
-decorateSpan = undefined
+decorateSpan :: Double -> H.Html -> H.Html
+decorateSpan fraction = H.span 
+  ! A.style (fromString $ T.unpack cssColorValueText)
+  where
+
+    cssColorValueText = [NI.text|background: rgba($textR, $textG, $textB, 1)|]
+      where
+        (textR, textG, textB) = (T.show r, T.show g, T.show b)
+        (r, g, b) = interpolateHeatmapColor fraction
 
 -- | Percentage Argument must be smaller in [0; 1]
 interpolateHeatmapColor :: Double -> (Word8, Word8, Word8)
@@ -69,9 +82,10 @@ interpolateHeatmapColor percentage =
           r = 128 + 127 * point
        in (round r, 255, 0)
   where
-    _red = (255, 0, 0, 1)
-    _yellow = (255, 255, 0, 1)
-    _green = (128, 255, 0, 1)
+    _red, _yellow, _green :: (Word8, Word8, Word8)
+    _red = (255, 0, 0)
+    _yellow = (255, 255, 0)
+    _green = (128, 255, 0)
 
 -- >>> splitTextFromTo (4, 40) (4, 43) "abc\ndef"
 -- ("abc","\ndef")

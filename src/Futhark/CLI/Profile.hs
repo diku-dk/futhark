@@ -1,23 +1,27 @@
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
-import Control.Arrow ((>>>))
+import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
-import Control.Monad ((>=>), forM_)
+import Control.Monad (forM_, (>=>))
 import Control.Monad.Except (ExceptT, liftEither, mapExceptT, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Identity (Identity (runIdentity))
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.List qualified as L
 import Data.Loc (posFile)
 import Data.Map qualified as M
+import Data.Monoid (Sum (..))
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
+import Data.Text.Lazy qualified as LT
+import Data.Text.Lazy.IO qualified as LT
 import Futhark.Bench
   ( BenchResult (BenchResult, benchResultProg),
     DataResult (DataResult),
@@ -36,16 +40,16 @@ import System.Directory (createDirectoryIfMissing, removePathForcibly)
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.FilePath
   ( dropExtension,
+    makeRelative,
+    takeDirectory,
     takeFileName,
     (-<.>),
     (<.>),
-    (</>), takeDirectory, makeRelative,
+    (</>),
   )
 import System.IO (hPutStrLn, stderr)
+import Text.Blaze.Html.Renderer.Text qualified as H
 import Text.Printf (printf)
-import qualified Text.Blaze.Html.Renderer.Text as H
-import qualified Data.Text.Lazy as LT
-import qualified Data.Text.Lazy.IO as LT
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -206,21 +210,37 @@ writeHtml ::
   M.Map (T.Text, T.Text) ES.EvSummary ->
   ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
+  -- for every source location of each cost centre: accumulated eventsummary
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
+
+  -- text source files
   sourceFiles <- loadAllFiles (posFile . SR.startPos . snd <$> M.keys provenanceSummaries)
 
   htmlFiles <-
+    -- for each file, for each source range: events
     let perFileSummaries =
           let sourceFileNames = M.keysSet sourceFiles
            in summarizeAndSplitByFile sourceFileNames provenanceSummaries
+        totalEvTime = getSum . foldMap (Sum . ES.evSum . snd)
+        maxTotalEvTime =
+          concatMap toList perFileSummaries
+            & map totalEvTime
+            & maximum
+
+        -- for each file, for each source range:
+        --  events and fraction of total time
+        summariesWithRatio = M.map (M.map (evRatio &&& id)) perFileSummaries
+          where
+            evRatio = (/ maxTotalEvTime) . totalEvTime
+
         generateSingleFile filePath =
           generateHeatmapHtml
             filePath
             (sourceFiles M.! filePath)
-     in M.traverseWithKey generateSingleFile perFileSummaries
+     in M.traverseWithKey generateSingleFile summariesWithRatio
           & mapExceptT (pure . runIdentity)
 
-  liftIO $ forM_ (M.toList htmlFiles) $ \ (srcFilePath, html) -> do
+  liftIO $ forM_ (M.toList htmlFiles) $ \(srcFilePath, html) -> do
     let absPath = htmlDirPath </> makeRelative "/" (T.unpack $ srcFilePath <> ".html")
     writeLazyTextFile absPath (H.renderHtml html)
 
