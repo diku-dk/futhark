@@ -380,6 +380,8 @@ library
       Futhark.Pkg.Solve
       Futhark.Pkg.Types
       Futhark.Profile
+      Futhark.Profile.Html
+      Futhark.Profile.SourceRange
       Futhark.Script
       Futhark.Test
       Futhark.Test.Spec
