@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
@@ -10,6 +11,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Identity (Identity (runIdentity))
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.FileEmbed (embedStringFile)
 import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.List qualified as L
@@ -50,8 +52,8 @@ import System.FilePath
   )
 import System.IO (hPutStrLn, stderr)
 import Text.Blaze.Html.Renderer.Text qualified as H
+import Text.Blaze.Html5 qualified as H
 import Text.Printf (printf)
-import Data.FileEmbed (embedStringFile)
 
 cssFile :: T.Text
 cssFile = $(embedStringFile "rts/futhark-profile/style.css")
@@ -208,13 +210,8 @@ buildProvenanceSummaryMap evSummaryMap =
    in mapM filterBadSourceRangeParses (M.toList provenanceEvSummaryMap)
         & fmap M.fromList
 
-writeHtml ::
-  -- | target directory path
-  FilePath ->
-  -- | mapping keys are (name, provenance)
-  M.Map (T.Text, T.Text) ES.EvSummary ->
-  ExceptT T.Text IO ()
-writeHtml htmlDirPath evSummaryMap = do
+generateHtmlFiles :: M.Map (T.Text, T.Text) ES.EvSummary -> ExceptT T.Text IO (M.Map T.Text H.Html)
+generateHtmlFiles evSummaryMap = do
   -- for every source location of each cost centre: accumulated eventsummary
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
 
@@ -223,37 +220,43 @@ writeHtml htmlDirPath evSummaryMap = do
     fmap normalizeNewlines
       <$!> loadAllFiles
         (posFile . SR.startPos . snd <$> M.keys provenanceSummaries)
+  -- for each file, for each source range: events
+  let perFileSummaries =
+        let sourceFileNames = M.keysSet sourceFiles
+         in summarizeAndSplitByFile sourceFileNames provenanceSummaries
+      totalEvTime = getSum . foldMap (Sum . ES.evSum . snd)
+      maxTotalEvTime =
+        concatMap toList perFileSummaries
+          & map totalEvTime
+          & maximum
 
-  htmlFiles <-
-    -- for each file, for each source range: events
-    let perFileSummaries =
-          let sourceFileNames = M.keysSet sourceFiles
-           in summarizeAndSplitByFile sourceFileNames provenanceSummaries
-        totalEvTime = getSum . foldMap (Sum . ES.evSum . snd)
-        maxTotalEvTime =
-          concatMap toList perFileSummaries
-            & map totalEvTime
-            & maximum
+      -- for each file, for each source range:
+      --  events and fraction of total time
+      summariesWithRatio = M.map (M.map (evRatio &&& id)) perFileSummaries
+        where
+          evRatio = (/ maxTotalEvTime) . totalEvTime
 
-        -- for each file, for each source range:
-        --  events and fraction of total time
-        summariesWithRatio = M.map (M.map (evRatio &&& id)) perFileSummaries
-          where
-            evRatio = (/ maxTotalEvTime) . totalEvTime
+      generateSingleFile filePath =
+        generateHeatmapHtml
+          filePath
+          (sourceFiles M.! filePath)
+   in M.traverseWithKey generateSingleFile summariesWithRatio
+        & mapExceptT (pure . runIdentity)
 
-        generateSingleFile filePath =
-          generateHeatmapHtml
-            filePath
-            (sourceFiles M.! filePath)
-     in M.traverseWithKey generateSingleFile summariesWithRatio
-          & mapExceptT (pure . runIdentity)
-  
+writeHtml ::
+  -- | target directory path
+  FilePath ->
+  -- | mapping keys are (name, provenance)
+  M.Map (T.Text, T.Text) ES.EvSummary ->
+  ExceptT T.Text IO ()
+writeHtml htmlDirPath evSummaryMap = do
+  htmlFiles <- generateHtmlFiles evSummaryMap
+
   liftIO $ forM_ (M.toList htmlFiles) $ \(srcFilePath, html) -> do
     let absPath = htmlDirPath </> makeRelative "/" (T.unpack $ srcFilePath <> ".html")
     writeLazyTextFile absPath (H.renderHtml html)
 
   liftIO $ T.writeFile (htmlDirPath </> "style.css") cssFile
-
 
 writeLazyTextFile :: FilePath -> LT.Text -> IO ()
 writeLazyTextFile filepath content = do
