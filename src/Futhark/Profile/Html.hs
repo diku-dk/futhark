@@ -2,6 +2,7 @@
 
 module Futhark.Profile.Html (generateHeatmapHtml) where
 
+import Control.Arrow ((>>>))
 import Control.Monad.Except (Except)
 import Control.Monad.State.Strict (State, evalState, get, modify)
 import Data.Bifunctor (second)
@@ -18,6 +19,7 @@ import Text.Blaze.Html5 ((!))
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
 import Text.Printf (printf)
+import Prelude hiding (span)
 
 type SourcePos = (Int, Int)
 
@@ -55,31 +57,44 @@ renderRanges (RenderState pos text) rs@((range, (fraction, evs)) : rest) =
           let rangeEndPos = SR.endLineCol range
           let (textHtml, text') = renderTextFromUntil pos rangeEndPos text
 
-          decorateSpan fraction evs textHtml
+          decorateSpan range fraction evs textHtml
           renderRanges (RenderState rangeEndPos text') rest
         LT -> do
           let (textHtml, text') = renderTextFromUntil pos rangePos text
           textHtml
           renderRanges (RenderState rangePos text') rs
 
-decorateSpan :: Double -> Seq.Seq (T.Text, ES.EvSummary) -> H.Html -> H.Html
-decorateSpan fraction evs =
-  H.span
-    ! A.style (fromString $ T.unpack cssColorValueText)
-    ! A.title (fromString $ T.unpack cssHoverText)
+decorateSpan :: SR.SourceRange -> Double -> Seq.Seq (T.Text, ES.EvSummary) -> H.Html -> H.Html
+decorateSpan range fraction evs = span . anchor
   where
-    cssHoverText =
-      [NI.trimming|Fraction of the total runtime: $textFraction
-      Part of $textEvCount cost centres.
-      |]
-      where
-        textEvCount = T.show $ Seq.length evs
-        textFraction = T.pack $ printf "%.4f" fraction
+    anchor =
+      H.a
+        ! A.class_ "silent-anchor"
 
-    cssColorValueText = [NI.text|background: rgba($textR, $textG, $textB, 1)|]
+    span =
+      H.span
+        ! A.id (fromString cssId)
+        ! A.style (fromString $ T.unpack cssColorValueText)
+        ! A.title (fromString $ T.unpack cssHoverText)
       where
-        (textR, textG, textB) = (T.show r, T.show g, T.show b)
-        (r, g, b) = interpolateHeatmapColor fraction
+        cssId = printf "range-l%i-c%i" startLine startCol
+          where
+            (startLine, startCol) = SR.startLineCol range
+
+        cssHoverText =
+          [NI.trimming|Fraction of the total runtime: $textFraction
+          Part of $textEvCount cost centres.
+          (Click to see more)
+          |]
+          where
+            textEvCount = T.show $ Seq.length evs
+            textFraction = T.pack $ printf "%.4f" fraction
+
+        cssColorValueText = 
+          [NI.text|background: rgba($textR, $textG, $textB, 1)|]
+          where
+            (textR, textG, textB) = (T.show r, T.show g, T.show b)
+            (r, g, b) = interpolateHeatmapColor fraction
 
 -- | Percentage Argument must be smaller in [0; 1]
 interpolateHeatmapColor :: Double -> (Word8, Word8, Word8)

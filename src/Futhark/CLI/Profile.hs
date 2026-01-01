@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
@@ -50,6 +51,10 @@ import System.FilePath
 import System.IO (hPutStrLn, stderr)
 import Text.Blaze.Html.Renderer.Text qualified as H
 import Text.Printf (printf)
+import Data.FileEmbed (embedStringFile)
+
+cssFile :: T.Text
+cssFile = $(embedStringFile "rts/futhark-profile/style.css")
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -242,6 +247,8 @@ writeHtml htmlDirPath evSummaryMap = do
             (sourceFiles M.! filePath)
      in M.traverseWithKey generateSingleFile summariesWithRatio
           & mapExceptT (pure . runIdentity)
+  
+  liftIO $ T.writeFile (htmlDirPath </> "style.css") cssFile
 
   liftIO $ forM_ (M.toList htmlFiles) $ \(srcFilePath, html) -> do
     let absPath = htmlDirPath </> makeRelative "/" (T.unpack $ srcFilePath <> ".html")
