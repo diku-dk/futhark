@@ -2,9 +2,10 @@
 
 module Futhark.Profile.Html (generateHeatmapHtml) where
 
+import Control.Monad (forM_, join)
 import Control.Monad.Except (Except)
 import Control.Monad.State.Strict (State, evalState, get, modify)
-import Data.Bifunctor (second)
+import Data.Bifunctor (bimap, second)
 import Data.Map qualified as M
 import Data.Sequence qualified as Seq
 import Data.String (IsString (fromString))
@@ -40,10 +41,74 @@ generateHeatmapHtml sourcePath sourceText sourceRanges =
 
 bodyHtml :: p -> T.Text -> M.Map SR.SourceRange CostCentreAnnotations -> H.Html
 bodyHtml sourcePath sourceText sourceRanges =
-  let rangeList = M.toAscList sourceRanges
-   in H.body $
-        H.code . H.pre $
-          renderRanges (RenderState (1, 1) sourceText) rangeList
+  H.body $ do
+    sourceCodeListing
+    detailTables
+  where
+    rangeList = M.toAscList sourceRanges
+
+    sourceCodeListing =
+      H.code . H.pre $
+        renderRanges (RenderState (1, 1) sourceText) rangeList
+
+    detailTables = mapM_ renderDetails rangeList
+
+renderDetails :: (SR.SourceRange, CostCentreAnnotations) -> H.Html
+renderDetails (range, (ratio, evs)) = detailDiv $ do
+  H.h2 $ do
+    H.text "Source Range from "
+    toSpanAnchor $ fractionColored ratio $ H.span $ H.text rangeText
+
+  costCentreTable
+  where
+    costCentreTable = do
+      H.h3 $ H.text "Cost Centres"
+      H.table $ do
+        H.tr $ do
+          mapM_
+            H.th
+            [ "Name",
+              "Event Count",
+              "Total Time (µs)",
+              "Minimum Time (µs)",
+              "Maximum Time (µs)"
+            ]
+
+        mapM_ evRow (Seq.sortOn fst evs)
+        evRow ("Total", evTotal)
+
+      H.tr $ do
+        H.td (H.text "Total")
+      where
+        evRow (ccName, ev) = H.tr $ do
+          mapM_
+            (H.td . H.text)
+            [ ccName,
+              T.show . ES.evCount $ ev,
+              T.pack . printf "%.2f" . ES.evSum $ ev,
+              T.pack . printf "%.2f" . ES.evMin $ ev,
+              T.pack . printf "%.2f" . ES.evMax $ ev
+            ]
+        evTotal = foldl' combine (ES.EvSummary 0 0 infPos infNeg) evs
+          where
+            combine (ES.EvSummary c s lo hi) (_, ES.EvSummary c' s' lo' hi') =
+              ES.EvSummary (c + c') (s + s') (min lo lo') (max hi hi')
+            infPos = read "Infinity"
+            infNeg = negate infPos
+
+    toSpanAnchor =
+      H.a
+        ! A.href (fromString $ '#' : sourceRangeSpanCssId range)
+        ! A.class_ "silent-anchor"
+
+    detailDiv =
+      H.div
+        ! A.id (fromString $ sourceRangeDetailsCssId range)
+
+    rangeText = [NI.text|$lineStart:$colStart to $lineEnd:$colEnd|]
+      where
+        (lineStart, colStart) = join bimap T.show $ SR.startLineCol range
+        (lineEnd, colEnd) = join bimap T.show $ SR.endLineCol range
 
 -- | Assumes that the annotated ranges are non-overlapping and in ascending order
 renderRanges :: RenderState -> [AnnotatedRange] -> H.Html
@@ -63,23 +128,30 @@ renderRanges (RenderState pos text) rs@((range, (fraction, evs)) : rest) =
           textHtml
           renderRanges (RenderState rangePos text') rs
 
+sourceRangeSpanCssId :: SR.SourceRange -> String
+sourceRangeSpanCssId range = printf "range-l%i-c%i" startLine startCol
+  where
+    (startLine, startCol) = SR.startLineCol range
+
+sourceRangeDetailsCssId :: SR.SourceRange -> String
+sourceRangeDetailsCssId range = "detail-table-" <> sourceRangeSpanCssId range
+
 decorateSpan :: SR.SourceRange -> Double -> Seq.Seq (T.Text, ES.EvSummary) -> H.Html -> H.Html
 decorateSpan range fraction evs = span . anchor
   where
     anchor =
       H.a
         ! A.class_ "silent-anchor"
-        ! A.href (fromString $ "#detail-table-" <> spanCssId)
+        ! A.href (fromString $ '#' : sourceRangeDetailsCssId range)
 
-    spanCssId = printf "range-l%i-c%i" startLine startCol
-          where
-            (startLine, startCol) = SR.startLineCol range
+    spanCssId = sourceRangeSpanCssId range
 
     span =
-      H.span
-        ! A.id (fromString spanCssId)
-        ! A.style (fromString $ T.unpack cssColorValueText)
-        ! A.title (fromString $ T.unpack cssHoverText)
+      fractionColored fraction
+        . ( H.span
+              ! A.id (fromString spanCssId)
+              ! A.title (fromString $ T.unpack cssHoverText)
+          )
       where
         cssHoverText =
           [NI.trimming|Fraction of the total runtime: $textFraction
@@ -90,11 +162,15 @@ decorateSpan range fraction evs = span . anchor
             textEvCount = T.show $ Seq.length evs
             textFraction = T.pack $ printf "%.4f" fraction
 
-        cssColorValueText = 
-          [NI.text|background: rgba($textR, $textG, $textB, 1)|]
-          where
-            (textR, textG, textB) = (T.show r, T.show g, T.show b)
-            (r, g, b) = interpolateHeatmapColor fraction
+fractionColored :: Double -> H.Html -> H.Html
+fractionColored fraction = (! A.style cssColorValue)
+  where
+    cssColorValue =
+      fromString . T.unpack $
+        [NI.text|background: rgba($textR, $textG, $textB, 1)|]
+      where
+        (textR, textG, textB) = (T.show r, T.show g, T.show b)
+        (r, g, b) = interpolateHeatmapColor fraction
 
 -- | Percentage Argument must be smaller in [0; 1]
 interpolateHeatmapColor :: Double -> (Word8, Word8, Word8)
