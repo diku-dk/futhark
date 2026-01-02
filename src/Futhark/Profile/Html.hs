@@ -1,11 +1,11 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module Futhark.Profile.Html (generateHeatmapHtml) where
+module Futhark.Profile.Html (generateHeatmapHtml, generateCCOverviewHtml) where
 
-import Control.Monad (forM_, join)
-import Control.Monad.Except (Except)
+import Control.Monad (join)
 import Control.Monad.State.Strict (State, evalState, get, modify)
 import Data.Bifunctor (bimap, second)
+import Data.Loc (posFile)
 import Data.Map qualified as M
 import Data.Sequence qualified as Seq
 import Data.String (IsString (fromString))
@@ -24,7 +24,7 @@ import Prelude hiding (span)
 type SourcePos = (Int, Int)
 
 data RenderState = RenderState
-  { renderPos :: !SourcePos,
+  { _renderPos :: !SourcePos,
     remainingText :: !T.Text
   }
 
@@ -33,14 +33,64 @@ type CostCentreAnnotations = (Double, Seq.Seq (T.Text, ES.EvSummary))
 
 type AnnotatedRange = (SR.SourceRange, CostCentreAnnotations)
 
-generateHeatmapHtml :: T.Text -> T.Text -> M.Map SR.SourceRange CostCentreAnnotations -> Except T.Text H.Html
+generateHeatmapHtml :: T.Text -> T.Text -> M.Map SR.SourceRange CostCentreAnnotations -> H.Html
 generateHeatmapHtml sourcePath sourceText sourceRanges =
-  pure . H.docTypeHtml $ do
+  H.docTypeHtml $ do
     headHtml (T.unpack sourcePath) (T.unpack $ sourcePath <> " - Source-Heatmap")
-    bodyHtml sourcePath sourceText sourceRanges
+    heatmapBodyHtml sourcePath sourceText sourceRanges
 
-bodyHtml :: p -> T.Text -> M.Map SR.SourceRange CostCentreAnnotations -> H.Html
-bodyHtml sourcePath sourceText sourceRanges =
+generateCCOverviewHtml :: M.Map T.Text (Seq.Seq SR.SourceRange, ES.EvSummary) -> H.Html
+generateCCOverviewHtml costCentres = do
+  headHtml "cost-centres.html" "Cost Centre Overview"
+  H.body $ do
+    H.h2 $ H.text "Cost Centres (in alphabetical order)"
+    ccDetailTables
+  where
+    ccDetailTables = mapM_ (uncurry costCentreDetails) $ M.toList costCentres
+
+costCentreDetails :: T.Text -> (Seq.Seq SR.SourceRange, ES.EvSummary) -> H.Html
+costCentreDetails ccName (sourceRanges, ES.EvSummary count sum_ min_ max_) = do
+  title
+  summaryTable
+  sourceRangeListing
+  where
+    title =
+      H.h3
+        $ H.a
+          ! A.href (fromString $ '#' : T.unpack ccName)
+          ! A.class_ "silent-anchor"
+        $ H.text ccName
+
+    summaryTable =
+      H.table $
+        mapM_
+          row
+          [ ("Event Count", T.show count),
+            ("Total Time (µs)", T.pack $ printf "%.2f" sum_),
+            ("Minimum Time (µs)", T.pack $ printf "%.2f" min_),
+            ("Maximum Time (µs)", T.pack $ printf "%.2f" max_)
+          ]
+      where
+        row (h, d) = H.tr $ do
+          H.th $ H.text h
+          H.td $ H.text d
+
+    sourceRangeListing = do
+      H.h4 $ H.text "Source Ranges"
+      H.ol $
+        mapM_ entry (Seq.sort sourceRanges)
+      where
+        entry range =
+          H.li $
+            (H.a ! A.href (fromString entryRef)) $
+              H.text $
+                sourceRangeText range <> " in " <> T.pack rangeFile
+          where
+            rangeFile = posFile . SR.startPos $ range
+            entryRef = rangeFile <> ".html#" <> sourceRangeSpanCssId range
+
+heatmapBodyHtml :: p -> T.Text -> M.Map SR.SourceRange CostCentreAnnotations -> H.Html
+heatmapBodyHtml _sourcePath sourceText sourceRanges =
   H.body $ do
     sourceCodeListing
     detailTables
@@ -51,18 +101,18 @@ bodyHtml sourcePath sourceText sourceRanges =
       H.code . H.pre $
         renderRanges (RenderState (1, 1) sourceText) rangeList
 
-    detailTables = mapM_ renderDetails rangeList
+    detailTables = mapM_ sourceRangeDetails rangeList
 
-renderDetails :: (SR.SourceRange, CostCentreAnnotations) -> H.Html
-renderDetails (range, (ratio, evs)) = detailDiv $ do
-  H.h2 $ do
+sourceRangeDetails :: (SR.SourceRange, CostCentreAnnotations) -> H.Html
+sourceRangeDetails (range, (ratio, evs)) = detailDiv $ do
+  H.h3 $ do
     H.text "Source Range from "
     toSpanAnchor $ fractionColored ratio $ H.span $ H.text rangeText
 
   costCentreTable
   where
     costCentreTable = do
-      H.h3 $ H.text "Cost Centres"
+      H.h4 $ H.text "Cost Centres"
       H.table $ do
         H.tr $ do
           mapM_
@@ -105,10 +155,13 @@ renderDetails (range, (ratio, evs)) = detailDiv $ do
       H.div
         ! A.id (fromString $ sourceRangeDetailsCssId range)
 
-    rangeText = [NI.text|$lineStart:$colStart to $lineEnd:$colEnd|]
-      where
-        (lineStart, colStart) = join bimap T.show $ SR.startLineCol range
-        (lineEnd, colEnd) = join bimap T.show $ SR.endLineCol range
+    rangeText = sourceRangeText range
+
+sourceRangeText :: SR.SourceRange -> T.Text
+sourceRangeText range = [NI.text|$lineStart:$colStart to $lineEnd:$colEnd|]
+  where
+    (lineStart, colStart) = join bimap T.show $ SR.startLineCol range
+    (lineEnd, colEnd) = join bimap T.show $ SR.endLineCol range
 
 -- | Assumes that the annotated ranges are non-overlapping and in ascending order
 renderRanges :: RenderState -> [AnnotatedRange] -> H.Html

@@ -6,9 +6,8 @@ module Futhark.CLI.Profile (main) where
 import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
 import Control.Monad (forM_, (<$!>), (>=>))
-import Control.Monad.Except (ExceptT, liftEither, mapExceptT, runExceptT, throwError)
+import Control.Monad.Except (ExceptT, liftEither, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Identity (Identity (runIdentity))
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.FileEmbed (embedStringFile)
@@ -35,7 +34,7 @@ import Futhark.Bench
     decodeProfilingReport,
   )
 import Futhark.Profile.EventSummary qualified as ES
-import Futhark.Profile.Html (generateHeatmapHtml)
+import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml)
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (showText)
 import Futhark.Util.Options (mainWithOptions)
@@ -210,8 +209,8 @@ buildProvenanceSummaryMap evSummaryMap =
    in mapM filterBadSourceRangeParses (M.toList provenanceEvSummaryMap)
         & fmap M.fromList
 
-generateHtmlFiles :: M.Map (T.Text, T.Text) ES.EvSummary -> ExceptT T.Text IO (M.Map T.Text H.Html)
-generateHtmlFiles evSummaryMap = do
+generateHtmlHeatmaps :: M.Map (T.Text, T.Text) ES.EvSummary -> ExceptT T.Text IO (M.Map T.Text H.Html)
+generateHtmlHeatmaps evSummaryMap = do
   -- for every source location of each cost centre: accumulated eventsummary
   provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
 
@@ -240,8 +239,7 @@ generateHtmlFiles evSummaryMap = do
         generateHeatmapHtml
           filePath
           (sourceFiles M.! filePath)
-   in M.traverseWithKey generateSingleFile summariesWithRatio
-        & mapExceptT (pure . runIdentity)
+   in pure $ M.mapWithKey generateSingleFile summariesWithRatio
 
 writeHtml ::
   -- | target directory path
@@ -250,13 +248,40 @@ writeHtml ::
   M.Map (T.Text, T.Text) ES.EvSummary ->
   ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
-  htmlFiles <- generateHtmlFiles evSummaryMap
+  htmlFiles <- generateHtmlHeatmaps evSummaryMap
+  costCentreOverview <- generateOverview evSummaryMap
 
-  liftIO $ forM_ (M.toList htmlFiles) $ \(srcFilePath, html) -> do
-    let absPath = htmlDirPath </> makeRelative "/" (T.unpack $ srcFilePath <> ".html")
-    writeLazyTextFile absPath (H.renderHtml html)
+  liftIO $ do
+    forM_ (M.toList htmlFiles) $ \(srcFilePath, html) -> do
+      let absPath =
+            htmlDirPath </> makeRelative "/" (T.unpack $ srcFilePath <> ".html")
+      writeLazyTextFile absPath (H.renderHtml html)
 
-  liftIO $ T.writeFile (htmlDirPath </> "style.css") cssFile
+    T.writeFile (htmlDirPath </> "style.css") cssFile
+    LT.writeFile
+      (htmlDirPath </> "cost-centres.html")
+      (H.renderHtml costCentreOverview)
+
+generateOverview ::
+  (Monad m) =>
+  -- | Keys are (ccName, ccProvenance), provenance may contain multiple srclocs
+  M.Map (T.Text, T.Text) ES.EvSummary ->
+  ExceptT T.Text m H.Html
+generateOverview ccSourcePairs =
+  M.toList ccSourcePairs
+    & traverse splitParseProvenance
+    & fmap (generateCCOverviewHtml . M.fromList)
+  where
+    splitParseProvenance ::
+      (Monad m) =>
+      ((T.Text, T.Text), ES.EvSummary) ->
+      ExceptT T.Text m (T.Text, (Seq.Seq SR.SourceRange, ES.EvSummary))
+    splitParseProvenance ((k, prov), v) = do
+      sourceRanges <-
+        T.splitOn "->" prov
+          & Seq.fromList
+          & traverse (liftEither . SR.parse)
+      pure (k, (sourceRanges, v))
 
 writeLazyTextFile :: FilePath -> LT.Text -> IO ()
 writeLazyTextFile filepath content = do
