@@ -380,6 +380,7 @@ library
       Futhark.Pkg.Solve
       Futhark.Pkg.Types
       Futhark.Profile
+      Futhark.Profile.Details
       Futhark.Profile.EventSummary
       Futhark.Profile.Html
       Futhark.Profile.SourceRange
