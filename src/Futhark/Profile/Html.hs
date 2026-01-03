@@ -20,6 +20,7 @@ import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
 import Text.Printf (printf)
 import Prelude hiding (span)
+import Futhark.Profile.Details (CostCentreName (CostCentreName), CostCentreDetails (CostCentreDetails))
 
 type SourcePos = (Int, Int)
 
@@ -39,17 +40,17 @@ generateHeatmapHtml sourcePath sourceText sourceRanges =
     headHtml (T.unpack sourcePath) (T.unpack $ sourcePath <> " - Source-Heatmap")
     heatmapBodyHtml sourcePath sourceText sourceRanges
 
-generateCCOverviewHtml :: M.Map T.Text (Seq.Seq SR.SourceRange, ES.EvSummary) -> H.Html
+generateCCOverviewHtml :: M.Map CostCentreName CostCentreDetails -> H.Html
 generateCCOverviewHtml costCentres = do
   headHtml "cost-centres.html" "Cost Centre Overview"
   H.body $ do
-    H.h2 $ H.text "Cost Centres (in alphabetical order)"
+    H.h2 $ H.text "Cost Centres (ordered by fraction)"
     ccDetailTables
   where
-    ccDetailTables = mapM_ (uncurry costCentreDetails) $ M.toList costCentres
+    ccDetailTables = mapM_ (uncurry renderCostCentreDetails) $ M.toAscList costCentres
 
-costCentreDetails :: T.Text -> (Seq.Seq SR.SourceRange, ES.EvSummary) -> H.Html
-costCentreDetails ccName (sourceRanges, ES.EvSummary count sum_ min_ max_) = do
+renderCostCentreDetails :: CostCentreName -> CostCentreDetails -> H.Html
+renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceRanges summary) = do
   title
   summaryTable
   sourceRangeListing
@@ -65,12 +66,14 @@ costCentreDetails ccName (sourceRanges, ES.EvSummary count sum_ min_ max_) = do
       H.table $
         mapM_
           row
-          [ ("Event Count", T.show count),
+          [ ("", T.pack $ printf "%.4f" ratio),
+            ("Event Count", T.show count),
             ("Total Time (µs)", T.pack $ printf "%.2f" sum_),
             ("Minimum Time (µs)", T.pack $ printf "%.2f" min_),
             ("Maximum Time (µs)", T.pack $ printf "%.2f" max_)
           ]
       where
+        (ES.EvSummary count sum_ min_ max_) = summary
         row (h, d) = H.tr $ do
           H.th $ H.text h
           H.td $ H.text d
@@ -78,7 +81,7 @@ costCentreDetails ccName (sourceRanges, ES.EvSummary count sum_ min_ max_) = do
     sourceRangeListing = do
       H.h4 $ H.text "Source Ranges"
       H.ol $
-        mapM_ entry (Seq.sort sourceRanges)
+        mapM_ entry (M.keys sourceRanges)
       where
         entry range =
           H.li $
