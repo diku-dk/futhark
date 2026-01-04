@@ -1,0 +1,284 @@
+{-# LANGUAGE QuasiQuotes #-}
+
+module Futhark.Profile.Html (generateHeatmapHtml, generateCCOverviewHtml) where
+
+import Control.Monad (join)
+import Control.Monad.State.Strict (State, evalState, get, modify)
+import Data.Bifunctor (bimap, second)
+import Data.Loc (posFile)
+import Data.Map qualified as M
+import Data.String (IsString (fromString))
+import Data.Text qualified as T
+import Data.Word (Word8)
+import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), CostCentreName (CostCentreName, getCostCentreName), SourceRangeDetails (SourceRangeDetails, containingCostCentres), sourceRangeDetailsFraction)
+import Futhark.Profile.EventSummary qualified as ES
+import Futhark.Profile.SourceRange qualified as SR
+import Futhark.Util.Html (headHtml)
+import NeatInterpolation qualified as NI (text, trimming)
+import Text.Blaze.Html5 ((!))
+import Text.Blaze.Html5 qualified as H
+import Text.Blaze.Html5.Attributes qualified as A
+import Text.Printf (printf)
+import Prelude hiding (span)
+import Control.Arrow ((***))
+import Data.Function ((&))
+
+type SourcePos = (Int, Int)
+
+data RenderState = RenderState
+  { _renderPos :: !SourcePos,
+    remainingText :: !T.Text
+  }
+
+generateHeatmapHtml :: T.Text -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
+generateHeatmapHtml sourcePath sourceText sourceRanges =
+  H.docTypeHtml $ do
+    headHtml (T.unpack sourcePath) (T.unpack $ sourcePath <> " - Source-Heatmap")
+    heatmapBodyHtml sourcePath sourceText sourceRanges
+
+generateCCOverviewHtml :: M.Map CostCentreName CostCentreDetails -> H.Html
+generateCCOverviewHtml costCentres = do
+  headHtml "cost-centres.html" "Cost Centre Overview"
+  H.body $ do
+    H.h2 $ H.text "Cost Centres (ordered by fraction)"
+    ccDetailTables
+  where
+    ccDetailTables = mapM_ (uncurry renderCostCentreDetails) $ M.toAscList costCentres
+
+renderCostCentreDetails :: CostCentreName -> CostCentreDetails -> H.Html
+renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceRanges summary) = do
+  title
+  summaryTable
+  sourceRangeListing
+  where
+    title =
+      H.h3
+        $ H.a
+          ! A.href (fromString $ '#' : T.unpack ccName)
+          ! A.class_ "silent-anchor"
+        $ H.text ccName
+
+    summaryTable =
+      H.table $
+        mapM_
+          row
+          [ ("", T.pack $ printf "%.4f" ratio),
+            ("Event Count", T.show count),
+            ("Total Time (µs)", T.pack $ printf "%.2f" sum_),
+            ("Minimum Time (µs)", T.pack $ printf "%.2f" min_),
+            ("Maximum Time (µs)", T.pack $ printf "%.2f" max_)
+          ]
+      where
+        (ES.EvSummary count sum_ min_ max_) = summary
+        row (h, d) = H.tr $ do
+          H.th $ H.text h
+          H.td $ H.text d
+
+    sourceRangeListing = do
+      H.h4 $ H.text "Source Ranges"
+      H.ol $
+        mapM_ entry (M.keys sourceRanges)
+      where
+        entry range =
+          H.li $
+            (H.a ! A.href (fromString entryRef)) $
+              H.text $
+                sourceRangeText range <> " in " <> T.pack rangeFile
+          where
+            rangeFile = posFile . SR.startPos $ range
+            entryRef = rangeFile <> ".html#" <> sourceRangeSpanCssId range
+
+heatmapBodyHtml :: T.Text -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
+heatmapBodyHtml _sourcePath sourceText sourceRanges =
+  H.body $ do
+    sourceCodeListing
+    detailTables
+  where
+    rangeList = M.toAscList sourceRanges
+
+    sourceCodeListing =
+      H.code . H.pre $
+        renderRanges (RenderState (1, 1) sourceText) rangeList
+
+    detailTables = mapM_ (uncurry sourceRangeDetails) rangeList
+
+sourceRangeDetails :: SR.SourceRange -> SourceRangeDetails -> H.Html
+sourceRangeDetails range details@(SourceRangeDetails ccs) = detailDiv $ do
+  H.h3 $ do
+    H.text "Source Range from "
+    toSpanAnchor $ fractionColored ratio $ H.span $ H.text rangeText
+
+  costCentreTable
+  where
+    ratio = sourceRangeDetailsFraction details
+    costCentreTable = do
+      H.h4 $ H.text "Cost Centres"
+      H.table $ do
+        H.tr $ do
+          mapM_
+            H.th
+            [ "Name",
+              "Event Count",
+              "Total Time (µs)",
+              "Minimum Time (µs)",
+              "Maximum Time (µs)"
+            ]
+
+        mapM_ evRow $ M.toAscList ccs
+          & fmap (getCostCentreName *** summary)
+        evRow ("Total", evTotal)
+
+      H.tr $ do
+        H.td (H.text "Total")
+      where
+        evRow (ccName, ev) = H.tr $ do
+          mapM_
+            (H.td . H.text)
+            [ ccName,
+              T.show . ES.evCount $ ev,
+              T.pack . printf "%.2f" . ES.evSum $ ev,
+              T.pack . printf "%.2f" . ES.evMin $ ev,
+              T.pack . printf "%.2f" . ES.evMax $ ev
+            ]
+        evTotal = M.toList ccs
+          & fmap (summary . snd)
+          & foldl' combine (ES.EvSummary 0 0 infPos infNeg) 
+          where
+            combine (ES.EvSummary c s lo hi) (ES.EvSummary c' s' lo' hi') =
+              ES.EvSummary (c + c') (s + s') (min lo lo') (max hi hi')
+            infPos = read "Infinity"
+            infNeg = negate infPos
+
+    toSpanAnchor =
+      H.a
+        ! A.href (fromString $ '#' : sourceRangeSpanCssId range)
+        ! A.class_ "silent-anchor"
+
+    detailDiv =
+      H.div
+        ! A.id (fromString $ sourceRangeDetailsCssId range)
+
+    rangeText = sourceRangeText range
+
+sourceRangeText :: SR.SourceRange -> T.Text
+sourceRangeText range = [NI.text|$lineStart:$colStart to $lineEnd:$colEnd|]
+  where
+    (lineStart, colStart) = join bimap T.show $ SR.startLineCol range
+    (lineEnd, colEnd) = join bimap T.show $ SR.endLineCol range
+
+-- | Assumes that the annotated ranges are non-overlapping and in ascending order
+renderRanges ::
+  RenderState ->
+  [(SR.SourceRange, SourceRangeDetails)] ->
+  -- range, fraction, costCentreCount
+  H.Html
+renderRanges state [] = H.text . remainingText $ state
+renderRanges (RenderState pos text) rs@((range, details) : rest) =
+  let rangePos = SR.startLineCol range
+   in case pos `compare` rangePos of
+        GT -> error "Impossible: Ranges were not in ascending order"
+        EQ -> do
+          let rangeEndPos = SR.endLineCol range
+          let (textHtml, text') = renderTextFromUntil pos rangeEndPos text
+          let fraction = sourceRangeDetailsFraction details
+          let evCount = M.size $ containingCostCentres details
+
+          decorateSpan range fraction evCount textHtml
+          renderRanges (RenderState rangeEndPos text') rest
+        LT -> do
+          let (textHtml, text') = renderTextFromUntil pos rangePos text
+          textHtml
+          renderRanges (RenderState rangePos text') rs
+
+sourceRangeSpanCssId :: SR.SourceRange -> String
+sourceRangeSpanCssId range = printf "range-l%i-c%i" startLine startCol
+  where
+    (startLine, startCol) = SR.startLineCol range
+
+sourceRangeDetailsCssId :: SR.SourceRange -> String
+sourceRangeDetailsCssId range = "detail-table-" <> sourceRangeSpanCssId range
+
+decorateSpan :: SR.SourceRange -> Double -> Int -> H.Html -> H.Html
+decorateSpan range fraction evCount = span . anchor
+  where
+    anchor =
+      H.a
+        ! A.class_ "silent-anchor"
+        ! A.href (fromString $ '#' : sourceRangeDetailsCssId range)
+
+    spanCssId = sourceRangeSpanCssId range
+
+    span =
+      fractionColored fraction
+        . ( H.span
+              ! A.id (fromString spanCssId)
+              ! A.title (fromString $ T.unpack cssHoverText)
+          )
+      where
+        cssHoverText =
+          [NI.trimming|Fraction of the total runtime: $textFraction
+          Part of $textEvCount cost centres.
+          (Click to jump to detail table)
+          |]
+          where
+            textEvCount = T.show evCount
+            textFraction = T.pack $ printf "%.4f" fraction
+
+fractionColored :: Double -> H.Html -> H.Html
+fractionColored fraction = (! A.style cssColorValue)
+  where
+    cssColorValue =
+      fromString . T.unpack $
+        [NI.text|background: rgba($textR, $textG, $textB, 1)|]
+      where
+        (textR, textG, textB) = (T.show r, T.show g, T.show b)
+        (r, g, b) = interpolateHeatmapColor fraction
+
+-- | Percentage Argument must be smaller in [0; 1]
+interpolateHeatmapColor :: Double -> (Word8, Word8, Word8)
+interpolateHeatmapColor percentage =
+  if percentage >= 0.5
+    then
+      let point = percentage * 2
+          g = point * 255
+       in (255, round g, 0)
+    else
+      let point = (percentage - 0.5) * 2
+          r = 128 + 127 * point
+       in (round r, 255, 0)
+  where
+    _red, _yellow, _green :: (Word8, Word8, Word8)
+    _red = (255, 0, 0)
+    _yellow = (255, 255, 0)
+    _green = (128, 255, 0)
+
+-- >>> splitTextFromTo (4, 40) (4, 43) "abc\ndef"
+-- ("abc","\ndef")
+
+splitTextFromTo :: SourcePos -> (Int, Int) -> T.Text -> (T.Text, T.Text)
+splitTextFromTo startPos endPos t =
+  flip evalState startPos $
+    T.spanM stepChar t
+  where
+    -- general category @LineSeparator@ is not used for Newlines
+    isNewline c = case c of
+      '\n' -> True
+      '\r' -> True
+      _ -> False
+
+    stepChar :: Char -> State SourcePos Bool
+    stepChar char = do
+      -- do the check at the start, this way the last character is always included
+      oldPos <- get
+
+      modify $
+        if isNewline char
+          then \(l, _) -> (succ l, 1)
+          else second succ
+
+      pure (oldPos /= endPos)
+
+renderTextFromUntil :: SourcePos -> SourcePos -> T.Text -> (H.Html, T.Text)
+renderTextFromUntil startPos endPos t =
+  let (included, rest) = splitTextFromTo startPos endPos t
+   in (H.text included, rest)

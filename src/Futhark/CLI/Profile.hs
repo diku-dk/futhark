@@ -1,13 +1,29 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
+import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
-import Data.Bifunctor (first)
+import Control.Monad (forM_, (<$!>), (>=>))
+import Control.Monad.Except (ExceptT, liftEither, runExceptT, throwError)
+import Control.Monad.IO.Class (liftIO)
+import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.FileEmbed (embedStringFile)
+import Data.Foldable (toList)
+import Data.Function ((&))
 import Data.List qualified as L
+import Data.Loc (posFile)
 import Data.Map qualified as M
+import Data.Monoid (Sum (..))
+import Data.Sequence qualified as Seq
+import Data.Set qualified as S
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
+import Data.Text.Lazy qualified as LT
+import Data.Text.Lazy.IO qualified as LT
 import Futhark.Bench
   ( BenchResult (BenchResult, benchResultProg),
     DataResult (DataResult),
@@ -17,19 +33,31 @@ import Futhark.Bench
     decodeBenchResults,
     decodeProfilingReport,
   )
+import Futhark.Profile.EventSummary qualified as ES
+import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml)
+import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (showText)
 import Futhark.Util.Options (mainWithOptions)
 import System.Directory (createDirectoryIfMissing, removePathForcibly)
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.FilePath
   ( dropExtension,
+    makeRelative,
+    takeDirectory,
     takeFileName,
     (-<.>),
     (<.>),
     (</>),
   )
 import System.IO (hPutStrLn, stderr)
+import Text.Blaze.Html.Renderer.Text qualified as H
+import Text.Blaze.Html5 qualified as H
 import Text.Printf (printf)
+import Futhark.Profile.SourceRange (SourceRange)
+import Futhark.Profile.Details (SourceRangeDetails, CostCentreName, CostCentreDetails, SourceRanges, CostCentres)
+
+cssFile :: T.Text
+cssFile = $(embedStringFile "rts/futhark-profile/style.css")
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []
@@ -53,29 +81,18 @@ padRight k s = s <> T.replicate (k - T.length s) " "
 padLeft :: Int -> T.Text -> T.Text
 padLeft k s = T.replicate (k - T.length s) " " <> s
 
-data EvSummary = EvSummary
-  { evCount :: Integer,
-    evSum :: Double,
-    evMin :: Double,
-    evMax :: Double
-  }
-
-tabulateEvents :: [ProfilingEvent] -> T.Text
-tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
+tabulateEvents :: M.Map (T.Text, T.Text) ES.EvSummary -> T.Text
+tabulateEvents = mkRows . M.toList
   where
-    pair (ProfilingEvent name dur provenance _details) =
-      ((name, provenance), EvSummary 1 dur dur dur)
-    comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
-      EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
     numpad = 15
     mkRows rows =
       let longest = foldl max numpad $ map (T.length . fst . fst) rows
-          total = sum $ map (evSum . snd) rows
+          total = sum $ map (ES.evSum . snd) rows
           header = headerRow longest
           splitter = T.map (const '-') header
           eventSummary =
             T.unwords
-              [ showText (sum (map (evCount . snd) rows)),
+              [ showText (sum (map (ES.evCount . snd) rows)),
                 "events with a total runtime of",
                 T.pack $ printf "%.2fμs" total
               ]
@@ -114,12 +131,12 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
     mkRow longest total (name, ev) =
       T.unwords
         [ padRight longest name,
-          padLeft numpad (showText (evCount ev)),
-          padLeft numpad $ T.pack $ printf "%.2fμs" (evSum ev),
-          padLeft numpad $ T.pack $ printf "%.2fμs" $ evSum ev / fromInteger (evCount ev),
-          padLeft numpad $ T.pack $ printf "%.2fμs" (evMin ev),
-          padLeft numpad $ T.pack $ printf "%.2fμs" (evMax ev),
-          padLeft numpad $ T.pack $ printf "%.4f" (evSum ev / total)
+          padLeft numpad (showText (ES.evCount ev)),
+          padLeft numpad $ T.pack $ printf "%.2fμs" (ES.evSum ev),
+          padLeft numpad $ T.pack $ printf "%.2fμs" $ ES.evSum ev / fromInteger (ES.evCount ev),
+          padLeft numpad $ T.pack $ printf "%.2fμs" (ES.evMin ev),
+          padLeft numpad $ T.pack $ printf "%.2fμs" (ES.evMax ev),
+          padLeft numpad $ T.pack $ printf "%.4f" (ES.evSum ev / total)
         ]
 
 timeline :: [ProfilingEvent] -> T.Text
@@ -133,17 +150,238 @@ timeline = T.unlines . L.intercalate [""] . map onEvent
 
 data TargetFiles = TargetFiles
   { summaryFile :: FilePath,
-    timelineFile :: FilePath
+    timelineFile :: FilePath,
+    htmlDir :: FilePath
   }
 
 writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
-writeAnalysis tf r = do
-  T.writeFile (summaryFile tf) $
-    memoryReport (profilingMemory r)
-      <> "\n\n"
-      <> tabulateEvents (profilingEvents r)
-  T.writeFile (timelineFile tf) $
-    timeline (profilingEvents r)
+writeAnalysis tf r = runExceptT >=> handleException $ do
+  let evSummaryMap = ES.eventSummaries $ profilingEvents r
+
+  -- heatmap html
+  writeHtml (htmlDir tf) evSummaryMap
+
+  -- profile.summary
+  liftIO $
+    T.writeFile (summaryFile tf) $
+      memoryReport (profilingMemory r)
+        <> "\n\n"
+        <> tabulateEvents evSummaryMap
+
+  -- profile.timeline
+  liftIO $
+    T.writeFile (timelineFile tf) $
+      timeline (profilingEvents r)
+  where
+    handleException :: Either T.Text () -> IO ()
+    handleException = either (T.hPutStrLn stderr) pure
+
+expandEvSummaryMap :: M.Map (T.Text, T.Text) ES.EvSummary -> M.Map (T.Text, T.Text) ES.EvSummary
+expandEvSummaryMap =
+  M.toList
+    >>> concatMap expandEvSummary
+    >>> M.fromList
+  where
+    expandEvSummary ((name, provenance), evSummary) =
+      map (\(sourceLoc, splitSummary) -> ((name, sourceLoc), splitSummary)) $
+        splitEvSummarySources provenance evSummary
+
+    splitEvSummarySources :: T.Text -> ES.EvSummary -> [(T.Text, ES.EvSummary)]
+    splitEvSummarySources provenance summary =
+      let sourceLocations = T.splitOn "->" provenance
+       in map (,summary) sourceLocations
+
+buildProvenanceSummaryMap ::
+  (Monad m) =>
+  -- | Keys are: (ccName, ccProvenance)
+  M.Map (T.Text, T.Text) ES.EvSummary ->
+  -- | Keys are: (ccName, ccProvenance)
+  ExceptT T.Text m (M.Map (T.Text, SR.SourceRange) ES.EvSummary)
+buildProvenanceSummaryMap evSummaryMap =
+  let -- there are no compound provenance blocks in this map anymore
+      singleSourceEvSummaryMap = expandEvSummaryMap evSummaryMap
+      -- parse the provenance text
+      provenanceEvSummaryMap =
+        M.mapKeys (second SR.parse) singleSourceEvSummaryMap
+
+      -- throw error text on parse failure, will short-circuit
+      filterBadSourceRangeParses ((name, parseResult), evSummary) = case parseResult of
+        Left err -> throwError $ "Parse failure in provenance information\n" <> err
+        Right sourceRange -> pure ((name, sourceRange), evSummary)
+   in mapM filterBadSourceRangeParses (M.toList provenanceEvSummaryMap)
+        & fmap M.fromList
+
+generateHtmlHeatmaps :: M.Map (T.Text, T.Text) ES.EvSummary -> ExceptT T.Text IO (M.Map T.Text H.Html)
+generateHtmlHeatmaps evSummaryMap = do
+  -- for every source location of each cost centre: accumulated eventsummary
+  provenanceSummaries <- buildProvenanceSummaryMap evSummaryMap
+
+  -- text source files
+  sourceFiles <-
+    fmap normalizeNewlines
+      <$!> loadAllFiles
+        (posFile . SR.startPos . snd <$> M.keys provenanceSummaries)
+  -- for each file, for each source range: events
+  let perFileSummaries =
+        let sourceFileNames = M.keysSet sourceFiles
+         in summarizeAndSplitByFile sourceFileNames provenanceSummaries
+      totalEvTime = getSum . foldMap (Sum . ES.evSum . snd)
+      maxTotalEvTime =
+        concatMap toList perFileSummaries
+          & map totalEvTime
+          & maximum
+
+      -- for each file, for each source range:
+      --  events and fraction of total time
+      summariesWithRatio = M.map (M.map (evRatio &&& id)) perFileSummaries
+        where
+          evRatio = (/ maxTotalEvTime) . totalEvTime
+
+      generateSingleFile filePath =
+        generateHeatmapHtml
+          filePath
+          (sourceFiles M.! filePath)
+   in pure $ M.mapWithKey generateSingleFile summariesWithRatio
+
+writeHtml ::
+  -- | target directory path
+  FilePath ->
+  -- | mapping keys are (name, provenance)
+  M.Map (T.Text, T.Text) ES.EvSummary ->
+  ExceptT T.Text IO ()
+writeHtml htmlDirPath evSummaryMap = do
+  (sourceRanges, costCentres) <- buildDetailStructures evSummaryMap
+  htmlFiles <- generateHtmlHeatmaps evSummaryMap
+  costCentreOverview <- generateOverview evSummaryMap
+
+  liftIO $ do
+    forM_ (M.toList htmlFiles) $ \(srcFilePath, html) -> do
+      let absPath =
+            htmlDirPath </> makeRelative "/" (T.unpack $ srcFilePath <> ".html")
+      writeLazyTextFile absPath (H.renderHtml html)
+
+    T.writeFile (htmlDirPath </> "style.css") cssFile
+    LT.writeFile
+      (htmlDirPath </> "cost-centres.html")
+      (H.renderHtml costCentreOverview)
+
+buildDetailStructures :: 
+  M.Map (T.Text, T.Text) ES.EvSummary -> 
+  -- ^ mapping keys are: (name, provenance)
+  ExceptT T.Text IO (SourceRanges, CostCentres)
+buildDetailStructures evSummaries = _
+
+generateOverview ::
+  (Monad m) =>
+  -- | Keys are (ccName, ccProvenance), provenance may contain multiple srclocs
+  M.Map (T.Text, T.Text) ES.EvSummary ->
+  ExceptT T.Text m H.Html
+generateOverview ccSourcePairs =
+  M.toList ccSourcePairs
+    & traverse splitParseProvenance
+    & fmap (generateCCOverviewHtml . M.fromList)
+  where
+    splitParseProvenance ::
+      (Monad m) =>
+      ((T.Text, T.Text), ES.EvSummary) ->
+      ExceptT T.Text m (T.Text, (Seq.Seq SR.SourceRange, ES.EvSummary))
+    splitParseProvenance ((k, prov), v) = do
+      sourceRanges <-
+        T.splitOn "->" prov
+          & Seq.fromList
+          & traverse (liftEither . SR.parse)
+      pure (k, (sourceRanges, v))
+
+writeLazyTextFile :: FilePath -> LT.Text -> IO ()
+writeLazyTextFile filepath content = do
+  createDirectoryIfMissing True $ takeDirectory filepath
+  LT.writeFile filepath content
+
+summarizeAndSplitByFile ::
+  -- | Names of all text files
+  S.Set T.Text ->
+  -- | Mapping from (ccName, ccProvenance) to event summary
+  M.Map (T.Text, SR.SourceRange) ES.EvSummary ->
+  -- | Non-Overlapping Events with SourceRanges separated by file
+  -- invariant: sourcerange.rangeStartPos.file is always equal to the map key
+  M.Map T.Text (M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary)))
+summarizeAndSplitByFile files summaries =
+  let separatedByFile =
+        let accumulateFiles m ((ccName, sourceRange), summary) =
+              -- relies on the fact that all the keys are already present in the map
+              M.adjust
+                (Seq.|> (sourceRange, (ccName, summary)))
+                (T.pack . posFile . SR.startPos $ sourceRange)
+                m
+         in M.toList summaries
+              & foldl' accumulateFiles (M.fromSet (const Seq.empty) files)
+
+      separateSourceRanges ::
+        -- \| All possibly overlapping SourceRanges
+        Seq.Seq (SR.SourceRange, (T.Text, ES.EvSummary)) ->
+        -- \| Ordered non-overlapping sourceranges with merged attached informations
+        M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary))
+      separateSourceRanges = foldl' accumulateRange M.empty . fmap (second Seq.singleton)
+        where
+          accumulateRange ::
+            -- \| Mapping of non-overlapping ranges, the T.Text is a ccName
+            M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary)) ->
+            -- \| New SourceRange that must be merged and inserted
+            (SR.SourceRange, Seq.Seq (T.Text, ES.EvSummary)) ->
+            -- \| Mapping of non-overlapping ranges
+            M.Map SR.SourceRange (Seq.Seq (T.Text, ES.EvSummary))
+          accumulateRange ranges (range, aux) = case M.lookupLE range ranges of
+            -- there is no lower range
+            Nothing -> case M.lookupGE range ranges of
+              -- there is no higher range
+              Nothing -> M.insert range aux ranges -- nothing to merge at all
+
+              -- higher ranges was found
+              Just higher@(higherRange, _) ->
+                if range `SR.overlapsWith` higherRange
+                  then
+                    let mergedRanges = SR.mergeSemigroup (range, aux) higher
+                        rangesWithoutHigher = M.delete higherRange ranges
+                     in foldl accumulateRange rangesWithoutHigher mergedRanges
+                  -- ranges don't overlap, don't merge
+                  else M.insert range aux ranges
+            -- lower range was found
+            Just lower@(lowerRange, _) ->
+              if range `SR.overlapsWith` lowerRange
+                then
+                  let mergedRanges = SR.mergeSemigroup (range, aux) lower
+                      rangesWithoutLower = M.delete lowerRange ranges
+                   in foldl accumulateRange rangesWithoutLower mergedRanges
+                -- lower range does not overlap
+                else case M.lookupGE range ranges of -- check the higher bound
+                -- nothing to merge
+                  Nothing -> M.insert range aux ranges
+                  -- higher range was found
+                  Just higher@(higherRange, _) ->
+                    if range `SR.overlapsWith` higherRange
+                      then
+                        let mergedRanges = SR.mergeSemigroup (range, aux) higher
+                            rangesWithoutHigher = M.delete higherRange ranges
+                         in foldl accumulateRange rangesWithoutHigher mergedRanges
+                      -- just insert the range normally
+                      else M.insert range aux ranges
+   in M.map separateSourceRanges separatedByFile
+
+loadAllFiles :: [FilePath] -> ExceptT T.Text IO (M.Map T.Text T.Text)
+loadAllFiles files =
+  mapM (\path -> (T.pack path,) <$> tryLoadFile path) files
+    & fmap M.fromList
+  where
+    tryLoadFile filePath = do
+      bytes <- liftIO $ readFileSafely filePath
+      bytes' <- liftEither . first T.pack $ bytes
+      liftEither . first T.show $ T.decodeUtf8' (BS.toStrict bytes')
+
+-- | Multi-Replace, replace all combinations of '\r' and '\n' with only '\n'
+normalizeNewlines :: T.Text -> T.Text
+normalizeNewlines =
+  T.replace "\r\n" "\n"
+    >>> T.replace "\r" "\n"
 
 prepareDir :: FilePath -> IO FilePath
 prepareDir json_path = do
@@ -159,7 +397,8 @@ analyseProfilingReport json_path r = do
   let tf =
         TargetFiles
           { summaryFile = top_dir </> "summary",
-            timelineFile = top_dir </> "timeline"
+            timelineFile = top_dir </> "timeline",
+            htmlDir = top_dir </> "html/"
           }
   writeAnalysis tf r
 
@@ -198,7 +437,8 @@ analyseBenchResults json_path bench_results = do
           let tf =
                 TargetFiles
                   { summaryFile = name' <> ".summary",
-                    timelineFile = name' <> ".timeline"
+                    timelineFile = name' <> ".timeline",
+                    htmlDir = name' <> ".html/"
                   }
            in writeAnalysis tf r
 
