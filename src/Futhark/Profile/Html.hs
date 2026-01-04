@@ -6,12 +6,15 @@ import Control.Monad (join)
 import Control.Monad.State.Strict (State, evalState, get, modify)
 import Data.Bifunctor (bimap, first, second)
 import Data.Function ((&))
+import Data.List (sortOn)
 import Data.Loc (posFile)
 import Data.Map qualified as M
+import Data.Ord (Down (Down))
 import Data.String (IsString (fromString))
 import Data.Text qualified as T
 import Data.Word (Word8)
 import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), CostCentreName (CostCentreName, getCostCentreName), SourceRangeDetails (SourceRangeDetails, containingCostCentres), sourceRangeDetailsFraction)
+import Futhark.Profile.Details qualified as D
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util.Html (headHtml, relativise)
@@ -21,9 +24,6 @@ import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
 import Text.Printf (printf)
 import Prelude hiding (span)
-import Data.List (sortOn)
-import qualified Futhark.Profile.Details as D
-import Data.Ord (Down(Down))
 
 type SourcePos = (Int, Int)
 
@@ -45,9 +45,10 @@ generateCCOverviewHtml costCentres = do
     H.h2 $ H.text "Cost Centres (ordered by fraction)"
     ccDetailTables
   where
-    ccDetailTables = M.toList costCentres
+    ccDetailTables =
+      M.toList costCentres
         & sortOn (Down . D.fraction . snd)
-        & mapM_ (uncurry renderCostCentreDetails) 
+        & mapM_ (uncurry renderCostCentreDetails)
 
 renderCostCentreDetails :: CostCentreName -> CostCentreDetails -> H.Html
 renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceRanges summary) = do
@@ -272,11 +273,12 @@ interpolateHeatmapColor :: Double -> (Word8, Word8, Word8)
 interpolateHeatmapColor percentage =
   if percentage >= 0.5
     then
-      let point = percentage * 2
-          g = point * 255
+      let point = (percentage - 0.5) * 2
+          -- less is more red, interpolate towards 0
+          g = 255 - point * 255
        in (255, round g, 0)
     else
-      let point = (percentage - 0.5) * 2
+      let point = percentage * 2
           r = 128 + 127 * point
        in (round r, 255, 0)
   where
