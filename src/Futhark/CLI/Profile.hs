@@ -53,6 +53,8 @@ import System.IO (hPutStrLn, stderr)
 import Text.Blaze.Html.Renderer.Text qualified as H
 import Text.Blaze.Html5 qualified as H
 import Text.Printf (printf)
+import Futhark.Profile.SourceRange (SourceRange)
+import Futhark.Profile.Details (SourceRangeDetails, CostCentreName, CostCentreDetails, SourceRanges, CostCentres)
 
 cssFile :: T.Text
 cssFile = $(embedStringFile "rts/futhark-profile/style.css")
@@ -248,6 +250,7 @@ writeHtml ::
   M.Map (T.Text, T.Text) ES.EvSummary ->
   ExceptT T.Text IO ()
 writeHtml htmlDirPath evSummaryMap = do
+  (sourceRanges, costCentres) <- buildDetailStructures evSummaryMap
   htmlFiles <- generateHtmlHeatmaps evSummaryMap
   costCentreOverview <- generateOverview evSummaryMap
 
@@ -261,6 +264,12 @@ writeHtml htmlDirPath evSummaryMap = do
     LT.writeFile
       (htmlDirPath </> "cost-centres.html")
       (H.renderHtml costCentreOverview)
+
+buildDetailStructures :: 
+  M.Map (T.Text, T.Text) ES.EvSummary -> 
+  -- ^ mapping keys are: (name, provenance)
+  ExceptT T.Text IO (SourceRanges, CostCentres)
+buildDetailStructures evSummaries = _
 
 generateOverview ::
   (Monad m) =>
