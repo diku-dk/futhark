@@ -6,8 +6,9 @@ module Futhark.CLI.Profile (main) where
 import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
 import Control.Monad (forM_, (>=>))
-import Control.Monad.Except (ExceptT, liftEither, runExceptT, runExcept)
+import Control.Monad.Except (ExceptT, liftEither, runExcept, runExceptT)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Except (Except)
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.FileEmbed (embedStringFile)
@@ -32,8 +33,10 @@ import Futhark.Bench
     decodeBenchResults,
     decodeProfilingReport,
   )
+import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails), CostCentreName (CostCentreName), CostCentres, SourceRangeDetails (SourceRangeDetails), SourceRanges, containingCostCentres)
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml)
+import Futhark.Profile.SourceRange (SourceRange)
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (showText)
 import Futhark.Util.Options (mainWithOptions)
@@ -52,9 +55,6 @@ import System.IO (hPutStrLn, stderr)
 import Text.Blaze.Html.Renderer.Text qualified as H
 import Text.Blaze.Html5 qualified as H
 import Text.Printf (printf)
-import Futhark.Profile.SourceRange (SourceRange)
-import Futhark.Profile.Details (CostCentreName (CostCentreName), SourceRanges, CostCentres, SourceRangeDetails (SourceRangeDetails), CostCentreDetails (CostCentreDetails), containingCostCentres)
-import Control.Monad.Trans.Except (Except)
 
 cssFile :: T.Text
 cssFile = $(embedStringFile "rts/futhark-profile/style.css")
@@ -206,94 +206,97 @@ writeLazyTextFile filepath content = do
   createDirectoryIfMissing True $ takeDirectory filepath
   LT.writeFile filepath content
 
-generateHtmlHeatmaps :: 
+generateHtmlHeatmaps ::
   M.Map FilePath SourceRanges ->
   ExceptT T.Text IO (M.Map FilePath H.Html)
 generateHtmlHeatmaps fileToRanges = do
   sourceFiles <- loadAllFiles (M.keys fileToRanges)
-  let renderSingle path text = 
+  let renderSingle path text =
         generateHeatmapHtml path text (fileToRanges M.! path)
   pure $ M.mapWithKey renderSingle sourceFiles
 
 buildDetailStructures ::
+  -- | mapping keys are: (name, provenance)
   M.Map (T.Text, T.Text) ES.EvSummary ->
-  -- ^ mapping keys are: (name, provenance)
+  -- | mapping key is the filename
   Except T.Text (M.Map FilePath SourceRanges, CostCentres)
-  -- ^ mapping key is the filename
 buildDetailStructures evSummaries = do
   parsedEvSummaries <- parseEvSummaries evSummaries
-  pure $ let
-      ranges = buildSourceRanges parsedEvSummaries lookupCC
-      centres = buildCostCentres parsedEvSummaries ccToRanges
-      lookupCC = (centres M.!)
-      ccToRanges :: CostCentreName -> M.Map SourceRange SourceRangeDetails
-      ccToRanges ccName = M.unions ranges
-        & M.filter (M.member ccName . containingCostCentres)
-    in (ranges, centres)
+  pure $
+    let ranges = buildSourceRanges parsedEvSummaries lookupCC
+        centres = buildCostCentres parsedEvSummaries ccToRanges
+        lookupCC = (centres M.!)
+        ccToRanges :: CostCentreName -> M.Map SourceRange SourceRangeDetails
+        ccToRanges ccName =
+          M.unions ranges
+            & M.filter (M.member ccName . containingCostCentres)
+     in (ranges, centres)
 
 buildCostCentres ::
   M.Map (CostCentreName, Seq.Seq SourceRange) ES.EvSummary ->
   (CostCentreName -> M.Map SourceRange SourceRangeDetails) ->
   CostCentres
-buildCostCentres summaries rangesInCC = let
-  totalTime = getSum $ foldMap (Sum . ES.evSum) summaries
-  makeDetails ((name, _), summary) =
-    CostCentreDetails fraction ranges summary
-      where
-        fraction = ES.evSum summary / totalTime
-        ranges = rangesInCC name
-  in M.toList summaries
-    & fmap (fst . fst &&& makeDetails)
-    & M.fromList
+buildCostCentres summaries rangesInCC =
+  let totalTime = getSum $ foldMap (Sum . ES.evSum) summaries
+      makeDetails ((name, _), summary) =
+        CostCentreDetails fraction ranges summary
+        where
+          fraction = ES.evSum summary / totalTime
+          ranges = rangesInCC name
+   in M.toList summaries
+        & fmap (fst . fst &&& makeDetails)
+        & M.fromList
 
 buildSourceRanges ::
   M.Map (CostCentreName, Seq.Seq SourceRange) ES.EvSummary ->
   (CostCentreName -> CostCentreDetails) ->
   M.Map FilePath SourceRanges
-buildSourceRanges summaries lookupCC = let
+buildSourceRanges summaries lookupCC =
+  let distributeRanges ::
+        (CostCentreName, Seq.Seq SourceRange) ->
+        S.Set (CostCentreName, SourceRange)
+      distributeRanges (name, ranges) =
+        toList ranges
+          & fmap (name,)
+          & S.fromList
 
-    distributeRanges ::
-      (CostCentreName, Seq.Seq SourceRange) ->
-      S.Set (CostCentreName, SourceRange)
-    distributeRanges (name, ranges) = toList ranges
-      & fmap (name, )
-      & S.fromList
+      distributedRanges =
+        M.keysSet summaries
+          & S.map distributeRanges
+          & S.unions
 
-    distributedRanges = M.keysSet summaries
-      & S.map distributeRanges
-      & S.unions
+      rangeToCCs = summarizeAndSplitRanges distributedRanges
+      fileToRangeToCCs =
+        M.toList rangeToCCs
+          & fmap (\(range, ccs) -> (SR.fileName range, (range, ccs)))
+          & fmap (second $ uncurry M.singleton)
+          & M.fromListWith M.union
 
-    rangeToCCs = summarizeAndSplitRanges distributedRanges
-    fileToRangeToCCs = M.toList rangeToCCs
-      & fmap (\ (range, ccs) -> (SR.fileName range, (range, ccs)))
-      & fmap (second $ uncurry M.singleton)
-      & M.fromListWith M.union
-
-    ccsToDetails = toList
-      >>> fmap (id &&& lookupCC)
-      >>> M.fromList
-      >>> SourceRangeDetails
-
-  in fmap (fmap ccsToDetails) fileToRangeToCCs
-
+      ccsToDetails =
+        toList
+          >>> fmap (id &&& lookupCC)
+          >>> M.fromList
+          >>> SourceRangeDetails
+   in fmap (fmap ccsToDetails) fileToRangeToCCs
 
 parseEvSummaries ::
   M.Map (T.Text, T.Text) ES.EvSummary ->
   Except T.Text (M.Map (CostCentreName, Seq.Seq SourceRange) ES.EvSummary)
-parseEvSummaries evSummaries = let
-    parseKey (ccName, sourceLocs) v = let
-      ccName' = CostCentreName ccName
-      in do
-        sourceRanges <- splitParseSourceLocs sourceLocs
-        pure ((ccName', sourceRanges), v)
-  in M.toList evSummaries
-    & traverse (uncurry parseKey)
-    & fmap M.fromList
+parseEvSummaries evSummaries =
+  let parseKey (ccName, sourceLocs) v =
+        let ccName' = CostCentreName ccName
+         in do
+              sourceRanges <- splitParseSourceLocs sourceLocs
+              pure ((ccName', sourceRanges), v)
+   in M.toList evSummaries
+        & traverse (uncurry parseKey)
+        & fmap M.fromList
 
 splitParseSourceLocs :: T.Text -> Except T.Text (Seq.Seq SourceRange)
-splitParseSourceLocs t = if t == "unknown"
-  then pure Seq.empty
-  else fmap Seq.fromList $ traverse (liftEither . SR.parse) $ T.splitOn "->" t
+splitParseSourceLocs t =
+  if t == "unknown"
+    then pure Seq.empty
+    else fmap Seq.fromList $ traverse (liftEither . SR.parse) $ T.splitOn "->" t
 
 summarizeAndSplitRanges ::
   -- | Mapping from (ccName, ccProvenance) to event summary
@@ -352,9 +355,9 @@ summarizeAndSplitRanges summaries =
                       -- just insert the range normally
                       else M.insert range aux ranges
    in S.toList summaries
-    & fmap (uncurry $ flip (,))
-    & Seq.fromList
-    & separateSourceRanges
+        & fmap (uncurry $ flip (,))
+        & Seq.fromList
+        & separateSourceRanges
 
 loadAllFiles :: [FilePath] -> ExceptT T.Text IO (M.Map FilePath T.Text)
 loadAllFiles files =

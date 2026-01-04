@@ -1,24 +1,26 @@
-module Futhark.Profile.Details (CostCentreDetails(..), SourceRangeDetails(..), CostCentreName(..), sourceRangeDetailsFraction, CostCentres, SourceRanges) where
-import Futhark.Profile.SourceRange (SourceRange)
-import Data.Map (Map)
-import Futhark.Profile.EventSummary (EvSummary)
-import Data.Text (Text)
-import Data.Monoid (Sum(Sum, getSum))
+module Futhark.Profile.Details (CostCentreDetails (..), SourceRangeDetails (..), CostCentreName (..), sourceRangeDetailsFraction, CostCentres, SourceRanges) where
+
 import Control.Arrow ((>>>))
+import Data.Map (Map)
+import Data.Monoid (Sum (Sum, getSum))
+import Data.Text (Text)
+import Futhark.Profile.EventSummary (EvSummary)
+import Futhark.Profile.SourceRange (SourceRange)
 
 type CostCentres = Map CostCentreName CostCentreDetails
+
 type SourceRanges = Map SourceRange SourceRangeDetails
 
-newtype CostCentreName = CostCentreName { getCostCentreName :: Text }
+newtype CostCentreName = CostCentreName {getCostCentreName :: Text}
   deriving (Eq, Ord)
 
 data CostCentreDetails = CostCentreDetails
-  { fraction :: Double
-  -- ^ Fraction of total program time spent in this cost centre
-  , sourceRanges :: Map SourceRange SourceRangeDetails
-  -- ^ all source ranges included in this cost centre
-  , summary :: EvSummary
-  -- ^ statistics about the runtime characteristics
+  { -- | Fraction of total program time spent in this cost centre
+    fraction :: Double,
+    -- | all source ranges included in this cost centre
+    sourceRanges :: Map SourceRange SourceRangeDetails,
+    -- | statistics about the runtime characteristics
+    summary :: EvSummary
   }
 
 newtype SourceRangeDetails = SourceRangeDetails
@@ -26,6 +28,7 @@ newtype SourceRangeDetails = SourceRangeDetails
   }
 
 sourceRangeDetailsFraction :: SourceRangeDetails -> Double
-sourceRangeDetailsFraction = containingCostCentres
-  >>> foldMap (Sum . fraction)
-  >>> getSum
+sourceRangeDetailsFraction =
+  containingCostCentres
+    >>> foldMap (Sum . fraction)
+    >>> getSum

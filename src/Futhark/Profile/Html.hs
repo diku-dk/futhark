@@ -4,7 +4,8 @@ module Futhark.Profile.Html (generateHeatmapHtml, generateCCOverviewHtml) where
 
 import Control.Monad (join)
 import Control.Monad.State.Strict (State, evalState, get, modify)
-import Data.Bifunctor (bimap, second)
+import Data.Bifunctor (bimap, first, second)
+import Data.Function ((&))
 import Data.Loc (posFile)
 import Data.Map qualified as M
 import Data.String (IsString (fromString))
@@ -13,15 +14,16 @@ import Data.Word (Word8)
 import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), CostCentreName (CostCentreName, getCostCentreName), SourceRangeDetails (SourceRangeDetails, containingCostCentres), sourceRangeDetailsFraction)
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
-import Futhark.Util.Html (headHtml)
+import Futhark.Util.Html (headHtml, relativise)
 import NeatInterpolation qualified as NI (text, trimming)
 import Text.Blaze.Html5 ((!))
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
 import Text.Printf (printf)
 import Prelude hiding (span)
-import Control.Arrow ((***))
-import Data.Function ((&))
+import Data.List (sortOn)
+import qualified Futhark.Profile.Details as D
+import Data.Ord (Down(Down))
 
 type SourcePos = (Int, Int)
 
@@ -43,7 +45,9 @@ generateCCOverviewHtml costCentres = do
     H.h2 $ H.text "Cost Centres (ordered by fraction)"
     ccDetailTables
   where
-    ccDetailTables = mapM_ (uncurry renderCostCentreDetails) $ M.toAscList costCentres
+    ccDetailTables = M.toList costCentres
+        & sortOn (Down . D.fraction . snd)
+        & mapM_ (uncurry renderCostCentreDetails) 
 
 renderCostCentreDetails :: CostCentreName -> CostCentreDetails -> H.Html
 renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceRanges summary) = do
@@ -53,6 +57,8 @@ renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceR
   where
     title =
       H.h3
+        ! A.id (fromString $ T.unpack ccName)
+        $ fractionColored ratio
         $ H.a
           ! A.href (fromString $ '#' : T.unpack ccName)
           ! A.class_ "silent-anchor"
@@ -62,7 +68,7 @@ renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceR
       H.table $
         mapM_
           row
-          [ ("", T.pack $ printf "%.4f" ratio),
+          [ ("Fraction", T.pack $ printf "%.4f" ratio),
             ("Event Count", T.show count),
             ("Total Time (µs)", T.pack $ printf "%.2f" sum_),
             ("Minimum Time (µs)", T.pack $ printf "%.2f" min_),
@@ -77,19 +83,23 @@ renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceR
     sourceRangeListing = do
       H.h4 $ H.text "Source Ranges"
       H.ol $
-        mapM_ entry (M.keys sourceRanges)
+        mapM_ (uncurry entry) (M.toList sourceRanges)
       where
-        entry range =
-          H.li $
-            (H.a ! A.href (fromString entryRef)) $
-              H.text $
-                sourceRangeText range <> " in " <> T.pack rangeFile
+        entry range details =
+          H.li
+            $ fractionColored (sourceRangeDetailsFraction details)
+            $ H.a
+              ! A.href (fromString entryRef)
+              ! A.class_ "silent-anchor"
+              ! A.title "Click to Jump to Source"
+            $ H.text
+            $ sourceRangeText range <> " in " <> T.pack rangeFile
           where
             rangeFile = posFile . SR.startPos $ range
             entryRef = rangeFile <> ".html#" <> sourceRangeSpanCssId range
 
 heatmapBodyHtml :: FilePath -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
-heatmapBodyHtml _sourcePath sourceText sourceRanges =
+heatmapBodyHtml sourcePath sourceText sourceRanges =
   H.body $ do
     sourceCodeListing
     detailTables
@@ -100,10 +110,10 @@ heatmapBodyHtml _sourcePath sourceText sourceRanges =
       H.code . H.pre $
         renderRanges (RenderState (1, 1) sourceText) rangeList
 
-    detailTables = mapM_ (uncurry sourceRangeDetails) rangeList
+    detailTables = mapM_ (uncurry $ sourceRangeDetails sourcePath) rangeList
 
-sourceRangeDetails :: SR.SourceRange -> SourceRangeDetails -> H.Html
-sourceRangeDetails range details@(SourceRangeDetails ccs) = detailDiv $ do
+sourceRangeDetails :: FilePath -> SR.SourceRange -> SourceRangeDetails -> H.Html
+sourceRangeDetails currentPath range details@(SourceRangeDetails ccs) = detailDiv $ do
   H.h3 $ do
     H.text "Source Range from "
     toSpanAnchor $ fractionColored ratio $ H.span $ H.text rangeText
@@ -121,28 +131,50 @@ sourceRangeDetails range details@(SourceRangeDetails ccs) = detailDiv $ do
               "Event Count",
               "Total Time (µs)",
               "Minimum Time (µs)",
-              "Maximum Time (µs)"
+              "Maximum Time (µs)",
+              "Fraction"
             ]
 
-        mapM_ evRow $ M.toAscList ccs
-          & fmap (getCostCentreName *** summary)
-        evRow ("Total", evTotal)
+        mapM_ evRow $
+          M.toAscList ccs
+            & fmap (first getCostCentreName)
 
-      H.tr $ do
-        H.td (H.text "Total")
-      where
-        evRow (ccName, ev) = H.tr $ do
+        H.tr $ do
+          H.td $ H.text "Total"
+          H.td $ H.text $ T.show $ ES.evCount evTotal
           mapM_
-            (H.td . H.text)
-            [ ccName,
-              T.show . ES.evCount $ ev,
-              T.pack . printf "%.2f" . ES.evSum $ ev,
-              T.pack . printf "%.2f" . ES.evMin $ ev,
-              T.pack . printf "%.2f" . ES.evMax $ ev
+            (H.td . H.text . T.pack . printf "%.2f")
+            [ ES.evSum evTotal,
+              ES.evMin evTotal,
+              ES.evMax evTotal,
+              ratio
             ]
-        evTotal = M.toList ccs
-          & fmap (summary . snd)
-          & foldl' combine (ES.EvSummary 0 0 infPos infNeg) 
+      where
+        evRow (ccName, CostCentreDetails fraction _ ev) = H.tr $ do
+          mapM_
+            H.td
+            [ fractionColored fraction
+                $ H.span
+                  ! A.title "Click to jump to Cost Centre Overview"
+                $ H.a
+                  ! A.href
+                    ( fromString $
+                        relativise "cost-centres.html" currentPath
+                          <> "#"
+                          <> T.unpack ccName
+                    )
+                  ! A.class_ "silent-anchor"
+                $ H.text ccName,
+              H.text . T.show . ES.evCount $ ev,
+              H.text . T.pack . printf "%.2f" . ES.evSum $ ev,
+              H.text . T.pack . printf "%.2f" . ES.evMin $ ev,
+              H.text . T.pack . printf "%.2f" . ES.evMax $ ev,
+              H.text . T.pack . printf "%.4f" $ fraction
+            ]
+        evTotal =
+          M.toList ccs
+            & fmap (summary . snd)
+            & foldl' combine (ES.EvSummary 0 0 infPos infNeg)
           where
             combine (ES.EvSummary c s lo hi) (ES.EvSummary c' s' lo' hi') =
               ES.EvSummary (c + c') (s + s') (min lo lo') (max hi hi')
@@ -153,6 +185,7 @@ sourceRangeDetails range details@(SourceRangeDetails ccs) = detailDiv $ do
       H.a
         ! A.href (fromString $ '#' : sourceRangeSpanCssId range)
         ! A.class_ "silent-anchor"
+        ! A.title "Click to jump to source"
 
     detailDiv =
       H.div
