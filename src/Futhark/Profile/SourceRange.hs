@@ -1,4 +1,4 @@
-module Futhark.Profile.SourceRange (SourceRange (..), startLineCol, endLineCol, filter123, overlapsWith, mergeSemigroup, parse) where
+module Futhark.Profile.SourceRange (SourceRange (..), startLineCol, endLineCol, filter123, overlapsWith, mergeSemigroup, parse, fileName) where
 
 import Control.Arrow ((&&&))
 import Control.Monad (void, when)
@@ -22,6 +22,9 @@ data SourceRange = SourceRange
     endColumn :: !Int
   }
   deriving (Show, Eq, Ord)
+
+fileName :: SourceRange -> FilePath
+fileName = posFile . startPos
 
 -- | Extract start line and column
 startLineCol :: SourceRange -> (Int, Int)
@@ -69,7 +72,7 @@ parse text = first textErrorBundle $ P.parse pSourceRange fname text
 
     pSourceRange :: P.Parsec Void T.Text SourceRange
     pSourceRange = do
-      fileName <- L.charLiteral `P.manyTill` P.single ':' -- separator
+      filePath <- L.charLiteral `P.manyTill` P.single ':' -- separator
       startLine <- L.decimal
       void $ P.single ':' -- separator
       startCol <- L.decimal
@@ -95,7 +98,7 @@ parse text = first textErrorBundle $ P.parse pSourceRange fname text
 
       pure $
         SourceRange
-          { startPos = Pos fileName startLine startCol (-1),
+          { startPos = Pos filePath startLine startCol (-1),
             endLine = lineRangeEnd,
             endColumn = columnRangeEnd
           }

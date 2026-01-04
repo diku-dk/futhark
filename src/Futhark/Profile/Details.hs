@@ -10,6 +10,7 @@ type CostCentres = Map CostCentreName CostCentreDetails
 type SourceRanges = Map SourceRange SourceRangeDetails
 
 newtype CostCentreName = CostCentreName { getCostCentreName :: Text }
+  deriving (Eq, Ord)
 
 data CostCentreDetails = CostCentreDetails
   { fraction :: Double

@@ -30,10 +30,10 @@ data RenderState = RenderState
     remainingText :: !T.Text
   }
 
-generateHeatmapHtml :: T.Text -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
+generateHeatmapHtml :: FilePath -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
 generateHeatmapHtml sourcePath sourceText sourceRanges =
   H.docTypeHtml $ do
-    headHtml (T.unpack sourcePath) (T.unpack $ sourcePath <> " - Source-Heatmap")
+    headHtml sourcePath (sourcePath <> " - Source-Heatmap")
     heatmapBodyHtml sourcePath sourceText sourceRanges
 
 generateCCOverviewHtml :: M.Map CostCentreName CostCentreDetails -> H.Html
@@ -88,7 +88,7 @@ renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceR
             rangeFile = posFile . SR.startPos $ range
             entryRef = rangeFile <> ".html#" <> sourceRangeSpanCssId range
 
-heatmapBodyHtml :: T.Text -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
+heatmapBodyHtml :: FilePath -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
 heatmapBodyHtml _sourcePath sourceText sourceRanges =
   H.body $ do
     sourceCodeListing
