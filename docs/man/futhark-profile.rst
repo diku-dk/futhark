@@ -47,8 +47,9 @@ produce a distinct top level directory.
 Files produced
 --------------
 
-Supposing a dataset ``foo``, ``futhark profile`` will produce the
-following files and directories in the top level directory.
+Supposing a dataset ``foo`` for an entry point in ``source-file.fut``.
+``futhark profile`` will produce the following files and directories in the top
+level directory.
 
 * ``foo.log``: the running log produced during execution. Contains many details
   on dynamic behaviour, depending on the exact backend.
