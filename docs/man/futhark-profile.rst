@@ -14,9 +14,10 @@ futhark profile JSONFILES
 DESCRIPTION
 ===========
 
-This tool produces human-readable profiling information based on information
-collected with :ref:`futhark bench<futhark-bench(1)>`. Futhark has basic support
-for profiling. The system can collect information about the run-time behaviour
+This tool produces human- and browser-readable profiling information based on 
+information collected with :ref:`futhark bench<futhark-bench(1)>`.
+Futhark has basic support for profiling.
+The system can collect information about the run-time behaviour
 of the program, and connects it as best it is able to the program source code.
 This works best for the GPU backends, and not at all for the sequential
 backends. The collected information can then be used to estimate the source of
