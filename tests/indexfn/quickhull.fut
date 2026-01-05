@@ -244,7 +244,7 @@ def expand_hull [num_segs] [num_points]
       ids, points_x', points_y')
 
 def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -> Range b' (0,n+1)}) =
-  map (\i -> x[i]) (iota (b - a))
+  map (\i -> x[i + a]) (iota (b - a))
 
 def non_empty_segments
       [num_segs]
