@@ -310,7 +310,7 @@ summarizeAndSplitRanges summaries =
         Seq.Seq (SR.SourceRange, CostCentreName) ->
         -- \| Ordered non-overlapping sourceranges with merged attached informations
         M.Map SR.SourceRange (Seq.Seq CostCentreName)
-      separateSourceRanges = foldl' accumulateRange M.empty . fmap (second Seq.singleton)
+      separateSourceRanges = L.foldl' accumulateRange M.empty . fmap (second Seq.singleton)
         where
           accumulateRange ::
             -- \| Mapping of non-overlapping ranges, the T.Text is a ccName
@@ -367,7 +367,7 @@ loadAllFiles files =
     tryLoadFile filePath = do
       bytes <- liftIO $ readFileSafely filePath
       bytes' <- liftEither . first T.pack $ bytes
-      liftEither . first T.show $ T.decodeUtf8' (BS.toStrict bytes')
+      liftEither . first showText $ T.decodeUtf8' (BS.toStrict bytes')
 
 prepareDir :: FilePath -> IO FilePath
 prepareDir json_path = do

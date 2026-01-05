@@ -6,7 +6,7 @@ import Control.Monad (join)
 import Control.Monad.State.Strict (State, evalState, get, modify)
 import Data.Bifunctor (bimap, first, second)
 import Data.Function ((&))
-import Data.List (sortOn)
+import Data.List (foldl', sortOn)
 import Data.Loc (posFile)
 import Data.Map qualified as M
 import Data.Ord (Down (Down))
@@ -17,6 +17,7 @@ import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), 
 import Futhark.Profile.Details qualified as D
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
+import Futhark.Util (showText)
 import Futhark.Util.Html (headHtml, relativise)
 import NeatInterpolation qualified as NI (text, trimming)
 import Text.Blaze.Html5 ((!))
@@ -70,7 +71,7 @@ renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceR
         mapM_
           row
           [ ("Fraction", T.pack $ printf "%.4f" ratio),
-            ("Event Count", T.show count),
+            ("Event Count", showText count),
             ("Total Time (µs)", T.pack $ printf "%.2f" sum_),
             ("Minimum Time (µs)", T.pack $ printf "%.2f" min_),
             ("Maximum Time (µs)", T.pack $ printf "%.2f" max_)
@@ -142,7 +143,7 @@ sourceRangeDetails currentPath range details@(SourceRangeDetails ccs) = detailDi
 
         H.tr $ do
           H.td $ H.text "Total"
-          H.td $ H.text $ T.show $ ES.evCount evTotal
+          H.td $ H.text $ showText $ ES.evCount evTotal
           mapM_
             (H.td . H.text . T.pack . printf "%.2f")
             [ ES.evSum evTotal,
@@ -166,7 +167,7 @@ sourceRangeDetails currentPath range details@(SourceRangeDetails ccs) = detailDi
                     )
                   ! A.class_ "silent-anchor"
                 $ H.text ccName,
-              H.text . T.show . ES.evCount $ ev,
+              H.text . showText . ES.evCount $ ev,
               H.text . T.pack . printf "%.2f" . ES.evSum $ ev,
               H.text . T.pack . printf "%.2f" . ES.evMin $ ev,
               H.text . T.pack . printf "%.2f" . ES.evMax $ ev,
@@ -197,8 +198,8 @@ sourceRangeDetails currentPath range details@(SourceRangeDetails ccs) = detailDi
 sourceRangeText :: SR.SourceRange -> T.Text
 sourceRangeText range = [NI.text|$lineStart:$colStart to $lineEnd:$colEnd|]
   where
-    (lineStart, colStart) = join bimap T.show $ SR.startLineCol range
-    (lineEnd, colEnd) = join bimap T.show $ SR.endLineCol range
+    (lineStart, colStart) = join bimap showText $ SR.startLineCol range
+    (lineEnd, colEnd) = join bimap showText $ SR.endLineCol range
 
 -- | Assumes that the annotated ranges are non-overlapping and in ascending order
 renderRanges ::
@@ -255,7 +256,7 @@ decorateSpan range fraction evCount = span . anchor
           (Click to jump to detail table)
           |]
           where
-            textEvCount = T.show evCount
+            textEvCount = showText evCount
             textFraction = T.pack $ printf "%.4f" fraction
 
 fractionColored :: Double -> H.Html -> H.Html
@@ -265,7 +266,7 @@ fractionColored fraction = (! A.style cssColorValue)
       fromString . T.unpack $
         [NI.text|background: rgba($textR, $textG, $textB, 1)|]
       where
-        (textR, textG, textB) = (T.show r, T.show g, T.show b)
+        (textR, textG, textB) = (showText r, showText g, showText b)
         (r, g, b) = interpolateHeatmapColor fraction
 
 -- | Percentage Argument must be smaller in [0; 1]
