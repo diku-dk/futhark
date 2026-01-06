@@ -61,15 +61,9 @@ level directory.
   which they occurred, along with their runtime and other available information,
   most importantly the source locations.
 
-* ``foo.html/index.html``: overview file and guide to the other html files.
+* ``foo-index.html``: overview file and guide to the other html files.
   Contains explanations for the concepts, links to other pages.
-
-* ``foo.html/cost-centres.html``: tables of all cost centres along with
-  performance summaries and source location links.
-
-* ``foo.html/source-file.fut.html``: Source-File Heatmap, especially costly
-  source ranges are highlighted and link to detail tables. These tables
-  contain time measurements and hyperlinks to associated cost centres.
+  This is the entry file for profile exploration.
 
 The log file is often too verbose to be useful, but the summary and timeline
 should be inspected, even if the latter is sometimes fairly large.
