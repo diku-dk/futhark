@@ -83,7 +83,7 @@ introductionIndex benchDir = do
     [NI.trimming|
           The Cost Centre Overview contains all the cost centres recorded
           during the last run of the benchmark. For every cost centre, there
-          is a table with statistics and also a list with links to all 
+          is a table with statistics and also a list with links to all
           relevant source ranges.
           |]
 
