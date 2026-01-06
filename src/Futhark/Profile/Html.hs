@@ -17,15 +17,15 @@ import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), 
 import Futhark.Profile.Details qualified as D
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
-import Futhark.Util (showText, hashText)
+import Futhark.Util (hashText, showText)
 import Futhark.Util.Html (headHtml, relativise)
 import NeatInterpolation qualified as NI (text, trimming)
+import System.FilePath (takeFileName)
 import Text.Blaze.Html5 ((!))
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
 import Text.Printf (printf)
 import Prelude hiding (span)
-import System.FilePath (takeFileName)
 
 securedHashPath :: FilePath -> FilePath
 securedHashPath p =

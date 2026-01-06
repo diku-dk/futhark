@@ -207,12 +207,13 @@ generateHtmlHeatmaps ::
   ExceptT T.Text IO (M.Map FilePath H.Html)
 generateHtmlHeatmaps fileToRanges = do
   sourceFiles <- loadAllFiles (M.keys fileToRanges)
-  let disambiguatedSourceFiles = 
+  let disambiguatedSourceFiles =
         M.mapKeys (securedHashPath &&& id) sourceFiles
   let renderSingle (targetPath, oldPath) text =
         generateHeatmapHtml targetPath text (fileToRanges M.! oldPath)
-  pure $ M.mapWithKey renderSingle disambiguatedSourceFiles
-    & M.mapKeys fst
+  pure $
+    M.mapWithKey renderSingle disambiguatedSourceFiles
+      & M.mapKeys fst
 
 buildDetailStructures ::
   -- | mapping keys are: (name, provenance)
