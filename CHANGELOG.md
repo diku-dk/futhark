@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * An interpreter bug in return size inference for functions returning an
   abstract type that is concrete at the calling size (#2336).
 
+* `futhark bench` would ignore programs with any tag.
+
 ## [0.25.34]
 
 ### Added
