@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module Futhark.Profile.Html (generateHeatmapHtml, generateCCOverviewHtml) where
+module Futhark.Profile.Html (securedHashPath, generateHeatmapHtml, generateCCOverviewHtml) where
 
 import Control.Monad (join)
 import Control.Monad.State.Strict (State, evalState, get, modify)
@@ -17,7 +17,7 @@ import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), 
 import Futhark.Profile.Details qualified as D
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
-import Futhark.Util (showText)
+import Futhark.Util (showText, hashText)
 import Futhark.Util.Html (headHtml, relativise)
 import NeatInterpolation qualified as NI (text, trimming)
 import Text.Blaze.Html5 ((!))
@@ -25,6 +25,11 @@ import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
 import Text.Printf (printf)
 import Prelude hiding (span)
+import System.FilePath (takeFileName)
+
+securedHashPath :: FilePath -> FilePath
+securedHashPath p =
+  T.unpack (hashText $ T.pack p) <> "-" <> takeFileName p
 
 type SourcePos = (Int, Int)
 
@@ -97,8 +102,9 @@ renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceR
             $ H.text
             $ sourceRangeText range <> " in " <> T.pack rangeFile
           where
-            rangeFile = posFile . SR.startPos $ range
-            entryRef = rangeFile <> ".html#" <> sourceRangeSpanCssId range
+            rangeFile = posFile $ SR.startPos range
+            rangeHtmlFile = securedHashPath rangeFile
+            entryRef = rangeHtmlFile <> ".html#" <> sourceRangeSpanCssId range
 
 heatmapBodyHtml :: FilePath -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
 heatmapBodyHtml sourcePath sourceText sourceRanges =

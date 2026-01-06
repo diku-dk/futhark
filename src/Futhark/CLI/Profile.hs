@@ -32,10 +32,10 @@ import Futhark.Bench
   )
 import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails), CostCentreName (CostCentreName), CostCentres, SourceRangeDetails (SourceRangeDetails), SourceRanges, containingCostCentres)
 import Futhark.Profile.EventSummary qualified as ES
-import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml)
+import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml, securedHashPath)
 import Futhark.Profile.SourceRange (SourceRange)
 import Futhark.Profile.SourceRange qualified as SR
-import Futhark.Util (hashText, showText)
+import Futhark.Util (showText)
 import Futhark.Util.Html (cssFile)
 import Futhark.Util.Options (mainWithOptions)
 import System.Directory (createDirectoryIfMissing, removePathForcibly)
@@ -207,12 +207,12 @@ generateHtmlHeatmaps ::
   ExceptT T.Text IO (M.Map FilePath H.Html)
 generateHtmlHeatmaps fileToRanges = do
   sourceFiles <- loadAllFiles (M.keys fileToRanges)
-  let disambiguatePath (p :: FilePath) =
-        T.unpack (hashText $ T.pack p) <> "-" <> takeFileName p
-  let disambiguatedSourceFiles = M.mapKeys disambiguatePath sourceFiles
-  let renderSingle path text =
-        generateHeatmapHtml path text (fileToRanges M.! path)
+  let disambiguatedSourceFiles = 
+        M.mapKeys (securedHashPath &&& id) sourceFiles
+  let renderSingle (targetPath, oldPath) text =
+        generateHeatmapHtml targetPath text (fileToRanges M.! oldPath)
   pure $ M.mapWithKey renderSingle disambiguatedSourceFiles
+    & M.mapKeys fst
 
 buildDetailStructures ::
   -- | mapping keys are: (name, provenance)
