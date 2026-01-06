@@ -101,15 +101,15 @@ sourceFileIndex benchDir paths = do
       where
         pathRef = benchDir </> securedHashPath path <.> ".html"
 
-generateHeatmapHtml :: 
+generateHeatmapHtml ::
   -- | Path where this Html will be placed
-  FilePath -> 
+  FilePath ->
   -- | Path where the corresponding source was
-  FilePath -> 
+  FilePath ->
   -- | Source File Text
-  T.Text -> 
+  T.Text ->
   -- | Non-Overlapping Source Ranges
-  M.Map SR.SourceRange SourceRangeDetails -> 
+  M.Map SR.SourceRange SourceRangeDetails ->
   H.Html
 generateHeatmapHtml htmlPath sourcePath sourceText sourceRanges =
   H.docTypeHtml $ do
