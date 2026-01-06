@@ -191,6 +191,7 @@ writeHtml htmlDirPath evSummaryMap = do
   let costCentreOverview = generateCCOverviewHtml costCentres
 
   liftIO $ do
+    createDirectoryIfMissing True $ htmlDirPath
     forM_ (M.toList htmlFiles) $ \(srcFilePath, html) -> do
       let absPath =
             htmlDirPath </> makeRelative "/" (srcFilePath <> ".html")
