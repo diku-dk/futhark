@@ -226,7 +226,7 @@ generateHtmlHeatmaps fileToRanges = do
   let disambiguatedSourceFiles =
         M.mapKeys (securedHashPath &&& id) sourceFiles
   let renderSingle (targetPath, oldPath) text =
-        generateHeatmapHtml targetPath text (fileToRanges M.! oldPath)
+        generateHeatmapHtml targetPath oldPath text (fileToRanges M.! oldPath)
   pure $
     M.mapWithKey renderSingle disambiguatedSourceFiles
       & M.mapKeys fst
@@ -283,10 +283,12 @@ buildSourceRanges summaries lookupCC =
 
       rangeToCCs = summarizeAndSplitRanges distributedRanges
       fileToRangeToCCs =
-        M.toList rangeToCCs
-          & fmap (\(range, ccs) -> (SR.fileName range, (range, ccs)))
-          & fmap (second $ uncurry M.singleton)
+        fmap prepareElement (M.toList rangeToCCs)
           & M.fromListWith M.union
+        where
+          prepareElement =
+            second (uncurry M.singleton)
+              . (\(range, ccs) -> (SR.fileName range, (range, ccs)))
 
       ccsToDetails =
         toList
