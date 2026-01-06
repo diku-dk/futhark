@@ -189,8 +189,7 @@ compileBenchmark opts (program, program_spec) = do
     RunCases cases _ _
       | null $
           optExcludeCase opts
-            `intersect` testTags spec
-            <> testTags program_spec,
+            `intersect` (testTags spec <> testTags program_spec),
         any hasRuns cases ->
           if optSkipCompilation opts
             then do
