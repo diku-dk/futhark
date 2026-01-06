@@ -32,7 +32,7 @@ import Futhark.Bench
   )
 import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails), CostCentreName (CostCentreName), CostCentres, SourceRangeDetails (SourceRangeDetails), SourceRanges, containingCostCentres)
 import Futhark.Profile.EventSummary qualified as ES
-import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml, securedHashPath)
+import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml, generateHtmlIndex, securedHashPath)
 import Futhark.Profile.SourceRange (SourceRange)
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (showText)
@@ -146,6 +146,7 @@ timeline = T.unlines . L.intercalate [""] . map onEvent
 data TargetFiles = TargetFiles
   { summaryFile :: FilePath,
     timelineFile :: FilePath,
+    htmlIndexFile :: FilePath,
     htmlDir :: FilePath
   }
 
@@ -153,8 +154,8 @@ writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
 writeAnalysis tf r = runExceptT >=> handleException $ do
   let evSummaryMap = ES.eventSummaries $ profilingEvents r
 
-  -- heatmap html
-  writeHtml (htmlDir tf) evSummaryMap
+  -- heatmap html and cost centres
+  writeHtml tf evSummaryMap
 
   -- profile.summary
   liftIO $
@@ -175,27 +176,39 @@ toIOExcept :: Except T.Text a -> ExceptT T.Text IO a
 toIOExcept = liftEither . runExcept
 
 writeHtml ::
-  -- | target directory path
-  FilePath ->
+  -- | Target paths
+  TargetFiles ->
   -- | mapping keys are (name, provenance)
   M.Map (T.Text, T.Text) ES.EvSummary ->
   ExceptT T.Text IO ()
-writeHtml htmlDirPath evSummaryMap = do
+writeHtml tf evSummaryMap = do
+  let htmlDirPath = htmlDir tf
+  let htmlIndexPath = htmlIndexFile tf
   (sourceRanges, costCentres) <- toIOExcept $ buildDetailStructures evSummaryMap
   htmlFiles <- generateHtmlHeatmaps sourceRanges
   let costCentreOverview = generateCCOverviewHtml costCentres
 
   liftIO $ do
+    -- create the bench.html/ directory
     createDirectoryIfMissing True htmlDirPath
+    -- style is needed by both cc-overview and source ranges
+    T.writeFile (htmlDirPath </> "style.css") cssFile
+
+    -- index file
+    LT.writeFile
+      htmlIndexPath
+      (H.renderHtml $ generateHtmlIndex htmlIndexPath sourceRanges costCentres)
+
+    -- cost centre file
+    LT.writeFile
+      (htmlDirPath </> "cost-centres.html")
+      (H.renderHtml costCentreOverview)
+
+    -- write all the source-heatmap files
     forM_ (M.toList htmlFiles) $ \(srcFilePath, html) -> do
       let absPath =
             htmlDirPath </> makeRelative "/" (srcFilePath <> ".html")
       writeLazyTextFile absPath (H.renderHtml html)
-
-    T.writeFile (htmlDirPath </> "style.css") cssFile
-    LT.writeFile
-      (htmlDirPath </> "cost-centres.html")
-      (H.renderHtml costCentreOverview)
 
 writeLazyTextFile :: FilePath -> LT.Text -> IO ()
 writeLazyTextFile filepath content = do
@@ -384,6 +397,7 @@ analyseProfilingReport json_path r = do
         TargetFiles
           { summaryFile = top_dir </> "summary",
             timelineFile = top_dir </> "timeline",
+            htmlIndexFile = top_dir </> "index",
             htmlDir = top_dir </> "html/"
           }
   writeAnalysis tf r
@@ -424,6 +438,7 @@ analyseBenchResults json_path bench_results = do
                 TargetFiles
                   { summaryFile = name' <> ".summary",
                     timelineFile = name' <> ".timeline",
+                    htmlIndexFile = name' <> "-index.html",
                     htmlDir = name' <> ".html/"
                   }
            in writeAnalysis tf r

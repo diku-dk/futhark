@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module Futhark.Profile.Html (securedHashPath, generateHeatmapHtml, generateCCOverviewHtml) where
+module Futhark.Profile.Html (securedHashPath, generateHeatmapHtml, generateCCOverviewHtml, generateHtmlIndex) where
 
 import Control.Monad (join)
 import Control.Monad.State.Strict (State, evalState, get, modify)
@@ -13,7 +13,7 @@ import Data.Ord (Down (Down))
 import Data.String (IsString (fromString))
 import Data.Text qualified as T
 import Data.Word (Word8)
-import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), CostCentreName (CostCentreName, getCostCentreName), SourceRangeDetails (SourceRangeDetails, containingCostCentres), sourceRangeDetailsFraction)
+import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), CostCentreName (CostCentreName, getCostCentreName), CostCentres, SourceRangeDetails (SourceRangeDetails, containingCostCentres), SourceRanges, sourceRangeDetailsFraction)
 import Futhark.Profile.Details qualified as D
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
@@ -37,6 +37,16 @@ data RenderState = RenderState
   { _renderPos :: !SourcePos,
     remainingText :: !T.Text
   }
+
+generateHtmlIndex ::
+  -- | Path where the generated file will be
+  FilePath ->
+  M.Map FilePath SourceRanges ->
+  CostCentres ->
+  H.Html
+generateHtmlIndex selfPath _pathToSourceRanges _costCentres = do
+  H.docTypeHtml $ do
+    headHtml selfPath "Source Range and Cost Centre Index"
 
 generateHeatmapHtml :: FilePath -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
 generateHeatmapHtml sourcePath sourceText sourceRanges =
