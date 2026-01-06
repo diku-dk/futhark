@@ -42,7 +42,6 @@ import System.Directory (createDirectoryIfMissing, removePathForcibly)
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.FilePath
   ( dropExtension,
-    joinPath,
     makeRelative,
     splitPath,
     takeDirectory,
@@ -198,13 +197,10 @@ writeHtml tf evSummaryMap = do
     T.writeFile cssPath cssFile
 
     -- index file
-    let relCssPath =
-          splitPath cssPath
-            & reverse . take 2 . reverse
-            & joinPath
+    let relHtmlDirPath = last $ splitPath htmlDirPath
     LT.writeFile
       htmlIndexPath
-      (H.renderHtml $ generateHtmlIndex relCssPath sourceRanges costCentres)
+      (H.renderHtml $ generateHtmlIndex relHtmlDirPath sourceRanges costCentres)
 
     -- cost centre file
     LT.writeFile

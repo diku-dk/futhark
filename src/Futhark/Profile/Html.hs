@@ -10,6 +10,7 @@ import Data.List (sortOn)
 import Data.Loc (posFile)
 import Data.Map qualified as M
 import Data.Ord (Down (Down))
+import Data.Set (Set)
 import Data.String (IsString (fromString))
 import Data.Text qualified as T
 import Data.Word (Word8)
@@ -20,7 +21,7 @@ import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (hashText, showText)
 import Futhark.Util.Html (headHtml, headHtmlWithCss, relativise)
 import NeatInterpolation qualified as NI (text, trimming)
-import System.FilePath (takeFileName)
+import System.FilePath (takeFileName, (<.>), (</>))
 import Text.Blaze.Html5 ((!))
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
@@ -39,16 +40,66 @@ data RenderState = RenderState
   }
 
 generateHtmlIndex ::
-  -- | Path to the css file
+  -- | Path of the bench dir
   FilePath ->
   M.Map FilePath SourceRanges ->
   CostCentres ->
   H.Html
-generateHtmlIndex cssPath _pathToSourceRanges _costCentres = do
+generateHtmlIndex benchDir _pathToSourceRanges _costCentres = do
   H.docTypeHtml $ do
-    headHtmlWithCss
-      cssPath
-      "Source Range and Cost Centre Index"
+    headHtmlWithCss (benchDir </> "style.css") pageTitle
+    H.h2 $ H.string pageTitle
+    introductionIndex (T.pack benchDir)
+    sourceFileIndex benchDir (M.keysSet _pathToSourceRanges)
+  where
+    pageTitle = "Source File Index"
+
+introductionIndex :: T.Text -> H.Html
+introductionIndex benchDir = do
+  H.text
+    [NI.trimming|
+          This is the index file for the benchmark files in $benchDir.
+          The generated profile markup consists of highlighted source files
+          and the cost centre overview.
+          |]
+  H.h4 "Highlighted Source Files"
+  H.text
+    [NI.trimming|
+          All the source files that were contained in any cost centre for this
+          benchmark were higlighted and rendered.
+          This means that source ranges are shown with a background
+          color progressing from green to yellow to red, depending on the
+          amount of total time spent in cost centres containing this range.
+          Not every source location gets a color, that is because some parts
+          are simply optimized out or were not needed for the compilation of
+          this benchmark.
+          At the bottom of each Source File there is a listing of all ranges
+          in the source file and which cost centres affected the coloring.
+          |]
+  H.h4 $
+    H.a ! A.href (fromString $ T.unpack benchDir </> "cost-centres.html") $
+      H.text "Cost Centre Overview"
+  H.text
+    [NI.trimming|
+          The Cost Centre Overview contains all the cost centres recorded
+          during the last run of the benchmark. For every cost centre, there
+          is a table with statistics and also a list with links to all 
+          relevant source ranges.
+          |]
+
+sourceFileIndex :: FilePath -> Set FilePath -> H.Html
+sourceFileIndex benchDir paths = do
+  H.h3 $ H.text "Source Files (ordered alphabetically)"
+  H.ul $ do
+    mapM_ pathListEntry paths
+  where
+    pathListEntry path =
+      H.li
+        $ H.a
+          ! A.href (fromString pathRef)
+        $ H.string path
+      where
+        pathRef = benchDir </> securedHashPath path <.> ".html"
 
 generateHeatmapHtml :: FilePath -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
 generateHeatmapHtml sourcePath sourceText sourceRanges =
