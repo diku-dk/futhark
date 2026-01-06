@@ -6,7 +6,7 @@ import Control.Monad (join)
 import Control.Monad.State.Strict (State, evalState, get, modify)
 import Data.Bifunctor (bimap, first, second)
 import Data.Function ((&))
-import Data.List (sortOn)
+import Data.List (foldl', sortOn)
 import Data.Loc (posFile)
 import Data.Map qualified as M
 import Data.Ord (Down (Down))
