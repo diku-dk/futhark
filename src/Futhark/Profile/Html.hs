@@ -18,7 +18,7 @@ import Futhark.Profile.Details qualified as D
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (hashText, showText)
-import Futhark.Util.Html (headHtml, relativise)
+import Futhark.Util.Html (headHtml, headHtmlWithCss, relativise)
 import NeatInterpolation qualified as NI (text, trimming)
 import System.FilePath (takeFileName)
 import Text.Blaze.Html5 ((!))
@@ -39,14 +39,16 @@ data RenderState = RenderState
   }
 
 generateHtmlIndex ::
-  -- | Path where the generated file will be
+  -- | Path to the css file
   FilePath ->
   M.Map FilePath SourceRanges ->
   CostCentres ->
   H.Html
-generateHtmlIndex selfPath _pathToSourceRanges _costCentres = do
+generateHtmlIndex cssPath _pathToSourceRanges _costCentres = do
   H.docTypeHtml $ do
-    headHtml selfPath "Source Range and Cost Centre Index"
+    headHtmlWithCss
+      cssPath
+      "Source Range and Cost Centre Index"
 
 generateHeatmapHtml :: FilePath -> T.Text -> M.Map SR.SourceRange SourceRangeDetails -> H.Html
 generateHeatmapHtml sourcePath sourceText sourceRanges =

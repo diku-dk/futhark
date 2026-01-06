@@ -42,7 +42,9 @@ import System.Directory (createDirectoryIfMissing, removePathForcibly)
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.FilePath
   ( dropExtension,
+    joinPath,
     makeRelative,
+    splitPath,
     takeDirectory,
     takeFileName,
     (-<.>),
@@ -192,12 +194,17 @@ writeHtml tf evSummaryMap = do
     -- create the bench.html/ directory
     createDirectoryIfMissing True htmlDirPath
     -- style is needed by both cc-overview and source ranges
-    T.writeFile (htmlDirPath </> "style.css") cssFile
+    let cssPath = htmlDirPath </> "style.css"
+    T.writeFile cssPath cssFile
 
     -- index file
+    let relCssPath =
+          splitPath cssPath
+            & reverse . take 2 . reverse
+            & joinPath
     LT.writeFile
       htmlIndexPath
-      (H.renderHtml $ generateHtmlIndex htmlIndexPath sourceRanges costCentres)
+      (H.renderHtml $ generateHtmlIndex relCssPath sourceRanges costCentres)
 
     -- cost centre file
     LT.writeFile

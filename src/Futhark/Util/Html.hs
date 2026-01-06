@@ -2,6 +2,7 @@
 
 module Futhark.Util.Html
   ( relativise,
+    headHtmlWithCss,
     headHtml,
     cssFile,
   )
@@ -22,13 +23,16 @@ relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ makeRelative "/" dest
 
-headHtml :: FilePath -> String -> H.Html
-headHtml current titleText =
+headHtmlWithCss :: String -> String -> H.Html
+headHtmlWithCss cssPath titleText =
   H.head $
     H.meta
       ! A.charset "utf-8"
       <> H.title (fromString titleText)
       <> H.link
-        ! A.href (fromString $ relativise "style.css" current)
+        ! A.href (fromString cssPath)
         ! A.rel "stylesheet"
         ! A.type_ "text/css"
+
+headHtml :: FilePath -> String -> H.Html
+headHtml current = headHtmlWithCss (relativise "style.css" current)
