@@ -38,7 +38,7 @@ import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml)
 import Futhark.Profile.SourceRange (SourceRange)
 import Futhark.Profile.SourceRange qualified as SR
-import Futhark.Util (showText)
+import Futhark.Util (showText, hashText)
 import Futhark.Util.Options (mainWithOptions)
 import System.Directory (createDirectoryIfMissing, removePathForcibly)
 import System.Exit (ExitCode (ExitFailure), exitWith)
@@ -211,9 +211,12 @@ generateHtmlHeatmaps ::
   ExceptT T.Text IO (M.Map FilePath H.Html)
 generateHtmlHeatmaps fileToRanges = do
   sourceFiles <- loadAllFiles (M.keys fileToRanges)
+  let disambiguatePath (p :: FilePath)
+        = T.unpack (hashText $ T.pack p) <> "-" <> takeFileName p
+  let disambiguatedSourceFiles = M.mapKeys disambiguatePath sourceFiles
   let renderSingle path text =
         generateHeatmapHtml path text (fileToRanges M.! path)
-  pure $ M.mapWithKey renderSingle sourceFiles
+  pure $ M.mapWithKey renderSingle disambiguatedSourceFiles
 
 buildDetailStructures ::
   -- | mapping keys are: (name, provenance)
