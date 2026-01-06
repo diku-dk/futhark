@@ -54,7 +54,7 @@ subExpResType = subExpType . resSubExp
 mapType :: SubExp -> Lambda rep -> [Type]
 mapType outersize f =
   [ arrayOf t (Shape [outersize]) NoUniqueness
-    | t <- lambdaReturnType f
+  | t <- lambdaReturnType f
   ]
 
 -- | The type of a primitive operation.

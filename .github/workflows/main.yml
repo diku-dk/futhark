@@ -41,7 +41,7 @@ jobs:
 
     - uses: haskell-actions/setup@v2
       with:
-        ghc-version: '9.8.1'
+        ghc-version: '9.10.3'
 
     - uses: actions/cache@v4
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -115,7 +115,7 @@ jobs:
     - id: setup-haskell
       uses: haskell-actions/setup@v2
       with:
-        ghc-version: '9.8.1'
+        ghc-version: '9.10.3'
 
     - uses: actions/cache@v4
       name: Cache cabal stuff
