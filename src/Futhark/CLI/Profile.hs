@@ -1,5 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
-
 -- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
@@ -11,7 +9,6 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (Except)
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
-import Data.FileEmbed (embedStringFile)
 import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.List qualified as L
@@ -39,6 +36,7 @@ import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml)
 import Futhark.Profile.SourceRange (SourceRange)
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (hashText, showText)
+import Futhark.Util.Html (cssFile)
 import Futhark.Util.Options (mainWithOptions)
 import System.Directory (createDirectoryIfMissing, removePathForcibly)
 import System.Exit (ExitCode (ExitFailure), exitWith)
@@ -55,9 +53,6 @@ import System.IO (hPutStrLn, stderr)
 import Text.Blaze.Html.Renderer.Text qualified as H
 import Text.Blaze.Html5 qualified as H
 import Text.Printf (printf)
-
-cssFile :: T.Text
-cssFile = $(embedStringFile "rts/futhark-profile/style.css")
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
 commonPrefix _ [] = []

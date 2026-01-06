@@ -1,10 +1,22 @@
-module Futhark.Util.Html (relativise, headHtml) where
+{-# LANGUAGE TemplateHaskell #-}
 
+module Futhark.Util.Html
+  ( relativise,
+    headHtml,
+    cssFile,
+  )
+where
+
+import Data.FileEmbed (embedStringFile)
 import Data.String (fromString)
+import Data.Text qualified as T
 import System.FilePath (makeRelative, splitPath)
 import Text.Blaze.Html5 ((!))
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
+
+cssFile :: T.Text
+cssFile = $(embedStringFile "rts/style.css")
 
 relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =

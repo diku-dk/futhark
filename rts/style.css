@@ -224,3 +224,19 @@ main {
     color: #5f0220;
     text-decoration: none;
 }
+
+a.silent-anchor {
+  text-decoration: inherit;
+  color: inherit;
+}
+
+table, th, td {
+  border: 1px solid black;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+  text-align: center;
+}
