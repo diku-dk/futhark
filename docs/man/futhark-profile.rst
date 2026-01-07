@@ -14,7 +14,7 @@ futhark profile JSONFILES
 DESCRIPTION
 ===========
 
-This tool produces human- and browser-readable profiling information based on 
+This tool produces human- and browser-readable profiling information based on
 information collected with :ref:`futhark bench<futhark-bench(1)>`.
 Futhark has basic support for profiling.
 The system can collect information about the run-time behaviour
@@ -33,13 +33,15 @@ collected profiling information. If you neglect to pass ``--profile``,
 the profiling information will be missing. The information in the JSON
 file is complete, but it is difficult for humans to read.
 
-The next step is to run ``futhark profile`` on the JSON file.  For a
-JSON file ``prog.json``, this will create a *top level directory*
-``prog.prof`` that contains files with human-readable profiling
-information.  A set of files will be created for each benchmark
-dataset.  If the original invocation of ``futhark bench`` included
-multiple programs, then ``futhark profile`` will create subdirectories
-for each program (although all inside the same top level directory).
+The next step is to run ``futhark profile`` on the JSON file. For a JSON file
+``prog.json``, this will create a *top level directory* ``prog.prof`` that
+contains files with human-readable profiling information. A set of files will be
+created for each benchmark dataset. If the original invocation of ``futhark
+bench`` included multiple programs, then ``futhark profile`` will create
+subdirectories for each program (although all inside the same top level
+directory). If the source files passed to ``futhark bench`` are accessible via
+the original paths, then the directory will also contain HTML files with
+annotated source code.
 
 You can pass multiple JSON files to ``futhark profile``. Each will
 produce a distinct top level directory.
