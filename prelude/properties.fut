@@ -1,5 +1,7 @@
 def and (_: []bool) : bool = ???
 
+def For 't (_: []t) (_: i64 -> bool) : bool = ???
+
 def inf = ???
 
 def Assume (_: bool) : bool = ???

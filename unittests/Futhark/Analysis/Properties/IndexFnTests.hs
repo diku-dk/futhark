@@ -6,6 +6,8 @@ import Futhark.Analysis.Properties.Convert
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (subIndexFn)
 import Futhark.Analysis.Properties.Monad
+import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
+import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg)
 import Futhark.Analysis.Properties.Unify (renameSame, unify)
 import Futhark.Compiler.CLI (fileProg, readProgramOrDie)
@@ -674,7 +676,7 @@ tests =
                   body = cases [(Bool True, sHole xs)]
                 }
             ]
-        )
+        ),
         --   ),
         -- mkTest
         --   "tests/indexfn/srad.fut"
@@ -754,7 +756,38 @@ tests =
         --               }
         --           ]
         --   )
+      mkTest
+        "tests/indexfn/for_postcondition.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))]],
+                  body = cases [(Bool True, sym2SoP (Apply (Hole xs) [sHole i]) .+. int2SoP 1)]
+                }
+            ]
+        ),
+      mkTest
+        "tests/indexfn/for_precondition.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))]],
+                  body = cases [(Bool True, sym2SoP (Apply (Hole xs) [sHole i]))]
+                }
+            ]
+        ),
+      mkTest
+        "tests/indexfn/for_parsing.fut"
+        ( pure $ \(i, _, xs, _) ->
+             [ IndexFn
+                    { shape = [],
+                      body =
+                        cases
+                          [ (Bool True, sym2SoP . Prop $ For xs (Predicate i Boolean))
+                          ]
+                    }
+                ]
+        )
     ]
+
   where
     mkTest programFile expectedPat = testCase (basename programFile) $ do
       (_, imports, vns) <- readProgramOrDie programFile

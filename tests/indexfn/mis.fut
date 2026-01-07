@@ -103,7 +103,8 @@ def mk_sizes [nVerts]
 
 def mis_step_ [nVerts] [nEdges]
              (shape: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Equiv nEdges (sum x)})
-             (offsets: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x && Equiv x (scan (+) 0 shape)})
+             -- (offsets: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x && Equiv x (scan (+) 0 shape)})
+             (offsets: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
              (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
              (newI: [nVerts]bool)
              (C: *[nVerts]i64) (I: *[nVerts]i64)

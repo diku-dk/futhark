@@ -1130,8 +1130,8 @@ forwardPropertyPrelude f args =
         Just x <- justVName e_X -> do
           propArgs <- commonFiltPart x (param_filt, lam_filt) parts
           fmap (IndexFn []) . simplify . cases $ do
-            (c, pf, pps) <- propArgs
-            pure (c, pr $ Property.FiltPartInv x pf pps)
+            (pf, pps) <- propArgs
+            pure (Bool True, pr $ Property.FiltPartInv x pf pps)
     "FiltPart"
       | e_Y : e_X : e_filt : e_parts <- getArgs args,
         Just (param_filt, lam_filt) <- parsePredicate e_filt,
@@ -1141,8 +1141,8 @@ forwardPropertyPrelude f args =
           -- HINT make sure in \i -> pf, i gets the iterator of e_Y not e_X.
           propArgs <- commonFiltPart x (param_filt, lam_filt) parts
           fmap (IndexFn []) . simplify . cases $ do
-            (c, pf, pps) <- propArgs
-            pure (c, pr $ Property.FiltPart y x pf pps)
+            (pf, pps) <- propArgs
+            pure (Bool True, pr $ Property.FiltPart y x pf pps)
     "FiltPart2" -> forwardPropertyPrelude "FiltPart" args
     "For"
       | [e_X, e_pred] <- getArgs args,
@@ -1156,16 +1156,11 @@ forwardPropertyPrelude f args =
           -- However, properties in prelude are usually `Prop (Property u)`.
           -- `forward` returns `[IndexFn]`.
           -- We need to extract the property from the `IndexFn`.
-
-          -- HACK: We assume `lam_p` is a call to a property constructor (like `Monotonic`, `For` etc.)
-          -- which `forward` handles by returning an IndexFn with a Property payload.
-          f_prop <- forward lam_p
-          case f_prop of
-            [IndexFn [] cs]
-              | [(Bool True, p_val)] <- casesToList cs,
-                Just (Prop prop) <- justSym p_val ->
-                  pure (IndexFn [] $ cases [(Bool True, pr $ Property.For x (Property.Predicate param_i prop))])
-            _ -> error $ "Body of For predicate must return a single property, got: " <> prettyStr f_prop
+          (i, prop) <- inferLambdaIndexFn x (param_i, lam_p)
+          case justSym prop of
+            Just (Prop p) ->
+               pure (IndexFn [] $ cases [(Bool True, pr $ Property.For x (Property.Predicate i p))])
+            val -> error $ "Body of For predicate must return a single property, got: " <> prettyStr val
     _ -> do
       error $
         "Properties must be in A-normal form and not use wildcards: " <> prettyStr f <> " " <> prettyStr (NE.map snd args)
@@ -1180,39 +1175,33 @@ forwardPropertyPrelude f args =
     inf2Nothing x | Just (Var vn) <- justSym x, E.baseString vn == "inf" = Nothing
     inf2Nothing x = Just x
 
-    -- Map filter and partition lambdas over indices of X to infer their
-    -- index functions.
-    -- substitutions (e.g., sizes). Then extract the inferred cases to create
-    -- `Property.Predicate`s which is the internal representation of the lambdas.
-    -- Returns combined
-    commonFiltPart x (param_filt, lam_filt) parts = do
-      -- (Note that this essentially just uses the inferred size of X;
-      -- f_X could simply be the trivial function: for i < n . true => X[i].)
+    -- Infers the index function of a lambda term over the indices of X.
+    -- The result must be a single case index function.
+    inferLambdaIndexFn x (param, lam) = do
       res <- lookupIndexFn x
       case res of
         Just [f_X] | [[Forall i _]] <- shape f_X -> rollbackAlgEnv $ do
           let idx = IndexFn [] (cases [(Bool True, sVar i)])
-          bindLambdaBodyParams $ (param_filt, idx) : map ((,idx) . fst) parts
+          bindLambdaBodyParams [(param, idx)]
           addRelShape (shape f_X)
-          f_filt <- forward lam_filt >>= subst . IndexFn (shape f_X) . body . head
-          f_parts <- forM parts $ \(_, lam_part) ->
-            forward lam_part >>= subst . IndexFn (shape f_X) . body . head
+          res_f <- forward lam >>= subst . IndexFn (shape f_X) . body . head
+          case justSingleCase res_f of
+            Just e -> pure (i, e)
+            Nothing -> error $ "Lambda must return a single case index function: " <> prettyStr res_f
+        _ -> error "inferLambdaIndexFn: invalid array shape"
 
-          let g_parts = [g | f_part <- f_parts, g <- guards f_part]
-          unless (all ((== Bool True) . fst) g_parts) $
-            error "Predicates with if-statements not implemented yet."
+    -- Map filter and partition lambdas over indices of X to infer their
+    -- index functions.
+    commonFiltPart x (param_filt, lam_filt) parts = do
+      (i, filt) <- inferLambdaIndexFn x (param_filt, lam_filt)
+      parts_exprs <- mapM (fmap snd . inferLambdaIndexFn x) parts
 
-          pure $ do
-            (p_filt, filt) <- guards f_filt
-            pure
-              ( p_filt,
-                Property.Predicate i (sop2Symbol filt),
-                [ Property.Predicate i (sop2Symbol part)
-                  | (Bool True, part) <- g_parts
-                ]
-              )
-        _ -> do
-          error "Applying property to name bound to tuple?"
+      pure $ do
+        -- We assume that the filter and partitions are properties that depend on i.
+        pure
+          ( Property.Predicate i (sop2Symbol filt),
+            map (Property.Predicate i . sop2Symbol) parts_exprs
+          )
 
 scatterSs1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFnM Answer
 scatterSs1 (IndexFn ([Forall _ d_xs] : _) _) (e_is, is) = do
