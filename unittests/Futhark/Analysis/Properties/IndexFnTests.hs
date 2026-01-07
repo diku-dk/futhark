@@ -7,7 +7,6 @@ import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (subIndexFn)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
-import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg)
 import Futhark.Analysis.Properties.Unify (renameSame, unify)
 import Futhark.Compiler.CLI (fileProg, readProgramOrDie)
@@ -37,7 +36,7 @@ tests =
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
-                  body = cases [(Bool True, sym2SoP (Apply (Hole xs) [sVar i .+. int2SoP 1]) .-. sym2SoP (Apply (Hole xs) [sVar i]) )]
+                  body = cases [(Bool True, sym2SoP (Apply (Hole xs) [sVar i .+. int2SoP 1]) .-. sym2SoP (Apply (Hole xs) [sVar i]))]
                 }
             ]
         ),
@@ -677,91 +676,95 @@ tests =
                 }
             ]
         ),
-        --   ),
-        -- mkTest
-        --   "tests/indexfn/srad.fut"
-        --   ( pure $ \(i, n, xs, _) ->
-        --       [ IndexFn
-        --           { shape = [[Forall i (Iota (sHole n))]],
-        --             -- matches anything; we're just checking the program.
-        --             body = cases [(Bool True, sHole xs)]
-        --           }
-        --       ]
-        --  ),
-        -- mkTest
-        --   "tests/indexfn/quickhull.fut"
-        --   ( pure $ \(i, n, xs, _) ->
-        --       [ IndexFn
-        --           { shape = [Forall i (Iota (sHole n))],
-        --             -- matches anything; we're just checking the program.
-        --             body = cases [(Bool True, sHole xs)]
-        --           }
-        --       ]
-        --   ),
-        -- mkTest
-        --   "tests/indexfn/lolhull.fut"
-        --   ( pure $ \(i, n, xs, _) ->
-        --       [ IndexFn
-        --           { shape = [Forall i (Iota (sHole n))],
-        --             -- matches anything; we're just checking the program.
-        --             body = cases [(Bool True, sHole xs)]
-        --           }
-        --       ]
-        --   )
-        -- mkTest
-        --   "tests/indexfn/part3indices_alternative.fut"
-        --   ( newNameFromString "q" >>= \q -> pure $ \(i, n, p, j) ->
-        --       let p_i = Apply (Hole p) [sHole i]
-        --           p_j = Apply (Hole p) [sHole j]
-        --           q_i = Apply (Hole q) [sHole i]
-        --           q_j = Apply (Hole q) [sHole j]
-        --        in [ IndexFn
-        --               { shape = [],
-        --                 body =
-        --                   cases
-        --                     [ ( Bool True,
-        --                         sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) p_j)
-        --                       )
-        --                     ]
-        --               },
-        --             IndexFn
-        --               { shape = [],
-        --                 body =
-        --                   cases
-        --                     [ ( Bool True,
-        --                         sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) p_j)
-        --                           .+. sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) q_j)
-        --                       )
-        --                     ]
-        --               },
-        --             IndexFn
-        --               { shape = [Forall i (Iota (sHole n))],
-        --                 body =
-        --                   cases
-        --                     [ ( p_i,
-        --                         sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) p_j)
-        --                       ),
-        --                       ( neg p_i :&& q_i,
-        --                         -- Mind the gap in the sums due to the above predicate simplifying a -1 away.
-        --                         sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) p_j)
-        --                           .+. sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) p_j)
-        --                           .+. sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) q_j)
-        --                       ),
-        --                       ( neg p_i :&& neg q_i,
-        --                         sHole i
-        --                           .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) p_j)
-        --                           .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) q_j)
-        --                       )
-        --                     ]
-        --               }
-        --           ]
-        --   )
+      --   ),
+      -- mkTest
+      --   "tests/indexfn/srad.fut"
+      --   ( pure $ \(i, n, xs, _) ->
+      --       [ IndexFn
+      --           { shape = [[Forall i (Iota (sHole n))]],
+      --             -- matches anything; we're just checking the program.
+      --             body = cases [(Bool True, sHole xs)]
+      --           }
+      --       ]
+      --  ),
+      -- mkTest
+      --   "tests/indexfn/quickhull.fut"
+      --   ( pure $ \(i, n, xs, _) ->
+      --       [ IndexFn
+      --           { shape = [Forall i (Iota (sHole n))],
+      --             -- matches anything; we're just checking the program.
+      --             body = cases [(Bool True, sHole xs)]
+      --           }
+      --       ]
+      --   ),
+      -- mkTest
+      --   "tests/indexfn/lolhull.fut"
+      --   ( pure $ \(i, n, xs, _) ->
+      --       [ IndexFn
+      --           { shape = [Forall i (Iota (sHole n))],
+      --             -- matches anything; we're just checking the program.
+      --             body = cases [(Bool True, sHole xs)]
+      --           }
+      --       ]
+      --   )
+      -- mkTest
+      --   "tests/indexfn/part3indices_alternative.fut"
+      --   ( newNameFromString "q" >>= \q -> pure $ \(i, n, p, j) ->
+      --       let p_i = Apply (Hole p) [sHole i]
+      --           p_j = Apply (Hole p) [sHole j]
+      --           q_i = Apply (Hole q) [sHole i]
+      --           q_j = Apply (Hole q) [sHole j]
+      --        in [ IndexFn
+      --               { shape = [],
+      --                 body =
+      --                   cases
+      --                     [ ( Bool True,
+      --                         sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) p_j)
+      --                       )
+      --                     ]
+      --               },
+      --             IndexFn
+      --               { shape = [],
+      --                 body =
+      --                   cases
+      --                     [ ( Bool True,
+      --                         sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) p_j)
+      --                           .+. sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) q_j)
+      --                       )
+      --                     ]
+      --               },
+      --             IndexFn
+      --               { shape = [Forall i (Iota (sHole n))],
+      --                 body =
+      --                   cases
+      --                     [ ( p_i,
+      --                         sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) p_j)
+      --                       ),
+      --                       ( neg p_i :&& q_i,
+      --                         -- Mind the gap in the sums due to the above predicate simplifying a -1 away.
+      --                         sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) p_j)
+      --                           .+. sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) p_j)
+      --                           .+. sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) q_j)
+      --                       ),
+      --                       ( neg p_i :&& neg q_i,
+      --                         sHole i
+      --                           .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) p_j)
+      --                           .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) q_j)
+      --                       )
+      --                     ]
+      --               }
+      --           ]
+      --   )
       mkTest
         "tests/indexfn/for_postcondition.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
-                  body = cases [(Bool True, sym2SoP (Apply (Hole xs) [sHole i]) .+. int2SoP 1)]
+                  body =
+                    cases
+                      [ (sym2SoP (Apply (Hole xs) [sHole i]) :>= int2SoP 0, sym2SoP (Apply (Hole xs) [sHole i])),
+                        (sym2SoP (Apply (Hole xs) [sHole i]) :< int2SoP 0, int2SoP 0)
+                      ]
                 }
             ]
         ),
@@ -777,17 +780,16 @@ tests =
       mkTest
         "tests/indexfn/for_parsing.fut"
         ( pure $ \(i, _, xs, _) ->
-             [ IndexFn
-                    { shape = [],
-                      body =
-                        cases
-                          [ (Bool True, sym2SoP . Prop $ For xs (Predicate i Boolean))
-                          ]
-                    }
-                ]
+            [ IndexFn
+                { shape = [],
+                  body =
+                    cases
+                      [ (Bool True, sym2SoP . Prop $ For xs (Predicate i Boolean))
+                      ]
+                }
+            ]
         )
     ]
-
   where
     mkTest programFile expectedPat = testCase (basename programFile) $ do
       (_, imports, vns) <- readProgramOrDie programFile

@@ -94,13 +94,6 @@ def remove_neighbour_and_self [nVerts] (marked: []i64) (targets: []i64)
   let C = scatter C targets zeros2
   in scatter C marked zeros1
 
-def mk_sizes [nVerts]
-             (nEdges: {i64 | \x -> Range x (0,inf)})
-             (shape: {[nVerts]i64 | \x -> Range x (0,nEdges+1)})
-             (newI: [nVerts]bool)
-             : {[nVerts]i64 | \y -> Range y (0,nEdges+1)} =
-  map (\v -> if newI[v] then shape[v] else 0) (iota nVerts)
-
 def mis_step_ [nVerts] [nEdges]
              (shape: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Equiv nEdges (sum x)})
              -- (offsets: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x && Equiv x (scan (+) 0 shape)})
@@ -116,15 +109,13 @@ def mis_step_ [nVerts] [nEdges]
   let I = scatter I targets newI_i64
 
   -- For each newly added vertex, get its neighbours
-  -- let szs = map (\v -> if newI[v] then shape[v] else 0) (iota nVerts)
-  let szs = mk_sizes nEdges shape newI
+  let szs = map (\v -> if newI[v] then shape[v] else 0) (iota nVerts)
   let (idxs, flags) = segment_ids szs
   let ones = map (\_ -> 1) flags
   let iotas_p1 = sgm_sum flags ones
   let iotas = map (\i -> i-1) iotas_p1
 
   let marked_idxs = map2 (\i j -> offsets[i] + j) idxs iotas
-  -- let marked = map2 (\i j -> edges[offsets[i] + j]) idxs iotas
   let marked = map (\i -> edges[i]) marked_idxs
 
   -- Remove the vectors neighbours and self
