@@ -50,7 +50,8 @@ propertyPrelude =
       "FiltPartInv",
       "FiltPart",
       "FiltPartInv2",
-      "FiltPart2"
+      "FiltPart2",
+      "For"
     ]
 
 newIndexFn :: (Pretty u) => E.VName -> E.TypeBase E.Exp u -> IndexFnM [IndexFn]
@@ -1143,6 +1144,28 @@ forwardPropertyPrelude f args =
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPart y x pf pps)
     "FiltPart2" -> forwardPropertyPrelude "FiltPart" args
+    "For"
+      | [e_X, e_pred] <- getArgs args,
+        Just x <- justVName e_X,
+        Just (param_i, lam_p) <- parsePredicate e_pred -> do
+          -- Recursively parse the property body.
+          -- We expect the lambda body to evaluate to a Property.
+          -- Since we're parsing a property prelude, we can reuse forwardPropertyPrelude logic
+          -- if we can extract the function name and args again, OR general forward if it's an expression
+          -- that evaluates to a property.
+          -- However, properties in prelude are usually `Prop (Property u)`.
+          -- `forward` returns `[IndexFn]`.
+          -- We need to extract the property from the `IndexFn`.
+
+          -- HACK: We assume `lam_p` is a call to a property constructor (like `Monotonic`, `For` etc.)
+          -- which `forward` handles by returning an IndexFn with a Property payload.
+          f_prop <- forward lam_p
+          case f_prop of
+            [IndexFn [] cs]
+              | [(Bool True, p_val)] <- casesToList cs,
+                Just (Prop prop) <- justSym p_val ->
+                  pure (IndexFn [] $ cases [(Bool True, pr $ Property.For x (Property.Predicate param_i prop))])
+            _ -> error $ "Body of For predicate must return a single property, got: " <> prettyStr f_prop
     _ -> do
       error $
         "Properties must be in A-normal form and not use wildcards: " <> prettyStr f <> " " <> prettyStr (NE.map snd args)

@@ -105,18 +105,18 @@ p =>? q
   | p == q = pure Yes
   | q `elem` conjToList (toCNF p) = pure Yes
   | otherwise = do
-  p' <- simplify p
-  rollbackAlgEnv
-    ( do
-        printM 7 "  * ALGEBRA "
-        printAlgebra 7 p
-        printAlgebra 7 q
-        printAlgEnv 7
-    )
-  printTrace 6 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q) $
-    pure (answerFromBool $ p' == q)
-      `orM` isFalse p'
-      `orM` dnfQuery p (check q) -- NOTE uses unsimplified p in query.
+      p' <- simplify p
+      rollbackAlgEnv
+        ( do
+            printM 7 "  * ALGEBRA "
+            printAlgebra 7 p
+            printAlgebra 7 q
+            printAlgEnv 7
+        )
+      printTrace 6 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q) $
+        pure (answerFromBool $ p' == q)
+          `orM` isFalse p'
+          `orM` dnfQuery p (check q) -- NOTE uses unsimplified p in query.
 
 infixl 8 =>?
 
@@ -295,6 +295,10 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 then pure Yes
                 else pure Unknown
         _ -> pure Unknown
+        _ -> pure Unknown
+    alreadyKnown (For {}) =
+      -- TODO: Implement alreadyKnown for For property
+      pure Unknown
     alreadyKnown _ = pure Unknown
 
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
@@ -433,6 +437,9 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     matchProof (FiltPart y x pf pps) = do
       f_Y <- getFn y
       newProver (FPV2 f_Y x pf pps)
+    matchProof (For {}) =
+      -- TODO: Implement proof for For property
+      pure Unknown
 
     getFn vn = do
       fs <- lookupIndexFn vn

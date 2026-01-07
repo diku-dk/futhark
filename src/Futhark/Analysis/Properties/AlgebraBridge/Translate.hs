@@ -83,6 +83,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     (BijectiveRCD x rcd img) -> BijectiveRCD x <$> fromAlgebra rcd <*> fromAlgebra img
     (FiltPartInv x pf pps) -> FiltPartInv x <$> fromAlgebra pf <*> mapM fromAlgebra pps
     (FiltPart y x pf pps) -> FiltPart y x <$> fromAlgebra pf <*> mapM fromAlgebra pps
+    (For x (Predicate i p)) -> For x . Predicate i <$> fromAlgebra p
   toAlgebra = \case
     Boolean -> pure Boolean
     (Disjoint vns) -> pure (Disjoint vns)
@@ -98,6 +99,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     (BijectiveRCD x rcd img) -> BijectiveRCD x <$> toAlgebra rcd <*> toAlgebra img
     (FiltPartInv x pf pps) -> FiltPartInv x <$> toAlgebra pf <*> mapM toAlgebra pps
     (FiltPart y x pf pps) -> FiltPart y x <$> toAlgebra pf <*> mapM toAlgebra pps
+    (For x (Predicate i p)) -> For x . Predicate i <$> toAlgebra p
 
 -- HINT currently unused constraint from addRel/MonadSoP.
 instance ToSoP Algebra.Symbol Symbol where

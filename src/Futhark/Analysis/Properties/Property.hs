@@ -49,6 +49,7 @@ data Property u
     BijectiveRCD VName (SoP u, SoP u) (SoP u, SoP u)
   | FiltPartInv VName (Predicate u) [Predicate u]
   | FiltPart VName VName (Predicate u) [Predicate u]
+  | For VName (Predicate (Property u))
   deriving (Eq, Ord, Show)
 
 data Predicate u = Predicate VName u
@@ -65,7 +66,7 @@ instance (Pretty u) => Pretty (Property u) where
   pretty (Disjoint s) =
     "Disjoint" <+> parens (commasep $ map prettyName $ S.toList s)
   pretty (UserFacingDisjoint p) =
-    blueString "Disjoint"  <+> pretty p
+    blueString "Disjoint" <+> pretty p
   pretty (Monotonic x dir) = "Mono" <+> prettyName x <+> pretty dir
   pretty (Equiv x y) =
     blueString "Equiv" <+> prettyName x <+> pretty y
@@ -79,6 +80,8 @@ instance (Pretty u) => Pretty (Property u) where
     blueString "FiltPartInv" <+> prettyName x <+> parens (pretty pf) <+> pretty pps
   pretty (FiltPart x y pf pps) =
     blueString "FiltPart" <+> prettyName x <+> prettyName y <+> parens (pretty pf) <+> pretty pps
+  pretty (For x prop) =
+    blueString "For" <+> prettyName x <+> parens (pretty prop)
 
 instance (Pretty u) => Pretty (Predicate u) where
   pretty (Predicate vn e) = "λ" <> prettyName vn <> dot <+> pretty e
@@ -130,6 +133,7 @@ askSimProp prop = (`askPropertyWith` getSimilarProp)
     match (BijectiveRCD {}) (BijectiveRCD {}) = True
     match (FiltPartInv {}) (FiltPartInv {}) = True
     match (FiltPart {}) (FiltPart {}) = True
+    match (For {}) (For {}) = True
     match _ _ = False
 
 askRng :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
@@ -214,6 +218,7 @@ nameAffectedBy (Injective x _) = x
 nameAffectedBy (BijectiveRCD x _ _) = x
 nameAffectedBy (FiltPartInv x _ _) = x
 nameAffectedBy (FiltPart y _x _ _) = y
+nameAffectedBy (For x _) = x
 nameAffectedBy _ = undefined
 
 cloneProperty :: VName -> Property u -> Property u
@@ -223,4 +228,5 @@ cloneProperty x (Injective _ a) = Injective x a
 cloneProperty x (BijectiveRCD _ a b) = BijectiveRCD x a b
 cloneProperty x (FiltPartInv _ a b) = FiltPartInv x a b
 cloneProperty x (FiltPart _ a b c) = FiltPart x a b c
+cloneProperty x (For _ a) = For x a
 cloneProperty _ _ = undefined
