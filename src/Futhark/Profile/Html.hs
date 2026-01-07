@@ -147,6 +147,7 @@ generateCCOverviewHtml costCentres = do
               $ H.a
                 ! A.href (fromString $ '#' : T.unpack name)
                 ! A.class_ "silent-anchor"
+                ! A.title "Click to jump to details"
               $ H.text name
             mapM_
               (H.td . H.string)
