@@ -18,14 +18,16 @@ module Futhark.Analysis.Properties.Property
     askRng,
     askBijectiveRCD,
     cloneProperty,
+    mapProperty,
   )
 where
 
 import Control.Monad (unless)
+import Data.Functor.Identity (Identity (..), runIdentity)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.Util
 import Futhark.SoP.Monad (MonadSoP, askPropertyWith)
-import Futhark.SoP.SoP (SoP)
+import Futhark.SoP.SoP (SoP, mapSymM)
 import Futhark.Util.Pretty
 import Language.Futhark (VName)
 
@@ -230,3 +232,32 @@ cloneProperty x (FiltPartInv _ a b) = FiltPartInv x a b
 cloneProperty x (FiltPart _ a b c) = FiltPart x a b c
 cloneProperty x (For _ a) = For x a
 cloneProperty _ _ = undefined
+
+mapProperty :: (Ord u, Ord v) => (u -> v) -> Property u -> Property v
+mapProperty f = runIdentity . mapPropertyM (pure . f)
+
+mapPropertyM :: (Monad m, Ord u, Ord v) => (u -> m v) -> Property u -> m (Property v)
+mapPropertyM f prop = case prop of
+  Boolean -> pure Boolean
+  Disjoint s -> pure (Disjoint s)
+  UserFacingDisjoint ps -> UserFacingDisjoint <$> mapM (mapPredicateM f) ps
+  Monotonic x dir -> pure (Monotonic x dir)
+  Equiv x sop -> Equiv x <$> mapSymM f sop
+  Rng x (a, b) ->
+    Rng x <$> ((,) <$> traverse (mapSymM f) a <*> traverse (mapSymM f) b)
+  Injective x rcd ->
+    Injective x
+      <$> traverse (\(a, b) -> (,) <$> mapSymM f a <*> mapSymM f b) rcd
+  BijectiveRCD x (a, b) (c, d) ->
+    BijectiveRCD x
+      <$> ((,) <$> mapSymM f a <*> mapSymM f b)
+      <*> ((,) <$> mapSymM f c <*> mapSymM f d)
+  FiltPartInv x pf pps ->
+    FiltPartInv x <$> mapPredicateM f pf <*> mapM (mapPredicateM f) pps
+  FiltPart x y pf pps ->
+    FiltPart x y <$> mapPredicateM f pf <*> mapM (mapPredicateM f) pps
+  For x pred ->
+    For x <$> mapPredicateM (mapPropertyM f) pred
+
+mapPredicateM :: (Monad m) => (u -> m v) -> Predicate u -> m (Predicate v)
+mapPredicateM f (Predicate vn u) = Predicate vn <$> f u

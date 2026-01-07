@@ -338,6 +338,8 @@ instance (Ord a, Renameable a) => Renameable (Property a) where
     FiltPartInv x <$> rename_ vns tau pf <*> mapM (rename_ vns tau) pps
   rename_ vns tau (FiltPart x y pf pps) =
     FiltPart x y <$> rename_ vns tau pf <*> mapM (rename_ vns tau) pps
+  rename_ vns tau (For x pred) =
+    For x <$> rename_ vns tau pred
 
 instance Unify VName a where
   unify_ _ x y
@@ -395,6 +397,8 @@ instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Property a)
     unifiesPredicates k (zip (pf1 : pps1) (pf2 : pps2))
   unify_ k (FiltPart y x pf1 pps1) (FiltPart y' x' pf2 pps2) | y == y', x == x' = do
     unifiesPredicates k (zip (pf1 : pps1) (pf2 : pps2))
+  unify_ k (For x1 (Predicate i1 p1)) (For x2 (Predicate i2 p2))
+    | x1 == x2, i1 == i2 = unify_ k p1 p2
   unify_ _ _ _ = fail "no unify"
 
 unifiesPredicates :: (Ord u, Rep u u, Unify u u, Hole u) => VName -> [(Predicate u, Predicate u)] -> MaybeT IndexFnM (Replacement u)
@@ -425,3 +429,5 @@ instance (FreeVariables u, Ord u) => FreeVariables (Property u) where
   fv (BijectiveRCD x rcd img) = fv x <> fv rcd <> fv img
   fv (FiltPartInv x pf pps) = fv x <> fv pf <> S.unions (map fv pps)
   fv (FiltPart x y pf pps) = fv x <> fv y <> fv pf <> S.unions (map fv pps)
+  fv (For x (Predicate i p)) = fv x <> fv p S.\\ S.singleton i
+

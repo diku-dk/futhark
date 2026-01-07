@@ -4,7 +4,7 @@ module Futhark.Analysis.Properties.SymbolPlus (toSumOfSums, repVName, repPropert
 
 import Data.Map qualified as M
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.Property (Property (..))
+import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Rep (..), Replacement, ReplacementBuilder (..), Unify (..), freshName, repPredicate, repTuple, unifies_)
 import Futhark.SoP.SoP (SoP, int2SoP, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.))
@@ -135,6 +135,10 @@ repProperty s (FiltPartInv x pf pps) =
   FiltPartInv (repVName s x) (repPredicate s pf) (map (repPredicate s) pps)
 repProperty s (FiltPart y x pf pps) =
   FiltPart (repVName s y) (repVName s x) (repPredicate s pf) (map (repPredicate s) pps)
+repProperty s (For x (Predicate i p)) =
+  let s' = M.delete i s
+   in For (repVName s x) (Predicate i (repProperty s' p))
+
 
 instance Hole Symbol where
   justHole (Hole x) = Just x

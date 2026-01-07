@@ -68,6 +68,8 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (Property a) where
     pf' <- astMap m pf
     pps' <- mapM (astMap m) pps
     pure $ FiltPart x y pf' pps'
+  astMap m (For x (Predicate i p)) =
+    For x . Predicate i <$> astMap m p
 
 instance ASTMappable Symbol Symbol where
   astMap _ Recurrence = pure Recurrence
@@ -159,6 +161,7 @@ instance ASTFoldable Symbol (Property Symbol) where
   astFold m acc (FiltPart _ _ pf pps) = do
     acc' <- astFold m acc pf
     foldM (astFold m) acc' pps
+  astFold m acc (For _ (Predicate _ p)) = astFold m acc p
 
 instance ASTFoldable Symbol Symbol where
   astFold m acc e@(Sum _ lb ub x) =
