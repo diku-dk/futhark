@@ -27,7 +27,7 @@ import System.IO
 import Text.Blaze.Html.Renderer.Text
 
 cssFile :: T.Text
-cssFile = $(embedStringFile "rts/futhark-doc/style.css")
+cssFile = $(embedStringFile "rts/style.css")
 
 data DocConfig = DocConfig
   { docOutput :: Maybe FilePath,

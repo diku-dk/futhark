@@ -16,12 +16,13 @@ import Data.Set qualified as S
 import Data.String (fromString)
 import Data.Text qualified as T
 import Data.Version
+import Futhark.Util.Html (headHtml, relativise)
 import Futhark.Util.Pretty (Doc, docText, pretty)
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Warnings
-import System.FilePath (makeRelative, splitPath, (-<.>), (</>))
+import System.FilePath (makeRelative, (-<.>), (</>))
 import Text.Blaze.Html5 (AttributeValue, Html, toHtml, (!))
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
@@ -285,17 +286,7 @@ indexPage important_imports imports documented fm =
 
 addBoilerplate :: String -> String -> Html -> Html
 addBoilerplate current titleText content =
-  let headHtml =
-        H.head $
-          H.meta
-            ! A.charset "utf-8"
-            <> H.title (fromString titleText)
-            <> H.link
-              ! A.href (fromString $ relativise "style.css" current)
-              ! A.rel "stylesheet"
-              ! A.type_ "text/css"
-
-      navigation =
+  let navigation =
         H.ul ! A.id "navigation" $
           H.li (H.a ! A.href (fromString $ relativise "index.html" current) $ "Contents")
             <> H.li (H.a ! A.href (fromString $ relativise "doc-index.html" current) $ "Index")
@@ -305,7 +296,7 @@ addBoilerplate current titleText content =
           <> (H.a ! A.href futhark_doc_url) "futhark-doc"
           <> " "
           <> fromString (showVersion version)
-   in headHtml
+   in headHtml current titleText
         <> H.body
           ( (H.div ! A.id "header") (H.h1 (toHtml titleText) <> navigation)
               <> (H.div ! A.id "content") content
@@ -682,10 +673,6 @@ paramHtml pat = do
       v' <- vnameHtml v
       pure $ parens $ v' <> ": " <> dietHtml d <> t'
     Unnamed -> pure t'
-
-relativise :: FilePath -> FilePath -> FilePath
-relativise dest src =
-  concat (replicate (length (splitPath src) - 1) "../") ++ makeRelative "/" dest
 
 dimDeclHtml :: Size -> DocM Html
 dimDeclHtml = pure . brackets . toHtml . prettyString
