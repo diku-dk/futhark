@@ -101,8 +101,10 @@ dnfQuery p query =
 
 -- Check whether p implies q.
 (=>?) :: Symbol -> Symbol -> IndexFnM Answer
-p =>? q | p == q = pure Yes
-p =>? q = do
+p =>? q
+  | p == q = pure Yes
+  | q `elem` conjToList (toCNF p) = pure Yes
+  | otherwise = do
   p' <- simplify p
   rollbackAlgEnv
     ( do

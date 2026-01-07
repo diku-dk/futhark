@@ -66,15 +66,6 @@ def slice [n] 't
           (b: {i64 | \b' -> Range b' (0,n+1)}): {[]t | \_ -> true} =
   map (\i -> x[i + a]) (iota (b - a))
 
--- def can_add [nEdges]
---             (nVerts: { i64 | \ x -> 0 <= x })
---             (vertexes: {[nVerts+1]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
---             (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
---             (random_state: [nVerts]i64)
---             (C: [nVerts]i64)
---             (index: { i64 | \ x -> Range x (0,nVerts) })
---             : {bool | \_ -> true} =
-
 def can_add [nVerts] [nEdges]
             (shape: {[nVerts]i64 | \x -> Range x (0,nEdges+1)})
             (offsets: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
@@ -96,11 +87,6 @@ def can_add [nVerts] [nEdges]
     let valid = sum arr
     in valid == 0
 
-def mark_neighbour (offsets: []i64) (edges: []i64) (index: i64)
-                   (i: i64): i64 =
-  let edgeStartIndex = offsets[index]
-  in edges[edgeStartIndex + i]
-
 def remove_neighbour_and_self [nVerts] (marked: []i64) (targets: []i64)
                                        (C: *[nVerts]i64): *[nVerts]i64 =
   let zeros1 = map (\_ -> 0) marked
@@ -108,12 +94,58 @@ def remove_neighbour_and_self [nVerts] (marked: []i64) (targets: []i64)
   let C = scatter C targets zeros2
   in scatter C marked zeros1
 
+def mk_sizes [nVerts]
+             (nEdges: {i64 | \x -> Range x (0,inf)})
+             (shape: {[nVerts]i64 | \x -> Range x (0,nEdges+1)})
+             (newI: [nVerts]bool)
+             : {[nVerts]i64 | \y -> Range y (0,nEdges+1)} =
+  map (\v -> if newI[v] then shape[v] else 0) (iota nVerts)
+
+def mis_step_ [nVerts] [nEdges]
+             (shape: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Equiv nEdges (sum x)})
+             (offsets: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x && Equiv x (scan (+) 0 shape)})
+             (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
+             (newI: [nVerts]bool)
+             (C: *[nVerts]i64) (I: *[nVerts]i64)
+             : {(*[nVerts]i64, *[nVerts]i64) | \_ -> true} =
+  -- Map the index of each 0-flag to -1, as to be ignored by scatter
+  let targets = map2 (\added j -> if added then j else -1) newI (iota nVerts)
+  -- Update our MIS with found values
+  let newI_i64 = map (\b -> if b then 1 else 0) newI
+  let I = scatter I targets newI_i64
+
+  -- For each newly added vertex, get its neighbours
+  -- let szs = map (\v -> if newI[v] then shape[v] else 0) (iota nVerts)
+  let szs = mk_sizes nEdges shape newI
+  let (idxs, flags) = segment_ids szs
+  let ones = map (\_ -> 1) flags
+  let iotas_p1 = sgm_sum flags ones
+  let iotas = map (\i -> i-1) iotas_p1
+
+  let marked_idxs = map2 (\i j -> offsets[i] + j) idxs iotas
+  -- let marked = map2 (\i j -> edges[offsets[i] + j]) idxs iotas
+  let marked = map (\i -> edges[i]) marked_idxs
+
+  -- Remove the vectors neighbours and self
+  let C = remove_neighbour_and_self marked targets C
+  in (C, I)
+
+def mis_step [nVerts] [nEdges]
+             (shape: {[nVerts]i64 | \x -> Range x (0,nEdges+1)})
+             (offsets: {[nVerts]i64 | \x -> Range x (0,nEdges+1) && Monotonic (<=) x})
+             (edges: {[nEdges]i64 | \x -> Range x (0, nVerts)})
+             (random_state: [nVerts]i64)
+             (C: *[nVerts]i64) (I: *[nVerts]i64)
+             : {(*[nVerts]i64, *[nVerts]i64) | \_ -> true} =
+  -- Get an array of flags for which vertexes can be added to MIS
+  let newI = map (\i -> can_add shape offsets edges random_state C i) (iota nVerts)
+  in mis_step_ shape offsets edges newI C I
+
 let MIS [nVerts] (nEdges: i64)
                  (shape: {[nVerts]i64 | \x -> Range x (0,nEdges+1)})
                  (edges: {[]i64 | \x -> Range x (0, nVerts)})
                  (random_state: [nVerts]i64) (C: *[nVerts]i64)
                  (I: *[nVerts]i64)
-                 (indexes: {[]i64 | \x -> Range x (0,nVerts)})
                  : {[]i64 | \_ -> true} =
   -- Reconstruct offsets from shape for O(1) edge access
   let offsets_inclusive = scan (+) 0 shape
@@ -121,26 +153,7 @@ let MIS [nVerts] (nEdges: i64)
 
   -- Loop until every vertex is added to or excluded from the MIS
   let (_, I) = loop (C, I) while (i64.sum C) > 0 do
-    -- Get an array of flags for which vertexes can be added to MIS
-    let newI = map (\i -> can_add shape offsets edges random_state C i) indexes
-    -- Map the index of each 0-flag to -1, as to be ignored by scatter
-    let targets = map2 (\added j -> if added then j else -1) newI indexes
-    -- Update our MIS with found values
-    let newI_i64 = map (\b -> if b then 1 else 0) newI
-    let I = scatter I targets newI_i64
-
-    -- For each newly added vertex, get its neighbours
-    let szs = map (\v -> edges_of_vertex_or_0 shape newI v) indexes
-    let (idxs, flags) = segment_ids szs
-    let iota_vals = map (\f -> if f then 0 else 1) flags
-    let iotas = sgm_sum flags iota_vals
-    
-    let marked = map2 (\i j -> mark_neighbour offsets edges indexes[i] j)
-                      idxs iotas
-
-    -- Remove the vectors neighbours and self
-    let C = remove_neighbour_and_self marked targets C
-    in (C, I)
+    mis_step shape offsets edges random_state C I
   in I
 
 -- Input uses the Adjacency graph description:
@@ -181,7 +194,7 @@ let MIS [nVerts] (nEdges: i64)
 --   let extended_vertexes = vertexes_64 ++ (map (\_ -> nEdges) (iota 1))
 --   let shape = map (\i -> extended_vertexes[i+1] - extended_vertexes[i]) indexes
 
---   let res = MIS nEdges shape edges_64 random_state C I indexes
+--   let res = MIS nEdges shape edges_64 random_state C I
 
 --   in map (\x -> i32.i64 x) res
 
