@@ -50,8 +50,7 @@ propertyPrelude =
       "FiltPartInv",
       "FiltPart",
       "FiltPartInv2",
-      "FiltPart2",
-      "and"
+      "FiltPart2"
     ]
 
 newIndexFn :: (Pretty u) => E.VName -> E.TypeBase E.Exp u -> IndexFnM [IndexFn]
@@ -1144,14 +1143,6 @@ forwardPropertyPrelude f args =
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPart y x pf pps)
     "FiltPart2" -> forwardPropertyPrelude "FiltPart" args
-    "and" | [e_xs] <- getArgs args -> do
-      -- No-op: The argument e_xs is a boolean array; each branch will
-      -- be checked in refinements.
-      -- XXX but we lose information about iterator at check site, hm...
-      xss <- forward e_xs
-      case xss of
-        [xs] -> pure xs
-        _ -> undefined
     _ -> do
       error $
         "Properties must be in A-normal form and not use wildcards: " <> prettyStr f <> " " <> prettyStr (NE.map snd args)
