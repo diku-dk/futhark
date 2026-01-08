@@ -120,12 +120,47 @@ generateCCOverviewHtml :: M.Map CostCentreName CostCentreDetails -> H.Html
 generateCCOverviewHtml costCentres = do
   headHtml "cost-centres.html" "Cost Centre Overview"
   H.body $ do
-    H.h2 $ H.text "Cost Centres (ordered by fraction)"
+    H.h2 $ H.text "Cost Centre Table (ordered by fraction)"
+    ccTable
+
+    H.h2 $ H.text "Cost Centre Details (ordered by fraction)"
     ccDetailTables
   where
+    orderAscending = sortOn (Down . D.fraction . snd)
+    ccTable = H.table $ do
+      H.tr $
+        mapM_
+          H.th
+          [ "Name",
+            "Fraction",
+            "Event Count",
+            "Total Time (µs)",
+            "Minimum Time (µs)",
+            "Maximum Time (µs)"
+          ]
+      mapM_ (uncurry row) . orderAscending $ M.toList costCentres
+      where
+        row (CostCentreName name) (CostCentreDetails fraction _ summary) =
+          H.tr $ do
+            H.td
+              $ fractionColored fraction
+              $ H.a
+                ! A.href (fromString $ '#' : T.unpack name)
+                ! A.class_ "silent-anchor"
+                ! A.title "Click to jump to details"
+              $ H.text name
+            mapM_
+              (H.td . H.string)
+              [ printf "%.4f" fraction,
+                show $ ES.evCount summary,
+                printf "%.2f" $ ES.evSum summary,
+                printf "%.2f" $ ES.evMin summary,
+                printf "%.2f" $ ES.evMax summary
+              ]
+
     ccDetailTables =
       M.toList costCentres
-        & sortOn (Down . D.fraction . snd)
+        & orderAscending
         & mapM_ (uncurry renderCostCentreDetails)
 
 renderCostCentreDetails :: CostCentreName -> CostCentreDetails -> H.Html
