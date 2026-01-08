@@ -424,15 +424,15 @@ newWidth (inp : _) _ = arraySize 0 $ inputType inp
 -- | The lambda used in a given SOAC.
 lambda :: SOAC rep -> Lambda rep
 lambda (Stream _ _ _ lam) = lam
-lambda (Screma _ _ (ScremaForm lam _ _)) = lam
+lambda (Screma _ _ (ScremaForm lam _ _ _)) = lam
 lambda (Hist _ _ _ lam) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda rep -> SOAC rep -> SOAC rep
 setLambda lam (Stream w arrs nes _) =
   Stream w arrs nes lam
-setLambda lam (Screma w arrs (ScremaForm _ scan red)) =
-  Screma w arrs (ScremaForm lam scan red)
+setLambda lam (Screma w arrs (ScremaForm _ scan red post_lam)) =
+  Screma w arrs (ScremaForm lam scan red post_lam)
 setLambda lam (Hist w ops inps _) =
   Hist w ops inps lam
 
@@ -529,10 +529,10 @@ soacToStream soac = do
           --
           -- array result and input IDs of the stream's lambda
           strm_resids <- mapM (newIdent "res") loutps
-          let insoac =
-                Futhark.Screma chvar (map paramName strm_inpids) $
-                  Futhark.mapSOAC lam'
-              insstm = mkLet strm_resids $ Op insoac
+          insoac <-
+            Futhark.Screma chvar (map paramName strm_inpids)
+              <$> Futhark.mapSOAC lam'
+          let insstm = mkLet strm_resids $ Op insoac
               strmbdy = mkBody (oneStm insstm) $ map (subExpRes . Var . identName) strm_resids
               strmpar = chunk_param : strm_inpids
               strmlam = Lambda strmpar loutps strmbdy
@@ -560,9 +560,11 @@ soacToStream soac = do
           strmlam <- fmap fst . runBuilder . mkLambda strmpar $ do
             -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
             (scan0_ids, map_resids) <-
-              fmap (splitAt (length scan_arr_ts)) . letTupExp "scan" . Op $
-                Futhark.Screma chvar (map paramName strm_inpids) $
-                  Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
+              fmap (splitAt (length scan_arr_ts))
+                . letTupExp "scan"
+                . Op
+                . Futhark.Screma chvar (map paramName strm_inpids)
+                =<< Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
             -- 2. let outerszm1id = chunksize - 1
             outszm1id <-
               letSubExp "outszm1" . BasicOp $
@@ -589,8 +591,10 @@ soacToStream soac = do
             let (addlelstm, addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
             -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
             strm_resids <-
-              letTupExp "strm_res" . Op $
-                Futhark.Screma chvar scan0_ids (Futhark.mapSOAC maplam)
+              letTupExp "strm_res"
+                . Op
+                . Futhark.Screma chvar scan0_ids
+                =<< Futhark.mapSOAC maplam
             -- 5. let acc'        = acc + lasteel_ids
             addStms addlelstm
             pure $ addlelres ++ map (subExpRes . Var) (strm_resids ++ map_resids)
