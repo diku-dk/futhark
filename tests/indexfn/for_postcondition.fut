@@ -11,8 +11,9 @@ def f2
   : { [n]i64 | \ys -> For ys (\i -> Range ys (0,offsets[i+1])) }
   =
   -- Should be equivalent to f3, algebraically.
-  let tmp1 = scan (\x y -> x + y) 0 offsets
-  in map (\i -> tmp1[i+1] - tmp1[i]) (iota n)
+  let sum0 = scan (\x y -> x + y) 0 offsets
+  let sum1 = map (\x -> x - offsets[0]) sum0
+  in map (\i -> sum1[i+1] - sum0[i]) (iota n)
 
 def f2_conditional
   (n: {i64 | \x -> Range x (0,inf)})
@@ -21,17 +22,29 @@ def f2_conditional
   : { [n]i64 | \ys -> For ys (\i -> Range ys (0,offsets[i+1])) }
   =
   -- Should be equivalent to f3, algebraically.
-  let tmp1 = scan (\x y -> x + y) 0 offsets
-  in map (\i -> if cs[i] then tmp1[i+1] - tmp1[i] else 0) (iota n)
+  let sum0 = scan (\x y -> x + y) 0 offsets
+  let sum1 = map (\x -> x - offsets[0]) sum0
+  in map (\i -> if cs[i] then sum1[i+1] - sum0[i] else 0) (iota n)
 
 
-def f3
-  (n: {i64 | \x -> Range x (0,inf)})
-  (offsets: {[n+1]i64 | \x -> Range x (0,inf) && Monotonic (<=) x})
-  : { [n]i64 | \ys -> For ys (\i -> Range ys (0,offsets[i+1])) }
-  =
-  let shape = map (\i -> offsets[i+1] - offsets[i]) (iota n)
-  in scan (\x y -> x + y) 0 shape
+-- def f3
+--   (n: {i64 | \x -> Range x (0,inf)})
+--   (offsets: {[n+1]i64 | \x -> Range x (0,inf) && Monotonic (<=) x})
+--   : { [n]i64 | \ys -> For ys (\i -> Range ys (0,offsets[i+1])) }
+--   =
+--   let shape = map (\i -> offsets[i+1] - offsets[i]) (iota n)
+--   in scan (\x y -> x + y) 0 shape
+
+-- def f3_conditional
+--   (n: {i64 | \x -> Range x (0,inf)})
+--   (offsets: {[n+1]i64 | \x -> Range x (0,inf) && Monotonic (<=) x})
+--   (new: [n]bool)
+--   : { [n]i64 | \ys -> For ys (\i -> Range ys (0,offsets[i+1])) }
+--   =
+--   let shape = map (\i ->
+--     if new[i] then offsets[i+1] - offsets[i] else 0
+--   ) (iota n)
+--   in scan (\x y -> x + y) 0 shape
 
 -- PLAN
 --
@@ -60,17 +73,17 @@ def f3
 --     if shape[i+1] - shape[i] > 0 then shape[i] else -1
 --   ) (iota n)
 
--- def f4
---   (n: {i64 | \x -> Range x (0,inf)})
---   (offsets: {[n+1]i64 | \x -> Range x (0,inf) && Monotonic (<=) x})
---   : { [n]i64 | \_ -> true }
---   =
---   -- can we scatter using offsets?
---   let idxs = map (\i ->
---     if offsets[i+1] - offsets[i] > 0 then offsets[i] else -1
---   ) (iota n)
+def f4
+  (n: {i64 | \x -> Range x (0,inf)})
+  (offsets: {[n+1]i64 | \x -> Range x (0,inf) && Monotonic (<=) x})
+  : { [n]i64 | \_ -> true }
+  =
+  -- can we scatter using offsets?
+  let idxs = map (\i ->
+    if offsets[i+1] - offsets[i] > 0 then offsets[i] else -1
+  ) (iota n)
 
---   in scatter (replicate n 0) idxs idxs
+  in scatter (replicate n 0) idxs idxs
 
 
 
