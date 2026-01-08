@@ -80,7 +80,7 @@ def valid_neighbour
     0
 
 def can_add [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E+1) && Monotonic (<=) x})
+    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (edges: {[E]i64 | \x -> Range x (0, V)})
     (random_state: [V]i64) (C: [V]i64)
     (index: {i64 | \x -> Range x (0,V)})
@@ -109,13 +109,13 @@ def remove_neighbour_and_self [V]
 
 def make_shape [V]
     (E: i64)
-    (offsets: {[V+1]i64 | \x -> Range x (0,E+1) && Monotonic (<=) x})
+    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (new: [V]bool)
     : {[V]i64 | \y -> For y (\i -> Range y (0, offsets[i+1] - offsets[i]))} =
   map (\i -> if new[i] then offsets[i+1] - offsets[i] else 0) (iota V)
 
 def expand [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E+1) && Monotonic (<=) x})
+    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (edges: {[E]i64 | \x -> Range x (0, V)})
     (new: [V]bool)
     : {[]i64 | \_ -> true} =
@@ -126,7 +126,7 @@ def expand [V] [E]
   in map (\i -> edges[i]) indices
 
 def mis_step_ [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E+1) && Monotonic (<=) x})
+    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (edges: {[E]i64 | \x -> Range x (0, V)})
     (new: [V]bool)
     (C: *[V]i64)
@@ -143,7 +143,7 @@ def mis_step_ [V] [E]
   in (C, I)
 
 def mis_step [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E+1) && Monotonic (<=) x})
+    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (edges: {[E]i64 | \x -> Range x (0, V)})
     (random_state: [V]i64)
     (C: *[V]i64)
@@ -155,7 +155,7 @@ def mis_step [V] [E]
 
 
 def MIS [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E+1) && Monotonic (<=) x})
+    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (edges: {[E]i64 | \x -> Range x (0, V)})
     (random_state: [V]i64)
     (C: *[V]i64)
