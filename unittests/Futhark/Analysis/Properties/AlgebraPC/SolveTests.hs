@@ -46,6 +46,82 @@ tests =
   testGroup
     "Properties.Algebra"
     [
+      testCase "mis expand indices bounds" $
+        run
+          ( do
+              clearAlgEnv
+              nV <- newNameFromString "V"
+              nE <- newNameFromString "E"
+              offsets <- newNameFromString "offsets"
+              new_shape <- newNameFromString "new_shape"
+              i <- newNameFromString "i"
+              k <- newNameFromString "k"
+              i2 <- newNameFromString "i"
+
+              -- i ∈ ⊎(k < V)
+              --  [∑j∈(0 ... k-1) new_shape(j), ..., ∑j∈(0 ... k) new_shape(j)]
+              addProperty (Var nV) (Rng nV (Just $ int 0, Nothing))
+              addRel (int 0 :<=: sVar nV)
+              addProperty (Var nE) (Rng nE (Just $ int 0, Nothing))
+              addRel (int 0 :<=: sVar nE)
+
+              addProperty (Var offsets) (Monotonic offsets Inc)
+              addProperty (Var offsets) (Rng offsets (Just $ int 0, Just $ sVar nE))
+              addRel (int 0 :<=: sVar offsets :&&: sVar offsets :<=: sVar nE)
+
+              let offsets_at = sym2SoP . Idx (One offsets) 
+              addProperty
+                (Var new_shape)
+                (For new_shape (Predicate i2 $ Rng new_shape (Just $ int 0, Just $ offsets_at (sVar i2 .+. int 1) .-. offsets_at (sVar i2))))
+
+              addRel (int 0 :<=: sVar k :&&: sVar k :<: sVar nV)
+
+              let sum_shape = sym2SoP . Sum (One new_shape) (int 0)
+
+              addRel (sum_shape (sVar k .-. int 1) :<=: sVar i :&&: sVar i :<: sum_shape (sVar k))
+
+
+              let new_shape_at = sym2SoP . Idx (One new_shape)
+
+              printAlgEnv 1
+              -- Sanity check: we can prove that 0 <= j < new_shape[k].
+              let j = sVar i .-. sum_shape (sVar k .-. int 1)
+              lb <- int 0 FM.$<=$ j
+              ub <- j FM.$<$ new_shape_at (sVar k)
+              printM 1 $ "j = " <> prettyString j
+              printM 1 $ "0 <= " <> prettyString j <> " < " <> prettyString (new_shape_at (sVar k)) <> ": " <> prettyString (lb && ub)
+
+              printM 1 $ "\nGoal: " <> prettyString (sVar i .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k) :<: sVar nE)
+              -- FM step 1: replace i by its upper bound sum_shape (sVar k) - 1
+              let test = sum_shape (sVar k) .-. int 1 .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k)
+              test' <- simplify test
+              printM 1 $ "Step 1: " <> prettyString test <> "\n  = " <> prettyString test'
+
+              -- FM step 2: maximize new_shape[k] to offsets[k+1] - offsets[k]
+              let test = int (-1) .+. offsets_at (sVar k) .+. offsets_at (sVar k .+. int 1) .-. offsets_at (sVar k) 
+              test' <- simplify test
+              printM 1 $ "Step 2: " <> prettyString test <> "\n  = " <> prettyString test'
+
+              -- FM step 3: offsets[k+1] - 1 < E
+              let test = int (-1) .+. offsets_at (sVar k .+. int 1)
+              test' <- test FM.$<$ sVar nE
+              printM 1 $ "Step 3: " <> prettyString (test :<: sVar nE) <> "\n  = " <> prettyString test'
+
+              -- FM step 4: Done using the range on offsets.
+
+              -- XXX
+              -- NOT IMPLEMENTED YET
+              -- Trying to do the effect of For-Range
+              -- 
+              addRel
+                (int 0 :<=: new_shape_at (sVar k)
+                :&&:
+                new_shape_at (sVar k) :<=: offsets_at (sVar k .+. int 1) .-. offsets_at (sVar k) )
+              -- XXX
+
+              (j .+. offsets_at (sVar k)) FM.$<$ sVar nE
+          )
+          @??= True,
       testCase "Pow Exact Normaliation" $
         run
           ( forM [1..num_tests_pow] $ \ kk -> do
