@@ -295,7 +295,6 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 then pure Yes
                 else pure Unknown
         _ -> pure Unknown
-        _ -> pure Unknown
     alreadyKnown (For {}) =
       -- TODO: Implement alreadyKnown for For property
       pure Unknown
