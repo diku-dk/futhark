@@ -12,7 +12,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, mapMaybe)
 import Data.Set qualified as S
-import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, simplify, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
@@ -1187,7 +1186,7 @@ forwardPropertyPrelude f args =
           res_f <- forward lam >>= subst . IndexFn (shape f_X) . body . head
           case justSingleCase res_f of
             Just e -> pure (i, e)
-            Nothing -> error $ "Lambda must return a single case index function: " <> prettyStr res_f
+            Nothing -> error $ "Not implemented yet. Lambda must return a single case index function: " <> prettyStr res_f
         _ -> error "inferLambdaIndexFn: invalid array shape"
 
     -- Map filter and partition lambdas over indices of X to infer their
