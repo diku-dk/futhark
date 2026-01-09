@@ -6,7 +6,7 @@ module Futhark.Analysis.Properties.AlgebraPC.UnaryRules
   ( simplifyPows,
     simplifyOneSumBef,
     simplifyOneSumAft,
-    simplifyPeelSumForFM
+    simplifyPeelSumForFM,
   )
 where
 
@@ -16,11 +16,13 @@ import Data.Maybe
 import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol
-import Futhark.SoP.SoP
-import Futhark.SoP.Monad (MonadSoP, getEquivs, getProperties, getRanges)  -- lookupRange
-import Futhark.SoP.FourierMotzkin qualified as FM
-import Language.Futhark (VName)
+-- lookupRange
+
 import Futhark.Analysis.Properties.Property (hasDisjoint)
+import Futhark.SoP.FourierMotzkin qualified as FM
+import Futhark.SoP.Monad (MonadSoP, getEquivs, getProperties, getRanges)
+import Futhark.SoP.SoP
+import Language.Futhark (VName)
 
 -- import Futhark.Util.Pretty
 -- import Debug.Trace
@@ -31,18 +33,21 @@ import Futhark.Analysis.Properties.Property (hasDisjoint)
 
 simplifyPows ::
   (MonadSoP Symbol e p m) =>
-  (SoP Symbol  -> m (SoP Symbol)) -> SoP Symbol -> m (SoP Symbol)
+  (SoP Symbol -> m (SoP Symbol)) ->
+  SoP Symbol ->
+  m (SoP Symbol)
 simplifyPows simplifyLevel sop = do
   lst <- mapM simplifyTerm $ M.toList $ getTerms sop
-  let sop' =  normalize $ SoP $ foldl ff M.empty lst
+  let sop' = normalize $ SoP $ foldl ff M.empty lst
   pure $ reducePairPows sop'
-  -- pure $ SoP $ M.fromList lst   -- BIG BUG!!!
-  -- pure $ foldl (.+.) sop_zero $ map (\ (t,i) -> term2SoP t i) lst
   where
-    ff acc (t,i) =
+    -- pure $ SoP $ M.fromList lst   -- BIG BUG!!!
+    -- pure $ foldl (.+.) sop_zero $ map (\ (t,i) -> term2SoP t i) lst
+
+    ff acc (t, i) =
       case M.lookup t acc of
         Nothing -> M.insert t i acc
-        Just j  -> M.insert t (i+j) acc
+        Just j -> M.insert t (i + j) acc
     -- simplifyTerm :: (Term Symbol, Integer) -> AlgM e (Term Symbol, Integer)
     simplifyTerm (Term mset, k) = do
       let (mset_pows, mset_others) = MS.partition hasPow mset
@@ -85,26 +90,26 @@ combineSamePow (q, tab) (b, sop) =
 
 reducePairPows :: SoP Symbol -> SoP Symbol
 reducePairPows sop =
-  let lst  = M.toList $ getTerms sop
+  let lst = M.toList $ getTerms sop
       lst' = filter (any hasPow . MS.elems . getTerm . fst) lst
-  in case findSatisfyingPair hasPattern lst' of
-       Nothing -> sop
-       Just (t1,t2,r) -> 
-         reducePairPows $ foldl (.+.) (int2SoP 0) $ map (\ (t,i) -> term2SoP t i) (t1:t2:r:lst)
+   in case findSatisfyingPair hasPattern lst' of
+        Nothing -> sop
+        Just (t1, t2, r) ->
+          reducePairPows $ foldl (.+.) (int2SoP 0) $ map (\(t, i) -> term2SoP t i) (t1 : t2 : r : lst)
   where
     findSatisfyingPair _ [] = Nothing
-    findSatisfyingPair p (a:as) =
+    findSatisfyingPair p (a : as) =
       case findPairHelper p a as of
-        Just r  -> Just r
+        Just r -> Just r
         Nothing -> findSatisfyingPair p as
     --
     findPairHelper _ _ [] = Nothing
-    findPairHelper p x (y:ys) =
+    findPairHelper p x (y : ys) =
       case p x y of
         Just r -> Just r
-        Nothing-> findPairHelper p x ys
+        Nothing -> findPairHelper p x ys
     --
-    hasPattern (t1,i1) (t2,i2)
+    hasPattern (t1, i1) (t2, i2)
       | i1 == -i2,
         (msetpows1, others1) <- MS.partition hasPow (getTerm t1),
         (msetpows2, others2) <- MS.partition hasPow (getTerm t2),
@@ -112,15 +117,17 @@ reducePairPows sop =
         [(base1, expnt1)] <- MS.toList (MS.mapMaybe mpowAsTup msetpows1),
         [(base2, expnt2)] <- MS.toList (MS.mapMaybe mpowAsTup msetpows2),
         base1 == base2 && base1 == 2 =
-      let diff = expnt1 .-. expnt2
-          mr = if diff == int2SoP 1
-               then Just (Pow (base1, expnt2), i1)
-               else if diff == int2SoP (0-1)
-                    then Just (Pow (base1, expnt1), i2)
-                    else Nothing
-      in case mr of
-           Nothing -> Nothing
-           Just (r,i) -> Just ((t1,-i1), (t2, -i2), (Term (MS.insert r others1), i))
+          let diff = expnt1 .-. expnt2
+              mr =
+                if diff == int2SoP 1
+                  then Just (Pow (base1, expnt2), i1)
+                  else
+                    if diff == int2SoP (0 - 1)
+                      then Just (Pow (base1, expnt1), i2)
+                      else Nothing
+           in case mr of
+                Nothing -> Nothing
+                Just (r, i) -> Just ((t1, -i1), (t2, -i2), (Term (MS.insert r others1), i))
     hasPattern _ _ = Nothing
 
 ---------------------------------------------------------------
@@ -136,15 +143,15 @@ sop_one :: SoP Symbol
 sop_one = int2SoP 1
 
 type FoldFunTp m =
-      Maybe (SoP Symbol, Symbol) ->
-      (Symbol, Int) ->
-      m (Maybe (SoP Symbol, Symbol))
+  Maybe (SoP Symbol, Symbol) ->
+  (Symbol, Int) ->
+  m (Maybe (SoP Symbol, Symbol))
 
 simplifyOneSumBef ::
   (MonadSoP Symbol e p m) => SoP Symbol -> m (Bool, SoP Symbol)
 simplifyOneSumBef sop = do
   equivs <- getEquivs
-  sop'   <- elimEmptySums sop
+  sop' <- elimEmptySums sop
   (success, sop'') <- unaryOpOnSumFP (hasUnitingSums equivs) uniteSumSym sop'
   pure (success, sop'')
 
@@ -154,9 +161,9 @@ hasUnitingSums equivs =
   where
     hasUnitingSumSym (Sum (POR nms) beg end)
       | S.size nms > 1 =
-      any hasUnitingSumSym $
-        map (\nm -> Sum (POR (S.singleton nm)) beg end) $
-        S.toList nms
+          any hasUnitingSumSym $
+            map (\nm -> Sum (POR (S.singleton nm)) beg end) $
+              S.toList nms
     hasUnitingSumSym (Sum nm beg end) =
       isJust (M.lookup (Idx nm (beg .-. sop_one)) equivs)
         || isJust (M.lookup (Idx nm (end .+. sop_one)) equivs)
@@ -170,7 +177,7 @@ uniteSumSym Nothing (sym@(Sum nm beg end), 1) = do
   valid_slice <- beg FM.$<=$ (end .+. sop_one)
   let beg_m_1 = beg .-. sop_one
       end_p_1 = end .+. sop_one
-      -- \^ do we need to further simplify these?
+  -- \^ do we need to further simplify these?
   mfst_el <- getEquivSoP equivs $ Idx nm beg_m_1
   mlst_el <- getEquivSoP equivs $ Idx nm end_p_1
   case (valid_slice, mfst_el, mlst_el) of
@@ -190,23 +197,27 @@ uniteSumSym Nothing _ = pure Nothing
 
 -- | Transforms a "known" array index to its value,
 --   by looking it up in the table of equivalences.
-getEquivSoP :: (MonadSoP Symbol e p m) => 
-  M.Map Symbol (SoP Symbol) -> Symbol -> m (Maybe (SoP Symbol))
+getEquivSoP ::
+  (MonadSoP Symbol e p m) =>
+  M.Map Symbol (SoP Symbol) ->
+  Symbol ->
+  m (Maybe (SoP Symbol))
 getEquivSoP equivs symb@(Idx (POR nms) ind_sop)
   | S.size nms > 1,
-    syms  <- map (nm2PORsym ind_sop) $ S.toList nms,
+    syms <- map (nm2PORsym ind_sop) $ S.toList nms,
     eq_vs <- mapMaybe (`M.lookup` equivs) syms =
-  if not $ null $ filter (== sop_one) eq_vs
-  then pure $ Just sop_one
-  -- \^ we found a True term in an OR node => True
-  else if length eq_vs == length syms &&
-          all isZero eq_vs
-       then pure $ Just $ int2SoP 0
-       -- \^ all are zero
-       else pure $ M.lookup symb equivs
+      if not $ null $ filter (== sop_one) eq_vs
+        then pure $ Just sop_one
+        else -- \^ we found a True term in an OR node => True
+
+          if length eq_vs == length syms
+            && all isZero eq_vs
+            then pure $ Just $ int2SoP 0
+            else -- \^ all are zero
+              pure $ M.lookup symb equivs
   where
     nm2PORsym ind arr_nm = Idx (POR (S.singleton arr_nm)) ind
-getEquivSoP equivs symb@Idx{} =
+getEquivSoP equivs symb@Idx {} =
   pure $ M.lookup symb equivs
 getEquivSoP _ _ =
   pure Nothing
@@ -238,14 +249,14 @@ simplifyOneSumAft sop = do
 simplifyPeelSumForFM ::
   (MonadSoP Symbol e Prop m) => SoP Symbol -> m (Bool, SoP Symbol)
 simplifyPeelSumForFM sop =
-  unaryOpOnSumFP (\ _ -> True) peelSumOnRanges sop
+  unaryOpOnSumFP (\_ -> True) peelSumOnRanges sop
 
 transfSum2Idx :: SoP Symbol -> (Bool, SoP Symbol)
 transfSum2Idx sop
   | tgt_sums <- filter isOneElmSum $ S.toList $ free sop,
     not (null tgt_sums) =
-  let subs = M.fromList $ zip tgt_sums $ map sum2Idx tgt_sums
-  in  (True, substitute subs sop)
+      let subs = M.fromList $ zip tgt_sums $ map sum2Idx tgt_sums
+       in (True, substitute subs sop)
   where
     isOneElmSum (Sum _ lb ub) = lb == ub
     isOneElmSum _ = False
@@ -254,10 +265,11 @@ transfSum2Idx sop
 transfSum2Idx sop = (False, sop)
 
 hasPeelableSums :: M.Map Symbol (SoP Symbol) -> (SoP Symbol) -> Bool
-hasPeelableSums equivs = (\ _ -> True)
-  -- any hasPeelableSumSym . S.toList . free
-  -- \^ has to make it look inside POR nodes
+hasPeelableSums equivs = (\_ -> True)
   where
+    -- any hasPeelableSumSym . S.toList . free
+    -- \^ has to make it look inside POR nodes
+
     hasPeelableSumSym (Sum nm beg end) =
       isJust (M.lookup (Idx nm beg) equivs)
         || isJust (M.lookup (Idx nm end) equivs)
@@ -269,40 +281,46 @@ disjointAllTheWay tab_props nms
     nm <- S.elemAt 0 nms,
     mtmp <- M.lookup (Var nm) tab_props,
     Just nms_disjoint <- hasDisjoint (fromMaybe S.empty mtmp) =
-  nms == S.insert nm nms_disjoint
+      nms == S.insert nm nms_disjoint
 disjointAllTheWay _ _ =
   False
 
 -- | Several cases:
---   Case 1 (SUM): 
+--   Case 1 (SUM):
 --     If x DISJOINT (y,z) holds and also
 --        ub - lb + 1 >= 0 holds
 --     then Sum(x||y||z)[lb,ub] == ub - lb + 1
 --   Case 2 (IDX): similar with Case 1 but for an index.
---   Case 3 (SUM): 
+--   Case 3 (SUM):
 --     peeling off first/last known elements of a sum
 --     (requires non-empty slice)
 --   Case 4 (IDX): replaces an index symbol that is found in
 --     equiv symtab.
-peelSumSymbHelper :: (MonadSoP Symbol e Prop m) =>
-  M.Map Symbol (S.Set Prop) -> Symbol -> m (Maybe (SoP Symbol, Symbol))
+peelSumSymbHelper ::
+  (MonadSoP Symbol e Prop m) =>
+  M.Map Symbol (S.Set Prop) ->
+  Symbol ->
+  m (Maybe (SoP Symbol, Symbol))
 peelSumSymbHelper tab_props sym@(Idx (POR nms) _idx)
-  | disjointAllTheWay tab_props nms = do -- Case 2
-  pure $ Just (sop_one, sym)
+  | disjointAllTheWay tab_props nms = do
+      -- Case 2
+      pure $ Just (sop_one, sym)
 --
 peelSumSymbHelper tab_props sym@(Sum (POR nms) beg end)
-  | disjointAllTheWay tab_props nms = do -- Case 1
-  let end_p_1 = end .+. sop_one
-  valid_slice <- beg FM.$<=$ end_p_1
-  if valid_slice
-  then pure $ Just $ (end_p_1 .-. beg, sym)
-  else pure Nothing
+  | disjointAllTheWay tab_props nms = do
+      -- Case 1
+      let end_p_1 = end .+. sop_one
+      valid_slice <- beg FM.$<=$ end_p_1
+      if valid_slice
+        then pure $ Just $ (end_p_1 .-. beg, sym)
+        else pure Nothing
 --
-peelSumSymbHelper _ sym@(Sum xs lb ub) = do -- Case 3
+peelSumSymbHelper _ sym@(Sum xs lb ub) = do
+  -- Case 3
   non_empty_slice <- lb FM.$<=$ ub
   if not non_empty_slice
-  then pure Nothing
-  else peelSumSymbEquiv xs lb ub
+    then pure Nothing
+    else peelSumSymbEquiv xs lb ub
   where
     -- try to peel of an end of the interval when
     --   the end is in the equivalence table
@@ -344,16 +362,17 @@ peelSumSymbHelper _ sym@(Sum arr beg end) = do -- Case 3
     (True, Nothing, Nothing) -> pure Nothing
 --}
 --
-peelSumSymbHelper _ sym@(Idx arr idx) = do -- Case 4
+peelSumSymbHelper _ sym@(Idx arr idx) = do
+  -- Case 4
   equivs <- getEquivs
-  m_el   <- getEquivSoP equivs $ Idx arr idx
+  m_el <- getEquivSoP equivs $ Idx arr idx
   case m_el of
     Nothing -> pure Nothing
     Just el -> pure $ Just (el, sym)
 --
 peelSumSymbHelper _ _ =
   pure Nothing
-  
+
 peelSumSymb :: (MonadSoP Symbol e Prop m) => FoldFunTp m
 peelSumSymb acc@(Just {}) _ = pure acc
 peelSumSymb Nothing (sym, 1) = do
@@ -370,8 +389,8 @@ peelSumOnRanges Nothing (sym@(Sum xs lb ub), 1) = do
   -- \^ ToDo: extend for any multiplicity >= 1
   non_empty_slice <- lb FM.$<=$ ub
   if not non_empty_slice
-  then pure Nothing
-  else peelSumSymbIneq xs lb ub
+    then pure Nothing
+    else peelSumSymbIneq xs lb ub
   where
     peelSumSymbIneq arr beg end = do
       ranges <- getRanges
@@ -395,7 +414,7 @@ peelSumOnRanges Nothing _ = pure Nothing
 --- Simplifications of Sum of Slice  ---
 ----------------------------------------
 
-elimEmptySums :: 
+elimEmptySums ::
   (MonadSoP Symbol e p m) => SoP Symbol -> m (SoP Symbol)
 elimEmptySums sop = do
   sopFromList <$> (filterM predTerm $ sopToList sop)
@@ -406,17 +425,23 @@ elimEmptySums sop = do
       tmps <- mapM (emptySumSym . fst) $ MS.toOccurList ms
       pure $ all not tmps
 
-unaryOpOnSumFP :: (MonadSoP Symbol e p m) =>
-  (SoP Symbol -> Bool) -> FoldFunTp m -> SoP Symbol -> m (Bool, SoP Symbol)
+unaryOpOnSumFP ::
+  (MonadSoP Symbol e p m) =>
+  (SoP Symbol -> Bool) ->
+  FoldFunTp m ->
+  SoP Symbol ->
+  m (Bool, SoP Symbol)
 unaryOpOnSumFP hasOpOnSym opOnSym sop
   | hasOpOnSym sop = do
-  res <- unaryOpOnSum opOnSym sop
-  case res of
-    (False, _) -> pure (False, sop)
-    (True, sop') -> do -- fix point
-      (_, sop'') <- unaryOpOnSumFP hasOpOnSym opOnSym sop'
-      pure (True, sop'')
+      res <- unaryOpOnSum opOnSym sop
+      case res of
+        (False, _) -> pure (False, sop)
+        (True, sop') -> do
+          -- fix point
+          (_, sop'') <- unaryOpOnSumFP hasOpOnSym opOnSym sop'
+          pure (True, sop'')
   where
+
 unaryOpOnSumFP _ _ sop = pure (False, sop)
 
 unaryOpOnSum :: (MonadSoP Symbol e p m) => FoldFunTp m -> SoP Symbol -> m (Bool, SoP Symbol)
@@ -436,5 +461,3 @@ unaryOpOnSum opOnSym sop = do
           let ms' = MS.delete sum_sym $ getTerm t
               sop' = sop_sym .*. term2SoP (Term ms') k
           pure $ Just (term2SoP t k, sop')
-
-
