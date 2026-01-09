@@ -67,7 +67,8 @@ tests =
 
               addProperty (Var offsets) (Monotonic offsets Inc)
               addProperty (Var offsets) (Rng offsets (Just $ int 0, Just $ sVar nE))
-              addRel (int 0 :<=: sVar offsets :&&: sVar offsets :<=: sVar nE)
+              -- addRel (int 0 :<=: sVar offsets :&&: sVar offsets :<=: sVar nE)
+              addRel (int 0 :<=: sVar offsets )
 
               let offsets_at = sym2SoP . Idx (One offsets) 
               addProperty
@@ -83,29 +84,28 @@ tests =
 
               let new_shape_at = sym2SoP . Idx (One new_shape)
 
-              printAlgEnv 1
               -- Sanity check: we can prove that 0 <= j < new_shape[k].
               let j = sVar i .-. sum_shape (sVar k .-. int 1)
-              lb <- int 0 FM.$<=$ j
-              ub <- j FM.$<$ new_shape_at (sVar k)
-              printM 1 $ "j = " <> prettyString j
-              printM 1 $ "0 <= " <> prettyString j <> " < " <> prettyString (new_shape_at (sVar k)) <> ": " <> prettyString (lb && ub)
+              -- lb <- int 0 FM.$<=$ j
+              -- ub <- j FM.$<$ new_shape_at (sVar k)
+              -- printM 1 $ "j = " <> prettyString j
+              -- printM 1 $ "0 <= " <> prettyString j <> " < " <> prettyString (new_shape_at (sVar k)) <> ": " <> prettyString (lb && ub)
 
-              printM 1 $ "\nGoal: " <> prettyString (sVar i .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k) :<: sVar nE)
-              -- FM step 1: replace i by its upper bound sum_shape (sVar k) - 1
-              let test = sum_shape (sVar k) .-. int 1 .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k)
-              test' <- simplify test
-              printM 1 $ "Step 1: " <> prettyString test <> "\n  = " <> prettyString test'
+              -- printM 1 $ "\nGoal: " <> prettyString (sVar i .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k) :<: sVar nE)
+              -- -- FM step 1: replace i by its upper bound sum_shape (sVar k) - 1
+              -- let test = (sum_shape (sVar k) .-. int 1) .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k)
+              -- test' <- simplify test
+              -- printM 1 $ "Step 1: " <> prettyString test <> "\n  = " <> prettyString test'
 
-              -- FM step 2: maximize new_shape[k] to offsets[k+1] - offsets[k]
-              let test = int (-1) .+. offsets_at (sVar k) .+. offsets_at (sVar k .+. int 1) .-. offsets_at (sVar k) 
-              test' <- simplify test
-              printM 1 $ "Step 2: " <> prettyString test <> "\n  = " <> prettyString test'
+              -- -- FM step 2: maximize new_shape[k] to offsets[k+1] - offsets[k]
+              -- let test = int (-1) .+. offsets_at (sVar k) .+. offsets_at (sVar k .+. int 1) .-. offsets_at (sVar k) 
+              -- test' <- simplify test
+              -- printM 1 $ "Step 2: " <> prettyString test <> "\n  = " <> prettyString test'
 
-              -- FM step 3: offsets[k+1] - 1 < E
-              let test = int (-1) .+. offsets_at (sVar k .+. int 1)
-              test' <- test FM.$<$ sVar nE
-              printM 1 $ "Step 3: " <> prettyString (test :<: sVar nE) <> "\n  = " <> prettyString test'
+              -- -- FM step 3: offsets[k+1] - 1 < E
+              -- let test = int (-1) .+. offsets_at (sVar k .+. int 1)
+              -- test' <- test FM.$<$ sVar nE
+              -- printM 1 $ "Step 3: " <> prettyString (test :<: sVar nE) <> "\n  = " <> prettyString test'
 
               -- FM step 4: Done using the range on offsets.
 
@@ -117,9 +117,20 @@ tests =
                 (int 0 :<=: new_shape_at (sVar k)
                 :&&:
                 new_shape_at (sVar k) :<=: offsets_at (sVar k .+. int 1) .-. offsets_at (sVar k) )
+              -- addRel
+              --   (new_shape_at (sVar k) :<=: sVar nE)
               -- XXX
+              printAlgEnv 1
 
-              (j .+. offsets_at (sVar k)) FM.$<$ sVar nE
+              -- THE ACTUAL QUERY
+              -- (j .+. offsets_at (sVar k)) FM.$<$ sVar nE
+              FM.fmSolveLEq0_ True 0 $
+                (j .+. offsets_at (sVar k)) .-. sVar nE .+. int 1
+              -- WHAT IM WORKING ON NOW
+              -- (j .+. offsets_at (sVar k)) FM.$<$ sVar nE
+              FM.fmSolveLEq0_ True 0 $
+                j .+. offsets_at (sVar k)
+              -- XXX when i dont have an upper bound on offsets, I can show that (j + offsets[k] < offsets[k+1])!   Put this as a range in the program?
           )
           @??= True,
       testCase "Pow Exact Normaliation" $

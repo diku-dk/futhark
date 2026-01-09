@@ -38,7 +38,7 @@ def sgm_sum [n] 't
 
 def segment_ids [m]
     (shape: {[m]i64 | \x -> Range x (0,inf)})
-    : {([]i64, []bool) | \(_, _) -> true } =
+    : {([]i64, []bool) | \(ids, _) -> Range ids (0,m)} =
   let flags1 = map (\i -> i + 1) (iota m)
   let zero = 0
   let flags = mk_flag_array shape zero flags1
@@ -48,14 +48,14 @@ def segment_ids [m]
 
 def repl_segm_iota [m]
     (shape: {[m]i64 | \x -> Range x (0,inf)})
-    : {([]i64, []i64) | \(_, _) -> true } =
+    : {([]i64, []i64) | \(ids, _) -> Range ids (0,m)} =
   let (ids, flags) = segment_ids shape
   let ones = map (\_ -> 1) flags
   let tmp = sgm_sum flags ones
   let iotas = map (\x -> x - 1) tmp
   in (ids, iotas)
 
-def sum [n] (xs: [n]i64): {i64 | \_ -> true }=
+def sum [n] (xs: [n]i64): {i64 | \_ -> true}=
   if n > 0 then (scan (\x y -> x + y) 0 xs)[n-1] else 0
 
 def slice [n] 't
@@ -114,15 +114,22 @@ def make_shape [V]
     : {[V]i64 | \y -> For y (\i -> Range y (0, offsets[i+1] - offsets[i]))} =
   map (\i -> if new[i] then offsets[i+1] - offsets[i] else 0) (iota V)
 
+def expand_indices [V]
+    (E: i64)
+    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
+    (new: [V]bool)
+    : {([]i64, []i64) | \(seg,y) -> For y (\i -> Range y (0, offsets[seg[i]+1]))} =
+  let new_shape = make_shape E offsets new
+  let (segment_ids, iotas) = repl_segm_iota new_shape
+  in (segment_ids, map2 (\i j -> offsets[i] + j) segment_ids iotas)
+
 def expand [V] [E]
     (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (edges: {[E]i64 | \x -> Range x (0, V)})
     (new: [V]bool)
     : {[]i64 | \_ -> true} =
   -- For each newly added vertex, get its neighbours
-  let new_shape = make_shape E offsets new
-  let (segment_ids, iotas) = repl_segm_iota new_shape
-  let indices = map2 (\i j -> offsets[i] + j) segment_ids iotas
+  let (_, indices) = expand_indices E offsets new
   in map (\i -> edges[i]) indices
 
 def mis_step_ [V] [E]
