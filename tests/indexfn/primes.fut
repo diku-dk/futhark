@@ -36,7 +36,7 @@ let segment_ids [m]
       (shape: {[m]i64 | \x -> Range x (0,inf)})
       : {([]i64, [m]i64) | \(ids, flags) ->
            length ids == sum shape
-           && Range flags (0,sum shape)
+           && Range flags (0,sum shape + 1)
         } =
   let flags1 = map (\i -> i + 1) (iota m)
   let zero = 0i64

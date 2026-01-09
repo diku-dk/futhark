@@ -34,7 +34,7 @@ def partition3_indices [n] 't (conds: [n]i8)
       FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
       -- ^ disjointness already proven by the above
       && Disjoint (\i -> (conds[i] == 1, conds[i] == 2, conds[i] != 1 && conds[i] != 2))
-      && Range a (0,n) && Range b (0,n)
+      && Range a (0,n+1) && Range b (0,n+1)
    } =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
   let eflags = map (\c -> if c == 2 then 1 else 0 ) conds
@@ -56,7 +56,7 @@ def partition3 't [n] (conds: [n]i8) (xs: [n]t)
    : {(i64,i64,[]t) | \(a, b, ys) ->
      FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
      && Disjoint (\i -> (conds[i] == 1, conds[i] == 2, conds[i] != 1 && conds[i] != 2))
-     && Range a (0,n) && Range b (0,n)
+     && Range a (0,n+1) && Range b (0,n+1)
    } =
   let (a, b, inds) = partition3_indices conds
   let scratch = map (\x -> x) xs -- copy xs.
@@ -278,7 +278,7 @@ def extract_empty_segments [num_segs] [num_points]
        , []i64                       -- seg_inds'
       ) | \(_,_, segs_true_bx,_,_,_, sgm_inds') ->
           let num_segs' = length segs_true_bx
-          in Range sgm_inds' (0,num_segs')
+          in Range sgm_inds' (0,num_segs'+1)
       }
     =
   -- let segs_parted = scatter zeros inds segs  
@@ -351,7 +351,7 @@ def semihull_loop [num_segs] [num_points]
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
        , []i64,[]real,[]real         -- points
-      ) | \(_,_, out_segs_begx,_,_,_, out_points_idx,_,_) -> Range out_points_idx (0,length out_segs_begx)}
+      ) | \(_,_, out_segs_begx,_,_,_, out_points_idx,_,_) -> Range out_points_idx (0,length out_segs_begx+1)}
     =
    let (segs_begx', segs_begy', segs_endx', segs_endy',
         points_idx', points_x', points_y') = expand_hull segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y

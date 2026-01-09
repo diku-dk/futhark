@@ -346,7 +346,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       pure Yes
     matchProof (Rng x (a, b)) = do
       let lb c = maybe (Bool True) (:<= c) a
-      let ub c = maybe (Bool True) (c :<=) b
+      let ub c = maybe (Bool True) (c :<) b
       -- InjV2
       indexfns <- getIndexFns
       fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var x)
