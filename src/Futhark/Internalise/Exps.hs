@@ -396,7 +396,9 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
               let args'' = concatMap tag args'
               letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] Safe
           | otherwise -> do
-              args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
+              args' <-
+                concat . reverse
+                  <$> mapM (internaliseArg arg_desc) (reverse args)
               funcall desc qfname args'
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body

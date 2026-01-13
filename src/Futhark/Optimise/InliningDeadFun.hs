@@ -269,7 +269,9 @@ inlineInBody fdmap = onBody
       | Just fd <- M.lookup fname fdmap,
         not $ "noinline" `inAttrs` funDefAttrs fd,
         not $ "noinline" `inAttrs` stmAuxAttrs aux =
-          (<>) <$> inlineFunction pat aux args safety (stmAuxLoc aux) fd <*> inline rest
+          (<>)
+            <$> inlineFunction pat aux args safety (stmAuxLoc aux) fd
+            <*> inline rest
     inline (stm@(Let _ _ BasicOp {}) : rest) =
       (oneStm stm <>) <$> inline rest
     inline (stm : rest) =
