@@ -18,7 +18,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol
 -- lookupRange
 
-import Futhark.Analysis.Properties.Property (hasDisjoint)
+import Futhark.Analysis.Properties.Property (hasDisjoint, Property (Rng, For), askRng, askForRng, Predicate (Predicate), mapProperty)
 import Futhark.SoP.FourierMotzkin qualified as FM
 import Futhark.SoP.Monad (MonadSoP, getEquivs, getProperties, getRanges)
 import Futhark.SoP.SoP
@@ -221,6 +221,21 @@ getEquivSoP equivs symb@Idx {} =
   pure $ M.lookup symb equivs
 getEquivSoP _ _ =
   pure Nothing
+
+-- getForRangeSoP :: (MonadSoP Symbol Symbol (Property Symbol) m) =>
+--   Symbol -> m (Maybe (SoP Symbol))
+-- getForRangeSoP (Idx (One vn) idx) = do
+--   p <- askForRng (Var vn)
+--   case p of
+--     Just (For vn' (Predicate i (Rng vn'' bounds)))
+--       | vn == vn',
+--         vn' == vn'' -> do
+--         -- idx has been bounds checked, so Rng holds for idx.
+--         let (a,b) = mapProperty (sop2Symbol . rep (mkRep i (sym2SoP (Var k)))) bounds
+--         undefined
+--     _ -> undefined
+-- getForRangeSoP _ =
+--   pure Nothing
 
 ---------------------------------------------------------------
 --- 2. Post Simplification of each (individual) slice sum:  ---

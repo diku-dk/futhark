@@ -20,6 +20,7 @@
 module Futhark.SoP.FourierMotzkin
   ( fmSolveLTh0,
     fmSolveLEq0,
+    fmSolveLEq0_,
     fmSolveGTh0,
     fmSolveGEq0,
     ($<$),
@@ -28,6 +29,7 @@ module Futhark.SoP.FourierMotzkin
     ($>=$),
     ($==$),
     ($/=$),
+    (%<),
   )
 where
 
@@ -35,6 +37,10 @@ import Data.Set qualified as S
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
+import Debug.Trace (traceM)
+import Language.Futhark (prettyString)
+import Control.Monad (when)
+import Data.Maybe (isJust, isNothing)
 
 -- import Futhark.Util.Pretty
 -- import Debug.Trace
@@ -81,34 +87,52 @@ fmSolveGEq0 = fmSolveLEq0 . negSoP
 --      (ii)  `False` if there is an `i` for which the inequality does
 --                    not hold or if the answer is unknown.
 fmSolveLEq0 :: (MonadSoP u e p m) => SoP u -> m Bool
-fmSolveLEq0 sop = do
+fmSolveLEq0 = fmSolveLEq0_ False 0
+
+-- Optimizations:
+-- 1. have constant check as fast path
+-- 2. dont perform al_leq_0 if a_leq_0 is False, likewise for geq test
+
+fmSolveLEq0_ :: (MonadSoP u e p m) => Bool -> Int -> SoP u -> m Bool
+fmSolveLEq0_ do_trace depth sop
+  | Just c <- justConstant sop = pure (c <= 0)
+  | otherwise = do
+  when do_trace . traceM $ indent ++ "[FM Entry]: " ++ prettyString sop
+
   sop' <- substEquivs sop
   (sop'', msymrg) <- findSymLEq0 sop' -- findSymLEq0Def sop'
+
   case (justConstant sop'', msymrg) of
-    (Just v, _) ->
-      pure (v <= 0)
-    (Nothing, Just (i,rg)) -> do
-      res <- divAndConqFM sop'' i rg
-      -- trace ("\nFM.LEq0 "++prettyString sop''++" succeeds: "++show res++"\n") $
-      pure res
-    (Nothing, Nothing) ->
-      pure False
+    (Just v, _) -> pure (v <= 0)
+    (Nothing, Just (i, rg)) -> divAndConqFM sop'' i rg
+    (Nothing, Nothing) -> pure False
   where
+    indent = replicate (depth * 2) ' '
+
     divAndConqFM sop1 i (Range lb k ub) = do
+      -- Debug: Trace symbol selection and the bounds being substituted
+      when do_trace . traceM $ indent ++ "  Simplified: " ++ prettyString sop1
+      when do_trace . traceM $ indent ++ "  Selected symbol: " ++ prettyString i
+            ++ " (k=" ++ show k ++ ")"
+            -- ++ "\n" ++ indent ++ "    Lower bounds: " ++ prettyString (S.toList lb)
+            -- ++ "\n" ++ indent ++ "    Upper bounds: " ++ prettyString (S.toList ub)
+
       let (a, b) = factorSoP [i] sop1
-      a_leq_0 <- fmSolveLEq0 a
+      a_leq_0 <- fmSolveLEq0_ False (depth + 1) a
       al_leq_0 <-
         anyM
-          ( \l ->
-              fmSolveLEq0 $
+          ( \l -> do
+              when (do_trace && a_leq_0) . traceM $ indent ++ "  Subst LB: " ++ prettyString l ++ " for " ++ prettyString i
+              fmSolveLEq0_ (do_trace && a_leq_0) (depth + 2) $
                 a .*. l .+. int2SoP k .*. b
           )
           (S.toList lb)
-      a_geq_0 <- fmSolveLEq0 $ negSoP a
+      a_geq_0 <- fmSolveLEq0_ False (depth + 1) $ negSoP a
       au_leq_0 <-
         anyM
-          ( \u ->
-              fmSolveLEq0 $
+          ( \u -> do
+              when (do_trace && a_geq_0) . traceM $ indent ++ "  Subst UB: " ++ prettyString u ++ " for " ++ prettyString i
+              fmSolveLEq0_ (do_trace && a_geq_0) (depth + 2) $
                 a .*. u .+. int2SoP k .*. b
           )
           (S.toList ub)
@@ -168,3 +192,6 @@ x $==$ y = (&&) <$> (x $<=$ y) <*> (x $>=$ y)
 
 ($/=$) :: (MonadSoP u e p m) => SoP u -> SoP u -> m Bool
 x $/=$ y = (||) <$> (x $<$ y) <*> (x $>$ y)
+
+(%<) :: (MonadSoP u e p m) => SoP u -> SoP u -> m Bool
+x %< y = fmSolveLEq0_ True 0 . (.+. int2SoP 1) $ x .-. y

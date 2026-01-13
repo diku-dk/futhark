@@ -117,19 +117,16 @@ tests =
                 (int 0 :<=: new_shape_at (sVar k)
                 :&&:
                 new_shape_at (sVar k) :<=: offsets_at (sVar k .+. int 1) .-. offsets_at (sVar k) )
-              -- addRel
-              --   (new_shape_at (sVar k) :<=: sVar nE)
               -- XXX
               printAlgEnv 1
 
               -- THE ACTUAL QUERY
               -- (j .+. offsets_at (sVar k)) FM.$<$ sVar nE
-              FM.fmSolveLEq0_ True 0 $
-                (j .+. offsets_at (sVar k)) .-. sVar nE .+. int 1
+              -- FM.fmSolveLEq0_ True 0 $
+              --   (j .+. offsets_at (sVar k)) .-. sVar nE .+. int 1
               -- WHAT IM WORKING ON NOW
               -- (j .+. offsets_at (sVar k)) FM.$<$ sVar nE
-              FM.fmSolveLEq0_ True 0 $
-                j .+. offsets_at (sVar k)
+              (j .+. offsets_at (sVar k)) FM.%< offsets_at (sVar k .+. int 1)
               -- XXX when i dont have an upper bound on offsets, I can show that (j + offsets[k] < offsets[k+1])!   Put this as a range in the program?
           )
           @??= True,

@@ -19,6 +19,7 @@ module Futhark.Analysis.Properties.Property
     askBijectiveRCD,
     cloneProperty,
     mapProperty,
+    askForRng,
   )
 where
 
@@ -211,6 +212,22 @@ getFiltPart props
   | otherwise = Nothing
   where
     f (FiltPart {}) = True
+    f _ = False
+
+askForRng :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
+askForRng = (`askPropertyWith` getForRng)
+
+getForRng :: S.Set (Property u) -> Maybe (Property u)
+getForRng props
+  | fp : rest <- filter f (S.toList props) = do
+      unless (null rest) $ error "getForRng multiple For-Rng"
+      Just fp
+  | otherwise = Nothing
+  where
+    -- Matches: For <var> (Predicate <var> (Rng ...))
+    f (For x (Predicate _ (Rng y _)))
+      | x == y = True
+      | otherwise = error "Internal error"
     f _ = False
 
 nameAffectedBy :: Property u -> VName
