@@ -9,15 +9,17 @@ module Futhark.Analysis.Properties.AlgebraBridge.Translate
     getDisjoint,
     lookupUntransBool,
     addProperty_,
+    addForProperties,
   )
 where
 
-import Control.Monad (foldM, forM, forM_, when, (<=<))
+import Control.Monad (foldM, forM, forM_, void, when, (<=<))
 import Data.Function (on)
 import Data.List (sortBy)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as S
+import Futhark.Analysis.Properties.AlgebraPC.Symbol (foldAlgebra, repAlgebra)
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Flatten (from1Dto2D)
 import Futhark.Analysis.Properties.IndexFn
@@ -32,10 +34,12 @@ import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
 import Futhark.SoP.Monad (addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
-import Futhark.SoP.Refine (addRel)
+import Futhark.SoP.Refine (addRel, addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justConstant, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~))
+import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
+import Debug.Trace (traceM)
 
 class AlgTranslatable u v where
   fromAlgebra :: u -> IndexFnM v
@@ -206,7 +210,41 @@ addProperty_ (UserFacingDisjoint ps) = do
     prop <- askDisjoint (Algebra.Var vn)
     when (isNothing prop) $ -- TODO make this more precise.
       addProperty (Algebra.Var vn) (Disjoint (S.delete vn x))
+addProperty_ (For x p) = do
+  addProperty (Algebra.Var x) (For x p)
 addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
+
+addForProperties :: SoP Algebra.Symbol -> IndexFnM ()
+addForProperties = void . foldAlgebra addForProperties_ mempty
+
+-- TODO
+-- [x] Predicate i is not being substituted properly
+-- [ ] I think this has to be interleaved in the FM algorithm simplification
+-- because we might reveal new indices from manipulating sums.
+addForProperties_ :: S.Set Algebra.Symbol -> Algebra.Symbol -> IndexFnM (S.Set Algebra.Symbol)
+addForProperties_ visited sym | sym `S.member` visited = pure visited
+addForProperties_ visited sym@(Algebra.Idx (Algebra.One vn) idx) = do
+      traceM $ "addForProperties_ " <> prettyStr sym
+      for_rng_prop <- askForRng (Algebra.Var vn)
+      case for_rng_prop of
+        Just (For _ (Predicate i (Rng _ (mlb, mub)))) -> do
+          let sub = repAlgebra (M.singleton i idx)
+          addRels . S.fromList $
+            catMaybes
+              [ fmap (\lb -> sub lb :<=: sym2SoP sym) mlb,
+                fmap (\ub -> sym2SoP sym :<=: sub ub .-. int2SoP 1) mub
+              ]
+          pure $ S.insert sym visited
+        _ -> pure visited
+addForProperties_ visited sym@(Algebra.Sum (Algebra.One vn) a_idx b_idx) = do
+      for_rng_prop <- askForRng (Algebra.Var vn)
+      case for_rng_prop of
+        Just (For _ (Predicate _ Rng {})) -> do
+          v' <- addForProperties_ visited (Algebra.Idx (Algebra.One vn) a_idx)
+          v'' <- addForProperties_ v' (Algebra.Idx (Algebra.One vn) b_idx)
+          pure $ S.insert sym v''
+        _ -> pure visited
+addForProperties_ visited _ = pure visited
 
 -----------------------------------------------------------------------------
 -- Translation from Algebra to IndexFn layer.

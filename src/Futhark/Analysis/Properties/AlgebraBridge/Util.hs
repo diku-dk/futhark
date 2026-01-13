@@ -27,7 +27,7 @@ import Control.Monad (forM_, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, toAlgebra, addProperty_)
+import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, toAlgebra, addProperty_, addForProperties)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Domain (..), Iterator, Quantified (..))
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
@@ -213,6 +213,7 @@ convFME :: (SoP Algebra.Symbol -> SoP Algebra.Symbol -> IndexFnM Bool) -> SoP Sy
 convFME op x y = rollbackAlgEnv $ do
   a <- toAlgebra x
   b <- toAlgebra y
+  addForProperties (a .+. b)
   ans <- a `op` b
   pure $ if ans then Yes else Unknown
 

@@ -21,6 +21,7 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Monad (printAlgEnv)
 import Futhark.SoP.SoP (SoP)
+import Futhark.Analysis.Properties.AlgebraBridge.Translate (addForProperties)
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-option="--pattern=Properties.Algebra"
@@ -33,10 +34,6 @@ num_tests_pow = 1 -- 100000
 
 num_tests_sum_sub :: Integer
 num_tests_sum_sub = 1 -- 1000
-
--- Need this dummy to use addRels.
-instance ToSoP Symbol IndexFn.Symbol where
-  toSoPNum _ = undefined
 
 mkRange' :: Ord u => SoP u -> SoP u -> Range u
 mkRange' x y = mkRange (Just x) (Just y)
@@ -67,67 +64,25 @@ tests =
 
               addProperty (Var offsets) (Monotonic offsets Inc)
               addProperty (Var offsets) (Rng offsets (Just $ int 0, Just $ sVar nE))
-              -- addRel (int 0 :<=: sVar offsets :&&: sVar offsets :<=: sVar nE)
               addRel (int 0 :<=: sVar offsets )
-
               let offsets_at = sym2SoP . Idx (One offsets) 
               addProperty
                 (Var new_shape)
                 (For new_shape (Predicate i2 $ Rng new_shape (Just $ int 0, Just $ offsets_at (sVar i2 .+. int 1) .-. offsets_at (sVar i2))))
-
               addRel (int 0 :<=: sVar k :&&: sVar k :<: sVar nV)
-
               let sum_shape = sym2SoP . Sum (One new_shape) (int 0)
-
               addRel (sum_shape (sVar k .-. int 1) :<=: sVar i :&&: sVar i :<: sum_shape (sVar k))
 
 
               let new_shape_at = sym2SoP . Idx (One new_shape)
-
-              -- Sanity check: we can prove that 0 <= j < new_shape[k].
               let j = sVar i .-. sum_shape (sVar k .-. int 1)
-              -- lb <- int 0 FM.$<=$ j
-              -- ub <- j FM.$<$ new_shape_at (sVar k)
-              -- printM 1 $ "j = " <> prettyString j
-              -- printM 1 $ "0 <= " <> prettyString j <> " < " <> prettyString (new_shape_at (sVar k)) <> ": " <> prettyString (lb && ub)
+              let q_lhs = j .+. offsets_at (sVar k)
+              let q_rhs = offsets_at (sVar k .+. int 1)
 
-              -- printM 1 $ "\nGoal: " <> prettyString (sVar i .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k) :<: sVar nE)
-              -- -- FM step 1: replace i by its upper bound sum_shape (sVar k) - 1
-              -- let test = (sum_shape (sVar k) .-. int 1) .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k)
-              -- test' <- simplify test
-              -- printM 1 $ "Step 1: " <> prettyString test <> "\n  = " <> prettyString test'
-
-              -- -- FM step 2: maximize new_shape[k] to offsets[k+1] - offsets[k]
-              -- let test = int (-1) .+. offsets_at (sVar k) .+. offsets_at (sVar k .+. int 1) .-. offsets_at (sVar k) 
-              -- test' <- simplify test
-              -- printM 1 $ "Step 2: " <> prettyString test <> "\n  = " <> prettyString test'
-
-              -- -- FM step 3: offsets[k+1] - 1 < E
-              -- let test = int (-1) .+. offsets_at (sVar k .+. int 1)
-              -- test' <- test FM.$<$ sVar nE
-              -- printM 1 $ "Step 3: " <> prettyString (test :<: sVar nE) <> "\n  = " <> prettyString test'
-
-              -- FM step 4: Done using the range on offsets.
-
-              -- XXX
-              -- NOT IMPLEMENTED YET
-              -- Trying to do the effect of For-Range
-              -- 
-              addRel
-                (int 0 :<=: new_shape_at (sVar k)
-                :&&:
-                new_shape_at (sVar k) :<=: offsets_at (sVar k .+. int 1) .-. offsets_at (sVar k) )
-              -- XXX
+              addForProperties (q_lhs .-. q_rhs)
               printAlgEnv 1
 
-              -- THE ACTUAL QUERY
-              -- (j .+. offsets_at (sVar k)) FM.$<$ sVar nE
-              -- FM.fmSolveLEq0_ True 0 $
-              --   (j .+. offsets_at (sVar k)) .-. sVar nE .+. int 1
-              -- WHAT IM WORKING ON NOW
-              -- (j .+. offsets_at (sVar k)) FM.$<$ sVar nE
-              (j .+. offsets_at (sVar k)) FM.%< offsets_at (sVar k .+. int 1)
-              -- XXX when i dont have an upper bound on offsets, I can show that (j + offsets[k] < offsets[k+1])!   Put this as a range in the program?
+              q_lhs FM.%< q_rhs
           )
           @??= True,
       testCase "Pow Exact Normaliation" $
