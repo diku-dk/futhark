@@ -81,9 +81,7 @@ fmSolveGEq0 = fmSolveLEq0 . negSoP
 --      (ii)  `False` if there is an `i` for which the inequality does
 --                    not hold or if the answer is unknown.
 fmSolveLEq0 :: (MonadSoP u e p m) => SoP u -> m Bool
-fmSolveLEq0 sop
-  | Just c <- justConstant sop = pure (c <= 0)
-  | otherwise = do
+fmSolveLEq0 sop = do
   sop' <- substEquivs sop
   (sop'', msymrg) <- findSymLEq0 sop' -- findSymLEq0Def sop'
 
