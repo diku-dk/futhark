@@ -72,8 +72,8 @@ simplifyLevel sop_orig = do
 --   in the transitive closure of its ranges, i.e., we
 --   call it ``the most dependent'' symbol
 findSymbolLEq0 :: (MonadSoP Symbol e Prop m) =>
-  Bool -> SoP Symbol -> m (SoP Symbol, Maybe (Symbol, Range Symbol))
-findSymbolLEq0 do_trace sop = do
+  SoP Symbol -> m (SoP Symbol, Maybe (Symbol, Range Symbol))
+findSymbolLEq0 sop = do
   -- perform general simplifications
   sop' <- simplify sop
   -- try to extract an equivalent SoP inequlity by "unifying" exponentials.
@@ -87,10 +87,8 @@ findSymbolLEq0 do_trace sop = do
   let (syms_pow, syms) = S.partition hasPow $ free sop'''
       -- is = map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) $ S.toList syms
   is <- forM (S.toList syms) $ \ s -> do
-          nms <- transClosInRangesSym do_trace s
+          nms <- transClosInRangesSym s
           pure (S.size nms, s)
-  when do_trace . traceM $ "findSymbolLEq0:sop: " <> prettyString sop'''
-  when do_trace . traceM $ "findSymbolLEq0:is: " <> prettyString is
   case (is, S.size syms_pow) of
     ([], 0) -> pure (sop''', Nothing)
     _ -> do
@@ -101,14 +99,11 @@ findSymbolLEq0 do_trace sop = do
       range <- getRangeOfSym sym2elim
       pure (sop''', Just (sym2elim, range))
 
-transClosInRangesSym :: (MonadSoP Symbol e Prop m) => Bool -> Symbol -> m (S.Set VName)
-transClosInRangesSym do_trace sym = do
+transClosInRangesSym :: (MonadSoP Symbol e Prop m) => Symbol -> m (S.Set VName)
+transClosInRangesSym sym = do
   let leaders = leadingNames sym
   active <- dependencies sym
-  when do_trace . traceM $ "transClosInRangesSym:sym: " <> prettyString sym
-  when do_trace . traceM $ "transClosInRangesSym:active: " <> prettyString active
   dep_names <- transClosHelper S.empty S.empty active
-  when do_trace . traceM $ "  |- dep_names: " <> prettyString dep_names
   if S.null (S.intersection leaders dep_names)
   then pure dep_names
   else do
@@ -129,7 +124,6 @@ transClosInRangesSym do_trace sym = do
         clos_nms'<- S.union clos_nms leaders,
         seen' <- S.insert sym' seen = do
       active' <- dependencies sym'
-      when do_trace . traceM $ "  | helper:(sym,deps): " <> prettyString (sym', active')
       let active''' = (active <> active') S.\\ seen
       transClosHelper clos_nms' seen' active'''
     --

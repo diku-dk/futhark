@@ -22,6 +22,7 @@ import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Monad (printAlgEnv)
 import Futhark.SoP.SoP (SoP)
 import Futhark.Analysis.Properties.AlgebraBridge.Translate()
+import Futhark.SoP.FourierMotzkin (($<$))
 
 -------------------------------------
 -- Run with:
@@ -82,7 +83,7 @@ tests =
 
               printAlgEnv 1
 
-              q_lhs FM.%< q_rhs
+              q_lhs $<$ q_rhs
           )
           @??= True,
       testCase "mis hard expand indices bounds" $
@@ -120,7 +121,7 @@ tests =
               printAlgEnv 1
 
               let index = sVar i .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k)
-              index FM.%< sVar nE
+              index $<$ sVar nE
           )
           @??= True,
       testCase "Pow Exact Normaliation" $
