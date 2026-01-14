@@ -219,8 +219,15 @@ addForProperties = void . foldAlgebra addForProperties_ mempty
 
 -- TODO
 -- [x] Predicate i is not being substituted properly
--- [ ] I think this has to be interleaved in the FM algorithm simplification
+-- [ ] Approach 1: I think this has to be interleaved in the FM algorithm simplification
 -- because we might reveal new indices from manipulating sums.
+-- [ ] Approach 2: I add the ranges, but keep a separate symbol table:
+--   * Add the Range from For-Range directly on the affected VName
+--         lb (function of some index) <= vn <= ub (function of some index)
+--   * Separate table maps the particular Range to the index that must be replaced
+--      (lb, vn, ub) |-> idx
+--   * Caveat: now all ranges have to be looked up in that table, but if it
+--     can be hidden behind a general "getRange" function that's OK.
 addForProperties_ :: S.Set Algebra.Symbol -> Algebra.Symbol -> IndexFnM (S.Set Algebra.Symbol)
 addForProperties_ visited sym | sym `S.member` visited = pure visited
 addForProperties_ visited sym@(Algebra.Idx (Algebra.One vn) idx) = do
