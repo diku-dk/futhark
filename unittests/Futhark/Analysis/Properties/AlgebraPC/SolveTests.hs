@@ -66,7 +66,7 @@ tests =
               addProperty (Var offsets) (Monotonic offsets Inc)
               addProperty (Var offsets) (Rng offsets (Just $ int 0, Just $ sVar nE))
               addRel (int 0 :<=: sVar offsets )
-              let offsets_at = sym2SoP . Idx (One offsets) 
+              let offsets_at = sym2SoP . Idx (One offsets)
               addProperty
                 (Var new_shape)
                 (For new_shape (Predicate i2 $ Rng new_shape (Just $ int 0, Just $ offsets_at (sVar i2 .+. int 1) .-. offsets_at (sVar i2))))
@@ -83,6 +83,44 @@ tests =
               printAlgEnv 1
 
               q_lhs FM.%< q_rhs
+          )
+          @??= True,
+      testCase "mis hard expand indices bounds" $
+        run
+          ( do
+              clearAlgEnv
+              nV <- newNameFromString "V"
+              nE <- newNameFromString "E"
+              offsets <- newNameFromString "offsets"
+              new_shape <- newNameFromString "new_shape"
+              i <- newNameFromString "i"
+              k <- newNameFromString "k"
+              i2 <- newNameFromString "i"
+
+              -- i ∈ ⊎(k < V)
+              --  [∑j∈(0 ... k-1) new_shape(j), ..., ∑j∈(0 ... k) new_shape(j)]
+              addProperty (Var nV) (Rng nV (Just $ int 0, Nothing))
+              addProperty (Var offsets) (Monotonic offsets Inc)
+              addProperty (Var offsets) (Rng offsets (Just $ int 0, Just $ sVar nE))
+              let offsets_at = sym2SoP . Idx (One offsets)
+              addProperty
+                (Var new_shape)
+                (For new_shape (Predicate i2 $ Rng new_shape (Just $ int 0, Just $ offsets_at (sVar i2 .+. int 1) .-. offsets_at (sVar i2))))
+              let sum_shape = sym2SoP . Sum (One new_shape) (int 0)
+
+              -- Add ranges the way they appear in mis.fut.
+              addRange (Var offsets) $ mkRange' (int 0) (sVar nE .-. int 1)
+              addRange (Var i) $ mkRange' (int 0) (sum_shape (sVar nV .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange' (sum_shape (sVar k .-. int 1)) (sum_shape (sVar k) .-. int 1)
+              addRels $ S.fromList [
+                  int 0 :<=: sVar nV,
+                  int 0 :<=: sVar k,
+                  sVar k :<: sVar nV
+                ]
+              printAlgEnv 1
+
+              let index = sVar i .-. sum_shape (sVar k .-. int 1) .+. offsets_at (sVar k)
+              index FM.%< sVar nE
           )
           @??= True,
       testCase "Pow Exact Normaliation" $

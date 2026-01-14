@@ -101,8 +101,8 @@ class
   getEquivs :: m (EquivEnv u)
   getProperties :: m (Map u (Set p))
   modifyEnv :: (AlgEnv u e p -> AlgEnv u e p) -> m ()
-  findSymLEq0 :: SoP u -> m (SoP u, Maybe (u, Range u))
-  findSymLEq0 = findSymLEq0Def
+  findSymLEq0 :: Bool -> SoP u -> m (SoP u, Maybe (u, Range u))
+  findSymLEq0 _ = findSymLEq0Def
 
 -- | The algebraic monad; consists of a an algebraic
 --   environment along with a fresh variable source.

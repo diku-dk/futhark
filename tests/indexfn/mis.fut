@@ -113,24 +113,15 @@ def make_shape [V]
     : {[V]i64 | \y -> For y (\i -> Range y (0, offsets[i+1] - offsets[i] + 1))} =
   map (\i -> if new[i] then offsets[i+1] - offsets[i] else 0) (iota V)
 
-def expand_indices [V]
-    (offsets: {[V+1]i64 | \x -> Range x (0,inf) && Monotonic (<=) x})
-    -- (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (new: [V]bool)
-    : {([]i64, []i64) | \(seg,y) -> For y (\i -> Range y (0, offsets[seg[i]+1] + 1))} =
-    -- : {([]i64, []i64) | \(seg,y) -> Range y (0, E)} =
-  let new_shape = make_shape offsets new
-  let (segment_ids, iotas) = repl_segm_iota new_shape
-  let indices = map2 (\i j -> offsets[i] + j) segment_ids iotas
-  in (segment_ids, indices)
-
 def expand [V] [E]
     (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (edges: {[E]i64 | \x -> Range x (0, V)})
     (new: [V]bool)
     : {[]i64 | \_ -> true} =
   -- For each newly added vertex, get its neighbours
-  let (_, indices) = expand_indices offsets new
+  let new_shape = make_shape offsets new
+  let (segment_ids, iotas) = repl_segm_iota new_shape
+  let indices = map2 (\i j -> offsets[i] + j) segment_ids iotas
   in map (\i -> edges[i]) indices
 
 def mis_step_ [V] [E]

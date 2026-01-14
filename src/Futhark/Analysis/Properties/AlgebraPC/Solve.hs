@@ -2,11 +2,10 @@ module Futhark.Analysis.Properties.AlgebraPC.Solve
   ( simplify,
     simplifyLevel,
     findSymbolLEq0,
-    transClosInRangesSym,
   )
 where
 
-import Control.Monad (forM, (<=<))
+import Control.Monad (forM, (<=<), when)
 import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
@@ -22,6 +21,7 @@ import Language.Futhark (VName)
 import Futhark.Util.Pretty
 import Futhark.Analysis.Properties.Property
 import Data.Maybe (catMaybes)
+import Debug.Trace (traceM)
 -- import Debug.Trace
 
 sop0 :: SoP Symbol
@@ -72,8 +72,8 @@ simplifyLevel sop_orig = do
 --   in the transitive closure of its ranges, i.e., we
 --   call it ``the most dependent'' symbol
 findSymbolLEq0 :: (MonadSoP Symbol e Prop m) =>
-  SoP Symbol -> m (SoP Symbol, Maybe (Symbol, Range Symbol))
-findSymbolLEq0 sop = do
+  Bool -> SoP Symbol -> m (SoP Symbol, Maybe (Symbol, Range Symbol))
+findSymbolLEq0 do_trace sop = do
   -- perform general simplifications
   sop' <- simplify sop
   -- try to extract an equivalent SoP inequlity by "unifying" exponentials.
@@ -87,27 +87,31 @@ findSymbolLEq0 sop = do
   let (syms_pow, syms) = S.partition hasPow $ free sop'''
       -- is = map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) $ S.toList syms
   is <- forM (S.toList syms) $ \ s -> do
-          nms <- transClosInRangesSym s
+          nms <- transClosInRangesSym do_trace s
           pure (S.size nms, s)
+  when do_trace . traceM $ "findSymbolLEq0:sop: " <> prettyString sop'''
+  when do_trace . traceM $ "findSymbolLEq0:is: " <> prettyString is
   case (is, S.size syms_pow) of
     ([], 0) -> pure (sop''', Nothing)
     _ -> do
       let sym2elim =
             if null is 
             then S.elemAt 0 syms_pow -- a pow sym
-            else snd $ maximum $ is  -- Yayyy, we have a non-Pow symbol
+            else snd $ maximum is  -- Yayyy, we have a non-Pow symbol
       range <- getRangeOfSym sym2elim
-      pure $ (sop''', Just (sym2elim, range))
+      pure (sop''', Just (sym2elim, range))
 
-transClosInRangesSym :: (MonadSoP Symbol e Prop m) => Symbol -> m (S.Set VName)
-transClosInRangesSym sym = do
+transClosInRangesSym :: (MonadSoP Symbol e Prop m) => Bool -> Symbol -> m (S.Set VName)
+transClosInRangesSym do_trace sym = do
   let leaders = leadingNames sym
-  range <- getRangeOfSym sym
-  let active = S.union (free sym) $ free range
+  active <- dependencies sym
+  when do_trace . traceM $ "transClosInRangesSym:sym: " <> prettyString sym
+  when do_trace . traceM $ "transClosInRangesSym:active: " <> prettyString active
   dep_names <- transClosHelper S.empty S.empty active
-  case S.null (S.intersection leaders dep_names) of
-    True  -> pure dep_names
-    False -> do
+  when do_trace . traceM $ "  |- dep_names: " <> prettyString dep_names
+  if S.null (S.intersection leaders dep_names)
+  then pure dep_names
+  else do
       ranges <- getRanges
       equivs <- getEquivs
       error ( "Circular range encountered in sym: " ++ prettyString sym ++
@@ -120,14 +124,13 @@ transClosInRangesSym sym = do
         S.Set VName -> S.Set Symbol -> S.Set Symbol -> m (S.Set VName)
     transClosHelper clos_nms seen active
       | S.null active = pure clos_nms
-      | (sym', active') <- S.deleteFindMin active,
+      | sym' <- S.findMin active,
         leaders  <- leadingNames sym',
         clos_nms'<- S.union clos_nms leaders,
-        freesyms <- free sym',
-        active'' <- S.union active' freesyms,
         seen' <- S.insert sym' seen = do
-      range <- getRangeOfSym $ sym'
-      let active''' = S.union active'' $ free range S.\\ seen
+      active' <- dependencies sym'
+      when do_trace . traceM $ "  | helper:(sym,deps): " <> prettyString (sym', active')
+      let active''' = (active <> active') S.\\ seen
       transClosHelper clos_nms' seen' active'''
     --
     leadingNames :: Symbol -> S.Set VName
@@ -141,6 +144,22 @@ transClosInRangesSym sym = do
     --
     leadingIdxNames (One nm ) = S.singleton nm
     leadingIdxNames (POR nms) = nms
+
+    -- Get the symbols that a symbol directly depends on (including via ranges
+    -- and range properties).
+    -- NOTE Somewhat hacky: for `Sum x [a:b]` it will look for ranges on `x[a]`
+    -- and `x[b]` because these are handled specially for For-Range properties.
+    -- If `x` has a For-Range property, we might miss the dependence in `Sum x
+    -- [a:b]` otherwise.
+    dependencies symbol = do
+      free_range <- case symbol of
+        Sum ix a b -> do
+          r1 <- getRangeOfSym symbol
+          r2 <- getRangeOfSym (Idx ix a)
+          r3 <- getRangeOfSym (Idx ix b)
+          pure (free r1 <> free r2 <> free r3)
+        _ -> free <$> getRangeOfSym symbol
+      pure $ free symbol <> free_range
 
 powEquiv ::
   (MonadSoP Symbol e Prop m) =>

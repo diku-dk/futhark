@@ -100,7 +100,7 @@ fmSolveLEq0_ do_trace depth sop
   when do_trace . traceM $ indent ++ "[FM Entry]: " ++ prettyString sop
 
   sop' <- substEquivs sop
-  (sop'', msymrg) <- findSymLEq0 sop' -- findSymLEq0Def sop'
+  (sop'', msymrg) <- findSymLEq0 do_trace sop' -- findSymLEq0Def sop'
 
   case (justConstant sop'', msymrg) of
     (Just v, _) -> pure (v <= 0)
