@@ -12,13 +12,12 @@ module Futhark.Analysis.Properties.AlgebraBridge.Translate
   )
 where
 
-import Control.Monad (foldM, forM, forM_, void, when, (<=<))
+import Control.Monad (foldM, forM, forM_, when, (<=<))
 import Data.Function (on)
 import Data.List (sortBy)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraPC.Symbol (foldAlgebra, repAlgebra)
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Flatten (from1Dto2D)
 import Futhark.Analysis.Properties.IndexFn
@@ -33,12 +32,10 @@ import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
 import Futhark.SoP.Monad (addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
-import Futhark.SoP.Refine (addRel, addRels)
+import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justConstant, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~))
-import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
-import Debug.Trace (traceM)
 
 class AlgTranslatable u v where
   fromAlgebra :: u -> IndexFnM v

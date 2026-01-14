@@ -9,12 +9,10 @@ module Futhark.Analysis.Properties.AlgebraPC.Symbol
     hasIdxOrSum,
     getVName,
     fv,
-    foldAlgebra,
     repAlgebra,
   )
 where
 
-import Control.Monad (foldM)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.Property (MonDir, Property)
 import Futhark.Analysis.Properties.Util (prettyName)
@@ -150,21 +148,6 @@ hasIdxOrSum x = hasIdx x || hasMdf x || hasSum x
 getVName :: Symbol -> VName
 getVName (Var vn) = vn
 getVName x = error ("getVName: non-Var symbol " <> show x)
-
-foldAlgebraSymbol :: (Monad m) => (b -> Symbol -> m b) -> b -> Symbol -> m b
-foldAlgebraSymbol f acc sym = do
-  acc' <- f acc sym
-  case sym of
-    Var _ -> pure acc'
-    Idx _ sop -> foldAlgebra f acc' sop
-    Mdf _ _ s1 s2 -> foldAlgebra f acc' s1 >>= flip (foldAlgebra f) s2
-    Sum _ s1 s2 -> foldAlgebra f acc' s1 >>= flip (foldAlgebra f) s2
-    Pow (_, sop) -> foldAlgebra f acc' sop
-
-foldAlgebra :: (Monad m) => (b -> Symbol -> m b) -> b -> SoP Symbol -> m b
-foldAlgebra f a sop = foldM foldTerms a (sopToLists sop)
-  where
-    foldTerms a' (terms, _) = foldM (foldAlgebraSymbol f) a' terms
 
 -- | Replace VNames in a SoP Symbol according to a substitution function
 repAlgebra :: M.Map VName (SoP Symbol) -> SoP Symbol -> SoP Symbol
