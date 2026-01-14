@@ -94,13 +94,27 @@ fmSolveLEq0 sop
   where
     divAndConqFM sop1 i (Range lb k ub) = do
       let (a, b) = factorSoP [i] sop1
-      a_leq_0 <- fmSolveLEq0 a
-      al_leq_0 <-
+      let a_leq_0 = fmSolveLEq0 a
+      let al_leq_0 =
             anyM (\l -> fmSolveLEq0 $ a .*. l .+. int2SoP k .*. b) (S.toList lb)
-      a_geq_0 <- fmSolveLEq0 $ negSoP a
-      au_leq_0 <-
+      let a_geq_0 = fmSolveLEq0 $ negSoP a
+      let au_leq_0 =
             anyM (\u -> do fmSolveLEq0 $ a .*. u .+. int2SoP k .*. b) (S.toList ub)
-      pure (a_leq_0 && al_leq_0 || a_geq_0 && au_leq_0)
+      (a_leq_0 `andM` al_leq_0) `orM` (a_geq_0 `andM` au_leq_0)
+
+andF :: (Monad m) => Bool -> m Bool -> m Bool
+andF True m = m
+andF False _ = pure False
+
+andM :: (Monad m) => m Bool -> m Bool -> m Bool
+andM m1 m2 = do
+  ans <- m1
+  ans `andF` m2
+
+orM :: (Monad m) => m Bool -> m Bool -> m Bool
+orM m1 m2 = do
+  a1 <- m1
+  if a1 then pure True else m2
 
 {--
 fmSolveLEq0 :: (MonadSoP u e p m) => SoP u -> m Bool
