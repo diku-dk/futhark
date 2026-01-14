@@ -18,6 +18,9 @@ import Futhark.Transform.Rename (renameBody)
 import Futhark.Util.IntegralExp (divUp)
 import Prelude hiding (quot, rem)
 
+-- This does not correspond with the actual cache size, but the actual cache
+-- size may not really be the optimal value either. Ideally this should be
+-- exposed as a tuning parameter.
 cacheSize :: Imp.TExp Int64
 cacheSize = 65536 -- 64 KB
 
@@ -55,11 +58,10 @@ updateLocalPrefixes scan_ops per_op_prefix_var per_op_prefix_arr index = do
 
 genArrays :: [SegBinOp MCMem] -> Name -> Shape -> MulticoreGen [[VName]]
 genArrays scan_ops arr_name block_shape = do
-  forM scan_ops $ \scan_op -> do
-    let shape = segBinOpShape scan_op
-        ts = lambdaReturnType $ segBinOpLambda scan_op
-    forM ts $ \t -> do
-      sAllocArray arr_name (elemType t) (block_shape <> shape <> arrayShape t) DefaultSpace
+  forM scan_ops $ \scan_op ->
+    forM (lambdaReturnType $ segBinOpLambda scan_op) $ \t -> do
+      let shape = block_shape <> segBinOpShape scan_op <> arrayShape t
+      sAllocArray arr_name (elemType t) shape DefaultSpace
 
 genLocalArray :: [SegBinOp MCMem] -> MulticoreGen [[VName]]
 genLocalArray scan_ops = do
@@ -204,11 +206,11 @@ seqScanFastPath pat i scan_ops kbody per_op_prefixes_var start chunk_length per_
 
       forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res, local_accums) ->
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-          forM_ (zip (xParams scan_op) local_accums) $ \(p, acc) -> do
+          forM_ (zip (xParams scan_op) local_accums) $ \(p, acc) ->
             copyDWIMFix (paramName p) [] (Var acc) vec_is
           forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
             copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
-          compileStms mempty (bodyStms $ lamBody scan_op) $ do
+          compileStms mempty (bodyStms $ lamBody scan_op) $
             forM_ (zip3 local_accums (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(acc, se, pe) -> do
               copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
               copyDWIMFix acc vec_is se []
@@ -216,8 +218,8 @@ seqScanFastPath pat i scan_ops kbody per_op_prefixes_var start chunk_length per_
 
     -- write back local accumulators to prefix arrays
     forM_ (zip3 scan_ops_renamed per_op_prefix_arr per_op_local_accum) $ \(scan_op, prefix_arrs, local_accums) ->
-      sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-        forM_ (zip local_accums prefix_arrs) $ \(acc, prefix_arr) -> do
+      sLoopNest (segBinOpShape scan_op) $ \vec_is ->
+        forM_ (zip local_accums prefix_arrs) $ \(acc, prefix_arr) ->
           copyDWIMFix prefix_arr (tvExp block_idx : vec_is) (Var acc) vec_is
 
 seqScanLB ::
@@ -243,8 +245,8 @@ seqScanLB pat i scan_ops kbody per_op_prefixes_var start chunk_length = do
   let per_scan_pes = segBinOpChunks scan_ops_renamed $ patElems pat
 
   forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $ \(scan_op, prefix_vars, local_accums) ->
-    sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-      forM_ (zip local_accums prefix_vars) $ \(acc, prefix) -> do
+    sLoopNest (segBinOpShape scan_op) $ \vec_is ->
+      forM_ (zip local_accums prefix_vars) $ \(acc, prefix) ->
         copyDWIMFix acc vec_is (Var prefix) vec_is
 
   z <- dPrimV "z" (0 :: Imp.TExp Int64)
@@ -255,11 +257,11 @@ seqScanLB pat i scan_ops kbody per_op_prefixes_var start chunk_length = do
         compileStms mempty (bodyStms kbody_renamed) $ do
           forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res, local_accums) ->
             sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-              forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
+              forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) ->
                 copyDWIMFix (paramName px) [] (Var acc) vec_is
               forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
                 copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
-              compileStms mempty (bodyStms $ lamBody scan_op) $ do
+              compileStms mempty (bodyStms $ lamBody scan_op) $
                 forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) pes local_accums) $ \(se, pe, acc) -> do
                   copyDWIMFix acc vec_is se []
                   copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
@@ -267,13 +269,13 @@ seqScanLB pat i scan_ops kbody per_op_prefixes_var start chunk_length = do
       else do
         forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, _, local_accums) ->
           sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-            forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
+            forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) ->
               copyDWIMFix (paramName px) [] (Var acc) vec_is
             forM_ (zip (yParams scan_op) pes) $ \(py, pe) ->
               -- reading from output array
               copyDWIMFix (paramName py) [] (Var (patElemName pe)) ((tvExp start + tvExp z) : vec_is)
             compileStms mempty (bodyStms $ lamBody scan_op) $ do
-              forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(se, pe) -> do
+              forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(se, pe) ->
                 copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
         z <-- tvExp z + 1
 
@@ -310,24 +312,27 @@ seqAggregate pat i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx 
 
       sIf
         (tvExp j .==. 0)
-        ( forM_ (zip4 scan_ops_renamed per_scan_res per_op_local_accum per_scan_pes) $ \(scan_op, scan_res_op, local_accums, pes) -> do
-            let shape = segBinOpShape scan_op
-            sLoopNest shape $ \vec_is -> do
-              forM_ (zip3 scan_res_op local_accums pes) $ \(kr, acc, pe) -> do
-                copyDWIMFix acc vec_is (kernelResultSubExp kr) vec_is
-                unless (shouldRecompute kbody_renamed) $ copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) (kernelResultSubExp kr) vec_is
+        ( forM_ (zip4 scan_ops_renamed per_scan_res per_op_local_accum per_scan_pes) $
+            \(scan_op, scan_res_op, local_accums, pes) -> do
+              let shape = segBinOpShape scan_op
+              sLoopNest shape $ \vec_is -> do
+                forM_ (zip3 scan_res_op local_accums pes) $ \(kr, acc, pe) -> do
+                  copyDWIMFix acc vec_is (kernelResultSubExp kr) vec_is
+                  unless (shouldRecompute kbody_renamed) $
+                    copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) (kernelResultSubExp kr) vec_is
         )
-        ( forM_ (zip4 scan_ops_renamed per_scan_res per_op_local_accum per_scan_pes) $ \(scan_op, scan_res, local_accums, pes) ->
-            sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-              forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) -> do
-                copyDWIMFix (paramName px) [] (Var acc) vec_is
-              forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) -> do
-                copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
+        ( forM_ (zip4 scan_ops_renamed per_scan_res per_op_local_accum per_scan_pes) $
+            \(scan_op, scan_res, local_accums, pes) ->
+              sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+                forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) ->
+                  copyDWIMFix (paramName px) [] (Var acc) vec_is
+                forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
+                  copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
 
-              compileStms mempty (bodyStms $ lamBody scan_op) $ do
-                forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) local_accums pes) $ \(se, acc, pe) -> do
-                  copyDWIMFix acc vec_is se []
-                  unless (shouldRecompute kbody_renamed) $ copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) se []
+                compileStms mempty (bodyStms $ lamBody scan_op) $ do
+                  forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) local_accums pes) $ \(se, acc, pe) -> do
+                    copyDWIMFix acc vec_is se []
+                    unless (shouldRecompute kbody_renamed) $ copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) se []
         )
     j <-- tvExp j + 1
 
@@ -336,6 +341,28 @@ seqAggregate pat i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx 
     sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
       forM_ (zip local_accums aggr_arrs) $ \(acc, agg) -> do
         copyDWIMFix agg (tvExp block_idx : vec_is) (Var acc) vec_is
+
+load64 ::
+  VName ->
+  VName ->
+  Imp.Count Imp.Elements (Imp.TExp Int32) ->
+  MulticoreGen ()
+load64 v arr i = sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) v arr i
+
+store64 ::
+  VName ->
+  Imp.Count Imp.Elements (Imp.TExp Int32) ->
+  Imp.TExp Int64 ->
+  MulticoreGen ()
+store64 arr i x = sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) arr i (untyped x)
+
+add64 ::
+  TV Int64 ->
+  VName ->
+  Imp.Count Imp.Elements (Imp.TExp Int32) ->
+  Imp.TExp Int64 ->
+  MulticoreGen ()
+add64 v arr i x = sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar v) arr i (untyped x)
 
 nonsegmentedScan ::
   Pat LetDecMem ->
@@ -380,7 +407,7 @@ nonsegmentedScan
       work_index_loc <- entryArrayLoc <$> lookupArray work_index
       let work_index_loc_name = memLocName work_index_loc
 
-      sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) work_index_loc_name (Imp.elements 0) (untyped (1 :: Imp.TExp Int64))
+      add64 block_idx work_index_loc_name (Imp.elements 0) 1
 
       sWhile (tvExp block_idx .<. tvExp block_no) $ do
         start <- dPrimV "start" (tvExp block_idx * blockSize)
@@ -406,7 +433,7 @@ nonsegmentedScan
               (initialiseLocalPrefixes scan_ops prefix_seqs)
               ( do
                   prev_flag <- dPrim "prev_flag" :: MulticoreGen (TV Int64)
-                  sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) (tvVar prev_flag) flag_loc_name (Imp.elements $ block_idx_32 - 1)
+                  load64 (tvVar prev_flag) flag_loc_name (Imp.elements $ block_idx_32 - 1)
                   sIf
                     (tvExp prev_flag .==. 2)
                     (updateLocalPrefixes scan_ops prefix_seqs prefArrs [tvExp block_idx - 1])
@@ -419,13 +446,13 @@ nonsegmentedScan
           ( do
               seqScanFastPath pat i scan_ops kbody prefix_seqs start chunk_length prefArrs block_idx
 
-              sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) flag_loc_name (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int64))
+              store64 flag_loc_name (Imp.elements block_idx_32) 2
           )
           ( do
               seqAggregate pat i scan_ops kbody start chunk_length aggrArrs block_idx
 
               -- write flag as 1
-              sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) flag_loc_name (Imp.elements block_idx_32) (untyped (1 :: Imp.TExp Int64))
+              store64 flag_loc_name (Imp.elements block_idx_32) 1
 
               old_flag <- dPrim "old_flag" :: MulticoreGen (TV Int64)
               old_flag <-- 0
@@ -438,13 +465,7 @@ nonsegmentedScan
               sOp $ Imp.GetError (tvVar error_flag)
 
               sWhile (bNot (tvExp old_flag .==. 2 .||. tvExp error_flag)) $ do
-                sOp $
-                  Imp.Atomic $
-                    Imp.AtomicLoad
-                      (IntType Int64)
-                      (tvVar old_flag)
-                      flag_loc_name
-                      (Imp.elements $ sExt32 (tvExp lb))
+                load64 (tvVar old_flag) flag_loc_name (Imp.elements $ sExt32 $ tvExp lb)
 
                 -- One of the other operators may fail, in which case we have to
                 -- bail out to avoid an infinite wait. This is a very rare case,
@@ -474,12 +495,12 @@ nonsegmentedScan
 
               applyScanAggregateToPrefix scan_ops prefix_vars aggrArrs prefArrs block_idx
 
-              sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) flag_loc_name (Imp.elements block_idx_32) (untyped (2 :: Imp.TExp Int64))
+              store64 flag_loc_name (Imp.elements block_idx_32) 2
 
               seqScanLB pat i scan_ops kbody prefix_vars start chunk_length
           )
 
-        sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar block_idx) work_index_loc_name (Imp.elements 0) (untyped (1 :: Imp.TExp Int64))
+        add64 block_idx work_index_loc_name (Imp.elements 0) 1
 
     free_params <- freeParams fbody
     emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
