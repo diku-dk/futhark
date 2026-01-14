@@ -141,17 +141,16 @@ transClosInRangesSym sym = do
 
     -- Get the symbols that a symbol directly depends on (including via ranges
     -- and range properties).
-    -- NOTE Somewhat hacky: for `Sum x [a:b]` it will look for ranges on `x[a]`
-    -- and `x[b]` because these are handled specially for For-Range properties.
-    -- If `x` has a For-Range property, we might miss the dependence in `Sum x
-    -- [a:b]` otherwise.
+    -- NOTE Somewhat hacky: for `Sum x [a:b]`, we additionally look for ranges
+    -- on a particular index (`x[a]`) because For-Range properties are handled
+    -- on indexing symbols. If `x` has a For-Range property, we might miss the
+    -- dependence in `Sum x [a:b]` otherwise.
     dependencies symbol = do
       free_range <- case symbol of
         Sum ix a b -> do
           r1 <- getRangeOfSym symbol
           r2 <- getRangeOfSym (Idx ix a)
-          r3 <- getRangeOfSym (Idx ix b)
-          pure (free r1 <> free r2 <> free r3)
+          pure (free r1 <> free r2)
         _ -> free <$> getRangeOfSym symbol
       pure $ free symbol <> free_range
 
@@ -263,13 +262,10 @@ getRangeOfSym idxsym@(Idx (One arr_nm) idx) = do
   for_prop <- askForRng (Var arr_nm)
   for_range <- case for_prop of
     Just (For _ (Predicate i (Rng _ (mlb, mub)))) -> do
-      let sub_map = M.singleton i idx
-      let rep = repAlgebra sub_map
-      let lb' = fmap rep mlb
-      let ub' = fmap rep mub
+      let rep = repAlgebra (M.singleton i idx)
       -- Rng's upper bound is exclusive, SoP's Range is inclusive
-      let ub_incl = fmap (\s -> s .-. int2SoP 1) ub'
-      pure $ Just $ mkRange lb' ub_incl
+      let ub_incl = fmap (\s -> s .-. int2SoP 1) mub
+      pure . Just $ mkRange (fmap rep mlb) (fmap rep ub_incl)
     _ -> pure Nothing
 
   pure $ mconcat_maybe [specific_range, for_range, Just arr_rg]
