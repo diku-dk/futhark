@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Per Cost-Centre Source Location Listings in the `.summary`-file output of
   `futhark profile`. (By VegOwOtenks)
 
+* The `multicore` backend now uses a decoupled lookback `scan` implemented by
+  Amirreza Hashemi.
+
 ### Removed
 
 ### Changed

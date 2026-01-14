@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+
 -- | Multicore code generation for SegScan. Uses a fairly naive multipass
 -- algorithm, with no particular locality optimisations.
 module Futhark.CodeGen.ImpGen.Multicore.SegScan
@@ -7,12 +9,501 @@ where
 
 import Control.Monad
 import Data.List (zip4)
+import Data.Maybe (isNothing)
 import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
-import Futhark.Util.IntegralExp (quot, rem)
+import Futhark.Transform.Rename (renameBody)
+import Futhark.Util.IntegralExp (divUp)
 import Prelude hiding (quot, rem)
+
+-- This does not correspond with the actual cache size, but the actual cache
+-- size may not really be the optimal value either. Ideally this should be
+-- exposed as a tuning parameter.
+cacheSize :: Imp.TExp Int64
+cacheSize = 65536 -- 64 KB
+
+xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
+xParams scan =
+  take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
+yParams scan =
+  drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
+
+lamBody :: SegBinOp MCMem -> Body MCMem
+lamBody = lambdaBody . segBinOpLambda
+
+genBinOpParams :: [SegBinOp MCMem] -> MulticoreGen ()
+genBinOpParams scan_ops =
+  dScope Nothing $
+    scopeOfLParams $
+      concatMap (lambdaParams . segBinOpLambda) scan_ops
+
+initialiseLocalPrefixes :: [SegBinOp MCMem] -> [[VName]] -> MulticoreGen ()
+initialiseLocalPrefixes scan_ops per_op_prefix_var = do
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
+  forM_ (zip scan_ops_renamed per_op_prefix_var) $ \(scan_op, prefix_vars) -> do
+    sLoopNest (segBinOpShape scan_op) $ \vec_is ->
+      forM_ (zip (segBinOpNeutral scan_op) prefix_vars) $ \(ne, prefix_var) -> do
+        copyDWIMFix prefix_var vec_is ne []
+
+updateLocalPrefixes :: [SegBinOp MCMem] -> [[VName]] -> [[VName]] -> [Imp.TExp Int64] -> MulticoreGen ()
+updateLocalPrefixes scan_ops per_op_prefix_var per_op_prefix_arr index = do
+  forM_ (zip3 scan_ops per_op_prefix_var per_op_prefix_arr) $ \(scan_op, prefix_vars, prefix_arrs) -> do
+    let shape = segBinOpShape scan_op
+    sLoopNest shape $ \vec_is ->
+      forM_ (zip prefix_vars prefix_arrs) $ \(prefix_var, prefix_arr) -> do
+        copyDWIMFix prefix_var vec_is (Var prefix_arr) (index ++ vec_is)
+
+genArrays :: [SegBinOp MCMem] -> Name -> Shape -> MulticoreGen [[VName]]
+genArrays scan_ops arr_name block_shape = do
+  forM scan_ops $ \scan_op ->
+    forM (lambdaReturnType $ segBinOpLambda scan_op) $ \t -> do
+      let shape = block_shape <> segBinOpShape scan_op <> arrayShape t
+      sAllocArray arr_name (elemType t) shape DefaultSpace
+
+genLocalArray :: [SegBinOp MCMem] -> MulticoreGen [[VName]]
+genLocalArray scan_ops = do
+  forM scan_ops $ \scan_op -> do
+    let shape = segBinOpShape scan_op
+        ts = lambdaReturnType $ segBinOpLambda scan_op
+    forM (zip (xParams scan_op) ts) $ \(p, t) -> do
+      case shapeDims shape of
+        [] -> pure $ paramName p
+        _ -> do
+          let pt = elemType t
+          sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
+
+totalBytes :: [SegBinOp MCMem] -> Imp.TExp Int64
+totalBytes scan_ops =
+  sum
+    [ bytesOfShape (elemType t) (arrayShape t <> scan_shape)
+    | op <- scan_ops,
+      let lam = segBinOpLambda op,
+      let scan_shape = segBinOpShape op,
+      t <- lambdaReturnType lam
+    ]
+  where
+    bytesOfShape pt sh = primByteSize pt * product (map pe64 (shapeDims sh))
+
+bodyHas :: (Exp MCMem -> Bool) -> GBody MCMem res -> Bool
+bodyHas f = any (f' . stmExp) . bodyStms
+  where
+    f' e
+      | f e = True
+      | otherwise = isNothing $ walkExpM walker e
+    walker =
+      identityWalker
+        { walkOnBody = const $ guard . not . bodyHas f
+        }
+
+-- | Determine whether this kernel body should be recomputed. Involves both
+-- correctness checks and (crude) efficiency checks. Basically, recomputation is
+-- only safe if nothing is consumed in the body, and considered efficient only
+-- if the body has no loops.
+shouldRecompute :: KernelBody MCMem -> Bool
+shouldRecompute = not . bodyHas bad
+  where
+    bad (BasicOp Update {}) = True
+    bad (BasicOp UpdateAcc {}) = True
+    bad (WithAcc {}) = True
+    bad Loop {} = True
+    bad _ = False
+
+hasAssert :: GBody MCMem res -> Bool
+hasAssert = bodyHas isAssert
+  where
+    isAssert (BasicOp Assert {}) = True
+    isAssert _ = False
+
+copyFromDescToLocal :: [SegBinOp MCMem] -> [[VName]] -> [[VName]] -> TV Int64 -> MulticoreGen ()
+copyFromDescToLocal scan_ops per_op_local_vars per_op_description_arrays index = do
+  forM_ (zip3 scan_ops per_op_local_vars per_op_description_arrays) $ \(scan_op, local_vars, desc_arrs) -> do
+    sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+      forM_ (zip local_vars desc_arrs) $ \(local_var, desc_arr) -> do
+        copyDWIMFix local_var vec_is (Var desc_arr) (tvExp index : vec_is)
+
+applyScanFromDescToLocal ::
+  [SegBinOp MCMem] ->
+  [[VName]] ->
+  [[VName]] ->
+  TV Int64 ->
+  MulticoreGen ()
+applyScanFromDescToLocal scan_ops per_op_local_vars per_op_description_arrays index = do
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
+  forM_ (zip3 scan_ops_renamed per_op_local_vars per_op_description_arrays) $ \(scan_op, local_vars, description_array) -> do
+    sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+      forM_ (zip (xParams scan_op) description_array) $ \(xs, desc_var) -> do
+        copyDWIMFix (paramName xs) [] (Var desc_var) (tvExp index : vec_is)
+      forM_ (zip (yParams scan_op) local_vars) $ \(ys, local_var) -> do
+        copyDWIMFix (paramName ys) [] (Var local_var) vec_is
+      compileStms mempty (bodyStms $ lamBody scan_op) $ do
+        forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) local_vars) $ \(se, local_var) -> do
+          copyDWIMFix local_var vec_is se []
+
+applyScanAggregateToPrefix ::
+  [SegBinOp MCMem] ->
+  [[VName]] ->
+  [[VName]] ->
+  [[VName]] ->
+  TV Int64 ->
+  MulticoreGen ()
+applyScanAggregateToPrefix scan_ops per_op_local_vars per_op_aggr_arrs prefArrs block_idx = do
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
+  forM_ (zip4 scan_ops_renamed per_op_local_vars per_op_aggr_arrs prefArrs) $ \(scan_op, local_vars, aggr_arrs, prifix_arrs) -> do
+    sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+      forM_ (zip (xParams scan_op) local_vars) $ \(xs, local_var) -> do
+        copyDWIMFix (paramName xs) [] (Var local_var) vec_is
+      forM_ (zip (yParams scan_op) aggr_arrs) $ \(ys, aggrArr) -> do
+        copyDWIMFix (paramName ys) [] (Var aggrArr) (tvExp block_idx : vec_is)
+
+      compileStms mempty (bodyStms $ lamBody scan_op) $ do
+        forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) prifix_arrs) $ \(se, prefix_arr) -> do
+          copyDWIMFix prefix_arr (tvExp block_idx : vec_is) se []
+
+seqScanFastPath ::
+  Pat LetDecMem ->
+  VName ->
+  [SegBinOp MCMem] ->
+  KernelBody MCMem ->
+  [[VName]] ->
+  TV Int64 ->
+  TV Int64 ->
+  [[VName]] ->
+  TV Int64 ->
+  MulticoreGen ()
+seqScanFastPath pat i scan_ops kbody per_op_prefixes_var start chunk_length per_op_prefix_arr block_idx = do
+  kbody_renamed <- renameBody kbody
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
+  per_op_local_accum <- genLocalArray scan_ops_renamed
+
+  let results = bodyResult kbody_renamed
+  let n_scan = segBinOpResults scan_ops_renamed
+  let (all_scan_res, map_res) = splitAt n_scan results
+
+  let per_scan_res = segBinOpChunks scan_ops_renamed all_scan_res
+  let per_scan_pes = segBinOpChunks scan_ops_renamed $ patElems pat
+
+  forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $ \(scan_op, prefix_vars, local_accums) ->
+    sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+      forM_ (zip local_accums prefix_vars) $ \(acc, prefix) -> do
+        copyDWIMFix acc vec_is (Var prefix) vec_is
+
+  z <- dPrimV "z" (0 :: Imp.TExp Int64)
+  sWhile (tvExp z .<. tvExp chunk_length) $ do
+    dPrimV_ i (tvExp start + tvExp z)
+
+    compileStms mempty (bodyStms kbody_renamed) $ do
+      let map_arrs = drop (segBinOpResults scan_ops_renamed) $ patElems pat
+
+      sComment "write mapped values results to memory" $
+        forM_ (zip (map patElemName map_arrs) (map kernelResultSubExp map_res)) $ \(arr, res) ->
+          copyDWIMFix arr [tvExp start + tvExp z] res []
+
+      forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res, local_accums) ->
+        sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+          forM_ (zip (xParams scan_op) local_accums) $ \(p, acc) ->
+            copyDWIMFix (paramName p) [] (Var acc) vec_is
+          forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
+            copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
+          compileStms mempty (bodyStms $ lamBody scan_op) $
+            forM_ (zip3 local_accums (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(acc, se, pe) -> do
+              copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
+              copyDWIMFix acc vec_is se []
+    z <-- tvExp z + 1
+
+    -- write back local accumulators to prefix arrays
+    forM_ (zip3 scan_ops_renamed per_op_prefix_arr per_op_local_accum) $ \(scan_op, prefix_arrs, local_accums) ->
+      sLoopNest (segBinOpShape scan_op) $ \vec_is ->
+        forM_ (zip local_accums prefix_arrs) $ \(acc, prefix_arr) ->
+          copyDWIMFix prefix_arr (tvExp block_idx : vec_is) (Var acc) vec_is
+
+seqScanLB ::
+  Pat LetDecMem ->
+  VName ->
+  [SegBinOp MCMem] ->
+  KernelBody MCMem ->
+  [[VName]] ->
+  TV Int64 ->
+  TV Int64 ->
+  MulticoreGen ()
+seqScanLB pat i scan_ops kbody per_op_prefixes_var start chunk_length = do
+  kbody_renamed <- renameBody kbody
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  genBinOpParams scan_ops_renamed
+  per_op_local_accum <- genLocalArray scan_ops_renamed
+
+  let results = bodyResult kbody_renamed
+  let n_scan = segBinOpResults scan_ops_renamed
+  let (all_scan_res, _) = splitAt n_scan results
+
+  let per_scan_res = segBinOpChunks scan_ops_renamed all_scan_res
+  let per_scan_pes = segBinOpChunks scan_ops_renamed $ patElems pat
+
+  forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $ \(scan_op, prefix_vars, local_accums) ->
+    sLoopNest (segBinOpShape scan_op) $ \vec_is ->
+      forM_ (zip local_accums prefix_vars) $ \(acc, prefix) ->
+        copyDWIMFix acc vec_is (Var prefix) vec_is
+
+  z <- dPrimV "z" (0 :: Imp.TExp Int64)
+  sWhile (tvExp z .<. tvExp chunk_length) $ do
+    dPrimV_ i (tvExp start + tvExp z)
+    if shouldRecompute kbody_renamed
+      then do
+        compileStms mempty (bodyStms kbody_renamed) $ do
+          forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res, local_accums) ->
+            sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+              forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) ->
+                copyDWIMFix (paramName px) [] (Var acc) vec_is
+              forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
+                copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
+              compileStms mempty (bodyStms $ lamBody scan_op) $
+                forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) pes local_accums) $ \(se, pe, acc) -> do
+                  copyDWIMFix acc vec_is se []
+                  copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
+        z <-- tvExp z + 1
+      else do
+        forM_ (zip4 per_scan_pes scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, _, local_accums) ->
+          sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+            forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) ->
+              copyDWIMFix (paramName px) [] (Var acc) vec_is
+            forM_ (zip (yParams scan_op) pes) $ \(py, pe) ->
+              -- reading from output array
+              copyDWIMFix (paramName py) [] (Var (patElemName pe)) ((tvExp start + tvExp z) : vec_is)
+            compileStms mempty (bodyStms $ lamBody scan_op) $ do
+              forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(se, pe) ->
+                copyDWIMFix (patElemName pe) ((tvExp start + tvExp z) : vec_is) se []
+        z <-- tvExp z + 1
+
+seqAggregate ::
+  Pat LetDecMem ->
+  VName ->
+  [SegBinOp MCMem] ->
+  KernelBody MCMem ->
+  TV Int64 ->
+  TV Int64 ->
+  [[VName]] ->
+  TV Int64 ->
+  MulticoreGen ()
+seqAggregate pat i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx = do
+  scan_ops_renamed <- renameSegBinOp scan_ops
+  kbody_renamed <- renameBody kbody
+  genBinOpParams scan_ops_renamed
+  let results = bodyResult kbody_renamed
+  let n_scan = segBinOpResults scan_ops_renamed
+  let (all_scan_res, map_res) = splitAt n_scan results
+  let per_scan_res = segBinOpChunks scan_ops_renamed all_scan_res
+  let per_scan_pes = segBinOpChunks scan_ops_renamed $ patElems pat
+
+  per_op_local_accum <- genLocalArray scan_ops_renamed
+
+  j <- dPrimV "j" (0 :: Imp.TExp Int64)
+  sWhile (tvExp j .<. tvExp chunk_length) $ do
+    dPrimV_ i (tvExp start + tvExp j)
+    compileStms mempty (bodyStms kbody_renamed) $ do
+      let map_arrs = drop (segBinOpResults scan_ops_renamed) $ patElems pat
+      sComment "write mapped values results to memory" $
+        forM_ (zip (map patElemName map_arrs) (map kernelResultSubExp map_res)) $ \(arr, res) ->
+          copyDWIMFix arr [tvExp start + tvExp j] res []
+
+      sIf
+        (tvExp j .==. 0)
+        ( forM_ (zip4 scan_ops_renamed per_scan_res per_op_local_accum per_scan_pes) $
+            \(scan_op, scan_res_op, local_accums, pes) -> do
+              let shape = segBinOpShape scan_op
+              sLoopNest shape $ \vec_is -> do
+                forM_ (zip3 scan_res_op local_accums pes) $ \(kr, acc, pe) -> do
+                  copyDWIMFix acc vec_is (kernelResultSubExp kr) vec_is
+                  unless (shouldRecompute kbody_renamed) $
+                    copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) (kernelResultSubExp kr) vec_is
+        )
+        ( forM_ (zip4 scan_ops_renamed per_scan_res per_op_local_accum per_scan_pes) $
+            \(scan_op, scan_res, local_accums, pes) ->
+              sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+                forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) ->
+                  copyDWIMFix (paramName px) [] (Var acc) vec_is
+                forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
+                  copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
+
+                compileStms mempty (bodyStms $ lamBody scan_op) $ do
+                  forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) local_accums pes) $ \(se, acc, pe) -> do
+                    copyDWIMFix acc vec_is se []
+                    unless (shouldRecompute kbody_renamed) $ copyDWIMFix (patElemName pe) ((tvExp start + tvExp j) : vec_is) se []
+        )
+    j <-- tvExp j + 1
+
+  --  write local accumulators to aggregate arrays
+  forM_ (zip3 scan_ops_renamed per_op_local_accum per_op_aggr_arrs) $ \(scan_op, local_accums, aggr_arrs) ->
+    sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+      forM_ (zip local_accums aggr_arrs) $ \(acc, agg) -> do
+        copyDWIMFix agg (tvExp block_idx : vec_is) (Var acc) vec_is
+
+load64 ::
+  VName ->
+  VName ->
+  Imp.Count Imp.Elements (Imp.TExp Int32) ->
+  MulticoreGen ()
+load64 v arr i = sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) v arr i
+
+store64 ::
+  VName ->
+  Imp.Count Imp.Elements (Imp.TExp Int32) ->
+  Imp.TExp Int64 ->
+  MulticoreGen ()
+store64 arr i x = sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) arr i (untyped x)
+
+add64 ::
+  TV Int64 ->
+  VName ->
+  Imp.Count Imp.Elements (Imp.TExp Int32) ->
+  Imp.TExp Int64 ->
+  MulticoreGen ()
+add64 v arr i x = sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar v) arr i (untyped x)
+
+nonsegmentedScan ::
+  Pat LetDecMem ->
+  SegSpace ->
+  [SegBinOp MCMem] ->
+  KernelBody MCMem ->
+  TV Int32 ->
+  MulticoreGen ()
+nonsegmentedScan
+  pat
+  (SegSpace fid [(i, n)])
+  scan_ops
+  kbody
+  _nsubtasks = do
+    let multiplier = 1 -- For playing with.
+        blockSize = cacheSize `divUp` (totalBytes scan_ops * multiplier)
+
+    block_no <- dPrimV "nblocks" (pe64 n `divUp` blockSize)
+
+    -- allocate flags/aggr/prefix arrays of length nblocks
+    flagsArr <- sAllocArray "scan_flags" int64 (Shape [Var (tvVar block_no)]) DefaultSpace
+
+    let block_shape = Shape [Var (tvVar block_no)]
+
+    aggrArrs <- genArrays scan_ops "scan_aggr" block_shape
+
+    prefArrs <- genArrays scan_ops "scan_pref" block_shape
+
+    work_index <- sAllocArray "work_index" int64 (Shape [intConst Int64 1]) DefaultSpace
+
+    sFor "init" (tvExp block_no) $ \j -> do
+      copyDWIMFix flagsArr [j] (intConst Int64 0) []
+
+    copyDWIMFix work_index [0] (intConst Int64 0) []
+
+    fbody <- collect $ do
+      seq_flag <- dPrimV "seq_flag" true
+
+      sOp $ Imp.GetTaskId fid
+
+      block_idx <- dPrim "block_idx"
+      work_index_loc <- entryArrayLoc <$> lookupArray work_index
+      let work_index_loc_name = memLocName work_index_loc
+
+      add64 block_idx work_index_loc_name (Imp.elements 0) 1
+
+      sWhile (tvExp block_idx .<. tvExp block_no) $ do
+        start <- dPrimV "start" (tvExp block_idx * blockSize)
+
+        diff_start <- dPrimV "diff_start" (pe64 n - tvExp start)
+
+        chunk_length <- dPrim "chunk_length"
+        sIf
+          (tvExp diff_start .<. blockSize)
+          (chunk_length <-- tvExp diff_start)
+          (chunk_length <-- blockSize)
+
+        prefix_seqs <- genArrays scan_ops "seq_prefix" (Shape [])
+
+        flags_loc <- entryArrayLoc <$> lookupArray flagsArr
+        let flag_loc_name = memLocName flags_loc
+        let block_idx_32 = sExt32 (tvExp block_idx)
+
+        sWhen
+          (tvExp seq_flag .==. true)
+          ( sIf
+              (tvExp block_idx .==. 0)
+              (initialiseLocalPrefixes scan_ops prefix_seqs)
+              ( do
+                  prev_flag <- dPrim "prev_flag" :: MulticoreGen (TV Int64)
+                  load64 (tvVar prev_flag) flag_loc_name (Imp.elements $ block_idx_32 - 1)
+                  sIf
+                    (tvExp prev_flag .==. 2)
+                    (updateLocalPrefixes scan_ops prefix_seqs prefArrs [tvExp block_idx - 1])
+                    (seq_flag <-- false)
+              )
+          )
+
+        sIf
+          (tvExp seq_flag .==. true)
+          ( do
+              seqScanFastPath pat i scan_ops kbody prefix_seqs start chunk_length prefArrs block_idx
+
+              store64 flag_loc_name (Imp.elements block_idx_32) 2
+          )
+          ( do
+              seqAggregate pat i scan_ops kbody start chunk_length aggrArrs block_idx
+
+              -- write flag as 1
+              store64 flag_loc_name (Imp.elements block_idx_32) 1
+
+              old_flag <- dPrim "old_flag" :: MulticoreGen (TV Int64)
+              old_flag <-- 0
+              prefix_vars <- genArrays scan_ops "par_prefix" (Shape [])
+
+              lb <- dPrimV "lb" (tvExp block_idx - 1)
+              has_acc <- dPrimV "has_acc" (false :: Imp.TExp Bool)
+
+              error_flag <- dPrim "error_flag" :: MulticoreGen (TV Bool)
+              sOp $ Imp.GetError (tvVar error_flag)
+
+              sWhile (bNot (tvExp old_flag .==. 2 .||. tvExp error_flag)) $ do
+                load64 (tvVar old_flag) flag_loc_name (Imp.elements $ sExt32 $ tvExp lb)
+
+                -- One of the other operators may fail, in which case we have to
+                -- bail out to avoid an infinite wait. This is a very rare case,
+                -- so only do it when necessary.
+                when (any (hasAssert . lambdaBody . segBinOpLambda) scan_ops || hasAssert kbody) $
+                  sOp $
+                    Imp.GetError (tvVar error_flag)
+
+                sWhen
+                  (tvExp old_flag .==. 2)
+                  ( do
+                      sIf
+                        (tvExp has_acc .==. false)
+                        (copyFromDescToLocal scan_ops prefix_vars prefArrs lb)
+                        (applyScanFromDescToLocal scan_ops prefix_vars prefArrs lb)
+                  )
+                sWhen
+                  (tvExp old_flag .==. 1)
+                  ( do
+                      sIf
+                        (tvExp has_acc .==. false)
+                        (copyFromDescToLocal scan_ops prefix_vars aggrArrs lb)
+                        (applyScanFromDescToLocal scan_ops prefix_vars aggrArrs lb)
+                      has_acc <-- true
+                      lb <-- tvExp lb - 1
+                  )
+
+              applyScanAggregateToPrefix scan_ops prefix_vars aggrArrs prefArrs block_idx
+
+              store64 flag_loc_name (Imp.elements block_idx_32) 2
+
+              seqScanLB pat i scan_ops kbody prefix_vars start chunk_length
+          )
+
+        add64 block_idx work_index_loc_name (Imp.elements 0) 1
+
+    free_params <- freeParams fbody
+    emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
 
 -- | Compile a SegScan construct.
 compileSegScan ::
@@ -26,450 +517,4 @@ compileSegScan pat space reds kbody nsubtasks
   | [_] <- unSegSpace space =
       nonsegmentedScan pat space reds kbody nsubtasks
   | otherwise =
-      segmentedScan pat space reds kbody
-
-xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
-xParams scan =
-  take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
-yParams scan =
-  drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
-
-lamBody :: SegBinOp MCMem -> Body MCMem
-lamBody = lambdaBody . segBinOpLambda
-
--- Arrays for storing worker results.
-carryArrays :: Name -> TV Int32 -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
-carryArrays s nsubtasks segops =
-  forM segops $ \(SegBinOp _ lam _ shape) ->
-    forM (lambdaReturnType lam) $ \t -> do
-      let pt = elemType t
-          full_shape =
-            Shape [Var (tvVar nsubtasks)]
-              <> shape
-              <> arrayShape t
-      sAllocArray s pt full_shape DefaultSpace
-
-nonsegmentedScan ::
-  Pat LetDecMem ->
-  SegSpace ->
-  [SegBinOp MCMem] ->
-  KernelBody MCMem ->
-  TV Int32 ->
-  MulticoreGen ()
-nonsegmentedScan pat space scan_ops kbody nsubtasks = do
-  emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
-  -- Are we working with nested arrays
-  let dims = map (shapeDims . segBinOpShape) scan_ops
-  -- Are we only working on scalars
-  let scalars = all (all (primType . typeOf . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all null dims
-  -- Do we have nested vector operations
-  let vectorize = [] `notElem` dims
-
-  let param_types = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
-  let no_array_param = all primType param_types
-
-  let (scanStage1, scanStage3)
-        | scalars = (scanStage1Scalar, scanStage3Scalar)
-        | vectorize && no_array_param = (scanStage1Nested, scanStage3Nested)
-        | otherwise = (scanStage1Fallback, scanStage3Fallback)
-
-  emit $ Imp.DebugPrint "Scan stage 1" Nothing
-  scanStage1 pat space kbody scan_ops
-
-  let nsubtasks' = tvExp nsubtasks
-  sWhen (nsubtasks' .>. 1) $ do
-    scan_ops2 <- renameSegBinOp scan_ops
-    emit $ Imp.DebugPrint "Scan stage 2" Nothing
-    carries <- scanStage2 pat nsubtasks space scan_ops2
-    scan_ops3 <- renameSegBinOp scan_ops
-    emit $ Imp.DebugPrint "Scan stage 3" Nothing
-    scanStage3 pat space scan_ops3 carries
-
--- Different ways to generate code for a scan loop
-data ScanLoopType
-  = ScanSeq -- Fully sequential
-  | ScanNested -- Nested vectorized map
-  | ScanScalar -- Vectorized scan over scalars
-
--- Given a scan type, return a function to inject into the loop body
-getScanLoop ::
-  ScanLoopType ->
-  (Imp.TExp Int64 -> MulticoreGen ()) ->
-  MulticoreGen ()
-getScanLoop ScanScalar = generateUniformizeLoop
-getScanLoop _ = \body -> body 0
-
--- Given a scan type, return a function to extract a scalar from a vector
-getExtract :: ScanLoopType -> Imp.TExp Int64 -> MulticoreGen Imp.MCCode -> MulticoreGen ()
-getExtract ScanSeq = \_ body -> body >>= emit
-getExtract _ = extractVectorLane
-
-genBinOpParams :: [SegBinOp MCMem] -> MulticoreGen ()
-genBinOpParams scan_ops =
-  dScope Nothing $
-    scopeOfLParams $
-      concatMap (lambdaParams . segBinOpLambda) scan_ops
-
-genLocalAccsStage1 :: [SegBinOp MCMem] -> MulticoreGen [[VName]]
-genLocalAccsStage1 scan_ops = do
-  forM scan_ops $ \scan_op -> do
-    let shape = segBinOpShape scan_op
-        ts = lambdaReturnType $ segBinOpLambda scan_op
-    forM (zip3 (xParams scan_op) (segBinOpNeutral scan_op) ts) $ \(p, ne, t) -> do
-      acc <- -- update accumulator to have type decoration
-        case shapeDims shape of
-          [] -> pure $ paramName p
-          _ -> do
-            let pt = elemType t
-            sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
-
-      -- Now neutral-initialise the accumulator.
-      sLoopNest (segBinOpShape scan_op) $ \vec_is ->
-        copyDWIMFix acc vec_is ne []
-
-      pure acc
-
-getNestLoop ::
-  ScanLoopType ->
-  Shape ->
-  ([Imp.TExp Int64] -> MulticoreGen ()) ->
-  MulticoreGen ()
-getNestLoop ScanNested = sLoopNestVectorized
-getNestLoop _ = sLoopNest
-
-applyScanOps ::
-  ScanLoopType ->
-  Pat LetDecMem ->
-  SegSpace ->
-  [SubExp] ->
-  [SegBinOp MCMem] ->
-  [[VName]] ->
-  ImpM MCMem HostEnv Imp.Multicore ()
-applyScanOps typ pat space all_scan_res scan_ops local_accs = do
-  let per_scan_res = segBinOpChunks scan_ops all_scan_res
-      per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  let (is, _) = unzip $ unSegSpace space
-
-  -- Potential vector load and then do sequential scan
-  getScanLoop typ $ \j ->
-    forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
-      getNestLoop typ (segBinOpShape scan_op) $ \vec_is -> do
-        sComment "Read accumulator" $
-          forM_ (zip (xParams scan_op) acc) $ \(p, acc') -> do
-            copyDWIMFix (paramName p) [] (Var acc') vec_is
-        sComment "Read next values" $
-          forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
-            getExtract typ j $
-              collect $
-                copyDWIMFix (paramName p) [] se vec_is
-        -- Scan body
-        sComment "Scan op body" $
-          compileStms mempty (bodyStms $ lamBody scan_op) $
-            forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-              \(acc', pe, se) -> do
-                copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-                copyDWIMFix acc' vec_is se []
-
--- Generate a loop which performs a potentially vectorized scan on the
--- result of a kernel body.
-genScanLoop ::
-  ScanLoopType ->
-  Pat LetDecMem ->
-  SegSpace ->
-  KernelBody MCMem ->
-  [SegBinOp MCMem] ->
-  [[VName]] ->
-  Imp.TExp Int64 ->
-  ImpM MCMem HostEnv Imp.Multicore ()
-genScanLoop typ pat space kbody scan_ops local_accs i = do
-  let (all_scan_res, map_res) =
-        splitAt (segBinOpResults scan_ops) $ bodyResult kbody
-  let (is, ns) = unzip $ unSegSpace space
-      ns' = map pe64 ns
-
-  zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-  compileStms mempty (bodyStms kbody) $ do
-    let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
-    sComment "write mapped values results to memory" $
-      zipWithM_ (compileThreadResult space) map_arrs map_res
-    sComment "Apply scan op" $
-      applyScanOps typ pat space (map kernelResultSubExp all_scan_res) scan_ops local_accs
-
-scanStage1Scalar ::
-  Pat LetDecMem ->
-  SegSpace ->
-  KernelBody MCMem ->
-  [SegBinOp MCMem] ->
-  MulticoreGen ()
-scanStage1Scalar pat space kbody scan_ops = do
-  fbody <- collect $ do
-    dPrim_ (segFlat space) int64
-    sOp $ Imp.GetTaskId (segFlat space)
-
-    genBinOpParams scan_ops
-    local_accs <- genLocalAccsStage1 scan_ops
-    inISPC $
-      generateChunkLoop "SegScan" Vectorized $
-        genScanLoop ScanScalar pat space kbody scan_ops local_accs
-  free_params <- freeParams fbody
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
-
-scanStage1Nested ::
-  Pat LetDecMem ->
-  SegSpace ->
-  KernelBody MCMem ->
-  [SegBinOp MCMem] ->
-  MulticoreGen ()
-scanStage1Nested pat space kbody scan_ops = do
-  fbody <- collect $ do
-    dPrim_ (segFlat space) int64
-    sOp $ Imp.GetTaskId (segFlat space)
-
-    local_accs <- genLocalAccsStage1 scan_ops
-
-    inISPC $ do
-      genBinOpParams scan_ops
-      generateChunkLoop "SegScan" Scalar $ \i -> do
-        genScanLoop ScanNested pat space kbody scan_ops local_accs i
-
-  free_params <- freeParams fbody
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
-
-scanStage1Fallback ::
-  Pat LetDecMem ->
-  SegSpace ->
-  KernelBody MCMem ->
-  [SegBinOp MCMem] ->
-  MulticoreGen ()
-scanStage1Fallback pat space kbody scan_ops = do
-  -- Stage 1 : each thread partially scans a chunk of the input
-  -- Writes directly to the resulting array
-  fbody <- collect $ do
-    dPrim_ (segFlat space) int64
-    sOp $ Imp.GetTaskId (segFlat space)
-
-    genBinOpParams scan_ops
-    local_accs <- genLocalAccsStage1 scan_ops
-
-    generateChunkLoop "SegScan" Scalar $
-      genScanLoop ScanSeq pat space kbody scan_ops local_accs
-  free_params <- freeParams fbody
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
-
-scanStage2 ::
-  Pat LetDecMem ->
-  TV Int32 ->
-  SegSpace ->
-  [SegBinOp MCMem] ->
-  MulticoreGen [[VName]]
-scanStage2 pat nsubtasks space scan_ops = do
-  let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map pe64 ns
-      per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-      nsubtasks' = sExt64 $ tvExp nsubtasks
-
-  dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
-  offset <- dPrimV "offset" (0 :: Imp.TExp Int64)
-  let offset' = tvExp offset
-  offset_index <- dPrimV "offset_index" (0 :: Imp.TExp Int64)
-  let offset_index' = tvExp offset_index
-
-  -- Parameters used to find the chunk sizes
-  -- Perhaps get this information from ``scheduling information``
-  -- instead of computing it manually here.
-  let iter_pr_subtask = product ns_64 `quot` nsubtasks'
-      remainder = product ns_64 `rem` nsubtasks'
-
-  carries <- carryArrays "scan_stage_2_carry" nsubtasks scan_ops
-  sComment "carry-in for first chunk is neutral" $
-    forM_ (zip scan_ops carries) $ \(scan_op, carry) ->
-      sLoopNest (segBinOpShape scan_op) $ \vec_is ->
-        forM_ (zip carry $ segBinOpNeutral scan_op) $ \(carry', ne) ->
-          copyDWIMFix carry' (0 : vec_is) ne []
-
-  -- Perform sequential scan over the last element of each chunk
-  sComment "scan carries" $ sFor "i" (nsubtasks' - 1) $ \i -> do
-    offset <-- iter_pr_subtask
-    sWhen (sExt64 i .<. remainder) (offset <-- offset' + 1)
-    offset_index <-- offset_index' + offset'
-    zipWithM_ dPrimV_ is $ unflattenIndex ns_64 $ sExt64 offset_index'
-
-    forM_ (zip3 per_scan_pes scan_ops carries) $ \(pes, scan_op, carry) ->
-      sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-        sComment "Read carry" $
-          forM_ (zip (xParams scan_op) carry) $ \(p, carry') ->
-            copyDWIMFix (paramName p) [] (Var carry') (i : vec_is)
-
-        sComment "Read next values" $
-          forM_ (zip (yParams scan_op) pes) $ \(p, pe) ->
-            copyDWIMFix (paramName p) [] (Var $ patElemName pe) ((offset_index' - 1) : vec_is)
-
-        compileStms mempty (bodyStms $ lamBody scan_op) $
-          forM_ (zip carry $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(carry', se) -> do
-            copyDWIMFix carry' ((i + 1) : vec_is) se []
-
-  -- Return the array of carries for each chunk.
-  pure carries
-
-scanStage3Scalar ::
-  Pat LetDecMem ->
-  SegSpace ->
-  [SegBinOp MCMem] ->
-  [[VName]] ->
-  MulticoreGen ()
-scanStage3Scalar pat space scan_ops per_scan_carries = do
-  let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-      (is, ns) = unzip $ unSegSpace space
-      ns' = map pe64 ns
-
-  body <- collect $ do
-    dPrim_ (segFlat space) int64
-    sOp $ Imp.GetTaskId $ segFlat space
-
-    inISPC $ do
-      genBinOpParams scan_ops
-      sComment "load carry-in" $
-        forM_ (zip per_scan_carries scan_ops) $ \(op_carries, scan_op) ->
-          forM_ (zip (xParams scan_op) op_carries) $ \(p, carries) ->
-            copyDWIMFix (paramName p) [] (Var carries) [le64 (segFlat space)]
-      generateChunkLoop "SegScan" Vectorized $ \i -> do
-        zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-        sComment "load partial result" $
-          forM_ (zip per_scan_pes scan_ops) $ \(scan_pes, scan_op) ->
-            forM_ (zip (yParams scan_op) scan_pes) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (map le64 is)
-        sComment "combine carry with partial result" $
-          forM_ (zip per_scan_pes scan_ops) $ \(scan_pes, scan_op) ->
-            compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip scan_pes $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(pe, se) ->
-                copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
-
-  free_params <- freeParams body
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
-
-scanStage3Nested ::
-  Pat LetDecMem ->
-  SegSpace ->
-  [SegBinOp MCMem] ->
-  [[VName]] ->
-  MulticoreGen ()
-scanStage3Nested pat space scan_ops per_scan_carries = do
-  let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-      (is, ns) = unzip $ unSegSpace space
-      ns' = map pe64 ns
-  body <- collect $ do
-    dPrim_ (segFlat space) int64
-    sOp $ Imp.GetTaskId (segFlat space)
-
-    generateChunkLoop "SegScan" Scalar $ \i -> do
-      genBinOpParams scan_ops
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-      forM_ (zip3 per_scan_pes per_scan_carries scan_ops) $ \(scan_pes, op_carries, scan_op) -> do
-        sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-          sComment "load carry-in" $
-            forM_ (zip (xParams scan_op) op_carries) $ \(p, carries) ->
-              copyDWIMFix (paramName p) [] (Var carries) (le64 (segFlat space) : vec_is)
-
-          sComment "load partial result" $
-            forM_ (zip (yParams scan_op) scan_pes) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (map le64 is ++ vec_is)
-          sComment "combine carry with partial result" $
-            compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip scan_pes $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(pe, se) ->
-                copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-
-  free_params <- freeParams body
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
-
-scanStage3Fallback ::
-  Pat LetDecMem ->
-  SegSpace ->
-  [SegBinOp MCMem] ->
-  [[VName]] ->
-  MulticoreGen ()
-scanStage3Fallback pat space scan_ops per_scan_carries = do
-  let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-      (is, ns) = unzip $ unSegSpace space
-      ns' = map pe64 ns
-  body <- collect $ do
-    dPrim_ (segFlat space) int64
-    sOp $ Imp.GetTaskId (segFlat space)
-
-    genBinOpParams scan_ops
-
-    generateChunkLoop "SegScan" Scalar $ \i -> do
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-      forM_ (zip3 per_scan_pes per_scan_carries scan_ops) $ \(scan_pes, op_carries, scan_op) -> do
-        sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-          sComment "load carry-in" $
-            forM_ (zip (xParams scan_op) op_carries) $ \(p, carries) ->
-              copyDWIMFix (paramName p) [] (Var carries) (le64 (segFlat space) : vec_is)
-
-          sComment "load partial result" $
-            forM_ (zip (yParams scan_op) scan_pes) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (map le64 is ++ vec_is)
-          sComment "combine carry with partial result" $
-            compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip scan_pes $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(pe, se) ->
-                copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-  free_params <- freeParams body
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
-
--- Note: This isn't currently used anywhere.
--- This implementation for a Segmented scan only
--- parallelize over the segments and each segment is
--- scanned sequentially.
-segmentedScan ::
-  Pat LetDecMem ->
-  SegSpace ->
-  [SegBinOp MCMem] ->
-  KernelBody MCMem ->
-  MulticoreGen ()
-segmentedScan pat space scan_ops kbody = do
-  emit $ Imp.DebugPrint "segmented segScan" Nothing
-  body <- compileSegScanBody pat space scan_ops kbody
-  free_params <- freeParams body
-  emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
-
-compileSegScanBody ::
-  Pat LetDecMem ->
-  SegSpace ->
-  [SegBinOp MCMem] ->
-  KernelBody MCMem ->
-  MulticoreGen Imp.MCCode
-compileSegScanBody pat space scan_ops kbody = collect $ do
-  let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map pe64 ns
-
-  dPrim_ (segFlat space) int64
-  sOp $ Imp.GetTaskId (segFlat space)
-
-  let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  generateChunkLoop "SegScan" Scalar $ \segment_i -> do
-    forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
-      dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
-      let (scan_x_params, scan_y_params) = splitAt (length $ segBinOpNeutral scan_op) $ (lambdaParams . segBinOpLambda) scan_op
-
-      forM_ (zip scan_x_params $ segBinOpNeutral scan_op) $ \(p, ne) ->
-        copyDWIMFix (paramName p) [] ne []
-
-      let inner_bound = last ns_64
-      -- Perform a sequential scan over the segment ``segment_i``
-      sFor "i" inner_bound $ \i -> do
-        zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns_64) segment_i
-        dPrimV_ (last is) i
-        compileStms mempty (bodyStms kbody) $ do
-          let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ bodyResult kbody
-          sComment "write to-scan values to parameters" $
-            forM_ (zip scan_y_params scan_res) $ \(p, se) ->
-              copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
-
-          sComment "write mapped values results to memory" $
-            forM_ (zip (drop (length $ segBinOpNeutral scan_op) $ patElems pat) map_res) $ \(pe, se) ->
-              copyDWIMFix (patElemName pe) (map Imp.le64 is) (kernelResultSubExp se) []
-
-          sComment "combine with carry and write to memory" $
-            compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
-              forM_ (zip3 scan_x_params scan_pes $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(p, pe, se) -> do
-                copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
-                copyDWIMFix (paramName p) [] se []
+      error "only nonsegmented scans for now"
