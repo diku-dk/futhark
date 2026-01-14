@@ -21,6 +21,7 @@ import Language.Futhark (VName)
 
 import Futhark.Util.Pretty
 import Futhark.Analysis.Properties.Property
+import Data.Maybe (catMaybes)
 -- import Debug.Trace
 
 sop0 :: SoP Symbol
@@ -228,7 +229,7 @@ powEquiv sop
 powEquiv sop = pure sop
 
 getRangeOfSym ::
-    (MonadSoP Symbol e p m) =>
+    (MonadSoP Symbol e Prop m) =>
     Symbol ->
     m (Range Symbol)
 getRangeOfSym sym@Var{} = do
@@ -237,12 +238,31 @@ getRangeOfSym sym@Var{} = do
 getRangeOfSym (Idx (POR {}) _) =
   pure $ Range sop0s 1 sop1s
 --
-getRangeOfSym idxsym@(Idx (One arr_nm) _) = do
+getRangeOfSym idxsym@(Idx (One arr_nm) idx) = do
+  -- Look up range on specific index, e.g. x[10]
   ranges <- getRanges
+  let specific_range = M.lookup idxsym ranges
+
+  -- Look up range on array variable itself, e.g. x
   arr_rg <- getRangeOfSym $ Var arr_nm
-  case M.lookup idxsym ranges of
-    Nothing -> pure arr_rg
-    Just rg -> pure (rg <> arr_rg)
+
+  -- Look up for-property, e.g. forall i. 0 <= x[i] < n
+  for_prop <- askForRng (Var arr_nm)
+  for_range <- case for_prop of
+    Just (For _ (Predicate i (Rng _ (mlb, mub)))) -> do
+      let sub_map = M.singleton i idx
+      let rep = repAlgebra sub_map
+      let lb' = fmap rep mlb
+      let ub' = fmap rep mub
+      -- Rng's upper bound is exclusive, SoP's Range is inclusive
+      let ub_incl = fmap (\s -> s .-. int2SoP 1) ub'
+      pure $ Just $ mkRange lb' ub_incl
+    _ -> pure Nothing
+
+  pure $ mconcat_maybe [specific_range, for_range, Just arr_rg]
+  where
+    mconcat_maybe :: (Monoid a) => [Maybe a] -> a
+    mconcat_maybe = mconcat . catMaybes
 --
 getRangeOfSym (Pow{}) = do
   pure $ Range sop1s 1 S.empty

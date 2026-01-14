@@ -21,7 +21,8 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Monad (printAlgEnv)
 import Futhark.SoP.SoP (SoP)
-import Futhark.Analysis.Properties.AlgebraBridge.Translate (addForProperties)
+import Futhark.Analysis.Properties.AlgebraBridge.Translate()
+
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-option="--pattern=Properties.Algebra"
@@ -79,7 +80,6 @@ tests =
               let q_lhs = j .+. offsets_at (sVar k)
               let q_rhs = offsets_at (sVar k .+. int 1)
 
-              addForProperties (q_lhs .-. q_rhs)
               printAlgEnv 1
 
               q_lhs FM.%< q_rhs

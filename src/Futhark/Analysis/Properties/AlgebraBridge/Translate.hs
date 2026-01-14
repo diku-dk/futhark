@@ -9,7 +9,6 @@ module Futhark.Analysis.Properties.AlgebraBridge.Translate
     getDisjoint,
     lookupUntransBool,
     addProperty_,
-    addForProperties,
   )
 where
 
@@ -213,45 +212,6 @@ addProperty_ (UserFacingDisjoint ps) = do
 addProperty_ (For x p) = do
   addProperty (Algebra.Var x) (For x p)
 addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
-
-addForProperties :: SoP Algebra.Symbol -> IndexFnM ()
-addForProperties = void . foldAlgebra addForProperties_ mempty
-
--- TODO
--- [x] Predicate i is not being substituted properly
--- [ ] Approach 1: I think this has to be interleaved in the FM algorithm simplification
--- because we might reveal new indices from manipulating sums.
--- [ ] Approach 2: I add the ranges, but keep a separate symbol table:
---   * Add the Range from For-Range directly on the affected VName
---         lb (function of some index) <= vn <= ub (function of some index)
---   * Separate table maps the particular Range to the index that must be replaced
---      (lb, vn, ub) |-> idx
---   * Caveat: now all ranges have to be looked up in that table, but if it
---     can be hidden behind a general "getRange" function that's OK.
-addForProperties_ :: S.Set Algebra.Symbol -> Algebra.Symbol -> IndexFnM (S.Set Algebra.Symbol)
-addForProperties_ visited sym | sym `S.member` visited = pure visited
-addForProperties_ visited sym@(Algebra.Idx (Algebra.One vn) idx) = do
-      traceM $ "addForProperties_ " <> prettyStr sym
-      for_rng_prop <- askForRng (Algebra.Var vn)
-      case for_rng_prop of
-        Just (For _ (Predicate i (Rng _ (mlb, mub)))) -> do
-          let sub = repAlgebra (M.singleton i idx)
-          addRels . S.fromList $
-            catMaybes
-              [ fmap (\lb -> sub lb :<=: sym2SoP sym) mlb,
-                fmap (\ub -> sym2SoP sym :<=: sub ub .-. int2SoP 1) mub
-              ]
-          pure $ S.insert sym visited
-        _ -> pure visited
-addForProperties_ visited sym@(Algebra.Sum (Algebra.One vn) a_idx b_idx) = do
-      for_rng_prop <- askForRng (Algebra.Var vn)
-      case for_rng_prop of
-        Just (For _ (Predicate _ Rng {})) -> do
-          v' <- addForProperties_ visited (Algebra.Idx (Algebra.One vn) a_idx)
-          v'' <- addForProperties_ v' (Algebra.Idx (Algebra.One vn) b_idx)
-          pure $ S.insert sym v''
-        _ -> pure visited
-addForProperties_ visited _ = pure visited
 
 -----------------------------------------------------------------------------
 -- Translation from Algebra to IndexFn layer.
