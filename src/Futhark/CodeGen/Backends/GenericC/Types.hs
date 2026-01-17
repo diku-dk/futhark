@@ -1016,7 +1016,10 @@ generateOpaque space types (desc, ot) = do
           then [C.csdecl|$ty:ct $id:(tupleField i);|]
           else [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
-generateAPITypes :: Space -> OpaqueTypes -> CompilerM op s (M.Map T.Text Manifest.Type)
+generateAPITypes ::
+  Space ->
+  OpaqueTypes ->
+  CompilerM op s (M.Map T.Text Manifest.Type)
 generateAPITypes arr_space types@(OpaqueTypes opaques) = do
   mapM_ (findNecessaryArrays . snd) opaques
   array_ts <- mapM (generateArray arr_space) . M.toList =<< gets compArrayTypes
@@ -1029,8 +1032,8 @@ generateAPITypes arr_space types@(OpaqueTypes opaques) = do
     -- the innards to increment reference counts.
     findNecessaryArrays (OpaqueType _) =
       pure ()
-    findNecessaryArrays (OpaqueArray {}) =
-      pure ()
+    findNecessaryArrays (OpaqueArray _ _ vts) =
+      mapM_ (valueTypeToCType Public) vts
     findNecessaryArrays (OpaqueRecordArray _ _ fs) =
       mapM_ (entryPointTypeToCType Public . snd) fs
     findNecessaryArrays (OpaqueSum _ variants) =

@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark bench` would ignore programs with any tag.
 
+* An issue where some array types would not be generated for the C API.
+
 ## [0.25.34]
 
 ### Added
