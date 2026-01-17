@@ -1033,7 +1033,7 @@ generateAPITypes arr_space types@(OpaqueTypes opaques) = do
     findNecessaryArrays (OpaqueType _) =
       pure ()
     findNecessaryArrays (OpaqueArray _ _ vts) =
-      mapM_ (valueTypeToCType Public) vts
+      mapM_ (valueTypeToCType Private) vts
     findNecessaryArrays (OpaqueRecordArray _ _ fs) =
       mapM_ (entryPointTypeToCType Public . snd) fs
     findNecessaryArrays (OpaqueSum _ variants) =
