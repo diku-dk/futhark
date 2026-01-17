@@ -4,7 +4,7 @@
 
 typedef int (*writer)(FILE*, const void*);
 typedef int (*bin_reader)(void*);
-typedef int (*str_reader)(const char *, void*);
+typedef int (*str_reader)(char *, void*);
 
 struct array_reader {
   char* elems;
@@ -259,7 +259,7 @@ static int read_str_array(FILE *f,
     return 1;                                                           \
   }
 
-static int read_str_i8(const char *buf, void* dest) {
+static int read_str_i8(char *buf, void* dest) {
   // Some platforms (WINDOWS) does not support scanf %hhd or its
   // cousin, %SCNi8.  Read into int first to avoid corrupting
   // memory.
@@ -275,7 +275,7 @@ static int read_str_i8(const char *buf, void* dest) {
   }
 }
 
-static int read_str_u8(const char *buf, void* dest) {
+static int read_str_u8(char *buf, void* dest) {
   // Some platforms (WINDOWS) does not support scanf %hhd or its
   // cousin, %SCNu8.  Read into int first to avoid corrupting
   // memory.
@@ -291,34 +291,34 @@ static int read_str_u8(const char *buf, void* dest) {
   }
 }
 
-static int read_str_i16(const char *buf, void* dest) {
+static int read_str_i16(char *buf, void* dest) {
   READ_STR(SCNi16, int16_t, "i16");
 }
 
-static int read_str_u16(const char *buf, void* dest) {
+static int read_str_u16(char *buf, void* dest) {
   READ_STR(SCNi16, int16_t, "u16");
 }
 
-static int read_str_i32(const char *buf, void* dest) {
+static int read_str_i32(char *buf, void* dest) {
   READ_STR(SCNi32, int32_t, "i32");
 }
 
-static int read_str_u32(const char *buf, void* dest) {
+static int read_str_u32(char *buf, void* dest) {
   READ_STR(SCNi32, int32_t, "u32");
 }
 
-static int read_str_i64(const char *buf, void* dest) {
+static int read_str_i64(char *buf, void* dest) {
   READ_STR(SCNi64, int64_t, "i64");
 }
 
-static int read_str_u64(const char *buf, void* dest) {
+static int read_str_u64(char *buf, void* dest) {
   // FIXME: This is not correct, as SCNu64 only permits decimal
   // literals.  However, SCNi64 does not handle very large numbers
   // correctly (it's really for signed numbers, so that's fair).
   READ_STR(SCNu64, uint64_t, "u64");
 }
 
-static int read_str_f16(const char *buf, void* dest) {
+static int read_str_f16(char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f16.nan") == 0) {
     *(uint16_t*)dest = float2halfbits(NAN);
@@ -342,7 +342,7 @@ static int read_str_f16(const char *buf, void* dest) {
   }
 }
 
-static int read_str_f32(const char *buf, void* dest) {
+static int read_str_f32(char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f32.nan") == 0) {
     *(float*)dest = (float)NAN;
@@ -358,7 +358,7 @@ static int read_str_f32(const char *buf, void* dest) {
   }
 }
 
-static int read_str_f64(const char *buf, void* dest) {
+static int read_str_f64(char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f64.nan") == 0) {
     *(double*)dest = (double)NAN;
@@ -374,7 +374,7 @@ static int read_str_f64(const char *buf, void* dest) {
   }
 }
 
-static int read_str_bool(const char *buf, void* dest) {
+static int read_str_bool(char *buf, void* dest) {
   if (strcmp(buf, "true") == 0) {
     *(char*)dest = 1;
     return 0;
