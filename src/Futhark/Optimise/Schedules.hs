@@ -35,6 +35,64 @@ import Futhark.Optimise.Schedules.AdjustResult(manifestResult)
 
 import Debug.Trace
 
+
+----------------------------------------
+--- SoP
+----------------------------------------
+
+{--
+instance MonadSoP VName (PrimExp VName) PassM where
+  getUntrans = gets (untrans . algenv)
+  getRanges = gets (ranges . algenv)
+  getEquivs = gets (equivs . algenv)
+  modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
+--}
+{--
+instance MonadSoP Algebra.Symbol Symbol (Property Algebra.Symbol) IndexFnM where
+  getUntrans = gets (untrans . algenv)
+  getRanges = gets (ranges . algenv)
+  getEquivs = gets (equivs . algenv)
+  getProperties = gets (properties . algenv)
+  modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
+  findSymLEq0 = Algebra.findSymbolLEq0
+--}
+{--
+data FusionEnv = FusionEnv
+  { vNameSource :: VNameSource,
+    fusionCount :: Int,
+    fuseScans :: Bool
+  }
+
+freshFusionEnv :: FusionEnv
+freshFusionEnv =
+  FusionEnv
+    { vNameSource = blankNameSource,
+      fusionCount = 0,
+      fuseScans = True
+    }
+
+newtype FusionM a = FusionM (ReaderT (Scope SOACS) (State FusionEnv) a)
+  deriving
+    ( Monad,
+      Applicative,
+      Functor,
+      MonadState FusionEnv,
+      HasScope SOACS,
+      LocalScope SOACS
+    )
+
+instance MonadFreshNames FusionM where
+  getNameSource = gets vNameSource
+  putNameSource source =
+    modify (\env -> env {vNameSource = source})
+
+runFusionM :: (MonadFreshNames m) => Scope SOACS -> FusionEnv -> FusionM a -> m a
+runFusionM scope fenv (FusionM a) = modifyNameSource $ \src ->
+  let x = runReaderT a scope
+      (y, z) = runState x (fenv {vNameSource = src})
+   in (y, vNameSource z)
+--}
+
 ----------------------------------------
 --- Environments
 ----------------------------------------
@@ -78,7 +136,7 @@ applySchedules =
 ----------------------------------------
 
 -- | Traversal structure
-applySchedOnStms :: (LocalScope SOACS m, MonadFreshNames m) =>
+applySchedOnStms :: (LocalScope SOACS m, MonadFreshNames m) =>  -- add smth like "SoPMonad ... m, "
   Env -> Stms SOACS -> m (Stms SOACS)
 applySchedOnStms env stmts = do
   bu_env <- traverseStms env stmts
