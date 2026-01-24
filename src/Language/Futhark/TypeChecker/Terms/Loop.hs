@@ -88,12 +88,12 @@ data ArgSource = Initial | BodyResult
 
 wellTypedLoopArg :: ArgSource -> [VName] -> Pat ParamType -> Exp -> TermTypeM ()
 wellTypedLoopArg src sparams pat arg = do
-  (merge_t, _) <-
+  (loop_t, _) <-
     freshDimsInType (mkUsage arg desc) Nonrigid "loop" sparams $
       toStruct (patternType pat)
   arg_t <- toStruct <$> expTypeFully arg
-  onFailure (checking merge_t arg_t) $
-    unify (mkUsage arg desc) merge_t arg_t
+  onFailure (checking loop_t arg_t) $
+    unify (mkUsage arg desc) loop_t arg_t
   where
     (checking, desc) =
       case src of
@@ -133,7 +133,7 @@ checkLoop ::
   UncheckedLoop ->
   SrcLoc ->
   TermTypeM (CheckedLoop, AppRes)
-checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
+checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
   loopinit' <- checkExp $ case loopinit of
     LoopInitExplicit e -> e
     LoopInitImplicit _ ->
@@ -150,13 +150,13 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
   -- similar to checking a function, followed by checking a call to
   -- it.  The overall procedure is as follows:
   --
-  -- (1) All empty dimensions in the merge pattern are instantiated
+  -- (1) All empty dimensions in the loop pattern are instantiated
   -- with nonrigid size variables.  All explicitly specified
   -- dimensions are preserved.
   --
   -- (2) The body of the loop is type-checked.  The result type is
-  -- combined with the merge pattern type to determine which sizes are
-  -- variant, and these are turned into size parameters for the merge
+  -- combined with the loop pattern type to determine which sizes are
+  -- variant, and these are turned into size parameters for the loop
   -- pattern.
   --
   -- (3) We now conceptually have a function parameter type and
@@ -164,25 +164,28 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
   -- as argument.
   --
   -- (4) Similarly to (3), we check that the "function" can be
-  -- called with the initial merge values as argument.  The result
+  -- called with the initial loop values as argument.  The result
   -- of this is the type of the loop as a whole.
 
-  (merge_t, new_dims_map) <-
+  (loop_t, new_dims_map) <-
     -- dim handling (1)
-    allDimsFreshInType (mkUsage loc "loop parameter type inference") Nonrigid "loop_d"
+    allDimsFreshInType
+      (mkUsage loc "loop parameter type inference")
+      Nonrigid
+      "loop_d"
       =<< expTypeFully loopinit'
   let new_dims_to_initial_dim = M.toList new_dims_map
       new_dims = map fst new_dims_to_initial_dim
 
   -- dim handling (2)
-  let checkLoopReturnSize mergepat' loopbody' = do
+  let checkLoopReturnSize looppat' loopbody' = do
         loopbody_t <- expTypeFully loopbody'
-        mergepat_t <- normTypeFully (patternType mergepat')
+        looppat_t <- normTypeFully (patternType looppat')
 
         let ok_names = known_before <> S.fromList new_dims
-        checkForImpossible (locOf mergepat) ok_names mergepat_t
+        checkForImpossible (locOf looppat) ok_names looppat_t
 
-        pat_t <- someDimsFreshInType loc "loop" new_dims mergepat_t
+        pat_t <- someDimsFreshInType loc "loop" new_dims looppat_t
 
         -- We are ignoring the dimensions here, because any mismatches
         -- should be turned into fresh size variables.
@@ -211,10 +214,10 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
                     pure ()
               pure e
         loopbody_t' <- normTypeFully loopbody_t
-        merge_t' <- normTypeFully merge_t
+        loop_t' <- normTypeFully loop_t
 
         let (init_substs, sparams) =
-              execState (matchDims onDims merge_t' loopbody_t') mempty
+              execState (matchDims onDims loop_t' loopbody_t') mempty
 
         -- Make sure that any of new_dims that are invariant will be
         -- replaced with the invariant size in the loop body.  Failure
@@ -226,7 +229,7 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
               pure ()
         mapM_ dimToInit $ M.toList init_substs
 
-        mergepat'' <- applySubst (`M.lookup` init_substs) <$> updateTypes mergepat'
+        looppat'' <- applySubst (`M.lookup` init_substs) <$> updateTypes looppat'
 
         -- Eliminate those new_dims that turned into sparams so it won't
         -- look like we have ambiguous sizes lying around.
@@ -238,11 +241,11 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
         -- of loop parameters in the type of loopbody' rigid,
         -- because we are no longer in a position to change them,
         -- really.
-        wellTypedLoopArg BodyResult sparams mergepat'' loopbody'
+        wellTypedLoopArg BodyResult sparams looppat'' loopbody'
 
-        pure (nubOrd sparams, mergepat'')
+        pure (nubOrd sparams, looppat'')
 
-  (sparams, mergepat', form', loopbody') <-
+  (sparams, looppat', form', loopbody') <-
     case form of
       For i uboundexp -> do
         uboundexp' <-
@@ -250,12 +253,12 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
             =<< checkExp uboundexp
         bound_t <- expTypeFully uboundexp'
         bindingIdent i bound_t $ \i' ->
-          bindingPat [] mergepat merge_t $ \mergepat' -> incLevel $ do
+          bindingPat [] looppat loop_t $ \looppat' -> incLevel $ do
             loopbody' <- checkExp loopbody
-            (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+            (sparams, looppat'') <- checkLoopReturnSize looppat' loopbody'
             pure
               ( sparams,
-                mergepat'',
+                looppat'',
                 For i' uboundexp',
                 loopbody'
               )
@@ -267,12 +270,12 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
           _
             | Just t' <- peelArray 1 t ->
                 bindingPat [] xpat t' $ \xpat' ->
-                  bindingPat [] mergepat merge_t $ \mergepat' -> incLevel $ do
+                  bindingPat [] looppat loop_t $ \looppat' -> incLevel $ do
                     loopbody' <- checkExp loopbody
-                    (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+                    (sparams, looppat'') <- checkLoopReturnSize looppat' loopbody'
                     pure
                       ( sparams,
-                        mergepat'',
+                        looppat'',
                         ForIn (fmap toStruct xpat') e',
                         loopbody'
                       )
@@ -281,22 +284,22 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
                   "Iteratee of a for-in loop must be an array, but expression has type"
                     <+> pretty t
       While cond ->
-        bindingPat [] mergepat merge_t $ \mergepat' ->
+        bindingPat [] looppat loop_t $ \looppat' ->
           incLevel $ do
             cond' <-
               checkExp cond
                 >>= unifies "being the condition of a 'while' loop" (Scalar $ Prim Bool)
             loopbody' <- checkExp loopbody
-            (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+            (sparams, looppat'') <- checkLoopReturnSize looppat' loopbody'
             pure
               ( sparams,
-                mergepat'',
+                looppat'',
                 While cond',
                 loopbody'
               )
 
   -- dim handling (4)
-  wellTypedLoopArg Initial sparams mergepat' loopinit'
+  wellTypedLoopArg Initial sparams looppat' loopinit'
 
   (loopt, retext) <-
     freshDimsInType
@@ -304,8 +307,8 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
       (Rigid RigidLoop)
       "loop"
       sparams
-      (patternType mergepat')
+      (patternType looppat')
   pure
-    ( (sparams, mergepat', LoopInitExplicit loopinit', form', loopbody'),
+    ( (sparams, looppat', LoopInitExplicit loopinit', form', loopbody'),
       AppRes (toStruct loopt) retext
     )
