@@ -10,7 +10,8 @@ module Futhark.Optimise.Schedules
 
 --import Control.Monad
 import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.State hiding (state)
+import Control.Monad (forM)
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Sequence qualified as Sq
@@ -22,7 +23,6 @@ import Futhark.Pass
 import Futhark.Tools
 --import Futhark.Transform.Rename
 --import Futhark.Analysis.PrimExp.Convert
-import Futhark.Optimise.Fusion(fuseInBody)
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Optimise.Schedules.EnvUtils
   (TopEnv (..), freshTopEnv, addTileBinding, addIota2Env, peFromSe)
@@ -32,7 +32,7 @@ import Futhark.Optimise.Schedules.Safety(checkValidSched)
 import Futhark.Optimise.Schedules.Stripmine(applyStripmining)
 import Futhark.Optimise.Schedules.Permute(applyPermute)
 import Futhark.Optimise.Schedules.AdjustResult(manifestResult)
-
+import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
 import Debug.Trace
 
 
@@ -40,58 +40,36 @@ import Debug.Trace
 --- SoP
 ----------------------------------------
 
-{--
-instance MonadSoP VName (PrimExp VName) PassM where
-  getUntrans = gets (untrans . algenv)
-  getRanges = gets (ranges . algenv)
-  getEquivs = gets (equivs . algenv)
-  modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
---}
-{--
-instance MonadSoP Algebra.Symbol Symbol (Property Algebra.Symbol) IndexFnM where
-  getUntrans = gets (untrans . algenv)
-  getRanges = gets (ranges . algenv)
-  getEquivs = gets (equivs . algenv)
-  getProperties = gets (properties . algenv)
-  modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
-  findSymLEq0 = Algebra.findSymbolLEq0
---}
-{--
-data FusionEnv = FusionEnv
+data ScheduleEnv = ScheduleEnv
   { vNameSource :: VNameSource,
-    fusionCount :: Int,
-    fuseScans :: Bool
+    algEnv :: AlgEnv VName (PrimExp VName)
   }
 
-freshFusionEnv :: FusionEnv
-freshFusionEnv =
-  FusionEnv
-    { vNameSource = blankNameSource,
-      fusionCount = 0,
-      fuseScans = True
-    }
-
-newtype FusionM a = FusionM (ReaderT (Scope SOACS) (State FusionEnv) a)
+newtype ScheduleM a = ScheduleM (ReaderT (Scope SOACS) (State ScheduleEnv) a)
   deriving
     ( Monad,
       Applicative,
       Functor,
-      MonadState FusionEnv,
+      MonadState ScheduleEnv,
       HasScope SOACS,
       LocalScope SOACS
     )
 
-instance MonadFreshNames FusionM where
+instance MonadFreshNames ScheduleM where
   getNameSource = gets vNameSource
-  putNameSource source =
-    modify (\env -> env {vNameSource = source})
+  putNameSource source = modify (\env -> env {vNameSource = source})
 
-runFusionM :: (MonadFreshNames m) => Scope SOACS -> FusionEnv -> FusionM a -> m a
-runFusionM scope fenv (FusionM a) = modifyNameSource $ \src ->
-  let x = runReaderT a scope
-      (y, z) = runState x (fenv {vNameSource = src})
-   in (y, vNameSource z)
---}
+instance MonadSoP VName (PrimExp VName) ScheduleM where
+  getUntrans = gets (untrans . algEnv)
+  getRanges = gets (ranges . algEnv)
+  getEquivs = gets (equivs . algEnv)
+  modifyEnv f = modify $ \env -> env {algEnv = f $ algEnv env}
+
+runScheduleM :: (MonadFreshNames m) => Scope SOACS -> ScheduleEnv -> ScheduleM a -> m a
+runScheduleM scope env (ScheduleM a) = modifyNameSource $ \src ->
+  let state = runReaderT a scope
+      (x, newEnv) = runState state (env {vNameSource = src})
+   in (x, vNameSource newEnv)
 
 ----------------------------------------
 --- Environments
@@ -107,9 +85,10 @@ type Env = (TopEnv, BotEnv)
 
 runSchedules :: Env -> Scope SOACS -> Stms SOACS -> PassM (Stms SOACS)
 runSchedules env scope stms =
-  modifyNameSource $
-    runState $
-      runReaderT (applySchedOnStms env stms) scope
+  runScheduleM
+    scope
+    (ScheduleEnv { vNameSource = mempty, algEnv = mempty })
+    (applySchedOnStms env stms)
 
 applySchedOnFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 applySchedOnFun consts fun = do
@@ -136,8 +115,7 @@ applySchedules =
 ----------------------------------------
 
 -- | Traversal structure
-applySchedOnStms :: (LocalScope SOACS m, MonadFreshNames m) =>  -- add smth like "SoPMonad ... m, "
-  Env -> Stms SOACS -> m (Stms SOACS)
+applySchedOnStms :: Env -> Stms SOACS -> ScheduleM (Stms SOACS)
 applySchedOnStms env stmts = do
   bu_env <- traverseStms env stmts
   pure $ optstms bu_env
@@ -153,8 +131,7 @@ applySchedOnStms env stmts = do
 -- | Applies schedules in a body of statements:
 --   1. sets the body result in the top-down env and
 --   2. processes the statements by means of @applySchedOnStms@
-applySchedOnBody :: (LocalScope SOACS m, MonadFreshNames m) =>
-  Env -> Body SOACS -> m (Body SOACS)
+applySchedOnBody :: Env -> Body SOACS -> ScheduleM (Body SOACS)
 applySchedOnBody env body = do
   let td_env' = (fst env) { bdy_res = map resSubExp $ bodyResult body}
   scope <- askScope
@@ -164,8 +141,7 @@ applySchedOnBody env body = do
 
 -- | Applies schedules in a lambda, essentially by calling
 --     @applySchedOnBody@
-applySchedOnLambda :: (LocalScope SOACS m, MonadFreshNames m) =>
-  Env -> Lambda SOACS -> m (Lambda SOACS)
+applySchedOnLambda :: Env -> Lambda SOACS -> ScheduleM (Lambda SOACS)
 applySchedOnLambda env lam = do
   scope <- askScope
   bdy <- localScope (scope <> scopeOf lam) $
@@ -224,8 +200,7 @@ updateTopdownEnv env _ = env
 -- | Core function:
 --    1. it identifies and records schedule calls
 --    2. transforms SOACS matching existing schedules
-applySchedOnStm :: (LocalScope SOACS m, MonadFreshNames m) =>
-  Env -> Stm SOACS -> m BotEnv
+applySchedOnStm :: Env -> Stm SOACS -> ScheduleM BotEnv
 applySchedOnStm (td_env, bu_env) stm@(Let pat _aux e)
   | Apply fnm args_diet _rtp _ <- e,
     L.isPrefixOf "hlSched2D" $ nameToString fnm,

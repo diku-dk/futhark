@@ -1,5 +1,6 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 -- | The Algebraic Environment, which is in principle
 --   maintained during program traversal, is used to
@@ -393,3 +394,12 @@ delFromEnv x =
         { dir = M.delete x $ dir ut,
           inv = M.filter (/= x) $ inv ut
         }
+-- Some default SoP instances for using VName as symbol.
+instance Free VName VName where
+  -- The "free symbols" in a VName is just the VName itself.
+  free = S.singleton
+
+instance RangeRelated VName where
+  freevar sop = S.fromList [vn | (vns, _) <- sopToLists sop, vn <- vns]
+  -- VNames are simply related to themselves.
+  rangeRelatedTo = S.singleton
