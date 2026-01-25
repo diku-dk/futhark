@@ -23,7 +23,6 @@ class
   getUntrans :: m (UntransEnv u e)
   getRanges :: m (RangeEnv u)
   getEquivs :: m (EquivEnv u)
-  getProps :: m (PropEnv u)
   modifyEnv :: (AlgEnv u e -> AlgEnv u e) -> m ()
 
 -- i < j

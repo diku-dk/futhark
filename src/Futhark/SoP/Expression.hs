@@ -47,7 +47,7 @@ instance Expression Exp where
         Just (e_x, e_y)
   moduloIsh _ = Nothing
 
-instance Ord u => Expression (PrimExp u) where
+instance (Ord u) => Expression (PrimExp u) where
   moduloIsh :: PrimExp u -> Maybe (PrimExp u, PrimExp u)
   moduloIsh (BinOpExp (SMod _ _) pe1 pe2) = Just (pe1, pe2)
   moduloIsh (BinOpExp (UMod _ _) pe1 pe2) = Just (pe1, pe2)

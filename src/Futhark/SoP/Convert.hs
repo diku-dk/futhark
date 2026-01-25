@@ -25,15 +25,15 @@ import Language.Futhark.Prop
 import Language.Futhark.Syntax (VName)
 import Language.Futhark.Syntax qualified as E
 
-toSoPNum_ :: (ToSoP u e, MonadSoP u e p m) => e -> m (SoP u)
+toSoPNum_ :: (ToSoP u e, MonadSoP u e m) => e -> m (SoP u)
 toSoPNum_ e = snd <$> toSoPNum e
 
-toSoPCmp_ :: (ToSoP u e, MonadSoP u e p m) => e -> m (SoP u >= 0)
+toSoPCmp_ :: (ToSoP u e, MonadSoP u e m) => e -> m (SoP u >= 0)
 toSoPCmp_ e = snd <$> toSoPNum e
 
 -- | Conversion from 'SoP's to other representations.
 class FromSoP u e where
-  fromSoP :: (MonadSoP u e p m) => SoP u -> m e
+  fromSoP :: (MonadSoP u e m) => SoP u -> m e
 
 -- instance Ord u => FromSoP u (PrimExp u) where
 --  fromSoP sop =
@@ -48,7 +48,7 @@ class FromSoP u e where
 --   'SoP's. Monadic because it may involve look-ups in the
 --   untranslatable expression environment.
 class ToSoP u e where
-  toSoPNum :: (MonadSoP u e p m) => e -> m (Integer, SoP u)
+  toSoPNum :: (MonadSoP u e m) => e -> m (Integer, SoP u)
 
 instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u Integer where
   toSoPNum x = pure (1, int2SoP x)
