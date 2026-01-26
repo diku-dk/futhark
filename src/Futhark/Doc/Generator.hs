@@ -136,7 +136,7 @@ fullRow :: Html -> Html
 fullRow = H.tr . (H.td ! A.colspan "3")
 
 emptyRow :: Html
-emptyRow = H.tr $ H.td mempty <> H.td mempty <> H.td mempty
+emptyRow = H.tr ! A.class_ "empty_spec_row" $ H.td mempty <> H.td mempty <> H.td mempty
 
 specRow :: Html -> Html -> Html -> Html
 specRow a b c =

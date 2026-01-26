@@ -127,7 +127,7 @@ generateCCOverviewHtml costCentres = do
     ccDetailTables
   where
     orderAscending = sortOn (Down . D.fraction . snd)
-    ccTable = H.table $ do
+    ccTable = H.table ! A.class_ "cctable" $ do
       H.tr $
         mapM_
           H.th
@@ -179,7 +179,7 @@ renderCostCentreDetails (CostCentreName ccName) (CostCentreDetails ratio sourceR
         $ H.text ccName
 
     summaryTable =
-      H.table $
+      H.table ! A.class_ "cctable" $
         mapM_
           row
           [ ("Fraction", T.pack $ printf "%.4f" ratio),

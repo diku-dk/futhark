@@ -42,7 +42,7 @@ td {
 
 #navigation {
     float: right;
-    vertical-align: centre;
+    vertical-align: center;
 }
 
 #navigation ol {
@@ -230,12 +230,12 @@ a.silent-anchor {
   color: inherit;
 }
 
-table, th, td {
+.cctable table, .cctable th, .cctable td {
   border: 1px solid black;
   border-collapse: collapse;
 }
 
-th, td {
+.cctable th, .cctable td {
   padding-left: 0.5em;
   padding-right: 0.5em;
   text-align: center;
