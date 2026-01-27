@@ -243,12 +243,12 @@ checkKernelResult ::
   TC.TypeM rep ()
 checkKernelResult (Returns _ cs what) t = do
   TC.checkCerts cs
-  TC.require [t] what
+  TC.require t what
 checkKernelResult (TileReturns cs dims v) t = do
   TC.checkCerts cs
   forM_ dims $ \(dim, tile) -> do
-    TC.require [Prim int64] dim
-    TC.require [Prim int64] tile
+    TC.require (Prim int64) dim
+    TC.require (Prim int64) tile
   vt <- lookupType v
   unless (vt == t `arrayOfShape` Shape (map snd dims)) $
     TC.bad $
@@ -256,9 +256,9 @@ checkKernelResult (TileReturns cs dims v) t = do
         "Invalid type for TileReturns " <> prettyText v
 checkKernelResult (RegTileReturns cs dims_n_tiles arr) t = do
   TC.checkCerts cs
-  mapM_ (TC.require [Prim int64]) dims
-  mapM_ (TC.require [Prim int64]) blk_tiles
-  mapM_ (TC.require [Prim int64]) reg_tiles
+  mapM_ (TC.require $ Prim int64) dims
+  mapM_ (TC.require $ Prim int64) blk_tiles
+  mapM_ (TC.require $ Prim int64) reg_tiles
 
   -- assert that arr is of element type t and shape (rev outer_tiles ++ reg_tiles)
   arr_t <- lookupType arr
@@ -339,7 +339,7 @@ scopeOfSegSpace (SegSpace phys space) =
 
 checkSegSpace :: (TC.Checkable rep) => SegSpace -> TC.TypeM rep ()
 checkSegSpace (SegSpace _ dims) =
-  mapM_ (TC.require [Prim int64] . snd) dims
+  mapM_ (TC.require (Prim int64) . snd) dims
 
 -- | A 'SegOp' is semantically a perfectly nested stack of maps, on
 -- top of some bottommost computation (scalar computation, reduction,
@@ -481,10 +481,10 @@ typeCheckSegOp checkLvl (SegHist lvl space ts kbody ops) = do
 
   TC.binding (scopeOfSegSpace space) $ do
     nes_ts <- forM ops $ \(HistOp dest_shape rf dests nes shape op) -> do
-      mapM_ (TC.require [Prim int64]) dest_shape
-      TC.require [Prim int64] rf
+      mapM_ (TC.require (Prim int64)) dest_shape
+      TC.require (Prim int64) rf
       nes' <- mapM TC.checkArg nes
-      mapM_ (TC.require [Prim int64]) $ shapeDims shape
+      mapM_ (TC.require (Prim int64)) $ shapeDims shape
 
       -- Operator type must match the type of neutral elements.
       let stripVecDims = stripArray $ shapeRank shape
@@ -501,7 +501,7 @@ typeCheckSegOp checkLvl (SegHist lvl space ts kbody ops) = do
       -- Arrays must have proper type.
       let dest_shape' = Shape segment_dims <> dest_shape <> shape
       forM_ (zip nes_t dests) $ \(t, dest) -> do
-        TC.requireI [t `arrayOfShape` dest_shape'] dest
+        TC.requireI (t `arrayOfShape` dest_shape') dest
         TC.consume =<< TC.lookupAliases dest
 
       pure $ map (`arrayOfShape` shape) nes_t
@@ -536,7 +536,7 @@ checkScanRed space ops ts kbody = do
 
   TC.binding (scopeOfSegSpace space) $ do
     ne_ts <- forM ops $ \(lam, nes, shape) -> do
-      mapM_ (TC.require [Prim int64]) $ shapeDims shape
+      mapM_ (TC.require (Prim int64)) $ shapeDims shape
       nes' <- mapM TC.checkArg nes
 
       -- Operator type must match the type of neutral elements.

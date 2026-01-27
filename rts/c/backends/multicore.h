@@ -6,11 +6,7 @@ struct futhark_context_config {
   int profiling;
   int logging;
   char *cache_fname;
-  int num_tuning_params;
-  int64_t *tuning_params;
-  const char** tuning_param_names;
-  const char** tuning_param_vars;
-  const char** tuning_param_classes;
+  struct tuning_param tuning_params[NUM_TUNING_PARAMS];
   // Uniform fields above.
 
   int num_threads;

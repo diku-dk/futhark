@@ -50,7 +50,6 @@ compileProg version =
     ( GC.compileProg
         "multicore"
         version
-        mempty
         operations
         generateBoilerplate
         "#include <pthread.h>\n"

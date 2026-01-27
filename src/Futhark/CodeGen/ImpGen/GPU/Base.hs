@@ -292,6 +292,10 @@ kernelConstToExp = traverse f
       v <- dPrimS (nameFromText $ prettyText k) int64
       sOp $ Imp.GetSize v k c
       pure v
+    f (Imp.SizeUserParam name def) = do
+      v <- dPrimS (nameFromText $ prettyText name) int64
+      emit $ Imp.GetUserParam v name $ le64 def
+      pure v
 
 -- | Given available register and a list of parameter types, compute
 -- the largest available chunk size given the parameters for which we

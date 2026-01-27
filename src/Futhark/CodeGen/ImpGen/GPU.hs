@@ -117,14 +117,15 @@ opCompiler dest (Alloc e space) =
   compileAlloc dest e space
 opCompiler (Pat [pe]) (Inner (SizeOp (GetSize key size_class))) = do
   fname <- askFunction
-  sOp $
-    Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
-      sizeClassWithEntryPoint fname size_class
+  let key' = keyWithEntryPoint fname key
+  addTuningParam key' $ Just size_class
+  sOp $ Imp.GetSize (patElemName pe) key' $ sizeClassWithEntryPoint fname size_class
 opCompiler (Pat [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
   fname <- askFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
-  sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
-    =<< toExp x
+      key' = keyWithEntryPoint fname key
+  addTuningParam key' $ Just size_class
+  sOp . Imp.CmpSizeLe (patElemName pe) key' size_class' =<< toExp x
 opCompiler (Pat [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblock_size))) = do
