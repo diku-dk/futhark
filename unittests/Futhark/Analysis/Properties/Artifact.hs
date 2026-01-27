@@ -150,6 +150,16 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/srad.fut"
+        ( newNameFromString "j" >>= \j -> pure $ \(i, n, m, xs) ->
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))], [Forall j (Iota (sHole m))]],
+                  -- matches anything; we're just checking the program.
+                  body = cases [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i, sHole j])]
+                }
+            ]
+       ),
+      mkTest
         "tests/indexfn/quickhull.fut"
         ( pure $ \(i, n, xs, _) ->
             -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
