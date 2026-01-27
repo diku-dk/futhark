@@ -666,26 +666,6 @@ tests =
             ]
         ),
       mkTest
-        "tests/indexfn/mis-old.fut"
-        ( pure $ \(i, n, xs, _) ->
-            [ IndexFn
-                { shape = [[Forall i (Iota (sHole n))]],
-                  -- matches anything; we're just checking the program.
-                  body = cases [(Bool True, sHole xs)]
-                }
-            ]
-        ),
-      mkTest
-        "tests/indexfn/mis-younger.fut"
-        ( pure $ \(i, n, xs, _) ->
-            [ IndexFn
-                { shape = [[Forall i (Iota (sHole n))]],
-                  -- matches anything; we're just checking the program.
-                  body = cases [(Bool True, sHole xs)]
-                }
-            ]
-        ),
-      mkTest
         "tests/indexfn/quickhull.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
@@ -695,17 +675,16 @@ tests =
                 }
             ]
         ),
-      --   ),
-      -- mkTest
-      --   "tests/indexfn/srad.fut"
-      --   ( pure $ \(i, n, xs, _) ->
-      --       [ IndexFn
-      --           { shape = [[Forall i (Iota (sHole n))]],
-      --             -- matches anything; we're just checking the program.
-      --             body = cases [(Bool True, sHole xs)]
-      --           }
-      --       ]
-      --  ),
+      mkTest
+        "tests/indexfn/srad.fut"
+        ( newNameFromString "j" >>= \j -> pure $ \(i, n, m, xs) ->
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))], [Forall j (Iota (sHole m))]],
+                  -- matches anything; we're just checking the program.
+                  body = cases [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i, sHole j])]
+                }
+            ]
+       ),
       -- mkTest
       --   "tests/indexfn/quickhull.fut"
       --   ( pure $ \(i, n, xs, _) ->
