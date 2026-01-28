@@ -37,7 +37,6 @@ compileProg mode class_name prog = do
       macros
       kernels
       types
-      sizes
       failures
       prog'
     ) <-
@@ -89,9 +88,9 @@ compileProg mode class_name prog = do
             "default_tile_size=default_tile_size",
             "default_reg_tile_size=default_reg_tile_size",
             "default_threshold=default_threshold",
-            "sizes=sizes"
+            "user_sizes=user_sizes"
           ]
-          [Escape $ openClInit macros types assign sizes failures]
+          [Escape $ openClInit macros types assign (Imp.defParams prog') failures]
       options =
         [ Option
             { optionLongName = "platform",
@@ -204,14 +203,17 @@ compileProg mode class_name prog = do
 asLong :: PyExp -> PyExp
 asLong x = simpleCall "np.int64" [x]
 
-getParamByKey :: Name -> PyExp
-getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
-
 kernelConstToExp :: Imp.KernelConst -> PyExp
 kernelConstToExp (Imp.SizeConst key _) =
-  getParamByKey key
+  Index (getParamByKey key) (IdxExp (String "value"))
 kernelConstToExp (Imp.SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
+kernelConstToExp (Imp.SizeUserParam name def) =
+  Call
+    (Field (Var "self.user_params") "get")
+    [ Arg $ String (nameToText name),
+      Arg $ Var $ compileName def
+    ]
 
 compileConstExp :: Imp.KernelConstExp -> PyExp
 compileConstExp e = runIdentity $ compilePrimExp (pure . kernelConstToExp) e
@@ -223,11 +225,11 @@ compileBlockDim (Right e) = pure $ compileConstExp e
 callKernel :: OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do
   v' <- compileVar v
-  stm $ Assign v' $ getParamByKey key
+  stm $ Assign v' $ Index (getParamByKey key) (IdxExp (String "value"))
 callKernel (Imp.CmpSizeLe v key x) = do
   v' <- compileVar v
   x' <- compileExp x
-  stm $ Assign v' $ BinOp "<=" (getParamByKey key) x'
+  stm $ Assign v' $ BinOp "<=" (Index (getParamByKey key) (IdxExp (String "value"))) x'
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- compileVar v
   stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class

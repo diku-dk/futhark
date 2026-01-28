@@ -36,6 +36,7 @@ module Futhark.CodeGen.ImpGen
     emit,
     emitFunction,
     hasFunction,
+    addTuningParam,
     collect,
     collect',
     VarEntry (..),
@@ -139,6 +140,8 @@ import Futhark.CodeGen.ImpCode
   ( Bytes,
     Count,
     Elements,
+    ParamMap,
+    SizeClass,
     elements,
   )
 import Futhark.CodeGen.ImpCode qualified as Imp
@@ -289,6 +292,7 @@ data ImpState rep r op = ImpState
     stateFunctions :: Imp.Functions op,
     stateCode :: Imp.Code op,
     stateConstants :: Imp.Constants op,
+    stateParams :: ParamMap,
     stateWarnings :: Warnings,
     -- | Maps the arrays backing each accumulator to their
     -- update function and neutral elements.  This works
@@ -301,7 +305,7 @@ data ImpState rep r op = ImpState
   }
 
 newState :: VNameSource -> ImpState rep r op
-newState = ImpState mempty mempty mempty mempty mempty mempty
+newState = ImpState mempty mempty mempty mempty mempty mempty mempty
 
 newtype ImpM rep r op a
   = ImpM (ReaderT (Env rep r op) (State (ImpState rep r op)) a)
@@ -376,11 +380,13 @@ subImpM r ops (ImpM m) = do
             stateNameSource = stateNameSource s,
             stateConstants = mempty,
             stateWarnings = mempty,
+            stateParams = stateParams s,
             stateAccs = stateAccs s
           }
       (x, s'') = runState (runReaderT m env') s'
 
   putNameSource $ stateNameSource s''
+  modify $ \s''' -> s''' {stateParams = stateParams s''}
   warnings $ stateWarnings s''
   pure (x, stateCode s'')
 
@@ -422,6 +428,15 @@ hasFunction fname = gets $ \s ->
   let Imp.Functions fs = stateFunctions s
    in isJust $ lookup fname fs
 
+-- | Add a tuning parameter. You can call this function with the same parameter
+-- name multiple times, but they must have the same class.
+addTuningParam :: Name -> Maybe SizeClass -> ImpM rep r op ()
+addTuningParam key sclass = do
+  user <- asks $ maybe mempty S.singleton . envFunction
+  modify $ \s -> s {stateParams = M.insertWith comb key (sclass, user) $ stateParams s}
+  where
+    comb (c, x) (_, y) = (c, x <> y)
+
 constsVTable :: (Mem rep inner) => Stms rep -> VTable rep
 constsVTable = foldMap stmVtable
   where
@@ -448,6 +463,7 @@ compileProg r ops space (Prog types consts funs) =
             combineStates ss
      in ( ( stateWarnings s',
             Imp.Definitions
+              (stateParams s')
               types
               (foldMap stateConstants ss <> stateConstants s')
               (stateFunctions s')
@@ -466,11 +482,14 @@ compileProg r ops space (Prog types consts funs) =
     combineStates ss =
       let Imp.Functions funs' = mconcat $ map stateFunctions ss
           src = mconcat (map stateNameSource ss)
+          mixParam (c, x) (_, y) = (c, x <> y)
        in (newState src)
             { stateFunctions =
                 Imp.Functions $ M.toList $ M.fromList funs',
               stateWarnings =
-                mconcat $ map stateWarnings ss
+                mconcat $ map stateWarnings ss,
+              stateParams =
+                foldl' (M.unionWith mixParam) mempty $ map stateParams ss
             }
 
 compileConsts :: Names -> Stms rep -> ImpM rep r op ()
@@ -1026,6 +1045,9 @@ defCompileBasicOp _ (UpdateAcc safety acc is vs) = sComment "UpdateAcc" $ do
         compileStms mempty (bodyStms $ lambdaBody lam) $
           forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, SubExpRes _ se) ->
             copyDWIMFix arr is' se []
+defCompileBasicOp (Pat [PatElem v _]) (UserParam name se) = do
+  addTuningParam name Nothing
+  emit $ Imp.GetUserParam v name $ pe64 se
 defCompileBasicOp pat e =
   error $
     "ImpGen.defCompileBasicOp: Invalid pattern\n  "

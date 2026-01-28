@@ -184,14 +184,13 @@ openclMemoryType space = error $ "GPU backend does not support '" ++ space ++ "'
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program opencl_code opencl_prelude macros kernels types params failures prog'
+    Program opencl_code opencl_prelude macros kernels types failures prog'
     ) <-
     ImpGen.compileProg prog
   (ws,)
     <$> GC.compileProg
       "opencl"
       version
-      params
       operations
       (mkBoilerplate (opencl_prelude <> opencl_code) macros kernels types failures)
       opencl_includes

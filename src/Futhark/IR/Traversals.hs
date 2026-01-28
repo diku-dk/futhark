@@ -175,6 +175,8 @@ mapExpM tv (BasicOp (UpdateAcc safety v is ses)) =
             <*> mapM (mapOnSubExp tv) is
             <*> mapM (mapOnSubExp tv) ses
         )
+mapExpM tv (BasicOp (UserParam name def)) =
+  BasicOp <$> (UserParam name <$> mapOnSubExp tv def)
 mapExpM tv (WithAcc inputs lam) =
   WithAcc <$> mapM onInput inputs <*> mapOnLambda tv lam
   where
@@ -335,6 +337,8 @@ walkExpM tv (BasicOp (UpdateAcc _ v is ses)) = do
   walkOnVName tv v
   mapM_ (walkOnSubExp tv) is
   mapM_ (walkOnSubExp tv) ses
+walkExpM tv (BasicOp (UserParam _name def)) =
+  walkOnSubExp tv def
 walkExpM tv (WithAcc inputs lam) = do
   forM_ inputs $ \(shape, vs, op) -> do
     walkOnShape tv shape

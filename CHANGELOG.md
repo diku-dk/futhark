@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The `multicore` backend now uses a decoupled lookback `scan` implemented by
   Amirreza Hashemi.
 
+* Custom tuning parameters can now be added with the `#[param(NAME)]` attribute.
+  See the documentation for the sharp edges.
+
+* `futhark test` now supports `--tuning`, just like `futhark bench`.
+
 ### Removed
 
 ### Changed

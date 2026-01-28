@@ -347,6 +347,8 @@ pBasicOp =
         safety <-
           choice [keyword "update_acc_unsafe" $> Unsafe, keyword "update_acc" $> Safe]
         parens (UpdateAcc safety <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
+      keyword "user_param"
+        *> parens (UserParam <$> pName <* pComma <*> pSubExp),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,

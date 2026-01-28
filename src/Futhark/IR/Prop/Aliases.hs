@@ -77,6 +77,7 @@ basicOpAliases Concat {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
 basicOpAliases UpdateAcc {} = [mempty]
+basicOpAliases UserParam {} = [mempty]
 
 matchAliases :: [([Names], Names)] -> [Names]
 matchAliases l =

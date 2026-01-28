@@ -815,6 +815,14 @@ internaliseExp desc (E.Attr attr e loc) = do
           I.Prim pt ->
             pure $ constant $ blankPrimValue pt
           _ -> pure se
+    I.AttrComp "param" [I.AttrName tag] -> do
+      case e' of
+        [se] -> do
+          se_t <- I.subExpType se
+          if se_t == I.Prim int64
+            then fmap pure $ letSubExp desc $ I.BasicOp $ I.UserParam tag se
+            else pure e'
+        _ -> pure e'
     _ ->
       pure e'
   where

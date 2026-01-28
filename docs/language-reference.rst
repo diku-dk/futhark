@@ -1850,6 +1850,15 @@ run-time.  This is used for performance-critical code where you want
 to be told when the compiler is unable to statically verify the safety
 of all operations.
 
+``param(name)``
+...............
+
+This attribute can only be attached to an expression of type ``i64``. It causes
+a tuning parameter to be defined with the given name. This tuning parameter can
+then be set at program startup to override value of the expression this
+attribute is applied to. It is currently unspecified whether setting the tuning
+parameter after context creation has any effect.
+
 Declaration attributes
 ~~~~~~~~~~~~~~~~~~~~~~
 

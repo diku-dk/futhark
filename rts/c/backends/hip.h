@@ -77,12 +77,8 @@ struct futhark_context_config {
   int debugging;
   int profiling;
   int logging;
-  char* cache_fname;
-  int num_tuning_params;
-  int64_t *tuning_params;
-  const char** tuning_param_names;
-  const char** tuning_param_vars;
-  const char** tuning_param_classes;
+  char *cache_fname;
+  struct tuning_param tuning_params[NUM_TUNING_PARAMS];
   // Uniform fields above.
 
   char* program;
@@ -183,7 +179,6 @@ struct futhark_context {
 
   void* global_failure;
   void* global_failure_args;
-  struct tuning_params tuning_params;
   // True if a potentially failing kernel has been enqueued.
   int32_t failure_is_an_option;
   int total_runs;
@@ -316,10 +311,10 @@ static void hip_size_setup(struct futhark_context *ctx) {
       / cfg->gpu.default_block_size;
   }
 
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    const char *size_class = cfg->tuning_param_classes[i];
-    int64_t *size_value = &cfg->tuning_params[i];
-    const char* size_name = cfg->tuning_param_names[i];
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+    const char *size_class = cfg->tuning_params[i].class;
+    int64_t *size_value = &cfg->tuning_params[i].val;
+    const char* size_name = cfg->tuning_params[i].name;
     int64_t max_value = 0, default_value = 0;
 
     if (strstr(size_class, "thread_block_size") == size_class) {
@@ -413,7 +408,7 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
     }
   }
 
-  size_t i = 0, n_opts_alloc = 20 + num_macros + num_extra_opts + cfg->num_tuning_params;
+  size_t i = 0, n_opts_alloc = 20 + num_macros + num_extra_opts + 2*NUM_TUNING_PARAMS;
   char **opts = (char**) malloc(n_opts_alloc * sizeof(char *));
   if (!arch_set) {
     hipDeviceProp_t props;
@@ -438,9 +433,13 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
     opts[i++] = msgprintf("-D%s=%zu", macro_names[j], macro_vals[j]);
   }
 
-  for (int j = 0; j < cfg->num_tuning_params; j++) {
-    opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
-                          cfg->tuning_params[j]);
+  for (int j = 0; j < NUM_TUNING_PARAMS; j++) {
+    opts[i++] = msgprintf("-Dset_%s=%d",
+                          ctx->cfg->tuning_params[j].var,
+                          (int)ctx->cfg->tuning_params[j].set);
+    opts[i++] = msgprintf("-Dval_%s=%d",
+                          ctx->cfg->tuning_params[j].var,
+                          (int)ctx->cfg->tuning_params[j].val);
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
   opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_thread_block_size);

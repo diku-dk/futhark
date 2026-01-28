@@ -6,11 +6,7 @@ struct futhark_context_config {
   int profiling;
   int logging;
   char *cache_fname;
-  int num_tuning_params;
-  int64_t *tuning_params;
-  const char** tuning_param_names;
-  const char** tuning_param_vars;
-  const char** tuning_param_classes;
+  struct tuning_param tuning_params[NUM_TUNING_PARAMS];
 };
 
 static void backend_context_config_setup(struct futhark_context_config* cfg) {
@@ -21,8 +17,17 @@ static void backend_context_config_teardown(struct futhark_context_config* cfg) 
   (void)cfg;
 }
 
-int futhark_context_config_set_tuning_param(struct futhark_context_config* cfg, const char *param_name, size_t param_value) {
-  (void)cfg; (void)param_name; (void)param_value;
+int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
+                                            const char *param_name,
+                                            size_t new_value) {
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+    if (strcmp(param_name, cfg->tuning_params[i].name) == 0) {
+      cfg->tuning_params[i].val = new_value;
+      cfg->tuning_params[i].set = true;
+      return 0;
+    }
+  }
+
   return 1;
 }
 

@@ -6,6 +6,14 @@
 struct futhark_context_config;
 struct futhark_context;
 
+struct tuning_param {
+  const char *name;
+  const char *var; // Z-encoded name.
+  const char *class;
+  bool set;
+  int64_t val;
+};
+
 static void set_error(struct futhark_context* ctx, char *error);
 
 // These are called in context/config new/free functions and contain

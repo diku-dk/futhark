@@ -142,6 +142,7 @@ basicOpMetrics Scratch {} = seen "Scratch"
 basicOpMetrics Reshape {} = seen "Reshape"
 basicOpMetrics Rearrange {} = seen "Rearrange"
 basicOpMetrics UpdateAcc {} = seen "UpdateAcc"
+basicOpMetrics UserParam {} = seen "UserParam"
 
 -- | Compute metrics for this lambda.
 lambdaMetrics :: (OpMetrics (Op rep)) => Lambda rep -> MetricsM ()
