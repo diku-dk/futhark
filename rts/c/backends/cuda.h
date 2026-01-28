@@ -550,9 +550,9 @@ static void cuda_size_setup(struct futhark_context *ctx)
   }
 
   for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
-    const char *size_class = cfg->tuning_param_classes[i];
+    const char *size_class = cfg->tuning_param[i].class;
     int64_t *size_value = &cfg->tuning_params[i];
-    const char* size_name = cfg->tuning_param_names[i];
+    const char* size_name = cfg->tuning_param[i].name;
     int64_t max_value = 0, default_value = 0;
 
     if (strstr(size_class, "thread_block_size") == size_class) {
