@@ -1,4 +1,6 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE LambdaCase #-}
 
 -- | The handlers exposed by the language server.
 module Futhark.LSP.Handlers (handlers) where
@@ -8,14 +10,18 @@ import Control.Lens ((^.))
 import Data.Aeson.Types (Value (Array, String))
 import Data.IORef
 import Data.Proxy (Proxy (..))
+import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
+import Futhark.Fmt.Printer (fmtToText)
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
+import Futhark.Util (showText)
 import Language.LSP.Protocol.Lens (HasUri (uri))
 import Language.LSP.Protocol.Message
 import Language.LSP.Protocol.Types
-import Language.LSP.Server (Handlers, LspM, notificationHandler, requestHandler)
+import Language.LSP.Server (Handlers, LspM, getVirtualFile, notificationHandler, requestHandler)
+import Language.LSP.VFS (file_text)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
@@ -81,6 +87,33 @@ onWorkspaceDidChangeConfiguration _state_mvar =
   notificationHandler SMethod_WorkspaceDidChangeConfiguration $ \_ ->
     logStringStderr <& "WorkspaceDidChangeConfiguration"
 
+-- Fo
+
+onDocumentFormattingHandler :: Handlers (LspM ())
+onDocumentFormattingHandler =
+  requestHandler SMethod_TextDocumentFormatting $ \message report ->
+    let TRequestMessage _ _ _ formattingParams = message
+        DocumentFormattingParams progressToken textDoc opts = formattingParams
+        fileUri = textDoc ^. uri
+     in do
+          logStringStderr <& ("Formatting: " ++ show (textDoc ^. uri))
+          getVirtualFile (toNormalizedUri fileUri) >>= \case
+            Nothing -> report $ noSuchDocumentResponse fileUri
+            Just virtualFile -> let
+                uriString = show fileUri
+                fileText = R.toText $ virtualFile ^. file_text
+              in case fmtToText uriString fileText of
+                Left _ -> _
+                Right formattedFileText -> _
+  where
+    noSuchDocumentResponse fileUri =
+      Left $
+        TResponseError
+          { _xdata = Nothing,
+            _message = "Failed to retrieve document at " <> showText fileUri,
+            _code = InR ErrorCodes_InvalidParams
+          }
+
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
@@ -90,6 +123,7 @@ handlers state_mvar _ =
     [ onInitializeHandler,
       onDocumentOpenHandler,
       onDocumentCloseHandler,
+      onDocumentFormattingHandler,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,
