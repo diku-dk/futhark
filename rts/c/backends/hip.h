@@ -435,11 +435,11 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
 
   for (int j = 0; j < NUM_TUNING_PARAMS; j++) {
     opts[i++] = msgprintf("-Dset_%s=%d",
-                          ctx->cfg->tuning_params[i].var,
-                          (int)ctx->cfg->tuning_params[i].set);
+                          ctx->cfg->tuning_params[j].var,
+                          (int)ctx->cfg->tuning_params[j].set);
     opts[i++] = msgprintf("-Dval_%s=%d",
-                          ctx->cfg->tuning_params[i].var,
-                          (int)ctx->cfg->tuning_params[i].val);
+                          ctx->cfg->tuning_params[j].var,
+                          (int)ctx->cfg->tuning_params[j].val);
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
   opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_thread_block_size);
