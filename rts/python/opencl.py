@@ -301,10 +301,16 @@ def initialise_opencl_object(
                 .replace("#", "zh")
                 .replace("'", "zq")
             )
-            build_options += [
-                "-Dval_{}={}".format(z, "0" if v is None else v),
-                "-Dset_{}={}".format(z, "0" if v is None else "1"),
-            ]
+            if v["value"] is None:
+                build_options += [
+                    "-Dval_{}=0".format(z),
+                    "-Dset_{}=false".format(z),
+                ]
+            else:
+                build_options += [
+                    "-Dval_{}={}".format(z, v["value"]),
+                    "-Dset_{}=true".format(z),
+                ]
 
         build_options += [
             "-D{}={}".format(s, to_c_str_rep(f())) for (s, f) in constants

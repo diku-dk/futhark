@@ -205,7 +205,7 @@ asLong x = simpleCall "np.int64" [x]
 
 kernelConstToExp :: Imp.KernelConst -> PyExp
 kernelConstToExp (Imp.SizeConst key _) =
-  getParamByKey key
+  Index (getParamByKey key) (IdxExp (String "value"))
 kernelConstToExp (Imp.SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
 kernelConstToExp (Imp.SizeUserParam name def) =
@@ -225,11 +225,11 @@ compileBlockDim (Right e) = pure $ compileConstExp e
 callKernel :: OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do
   v' <- compileVar v
-  stm $ Assign v' $ getParamByKey key
+  stm $ Assign v' $ Index (getParamByKey key) (IdxExp (String "value"))
 callKernel (Imp.CmpSizeLe v key x) = do
   v' <- compileVar v
   x' <- compileExp x
-  stm $ Assign v' $ BinOp "<=" (getParamByKey key) x'
+  stm $ Assign v' $ BinOp "<=" (Index (getParamByKey key) (IdxExp (String "value"))) x'
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- compileVar v
   stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class

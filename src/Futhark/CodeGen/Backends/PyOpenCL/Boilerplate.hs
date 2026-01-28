@@ -29,7 +29,10 @@ errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
 
 getParamByKey :: Name -> PyExp
-getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+getParamByKey key =
+  Index
+    (Index (Var "self.sizes") (IdxExp $ String $ prettyText key))
+    (IdxExp $ String "value")
 
 compileConstExp :: KernelConstExp -> PyExp
 compileConstExp e = runIdentity $ Py.compilePrimExp (pure . kernelConstToExp) e
