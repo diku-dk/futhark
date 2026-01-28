@@ -24,8 +24,17 @@ void futhark_context_config_set_num_threads(struct futhark_context_config *cfg, 
   cfg->num_threads = n;
 }
 
-int futhark_context_config_set_tuning_param(struct futhark_context_config* cfg, const char *param_name, size_t param_value) {
-  (void)cfg; (void)param_name; (void)param_value;
+int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
+                                            const char *param_name,
+                                            size_t new_value) {
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+    if (strcmp(param_name, cfg->tuning_params[i].name) == 0) {
+      cfg->tuning_params[i].val = new_value;
+      cfg->tuning_params[i].set = true;
+      return 0;
+    }
+  }
+
   return 1;
 }
 
