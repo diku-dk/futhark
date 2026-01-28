@@ -290,6 +290,7 @@ kernelConstToExp = traverse f
       pure v
     f (Imp.SizeConst k c) = do
       v <- dPrimS (nameFromText $ prettyText k) int64
+      addTuningParam k $ Just c
       sOp $ Imp.GetSize v k c
       pure v
     f (Imp.SizeUserParam name def) = do
@@ -1185,6 +1186,7 @@ getSize desc size_class = do
   v <- dPrim desc
   fname <- askFunction
   let v_key = keyWithEntryPoint fname $ nameFromText $ prettyText $ tvVar v
+  addTuningParam v_key $ Just size_class
   sOp $ Imp.GetSize (tvVar v) v_key size_class
   pure v
 

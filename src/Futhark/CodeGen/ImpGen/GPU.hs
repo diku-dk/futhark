@@ -131,9 +131,10 @@ opCompiler (Pat [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
 opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblock_size))) = do
   fname <- askFunction
   max_num_tblocks :: TV Int64 <- dPrim "max_num_tblocks"
-  sOp $
-    Imp.GetSize (tvVar max_num_tblocks) (keyWithEntryPoint fname max_num_tblocks_key) $
-      sizeClassWithEntryPoint fname SizeGrid
+  let key = keyWithEntryPoint fname max_num_tblocks_key
+      class_ = sizeClassWithEntryPoint fname SizeGrid
+  addTuningParam key $ Just class_
+  sOp $ Imp.GetSize (tvVar max_num_tblocks) key class_
 
   -- If 'w' is small, we launch fewer blocks than we normally would.
   -- We don't want any idle blocks.
