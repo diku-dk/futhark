@@ -264,7 +264,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-        futhark test -c --backend=c tests --no-tuning
+        futhark test -c --backend=c tests
         make -C tests_lib/c -j
 
   test-multicore:
@@ -412,6 +412,7 @@ jobs:
           futhark test tests \
             --backend=opencl \
             --cache-extension=cache
+            --tuning=tuning_gpu
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
         slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:a100:1 --job-name=fut-opencl-test
 
@@ -432,7 +433,9 @@ jobs:
           pip install numpy pyopencl jsonschema
           module unload cuda
           module load cuda/11.8
-          futhark test tests --no-terminal --backend=pyopencl
+          futhark test tests \
+             --backend=pyopencl \
+             --tuning=tuning_gpu
         slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:a100:1 --job-name=fut-pyopencl-test
 
   test-cuda:
@@ -456,6 +459,7 @@ jobs:
           futhark test tests \
             --backend=cuda \
             --cache-extension=cache \
+            --tuning=tuning_gpu \
             --concurrency=8
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:a100:1 --job-name=fut-cuda-test
@@ -477,7 +481,10 @@ jobs:
         script: |
           set -e
           hostname
-          futhark test tests --no-terminal --backend=hip --concurrency=8
+          futhark test tests --no-terminal \
+            --backend=hip \
+            --tuning=tuning_gpu \
+            --concurrency=8
           source virtualenv/bin/activate
           FUTHARK_BACKEND=hip make -C tests_lib/c -j
 
