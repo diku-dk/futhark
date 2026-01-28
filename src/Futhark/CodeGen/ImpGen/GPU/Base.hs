@@ -1055,6 +1055,7 @@ simpleKernelBlocks max_num_tblocks kernel_size = do
   tblock_size <- dPrim "tblock_size"
   fname <- askFunction
   let tblock_size_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar tblock_size
+  addTuningParam tblock_size_key $ Just Imp.SizeThreadBlock
   sOp $ Imp.GetSize (tvVar tblock_size) tblock_size_key Imp.SizeThreadBlock
   virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `divUp` tvExp tblock_size
   num_tblocks <- dPrimV "num_tblocks" $ virt_num_tblocks `sMin64` max_num_tblocks
