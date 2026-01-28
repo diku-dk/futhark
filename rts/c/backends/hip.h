@@ -433,7 +433,7 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
     opts[i++] = msgprintf("-D%s=%zu", macro_names[j], macro_vals[j]);
   }
 
-  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+  for (int j = 0; j < NUM_TUNING_PARAMS; j++) {
     opts[i++] = msgprintf("-Dset_%s=%d",
                           ctx->cfg->tuning_params[i].var,
                           (int)ctx->cfg->tuning_params[i].set);
