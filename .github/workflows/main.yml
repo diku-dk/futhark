@@ -411,7 +411,7 @@ jobs:
           module load cuda/11.8
           futhark test tests \
             --backend=opencl \
-            --cache-extension=cache
+            --cache-extension=cache \
             --tuning=tuning_gpu
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
         slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:a100:1 --job-name=fut-opencl-test
