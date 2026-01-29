@@ -488,6 +488,7 @@ analyseBasicOp ctx expression pats =
           concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)
         FlatIndex name _ -> varInfoFromNames ctx $ oneName name
         FlatUpdate name _ source -> varInfoFromNames ctx $ namesFromList [name, source]
+        UserParam _name def -> varInfoFromSubExp def
       ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
    in (ctx', mempty)
   where
