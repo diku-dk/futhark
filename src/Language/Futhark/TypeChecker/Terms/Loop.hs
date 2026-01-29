@@ -139,6 +139,8 @@ checkForVariantEscape loc sparams = do
         let fvs = case constraint of
               Constraint t _ -> fvVars $ freeInType $ retType t
               Size (Just e) _ -> fvVars $ freeInExp e
+              HasFields _ fields _ -> foldMap (fvVars . freeInType) fields
+              HasConstrs _ constrs _ -> foldMap (foldMap (fvVars . freeInType)) constrs
               _ -> mempty
             bad_fvs = filter (\fv -> any (areSameSize fv) sparams) (S.toList fvs)
          in case bad_fvs of
