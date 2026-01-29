@@ -55,11 +55,16 @@ def repl_segm_iota [m]
 --
 
 -- Helpers
-let to_i64 (b: bool) : i64 = i64.bool b
+let to_i64 (b: bool) : i64 = if b then 1 else 0
 
 -- Top-level filter function for Structure of Arrays (SoA)
 -- Returns unique arrays (*[]i64)
-def filter_soa [n] (flags: [n]bool) (arr1: [n]i64) (arr2: [n]i64) : (*[]i64, *[]i64) =
+def filter_soa [n]
+    (V: i64)
+    (flags: [n]bool)
+    (arr1: {[n]i64 | \x -> Range x (0,V)})
+    (arr2: {[n]i64 | \x -> Range x (0,V)})
+    : {(*[]i64, *[]i64) | \(y1,y2) -> Range y1 (0,V) && Range y2 (0,V)} =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) flags)
   let new_size = if n > 0 then num_trues[n-1] else 0
   let ranks = map2 (\c i -> if c then i-1 else -1) flags num_trues
@@ -69,11 +74,37 @@ def filter_soa [n] (flags: [n]bool) (arr1: [n]i64) (arr2: [n]i64) : (*[]i64, *[]
   let out2 = scatter out2 ranks arr2
   in (out1, out2)
 
-def remove_duplicates [Q] (V: i64) (q_verts: [Q]i64) (q_parents: [Q]i64): (*[]i64, *[]i64) = 
-  let indexes = iota Q 
+-- def getSmallestPairs_H_as_arg [arraySize]
+--     (nVerts: i64)
+--     (H: [nVerts]i64)
+--     (flat_edges: {[arraySize*2]i64 | \x -> Range x (0, nVerts)})
+--     (flat_edge2Ids: {[arraySize*2]i64 | \x -> Injective x})
+--     : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
+--          Injective new_edges && Injective new_edgeIds
+--       }
+--     =
+--     let cs = map2 (\i j -> H[i] == j) flat_edges flat_edge2Ids
+--     let dummy = 0i64
+--     let (newSize, ys) = filter_by cs flat_edges dummy
+--     let (_, zs) = filter_by cs flat_edge2Ids dummy
+--     in (ys :> [newSize]i64, zs :> [newSize]i64)
+def remove_duplicates [Q]
+    (V: i64)
+    (q_verts: {[Q]i64 | \x -> Range x (0,V)})
+    (q_parents: {[Q]i64 | \x -> Range x (0,V)})
+    : {(*[]i64, *[]i64) | \(verts, parents) ->
+      Injective verts && Injective parents
+    } = 
+  let indexes = iota Q
   let H = hist i64.min Q V q_verts indexes
   let flags = map2 (\i j -> H[i] == j) q_verts indexes
-  in filter_soa flags q_verts q_parents
+  let (verts, parents) = filter_soa V flags q_verts q_parents
+  in (verts, parents)
+  -- TODO
+  -- 1. it should work because indexes is injective (iota) corresponding
+  -- to flat_edge2Ids above. Might have to make indexes an argument though.
+  -- 2. define filter_by cs
+  -- 3. profit ???
 
 def update_parents [V] [Q] (parents: *[V]i64) (q_verts: [Q]i64) (q_parents: [Q]i64): *[V]i64 =
   scatter parents q_verts q_parents
@@ -86,46 +117,52 @@ def make_shape [V] [Q]
     } =
   map (\q -> offsets[q+1] - offsets[q]) queue
 
-def expand [V] [E] [Q]
+def expand_ [V] [E] [Q]
     (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0, V)})
+    (edges: {[E]i64 | \x -> Range x (0,V)})
     (queue: {[Q]i64 | \x -> Range x (0,V)})
+    (shape: [Q]i64)
+    (dummy: {i64 | \x ->
+      -- This property should be annotated directly on shape, but we can't
+      -- because For needs an index function to be bound to shape to infer its
+      -- domain; this won't happen until it's used in the body. I haven't fixed
+      -- this limitation yet.
+      For shape (\i -> Range shape (0, offsets[queue[i]+1] - offsets[queue[i]] + 1))
+    })
     : {(*[]i64, *[]i64) | \_ -> true} =
   -- 1. Calculate vertex degrees
-  let q_shape = map (\q -> offsets[q+1] - offsets[q]) queue
-  let (ids, iotas) = repl_segm_iota q_shape
+  let (ids, iotas) = repl_segm_iota shape
   let q_ids = map (\i -> queue[i]) ids
   let q_offsets = map (\i -> offsets[queue[i]]) ids
-
   -- 2. Generate edges
   let indices = map2 (\offset j -> offset + j) q_offsets iotas
   let q_edges = map (\i -> edges[i]) indices
   in (q_ids, q_edges)
 
+def expand [V] [E] [Q]
+    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
+    (edges: {[E]i64 | \x -> Range x (0,V)})
+    (queue: {[Q]i64 | \x -> Range x (0,V)})
+    : {(*[]i64, *[]i64) | \_ -> true} =
+  -- 1. Calculate vertex degrees
+  let shape = make_shape offsets queue
+  let zero = 0
+  in expand_ offsets edges queue shape zero
+
 def bfs_step [V] [E] [Q]
     (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0, V)})
+    (edges: {[E]i64 | \x -> Range x (0,V)})
     (parents: *[V]i64)
     (queue: {[Q]i64 | \x -> Range x (0,V)})
     : {(*[V]i64, *[]i64) | \_ -> true} =
   let (raw_parents, raw_verts) = expand offsets edges queue
   let valid_flags = map (\v -> parents[v] == -1) raw_verts
-  let (filtered_v, filtered_p) = filter_soa valid_flags raw_verts raw_parents
+  let (filtered_v, filtered_p) = filter_soa V valid_flags raw_verts raw_parents
   let (noDupes_v, noDupes_p) = remove_duplicates V filtered_v filtered_p
   let new_parents = update_parents parents noDupes_v noDupes_p
   in (new_parents, noDupes_v)
 
--- def BFS [V] [E] [Q]
---   (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
---   (edges: {[E]i64 | \x -> Range x (0, V)})
---   (parents: *[V]i64)
---   (queue: [Q]i64)
---   : {[V]i64 | \_ -> true} =
---     let (parents, _) = loop (parents, queue) while length queue > 0 do
---         -- This copy is not needed on the main-branch compiler, but has nothing
---         -- to do with our system; our annotations just haven't been integrated
---         -- fully with the handling of uniqueness types in the type checker,
---         -- meaning we are not able to mark bfs_step's returns unique.
---         let p = copy parents
---         in bfs_step offsets edges p queue
---     in parents
+-- TODO make remove_duplicates return injective arrays. I think maxMatch
+-- can be used as an example.
+-- TODO fix quickhull; adding preconditions to the environment during
+-- checks broke it.
