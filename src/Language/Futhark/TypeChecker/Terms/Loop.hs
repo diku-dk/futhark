@@ -126,6 +126,26 @@ checkForImpossible loc known_before pat_t = do
     problem : _ -> problem
     [] -> pure ()
 
+-- | Check that loop-variant sizes (sparams) do not appear in the type
+-- of the initial loop values, which are bound outside the loop.
+checkForVariantEscape :: Loc -> [VName] -> StructType -> TermTypeM ()
+checkForVariantEscape loc sparams init_t = do
+  areSameSize <- getAreSame
+  let bad_sparams =
+        filter
+          (\v -> any (areSameSize v) sparams)
+          (S.toList $ fvVars $ freeInType init_t)
+  case bad_sparams of
+    v : _ ->
+      typeError (srclocOf loc) mempty $
+        "Initial loop values have type"
+          </> indent 2 (pretty init_t)
+          </> "but this type contains"
+          <+> dquotes (prettyName v)
+          <> ", which is a loop-variant size that changes in the loop body."
+          </> "This is not allowed, as the initial values are bound outside the loop."
+    [] -> pure ()
+
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
@@ -294,6 +314,11 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
                 While cond',
                 loopbody'
               )
+
+  -- Check that loop-variant sizes do not escape into the type of
+  -- values bound outside the loop.
+  loopinit_t <- expTypeFully loopinit'
+  checkForVariantEscape loc sparams (toStruct loopinit_t)
 
   -- dim handling (4)
   wellTypedLoopArg Initial sparams mergepat' loopinit'
