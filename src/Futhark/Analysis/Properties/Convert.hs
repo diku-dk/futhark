@@ -356,10 +356,17 @@ renamingRep actual_args actual_arg_exprs =
 checkPreconditions :: (Pretty u, Pretty (E.Shape dim)) => E.SrcLoc -> E.VName -> [E.PatBase E.Info E.VName (E.TypeBase dim u)] -> ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]]) -> M.Map E.VName (SoP Symbol) -> IndexFnM (M.Map E.VName (SoP Symbol))
 checkPreconditions loc g pats (actual_args, actual_sizes) name_rep = do
   let size_rep = M.fromList $ mconcat actual_sizes
-  foldM_
+  rollbackAlgEnv $ foldM_
     ( \args_in_scope (pat, arg) -> do
         let scope = args_in_scope <> arg
-        checkPatPrecondition scope pat size_rep
+        effects <- checkPatPrecondition scope pat size_rep
+        -- Temporarily add preconditions to the environment so that subsequent
+        -- preconditions can be validated against previous arguments. Example:
+        --   def f (x: | Range x (0..n)) (y: | For y (\i -> P(y[x[i]])))
+        --   def g a b = f a b
+        -- Indexing y[x[i]] is only safe if x's internal Range is in scope.
+        -- No name substitutions because we want to add it on `x`, not g's `a`.
+        forM_ effects $ \effect -> effect (mempty, scope, mempty)
         pure scope
     )
     []
@@ -368,8 +375,8 @@ checkPreconditions loc g pats (actual_args, actual_sizes) name_rep = do
   pure size_rep
   where
     checkPatPrecondition scope pat size_rep = do
-      conds <- getPrecondition pat
-      answers <- forM conds $ \check -> do
+      (preconds, effects) <- unzip <$> getRefinement pat
+      answers <- forM preconds $ \check -> do
         printM 1 $
           "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
         check (size_rep, scope, name_rep)
@@ -380,6 +387,7 @@ checkPreconditions loc g pats (actual_args, actual_sizes) name_rep = do
             <> prettyStr pat
             <> " in context: "
             <> prettyStr scope
+      pure effects
 
 {-
     Construct index function for source expression.
@@ -1199,6 +1207,7 @@ forwardPropertyPrelude f args =
           case justSingleCase res_f of
             Just e -> pure (i, e)
             Nothing -> error $ "Not implemented yet. Lambda must return a single case index function: " <> prettyStr res_f
+        Nothing -> error "inferLambdaIndexFn: known limitation: need to bind arguments to lambdas earlier."
         _ -> error "inferLambdaIndexFn: invalid array shape"
 
     -- Map filter and partition lambdas over indices of X to infer their
