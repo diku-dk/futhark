@@ -31,7 +31,7 @@ import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justConstant, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (./.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justAffine, justConstant, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (./.), (~*~), (~+~), (~-~))
 import Futhark.Util.Pretty (Pretty)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -1544,14 +1544,24 @@ zipArgs' loc formal_args actual_args = do
         array_shape <- shapeOf pat_type
         unless (length array_shape == rank f) . error $
           errorMsg loc "Internal error: parameter and argument sizes do not align."
-        let size_vars = map getVName array_shape
+        let size_vars = map getSizeVarAndConst array_shape
         sizes <- mapM (rewrite . dimSize) (shape f)
-        pure . catMaybes $ zipWith (\sz -> fmap (,sz)) sizes size_vars
+        pure . catMaybes $
+          zipWith
+            ( \n size_var ->
+                case size_var of
+                  Just (vn, 0) -> Just (vn, n)
+                  Just (vn, c) -> Just (vn, n .-. int2SoP c)
+                  Nothing -> Nothing
+            )
+            sizes
+            size_vars
 
   pure (aligned_args, aligned_sizes)
   where
-    getVName x
-      | Just (Var vn) <- justSym x = Just vn
+    -- We support only sizes of the form [n+1] for now.
+    getSizeVarAndConst x
+      | Just (1, Var vn, c) <- justAffine x = Just (vn, c)
       | otherwise = Nothing
 
 substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
