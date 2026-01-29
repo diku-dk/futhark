@@ -43,7 +43,6 @@ compileProg version prog = do
     GC.compileProg
       "wasm"
       version
-      mempty
       operations
       generateBoilerplate
       ""

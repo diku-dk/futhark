@@ -125,10 +125,10 @@ genericOptions =
                 if (equals != NULL) {
                   *equals = 0;
                   if (futhark_context_config_set_tuning_param(cfg, name, (size_t)value) != 0) {
-                    futhark_panic(1, "Unknown size: %s\n", name);
+                    futhark_panic(1, "Unknown tuning parameter: %s\n", name);
                   }
                 } else {
-                  futhark_panic(1, "Invalid argument for size option: %s\n", optarg);
+                  futhark_panic(1, "Invalid argument for --parameter option: %s\n", optarg);
                 }}|]
       },
     Option

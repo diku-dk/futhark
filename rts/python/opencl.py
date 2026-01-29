@@ -183,25 +183,25 @@ def initialise_opencl_object(
     )
     self.failure_is_an_option = np.int32(0)
 
-    if "default_group_size" in sizes:
-        default_group_size = sizes["default_group_size"]
-        del sizes["default_group_size"]
+    if "default_group_size" in user_sizes:
+        default_group_size = user_sizes["default_group_size"]
+        del user_sizes["default_group_size"]
 
-    if "default_num_groups" in sizes:
-        default_num_groups = sizes["default_num_groups"]
-        del sizes["default_num_groups"]
+    if "default_num_groups" in user_sizes:
+        default_num_groups = user_sizes["default_num_groups"]
+        del user_sizes["default_num_groups"]
 
-    if "default_tile_size" in sizes:
-        default_tile_size = sizes["default_tile_size"]
-        del sizes["default_tile_size"]
+    if "default_tile_size" in user_sizes:
+        default_tile_size = user_sizes["default_tile_size"]
+        del user_sizes["default_tile_size"]
 
-    if "default_reg_tile_size" in sizes:
-        default_reg_tile_size = sizes["default_reg_tile_size"]
-        del sizes["default_reg_tile_size"]
+    if "default_reg_tile_size" in user_sizes:
+        default_reg_tile_size = user_sizes["default_reg_tile_size"]
+        del user_sizes["default_reg_tile_size"]
 
-    if "default_threshold" in sizes:
-        default_threshold = sizes["default_threshold"]
-        del sizes["default_threshold"]
+    if "default_threshold" in user_sizes:
+        default_threshold = user_sizes["default_threshold"]
+        del user_sizes["default_threshold"]
 
     default_group_size_set = default_group_size != None
     default_tile_size_set = default_tile_size != None
@@ -242,19 +242,13 @@ def initialise_opencl_object(
             )
         default_tile_size = max_tile_size
 
-    for k, v in user_sizes.items():
-        if k in all_sizes:
-            all_sizes[k]["value"] = v
-        else:
-            raise Exception(
-                "Unknown size: {}\nKnown sizes: {}".format(
-                    k, " ".join(all_sizes.keys())
-                )
-            )
+    set_user_params(all_sizes, user_sizes)
 
-    self.sizes = {}
     for k, v in all_sizes.items():
-        if v["class"] == "thread_block_size":
+        if v["class"] is None:
+            max_value = None
+            default_value = None
+        elif v["class"] == "thread_block_size":
             max_value = max_group_size
             default_value = default_group_size
         elif v["class"] == "grid_size":
@@ -279,16 +273,16 @@ def initialise_opencl_object(
             # Bespoke sizes have no limit or default.
             max_value = None
         if v["value"] == None:
-            self.sizes[k] = default_value
+            self.sizes[k]["value"] = default_value
         elif max_value != None and v["value"] > max_value:
             sys.stderr.write(
                 "Note: Device limits {} to {} (down from {}\n".format(
                     k, max_value, v["value"]
                 )
             )
-            self.sizes[k] = max_value
+            self.sizes[k]["value"] = max_value
         else:
-            self.sizes[k] = v["value"]
+            self.sizes[k]["value"] = v["value"]
 
     # XXX: we perform only a subset of z-encoding here.  Really, the
     # compiler should provide us with the variables to which
@@ -300,16 +294,23 @@ def initialise_opencl_object(
             "-D{}={}".format("max_thread_block_size", max_group_size)
         ]
 
-        build_options += [
-            "-D{}={}".format(
+        for s, v in self.sizes.items():
+            z = (
                 s.replace("z", "zz")
                 .replace(".", "zi")
                 .replace("#", "zh")
-                .replace("'", "zq"),
-                v,
+                .replace("'", "zq")
             )
-            for (s, v) in self.sizes.items()
-        ]
+            if v["value"] is None:
+                build_options += [
+                    "-Dval_{}=0".format(z),
+                    "-Dset_{}=false".format(z),
+                ]
+            else:
+                build_options += [
+                    "-Dval_{}={}".format(z, v["value"]),
+                    "-Dset_{}=true".format(z),
+                ]
 
         build_options += [
             "-D{}={}".format(s, to_c_str_rep(f())) for (s, f) in constants

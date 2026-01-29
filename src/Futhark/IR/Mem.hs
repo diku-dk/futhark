@@ -916,7 +916,7 @@ checkMemInfo ::
   MemInfo SubExp u MemBind ->
   TC.TypeM rep ()
 checkMemInfo _ (MemPrim _) = pure ()
-checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int64]) d
+checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require (Prim int64)) d
 checkMemInfo _ (MemMem _) = pure ()
 checkMemInfo _ (MemAcc acc ispace ts u) =
   TC.checkType $ Acc acc ispace ts u

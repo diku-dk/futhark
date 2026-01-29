@@ -807,6 +807,14 @@ commandLineOptions =
       "Pass this option to the compiler (or typechecker if in -t mode).",
     Option
       []
+      ["tuning"]
+      ( ReqArg
+          (\s -> Right $ changeProgConfig $ \config -> config {configTuning = Just s})
+          "EXTENSION"
+      )
+      "Look for tuning files with this extension (defaults to .tuning).",
+    Option
+      []
       ["no-tuning"]
       (NoArg $ Right $ changeProgConfig $ \config -> config {configTuning = Nothing})
       "Do not load tuning files.",

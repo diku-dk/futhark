@@ -5,7 +5,6 @@ module Futhark.CodeGen.Backends.GenericPython
   ( compileProg,
     CompilerMode,
     Constructor (..),
-    emptyConstructor,
     compileName,
     compileVar,
     compileDim,
@@ -36,7 +35,9 @@ module Futhark.CodeGen.Backends.GenericPython
     atInit,
     collect',
     collect,
+    getParamByKey,
     simpleCall,
+    sizeClassesToPython,
   )
 where
 
@@ -272,7 +273,7 @@ standardOptions =
       { optionLongName = "tuning",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "open",
-        optionAction = [Exp $ simpleCall "read_tuning_file" [Var "sizes", Var "optarg"]]
+        optionAction = [Exp $ simpleCall "read_tuning_file" [Var "user_sizes", Var "optarg"]]
       },
     -- Does not actually do anything for Python backends.
     Option
@@ -369,10 +370,6 @@ opaqueDefs (Imp.Functions funs) =
 -- constructor, although it can be vacuous.
 data Constructor = Constructor [String] [PyStmt]
 
--- | A constructor that takes no arguments and does nothing.
-emptyConstructor :: Constructor
-emptyConstructor = Constructor ["self"] [Pass]
-
 constructorToFunDef :: Constructor -> [PyStmt] -> PyFunDef
 constructorToFunDef (Constructor params body) at_init =
   Def "__init__" params $ body <> at_init
@@ -396,7 +393,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
   pure . prettyText . PyProg $
     imports
       ++ [ Import "argparse" Nothing,
-           Assign (Var "sizes") $ Dict []
+           Assign (Var "user_sizes") $ Dict []
          ]
       ++ defines
       ++ [ Escape valuesPy,
@@ -408,7 +405,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
          ]
       ++ prog'
   where
-    Imp.Definitions _types consts (Imp.Functions funs) = prog
+    Imp.Definitions params _types consts (Imp.Functions funs) = prog
     compileProg' = withConstantSubsts consts $ do
       compileConstants consts
 
@@ -416,6 +413,13 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
       at_inits <- gets compInit
 
       let constructor' = constructorToFunDef constructor at_inits
+          paramAssign (v, (c, _)) =
+            ( String (nameToText v),
+              Dict
+                [ (String "class", String $ maybe "user" prettyText c),
+                  (String "value", None)
+                ]
+            )
 
       case mode of
         ToLibrary -> do
@@ -424,11 +428,17 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
           pure
             [ ClassDef $
                 Class class_name $
-                  Assign (Var "entry_points") (Dict entry_point_types)
-                    : Assign
+                  [ Assign
+                      (Var "entry_points")
+                      (Dict entry_point_types),
+                    Assign
                       (Var "opaques")
-                      (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads))
-                    : map FunDef (constructor' : definitions ++ entry_points)
+                      (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads)),
+                    Assign
+                      (Var "sizes")
+                      (Dict $ map paramAssign $ M.toList params)
+                  ]
+                    <> map FunDef (constructor' : definitions ++ entry_points)
             ]
         ToServer -> do
           (entry_points, entry_point_types) <-
@@ -437,11 +447,17 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
             parse_options_server
               ++ [ ClassDef
                      ( Class class_name $
-                         Assign (Var "entry_points") (Dict entry_point_types)
-                           : Assign
+                         [ Assign
+                             (Var "entry_points")
+                             (Dict entry_point_types),
+                           Assign
                              (Var "opaques")
-                             (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads))
-                           : map FunDef (constructor' : definitions ++ entry_points)
+                             (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads)),
+                           Assign
+                             (Var "sizes")
+                             (Dict $ map paramAssign $ M.toList params)
+                         ]
+                           <> map FunDef (constructor' : definitions ++ entry_points)
                      ),
                    Assign
                      (Var "server")
@@ -456,8 +472,10 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
             parse_options_executable
               ++ ClassDef
                 ( Class class_name $
-                    map FunDef $
-                      constructor' : definitions
+                    Assign
+                      (Var "sizes")
+                      (Dict $ map paramAssign $ M.toList params)
+                      : map FunDef (constructor' : definitions)
                 )
               : classinst
               : map FunDef entry_point_defs
@@ -1248,6 +1266,9 @@ compileCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
       doRead src_i = generateRead src' src_i t srcspace
   compileCopyWith shape doWrite dst_lmad doRead src_lmad
 
+getParamByKey :: Name -> PyExp
+getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+
 compileCode :: Imp.Code op -> CompilerM op s ()
 compileCode Imp.DebugPrint {} =
   pure ()
@@ -1378,6 +1399,14 @@ compileCode (Imp.Read x src (Imp.Count iexp) pt space _) = do
   src' <- compileVar src
   stm . Assign x' =<< generateRead src' iexp' pt space
 compileCode Imp.Skip = pure ()
+compileCode (Imp.GetUserParam v name def) = do
+  v' <- compileVar v
+  def' <- compileExp $ untyped def
+  stm $
+    If
+      (BinOp "==" (Index (getParamByKey name) (IdxExp $ String "value")) None)
+      [Assign v' def']
+      [Assign v' $ Index (getParamByKey name) (IdxExp $ String "value")]
 
 lmadcopyCPU :: DoCopy op s
 lmadcopyCPU t shape dst (dstoffset, dststride) src (srcoffset, srcstride) =
@@ -1391,3 +1420,19 @@ lmadcopyCPU t shape dst (dstoffset, dststride) src (srcoffset, srcstride) =
       List (map unCount srcstride),
       List (map unCount shape)
     ]
+
+sizeClassesToPython :: Imp.ParamMap -> PyExp
+sizeClassesToPython = Dict . map f . M.toList
+  where
+    f (size_name, (size_class, _)) =
+      ( String $ prettyText size_name,
+        Dict
+          [ (String "class", maybe None (String . prettyText) size_class),
+            ( String "value",
+              maybe
+                None
+                (maybe None (Integer . fromIntegral) . Imp.sizeDefault)
+                size_class
+            )
+          ]
+      )

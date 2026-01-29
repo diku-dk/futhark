@@ -7,7 +7,6 @@ module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 where
 
 import Control.Monad.Identity
-import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericPython qualified as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
@@ -20,7 +19,6 @@ import Futhark.CodeGen.ImpCode.OpenCL
     ParamMap,
     PrimType (..),
     errorMsgArgTypes,
-    sizeDefault,
     untyped,
   )
 import Futhark.CodeGen.OpenCL.Heuristics
@@ -31,16 +29,25 @@ errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
 
 getParamByKey :: Name -> PyExp
-getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+getParamByKey key =
+  Index
+    (Index (Var "self.sizes") (IdxExp $ String $ prettyText key))
+    (IdxExp $ String "value")
+
+compileConstExp :: KernelConstExp -> PyExp
+compileConstExp e = runIdentity $ Py.compilePrimExp (pure . kernelConstToExp) e
 
 kernelConstToExp :: KernelConst -> PyExp
 kernelConstToExp (SizeConst key _) =
   getParamByKey key
 kernelConstToExp (SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
-
-compileConstExp :: KernelConstExp -> PyExp
-compileConstExp e = runIdentity $ Py.compilePrimExp (pure . kernelConstToExp) e
+kernelConstToExp (SizeUserParam name def) =
+  Call
+    (Field (Var "self.user_params") "get")
+    [ Arg $ String (nameToText name),
+      Arg $ Var $ Py.compileName def
+    ]
 
 -- | Python code (as a string) that calls the
 -- @initiatialize_opencl_object@ procedure.  Should be put in the
@@ -66,7 +73,7 @@ program = initialise_opencl_object(self,
                                    default_threshold=default_threshold,
                                    size_heuristics=size_heuristics,
                                    required_types=$types',
-                                   user_sizes=sizes,
+                                   user_sizes=user_sizes,
                                    all_sizes=$sizes',
                                    constants=constants)
 $assign'
@@ -75,7 +82,7 @@ $assign'
     assign' = T.pack assign
     size_heuristics = prettyText $ sizeHeuristicsToPython sizeHeuristicsTable
     types' = prettyText $ map (show . prettyString) types -- Looks enough like Python.
-    sizes' = prettyText $ sizeClassesToPython sizes
+    sizes' = prettyText $ Py.sizeClassesToPython sizes
     max_num_args = prettyText $ foldl max 0 $ map (errorMsgNumArgs . failureError) failures
     failure_msgs = prettyText $ List $ map formatFailure failures
     onConstant (name, e) =
@@ -97,20 +104,6 @@ formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
 
     onPart (ErrorString s) = formatEscape $ T.unpack s
     onPart ErrorVal {} = "{}"
-
-sizeClassesToPython :: ParamMap -> PyExp
-sizeClassesToPython = Dict . map f . M.toList
-  where
-    f (size_name, (size_class, _)) =
-      ( String $ prettyText size_name,
-        Dict
-          [ (String "class", String $ prettyText size_class),
-            ( String "value",
-              maybe None (Integer . fromIntegral) $
-                sizeDefault size_class
-            )
-          ]
-      )
 
 sizeHeuristicsToPython :: [SizeHeuristic] -> PyExp
 sizeHeuristicsToPython = List . map f

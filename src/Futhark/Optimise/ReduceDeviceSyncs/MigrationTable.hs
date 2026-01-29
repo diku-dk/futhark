@@ -502,6 +502,9 @@ graphStm stm = do
     -- END
     BasicOp UpdateAcc {} ->
       graphUpdateAcc (one bs) e
+    BasicOp (UserParam _name def) -> do
+      graphSimple bs e
+      one bs `reusesSubExp` def
     Apply fn _ _ _ ->
       graphApply fn bs e
     Match ses cases defbody _ ->

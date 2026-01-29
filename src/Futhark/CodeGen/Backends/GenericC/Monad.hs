@@ -240,7 +240,9 @@ data Operations op s = Operations
     -- pointers.
     opsFatMemory :: Bool,
     -- | Code to bracket critical sections.
-    opsCritical :: ([C.BlockItem], [C.BlockItem])
+    opsCritical :: ([C.BlockItem], [C.BlockItem]),
+    -- | An expression for the param value and one for whether it is set.
+    opsGetParam :: Name -> (C.Exp, C.Exp)
   }
 
 freeAllocatedMem :: CompilerM op s [C.BlockItem]

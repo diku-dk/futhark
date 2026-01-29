@@ -267,6 +267,8 @@ instance Pretty BasicOp where
       update_acc_str = case safety of
         Safe -> "update_acc"
         Unsafe -> "update_acc_unsafe"
+  pretty (UserParam name def) =
+    "user_param" <> apply [pretty name, pretty def]
 
 instance (Pretty a) => Pretty (ErrorMsg a) where
   pretty (ErrorMsg parts) = braces $ align $ commasep $ map p parts

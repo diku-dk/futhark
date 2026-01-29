@@ -440,6 +440,9 @@ data BasicOp
     -- 'Safe', perform a run-time bounds check and ignore the write if
     -- out of bounds (scatter-like).
     UpdateAcc Safety VName [SubExp] [SubExp]
+  | -- | Value of a user-defined parameter (an implicit value provided at
+    -- program startup), including a default if no value is provided.
+    UserParam Name SubExp
   deriving (Eq, Ord, Show)
 
 -- | The input to a 'WithAcc' construct.  Comprises the index space of
