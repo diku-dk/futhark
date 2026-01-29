@@ -1170,7 +1170,7 @@ forwardPropertyPrelude f args =
           (i, prop) <- inferLambdaIndexFn x (param_i, lam_p)
           case justSym prop of
             Just (Prop p) ->
-               pure (IndexFn [] $ cases [(Bool True, pr $ Property.For x (Property.Predicate i p))])
+              pure (IndexFn [] $ cases [(Bool True, pr $ Property.For x (Property.Predicate i p))])
             val -> error $ "Body of For predicate must return a single property, got: " <> prettyStr val
     _ -> do
       error $
@@ -1750,8 +1750,8 @@ shapeOfTE (E.TEArray dim inner _) = do
   rest <- shapeOfTE inner
   -- d is [IndexFn]. We expect a scalar size.
   let s = case d of
-            [IndexFn [] cs] | Just x <- justSingleCase (IndexFn [] cs) -> x
-            _ -> error "shapeOfTE: expected scalar size"
+        [IndexFn [] cs] | Just x <- justSingleCase (IndexFn [] cs) -> x
+        _ -> error "shapeOfTE: expected scalar size"
   pure (s : rest)
   where
     dimExp (E.SizeExp e _) = e
@@ -1766,8 +1766,8 @@ toTupleOfArraysTE (E.TEArray _ inner _) = toTupleOfArraysTE inner
 toTupleOfArraysTE (E.TEParens te _) = toTupleOfArraysTE te
 toTupleOfArraysTE (E.TERefine te _ _) = toTupleOfArraysTE te
 toTupleOfArraysTE (E.TETuple tes _) = do
-  (i, te) <- zip [0..] tes
-  map (i:) (toTupleOfArraysTE te)
+  (i, te) <- zip [0 ..] tes
+  map (i :) (toTupleOfArraysTE te)
 toTupleOfArraysTE (E.TERecord {}) = error "Records not supported in toTupleOfArraysTE"
 toTupleOfArraysTE _ = [[]] -- Scalar
 
