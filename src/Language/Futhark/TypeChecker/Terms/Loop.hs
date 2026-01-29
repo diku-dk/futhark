@@ -137,7 +137,7 @@ checkForVariantEscape loc sparams = do
   -- Check each remaining constraint to see if it references any sparams
   let checkConstraint (v, (_, constraint)) =
         let fvs = case constraint of
-              Constraint t _ -> fvVars $ freeInType $ toStruct t
+              Constraint t _ -> fvVars $ freeInType $ retType t
               Size (Just e) _ -> fvVars $ freeInExp e
               _ -> mempty
             bad_fvs = filter (\fv -> any (areSameSize fv) sparams) (S.toList fvs)
