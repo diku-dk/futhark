@@ -21,9 +21,9 @@ import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
 import Futhark.Util (showText)
-import Language.Futhark.Parser.Monad ( SyntaxError(SyntaxError) )
-import Futhark.Util.Pretty ( prettyText )
-import Language.Futhark.Core ( locText )
+import Futhark.Util.Pretty (prettyText)
+import Language.Futhark.Core (locText)
+import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
 import Language.LSP.Protocol.Lens (HasUri (uri))
 import Language.LSP.Protocol.Message
 import Language.LSP.Protocol.Types
@@ -127,8 +127,8 @@ onDocumentFormattingHandler =
                 _end =
                   -- TODO: Assumes @PositionEncodingKind_UTF8@
                   Position
-                    -- defaults back to real lines, as documented in @lsp-types@
-                    { _line = maxBound,
+                    { -- defaults back to real lines, as documented in @lsp-types@
+                      _line = maxBound,
                       _character = maxBound
                     }
               }

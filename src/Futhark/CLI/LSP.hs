@@ -14,6 +14,23 @@ import Language.LSP.Protocol.Types
     type (|?) (InR),
   )
 import Language.LSP.Server
+  ( Options (optTextDocumentSync),
+    ServerDefinition
+      ( ServerDefinition,
+        configSection,
+        defaultConfig,
+        doInitialize,
+        interpretHandler,
+        onConfigChange,
+        options,
+        parseConfig,
+        staticHandlers
+      ),
+    defaultOptions,
+    runLspT,
+    runServer,
+    type (<~>) (Iso),
+  )
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
