@@ -126,6 +126,30 @@ checkForImpossible loc known_before pat_t = do
     problem : _ -> problem
     [] -> pure ()
 
+-- Check if any sparams have reduced levels, which indicates they escaped the
+-- loop scope and got constrained by something at a lower (outer) level. This
+-- means they cannot actually be variant across the loop.
+checkForEscaped :: SrcLoc -> M.Map VName Level -> [VName] -> TermTypeM ()
+checkForEscaped loc initial_levels sparams = do
+  cs <- getConstraints
+  let checkSparamLevel sparam = do
+        let current_level = fst <$> M.lookup sparam cs
+            original_level = M.lookup sparam initial_levels
+        case (original_level, current_level) of
+          (Just orig, Just curr)
+            | curr < orig ->
+                Just
+                  . typeError loc mempty
+                  . withIndexLink "loop-variant-escape"
+                  $ "Loop-variant size"
+                    <+> "has escaped into type that occurs outside of loop."
+                    </> "This is likely because the loop body uses a variable whose type"
+                    </> "depends on the loop parameter."
+          _ -> Nothing
+  case mapMaybe checkSparamLevel sparams of
+    problem : _ -> problem
+    [] -> pure ()
+
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
@@ -177,6 +201,11 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
   let new_dims_to_initial_dim = M.toList new_dims_map
       new_dims = map fst new_dims_to_initial_dim
 
+  -- Save the initial levels of new_dims for later checking
+  initial_levels <- do
+    cs <- getConstraints
+    pure $ M.fromList [(v, lvl) | v <- new_dims, Just (lvl, _) <- [M.lookup v cs]]
+
   -- dim handling (2)
   let checkLoopReturnSize looppat' loopbody' = do
         loopbody_t <- expTypeFully loopbody'
@@ -218,6 +247,8 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
 
         let (init_substs, sparams) =
               execState (matchDims onDims loop_t' loopbody_t') mempty
+
+        checkForEscaped loc initial_levels sparams
 
         -- Make sure that any of new_dims that are invariant will be
         -- replaced with the invariant size in the loop body.  Failure
