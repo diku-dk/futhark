@@ -9,17 +9,18 @@ import Colog.Core (logStringStderr, (<&))
 import Control.Lens ((^.))
 import Control.Monad.Except (MonadError (throwError), liftEither)
 import Control.Monad.Trans (lift)
-import Control.Monad.Trans.Except (runExceptT)
+import Control.Monad.Trans.Except (runExcept, runExceptT)
 import Data.Aeson.Types (Value (Array, String))
 import Data.Bifunctor (bimap, first)
 import Data.Function ((&))
 import Data.IORef (IORef)
 import Data.Proxy (Proxy (..))
+import Data.Text (Text)
 import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
 import Futhark.Fmt.Printer (fmtToText)
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
-import Futhark.LSP.EvalLenses (evalLensesFor)
+import Futhark.LSP.Lenses (evalLensesFor, resolveCodeLens)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
 import Futhark.Util (showText)
@@ -28,20 +29,8 @@ import Language.Futhark.Core (locText)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
 import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), params)
 import Language.LSP.Protocol.Message
-  ( SMethod
-      ( SMethod_CustomMethod,
-        SMethod_Initialized,
-        SMethod_TextDocumentCodeLens,
-        SMethod_TextDocumentDefinition,
-        SMethod_TextDocumentDidChange,
-        SMethod_TextDocumentDidClose,
-        SMethod_TextDocumentDidOpen,
-        SMethod_TextDocumentDidSave,
-        SMethod_TextDocumentFormatting,
-        SMethod_TextDocumentHover,
-        SMethod_WorkspaceCodeLensRefresh,
-        SMethod_WorkspaceDidChangeConfiguration
-      ),
+  ( Method (..),
+    SMethod (..),
     TNotificationMessage (TNotificationMessage),
     TRequestMessage (TRequestMessage),
     TResponseError (TResponseError, _code, _message, _xdata),
@@ -52,7 +41,6 @@ import Language.LSP.Protocol.Types
     Definition (Definition),
     DefinitionParams (DefinitionParams),
     DidChangeTextDocumentParams (DidChangeTextDocumentParams),
-    DidOpenTextDocumentParams (..),
     DidSaveTextDocumentParams (DidSaveTextDocumentParams),
     DocumentFormattingParams (DocumentFormattingParams),
     ErrorCodes (ErrorCodes_InvalidParams, ErrorCodes_InvalidRequest, ErrorCodes_ParseError),
@@ -66,7 +54,7 @@ import Language.LSP.Protocol.Types
     uriToFilePath,
     type (|?) (..),
   )
-import Language.LSP.Server (Handlers, LspM, getVirtualFile, notificationHandler, requestHandler, sendRequest)
+import Language.LSP.Server (Handlers, LspM, getVirtualFile, notificationHandler, requestHandler)
 import Language.LSP.VFS (file_text)
 
 onInitializeHandler :: Handlers (LspM ())
@@ -121,14 +109,7 @@ onDocumentChangeHandler state_mvar =
 -- Some clients (Eglot) sends open/close events whether we want them
 -- or not, so we better be prepared to ignore them.
 onDocumentOpenHandler :: Handlers (LspM ())
-onDocumentOpenHandler = notificationHandler SMethod_TextDocumentDidOpen $ \message -> do
-  -- discards the lsp-id and the result
-  lspId <- sendRequest SMethod_WorkspaceCodeLensRefresh Nothing $ \r -> do
-    logStringStderr <& ("CodeLens Refresh got result: " ++ show r)
-
-  logStringStderr <& ("Sent CodeLens Refresh with id: " ++ show lspId)
-
-  pure ()
+onDocumentOpenHandler = notificationHandler SMethod_TextDocumentDidOpen $ \_ -> pure ()
 
 onDocumentCloseHandler :: Handlers (LspM ())
 onDocumentCloseHandler = notificationHandler SMethod_TextDocumentDidClose $ \_msg -> pure ()
@@ -209,7 +190,7 @@ onDocumentCodeLenses =
   requestHandler SMethod_TextDocumentCodeLens $ \request respond ->
     let textDocUri = request ^. (params . textDocument . uri)
      in do
-          logStringStderr <& ("textDocument/CodeLens for" ++ show textDocUri)
+          logStringStderr <& ("textDocument/CodeLens for " ++ show textDocUri)
           eitherLenses <- evalLensesFor textDocUri
           respond $ bimap failure success eitherLenses
   where
@@ -223,6 +204,22 @@ onDocumentCodeLenses =
           _code = InR ErrorCodes_InvalidRequest
         }
 
+onDocumentCodeLensResolve :: Handlers (LspM ())
+onDocumentCodeLensResolve =
+  requestHandler SMethod_CodeLensResolve $ \request respond ->
+    let codeLens = request ^. params
+     in respond
+          . first failure
+          $ runExcept (resolveCodeLens codeLens)
+  where
+    failure :: Text -> TResponseError Method_CodeLensResolve
+    failure text =
+      TResponseError
+        { _xdata = Nothing,
+          _message = text,
+          _code = InR ErrorCodes_InvalidParams
+        }
+
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
@@ -233,6 +230,7 @@ handlers state_mvar _ =
       onDocumentOpenHandler,
       onDocumentCloseHandler,
       onDocumentCodeLenses,
+      onDocumentCodeLensResolve,
       onDocumentFormattingHandler,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
