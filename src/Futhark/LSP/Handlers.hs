@@ -193,6 +193,7 @@ onDocumentCodeLenses =
      in do
           logStringStderr <& ("textDocument/CodeLens for " ++ show textDocUri)
           eitherLenses <- evalLensesFor textDocUri
+          logStringStderr <& ("CodeLenses are: " ++ show eitherLenses)
           respond $ bimap failure success eitherLenses
   where
     success :: [CodeLens] -> [CodeLens] |? Null
@@ -209,9 +210,11 @@ onDocumentCodeLensResolve :: Handlers (LspM ())
 onDocumentCodeLensResolve =
   requestHandler SMethod_CodeLensResolve $ \request respond ->
     let codeLens = request ^. params
-     in respond
-          . first failure
-          $ runExcept (resolveCodeLens codeLens)
+     in do
+          logStringStderr <& ("Resolving Code Lens: " ++ show codeLens)
+          let result = runExcept $ resolveCodeLens codeLens
+          logStringStderr <& ("Code lens resolved to: " ++ show result)
+          respond . first failure $ result
   where
     failure :: Text -> TResponseError Method_CodeLensResolve
     failure text =

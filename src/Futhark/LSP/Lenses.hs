@@ -82,13 +82,12 @@ evalLensesFor file_uri = runExceptT $ do
       CodeLens
         { _command = Nothing,
           _data_ =
-            Just $
-              Aeson.toJSON
-                EvalLensData
-                  { cldtextDocument = file_uri,
-                    cldLine = i,
-                    cldComment = text
-                  },
+            Just . Aeson.toJSON . EvalLensPayload $
+              EvalLensData
+                { cldtextDocument = file_uri,
+                  cldLine = i,
+                  cldComment = text
+                },
           _range =
             Range
               { _start = Position {_line = i, _character = 0},
