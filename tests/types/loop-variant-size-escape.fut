@@ -1,6 +1,6 @@
 -- Loop-variant sizes should not escape into types of values bound outside the loop.
 -- ==
--- error: loop-variant size
+-- error: Loop parameter
 
 let grow_dim [h]  (m: [h]f64): []f64 =
   map (\i -> 0.0) (iota (h + 1))
