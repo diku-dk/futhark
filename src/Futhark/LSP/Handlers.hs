@@ -125,7 +125,6 @@ onDocumentFormattingHandler =
                       _character = 0
                     },
                 _end =
-                  -- TODO: Assumes @PositionEncodingKind_UTF8@
                   Position
                     { -- defaults back to real lines, as documented in @lsp-types@
                       _line = maxBound,
