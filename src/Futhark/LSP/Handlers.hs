@@ -19,6 +19,7 @@ import Data.Text (Text)
 import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
 import Futhark.Fmt.Printer (fmtToText)
+import Futhark.LSP.Command qualified as Command
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
 import Futhark.LSP.Lenses (evalLensesFor, resolveCodeLens)
 import Futhark.LSP.State (State (..))
@@ -27,7 +28,7 @@ import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
-import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), params)
+import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), arguments, command, params)
 import Language.LSP.Protocol.Message
   ( Method (..),
     SMethod (..),
@@ -220,6 +221,21 @@ onDocumentCodeLensResolve =
           _code = InR ErrorCodes_InvalidParams
         }
 
+onWorkspaceExecuteCommandHandler :: Handlers (LspM ())
+onWorkspaceExecuteCommandHandler =
+  requestHandler SMethod_WorkspaceExecuteCommand $ \request respond ->
+    let args = request ^. params
+     in do
+          result <- runExceptT $ Command.execute (args ^. command) (args ^. arguments)
+          respond $ bimap (uncurry failure) (const $ InR Null) result
+  where
+    failure message err =
+      TResponseError
+        { _xdata = Nothing,
+          _message = message,
+          _code = err
+        }
+
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
@@ -237,5 +253,6 @@ handlers state_mvar _ =
       onDocumentFocusHandler state_mvar,
       goToDefinitionHandler state_mvar,
       onHoverHandler state_mvar,
-      onWorkspaceDidChangeConfiguration state_mvar
+      onWorkspaceDidChangeConfiguration state_mvar,
+      onWorkspaceExecuteCommandHandler
     ]
