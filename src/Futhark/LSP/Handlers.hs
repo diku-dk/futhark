@@ -1,21 +1,34 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 -- | The handlers exposed by the language server.
 module Futhark.LSP.Handlers (handlers) where
 
 import Colog.Core (logStringStderr, (<&))
 import Control.Lens ((^.))
+import Control.Monad.Except (MonadError (throwError), liftEither)
+import Control.Monad.Trans (lift)
+import Control.Monad.Trans.Except (runExceptT)
 import Data.Aeson.Types (Value (Array, String))
+import Data.Bifunctor (first)
+import Data.Function ((&))
 import Data.IORef
 import Data.Proxy (Proxy (..))
+import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
+import Futhark.Fmt.Printer (fmtToText)
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
+import Futhark.Util (showText)
+import Futhark.Util.Pretty (prettyText)
+import Language.Futhark.Core (locText)
+import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
 import Language.LSP.Protocol.Lens (HasUri (uri))
 import Language.LSP.Protocol.Message
 import Language.LSP.Protocol.Types
-import Language.LSP.Server (Handlers, LspM, notificationHandler, requestHandler)
+import Language.LSP.Server (Handlers, LspM, getVirtualFile, notificationHandler, requestHandler)
+import Language.LSP.VFS (file_text)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
@@ -81,6 +94,70 @@ onWorkspaceDidChangeConfiguration _state_mvar =
   notificationHandler SMethod_WorkspaceDidChangeConfiguration $ \_ ->
     logStringStderr <& "WorkspaceDidChangeConfiguration"
 
+onDocumentFormattingHandler :: Handlers (LspM ())
+onDocumentFormattingHandler =
+  requestHandler SMethod_TextDocumentFormatting $ \message report ->
+    let TRequestMessage _ _ _ formattingParams = message
+        DocumentFormattingParams _progressToken textDoc _opts = formattingParams
+        fileUri = textDoc ^. uri
+     in do
+          logStringStderr <& ("Formatting: " ++ show (textDoc ^. uri))
+          result <- runExceptT $ do
+            virtualFile <- getVirtualFile' fileUri
+            let fileText = R.toText $ virtualFile ^. file_text
+            formattedText <- fmtToText' (show fileUri) fileText
+            pure $
+              if formattedText == fileText
+                then InR Null
+                else InL [fullTextEdit formattedText]
+
+          logStringStderr <& show result
+          report result
+  where
+    fullTextEdit newText =
+      TextEdit
+        { _newText = newText,
+          _range =
+            Range
+              { _start =
+                  Position
+                    { _line = 0,
+                      _character = 0
+                    },
+                _end =
+                  Position
+                    { -- defaults back to real lines, as documented in @lsp-types@
+                      _line = maxBound,
+                      _character = maxBound
+                    }
+              }
+        }
+
+    fmtToText' fname ftext =
+      fmtToText fname ftext
+        & first syntaxErrorResponse
+        & liftEither
+
+    getVirtualFile' fileUri = do
+      maybeFile <- lift $ getVirtualFile (toNormalizedUri fileUri)
+      case maybeFile of
+        Nothing -> throwError $ noSuchDocumentResponse fileUri
+        Just f -> pure f
+
+    syntaxErrorResponse (SyntaxError loc msg) =
+      TResponseError
+        { _code = InR ErrorCodes_ParseError,
+          _message = "Syntax Error at " <> locText loc <> ":\n" <> prettyText msg,
+          _xdata = Nothing
+        }
+
+    noSuchDocumentResponse fileUri =
+      TResponseError
+        { _xdata = Nothing,
+          _message = "Failed to retrieve document at " <> showText fileUri,
+          _code = InR ErrorCodes_InvalidParams
+        }
+
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
@@ -90,6 +167,7 @@ handlers state_mvar _ =
     [ onInitializeHandler,
       onDocumentOpenHandler,
       onDocumentCloseHandler,
+      onDocumentFormattingHandler,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,

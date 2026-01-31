@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark lsp` now provides the `textDocument/formatting` server method
+
 * `futhark profile`: Generation of HTML-Files with cost centre and source range
   analysis, heatmap markup according to source range cost.
   (#2340, With VegOwOtenks)

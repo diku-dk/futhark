@@ -494,6 +494,7 @@ library
     , temporary
     , terminal-size >=0.3
     , text >=1.2.2.2
+    , text-rope
     , time >=1.6.0.1
     , transformers >=0.3
     , vector >=0.12
