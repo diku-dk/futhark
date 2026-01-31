@@ -306,6 +306,7 @@ library
       Futhark.Internalise.TypesValues
       Futhark.LSP.Compile
       Futhark.LSP.Diagnostic
+      Futhark.LSP.EvalLenses
       Futhark.LSP.Handlers
       Futhark.LSP.Tool
       Futhark.LSP.State
