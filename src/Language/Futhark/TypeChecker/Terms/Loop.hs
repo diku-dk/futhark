@@ -126,6 +126,30 @@ checkForImpossible loc known_before pat_t = do
     problem : _ -> problem
     [] -> pure ()
 
+-- Check if any sparams have reduced levels, which indicates they escaped the
+-- loop scope and got constrained by something at a lower (outer) level. This
+-- means they cannot actually be variant across the loop.
+checkForEscaped :: SrcLoc -> M.Map VName Level -> [VName] -> TermTypeM ()
+checkForEscaped loc initial_levels sparams = do
+  cs <- getConstraints
+  let checkSparamLevel sparam = do
+        let current_level = fst <$> M.lookup sparam cs
+            original_level = M.lookup sparam initial_levels
+        case (original_level, current_level) of
+          (Just orig, Just curr)
+            | curr < orig ->
+                Just
+                  . typeError loc mempty
+                  . withIndexLink "loop-variant-escape"
+                  $ "Loop-variant size"
+                    <+> "has escaped into type that occurs outside of loop."
+                    </> "This is likely because the loop body uses a variable whose type"
+                    </> "depends on the loop parameter."
+          _ -> Nothing
+  case mapMaybe checkSparamLevel sparams of
+    problem : _ -> problem
+    [] -> pure ()
+
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
@@ -224,27 +248,7 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
         let (init_substs, sparams) =
               execState (matchDims onDims loop_t' loopbody_t') mempty
 
-        -- Check if any sparams have reduced levels, which indicates
-        -- they escaped the loop scope and got constrained by something
-        -- at a lower (outer) level. This means they cannot actually be
-        -- variant across the loop.
-        cs <- getConstraints
-        let checkSparamLevel sparam = do
-              let current_level = fst <$> M.lookup sparam cs
-                  original_level = M.lookup sparam initial_levels
-              case (original_level, current_level) of
-                (Just orig, Just curr) | curr < orig ->
-                  Just . typeError loc mempty $
-                    "Loop parameter"
-                      <+> dquotes (prettyName sparam)
-                      <+> "would have a type that varies across loop iterations,"
-                      </> "but it is constrained to be the same by its use in the loop body."
-                      </> "This is likely because the loop body uses a variable whose type"
-                      </> "depends on the loop parameter."
-                _ -> Nothing
-        case mapMaybe checkSparamLevel sparams of
-          problem : _ -> problem
-          [] -> pure ()
+        checkForEscaped loc initial_levels sparams
 
         -- Make sure that any of new_dims that are invariant will be
         -- replaced with the invariant size in the loop body.  Failure

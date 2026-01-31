@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * An issue where some array types would not be generated for the C API.
 
+* An edge case in loop size inference. (#2354)
+
 ## [0.25.34]
 
 ### Added
