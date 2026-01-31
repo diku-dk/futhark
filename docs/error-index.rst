@@ -660,6 +660,37 @@ ascription to disambiguate:
 
    def main = f (\(xs:[1]i64) -> xs[0])
 
+.. _loop-variant-escape:
+
+"Loop-variant size has escaped"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This somewhat rare error occurs for ``loop`` expression where the size of some
+loop parameter changes for every iteration, yet type inference leads to that
+size also occurring in the type of some variable or expression bound outside the
+loop. As an example, consider this program:
+
+.. code-block:: futhark
+
+   def grow [d] (a: [d]f64) (b: [d + 1]f64) : [d + 1]f64 =
+     b
+
+   def f_pass [n] (a: [n]f64) (b: []f64) =
+     loop a' = a for i < 1 do
+       grow a' b
+
+The definition of ``grow`` does not matter; the important detail is that it
+forces a relationship between the sizes of its arguments. Now the loop parameter
+``a'`` is assigned a type ``[m]f64`` for some ``m`` that varies for every
+iteration of the loop. Due to the application of ``grow``, we force the type of
+``b`` to become ``[m+1]f64``. But this is meaningless (and not allowed), since
+``m`` does not exist at the point where ``b`` is found.
+
+It can be difficult to identify the specific point in the code that makes the
+undesirable inferance, but it usually helps to put explicit size annotations on
+all function parameters and other ambiguous cases. The error can occur only due
+to instantiation of an anonymous size.
+
 Module errors
 -------------
 
