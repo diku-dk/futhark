@@ -33,7 +33,6 @@ import Futhark.Util.Pretty
     pretty,
     stack,
     (<+>),
-    (</>),
   )
 import Prelude hiding (id, (.))
 
