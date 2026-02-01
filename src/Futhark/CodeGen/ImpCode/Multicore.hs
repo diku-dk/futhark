@@ -102,8 +102,8 @@ instance Pretty Scheduling where
 instance Pretty SchedulerInfo where
   pretty (SchedulerInfo i sched) =
     stack
-      [ nestedBlock "scheduling {" "}" (pretty sched),
-        nestedBlock "iter {" "}" (pretty i)
+      [ "scheduling" <+> nestedBlock (pretty sched),
+        "iter" <+> nestedBlock (pretty i)
       ]
 
 instance Pretty ParallelTask where
@@ -117,28 +117,28 @@ instance Pretty Multicore where
   pretty (GetNumTasks v) =
     pretty v <+> "<-" <+> "get_num_tasks()"
   pretty (SegOp s free seq_code par_code retval scheduler) =
-    "SegOp" <+> pretty s <+> nestedBlock "{" "}" ppbody
+    "SegOp" <+> pretty s <+> nestedBlock ppbody
     where
       ppbody =
         stack
           [ pretty scheduler,
-            nestedBlock "free {" "}" (pretty free),
-            nestedBlock "seq {" "}" (pretty seq_code),
-            maybe mempty (nestedBlock "par {" "}" . pretty) par_code,
-            nestedBlock "retvals {" "}" (pretty retval)
+            "free" <+> nestedBlock (pretty free),
+            "seq" <+> nestedBlock (pretty seq_code),
+            maybe mempty (("par" <+>) . nestedBlock . pretty) par_code,
+            "retvals" <+> nestedBlock (pretty retval)
           ]
   pretty (ParLoop s body params) =
-    "parloop" <+> pretty s </> nestedBlock "{" "}" ppbody
+    "parloop" <+> pretty s </> nestedBlock ppbody
     where
       ppbody =
         stack
-          [ nestedBlock "params {" "}" (pretty params),
-            nestedBlock "body {" "}" (pretty body)
+          [ "params" <+> nestedBlock (pretty params),
+            "body" <+> nestedBlock (pretty body)
           ]
   pretty (Atomic _) =
     "AtomicOp"
   pretty (ISPCKernel body _) =
-    "ispc" <+> nestedBlock "{" "}" (pretty body)
+    "ispc" <+> nestedBlock (pretty body)
   pretty (ForEach i from to body) =
     "foreach"
       <+> pretty i
@@ -146,11 +146,11 @@ instance Pretty Multicore where
       <+> pretty from
       <+> "to"
       <+> pretty to
-      <+> nestedBlock "{" "}" (pretty body)
+      <+> nestedBlock (pretty body)
   pretty (ForEachActive i body) =
     "foreach_active"
       <+> pretty i
-      <+> nestedBlock "{" "}" (pretty body)
+      <+> nestedBlock (pretty body)
   pretty (ExtractLane dest tar lane) =
     pretty dest <+> "<-" <+> "extract" <+> parens (commasep $ map pretty [tar, lane])
   pretty (GetError v) =

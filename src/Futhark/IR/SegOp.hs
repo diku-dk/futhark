@@ -782,14 +782,14 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
         </> PP.align (pretty space)
         <+> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
+        <+> PP.nestedBlock (pretty body)
   pretty (SegRed lvl space ts body reds) =
     "segred"
       <> pretty lvl
         </> PP.align (pretty space)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
+        <+> PP.nestedBlock (pretty body)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
   pretty (SegScan lvl space ts body scans) =
     "segscan"
@@ -797,7 +797,7 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
         </> PP.align (pretty space)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
+        <+> PP.nestedBlock (pretty body)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
   pretty (SegHist lvl space ts body ops) =
     "seghist"
@@ -805,7 +805,7 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
         </> PP.align (pretty space)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
+        <+> PP.nestedBlock (pretty body)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
     where
       ppOp (HistOp w rf dests nes shape op) =

@@ -341,7 +341,7 @@ instance (PrettyRep rep, PP.Pretty (op rep)) => PP.Pretty (HostOp op rep) where
   pretty (OtherOp op) = pretty op
   pretty (SizeOp op) = pretty op
   pretty (GPUBody ts body) =
-    "gpu" <+> PP.colon <+> ppTuple' (map pretty ts) <+> PP.nestedBlock "{" "}" (pretty body)
+    "gpu" <+> PP.colon <+> ppTuple' (map pretty ts) <+> PP.nestedBlock (pretty body)
 
 instance (OpMetrics (Op rep), OpMetrics (op rep)) => OpMetrics (HostOp op rep) where
   opMetrics (SegOp op) = opMetrics op

@@ -161,10 +161,10 @@ annot :: [Doc a] -> Doc a -> Doc a
 annot [] s = s
 annot l s = vsep (l ++ [s])
 
--- | Surround the given document with enclosers and add linebreaks and
+-- | Surround the given document with braces and add linebreaks and
 -- indents.
-nestedBlock :: Doc a -> Doc a -> Doc a -> Doc a
-nestedBlock pre post body = vsep [pre, indent 2 body, post]
+nestedBlock :: Doc a -> Doc a
+nestedBlock body = vsep ["{", indent 2 body, "}"]
 
 -- | Prettyprint on a single line up to at most some appropriate
 -- number of characters, with trailing ... if necessary.  Used for
