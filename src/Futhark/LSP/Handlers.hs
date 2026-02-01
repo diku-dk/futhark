@@ -28,7 +28,7 @@ import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
-import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), arguments, command, params)
+import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), arguments, command, line, params, range, start)
 import Language.LSP.Protocol.Message
   ( Method (..),
     SMethod (..),
@@ -189,11 +189,10 @@ onDocumentFormattingHandler =
 onDocumentCodeLenses :: Handlers (LspM ())
 onDocumentCodeLenses =
   requestHandler SMethod_TextDocumentCodeLens $ \request respond ->
-    let textDocUri = request ^. (params . textDocument . uri)
+    let textDocUri = request ^. params . textDocument . uri
      in do
           logStringStderr <& ("textDocument/CodeLens for " ++ show textDocUri)
           eitherLenses <- evalLensesFor textDocUri
-          logStringStderr <& ("CodeLenses are: " ++ show eitherLenses)
           respond $ bimap failure success eitherLenses
   where
     success :: [CodeLens] -> [CodeLens] |? Null
@@ -210,10 +209,10 @@ onDocumentCodeLensResolve :: Handlers (LspM ())
 onDocumentCodeLensResolve =
   requestHandler SMethod_CodeLensResolve $ \request respond ->
     let codeLens = request ^. params
+        codeLensLine = codeLens ^. (range . start . line)
      in do
-          logStringStderr <& ("Resolving Code Lens: " ++ show codeLens)
+          logStringStderr <& ("Resolving code lens on line " ++ show codeLensLine)
           let result = runExcept $ resolveCodeLens codeLens
-          logStringStderr <& ("Code lens resolved to: " ++ show result)
           respond . first failure $ result
   where
     failure :: Text -> TResponseError Method_CodeLensResolve

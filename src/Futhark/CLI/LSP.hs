@@ -39,6 +39,7 @@ import System.IO (BufferMode (LineBuffering), hSetBuffering, stderr)
 main :: String -> [String] -> IO ()
 main _prog _args = do
   state_mvar <- newIORef emptyState
+  -- makes the lines appear in full in the logs
   hSetBuffering stderr LineBuffering
   _ <-
     runServer $
