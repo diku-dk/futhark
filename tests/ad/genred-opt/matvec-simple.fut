@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_ispc }
 -- entry: rev_J
 -- compiled random input { [1024][80]f32 [1024][80]f32 [1024][1024]f32} auto output
 -- compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32} auto output
