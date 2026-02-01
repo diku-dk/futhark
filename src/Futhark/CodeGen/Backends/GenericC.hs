@@ -39,7 +39,6 @@ import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, copyH, errorsH, eventListH, freeListH, halfH, lockH, timingH, utilH)
-import Futhark.IR.GPU.Sizes
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeText)
@@ -85,6 +84,9 @@ lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
                    (typename int64_t[]){ $inits:srcstride_inits },
                    (typename int64_t[]){ $inits:shape_inits });|]
 
+getUserParamByName :: Name -> C.Exp
+getUserParamByName name = [C.cexp|ctx->cfg->tuning_params[tuning_param_indexes.$id:name]|]
+
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for
 -- memory management.
@@ -102,7 +104,10 @@ defaultOperations =
       opsFatMemory = True,
       opsError = defError,
       opsCall = defCall,
-      opsCritical = mempty
+      opsCritical = mempty,
+      opsGetParam = \name ->
+        let name' = getUserParamByName name
+         in ([C.cexp|$exp:name'.val|], [C.cexp|$exp:name'.set|])
     }
   where
     defWriteScalar _ _ _ _ _ =
@@ -362,7 +367,6 @@ compileProg' ::
   (MonadFreshNames m) =>
   T.Text ->
   T.Text ->
-  ParamMap ->
   Operations op s ->
   s ->
   CompilerM op s () ->
@@ -371,7 +375,7 @@ compileProg' ::
   [Option] ->
   Definitions op ->
   m (CParts, CompilerState s)
-compileProg' backend version params ops def extra header_extra (arr_space, spaces) options prog = do
+compileProg' backend version ops def extra header_extra (arr_space, spaces) options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
         runCompilerM ops src def compileProgAction
@@ -493,7 +497,7 @@ $entry_point_decls
       endstate
     )
   where
-    Definitions types consts (Functions funs) = prog
+    Definitions params types consts (Functions funs) = prog
 
     compileProgAction = do
       (memfuns, memreport) <- mapAndUnzipM defineMemorySpace spaces
@@ -521,17 +525,6 @@ $entry_point_decls
 
       generateTuningParams params
       extra
-
-      let set_tuning_params =
-            zipWith
-              (\i k -> [C.cstm|ctx->tuning_params.$id:k = &ctx->cfg->tuning_params[$int:i];|])
-              [(0 :: Int) ..]
-              $ M.keys params
-      earlyDecl
-        [C.cedecl|static void set_tuning_params(struct futhark_context* ctx) {
-                    (void)ctx;
-                    $stms:set_tuning_params
-                  }|]
 
       mapM_ earlyDecl $ concat memfuns
       type_funs <- generateAPITypes arr_space types
@@ -563,7 +556,6 @@ compileProg ::
   (MonadFreshNames m) =>
   T.Text ->
   T.Text ->
-  ParamMap ->
   Operations op () ->
   CompilerM op () () ->
   T.Text ->
@@ -571,27 +563,41 @@ compileProg ::
   [Option] ->
   Definitions op ->
   m CParts
-compileProg backend version params ops extra header_extra (arr_space, spaces) options prog =
-  fst <$> compileProg' backend version params ops () extra header_extra (arr_space, spaces) options prog
+compileProg backend version ops extra header_extra (arr_space, spaces) options prog =
+  fst <$> compileProg' backend version ops () extra header_extra (arr_space, spaces) options prog
 
 generateTuningParams :: ParamMap -> CompilerM op a ()
 generateTuningParams params = do
-  let (param_names, (param_classes, _param_users)) =
-        second unzip $ unzip $ M.toList params
+  let (param_names, (param_classes, _param_users)) = second unzip $ unzip $ M.toList params
       strinit s = [C.cinit|$string:(T.unpack s)|]
       intinit x = [C.cinit|$int:x|]
       size_name_inits = map (strinit . prettyText) param_names
       size_var_inits = map (strinit . zEncodeText . prettyText) param_names
-      size_class_inits = map (strinit . prettyText) param_classes
-      size_default_inits = map (intinit . fromMaybe 0 . sizeDefault) param_classes
-      size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) param_names
+      size_class_inits = map (strinit . maybe "custom" prettyText) param_classes
+      size_default_inits = map (intinit . maybe 0 (fromMaybe 0 . sizeDefault)) param_classes
       num_params = length params
-  earlyDecl [C.cedecl|struct tuning_params { int dummy; $sdecls:size_decls };|]
-  earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_params;|]
+      def = "#define NUM_TUNING_PARAMS " <> show num_params
+
+  earlyDecl [C.cedecl|$esc:def|]
   earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits, NULL };|]
   earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits, NULL };|]
   earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits, NULL };|]
   earlyDecl [C.cedecl|static typename int64_t tuning_param_defaults[] = { $inits:size_default_inits, 0 };|]
+  -- Produce global constant for each tuning parameter that contain an index
+  -- into the array of tuning parameters. This makes it fast to look up the
+  -- concrete parameter by name, and is easier than creating an enumeration in
+  -- the compiler itself.
+  let indexDecl k i =
+        ( [C.csdecl|int $id:k;|],
+          [C.cinit|$int:i|]
+        )
+      (index_decls, index_inits) =
+        if null param_names
+          then ([[C.csdecl|int dummy;|]], [[C.cinit|0|]])
+          else unzip $ zipWith indexDecl param_names [0 :: Int ..]
+  earlyDecl
+    [C.cedecl|static const struct { $sdecls:index_decls } tuning_param_indexes =
+              { $inits:index_inits };|]
 
 generateCommonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 generateCommonLibFuns memreport = do

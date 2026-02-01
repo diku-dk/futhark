@@ -50,7 +50,7 @@ actualMetrics (CountMetrics metrics) =
   where
     expand (ctx, k) =
       [ (T.intercalate "/" (ctx' ++ [k]), 1)
-        | ctx' <- tails $ "" : ctx
+      | ctx' <- tails $ "" : ctx
       ]
 
 -- | This monad is used for computing metrics.  It internally keeps
@@ -142,6 +142,7 @@ basicOpMetrics Scratch {} = seen "Scratch"
 basicOpMetrics Reshape {} = seen "Reshape"
 basicOpMetrics Rearrange {} = seen "Rearrange"
 basicOpMetrics UpdateAcc {} = seen "UpdateAcc"
+basicOpMetrics UserParam {} = seen "UserParam"
 
 -- | Compute metrics for this lambda.
 lambdaMetrics :: (OpMetrics (Op rep)) => Lambda rep -> MetricsM ()

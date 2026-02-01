@@ -423,7 +423,7 @@ transformFName loc fname ft = do
       )
 
     applySizeArgs fname' t size_args =
-      snd $
+      setApplyLoc loc . snd $
         foldl'
           (applySizeArg t)
           ( length size_args - 1,
@@ -519,11 +519,9 @@ transformAppExp LetFun {} _ =
   error "transformAppExp: LetFun is not supposed to occur"
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> (Info <$> transformAppRes res)
-transformAppExp (Apply fe args _) res =
-  mkApply
-    <$> transformExp fe
-    <*> mapM onArg (NE.toList args)
-    <*> transformAppRes res
+transformAppExp (Apply fe args loc) res =
+  setApplyLoc loc
+    <$> (mkApply <$> transformExp fe <*> mapM onArg (NE.toList args) <*> transformAppRes res)
   where
     onArg (Info ext, e) = (ext,) <$> transformExp e
 transformAppExp (Loop sparams pat loopinit form body loc) res = do

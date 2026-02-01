@@ -8,9 +8,9 @@ import Data.Bifunctor (first)
 import Data.ByteString.Char8 qualified as SBS
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Either
-import Data.Function ((&))
+import Data.Function (on, (&))
 import Data.IORef
-import Data.List (intersect, sortBy)
+import Data.List (groupBy, intersect, sortBy)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Ord
@@ -96,6 +96,19 @@ initialBenchOptions =
       optTestSpec = Nothing
     }
 
+combineDuplicates :: [BenchResult] -> [BenchResult]
+combineDuplicates =
+  mapMaybe f
+    . groupBy ((==) `on` benchResultProg)
+    . sortBy (comparing benchResultProg)
+  where
+    f [] = Nothing
+    f (x : xs) =
+      Just $
+        BenchResult (benchResultProg x) $
+          concatMap benchResultResults $
+            x : xs
+
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
   -- We force line buffering to ensure that we produce running output.
@@ -134,7 +147,10 @@ runBenchmarks opts paths = do
   let results = concat $ catMaybes maybe_results
   case optJSON opts of
     Nothing -> pure ()
-    Just file -> LBS.writeFile file $ encodeBenchResults results
+    Just file ->
+      LBS.writeFile file $
+        encodeBenchResults $
+          combineDuplicates results
   when (any isNothing maybe_results || anyFailed results) exitFailure
   where
     ignored f = any (`match` f) $ optIgnoreFiles opts
@@ -173,8 +189,7 @@ compileBenchmark opts (program, program_spec) = do
     RunCases cases _ _
       | null $
           optExcludeCase opts
-            `intersect` testTags spec
-            <> testTags program_spec,
+            `intersect` (testTags spec <> testTags program_spec),
         any hasRuns cases ->
           if optSkipCompilation opts
             then do

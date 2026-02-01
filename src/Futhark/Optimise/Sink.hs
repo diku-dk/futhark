@@ -45,7 +45,6 @@ module Futhark.Optimise.Sink (sinkGPU, sinkMC) where
 
 import Control.Monad.State
 import Data.Bifunctor
-import Data.List (foldl')
 import Data.Map qualified as M
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.SymbolTable qualified as ST

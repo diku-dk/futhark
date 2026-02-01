@@ -108,8 +108,6 @@ instance Pretty DistStm where
       stm' =
         "map"
           <+> nestedBlock
-            "{"
-            "}"
             ( stack $
                 map onInput inputs
                   ++ [ pretty stm,
