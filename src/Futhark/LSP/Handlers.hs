@@ -226,9 +226,11 @@ onDocumentCodeLensResolve =
 onWorkspaceExecuteCommandHandler :: Handlers (LspM ())
 onWorkspaceExecuteCommandHandler =
   requestHandler SMethod_WorkspaceExecuteCommand $ \request respond ->
-    let args = request ^. params
+    let parameters = request ^. params
      in do
-          result <- runExceptT $ Command.execute (args ^. command) (args ^. arguments)
+          let commandName = parameters ^. command
+          let commandArgs = parameters ^. arguments
+          result <- runExceptT $ Command.execute commandName commandArgs
           respond $ bimap (uncurry failure) (const $ InR Null) result
   where
     failure message err =

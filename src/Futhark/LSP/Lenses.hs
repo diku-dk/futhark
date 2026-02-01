@@ -1,12 +1,10 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE PartialTypeSignatures #-}
 
 module Futhark.LSP.Lenses (evalLensesFor, resolveCodeLens, execute) where
 
 import Control.Lens ((^.))
-import Control.Monad (when)
 import Control.Monad.Except (Except, ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.Trans (lift)
 import Data.Aeson (FromJSON (parseJSON))
@@ -24,41 +22,51 @@ import Language.LSP.Protocol.Types (CodeLens (..), Command (..), ErrorCodes (Err
 import Language.LSP.Server (LspT, getVirtualFile)
 import Language.LSP.VFS (file_text)
 
+-- | All the possible lenses
+--
+-- I tried some trickery with GADTs here for advanced type safety, but I
+-- ultimately didn't succeed because I was unable to write/derive instances
 newtype LensPayload
   = EvalLensPayload EvalLensData
 
 instance Aeson.ToJSON LensPayload where
+  -- it is necessary to make sure that this mirror with @FromJSON@
   toJSON :: LensPayload -> Aeson.Value
   toJSON = \case
-    EvalLensPayload payload ->
-      Aeson.Object . KeyMap.fromList $
-        [ ("type", "EvalLens"),
-          ("payload", Aeson.toJSON payload)
-        ]
+    EvalLensPayload payload -> payloadWithType "EvalLens" payload
+    where
+      payloadWithType :: (Aeson.ToJSON a) => Text -> a -> Aeson.Value
+      payloadWithType typ load =
+        Aeson.Object . KeyMap.fromList $
+          [ ("type", Aeson.toJSON typ),
+            ("payload", Aeson.toJSON load)
+          ]
 
 instance Aeson.FromJSON LensPayload where
+  -- it is necessary to make sure that this mirror with @toJSON@
   parseJSON :: Aeson.Value -> Aeson.Parser LensPayload
   parseJSON = Aeson.withObject "LensPayload" $ \object -> do
     (typ :: Text) <- Aeson.parseField object "type"
     case typ of
       "EvalLens" -> EvalLensPayload <$> Aeson.parseField object "payload"
-      _ -> fail $ "Unexpected LensPayload type: " ++ show typ
+      _ -> fail $ "Unknown Lens Type: " ++ T.unpack typ
 
+-- which document, which line
+-- this is valid as long as the document has an eval comment on that line
 data EvalLensData = EvalLensData
   { cldtextDocument :: Uri,
-    cldLine :: UInt,
-    cldComment :: Text
+    cldLine :: UInt
   }
 
 instance Aeson.ToJSON EvalLensData where
   toJSON :: EvalLensData -> Aeson.Value
-  toJSON (EvalLensData textDoc line comment) = Aeson.toJSON (textDoc, line, comment)
+  toJSON (EvalLensData textDoc line) = Aeson.toJSON (textDoc, line)
 
 instance Aeson.FromJSON EvalLensData where
   parseJSON :: Aeson.Value -> Aeson.Parser EvalLensData
   parseJSON o = do
-    (textDoc, line, comment) <- parseJSON o
-    pure $ EvalLensData textDoc line comment
+    (textDoc, line) <- parseJSON o
+    pure $ EvalLensData textDoc line
 
 evalLensesFor :: Uri -> LspT () IO (Either Text [CodeLens])
 evalLensesFor file_uri = runExceptT $ do
@@ -77,16 +85,15 @@ evalLensesFor file_uri = runExceptT $ do
     commentLines
       & map evalLens
   where
-    filterComment (i, line) = (i,) <$> T.stripPrefix "-- >>>" line
-    evalLens (i, text) =
+    filterComment (i, line) = i <$ T.stripPrefix "-- >>>" line
+    evalLens i =
       CodeLens
         { _command = Nothing,
           _data_ =
             Just . Aeson.toJSON . EvalLensPayload $
               EvalLensData
                 { cldtextDocument = file_uri,
-                  cldLine = i,
-                  cldComment = text
+                  cldLine = i
                 },
           _range =
             Range
@@ -119,6 +126,7 @@ resolveCodeLens (CodeLens range Nothing (Just payload)) =
 
 type Execute a = ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) a
 
+-- | Decode the arguments
 execute :: Maybe [Aeson.Value] -> Execute ()
 execute = \case
   Just [argument] -> case Aeson.fromJSON argument :: Aeson.Result LensPayload of
@@ -135,12 +143,16 @@ execute = \case
         InR ErrorCodes_InvalidParams
       )
 
+-- | Dispatch to the correct lens executor
+--
+-- (currently there's only one)
 executeLens :: LensPayload -> Execute ()
 executeLens = \case
   EvalLensPayload payloadData -> executeEvalLens payloadData
 
+-- | Execute a Evaluation Lens
 executeEvalLens :: EvalLensData -> Execute ()
-executeEvalLens (EvalLensData docUri line expectedExpression) = do
+executeEvalLens (EvalLensData docUri line) = do
   -- retrieve the file
   file <-
     lift (getVirtualFile $ toNormalizedUri docUri) >>= \case
@@ -160,13 +172,5 @@ executeEvalLens (EvalLensData docUri line expectedExpression) = do
           InR ErrorCodes_InvalidParams
         )
     Just expression -> pure expression
-
-  -- is the lens too old?
-  -- TODO: Does this really need to be checked?
-  when (expressionText /= expectedExpression) $
-    throwError
-      ( "Specified line has changed since the code lens was resolved",
-        InR ErrorCodes_InvalidParams
-      )
 
   undefined
