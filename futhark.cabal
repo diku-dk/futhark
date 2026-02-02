@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:           futhark
-version:        0.26.0
+version:        0.25.35
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
