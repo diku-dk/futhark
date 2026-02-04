@@ -22,8 +22,8 @@ type Program = Functions Multicore
 
 -- | A multicore operation.
 data Multicore
-  = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
-  | ParLoop String MCCode [Param]
+  = SegOp Name [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
+  | ParLoop Name MCCode [Param]
   | -- | A kernel of ISPC code, or a scoped block in regular C.
     ISPCKernel MCCode [Param]
   | -- | A foreach loop in ISPC, or a regular for loop in C.
@@ -43,6 +43,9 @@ data Multicore
   | -- | Retrieve the number of subtasks to execute.  Only valid
     -- immediately inside a 'SegOp' or 'ParLoop' construct!
     GetNumTasks VName
+  | -- | If the context is currently in an error state (e.g. because some other
+    -- task has died), put @True@ in the given variable, otherwise @False@.
+    GetError VName
   | Atomic AtomicOp
 
 -- | Multicore code.
@@ -59,6 +62,8 @@ data AtomicOp
   | AtomicXor IntType VName VName (Count Elements (TExp Int32)) Exp
   | AtomicXchg PrimType VName VName (Count Elements (TExp Int32)) Exp
   | AtomicCmpXchg PrimType VName VName (Count Elements (TExp Int32)) VName Exp
+  | AtomicLoad PrimType VName VName (Count Elements (TExp Int32))
+  | AtomicStore PrimType VName (Count Elements (TExp Int32)) Exp
   deriving (Show)
 
 instance FreeIn AtomicOp where
@@ -69,6 +74,8 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicXor _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
   freeIn' (AtomicCmpXchg _ _ arr i retval x) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' retval
   freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicLoad _ _ arr i) = freeIn' arr <> freeIn' i
+  freeIn' (AtomicStore _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 -- | Information about parallel work that is do be done.  This is
 -- passed to the scheduler to help it make scheduling decisions.
@@ -95,8 +102,8 @@ instance Pretty Scheduling where
 instance Pretty SchedulerInfo where
   pretty (SchedulerInfo i sched) =
     stack
-      [ nestedBlock "scheduling {" "}" (pretty sched),
-        nestedBlock "iter {" "}" (pretty i)
+      [ "scheduling" <+> nestedBlock (pretty sched),
+        "iter" <+> nestedBlock (pretty i)
       ]
 
 instance Pretty ParallelTask where
@@ -110,28 +117,28 @@ instance Pretty Multicore where
   pretty (GetNumTasks v) =
     pretty v <+> "<-" <+> "get_num_tasks()"
   pretty (SegOp s free seq_code par_code retval scheduler) =
-    "SegOp" <+> pretty s <+> nestedBlock "{" "}" ppbody
+    "SegOp" <+> pretty s <+> nestedBlock ppbody
     where
       ppbody =
         stack
           [ pretty scheduler,
-            nestedBlock "free {" "}" (pretty free),
-            nestedBlock "seq {" "}" (pretty seq_code),
-            maybe mempty (nestedBlock "par {" "}" . pretty) par_code,
-            nestedBlock "retvals {" "}" (pretty retval)
+            "free" <+> nestedBlock (pretty free),
+            "seq" <+> nestedBlock (pretty seq_code),
+            maybe mempty (("par" <+>) . nestedBlock . pretty) par_code,
+            "retvals" <+> nestedBlock (pretty retval)
           ]
   pretty (ParLoop s body params) =
-    "parloop" <+> pretty s </> nestedBlock "{" "}" ppbody
+    "parloop" <+> pretty s </> nestedBlock ppbody
     where
       ppbody =
         stack
-          [ nestedBlock "params {" "}" (pretty params),
-            nestedBlock "body {" "}" (pretty body)
+          [ "params" <+> nestedBlock (pretty params),
+            "body" <+> nestedBlock (pretty body)
           ]
   pretty (Atomic _) =
     "AtomicOp"
   pretty (ISPCKernel body _) =
-    "ispc" <+> nestedBlock "{" "}" (pretty body)
+    "ispc" <+> nestedBlock (pretty body)
   pretty (ForEach i from to body) =
     "foreach"
       <+> pretty i
@@ -139,13 +146,15 @@ instance Pretty Multicore where
       <+> pretty from
       <+> "to"
       <+> pretty to
-      <+> nestedBlock "{" "}" (pretty body)
+      <+> nestedBlock (pretty body)
   pretty (ForEachActive i body) =
     "foreach_active"
       <+> pretty i
-      <+> nestedBlock "{" "}" (pretty body)
+      <+> nestedBlock (pretty body)
   pretty (ExtractLane dest tar lane) =
     pretty dest <+> "<-" <+> "extract" <+> parens (commasep $ map pretty [tar, lane])
+  pretty (GetError v) =
+    pretty v <+> "<-" <+> "get_error()"
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -174,6 +183,8 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body)
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
+  freeIn' (GetError v) =
+    freeIn' v
 
 -- | Whether 'lexicalMemoryUsageMC' should look inside nested kernels
 -- or not.

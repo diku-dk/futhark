@@ -823,15 +823,18 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   >>= LiftLambdas.transformProg
         Monomorphise -> do
           (_, imports, src) <- readProgram'
-          liftIO $
-            p $
-              flip evalState src $
-                Defunctorise.transformProg imports
-                  >>= ApplyTypeAbbrs.transformProg
-                  >>= FullNormalise.transformProg
-                  >>= ReplaceRecords.transformProg
-                  >>= LiftLambdas.transformProg
-                  >>= Monomorphise.transformProg
+          let (prog, stats) =
+                flip evalState src $
+                  Defunctorise.transformProg imports
+                    >>= ApplyTypeAbbrs.transformProg
+                    >>= FullNormalise.transformProg
+                    >>= ReplaceRecords.transformProg
+                    >>= LiftLambdas.transformProg
+                    >>= Monomorphise.transformProg
+          liftIO $ do
+            p prog
+            putStrLn ""
+            PP.putDocLn $ PP.pretty stats
         Defunctionalise -> do
           (_, imports, src) <- readProgram'
           liftIO $
@@ -842,7 +845,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   >>= FullNormalise.transformProg
                   >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
-                  >>= Monomorphise.transformProg
+                  >>= fmap fst . Monomorphise.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} -> do
           let (base, ext) = splitExtension file

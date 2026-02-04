@@ -5,6 +5,9 @@
 -- going on in the kernel.  Feel free to remove this program if one
 -- day we improve tiling to detect that it is not profitable.
 
+-- ==
+-- tags { autodiff }
+
 local
 def hash (x: i32) : i32 =
   let x = u32.i32 x

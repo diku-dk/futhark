@@ -1,6 +1,6 @@
 -- Result of one reduction is used free in a map.
 -- ==
--- tags { no_ispc }
+-- tags { no_ispc autodiff }
 -- entry: fwd rev
 -- input { [3f64, 1f64, 5f64] } output { [-1.000000f64, -1.000000f64, -1.000000f64] }
 

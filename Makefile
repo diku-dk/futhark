@@ -30,7 +30,7 @@ install: build
 	install "$$(cabal -v0 list-bin exe:futhark)" $(INSTALLBIN)
 
 docs:
-	cabal haddock \
+	cabal haddock lib:futhark \
 		--enable-documentation \
 		--haddock-html \
 		--haddock-options=--show-all \
@@ -48,7 +48,7 @@ unittest:
 	cabal run unit -- --hide-successes
 
 test-oclgrind:
-	cabal run -- futhark test tests -c --backend=opencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
+	cabal run -- futhark test tests -c --backend=opencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh --tuning=tuning_gpu
 
 test-webgpu:
 	cabal run -- futhark test tests -c --backend=webgpu --runner tools/browser_test.py --no-tuning
@@ -57,19 +57,23 @@ test-t:
 	cabal run -- futhark test tests -t
 
 test-c:
-	cabal run -- futhark test tests -c --backend=c --no-tuning
+	cabal run -- futhark test tests -c --backend=c
 
 test-ispc:
-	cabal run -- futhark test -c --backend=ispc tests --no-tuning
+	cabal run -- futhark test -c --backend=ispc tests
 
 test-multicore:
-	cabal run -- futhark test tests -c --backend=multicore --no-tuning
+	cabal run -- futhark test tests -c --backend=multicore
 
 test-interpreter:
 	cabal run -- futhark test tests -i
 
 test-structure:
 	cabal run -- futhark test tests -s
+
+# Note: does not do cabal run.
+test-literate:
+	cd tests_literate && sh test.sh
 
 clean:
 	cabal clean

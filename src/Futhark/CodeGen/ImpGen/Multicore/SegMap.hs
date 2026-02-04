@@ -25,8 +25,8 @@ compileSegMapBody ::
   Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
-  MulticoreGen Imp.MCCode
-compileSegMapBody pat space (Body _ kstms kres) = collect $ do
+  MulticoreGen ()
+compileSegMapBody pat space (Body _ kstms kres) = do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   dPrim_ (segFlat space) int64
@@ -42,8 +42,8 @@ compileSegMap ::
   Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
-  MulticoreGen Imp.MCCode
-compileSegMap pat space kbody = collect $ do
-  body <- compileSegMapBody pat space kbody
+  MulticoreGen ()
+compileSegMap pat space kbody = do
+  body <- collect $ compileSegMapBody pat space kbody
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "segmap" body free_params

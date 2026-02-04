@@ -9,15 +9,103 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.25.35]
+
+### Added
+
+* `futhark lsp` now provides the `textDocument/formatting` server method
+
+* `futhark profile`: Generation of HTML-Files with cost centre and source range
+  analysis, heatmap markup according to source range cost.
+  (#2340, With VegOwOtenks)
+
+* Per Cost-Centre Source Location Listings in the `.summary`-file output of
+  `futhark profile`. (By VegOwOtenks)
+
+* The `multicore` backend now uses a decoupled lookback `scan` implemented by
+  Amirreza Hashemi.
+
+* Custom tuning parameters can now be added with the `#[param(NAME)]` attribute.
+  See the documentation for the sharp edges.
+
+* `futhark test` now supports `--tuning`, just like `futhark bench`.
+
+### Fixed
+
+* Unit types now behave like records/tuples in the C interface and derived
+  interface, such as server-mode and `futhark literate`. (#2332)
+
+* `futhark bench`: JSON output now contains results for all test stanzas that
+  use a given entry point, rather than just the last one.
+
+* A bug in internalisation of `while` loops that could occur when one result of
+  the loop was syntactically the same as a loop parameter. (#2335)
+
+* Missing inlining for some functions that must be inlined when using GPU
+  backends. (#2341)
+
+* An interpreter bug in return size inference for functions returning an
+  abstract type that is concrete at the calling size (#2336).
+
+* `futhark bench` would ignore programs with any tag.
+
+* An issue where some array types would not be generated for the C API.
+
+* An edge case in loop size inference. (#2354)
+
+## [0.25.34]
+
+### Added
+
+* Support for CUDA 13.
+
+### Fixed
+
+* Declaration of zero-length arrays in GPU kernels.
+
+* Handling of size closures of type abbreviations in interpreter (#2316).
+
+* `futhark literate` deleted `CACHEDIR.TAG` files.
+
+* `futhark literate` now prints records and tuples properly.
+
+* Some optimisations would throw away source location information, resulting in
+  worse profiling data.
+
+* Tighter source locations for `let x[i] = ...` expressions.
+
+* Oversight in size expressions in let-bindings. (#2322)
+
+* `futhark pkg` is now more robust against errors in package data.
+
+* Incorrect uniqueness inference for functions returning abstract types. (#2324)
+
+* Duplication of entry points in some cases. (#2326)
+
+* A race condition in the creation of `CACHEDIR.TAG` files that could cause
+  `futhark bench` and `futhark test` to crash.
+
+## [0.25.33]
+
+### Added
+
 * Futhark now implements the cachedir specification, such that e.g. the `data`
   directories created by `futhark test` and `futhark bench` contain a
   `CACHEDIR.TAG` file.
 
 * C types corresponding to records now have nicer names.
 
-### Removed
+* ``futhark script`` now has a ``$restore`` procedure, and the ``$store``
+  procedure has been augmented with support for opaque types.
 
-### Changed
+* The expression guarded by an `assert` may now be any expression, and need no
+  longer be an atom.
 
 ### Fixed
 
@@ -25,6 +113,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Use of unsigned types in entry points could cause invalid C to be generated.
   (#2306)
+
+* `futhark script` now frees values before terminating.
+
+* Correct source locations when warning about unused local functions.
+
+* Unpacking a unary sum type directly in a parameter or `let`-binding was
+  defective. (#2314)
+
+* The derivative of `x**1` for `x==0` would be NaN.
+
+* `futhark fmt` now prints multi-line `assert` in a less horrible way.
 
 ## [0.25.32]
 
@@ -319,6 +418,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark script` now supports an `-f` option.
 
 * `futhark script` now supports the builtin procedure `$store`.
+
+* Compiling the Futhark compiler now requires GHC 9.10.
 
 ### Fixed
 

@@ -38,7 +38,6 @@ import Data.Bitraversable
 import Data.Functor (($>), (<&>))
 import Data.List
   ( find,
-    foldl',
     genericLength,
     genericTake,
     transpose,
@@ -78,7 +77,7 @@ instance Located StackFrame where
 data BreakReason
   = -- | An explicit breakpoint in the program.
     BreakPoint
-  | -- | A
+  | -- | An arithmetic operation produced a fresh NaN.
     BreakNaN
 
 data ExtOp a
@@ -225,7 +224,7 @@ resolveTypeParams names orig_t1 orig_t2 =
     match _ _ _ = pure mempty
 
     matchDims bound e1 (SizeClosure env e2)
-      | e1 == anySize || e2 == anySize = pure mempty
+      | isJust (isAnySize e1) || isJust (isAnySize e2) = pure mempty
       | otherwise = matchExps bound env e1 e2
 
     matchExps bound env (Var (QualName _ d1) _ _) e
@@ -252,8 +251,8 @@ evalResolved (ts, ds) = do
   ds' <- mapM (traverse $ \(SizeClosure env e) -> asInt64 <$> evalWithExts env e) ds
   pure $ typeEnv (M.fromList ts') <> i64Env (M.fromList ds')
   where
-    onDim (Left x) = sizeFromInteger (toInteger x) mempty
-    onDim (Right (SizeClosure _ e)) = e -- FIXME
+    onDim (Left x) = SizeClosure mempty $ sizeFromInteger (toInteger x) mempty
+    onDim (Right e) = e
 
 resolveExistentials :: [VName] -> StructType -> ValueShape -> M.Map VName Int64
 resolveExistentials names = match
@@ -348,9 +347,8 @@ lookupType = lookupInEnv envType
 -- an existential.
 data TermBinding
   = TermValue (Maybe T.BoundV) Value
-  | -- | A polymorphic value that must be instantiated.  The
-    --  'StructType' provided is un-evaluated, but parts of it can be
-    --  evaluated using the provided 'Eval' function.
+  | -- | A polymorphic value that must be instantiated. The 'EvalType' provided
+    --  is the type of the instantiation.
     TermPoly (Maybe T.BoundV) (EvalType -> EvalM Value)
   | TermModule Module
 
@@ -359,7 +357,13 @@ instance Show TermBinding where
   show (TermPoly bv _) = unwords ["TermPoly", show bv]
   show (TermModule m) = unwords ["TermModule", show m]
 
-data TypeBinding = TypeBinding Env [TypeParam] StructRetType
+data TypeBinding
+  = TypeConBinding
+      Env
+      [TypeParam]
+      (RetTypeBase Size NoUniqueness)
+  | TypeBinding
+      EvalType
   deriving (Show)
 
 data Module
@@ -406,14 +410,12 @@ modEnv m =
       envType = mempty
     }
 
-typeEnv :: M.Map VName StructType -> Env
+typeEnv :: M.Map VName EvalType -> Env
 typeEnv m =
   Env
     { envTerm = mempty,
-      envType = M.map tbind m
+      envType = M.map TypeBinding m
     }
-  where
-    tbind = TypeBinding mempty [] . RetType []
 
 i64Env :: M.Map VName Int64 -> Env
 i64Env = valEnv . M.map f
@@ -459,6 +461,11 @@ break env loc = do
 fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
 fromArray v = error $ "Expected array value, but found: " <> show v
+
+project :: Name -> Value -> Value
+project f (ValueRecord fs)
+  | Just v' <- M.lookup f fs = v'
+project _ _ = error "Value does not have expected field."
 
 apply :: SrcLoc -> Env -> Value -> Value -> EvalM Value
 apply loc env (ValueFun f) v = stacking loc env (f v)
@@ -660,14 +667,16 @@ expandType env t@(Array u shape _) =
    in second (const u) (arrayOf shape' $ toStruct et')
 expandType env (Scalar (TypeVar u tn args)) =
   case lookupType tn env of
-    Just (TypeBinding tn_env ps (RetType ext t')) ->
+    Just (TypeBinding t') ->
+      second (const u) t'
+    Just (TypeConBinding tn_env ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
           onDim (SizeClosure dim_env dim)
             | any (`elem` ext) $ fvVars $ freeInExp dim =
-                -- The case can occur when a type with existential
-                -- size has been hidden by a module ascription, e.g.
+                -- The case can occur when a type with existential size has been
+                -- hidden by a module ascription, e.g.
                 -- tests/modules/sizeparams4.fut.
-                SizeClosure mempty anySize
+                SizeClosure mempty $ anySize 0
             | otherwise =
                 SizeClosure (env <> dim_env) $
                   applySubst (`M.lookup` substs) dim
@@ -680,8 +689,8 @@ expandType env (Scalar (TypeVar u tn args)) =
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
       (M.singleton p $ ExpSubst e, mempty)
     matchPtoA (TypeParamType _ p _) (TypeArgType t') =
-      let t'' = evalToStruct $ expandType env t' -- FIXME, we are throwing away the closure here.
-       in (mempty, M.singleton p (TypeBinding mempty [] $ RetType [] t''))
+      let t'' = expandType env t'
+       in (mempty, M.singleton p (TypeBinding t''))
     matchPtoA _ _ = mempty
     expandArg (TypeArgDim s) = TypeArgDim $ SizeClosure env s
     expandArg (TypeArgType t) = TypeArgType $ expandType env t
@@ -735,13 +744,13 @@ linkMissingSizes missing_sizes p v env =
   where
     p_t = evalToStruct $ expandType env $ patternStructType p
 
-evalFunction :: Env -> [VName] -> [Pat ParamType] -> Exp -> ResType -> EvalM Value
+evalBinding :: Env -> [VName] -> [Pat ParamType] -> Exp -> ResType -> EvalM Value
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
-evalFunction env missing_sizes [] body rettype =
+evalBinding env missing_sizes [] body rettype =
   -- Eta-expand the rest to make any sizes visible.
   etaExpand [] env rettype
   where
@@ -753,20 +762,20 @@ evalFunction env missing_sizes [] body rettype =
     etaExpand vs env' _ = do
       f <- eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
-evalFunction env missing_sizes (p : ps) body rettype =
+evalBinding env missing_sizes (p : ps) body rettype =
   pure . ValueFun $ \v -> do
     env' <- linkMissingSizes missing_sizes p v <$> matchPat env p v
-    evalFunction env' missing_sizes ps body rettype
+    evalBinding env' missing_sizes ps body rettype
 
-evalFunctionBinding ::
+evalValBinding ::
   Env ->
   [TypeParam] ->
   [Pat ParamType] ->
   ResRetType ->
   Exp ->
   EvalM TermBinding
-evalFunctionBinding env tparams ps ret fbody = do
-  let ftype = funType ps ret
+evalValBinding env tparams ps ret fbody = do
+  let ftype = evalToStruct $ expandType env $ funType ps ret
       retext = case ps of
         [] -> retDims ret
         _ -> []
@@ -776,9 +785,10 @@ evalFunctionBinding env tparams ps ret fbody = do
     then
       fmap (TermValue (Just $ T.BoundV [] ftype))
         . returned env (retType ret) retext
-        =<< evalFunction env [] ps fbody (retType ret)
+        =<< evalBinding env [] ps fbody (retType ret)
     else pure . TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
-      let resolved = resolveTypeParams (map typeParamName tparams) ftype ftype'
+      let resolved =
+            resolveTypeParams (map typeParamName tparams) ftype ftype'
       tparam_env <- evalResolved resolved
       let env' = tparam_env <> env
           -- In some cases (abstract lifted types) there may be
@@ -789,7 +799,7 @@ evalFunctionBinding env tparams ps ret fbody = do
             filter (`M.notMember` envTerm env') $
               map typeParamName (filter isSizeParam tparams)
       returned env (retType ret) retext
-        =<< evalFunction env' missing_sizes ps fbody (retType ret)
+        =<< evalBinding env' missing_sizes ps fbody (retType ret)
 
 evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
@@ -864,16 +874,16 @@ evalAppExp env (LetPat sizes p e body _) = do
       v_s = valueShape v
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
-evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
-  binding <- evalFunctionBinding env tparams ps ret fbody
+evalAppExp env (LetFun (f, _) (tparams, ps, _, Info ret, fbody) body _) = do
+  binding <- evalValBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
 evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
-  | baseString (qualLeaf op) == "&&" = do
+  | baseName (qualLeaf op) == "&&" = do
       x' <- asBool <$> eval env x
       if x'
         then eval env y
         else pure $ ValuePrim $ BoolValue False
-  | baseString (qualLeaf op) == "||" = do
+  | baseName (qualLeaf op) == "||" = do
       x' <- asBool <$> eval env x
       if x'
         then pure $ ValuePrim $ BoolValue True
@@ -1062,7 +1072,7 @@ eval env (RecordUpdate src all_fs v _ _) =
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
 eval env (Lambda ps body _ (Info (RetType _ rt)) _) =
-  evalFunction env [] ps body rt
+  evalBinding env [] ps body rt
 eval env (OpSection qv (Info t) _) =
   evalTermVar env qv $ toStruct t
 eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info (RetType _ t), _) loc) = do
@@ -1085,10 +1095,7 @@ eval _ (ProjectSection ks _ _) =
       | Just v' <- M.lookup f fs = pure v'
     walk _ _ = error "Value does not have expected field."
 eval env (Project f e _ _) = do
-  v <- eval env e
-  case v of
-    ValueRecord fs | Just v' <- M.lookup f fs -> pure v'
-    _ -> error "Value does not have expected field."
+  project f <$> eval env e
 eval env (Assert what e (Info s) loc) = do
   cond <- asBool <$> eval env what
   unless cond $ bad loc env s
@@ -1137,7 +1144,7 @@ substituteInModule substs = onModule
       k' <- replace k
       pure (k', f v)
     onEnv (Env terms types) =
-      Env (replaceM onTerm terms) (replaceM onType types)
+      Env (replaceM onTerm terms) (replaceM id types)
     onModule (Module env) =
       Module $ onEnv env
     onModule (ModuleFun f) =
@@ -1145,7 +1152,6 @@ substituteInModule substs = onModule
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
-    onType (TypeBinding env ps t) = TypeBinding (onEnv env) ps t
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1213,7 +1219,7 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
 
 evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
-  binding <- evalFunctionBinding env tparams ps ret fbody
+  binding <- evalValBinding env tparams ps ret fbody
   sizes <- extEnv
   pure $ mempty {envTerm = M.singleton v binding} <> sizes
 evalDec env (OpenDec me _) = do
@@ -1226,7 +1232,7 @@ evalDec env (ImportDec name name' loc) =
 evalDec env (LocalDec d _) = evalDec env d
 evalDec _env ModTypeDec {} = pure mempty
 evalDec env (TypeDec (TypeBind v _ ps _ (Info (RetType dims t)) _ _)) = do
-  let abbr = TypeBinding env ps $ RetType dims t
+  let abbr = TypeConBinding env ps $ RetType dims t
   pure mempty {envType = M.singleton v abbr}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   (mod_env, mod) <- evalModExp env $ wrapInLambda ps
@@ -1273,7 +1279,159 @@ breakOnNaN inputs result
 breakOnNaN _ _ =
   pure ()
 
--- | The initial environment contains definitions of the various intrinsic functions.
+getV :: PrimValue -> Maybe P.PrimValue
+getV (SignedValue x) = Just $ P.IntValue x
+getV (UnsignedValue x) = Just $ P.IntValue x
+getV (FloatValue x) = Just $ P.FloatValue x
+getV (BoolValue x) = Just $ P.BoolValue x
+
+putV :: P.PrimValue -> PrimValue
+putV (P.IntValue x) = SignedValue x
+putV (P.FloatValue x) = FloatValue x
+putV (P.BoolValue x) = BoolValue x
+putV P.UnitValue = BoolValue True
+
+getAD :: Value -> Maybe AD.ADValue
+getAD (ValuePrim v) = AD.Constant <$> getV v
+getAD (ValueAD d v) = Just $ AD.Variable d v
+getAD _ = Nothing
+
+putAD :: AD.ADValue -> Value
+putAD (AD.Variable d s) = ValueAD d s
+putAD (AD.Constant v) = ValuePrim $ putV v
+
+modifyValue :: (Num t) => (t -> Value -> Value) -> Value -> Value
+modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
+
+modifyValueM ::
+  (Num t, Monad m) =>
+  (t -> Value -> m Value) ->
+  Value ->
+  m Value
+modifyValueM f v = snd <$> valueAccumLM g 0 v
+  where
+    g a b = do
+      b' <- f a b
+      pure (a + 1, b')
+
+-- TODO: This could be much better. Currently, it is very inefficient
+-- Perhaps creating JVPValues could be abstracted into a function
+-- exposed by the AD module?
+doJVP2 :: Value -> Value -> Value -> EvalM Value
+doJVP2 f v s = do
+  depth <- adDepth
+
+  -- Turn the seeds into a list of ADValues
+  let s' =
+        fromMaybe (error $ "jvp: invalid seeds " ++ show s) $
+          mapM getAD $
+            fst $
+              valueAccum (\a b -> (b : a, b)) [] s
+  -- Augment the values
+  let v' =
+        fromMaybe (error $ "jvp: invalid values " ++ show v) $
+          modifyValueM
+            ( \i lv -> do
+                lv' <- getAD lv
+                pure $ ValueAD depth . AD.JVP . AD.JVPValue lv' $ s' !! (length s' - 1 - i)
+            )
+            v
+
+  -- Run the function, and turn its outputs into a list of Values
+  o <- apply noLoc mempty f v'
+  let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
+
+  -- For each output..
+  let m =
+        fromMaybe (error "jvp: differentiation failed") $
+          forM o' $ \on -> case on of
+            -- If it is a JVP variable of the correct depth, return
+            -- its primal and derivative
+            (ValueAD d (AD.JVP (AD.JVPValue pv dv)))
+              | d == depth -> Just (putAD pv, putAD dv)
+            -- Otherwise, its partial derivatives are all 0
+            _ ->
+              (on,)
+                . ValuePrim
+                . putV
+                . P.blankPrimValue
+                . P.primValueType
+                . AD.primitive
+                <$> getAD on
+
+  -- Extract the output values, and the partial derivatives
+  let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
+      od = modifyValue (\i _ -> snd $ m !! (length m - 1 - i)) o
+
+  -- Return a tuple of the output values, and partial derivatives
+  pure $ toTuple [ov, od]
+
+-- TODO: This could be much better. Currently, it is very inefficient
+-- Perhaps creating VJPValues could be abstracted into a function
+-- exposed by the AD module?
+doVJP2 :: Value -> Value -> Value -> EvalM Value
+doVJP2 f v s = do
+  -- Get the depth
+  depth <- adDepth
+
+  -- Augment the values
+  let v' =
+        fromMaybe (error $ "vjp: invalid values " ++ show v) $
+          modifyValueM (\i lv -> ValueAD depth . AD.VJP . AD.VJPValue . AD.TapeID i <$> getAD lv) v
+  -- Turn the seeds into a list of ADValues
+  let s' =
+        fromMaybe (error $ "vjp: invalid seeds " ++ show s) $
+          mapM getAD $
+            fst $
+              valueAccum (\a b -> (b : a, b)) [] s
+
+  -- Run the function, and turn its outputs into a list of Values
+  o <- apply noLoc mempty f v'
+  let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
+
+  -- For each output..
+  m <-
+    forM
+      (zip o' s')
+      ( \(on, sn) -> case on of
+          -- If it is a VJP variable of the correct depth, run
+          -- deriveTape on it- and its corresponding seed
+          (ValueAD d (AD.VJP (AD.VJPValue t)))
+            | d == depth ->
+                getCounter
+                  >>= either
+                    (pure . Left)
+                    (\(m', i) -> putCounter i $> Right (putAD $ AD.tapePrimal t, m'))
+                    . AD.deriveTape t sn
+          -- Otherwise, its partial derivatives are all 0
+          _ -> pure $ Right (on, M.empty)
+      )
+      <&> either (error . show) id . sequence
+
+  -- Add together every derivative
+  drvs' <- AD.unionsWithM add (map snd m)
+  let drvs = M.map (Just . putAD) drvs'
+
+  -- Extract the output values, and the partial derivatives
+  let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
+  let od =
+        fromMaybe (error "vjp: differentiation failed") $
+          modifyValueM (\i vo -> M.findWithDefault (ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD vo) i drvs) v
+
+  -- Return a tuple of the output values, and partial derivatives
+  pure $ toTuple [ov, od]
+  where
+    -- TODO: Perhaps this could be fully abstracted by AD?
+    -- Making addFor private would be nice..
+    add x y =
+      getCounter
+        >>= either
+          (error . show)
+          (\(a, b) -> putCounter b >> pure a)
+          . AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
+
+-- | The initial environment contains definitions of the various
+-- intrinsic functions.
 initialCtx :: Ctx
 initialCtx =
   Ctx
@@ -1330,15 +1488,6 @@ initialCtx =
       ]
     boolCmp f = [(getB, Just . BoolValue, P.doCmpOp f, adBinOp $ AD.OpCmp f)]
 
-    getV (SignedValue x) = Just $ P.IntValue x
-    getV (UnsignedValue x) = Just $ P.IntValue x
-    getV (FloatValue x) = Just $ P.FloatValue x
-    getV (BoolValue x) = Just $ P.BoolValue x
-    putV (P.IntValue x) = SignedValue x
-    putV (P.FloatValue x) = FloatValue x
-    putV (P.BoolValue x) = BoolValue x
-    putV P.UnitValue = BoolValue True
-
     getS (SignedValue x) = Just $ P.IntValue x
     getS _ = Nothing
     putS (P.IntValue x) = Just $ SignedValue x
@@ -1358,12 +1507,6 @@ initialCtx =
     getB _ = Nothing
     putB (P.BoolValue x) = Just $ BoolValue x
     putB _ = Nothing
-
-    getAD (ValuePrim v) = AD.Constant <$> getV v
-    getAD (ValueAD d v) = Just $ AD.Variable d v
-    getAD _ = Nothing
-    putAD (AD.Variable d s) = ValueAD d s
-    putAD (AD.Constant v) = ValuePrim $ putV v
 
     adToPrim v = putV $ AD.primitive v
 
@@ -1995,144 +2138,8 @@ initialCtx =
                 <> "]"
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "manifest" = Just $ fun1 pure
-    def "vjp2" = Just $
-      -- TODO: This could be much better. Currently, it is very inefficient
-      -- Perhaps creating VJPValues could be abstracted into a function
-      -- exposed by the AD module?
-      fun3 $ \f v s -> do
-        -- Get the depth
-        depth <- adDepth
-
-        -- Augment the values
-        let v' =
-              fromMaybe (error $ "vjp: invalid values " ++ show v) $
-                modifyValueM (\i lv -> ValueAD depth . AD.VJP . AD.VJPValue . AD.TapeID i <$> getAD lv) v
-        -- Turn the seeds into a list of ADValues
-        let s' =
-              fromMaybe (error $ "vjp: invalid seeds " ++ show s) $
-                mapM getAD $
-                  fst $
-                    valueAccum (\a b -> (b : a, b)) [] s
-
-        -- Run the function, and turn its outputs into a list of Values
-        o <- apply noLoc mempty f v'
-        let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
-
-        -- For each output..
-        m <-
-          forM
-            (zip o' s')
-            ( \(on, sn) -> case on of
-                -- If it is a VJP variable of the correct depth, run
-                -- deriveTape on it- and its corresponding seed
-                (ValueAD d (AD.VJP (AD.VJPValue t)))
-                  | d == depth ->
-                      getCounter
-                        >>= either
-                          (pure . Left)
-                          (\(m', i) -> putCounter i $> Right (putAD $ AD.tapePrimal t, m'))
-                          . AD.deriveTape t sn
-                -- Otherwise, its partial derivatives are all 0
-                _ -> pure $ Right (on, M.empty)
-            )
-            <&> either (error . show) id . sequence
-
-        -- Add together every derivative
-        drvs' <- AD.unionsWithM add (map snd m)
-        let drvs = M.map (Just . putAD) drvs'
-
-        -- Extract the output values, and the partial derivatives
-        let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
-        let od =
-              fromMaybe (error "vjp: differentiation failed") $
-                modifyValueM (\i vo -> M.findWithDefault (ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD vo) i drvs) v
-
-        -- Return a tuple of the output values, and partial derivatives
-        pure $ toTuple [ov, od]
-      where
-        modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
-        modifyValueM f v =
-          snd
-            <$> valueAccumLM
-              ( \a b -> do
-                  b' <- f a b
-                  pure (a + 1, b')
-              )
-              0
-              v
-
-        -- TODO: Perhaps this could be fully abstracted by AD?
-        -- Making addFor private would be nice..
-        add x y =
-          getCounter
-            >>= either
-              (error . show)
-              (\(a, b) -> putCounter b >> pure a)
-              . AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
-    def "jvp2" = Just $
-      -- TODO: This could be much better. Currently, it is very inefficient
-      -- Perhaps creating JVPValues could be abstracted into a function
-      -- exposed by the AD module?
-      fun3 $ \f v s -> do
-        depth <- adDepth
-
-        -- Turn the seeds into a list of ADValues
-        let s' =
-              expectJust ("jvp: invalid seeds " ++ show s) $
-                mapM getAD $
-                  fst $
-                    valueAccum (\a b -> (b : a, b)) [] s
-        -- Augment the values
-        let v' =
-              expectJust ("jvp: invalid values " ++ show v) $
-                modifyValueM
-                  ( \i lv -> do
-                      lv' <- getAD lv
-                      pure $ ValueAD depth . AD.JVP . AD.JVPValue lv' $ s' !! (length s' - 1 - i)
-                  )
-                  v
-
-        -- Run the function, and turn its outputs into a list of Values
-        o <- apply noLoc mempty f v'
-        let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
-
-        -- For each output..
-        let m =
-              expectJust "jvp: differentiation failed" $
-                mapM
-                  ( \on -> case on of
-                      -- If it is a JVP variable of the correct depth, return
-                      -- its primal and derivative
-                      (ValueAD d (AD.JVP (AD.JVPValue pv dv)))
-                        | d == depth -> Just (putAD pv, putAD dv)
-                      -- Otherwise, its partial derivatives are all 0
-                      _ ->
-                        (on,)
-                          . ValuePrim
-                          . putV
-                          . P.blankPrimValue
-                          . P.primValueType
-                          . AD.primitive
-                          <$> getAD on
-                  )
-                  o'
-
-        -- Extract the output values, and the partial derivatives
-        let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
-            od = modifyValue (\i _ -> snd $ m !! (length m - 1 - i)) o
-
-        -- Return a tuple of the output values, and partial derivatives
-        pure $ toTuple [ov, od]
-      where
-        modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
-        modifyValueM f v = snd <$> valueAccumLM step 0 v
-          where
-            step a b = do
-              b' <- f a b
-              pure (a + 1, b')
-
-        expectJust _ (Just v) = v
-        expectJust s Nothing = error s
+    def "jvp2" = Just $ fun3 doJVP2
+    def "vjp2" = Just $ fun3 doVJP2
     def "acc" = Nothing
     def s | nameFromText s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ T.unpack s
@@ -2140,7 +2147,7 @@ initialCtx =
     tdef :: Name -> Maybe TypeBinding
     tdef s = do
       t <- s `M.lookup` namesToPrimTypes
-      pure $ TypeBinding mempty [] $ RetType [] $ Scalar $ Prim t
+      pure $ TypeConBinding mempty [] $ RetType [] $ Scalar $ Prim t
 
 intrinsicVal :: Name -> Value
 intrinsicVal name =

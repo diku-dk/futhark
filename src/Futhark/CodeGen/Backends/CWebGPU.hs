@@ -22,8 +22,8 @@ import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
-import Futhark.CodeGen.RTS.WebGPU (serverWsJs, utilJs, valuesJs, wrappersJs)
 import Futhark.CodeGen.RTS.WGSL qualified as RTS
+import Futhark.CodeGen.RTS.WebGPU (serverWsJs, utilJs, valuesJs, wrappersJs)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (chunk)
@@ -136,26 +136,31 @@ builtinKernels =
   M.fromList $ concatMap generateKernels builtinKernelTemplates
   where
     builtinKernelTemplates =
-      [ ("lmad_copy_NAME",                copyInterface RTS.lmad_copy)
-      , ("map_transpose_NAME",            transposeInterface RTS.map_transpose)
-      , ("map_transpose_NAME_low_height", transposeInterface RTS.map_transpose_low_height)
-      , ("map_transpose_NAME_low_width",  transposeInterface RTS.map_transpose_low_width)
-      , ("map_transpose_NAME_small",      transposeInterface RTS.map_transpose_small)
-      , ("map_transpose_NAME_large",      transposeInterfaceLarge RTS.map_transpose_large)
+      [ ("lmad_copy_NAME", copyInterface RTS.lmad_copy),
+        ("map_transpose_NAME", transposeInterface RTS.map_transpose),
+        ("map_transpose_NAME_low_height", transposeInterface RTS.map_transpose_low_height),
+        ("map_transpose_NAME_low_width", transposeInterface RTS.map_transpose_low_width),
+        ("map_transpose_NAME_small", transposeInterface RTS.map_transpose_small),
+        ("map_transpose_NAME_large", transposeInterfaceLarge RTS.map_transpose_large)
       ]
 
     generateKernelProgram kernel name elemType atomic =
-      let baseKernel = if atomic
-                       then T.replace "<ELEM_TYPE>" "<atomic<ELEM_TYPE>>" kernel
-                       else kernel
-      in RTS.wgsl_prelude <> (T.replace "NAME" name $ T.replace "ELEM_TYPE" elemType baseKernel)
+      let baseKernel =
+            if atomic
+              then T.replace "<ELEM_TYPE>" "<atomic<ELEM_TYPE>>" kernel
+              else kernel
+       in RTS.wgsl_prelude
+            <> T.replace "NAME" name (T.replace "ELEM_TYPE" elemType baseKernel)
 
     generateKernels (template, interface) =
-      [(nameFromText (T.replace "NAME" name template), interface name elemType atomic) 
-        | (name, elemType, atomic) <- [("1b", "i8", True)
-                                      ,("2b", "i16", True)
-                                      ,("4b", "i32", False)
-                                      ,("8b", "i64", False)]]
+      [ (nameFromText (T.replace "NAME" name template), interface name elemType atomic)
+      | (name, elemType, atomic) <-
+          [ ("1b", "i8", True),
+            ("2b", "i16", True),
+            ("4b", "i32", False),
+            ("8b", "i64", False)
+          ]
+      ]
 
     transposeInterface program name elemType atomic =
       KernelInterface
@@ -165,7 +170,7 @@ builtinKernels =
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
           overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
-          dynamicBlockDims = 
+          dynamicBlockDims =
             [ (0, "block_size_x"),
               (1, "block_size_y"),
               (2, "block_size_z")
@@ -182,7 +187,7 @@ builtinKernels =
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
           overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
-          dynamicBlockDims = 
+          dynamicBlockDims =
             [ (0, "block_size_x"),
               (1, "block_size_y"),
               (2, "block_size_z")
@@ -275,7 +280,7 @@ asyncCall func hasReturn args =
       "[" <> T.intercalate ", " args <> "]"
 
 mkJsContext :: Definitions a -> T.Text -> (T.Text, [T.Text])
-mkJsContext (Definitions _ _ (Functions funs)) manifest =
+mkJsContext (Definitions _ _ _ (Functions funs)) manifest =
   ( [text|
    class FutharkModule {
      ${constructor}
@@ -395,14 +400,13 @@ compileProg ::
   m (ImpGen.Warnings, (GC.CParts, T.Text, [T.Text]))
 compileProg version prog = do
   ( ws,
-    Program wgsl_code wgsl_prelude macros kernels params failures prog'
+    Program wgsl_code wgsl_prelude macros kernels failures prog'
     ) <-
     ImpGen.compileProg prog
   c <-
     GC.compileProg
       "webgpu"
       version
-      params
       operations
       (mkBoilerplate (wgsl_prelude <> wgsl_code) macros kernels [] failures)
       webgpu_includes

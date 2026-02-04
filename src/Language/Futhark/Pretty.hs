@@ -48,7 +48,7 @@ class (Eq v) => IsName v where
 instance IsName VName where
   prettyName
     | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
-        \(VName vn i) -> pretty vn <> "_" <> pretty (show i)
+        \(VName vn i) -> pretty vn <> "_" <> pretty i
     | otherwise = pretty . baseName
   toName = baseName
 
@@ -260,7 +260,7 @@ prettyAppExp p (LetPat sizes pat e body _) =
       ArrayLit {} -> False
       Lambda {} -> True
       _ -> hasArrayLit e
-prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
+prettyAppExp _ (LetFun (fname, _) (tparams, params, retdecl, rettype, e) body _) =
   "let"
     <+> hsep (prettyName fname : map pretty tparams ++ map pretty params)
     <> retdecl'
@@ -487,7 +487,7 @@ prettyModExp _ (ModParens e _) =
 prettyModExp _ (ModImport v _ _) =
   "import" <+> pretty (show v)
 prettyModExp _ (ModDecs ds _) =
-  nestedBlock "{" "}" $ stack $ punctuate line $ map pretty ds
+  nestedBlock $ stack $ punctuate line $ map pretty ds
 prettyModExp p (ModApply f a _ _ _) =
   parensIf (p >= 10) $ prettyModExp 0 f <+> prettyModExp 10 a
 prettyModExp p (ModAscript me se _ _) =
@@ -565,7 +565,7 @@ instance (IsName vn, Annot f) => Pretty (SpecBase f vn) where
 instance (IsName vn, Annot f) => Pretty (ModTypeExpBase f vn) where
   pretty (ModTypeVar v _ _) = pretty v
   pretty (ModTypeParens e _) = parens $ pretty e
-  pretty (ModTypeSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ss)
+  pretty (ModTypeSpecs ss _) = nestedBlock (stack $ punctuate line $ map pretty ss)
   pretty (ModTypeWith s (TypeRef v ps td _) _) =
     pretty s <+> "with" <+> pretty v <+> hsep (map pretty ps) <> " =" <+> pretty td
   pretty (ModTypeArrow (Just v) e1 e2 _) =

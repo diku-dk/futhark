@@ -45,6 +45,8 @@ module Futhark.Analysis.SymbolTable
     insertLParam,
     insertLoopVar,
     insertLoopMerge,
+    insertFreeVar,
+    insertScope,
 
     -- * Misc
     hideCertified,
@@ -54,7 +56,7 @@ where
 
 import Control.Arrow ((&&&))
 import Control.Monad
-import Data.List (elemIndex, foldl')
+import Data.List (elemIndex)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
@@ -76,28 +78,15 @@ data SymbolTable rep = SymbolTable
     simplifyMemory :: Bool
   }
 
-instance Semigroup (SymbolTable rep) where
-  table1 <> table2 =
-    SymbolTable
-      { loopDepth = max (loopDepth table1) (loopDepth table2),
-        bindings = bindings table1 <> bindings table2,
-        availableAtClosestLoop =
-          availableAtClosestLoop table1
-            <> availableAtClosestLoop table2,
-        simplifyMemory = simplifyMemory table1 || simplifyMemory table2
-      }
-
-instance Monoid (SymbolTable rep) where
-  mempty = empty
-
 empty :: SymbolTable rep
 empty = SymbolTable 0 M.empty mempty False
 
+-- | Construct a symbol table from a scope. All names in the scope are
+-- considered as free variables. Equivalent to 'insertScope' on 'empty'.
 fromScope :: (ASTRep rep) => Scope rep -> SymbolTable rep
-fromScope = M.foldlWithKey' insertFreeVar' empty
-  where
-    insertFreeVar' m k dec = insertFreeVar k dec m
+fromScope scope = insertScope scope empty
 
+-- | Construct a Scope from a symbol table.
 toScope :: SymbolTable rep -> Scope rep
 toScope = M.map entryInfo . bindings
 
@@ -578,6 +567,12 @@ insertFreeVar name dec = insertEntry name entry
             freeVarIndex = \_ _ -> Nothing,
             freeVarAliases = mempty
           }
+
+-- | Insert types from a scope as free variables.
+insertScope :: (ASTRep rep) => Scope rep -> SymbolTable rep -> SymbolTable rep
+insertScope scope st = M.foldlWithKey' insertFreeVar' st scope
+  where
+    insertFreeVar' m k dec = insertFreeVar k dec m
 
 consume :: VName -> SymbolTable rep -> SymbolTable rep
 consume consumee vtable =

@@ -240,7 +240,9 @@ data Operations op s = Operations
     -- pointers.
     opsFatMemory :: Bool,
     -- | Code to bracket critical sections.
-    opsCritical :: ([C.BlockItem], [C.BlockItem])
+    opsCritical :: ([C.BlockItem], [C.BlockItem]),
+    -- | An expression for the param value and one for whether it is set.
+    opsGetParam :: Name -> (C.Exp, C.Exp)
   }
 
 freeAllocatedMem :: CompilerM op s [C.BlockItem]
@@ -273,11 +275,11 @@ contextContents = do
     gets $ unzip4 . DL.toList . compCtxFields
   let fields =
         [ [C.csdecl|$ty:ty $id:name;|]
-          | (name, ty) <- zip field_names field_types
+        | (name, ty) <- zip field_names field_types
         ]
       init_fields =
         [ [C.cstm|ctx->program->$id:name = $exp:e;|]
-          | (name, Just e) <- zip field_names field_values
+        | (name, Just e) <- zip field_names field_values
         ]
       (setup, free) = unzip $ catMaybes field_frees
   pure (fields, init_fields <> setup, free)
@@ -483,8 +485,13 @@ rawMemCType DefaultSpace = pure defaultMemBlockType
 rawMemCType (Space sid) = join $ asks (opsMemoryType . envOperations) <*> pure sid
 rawMemCType (ScalarSpace [] t) =
   pure [C.cty|$ty:(primTypeToCType t)[1]|]
-rawMemCType (ScalarSpace ds t) =
-  pure [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
+rawMemCType (ScalarSpace ds t)
+  | null ds || Constant (IntValue (Int64Value 0)) `elem` ds =
+      -- The case where a 0 ends up here is pretty obscure, but it can occur for
+      -- some empty array literals.
+      pure [C.cty|$ty:(primTypeToCType t)[1]|]
+  | otherwise =
+      pure [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
   where
     ds' = map (`C.toExp` noLoc) ds
 
@@ -658,7 +665,7 @@ cachingMemory lexical f = do
   let cached = M.keys $ M.filter (== DefaultSpace) lexical
 
   cached' <- forM cached $ \mem -> do
-    size <- newVName $ prettyString mem <> "_cached_size"
+    size <- newVName $ nameFromText (prettyText mem) <> "_cached_size"
     pure (mem, size)
 
   let lexMem env =

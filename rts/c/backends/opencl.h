@@ -123,11 +123,7 @@ struct futhark_context_config {
   int profiling;
   int logging;
   char *cache_fname;
-  int num_tuning_params;
-  int64_t *tuning_params;
-  const char** tuning_param_names;
-  const char** tuning_param_vars;
-  const char** tuning_param_classes;
+  struct tuning_param tuning_params[NUM_TUNING_PARAMS];
   // Uniform fields above.
 
   char* program;
@@ -446,7 +442,6 @@ struct futhark_context {
 
   cl_mem global_failure;
   cl_mem global_failure_args;
-  struct tuning_params tuning_params;
   // True if a potentially failing kernel has been enqueued.
   cl_int failure_is_an_option;
   int total_runs;
@@ -514,8 +509,8 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                              struct opencl_device_option device_option) {
   int compile_opts_size = 1024;
 
-  for (int i = 0; i < ctx->cfg->num_tuning_params; i++) {
-    compile_opts_size += strlen(ctx->cfg->tuning_param_names[i]) + 20;
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+    compile_opts_size += 2*(strlen(ctx->cfg->tuning_params[i].name) + 20);
   }
 
   char** macro_names;
@@ -551,11 +546,13 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                 "max_registers",
                 (int)ctx->max_registers);
 
-  for (int i = 0; i < ctx->cfg->num_tuning_params; i++) {
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
-                  "-D%s=%d ",
-                  ctx->cfg->tuning_param_vars[i],
-                  (int)ctx->cfg->tuning_params[i]);
+                  "-Dset_%s=%d -Dval_%s=%d ",
+                  ctx->cfg->tuning_params[i].var,
+                  (int)ctx->cfg->tuning_params[i].set,
+                  ctx->cfg->tuning_params[i].var,
+                  (int)ctx->cfg->tuning_params[i].val);
   }
 
   for (int i = 0; extra_build_opts[i] != NULL; i++) {
@@ -816,10 +813,10 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
 
   // Now we go through all the sizes, clamp them to the valid range,
   // or set them to the default.
-  for (int i = 0; i < ctx->cfg->num_tuning_params; i++) {
-    const char *size_class = ctx->cfg->tuning_param_classes[i];
-    int64_t *size_value = &ctx->cfg->tuning_params[i];
-    const char* size_name = ctx->cfg->tuning_param_names[i];
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+    const char *size_class = ctx->cfg->tuning_params[i].class;
+    int64_t *size_value = &ctx->cfg->tuning_params[i].val;
+    const char* size_name = ctx->cfg->tuning_params[i].name;
     int64_t max_value = 0, default_value = 0;
 
     if (strstr(size_class, "thread_block_size") == size_class) {

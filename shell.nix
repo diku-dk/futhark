@@ -3,7 +3,7 @@ let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
   python = pkgs.python313Packages;
-  haskell = pkgs.haskell.packages.ghc98;
+  haskell = pkgs.haskell.packages.ghc910;
   PWD = builtins.getEnv "PWD";
 in
 pkgs.stdenv.mkDerivation {
@@ -12,22 +12,20 @@ pkgs.stdenv.mkDerivation {
   EM_CACHE = "${PWD}/em_cache";
 
   buildInputs =
-    with pkgs;
+    (import ./nix/pkgs-style.nix {pkgs=pkgs; haskell=haskell; python=python;}) ++
+    (with pkgs;
     [
       cabal-install
       cacert
       curl
       file
       git
-      parallel
       haskell.ghc
-      ormolu
       haskell.weeder
       haskell.haskell-language-server
       haskellPackages.graphmod
-      haskellPackages.apply-refact
+#      haskellPackages.apply-refact
       xdot
-      hlint
       pkg-config
       zlib
       zlib.out
@@ -58,8 +56,8 @@ pkgs.stdenv.mkDerivation {
     ++ lib.optionals (stdenv.isLinux)
       [ opencl-headers
         ocl-icd
-        oclgrind
+        (pkgs.callPackage ./nix/oclgrind.nix {})
         rocmPackages.clr
-      ]
+      ])
   ;
 }

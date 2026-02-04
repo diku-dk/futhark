@@ -3,7 +3,6 @@
 module Futhark.AD.Rev.Loop (diffLoop, stripmineStms) where
 
 import Control.Monad
-import Data.Foldable (toList)
 import Data.List ((\\))
 import Data.Map qualified as M
 import Data.Maybe
@@ -204,7 +203,7 @@ fwdLoop pat aux loop =
 
     empty_saved_array <-
       forM loop_params_to_copy $ \p ->
-        letSubExp (baseString (paramName p) <> "_empty_saved")
+        letSubExp (baseName (paramName p) <> "_empty_saved")
           =<< eBlank (arrayOf (paramDec p) (Shape [bound64]) NoUniqueness)
 
     (body', (saved_pats, saved_params)) <- buildBody $
@@ -217,15 +216,15 @@ fwdLoop pat aux loop =
             forM loop_params_to_copy $ \p -> do
               let v = paramName p
                   t = paramDec p
-              saved_param_v <- newVName $ baseString v <> "_saved"
-              saved_pat_v <- newVName $ baseString v <> "_saved"
+              saved_param_v <- newVName $ baseName v <> "_saved"
+              saved_pat_v <- newVName $ baseName v <> "_saved"
               setLoopTape v saved_pat_v
               let saved_param = Param mempty saved_param_v $ arrayOf t (Shape [bound64]) Unique
                   saved_pat = PatElem saved_pat_v $ arrayOf t (Shape [bound64]) NoUniqueness
               saved_update <-
                 localScope (scopeOfFParams [saved_param])
                   $ letInPlace
-                    (baseString v <> "_saved_update")
+                    (baseName v <> "_saved_update")
                     saved_param_v
                     (fullSlice (fromDecl $ paramDec saved_param) [DimFix i_i64])
                   $ substituteNames copy_substs
@@ -262,7 +261,7 @@ reverseIndices loop = do
 
     (i_rev, i_stms) <- collectStms $
       localScope (scopeOfLoopForm form) $ do
-        letExp (baseString i <> "_rev") $
+        letExp (baseName i <> "_rev") $
           BasicOp $
             BinOp (Sub it OverflowWrap) bound_minus_one (Var i)
 
@@ -333,7 +332,7 @@ revLoop diffStms pat loop =
         (i_subst, i_stms) <- reverseIndices loop'
 
         val_pat_adjs <- valPatAdjs loop_vnames
-        let val_pat_adjs_list = concat $ toList val_pat_adjs
+        let val_pat_adjs_list = concat val_pat_adjs
 
         (loop_adjs, stms_adj) <- collectStms $
           localScope (scopeOfLoopForm form' <> scopeOfFParams (map fst val_pat_adjs_list <> loop_params')) $ do
@@ -343,7 +342,7 @@ revLoop diffStms pat loop =
                 zipWithM_
                   (\val_pat v -> insAdj v (paramName $ fst val_pat))
                   val_pat_adjs_list
-                  (concat $ toList loop_vnames)
+                  (concat loop_vnames)
                 diffStms $ bodyStms body'
 
                 loop_res_adjs <- mapM (lookupAdjVal . paramName) loop_params'
@@ -364,7 +363,7 @@ revLoop diffStms pat loop =
 
         inScopeOf stms_adj $
           localScope (scopeOfFParams $ map fst val_pat_adjs_list) $ do
-            let body_adj = mkBody stms_adj $ varsRes $ concat $ toList loop_adjs
+            let body_adj = mkBody stms_adj $ varsRes $ concat loop_adjs
                 restore_true_deps = M.fromList $
                   flip mapMaybe (zip loop_params' $ patElems pat) $ \(p, pe) ->
                     if p `elem` filter (inAttrs (AttrName "true_dep") . paramAttrs) loop_params'

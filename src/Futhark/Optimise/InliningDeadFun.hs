@@ -87,7 +87,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
                 consts' <-
                   simplifyConsts . performCSEOnStms
                     =<< inlineInStms inlinemap consts
-                pure (ST.insertStms (informStms consts') mempty, consts')
+                pure (ST.insertStms (informStms consts') ST.empty, consts')
               else pure (vtable, consts)
 
           let simplifyFun' fd
@@ -185,6 +185,10 @@ inlineBecauseSOACs cg prog =
       any arrayInBody $ defbody : map caseBody cases
     arrayInExp (Loop _ _ body) =
       arrayInBody body
+    -- Might be indexing a global array, see #2341. This one could perhaps be
+    -- fixed.
+    arrayInExp (BasicOp Index {}) =
+      True
     arrayInExp _ = False
 
 -- Conservative inlining of functions that are called just once, or
@@ -265,7 +269,9 @@ inlineInBody fdmap = onBody
       | Just fd <- M.lookup fname fdmap,
         not $ "noinline" `inAttrs` funDefAttrs fd,
         not $ "noinline" `inAttrs` stmAuxAttrs aux =
-          (<>) <$> inlineFunction pat aux args safety (stmAuxLoc aux) fd <*> inline rest
+          (<>)
+            <$> inlineFunction pat aux args safety (stmAuxLoc aux) fd
+            <*> inline rest
     inline (stm@(Let _ _ BasicOp {}) : rest) =
       (oneStm stm <>) <$> inline rest
     inline (stm : rest) =

@@ -133,7 +133,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       in_bounds =
         allTrue
           [ [C.cexp|$id:p >= 0 && $id:p < arr->shape[$int:i]|]
-            | (p, i) <- zip index_names [0 .. rank - 1]
+          | (p, i) <- zip index_names [0 .. rank - 1]
           ]
   index_body <-
     collect $
@@ -547,7 +547,7 @@ recordArrayIndexFunctions space _types desc rank elemtype vds = do
     in_bounds =
       allTrue
         [ [C.cexp|$id:p >= 0 && $id:p < arr->$id:(tupleField 0)->shape[$int:i]|]
-          | (p, i) <- zip index_names [0 .. rank - 1]
+        | (p, i) <- zip index_names [0 .. rank - 1]
         ]
 
     setField copy j (ValueType _ (Rank r) pt)
@@ -641,12 +641,17 @@ sumVariants desc variants vds = do
 
   zipWithM onVariant [0 :: Int ..] variants
   where
+    unary = length variants == 1
+
     constructFunction ops ctx_ty opaque_ty i fname payload = do
       (params, new_stms) <- unzip <$> zipWithM constructPayload [0 ..] payload
 
       let used = concatMap snd payload
       set_unused_stms <-
         mapM setUnused $ filter ((`notElem` used) . fst) (zip [0 ..] vds)
+
+      let set_variant =
+            [[C.cstm|v->$id:(tupleField 0) = $int:i;|] | not unary]
 
       headerDecl
         (OpaqueDecl desc)
@@ -660,7 +665,7 @@ sumVariants desc variants vds = do
                                 $params:params) {
                     (void)ctx;
                     $ty:opaque_ty* v = malloc(sizeof($ty:opaque_ty));
-                    v->$id:(tupleField 0) = $int:i;
+                    $stms:set_variant
                     { $items:(criticalSection ops new_stms) }
                     // Set other fields
                     { $items:set_unused_stms }
@@ -711,6 +716,8 @@ sumVariants desc variants vds = do
 
     destructFunction ops ctx_ty opaque_ty i fname payload = do
       (params, destruct_stms) <- unzip <$> zipWithM (destructPayload ops) [0 ..] payload
+      let check_stms =
+            [[C.cstm|assert(obj->$id:(tupleField 0) == $int:i);|] | not unary]
       headerDecl
         (OpaqueDecl desc)
         [C.cedecl|int $id:fname($ty:ctx_ty *ctx,
@@ -722,7 +729,7 @@ sumVariants desc variants vds = do
                                 $params:params,
                                 const $ty:opaque_ty *obj) {
                     (void)ctx;
-                    assert(obj->$id:(tupleField 0) == $int:i);
+                    $stms:check_stms
                     $stms:destruct_stms
                     return FUTHARK_SUCCESS;
                   }|]
@@ -738,20 +745,25 @@ sumVariants desc variants vds = do
                   }|]
         )
 
-sumVariantFunction :: Name -> CompilerM op s Manifest.CFuncName
-sumVariantFunction desc = do
+sumVariantFunction :: Int -> Name -> CompilerM op s Manifest.CFuncName
+sumVariantFunction num_cs desc = do
   opaque_ty <- opaqueToCType desc
   ctx_ty <- contextType
   variant <- publicName $ "variant_" <> opaqueName desc
   headerDecl
     (OpaqueDecl desc)
     [C.cedecl|int $id:variant($ty:ctx_ty *ctx, const $ty:opaque_ty* v);|]
-  -- This depends on the assumption that the first value always
-  -- encodes the variant.
+  -- This depends on the assumption that the first value always encodes the
+  -- variant, which means we need to treat the unary case specially.
+  let e =
+        if num_cs == 1
+          then [C.cexp|0|]
+          else
+            [C.cexp|v->$id:(tupleField 0)|]
   libDecl
     [C.cedecl|int $id:variant($ty:ctx_ty *ctx, const $ty:opaque_ty* v) {
-                (void)ctx;
-                return v->$id:(tupleField 0);
+                (void)ctx; (void)v;
+                return $exp:e;
               }|]
   pure variant
 
@@ -762,13 +774,26 @@ opaqueExtraOps ::
   OpaqueType ->
   [ValueType] ->
   CompilerM op s (Maybe Manifest.OpaqueExtraOps)
+-- Special-case () as a 0-ary record. It isn't really in the IR, but otherwise
+-- we cannot construct them from the outside.
+opaqueExtraOps
+  _
+  types
+  "()"
+  (OpaqueType [ValueType Signed (Rank 0) Unit])
+  [ValueType Signed (Rank 0) Unit] =
+    Just . Manifest.OpaqueRecord
+      <$> ( Manifest.RecordOps
+              <$> recordProjectFunctions types "()" [] []
+              <*> recordNewFunctions types "()" [] []
+          )
 opaqueExtraOps _ _ _ (OpaqueType _) _ =
   pure Nothing
 opaqueExtraOps _ _types desc (OpaqueSum _ cs) vds =
   Just . Manifest.OpaqueSum
     <$> ( Manifest.SumOps
             <$> sumVariants desc cs vds
-            <*> sumVariantFunction desc
+            <*> sumVariantFunction (length cs) desc
         )
 opaqueExtraOps _ types desc (OpaqueRecord fs) vds =
   Just . Manifest.OpaqueRecord
@@ -991,7 +1016,10 @@ generateOpaque space types (desc, ot) = do
           then [C.csdecl|$ty:ct $id:(tupleField i);|]
           else [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
-generateAPITypes :: Space -> OpaqueTypes -> CompilerM op s (M.Map T.Text Manifest.Type)
+generateAPITypes ::
+  Space ->
+  OpaqueTypes ->
+  CompilerM op s (M.Map T.Text Manifest.Type)
 generateAPITypes arr_space types@(OpaqueTypes opaques) = do
   mapM_ (findNecessaryArrays . snd) opaques
   array_ts <- mapM (generateArray arr_space) . M.toList =<< gets compArrayTypes
@@ -1004,8 +1032,8 @@ generateAPITypes arr_space types@(OpaqueTypes opaques) = do
     -- the innards to increment reference counts.
     findNecessaryArrays (OpaqueType _) =
       pure ()
-    findNecessaryArrays (OpaqueArray {}) =
-      pure ()
+    findNecessaryArrays (OpaqueArray _ _ vts) =
+      mapM_ (valueTypeToCType Private) vts
     findNecessaryArrays (OpaqueRecordArray _ _ fs) =
       mapM_ (entryPointTypeToCType Public . snd) fs
     findNecessaryArrays (OpaqueSum _ variants) =

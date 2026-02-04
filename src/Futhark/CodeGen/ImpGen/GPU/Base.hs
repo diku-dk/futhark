@@ -117,7 +117,7 @@ kernelBlockId = tvExp . kernelBlockIdVar
 
 keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
-  nameFromString $ maybe "" ((++ ".") . nameToString) fname ++ nameToString key
+  maybe "" (<> ".") fname <> key
 
 allocLocal :: AllocCompiler GPUMem r Imp.KernelOp
 allocLocal mem size =
@@ -180,7 +180,7 @@ updateAcc safety acc is vs = sComment "UpdateAcc" $ do
 
 -- | Generate a constant device array of 32-bit integer zeroes with
 -- the given number of elements.  Initialised with a replicate.
-genZeroes :: String -> Int -> CallKernelGen VName
+genZeroes :: Name -> Int -> CallKernelGen VName
 genZeroes desc n = genConstants $ do
   counters_mem <- sAlloc (desc <> "_mem") (4 * fromIntegral n) (Space "device")
   let shape = Shape [intConst Int64 (fromIntegral n)]
@@ -285,12 +285,17 @@ kernelConstToExp :: Imp.KernelConstExp -> CallKernelGen Imp.Exp
 kernelConstToExp = traverse f
   where
     f (Imp.SizeMaxConst c) = do
-      v <- dPrimS (prettyString c) int64
+      v <- dPrimS (nameFromText $ prettyText c) int64
       sOp $ Imp.GetSizeMax v c
       pure v
     f (Imp.SizeConst k c) = do
-      v <- dPrimS (nameToString k) int64
+      v <- dPrimS (nameFromText $ prettyText k) int64
+      addTuningParam k $ Just c
       sOp $ Imp.GetSize v k c
+      pure v
+    f (Imp.SizeUserParam name def) = do
+      v <- dPrimS (nameFromText $ prettyText name) int64
+      emit $ Imp.GetUserParam v name $ le64 def
       pure v
 
 -- | Given available register and a list of parameter types, compute
@@ -1051,6 +1056,7 @@ simpleKernelBlocks max_num_tblocks kernel_size = do
   tblock_size <- dPrim "tblock_size"
   fname <- askFunction
   let tblock_size_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar tblock_size
+  addTuningParam tblock_size_key $ Just Imp.SizeThreadBlock
   sOp $ Imp.GetSize (tvVar tblock_size) tblock_size_key Imp.SizeThreadBlock
   virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `divUp` tvExp tblock_size
   num_tblocks <- dPrimV "num_tblocks" $ virt_num_tblocks `sMin64` max_num_tblocks
@@ -1058,7 +1064,7 @@ simpleKernelBlocks max_num_tblocks kernel_size = do
 
 simpleKernelConstants ::
   Imp.TExp Int64 ->
-  String ->
+  Name ->
   CallKernelGen
     ( (Imp.TExp Int64 -> InKernelGen ()) -> InKernelGen (),
       KernelConstants
@@ -1070,9 +1076,9 @@ simpleKernelConstants kernel_size desc = do
   -- GPU will possibly need.  Feel free to come back and laugh at me
   -- in the future.
   let max_num_tblocks = 1024 * 1024
-  thread_gtid <- newVName $ desc ++ "_gtid"
-  thread_ltid <- newVName $ desc ++ "_ltid"
-  tblock_id <- newVName $ desc ++ "_gid"
+  thread_gtid <- newVName $ desc <> "_gtid"
+  thread_ltid <- newVName $ desc <> "_ltid"
+  tblock_id <- newVName $ desc <> "_gid"
   inner_tblock_size <- newVName "tblock_size"
   (virt_num_tblocks, num_tblocks, tblock_size) <-
     simpleKernelBlocks max_num_tblocks kernel_size
@@ -1175,11 +1181,12 @@ defKernelAttrs num_tblocks tblock_size =
 
 -- | Retrieve a size of the given size class and put it in a variable
 -- with the given name.
-getSize :: String -> SizeClass -> CallKernelGen (TV Int64)
+getSize :: Name -> SizeClass -> CallKernelGen (TV Int64)
 getSize desc size_class = do
   v <- dPrim desc
   fname <- askFunction
-  let v_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar v
+  let v_key = keyWithEntryPoint fname $ nameFromText $ prettyText $ tvVar v
+  addTuningParam v_key $ Just size_class
   sOp $ Imp.GetSize (tvVar v) v_key size_class
   pure v
 
@@ -1205,7 +1212,7 @@ lvlKernelAttrs lvl =
 sKernel ::
   Operations GPUMem KernelEnv Imp.KernelOp ->
   (KernelConstants -> Imp.TExp Int64) ->
-  String ->
+  Name ->
   VName ->
   KernelAttrs ->
   InKernelGen () ->
@@ -1213,14 +1220,14 @@ sKernel ::
 sKernel ops flatf name v attrs f = do
   (constants, set_constants) <-
     kernelInitialisationSimple (kAttrNumBlocks attrs) (kAttrBlockSize attrs)
-  name' <- nameForFun $ name ++ "_" ++ show (baseTag v)
+  name' <- nameForFun $ name <> "_" <> nameFromString (show (baseTag v))
   sKernelOp attrs constants ops name' $ do
     set_constants
     dPrimV_ v $ flatf constants
     f
 
 sKernelThread ::
-  String ->
+  Name ->
   VName ->
   KernelAttrs ->
   InKernelGen () ->
@@ -1308,8 +1315,8 @@ sReplicateKernel arr se = do
   fname <- askFunction
   let name =
         keyWithEntryPoint fname $
-          nameFromString $
-            "replicate_" ++ show (baseTag $ tvVar $ kernelGlobalThreadIdVar constants)
+          "replicate_"
+            <> nameFromString (show (baseTag $ tvVar $ kernelGlobalThreadIdVar constants))
 
   sKernelFailureTolerant True threadOperations constants name $
     virtualise $ \gtid -> do

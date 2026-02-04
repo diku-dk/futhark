@@ -53,7 +53,6 @@ import Data.Bifunctor (first)
 import Data.Bitraversable
 import Data.List
   ( elemIndex,
-    foldl',
     groupBy,
     intersperse,
     isPrefixOf,
@@ -244,12 +243,12 @@ checkKernelResult ::
   TC.TypeM rep ()
 checkKernelResult (Returns _ cs what) t = do
   TC.checkCerts cs
-  TC.require [t] what
+  TC.require t what
 checkKernelResult (TileReturns cs dims v) t = do
   TC.checkCerts cs
   forM_ dims $ \(dim, tile) -> do
-    TC.require [Prim int64] dim
-    TC.require [Prim int64] tile
+    TC.require (Prim int64) dim
+    TC.require (Prim int64) tile
   vt <- lookupType v
   unless (vt == t `arrayOfShape` Shape (map snd dims)) $
     TC.bad $
@@ -257,9 +256,9 @@ checkKernelResult (TileReturns cs dims v) t = do
         "Invalid type for TileReturns " <> prettyText v
 checkKernelResult (RegTileReturns cs dims_n_tiles arr) t = do
   TC.checkCerts cs
-  mapM_ (TC.require [Prim int64]) dims
-  mapM_ (TC.require [Prim int64]) blk_tiles
-  mapM_ (TC.require [Prim int64]) reg_tiles
+  mapM_ (TC.require $ Prim int64) dims
+  mapM_ (TC.require $ Prim int64) blk_tiles
+  mapM_ (TC.require $ Prim int64) reg_tiles
 
   -- assert that arr is of element type t and shape (rev outer_tiles ++ reg_tiles)
   arr_t <- lookupType arr
@@ -340,7 +339,7 @@ scopeOfSegSpace (SegSpace phys space) =
 
 checkSegSpace :: (TC.Checkable rep) => SegSpace -> TC.TypeM rep ()
 checkSegSpace (SegSpace _ dims) =
-  mapM_ (TC.require [Prim int64] . snd) dims
+  mapM_ (TC.require (Prim int64) . snd) dims
 
 -- | A 'SegOp' is semantically a perfectly nested stack of maps, on
 -- top of some bottommost computation (scalar computation, reduction,
@@ -482,10 +481,10 @@ typeCheckSegOp checkLvl (SegHist lvl space ts kbody ops) = do
 
   TC.binding (scopeOfSegSpace space) $ do
     nes_ts <- forM ops $ \(HistOp dest_shape rf dests nes shape op) -> do
-      mapM_ (TC.require [Prim int64]) dest_shape
-      TC.require [Prim int64] rf
+      mapM_ (TC.require (Prim int64)) dest_shape
+      TC.require (Prim int64) rf
       nes' <- mapM TC.checkArg nes
-      mapM_ (TC.require [Prim int64]) $ shapeDims shape
+      mapM_ (TC.require (Prim int64)) $ shapeDims shape
 
       -- Operator type must match the type of neutral elements.
       let stripVecDims = stripArray $ shapeRank shape
@@ -502,7 +501,7 @@ typeCheckSegOp checkLvl (SegHist lvl space ts kbody ops) = do
       -- Arrays must have proper type.
       let dest_shape' = Shape segment_dims <> dest_shape <> shape
       forM_ (zip nes_t dests) $ \(t, dest) -> do
-        TC.requireI [t `arrayOfShape` dest_shape'] dest
+        TC.requireI (t `arrayOfShape` dest_shape') dest
         TC.consume =<< TC.lookupAliases dest
 
       pure $ map (`arrayOfShape` shape) nes_t
@@ -537,7 +536,7 @@ checkScanRed space ops ts kbody = do
 
   TC.binding (scopeOfSegSpace space) $ do
     ne_ts <- forM ops $ \(lam, nes, shape) -> do
-      mapM_ (TC.require [Prim int64]) $ shapeDims shape
+      mapM_ (TC.require (Prim int64)) $ shapeDims shape
       nes' <- mapM TC.checkArg nes
 
       -- Operator type must match the type of neutral elements.
@@ -783,14 +782,14 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
         </> PP.align (pretty space)
         <+> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
+        <+> PP.nestedBlock (pretty body)
   pretty (SegRed lvl space ts body reds) =
     "segred"
       <> pretty lvl
         </> PP.align (pretty space)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
+        <+> PP.nestedBlock (pretty body)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
   pretty (SegScan lvl space ts body scans) =
     "segscan"
@@ -798,7 +797,7 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
         </> PP.align (pretty space)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
+        <+> PP.nestedBlock (pretty body)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
   pretty (SegHist lvl space ts body ops) =
     "seghist"
@@ -806,7 +805,7 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
         </> PP.align (pretty space)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
+        <+> PP.nestedBlock (pretty body)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
     where
       ppOp (HistOp w rf dests nes shape op) =
@@ -923,7 +922,7 @@ simplifyKernelBody space (Body _ stms res) = do
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
-    Engine.localVtable (<> scope_vtable)
+    Engine.localVtable (segSpaceSymbolTable space)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
       . Engine.enterLoop
       $ Engine.blockIf blocker stms
@@ -935,7 +934,6 @@ simplifyKernelBody space (Body _ stms res) = do
 
   pure (mkWiseBody () body_stms body_res, hoisted)
   where
-    scope_vtable = segSpaceSymbolTable space
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
 simplifyLambda ::
@@ -945,9 +943,9 @@ simplifyLambda ::
   Engine.SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
 simplifyLambda bound = Engine.blockMigrated . Engine.simplifyLambda bound
 
-segSpaceSymbolTable :: (ASTRep rep) => SegSpace -> ST.SymbolTable rep
-segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
-  foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int64) gtids_and_dims
+segSpaceSymbolTable :: (ASTRep rep) => SegSpace -> ST.SymbolTable rep -> ST.SymbolTable rep
+segSpaceSymbolTable (SegSpace flat gtids_and_dims) st =
+  foldl' f (ST.insertFreeVar flat (IndexName Int64) st) gtids_and_dims
   where
     f vtable (gtid, dim) = ST.insertLoopVar gtid Int64 dim vtable
 
@@ -982,7 +980,7 @@ simplifySegOp (SegMap lvl space ts kbody) = do
 simplifySegOp (SegRed lvl space ts kbody reds) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (reds', reds_hoisted) <-
-    Engine.localVtable (<> scope_vtable) $
+    Engine.localVtable (ST.insertScope scope) $
       mapAndUnzipM (simplifySegBinOp (segFlat space)) reds
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
@@ -992,11 +990,10 @@ simplifySegOp (SegRed lvl space ts kbody reds) = do
     )
   where
     scope = scopeOfSegSpace space
-    scope_vtable = ST.fromScope scope
 simplifySegOp (SegScan lvl space ts kbody scans) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (scans', scans_hoisted) <-
-    Engine.localVtable (<> scope_vtable) $
+    Engine.localVtable (ST.insertScope scope) $
       mapAndUnzipM (simplifySegBinOp (segFlat space)) scans
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
@@ -1006,7 +1003,6 @@ simplifySegOp (SegScan lvl space ts kbody scans) = do
     )
   where
     scope = scopeOfSegSpace space
-    scope_vtable = ST.fromScope scope
 simplifySegOp (SegHist lvl space ts kbody ops) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
 
@@ -1019,7 +1015,7 @@ simplifySegOp (SegHist lvl space ts kbody ops) = do
         nes' <- Engine.simplify nes
         dims' <- Engine.simplify dims
         (lam', op_hoisted) <-
-          Engine.localVtable (<> scope_vtable) $
+          Engine.localVtable (ST.insertScope scope) $
             Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
               simplifyLambda (oneName (segFlat space)) lam
         pure
@@ -1035,7 +1031,6 @@ simplifySegOp (SegHist lvl space ts kbody ops) = do
       )
   where
     scope = scopeOfSegSpace space
-    scope_vtable = ST.fromScope scope
 
 -- | Does this rep contain 'SegOp's in its t'Op's?  A rep must be an
 -- instance of this class for the simplification rules to work.
@@ -1250,7 +1245,7 @@ bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
                 letBindNames [patElemName kpe'] . BasicOp . Index arr $
                   Slice $
                     outer_slice <> remaining_slice
-          precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
+          precopy <- newVName $ baseName (patElemName kpe) <> "_precopy"
           index kpe {patElemName = precopy}
           letBindNames [patElemName kpe] $ BasicOp $ Replicate mempty $ Var precopy
           pure

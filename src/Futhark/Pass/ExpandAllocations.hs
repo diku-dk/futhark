@@ -10,7 +10,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor
 import Data.Either (rights)
-import Data.List (find, foldl')
+import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
@@ -205,7 +205,7 @@ ensureGridKnown lvl =
       pure (stms, f $ Just grid, grid)
 
     getSize desc size_class = do
-      size_key <- nameFromString . prettyString <$> newVName desc
+      size_key <- nameFromText . prettyText <$> newVName desc
       letSubExp desc $ Op $ Inner $ SizeOp $ GetSize size_key size_class
 
 transformScanRed ::
@@ -657,7 +657,7 @@ addPatternContext (Pat pes) = localScope (scopeOfPat (Pat pes)) $ do
       acc
       (PatElem pe_v (MemArray pt pe_shape pe_u (ArrayIn pe_mem lmad))) = do
         space <- lookupMemSpace pe_mem
-        pe_mem' <- newVName $ baseString pe_mem <> "_ext"
+        pe_mem' <- newVName $ baseName pe_mem <> "_ext"
         let num_exts = length (LMAD.existentialized lmad)
         lmad_exts <-
           replicateM num_exts $
@@ -678,7 +678,7 @@ addParamsContext ps = localScope (scopeOfFParams ps) $ do
   where
     onType acc (Param attr v (MemArray pt shape u (ArrayIn mem lmad))) = do
       space <- lookupMemSpace mem
-      mem' <- newVName $ baseString mem <> "_ext"
+      mem' <- newVName $ baseName mem <> "_ext"
       let num_exts = length (LMAD.existentialized lmad)
       lmad_exts <-
         replicateM num_exts $
@@ -710,7 +710,7 @@ offsetBranch (Pat pes) ts = do
             pure (space, lmad)
           ReturnsNewBlock space _ lmad ->
             pure (space, lmad)
-        pe_mem' <- newVName $ baseString pe_mem <> "_ext"
+        pe_mem' <- newVName $ baseName pe_mem <> "_ext"
         let start = length ts + length acc
             num_exts = length (LMAD.existentialized lmad)
             ext (Free se) = Free <$> pe64 se
@@ -947,7 +947,7 @@ copyConsumed stms = do
     let substs = M.fromList (zip consumed consumed')
     addStms $ substituteNames substs stms
   where
-    copy v = letExp (baseString v <> "_copy") $ BasicOp $ Replicate mempty $ Var v
+    copy v = letExp (baseName v <> "_copy") $ BasicOp $ Replicate mempty $ Var v
 
 -- Important for edge cases (#1838) that the Stms here still have the
 -- Allocs we are actually trying to get rid of.

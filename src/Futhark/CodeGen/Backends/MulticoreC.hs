@@ -50,7 +50,6 @@ compileProg version =
     ( GC.compileProg
         "multicore"
         version
-        mempty
         operations
         generateBoilerplate
         "#include <pthread.h>\n"
@@ -234,12 +233,12 @@ addTimingFields name = do
   GC.contextField (functionTiming name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   GC.contextField (functionIterations name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
-multicoreName :: String -> GC.CompilerM op s Name
+multicoreName :: Name -> GC.CompilerM op s Name
 multicoreName s = do
-  s' <- newVName ("futhark_mc_" ++ s)
-  pure $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
+  s' <- newVName $ "futhark_mc_" <> s
+  pure $ baseName s' <> "_" <> nameFromString (show (baseTag s'))
 
-type DefSpecifier s = String -> (Name -> GC.CompilerM Multicore s C.Definition) -> GC.CompilerM Multicore s Name
+type DefSpecifier s = Name -> (Name -> GC.CompilerM Multicore s C.Definition) -> GC.CompilerM Multicore s Name
 
 multicoreDef :: DefSpecifier s
 multicoreDef s f = do
@@ -250,7 +249,7 @@ multicoreDef s f = do
 generateParLoopFn ::
   (C.ToIdent a) =>
   M.Map VName Space ->
-  String ->
+  Name ->
   MCCode ->
   a ->
   [(VName, (C.Type, ValueType))] ->
@@ -285,7 +284,7 @@ generateParLoopFn lexical basename code fstruct free retval = do
 
 prepareTaskStruct ::
   DefSpecifier s ->
-  String ->
+  Name ->
   [VName] ->
   [(C.Type, ValueType)] ->
   [VName] ->
@@ -332,7 +331,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   fstruct <-
     prepareTaskStruct multicoreDef "task" free_args free_ctypes retval_args retval_ctypes
 
-  fpar_task <- generateParLoopFn lexical (name ++ "_task") seq_code fstruct free retval
+  fpar_task <- generateParLoopFn lexical (name <> "_task") seq_code fstruct free retval
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
@@ -353,7 +352,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   case par_task of
     Just (ParallelTask nested_code) -> do
       let lexical_nested = lexicalMemoryUsageMC TraverseKernels $ Function Nothing [] params nested_code
-      fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
+      fnpar_task <- generateParLoopFn lexical_nested (name <> "_nested_task") nested_code fstruct free retval
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
     Nothing ->
       GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
@@ -374,9 +373,9 @@ compileOp (ParLoop s' body free) = do
   let lexical = lexicalMemoryUsageMC TraverseKernels $ Function Nothing [] free body
 
   fstruct <-
-    prepareTaskStruct multicoreDef (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
+    prepareTaskStruct multicoreDef (s' <> "_parloop_struct") free_args free_ctypes mempty mempty
 
-  ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
+  ftask <- multicoreDef (s' <> "_parloop") $ \s -> do
     fbody <- benchmarkCode s <=< GC.inNewFunction $
       GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
         GC.items [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
@@ -446,6 +445,8 @@ compileOp (ForEachActive i body) = do
 compileOp (ExtractLane dest tar _) = do
   tar' <- GC.compileExp tar
   GC.stm [C.cstm|$id:dest = $exp:tar';|]
+compileOp (GetError v) =
+  GC.stm [C.cstm|$id:v = ctx->error != NULL;|]
 
 scopedBlock :: MCCode -> GC.CompilerM Multicore s ()
 scopedBlock code = do
@@ -491,6 +492,21 @@ atomicOps (AtomicXchg t old arr ind val) castf = do
   where
     op :: String
     op = "__atomic_exchange_n"
+atomicOps (AtomicLoad t ret arr ind) castf = do
+  ind' <- GC.compileExp $ untyped $ unCount ind
+  cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
+  GC.stm [C.cstm|$id:ret = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], __ATOMIC_ACQUIRE);|]
+  where
+    op :: String
+    op = "__atomic_load_n"
+atomicOps (AtomicStore t arr ind val) castf = do
+  ind' <- GC.compileExp $ untyped $ unCount ind
+  val' <- GC.compileExp val
+  cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
+  GC.stm [C.cstm|$id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_RELEASE);|]
+  where
+    op :: String
+    op = "__atomic_store_n"
 atomicOps (AtomicAdd t old arr ind val) castf =
   doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|] castf
 atomicOps (AtomicSub t old arr ind val) castf =

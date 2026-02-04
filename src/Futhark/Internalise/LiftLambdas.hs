@@ -7,7 +7,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
-import Data.Foldable
 import Data.List (partition)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -152,9 +151,9 @@ transformPat :: PatBase Info VName (TypeBase Exp u) -> LiftM (PatBase Info VName
 transformPat = traverse transformType
 
 transformExp :: Exp -> LiftM Exp
-transformExp (AppExp (LetFun fname (tparams, params, _, Info ret, funbody) body _) _) = do
+transformExp (AppExp (LetFun (fname, _) (tparams, params, _, Info ret, funbody) body _) _) = do
   funbody' <- bindingParams (map typeParamName tparams) params $ transformExp funbody
-  fname' <- newVName $ "lifted_" ++ baseString fname
+  fname' <- newVName $ "lifted_" <> baseName fname
   lifted_call <- liftFunction fname' tparams params ret funbody'
   replacing fname lifted_call $ transformExp body
 transformExp e@(Lambda params body _ (Info ret) _) = do

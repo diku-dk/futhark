@@ -18,7 +18,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     getLoopBounds,
     getIterationDomain,
     getReturnParams,
-    segOpString,
+    segOpName,
     ChunkLoopVectorization (..),
     generateChunkLoop,
     generateUniformizeLoop,
@@ -58,11 +58,11 @@ data HostEnv = HostEnv
 
 type MulticoreGen = ImpM MCMem HostEnv Imp.Multicore
 
-segOpString :: SegOp () MCMem -> MulticoreGen String
-segOpString SegMap {} = pure "segmap"
-segOpString SegRed {} = pure "segred"
-segOpString SegScan {} = pure "segscan"
-segOpString SegHist {} = pure "seghist"
+segOpName :: SegOp () MCMem -> MulticoreGen Name
+segOpName SegMap {} = pure "segmap"
+segOpName SegRed {} = pure "segred"
+segOpName SegScan {} = pure "segscan"
+segOpName SegHist {} = pure "seghist"
 
 arrParam :: VName -> MulticoreGen Imp.Param
 arrParam arr = do
@@ -197,8 +197,7 @@ extractAllocations segop_code = f segop_code
           (free_allocs, here_allocs) = f body_allocs
           free' =
             filter
-              ( (`notNameIn` Imp.declaredIn body_allocs) . Imp.paramName
-              )
+              ((`notNameIn` Imp.declaredIn body_allocs) . Imp.paramName)
               free
        in ( free_allocs,
             here_allocs <> Imp.Op (Imp.ParLoop s body' free')
@@ -217,7 +216,7 @@ data ChunkLoopVectorization = Vectorized | Scalar
 -- The action is called with the (symbolic) index of the current
 -- iteration.
 generateChunkLoop ::
-  String ->
+  Name ->
   ChunkLoopVectorization ->
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
@@ -300,7 +299,7 @@ sForVectorized' i bound body = do
   body' <- collect body
   emit $ Imp.Op $ Imp.ForEach i (Imp.ValueExp $ blankPrimValue $ Imp.IntType Imp.Int64) bound body'
 
-sForVectorized :: String -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
+sForVectorized :: Name -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
 sForVectorized i bound body = do
   i' <- newVName i
   sForVectorized' i' (untyped bound) $

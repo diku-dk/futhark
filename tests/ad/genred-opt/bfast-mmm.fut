@@ -1,5 +1,8 @@
 -- | dot-product but in which we filter-out the entries for which `vct[i]==NAN`
 
+-- ==
+-- tags { autodiff }
+
 def dotprod_filt [n] (vct: [n]f32) (xs: [n]f32) (ys: [n]f32) : f32 =
   f32.sum (map3 (\v x y -> x * y * if (v == 333.333) then 0.0 else 1.0) vct xs ys)
 

@@ -35,7 +35,6 @@ import Language.WGSL qualified as WGSL
 data WebGPUS = WebGPUS
   { -- | Accumulated code.
     wsCode :: T.Text,
-    wsSizes :: M.Map Name SizeClass,
     wsMacroDefs :: [(Name, KernelConstExp)],
     -- | Interface of kernels already generated into wsCode.
     wsKernels :: [(WGSL.Ident, KernelInterface)],
@@ -48,10 +47,6 @@ data WebGPUS = WebGPUS
 
 -- The monad in which we perform the overall translation.
 type WebGPUM = State.State WebGPUS
-
-addSize :: Name -> SizeClass -> WebGPUM ()
-addSize key sclass =
-  State.modify $ \s -> s {wsSizes = M.insert key sclass $ wsSizes s}
 
 addMacroDef :: Name -> KernelConstExp -> WebGPUM ()
 addMacroDef key e =
@@ -347,7 +342,7 @@ onKernel kernel = do
   let extraArgs = [ValueKArg e t | (e, t) <- extraArgExps]
   let scalarArgs =
         [ ValueKArg (LeafExp n t) t
-          | ImpGPU.ScalarUse n t <- ImpGPU.kernelUses kernel
+        | ImpGPU.ScalarUse n t <- ImpGPU.kernelUses kernel
         ]
   let memArgs = [MemKArg n | ImpGPU.MemoryUse n <- ImpGPU.kernelUses kernel]
   let args = extraArgs ++ scalarArgs ++ memArgs
@@ -356,11 +351,9 @@ onKernel kernel = do
 
 onHostOp :: ImpGPU.HostOp -> WebGPUM HostOp
 onHostOp (ImpGPU.CallKernel k) = onKernel k
-onHostOp (ImpGPU.GetSize v key size_class) = do
-  addSize key size_class
+onHostOp (ImpGPU.GetSize v key _) =
   pure $ GetSize v key
-onHostOp (ImpGPU.CmpSizeLe v key size_class x) = do
-  addSize key size_class
+onHostOp (ImpGPU.CmpSizeLe v key _ x) =
   pure $ CmpSizeLe v key x
 onHostOp (ImpGPU.GetSizeMax v size_class) =
   pure $ GetSizeMax v size_class
@@ -369,6 +362,7 @@ onHostOp (ImpGPU.GetSizeMax v size_class) =
 kernelsToWebGPU :: ImpGPU.Program -> Program
 kernelsToWebGPU prog =
   let ImpGPU.Definitions
+        params
         types
         (ImpGPU.Constants ps consts)
         (ImpGPU.Functions funs) = prog
@@ -376,7 +370,6 @@ kernelsToWebGPU prog =
       initial_state =
         WebGPUS
           { wsCode = mempty,
-            wsSizes = mempty,
             wsMacroDefs = mempty,
             wsKernels = mempty,
             wsNextBindSlot = 0,
@@ -390,19 +383,16 @@ kernelsToWebGPU prog =
           (,) <$> traverse onHostOp consts <*> traverse (traverse (traverse onHostOp)) funs
 
       prog' =
-        Definitions types (Constants ps consts') (Functions funs')
+        Definitions params types (Constants ps consts') (Functions funs')
 
       kernels = M.fromList $ map (first nameFromText) (wsKernels translation)
       constants = wsMacroDefs translation
-      -- TODO: Compute functions using tuning params
-      params = M.map (,S.empty) $ wsSizes translation
       failures = mempty
    in Program
         { webgpuProgram = wsCode translation,
           webgpuPrelude = RTS.wgsl_prelude,
           webgpuMacroDefs = constants,
           webgpuKernels = kernels,
-          webgpuParams = params,
           webgpuFailures = failures,
           hostDefinitions = prog'
         }
@@ -828,6 +818,7 @@ genWGSLStm (Op (ImpGPU.UniformRead tgt mem i _ _)) = do
     WGSL.Assign tgt' $
       WGSL.CallExp "workgroupUniformLoad" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
 genWGSLStm (Op (ImpGPU.ErrorSync f)) = genWGSLStm $ Op (ImpGPU.Barrier f)
+genWGSLStm GetUserParam {} = error "genWGSLStm: GetUserParam not handled."
 
 call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
 call1 f a = WGSL.CallExp f [a]

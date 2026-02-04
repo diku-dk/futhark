@@ -22,6 +22,8 @@ module Language.Futhark.Prop
     defaultEntryPoint,
     paramName,
     anySize,
+    isAnySize,
+    setApplyLoc,
 
     -- * Queries on expressions
     typeOf,
@@ -357,19 +359,35 @@ paramName :: PName -> Maybe VName
 paramName (Named v) = Just v
 paramName Unnamed = Nothing
 
--- | A special expression representing no known size.  When present in
--- a type, each instance represents a distinct size.  The type checker
--- should _never_ produce these - they are a (hopefully temporary)
--- thing introduced by defunctorisation and monomorphisation.  They
--- represent a flaw in our implementation.  When they occur in a
--- return type, they can be replaced with freshly created existential
--- sizes.  When they occur in parameter types, they can be replaced
--- with size parameters.
-anySize :: Size
-anySize =
-  -- The definition here is weird to avoid seeing this as a free
-  -- variable.
-  StringLit [65, 78, 89] mempty
+-- | A special expression representing no known size, but encoding an
+-- equivalence class (represented by the integer) that can be used to detect
+-- unknown-but-equal sizes. This is important so that we do not throw away size
+-- equalities just because the names become unknown to us (e.g. see #2326). The
+-- type checker should _never_ produce anySizes - they are a (hopefully
+-- temporary) thing introduced by defunctorisation and monomorphisation. They
+-- represent a flaw in our implementation. When they occur in a return type,
+-- they can be replaced with freshly created existential sizes. When they occur
+-- in parameter types, they can be replaced with size parameters.
+anySize :: Int -> Size
+anySize x =
+  -- The definition here is weird to avoid seeing this as a free variable.
+  StringLit (map (fromIntegral . ord) (show x)) mempty
+
+-- | If this is any size, retrieve the key for the equivalence class.
+isAnySize :: Size -> Maybe Int
+isAnySize (StringLit xs _) = Just $ read $ map (chr . fromIntegral) xs
+isAnySize _ = Nothing
+
+-- | Override the location of an 'Apply' expression.
+--
+-- This is useful because 'mkApply' sets the location to be the span of the
+-- function and all arguments, but during many frontend transformations we
+-- insert additional arguments for which we do not care about the original
+-- source location. Our goal is to maintain a correspondence between the
+-- original source code and the generated code.
+setApplyLoc :: SrcLoc -> Exp -> Exp
+setApplyLoc loc (AppExp (Apply f args _) info) = AppExp (Apply f args loc) info
+setApplyLoc _ e = e
 
 -- | Match the dimensions of otherwise assumed-equal types.  The
 -- combining function is also passed the names bound within the type
@@ -628,11 +646,11 @@ namesToPrimTypes :: M.Map Name PrimType
 namesToPrimTypes =
   M.fromList
     [ (nameFromString $ prettyString t, t)
-      | t <-
-          Bool
-            : map Signed [minBound .. maxBound]
-            ++ map Unsigned [minBound .. maxBound]
-            ++ map FloatType [minBound .. maxBound]
+    | t <-
+        Bool
+          : map Signed [minBound .. maxBound]
+          ++ map Unsigned [minBound .. maxBound]
+          ++ map FloatType [minBound .. maxBound]
     ]
 
 -- | The nature of something predefined.  For functions, these can
@@ -706,7 +724,7 @@ intrinsics =
                   [Scalar $ t_a mempty]
                   $ RetType []
                   $ Scalar
-                  $ t_a mempty
+                  $ t_a Unique
               ),
               ( "flatten",
                 IntrinsicPolyFun

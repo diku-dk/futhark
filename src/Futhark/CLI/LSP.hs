@@ -14,6 +14,23 @@ import Language.LSP.Protocol.Types
     type (|?) (InR),
   )
 import Language.LSP.Server
+  ( Options (optTextDocumentSync),
+    ServerDefinition
+      ( ServerDefinition,
+        configSection,
+        defaultConfig,
+        doInitialize,
+        interpretHandler,
+        onConfigChange,
+        options,
+        parseConfig,
+        staticHandlers
+      ),
+    defaultOptions,
+    runLspT,
+    runServer,
+    type (<~>) (Iso),
+  )
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
@@ -39,7 +56,7 @@ main _prog _args = do
 syncOptions :: TextDocumentSyncOptions
 syncOptions =
   TextDocumentSyncOptions
-    { _openClose = Just False,
+    { _openClose = Just True,
       _change = Just TextDocumentSyncKind_Incremental,
       _willSave = Just False,
       _willSaveWaitUntil = Just False,

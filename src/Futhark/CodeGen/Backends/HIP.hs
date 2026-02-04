@@ -93,14 +93,13 @@ hipMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' me
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program hip_code hip_prelude macros kernels types params failures prog'
+    Program hip_code hip_prelude macros kernels types failures prog'
     ) <-
     ImpGen.compileProg prog
   (ws,)
     <$> GC.compileProg
       "hip"
       version
-      params
       operations
       (mkBoilerplate (hip_prelude <> hip_code) macros kernels types failures)
       hip_includes

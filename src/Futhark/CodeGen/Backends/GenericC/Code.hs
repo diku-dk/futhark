@@ -212,7 +212,7 @@ compileDest v = do
   wrap <- memNeedsWrapping v
   if wrap
     then do
-      v' <- newVName $ baseString v <> "_struct"
+      v' <- newVName $ baseName v <> "_struct"
       item [C.citem|$ty:(fatMemType DefaultSpace) $id:v' = {.references = NULL, .mem = $exp:v};|]
       pure (v', [C.cstms|$id:v = $id:v'.mem;|])
     else pure (v, mempty)
@@ -360,7 +360,7 @@ compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
 compileCode (DeclareArray name t vs) = do
-  name_realtype <- newVName $ baseString name ++ "_realtype"
+  name_realtype <- newVName $ baseName name <> "_realtype"
   let ct = primTypeToCType t
   case vs of
     ArrayValues vs' -> do
@@ -411,6 +411,9 @@ compileCode (Call dests fname args) = do
       <*> pure fname
       <*> mapM compileArg args
   stms $ mconcat unpack_dest
+compileCode (GetUserParam v name def) = do
+  (val, set) <- asks (opsGetParam . envOperations) <*> pure name
+  stm [C.cstm|$id:v = $exp:set ? $exp:val : $exp:def;|]
 
 -- | Compile an 'Copy' using sequential nested loops, but
 -- parameterised over how to do the reads and writes.

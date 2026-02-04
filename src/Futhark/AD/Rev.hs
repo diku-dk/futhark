@@ -34,8 +34,7 @@ copyIfArray v = do
   v_t <- lookupType v
   case v_t of
     Array {} ->
-      letExp (baseString v <> "_copy") . BasicOp $
-        Replicate mempty (Var v)
+      letExp (baseName v <> "_copy") . BasicOp $ Replicate mempty (Var v)
     _ -> pure v
 
 -- The vast majority of BasicOps require no special treatment in the
@@ -145,7 +144,7 @@ diffBasicOp pat aux e m =
         ne <- letSubExp "zero" $ zeroExp x_t
         n <- letSubExp "rep_size" =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ns
         pat_adj_flat <-
-          letExp (baseString pat_adj <> "_flat") . BasicOp $
+          letExp (baseName pat_adj <> "_flat") . BasicOp $
             Reshape pat_adj (reshapeAll (Shape ns) (Shape $ n : arrayDims x_t))
         reduce <- reduceSOAC [Reduce Commutative lam [ne]]
         updateSubExpAdj x
@@ -160,7 +159,7 @@ diffBasicOp pat aux e m =
               let w = arraySize 0 v_t
                   slice = DimSlice start w (intConst Int64 1)
               pat_adj_slice <-
-                letExp (baseString pat_adj <> "_slice") $
+                letExp (baseName pat_adj <> "_slice") $
                   BasicOp $
                     Index pat_adj (sliceAt v_t d [slice])
               start' <- letSubExp "start" $ BasicOp $ BinOp (Add Int64 OverflowUndef) start w
@@ -207,6 +206,9 @@ diffBasicOp pat aux e m =
           adj_t <- lookupType adj
           adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
           updateSubExpAdj v adj_i
+    --
+    UserParam {} ->
+      void $ commonBasicOp pat aux e m
 
 vjpOps :: VjpOps
 vjpOps =
@@ -278,7 +280,7 @@ diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
       ( pure . takeLast (length branches_free)
           <=< letTupExp "branch_adj"
           <=< renameExp
-        )
+      )
         =<< eMatch
           ses
           (map (fmap $ diffBody adjs branches_free) cases)

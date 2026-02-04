@@ -503,7 +503,7 @@ literals and variables, but also more complicated forms.
       : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
       : | "unsafe" `exp`
-      : | "assert" `atom` `atom`
+      : | "assert" `atom` `exp`
       : | `exp` "with" `slice` "=" `exp`
       : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
       : | "match" `exp` ("case" `pat` "->" `exp`)+
@@ -590,8 +590,8 @@ in natural text.
   ``t``.  To pass a single array-typed parameter, enclose it in
   parens.
 
-* The bodies of ``let``, ``if``, and ``loop`` extend as far to the
-  right as possible.
+* The bodies of ``let``, ``if``, and ``loop`` extend as far to the right as
+  possible, as does the expression guarded by an ``assert``.
 
 * The following table describes the precedence and associativity of
   infix operators in both expressions and type expressions.  All
@@ -933,18 +933,6 @@ Numerical negation of ``x``, which must be of numeric type.
 Apply the given attribute to the expression.  Attributes are an ad-hoc
 and optional mechanism for providing extra information, directives, or
 hints to the compiler.  See :ref:`attributes` for more information.
-
-``unsafe e``
-............
-
-Elide safety checks and assertions (such as bounds checking) that
-occur during execution of ``e``.  This is useful if the compiler is
-otherwise unable to avoid bounds checks (e.g. when using indirect
-indexes), but you really do not want them there.  Make very sure that
-the code is correct; eliding such checks can lead to memory
-corruption.
-
-This construct is deprecated.  Use the ``#[unsafe]`` attribute instead.
 
 .. _assert:
 
@@ -1816,7 +1804,7 @@ backends from generating working code.
 ``scratch``
 ...........
 
-Like ``blank``, but the resulting values (if arrays) will comprise initialised
+Like ``blank``, but the resulting values (if arrays) will comprise uninitialised
 memory. Reading from such arrays is potentially dangerous, as the elements are
 completely undefined until they are updated with a ``scatter`` or similar.
 
@@ -1861,6 +1849,15 @@ subexpressions) requires safety checks (such as bounds checking) at
 run-time.  This is used for performance-critical code where you want
 to be told when the compiler is unable to statically verify the safety
 of all operations.
+
+``param(name)``
+...............
+
+This attribute can only be attached to an expression of type ``i64``. It causes
+a tuning parameter to be defined with the given name. This tuning parameter can
+then be set at program startup to override value of the expression this
+attribute is applied to. It is currently unspecified whether setting the tuning
+parameter after context creation has any effect.
 
 Declaration attributes
 ~~~~~~~~~~~~~~~~~~~~~~

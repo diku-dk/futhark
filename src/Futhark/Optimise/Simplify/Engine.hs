@@ -68,7 +68,7 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bitraversable
 import Data.Either
-import Data.List (find, foldl', inits, mapAccumL)
+import Data.List (find, inits, mapAccumL)
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -109,7 +109,7 @@ emptyEnv rules blockers =
   Env
     { envRules = rules,
       envHoistBlockers = blockers,
-      envVtable = mempty
+      envVtable = ST.empty
     }
 
 -- | A function that protects a hoisted operation (if possible).  The
@@ -185,7 +185,7 @@ instance
   (SimplifiableRep rep) =>
   LocalScope (Wise rep) (SimpleM rep)
   where
-  localScope types = localVtable (<> ST.fromScope types)
+  localScope types = localVtable (ST.insertScope types)
 
 runSimpleM ::
   SimpleM rep a ->

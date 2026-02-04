@@ -58,8 +58,6 @@ data Program = Program
     -- compiler.
     webgpuMacroDefs :: [(Name, KernelConstExp)],
     webgpuKernels :: M.Map KernelName KernelInterface,
-    -- | Runtime-configurable constants.
-    webgpuParams :: ParamMap,
     -- | Assertion failure error messages.
     webgpuFailures :: [FailureMsg],
     hostDefinitions :: Definitions HostOp

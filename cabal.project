@@ -1,10 +1,9 @@
 packages: futhark.cabal, language-wgsl
-index-state: 2025-07-03T02:06:05Z
+index-state: 2026-01-28T16:07:56Z
 packages: futhark.cabal
+multi-repl: True
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
 
 allow-newer: base, template-haskell, ghc-prim
-
-multi-repl: True

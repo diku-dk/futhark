@@ -111,14 +111,13 @@ cudaMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' m
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program cuda_code cuda_prelude macros kernels types params failures prog'
+    Program cuda_code cuda_prelude macros kernels types failures prog'
     ) <-
     ImpGen.compileProg prog
   (ws,)
     <$> GC.compileProg
       "cuda"
       version
-      params
       operations
       (mkBoilerplate (cuda_prelude <> cuda_code) macros kernels types failures)
       cuda_includes
