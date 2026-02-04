@@ -743,6 +743,13 @@ data AppExpBase f vn
       (ExpBase f vn)
       (ExpBase f vn)
       SrcLoc
+  | LetWithField
+      (IdentBase f vn StructType)
+      (IdentBase f vn StructType)
+      [Name]
+      (ExpBase f vn)
+      (ExpBase f vn)
+      SrcLoc
   | Index (ExpBase f vn) (SliceBase f vn) SrcLoc
   | -- | A match expression.
     Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) SrcLoc
@@ -770,6 +777,7 @@ instance Located (AppExpBase f vn) where
   locOf (Index _ _ loc) = locOf loc
   locOf (Loop _ _ _ _ _ loc) = locOf loc
   locOf (Match _ _ loc) = locOf loc
+  locOf (LetWithField _ _ _ _ _ loc) = locOf loc
 
 -- | An annotation inserted by the type checker on constructs that are
 -- "function calls" (either literally or conceptually).  This
