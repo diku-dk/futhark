@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* GPU code generation for atomics on 8-bit scalars.
+
 ## [0.25.35]
 
 ### Added
