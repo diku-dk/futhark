@@ -391,8 +391,8 @@ def pmax p q = if point_less p q then q else p
 def get_leftmost_rightmost (n: {i64 | \n -> Range n (1,inf)}) (ps0: [n]f64) (ps1: [n]f64): {((f64, f64), (f64, f64)) | \_ -> true} =
   let ps = zip ps0 ps1
   let ne = ps[0]
-  let leftmosts = scan (\(p1,p2) (q1,q2) -> if point_less (p1,p2) (q1,q2) then (p1,p2) else (q1,q2)) ne ps
-  let rightmosts = scan (\(p1,p2) (q1,q2) -> if point_less (p1,p2) (q1,q2) then (p1,p2) else (q1,q2)) ne ps
+  let leftmosts = scan pmin ne ps
+  let rightmosts = scan pmax ne ps
   let (leftmosts1, leftmosts2) = unzip leftmosts
   let (rightmosts1, rightmosts2) = unzip rightmosts
   in ((leftmosts1[n-1], leftmosts2[n-1]), (rightmosts1[n-1], rightmosts2[n-1]))
