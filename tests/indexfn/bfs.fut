@@ -62,49 +62,34 @@ let to_i64 (b: bool) : i64 = if b then 1 else 0
 def filter_soa [n]
     (V: i64)
     (flags: [n]bool)
-    (arr1: {[n]i64 | \x -> Range x (0,V)})
-    (arr2: {[n]i64 | \x -> Range x (0,V)})
-    : {(*[]i64, *[]i64) | \(y1,y2) -> Range y1 (0,V) && Range y2 (0,V)} =
+    (x1: {[n]i64 | \x -> Range x (0,V)})
+    (x2: {[n]i64 | \x -> Range x (0,V)})
+    : {(*[]i64, *[]i64) | \(y1,y2) ->
+        Range y1 (0,V) && Range y2 (0,V)
+        && FiltPart y1 x1 (\i -> flags[i]) (\_i -> true)
+        && FiltPart y2 x2 (\i -> flags[i]) (\_i -> true)
+    } =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) flags)
   let new_size = if n > 0 then num_trues[n-1] else 0
   let ranks = map2 (\c i -> if c then i-1 else -1) flags num_trues
   let out1 = replicate new_size 0i64
   let out2 = replicate new_size 0i64
-  let out1 = scatter out1 ranks arr1
-  let out2 = scatter out2 ranks arr2
+  let out1 = scatter out1 ranks x1
+  let out2 = scatter out2 ranks x2
   in (out1, out2)
 
--- def getSmallestPairs_H_as_arg [arraySize]
---     (nVerts: i64)
---     (H: [nVerts]i64)
---     (flat_edges: {[arraySize*2]i64 | \x -> Range x (0, nVerts)})
---     (flat_edge2Ids: {[arraySize*2]i64 | \x -> Injective x})
---     : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
---          Injective new_edges && Injective new_edgeIds
---       }
---     =
---     let cs = map2 (\i j -> H[i] == j) flat_edges flat_edge2Ids
---     let dummy = 0i64
---     let (newSize, ys) = filter_by cs flat_edges dummy
---     let (_, zs) = filter_by cs flat_edge2Ids dummy
---     in (ys :> [newSize]i64, zs :> [newSize]i64)
 def remove_duplicates [Q]
     (V: i64)
     (q_verts: {[Q]i64 | \x -> Range x (0,V)})
     (q_parents: {[Q]i64 | \x -> Range x (0,V)})
-    : {(*[]i64, *[]i64) | \(verts, parents) ->
-      Injective verts && Injective parents
+    : {(*[]i64, *[]i64) | \(verts, _parents) ->
+      Injective verts
     } = 
   let indexes = iota Q
   let H = hist i64.min Q V q_verts indexes
   let flags = map2 (\i j -> H[i] == j) q_verts indexes
   let (verts, parents) = filter_soa V flags q_verts q_parents
   in (verts, parents)
-  -- TODO
-  -- 1. it should work because indexes is injective (iota) corresponding
-  -- to flat_edge2Ids above. Might have to make indexes an argument though.
-  -- 2. define filter_by cs
-  -- 3. profit ???
 
 def update_parents [V] [Q] (parents: *[V]i64) (q_verts: [Q]i64) (q_parents: [Q]i64): *[V]i64 =
   scatter parents q_verts q_parents
@@ -122,7 +107,7 @@ def expand_ [V] [E] [Q]
     (edges: {[E]i64 | \x -> Range x (0,V)})
     (queue: {[Q]i64 | \x -> Range x (0,V)})
     (shape: [Q]i64)
-    (dummy: {i64 | \x ->
+    (_dummy: {i64 | \_ ->
       -- This property should be annotated directly on shape, but we can't
       -- because For needs an index function to be bound to shape to infer its
       -- domain; this won't happen until it's used in the body. I haven't fixed
