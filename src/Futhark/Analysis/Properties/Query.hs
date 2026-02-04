@@ -436,16 +436,13 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     matchProof (FiltPart y x pf pps) = do
       f_Y <- getFn y
       newProver (FPV2 f_Y x pf pps)
-    matchProof prop@(For x (Predicate i p)) = do
+    matchProof (For x (Predicate i p)) = do
       f_x <- getFn x
       case f_x of
         IndexFn [[Forall k dom]] _ -> algebraContext f_x $ do
           addRelIterator (Forall k dom)
-          let p' = mapProperty (sop2Symbol . rep (mkRep i (sym2SoP (Var k)))) p
-          printM 0 $ "matchProof: " <> prettyStr prop
-          printM 0 $ "matchProof: p' " <> prettyStr p'
-          printAlgEnv 0
-          prove p'
+          prove $
+            mapProperty (sop2Symbol . rep (mkRep i (sym2SoP (Var k)))) p
         _ -> pure Unknown
 
     getFn vn = do
