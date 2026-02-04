@@ -700,6 +700,10 @@ LetExp :: { UncheckedExp }
      | let id '...[' DimIndices ']' '=' Exp LetBody
        { let L vloc (ID v) = $2; ident = Ident v NoInfo (srclocOf vloc)
          in AppExp (LetWith ident ident $4 $7 $8 (srcspan $1 $>)) NoInfo }
+     | let id FieldAccesses '=' Exp LetBody
+       { let L vloc (ID v) = $2
+            ident = Ident v NoInfo (srclocOf vloc)
+          in AppExp (LetWithField ident ident (map unLoc $3) $5 $6 (srcspan $1 $>)) NoInfo } 
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
