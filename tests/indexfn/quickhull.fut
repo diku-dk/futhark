@@ -123,6 +123,36 @@ def remove_negatives [num_points] num_segs (x: {[num_points]i64 | \x -> Range x 
   let points_y' = scatter zeros is points_y
   in (ids, points_x', points_y')
 
+def compute_new_seg_inds [num_segs] [num_points]
+    (segs_begx : [num_segs]real)
+    (segs_begy : [num_segs]real)
+    (segs_endx : [num_segs]real)
+    (segs_endy : [num_segs]real)
+    (points_idx : {[num_points]i64 | \x -> Range x (0, num_segs)})
+    (points_x : [num_points]real)
+    (points_y : [num_points]real)
+    (extrema_ix_inds : {[num_segs]i64 | \x -> Range x (0, num_points)})
+    : ({[num_points]i64 | \y -> Range y (-1, 2 * num_segs)}) =
+  map4 (\ix seg_ix px py ->
+      let extreme_ix = extrema_ix_inds[seg_ix]
+      in if extreme_ix == ix then -1i64 else
+      let ax = segs_begx[seg_ix]
+      let ay = segs_begy[seg_ix]
+      let bx = segs_endx[seg_ix]
+      let by = segs_endy[seg_ix]
+      let qx = points_x[extreme_ix]
+      let qy = points_y[extreme_ix]
+      let axay = (ax, ay)
+      let bxby = (bx, by)
+      let pxpy = (px, py)
+      let qxqy = (qx, qy)
+      let daq = signed_dist_to_line axay qxqy pxpy
+      let dqb = signed_dist_to_line qxqy bxby pxpy
+      in if dist_less zero_dist daq then (seg_ix * 2)
+         else if dist_less zero_dist dqb then (seg_ix * 2 + 1)
+         else (-1)
+    ) (iota num_points) points_idx points_x points_y
+
 -- Precondition:  Range points.0 = [0, num_segs-1]
 -- Postcondition: \ (xs, ys) -> length xs = 2*num_segs &&
 --                              Range ys.0 = [0, 2*num_segs-1] &&
@@ -207,39 +237,13 @@ def expand_hull [num_segs] [num_points]
 
   -- let (sgm_inds, only_points) = unzip points
   let new_seg_inds =
-    map4 (\ix seg_ix px py ->
-        let extreme_ix = extrema_ix_inds[seg_ix]
-        in if extreme_ix == ix then -1 else
-        let ax = segs_begx[seg_ix]
-        let ay = segs_begy[seg_ix]
-        let bx = segs_endx[seg_ix]
-        let by = segs_endy[seg_ix]
-        let qx = points_x[extreme_ix]
-        let qy = points_y[extreme_ix]
-        let axay = (ax, ay)
-        let bxby = (bx, by)
-        let pxpy = (px, py)
-        let qxqy = (qx, qy)
-        let daq = signed_dist_to_line axay qxqy pxpy
-        let dqb = signed_dist_to_line qxqy bxby pxpy
-        in if dist_less zero_dist daq then (seg_ix * 2)
-           else if dist_less zero_dist dqb then (seg_ix * 2 + 1)
-           else (-1)
-      ) (iota num_points) points_idx points_x points_y
+    compute_new_seg_inds segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y extrema_ix_inds
   -- ^ From the map above, it should be provable that the range of
   --     `new_seg_inds` is [-1, 2*num_segs-1]
   -- V The filter below removes the less than zero elements, hence,
   --     the range of points'.0 should be `[0, 2*num_segs-1]`
   --   Finally, it should be trivial that `points'.1` is some filtering of `points.1`
-  -- let points' = filter (\(i,_) -> i >= 0) (zip new_seg_inds only_points)
   let (ids, points_x', points_y') = remove_negatives num_segs new_seg_inds points_x points_y
-  -- let (n, is) = filter_indices bs
-  -- let zeros = replicate n 0i64
-  -- let ids = scatter zeros is new_seg_inds
-  -- let zeros = replicate n 0
-  -- let points_x' = scatter zeros is points_x
-  -- let zeros = replicate n 0
-  -- let points_y' = scatter zeros is points_y
   in (segs_begx', segs_begy', segs_endx', segs_endy',
       ids, points_x', points_y')
 
