@@ -416,6 +416,8 @@ forward (E.Literal (E.BoolValue x) _) =
   pure . fromScalar . sym2SoP $ Bool x
 forward (E.Literal (E.SignedValue (E.Int64Value x)) _) =
   pure . fromScalar . int2SoP $ toInteger x
+forward (E.Literal (E.FloatValue {}) _) = do
+  fromScalar . sym2SoP . Var <$> newNameFromString "float"
 forward (E.IntLit x _ _) =
   pure . fromScalar $ int2SoP x
 forward (E.Negate x _) = do

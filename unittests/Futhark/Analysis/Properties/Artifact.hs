@@ -21,6 +21,16 @@ tests =
   testGroup
     "Properties.Artifact"
     [ mkTest
+        "tests/indexfn/lavaMD.fut"
+        ( newNameFromString "j" >>= \j -> pure $ \(i, n, m, xs) ->
+            -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
+            [ IndexFn
+                { shape = [[Forall i (Iota (sHole n))], [Forall j (Iota (sHole m))]],
+                  body = cases [(Bool True, sym2SoP $ Hole xs)]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/bfs.fut"
         ( pure $ \(i, n, xs, _) ->
             -- Match any output index function; we test whether the intermediate analysis is OK (bounds checking, property verification).
@@ -158,7 +168,7 @@ tests =
                   body = cases [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i, sHole j])]
                 }
             ]
-       ),
+        ),
       mkTest
         "tests/indexfn/quickhull.fut"
         ( pure $ \(i, n, xs, _) ->
