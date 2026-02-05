@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * GPU code generation for atomics on 8-bit scalars.
 
+* `f64.nextafter`, `f64.copysign`, and `f64.isinf` reduced precision. (#2363)
+
 ## [0.25.35]
 
 ### Added
