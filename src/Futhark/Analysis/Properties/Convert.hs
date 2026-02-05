@@ -50,8 +50,7 @@ propertyPrelude =
       "FiltPart",
       "FiltPartInv2",
       "FiltPart2",
-      "For",
-      "Uninterpreted"
+      "For"
     ]
 
 newIndexFn :: (Pretty u) => E.VName -> E.TypeBase E.Exp u -> IndexFnM [IndexFn]
@@ -122,24 +121,15 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
         emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
           <> prettyStr val
       forM_ formal_args (uncurry newIndexFn)
-      if isUninterpreted te
-        then do
-          forM_ size_vars addSizeVariable
-          indexfns <- indexFnsFromTypeExp vn te >>= bindfn vn
-          insertTopLevel vn (mkApplyIndexFn vn size_vars params te indexfns)
-          out <- mapM (changeScope (S.fromList $ size_vars <> arg_vars)) indexfns
-          printM 1 $ prettyBinding vn out
-          pure out
-        else do
-          forM_ params addPreconditions
-          forM_ params addBooleanNames
-          forM_ size_vars addSizeVariable
-          indexfns <- forward body >>= mapM rewrite >>= bindfn vn
-          checkPostcondition vn indexfns te
-          insertTopLevel vn (mkApplyIndexFn vn size_vars params te indexfns)
-          out <- mapM (changeScope (S.fromList $ size_vars <> arg_vars)) indexfns
-          printM 1 $ prettyBinding vn out
-          pure out
+      forM_ params addPreconditions
+      forM_ params addBooleanNames
+      forM_ size_vars addSizeVariable
+      indexfns <- forward body >>= mapM rewrite >>= bindfn vn
+      checkPostcondition vn indexfns te
+      insertTopLevel vn (mkApplyIndexFn vn size_vars params te indexfns)
+      out <- mapM (changeScope (S.fromList $ size_vars <> arg_vars)) indexfns
+      printM 1 $ prettyBinding vn out
+      pure out
   where
     formal_args = concatMap E.patternMap params
     arg_vars = map fst formal_args
@@ -1165,8 +1155,6 @@ forwardPropertyPrelude f args =
             (pf, pps) <- propArgs
             pure (Bool True, pr $ Property.FiltPart y x pf pps)
     "FiltPart2" -> forwardPropertyPrelude "FiltPart" args
-    "Uninterpreted" ->
-      pure (IndexFn [] (cases [(Bool True, sym2SoP (Bool True))]))
     "For"
       | [e_X, e_pred] <- getArgs args,
         Just x <- justVName e_X,
@@ -1746,51 +1734,3 @@ checkBounds e f_xs idxs =
               <> " => "
               <> prettyStr (bound e_idx)
               <> ")."
-
-indexFnsFromTypeExp :: E.VName -> E.TypeExp E.Exp E.VName -> IndexFnM [IndexFn]
-indexFnsFromTypeExp vn te = do
-  array_shape <- shapeOfTE te
-  let paths = toTupleOfArraysTE te
-  fs <- mapM (createUninterpretedIndexFn array_shape <=< dots vn) paths
-  pure fs
-  where
-    name `dots` [] = pure name
-    name `dots` proj = newNameFromString (E.baseString name <> concatMap (('.' :) . show) proj)
-
-shapeOfTE :: E.TypeExp E.Exp E.VName -> IndexFnM [SoP Symbol]
-shapeOfTE (E.TEArray dim inner _) = do
-  d <- forward (dimExp dim)
-  rest <- shapeOfTE inner
-  -- d is [IndexFn]. We expect a scalar size.
-  let s = case d of
-        [IndexFn [] cs] | Just x <- justSingleCase (IndexFn [] cs) -> x
-        _ -> error "shapeOfTE: expected scalar size"
-  pure (s : rest)
-  where
-    dimExp (E.SizeExp e _) = e
-    dimExp (E.SizeExpAny _) = error "shapeOfTE: AnyDim not supported"
-shapeOfTE (E.TEParens te _) = shapeOfTE te
-shapeOfTE (E.TERefine te _ _) = shapeOfTE te
-shapeOfTE (E.TETuple _ _) = pure [] -- Arrays of tuples are flattened, so shape of tuple is empty (scalar).
-shapeOfTE _ = pure [] -- Scalar
-
-toTupleOfArraysTE :: E.TypeExp E.Exp E.VName -> [[Integer]]
-toTupleOfArraysTE (E.TEArray _ inner _) = toTupleOfArraysTE inner
-toTupleOfArraysTE (E.TEParens te _) = toTupleOfArraysTE te
-toTupleOfArraysTE (E.TERefine te _ _) = toTupleOfArraysTE te
-toTupleOfArraysTE (E.TETuple tes _) = do
-  (i, te) <- zip [0 ..] tes
-  map (i :) (toTupleOfArraysTE te)
-toTupleOfArraysTE (E.TERecord {}) = error "Records not supported in toTupleOfArraysTE"
-toTupleOfArraysTE _ = [[]] -- Scalar
-
-isUninterpreted :: E.TypeExp E.Exp E.VName -> Bool
-isUninterpreted te = any check (getTERefine te)
-  where
-    check (E.Lambda _ body _ _ _) = checkBody body
-    check _ = False
-
-    checkBody (E.AppExp (E.Apply f _ _) _)
-      | Just "Uninterpreted" <- getFun f = True
-    checkBody (E.AppExp (E.LetPat _ _ _ body _) _) = checkBody body
-    checkBody _ = False
