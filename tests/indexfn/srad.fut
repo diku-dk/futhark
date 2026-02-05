@@ -34,7 +34,7 @@ def indexE
 def calc_stats [rows] [cols]
     (image: [rows][cols]f32)
     (neROI: i64)
-    : {f32 | \x -> Uninterpreted x} =
+    : {f32 | \_ -> true} =
   let flat_image = flatten image
   let sum = f32.sum flat_image
   let flat_sq = map (\x -> x*x) flat_image
@@ -67,7 +67,7 @@ def calc_c
     (dE_k: f32)
     (jc: f32)
     (q0sqr: f32)
-    : {f32 | \x -> Uninterpreted x} =
+    : {f32 | \_ -> true} =
   let g2 =
     (dN_k * dN_k + dS_k * dS_k
      + dW_k * dW_k
@@ -96,8 +96,10 @@ def calc_d
     (dW_k: f32)
     (cE: f32)
     (dE_k: f32)
-    : {f32 | \x -> Uninterpreted x} =
-  cN * dN_k + cS * dS_k + cW * dW_k + cE * dE_k
+    : {f32 | \_ -> true} =
+  -- The identitity function is a little trick to make the index function
+  -- for this uninterpreted.
+  (\x -> x) (cN * dN_k + cS * dS_k + cW * dW_k + cE * dE_k)
 
 
 def srad_iter [rows] [cols]
@@ -170,5 +172,5 @@ def main [rows] [cols]
     (image: [rows][cols]u8)
     : {[rows][cols]f32 | \_ -> true} =
   let niter = 100
-  let lambda = 1 / 2 -- 0.5
+  let lambda = 0.5
   in do_srad niter lambda image

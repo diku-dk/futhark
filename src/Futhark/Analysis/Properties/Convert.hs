@@ -420,6 +420,8 @@ forward (E.Literal (E.FloatValue {}) _) = do
   fromScalar . sym2SoP . Var <$> newNameFromString "float"
 forward (E.IntLit x _ _) =
   pure . fromScalar $ int2SoP x
+forward (E.FloatLit {}) = do
+  fromScalar . sym2SoP . Var <$> newNameFromString "float"
 forward (E.Negate x _) = do
   -- Numeric negation.
   map negf <$> forward x
