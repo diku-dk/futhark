@@ -268,7 +268,6 @@ struct futhark_context {
   bool program_initialised;
   // Uniform fields above.
 
-  struct tuning_params tuning_params;
   // True if a potentially failing kernel has been enqueued.
   int32_t failure_is_an_option;
   int total_runs;
