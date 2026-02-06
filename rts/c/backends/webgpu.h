@@ -209,11 +209,7 @@ struct futhark_context_config {
   int profiling;
   int logging;
   char *cache_fname;
-  int num_tuning_params;
-  int64_t *tuning_params;
-  const char** tuning_param_names;
-  const char** tuning_param_vars;
-  const char** tuning_param_classes;
+  struct tuning_param tuning_params[NUM_TUNING_PARAMS];
   // Uniform fields above.
 
   char *program;
@@ -322,10 +318,10 @@ static void wgpu_size_setup(struct futhark_context *ctx) {
     cfg->gpu.default_grid_size = 16;
   }
 
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    const char *size_class = cfg->tuning_param_classes[i];
-    int64_t *size_value = &cfg->tuning_params[i];
-    const char* size_name = cfg->tuning_param_names[i];
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+    const char *size_class = cfg->tuning_params[i].class;
+    int64_t *size_value = &cfg->tuning_params[i].val;
+    const char* size_name = cfg->tuning_params[i].name;
     //int64_t max_value = 0;
     int64_t default_value = 0;
 
