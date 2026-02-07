@@ -4,7 +4,6 @@ module Futhark.Test.WebGPUTest
 where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Maybe (mapMaybe)
 import Data.Text qualified as T
@@ -14,8 +13,8 @@ import Futhark.IR.GPUMem qualified as F
 import Futhark.MonadFreshNames
 import Futhark.Test.Spec
 import Futhark.Test.Values qualified as V
-import Futhark.Util.Pretty
 import Futhark.Util
+import Futhark.Util.Pretty
 
 generateTests ::
   (MonadFreshNames m, MonadIO m) =>
