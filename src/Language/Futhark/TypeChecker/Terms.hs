@@ -48,6 +48,7 @@ hasBinding (AppExp LetPat {} _) = True
 hasBinding (AppExp LetFun {} _) = True
 hasBinding (AppExp Loop {} _) = True
 hasBinding (AppExp LetWith {} _) = True
+hasBinding (AppExp LetWithField {} _) = True
 hasBinding (AppExp Match {} _) = True
 hasBinding e = isNothing $ astMap m e
   where
@@ -552,6 +553,33 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
     body' <- checkExp body
     (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
     pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
+checkExp (AppExp (LetWithField dest src fields ve body loc) _) = do
+  src' <- checkIdent src
+  src_t <- normTypeFully $ unInfo $ identType src'
+  foldM_ (flip $ mustHaveField usage) src_t fields
+  ve' <- checkExp ve
+  ve_t <- expType ve'
+  updated_t <- updateField fields ve_t src_t
+  bindingIdent dest updated_t $ \dest' -> do
+    body' <- checkExp body
+    (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
+    pure $ AppExp (LetWithField dest' src' fields ve' body' loc) (Info $ AppRes body_t ext)
+  where
+    usage = mkUsage loc "record field update"
+    updateField [] ve_t src_t = do
+      (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
+      onFailure (CheckingRecordUpdate fields src_t' ve_t) $
+        unify usage src_t' ve_t
+      pure ve_t
+    updateField (f : fs) ve_t (Scalar (Record m))
+      | Just f_t <- M.lookup f m = do
+          f_t' <- updateField fs ve_t f_t
+          pure $ Scalar $ Record $ M.insert f f_t' m
+    updateField _ _ _ =
+      typeError loc mempty . withIndexLink "record-type-not-known" $
+        "Full type of"
+          </> indent 2 (pretty src)
+          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
 checkExp (Update src slice ve loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
