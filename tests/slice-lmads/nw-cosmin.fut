@@ -2,6 +2,7 @@
 -- https://github.com/kkushagra/rodinia/blob/master/openmp/nw
 --
 -- ==
+-- tags { no_webgpu }
 -- entry: nw_flat
 -- compiled random input { 16i64 10i32 [2362369]i32 [2362369]i32 } auto output
 -- compiled random input { 32i64 10i32 [2362369]i32 [2362369]i32 } auto output

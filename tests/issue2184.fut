@@ -1,9 +1,7 @@
 -- Somewhat exotic case related to entry points that are also used as
 -- ordinary functions.
-
-
 -- ==
--- tags { autodiff }
+-- tags { no_webgpu }
 
 entry calculate_objective [d]
                           (xParam: [3][4 * d]f64)

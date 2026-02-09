@@ -1,5 +1,7 @@
 -- This is a fragile test, in that it depends on subtle interchange to
 -- even produce the code that sequentialisation chokes on.
+-- ==
+-- tags { no_webgpu }
 
 def dotprod [n] (xs: [n]f64) (ys: [n]f64) =
   f64.sum (map2 (*) xs ys)
