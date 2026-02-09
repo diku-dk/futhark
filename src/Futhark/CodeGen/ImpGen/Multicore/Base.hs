@@ -203,8 +203,7 @@ extractAllocations segop_code = f segop_code
           (free_allocs, here_allocs) = f body_allocs
           free' =
             filter
-              ( (`notNameIn` Imp.declaredIn body_allocs) . Imp.paramName
-              )
+              ((`notNameIn` Imp.declaredIn body_allocs) . Imp.paramName)
               free
        in ( free_allocs,
             here_allocs <> Imp.Op (Imp.ParLoop s body' free')

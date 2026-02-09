@@ -15,6 +15,54 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* GPU code generation for atomics on 8-bit scalars.
+
+* `f64.nextafter`, `f64.copysign`, and `f64.isinf` reduced precision. (#2363)
+
+## [0.25.35]
+
+### Added
+
+* `futhark lsp` now provides the `textDocument/formatting` server method
+
+* `futhark profile`: Generation of HTML-Files with cost centre and source range
+  analysis, heatmap markup according to source range cost.
+  (#2340, With VegOwOtenks)
+
+* Per Cost-Centre Source Location Listings in the `.summary`-file output of
+  `futhark profile`. (By VegOwOtenks)
+
+* The `multicore` backend now uses a decoupled lookback `scan` implemented by
+  Amirreza Hashemi.
+
+* Custom tuning parameters can now be added with the `#[param(NAME)]` attribute.
+  See the documentation for the sharp edges.
+
+* `futhark test` now supports `--tuning`, just like `futhark bench`.
+
+### Fixed
+
+* Unit types now behave like records/tuples in the C interface and derived
+  interface, such as server-mode and `futhark literate`. (#2332)
+
+* `futhark bench`: JSON output now contains results for all test stanzas that
+  use a given entry point, rather than just the last one.
+
+* A bug in internalisation of `while` loops that could occur when one result of
+  the loop was syntactically the same as a loop parameter. (#2335)
+
+* Missing inlining for some functions that must be inlined when using GPU
+  backends. (#2341)
+
+* An interpreter bug in return size inference for functions returning an
+  abstract type that is concrete at the calling size (#2336).
+
+* `futhark bench` would ignore programs with any tag.
+
+* An issue where some array types would not be generated for the C API.
+
+* An edge case in loop size inference. (#2354)
+
 ## [0.25.34]
 
 ### Added
@@ -374,6 +422,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark script` now supports an `-f` option.
 
 * `futhark script` now supports the builtin procedure `$store`.
+
+* Compiling the Futhark compiler now requires GHC 9.10.
 
 ### Fixed
 

@@ -23,6 +23,7 @@ module Language.Futhark.Prop
     paramName,
     anySize,
     isAnySize,
+    setApplyLoc,
 
     -- * Queries on expressions
     typeOf,
@@ -377,6 +378,17 @@ isAnySize :: Size -> Maybe Int
 isAnySize (StringLit xs _) = Just $ read $ map (chr . fromIntegral) xs
 isAnySize _ = Nothing
 
+-- | Override the location of an 'Apply' expression.
+--
+-- This is useful because 'mkApply' sets the location to be the span of the
+-- function and all arguments, but during many frontend transformations we
+-- insert additional arguments for which we do not care about the original
+-- source location. Our goal is to maintain a correspondence between the
+-- original source code and the generated code.
+setApplyLoc :: SrcLoc -> Exp -> Exp
+setApplyLoc loc (AppExp (Apply f args _) info) = AppExp (Apply f args loc) info
+setApplyLoc _ e = e
+
 -- | Match the dimensions of otherwise assumed-equal types.  The
 -- combining function is also passed the names bound within the type
 -- (from named parameters or return types).
@@ -634,11 +646,11 @@ namesToPrimTypes :: M.Map Name PrimType
 namesToPrimTypes =
   M.fromList
     [ (nameFromString $ prettyString t, t)
-      | t <-
-          Bool
-            : map Signed [minBound .. maxBound]
-            ++ map Unsigned [minBound .. maxBound]
-            ++ map FloatType [minBound .. maxBound]
+    | t <-
+        Bool
+          : map Signed [minBound .. maxBound]
+          ++ map Unsigned [minBound .. maxBound]
+          ++ map FloatType [minBound .. maxBound]
     ]
 
 -- | The nature of something predefined.  For functions, these can

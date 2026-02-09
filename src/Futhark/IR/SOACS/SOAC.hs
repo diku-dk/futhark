@@ -649,7 +649,7 @@ typeCheckSOAC (JVP args vec lam) = do
         </> "does not match type of seed vector"
         </> PP.indent 2 (pretty vec_ts)
 typeCheckSOAC (Stream size arrexps accexps lam) = do
-  TC.require [Prim int64] size
+  TC.require (Prim int64) size
   accargs <- mapM TC.checkArg accexps
   arrargs <- mapM lookupType arrexps
   _ <- TC.checkSOACArrayArgs size arrexps
@@ -669,13 +669,13 @@ typeCheckSOAC (Stream size arrexps accexps lam) = do
   let fake_lamarrs' = map asArg lamarrs'
   TC.checkLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
 typeCheckSOAC (Hist w arrs ops bucket_fun) = do
-  TC.require [Prim int64] w
+  TC.require (Prim int64) w
 
   -- Check the operators.
   forM_ ops $ \(HistOp dest_shape rf dests nes op) -> do
     nes' <- mapM TC.checkArg nes
-    mapM_ (TC.require [Prim int64]) dest_shape
-    TC.require [Prim int64] rf
+    mapM_ (TC.require (Prim int64)) dest_shape
+    TC.require (Prim int64) rf
 
     -- Operator type must match the type of neutral elements.
     TC.checkLambda op $ map TC.noArgAliases $ nes' ++ nes'
@@ -689,7 +689,7 @@ typeCheckSOAC (Hist w arrs ops bucket_fun) = do
 
     -- Arrays must have proper type.
     forM_ (zip nes_t dests) $ \(t, dest) -> do
-      TC.requireI [t `arrayOfShape` dest_shape] dest
+      TC.requireI (t `arrayOfShape` dest_shape) dest
       TC.consume =<< TC.lookupAliases dest
 
   -- Types of input arrays must equal parameter types for bucket function.
@@ -708,8 +708,8 @@ typeCheckSOAC (Hist w arrs ops bucket_fun) = do
         <> prettyTuple (lambdaReturnType bucket_fun)
         <> " but should have type "
         <> prettyTuple bucket_ret_t
-typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
-  TC.require [Prim int64] w
+typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
+  TC.require (Prim int64) w
   arrs' <- TC.checkSOACArrayArgs w arrs
   TC.checkLambda map_lam arrs'
   scan_nes' <- concat <$> mapM typeCheckScan scans

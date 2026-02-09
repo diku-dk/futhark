@@ -290,7 +290,12 @@ kernelConstToExp = traverse f
       pure v
     f (Imp.SizeConst k c) = do
       v <- dPrimS (nameFromText $ prettyText k) int64
+      addTuningParam k $ Just c
       sOp $ Imp.GetSize v k c
+      pure v
+    f (Imp.SizeUserParam name def) = do
+      v <- dPrimS (nameFromText $ prettyText name) int64
+      emit $ Imp.GetUserParam v name $ le64 def
       pure v
 
 -- | Given available register and a list of parameter types, compute
@@ -907,10 +912,12 @@ atomicUpdateCAS space t arr old bucket x do_op = do
             )
           _ -> (id, id)
 
-      int
-        | primBitSize t == 16 = int16
-        | primBitSize t == 32 = int32
-        | otherwise = int64
+      int = case primBitSize t of
+        8 -> int8
+        16 -> int16
+        32 -> int32
+        64 -> int64
+        _ -> error "impossible integer bit size"
 
   sWhile (tvExp run_loop) $ do
     assumed <~~ Imp.var old t
@@ -1051,6 +1058,7 @@ simpleKernelBlocks max_num_tblocks kernel_size = do
   tblock_size <- dPrim "tblock_size"
   fname <- askFunction
   let tblock_size_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar tblock_size
+  addTuningParam tblock_size_key $ Just Imp.SizeThreadBlock
   sOp $ Imp.GetSize (tvVar tblock_size) tblock_size_key Imp.SizeThreadBlock
   virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `divUp` tvExp tblock_size
   num_tblocks <- dPrimV "num_tblocks" $ virt_num_tblocks `sMin64` max_num_tblocks
@@ -1180,6 +1188,7 @@ getSize desc size_class = do
   v <- dPrim desc
   fname <- askFunction
   let v_key = keyWithEntryPoint fname $ nameFromText $ prettyText $ tvVar v
+  addTuningParam v_key $ Just size_class
   sOp $ Imp.GetSize (tvVar v) v_key size_class
   pure v
 

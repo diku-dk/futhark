@@ -41,7 +41,7 @@ jobs:
 
     - uses: haskell-actions/setup@v2
       with:
-        ghc-version: '9.8.1'
+        ghc-version: '9.10.3'
 
     - uses: actions/cache@v4
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -115,7 +115,7 @@ jobs:
     - id: setup-haskell
       uses: haskell-actions/setup@v2
       with:
-        ghc-version: '9.8.1'
+        ghc-version: '9.10.3'
 
     - uses: actions/cache@v4
       name: Cache cabal stuff
@@ -264,7 +264,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-        futhark test -c --backend=c tests --no-tuning
+        futhark test -c --backend=c tests
         make -C tests_lib/c -j
 
   test-multicore:
@@ -289,7 +289,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
         export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O"
-        futhark test -c --backend=multicore tests --no-tuning
+        futhark test -c --backend=multicore tests
         make -C tests_lib/c FUTHARK_BACKEND=multicore
 
   test-ispc:
@@ -319,7 +319,7 @@ jobs:
 
     - run: |
         export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O"
-        nix-shell -E 'with import (import ./nix/sources.nix {}).nixpkgs {}; mkShell { buildInputs = [ ispc python3Packages.jsonschema ]; }' --run 'futhark test -c --backend=ispc tests --no-tuning'
+        nix-shell -E 'with import (import ./nix/sources.nix {}).nixpkgs {}; mkShell { buildInputs = [ ispc python3Packages.jsonschema ]; }' --run 'futhark test -c --backend=ispc tests'
         nix-shell -E 'with import (import ./nix/sources.nix {}).nixpkgs {}; mkShell { buildInputs = [ ispc python3Packages.jsonschema ]; }' --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 
   test-python:
@@ -345,7 +345,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests
+        futhark test -c --no-terminal --backend=python --exclude=no_python --exclude=compiled tests
         make -C tests_lib/python -j
 
   test-oclgrind:
@@ -390,7 +390,7 @@ jobs:
         python -m venv virtualenv
         source virtualenv/bin/activate
         pip install 'numpy<2.0.0' pyopencl jsonschema
-        futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
+        futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh --tuning=tuning_gpu
 
   test-opencl:
     runs-on: hendrix
@@ -411,7 +411,8 @@ jobs:
           module load cuda/11.8
           futhark test tests \
             --backend=opencl \
-            --cache-extension=cache
+            --cache-extension=cache \
+            --tuning=tuning_gpu
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
         slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:a100:1 --job-name=fut-opencl-test
 
@@ -432,7 +433,9 @@ jobs:
           pip install numpy pyopencl jsonschema
           module unload cuda
           module load cuda/11.8
-          futhark test tests --no-terminal --backend=pyopencl
+          futhark test tests \
+             --backend=pyopencl \
+             --tuning=tuning_gpu
         slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:a100:1 --job-name=fut-pyopencl-test
 
   test-cuda:
@@ -456,6 +459,7 @@ jobs:
           futhark test tests \
             --backend=cuda \
             --cache-extension=cache \
+            --tuning=tuning_gpu \
             --concurrency=8
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:a100:1 --job-name=fut-cuda-test
@@ -477,7 +481,10 @@ jobs:
         script: |
           set -e
           hostname
-          futhark test tests --no-terminal --backend=hip --concurrency=8
+          futhark test tests --no-terminal \
+            --backend=hip \
+            --tuning=tuning_gpu \
+            --concurrency=8
           source virtualenv/bin/activate
           FUTHARK_BACKEND=hip make -C tests_lib/c -j
 
@@ -516,7 +523,6 @@ jobs:
           -c \
           --backend=wasm \
           --runner=./tools/node-simd.sh \
-          --no-tuning \
           --exclude=no_wasm tests
 
   test-wasm-multicore:
@@ -550,7 +556,7 @@ jobs:
       run: |
         node --version
         export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1 -s PTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
-        futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --no-tuning --exclude=no_wasm tests
+        futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --exclude=no_wasm tests
 
   test-wasm-lib:
     runs-on: ubuntu-22.04
