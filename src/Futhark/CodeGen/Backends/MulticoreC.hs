@@ -96,62 +96,62 @@ closureRetvalStructField v =
 
 data ValueType = Prim PrimType | MemBlock | RawMem
 
-compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
+compileFreeStructFields :: [VName] -> [(C.Type, C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
   where
-    field name (ty, Prim _) =
-      [C.csdecl|$ty:ty $id:(closureFreeStructField name);|]
-    field name (_, _) =
+    field name (_, storage_ty, Prim _) =
+      [C.csdecl|$ty:storage_ty $id:(closureFreeStructField name);|]
+    field name (_, _, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureFreeStructField name);|]
 
-compileRetvalStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
+compileRetvalStructFields :: [VName] -> [(C.Type, C.Type, ValueType)] -> [C.FieldGroup]
 compileRetvalStructFields = zipWith field
   where
-    field name (ty, Prim _) =
+    field name (ty, _, Prim _) =
       [C.csdecl|$ty:ty *$id:(closureRetvalStructField name);|]
-    field name (_, _) =
+    field name (_, _, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureRetvalStructField name);|]
 
 compileSetStructValues ::
   (C.ToIdent a) =>
   a ->
   [VName] ->
-  [(C.Type, ValueType)] ->
+  [(C.Type, C.Type, ValueType)] ->
   [C.Stm]
 compileSetStructValues struct = zipWith field
   where
-    field name (_, Prim pt) =
+    field name (_, _, Prim pt) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$exp:(toStorage pt (C.toExp name noLoc));|]
-    field name (_, MemBlock) =
+    field name (_, _, MemBlock) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name.mem;|]
-    field name (_, RawMem) =
+    field name (_, _, RawMem) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
 
 compileSetRetvalStructValues ::
   (C.ToIdent a) =>
   a ->
   [VName] ->
-  [(C.Type, ValueType)] ->
+  [(C.Type, C.Type, ValueType)] ->
   [C.Stm]
 compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
   where
-    field name (ct, Prim _) =
+    field name (ct, _, Prim _) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=(($ty:ct*)&$id:name);
                $escstm:("#if defined(ISPC)")
                $id:struct.$id:(closureRetvalStructField name)+= programIndex;
                $escstm:("#endif")|]
-    field name (_, MemBlock) =
+    field name (_, _, MemBlock) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
-    field name (_, RawMem) =
+    field name (_, _, RawMem) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
 
-compileGetRetvalStructVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
+compileGetRetvalStructVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, C.Type, ValueType)] -> [C.InitGroup]
 compileGetRetvalStructVals struct = zipWith field
   where
-    field name (ty, Prim pt) =
+    field name (ty, _storage_ty, Prim _) =
       let inner = [C.cexp|*$id:struct->$id:(closureRetvalStructField name)|]
-       in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
-    field name (ty, _) =
+       in [C.cdecl|$ty:ty $id:name = $exp:inner;|]
+    field name (ty, _, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(prettyString name),
                  .mem = $id:struct->$id:(closureRetvalStructField name),
@@ -161,32 +161,33 @@ compileGetStructVals ::
   (C.ToIdent a) =>
   a ->
   [VName] ->
-  [(C.Type, ValueType)] ->
+  [(C.Type, C.Type, ValueType)] ->
   [C.InitGroup]
 compileGetStructVals struct = zipWith field
   where
-    field name (ty, Prim pt) =
+    field name (ty, _storage_ty, Prim pt) =
       let inner = [C.cexp|$id:struct->$id:(closureFreeStructField name)|]
        in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
-    field name (ty, _) =
+    field name (ty, _, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(prettyString name),
                   .mem = $id:struct->$id:(closureFreeStructField name),
                   .size = 0, .references = NULL};|]
 
-compileWriteBackResVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
+compileWriteBackResVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, C.Type, ValueType)] -> [C.Stm]
 compileWriteBackResVals struct = zipWith field
   where
-    field name (_, Prim pt) =
-      [C.cstm|*$id:struct->$id:(closureRetvalStructField name) = $exp:(toStorage pt (C.toExp name noLoc));|]
-    field name (_, _) =
+    field name (_, _, Prim _) =
+      [C.cstm|*$id:struct->$id:(closureRetvalStructField name) = $exp:(C.toExp name noLoc);|]
+    field name (_, _, _) =
       [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name.mem;|]
 
-paramToCType :: Param -> GC.CompilerM op s (C.Type, ValueType)
-paramToCType (ScalarParam _ pt) = do
-  let t = primStorageType pt
-  pure (t, Prim pt)
-paramToCType (MemParam name space') = mcMemToCType name space'
+paramToCType :: Param -> GC.CompilerM op s (C.Type, C.Type, ValueType)
+paramToCType (ScalarParam _ pt) =
+  pure (primTypeToCType pt, primStorageType pt, Prim pt)
+paramToCType (MemParam name space') = do
+  (ct, vt) <- mcMemToCType name space'
+  pure (ct, ct, vt)
 
 mcMemToCType :: VName -> Space -> GC.CompilerM op s (C.Type, ValueType)
 mcMemToCType v space = do
@@ -252,8 +253,8 @@ generateParLoopFn ::
   Name ->
   MCCode ->
   a ->
-  [(VName, (C.Type, ValueType))] ->
-  [(VName, (C.Type, ValueType))] ->
+  [(VName, (C.Type, C.Type, ValueType))] ->
+  [(VName, (C.Type, C.Type, ValueType))] ->
   GC.CompilerM Multicore s Name
 generateParLoopFn lexical basename code fstruct free retval = do
   let (fargs, fctypes) = unzip free
@@ -286,9 +287,9 @@ prepareTaskStruct ::
   DefSpecifier s ->
   Name ->
   [VName] ->
-  [(C.Type, ValueType)] ->
+  [(C.Type, C.Type, ValueType)] ->
   [VName] ->
-  [(C.Type, ValueType)] ->
+  [(C.Type, C.Type, ValueType)] ->
   GC.CompilerM Multicore s Name
 prepareTaskStruct def name free_args free_ctypes retval_args retval_ctypes = do
   let makeStruct s =
