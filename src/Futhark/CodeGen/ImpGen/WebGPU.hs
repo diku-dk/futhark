@@ -390,7 +390,7 @@ kernelsToWebGPU prog =
       failures = mempty
    in Program
         { webgpuProgram = wsCode translation,
-          webgpuPrelude = RTS.wgsl_prelude,
+          webgpuPrelude = RTS.wgslPrelude,
           webgpuMacroDefs = constants,
           webgpuKernels = kernels,
           webgpuFailures = failures,

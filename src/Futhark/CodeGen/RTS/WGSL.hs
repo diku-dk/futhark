@@ -8,13 +8,13 @@ module Futhark.CodeGen.RTS.WGSL
     scalar32,
     scalar64,
     atomics,
-    wgsl_prelude,
-    lmad_copy,
-    map_transpose,
-    map_transpose_low_height,
-    map_transpose_low_width,
-    map_transpose_small,
-    map_transpose_large,
+    wgslPrelude,
+    lmadCopy,
+    mapTranspose,
+    mapTransposeLowHeight,
+    mapTransposeLowWidth,
+    mapTransposeSmall,
+    mapTransposeLarge,
   )
 where
 
@@ -51,8 +51,8 @@ atomics :: T.Text
 atomics = $(embedStringFile "rts/wgsl/atomics.wgsl")
 {-# NOINLINE atomics #-}
 
-wgsl_prelude :: T.Text
-wgsl_prelude =
+wgslPrelude :: T.Text
+wgslPrelude =
   -- Put scalar32 in front of the other integer types since they are all
   -- internally represented using i32.
   mconcat
@@ -66,31 +66,31 @@ wgsl_prelude =
     ]
 
 -- | @rts/wgsl/lmad_copy.wgsl@
-lmad_copy :: T.Text
-lmad_copy = $(embedStringFile "rts/wgsl/lmad_copy.wgsl")
-{-# NOINLINE lmad_copy #-}
+lmadCopy :: T.Text
+lmadCopy = $(embedStringFile "rts/wgsl/lmad_copy.wgsl")
+{-# NOINLINE lmadCopy #-}
 
 -- | @rts/wgsl/map_transpose.wgsl@
-map_transpose :: T.Text
-map_transpose = $(embedStringFile "rts/wgsl/map_transpose.wgsl")
-{-# NOINLINE map_transpose #-}
+mapTranspose :: T.Text
+mapTranspose = $(embedStringFile "rts/wgsl/map_transpose.wgsl")
+{-# NOINLINE mapTranspose #-}
 
 -- | @rts/wgsl/map_transpose_low_height.wgsl@
-map_transpose_low_height :: T.Text
-map_transpose_low_height = $(embedStringFile "rts/wgsl/map_transpose_low_height.wgsl")
-{-# NOINLINE map_transpose_low_height #-}
+mapTransposeLowHeight :: T.Text
+mapTransposeLowHeight = $(embedStringFile "rts/wgsl/map_transpose_low_height.wgsl")
+{-# NOINLINE mapTransposeLowHeight #-}
 
 -- | @rts/wgsl/map_transpose_low_width.wgsl@
-map_transpose_low_width :: T.Text
-map_transpose_low_width = $(embedStringFile "rts/wgsl/map_transpose_low_width.wgsl")
-{-# NOINLINE map_transpose_low_width #-}
+mapTransposeLowWidth :: T.Text
+mapTransposeLowWidth = $(embedStringFile "rts/wgsl/map_transpose_low_width.wgsl")
+{-# NOINLINE mapTransposeLowWidth #-}
 
 -- | @rts/wgsl/map_transpose_small.wgsl@
-map_transpose_small :: T.Text
-map_transpose_small = $(embedStringFile "rts/wgsl/map_transpose_small.wgsl")
-{-# NOINLINE map_transpose_small #-}
+mapTransposeSmall :: T.Text
+mapTransposeSmall = $(embedStringFile "rts/wgsl/map_transpose_small.wgsl")
+{-# NOINLINE mapTransposeSmall #-}
 
 -- | @rts/wgsl/map_transpose_large.wgsl@
-map_transpose_large :: T.Text
-map_transpose_large = $(embedStringFile "rts/wgsl/map_transpose_large.wgsl")
-{-# NOINLINE map_transpose_large #-}
+mapTransposeLarge :: T.Text
+mapTransposeLarge = $(embedStringFile "rts/wgsl/map_transpose_large.wgsl")
+{-# NOINLINE mapTransposeLarge #-}

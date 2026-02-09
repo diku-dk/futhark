@@ -136,12 +136,12 @@ builtinKernels =
   M.fromList $ concatMap generateKernels builtinKernelTemplates
   where
     builtinKernelTemplates =
-      [ ("lmad_copy_NAME", copyInterface RTS.lmad_copy),
-        ("map_transpose_NAME", transposeInterface RTS.map_transpose),
-        ("map_transpose_NAME_low_height", transposeInterface RTS.map_transpose_low_height),
-        ("map_transpose_NAME_low_width", transposeInterface RTS.map_transpose_low_width),
-        ("map_transpose_NAME_small", transposeInterface RTS.map_transpose_small),
-        ("map_transpose_NAME_large", transposeInterfaceLarge RTS.map_transpose_large)
+      [ ("lmad_copy_NAME", copyInterface RTS.lmadCopy),
+        ("map_transpose_NAME", transposeInterface RTS.mapTranspose),
+        ("map_transpose_NAME_low_height", transposeInterface RTS.mapTransposeLowHeight),
+        ("map_transpose_NAME_low_width", transposeInterface RTS.mapTransposeLowWidth),
+        ("map_transpose_NAME_small", transposeInterface RTS.mapTransposeSmall),
+        ("map_transpose_NAME_large", transposeInterfaceLarge RTS.mapTransposeLarge)
       ]
 
     generateKernelProgram kernel name elemType atomic =
@@ -149,7 +149,7 @@ builtinKernels =
             if atomic
               then T.replace "<ELEM_TYPE>" "<atomic<ELEM_TYPE>>" kernel
               else kernel
-       in RTS.wgsl_prelude
+       in RTS.wgslPrelude
             <> T.replace "NAME" name (T.replace "ELEM_TYPE" elemType baseKernel)
 
     generateKernels (template, interface) =
