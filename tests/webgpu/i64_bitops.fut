@@ -23,19 +23,19 @@
 -- ==
 -- entry: shl
 -- input { [1i64, 1i64, 1i64, 0xFFFFFFFFi64, -1i64]
---         [0i32, 32i32, 63i32, 32i32, 1i32] }
+--         [0i64, 32i64, 63i64, 32i64, 1i64] }
 -- output { [1i64, 0x100000000i64, -9223372036854775808i64, 0xFFFFFFFF00000000i64, -2i64] }
 
 -- ==
 -- entry: shr
 -- input { [1i64, 0x100000000i64, -9223372036854775808i64, -1i64, -0x100000000i64]
---         [0i32, 32i32, 63i32, 1i32, 32i32] }
+--         [0i64, 32i64, 63i64, 1i64, 32i64] }
 -- output { [1i64, 1i64, -1i64, -1i64, -1i64] }
 
 -- ==
 -- entry: ushr
 -- input { [1i64, 0x100000000i64, -9223372036854775808i64, -1i64]
---         [0i32, 32i32, 63i32, 1i32] }
+--         [0i64, 32i64, 63i64, 1i64] }
 -- output { [1i64, 1i64, 1i64, 9223372036854775807i64] }
 
 -- ==
@@ -46,7 +46,7 @@
 entry land = map2 (i64.&)
 entry lor = map2 (i64.|)
 entry lxor = map2 (i64.^)
-entry shl (xs: []i64) (ys: []i32) = map2 (\x y -> x << y) xs ys
-entry shr (xs: []i64) (ys: []i32) = map2 (\x y -> x >> y) xs ys
-entry ushr (xs: []i64) (ys: []i32) = map2 (\x y -> x >>> y) xs ys
+entry shl (xs: []i64) (ys: []i64) = map2 (\x y -> x << y) xs ys
+entry shr (xs: []i64) (ys: []i64) = map2 (\x y -> x >> y) xs ys
+entry ushr (xs: []i64) (ys: []i64) = map2 (\x y -> i64.u64 (u64.i64 x >> u64.i64 y)) xs ys
 entry complement = map i64.not
