@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `f64.nextafter`, `f64.copysign`, and `f64.isinf` reduced precision. (#2363)
 
+* Equality for `f16` in interpreter did not handle NaN correctly.
+
 ## [0.25.35]
 
 ### Added
