@@ -428,7 +428,6 @@ compileProg version prog = do
        #else
          #include <webgpu/webgpu.h>
          #include <emscripten.h>
-         #include <emscripten/html5_webgpu.h>
        #endif
       |]
 
