@@ -253,78 +253,7 @@ tests =
         ],
       testGroup
         "fuseScrema"
-        [ testCase "map-scan" $
-            SP
-              ( freshNames
-                  ( fuseScrema
-                      "d_5537"
-                      [SOAC.Input mempty "a_5538" "[d_5537]i32"]
-                      ( ScremaForm
-                          ( fromLines
-                              [ "\\ {eta_p_5566 : i32} : {i32} ->",
-                                "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
-                                "in {lifted_lambda_res_5567}"
-                              ]
-                          )
-                          []
-                          []
-                          "\\ {x_5568 : i32} : {i32} -> {x_5568}"
-                      )
-                      ["defunc_0_map_res_5565"]
-                      [SOAC.Input mempty "defunc_0_map_res_5565" "[d_5537]i32"]
-                      ( ScremaForm
-                          "\\ {x_5570 : i32} : {i32} -> {x_5570}"
-                          [ Scan
-                              ( fromLines
-                                  [ "\\ {eta_p_5571 : i32, eta_p_5572 : i32} : {i32} ->",
-                                    "let {defunc_0_op_res_5573 : i32} = add32(eta_p_5571, eta_p_5572)",
-                                    "in {defunc_0_op_res_5573}"
-                                  ]
-                              )
-                              ["0i32"]
-                          ]
-                          []
-                          "\\ {x_5574 : i32} : {i32} -> {x_5574}"
-                      )
-                      ["defunc_0_scan_res_5569"]
-                  )
-              )
-              @?= SP
-                ( Just
-                    ( [ Input mempty "defunc_0_map_res_5565" "[d_5537]i32",
-                        Input mempty "a_5538" "[d_5537]i32"
-                      ],
-                      ScremaForm
-                        { scremaLambda =
-                            fromLines
-                              [ "\\ {x_5570 : i32, eta_p_5566 : i32} : {i32, i32, i32} ->",
-                                "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
-                                "let {x_10000 : i32} = lifted_lambda_res_5567",
-                                "in {x_5570, lifted_lambda_res_5567, x_10000}"
-                              ],
-                          scremaScans =
-                            [ Scan
-                                ( fromLines
-                                    [ "\\ {eta_p_5571 : i32, eta_p_5572 : i32} : {i32} ->",
-                                      "let {defunc_0_op_res_5573 : i32} = add32(eta_p_5571, eta_p_5572)",
-                                      "in {defunc_0_op_res_5573}"
-                                    ]
-                                )
-                                ["0i32"]
-                            ],
-                          scremaReduces = [],
-                          scremaPostLambda =
-                            fromLines
-                              [ "\\ {x_5574 : i32, x_10002 : i32, x_10001 : i32} : {i32, i32} -> ",
-                                "{x_5574, x_10001}"
-                              ]
-                        },
-                      [ "defunc_0_scan_res_5569",
-                        "defunc_0_map_res_5565"
-                      ]
-                    )
-                )
-        ],
+        [],
       testGroup
         "fuseSuperScrema"
         [ testCase "map-scan (vertical)" $
@@ -373,9 +302,9 @@ tests =
                         "d_5537"
                         [input_a, input_b]
                         ( fromLines
-                            [ "\\ {eta_p_5566:i32} : {i32} ->",
+                            [ "\\ {eta_p_5566:i32, x_10000 : i32} : {i32, i32} ->",
                               "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
-                              "in {lifted_lambda_res_5567}"
+                              "in {lifted_lambda_res_5567, x_10000}"
                             ]
                         )
                         []

@@ -122,7 +122,12 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
                 )
           }
 
-  let lam3 = scremaPostLambda form_c
+  let lam3 =
+        Lambda
+          { lambdaParams =
+              lambdaParams (scremaPostLambda form_p)
+                <> lambdaParams (scremaLambda form_c)
+          }
   pure $
     SuperScrema
       w
