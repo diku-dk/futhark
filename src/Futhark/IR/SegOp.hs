@@ -554,10 +554,9 @@ checkScanRed ::
 checkScanRed ops ts kbody = do
   mapM_ TC.checkType ts
 
-  TC.binding (scopeOfSegSpace space) $ do
-    ne_ts <- forM ops $ \(lam, nes, shape) -> do
-      mapM_ (TC.require (Prim int64)) $ shapeDims shape
-      nes' <- mapM TC.checkArg nes
+  ne_ts <- forM ops $ \(lam, nes, shape) -> do
+    mapM_ (TC.require (Prim int64)) $ shapeDims shape
+    nes' <- mapM TC.checkArg nes
 
     -- Operator type must match the type of neutral elements.
     TC.checkLambda lam $ map TC.noArgAliases $ nes' ++ nes'

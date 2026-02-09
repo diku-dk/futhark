@@ -708,7 +708,7 @@ typeCheckSOAC (Hist w arrs ops bucket_fun) = do
         <> prettyTuple (lambdaReturnType bucket_fun)
         <> " but should have type "
         <> prettyTuple bucket_ret_t
-typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
+typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
   TC.require (Prim int64) w
   arrs' <- TC.checkSOACArrayArgs w arrs
   TC.checkLambda map_lam arrs'
