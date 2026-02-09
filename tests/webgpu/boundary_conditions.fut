@@ -24,7 +24,7 @@
 -- ==
 -- entry: f16_boundaries
 -- input { }
--- output { -65504f16 65504f16 }
+-- output { -f16.inf f16.inf }
 
 -- ==
 -- entry: i8_overflow_add

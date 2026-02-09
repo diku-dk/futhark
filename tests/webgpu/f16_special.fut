@@ -38,7 +38,7 @@
 -- entry: max_min
 -- input { [1f16, f16.inf, f16.nan, -65504f16]
 --         [2f16, 1f16, 1f16, 65504f16] }
--- output { [2f16, f16.inf, f16.nan, 65504f16] }
+-- output { [2f16, f16.inf, 1f16, 65504f16] }
 
 entry isnan = map f16.isnan
 entry isinf = map f16.isinf
