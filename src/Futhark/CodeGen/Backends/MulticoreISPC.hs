@@ -699,15 +699,15 @@ compileReadbackMemStructVals struct lexmems fatmems = do
 compileGetStructVals ::
   Name ->
   [VName] ->
-  [(C.Type, MC.ValueType)] ->
+  [(C.Type, C.Type, MC.ValueType)] ->
   ISPCCompilerM [C.BlockItem]
 compileGetStructVals struct a b = concat <$> zipWithM field a b
   where
     struct' = struct <> "_"
-    field name (ty, MC.Prim pt) = do
+    field name (ty, storage_ty, MC.Prim pt) = do
       let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
       pure [C.citems|$tyqual:uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
-    field name (_, _) = do
+    field name (_, _, _) = do
       strlit <- makeStringLiteral $ prettyString name
       pure
         [C.citems|$tyqual:uniform struct memblock $id:name;

@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Equality for `f16` in interpreter did not handle NaN correctly.
 
+* `f16` handling in `multicore` and `ispc` backends.
+
 ## [0.25.35]
 
 ### Added
