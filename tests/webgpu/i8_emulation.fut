@@ -30,7 +30,7 @@
 -- entry: mod
 -- input  { [7i8, -7i8, 127i8, -128i8]
 --          [3i8, 3i8, 10i8, 10i8] }
--- output { [1i8, -1i8, 7i8, -8i8] }
+-- output { [1i8, 2i8, 7i8, 2i8] }
 
 -- ==
 -- entry: neg
