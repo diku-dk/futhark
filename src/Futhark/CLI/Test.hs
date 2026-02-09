@@ -477,7 +477,8 @@ excludedTest :: TestConfig -> TestCase -> Bool
 excludedTest config =
   any (`elem` configExclude config) . testTags . testCaseTest
 
--- | Exclude those test cases that have tags we do not wish to run.
+-- | Exclude those test cases that have tags we do not wish to run or
+-- exclude based on entry point name.
 excludeCases :: TestConfig -> TestCase -> TestCase
 excludeCases config tcase =
   tcase {testCaseTest = onTest $ testCaseTest tcase}
@@ -485,10 +486,12 @@ excludeCases config tcase =
     onTest (ProgramTest desc tags action) =
       ProgramTest desc tags $ onAction action
     onAction (RunCases ios stest wtest) =
-      RunCases (map onIOs ios) stest wtest
+      RunCases (map onIOs $ filter relevantEntry ios) stest wtest
     onAction action = action
     onIOs (InputOutputs entry runs) =
       InputOutputs entry $ filter (not . any excluded . runTags) runs
+    relevantEntry (InputOutputs entry _) =
+      maybe True (== T.unpack entry) (configEntryPoint config)
     excluded = (`elem` configExclude config)
 
 putStatusTable :: TestStatus -> IO ()
@@ -670,7 +673,8 @@ data TestConfig = TestConfig
     configPrograms :: ProgConfig,
     configExclude :: [T.Text],
     configLineOutput :: Bool,
-    configConcurrency :: Maybe Int
+    configConcurrency :: Maybe Int,
+    configEntryPoint :: Maybe String
   }
 
 defaultConfig :: TestConfig
@@ -689,7 +693,8 @@ defaultConfig =
             configCacheExt = Nothing
           },
       configLineOutput = False,
-      configConcurrency = Nothing
+      configConcurrency = Nothing,
+      configEntryPoint = Nothing
     }
 
 data ProgConfig = ProgConfig
@@ -802,6 +807,14 @@ commandLineOptions =
       "Pass this option to the compiler (or typechecker if in -t mode).",
     Option
       []
+      ["tuning"]
+      ( ReqArg
+          (\s -> Right $ changeProgConfig $ \config -> config {configTuning = Just s})
+          "EXTENSION"
+      )
+      "Look for tuning files with this extension (defaults to .tuning).",
+    Option
+      []
       ["no-tuning"]
       (NoArg $ Right $ changeProgConfig $ \config -> config {configTuning = Nothing})
       "Do not load tuning files.",
@@ -827,7 +840,17 @@ commandLineOptions =
           )
           "NUM"
       )
-      "Number of tests to run concurrently."
+      "Number of tests to run concurrently.",
+    Option
+      "e"
+      ["entry-point"]
+      ( ReqArg
+          ( \s -> Right $ \config ->
+              config {configEntryPoint = Just s}
+          )
+          "NAME"
+      )
+      "Only run entry points with this name."
   ]
 
 excludeBackend :: TestConfig -> TestConfig

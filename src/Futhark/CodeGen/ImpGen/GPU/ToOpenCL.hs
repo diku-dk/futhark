@@ -58,10 +58,11 @@ translateGPU ::
 translateGPU target prog =
   let env = envFromProg prog
       ( prog',
-        ToOpenCL kernels device_funs used_types sizes failures constants
+        ToOpenCL kernels device_funs used_types failures constants
         ) =
           (`runState` initialOpenCL) . (`runReaderT` env) $ do
             let ImpGPU.Definitions
+                  params
                   types
                   (ImpGPU.Constants ps consts)
                   (ImpGPU.Functions funs) = prog
@@ -71,6 +72,7 @@ translateGPU target prog =
 
             pure $
               ImpOpenCL.Definitions
+                (findParamUsers env prog' (cleanParams params))
                 types
                 (ImpOpenCL.Constants ps consts')
                 (ImpOpenCL.Functions funs')
@@ -91,7 +93,6 @@ translateGPU target prog =
           openClMacroDefs = constants,
           openClKernelNames = kernels',
           openClUsedTypes = S.toList used_types,
-          openClParams = findParamUsers env prog' (cleanSizes sizes),
           openClFailures = failures,
           hostDefinitions = prog'
         }
@@ -103,18 +104,18 @@ translateGPU target prog =
 -- | Due to simplifications after kernel extraction, some threshold
 -- parameters may contain KernelPaths that reference threshold
 -- parameters that no longer exist.  We remove these here.
-cleanSizes :: M.Map Name SizeClass -> M.Map Name SizeClass
-cleanSizes m = M.map clean m
+cleanParams :: ParamMap -> ParamMap
+cleanParams m = M.map clean m
   where
     known = M.keys m
-    clean (SizeThreshold path def) =
-      SizeThreshold (filter ((`elem` known) . fst) path) def
+    clean (Just (SizeThreshold path def), users) =
+      (Just $ SizeThreshold (filter ((`elem` known) . fst) path) def, users)
     clean s = s
 
 findParamUsers ::
   Env ->
   Definitions ImpOpenCL.OpenCL ->
-  M.Map Name SizeClass ->
+  ParamMap ->
   ParamMap
 findParamUsers env defs = M.mapWithKey onParam
   where
@@ -134,7 +135,7 @@ findParamUsers env defs = M.mapWithKey onParam
       )
     indirect_uses = direct_uses <> map (indirectUseInFun . fst) direct_uses
 
-    onParam k c = (c, S.fromList $ map fst $ filter ((k `elem`) . snd) indirect_uses)
+    onParam k (c, _) = (c, S.fromList $ map fst $ filter ((k `elem`) . snd) indirect_uses)
 
 pointerQuals :: String -> [C.TypeQual]
 pointerQuals "global" = [C.ctyquals|__global|]
@@ -173,13 +174,12 @@ data ToOpenCL = ToOpenCL
   { clGPU :: M.Map KernelName (KernelSafety, T.Text),
     clDevFuns :: M.Map Name (C.Definition, T.Text),
     clUsedTypes :: S.Set PrimType,
-    clSizes :: M.Map Name SizeClass,
     clFailures :: [FailureMsg],
     clConstants :: [(Name, KernelConstExp)]
   }
 
 initialOpenCL :: ToOpenCL
-initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty mempty
+initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
 
 data Env = Env
   { envFuns :: ImpGPU.Functions ImpGPU.HostOp,
@@ -226,17 +226,11 @@ functionMayFail fname = S.member fname . envFunsMayFail
 
 type OnKernelM = ReaderT Env (State ToOpenCL)
 
-addSize :: Name -> SizeClass -> OnKernelM ()
-addSize key sclass =
-  modify $ \s -> s {clSizes = M.insert key sclass $ clSizes s}
-
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp _ (ImpGPU.GetSize v key size_class) = do
-  addSize key size_class
+onHostOp _ (ImpGPU.GetSize v key _) =
   pure $ ImpOpenCL.GetSize v key
-onHostOp _ (ImpGPU.CmpSizeLe v key size_class x) = do
-  addSize key size_class
+onHostOp _ (ImpGPU.CmpSizeLe v key _ x) =
   pure $ ImpOpenCL.CmpSizeLe v key x
 onHostOp _ (ImpGPU.GetSizeMax v size_class) =
   pure $ ImpOpenCL.GetSizeMax v size_class
@@ -332,7 +326,7 @@ ensureDeviceFuns code = do
 
 isConst :: BlockDim -> Maybe KernelConstExp
 isConst (Left (ValueExp (IntValue x))) =
-  Just $ ValueExp (IntValue x)
+  Just $ ValueExp $ IntValue x
 isConst (Right e) =
   Just e
 isConst _ = Nothing
@@ -612,7 +606,11 @@ inKernelOperations env mode body =
       GC.opsFatMemory = False,
       GC.opsError = errorInKernel,
       GC.opsCall = callInKernel,
-      GC.opsCritical = mempty
+      GC.opsCritical = mempty,
+      GC.opsGetParam = \name ->
+        let name_val = "val_" <> nameToString name
+            name_set = "set_" <> nameToString name
+         in ([C.cexp|$id:name_val|], [C.cexp|$id:name_set|])
     }
   where
     has_communication = hasCommunication body
@@ -898,6 +896,7 @@ typesInCode (Assert e _ _) = typesInExp e
 typesInCode (Meta _) = mempty
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
 typesInCode (TracePrint msg) = foldMap typesInExp msg
+typesInCode (GetUserParam _ _ def) = typesInExp (untyped def)
 typesInCode Op {} = mempty
 
 typesInExp :: Exp -> S.Set PrimType

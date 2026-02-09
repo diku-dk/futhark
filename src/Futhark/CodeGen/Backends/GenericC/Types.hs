@@ -133,7 +133,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       in_bounds =
         allTrue
           [ [C.cexp|$id:p >= 0 && $id:p < arr->shape[$int:i]|]
-            | (p, i) <- zip index_names [0 .. rank - 1]
+          | (p, i) <- zip index_names [0 .. rank - 1]
           ]
   index_body <-
     collect $
@@ -547,7 +547,7 @@ recordArrayIndexFunctions space _types desc rank elemtype vds = do
     in_bounds =
       allTrue
         [ [C.cexp|$id:p >= 0 && $id:p < arr->$id:(tupleField 0)->shape[$int:i]|]
-          | (p, i) <- zip index_names [0 .. rank - 1]
+        | (p, i) <- zip index_names [0 .. rank - 1]
         ]
 
     setField copy j (ValueType _ (Rank r) pt)
@@ -774,6 +774,19 @@ opaqueExtraOps ::
   OpaqueType ->
   [ValueType] ->
   CompilerM op s (Maybe Manifest.OpaqueExtraOps)
+-- Special-case () as a 0-ary record. It isn't really in the IR, but otherwise
+-- we cannot construct them from the outside.
+opaqueExtraOps
+  _
+  types
+  "()"
+  (OpaqueType [ValueType Signed (Rank 0) Unit])
+  [ValueType Signed (Rank 0) Unit] =
+    Just . Manifest.OpaqueRecord
+      <$> ( Manifest.RecordOps
+              <$> recordProjectFunctions types "()" [] []
+              <*> recordNewFunctions types "()" [] []
+          )
 opaqueExtraOps _ _ _ (OpaqueType _) _ =
   pure Nothing
 opaqueExtraOps _ _types desc (OpaqueSum _ cs) vds =
@@ -1003,7 +1016,10 @@ generateOpaque space types (desc, ot) = do
           then [C.csdecl|$ty:ct $id:(tupleField i);|]
           else [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
-generateAPITypes :: Space -> OpaqueTypes -> CompilerM op s (M.Map T.Text Manifest.Type)
+generateAPITypes ::
+  Space ->
+  OpaqueTypes ->
+  CompilerM op s (M.Map T.Text Manifest.Type)
 generateAPITypes arr_space types@(OpaqueTypes opaques) = do
   mapM_ (findNecessaryArrays . snd) opaques
   array_ts <- mapM (generateArray arr_space) . M.toList =<< gets compArrayTypes
@@ -1016,8 +1032,8 @@ generateAPITypes arr_space types@(OpaqueTypes opaques) = do
     -- the innards to increment reference counts.
     findNecessaryArrays (OpaqueType _) =
       pure ()
-    findNecessaryArrays (OpaqueArray {}) =
-      pure ()
+    findNecessaryArrays (OpaqueArray _ _ vts) =
+      mapM_ (valueTypeToCType Private) vts
     findNecessaryArrays (OpaqueRecordArray _ _ fs) =
       mapM_ (entryPointTypeToCType Public . snd) fs
     findNecessaryArrays (OpaqueSum _ variants) =

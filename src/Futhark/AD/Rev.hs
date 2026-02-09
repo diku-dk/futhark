@@ -206,6 +206,9 @@ diffBasicOp pat aux e m =
           adj_t <- lookupType adj
           adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
           updateSubExpAdj v adj_i
+    --
+    UserParam {} ->
+      void $ commonBasicOp pat aux e m
 
 vjpOps :: VjpOps
 vjpOps =
@@ -277,7 +280,7 @@ diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
       ( pure . takeLast (length branches_free)
           <=< letTupExp "branch_adj"
           <=< renameExp
-        )
+      )
         =<< eMatch
           ses
           (map (fmap $ diffBody adjs branches_free) cases)

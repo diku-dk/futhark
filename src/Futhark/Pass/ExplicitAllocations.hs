@@ -42,7 +42,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Either (partitionEithers)
-import Data.List (foldl', transpose, zip4)
+import Data.List (transpose, zip4)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S

@@ -82,8 +82,7 @@ generateOptionParser options =
     executeOption option =
       For
         "optarg"
-        ( Index (Var "parser_result") $ IdxExp $ String $ fieldName option
-        )
+        (Index (Var "parser_result") $ IdxExp $ String $ fieldName option)
         $ optionAction option
 
     fieldName = T.map escape . optionLongName

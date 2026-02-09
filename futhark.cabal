@@ -1,4 +1,4 @@
-cabal-version: 2.4
+cabal-version: 3.0
 name:           futhark
 version:        0.26.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
@@ -67,7 +67,7 @@ extra-source-files:
     rts/c/util.h
     rts/c/server.h
     rts/cuda/prelude.cu
-    rts/futhark-doc/style.css
+    rts/style.css
     rts/javascript/server.js
     rts/javascript/values.js
     rts/javascript/wrapperclasses.js
@@ -103,7 +103,7 @@ source-repository head
   location: https://github.com/diku-dk/futhark
 
 common common
-  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wno-x-partial -Wno-unrecognised-warning-flags  -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
+  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wno-x-partial -Wno-unrecognised-warning-flags  -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages -Wno-x-data-list-nonempty-unzip
   default-language: GHC2021
   default-extensions:
     OverloadedStrings
@@ -381,6 +381,10 @@ library
       Futhark.Pkg.Solve
       Futhark.Pkg.Types
       Futhark.Profile
+      Futhark.Profile.Details
+      Futhark.Profile.EventSummary
+      Futhark.Profile.Html
+      Futhark.Profile.SourceRange
       Futhark.Script
       Futhark.Test
       Futhark.Test.Spec
@@ -393,6 +397,7 @@ library
       Futhark.Util
       Futhark.Util.CMath
       Futhark.Util.IntegralExp
+      Futhark.Util.Html
       Futhark.Util.Loc
       Futhark.Util.Log
       Futhark.Util.Options
@@ -447,7 +452,7 @@ library
     , ansi-terminal >=0.6.3.1
     , array >=0.4
     , async >=2.0
-    , base >=4.15 && <5
+    , base >=4.20 && <5
     , base16-bytestring
     , binary >=0.8.3
     , blaze-html >=0.9.0.1
@@ -490,6 +495,7 @@ library
     , temporary
     , terminal-size >=0.3
     , text >=1.2.2.2
+    , text-rope
     , time >=1.6.0.1
     , transformers >=0.3
     , vector >=0.12
@@ -509,6 +515,7 @@ executable futhark
 library futhark-testing
   import: common
   hs-source-dirs: src-testing
+  visibility: private
   exposed-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests

@@ -36,6 +36,7 @@ type KernelCode = Code KernelOp
 data KernelConst
   = SizeConst Name SizeClass
   | SizeMaxConst SizeClass
+  | SizeUserParam Name VName
   deriving (Eq, Ord, Show)
 
 -- | An expression whose variables are kernel constants.
@@ -89,10 +90,13 @@ instance Pretty KernelConst where
     "get_size" <> parens (commasep [pretty key, pretty size_class])
   pretty (SizeMaxConst size_class) =
     "get_max_size" <> parens (pretty size_class)
+  pretty (SizeUserParam name def) =
+    "get_user_param" <> parens (commasep [pretty name, pretty def])
 
 instance FreeIn KernelConst where
   freeIn' SizeConst {} = mempty
   freeIn' (SizeMaxConst _) = mempty
+  freeIn' (SizeUserParam _ def) = freeIn' def
 
 instance Pretty KernelUse where
   pretty (ScalarUse name t) =

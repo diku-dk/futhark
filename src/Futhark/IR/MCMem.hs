@@ -42,7 +42,7 @@ instance TC.Checkable MCMem where
   checkOp = typeCheckMemoryOp
     where
       typeCheckMemoryOp (Alloc size _) =
-        TC.require [Prim int64] size
+        TC.require (Prim int64) size
       typeCheckMemoryOp (Inner op) =
         typeCheckMCOp (const $ pure ()) op
   checkFParamDec = checkMemInfo

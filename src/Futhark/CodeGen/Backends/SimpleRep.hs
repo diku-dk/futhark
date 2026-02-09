@@ -152,7 +152,10 @@ findPrettyName =
       (("arr" <> showText (length dims) <> "d_") <>) <$> p
     pTup = between "(" ")" $ do
       ts <- p `sepBy` pComma
-      pure $ "tup" <> showText (length ts) <> "_" <> T.intercalate "_" ts
+      pure $
+        if null ts
+          then "unit"
+          else "tup" <> showText (length ts) <> "_" <> T.intercalate "_" ts
     pRec = between "{" "}" $ do
       fs <- pField `sepBy` pComma
       pure $ "rec__" <> T.intercalate "__" fs

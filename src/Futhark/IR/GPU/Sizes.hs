@@ -37,8 +37,6 @@ data SizeClass
   | -- | Likely not useful on its own, but querying the
     -- maximum can be handy.
     SizeSharedMemory
-  | -- | A bespoke size with a default.
-    SizeBespoke Name Int64
   | -- | Amount of registers available per threadblock. Mostly
     -- meaningful for querying the maximum.
     SizeRegisters
@@ -59,15 +57,12 @@ instance Pretty SizeClass where
   pretty SizeTile = "tile_size"
   pretty SizeRegTile = "reg_tile_size"
   pretty SizeSharedMemory = "shared_memory"
-  pretty (SizeBespoke k def) =
-    "bespoke" <> parens (pretty k <> comma <+> pretty def)
   pretty SizeRegisters = "registers"
   pretty SizeCache = "cache"
 
 -- | The default value for the size.  If 'Nothing', that means the backend gets to decide.
 sizeDefault :: SizeClass -> Maybe Int64
 sizeDefault (SizeThreshold _ x) = x
-sizeDefault (SizeBespoke _ x) = Just x
 sizeDefault _ = Nothing
 
 -- | A wrapper supporting a phantom type for indicating what we are counting.

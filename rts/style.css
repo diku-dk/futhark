@@ -42,7 +42,7 @@ td {
 
 #navigation {
     float: right;
-    vertical-align: centre;
+    vertical-align: center;
 }
 
 #navigation ol {
@@ -223,4 +223,20 @@ main {
 #doc_index_list a, #doc_index_list a:visited {
     color: #5f0220;
     text-decoration: none;
+}
+
+a.silent-anchor {
+  text-decoration: inherit;
+  color: inherit;
+}
+
+.cctable table, .cctable th, .cctable td {
+  border: 1px solid black;
+  border-collapse: collapse;
+}
+
+.cctable th, .cctable td {
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+  text-align: center;
 }

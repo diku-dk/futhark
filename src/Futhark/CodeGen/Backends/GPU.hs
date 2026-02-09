@@ -69,15 +69,19 @@ genKernelFunction kernel_name safety arg_params arg_set = do
         ]
 
 getParamByKey :: Name -> C.Exp
-getParamByKey key = [C.cexp|*ctx->tuning_params.$id:key|]
+getParamByKey key = [C.cexp|ctx->cfg->tuning_params[tuning_param_indexes.$id:key]|]
 
 kernelConstToExp :: KernelConst -> C.Exp
 kernelConstToExp (SizeConst key _) =
-  getParamByKey key
+  [C.cexp|$exp:(getParamByKey key).val|]
 kernelConstToExp (SizeMaxConst size_class) =
   [C.cexp|ctx->$id:field|]
   where
     field = "max_" <> prettyString size_class
+kernelConstToExp (SizeUserParam name def) =
+  [C.cexp|$exp:name'.set ? $exp:name'.val : $exp:def|]
+  where
+    name' = getParamByKey name
 
 compileBlockDim :: BlockDim -> GC.CompilerM op s C.Exp
 compileBlockDim (Left e) = GC.compileExp e
@@ -139,10 +143,10 @@ genLaunchKernel safety kernel_name shared_memory args num_tblocks tblock_size = 
 
 callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
-  GC.stm [C.cstm|$id:v = $exp:(getParamByKey key);|]
+  GC.stm [C.cstm|$id:v = $exp:(getParamByKey key).val;|]
 callKernel (CmpSizeLe v key x) = do
   x' <- GC.compileExp x
-  GC.stm [C.cstm|$id:v = $exp:(getParamByKey key) <= $exp:x';|]
+  GC.stm [C.cstm|$id:v = $exp:(getParamByKey key).val <= $exp:x';|]
   -- Output size information if logging is enabled.  The autotuner
   -- depends on the format of this output, so use caution if changing
   -- it.
