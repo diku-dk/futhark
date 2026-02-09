@@ -23,19 +23,19 @@
 -- ==
 -- entry: shl
 -- input { [1i8, 1i8, 1i8, -1i8, 64i8]
---         [0i32, 1i32, 7i32, 1i32, 1i32] }
+--         [0i8, 1i8, 7i8, 1i8, 1i8] }
 -- output { [1i8, 2i8, -128i8, -2i8, -128i8] }
 
 -- ==
 -- entry: shr
 -- input { [1i8, 2i8, -128i8, -1i8, -128i8]
---         [0i32, 1i32, 7i32, 1i32, 1i32] }
+--         [0i8, 1i8, 7i8, 1i8, 1i8] }
 -- output { [1i8, 1i8, -1i8, -1i8, -64i8] }
 
 -- ==
 -- entry: ushr
 -- input { [1i8, 2i8, -128i8, -1i8, -128i8]
---         [0i32, 1i32, 7i32, 1i32, 1i32] }
+--         [0i8, 1i8, 7i8, 1i8, 1i8] }
 -- output { [1i8, 1i8, 1i8, 127i8, 64i8] }
 
 -- ==
@@ -46,7 +46,7 @@
 entry land = map2 (i8.&)
 entry lor = map2 (i8.|)
 entry lxor = map2 (i8.^)
-entry shl (xs: []i8) (ys: []i32) = map2 (\x y -> x << y) xs ys
-entry shr (xs: []i8) (ys: []i32) = map2 (\x y -> x >> y) xs ys
-entry ushr (xs: []i8) (ys: []i32) = map2 (\x y -> x >>> y) xs ys
+entry shl (xs: []i8) (ys: []i8) = map2 (\x y -> x << y) xs ys
+entry shr (xs: []i8) (ys: []i8) = map2 (\x y -> x >> y) xs ys
+entry ushr (xs: []i8) (ys: []i8) = map2 (\x y -> i8.u8 (u8.i8 x >> u8.i8 y)) xs ys
 entry complement = map i8.not
