@@ -498,6 +498,7 @@ literals and variables, but also more complicated forms.
       : | "if" `exp` "then" `exp` "else" `exp`
       : | "let" `size`* `pat` "=" `exp` "in" `exp`
       : | "let" `name` `slice` "=" `exp` "in" `exp`
+      : | "let" `name` "." `fieldid` ("." `fieldid`)* "=" `exp` "in" `exp`
       : | "let" `name` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
