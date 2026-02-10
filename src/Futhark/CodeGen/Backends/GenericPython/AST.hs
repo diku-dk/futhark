@@ -197,7 +197,7 @@ instance Pretty PyClassDef where
     "class"
       <+> pretty cname
       <> ":"
-        </> indent 2 (stack (map pretty body))
+        </> indent 2 (stack $ punctuate line $ map pretty body)
 
 instance Pretty PyExcept where
   pretty (Catch pyexp stms) =
@@ -207,4 +207,4 @@ instance Pretty PyExcept where
       </> indent 2 (vsep $ map pretty stms)
 
 instance Pretty PyProg where
-  pretty (PyProg stms) = vsep (map pretty stms)
+  pretty (PyProg stms) = stack $ punctuate line $ map pretty stms
