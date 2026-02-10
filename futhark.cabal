@@ -521,7 +521,7 @@ library
     , text >=1.2.2.2
     , text-rope
     , time >=1.6.0.1
-    , transformers >= 0.3
+    , transformers >=0.3
     , vector >=0.12
     , versions >=6.0.0
     , zlib >=0.7.0.0
