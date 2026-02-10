@@ -122,7 +122,9 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
             lambdaBody =
               mkBody
                 (bodyStms (lambdaBody (scremaLambda form_p)))
-                (bodyResult (lambdaBody (scremaLambda form_p)) <> varsRes (map paramName forward_params))
+                ( bodyResult (lambdaBody (scremaLambda form_p))
+                    <> varsRes (map paramName forward_params)
+                )
           }
 
   let lam2 =
@@ -139,8 +141,8 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
                     <> binds
                     <> bodyStms (lambdaBody (scremaLambda form_c))
                 )
-                ( bodyResult (lambdaBody (scremaPostLambda form_p))
-                    <> bodyResult (lambdaBody (scremaLambda form_c))
+                ( bodyResult (lambdaBody (scremaLambda form_c))
+                    <> bodyResult (lambdaBody (scremaPostLambda form_p))
                 )
           }
 
@@ -150,15 +152,15 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
   let lam3 =
         Lambda
           { lambdaParams =
-              post_forward_params <> lambdaParams (scremaLambda form_c),
-            lambdaReturnType = lambdaReturnType (scremaPostLambda form_p),
+              lambdaParams (scremaLambda form_c) <> post_forward_params,
+            lambdaReturnType =
+              lambdaReturnType (scremaPostLambda form_p)
+                <> map paramType post_forward_params,
             lambdaBody =
               mkBody
-                ( bodyStms (lambdaBody (scremaPostLambda form_p))
-                    <> bodyStms (lambdaBody (scremaLambda form_c))
-                )
+                (bodyStms (lambdaBody (scremaPostLambda form_p)))
                 ( varsRes (map paramName forward_params)
-                    <> bodyResult (lambdaBody (postScremaLambda form_c))
+                    <> varsRes (map paramName post_forward_params)
                 )
           }
   pure $
