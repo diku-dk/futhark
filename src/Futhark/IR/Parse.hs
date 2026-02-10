@@ -853,9 +853,7 @@ pSizeClass =
               <$> choice [Just <$> pInt64, "def" $> Nothing]
               <* pComma
               <*> pKernelPath
-          ),
-      keyword "bespoke"
-        *> parens (GPU.SizeBespoke <$> pName <* pComma <*> pInt64)
+          )
     ]
   where
     pKernelPath = many pStep

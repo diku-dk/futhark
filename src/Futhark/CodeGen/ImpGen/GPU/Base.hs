@@ -912,10 +912,12 @@ atomicUpdateCAS space t arr old bucket x do_op = do
             )
           _ -> (id, id)
 
-      int
-        | primBitSize t == 16 = int16
-        | primBitSize t == 32 = int32
-        | otherwise = int64
+      int = case primBitSize t of
+        8 -> int8
+        16 -> int16
+        32 -> int32
+        64 -> int64
+        _ -> error "impossible integer bit size"
 
   sWhile (tvExp run_loop) $ do
     assumed <~~ Imp.var old t

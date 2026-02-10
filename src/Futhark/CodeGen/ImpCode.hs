@@ -494,7 +494,7 @@ instance (Pretty op) => Pretty (Definitions op) where
     params' </> pretty types </> pretty consts </> pretty funs
     where
       params' =
-        "Parameters:" </> indent 2 (stack $ map ppParam $ M.toList params)
+        "tuning params" <+> nestedBlock (stack $ map ppParam $ M.toList params)
       ppParam (k, (c, users)) =
         maybe "user" pretty c <+> pretty k <+> parens (commasep $ map pretty $ S.toList users)
 
@@ -502,38 +502,35 @@ instance (Pretty op) => Pretty (Functions op) where
   pretty (Functions funs) = stack $ intersperse mempty $ map ppFun funs
     where
       ppFun (name, fun) =
-        "Function " <> pretty name <> colon </> indent 2 (pretty fun)
+        "function" <+> pretty name <+> nestedBlock (pretty fun)
 
 instance (Pretty op) => Pretty (Constants op) where
   pretty (Constants decls code) =
-    "Constants:"
-      </> indent 2 (stack $ map pretty decls)
+    "constants"
+      <+> nestedBlock (stack $ map pretty decls)
       </> mempty
-      </> "Initialisation:"
-      </> indent 2 (pretty code)
+      </> "initialisation"
+      <+> nestedBlock (pretty code)
 
 instance Pretty EntryPoint where
   pretty (EntryPoint name results args) =
-    "Name:"
-      </> indent 2 (dquotes (pretty name))
-      </> "Arguments:"
-      </> indent 2 (stack $ map ppArg args)
-      </> "Results:"
-      </> indent 2 (stack $ map ppRes results)
+    stack
+      [ "name" <+> nestedBlock (dquotes (pretty name)),
+        "arguments" <+> nestedBlock (stack $ map ppArg args),
+        "results" <+> nestedBlock (stack $ map ppRes results)
+      ]
     where
       ppArg ((p, u), t) = pretty p <+> ":" <+> ppRes (u, t)
       ppRes (u, t) = pretty u <> pretty t
 
 instance (Pretty op) => Pretty (FunctionT op) where
   pretty (Function entry outs ins body) =
-    "Inputs:"
-      </> indent 2 (stack $ map pretty ins)
-      </> "Outputs:"
-      </> indent 2 (stack $ map pretty outs)
-      </> "Entry:"
-      </> indent 2 (pretty entry)
-      </> "Body:"
-      </> indent 2 (pretty body)
+    stack
+      [ "inputs" <+> nestedBlock (stack $ map pretty ins),
+        "outputs" <+> nestedBlock (stack $ map pretty outs),
+        "entry" <+> nestedBlock (pretty entry),
+        "body" <+> nestedBlock (pretty body)
+      ]
 
 instance Pretty Param where
   pretty (ScalarParam name ptype) = pretty ptype <+> pretty name
@@ -559,7 +556,7 @@ instance Pretty ExternalValue where
   pretty (OpaqueValue desc vs) =
     "opaque"
       <+> dquotes (pretty desc)
-      <+> nestedBlock "{" "}" (stack $ map pretty vs)
+      <+> nestedBlock (stack $ map pretty vs)
 
 instance Pretty ArrayContents where
   pretty (ArrayValues vs) = braces (commasep $ map pretty vs)

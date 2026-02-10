@@ -1036,6 +1036,7 @@ doCmpOp _ _ _ = Nothing
 
 -- | Compare any two primtive values for exact equality.
 doCmpEq :: PrimValue -> PrimValue -> Bool
+doCmpEq (FloatValue (Float16Value v1)) (FloatValue (Float16Value v2)) = v1 == v2
 doCmpEq (FloatValue (Float32Value v1)) (FloatValue (Float32Value v2)) = v1 == v2
 doCmpEq (FloatValue (Float64Value v1)) (FloatValue (Float64Value v2)) = v1 == v2
 doCmpEq v1 v2 = v1 == v2

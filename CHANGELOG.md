@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+* GPU code generation for atomics on 8-bit scalars.
+
+* `f64.nextafter`, `f64.copysign`, and `f64.isinf` reduced precision. (#2363)
+
+* Equality for `f16` in interpreter did not handle NaN correctly.
+
+* `f16` handling in `multicore` and `ispc` backends.
+
+## [0.25.35]
+
+### Added
+
 * `futhark lsp` now provides the `textDocument/formatting` server method
 
 * `futhark profile`: Generation of HTML-Files with cost centre and source range
@@ -25,10 +43,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   See the documentation for the sharp edges.
 
 * `futhark test` now supports `--tuning`, just like `futhark bench`.
-
-### Removed
-
-### Changed
 
 ### Fixed
 

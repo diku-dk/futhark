@@ -279,7 +279,7 @@ instance (Pretty a) => Pretty (ErrorMsg a) where
 maybeNest :: (PrettyRep rep) => Body rep -> Doc a
 maybeNest b
   | null $ bodyStms b = pretty b
-  | otherwise = nestedBlock "{" "}" $ pretty b
+  | otherwise = nestedBlock $ pretty b
 
 instance (PrettyRep rep) => Pretty (Case (Body rep)) where
   pretty (Case vs b) =
@@ -357,7 +357,7 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
                 "while" <+> pretty cond
           )
       <+> "do"
-      <+> nestedBlock "{" "}" (pretty loopbody)
+      <+> nestedBlock (pretty loopbody)
     where
       (params, args) = unzip merge
   pretty (WithAcc inputs lam) =
@@ -409,7 +409,7 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
         <+> parens (commastack $ map pretty fparams)
         </> indent 2 (colon <+> align (ppTupleLines' $ map prettyRet rettype))
         <+> equals
-        <+> nestedBlock "{" "}" (pretty body)
+        <+> nestedBlock (pretty body)
     where
       fun = case entry of
         Nothing -> "fun"
@@ -427,27 +427,27 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
 
 instance Pretty OpaqueType where
   pretty (OpaqueType ts) =
-    "opaque" <+> nestedBlock "{" "}" (stack $ map pretty ts)
+    "opaque" <+> nestedBlock (stack $ map pretty ts)
   pretty (OpaqueRecord fs) =
-    "record" <+> nestedBlock "{" "}" (stack $ map p fs)
+    "record" <+> nestedBlock (stack $ map p fs)
     where
       p (f, et) = pretty f <> ":" <+> pretty et
   pretty (OpaqueSum ts cs) =
-    "sum" <+> nestedBlock "{" "}" (stack $ pretty ts : map p cs)
+    "sum" <+> nestedBlock (stack $ pretty ts : map p cs)
     where
       p (c, ets) = hsep $ "#" <> pretty c : map pretty ets
   pretty (OpaqueArray r v ts) =
     "array" <+> pretty r
       <> "d"
         <+> dquotes (pretty v)
-        <+> nestedBlock "{" "}" (stack $ map pretty ts)
+        <+> nestedBlock (stack $ map pretty ts)
   pretty (OpaqueRecordArray r v fs) =
-    "record_array" <+> pretty r <> "d" <+> dquotes (pretty v) <+> nestedBlock "{" "}" (stack $ map p fs)
+    "record_array" <+> pretty r <> "d" <+> dquotes (pretty v) <+> nestedBlock (stack $ map p fs)
     where
       p (f, et) = pretty f <> ":" <+> pretty et
 
 instance Pretty OpaqueTypes where
-  pretty (OpaqueTypes ts) = "types" <+> nestedBlock "{" "}" (stack $ map p ts)
+  pretty (OpaqueTypes ts) = "types" <+> nestedBlock (stack $ map p ts)
     where
       p (name, t) = "type" <+> dquotes (pretty name) <+> equals <+> pretty t
 
