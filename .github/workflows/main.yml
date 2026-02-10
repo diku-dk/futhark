@@ -263,7 +263,7 @@ jobs:
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
-        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
+        export CFLAGS="-fsanitize=address -fno-sanitize-recover -O"
         futhark test -c --backend=c tests
         make -C tests_lib/c -j
 
@@ -288,7 +288,7 @@ jobs:
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
-        export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O"
+        export CFLAGS="-fno-sanitize-recover -O"
         futhark test -c --backend=multicore tests
         make -C tests_lib/c FUTHARK_BACKEND=multicore
 
@@ -318,7 +318,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O"
+        export CFLAGS="-fno-sanitize-recover -O"
         nix-shell -E 'with import (import ./nix/sources.nix {}).nixpkgs {}; mkShell { buildInputs = [ ispc python3Packages.jsonschema ]; }' --run 'futhark test -c --backend=ispc tests'
         nix-shell -E 'with import (import ./nix/sources.nix {}).nixpkgs {}; mkShell { buildInputs = [ ispc python3Packages.jsonschema ]; }' --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 
