@@ -998,6 +998,13 @@ not be complete and can also be a slice, but in these cases, the value
 of ``v`` must be an array of the proper size.  This notation is
 Syntactic sugar for ``let a = a with [i] = v in a``.
 
+``let r.f = v in body``
+.......................
+
+Write ``v`` to the field ``f`` of record ``r`` and evaluate ``body``.
+Nested field updates are written ``let r.f.g = v in body``.
+This notation is syntactic sugar for ``let r = r with f = v in body``.
+
 ``let f params... = e in body``
 ...............................
 

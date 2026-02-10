@@ -414,6 +414,18 @@ instance Format (AppExpBase NoInfo Name) where
             </> letBody body
     where
       idxs' = brackets $ sep ", " $ map fmt idxs
+  fmt (LetWithField dest _src fields ve body loc) =
+    addComments loc $
+      lineIndent
+        ve
+        ( "let"
+            <+> fmt dest
+            <> "."
+            <> sep "." (map fmt fields)
+              <+> "="
+        )
+        (fmt ve)
+        </> letBody body
   fmt (Range start maybe_step end loc) =
     addComments loc $ fmt start <> step <> end'
     where
@@ -442,6 +454,7 @@ letBody :: UncheckedExp -> Fmt
 letBody body@(AppExp LetPat {} _) = fmt body
 letBody body@(AppExp LetFun {} _) = fmt body
 letBody body@(AppExp LetWith {} _) = fmt body
+letBody body@(AppExp LetWithField {} _) = fmt body
 letBody body = addComments body $ "in" <+> align (fmt body)
 
 instance Format (SizeBinder Name) where
