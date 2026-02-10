@@ -492,7 +492,7 @@ library
     , dlist >=0.6.0.1
     , fgl
     , fgl-visualize
-    , file-embed >=0.0.14.0
+    , file-embed >=0.0.16.0
     , filepath >=1.4.1.1
     , free >=5.1.10
     , futhark-data >= 1.1.2.0
@@ -511,7 +511,7 @@ library
     , mtl >=2.2.1
     , neat-interpolation >=0.3
     , parallel >=3.2.1.0
-    , random >= 1.2.0
+    , random >= 1.3.1
     , process-extras >=0.7.2
     , regex-tdfa >=1.2
     , srcloc >=0.4
@@ -521,14 +521,16 @@ library
     , text >=1.2.2.2
     , text-rope
     , time >=1.6.0.1
-    , transformers >=0.3
+    , transformers >= 0.4.6
     , vector >=0.12
     , versions >=6.0.0
     , zlib >=0.7.0.0
+    , exception-mtl >= 0.4.0.2
     , statistics
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
+    , unliftio-core >= 0.2.1.0
     , language-wgsl
 
 executable futhark
