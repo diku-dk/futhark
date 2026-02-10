@@ -10,7 +10,9 @@ with pkgs;
   python.numpy
   python.pyopencl
 
-  imagemagick # needed for literate tests
+  # needed for literate tests
+  imagemagick
+  ffmpeg
 
   opencl-headers
   ocl-icd
