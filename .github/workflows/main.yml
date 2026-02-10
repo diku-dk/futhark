@@ -207,7 +207,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        file: shell-test.nix
 
     - name: Run haddock
       run: |
@@ -264,7 +264,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        file: shell-test.nix
 
     - uses: actions/download-artifact@v4
       with:
@@ -292,7 +292,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        file: shell-test.nix
 
     - uses: actions/download-artifact@v4
       with:
@@ -320,7 +320,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        file: shell-test.nix
 
     - uses: actions/download-artifact@v4
       with:
@@ -349,7 +349,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        file: shell-test.nix
 
     - uses: actions/download-artifact@v4
       with:
@@ -376,7 +376,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        file: shell-test.nix
 
     - uses: actions/download-artifact@v4
       with:
@@ -402,7 +402,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        file: shell-test.nix
 
     - uses: actions/download-artifact@v4
       with:
@@ -670,7 +670,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        file: shell-test.nix
 
     - uses: actions/download-artifact@v4
       with:
