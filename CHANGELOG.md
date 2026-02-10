@@ -23,9 +23,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `f16` handling in `multicore` and `ispc` backends.
 
-* `futhark literate` now uses `"magick"` instead of `"convert"` for image
-  operations, to support newer versions of ImageMagick.
-
 ## [0.25.35]
 
 ### Added

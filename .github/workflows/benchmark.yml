@@ -12,7 +12,7 @@ on:
 jobs:
   build-linux-nix:
     if: github.repository == 'diku-dk/futhark' && (!github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'run-benchmarks') || github.ref == 'refs/heads/master')
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v4
@@ -86,7 +86,7 @@ jobs:
         slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cuda-A100 --exclude=hendrixgpu14fl
 
   benchmark-results:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs:
       - benchmark-A100
       - benchmark-MI100-opencl
