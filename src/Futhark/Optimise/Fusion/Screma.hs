@@ -86,12 +86,31 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
   let inp_c_real_map = map (not . inputFromOutput) inp_c
       inp_c_real = pick inp_c_real_map inp_c
       inp_r = inp_p <> inp_c_real
+      ts_p = lambdaReturnType $ scremaPostLambda form_p
+      res_p = bodyResult $ lambdaBody $ scremaPostLambda form_p
+      inp_c_map =
+        M.fromList
+          . zip (SOAC.inputArray <$> inp_c)
+          . fmap paramName
+          . lambdaParams
+          $ scremaLambda form_c
+
+      bindResToPar :: (VName, SubExpRes, Type) -> Maybe (Stm SOACS)
+      bindResToPar (out, res, t) =
+        case M.lookup out inp_c_map of
+          Just name ->
+            Just $ certify cs $ mkLet [Ident name t] $ BasicOp $ SubExp e
+            where
+              SubExpRes cs e = res
+          Nothing -> Nothing
+
+      binds =
+        stmsFromList
+          . mapMaybe bindResToPar
+          $ zip3 out_p res_p ts_p
 
   forward_params <- forM (pick inp_c_real_map (lambdaParams (scremaLambda form_c))) $ \p ->
     newParam (baseName (paramName p)) (paramType p)
-
-  let params_c_sorted =
-        L.sortBy (comparing fst) $ zip inp_c_real_map $ lambdaParams $ scremaLambda form_p
 
   let lam1 =
         Lambda
@@ -111,10 +130,13 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
           { lambdaParams =
               lambdaParams (scremaPostLambda form_p)
                 <> lambdaParams (scremaLambda form_c),
-            lambdaReturnType = lambdaReturnType (scremaPostLambda form_p),
+            lambdaReturnType =
+              lambdaReturnType (scremaPostLambda form_p)
+                <> lambdaReturnType (scremaLambda form_c),
             lambdaBody =
               mkBody
                 ( bodyStms (lambdaBody (scremaPostLambda form_p))
+                    <> binds
                     <> bodyStms (lambdaBody (scremaLambda form_c))
                 )
                 ( bodyResult (lambdaBody (scremaPostLambda form_p))
@@ -122,11 +144,22 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
                 )
           }
 
+  post_forward_params <- forM (zip (bodyResult (lambdaBody (scremaPostLambda form_p))) (lambdaReturnType (scremaPostLambda form_p))) $ \(res, t) ->
+    newParam (fromMaybe (nameFromString "x") (baseName <$> subExpResVName res)) t
+
   let lam3 =
         Lambda
           { lambdaParams =
-              lambdaParams (scremaPostLambda form_p)
-                <> lambdaParams (scremaLambda form_c)
+              post_forward_params <> lambdaParams (scremaLambda form_c),
+            lambdaReturnType = lambdaReturnType (scremaPostLambda form_p),
+            lambdaBody =
+              mkBody
+                ( bodyStms (lambdaBody (scremaPostLambda form_p))
+                    <> bodyStms (lambdaBody (scremaLambda form_c))
+                )
+                ( varsRes (map paramName forward_params)
+                    <> bodyResult (lambdaBody (postScremaLambda form_c))
+                )
           }
   pure $
     SuperScrema
