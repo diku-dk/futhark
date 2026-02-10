@@ -207,7 +207,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        file: shell.nix
 
     - name: Run haddock
       run: |
