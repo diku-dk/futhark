@@ -564,7 +564,7 @@ compileWebGPUAction fcfg mode tgtpath =
           jsserverpath = tgtpath `addExtension` "server.js"
           jsonpath = tgtpath `addExtension` "json"
           extra_options =
-            [ "-sUSE_WEBGPU",
+            [ "--use-port=emdawnwebgpu",
               "-sASYNCIFY",
               "-sMODULARIZE",
               "-sWASM_BIGINT",

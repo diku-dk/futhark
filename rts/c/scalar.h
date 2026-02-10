@@ -39,6 +39,11 @@ SCALAR_FUN_ATTR uint16_t mul16(uint16_t x, uint16_t y) { return x * y; }
 SCALAR_FUN_ATTR uint32_t mul32(uint32_t x, uint32_t y) { return x * y; }
 SCALAR_FUN_ATTR uint64_t mul64(uint64_t x, uint64_t y) { return x * y; }
 
+SCALAR_FUN_ATTR uint8_t   neg_i8(uint8_t x)  { return -x; }
+SCALAR_FUN_ATTR uint16_t neg_i16(uint16_t x) { return -x; }
+SCALAR_FUN_ATTR uint32_t neg_i32(uint32_t x) { return -x; }
+SCALAR_FUN_ATTR uint64_t neg_i64(uint64_t x) { return -x; }
+
 #if defined(ISPC)
 
 SCALAR_FUN_ATTR uint8_t udiv8(uint8_t x, uint8_t y) {
@@ -1339,8 +1344,8 @@ SCALAR_FUN_ATTR int64_t fptobits_f64_i64(double x);
 
 #if defined(ISPC)
 
-SCALAR_FUN_ATTR bool futrts_isinf64(float x) { return !isnan(x) && isnan(x - x); }
-SCALAR_FUN_ATTR bool futrts_isfinite64(float x) { return !isnan(x) && !futrts_isinf64(x); }
+SCALAR_FUN_ATTR bool futrts_isinf64(double x) { return !isnan(x) && isnan(x - x); }
+SCALAR_FUN_ATTR bool futrts_isfinite64(double x) { return !isnan(x) && !futrts_isinf64(x); }
 SCALAR_FUN_ATTR double fdiv64(double x, double y) { return x / y; }
 SCALAR_FUN_ATTR double fadd64(double x, double y) { return x + y; }
 SCALAR_FUN_ATTR double fsub64(double x, double y) { return x - y; }
@@ -1482,7 +1487,7 @@ SCALAR_FUN_ATTR double futrts_round64(double x) { return round(x); }
 SCALAR_FUN_ATTR double futrts_ceil64(double x) { return ceil(x); }
 
 extern "C" unmasked uniform double nextafter(uniform float x, uniform double y);
-SCALAR_FUN_ATTR float futrts_nextafter64(double x, double y) {
+SCALAR_FUN_ATTR double futrts_nextafter64(double x, double y) {
   double res;
   foreach_active (i) {
     uniform double r = nextafter(extract(x, i), extract(y, i));
@@ -1743,7 +1748,7 @@ SCALAR_FUN_ATTR double futrts_erfc64(double x) { return erfc(x); }
 SCALAR_FUN_ATTR double futrts_fma64(double a, double b, double c) { return fma(a, b, c); }
 SCALAR_FUN_ATTR double futrts_round64(double x) { return rint(x); }
 SCALAR_FUN_ATTR double futrts_ceil64(double x) { return ceil(x); }
-SCALAR_FUN_ATTR float futrts_nextafter64(float x, float y) { return nextafter(x, y); }
+SCALAR_FUN_ATTR double futrts_nextafter64(double x, double y) { return nextafter(x, y); }
 SCALAR_FUN_ATTR double futrts_floor64(double x) { return floor(x); }
 SCALAR_FUN_ATTR bool futrts_isnan64(double x) { return isnan(x); }
 SCALAR_FUN_ATTR bool futrts_isinf64(double x) { return isinf(x); }
@@ -1855,7 +1860,7 @@ SCALAR_FUN_ATTR double futrts_ldexp64(double x, int32_t y) {
   return ldexp(x, y);
 }
 
-SCALAR_FUN_ATTR float futrts_copysign64(double x, double y) {
+SCALAR_FUN_ATTR double futrts_copysign64(double x, double y) {
   return copysign(x, y);
 }
 

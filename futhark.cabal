@@ -92,7 +92,6 @@ extra-source-files:
     rts/wgsl/scalar32.wgsl
     rts/wgsl/scalar64.wgsl
     rts/wgsl/atomics.wgsl
-    rts/wgsl/builtin_kernels.wgsl
     rts/wgsl/lmad_copy.wgsl
     rts/wgsl/map_transpose.wgsl
     rts/wgsl/map_transpose_low_height.wgsl
@@ -493,7 +492,7 @@ library
     , dlist >=0.6.0.1
     , fgl
     , fgl-visualize
-    , file-embed >=0.0.14.0
+    , file-embed >=0.0.16.0
     , filepath >=1.4.1.1
     , free >=5.1.10
     , futhark-data >= 1.1.2.0

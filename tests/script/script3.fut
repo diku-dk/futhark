@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- entry: dotprod
 -- script input @ script3.futharkscript
 

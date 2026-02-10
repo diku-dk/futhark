@@ -315,18 +315,17 @@ readOpenCLScalar mem i bt "device" = do
             ArgKeyword "dtype" (Var $ compilePrimType bt)
           ]
   stm $ Assign val' nparr
-  stm $
-    Exp $
-      Call
-        (Var "cl.enqueue_copy")
-        [ Arg $ Var "self.queue",
-          Arg val',
-          Arg mem,
-          ArgKeyword "src_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
-          ArgKeyword "is_blocking" $ Var "synchronous"
-        ]
+  stm . Exp $
+    Call
+      (Var "cl.enqueue_copy")
+      [ Arg $ Var "self.queue",
+        Arg val',
+        Arg mem,
+        ArgKeyword "src_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
+        ArgKeyword "is_blocking" $ Var "synchronous"
+      ]
   stm $ Exp $ simpleCall "sync" [Var "self"]
-  pure $ Index val' $ IdxExp $ Integer 0
+  pure $ fromStorage bt $ Index val' $ IdxExp $ Integer 0
 readOpenCLScalar _ _ _ space =
   error $ "Cannot read from '" ++ space ++ "' memory space."
 
