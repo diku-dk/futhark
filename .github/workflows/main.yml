@@ -16,10 +16,10 @@ jobs:
     - name: Install Nix
       uses: cachix/install-nix-action@v27
 
-    # - uses: cachix/cachix-action@v15
-    #   with:
-    #     name: futhark
-    #     signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+    - uses: cachix/cachix-action@v15
+      with:
+        name: futhark
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
     - name: Build Futhark
       run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
@@ -287,10 +287,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-jsonschema
+    - name: Install Nix
+      uses: cachix/install-nix-action@v18
+
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell.nix
+
     - uses: actions/download-artifact@v4
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -312,13 +315,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-jsonschema
-
     - name: Install Nix
-      uses: cachix/install-nix-action@v27
+      uses: cachix/install-nix-action@v18
+
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell.nix
 
     - uses: actions/download-artifact@v4
       with:
@@ -332,8 +334,8 @@ jobs:
 
     - run: |
         export CFLAGS="-fno-sanitize-recover -O"
-        nix-shell -E 'with import (import ./nix/sources.nix {}).nixpkgs {}; mkShell { buildInputs = [ ispc python3Packages.jsonschema ]; }' --run 'futhark test -c --backend=ispc tests'
-        nix-shell -E 'with import (import ./nix/sources.nix {}).nixpkgs {}; mkShell { buildInputs = [ ispc python3Packages.jsonschema ]; }' --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
+        futhark test -c --backend=ispc tests
+        make -C tests_lib/c FUTHARK_BACKEND=ispc
 
   test-python:
     runs-on: ubuntu-24.04
@@ -342,10 +344,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-numpy
+    - name: Install Nix
+      uses: cachix/install-nix-action@v18
+
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell.nix
 
     - uses: actions/download-artifact@v4
       with:
@@ -366,18 +370,24 @@ jobs:
     needs: [build-linux-nix]
     steps:
     - uses: actions/checkout@v4
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y opencl-headers oclgrind nvidia-opencl-dev
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v18
+
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell.nix
+
     - uses: actions/download-artifact@v4
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
+
     - name: Install from nightly tarball
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
+
     - run: |
         futhark test tests -c --no-terminal --backend=opencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
@@ -386,18 +396,24 @@ jobs:
     needs: [build-linux-nix]
     steps:
     - uses: actions/checkout@v4
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y opencl-headers oclgrind
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v18
+
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell.nix
+
     - uses: actions/download-artifact@v4
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
+
     - name: Install from nightly tarball
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
+
     - run: |
         set -e
         python -m venv virtualenv
@@ -647,12 +663,14 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - name: Install OS dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg opencl-headers oclgrind nvidia-opencl-dev imagemagick
-
     - uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v18
+
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell.nix
 
     - uses: actions/download-artifact@v4
       with:
