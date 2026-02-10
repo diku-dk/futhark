@@ -160,8 +160,12 @@ jobs:
           dist-newstyle
         key: ${{ runner.os }}-${{ hashFiles('nix/sources.json') }}-style
 
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell-style.nix
+
     - name: Style check
-      run: nix-shell shell-style.nix --pure --run "make check"
+      run: make check
 
 
   python-test-style:
@@ -173,11 +177,15 @@ jobs:
     - name: Install Nix
       uses: cachix/install-nix-action@v27
 
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell-style.nix
+
     - name: Style check
-      run: nix-shell shell-style.nix --pure --run "black --check rts docs"
+      run: black --check rts docs
 
     - name: Type check
-      run: nix-shell shell-style.nix --pure --run "mypy rts"
+      run: mypy rts
 
   build-docs:
     runs-on: ubuntu-24.04
@@ -197,10 +205,14 @@ jobs:
           dist-newstyle
         key: ${{ runner.os }}-${{ hashFiles('nix/sources.json', 'futhark.cabal', 'cabal.project') }}-haddock
 
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell.nix
+
     - name: Run haddock
       run: |
-          nix-shell --pure --run "make configure"
-          nix-shell --pure --run "make docs"
+          make configure
+          make docs
 
   test-interpreter:
     runs-on: ubuntu-24.04
@@ -247,10 +259,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-jsonschema
+    - name: Install Nix
+      uses: cachix/install-nix-action@v18
+
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        file: shell.nix
+
     - uses: actions/download-artifact@v4
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
