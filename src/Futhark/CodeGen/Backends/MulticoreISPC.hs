@@ -704,7 +704,7 @@ compileGetStructVals ::
 compileGetStructVals struct a b = concat <$> zipWithM field a b
   where
     struct' = struct <> "_"
-    field name (ty, storage_ty, MC.Prim pt) = do
+    field name (ty, _, MC.Prim pt) = do
       let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
       pure [C.citems|$tyqual:uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (_, _, _) = do
