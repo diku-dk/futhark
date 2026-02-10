@@ -131,7 +131,7 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
         Lambda
           { lambdaParams =
               lambdaParams (scremaPostLambda form_p)
-                <> lambdaParams (scremaLambda form_c),
+                <> pick inp_c_real_map (lambdaParams (scremaLambda form_c)),
             lambdaReturnType =
               lambdaReturnType (scremaPostLambda form_p)
                 <> lambdaReturnType (scremaLambda form_c),
@@ -152,14 +152,14 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
   let lam3 =
         Lambda
           { lambdaParams =
-              lambdaParams (scremaLambda form_c) <> post_forward_params,
+              lambdaParams (scremaPostLambda form_c) <> post_forward_params,
             lambdaReturnType =
-              lambdaReturnType (scremaPostLambda form_p)
+              lambdaReturnType (scremaPostLambda form_c)
                 <> map paramType post_forward_params,
             lambdaBody =
               mkBody
-                (bodyStms (lambdaBody (scremaPostLambda form_p)))
-                ( varsRes (map paramName forward_params)
+                (bodyStms (lambdaBody (scremaPostLambda form_c)))
+                ( bodyResult (lambdaBody (scremaPostLambda form_c))
                     <> varsRes (map paramName post_forward_params)
                 )
           }

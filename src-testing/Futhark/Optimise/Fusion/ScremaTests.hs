@@ -256,7 +256,7 @@ tests =
         [],
       testGroup
         "fuseSuperScrema"
-        [ testCase "map-scan (horizontal)" $
+        [ testCase "map-scan (vertical)" $
             let scan_op =
                   Scan
                     ( fromLines
@@ -300,25 +300,26 @@ tests =
                   @?= SP
                     ( SuperScrema
                         "d_5537"
-                        [input_a, input_b]
+                        [input_a]
                         ( fromLines
-                            [ "\\ {eta_p_5566 : i32, x_10000 : i32}: {i32, i32} ->",
+                            [ "\\ {eta_p_5566 : i32}: {i32} ->",
                               "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
-                              "in {lifted_lambda_res_5567, x_10000}"
+                              "in {lifted_lambda_res_5567}"
                             ]
                         )
                         []
                         []
                         ( fromLines
-                            [ "\\ {x_5568 : i32, x_5570 : i32}: {i32, i32} -> ",
-                              "{x_5570, x_5568}"
+                            [ "\\ {x_5568 : i32}: {i32, i32} -> ",
+                              "let {x_5570 : i32} = x_5568",
+                              "in {x_5570, x_5568}"
                             ]
                         )
                         [scan_op]
                         []
                         ( fromLines
-                            [ "\\ {x_5570 : i32, x_10001 : i32}: {i32, i32} ->",
-                              "{x_10000, x_10001}"
+                            [ "\\ {x_5574 : i32, x_10000 : i32}: {i32, i32} ->",
+                              "{x_5574, x_10000}"
                             ]
                         )
                     ),
@@ -385,8 +386,8 @@ tests =
                         [scan_op]
                         []
                         ( fromLines
-                            [ "\\ {x_5570 : i32, x_10001 : i32}: {i32, i32} ->",
-                              "{x_10000, x_10001}"
+                            [ "\\ {x_5574 : i32, x_10001 : i32}: {i32, i32} ->",
+                              "{x_5574, x_10001}"
                             ]
                         )
                     )
