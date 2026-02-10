@@ -606,7 +606,7 @@ loadImage :: FilePath -> ScriptM (Compound Value)
 loadImage imgfile =
   withTempDir $ \dir -> do
     let bmpfile = dir </> takeBaseName imgfile `replaceExtension` "bmp"
-    void $ system "magick" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
+    void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
     loadBMP bmpfile
 
 loadPCM :: Int -> FilePath -> ScriptM (Compound Value)
@@ -751,7 +751,7 @@ processDirective env (DirectiveImg e params) = do
             withTempDir $ \dir -> do
               let bmpfile = dir </> "img.bmp"
               liftIO $ LBS.writeFile bmpfile bmp
-              void $ system "magick" [bmpfile, pngfile] mempty
+              void $ system "convert" [bmpfile, pngfile] mempty
       Right v ->
         nope $ fmap valueType v
       Left t ->
