@@ -390,6 +390,230 @@ tests =
                               "{x_5574, x_10001}"
                             ]
                         )
+                    ),
+          testCase "map-scan (vertical) with reduce (horizontal)" $
+            let scan_op =
+                  Scan
+                    ( fromLines
+                        [ "\\ {eta_p_5571 : i32, eta_p_5572 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_5573 : i32} = add32(eta_p_5571, eta_p_5572)",
+                          "in {defunc_0_op_res_5573}"
+                        ]
+                    )
+                    ["0i32"]
+                reduce_op =
+                  Reduce
+                    Commutative
+                    ( fromLines
+                        [ "\\ {eta_p_55720 : i32, eta_p_557201 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_5573 : i32} = add32(eta_p_55720, eta_p_557201)",
+                          "in {defunc_0_op_res_5573}"
+                        ]
+                    )
+                    ["0i32"]
+
+                ident_a = Ident "input_a_5565" "[d_5537]i32"
+                ident_b = Ident "input_b_5538" "[d_5537]i32"
+                input_a = SOAC.identInput ident_a
+                input_b = SOAC.identInput ident_b
+             in SP
+                  ( freshNames
+                      ( fuseSuperScrema
+                          "d_5537"
+                          [input_a]
+                          ( ScremaForm
+                              ( fromLines
+                                  [ "\\ {eta_p_5566 : i32} : {i32} ->",
+                                    "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
+                                    "in {lifted_lambda_res_5567, lifted_lambda_res_5567}"
+                                  ]
+                              )
+                              []
+                              [reduce_op]
+                              "\\ {x_5568 : i32} : {i32} -> {x_5568}"
+                          )
+                          [identName ident_b]
+                          [input_b]
+                          ( ScremaForm
+                              "\\ {x_5570 : i32} : {i32} -> {x_5570}"
+                              [scan_op]
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5574 : i32} : {i32} ->",
+                                    "let {y_5567 : i32} = add32(2i32, x_5574)",
+                                    "in {y_5567}"
+                                  ]
+                              )
+                          )
+                          ["defunc_0_scan_res_5569"]
+                      )
+                  )
+                  @?= SP
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {eta_p_5566 : i32}: {i32} ->",
+                              "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
+                              "in {lifted_lambda_res_5567, lifted_lambda_res_5567}"
+                            ]
+                        )
+                        []
+                        [reduce_op]
+                        ( fromLines
+                            [ "\\ {x_5568 : i32}: {i32, i32} -> ",
+                              "let {x_5570 : i32} = x_5568",
+                              "in {x_5570, x_5568}"
+                            ]
+                        )
+                        [scan_op]
+                        []
+                        ( fromLines
+                            [ "\\ {x_5574 : i32, x_10000 : i32}: {i32, i32} ->",
+                              "let {y_5567 : i32} = add32(2i32, x_5574)",
+                              "in {y_5567, x_10000}"
+                            ]
+                        )
+                    ),
+          testCase "map-map (vertical)" $
+            let ident_a = Ident "input_a_5565" "[d_5537]i32"
+                ident_b = Ident "input_b_5538" "[d_5537]i32"
+                input_a = SOAC.identInput ident_a
+                input_b = SOAC.identInput ident_b
+             in SP
+                  ( freshNames
+                      ( fuseSuperScrema
+                          "d_5537"
+                          [input_a]
+                          ( ScremaForm
+                              ( fromLines
+                                  [ "\\ {eta_p_5566 : i32} : {i32} ->",
+                                    "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
+                                    "in {lifted_lambda_res_5567, lifted_lambda_res_5567}"
+                                  ]
+                              )
+                              []
+                              []
+                              "\\ {x_5568 : i32} : {i32} -> {x_5568}"
+                          )
+                          [identName ident_b]
+                          [input_b]
+                          ( ScremaForm
+                              ( fromLines
+                                  [ "\\ {x_5574 : i32} : {i32} ->",
+                                    "let {y_5567 : i32} = add32(3i32, x_5574)",
+                                    "in {y_5567}"
+                                  ]
+                              )
+                              []
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5570 : i32} : {i32} -> {x_5570}"
+                                  ]
+                              )
+                          )
+                          ["defunc_0_scan_res_5569"]
+                      )
+                  )
+                  @?= SP
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {eta_p_5566 : i32}: {i32} ->",
+                              "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
+                              "in {lifted_lambda_res_5567, lifted_lambda_res_5567}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5568 : i32}: {i32, i32} -> ",
+                              "let {x_5574 : i32} = x_5568",
+                              "let {y_5567 : i32} = add32(3i32, x_5574)",
+                              "in {y_5567, x_5568}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5570 : i32, x_10000 : i32}: {i32, i32} ->",
+                              "in {x_5570, x_10000}"
+                            ]
+                        )
+                    ),
+          testCase "map-scan-map (vertical)" $
+            let scan_op =
+                  Scan
+                    ( fromLines
+                        [ "\\ {eta_p_5571 : i32, eta_p_5572 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_5573 : i32} = add32(eta_p_5571, eta_p_5572)",
+                          "in {defunc_0_op_res_5573}"
+                        ]
+                    )
+                    ["0i32"]
+                ident_a = Ident "input_a_5565" "[d_5537]i32"
+                ident_b = Ident "input_b_5538" "[d_5537]i32"
+                input_a = SOAC.identInput ident_a
+                input_b = SOAC.identInput ident_b
+             in SP
+                  ( freshNames
+                      ( fuseSuperScrema
+                          "d_5537"
+                          [input_a]
+                          ( ScremaForm
+                              ( fromLines
+                                  [ "\\ {eta_p_5566 : i32} : {i32} ->",
+                                    "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
+                                    "in {lifted_lambda_res_5567}"
+                                  ]
+                              )
+                              []
+                              []
+                              "\\ {x_5568 : i32} : {i32} -> {x_5568}"
+                          )
+                          [identName ident_b]
+                          [input_b]
+                          ( ScremaForm
+                              "\\ {x_5570 : i32} : {i32} -> {x_5570}"
+                              [scan_op]
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5574 : i32} : {i32} ->",
+                                    "let {y_6363: i32} = add32(3i32, x_5574)",
+                                    "in {y_6363}"
+                                  ]
+                              )
+                          )
+                          ["defunc_0_scan_res_5569"]
+                      )
+                  )
+                  @?= SP
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {eta_p_5566 : i32}: {i32} ->",
+                              "let {lifted_lambda_res_5567 : i32} = add32(2i32, eta_p_5566)",
+                              "in {lifted_lambda_res_5567}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5568 : i32}: {i32, i32} -> ",
+                              "let {x_5570 : i32} = x_5568",
+                              "in {x_5570, x_5568}"
+                            ]
+                        )
+                        [scan_op]
+                        []
+                        ( fromLines
+                            [ "\\ {x_5574 : i32, x_10000 : i32}: {i32, i32} ->",
+                              "let {y_6363 : i32} = add32(3i32, x_5574)",
+                              "in {y_6363, x_10000}"
+                            ]
+                        )
                     )
         ]
     ]
