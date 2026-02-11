@@ -921,6 +921,19 @@ evalAppExp env (LetWith dest src is v body loc) = do
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
     oob = bad loc env "Update out of bounds"
+evalAppExp env (LetWithField dest src fields v body _) = do
+  let Ident src_vn (Info src_t) _ = src
+  src_v <- evalTermVar env (qualName src_vn) (toStruct src_t)
+  v' <- eval env v
+  let dest' = update src_v fields v'
+      t = T.BoundV [] $ toStruct $ unInfo $ identType dest
+  eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
+  where
+    update _ [] v' = v'
+    update (ValueRecord src') (f : fs) v'
+      | Just f_v <- M.lookup f src' =
+          ValueRecord $ M.insert f (update f_v fs v') src'
+    update _ _ _ = error "evalAppExp LetWithField: invalid value."
 evalAppExp env (Loop sparams pat loopinit form body _) = do
   init_v <- eval env $ loopInitExp loopinit
   case form of

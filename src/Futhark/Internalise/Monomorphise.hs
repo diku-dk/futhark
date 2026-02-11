@@ -600,6 +600,8 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
         )
 transformAppExp LetWith {} _ =
   error "transformAppExp: LetWith is not supposed to occur"
+transformAppExp LetWithField {} _ =
+  error "transformAppExp: LetWithField is not supposed to occur"
 transformAppExp (Index e0 idxs loc) res =
   AppExp
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)

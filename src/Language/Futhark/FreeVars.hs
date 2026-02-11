@@ -105,6 +105,10 @@ freeInExp expr = case expr of
       <> foldMap freeInDimIndex idxs
       <> freeInExp e1
       <> (freeInExp e2 `freeWithout` S.singleton (identName id1))
+  AppExp (LetWithField id1 id2 _ e1 e2 _) _ ->
+    ident id2
+      <> freeInExp e1
+      <> (freeInExp e2 `freeWithout` S.singleton (identName id1))
   AppExp (Index e idxs _) _ -> freeInExp e <> foldMap freeInDimIndex idxs
   Update e1 idxs e2 _ -> freeInExp e1 <> foldMap freeInDimIndex idxs <> freeInExp e2
   RecordUpdate e1 _ e2 _ _ -> freeInExp e1 <> freeInExp e2

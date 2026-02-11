@@ -289,6 +289,14 @@ prettyAppExp _ (LetWith dest src idxs ve body _)
         <+> "="
         <+> align (pretty ve)
         </> letBody body
+prettyAppExp _ (LetWithField dest _ fields ve body _) =
+  "let"
+    <+> pretty dest
+    <> "."
+    <> mconcat (intersperse "." (map pretty fields))
+      <+> equals
+      <+> align (pretty ve)
+      </> letBody body
 prettyAppExp p (Range start maybe_step end _) =
   parensIf (p /= -1) $
     pretty start

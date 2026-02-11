@@ -621,6 +621,8 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
     _ -> error $ "Projection of an expression with static value " ++ show sv0
 defuncExp (AppExp LetWith {} _) =
   error "defuncExp: unexpected LetWith"
+defuncExp (AppExp LetWithField {} _) =
+  error "defuncExp: unexpected LetWithField"
 defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
   e0' <- defuncExp' e0
   idxs' <- mapM defuncDimIndex idxs

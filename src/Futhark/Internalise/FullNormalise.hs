@@ -337,6 +337,11 @@ getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) sl
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
+getOrdering final (AppExp (LetWithField (Ident dest dty dloc) (Ident src sty sloc) fields e body _) _) = do
+  e' <- getOrdering False e
+  let loc' = srcspan dloc e
+  addBind $ PatBind [] (Id dest dty dloc) (RecordUpdate (Var (qualName src) sty sloc) fields e' (Info (unInfo sty)) loc')
+  getOrdering final body
 getOrdering final (AppExp (Index e slice loc) resT) = do
   e' <- getOrdering False e
   slice' <- astMap mapper slice

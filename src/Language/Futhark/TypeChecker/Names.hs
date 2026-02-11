@@ -362,6 +362,13 @@ resolveAppExp (LetWith (Ident dst _ dstloc) (Ident src _ srcloc) slice e1 e2 loc
     let dst' = Ident dstv NoInfo dstloc
     e2' <- resolveExp e2
     pure $ LetWith dst' src' slice' e1' e2' loc
+resolveAppExp (LetWithField (Ident dst _ dstloc) (Ident src _ srcloc) fields e1 e2 loc) = do
+  src' <- Ident <$> resolveName src srcloc <*> pure NoInfo <*> pure srcloc
+  e1' <- resolveExp e1
+  bindSpaced1 Term dst loc $ \dstv -> do
+    let dst' = Ident dstv NoInfo dstloc
+    e2' <- resolveExp e2
+    pure $ LetWithField dst' src' fields e1' e2' loc
 resolveAppExp (BinOp (f, floc) finfo (e1, info1) (e2, info2) loc) = do
   f' <- resolveQualName f floc
   e1' <- resolveExp e1
