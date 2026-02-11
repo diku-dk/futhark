@@ -96,6 +96,37 @@ function make_array_class(fut, name) {
   };
 }
 
+class FutharkOpaque {
+  constructor(name, ptr) {
+    this.ptr = ptr;
+    this.valid = true;
+  }
+}
+
+function make_opaque_class(fut, name) {
+  const type_info = fut.manifest.types[name];
+
+  function wasm_fun(full_name) {
+    const name = "_" + full_name;
+    return fut.m[name];
+  }
+
+  return class FutharkOpaqueImpl extends FutharkOpaque {
+    constructor(name, ptr) {
+      super(name, ptr);
+    }
+
+    static from_native(ptr) {
+      return new FutharkOpaqueImpl(name, ptr);
+    }
+
+    free() {
+      const free_fun = wasm_fun(type_info.ops.free);
+      free_fun(fut.ctx, this.arr);
+    }
+  };
+}
+
 function make_entry_function(fut, name) {
   const entry_info = fut.manifest.entry_points[name];
 
@@ -119,7 +150,8 @@ function make_entry_function(fut, name) {
           real_inputs.push(inputs[i].arr);
         }
         else {
-          real_inputs.push(inputs[i]);
+          // Assume opaque.
+          real_inputs.push(inputs[i].ptr);
         }
       }
       else {
@@ -150,11 +182,9 @@ function make_entry_function(fut, name) {
           const array_type = fut.types[out_info.type];
           const val = array_type.from_native(fut.m.HEAP32[out_ptrs[i] / 4]);
           outputs.push(val);
-        }
-        else {
-          // FIXME: I'm not sure this is right. At the very least we should wrap
-          // it so it can be freed.
-          const val = fut.m.HEAP32[out_ptrs[i] / 4];
+        } else {
+          const opaque_type = fut.types[out_info.type];
+          const val = opaque_type.from_native(fut.m.HEAP32[out_ptrs[i] / 4]);
           outputs.push(val);
         }
       }
