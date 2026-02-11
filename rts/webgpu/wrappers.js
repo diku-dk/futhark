@@ -23,7 +23,7 @@ function make_array_class(fut, name) {
     const name = "_" + full_name;
     return fut.m[name];
   }
-  
+
   return class FutharkArrayImpl extends FutharkArray {
     constructor(arr, shape) {
       super(name, arr, shape);
@@ -32,7 +32,7 @@ function make_array_class(fut, name) {
     static from_native(arr) {
       const shape_fun = wasm_fun(type_info.ops.shape);
       const shape_ptr = shape_fun(fut.ctx, arr);
-      
+
       const shape = new BigInt64Array(
         fut.m.HEAP64.subarray(shape_ptr / 8, shape_ptr / 8 + type_info.rank));
 
@@ -65,7 +65,7 @@ function make_array_class(fut, name) {
 
     get_shape() { return this.shape; }
 
-    async values() { 
+    async values() {
       futhark_assert(this.arr != undefined, "array already freed");
 
       const flat_len = Number(this.shape.reduce((a, b) => a * b));
@@ -98,7 +98,7 @@ function make_array_class(fut, name) {
 
 function make_entry_function(fut, name) {
   const entry_info = fut.manifest.entry_points[name];
-  
+
   return async function(...inputs) {
     futhark_assert(inputs.length == entry_info.inputs.length,
       "Unexpected number of input arguments");
@@ -152,6 +152,9 @@ function make_entry_function(fut, name) {
           outputs.push(val);
         }
         else {
+          // FIXME: I'm not sure this is right. At the very least we should wrap
+          // it so it can be freed.
+          const val = fut.m.HEAP32[out_ptrs[i] / 4];
           outputs.push(val);
         }
       }
