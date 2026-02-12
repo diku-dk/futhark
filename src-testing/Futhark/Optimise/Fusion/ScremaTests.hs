@@ -9,7 +9,6 @@ import Futhark.IR.SOACSTests ()
 import Futhark.Optimise.Fusion.Screma
   ( SuperScrema (..),
     fuseLambda,
-    fuseScrema,
     fuseSuperScrema,
     splitLambdaByPar,
     splitLambdaByRes,
