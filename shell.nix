@@ -49,4 +49,10 @@ pkgs.stdenv.mkDerivation {
         rocmPackages.clr
       ])
   ;
+
+  # Locale setup so that 'nix-shell --pure' will not run in an ASCII
+  # environment.
+  LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
+  LANG = "C.UTF-8";
+  LC_ALL = "C.UTF-8";
 }

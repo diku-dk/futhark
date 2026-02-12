@@ -600,6 +600,8 @@ internaliseAppExp _ _ e@E.BinOp {} =
   error $ "internaliseAppExp: Unexpected BinOp " ++ prettyString e
 internaliseAppExp _ _ e@(E.LetWith {}) =
   error $ "internaliseAppExp: Unexpected LetWith at " ++ locStr (srclocOf e)
+internaliseAppExp _ _ e@(E.LetWithField {}) =
+  error $ "internaliseAppExp: Unexpected LetWithField at " ++ locStr (srclocOf e)
 
 internaliseExp :: Name -> E.Exp -> InternaliseM [I.SubExp]
 internaliseExp desc (E.Parens e _) =

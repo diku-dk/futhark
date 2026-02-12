@@ -868,7 +868,13 @@ checkExp (AppExp (LetWith dst src slice ve body loc) appres) = do
   overlapCheck (locOf ve) (src, src_als) (ve', ve_als)
   (body', body_als) <- bindingIdent Consume dst $ checkExp body
   pure (AppExp (LetWith dst src slice' ve' body' loc) appres, body_als)
-
+--
+checkExp (AppExp (LetWithField dst src fields ve body loc) appres) = do
+  _ <- observeVar (locOf dst) (identName src) (unInfo $ identType src)
+  (ve', _) <- checkExp ve
+  consume (locOf src) (identName src) (unInfo (identType src))
+  (body', body_als) <- bindingIdent Consume dst $ checkExp body
+  pure (AppExp (LetWithField dst src fields ve' body' loc) appres, body_als)
 --
 checkExp (Update src slice ve loc) = do
   slice' <- checkSubExps slice
