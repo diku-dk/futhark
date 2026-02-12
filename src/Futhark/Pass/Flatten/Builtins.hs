@@ -406,7 +406,12 @@ partitionBuiltin = buildingBuiltin $ do
 -- avoid the code explosion that would result if we inserted
 -- primitives everywhere.
 flatteningBuiltins :: [FunDef GPU]
-flatteningBuiltins = [segIotaBuiltin, repIotaBuiltin, prefixSumBuiltin, partitionBuiltin]
+flatteningBuiltins =
+  [ segIotaBuiltin,
+    repIotaBuiltin,
+    prefixSumBuiltin,
+    partitionBuiltin
+  ]
 
 -- | @[0,1,2,0,1,0,1,2,3,4,...]@.  Returns @(flags,offsets,elems)@.
 doSegIota :: VName -> Builder GPU (VName, VName, VName)
