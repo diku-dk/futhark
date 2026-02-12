@@ -6,6 +6,8 @@
 -- Tiling produced such a SegOp.  In most cases that version will then
 -- be discarded, but the attributes ensure that only one version is
 -- produced.
+-- ==
+-- tags { no_webgpu }
 
 module loess_m = {
   module T = f64

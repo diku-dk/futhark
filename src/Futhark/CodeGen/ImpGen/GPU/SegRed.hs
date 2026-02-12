@@ -952,7 +952,14 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
   sOp $ Imp.Barrier Imp.FenceGlobal
 
   is_last_block <- dPrim "is_last_block"
-  copyDWIMFix (tvVar is_last_block) [] (Var sync_arr) [0]
+  (sync_arr_mem, sync_arr_space, sync_arr_is) <- fullyIndexArray sync_arr [0]
+  sOp $
+    Imp.UniformRead
+      (tvVar is_last_block)
+      sync_arr_mem
+      sync_arr_is
+      Bool
+      sync_arr_space
   sWhen (tvExp is_last_block) $ do
     -- The final block has written its result (and it was
     -- us!), so read in all the block results and perform the

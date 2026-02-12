@@ -1,5 +1,6 @@
 -- http://rosettacode.org/wiki/Averages/Root_mean_square
---
+-- ==
+-- tags { no_webgpu }
 -- input { [1.0,2.0,3.0,1.0] }
 -- output { 1.936f64 }
 

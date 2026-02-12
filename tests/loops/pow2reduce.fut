@@ -1,5 +1,6 @@
 -- Tree reduction that only works on input that is a power of two.
 -- ==
+-- tags { no_webgpu }
 -- input { [1,2,3,4] }
 -- output { 10 }
 

@@ -50,6 +50,9 @@ unittest:
 test-oclgrind:
 	cabal run -- futhark test tests -c --backend=opencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh --tuning=tuning_gpu
 
+test-webgpu:
+	cabal run -- futhark test tests -c --backend=webgpu --runner tools/browser_test.py --no-tuning
+
 test-t:
 	cabal run -- futhark test tests -t
 

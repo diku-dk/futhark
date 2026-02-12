@@ -47,6 +47,7 @@ extra-source-files:
     rts/c/backends/hip.h
     rts/c/backends/multicore.h
     rts/c/backends/opencl.h
+    rts/c/backends/webgpu.h
     rts/c/lock.h
     rts/c/copy.h
     rts/c/timing.h
@@ -81,6 +82,22 @@ extra-source-files:
     rts/python/values.py
     rts/python/opencl.py
     rts/python/scalar.py
+    rts/webgpu/server_ws.js
+    rts/webgpu/util.js
+    rts/webgpu/values.js
+    rts/webgpu/wrappers.js
+    rts/wgsl/scalar.wgsl
+    rts/wgsl/scalar8.wgsl
+    rts/wgsl/scalar16.wgsl
+    rts/wgsl/scalar32.wgsl
+    rts/wgsl/scalar64.wgsl
+    rts/wgsl/atomics.wgsl
+    rts/wgsl/lmad_copy.wgsl
+    rts/wgsl/map_transpose.wgsl
+    rts/wgsl/map_transpose_low_height.wgsl
+    rts/wgsl/map_transpose_low_width.wgsl
+    rts/wgsl/map_transpose_small.wgsl
+    rts/wgsl/map_transpose_large.wgsl
     prelude/functional.fut
     prelude/math.fut
     prelude/soacs.fut
@@ -178,8 +195,10 @@ library
       Futhark.CLI.Script
       Futhark.CLI.Test
       Futhark.CLI.WASM
+      Futhark.CLI.WebGPU
       Futhark.CodeGen.Backends.CCUDA
       Futhark.CodeGen.Backends.COpenCL
+      Futhark.CodeGen.Backends.CWebGPU
       Futhark.CodeGen.Backends.HIP
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
@@ -212,11 +231,15 @@ library
       Futhark.CodeGen.RTS.OpenCL
       Futhark.CodeGen.RTS.Python
       Futhark.CodeGen.RTS.JavaScript
+      Futhark.CodeGen.RTS.WebGPU
+      Futhark.CodeGen.RTS.WGSL
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.GPU
+      Futhark.CodeGen.ImpCode.Kernels
       Futhark.CodeGen.ImpCode.Multicore
       Futhark.CodeGen.ImpCode.OpenCL
       Futhark.CodeGen.ImpCode.Sequential
+      Futhark.CodeGen.ImpCode.WebGPU
       Futhark.CodeGen.ImpGen
       Futhark.CodeGen.ImpGen.CUDA
       Futhark.CodeGen.ImpGen.GPU
@@ -238,6 +261,7 @@ library
       Futhark.CodeGen.ImpGen.Multicore.SegScan
       Futhark.CodeGen.ImpGen.OpenCL
       Futhark.CodeGen.ImpGen.Sequential
+      Futhark.CodeGen.ImpGen.WebGPU
       Futhark.CodeGen.OpenCL.Heuristics
       Futhark.Compiler
       Futhark.Compiler.CLI
@@ -387,6 +411,7 @@ library
       Futhark.Script
       Futhark.Test
       Futhark.Test.Spec
+      Futhark.Test.WebGPUTest
       Futhark.Test.Values
       Futhark.Tools
       Futhark.Transform.CopyPropagate
@@ -467,7 +492,7 @@ library
     , dlist >=0.6.0.1
     , fgl
     , fgl-visualize
-    , file-embed >=0.0.14.0
+    , file-embed >=0.0.16.0
     , filepath >=1.4.1.1
     , free >=5.1.10
     , futhark-data >= 1.1.2.0
@@ -504,6 +529,7 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
+    , language-wgsl
 
 executable futhark
   import: common
