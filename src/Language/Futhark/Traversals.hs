@@ -102,6 +102,14 @@ instance ASTMappable (AppExpBase Info VName) where
       <*> mapOnExp tv vexp
       <*> mapOnExp tv body
       <*> pure loc
+  astMap tv (LetWithField dest src fields vexp body loc) =
+    LetWithField
+      <$> astMap tv dest
+      <*> astMap tv src
+      <*> pure fields
+      <*> mapOnExp tv vexp
+      <*> mapOnExp tv body
+      <*> pure loc
   astMap tv (BinOp (fname, fname_loc) t (x, xext) (y, yext) loc) =
     BinOp
       <$> ((,) <$> mapOnName tv fname <*> pure fname_loc)
@@ -513,6 +521,14 @@ bareExp (AppExp appexp _) =
             (Ident dest NoInfo destloc)
             (Ident src NoInfo srcloc)
             (map bareDimIndex idxexps)
+            (bareExp vexp)
+            (bareExp body)
+            loc
+        LetWithField (Ident dest _ destloc) (Ident src _ srcloc) fields vexp body loc ->
+          LetWithField
+            (Ident dest NoInfo destloc)
+            (Ident src NoInfo srcloc)
+            fields
             (bareExp vexp)
             (bareExp body)
             loc
