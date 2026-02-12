@@ -265,8 +265,8 @@ tests =
                         ]
                     )
                     ["0i32"]
-                ident_a = Ident "input_a_5565" "[d_5537]i32"
-                ident_b = Ident "input_b_5538" "[d_5537]i32"
+                ident_a = "input_a_5565 : [d_5537]i32"
+                ident_b = "input_b_5538 : [d_5537]i32"
                 input_a = SOAC.identInput ident_a
                 input_b = SOAC.identInput ident_b
              in SP
@@ -333,8 +333,8 @@ tests =
                         ]
                     )
                     ["0i32"]
-                ident_a = Ident "input_a_5565" "[d_5537]i32"
-                ident_b = Ident "input_b_5538" "[d_5537]i32"
+                ident_a = "input_a_5565 : [d_5537]i32"
+                ident_b = "input_b_5538 : [d_5537]i32"
                 input_a = SOAC.identInput ident_a
                 input_b = SOAC.identInput ident_b
                 out_a = "out_a_5564145"
@@ -413,8 +413,8 @@ tests =
                     )
                     ["0i32"]
 
-                ident_a = Ident "input_a_5565" "[d_5537]i32"
-                ident_b = Ident "input_b_5538" "[d_5537]i32"
+                ident_a = "input_a_5565 : [d_5537]i32"
+                ident_b = "input_b_5538 : [d_5537]i32"
                 input_a = SOAC.identInput ident_a
                 input_b = SOAC.identInput ident_b
              in SP
@@ -478,8 +478,8 @@ tests =
                       ["red_out_543532", "defunc_0_scan_res_5569", identName ident_b]
                     ),
           testCase "map-map (vertical)" $
-            let ident_a = Ident "input_a_5565" "[d_5537]i32"
-                ident_b = Ident "input_b_5538" "[d_5537]i32"
+            let ident_a = "input_a_5565 : [d_5537]i32"
+                ident_b = "input_b_5538 : [d_5537]i32"
                 input_a = SOAC.identInput ident_a
                 input_b = SOAC.identInput ident_b
              in SP
@@ -555,8 +555,8 @@ tests =
                         ]
                     )
                     ["0i32"]
-                ident_a = Ident "input_a_5565" "[d_5537]i32"
-                ident_b = Ident "input_b_5538" "[d_5537]i32"
+                ident_a = "input_a_5565 : [d_5537]i32"
+                ident_b = "input_b_5538 : [d_5537]i32"
                 input_a = SOAC.identInput ident_a
                 input_b = SOAC.identInput ident_b
              in SP

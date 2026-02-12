@@ -16,6 +16,7 @@ module Futhark.IR.Parse
     parseVName,
     parseSubExp,
     parseSubExpRes,
+    parseIdent,
 
     -- * Representation-specific fragments
     parseLambdaSOACS,
@@ -745,6 +746,9 @@ pProg pr =
 pStateAndProg :: PR rep -> Parser (VNameSource, Prog rep)
 pStateAndProg pr = (,) <$> (pVNameSource <|> pure (VNameSource 0)) <*> pProg pr
 
+pIdent :: Parser Ident
+pIdent = Ident <$> pVName <* pColon <*> pType
+
 pSOAC :: PR rep -> Parser (SOAC.SOAC rep)
 pSOAC pr =
   choice
@@ -1218,6 +1222,9 @@ parseSubExp = parseFull pSubExp
 
 parseSubExpRes :: FilePath -> T.Text -> Either T.Text SubExpRes
 parseSubExpRes = parseFull pSubExpRes
+
+parseIdent :: FilePath -> T.Text -> Either T.Text Ident
+parseIdent = parseFull pIdent
 
 -- Rep-specific fragment parsers
 
