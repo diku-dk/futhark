@@ -177,6 +177,30 @@ fusible inp_p form_p out_p inp_c form_c out_c =
     ((_, post_scan_p, _), _) =
       splitLambdaByPar post_scan_pars_p inp_p post_p out_c
 
+fuseBinds ::
+  (Buildable rep, Ord a) =>
+  Lambda rep ->
+  [a] ->
+  [a] ->
+  Lambda rep ->
+  Stms rep
+fuseBinds lam_p out_p inp_c lam_c =
+  stmsFromList . mapMaybe bindResToPar $ zip3 out_p res_p ts_p
+  where
+    ts_p = lambdaReturnType lam_p
+    res_p = bodyResult $ lambdaBody lam_p
+
+    inp_c_map =
+      M.fromList . zip inp_c $ paramName <$> lambdaParams lam_c
+
+    bindResToPar (out, res, t) =
+      case M.lookup out inp_c_map of
+        Just name ->
+          Just $ certify cs $ mkLet [Ident name t] $ BasicOp $ SubExp e
+          where
+            SubExpRes cs e = res
+        Nothing -> Nothing
+
 -- WIP: NOT FINISHED
 fuseSuperScrema ::
   (MonadFreshNames m) =>
@@ -192,32 +216,11 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
   let inp_c_real_map = map (not . inputFromOutput) inp_c
       inp_c_real = pick inp_c_real_map inp_c
       inp_r = inp_p <> inp_c_real
-      ts_p = lambdaReturnType $ scremaPostLambda form_p
-      res_p = bodyResult $ lambdaBody $ scremaPostLambda form_p
-      inp_c_map =
-        M.fromList
-          . zip (SOAC.inputArray <$> inp_c)
-          . fmap paramName
-          . lambdaParams
-          $ scremaLambda form_c
-
-      bindResToPar :: (VName, SubExpRes, Type) -> Maybe (Stm SOACS)
-      bindResToPar (out, res, t) =
-        case M.lookup out inp_c_map of
-          Just name ->
-            Just $ certify cs $ mkLet [Ident name t] $ BasicOp $ SubExp e
-            where
-              SubExpRes cs e = res
-          Nothing -> Nothing
 
       (out_red_p, out_post_p) =
         splitAt (redResults $ scremaReduces form_p) out_p
       (out_red_c, out_post_c) =
         splitAt (redResults $ scremaReduces form_c) out_c
-      binds =
-        stmsFromList
-          . mapMaybe bindResToPar
-          $ zip3 out_post_p res_p ts_p
 
   forward_params <- forM (pick inp_c_real_map (lambdaParams (scremaLambda form_c))) $ \p ->
     newParam (baseName (paramName p)) (paramType p)
@@ -248,7 +251,11 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
             lambdaBody =
               mkBody
                 ( bodyStms (lambdaBody (scremaPostLambda form_p))
-                    <> binds
+                    <> fuseBinds
+                      (scremaPostLambda form_p)
+                      out_post_p
+                      (SOAC.inputArray <$> inp_c)
+                      (scremaLambda form_c)
                     <> bodyStms (lambdaBody (scremaLambda form_c))
                 )
                 ( bodyResult (lambdaBody (scremaLambda form_c))
@@ -296,6 +303,16 @@ moveScanSuperScrema ::
 moveScanSuperScrema super_screma = do
   pure super_screma
   where
+    names'' =
+      map paramName
+        . take (scanResults scan')
+        $ lambdaParams lam''
+    names' =
+      splitAt3 (scanResults scan) (redResults red)
+        . map paramName
+        $ lambdaParams lam'
+    (_, _) = splitLambdaByPar names'' (repeat 0) lam'' (repeat 0)
+    -- splitLambdaByPars
     SuperScrema
       w
       inp

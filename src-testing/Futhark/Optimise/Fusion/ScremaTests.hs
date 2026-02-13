@@ -30,18 +30,18 @@ freshNames :: State VNameSource a -> a
 freshNames m = evalState m $ newNameSource 10000
 
 -- | A wrapper that makes 'show' behave like 'prettyString'.
-newtype SP a = SP a
+newtype SP a b = SP (a, b)
   deriving (Eq, Ord)
 
-instance (Pretty a) => Show (SP a) where
-  show (SP x) = prettyString x
+instance (Pretty a, Pretty b) => Show (SP a b) where
+  show (SP (x, y)) = "(" <> prettyString x <> ",\n" <> prettyString y <> ")"
 
 -- | A wrapper that makes 'pretty' behave like 'Show'.
 newtype PS a = PS a
   deriving (Eq, Ord)
 
-instance (Show a) => Pretty (PS a) where
-  pretty (PS x) = pretty (show x)
+instance (Pretty a) => Show (PS a) where
+  show (PS x) = prettyString x
 
 tests :: TestTree
 tests =
@@ -55,8 +55,8 @@ tests =
                 out_c = ["ys_3"]
                 lam_p = "\\{x_2 : i32} : {i32} -> {x_2}"
                 out_p = ["zs_4"]
-             in SP (fuseLambda lam_c inp_c out_c lam_p out_p)
-                  @?= SP
+             in PS (fuseLambda lam_c inp_c out_c lam_p out_p)
+                  @?= PS
                     ( ["xs_1" :: VName],
                       "\\{x_2 : i32, x_0 : i32} : {i32,i32} -> {x_2, x_0}",
                       ["zs_4", "ys_3"]
