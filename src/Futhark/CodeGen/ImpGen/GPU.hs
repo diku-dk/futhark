@@ -197,7 +197,7 @@ checkSharedMemoryReqs in_scope code = do
 
   -- If any of the sizes involve a variable that is not known at this
   -- point, then we cannot check the requirements.
-  if not $ all in_scope $ namesToList $ freeIn alloc_sizes
+  if not $ allNames in_scope $ freeIn alloc_sizes
     then pure Nothing
     else do
       shared_memory_capacity :: TV Int64 <- dPrim "shared_memory_capacity"

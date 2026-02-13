@@ -1224,9 +1224,8 @@ bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
         space_slice <- map (DimFix . Var . fst) $ unSegSpace space,
         space_slice `isPrefixOf` unSlice slice,
         remaining_slice <- Slice $ drop (length space_slice) (unSlice slice),
-        all (isJust . flip ST.lookup vtable) $
-          namesToList $
-            freeIn arr <> freeIn remaining_slice <> freeIn (stmAuxCerts aux) =
+        allNames (isJust . flip ST.lookup vtable) $
+          freeIn arr <> freeIn remaining_slice <> freeIn (stmAuxCerts aux) =
           Just (remaining_slice, arr)
       | otherwise =
           Nothing

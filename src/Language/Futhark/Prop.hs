@@ -645,7 +645,7 @@ patternParam p =
 namesToPrimTypes :: M.Map Name PrimType
 namesToPrimTypes =
   M.fromList
-    [ (nameFromString $ prettyString t, t)
+    [ (nameFromText $ prettyText t, t)
     | t <-
         Bool
           : map Signed [minBound .. maxBound]

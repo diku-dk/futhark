@@ -70,7 +70,7 @@ intrablockParallelise knest lam = runMaybeT $ do
   let available v =
         v `M.member` outside_scope
           && v `notElem` map kernelInputName inps
-  unless (all available $ namesToList $ freeIn (wss_min ++ wss_avail)) $
+  unless (allNames available $ freeIn (wss_min ++ wss_avail)) $
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $
