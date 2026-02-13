@@ -26,16 +26,15 @@ def f a2 rai_v rai_x rai_y rai_z rbj_v rbj_x rbj_y rbj_z qbj
 
 def neighbor [par_per_box]
              (a2: f32)
-             (rA_el_0: f32)
-             (rA_el_1: f32)
-             (rA_el_2: f32)
-             (rA_el_3: f32)
+             (rai_v: f32)
+             (rai_x: f32)
+             (rai_y: f32)
+             (rai_z: f32)
              (rB_0: [par_per_box]f32)
              (rB_1: [par_per_box]f32)
              (rB_2: [par_per_box]f32)
              (rB_3: [par_per_box]f32)
-             (qB: [par_per_box]f32) : {(f32, f32, f32, f32) | \y -> true}=
-  let (rai_v, rai_x, rai_y, rai_z) = (rA_el_0, rA_el_1, rA_el_2, rA_el_3)
+             (qB: [par_per_box]f32) : {(f32, f32, f32, f32) | \_ -> true}=
   let rB = zip4 rB_0 rB_1 rB_2 rB_3
   let pres =
     map2 (\(rbj_v, rbj_x, rbj_y, rbj_z) qbj ->
@@ -80,14 +79,14 @@ def main [number_boxes] [par_per_box] [num_neighbors]
              in loop (acc) for k < box_num_nghbs' + 1 do
                   let pointer =
                     if (k > 0)
-                    then let num = #[unsafe] box_nnghs_3[k - 1, l] in num
+                    then let num = box_nnghs_3[k - 1, l] in num
                     else l
-                  let first_j = #[unsafe] box_coefs_3[pointer]
-                  let rB_0 = #[unsafe] rv_0[first_j, :]
-                  let rB_1 = #[unsafe] rv_1[first_j, :]
-                  let rB_2 = #[unsafe] rv_2[first_j, :]
-                  let rB_3 = #[unsafe] rv_3[first_j, :]
-                  let qB = #[unsafe] qv[first_j, :]
+                  let first_j = box_coefs_3[pointer]
+                  let rB_0 = rv_0[first_j, :]
+                  let rB_1 = rv_1[first_j, :]
+                  let rB_2 = rv_2[first_j, :]
+                  let rB_3 = rv_3[first_j, :]
+                  let qB = qv[first_j, :]
                   let (r1, r2, r3, r4) = neighbor a2 rA_el_0 rA_el_1 rA_el_2 rA_el_3 rB_0 rB_1 rB_2 rB_3 qB
                   let (a1, a2, a3, a4) = acc
                   in (a1 + r1, a2 + r2, a3 + r3, a4 + r4))

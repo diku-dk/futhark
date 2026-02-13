@@ -1,12 +1,3 @@
--- Transformed version of srad.fut (v3) with Range annotations
--- Changes:
--- 1. Top-level functions use curried arguments (no tuples).
--- 2. Call sites to top-level definitions are in ANF (arguments are trivial).
--- 3. Anonymous lambdas inside maps are preserved (no lifting).
--- 4. Arithmetic/algebraic expressions are preserved (no full ANF for operators).
--- 5. Explicit initialization and type casting.
--- 6. Range annotations for safe indexing.
-
 def indexN
     (rows: {i64 |\v -> Range v (1,inf)})
     (i: {i64 | \v -> Range v (0, rows+1)})
@@ -117,10 +108,10 @@ def srad_iter [rows] [cols]
                                     let idx_s = indexS rows i
                                     let idx_w = indexW cols j
                                     let idx_e = indexE cols j
-                                    let dN_k = #[unsafe] image[idx_n, j] - jc
-                                    let dS_k = #[unsafe] image[idx_s, j] - jc
-                                    let dW_k = #[unsafe] image[i, idx_w] - jc
-                                    let dE_k = #[unsafe] image[i, idx_e] - jc
+                                    let dN_k = image[idx_n, j] - jc
+                                    let dS_k = image[idx_s, j] - jc
+                                    let dW_k = image[i, idx_w] - jc
+                                    let dE_k = image[i, idx_e] - jc
                                     let c_k = calc_c dN_k dS_k dW_k dE_k jc q0sqr
                                     in (dN_k, dS_k, dW_k, dE_k, c_k))
                                   (iota cols)
@@ -132,8 +123,8 @@ def srad_iter [rows] [cols]
             map4 (\j pixel c_k (dN_k, dS_k, dW_k, dE_k) ->
                     let idx_s = indexS rows i
                     let idx_e = indexE cols j
-                    let cS = #[unsafe] c[idx_s, j]
-                    let cE = #[unsafe] c[i, idx_e]
+                    let cS = c[idx_s, j]
+                    let cE = c[i, idx_e]
                     let cN = c_k
                     let cW = c_k
                     let d = calc_d cN dN_k cS dS_k cW dW_k cE dE_k
