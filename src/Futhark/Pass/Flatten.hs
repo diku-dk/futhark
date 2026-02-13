@@ -914,6 +914,18 @@ transformInnerMap segments env inps pat w arrs map_lam = do
   addStms =<< runReaderT (runBuilder_ m) scope
   pure (ws_F, ws_O, ws)
 
+-- Reduction or scan operators may not have any free variables that are variant
+-- to the nest (that is, are inputs to the distributed operation). This is
+-- because we would be unable to express them as SegScan/SegReds. Fixing this
+-- would require modifications to the SegOp representation, but it is likely not
+-- worth it, as such operators are extremely rare - and we can just fall back on
+-- sequentialisation.
+suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> Bool
+suitableOperator env inps =
+  allNames notVariant . freeIn
+  where
+    notVariant v = isNothing $ M.lookup v $ inputReps inps env
+
 transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm segments env (DistStm inps res stm) = do
   case stm of
@@ -923,11 +935,13 @@ transformDistStm segments env (DistStm inps res stm) = do
       transformDistBasicOp segments env (inps, res', pe, aux, e)
     Let pat _ (Op (Screma w arrs form))
       | Just reds <- isReduceSOAC form,
+        all (suitableOperator env inps . redLambda) reds,
         Just arrs' <- mapM (`lookup` inps) arrs,
         (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
           elems' <- genSegRed arr_segments flags offsets elems $ singleReduce reds
           pure $ insertReps (zip (map distResTag res) (map Regular elems')) env
-      | Just (reds, map_lam) <- isRedomapSOAC form -> do
+      | Just (reds, map_lam) <- isRedomapSOAC form,
+        all (suitableOperator env inps . redLambda) reds -> do
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
             PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
           (ws_F, ws_O, ws) <-
