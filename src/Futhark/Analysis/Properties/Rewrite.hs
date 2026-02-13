@@ -5,14 +5,14 @@ module Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules, solveI
 import Control.Monad (filterM, (<=<))
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraBridge (Answer (..), addRelShape, algebraContext, andM, assume, isFalse, isUnknown, simplify, addRelDim)
+import Futhark.Analysis.Properties.AlgebraBridge (Answer (..), addRelDim, addRelShape, algebraContext, andM, assume, isFalse, isUnknown, simplify)
 import Futhark.Analysis.Properties.IndexFn (Domain (Iota), IndexFn (..), Quantified (..), cases, casesToList)
 import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv)
-import Futhark.Analysis.Properties.Query ((=>?), unifiesWith)
+import Futhark.Analysis.Properties.Query (unifiesWith, (=>?))
 import Futhark.Analysis.Properties.Rule (Rule (..), applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
 import Futhark.Analysis.Properties.Traversals
-import Futhark.Analysis.Properties.Unify (Renameable, fv, renameSame)
+import Futhark.Analysis.Properties.Unify (Renameable, fv, renameSame, sub)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, filterSoP, int2SoP, isZero, justConstant, justSym, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.))
 import Language.Futhark (VName)
@@ -112,32 +112,32 @@ solveIx [dim] =
   where
     rulesSoP :: IndexFnM [Rule (SoP Symbol) Symbol IndexFnM]
     rulesSoP = do
-      h1 <- newVName "h"
-      h2 <- newVName "h"
-      h3 <- newVName "h"
-      h4 <- newVName "h"
       pure []
-        -- XXX This somehow can remove a -1 factor.
-        -- [ Rule
-        --     { name = "SolveIdx0",
-        --       from = hole h4 .*. sym2SoP (Ix (hole h1) (hole h2) (hole h3)),
-        --       to = \s -> do
-        --         n <- sub s (hole h1)
-        --         m <- sub s (hole h2)
-        --         e_idx <- sub s (hole h3)
-        --         t <- sub s (hole h4)
-        --         printM 0 ("### t " <> prettyStr t)
-        --         (t .*.) <$> solveIdx0 dim (Ix n m e_idx),
-        --       sideCondition = \s -> do
-        --         n <- sub s (hole h1)
-        --         m <- sub s (hole h2)
-        --         e_idx <- sub s (hole h3)
-        --         solveIdx0sidecond dim (Ix n m e_idx)
-        --     }
-        -- ]
-      where
-        hole = sym2SoP . Hole
 solveIx _shape = pure
+-- XXX This somehow can remove a -1 factor.
+-- h1 <- newVName "h"
+-- h2 <- newVName "h"
+-- h3 <- newVName "h"
+-- h4 <- newVName "h"
+-- [ Rule
+--     { name = "SolveIdx0",
+--       from = hole h4 .*. sym2SoP (Ix (hole h1) (hole h2) (hole h3)),
+--       to = \s -> do
+--         n <- sub s (hole h1)
+--         m <- sub s (hole h2)
+--         e_idx <- sub s (hole h3)
+--         t <- sub s (hole h4)
+--         printM 0 ("### t " <> prettyStr t)
+--         (t .*.) <$> solveIdx0 dim (Ix n m e_idx),
+--       sideCondition = \s -> do
+--         n <- sub s (hole h1)
+--         m <- sub s (hole h2)
+--         e_idx <- sub s (hole h3)
+--         solveIdx0sidecond dim (Ix n m e_idx)
+--     }
+-- ]
+-- where
+--   hole = sym2SoP . Hole
 
 solveIdx0sidecond :: [Quantified Domain] -> Symbol -> IndexFnM Bool
 solveIdx0sidecond [Forall _ (Iota _), Forall _ (Iota e2)] (Ix _ m e_idx) = do
@@ -178,6 +178,10 @@ solveIdx1 dim@[Forall i1 (Iota _), Forall _ (Iota e2)] sym@(Ix _ m e_idx)
         Yes -> pure (Var i1)
         Unknown -> pure sym
 solveIdx1 _ sym = pure sym
+
+solveIdxZero :: p -> Symbol -> IndexFnM (SoP Symbol)
+solveIdxZero _ (Ix _ _ e_idx) | isZero e_idx = pure (int2SoP 0)
+solveIdxZero _ sym = pure (sym2SoP sym)
 
 sVar :: VName -> SoP Symbol
 sVar = sym2SoP . Var

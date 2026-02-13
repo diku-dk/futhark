@@ -92,6 +92,22 @@ def calc_d
   -- for this uninterpreted.
   (\x -> x) (cN * dN_k + cS * dS_k + cW * dW_k + cE * dE_k)
 
+def indexers
+    (rows: {i64 |\v -> Range v (1,inf)})
+    (cols: {i64 |\v -> Range v (1,inf)})
+    (image: [rows][cols]f32)
+    (i: {i64 | \v -> Range v (0, rows)})
+    (j: {i64 | \v -> Range v (0, cols)})
+    (jc: f32): {(f32, f32, f32, f32) | \_ -> true } =
+    let idx_n = indexN rows i
+    let idx_s = indexS rows i
+    let idx_w = indexW cols j
+    let idx_e = indexE cols j
+    let dN_k = image[idx_n, j] - jc
+    let dS_k = image[idx_s, j] - jc
+    let dW_k = image[i, idx_w] - jc
+    let dE_k = image[i, idx_e] - jc
+    in (\x -> x) (dN_k, dS_k, dW_k, dE_k)
 
 def srad_iter [rows] [cols]
     (image: [rows][cols]f32)
@@ -104,14 +120,7 @@ def srad_iter [rows] [cols]
     unzip5 (map2 (\i row ->
                     unzip5 (map2 (\j jc ->
                                     -- ANF calls to indexers
-                                    let idx_n = indexN rows i
-                                    let idx_s = indexS rows i
-                                    let idx_w = indexW cols j
-                                    let idx_e = indexE cols j
-                                    let dN_k = image[idx_n, j] - jc
-                                    let dS_k = image[idx_s, j] - jc
-                                    let dW_k = image[i, idx_w] - jc
-                                    let dE_k = image[i, idx_e] - jc
+                                    let (dN_k, dS_k, dW_k, dE_k) = indexers rows cols image i j jc
                                     let c_k = calc_c dN_k dS_k dW_k dE_k jc q0sqr
                                     in (dN_k, dS_k, dW_k, dE_k, c_k))
                                   (iota cols)

@@ -142,7 +142,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
         type_params
     -- Adds the effect of a precondition without checking that it holds.
     addPreconditions pat = do
-      printM 1 $ "+ Adding precondition on " <> prettyStr pat
+      printM 1 $ warningString "+" <> " Adding precondition on " <> prettyStr pat
       ref <- getRefinement pat
       forM_ ref $ \(_, effect) -> effect emptyCheckContext
       printAlgEnv 3
@@ -209,22 +209,20 @@ changeScope :: S.Set E.VName -> IndexFn -> IndexFnM IndexFn
 changeScope newScope f
   | fv f `S.isSubsetOf` newScope = pure f
   | fv (shape f) `S.isSubsetOf` newScope = do
-      g <- mkUinterpreted f
+      g <- mkUinterpreted (S.toList newScope) f
       pure $ g {shape = shape f}
-  | otherwise = mkUinterpreted f
+  | otherwise = mkUinterpreted (S.toList newScope) f
 
-uninterpretedName :: String
-uninterpretedName = "uninterpreted-function"
-
-mkUinterpreted :: IndexFn -> IndexFnM IndexFn
-mkUinterpreted f = do
+mkUinterpreted :: [E.VName] -> IndexFn -> IndexFnM IndexFn
+mkUinterpreted params f = do
   new_shape <- forM (shape f) . mapM $ \(Forall i _) ->
     Forall i . Iota . sym2SoP . Var <$> newNameFromString "<d>"
   x <- newNameFromString uninterpretedName
+  let params' = map (sym2SoP . Var) params
   pure $
     IndexFn
       { shape = new_shape,
-        body = singleCase (sym2SoP $ Apply (Var x) (indexVars f))
+        body = singleCase (sym2SoP $ Apply (Var x) (indexVars f <> (if null (indexVars f) then params' else [])))
       }
 
 bodyIsUinterpreted :: IndexFn -> Bool
@@ -792,7 +790,6 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
         Nothing -> do
           g <- lookupUninterpreted e_f
           -- We treat g as an uninterpreted function.
-          printM 1 $ warningMsg loc ("g: " <> prettyStr g)
           arg_fns <- mconcat <$> mapM forward (getArgs args)
           let return_type = E.appResType (E.unInfo appres)
           size <- shapeOf return_type
@@ -829,7 +826,7 @@ forward (E.AppExp (E.Loop _sz _init_pat _init form e_body _loc) _) = do
         forM_ conds . mapM_ $ assume . sop2Symbol
       _ -> error "not implemented"
     forward e_body
-  mapM mkUinterpreted fs
+  mapM (mkUinterpreted []) fs
 forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
   forward e

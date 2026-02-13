@@ -19,6 +19,8 @@ module Futhark.Analysis.Properties.IndexFn
     cmapValues,
     rank,
     indexVars,
+    uninterpretedName,
+    isUninterpretedByName,
   )
 where
 
@@ -27,6 +29,7 @@ import Futhark.Analysis.Properties.Symbol
 import Futhark.SoP.SoP (SoP, sym2SoP, (.*.), (.+.))
 import Language.Futhark (VName)
 import Data.Bifunctor (second)
+import qualified Language.Futhark as E
 
 data IndexFn = IndexFn
   { shape :: [[Quantified Domain]],
@@ -116,3 +119,9 @@ cmap f (Cases xs) = Cases (fmap f xs)
 
 cmapValues :: (b -> c) -> Cases a b -> Cases a c
 cmapValues f = cmap (second f)
+
+uninterpretedName :: String
+uninterpretedName = "<f>"
+
+isUninterpretedByName :: VName -> Bool
+isUninterpretedByName = (== uninterpretedName) . E.baseString
