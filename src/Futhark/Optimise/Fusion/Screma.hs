@@ -296,23 +296,15 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
   where
     inputFromOutput inp = SOAC.inputArray inp `elem` out_p
 
-moveScanSuperScrema ::
+moveRedScanSuperScrema ::
   (MonadFreshNames m) =>
   SuperScrema SOACS ->
   m (SuperScrema SOACS)
-moveScanSuperScrema super_screma = do
+moveRedScanSuperScrema super_screma = do
   pure super_screma
   where
     names'' =
-      map paramName
-        . take (scanResults scan')
-        $ lambdaParams lam''
-    names' =
-      splitAt3 (scanResults scan) (redResults red)
-        . map paramName
-        $ lambdaParams lam'
-    (_, _) = splitLambdaByPar names'' (repeat 0) lam'' (repeat 0)
-    -- splitLambdaByPars
+      splitAtLambdaByRes (scanResults scan' + redResults red') lam'
     SuperScrema
       w
       inp
@@ -433,6 +425,31 @@ eliminate = auxiliary (stmsFromList [])
 -- to compute these result values.
 eliminateByRes :: [SubExpRes] -> Stms SOACS -> Stms SOACS
 eliminateByRes = eliminate . namesFromList . mapMaybe subExpResVName
+
+splitAtLambdaByRes :: Int -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
+splitAtLambdaByRes i lam =
+  ( Lambda
+      { lambdaParams = new_params,
+        lambdaBody = mkBody new_stms new_res,
+        lambdaReturnType = new_ts
+      },
+    Lambda
+      { lambdaParams = new_params',
+        lambdaBody = mkBody new_stms' new_res',
+        lambdaReturnType = new_ts'
+      }
+  )
+  where
+    pars = lambdaParams lam
+    stms = bodyStms $ lambdaBody lam
+    new_stms = eliminateByRes new_res stms
+    new_stms' = eliminateByRes new_res' stms
+    deps = freeIn new_stms <> namesFromList (mapMaybe subExpResVName new_res)
+    deps' = freeIn new_stms' <> namesFromList (mapMaybe subExpResVName new_res')
+    new_params = filter ((`nameIn` deps) . paramName) pars
+    new_params' = filter ((`nameIn` deps') . paramName) pars
+    (new_res, new_res') = splitAt i $ bodyResult $ lambdaBody lam
+    (new_ts, new_ts') = splitAt i $ lambdaReturnType lam
 
 -- | Given a list of result variable names and a lambda, split the
 -- lambda function into two where the first function will compute
