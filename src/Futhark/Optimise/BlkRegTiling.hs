@@ -720,7 +720,7 @@ mkTileMemSizes ::
 mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
   tk_name <- nameFromText . prettyText <$> newVName "Tk"
   ty_name <- nameFromText . prettyText <$> newVName "Ty"
-  ry_name <- nameFromString . prettyString <$> newVName "Ry"
+  ry_name <- nameFromText . prettyText <$> newVName "Ry"
 
   -- until we change the copying to use lmads we need to
   --   guarantee that Tx=Ty AND Rx = Ry AND Tx | Tk
@@ -1057,8 +1057,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
             (M.empty, M.empty)
             $ M.toList arr_tab0
 
-        tx_name <- nameFromString . prettyString <$> newVName "Tx"
-        ty_name <- nameFromString . prettyString <$> newVName "Ty"
+        tx_name <- nameFromText . prettyText <$> newVName "Tx"
+        ty_name <- nameFromText . prettyText <$> newVName "Ty"
 
         tx0 <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
         ty0 <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile

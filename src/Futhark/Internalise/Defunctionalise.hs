@@ -447,12 +447,12 @@ defuncFun tparams pats e0 ret loc = do
     )
   where
     closureFromDynamicFun (vn, Binding _ (DynamicFun (clsr_env, sv) _)) =
-      let name = nameFromString $ prettyString vn
+      let name = nameFromText $ prettyText vn
        in ( RecordFieldExplicit (L noLoc name) clsr_env mempty,
             (vn, Binding Nothing sv)
           )
     closureFromDynamicFun (vn, Binding _ sv) =
-      let name = nameFromString $ prettyString vn
+      let name = nameFromText $ prettyText vn
           tp' = structTypeFromSV sv
        in ( RecordFieldExplicit
               (L noLoc name)
@@ -1090,7 +1090,7 @@ typeFromSV (Dynamic tp) =
   tp
 typeFromSV (LambdaSV _ _ _ env) =
   Scalar . Record . M.fromList $
-    map (bimap (nameFromString . prettyString) (typeFromSV . bindingSV)) $
+    map (bimap (nameFromText . prettyText) (typeFromSV . bindingSV)) $
       M.toList env
 typeFromSV (RecordSV ls) =
   let ts = map (fmap typeFromSV) ls

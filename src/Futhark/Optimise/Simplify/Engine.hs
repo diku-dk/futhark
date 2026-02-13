@@ -657,7 +657,7 @@ cheapExp _ = True -- Used to be False, but
 
 loopInvariantStm :: (ASTRep rep) => ST.SymbolTable rep -> Stm rep -> Bool
 loopInvariantStm vtable =
-  all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
+  allNames (`nameIn` ST.availableAtClosestLoop vtable) . freeIn
 
 matchBlocker ::
   (SimplifiableRep rep) =>
@@ -677,7 +677,7 @@ matchBlocker cond (MatchDec _ ifsort) = do
       -- contributes to memory or array size, because that will allow
       -- allocations to be hoisted.
       cond_loop_invariant =
-        all (`nameIn` ST.availableAtClosestLoop vtable) $ namesToList $ freeIn cond
+        allNames (`nameIn` ST.availableAtClosestLoop vtable) $ freeIn cond
 
       desirableToHoist usage stm =
         is_alloc_fun stm

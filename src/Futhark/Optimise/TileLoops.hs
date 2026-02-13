@@ -278,7 +278,7 @@ partitionPrelude variance prestms private used_after =
     invariantTo names stm =
       case patNames (stmPat stm) of
         [] -> True -- Does not matter.
-        v : _ -> all (`notNameIn` names) (namesToList $ M.findWithDefault mempty v variance)
+        v : _ -> allNames (`notNameIn` names) (M.findWithDefault mempty v variance)
 
     consumed_in_prestms =
       foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
@@ -1177,7 +1177,7 @@ tiling2d dims_on_top (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
   gid_x <- newVName "gid_x"
   gid_y <- newVName "gid_y"
 
-  tile_size_key <- nameFromString . prettyString <$> newVName "tile_size"
+  tile_size_key <- nameFromText . prettyText <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
   tblock_size <- letSubExp "tblock_size" $ BasicOp $ BinOp (Mul Int64 OverflowUndef) tile_size tile_size
 

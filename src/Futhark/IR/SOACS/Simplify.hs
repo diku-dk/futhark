@@ -853,7 +853,7 @@ simplifyMapIota vtable screma_pat aux op
       | arr `ST.elem` vtable,
         all (`ST.elem` vtable) $ unCerts cs,
         Just js' <- fixWith v js,
-        all (`ST.elem` vtable) $ namesToList $ freeIn js' =
+        allNames (`ST.elem` vtable) $ freeIn js' =
           Just (pat, js', idx)
     indexesWith _ _ = Nothing
 
@@ -921,19 +921,19 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
     -- everything else must be map-invariant.
     arrayIsMapParam (pat', ArrayIndexing cs arr slice) =
       arr `elem` map_param_names
-        && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn slice)
+        && allNames (`ST.elem` vtable) (freeIn cs <> freeIn slice)
         && not (null slice)
         && (not (null $ sliceDims slice) || (topLevelPat pat' && onlyUsedOnce arr))
     arrayIsMapParam (_, ArrayRearrange cs arr perm) =
       arr `elem` map_param_names
-        && all (`ST.elem` vtable) (namesToList $ freeIn cs)
+        && allNames (`ST.elem` vtable) (freeIn cs)
         && not (null perm)
     arrayIsMapParam (_, ArrayReshape cs arr new_shape) =
       arr `elem` map_param_names
-        && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn new_shape)
+        && allNames (`ST.elem` vtable) (freeIn cs <> freeIn new_shape)
     arrayIsMapParam (_, ArrayCopy cs arr) =
       arr `elem` map_param_names
-        && all (`ST.elem` vtable) (namesToList $ freeIn cs)
+        && allNames (`ST.elem` vtable) (freeIn cs)
     arrayIsMapParam (_, ArrayVar {}) =
       False
 
@@ -1019,7 +1019,7 @@ moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm ma
 
     scope = scopeOf $ bodyStms $ lambdaBody map_lam
 
-    invariantToMap = all (`ST.elem` vtable) . namesToList . freeIn
+    invariantToMap = allNames (`ST.elem` vtable) . freeIn
 
     onStm (transformed, map_infos, stms) (Let (Pat [pe]) aux (BasicOp (Reshape arr new_shape)))
       | ([(res, _, screma_pe)], map_pesres') <- partition matches map_infos,

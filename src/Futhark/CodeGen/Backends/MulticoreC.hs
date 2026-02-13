@@ -88,11 +88,11 @@ operations =
 
 closureFreeStructField :: VName -> Name
 closureFreeStructField v =
-  nameFromString "free_" <> nameFromString (prettyString v)
+  nameFromString "free_" <> nameFromText (prettyText v)
 
 closureRetvalStructField :: VName -> Name
 closureRetvalStructField v =
-  nameFromString "retval_" <> nameFromString (prettyString v)
+  nameFromString "retval_" <> nameFromText (prettyText v)
 
 data ValueType = Prim PrimType | MemBlock | RawMem
 
