@@ -933,7 +933,7 @@ transformDistStm segments env (DistStm inps res stm) = do
       let ~[res'] = res
           ~[pe] = patElems pat
       transformDistBasicOp segments env (inps, res', pe, aux, e)
-    Let pat _ (Op (Screma w arrs form))
+    Let pat aux (Op (Screma w arrs form))
       | Just reds <- isReduceSOAC form,
         all (suitableOperator env inps . redLambda) reds,
         Just arrs' <- mapM (`lookup` inps) arrs,
@@ -958,6 +958,12 @@ transformDistStm segments env (DistStm inps res stm) = do
       | Just map_lam <- isMapSOAC form -> do
           (ws_F, ws_O, ws) <- transformInnerMap segments env inps pat w arrs map_lam
           pure $ insertIrregulars ws ws_F ws_O (zip (map distResTag res) $ patNames pat) env
+      | otherwise ->
+          -- XXX: here we silently sequentialise any SOAC that is not handled
+          -- above. We need to make sure that we actually handle everything we
+          -- care about!
+          transformScalarStm segments env inps res $
+            Let pat aux (Op (Screma w arrs form))
     Let _ _ (Match scrutinees cases defaultCase _) -> do
       let [w] = NE.toList segments
 
