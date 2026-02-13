@@ -428,16 +428,8 @@ eliminateByRes = eliminate . namesFromList . mapMaybe subExpResVName
 
 splitAtLambdaByRes :: Int -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
 splitAtLambdaByRes i lam =
-  ( Lambda
-      { lambdaParams = new_params,
-        lambdaBody = mkBody new_stms new_res,
-        lambdaReturnType = new_ts
-      },
-    Lambda
-      { lambdaParams = new_params',
-        lambdaBody = mkBody new_stms' new_res',
-        lambdaReturnType = new_ts'
-      }
+  ( Lambda new_params new_ts (mkBody new_stms new_res),
+    Lambda new_params' new_ts' (mkBody new_stms' new_res')
   )
   where
     pars = lambdaParams lam
