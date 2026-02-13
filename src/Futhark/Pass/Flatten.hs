@@ -681,7 +681,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             letExp (baseName v <> "_copy_free") . BasicOp $
               Replicate (segmentsShape segments) (Var v)
           pure $ insertRegulars [distResTag res] [v'] env
-    Update _ as slice (Var v)
+    Update _ as slice se
       | Just as_t <- distInputType <$> lookup as inps -> do
           ns <- letExp "slice_sizes"
             <=< renameExp
@@ -702,20 +702,28 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp gid]
             in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp gid]
             readInputs segments env [seg_i] $ filter ((/= as) . fst) inps
-            v_t <- lookupType v
-            let in_seg_is =
-                  unflattenIndex (map pe64 (arrayDims v_t)) (pe64 in_seg_i)
-                slice' = fmap pe64 slice
-                flat_i =
-                  flattenIndex
-                    (map pe64 $ arrayDims as_t)
-                    (fixSlice slice' in_seg_is)
-            -- Value to write
-            v' <- letSubExp "v" =<< eIndex v (map toExp in_seg_is)
-            o' <- letSubExp "o" =<< eIndex offsets [eSubExp seg_i]
-            -- Index to write `v'` at
-            i <- letExp "i" =<< toExp (pe64 o' + flat_i)
-            pure (i, v')
+            case se of  
+              Var v -> do
+                v_t <- lookupType v
+                let in_seg_is =
+                      unflattenIndex (map pe64 (arrayDims v_t)) (pe64 in_seg_i)
+                    slice' = fmap pe64 slice
+                    flat_i =
+                      flattenIndex
+                        (map pe64 $ arrayDims as_t)
+                        (fixSlice slice' in_seg_is)
+                -- Value to write
+                v' <- letSubExp "v" =<< eIndex v (map toExp in_seg_is)
+                o' <- letSubExp "o" =<< eIndex offsets [eSubExp seg_i]
+                -- Index to write `v'` at
+                i <- letExp "i" =<< toExp (pe64 o' + flat_i)
+                pure (i, v')
+              Constant c -> do
+                let slice' = fmap pe64 slice
+                    flat_i = flattenIndex (map pe64 $ arrayDims as_t) (fixSlice slice' [])
+                o' <- letSubExp "o" =<< eIndex offsets [eSubExp seg_i]
+                i <- letExp "i" =<< toExp (pe64 o' + flat_i)
+                pure (i, Constant c)
           pure $ insertIrregular shape flags offsets (distResTag res) elems' env
       | otherwise ->
           error "Flattening update: destination is not input."
