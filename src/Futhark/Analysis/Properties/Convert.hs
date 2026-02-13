@@ -214,7 +214,7 @@ changeScope newScope f
   | otherwise = mkUinterpreted f
 
 uninterpretedName :: String
-uninterpretedName = "<f>"
+uninterpretedName = "uninterpreted-function"
 
 mkUinterpreted :: IndexFn -> IndexFnM IndexFn
 mkUinterpreted f = do
@@ -829,13 +829,7 @@ forward (E.AppExp (E.Loop _sz _init_pat _init form e_body _loc) _) = do
         forM_ conds . mapM_ $ assume . sop2Symbol
       _ -> error "not implemented"
     forward e_body
-  -- Create uninterpreted functions that vary like the actual loop body's
-  -- result. (If we just create scalars we can prove injectivity erroneously
-  -- etc.)
-  let mkUntransFun f = do
-        vn <- newVName "untranslatable_loop"
-        pure $ f {body = singleCase . sym2SoP $ Apply (Var vn) (map (sVar . boundVar) (concat $ shape f))}
-  mapM mkUntransFun fs
+  mapM mkUinterpreted fs
 forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
   forward e
