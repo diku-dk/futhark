@@ -496,6 +496,7 @@ typeOf (Negate e _) = typeOf e
 typeOf (Not e _) = typeOf e
 typeOf (Update e _ _ _) = typeOf e
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
+typeOf (UpdateFieldInRecArray _ _ _ _ (Info t) _) = t
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (Lambda params _ _ (Info t) _) = funType params t
 typeOf (OpSection _ (Info t) _) = t

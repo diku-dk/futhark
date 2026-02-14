@@ -179,6 +179,14 @@ instance ASTMappable (ExpBase Info VName) where
       <*> mapOnExp tv v
       <*> (Info <$> mapOnStructType tv t)
       <*> pure loc
+  astMap tv (UpdateFieldInRecArray src slice fields v (Info t) loc) =
+    UpdateFieldInRecArray
+      <$> mapOnExp tv src
+      <*> mapM (astMap tv) slice
+      <*> pure fields
+      <*> mapOnExp tv v
+      <*> (Info <$> mapOnStructType tv t)
+      <*> pure loc
   astMap tv (Project field e t loc) =
     Project field <$> mapOnExp tv e <*> traverse (mapOnStructType tv) t <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
@@ -552,3 +560,11 @@ bareExp (AppExp appexp _) =
           Index (bareExp arr) (map bareDimIndex slice) loc
 bareExp (Attr attr e loc) =
   Attr attr (bareExp e) loc
+bareExp (UpdateFieldInRecArray src slice fs v _ loc) =
+  UpdateFieldInRecArray
+    (bareExp src)
+    (map bareDimIndex slice)
+    fs
+    (bareExp v)
+    NoInfo
+    loc

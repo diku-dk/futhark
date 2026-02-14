@@ -883,6 +883,16 @@ checkExp (Update src slice ve loc) = do
   overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
   consumeAliases (locOf loc) $ aliases src_als
   pure (Update src' slice' ve' loc, second (const mempty) src_als)
+checkExp (UpdateFieldInRecArray src slice fields ve t loc) = do
+  slice' <- checkSubExps slice
+  (ve', ve_als) <- checkExp ve
+  (src', src_als) <- checkExp src
+  overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
+  consumeAliases (locOf loc) $ aliases src_als
+  pure
+    ( UpdateFieldInRecArray src' slice' fields ve' t loc,
+      second (const mempty) src_als
+    )
 
 -- Cases that simply propagate aliases directly.
 checkExp (Var v (Info t) loc) = do

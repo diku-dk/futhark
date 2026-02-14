@@ -273,6 +273,8 @@ resolveExp (Update e1 slice e2 loc) =
   Update <$> resolveExp e1 <*> resolveSlice slice <*> resolveExp e2 <*> pure loc
 resolveExp (RecordUpdate e1 fs e2 NoInfo loc) =
   RecordUpdate <$> resolveExp e1 <*> pure fs <*> resolveExp e2 <*> pure NoInfo <*> pure loc
+resolveExp (UpdateFieldInRecArray e1 slice fs e2 _ loc) =
+  UpdateFieldInRecArray <$> resolveExp e1 <*> resolveSlice slice <*> pure fs <*> resolveExp e2 <*> pure NoInfo <*> pure loc
 resolveExp (OpSection v NoInfo loc) =
   OpSection <$> resolveQualName v loc <*> pure NoInfo <*> pure loc
 resolveExp (OpSectionLeft v info1 e info2 info3 loc) =

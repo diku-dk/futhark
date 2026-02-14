@@ -615,7 +615,38 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
         "Full type of"
           </> indent 2 (pretty src)
           </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
+checkExp (UpdateFieldInRecArray src slice fields ve NoInfo loc) = do
+  slice' <- checkSlice slice
+  (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
 
+  elemt <- fst <$> (sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t)
+  foldM_ (flip $ mustHaveField usage) elemt fields
+
+  ve' <- checkExp ve
+  ve_t <- expType ve'
+  _ <- updateField fields ve_t elemt
+
+  src' <- unifies "type of target array" t =<< checkExp src
+  src_t <- expTypeFully src'
+
+  pure $ UpdateFieldInRecArray src' slice' fields ve' (Info src_t) loc
+  where
+    usage = mkUsage loc "record field update in array update"
+
+    updateField [] ve_t src_t = do
+      (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
+      onFailure (CheckingRecordUpdate fields src_t' ve_t) $
+        unify usage src_t' ve_t
+      pure ve_t
+    updateField (f : fs) ve_t (Scalar (Record m))
+      | Just f_t <- M.lookup f m = do
+          f_t' <- updateField fs ve_t f_t
+          pure $ Scalar $ Record $ M.insert f f_t' m
+    updateField _ _ _ =
+      typeError loc mempty . withIndexLink "record-type-not-known" $
+        "Full type of"
+          </> indent 2 (pretty src)
+          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
 --
 checkExp (AppExp (Index e slice loc) _) = do
   slice' <- checkSlice slice

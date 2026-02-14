@@ -1079,6 +1079,20 @@ eval env (RecordUpdate src all_fs v _ _) =
       | Just f_v <- M.lookup f src' =
           ValueRecord $ M.insert f (update f_v fs v') src'
     update _ _ _ = error "eval RecordUpdate: invalid value."
+eval env (UpdateFieldInRecArray src is all_fs v _ loc) = do
+  is' <- mapM (evalDimIndex env) is
+  src' <- eval env src
+  v' <- eval env v
+  res <- updateArray (\old new -> update old all_fs new) is' src' v'
+  maybe oob pure res
+  where
+    update _ [] v'' = pure v''
+    update (ValueRecord src') (f : fs) v''
+      | Just f_v <- M.lookup f src' = do
+          v''' <- update f_v fs v''
+          pure $ ValueRecord $ M.insert f v''' src'
+    update _ _ _ = error "eval UpdateFieldInRecArray: invalid value."
+    oob = bad loc env "Bad update"
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
