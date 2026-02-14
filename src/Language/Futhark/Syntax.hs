@@ -837,6 +837,7 @@ data ExpBase f vn
   | -- | An n-ary value constructor.
     Constr Name [ExpBase f vn] (f StructType) SrcLoc
   | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc
+  | UpdateFieldInRecArray (ExpBase f vn) (SliceBase f vn) [Name] (ExpBase f vn) (f StructType) SrcLoc
   | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f StructType) SrcLoc
   | Lambda
       [PatBase f vn ParamType]
@@ -903,6 +904,7 @@ instance Located (ExpBase f vn) where
   locOf (Not _ pos) = locOf pos
   locOf (Update _ _ _ pos) = locOf pos
   locOf (RecordUpdate _ _ _ _ pos) = locOf pos
+  locOf (UpdateFieldInRecArray _ _ _ _ _ pos) = locOf pos
   locOf (Lambda _ _ _ _ loc) = locOf loc
   locOf (Hole _ loc) = locOf loc
   locOf (OpSection _ _ loc) = locOf loc
