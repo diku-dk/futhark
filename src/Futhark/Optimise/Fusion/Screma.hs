@@ -315,12 +315,24 @@ moveRedScanSuperScrema super_screma = do
       new_scan = scan <> scan'
       new_red = red <> red'
       new_ts = scan_ts <> scan_ts' <> red_ts <> red_ts' <> map_ts
-      new_pars = (lambdaParams lam)
+      new_pars = lambdaParams lam
       new_res = scan_res <> scan_res' <> red_res <> red_res' <> map_res
       new_body = mkBody (stms <> binds <> stms') new_res
       new_lam = Lambda new_pars new_ts new_body
+      (scan_pars', map_pars') =
+        splitAt (scanResults scan) (lambdaParams lam_map')
+
+  extra_scan_pars' <- mapM (newParam "x") scan_ts'
+
+  let new_pars' = scan_pars' <> extra_scan_pars' <> map_pars'
+      new_ts' = scan_ts' <> lambdaReturnType lam_map'
+      new_stms' = bodyStms $ lambdaBody lam_map'
+      new_res' = varsRes (map paramName extra_scan_pars')
+      new_body' = mkBody new_stms' new_res'
+      new_lam' = Lambda new_pars' new_ts' new_body'
+
   pure $
-    SuperScrema w inp new_lam new_scan new_red lam' [] [] lam''
+    SuperScrema w inp new_lam new_scan new_red new_lam' [] [] lam''
   where
     stms = bodyStms $ lambdaBody lam
     out_p = [0 .. length (bodyResult $ lambdaBody lam) - 1]
@@ -341,7 +353,7 @@ moveRedScanSuperScrema super_screma = do
         (lambdaReturnType lam)
     inp_c = scan_out <> map_out
 
-    (lam_scan_red', _) =
+    (lam_scan_red', lam_map') =
       splitAtLambdaByRes (scanResults scan' + redResults red') lam'
 
     SuperScrema w inp lam scan red lam' scan' red' lam'' =
@@ -459,18 +471,14 @@ eliminateByRes = eliminate . namesFromList . mapMaybe subExpResVName
 
 splitAtLambdaByRes :: Int -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
 splitAtLambdaByRes i lam =
-  ( Lambda new_params new_ts (mkBody new_stms new_res),
-    Lambda new_params' new_ts' (mkBody new_stms' new_res')
+  ( Lambda pars new_ts (mkBody new_stms new_res),
+    Lambda pars new_ts' (mkBody new_stms' new_res')
   )
   where
     pars = lambdaParams lam
     stms = bodyStms $ lambdaBody lam
     new_stms = eliminateByRes new_res stms
     new_stms' = eliminateByRes new_res' stms
-    deps = freeIn new_stms <> namesFromList (mapMaybe subExpResVName new_res)
-    deps' = freeIn new_stms' <> namesFromList (mapMaybe subExpResVName new_res')
-    new_params = filter ((`nameIn` deps) . paramName) pars
-    new_params' = filter ((`nameIn` deps') . paramName) pars
     (new_res, new_res') = splitAt i $ bodyResult $ lambdaBody lam
     (new_ts, new_ts') = splitAt i $ lambdaReturnType lam
 
