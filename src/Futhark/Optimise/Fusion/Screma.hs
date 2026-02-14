@@ -301,20 +301,51 @@ moveRedScanSuperScrema ::
   SuperScrema SOACS ->
   m (SuperScrema SOACS)
 moveRedScanSuperScrema super_screma = do
-  pure super_screma
+  renamed_lam_scan_red' <- renameLambda lam_scan_red'
+  let (scan_res', red_res') =
+        splitAt (scanResults scan')
+          . bodyResult
+          $ lambdaBody renamed_lam_scan_red'
+      (scan_ts', red_ts') =
+        splitAt (scanResults scan') $
+          lambdaReturnType renamed_lam_scan_red'
+      binds = fuseBinds lam out_p inp_c renamed_lam_scan_red'
+      stms' = bodyStms $ lambdaBody renamed_lam_scan_red'
+      -- Ordering might be wrong here.
+      new_scan = scan <> scan'
+      new_red = red <> red'
+      new_ts = scan_ts <> scan_ts' <> red_ts <> red_ts' <> map_ts
+      new_pars = (lambdaParams lam)
+      new_res = scan_res <> scan_res' <> red_res <> red_res' <> map_res
+      new_body = mkBody (stms <> binds <> stms') new_res
+      new_lam = Lambda new_pars new_ts new_body
+  pure $
+    SuperScrema w inp new_lam new_scan new_red lam' [] [] lam''
   where
-    names'' =
+    stms = bodyStms $ lambdaBody lam
+    out_p = [0 .. length (bodyResult $ lambdaBody lam) - 1]
+    (scan_out, _, map_out) =
+      splitAt3
+        (scanResults scan)
+        (redResults red)
+        [0 .. length (bodyResult $ lambdaBody lam) - 1]
+    (scan_res, red_res, map_res) =
+      splitAt3
+        (scanResults scan)
+        (redResults red)
+        (bodyResult $ lambdaBody lam)
+    (scan_ts, red_ts, map_ts) =
+      splitAt3
+        (scanResults scan)
+        (redResults red)
+        (lambdaReturnType lam)
+    inp_c = scan_out <> map_out
+
+    (lam_scan_red', _) =
       splitAtLambdaByRes (scanResults scan' + redResults red') lam'
-    SuperScrema
-      w
-      inp
-      lam
-      scan
-      red
-      lam'
-      scan'
-      red'
-      lam'' = super_screma
+
+    SuperScrema w inp lam scan red lam' scan' red' lam'' =
+      super_screma
 
 debug text a = traceShow (text <> show a) a
 
