@@ -905,7 +905,7 @@ tests =
                             ]
                         )
                     ),
-          testCase "map-map-scan,reduce-map" $
+          testCase "map-reduce-map-scan,reduce-map" $
             let scan_op =
                   Scan
                     ( fromLines

@@ -6,6 +6,8 @@ module Futhark.Optimise.Fusion.Screma
     fuseSuperScrema,
     SuperScrema (..),
     moveRedScanSuperScrema,
+    moveLastSuperScrema,
+    moveMidSuperScrema,
   )
 where
 
@@ -156,7 +158,7 @@ fusible ::
   ScremaForm SOACS ->
   [VName] ->
   Bool
-fusible inp_p form_p out_p inp_c form_c out_c =
+fusible inp_c form_c out_c inp_p form_p out_p =
   fuseIsVarish inp_c out_p && not (forbidden_c `namesIntersect` forbidden_p)
   where
     pre_pars_c = oneName . paramName <$> lambdaParams pre_c
@@ -363,6 +365,35 @@ moveRedScanSuperScrema super_screma = do
     SuperScrema w inp lam scan red lam' scan' red' lam'' =
       super_screma
 
+moveLastSuperScrema ::
+  (MonadFreshNames m) =>
+  SuperScrema SOACS ->
+  m (SuperScrema SOACS)
+moveLastSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'') = do
+  temp_lam'' <- renameLambda lam''
+  let new_pars = lambdaParams lam'
+      new_ts = lambdaReturnType lam''
+      out_p = [0 .. length (bodyResult $ lambdaBody lam') - 1]
+      inp_c = out_p
+      binds = fuseBinds lam out_p inp_c temp_lam''
+      stms' = bodyStms $ lambdaBody lam'
+      stms'' = bodyStms $ lambdaBody temp_lam''
+      new_stms = stms' <> binds <> stms''
+      new_res = bodyResult $ lambdaBody temp_lam''
+      new_body = mkBody new_stms new_res
+      new_lam' = Lambda new_pars new_ts new_body
+
+  new_lam'' <- mkIdentityLambda $ lambdaReturnType lam''
+  pure $
+    SuperScrema w inp lam scan red new_lam' [] [] new_lam''
+moveLastSuperScrema _ =
+  error "moveLastSuperScrema must not have any scans or reduce operation in the end."
+
+moveMidSuperScrema (SuperScrema w inp lam scan red lam' scan' red' lam'') = do
+  let (_, map_lam') = splitAtLambdaByRes (scanResults scan + redResults red) lam'
+  pure $
+    SuperScrema w inp lam scan red lam' scan' red' lam''
+
 debug text a = traceShow (text <> show a) a
 
 debugWith text f a = traceShow (text <> show (f a)) a
@@ -429,27 +460,6 @@ fuseLambda lam_c inp_c out_c lam_p out_p =
         { bodyStms = new_body_stms,
           bodyResult = new_res
         }
-    params_c = lambdaParams lam_c
-    params_p = lambdaParams lam_p
-
-concatLambda ::
-  Lambda SOACS ->
-  Lambda SOACS ->
-  Lambda SOACS
-concatLambda lam_c lam_p =
-  Lambda
-    { lambdaBody = mkBody new_body_stms $ res_p <> res_c,
-      lambdaParams = params_p <> params_c,
-      lambdaReturnType = ts_p <> ts_c
-    }
-  where
-    ts_c = lambdaReturnType lam_c
-    ts_p = lambdaReturnType lam_p
-    res_c = bodyResult $ lambdaBody lam_c
-    res_p = bodyResult $ lambdaBody lam_p
-    body_stms_c = bodyStms $ lambdaBody lam_c
-    body_stms_p = bodyStms $ lambdaBody lam_p
-    new_body_stms = body_stms_p <> body_stms_c
     params_c = lambdaParams lam_c
     params_p = lambdaParams lam_p
 
@@ -554,258 +564,10 @@ parToInp inp lam = (m M.!)
   where
     m = M.fromList $ flip zip inp $ paramName <$> lambdaParams lam
 
-vnameInpToPar :: [VName] -> Lambda SOACS -> VName -> VName
-vnameInpToPar inp lam = (m M.!)
-  where
-    m =
-      M.fromList
-        . zip inp
-        $ paramName <$> lambdaParams lam
-
-fuseInputs :: [SOAC.Input] -> [VName] -> [VName]
-fuseInputs inp_c =
-  filter (`M.member` name_to_inp_c)
-  where
-    name_to_inp_c = M.fromList $ zip (SOAC.inputArray <$> inp_c) inp_c
-
-simplifyPrePost ::
-  (MonadFreshNames m) =>
-  ScremaForm SOACS ->
-  ([InOut], [InOut]) ->
-  ([InOut], [InOut]) ->
-  m
-    ( ([InOut], Lambda SOACS, [InOut]),
-      ([InOut], Lambda SOACS, [InOut])
-    )
-simplifyPrePost form (pre_inp, pre_out) (post_inp, post_out) = do
-  !post_map' <- renameLambda post_map
-
-  case fuseLambda post_map' post_map_inp post_map_out pre pre_out of
-    ([], pre', pre_out') -> pure ((pre_inp, pre', pre_out'), post_scan)
-    _any -> error "No extra inputs should be created for post."
-  where
-    pre = scremaLambda form
-    post = scremaPostLambda form
-    num_scan = scanResults $ scremaScans form
-    scan_names = fmap paramName . take num_scan $ lambdaParams post
-    (post_scan, (post_map_inp, post_map, post_map_out)) =
-      splitLambdaByPar scan_names post_inp post post_out
-
-data InOut
-  = External !VName
-  | Internal !Natural
-  deriving (Show, Ord, Eq)
-
-external :: VName -> InOut
-external = External
-
-internal :: Natural -> InOut
-internal = Internal
-
-fromInternal :: InOut -> Maybe Natural
-fromInternal (Internal n) = Just n
-fromInternal (External _) = Nothing
-
-fromExternal :: InOut -> Maybe VName
-fromExternal (External n) = Just n
-fromExternal (Internal _) = Nothing
-
-fromExternalUnsafe :: InOut -> VName
-fromExternalUnsafe =
-  fromMaybe (error "Can not get VName from Internal.") . fromExternal
-
-prePostInOut ::
-  Natural ->
-  [SOAC.Input] ->
-  ScremaForm rep ->
-  [VName] ->
-  (([InOut], [InOut]), ([InOut], [InOut]))
-prePostInOut start inp form out =
-  ((pre_inp, pre_out), (post_inp, post_out))
-  where
-    pre_inp = external . SOAC.inputArray <$> inp
-    (red_out, post_out) = splitAt num_red (external <$> out)
-    pre = scremaLambda form
-    num_scan = scanResults $ scremaScans form
-    num_red = redResults $ scremaReduces form
-    num_pre_rets = length $ lambdaReturnType pre
-    num_map = num_pre_rets - num_scan - num_red
-    nat_num_scan = fromIntegral num_scan
-    nat_num_map = fromIntegral num_map
-    (scan_out, map_out) =
-      splitAt num_scan $
-        internal <$> take (nat_num_scan + nat_num_map) [start ..]
-    pre_out = scan_out <> red_out <> map_out
-    post_inp = scan_out <> map_out
-
-scremaFuseInOut ::
-  [SOAC.Input] ->
-  ScremaForm rep ->
-  [VName] ->
-  [SOAC.Input] ->
-  ScremaForm rep ->
-  [VName] ->
-  ( ( ([InOut], [InOut]),
-      ([InOut], [InOut])
-    ),
-    ( ([InOut], [InOut]),
-      ([InOut], [InOut])
-    )
-  )
-scremaFuseInOut inp_c form_c out_c inp_p form_p out_p =
-  ( ((pre_inp_c, pre_out_c), (post_inp_c, post_out_c)),
-    ((pre_inp_p, pre_out_p), (post_inp_p, post_out_p))
-  )
-  where
-    ((pre_inp_c, pre_out_c), (post_inp_c, post_out_c)) =
-      prePostInOut 0 inp_c form_c out_c
-    s = succ $ maximum $ (0 :) $ mapMaybe fromInternal pre_out_c
-    ((pre_inp_p, pre_out_p), (post_inp_p, post_out_p)) =
-      prePostInOut s inp_p form_p out_p
-
-prunePostOut :: Lambda SOACS -> [InOut] -> (Lambda SOACS, [InOut])
-prunePostOut lam out =
-  ( lam
-      { lambdaBody = body {bodyResult = res'},
-        lambdaReturnType = ts'
-      },
-    out'
-  )
-  where
-    ts = lambdaReturnType lam
-    body = lambdaBody lam
-    res = bodyResult body
-
-    (ts', res', out') =
-      unzip3
-        . mapMaybe (\(t, r, o) -> (t,r,) . External <$> fromExternal o)
-        $ zip3 ts res out
-
-toScrema ::
-  (MonadFreshNames m) =>
-  [SOAC.Input] ->
-  ([InOut], Lambda SOACS, [InOut]) ->
-  ([Scan SOACS], [InOut]) ->
-  ([Reduce SOACS], [InOut]) ->
-  ([InOut], Lambda SOACS, [InOut]) ->
-  m ([SOAC.Input], ScremaForm SOACS, [VName])
-toScrema
-  soac_inps
-  (pre_inp, pre, pre_out)
-  (scans, scans_inout)
-  (reds, reds_inout)
-  (post_inp, post, post_out) = do
-    (post', post_out') <-
-      alignPrePost (pre', pre_out') (post_inp, post, post_out)
-    let out = fmap fromExternalUnsafe reds_inout <> post_out'
-        inp = (mapping M.!) . fromExternalUnsafe <$> pre_inp
-    pure
-      ( inp,
-        ScremaForm pre' scans reds post',
-        out
-      )
-    where
-      mapping =
-        M.fromList $
-          zip
-            (SOAC.inputArray <$> soac_inps)
-            soac_inps
-      (pre', pre_out') =
-        alignLambdaRes (pre, pre_out) (scans_inout <> reds_inout)
-
-alignPrePost ::
-  (MonadFreshNames m) =>
-  (Lambda SOACS, [InOut]) ->
-  ([InOut], Lambda SOACS, [InOut]) ->
-  m (Lambda SOACS, [VName])
-alignPrePost (pre, pre_out) (post_inp, post, post_out) = do
-  (post_inp', pars', ts') <-
-    unzip3 <$> auxiliary (pure []) _is_pars _is_ts
-  let (id_out, id_res, id_ts) =
-        unzip3
-          . mapMaybe (\(i, p, t) -> (,varRes $ paramName p,t) <$> fromExternal i)
-          . L.nubBy ((==) `on` fst3)
-          . filter ((`notElem` post_out) . fst3)
-          $ zip3 post_inp' pars' ts'
-  pure
-    ( post
-        { lambdaParams = pars',
-          lambdaReturnType = ts <> id_ts,
-          lambdaBody = body {bodyResult = res <> id_res}
-        },
-      map fromExternalUnsafe post_out <> id_out
-    )
-  where
-    fst3 (a, _, _) = a
-    body = lambdaBody post
-    pars = lambdaParams post
-    ts = lambdaReturnType post
-    res = bodyResult body
-    _is_pars = zip post_inp pars
-    _is_ts = zip pre_out $ lambdaReturnType pre
-
-    auxiliary as _ [] = reverse <$> as
-    auxiliary as is_pars ((i, t) : is_ts) =
-      case pop ((i ==) . fst) is_pars of
-        Just ((_, par), is_pars') ->
-          let as' = ((i, par, t) :) <$> as
-           in auxiliary as' is_pars' is_ts
-        Nothing ->
-          let as' = do
-                par <- newParam "x" t
-                ((i, par, t) :) <$> as
-           in auxiliary as' is_pars is_ts
-
-pop :: (a -> Bool) -> [a] -> Maybe (a, [a])
-pop _ [] = Nothing
-pop p (a : as)
-  | p a = Just (a, as)
-  | otherwise = fmap (a :) <$> pop p as
-
-alignInOuts ::
-  (Eq a) =>
-  [(a, b)] ->
-  [a] ->
-  [(a, b)]
-alignInOuts = auxiliary []
-  where
-    auxiliary xs is_res [] = reverse xs <> is_res
-    auxiliary xs is_res (i : is) =
-      case pop ((i ==) . fst) is_res of
-        Just (i_res, is_res') -> auxiliary (i_res : xs) is_res' is
-        Nothing -> error "If this happend then the developer used this function incorrectly."
-
-alignLambdaRes ::
-  (Eq a) =>
-  (Lambda SOACS, [a]) ->
-  [a] ->
-  (Lambda SOACS, [a])
-alignLambdaRes (lam, inout) inout'' =
-  ( lam
-      { lambdaBody = body {bodyResult = res'},
-        lambdaReturnType = ts'
-      },
-    inout'
-  )
-  where
-    body = lambdaBody lam
-    res = bodyResult body
-    ts = lambdaReturnType lam
-    (inout', (res', ts')) =
-      fmap unzip . unzip $ alignInOuts (zip inout (zip res ts)) inout''
-
-alignLambdaPar ::
-  (Eq a) =>
-  ([a], Lambda SOACS) ->
-  [a] ->
-  ([a], Lambda SOACS)
-alignLambdaPar (inout, lam) inout'' =
-  ( inout',
-    lam {lambdaParams = par'}
-  )
-  where
-    par = lambdaParams lam
-    (inout', par') = unzip $ alignInOuts (zip inout par) inout''
+-- toScrema ::
+--   SuperScrema SOACS ->
+--   ScremaForm SOACS
+-- toScrema =
 
 fuseScrema ::
   (MonadFreshNames m) =>
@@ -817,4 +579,9 @@ fuseScrema ::
   ScremaForm SOACS ->
   [VName] ->
   m (Maybe ([SOAC.Input], ScremaForm SOACS, [VName]))
-fuseScrema w inp_c form_c out_c inp_p form_p out_p = undefined
+fuseScrema w inp_c form_c out_c inp_p form_p out_p =
+  if not $ fusible inp_c form_c out_c inp_p form_p out_p
+    then pure Nothing
+    else do
+      super_screma <- fuseSuperScrema w inp_c form_c out_c inp_p form_p out_p
+      pure Nothing
