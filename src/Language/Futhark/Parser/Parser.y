@@ -575,10 +575,10 @@ Exp2 :: { UncheckedExp }
      | '-' Exp2  %prec juxtprec  { Negate $2 (srcspan $1 $>) }
      | '!' Exp2 %prec juxtprec   { Not $2 (srcspan $1 $>) }
 
-      | Exp2 with '[' DimIndices ']' FieldAccesses_ '=' Exp2
-       { UpdateFieldInRecArray $1 $4 (map unLoc $6) $8 NoInfo (srcspan $1 $>) }
-     | Exp2 with '...[' DimIndices ']' FieldAccesses_ '=' Exp2
-       { UpdateFieldInRecArray $1 $4 (map unLoc $6) $8 NoInfo (srcspan $1 $>) }
+     | Exp2 with '[' DimIndices ']' '.' FieldAccesses_ '=' Exp2
+       { UpdateFieldInRecArray $1 $4 (map unLoc $7) $9 NoInfo (srcspan $1 $>) }
+     | Exp2 with '...[' DimIndices ']' '.' FieldAccesses_ '=' Exp2
+       { UpdateFieldInRecArray $1 $4 (map unLoc $7) $9 NoInfo (srcspan $1 $>) }
 
      | Exp2 with '[' DimIndices ']' '=' Exp2
        { Update $1 $4 $7 (srcspan $1 $>) }

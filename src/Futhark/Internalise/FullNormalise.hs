@@ -209,6 +209,13 @@ getOrdering final (RecordUpdate eb ns eu ty loc) = do
   eb' <- getOrdering False eb
   eu' <- getOrdering False eu
   nameExp final $ RecordUpdate eb' ns eu' ty loc
+getOrdering final (UpdateFieldInRecArray eb slice ns eu ty loc) = do
+  eu' <- getOrdering False eu
+  slice' <- astMap mapper slice
+  eb' <- getOrdering False eb
+  nameExp final $ UpdateFieldInRecArray eb' slice' ns eu' ty loc
+  where
+    mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering final (Lambda params body mte ret loc) = do
   body' <- transformBody body
   nameExp final $ Lambda params body' mte ret loc

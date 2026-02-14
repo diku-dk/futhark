@@ -722,6 +722,14 @@ transformExp (RecordUpdate e1 fs e2 t loc) =
     <*> transformExp e2
     <*> traverse transformType t
     <*> pure loc
+transformExp (UpdateFieldInRecArray e1 idxs fs e2 t loc) =
+  UpdateFieldInRecArray
+    <$> transformExp e1
+    <*> mapM transformDimIndex idxs
+    <*> pure fs
+    <*> transformExp e2
+    <*> traverse transformType t
+    <*> pure loc
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 transformExp (Constr name all_es t loc) =

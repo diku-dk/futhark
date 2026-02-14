@@ -619,15 +619,15 @@ checkExp (UpdateFieldInRecArray src slice fields ve NoInfo loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
 
-  elemt <- fst <$> (sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t)
+  src' <- unifies "type of target array" t =<< checkExp src
+  src_t <- expTypeFully src'
+
+  elemt <- fst <$> (sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully src_t)
   foldM_ (flip $ mustHaveField usage) elemt fields
 
   ve' <- checkExp ve
   ve_t <- expType ve'
   _ <- updateField fields ve_t elemt
-
-  src' <- unifies "type of target array" t =<< checkExp src
-  src_t <- expTypeFully src'
 
   pure $ UpdateFieldInRecArray src' slice' fields ve' (Info src_t) loc
   where

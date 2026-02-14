@@ -657,6 +657,11 @@ defuncExp (RecordUpdate e1 fs e2 _ loc) = do
     staticField (Dynamic t@(Scalar Record {})) sv2 fs'@(_ : _) =
       staticField (svFromType t) sv2 fs'
     staticField _ sv2 _ = sv2
+defuncExp (UpdateFieldInRecArray e1 idxs fs e2 _ loc) = do
+  (e1', sv) <- defuncExp e1
+  idxs' <- mapM defuncDimIndex idxs
+  e2' <- defuncExp' e2
+  pure (UpdateFieldInRecArray e1' idxs' fs e2' (Info $ structTypeFromSV sv) loc, sv)
 defuncExp (Assert e1 e2 desc loc) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2

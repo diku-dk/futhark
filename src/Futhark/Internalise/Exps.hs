@@ -788,6 +788,12 @@ internaliseExp desc (E.RecordUpdate src fields ve _ loc) = locating loc $ do
           src'' <- replace t fs ve' to_update
           pure $ bef ++ src'' ++ aft
     replace _ _ ve' _ = pure ve'
+internaliseExp desc (E.UpdateFieldInRecArray src slice fields ve _ loc) =
+  internaliseExp desc $ E.Update src slice updated loc
+  where
+    elem_t = E.stripArray (length slice) (E.typeOf src)
+    indexed = E.AppExp (E.Index src slice loc) (Info $ E.AppRes elem_t [])
+    updated = E.RecordUpdate indexed fields ve (Info elem_t) loc
 internaliseExp desc (E.Attr attr e loc) = do
   attr' <- internaliseAttr attr
   e' <- local (f attr') $ internaliseExp desc e
