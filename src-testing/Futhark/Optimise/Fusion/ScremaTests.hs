@@ -10,10 +10,10 @@ import Futhark.Optimise.Fusion.Screma
   ( SuperScrema (..),
     fuseLambda,
     fuseSuperScrema,
+    moveRedScanSuperScrema,
     splitLambdaByPar,
     splitLambdaByRes,
   )
-import Futhark.Util.Pretty (Pretty (..))
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -618,6 +618,382 @@ tests =
                             ]
                         ),
                       ["defunc_0_scan_res_5569", identName ident_b]
+                    )
+        ],
+      testGroup
+        "moveRedScanSuperScrema"
+        [ testCase "Only map." $
+            let ident_a = "input_a_5565 : [d_5537]i32"
+                input_a = SOAC.identInput ident_a
+             in PS
+                  ( freshNames
+                      ( moveRedScanSuperScrema
+                          ( SuperScrema
+                              "d_5537"
+                              [input_a]
+                              ( fromLines
+                                  [ "\\ {x_5566 : i32}: {i32} ->",
+                                    "let {y_5567 : i32} = add32(1i32, x_5566)",
+                                    "in {y_5567}"
+                                  ]
+                              )
+                              []
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5568 : i32}: {i32} -> ",
+                                    "let {y_5570 : i32} = add32(2i32, x_5568)",
+                                    "in {y_5570}"
+                                  ]
+                              )
+                              []
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5571 : i32}: {i32} -> ",
+                                    "let {y_5572 : i32} = add32(3i32, x_5571)",
+                                    "in {y_5572}"
+                                  ]
+                              )
+                          )
+                      )
+                  )
+                  @?= PS
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_5566 : i32}: {i32} ->",
+                              "let {y_5567 : i32} = add32(1i32, x_5566)",
+                              "in {y_5567}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5568 : i32}: {i32} -> ",
+                              "let {y_5570 : i32} = add32(2i32, x_5568)",
+                              "in {y_5570}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5571 : i32}: {i32} -> ",
+                              "let {y_5572 : i32} = add32(3i32, x_5571)",
+                              "in {y_5572}"
+                            ]
+                        )
+                    ),
+          testCase "map-map-scan-map" $
+            let scan_op =
+                  Scan
+                    ( fromLines
+                        [ "\\ {eta_p_5571 : i32, eta_p_5572 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_5573 : i32} = add32(eta_p_5571, eta_p_5572)",
+                          "in {defunc_0_op_res_5573}"
+                        ]
+                    )
+                    ["0i32"]
+                ident_a = "input_a_5565 : [d_5537]i32"
+                input_a = SOAC.identInput ident_a
+             in PS
+                  ( freshNames
+                      ( moveRedScanSuperScrema
+                          ( SuperScrema
+                              "d_5537"
+                              [input_a]
+                              ( fromLines
+                                  [ "\\ {x_5566 : i32}: {i32} ->",
+                                    "let {y_5567 : i32} = add32(1i32, x_5566)",
+                                    "in {y_5567}"
+                                  ]
+                              )
+                              []
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5568 : i32}: {i32} -> ",
+                                    "let {y_5570 : i32} = add32(2i32, x_5568)",
+                                    "in {y_5570}"
+                                  ]
+                              )
+                              [scan_op]
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5571 : i32}: {i32} -> ",
+                                    "let {y_5572 : i32} = add32(3i32, x_5571)",
+                                    "in {y_5572}"
+                                  ]
+                              )
+                          )
+                      )
+                  )
+                  @?= PS
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_5566 : i32}: {i32, i32} ->",
+                              "let {y_5567 : i32} = add32(1i32, x_5566)",
+                              "let {x_10000 : i32} = y_5567",
+                              "let {y_10001 : i32} = add32(2i32, x_10000)",
+                              "in {y_10001, y_5567}"
+                            ]
+                        )
+                        [scan_op]
+                        []
+                        ( fromLines
+                            [ "\\ {x_10002 : i32, x_5568 : i32}: {i32} -> ",
+                              "in {x_10002}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5571 : i32}: {i32} -> ",
+                              "let {y_5572 : i32} = add32(3i32, x_5571)",
+                              "in {y_5572}"
+                            ]
+                        )
+                    ),
+          testCase "map-scan-map-map" $
+            let scan_op =
+                  Scan
+                    ( fromLines
+                        [ "\\ {eta_p_5571 : i32, eta_p_5572 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_5573 : i32} = add32(eta_p_5571, eta_p_5572)",
+                          "in {defunc_0_op_res_5573}"
+                        ]
+                    )
+                    ["0i32"]
+                ident_a = "input_a_5565 : [d_5537]i32"
+                input_a = SOAC.identInput ident_a
+             in PS
+                  ( freshNames
+                      ( moveRedScanSuperScrema
+                          ( SuperScrema
+                              "d_5537"
+                              [input_a]
+                              ( fromLines
+                                  [ "\\ {x_5566 : i32}: {i32} ->",
+                                    "let {y_5567 : i32} = add32(1i32, x_5566)",
+                                    "in {y_5567}"
+                                  ]
+                              )
+                              [scan_op]
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5568 : i32}: {i32} -> ",
+                                    "let {y_5570 : i32} = add32(2i32, x_5568)",
+                                    "in {y_5570}"
+                                  ]
+                              )
+                              []
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5571 : i32}: {i32} -> ",
+                                    "let {y_5572 : i32} = add32(3i32, x_5571)",
+                                    "in {y_5572}"
+                                  ]
+                              )
+                          )
+                      )
+                  )
+                  @?= PS
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_5566 : i32}: {i32} ->",
+                              "let {y_5567 : i32} = add32(1i32, x_5566)",
+                              "in {y_5567}"
+                            ]
+                        )
+                        [scan_op]
+                        []
+                        ( fromLines
+                            [ "\\ {x_5568 : i32}: {i32} -> ",
+                              "let {y_5570 : i32} = add32(2i32, x_5568)",
+                              "in {y_5570}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5571 : i32}: {i32} -> ",
+                              "let {y_5572 : i32} = add32(3i32, x_5571)",
+                              "in {y_5572}"
+                            ]
+                        )
+                    ),
+          testCase "map-map-scan,reduce-map" $
+            let scan_op =
+                  Scan
+                    ( fromLines
+                        [ "\\ {eta_p_5571 : i32, eta_p_5572 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_5573 : i32} = add32(eta_p_5571, eta_p_5572)",
+                          "in {defunc_0_op_res_5573}"
+                        ]
+                    )
+                    ["0i32"]
+                reduce_op =
+                  Reduce
+                    Commutative
+                    ( fromLines
+                        [ "\\ {eta_p_55720 : i32, eta_p_557201 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_5573 : i32} = add32(eta_p_55720, eta_p_557201)",
+                          "in {defunc_0_op_res_5573}"
+                        ]
+                    )
+                    ["0i32"]
+                ident_a = "input_a_5565 : [d_5537]i32"
+                input_a = SOAC.identInput ident_a
+             in PS
+                  ( freshNames
+                      ( moveRedScanSuperScrema
+                          ( SuperScrema
+                              "d_5537"
+                              [input_a]
+                              ( fromLines
+                                  [ "\\ {x_5566 : i32}: {i32} ->",
+                                    "let {y_5567 : i32} = add32(1i32, x_5566)",
+                                    "in {y_5567}"
+                                  ]
+                              )
+                              []
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5568 : i32}: {i32} -> ",
+                                    "let {y_5570 : i32} = add32(2i32, x_5568)",
+                                    "in {y_5570, y_5570}"
+                                  ]
+                              )
+                              [scan_op]
+                              [reduce_op]
+                              ( fromLines
+                                  [ "\\ {x_5571 : i32}: {i32} -> ",
+                                    "let {y_5572 : i32} = add32(3i32, x_5571)",
+                                    "in {y_5572}"
+                                  ]
+                              )
+                          )
+                      )
+                  )
+                  @?= PS
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_5566 : i32}: {i32, i32} ->",
+                              "let {y_5567 : i32} = add32(1i32, x_5566)",
+                              "let {x_10000 : i32} = y_5567",
+                              "let {y_10001 : i32} = add32(2i32, x_10000)",
+                              "in {y_10001, y_10001, y_5567}"
+                            ]
+                        )
+                        [scan_op]
+                        [reduce_op]
+                        ( fromLines
+                            [ "\\ {x_10002 : i32, x_5568 : i32}: {i32} -> ",
+                              "in {x_10002}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5571 : i32}: {i32} -> ",
+                              "let {y_5572 : i32} = add32(3i32, x_5571)",
+                              "in {y_5572}"
+                            ]
+                        )
+                    ),
+          testCase "map-map-scan,reduce-map" $
+            let scan_op =
+                  Scan
+                    ( fromLines
+                        [ "\\ {eta_p_5571 : i32, eta_p_5572 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_5573 : i32} = add32(eta_p_5571, eta_p_5572)",
+                          "in {defunc_0_op_res_5573}"
+                        ]
+                    )
+                    ["0i32"]
+                reduce_op =
+                  Reduce
+                    Commutative
+                    ( fromLines
+                        [ "\\ {eta_p_55720 : i32, eta_p_557201 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_5573 : i32} = add32(eta_p_55720, eta_p_557201)",
+                          "in {defunc_0_op_res_5573}"
+                        ]
+                    )
+                    ["0i32"]
+                reduce_op' =
+                  Reduce
+                    Commutative
+                    ( fromLines
+                        [ "\\ {eta_p_0 : i32, eta_p_1 : i32} : {i32} ->",
+                          "let {defunc_0_op_res_3 : i32} = add32(eta_p_0, eta_p_1)",
+                          "in {defunc_0_op_res_3}"
+                        ]
+                    )
+                    ["0i32"]
+                ident_a = "input_a_5565 : [d_5537]i32"
+                input_a = SOAC.identInput ident_a
+             in PS
+                  ( freshNames
+                      ( moveRedScanSuperScrema
+                          ( SuperScrema
+                              "d_5537"
+                              [input_a]
+                              ( fromLines
+                                  [ "\\ {x_5566 : i32}: {i32} ->",
+                                    "let {y_5567 : i32} = add32(1i32, x_5566)",
+                                    "in {x_5566, y_5567}"
+                                  ]
+                              )
+                              []
+                              [reduce_op']
+                              ( fromLines
+                                  [ "\\ {x_5568 : i32}: {i32} -> ",
+                                    "let {y_5570 : i32} = add32(2i32, x_5568)",
+                                    "in {y_5570, y_5570}"
+                                  ]
+                              )
+                              [scan_op]
+                              [reduce_op]
+                              ( fromLines
+                                  [ "\\ {x_5571 : i32}: {i32} -> ",
+                                    "let {y_5572 : i32} = add32(3i32, x_5571)",
+                                    "in {y_5572}"
+                                  ]
+                              )
+                          )
+                      )
+                  )
+                  @?= PS
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_5566 : i32}: {i32, i32} ->",
+                              "let {y_5567 : i32} = add32(1i32, x_5566)",
+                              "let {y_10001 : i32} = add32(2i32, x_10000)",
+                              "in {y_10001, x_5566, y_10001, y_5567}"
+                            ]
+                        )
+                        [scan_op]
+                        [reduce_op', reduce_op]
+                        ( fromLines
+                            [ "\\ {x_10002 : i32, x_5568 : i32}: {i32} -> ",
+                              "in {x_10002}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5571 : i32}: {i32} -> ",
+                              "let {y_5572 : i32} = add32(3i32, x_5571)",
+                              "in {y_5572}"
+                            ]
+                        )
                     )
         ]
     ]

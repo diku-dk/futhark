@@ -5,6 +5,7 @@ module Futhark.Optimise.Fusion.Screma
     fuseScrema,
     fuseSuperScrema,
     SuperScrema (..),
+    moveRedScanSuperScrema,
   )
 where
 
@@ -26,6 +27,7 @@ import Futhark.Construct (mapResult)
 import Futhark.IR
 import Futhark.IR.Prop.Names
 import Futhark.IR.SOACS
+import Futhark.IR.SOACS.Simplify
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, splitAt3, takeLast)
@@ -318,7 +320,7 @@ moveRedScanSuperScrema super_screma = do
       new_pars = lambdaParams lam
       new_res = scan_res <> scan_res' <> red_res <> red_res' <> map_res
       new_body = mkBody (stms <> binds <> stms') new_res
-      new_lam = Lambda new_pars new_ts new_body
+      new_lam = eliminateDeadCode $ Lambda new_pars new_ts new_body
       (scan_pars', map_pars') =
         splitAt (scanResults scan) (lambdaParams lam_map')
 
@@ -327,7 +329,9 @@ moveRedScanSuperScrema super_screma = do
   let new_pars' = scan_pars' <> extra_scan_pars' <> map_pars'
       new_ts' = scan_ts' <> lambdaReturnType lam_map'
       new_stms' = bodyStms $ lambdaBody lam_map'
-      new_res' = varsRes (map paramName extra_scan_pars')
+      new_res' =
+        varsRes (map paramName extra_scan_pars')
+          <> bodyResult (lambdaBody lam_map')
       new_body' = mkBody new_stms' new_res'
       new_lam' = Lambda new_pars' new_ts' new_body'
 
@@ -468,6 +472,17 @@ eliminate = auxiliary (stmsFromList [])
 -- to compute these result values.
 eliminateByRes :: [SubExpRes] -> Stms SOACS -> Stms SOACS
 eliminateByRes = eliminate . namesFromList . mapMaybe subExpResVName
+
+eliminateDeadCode :: Lambda SOACS -> Lambda SOACS
+eliminateDeadCode lam =
+  Lambda (lambdaParams lam) (lambdaReturnType lam) (mkBody stms res)
+  where
+    res = bodyResult $ lambdaBody lam
+    stms =
+      eliminateByRes
+        res
+        . bodyStms
+        $ lambdaBody lam
 
 splitAtLambdaByRes :: Int -> Lambda SOACS -> (Lambda SOACS, Lambda SOACS)
 splitAtLambdaByRes i lam =
