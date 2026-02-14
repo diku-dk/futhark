@@ -238,6 +238,12 @@ updates (Update src is ve _) = second (++ [(is', ve')]) $ updates src
   where
     is' = brackets $ sep ("," <> space) $ map fmt is
     ve' = fmt ve
+updates (UpdateFieldInRecArray src is fs ve _ _) = second (++ [(isfs', ve')]) $ updates src
+  where
+    is' = brackets $ sep ("," <> space) $ map fmt is
+    fs' = sep "." $ fmt <$> fs
+    isfs' = is' <> "." <> fs'
+    ve' = fmt ve
 updates e = (e, [])
 
 fmtUpdate :: UncheckedExp -> Fmt
@@ -272,6 +278,7 @@ instance Format UncheckedExp where
   fmt (Not e loc) = addComments loc $ "!" <> fmt e
   fmt e@Update {} = fmtUpdate e
   fmt e@RecordUpdate {} = fmtUpdate e
+  fmt e@UpdateFieldInRecArray {} = fmtUpdate e
   fmt (Assert e1 e2 _ loc) =
     addComments loc $ "assert" <+> fmt e1 </> fmt e2
   fmt (Lambda params body rettype _ loc) =

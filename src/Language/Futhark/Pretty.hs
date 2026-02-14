@@ -384,6 +384,14 @@ prettyExp _ (RecordUpdate src fs ve _ _) =
     <+> mconcat (intersperse "." (map pretty fs))
     <+> "="
     <+> align (pretty ve)
+prettyExp _ (UpdateFieldInRecArray src idxs fs ve _ _) =
+  pretty src
+    <+> "with"
+    <+> brackets (commasep (map pretty idxs))
+    <> "."
+    <> mconcat (intersperse "." (map pretty fs))
+      <+> "="
+      <+> align (pretty ve)
 prettyExp _ (Assert e1 e2 _ _) =
   "assert" <+> prettyExp 10 e1 <+> prettyExp 10 e2
 prettyExp p (Lambda params body rettype _ _) =
