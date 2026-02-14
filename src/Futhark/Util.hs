@@ -22,6 +22,7 @@ module Futhark.Util
     partitionMaybe,
     maybeNth,
     maybeHead,
+    unsnoc,
     lookupWithIndex,
     splitFromEnd,
     splitAt3,
@@ -192,6 +193,12 @@ maybeNth i l
 maybeHead :: [a] -> Maybe a
 maybeHead [] = Nothing
 maybeHead (x : _) = Just x
+
+-- | Split the last element from the list, if it exists.
+unsnoc :: [a] -> Maybe ([a], a)
+unsnoc [] = Nothing
+unsnoc [x] = Just ([], x)
+unsnoc (x : xs) = unsnoc xs >>= \(ys, y) -> Just (x : ys, y)
 
 -- | Lookup a value, returning also the index at which it appears.
 lookupWithIndex :: (Eq a) => a -> [(a, b)] -> Maybe (Int, b)

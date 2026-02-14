@@ -58,7 +58,7 @@ import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
 import Futhark.IR.Aliases hiding (lookupAliases)
 import Futhark.Util
-import Futhark.Util.Pretty (align, docText, indent, ppTuple', pretty, (<+>), (</>))
+import Futhark.Util.Pretty hiding (width)
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -738,7 +738,7 @@ checkSubExp (Var ident) = context ("In subexp " <> prettyText ident) $ do
   lookupType ident
 
 checkCerts :: (Checkable rep) => Certs -> TypeM rep ()
-checkCerts (Certs cs) = mapM_ (requireI (Prim Unit)) cs
+checkCerts = mapM_ lookupType . unCerts
 
 checkSubExpRes :: (Checkable rep) => SubExpRes -> TypeM rep Type
 checkSubExpRes (SubExpRes cs se) = do
@@ -1028,9 +1028,9 @@ checkExp (Apply fname args rettype_annot _) = do
   when (rettype_derived /= rettype_annot) $
     bad . TypeError . docText $
       "Expected apply result type:"
-        </> indent 2 (pretty $ map fst rettype_derived)
+        </> indent 2 (braces $ commasep $ map prettyRet rettype_derived)
         </> "But annotation is:"
-        </> indent 2 (pretty $ map fst rettype_annot)
+        </> indent 2 (braces $ commasep $ map prettyRet rettype_annot)
   consumeArgs paramtypes argflows
 checkExp (Loop merge form loopbody) = do
   let (mergepat, mergeexps) = unzip merge
@@ -1258,9 +1258,8 @@ checkStm ::
   TypeM rep a ->
   TypeM rep a
 checkStm stm@(Let pat aux e) m = do
-  let Certs cs = stmAuxCerts aux
-      (_, dec) = stmAuxDec aux
-  context "When checking certificates" $ mapM_ (requireI $ Prim Unit) cs
+  let (_, dec) = stmAuxDec aux
+  context "When checking certificates" $ checkCerts $ stmAuxCerts aux
   context "When checking expression annotation" $ checkExpDec dec
   context ("When matching\n" <> message "  " pat <> "\nwith\n" <> message "  " e) $
     matchPat pat e

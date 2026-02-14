@@ -371,6 +371,9 @@ library
       Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
+      Futhark.Pass.Flatten
+      Futhark.Pass.Flatten.Builtins
+      Futhark.Pass.Flatten.Distribute
       Futhark.Pass.LiftAllocations
       Futhark.Pass.LowerAllocations
       Futhark.Pass.Simplify
@@ -482,6 +485,7 @@ library
     , lsp-types >= 2.0.1.0
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
+    , OneTuple
     , megaparsec >=9.0.0
     , mtl >=2.2.1
     , neat-interpolation >=0.3

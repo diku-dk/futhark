@@ -5,6 +5,7 @@ module Futhark.Pass.ExtractKernels.ToGPU
     segThread,
     soacsLambdaToGPU,
     soacsStmToGPU,
+    soacsExpToGPU,
     scopeForGPU,
     scopeForSOACs,
     injectSOACS,
@@ -73,6 +74,9 @@ injectSOACS f =
 
 soacsStmToGPU :: Stm SOACS -> Stm GPU
 soacsStmToGPU = runIdentity . rephraseStm (injectSOACS OtherOp)
+
+soacsExpToGPU :: Exp SOACS -> Exp GPU
+soacsExpToGPU = runIdentity . rephraseExp (injectSOACS OtherOp)
 
 soacsLambdaToGPU :: Lambda SOACS -> Lambda GPU
 soacsLambdaToGPU = runIdentity . rephraseLambda (injectSOACS OtherOp)
