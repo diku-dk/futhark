@@ -178,8 +178,8 @@ segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
 segOpCompiler pat (SegRed lvl@(SegThread _ _) space _ kbody reds) =
   compileSegRed pat lvl space reds kbody
-segOpCompiler pat (SegScan lvl@(SegThread _ _) space _ kbody scans) =
-  compileSegScan pat lvl space scans kbody
+segOpCompiler pat (SegScan lvl@(SegThread _ _) space ts kbody scans post_op) =
+  compileSegScan pat lvl space ts kbody scans post_op
 segOpCompiler pat (SegHist lvl@(SegThread _ _) space _ kbody ops) =
   compileSegHist pat lvl space ops kbody
 segOpCompiler pat segop =

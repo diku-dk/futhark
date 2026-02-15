@@ -1,0 +1,53 @@
+types {
+
+}
+
+entry("main",
+      {xs: []i32},
+      {[]i32})
+  entry_main (n_5232 : i64,
+              xs_5233 : [n_5232]i32)
+  : {i64, [?0]i32#([1], [0])} = {
+  let {dest_53290 : [n_5232]i32} = replicate([n_5232], 0i32)
+  let {count_532900 : [1i64]i64} = replicate([1i64], 0i64)
+  let {indices_342569 : [n_5232]i64} = iota64(n_5232, 0i64, 1i64)
+  let {defunc_0_scan_res_52563 : [n_5232]i32, williamdue_1337 : [1i64]i64} =
+    scanscatter(n_5232,
+             {xs_5233, indices_342569},
+             \ {eta_p_52571 : i32, idx_543980 : i64}
+               : {i64, i64} ->
+               let {i32_arg0_52581 : i32} =
+                 smod32(eta_p_52571, 2i32)
+               let {i32_res_52591 : i64} =
+                 sext i32 i32_arg0_52581 to i64
+               in {i32_res_52591, idx_543980},
+             \ {eta_p_5253 : i64,
+                 eta_p_5254 : i64}
+               : {i64} ->
+               let {defunc_0_op_res_5255 : i64} =
+                 add64(eta_p_5253, eta_p_5254)
+               in {defunc_0_op_res_5255},
+             {0i64},
+             ([n_5232], 1, dest_53290), ([1i64], 1, count_532900),
+             \ {eta_p_54282 : i64, eta_p_54272 : i32, idx_5439804 : i64} : {i64, i64, i32, i64} ->
+                let {==_lhs_54292 : i32} =
+                  smod32(eta_p_54272, 2i32)
+                let {cond_54302 : bool} =
+                  eq_i32(==_lhs_54292, 0i32)
+                let {lifted_lambda_res_54312 : i64} =
+                  if cond_54302
+                  then {-1i64}
+                  else {let {res_97891: i64} = sub64(eta_p_54282, 1i64)
+                       in {res_97891}} : {i64}
+                let {m_5893278325 : i64} = sub64(n_5232, 1i64)
+                let {cond_54302532 : bool} =
+                  eq_i64(idx_5439804, m_5893278325)
+                let {count_idx_123 : i64} =
+                  if cond_54302532
+                  then {0i64}
+                  else {-1i64} : {i64}
+                in {lifted_lambda_res_54312, count_idx_123, eta_p_54272, eta_p_54282})
+  let {athas_1338: i64} = williamdue_1337[0i64]
+  let {svip_1339: [athas_1338]i32} = defunc_0_scan_res_52563[0i64 :+ athas_1338 * 1i64]
+  in {athas_1338, svip_1339}
+}

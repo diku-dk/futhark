@@ -26,6 +26,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     inISPC,
     toParam,
     sLoopNestVectorized,
+    renameSegPostOp,
     taskProvenance,
   )
 where
@@ -81,7 +82,7 @@ toParam _name Acc {} = pure [] -- FIXME?  Are we sure this works?
 getSpace :: SegOp () MCMem -> SegSpace
 getSpace (SegHist _ space _ _ _) = space
 getSpace (SegRed _ space _ _ _) = space
-getSpace (SegScan _ space _ _ _) = space
+getSpace (SegScan _ space _ _ _ _) = space
 getSpace (SegMap _ space _ _) = space
 
 getLoopBounds :: MulticoreGen (Imp.TExp Int64, Imp.TExp Int64)
@@ -125,6 +126,11 @@ renameSegBinOp segbinops =
   forM segbinops $ \(SegBinOp comm lam ne shape) -> do
     lam' <- renameLambda lam
     pure $ SegBinOp comm lam' ne shape
+
+renameSegPostOp :: SegPostOp MCMem -> MulticoreGen (SegPostOp MCMem)
+renameSegPostOp (SegPostOp lam) = do
+  lam' <- renameLambda lam
+  pure $ SegPostOp lam'
 
 compileThreadResult ::
   SegSpace ->

@@ -369,6 +369,7 @@ nonsegmentedScan ::
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
+  SegPostOp MCMem ->
   TV Int32 ->
   MulticoreGen ()
 nonsegmentedScan
@@ -376,6 +377,7 @@ nonsegmentedScan
   (SegSpace fid [(i, n)])
   scan_ops
   kbody
+  _post_op -- TODO: use this
   _nsubtasks = do
     let multiplier = 1 -- For playing with.
         blockSize = cacheSize `divUp` (totalBytes scan_ops * multiplier)
@@ -509,12 +511,14 @@ nonsegmentedScan
 compileSegScan ::
   Pat LetDecMem ->
   SegSpace ->
-  [SegBinOp MCMem] ->
+  [Type] ->
   KernelBody MCMem ->
+  [SegBinOp MCMem] ->
+  SegPostOp MCMem ->
   TV Int32 ->
   MulticoreGen ()
-compileSegScan pat space reds kbody nsubtasks
+compileSegScan pat space _ts kbody reds post_op nsubtasks
   | [_] <- unSegSpace space =
-      nonsegmentedScan pat space reds kbody nsubtasks
+      nonsegmentedScan pat space reds kbody post_op nsubtasks
   | otherwise =
       error "only nonsegmented scans for now"

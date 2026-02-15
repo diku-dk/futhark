@@ -472,21 +472,24 @@ hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
 removeOutputsExcept toKeep s = case s of
-  SoacNode ots (Pat pats1) soac@(H.Screma _ _ (ScremaForm lam_1 scans_1 red_1)) aux1 ->
-    SoacNode ots (Pat $ pats_unchanged <> pats_new) (H.setLambda lam_new soac) aux1
+  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm lam_1 scan_1 red_1 post_lam)) aux1 ->
+    SoacNode
+      ots
+      (Pat $ pats_unchanged <> pats_new)
+      (H.Screma w inp (ScremaForm lam_1 scan_1 red_1 lam_new))
+      aux1
     where
-      scan_output_size = Futhark.scanResults scans_1
       red_output_size = Futhark.redResults red_1
 
-      (pats_unchanged, pats_toChange) = splitAt (scan_output_size + red_output_size) pats1
-      (res_unchanged, res_toChange) = splitAt (scan_output_size + red_output_size) (zip (resFromLambda lam_1) (lambdaReturnType lam_1))
+      (pats_unchanged, pats_toChange) = splitAt red_output_size pats1
+      res_toChange = zip (resFromLambda post_lam) (lambdaReturnType post_lam)
 
-      (pats_new, other) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
-      (results, types) = unzip (res_unchanged ++ other)
+      (pats_new, res_new) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
+      (results, types) = unzip res_new
       lam_new =
-        lam_1
+        post_lam
           { lambdaReturnType = types,
-            lambdaBody = (lambdaBody lam_1) {bodyResult = results}
+            lambdaBody = (lambdaBody post_lam) {bodyResult = results}
           }
   node -> node
 
@@ -598,12 +601,13 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     soac' <- case soac of
       H.Stream w inputs accs lam ->
         H.Stream w inputs accs <$> dontFuseScans (onLambda lam)
-      H.Screma w inputs (ScremaForm lam scans reds) ->
+      H.Screma w inputs (ScremaForm lam scans reds post_lam) ->
         H.Screma w inputs
           <$> ( ScremaForm
                   <$> doFuseScans (onLambda lam)
                   <*> mapM onScan scans
                   <*> mapM onRed reds
+                  <*> doFuseScans (onLambda post_lam)
               )
       _ ->
         H.setLambda <$> doFuseScans (onLambda (H.lambda soac)) <*> pure soac

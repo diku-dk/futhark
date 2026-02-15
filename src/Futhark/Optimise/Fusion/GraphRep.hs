@@ -391,7 +391,8 @@ expInputs (Loop params form b1) =
 expInputs (Op soac) = case soac of
   Futhark.Screma w is form -> inputs is <> freeClassifications (w, form)
   Futhark.Hist w is ops lam -> inputs is <> freeClassifications (w, ops, lam)
-  Futhark.Stream w is nes lam -> inputs is <> freeClassifications (w, nes, lam)
+  Futhark.Stream w is nes lam ->
+    inputs is <> freeClassifications (w, nes, lam)
   Futhark.JVP {} -> freeClassifications soac
   Futhark.VJP {} -> freeClassifications soac
   where

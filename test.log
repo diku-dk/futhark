@@ -1,0 +1,360 @@
+0 failed, 0 passed, 2362 to go.
+0 failed, 222 passed, 2140 to go.
+0 failed, 499 passed, 1863 to go.
+0 failed, 752 passed, 1610 to go.
+tests/soacs/filter3.fut:
+Compiling with --backend=cuda:
+Warning at tests/soacs/filter3.fut:12:27-28:
+  Unused name "i".
+Internal compiler error.  Please report this:
+  https://github.com/diku-dk/futhark/issues
+Type error after pass 'simplify':
+In function entry_main
+When checking function body
+In expression of statement
+  {tmp_6180 : ({}, i64)}
+in body of case {true}
+Type error:
+Type annotation is
+  {i64}
+But result returns type
+  {i32}
+
+
+1 failed, 1017 passed, 1344 to go.
+tests/issue1753.fut:
+Compiling with --backend=cuda:
+
+2 failed, 1224 passed, 1136 to go.
+tests/migration/scan0.fut:
+Compiling with --backend=cuda:
+
+tests/rosettacode/amicablepairs.fut:
+Compiling with --backend=cuda:
+Internal compiler error.  Please report this:
+  https://github.com/diku-dk/futhark/issues
+Type error after pass 'simplify':
+In function entry_main
+When checking function body
+In expression of statement
+  {defunc_0_filter_res_7553 : ({}, i64),
+   defunc_0_filter_res_7555 : ({}, i64),
+   defunc_0_filter_res_7557 : ({defunc_0_filter_res_7559}, [defunc_0_filter_res_7553]i32),
+   defunc_0_filter_res_7559 : ({defunc_0_filter_res_7557}, [defunc_0_filter_res_7555]i32)}
+in body of last case
+In expression of statement
+  {scatter_res_7858 : ({}, [d<{(*) upper upper}>_7444]i32),
+   scatter_res_7859 : ({}, [d<{(*) upper upper}>_7444]i32)}
+Type error:
+Anonymous function defined with 4 parameters:
+[eta_p_7778 : i64, eta_p_7777 : i64, write_value_7779 : i32, write_value_7780 : i32]
+but expected to take 2 arguments.
+
+tests/issue1435.fut:
+Command failed with ExitFailure 1:
+./tests/issue1435 --cache-file tests/issue1435.fut.cache
+Stderr:
+./tests/issue1435: Error during context initialisation:
+Index [-1] out of bounds for array of shape [3].
+-> #0  tests/issue1435.fut:29:22-27
+
+CallStack (from HasCallStack):
+  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
+CallStack (from -prof):
+  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
+  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
+  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
+  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
+  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
+  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
+  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
+  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
+  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
+  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
+  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
+  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
+  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
+  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
+  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
+  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
+5 failed, 1420 passed, 937 to go.
+tests/primitive/i64_cmpop.fut:
+Compiling with --backend=cuda:
+futhark: internal error: PAP object (0x4202d0f690) entered!
+Stack trace:
+futhark: Failed to get stack frames of current process: No DWARF information found: Success
+                 0xbb63f50    set_initial_registers (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+            0x7f17e73bf168    dwfl_thread_getframes (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+            0x7f17e73beb9b    get_one_thread_cb (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+            0x7f17e73bef6a    dwfl_getthreads (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+            0x7f17e73bf4d4    dwfl_getthread_frames (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+                 0xbb64691    libdwGetBacktrace (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+                 0xbb21646    rtsFatalInternalErrorFn (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+                 0xbb2187a    barf (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+                 0xbb4cea5    stg_PAP_info (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+
+    (GHC version 9.6.6 for x86_64_unknown_linux)
+    Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
+
+6 failed, 1638 passed, 718 to go.
+6 failed, 1887 passed, 469 to go.
+tests/scatter/fusion/concat-scatter-fusion1.fut:
+Compiling with --backend=cuda:
+futhark: internal error: PAP object (0x420146e1f0) entered!
+Stack trace:
+futhark: Failed to get stack frames of current process: No DWARF information found: Success
+                 0xbb63f50    set_initial_registers (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+            0x7f1ce612c168    dwfl_thread_getframes (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+            0x7f1ce612bb9b    get_one_thread_cb (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+            0x7f1ce612bf6a    dwfl_getthreads (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+            0x7f1ce612c4d4    dwfl_getthread_frames (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+                 0xbb64691    libdwGetBacktrace (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+                 0xbb21646    rtsFatalInternalErrorFn (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+                 0xbb2187a    barf (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+                 0xbb4cea5    stg_PAP_info (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+
+    (GHC version 9.6.6 for x86_64_unknown_linux)
+    Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
+
+tests/ad/issue1879.fut:
+Compiling with --backend=cuda:
+Warning at tests/ad/issue1879.fut:10:13-18:
+  Unused name "sizes".
+Internal compiler error (unhandled IO exception).
+Please report this at https://github.com/diku-dk/futhark/issues
+vjpSOAC unhandled:
+scanscatter(n₃_6420,
+            {defunc_0_map_res_7026, defunc_0_map_res_7027, eta_p_6922},
+            \ {x_6998 : i64,
+               x_6999 : i64,
+               x_7000 : [3i64]f64}
+              : {i64,
+                 i64,
+                 i64,
+                 [3i64]f64} ->
+              {x_6998, x_6999, x_6998, x_7000},
+            \ {eta_p_6944 : i64,
+               eta_p_6945 : i64,
+               eta_p_6946 : i64,
+               eta_p_6947 : i64}
+              : {i64,
+                 i64} ->
+              let {tmp_6948 : i64} =
+                add64(eta_p_6944, eta_p_6946)
+              let {tmp_6949 : i64} =
+                add64(eta_p_6945, eta_p_6947)
+              in {tmp_6948, tmp_6949},
+            {0i64, 0i64},
+            ([n₃_6420], 1, scatter_arg_ad_copy_7066),
+            \ {eta_p_6986 : i64,
+               eta_p_6987 : i64,
+               eta_p_6985 : i64,
+               write_value_6988 : [3i64]f64}
+              : {i64,
+                 [3i64]f64} ->
+              let {cond_6989 : bool} =
+                eq_i64(eta_p_6985, 1i64)
+              let {lifted_to_index_res_6990 : i64} =
+                if cond_6989
+                then {
+                  let {lifted_to_index_res_t_res_6991 : i64} =
+                    sub64(eta_p_6986, 1i64)
+                  in {lifted_to_index_res_t_res_6991}
+                } else {
+                  let {-_lhs_6992 : i64} =
+                    add64(eta_p_6987, defunc_0_reduce_comm_res_7025)
+                  let {lifted_to_index_res_f_res_6993 : i64} =
+                    sub64(-_lhs_6992, 1i64)
+                  in {lifted_to_index_res_f_res_6993}
+                }
+                : {i64}
+              in {lifted_to_index_res_6990, write_value_6988})
+CallStack (from HasCallStack):
+  error, called at src/Futhark/AD/Rev/SOAC.hs:199:3 in futhark-0.26.0-inplace:Futhark.AD.Rev.SOAC
+CallStack (from -prof):
+  Futhark.AD.Rev.SOAC.vjpSOAC (src/Futhark/AD/Rev/SOAC.hs:(74,1)-(199,53))
+  Futhark.AD.Rev.diffStm (src/Futhark/AD/Rev.hs:(217,1)-(296,66))
+  Futhark.AD.Rev.diffStms (src/Futhark/AD/Rev.hs:(299,1)-(307,13))
+  Futhark.AD.Rev.Monad.>> (src/Futhark/AD/Rev/Monad.hs:201:7-11)
+  Futhark.Builder.>> (src/Futhark/Builder.hs:86:22-26)
+  Futhark.Builder.>>= (src/Futhark/Builder.hs:86:22-26)
+  Futhark.Builder.collectStms (src/Futhark/Builder.hs:(133,3)-(139,22))
+  Futhark.AD.Rev.Monad.collectStms (src/Futhark/AD/Rev/Monad.hs:215:3-43)
+  Futhark.AD.Rev.Monad.subSubsts (src/Futhark/AD/Rev/Monad.hs:(503,1)-(507,8))
+  Futhark.AD.Rev.Monad.subAD (src/Futhark/AD/Rev/Monad.hs:(496,1)-(500,8))
+  Futhark.AD.Rev.diffBody (src/Futhark/AD/Rev.hs:(315,1)-(323,46))
+  Futhark.AD.Rev.Monad.>>= (src/Futhark/AD/Rev/Monad.hs:201:7-11)
+  Futhark.Builder.localScope (src/Futhark/Builder.hs:(113,3)-(117,10))
+  Futhark.AD.Rev.Monad.localScope (src/Futhark/AD/Rev/Monad.hs:205:7-22)
+  Futhark.Builder.runBuilderT (src/Futhark/Builder.hs:(148,1)-(150,16))
+  Futhark.AD.Rev.Monad.runADM (src/Futhark/AD/Rev/Monad.hs:(222,1)-(227,40))
+  Futhark.AD.Rev.revVJP (src/Futhark/AD/Rev.hs:(334,1)-(346,75))
+  Futhark.Pass.AD.onStm (src/Futhark/Pass/AD.hs:(39,1)-(60,76))
+  Futhark.Pass.liftA2 (src/Futhark/Pass.hs:27:22-32)
+  Futhark.Pass.AD.onStms (src/Futhark/Pass/AD.hs:(63,1)-(65,34))
+  Futhark.Pass.AD.onBody (src/Futhark/Pass/AD.hs:(68,1)-(70,31))
+  Futhark.Pass.AD.onFun (src/Futhark/Pass/AD.hs:(78,1)-(80,31))
+  Futhark.MonadFreshNames.modifyNameSource (src/Futhark/MonadFreshNames.hs:(73,1)-(77,8))
+  Futhark.Pass.parPass (src/Futhark/Pass.hs:(69,1)-(79,25))
+  Futhark.Pass.intraproceduralTransformationWithConsts (src/Futhark/Pass.hs:(91,1)-(94,54))
+  Futhark.Pass.AD.applyAD (src/Futhark/Pass/AD.hs:(83,1)-(91,5))
+  Futhark.Pass.passFunction (src/Futhark/Pass.hs:54:5-16)
+  Futhark.Pass.runPassM (src/Futhark/Pass.hs:42:1-63)
+  Futhark.Pipeline.runPass (src/Futhark/Pipeline.hs:(216,1)-(220,12))
+  Futhark.Pipeline.onePass (src/Futhark/Pipeline.hs:(159,1)-(183,28))
+  Futhark.Pipeline.passes (src/Futhark/Pipeline.hs:199:1-37)
+  Futhark.Passes.standardPipeline (src/Futhark/Passes.hs:(53,1)-(67,38))
+  Futhark.Pipeline.id (src/Futhark/Pipeline.hs:137:3-48)
+  Futhark.Pipeline.. (src/Futhark/Pipeline.hs:(138,3)-(142,30))
+  Futhark.Passes.gpumemPipeline (src/Futhark/Passes.hs:(146,1)-(170,7))
+  Futhark.Pipeline.runPipeline (src/Futhark/Pipeline.hs:(150,1)-(152,9))
+  Futhark.Compiler.runPipelineOnProgram (src/Futhark/Compiler.hs:(107,1)-(126,9))
+  Futhark.Pipeline.runFutharkM (src/Futhark/Pipeline.hs:(95,1)-(97,47))
+  Futhark.Compiler.runCompilerOnProgram (src/Futhark/Compiler.hs:(82,1)-(98,34))
+  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
+  Futhark.Compiler.CLI.compilerMain (src/Futhark/Compiler/CLI.hs:(49,1)-(76,9))
+  Futhark.CLI.CUDA.main (src/Futhark/CLI/CUDA.hs:(10,1)-(17,62))
+  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
+  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
+  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
+
+8 failed, 2008 passed, 346 to go.
+tests/ad/genred-opt/matvec-simple.fut:
+Compiling with --backend=cuda:
+futhark: internal error: PAP object (0x4202a48000) entered!
+Stack trace:
+futhark: Failed to get stack frames of current process: No DWARF information found: Success
+                 0xbb63f50    set_initial_registers (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+            0x7f11249bf168    dwfl_thread_getframes (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+            0x7f11249beb9b    get_one_thread_cb (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+            0x7f11249bef6a    dwfl_getthreads (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+            0x7f11249bf4d4    dwfl_getthread_frames (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
+                 0xbb64691    libdwGetBacktrace (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+                 0xbb21646    rtsFatalInternalErrorFn (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+                 0xbb2187a    barf (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+                 0xbb4cea5    stg_PAP_info (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
+
+    (GHC version 9.6.6 for x86_64_unknown_linux)
+    Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
+
+tests/fusion/Vers2.0/maposcanomaposcan.fut:
+Compiling with --backend=cuda:
+Internal compiler error.  Please report this:
+  https://github.com/diku-dk/futhark/issues
+Type error after pass 'simplify':
+In function entry_main
+When checking function body
+When matching
+   {defunc_0_map_res_5856 : ({}, [d₀_5684]f64)}
+with
+   segscan(thread; ; grid=num_tblocks_5883; blocksize=segscan_tblock_size_5881)
+   (gtid_5885 < d₀_5684) (~phys_tid_5886)
+   : {f64} {
+     let {x_5770 : ({}, f64)} =
+       res_5874[0i64, gtid_5885]
+     return {returns x_5770}
+   }
+   ({0.0f64},
+   ,
+   \ {eta_p_5758 : f64,
+      eta_p_5759 : f64}
+     : {f64} ->
+     let {defunc_0_op_res_5760 : ({}, f64)} =
+       fadd64(eta_p_5758, eta_p_5759)
+     in {defunc_0_op_res_5760})
+   \ {eta_p_5762 : f64}
+     : {f64,
+        f64} ->
+     let {lifted_lambda_res_5763 : ({}, f64)} =
+       fadd64(5.0f64, eta_p_5762)
+     in {lifted_lambda_res_5763, eta_p_5762},
+
+Pat
+{defunc_0_map_res_5856 : ({}, [d₀_5684]f64)}
+cannot match value of type
+{[d₀_5684]f64,
+ [d₀_5684]f64}.
+
+tests/fusion/Vers2.0/maposcan0.fut:
+Compiling with --backend=cuda:
+Internal compiler error.  Please report this:
+  https://github.com/diku-dk/futhark/issues
+Type error after pass 'simplify':
+In function entry_main
+When checking function body
+When matching
+   {defunc_0_map_res_5573 : ({}, [d₀_5536]f64)}
+with
+   segscan(thread; ; grid=num_tblocks_5579; blocksize=segscan_tblock_size_5577)
+   (gtid_5581 < d₀_5536) (~phys_tid_5582)
+   : {f64} {
+     let {x_5572 : ({}, f64)} =
+       arr_5537[gtid_5581]
+     return {returns x_5572}
+   }
+   ({0.0f64},
+   ,
+   \ {eta_p_5565 : f64,
+      eta_p_5566 : f64}
+     : {f64} ->
+     let {defunc_0_op_res_5567 : ({}, f64)} =
+       fadd64(eta_p_5565, eta_p_5566)
+     in {defunc_0_op_res_5567})
+   \ {eta_p_5569 : f64}
+     : {f64,
+        f64} ->
+     let {lifted_lambda_res_5570 : ({}, f64)} =
+       fmul64(2.0f64, eta_p_5569)
+     in {lifted_lambda_res_5570, eta_p_5569},
+
+Pat
+{defunc_0_map_res_5573 : ({}, [d₀_5536]f64)}
+cannot match value of type
+{[d₀_5536]f64,
+ [d₀_5536]f64}.
+
+11 failed, 2146 passed, 205 to go.
+tests/localfunction11.fut:
+Compiling with --backend=cuda:
+Internal compiler error.  Please report this:
+  https://github.com/diku-dk/futhark/issues
+Type error after pass 'simplify':
+In function entry_main
+When checking function body
+In expression of statement
+  {defunc_0_f_res_6199 : ({}, i64),
+   defunc_0_f_res_6200 : ({}, [defunc_0_f_res_6199]i32)}
+in body of last case
+In expression of statement
+  {scatter_res_6275 : ({}, [d₀_5972]i32),
+   defunc_0_scan_res_6276 : ({}, [d₀_5972]i64)}
+in body of last case
+When matching
+   {scatter_res_6455 : ({}, [d₀_5972]i32)}
+with
+   segscan(thread; ; grid=num_tblocks_6453; blocksize=segscan_tblock_size_6452)
+   (gtid_6456 < d₀_5972) (~phys_tid_6457)
+   : {i64} {
+     let {x_6458 : ({}, i64)} =
+       scatter_res_map_acc_6411[gtid_6456]
+     return {returns x_6458}
+   }
+   ({0i64},
+   ,
+   \ {eta_p_6459 : i64,
+      eta_p_6460 : i64}
+     : {i64} ->
+     let {defunc_0_op_res_6461 : ({}, i64)} =
+       add64(eta_p_6459, eta_p_6460)
+     in {defunc_0_op_res_6461})
+   \ {x_6462 : i64}
+     : {i64} ->
+     {x_6462},
+
+Pat
+{scatter_res_6455 : ({}, [d₀_5972]i32)}
+cannot match value of type
+{[d₀_5972]i64}.
+
+2350/2362 passed.
+7 program(s) excluded.

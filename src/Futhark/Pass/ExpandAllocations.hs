@@ -125,13 +125,14 @@ transformExp (Op (Inner (SegOp (SegRed lvl space ts kbody reds)))) = do
     ( alloc_stms,
       Op $ Inner $ SegOp $ SegRed lvl' space ts kbody' reds'
     )
-transformExp (Op (Inner (SegOp (SegScan lvl space ts kbody scans)))) = do
-  (alloc_stms, (lvl', lams, kbody')) <-
-    transformScanRed lvl space (map segBinOpLambda scans) kbody
+transformExp (Op (Inner (SegOp (SegScan lvl space ts kbody scans post_op)))) = do
+  (alloc_stms, (lvl', lams', kbody')) <-
+    transformScanRed lvl space (segPostOpLambda post_op : map segBinOpLambda scans) kbody
+  let post_op_lam : lams = lams'
   let scans' = zipWith (\red lam -> red {segBinOpLambda = lam}) scans lams
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegScan lvl' space ts kbody' scans'
+      Op $ Inner $ SegOp $ SegScan lvl' space ts kbody' scans' (post_op {segPostOpLambda = post_op_lam})
     )
 transformExp (Op (Inner (SegOp (SegHist lvl space ts kbody ops)))) = do
   (alloc_stms, (lvl', lams', kbody')) <- transformScanRed lvl space lams kbody
@@ -455,7 +456,8 @@ extractStmAllocations user bound_outside bound_kernel stm = do
 
     opMapper user' =
       identitySegOpMapper
-        { mapOnSegOpLambda = onLambda user',
+        { mapOnSegBinOpLambda = onLambda user',
+          mapOnSegPostOpLambda = onLambda user',
           mapOnSegOpBody = onKernelBody user'
         }
 
@@ -812,7 +814,8 @@ offsetMemoryInExp offsets = mapExpM recurse
         segOpMapper =
           identitySegOpMapper
             { mapOnSegOpBody = offsetMemoryInKernelBody offsets,
-              mapOnSegOpLambda = offsetMemoryInLambda offsets
+              mapOnSegBinOpLambda = offsetMemoryInLambda offsets,
+              mapOnSegPostOpLambda = offsetMemoryInLambda offsets
             }
     onOp op = pure op
 
@@ -900,7 +903,8 @@ unAllocGPUStms = unAllocStms False
       where
         mapper =
           identitySegOpMapper
-            { mapOnSegOpLambda = unAllocLambda,
+            { mapOnSegBinOpLambda = unAllocLambda,
+              mapOnSegPostOpLambda = unAllocLambda,
               mapOnSegOpBody = unAllocKernelBody
             }
 
