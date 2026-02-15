@@ -630,38 +630,36 @@ defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
     ( AppExp (Index e0' idxs' loc) res,
       Dynamic $ toParam Observe $ typeOf expr
     )
-defuncExp (Update e1 idxs e2 loc) = do
-  (e1', sv) <- defuncExp e1
-  idxs' <- mapM defuncDimIndex idxs
-  e2' <- defuncExp' e2
-  pure (Update e1' idxs' e2' loc, sv)
 
 -- Note that we might change the type of the record field here.  This
 -- is not permitted in the type checker due to problems with type
 -- inference, but it actually works fine.
-defuncExp (RecordUpdate e1 fs e2 _ loc) = do
+defuncExp (UpdatePath e1 steps e2 t loc) = do
   (e1', sv1) <- defuncExp e1
   (e2', sv2) <- defuncExp e2
-  let sv = staticField sv1 sv2 fs
-  pure
-    ( RecordUpdate e1' fs e2' (Info $ structTypeFromSV sv1) loc,
-      sv
-    )
+  steps' <- mapM defuncStep steps
+  let sv' = updateStatic sv1 steps sv2
+  pure (UpdatePath e1' steps' e2' t loc, sv')
   where
-    staticField (RecordSV svs) sv2 (f : fs') =
-      case lookup f svs of
-        Just sv ->
+    defuncStep (UpdateStepField f) =
+      pure $ UpdateStepField f
+    defuncStep (UpdateStepIndex idxs) =
+      UpdateStepIndex <$> mapM defuncDimIndex idxs
+
+    updateStatic _ [] newv = newv
+    updateStatic (RecordSV fs) (UpdateStepField f : rest) newv =
+      case lookup f fs of
+        Just old ->
           RecordSV $
-            (f, staticField sv sv2 fs') : filter ((/= f) . fst) svs
-        Nothing -> error "Invalid record projection."
-    staticField (Dynamic t@(Scalar Record {})) sv2 fs'@(_ : _) =
-      staticField (svFromType t) sv2 fs'
-    staticField _ sv2 _ = sv2
-defuncExp (UpdateFieldInRecArray e1 idxs fs e2 _ loc) = do
-  (e1', sv) <- defuncExp e1
-  idxs' <- mapM defuncDimIndex idxs
-  e2' <- defuncExp' e2
-  pure (UpdateFieldInRecArray e1' idxs' fs e2' (Info $ structTypeFromSV sv) loc, sv)
+            (f, updateStatic old rest newv) : filter ((/= f) . fst) fs
+        Nothing ->
+          error "Invalid record projection."
+    updateStatic (Dynamic t'@(Scalar Record {})) steps0 newv =
+      updateStatic (svFromType t') steps0 newv
+    updateStatic cur (UpdateStepIndex _ : _) _ =
+      cur
+    updateStatic _ _ _ =
+      error "defuncExp UpdatePath: invalid update path."
 defuncExp (Assert e1 e2 desc loc) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2

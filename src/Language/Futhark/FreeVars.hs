@@ -110,10 +110,8 @@ freeInExp expr = case expr of
       <> freeInExp e1
       <> (freeInExp e2 `freeWithout` S.singleton (identName id1))
   AppExp (Index e idxs _) _ -> freeInExp e <> foldMap freeInDimIndex idxs
-  Update e1 idxs e2 _ -> freeInExp e1 <> foldMap freeInDimIndex idxs <> freeInExp e2
-  RecordUpdate e1 _ e2 _ _ -> freeInExp e1 <> freeInExp e2
-  UpdateFieldInRecArray e1 idxs _ e2 _ _ ->
-    freeInExp e1 <> foldMap freeInDimIndex idxs <> freeInExp e2
+  UpdatePath e1 steps e2 _ _ ->
+    freeInExp e1 <> foldMap freeInUpdateStep steps <> freeInExp e2
   Assert e1 e2 _ _ -> freeInExp e1 <> freeInExp e2
   Constr _ es _ _ -> foldMap freeInExp es
   Attr _ e _ -> freeInExp e
@@ -122,6 +120,10 @@ freeInExp expr = case expr of
       caseFV (CasePat p eCase _) =
         (freeInPat p <> freeInExp eCase)
           `freeWithoutL` patNames p
+
+freeInUpdateStep :: UpdateStep Info VName -> FV
+freeInUpdateStep (UpdateStepIndex idxs) = foldMap freeInDimIndex idxs
+freeInUpdateStep (UpdateStepField _) = mempty
 
 freeInDimIndex :: DimIndexBase Info VName -> FV
 freeInDimIndex (DimFix e) = freeInExp e

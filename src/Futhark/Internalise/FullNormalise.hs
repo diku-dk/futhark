@@ -198,24 +198,17 @@ getOrdering _ (Not e loc) = do
 getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
   nameExp final $ Constr n es' ty loc
-getOrdering final (Update eb slice eu loc) = do
+getOrdering final (UpdatePath eb steps eu ty loc) = do
   eu' <- getOrdering False eu
-  slice' <- astMap mapper slice
+  steps' <- mapM onStep steps
   eb' <- getOrdering False eb
-  nameExp final $ Update eb' slice' eu' loc
+  nameExp final $ UpdatePath eb' steps' eu' ty loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
-getOrdering final (RecordUpdate eb ns eu ty loc) = do
-  eb' <- getOrdering False eb
-  eu' <- getOrdering False eu
-  nameExp final $ RecordUpdate eb' ns eu' ty loc
-getOrdering final (UpdateFieldInRecArray eb slice ns eu ty loc) = do
-  eu' <- getOrdering False eu
-  slice' <- astMap mapper slice
-  eb' <- getOrdering False eb
-  nameExp final $ UpdateFieldInRecArray eb' slice' ns eu' ty loc
-  where
-    mapper = identityMapper {mapOnExp = getOrdering False}
+    onStep (UpdateStepIndex slice) =
+      UpdateStepIndex <$> astMap mapper slice
+    onStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 getOrdering final (Lambda params body mte ret loc) = do
   body' <- transformBody body
   nameExp final $ Lambda params body' mte ret loc
@@ -337,17 +330,23 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
 getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body _) _) = do
   e' <- getOrdering False e
   slice' <- astMap mapper slice
-  -- Carefully synthesize a location that does not have the body in it -
-  -- this is so profiling information will be more precise.
   let loc' = srcspan dloc e
-  addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc')
+  addBind $
+    PatBind
+      []
+      (Id dest dty dloc)
+      (UpdatePath (Var (qualName src) sty sloc) [UpdateStepIndex slice'] e' (Info (unInfo sty)) loc')
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering final (AppExp (LetWithField (Ident dest dty dloc) (Ident src sty sloc) fields e body _) _) = do
   e' <- getOrdering False e
   let loc' = srcspan dloc e
-  addBind $ PatBind [] (Id dest dty dloc) (RecordUpdate (Var (qualName src) sty sloc) fields e' (Info (unInfo sty)) loc')
+  addBind $
+    PatBind
+      []
+      (Id dest dty dloc)
+      (UpdatePath (Var (qualName src) sty sloc) (map UpdateStepField fields) e' (Info (unInfo sty)) loc')
   getOrdering final body
 getOrdering final (AppExp (Index e slice loc) resT) = do
   e' <- getOrdering False e

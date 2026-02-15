@@ -1066,32 +1066,29 @@ eval env (Negate e loc) = do
   apply loc env intrinsicsNeg ev
 eval env (Not e loc) =
   apply loc env intrinsicsNot =<< eval env e
-eval env (Update src is v loc) =
-  maybe oob pure
-    =<< writeArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
-  where
-    oob = bad loc env "Bad update"
-eval env (RecordUpdate src all_fs v _ _) =
-  update <$> eval env src <*> pure all_fs <*> eval env v
-  where
-    update _ [] v' = v'
-    update (ValueRecord src') (f : fs) v'
-      | Just f_v <- M.lookup f src' =
-          ValueRecord $ M.insert f (update f_v fs v') src'
-    update _ _ _ = error "eval RecordUpdate: invalid value."
-eval env (UpdateFieldInRecArray src is all_fs v _ loc) = do
-  is' <- mapM (evalDimIndex env) is
+eval env (UpdatePath src steps v _ loc) = do
   src' <- eval env src
   v' <- eval env v
-  res <- updateArray (\old new -> update old all_fs new) is' src' v'
+  res <- updatePath steps src' v'
   maybe oob pure res
   where
-    update _ [] v'' = pure v''
-    update (ValueRecord src') (f : fs) v''
-      | Just f_v <- M.lookup f src' = do
-          v''' <- update f_v fs v''
-          pure $ ValueRecord $ M.insert f v''' src'
-    update _ _ _ = error "eval UpdateFieldInRecArray: invalid value."
+    updatePath [] _ newv = pure $ Just newv
+    updatePath (UpdateStepField f : rest) (ValueRecord fs) newv
+      | Just old <- M.lookup f fs = do
+          newf <- updatePath rest old newv
+          pure $ fmap (\v' -> ValueRecord $ M.insert f v' fs) newf
+    updatePath (UpdateStepField _ : _) _ _ =
+      error "eval UpdatePath: invalid field update."
+    updatePath (UpdateStepIndex is : rest) arr newv = do
+      is' <- mapM (evalDimIndex env) is
+      case indexArray is' arr of
+        Nothing -> pure Nothing
+        Just old -> do
+          newsub <- updatePath rest old newv
+          case newsub of
+            Nothing -> pure Nothing
+            Just vsub -> pure $ writeArray is' arr vsub
+
     oob = bad loc env "Bad update"
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
