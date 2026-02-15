@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE ExplicitNamespaces #-}
 
 -- | The handlers exposed by the language server.
 module Futhark.LSP.Handlers (handlers) where
@@ -8,25 +9,52 @@ import Colog.Core (logStringStderr, (<&))
 import Control.Lens ((^.))
 import Control.Monad.Except (MonadError (throwError), liftEither)
 import Control.Monad.Trans (lift)
-import Control.Monad.Trans.Except (runExceptT)
+import Control.Monad.Trans.Except (runExcept, runExceptT)
 import Data.Aeson.Types (Value (Array, String))
-import Data.Bifunctor (first)
+import Data.Bifunctor (bimap, first)
 import Data.Function ((&))
-import Data.IORef
+import Data.IORef (IORef)
 import Data.Proxy (Proxy (..))
+import Data.Text (Text)
 import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
 import Futhark.Fmt.Printer (fmtToText)
+import Futhark.LSP.Command qualified as Command
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
+import Futhark.LSP.Lenses (evalLensesFor, resolveCodeLens)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
 import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
-import Language.LSP.Protocol.Lens (HasUri (uri))
+import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), arguments, command, line, params, range, start)
 import Language.LSP.Protocol.Message
+  ( Method (..),
+    SMethod (..),
+    TNotificationMessage (TNotificationMessage),
+    TRequestMessage (TRequestMessage),
+    TResponseError (TResponseError, _code, _message, _xdata),
+  )
 import Language.LSP.Protocol.Types
+  ( ClientCapabilities,
+    CodeLens,
+    Definition (Definition),
+    DefinitionParams (DefinitionParams),
+    DidChangeTextDocumentParams (DidChangeTextDocumentParams),
+    DidSaveTextDocumentParams (DidSaveTextDocumentParams),
+    DocumentFormattingParams (DocumentFormattingParams),
+    ErrorCodes (ErrorCodes_InvalidParams, ErrorCodes_InvalidRequest, ErrorCodes_ParseError),
+    HoverParams (HoverParams),
+    Null (..),
+    Position (Position, _character, _line),
+    Range (Range, _end, _start),
+    TextEdit (TextEdit, _newText, _range),
+    Uri (Uri),
+    toNormalizedUri,
+    uriToFilePath,
+    type (|?) (..),
+  )
 import Language.LSP.Server (Handlers, LspM, getVirtualFile, notificationHandler, requestHandler)
 import Language.LSP.VFS (file_text)
 
@@ -158,6 +186,60 @@ onDocumentFormattingHandler =
           _code = InR ErrorCodes_InvalidParams
         }
 
+onDocumentCodeLenses :: Handlers (LspM ())
+onDocumentCodeLenses =
+  requestHandler SMethod_TextDocumentCodeLens $ \request respond ->
+    let textDocUri = request ^. params . textDocument . uri
+     in do
+          logStringStderr <& ("textDocument/CodeLens for " ++ show textDocUri)
+          eitherLenses <- evalLensesFor textDocUri
+          respond $ bimap failure success eitherLenses
+  where
+    success :: [CodeLens] -> [CodeLens] |? Null
+    success = InL
+
+    failure message =
+      TResponseError
+        { _xdata = Nothing,
+          _message = message,
+          _code = InR ErrorCodes_InvalidRequest
+        }
+
+onDocumentCodeLensResolve :: Handlers (LspM ())
+onDocumentCodeLensResolve =
+  requestHandler SMethod_CodeLensResolve $ \request respond ->
+    let codeLens = request ^. params
+        codeLensLine = codeLens ^. (range . start . line)
+     in do
+          logStringStderr <& ("Resolving code lens on line " ++ show codeLensLine)
+          let result = runExcept $ resolveCodeLens codeLens
+          respond . first failure $ result
+  where
+    failure :: Text -> TResponseError Method_CodeLensResolve
+    failure text =
+      TResponseError
+        { _xdata = Nothing,
+          _message = text,
+          _code = InR ErrorCodes_InvalidParams
+        }
+
+onWorkspaceExecuteCommandHandler :: Handlers (LspM ())
+onWorkspaceExecuteCommandHandler =
+  requestHandler SMethod_WorkspaceExecuteCommand $ \request respond ->
+    let parameters = request ^. params
+     in do
+          let commandName = parameters ^. command
+          let commandArgs = parameters ^. arguments
+          result <- runExceptT $ Command.execute commandName commandArgs
+          respond $ bimap (uncurry failure) (const $ InR Null) result
+  where
+    failure message err =
+      TResponseError
+        { _xdata = Nothing,
+          _message = message,
+          _code = err
+        }
+
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
@@ -167,11 +249,14 @@ handlers state_mvar _ =
     [ onInitializeHandler,
       onDocumentOpenHandler,
       onDocumentCloseHandler,
+      onDocumentCodeLenses,
+      onDocumentCodeLensResolve,
       onDocumentFormattingHandler,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,
       goToDefinitionHandler state_mvar,
       onHoverHandler state_mvar,
-      onWorkspaceDidChangeConfiguration state_mvar
+      onWorkspaceDidChangeConfiguration state_mvar,
+      onWorkspaceExecuteCommandHandler
     ]

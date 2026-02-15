@@ -304,8 +304,11 @@ library
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.ReplaceRecords
       Futhark.Internalise.TypesValues
+      Futhark.LSP.Command
+      Futhark.LSP.CommandType
       Futhark.LSP.Compile
       Futhark.LSP.Diagnostic
+      Futhark.LSP.Lenses
       Futhark.LSP.Handlers
       Futhark.LSP.Tool
       Futhark.LSP.State
