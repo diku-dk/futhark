@@ -8,15 +8,12 @@ import Control.Monad
     when,
     (<=<),
   )
-import Control.Monad.Except (Except, ExceptT, runExcept, runExceptT, throwError)
+import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Free.Church (F (runF))
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.RWS.Class (MonadWriter (tell))
-import Control.Monad.Trans.Writer.CPS (runWriter)
-import Data.Functor (($>))
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Trans.Class (MonadTrans (lift))
 import Data.Map qualified as M
 import Data.Maybe (maybeToList)
-import Data.Sequence qualified as S
 import Data.Text qualified as T
 import Futhark.Compiler
   ( FileModule (fileProg, fileScope),
@@ -66,34 +63,64 @@ main = mainWithOptions interpreterConfig options "options... <exprs...>" run
     run [] _ = Nothing
     run exprs config = Just $ runExprs exprs config
 
+class MonadAbort m where
+  abort :: Doc AnsiStyle -> m b
+
+class MonadTrace m where
+  trace :: Doc AnsiStyle -> m ()
+
+newtype EvalIO a = EvalIO {runEvalIO :: IO a}
+  deriving (Functor, Applicative, Monad)
+
+instance (MonadTrans m, MonadAbort m', Monad m') => MonadAbort (m m') where
+  abort = lift . abort
+
+instance MonadAbort EvalIO where
+  abort :: Doc AnsiStyle -> EvalIO b
+  abort reason = EvalIO $ do
+    hPutDocLn stderr reason
+    exitWith $ ExitFailure 1
+
+instance (MonadTrans m, MonadTrace m', Monad m') => MonadTrace (m m') where
+  trace = lift . trace
+
+instance MonadTrace EvalIO where
+  trace :: Doc AnsiStyle -> EvalIO ()
+  trace = EvalIO . putDocLn
+
+instance MonadIO EvalIO where
+  liftIO :: IO a -> EvalIO a
+  liftIO = EvalIO
+
 runExprs :: [String] -> InterpreterConfig -> IO ()
 runExprs exprs cfg = do
   let InterpreterConfig _ file = cfg
-  maybe_new_state <- newFutharkiState cfg file
+  maybe_new_state <- runEvalIO $ newFutharkiState cfg file
   (src, env, ctx) <- case maybe_new_state of
     Left reason -> do
       hPutDocLn stderr reason
       exitWith $ ExitFailure 2
     Right s -> pure s
-  forM_ exprs $ \expr -> case runExcept $ runExpr src env ctx expr of
-    Left errdoc -> do
-      hPutDocLn stderr errdoc
-      exitWith $ ExitFailure 1
-    Right valdoc -> do
-      putDocLn valdoc
+  forM_ exprs $ \expr -> putDocLn =<< runEvalIO (runExpr src env ctx expr)
 
 -- Use parseExp, checkExp, then interpretExp.
-runExpr :: VNameSource -> T.Env -> I.Ctx -> String -> Except (Doc AnsiStyle) (Doc AnsiStyle)
+runExpr ::
+  (Monad m, MonadAbort m, MonadTrace m) =>
+  VNameSource ->
+  T.Env ->
+  I.Ctx ->
+  String ->
+  m (Doc AnsiStyle)
 runExpr src env ctx str = do
   uexp <- case parseExp "" (T.pack str) of
-    Left (SyntaxError _ serr) -> throwError $ pretty serr
+    Left (SyntaxError _ serr) -> abort $ pretty serr
     Right e -> pure e
   fexp <- case T.checkExp [] src env uexp of
     (_, Left terr) -> do
-      throwError $ I.prettyTypeError terr
+      abort $ I.prettyTypeError terr
     (_, Right ([], e)) -> pure e
     (_, Right (tparams, e)) ->
-      throwError $
+      abort $
         vcat
           [ "Inferred type of expression: " <> align (pretty (typeOf e)),
             "The following types are ambiguous: "
@@ -102,8 +129,8 @@ runExpr src env ctx str = do
   pval <- runInterpreterNoBreak $ I.interpretExp ctx fexp
   case pval of
     Left err -> do
-      throwError $ I.prettyInterpreterError err
-    Right val -> throwError $ I.prettyValue val <> hardline
+      abort $ I.prettyInterpreterError err
+    Right val -> pure $ I.prettyValue val <> hardline
 
 data InterpreterConfig = InterpreterConfig
   { interpreterPrintWarnings :: Bool,
@@ -135,7 +162,7 @@ options =
 newFutharkiState ::
   InterpreterConfig ->
   Maybe FilePath ->
-  IO (Either (Doc AnsiStyle) (VNameSource, T.Env, I.Ctx))
+  EvalIO (Either (Doc AnsiStyle) (VNameSource, T.Env, I.Ctx))
 newFutharkiState cfg maybe_file = runExceptT $ do
   (ws, imports, src) <-
     badOnLeft prettyCompilerError
@@ -150,11 +177,9 @@ newFutharkiState cfg maybe_file = runExceptT $ do
         prettyWarnings ws
 
   ictx <-
-    let putTraces (result, traces) = liftIO (mapM_ putDocLn traces) $> result
-        runInterpreterTrace = putTraces . runWriter . runInterpreterNoBreak
-        foldFile ctx =
+    let foldFile ctx =
           badOnLeft I.prettyInterpreterError
-            <=< runInterpreterTrace . I.interpretImport ctx
+            <=< runInterpreterNoBreak . I.interpretImport ctx
      in foldM foldFile I.initialCtx $
           map (fmap fileProg) imports
 
@@ -166,15 +191,15 @@ newFutharkiState cfg maybe_file = runExceptT $ do
 
   pure (src, tenv, ienv)
   where
-    badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
+    badOnLeft :: (Monad m) => (err -> err') -> Either err a -> ExceptT err' m a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
-runInterpreterNoBreak :: (MonadWriter (S.Seq (Doc ann0)) m) => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak :: (MonadTrace m, Monad m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      tell . S.singleton $ pretty w <> ":" <+> align (unAnnotate v)
+      trace $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
