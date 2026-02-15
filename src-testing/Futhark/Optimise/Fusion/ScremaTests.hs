@@ -8,6 +8,7 @@ import Futhark.IR.SOACS
 import Futhark.IR.SOACSTests ()
 import Futhark.Optimise.Fusion.Screma
   ( SuperScrema (..),
+    fuseScrema,
     fuseSuperScrema,
     moveRedScanSuperScrema,
     splitLambdaByPar,
@@ -34,6 +35,14 @@ newtype SP a b = SP (a, b)
 
 instance (Pretty a, Pretty b) => Show (SP a b) where
   show (SP (x, y)) = "(" <> prettyString x <> ",\n" <> prettyString y <> ")"
+
+newtype FuseScrema a b c = FuseScrema (Maybe (a, b, c))
+  deriving (Eq, Ord)
+
+instance (Pretty a, Pretty b, Pretty c) => Show (FuseScrema a b c) where
+  show (FuseScrema (Just (x, y, z))) =
+    "(" <> prettyString x <> ",\n" <> prettyString y <> ",\n" <> prettyString z <> ")"
+  show (FuseScrema Nothing) = "Nothing"
 
 -- | A wrapper that makes 'pretty' behave like 'Show'.
 newtype PS a = PS a
@@ -234,9 +243,6 @@ tests =
                 names = ["x_3"]
              in splitLambdaByRes names lam @?= (lam_x, lam_y)
         ],
-      testGroup
-        "fuseScrema"
-        [],
       testGroup
         "fuseSuperScrema"
         [ testCase "map-scan (vertical)" $
@@ -977,6 +983,70 @@ tests =
                               "let {y_5572 : i32} = add32(3i32, x_5571)",
                               "in {y_5572}"
                             ]
+                        )
+                    )
+        ],
+      testGroup
+        "fuseScrema"
+        [ testCase "map-map (vertical)" $
+            let w = Var "n"
+                ident_a = "input_a_6 : [d_5537]i32"
+                ident_b = "input_b_7 : [d_5537]i32"
+                input_a = SOAC.identInput ident_a
+                input_b = SOAC.identInput ident_b
+             in FuseScrema
+                  ( freshNames
+                      ( fuseScrema
+                          w
+                          [input_a]
+                          ( ScremaForm
+                              ( fromLines
+                                  [ "\\ {x_0 : i32} : {i32} ->",
+                                    "let {y_1 : i32} = add32(1i32, x_0)",
+                                    "in {y_1}"
+                                  ]
+                              )
+                              []
+                              []
+                              "\\ {x_2 : i32} : {i32} -> {x_2}"
+                          )
+                          [identName ident_b]
+                          [input_b]
+                          ( ScremaForm
+                              ( fromLines
+                                  [ "\\ {x_3: i32} : {i32} ->",
+                                    "let {y_4 : i32} = add32(2i32, x_3)",
+                                    "in {y_4}"
+                                  ]
+                              )
+                              []
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5 : i32} : {i32} -> {x_5}"
+                                  ]
+                              )
+                          )
+                          ["b_out_8"]
+                      )
+                  )
+                  @?= FuseScrema
+                    ( Just
+                        ( [input_b],
+                          ( ScremaForm
+                              ( fromLines
+                                  [ "\\ {x_5574 : i32} : {i32} ->",
+                                    "let {y_5567 : i32} = add32(3i32, x_5574)",
+                                    "in {y_5567}"
+                                  ]
+                              )
+                              []
+                              []
+                              ( fromLines
+                                  [ "\\ {x_5570 : i32} : {i32} -> {x_5570}"
+                                  ]
+                              )
+                          ),
+                          ["defunc_0_scan_res_5569"]
                         )
                     )
         ]

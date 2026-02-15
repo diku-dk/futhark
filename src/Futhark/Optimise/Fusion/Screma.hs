@@ -25,6 +25,8 @@ import Futhark.Transform.Rename
 import Futhark.Util (splitAt3)
 import Futhark.Util.Pretty
 
+-- import Debug.Trace
+
 data SuperScrema rep
   = SuperScrema
       SubExp
@@ -354,13 +356,13 @@ moveLastSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'') = do
       new_ts = lambdaReturnType lam''
       out_p = [0 .. length (bodyResult $ lambdaBody lam') - 1]
       inp_c = out_p
-      binds = fuseBinds lam out_p inp_c temp_lam''
+      binds = fuseBinds lam' out_p inp_c temp_lam''
       stms' = bodyStms $ lambdaBody lam'
       stms'' = bodyStms $ lambdaBody temp_lam''
       new_stms = stms' <> binds <> stms''
       new_res = bodyResult $ lambdaBody temp_lam''
       new_body = mkBody new_stms new_res
-      new_lam' = Lambda new_pars new_ts new_body
+      new_lam' = eliminateDeadCode $ Lambda new_pars new_ts new_body
 
   new_lam'' <- mkIdentityLambda $ lambdaReturnType lam''
   pure $
@@ -552,5 +554,5 @@ fuseScrema w inp_c form_c out_c inp_p form_p out_p =
         fmap toScrema $
           moveRedScanSuperScrema super_screma
             >>= moveLastSuperScrema
-            >>= moveMidSuperScrema
+            >>= moveMidSuperScrema -- <- Broken
       pure (new_inp, form, new_out)
