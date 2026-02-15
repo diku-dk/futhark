@@ -74,6 +74,7 @@ newtype EvalIO a = EvalIO {runEvalIO :: IO a}
   deriving (Functor, Applicative, Monad)
 
 instance (MonadTrans m, MonadAbort m', Monad m') => MonadAbort (m m') where
+  abort :: Doc AnsiStyle -> m m' b
   abort = lift . abort
 
 instance MonadAbort EvalIO where
@@ -83,6 +84,7 @@ instance MonadAbort EvalIO where
     exitWith $ ExitFailure 1
 
 instance (MonadTrans m, MonadTrace m', Monad m') => MonadTrace (m m') where
+  trace :: Doc AnsiStyle -> m m' ()
   trace = lift . trace
 
 instance MonadTrace EvalIO where
