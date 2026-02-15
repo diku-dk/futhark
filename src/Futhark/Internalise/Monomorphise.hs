@@ -709,19 +709,18 @@ transformExp (Project n e tp loc) = do
   tp' <- traverse transformType tp
   e' <- transformExp e
   pure $ Project n e' tp' loc
-transformExp (Update e1 idxs e2 loc) =
-  Update
+transformExp (UpdatePath e1 steps e2 t loc) =
+  UpdatePath
     <$> transformExp e1
-    <*> mapM transformDimIndex idxs
-    <*> transformExp e2
-    <*> pure loc
-transformExp (RecordUpdate e1 fs e2 t loc) =
-  RecordUpdate
-    <$> transformExp e1
-    <*> pure fs
+    <*> mapM transformStep steps
     <*> transformExp e2
     <*> traverse transformType t
     <*> pure loc
+  where
+    transformStep (UpdateStepIndex idxs) =
+      UpdateStepIndex <$> mapM transformDimIndex idxs
+    transformStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 transformExp (Constr name all_es t loc) =

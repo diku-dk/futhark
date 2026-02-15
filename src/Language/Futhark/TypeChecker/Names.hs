@@ -269,10 +269,11 @@ resolveExp (Project k e NoInfo loc) =
   Project k <$> resolveExp e <*> pure NoInfo <*> pure loc
 resolveExp (Constr k es NoInfo loc) =
   Constr k <$> mapM resolveExp es <*> pure NoInfo <*> pure loc
-resolveExp (Update e1 slice e2 loc) =
-  Update <$> resolveExp e1 <*> resolveSlice slice <*> resolveExp e2 <*> pure loc
-resolveExp (RecordUpdate e1 fs e2 NoInfo loc) =
-  RecordUpdate <$> resolveExp e1 <*> pure fs <*> resolveExp e2 <*> pure NoInfo <*> pure loc
+resolveExp (UpdatePath e1 steps e2 NoInfo loc) =
+  UpdatePath <$> resolveExp e1 <*> mapM resolveStep steps <*> resolveExp e2 <*> pure NoInfo <*> pure loc
+  where
+    resolveStep (UpdateStepIndex slice) = UpdateStepIndex <$> resolveSlice slice
+    resolveStep (UpdateStepField f) = pure $ UpdateStepField f
 resolveExp (OpSection v NoInfo loc) =
   OpSection <$> resolveQualName v loc <*> pure NoInfo <*> pure loc
 resolveExp (OpSectionLeft v info1 e info2 info3 loc) =

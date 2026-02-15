@@ -230,15 +230,20 @@ instance Format PrimValue where
 updates ::
   UncheckedExp ->
   (UncheckedExp, [(Fmt, Fmt)])
-updates (RecordUpdate src fs ve _ _) = second (++ [(fs', ve')]) $ updates src
+updates (UpdatePath src steps ve _ _) = second (++ [(steps', ve')]) $ updates src
   where
-    fs' = sep "." $ fmt <$> fs
-    ve' = fmt ve
-updates (Update src is ve _) = second (++ [(is', ve')]) $ updates src
-  where
-    is' = brackets $ sep ("," <> space) $ map fmt is
+    steps' = fmtUpdatePath steps
     ve' = fmt ve
 updates e = (e, [])
+
+fmtUpdatePath :: [UpdateStep NoInfo Name] -> Fmt
+fmtUpdatePath = go True
+  where
+    go _ [] = nil
+    go first (UpdateStepField f : rest) =
+      (if first then fmt f else "." <> fmt f) <> go False rest
+    go _ (UpdateStepIndex is : rest) =
+      brackets (sep ("," <> space) $ map fmt is) <> go False rest
 
 fmtUpdate :: UncheckedExp -> Fmt
 fmtUpdate e =
@@ -270,8 +275,7 @@ instance Format UncheckedExp where
   fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmt k
   fmt (Negate e loc) = addComments loc $ "-" <> fmt e
   fmt (Not e loc) = addComments loc $ "!" <> fmt e
-  fmt e@Update {} = fmtUpdate e
-  fmt e@RecordUpdate {} = fmtUpdate e
+  fmt e@UpdatePath {} = fmtUpdate e
   fmt (Assert e1 e2 _ loc) =
     addComments loc $ "assert" <+> fmt e1 </> fmt e2
   fmt (Lambda params body rettype _ loc) =

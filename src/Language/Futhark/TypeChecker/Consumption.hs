@@ -76,10 +76,17 @@ addAliases = flip second
 aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
 
-setFieldAliases :: TypeAliases -> [Name] -> TypeAliases -> TypeAliases
-setFieldAliases ve_als (x : xs) (Scalar (Record fs)) =
-  Scalar $ Record $ M.adjust (setFieldAliases ve_als xs) x fs
-setFieldAliases ve_als _ _ = ve_als
+updatePathAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
+updatePathAliases _ [] ve_als =
+  ve_als
+updatePathAliases src_als (UpdateStepField f : rest) ve_als =
+  case src_als of
+    Scalar (Record fs)
+      | Just sub <- M.lookup f fs ->
+          Scalar $ Record $ M.insert f (updatePathAliases sub rest ve_als) fs
+    _ ->
+      src_als
+updatePathAliases src_als (UpdateStepIndex _ : _) _ = second (const mempty) src_als
 
 data Entry a
   = Consumable {entryAliases :: a}
@@ -876,13 +883,24 @@ checkExp (AppExp (LetWithField dst src fields ve body loc) appres) = do
   (body', body_als) <- bindingIdent Consume dst $ checkExp body
   pure (AppExp (LetWithField dst src fields ve' body' loc) appres, body_als)
 --
-checkExp (Update src slice ve loc) = do
-  slice' <- checkSubExps slice
+checkExp (UpdatePath src steps ve t loc) = do
+  steps' <- mapM checkStep steps
   (ve', ve_als) <- checkExp ve
   (src', src_als) <- checkExp src
-  overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
-  consumeAliases (locOf loc) $ aliases src_als
-  pure (Update src' slice' ve' loc, second (const mempty) src_als)
+  let hasIndex = any isIndex steps
+  when hasIndex $ do
+    overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
+    consumeAliases (locOf loc) $ aliases src_als
+  let res_als =
+        if hasIndex
+          then second (const mempty) src_als
+          else updatePathAliases src_als steps ve_als
+  pure (UpdatePath src' steps' ve' t loc, res_als)
+  where
+    isIndex UpdateStepIndex {} = True
+    isIndex _ = False
+    checkStep (UpdateStepIndex slice) = UpdateStepIndex <$> checkSubExps slice
+    checkStep (UpdateStepField f) = pure $ UpdateStepField f
 
 -- Cases that simply propagate aliases directly.
 checkExp (Var v (Info t) loc) = do
@@ -963,13 +981,6 @@ checkExp (Constr name es t loc) = do
           Scalar . Sum . M.insert name es_als $
             M.map (map (`setAliases` mempty)) cs
         t' -> error $ "checkExp Constr: bad type " <> prettyString t'
-    )
-checkExp (RecordUpdate src fields ve t loc) = do
-  (src', src_als) <- checkExp src
-  (ve', ve_als) <- checkExp ve
-  pure
-    ( RecordUpdate src' fields ve' t loc,
-      setFieldAliases ve_als fields src_als
     )
 checkExp (RecordLit fs loc) = do
   (fs', fs_als) <- mapAndUnzipM checkField fs

@@ -372,16 +372,10 @@ prettyExp _ (StringLit s _) =
 prettyExp _ (Project k e _ _) = prettyExp 11 e <> "." <> pretty k
 prettyExp _ (Negate e _) = "-" <> pretty e
 prettyExp _ (Not e _) = "!" <> pretty e
-prettyExp _ (Update src idxs ve _) =
+prettyExp _ (UpdatePath src steps ve _ _) =
   pretty src
     <+> "with"
-    <+> brackets (commasep (map pretty idxs))
-    <+> "="
-    <+> align (pretty ve)
-prettyExp _ (RecordUpdate src fs ve _ _) =
-  pretty src
-    <+> "with"
-    <+> mconcat (intersperse "." (map pretty fs))
+    <+> prettyUpdatePath steps
     <+> "="
     <+> align (pretty ve)
 prettyExp _ (Assert e1 e2 _ _) =
@@ -418,6 +412,16 @@ prettyExp i (AppExp e res)
         </> "@"
         <> parens (pretty t <> "," <+> brackets (commasep $ map prettyName ext))
   | otherwise = prettyAppExp i e
+
+prettyUpdatePath :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
+prettyUpdatePath = mconcat . zipWith pp [0 :: Int ..]
+  where
+    pp _ (UpdateStepIndex idxs) =
+      brackets (commasep (map pretty idxs))
+    pp 0 (UpdateStepField f) =
+      pretty f
+    pp _ (UpdateStepField f) =
+      "." <> pretty f
 
 instance (IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pretty = prettyExp (-1)

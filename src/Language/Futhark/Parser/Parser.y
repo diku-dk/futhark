@@ -574,14 +574,8 @@ Exp2 :: { UncheckedExp }
      | Atom '..' Exp2            {% twoDotsRange $2 }
      | '-' Exp2  %prec juxtprec  { Negate $2 (srcspan $1 $>) }
      | '!' Exp2 %prec juxtprec   { Not $2 (srcspan $1 $>) }
-
-     | Exp2 with '[' DimIndices ']' '=' Exp2
-       { Update $1 $4 $7 (srcspan $1 $>) }
-     | Exp2 with '...[' DimIndices ']' '=' Exp2
-       { Update $1 $4 $7 (srcspan $1 $>) }
-
-     | Exp2 with FieldAccesses_ '=' Exp2
-       { RecordUpdate $1 (map unLoc $3) $5 NoInfo (srcspan $1 $>) }
+     | Exp2 with UpdatePath '=' Exp2
+       { UpdatePath $1 $3 $5 NoInfo (srcspan $1 $>) }
 
      | ApplyList {% applyExp $1 }
 
@@ -668,6 +662,19 @@ Exps1_ :: { [UncheckedExp] }
         : Exps1_ ',' Exp { $3 : $1 }
         | Exps1_ ','     { $1 }
         | Exp            { [$1] }
+
+UpdatePath :: { [UpdateStep NoInfo Name] }
+           : UpdatePathStep UpdatePathTail { $1 : $2 }
+
+UpdatePathTail :: { [UpdateStep NoInfo Name] }
+               : UpdatePathStep UpdatePathTail { $1 : $2 }
+               |                              { [] }
+
+UpdatePathStep :: { UpdateStep NoInfo Name }
+               : '[' DimIndices ']'    { UpdateStepIndex $2 }
+               | '...[' DimIndices ']' { UpdateStepIndex $2 }
+               | FieldId               { UpdateStepField (unLoc $1) }
+               | '.' FieldId           { UpdateStepField (unLoc $2) }
 
 FieldAccesses :: { [L Name] }
                : '.' FieldId FieldAccesses { $2 : $3 }

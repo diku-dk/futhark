@@ -166,19 +166,16 @@ instance ASTMappable (ExpBase Info VName) where
     Negate <$> mapOnExp tv x <*> pure loc
   astMap tv (Not x loc) =
     Not <$> mapOnExp tv x <*> pure loc
-  astMap tv (Update src slice v loc) =
-    Update
+  astMap tv (UpdatePath src steps v (Info t) loc) =
+    UpdatePath
       <$> mapOnExp tv src
-      <*> mapM (astMap tv) slice
-      <*> mapOnExp tv v
-      <*> pure loc
-  astMap tv (RecordUpdate src fs v (Info t) loc) =
-    RecordUpdate
-      <$> mapOnExp tv src
-      <*> pure fs
+      <*> mapM mapStep steps
       <*> mapOnExp tv v
       <*> (Info <$> mapOnStructType tv t)
       <*> pure loc
+    where
+      mapStep (UpdateStepIndex slice) = UpdateStepIndex <$> mapM (astMap tv) slice
+      mapStep (UpdateStepField f) = pure $ UpdateStepField f
   astMap tv (Project field e t loc) =
     Project field <$> mapOnExp tv e <*> traverse (mapOnStructType tv) t <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
@@ -482,10 +479,6 @@ bareExp (Ascript e te loc) = Ascript (bareExp e) (bareTypeExp te) loc
 bareExp (Coerce e te _ loc) = Coerce (bareExp e) (bareTypeExp te) NoInfo loc
 bareExp (Negate x loc) = Negate (bareExp x) loc
 bareExp (Not x loc) = Not (bareExp x) loc
-bareExp (Update src slice v loc) =
-  Update (bareExp src) (map bareDimIndex slice) (bareExp v) loc
-bareExp (RecordUpdate src fs v _ loc) =
-  RecordUpdate (bareExp src) fs (bareExp v) NoInfo loc
 bareExp (Project field e _ loc) =
   Project field (bareExp e) NoInfo loc
 bareExp (Assert e1 e2 _ loc) = Assert (bareExp e1) (bareExp e2) NoInfo loc
@@ -552,3 +545,13 @@ bareExp (AppExp appexp _) =
           Index (bareExp arr) (map bareDimIndex slice) loc
 bareExp (Attr attr e loc) =
   Attr attr (bareExp e) loc
+bareExp (UpdatePath src steps v _ loc) =
+  UpdatePath
+    (bareExp src)
+    (map bareStep steps)
+    (bareExp v)
+    NoInfo
+    loc
+  where
+    bareStep (UpdateStepIndex slice) = UpdateStepIndex $ map bareDimIndex slice
+    bareStep (UpdateStepField f) = UpdateStepField f

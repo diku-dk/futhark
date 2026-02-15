@@ -57,6 +57,7 @@ module Language.Futhark.Syntax
     AppExpBase (..),
     AppRes (..),
     ExpBase (..),
+    UpdateStep (..),
     FieldBase (..),
     CaseBase (..),
     LoopInitBase (..),
@@ -779,6 +780,22 @@ instance Located (AppExpBase f vn) where
   locOf (Match _ _ loc) = locOf loc
   locOf (LetWithField _ _ _ _ _ loc) = locOf loc
 
+data UpdateStep f vn
+  = UpdateStepIndex (SliceBase f vn)
+  | UpdateStepField Name
+
+deriving instance Show (UpdateStep Info VName)
+
+deriving instance (Show vn) => Show (UpdateStep NoInfo vn)
+
+deriving instance Eq (UpdateStep NoInfo VName)
+
+deriving instance Ord (UpdateStep NoInfo VName)
+
+deriving instance Eq (UpdateStep Info VName)
+
+deriving instance Ord (UpdateStep Info VName)
+
 -- | An annotation inserted by the type checker on constructs that are
 -- "function calls" (either literally or conceptually).  This
 -- annotation encodes the result type, as well as any existential
@@ -836,8 +853,7 @@ data ExpBase f vn
     Assert (ExpBase f vn) (ExpBase f vn) (f T.Text) SrcLoc
   | -- | An n-ary value constructor.
     Constr Name [ExpBase f vn] (f StructType) SrcLoc
-  | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc
-  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f StructType) SrcLoc
+  | UpdatePath (ExpBase f vn) [UpdateStep f vn] (ExpBase f vn) (f StructType) SrcLoc
   | Lambda
       [PatBase f vn ParamType]
       (ExpBase f vn)
@@ -901,8 +917,6 @@ instance Located (ExpBase f vn) where
   locOf (Coerce _ _ _ loc) = locOf loc
   locOf (Negate _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
-  locOf (Update _ _ _ pos) = locOf pos
-  locOf (RecordUpdate _ _ _ _ pos) = locOf pos
   locOf (Lambda _ _ _ _ loc) = locOf loc
   locOf (Hole _ loc) = locOf loc
   locOf (OpSection _ _ loc) = locOf loc
@@ -914,6 +928,7 @@ instance Located (ExpBase f vn) where
   locOf (Constr _ _ _ loc) = locOf loc
   locOf (Attr _ _ loc) = locOf loc
   locOf (AppExp e _) = locOf e
+  locOf (UpdatePath _ _ _ _ pos) = locOf pos
 
 -- | An entry in a record literal.
 data FieldBase f vn
