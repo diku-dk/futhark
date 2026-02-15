@@ -580,6 +580,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       scalarCase
     Assert {} ->
       scalarCase
+    ArrayLit {} -> scalarCase
     Opaque _op se
       | Var v <- se,
         Just (DistInput rt_in _) <- lookup v inps ->
