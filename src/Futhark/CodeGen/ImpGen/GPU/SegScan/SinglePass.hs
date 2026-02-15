@@ -695,5 +695,5 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                   forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
                     copyDWIMFix (patElemName pe) (map le64 gtids) subexp []
 
-      sOp $ local_barrier
+      sOp local_barrier
 {-# NOINLINE compileSegScan #-}
