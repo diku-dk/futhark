@@ -377,7 +377,7 @@ nonsegmentedScan
   (SegSpace fid [(i, n)])
   scan_ops
   kbody
-  post_op -- TODO: use this
+  _post_op -- TODO: use this
   _nsubtasks = do
     let multiplier = 1 -- For playing with.
         blockSize = cacheSize `divUp` (totalBytes scan_ops * multiplier)

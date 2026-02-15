@@ -8,7 +8,6 @@ import Futhark.IR.SOACS
 import Futhark.IR.SOACSTests ()
 import Futhark.Optimise.Fusion.Screma
   ( SuperScrema (..),
-    fuseLambda,
     fuseSuperScrema,
     moveRedScanSuperScrema,
     splitLambdaByPar,
@@ -48,21 +47,6 @@ tests =
   testGroup
     "ScremaTests"
     [ testGroup
-        "FuseScrema"
-        [ testCase "map-map" $
-            let lam_c = "\\{x_0 : i32} : {i32} -> {x_0}"
-                inp_c = ["xs_1"]
-                out_c = ["ys_3"]
-                lam_p = "\\{x_2 : i32} : {i32} -> {x_2}"
-                out_p = ["zs_4"]
-             in PS (fuseLambda lam_c inp_c out_c lam_p out_p)
-                  @?= PS
-                    ( ["xs_1" :: VName],
-                      "\\{x_2 : i32, x_0 : i32} : {i32,i32} -> {x_2, x_0}",
-                      ["zs_4", "ys_3"]
-                    )
-        ],
-      testGroup
         "splitLambdaByPar"
         [ testCase "keeps params and result." $
             let lam = "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> {x_0, x_1}"

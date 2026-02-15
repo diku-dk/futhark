@@ -18,7 +18,7 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, partition, (\\))
+import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.HORep.MapNest (MapNest)
@@ -32,7 +32,6 @@ import Futhark.Optimise.Fusion.Screma
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
-import Futhark.Util (splitAt3)
 
 newtype TryFusion a
   = TryFusion
@@ -188,70 +187,11 @@ attemptFusion mode unfus_nms outVars soac ker = do
   scope <- askScope
   tryFusion (applyFusionRules mode unfus_nms outVars soac ker) scope
 
--- | Check that the consumer does not use any scan or reduce results.
-scremaFusionOK :: ([VName], [VName]) -> FusedSOAC -> Bool
-scremaFusionOK (nonmap_outs, _map_outs) ker =
-  all (`notElem` nonmap_outs) $ mapMaybe SOAC.isVarishInput (inputs ker)
-
 -- | Check that the consumer uses all the outputs of the producer unmodified.
 mapWriteFusionOK :: [VName] -> FusedSOAC -> Bool
 mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
   where
     inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
-
-extendLambda ::
-  Lambda SOACS ->
-  [Param Type] ->
-  Lambda SOACS
-extendLambda lam extra_params =
-  lam
-    { lambdaBody = new_body,
-      lambdaReturnType = new_rets,
-      lambdaParams = new_params
-    }
-  where
-    params = lambdaParams lam
-    extra_rets = varRes . paramName <$> extra_params
-    extra_ts = paramType <$> extra_params
-    body = lambdaBody lam
-    new_body = body {bodyResult = bodyResult body <> extra_rets}
-    new_rets = lambdaReturnType lam <> extra_ts
-    new_params = params <> filter (`notElem` params) extra_params
-
-fusability :: Names -> [VName] -> ([VName], [VName])
-fusability unfus_set = partition (`notNameIn` unfus_set)
-
-vNameToNewParam :: VName -> TryFusion (Param Type)
-vNameToNewParam = lookupType >=> newParam "x" . rowType
-
-inputToVName :: SOAC.Input -> TryFusion VName
-inputToVName = liftMaybe . SOAC.isVarishInput
-
-inputToNewParam :: SOAC.Input -> TryFusion (Param Type)
-inputToNewParam = inputToVName >=> vNameToNewParam
-
-combineInputs ::
-  [SOAC.Input] ->
-  Lambda SOACS ->
-  [VName] ->
-  [SOAC.Input] ->
-  TryFusion
-    ( [(SOAC.Input, Param Type)],
-      [(SOAC.Input, Param Type)]
-    )
-combineInputs inp lam out inp' = do
-  new_inputs <- mapM toNewParamPair =<< filterM (isOutput out) inp'
-  pure (old_inputs, new_inputs)
-  where
-    old_inputs = zip inp $ lambdaParams lam
-    toNewParamPair inp'' =
-      maybe
-        ((inp'',) <$> inputToNewParam inp'')
-        (pure . (inp'',))
-        (lookup inp'' old_inputs)
-
-isOutput :: (Foldable t) => t VName -> SOAC.Input -> TryFusion Bool
-isOutput out = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
@@ -408,20 +348,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
         (map identName newacc_ids ++ outVars)
         soac_p'
         ker
-    (_, SOAC.Screma _ _ form, _) | Just _ <- Futhark.isScanomapSOAC form -> do
-      -- A Scan soac can be currently only fused as a (sequential) stream,
-      -- hence it is first translated to a (sequential) Stream and then
-      -- fusion with a kernel is attempted.
-      (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
-      if soac_p' /= soac_p
-        then
-          fuseSOACwithKer
-            mode
-            (namesFromList (map identName newacc_ids) <> unfus_set)
-            (map identName newacc_ids ++ outVars)
-            soac_p'
-            ker
-        else fail "SOAC could not be turned into stream."
     (_, SOAC.Stream {}, _) -> do
       -- If it reached this case then soac_c is NOT a Stream kernel,
       -- hence transform the kernel's soac to a stream and attempt
@@ -438,11 +364,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
             soac_p
             $ ker {fsSOAC = soac_c', fsOutNames = map identName newacc_ids ++ fsOutNames ker}
         else fail "SOAC could not be turned into stream."
-
-    ---------------------------------
-    --- DEFAULT, CANNOT FUSE CASE ---
-    ---------------------------------
-    _ -> fail "Cannot fuse"
 
 fuseStreamHelper ::
   [VName] ->
