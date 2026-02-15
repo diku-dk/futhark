@@ -17,8 +17,9 @@ import Data.Maybe (maybeToList)
 import Data.Text qualified as T
 import Futhark.Compiler
   ( FileModule (fileProg, fileScope),
+    VFS,
     prettyWarnings,
-    readProgramFiles,
+    readProgramFilesExceptKnown,
   )
 import Futhark.Error (externalErrorS, prettyCompilerError)
 import Futhark.FreshNames (VNameSource)
@@ -95,7 +96,7 @@ instance MonadIO EvalIO where
 runExprs :: [String] -> InterpreterConfig -> IO ()
 runExprs exprs cfg = do
   let InterpreterConfig _ file = cfg
-  maybe_new_state <- runEvalIO $ newFutharkiState cfg file
+  maybe_new_state <- runEvalIO $ newFutharkiState cfg file M.empty
   (src, env, ctx) <- case maybe_new_state of
     Left reason -> do
       hPutDocLn stderr reason
@@ -162,12 +163,13 @@ options =
 newFutharkiState ::
   InterpreterConfig ->
   Maybe FilePath ->
+  VFS ->
   EvalIO (Either (Doc AnsiStyle) (VNameSource, T.Env, I.Ctx))
-newFutharkiState cfg maybe_file = runExceptT $ do
+newFutharkiState cfg maybe_file vfs = runExceptT $ do
   (ws, imports, src) <-
     badOnLeft prettyCompilerError
       =<< liftIO
-        ( runExceptT (readProgramFiles [] $ maybeToList maybe_file)
+        ( runExceptT (readProgramFilesExceptKnown [] vfs $ maybeToList maybe_file)
             `catch` \(err :: IOException) ->
               pure (externalErrorS (show err))
         )
