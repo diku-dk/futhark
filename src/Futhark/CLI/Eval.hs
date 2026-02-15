@@ -1,30 +1,63 @@
 -- | @futhark eval@
 module Futhark.CLI.Eval (main) where
 
-import Control.Exception
+import Control.Exception (IOException, catch)
 import Control.Monad
-import Control.Monad.Except (ExceptT, runExceptT, throwError)
-import Control.Monad.Free.Church
-import Control.Monad.IO.Class (MonadIO, liftIO)
+  ( foldM,
+    forM_,
+    when,
+    (<=<),
+  )
+import Control.Monad.Except (Except, ExceptT, runExcept, runExceptT, throwError)
+import Control.Monad.Free.Church (F (runF))
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.RWS.Class (MonadWriter (tell))
+import Control.Monad.Trans.Writer.CPS (runWriter)
+import Data.Functor (($>))
 import Data.Map qualified as M
-import Data.Maybe
+import Data.Maybe (maybeToList)
+import Data.Sequence qualified as S
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import Futhark.Compiler
-import Futhark.MonadFreshNames
-import Futhark.Pipeline
+  ( FileModule (fileProg, fileScope),
+    prettyWarnings,
+    readProgramFiles,
+  )
+import Futhark.Error (externalErrorS, prettyCompilerError)
+import Futhark.FreshNames (VNameSource)
 import Futhark.Util.Options
+  ( ArgDescr (NoArg, ReqArg),
+    FunOptDescr,
+    OptDescr (Option),
+    mainWithOptions,
+  )
 import Futhark.Util.Pretty
-import Language.Futhark
+  ( AnsiStyle,
+    Doc,
+    Pretty (pretty),
+    align,
+    commasep,
+    hPutDoc,
+    hPutDocLn,
+    hardline,
+    putDocLn,
+    unAnnotate,
+    vcat,
+    (<+>),
+  )
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Parser
+  ( SyntaxError (SyntaxError),
+    parseExp,
+  )
+import Language.Futhark.Pretty (IsName (toName))
+import Language.Futhark.Prop (typeOf)
 import Language.Futhark.Semantic qualified as T
-import Language.Futhark.TypeChecker qualified as I
+import Language.Futhark.Syntax (nameToText, typeParamName)
 import Language.Futhark.TypeChecker qualified as T
-import System.Exit
-import System.FilePath
-import System.IO
-import Prelude
+import Language.Futhark.TypeChecker.Monad qualified as I
+import System.Exit (ExitCode (ExitFailure), exitWith)
+import System.IO (stderr)
 
 -- | Run @futhark eval@.
 main :: String -> [String] -> IO ()
@@ -42,33 +75,35 @@ runExprs exprs cfg = do
       hPutDocLn stderr reason
       exitWith $ ExitFailure 2
     Right s -> pure s
-  mapM_ (runExpr src env ctx) exprs
+  forM_ exprs $ \expr -> case runExcept $ runExpr src env ctx expr of
+    Left errdoc -> do
+      hPutDocLn stderr errdoc
+      exitWith $ ExitFailure 1
+    Right valdoc -> do
+      putDocLn valdoc
 
 -- Use parseExp, checkExp, then interpretExp.
-runExpr :: VNameSource -> T.Env -> I.Ctx -> String -> IO ()
+runExpr :: VNameSource -> T.Env -> I.Ctx -> String -> Except (Doc AnsiStyle) (Doc AnsiStyle)
 runExpr src env ctx str = do
   uexp <- case parseExp "" (T.pack str) of
-    Left (SyntaxError _ serr) -> do
-      T.hPutStrLn stderr serr
-      exitWith $ ExitFailure 1
+    Left (SyntaxError _ serr) -> throwError $ pretty serr
     Right e -> pure e
   fexp <- case T.checkExp [] src env uexp of
     (_, Left terr) -> do
-      hPutDoc stderr $ I.prettyTypeError terr
-      exitWith $ ExitFailure 1
+      throwError $ I.prettyTypeError terr
     (_, Right ([], e)) -> pure e
-    (_, Right (tparams, e)) -> do
-      putDocLn $ "Inferred type of expression: " <> align (pretty (typeOf e))
-      T.putStrLn $
-        "The following types are ambiguous: "
-          <> T.intercalate ", " (map (nameToText . toName . typeParamName) tparams)
-      exitWith $ ExitFailure 1
+    (_, Right (tparams, e)) ->
+      throwError $
+        vcat
+          [ "Inferred type of expression: " <> align (pretty (typeOf e)),
+            "The following types are ambiguous: "
+              <> commasep (map (pretty . nameToText . toName . typeParamName) tparams)
+          ]
   pval <- runInterpreterNoBreak $ I.interpretExp ctx fexp
   case pval of
     Left err -> do
-      hPutDoc stderr $ I.prettyInterpreterError err
-      exitWith $ ExitFailure 1
-    Right val -> putDoc $ I.prettyValue val <> hardline
+      throwError $ I.prettyInterpreterError err
+    Right val -> throwError $ I.prettyValue val <> hardline
 
 data InterpreterConfig = InterpreterConfig
   { interpreterPrintWarnings :: Bool,
@@ -115,8 +150,13 @@ newFutharkiState cfg maybe_file = runExceptT $ do
         prettyWarnings ws
 
   ictx <-
-    foldM (\ctx -> badOnLeft I.prettyInterpreterError <=< runInterpreterNoBreak . I.interpretImport ctx) I.initialCtx $
-      map (fmap fileProg) imports
+    let putTraces (result, traces) = liftIO (mapM_ putDocLn traces) $> result
+        runInterpreterTrace = putTraces . runWriter . runInterpreterNoBreak
+        foldFile ctx =
+          badOnLeft I.prettyInterpreterError
+            <=< runInterpreterTrace . I.interpretImport ctx
+     in foldM foldFile I.initialCtx $
+          map (fmap fileProg) imports
 
   let (tenv, ienv) =
         let (iname, fm) = last imports
@@ -130,11 +170,11 @@ newFutharkiState cfg maybe_file = runExceptT $ do
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
-runInterpreterNoBreak :: (MonadIO m) => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak :: (MonadWriter (S.Seq (Doc ann0)) m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putDocLn $ pretty w <> ":" <+> align (unAnnotate v)
+      tell . S.singleton $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
