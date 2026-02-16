@@ -693,11 +693,12 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
         addRelDim outer_dim
         forward lam_body
 
-      neutrals <- forward ne
+      neutrals <- zip acc_vns <$> forward ne
+      let recurrences = mkRepFromList $ map (,sym2SoP Recurrence) acc_vns
 
-      forM (zip3 bodies acc_vns neutrals) $ \(f_body, acc, f_ne) -> do
-        let f_rec = repIndexFn (mkRep acc (sym2SoP Recurrence)) f_body
-        f_base <- f_body @ (acc, f_ne)
+      forM bodies $ \f_body -> do
+        let f_rec = repIndexFn recurrences f_body
+        f_base <- f_body `substParams` neutrals
         base_case <- newVName "#base_case"
         rec_case <- newVName "#rec_case"
         f_scan <-

@@ -280,8 +280,8 @@ def extract_empty_segments [num_segs] [num_points]
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
        , []i64                       -- seg_inds'
-      ) | \(_,_, segs_true_bx,_,_,_, sgm_inds') ->
-          let num_segs' = length segs_true_bx
+      ) | \(_,_, _,_,_,_, sgm_inds') ->
+          let num_segs' = sum (map (\b -> to_i64 b) segs_inhabited)
           in Range sgm_inds' (0,num_segs'+1)
       }
     =
@@ -321,7 +321,6 @@ def extract_empty_segments [num_segs] [num_points]
 
   -- let segs' = zip4 segs_true_bx segs_true_by segs_true_ex segs_true_ey
   let sgm_inds' = 
-      -- map (\seg_ix -> new_segs_ix[seg_ix] + segs_indicator[seg_ix] - 1) sgm_inds
       map (\seg_ix -> if segs_inhabited[seg_ix]
                       then new_segs_ix[seg_ix]
                       else 0
