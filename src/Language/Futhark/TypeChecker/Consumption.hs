@@ -895,9 +895,6 @@ checkExp (Update src steps ve t loc) = do
         consumeAliases (locOf loc) $ aliases src_als
         pure $ second (const mempty) src_als
       else pure $ updateAliases src_als steps ve_als
-  when hasIndex $ do
-    overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
-    consumeAliases (locOf loc) $ aliases src_als
   pure (Update src' steps' ve' t loc, res_als)
   where
     isIndex UpdateStepSlice {} = True
