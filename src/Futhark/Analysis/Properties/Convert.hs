@@ -344,21 +344,22 @@ renamingRep actual_args actual_arg_exprs =
 checkPreconditions :: (Pretty u, Pretty (E.Shape dim)) => E.SrcLoc -> E.VName -> [E.PatBase E.Info E.VName (E.TypeBase dim u)] -> ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]]) -> M.Map E.VName (SoP Symbol) -> IndexFnM (M.Map E.VName (SoP Symbol))
 checkPreconditions loc g pats (actual_args, actual_sizes) name_rep = do
   let size_rep = M.fromList $ mconcat actual_sizes
-  rollbackAlgEnv $ foldM_
-    ( \args_in_scope (pat, arg) -> do
-        let scope = args_in_scope <> arg
-        effects <- checkPatPrecondition scope pat size_rep
-        -- Temporarily add preconditions to the environment so that subsequent
-        -- preconditions can be validated against previous arguments. Example:
-        --   def f (x: | Range x (0..n)) (y: | For y (\i -> P(y[x[i]])))
-        --   def g a b = f a b
-        -- Indexing y[x[i]] is only safe if x's internal Range is in scope.
-        -- No name substitutions because we want to add it on `x`, not g's `a`.
-        forM_ effects $ \effect -> effect (mempty, scope, mempty)
-        pure scope
-    )
-    []
-    (zip pats actual_args)
+  rollbackAlgEnv $
+    foldM_
+      ( \args_in_scope (pat, arg) -> do
+          let scope = args_in_scope <> arg
+          effects <- checkPatPrecondition scope pat size_rep
+          -- Temporarily add preconditions to the environment so that subsequent
+          -- preconditions can be validated against previous arguments. Example:
+          --   def f (x: | Range x (0..n)) (y: | For y (\i -> P(y[x[i]])))
+          --   def g a b = f a b
+          -- Indexing y[x[i]] is only safe if x's internal Range is in scope.
+          -- No name substitutions because we want to add it on `x`, not g's `a`.
+          forM_ effects $ \effect -> effect (mempty, scope, mempty)
+          pure scope
+      )
+      []
+      (zip pats actual_args)
 
   pure size_rep
   where
