@@ -541,7 +541,7 @@ tests =
                   ]
         ),
       mkTest
-        "tests/indexfn/filter_segmented_array.fut"
+        "tests/indexfn/filter_irreg.fut"
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [[Forall i (Iota (sHole n))]],
