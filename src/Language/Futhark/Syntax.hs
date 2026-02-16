@@ -781,7 +781,7 @@ instance Located (AppExpBase f vn) where
   locOf (LetWithField _ _ _ _ _ loc) = locOf loc
 
 data UpdateStep f vn
-  = UpdateStepIndex (SliceBase f vn)
+  = UpdateStepSlice (SliceBase f vn)
   | UpdateStepField Name
 
 deriving instance Show (UpdateStep Info VName)
@@ -853,7 +853,7 @@ data ExpBase f vn
     Assert (ExpBase f vn) (ExpBase f vn) (f T.Text) SrcLoc
   | -- | An n-ary value constructor.
     Constr Name [ExpBase f vn] (f StructType) SrcLoc
-  | UpdatePath (ExpBase f vn) [UpdateStep f vn] (ExpBase f vn) (f StructType) SrcLoc
+  | Update (ExpBase f vn) [UpdateStep f vn] (ExpBase f vn) (f StructType) SrcLoc
   | Lambda
       [PatBase f vn ParamType]
       (ExpBase f vn)
@@ -928,7 +928,7 @@ instance Located (ExpBase f vn) where
   locOf (Constr _ _ _ loc) = locOf loc
   locOf (Attr _ _ loc) = locOf loc
   locOf (AppExp e _) = locOf e
-  locOf (UpdatePath _ _ _ _ pos) = locOf pos
+  locOf (Update _ _ _ _ pos) = locOf pos
 
 -- | An entry in a record literal.
 data FieldBase f vn

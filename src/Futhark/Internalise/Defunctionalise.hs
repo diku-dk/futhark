@@ -634,17 +634,17 @@ defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
 -- Note that we might change the type of the record field here.  This
 -- is not permitted in the type checker due to problems with type
 -- inference, but it actually works fine.
-defuncExp (UpdatePath e1 steps e2 t loc) = do
+defuncExp (Update e1 steps e2 t loc) = do
   (e1', sv1) <- defuncExp e1
   (e2', sv2) <- defuncExp e2
   steps' <- mapM defuncStep steps
   let sv' = updateStatic sv1 steps sv2
-  pure (UpdatePath e1' steps' e2' t loc, sv')
+  pure (Update e1' steps' e2' t loc, sv')
   where
     defuncStep (UpdateStepField f) =
       pure $ UpdateStepField f
-    defuncStep (UpdateStepIndex idxs) =
-      UpdateStepIndex <$> mapM defuncDimIndex idxs
+    defuncStep (UpdateStepSlice idxs) =
+      UpdateStepSlice <$> mapM defuncDimIndex idxs
 
     updateStatic _ [] newv = newv
     updateStatic (RecordSV fs) (UpdateStepField f : rest) newv =
@@ -656,10 +656,10 @@ defuncExp (UpdatePath e1 steps e2 t loc) = do
           error "Invalid record projection."
     updateStatic (Dynamic t'@(Scalar Record {})) steps0 newv =
       updateStatic (svFromType t') steps0 newv
-    updateStatic cur (UpdateStepIndex _ : _) _ =
+    updateStatic cur (UpdateStepSlice _ : _) _ =
       cur
     updateStatic _ _ _ =
-      error "defuncExp UpdatePath: invalid update path."
+      error "defuncExp Update: invalid update."
 defuncExp (Assert e1 e2 desc loc) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2

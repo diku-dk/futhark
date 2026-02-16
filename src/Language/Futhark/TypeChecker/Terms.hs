@@ -583,7 +583,7 @@ checkExp (AppExp (LetWithField dest src fields ve body loc) _) = do
 -- Record updates are a bit hacky, because we do not have row typing
 -- (yet?).  For now, we only permit record updates where we know the
 -- full type up to the field we are updating.
-checkExp (UpdatePath src steps ve NoInfo loc) = do
+checkExp (Update src steps ve NoInfo loc) = do
   src' <- checkExp src
   src_t <- expTypeFully src'
   let onlyFields = all isField steps
@@ -593,12 +593,12 @@ checkExp (UpdatePath src steps ve NoInfo loc) = do
       ve_t <- expType ve'
       updated_t <- updateFieldPath (fieldNames steps) ve_t src_t
       steps' <- mapM checkFieldStep steps
-      pure $ UpdatePath src' steps' ve' (Info updated_t) loc
+      pure $ Update src' steps' ve' (Info updated_t) loc
     else do
       (steps', target_t) <- checkSteps src_t steps
       ve' <- unifies "type of update target" target_t =<< checkExp ve
       src_t' <- expTypeFully src'
-      pure $ UpdatePath src' steps' ve' (Info src_t') loc
+      pure $ Update src' steps' ve' (Info src_t') loc
   where
     isField UpdateStepField {} = True
     isField _ = False
@@ -631,13 +631,13 @@ checkExp (UpdatePath src steps ve NoInfo loc) = do
       pure ([], t)
     checkSteps t (step : rest) =
       case step of
-        UpdateStepIndex slice -> do
+        UpdateStepSlice slice -> do
           slice' <- checkSlice slice
           (arr_t, _) <- newArrayType (mkUsage' loc) "update_path_src" $ sliceDims slice'
           unify (mkUsage loc "type of update path indexing") arr_t t
           (elem_t, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully arr_t
           (rest', target_t) <- checkSteps elem_t rest
-          pure (UpdateStepIndex slice' : rest', target_t)
+          pure (UpdateStepSlice slice' : rest', target_t)
         UpdateStepField f -> do
           t' <- normTypeFully t
           f_t <- mustHaveField (mkUsage loc "record update path") f t'

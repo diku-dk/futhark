@@ -230,7 +230,7 @@ instance Format PrimValue where
 updates ::
   UncheckedExp ->
   (UncheckedExp, [(Fmt, Fmt)])
-updates (UpdatePath src steps ve _ _) = second (++ [(steps', ve')]) $ updates src
+updates (Update src steps ve _ _) = second (++ [(steps', ve')]) $ updates src
   where
     steps' = fmtUpdatePath steps
     ve' = fmt ve
@@ -242,7 +242,7 @@ fmtUpdatePath = go True
     go _ [] = nil
     go first (UpdateStepField f : rest) =
       (if first then fmt f else "." <> fmt f) <> go False rest
-    go _ (UpdateStepIndex is : rest) =
+    go _ (UpdateStepSlice is : rest) =
       brackets (sep ("," <> space) $ map fmt is) <> go False rest
 
 fmtUpdate :: UncheckedExp -> Fmt
@@ -275,7 +275,7 @@ instance Format UncheckedExp where
   fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmt k
   fmt (Negate e loc) = addComments loc $ "-" <> fmt e
   fmt (Not e loc) = addComments loc $ "!" <> fmt e
-  fmt e@UpdatePath {} = fmtUpdate e
+  fmt e@Update {} = fmtUpdate e
   fmt (Assert e1 e2 _ loc) =
     addComments loc $ "assert" <+> fmt e1 </> fmt e2
   fmt (Lambda params body rettype _ loc) =

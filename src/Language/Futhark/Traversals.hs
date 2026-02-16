@@ -166,15 +166,15 @@ instance ASTMappable (ExpBase Info VName) where
     Negate <$> mapOnExp tv x <*> pure loc
   astMap tv (Not x loc) =
     Not <$> mapOnExp tv x <*> pure loc
-  astMap tv (UpdatePath src steps v (Info t) loc) =
-    UpdatePath
+  astMap tv (Update src steps v (Info t) loc) =
+    Update
       <$> mapOnExp tv src
       <*> mapM mapStep steps
       <*> mapOnExp tv v
       <*> (Info <$> mapOnStructType tv t)
       <*> pure loc
     where
-      mapStep (UpdateStepIndex slice) = UpdateStepIndex <$> mapM (astMap tv) slice
+      mapStep (UpdateStepSlice slice) = UpdateStepSlice <$> mapM (astMap tv) slice
       mapStep (UpdateStepField f) = pure $ UpdateStepField f
   astMap tv (Project field e t loc) =
     Project field <$> mapOnExp tv e <*> traverse (mapOnStructType tv) t <*> pure loc
@@ -545,13 +545,13 @@ bareExp (AppExp appexp _) =
           Index (bareExp arr) (map bareDimIndex slice) loc
 bareExp (Attr attr e loc) =
   Attr attr (bareExp e) loc
-bareExp (UpdatePath src steps v _ loc) =
-  UpdatePath
+bareExp (Update src steps v _ loc) =
+  Update
     (bareExp src)
     (map bareStep steps)
     (bareExp v)
     NoInfo
     loc
   where
-    bareStep (UpdateStepIndex slice) = UpdateStepIndex $ map bareDimIndex slice
+    bareStep (UpdateStepSlice slice) = UpdateStepSlice $ map bareDimIndex slice
     bareStep (UpdateStepField f) = UpdateStepField f

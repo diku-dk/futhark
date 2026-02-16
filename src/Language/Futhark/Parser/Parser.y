@@ -574,8 +574,8 @@ Exp2 :: { UncheckedExp }
      | Atom '..' Exp2            {% twoDotsRange $2 }
      | '-' Exp2  %prec juxtprec  { Negate $2 (srcspan $1 $>) }
      | '!' Exp2 %prec juxtprec   { Not $2 (srcspan $1 $>) }
-     | Exp2 with UpdatePath '=' Exp2
-       { UpdatePath $1 $3 $5 NoInfo (srcspan $1 $>) }
+     | Exp2 with Update '=' Exp2
+       { Update $1 $3 $5 NoInfo (srcspan $1 $>) }
 
      | ApplyList {% applyExp $1 }
 
@@ -663,16 +663,16 @@ Exps1_ :: { [UncheckedExp] }
         | Exps1_ ','     { $1 }
         | Exp            { [$1] }
 
-UpdatePath :: { [UpdateStep NoInfo Name] }
-           : UpdatePathStep UpdatePathTail { $1 : $2 }
+Update :: { [UpdateStep NoInfo Name] }
+           : UpdateStep UpdateTail { $1 : $2 }
 
-UpdatePathTail :: { [UpdateStep NoInfo Name] }
-               : UpdatePathStep UpdatePathTail { $1 : $2 }
+UpdateTail :: { [UpdateStep NoInfo Name] }
+               : UpdateStep UpdateTail { $1 : $2 }
                |                              { [] }
 
-UpdatePathStep :: { UpdateStep NoInfo Name }
-               : '[' DimIndices ']'    { UpdateStepIndex $2 }
-               | '...[' DimIndices ']' { UpdateStepIndex $2 }
+UpdateStep :: { UpdateStep NoInfo Name }
+               : '[' DimIndices ']'    { UpdateStepSlice $2 }
+               | '...[' DimIndices ']' { UpdateStepSlice $2 }
                | FieldId               { UpdateStepField (unLoc $1) }
                | '.' FieldId           { UpdateStepField (unLoc $2) }
 

@@ -198,15 +198,15 @@ getOrdering _ (Not e loc) = do
 getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
   nameExp final $ Constr n es' ty loc
-getOrdering final (UpdatePath eb steps eu ty loc) = do
+getOrdering final (Update eb steps eu ty loc) = do
   eu' <- getOrdering False eu
   steps' <- mapM onStep steps
   eb' <- getOrdering False eb
-  nameExp final $ UpdatePath eb' steps' eu' ty loc
+  nameExp final $ Update eb' steps' eu' ty loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
-    onStep (UpdateStepIndex slice) =
-      UpdateStepIndex <$> astMap mapper slice
+    onStep (UpdateStepSlice slice) =
+      UpdateStepSlice <$> astMap mapper slice
     onStep (UpdateStepField f) =
       pure $ UpdateStepField f
 getOrdering final (Lambda params body mte ret loc) = do
@@ -335,7 +335,7 @@ getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) sl
     PatBind
       []
       (Id dest dty dloc)
-      (UpdatePath (Var (qualName src) sty sloc) [UpdateStepIndex slice'] e' (Info (unInfo sty)) loc')
+      (Update (Var (qualName src) sty sloc) [UpdateStepSlice slice'] e' (Info (unInfo sty)) loc')
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
@@ -346,7 +346,7 @@ getOrdering final (AppExp (LetWithField (Ident dest dty dloc) (Ident src sty slo
     PatBind
       []
       (Id dest dty dloc)
-      (UpdatePath (Var (qualName src) sty sloc) (map UpdateStepField fields) e' (Info (unInfo sty)) loc')
+      (Update (Var (qualName src) sty sloc) (map UpdateStepField fields) e' (Info (unInfo sty)) loc')
   getOrdering final body
 getOrdering final (AppExp (Index e slice loc) resT) = do
   e' <- getOrdering False e

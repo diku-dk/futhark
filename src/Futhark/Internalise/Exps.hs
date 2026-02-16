@@ -745,7 +745,7 @@ internaliseExp desc (E.Not e loc) = locating loc $ do
       letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) e'
     _ ->
       error "Futhark.Internalise.internaliseExp: non-int/bool type in Not"
-internaliseExp desc (E.UpdatePath src [E.UpdateStepIndex slice] ve _ loc) = locating loc $ do
+internaliseExp desc (E.Update src [E.UpdateStepSlice slice] ve _ loc) = locating loc $ do
   ves <- internaliseExp "lw_val" ve
   srcs <- internaliseExpToVars "src" src
   src_dims <- case srcs of
@@ -763,7 +763,7 @@ internaliseExp desc (E.UpdatePath src [E.UpdateStepIndex slice] ve _ loc) = loca
         letInPlace desc sname full_slice $ BasicOp $ SubExp ve''
 
   certifying cs $ map I.Var <$> zipWithM comb srcs ves
-internaliseExp desc (E.UpdatePath src [E.UpdateStepField field] ve _ loc) = locating loc $ do
+internaliseExp desc (E.Update src [E.UpdateStepField field] ve _ loc) = locating loc $ do
   src' <- internaliseExp desc src
   ve' <- internaliseExp desc ve
   replace (E.typeOf src) field ve' src'
@@ -778,7 +778,7 @@ internaliseExp desc (E.UpdatePath src [E.UpdateStepField field] ve _ loc) = loca
               (bef, _to_update, aft) = splitAt3 i k src_vals
            in pure $ bef ++ ve_vals ++ aft
     replace _ _ ve_vals _ = pure ve_vals
-internaliseExp desc (E.UpdatePath src steps ve _ loc) = locating loc $ do
+internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
   src_tmp <- newVName "update_path_src"
   let src_t = E.typeOf src
       src_pat = E.Id src_tmp (Info src_t) loc
@@ -808,20 +808,20 @@ internaliseExp desc (E.UpdatePath src steps ve _ loc) = locating loc $ do
                 case M.lookup f fs of
                   Just t -> t
                   Nothing ->
-                    error $ "internaliseExp UpdatePath: missing field " ++ prettyString f
+                    error $ "internaliseExp Updat: missing field " ++ prettyString f
               t ->
-                error $ "internaliseExp UpdatePath: field step on non-record type " ++ prettyString t
+                error $ "internaliseExp Update: field step on non-record type " ++ prettyString t
           inner_base = E.Project f base (Info field_t) loc
           inner_v = lowerPath inner_base field_t rest newv
-       in E.UpdatePath base [E.UpdateStepField f] inner_v (Info base_t) loc
-    lowerPath base base_t (E.UpdateStepIndex idxs : rest) newv =
+       in E.Update base [E.UpdateStepField f] inner_v (Info base_t) loc
+    lowerPath base base_t (E.UpdateStepSlice idxs : rest) newv =
       let inner_t = indexType base_t idxs
           inner_base =
             E.AppExp
               (E.Index base idxs loc)
               (Info $ E.AppRes inner_t [])
           inner_v = lowerPath inner_base inner_t rest newv
-       in E.UpdatePath base [E.UpdateStepIndex idxs] inner_v (Info base_t) loc
+       in E.Update base [E.UpdateStepSlice idxs] inner_v (Info base_t) loc
 
     indexType (E.Array u (E.Shape dims) et) idxs =
       case dims' of

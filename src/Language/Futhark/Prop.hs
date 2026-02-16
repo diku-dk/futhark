@@ -494,7 +494,7 @@ typeOf (Ascript e _ _) = typeOf e
 typeOf (Coerce _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (Not e _) = typeOf e
-typeOf (UpdatePath _ _ _ (Info t) _) = t
+typeOf (Update _ _ _ (Info t) _) = t
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (Lambda params _ _ (Info t) _) = funType params t
 typeOf (OpSection _ (Info t) _) = t
@@ -1455,14 +1455,14 @@ similarExps (Constr n1 es1 _ _) (Constr n2 es2 _ _)
   | length es1 == length es2,
     n1 == n2 =
       Just $ zip es1 es2
-similarExps (UpdatePath e1 steps1 e'1 _ _) (UpdatePath e2 steps2 e'2 _ _)
+similarExps (Update e1 steps1 e'1 _ _) (Update e2 steps2 e'2 _ _)
   | length steps1 == length steps2 = do
       step_pairs <- concat <$> zipWithM similarStep steps1 steps2
       pure $ [(e1, e2), (e'1, e'2)] ++ step_pairs
   where
     similarStep (UpdateStepField f1) (UpdateStepField f2)
       | f1 == f2 = Just []
-    similarStep (UpdateStepIndex s1) (UpdateStepIndex s2) =
+    similarStep (UpdateStepSlice s1) (UpdateStepSlice s2) =
       similarSlices s1 s2
     similarStep _ _ = Nothing
 similarExps (OpSection op1 _ _) (OpSection op2 _ _)

@@ -76,17 +76,17 @@ addAliases = flip second
 aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
 
-updatePathAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
-updatePathAliases _ [] ve_als =
+updateAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
+updateAliases _ [] ve_als =
   ve_als
-updatePathAliases src_als (UpdateStepField f : rest) ve_als =
+updateAliases src_als (UpdateStepField f : rest) ve_als =
   case src_als of
     Scalar (Record fs)
       | Just sub <- M.lookup f fs ->
-          Scalar $ Record $ M.insert f (updatePathAliases sub rest ve_als) fs
+          Scalar $ Record $ M.insert f (updateAliases sub rest ve_als) fs
     _ ->
       src_als
-updatePathAliases src_als (UpdateStepIndex _ : _) _ = second (const mempty) src_als
+updateAliases src_als (UpdateStepSlice _ : _) _ = second (const mempty) src_als
 
 data Entry a
   = Consumable {entryAliases :: a}
@@ -883,23 +883,26 @@ checkExp (AppExp (LetWithField dst src fields ve body loc) appres) = do
   (body', body_als) <- bindingIdent Consume dst $ checkExp body
   pure (AppExp (LetWithField dst src fields ve' body' loc) appres, body_als)
 --
-checkExp (UpdatePath src steps ve t loc) = do
+checkExp (Update src steps ve t loc) = do
   steps' <- mapM checkStep steps
   (ve', ve_als) <- checkExp ve
   (src', src_als) <- checkExp src
   let hasIndex = any isIndex steps
+  res_als <-
+    if hasIndex
+      then do
+        overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
+        consumeAliases (locOf loc) $ aliases src_als
+        pure $ second (const mempty) src_als
+      else pure $ updateAliases src_als steps ve_als
   when hasIndex $ do
     overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
     consumeAliases (locOf loc) $ aliases src_als
-  let res_als =
-        if hasIndex
-          then second (const mempty) src_als
-          else updatePathAliases src_als steps ve_als
-  pure (UpdatePath src' steps' ve' t loc, res_als)
+  pure (Update src' steps' ve' t loc, res_als)
   where
-    isIndex UpdateStepIndex {} = True
+    isIndex UpdateStepSlice {} = True
     isIndex _ = False
-    checkStep (UpdateStepIndex slice) = UpdateStepIndex <$> checkSubExps slice
+    checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
     checkStep (UpdateStepField f) = pure $ UpdateStepField f
 
 -- Cases that simply propagate aliases directly.

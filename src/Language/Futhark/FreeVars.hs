@@ -110,7 +110,7 @@ freeInExp expr = case expr of
       <> freeInExp e1
       <> (freeInExp e2 `freeWithout` S.singleton (identName id1))
   AppExp (Index e idxs _) _ -> freeInExp e <> foldMap freeInDimIndex idxs
-  UpdatePath e1 steps e2 _ _ ->
+  Update e1 steps e2 _ _ ->
     freeInExp e1 <> foldMap freeInUpdateStep steps <> freeInExp e2
   Assert e1 e2 _ _ -> freeInExp e1 <> freeInExp e2
   Constr _ es _ _ -> foldMap freeInExp es
@@ -122,7 +122,7 @@ freeInExp expr = case expr of
           `freeWithoutL` patNames p
 
 freeInUpdateStep :: UpdateStep Info VName -> FV
-freeInUpdateStep (UpdateStepIndex idxs) = foldMap freeInDimIndex idxs
+freeInUpdateStep (UpdateStepSlice idxs) = foldMap freeInDimIndex idxs
 freeInUpdateStep (UpdateStepField _) = mempty
 
 freeInDimIndex :: DimIndexBase Info VName -> FV

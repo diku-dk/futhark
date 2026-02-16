@@ -1066,25 +1066,25 @@ eval env (Negate e loc) = do
   apply loc env intrinsicsNeg ev
 eval env (Not e loc) =
   apply loc env intrinsicsNot =<< eval env e
-eval env (UpdatePath src steps v _ loc) = do
+eval env (Update src steps v _ loc) = do
   src' <- eval env src
   v' <- eval env v
-  res <- updatePath steps src' v'
+  res <- update steps src' v'
   maybe oob pure res
   where
-    updatePath [] _ newv = pure $ Just newv
-    updatePath (UpdateStepField f : rest) (ValueRecord fs) newv
+    update [] _ newv = pure $ Just newv
+    update (UpdateStepField f : rest) (ValueRecord fs) newv
       | Just old <- M.lookup f fs = do
-          newf <- updatePath rest old newv
+          newf <- update rest old newv
           pure $ fmap (\v' -> ValueRecord $ M.insert f v' fs) newf
-    updatePath (UpdateStepField _ : _) _ _ =
-      error "eval UpdatePath: invalid field update."
-    updatePath (UpdateStepIndex is : rest) arr newv = do
+    update (UpdateStepField _ : _) _ _ =
+      error "eval Update: invalid field update."
+    update (UpdateStepSlice is : rest) arr newv = do
       is' <- mapM (evalDimIndex env) is
       case indexArray is' arr of
         Nothing -> pure Nothing
         Just old -> do
-          newsub <- updatePath rest old newv
+          newsub <- update rest old newv
           case newsub of
             Nothing -> pure Nothing
             Just vsub -> pure $ writeArray is' arr vsub
