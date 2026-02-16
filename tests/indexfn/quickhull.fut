@@ -305,38 +305,18 @@ def extract_empty_segments [num_segs] [num_points]
   let segs_false_bx = slice segs_parted_bx n num_segs
   let segs_false_by = slice segs_parted_by n num_segs
   
-  -- let (segs_true, segs_false) = partition (.1) (zip segs segs_inhabited)
-  -- ^ we know that the length of `segs_true` is equal to the split point,
-  --   which is is `SUM(segs_inhabited[0:num_segs-1])`
-  
   let segs_indicator = map (\c -> if c then 1 else 0) segs_inhabited
   let sum_segs = scan (+) 0 segs_indicator
   let new_segs_ix = map2 (\i n -> n - i) segs_indicator sum_segs
-  -- ^ IxFn for `new_segs_ix` is: 
-  --   `forall i < num_segs . true => Sum(segs_inhabited[0:i-1])`
   
   let hull_x' = hull_x ++ segs_false_bx
   let hull_y' = hull_y ++ segs_false_by
-  -- let hull'   = zip hull_x' (sized_like hull_x' hull_y')
 
-  -- let segs' = zip4 segs_true_bx segs_true_by segs_true_ex segs_true_ey
   let sgm_inds' = 
       map (\seg_ix -> if segs_inhabited[seg_ix]
                       then new_segs_ix[seg_ix]
                       else 0
           ) sgm_inds
-  -- ^ Bounds check for `new_segs_ix[seg_ix]` should succeed, since
-  --     precondition dictates `0 <= seg_ix < num_segs`
-  --   Array `sgm_inds'` has index function:
-  --       `forall i < num_segs . true => Sum(segs_inhabited[0 : sgm_inds[i]]) - 1`
-  --   The postcondition reduces to proving that
-  --       `Sum(segs_inhabited[0 : sgm_inds[i]-1]) < SUM(segs_inhabited[0 : num_segs-1])`
-  --   After subtraction it becomes:
-  --       `Sum(segs_inhabited[sgm_inds[i] : num_segs-1]) > 0`
-  --   After expanding with known indices it becomes:
-  --       `1 + Sum(segs_inhabited[sgm_inds[i] : num_segs-1]) > 0`
-  --     which NOW (after the modification) works!
-  --
   in (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds')
 
 def semihull_loop [num_segs] [num_points]
@@ -384,22 +364,27 @@ def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 
     let hull' = zip hullx' (sized_like hullx' hully')
     in hull'
 
-def pmin p q = if point_less p q then p else q
-def pmax p q = if point_less p q then q else p
+def pmin p0 p1 q0 q1: {(f64,f64) | \_ -> true} =
+  -- Applying the identity function makes the index function uninterpreted.
+  (\x -> x) (if point_less (p0,p1) (q0,q1) then (p0,p1) else (q0,q1))
+def pmax p0 p1 q0 q1: {(f64,f64) | \_ -> true} =
+  (\x -> x) (if point_less (p0,p1) (q0,q1) then (q0,q1) else (p0,p1))
 
-def get_leftmost_rightmost (n: {i64 | \n -> Range n (1,inf)}) (ps0: [n]f64) (ps1: [n]f64): {((f64, f64), (f64, f64)) | \_ -> true} =
+def get_leftmost (n: {i64 | \n -> Range n (1,inf)}) (ps0: [n]f64) (ps1: [n]f64): {(f64, f64) | \_ -> true} =
   let ps = zip ps0 ps1
-  let ne = ps[0]
-  let leftmosts = scan pmin ne ps
-  let rightmosts = scan pmax ne ps
-  let (leftmosts1, leftmosts2) = unzip leftmosts
-  let (rightmosts1, rightmosts2) = unzip rightmosts
-  in ((leftmosts1[n-1], leftmosts2[n-1]), (rightmosts1[n-1], rightmosts2[n-1]))
+  let leftmosts = scan (\(p0,p1) (q0,q1) -> pmin p0 p1 q0 q1) (ps0[0], ps1[0]) ps
+  in leftmosts[n-1]
+
+def get_rightmost (n: {i64 | \n -> Range n (1,inf)}) (ps0: [n]f64) (ps1: [n]f64): {(f64, f64) | \_ -> true} =
+  let ps = zip ps0 ps1
+  let rightmosts = scan (\(p0,p1) (q0,q1) -> pmax p0 p1 q0 q1) (ps0[0], ps1[0]) ps
+  in rightmosts[n-1]
 
 def compute (n: {i64 | \n -> Range n (3,inf)}) (ps0 : [n]f64)
     (ps1 : [n]f64)
     : {([](f64,f64), [](f64,f64)) | \_ -> true} =
-  let ((leftmost1, leftmost2), (rightmost1, rightmost2)) = get_leftmost_rightmost n ps0 ps1
+  let (leftmost1, leftmost2) = get_leftmost n ps0 ps1
+  let (rightmost1, rightmost2) = get_rightmost n ps0 ps1
   let left = (leftmost1,leftmost2)
   let right = (rightmost1,rightmost2)
   let conds = map2 (\p1 p2 ->
