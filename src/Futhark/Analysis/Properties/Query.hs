@@ -418,6 +418,15 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                   j <- newNameFromString "j"
                   let y_at ident = sym2SoP $ Apply (Var y) [sym2SoP (Var ident)]
                   newProver (InjGe i j d gs rcd (y_at i :== y_at j))
+                IndexFn [[Forall i d, Forall j (Iota m)]] _
+                  | Just e <- justSingleCase f_y -> do
+                      x <- newNameFromString "x"
+                      s :: Maybe (Substitution Symbol) <- unify (sym2SoP (Hole x) .*. m .+. sym2SoP (Var j)) e
+                      case M.lookup x . mapping =<< s of
+                        Just e' | j `S.notMember` fv e' -> do
+                          insertIndexFn x [IndexFn [[Forall i d]] (singleCase e')]
+                          prove (Injective x Nothing)
+                        _ -> undefined
                 _ -> pure Unknown
           strat1 `orM` strat2 `orM` strat3
     matchProof (BijectiveRCD x rcd img) =

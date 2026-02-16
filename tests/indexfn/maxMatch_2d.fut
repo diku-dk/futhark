@@ -97,25 +97,16 @@ def getSmallestPairs_core [arraySize]
 --      0,  1,  2,  3,  4,  5
 --      |   |   |   |   |   |
 --      0,1 2,3 4,5 6,7 8,9 10,11
-def expandIds [n] (edgeIds: {[n]i64 | \x -> Monotonic (<) x}): {[n*2]i64 | \y -> Monotonic (<) y} =
+def expandIds [n] (edgeIds: {[n]i64 | \x -> Injective x}): {[n*2]i64 | \y -> Injective y} =
     let ys = map (\i -> map (\j -> 2*i + j) (iota 2)) edgeIds
     in flatten ys
--- WEAKER PRE/POSTCONDITION:
--- def expandIds [n] (edgeIds: {[n]i64 | \x -> Injective x}): {[n][2]i64 | \y -> Injective y} =
---     map (\i -> map (\j -> 2*i + j) (iota 2)) edgeIds
--- ^ could be shown as
---   for i < n . for j < m .
---     | True => j + m * edgeIds(i)
--- creates a gap between each distinct m*edgeIds(i) of size m, which
--- is exactly what j iterates over.
-
 
 -- Return the edge-id pairs with the smallest edge id
 def getSmallestPairs [arraySize]
     (nVerts: i64)
     (nEdges: i64)
     (edges: {[arraySize][2]i64 | \x -> Range x (0, nVerts)})
-    (edgeIds: {[arraySize]i64 | \x -> Monotonic (<) x})
+    (edgeIds: {[arraySize]i64 | \x -> Injective x})
     : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
          Injective new_edges && Injective new_edgeIds
       }
@@ -192,7 +183,7 @@ def resetsmallestEdgeId [n] (_smallestEdgeId: [n]i64): {*[n]i64 | \_ -> true} =
 
 def loopBody [nEdges] [nVerts]
     (edges: {[][2]i64 | \x -> Range x (0,nVerts)})
-    (edgeIds: {[nEdges]i64 | \x -> Monotonic (<) x})
+    (edgeIds: {[nEdges]i64 | \x -> Injective x})
     (markedVerts: *[nVerts]bool)
     (smallestEdgeId: *[nVerts]i64)
     (includedEdges: *[nEdges]bool)
