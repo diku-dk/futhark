@@ -1,4 +1,4 @@
-module Futhark.Eval (InterpreterConfig (..), runExpr, interpreterConfig, newFutharkiState, EvalIO (..)) where
+module Futhark.Eval (InterpreterConfig (..), runExpr, interpreterConfig, newFutharkiState, EvalIO (..), runEvalRecord, EvalRecord (..), AbortEvaluation (..), TraceEvaluation (..)) where
 
 import Control.Exception (IOException, catch)
 import Control.Monad (foldM, when, (<=<))
@@ -6,8 +6,11 @@ import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Free.Church (F, runF)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (MonadTrans, lift)
+import Control.Monad.Trans.Writer (WriterT, runWriterT, tell)
 import Data.Map qualified as M
 import Data.Maybe (maybeToList)
+import Data.Sequence (Seq)
+import Data.Sequence qualified as Seq
 import Data.Text qualified as T
 import Futhark.Compiler (prettyWarnings, readProgramFilesExceptKnown)
 import Futhark.Compiler.Program (VFS, fileProg, fileScope)
@@ -30,29 +33,43 @@ import System.IO (stderr)
 class AbortEvaluation m where
   abort :: Doc AnsiStyle -> m b
 
-class TraceEvaluation m where
-  trace :: Doc AnsiStyle -> m ()
-
-newtype EvalIO a = EvalIO {runEvalIO :: IO a}
-  deriving (Functor, Applicative, Monad, MonadIO)
-
-instance (MonadTrans m, AbortEvaluation m', Monad m') => AbortEvaluation (m m') where
-  abort :: Doc AnsiStyle -> m m' b
-  abort = lift . abort
-
 instance AbortEvaluation EvalIO where
   abort :: Doc AnsiStyle -> EvalIO b
   abort reason = EvalIO $ do
     hPutDocLn stderr reason
     exitWith $ ExitFailure 1
 
-instance (MonadTrans m, TraceEvaluation m', Monad m') => TraceEvaluation (m m') where
-  trace :: Doc AnsiStyle -> m m' ()
-  trace = lift . trace
+instance (Monad m) => AbortEvaluation (EvalRecord m) where
+  abort :: Doc AnsiStyle -> EvalRecord m b
+  abort = EvalRecord . throwError
+
+class TraceEvaluation m where
+  trace :: Doc AnsiStyle -> m ()
 
 instance TraceEvaluation EvalIO where
   trace :: Doc AnsiStyle -> EvalIO ()
   trace = EvalIO . putDocLn
+
+instance (Monad m) => TraceEvaluation (EvalRecord m) where
+  trace :: Doc AnsiStyle -> EvalRecord m ()
+  trace = EvalRecord . lift . tell . Seq.singleton
+
+instance (Monad m, TraceEvaluation m) => TraceEvaluation (ExceptT e m) where
+  trace :: Doc AnsiStyle -> ExceptT e m ()
+  trace = lift . trace
+
+newtype EvalIO a = EvalIO {runEvalIO :: IO a}
+  deriving (Functor, Applicative, Monad, MonadIO)
+
+newtype EvalRecord m a = EvalRecord (ExceptT (Doc AnsiStyle) (WriterT (Seq (Doc AnsiStyle)) m) a)
+  deriving (Functor, Applicative, Monad, MonadIO)
+
+runEvalRecord :: EvalRecord m a -> m (Either (Doc AnsiStyle) a, Seq (Doc AnsiStyle))
+runEvalRecord (EvalRecord computation) = runWriterT $ runExceptT computation
+
+instance MonadTrans EvalRecord where
+  lift :: (Monad m) => m a -> EvalRecord m a
+  lift = EvalRecord . lift . lift
 
 newtype InterpreterState = InterpreterState (VNameSource, T.Env, I.Ctx)
 
@@ -60,10 +77,10 @@ newtype InterpreterState = InterpreterState (VNameSource, T.Env, I.Ctx)
 runExpr ::
   (Monad m, AbortEvaluation m, TraceEvaluation m) =>
   InterpreterState ->
-  String ->
+  T.Text ->
   m (Doc AnsiStyle)
 runExpr (InterpreterState (src, env, ctx)) str = do
-  uexp <- case parseExp "" (T.pack str) of
+  uexp <- case parseExp "" str of
     Left (SyntaxError _ serr) -> abort $ pretty serr
     Right e -> pure e
   fexp <- case T.checkExp [] src env uexp of

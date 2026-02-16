@@ -1,6 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE LambdaCase #-}
+{-# OPTIONS_GHC -fprint-potential-instances #-}
 
 module Futhark.LSP.Lenses (evalLensesFor, resolveCodeLens, execute) where
 
@@ -13,14 +14,20 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
 import Data.Function ((&))
 import Data.Maybe (mapMaybe)
+import Data.Sequence (Seq)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
+import Futhark.Eval (AbortEvaluation (abort), InterpreterConfig (InterpreterConfig), newFutharkiState, runEvalRecord, runExpr)
 import Futhark.LSP.CommandType qualified as CommandType
+import Futhark.LSP.Tool (transformVFS)
 import Futhark.Util (showText)
-import Language.LSP.Protocol.Types (CodeLens (..), Command (..), ErrorCodes (ErrorCodes_InvalidParams), LSPErrorCodes, Position (..), Range (..), UInt, Uri, toNormalizedUri, type (|?) (..))
-import Language.LSP.Server (LspT, getVirtualFile)
+import Language.LSP.Protocol.Types (CodeLens (..), Command (..), ErrorCodes (ErrorCodes_InvalidParams), LSPErrorCodes, Position (..), Range (..), UInt, Uri, fromNormalizedFilePath, toNormalizedUri, uriToNormalizedFilePath, type (|?) (..))
+import Language.LSP.Server (LspT, getVirtualFile, getVirtualFiles)
 import Language.LSP.VFS (file_text)
+import Prettyprinter (Doc)
+import Prettyprinter.Render.Terminal (AnsiStyle)
+import System.Mem (enableAllocationLimit, setAllocationCounter)
 
 -- | All the possible lenses
 --
@@ -172,5 +179,31 @@ executeEvalLens (EvalLensData docUri line) = do
           InR ErrorCodes_InvalidParams
         )
     Just expression -> pure expression
+
+  currentVFS <- lift $ transformVFS <$> getVirtualFiles
+  let setupLimits = do
+        -- 100 million bytes should suffice but should also be available
+        setAllocationCounter 100_000_000
+        enableAllocationLimit
+        _
+
+      evaluationAction :: IO (Either (Doc AnsiStyle) a, Seq (Doc AnsiStyle))
+      evaluationAction = runEvalRecord $ do
+        -- do not print warnings, no file
+        let interpreterConfig = InterpreterConfig False Nothing
+        let filePath =
+              toNormalizedUri docUri
+                & uriToNormalizedFilePath
+                & fmap fromNormalizedFilePath
+
+        -- load the file the expression is located in
+        interpreterState <-
+          newFutharkiState interpreterConfig filePath currentVFS
+            >>= either abort pure
+
+        setupLimits
+
+        result <- runExpr interpreterState expressionText
+        undefined
 
   undefined

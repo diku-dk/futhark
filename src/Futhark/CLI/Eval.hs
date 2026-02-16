@@ -5,6 +5,7 @@ import Control.Monad
   ( forM_,
   )
 import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.Eval
   ( EvalIO (runEvalIO),
     InterpreterConfig (..),
@@ -41,7 +42,7 @@ runExprs exprs cfg = do
       hPutDocLn stderr reason
       exitWith $ ExitFailure 2
     Right s -> pure s
-  forM_ exprs $ \expr -> putDocLn =<< runEvalIO (runExpr interpreter_state expr)
+  forM_ exprs $ \expr -> putDocLn =<< runEvalIO (runExpr interpreter_state $ T.pack expr)
 
 options :: [FunOptDescr InterpreterConfig]
 options =
