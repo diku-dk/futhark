@@ -263,11 +263,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       SOAC.Screma _ inp_p form_p,
       _
       ) -> do
-        m <- fuseScrema w inp_c form_c out_c inp_p form_p out_p
-        case m of
-          Just (inp, form, out) ->
-            success out $ SOAC.Screma w inp form
-          Nothing -> fail "Can not fuse"
+        (inp, form, out) <- fuseScrema w inp_c form_c out_c inp_p form_p out_p
+        success out $ SOAC.Screma w inp form
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
