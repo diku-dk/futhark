@@ -209,12 +209,12 @@ changeScope :: S.Set E.VName -> IndexFn -> IndexFnM IndexFn
 changeScope newScope f
   | fv f `S.isSubsetOf` newScope = pure f
   | fv (shape f) `S.isSubsetOf` newScope = do
-      g <- mkUinterpreted (S.toList newScope) f
+      g <- mkUninterpreted (S.toList newScope) f
       pure $ g {shape = shape f}
-  | otherwise = mkUinterpreted (S.toList newScope) f
+  | otherwise = mkUninterpreted (S.toList newScope) f
 
-mkUinterpreted :: [E.VName] -> IndexFn -> IndexFnM IndexFn
-mkUinterpreted params f = do
+mkUninterpreted :: [E.VName] -> IndexFn -> IndexFnM IndexFn
+mkUninterpreted params f = do
   new_shape <- forM (shape f) . mapM $ \(Forall i _) ->
     Forall i . Iota . sym2SoP . Var <$> newNameFromString "<d>"
   x <- newNameFromString uninterpretedName
@@ -826,7 +826,7 @@ forward (E.AppExp (E.Loop _sz _init_pat _init form e_body _loc) _) = do
         forM_ conds . mapM_ $ assume . sop2Symbol
       _ -> error "not implemented"
     forward e_body
-  mapM (mkUinterpreted []) fs
+  mapM (mkUninterpreted []) fs
 forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
   forward e
@@ -1337,8 +1337,8 @@ scatterSc2 _ _ _ = fail ""
 
 -- Scatter fallback: result is uninterpreted, but safe.
 scatterSc3 :: IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc3 (IndexFn [[Forall i dom_dest]] _) = do
-  uninterpreted <- newNameFromString "safe_scatter"
+scatterSc3 f@(IndexFn [[Forall i dom_dest]] _) = do
+  uninterpreted <- newNameFromString uninterpretedName
   lift . pure $
     IndexFn
       { shape = [[Forall i dom_dest]],
