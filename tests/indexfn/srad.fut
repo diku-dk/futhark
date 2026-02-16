@@ -1,35 +1,55 @@
-def indexN
+def indexN [cols]
     (rows: {i64 |\v -> Range v (1,inf)})
-    (i: {i64 | \v -> Range v (0, rows+1)})
-    : {i64 | \v -> Range v (0, rows)} =
-  if i == 0 then i else i - 1
-
-def indexS
-    (rows: {i64 |\v -> Range v (1,inf)})
+    (image: [rows][cols]f32)
     (i: {i64 | \v -> Range v (0, rows)})
-    : {i64 | \v -> Range v (0, rows)} =
-  if i == rows - 1 then i else i + 1
-
-def indexW
-    (cols: {i64 |\v -> Range v (1,inf)})
     (j: {i64 | \v -> Range v (0, cols)})
-    : {i64 | \v -> Range v (0, cols)} =
-  if j == 0 then j else j - 1
+    (jc: f32): {f32 | \_ -> true } =
+    -- The identitity function is a little trick to make the index function
+    -- for this uninterpreted to speed up the analysis.
+    let idx = image[if i == 0 then i else i - 1, j] - jc
+    in (\x -> x) idx
 
-def indexE
-    (cols: {i64 |\v -> Range v (1,inf)})
+def indexS [cols]
+    (rows: {i64 |\v -> Range v (1,inf)})
+    (image: [rows][cols]f32)
+    (i: {i64 | \v -> Range v (0, rows)})
     (j: {i64 | \v -> Range v (0, cols)})
-    : {i64 | \v -> Range v (0, cols)} =
-  if j == cols - 1 then j else j + 1
+    (jc: f32): {f32 | \_ -> true } =
+    let idx = image[if i == rows - 1 then i else i + 1, j] - jc
+    in (\x -> x) idx
+
+def indexW [rows]
+    (cols: {i64 |\v -> Range v (1,inf)})
+    (image: [rows][cols]f32)
+    (i: {i64 | \v -> Range v (0, rows)})
+    (j: {i64 | \v -> Range v (0, cols)})
+    (jc: f32): {f32 | \_ -> true } =
+    let dW_k = image[i, if j == 0 then j else j - 1] - jc
+    in (\x -> x) dW_k
+
+def indexE [rows]
+    (cols: {i64 |\v -> Range v (1,inf)})
+    (image: [rows][cols]f32)
+    (i: {i64 | \v -> Range v (0, rows)})
+    (j: {i64 | \v -> Range v (0, cols)})
+    (jc: f32): {f32 | \_ -> true } =
+    let dE_k = image[i, if j == cols - 1 then j else j + 1] - jc
+    in (\x -> x) dE_k
+
+def f32_sum [n] (xs: [n]f32): {f32 | \_ -> true} =
+  -- The identitity function is a little trick to make the index function
+  -- for this uninterpreted because the prototype doesn't support
+  -- sums over flattened arrays yet.
+  (\x -> x) (if n > 0 then (scan (+) 0 xs)[n-1] else 0)
 
 def calc_stats [rows] [cols]
     (image: [rows][cols]f32)
     (neROI: i64)
     : {f32 | \_ -> true} =
   let flat_image = flatten image
-  let sum = f32.sum flat_image
+  let sum = f32_sum flat_image
   let flat_sq = map (\x -> x*x) flat_image
-  let sum2 = f32.sum flat_sq
+  let sum2 = f32_sum flat_sq
   -- get mean (average) value of element in ROI
   let neROI_f32 = f32.i64 neROI
   let meanROI = sum / neROI_f32
@@ -89,25 +109,8 @@ def calc_d
     (dE_k: f32)
     : {f32 | \_ -> true} =
   -- The identitity function is a little trick to make the index function
-  -- for this uninterpreted.
+  -- for this uninterpreted. This speeds up the analysis.
   (\x -> x) (cN * dN_k + cS * dS_k + cW * dW_k + cE * dE_k)
-
-def indexers
-    (rows: {i64 |\v -> Range v (1,inf)})
-    (cols: {i64 |\v -> Range v (1,inf)})
-    (image: [rows][cols]f32)
-    (i: {i64 | \v -> Range v (0, rows)})
-    (j: {i64 | \v -> Range v (0, cols)})
-    (jc: f32): {(f32, f32, f32, f32) | \_ -> true } =
-    let idx_n = indexN rows i
-    let idx_s = indexS rows i
-    let idx_w = indexW cols j
-    let idx_e = indexE cols j
-    let dN_k = image[idx_n, j] - jc
-    let dS_k = image[idx_s, j] - jc
-    let dW_k = image[i, idx_w] - jc
-    let dE_k = image[i, idx_e] - jc
-    in (\x -> x) (dN_k, dS_k, dW_k, dE_k)
 
 def srad_iter [rows] [cols]
     (image: [rows][cols]f32)
@@ -120,7 +123,10 @@ def srad_iter [rows] [cols]
     unzip5 (map2 (\i row ->
                     unzip5 (map2 (\j jc ->
                                     -- ANF calls to indexers
-                                    let (dN_k, dS_k, dW_k, dE_k) = indexers rows cols image i j jc
+                                    let dN_k = indexN rows image i j jc
+                                    let dS_k = indexS rows image i j jc
+                                    let dW_k = indexW cols image i j jc
+                                    let dE_k = indexE cols image i j jc
                                     let c_k = calc_c dN_k dS_k dW_k dE_k jc q0sqr
                                     in (dN_k, dS_k, dW_k, dE_k, c_k))
                                   (iota cols)
@@ -130,8 +136,8 @@ def srad_iter [rows] [cols]
   let image =
     map4 (\i image_row c_row (dN_row, dS_row, dW_row, dE_row) ->
             map4 (\j pixel c_k (dN_k, dS_k, dW_k, dE_k) ->
-                    let idx_s = indexS rows i
-                    let idx_e = indexE cols j
+                    let idx_s = if i == rows - 1 then i else i + 1
+                    let idx_e = if j == cols - 1 then j else j + 1
                     let cS = c[idx_s, j]
                     let cE = c[i, idx_e]
                     let cN = c_k
