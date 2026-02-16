@@ -738,7 +738,8 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
           Unknown -> do
             printM 10 "scatter: unable to show safety"
             pure Nothing
-          Yes ->
+          Yes -> do
+            printM 1 . locMsg (E.locOf expr) $ prettyStr expr <> greenString " SAFE"
             runMaybeT $
               scatterSc1 dest (e_inds, inds) vals
                 <|> scatterSc2 dest inds vals
@@ -1337,7 +1338,7 @@ scatterSc2 _ _ _ = fail ""
 
 -- Scatter fallback: result is uninterpreted, but safe.
 scatterSc3 :: IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc3 f@(IndexFn [[Forall i dom_dest]] _) = do
+scatterSc3 (IndexFn [[Forall i dom_dest]] _) = do
   uninterpreted <- newNameFromString uninterpretedName
   lift . pure $
     IndexFn
@@ -1609,10 +1610,6 @@ type Check = CheckContext -> IndexFnM Answer
 
 type Effect = CheckContext -> IndexFnM ()
 
--- Extract the Check to verify a formal argument's precondition, if it exists.
-getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [Check]
-getPrecondition = fmap (fmap fst) . getRefinement
-
 -- Extract the Check to verify, and the Effect of, a formal argument's refinement, if it exists.
 getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [(Check, Effect)]
 getRefinement (E.PatParens pat _) = getRefinement pat
@@ -1690,7 +1687,7 @@ checkBounds _ (IndexFn [] _) _ =
 checkBounds e f_xs idxs =
   whenBoundsChecking $ do
     forM_ (zip (shape f_xs) idxs) checkIndexInDomain
-    printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " OK"
+    printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " SAFE"
   where
     checkIndexInDomain (_, Nothing) = pure ()
     checkIndexInDomain ([Forall _ d], Just f_idx) =

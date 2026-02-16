@@ -78,7 +78,7 @@ emphString :: String -> String
 emphString s = "\ESC[95m\n|\n| " <> s <> "\n|\ESC[0m\n"
 
 greenString :: String -> String
-greenString s = "\ESC[92m" <> s <> "\ESC[0m"
+greenString s = "\ESC[32m" <> s <> "\ESC[0m"
 
 blueString :: (Semigroup a, IsString a) => a -> a
 blueString s = "\ESC[96m" <> s <> "\ESC[0m"
