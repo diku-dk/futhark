@@ -64,36 +64,32 @@ main = mainWithOptions interpreterConfig options "options... <exprs...>" run
     run [] _ = Nothing
     run exprs config = Just $ runExprs exprs config
 
-class MonadAbort m where
+class AbortEvaluation m where
   abort :: Doc AnsiStyle -> m b
 
-class MonadTrace m where
+class TraceEvaluation m where
   trace :: Doc AnsiStyle -> m ()
 
 newtype EvalIO a = EvalIO {runEvalIO :: IO a}
-  deriving (Functor, Applicative, Monad)
+  deriving (Functor, Applicative, Monad, MonadIO)
 
-instance (MonadTrans m, MonadAbort m', Monad m') => MonadAbort (m m') where
+instance (MonadTrans m, AbortEvaluation m', Monad m') => AbortEvaluation (m m') where
   abort :: Doc AnsiStyle -> m m' b
   abort = lift . abort
 
-instance MonadAbort EvalIO where
+instance AbortEvaluation EvalIO where
   abort :: Doc AnsiStyle -> EvalIO b
   abort reason = EvalIO $ do
     hPutDocLn stderr reason
     exitWith $ ExitFailure 1
 
-instance (MonadTrans m, MonadTrace m', Monad m') => MonadTrace (m m') where
+instance (MonadTrans m, TraceEvaluation m', Monad m') => TraceEvaluation (m m') where
   trace :: Doc AnsiStyle -> m m' ()
   trace = lift . trace
 
-instance MonadTrace EvalIO where
+instance TraceEvaluation EvalIO where
   trace :: Doc AnsiStyle -> EvalIO ()
   trace = EvalIO . putDocLn
-
-instance MonadIO EvalIO where
-  liftIO :: IO a -> EvalIO a
-  liftIO = EvalIO
 
 runExprs :: [String] -> InterpreterConfig -> IO ()
 runExprs exprs cfg = do
@@ -108,7 +104,7 @@ runExprs exprs cfg = do
 
 -- Use parseExp, checkExp, then interpretExp.
 runExpr ::
-  (Monad m, MonadAbort m, MonadTrace m) =>
+  (Monad m, AbortEvaluation m, TraceEvaluation m) =>
   VNameSource ->
   T.Env ->
   I.Ctx ->
@@ -199,7 +195,7 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
-runInterpreterNoBreak :: (MonadTrace m, Monad m) => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak :: (TraceEvaluation m, Monad m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
