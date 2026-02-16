@@ -129,7 +129,6 @@ def expand [V] [E] [Q]
     (edges: {[E]i64 | \x -> Range x (0,V)})
     (queue: {[Q]i64 | \x -> Range x (0,V)})
     : {(*[]i64, *[]i64) | \_ -> true} =
-  -- 1. Calculate vertex degrees
   let shape = make_shape offsets queue
   let zero = 0
   in expand_ offsets edges queue shape zero
@@ -146,8 +145,3 @@ def bfs_step [V] [E] [Q]
   let (noDupes_v, noDupes_p) = remove_duplicates V filtered_v filtered_p
   let new_parents = update_parents parents noDupes_v noDupes_p
   in (new_parents, noDupes_v)
-
--- TODO make remove_duplicates return injective arrays. I think maxMatch
--- can be used as an example.
--- TODO fix quickhull; adding preconditions to the environment during
--- checks broke it.
