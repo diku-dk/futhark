@@ -246,6 +246,7 @@ library
       Futhark.Construct
       Futhark.Doc.Generator
       Futhark.Error
+      Futhark.Eval
       Futhark.Fmt.Printer
       Futhark.Fmt.Monad
       Futhark.FreshNames

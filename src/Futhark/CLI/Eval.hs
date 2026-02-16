@@ -91,26 +91,26 @@ instance TraceEvaluation EvalIO where
   trace :: Doc AnsiStyle -> EvalIO ()
   trace = EvalIO . putDocLn
 
+newtype InterpreterState = InterpreterState (VNameSource, T.Env, I.Ctx)
+
 runExprs :: [String] -> InterpreterConfig -> IO ()
 runExprs exprs cfg = do
   let InterpreterConfig _ file = cfg
   maybe_new_state <- runEvalIO $ newFutharkiState cfg file M.empty
-  (src, env, ctx) <- case maybe_new_state of
+  interpreter_state <- case maybe_new_state of
     Left reason -> do
       hPutDocLn stderr reason
       exitWith $ ExitFailure 2
     Right s -> pure s
-  forM_ exprs $ \expr -> putDocLn =<< runEvalIO (runExpr src env ctx expr)
+  forM_ exprs $ \expr -> putDocLn =<< runEvalIO (runExpr interpreter_state expr)
 
 -- Use parseExp, checkExp, then interpretExp.
 runExpr ::
   (Monad m, AbortEvaluation m, TraceEvaluation m) =>
-  VNameSource ->
-  T.Env ->
-  I.Ctx ->
+  InterpreterState ->
   String ->
   m (Doc AnsiStyle)
-runExpr src env ctx str = do
+runExpr (InterpreterState (src, env, ctx)) str = do
   uexp <- case parseExp "" (T.pack str) of
     Left (SyntaxError _ serr) -> abort $ pretty serr
     Right e -> pure e
@@ -159,10 +159,11 @@ options =
   ]
 
 newFutharkiState ::
+  (MonadIO m, TraceEvaluation m) =>
   InterpreterConfig ->
   Maybe FilePath ->
   VFS ->
-  EvalIO (Either (Doc AnsiStyle) (VNameSource, T.Env, I.Ctx))
+  m (Either (Doc AnsiStyle) InterpreterState)
 newFutharkiState cfg maybe_file vfs = runExceptT $ do
   (ws, imports, src) <-
     badOnLeft prettyCompilerError
@@ -189,7 +190,7 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
               ictx {I.ctxEnv = I.ctxImports ictx M.! iname}
             )
 
-  pure (src, tenv, ienv)
+  pure $ InterpreterState (src, tenv, ienv)
   where
     badOnLeft :: (Monad m) => (err -> err') -> Either err a -> ExceptT err' m a
     badOnLeft _ (Right x) = pure x
