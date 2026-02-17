@@ -1022,22 +1022,21 @@ tests =
                   @?= Tuple3
                     ( Just
                         ( [input_a],
-                          ( ScremaForm
-                              ( fromLines
-                                  [ "\\ {x_0 : i32} : {i32, i32} ->",
-                                    "let {y_1 : i32} = add32(1i32, x_0)",
-                                    "let {y_10010 : i32} = add32(3i32, x_0)",
-                                    "in {y_10010, y_1}"
-                                  ]
-                              )
-                              []
-                              []
-                              ( fromLines
-                                  [ "\\ {x_10013 : i32, x_10014 : i32} : {i32, i32} ->",
-                                    "{x_10013, x_10014}"
-                                  ]
-                              )
-                          ),
+                          ScremaForm
+                            ( fromLines
+                                [ "\\ {x_0 : i32} : {i32, i32} ->",
+                                  "let {y_1 : i32} = add32(1i32, x_0)",
+                                  "let {y_10010 : i32} = add32(3i32, x_0)",
+                                  "in {y_10010, y_1}"
+                                ]
+                            )
+                            []
+                            []
+                            ( fromLines
+                                [ "\\ {x_10013 : i32, x_10014 : i32} : {i32, i32} ->",
+                                  "{x_10013, x_10014}"
+                                ]
+                            ),
                           ["b_out_8", identName ident_b]
                         )
                     )

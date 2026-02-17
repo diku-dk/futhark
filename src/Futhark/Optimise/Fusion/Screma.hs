@@ -134,7 +134,6 @@ fusible inp_p form_p out_p inp_c form_c out_c = do
         fuseIsVarish inp_c out_p
           && not (forbidden_c `namesIntersect` forbidden_p)
   unless (is_fusible) (fail "Scremas are not fusible.")
-  pure ()
   where
     ((_, post_scan_p, _), _) =
       splitLambdaByPar post_scan_pars_p inp_p post_p out_c
@@ -397,7 +396,7 @@ moveMidSuperScrema (SuperScrema w inp lam scan red lam' scan' red' lam'') = do
         M.fromList $
           zip
             (bodyResult $ lambdaBody map_lam)
-            (varsRes $ map paramName $ forward_params)
+            (varsRes $ map paramName forward_params)
       new_pars' = lambdaParams lam' <> forward_params
       new_res' =
         map (\r -> fromMaybe r (M.lookup r res_mapping))
