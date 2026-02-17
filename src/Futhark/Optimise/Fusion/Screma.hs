@@ -179,7 +179,7 @@ fuseBinds lam_p out_p inp_c lam_c =
 
 -- WIP: NOT FINISHED
 fuseSuperScrema ::
-  (HasScope SOACS m, MonadFreshNames m) =>
+  (MonadFreshNames m) =>
   SubExp ->
   [SOAC.Input] ->
   ScremaForm SOACS ->

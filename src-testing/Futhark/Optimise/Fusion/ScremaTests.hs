@@ -25,6 +25,10 @@ withFreshNamesAndScope :: ReaderT (Scope SOACS) (State VNameSource) a -> a
 withFreshNamesAndScope m =
   evalState (runReaderT m mempty) (newNameSource 10000)
 
+withFreshNames :: State VNameSource a -> a
+withFreshNames m =
+  evalState m (newNameSource 10000)
+
 fromLines :: [String] -> Lambda SOACS
 fromLines = fromString . unlines
 
@@ -170,7 +174,7 @@ tests =
                 input_a = SOAC.identInput ident_a
                 input_b = SOAC.identInput ident_b
              in Tuple2
-                  ( withFreshNamesAndScope
+                  ( withFreshNames
                       ( fuseSuperScrema
                           "d_5537"
                           [input_a]
@@ -240,7 +244,7 @@ tests =
                 out_a = "out_a_5564145"
                 out_b = "out_b_5534156"
              in Tuple2
-                  ( withFreshNamesAndScope
+                  ( withFreshNames
                       ( fuseSuperScrema
                           "d_5537"
                           [input_a]
@@ -318,7 +322,7 @@ tests =
                 input_a = SOAC.identInput ident_a
                 input_b = SOAC.identInput ident_b
              in Tuple2
-                  ( withFreshNamesAndScope
+                  ( withFreshNames
                       ( fuseSuperScrema
                           "d_5537"
                           [input_a]
@@ -383,7 +387,7 @@ tests =
                 input_a = SOAC.identInput ident_a
                 input_b = SOAC.identInput ident_b
              in Tuple2
-                  ( withFreshNamesAndScope
+                  ( withFreshNames
                       ( fuseSuperScrema
                           "d_5537"
                           [input_a]
@@ -460,7 +464,7 @@ tests =
                 input_a = SOAC.identInput ident_a
                 input_b = SOAC.identInput ident_b
              in Tuple2
-                  ( withFreshNamesAndScope
+                  ( withFreshNames
                       ( fuseSuperScrema
                           "d_5537"
                           [input_a]
