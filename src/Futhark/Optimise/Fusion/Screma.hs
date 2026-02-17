@@ -133,7 +133,7 @@ fusible inp_p form_p out_p inp_c form_c out_c = do
       is_fusible =
         fuseIsVarish inp_c out_p
           && not (forbidden_c `namesIntersect` forbidden_p)
-  unless (is_fusible) (fail "Scremas are not fusible.")
+  unless is_fusible (fail "Scremas are not fusible.")
   where
     ((_, post_scan_p, _), _) =
       splitLambdaByPar post_scan_pars_p inp_p post_p out_c
