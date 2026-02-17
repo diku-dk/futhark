@@ -558,6 +558,6 @@ fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
     fmap toScrema $
       moveRedScanSuperScrema super_screma
         >>= moveLastSuperScrema
-        >>= moveMidSuperScrema -- <- Broken
+        >>= moveMidSuperScrema
         >>= simplifySuperScrema
   pure (new_inp, form, new_out)
