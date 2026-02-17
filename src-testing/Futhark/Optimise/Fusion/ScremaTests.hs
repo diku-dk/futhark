@@ -36,7 +36,7 @@ splitLambdaByParTester :: [VName] -> Lambda SOACS -> Tuple2 (Lambda SOACS) (Lamb
 splitLambdaByParTester names lam = Tuple2 (lam_x', lam_y')
   where
     ((_, lam_x', _), (_, lam_y', _)) =
-      withFreshNamesAndScope $ splitLambdaByPar names (lambdaParams lam) lam (lambdaReturnType lam)
+      splitLambdaByPar names (lambdaParams lam) lam (lambdaReturnType lam)
 
 -- | A wrapper that makes 'show' behave like 'prettyString'.
 newtype Tuple2 a b = Tuple2 (a, b)
@@ -128,7 +128,8 @@ tests =
                 lam_y =
                   fromLines
                     [ "\\{x_0 : i32} : {i32} -> ",
-                      "  let {x_4 : i32} = add32(2i32, x_0) ",
+                      "  let {x_3 : i32} = add32(1i32, x_0) ",
+                      "  let {x_4 : i32} = add32(1i32, x_3) ",
                       "  in {x_4}"
                     ]
                 names = ["x_1"]
@@ -138,7 +139,7 @@ tests =
                   fromLines
                     [ "\\{x_0 : i32, x_1 : i32} : {i32, i32} -> ",
                       "  let {x_2 : i32} = add32(1i32, x_0) ",
-                      "  let {x_3 : i32} = add32(x_2, x_1) ",
+                      "  let {x_3 : i32} = add32(x_1, x_2) ",
                       "  in {x_3, x_2}"
                     ]
                 lam_x =
@@ -567,7 +568,6 @@ tests =
                         ( fromLines
                             [ "\\ {x_0 : i32}: {i32} ->",
                               "let {y_1 : i32} = add32(1i32, x_0)",
-                              "let {x_10000 : i32} = y_1",
                               "in {y_1}"
                             ]
                         )
@@ -709,7 +709,6 @@ tests =
                         ( fromLines
                             [ "\\ {x_5566 : i32}: {i32} ->",
                               "let {y_5567 : i32} = add32(1i32, x_5566)",
-                              "let {x_10000 : i32} = y_5567",
                               "in {y_5567}"
                             ]
                         )
@@ -946,18 +945,20 @@ tests =
                   )
                   @?= Tuple3
                     ( Just
-                        ( [input_b],
+                        ( [input_a],
                           ( ScremaForm
                               ( fromLines
-                                  [ "\\ {x_5574 : i32} : {i32} ->",
-                                    "let {y_5567 : i32} = add32(3i32, x_5574)",
-                                    "in {y_5567}"
+                                  [ "\\ {x_0 : i32} : {i32, i32} ->",
+                                    "let {y_1 : i32} = add32(1i32, x_0)",
+                                    "let {y_10010 : i32} = add32(3i32, x_0)",
+                                    "in {y_10010, y_1}"
                                   ]
                               )
                               []
                               []
                               ( fromLines
-                                  [ "\\ {x_5570 : i32} : {i32} -> {x_5570}"
+                                  [ "\\ {x_10013 : i32, x_10014 : i32} : {i32, i32} ->",
+                                    "{x_10013, x_10014}"
                                   ]
                               )
                           ),

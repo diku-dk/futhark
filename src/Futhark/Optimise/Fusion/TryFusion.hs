@@ -263,7 +263,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       SOAC.Screma _ inp_p form_p,
       _
       ) -> do
-        (inp, form, out) <- fuseScrema w inp_c form_c out_c inp_p form_p out_p
+        (inp, form, out) <- fuseScrema w inp_p form_p out_p inp_c form_c out_c
         success out $ SOAC.Screma w inp form
     -- Map-Hist fusion.
     --
