@@ -288,7 +288,6 @@ moveRedScanSuperScrema super_screma = do
           lambdaReturnType renamed_lam_scan_red'
       binds = fuseBinds lam out_p inp_c renamed_lam_scan_red'
       stms' = bodyStms $ lambdaBody renamed_lam_scan_red'
-      -- Ordering might be wrong here.
       new_scan = scan <> scan'
       new_red = red <> red'
       new_ts = scan_ts <> scan_ts' <> red_ts <> red_ts' <> map_ts
