@@ -477,9 +477,11 @@ simplifyFuse scan red lam_p lam_c = (new_scan, new_lam_p, new_lam_c)
   where
     pars_c = lambdaParams lam_c
     res_p = bodyResult $ lambdaBody lam_p
+    ts_p = lambdaReturnType lam_p
     (scan_res_p, red_res_p, map_res_p) =
       splitAt3 (scanResults scan) (redResults red) res_p
-    ts_p = lambdaReturnType lam_p
+    (scan_ts_p, red_ts_p, map_ts_p) =
+      splitAt3 (scanResults scan) (redResults red) ts_p
     new_scan = catMaybes mscan
     stms_p = bodyStms $ lambdaBody lam_p
     new_lam_c = temp_lam_c {lambdaParams = new_pars_c}
@@ -490,18 +492,24 @@ simplifyFuse scan red lam_p lam_c = (new_scan, new_lam_p, new_lam_c)
             lambdaReturnType = new_ts_p
           }
 
+    fst3 (a, _, _) = a
+    snd3 (_, a, _) = a
+    thrd3 (_, _, a) = a
     new_res_p =
-      map snd new_scan_res_p <> red_res_p <> map snd new_map_res_p
-    (new_scan_res_p, new_map_res_p) =
-      span (isJust . fst) $ zip mscan new_res_scan_red_p
+      map snd3 new_scan_tuple <> red_res_p <> map snd3 new_map_tuple
+    new_ts_p =
+      map thrd3 new_scan_tuple <> red_ts_p <> map thrd3 new_map_tuple
+    (new_scan_tuple, new_map_tuple) =
+      span (isJust . fst3) $
+        zip3 mscan new_res_scan_map_p new_ts_scan_map_p
 
-    (mscan, new_res_scan_red_p, new_ts_p, new_pars_c) =
+    (mscan, new_res_scan_map_p, new_ts_scan_map_p, new_pars_c) =
       L.unzip4
         . filter (\(_, _, _, a) -> paramName a `nameIn` deps)
         $ L.zip4
           (map Just scan <> repeat Nothing)
           (scan_res_p <> map_res_p)
-          ts_p
+          (scan_ts_p <> map_ts_p)
           pars_c
     temp_lam_c = eliminateByRes lam_c
     deps = freeIn $ lambdaBody temp_lam_c
