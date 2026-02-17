@@ -804,13 +804,14 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
     lowerPath base base_t (E.UpdateStepField f : rest) newv =
       let field_t =
             case E.typeOf base of
-              E.Scalar (E.Record fs) ->
-                case M.lookup f fs of
-                  Just t -> t
-                  Nothing ->
-                    error $ "internaliseExp Updat: missing field " ++ prettyString f
+              E.Scalar (E.Record fs)
+                | Just t <- M.lookup f fs -> t
               t ->
-                error $ "internaliseExp Update: field step on non-record type " ++ prettyString t
+                error $
+                  "lowerPath: missing field "
+                    ++ prettyString f
+                    ++ " in type "
+                    ++ prettyString t
           inner_base = E.Project f base (Info field_t) loc
           inner_v = lowerPath inner_base field_t rest newv
        in E.Update base [E.UpdateStepField f] inner_v (Info base_t) loc
