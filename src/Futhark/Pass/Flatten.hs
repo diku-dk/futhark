@@ -1180,6 +1180,59 @@ transformDistStm segments env (DistStm inps res stm) = do
       result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
       let reps = resultToResReps (map fst rettype) result
       pure $ insertReps (zip (map distResTag res) reps) env
+      
+    Let _ aux (Loop merge (ForLoop i it n@(Constant _)) body) -> do
+    -- We start with the simple case of a for loop with a constant number of iterations.
+      let [w] = NE.toList segments
+          old_loop_params = map fst merge
+          old_loop_inits = map snd merge
+          merge_types = map (paramType . fst) merge
+          merge_start_tag = length inps
+
+      (lifted_loop_params, lifted_loop_reps) <- mapAndUnzipM (liftParam w) old_loop_params 
+      lifted_init <- mapM (liftLoopInit segments inps env) old_loop_inits
+
+      let loop_lifted_inputs = zipWith (\p tag_i -> (paramName p, DistInput (ResTag tag_i) (paramType p)))
+                              old_loop_params [merge_start_tag..]
+        
+      
+      let loop_lifted_env = DistEnv $ M.fromList $ zip (map ResTag [merge_start_tag..]) lifted_loop_reps
+        
+      let lifted_loop_params' = concat lifted_loop_params
+          lifted_init' = concat lifted_init
+
+      let loop_new_inputs = inps <> loop_lifted_inputs
+          loop_new_env = env <> loop_lifted_env
+
+      scope <- askScope
+      let (loop_new_inputs', loop_dstms) =
+            distributeBody scope w loop_new_inputs body
+
+      let i_param = Param mempty i (Prim (IntType it))
+          loop_scope =
+            scope
+              <> scopeOfFParams lifted_loop_params'
+              <> scopeOfLParams [i_param]
+
+      (loop_body_res, loop_body_stms) <-
+        localScope loop_scope $
+          runBuilder $
+            liftBody w loop_new_inputs' loop_new_env loop_dstms (bodyResult body)
+
+      let loop_body_gpu = Body () loop_body_stms loop_body_res
+          loop_exp_gpu  =
+            Loop
+              (zip lifted_loop_params' lifted_init')
+              (ForLoop i it n)
+              loop_body_gpu
+
+      loop_out_vs <-
+        certifying (distCerts inps aux env) $
+          letTupExp "loop_res" loop_exp_gpu
+
+      let out_reps = resultToResReps merge_types loop_out_vs
+      pure $ insertReps (zip (map distResTag res) out_reps) env
+
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
 -- | This function walks through the *unlifted* result types
@@ -1291,7 +1344,7 @@ liftSubExp segments inps env se = case se of
           Acc {} -> error "getRepSubExp: Acc"
           Mem {} -> error "getRepSubExp: Mem"
 
-liftParam :: SubExp -> FParam SOACS -> PassM ([FParam GPU], ResRep)
+liftParam :: (MonadFreshNames m) => SubExp -> FParam SOACS -> m ([FParam GPU], ResRep)
 liftParam w fparam =
   case declTypeOf fparam of
     Prim pt -> do
@@ -1356,6 +1409,29 @@ liftArg segments inps env (se, d) = do
         -- Only apply the original diet to the 'elems' array
         let diets = replicate 4 Observe ++ [d]
         pure $ zipWith (curry (first Var)) [num_data, segs, flags', offsets, elems'] diets
+
+liftLoopInit :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU [SubExp]
+liftLoopInit segments inps env se = do
+  (_, rep) <- liftSubExp segments inps env se
+  case rep of
+    Regular v -> pure [Var v]
+    Irregular irreg -> mkIrrep irreg
+  where
+    mkIrrep
+      ( IrregularRep
+          { irregularS = segs,
+            irregularF = flags,
+            irregularO = offsets,
+            irregularD = elems
+          }
+        ) = do
+        t <- lookupType elems
+        flags_t <- lookupType flags
+        num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
+        let shape = Shape [Var num_data]
+        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
+        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
+        pure $ map Var [num_data, segs, flags', offsets, elems']
 
 -- Lifts a functions return type such that it matches the lifted functions return type.
 liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
