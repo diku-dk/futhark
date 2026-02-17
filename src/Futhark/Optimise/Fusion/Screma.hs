@@ -545,7 +545,7 @@ fuseScrema ::
   m ([SOAC.Input], ScremaForm SOACS, [VName])
 fuseScrema w inp_c form_c out_c inp_p form_p out_p = do
   fusible inp_c form_c out_c inp_p form_p out_p
-  (super_screma, new_out) <- fuseSuperScrema w inp_c form_c out_c inp_p form_p out_p
+  (super_screma, new_out) <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
   (new_inp, form) <-
     fmap toScrema $
       moveRedScanSuperScrema super_screma
