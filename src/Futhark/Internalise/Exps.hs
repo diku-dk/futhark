@@ -746,12 +746,12 @@ internaliseExp desc (E.Not e loc) = locating loc $ do
     _ ->
       error "Futhark.Internalise.internaliseExp: non-int/bool type in Not"
 internaliseExp desc (E.Update src [E.UpdateStepSlice slice] ve _ loc) = locating loc $ do
+  ves <- internaliseExp "lw_val" ve
   srcs <- internaliseExpToVars "src" src
   src_dims <- case srcs of
     src_v : _ -> I.arrayDims <$> lookupType src_v
     _ -> pure []
   (idxs', cs) <- internaliseSlice src_dims slice
-  ves <- internaliseExp "lw_val" ve
 
   let errormsg = errorMsg [ErrorString "Shape of slice does not match shape of value."]
 
@@ -780,15 +780,17 @@ internaliseExp desc (E.Update src [E.UpdateStepField field] ve _ loc) = locating
     replace _ _ ve_vals _ = pure ve_vals
 internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
   src_vals <- internaliseExp desc src
-  lowerPath (E.typeOf src) src_vals steps (internaliseExp "update_val" ve)
+  ve_vals <- internaliseExp "update_val" ve
+  lowerPath (E.typeOf src) src_vals steps ve_vals
   where
     lowerPath ::
       E.StructType ->
       [I.SubExp] ->
       [E.UpdateStep Info VName] ->
-      InternaliseM [I.SubExp] ->
+      [I.SubExp] ->
       InternaliseM [I.SubExp]
-    lowerPath _ _ [] new_vals = new_vals
+    lowerPath _ _ [] new_vals =
+      pure new_vals
     lowerPath base_t base_vals (E.UpdateStepField f : rest) new_vals = do
       (before, field_vals, after, field_t) <- splitField base_t f base_vals
       updated_field_vals <- lowerPath field_t field_vals rest new_vals
