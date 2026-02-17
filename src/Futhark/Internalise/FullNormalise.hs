@@ -199,9 +199,9 @@ getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
   nameExp final $ Constr n es' ty loc
 getOrdering final (Update eb steps eu ty loc) = do
-  eu' <- getOrdering False eu
-  steps' <- mapM onStep steps
   eb' <- getOrdering False eb
+  steps' <- mapM onStep steps
+  eu' <- getOrdering False eu
   nameExp final $ Update eb' steps' eu' ty loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
@@ -328,8 +328,8 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
     isOr = baseName (qualLeaf op) == "||"
     isAnd = baseName (qualLeaf op) == "&&"
 getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body _) _) = do
-  e' <- getOrdering False e
   slice' <- astMap mapper slice
+  e' <- getOrdering False e
   let loc' = srcspan dloc e
   addBind $
     PatBind
