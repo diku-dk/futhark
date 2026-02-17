@@ -268,7 +268,7 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
         (scremaScans form_c)
         (scremaReduces form_c)
         lam3,
-      out_red_c <> out_red_p <> out_post_c <> out_post_p
+      out_red_p <> out_red_c <> out_post_c <> out_post_p
     )
   where
     inputFromOutput inp = SOAC.inputArray inp `elem` out_p
