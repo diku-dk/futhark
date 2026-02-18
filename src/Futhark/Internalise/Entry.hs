@@ -67,7 +67,7 @@ typeExpOpaqueName = nameFromText . f
     g (E.TERecord tes _) =
       "{" <> mconcat (intersperse ", " (map onField tes)) <> "}"
       where
-        onField (L _ k, te) = E.nameToText k <> ":" <> f te
+        onField (L _ k, te) = E.nameToText k <> ": " <> f te
     g (E.TESum cs _) =
       mconcat (intersperse " | " (map onConstr cs))
       where
