@@ -199,9 +199,9 @@ getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
   nameExp final $ Constr n es' ty loc
 getOrdering final (Update eb steps eu ty loc) = do
-  eb' <- getOrdering False eb
   steps' <- mapM onStep steps
   eu' <- getOrdering False eu
+  eb' <- getOrdering False eb
   nameExp final $ Update eb' steps' eu' ty loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
