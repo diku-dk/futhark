@@ -564,7 +564,7 @@ tests =
                               [reduce_op']
                               (fromLines ["nilFn"])
                           )
-                          ["out_a_13"]
+                          []
                           [input_b]
                           ( ScremaForm
                               ( fromLines
@@ -576,7 +576,7 @@ tests =
                               [reduce_op]
                               (fromLines ["nilFn"])
                           )
-                          ["out_b_15"]
+                          []
                       )
                   )
                   @?= Tuple2
@@ -598,7 +598,93 @@ tests =
                         []
                         [reduce_op]
                         (fromLines ["nilFn"]),
-                      ["out_a_13", "out_b_15"]
+                      []
+                    ),
+          testCase "scan-scan fusion" $
+            let scan_op' =
+                  Scan
+                    ( fromLines
+                        [ "\\ {a_0 : i32, b_1 : i32} : {i32} ->",
+                          "let {c_2 : i32} = add32(a_0, b_1)",
+                          "in {c_2}"
+                        ]
+                    )
+                    ["0i32"]
+                scan_op =
+                  Scan
+                    ( fromLines
+                        [ "\\ {a_4 : f32, b_5 : f32} : {f32} ->",
+                          "let {c_6 : f32} = fadd32(a_4, b_5)",
+                          "in {c_6}"
+                        ]
+                    )
+                    ["0.0f32"]
+                ident_a = "input_a_7 : [d_9]i32"
+                input_a = SOAC.identInput ident_a
+                ident_b = "input_b_8 : [d_9]f32"
+                input_b = SOAC.identInput ident_b
+             in Tuple2
+                  ( withFreshNames
+                      ( fuseSuperScrema
+                          "d_9"
+                          [input_a]
+                          ( ScremaForm
+                              ( fromLines
+                                  [ "\\ {x_11 : i32} : {i32} ->",
+                                    "in {x_11}"
+                                  ]
+                              )
+                              [scan_op']
+                              []
+                              ( fromLines
+                                  [ "\\ {x_12 : i32} : {i32} ->",
+                                    "in {x_12}"
+                                  ]
+                              )
+                          )
+                          ["out_a_16"]
+                          [input_b]
+                          ( ScremaForm
+                              ( fromLines
+                                  [ "\\ {x_13 : f32} : {f32} ->",
+                                    "in {x_13}"
+                                  ]
+                              )
+                              [scan_op]
+                              []
+                              ( fromLines
+                                  [ "\\ {x_14 : f32} : {f32} ->",
+                                    "in {x_14}"
+                                  ]
+                              )
+                          )
+                          ["out_b_15"]
+                      )
+                  )
+                  @?= Tuple2
+                    ( SuperScrema
+                        "d_9"
+                        [input_a, input_b]
+                        ( fromLines
+                            [ "\\ {x_11 : i32, x_10000 : f32}: {i32, f32} ->",
+                              "{x_11, x_10000}"
+                            ]
+                        )
+                        [scan_op']
+                        []
+                        ( fromLines
+                            [ "\\ {x_12 : i32, x_13 : f32} : {i32, f32} ->",
+                              "{x_13, x_12}"
+                            ]
+                        )
+                        [scan_op]
+                        []
+                        ( fromLines
+                            [ "\\ {x_14 : f32, x_10001 : i32} : {f32, i32} ->",
+                              "{x_14, x_10001}"
+                            ]
+                        ),
+                      ["out_b_15", "out_a_16"]
                     )
         ],
       testGroup
