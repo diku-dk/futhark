@@ -201,10 +201,10 @@ parseExp sep =
           ]
 
     pProject e =
-      lexeme sep "." *> (pFieldName >>= pProject . Project e)
-
-    pPost e =
-      pProject e <|> pure e
+      choice
+        [ lexeme sep "." *> (pFieldName >>= pProject . Project e),
+          pure e
+        ]
 
     pAtom =
       choice
@@ -215,7 +215,7 @@ parseExp sep =
           Const <$> V.parseValue sep,
           Call <$> pFunc <*> pure []
         ]
-        >>= pPost
+        >>= pProject
 
     pPat =
       choice
