@@ -19,7 +19,7 @@ import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
-import Data.Sequence (Seq)
+import Data.Sequence (Seq ((:|>)))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
@@ -191,8 +191,7 @@ executeEvalLens (EvalLensData docUri line) = do
   currentVFS <- lift $ transformVFS <$> getVirtualFiles
   result <- liftIO $ performEvaluation currentVFS expressionText
 
-  let fileRope = file ^. file_text
-  publishResult result fileRope
+  publishResult result $ file ^. file_text
 
   pure ()
   where
@@ -205,13 +204,12 @@ executeEvalLens (EvalLensData docUri line) = do
               findResultLinesEnd $ succ i
           | otherwise = i
         insertText =
-          let resultDoc = either id id $ fst result
-              traceDocs = toList $ snd result
+          let allDocs = snd result :|> either id id (fst result)
               commentLines =
                 T.lines
                   >>> map ("-- " <>)
                   >>> T.unlines
-           in commentLines $ docText $ vcat $ traceDocs ++ [resultDoc]
+           in commentLines . docText . vcat . toList $ allDocs
         insertResultEdit =
           TextEdit
             { _newText = insertText,
@@ -227,7 +225,7 @@ executeEvalLens (EvalLensData docUri line) = do
                       Position
                         { _line =
                             -- replace the entire comment range
-                            -- this shall remove any previous results
+                            -- removes any previous results
                             fromIntegral . findResultLinesEnd $
                               fromIntegral line,
                           _character = 0
@@ -263,7 +261,7 @@ executeEvalLens (EvalLensData docUri line) = do
           enableAllocationLimit
 
         evaluationAction :: IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
-        evaluationAction = handle handleOom . runEvalRecord $ do
+        evaluationAction = interpret $ do
           -- do not print warnings, no file
           let interpreterConfig = InterpreterConfig False Nothing
           let filePath =
@@ -279,3 +277,5 @@ executeEvalLens (EvalLensData docUri line) = do
           liftIO setupLimits
 
           runExpr interpreterState expressionText
+          where
+            interpret = handle handleOom . runEvalRecord
