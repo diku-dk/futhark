@@ -69,8 +69,8 @@ instance Aeson.FromJSON LensPayload where
 -- which document, which line
 -- this is valid as long as the document has an eval comment on that line
 data EvalLensData = EvalLensData
-  { cldtextDocument :: Uri,
-    cldLine :: UInt
+  { eldTextDocument :: Uri,
+    eldLine :: UInt
   }
 
 instance Aeson.ToJSON EvalLensData where
@@ -107,8 +107,8 @@ evalLensesFor file_uri = runExceptT $ do
           _data_ =
             Just . Aeson.toJSON . EvalLensPayload $
               EvalLensData
-                { cldtextDocument = file_uri,
-                  cldLine = i
+                { eldTextDocument = file_uri,
+                  eldLine = i
                 },
           _range =
             Range
@@ -189,75 +189,93 @@ executeEvalLens (EvalLensData docUri line) = do
     Just expression -> pure expression
 
   currentVFS <- lift $ transformVFS <$> getVirtualFiles
-  result <- liftIO $ performEvaluation currentVFS docUri expressionText
+  result <- liftIO $ performEvaluation currentVFS expressionText
 
-  let insertPosition =
-        Position
-          { _character = 0,
-            -- insert below the evaluation comment
-            _line = line + 1
-          }
-      insertText =
-        let resultDoc = either id id $ fst result
-            traceDocs = toList $ snd result
-            commentLines =
-              T.lines
-                >>> map ("-- " <>)
-                >>> T.unlines
-         in commentLines $ docText $ vcat $ traceDocs ++ [resultDoc]
-      insertResultEdit =
-        TextEdit
-          { _newText = insertText,
-            _range =
-              Range
-                { _end = insertPosition,
-                  _start = insertPosition
-                }
-          }
-      workSpaceEditParams =
-        ApplyWorkspaceEditParams
-          { _label = Just "Insert result of code lens evaluation",
-            _edit =
-              WorkspaceEdit
-                { _documentChanges = Nothing,
-                  _changeAnnotations = Nothing,
-                  _changes = Just $ M.singleton docUri [insertResultEdit]
-                }
-          }
-  _lspId <- lift $ sendRequest SMethod_WorkspaceApplyEdit workSpaceEditParams (const $ pure ())
+  let fileRope = file ^. file_text
+  publishResult result fileRope
+
   pure ()
-
-performEvaluation :: VFS -> Uri -> Text -> IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
-performEvaluation currentVFS docUri expressionText = do
-  resultVar <- newEmptyMVar
-  _evaluationThreadId <- forkIO (putMVar resultVar =<< evaluationAction)
-  takeMVar resultVar
   where
-    -- TODO: throws away the entire trace, maybe this could be remedied someway
-    handleOom AllocationLimitExceeded =
-      pure (Left "Computation Timed Out", mempty)
+    publishResult result fileRope = do
+      _lspId <- lift $ sendRequest SMethod_WorkspaceApplyEdit workSpaceEditParams (const $ pure ())
+      pure ()
+      where
+        findResultLinesEnd i
+          | T.isPrefixOf "-- " $ R.toText $ R.getLine i fileRope =
+              findResultLinesEnd $ succ i
+          | otherwise = i
+        insertText =
+          let resultDoc = either id id $ fst result
+              traceDocs = toList $ snd result
+              commentLines =
+                T.lines
+                  >>> map ("-- " <>)
+                  >>> T.unlines
+           in commentLines $ docText $ vcat $ traceDocs ++ [resultDoc]
+        insertResultEdit =
+          TextEdit
+            { _newText = insertText,
+              _range =
+                Range
+                  { _end =
+                      Position
+                        { _character = 0,
+                          -- insert below the evaluation comment
+                          _line = line + 1
+                        },
+                    _start =
+                      Position
+                        { _line =
+                            -- replace the entire comment range
+                            -- this shall remove any previous results
+                            fromIntegral . findResultLinesEnd $
+                              fromIntegral line,
+                          _character = 0
+                        }
+                  }
+            }
+        workSpaceEditParams =
+          ApplyWorkspaceEditParams
+            { _label = Just "Insert result of code lens evaluation",
+              _edit =
+                WorkspaceEdit
+                  { _documentChanges = Nothing,
+                    _changeAnnotations = Nothing,
+                    _changes = Just $ M.singleton docUri [insertResultEdit]
+                  }
+            }
 
-    -- TODO: Possibly kill the thread after a timeout,
-    -- but this is GHC-specific
-    setupLimits = do
-      -- 100 million bytes should suffice but should also be available
-      setAllocationCounter 100_000_000
-      enableAllocationLimit
+    performEvaluation :: VFS -> Text -> IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
+    performEvaluation currentVFS expressionText = do
+      resultVar <- newEmptyMVar
+      _evaluationThreadId <- forkIO (putMVar resultVar =<< evaluationAction)
+      takeMVar resultVar
+      where
+        -- TODO: throws away the entire trace, maybe this could be remedied someway
+        handleOom AllocationLimitExceeded =
+          pure (Left "Computation Timed Out", mempty)
 
-    evaluationAction :: IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
-    evaluationAction = handle handleOom . runEvalRecord $ do
-      -- do not print warnings, no file
-      let interpreterConfig = InterpreterConfig False Nothing
-      let filePath =
-            toNormalizedUri docUri
-              & uriToNormalizedFilePath
-              & fmap fromNormalizedFilePath
+        -- TODO: Possibly kill the thread after a timeout,
+        -- but this is GHC-specific
+        setupLimits = do
+          -- 100 million bytes should suffice but should also be available
+          setAllocationCounter 100_000_000
+          enableAllocationLimit
 
-      -- load the file the expression is located in
-      interpreterState <-
-        newFutharkiState interpreterConfig filePath currentVFS
-          >>= either abort pure
+        evaluationAction :: IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
+        evaluationAction = handle handleOom . runEvalRecord $ do
+          -- do not print warnings, no file
+          let interpreterConfig = InterpreterConfig False Nothing
+          let filePath =
+                toNormalizedUri docUri
+                  & uriToNormalizedFilePath
+                  & fmap fromNormalizedFilePath
 
-      liftIO setupLimits
+          -- load the file the expression is located in
+          interpreterState <-
+            newFutharkiState interpreterConfig filePath currentVFS
+              >>= either abort pure
 
-      runExpr interpreterState expressionText
+          liftIO setupLimits
+
+          runExpr interpreterState expressionText
