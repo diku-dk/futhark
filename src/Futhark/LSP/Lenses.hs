@@ -5,25 +5,32 @@
 
 module Futhark.LSP.Lenses (evalLensesFor, resolveCodeLens, execute) where
 
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (AllocationLimitExceeded (AllocationLimitExceeded), handle)
 import Control.Lens ((^.))
 import Control.Monad.Except (Except, ExceptT, MonadError (throwError), runExceptT)
-import Control.Monad.Trans (lift)
+import Control.Monad.Trans (MonadIO (liftIO), lift)
 import Data.Aeson (FromJSON (parseJSON))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
+import Data.Foldable (toList)
 import Data.Function ((&))
+import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
 import Data.Sequence (Seq)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
+import Futhark.Compiler.Program (VFS)
 import Futhark.Eval (AbortEvaluation (abort), InterpreterConfig (InterpreterConfig), newFutharkiState, runEvalRecord, runExpr)
 import Futhark.LSP.CommandType qualified as CommandType
 import Futhark.LSP.Tool (transformVFS)
 import Futhark.Util (showText)
-import Language.LSP.Protocol.Types (CodeLens (..), Command (..), ErrorCodes (ErrorCodes_InvalidParams), LSPErrorCodes, Position (..), Range (..), UInt, Uri, fromNormalizedFilePath, toNormalizedUri, uriToNormalizedFilePath, type (|?) (..))
-import Language.LSP.Server (LspT, getVirtualFile, getVirtualFiles)
+import Futhark.Util.Pretty (docText, vcat)
+import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))
+import Language.LSP.Protocol.Types (ApplyWorkspaceEditParams (..), CodeLens (..), Command (..), ErrorCodes (ErrorCodes_InvalidParams), LSPErrorCodes, Position (..), Range (..), TextEdit (..), UInt, Uri, WorkspaceEdit (..), fromNormalizedFilePath, toNormalizedUri, uriToNormalizedFilePath, type (|?) (..))
+import Language.LSP.Server (LspT, getVirtualFile, getVirtualFiles, sendRequest)
 import Language.LSP.VFS (file_text)
 import Prettyprinter (Doc)
 import Prettyprinter.Render.Terminal (AnsiStyle)
@@ -181,29 +188,71 @@ executeEvalLens (EvalLensData docUri line) = do
     Just expression -> pure expression
 
   currentVFS <- lift $ transformVFS <$> getVirtualFiles
-  let setupLimits = do
-        -- 100 million bytes should suffice but should also be available
-        setAllocationCounter 100_000_000
-        enableAllocationLimit
-        _
+  result <- liftIO $ performEvaluation currentVFS docUri expressionText
 
-      evaluationAction :: IO (Either (Doc AnsiStyle) a, Seq (Doc AnsiStyle))
-      evaluationAction = runEvalRecord $ do
-        -- do not print warnings, no file
-        let interpreterConfig = InterpreterConfig False Nothing
-        let filePath =
-              toNormalizedUri docUri
-                & uriToNormalizedFilePath
-                & fmap fromNormalizedFilePath
+  let insertPosition =
+        Position
+          { _character = 0,
+            -- insert below the evaluation comment
+            _line = line + 1
+          }
+      insertText =
+        let resultDoc = either id id $ fst result
+            traceDocs = vcat $ toList $ snd result
+         in docText $ vcat [traceDocs, resultDoc]
+      insertResultEdit =
+        TextEdit
+          { _newText = insertText,
+            _range =
+              Range
+                { _end = insertPosition,
+                  _start = insertPosition
+                }
+          }
+      workSpaceEditParams =
+        ApplyWorkspaceEditParams
+          { _label = Just "Insert result of code lens evaluation",
+            _edit =
+              WorkspaceEdit
+                { _documentChanges = Nothing,
+                  _changeAnnotations = Nothing,
+                  _changes = Just $ M.singleton docUri [insertResultEdit]
+                }
+          }
+  _lspId <- lift $ sendRequest SMethod_WorkspaceApplyEdit workSpaceEditParams (const $ pure ())
+  pure ()
 
-        -- load the file the expression is located in
-        interpreterState <-
-          newFutharkiState interpreterConfig filePath currentVFS
-            >>= either abort pure
+performEvaluation :: VFS -> Uri -> Text -> IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
+performEvaluation currentVFS docUri expressionText = do
+  resultVar <- newEmptyMVar
+  _evaluationThreadId <- forkIO (putMVar resultVar =<< evaluationAction)
+  takeMVar resultVar
+  where
+    -- TODO: throws away the entire trace, maybe this could be remedied someway
+    handleOom AllocationLimitExceeded =
+      pure (Left "Computation Timed Out", mempty)
 
-        setupLimits
+    -- TODO: Possibly kill the thread after a timeout,
+    -- but this is GHC-specific
+    setupLimits = do
+      -- 100 million bytes should suffice but should also be available
+      setAllocationCounter 100_000_000
+      enableAllocationLimit
 
-        result <- runExpr interpreterState expressionText
-        undefined
+    evaluationAction :: IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
+    evaluationAction = handle handleOom . runEvalRecord $ do
+      -- do not print warnings, no file
+      let interpreterConfig = InterpreterConfig False Nothing
+      let filePath =
+            toNormalizedUri docUri
+              & uriToNormalizedFilePath
+              & fmap fromNormalizedFilePath
 
-  undefined
+      -- load the file the expression is located in
+      interpreterState <-
+        newFutharkiState interpreterConfig filePath currentVFS
+          >>= either abort pure
+
+      liftIO setupLimits
+
+      runExpr interpreterState expressionText
