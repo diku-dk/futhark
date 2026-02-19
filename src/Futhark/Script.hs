@@ -121,6 +121,7 @@ data Exp
   | Tuple [Exp]
   | Record [(T.Text, Exp)]
   | Project Exp T.Text
+  | Index Exp [Exp]
   | StringLit T.Text
   | Let [VarName] Exp Exp
   | -- | Server-side variable, *not* Futhark variable (these are
@@ -150,6 +151,8 @@ instance Pretty Exp where
         parens $ commasep $ map (align . pretty) vs
       pprPrec _ (Project e f) =
         pprPrec 1 e <> "." <> pretty f
+      pprPrec _ (Index e is) =
+        pprPrec 1 e <> brackets (commasep $ map pretty is)
       pprPrec _ (StringLit s) = pretty $ show s
       pprPrec _ (Record m) = braces $ align $ commasep $ map field m
         where
@@ -166,11 +169,15 @@ inParens sep = between (lexeme sep "(") (lexeme sep ")")
 inBraces :: Parser () -> Parser a -> Parser a
 inBraces sep = between (lexeme sep "{") (lexeme sep "}")
 
+inBrackets :: Parser () -> Parser a -> Parser a
+inBrackets sep = between (lexeme sep "[") (lexeme sep "]")
+
 -- | Parse a FutharkScript expression, given a whitespace parser.
 parseExp :: Parsec Void T.Text () -> Parsec Void T.Text Exp
 parseExp sep =
   choice
     [ pLet,
+      try pIndex,
       try $ Call <$> pFunc <*> some pAtom,
       pAtom
     ]
@@ -222,14 +229,21 @@ parseExp sep =
           FuncFut <$> lVarName
         ]
 
+    pIndex =
+      Index
+        <$> (Call . FuncFut <$> rawVarName <*> pure [])
+        <*> inBrackets sep (parseExp sep `sepEndBy` pComma)
+
     reserved = ["let", "in"]
 
-    lVarName = lexeme sep . try $ do
+    rawVarName = do
       v <- fmap T.pack $ (:) <$> satisfy isAlpha <*> many (satisfy constituent)
       guard $ v `notElem` reserved
       pure v
       where
         constituent c = isAlphaNum c || c == '\'' || c == '_'
+
+    lVarName = lexeme sep $ try rawVarName
 
     lIntStr = lexeme sep . try . fmap T.pack $ some $ satisfy isDigit
 
@@ -535,6 +549,35 @@ project server (V.ValueAtom (SValue t (VVar v))) f
 project _ _ _ =
   throwError "Cannot project from non-record."
 
+index ::
+  (MonadIO m, MonadError T.Text m) =>
+  ScriptServer ->
+  ExpValue ->
+  [ExpValue] ->
+  m ExpValue
+index server (V.ValueAtom (SValue array_type (VVar array_var))) is = do
+  shape <- cmdEither $ cmdShape (scriptServer server) array_var
+  is' <- mapM asInt is
+  unless (all inBounds $ zip shape is') $
+    throwError $
+      "Index "
+        <> prettyText is'
+        <> " out of bounds for array of shape "
+        <> mconcat (map (prettyText . (: [])) shape)
+        <> "."
+  elem_var <- newVar server "field"
+  cmdMaybe $ cmdIndex (scriptServer server) elem_var array_var is'
+  let elem_type = T.drop (2 * length is) array_type -- UGH! XXX
+  pure $ V.ValueAtom $ SValue elem_type $ VVar elem_var
+  where
+    asInt (V.ValueAtom (SValue _ (VVal v)))
+      | Just x <- V.getValue v = pure $ fromInteger x
+    asInt v = throwError $ "Invalid index type: " <> prettyText (fmap scriptValueType v)
+
+    inBounds (d, i) = i >= 0 && i < d
+index _ _ _ =
+  throwError "Cannot index non-array."
+
 -- | Evaluate a FutharkScript expression relative to some running server.
 evalExp ::
   forall m.
@@ -619,6 +662,10 @@ evalExp builtin sserver top_level_e = do
       evalExp' vtable (Project e f) = do
         e' <- evalExp' vtable e
         project sserver e' f
+      evalExp' vtable (Index e is) = do
+        e' <- evalExp' vtable e
+        is' <- mapM (evalExp' vtable) is
+        index sserver e' is'
       evalExp' vtable (Call (FuncBuiltin name) es) =
         builtin sserver name =<< mapM (evalExp' vtable) es
       evalExp' vtable (Call (FuncFut name) es)
@@ -757,6 +804,7 @@ evalExpToGround builtin server e = do
 varsInExp :: Exp -> S.Set EntryName
 varsInExp ServerVar {} = mempty
 varsInExp (Project e _) = varsInExp e
+varsInExp (Index e is) = varsInExp e <> foldMap varsInExp is
 varsInExp (Call (FuncFut v) es) = S.insert v $ foldMap varsInExp es
 varsInExp (Call (FuncBuiltin _) es) = foldMap varsInExp es
 varsInExp (Tuple es) = foldMap varsInExp es

@@ -23,7 +23,7 @@ import Language.LSP.Protocol.Types
     uriToNormalizedFilePath,
   )
 import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
-import Language.LSP.VFS (VFS, vfsMap, virtualFileText)
+import Language.LSP.VFS (VFS, VirtualFileEntry (..), vfsMap, virtualFileText)
 
 -- | Try to take state from IORef, if it's empty, try to compile.
 tryTakeStateFromIORef :: IORef State -> Maybe FilePath -> LspT () IO State
@@ -95,11 +95,14 @@ tryCompile state (Just path) old_loaded_prog = do
 transformVFS :: VFS -> M.Map FilePath T.Text
 transformVFS vfs =
   M.foldrWithKey
-    ( \uri virtual_file acc ->
-        case uriToNormalizedFilePath uri of
-          Nothing -> acc
-          Just file_path ->
-            M.insert (fromNormalizedFilePath file_path) (virtualFileText virtual_file) acc
+    ( \uri virtual_file_entry acc ->
+        case virtual_file_entry of
+          Closed _ -> acc
+          Open virtual_file ->
+            case uriToNormalizedFilePath uri of
+              Nothing -> acc
+              Just file_path ->
+                M.insert (fromNormalizedFilePath file_path) (virtualFileText virtual_file) acc
     )
     M.empty
     (view vfsMap vfs)

@@ -191,6 +191,22 @@ corresponding field types (the expected order is given by the
 Create a new variable *to* whose value is the field *field* of the
 record-typed variable *from*.
 
+Array Commands
+~~~~~~~~~~~~~~
+
+``shape`` *variable*
+....................
+
+Print the shape of the given variable, with one line per dimension. Non-arrays
+print no lines, in the sense that they are considered 0-dimensional.
+
+``index`` *v0* *v1* *i0* ... *iN-1*
+...................................
+
+Create a new variable *v0* whose value is the result of indexing the variable
+*v1*, which must be an array of rank *N*, at position *[i0]...[iN-1]*, where
+each *i* is an integer. Fails if the index is out of bounds.
+
 Environment Variables
 ---------------------
 
