@@ -1183,39 +1183,48 @@ transformDistStm segments env (DistStm inps res stm) = do
       
     Let _ aux (Loop merge (ForLoop i it n@(Constant _)) body) -> do
     -- We start with the simple case of a for loop with a constant number of iterations.
+    -- I should revisit hadnling the for iterator (i)
       let [w] = NE.toList segments
           old_loop_params = map fst merge
           old_loop_inits = map snd merge
-          merge_start_tag = 1 + foldl max (-1) [t | (_, DistInput (ResTag t) _) <- inps]
 
       (lifted_loop_params, lifted_loop_reps) <- mapAndUnzipM (liftParam w) old_loop_params 
       lifted_init <- mapM (liftLoopInit segments inps env) old_loop_inits
-
-      let loop_lifted_inputs = zipWith (\p tag_i -> (paramName p, DistInput (ResTag tag_i) (paramType p)))
-                              old_loop_params [merge_start_tag..]
-        
-      
-      let loop_lifted_env = zip (map ResTag [merge_start_tag..]) lifted_loop_reps
         
       let lifted_loop_params' = concat lifted_loop_params
           lifted_init' = concat lifted_init
 
-      let loop_new_inputs = inps <> loop_lifted_inputs
-          loop_new_env = insertReps loop_lifted_env env
+      let (inps_local, env_local0, next0) = localiseInputs env inps
+          loop_param_inputs_local =
+            zipWith
+              (\p j -> (paramName p, DistInput (ResTag j) (paramType p)))
+              old_loop_params
+              [next0 ..]
 
-      scope <- askScope
-      let (loop_new_inputs', loop_dstms) =
-            distributeBody scope w loop_new_inputs body
+          loop_param_reps_local =
+            zipWith
+              (\j rep -> (ResTag j, rep))
+              [next0 ..]
+              lifted_loop_reps
+          loop_new_inputs = inps_local <> loop_param_inputs_local
+          loop_env_local = insertReps loop_param_reps_local env_local0
 
       let i_param = Param mempty i (Prim (IntType it))
-          loop_scope =
+          dist_scope =
+            scopeOfFParams old_loop_params
+              <> scopeOfLParams [i_param]
+          build_scope =
             scopeOfFParams lifted_loop_params'
               <> scopeOfLParams [i_param]
+      scope <- askScope
+      let (loop_new_inputs', loop_dstms) =
+            distributeBody (scope <> dist_scope) w loop_new_inputs body
 
       (loop_body_res, loop_body_stms) <-
-        localScope loop_scope $
-          runBuilder $
-            liftBody w loop_new_inputs' loop_new_env loop_dstms (bodyResult body)
+        runReaderT 
+          (runBuilder $
+            liftBody w loop_new_inputs' loop_env_local loop_dstms (bodyResult body))
+            (scope <> build_scope)
 
       let loop_body_gpu = Body () loop_body_stms loop_body_res
           loop_exp_gpu  =
@@ -1228,11 +1237,30 @@ transformDistStm segments env (DistStm inps res stm) = do
         certifying (distCerts inps aux env) $
           letTupExp "loop_res" loop_exp_gpu
 
-      let body_res_types = map (declTypeOf . fst) merge
-          out_reps = resultToResReps body_res_types loop_out_vs
+      let result_types = map ((\(DistType _ _ t) -> t) . distResType) res
+          out_reps = resultToResReps result_types loop_out_vs
       pure $ insertReps (zip (map distResTag res) out_reps) env
 
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
+
+-- helper to not mess up the tags when generating new ones for the loop parameters
+-- probably won't be used in future
+localiseInputs :: DistEnv -> DistInputs -> (DistInputs, DistEnv, Int)
+localiseInputs env_outer inps =
+  let step (i, env_acc) (v, inp) =
+        case inp of
+          DistInputFree arr t ->
+            ((i, env_acc), (v, DistInputFree arr t))
+
+          DistInput oldrt t ->
+            let newrt    = ResTag i
+                rep      = resVar oldrt env_outer
+                env_acc' = insertRep newrt rep env_acc
+             in ((i + 1, env_acc'), (v, DistInput newrt t))
+
+      ((next, env_local), inps_local) =
+        L.mapAccumL step (0, mempty) inps
+   in (inps_local, env_local, next)
 
 -- | This function walks through the *unlifted* result types
 -- and uses the *lifted* results to construct the corresponding res reps.
@@ -1409,6 +1437,7 @@ liftArg segments inps env (se, d) = do
         let diets = replicate 4 Observe ++ [d]
         pure $ zipWith (curry (first Var)) [num_data, segs, flags', offsets, elems'] diets
 
+-- Mostly same as liftArg
 liftLoopInit :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU [SubExp]
 liftLoopInit segments inps env se = do
   (_, rep) <- liftSubExp segments inps env se
