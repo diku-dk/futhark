@@ -5,6 +5,7 @@
 
 module Futhark.LSP.Lenses (evalLensesFor, resolveCodeLens, execute) where
 
+import Control.Arrow ((>>>))
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (AllocationLimitExceeded (AllocationLimitExceeded), handle)
 import Control.Lens ((^.))
@@ -27,7 +28,7 @@ import Futhark.Eval (AbortEvaluation (abort), InterpreterConfig (InterpreterConf
 import Futhark.LSP.CommandType qualified as CommandType
 import Futhark.LSP.Tool (transformVFS)
 import Futhark.Util (showText)
-import Futhark.Util.Pretty (docText, hardline, vcat)
+import Futhark.Util.Pretty (docText, vcat)
 import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))
 import Language.LSP.Protocol.Types (ApplyWorkspaceEditParams (..), CodeLens (..), Command (..), ErrorCodes (ErrorCodes_InvalidParams), LSPErrorCodes, Position (..), Range (..), TextEdit (..), UInt, Uri, WorkspaceEdit (..), fromNormalizedFilePath, toNormalizedUri, uriToNormalizedFilePath, type (|?) (..))
 import Language.LSP.Server (LspT, getVirtualFile, getVirtualFiles, sendRequest)
@@ -198,8 +199,12 @@ executeEvalLens (EvalLensData docUri line) = do
           }
       insertText =
         let resultDoc = either id id $ fst result
-            traceDocs = fmap ("-- " <>) . toList $ snd result
-         in docText $ vcat $ traceDocs ++ ["-- " <> resultDoc <> hardline]
+            traceDocs = toList $ snd result
+            commentLines =
+              T.lines
+                >>> map ("-- " <>)
+                >>> T.unlines
+         in commentLines $ docText $ vcat $ traceDocs ++ [resultDoc]
       insertResultEdit =
         TextEdit
           { _newText = insertText,
