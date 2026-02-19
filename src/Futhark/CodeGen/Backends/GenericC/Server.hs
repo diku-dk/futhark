@@ -131,6 +131,8 @@ typeBoilerplate _ (tname, TypeArray _ et rank ops) =
       info_name = et <> "_info"
       shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       array_new_wrap = arrayNew ops <> "_wrap"
+      array_index_wrap = arrayIndex ops <> "_wrap"
+      is_args = [[C.cexp|is[$int:i]|] | i <- [0 .. rank - 1]]
    in ( [C.cedecl|const struct type $id:type_name;|],
         [C.cinit|&$id:type_name|],
         [C.cunit|
@@ -148,12 +150,23 @@ typeBoilerplate _ (tname, TypeArray _ et rank ops) =
                 .shape = (typename array_shape_fn)$id:(arrayShape ops),
                 .values = (typename array_values_fn)$id:(arrayValues ops)
               };
+              int $id:array_index_wrap(struct futhark_context *ctx,
+                                       void *dest,
+                                       void *arr,
+                                       const typename int64_t *is) {
+                return $id:(arrayIndex ops)(ctx, dest, arr, $args:is_args);
+              }
               const struct type $id:type_name = {
                 .name = $string:(T.unpack tname),
+                .rank = $int:rank,
+                .elem_type = $string:(T.unpack et),
                 .restore = (typename restore_fn)restore_array,
                 .store = (typename store_fn)store_array,
                 .free = (typename free_fn)free_array,
-                .aux = &$id:aux_name
+                .aux = &$id:aux_name,
+                .record = NULL,
+                .index = (typename index_fn)$id:array_index_wrap,
+                .shape = (typename shape_fn)$id:(arrayShape ops)
               };|]
       )
 typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
@@ -171,6 +184,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
               };
               const struct type $id:type_name = {
                 .name = $string:(T.unpack tname),
+                .rank = 0,
                 .restore = (typename restore_fn)restore_opaque,
                 .store = (typename store_fn)store_opaque,
                 .free = (typename free_fn)free_opaque,

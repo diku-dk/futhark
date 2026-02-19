@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * New notation: `let x.f = y in z` as a shortcut for `let x = x with f = y in
   z`, by Aziz Rmadi. (#1160)
 
+* New server protocol commands: `index` and `shape`.
+
+* FutharkScript now supports (barely) array indexing.
+
 ### Removed
 
 ### Changed
