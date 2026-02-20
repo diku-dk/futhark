@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Regression in the unrolling of `map`.
 
+* Occasional duplication of entry points leading to compiler crash. (#2374)
+
 ## [0.25.35]
 
 ### Added

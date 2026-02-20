@@ -1009,6 +1009,10 @@ arrowArg scope argset args_params rety =
     arrowCleanType paramed (Scalar ty) =
       Scalar $ arrowCleanScalar paramed ty
 
+removeEntryPoint :: PolyBinding -> PolyBinding
+removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, loc)) =
+  PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
+
 -- Monomorphise a polymorphic function at the types given in the instance
 -- list. Monomorphises the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
@@ -1228,7 +1232,9 @@ transformValBind valbind = do
 
   pure
     env
-      { envPolyBindings = M.insert (valBindName valbind) valbind' $ envPolyBindings env,
+      { envPolyBindings =
+          M.insert (valBindName valbind) (removeEntryPoint valbind') $
+            envPolyBindings env,
         envGlobalScope = global <> envGlobalScope env,
         envScope =
           S.insert (valBindName valbind) global
