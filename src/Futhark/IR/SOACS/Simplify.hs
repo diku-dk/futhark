@@ -680,13 +680,20 @@ simplifyKnownIterationSOAC _ pat aux op
   | Just (Screma w arrs form) <- asSOAC op,
     Constant (IntValue (Int64Value k)) <- w,
     "unroll" `inAttrs` stmAuxAttrs aux =
-      Simplify $
-        auxing aux $
-          FOT.transformScrema
-            pat
-            (Constant (IntValue (Int64Value k)))
-            arrs
-            form
+      -- We unroll maps in a more direct way, and pass everything else on to
+      -- general sequentialisation.
+      case isMapSOAC form of
+        Just map_lam -> Simplify $ do
+          arrs_elems <- fmap transpose . forM [0 .. k - 1] $ \i -> do
+            map_lam' <- renameLambda map_lam
+            eLambda map_lam' $ map (`eIndex` [eSubExp (constant i)]) arrs
+          forM_ (zip3 (patNames pat) arrs_elems (lambdaReturnType map_lam)) $
+            \(v, arr_elems, t) ->
+              certifying (mconcat (map resCerts arr_elems)) $
+                letBindNames [v] . BasicOp $
+                  ArrayLit (map resSubExp arr_elems) t
+        _ ->
+          Simplify . auxing aux $ FOT.transformScrema pat w arrs form
 --
 simplifyKnownIterationSOAC _ _ _ _ = Skip
 

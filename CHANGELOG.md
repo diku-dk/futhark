@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Opaque types in C API generated from record patterns in entry points. (#2371)
 
+* Regression in the unrolling of `map`.
+
 ## [0.25.35]
 
 ### Added
