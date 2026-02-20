@@ -715,6 +715,14 @@ LetExp :: { UncheckedExp }
      | let id FieldAccesses1 '=' Exp LetBody
        { let L vloc (ID v) = $2; ident = Ident v NoInfo (srclocOf vloc)
           in AppExp (LetWithField ident ident (map unLoc $3) $5 $6 (srcspan $1 $>)) NoInfo }
+     | let id '...[' DimIndices ']' '.' FieldAccesses_ '=' Exp LetBody
+       { let { L vloc (ID v) = $2
+             ; pat = Id v NoInfo (srclocOf vloc)
+             ; src = Var (QualName [] v) NoInfo (srclocOf vloc)
+             ; steps = UpdateStepSlice $4 : map (UpdateStepField . unLoc) $7
+             ; rhs = Update src steps $9 NoInfo (srcspan src $9)
+             }
+          in AppExp (LetPat [] pat rhs $10 (srcspan $1 $>)) NoInfo }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
