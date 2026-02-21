@@ -391,14 +391,14 @@ instance Format (AppExpBase NoInfo Name) where
         | null tparams = space <> params'
         | null params = space <> tparams'
         | otherwise = space <> tparams' <+> params'
-  fmt (LetWith dest src idxs ve body loc)
+  fmt (LetWith dest src steps ve body loc)
     | dest == src =
         addComments loc $
           lineIndent
             ve
             ( "let"
                 <+> fmt dest
-                <> idxs'
+                <> fmtLetLhsUpdatePath steps
                   <+> "="
             )
             (fmt ve)
@@ -412,24 +412,10 @@ instance Format (AppExpBase NoInfo Name) where
                 <+> "="
                 <+> fmt src
                 <+> "with"
-                <+> idxs'
+                <+> fmtUpdatePath steps
             )
             (fmt ve)
             </> letBody body
-    where
-      idxs' = brackets $ sep ", " $ map fmt idxs
-  fmt (LetWithField dest _src fields ve body loc) =
-    addComments loc $
-      lineIndent
-        ve
-        ( "let"
-            <+> fmt dest
-            <> "."
-            <> sep "." (map fmt fields)
-              <+> "="
-        )
-        (fmt ve)
-        </> letBody body
   fmt (Range start maybe_step end loc) =
     addComments loc $ fmt start <> step <> end'
     where
@@ -454,11 +440,16 @@ instance Format (AppExpBase NoInfo Name) where
     where
       fmt_args = sepArgs fmt $ fmap snd args
 
+fmtLetLhsUpdatePath :: [UpdateStep NoInfo Name] -> Fmt
+fmtLetLhsUpdatePath = mconcat . map step
+  where
+    step (UpdateStepSlice is) = brackets (sep ("," <> space) $ map fmt is)
+    step (UpdateStepField f) = "." <> fmt f
+
 letBody :: UncheckedExp -> Fmt
 letBody body@(AppExp LetPat {} _) = fmt body
 letBody body@(AppExp LetFun {} _) = fmt body
 letBody body@(AppExp LetWith {} _) = fmt body
-letBody body@(AppExp LetWithField {} _) = fmt body
 letBody body = addComments body $ "in" <+> align (fmt body)
 
 instance Format (SizeBinder Name) where

@@ -347,10 +347,6 @@ consumeAliases loc als = do
   where
     als' = M.fromList $ map ((,loc) . aliasVar) $ S.toList als
 
-consume :: Loc -> VName -> StructType -> CheckM ()
-consume loc v t =
-  consumeAliases loc . aliases =<< observeVar loc v t
-
 -- | Observe the given name here and return its aliases.
 observeVar :: Loc -> VName -> StructType -> CheckM TypeAliases
 observeVar loc v t = do
@@ -867,21 +863,24 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
       )
 
 --
-checkExp (AppExp (LetWith dst src slice ve body loc) appres) = do
-  src_als <- observeVar (locOf dst) (identName src) (unInfo $ identType src)
-  slice' <- checkSubExps slice
+checkExp (AppExp (LetWith dst src steps ve body loc) appres) = do
+  steps' <- mapM checkStep steps
   (ve', ve_als) <- checkExp ve
-  consume (locOf src) (identName src) (unInfo (identType src))
-  overlapCheck (locOf ve) (src, src_als) (ve', ve_als)
+  src_als <- observeVar (locOf src) (identName src) (unInfo $ identType src)
+
+  let hasIndex = any isIndex steps
+
+  when hasIndex $ do
+    overlapCheck (locOf ve) (src, src_als) (ve', ve_als)
+    consumeAliases (locOf loc) $ aliases src_als
+
   (body', body_als) <- bindingIdent Consume dst $ checkExp body
-  pure (AppExp (LetWith dst src slice' ve' body' loc) appres, body_als)
---
-checkExp (AppExp (LetWithField dst src fields ve body loc) appres) = do
-  _ <- observeVar (locOf dst) (identName src) (unInfo $ identType src)
-  (ve', _) <- checkExp ve
-  consume (locOf src) (identName src) (unInfo (identType src))
-  (body', body_als) <- bindingIdent Consume dst $ checkExp body
-  pure (AppExp (LetWithField dst src fields ve' body' loc) appres, body_als)
+  pure (AppExp (LetWith dst src steps' ve' body' loc) appres, body_als)
+  where
+    isIndex UpdateStepSlice {} = True
+    isIndex _ = False
+    checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
+    checkStep (UpdateStepField f) = pure $ UpdateStepField f
 --
 checkExp (Update src steps ve t loc) = do
   steps' <- mapM checkStep steps

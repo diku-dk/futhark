@@ -740,14 +740,7 @@ data AppExpBase f vn
   | LetWith
       (IdentBase f vn StructType)
       (IdentBase f vn StructType)
-      (SliceBase f vn)
-      (ExpBase f vn)
-      (ExpBase f vn)
-      SrcLoc
-  | LetWithField
-      (IdentBase f vn StructType)
-      (IdentBase f vn StructType)
-      [Name]
+      [UpdateStep f vn]
       (ExpBase f vn)
       (ExpBase f vn)
       SrcLoc
@@ -778,7 +771,6 @@ instance Located (AppExpBase f vn) where
   locOf (Index _ _ loc) = locOf loc
   locOf (Loop _ _ _ _ _ loc) = locOf loc
   locOf (Match _ _ loc) = locOf loc
-  locOf (LetWithField _ _ _ _ _ loc) = locOf loc
 
 data UpdateStep f vn
   = UpdateStepSlice (SliceBase f vn)

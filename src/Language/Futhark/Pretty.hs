@@ -16,7 +16,6 @@ where
 import Control.Monad
 import Data.Char (chr)
 import Data.Functor
-import Data.List (intersperse)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -271,11 +270,11 @@ prettyAppExp _ (LetFun (fname, _) (tparams, params, retdecl, rettype, e) body _)
     retdecl' = case (pretty <$> unAnnot rettype) `mplus` (pretty <$> retdecl) of
       Just rettype' -> colon <+> align rettype'
       Nothing -> mempty
-prettyAppExp _ (LetWith dest src idxs ve body _)
+prettyAppExp _ (LetWith dest src steps ve body _)
   | dest == src =
       "let"
         <+> pretty dest
-        <> list (map pretty idxs)
+        <> prettyLetLhsUpdate steps
           <+> equals
           <+> align (pretty ve)
           </> letBody body
@@ -285,18 +284,10 @@ prettyAppExp _ (LetWith dest src idxs ve body _)
         <+> equals
         <+> pretty src
         <+> "with"
-        <+> brackets (commasep (map pretty idxs))
+        <+> prettyUpdate steps
         <+> "="
         <+> align (pretty ve)
         </> letBody body
-prettyAppExp _ (LetWithField dest _ fields ve body _) =
-  "let"
-    <+> pretty dest
-    <> "."
-    <> mconcat (intersperse "." (map pretty fields))
-      <+> equals
-      <+> align (pretty ve)
-      </> letBody body
 prettyAppExp p (Range start maybe_step end _) =
   parensIf (p /= -1) $
     pretty start
@@ -316,6 +307,12 @@ prettyAppExp p (Apply f args _) =
   parensIf (p >= 10) $
     prettyExp 0 f
       <+> hsep (map (prettyExp 10 . snd) $ NE.toList args)
+
+prettyLetLhsUpdate :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
+prettyLetLhsUpdate = mconcat . map pp
+  where
+    pp (UpdateStepSlice idxs) = brackets (commasep (map pretty idxs))
+    pp (UpdateStepField f) = "." <> pretty f
 
 instance (IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)

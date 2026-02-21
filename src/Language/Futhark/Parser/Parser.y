@@ -678,6 +678,17 @@ UpdateStep :: { UpdateStep NoInfo Name }
                | FieldId               { UpdateStepField (unLoc $1) }
                | '.' FieldId           { UpdateStepField (unLoc $2) }
 
+LetUpdate :: { [UpdateStep NoInfo Name] }
+          : LetUpdateStep LetUpdateTail { $1 : $2 }
+
+LetUpdateTail :: { [UpdateStep NoInfo Name] }
+              : LetUpdateStep LetUpdateTail { $1 : $2 }
+              |                             { [] }
+
+LetUpdateStep :: { UpdateStep NoInfo Name }
+              : '...[' DimIndices ']' { UpdateStepSlice $2 }
+              | '.' FieldId           { UpdateStepField (unLoc $2) }
+
 FieldAccesses :: { [L Name] }
                : FieldAccesses1 { $1 }
                |                { [] }
@@ -704,25 +715,17 @@ LetExp :: { UncheckedExp }
        { AppExp (LetPat [] $2 $4 $5 (srcspan $1 $>)) NoInfo }
 
      | let id LocalFunTypeParams FunParams1 maybeAscription(TypeExp) '=' Exp LetBody
-       { let L nameloc (ID name) = $2
-           in AppExp (LetFun (name, srclocOf nameloc) ($3, fst $4 : snd $4, $5, NoInfo, $7)
-                     $8 (srcspan $1 $>))
-                     NoInfo}
+       { let { L nameloc (ID name) = $2 }
+         in AppExp (LetFun (name, srclocOf nameloc) ($3, fst $4 : snd $4, $5, NoInfo, $7)
+                    $8 (srcspan $1 $>)) NoInfo
+       }
 
-     | let id '...[' DimIndices ']' '=' Exp LetBody
-       { let L vloc (ID v) = $2; ident = Ident v NoInfo (srclocOf vloc)
-         in AppExp (LetWith ident ident $4 $7 $8 (srcspan $1 $>)) NoInfo }
-     | let id FieldAccesses1 '=' Exp LetBody
-       { let L vloc (ID v) = $2; ident = Ident v NoInfo (srclocOf vloc)
-          in AppExp (LetWithField ident ident (map unLoc $3) $5 $6 (srcspan $1 $>)) NoInfo }
-     | let id '...[' DimIndices ']' '.' FieldAccesses_ '=' Exp LetBody
+     | let id LetUpdate '=' Exp LetBody
        { let { L vloc (ID v) = $2
-             ; pat = Id v NoInfo (srclocOf vloc)
-             ; src = Var (QualName [] v) NoInfo (srclocOf vloc)
-             ; steps = UpdateStepSlice $4 : map (UpdateStepField . unLoc) $7
-             ; rhs = Update src steps $9 NoInfo (srcspan src $9)
+             ; ident = Ident v NoInfo (srclocOf vloc)
              }
-          in AppExp (LetPat [] pat rhs $10 (srcspan $1 $>)) NoInfo }
+         in AppExp (LetWith ident ident $3 $5 $6 (srcspan $1 $>)) NoInfo
+       }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }

@@ -94,22 +94,17 @@ instance ASTMappable (AppExpBase Info VName) where
           )
       <*> mapOnExp tv body
       <*> pure loc
-  astMap tv (LetWith dest src idxexps vexp body loc) =
+  astMap tv (LetWith dest src steps vexp body loc) =
     LetWith
       <$> astMap tv dest
       <*> astMap tv src
-      <*> mapM (astMap tv) idxexps
+      <*> mapM mapStep steps
       <*> mapOnExp tv vexp
       <*> mapOnExp tv body
       <*> pure loc
-  astMap tv (LetWithField dest src fields vexp body loc) =
-    LetWithField
-      <$> astMap tv dest
-      <*> astMap tv src
-      <*> pure fields
-      <*> mapOnExp tv vexp
-      <*> mapOnExp tv body
-      <*> pure loc
+    where
+      mapStep (UpdateStepSlice slice) = UpdateStepSlice <$> mapM (astMap tv) slice
+      mapStep (UpdateStepField f) = pure $ UpdateStepField f
   astMap tv (BinOp (fname, fname_loc) t (x, xext) (y, yext) loc) =
     BinOp
       <$> ((,) <$> mapOnName tv fname <*> pure fname_loc)
@@ -443,6 +438,10 @@ bareSizeExp :: SizeExp (ExpBase Info VName) -> SizeExp (ExpBase NoInfo VName)
 bareSizeExp (SizeExp e loc) = SizeExp (bareExp e) loc
 bareSizeExp (SizeExpAny loc) = SizeExpAny loc
 
+bareUpdateStep :: UpdateStep Info VName -> UpdateStep NoInfo VName
+bareUpdateStep (UpdateStepSlice slice) = UpdateStepSlice $ map bareDimIndex slice
+bareUpdateStep (UpdateStepField f) = UpdateStepField f
+
 bareTypeExp :: TypeExp (ExpBase Info VName) VName -> TypeExp (ExpBase NoInfo VName) VName
 bareTypeExp (TEVar qn loc) = TEVar qn loc
 bareTypeExp (TEParens te loc) = TEParens (bareTypeExp te) loc
@@ -509,19 +508,11 @@ bareExp (AppExp appexp _) =
             (bareLoopForm form)
             (bareExp loopbody)
             loc
-        LetWith (Ident dest _ destloc) (Ident src _ srcloc) idxexps vexp body loc ->
+        LetWith (Ident dest _ destloc) (Ident src _ srcloc) steps vexp body loc ->
           LetWith
             (Ident dest NoInfo destloc)
             (Ident src NoInfo srcloc)
-            (map bareDimIndex idxexps)
-            (bareExp vexp)
-            (bareExp body)
-            loc
-        LetWithField (Ident dest _ destloc) (Ident src _ srcloc) fields vexp body loc ->
-          LetWithField
-            (Ident dest NoInfo destloc)
-            (Ident src NoInfo srcloc)
-            fields
+            (map bareUpdateStep steps)
             (bareExp vexp)
             (bareExp body)
             loc
@@ -548,10 +539,7 @@ bareExp (Attr attr e loc) =
 bareExp (Update src steps v _ loc) =
   Update
     (bareExp src)
-    (map bareStep steps)
+    (map bareUpdateStep steps)
     (bareExp v)
     NoInfo
     loc
-  where
-    bareStep (UpdateStepSlice slice) = UpdateStepSlice $ map bareDimIndex slice
-    bareStep (UpdateStepField f) = UpdateStepField f

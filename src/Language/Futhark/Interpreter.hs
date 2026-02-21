@@ -909,31 +909,15 @@ evalAppExp env (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
   evalIndex loc env is' arr
-evalAppExp env (LetWith dest src is v body loc) = do
+evalAppExp env (LetWith dest src steps v body loc) = do
   let Ident src_vn (Info src_t) _ = src
-  dest' <-
-    maybe oob pure
-      =<< writeArray
-        <$> mapM (evalDimIndex env) is
-        <*> evalTermVar env (qualName src_vn) (toStruct src_t)
-        <*> eval env v
+  src_v <- evalTermVar env (qualName src_vn) (toStruct src_t)
+  v' <- eval env v
+  dest' <- maybe oob pure =<< evalUpdateSteps env steps src_v v'
   let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
     oob = bad loc env "Update out of bounds"
-evalAppExp env (LetWithField dest src fields v body _) = do
-  let Ident src_vn (Info src_t) _ = src
-  src_v <- evalTermVar env (qualName src_vn) (toStruct src_t)
-  v' <- eval env v
-  let dest' = update src_v fields v'
-      t = T.BoundV [] $ toStruct $ unInfo $ identType dest
-  eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
-  where
-    update _ [] v' = v'
-    update (ValueRecord src') (f : fs) v'
-      | Just f_v <- M.lookup f src' =
-          ValueRecord $ M.insert f (update f_v fs v') src'
-    update _ _ _ = error "evalAppExp LetWithField: invalid value."
 evalAppExp env (Loop sparams pat loopinit form body _) = do
   init_v <- eval env $ loopInitExp loopinit
   case form of
@@ -1069,26 +1053,9 @@ eval env (Not e loc) =
 eval env (Update src steps v _ loc) = do
   src' <- eval env src
   v' <- eval env v
-  res <- update steps src' v'
+  res <- evalUpdateSteps env steps src' v'
   maybe oob pure res
   where
-    update [] _ newv = pure $ Just newv
-    update (UpdateStepField f : rest) (ValueRecord fs) newv
-      | Just old <- M.lookup f fs = do
-          newf <- update rest old newv
-          pure $ fmap (\v' -> ValueRecord $ M.insert f v' fs) newf
-    update (UpdateStepField _ : _) _ _ =
-      error "eval Update: invalid field update."
-    update (UpdateStepSlice is : rest) arr newv = do
-      is' <- mapM (evalDimIndex env) is
-      case indexArray is' arr of
-        Nothing -> pure Nothing
-        Just old -> do
-          newsub <- update rest old newv
-          case newsub of
-            Nothing -> pure Nothing
-            Just vsub -> pure $ writeArray is' arr vsub
-
     oob = bad loc env "Bad update"
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
@@ -1141,6 +1108,26 @@ eval env (Attr (AttrComp "trace" [AttrAtom (AtomName tag) _] _) e _) = do
   pure v
 eval env (Attr _ e _) =
   eval env e
+
+evalUpdateSteps :: Env -> [UpdateStep Info VName] -> Value -> Value -> EvalM (Maybe Value)
+evalUpdateSteps env = go
+  where
+    go [] _ newv = pure $ Just newv
+    go (UpdateStepField f : rest) (ValueRecord fs) newv
+      | Just old <- M.lookup f fs = do
+          newf <- go rest old newv
+          pure $ fmap (\v' -> ValueRecord $ M.insert f v' fs) newf
+    go (UpdateStepField _ : _) _ _ =
+      error "eval update: invalid field update."
+    go (UpdateStepSlice is : rest) arr newv = do
+      is' <- mapM (evalDimIndex env) is
+      case indexArray is' arr of
+        Nothing -> pure Nothing
+        Just old -> do
+          newsub <- go rest old newv
+          case newsub of
+            Nothing -> pure Nothing
+            Just vsub -> pure $ writeArray is' arr vsub
 
 evalCase ::
   Value ->

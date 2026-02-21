@@ -100,13 +100,9 @@ freeInExp expr = case expr of
       <> freeInExp e1
       <> freeInExp e2
   Project _ e _ _ -> freeInExp e
-  AppExp (LetWith id1 id2 idxs e1 e2 _) _ ->
+  AppExp (LetWith id1 id2 steps e1 e2 _) _ ->
     ident id2
-      <> foldMap freeInDimIndex idxs
-      <> freeInExp e1
-      <> (freeInExp e2 `freeWithout` S.singleton (identName id1))
-  AppExp (LetWithField id1 id2 _ e1 e2 _) _ ->
-    ident id2
+      <> foldMap freeInUpdateStep steps
       <> freeInExp e1
       <> (freeInExp e2 `freeWithout` S.singleton (identName id1))
   AppExp (Index e idxs _) _ -> freeInExp e <> foldMap freeInDimIndex idxs

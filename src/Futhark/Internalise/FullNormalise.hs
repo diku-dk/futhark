@@ -327,27 +327,20 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
   where
     isOr = baseName (qualLeaf op) == "||"
     isAnd = baseName (qualLeaf op) == "&&"
-getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body _) _) = do
-  slice' <- astMap mapper slice
+getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) steps e body _) _) = do
+  steps' <- mapM onStep steps
   e' <- getOrdering False e
   let loc' = srcspan dloc e
   addBind $
     PatBind
       []
       (Id dest dty dloc)
-      (Update (Var (qualName src) sty sloc) [UpdateStepSlice slice'] e' (Info (unInfo sty)) loc')
+      (Update (Var (qualName src) sty sloc) steps' e' (Info (unInfo sty)) loc')
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
-getOrdering final (AppExp (LetWithField (Ident dest dty dloc) (Ident src sty sloc) fields e body _) _) = do
-  e' <- getOrdering False e
-  let loc' = srcspan dloc e
-  addBind $
-    PatBind
-      []
-      (Id dest dty dloc)
-      (Update (Var (qualName src) sty sloc) (map UpdateStepField fields) e' (Info (unInfo sty)) loc')
-  getOrdering final body
+    onStep (UpdateStepSlice slice) = UpdateStepSlice <$> astMap mapper slice
+    onStep (UpdateStepField f) = pure $ UpdateStepField f
 getOrdering final (AppExp (Index e slice loc) resT) = do
   e' <- getOrdering False e
   slice' <- astMap mapper slice
