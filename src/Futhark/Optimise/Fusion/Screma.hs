@@ -222,8 +222,8 @@ fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
               lambdaParams (scremaPostLambda form_p)
                 <> pick inp_c_real_map (lambdaParams (scremaLambda form_c)),
             lambdaReturnType =
-              lambdaReturnType (scremaPostLambda form_p)
-                <> lambdaReturnType (scremaLambda form_c),
+              lambdaReturnType (scremaLambda form_c)
+                <> lambdaReturnType (scremaPostLambda form_p),
             lambdaBody =
               mkBody
                 ( bodyStms (lambdaBody (scremaPostLambda form_p))
