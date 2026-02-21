@@ -503,7 +503,6 @@ literals and variables, but also more complicated forms.
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
-      : | "unsafe" `exp`
       : | "assert" `atom` `exp`
       : | `exp` "with" `slice` "=" `exp`
       : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
