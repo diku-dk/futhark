@@ -548,7 +548,7 @@ checkExp (AppExp (LetWith dest src steps ve body loc) _) = do
     then do
       ve' <- checkExp ve
       ve_t <- expType ve'
-      updated_t <- updateFieldPath (fieldNames steps) ve_t src_t
+      updated_t <- updateFieldPath src (fieldNames steps) ve_t src_t
       steps' <- mapM checkFieldStep steps
 
       bindingIdent dest updated_t $ \dest' -> do
@@ -573,23 +573,6 @@ checkExp (AppExp (LetWith dest src steps ve body loc) _) = do
     checkFieldStep (UpdateStepField f) = pure $ UpdateStepField f
     checkFieldStep _ = error "impossible"
 
-    usage = mkUsage loc "record update"
-
-    updateFieldPath [] ve_t src_leaf_t = do
-      (src_leaf_t', _) <- allDimsFreshInType usage Nonrigid "any" src_leaf_t
-      onFailure (CheckingRecordUpdate [] src_leaf_t' ve_t) $
-        unify usage src_leaf_t' ve_t
-      pure ve_t
-    updateFieldPath (f : fs) ve_t (Scalar (Record m))
-      | Just f_t <- M.lookup f m = do
-          f_t' <- updateFieldPath fs ve_t f_t
-          pure $ Scalar $ Record $ M.insert f f_t' m
-    updateFieldPath _ _ _ =
-      typeError loc mempty . withIndexLink "record-type-not-known" $
-        "Full type of"
-          </> indent 2 (pretty src)
-          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
-
 -- Record updates are a bit hacky, because we do not have row typing
 -- (yet?).  For now, we only permit record updates where we know the
 -- full type up to the field we are updating.
@@ -601,7 +584,7 @@ checkExp (Update src steps ve NoInfo loc) = do
     then do
       ve' <- checkExp ve
       ve_t <- expType ve'
-      updated_t <- updateFieldPath (fieldNames steps) ve_t src_t
+      updated_t <- updateFieldPath src (fieldNames steps) ve_t src_t
       steps' <- mapM checkFieldStep steps
       pure $ Update src' steps' ve' (Info updated_t) loc
     else do
@@ -617,22 +600,6 @@ checkExp (Update src steps ve NoInfo loc) = do
 
     checkFieldStep (UpdateStepField f) = pure $ UpdateStepField f
     checkFieldStep _ = error "impossible"
-
-    usage = mkUsage loc "record update"
-    updateFieldPath [] ve_t src_leaf_t = do
-      (src_leaf_t', _) <- allDimsFreshInType usage Nonrigid "any" src_leaf_t
-      onFailure (CheckingRecordUpdate [] src_leaf_t' ve_t) $
-        unify usage src_leaf_t' ve_t
-      pure ve_t
-    updateFieldPath (f : fs) ve_t (Scalar (Record m))
-      | Just f_t <- M.lookup f m = do
-          f_t' <- updateFieldPath fs ve_t f_t
-          pure $ Scalar $ Record $ M.insert f f_t' m
-    updateFieldPath _ _ _ =
-      typeError loc mempty . withIndexLink "record-type-not-known" $
-        "Full type of"
-          </> indent 2 (pretty src)
-          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
 checkExp (AppExp (Index e slice loc) _) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
@@ -780,6 +747,30 @@ checkExp (AppExp (Match e cs loc) _) = do
   pure $ AppExp (Match e' cs' loc) (Info $ AppRes t retext)
 checkExp (Attr info e loc) =
   Attr <$> checkAttr info <*> checkExp e <*> pure loc
+
+updateFieldPath ::
+  (Pretty a, Located a) =>
+  a ->
+  [Name] ->
+  StructType ->
+  StructType ->
+  TermTypeM StructType
+updateFieldPath src [] ve_t src_leaf_t = do
+  (src_leaf_t', _) <- allDimsFreshInType usage Nonrigid "any" src_leaf_t
+  onFailure (CheckingRecordUpdate [] src_leaf_t' ve_t) $
+    unify usage src_leaf_t' ve_t
+  pure ve_t
+  where
+    usage = mkUsage (locOf src) "record update"
+updateFieldPath src (f : fs) ve_t (Scalar (Record m))
+  | Just f_t <- M.lookup f m = do
+      f_t' <- updateFieldPath src fs ve_t f_t
+      pure $ Scalar $ Record $ M.insert f f_t' m
+updateFieldPath src _ _ _ =
+  typeError (locOf src) mempty . withIndexLink "record-type-not-known" $
+    "Full type of"
+      </> indent 2 (pretty src)
+      </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
 
 checkUpdateSteps ::
   SrcLoc ->
