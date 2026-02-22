@@ -691,40 +691,40 @@ tests =
                   Reduce
                     Commutative
                     ( fromLines
-                        [ "\\ {a_0 : i32, b_1 : i32} : {i32} ->",
-                          "let {c_2 : i32} = add32(a_0, b_1)",
+                        [ "\\ {a_0 : i64, b_1 : i64} : {i64} ->",
+                          "let {c_2 : i64} = add32(a_0, b_1)",
                           "in {c_2}"
                         ]
                     )
-                    ["0i32"]
+                    ["0i64"]
                 reduce_op =
                   Reduce
                     Commutative
                     ( fromLines
-                        [ "\\ {a_4 : f32, b_5 : f32} : {f32} ->",
-                          "let {c_6 : f32} = fadd32(a_4, b_5)",
+                        [ "\\ {a_4 : f64, b_5 : f64} : {f64} ->",
+                          "let {c_6 : f64} = fadd32(a_4, b_5)",
                           "in {c_6}"
                         ]
                     )
-                    ["0.0f32"]
+                    ["0.0f64"]
                 scan_op' =
                   Scan
                     ( fromLines
-                        [ "\\ {a_7 : i64, b_8 : i64} : {i64} ->",
-                          "let {c_9 : i64} = add64(a_7, b_8)",
+                        [ "\\ {a_7 : i32, b_8 : i32} : {i32} ->",
+                          "let {c_9 : i32} = add64(a_7, b_8)",
                           "in {c_9}"
                         ]
                     )
-                    ["0i64"]
+                    ["0i32"]
                 scan_op =
                   Scan
                     ( fromLines
-                        [ "\\ {a_10 : f64, b_11 : f64} : {f64} ->",
-                          "let {c_12 : f64} = fadd64(a_10, b_11)",
+                        [ "\\ {a_10 : f32, b_11 : f32} : {f32} ->",
+                          "let {c_12 : f32} = fadd64(a_10, b_11)",
                           "in {c_12}"
                         ]
                     )
-                    ["0.0f64"]
+                    ["0.0f32"]
                 ident_0_a = "input_a_0_13 : [d_27]i32"
                 input_0_a = SOAC.identInput ident_0_a
                 ident_0_b = "input_b_0_14 : [d_27]f32"
@@ -1171,40 +1171,40 @@ tests =
                   Reduce
                     Commutative
                     ( fromLines
-                        [ "\\ {a_0 : i32, b_1 : i32} : {i32} ->",
-                          "let {c_2 : i32} = add32(a_0, b_1)",
+                        [ "\\ {a_0 : i64, b_1 : i64} : {i64} ->",
+                          "let {c_2 : i64} = add32(a_0, b_1)",
                           "in {c_2}"
                         ]
                     )
-                    ["0i32"]
+                    ["0i64"]
                 reduce_op =
                   Reduce
                     Commutative
                     ( fromLines
-                        [ "\\ {a_4 : f32, b_5 : f32} : {f32} ->",
-                          "let {c_6 : f32} = fadd32(a_4, b_5)",
+                        [ "\\ {a_4 : f64, b_5 : f64} : {f64} ->",
+                          "let {c_6 : f64} = fadd32(a_4, b_5)",
                           "in {c_6}"
                         ]
                     )
-                    ["0.0f32"]
+                    ["0.0f64"]
                 scan_op' =
                   Scan
                     ( fromLines
-                        [ "\\ {a_7 : i64, b_8 : i64} : {i64} ->",
-                          "let {c_9 : i64} = add64(a_7, b_8)",
+                        [ "\\ {a_7 : i32, b_8 : i32} : {i32} ->",
+                          "let {c_9 : i32} = add64(a_7, b_8)",
                           "in {c_9}"
                         ]
                     )
-                    ["0i64"]
+                    ["0i32"]
                 scan_op =
                   Scan
                     ( fromLines
-                        [ "\\ {a_10 : f64, b_11 : f64} : {f64} ->",
-                          "let {c_12 : f64} = fadd64(a_10, b_11)",
+                        [ "\\ {a_10 : f32, b_11 : f32} : {f32} ->",
+                          "let {c_12 : f32} = fadd64(a_10, b_11)",
                           "in {c_12}"
                         ]
                     )
-                    ["0.0f64"]
+                    ["0.0f32"]
                 ident_0_a = "input_a_0_13 : [d_27]i32"
                 input_0_a = SOAC.identInput ident_0_a
                 ident_0_b = "input_b_0_14 : [d_27]f32"
@@ -1221,8 +1221,8 @@ tests =
                         "d_27"
                         [input_0_a, input_0_b, input_1_a, input_1_b]
                         ( fromLines [
-                          "\\ {x_17 : i32, x_18 : i64, x_10000 : f32, x_10001 : f64}: {i32, i64, f32, f64} ->",
-                          "{x_17, x_18, x_10000, x_10001}"
+                          "\\ {x_17 : i32, x_18 : i64, x_30 : f32, x_31 : f64}: {i32, i64, f32, f64} ->",
+                          "{x_17, x_18, x_30, x_31}"
                         ])
                         [scan_op']
                         [reduce_op']
@@ -1233,8 +1233,8 @@ tests =
                         [scan_op]
                         [reduce_op]
                         ( fromLines 
-                        [ "\\ {x_24 : f64, x_10002 : i64}: {f64, i64} ->",
-                          "{x_24, x_10002}"
+                        [ "\\ {x_24 : f64, x_32 : i64}: {f64, i64} ->",
+                          "{x_24, x_32}"
                         ])
                       )
                   )

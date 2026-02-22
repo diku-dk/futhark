@@ -277,16 +277,18 @@ moveRedScanSuperScrema ::
   SuperScrema SOACS ->
   m (SuperScrema SOACS)
 moveRedScanSuperScrema super_screma = do
-  renamed_lam_scan_red' <- renameLambda lam_scan_red'
+  let (scan_red_lam', map_lam') =
+        splitAtLambdaByRes (scanResults scan' + redResults red') lam'
+  renamed_scan_red_lam' <- renameLambda scan_red_lam'
   let (scan_res', red_res') =
         splitAt (scanResults scan')
           . bodyResult
-          $ lambdaBody renamed_lam_scan_red'
+          $ lambdaBody renamed_scan_red_lam'
       (scan_ts', red_ts') =
         splitAt (scanResults scan') $
-          lambdaReturnType renamed_lam_scan_red'
-      binds = fuseBinds lam out_p inp_c renamed_lam_scan_red'
-      stms' = bodyStms $ lambdaBody renamed_lam_scan_red'
+          lambdaReturnType renamed_scan_red_lam'
+      binds = fuseBinds lam out_p inp_c renamed_scan_red_lam'
+      stms' = bodyStms $ lambdaBody renamed_scan_red_lam'
       new_scan = scan <> scan'
       new_red = red <> red'
       new_ts = scan_ts <> scan_ts' <> red_ts <> red_ts' <> map_ts
@@ -295,24 +297,22 @@ moveRedScanSuperScrema super_screma = do
       new_body = mkBody (stms <> binds <> stms') new_res
       new_lam = eliminateByRes $ Lambda new_pars new_ts new_body
       (scan_pars', map_pars') =
-        splitAt (scanResults scan) (lambdaParams lam_map')
+        splitAt (scanResults scan) (lambdaParams map_lam')
 
   extra_scan_pars' <- mapM (newParam "x") scan_ts'
 
-  let new_pars' = scan_pars' <> extra_scan_pars' <> map_pars'
-      new_ts' = scan_ts' <> lambdaReturnType lam_map'
-      new_stms' = bodyStms $ lambdaBody lam_map'
+  let new_pars' = lambdaParams map_lam' -- scan_pars' <> extra_scan_pars' <> map_pars'
+      new_ts' = lambdaReturnType renamed_scan_red_lam' -- scan_ts' <> lambdaReturnType map_lam'
+      new_stms' = bodyStms $ lambdaBody map_lam'
       new_res' =
         varsRes (map paramName extra_scan_pars')
-          <> bodyResult (lambdaBody lam_map')
+          <> bodyResult (lambdaBody map_lam')
       new_body' = mkBody new_stms' new_res'
       new_lam' = eliminateByRes $ Lambda new_pars' new_ts' new_body'
 
   pure $
     SuperScrema w inp new_lam new_scan new_red new_lam' [] [] lam''
   where
-    (lam_scan_red', lam_map') =
-      splitAtLambdaByRes (scanResults scan' + redResults red') lam'
     stms = bodyStms $ lambdaBody lam
     out_p = [0 .. length (bodyResult $ lambdaBody lam) - 1]
     (scan_out, _, map_out) =
