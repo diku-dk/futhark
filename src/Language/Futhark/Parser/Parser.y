@@ -576,14 +576,8 @@ Exp2 :: { UncheckedExp }
      | Atom '..' Exp2            {% twoDotsRange $2 }
      | '-' Exp2  %prec juxtprec  { Negate $2 (srcspan $1 $>) }
      | '!' Exp2 %prec juxtprec   { Not $2 (srcspan $1 $>) }
-
-     | Exp2 with '[' DimIndices ']' '=' Exp2
-       { Update $1 $4 $7 (srcspan $1 $>) }
-     | Exp2 with '...[' DimIndices ']' '=' Exp2
-       { Update $1 $4 $7 (srcspan $1 $>) }
-
-     | Exp2 with FieldAccesses_ '=' Exp2
-       { RecordUpdate $1 (map unLoc $3) $5 NoInfo (srcspan $1 $>) }
+     | Exp2 with Update '=' Exp2
+       { Update $1 $3 $5 NoInfo (srcspan $1 $>) }
 
      | ApplyList {% applyExp $1 }
 
@@ -671,6 +665,30 @@ Exps1_ :: { [UncheckedExp] }
         | Exps1_ ','     { $1 }
         | Exp            { [$1] }
 
+Update :: { [UpdateStep NoInfo Name] }
+           : UpdateStep UpdateTail { $1 : $2 }
+
+UpdateTail :: { [UpdateStep NoInfo Name] }
+               : UpdateStep UpdateTail { $1 : $2 }
+               |                              { [] }
+
+UpdateStep :: { UpdateStep NoInfo Name }
+               : '[' DimIndices ']'    { UpdateStepSlice $2 }
+               | '...[' DimIndices ']' { UpdateStepSlice $2 }
+               | FieldId               { UpdateStepField (unLoc $1) }
+               | '.' FieldId           { UpdateStepField (unLoc $2) }
+
+LetUpdate :: { [UpdateStep NoInfo Name] }
+          : LetUpdateStep LetUpdateTail { $1 : $2 }
+
+LetUpdateTail :: { [UpdateStep NoInfo Name] }
+              : LetUpdateStep LetUpdateTail { $1 : $2 }
+              |                             { [] }
+
+LetUpdateStep :: { UpdateStep NoInfo Name }
+              : '...[' DimIndices ']' { UpdateStepSlice $2 }
+              | '.' FieldId           { UpdateStepField (unLoc $2) }
+
 FieldAccesses :: { [L Name] }
                : FieldAccesses1 { $1 }
                |                { [] }
@@ -697,17 +715,17 @@ LetExp :: { UncheckedExp }
        { AppExp (LetPat [] $2 $4 $5 (srcspan $1 $>)) NoInfo }
 
      | let id LocalFunTypeParams FunParams1 maybeAscription(TypeExp) '=' Exp LetBody
-       { let L nameloc (ID name) = $2
-           in AppExp (LetFun (name, srclocOf nameloc) ($3, fst $4 : snd $4, $5, NoInfo, $7)
-                     $8 (srcspan $1 $>))
-                     NoInfo}
+       { let { L nameloc (ID name) = $2 }
+         in AppExp (LetFun (name, srclocOf nameloc) ($3, fst $4 : snd $4, $5, NoInfo, $7)
+                    $8 (srcspan $1 $>)) NoInfo
+       }
 
-     | let id '...[' DimIndices ']' '=' Exp LetBody
-       { let L vloc (ID v) = $2; ident = Ident v NoInfo (srclocOf vloc)
-         in AppExp (LetWith ident ident $4 $7 $8 (srcspan $1 $>)) NoInfo }
-     | let id FieldAccesses1 '=' Exp LetBody
-       { let L vloc (ID v) = $2; ident = Ident v NoInfo (srclocOf vloc)
-          in AppExp (LetWithField ident ident (map unLoc $3) $5 $6 (srcspan $1 $>)) NoInfo }
+     | let id LetUpdate '=' Exp LetBody
+       { let { L vloc (ID v) = $2
+             ; ident = Ident v NoInfo (srclocOf vloc)
+             }
+         in AppExp (LetWith ident ident $3 $5 $6 (srcspan $1 $>)) NoInfo
+       }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
