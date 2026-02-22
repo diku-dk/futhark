@@ -1251,6 +1251,15 @@ transformDistStm segments env (DistStm inps res stm) = do
             "body:         " ++ prettyString body
           ]
 
+      -- TODO:
+      -- 1) handle infinite loop
+      -- 2) refactor
+      -- 3) consider avoiding "mulitpl path that basicly hapening"
+      -- 4) use reduction rather than scan for any_active
+      -- 5) consider updating the svtive segment so we don't go over w everytime
+      -- 6) consider not using doParttion since it seems to be an overkill
+
+
       -- inside the body we should compute the indices for which the condition is true and for which it is false, and then distribute the body based on that.
       --  We can then merge the results of the two branches by writing them back to a blank space like we do for the branches of a match.
       let [w] = NE.toList segments
