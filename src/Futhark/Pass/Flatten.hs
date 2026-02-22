@@ -25,6 +25,7 @@ import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass
+import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace)
 import Futhark.Pass.ExtractKernels.ToGPU (soacsStmToGPU)
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
@@ -703,7 +704,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp gid]
             in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp gid]
             readInputs segments env [seg_i] $ filter ((/= as) . fst) inps
-            case se of  
+            case se of
               Var v -> do
                 v_t <- lookupType v
                 let in_seg_is =
@@ -1180,17 +1181,16 @@ transformDistStm segments env (DistStm inps res stm) = do
       result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
       let reps = resultToResReps (map fst rettype) result
       pure $ insertReps (zip (map distResTag res) reps) env
-      
     Let _ aux (Loop merge (ForLoop i it n@(Constant _)) body) -> do
-    -- We start with the simple case of a for loop with a constant number of iterations.
-    -- I should revisit hadnling the for iterator (i)
+      -- We start with the simple case of a for loop with a constant number of iterations.
+      -- I should revisit hadnling the for iterator (i)
       let [w] = NE.toList segments
           old_loop_params = map fst merge
           old_loop_inits = map snd merge
 
-      (lifted_loop_params, lifted_loop_reps) <- mapAndUnzipM (liftParam w) old_loop_params 
+      (lifted_loop_params, lifted_loop_reps) <- mapAndUnzipM (liftParam w) old_loop_params
       lifted_init <- mapM (liftLoopInit segments inps env) old_loop_inits
-        
+
       let lifted_loop_params' = concat lifted_loop_params
           lifted_init' = concat lifted_init
 
@@ -1221,13 +1221,14 @@ transformDistStm segments env (DistStm inps res stm) = do
             distributeBody (scope <> dist_scope) w loop_new_inputs body
 
       (loop_body_res, loop_body_stms) <-
-        runReaderT 
-          (runBuilder $
-            liftBody w loop_new_inputs' loop_env_local loop_dstms (bodyResult body))
-            (scope <> build_scope)
+        runReaderT
+          ( runBuilder $
+              liftBody w loop_new_inputs' loop_env_local loop_dstms (bodyResult body)
+          )
+          (scope <> build_scope)
 
       let loop_body_gpu = Body () loop_body_stms loop_body_res
-          loop_exp_gpu  =
+          loop_exp_gpu =
             Loop
               (zip lifted_loop_params' lifted_init')
               (ForLoop i it n)
@@ -1235,12 +1236,188 @@ transformDistStm segments env (DistStm inps res stm) = do
 
       loop_out_vs <-
         certifying (distCerts inps aux env) $
-          letTupExp "loop_res" loop_exp_gpu
+          letTupExp "loop_res_out" loop_exp_gpu
 
       let result_types = map ((\(DistType _ _ t) -> t) . distResType) res
           out_reps = resultToResReps result_types loop_out_vs
       pure $ insertReps (zip (map distResTag res) out_reps) env
+    Let _ aux (Loop merge (WhileLoop cond) body) -> do
+      traceM $
+        unlines
+          [ "=== WhileLoop ===",
+            "merge params: " ++ prettyString (map fst merge),
+            "merge inits:  " ++ prettyString (map snd merge),
+            "cond:         " ++ prettyString cond,
+            "body:         " ++ prettyString body
+          ]
 
+      -- inside the body we should compute the indices for which the condition is true and for which it is false, and then distribute the body based on that.
+      --  We can then merge the results of the two branches by writing them back to a blank space like we do for the branches of a match.
+      let [w] = NE.toList segments
+          old_loop_params = map fst merge
+          old_loop_inits = map snd merge
+
+      (lifted_loop_params, lifted_loop_reps) <- mapAndUnzipM (liftParam w) old_loop_params
+      lifted_init <- mapM (liftLoopInit segments inps env) old_loop_inits
+      traceM $
+        unlines
+          [ "lifted_loop_params: " ++ prettyString lifted_loop_params,
+            "lifted_init:       " ++ prettyString lifted_init
+          ]
+
+      let lifted_loop_params' = concat lifted_loop_params
+          lifted_init' = concat lifted_init
+
+
+      -- for now we use doPartition but probably we can do something simpeler?
+
+      -- find cond_lifted_param in old_lifted_loop_params to get the lifted_loop_reps
+      -- TODO: handle infinite loop
+      let (Just (cond_lifted_rep,cond_init)) = lookup cond (zip (map paramName old_loop_params) (zip lifted_loop_reps lifted_init))
+          [cond_init_se] = cond_init
+
+      -- Compute initial any_active
+      cond_init_arr_v <- letExp "cond_init_arr" $ BasicOp $ SubExp cond_init_se
+      let cond_lifted_param = case cond_lifted_rep of
+            Regular v -> v
+            Irregular {} -> error "WhileLoop condition cannot be irregular"
+
+      -- latter chagne to reduction 
+      or_lam <- binOpLambda LogOr Bool
+      cond_scanned <- genScan "any_scan" [w] or_lam [constant False] [cond_init_arr_v]
+      let [cond_scanned_v] = cond_scanned
+      any_active_init <-
+        letSubExp "any_active_init"
+          =<< eIndex cond_scanned_v [toExp $ pe64 w - 1]
+
+      any_active_param <- newParam "any_active" (Prim Bool)
+
+      let (inps_local, env_local0, next0) = localiseInputs env inps
+          loop_param_inputs_local =
+            zipWith
+              (\p j -> (paramName p, DistInput (ResTag j) (paramType p)))
+              old_loop_params
+              [next0 ..]
+          loop_param_reps_local =
+            zipWith
+              (\j rep -> (ResTag j, rep))
+              [next0 ..]
+              lifted_loop_reps
+          loop_new_inputs = inps_local <> loop_param_inputs_local
+          loop_env_local = insertReps loop_param_reps_local env_local0
+
+      let dist_scope = scopeOfFParams old_loop_params
+          build_scope = scopeOfFParams lifted_loop_params' <> scopeOfFParams [any_active_param]
+      scope <- askScope
+
+      -- ‌build body
+      (loop_body_res, loop_body_stms) <-
+        runReaderT
+          (runBuilder $ do
+        equiv_classes <- letExp "equiv_classes" <=< segMap (MkSolo w) $ \(MkSolo i) -> do
+          c <- letSubExp "c" =<< eIndex cond_lifted_param [eSubExp i]
+          cls <-
+            letSubExp "cls"
+              =<< eIf
+                (eSubExp c)
+                (eBody [toExp $ intConst Int64 1])
+                (eBody [toExp $ intConst Int64 0])
+          pure [subExpRes cls]
+        n_cases <- letExp "n_cases" <=< toExp $ intConst Int64 2
+        (partition_sizes, partition_offs, partition_inds) <- doPartition n_cases equiv_classes
+        inds_t <- lookupType partition_inds
+        num_data <- letSubExp "size 1" =<< eIndex partition_sizes [toExp $ intConst Int64 1]
+        begin <- letSubExp "idx_begin 1" =<< eIndex partition_offs [toExp $ intConst Int64 1]
+        active_inds <- letExp "inds_branch 1"  $ BasicOp $ Index partition_inds $ fullSlice inds_t [DimSlice begin num_data (intConst Int64 1)]
+
+
+        let splitInputWhile is v = do
+              (t, rep) <- liftSubExp (NE.singleton w) loop_new_inputs loop_env_local (Var v)
+              (t, v,) <$> case rep of
+                Regular arr -> do
+                  n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+                  arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
+                    idx <- letExp "idx" =<< eIndex is [eSubExp i]
+                    subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
+                  pure $ Regular arr'
+                Irregular (IrregularRep segs flags offsets elems) -> do
+                  n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+                  segs' <- letExp "split_segs" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
+                    idx <- letExp "idx" =<< eIndex is [eSubExp i]
+                    subExpsRes . pure <$> (letSubExp "segs" =<< eIndex segs [toExp idx])
+                  (_, offsets', num_data) <- exScanAndSum segs'
+                  (_, _, ii1) <- doRepIota segs'
+                  (_, _, ii2) <- doSegIota segs'
+                  ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap (MkSolo num_data) $ \(MkSolo i) -> do
+                    offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp i]]]
+                    idx <- letExp "idx" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp i])
+                    flags_split <- letSubExp "flags" =<< eIndex flags [toExp idx]
+                    elems_split <- letSubExp "elems" =<< eIndex elems [toExp idx]
+                    pure $ subExpsRes [flags_split, elems_split]
+                  pure $ Irregular $ IrregularRep
+                    { irregularS = segs', irregularF = flags', irregularO = offsets', irregularD = elems' }
+
+        let free_in_body = namesToList $ freeIn body
+        (ts, vs, reps) <- unzip3 <$> mapM (splitInputWhile active_inds) free_in_body
+        let subset_inputs = do
+              (v, t, i) <- zip3 vs ts [0 ..]
+              pure (v, DistInput (ResTag i) t)
+            env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
+        let (subset_inputs', subset_dstms) = distributeBody (scope <> dist_scope) num_data subset_inputs body
+        
+        subset_body_res <- liftBody num_data subset_inputs' env_subset subset_dstms (bodyResult body)
+        subset_result_vs <- mapM (letExp "subset_result" <=< toExp . resSubExp) subset_body_res
+        
+        let subset_reps = resultToResReps (map declTypeOf old_loop_params) subset_result_vs
+
+
+        let scatterBack full_arr is xs = do
+              n <- letSubExp "n_scatter" =<< (toExp . arraySize 0 =<< lookupType is)
+              copy_arr <- letExp "param_copy" $ BasicOp $ Replicate mempty (Var full_arr)
+              letExp "scattered" <=< genScatter copy_arr n $ \gtid -> do
+                x <- letSubExp "x" =<< eIndex xs [eSubExp gtid]
+                idx <- letExp "i" =<< eIndex is [eSubExp gtid]
+                pure (idx, x)
+
+
+        merged <- forM (zip lifted_loop_params subset_reps) $ \(param_group, rep) ->
+          case rep of
+            Regular subset_arr -> do
+              let [full_param] = param_group
+              scattered <- scatterBack (paramName full_param) active_inds subset_arr
+              pure [Var scattered]
+            Irregular {} ->
+              error "WhileLoop: irregular loop params not yet supported"
+
+        let merged_flat = concat merged
+
+        or_lam <- binOpLambda LogOr Bool
+        cond_scanned <- genScan "scan_again" [w] or_lam [constant False] [cond_lifted_param]
+        let [cond_scanned_v] = cond_scanned
+        any_active <-
+          letSubExp "any_active_init"
+            =<< eIndex cond_scanned_v [toExp $ pe64 w - 1]
+        pure $ map (SubExpRes mempty) merged_flat ++ [SubExpRes mempty any_active]
+        )
+       (scope <> build_scope)
+
+      let loop_body_gpu = Body () loop_body_stms loop_body_res
+          loop_exp_gpu = 
+            Loop
+              (zip (lifted_loop_params' ++ [any_active_param]) (lifted_init' ++ [any_active_init]))
+              (WhileLoop (paramName any_active_param))
+              loop_body_gpu
+      
+      
+      loop_out_vs <-
+        certifying (distCerts inps aux env) $
+          letTupExp "loop_res_out" loop_exp_gpu
+      let loop_out_vs' = L.init loop_out_vs
+          result_types = map ((\(DistType _ _ t) -> t) . distResType) res
+          out_reps = resultToResReps result_types loop_out_vs'
+      pure $ insertReps (zip (map distResTag res) out_reps) env
+       
+      -- error "WhileLoop not yet implemented"
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
 -- helper to not mess up the tags when generating new ones for the loop parameters
@@ -1251,10 +1428,9 @@ localiseInputs env_outer inps =
         case inp of
           DistInputFree arr t ->
             ((i, env_acc), (v, DistInputFree arr t))
-
           DistInput oldrt t ->
-            let newrt    = ResTag i
-                rep      = resVar oldrt env_outer
+            let newrt = ResTag i
+                rep = resVar oldrt env_outer
                 env_acc' = insertRep newrt rep env_acc
              in ((i + 1, env_acc'), (v, DistInput newrt t))
 
