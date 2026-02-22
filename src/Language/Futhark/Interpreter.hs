@@ -1,3 +1,5 @@
+{-# LANGUAGE Strict #-}
+
 -- | An interpreter operating on type-checked source Futhark terms.
 -- Relatively slow.
 module Language.Futhark.Interpreter
@@ -44,7 +46,7 @@ import Data.List
   )
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
-import Data.Map qualified as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
 import Data.Ord
