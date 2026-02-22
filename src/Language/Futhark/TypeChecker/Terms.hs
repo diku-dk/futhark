@@ -48,7 +48,6 @@ hasBinding (AppExp LetPat {} _) = True
 hasBinding (AppExp LetFun {} _) = True
 hasBinding (AppExp Loop {} _) = True
 hasBinding (AppExp LetWith {} _) = True
-hasBinding (AppExp LetWithField {} _) = True
 hasBinding (AppExp Match {} _) = True
 hasBinding e = isNothing $ astMap m e
   where
@@ -539,84 +538,68 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
           loc
       )
       (Info $ AppRes body_t ext)
-checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
-  src' <- checkIdent src
-  slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage src "type of source array") "src" $ sliceDims slice'
-  unify (mkUsage loc "type of target array") t $ unInfo $ identType src'
-
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
-
-  ve' <- unifies "type of target array" elemt =<< checkExp ve
-
-  bindingIdent dest (unInfo (identType src')) $ \dest' -> do
-    body' <- checkExp body
-    (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
-    pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
-checkExp (AppExp (LetWithField dest src fields ve body loc) _) = do
+checkExp (AppExp (LetWith dest src steps ve body loc) _) = do
   src' <- checkIdent src
   src_t <- normTypeFully $ unInfo $ identType src'
-  foldM_ (flip $ mustHaveField usage) src_t fields
-  ve' <- checkExp ve
-  ve_t <- expType ve'
-  updated_t <- updateField fields ve_t src_t
-  bindingIdent dest updated_t $ \dest' -> do
-    body' <- checkExp body
-    (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
-    pure $ AppExp (LetWithField dest' src' fields ve' body' loc) (Info $ AppRes body_t ext)
+
+  let onlyFields = all isField steps
+
+  if onlyFields
+    then do
+      ve' <- checkExp ve
+      ve_t <- expType ve'
+      updated_t <- updateFieldPath src (fieldNames steps) ve_t src_t
+      steps' <- mapM checkFieldStep steps
+
+      bindingIdent dest updated_t $ \dest' -> do
+        body' <- checkExp body
+        (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
+        pure $ AppExp (LetWith dest' src' steps' ve' body' loc) (Info $ AppRes body_t ext)
+    else do
+      (steps', target_t) <- checkUpdateSteps loc src_t steps
+      ve' <- unifies "type of update target" target_t =<< checkExp ve
+
+      src_t' <- normTypeFully $ unInfo $ identType src'
+      bindingIdent dest src_t' $ \dest' -> do
+        body' <- checkExp body
+        (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
+        pure $ AppExp (LetWith dest' src' steps' ve' body' loc) (Info $ AppRes body_t ext)
   where
-    usage = mkUsage loc "record field update"
-    updateField [] ve_t src_t = do
-      (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
-      onFailure (CheckingRecordUpdate fields src_t' ve_t) $
-        unify usage src_t' ve_t
-      pure ve_t
-    updateField (f : fs) ve_t (Scalar (Record m))
-      | Just f_t <- M.lookup f m = do
-          f_t' <- updateField fs ve_t f_t
-          pure $ Scalar $ Record $ M.insert f f_t' m
-    updateField _ _ _ =
-      typeError loc mempty . withIndexLink "record-type-not-known" $
-        "Full type of"
-          </> indent 2 (pretty src)
-          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
-checkExp (Update src slice ve loc) = do
-  slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
-  ve' <- unifies "type of target array" elemt =<< checkExp ve
-  src' <- unifies "type of target array" t =<< checkExp src
-  pure $ Update src' slice' ve' loc
+    isField UpdateStepField {} = True
+    isField _ = False
+
+    fieldNames = map (\(UpdateStepField f) -> f)
+
+    checkFieldStep (UpdateStepField f) = pure $ UpdateStepField f
+    checkFieldStep _ = error "impossible"
 
 -- Record updates are a bit hacky, because we do not have row typing
 -- (yet?).  For now, we only permit record updates where we know the
 -- full type up to the field we are updating.
-checkExp (RecordUpdate src fields ve NoInfo loc) = do
+checkExp (Update src steps ve NoInfo loc) = do
   src' <- checkExp src
-  ve' <- checkExp ve
-  a <- expTypeFully src'
-  foldM_ (flip $ mustHaveField usage) a fields
-  ve_t <- expType ve'
-  updated_t <- updateField fields ve_t =<< expTypeFully src'
-  pure $ RecordUpdate src' fields ve' (Info updated_t) loc
+  src_t <- expTypeFully src'
+  let onlyFields = all isField steps
+  if onlyFields
+    then do
+      ve' <- checkExp ve
+      ve_t <- expType ve'
+      updated_t <- updateFieldPath src (fieldNames steps) ve_t src_t
+      steps' <- mapM checkFieldStep steps
+      pure $ Update src' steps' ve' (Info updated_t) loc
+    else do
+      (steps', target_t) <- checkUpdateSteps loc src_t steps
+      ve' <- unifies "type of update target" target_t =<< checkExp ve
+      src_t' <- expTypeFully src'
+      pure $ Update src' steps' ve' (Info src_t') loc
   where
-    usage = mkUsage loc "record update"
-    updateField [] ve_t src_t = do
-      (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
-      onFailure (CheckingRecordUpdate fields src_t' ve_t) $
-        unify usage src_t' ve_t
-      pure ve_t
-    updateField (f : fs) ve_t (Scalar (Record m))
-      | Just f_t <- M.lookup f m = do
-          f_t' <- updateField fs ve_t f_t
-          pure $ Scalar $ Record $ M.insert f f_t' m
-    updateField _ _ _ =
-      typeError loc mempty . withIndexLink "record-type-not-known" $
-        "Full type of"
-          </> indent 2 (pretty src)
-          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
+    isField UpdateStepField {} = True
+    isField _ = False
 
---
+    fieldNames = map (\(UpdateStepField f) -> f)
+
+    checkFieldStep (UpdateStepField f) = pure $ UpdateStepField f
+    checkFieldStep _ = error "impossible"
 checkExp (AppExp (Index e slice loc) _) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
@@ -764,6 +747,52 @@ checkExp (AppExp (Match e cs loc) _) = do
   pure $ AppExp (Match e' cs' loc) (Info $ AppRes t retext)
 checkExp (Attr info e loc) =
   Attr <$> checkAttr info <*> checkExp e <*> pure loc
+
+updateFieldPath ::
+  (Pretty a, Located a) =>
+  a ->
+  [Name] ->
+  StructType ->
+  StructType ->
+  TermTypeM StructType
+updateFieldPath src [] ve_t src_leaf_t = do
+  (src_leaf_t', _) <- allDimsFreshInType usage Nonrigid "any" src_leaf_t
+  onFailure (CheckingRecordUpdate [] src_leaf_t' ve_t) $
+    unify usage src_leaf_t' ve_t
+  pure ve_t
+  where
+    usage = mkUsage (locOf src) "record update"
+updateFieldPath src (f : fs) ve_t (Scalar (Record m))
+  | Just f_t <- M.lookup f m = do
+      f_t' <- updateFieldPath src fs ve_t f_t
+      pure $ Scalar $ Record $ M.insert f f_t' m
+updateFieldPath src _ _ _ =
+  typeError (locOf src) mempty . withIndexLink "record-type-not-known" $
+    "Full type of"
+      </> indent 2 (pretty src)
+      </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
+
+checkUpdateSteps ::
+  SrcLoc ->
+  StructType ->
+  [UpdateStep NoInfo VName] ->
+  TermTypeM ([UpdateStep Info VName], StructType)
+checkUpdateSteps _ t [] =
+  pure ([], t)
+checkUpdateSteps loc t (step : rest) =
+  case step of
+    UpdateStepSlice slice -> do
+      slice' <- checkSlice slice
+      (arr_t, _) <- newArrayType (mkUsage' loc) "update_path_src" $ sliceDims slice'
+      unify (mkUsage loc "type of update path indexing") arr_t t
+      (elem_t, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully arr_t
+      (rest', target_t) <- checkUpdateSteps loc elem_t rest
+      pure (UpdateStepSlice slice' : rest', target_t)
+    UpdateStepField f -> do
+      t' <- normTypeFully t
+      f_t <- mustHaveField (mkUsage loc "record update path") f t'
+      (rest', target_t) <- checkUpdateSteps loc f_t rest
+      pure (UpdateStepField f : rest', target_t)
 
 checkCases ::
   StructType ->

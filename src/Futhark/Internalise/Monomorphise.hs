@@ -600,8 +600,6 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
         )
 transformAppExp LetWith {} _ =
   error "transformAppExp: LetWith is not supposed to occur"
-transformAppExp LetWithField {} _ =
-  error "transformAppExp: LetWithField is not supposed to occur"
 transformAppExp (Index e0 idxs loc) res =
   AppExp
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
@@ -709,19 +707,18 @@ transformExp (Project n e tp loc) = do
   tp' <- traverse transformType tp
   e' <- transformExp e
   pure $ Project n e' tp' loc
-transformExp (Update e1 idxs e2 loc) =
+transformExp (Update e1 steps e2 t loc) =
   Update
     <$> transformExp e1
-    <*> mapM transformDimIndex idxs
-    <*> transformExp e2
-    <*> pure loc
-transformExp (RecordUpdate e1 fs e2 t loc) =
-  RecordUpdate
-    <$> transformExp e1
-    <*> pure fs
+    <*> mapM transformStep steps
     <*> transformExp e2
     <*> traverse transformType t
     <*> pure loc
+  where
+    transformStep (UpdateStepSlice idxs) =
+      UpdateStepSlice <$> mapM transformDimIndex idxs
+    transformStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 transformExp (Constr name all_es t loc) =
@@ -1009,6 +1006,10 @@ arrowArg scope argset args_params rety =
     arrowCleanType paramed (Scalar ty) =
       Scalar $ arrowCleanScalar paramed ty
 
+removeEntryPoint :: PolyBinding -> PolyBinding
+removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, loc)) =
+  PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
+
 -- Monomorphise a polymorphic function at the types given in the instance
 -- list. Monomorphises the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
@@ -1228,7 +1229,9 @@ transformValBind valbind = do
 
   pure
     env
-      { envPolyBindings = M.insert (valBindName valbind) valbind' $ envPolyBindings env,
+      { envPolyBindings =
+          M.insert (valBindName valbind) (removeEntryPoint valbind') $
+            envPolyBindings env,
         envGlobalScope = global <> envGlobalScope env,
         envScope =
           S.insert (valBindName valbind) global

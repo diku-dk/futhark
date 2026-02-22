@@ -102,7 +102,7 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
     sunkHere v stm =
       v
         `nameIn` free_in_stms
-        && all (`ST.available` vtable) (namesToList (freeIn stm))
+        && allNames (`ST.available` vtable) (freeIn stm)
     sunk = namesFromList $ foldMap (patNames . stmPat) sunk_stms
 
 optimiseLoop ::

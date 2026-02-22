@@ -222,7 +222,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
       lmem <- sAlloc "local_mem" lmem_total_size (Space "shared")
       let arrInLMem ptype name len_se offset =
             sArray
-              (name <> "_" <> nameFromString (prettyString ptype))
+              (name <> "_" <> nameFromText (prettyText ptype))
               ptype
               (Shape [len_se])
               lmem
