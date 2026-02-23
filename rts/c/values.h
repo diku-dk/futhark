@@ -427,6 +427,24 @@ static int write_str_u64(FILE *out, const uint64_t *src) {
   return fprintf(out, "%"PRIu64"u64", *src);
 }
 
+// FLT_DECIMAL_DIG and DBL_DECIMAL_DIG are defined in C11.
+// If we want C99 compatibility, we must define them ourselves.
+// We choose the standard values on platforms that use the IEEE754 defaults, with fallback to an overestimate.
+#ifndef FLT_DECIMAL_DIG
+  #if FLT_RADIX == 2 && FLT_MANT_DIG <= 24
+    #define FLT_DECIMAL_DIG 9
+  #else
+    #define FLT_DECIMAL_DIG DECIMAL_DIG
+  #endif
+#endif
+#ifndef DBL_DECIMAL_DIG
+  #if FLT_RADIX == 2 && DBL_MANT_DIG <= 53
+    #define DBL_DECIMAL_DIG 17
+  #else
+    #define DBL_DECIMAL_DIG DECIMAL_DIG
+  #endif
+#endif
+
 static int write_str_f16(FILE *out, const uint16_t *src) {
   float x = halfbits2float(*src);
   if (isnan(x)) {
@@ -436,7 +454,7 @@ static int write_str_f16(FILE *out, const uint16_t *src) {
   } else if (isinf(x)) {
     return fprintf(out, "-f16.inf");
   } else {
-    return fprintf(out, "%.*ff16", FLT_DIG, x);
+    return fprintf(out, "%.*gf16", FLT_DECIMAL_DIG, x);
   }
 }
 
@@ -449,7 +467,7 @@ static int write_str_f32(FILE *out, const float *src) {
   } else if (isinf(x)) {
     return fprintf(out, "-f32.inf");
   } else {
-    return fprintf(out, "%.*ff32", FLT_DIG, x);
+    return fprintf(out, "%.*gf32", FLT_DECIMAL_DIG, x);
   }
 }
 
@@ -462,7 +480,7 @@ static int write_str_f64(FILE *out, const double *src) {
   } else if (isinf(x)) {
     return fprintf(out, "-f64.inf");
   } else {
-    return fprintf(out, "%.*ff64", DBL_DIG, x);
+    return fprintf(out, "%.*gf64", DBL_DECIMAL_DIG, x);
   }
 }
 
