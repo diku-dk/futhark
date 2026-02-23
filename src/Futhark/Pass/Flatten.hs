@@ -1254,9 +1254,9 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- TODO:
       -- 1) handle infinite loop
       -- 2) refactor
-      -- 3) consider avoiding "mulitpl path that basicly hapening"
+      -- 3) consider avoiding "calculating the partion kind of two times"
       -- 4) use reduction rather than scan for any_active
-      -- 5) consider updating the svtive segment so we don't go over w everytime
+      -- 5) consider updating the active segment so we don't go over w everytime
       -- 6) consider not using doParttion since it seems to be an overkill
 
 
@@ -1277,8 +1277,6 @@ transformDistStm segments env (DistStm inps res stm) = do
       let lifted_loop_params' = concat lifted_loop_params
           lifted_init' = concat lifted_init
 
-
-      -- for now we use doPartition but probably we can do something simpeler?
 
       -- find cond_lifted_param in old_lifted_loop_params to get the lifted_loop_reps
       -- TODO: handle infinite loop
@@ -1323,22 +1321,7 @@ transformDistStm segments env (DistStm inps res stm) = do
       (loop_body_res, loop_body_stms) <-
         runReaderT
           (runBuilder $ do
-        equiv_classes <- letExp "equiv_classes" <=< segMap (MkSolo w) $ \(MkSolo i) -> do
-          c <- letSubExp "c" =<< eIndex cond_lifted_param [eSubExp i]
-          cls <-
-            letSubExp "cls"
-              =<< eIf
-                (eSubExp c)
-                (eBody [toExp $ intConst Int64 1])
-                (eBody [toExp $ intConst Int64 0])
-          pure [subExpRes cls]
-        n_cases <- letExp "n_cases" <=< toExp $ intConst Int64 2
-        (partition_sizes, partition_offs, partition_inds) <- doPartition n_cases equiv_classes
-        inds_t <- lookupType partition_inds
-        num_data <- letSubExp "size 1" =<< eIndex partition_sizes [toExp $ intConst Int64 1]
-        begin <- letSubExp "idx_begin 1" =<< eIndex partition_offs [toExp $ intConst Int64 1]
-        active_inds <- letExp "inds_branch 1"  $ BasicOp $ Index partition_inds $ fullSlice inds_t [DimSlice begin num_data (intConst Int64 1)]
-
+        (num_data, active_inds) <- genFilter cond_lifted_param
 
         let splitInputWhile is v = do
               (t, rep) <- liftSubExp (NE.singleton w) loop_new_inputs loop_env_local (Var v)
