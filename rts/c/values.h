@@ -431,14 +431,14 @@ static int write_str_u64(FILE *out, const uint64_t *src) {
 // If we want C99 compatibility, we must define them ourselves.
 // We choose the standard values on platforms that use the IEEE754 defaults, with fallback to an overestimate.
 #ifndef FLT_DECIMAL_DIG
-  #if FLT_RADIX == 2 && FLT_MANT_DIG <= 24
+  #if FLT_RADIX == 2 && FLT_MANT_DIG <= 24 && 9 < DECIMAL_DIG
     #define FLT_DECIMAL_DIG 9
   #else
     #define FLT_DECIMAL_DIG DECIMAL_DIG
   #endif
 #endif
 #ifndef DBL_DECIMAL_DIG
-  #if FLT_RADIX == 2 && DBL_MANT_DIG <= 53
+  #if FLT_RADIX == 2 && DBL_MANT_DIG <= 53 && 17 < DECIMAL_DIG
     #define DBL_DECIMAL_DIG 17
   #else
     #define DBL_DECIMAL_DIG DECIMAL_DIG
