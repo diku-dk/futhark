@@ -14,7 +14,6 @@ import Data.Graph.Inductive.Query.DFS qualified as Q
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Trace
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
@@ -63,8 +62,12 @@ instance MonadFreshNames FusionM where
 decGas :: FusionM ()
 decGas = modify (\s -> s {gas = max 0 . (+ (-1)) <$> gas s})
 
-isOutOfGas :: FusionM Bool
-isOutOfGas = maybe False (<= 0) <$> gets gas
+useGas :: a -> FusionM a -> FusionM a
+useGas g m = do
+  is_out_of_gas <- gets (maybe False (<= 0) . gas)
+  if is_out_of_gas
+    then pure g
+    else m
 
 runFusionM :: (MonadFreshNames m) => Scope SOACS -> FusionEnv -> FusionM a -> m a
 runFusionM scope fenv (FusionM a) = modifyNameSource $ \src ->
@@ -125,27 +128,24 @@ vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM
 -- find the neighbors -> verify that fusion causes no cycles -> fuse
 vTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
   | not (G.gelem node_1 g && G.gelem node_2 g) = pure dg
-  | vFusionFeasability dg node_1 node_2 = do
-      is_out_of_gas <- isOutOfGas
-      if is_out_of_gas
-        then pure dg
-        else do
-          let (ctx1, ctx2) = (G.context g node_1, G.context g node_2)
-          fres <- vFuseContexts edgs infusable_nodes ctx1 ctx2
-          case fres of
-            Just (inputs, _, nodeT, outputs) -> do
-              nodeT' <-
-                if null fusedC
-                  then pure nodeT
-                  else do
-                    let (_, _, _, deps_1) = ctx1
-                        (_, _, _, deps_2) = ctx2
-                        -- make copies of everything that was not
-                        -- previously consumed
-                        old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
-                    makeCopiesOfFusedExcept old_cons nodeT
-              contractEdge node_2 (inputs, node_1, nodeT', outputs) dg
-            Nothing -> pure dg
+  | vFusionFeasability dg node_1 node_2 =
+      useGas dg $ do
+        let (ctx1, ctx2) = (G.context g node_1, G.context g node_2)
+        fres <- vFuseContexts edgs infusable_nodes ctx1 ctx2
+        case fres of
+          Just (inputs, _, nodeT, outputs) -> do
+            nodeT' <-
+              if null fusedC
+                then pure nodeT
+                else do
+                  let (_, _, _, deps_1) = ctx1
+                      (_, _, _, deps_2) = ctx2
+                      -- make copies of everything that was not
+                      -- previously consumed
+                      old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
+                  makeCopiesOfFusedExcept old_cons nodeT
+            contractEdge node_2 (inputs, node_1, nodeT', outputs) dg
+          Nothing -> pure dg
   | otherwise = pure dg
   where
     edgs = map G.edgeLabel $ edgesBetween dg node_1 node_2
@@ -158,15 +158,12 @@ vTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
 hTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM
 hTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
   | not (G.gelem node_1 g && G.gelem node_2 g) = pure dg
-  | hFusionFeasability dg node_1 node_2 = do
-      is_out_of_gas <- isOutOfGas
-      if is_out_of_gas
-        then pure dg
-        else do
-          fres <- hFuseContexts (G.context g node_1) (G.context g node_2)
-          case fres of
-            Just ctx -> contractEdge node_2 ctx dg
-            Nothing -> pure dg
+  | hFusionFeasability dg node_1 node_2 =
+      useGas dg $ do
+        fres <- hFuseContexts (G.context g node_1) (G.context g node_2)
+        case fres of
+          Just ctx -> contractEdge node_2 ctx dg
+          Nothing -> pure dg
   | otherwise = pure dg
 
 hFuseContexts :: DepContext -> DepContext -> FusionM (Maybe DepContext)
@@ -577,16 +574,13 @@ doInnerFusion = mapAcross runInnerFusionOnContext
 -- Fixed-point iteration.
 keepTrying :: DepGraphAug FusionM -> DepGraphAug FusionM
 keepTrying f g = do
-  is_out_of_gas <- isOutOfGas
-  if is_out_of_gas
-    then pure g
-    else do
-      prev_fused <- gets fusionCount
-      g' <- f g
-      aft_fused <- gets fusionCount
-      if prev_fused /= aft_fused
-        then keepTrying f g'
-        else pure g'
+  useGas g $ do
+    prev_fused <- gets fusionCount
+    g' <- f g
+    aft_fused <- gets fusionCount
+    if prev_fused /= aft_fused
+      then keepTrying f g'
+      else pure g'
 
 doAllFusion :: DepGraphAug FusionM
 doAllFusion =
@@ -647,20 +641,17 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
 
 doFusionInLambda :: Lambda SOACS -> FusionM (Lambda SOACS, Bool)
 doFusionInLambda lam = do
-  is_out_of_gas <- isOutOfGas
-  if is_out_of_gas
-    then pure (lam, False)
-    else do
-      -- To clean up previous instances of fusion.
-      lam' <- simplifyLambda lam
-      prev_count <- gets fusionCount
-      newbody <- inScopeOf lam' $ doFusionBody $ lambdaBody lam'
-      aft_count <- gets fusionCount
-      -- To clean up any inner fusion.
-      lam'' <-
-        (if prev_count /= aft_count then simplifyLambda else pure)
-          lam' {lambdaBody = newbody}
-      pure (lam'', prev_count /= aft_count)
+  useGas (lam, False) $ do
+    -- To clean up previous instances of fusion.
+    lam' <- simplifyLambda lam
+    prev_count <- gets fusionCount
+    newbody <- inScopeOf lam' $ doFusionBody $ lambdaBody lam'
+    aft_count <- gets fusionCount
+    -- To clean up any inner fusion.
+    lam'' <-
+      (if prev_count /= aft_count then simplifyLambda else pure)
+        lam' {lambdaBody = newbody}
+    pure (lam'', prev_count /= aft_count)
   where
     doFusionBody :: Body SOACS -> FusionM (Body SOACS)
     doFusionBody body = do

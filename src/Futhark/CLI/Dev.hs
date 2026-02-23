@@ -302,8 +302,8 @@ typedPassOptionWithArg ::
   String ->
   String ->
   FutharkOption
-typedPassOptionWithArg getProg putProg makePass short long argName argDesc =
-  passOptionWithArg (passDescription (makePass Nothing)) (UntypedPass . perform) short long argName argDesc
+typedPassOptionWithArg getProg putProg makePass =
+  passOptionWithArg (passDescription (makePass Nothing)) (UntypedPass . perform)
   where
     perform arg s config = do
       let pass = makePass arg
