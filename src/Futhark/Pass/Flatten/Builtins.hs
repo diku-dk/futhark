@@ -4,6 +4,8 @@ module Futhark.Pass.Flatten.Builtins
   ( flatteningBuiltins,
     segMap,
     genFlags,
+    genScan,
+    genFilter,
     genSegScan,
     genSegRed,
     genScatter,
@@ -302,6 +304,44 @@ genPartition n k cls = do
     i <- letSubExp "i" =<< toExp gtid
     pure (ind, i)
   pure (counts, global_offs, res)
+
+genFilter :: VName -> BuilderT GPU (State VNameSource) (SubExp, VName)
+genFilter flags = do
+  w <- arraySize 0 <$> lookupType flags
+  flags_int <- letExp "flags_int" <=< segMap [w] $ \[i] -> do
+    b <- letSubExp "b" =<< eIndex flags [eSubExp i]
+    v <-
+      letSubExp "v"
+        =<< eIf
+          (eSubExp b)
+          (eBody [toExp $ intConst Int64 1])
+          (eBody [toExp $ intConst Int64 0])
+    pure [subExpRes v]
+  -- offsets <- genExPrefixSum "filter_offs" flags_int
+  (_n, offsets, num_true) <- exScanAndSum flags_int
+  -- num_true <- letSubExp "num_true"  =<< eIndex flags_int [toExp $ pe64 w - 1]
+  scratch <- letExp "scratch" $ BasicOp $ Scratch int64 [num_true]
+  -- is this efficient or do i need to do something smarter? like scatter with guard?
+  -- offsets' <- letExp "offset" <=< segMap [w] $ \[i] -> do
+  --   b' <- letSubExp "b" =<< eIndex flags [eSubExp i] 
+  --   v' <-
+  --     letSubExp "v'"
+  --       =<< eIf
+  --         (eSubExp b')
+  --         (eBody [eIndex offsets [eSubExp i]] )
+  --         (eBody [toExp $ intConst Int64 (-1)])
+  --   pure [subExpRes v']
+
+  filtered <- letExp "filtered" <=< genScatter scratch w $ \gtid -> do
+    b <- letSubExp "b" =<< eIndex flags [eSubExp gtid]
+    -- idx <- letExp "idx" =<< eIndex offsets' [eSubExp gtid]
+    idx_se <- letSubExp "idx" =<< eIf (eSubExp b)
+      (eBody [eIndex offsets [eSubExp gtid]])
+      (eBody [toExp $ intConst Int64 (-1)])
+    -- maybe cleaner?
+    idx <- letExp "idx" =<< toExp idx_se
+    pure (idx, gtid) 
+  pure (num_true,filtered)
 
 buildingBuiltin :: Builder GPU (FunDef GPU) -> FunDef GPU
 buildingBuiltin m = fst $ evalState (runBuilderT m mempty) blankNameSource
