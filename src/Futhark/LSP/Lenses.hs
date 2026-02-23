@@ -200,9 +200,16 @@ executeEvalLens (EvalLensData docUri line) = do
       pure ()
       where
         findResultLinesEnd i
-          | T.isPrefixOf "-- " $ R.toText $ R.getLine i fileRope =
+          -- don't override other eval comments
+          | T.isPrefixOf "-- >>>" commentLine =
+              i
+          -- replace all output comments
+          | T.isPrefixOf "-- " commentLine =
               findResultLinesEnd $ succ i
+          -- stop otherwise
           | otherwise = i
+          where
+            commentLine = R.toText $ R.getLine i fileRope
         insertText =
           let allDocs = snd result :|> either id id (fst result)
               commentLines =
@@ -226,8 +233,11 @@ executeEvalLens (EvalLensData docUri line) = do
                         { _line =
                             -- replace the entire comment range
                             -- removes any previous results
-                            fromIntegral . findResultLinesEnd $
-                              fromIntegral line,
+                            fromIntegral
+                              . findResultLinesEnd
+                              . succ
+                              . fromIntegral
+                              $ line,
                           _character = 0
                         }
                   }
