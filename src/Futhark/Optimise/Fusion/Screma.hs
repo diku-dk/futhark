@@ -297,12 +297,12 @@ moveRedScanSuperScrema super_screma = do
       new_body = mkBody (stms <> binds <> stms') new_res
       new_lam = eliminateByRes $ Lambda new_pars new_ts new_body
       (scan_pars', map_pars') =
-        splitAt (scanResults scan) (lambdaParams map_lam')
+        splitAt (scanResults scan) (lambdaParams lam')
 
   extra_scan_pars' <- mapM (newParam "x") scan_ts'
 
-  let new_pars' = lambdaParams map_lam' -- scan_pars' <> extra_scan_pars' <> map_pars'
-      new_ts' = lambdaReturnType renamed_scan_red_lam' -- scan_ts' <> lambdaReturnType map_lam'
+  let new_pars' = scan_pars' <> extra_scan_pars' <> map_pars'
+      new_ts' = scan_ts' <> lambdaReturnType map_lam'
       new_stms' = bodyStms $ lambdaBody map_lam'
       new_res' =
         varsRes (map paramName extra_scan_pars')

@@ -686,13 +686,13 @@ tests =
                         ),
                       ["out_b_15", "out_a_16"]
                     ),
-          testCase "red,scan-red,scan (horizontal)" $
+          testCase "scan,red-scan,red (horizontal)" $
             let reduce_op' =
                   Reduce
                     Commutative
                     ( fromLines
-                        [ "\\ {a_0 : i64, b_1 : i64} : {i64} ->",
-                          "let {c_2 : i64} = add32(a_0, b_1)",
+                        [ "\\ {a_0 : i32, b_1 : i32} : {i32} ->",
+                          "let {c_2 : i32} = add32(a_0, b_1)",
                           "in {c_2}"
                         ]
                     )
@@ -701,8 +701,8 @@ tests =
                   Reduce
                     Commutative
                     ( fromLines
-                        [ "\\ {a_4 : f64, b_5 : f64} : {f64} ->",
-                          "let {c_6 : f64} = fadd32(a_4, b_5)",
+                        [ "\\ {a_4 : f32, b_5 : f32} : {f32} ->",
+                          "let {c_6 : f32} = fadd32(a_4, b_5)",
                           "in {c_6}"
                         ]
                     )
@@ -710,8 +710,8 @@ tests =
                 scan_op' =
                   Scan
                     ( fromLines
-                        [ "\\ {a_7 : i32, b_8 : i32} : {i32} ->",
-                          "let {c_9 : i32} = add64(a_7, b_8)",
+                        [ "\\ {a_7 : i64, b_8 : i64} : {i64} ->",
+                          "let {c_9 : i64} = add64(a_7, b_8)",
                           "in {c_9}"
                         ]
                     )
@@ -719,77 +719,86 @@ tests =
                 scan_op =
                   Scan
                     ( fromLines
-                        [ "\\ {a_10 : f32, b_11 : f32} : {f32} ->",
-                          "let {c_12 : f32} = fadd64(a_10, b_11)",
+                        [ "\\ {a_10 : f64, b_11 : f64} : {f64} ->",
+                          "let {c_12 : f64} = fadd64(a_10, b_11)",
                           "in {c_12}"
                         ]
                     )
                     ["0.0f32"]
-                ident_0_a = "input_a_0_13 : [d_27]i32"
-                input_0_a = SOAC.identInput ident_0_a
-                ident_0_b = "input_b_0_14 : [d_27]f32"
-                input_0_b = SOAC.identInput ident_0_b
-                ident_1_a = "input_a_1_15 : [d_27]i64"
-                input_1_a = SOAC.identInput ident_1_a
-                ident_1_b = "input_b_1_16 : [d_27]f64"
-                input_1_b = SOAC.identInput ident_1_b
+                ident_a = "input_a_13 : [d_27]i64"
+                input_a = SOAC.identInput ident_a
+                ident_b = "input_b_15 : [d_27]i32"
+                input_b = SOAC.identInput ident_b
+                ident_c = "input_c_14 : [d_27]f64"
+                input_c = SOAC.identInput ident_c
+                ident_d = "input_d_16 : [d_27]f32"
+                input_d = SOAC.identInput ident_d
+                out_a = "out_a_20"
+                out_b = "out_b_21"
+                out_c = "out_c_25"
+                out_d = "out_d_26"
              in Tuple2
                   ( withFreshNames
                       ( fuseSuperScrema
                           "d_27"
-                          [input_0_a, input_0_b]
+                          [input_a, input_b]
                           ( ScremaForm
                               ( fromLines
-                                  [ "\\ {x_17 : i32, x_18 : i64} : {i32, i64} ->",
+                                  [ "\\ {x_17 : i64, x_18 : i32} : {i64, i32} ->",
                                     "in {x_17, x_18}"
                                   ]
                               )
                               [scan_op']
                               [reduce_op']
-                              (fromLines
+                              ( fromLines
                                   [ "\\ {x_19 : i64} : {i64} ->",
-                                   "in {x_19}"
-                                  ])
+                                    "in {x_19}"
+                                  ]
+                              )
                           )
-                          ["out_a_0_20", "out_b_0_21"]
-                          [input_1_a, input_1_b]
+                          [out_b, out_a]
+                          [input_c, input_d]
                           ( ScremaForm
                               ( fromLines
-                                  [ "\\ {x_22 : f32, x_23 : f64} : {f32, f64} ->",
+                                  [ "\\ {x_22 : f64, x_23 : f32} : {f64, f32} ->",
                                     "in {x_22, x_23}"
                                   ]
                               )
                               [scan_op]
                               [reduce_op]
-                              (fromLines
+                              ( fromLines
                                   [ "\\ {x_24 : f64} : {f64} ->",
-                                   "in {x_24}"
-                                  ])
+                                    "in {x_24}"
+                                  ]
+                              )
                           )
-                          ["out_a_1_25", "out_b_1_26"]
+                          [out_d, out_c]
                       )
                   )
                   @?= Tuple2
                     ( SuperScrema
                         "d_27"
-                        [input_0_a, input_0_b, input_1_a, input_1_b]
-                        ( fromLines [
-                          "\\ {x_17 : i32, x_18 : i64, x_10000 : f32, x_10001 : f64}: {i32, i64, f32, f64} ->",
-                          "{x_17, x_18, x_10000, x_10001}"
-                        ])
+                        [input_a, input_b, input_c, input_d]
+                        ( fromLines
+                            [ "\\ {x_17 : i64, x_18 : i32, x_10000 : f64, x_10001 : f32}: {i64, i32, f64, f32} ->",
+                              "{x_17, x_18, x_10000, x_10001}"
+                            ]
+                        )
                         [scan_op']
                         [reduce_op']
-                        ( fromLines [
-                          "\\ {x_19 : i64, x_22 : f32, x_23 : f64}: {f32, f64, i64} ->",
-                          "{x_22, x_23, x_19}"
-                        ])
+                        ( fromLines
+                            [ "\\ {x_19 : i64, x_22 : f64, x_23 : f32}: {f64, f32, i64} ->",
+                              "{x_22, x_23, x_19}"
+                            ]
+                        )
                         [scan_op]
                         [reduce_op]
-                        ( fromLines 
-                        [ "\\ {x_24 : f64, x_10002 : i64}: {f64, i64} ->",
-                          "{x_24, x_10002}"
-                        ]),
-                      ["out_a_0_20", "out_a_1_25", "out_b_1_26", "out_b_0_21"]
+                        ( fromLines
+                            [ "\\ {x_24 : f64, x_10002 : i64}: {f64, i64} ->",
+                              "{x_24, x_10002}"
+                            ]
+                        ),
+                      [out_b, out_d, out_c, out_a]
                     )
         ],
       testGroup
@@ -1171,8 +1180,8 @@ tests =
                   Reduce
                     Commutative
                     ( fromLines
-                        [ "\\ {a_0 : i64, b_1 : i64} : {i64} ->",
-                          "let {c_2 : i64} = add32(a_0, b_1)",
+                        [ "\\ {a_0 : i32, b_1 : i32} : {i32} ->",
+                          "let {c_2 : i32} = add32(a_0, b_1)",
                           "in {c_2}"
                         ]
                     )
@@ -1181,8 +1190,8 @@ tests =
                   Reduce
                     Commutative
                     ( fromLines
-                        [ "\\ {a_4 : f64, b_5 : f64} : {f64} ->",
-                          "let {c_6 : f64} = fadd32(a_4, b_5)",
+                        [ "\\ {a_4 : f32, b_5 : f32} : {f32} ->",
+                          "let {c_6 : f32} = fadd32(a_4, b_5)",
                           "in {c_6}"
                         ]
                     )
@@ -1190,8 +1199,8 @@ tests =
                 scan_op' =
                   Scan
                     ( fromLines
-                        [ "\\ {a_7 : i32, b_8 : i32} : {i32} ->",
-                          "let {c_9 : i32} = add64(a_7, b_8)",
+                        [ "\\ {a_7 : i64, b_8 : i64} : {i64} ->",
+                          "let {c_9 : i64} = add64(a_7, b_8)",
                           "in {c_9}"
                         ]
                     )
@@ -1199,66 +1208,71 @@ tests =
                 scan_op =
                   Scan
                     ( fromLines
-                        [ "\\ {a_10 : f32, b_11 : f32} : {f32} ->",
-                          "let {c_12 : f32} = fadd64(a_10, b_11)",
+                        [ "\\ {a_10 : f64, b_11 : f64} : {f64} ->",
+                          "let {c_12 : f64} = fadd64(a_10, b_11)",
                           "in {c_12}"
                         ]
                     )
                     ["0.0f32"]
-                ident_0_a = "input_a_0_13 : [d_27]i32"
-                input_0_a = SOAC.identInput ident_0_a
-                ident_0_b = "input_b_0_14 : [d_27]f32"
-                input_0_b = SOAC.identInput ident_0_b
-                ident_1_a = "input_a_1_15 : [d_27]i64"
-                input_1_a = SOAC.identInput ident_1_a
-                ident_1_b = "input_b_1_16 : [d_27]f64"
-                input_1_b = SOAC.identInput ident_1_b
+                ident_a = "input_a_13 : [d_27]i64"
+                input_a = SOAC.identInput ident_a
+                ident_b = "input_b_15 : [d_27]i32"
+                input_b = SOAC.identInput ident_b
+                ident_c = "input_c_14 : [d_27]f64"
+                input_c = SOAC.identInput ident_c
+                ident_d = "input_d_16 : [d_27]f32"
+                input_d = SOAC.identInput ident_d
              in Singleton
                   ( withFreshNamesAndScope
                       ( moveRedScanSuperScrema
-                          ( 
-                            SuperScrema
-                        "d_27"
-                        [input_0_a, input_0_b, input_1_a, input_1_b]
-                        ( fromLines [
-                          "\\ {x_17 : i32, x_18 : i64, x_30 : f32, x_31 : f64}: {i32, i64, f32, f64} ->",
-                          "{x_17, x_18, x_30, x_31}"
-                        ])
-                        [scan_op']
-                        [reduce_op']
-                        ( fromLines [
-                          "\\ {x_19 : i64, x_22 : f32, x_23 : f64}: {f32, f64, i64} ->",
-                          "{x_22, x_23, x_19}"
-                        ])
-                        [scan_op]
-                        [reduce_op]
-                        ( fromLines 
-                        [ "\\ {x_24 : f64, x_32 : i64}: {f64, i64} ->",
-                          "{x_24, x_32}"
-                        ])
+                          ( SuperScrema
+                              "d_27"
+                              [input_a, input_b, input_c, input_d]
+                              ( fromLines
+                                  [ "\\ {x_17 : i64, x_18 : i32, x_30 : f64, x_31 : f32}: {i64, i32, f64, f32} ->",
+                                    "{x_17, x_18, x_30, x_31}"
+                                  ]
+                              )
+                              [scan_op']
+                              [reduce_op']
+                              ( fromLines
+                                  [ "\\ {x_19 : i64, x_22 : f64, x_23 : f32}: {f64, f32, i64} ->",
+                                    "{x_22, x_23, x_19}"
+                                  ]
+                              )
+                              [scan_op]
+                              [reduce_op]
+                              ( fromLines
+                                  [ "\\ {x_24 : f64, x_32 : i64}: {f64, i64} ->",
+                                    "{x_24, x_32}"
+                                  ]
+                              )
+                          )
                       )
-                  )
                   )
                   @?= Singleton
                     ( SuperScrema
                         "d_27"
-                        [input_0_a, input_0_b, input_1_a, input_1_b]
-                        ( fromLines [
-                          "\\ {x_17 : i32, x_18 : i64, x_10000 : f32, x_10001 : f64}: {i32, i64, f32, f64} ->",
-                          "{x_17, x_18, x_10000, x_10001}"
-                        ])
+                        [input_a, input_b, input_c, input_d]
+                        ( fromLines
+                            [ "\\ {x_17 : i64, x_18 : i32, x_10000 : f64, x_10001 : f32}: {i64, i32, f64, f32} ->",
+                              "{x_17, x_18, x_10000, x_10001}"
+                            ]
+                        )
                         [scan_op']
                         [reduce_op']
-                        ( fromLines [
-                          "\\ {x_19 : i64, x_22 : f32, x_23 : f64}: {f32, f64, i64} ->",
-                          "{x_22, x_23, x_19}"
-                        ])
+                        ( fromLines
+                            [ "\\ {x_19 : i64, x_22 : f64, x_23 : f32}: {f64, f32, i64} ->",
+                              "{x_22, x_23, x_19}"
+                            ]
+                        )
                         [scan_op]
                         [reduce_op]
-                        ( fromLines 
-                        [ "\\ {x_24 : f64, x_10002 : i64}: {f64, i64} ->",
-                          "{x_24, x_10002}"
-                        ])
+                        ( fromLines
+                            [ "\\ {x_24 : f64, x_10002 : i64}: {f64, i64} ->",
+                              "{x_24, x_10002}"
+                            ]
+                        )
                     )
         ],
       testGroup
@@ -1384,14 +1398,14 @@ tests =
                     ( Just
                         ( [input_a, input_b],
                           ScremaForm
-                        ( fromLines
-                            [ "\\ {x_11 : i32, x_10000 : f32}: {i32, f32} ->",
-                              "{x_11, x_10000}"
-                            ]
-                        )
-                        []
-                        [reduce_op', reduce_op]
-                        ( fromLines ["nilFn"]),
+                            ( fromLines
+                                [ "\\ {x_11 : i32, x_10000 : f32}: {i32, f32} ->",
+                                  "{x_11, x_10000}"
+                                ]
+                            )
+                            []
+                            [reduce_op', reduce_op]
+                            (fromLines ["nilFn"]),
                           ["out_a_12", "b_out_14"]
                         )
                     ),
@@ -1455,10 +1469,11 @@ tests =
                               )
                               [scan_op']
                               [reduce_op']
-                              (fromLines
+                              ( fromLines
                                   [ "\\ {x_19 : i64} : {i64} ->",
-                                   "in {x_19}"
-                                  ])
+                                    "in {x_19}"
+                                  ]
+                              )
                           )
                           ["out_a_0_20", "out_b_0_21"]
                           [input_0_b, input_1_b]
@@ -1470,10 +1485,11 @@ tests =
                               )
                               [scan_op]
                               [reduce_op]
-                              (fromLines
+                              ( fromLines
                                   [ "\\ {x_24 : f64} : {f64} ->",
-                                   "in {x_24}"
-                                  ])
+                                    "in {x_24}"
+                                  ]
+                              )
                           )
                           ["out_a_1_25", "out_b_1_26"]
                       )
@@ -1482,14 +1498,14 @@ tests =
                     ( Just
                         ( [input_1_a, input_1_b],
                           ScremaForm
-                        ( fromLines
-                            [ "\\ {x_11 : i32, x_10000 : f32}: {i32, f32} ->",
-                              "{x_11, x_10000}"
-                            ]
-                        )
-                        []
-                        [reduce_op', reduce_op]
-                        ( fromLines ["nilFn"]),
+                            ( fromLines
+                                [ "\\ {x_11 : i32, x_10000 : f32}: {i32, f32} ->",
+                                  "{x_11, x_10000}"
+                                ]
+                            )
+                            []
+                            [reduce_op', reduce_op]
+                            (fromLines ["nilFn"]),
                           ["out_a_12", "b_out_14"]
                         )
                     )
