@@ -59,17 +59,14 @@ instance MonadFreshNames FusionM where
   putNameSource source =
     modify (\env -> env {vNameSource = source})
 
-decGas :: FusionM ()
-decGas =
-  modify $ \s ->
-    s {gas = (\g -> max 0 (g - 1)) <$> gas s}
-
 useGas :: a -> FusionM a -> FusionM a
 useGas g m = do
   is_out_of_gas <- gets (maybe False (<= 0) . gas)
   if is_out_of_gas
     then pure g
-    else m
+    else
+      modify (\s -> s {gas = (\gas' -> max 0 (gas' - 1)) <$> gas s})
+        >> m
 
 runFusionM :: (MonadFreshNames m) => Scope SOACS -> FusionEnv -> FusionM a -> m a
 runFusionM scope fenv (FusionM a) = modifyNameSource $ \src ->
@@ -123,7 +120,6 @@ linearizeGraph dg =
 fusedSomething :: NodeT -> FusionM (Maybe NodeT)
 fusedSomething x = do
   modify $ \s -> s {fusionCount = 1 + fusionCount s}
-  decGas
   pure $ Just x
 
 vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM

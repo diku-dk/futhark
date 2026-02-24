@@ -296,22 +296,28 @@ typedPassOptionWithArg ::
   (Checkable torep) =>
   (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
   (Prog torep -> UntypedPassState) ->
-  (Maybe String -> Pass fromrep torep) ->
+  (Maybe String -> Either String (Pass fromrep torep)) ->
   String ->
   [String] ->
   String ->
   String ->
   FutharkOption
 typedPassOptionWithArg getProg putProg makePass =
-  passOptionWithArg (passDescription (makePass Nothing)) (UntypedPass . perform)
+  passOptionWithArg desc (UntypedPass . perform)
   where
+    desc = case makePass Nothing of
+      Right pass -> passDescription pass
+      Left _ -> "Pass with argument"
+
     perform arg s config = do
-      let pass = makePass arg
-      prog <- getProg (passName pass) s
-      putProg <$> runPipeline (onePass pass) config prog
+      case makePass arg of
+        Left err -> externalErrorS err
+        Right pass -> do
+          prog <- getProg (passName pass) s
+          putProg <$> runPipeline (onePass pass) config prog
 
 soacsPassOptionWithArg ::
-  (Maybe String -> Pass SOACS.SOACS SOACS.SOACS) ->
+  (Maybe String -> Either String (Pass SOACS.SOACS SOACS.SOACS)) ->
   String ->
   [String] ->
   String ->
@@ -482,11 +488,11 @@ unstreamOption short =
     long = [passLongOption pass]
     pass = unstreamGPU
 
-parseGas :: Maybe String -> Maybe Int
-parseGas Nothing = Nothing
+parseGas :: Maybe String -> Either String (Maybe Int)
+parseGas Nothing = Right Nothing
 parseGas (Just s) = case reads s of
-  [(n, "")] -> Just n
-  _ -> error $ "Invalid gas value: " <> s
+  [(n, "")] -> Right (Just n)
+  _any -> Left $ "Invalid gas value: " <> s
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
@@ -696,7 +702,7 @@ commandLineOptions =
       "Generate a server executable.",
     typedPassOption soacsProg Seq firstOrderTransform "f",
     soacsPassOptionWithArg
-      (fuseSOACs . parseGas)
+      (fmap fuseSOACs . parseGas)
       "o"
       ["fuse"]
       "GAS"
