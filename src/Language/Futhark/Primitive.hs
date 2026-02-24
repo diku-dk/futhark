@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MagicHash #-}
 
 -- | Definitions of primitive types, the values that inhabit these
 -- types, and operations on these values.  A primitive value can also
@@ -138,6 +139,7 @@ import Foreign.C.Types (CUShort (..))
 import Futhark.Util (convFloat)
 import Futhark.Util.CMath
 import Futhark.Util.Pretty
+import GHC.Exts (Double(D#), Float(F#), fmaddDouble#, fmaddFloat#)
 import Numeric (log1p)
 import Numeric.Half
 import Prelude hiding (id, (.))
@@ -1569,9 +1571,9 @@ primFuns =
       f16_3 "mad16" (\a b c -> a * b + c),
       f32_3 "mad32" (\a b c -> a * b + c),
       f64_3 "mad64" (\a b c -> a * b + c),
-      f16_3 "fma16" (\a b c -> a * b + c),
-      f32_3 "fma32" (\a b c -> a * b + c),
-      f64_3 "fma64" (\a b c -> a * b + c)
+      f16_3 "fma16" fma16,
+      f32_3 "fma32" (\(F# a) (F# b) (F# c) -> F# (fmaddFloat# a b c)),
+      f64_3 "fma64" (\(D# a) (D# b) (D# c) -> D# (fmaddDouble# a b c))
     ]
       <> [ ( condFun t,
              ( [Bool, t, t],
@@ -1585,6 +1587,9 @@ primFuns =
          | t <- allPrimTypes
          ]
   where
+    fma16 a b c
+      | isNaN a || isNaN b || isNaN c || isInfinite a || isInfinite b || isInfinite c = a * b + c
+      | otherwise = fromRational (toRational a * toRational b + toRational c)
     i8 s f = (s, ([IntType Int8], IntType Int32, i8PrimFun f))
     i16 s f = (s, ([IntType Int16], IntType Int32, i16PrimFun f))
     i32 s f = (s, ([IntType Int32], IntType Int32, i32PrimFun f))
