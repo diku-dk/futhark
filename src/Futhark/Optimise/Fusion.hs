@@ -60,7 +60,9 @@ instance MonadFreshNames FusionM where
     modify (\env -> env {vNameSource = source})
 
 decGas :: FusionM ()
-decGas = modify (\s -> s {gas = max 0 . (+ (-1)) <$> gas s})
+decGas =
+  modify $ \s ->
+    s {gas = (\g -> max 0 (g - 1)) <$> gas s}
 
 useGas :: a -> FusionM a -> FusionM a
 useGas g m = do
