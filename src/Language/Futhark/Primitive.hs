@@ -1588,7 +1588,8 @@ primFuns =
          ]
   where
     fma16 a b c
-      | isNaN a || isNaN b || isNaN c || isInfinite a || isInfinite b || isInfinite c = a * b + c
+      | isNaN a || isInfinite a || isNaN b || isInfinite b = a * b + c
+      | isNaN c || isInfinite c = c
       | otherwise = fromRational (toRational a * toRational b + toRational c)
     i8 s f = (s, ([IntType Int8], IntType Int32, i8PrimFun f))
     i16 s f = (s, ([IntType Int16], IntType Int32, i16PrimFun f))
