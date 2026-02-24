@@ -15,7 +15,7 @@ import Data.Tree
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (maxinum, showText)
+import Futhark.Util (fancyTerminal, maxinum, showText)
 import Futhark.Util.Options
 import Futhark.Util.ProgressBar
 import System.Directory
@@ -356,7 +356,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
                     | fromIntegral rt * epsilon < fromIntegral best_t -> do
                         T.putStrLn $
                           T.unwords
-                            [ "\r\ESC[KWARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
+                            [ (if fancyTerminal then "\r\ESC[K" else "") <> "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
                               dataset_name,
                               " was",
                               showText rt,
@@ -388,7 +388,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
           when (optVerbose opts > 0) $
             putStrLn $
               unwords
-                [ "\r\ESC[KTrying e_par",
+                [ (if fancyTerminal then "\r\ESC[K" else "") ++ "Trying e_par",
                   show middle,
                   "and",
                   show middle'
@@ -421,7 +421,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
         (_, _) -> do
           when (optVerbose opts > 0) $
             putStrLn $
-              unwords ["\r\ESC[KTrying e_pars", show xs]
+              unwords [(if fancyTerminal then "\r\ESC[K" else "") ++ "Trying e_pars", show xs]
           candidates <-
             catMaybes . zipWith (fmap . flip (,)) xs
               <$> mapM (runner $ timeout best_t) xs
@@ -457,15 +457,16 @@ tune opts prog = do
                progressBarBound = 1,
                progressBarElapsed = fromIntegral n / fromIntegral total
              }) ++ T.unpack v ++ " on " ++ T.unpack dataset_names
-       putStr bar
+       when fancyTerminal $ putStr bar
        hFlush stdout
        r <- tuneThreshold opts server datasets acc tp
-       putStr bar
+       when fancyTerminal $ putStr bar
        hFlush stdout
        pure r
      ) ([], mempty) paths
-    putStr "\r\ESC[K"
-    hFlush stdout
+    when fancyTerminal $ do
+      putStr "\r\ESC[K"
+      hFlush stdout
     pure (fst result)
 
 runAutotuner :: AutotuneOptions -> FilePath -> IO ()
