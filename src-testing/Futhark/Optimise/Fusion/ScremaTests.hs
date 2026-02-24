@@ -222,61 +222,57 @@ emptyScremaForm =
 
 scremaFusionTests :: TestTree
 scremaFusionTests =
-  let ident_a = "input_a_0 : [d_2]i32"
-      ident_b = "input_b_1 : [d_2]i32"
-      input_a = SOAC.identInput ident_a
-      input_b = SOAC.identInput ident_b
-      out_b = "out_b_9"
-      scan_op =
-        Scan
-          ( fromLines
-              [ "\\ {a_10 : i32, b_11 : i32} : {i32} ->",
-                "let {c_12 : i32} = add32(a_10, b_11)",
-                "in {c_12}"
-              ]
-          )
-          ["0i32"]
-   in testGroup
-        "Screma Fusion Tests"
-        [ scremaTester
+  testGroup
+    "Screma Fusion Tests"
+    [ let ident_a = "arr_5649 : [d_5648]f64"
+          input_a = SOAC.identInput ident_a
+          ident_out_a = "defunc_0_map_res_5769 : [d_5648]f64"
+          input_out_a = SOAC.identInput ident_out_a
+          out_a = identName ident_out_a
+       in scremaTester
             "fusible map-scan-map"
-            "d_2"
+            "d_5648"
             [input_a]
             ( ScremaForm
                 ( fromLines
-                    [ "\\ {a_3 : i32} : {i32} ->",
-                      "let {a_4 : i32} = add32(1i32, a_3)",
-                      "in {a_4}"
+                    [ "\\ {eta_p_5705 : f64} : {f64} ->",
+                      "let {f_res_5706 : f64} = fadd64(3.0f64, eta_p_5705)",
+                      "in {f_res_5706}"
                     ]
                 )
                 []
                 []
-                ( fromLines
-                    [ "\\ {a_5 : i32} : {i32} ->",
-                      "let {a_13: i32} = add32(a_5, a_5)",
-                      "in {a_13}"
-                    ]
-                )
+                "\\ {x_5707 : f64} : {f64} -> {x_5707}"
             )
-            [identName ident_b]
-            [input_b]
+            [out_a]
+            [input_out_a, input_out_a]
             ( ScremaForm
                 ( fromLines
-                    [ "\\ {b_6 : i32} : {i32} ->",
-                      "let {b_7 : i32} = mul32(2i32, b_6)",
-                      "in {b_7}"
+                    [ "\\ {eta_p_5766 : f64, eta_p_5767 : f64} : {f64, f64} ->",
+                      "let {f_res_5768 : f64} = fadd64(3.0f64, eta_p_5766)",
+                      "in {f_res_5768, eta_p_5767}"
                     ]
                 )
-                [scan_op]
+                []
                 []
                 ( fromLines
-                    [ "\\ {b_8 : i32} : {i32} ->",
-                      "let {b_14: i32} = mul32(b_8, b_8)",
-                      "in {b_14}"
+                    [ "\\ {x_5711 : f64, eta_p_5744 : f64} : {f64} ->",
+                      "let {eta_p_5745 : f64} = x_5711",
+                      "let {g_res_5746 : f64} = fmul64(3.0f64, eta_p_5744)",
+                      "let {x_5754 : f64} = g_res_5746",
+                      "let {eta_p_5755 : f64} = eta_p_5745",
+                      "let {x_5756 : f64} = x_5711",
+                      "let {eta_p_5757 : f64} = x_5754",
+                      "let {-_lhs_5758 : f64} = fmul64(eta_p_5755, eta_p_5757)",
+                      "let {-_rhs_5759 : f64} = fadd64(eta_p_5755, eta_p_5757)",
+                      "let {h_res_5760 : f64} = fsub64(-_lhs_5758, -_rhs_5759)",
+                      "let {x_5761 : f64} = h_res_5760",
+                      "let {x_5762 : f64} = x_5754",
+                      "in {x_5761}"
                     ]
                 )
             )
-            [out_b]
+            ["defunc_0_map_res_5770"]
             ( Just $
                 ExpectedScrema
                   { esFuseSuperScrema = emptySuperScrema,
@@ -287,7 +283,7 @@ scremaFusionTests =
                     esOutput = []
                   }
             )
-        ]
+    ]
 
 fuseSuperScremaTests :: TestTree
 fuseSuperScremaTests =
@@ -933,7 +929,7 @@ fuseSuperScremaTests =
                     ),
                   [out_b, out_d, out_c, out_a]
                 ),
-      testCase "map-map (vertical) with duplicate input" $
+      testCase "map-map (vertical) duplicate input" $
         let ident_a = "arr_5649 : [d_5648]f64"
             input_a = SOAC.identInput ident_a
             ident_out_a = "defunc_0_map_res_5769 : [d_5648]f64"
@@ -991,25 +987,40 @@ fuseSuperScremaTests =
                     "d_5648"
                     [input_a]
                     ( fromLines
-                        ["nilFn"]
+                        [ "\\ {eta_p_5705 : f64} : {f64} ->",
+                          "let {f_res_5706 : f64} = fadd64(3.0f64, eta_p_5705)",
+                          "in {f_res_5706}"
+                        ]
                     )
-                    -- TODO: fill in the fused map function
-
                     []
                     []
                     ( fromLines
-                        ["nilFn"]
+                        [ "\\ {x_5707 : f64} : {f64, f64, f64} ->",
+                          "let {eta_p_5766 : f64} = x_5707",
+                          "let {eta_p_5767 : f64} = eta_p_5766",
+                          "let {f_res_5768 : f64} = fadd64(3.0f64, eta_p_5766)",
+                          "in {f_res_5768, eta_p_5767, x_5707}"
+                        ]
                     )
-                    -- TODO: fill in the fused middle function
-
                     []
                     []
                     ( fromLines
-                        ["nilFn"]
+                        [ "\\ {x_5711 : f64, eta_p_5744 : f64, x_10000 : f64} : {f64, f64} ->",
+                          "let {eta_p_5745 : f64} = x_5711",
+                          "let {g_res_5746 : f64} = fmul64(3.0f64, eta_p_5744)",
+                          "let {x_5754 : f64} = g_res_5746",
+                          "let {eta_p_5755 : f64} = eta_p_5745",
+                          "let {x_5756 : f64} = x_5711",
+                          "let {eta_p_5757 : f64} = x_5754",
+                          "let {-_lhs_5758 : f64} = fmul64(eta_p_5755, eta_p_5757)",
+                          "let {-_rhs_5759 : f64} = fadd64(eta_p_5755, eta_p_5757)",
+                          "let {h_res_5760 : f64} = fsub64(-_lhs_5758, -_rhs_5759)",
+                          "let {x_5761 : f64} = h_res_5760",
+                          "let {x_5762 : f64} = x_5754",
+                          "in {x_5761, x_10000}"
+                        ]
                     ),
-                  -- TODO: fill in the fused post function
-
-                  ["defunc_0_map_res_5770"]
+                  ["defunc_0_map_res_5770", out_a]
                 )
     ]
 
@@ -1469,22 +1480,24 @@ moveRedScanSuperScremaTests =
                     "d_27"
                     [input_a, input_b, input_c, input_d]
                     ( fromLines
-                        [ "\\ {x_17 : i64, x_18 : i32, x_10000 : f64, x_10001 : f32}: {i64, i32, f64, f32} ->",
-                          "{x_17, x_18, x_10000, x_10001}"
+                        [ "\\ {x_17 : i64, x_18 : i32, x_30 : f64, x_31 : f32}: {i64, f64, i32, f32, f64, f32} ->",
+                          "let {x_10001 : f64} = x_30",
+                          "let {x_10002 : f32} = x_31",
+                          "in {x_17, x_10001, x_18, x_10002, x_30, x_31}"
                         ]
                     )
-                    [scan_op']
-                    [reduce_op']
+                    [scan_op', scan_op]
+                    [reduce_op', reduce_op]
                     ( fromLines
-                        [ "\\ {x_19 : i64, x_22 : f64, x_23 : f32}: {f64, f32, i64} ->",
-                          "{x_22, x_23, x_19}"
+                        [ "\\ {x_19 : i64, x_10003 : f64, x_22 : f64, x_23 : f32}: {f64, i64} ->",
+                          "{x_10003, x_19}"
                         ]
                     )
-                    [scan_op]
-                    [reduce_op]
+                    []
+                    []
                     ( fromLines
-                        [ "\\ {x_24 : f64, x_10002 : i64}: {f64, i64} ->",
-                          "{x_24, x_10002}"
+                        [ "\\ {x_24 : f64, x_32 : i64}: {f64, i64} ->",
+                          "{x_24, x_32}"
                         ]
                     )
                 )

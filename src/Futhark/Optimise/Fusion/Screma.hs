@@ -14,6 +14,7 @@ where
 
 import Control.Monad
 import Data.Bifunctor
+import Data.Function
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -179,6 +180,43 @@ fuseBinds lam_p out_p inp_c lam_c =
             SubExpRes cs e = res
         Nothing -> Nothing
 
+dedupInput ::
+  [SOAC.Input] ->
+  ScremaForm SOACS ->
+  ([SOAC.Input], ScremaForm SOACS)
+dedupInput inp form =
+  (new_inp, form {scremaLambda = new_lam})
+  where
+    lam = scremaLambda form
+    body = lambdaBody lam
+    stms = bodyStms body
+    res = bodyResult body
+    new_body = mkBody (binds <> stms) res
+    new_lam = lam {lambdaParams = new_pars, lambdaBody = new_body}
+    pars = lambdaParams lam
+    auxiliary [] = Nothing
+    auxiliary (x : xs) = Just (x, xs)
+    pairs = zip inp pars
+    (new_inp, new_pars) = unzip $ filter (`elem` keep_pairs) pairs
+    keep_pairs = map fst bind_pairs
+    bind_pairs =
+      mapMaybe auxiliary
+        . L.groupBy ((==) `on` fst)
+        $ L.sortOn fst pairs
+    par_bind_pairs = map (second (map snd) . first snd) bind_pairs
+    binds = foldMap mkBinds par_bind_pairs
+    mkBinds (par_name, names) =
+      stmsFromList $
+        map
+          ( \name ->
+              mkLet [Ident (paramName name) (paramType par_name)]
+                . BasicOp
+                . SubExp
+                . Var
+                $ paramName par_name
+          )
+          names
+
 fuseSuperScrema ::
   (MonadFreshNames m) =>
   SubExp ->
@@ -189,8 +227,10 @@ fuseSuperScrema ::
   ScremaForm SOACS ->
   [VName] ->
   m (SuperScrema SOACS, [VName])
-fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c = do
-  let inp_c_real_map = map (not . inputFromOutput) inp_c
+fuseSuperScrema w inp_p' form_p' out_p inp_c' form_c' out_c = do
+  let (inp_p, form_p) = dedupInput inp_p' form_p'
+      (inp_c, form_c) = dedupInput inp_c' form_c'
+      inp_c_real_map = map (not . inputFromOutput) inp_c
       inp_c_real = pick inp_c_real_map inp_c
       inp_r = inp_p <> inp_c_real
 
