@@ -306,16 +306,6 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
               T.unwords [v, "is irrelevant for", entry_point]
           pure (thresholds, best_runtimes)
         else do
-          T.putStrLn $
-            T.unwords
-              [ "Tuning",
-                v,
-                "on entry point",
-                entry_point,
-                "and dataset",
-                dataset_name
-              ]
-
           sample_run <-
             run
               server
@@ -447,13 +437,33 @@ tune opts prog = do
   let progbin = "." </> dropExtension prog
   withServer (futharkServerCfg progbin (serverOptions opts)) $ \server -> do
     forest <- thresholdForest server
+    let paths = tuningPaths forest
+    let total = length paths
     when (optVerbose opts > 0) $
       putStrLn $
         ("Threshold forest:\n" <>) $
           drawForest (map (fmap show) forest)
 
-    fmap fst . foldM (tuneThreshold opts server datasets) ([], mempty) $
-      tuningPaths forest
+    counter <- newIORef (0 :: Int)
+    let dataset_names = T.intercalate "," $ map (\(name, _, ep) -> ep <> ":" <> name) datasets
+    result <- foldM (\acc tp@(v, _) -> do
+       modifyIORef' counter (+1)
+       n <- readIORef counter
+       let bar =  "\rTuning: " ++ show n ++ "/" ++ show total ++ " " ++ T.unpack (progressBar ProgressBar
+             { progressBarSteps = 10,
+               progressBarBound = 1,
+               progressBarElapsed = fromIntegral n / fromIntegral total
+             }) ++ T.unpack v ++ " on " ++ T.unpack dataset_names
+       putStr bar
+       hFlush stdout
+       r <- tuneThreshold opts server datasets acc tp
+       putStr bar
+       hFlush stdout
+       pure r
+     ) ([], mempty) paths
+    putStr "\r\ESC[K"
+    hFlush stdout
+    pure (fst result)
 
 runAutotuner :: AutotuneOptions -> FilePath -> IO ()
 runAutotuner opts prog = do
