@@ -173,7 +173,8 @@ scremaTester ::
   Maybe ExpectedScrema ->
   TestTree
 scremaTester name _w inp_p form_p out_p inp_c form_c out_c Nothing =
-  testGroup name $
+  testGroup
+    name
     [ testCase
         "fusible"
         ( withFreshNamesScopeError
