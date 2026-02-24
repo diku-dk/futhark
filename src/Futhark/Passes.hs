@@ -59,7 +59,7 @@ standardPipeline =
       simplifySOACS,
       performCSE True,
       simplifySOACS,
-      fuseSOACs,
+      fuseSOACs Nothing,
       performCSE True,
       simplifySOACS,
       removeDeadFunctions
@@ -74,7 +74,7 @@ adPipeline =
     [ applyAD,
       simplifySOACS,
       performCSE True,
-      fuseSOACs,
+      fuseSOACs Nothing,
       performCSE True,
       simplifySOACS
     ]
