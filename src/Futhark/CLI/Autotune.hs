@@ -354,7 +354,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
                     | fromIntegral rt * epsilon < fromIntegral best_t -> do
                         T.putStrLn $
                           T.unwords
-                            [ "\r\ESC[K\WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
+                            [ "\r\ESC[KWARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
                               dataset_name,
                               " was",
                               showText rt,
