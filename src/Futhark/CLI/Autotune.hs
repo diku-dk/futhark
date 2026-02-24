@@ -21,6 +21,7 @@ import System.Directory
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
+import System.IO
 import Text.Read (readMaybe)
 import Text.Regex.TDFA
 
