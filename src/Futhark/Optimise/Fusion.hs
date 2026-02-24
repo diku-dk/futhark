@@ -681,9 +681,9 @@ fuseFun g consts fun = do
       (fuseGraph (funDefBody fun))
   pure fun {funDefBody = (funDefBody fun) {bodyStms = fun_stms'}}
 
--- | The pass definition with a parameter to bound the number of
--- iterations before the fusion convergence loop stop. If nothing
--- continue forever.
+-- | Pass definition with an optional bound on the number of
+-- iterations of the fusion convergence loop.  'Just n' runs at
+-- most @n@ iterations; 'Nothing' means no bound (iterate until convergence).
 {-# NOINLINE fuseSOACs #-}
 fuseSOACs :: Maybe Int -> Pass SOACS SOACS
 fuseSOACs g =
