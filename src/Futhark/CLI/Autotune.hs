@@ -16,6 +16,7 @@ import Futhark.Server
 import Futhark.Test
 import Futhark.Util (maxinum, showText)
 import Futhark.Util.Options
+import Futhark.Util.ProgressBar
 import System.Directory
 import System.Environment (getExecutablePath)
 import System.Exit
@@ -353,7 +354,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
                     | fromIntegral rt * epsilon < fromIntegral best_t -> do
                         T.putStrLn $
                           T.unwords
-                            [ "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
+                            [ "\r\ESC[K\WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
                               dataset_name,
                               " was",
                               showText rt,
@@ -385,7 +386,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
           when (optVerbose opts > 0) $
             putStrLn $
               unwords
-                [ "Trying e_par",
+                [ "\r\ESC[KTrying e_par",
                   show middle,
                   "and",
                   show middle'
@@ -418,7 +419,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
         (_, _) -> do
           when (optVerbose opts > 0) $
             putStrLn $
-              unwords ["Trying e_pars", show xs]
+              unwords ["\r\ESC[KTrying e_pars", show xs]
           candidates <-
             catMaybes . zipWith (fmap . flip (,)) xs
               <$> mapM (runner $ timeout best_t) xs
