@@ -139,7 +139,7 @@ import Foreign.C.Types (CUShort (..))
 import Futhark.Util (convFloat)
 import Futhark.Util.CMath
 import Futhark.Util.Pretty
-import GHC.Exts (Double(D#), Float(F#), fmaddDouble#, fmaddFloat#)
+import GHC.Exts (Double (D#), Float (F#), fmaddDouble#, fmaddFloat#)
 import Numeric (log1p)
 import Numeric.Half
 import Prelude hiding (id, (.))
