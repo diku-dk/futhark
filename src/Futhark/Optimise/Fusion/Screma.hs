@@ -7,6 +7,7 @@ module Futhark.Optimise.Fusion.Screma
     moveLastSuperScrema,
     moveMidSuperScrema,
     unusedSuperScrema,
+    simplifySuperScrema,
     fusible,
     toScrema,
   )
