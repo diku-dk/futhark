@@ -495,10 +495,10 @@ eliminate :: Names -> Stms SOACS -> Stms SOACS
 eliminate = auxiliary (stmsFromList [])
   where
     auxiliary stms' deps stms
-      | Just (stms'', stm@(Let v _ e)) <- stmsLast stms =
+      | Just (stms'', stm@(Let v aux e)) <- stmsLast stms =
           if namesIntersect deps $ namesFromList $ patNames v
             then
-              auxiliary (oneStm stm <> stms') (freeIn e <> deps) stms''
+              auxiliary (oneStm stm <> stms') (freeIn (aux, e) <> deps) stms''
             else
               auxiliary stms' deps stms''
       | otherwise = stms'
