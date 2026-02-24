@@ -4,10 +4,10 @@ module Futhark.CLI.Autotune (main) where
 import Control.Monad
 import Data.ByteString.Char8 qualified as SBS
 import Data.Function (on)
+import Data.IORef
 import Data.List (elemIndex, intersect, minimumBy, sort, sortOn)
 import Data.Map qualified as M
 import Data.Maybe
-import Data.IORef
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
