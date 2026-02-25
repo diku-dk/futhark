@@ -552,7 +552,7 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   where
     uninterpretedOp a b = sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a, sym2SoP b]
 forward (E.AppExp (E.If e_c e_t e_f _) _) = do
-  cs <- forward e_c
+  cs <- rollbackAlgEnv $ forward e_c
   let f_c = case cs of
         [v] -> v
         _ -> error "If on tuple?"
