@@ -82,7 +82,7 @@ def map3 'a 'b 'c [n] 'x (f: a -> b -> c -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) 
 def map4 'a 'b 'c 'd [n] 'x (f: a -> b -> c -> d -> x) (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) : *[n]x =
   map (\(a, b, c, d) -> f a b c d) (zip4 as bs cs ds)
 
--- | As `map3`@term, but with one more array.
+-- | As `map4`@term, but with one more array.
 --
 -- **Work:** *O(n ✕ W(f))*
 --
