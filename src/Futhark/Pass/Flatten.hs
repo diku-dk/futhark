@@ -1450,8 +1450,6 @@ transformDistStm segments env (DistStm inps res stm) = do
               result_types = map ((\(DistType _ _ t) -> t) . distResType) res
               out_reps = resultToResReps result_types loop_out_vs'
           pure $ insertReps (zip (map distResTag res) out_reps) env
-
-    -- error "WhileLoop not yet implemented"
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
 -- helper to not mess up the tags when generating new ones for the loop parameters
@@ -1512,21 +1510,22 @@ transformDistributed ::
 transformDistributed irregs segments dist = do
   let Distributed dstms (DistResults resmap reps) = dist
   env <- foldM (transformDistStm segments) env_initial dstms
-  forM_ (M.toList resmap) $ \(rt, (cs_inps, v, v_t)) ->
-    certifying (distResCerts env cs_inps) $
-      -- FIXME: the copies are because we have too liberal aliases on
-      -- lifted functions.
-      case resVar rt env of
-        Regular v' -> letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-        Irregular irreg -> do
-          -- It might have an irregular representation, but we know
-          -- that it is actually regular because it is a result.
-          let shape = segmentsShape segments <> arrayShape v_t
-          v_copy <-
-            letExp (baseName v) . BasicOp $
-              Replicate mempty (Var $ irregularD irreg)
-          v_copy_shape <- arrayShape <$> lookupType v_copy
-          letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
+  forM_ (M.toList resmap) $ \(rt, binds) ->
+    forM_ binds $ \(cs_inps, v, v_t) ->
+      certifying (distResCerts env cs_inps) $
+        -- FIXME: the copies are because we have too liberal aliases on
+        -- lifted functions.
+        case resVar rt env of
+          Regular v' -> letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+          Irregular irreg -> do
+            -- It might have an irregular representation, but we know
+            -- that it is actually regular because it is a result.
+            let shape = segmentsShape segments <> arrayShape v_t
+            v_copy <-
+              letExp (baseName v) . BasicOp $
+                Replicate mempty (Var $ irregularD irreg)
+            v_copy_shape <- arrayShape <$> lookupType v_copy
+            letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
   forM_ reps $ \(v, r) ->
     case r of
       Left se ->
@@ -1946,38 +1945,44 @@ scatterIrregular offsets space (is, irregRep) = do
     i <- letExp "i" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp gtid])
     pure (i, x)
 
--- Segments -> DistInputs -> DistEnv 
+splitInput ::
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  VName ->
+  VName ->
+  Builder GPU (Type, VName, ResRep)
 splitInput segments inps env is v = do
-    (t, rep) <- liftSubExp segments inps env (Var v)
-    (t,v,) <$> case rep of
-      Regular arr -> do
-        n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-        arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
-          idx <- letExp "idx" =<< eIndex is [eSubExp i]
-          subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
-        pure $ Regular arr'
-      Irregular (IrregularRep segs flags offsets elems) -> do
-        n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-        segs' <- letExp "split_segs" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
-          idx <- letExp "idx" =<< eIndex is [eSubExp i]
-          subExpsRes . pure <$> (letSubExp "segs" =<< eIndex segs [toExp idx])
-        (_, offsets', num_data) <- exScanAndSum segs'
-        (_, _, ii1) <- doRepIota segs'
-        (_, _, ii2) <- doSegIota segs'
-        ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap (MkSolo num_data) $ \(MkSolo i) -> do
-          offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp i]]]
-          idx <- letExp "idx" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp i])
-          flags_split <- letSubExp "flags" =<< eIndex flags [toExp idx]
-          elems_split <- letSubExp "elems" =<< eIndex elems [toExp idx]
-          pure $ subExpsRes [flags_split, elems_split]
-        pure $
-          Irregular $
-            IrregularRep
-              { irregularS = segs',
-                irregularF = flags',
-                irregularO = offsets',
-                irregularD = elems'
-              }
+  (t, rep) <- liftSubExp segments inps env (Var v)
+  (t,v,) <$> case rep of
+    Regular arr -> do
+      n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+      arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
+        idx <- letExp "idx" =<< eIndex is [eSubExp i]
+        subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
+      pure $ Regular arr'
+    Irregular (IrregularRep segs flags offsets elems) -> do
+      n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+      segs' <- letExp "split_segs" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
+        idx <- letExp "idx" =<< eIndex is [eSubExp i]
+        subExpsRes . pure <$> (letSubExp "segs" =<< eIndex segs [toExp idx])
+      (_, offsets', num_data) <- exScanAndSum segs'
+      (_, _, ii1) <- doRepIota segs'
+      (_, _, ii2) <- doSegIota segs'
+      ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap (MkSolo num_data) $ \(MkSolo i) -> do
+        offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp i]]]
+        idx <- letExp "idx" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp i])
+        flags_split <- letSubExp "flags" =<< eIndex flags [toExp idx]
+        elems_split <- letSubExp "elems" =<< eIndex elems [toExp idx]
+        pure $ subExpsRes [flags_split, elems_split]
+      pure $
+        Irregular $
+          IrregularRep
+            { irregularS = segs',
+              irregularF = flags',
+              irregularO = offsets',
+              irregularD = elems'
+            }
 
 -- | Transform a SOACS program to a GPU program, using flattening.
 flattenSOACs :: Pass SOACS GPU

@@ -73,7 +73,7 @@ data DistStm = DistStm
 -- Second is the name to which is should be bound.
 --
 -- Third is the element type (i.e. excluding shape of segments).
-type ResMap = M.Map ResTag ([DistInput], VName, Type)
+type ResMap = M.Map ResTag [([DistInput], VName, Type)]
 
 -- | The results of a map-distribution that were free or identity
 -- mapped in the original map function.  These correspond to plain
@@ -126,7 +126,8 @@ instance Pretty Distributed where
     where
       res' = stack $ map onRes (M.toList resmap) <> map onRep reps
       stms' = stack $ map pretty stms
-      onRes (rt, v) = "let" <+> pretty v <+> "=" <+> pretty rt
+      onRes (rt, binds) =
+        stack [ "let" <+> pretty v <+> "=" <+> pretty rt | v <- binds ]
       onRep (v, Left se) =
         "let" <+> pretty v <+> "=" <+> "rep" <> parens (pretty se)
       onRep (v, Right tag) =
@@ -138,11 +139,14 @@ resultMap avail_inputs stms pat res = mconcat $ map f stms
     f stm =
       foldMap g $ zip (distStmResult stm) (patElems (stmPat (distStm stm)))
     g (DistResult rt _, pe) =
-      maybe mempty (M.singleton rt) $ findRes pe
-    findRes (PatElem v v_t) = do
-      (SubExpRes cs _, pv) <-
-        L.find ((Var v ==) . resSubExp . fst) $ zip res $ patNames pat
-      Just (map findCert $ unCerts cs, pv, v_t)
+      case findRess pe of
+        [] -> mempty
+        binds -> M.singleton rt binds
+    findRess (PatElem v v_t) = do
+      (SubExpRes cs se, pv) <- zip res (patNames pat)
+      if se == Var v
+        then pure (map findCert (unCerts cs), pv, v_t)
+        else []
     findCert v = fromMaybe (DistInputFree v (Prim Unit)) $ lookup v avail_inputs
 
 splitIrregDims :: Names -> Type -> (Rank, Type)
