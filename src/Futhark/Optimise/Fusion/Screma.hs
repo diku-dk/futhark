@@ -147,7 +147,7 @@ fusible inp_p form_p out_p inp_c form_c out_c = do
         lambdaDependencies mempty pre_c pre_pars_c
     forbidden_c =
       namesFromList
-        . fmap (SOAC.inputArray . parToInp inp_c pre_c)
+        . mapMaybe (fmap SOAC.inputArray . parToInp inp_c pre_c)
         . namesToList
         $ mconcat (pre_scan_deps_c <> pre_red_deps_c)
     pre_c = scremaLambda form_c
@@ -481,8 +481,8 @@ resToOut out lam = (m M.!)
 
 -- | Create a mapping from lambda parameter names to their input
 -- array.
-parToInp :: [SOAC.Input] -> Lambda SOACS -> VName -> SOAC.Input
-parToInp inp lam = (m M.!)
+parToInp :: [SOAC.Input] -> Lambda SOACS -> VName -> Maybe SOAC.Input
+parToInp inp lam = flip M.lookup m
   where
     m = M.fromList $ flip zip inp $ paramName <$> lambdaParams lam
 
@@ -599,10 +599,10 @@ fuseScrema ::
   [VName] ->
   m ([SOAC.Input], ScremaForm SOACS, [VName])
 fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
-  failOnScan form_p
-  failOnScan form_c
-  failOnRed form_p
-  failOnRed form_c
+  -- failOnScan form_p
+  -- failOnScan form_c
+  -- failOnRed form_p
+  -- failOnRed form_c
   fusible inp_p form_p out_p inp_c form_c out_c
   (super_screma, new_out) <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
   (new_inp, form) <-
