@@ -22,7 +22,7 @@ import Futhark.Analysis.HORep.SOAC (SOAC)
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Construct
 import Futhark.IR hiding (typeOf)
-import Futhark.IR.SOACS (SOACS)
+import Futhark.IR.SOACS (SOACS, isMapSOAC)
 import Futhark.IR.SOACS.SOAC qualified as Futhark
 import Futhark.Transform.Substitute
 
@@ -118,7 +118,7 @@ fromSOAC' bound soac = do
   screma <- massage soac
 
   case screma of
-    SOAC.Screma w inps (SOAC.ScremaForm lam [] [] _) -> do
+    SOAC.Screma w inps form | Just lam <- isMapSOAC form -> do
       let bound' = bound <> map paramIdent (lambdaParams lam)
 
       maybenest <- case ( stmsToList $ bodyStms $ lambdaBody lam,
