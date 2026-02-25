@@ -509,8 +509,7 @@ eliminateByRes lam = lam {lambdaBody = mkBody new_stms res}
   where
     res = bodyResult $ lambdaBody lam
     stms = bodyStms $ lambdaBody lam
-    names = namesFromList $ mapMaybe subExpResVName res
-    new_stms = eliminate names stms
+    new_stms = eliminate (freeIn res) stms
 
 simplifyFuse :: [Scan SOACS] -> [Reduce SOACS] -> Lambda SOACS -> Lambda SOACS -> ([Scan SOACS], Lambda SOACS, Lambda SOACS)
 simplifyFuse scan red lam_p lam_c = (new_scan, new_lam_p, new_lam_c)
