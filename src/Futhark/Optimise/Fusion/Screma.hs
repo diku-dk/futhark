@@ -204,7 +204,7 @@ dedupInput inp form =
       mapMaybe auxiliary
         . L.groupBy ((==) `on` fst)
         $ L.sortOn fst pairs
-    par_bind_pairs = map (second (map snd) . first snd) bind_pairs
+    par_bind_pairs = bimap snd (map snd) <$> bind_pairs
     binds = foldMap mkBinds par_bind_pairs
     mkBinds (par_name, names) =
       stmsFromList $
@@ -581,15 +581,11 @@ simplifySuperScremaLams (SuperScrema w inp lam scan red lam' scan' red' lam'') =
     <*> pure red'
     <*> simplifyLambda lam''
 
-failOnScan ::
-  (MonadFail m) =>
-  (ScremaForm SOACS) -> m ()
+failOnScan :: (MonadFail m) => ScremaForm SOACS -> m ()
 failOnScan (ScremaForm _ scan _ _) =
   unless (null scan) (fail "Must be empty scan.")
 
-failOnRed ::
-  (MonadFail m) =>
-  (ScremaForm SOACS) -> m ()
+failOnRed :: (MonadFail m) => ScremaForm SOACS -> m ()
 failOnRed (ScremaForm _ _ red _) =
   unless (null red) (fail "Must be empty scan.")
 
