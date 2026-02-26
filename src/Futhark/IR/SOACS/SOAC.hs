@@ -28,6 +28,7 @@ module Futhark.IR.SOACS.SOAC
     scanSOAC,
     reduceSOAC,
     mapSOAC,
+    simplifyFuse,
     isMaposcanomapSOAC,
     isScanomapSOAC,
     isRedomapSOAC,
@@ -52,6 +53,7 @@ import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.List (intersperse)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
@@ -803,6 +805,66 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
       mapM_ (lambdaMetrics . scanLambda) scans
       mapM_ (lambdaMetrics . redLambda) reds
       lambdaMetrics post_lam
+
+-- | Remove parameters passed from pre to post lambda that if the
+-- parameters are not used then they will be removed.
+simplifyFuse :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
+simplifyFuse (ScremaForm lam_p scan red lam_c) = ScremaForm new_lam_p new_scan red new_lam_c
+  where
+    pars_c = lambdaParams temp_lam_c
+    res_p = bodyResult $ lambdaBody lam_p
+    ts_p = lambdaReturnType lam_p
+    (scan_res_p, red_res_p, map_res_p) =
+      splitAt3 (scanResults scan) (redResults red) res_p
+    (scan_ts_p, red_ts_p, map_ts_p) =
+      splitAt3 (scanResults scan) (redResults red) ts_p
+    new_scan = catMaybes mscan
+    stms_p = bodyStms $ lambdaBody lam_p
+    new_lam_c = temp_lam_c {lambdaParams = new_pars_c}
+    new_lam_p =
+      eliminateByRes $
+        lam_p
+          { lambdaBody = mkBody stms_p new_res_p,
+            lambdaReturnType = new_ts_p
+          }
+
+    fst3 (a, _, _) = a
+    snd3 (_, a, _) = a
+    thrd3 (_, _, a) = a
+    new_res_p =
+      map snd3 new_scan_tuple <> red_res_p <> map snd3 new_map_tuple
+    new_ts_p =
+      map thrd3 new_scan_tuple <> red_ts_p <> map thrd3 new_map_tuple
+    (new_scan_tuple, new_map_tuple) =
+      span (isJust . fst3) $
+        zip3 mscan new_res_scan_map_p new_ts_scan_map_p
+
+    (mscan, new_res_scan_map_p, new_ts_scan_map_p, new_pars_c) =
+      L.unzip4
+        . filter (\(_, _, _, b) -> paramName b `nameIn` deps)
+        $ L.zip4
+          (map Just scan <> repeat Nothing)
+          (scan_res_p <> map_res_p)
+          (scan_ts_p <> map_ts_p)
+          pars_c
+    temp_lam_c = eliminateByRes lam_c
+    deps = freeIn $ lambdaBody temp_lam_c
+    eliminate = auxiliary (stmsFromList [])
+      where
+        auxiliary stms' deps' stms
+          | Just (stms'', stm@(Let v aux e)) <- stmsLast stms =
+              if namesIntersect deps' $ namesFromList $ patNames v
+                then
+                  auxiliary (oneStm stm <> stms') (freeIn (aux, e) <> deps') stms''
+                else
+                  auxiliary stms' deps' stms''
+          | otherwise = stms'
+
+    eliminateByRes lam = lam {lambdaBody = mkBody new_stms res}
+      where
+        res = bodyResult $ lambdaBody lam
+        stms = bodyStms $ lambdaBody lam
+        new_stms = eliminate (freeIn res) stms
 
 instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
   pretty (VJP args vec lam) =

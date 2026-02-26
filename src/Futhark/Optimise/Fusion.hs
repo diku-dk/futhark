@@ -503,7 +503,7 @@ removeOutputsExcept toKeep s = case s of
     SoacNode
       ots
       (Pat $ pats_unchanged <> pats_new)
-      (H.Screma w inp (ScremaForm lam_1 scan_1 red_1 lam_new))
+      (H.Screma w inp (simplifyFuse $ ScremaForm lam_1 scan_1 red_1 lam_new))
       aux1
     where
       red_output_size = Futhark.redResults red_1
