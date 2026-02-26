@@ -356,7 +356,8 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
                     | fromIntegral rt * epsilon < fromIntegral best_t -> do
                         T.putStrLn $
                           T.unwords
-                            [ (if fancyTerminal then "\r\ESC[K" else "") <> "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
+                            [ (if fancyTerminal then "\r\ESC[K" else "")
+                                <> "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
                               dataset_name,
                               " was",
                               showText rt,
@@ -448,22 +449,39 @@ tune opts prog = do
           drawForest (map (fmap show) forest)
 
     counter <- newIORef (0 :: Int)
-    let dataset_names = T.intercalate "," $ map (\(name, _, ep) -> ep <> ":" <> name) datasets
-    result <- foldM (\acc tp@(v, _) -> do
-       modifyIORef' counter (+1)
-       n <- readIORef counter
-       let bar =  "\rTuning: " ++ show n ++ "/" ++ show total ++ " " ++ T.unpack (progressBar ProgressBar
-             { progressBarSteps = 10,
-               progressBarBound = 1,
-               progressBarElapsed = fromIntegral n / fromIntegral total
-             }) ++ T.unpack v ++ " on " ++ T.unpack dataset_names
-       when fancyTerminal $ putStr bar
-       hFlush stdout
-       r <- tuneThreshold opts server datasets acc tp
-       when fancyTerminal $ putStr bar
-       hFlush stdout
-       pure r
-     ) ([], mempty) paths
+    let dataset_names =
+          T.intercalate "," $ map (\(name, _, ep) -> ep <> ":" <> name) datasets
+    result <-
+      foldM
+        ( \acc tp@(v, _) -> do
+            modifyIORef' counter (+ 1)
+            n <- readIORef counter
+            let bar =
+                  "\rTuning: "
+                    ++ show n
+                    ++ "/"
+                    ++ show total
+                    ++ " "
+                    ++ T.unpack
+                      ( progressBar
+                          ProgressBar
+                            { progressBarSteps = 10,
+                              progressBarBound = 1,
+                              progressBarElapsed = fromIntegral n / fromIntegral total
+                            }
+                      )
+                    ++ T.unpack v
+                    ++ " on "
+                    ++ T.unpack dataset_names
+            when fancyTerminal $ putStr bar
+            hFlush stdout
+            r <- tuneThreshold opts server datasets acc tp
+            when fancyTerminal $ putStr bar
+            hFlush stdout
+            pure r
+        )
+        ([], mempty)
+        paths
     when fancyTerminal $ do
       putStr "\r\ESC[K"
       hFlush stdout
