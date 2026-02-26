@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * FutharkScript now supports (barely) array indexing.
 
+* `futhark autotune` now shows a progress bar when running in a terminal. Work by Nader Rahhal.
+
 ### Removed
 
 ### Changed
