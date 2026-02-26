@@ -6,7 +6,6 @@ module Futhark.Optimise.Fusion.Screma
     moveRedScanSuperScrema,
     moveLastSuperScrema,
     moveMidSuperScrema,
-    unusedSuperScrema,
     simplifySuperScrema,
     fusible,
     toScrema,
@@ -408,52 +407,55 @@ moveMidSuperScrema ::
   (MonadFreshNames m) =>
   SuperScrema SOACS ->
   m (SuperScrema SOACS)
-moveMidSuperScrema (SuperScrema w inp lam scan red lam' scan' red' lam'') = do
-  let map_pars =
-        drop (scanResults scan + redResults red)
-          . map paramName
-          $ lambdaParams lam'
-      ((inp_c, map_lam, _), _) =
-        splitLambdaByPar
-          map_pars
-          (scan_out <> map_out)
-          lam'
-          (replicate (numRes lam') ())
-  map_lam_renamed <- renameLambda map_lam
-  let binds = fuseBinds lam out_p inp_c map_lam_renamed
-      stms = bodyStms $ lambdaBody lam
-      stms' = bodyStms $ lambdaBody map_lam_renamed
-      new_stms = stms <> binds <> stms'
-      new_res =
-        bodyResult (lambdaBody lam)
-          <> bodyResult (lambdaBody map_lam_renamed)
-      new_body = mkBody new_stms new_res
-      new_pars = lambdaParams lam
-      new_ts = lambdaReturnType lam <> lambdaReturnType map_lam_renamed
-      new_lam = eliminateByRes $ Lambda new_pars new_ts new_body
+moveMidSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'')
+  | not $ isIdentityLambda lam'' = error "moveLastSuperScrema last lambda must be the identity."
+  | otherwise = do
+      let map_pars =
+            drop (scanResults scan + redResults red)
+              . map paramName
+              $ lambdaParams lam'
+          ((inp_c, map_lam, _), _) =
+            splitLambdaByPar
+              map_pars
+              (scan_out <> map_out)
+              lam'
+              (replicate (numRes lam') ())
+      map_lam_renamed <- renameLambda map_lam
+      let binds = fuseBinds lam out_p inp_c map_lam_renamed
+          stms = bodyStms $ lambdaBody lam
+          stms' = bodyStms $ lambdaBody map_lam_renamed
+          new_stms = stms <> binds <> stms'
+          new_res =
+            bodyResult (lambdaBody lam)
+              <> bodyResult (lambdaBody map_lam_renamed)
+          new_body = mkBody new_stms new_res
+          new_pars = lambdaParams lam
+          new_ts = lambdaReturnType lam <> lambdaReturnType map_lam_renamed
+          new_lam = eliminateByRes $ Lambda new_pars new_ts new_body
 
-  forward_params <- mapM (newParam "x") $ lambdaReturnType map_lam_renamed
+      forward_params <- mapM (newParam "x") $ lambdaReturnType map_lam_renamed
 
-  let res_mapping =
-        M.fromList $
-          zip
-            (bodyResult $ lambdaBody map_lam)
-            (varsRes $ map paramName forward_params)
-      new_pars' = lambdaParams lam' <> forward_params
-      new_res' =
-        map (\r -> fromMaybe r (M.lookup r res_mapping))
-          . bodyResult
-          $ lambdaBody lam'
-      new_ts' = lambdaReturnType lam'
-      new_body' = bodyStms $ lambdaBody lam'
-      new_lam' = Lambda new_pars' new_ts' (mkBody new_body' new_res')
+      let res_mapping =
+            M.fromList $
+              zip
+                (bodyResult $ lambdaBody map_lam)
+                (varsRes $ map paramName forward_params)
+          new_pars' = lambdaParams lam' <> forward_params
+          new_res' =
+            map (\r -> fromMaybe r (M.lookup r res_mapping))
+              . bodyResult
+              $ lambdaBody lam'
+          new_ts' = lambdaReturnType lam'
+          new_body' = bodyStms $ lambdaBody lam'
+          new_lam' = eliminateByRes $ Lambda new_pars' new_ts' (mkBody new_body' new_res')
 
-  pure $
-    SuperScrema w inp new_lam scan red new_lam' scan' red' lam''
+      pure $
+        SuperScrema w inp new_lam scan red new_lam' [] [] lam''
   where
     out_p = [0 .. numRes lam - 1]
     (scan_out, _, map_out) =
       splitAt3 (scanResults scan) (redResults red) out_p
+moveMidSuperScrema _ = error "moveMidSuperScrema must not have any scans or reduce operation in the end."
 
 -- debug text a = traceShow (text <> show a) a
 -- debugWith text f a = traceShow (text <> show (f a)) a
@@ -511,10 +513,10 @@ eliminateByRes lam = lam {lambdaBody = mkBody new_stms res}
     stms = bodyStms $ lambdaBody lam
     new_stms = eliminate (freeIn res) stms
 
-simplifyFuse :: [Scan SOACS] -> [Reduce SOACS] -> Lambda SOACS -> Lambda SOACS -> ([Scan SOACS], Lambda SOACS, Lambda SOACS)
-simplifyFuse scan red lam_p lam_c = (new_scan, new_lam_p, new_lam_c)
+simplifyFuse :: ScremaForm SOACS -> ScremaForm SOACS
+simplifyFuse (ScremaForm lam_p scan red lam_c) = ScremaForm new_lam_p new_scan red new_lam_c
   where
-    pars_c = lambdaParams lam_c
+    pars_c = lambdaParams temp_lam_c
     res_p = bodyResult $ lambdaBody lam_p
     ts_p = lambdaReturnType lam_p
     (scan_res_p, red_res_p, map_res_p) =
@@ -544,7 +546,7 @@ simplifyFuse scan red lam_p lam_c = (new_scan, new_lam_p, new_lam_c)
 
     (mscan, new_res_scan_map_p, new_ts_scan_map_p, new_pars_c) =
       L.unzip4
-        . filter (\(_, _, _, a) -> paramName a `nameIn` deps)
+        . filter (\(_, _, _, b) -> paramName b `nameIn` deps)
         $ L.zip4
           (map Just scan <> repeat Nothing)
           (scan_res_p <> map_res_p)
@@ -553,24 +555,11 @@ simplifyFuse scan red lam_p lam_c = (new_scan, new_lam_p, new_lam_c)
     temp_lam_c = eliminateByRes lam_c
     deps = freeIn $ lambdaBody temp_lam_c
 
-unusedSuperScrema :: SuperScrema SOACS -> SuperScrema SOACS
-unusedSuperScrema (SuperScrema w inp lam scan red lam' scan' red' lam'') =
-  SuperScrema w inp new_lam new_scan red new_lam' new_scan' red' new_lam''
-  where
-    (new_scan', temp_lam', new_lam'') = simplifyFuse scan' red' lam' lam''
-    (new_scan, new_lam, new_lam') = simplifyFuse scan red lam temp_lam'
-
 simplifySuperScrema ::
   (HasScope SOACS m, MonadFreshNames m) =>
   SuperScrema SOACS ->
   m (SuperScrema SOACS)
-simplifySuperScrema = simplifySuperScremaLams . unusedSuperScrema
-
-simplifySuperScremaLams ::
-  (HasScope SOACS m, MonadFreshNames m) =>
-  SuperScrema SOACS ->
-  m (SuperScrema SOACS)
-simplifySuperScremaLams (SuperScrema w inp lam scan red lam' scan' red' lam'') =
+simplifySuperScrema (SuperScrema w inp lam scan red lam' scan' red' lam'') =
   SuperScrema w inp
     <$> simplifyLambda lam
     <*> pure scan
@@ -579,14 +568,6 @@ simplifySuperScremaLams (SuperScrema w inp lam scan red lam' scan' red' lam'') =
     <*> pure scan'
     <*> pure red'
     <*> simplifyLambda lam''
-
-failOnScan :: (MonadFail m) => ScremaForm SOACS -> m ()
-failOnScan (ScremaForm _ scan _ _) =
-  unless (null scan) (fail "Must be empty scan.")
-
-failOnRed :: (MonadFail m) => ScremaForm SOACS -> m ()
-failOnRed (ScremaForm _ _ red _) =
-  unless (null red) (fail "Must be empty scan.")
 
 fuseScrema ::
   (MonadFail m, MonadFreshNames m, HasScope SOACS m) =>
@@ -599,16 +580,12 @@ fuseScrema ::
   [VName] ->
   m ([SOAC.Input], ScremaForm SOACS, [VName])
 fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
-  -- failOnScan form_p
-  -- failOnScan form_c
-  -- failOnRed form_p
-  -- failOnRed form_c
   fusible inp_p form_p out_p inp_c form_c out_c
   (super_screma, new_out) <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
   (new_inp, form) <-
-    fmap toScrema $
+    fmap (second simplifyFuse . toScrema) $
       moveRedScanSuperScrema super_screma
         >>= moveLastSuperScrema
-  -- >>= moveMidSuperScrema
-  -- >>= simplifySuperScrema
+        >>= moveMidSuperScrema
+        >>= simplifySuperScrema
   pure (new_inp, form, new_out)
