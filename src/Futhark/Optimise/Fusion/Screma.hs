@@ -18,9 +18,11 @@ import Data.Function
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Futhark.Analysis.Alias
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.IR
+import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify
 import Futhark.MonadFreshNames
@@ -110,32 +112,43 @@ fuseIsVarish inp_c =
 -- information @a@, and each result with some additional information
 -- @b@. This is also partitioned and returned appropriately.
 splitLambdaByPar ::
+  (MonadFail m) =>
   [VName] ->
-  [a] ->
+  [inp] ->
   Lambda SOACS ->
-  [b] ->
-  (([a], Lambda SOACS, [b]), ([a], Lambda SOACS, [b]))
-splitLambdaByPar names inps lam outs =
-  ( (new_inps, lam0, new_outs),
-    (new_inps', lam1, new_outs')
-  )
+  [out] ->
+  m (([inp], Lambda SOACS, [out]), ([inp], Lambda SOACS, [out]))
+splitLambdaByPar names inp lam out = do
+  when
+    (consumedOverlap new_lam new_lam')
+    (fail "Can not fuse due to overlap consumption in pre and post.")
+  when
+    (parAccsOverlap new_lam new_lam')
+    (fail "Can not fuse due to overlap in parameter accumalators.")
+  when
+    (resAccsOverlap new_lam new_lam')
+    (fail "Can not fuse due to overlap in result accumalators.")
+  pure
+    ( (new_inp, new_lam, new_out),
+      (new_inp', new_lam', new_out')
+    )
   where
-    lam0 = eliminateByRes $ Lambda new_params new_ts (mkBody stms new_res)
-    lam1 = eliminateByRes $ Lambda new_params' new_ts' (mkBody stms new_res')
+    new_lam = eliminateByRes $ Lambda new_params new_ts (mkBody stms new_res)
+    new_lam' = eliminateByRes $ Lambda new_params' new_ts' (mkBody stms new_res')
     pars = lambdaParams lam
-    m = M.fromList $ zip pars inps
+    m = M.fromList $ zip pars inp
     par_deps = lambdaDependencies mempty lam (oneName . paramName <$> pars)
     body = lambdaBody lam
     stms = bodyStms body
-    new_inps = (m M.!) <$> new_params
-    new_inps' = (m M.!) <$> new_params'
+    new_inp = (m M.!) <$> new_params
+    new_inp' = (m M.!) <$> new_params'
     new_params = filter ((`nameIn` deps) . paramName) pars
     new_params' = filter ((`nameIn` deps') . paramName) pars
     auxiliary = (\(a, b, c, d) -> (mconcat a, b, c, d)) . L.unzip4
-    ((deps, new_res, new_ts, new_outs), (deps', new_res', new_ts', new_outs')) =
+    ((deps, new_res, new_ts, new_out), (deps', new_res', new_ts', new_out')) =
       bimap auxiliary auxiliary
         . L.partition (namesIntersect (namesFromList names) . (\(a, _, _, _) -> a))
-        $ L.zip4 par_deps (bodyResult body) (lambdaReturnType lam) outs
+        $ L.zip4 par_deps (bodyResult body) (lambdaReturnType lam) out
 
 -- | Check that two scremas are fusible if they are give back the
 -- producer scremas post lambda that has been split into the scan
@@ -152,6 +165,8 @@ fusible ::
   [VName] ->
   m ()
 fusible inp_p form_p out_p inp_c form_c out_c = do
+  ((_, post_scan_p, _), _) <-
+    splitLambdaByPar post_scan_pars_p inp_p post_p out_c
   let post_scan_res_p = bodyResult $ lambdaBody post_scan_p
       forbidden_p = namesFromList $ resToOut out_p post_p <$> post_scan_res_p
       is_fusible =
@@ -159,8 +174,6 @@ fusible inp_p form_p out_p inp_c form_c out_c = do
           && not (forbidden_c `namesIntersect` forbidden_p)
   unless is_fusible (fail "Scremas are not fusible.")
   where
-    ((_, post_scan_p, _), _) =
-      splitLambdaByPar post_scan_pars_p inp_p post_p out_c
     pre_pars_c = oneName . paramName <$> lambdaParams pre_c
     (pre_scan_deps_c, pre_red_deps_c, _) =
       splitAt3 num_scan_c num_red_c $
@@ -335,12 +348,16 @@ fuseSuperScrema w inp_p' form_p' out_p inp_c' form_c' out_c = do
     inputFromOutput inp = SOAC.inputArray inp `elem` out_p
 
 moveRedScanSuperScrema ::
-  (MonadFreshNames m) =>
+  (MonadFail m, MonadFreshNames m) =>
   SuperScrema SOACS ->
   m (SuperScrema SOACS)
 moveRedScanSuperScrema super_screma = do
-  let (scan_red_lam', map_lam') =
-        splitAtLambdaByRes (scanResults scan' + redResults red') lam'
+  ((scan_red_inp_c, scan_red_lam', _), (_, map_lam', _)) <-
+    splitAtLambdaByRes
+      (scanResults scan' + redResults red')
+      inp_c
+      lam'
+      (replicate (length $ lambdaReturnType lam') ())
   renamed_scan_red_lam' <- renameLambda scan_red_lam'
   let (scan_res', red_res') =
         splitAt (scanResults scan')
@@ -349,7 +366,7 @@ moveRedScanSuperScrema super_screma = do
       (scan_ts', red_ts') =
         splitAt (scanResults scan') $
           lambdaReturnType renamed_scan_red_lam'
-      binds = fuseBinds lam out_p inp_c renamed_scan_red_lam'
+      binds = fuseBinds lam out_p scan_red_inp_c renamed_scan_red_lam'
       stms' = bodyStms $ lambdaBody renamed_scan_red_lam'
       new_scan = scan <> scan'
       new_red = red <> red'
@@ -425,7 +442,7 @@ numRes :: Lambda rep -> Int
 numRes = length . bodyResult . lambdaBody
 
 moveMidSuperScrema ::
-  (MonadFreshNames m) =>
+  (MonadFail m, MonadFreshNames m) =>
   SuperScrema SOACS ->
   m (SuperScrema SOACS)
 moveMidSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'')
@@ -435,12 +452,12 @@ moveMidSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'')
             drop (scanResults scan + redResults red)
               . map paramName
               $ lambdaParams lam'
-          ((inp_c, map_lam, _), _) =
-            splitLambdaByPar
-              map_pars
-              (scan_out <> map_out)
-              lam'
-              (replicate (numRes lam') ())
+      ((inp_c, map_lam, _), _) <-
+        splitLambdaByPar
+          map_pars
+          (scan_out <> map_out)
+          lam'
+          (replicate (numRes lam') ())
       map_lam_renamed <- renameLambda map_lam
       let binds = fuseBinds lam out_p inp_c map_lam_renamed
           stms = bodyStms $ lambdaBody lam
@@ -478,39 +495,55 @@ moveMidSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'')
       splitAt3 (scanResults scan) (redResults red) out_p
 moveMidSuperScrema _ = error "moveMidSuperScrema must not have any scans or reduce operation in the end."
 
-{-
+parAccs :: Lambda SOACS -> [Type]
+parAccs = filter isAcc . map typeOf . lambdaParams
+
+resAccs :: Lambda SOACS -> [Type]
+resAccs = filter isAcc . lambdaReturnType
+
+parAccsOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
+parAccsOverlap lam = any (`elem` accs) . parAccs
+  where
+    accs = parAccs lam
+
+resAccsOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
+resAccsOverlap lam = any (`elem` accs) . resAccs
+  where
+    accs = resAccs lam
+
+consumedOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
+consumedOverlap lam lam' =
+  on namesIntersect (consumedByLambda . analyseLambda mempty) lam lam'
+
 splitAtLambdaByRes ::
   (MonadFail m) =>
   Int ->
-  [a] ->
-  [b] ->
+  [inp] ->
   Lambda SOACS ->
-  m (([a], Lambda SOACS, [b]), ([a], Lambda SOACS, [b]))
-splitAtLambdaByRes i inps outs lam =
-  pure ((inps0, lam0, outs0), (inps1, lam1, outs1))
+  [out] ->
+  m (([inp], Lambda SOACS, [out]), ([inp], Lambda SOACS, [out]))
+splitAtLambdaByRes i inp lam out = do
+  when
+    (consumedOverlap new_lam new_lam')
+    (fail "Can not fuse due to overlap consumption in pre and post.")
+  when
+    (parAccsOverlap new_lam new_lam')
+    (fail "Can not fuse due to overlap in parameter accumalators.")
+  pure ((new_inp, new_lam, new_out), (new_inp', new_lam', new_out'))
   where
-    lam0 = Lambda pars new_ts (mkBody stms new_res)
-    lam1 = Lambda pars new_ts' (mkBody stms new_res')
+    new_lam = Lambda new_pars new_ts new_body
+    new_lam' = Lambda new_pars' new_ts' new_body'
     pars = lambdaParams lam
     stms = bodyStms $ lambdaBody lam
+    new_body = mkBody (eliminate (freeIn new_res) stms) new_res
+    new_body' = mkBody (eliminate (freeIn new_res') stms) new_res'
+    inBody body = (`nameIn` freeIn body) . paramName . fst
+    removePars body = unzip $ filter (inBody body) $ zip pars inp
+    (new_pars, new_inp) = removePars new_body
+    (new_pars', new_inp') = removePars new_body'
     (new_res, new_res') = splitAt i $ bodyResult $ lambdaBody lam
     (new_ts, new_ts') = splitAt i $ lambdaReturnType lam
-    (outs0, outs1) = splitAt i outs
-    (inps0, inps1) = ([], [])
--}
-
-splitAtLambdaByRes ::
-  Int ->
-  Lambda SOACS ->
-  (Lambda SOACS, Lambda SOACS)
-splitAtLambdaByRes i lam = (lam0, lam1)
-  where
-    lam0 = Lambda pars new_ts (mkBody stms new_res)
-    lam1 = Lambda pars new_ts' (mkBody stms new_res')
-    pars = lambdaParams lam
-    stms = bodyStms $ lambdaBody lam
-    (new_res, new_res') = splitAt i $ bodyResult $ lambdaBody lam
-    (new_ts, new_ts') = splitAt i $ lambdaReturnType lam
+    (new_out, new_out') = splitAt i out
 
 -- | Create a mapping from lambda results expression to their output
 -- array.

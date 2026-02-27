@@ -15,10 +15,6 @@ withFreshNamesScopeError :: ReaderT (Scope SOACS) (StateT VNameSource Maybe) a -
 withFreshNamesScopeError m =
   evalStateT (runReaderT m mempty) (newNameSource 10000)
 
-withFreshNamesAndScope :: ReaderT (Scope SOACS) (State VNameSource) a -> a
-withFreshNamesAndScope m =
-  evalState (runReaderT m mempty) (newNameSource 10000)
-
 withFreshNames :: State VNameSource a -> a
 withFreshNames m =
   evalState m (newNameSource 10000)
@@ -48,11 +44,19 @@ newtype Singleton a = Singleton a
 instance (Pretty a) => Show (Singleton a) where
   show (Singleton x) = prettyString x
 
+newtype SingletonError a = SingletonError (Maybe a)
+  deriving (Eq, Ord)
+
+instance (Pretty a) => Show (SingletonError a) where
+  show (SingletonError (Just x)) = prettyString x
+  show (SingletonError Nothing) = "Nothing"
+
 splitLambdaByParTester :: [VName] -> Lambda SOACS -> Tuple2 (Lambda SOACS) (Lambda SOACS)
 splitLambdaByParTester names lam = Tuple2 (lam_x', lam_y')
   where
-    ((_, lam_x', _), (_, lam_y', _)) =
-      splitLambdaByPar names (lambdaParams lam) lam (lambdaReturnType lam)
+    Just ((_, lam_x', _), (_, lam_y', _)) =
+      withFreshNamesScopeError $
+        splitLambdaByPar names (lambdaParams lam) lam (lambdaReturnType lam)
 
 splitLambdaByParTests :: TestTree
 splitLambdaByParTests =
@@ -1032,8 +1036,8 @@ moveRedScanSuperScremaTests =
     [ testCase "Only map" $
         let ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in Singleton
-              ( withFreshNamesAndScope
+         in SingletonError
+              ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
                           "d_5537"
@@ -1063,31 +1067,33 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= Singleton
-                ( SuperScrema
-                    "d_5537"
-                    [input_a]
-                    ( fromLines
-                        [ "\\ {x_0 : i32}: {i32} ->",
-                          "let {y_1 : i32} = add32(1i32, x_0)",
-                          "in {y_1}"
-                        ]
-                    )
-                    []
-                    []
-                    ( fromLines
-                        [ "\\ {x_2 : i32}: {i32} -> ",
-                          "let {y_3 : i32} = add32(2i32, x_2)",
-                          "in {y_3}"
-                        ]
-                    )
-                    []
-                    []
-                    ( fromLines
-                        [ "\\ {x_4 : i32}: {i32} -> ",
-                          "let {y_5 : i32} = add32(3i32, x_4)",
-                          "in {y_5}"
-                        ]
+              @?= SingletonError
+                ( Just
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_0 : i32}: {i32} ->",
+                              "let {y_1 : i32} = add32(1i32, x_0)",
+                              "in {y_1}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_2 : i32}: {i32} -> ",
+                              "let {y_3 : i32} = add32(2i32, x_2)",
+                              "in {y_3}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_4 : i32}: {i32} -> ",
+                              "let {y_5 : i32} = add32(3i32, x_4)",
+                              "in {y_5}"
+                            ]
+                        )
                     )
                 ),
       testCase "map-map-scan-map" $
@@ -1102,8 +1108,8 @@ moveRedScanSuperScremaTests =
                 ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in Singleton
-              ( withFreshNamesAndScope
+         in SingletonError
+              ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
                           "d_5537"
@@ -1133,32 +1139,34 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= Singleton
-                ( SuperScrema
-                    "d_5537"
-                    [input_a]
-                    ( fromLines
-                        [ "\\ {x_0 : i32}: {i32, i32} ->",
-                          "let {y_1 : i32} = add32(2i32, x_0)",
-                          "let {x_10000 : i32} = y_1",
-                          "let {y_10001 : i32} = add32(2i32, x_10000)",
-                          "in {y_10001, y_1}"
-                        ]
-                    )
-                    [scan_op]
-                    []
-                    ( fromLines
-                        [ "\\ {x_10002 : i32, x_2 : i32}: {i32} -> ",
-                          "in {x_10002}"
-                        ]
-                    )
-                    []
-                    []
-                    ( fromLines
-                        [ "\\ {x_4 : i32}: {i32} -> ",
-                          "let {y_5 : i32} = add32(2i32, x_4)",
-                          "in {y_5}"
-                        ]
+              @?= SingletonError
+                ( Just
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_0 : i32}: {i32, i32} ->",
+                              "let {y_1 : i32} = add32(2i32, x_0)",
+                              "let {x_10000 : i32} = y_1",
+                              "let {y_10001 : i32} = add32(2i32, x_10000)",
+                              "in {y_10001, y_1}"
+                            ]
+                        )
+                        [scan_op]
+                        []
+                        ( fromLines
+                            [ "\\ {x_10002 : i32, x_2 : i32}: {i32} -> ",
+                              "in {x_10002}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_4 : i32}: {i32} -> ",
+                              "let {y_5 : i32} = add32(2i32, x_4)",
+                              "in {y_5}"
+                            ]
+                        )
                     )
                 ),
       testCase "map-scan-map-map" $
@@ -1173,8 +1181,8 @@ moveRedScanSuperScremaTests =
                 ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in Singleton
-              ( withFreshNamesAndScope
+         in SingletonError
+              ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
                           "d_5537"
@@ -1204,31 +1212,33 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= Singleton
-                ( SuperScrema
-                    "d_5537"
-                    [input_a]
-                    ( fromLines
-                        [ "\\ {x_5566 : i32}: {i32} ->",
-                          "let {y_5567 : i32} = add32(1i32, x_5566)",
-                          "in {y_5567}"
-                        ]
-                    )
-                    [scan_op]
-                    []
-                    ( fromLines
-                        [ "\\ {x_5568 : i32}: {i32} -> ",
-                          "let {y_5570 : i32} = add32(2i32, x_5568)",
-                          "in {y_5570}"
-                        ]
-                    )
-                    []
-                    []
-                    ( fromLines
-                        [ "\\ {x_5571 : i32}: {i32} -> ",
-                          "let {y_5572 : i32} = add32(3i32, x_5571)",
-                          "in {y_5572}"
-                        ]
+              @?= SingletonError
+                ( Just
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_5566 : i32}: {i32} ->",
+                              "let {y_5567 : i32} = add32(1i32, x_5566)",
+                              "in {y_5567}"
+                            ]
+                        )
+                        [scan_op]
+                        []
+                        ( fromLines
+                            [ "\\ {x_5568 : i32}: {i32} -> ",
+                              "let {y_5570 : i32} = add32(2i32, x_5568)",
+                              "in {y_5570}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5571 : i32}: {i32} -> ",
+                              "let {y_5572 : i32} = add32(3i32, x_5571)",
+                              "in {y_5572}"
+                            ]
+                        )
                     )
                 ),
       testCase "map-map-scan,reduce-map" $
@@ -1253,8 +1263,8 @@ moveRedScanSuperScremaTests =
                 ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in Singleton
-              ( withFreshNamesAndScope
+         in SingletonError
+              ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
                           "d_5537"
@@ -1284,32 +1294,34 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= Singleton
-                ( SuperScrema
-                    "d_5537"
-                    [input_a]
-                    ( fromLines
-                        [ "\\ {x_5566 : i32}: {i32, i32, i32} ->",
-                          "let {y_5567 : i32} = add32(2i32, x_5566)",
-                          "let {x_10000 : i32} = y_5567",
-                          "let {y_10001 : i32} = add32(2i32, x_10000)",
-                          "in {y_10001, y_10001, y_5567}"
-                        ]
-                    )
-                    [scan_op]
-                    [reduce_op]
-                    ( fromLines
-                        [ "\\ {x_10002 : i32, x_5568 : i32}: {i32} -> ",
-                          "in {x_10002}"
-                        ]
-                    )
-                    []
-                    []
-                    ( fromLines
-                        [ "\\ {x_5571 : i32}: {i32} -> ",
-                          "let {y_5572 : i32} = add32(2i32, x_5571)",
-                          "in {y_5572}"
-                        ]
+              @?= SingletonError
+                ( Just
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_5566 : i32}: {i32, i32, i32} ->",
+                              "let {y_5567 : i32} = add32(2i32, x_5566)",
+                              "let {x_10000 : i32} = y_5567",
+                              "let {y_10001 : i32} = add32(2i32, x_10000)",
+                              "in {y_10001, y_10001, y_5567}"
+                            ]
+                        )
+                        [scan_op]
+                        [reduce_op]
+                        ( fromLines
+                            [ "\\ {x_10002 : i32, x_5568 : i32}: {i32} -> ",
+                              "in {x_10002}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5571 : i32}: {i32} -> ",
+                              "let {y_5572 : i32} = add32(2i32, x_5571)",
+                              "in {y_5572}"
+                            ]
+                        )
                     )
                 ),
       testCase "map-reduce-map-scan,reduce-map" $
@@ -1344,8 +1356,8 @@ moveRedScanSuperScremaTests =
                 ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in Singleton
-              ( withFreshNamesAndScope
+         in SingletonError
+              ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
                           "d_5537"
@@ -1374,31 +1386,33 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= Singleton
-                ( SuperScrema
-                    "d_5537"
-                    [input_a]
-                    ( fromLines
-                        [ "\\ {x_5566 : i32}: {i32, i32, i32, i32} ->",
-                          "let {y_5567 : i32} = add32(1i32, x_5566)",
-                          "let {x_10000 : i32} = y_5567",
-                          "in {x_10000, x_5566, x_10000, y_5567}"
-                        ]
-                    )
-                    [scan_op]
-                    [reduce_op', reduce_op]
-                    ( fromLines
-                        [ "\\ {x_10001 : i32, x_6777 : i32}: {i32} -> ",
-                          "in {x_10001}"
-                        ]
-                    )
-                    []
-                    []
-                    ( fromLines
-                        [ "\\ {x_5571 : i32}: {i32} -> ",
-                          "let {y_5572 : i32} = add32(3i32, x_5571)",
-                          "in {y_5572}"
-                        ]
+              @?= SingletonError
+                ( Just
+                    ( SuperScrema
+                        "d_5537"
+                        [input_a]
+                        ( fromLines
+                            [ "\\ {x_5566 : i32}: {i32, i32, i32, i32} ->",
+                              "let {y_5567 : i32} = add32(1i32, x_5566)",
+                              "let {x_10000 : i32} = y_5567",
+                              "in {x_10000, x_5566, x_10000, y_5567}"
+                            ]
+                        )
+                        [scan_op]
+                        [reduce_op', reduce_op]
+                        ( fromLines
+                            [ "\\ {x_10001 : i32, x_6777 : i32}: {i32} -> ",
+                              "in {x_10001}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_5571 : i32}: {i32} -> ",
+                              "let {y_5572 : i32} = add32(3i32, x_5571)",
+                              "in {y_5572}"
+                            ]
+                        )
                     )
                 ),
       testCase "scan,red-scan,red" $
@@ -1448,8 +1462,8 @@ moveRedScanSuperScremaTests =
             input_c = SOAC.identInput ident_c
             ident_d = "input_d_16 : [d_27]f32"
             input_d = SOAC.identInput ident_d
-         in Singleton
-              ( withFreshNamesAndScope
+         in SingletonError
+              ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
                           "d_27"
@@ -1476,30 +1490,32 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= Singleton
-                ( SuperScrema
-                    "d_27"
-                    [input_a, input_b, input_c, input_d]
-                    ( fromLines
-                        [ "\\ {x_17 : i64, x_18 : i32, x_30 : f64, x_31 : f32}: {i64, f64, i32, f32, f64, f32} ->",
-                          "let {x_10001 : f64} = x_30",
-                          "let {x_10002 : f32} = x_31",
-                          "in {x_17, x_10001, x_18, x_10002, x_30, x_31}"
-                        ]
-                    )
-                    [scan_op', scan_op]
-                    [reduce_op', reduce_op]
-                    ( fromLines
-                        [ "\\ {x_19 : i64, x_10003 : f64, x_22 : f64, x_23 : f32}: {f64, i64} ->",
-                          "{x_10003, x_19}"
-                        ]
-                    )
-                    []
-                    []
-                    ( fromLines
-                        [ "\\ {x_24 : f64, x_32 : i64}: {f64, i64} ->",
-                          "{x_24, x_32}"
-                        ]
+              @?= SingletonError
+                ( Just
+                    ( SuperScrema
+                        "d_27"
+                        [input_a, input_b, input_c, input_d]
+                        ( fromLines
+                            [ "\\ {x_17 : i64, x_18 : i32, x_30 : f64, x_31 : f32}: {i64, f64, i32, f32, f64, f32} ->",
+                              "let {x_10001 : f64} = x_30",
+                              "let {x_10002 : f32} = x_31",
+                              "in {x_17, x_10001, x_18, x_10002, x_30, x_31}"
+                            ]
+                        )
+                        [scan_op', scan_op]
+                        [reduce_op', reduce_op]
+                        ( fromLines
+                            [ "\\ {x_19 : i64, x_10003 : f64, x_22 : f64, x_23 : f32}: {f64, i64} ->",
+                              "{x_10003, x_19}"
+                            ]
+                        )
+                        []
+                        []
+                        ( fromLines
+                            [ "\\ {x_24 : f64, x_32 : i64}: {f64, i64} ->",
+                              "{x_24, x_32}"
+                            ]
+                        )
                     )
                 )
     ]
