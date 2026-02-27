@@ -599,6 +599,70 @@ tryIdentityPost (ScremaForm pre_lam [] [] post_lam) = do
         }
 tryIdentityPost form = pure form
 
+-- | Remove unused post lambda map parameters as well the
+-- corresponding pre lambda results.
+removeUnusedMap :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
+removeUnusedMap (ScremaForm lam_p scan red lam_c) =
+  ScremaForm new_lam_p scan red new_lam_c
+  where
+    (rest_res_p, map_res_p) =
+      splitAt (scanResults scan + redResults red) . bodyResult $ lambdaBody lam_p
+    (rest_ts_p, map_ts_p) =
+      splitAt (scanResults scan + redResults red) $ lambdaReturnType lam_p
+    (scan_pars_c, map_pars_c) =
+      splitAt (scanResults scan) $ lambdaParams temp_lam_c
+    new_lam_c = temp_lam_c {lambdaParams = scan_pars_c <> new_map_pars_c}
+    new_lam_p =
+      eliminateByRes $
+        lam_p
+          { lambdaBody =
+              mkBody
+                (bodyStms $ lambdaBody lam_p)
+                (rest_res_p <> new_map_res_p),
+            lambdaReturnType = rest_ts_p <> new_map_ts_p
+          }
+    (new_map_res_p, new_map_ts_p, new_map_pars_c) =
+      unzip3
+        . filter (\(_, _, p) -> paramName p `nameIn` deps)
+        $ zip3 map_res_p map_ts_p map_pars_c
+    temp_lam_c = eliminateByRes lam_c
+    deps = freeIn $ lambdaBody temp_lam_c
+
+-- | Remove unused post lambda scan parameters as well the
+-- corresponding pre lambda results.
+removeUnusedScan :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
+removeUnusedScan (ScremaForm lam_p scan red lam_c) =
+  ScremaForm new_lam_p new_scan red new_lam_c
+  where
+    (scan_res_p, rest_res_p) =
+      splitAt (scanResults scan) . bodyResult $ lambdaBody lam_p
+    (scan_ts_p, rest_ts_p) =
+      splitAt (scanResults scan) $ lambdaReturnType lam_p
+    (scan_pars_c, map_pars_c) =
+      splitAt (scanResults scan) $ lambdaParams temp_lam_c
+    new_lam_c = temp_lam_c {lambdaParams = new_scan_pars_c <> map_pars_c}
+    new_lam_p =
+      eliminateByRes $
+        lam_p
+          { lambdaBody =
+              mkBody
+                (bodyStms $ lambdaBody lam_p)
+                (new_scan_res_p <> rest_res_p),
+            lambdaReturnType = new_scan_ts_p <> rest_ts_p
+          }
+    (new_scan, new_scan_res_p, new_scan_ts_p, new_scan_pars_c) =
+      L.unzip4
+        . filter (\(_, _, _, p) -> paramName p `nameIn` deps)
+        $ L.zip4 scan scan_res_p scan_ts_p scan_pars_c
+    temp_lam_c = eliminateByRes lam_c
+    deps = freeIn $ lambdaBody temp_lam_c
+
+removeUnused :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
+removeUnused form =
+  if form == form' then form' else removeUnused form'
+  where
+    form' = removeUnusedScan $ removeUnusedMap form
+
 fuseScrema ::
   (MonadFail m, MonadFreshNames m, HasScope SOACS m) =>
   SubExp ->
@@ -613,7 +677,7 @@ fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
   fusible inp_p form_p out_p inp_c form_c out_c
   (super_screma, new_out) <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
   (new_inp, form') <-
-    fmap toScrema $
+    fmap (second removeUnused . toScrema) $
       moveRedScanSuperScrema super_screma
         >>= moveLastSuperScrema
         >>= moveMidSuperScrema
