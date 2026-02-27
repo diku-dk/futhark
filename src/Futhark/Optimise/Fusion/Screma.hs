@@ -663,6 +663,14 @@ removeUnused form =
   where
     form' = removeUnusedScan $ removeUnusedMap form
 
+failOnScan :: (MonadFail m) => ScremaForm SOACS -> m ()
+failOnScan (ScremaForm _ scan _ _) =
+  unless (null scan) (fail "Must be empty scan.")
+
+failOnRed :: (MonadFail m) => ScremaForm SOACS -> m ()
+failOnRed (ScremaForm _ _ red _) =
+  unless (null red) (fail "Must be empty scan.")
+
 fuseScrema ::
   (MonadFail m, MonadFreshNames m, HasScope SOACS m) =>
   SubExp ->
@@ -674,6 +682,10 @@ fuseScrema ::
   [VName] ->
   m ([SOAC.Input], ScremaForm SOACS, [VName])
 fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
+  -- failOnScan form_p
+  -- failOnScan form_c
+  -- failOnRed form_p
+  -- failOnRed form_c
   fusible inp_p form_p out_p inp_c form_c out_c
   (super_screma, new_out) <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
   (new_inp, form') <-
