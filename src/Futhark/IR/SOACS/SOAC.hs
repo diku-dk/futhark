@@ -56,6 +56,7 @@ import Data.List (intersperse)
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Debug.Trace
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
@@ -806,11 +807,24 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
       mapM_ (lambdaMetrics . redLambda) reds
       lambdaMetrics post_lam
 
--- | Remove parameters passed from pre to post lambda that if the
--- parameters are not used then they will be removed.
+-- | Remove unused post lambda parameters as well the corresponding
+-- pre lambda results.
 simplifyFuse :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
-simplifyFuse (ScremaForm lam_p scan red lam_c) = ScremaForm new_lam_p new_scan red new_lam_c
+simplifyFuse inp@(ScremaForm lam_p scan red lam_c) =
+  traceWith
+    ( \out ->
+        unlines
+          [ "equal: " <> show (inp == out),
+            "input: ",
+            prettyString inp,
+            "result: ",
+            prettyString out
+          ]
+    )
+    $ ScremaForm new_lam_p new_scan red new_lam_c
   where
+    -- (ScremaForm lam_p scan red lam_c)
+
     pars_c = lambdaParams temp_lam_c
     res_p = bodyResult $ lambdaBody lam_p
     ts_p = lambdaReturnType lam_p

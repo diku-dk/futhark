@@ -116,12 +116,12 @@ splitLambdaByPar ::
   [b] ->
   (([a], Lambda SOACS, [b]), ([a], Lambda SOACS, [b]))
 splitLambdaByPar names inps lam outs =
-  ( (new_inps, eliminateByRes lam0, new_outs),
-    (new_inps', eliminateByRes lam1, new_outs')
+  ( (new_inps, lam0, new_outs),
+    (new_inps', lam1, new_outs')
   )
   where
-    lam0 = Lambda new_params new_ts (mkBody stms new_res)
-    lam1 = Lambda new_params' new_ts' (mkBody stms new_res')
+    lam0 = eliminateByRes $ Lambda new_params new_ts (mkBody stms new_res)
+    lam1 = eliminateByRes $ Lambda new_params' new_ts' (mkBody stms new_res')
     pars = lambdaParams lam
     m = M.fromList $ zip pars inps
     par_deps = lambdaDependencies mempty lam (oneName . paramName <$> pars)
@@ -478,6 +478,27 @@ moveMidSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'')
       splitAt3 (scanResults scan) (redResults red) out_p
 moveMidSuperScrema _ = error "moveMidSuperScrema must not have any scans or reduce operation in the end."
 
+{-
+splitAtLambdaByRes ::
+  (MonadFail m) =>
+  Int ->
+  [a] ->
+  [b] ->
+  Lambda SOACS ->
+  m (([a], Lambda SOACS, [b]), ([a], Lambda SOACS, [b]))
+splitAtLambdaByRes i inps outs lam =
+  pure ((inps0, lam0, outs0), (inps1, lam1, outs1))
+  where
+    lam0 = Lambda pars new_ts (mkBody stms new_res)
+    lam1 = Lambda pars new_ts' (mkBody stms new_res')
+    pars = lambdaParams lam
+    stms = bodyStms $ lambdaBody lam
+    (new_res, new_res') = splitAt i $ bodyResult $ lambdaBody lam
+    (new_ts, new_ts') = splitAt i $ lambdaReturnType lam
+    (outs0, outs1) = splitAt i outs
+    (inps0, inps1) = ([], [])
+-}
+
 splitAtLambdaByRes ::
   Int ->
   Lambda SOACS ->
@@ -525,36 +546,25 @@ simplifySuperScrema (SuperScrema w inp lam scan red lam' scan' red' lam'') =
     <*> pure red'
     <*> simplifyLambda lam''
 
-tryIdentityPost :: ScremaForm SOACS -> ScremaForm SOACS
-tryIdentityPost (ScremaForm pre_lam [] [] post_lam) =
-  (ScremaForm new_pre_lam [] [] new_post_lam)
+tryIdentityPost ::
+  (MonadFreshNames m) => ScremaForm SOACS -> m (ScremaForm SOACS)
+tryIdentityPost (ScremaForm pre_lam [] [] post_lam) = do
+  new_post_lam <- mkIdentityLambda $ lambdaReturnType post_lam
+  pure (ScremaForm new_pre_lam [] [] new_post_lam)
   where
-    pre_res = bodyResult $ lambdaBody pre_lam
-    post_pars = lambdaParams post_lam
-    post_res = bodyResult $ lambdaBody post_lam
-    pre_types = lambdaReturnType pre_lam
-
-    par_to_pre_res = M.fromList $ zip (map paramName post_pars) (zip3 post_pars pre_res pre_types)
-    (new_post_pars, new_pre_res, new_pre_types) =
-      unzip3 $
-        map reorderOne post_res
-
-    reorderOne res =
-      case subExpResVName res >>= flip M.lookup par_to_pre_res of
-        Just triple -> triple
-        Nothing -> error "tryIdentityPost: post lambda result is not a simple parameter reference"
-
+    out_p = [0 .. length (bodyResult $ lambdaBody pre_lam) - 1]
+    inp_c = out_p
+    binds = fuseBinds pre_lam out_p inp_c post_lam
+    pre_stms = bodyStms $ lambdaBody pre_lam
+    post_stms = bodyStms $ lambdaBody post_lam
+    res = bodyResult $ lambdaBody post_lam
     new_pre_lam =
-      pre_lam
-        { lambdaReturnType = new_pre_types,
-          lambdaBody = mkBody (bodyStms $ lambdaBody pre_lam) new_pre_res
+      Lambda
+        { lambdaParams = lambdaParams pre_lam,
+          lambdaReturnType = lambdaReturnType post_lam,
+          lambdaBody = mkBody (pre_stms <> binds <> post_stms) res
         }
-
-    new_post_lam =
-      post_lam
-        { lambdaParams = new_post_pars
-        }
-tryIdentityPost form = form
+tryIdentityPost form = pure form
 
 fuseScrema ::
   (MonadFail m, MonadFreshNames m, HasScope SOACS m) =>
@@ -569,10 +579,11 @@ fuseScrema ::
 fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
   fusible inp_p form_p out_p inp_c form_c out_c
   (super_screma, new_out) <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
-  (new_inp, form) <-
-    fmap (second (tryIdentityPost . simplifyFuse) . toScrema) $
+  (new_inp, form') <-
+    fmap toScrema $
       moveRedScanSuperScrema super_screma
         >>= moveLastSuperScrema
         >>= moveMidSuperScrema
   -- >>= simplifySuperScrema
+  form <- tryIdentityPost form'
   pure (new_inp, form, new_out)

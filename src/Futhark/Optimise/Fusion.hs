@@ -499,14 +499,44 @@ hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
 removeOutputsExcept toKeep s = case s of
-  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm lam_1 scan_1 red_1 post_lam)) aux1 ->
+  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam [] [] post_lam)) aux1 ->
+    SoacNode
+      ots
+      (Pat $ pats_new)
+      (H.Screma w inp (ScremaForm new_pre [] [] new_post))
+      aux1
+    where
+      to_change =
+        L.zip5
+          (resFromLambda pre_lam)
+          (lambdaReturnType pre_lam)
+          (lambdaParams post_lam)
+          (resFromLambda post_lam)
+          (lambdaReturnType post_lam)
+
+      (pats_new, res_new) =
+        unzip $
+          filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats1 to_change)
+      (pre_res, pre_ts, post_pars, post_res, post_ts) = L.unzip5 res_new
+      new_post =
+        Lambda
+          { lambdaParams = post_pars,
+            lambdaReturnType = post_ts,
+            lambdaBody = (lambdaBody post_lam) {bodyResult = post_res}
+          }
+      new_pre =
+        pre_lam
+          { lambdaReturnType = pre_ts,
+            lambdaBody = (lambdaBody pre_lam) {bodyResult = pre_res}
+          }
+  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam scan red post_lam)) aux1 ->
     SoacNode
       ots
       (Pat $ pats_unchanged <> pats_new)
-      (H.Screma w inp (simplifyFuse $ ScremaForm lam_1 scan_1 red_1 lam_new))
+      (H.Screma w inp (ScremaForm pre_lam scan red lam_new))
       aux1
     where
-      red_output_size = Futhark.redResults red_1
+      red_output_size = Futhark.redResults red
 
       (pats_unchanged, pats_toChange) = splitAt red_output_size pats1
       res_toChange = zip (resFromLambda post_lam) (lambdaReturnType post_lam)
