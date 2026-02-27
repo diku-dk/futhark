@@ -581,9 +581,10 @@ simplifySuperScrema (SuperScrema w inp lam scan red lam' scan' red' lam'') =
 
 tryIdentityPost ::
   (MonadFreshNames m) => ScremaForm SOACS -> m (ScremaForm SOACS)
-tryIdentityPost (ScremaForm pre_lam [] [] post_lam) = do
-  new_post_lam <- mkIdentityLambda $ lambdaReturnType post_lam
-  pure (ScremaForm new_pre_lam [] [] new_post_lam)
+tryIdentityPost (ScremaForm pre_lam [] [] post_lam)
+  | not $ isIdentityLambda post_lam = do
+      new_post_lam <- mkIdentityLambda $ lambdaReturnType post_lam
+      pure (ScremaForm new_pre_lam [] [] new_post_lam)
   where
     out_p = [0 .. length (bodyResult $ lambdaBody pre_lam) - 1]
     inp_c = out_p
