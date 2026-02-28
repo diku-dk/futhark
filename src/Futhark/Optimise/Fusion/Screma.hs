@@ -28,7 +28,7 @@ import Futhark.IR.SOACS.Simplify
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
-import Futhark.Util (splitAt3, chunks)
+import Futhark.Util (chunks, splitAt3)
 import Futhark.Util.Pretty
 
 data SuperScrema rep
@@ -512,8 +512,8 @@ resAccsOverlap lam = any (`elem` accs) . resAccs
     accs = resAccs lam
 
 consumedOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
-consumedOverlap lam lam' =
-  on namesIntersect (consumedByLambda . analyseLambda mempty) lam lam'
+consumedOverlap =
+  on namesIntersect (consumedByLambda . analyseLambda mempty)
 
 splitAtLambdaByRes ::
   (MonadFail m) =>
@@ -687,7 +687,7 @@ fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
     fmap (second removeUnused . toScrema) $
       moveRedScanSuperScrema super_screma
         >>= moveLastSuperScrema
-        -- >>= moveMidSuperScrema
+  -- >>= moveMidSuperScrema
   -- >>= simplifySuperScrema
   form <- tryIdentityPost form'
   pure (new_inp, form, new_out)
