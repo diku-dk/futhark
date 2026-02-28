@@ -28,7 +28,7 @@ import Futhark.IR.SOACS.Simplify
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
-import Futhark.Util (splitAt3, chunks)
+import Futhark.Util (chunks, splitAt3)
 import Futhark.Util.Pretty
 
 data SuperScrema rep
@@ -512,8 +512,8 @@ resAccsOverlap lam = any (`elem` accs) . resAccs
     accs = resAccs lam
 
 consumedOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
-consumedOverlap lam lam' =
-  on namesIntersect (consumedByLambda . analyseLambda mempty) lam lam'
+consumedOverlap =
+  on namesIntersect (consumedByLambda . analyseLambda mempty)
 
 splitAtLambdaByRes ::
   (MonadFail m) =>
@@ -603,22 +603,22 @@ tryIdentityPost form = pure form
 -- | Remove unused post lambda map parameters as well the
 -- corresponding pre lambda results.
 removeUnusedMap :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
-removeUnusedMap (ScremaForm lam_p scan red lam_c) =
-  ScremaForm new_lam_p scan red new_lam_c
+removeUnusedMap (ScremaForm pre_lam scan red post_lam) =
+  ScremaForm new_pre_lam scan red new_post_lam
   where
     (rest_res_p, map_res_p) =
-      splitAt (scanResults scan + redResults red) . bodyResult $ lambdaBody lam_p
+      splitAt (scanResults scan + redResults red) . bodyResult $ lambdaBody pre_lam
     (rest_ts_p, map_ts_p) =
-      splitAt (scanResults scan + redResults red) $ lambdaReturnType lam_p
+      splitAt (scanResults scan + redResults red) $ lambdaReturnType pre_lam
     (scan_pars_c, map_pars_c) =
-      splitAt (scanResults scan) $ lambdaParams temp_lam_c
-    new_lam_c = temp_lam_c {lambdaParams = scan_pars_c <> new_map_pars_c}
-    new_lam_p =
+      splitAt (scanResults scan) $ lambdaParams temp_post_lam
+    new_post_lam = temp_post_lam {lambdaParams = scan_pars_c <> new_map_pars_c}
+    new_pre_lam =
       eliminateByRes $
-        lam_p
+        pre_lam
           { lambdaBody =
               mkBody
-                (bodyStms $ lambdaBody lam_p)
+                (bodyStms $ lambdaBody pre_lam)
                 (rest_res_p <> new_map_res_p),
             lambdaReturnType = rest_ts_p <> new_map_ts_p
           }
@@ -626,34 +626,34 @@ removeUnusedMap (ScremaForm lam_p scan red lam_c) =
       unzip3
         . filter (\(_, _, p) -> paramName p `nameIn` deps)
         $ zip3 map_res_p map_ts_p map_pars_c
-    temp_lam_c = eliminateByRes lam_c
-    deps = freeIn $ lambdaBody temp_lam_c
+    temp_post_lam = eliminateByRes post_lam
+    deps = freeIn $ lambdaBody temp_post_lam
 
 -- | Remove unused post lambda scan parameters as well the
 -- corresponding pre lambda results.
 removeUnusedScan :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
-removeUnusedScan (ScremaForm lam_p scan red lam_c) =
-  ScremaForm new_lam_p new_scan red new_lam_c
+removeUnusedScan (ScremaForm pre_lam scan red post_lam) =
+  ScremaForm new_pre_lam new_scan red new_post_lam
   where
     (scan_res_p, rest_res_p) =
-      splitAt (scanResults scan) . bodyResult $ lambdaBody lam_p
+      splitAt (scanResults scan) . bodyResult $ lambdaBody pre_lam
     (scan_ts_p, rest_ts_p) =
-      splitAt (scanResults scan) $ lambdaReturnType lam_p
+      splitAt (scanResults scan) $ lambdaReturnType pre_lam
     (scan_pars_c, map_pars_c) =
-      splitAt (scanResults scan) $ lambdaParams temp_lam_c
-    new_lam_c = temp_lam_c {lambdaParams = mconcat new_scan_pars_c <> map_pars_c}
-    new_lam_p =
+      splitAt (scanResults scan) $ lambdaParams temp_post_lam
+    new_post_lam = temp_post_lam {lambdaParams = mconcat new_scan_pars_c <> map_pars_c}
+    new_pre_lam =
       eliminateByRes $
-        lam_p
+        pre_lam
           { lambdaBody =
               mkBody
-                (bodyStms $ lambdaBody lam_p)
+                (bodyStms $ lambdaBody pre_lam)
                 (mconcat new_scan_res_p <> rest_res_p),
             lambdaReturnType = mconcat new_scan_ts_p <> rest_ts_p
           }
-    
+
     chunkByScan = chunks (map (length . scanNeutral) scan)
-      
+
     chunked_scan_res_p = chunkByScan scan_res_p
     chunked_scan_ts_p = chunkByScan scan_ts_p
     chunked_scan_pars_c = chunkByScan scan_pars_c
@@ -661,8 +661,8 @@ removeUnusedScan (ScremaForm lam_p scan red lam_c) =
       L.unzip4
         . filter (\(_, _, _, ps) -> any ((`nameIn` deps) . paramName) ps)
         $ L.zip4 scan chunked_scan_res_p chunked_scan_ts_p chunked_scan_pars_c
-    temp_lam_c = eliminateByRes lam_c
-    deps = freeIn $ lambdaBody temp_lam_c
+    temp_post_lam = eliminateByRes post_lam
+    deps = freeIn $ lambdaBody temp_post_lam
 
 removeUnused :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
 removeUnused form =
@@ -687,7 +687,7 @@ fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
     fmap (second removeUnused . toScrema) $
       moveRedScanSuperScrema super_screma
         >>= moveLastSuperScrema
-        -- >>= moveMidSuperScrema
+  -- >>= moveMidSuperScrema
   -- >>= simplifySuperScrema
   form <- tryIdentityPost form'
   pure (new_inp, form, new_out)
