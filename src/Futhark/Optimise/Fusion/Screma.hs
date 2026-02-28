@@ -28,7 +28,7 @@ import Futhark.IR.SOACS.Simplify
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
-import Futhark.Util (splitAt3)
+import Futhark.Util (splitAt3, chunks)
 import Futhark.Util.Pretty
 
 data SuperScrema rep
@@ -641,20 +641,26 @@ removeUnusedScan (ScremaForm lam_p scan red lam_c) =
       splitAt (scanResults scan) $ lambdaReturnType lam_p
     (scan_pars_c, map_pars_c) =
       splitAt (scanResults scan) $ lambdaParams temp_lam_c
-    new_lam_c = temp_lam_c {lambdaParams = new_scan_pars_c <> map_pars_c}
+    new_lam_c = temp_lam_c {lambdaParams = mconcat new_scan_pars_c <> map_pars_c}
     new_lam_p =
       eliminateByRes $
         lam_p
           { lambdaBody =
               mkBody
                 (bodyStms $ lambdaBody lam_p)
-                (new_scan_res_p <> rest_res_p),
-            lambdaReturnType = new_scan_ts_p <> rest_ts_p
+                (mconcat new_scan_res_p <> rest_res_p),
+            lambdaReturnType = mconcat new_scan_ts_p <> rest_ts_p
           }
+    
+    chunkByScan = chunks (map (length . scanNeutral) scan)
+      
+    chunked_scan_res_p = chunkByScan scan_res_p
+    chunked_scan_ts_p = chunkByScan scan_ts_p
+    chunked_scan_pars_c = chunkByScan scan_pars_c
     (new_scan, new_scan_res_p, new_scan_ts_p, new_scan_pars_c) =
       L.unzip4
-        . filter (\(_, _, _, p) -> paramName p `nameIn` deps)
-        $ L.zip4 scan scan_res_p scan_ts_p scan_pars_c
+        . filter (\(_, _, _, ps) -> any ((`nameIn` deps) . paramName) ps)
+        $ L.zip4 scan chunked_scan_res_p chunked_scan_ts_p chunked_scan_pars_c
     temp_lam_c = eliminateByRes lam_c
     deps = freeIn $ lambdaBody temp_lam_c
 
@@ -663,14 +669,6 @@ removeUnused form =
   if form == form' then form' else removeUnused form'
   where
     form' = removeUnusedScan $ removeUnusedMap form
-
-failOnScan :: (MonadFail m) => ScremaForm SOACS -> m ()
-failOnScan (ScremaForm _ scan _ _) =
-  unless (null scan) (fail "Must be empty scan.")
-
-failOnRed :: (MonadFail m) => ScremaForm SOACS -> m ()
-failOnRed (ScremaForm _ _ red _) =
-  unless (null red) (fail "Must be empty scan.")
 
 fuseScrema ::
   (MonadFail m, MonadFreshNames m, HasScope SOACS m) =>
@@ -683,17 +681,13 @@ fuseScrema ::
   [VName] ->
   m ([SOAC.Input], ScremaForm SOACS, [VName])
 fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
-  -- failOnScan form_p
-  -- failOnScan form_c
-  -- failOnRed form_p
-  -- failOnRed form_c
   fusible inp_p form_p out_p inp_c form_c out_c
   (super_screma, new_out) <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
   (new_inp, form') <-
     fmap (second removeUnused . toScrema) $
       moveRedScanSuperScrema super_screma
         >>= moveLastSuperScrema
-        >>= moveMidSuperScrema
+        -- >>= moveMidSuperScrema
   -- >>= simplifySuperScrema
   form <- tryIdentityPost form'
   pure (new_inp, form, new_out)
