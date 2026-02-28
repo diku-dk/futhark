@@ -52,10 +52,8 @@ import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.List (intersperse)
-import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Trace
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
