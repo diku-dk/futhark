@@ -7,6 +7,7 @@ module Futhark.Tools
     redomapToMapAndReduce,
     scanomapToMapAndScan,
     dissectScrema,
+    extractPostLambda,
     sequentialStreamWholeArray,
     partitionChunkedFoldParameters,
     withAcc,
@@ -135,6 +136,29 @@ dissectScrema pat w (ScremaForm map_lam scans reds post_lam) arrs = do
 
   reduce <- reduceSOAC reds
   letBindNames red_res $ Op $ Screma w to_red reduce
+
+-- | Remove the post lambda from a screma, producing the screma with an identity
+-- post-lambda, and a new map screma that is just the post-lambda. You can apply
+-- this indefinitely in case the post-lambda is already an identity lambda, so
+-- be careful.
+extractPostLambda ::
+  ( MonadBuilder m,
+    Op (Rep m) ~ SOAC (Rep m),
+    Buildable (Rep m)
+  ) =>
+  Pat (LetDec (Rep m)) ->
+  SubExp ->
+  [VName] ->
+  ScremaForm (Rep m) ->
+  m ()
+extractPostLambda pat w arrs (ScremaForm pre_lam scans reds post_lam) = do
+  tmp_names <- mapM (newVName . (<> "_extract_tmp") . baseName . patElemName) nonred_res
+  id_lam <- mkIdentityLambda $ map paramType $ lambdaParams post_lam
+  letBindNames (map patElemName red_res <> tmp_names) $
+    Op (Screma w arrs $ ScremaForm pre_lam scans reds id_lam)
+  letBind (Pat nonred_res) . Op . Screma w tmp_names =<< mapSOAC post_lam
+  where
+    (red_res, nonred_res) = splitAt (redResults reds) (patElems pat)
 
 -- | Turn a stream SOAC into statements that apply the stream lambda
 -- to the entire input.
