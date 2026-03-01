@@ -152,7 +152,8 @@ extractPostLambda ::
   ScremaForm (Rep m) ->
   m ()
 extractPostLambda pat w arrs (ScremaForm pre_lam scans reds post_lam) = do
-  tmp_names <- mapM (newVName . (<> "_extract_tmp") . baseName . patElemName) nonred_res
+  tmp_names <-
+    mapM (newVName . (<> "_extract") . baseName . paramName) (lambdaParams post_lam)
   id_lam <- mkIdentityLambda $ map paramType $ lambdaParams post_lam
   letBindNames (map patElemName red_res <> tmp_names) $
     Op (Screma w arrs $ ScremaForm pre_lam scans reds id_lam)
