@@ -721,7 +721,7 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
     )
     . TC.bad
     . TC.TypeError
-    $ "Map function return type "
+    $ "Pre-lambda function return type "
       <> prettyTuple map_lam_ts
       <> " wrong for given scan and reduction functions."
   let (scan_ts, _, map_ts) =

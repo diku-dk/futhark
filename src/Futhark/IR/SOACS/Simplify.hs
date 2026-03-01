@@ -210,7 +210,8 @@ topDownRules =
     RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
     RuleOp moveTransformToInput,
-    RuleOp moveTransformToOutput
+    RuleOp moveTransformToOutput,
+    RuleOp removeUnusedPreLamResult
   ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -436,6 +437,44 @@ removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm lam scans r
   where
     num_nonmap_res = scanResults scans + redResults reds
 removeDeadMapping _ _ _ _ = Skip
+
+-- | If we have pre-lambda result that is passed to the post-lambda, but not
+-- actually used for anything in the post-lambda, then get rid of it.
+removeUnusedPreLamResult :: TopDownRuleOp (Wise SOACS)
+removeUnusedPreLamResult _ pat aux (Screma w arrs (ScremaForm pre_lam scans reds post_lam))
+  | not $ and used_mask = Simplify $ do
+      let pre_lam_new_res =
+            keep
+              (replicate num_scanred_results True ++ used_mask)
+              (bodyResult (lambdaBody pre_lam))
+          pre_lam_new_ts =
+            keep
+              (replicate num_scanred_results True ++ used_mask)
+              (lambdaReturnType pre_lam)
+          pre_lam' =
+            pre_lam
+              { lambdaBody = (lambdaBody pre_lam) {bodyResult = pre_lam_new_res},
+                lambdaReturnType = pre_lam_new_ts
+              }
+          post_lam' =
+            post_lam
+              { lambdaParams =
+                  keep
+                    (replicate (scanResults scans) True ++ used_mask)
+                    (lambdaParams post_lam)
+              }
+      auxing aux . letBind pat $
+        Op (Screma w arrs $ ScremaForm pre_lam' scans reds post_lam')
+  where
+    keep mask xs = map snd $ filter fst $ zip mask xs
+    num_scanred_results = scanResults scans + redResults reds
+    -- This mask covers only the results/parameters directly passed from prelam
+    -- to postlam.
+    used_mask =
+      map
+        ((`nameIn` freeIn (lambdaBody post_lam)) . paramName)
+        (drop (scanResults scans) (lambdaParams post_lam))
+removeUnusedPreLamResult _ _ _ _ = Skip
 
 removeDuplicateMapOutput :: TopDownRuleOp (Wise SOACS)
 removeDuplicateMapOutput _ (Pat pes) aux (Screma w arrs form)
