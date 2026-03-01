@@ -770,7 +770,7 @@ onMapFreeVar ::
   (VName, VName, VName) ->
   VName ->
   Maybe (Builder GPU (VName, MapArray IrregularRep))
-onMapFreeVar _segments env inps ws (_ws_F, _ws_O, ws_data) v = do
+onMapFreeVar _segments env inps _ws (_ws_F, _ws_O, ws_data) v = do
   let segments_per_elem = ws_data
   v_inp <- lookup v inps
   pure $ do
@@ -785,14 +785,16 @@ onMapFreeVar _segments env inps ws (_ws_F, _ws_O, ws_data) v = do
             subExpsRes . pure <$> (letSubExp "v" =<< eIndex v' [eSubExp segment])
       DistInput rt t -> case resVar rt env of
         Irregular rep -> do
-          offsets <- letExp (baseName v <> "_rep_free_irreg_O")
+          ~[new_S, offsets] <- letTupExp (baseName v <> "_rep_free_irreg")
             <=< segMap (MkSolo ws_prod)
             $ \(MkSolo i) -> do
               segment <- letSubExp "segment" =<< eIndex ws_data [eSubExp i]
-              subExpsRes . pure <$> (letSubExp "v" =<< eIndex (irregularO rep) [eSubExp segment])
+              s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp segment]
+              o <- letSubExp "o" =<< eIndex (irregularO rep) [eSubExp segment]
+              pure $ subExpsRes [s, o]
           let rep' =
                 IrregularRep
-                  { irregularS = ws,
+                  { irregularS = new_S,
                     irregularF = irregularF rep,
                     irregularO = offsets,
                     irregularD = irregularD rep
@@ -811,11 +813,12 @@ onMapInputArr ::
   DistEnv ->
   DistInputs ->
   VName ->
+  VName ->
   Param Type ->
   VName ->
   Builder GPU (MapArray IrregularRep)
-onMapInputArr segments env inps ii2 p arr = do
-  ws_prod <- arraySize 0 <$> lookupType ii2
+onMapInputArr segments env inps ws_O ws_data p arr = do
+  ws_prod <- arraySize 0 <$> lookupType ws_data
   case lookup arr inps of
     Just v_inp ->
       case v_inp of
@@ -830,19 +833,34 @@ onMapInputArr segments env inps ii2 p arr = do
           case resVar rt env of
             Irregular rep -> do
               elems_t <- lookupType $ irregularD rep
-              -- If parameter type of the map corresponds to the
-              -- element type of the value array, we can map it
-              -- directly.
               if stripArray (segmentsRank segments) elems_t == paramType p
-                then pure $ MapArray (irregularD rep) elems_t
+                then do
+                  data_size <- arraySize 0 <$> lookupType (irregularD rep)
+                  if data_size == ws_prod
+                    then
+                      -- Data already has the right layout and we can map it directly.
+                      pure $ MapArray (irregularD rep) (stripArray 1 elems_t)
+                    else do
+                      -- We need to materialize the data.
+                      new_flat <-
+                        letExp (baseName arr <> "_flat_expand")
+                          <=< segMap (MkSolo ws_prod)
+                          $ \(MkSolo i) -> do
+                            j <- letSubExp "j" =<< eIndex ws_data [eSubExp i]
+                            data_off <- letSubExp "data_off" =<< eIndex (irregularO rep) [eSubExp j]
+                            seg_start <- letSubExp "seg_start" =<< eIndex ws_O [eSubExp j]
+                            local_pos <- letSubExp "local_pos" <=< toExp $ pe64 i - pe64 seg_start
+                            flat_idx <- letSubExp "flat_idx" <=< toExp $ pe64 data_off + pe64 local_pos
+                            fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
+                      pure $ MapArray new_flat (stripArray 1 elems_t)
                 else do
-                  -- Otherwise we need to perform surgery on the metadata.
+                  -- we need to perform surgery on the metadata.
                   ~[p_segments, p_O] <- letTupExp
                     (baseName (paramName p) <> "_rep_inp_irreg")
                     <=< segMap (MkSolo ws_prod)
                     $ \(MkSolo i) -> do
                       segment_i <-
-                        letSubExp "segment" =<< eIndex ii2 [eSubExp i]
+                        letSubExp "segment" =<< eIndex ws_data [eSubExp i]
                       segment <-
                         letSubExp "v" =<< eIndex (irregularS rep) [eSubExp segment_i]
                       offset <-
@@ -889,7 +907,7 @@ transformInnerMap segments env inps pat w arrs map_lam = do
   new_segment <- arraySize 0 <$> lookupType ws_data
   arrs' <-
     zipWithM
-      (onMapInputArr segments env inps ws_data)
+      (onMapInputArr segments env inps ws_O ws_data)
       (lambdaParams map_lam)
       arrs
   let free = freeIn map_lam
@@ -1238,7 +1256,8 @@ transformDistStm segments env (DistStm inps res stm) = do
             "merge params: " ++ prettyString (map fst merge),
             "merge inits:  " ++ prettyString (map snd merge),
             "cond:         " ++ prettyString cond,
-            "body:         " ++ prettyString body
+            "body:         " ++ prettyString body,
+            "loop inputs:  " ++ prettyString inps
           ]
 
       -- TODO:
@@ -1277,6 +1296,12 @@ transformDistStm segments env (DistStm inps res stm) = do
               lifted_loop_reps
           loop_new_inputs = inps_local <> loop_param_inputs_local
           loop_env_local = insertReps loop_param_reps_local env_local0
+
+      traceM $
+        unlines
+          [ "loop_param_inputs_local: " ++ prettyString loop_new_inputs,
+            "loop_env_local: " ++ show (distResMap loop_env_local)
+          ]
 
       let maybe_cond = lookup cond (zip (map paramName old_loop_params) (zip lifted_loop_reps lifted_init))
       scope <- askScope
