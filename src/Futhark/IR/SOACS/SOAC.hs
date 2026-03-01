@@ -220,9 +220,8 @@ scanomapSOAC ::
   [Scan rep] ->
   Lambda rep ->
   m (ScremaForm rep)
-scanomapSOAC scans lam = do
-  post_lam <- mkIdentityLambda $ lambdaReturnType lam
-  pure $ ScremaForm lam scans [] post_lam
+scanomapSOAC scans lam =
+  ScremaForm lam scans [] <$> mkIdentityLambda (lambdaReturnType lam)
 
 -- | Construct a Screma with possibly multiple scans,
 -- the given map function, and a given post lambda.
@@ -236,11 +235,13 @@ maposcanomapSOAC post_lam scans lam = ScremaForm lam scans [] post_lam
 -- | Construct a Screma with possibly multiple reductions, and
 -- the given map function.
 redomapSOAC ::
-  (Buildable rep) =>
+  (Buildable rep, MonadFreshNames m) =>
   [Reduce rep] ->
   Lambda rep ->
-  ScremaForm rep
-redomapSOAC reds lam = ScremaForm lam [] reds nilFn
+  m (ScremaForm rep)
+redomapSOAC reds lam = ScremaForm lam [] reds <$> mkIdentityLambda map_ts
+  where
+    map_ts = drop (redResults reds) $ lambdaReturnType lam
 
 -- | Construct a Screma with possibly multiple scans, and identity map
 -- function.
@@ -258,7 +259,7 @@ reduceSOAC ::
   (Buildable rep, MonadFreshNames m) =>
   [Reduce rep] ->
   m (ScremaForm rep)
-reduceSOAC reds = redomapSOAC reds <$> mkIdentityLambda ts
+reduceSOAC reds = redomapSOAC reds =<< mkIdentityLambda ts
   where
     ts = concatMap (lambdaReturnType . redLambda) reds
 

@@ -619,12 +619,12 @@ soacToStream soac = do
           inpacc_ids <- mapM (newParam "inpacc") accrtps
           acc0_ids <- mapM (newIdent "acc0") accrtps
           -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-          let insoac =
-                Futhark.Screma
-                  chvar
-                  (map paramName strm_inpids)
-                  $ Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
-              insstm = mkLet (acc0_ids ++ strm_resids) $ Op insoac
+          insoac <-
+            Futhark.Screma
+              chvar
+              (map paramName strm_inpids)
+              <$> Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
+          let insstm = mkLet (acc0_ids ++ strm_resids) $ Op insoac
           -- 2. let acc'     = acc + acc0_ids    in
           addaccbdy <-
             mkPlusBnds lamin $
