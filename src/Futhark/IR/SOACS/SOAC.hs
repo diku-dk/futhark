@@ -291,6 +291,7 @@ isScanSOAC :: ScremaForm rep -> Maybe [Scan rep]
 isScanSOAC form = do
   (scans, map_lam) <- isScanomapSOAC form
   guard $ isIdentityLambda map_lam
+  guard $ length (lambdaReturnType map_lam) == scanResults scans
   pure scans
 
 -- | Does this Screma correspond to a reduce-map composition?
@@ -306,6 +307,7 @@ isReduceSOAC :: ScremaForm rep -> Maybe [Reduce rep]
 isReduceSOAC form = do
   (reds, map_lam) <- isRedomapSOAC form
   guard $ isIdentityLambda map_lam
+  guard $ length (lambdaReturnType map_lam) == redResults reds
   pure reds
 
 -- | Does this Screma correspond to a simple map, without any
