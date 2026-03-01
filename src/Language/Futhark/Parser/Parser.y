@@ -689,15 +689,16 @@ LetUpdateStep :: { UpdateStep NoInfo Name }
               : '...[' DimIndices ']' { UpdateStepSlice $2 }
               | '.' FieldId           { UpdateStepField (unLoc $2) }
 
-FieldAccesses :: { [L Name] }
-               : FieldAccesses1 { $1 }
-               |                { [] }
+SectionUpdate :: { [UpdateStep NoInfo Name] }
+              : SectionUpdateStep SectionUpdateTail { $1 : $2 }
 
-FieldAccesses1 :: { [L Name] }
-                : '.' FieldId FieldAccesses { $2 : $3 }
+SectionUpdateTail :: { [UpdateStep NoInfo Name] }
+                  : SectionUpdateStep SectionUpdateTail { $1 : $2 }
+                  |                                     { [] }
 
-FieldAccesses_ :: { [L Name] }
-               : FieldId FieldAccesses { $1 : $2 }
+SectionUpdateStep :: { UpdateStep NoInfo Name }
+                  : '.' FieldId             { UpdateStepField (unLoc $2) }
+                  | '.' '[' DimIndices ']' { UpdateStepSlice $3 }
 
 Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordFieldExplicit $1 $3 (srcspan $1 $>) }
@@ -780,11 +781,8 @@ SectionExp :: { UncheckedExp }
   | '(' BinOp ')'
     { OpSection (fst $2) NoInfo (srcspan $1 $>) }
 
-  | '(' '.' FieldAccesses_ ')'
-    { ProjectSection (map unLoc $3) NoInfo (srcspan $1 $>) }
-
-  | '(' '.' '[' DimIndices ']' ')'
-    { IndexSection $4 NoInfo (srcspan $1 $>) }
+  | '(' SectionUpdate ')'
+    { UpdateSection $2 NoInfo (srcspan $1 $>) }
 
 RangeExp :: { UncheckedExp }
   : Exp2 '...' Exp2           { AppExp (Range $1 Nothing (ToInclusive $3) (srcspan $1 $>)) NoInfo }

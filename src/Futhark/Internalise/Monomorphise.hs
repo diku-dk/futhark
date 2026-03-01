@@ -697,12 +697,15 @@ transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
     (yp, ytype, yargext)
     (rettype, [])
     loc
-transformExp (ProjectSection fields (Info t) loc) = do
+transformExp (UpdateSection steps (Info t) loc) = do
   t' <- transformType t
-  desugarProjectSection fields t' loc
-transformExp (IndexSection idxs (Info t) loc) = do
-  idxs' <- mapM transformDimIndex idxs
-  desugarIndexSection idxs' t loc
+  steps' <- mapM transformStep steps
+  desugarUpdateSection steps' t' loc
+  where
+    transformStep (UpdateStepSlice idxs) =
+      UpdateStepSlice <$> mapM transformDimIndex idxs
+    transformStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 transformExp (Project n e tp loc) = do
   tp' <- traverse transformType tp
   e' <- transformExp e
@@ -789,10 +792,10 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
       (v, pat, var_e) <- patAndVar argtype
       pure (v, id, var_e, [pat])
 
-desugarProjectSection :: [Name] -> StructType -> SrcLoc -> MonoM Exp
-desugarProjectSection fields (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
-  p <- newVName "project_p"
-  let body = foldl project (Var (qualName p) (Info t1) mempty) fields
+desugarUpdateSection :: [UpdateStep Info VName] -> StructType -> SrcLoc -> MonoM Exp
+desugarUpdateSection steps (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
+  p <- newVName "section_p"
+  let body = fst $ foldl applyStep (Var (qualName p) (Info t1) mempty, t1) steps
   pure $
     Lambda
       [Id p (Info $ toParam Observe t1) mempty]
@@ -801,33 +804,26 @@ desugarProjectSection fields (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = d
       (Info (RetType dims t2))
       loc
   where
-    project e field =
-      case typeOf e of
+    applyStep (e, t) (UpdateStepField field) =
+      case t of
         Scalar (Record fs)
-          | Just t <- M.lookup field fs ->
-              Project field e (Info t) mempty
-        t ->
+          | Just t' <- M.lookup field fs ->
+              (Project field e (Info t') mempty, t')
+        _ ->
           error $
-            "desugarOpSection: type "
+            "desugarUpdateSection: type "
               ++ prettyString t
               ++ " does not have field "
               ++ prettyString field
-desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " ++ prettyString t
+    applyStep (e, t) (UpdateStepSlice idxs) =
+      let t' = stripArray (fixedDims idxs) t
+          e' = AppExp (Index e idxs loc) (Info (AppRes t' []))
+       in (e', t')
 
-desugarIndexSection :: [DimIndex] -> StructType -> SrcLoc -> MonoM Exp
-desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
-  p <- newVName "index_i"
-  t1' <- transformType t1
-  t2' <- transformType t2
-  let body = AppExp (Index (Var (qualName p) (Info t1') loc) idxs loc) (Info (AppRes (toStruct t2') []))
-  pure $
-    Lambda
-      [Id p (Info $ toParam Observe t1') mempty]
-      body
-      Nothing
-      (Info (RetType dims t2'))
-      loc
-desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
+    fixedDims = length . filter isFix
+    isFix DimFix {} = True
+    isFix _ = False
+desugarUpdateSection _ t _ = error $ "desugarUpdateSection: not a function type: " ++ prettyString t
 
 transformPat :: Pat (TypeBase Size u) -> MonoM (Pat (TypeBase Size u))
 transformPat = traverse transformType

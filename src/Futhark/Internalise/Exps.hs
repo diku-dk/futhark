@@ -989,10 +989,8 @@ internaliseExp _ e@E.OpSectionLeft {} =
   error $ "internaliseExp: Unexpected left operator section at " ++ locStr (srclocOf e)
 internaliseExp _ e@E.OpSectionRight {} =
   error $ "internaliseExp: Unexpected right operator section at " ++ locStr (srclocOf e)
-internaliseExp _ e@E.ProjectSection {} =
+internaliseExp _ e@E.UpdateSection {} =
   error $ "internaliseExp: Unexpected projection section at " ++ locStr (srclocOf e)
-internaliseExp _ e@E.IndexSection {} =
-  error $ "internaliseExp: Unexpected index section at " ++ locStr (srclocOf e)
 
 internaliseArg :: Name -> (E.Exp, Maybe VName) -> InternaliseM [SubExp]
 internaliseArg desc (arg, argdim) = do

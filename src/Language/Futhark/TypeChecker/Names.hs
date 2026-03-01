@@ -292,10 +292,11 @@ resolveExp (OpSectionRight v info1 e info2 info3 loc) =
     <*> pure info2
     <*> pure info3
     <*> pure loc
-resolveExp (ProjectSection ks info loc) =
-  pure $ ProjectSection ks info loc
-resolveExp (IndexSection slice info loc) =
-  IndexSection <$> resolveSlice slice <*> pure info <*> pure loc
+resolveExp (UpdateSection steps info loc) =
+  UpdateSection <$> mapM resolveStep steps <*> pure info <*> pure loc
+  where
+    resolveStep (UpdateStepField f) = pure $ UpdateStepField f
+    resolveStep (UpdateStepSlice slice) = UpdateStepSlice <$> resolveSlice slice
 resolveExp (Ascript e te loc) =
   Ascript <$> resolveExp e <*> resolveTypeExp te <*> pure loc
 resolveExp (Coerce e te info loc) =
