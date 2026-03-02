@@ -695,12 +695,12 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
               maybe (pure ()) (\p -> copyDWIMFix par [] (Var p) [i]) priv
 
           let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
-          sComment "compute post op." $
-            compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
-              sComment "write mapped values" $ do
-                flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
-                dIndexSpace (zip gtids dims') flat_idx
-                sWhen (flat_idx .<. n) $ do
+          sComment "compute post op." $ do
+            flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
+            sWhen (flat_idx .<. n) $
+              compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
+                sComment "write mapped values" $ do
+                  dIndexSpace (zip gtids dims') flat_idx
                   forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
                     copyDWIMFix (patElemName pe) (map le64 gtids) subexp []
 
