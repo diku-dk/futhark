@@ -560,7 +560,7 @@ compileSegScan pat lvl space ts scans kbody post_op = do
   map_out <- forM (drop (segBinOpResults scans) ts) $ \t ->
     if isAcc t
       then pure Nothing
-      else fmap Just $ sAllocArray "map_out" (elemType t) (shpOfT t mempty) (Space "device")
+      else Just <$> sAllocArray "map_out" (elemType t) (shpOfT t mempty) (Space "device")
 
   (stage1_num_threads, elems_per_group, crossesSegment) <-
     scanStage1 scan_out map_out stage1_num_tblocks (kAttrBlockSize attrs) space scans kbody
