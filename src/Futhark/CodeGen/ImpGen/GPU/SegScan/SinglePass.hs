@@ -228,9 +228,14 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
       n = product $ map pe64 $ segSpaceDims space
 
-      (scan_tys', map_tys') = splitAt (length $ segBinOpNeutral scan_op) ts
+      scan_tys' = lambdaReturnType $ segBinOpLambda scan_op
+      map_tys' = drop (length $ segBinOpNeutral scan_op) ts
 
-      map_tys = map elemType map_tys'
+      map_tys =
+        ( \x ->
+            if isAcc x then Nothing else Just $ elemType x
+        )
+          <$> map_tys'
       scan_tys = map elemType scan_tys'
 
       tblock_size_e = pe64 $ unCount $ kAttrBlockSize attrs
@@ -345,12 +350,16 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
             (ScalarSpace [tvSize chunk_v] ty)
 
       map_private_chunks <-
-        forM map_tys $ \ty ->
-          sAllocArray
-            "private"
-            ty
-            (Shape [tvSize chunk_v])
-            (ScalarSpace [tvSize chunk_v] ty)
+        forM map_tys $ \mty ->
+          traverse
+            ( \ty ->
+                sAllocArray
+                  "private"
+                  ty
+                  (Shape [tvSize chunk_v])
+                  (ScalarSpace [tvSize chunk_v] ty)
+            )
+            mty
 
       thd_offset <- dPrimVE "thd_offset" $ block_offset + ltid
 
@@ -367,7 +376,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
                   -- Write map results to private memory.
                   forM_ (zip map_private_chunks $ map kernelResultSubExp map_res) $ \(dest, src) ->
-                    copyDWIMFix dest [i] src []
+                    maybe (pure ()) (\d -> copyDWIMFix d [i] src []) dest
 
                   -- Write to-scan results to private memory.
                   forM_ (zip scan_private_chunks $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
@@ -683,7 +692,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
           sComment "bind map results to post lamda params" $
             forM_ (zip map_pars map_private_chunks) $ \(par, priv) -> do
-              copyDWIMFix par [] (Var priv) [i]
+              maybe (pure ()) (\p -> copyDWIMFix par [] (Var p) [i]) priv
 
           let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
           sComment "compute post op." $
