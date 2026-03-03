@@ -4,4 +4,4 @@
 
 def main (x: i32) =
   let r = {f = x}
-  in (.f.[0:1]) r
+  in (.f[0:1]) r

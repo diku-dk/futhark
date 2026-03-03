@@ -4,6 +4,6 @@
 
 def main (xs: []i32) (ys: []i32) =
   let r = {a = xs, b = ys}
-  in ( (.a.[1:3]) r
-     , (.b.[0:2]) r
+  in ( (.a[1:3]) r
+     , (.b[0:2]) r
      )
