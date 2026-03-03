@@ -928,11 +928,12 @@ checkExp (OpSectionRight op ftype arg arginfo retinfo loc) = do
     ( OpSectionRight op ftype arg' arginfo retinfo loc,
       Scalar $ Arrow (aliases arg_als <> aliases als) pn (diet pt2) (toStruct pt2) ret
     )
-checkExp (IndexSection slice t loc) = do
-  slice' <- checkSubExps slice
-  pure (IndexSection slice' t loc, unInfo t `setAliases` mempty)
-checkExp (ProjectSection fs t loc) = do
-  pure (ProjectSection fs t loc, unInfo t `setAliases` mempty)
+checkExp (UpdateSection steps t loc) = do
+  steps' <- mapM checkStep steps
+  pure (UpdateSection steps' t loc, unInfo t `setAliases` mempty)
+  where
+    checkStep (UpdateStepField f) = pure $ UpdateStepField f
+    checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
 checkExp (Coerce e te t loc) = do
   (e', e_als) <- checkExp e
   pure (Coerce e' te t loc, e_als)

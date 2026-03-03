@@ -209,13 +209,14 @@ instance ASTMappable (ExpBase Info VName) where
           )
       <*> traverse (mapOnResRetType tv) t2
       <*> pure loc
-  astMap tv (ProjectSection fields t loc) =
-    ProjectSection fields <$> traverse (mapOnStructType tv) t <*> pure loc
-  astMap tv (IndexSection idxs t loc) =
-    IndexSection
-      <$> mapM (astMap tv) idxs
+  astMap tv (UpdateSection steps t loc) =
+    UpdateSection
+      <$> mapM mapStep steps
       <*> traverse (mapOnStructType tv) t
       <*> pure loc
+    where
+      mapStep (UpdateStepField f) = pure $ UpdateStepField f
+      mapStep (UpdateStepSlice idxs) = UpdateStepSlice <$> mapM (astMap tv) idxs
   astMap tv (Constr name es t loc) =
     Constr name <$> traverse (mapOnExp tv) es <*> traverse (mapOnStructType tv) t <*> pure loc
   astMap tv (Attr attr e loc) =
@@ -488,9 +489,8 @@ bareExp (OpSectionLeft name _ arg _ _ loc) =
   OpSectionLeft name NoInfo (bareExp arg) (NoInfo, NoInfo) (NoInfo, NoInfo) loc
 bareExp (OpSectionRight name _ arg _ _ loc) =
   OpSectionRight name NoInfo (bareExp arg) (NoInfo, NoInfo) NoInfo loc
-bareExp (ProjectSection fields _ loc) = ProjectSection fields NoInfo loc
-bareExp (IndexSection slice _ loc) =
-  IndexSection (map bareDimIndex slice) NoInfo loc
+bareExp (UpdateSection steps _ loc) =
+  UpdateSection (map bareUpdateStep steps) NoInfo loc
 bareExp (Constr name es _ loc) =
   Constr name (map bareExp es) NoInfo loc
 bareExp (AppExp appexp _) =

@@ -1078,15 +1078,18 @@ eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info (RetType _ t
     ValueFun $ \x -> do
       f <- evalTermVar env qv $ toStruct t
       apply2 loc env f x y
-eval env (IndexSection is _ loc) = do
-  is' <- mapM (evalDimIndex env) is
-  pure $ ValueFun $ evalIndex loc env is'
-eval _ (ProjectSection ks _ _) =
-  pure $ ValueFun $ flip (foldM walk) ks
+eval env (UpdateSection steps _ loc) =
+  pure $ ValueFun $ evalSection steps
   where
-    walk (ValueRecord fs) f
-      | Just v' <- M.lookup f fs = pure v'
-    walk _ _ = error "Value does not have expected field."
+    evalSection [] v = pure v
+    evalSection (UpdateStepField f : rest) (ValueRecord fs)
+      | Just v' <- M.lookup f fs =
+          evalSection rest v'
+    evalSection (UpdateStepField _ : _) _ =
+      error "Value does not have expected field."
+    evalSection (UpdateStepSlice is : rest) arr = do
+      is' <- mapM (evalDimIndex env) is
+      evalIndex loc env is' arr >>= evalSection rest
 eval env (Project f e _ _) = do
   project f <$> eval env e
 eval env (Assert what e (Info s) loc) = do
