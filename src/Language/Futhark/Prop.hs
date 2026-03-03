@@ -502,8 +502,7 @@ typeOf (OpSectionLeft _ _ _ (_, Info (pn, pt2)) (Info ret, _) _) =
   Scalar $ Arrow mempty pn (diet pt2) (toStruct pt2) ret
 typeOf (OpSectionRight _ _ _ (Info (pn, pt1), _) (Info ret) _) =
   Scalar $ Arrow mempty pn (diet pt1) (toStruct pt1) ret
-typeOf (ProjectSection _ (Info t) _) = t
-typeOf (IndexSection _ (Info t) _) = t
+typeOf (UpdateSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t
 typeOf (Attr _ e _) = typeOf e
 typeOf (AppExp _ (Info res)) = appResType res
@@ -1471,10 +1470,14 @@ similarExps (OpSectionLeft op1 _ x1 _ _ _) (OpSectionLeft op2 _ x2 _ _ _)
   | op1 == op2 = Just [(x1, x2)]
 similarExps (OpSectionRight op1 _ x1 _ _ _) (OpSectionRight op2 _ x2 _ _ _)
   | op1 == op2 = Just [(x1, x2)]
-similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
-  | names1 == names2 = Just []
-similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
-  similarSlices slice1 slice2
+similarExps (UpdateSection steps1 _ _) (UpdateSection steps2 _ _)
+  | length steps1 == length steps2 = concat <$> zipWithM similarStep steps1 steps2
+  where
+    similarStep (UpdateStepField f1) (UpdateStepField f2)
+      | f1 == f2 = Just []
+    similarStep (UpdateStepSlice s1) (UpdateStepSlice s2) =
+      similarSlices s1 s2
+    similarStep _ _ = Nothing
 similarExps _ _ = Nothing
 
 -- | Are these the same expression as per recursively invoking

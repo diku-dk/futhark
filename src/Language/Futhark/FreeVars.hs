@@ -83,8 +83,7 @@ freeInExp expr = case expr of
   OpSection {} -> mempty
   OpSectionLeft _ _ e _ _ _ -> freeInExp e
   OpSectionRight _ _ e _ _ _ -> freeInExp e
-  ProjectSection {} -> mempty
-  IndexSection idxs _ _ -> foldMap freeInDimIndex idxs
+  UpdateSection steps _ _ -> foldMap freeInUpdateStep steps
   AppExp (Loop sparams pat e1 form e3 _) _ ->
     let (e2fv, e2ident) = formVars form
      in freeInExp (loopInitExp e1)

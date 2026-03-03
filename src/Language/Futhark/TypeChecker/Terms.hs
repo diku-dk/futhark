@@ -711,18 +711,27 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (ProjectSection fields NoInfo loc) = do
+checkExp (UpdateSection steps NoInfo loc) = do
   a <- newTypeVar loc "a"
-  let usage = mkUsage loc "projection at"
-  b <- foldM (flip $ mustHaveField usage) a fields
-  let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType [] $ toRes Nonunique b
-  pure $ ProjectSection fields (Info ft) loc
-checkExp (IndexSection slice NoInfo loc) = do
-  slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
-  (t', retext) <- sliceShape Nothing slice' t
-  let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ toRes Nonunique t'
-  pure $ IndexSection slice' (Info ft) loc
+  (steps', b, retext) <- checkSectionSteps a steps
+  let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType retext $ toRes Nonunique b
+  pure $ UpdateSection steps' (Info ft) loc
+  where
+    checkSectionSteps t [] =
+      pure ([], t, [])
+    checkSectionSteps t (step : rest) =
+      case step of
+        UpdateStepField f -> do
+          t' <- mustHaveField (mkUsage loc "projection at") f t
+          (rest', target_t, retext) <- checkSectionSteps t' rest
+          pure (UpdateStepField f : rest', target_t, retext)
+        UpdateStepSlice slice -> do
+          slice' <- checkSlice slice
+          (arr_t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
+          unify (mkUsage loc "type of section indexing") arr_t t
+          (t', retext) <- sliceShape Nothing slice' =<< normTypeFully arr_t
+          (rest', target_t, retext_rest) <- checkSectionSteps t' rest
+          pure (UpdateStepSlice slice' : rest', target_t, retext <> retext_rest)
 checkExp (AppExp (Loop _ mergepat loopinit form loopbody loc) _) = do
   ((sparams, mergepat', loopinit', form', loopbody'), appres) <-
     checkLoop checkExp (mergepat, loopinit, form, loopbody) loc
@@ -1065,10 +1074,7 @@ causalityCheck binding_body = do
       onExp known (Var v (Info t) loc)
         | Just bad <- checkCausality (dquotes (pretty v)) known t loc =
             bad
-      onExp known (ProjectSection _ (Info t) loc)
-        | Just bad <- checkCausality "projection section" known t loc =
-            bad
-      onExp known (IndexSection _ (Info t) loc)
+      onExp known (UpdateSection _ (Info t) loc)
         | Just bad <- checkCausality "projection section" known t loc =
             bad
       onExp known (OpSectionRight _ (Info t) _ _ _ loc)
