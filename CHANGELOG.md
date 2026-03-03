@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark lsp` supports running evaluation comments in the interpreter,
+    implemented by VegOwOtenks.
+    
+
 ### Removed
 
 ### Changed
