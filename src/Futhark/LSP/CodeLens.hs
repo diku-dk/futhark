@@ -5,7 +5,7 @@
 module Futhark.LSP.CodeLens (evalLensesFor, execute, resolve) where
 
 import Control.Arrow ((>>>))
-import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, myThreadId)
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (AllocationLimitExceeded (AllocationLimitExceeded), handle)
 import Control.Lens ((^.))
 import Control.Monad.Except (Except, ExceptT, MonadError (throwError), runExceptT)
@@ -268,11 +268,9 @@ executeEvalLens (EvalLensData docUri line) = do
         handleOom AllocationLimitExceeded =
           pure (Left "Computation ran out of memory", mempty)
 
-        -- TODO: Possibly kill the thread after a timeout,
-        -- but this is GHC-specific
         setupLimits = do
-          -- 100 million bytes should suffice but should also be available
-          setAllocationCounter 100_000_000
+          -- I was unable to trigger the timeout with a lower limit at all
+          setAllocationCounter 100_000_000_000
           enableAllocationLimit
 
         evaluationAction :: 
