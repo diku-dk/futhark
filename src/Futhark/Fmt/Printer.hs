@@ -230,15 +230,20 @@ instance Format PrimValue where
 updates ::
   UncheckedExp ->
   (UncheckedExp, [(Fmt, Fmt)])
-updates (RecordUpdate src fs ve _ _) = second (++ [(fs', ve')]) $ updates src
+updates (Update src steps ve _ _) = second (++ [(steps', ve')]) $ updates src
   where
-    fs' = sep "." $ fmt <$> fs
-    ve' = fmt ve
-updates (Update src is ve _) = second (++ [(is', ve')]) $ updates src
-  where
-    is' = brackets $ sep ("," <> space) $ map fmt is
+    steps' = fmtUpdatePath steps
     ve' = fmt ve
 updates e = (e, [])
+
+fmtUpdatePath :: [UpdateStep NoInfo Name] -> Fmt
+fmtUpdatePath = go True
+  where
+    go _ [] = nil
+    go first (UpdateStepField f : rest) =
+      (if first then fmt f else "." <> fmt f) <> go False rest
+    go _ (UpdateStepSlice is : rest) =
+      brackets (sep ("," <> space) $ map fmt is) <> go False rest
 
 fmtUpdate :: UncheckedExp -> Fmt
 fmtUpdate e =
@@ -271,7 +276,6 @@ instance Format UncheckedExp where
   fmt (Negate e loc) = addComments loc $ "-" <> fmt e
   fmt (Not e loc) = addComments loc $ "!" <> fmt e
   fmt e@Update {} = fmtUpdate e
-  fmt e@RecordUpdate {} = fmtUpdate e
   fmt (Assert e1 e2 _ loc) =
     addComments loc $ "assert" <+> fmt e1 </> fmt e2
   fmt (Lambda params body rettype _ loc) =
@@ -387,14 +391,14 @@ instance Format (AppExpBase NoInfo Name) where
         | null tparams = space <> params'
         | null params = space <> tparams'
         | otherwise = space <> tparams' <+> params'
-  fmt (LetWith dest src idxs ve body loc)
+  fmt (LetWith dest src steps ve body loc)
     | dest == src =
         addComments loc $
           lineIndent
             ve
             ( "let"
                 <+> fmt dest
-                <> idxs'
+                <> fmtLetLhsUpdatePath steps
                   <+> "="
             )
             (fmt ve)
@@ -408,12 +412,10 @@ instance Format (AppExpBase NoInfo Name) where
                 <+> "="
                 <+> fmt src
                 <+> "with"
-                <+> idxs'
+                <+> fmtUpdatePath steps
             )
             (fmt ve)
             </> letBody body
-    where
-      idxs' = brackets $ sep ", " $ map fmt idxs
   fmt (Range start maybe_step end loc) =
     addComments loc $ fmt start <> step <> end'
     where
@@ -437,6 +439,12 @@ instance Format (AppExpBase NoInfo Name) where
     addComments loc $ fmt f <+> fmt_args
     where
       fmt_args = sepArgs fmt $ fmap snd args
+
+fmtLetLhsUpdatePath :: [UpdateStep NoInfo Name] -> Fmt
+fmtLetLhsUpdatePath = mconcat . map step
+  where
+    step (UpdateStepSlice is) = brackets (sep ("," <> space) $ map fmt is)
+    step (UpdateStepField f) = "." <> fmt f
 
 letBody :: UncheckedExp -> Fmt
 letBody body@(AppExp LetPat {} _) = fmt body

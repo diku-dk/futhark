@@ -41,7 +41,7 @@ internaliseValBinds :: VisibleTypes -> [E.ValBind] -> InternaliseM ()
 internaliseValBinds types = mapM_ $ internaliseValBind types
 
 internaliseFunName :: VName -> Name
-internaliseFunName = nameFromString . prettyString
+internaliseFunName = nameFromText . prettyText
 
 shiftRetAls :: Int -> RetAls -> RetAls
 shiftRetAls d (RetAls pals rals) = RetAls pals $ map (+ d) rals
@@ -743,49 +743,123 @@ internaliseExp desc (E.Not e loc) = locating loc $ do
       letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) e'
     _ ->
       error "Futhark.Internalise.internaliseExp: non-int/bool type in Not"
-internaliseExp desc (E.Update src slice ve loc) = locating loc $ do
+internaliseExp desc (E.Update src [E.UpdateStepSlice slice] ve _ loc) = locating loc $ do
   ves <- internaliseExp "lw_val" ve
   srcs <- internaliseExpToVars "src" src
-  (src_dims, ve_dims) <- case (srcs, ves) of
-    (src_v : _, ve_v : _) ->
-      (,)
-        <$> (I.arrayDims <$> lookupType src_v)
-        <*> (I.arrayDims <$> subExpType ve_v)
-    _ -> pure ([], []) -- Will this happen?
+  src_dims <- case srcs of
+    src_v : _ -> I.arrayDims <$> lookupType src_v
+    _ -> pure []
   (idxs', cs) <- internaliseSlice src_dims slice
-  let src_dims' = sliceDims (Slice idxs')
-      rank = length src_dims'
-      errormsg =
-        "Shape "
-          <> errorShape src_dims'
-          <> " of slice does not match shape "
-          <> errorShape (take rank ve_dims)
-          <> " of value."
 
-  let comb sname ve' = do
+  let errormsg = errorMsg [ErrorString "Shape of slice does not match shape of value."]
+
+      comb sname ve' = do
         sname_t <- lookupType sname
         let full_slice = fullSlice sname_t idxs'
             rowtype = sname_t `setArrayDims` sliceDims full_slice
-        ve'' <-
-          ensureShape errormsg rowtype "lw_val_correct_shape" ve'
+        ve'' <- ensureShape errormsg rowtype "lw_val_correct_shape" ve'
         letInPlace desc sname full_slice $ BasicOp $ SubExp ve''
+
   certifying cs $ map I.Var <$> zipWithM comb srcs ves
-internaliseExp desc (E.RecordUpdate src fields ve _ loc) = locating loc $ do
+internaliseExp desc (E.Update src [E.UpdateStepField field] ve _ loc) = locating loc $ do
   src' <- internaliseExp desc src
   ve' <- internaliseExp desc ve
-  replace (E.typeOf src) fields ve' src'
+  replace (E.typeOf src) field ve' src'
   where
-    replace (E.Scalar (E.Record m)) (f : fs) ve' src'
-      | Just t <- M.lookup f m = do
+    replace (E.Scalar (E.Record m)) f ve_vals src_vals
+      | Just t <- M.lookup f m =
           let i =
                 sum . map (internalisedTypeSize . snd) $
                   takeWhile ((/= f) . fst) . sortFields $
                     m
               k = internalisedTypeSize t
-              (bef, to_update, aft) = splitAt3 i k src'
-          src'' <- replace t fs ve' to_update
-          pure $ bef ++ src'' ++ aft
-    replace _ _ ve' _ = pure ve'
+              (bef, _to_update, aft) = splitAt3 i k src_vals
+           in pure $ bef ++ ve_vals ++ aft
+    replace _ _ ve_vals _ = pure ve_vals
+internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
+  src_vals <- internaliseExp desc src
+  ve_vals <- internaliseExp "update_val" ve
+  lowerPath (E.typeOf src) src_vals steps ve_vals
+  where
+    lowerPath ::
+      E.StructType ->
+      [I.SubExp] ->
+      [E.UpdateStep Info VName] ->
+      [I.SubExp] ->
+      InternaliseM [I.SubExp]
+    lowerPath _ _ [] new_vals =
+      pure new_vals
+    lowerPath base_t base_vals (E.UpdateStepField f : rest) new_vals = do
+      (before, field_vals, after, field_t) <- splitField base_t f base_vals
+      updated_field_vals <- lowerPath field_t field_vals rest new_vals
+      pure $ before ++ updated_field_vals ++ after
+    lowerPath base_t base_vals (E.UpdateStepSlice slice : rest) new_vals = do
+      base_vs <- mapM asVar base_vals
+      base_dims <- case base_vs of
+        v : _ -> I.arrayDims <$> lookupType v
+        _ -> pure []
+
+      (idxs', cs) <- internaliseSlice base_dims slice
+
+      indexed_vals <- certifying cs $ forM base_vs $ \v -> do
+        v_t <- lookupType v
+        letSubExp "update_indexed" $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
+
+      let inner_t = indexType base_t slice
+      updated_indexed_vals <- lowerPath inner_t indexed_vals rest new_vals
+
+      when (length updated_indexed_vals /= length base_vs) $
+        error "internaliseExp Update: update arity mismatch in indexed step"
+
+      let errormsg = errorMsg [ErrorString "Shape of slice does not match shape of value."]
+
+          writeBack sname ve' = do
+            sname_t <- lookupType sname
+            let full_slice = fullSlice sname_t idxs'
+                rowtype = sname_t `setArrayDims` sliceDims full_slice
+            ve'' <- ensureShape errormsg rowtype "update_val_correct_shape" ve'
+            letInPlace desc sname full_slice $ BasicOp $ SubExp ve''
+
+      certifying cs $ map I.Var <$> zipWithM writeBack base_vs updated_indexed_vals
+
+    splitField ::
+      E.StructType ->
+      Name ->
+      [I.SubExp] ->
+      InternaliseM ([I.SubExp], [I.SubExp], [I.SubExp], E.StructType)
+    splitField (E.Scalar (E.Record m)) f vals
+      | Just field_t <- M.lookup f m =
+          let i =
+                sum . map (internalisedTypeSize . snd) $
+                  takeWhile ((/= f) . fst) $
+                    sortFields m
+              k = internalisedTypeSize field_t
+              (before, field_vals, after) = splitAt3 i k vals
+           in pure (before, field_vals, after, field_t)
+    splitField t f _ =
+      error $
+        "lowerPath: missing field "
+          ++ prettyString f
+          ++ " in type "
+          ++ prettyString t
+
+    asVar :: I.SubExp -> InternaliseM I.VName
+    asVar (I.Var v) = pure v
+    asVar se = letExp "update_src" $ I.BasicOp $ I.SubExp se
+
+    indexType :: E.StructType -> [E.DimIndex] -> E.StructType
+    indexType (E.Array u (E.Shape dims) et) idxs =
+      case dims' of
+        [] -> E.Scalar et
+        ds -> E.Array u (E.Shape ds) et
+      where
+        dims' = keptPrefix <> suffix
+        keptPrefix = [d | (d, i) <- zip prefix idxs, keepDim i]
+        prefix = take (length idxs) dims
+        suffix = drop (length idxs) dims
+        keepDim E.DimFix {} = False
+        keepDim E.DimSlice {} = True
+    indexType t _ = t
 internaliseExp desc (E.Attr attr e loc) = do
   attr' <- internaliseAttr attr
   e' <- local (f attr') $ internaliseExp desc e
@@ -2205,9 +2279,3 @@ errorMsg = ErrorMsg . compact
     compact (ErrorString x : ErrorString y : parts) =
       compact (ErrorString (x <> y) : parts)
     compact (x : y) = x : compact y
-
-errorShape :: [a] -> ErrorMsg a
-errorShape dims =
-  "["
-    <> mconcat (intersperse "][" $ map (ErrorMsg . pure . ErrorVal int64) dims)
-    <> "]"

@@ -94,14 +94,17 @@ instance ASTMappable (AppExpBase Info VName) where
           )
       <*> mapOnExp tv body
       <*> pure loc
-  astMap tv (LetWith dest src idxexps vexp body loc) =
+  astMap tv (LetWith dest src steps vexp body loc) =
     LetWith
       <$> astMap tv dest
       <*> astMap tv src
-      <*> mapM (astMap tv) idxexps
+      <*> mapM mapStep steps
       <*> mapOnExp tv vexp
       <*> mapOnExp tv body
       <*> pure loc
+    where
+      mapStep (UpdateStepSlice slice) = UpdateStepSlice <$> mapM (astMap tv) slice
+      mapStep (UpdateStepField f) = pure $ UpdateStepField f
   astMap tv (BinOp (fname, fname_loc) t (x, xext) (y, yext) loc) =
     BinOp
       <$> ((,) <$> mapOnName tv fname <*> pure fname_loc)
@@ -158,19 +161,16 @@ instance ASTMappable (ExpBase Info VName) where
     Negate <$> mapOnExp tv x <*> pure loc
   astMap tv (Not x loc) =
     Not <$> mapOnExp tv x <*> pure loc
-  astMap tv (Update src slice v loc) =
+  astMap tv (Update src steps v (Info t) loc) =
     Update
       <$> mapOnExp tv src
-      <*> mapM (astMap tv) slice
-      <*> mapOnExp tv v
-      <*> pure loc
-  astMap tv (RecordUpdate src fs v (Info t) loc) =
-    RecordUpdate
-      <$> mapOnExp tv src
-      <*> pure fs
+      <*> mapM mapStep steps
       <*> mapOnExp tv v
       <*> (Info <$> mapOnStructType tv t)
       <*> pure loc
+    where
+      mapStep (UpdateStepSlice slice) = UpdateStepSlice <$> mapM (astMap tv) slice
+      mapStep (UpdateStepField f) = pure $ UpdateStepField f
   astMap tv (Project field e t loc) =
     Project field <$> mapOnExp tv e <*> traverse (mapOnStructType tv) t <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
@@ -438,6 +438,10 @@ bareSizeExp :: SizeExp (ExpBase Info VName) -> SizeExp (ExpBase NoInfo VName)
 bareSizeExp (SizeExp e loc) = SizeExp (bareExp e) loc
 bareSizeExp (SizeExpAny loc) = SizeExpAny loc
 
+bareUpdateStep :: UpdateStep Info VName -> UpdateStep NoInfo VName
+bareUpdateStep (UpdateStepSlice slice) = UpdateStepSlice $ map bareDimIndex slice
+bareUpdateStep (UpdateStepField f) = UpdateStepField f
+
 bareTypeExp :: TypeExp (ExpBase Info VName) VName -> TypeExp (ExpBase NoInfo VName) VName
 bareTypeExp (TEVar qn loc) = TEVar qn loc
 bareTypeExp (TEParens te loc) = TEParens (bareTypeExp te) loc
@@ -474,10 +478,6 @@ bareExp (Ascript e te loc) = Ascript (bareExp e) (bareTypeExp te) loc
 bareExp (Coerce e te _ loc) = Coerce (bareExp e) (bareTypeExp te) NoInfo loc
 bareExp (Negate x loc) = Negate (bareExp x) loc
 bareExp (Not x loc) = Not (bareExp x) loc
-bareExp (Update src slice v loc) =
-  Update (bareExp src) (map bareDimIndex slice) (bareExp v) loc
-bareExp (RecordUpdate src fs v _ loc) =
-  RecordUpdate (bareExp src) fs (bareExp v) NoInfo loc
 bareExp (Project field e _ loc) =
   Project field (bareExp e) NoInfo loc
 bareExp (Assert e1 e2 _ loc) = Assert (bareExp e1) (bareExp e2) NoInfo loc
@@ -508,11 +508,11 @@ bareExp (AppExp appexp _) =
             (bareLoopForm form)
             (bareExp loopbody)
             loc
-        LetWith (Ident dest _ destloc) (Ident src _ srcloc) idxexps vexp body loc ->
+        LetWith (Ident dest _ destloc) (Ident src _ srcloc) steps vexp body loc ->
           LetWith
             (Ident dest NoInfo destloc)
             (Ident src NoInfo srcloc)
-            (map bareDimIndex idxexps)
+            (map bareUpdateStep steps)
             (bareExp vexp)
             (bareExp body)
             loc
@@ -536,3 +536,10 @@ bareExp (AppExp appexp _) =
           Index (bareExp arr) (map bareDimIndex slice) loc
 bareExp (Attr attr e loc) =
   Attr attr (bareExp e) loc
+bareExp (Update src steps v _ loc) =
+  Update
+    (bareExp src)
+    (map bareUpdateStep steps)
+    (bareExp v)
+    NoInfo
+    loc

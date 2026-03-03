@@ -1,3 +1,5 @@
+{-# LANGUAGE Strict #-}
+
 -- | An interpreter operating on type-checked source Futhark terms.
 -- Relatively slow.
 module Language.Futhark.Interpreter
@@ -44,7 +46,7 @@ import Data.List
   )
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
-import Data.Map qualified as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
 import Data.Ord
@@ -909,14 +911,11 @@ evalAppExp env (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
   evalIndex loc env is' arr
-evalAppExp env (LetWith dest src is v body loc) = do
+evalAppExp env (LetWith dest src steps v body loc) = do
   let Ident src_vn (Info src_t) _ = src
-  dest' <-
-    maybe oob pure
-      =<< writeArray
-        <$> mapM (evalDimIndex env) is
-        <*> evalTermVar env (qualName src_vn) (toStruct src_t)
-        <*> eval env v
+  src_v <- evalTermVar env (qualName src_vn) (toStruct src_t)
+  v' <- eval env v
+  dest' <- maybe oob pure =<< evalUpdateSteps env steps src_v v'
   let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
@@ -1053,19 +1052,13 @@ eval env (Negate e loc) = do
   apply loc env intrinsicsNeg ev
 eval env (Not e loc) =
   apply loc env intrinsicsNot =<< eval env e
-eval env (Update src is v loc) =
-  maybe oob pure
-    =<< writeArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
+eval env (Update src steps v _ loc) = do
+  src' <- eval env src
+  v' <- eval env v
+  res <- evalUpdateSteps env steps src' v'
+  maybe oob pure res
   where
     oob = bad loc env "Bad update"
-eval env (RecordUpdate src all_fs v _ _) =
-  update <$> eval env src <*> pure all_fs <*> eval env v
-  where
-    update _ [] v' = v'
-    update (ValueRecord src') (f : fs) v'
-      | Just f_v <- M.lookup f src' =
-          ValueRecord $ M.insert f (update f_v fs v') src'
-    update _ _ _ = error "eval RecordUpdate: invalid value."
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
@@ -1117,6 +1110,26 @@ eval env (Attr (AttrComp "trace" [AttrAtom (AtomName tag) _] _) e _) = do
   pure v
 eval env (Attr _ e _) =
   eval env e
+
+evalUpdateSteps :: Env -> [UpdateStep Info VName] -> Value -> Value -> EvalM (Maybe Value)
+evalUpdateSteps env = go
+  where
+    go [] _ newv = pure $ Just newv
+    go (UpdateStepField f : rest) (ValueRecord fs) newv
+      | Just old <- M.lookup f fs = do
+          newf <- go rest old newv
+          pure $ fmap (\v' -> ValueRecord $ M.insert f v' fs) newf
+    go (UpdateStepField _ : _) _ _ =
+      error "eval update: invalid field update."
+    go (UpdateStepSlice is : rest) arr newv = do
+      is' <- mapM (evalDimIndex env) is
+      case indexArray is' arr of
+        Nothing -> pure Nothing
+        Just old -> do
+          newsub <- go rest old newv
+          case newsub of
+            Nothing -> pure Nothing
+            Just vsub -> pure $ writeArray is' arr vsub
 
 evalCase ::
   Value ->

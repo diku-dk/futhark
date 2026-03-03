@@ -18,6 +18,7 @@ import Language.LSP.Protocol.Types
     toNormalizedUri,
   )
 import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
+import Language.LSP.VFS (VFS, VirtualFileEntry (..), vfsMap, virtualFileText)
 
 -- | Try to take state from IORef, if it's empty, try to compile.
 tryTakeStateFromIORef :: IORef State -> Maybe FilePath -> LspT () IO State
