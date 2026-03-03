@@ -5,7 +5,7 @@
 module Futhark.LSP.CodeLens (evalLensesFor, execute, resolve) where
 
 import Control.Arrow ((>>>))
-import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, myThreadId)
 import Control.Exception (AllocationLimitExceeded (AllocationLimitExceeded), handle)
 import Control.Lens ((^.))
 import Control.Monad.Except (Except, ExceptT, MonadError (throwError), runExceptT)
@@ -17,7 +17,7 @@ import Data.Aeson.Types qualified as Aeson
 import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.Map.Strict qualified as M
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe)
 import Data.Sequence (Seq ((:|>)))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -35,6 +35,7 @@ import Language.LSP.VFS (file_text)
 import Prettyprinter (Doc)
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import System.Mem (enableAllocationLimit, setAllocationCounter)
+import System.Timeout (timeout)
 
 -- | All the possible lenses
 --
@@ -254,7 +255,10 @@ executeEvalLens (EvalLensData docUri line) = do
                   }
             }
 
-    performEvaluation :: VFS -> Text -> IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
+    performEvaluation :: 
+      VFS -> 
+      Text -> 
+      IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
     performEvaluation currentVFS expressionText = do
       resultVar <- newEmptyMVar
       _evaluationThreadId <- forkIO (putMVar resultVar =<< evaluationAction)
@@ -262,7 +266,7 @@ executeEvalLens (EvalLensData docUri line) = do
       where
         -- TODO: throws away the entire trace, maybe this could be remedied someway
         handleOom AllocationLimitExceeded =
-          pure (Left "Computation Timed Out", mempty)
+          pure (Left "Computation ran out of memory", mempty)
 
         -- TODO: Possibly kill the thread after a timeout,
         -- but this is GHC-specific
@@ -271,7 +275,8 @@ executeEvalLens (EvalLensData docUri line) = do
           setAllocationCounter 100_000_000
           enableAllocationLimit
 
-        evaluationAction :: IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
+        evaluationAction :: 
+          IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
         evaluationAction = interpret $ do
           -- do not print warnings, no file
           let interpreterConfig = InterpreterConfig False Nothing
@@ -285,8 +290,12 @@ executeEvalLens (EvalLensData docUri line) = do
             newFutharkiState interpreterConfig filePath currentVFS
               >>= either abort pure
 
-          liftIO setupLimits
+          liftIO $ setupLimits
 
           runExpr interpreterState expressionText
           where
-            interpret = handle handleOom . runEvalRecord
+            interpret = handle handleOom . handleTimeout . runEvalRecord
+            handleTimeout action = timeout timeoutMilliseconds action
+              & fmap (fromMaybe (Left "Computation ran out of time", mempty))
+              where
+                timeoutMilliseconds = 15 * 10 ^ (6 :: Int)
