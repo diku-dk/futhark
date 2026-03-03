@@ -27,7 +27,7 @@ import Futhark.Eval (AbortEvaluation (abort), InterpreterConfig (InterpreterConf
 import Futhark.LSP.CommandType qualified as CommandType
 import Futhark.LSP.Tool (transformVFS)
 import Futhark.Util (showText)
-import Futhark.Util.Pretty (docText, vcat)
+import Futhark.Util.Pretty (docText, vcat, pretty, plural)
 import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))
 import Language.LSP.Protocol.Types (ApplyWorkspaceEditParams (..), CodeLens (..), Command (..), ErrorCodes (ErrorCodes_InvalidParams), LSPErrorCodes, Position (..), Range (..), TextEdit (..), UInt, Uri, WorkspaceEdit (..), fromNormalizedFilePath, toNormalizedUri, uriToNormalizedFilePath, type (|?) (..))
 import Language.LSP.Server (LspT, getVirtualFile, getVirtualFiles, sendRequest)
@@ -197,7 +197,7 @@ executeEvalLens (EvalLensData docUri line) = do
 
   pure ()
   where
-    publishResult result fileRope = do
+    publishResult (result, traces) fileRope = do
       _lspId <- lift $ sendRequest SMethod_WorkspaceApplyEdit workSpaceEditParams $ \case
         Left _ -> pure ()
         Right _ -> pure ()
@@ -215,7 +215,17 @@ executeEvalLens (EvalLensData docUri line) = do
           where
             commentLine = R.toText $ R.getLine i fileRope
         insertText =
-          let allDocs = snd result :|> either id id (fst result)
+          -- TODO: configurable retained trace count
+          let droppedTraceCount = Seq.length traces - 100
+              truncatedTraces = Seq.drop droppedTraceCount traces
+                & if droppedTraceCount > 0 
+                  then (
+                    "Hiding " 
+                    <> pretty droppedTraceCount 
+                    <> plural " trace" " traces" droppedTraceCount 
+                    Seq.<|) 
+                  else id
+              allDocs = truncatedTraces :|> either id id result
               commentLines =
                 T.lines
                   >>> map ("-- " <>)
@@ -292,13 +302,15 @@ executeEvalLens (EvalLensData docUri line) = do
 
           runExpr interpreterState expressionText
           where
+            -- TODO: Configurable allocation limit
             handleOom AllocationLimitExceeded =
               pure (Left "Computation ran out of memory")
 
-            interpret = 
-              handle handleOom . handleTimeout . runEvalRecordRef traceRef
-
+            -- TODO: Configurable timeout
             handleTimeout action = timeout timeoutMilliseconds action
               & fmap (fromMaybe (Left "Computation ran out of time"))
               where
                 timeoutMilliseconds = 15 * 10 ^ (6 :: Int)
+
+            interpret = 
+              handle handleOom . handleTimeout . runEvalRecordRef traceRef
