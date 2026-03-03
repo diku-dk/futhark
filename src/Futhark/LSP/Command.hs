@@ -8,10 +8,10 @@ import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
 import Futhark.LSP.CommandType (CommandType (CodeLens))
-import Futhark.LSP.Lenses qualified as Lenses
 import Language.LSP.Protocol.Types (ErrorCodes (ErrorCodes_InvalidRequest), LSPErrorCodes, type (|?) (..))
 import Language.LSP.Server (LspT)
 import Text.Read (readMaybe)
+import qualified Futhark.LSP.CodeLens as CodeLens
 
 -- | Dispatch to the correct Command Handler
 execute :: 
@@ -20,7 +20,7 @@ execute ::
   ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) ()
 execute name params = case readMaybe $ T.unpack name of
   Just command -> case command of
-    CodeLens -> Lenses.execute params
+    CodeLens -> CodeLens.execute params
   Nothing ->
     throwError
       ( "Unknown command name: " <> name,

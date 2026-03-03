@@ -1,9 +1,8 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE LambdaCase #-}
-{-# OPTIONS_GHC -fprint-potential-instances #-}
 
-module Futhark.LSP.Lenses (evalLensesFor, resolveCodeLens, execute) where
+module Futhark.LSP.CodeLens (evalLensesFor, execute, resolve) where
 
 import Control.Arrow ((>>>))
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
@@ -117,12 +116,12 @@ evalLensesFor file_uri = runExceptT $ do
               }
         }
 
-resolveCodeLens :: CodeLens -> Except Text CodeLens
-resolveCodeLens (CodeLens _ (Just _) _) =
+resolve :: CodeLens -> Except Text CodeLens
+resolve (CodeLens _ (Just _) _) =
   throwError "CodeLens is already resolved"
-resolveCodeLens (CodeLens _ _ Nothing) =
+resolve (CodeLens _ _ Nothing) =
   throwError "CodeLens doesn't have data attached"
-resolveCodeLens (CodeLens range Nothing (Just payload)) =
+resolve (CodeLens range Nothing (Just payload)) =
   case Aeson.fromJSON payload :: Aeson.Result LensPayload of
     Aeson.Error msg -> throwError $ T.pack msg
     Aeson.Success _ ->

@@ -21,7 +21,6 @@ import Data.Vector qualified as V
 import Futhark.Fmt.Printer (fmtToText)
 import Futhark.LSP.Command qualified as Command
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
-import Futhark.LSP.Lenses (evalLensesFor, resolveCodeLens)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
 import Futhark.Util (showText)
@@ -57,6 +56,7 @@ import Language.LSP.Protocol.Types
   )
 import Language.LSP.Server (Handlers, LspM, getVirtualFile, notificationHandler, requestHandler)
 import Language.LSP.VFS (file_text)
+import qualified Futhark.LSP.CodeLens as CodeLens
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
@@ -192,7 +192,7 @@ onDocumentCodeLenses =
     let textDocUri = request ^. params . textDocument . uri
      in do
           logStringStderr <& ("textDocument/CodeLens for " ++ show textDocUri)
-          eitherLenses <- evalLensesFor textDocUri
+          eitherLenses <- CodeLens.evalLensesFor textDocUri
           respond $ bimap failure success eitherLenses
   where
     success :: [CodeLens] -> [CodeLens] |? Null
@@ -212,7 +212,7 @@ onDocumentCodeLensResolve =
         codeLensLine = codeLens ^. (range . start . line)
      in do
           logStringStderr <& ("Resolving code lens on line " ++ show codeLensLine)
-          let result = runExcept $ resolveCodeLens codeLens
+          let result = runExcept $ CodeLens.resolve codeLens
           respond . first failure $ result
   where
     failure :: Text -> TResponseError Method_CodeLensResolve
