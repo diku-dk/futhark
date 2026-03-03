@@ -870,10 +870,8 @@ data ExpBase f vn
       (f (PName, ParamType), f (PName, ParamType, Maybe VName))
       (f ResRetType)
       SrcLoc
-  | -- | Field projection as a section: @(.x.y.z)@.
-    ProjectSection [Name] (f StructType) SrcLoc
-  | -- | Array indexing as a section: @(.[i,j])@.
-    IndexSection (SliceBase f vn) (f StructType) SrcLoc
+  | -- | Field projection and array indexing as a section, e.g. @(.x)@, @(.[i,j])@, @(.[0].x)@.
+    UpdateSection [UpdateStep f vn] (f StructType) SrcLoc
   | -- | Type ascription: @e : t@.
     Ascript (ExpBase f vn) (TypeExp (ExpBase f vn) vn) SrcLoc
   | -- | Size coercion: @e :> t@.
@@ -914,8 +912,7 @@ instance Located (ExpBase f vn) where
   locOf (OpSection _ _ loc) = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc) = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
-  locOf (ProjectSection _ _ loc) = locOf loc
-  locOf (IndexSection _ _ loc) = locOf loc
+  locOf (UpdateSection _ _ loc) = locOf loc
   locOf (Assert _ _ _ loc) = locOf loc
   locOf (Constr _ _ _ loc) = locOf loc
   locOf (Attr _ _ loc) = locOf loc

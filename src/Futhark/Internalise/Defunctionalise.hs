@@ -584,8 +584,7 @@ defuncExp (Lambda pats e0 _ (Info ret) loc) =
 defuncExp OpSection {} = error "defuncExp: unexpected operator section."
 defuncExp OpSectionLeft {} = error "defuncExp: unexpected operator section."
 defuncExp OpSectionRight {} = error "defuncExp: unexpected operator section."
-defuncExp ProjectSection {} = error "defuncExp: unexpected projection section."
-defuncExp IndexSection {} = error "defuncExp: unexpected projection section."
+defuncExp UpdateSection {} = error "defuncExp: unexpected projection section."
 defuncExp (AppExp (Loop sparams pat loopinit form e3 loc) res) = do
   (e1', sv1) <- defuncExp $ loopInitExp loopinit
   env <- askEnv
@@ -729,7 +728,7 @@ defuncSoacExp :: Exp -> DefM Exp
 defuncSoacExp e@OpSection {} = pure e
 defuncSoacExp e@OpSectionLeft {} = pure e
 defuncSoacExp e@OpSectionRight {} = pure e
-defuncSoacExp e@ProjectSection {} = pure e
+defuncSoacExp e@UpdateSection {} = pure e
 defuncSoacExp (Parens e loc) =
   Parens <$> defuncSoacExp e <*> pure loc
 defuncSoacExp (Lambda params e0 decl tp loc) = do

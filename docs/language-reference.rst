@@ -482,7 +482,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` `qualsymbol` ")"
        : | "(" `qualsymbol` `exp` ")"
        : | "(" ( "." `field` )+ ")"
-       : | "(" "." `slice` ")"
+       : | "(" ("." `slice` | "." `fieldid`)+ ")"
        : | "???"
    exp:   `atom`
       : | `exp` `qualsymbol` `exp`
