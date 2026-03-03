@@ -502,7 +502,7 @@ removeOutputsExcept toKeep s = case s of
   SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam [] [] post_lam)) aux1 ->
     SoacNode
       ots
-      (Pat $ pats_new)
+      (Pat pats_new)
       (H.Screma w inp (ScremaForm new_pre [] [] new_post))
       aux1
     where

@@ -14,7 +14,6 @@ import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
-import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
 
@@ -146,13 +145,14 @@ readCarries chunk_id chunk_offset dims' vec_is pes scan
 -- | Produce partially scanned intervals; one per threadblock.
 scanStage1 ::
   [VName] ->
+  [Maybe VName] ->
   Count NumBlocks SubExp ->
   Count BlockSize SubExp ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen (TV Int32, Imp.TExp Int64, CrossesSegment)
-scanStage1 all_pes num_tblocks tblock_size space scans kbody = do
+scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
   let num_tblocks' = fmap pe64 num_tblocks
       tblock_size' = fmap pe64 tblock_size
   num_threads <- dPrimV "num_threads" $ sExt32 $ unCount num_tblocks' * unCount tblock_size'
@@ -191,7 +191,7 @@ scanStage1 all_pes num_tblocks tblock_size space scans kbody = do
       -- Construct segment indices.
       zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
 
-      let per_scan_pes = segBinOpChunks scans all_pes
+      let per_scan_pes = segBinOpChunks scans scan_out
 
           in_bounds =
             foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
@@ -208,12 +208,17 @@ scanStage1 all_pes num_tblocks tblock_size space scans kbody = do
                   zip3 per_scan_pes scans per_scan_res
 
               sComment "write mapped values results to global memory" $
-                forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(pe, se) ->
-                  copyDWIMFix
+                forM_ (zip map_out map_res) $ \(pe, se) ->
+                  maybe
+                    (pure ())
+                    ( \p ->
+                        copyDWIMFix
+                          p
+                          (map Imp.le64 gtids)
+                          (kernelResultSubExp se)
+                          []
+                    )
                     pe
-                    (map Imp.le64 gtids)
-                    (kernelResultSubExp se)
-                    []
 
       sComment "threads in bounds read input" $
         sWhen in_bounds when_in_bounds
@@ -328,7 +333,7 @@ scanStage2 ::
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage2 all_pes stage1_num_threads elems_per_group num_tblocks crossesSegment space scans = do
+scanStage2 scan_out stage1_num_threads elems_per_group num_tblocks crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
 
@@ -346,7 +351,7 @@ scanStage2 all_pes stage1_num_threads elems_per_group num_tblocks crossesSegment
     constants <- kernelConstants <$> askEnv
     per_scan_local_arrs <- makeLocalArrays tblock_size (tvSize stage1_num_threads) scans
     let per_scan_rets = map (lambdaReturnType . segBinOpLambda) scans
-        per_scan_pes = segBinOpChunks scans all_pes
+        per_scan_pes = segBinOpChunks scans scan_out
 
     flat_idx <-
       dPrimV "flat_idx" $
@@ -398,6 +403,7 @@ scanStage2 all_pes stage1_num_threads elems_per_group num_tblocks crossesSegment
 scanStage3 ::
   Pat LetDecMem ->
   [VName] ->
+  [Maybe VName] ->
   Count NumBlocks SubExp ->
   Count BlockSize SubExp ->
   Imp.TExp Int64 ->
@@ -406,7 +412,7 @@ scanStage3 ::
   [SegBinOp GPUMem] ->
   SegPostOp GPUMem ->
   CallKernelGen ()
-scanStage3 pat all_pes num_tblocks tblock_size elems_per_group crossesSegment space scans post_op = do
+scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesSegment space scans post_op = do
   let tblock_size' = fmap pe64 tblock_size
       (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
@@ -449,7 +455,7 @@ scanStage3 pat all_pes num_tblocks tblock_size elems_per_group crossesSegment sp
           is_a_carry = flat_idx .==. (tvExp orig_group + 1) * elems_per_group - 1
           no_carry_in = tvExp orig_group .==. 0 .||. is_a_carry .||. crosses_segment
 
-      let per_scan_pes = segBinOpChunks scans all_pes
+      let per_scan_pes = segBinOpChunks scans scan_out
       sWhen in_bounds $ do
         sUnless no_carry_in $
           forM_ (zip per_scan_pes scans) $
@@ -487,7 +493,6 @@ scanStage3 pat all_pes num_tblocks tblock_size elems_per_group crossesSegment sp
 
       sWhen in_bounds $ do
         let (scan_pars, map_pars) = splitAt (segBinOpResults scans) $ lambdaParams $ segPostOpLambda post_op
-            (scan_out, map_out) = splitAt (segBinOpResults scans) all_pes
         dScope Nothing $
           scopeOfLParams $
             lambdaParams $
@@ -499,7 +504,12 @@ scanStage3 pat all_pes num_tblocks tblock_size elems_per_group crossesSegment sp
 
         sComment "bind map results to post lamda params" $
           forM_ (zip map_pars map_out) $ \(par, out) -> do
-            copyDWIMFix (paramName par) [] (Var out) (map Imp.le64 gtids)
+            maybe
+              (pure ())
+              ( \o ->
+                  copyDWIMFix (paramName par) [] (Var o) (map Imp.le64 gtids)
+              )
+              out
 
         let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
         sComment "compute post op." $
@@ -548,14 +558,14 @@ compileSegScan pat lvl space ts scans kbody post_op = do
     sAllocArray "scan_out" (elemType t) (shpOfT t s) (Space "device")
 
   map_out <- forM (drop (segBinOpResults scans) ts) $ \t ->
-    sAllocArray "map_out" (elemType t) (shpOfT t mempty) (Space "device")
-
-  let outs = scan_out ++ map_out
+    if isAcc t
+      then pure Nothing
+      else Just <$> sAllocArray "map_out" (elemType t) (shpOfT t mempty) (Space "device")
 
   (stage1_num_threads, elems_per_group, crossesSegment) <-
-    scanStage1 outs stage1_num_tblocks (kAttrBlockSize attrs) space scans kbody
+    scanStage1 scan_out map_out stage1_num_tblocks (kAttrBlockSize attrs) space scans kbody
 
   emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
 
-  scanStage2 outs stage1_num_threads elems_per_group stage1_num_tblocks crossesSegment space scans
-  scanStage3 pat outs (kAttrNumBlocks attrs) (kAttrBlockSize attrs) elems_per_group crossesSegment space scans post_op
+  scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks crossesSegment space scans
+  scanStage3 pat scan_out map_out (kAttrNumBlocks attrs) (kAttrBlockSize attrs) elems_per_group crossesSegment space scans post_op

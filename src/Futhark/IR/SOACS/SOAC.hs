@@ -52,10 +52,8 @@ import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.List (intersperse)
-import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Trace
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
@@ -222,9 +220,8 @@ scanomapSOAC ::
   [Scan rep] ->
   Lambda rep ->
   m (ScremaForm rep)
-scanomapSOAC scans lam = do
-  post_lam <- mkIdentityLambda $ lambdaReturnType lam
-  pure $ ScremaForm lam scans [] post_lam
+scanomapSOAC scans lam =
+  ScremaForm lam scans [] <$> mkIdentityLambda (lambdaReturnType lam)
 
 -- | Construct a Screma with possibly multiple scans,
 -- the given map function, and a given post lambda.
@@ -238,11 +235,13 @@ maposcanomapSOAC post_lam scans lam = ScremaForm lam scans [] post_lam
 -- | Construct a Screma with possibly multiple reductions, and
 -- the given map function.
 redomapSOAC ::
-  (Buildable rep) =>
+  (Buildable rep, MonadFreshNames m) =>
   [Reduce rep] ->
   Lambda rep ->
-  ScremaForm rep
-redomapSOAC reds lam = ScremaForm lam [] reds nilFn
+  m (ScremaForm rep)
+redomapSOAC reds lam = ScremaForm lam [] reds <$> mkIdentityLambda map_ts
+  where
+    map_ts = drop (redResults reds) $ lambdaReturnType lam
 
 -- | Construct a Screma with possibly multiple scans, and identity map
 -- function.
@@ -260,7 +259,7 @@ reduceSOAC ::
   (Buildable rep, MonadFreshNames m) =>
   [Reduce rep] ->
   m (ScremaForm rep)
-reduceSOAC reds = redomapSOAC reds <$> mkIdentityLambda ts
+reduceSOAC reds = redomapSOAC reds =<< mkIdentityLambda ts
   where
     ts = concatMap (lambdaReturnType . redLambda) reds
 
@@ -292,6 +291,7 @@ isScanSOAC :: ScremaForm rep -> Maybe [Scan rep]
 isScanSOAC form = do
   (scans, map_lam) <- isScanomapSOAC form
   guard $ isIdentityLambda map_lam
+  guard $ length (lambdaReturnType map_lam) == scanResults scans
   pure scans
 
 -- | Does this Screma correspond to a reduce-map composition?
@@ -307,6 +307,7 @@ isReduceSOAC :: ScremaForm rep -> Maybe [Reduce rep]
 isReduceSOAC form = do
   (reds, map_lam) <- isRedomapSOAC form
   guard $ isIdentityLambda map_lam
+  guard $ length (lambdaReturnType map_lam) == redResults reds
   pure reds
 
 -- | Does this Screma correspond to a simple map, without any
@@ -723,7 +724,7 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
     )
     . TC.bad
     . TC.TypeError
-    $ "Map function return type "
+    $ "Pre-lambda function return type "
       <> prettyTuple map_lam_ts
       <> " wrong for given scan and reduction functions."
   let (scan_ts, _, map_ts) =

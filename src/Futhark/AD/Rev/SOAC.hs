@@ -137,6 +137,12 @@ vjpSOAC ops pat _aux (Screma w as form) m
         scanomapToMapAndScan pat (w, scans, map_lam, as)
       vjpStm ops mapstm $ vjpStm ops scanstm m
 
+-- Get rid of post-lambdas
+vjpSOAC ops pat aux (Screma w as form) m
+  | not $ isIdentityLambda $ scremaPostLambda form = do
+      stms <- collectStms_ $ auxing aux $ extractPostLambda pat w as form
+      foldr (vjpStm ops) m stms
+
 -- Differentiating Histograms
 vjpSOAC ops pat aux (Hist n as histops f) m
   | isIdentityLambda f,
