@@ -19,6 +19,7 @@ import Data.Text (Text)
 import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
 import Futhark.Fmt.Printer (fmtToText)
+import Futhark.LSP.CodeLens qualified as CodeLens
 import Futhark.LSP.Command qualified as Command
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
 import Futhark.LSP.State (State (..))
@@ -56,7 +57,6 @@ import Language.LSP.Protocol.Types
   )
 import Language.LSP.Server (Handlers, LspM, getVirtualFile, notificationHandler, requestHandler)
 import Language.LSP.VFS (file_text)
-import qualified Futhark.LSP.CodeLens as CodeLens
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->

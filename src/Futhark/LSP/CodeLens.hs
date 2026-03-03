@@ -16,9 +16,11 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
 import Data.Foldable (toList)
 import Data.Function ((&))
+import Data.IORef (IORef, newIORef, readIORef)
 import Data.Map.Strict qualified as M
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Sequence (Seq ((:|>)))
+import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
@@ -27,7 +29,7 @@ import Futhark.Eval (AbortEvaluation (abort), InterpreterConfig (InterpreterConf
 import Futhark.LSP.CommandType qualified as CommandType
 import Futhark.LSP.Tool (transformVFS)
 import Futhark.Util (showText)
-import Futhark.Util.Pretty (docText, vcat, pretty, plural)
+import Futhark.Util.Pretty (docText, plural, pretty, vcat)
 import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))
 import Language.LSP.Protocol.Types (ApplyWorkspaceEditParams (..), CodeLens (..), Command (..), ErrorCodes (ErrorCodes_InvalidParams), LSPErrorCodes, Position (..), Range (..), TextEdit (..), UInt, Uri, WorkspaceEdit (..), fromNormalizedFilePath, toNormalizedUri, uriToNormalizedFilePath, type (|?) (..))
 import Language.LSP.Server (LspT, getVirtualFile, getVirtualFiles, sendRequest)
@@ -36,8 +38,6 @@ import Prettyprinter (Doc)
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import System.Mem (enableAllocationLimit, setAllocationCounter)
 import System.Timeout (timeout)
-import Data.IORef (readIORef, newIORef, IORef)
-import qualified Data.Sequence as Seq
 
 -- | All the possible lenses
 --
@@ -217,14 +217,16 @@ executeEvalLens (EvalLensData docUri line) = do
         insertText =
           -- TODO: configurable retained trace count
           let droppedTraceCount = Seq.length traces - 100
-              truncatedTraces = Seq.drop droppedTraceCount traces
-                & if droppedTraceCount > 0 
-                  then (
-                    "Hiding " 
-                    <> pretty droppedTraceCount 
-                    <> plural " trace" " traces" droppedTraceCount 
-                    Seq.<|) 
-                  else id
+              truncatedTraces =
+                Seq.drop droppedTraceCount traces
+                  & if droppedTraceCount > 0
+                    then
+                      ( "Hiding "
+                          <> pretty droppedTraceCount
+                          <> plural " trace" " traces" droppedTraceCount
+                          Seq.<|
+                      )
+                    else id
               allDocs = truncatedTraces :|> either id id result
               commentLines =
                 T.lines
@@ -267,9 +269,9 @@ executeEvalLens (EvalLensData docUri line) = do
                   }
             }
 
-    performEvaluation :: 
-      VFS -> 
-      Text -> 
+    performEvaluation ::
+      VFS ->
+      Text ->
       IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
     performEvaluation currentVFS expressionText = do
       resultVar <- newEmptyMVar
@@ -282,7 +284,7 @@ executeEvalLens (EvalLensData docUri line) = do
           setAllocationCounter 100_000_000_000
           enableAllocationLimit
 
-        evaluationAction :: 
+        evaluationAction ::
           IORef (Seq (Doc AnsiStyle)) ->
           IO (Either (Doc AnsiStyle) (Doc AnsiStyle))
         evaluationAction traceRef = interpret $ do
@@ -298,7 +300,7 @@ executeEvalLens (EvalLensData docUri line) = do
             newFutharkiState interpreterConfig filePath currentVFS
               >>= either abort pure
 
-          liftIO $ setupLimits
+          liftIO setupLimits
 
           runExpr interpreterState expressionText
           where
@@ -307,10 +309,11 @@ executeEvalLens (EvalLensData docUri line) = do
               pure (Left "Computation ran out of memory")
 
             -- TODO: Configurable timeout
-            handleTimeout action = timeout timeoutMilliseconds action
-              & fmap (fromMaybe (Left "Computation ran out of time"))
+            handleTimeout action =
+              timeout timeoutMilliseconds action
+                & fmap (fromMaybe (Left "Computation ran out of time"))
               where
                 timeoutMilliseconds = 15 * 10 ^ (6 :: Int)
 
-            interpret = 
+            interpret =
               handle handleOom . handleTimeout . runEvalRecordRef traceRef

@@ -1,4 +1,4 @@
-module Futhark.Eval (InterpreterConfig (..), runExpr, interpreterConfig, newFutharkiState, EvalIO (..), AbortEvaluation (..), TraceEvaluation (..), EvalRecordRef(), runEvalRecordRef) where
+module Futhark.Eval (InterpreterConfig (..), runExpr, interpreterConfig, newFutharkiState, EvalIO (..), AbortEvaluation (..), TraceEvaluation (..), EvalRecordRef (), runEvalRecordRef) where
 
 import Control.Exception (IOException, catch)
 import Control.Monad (foldM, when, (<=<))
@@ -6,8 +6,11 @@ import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Free.Church (F, runF)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask)
+import Data.IORef (IORef, modifyIORef')
 import Data.Map qualified as M
 import Data.Maybe (maybeToList)
+import Data.Sequence (Seq, (|>))
 import Data.Text qualified as T
 import Futhark.Compiler (prettyWarnings, readProgramFilesExceptKnown)
 import Futhark.Compiler.Program (VFS, fileProg, fileScope)
@@ -26,9 +29,6 @@ import Prettyprinter (Doc, align, pretty, unAnnotate, vcat, (<+>))
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.IO (stderr)
-import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask)
-import Data.IORef (IORef, modifyIORef')
-import Data.Sequence (Seq, (|>))
 
 class AbortEvaluation m where
   abort :: Doc AnsiStyle -> m b
@@ -63,15 +63,16 @@ instance TraceEvaluation EvalRecordRef where
 newtype EvalIO a = EvalIO {runEvalIO :: IO a}
   deriving (Functor, Applicative, Monad, MonadIO)
 
-newtype EvalRecordRef a = EvalRecordRef
-  (ExceptT (Doc AnsiStyle) (ReaderT (IORef (Seq (Doc AnsiStyle))) IO) a)
+newtype EvalRecordRef a
+  = EvalRecordRef
+      (ExceptT (Doc AnsiStyle) (ReaderT (IORef (Seq (Doc AnsiStyle))) IO) a)
   deriving (Functor, Applicative, Monad, MonadIO)
 
-runEvalRecordRef :: 
-  IORef (Seq (Doc AnsiStyle)) -> 
-  EvalRecordRef a -> 
+runEvalRecordRef ::
+  IORef (Seq (Doc AnsiStyle)) ->
+  EvalRecordRef a ->
   IO (Either (Doc AnsiStyle) a)
-runEvalRecordRef msgRef (EvalRecordRef action) = 
+runEvalRecordRef msgRef (EvalRecordRef action) =
   flip runReaderT msgRef $ runExceptT action
 
 newtype InterpreterState = InterpreterState (VNameSource, T.Env, I.Ctx)
