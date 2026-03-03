@@ -196,7 +196,9 @@ executeEvalLens (EvalLensData docUri line) = do
   pure ()
   where
     publishResult result fileRope = do
-      _lspId <- lift $ sendRequest SMethod_WorkspaceApplyEdit workSpaceEditParams (const $ pure ())
+      _lspId <- lift $ sendRequest SMethod_WorkspaceApplyEdit workSpaceEditParams $ \case
+        Left _ -> pure ()
+        Right _ -> pure ()
       pure ()
       where
         findResultLinesEnd i

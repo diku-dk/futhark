@@ -14,7 +14,10 @@ import Language.LSP.Server (LspT)
 import Text.Read (readMaybe)
 
 -- | Dispatch to the correct Command Handler
-execute :: Text -> Maybe [Aeson.Value] -> ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) ()
+execute :: 
+  Text -> 
+  Maybe [Aeson.Value] -> 
+  ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) ()
 execute name params = case readMaybe $ T.unpack name of
   Just command -> case command of
     CodeLens -> Lenses.execute params
