@@ -690,15 +690,13 @@ LetUpdateStep :: { UpdateStep NoInfo Name }
               | '.' FieldId           { UpdateStepField (unLoc $2) }
 
 SectionUpdate :: { [UpdateStep NoInfo Name] }
-              : SectionUpdateStep SectionUpdateTail { $1 : $2 }
+              : '.' FieldId SectionUpdateTail            { UpdateStepField (unLoc $2) : $3 }
+              | '.' '[' DimIndices ']' SectionUpdateTail { UpdateStepSlice $3 : $5 }
 
 SectionUpdateTail :: { [UpdateStep NoInfo Name] }
-                  : SectionUpdateStep SectionUpdateTail { $1 : $2 }
-                  |                                     { [] }
-
-SectionUpdateStep :: { UpdateStep NoInfo Name }
-                  : '.' FieldId             { UpdateStepField (unLoc $2) }
-                  | '.' '[' DimIndices ']' { UpdateStepSlice $3 }
+                  : '.' FieldId SectionUpdateTail           { UpdateStepField (unLoc $2) : $3 }
+                  | '...[' DimIndices ']' SectionUpdateTail { UpdateStepSlice $2 : $4 }
+                  |                                         { [] }
 
 Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordFieldExplicit $1 $3 (srcspan $1 $>) }
