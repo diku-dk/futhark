@@ -167,14 +167,16 @@ applyScanAggregateToPrefix scan_ops per_op_local_vars per_op_aggr_arrs prefArrs 
 seqScanFastPath ::
   [[VName]] ->
   [Maybe VName] ->
+  VName ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   [[VName]] ->
   TV Int64 ->
+  TV Int64 ->
   [[VName]] ->
   TV Int64 ->
   MulticoreGen ()
-seqScanFastPath scan_out map_out scan_ops kbody per_op_prefixes_var chunk_length per_op_prefix_arr block_idx = do
+seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chunk_length per_op_prefix_arr block_idx = do
   kbody_renamed <- renameBody kbody
   scan_ops_renamed <- renameSegBinOp scan_ops
   genBinOpParams scan_ops_renamed
@@ -193,6 +195,7 @@ seqScanFastPath scan_out map_out scan_ops kbody per_op_prefixes_var chunk_length
 
   z <- dPrimV "z" (0 :: Imp.TExp Int64)
   sWhile (tvExp z .<. tvExp chunk_length) $ do
+    dPrimV_ i (tvExp start + tvExp z)
     compileStms mempty (bodyStms kbody_renamed) $ do
       sComment "write mapped values results to memory" $
         forM_ (zip map_out (map kernelResultSubExp map_res)) $ \(marr, res) ->
@@ -218,12 +221,14 @@ seqScanFastPath scan_out map_out scan_ops kbody per_op_prefixes_var chunk_length
 
 seqScanLB ::
   [[VName]] ->
+  VName ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   [[VName]] ->
   TV Int64 ->
+  TV Int64 ->
   MulticoreGen ()
-seqScanLB scan_out scan_ops kbody per_op_prefixes_var chunk_length = do
+seqScanLB scan_out i scan_ops kbody per_op_prefixes_var start chunk_length = do
   kbody_renamed <- renameBody kbody
   scan_ops_renamed <- renameSegBinOp scan_ops
   genBinOpParams scan_ops_renamed
@@ -242,6 +247,7 @@ seqScanLB scan_out scan_ops kbody per_op_prefixes_var chunk_length = do
 
   z <- dPrimV "z" (0 :: Imp.TExp Int64)
   sWhile (tvExp z .<. tvExp chunk_length) $ do
+    dPrimV_ i (tvExp start + tvExp z)
     if shouldRecompute kbody_renamed
       then do
         compileStms mempty (bodyStms kbody_renamed) $ do
@@ -272,13 +278,15 @@ seqScanLB scan_out scan_ops kbody per_op_prefixes_var chunk_length = do
 seqAggregate ::
   [[VName]] ->
   [Maybe VName] ->
+  VName ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
+  TV Int64 ->
   TV Int64 ->
   [[VName]] ->
   TV Int64 ->
   MulticoreGen ()
-seqAggregate scan_out map_out scan_ops kbody chunk_length per_op_aggr_arrs block_idx = do
+seqAggregate scan_out map_out i scan_ops kbody start chunk_length per_op_aggr_arrs block_idx = do
   scan_ops_renamed <- renameSegBinOp scan_ops
   kbody_renamed <- renameBody kbody
   genBinOpParams scan_ops_renamed
@@ -291,6 +299,7 @@ seqAggregate scan_out map_out scan_ops kbody chunk_length per_op_aggr_arrs block
 
   j <- dPrimV "j" (0 :: Imp.TExp Int64)
   sWhile (tvExp j .<. tvExp chunk_length) $ do
+    dPrimV_ i (tvExp start + tvExp j)
     compileStms mempty (bodyStms kbody_renamed) $ do
       sComment "write mapped values results to memory" $
         forM_ (zip map_out (map kernelResultSubExp map_res)) $ \(marr, res) ->
@@ -487,14 +496,14 @@ nonsegmentedScan
         sIf
           (tvExp seq_flag .==. true)
           ( do
-              seqScanFastPath scan_out map_out scan_ops kbody prefix_seqs chunk_length prefArrs block_idx
+              seqScanFastPath scan_out map_out i scan_ops kbody prefix_seqs start chunk_length prefArrs block_idx
 
               store64 flag_loc_name (Imp.elements block_idx_32) 2
 
               applyPostOp pat scan_out map_out scan_ops post_op start chunk_length
           )
           ( do
-              seqAggregate scan_out map_out scan_ops kbody chunk_length aggrArrs block_idx
+              seqAggregate scan_out map_out i scan_ops kbody start chunk_length aggrArrs block_idx
 
               -- write flag as 1
               store64 flag_loc_name (Imp.elements block_idx_32) 1
@@ -542,7 +551,7 @@ nonsegmentedScan
 
               store64 flag_loc_name (Imp.elements block_idx_32) 2
 
-              seqScanLB scan_out scan_ops kbody prefix_vars chunk_length
+              seqScanLB scan_out i scan_ops kbody prefix_vars start chunk_length
 
               applyPostOp pat scan_out map_out scan_ops post_op start chunk_length
           )
