@@ -499,8 +499,6 @@ nonsegmentedScan
               seqScanFastPath scan_out map_out i scan_ops kbody prefix_seqs start chunk_length prefArrs block_idx
 
               store64 flag_loc_name (Imp.elements block_idx_32) 2
-
-              applyPostOp pat scan_out map_out scan_ops post_op start chunk_length
           )
           ( do
               seqAggregate scan_out map_out i scan_ops kbody start chunk_length aggrArrs block_idx
@@ -552,11 +550,11 @@ nonsegmentedScan
               store64 flag_loc_name (Imp.elements block_idx_32) 2
 
               seqScanLB scan_out i scan_ops kbody prefix_vars start chunk_length
-
-              applyPostOp pat scan_out map_out scan_ops post_op start chunk_length
           )
 
         add64 block_idx work_index_loc_name (Imp.elements 0) 1
+
+        applyPostOp pat scan_out map_out scan_ops post_op start chunk_length
 
     free_params <- freeParams fbody
     emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
