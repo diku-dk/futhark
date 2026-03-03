@@ -23,7 +23,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
 import Futhark.Compiler.Program (VFS)
-import Futhark.Eval (AbortEvaluation (abort), InterpreterConfig (InterpreterConfig), newFutharkiState, runEvalRecord, runExpr)
+import Futhark.Eval (AbortEvaluation (abort), InterpreterConfig (InterpreterConfig), newFutharkiState, runEvalRecordRef, runExpr)
 import Futhark.LSP.CommandType qualified as CommandType
 import Futhark.LSP.Tool (transformVFS)
 import Futhark.Util (showText)
@@ -36,6 +36,8 @@ import Prettyprinter (Doc)
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import System.Mem (enableAllocationLimit, setAllocationCounter)
 import System.Timeout (timeout)
+import Data.IORef (readIORef, newIORef, IORef)
+import qualified Data.Sequence as Seq
 
 -- | All the possible lenses
 --
@@ -261,21 +263,20 @@ executeEvalLens (EvalLensData docUri line) = do
       IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
     performEvaluation currentVFS expressionText = do
       resultVar <- newEmptyMVar
-      _evaluationThreadId <- forkIO (putMVar resultVar =<< evaluationAction)
-      takeMVar resultVar
+      traceRef <- newIORef Seq.empty
+      _evaluationTid <- forkIO (putMVar resultVar =<< evaluationAction traceRef)
+      (,) <$> takeMVar resultVar <*> readIORef traceRef
       where
         -- TODO: throws away the entire trace, maybe this could be remedied someway
-        handleOom AllocationLimitExceeded =
-          pure (Left "Computation ran out of memory", mempty)
-
         setupLimits = do
           -- I was unable to trigger the timeout with a lower limit at all
           setAllocationCounter 100_000_000_000
           enableAllocationLimit
 
         evaluationAction :: 
-          IO (Either (Doc AnsiStyle) (Doc AnsiStyle), Seq (Doc AnsiStyle))
-        evaluationAction = interpret $ do
+          IORef (Seq (Doc AnsiStyle)) ->
+          IO (Either (Doc AnsiStyle) (Doc AnsiStyle))
+        evaluationAction traceRef = interpret $ do
           -- do not print warnings, no file
           let interpreterConfig = InterpreterConfig False Nothing
           let filePath =
@@ -292,8 +293,11 @@ executeEvalLens (EvalLensData docUri line) = do
 
           runExpr interpreterState expressionText
           where
-            interpret = handle handleOom . handleTimeout . runEvalRecord
+            handleOom AllocationLimitExceeded =
+              pure (Left "Computation ran out of memory")
+
+            interpret = handle handleOom . handleTimeout . runEvalRecordRef traceRef
             handleTimeout action = timeout timeoutMilliseconds action
-              & fmap (fromMaybe (Left "Computation ran out of time", mempty))
+              & fmap (fromMaybe (Left "Computation ran out of time"))
               where
                 timeoutMilliseconds = 15 * 10 ^ (6 :: Int)
