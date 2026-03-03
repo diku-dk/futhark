@@ -267,7 +267,6 @@ executeEvalLens (EvalLensData docUri line) = do
       _evaluationTid <- forkIO (putMVar resultVar =<< evaluationAction traceRef)
       (,) <$> takeMVar resultVar <*> readIORef traceRef
       where
-        -- TODO: throws away the entire trace, maybe this could be remedied someway
         setupLimits = do
           -- I was unable to trigger the timeout with a lower limit at all
           setAllocationCounter 100_000_000_000
@@ -296,7 +295,9 @@ executeEvalLens (EvalLensData docUri line) = do
             handleOom AllocationLimitExceeded =
               pure (Left "Computation ran out of memory")
 
-            interpret = handle handleOom . handleTimeout . runEvalRecordRef traceRef
+            interpret = 
+              handle handleOom . handleTimeout . runEvalRecordRef traceRef
+
             handleTimeout action = timeout timeoutMilliseconds action
               & fmap (fromMaybe (Left "Computation ran out of time"))
               where

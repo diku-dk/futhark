@@ -59,7 +59,6 @@ instance TraceEvaluation EvalRecordRef where
   trace message = EvalRecordRef $ do
     messagesRef <- lift $ ask
     liftIO $ modifyIORef' messagesRef (|> message)
-    undefined
 
 newtype EvalIO a = EvalIO {runEvalIO :: IO a}
   deriving (Functor, Applicative, Monad, MonadIO)
