@@ -26,7 +26,7 @@ import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass
 import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace)
-import Futhark.Pass.ExtractKernels.ToGPU (soacsStmToGPU)
+import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU, soacsStmToGPU)
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Tools
@@ -232,6 +232,7 @@ transformScalarStms segments env inps distres stms res = do
     readInputs segments env (toList is) inps
     addStms $ fmap soacsStmToGPU stms
     pure $ subExpsRes $ map Var res
+  traceM $ "scalarstmt done" ++ prettyString stms 
   pure $ insertReps (zip (map distResTag distres) $ map Regular vs) env
 
 transformScalarStm ::
@@ -279,21 +280,28 @@ mkIrregFromReg ::
   VName ->
   Builder GPU IrregularRep
 mkIrregFromReg segments arr = do
+  traceM $ "mkIrregFromReg: arr = " ++ prettyString arr
   arr_t <- lookupType arr
+  traceM $ "type: arr_t = " ++ prettyString arr_t
   segment_size <-
     letSubExp "reg_seg_size" <=< toExp . product . map pe64 $
       drop (segmentsRank segments) (arrayDims arr_t)
+  traceM $ "segment_size = " ++ prettyString segment_size
   arr_S <-
     letExp "reg_segments" . BasicOp $
       Replicate (segmentsShape segments) segment_size
+  traceM $ "arr_S = " ++ prettyString arr_S
   num_elems <-
     letSubExp "reg_num_elems" <=< toExp $ product $ map pe64 $ arrayDims arr_t
+  traceM $ "num_elems = " ++ prettyString num_elems
   arr_D <-
     letExp "reg_D" . BasicOp $
       Reshape arr (reshapeAll (arrayShape arr_t) (Shape [num_elems]))
+  traceM $ "arr_D = " ++ prettyString arr_D
   arr_F <- letExp "reg_F" <=< segMap (MkSolo num_elems) $ \(MkSolo i) -> do
     flag <- letSubExp "flag" <=< toExp $ (pe64 i `rem` pe64 segment_size) .==. 0
     pure [subExpRes flag]
+  traceM $ "arr_F = " ++ prettyString arr_F
   arr_O <- letExp "reg_O" <=< segMap (shapeDims (segmentsShape segments)) $ \is -> do
     let flat_seg_i =
           flattenIndex
@@ -954,6 +962,11 @@ suitableOperator env inps =
   where
     notVariant v = isNothing $ M.lookup v $ inputReps inps env
 
+doSegScan :: [Scan SOACS] -> VName -> [VName] -> Builder GPU [VName]
+doSegScan scans flags elems =
+  let scan = singleScan scans
+   in genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) (scanNeutral scan) flags elems
+
 transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm segments env (DistStm inps res stm) = do
   case stm of
@@ -983,18 +996,46 @@ transformDistStm segments env (DistStm inps res stm) = do
           pure $
             insertRegulars red_tags elems' $
               insertIrregulars ws ws_F ws_O (zip map_tags mapout_names) env
+      | Just scans <- isScanSOAC form,
+        all (suitableOperator env inps . scanLambda) scans,
+        Just arrs' <- mapM (`lookup` inps) arrs,
+        (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
+          elems' <- doSegScan scans flags elems
+          pure $ insertIrregulars arr_segments flags offsets (zip (map distResTag res) elems') env
+      | Just (scans, map_lam) <- isScanomapSOAC form,
+        all (suitableOperator env inps . scanLambda) scans -> do
+          map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
+            PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
+          (ws_F, ws_O, ws) <-
+            transformInnerMap segments env inps map_pat w arrs map_lam
+          let (scanout_names, mapout_names) =
+                splitAt (scanResults scans) (patNames map_pat)
+          elems' <- doSegScan scans ws_F scanout_names
+          let (scan_tags, map_tags) = splitAt (scanResults scans) $ map distResTag res
+          pure $
+            insertIrregulars ws ws_F ws_O (zip scan_tags elems') $
+              insertIrregulars ws ws_F ws_O (zip map_tags mapout_names) env
       | Just map_lam <- isMapSOAC form -> do
           (ws_F, ws_O, ws) <- transformInnerMap segments env inps pat w arrs map_lam
           pure $ insertIrregulars ws ws_F ws_O (zip (map distResTag res) $ patNames pat) env
-      | otherwise ->
+      | otherwise -> do
           -- XXX: here we silently sequentialise any SOAC that is not handled
           -- above. We need to make sure that we actually handle everything we
           -- care about!
+          traceM $ "Sequentialising unhandled SOAC:\n" ++ prettyString stm
           transformScalarStm segments env inps res $
             Let pat aux (Op (Screma w arrs form))
     Let _ _ (Match scrutinees cases defaultCase _) -> do
       let [w] = NE.toList segments
+      traceM $
+        unlines
+          [ "=== match  ===",
+            "scrutinees: " ++ prettyString scrutinees,
+            "cases: " ++ prettyString cases,
+            "default: " ++ prettyString defaultCase
+          ]
 
+      -- We need to partition the indices of the scrutinees by which case they match.
       -- Lift the scrutinees.
       -- If it's a variable, we know it's a scalar and the lifted version will therefore be a regular array.
       lifted_scrutinees <- forM scrutinees $ \scrut -> do
@@ -1041,15 +1082,20 @@ transformDistStm segments env (DistStm inps res stm) = do
 
       -- Take the elements at index `is` from an input `v`.
       let splitInput is v = do
+            traceM $ "Splitting started for " ++ prettyString v ++ "of " ++prettyString is
+            traceM $ "look up result " ++ show (M.lookup v $ inputReps inps env)
             (t, rep) <- liftSubExp segments inps env (Var v)
+            traceM $ "Splitting done for " ++ prettyString v ++ " of type " ++ prettyString t ++ " with rep " ++ show rep ++ " for indices " ++ prettyString is
             (t,v,) <$> case rep of
               Regular arr -> do
                 -- In the regular case we just take the elements
                 -- of the array given by `is`
                 n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+                traceM $ "Regular split: n = " ++ prettyString n
                 arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
                   idx <- letExp "idx" =<< eIndex is [eSubExp i]
                   subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
+                traceM $ "Regular split result: " ++ prettyString arr'
                 pure $ Regular arr'
               Irregular (IrregularRep segs flags offsets elems) -> do
                 -- In the irregular case we take the elements
@@ -1086,7 +1132,14 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- Given the indices for which a branch is taken and its body,
       -- distribute the statements of the body of that branch.
       let distributeBranch is body = do
+            traceM $
+              unlines
+              ["Distributing branch with indices: " ++ prettyString is
+              ,"fre in  body: " ++ show (namesToList $ freeIn body)
+              ] 
+            
             (ts, vs, reps) <- unzip3 <$> mapM (splitInput is) (namesToList $ freeIn body)
+            traceM $ "Branch free variables: " ++ prettyString (zip vs ts)
             let inputs = do
                   (v, t, i) <- zip3 vs ts [0 ..]
                   pure (v, DistInput (ResTag i) t)
@@ -1099,7 +1152,15 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- We put the default case at the start as it's the 0'th equivalence class
       -- and is therefore the first segment after the partition.
       let branch_bodies = defaultCase : map (\(Case _ body) -> body) cases
+      traceM $ "Branch bodies: " ++ prettyString branch_bodies
       (branch_inputs, branch_envs, branch_dstms) <- unzip3 <$> zipWithM distributeBranch inds branch_bodies
+      traceM 
+        $ unlines 
+          [ "=== distributed branches ===",
+            "branch inputs: " ++ prettyString branch_inputs,
+            "branch dstms: " ++ prettyString branch_dstms
+          ]
+      
       let branch_results = map bodyResult branch_bodies
       lifted_bodies <- forM [0 .. num_cases - 1] $ \i -> do
         size <- letSubExp "size" =<< eIndex partition_sizes [toExp $ intConst Int64 i]
@@ -1218,15 +1279,10 @@ transformDistStm segments env (DistStm inps res stm) = do
               loop_env_local = insertReps loop_param_reps_local env_local0
 
           let i_param = Param mempty i (Prim (IntType it))
-              dist_scope =
-                scopeOfFParams old_loop_params
-                  <> scopeOfLParams [i_param]
-              build_scope =
-                scopeOfFParams lifted_loop_params'
-                  <> scopeOfLParams [i_param]
+          let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfLParams [i_param]
           scope <- askScope
           let (loop_new_inputs', loop_dstms) =
-                distributeBody (scope <> dist_scope) w loop_new_inputs body
+                distributeBody scope w loop_new_inputs body
 
           (loop_body_res, loop_body_stms) <-
             runReaderT
@@ -1235,6 +1291,7 @@ transformDistStm segments env (DistStm inps res stm) = do
               )
               (scope <> build_scope)
 
+          
           let loop_body_gpu = Body () loop_body_stms loop_body_res
               loop_exp_gpu =
                 Loop
@@ -1299,7 +1356,7 @@ transformDistStm segments env (DistStm inps res stm) = do
 
       traceM $
         unlines
-          [ "loop_param_inputs_local: " ++ prettyString loop_new_inputs,
+          [ "loop_param_new_inputs: " ++ prettyString loop_new_inputs,
             "loop_env_local: " ++ show (distResMap loop_env_local)
           ]
 
@@ -1308,9 +1365,8 @@ transformDistStm segments env (DistStm inps res stm) = do
       case maybe_cond of
         -- infinite loop . later can be uniform case as well.
         Nothing -> do
-          let dist_scope = scopeOfFParams old_loop_params
-              build_scope = scopeOfFParams lifted_loop_params'
-          let (loop_new_inputs', loop_dstms) = distributeBody (scope <> dist_scope) w loop_new_inputs body
+          let build_scope = scopeOfFParams lifted_loop_params'
+          let (loop_new_inputs', loop_dstms) = distributeBody scope w loop_new_inputs body
           (loop_body_res, loop_body_stms) <-
             runReaderT
               (runBuilder $ liftBody w loop_new_inputs' loop_env_local loop_dstms (bodyResult body))
@@ -1339,8 +1395,7 @@ transformDistStm segments env (DistStm inps res stm) = do
               =<< eIndex cond_scanned_v [toExp $ pe64 w - 1]
 
           any_active_param <- newParam "any_active" (Prim Bool)
-          let dist_scope = scopeOfFParams old_loop_params
-              build_scope = scopeOfFParams lifted_loop_params' <> scopeOfFParams [any_active_param]
+          let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfFParams [any_active_param]
 
           -- ‌build body
           (loop_body_res, loop_body_stms) <-
@@ -1381,12 +1436,13 @@ transformDistStm segments env (DistStm inps res stm) = do
                     pure rep
 
                   let free_in_body = namesToList $ freeIn body
+                  traceM $ "Free variables in loop body: " ++ prettyString free_in_body
                   (ts, vs, reps) <- unzip3 <$> mapM (splitInput segments loop_new_inputs loop_env_local active_inds) free_in_body
                   let subset_inputs = do
                         (v, t, i) <- zip3 vs ts [0 ..]
                         pure (v, DistInput (ResTag i) t)
                       env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-                  let (subset_inputs', subset_dstms) = distributeBody (scope <> dist_scope) num_data subset_inputs body
+                  let (subset_inputs', subset_dstms) = distributeBody scope num_data subset_inputs body
 
                   subset_body_res <- liftBody num_data subset_inputs' env_subset subset_dstms (bodyResult body)
                   subset_result_vs <- mapM (letExp "subset_result" <=< toExp . resSubExp) subset_body_res
@@ -1459,7 +1515,7 @@ transformDistStm segments env (DistStm inps res stm) = do
 
                   pure $ merged_results ++ [SubExpRes mempty any_active]
               )
-              (scope <> build_scope)
+              (scope <> build_scope <> scopeOfFParams old_loop_params)
 
           let loop_body_gpu = Body () loop_body_stms loop_body_res
               loop_exp_gpu =
