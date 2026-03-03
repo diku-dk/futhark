@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 -- | Generally useful definition used in various places in the
 -- language server implementation.
 module Futhark.LSP.Tool
@@ -10,7 +11,7 @@ module Futhark.LSP.Tool
   )
 where
 
-import Control.Lens.Getter (view)
+import Control.Lens.Getter ((^.))
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.Compiler.Program (lpImports)
@@ -33,6 +34,7 @@ import Language.Futhark.Query
 import Language.LSP.Protocol.Types
 import Language.LSP.Server (LspM, getVirtualFile)
 import Language.LSP.VFS (VFS, VirtualFile, vfsMap, virtualFileText, virtualFileVersion)
+import qualified Language.LSP.VFS as VFS
 
 -- | Retrieve hover info for the definition referenced at the given
 -- file at the given line and column number (the two 'Int's).
@@ -142,4 +144,8 @@ transformVFS vfs =
             M.insert (fromNormalizedFilePath file_path) (virtualFileText virtual_file) acc
     )
     M.empty
-    (view vfsMap vfs)
+    (M.mapMaybe keepOpenFile (vfs ^. vfsMap))
+  where
+    keepOpenFile = \case
+      VFS.Open file -> Just file
+      VFS.Closed _ -> Nothing

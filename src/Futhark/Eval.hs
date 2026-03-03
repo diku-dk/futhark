@@ -57,7 +57,7 @@ instance (Monad m, TraceEvaluation m) => TraceEvaluation (ExceptT e m) where
 instance TraceEvaluation EvalRecordRef where
   trace :: Doc AnsiStyle -> EvalRecordRef ()
   trace message = EvalRecordRef $ do
-    messagesRef <- lift $ ask
+    messagesRef <- lift ask
     liftIO $ modifyIORef' messagesRef (|> message)
 
 newtype EvalIO a = EvalIO {runEvalIO :: IO a}
