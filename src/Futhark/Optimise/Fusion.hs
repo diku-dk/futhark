@@ -499,35 +499,50 @@ hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
 removeOutputsExcept toKeep s = case s of
-  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam [] [] post_lam)) aux1 ->
+  SoacNode ots (Pat pats) (H.Screma w inp (ScremaForm pre_lam [] red post_lam)) aux1 ->
     SoacNode
       ots
-      (Pat pats_new)
-      (H.Screma w inp (ScremaForm new_pre [] [] new_post))
+      (Pat $ red_pats <> new_pats)
+      (H.Screma w inp (ScremaForm new_pre [] red new_post))
       aux1
     where
+      (pre_red_res, pre_map_res) =
+        splitAt (redResults red) $ resFromLambda pre_lam
+      (pre_red_ts, pre_map_ts) =
+        splitAt (redResults red) $ lambdaReturnType pre_lam
+
       to_change =
         L.zip5
-          (resFromLambda pre_lam)
-          (lambdaReturnType pre_lam)
+          pre_map_res
+          pre_map_ts
           (lambdaParams post_lam)
           (resFromLambda post_lam)
           (lambdaReturnType post_lam)
 
-      (pats_new, res_new) =
+      (red_pats, map_pats) = splitAt (redResults red) pats
+
+      (new_pats, new) =
         unzip $
-          filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats1 to_change)
-      (pre_res, pre_ts, post_pars, post_res, post_ts) = L.unzip5 res_new
+          filter (\(x, _) -> patElemName x `elem` toKeep) (zip map_pats to_change)
+      ( new_pre_map_res,
+        new_pre_map_ts,
+        new_post_pars,
+        new_post_res,
+        new_post_ts
+        ) = L.unzip5 new
       new_post =
         Lambda
-          { lambdaParams = post_pars,
-            lambdaReturnType = post_ts,
-            lambdaBody = (lambdaBody post_lam) {bodyResult = post_res}
+          { lambdaParams = new_post_pars,
+            lambdaReturnType = new_post_ts,
+            lambdaBody = (lambdaBody post_lam) {bodyResult = new_post_res}
           }
       new_pre =
         pre_lam
-          { lambdaReturnType = pre_ts,
-            lambdaBody = (lambdaBody pre_lam) {bodyResult = pre_res}
+          { lambdaReturnType = pre_red_ts <> new_pre_map_ts,
+            lambdaBody =
+              (lambdaBody pre_lam)
+                { bodyResult = pre_red_res <> new_pre_map_res
+                }
           }
   SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam scan red post_lam)) aux1 ->
     SoacNode

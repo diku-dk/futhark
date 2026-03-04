@@ -770,9 +770,9 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
       post_lam_args = map (,mempty) $ scan_ts <> map_ts
   TC.checkLambda post_lam post_lam_args
 
-  when (null scans && null reds && not (isIdentityLambda post_lam)) $
+  when (null scans && not (isIdentityLambda post_lam)) $
     TC.bad $
-      TC.TypeError "Screma has post-lambda but no reduce or scan operations."
+      TC.TypeError "Screma has post-lambda but no scan operations."
 
 typeCheckScan :: (TC.Checkable rep) => Scan (Aliases rep) -> TC.TypeM rep [(Type, Names)]
 typeCheckScan (Scan scan_lam scan_nes) = do
