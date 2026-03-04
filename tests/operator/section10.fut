@@ -4,4 +4,4 @@
 
 def main (xss: [][]i32) =
   let rs = map (\xs -> {a = xs}) xss
-  in (.[0].a.[1:3]) rs
+  in (.[0].a[1:3]) rs
