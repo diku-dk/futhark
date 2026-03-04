@@ -226,11 +226,49 @@ scanomapSOAC scans lam =
 -- | Construct a Screma with possibly multiple scans,
 -- the given map function, and a given post lambda.
 maposcanomapSOAC ::
+  (Buildable rep, MonadFreshNames m) =>
   Lambda rep ->
   [Scan rep] ->
   Lambda rep ->
-  ScremaForm rep
-maposcanomapSOAC post_lam scans lam = ScremaForm lam scans [] post_lam
+  m (ScremaForm rep)
+maposcanomapSOAC post_lam [] pre_lam = do
+  new_post_lam <- mkIdentityLambda $ lambdaReturnType post_lam
+  let new_pre_lam =
+        Lambda
+          { lambdaParams = lambdaParams pre_lam,
+            lambdaReturnType = lambdaReturnType post_lam,
+            lambdaBody = mkBody new_stms new_res
+          }
+  pure $ ScremaForm new_pre_lam [] [] new_post_lam
+  where
+    new_res = bodyResult $ lambdaBody post_lam
+    stmsFromLam = bodyStms . lambdaBody
+    deps = [0 .. length $ lambdaReturnType pre_lam]
+    new_stms = stmsFromLam pre_lam <> fuseBinds pre_lam deps deps post_lam <> stmsFromLam post_lam
+    fuseBinds ::
+      (Buildable rep, Ord a) =>
+      Lambda rep ->
+      [a] ->
+      [a] ->
+      Lambda rep ->
+      Stms rep
+    fuseBinds lam_p out_p inp_c lam_c =
+      stmsFromList . mapMaybe bindResToPar $ zip3 out_p res_p ts_p
+      where
+        ts_p = lambdaReturnType lam_p
+        res_p = bodyResult $ lambdaBody lam_p
+
+        inp_c_map =
+          M.fromList . zip inp_c $ paramName <$> lambdaParams lam_c
+
+        bindResToPar (out, res, t) =
+          case M.lookup out inp_c_map of
+            Just name ->
+              Just $ certify cs $ mkLet [Ident name t] $ BasicOp $ SubExp e
+              where
+                SubExpRes cs e = res
+            Nothing -> Nothing
+maposcanomapSOAC post_lam scans lam = pure $ ScremaForm lam scans [] post_lam
 
 -- | Construct a Screma with possibly multiple reductions, and
 -- the given map function.
