@@ -216,7 +216,7 @@ topDownRules =
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
 bottomUpRules =
-  [ RuleOp removeDeadMapping,
+  [ RuleOp removeDeadResult,
     RuleOp removeDeadReduction,
     RuleBasicOp removeUnnecessaryCopy,
     RuleOp liftIdentityStreaming,
@@ -408,35 +408,30 @@ removeUnusedSOACInput _ pat aux op
        in if null unused then Nothing else Just (used_arrs, map_lam')
 removeUnusedSOACInput _ _ _ _ = Skip
 
-removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
-removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm lam scans reds post_lam))
-  | -- This case should probably also be handled.
-    isIdentityLambda post_lam,
-    (nonmap_pes, map_pes) <- splitAt num_nonmap_res pes,
-    not $ null map_pes =
-      let (nonmap_res, map_res) = splitAt num_nonmap_res $ bodyResult $ lambdaBody lam
-          (nonmap_ts, map_ts) = splitAt num_nonmap_res $ lambdaReturnType lam
+removeDeadResult :: BottomUpRuleOp (Wise SOACS)
+removeDeadResult (_, used) (Pat pes) aux (Screma w arrs (ScremaForm lam scans reds post_lam))
+  | (red_pes, post_pes) <- splitAt (redResults reds) pes,
+    not $ null post_pes =
+      let res = bodyResult $ lambdaBody post_lam
+          ts = lambdaReturnType post_lam
           isUsed (bindee, _, _) = (`UT.used` used) $ patElemName bindee
-          (map_pes', map_res', map_ts') =
-            unzip3 $ filter isUsed $ zip3 map_pes map_res map_ts
-          lam' =
-            lam
-              { lambdaBody = (lambdaBody lam) {bodyResult = nonmap_res <> map_res'},
-                lambdaReturnType = nonmap_ts <> map_ts'
+          (post_pes', res', ts') =
+            unzip3 $ filter isUsed $ zip3 post_pes res ts
+          post_lam' =
+            post_lam
+              { lambdaBody = mkBody (bodyStms (lambdaBody post_lam)) res',
+                lambdaReturnType = ts'
               }
-          scan_ts = concatMap (lambdaReturnType . scanLambda) scans
-       in if map_pes /= map_pes'
+       in if post_pes /= post_pes'
             then
+              -- It is possible that we produce a Screma here that has a
+              -- non-identity post_lam, but that will be cleaned up by
+              -- removeUnusedPreLamResult.
               Simplify . auxing aux $
-                letBind (Pat $ nonmap_pes <> map_pes')
-                  . Op
-                  . Screma w arrs
-                  . ScremaForm lam' scans reds
-                  =<< mkIdentityLambda (scan_ts <> map_ts')
+                letBind (Pat $ red_pes <> post_pes') . Op $
+                  Screma w arrs (ScremaForm lam scans reds post_lam')
             else Skip
-  where
-    num_nonmap_res = scanResults scans + redResults reds
-removeDeadMapping _ _ _ _ = Skip
+removeDeadResult _ _ _ _ = Skip
 
 -- | If we have pre-lambda result that is passed to the post-lambda, but not
 -- actually used for anything in the post-lambda, then get rid of it.
