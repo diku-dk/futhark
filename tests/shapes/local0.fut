@@ -1,5 +1,7 @@
 -- A location function with some shape stuff.  Crashed the
 -- defunctionaliser once.
+-- ==
+-- tags { no_webgpu }
 
 def getneighbors (_: i32) : []f64 = []
 

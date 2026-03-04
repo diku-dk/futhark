@@ -1,0 +1,3 @@
+*.js
+!main.js
+tests/

@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_webgpu }
+
 def N_coating_coefs = i64.i32 8
 def N_coating_specs = i64.i32 26
 

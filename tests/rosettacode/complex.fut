@@ -2,7 +2,8 @@
 --
 -- We implement a complex number as a pair of floats.  This would be
 -- nicer with operator overloading.
---
+-- ==
+-- tags { no_webgpu }
 -- input { 0 1.0 1.0 3.14159 1.2 }
 -- output { 4.14159 2.2 }
 -- input { 1 1.0 1.0 3.14159 1.2 }

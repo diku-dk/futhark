@@ -34,6 +34,8 @@ let
           futhark-manifest =
             haskellPackagesNew.callPackage ./nix/futhark-manifest.nix { };
 
+          language-wgsl =
+            haskellPackagesOld.callCabal2nix "language-wgsl" ./language-wgsl {};
           lsp =
             haskellPackagesNew.callPackage ./nix/lsp.nix { };
 

@@ -184,7 +184,7 @@ compileProg mode class_name prog = do
       options
       prog'
   where
-    operations :: Operations Imp.OpenCL ()
+    operations :: Operations Imp.HostOp ()
     operations =
       Operations
         { opsCompiler = callKernel,
@@ -222,7 +222,7 @@ compileBlockDim :: Imp.BlockDim -> CompilerM op s PyExp
 compileBlockDim (Left e) = asLong <$> compileExp e
 compileBlockDim (Right e) = pure $ compileConstExp e
 
-callKernel :: OpCompiler Imp.OpenCL ()
+callKernel :: OpCompiler Imp.HostOp ()
 callKernel (Imp.GetSize v key) = do
   v' <- compileVar v
   stm $ Assign v' $ Index (getParamByKey key) (IdxExp (String "value"))
@@ -285,7 +285,7 @@ launchKernel kernel_name safety kernel_dims threadblock_dims shared_memory args 
     processKernelArg (Imp.ValueKArg e bt) = toStorage bt <$> compileExp e
     processKernelArg (Imp.MemKArg v) = compileVar v
 
-writeOpenCLScalar :: WriteScalar Imp.OpenCL ()
+writeOpenCLScalar :: WriteScalar Imp.HostOp ()
 writeOpenCLScalar mem i bt "device" val = do
   let nparr =
         Call
@@ -304,7 +304,7 @@ writeOpenCLScalar mem i bt "device" val = do
 writeOpenCLScalar _ _ _ space _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
-readOpenCLScalar :: ReadScalar Imp.OpenCL ()
+readOpenCLScalar :: ReadScalar Imp.HostOp ()
 readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
   let val' = Var $ prettyString val
@@ -329,7 +329,7 @@ readOpenCLScalar mem i bt "device" = do
 readOpenCLScalar _ _ _ space =
   error $ "Cannot read from '" ++ space ++ "' memory space."
 
-allocateOpenCLBuffer :: Allocate Imp.OpenCL ()
+allocateOpenCLBuffer :: Allocate Imp.HostOp ()
 allocateOpenCLBuffer mem size "device" =
   stm $
     Assign mem $
@@ -337,7 +337,7 @@ allocateOpenCLBuffer mem size "device" =
 allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
 
-packArrayOutput :: EntryOutput Imp.OpenCL ()
+packArrayOutput :: EntryOutput Imp.HostOp ()
 packArrayOutput mem "device" bt ept dims = do
   mem' <- compileVar mem
   dims' <- mapM compileDim dims
@@ -352,7 +352,7 @@ packArrayOutput mem "device" bt ept dims = do
 packArrayOutput _ sid _ _ _ =
   error $ "Cannot return array from " ++ sid ++ " space."
 
-unpackArrayInput :: EntryInput Imp.OpenCL ()
+unpackArrayInput :: EntryInput Imp.HostOp ()
 unpackArrayInput mem "device" t s dims e = do
   let type_is_ok =
         BinOp

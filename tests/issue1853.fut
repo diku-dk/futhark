@@ -1,4 +1,6 @@
 -- Test parser-related quirks.
+-- ==
+-- tags { no_webgpu }
 
 type Thing = #this [2]f64 | #that [3]f64
 
