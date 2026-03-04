@@ -17,6 +17,10 @@ module Futhark.IR.SOACS.Simplify
     liftIdentityMapping,
     simplifyMapIota,
     SOACS,
+    eliminate,
+    eliminateByRes,
+    prunePreLambdaResults,
+    dedupInput,
   )
 where
 
@@ -27,7 +31,9 @@ import Control.Monad.Writer
 import Data.Bifunctor
 import Data.Either
 import Data.Foldable
+import Data.Function (on)
 import Data.List (partition, transpose, unzip4)
+import Data.List qualified as L
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -1107,3 +1113,195 @@ moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm ma
       pure (SubExpRes cs (Var arr), t, v, bind)
 moveTransformToOutput _ _ _ _ =
   Skip
+
+-- | Eliminate statements if it is not an dependency used to form the
+-- names given.
+eliminate :: (Buildable rep) => Names -> Stms rep -> Stms rep
+eliminate = auxiliary (stmsFromList [])
+  where
+    auxiliary stms' deps stms
+      | Just (stms'', stm@(Let v aux e)) <- stmsLast stms =
+          if namesIntersect deps $ namesFromList $ patNames v
+            then
+              auxiliary (oneStm stm <> stms') (freeIn (aux, e) <> deps) stms''
+            else
+              auxiliary stms' deps stms''
+      | otherwise = stms'
+
+-- | Eliminate statements inside a lambda if they are not used to
+-- compute the result.
+eliminateByRes :: (Buildable rep) => Lambda rep -> Lambda rep
+eliminateByRes lam = lam {lambdaBody = mkBody new_stms res}
+  where
+    res = bodyResult $ lambdaBody lam
+    stms = bodyStms $ lambdaBody lam
+    new_stms = eliminate (freeIn res) stms
+
+-- | Prunes unused map results from the pre-lambda in a ScremaForm.
+--
+-- A ScremaForm contains pre-lambda and post-lambda functions where
+-- results from the pre-lambda are passed as arguments to the
+-- post-lambda. This function eliminates map-related results from the
+-- pre-lambda that don't contribute to the post-lambda's
+--
+-- results:
+--   1. Identifies which post-lambda parameters are never used (dead)
+--   2. Removes those parameters from the post-lambda
+--   3. Removes the corresponding results from the pre-lambda
+--   4. Removes the corresponding return types from the pre-lambda
+--
+-- Only affects map results; scan and reduction results are preserved.
+--
+-- Returns: A ScremaForm with unused pre-lambda map results
+-- eliminated.
+prunePreLambdaMapResults :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
+prunePreLambdaMapResults (ScremaForm pre_lam scan red post_lam) =
+  ScremaForm new_pre_lam scan red new_post_lam
+  where
+    (rest_res_p, map_res_p) =
+      splitAt (scanResults scan + redResults red) . bodyResult $ lambdaBody pre_lam
+    (rest_ts_p, map_ts_p) =
+      splitAt (scanResults scan + redResults red) $ lambdaReturnType pre_lam
+    (scan_pars_c, map_pars_c) =
+      splitAt (scanResults scan) $ lambdaParams temp_post_lam
+    new_post_lam = temp_post_lam {lambdaParams = scan_pars_c <> new_map_pars_c}
+    new_pre_lam =
+      eliminateByRes $
+        pre_lam
+          { lambdaBody =
+              mkBody
+                (bodyStms $ lambdaBody pre_lam)
+                (rest_res_p <> new_map_res_p),
+            lambdaReturnType = rest_ts_p <> new_map_ts_p
+          }
+    (new_map_res_p, new_map_ts_p, new_map_pars_c) =
+      unzip3
+        . filter (\(_, _, p) -> paramName p `nameIn` deps)
+        $ zip3 map_res_p map_ts_p map_pars_c
+    temp_post_lam = eliminateByRes post_lam
+    deps = freeIn $ lambdaBody temp_post_lam
+
+-- | Prunes unused scan results from the pre-lambda in a ScremaForm.
+--
+-- Similar to 'prunePreLambdaMapResults', but for scan
+-- operations. Removes entire scan operations when none of their
+-- pre-lambda results are used to produce the post-lambda's results.
+--
+-- For each scan operation (which produces multiple results in the
+-- pre-lambda), checks if ANY of the corresponding post-lambda
+-- parameters are used. If not, the entire scan and its results are
+-- eliminated.
+--
+-- Returns: A ScremaForm with unused pre-lambda scan results
+-- eliminated.
+prunePreLambdaScanResults :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
+prunePreLambdaScanResults (ScremaForm pre_lam scan red post_lam) =
+  ScremaForm new_pre_lam new_scan red new_post_lam
+  where
+    (scan_res_p, rest_res_p) =
+      splitAt (scanResults scan) . bodyResult $ lambdaBody pre_lam
+    (scan_ts_p, rest_ts_p) =
+      splitAt (scanResults scan) $ lambdaReturnType pre_lam
+    (scan_pars_c, map_pars_c) =
+      splitAt (scanResults scan) $ lambdaParams temp_post_lam
+    new_post_lam = temp_post_lam {lambdaParams = mconcat new_scan_pars_c <> map_pars_c}
+    new_pre_lam =
+      eliminateByRes $
+        pre_lam
+          { lambdaBody =
+              mkBody
+                (bodyStms $ lambdaBody pre_lam)
+                (mconcat new_scan_res_p <> rest_res_p),
+            lambdaReturnType = mconcat new_scan_ts_p <> rest_ts_p
+          }
+
+    chunkByScan :: [a] -> [[a]]
+    chunkByScan = chunks (map (length . scanNeutral) scan)
+
+    chunked_scan_res_p = chunkByScan scan_res_p
+    chunked_scan_ts_p = chunkByScan scan_ts_p
+    chunked_scan_pars_c = chunkByScan scan_pars_c
+    (new_scan, new_scan_res_p, new_scan_ts_p, new_scan_pars_c) =
+      L.unzip4
+        . filter (\(_, _, _, ps) -> any ((`nameIn` deps) . paramName) ps)
+        $ L.zip4 scan chunked_scan_res_p chunked_scan_ts_p chunked_scan_pars_c
+    temp_post_lam = eliminateByRes post_lam
+    deps = freeIn $ lambdaBody temp_post_lam
+
+-- | Prunes all unused results from the pre-lambda in a ScremaForm
+-- (fixed-point).
+--
+-- Repeatedly prunes unused scan and map results until no further
+-- changes occur.  This is necessary because eliminating some results
+-- may make other results unused.
+--
+-- Example: If a map result is only used by a scan operation, and that
+-- scan's results don't contribute to the post-lambda's results, then
+-- the first pass removes the scan results, and the second pass can
+-- then remove the map result.
+--
+-- Returns: A ScremaForm with all transitively unused pre-lambda
+-- results eliminated.
+prunePreLambdaResults :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
+prunePreLambdaResults form =
+  if form == form' then form' else prunePreLambdaResults form'
+  where
+    form' = prunePreLambdaScanResults $ prunePreLambdaMapResults form
+
+-- | Removes duplicate inputs from a ScremaForm's lambda parameters.
+--
+-- When the same input appears multiple times in the input list (with
+-- corresponding duplicate lambda parameters), this function: 1. Keeps
+-- only one copy of each unique input 2. Creates let-bindings in the
+-- lambda body to alias the duplicates
+--
+-- Example: If inputs [x, y, x] map to lambda params [a, b, c], the
+-- result will have inputs [x, y] with params [a, b], and a
+-- let-binding c = a.
+--
+-- Arguments:
+--  * Input list that corresponds 1:1 with the lambda's parameters
+--  * ScremaForm containing the lambda to transform
+--
+-- Returns:
+--  * Deduplicated input list
+--  * Modified ScremaForm with updated lambda (fewer params,
+--    additional bindings)
+dedupInput ::
+  (Buildable rep, Ord a) =>
+  -- | Inputs
+  [a] ->
+  -- | Screma
+  ScremaForm rep ->
+  -- | Deduplicated inputs and new screma
+  ([a], ScremaForm rep)
+dedupInput inp form =
+  (new_inp, form {scremaLambda = new_lam})
+  where
+    lam = scremaLambda form
+    body = lambdaBody lam
+    new_body = mkBody (binds <> bodyStms body) $ bodyResult body
+    new_lam = lam {lambdaParams = new_pars, lambdaBody = new_body}
+    pars = lambdaParams lam
+    auxiliary [] = Nothing
+    auxiliary (x : xs) = Just (x, xs)
+    pairs = zip inp pars
+    (new_inp, new_pars) = unzip $ filter (`elem` keep_pairs) pairs
+    keep_pairs = map fst bind_pairs
+    bind_pairs =
+      mapMaybe auxiliary
+        . L.groupBy ((==) `on` fst)
+        $ L.sortOn fst pairs
+    par_bind_pairs = bimap snd (map snd) <$> bind_pairs
+    binds = foldMap mkBinds par_bind_pairs
+    mkBinds (par_name, names) =
+      stmsFromList $
+        map
+          ( \name ->
+              mkLet [Ident (paramName name) (paramType par_name)]
+                . BasicOp
+                . SubExp
+                . Var
+                $ paramName par_name
+          )
+          names

@@ -15,6 +15,7 @@ module Futhark.IR.SOACS.SOAC
     singleReduce,
 
     -- * Utility
+    composeBinds,
     scremaType,
     soacType,
     typeCheckSOAC,
@@ -182,6 +183,56 @@ scremaType w (ScremaForm _map_lam _scans reds post_lam) =
   where
     red_tps = concatMap (lambdaReturnType . redLambda) reds
 
+-- | Creates let-bindings to compose two lambda functions (producer →
+-- consumer).
+--
+-- When composing two operations where the outputs of one lambda
+-- (producer) flow into the inputs of another lambda (consumer), this
+-- function generates the necessary let-bindings that connect matching
+-- outputs to inputs.
+--
+-- The function looks for outputs from the producer that correspond to
+-- inputs expected by the consumer, and creates bindings like: let
+-- consumer_param = producer_result
+--
+-- This allows the two lambdas to be composed into a operation.
+--
+-- Returns: Statements containing let-bindings for each matched
+-- producer output → consumer input pair. Preserves certificates from
+-- the producer results.
+--
+-- Example: If out_p[i] == inp_c[j], then producer's result[i] is
+-- bound to consumer's parameter[j]. Unmatched outputs (producer
+-- results not consumed) are omitted.
+composeBinds ::
+  (Buildable rep, Ord a) =>
+  -- | Producer lambda
+  Lambda rep ->
+  -- | Producer outputs to match
+  [a] ->
+  -- | Consumer inputs to match
+  [a] ->
+  -- | Consumer lambda
+  Lambda rep ->
+  -- | Let-bindings connecting them
+  Stms rep
+composeBinds lam_p out_p inp_c lam_c =
+  stmsFromList . mapMaybe bindResToPar $ zip3 out_p res_p ts_p
+  where
+    ts_p = lambdaReturnType lam_p
+    res_p = bodyResult $ lambdaBody lam_p
+
+    inp_c_map =
+      M.fromList . zip inp_c $ paramName <$> lambdaParams lam_c
+
+    bindResToPar (out, res, t) =
+      case M.lookup out inp_c_map of
+        Just name ->
+          Just $ certify cs $ mkLet [Ident name t] $ BasicOp $ SubExp e
+          where
+            SubExpRes cs e = res
+        Nothing -> Nothing
+
 -- | Construct a lambda that takes parameters of the given types and
 -- simply returns them unchanged.
 mkIdentityLambda ::
@@ -213,8 +264,8 @@ isNilLambda lam =
 nilFn :: (Buildable rep) => Lambda rep
 nilFn = Lambda mempty mempty (mkBody mempty mempty)
 
--- | Construct a Screma with possibly multiple scans, and
--- the given map function.
+-- | Construct a Screma with possibly multiple scans, and the given
+-- map function.
 scanomapSOAC ::
   (Buildable rep, MonadFreshNames m) =>
   [Scan rep] ->
@@ -244,31 +295,12 @@ maposcanomapSOAC post_lam [] pre_lam = do
     new_res = bodyResult $ lambdaBody post_lam
     stmsFromLam = bodyStms . lambdaBody
     deps = [0 .. length $ lambdaReturnType pre_lam]
-    new_stms = stmsFromLam pre_lam <> fuseBinds pre_lam deps deps post_lam <> stmsFromLam post_lam
-    fuseBinds ::
-      (Buildable rep, Ord a) =>
-      Lambda rep ->
-      [a] ->
-      [a] ->
-      Lambda rep ->
-      Stms rep
-    fuseBinds lam_p out_p inp_c lam_c =
-      stmsFromList . mapMaybe bindResToPar $ zip3 out_p res_p ts_p
-      where
-        ts_p = lambdaReturnType lam_p
-        res_p = bodyResult $ lambdaBody lam_p
-
-        inp_c_map =
-          M.fromList . zip inp_c $ paramName <$> lambdaParams lam_c
-
-        bindResToPar (out, res, t) =
-          case M.lookup out inp_c_map of
-            Just name ->
-              Just $ certify cs $ mkLet [Ident name t] $ BasicOp $ SubExp e
-              where
-                SubExpRes cs e = res
-            Nothing -> Nothing
-maposcanomapSOAC post_lam scans lam = pure $ ScremaForm lam scans [] post_lam
+    new_stms =
+      stmsFromLam pre_lam
+        <> composeBinds pre_lam deps deps post_lam
+        <> stmsFromLam post_lam
+maposcanomapSOAC post_lam scans lam =
+  pure $ ScremaForm lam scans [] post_lam
 
 -- | Construct a Screma with possibly multiple reductions, and
 -- the given map function.
