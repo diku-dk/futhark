@@ -16,7 +16,6 @@ where
 import Control.Monad
 import Data.Char (chr)
 import Data.Functor
-import Data.List (intersperse)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -271,11 +270,11 @@ prettyAppExp _ (LetFun (fname, _) (tparams, params, retdecl, rettype, e) body _)
     retdecl' = case (pretty <$> unAnnot rettype) `mplus` (pretty <$> retdecl) of
       Just rettype' -> colon <+> align rettype'
       Nothing -> mempty
-prettyAppExp _ (LetWith dest src idxs ve body _)
+prettyAppExp _ (LetWith dest src steps ve body _)
   | dest == src =
       "let"
         <+> pretty dest
-        <> list (map pretty idxs)
+        <> prettyLetLhsUpdate steps
           <+> equals
           <+> align (pretty ve)
           </> letBody body
@@ -285,7 +284,7 @@ prettyAppExp _ (LetWith dest src idxs ve body _)
         <+> equals
         <+> pretty src
         <+> "with"
-        <+> brackets (commasep (map pretty idxs))
+        <+> prettyUpdate steps
         <+> "="
         <+> align (pretty ve)
         </> letBody body
@@ -308,6 +307,12 @@ prettyAppExp p (Apply f args _) =
   parensIf (p >= 10) $
     prettyExp 0 f
       <+> hsep (map (prettyExp 10 . snd) $ NE.toList args)
+
+prettyLetLhsUpdate :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
+prettyLetLhsUpdate = mconcat . map pp
+  where
+    pp (UpdateStepSlice idxs) = brackets (commasep (map pretty idxs))
+    pp (UpdateStepField f) = "." <> pretty f
 
 instance (IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)
@@ -364,16 +369,10 @@ prettyExp _ (StringLit s _) =
 prettyExp _ (Project k e _ _) = prettyExp 11 e <> "." <> pretty k
 prettyExp _ (Negate e _) = "-" <> pretty e
 prettyExp _ (Not e _) = "!" <> pretty e
-prettyExp _ (Update src idxs ve _) =
+prettyExp _ (Update src steps ve _ _) =
   pretty src
     <+> "with"
-    <+> brackets (commasep (map pretty idxs))
-    <+> "="
-    <+> align (pretty ve)
-prettyExp _ (RecordUpdate src fs ve _ _) =
-  pretty src
-    <+> "with"
-    <+> mconcat (intersperse "." (map pretty fs))
+    <+> prettyUpdate steps
     <+> "="
     <+> align (pretty ve)
 prettyExp _ (Assert e1 e2 _ _) =
@@ -391,12 +390,12 @@ prettyExp _ (OpSectionLeft binop _ x _ _ _) =
   parens $ pretty x <+> ppBinOp binop
 prettyExp _ (OpSectionRight binop _ x _ _ _) =
   parens $ ppBinOp binop <+> pretty x
-prettyExp _ (ProjectSection fields _ _) =
-  parens $ mconcat $ map p fields
+prettyExp _ (UpdateSection steps _ _) =
+  parens $ mconcat $ zipWith p [(0 :: Int) ..] steps
   where
-    p name = "." <> pretty name
-prettyExp _ (IndexSection idxs _ _) =
-  parens $ "." <> brackets (commasep (map pretty idxs))
+    p _ (UpdateStepField name) = "." <> pretty name
+    p 0 (UpdateStepSlice idxs) = "." <> brackets (commasep (map pretty idxs))
+    p _ (UpdateStepSlice idxs) = brackets (commasep (map pretty idxs))
 prettyExp p (Constr n cs t _) =
   parensIf (p >= 10) $
     "#" <> pretty n <+> sep (map (prettyExp 10) cs) <> prettyInst t
@@ -410,6 +409,16 @@ prettyExp i (AppExp e res)
         </> "@"
         <> parens (pretty t <> "," <+> brackets (commasep $ map prettyName ext))
   | otherwise = prettyAppExp i e
+
+prettyUpdate :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
+prettyUpdate = mconcat . zipWith pp [0 :: Int ..]
+  where
+    pp _ (UpdateStepSlice idxs) =
+      brackets (commasep (map pretty idxs))
+    pp 0 (UpdateStepField f) =
+      pretty f
+    pp _ (UpdateStepField f) =
+      "." <> pretty f
 
 instance (IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pretty = prettyExp (-1)

@@ -482,7 +482,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` `qualsymbol` ")"
        : | "(" `qualsymbol` `exp` ")"
        : | "(" ( "." `field` )+ ")"
-       : | "(" "." `slice` ")"
+       : | "(" "." (`slice` | `fieldid`) (`slice` | "." `fieldid`) *  ")"
        : | "???"
    exp:   `atom`
       : | `exp` `qualsymbol` `exp`
@@ -497,15 +497,13 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
       : | "let" `size`* `pat` "=" `exp` "in" `exp`
-      : | "let" `name` `slice` "=" `exp` "in" `exp`
+      : | "let" `name` (`slice` | "." `fieldid`)+ "=" `exp` "in" `exp`
       : | "let" `name` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
-      : | "unsafe" `exp`
       : | "assert" `atom` `exp`
-      : | `exp` "with" `slice` "=" `exp`
-      : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
+      : | `exp` "with" (`slice` | `fieldid`) (`slice` | "." `fieldid`)*  "=" `exp`
       : | "match" `exp` ("case" `pat` "->" `exp`)+
    slice: "[" `index` ("," `index`)* [","] "]"
    field:   `fieldid` "=" `exp`
@@ -996,6 +994,13 @@ Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value
 of ``v`` must be an array of the proper size.  This notation is
 Syntactic sugar for ``let a = a with [i] = v in a``.
+
+``let r.f = v in body``
+.......................
+
+Write ``v`` to the field ``f`` of record ``r`` and evaluate ``body``.
+Nested field updates are written ``let r.f.g = v in body``.
+This notation is syntactic sugar for ``let r = r with f = v in body``.
 
 ``let f params... = e in body``
 ...............................

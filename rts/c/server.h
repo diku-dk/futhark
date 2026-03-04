@@ -19,6 +19,8 @@ typedef void (*store_fn)(const void*, FILE *, struct futhark_context*, void*);
 typedef int (*free_fn)(const void*, struct futhark_context*, void*);
 typedef int (*project_fn)(struct futhark_context*, void*, const void*);
 typedef int (*new_fn)(struct futhark_context*, void**, const void*[]);
+typedef int (*index_fn)(struct futhark_context*, void*, void*, const int64_t*);
+typedef const int64_t* (*shape_fn)(struct futhark_context*, const void*);
 
 struct field {
   const char *name;
@@ -33,10 +35,14 @@ struct record {
 };
 
 struct type {
+  int rank;
+  const char *elem_type; // Only set if rank > 0
   const char *name;
   restore_fn restore;
   store_fn store;
   free_fn free;
+  index_fn index;
+  shape_fn shape;
   const void *aux;
   const struct record *record;
 };
@@ -731,6 +737,68 @@ void cmd_new(struct server_state *s, const char *args[]) {
   r->new(s->ctx, value_ptr(&to->value), value_ptrs);
 }
 
+void cmd_shape(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+  struct variable *v = get_variable(s, name);
+
+  if (v == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", name);
+    return;
+  }
+
+  const struct type *t = v->value.type;
+
+  int64_t r = t->rank;
+
+  if (r != 0) {
+    const int64_t *shape = t->shape(s->ctx, v->value.value.v_ptr);
+
+    for (int64_t i = 0; i < r; i++) {
+      printf("%ld\n", shape[i]);
+    }
+  }
+}
+
+void cmd_index(struct server_state *s, const char *args[]) {
+  const char *v0_name = get_arg(args, 0);
+  const char *v1_name = get_arg(args, 1);
+  struct variable *v1 = get_variable(s, v1_name);
+
+  if (v1 == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", v1_name);
+    return;
+  }
+
+  const struct type *t1 = v1->value.type;
+
+  int64_t r = t1->rank;
+  int64_t *is = alloca(r * sizeof(int64_t));
+
+  for (int64_t i = 0; i < r; i++) {
+    if (arg_exists(args, i+2)) {
+      is[i] = atoi(get_arg(args, i+2));
+    } else {
+      failure();
+      printf("%d indexes expected.\n", (int)r);
+      return;
+    }
+  }
+
+  const struct type *t0 = get_type(s, t1->elem_type);
+  struct variable *v0 = create_variable(s, v0_name, t0);
+
+  if (v0 == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", v0_name);
+    return;
+  }
+
+  int err = t1->index(s->ctx, value_ptr(&v0->value), v1->value.value.v_ptr, is);
+  error_check(s, err);
+}
+
 void cmd_entry_points(struct server_state *s, const char *args[]) {
   (void)args;
   for (int i = 0; s->prog.entry_points[i].name; i++) {
@@ -841,6 +909,10 @@ void process_line(struct server_state *s, char *line) {
     cmd_new(s, tokens+1);
   } else if (strcmp(command, "project") == 0) {
     cmd_project(s, tokens+1);
+  } else if (strcmp(command, "shape") == 0) {
+    cmd_shape(s, tokens+1);
+  } else if (strcmp(command, "index") == 0) {
+    cmd_index(s, tokens+1);
   } else if (strcmp(command, "entry_points") == 0) {
     cmd_entry_points(s, tokens+1);
   } else if (strcmp(command, "types") == 0) {

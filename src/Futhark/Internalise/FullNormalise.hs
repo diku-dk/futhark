@@ -198,17 +198,17 @@ getOrdering _ (Not e loc) = do
 getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
   nameExp final $ Constr n es' ty loc
-getOrdering final (Update eb slice eu loc) = do
+getOrdering final (Update eb steps eu ty loc) = do
+  steps' <- mapM onStep steps
   eu' <- getOrdering False eu
-  slice' <- astMap mapper slice
   eb' <- getOrdering False eb
-  nameExp final $ Update eb' slice' eu' loc
+  nameExp final $ Update eb' steps' eu' ty loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
-getOrdering final (RecordUpdate eb ns eu ty loc) = do
-  eb' <- getOrdering False eb
-  eu' <- getOrdering False eu
-  nameExp final $ RecordUpdate eb' ns eu' ty loc
+    onStep (UpdateStepSlice slice) =
+      UpdateStepSlice <$> astMap mapper slice
+    onStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 getOrdering final (Lambda params body mte ret loc) = do
   body' <- transformBody body
   nameExp final $ Lambda params body' mte ret loc
@@ -240,37 +240,42 @@ getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (
       | Named p <- xp, p == vn = Just $ ExpSubst x
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
-getOrdering final (ProjectSection names (Info ty) loc) = do
+getOrdering final (UpdateSection steps (Info ty) loc) = do
+  steps' <- mapM transformStep steps
   xn <- newVName "x"
   let (xty, RetType dims ret) = case ty of
         Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
-        _ -> error $ "not a function type for project section: " ++ prettyString ty
+        _ -> error $ "not a function type for section update: " ++ prettyString ty
       x = Var (qualName xn) (Info $ toStruct xty) mempty
-      body = foldl project x names
-  nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret)) loc
-  where
-    project e field =
-      case typeOf e of
-        Scalar (Record fs)
-          | Just t <- M.lookup field fs ->
-              Project field e (Info t) mempty
-        t ->
-          error $
-            "desugar ProjectSection: type "
-              ++ prettyString t
-              ++ " does not have field "
-              ++ prettyString field
-getOrdering final (IndexSection slice (Info ty) loc) = do
-  slice' <- astMap mapper slice
-  xn <- newVName "x"
-  let (xty, RetType dims ret) = case ty of
-        Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
-        _ -> error $ "not a function type for index section: " ++ prettyString ty
-      x = Var (qualName xn) (Info $ toStruct xty) mempty
-      body = AppExp (Index x slice' loc) (Info (AppRes (toStruct ret) []))
+      body = fst $ foldl applyStep (x, toStruct xty) steps'
   nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret)) loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
+
+    transformStep (UpdateStepField f) =
+      pure $ UpdateStepField f
+    transformStep (UpdateStepSlice slice) =
+      UpdateStepSlice <$> astMap mapper slice
+
+    applyStep (e, t) (UpdateStepField field) =
+      case t of
+        Scalar (Record fs)
+          | Just t' <- M.lookup field fs ->
+              (Project field e (Info t') mempty, t')
+        _ ->
+          error $
+            "desugar UpdateSection: type "
+              ++ prettyString t
+              ++ " does not have field "
+              ++ prettyString field
+    applyStep (e, t) (UpdateStepSlice slice) =
+      let t' = stripArray (fixedDims slice) t
+          e' = AppExp (Index e slice loc) (Info (AppRes t' []))
+       in (e', t')
+
+    fixedDims = length . filter isFix
+    isFix DimFix {} = True
+    isFix _ = False
 getOrdering _ (Ascript e _ _) = getOrdering False e
 getOrdering final (AppExp (Apply f args loc) resT) = do
   args' <-
@@ -327,16 +332,20 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
   where
     isOr = baseName (qualLeaf op) == "||"
     isAnd = baseName (qualLeaf op) == "&&"
-getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body _) _) = do
+getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) steps e body _) _) = do
+  steps' <- mapM onStep steps
   e' <- getOrdering False e
-  slice' <- astMap mapper slice
-  -- Carefully synthesize a location that does not have the body in it -
-  -- this is so profiling information will be more precise.
   let loc' = srcspan dloc e
-  addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc')
+  addBind $
+    PatBind
+      []
+      (Id dest dty dloc)
+      (Update (Var (qualName src) sty sloc) steps' e' (Info (unInfo sty)) loc')
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
+    onStep (UpdateStepSlice slice) = UpdateStepSlice <$> astMap mapper slice
+    onStep (UpdateStepField f) = pure $ UpdateStepField f
 getOrdering final (AppExp (Index e slice loc) resT) = do
   e' <- getOrdering False e
   slice' <- astMap mapper slice

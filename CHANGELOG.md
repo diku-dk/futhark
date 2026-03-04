@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* New notation: `let x.f = y in z` as a shortcut for `let x = x with f = y in
+  z`, by Aziz Rmadi. (#1160)
+
+* Array and field updates can now be chained, e.g., `x with [i].f = y`,
+  including in operator sections. Work by Aziz Rmadi.
+
+* New server protocol commands: `index` and `shape`.
+
+* FutharkScript now supports (barely) array indexing.
+
+* `futhark autotune` now shows a progress bar when running in a terminal. Work
+  by Nader Rahhal.
+
 ### Removed
 
 ### Changed
@@ -22,6 +35,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Equality for `f16` in interpreter did not handle NaN correctly.
 
 * `f16` handling in `multicore` and `ispc` backends.
+
+* Opaque types in C API generated from record patterns in entry points. (#2371)
+
+* Regression in the unrolling of `map`.
+
+* Occasional duplication of entry points leading to compiler crash. (#2374)
 
 ## [0.25.35]
 

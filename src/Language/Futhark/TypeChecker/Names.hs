@@ -269,10 +269,11 @@ resolveExp (Project k e NoInfo loc) =
   Project k <$> resolveExp e <*> pure NoInfo <*> pure loc
 resolveExp (Constr k es NoInfo loc) =
   Constr k <$> mapM resolveExp es <*> pure NoInfo <*> pure loc
-resolveExp (Update e1 slice e2 loc) =
-  Update <$> resolveExp e1 <*> resolveSlice slice <*> resolveExp e2 <*> pure loc
-resolveExp (RecordUpdate e1 fs e2 NoInfo loc) =
-  RecordUpdate <$> resolveExp e1 <*> pure fs <*> resolveExp e2 <*> pure NoInfo <*> pure loc
+resolveExp (Update e1 steps e2 NoInfo loc) =
+  Update <$> resolveExp e1 <*> mapM resolveStep steps <*> resolveExp e2 <*> pure NoInfo <*> pure loc
+  where
+    resolveStep (UpdateStepSlice slice) = UpdateStepSlice <$> resolveSlice slice
+    resolveStep (UpdateStepField f) = pure $ UpdateStepField f
 resolveExp (OpSection v NoInfo loc) =
   OpSection <$> resolveQualName v loc <*> pure NoInfo <*> pure loc
 resolveExp (OpSectionLeft v info1 e info2 info3 loc) =
@@ -291,10 +292,11 @@ resolveExp (OpSectionRight v info1 e info2 info3 loc) =
     <*> pure info2
     <*> pure info3
     <*> pure loc
-resolveExp (ProjectSection ks info loc) =
-  pure $ ProjectSection ks info loc
-resolveExp (IndexSection slice info loc) =
-  IndexSection <$> resolveSlice slice <*> pure info <*> pure loc
+resolveExp (UpdateSection steps info loc) =
+  UpdateSection <$> mapM resolveStep steps <*> pure info <*> pure loc
+  where
+    resolveStep (UpdateStepField f) = pure $ UpdateStepField f
+    resolveStep (UpdateStepSlice slice) = UpdateStepSlice <$> resolveSlice slice
 resolveExp (Ascript e te loc) =
   Ascript <$> resolveExp e <*> resolveTypeExp te <*> pure loc
 resolveExp (Coerce e te info loc) =
@@ -354,14 +356,14 @@ resolveAppExp (LetFun (fname, fnameloc) (tparams, params, ret, NoInfo, fbody) bo
   bindSpaced1 Term fname fnameloc $ \fname' -> do
     body' <- resolveExp body
     pure $ LetFun (fname', fnameloc) (tparams', params', ret', NoInfo, fbody') body' loc
-resolveAppExp (LetWith (Ident dst _ dstloc) (Ident src _ srcloc) slice e1 e2 loc) = do
+resolveAppExp (LetWith (Ident dst _ dstloc) (Ident src _ srcloc) steps e1 e2 loc) = do
   src' <- Ident <$> resolveName src srcloc <*> pure NoInfo <*> pure srcloc
   e1' <- resolveExp e1
-  slice' <- resolveSlice slice
+  steps' <- mapM resolveUpdateStep steps
   bindSpaced1 Term dst loc $ \dstv -> do
     let dst' = Ident dstv NoInfo dstloc
     e2' <- resolveExp e2
-    pure $ LetWith dst' src' slice' e1' e2' loc
+    pure $ LetWith dst' src' steps' e1' e2' loc
 resolveAppExp (BinOp (f, floc) finfo (e1, info1) (e2, info2) loc) = do
   f' <- resolveQualName f floc
   e1' <- resolveExp e1
@@ -390,6 +392,14 @@ resolveAppExp (Loop sizes pat loopinit form body loc) = do
       cond' <- resolveExp cond
       body' <- resolveExp body
       pure $ Loop sizes pat' e' (While cond') body' loc
+
+resolveUpdateStep ::
+  UpdateStep NoInfo Name ->
+  TypeM (UpdateStep NoInfo VName)
+resolveUpdateStep (UpdateStepSlice slice) =
+  UpdateStepSlice <$> resolveSlice slice
+resolveUpdateStep (UpdateStepField f) =
+  pure $ UpdateStepField f
 
 resolveSlice :: SliceBase NoInfo Name -> TypeM (SliceBase NoInfo VName)
 resolveSlice = mapM onDimIndex

@@ -36,6 +36,11 @@ let
 
           language-wgsl =
             haskellPackagesOld.callCabal2nix "language-wgsl" ./language-wgsl {};
+          lsp =
+            haskellPackagesNew.callPackage ./nix/lsp.nix { };
+
+          lsp-types =
+            haskellPackagesNew.callPackage ./nix/lsp-types.nix { };
 
           futhark =
             # callCabal2Nix does not do a great job at determining

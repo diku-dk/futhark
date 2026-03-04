@@ -159,9 +159,8 @@ hoistLoopInvariantLoopParams vtable pat aux (merge, form, loopbody) = do
         (invariant, explpat', (mergeParam, mergeInit) : merge', resExp : resExps)
 
     allExistentialInvariant namesOfInvariant mergeParam =
-      all (invariantOrNotMergeParam namesOfInvariant) $
-        namesToList $
-          freeIn mergeParam `namesSubtract` oneName (paramName mergeParam)
+      allNames (invariantOrNotMergeParam namesOfInvariant) $
+        freeIn mergeParam `namesSubtract` oneName (paramName mergeParam)
     invariantOrNotMergeParam namesOfInvariant name =
       (name `notNameIn` namesOfLoopParams)
         || (name `nameIn` namesOfInvariant)
