@@ -228,11 +228,12 @@ transformScalarStms ::
   [VName] ->
   Builder GPU DistEnv
 transformScalarStms segments env inps distres stms res = do
+  traceM "scalarstmt received ****\n" 
   vs <- letTupExp "scalar_dist" <=< renameExp <=< segMap segments $ \is -> do
     readInputs segments env (toList is) inps
     addStms $ fmap soacsStmToGPU stms
     pure $ subExpsRes $ map Var res
-  traceM $ "scalarstmt done" ++ prettyString stms 
+  traceM $ "scalarstmt done\n" ++ prettyString stms 
   pure $ insertReps (zip (map distResTag distres) $ map Regular vs) env
 
 transformScalarStm ::
@@ -763,6 +764,32 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             letExp (baseName v <> "_tr") . BasicOp $
               Rearrange v ([0 .. r - 1] ++ map (+ r) perm)
           pure $ insertRegulars [distResTag res] [v'] env
+    Scratch pt dims
+      | not $ any (isVariant inps env) dims -> do
+          -- All dims are invariant result is regular across segments.
+          traceM $ "All scratch dims invariant, making regular: " ++ prettyString dims
+          v' <-
+            letExp "scratch" . BasicOp $
+              Scratch pt (shapeDims (segmentsShape segments) ++ dims)
+          pure $ insertRegulars [distResTag res] [v'] env
+      | [n] <- dims -> do
+          ns <- dataArr segments env inps n
+          (_n, offsets, m) <- exScanAndSum ns
+          flags <- genFlags m offsets
+          res_D <- letExp "scratch_D" $ BasicOp $ Scratch pt [m]
+          traceM $ "One scratch dim, res_D = " ++ prettyString res_D
+          pure $ insertIrregular ns flags offsets (distResTag res) res_D env
+      | otherwise -> do
+          dim_arrs <- mapM (dataArr segments env inps) dims
+          w <- arraySize 0 <$> lookupType (head dim_arrs)
+          ns <- letExp "scratch_sizes" <=< segMap (MkSolo w) $ \(MkSolo i) -> do
+            vals <- mapM (\arr -> letSubExp "d" =<< eIndex arr [eSubExp i]) dim_arrs
+            n <- letSubExp "n" <=< toExp $ product $ map pe64 vals
+            pure [subExpRes n]
+          (_n, offsets, m) <- exScanAndSum ns
+          flags <- genFlags m offsets
+          res_D <- letExp "scratch_D" $ BasicOp $ Scratch pt [m]
+          pure $ insertIrregular ns flags offsets (distResTag res) res_D env
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
     scalarCase =
@@ -882,8 +909,15 @@ onMapInputArr segments env inps ws_O ws_data p arr = do
                             irregularO = p_O
                           }
                   pure $ MapOther rep' elems_t
-            Regular _vs ->
-              undefined
+            Regular vs -> do
+              traceM $ "Input array " ++ prettyString arr ++ " is regular"
+              let inner_shape = arrayShape $ paramType p
+              vs_t <- lookupType vs
+              v <-
+                letExp (baseName arr <> "_reg_flat") . BasicOp . Reshape vs $
+                  reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
+              pure $ MapArray v (stripArray 1 vs_t)
+              -- undefined
     Nothing -> do
       arr_row_t <- rowType <$> lookupType arr
       arr_rep <-
@@ -1437,16 +1471,16 @@ transformDistStm segments env (DistStm inps res stm) = do
 
                   let free_in_body = namesToList $ freeIn body
                   traceM $ "Free variables in loop body: " ++ prettyString free_in_body
+                  free_sizes <- localScope (scopeOfDistInputs loop_new_inputs) $ foldMap freeIn <$> mapM lookupType (namesToList $ freeIn body)
+                  traceM $ "Free sizes in loop body: " ++ prettyString free_sizes
                   (ts, vs, reps) <- unzip3 <$> mapM (splitInput segments loop_new_inputs loop_env_local active_inds) free_in_body
                   let subset_inputs = do
                         (v, t, i) <- zip3 vs ts [0 ..]
                         pure (v, DistInput (ResTag i) t)
                       env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
                   let (subset_inputs', subset_dstms) = distributeBody scope num_data subset_inputs body
-
                   subset_body_res <- liftBody num_data subset_inputs' env_subset subset_dstms (bodyResult body)
                   subset_result_vs <- mapM (letExp "subset_result" <=< toExp . resSubExp) subset_body_res
-
                   let active_reps = resultToResReps (map declTypeOf old_loop_params) subset_result_vs
 
                   let mergeOneLifted t rep0 rep1 =
@@ -1515,7 +1549,7 @@ transformDistStm segments env (DistStm inps res stm) = do
 
                   pure $ merged_results ++ [SubExpRes mempty any_active]
               )
-              (scope <> build_scope <> scopeOfFParams old_loop_params)
+              (scope <> build_scope)
 
           let loop_body_gpu = Body () loop_body_stms loop_body_res
               loop_exp_gpu =
@@ -1531,6 +1565,9 @@ transformDistStm segments env (DistStm inps res stm) = do
               result_types = map ((\(DistType _ _ t) -> t) . distResType) res
               out_reps = resultToResReps result_types loop_out_vs'
           pure $ insertReps (zip (map distResTag res) out_reps) env
+    Let pat aux (WithAcc inputs lam) -> do
+      transformScalarStm segments env inps res $
+        Let pat aux (WithAcc inputs lam)
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
 -- helper to not mess up the tags when generating new ones for the loop parameters
