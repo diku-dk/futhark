@@ -268,7 +268,6 @@ seqScanLB scan_out i scan_ops kbody per_op_prefixes_var start chunk_length = do
             forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) ->
               copyDWIMFix (paramName px) [] (Var acc) vec_is
             forM_ (zip (yParams scan_op) pes) $ \(py, pe) ->
-              -- reading from output array
               copyDWIMFix (paramName py) [] (Var pe) (tvExp z : vec_is)
             compileStms mempty (bodyStms $ lamBody scan_op) $ do
               forM_ (zip (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(se, pe) ->
@@ -376,13 +375,13 @@ applyPostOp ::
   MulticoreGen ()
 applyPostOp pat scan_out map_out scan_ops post_op start chunk_length = do
   z <- dPrimV "z" (0 :: Imp.TExp Int64)
-  sWhile (tvExp z .<. tvExp chunk_length) $ do
-    let (scan_pars, map_pars) = splitAt (segBinOpResults scan_ops) $ lambdaParams $ segPostOpLambda post_op
-    dScope Nothing $
-      scopeOfLParams $
-        lambdaParams $
-          segPostOpLambda post_op
+  let (scan_pars, map_pars) = splitAt (segBinOpResults scan_ops) $ lambdaParams $ segPostOpLambda post_op
+  dScope Nothing $
+    scopeOfLParams $
+      lambdaParams $
+        segPostOpLambda post_op
 
+  sWhile (tvExp z .<. tvExp chunk_length) $ do
     sComment "bind scan results to post lambda params" $ do
       forM_ (zip scan_pars $ mconcat scan_out) $ \(par, acc) ->
         copyDWIMFix (paramName par) [] (Var acc) [tvExp z]
@@ -402,6 +401,8 @@ applyPostOp pat scan_out map_out scan_ops post_op start chunk_length = do
         sComment "write values" $
           forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
             copyDWIMFix (patElemName pe) [tvExp start + tvExp z] subexp []
+
+    z <-- tvExp z + 1
 
 nonsegmentedScan ::
   Pat LetDecMem ->
@@ -552,9 +553,9 @@ nonsegmentedScan
               seqScanLB scan_out i scan_ops kbody prefix_vars start chunk_length
           )
 
-        add64 block_idx work_index_loc_name (Imp.elements 0) 1
-
         applyPostOp pat scan_out map_out scan_ops post_op start chunk_length
+
+        add64 block_idx work_index_loc_name (Imp.elements 0) 1
 
     free_params <- freeParams fbody
     emit $ Imp.Op $ Imp.ParLoop "segmap" fbody free_params
