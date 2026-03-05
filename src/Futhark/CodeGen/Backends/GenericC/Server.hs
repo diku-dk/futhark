@@ -7,6 +7,7 @@ module Futhark.CodeGen.Backends.GenericC.Server
 where
 
 import Data.Bifunctor (first, second)
+import Data.List (unzip4)
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -122,16 +123,31 @@ cType manifest tname =
     Just (TypeOpaque ctype _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
     Nothing -> uncurry primAPIType $ scalarToPrim tname
 
+data Kind
+  = Scalar
+  -- TODO: Implement array functions for opaque arrays
+  | Array
+  | Record
+  | Sum
+
+cKind :: Kind -> String
+cKind Scalar      = "SCALAR"
+cKind Array       = "ARRAY"
+cKind Record      = "RECORD"
+cKind Sum         = "SUM"
+
 -- First component is forward declaration so we don't have to worry
 -- about ordering.
 typeBoilerplate :: Manifest -> (T.Text, Type) -> (C.Definition, C.Initializer, [C.Definition])
-typeBoilerplate _ (tname, TypeArray _ et rank ops) =
-  let type_name = typeStructName tname
+typeBoilerplate _ (tname, TypeArray c_type_name et rank ops) =
+  let element_type_name = typeStructName et
+      type_name = typeStructName tname
+      array_name = type_name <> "_array"
       aux_name = type_name <> "_aux"
       info_name = et <> "_info"
-      shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       array_new_wrap = arrayNew ops <> "_wrap"
       array_index_wrap = arrayIndex ops <> "_wrap"
+      shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       is_args = [[C.cexp|is[$int:i]|] | i <- [0 .. rank - 1]]
    in ( [C.cedecl|const struct type $id:type_name;|],
         [C.cinit|&$id:type_name|],
@@ -141,6 +157,19 @@ typeBoilerplate _ (tname, TypeArray _ et rank ops) =
                                        const typename int64_t* shape) {
                 return $id:(arrayNew ops)(ctx, p, $args:shape_args);
               }
+              int $id:array_index_wrap(struct futhark_context *ctx,
+                                       void *dest,
+                                       typename $id:c_type_name arr,
+                                       const typename int64_t *is) {
+                return $id:(arrayIndex ops)(ctx, dest, arr, $args:is_args);
+              }
+              const struct array $id:array_name = {
+                .rank = $int:rank,
+                .element_type = &$id:element_type_name,
+                .new = (typename array_new_fn)$id:array_new_wrap,
+                .shape = (typename array_shape_fn)$id:(arrayShape ops),
+                .index = (typename array_index_fn)$id:array_index_wrap,
+              };
               const struct array_aux $id:aux_name = {
                 .name = $string:(T.unpack tname),
                 .rank = $int:rank,
@@ -150,32 +179,23 @@ typeBoilerplate _ (tname, TypeArray _ et rank ops) =
                 .shape = (typename array_shape_fn)$id:(arrayShape ops),
                 .values = (typename array_values_fn)$id:(arrayValues ops)
               };
-              int $id:array_index_wrap(struct futhark_context *ctx,
-                                       void *dest,
-                                       void *arr,
-                                       const typename int64_t *is) {
-                return $id:(arrayIndex ops)(ctx, dest, arr, $args:is_args);
-              }
               const struct type $id:type_name = {
                 .name = $string:(T.unpack tname),
-                .rank = $int:rank,
-                .elem_type = $string:(T.unpack et),
                 .restore = (typename restore_fn)restore_array,
                 .store = (typename store_fn)store_array,
                 .free = (typename free_fn)free_array,
                 .aux = &$id:aux_name,
-                .record = NULL,
-                .index = (typename index_fn)$id:array_index_wrap,
-                .shape = (typename shape_fn)$id:(arrayShape ops)
+                .kind = $id:(cKind Array),
+                .info = &$id:array_name
               };|]
       )
 typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
   let type_name = typeStructName tname
       aux_name = type_name <> "_aux"
-      (record_edecls, record_init) = recordDefs type_name extra_ops
+      (transparent_edecls, transparent_init, kind) = transparentDefs type_name extra_ops
    in ( [C.cedecl|const struct type $id:type_name;|],
         [C.cinit|&$id:type_name|],
-        record_edecls
+        transparent_edecls
           ++ [C.cunit|
               const struct opaque_aux $id:aux_name = {
                 .store = (typename opaque_store_fn)$id:(opaqueStore ops),
@@ -184,16 +204,16 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
               };
               const struct type $id:type_name = {
                 .name = $string:(T.unpack tname),
-                .rank = 0,
                 .restore = (typename restore_fn)restore_opaque,
                 .store = (typename store_fn)store_opaque,
                 .free = (typename free_fn)free_opaque,
                 .aux = &$id:aux_name,
-                .record = $init:record_init
+                .kind = $id:(cKind kind),
+                .info = $init:transparent_init
               };|]
       )
   where
-    recordDefs type_name (Just (OpaqueRecord (RecordOps fields new))) =
+    transparentDefs type_name (Just (OpaqueRecord (RecordOps fields new))) =
       let new_wrap = new <> "_wrap"
           record_name = type_name <> "_record"
           fields_name = type_name <> "_fields"
@@ -223,9 +243,88 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
                .fields = $id:fields_name,
                .new = $id:new_wrap
              };|],
-            [C.cinit|&$id:record_name|]
+            [C.cinit|&$id:record_name|],
+            Record
           )
-    recordDefs _ _ = ([], [C.cinit|NULL|])
+    transparentDefs type_name (Just (OpaqueSum (SumOps variants variant))) =
+      let sum_name = type_name <> "_sum"
+          variants_name = type_name <> "_variants"
+          onType i type_tname =
+            let type_c_type = cType manifest type_tname
+                type_v = "v" <> show (i :: Int)
+             in ( [C.citem|const $ty:type_c_type $id:type_v =
+                            *(const $ty:type_c_type*)types[$int:i];|],
+                  [C.citem|$ty:type_c_type *$id:type_v =
+                            ($ty:type_c_type*)outs[$int:i];|],
+                  [C.cexp|$id:type_v|],
+                  [C.cinit|&$id:(typeStructName type_tname)|]
+                )
+          onVariant (SumVariant name variant_tnames new destruct) =
+            let new_wrap = new <> "_wrap"
+                destruct_wrap = destruct <> "_wrap"
+                types_name = type_name <> "_" <> name <> "_fields"
+                (get_types, get_outs, type_args, type_struct_names) = unzip4 $ zipWith onType [0..] variant_tnames
+             in ( [C.cinit|{.name = $string:(T.unpack name),
+                            .num_types = $int:(length variant_tnames),
+                            .types = $id:types_name,
+                            .new = $id:new_wrap,
+                            .destruct = $id:destruct_wrap
+                           }|],
+                  [C.cunit|
+                    const struct type *$id:types_name[] = {
+                      $inits:type_struct_names
+                    };
+                    int $id:new_wrap(struct futhark_context* ctx, void** outp, const void* types[]) {
+                      typename $id:c_type_name *out = (typename $id:c_type_name*) outp;
+                      $items:get_types
+                      return $id:new(ctx, out, $args:type_args);
+                    }
+                    int $id:destruct_wrap(struct futhark_context* ctx, const void* outs[], const void* inp) {
+                      const typename $id:c_type_name in = (const typename $id:c_type_name) inp;
+                      $items:get_outs
+                      return $id:destruct(ctx, $args:type_args, in);
+                    }|]
+                )
+            
+          (variant_inits, variant_wraps) = unzip $ map onVariant variants
+       in ( foldl1 (++) variant_wraps ++ [C.cunit|
+             const struct variant $id:variants_name[] = {
+               $inits:variant_inits
+             };
+             const struct sum $id:sum_name = {
+               .num_variants = $int:(length variants),
+               .variants = $id:variants_name,
+               .variant = (int (*)(struct futhark_context *, const void *))$id:variant
+             };|],
+            [C.cinit|&$id:sum_name|],
+            Sum
+          )
+    transparentDefs type_name (Just (OpaqueArray ops')) = opaqueArrayDefs type_name (opaqueArrayRank ops') (opaqueArrayElemType ops') (opaqueArrayShape ops') (opaqueArrayIndex ops')
+    transparentDefs type_name (Just (OpaqueRecordArray ops')) = opaqueArrayDefs type_name (recordArrayRank ops') (recordArrayElemType ops') (recordArrayShape ops') (recordArrayIndex ops')
+    transparentDefs _ _ = ([], [C.cinit|NULL|], Scalar)
+
+    opaqueArrayDefs type_name rank et shape index =
+      let array_name = type_name <> "_array"
+          element_type_name = typeStructName et
+          index_wrap = index <> "_wrap"
+          is_args = [[C.cexp|is[$int:i]|] | i <- [0 .. rank - 1]]
+       in ( [C.cunit|
+              int $id:index_wrap(struct futhark_context *ctx,
+                                       void *dest,
+                                       typename $id:c_type_name arr,
+                                       const typename int64_t *is) {
+                return $id:index(ctx, dest, arr, $args:is_args);
+              }
+              const struct array $id:array_name = {
+                .rank = $int:rank,
+                .element_type = &$id:element_type_name,
+                .new = NULL,
+                .shape = (typename array_shape_fn)$id:shape,
+                .index = (typename array_index_fn)$id:index_wrap,
+              };|],
+            [C.cinit|&$id:array_name|],
+            Array
+          )
 
 entryTypeBoilerplate :: Manifest -> ([C.Definition], [C.Initializer], [C.Definition])
 entryTypeBoilerplate manifest =
