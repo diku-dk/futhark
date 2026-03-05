@@ -246,6 +246,7 @@ library
       Futhark.Construct
       Futhark.Doc.Generator
       Futhark.Error
+      Futhark.Eval
       Futhark.Fmt.Printer
       Futhark.Fmt.Monad
       Futhark.FreshNames
@@ -304,6 +305,8 @@ library
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.ReplaceRecords
       Futhark.Internalise.TypesValues
+      Futhark.LSP.CodeLens
+      Futhark.LSP.CommandType
       Futhark.LSP.Compile
       Futhark.LSP.Diagnostic
       Futhark.LSP.Handlers
