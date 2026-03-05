@@ -17,5 +17,5 @@ def main (xs) =
                       in (i + 1, s'', ac')
                   in res)
                zs
-         in reduce (+) 0 some_res + x)
+         in reduce (+) 0 some_res)
       xs
