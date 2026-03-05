@@ -85,6 +85,9 @@ instance Aeson.FromJSON EvalLensData where
     (textDoc, line) <- parseJSON o
     pure $ EvalLensData textDoc line
 
+evalLensPrefix :: T.Text
+evalLensPrefix = "-- >>>"
+
 evalLensesFor :: Uri -> LspT () IO (Either Text [CodeLens])
 evalLensesFor file_uri = runExceptT $ do
   vfile <-
@@ -102,7 +105,7 @@ evalLensesFor file_uri = runExceptT $ do
     commentLines
       & map evalLens
   where
-    filterComment (i, line) = i <$ T.stripPrefix "-- >>>" line
+    filterComment (i, line) = i <$ T.stripPrefix evalLensPrefix line
     evalLens i =
       CodeLens
         { _command = Nothing,
@@ -164,9 +167,6 @@ execute bad =
 -- (currently there's only one)
 executeLens :: LensPayload -> Execute ()
 executeLens (EvalLensPayload payloadData) = executeEvalLens payloadData
-
-evalLensPrefix :: T.Text
-evalLensPrefix = "-- >>>"
 
 -- | Execute a Evaluation Lens
 executeEvalLens :: EvalLensData -> Execute ()
