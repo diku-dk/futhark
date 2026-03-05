@@ -33,6 +33,7 @@ import Language.LSP.Server
     runServer,
     type (<~>) (Iso),
   )
+import System.Exit
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stderr)
 
 -- | Run @futhark lsp@
@@ -41,7 +42,7 @@ main _prog _args = do
   state_mvar <- newIORef emptyState
   -- makes the lines appear in full in the logs
   hSetBuffering stderr LineBuffering
-  _ <-
+  code <-
     runServer $
       ServerDefinition
         { onConfigChange = const $ pure (),
@@ -53,13 +54,15 @@ main _prog _args = do
           interpretHandler = \env -> Iso (runLspT env) liftIO,
           options =
             defaultOptions
-              { optTextDocumentSync = Just syncOptions,
+              { optTextDocumentSync =
+                  Just syncOptions,
                 optExecuteCommandCommands =
-                  Just $
-                    map showText [minBound :: CommandType .. maxBound]
+                  Just $ map showText [minBound :: CommandType .. maxBound]
               }
         }
-  pure ()
+  case code of
+    0 -> exitSuccess
+    _ -> exitWith $ ExitFailure code
 
 syncOptions :: TextDocumentSyncOptions
 syncOptions =
