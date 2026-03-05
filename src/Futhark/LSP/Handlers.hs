@@ -7,20 +7,22 @@ module Futhark.LSP.Handlers (handlers) where
 
 import Colog.Core (logStringStderr, (<&))
 import Control.Lens ((^.))
-import Control.Monad.Except (MonadError (throwError), liftEither)
+import Control.Monad.Except (ExceptT, MonadError (throwError), liftEither, throwError)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Except (runExcept, runExceptT)
+import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Value (Array, String))
 import Data.Bifunctor (bimap, first)
 import Data.Function ((&))
 import Data.IORef (IORef)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
 import Futhark.Fmt.Printer (fmtToText)
 import Futhark.LSP.CodeLens qualified as CodeLens
-import Futhark.LSP.Command qualified as Command
+import Futhark.LSP.CommandType (CommandType (CodeLens))
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
@@ -46,6 +48,7 @@ import Language.LSP.Protocol.Types
     DocumentFormattingParams (DocumentFormattingParams),
     ErrorCodes (ErrorCodes_InvalidParams, ErrorCodes_InvalidRequest, ErrorCodes_ParseError),
     HoverParams (HoverParams),
+    LSPErrorCodes,
     Null (..),
     Position (Position, _character, _line),
     Range (Range, _end, _start),
@@ -55,8 +58,9 @@ import Language.LSP.Protocol.Types
     uriToFilePath,
     type (|?) (..),
   )
-import Language.LSP.Server (Handlers, LspM, getVirtualFile, notificationHandler, requestHandler)
+import Language.LSP.Server (Handlers, LspM, LspT, getVirtualFile, notificationHandler, requestHandler)
 import Language.LSP.VFS (file_text)
+import Text.Read (readMaybe)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
@@ -223,6 +227,19 @@ onDocumentCodeLensResolve =
           _code = InR ErrorCodes_InvalidParams
         }
 
+-- | Dispatch to the correct Command Handler
+executeCommand ::
+  Text ->
+  Maybe [Aeson.Value] ->
+  ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) ()
+executeCommand cmd_name cmd_params = case readMaybe $ T.unpack cmd_name of
+  Just CodeLens -> CodeLens.execute cmd_params
+  Nothing ->
+    throwError
+      ( "Unknown command name: " <> cmd_name,
+        InR ErrorCodes_InvalidRequest
+      )
+
 onWorkspaceExecuteCommandHandler :: Handlers (LspM ())
 onWorkspaceExecuteCommandHandler =
   requestHandler SMethod_WorkspaceExecuteCommand $ \request respond ->
@@ -230,7 +247,7 @@ onWorkspaceExecuteCommandHandler =
      in do
           let commandName = parameters ^. command
           let commandArgs = parameters ^. arguments
-          result <- runExceptT $ Command.execute commandName commandArgs
+          result <- runExceptT $ executeCommand commandName commandArgs
           respond $ bimap (uncurry failure) (const $ InR Null) result
   where
     failure message err =
