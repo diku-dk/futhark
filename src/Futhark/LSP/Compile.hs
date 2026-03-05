@@ -5,25 +5,19 @@
 module Futhark.LSP.Compile (tryTakeStateFromIORef, tryReCompile) where
 
 import Colog.Core (logStringStderr, (<&))
-import Control.Lens.Getter (view)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.IORef (IORef, readIORef, writeIORef)
-import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
-import Data.Text qualified as T
 import Futhark.Compiler.Program (LoadedProg, lpFilePaths, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
 import Futhark.LSP.State (State (..), emptyState, updateStaleContent, updateStaleMapping)
-import Futhark.LSP.Tool (computeMapping)
+import Futhark.LSP.Tool (computeMapping, transformVFS)
 import Language.Futhark.Warnings (listWarnings)
 import Language.LSP.Protocol.Types
   ( filePathToUri,
-    fromNormalizedFilePath,
     toNormalizedUri,
-    uriToNormalizedFilePath,
   )
 import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
-import Language.LSP.VFS (VFS, vfsMap, virtualFileText)
 
 -- | Try to take state from IORef, if it's empty, try to compile.
 tryTakeStateFromIORef :: IORef State -> Maybe FilePath -> LspT () IO State
@@ -89,20 +83,6 @@ tryCompile state (Just path) old_loaded_prog = do
       logStringStderr <& "Compilation failed, publishing diagnostics"
       publishErrorDiagnostics prog_error
       pure emptyState
-
--- | Transform VFS to a map of file paths to file contents.
--- This is used to pass the file contents to the compiler.
-transformVFS :: VFS -> M.Map FilePath T.Text
-transformVFS vfs =
-  M.foldrWithKey
-    ( \uri virtual_file acc ->
-        case uriToNormalizedFilePath uri of
-          Nothing -> acc
-          Just file_path ->
-            M.insert (fromNormalizedFilePath file_path) (virtualFileText virtual_file) acc
-    )
-    M.empty
-    (view vfsMap vfs)
 
 getLoadedProg :: State -> LoadedProg
 getLoadedProg state = fromMaybe noLoadedProg (stateProgram state)

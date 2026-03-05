@@ -482,7 +482,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` `qualsymbol` ")"
        : | "(" `qualsymbol` `exp` ")"
        : | "(" ( "." `field` )+ ")"
-       : | "(" "." `slice` ")"
+       : | "(" "." (`slice` | `fieldid`) (`slice` | "." `fieldid`) *  ")"
        : | "???"
    exp:   `atom`
       : | `exp` `qualsymbol` `exp`
@@ -497,16 +497,13 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
       : | "let" `size`* `pat` "=" `exp` "in" `exp`
-      : | "let" `name` `slice` "=" `exp` "in" `exp`
-      : | "let" `name` "." `fieldid` ("." `fieldid`)* "=" `exp` "in" `exp`
+      : | "let" `name` (`slice` | "." `fieldid`)+ "=" `exp` "in" `exp`
       : | "let" `name` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
-      : | "unsafe" `exp`
       : | "assert" `atom` `exp`
-      : | `exp` "with" `slice` "=" `exp`
-      : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
+      : | `exp` "with" (`slice` | `fieldid`) (`slice` | "." `fieldid`)*  "=" `exp`
       : | "match" `exp` ("case" `pat` "->" `exp`)+
    slice: "[" `index` ("," `index`)* [","] "]"
    field:   `fieldid` "=" `exp`

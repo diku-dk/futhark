@@ -244,6 +244,7 @@ Only an extremely limited subset of Futhark is supported:
    script_exp:   `script_fun` `script_exp`*
              : | "let" `script_pat` "=" `script_exp` "in" `script_exp`
              : | `script_atom` ( "." `fieldid` )*
+             : | `id` "[" `script_exp` ( "," `script_exp`)* "]"
    script_atom: `script_fun`
               : | "(" `script_exp` ")"
               : | "(" `script_exp` ( "," `script_exp` )+ ")"

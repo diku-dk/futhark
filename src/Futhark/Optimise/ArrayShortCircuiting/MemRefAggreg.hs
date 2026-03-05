@@ -314,7 +314,7 @@ aggSummaryLoopTotal _ _ _ _ (Set l)
 aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
   | Set ls <- translateAccessSummary scope_loop scals_loop access,
     nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
-    all inBeforeScope $ namesToList nms = do
+    allNames inBeforeScope nms =
       pure $ Set ls
   where
     inBeforeScope v =

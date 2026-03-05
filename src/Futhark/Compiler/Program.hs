@@ -4,6 +4,7 @@
 -- more high-level API.
 module Futhark.Compiler.Program
   ( readLibrary,
+    readLibraryExceptKnown,
     readUntypedLibrary,
     Imports,
     FileModule (..),
@@ -441,13 +442,25 @@ readLibrary ::
   [E.Name] ->
   -- | The files to read.
   [FilePath] ->
+  IO (Either (NE.NonEmpty ProgError) (Warnings, Imports, VNameSource))
+readLibrary extra_eps fps = readLibraryExceptKnown extra_eps fps M.empty
+
+-- | Read and type-check some Futhark files.
+readLibraryExceptKnown ::
+  -- | Extra functions that should be marked as entry points; only
+  -- applies to the immediate files, not any imports imported.
+  [E.Name] ->
+  -- | The files to read.
+  [FilePath] ->
+  -- | Files which are already cached
+  VFS ->
   IO (Either (NE.NonEmpty ProgError) (E.Warnings, Imports, VNameSource))
-readLibrary extra_eps fps =
+readLibraryExceptKnown extra_eps fps vfs =
   ( fmap frob
       . typeCheckProg mempty (lpNameSource noLoadedProg)
       <=< fmap (setEntryPoints (E.defaultEntryPoint : extra_eps) fps)
   )
-    <$> readUntypedLibraryExceptKnown [] M.empty fps
+    <$> readUntypedLibraryExceptKnown [] vfs fps
   where
     frob (y, z) = (foldMap (cfWarnings . lfMod) y, asImports y, z)
 
