@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark lsp` supports running evaluation comments in the interpreter,
     implemented by VegOwOtenks.
-    
+
 * New notation: `let x.f = y in z` as a shortcut for `let x = x with f = y in
   z`, by Aziz Rmadi. (#1160)
 
