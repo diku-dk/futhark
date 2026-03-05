@@ -1,22 +1,28 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE ExplicitNamespaces #-}
 
 -- | The handlers exposed by the language server.
 module Futhark.LSP.Handlers (handlers) where
 
 import Colog.Core (logStringStderr, (<&))
 import Control.Lens ((^.))
-import Control.Monad.Except (MonadError (throwError), liftEither)
+import Control.Monad.Except (ExceptT, MonadError (throwError), liftEither, throwError)
 import Control.Monad.Trans (lift)
-import Control.Monad.Trans.Except (runExceptT)
+import Control.Monad.Trans.Except (runExcept, runExceptT)
+import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Value (Array, String))
-import Data.Bifunctor (first)
+import Data.Bifunctor (bimap, first)
 import Data.Function ((&))
-import Data.IORef
+import Data.IORef (IORef)
 import Data.Proxy (Proxy (..))
+import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
 import Futhark.Fmt.Printer (fmtToText)
+import Futhark.LSP.CodeLens qualified as CodeLens
+import Futhark.LSP.CommandType (CommandType (CodeLens))
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
@@ -24,11 +30,37 @@ import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
-import Language.LSP.Protocol.Lens (HasUri (uri))
+import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), arguments, command, line, params, range, start)
 import Language.LSP.Protocol.Message
+  ( Method (..),
+    SMethod (..),
+    TNotificationMessage (TNotificationMessage),
+    TRequestMessage (TRequestMessage),
+    TResponseError (TResponseError, _code, _message, _xdata),
+  )
 import Language.LSP.Protocol.Types
-import Language.LSP.Server (Handlers, LspM, getVirtualFile, notificationHandler, requestHandler)
+  ( ClientCapabilities,
+    CodeLens,
+    Definition (Definition),
+    DefinitionParams (DefinitionParams),
+    DidChangeTextDocumentParams (DidChangeTextDocumentParams),
+    DidSaveTextDocumentParams (DidSaveTextDocumentParams),
+    DocumentFormattingParams (DocumentFormattingParams),
+    ErrorCodes (ErrorCodes_InvalidParams, ErrorCodes_InvalidRequest, ErrorCodes_ParseError),
+    HoverParams (HoverParams),
+    LSPErrorCodes,
+    Null (..),
+    Position (Position, _character, _line),
+    Range (Range, _end, _start),
+    TextEdit (TextEdit, _newText, _range),
+    Uri (Uri),
+    toNormalizedUri,
+    uriToFilePath,
+    type (|?) (..),
+  )
+import Language.LSP.Server (Handlers, LspM, LspT, getVirtualFile, notificationHandler, requestHandler)
 import Language.LSP.VFS (file_text)
+import Text.Read (readMaybe)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
@@ -158,6 +190,73 @@ onDocumentFormattingHandler =
           _code = InR ErrorCodes_InvalidParams
         }
 
+onDocumentCodeLenses :: Handlers (LspM ())
+onDocumentCodeLenses =
+  requestHandler SMethod_TextDocumentCodeLens $ \request respond ->
+    let textDocUri = request ^. params . textDocument . uri
+     in do
+          logStringStderr <& ("textDocument/CodeLens for " ++ show textDocUri)
+          eitherLenses <- CodeLens.evalLensesFor textDocUri
+          respond $ bimap failure success eitherLenses
+  where
+    success :: [CodeLens] -> [CodeLens] |? Null
+    success = InL
+
+    failure message =
+      TResponseError
+        { _xdata = Nothing,
+          _message = message,
+          _code = InR ErrorCodes_InvalidRequest
+        }
+
+onDocumentCodeLensResolve :: Handlers (LspM ())
+onDocumentCodeLensResolve =
+  requestHandler SMethod_CodeLensResolve $ \request respond ->
+    let codeLens = request ^. params
+        codeLensLine = codeLens ^. (range . start . line)
+     in do
+          logStringStderr <& ("Resolving code lens on line " ++ show codeLensLine)
+          let result = runExcept $ CodeLens.resolve codeLens
+          respond . first failure $ result
+  where
+    failure :: Text -> TResponseError Method_CodeLensResolve
+    failure text =
+      TResponseError
+        { _xdata = Nothing,
+          _message = text,
+          _code = InR ErrorCodes_InvalidParams
+        }
+
+-- | Dispatch to the correct Command Handler
+executeCommand ::
+  Text ->
+  Maybe [Aeson.Value] ->
+  ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) ()
+executeCommand cmd_name cmd_params = case readMaybe $ T.unpack cmd_name of
+  Just CodeLens -> CodeLens.execute cmd_params
+  Nothing ->
+    throwError
+      ( "Unknown command name: " <> cmd_name,
+        InR ErrorCodes_InvalidRequest
+      )
+
+onWorkspaceExecuteCommandHandler :: Handlers (LspM ())
+onWorkspaceExecuteCommandHandler =
+  requestHandler SMethod_WorkspaceExecuteCommand $ \request respond ->
+    let parameters = request ^. params
+     in do
+          let commandName = parameters ^. command
+          let commandArgs = parameters ^. arguments
+          result <- runExceptT $ executeCommand commandName commandArgs
+          respond $ bimap (uncurry failure) (const $ InR Null) result
+  where
+    failure message err =
+      TResponseError
+        { _xdata = Nothing,
+          _message = message,
+          _code = err
+        }
+
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
@@ -167,11 +266,14 @@ handlers state_mvar _ =
     [ onInitializeHandler,
       onDocumentOpenHandler,
       onDocumentCloseHandler,
+      onDocumentCodeLenses,
+      onDocumentCodeLensResolve,
       onDocumentFormattingHandler,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,
       goToDefinitionHandler state_mvar,
       onHoverHandler state_mvar,
-      onWorkspaceDidChangeConfiguration state_mvar
+      onWorkspaceDidChangeConfiguration state_mvar,
+      onWorkspaceExecuteCommandHandler
     ]
