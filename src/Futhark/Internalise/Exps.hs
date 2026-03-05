@@ -777,24 +777,23 @@ internaliseExp desc (E.Update src [E.UpdateStepField field] ve _ loc) = locating
            in pure $ bef ++ ve_vals ++ aft
     replace _ _ ve_vals _ = pure ve_vals
 internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
-  src_vals <- internaliseExp desc src
+  src_vals <- internaliseExpToVars desc src
   ve_vals <- internaliseExp "update_val" ve
   lowerPath (E.typeOf src) src_vals steps ve_vals
   where
     lowerPath ::
       E.StructType ->
-      [I.SubExp] ->
+      [I.VName] ->
       [E.UpdateStep Info VName] ->
       [I.SubExp] ->
       InternaliseM [I.SubExp]
     lowerPath _ _ [] new_vals =
       pure new_vals
-    lowerPath base_t base_vals (E.UpdateStepField f : rest) new_vals = do
-      (before, field_vals, after, field_t) <- splitField base_t f base_vals
+    lowerPath base_t base_vs (E.UpdateStepField f : rest) new_vals = do
+      (before, field_vals, after, field_t) <- splitField base_t f base_vs
       updated_field_vals <- lowerPath field_t field_vals rest new_vals
-      pure $ before ++ updated_field_vals ++ after
-    lowerPath base_t base_vals (E.UpdateStepSlice slice : rest) new_vals = do
-      base_vs <- mapM asVar base_vals
+      pure $ map I.Var before ++ updated_field_vals ++ map I.Var after
+    lowerPath base_t base_vs (E.UpdateStepSlice slice : rest) new_vals = do
       base_dims <- case base_vs of
         v : _ -> I.arrayDims <$> lookupType v
         _ -> pure []
@@ -803,7 +802,7 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
 
       indexed_vals <- certifying cs $ forM base_vs $ \v -> do
         v_t <- lookupType v
-        letSubExp "update_indexed" $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
+        letExp "update_indexed" $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
 
       let inner_t = indexType base_t slice
       updated_indexed_vals <- lowerPath inner_t indexed_vals rest new_vals
@@ -825,8 +824,8 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
     splitField ::
       E.StructType ->
       Name ->
-      [I.SubExp] ->
-      InternaliseM ([I.SubExp], [I.SubExp], [I.SubExp], E.StructType)
+      [I.VName] ->
+      InternaliseM ([I.VName], [I.VName], [I.VName], E.StructType)
     splitField (E.Scalar (E.Record m)) f vals
       | Just field_t <- M.lookup f m =
           let i =
@@ -842,10 +841,6 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
           ++ prettyString f
           ++ " in type "
           ++ prettyString t
-
-    asVar :: I.SubExp -> InternaliseM I.VName
-    asVar (I.Var v) = pure v
-    asVar se = letExp "update_src" $ I.BasicOp $ I.SubExp se
 
     indexType :: E.StructType -> [E.DimIndex] -> E.StructType
     indexType (E.Array u (E.Shape dims) et) idxs =
