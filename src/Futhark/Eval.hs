@@ -1,4 +1,13 @@
-module Futhark.Eval (InterpreterConfig (..), runExpr, interpreterConfig, newFutharkiState, EvalIO (..), AbortEvaluation (..), TraceEvaluation (..), EvalRecordRef (), runEvalRecordRef) where
+module Futhark.Eval
+  ( InterpreterConfig (..),
+    runExpr,
+    interpreterConfig,
+    newFutharkiState,
+    Evaluation (..),
+    EvalRecordRef (),
+    runEvalRecordRef,
+  )
+where
 
 import Control.Exception (IOException, catch)
 import Control.Monad (foldM, when, (<=<))
@@ -30,43 +39,37 @@ import Prettyprinter.Render.Terminal (AnsiStyle)
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.IO (stderr)
 
-class AbortEvaluation m where
+-- | The class of monads that can perform expression evaluation.
+class (Monad m) => Evaluation m where
   abort :: Doc AnsiStyle -> m b
-
-instance AbortEvaluation EvalIO where
-  abort :: Doc AnsiStyle -> EvalIO b
-  abort reason = EvalIO $ do
-    hPutDocLn stderr reason
-    exitWith $ ExitFailure 1
-
-instance AbortEvaluation EvalRecordRef where
-  abort :: Doc AnsiStyle -> EvalRecordRef b
-  abort = EvalRecordRef . throwError
-
-class TraceEvaluation m where
   trace :: Doc AnsiStyle -> m ()
 
-instance TraceEvaluation EvalIO where
-  trace :: Doc AnsiStyle -> EvalIO ()
-  trace = EvalIO . putDocLn
-
-instance (Monad m, TraceEvaluation m) => TraceEvaluation (ExceptT e m) where
+instance (Evaluation m) => Evaluation (ExceptT (Doc AnsiStyle) m) where
   trace :: Doc AnsiStyle -> ExceptT e m ()
   trace = lift . trace
 
-instance TraceEvaluation EvalRecordRef where
-  trace :: Doc AnsiStyle -> EvalRecordRef ()
-  trace message = EvalRecordRef $ do
-    messagesRef <- lift ask
-    liftIO $ modifyIORef' messagesRef (|> message)
+  abort = throwError
 
-newtype EvalIO a = EvalIO {runEvalIO :: IO a}
-  deriving (Functor, Applicative, Monad, MonadIO)
+instance Evaluation IO where
+  abort reason = do
+    hPutDocLn stderr reason
+    exitWith $ ExitFailure 1
+
+  trace = putDocLn
 
 newtype EvalRecordRef a
   = EvalRecordRef
       (ExceptT (Doc AnsiStyle) (ReaderT (IORef (Seq (Doc AnsiStyle))) IO) a)
   deriving (Functor, Applicative, Monad, MonadIO)
+
+instance Evaluation EvalRecordRef where
+  abort :: Doc AnsiStyle -> EvalRecordRef b
+  abort = EvalRecordRef . throwError
+
+  trace :: Doc AnsiStyle -> EvalRecordRef ()
+  trace message = EvalRecordRef $ do
+    messagesRef <- lift ask
+    liftIO $ modifyIORef' messagesRef (|> message)
 
 runEvalRecordRef ::
   IORef (Seq (Doc AnsiStyle)) ->
@@ -77,9 +80,11 @@ runEvalRecordRef msgRef (EvalRecordRef action) =
 
 newtype InterpreterState = InterpreterState (VNameSource, T.Env, I.Ctx)
 
--- Use parseExp, checkExp, then interpretExp.
+-- | Run an expression in the given interpreter state. The expression is parsed,
+-- type checked, and then run. Returns a prettyprinted result. Must be run in a
+-- monad that supports aborting and traces.
 runExpr ::
-  (Monad m, AbortEvaluation m, TraceEvaluation m) =>
+  (Evaluation m) =>
   InterpreterState ->
   T.Text ->
   m (Doc AnsiStyle)
@@ -113,7 +118,7 @@ interpreterConfig :: InterpreterConfig
 interpreterConfig = InterpreterConfig True Nothing
 
 newFutharkiState ::
-  (MonadIO m, TraceEvaluation m) =>
+  (MonadIO m, Evaluation m) =>
   InterpreterConfig ->
   Maybe FilePath ->
   VFS ->
@@ -151,7 +156,10 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
-runInterpreterNoBreak :: (TraceEvaluation m, Monad m) => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak ::
+  (Evaluation m) =>
+  F I.ExtOp a ->
+  m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err

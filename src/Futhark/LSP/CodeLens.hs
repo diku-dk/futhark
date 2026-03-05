@@ -26,7 +26,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
 import Futhark.Compiler.Program (VFS)
-import Futhark.Eval (AbortEvaluation (abort), InterpreterConfig (InterpreterConfig), newFutharkiState, runEvalRecordRef, runExpr)
+import Futhark.Eval (Evaluation (abort), InterpreterConfig (InterpreterConfig), newFutharkiState, runEvalRecordRef, runExpr)
 import Futhark.LSP.CommandType qualified as CommandType
 import Futhark.LSP.Tool (transformVFS)
 import Futhark.Util (showText)

@@ -7,8 +7,7 @@ import Control.Monad
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.Eval
-  ( EvalIO (runEvalIO),
-    InterpreterConfig (..),
+  ( InterpreterConfig (..),
     interpreterConfig,
     newFutharkiState,
     runExpr,
@@ -36,13 +35,13 @@ main = mainWithOptions interpreterConfig options "options... <exprs...>" run
 runExprs :: [String] -> InterpreterConfig -> IO ()
 runExprs exprs cfg = do
   let InterpreterConfig _ file = cfg
-  maybe_new_state <- runEvalIO $ newFutharkiState cfg file M.empty
+  maybe_new_state <- newFutharkiState cfg file M.empty
   interpreter_state <- case maybe_new_state of
     Left reason -> do
       hPutDocLn stderr reason
       exitWith $ ExitFailure 2
     Right s -> pure s
-  forM_ exprs $ \expr -> putDocLn =<< runEvalIO (runExpr interpreter_state $ T.pack expr)
+  forM_ exprs $ \expr -> putDocLn =<< runExpr interpreter_state (T.pack expr)
 
 options :: [FunOptDescr InterpreterConfig]
 options =
