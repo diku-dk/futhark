@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * New notation: `let x.f = y in z` as a shortcut for `let x = x with f = y in
   z`, by Aziz Rmadi. (#1160)
 
-* Array and field updates can now be chained, e.g., `x with [i].f = y`. Work by
-  Aziz Rmadi.
+* Array and field updates can now be chained, e.g., `x with [i].f = y`,
+  including in operator sections. Work by Aziz Rmadi.
 
 * New server protocol commands: `index` and `shape`.
 

@@ -293,12 +293,12 @@ instance Format UncheckedExp where
     addComments loc $ parens $ fmt x <+> fmtBinOp binop
   fmt (OpSectionRight binop _ x _ _ loc) =
     addComments loc $ parens $ fmtBinOp binop <+> fmt x
-  fmt (ProjectSection fields _ loc) =
-    addComments loc $ parens $ "." <> sep "." (fmt <$> fields)
-  fmt (IndexSection idxs _ loc) =
-    addComments loc $ parens ("." <> idxs')
+  fmt (UpdateSection steps _ loc) =
+    addComments loc $ parens $ mconcat (zipWith step [0 :: Int ..] steps)
     where
-      idxs' = brackets $ sep ("," <> space) $ map fmt idxs
+      step _ (UpdateStepField f) = "." <> fmt f
+      step 0 (UpdateStepSlice is) = "." <> brackets (sep ("," <> space) $ map fmt is)
+      step _ (UpdateStepSlice is) = brackets (sep ("," <> space) $ map fmt is)
   fmt (Constr n [] _ loc) =
     addComments loc $ "#" <> fmt n
   fmt (Constr n cs _ loc) =

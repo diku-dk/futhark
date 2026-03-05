@@ -390,12 +390,12 @@ prettyExp _ (OpSectionLeft binop _ x _ _ _) =
   parens $ pretty x <+> ppBinOp binop
 prettyExp _ (OpSectionRight binop _ x _ _ _) =
   parens $ ppBinOp binop <+> pretty x
-prettyExp _ (ProjectSection fields _ _) =
-  parens $ mconcat $ map p fields
+prettyExp _ (UpdateSection steps _ _) =
+  parens $ mconcat $ zipWith p [(0 :: Int) ..] steps
   where
-    p name = "." <> pretty name
-prettyExp _ (IndexSection idxs _ _) =
-  parens $ "." <> brackets (commasep (map pretty idxs))
+    p _ (UpdateStepField name) = "." <> pretty name
+    p 0 (UpdateStepSlice idxs) = "." <> brackets (commasep (map pretty idxs))
+    p _ (UpdateStepSlice idxs) = brackets (commasep (map pretty idxs))
 prettyExp p (Constr n cs t _) =
   parensIf (p >= 10) $
     "#" <> pretty n <+> sep (map (prettyExp 10) cs) <> prettyInst t
