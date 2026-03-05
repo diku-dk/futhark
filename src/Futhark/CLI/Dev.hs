@@ -201,6 +201,27 @@ passOption desc pass short long =
     )
     desc
 
+passOptionWithArg ::
+  String ->
+  (Maybe String -> UntypedPass) ->
+  String ->
+  [String] ->
+  String ->
+  String ->
+  FutharkOption
+passOptionWithArg desc makePass short long argName argDesc =
+  Option
+    short
+    long
+    ( OptArg
+        ( \arg -> Right $ \cfg ->
+            let pass = makePass arg
+             in cfg {futharkPipeline = Pipeline $ getFutharkPipeline cfg ++ [pass]}
+        )
+        argName
+    )
+    (desc ++ " " ++ argDesc)
+
 kernelsMemProg ::
   String ->
   UntypedPassState ->
@@ -271,6 +292,40 @@ typedPassOption getProg putProg pass short =
 soacsPassOption :: Pass SOACS.SOACS SOACS.SOACS -> String -> FutharkOption
 soacsPassOption =
   typedPassOption soacsProg SOACS
+
+typedPassOptionWithArg ::
+  (Checkable torep) =>
+  (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
+  (Prog torep -> UntypedPassState) ->
+  (Maybe String -> Either String (Pass fromrep torep)) ->
+  String ->
+  [String] ->
+  String ->
+  String ->
+  FutharkOption
+typedPassOptionWithArg getProg putProg makePass =
+  passOptionWithArg desc (UntypedPass . perform)
+  where
+    desc = case makePass Nothing of
+      Right pass -> passDescription pass
+      Left _ -> "Pass with argument"
+
+    perform arg s config = do
+      case makePass arg of
+        Left err -> externalErrorS err
+        Right pass -> do
+          prog <- getProg (passName pass) s
+          putProg <$> runPipeline (onePass pass) config prog
+
+soacsPassOptionWithArg ::
+  (Maybe String -> Either String (Pass SOACS.SOACS SOACS.SOACS)) ->
+  String ->
+  [String] ->
+  String ->
+  String ->
+  FutharkOption
+soacsPassOptionWithArg =
+  typedPassOptionWithArg soacsProg SOACS
 
 kernelsPassOption ::
   Pass GPU.GPU GPU.GPU ->
@@ -433,6 +488,12 @@ unstreamOption short =
 
     long = [passLongOption pass]
     pass = unstreamGPU
+
+parseGas :: Maybe String -> Either String (Maybe Int)
+parseGas Nothing = Right Nothing
+parseGas (Just s) = case reads s of
+  [(n, "")] -> Right (Just n)
+  _any -> Left $ "Invalid gas value: " <> s
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
@@ -641,7 +702,12 @@ commandLineOptions =
       (NoArg $ Right $ \opts -> opts {futharkCompilerMode = ToServer})
       "Generate a server executable.",
     typedPassOption soacsProg Seq firstOrderTransform "f",
-    soacsPassOption fuseSOACs "o",
+    soacsPassOptionWithArg
+      (fmap fuseSOACs . parseGas)
+      "o"
+      ["fuse"]
+      "GAS"
+      "(default: infinite, provide integer to limit)",
     soacsPassOption inlineAggressively [],
     soacsPassOption inlineConservatively [],
     soacsPassOption removeDeadFunctions [],
