@@ -8,6 +8,7 @@ import Control.Arrow ((>>>))
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (AllocationLimitExceeded (AllocationLimitExceeded), handle)
 import Control.Lens ((^.))
+import Control.Monad (void)
 import Control.Monad.Except (Except, ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.Trans (MonadIO (liftIO), lift)
 import Data.Aeson (FromJSON (parseJSON))
@@ -49,8 +50,7 @@ newtype LensPayload
 instance Aeson.ToJSON LensPayload where
   -- it is necessary to make sure that this mirror with @FromJSON@
   toJSON :: LensPayload -> Aeson.Value
-  toJSON = \case
-    EvalLensPayload payload -> payloadWithType "EvalLens" payload
+  toJSON (EvalLensPayload payload) = payloadWithType "EvalLens" payload
     where
       payloadWithType :: (Aeson.ToJSON a) => Text -> a -> Aeson.Value
       payloadWithType typ load =
@@ -145,27 +145,28 @@ type Execute a = ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) a
 
 -- | Decode the arguments
 execute :: Maybe [Aeson.Value] -> Execute ()
-execute = \case
-  Just [argument] -> case Aeson.fromJSON argument :: Aeson.Result LensPayload of
-    Aeson.Success payload -> executeLens payload
-    Aeson.Error msg ->
-      throwError
-        ( "Failed to decode CodeLens command argument: " <> T.pack msg,
-          InR ErrorCodes_InvalidParams
-        )
-  bad ->
+execute (Just [argument]) = case Aeson.fromJSON argument :: Aeson.Result LensPayload of
+  Aeson.Success payload -> executeLens payload
+  Aeson.Error msg ->
     throwError
-      ( "Expected exactly one argument for the CodeLens Command, got: "
-          <> showText bad,
+      ( "Failed to decode CodeLens command argument: " <> T.pack msg,
         InR ErrorCodes_InvalidParams
       )
+execute bad =
+  throwError
+    ( "Expected exactly one argument for the CodeLens Command, got: "
+        <> showText bad,
+      InR ErrorCodes_InvalidParams
+    )
 
 -- | Dispatch to the correct lens executor
 --
 -- (currently there's only one)
 executeLens :: LensPayload -> Execute ()
-executeLens = \case
-  EvalLensPayload payloadData -> executeEvalLens payloadData
+executeLens (EvalLensPayload payloadData) = executeEvalLens payloadData
+
+evalLensPrefix :: T.Text
+evalLensPrefix = "-- >>>"
 
 -- | Execute a Evaluation Lens
 executeEvalLens :: EvalLensData -> Execute ()
@@ -182,7 +183,7 @@ executeEvalLens (EvalLensData docUri line) = do
 
   -- check the line
   let lineText = R.toText . R.getLine (fromIntegral line) $ file ^. file_text
-  expressionText <- case T.stripPrefix "-- >>>" lineText of
+  expressionText <- case T.stripPrefix evalLensPrefix lineText of
     Nothing ->
       throwError
         ( "Specified line does not contain an evaluation comment",
@@ -197,15 +198,14 @@ executeEvalLens (EvalLensData docUri line) = do
 
   pure ()
   where
-    publishResult (result, traces) fileRope = do
-      _lspId <- lift $ sendRequest SMethod_WorkspaceApplyEdit workSpaceEditParams $ \case
-        Left _ -> pure ()
-        Right _ -> pure ()
-      pure ()
+    publishResult (result, traces) fileRope =
+      void . lift $
+        sendRequest SMethod_WorkspaceApplyEdit workSpaceEditParams $
+          const (pure ())
       where
         findResultLinesEnd i
           -- don't override other eval comments
-          | T.isPrefixOf "-- >>>" commentLine =
+          | T.isPrefixOf evalLensPrefix commentLine =
               i
           -- replace all output comments
           | T.isPrefixOf "-- " commentLine =
@@ -276,7 +276,7 @@ executeEvalLens (EvalLensData docUri line) = do
     performEvaluation currentVFS expressionText = do
       resultVar <- newEmptyMVar
       traceRef <- newIORef Seq.empty
-      _evaluationTid <- forkIO (putMVar resultVar =<< evaluationAction traceRef)
+      _evaluationTid <- forkIO $ putMVar resultVar =<< evaluationAction traceRef
       (,) <$> takeMVar resultVar <*> readIORef traceRef
       where
         setupLimits = do
