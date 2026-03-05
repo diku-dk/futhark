@@ -743,39 +743,6 @@ internaliseExp desc (E.Not e loc) = locating loc $ do
       letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) e'
     _ ->
       error "Futhark.Internalise.internaliseExp: non-int/bool type in Not"
-internaliseExp desc (E.Update src [E.UpdateStepSlice slice] ve _ loc) = locating loc $ do
-  ves <- internaliseExp "lw_val" ve
-  srcs <- internaliseExpToVars "src" src
-  src_dims <- case srcs of
-    src_v : _ -> I.arrayDims <$> lookupType src_v
-    _ -> pure []
-  (idxs', cs) <- internaliseSlice src_dims slice
-
-  let errormsg = errorMsg [ErrorString "Shape of slice does not match shape of value."]
-
-      comb sname ve' = do
-        sname_t <- lookupType sname
-        let full_slice = fullSlice sname_t idxs'
-            rowtype = sname_t `setArrayDims` sliceDims full_slice
-        ve'' <- ensureShape errormsg rowtype "lw_val_correct_shape" ve'
-        letInPlace desc sname full_slice $ BasicOp $ SubExp ve''
-
-  certifying cs $ map I.Var <$> zipWithM comb srcs ves
-internaliseExp desc (E.Update src [E.UpdateStepField field] ve _ loc) = locating loc $ do
-  src' <- internaliseExp desc src
-  ve' <- internaliseExp desc ve
-  replace (E.typeOf src) field ve' src'
-  where
-    replace (E.Scalar (E.Record m)) f ve_vals src_vals
-      | Just t <- M.lookup f m =
-          let i =
-                sum . map (internalisedTypeSize . snd) $
-                  takeWhile ((/= f) . fst) . sortFields $
-                    m
-              k = internalisedTypeSize t
-              (bef, _to_update, aft) = splitAt3 i k src_vals
-           in pure $ bef ++ ve_vals ++ aft
-    replace _ _ ve_vals _ = pure ve_vals
 internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
   src_vals <- internaliseExpToVars desc src
   ve_vals <- internaliseExp "update_val" ve
