@@ -131,6 +131,22 @@ any inputs), the type is prefixed by `*`.
 Clear all internal caches and counters maintained by the Futhark
 context.  Corresponds to :c:func:`futhark_context_clear_caches`.
 
+``kind`` *type*
+.........
+
+Print the kind of type *type*. Always one of:
+
+- ``primitive``
+- ``array``
+- ``record``
+- ``sum``
+- ``opaque``
+
+``type`` *v*
+.........
+
+Print type name of variable *v*.
+
 ``pause_profiling``
 ...................
 
@@ -165,6 +181,26 @@ note that this command prints *names* and not *integers*.
 
 Corresponds to :c:func:`futhark_get_tuning_param_class`.
 
+Array Commands
+~~~~~~~~~~~~~~
+
+``elemtype`` *v*
+....................
+
+Print the typename of the elements of array-typed variable *v*.
+
+``shape`` *v*
+....................
+
+Print the shape of array-typed variable *v* as space-separated integers.
+
+``index`` *v0* *v1* *i0* ... *iN-1*
+...................................
+
+Create a new variable *v0* whose value is the result of indexing the variable
+*v1*, which must be an array of rank *N*, at position *[i0]...[iN-1]*, where
+each *i* is an integer. Fails if the index is out of bounds.
+
 Record Commands
 ~~~~~~~~~~~~~~~
 
@@ -188,24 +224,39 @@ corresponding field types (the expected order is given by the
 ``project`` *to* *from* *field*
 ...............................
 
-Create a new variable *to* whose value is the field *field* of the
-record-typed variable *from*.
+Create a new variable *to* whose value is the field *field* of record-typed
+variable *from*.
 
-Array Commands
+Sum Commands
 ~~~~~~~~~~~~~~
 
-``shape`` *variable*
+``variants`` *type*
 ....................
 
-Print the shape of the given variable, with one line per dimension. Non-arrays
-print no lines, in the sense that they are considered 0-dimensional.
+If type *type* is a sum, print a each variant of the sum, followed by the
+typename of each value of the variant, in order. The lines of typenames are
+prefixed with a dash (``-``). The order of values is significant, as it is the
+one expected by the ``construct`` and ``destruct`` commands.
 
-``index`` *v0* *v1* *i0* ... *iN-1*
+``construct`` *v0* *type* *variant* *v1* ... *vN*
+....................
+
+Create a new variable *v0* of type *type*, which must be a sum type including a
+variant named *variant* containing *N* values. *v1* to *vN* are variables of
+the same types as the values held by the variant (the expected order is given by
+the ``variants`` command).
+
+``destruct`` *v0* *v1* .. *vN*
 ...................................
 
-Create a new variable *v0* whose value is the result of indexing the variable
-*v1*, which must be an array of rank *N*, at position *[i0]...[iN-1]*, where
-each *i* is an integer. Fails if the index is out of bounds.
+Copy the values held by an instance of a sum type, given in variable *v0*, to
+variables *v1* to *vN*, where N is the number of values stored in the variant
+of *v0* (the expected order is given by the ``variants`` command).
+
+``variant`` *v*
+....................
+
+Print the variant name of sum-typed variable *v*.
 
 Environment Variables
 ---------------------
