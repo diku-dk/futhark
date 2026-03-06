@@ -125,18 +125,18 @@ cType manifest tname =
 
 data Kind
   = Primitive
-  -- TODO: Implement array functions for opaque arrays
-  | Array
+  | -- TODO: Implement array functions for opaque arrays
+    Array
   | Record
   | Sum
   | Opaque
 
 cKind :: Kind -> C.Exp
 cKind Primitive = [C.cexp|PRIMITIVE|]
-cKind Array     = [C.cexp|ARRAY|]
-cKind Record    = [C.cexp|RECORD|]
-cKind Sum       = [C.cexp|SUM|]
-cKind Opaque    = [C.cexp|OPAQUE|]
+cKind Array = [C.cexp|ARRAY|]
+cKind Record = [C.cexp|RECORD|]
+cKind Sum = [C.cexp|SUM|]
+cKind Opaque = [C.cexp|OPAQUE|]
 
 -- First component is forward declaration so we don't have to worry
 -- about ordering.
@@ -265,7 +265,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
             let new_wrap = new <> "_wrap"
                 destruct_wrap = destruct <> "_wrap"
                 types_name = type_name <> "_" <> name <> "_fields"
-                (get_types, get_outs, type_args, type_struct_names) = unzip4 $ zipWith onType [0..] variant_tnames
+                (get_types, get_outs, type_args, type_struct_names) = unzip4 $ zipWith onType [0 ..] variant_tnames
              in ( [C.cinit|{.name = $string:(T.unpack name),
                             .num_types = $int:(length variant_tnames),
                             .types = $id:types_name,
@@ -287,9 +287,10 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
                       return $id:destruct(ctx, $args:type_args, in);
                     }|]
                 )
-            
+
           (variant_inits, variant_wraps) = unzip $ map onVariant variants
-       in ( foldl1 (++) variant_wraps ++ [C.cunit|
+       in ( foldl1 (++) variant_wraps
+              ++ [C.cunit|
              const struct variant $id:variants_name[] = {
                $inits:variant_inits
              };
