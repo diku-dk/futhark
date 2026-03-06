@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Occasional duplication of entry points leading to compiler crash. (#2374)
 
+* `futhark autotune` no longer tells you to report an issue when the underlying
+  program crashes. (#2388)
+
 ## [0.25.35]
 
 ### Added

@@ -1,6 +1,7 @@
 -- | @futhark autotune@
 module Futhark.CLI.Autotune (main) where
 
+import Control.Exception
 import Control.Monad
 import Data.ByteString.Char8 qualified as SBS
 import Data.Function (on)
@@ -110,7 +111,7 @@ checkCmd = either (error . T.unpack . T.unlines . failureMsg) pure
 
 setTuningParam :: Server -> T.Text -> Int -> IO ()
 setTuningParam server name val =
-  void $ checkCmd =<< cmdSetTuningParam server name (showText val)
+  void $ checkCmd . maybe (Right ()) Left =<< cmdSetTuningParam server name val
 
 setTuningParams :: Server -> Path -> IO ()
 setTuningParams server = mapM_ (uncurry $ setTuningParam server)
@@ -487,21 +488,28 @@ tune opts prog = do
       hFlush stdout
     pure (fst result)
 
+onServerException :: ServerException -> IO a
+onServerException (ServerException s) = do
+  T.hPutStrLn stderr s
+  exitFailure
+
 runAutotuner :: AutotuneOptions -> FilePath -> IO ()
-runAutotuner opts prog = do
-  best <- tune opts prog
+runAutotuner opts prog =
+  do
+    best <- tune opts prog
 
-  let tuning = T.unlines $ do
-        (s, n) <- sortOn fst best
-        pure $ s <> "=" <> showText n
+    let tuning = T.unlines $ do
+          (s, n) <- sortOn fst best
+          pure $ s <> "=" <> showText n
 
-  case optTuning opts of
-    Nothing -> pure ()
-    Just suffix -> do
-      T.writeFile (prog <.> suffix) tuning
-      putStrLn $ "Wrote " ++ prog <.> suffix
+    case optTuning opts of
+      Nothing -> pure ()
+      Just suffix -> do
+        T.writeFile (prog <.> suffix) tuning
+        putStrLn $ "Wrote " ++ prog <.> suffix
 
-  T.putStrLn $ "Result of autotuning:\n" <> tuning
+    T.putStrLn $ "Result of autotuning:\n" <> tuning
+    `catch` onServerException
 
 supportedBackends :: [String]
 supportedBackends = ["opencl", "cuda", "hip"]
