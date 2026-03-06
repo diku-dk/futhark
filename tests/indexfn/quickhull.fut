@@ -280,9 +280,9 @@ def extract_empty_segments [num_segs] [num_points]
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
        , []i64                       -- seg_inds'
-      ) | \(_,_, _,_,_,_, sgm_inds') ->
-          let num_segs' = sum (map (\b -> to_i64 b) segs_inhabited)
-          in Range sgm_inds' (0,num_segs'+1)
+      ) | \(_,_, segs_bx',_,_,_, sgm_inds') ->
+          let num_segs' = length segs_bx'
+          in Range sgm_inds' (0, num_segs')
       }
     =
   -- let segs_parted = scatter zeros inds segs  
@@ -305,18 +305,17 @@ def extract_empty_segments [num_segs] [num_points]
   let segs_false_bx = slice segs_parted_bx n num_segs
   let segs_false_by = slice segs_parted_by n num_segs
   
-  let segs_indicator = map (\c -> if c then 1 else 0) segs_inhabited
-  let sum_segs = scan (+) 0 segs_indicator
-  let new_segs_ix = map2 (\i n -> n - i) segs_indicator sum_segs
-  
   let hull_x' = hull_x ++ segs_false_bx
   let hull_y' = hull_y ++ segs_false_by
 
-  let sgm_inds' = 
-      map (\seg_ix -> if segs_inhabited[seg_ix]
-                      then new_segs_ix[seg_ix]
-                      else 0
-          ) sgm_inds
+  let segs_indicator = map (\c -> if c then 1 else 0) segs_inhabited
+  let sum_segs = scan (+) 0 segs_indicator
+
+  let sgm_inds' = map (\seg_ix ->
+      if segs_inhabited[seg_ix]
+      then sum_segs[seg_ix] - segs_indicator[seg_ix]
+      else 0
+    ) sgm_inds
   in (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds')
 
 def semihull_loop [num_segs] [num_points]
@@ -334,7 +333,7 @@ def semihull_loop [num_segs] [num_points]
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
        , []i64,[]real,[]real         -- points
-      ) | \(_,_, out_segs_begx,_,_,_, out_points_idx,_,_) -> Range out_points_idx (0,length out_segs_begx+1)}
+      ) | \(_,_, out_segs_begx,_,_,_, out_points_idx,_,_) -> Range out_points_idx (0,length out_segs_begx)}
     =
    let (segs_begx', segs_begy', segs_endx', segs_endy',
         points_idx', points_x', points_y') = expand_hull segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
