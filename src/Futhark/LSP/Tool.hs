@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Generally useful definition used in various places in the
 -- language server implementation.
 module Futhark.LSP.Tool
@@ -6,9 +8,12 @@ module Futhark.LSP.Tool
     rangeFromLoc,
     posToUri,
     computeMapping,
+    transformVFS,
   )
 where
 
+import Control.Lens.Getter ((^.))
+import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.PositionMapping
@@ -29,7 +34,8 @@ import Language.Futhark.Query
   )
 import Language.LSP.Protocol.Types
 import Language.LSP.Server (LspM, getVirtualFile)
-import Language.LSP.VFS (VirtualFile, virtualFileText, virtualFileVersion)
+import Language.LSP.VFS (VFS, VirtualFile, vfsMap, virtualFileText, virtualFileVersion)
+import Language.LSP.VFS qualified as VFS
 
 -- | Retrieve hover info for the definition referenced at the given
 -- file at the given line and column number (the two 'Int's).
@@ -126,3 +132,21 @@ getEndPos (Pos _ l c _) =
 rangeFromLoc :: Loc -> Range
 rangeFromLoc (Loc start end) = Range (getStartPos start) (getEndPos end)
 rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
+
+-- | Transform VFS to a map of file paths to file contents.
+-- This is used to pass the file contents to the compiler.
+transformVFS :: VFS -> M.Map FilePath T.Text
+transformVFS vfs =
+  M.foldrWithKey
+    ( \uri virtual_file acc ->
+        case uriToNormalizedFilePath uri of
+          Nothing -> acc
+          Just file_path ->
+            M.insert (fromNormalizedFilePath file_path) (virtualFileText virtual_file) acc
+    )
+    M.empty
+    (M.mapMaybe keepOpenFile (vfs ^. vfsMap))
+  where
+    keepOpenFile = \case
+      VFS.Open file -> Just file
+      VFS.Closed _ -> Nothing

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark lsp` supports running evaluation comments in the interpreter,
+    implemented by VegOwOtenks.
+
 * New notation: `let x.f = y in z` as a shortcut for `let x = x with f = y in
   z`, by Aziz Rmadi. (#1160)
 
@@ -41,6 +44,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Regression in the unrolling of `map`.
 
 * Occasional duplication of entry points leading to compiler crash. (#2374)
+
+* `futhark autotune` no longer tells you to report an issue when the underlying
+  program crashes. (#2388)
 
 ## [0.25.35]
 
