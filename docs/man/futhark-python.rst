@@ -14,16 +14,15 @@ futhark python [options...] infile
 DESCRIPTION
 ===========
 
-``futhark python`` translates a Futhark program to sequential Python
-code, which depends on Numpy.
+``futhark python`` translates a Futhark program to sequential Python code, which
+depends on Numpy.
 
-The resulting program will read the arguments to the ``main`` function
-from standard input and print its return value on standard output.
-The arguments are read and printed in Futhark syntax.
+The resulting program will read the arguments to the ``main`` function from
+standard input and print its return value on standard output. The arguments are
+read and printed in Futhark syntax.
 
-The generated code is very slow, likely too slow to be useful.  It is
-more interesting to use this command's big brother,
-:ref:`futhark-pyopencl(1)`.
+The generated code is very slow, likely too slow to be useful.  It is more
+interesting to use this command's big brother, :ref:`futhark-pyopencl(1)`.
 
 OPTIONS
 =======

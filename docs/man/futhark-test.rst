@@ -14,26 +14,24 @@ futhark test [options...] infiles...
 DESCRIPTION
 ===========
 
-Test Futhark programs based on input/output datasets.  All contained
-``.fut`` files within a given directory are considered.  By default,
-tests are carried out with compiled code.  This can be changed with
-the ``-i`` option.
+Test Futhark programs based on input/output datasets.  All contained ``.fut``
+files within a given directory are considered.  By default, tests are carried
+out with compiled code.  This can be changed with the ``-i`` option.
 
-A Futhark test program is an ordinary Futhark program, with at least
-one test block describing input/output test cases and possibly other
-options.  The last line must end in a newline.  A test block consists
-of commented-out text with the following overall format::
+A Futhark test program is an ordinary Futhark program, with at least one test
+block describing input/output test cases and possibly other options.  The last
+line must end in a newline.  A test block consists of commented-out text with
+the following overall format::
 
   description
   ==
   cases...
 
-The ``description`` is an arbitrary (and possibly multiline)
-human-readable explanation of the test program.  It is separated from
-the test cases by a line containing just ``==``.  Any comment starting
-at the beginning of the line, and containing a line consisting of just
-``==``, will be considered a test block.  The format of a test case is
-as follows::
+The ``description`` is an arbitrary (and possibly multiline) human-readable
+explanation of the test program.  It is separated from the test cases by a line
+containing just ``==``.  Any comment starting at the beginning of the line, and
+containing a line consisting of just ``==``, will be considered a test block.
+The format of a test case is as follows::
 
   [tags { tags... }]
   [entry: names...]
@@ -41,83 +39,79 @@ as follows::
   random input { types ... } | script input { ... } | input ({ values... } | @ filename)
   output { values... } | auto output | error: regex
 
-If a test case begins with a quoted string, that string is reported as
-the dataset name, including in the JSON file produced by
-:ref:`futhark-bench(1)`.  If no name is provided, one is automatically
-generated.  The name must be unique across all test cases.
+If a test case begins with a quoted string, that string is reported as the
+dataset name, including in the JSON file produced by :ref:`futhark-bench(1)`.
+If no name is provided, one is automatically generated.  The name must be unique
+across all test cases.
 
-If ``compiled`` is present before the ``input`` keyword, this test
-case will never be passed to the interpreter.  This is useful for test
-cases that are annoyingly slow to interpret.  The ``nobench`` keyword
-is for data sets that are too small to be worth benchmarking, and only
-has meaning to :ref:`futhark-bench(1)`.
+If ``compiled`` is present before the ``input`` keyword, this test case will
+never be passed to the interpreter.  This is useful for test cases that are
+annoyingly slow to interpret.  The ``nobench`` keyword is for data sets that are
+too small to be worth benchmarking, and only has meaning to
+:ref:`futhark-bench(1)`.
 
-If ``input`` is preceded by ``random``, the text between the curly
-braces must consist of a sequence of Futhark types, including sizes in
-the case of arrays.  When ``futhark test`` is run, a file located in a
-``data/`` subdirectory, containing values of the indicated types and
-shapes is, automatically constructed with :ref:`futhark-dataset(1)`.
-Apart from sizes, integer constants (with or without type suffix), and
-floating-point constants (always with type suffix) are also permitted.
+If ``input`` is preceded by ``random``, the text between the curly braces must
+consist of a sequence of Futhark types, including sizes in the case of arrays.
+When ``futhark test`` is run, a file located in a ``data/`` subdirectory,
+containing values of the indicated types and shapes is, automatically
+constructed with :ref:`futhark-dataset(1)`. Apart from sizes, integer constants
+(with or without type suffix), and floating-point constants (always with type
+suffix) are also permitted.
 
-If ``input`` is preceded by ``script``, the text between the curly
-braces is interpreted as a FutharkScript expression (see
-:ref:`futhark-literate(1)`), which is executed to generate the input.
-It must use only functions explicitly declared as entry points. If the
-expression produces an *n*-element tuple, it will be unpacked and its
-components passed as *n* distinct arguments to the test function. The
-only builtin functions supported are ``$loaddata`` and ``$loadbytes``.
+If ``input`` is preceded by ``script``, the text between the curly braces is
+interpreted as a FutharkScript expression (see :ref:`futhark-literate(1)`),
+which is executed to generate the input. It must use only functions explicitly
+declared as entry points. If the expression produces an *n*-element tuple, it
+will be unpacked and its components passed as *n* distinct arguments to the test
+function. The only builtin functions supported are ``$loaddata`` and
+``$loadbytes``.
 
-If ``input`` is followed by an ``@`` and a file name (which must not
-contain any whitespace) instead of curly braces, values will be read
-from the indicated file.  This is recommended for large data sets.
-This notation cannot be used with ``random`` input.  With ``script
-input``, the file contents will be interpreted as a FutharkScript
-expression.
+If ``input`` is followed by an ``@`` and a file name (which must not contain any
+whitespace) instead of curly braces, values will be read from the indicated
+file.  This is recommended for large data sets. This notation cannot be used
+with ``random`` input.  With ``script input``, the file contents will be
+interpreted as a FutharkScript expression.
 
-After the ``input`` block, the expected result of the test case is
-written as either ``output`` followed by another block of values, or
-``error:`` followed by a regex indicating an expected run-time error.
-If neither ``output`` nor ``error`` is given, the program will be
-expected to execute succesfully, but its output will not be validated.
+After the ``input`` block, the expected result of the test case is written as
+either ``output`` followed by another block of values, or ``error:`` followed by
+a regex indicating an expected run-time error. If neither ``output`` nor
+``error`` is given, the program will be expected to execute succesfully, but its
+output will not be validated.
 
-If ``output`` is preceded by ``auto`` (as in ``auto output``), the
-expected values are automatically generated by compiling the program
-with ``futhark c`` and recording its result for the given input (which
-must not fail).  This is usually only useful for testing or
-benchmarking alternative compilers, and not for testing the
-correctness of Futhark programs.  This currently does not work for
-``script`` inputs.
+If ``output`` is preceded by ``auto`` (as in ``auto output``), the expected
+values are automatically generated by compiling the program with ``futhark c``
+and recording its result for the given input (which must not fail).  This is
+usually only useful for testing or benchmarking alternative compilers, and not
+for testing the correctness of Futhark programs.  This currently does not work
+for ``script`` inputs.
 
-Alternatively, instead of input-output pairs, the test cases can
-simply be a description of an expected compile time type error::
+Alternatively, instead of input-output pairs, the test cases can simply be a
+description of an expected compile time type error::
 
   error: regex
 
 This is used to test the type checker.
 
-An optional tags specification is permitted in the first test block.
-This section can contain arbitrary tags that classify the benchmark::
+An optional tags specification is permitted in the first test block. This
+section can contain arbitrary tags that classify the benchmark::
 
   tags { names... }
 
-Tag are sequences of alphanumeric characters, dashes, and underscores,
-with each tag seperated by whitespace.  Any program with the
-``disable`` tag is ignored by ``futhark test``.
+Tag are sequences of alphanumeric characters, dashes, and underscores, with each
+tag seperated by whitespace.  Any program with the ``disable`` tag is ignored by
+``futhark test``.
 
-Another optional directive is ``entry``, which specifies the entry
-point to be used for testing.  This is useful for writing programs
-that test libraries with multiple entry points.  Multiple entry points
-can be specified on the same line by separating them with space, and
-they will all be tested with the same input/output pairs.  The
-``entry`` directive affects subsequent input-output pairs in the same
-comment block, and may only be present immediately preceding these
-input-output pairs.  If no ``entry`` is given, ``main`` is assumed.
-See below for an example.
+Another optional directive is ``entry``, which specifies the entry point to be
+used for testing.  This is useful for writing programs that test libraries with
+multiple entry points.  Multiple entry points can be specified on the same line
+by separating them with space, and they will all be tested with the same
+input/output pairs.  The ``entry`` directive affects subsequent input-output
+pairs in the same comment block, and may only be present immediately preceding
+these input-output pairs.  If no ``entry`` is given, ``main`` is assumed. See
+below for an example.
 
-For many usage examples, see the ``tests`` directory in the
-Futhark source directory.  A simple example can be found in
-``EXAMPLES`` below.
+For many usage examples, see the ``tests`` directory in the Futhark source
+directory.  A simple example can be found in ``EXAMPLES`` below.
 
 VALUES
 ------
@@ -141,17 +135,16 @@ OPTIONS
 
 --backend=program
 
-  The backend used when compiling Futhark programs (without leading
-  ``futhark``, e.g. just ``opencl``).
+  The backend used when compiling Futhark programs (without leading ``futhark``,
+  e.g. just ``opencl``).
 
 --cache-extension=EXTENSION
 
-  For a program ``foo.fut``, pass ``--cache-file foo.fut.EXTENSION``.
-  By default, ``--cache-file`` is not passed.
+  For a program ``foo.fut``, pass ``--cache-file foo.fut.EXTENSION``. By
+  default, ``--cache-file`` is not passed.
 
 -c
-  Only run compiled code - do not run the interpreter.  This is the
-  default.
+  Only run compiled code - do not run the interpreter.  This is the default.
 
 -C
   Compile the programs, but do not run them.
@@ -167,34 +160,34 @@ OPTIONS
 
 --exclude=tag
 
-  Do not run test cases that contain the given tag.  Cases marked with
-  "notest", "disable", or "no_foo" (where *foo* is the backend used)
-  are ignored by default.
+  Do not run test cases that contain the given tag.  Cases marked with "notest",
+  "disable", or "no_foo" (where *foo* is the backend used) are ignored by
+  default.
 
 -i
   Test with the interpreter.
 
 -I
-  Pass the program through the compiler frontend, but do not run them.
-  This is only useful for testing the Futhark compiler itself.
+  Pass the program through the compiler frontend, but do not run them. This is
+  only useful for testing the Futhark compiler itself.
 
 -t
   Type-check the programs, but do not run them.
 
 -s
 
-  Run ``structure`` tests. These are not run by default. When this
-  option is passed, no other testing is done.
+  Run ``structure`` tests. These are not run by default. When this option is
+  passed, no other testing is done.
 
 --futhark=program
 
-  The program used to perform operations (eg. compilation).  Defaults
-  to the binary running ``futhark test`` itself.
+  The program used to perform operations (eg. compilation).  Defaults to the
+  binary running ``futhark test`` itself.
 
 --no-terminal
 
-  Change the output format to be suitable for noninteractive
-  terminals. Prints a status message roughly every minute.
+  Change the output format to be suitable for noninteractive terminals. Prints a
+  status message roughly every minute.
 
 --no-tuning
 
@@ -202,8 +195,8 @@ OPTIONS
 
 --pass-option=opt
 
-  Pass an option to benchmark programs that are being run.  For
-  example, we might want to run OpenCL programs on a specific device::
+  Pass an option to benchmark programs that are being run.  For example, we
+  might want to run OpenCL programs on a specific device::
 
     futhark test prog.fut --backend=opencl --pass-option=-dHawaii
 
@@ -213,28 +206,25 @@ OPTIONS
 
 --runner=program
 
-  If set to a non-empty string, compiled programs are not run
-  directly, but instead the indicated *program* is run with its first
-  argument being the path to the compiled Futhark program.  This is
-  useful for compilation targets that cannot be executed directly (as
-  with :ref:`futhark-pyopencl(1)` on some platforms), or when you wish
-  to run the program on a remote machine.
+  If set to a non-empty string, compiled programs are not run directly, but
+  instead the indicated *program* is run with its first argument being the path
+  to the compiled Futhark program.  This is useful for compilation targets that
+  cannot be executed directly (as with :ref:`futhark-pyopencl(1)` on some
+  platforms), or when you wish to run the program on a remote machine.
 
 --tuning=EXTENSION
 
-  For each program being run, look for a tuning file with this
-  extension, which is suffixed to the name of the program.  For
-  example, given ``--tuning=tuning`` (the default), the program
-  ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
-  exists.
+  For each program being run, look for a tuning file with this extension, which
+  is suffixed to the name of the program.  For example, given
+  ``--tuning=tuning`` (the default), the program ``foo.fut`` will be passed the
+  tuning file ``foo.fut.tuning`` if it exists.
 
 ENVIRONMENT VARIABLES
 =====================
 
 ``TMPDIR``
 
-  Directory used for temporary files such as gunzipped datasets and
-  log files.
+  Directory used for temporary files such as gunzipped datasets and log files.
 
 EXAMPLES
 ========
@@ -252,8 +242,7 @@ The following program tests simple indexing and bounds checking::
   let main (a: []i32) (i: i64): i32 =
     a[i]
 
-The following program contains two entry points, both of which are
-tested::
+The following program contains two entry points, both of which are tested::
 
   let add (x: i32) (y: i32): i32 = x + y
 
@@ -271,8 +260,8 @@ tested::
 
   entry sub1 (x: i32): i32 = add x (-1)
 
-The following program contains an entry point that is tested with
-randomly generated data::
+The following program contains an entry point that is tested with randomly
+generated data::
 
   -- ==
   -- random input { [100]i32 [100]i32 } auto output
