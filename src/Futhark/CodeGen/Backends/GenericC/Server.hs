@@ -131,12 +131,12 @@ data Kind
   | Sum
   | Opaque
 
-cKind :: Kind -> String
-cKind Primitive = "PRIMITIVE"
-cKind Array     = "ARRAY"
-cKind Record    = "RECORD"
-cKind Sum       = "SUM"
-cKind Opaque    = "OPAQUE"
+cKind :: Kind -> C.Exp
+cKind Primitive = [C.cexp|PRIMITIVE|]
+cKind Array     = [C.cexp|ARRAY|]
+cKind Record    = [C.cexp|RECORD|]
+cKind Sum       = [C.cexp|SUM|]
+cKind Opaque    = [C.cexp|OPAQUE|]
 
 -- First component is forward declaration so we don't have to worry
 -- about ordering.
@@ -187,7 +187,7 @@ typeBoilerplate _ (tname, TypeArray c_type_name et rank ops) =
                 .store = (typename store_fn)store_array,
                 .free = (typename free_fn)free_array,
                 .aux = &$id:aux_name,
-                .kind = $id:(cKind Array),
+                .kind = $exp:(cKind Array),
                 .info = &$id:array_name
               };|]
       )
@@ -210,7 +210,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
                 .store = (typename store_fn)store_opaque,
                 .free = (typename free_fn)free_opaque,
                 .aux = &$id:aux_name,
-                .kind = $id:(cKind kind),
+                .kind = $exp:(cKind kind),
                 .info = $init:transparent_init
               };|]
       )
