@@ -6,6 +6,7 @@ module Futhark.Tools
   ( module Futhark.Construct,
     redomapToMapAndReduce,
     scanomapToMapAndScan,
+    maposcanomapToMapScanAndMap,
     dissectScrema,
     extractPostLambda,
     sequentialStreamWholeArray,
@@ -73,6 +74,32 @@ scanomapToMapAndScan (Pat pes) (w, scans, map_lam, arrs) = do
       <$> (Screma w scan_arrs <$> scanSOAC scans)
   pure (map_stm, scan_stm)
 
+maposcanomapToMapScanAndMap ::
+  ( MonadFreshNames m,
+    Buildable rep,
+    Op rep ~ SOAC rep
+  ) =>
+  Pat (LetDec rep) ->
+  ( SubExp,
+    Lambda rep,
+    [Scan rep],
+    Lambda rep,
+    [VName]
+  ) ->
+  m (Stm rep, Stm rep, Stm rep)
+maposcanomapToMapScanAndMap (Pat pes) (w, post_lam, scans, map_lam, arrs) = do
+  map_res <- mapM tempRes $ lambdaReturnType map_lam
+  map_stm <- mkLet map_res . Op . Screma w arrs <$> mapSOAC map_lam
+  scan_res <- mapM tempRes $ take (scanResults scans) $ lambdaReturnType map_lam
+  let (scan_arrs, map_arrs) = splitAt (scanResults scans) $ map identName map_res
+  scan_stm <- mkLet scan_res . Op . Screma w scan_arrs <$> scanSOAC scans
+  let post_arrs = map identName scan_res <> map_arrs
+      res = patElemIdent <$> pes
+  post_stm <- mkLet res . Op . Screma w post_arrs <$> mapSOAC post_lam
+  pure (map_stm, scan_stm, post_stm)
+  where
+    tempRes res = newIdent "temp_res" $ res `arrayOfRow` w
+
 splitScanOrRedomap ::
   (Typed dec, MonadFreshNames m) =>
   [PatElem dec] ->
@@ -94,7 +121,7 @@ splitScanOrRedomap pes w map_lam nes = do
       newIdent (baseName (patElemName pe) <> "_map_acc") $ acc_t `arrayOfRow` w
     arrMapPatElem = pure . patElemIdent
 
--- | Turn a Screma into a Scanomap (possibly with mapout parts) and a
+-- | Turn a Screma into a maposcanomap (possibly with mapout parts) and a
 -- Redomap.  This is used to handle Scremas that are so complicated
 -- that we cannot directly generate efficient parallel code for them.
 -- In essense, what happens is the opposite of horisontal fusion.

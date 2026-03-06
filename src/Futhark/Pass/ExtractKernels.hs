@@ -415,11 +415,18 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
               =<< (mkBody <$> paralleliseOuter <*> pure (varsRes (patNames pat)))
 
           paralleliseInner path' = do
-            (mapstm, scanstm) <-
-              scanomapToMapAndScan pat (w, scans, map_lam, arrs)
+            (mapstm, scanstm, poststm) <-
+              maposcanomapToMapScanAndMap pat (w, post_lam, scans, map_lam, arrs)
             types <- asksScope scopeForSOACs
             transformStms path' . stmsToList <=< (`runBuilderT_` types) $
-              addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs scanstm])
+              addStms
+                =<< simplifyStms
+                  ( stmsFromList
+                      [ certify cs mapstm,
+                        certify cs scanstm,
+                        certify cs poststm
+                      ]
+                  )
 
           innerParallelBody path' =
             renameBody
