@@ -45,6 +45,68 @@ tests =
   testGroup
     "Properties.Algebra"
     [
+      testCase "quickhull extract_empty_segments range" $
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              num_segs <- newNameFromString "num_segs"
+              num_points <- newNameFromString "num_points"
+              segs_inhabited <- newNameFromString "segs_inhabited"
+              sgm_inds <- newNameFromString "sgm_inds"
+
+              addProperty (Var num_segs) (Rng num_segs (Just $ int 0, Nothing))
+              addRel (int 0 :<=: sVar num_segs)
+              addProperty (Var num_points) (Rng num_points (Just $ int 0, Nothing))
+              addRel (int 0 :<=: sVar num_points)
+
+              addProperty (Var i) (Rng i (Just $ int 0, Just $ sVar num_points))
+              addRel (int 0 :<=: sVar i :&&: sVar i :<: sVar num_points)
+
+              addProperty (Var sgm_inds) (Rng sgm_inds (Just $ int 0, Just $ sVar num_segs))
+              addRel (int 0 :<=: sVar sgm_inds :&&: sVar sgm_inds :<: sVar num_segs)
+
+              addProperty (Var segs_inhabited) Boolean
+
+              -- (∑j₂₇₂₉₇₂∈(0 .. -1 + sgm_inds₅₄₃₈(i₂₆₀₄₉₅)) (segs_inhabited₅₄₃₃(j₂₇₂₉₇₂))
+              --         < ∑j₂₇₄₂₁₃∈(0 .. -1 + num_segs₅₄₂₉) (segs_inhabited₅₄₃₃(j₂₇₄₂₁₃))) Unknown
+              --     Untranslatable: [(wª₂₆₃₀₃₈, True)]
+              --     Equivalences: n₄₆₂₀ ≡ n₄₆₉₂
+              --                   n₅₃₇₇ ≡ num_segs₅₄₂₉
+              --                   wª₂₆₃₀₃₈ ≡ 1
+              --     Ranges: max{0, 0} <= num_segs₅₄₂₉ <= min{}
+              --             max{0, 0} <= num_points₅₄₃₀ <= min{}
+              --             max{0} <= sgm_inds₅₄₃₈ <= min{-1 + num_segs₅₄₂₉}
+              --             max{0, 0} <= d₀₅₄₆₉ <= min{}
+              --             max{0, 0} <= d₁₅₄₇₁ <= min{}
+              --             max{0} <= wª₂₆₃₀₃₈ <= min{}
+              --             max{0} <= inds⁻¹₂₆₃₃₉₆ <= min{-2 + num_segs₅₄₂₉}
+              --             max{0} <= inds⁻¹₂₆₃₇₇₈ <= min{-2 + num_segs₅₄₂₉}
+              --             max{0} <= inds⁻¹₂₆₄₁₆₀ <= min{-2 + num_segs₅₄₂₉}
+              --             max{0} <= inds⁻¹₂₆₄₅₄₂ <= min{-2 + num_segs₅₄₂₉}
+
+              let sum_segs_inhabited = sym2SoP . Sum (One segs_inhabited) (int 0)
+              let a = sum_segs_inhabited (sym2SoP (Idx (One sgm_inds) (sVar i)) .-. int 1)
+              let b = sum_segs_inhabited (sVar num_segs .-. int 1)
+
+              -- One problem is that if b = 0, then a = 0 and we cannot show 0 < 0.
+              -- NOTE These ranges have been added to debug what might be missing.
+              addRel (int 0 :<=: sVar segs_inhabited :&&: sVar segs_inhabited :<=: int 1)
+              addRel (sym2SoP (Idx (One segs_inhabited) (sym2SoP $ Idx (One sgm_inds) (sVar i))) :==: int 1)
+
+              -- TODO
+              -- 1. make segs_inhabited have a range in real program
+              -- 2. make sure we get the equivalence inside the branch
+              -- 3. what to do about the case when num_segs' = 0?
+
+              printAlgEnv 1
+              printM 1 $ prettyString a <> "  <  " <> prettyString b
+              simplified <- simplify $ b .-. a
+              printM 1 $ "0 < " <> prettyString simplified
+
+              a $<$ b
+          )
+          @??= True,
       testCase "mis expand indices bounds" $
         run
           ( do
