@@ -26,10 +26,11 @@ typedef int (*new_fn)(struct futhark_context*, void**, const void*[]);
 typedef int (*destruct_fn)(struct futhark_context*, const void*[], const void*);
 
 enum kind {
-  SCALAR,
+  PRIMITIVE,
   ARRAY,
   RECORD,
-  SUM
+  SUM,
+  OPAQUE
 };
 
 struct array {
@@ -653,10 +654,11 @@ void cmd_kind(struct server_state *s, const char *args[]) {
   const struct type *t = get_type(s, type);
 
   switch (t->kind) {
-    case SCALAR: printf("scalar\n"); return;
-    case ARRAY:  printf("array\n");  return;
-    case RECORD: printf("record\n"); return;
-    case SUM:    printf("sum\n");    return;
+    case PRIMITIVE: printf("primitive\n"); return;
+    case ARRAY:     printf("array\n");     return;
+    case RECORD:    printf("record\n");    return;
+    case SUM:       printf("sum\n");       return;
+    case OPAQUE:    printf("opaque\n");    return;
   }
   futhark_panic(1, "Invalid kind detected on type \"%s\".\n", t->name);
 }

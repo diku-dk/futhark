@@ -124,17 +124,19 @@ cType manifest tname =
     Nothing -> uncurry primAPIType $ scalarToPrim tname
 
 data Kind
-  = Scalar
+  = Primitive
   -- TODO: Implement array functions for opaque arrays
   | Array
   | Record
   | Sum
+  | Opaque
 
 cKind :: Kind -> String
-cKind Scalar      = "SCALAR"
-cKind Array       = "ARRAY"
-cKind Record      = "RECORD"
-cKind Sum         = "SUM"
+cKind Primitive = "PRIMITIVE"
+cKind Array     = "ARRAY"
+cKind Record    = "RECORD"
+cKind Sum       = "SUM"
+cKind Opaque    = "OPAQUE"
 
 -- First component is forward declaration so we don't have to worry
 -- about ordering.
@@ -301,7 +303,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
           )
     transparentDefs type_name (Just (OpaqueArray ops')) = opaqueArrayDefs type_name (opaqueArrayRank ops') (opaqueArrayElemType ops') (opaqueArrayShape ops') (opaqueArrayIndex ops')
     transparentDefs type_name (Just (OpaqueRecordArray ops')) = opaqueArrayDefs type_name (recordArrayRank ops') (recordArrayElemType ops') (recordArrayShape ops') (recordArrayIndex ops')
-    transparentDefs _ _ = ([], [C.cinit|NULL|], Scalar)
+    transparentDefs _ _ = ([], [C.cinit|NULL|], Opaque)
 
     opaqueArrayDefs type_name rank et shape index =
       let array_name = type_name <> "_array"
