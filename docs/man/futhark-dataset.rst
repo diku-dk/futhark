@@ -14,16 +14,18 @@ futhark dataset [options...]
 DESCRIPTION
 ===========
 
-Generate random values in Futhark syntax, which can be useful when generating
-input datasets for program testing.  All Futhark primitive types are supported.
-Tuples are not supported.  Arrays of specific (non-random) sizes can be
-generated.  You can specify maximum and minimum bounds for values, as well as
-the random seed used when generating the data.  The generated values are written
-to standard output.
+Generate random values in Futhark syntax, which can be useful when
+generating input datasets for program testing.  All Futhark primitive
+types are supported.  Tuples are not supported.  Arrays of specific
+(non-random) sizes can be generated.  You can specify maximum and
+minimum bounds for values, as well as the random seed used when
+generating the data.  The generated values are written to standard
+output.
 
-If no ``-g``/``--generate`` options are passed, values are read from standard
-input, and printed to standard output in the indicated format.  The input format
-(whether textual or binary) is automatically detected.
+If no ``-g``/``--generate`` options are passed, values are read from
+standard input, and printed to standard output in the indicated
+format.  The input format (whether textual or binary) is automatically
+detected.
 
 Returns a nonzero exit code if it fails to write the full output.
 
@@ -36,15 +38,16 @@ OPTIONS
 -g type, --generate type
   Generate a value of the indicated type, e.g. ``-g i32`` or ``-g [10]f32``.
 
-  The type may also be a value, in which case that literal value is generated.
+  The type may also be a value, in which case that literal value is
+  generated.
 
 -s int
   Set the seed used for the RNG.  1 by default.
 
 --T-bounds=<min:max>
-  Set inclusive lower and upper bounds on generated values of type ``T``.  ``T``
-  is any primitive type, e.g. ``i32`` or ``f32``.  The bounds apply to any
-  following uses of the ``-g`` option.
+  Set inclusive lower and upper bounds on generated values of type
+  ``T``.  ``T`` is any primitive type, e.g. ``i32`` or ``f32``.  The
+  bounds apply to any following uses of the ``-g`` option.
 
 You can alter the output format using the following flags. To use them, add them
 before data generation (--generate):
@@ -53,8 +56,8 @@ before data generation (--generate):
   Output data in text format (must precede --generate). Default.
 
 -t, --type
-  Output the types of values (textually) instead of the values themselves.
-  Mostly useful when reading values on stdin.
+  Output the types of values (textually) instead of the values
+  themselves.  Mostly useful when reading values on stdin.
 
 EXAMPLES
 ========
@@ -63,8 +66,7 @@ Generate a 4 by 2 integer matrix::
 
   futhark dataset -g [4][2]i32
 
-Generate an array of floating-point numbers and an array of indices into that
-array::
+Generate an array of floating-point numbers and an array of indices into that array::
 
   futhark dataset -g [10]f32 --i64-bounds=0:9 -g [100]i64
 

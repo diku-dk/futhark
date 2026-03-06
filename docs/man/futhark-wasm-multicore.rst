@@ -14,11 +14,12 @@ futhark wasm-multicore [options...] <program.fut>
 DESCRIPTION
 ===========
 
-``futhark wasm-multicore`` translates a Futhark program to multi-threaded
-WebAssembly code by first generating C as ``futhark c``, and then using
-Emscripten (``emcc``).  This produces a ``.js`` file that allows the compiled
-code to be invoked from JavaScript. Executables implement the Futhark server
-protocol and can be run with Node.js.
+``futhark wasm-multicore`` translates a Futhark program to
+multi-threaded WebAssembly code by first generating C as ``futhark
+c``, and then using Emscripten (``emcc``).  This produces a ``.js``
+file that allows the compiled code to be invoked from JavaScript.
+Executables implement the Futhark server protocol and can be run with
+Node.js.
 
 OPTIONS
 =======

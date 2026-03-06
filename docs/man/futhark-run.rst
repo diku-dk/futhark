@@ -14,14 +14,15 @@ futhark run [options...] <program.fut>
 DESCRIPTION
 ===========
 
-Execute the given program by evaluating an entry point (``main`` by default)
-with arguments read from standard input, and write the results on standard
-output.
+Execute the given program by evaluating an entry point (``main`` by
+default) with arguments read from standard input, and write the
+results on standard output.
 
-``futhark run`` is very slow, and in practice only useful for testing, teaching,
-and experimenting with the language.  The ``#[trace]`` and ``#[break]``
-attributes are fully supported in the interpreter. Tracing prints values to
-stdout in contrast to compiled code, which prints to stderr.
+``futhark run`` is very slow, and in practice only useful for testing,
+teaching, and experimenting with the language.  The ``#[trace]`` and
+``#[break]`` attributes are fully supported in the interpreter.
+Tracing prints values to stdout in contrast to compiled code, which
+prints to stderr.
 
 OPTIONS
 =======

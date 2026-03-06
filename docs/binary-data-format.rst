@@ -12,15 +12,15 @@ and its current limitations. The input formats (whether textual or binary) are
 not used for Futhark programs compiled to libraries, which instead use whichever
 format is supported by their host language.
 
-Currently reading binary input is only supported for compiled programs. It is
-*not* supported for ``futhark run``.
+Currently reading binary input is only supported for compiled programs.
+It is *not* supported for ``futhark run``.
 
-You can generate random data in the binary format with ``futhark dataset``
-(:ref:`futhark-dataset(1)`).  This tool can also be used to convert between
-binary and textual data.
+You can generate random data in the binary format with ``futhark
+dataset`` (:ref:`futhark-dataset(1)`).  This tool can also be used to
+convert between binary and textual data.
 
-Futhark-generated executables can be asked to generate binary output with the
-``-b`` option.
+Futhark-generated executables can be asked to generate binary output
+with the ``-b`` option.
 
 Specification
 -------------
@@ -48,10 +48,10 @@ Encoding a scalar value is done by treating it as a 0-dimensional array::
 
   b <version> 0 <type> <value>
 
-To encode an array, we encode the number of dimensions ``n`` as a single byte,
-each dimension ``dim_i`` as an unsigned 64-bit little endian integer, and
-finally all the values in row-major order in their binary little endian
-representation::
+To encode an array, we encode the number of dimensions ``n`` as a
+single byte, each dimension ``dim_i`` as an unsigned 64-bit little
+endian integer, and finally all the values in row-major order in their
+binary little endian representation::
 
   b <version> <n> <type> <dim_1> <dim_2> ... <dim_n> <values...>
 
@@ -59,8 +59,8 @@ representation::
 Type Values
 ~~~~~~~~~~~
 
-A type is identified by a 4 character ASCII string (four bytes). Valid types
-are::
+A type is identified by a 4 character ASCII string (four bytes). Valid
+types are::
 
   "  i8"
   " i16"
@@ -75,7 +75,8 @@ are::
   " f64"
   "bool"
 
-Note that unsigned and signed integers have the same byte-level representation.
+Note that unsigned and signed integers have the same byte-level
+representation.
 
-Values of type ``bool`` are encoded with a byte each.  The results are undefined
-if this byte is not either 0 or 1.
+Values of type ``bool`` are encoded with a byte each.  The results are
+undefined if this byte is not either 0 or 1.
