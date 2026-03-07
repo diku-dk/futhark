@@ -250,6 +250,18 @@ def expand_hull [num_segs] [num_points]
 def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -> Range b' (0,n+1)}) =
   map (\i -> x[i + a]) (iota (b - a))
 
+def non_empty_segments
+      [num_segs]
+      [num_points]
+      (_segs : [num_segs]real)
+      (sgm_inds : [num_points]i64)
+      : {[num_segs]bool | \_ -> true} =
+  let zeros = replicate num_segs 0
+  let ones = replicate num_points 1
+  let segs_inhabited' = reduce_by_index zeros (+) 0 sgm_inds ones
+  let segs_inhabited = map (\i -> i > 0) segs_inhabited'
+  in segs_inhabited
+
 --
 -- Precondition: RANGE(sgm_inds) = [0,num_segs-1]
 -- Postcondition: \ (_, segs', sgm_inds') ->
@@ -258,6 +270,7 @@ def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -
 def extract_empty_segments [num_segs] [num_points]
                            (hull_x : []real)
                            (hull_y : []real)
+                           (segs_inhabited : [num_segs]bool)
                            (segs_bx : [num_segs]real)
                            (segs_by : [num_segs]real)
                            (segs_ex : [num_segs]real)
@@ -273,10 +286,6 @@ def extract_empty_segments [num_segs] [num_points]
       }
     =
   -- let segs_parted = scatter zeros inds segs  
-  let zeros = replicate num_segs 0
-  let ones = replicate num_points 1
-  let seg_size = reduce_by_index zeros (+) 0 sgm_inds ones
-  let segs_inhabited = map (\i -> i > 0) seg_size
   let (n, inds) = partition_indices segs_inhabited
   let zeros = replicate num_segs 0
   let segs_parted_bx = scatter zeros inds segs_bx
@@ -328,7 +337,8 @@ def semihull_loop [num_segs] [num_points]
     =
    let (segs_begx', segs_begy', segs_endx', segs_endy',
         points_idx', points_x', points_y') = expand_hull segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
-   let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'') = extract_empty_segments hull_x hull_y segs_begx' segs_begy' segs_endx' segs_endy' points_idx'
+   let segs_inhabited = non_empty_segments segs_begx' points_idx'
+   let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'') = extract_empty_segments hull_x hull_y segs_inhabited segs_begx' segs_begy' segs_endx' segs_endy' points_idx'
    in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 
 def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 : [n]real) (points1 : [n]real) : {[](real, real) | \_ -> true}  =
