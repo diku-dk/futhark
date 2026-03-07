@@ -228,10 +228,9 @@ def extract_empty_segments [num_segs] [num_points]
        ) | \(_,_, segs_bx',_,_,_, sgm_inds') ->
          Range sgm_inds' (0, length segs_bx')
       } =
-  let zeros = replicate num_segs 0
-  let ones = replicate num_points 1
-  let seg_sizes = reduce_by_index zeros (+) 0 sgm_inds ones
-  let segs_inhabited = map (\i -> i > 0) seg_sizes
+  let zeros = replicate num_segs false
+  let ones = replicate num_points true
+  let segs_inhabited = reduce_by_index zeros (||) false sgm_inds ones
 
   let (n, inds) = partition_indices segs_inhabited
   let zeros = replicate num_segs 0
