@@ -193,13 +193,27 @@ makeCopiesOfFusedExcept ::
   NodeT ->
   m NodeT
 makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
-  let lam = H.lambda soac
-  localScope (scopeOf lam) $ do
-    fused_inner <-
-      filterM (fmap (not . isAcc) . lookupType) . namesToList . consumedByLambda $
-        Alias.analyseLambda mempty lam
-    lam' <- makeCopiesInLambda (fused_inner L.\\ noCopy) lam
-    pure $ SoacNode ots pats (H.setLambda lam' soac) aux
+  case soac of
+    H.Screma w arrs (ScremaForm lam scans reduces postLam) -> do
+      localScope (scopeOf lam <> scopeOf postLam) $ do
+        fused_in_main <-
+          filterM (fmap (not . isAcc) . lookupType) . namesToList . consumedByLambda $
+            Alias.analyseLambda mempty lam
+        fused_in_post <-
+          filterM (fmap (not . isAcc) . lookupType) . namesToList . consumedByLambda $
+            Alias.analyseLambda mempty postLam
+        lam' <- makeCopiesInLambda (fused_in_main L.\\ noCopy) lam
+        postLam' <- makeCopiesInLambda (fused_in_post L.\\ noCopy) postLam
+        let form' = ScremaForm lam' scans reduces postLam'
+        pure $ SoacNode ots pats (H.Screma w arrs form') aux
+    _any -> do
+      let lam = H.lambda soac
+      localScope (scopeOf lam) $ do
+        fused_inner <-
+          filterM (fmap (not . isAcc) . lookupType) . namesToList . consumedByLambda $
+            Alias.analyseLambda mempty lam
+        lam' <- makeCopiesInLambda (fused_inner L.\\ noCopy) lam
+        pure $ SoacNode ots pats (H.setLambda lam' soac) aux
 makeCopiesOfFusedExcept _ nodeT = pure nodeT
 
 makeCopiesInLambda ::
@@ -485,21 +499,69 @@ hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
 removeOutputsExcept toKeep s = case s of
-  SoacNode ots (Pat pats1) soac@(H.Screma _ _ (ScremaForm lam_1 scans_1 red_1)) aux1 ->
-    SoacNode ots (Pat $ pats_unchanged <> pats_new) (H.setLambda lam_new soac) aux1
+  SoacNode ots (Pat pats) (H.Screma w inp (ScremaForm pre_lam [] red post_lam)) aux1 ->
+    SoacNode
+      ots
+      (Pat $ red_pats <> new_pats)
+      (H.Screma w inp (ScremaForm new_pre [] red new_post))
+      aux1
     where
-      scan_output_size = Futhark.scanResults scans_1
-      red_output_size = Futhark.redResults red_1
+      (pre_red_res, pre_map_res) =
+        splitAt (redResults red) $ resFromLambda pre_lam
+      (pre_red_ts, pre_map_ts) =
+        splitAt (redResults red) $ lambdaReturnType pre_lam
 
-      (pats_unchanged, pats_toChange) = splitAt (scan_output_size + red_output_size) pats1
-      (res_unchanged, res_toChange) = splitAt (scan_output_size + red_output_size) (zip (resFromLambda lam_1) (lambdaReturnType lam_1))
+      to_change =
+        L.zip5
+          pre_map_res
+          pre_map_ts
+          (lambdaParams post_lam)
+          (resFromLambda post_lam)
+          (lambdaReturnType post_lam)
 
-      (pats_new, other) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
-      (results, types) = unzip (res_unchanged ++ other)
+      (red_pats, map_pats) = splitAt (redResults red) pats
+
+      (new_pats, new) =
+        unzip $
+          filter (\(x, _) -> patElemName x `elem` toKeep) (zip map_pats to_change)
+      ( new_pre_map_res,
+        new_pre_map_ts,
+        new_post_pars,
+        new_post_res,
+        new_post_ts
+        ) = L.unzip5 new
+      new_post =
+        Lambda
+          { lambdaParams = new_post_pars,
+            lambdaReturnType = new_post_ts,
+            lambdaBody = (lambdaBody post_lam) {bodyResult = new_post_res}
+          }
+      new_pre =
+        pre_lam
+          { lambdaReturnType = pre_red_ts <> new_pre_map_ts,
+            lambdaBody =
+              (lambdaBody pre_lam)
+                { bodyResult = pre_red_res <> new_pre_map_res
+                }
+          }
+  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam scan red post_lam)) aux1 ->
+    SoacNode
+      ots
+      (Pat $ pats_unchanged <> pats_new)
+      (H.Screma w inp (ScremaForm pre_lam scan red lam_new))
+      aux1
+    where
+      red_output_size = Futhark.redResults red
+
+      (pats_unchanged, pats_toChange) = splitAt red_output_size pats1
+      res_toChange = zip (resFromLambda post_lam) (lambdaReturnType post_lam)
+
+      (pats_new, res_new) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
+      (results, types) = unzip res_new
       lam_new =
-        lam_1
+        post_lam
           { lambdaReturnType = types,
-            lambdaBody = (lambdaBody lam_1) {bodyResult = results}
+            lambdaBody = (lambdaBody post_lam) {bodyResult = results}
           }
   node -> node
 
@@ -614,12 +676,13 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     soac' <- case soac of
       H.Stream w inputs accs lam ->
         H.Stream w inputs accs <$> dontFuseScans (onLambda lam)
-      H.Screma w inputs (ScremaForm lam scans reds) ->
+      H.Screma w inputs (ScremaForm lam scans reds post_lam) ->
         H.Screma w inputs
           <$> ( ScremaForm
                   <$> doFuseScans (onLambda lam)
                   <*> mapM onScan scans
                   <*> mapM onRed reds
+                  <*> doFuseScans (onLambda post_lam)
               )
       _ ->
         H.setLambda <$> doFuseScans (onLambda (H.lambda soac)) <*> pure soac
