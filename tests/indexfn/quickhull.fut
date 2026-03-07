@@ -214,17 +214,6 @@ def expand_hull [num_segs] [num_points]
 def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -> Range b' (0,n+1)}) =
   map (\i -> x[i + a]) (iota (b - a))
 
-def non_empty_segments
-    [num_segs]
-    [num_points]
-    (_segs : [num_segs]real)
-    (sgm_inds : [num_points]i64)
-    : {[num_segs]i64 | \_ -> true} =
-  let zeros = replicate num_segs 0
-  let ones = replicate num_points 1
-  let seg_sizes = reduce_by_index zeros (+) 0 sgm_inds ones
-  in seg_sizes
-
 def extract_empty_segments [num_segs] [num_points]
     (hull_x : []real)
     (hull_y : []real)
@@ -283,19 +272,40 @@ def semihull_loop [num_segs] [num_points]
     (segs_endx : [num_segs]real)
     (segs_endy : [num_segs]real)
     -- (points : [num_points](i64, real, real))
-    (points_idx : {[num_points]i64 | \x -> Range x (0,num_segs)})
+    (sgm_inds: {[num_points]i64 | \x -> Range x (0,num_segs)})
     (points_x : [num_points]real)
     (points_y : [num_points]real)
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
        , []i64,[]real,[]real         -- points
-      ) | \(_,_, out_segs_begx,_,_,_, out_points_idx,_,_) -> Range out_points_idx (0,length out_segs_begx)}
+      ) | \(_,_, res_segs_begx,_,_,_, res_sgm_inds,_,_) ->
+        Range res_sgm_inds (0,length res_segs_begx)}
     =
   let (segs_begx', segs_begy', segs_endx', segs_endy',
-      points_idx', points_x', points_y') = expand_hull segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
-  let seg_sizes = non_empty_segments segs_begx' points_idx'
-  let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'') = extract_empty_segments hull_x hull_y seg_sizes segs_begx' segs_begy' segs_endx' segs_endy' points_idx'
-  in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
+      sgm_inds', points_x', points_y') =
+    expand_hull
+      segs_begx
+      segs_begy
+      segs_endx
+      segs_endy
+      sgm_inds
+      points_x
+      points_y
+  -- let seg_sizes = compute_segment_sizes segs_begx' sgm_inds'
+  let zeros = map (\_ -> 0) segs_begx'
+  let ones = map (\_ -> 1) sgm_inds'
+  let seg_sizes = reduce_by_index zeros (+) 0 sgm_inds' ones
+  let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds'') =
+    extract_empty_segments
+      hull_x
+      hull_y
+      seg_sizes
+      segs_begx'
+      segs_begy'
+      segs_endx'
+      segs_endy'
+      sgm_inds'
+  in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds'', points_x', points_y')
 
 def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 : [n]real) (points1 : [n]real) : {[](real, real) | \_ -> true}  =
   -- We don't support branches with different sizes in the index
