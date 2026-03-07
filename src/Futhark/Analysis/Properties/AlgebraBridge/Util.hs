@@ -36,7 +36,7 @@ import Futhark.Analysis.Properties.Property (Property (..))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF, neg)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Refine (addRel, addRels)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.+.), (.-.))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.+.), (.-.), justSym)
 import Futhark.Util.Pretty (Pretty (pretty), viaShow)
 
 -- Fourer Motzkin Elimination solver may return True or False.
@@ -146,6 +146,11 @@ addRelSymbol p = do
             _ -> fail ""
     toRel_ (x :&& y) = convOp toRel_ (liftOp (:&&:)) x y
     toRel_ (_ :|| _) = fail "toRel on :||" -- convOp toRel_ (liftOp (:||:)) x y
+    toRel_ (Apply (Var vn) [idx]) = do
+      -- This case enhances the lowered algebra context a bit.
+      -- TODO this should be handled by algebraContext.
+      a :: SoP Algebra.Symbol <- lift $ toAlgebra idx
+      pure $ sym2SoP (Algebra.Idx (Algebra.POR (S.singleton vn)) a) :==: int2SoP 1
     toRel_ _ = fail ""
 
     -- Convert to CNF, then get all conjuncts that are properties.

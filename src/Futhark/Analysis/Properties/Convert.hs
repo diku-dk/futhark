@@ -1668,9 +1668,13 @@ addBooleanNames :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
 addBooleanNames (E.PatParens pat _) = addBooleanNames pat
 addBooleanNames (E.PatAscription pat _ _) = addBooleanNames pat
 addBooleanNames (E.Id param (E.Info {E.unInfo = E.Array _ _ t}) _) = do
-  when (typeIsBool $ E.Scalar t) $ addProperty (Algebra.Var param) Property.Boolean
+  when (typeIsBool $ E.Scalar t) $ do
+    addProperty (Algebra.Var param) Property.Boolean
+    addRelSymbol (Prop (Property.Rng param (Just (int2SoP 0), Just (int2SoP 2))))
 addBooleanNames (E.Id param (E.Info {E.unInfo = t}) _) = do
-  when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
+  when (typeIsBool t) $ do
+    addProperty (Algebra.Var param) Property.Boolean
+    addRelSymbol (Prop (Property.Rng param (Just (int2SoP 0), Just (int2SoP 2))))
 addBooleanNames _ = pure ()
 
 -- Automatically refines size variables to be non-negative.
