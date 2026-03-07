@@ -100,9 +100,6 @@ def signed_dist_to_line (px: real, py: real) (qx: real, qy: real) (rx: real, ry:
   let by = ry - py
   in ssqr (ax * by - ay * bx) / (sqr ax + sqr ay)
 
--- def tabulate 't (n: i64) (f: i64 -> t): *[n]t =
---   map (\i -> f i) (iota n)
-
 def max (i,id) (j,jd) =
   if dist_less jd id then (i,id) else (j,jd)
 
@@ -153,39 +150,32 @@ def compute_new_seg_inds [num_segs] [num_points]
          else (-1)
     ) (iota num_points) points_idx points_x points_y
 
--- Precondition:  Range points.0 = [0, num_segs-1]
--- Postcondition: \ (xs, ys) -> length xs = 2*num_segs &&
---                              Range ys.0 = [0, 2*num_segs-1] &&
---                              Filt ys.1 points.1 (\_ -> false)
---                  -- ^ meaning some filtering with unknown pred
 def expand_hull [num_segs] [num_points]
-                -- (segs   : [num_segs](real,real,real,real))
-                (segs_begx : [num_segs]real)
-                (segs_begy : [num_segs]real)
-                (segs_endx : [num_segs]real)
-                (segs_endy : [num_segs]real)
-                -- (points : [num_points](i64, real, real))
-                (points_idx : {[num_points]i64 | \x -> Range x (0, num_segs)})
-                (points_x : [num_points]real)
-                (points_y : [num_points]real)
-              : {( []real,[]real,[]real,[]real -- segs'
-                , []i64, []real, []real     -- points'
-                ) | \(_,_,_,_, ys0,_,_) -> Range ys0 (0,2*num_segs)}
-              =
-
-  -- bounds checks of array `segs` are verifiable by precondition
-  let dists = map3
-              (\ seg_ix px py ->
-                 let ax = segs_begx[seg_ix]
-                 let ay = segs_begy[seg_ix]
-                 let bx = segs_endx[seg_ix]
-                 let by = segs_endy[seg_ix]
-                 let axay = (ax, ay)
-                 let bxby = (bx, by)
-                 let pxpy = (px, py)
-                 in signed_dist_to_line axay bxby pxpy
-              )
-              points_idx points_x points_y
+    -- (segs   : [num_segs](real,real,real,real))
+    (segs_begx : [num_segs]real)
+    (segs_begy : [num_segs]real)
+    (segs_endx : [num_segs]real)
+    (segs_endy : [num_segs]real)
+    -- (points : [num_points](i64, real, real))
+    (points_idx : {[num_points]i64 | \x -> Range x (0, num_segs)})
+    (points_x : [num_points]real)
+    (points_y : [num_points]real)
+    : {( []real,[]real,[]real,[]real -- segs'
+       , []i64, []real, []real       -- points'
+      ) | \(_,_,_,_, ys0,_,_) ->
+        Range ys0 (0,2*num_segs)
+    } =
+  let dists = map3 (\seg_ix px py ->
+      let ax = segs_begx[seg_ix]
+      let ay = segs_begy[seg_ix]
+      let bx = segs_endx[seg_ix]
+      let by = segs_endy[seg_ix]
+      let axay = (ax, ay)
+      let bxby = (bx, by)
+      let pxpy = (px, py)
+      in signed_dist_to_line axay bxby pxpy
+    )
+    points_idx points_x points_y
   
   let ne = (0, zero_dist)
   let bins = replicate num_segs ne
@@ -195,54 +185,28 @@ def expand_hull [num_segs] [num_points]
   let extrema_ix =
     reduce_by_index bins (\(i,id) (j,jd) -> if dist_less jd id then (i,id) else (j,jd)) ne inds vals
   let (extrema_ix_inds, _extrema_ix_dsts) = unzip extrema_ix
-  -- ^ 1. The length of `extrema_ix` is `num_segs` (from above)
-  -- V 2. Bounds checks for `extrema_ix[i]` and `segs[i]` are verifiable,
-  --      since 0 <= i < num_segs
-  --   3. Bounds checks for `points[extrema_ix[i].0]` needs to prove that:
-  --          0 <= extrema_ix[i].0 < num_points
-  --      the neutral element (ne) for reduce_by_index is (0, zero_max)
-  --      the operator returns one of the elements of the two args
-  --      (in fist position),
-  --       which are coming from `iota num_points` or from the neutral element 0
-  --      Hence it should be able to prove the bounds above.
-  --      If needed, modify `max` above to receive `num_points` as first (extra)
-  --      arg,
-  --        add the preconditions that `i` and `j` have range [0,num_points-1]
-  --        and the postcondition for the first return as also
-  --        Range [0,num_points-1]
-  -- 
-  let segs'' = map
-                 (\i -> let pbx = segs_begx[i]
-                        let pby = segs_begy[i]
-                        let pext_x = points_x[ extrema_ix_inds[i] ]
-                        let pext_y = points_y[ extrema_ix_inds[i] ]
-                        let pex = segs_endx[i]
-                        let pey = segs_endy[i]
-                        in  ( mk2vec pbx pext_x
-                            , mk2vec pby pext_y
-                            , mk2vec pext_x pex
-                            , mk2vec pext_y pey
-                            )
-                        -- [(segs[i].0, points[extrema_ix[i].0].1),
-                        -- (points[extrema_ix[i].0].1, segs[i].1)]
-                 )
-                (iota num_segs)
+  let segs'' = map (\i ->
+      let pbx = segs_begx[i]
+      let pby = segs_begy[i]
+      let pext_x = points_x[ extrema_ix_inds[i] ]
+      let pext_y = points_y[ extrema_ix_inds[i] ]
+      let pex = segs_endx[i]
+      let pey = segs_endy[i]
+      in  ( mk2vec pbx pext_x
+          , mk2vec pby pext_y
+          , mk2vec pext_x pex
+          , mk2vec pext_y pey
+          )
+    )
+    (iota num_segs)
   let (segs0'', segs1'', segs2'', segs3'') = unzip4 segs''
   let segs_begx' = flatten segs0''
   let segs_begy' = flatten segs1''
   let segs_endx' = flatten segs2''
   let segs_endy' = flatten segs3''
-  -- let segs' = flatten segs''
-  -- ^ Length of segs' is clearly `2*num_segs`
 
-  -- let (sgm_inds, only_points) = unzip points
   let new_seg_inds =
     compute_new_seg_inds segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y extrema_ix_inds
-  -- ^ From the map above, it should be provable that the range of
-  --     `new_seg_inds` is [-1, 2*num_segs-1]
-  -- V The filter below removes the less than zero elements, hence,
-  --     the range of points'.0 should be `[0, 2*num_segs-1]`
-  --   Finally, it should be trivial that `points'.1` is some filtering of `points.1`
   let (ids, points_x', points_y') = remove_negatives num_segs new_seg_inds points_x points_y
   in (segs_begx', segs_begy', segs_endx', segs_endy',
       ids, points_x', points_y')
@@ -251,41 +215,33 @@ def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -
   map (\i -> x[i + a]) (iota (b - a))
 
 def non_empty_segments
-      [num_segs]
-      [num_points]
-      (_segs : [num_segs]real)
-      (sgm_inds : [num_points]i64)
-      : {[num_segs]bool | \_ -> true} =
+    [num_segs]
+    [num_points]
+    (_segs : [num_segs]real)
+    (sgm_inds : [num_points]i64)
+    : {[num_segs]i64 | \_ -> true} =
   let zeros = replicate num_segs 0
   let ones = replicate num_points 1
-  let segs_inhabited' = reduce_by_index zeros (+) 0 sgm_inds ones
-  let segs_inhabited = map (\i -> i > 0) segs_inhabited'
-  in segs_inhabited
+  let seg_sizes = reduce_by_index zeros (+) 0 sgm_inds ones
+  in seg_sizes
 
---
--- Precondition: RANGE(sgm_inds) = [0,num_segs-1]
--- Postcondition: \ (_, segs', sgm_inds') ->
---                    Range sgm_inds' = [0, length segs' - 1] &&
---
 def extract_empty_segments [num_segs] [num_points]
-                           (hull_x : []real)
-                           (hull_y : []real)
-                           (segs_inhabited : [num_segs]bool)
-                           (segs_bx : [num_segs]real)
-                           (segs_by : [num_segs]real)
-                           (segs_ex : [num_segs]real)
-                           (segs_ey : [num_segs]real)
-                           (sgm_inds : {[num_points]i64 | \x -> Range x (0, num_segs)})
-    -- : {([](real,real), [](real,real,real,real), [num_points]i64) | \_ -> true} =
+    (hull_x : []real)
+    (hull_y : []real)
+    (seg_sizes : [num_segs]i64)
+    (segs_bx : [num_segs]real)
+    (segs_by : [num_segs]real)
+    (segs_ex : [num_segs]real)
+    (segs_ey : [num_segs]real)
+    (sgm_inds : {[num_points]i64 | \x -> Range x (0, num_segs)})
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
        , []i64                       -- seg_inds'
-      ) | \(_,_, segs_bx',_,_,_, sgm_inds') ->
-          let num_segs' = length segs_bx'
-          in Range sgm_inds' (0, num_segs')
-      }
-    =
-  -- let segs_parted = scatter zeros inds segs  
+       ) | \(_,_, segs_bx',_,_,_, sgm_inds') ->
+         let num_segs' = length segs_bx'
+         in Assume (Range sgm_inds' (0, num_segs'))
+      } =
+  let segs_inhabited = map (\i -> i > 0) seg_sizes
   let (n, inds) = partition_indices segs_inhabited
   let zeros = replicate num_segs 0
   let segs_parted_bx = scatter zeros inds segs_bx
@@ -319,27 +275,27 @@ def extract_empty_segments [num_segs] [num_points]
   in (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds')
 
 def semihull_loop [num_segs] [num_points]
-                  (hull_x : []real)
-                  (hull_y : []real)
-                  -- (segs   : [num_segs](real,real,real,real))
-                  (segs_begx : [num_segs]real)
-                  (segs_begy : [num_segs]real)
-                  (segs_endx : [num_segs]real)
-                  (segs_endy : [num_segs]real)
-                  -- (points : [num_points](i64, real, real))
-                  (points_idx : {[num_points]i64 | \x -> Range x (0,num_segs)})
-                  (points_x : [num_points]real)
-                  (points_y : [num_points]real)
+    (hull_x : []real)
+    (hull_y : []real)
+    -- (segs   : [num_segs](real,real,real,real))
+    (segs_begx : [num_segs]real)
+    (segs_begy : [num_segs]real)
+    (segs_endx : [num_segs]real)
+    (segs_endy : [num_segs]real)
+    -- (points : [num_points](i64, real, real))
+    (points_idx : {[num_points]i64 | \x -> Range x (0,num_segs)})
+    (points_x : [num_points]real)
+    (points_y : [num_points]real)
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
        , []i64,[]real,[]real         -- points
       ) | \(_,_, out_segs_begx,_,_,_, out_points_idx,_,_) -> Range out_points_idx (0,length out_segs_begx)}
     =
-   let (segs_begx', segs_begy', segs_endx', segs_endy',
-        points_idx', points_x', points_y') = expand_hull segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
-   let segs_inhabited = non_empty_segments segs_begx' points_idx'
-   let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'') = extract_empty_segments hull_x hull_y segs_inhabited segs_begx' segs_begy' segs_endx' segs_endy' points_idx'
-   in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
+  let (segs_begx', segs_begy', segs_endx', segs_endy',
+      points_idx', points_x', points_y') = expand_hull segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
+  let seg_sizes = non_empty_segments segs_begx' points_idx'
+  let (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'') = extract_empty_segments hull_x hull_y seg_sizes segs_begx' segs_begy' segs_endx' segs_endy' points_idx'
+  in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 
 def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 : [n]real) (points1 : [n]real) : {[](real, real) | \_ -> true}  =
   -- We don't support branches with different sizes in the index
@@ -348,20 +304,20 @@ def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 
   --
   -- if n == 0 then map (\_ -> (startx,starty)) (iota 1)
   -- else
-    let hull = map (\_ -> (0,0)) (iota 0)
-    let segs = map (\_ -> (startx,starty, endx,endy)) (iota 1)
-    let points_idx = map (\_ -> 0) points0
-    let points_x = points0
-    let points_y = points1
-    let (segs_begx, segs_begy, segs_endx, segs_endy) = unzip4 segs
-    let (hullx, hully) = unzip hull
-    let (hullx', hully', _,_,_,_, _,_,_) =
-       -- loop (hull, segs, points) =
-       --   ([], [(startx,starty, endx,endy)], map (\(x,y) -> (0, x, y)) points)
-       -- while !null points do
-         semihull_loop hullx hully segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
-    let hull' = zip hullx' (sized_like hullx' hully')
-    in hull'
+  let hull = map (\_ -> (0,0)) (iota 0)
+  let segs = map (\_ -> (startx,starty, endx,endy)) (iota 1)
+  let points_idx = map (\_ -> 0) points0
+  let points_x = points0
+  let points_y = points1
+  let (segs_begx, segs_begy, segs_endx, segs_endy) = unzip4 segs
+  let (hullx, hully) = unzip hull
+  let (hullx', hully', _,_,_,_, _,_,_) =
+     -- loop (hull, segs, points) =
+     --   ([], [(startx,starty, endx,endy)], map (\(x,y) -> (0, x, y)) points)
+     -- while !null points do
+       semihull_loop hullx hully segs_begx segs_begy segs_endx segs_endy points_idx points_x points_y
+  let hull' = zip hullx' (sized_like hullx' hully')
+  in hull'
 
 def pmin p0 p1 q0 q1: {(f64,f64) | \_ -> true} =
   -- Applying the identity function makes the index function uninterpreted.
@@ -397,7 +353,6 @@ def compute (n: {i64 | \n -> Range n (3,inf)}) (ps0 : [n]f64)
     ) ps0 ps1
   let (a, b, points_parted0) = partition3 conds ps0
   let (_, _, points_parted1) = partition3 conds ps1
-  -- let _discard = slice points_parted 0 a
   let upper_points0 = slice points_parted0 a b
   let upper_points1 = slice points_parted1 a b
   let lower_points0 = slice points_parted0 b n
