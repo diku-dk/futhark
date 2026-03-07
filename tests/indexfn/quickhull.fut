@@ -214,62 +214,33 @@ def expand_hull [num_segs] [num_points]
 def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -> Range b' (0,n+1)}) =
   map (\i -> x[i + a]) (iota (b - a))
 
-def semihull_loop [num_segs] [num_points]
+def non_empty_segments
+    [num_segs]
+    [num_points]
+    (_segs : [num_segs]real)
+    (sgm_inds : [num_points]i64)
+    : {[num_segs]bool | \_ -> true} =
+  let zeros = replicate num_segs 0
+  let ones = replicate num_points 1
+  let seg_sizes = reduce_by_index zeros (+) 0 sgm_inds ones
+  let segs_inhabited = map (\i -> i > 0) seg_sizes
+  in segs_inhabited
+
+def extract_empty_segments [num_segs] [num_points]
     (hull_x : []real)
     (hull_y : []real)
-    -- (segs   : [num_segs](real,real,real,real))
+    (segs_inhabited: [num_segs]bool)
     (segs_bx : [num_segs]real)
     (segs_by : [num_segs]real)
     (segs_ex : [num_segs]real)
     (segs_ey : [num_segs]real)
-    -- (points : [num_points](i64, real, real))
-    (sgm_inds: {[num_points]i64 | \x -> Range x (0,num_segs)})
-    (points_x : [num_points]real)
-    (points_y : [num_points]real)
+    (sgm_inds : {[num_points]i64 | \x -> Range x (0, length segs_bx)})
     : {( []real, []real              -- hull'
        , []real,[]real,[]real,[]real -- segs'
-       , []i64,[]real,[]real         -- points
-      ) | \(_,_, res_segs_bx,_,_,_, res_sgm_inds,_,_) ->
-        Range res_sgm_inds (0,length res_segs_bx)}
-    =
-  let ( segs_bx
-      , segs_by
-      , segs_ex
-      , segs_ey
-      , sgm_inds
-      , points_x
-      , points_y) =
-    expand_hull
-      segs_bx
-      segs_by
-      segs_ex
-      segs_ey
-      sgm_inds
-      points_x
-      points_y
-  -- let ( hull_x
-  --     , hull_y
-  --     , segs_true_bx
-  --     , segs_true_by
-  --     , segs_true_ex
-  --     , segs_true_ey
-  --     , sgm_inds) =
-  --   extract_empty_segments
-  --     hull_x
-  --     hull_y
-  --     segs_bx
-  --     segs_by
-  --     segs_ex
-  --     segs_ey
-  --     sgm_inds
-  -- let zeros = map (\_ -> 0) segs_bx
-  -- let ones = map (\_ -> 1) sgm_inds
-  let zeros = replicate (num_segs * 2) 0
-  let ones = replicate (length sgm_inds) 0
-  let sgm_inds = sized (length sgm_inds) sgm_inds
-  let seg_sizes = reduce_by_index zeros (+) 0 sgm_inds ones
-  let segs_inhabited = map (\i -> i > 0) seg_sizes
-
+       , []i64                       -- seg_inds'
+       ) | \(_,_, segs_bx',_,_,_, sgm_inds') ->
+         Assume (Range sgm_inds' (0, length segs_bx'))
+      } =
   let (n, inds) = partition_indices segs_inhabited
   let zeros = replicate num_segs 0
   let segs_parted_bx = scatter zeros inds segs_bx
@@ -300,7 +271,59 @@ def semihull_loop [num_segs] [num_points]
       then sum_segs[seg_ix] - segs_indicator[seg_ix]
       else 0
     ) sgm_inds
-  in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds', points_x, points_y)
+  in (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds')
+
+def semihull_loop [num_segs] [num_points]
+    (hull_x : []real)
+    (hull_y : []real)
+    -- (segs   : [num_segs](real,real,real,real))
+    (segs_bx : [num_segs]real)
+    (segs_by : [num_segs]real)
+    (segs_ex : [num_segs]real)
+    (segs_ey : [num_segs]real)
+    -- (points : [num_points](i64, real, real))
+    (sgm_inds: {[num_points]i64 | \x -> Range x (0,num_segs)})
+    (points_x : [num_points]real)
+    (points_y : [num_points]real)
+    : {( []real, []real              -- hull'
+       , []real,[]real,[]real,[]real -- segs'
+       , []i64,[]real,[]real         -- points
+      ) | \(_,_, res_segs_bx,_,_,_, res_sgm_inds,_,_) ->
+        Range res_sgm_inds (0,length res_segs_bx)}
+    =
+  let ( segs_bx'
+      , segs_by'
+      , segs_ex'
+      , segs_ey'
+      , sgm_inds'
+      , points_x'
+      , points_y') =
+    expand_hull
+      segs_bx
+      segs_by
+      segs_ex
+      segs_ey
+      sgm_inds
+      points_x
+      points_y
+  let segs_inhabited = non_empty_segments segs_bx' sgm_inds'
+  let ( hull_x'
+      , hull_y'
+      , segs_true_bx
+      , segs_true_by
+      , segs_true_ex
+      , segs_true_ey
+      , sgm_inds'') =
+    extract_empty_segments
+      hull_x
+      hull_y
+      segs_inhabited
+      segs_bx'
+      segs_by'
+      segs_ex'
+      segs_ey'
+      sgm_inds'
+  in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds'', points_x', points_y')
 
 def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 : [n]real) (points1 : [n]real) : {[](real, real) | \_ -> true}  =
   -- We don't support branches with different sizes in the index
