@@ -1,5 +1,5 @@
 -- ==
--- input { [3i64, 7i64, 100i64, 1i64, 1000i64] }
+-- input { [3i64, 7i64, 10i64, 1i64, 20i64] }
 -- auto output
 def main (xs) =
   map (\x ->

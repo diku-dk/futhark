@@ -1,5 +1,6 @@
+-- Nested maps over irregular iota arrays
 -- ==
--- input { [2i64,3] [2i64,1] }
+-- input { [2i64, 3i64, 5i64] [1i64, 2i64] }
 -- auto output
 def main (xs) (ys) =
   map (\x ->

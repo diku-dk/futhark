@@ -9,5 +9,5 @@
 -- }
 entry main (xs: []i64) (ys: []i64) =
   map (\x ->
-        map (\y -> [x, y, x+y]) ys
-      ) xs
+         map (\y -> [x, y, x + y]) ys)
+      xs

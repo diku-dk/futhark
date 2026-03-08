@@ -228,12 +228,10 @@ transformScalarStms ::
   [VName] ->
   Builder GPU DistEnv
 transformScalarStms segments env inps distres stms res = do
-  traceM $ unlines ["transforming scalar stms", prettyString stms]
   vs <- letTupExp "scalar_dist" <=< renameExp <=< segMap segments $ \is -> do
     readInputs segments env (toList is) inps
     addStms $ fmap soacsStmToGPU stms
     pure $ subExpsRes $ map Var res
-  traceM $ unlines ["transforming scalar stms done"]
   pure $ insertReps (zip (map distResTag distres) $ map Regular vs) env
 
 transformScalarStm ::
@@ -874,7 +872,6 @@ onMapInputArr segments env inps ws_O ws_data p arr = do
                       pure $ MapArray (irregularD rep) (stripArray 1 elems_t)
                     else do
                       -- We need to materialize the data.
-                      traceM $ "FLATTENING IRREGULAR ARRAY " ++ prettyString arr
                       new_flat <-
                         letExp (baseName arr <> "_flat_expand")
                           <=< segMap (MkSolo ws_prod)
@@ -979,7 +976,6 @@ transformInnerMap segments env inps pat w arrs map_lam = do
         transformDistributed arrmap (NE.singleton new_segment) distributed
   traceM $ unlines ["inner map distributed", prettyString distributed]
   addStms =<< runReaderT (runBuilder_ m) scope
-  traceM $ unlines ["inner map distributed and transformed"]
   pure (ws_F, ws_O, ws)
 
 -- Reduction or scan operators may not have any free variables that are variant
@@ -1054,19 +1050,11 @@ transformDistStm segments env (DistStm inps res stm) = do
           -- XXX: here we silently sequentialise any SOAC that is not handled
           -- above. We need to make sure that we actually handle everything we
           -- care about!
-          traceM $ "Sequentialising unhandled SOAC:\n" ++ prettyString stm
-          transformScalarStm segments env inps res $
-            Let pat aux (Op (Screma w arrs form))
+           error $ "unhandled SOAC:\n" ++ prettyString stm
+          -- transformScalarStm segments env inps res $
+          --   Let { stmPat = pat, stmAux = aux, stmExp = (Op (Screma w arrs form)) }
     Let _ _ (Match scrutinees cases defaultCase _) -> do
       let [w] = NE.toList segments
-      traceM $
-        unlines
-          [ "=== match  ===",
-            "scrutinees: " ++ prettyString scrutinees,
-            "cases: " ++ prettyString cases,
-            "default: " ++ prettyString defaultCase
-          ]
-
       -- We need to partition the indices of the scrutinees by which case they match.
       -- Lift the scrutinees.
       -- If it's a variable, we know it's a scalar and the lifted version will therefore be a regular array.
@@ -1114,20 +1102,15 @@ transformDistStm segments env (DistStm inps res stm) = do
 
       -- Take the elements at index `is` from an input `v`.
       let splitInput is v = do
-            traceM $ "Splitting started for " ++ prettyString v ++ "of " ++prettyString is
-            traceM $ "look up result " ++ show (M.lookup v $ inputReps inps env)
             (t, rep) <- liftSubExp segments inps env (Var v)
-            traceM $ "Splitting done for " ++ prettyString v ++ " of type " ++ prettyString t ++ " with rep " ++ show rep ++ " for indices " ++ prettyString is
             (t,v,) <$> case rep of
               Regular arr -> do
                 -- In the regular case we just take the elements
                 -- of the array given by `is`
                 n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-                traceM $ "Regular split: n = " ++ prettyString n
                 arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
                   idx <- letExp "idx" =<< eIndex is [eSubExp i]
                   subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
-                traceM $ "Regular split result: " ++ prettyString arr'
                 pure $ Regular arr'
               Irregular (IrregularRep segs flags offsets elems) -> do
                 -- In the irregular case we take the elements
@@ -1164,14 +1147,7 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- Given the indices for which a branch is taken and its body,
       -- distribute the statements of the body of that branch.
       let distributeBranch is body = do
-            traceM $
-              unlines
-              ["Distributing branch with indices: " ++ prettyString is
-              ,"fre in  body: " ++ show (namesToList $ freeIn body)
-              ] 
-            
             (ts, vs, reps) <- unzip3 <$> mapM (splitInput is) (namesToList $ freeIn body)
-            traceM $ "Branch free variables: " ++ prettyString (zip vs ts)
             let inputs = do
                   (v, t, i) <- zip3 vs ts [0 ..]
                   pure (v, DistInput (ResTag i) t)
@@ -1184,14 +1160,7 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- We put the default case at the start as it's the 0'th equivalence class
       -- and is therefore the first segment after the partition.
       let branch_bodies = defaultCase : map (\(Case _ body) -> body) cases
-      traceM $ "Branch bodies: " ++ prettyString branch_bodies
       (branch_inputs, branch_envs, branch_dstms) <- unzip3 <$> zipWithM distributeBranch inds branch_bodies
-      traceM 
-        $ unlines 
-          [ "=== distributed branches ===",
-            "branch inputs: " ++ prettyString branch_inputs,
-            "branch dstms: " ++ prettyString branch_dstms
-          ]
       
       let branch_results = map bodyResult branch_bodies
       lifted_bodies <- forM [0 .. num_cases - 1] $ \i -> do
@@ -1276,15 +1245,6 @@ transformDistStm segments env (DistStm inps res stm) = do
       if isVariant inps env n
         then transformFortoWhile segments env inps res aux merge i it n body
         else do
-          traceM $
-            unlines
-              [ "=== For loop ===",
-                "merge params: " ++ prettyString (map fst merge),
-                "merge inits:  " ++ prettyString (map snd merge),
-                "iteratior var:         " ++ prettyString i,
-                "number of iterartions:         " ++ prettyString n,
-                "body:         " ++ prettyString body
-              ]
           let [w] = NE.toList segments
               old_loop_params = map fst merge
               old_loop_inits = map snd merge
@@ -1339,15 +1299,6 @@ transformDistStm segments env (DistStm inps res stm) = do
               out_reps = resultToResReps result_types loop_out_vs
           pure $ insertReps (zip (map distResTag res) out_reps) env
     Let _ aux (Loop merge (WhileLoop cond) body) -> do
-      traceM $
-        unlines
-          [ "=== WhileLoop ===",
-            "merge params: " ++ prettyString (map fst merge),
-            "merge inits:  " ++ prettyString (map snd merge),
-            "cond:         " ++ prettyString cond,
-            "body:         " ++ prettyString body,
-            "loop inputs:  " ++ prettyString inps
-          ]
 
       -- TODO:
       -- 4) Use reduction rather than scan for any_active
@@ -1362,12 +1313,6 @@ transformDistStm segments env (DistStm inps res stm) = do
 
       (lifted_loop_params, lifted_loop_reps) <- mapAndUnzipM (liftParam w) old_loop_params
       lifted_init <- mapM (liftLoopInit segments inps env) old_loop_inits
-      traceM $
-        unlines
-          [ "lifted_loop_params: " ++ prettyString lifted_loop_params,
-            "lifted_init:       " ++ prettyString lifted_init
-          ]
-
       let lifted_loop_params' = concat lifted_loop_params
           lifted_init' = concat lifted_init
 
@@ -1385,12 +1330,6 @@ transformDistStm segments env (DistStm inps res stm) = do
               lifted_loop_reps
           loop_new_inputs = inps_local <> loop_param_inputs_local
           loop_env_local = insertReps loop_param_reps_local env_local0
-
-      traceM $
-        unlines
-          [ "loop_param_new_inputs: " ++ prettyString loop_new_inputs,
-            "loop_env_local: " ++ show (distResMap loop_env_local)
-          ]
 
       let maybe_cond = lookup cond (zip (map paramName old_loop_params) (zip lifted_loop_reps lifted_init))
       scope <- askScope
@@ -1468,19 +1407,14 @@ transformDistStm segments env (DistStm inps res stm) = do
                     pure rep
 
                   let free_in_body = namesToList $ freeIn body
-                  traceM $ "Free variables in loop body: " ++ prettyString free_in_body
-                  free_sizes <- localScope (scopeOfDistInputs loop_new_inputs) $ foldMap freeIn <$> mapM lookupType (namesToList $ freeIn body)
-                  traceM $ "Free sizes in loop body: " ++ prettyString free_sizes
+                  -- free_sizes <- localScope (scopeOfDistInputs loop_new_inputs) $ foldMap freeIn <$> mapM lookupType (namesToList $ freeIn body)
                   (ts, vs, reps) <- unzip3 <$> mapM (splitInput segments loop_new_inputs loop_env_local active_inds) free_in_body
-                  traceM $ "split input done: " ++ prettyString (zip vs ts)
                   let subset_inputs = do
                         (v, t, i) <- zip3 vs ts [0 ..]
                         pure (v, DistInput (ResTag i) t)
                       env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
                   let (subset_inputs', subset_dstms) = distributeBody scope num_data subset_inputs body
-                  traceM $ "distribute body done: " ++ prettyString subset_inputs'
                   subset_body_res <- liftBody num_data subset_inputs' env_subset subset_dstms (bodyResult body)
-                  traceM $ "lift body done: " ++ prettyString subset_body_res
                   subset_result_vs <- mapM (letExp "subset_result" <=< toExp . resSubExp) subset_body_res
                   let active_reps = resultToResReps (map declTypeOf old_loop_params) subset_result_vs
 
@@ -1540,7 +1474,7 @@ transformDistStm segments env (DistStm inps res stm) = do
                         old_loop_params
                         (zip inactive_reps active_reps)
 
-                  -- we have one extra iteration but we ignore it for now
+                  -- we have one extra iteration but it is better than extra reduction in the loop body,
                   any_active <-
                     letSubExp "any_active"
                       =<< eIf
@@ -1679,7 +1613,6 @@ liftSubExp segments inps env se = case se of
      in ((t,) . Regular <$> letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c))
   Var v -> case M.lookup v $ inputReps inps env of
     Just (t, Regular v') -> do
-      traceM $ "liftSubExp: found regular rep for " ++ prettyString v ++ ": " ++ prettyString v'
       (t,)
         <$> case t of
           Prim {} -> pure $ Regular v'
@@ -1810,9 +1743,7 @@ liftResult :: Segments -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Resu
 liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
   where
     vs = do
-      traceM $ "Lifting result: " ++ prettyString res
       (_, rep) <- liftSubExp segments inps env (resSubExp res)
-      traceM $ "liftSubExp called when lifting result: " ++ prettyString res
       case rep of
         Regular v -> pure [v]
         Irregular irreg -> mkIrrep irreg
@@ -1836,11 +1767,6 @@ liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GP
 liftBody w inputs env dstms result = do
   let segments = NE.singleton w
   env' <- foldM (transformDistStm segments) env dstms
-  traceM $ unlines
-    [ "statements: " ++ prettyString dstms,
-      "env: " ++ show (distResMap env'),
-      "result: " ++ prettyString result
-    ]
   result' <- mapM (liftResult segments inputs env') result
   pure $ concat result'
 
@@ -1933,7 +1859,6 @@ isVariant inps env se = case se of
   Var v -> isJust $ M.lookup v $ inputReps inps env
 
 -- transform a for-loop with a variant iteration count into a while-loop
--- I'm not sure if this is the best approach to the problem
 transformFortoWhile ::
   Segments ->
   DistEnv ->
