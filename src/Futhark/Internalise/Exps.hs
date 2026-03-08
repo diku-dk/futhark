@@ -757,6 +757,9 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
     lowerPath base_t base_vs path_steps new_vals
       | all noSlice path_steps =
           lowerPathFields base_t base_vs path_steps new_vals
+      where
+        noSlice E.UpdateStepSlice {} = False
+        noSlice _ = True
     lowerPath base_t base_vs path_steps new_vals = do
       let focused0 = zip [0 ..] (map (const Nothing) base_vs)
       updates <- go base_vs mempty base_t focused0 path_steps new_vals
@@ -779,9 +782,6 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
       pure $ map I.Var before ++ updated_field_vals ++ map I.Var after
     lowerPathFields _ _ _ _ =
       error "lowerPathFields: unexpected slice step"
-
-    noSlice E.UpdateStepSlice {} = False
-    noSlice _ = True
 
     go ::
       [I.VName] ->
