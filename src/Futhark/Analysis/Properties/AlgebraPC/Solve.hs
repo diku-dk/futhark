@@ -276,9 +276,11 @@ getRangeOfSym idxsym@(Idx (One arr_nm) idx) = do
 getRangeOfSym (Pow{}) = do
   pure $ Range sop1s 1 S.empty
 --
-getRangeOfSym (Sum (POR {}) slc_beg slc_end) = do
-  let ub = S.singleton $ slc_end .-. slc_beg .+. int2SoP 1
-  pure $ Range sop0s 1 ub
+getRangeOfSym sym@(Sum (POR {}) slc_beg slc_end) = do
+  Range sym_lb m sym_ub <- lookupRange sym
+  let lb = if null sym_lb then sop0s else sym_lb
+  let ub = if null sym_ub && m == 1 then S.singleton (slc_end .-. slc_beg .+. int2SoP 1) else sym_ub
+  pure $ Range lb m ub
 --
 getRangeOfSym (Sum (One arr_nm) slc_beg slc_end) = do
   let slc_len = slc_end .-. slc_beg .+. int2SoP 1

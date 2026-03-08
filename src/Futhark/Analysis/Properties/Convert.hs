@@ -17,7 +17,7 @@ import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Flatten (unflatten)
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (dimSize, domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn)
+import Futhark.Analysis.Properties.IndexFnPlus (dimSize, domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn, dimStart, dimEnd)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (MonDir (..), askRng, cloneProperty)
 import Futhark.Analysis.Properties.Property qualified as Property
@@ -932,6 +932,55 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
                 singleCase . sym2SoP $
                   Apply (Var h) (map (sVar . boundVar) (mconcat $ shape y))
             }
+  | Just "reduce_by_index" <- getFun e_f,
+    [e_dest, e_op, _e_ne, e_is, e_xs] <- getArgs args,
+    E.OpSection vn_op _ _ <- e_op,
+    E.baseTag (E.qualLeaf vn_op) <= E.maxIntrinsicTag,
+    name <- E.baseString $ E.qualLeaf vn_op,
+    Just E.LogOr <- L.find ((name ==) . prettyStr) [minBound .. maxBound :: E.BinOp] = do
+      f_xs <- forward e_xs
+      f_is <- forward e_is
+      f_dest <- forward e_dest
+      unless (length f_xs == length f_dest && length f_xs == 1) $
+        error "not implemented yet"
+      let [x] = f_xs
+      let [idx] = f_is
+      let [y] = f_dest
+
+      unless (rank y == 1 && rank x == 1 && rank idx == 1) $ error "not implemented yet"
+
+      m <- rewrite $ dimSize (head $ shape idx)
+      non_empty_idx <- Bool True =>? (m :> int2SoP 0)
+
+      n <- rewrite $ dimSize (head $ shape y)
+      let in_dom v = int2SoP 0 :<= v :&& v :< n
+      in_bounds <- askQ (CaseCheck in_dom) idx
+      all_trues <- askQ Truth x
+
+      addRelSymbol (Prop $ Property.Rng h (Just $ int2SoP 0, Just $ int2SoP 2))
+      printM 10 $ "m " <> prettyStr m
+      printM 10 $ "non_empty_idx " <> prettyStr non_empty_idx
+      printM 10 $ "in_bounds " <> prettyStr in_bounds
+      printM 10 $ "all_trues " <> prettyStr all_trues
+      when (isYes in_bounds && isYes all_trues) $ do
+        -- If the index array is non-empty, all indices are in bounds
+        -- and all values are true, then there is at least one true in h.
+        case shape y of
+          [d] -> do
+            j <- newNameFromString "j"
+            addProperty (Algebra.Var h) Property.Boolean
+            sum_h <- toAlgebra . sym2SoP $ Sum j (dimStart d) (dimEnd d) (Apply (Var h) [sVar j])
+            printM 0 $ prettyStr sum_h
+            addRel (int2SoP 1 :<=: sum_h)
+          _ -> pure ()
+
+      pure [
+        y
+          { body =
+              singleCase . sym2SoP $
+                Apply (Var h) (map (sVar . boundVar) (mconcat $ shape y))
+          }
+        ]
   | Just "reduce_by_index" <- getFun e_f,
     [dest, e_op, e_ne, _is, _xs] <- getArgs args,
     E.Lambda params lam_body _ _ _ <- e_op,

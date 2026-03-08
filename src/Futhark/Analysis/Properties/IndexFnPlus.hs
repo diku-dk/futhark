@@ -12,6 +12,8 @@ module Futhark.Analysis.Properties.IndexFnPlus
     intervalStart,
     index,
     dimSize,
+    dimStart,
+    dimEnd,
   )
 where
 

@@ -202,13 +202,11 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                     (Nothing, Just a') -> pure Yes
                     (Just a, Nothing) -> pure Unknown
                     (Just a, Just a') -> (a $<=) =<< fromAlgebra a'
-                    _ -> pure Unknown
               let ub = case (snd rng, snd rng') of
                     (Nothing, Nothing) -> pure Yes
                     (Nothing, Just a') -> pure Yes
                     (Just a, Nothing) -> pure Unknown
                     (Just b, Just b') -> ($<= b) =<< fromAlgebra b'
-                    _ -> pure Unknown
               let same_range =
                     answerFromBool <$> ((wts `unifiesWith`) =<< fromAlgebra known)
               range_subset <- isYes <$> same_range `orM` (lb `andM` ub)
