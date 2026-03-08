@@ -805,7 +805,7 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
                 sname_t <- lookupType sname
                 let rowtype = sname_t `setArrayDims` sliceDims sl
                 ve'' <- ensureShape errormsg rowtype "update_val_correct_shape" ve'
-                certifying certs $ I.Var <$> (letInPlace desc sname sl $ BasicOp $ SubExp ve'')
+                certifying certs $ I.Var <$> letInPlace desc sname sl (BasicOp $ SubExp ve'')
 
       M.fromList
         <$> zipWithM
