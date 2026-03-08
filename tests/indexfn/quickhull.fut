@@ -150,8 +150,7 @@ def compute_new_seg_inds [num_segs] [num_points]
          else (-1)
     ) (iota num_points) points_idx points_x points_y
 
-def expand_hull [num_segs]
-    (num_points : {i64 | \x -> Range x (1, inf)})
+def expand_hull [num_segs] [num_points]
     -- (segs   : [num_segs](real,real,real,real))
     (segs_begx : [num_segs]real)
     (segs_begy : [num_segs]real)
@@ -164,9 +163,7 @@ def expand_hull [num_segs]
     : {( []real,[]real,[]real,[]real -- segs'
        , []i64, []real, []real       -- points'
       ) | \(segs_bx',_,_,_, points_idx',_,_) ->
-        let num_points' = length points_idx'
-        in Range points_idx' (0, length segs_bx')
-           && Range num_points' (1, inf)
+        Range points_idx' (0, length segs_bx')
     } =
   let dists = map3 (\seg_ix px py ->
       let ax = segs_begx[seg_ix]
@@ -230,9 +227,7 @@ def extract_empty_segments [num_segs]
        , []real,[]real,[]real,[]real -- segs'
        , []i64                       -- seg_inds'
        ) | \(_,_, segs_bx',_,_,_, sgm_inds') ->
-         let num_points' = length sgm_inds'
-         in Range sgm_inds' (0, length segs_bx')
-           && Range num_points' (1, inf)
+         Range sgm_inds' (0, length segs_bx')
       } =
   let zeros = replicate num_segs false
   let ones = replicate num_points true
@@ -293,12 +288,6 @@ def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 
     -- which is annotated as both pre- and postconditions
     -- on both expand_hull and extract_empty_segments.
 
-    -- This size business is due to limitations in Futhark's existing size type system.
-    let n = length points_idx
-    let points_idx = sized n points_idx
-    let points_x = sized n points_x
-    let points_y = sized n points_y
-
     let ( segs_bx'
         , segs_by'
         , segs_ex'
@@ -306,19 +295,11 @@ def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 
         , points_idx'
         , points_x'
         , points_y') =
-      expand_hull
-        n
-        segs_bx
-        segs_by
-        segs_ex
-        segs_ey
-        points_idx
-        points_x
-        points_y
+      expand_hull segs_bx segs_by segs_ex segs_ey points_idx points_x points_y
 
     -- This size business is due to limitations in Futhark's existing size type system.
-    let n = length points_idx'
-    let points_idx' = sized n points_idx'
+    let N = length points_idx'
+    let points_idx' = sized N points_idx'
 
     let ( hull_x'
         , hull_y'
@@ -327,15 +308,22 @@ def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 
         , segs_true_ex
         , segs_true_ey
         , points_idx'') =
-      extract_empty_segments
-        n
-        hull_x
-        hull_y
-        segs_bx'
-        segs_by'
-        segs_ex'
-        segs_ey'
-        points_idx'
+      if N > 0 then
+        extract_empty_segments N hull_x hull_y segs_bx' segs_by' segs_ex' segs_ey' points_idx'
+      else
+        let segs_true_bx = map (\_ -> 0) (iota 0)
+        let segs_true_by = map (\_ -> 0) (iota 0)
+        let segs_true_ex = map (\_ -> 0) (iota 0)
+        let segs_true_ey = map (\_ -> 0) (iota 0)
+
+        let segs_false_bx = segs_bx
+        let segs_false_by = segs_by
+
+        let hull_x' = hull_x ++ segs_false_bx
+        let hull_y' = hull_y ++ segs_false_by
+        in (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey,
+          points_idx')
+        -- Postcondition holds vacuously here because points_idx' is empty.
     in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
   let hull' = zip hull_x' (sized_like hull_x' hull_y')
   in hull'

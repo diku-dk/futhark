@@ -460,6 +460,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       fs <- lookupIndexFn vn
       case fs of
         Just [f] -> pure f
+        Nothing -> pure $ IndexFn [] (singleCase . sym2SoP $ Var vn) -- TODO no good if vn is array typed
         _ -> error $ "internal error: getFn " <> prettyStr vn <> " " <> prettyStr fs
 
     predToFun (Predicate vn e) arg =

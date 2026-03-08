@@ -576,14 +576,17 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   -- (E.g., use "outer" guards or bool-multiplication tricks on domain sizes.)
   let eq x y = isJust <$> (unify x y :: IndexFnM (Maybe (Substitution Symbol)))
   dims_eq <- and . mconcat <$> zipWithM (zipWithM eq) (concatMap shape ts) (concatMap shape fs)
-  unless dims_eq $ error "Branches with different dimensions not supported yet."
+  -- unless dims_eq $ error "Branches with different dimensions not supported yet."
 
   c <- newVName "if-condition"
   t_branch <- newVName "t_branch"
   f_branch <- newVName "f_branch"
   let gs = cases [(Var c, sVar t_branch), (neg $ Var c, sVar f_branch)]
   forM (zip ts fs) $ \(t, f) -> do
-    substParams (IndexFn (shape t) gs) [(c, f_c), (t_branch, t), (f_branch, f)]
+    let new_shape =
+          if dims_eq then shape t
+          else zipWith (zipWith (\(Forall i (Iota n)) (Forall _ (Iota m)) -> Forall i . Iota . flattenCases $ cases [(Var c, n), (neg (Var c), m)])) (shape t) (shape f)
+    substParams (IndexFn new_shape gs) [(c, f_c), (t_branch, t), (f_branch, f)]
       >>= rewrite
 forward (E.Lambda _ _ _ _ loc) =
   error $ errorMsg loc "Cannot create index function for unapplied lambda."
