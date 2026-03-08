@@ -807,14 +807,9 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
                 ve'' <- ensureShape errormsg rowtype "update_val_correct_shape" ve'
                 certifying certs $ I.Var <$> letInPlace desc sname sl (BasicOp $ SubExp ve'')
 
-      M.fromList
-        <$> zipWithM
-          ( \f ve' -> do
-              res <- writeBack f ve'
-              pure (fst f, res)
-          )
-          focused
-          new_vals
+      fmap M.fromList . forM (zip focused new_vals) $ \(f, ve') -> do
+        res <- writeBack f ve'
+        pure (fst f, res)
     go root_vs certs base_t focused (E.UpdateStepField f : rest) new_vals = do
       (_before, field_vals, _after, field_t) <- splitField base_t f focused
       go root_vs certs field_t field_vals rest new_vals
