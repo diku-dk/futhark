@@ -501,19 +501,36 @@ value. However, it also supports a subset of the API documented in
 :ref:`array-values`.
 
 For an opaque array type ``[]t``, the following functions are always
-generated (assuming the generated C type is ``arr_t``):
+generated (assuming the generated C type is ``arr1d_t``):
 
-.. c:function:: int futhark_index_opaque_arr_t(struct futhark_context *ctx, struct futhark_opaque_t **out, struct futhark_opaque_arr_t *arr, int64_t i0);
+.. c:function:: int futhark_index_opaque_arr1d_t(struct futhark_context *ctx, struct futhark_opaque_t **out, struct futhark_opaque_arr1d_t *arr, int64_t i0);
 
    Asynchronously copy a single element from the array and store it in
    ``*out``. Returns a nonzero value if the index is out of bounds.
 
-.. c:function:: const int64_t *futhark_shape_opaque_arr_t(struct futhark_context *ctx, struct futhark_opaque_arr_t *arr);
+.. c:function:: int futhark_set_opaque_arr1d_t(struct futhark_context *ctx, struct futhark_opaque_arr1d_t *arr, struct futhark_opaque_t *elem, int64_t i0);
+
+   Copy the provided element into the given index in the array. Returns a
+   nonzero value if the index is out of bounds.
+
+.. c:function:: const int64_t *futhark_shape_opaque_arr1d_t(struct futhark_context *ctx, struct futhark_opaque_arr1d_t *arr);
 
    Return a pointer to the shape of the array, with one element per
    dimension. The lifetime of the shape is the same as ``arr``, and
    must *not* be manually freed. Assuming ``arr`` is a valid object,
    this function cannot fail.
+
+.. c:function:: int futhark_new_opaque_arr1d_t(struct futhark_context *ctx, struct futhark_opaque_arr1d_t **out, struct futhark_opaque_t **elems, int64_t dim0);
+
+   Construct a new opaque array comprising the elements passed in the C array
+   ``elems``, whose length must be at least the product of the shape. The
+   ``elems`` array is interpreted in row-major order to assemble
+   multidimensional arrays. The elements must have the same shape. Returns a
+   nonzero value if the elements are invalid or something else goes wrong.
+
+   **Note:** This is an expensive operation as the elements are copied
+   sequentially to the new array. You should not use this to frequently
+   construct large arrays.
 
 Additionally, if the element type is a record (or equivalently a
 tuple), for example if the array type is ``[](f32,f32)``, the

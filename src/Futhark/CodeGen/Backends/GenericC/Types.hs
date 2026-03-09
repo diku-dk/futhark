@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | Code generation for public API types.
@@ -46,15 +47,16 @@ prepareNewMem ::
   CompilerM op s ()
 prepareNewMem arr space shape pt = do
   let rank = length shape
-      arr_size = cproduct [[C.cexp|$exp:k|] | k <- shape]
+      arr_size =
+        cproduct [[C.cexp|$exp:arr->shape[$int:i]|] | i <- [0 .. length shape - 1]]
   resetMem [C.cexp|$exp:arr->mem|] space
+  forM_ (zip [0 .. rank - 1] shape) $ \(i, dim_s) ->
+    stm [C.cstm|$exp:arr->shape[$int:i] = $exp:dim_s;|]
   allocMem
     [C.cexp|$exp:arr->mem|]
     [C.cexp|$exp:arr_size * $int:(primByteSize pt::Int)|]
     space
     [C.cstm|err = 1;|]
-  forM_ (zip [0 .. rank - 1] shape) $ \(i, dim_s) ->
-    stm [C.cstm|$exp:arr->shape[$int:i] = $exp:dim_s;|]
 
 arrayLibraryFunctions ::
   Publicness ->
@@ -492,7 +494,31 @@ recordArrayZipFunctions types desc fs vds rank = do
     sameShape param_names =
       allTrue $ map allEqual $ L.transpose $ zipWith valueShape (map snd fs) param_names
 
-recordArrayIndexFunctions ::
+indexingDefs ::
+  Int ->
+  ([C.Param], PrimType -> Int -> C.Exp -> C.Exp, C.Exp)
+indexingDefs rank =
+  (index_params, indexExp, in_bounds)
+  where
+    index_names = ["i" <> prettyText i | i <- [0 .. rank - 1]]
+    index_params = [[C.cparam|typename int64_t $id:k|] | k <- index_names]
+    indexExp pt r shape =
+      cproduct
+        [ [C.cexp|$int:(primByteSize pt::Int)|],
+          csum (zipWith (\x y -> [C.cexp|$id:x * $exp:y|]) index_names strides)
+        ]
+      where
+        strides = do
+          d <- [0 .. r - 1]
+          pure $ cproduct [[C.cexp|$exp:shape[$int:i]|] | i <- [d + 1 .. r - 1]]
+
+    in_bounds =
+      allTrue
+        [ [C.cexp|$id:p >= 0 && $id:p < arr->$id:(tupleField 0)->shape[$int:i]|]
+        | (p, i) <- zip index_names [0 .. rank - 1]
+        ]
+
+recordArrayIndexFunction ::
   Space ->
   OpaqueTypes ->
   Name ->
@@ -500,7 +526,7 @@ recordArrayIndexFunctions ::
   Name ->
   [ValueType] ->
   CompilerM op s Manifest.CFuncName
-recordArrayIndexFunctions space _types desc rank elemtype vds = do
+recordArrayIndexFunction space _types desc rank elemtype vds = do
   index_f <- publicName $ "index_" <> opaqueName desc
   ctx_ty <- contextType
   array_ct <- opaqueToCType desc
@@ -532,23 +558,7 @@ recordArrayIndexFunctions space _types desc rank elemtype vds = do
 
   pure index_f
   where
-    index_names = ["i" <> prettyText i | i <- [0 .. rank - 1]]
-    index_params = [[C.cparam|typename int64_t $id:k|] | k <- index_names]
-    indexExp pt r shape =
-      cproduct
-        [ [C.cexp|$int:(primByteSize pt::Int)|],
-          csum (zipWith (\x y -> [C.cexp|$id:x * $exp:y|]) index_names strides)
-        ]
-      where
-        strides = do
-          d <- [0 .. r - 1]
-          pure $ cproduct [[C.cexp|$exp:shape[$int:i]|] | i <- [d + 1 .. r - 1]]
-
-    in_bounds =
-      allTrue
-        [ [C.cexp|$id:p >= 0 && $id:p < arr->$id:(tupleField 0)->shape[$int:i]|]
-        | (p, i) <- zip index_names [0 .. rank - 1]
-        ]
+    (index_params, indexExp, in_bounds) = indexingDefs rank
 
     setField copy j (ValueType _ (Rank r) pt)
       | r == rank =
@@ -581,8 +591,86 @@ recordArrayIndexFunctions space _types desc rank elemtype vds = do
             space
             $ cproduct ([C.cexp|$int:(primByteSize pt::Int)|] : shape)
 
-recordArrayShapeFunctions :: Name -> CompilerM op s Manifest.CFuncName
-recordArrayShapeFunctions desc = do
+recordArraySetFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+recordArraySetFunction space _types desc rank elemtype vds = do
+  index_f <- publicName $ "set_" <> opaqueName desc
+  ctx_ty <- contextType
+  array_ct <- opaqueToCType desc
+  obj_ct <- opaqueToCType elemtype
+  copy <- asks $ opsCopy . envOperations
+
+  set_items <- collect $ zipWithM_ (setField copy) [0 ..] vds
+
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|int $id:index_f($ty:ctx_ty *ctx,
+                              $ty:array_ct *arr,
+                              $ty:obj_ct *v,
+                              $params:index_params);|]
+  libDecl
+    [C.cedecl|int $id:index_f($ty:ctx_ty *ctx,
+                              $ty:array_ct *arr,
+                              $ty:obj_ct *v,
+                              $params:index_params) {
+                int err = 0;
+                if (!$exp:in_bounds) {
+                  err = 1;
+                  set_error(ctx, strdup("Index out of bounds."));
+                } else if (!$exp:same_shape) {
+                  err = 1;
+                  set_error(ctx, strdup("Element shape differs from array shape"));
+                } else {
+                  $items:set_items
+                }
+                return err;
+              }|]
+
+  pure index_f
+  where
+    (index_params, indexExp, in_bounds) = indexingDefs rank
+
+    same_shape = allTrue $ do
+      (j, ValueType _ (Rank r) _) <- zip [0 ..] vds
+      guard $ r > rank
+      pure
+        [C.cexp|memcmp(v->$id:(tupleField j)->shape,
+                       &arr->$id:(tupleField j)->shape[$int:rank],
+                       $int:(r-rank) * sizeof(int64_t)) == 0|]
+
+    setField copy j (ValueType _ (Rank r) pt)
+      | r == rank =
+          copy
+            CopyNoBarrier
+            [C.cexp|arr->$id:(tupleField j)->mem.mem|]
+            (indexExp pt rank [C.cexp|arr->$id:(tupleField j)->shape|])
+            space
+            [C.cexp|(unsigned char*)&v->$id:(tupleField j)|]
+            [C.cexp|0|]
+            DefaultSpace
+            [C.cexp|$int:(primByteSize pt::Int)|]
+      | otherwise = do
+          let shape = do
+                i <- [rank .. r - 1]
+                pure [C.cexp|arr->$id:(tupleField j)->shape[$int:i]|]
+          copy
+            CopyNoBarrier
+            [C.cexp|arr->$id:(tupleField j)->mem.mem|]
+            (indexExp pt r [C.cexp|arr->$id:(tupleField j)->shape|])
+            space
+            [C.cexp|v->$id:(tupleField j)->mem.mem|]
+            [C.cexp|0|]
+            space
+            $ cproduct ([C.cexp|$int:(primByteSize pt::Int)|] : shape)
+
+recordArrayShapeFunction :: Name -> CompilerM op s Manifest.CFuncName
+recordArrayShapeFunction desc = do
   shape_f <- publicName $ "shape_" <> opaqueName desc
   ctx_ty <- contextType
   array_ct <- opaqueToCType desc
@@ -601,7 +689,7 @@ recordArrayShapeFunctions desc = do
 
   pure shape_f
 
-opaqueArrayIndexFunctions ::
+recordArrayNewFunction ::
   Space ->
   OpaqueTypes ->
   Name ->
@@ -609,10 +697,146 @@ opaqueArrayIndexFunctions ::
   Name ->
   [ValueType] ->
   CompilerM op s Manifest.CFuncName
-opaqueArrayIndexFunctions = recordArrayIndexFunctions
+recordArrayNewFunction space types desc rank elemtype vds = do
+  new_f <- publicName $ "new_" <> opaqueName desc
+  ctx_ty <- contextType
+  array_ct <- opaqueToCType desc
+  obj_ct <- opaqueToCType elemtype
+  copy <- asks $ opsCopy . envOperations
+  ops <- asks envOperations
 
-opaqueArrayShapeFunctions :: Name -> CompilerM op s Manifest.CFuncName
-opaqueArrayShapeFunctions = recordArrayShapeFunctions
+  check_items <- collect checkElemShapes
+
+  alloc_items <- collect $ zipWithM_ allocateField [0 ..] vds
+
+  set_items <- collect $ zipWithM_ (handleField copy) [0 ..] vds
+
+  let end_items = [C.citems|end: *out = v;|]
+
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|int $id:new_f($ty:ctx_ty *ctx, $ty:array_ct **out,
+                            $ty:obj_ct **elems, $params:shape_params);|]
+  libDecl
+    [C.cedecl|int $id:new_f($ty:ctx_ty *ctx, $ty:array_ct **out,
+                            $ty:obj_ct **elems, $params:shape_params) {
+                int err = 0;
+                typename int64_t n = $exp:(cproduct outer_shape);
+                $items:check_items
+                if (err != 0) {
+                  set_error(ctx, strdup("Cannot construct arrays with elements of different shapes."));
+                  return 1;
+                }
+                $ty:array_ct* v = malloc(sizeof($ty:array_ct));
+                $items:(criticalSection ops (alloc_items<>set_items<>end_items))
+                return err;
+              }|]
+
+  pure new_f
+  where
+    elemtype' = lookupOpaqueType elemtype types
+    shape_names = ["dim" <> prettyText i | i <- [0 .. rank - 1]]
+    shape_params = [[C.cparam|typename int64_t $id:k|] | k <- shape_names]
+    outer_shape = [[C.cexp|$id:k|] | k <- shape_names]
+
+    allocateField i (ValueType _ (Rank r) pt) = do
+      let shape =
+            outer_shape
+              ++ [ [C.cexp|n==0?0:elems[0]->$id:(tupleField i)->shape[$int:j]|]
+                 | j <- [0 .. r - rank - 1]
+                 ]
+
+      stm [C.cstm|v->$id:(tupleField i) = malloc(sizeof(*v->$id:(tupleField i)));|]
+      prepareNewMem [C.cexp|v->$id:(tupleField i)|] space shape pt
+      stm
+        [C.cstm|if (err != 0) {
+                    free(v->$id:(tupleField i));
+                    free(v);
+                    v = NULL;
+                    goto end;
+                  }|]
+
+    handleField copy i (ValueType _ (Rank r) pt) = do
+      let elem_size =
+            cproduct $
+              [C.cexp|$int:(primByteSize pt::Int)|]
+                : [ [C.cexp|v->$id:(tupleField i)->shape[$int:rank+$int:j]|]
+                  | j <- [0 .. r - rank - 1]
+                  ]
+
+      copy_items <-
+        collect $
+          copy
+            CopyNoBarrier
+            [C.cexp|v->$id:(tupleField i)->mem.mem|]
+            [C.cexp|i*$exp:elem_size|]
+            space
+            ( if r == rank
+                then [C.cexp|(unsigned char*)&elems[i]->$id:(tupleField i)|]
+                else [C.cexp|elems[i]->$id:(tupleField i)->mem.mem|]
+            )
+            [C.cexp|0|]
+            (if r == rank then DefaultSpace else space)
+            elem_size
+
+      stm
+        [C.cstm|for (typename int64_t i = 0; i < n; i++) {
+                  $items:copy_items
+                  if (err != 0) {
+                    goto end;
+                  }
+                }|]
+
+    checkSameShape x y = do
+      forM_ (zip [0 ..] (opaquePayload types elemtype')) $ \case
+        (fi, ValueType _ (Rank r) _) -> do
+          let fi' = tupleField fi
+          forM_ [0 .. r - 1] $ \i ->
+            stm
+              [C.cstm|if ($exp:x->$id:fi'->shape[$int:i]
+                          !=
+                          $exp:y->$id:fi'->shape[$int:i]) {
+                          err = 1;
+                      }|]
+
+    checkElemShapes = do
+      check_one <- collect $ checkSameShape [C.cexp|elems[0]|] [C.cexp|elems[i]|]
+      stm
+        [C.cstm|for (typename int64_t i = 1; i < n; i++)
+                { $items:check_one }|]
+
+opaqueArrayIndexFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+opaqueArrayIndexFunction = recordArrayIndexFunction
+
+opaqueArrayShapeFunction :: Name -> CompilerM op s Manifest.CFuncName
+opaqueArrayShapeFunction = recordArrayShapeFunction
+
+opaqueArrayNewFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+opaqueArrayNewFunction = recordArrayNewFunction
+
+opaqueArraySetFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+opaqueArraySetFunction = recordArraySetFunction
 
 sumVariants ::
   Name ->
@@ -806,14 +1030,18 @@ opaqueExtraOps space types desc (OpaqueRecordArray rank elemtype fs) vds =
     <$> ( Manifest.RecordArrayOps rank (nameToText elemtype)
             <$> recordArrayProjectFunctions types desc fs vds
             <*> recordArrayZipFunctions types desc fs vds rank
-            <*> recordArrayIndexFunctions space types desc rank elemtype vds
-            <*> recordArrayShapeFunctions desc
+            <*> recordArrayIndexFunction space types desc rank elemtype vds
+            <*> recordArrayShapeFunction desc
+            <*> recordArrayNewFunction space types desc rank elemtype vds
+            <*> recordArraySetFunction space types desc rank elemtype vds
         )
 opaqueExtraOps space types desc (OpaqueArray rank elemtype _) vds =
   Just . Manifest.OpaqueArray
     <$> ( Manifest.OpaqueArrayOps rank (nameToText elemtype)
-            <$> opaqueArrayIndexFunctions space types desc rank elemtype vds
-            <*> opaqueArrayShapeFunctions desc
+            <$> opaqueArrayIndexFunction space types desc rank elemtype vds
+            <*> opaqueArrayShapeFunction desc
+            <*> opaqueArrayNewFunction space types desc rank elemtype vds
+            <*> opaqueArraySetFunction space types desc rank elemtype vds
         )
 
 opaqueLibraryFunctions ::
