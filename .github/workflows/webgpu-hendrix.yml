@@ -17,12 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/futhark-slurm
-        with:
-          script: |
-            set -euo pipefail
-            hostname
-
-            source tools/webgpu/setup_webgpu_ci.sh
-            tools/webgpu/run_webgpu_test.sh
-          slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:a100:1 --job-name=test-webgpu-hendrix
+      - name: Run WebGPU test without the futhark-slurm action
+        shell: bash
+        run: |
+          srun -p gpu --time=0-01:00:00 --gres=gpu:a100:1 --job-name=test-webgpu-hendrix \
+            bash -lc '
+              set -euo pipefail
+              hostname
+              source tools/webgpu/setup_webgpu_ci.sh
+              tools/webgpu/run_webgpu_test.sh
+            '
