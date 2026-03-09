@@ -532,6 +532,11 @@ generated (assuming the generated C type is ``arr1d_t``):
    sequentially to the new array. You should not use this to frequently
    construct large arrays.
 
+   **Note:** You can use this function to construct empty arrays, but in that
+   case the inner dimensions of the element types will be considered zero, which
+   may violate type invariants, making it impossible to pass these arrays to
+   entry points.
+
 Additionally, if the element type is a record (or equivalently a
 tuple), for example if the array type is ``[](f32,f32)``, the
 following functions are also available:
