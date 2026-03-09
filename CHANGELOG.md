@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark autotune` now shows a progress bar when running in a terminal. Work
   by Nader Rahhal.
 
+* The C API now has functions for creating and updating arrays of opaque
+  objects. (#2383, #2384)
+
 ### Removed
 
 ### Changed

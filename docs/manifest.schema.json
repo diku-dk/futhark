@@ -110,6 +110,8 @@
                                   "zip": {"type": "string"},
                                   "index": {"type": "string"},
                                   "shape": {"type": "string"},
+                                  "new": {"type": "string"},
+                                  "set": {"type": "string"},
                                   "fields": {
                                       "type": "array",
                                       "items": {
@@ -130,7 +132,9 @@
                                   "rank": {"type": "integer"},
                                   "elemtype": {"type": "string"},
                                   "index": {"type": "string"},
-                                  "shape": {"type": "string"}
+                                  "shape": {"type": "string"},
+                                  "new": {"type": "string"},
+                                  "set": {"type": "string"}
                               },
                               "additionalProperties": false
                           }
