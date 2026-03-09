@@ -1,0 +1,28 @@
+name: Test WebGPU on Hendrix
+
+on:
+  pull_request:
+    branches: [ webgpu ]
+
+  push:
+    branches: [ webgpu ]
+  
+  workflow_dispatch:
+
+jobs:
+  test-webgpu-hendrix:
+    runs-on: hendrix
+    if: github.repository == 'diku-dk/futhark'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/futhark-slurm
+        with:
+          script: |
+            set -euo pipefail
+            hostname
+
+            source tools/webgpu/setup_webgpu_ci.sh
+            tools/webgpu/run_webgpu_test.sh
+          slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:a100:1 --job-name=test-webgpu-hendrix
