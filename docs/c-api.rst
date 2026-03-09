@@ -853,7 +853,7 @@ the compiled Futhark program. Specifically, the manifest contains:
 
      * The element type and rank.
 
-     * The operations ``index`` and ``shape``.
+     * The operations ``index``, ``shape``, ``set``, and ``new``.
 
 
 Manifests are defined by the following JSON Schema:
