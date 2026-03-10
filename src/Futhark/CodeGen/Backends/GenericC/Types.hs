@@ -565,7 +565,7 @@ recordArrayIndexFunction space _types desc rank elemtype vds = do
           -- Easy case: just copy the scalar from the array into the
           -- variable.
           copy
-            CopyNoBarrier
+            CopyBarrier
             [C.cexp|(unsigned char*)&v->$id:(tupleField j)|]
             [C.cexp|0|]
             DefaultSpace
@@ -647,7 +647,7 @@ recordArraySetFunction space _types desc rank elemtype vds = do
     setField copy j (ValueType _ (Rank r) pt)
       | r == rank =
           copy
-            CopyNoBarrier
+            CopyBarrier
             [C.cexp|arr->$id:(tupleField j)->mem.mem|]
             (indexExp pt rank [C.cexp|arr->$id:(tupleField j)->shape|])
             space
