@@ -232,11 +232,17 @@ def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
   then []
   else let flags = map (\x -> if p x then 1 else 0) as
        let offsets = scan (+) 0 flags
+       let is = map2 (\f o -> if f == 1 then o - 1 else -1) flags offsets
+       -- This following is carefully written such that the two scatters will be
+       -- fused horisontally, which allows the entire thing to become a single
+       -- kernel.
        let result =
-         scatter (#[scratch] [as][0])
-                 (map2 (\f o -> if f == 1 then o - 1 else -1) flags offsets)
-                 as
-       in result[:offsets[n - 1]]
+         scatter (#[scratch] [as][0]) is as
+       let count =
+         scatter (#[scratch] [0])
+                 (map (\j -> if j == n - 1 then 0 else -1) (0..1..<n))
+                 offsets
+       in result[:count[0]]
 
 -- | Split an array into those elements that satisfy the given
 -- predicate, and those that do not.
