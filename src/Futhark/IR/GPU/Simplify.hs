@@ -125,6 +125,21 @@ removeDeadGPUBodyResult (_, used) pat aux (GPUBody types body)
   | otherwise = Skip
 removeDeadGPUBodyResult _ _ _ _ = Skip
 
+-- moveKernelBodyLookupSegScan :: BottomUpRuleOp (Wise GPU)
+-- moveKernelBodyLookupSegScan (_, used) pat aux (SegOp (SegScan lvl space ts body seg_op post_op))
+--   | -- Figure out which of the names in 'pat' are used...
+--     False =
+--       Skip
+--   | otherwise = Skip
+--   where
+--     res = bodyResult body
+--     stms = bodyStms body
+--     isIndex (BasicOp (Index _ _)) = True
+--     isIndex _ = False
+--     index_stms = filter (isIndex . stmExp) $ stmsToList stms
+--     var_names = concatMap (patElems . stmPat) index_stms
+-- moveKernelBodyLookupSegScan _ _ _ _ = Skip
+
 -- If we see an Update with a scalar where the value to be written is
 -- the result of indexing some other array, then we convert it into an
 -- Update with a slice of that array.  This matters when the arrays

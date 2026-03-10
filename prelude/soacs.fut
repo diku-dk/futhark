@@ -258,8 +258,9 @@ def partition [n] 'a (p: a -> bool) (as: [n]a) : ?[k].([k]a, [n - k]a) =
          let offset = reduce_comm (+) 0 (map (.0) flags)
          let add2 (a0, b0) (a1, b1) = (a0 + a1, b0 + b1)
          let to_index (f, _) (o0, o1) = if f == 1i64 then o0 - 1i64 else offset + o1 - 1
-         let offsets = scan add2 (0, 0) flags
-         let idxs = map2 to_index flags offsets
+         let flags' = map (\x -> if p x then (1, 0) else (0, 1)) as
+         let offsets = scan add2 (0, 0) flags'
+         let idxs = map2 to_index flags' offsets
          let res =
            scatter (#[scratch] [as][0])
                    idxs
@@ -286,8 +287,9 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
            else if f1 == 1i64
            then offset0 + o1 - 1
            else offset0 + offset1 + o2 - 1
-         let offsets = scan add2 (0, 0, 0) flags
-         let idxs = map2 to_index flags offsets
+         let flags' = map (\x -> if p1 x then (1, 0, 0) else if p2 x then (0, 1, 0) else (0, 0, 1)) as
+         let offsets = scan add2 (0, 0, 0) flags'
+         let idxs = map2 to_index flags' offsets
          let res =
            scatter (#[scratch] [as][0])
                    idxs
