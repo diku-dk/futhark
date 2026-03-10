@@ -952,21 +952,28 @@ instance Engine.Simplifiable KernelResult where
       <*> Engine.simplify dims_n_tiles
       <*> Engine.simplify what
 
+segOpBlocker ::
+  (Engine.SimplifiableRep rep) =>
+  SegSpace -> Engine.SimpleM rep (Engine.BlockPred (Wise rep))
+segOpBlocker space = do
+  par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
+  pure $
+    Engine.hasFree bound_here
+      `Engine.orIf` Engine.isOp
+      `Engine.orIf` par_blocker
+      `Engine.orIf` Engine.isConsumed
+      `Engine.orIf` Engine.isConsuming
+      `Engine.orIf` Engine.isDeviceMigrated
+  where
+    bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
+
 simplifyKernelBody ::
   (Engine.SimplifiableRep rep, BodyDec rep ~ ()) =>
   SegSpace ->
   KernelBody (Wise rep) ->
   Engine.SimpleM rep (KernelBody (Wise rep), Stms (Wise rep))
 simplifyKernelBody space (Body _ stms res) = do
-  par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
-
-  let blocker =
-        Engine.hasFree bound_here
-          `Engine.orIf` Engine.isOp
-          `Engine.orIf` par_blocker
-          `Engine.orIf` Engine.isConsumed
-          `Engine.orIf` Engine.isConsuming
-          `Engine.orIf` Engine.isDeviceMigrated
+  blocker <- segOpBlocker space
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
@@ -981,8 +988,6 @@ simplifyKernelBody space (Body _ stms res) = do
         pure (res', UT.usages $ freeIn res')
 
   pure (mkWiseBody () body_stms body_res, hoisted)
-  where
-    bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
 simplifyLambda ::
   (Engine.SimplifiableRep rep) =>
@@ -1012,14 +1017,16 @@ simplifySegBinOp phys_id (SegBinOp comm lam nes shape) = do
 
 simplifySegPostOp ::
   (Engine.SimplifiableRep rep) =>
-  VName ->
+  SegSpace ->
   SegPostOp (Wise rep) ->
   Engine.SimpleM rep (SegPostOp (Wise rep), Stms (Wise rep))
-simplifySegPostOp phys_id (SegPostOp lam) = do
+simplifySegPostOp space (SegPostOp lam) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-      simplifyLambda (oneName phys_id) lam
+      simplifyLambda bound_here lam
   pure (SegPostOp lam', hoisted)
+  where
+    bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
 -- | Simplify the given 'SegOp'.
 simplifySegOp ::
@@ -1057,7 +1064,7 @@ simplifySegOp (SegScan lvl space ts kbody scans post_op) = do
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
   (post_op', post_op_hoisted) <-
     Engine.localVtable (ST.insertScope scope) $
-      simplifySegPostOp (segFlat space) post_op
+      simplifySegPostOp space post_op
 
   pure
     ( SegScan lvl' space' ts' kbody' scans' post_op',
