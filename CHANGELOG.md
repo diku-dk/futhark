@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Array and field updates can now be chained, e.g., `x with [i].f = y`,
   including in operator sections. Work by Aziz Rmadi.
 
-* New server protocol commands: `index` and `shape`.
+* New server protocol commands: `index`, `shape`, and `attributes`.
 
 * FutharkScript now supports (barely) array indexing.
 

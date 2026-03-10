@@ -66,8 +66,8 @@ compileProg version prog = do
 fRepMyRep :: Imp.Definitions Imp.Multicore -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Functions fs = Imp.defFuns prog
-      function (Imp.Function entry _ _ _) = do
-        Imp.EntryPoint n res args <- entry
+      function fun = do
+        Imp.EntryPoint n res args <- Imp.functionEntry fun
         Just $
           JSEntryPoint
             { name = nameToString n,

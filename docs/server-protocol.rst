@@ -175,6 +175,14 @@ this command prints *names* and not *integers*.
 
 Corresponds to :c:func:`futhark_get_tuning_param_class`.
 
+``attributes`` *entry*
+......................
+
+Print the attributes of the provided entry point in no particular order. Does
+not include the attribute brackets used in the Futhark syntax, meaning that an
+attribute written as ``#[foo]`` becomes simply ``"foo"`` in the output of this
+command.
+
 Array Commands
 ~~~~~~~~~~~~~~
 

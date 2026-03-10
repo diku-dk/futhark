@@ -537,7 +537,7 @@ compileConstants (Imp.Constants _ init_consts) = do
   mapM_ atInit =<< collect (compileCode init_consts)
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunDef
-compileFunc (fname, Imp.Function _ outputs inputs body) = do
+compileFunc (fname, Imp.Function _ outputs inputs _ body) = do
   body' <- collect $ compileCode body
   let inputs' = map (compileName . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
@@ -840,7 +840,7 @@ prepareEntry ::
       [PyStmt],
       [(Imp.ExternalValue, PyExp)]
     )
-prepareEntry (Imp.EntryPoint _ results args) (fname, Imp.Function _ outputs inputs _) = do
+prepareEntry (Imp.EntryPoint _ results args) (fname, Imp.Function _ outputs inputs _ _) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
 
@@ -938,8 +938,8 @@ callEntryFun ::
   [PyStmt] ->
   (Name, Imp.Function op) ->
   CompilerM op s (Maybe (PyFunDef, T.Text, PyExp))
-callEntryFun _ (_, Imp.Function Nothing _ _ _) = pure Nothing
-callEntryFun pre_timing fun@(fname, Imp.Function (Just entry) _ _ _) = do
+callEntryFun _ (_, Imp.Function Nothing _ _ _ _) = pure Nothing
+callEntryFun pre_timing fun@(fname, Imp.Function (Just entry) _ _ _ _) = do
   let Imp.EntryPoint ename _ decl_args = entry
   (_, prepare_in, body_bin, _, res) <- prepareEntry entry fun
 

@@ -113,7 +113,8 @@ import Futhark.IR.GPU.Sizes (Count (..), SizeClass (..), sizeDefault)
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax.Core
-  ( EntryPointType (..),
+  ( Attrs (..),
+    EntryPointType (..),
     ErrorMsg (..),
     ErrorMsgPart (..),
     OpaqueType (..),
@@ -228,6 +229,7 @@ data FunctionT a = Function
   { functionEntry :: Maybe EntryPoint,
     functionOutput :: [Param],
     functionInput :: [Param],
+    functionAttrs :: Attrs,
     functionBody :: Code a
   }
   deriving (Show)
@@ -524,11 +526,12 @@ instance Pretty EntryPoint where
       ppRes (u, t) = pretty u <> pretty t
 
 instance (Pretty op) => Pretty (FunctionT op) where
-  pretty (Function entry outs ins body) =
+  pretty (Function entry outs ins attrs body) =
     stack
       [ "inputs" <+> nestedBlock (stack $ map pretty ins),
         "outputs" <+> nestedBlock (stack $ map pretty outs),
         "entry" <+> nestedBlock (pretty entry),
+        "attributes" <+> nestedBlock (pretty attrs),
         "body" <+> nestedBlock (pretty body)
       ]
 
@@ -706,8 +709,8 @@ instance Foldable FunctionT where
   foldMap = foldMapDefault
 
 instance Traversable FunctionT where
-  traverse f (Function entry outs ins body) =
-    Function entry outs ins <$> traverse f body
+  traverse f (Function entry outs ins attrs body) =
+    Function entry outs ins attrs <$> traverse f body
 
 instance Functor Code where
   fmap = fmapDefault

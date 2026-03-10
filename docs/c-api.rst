@@ -812,6 +812,12 @@ the compiled Futhark program. Specifically, the manifest contains:
     of this entry point.  These are not necessarily unique to the
     entry point.
 
+  * A list of all *attributes* attached to the entry point. These are the string
+    representation of the attributes and may require further parsing. Does not
+    include attribute brackets used in the Futhark syntax, meaning that an
+    attribute ``#[foo]`` becomes simply an entry ``"foo"`` in this list. The
+    attributes appear in no particular order.
+
 * A mapping from the name of each non-scalar type to:
 
   * The C type used to represent this type (which is in practice

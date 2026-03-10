@@ -299,7 +299,7 @@ printResult manifest = concatMap f
 
 cliEntryPoint ::
   Manifest -> T.Text -> EntryPoint -> (C.Definition, C.Initializer)
-cliEntryPoint manifest entry_point_name (EntryPoint cfun _tuning_params outputs inputs) =
+cliEntryPoint manifest entry_point_name (EntryPoint cfun _tuning_params outputs inputs _attrs) =
   let (input_items, pack_input, free_input, free_parsed, input_args) =
         unzip5 $ readInputs manifest $ map inputType inputs
 
