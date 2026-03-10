@@ -689,7 +689,7 @@ compileFunDef ::
   OpaqueTypes ->
   FunDef rep ->
   ImpM rep r op ()
-compileFunDef types (FunDef entry _ fname rettype params body) =
+compileFunDef types (FunDef entry attrs fname rettype params body) =
   local (\env -> env {envFunction = name_entry `mplus` Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
     let entry' = case (name_entry, results, args) of
@@ -697,7 +697,7 @@ compileFunDef types (FunDef entry _ fname rettype params body) =
             Just $ Imp.EntryPoint name_entry' results' args'
           _ ->
             Nothing
-    emitFunction fname $ Imp.Function entry' outparams inparams body'
+    emitFunction fname $ Imp.Function entry' outparams inparams attrs body'
   where
     (name_entry, params_entry, ret_entry) = case entry of
       Nothing -> (Nothing, Nothing, Nothing)
@@ -1927,7 +1927,7 @@ function fname outputs inputs m = local newFunction $ do
   body <- collect $ do
     mapM_ addParam $ outputs ++ inputs
     m
-  emitFunction fname $ Imp.Function Nothing outputs inputs body
+  emitFunction fname $ Imp.Function Nothing outputs inputs mempty body
   where
     addParam (Imp.MemParam name space) =
       addVar name $ MemVar Nothing $ MemEntry space

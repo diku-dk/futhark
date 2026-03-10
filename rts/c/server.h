@@ -194,6 +194,7 @@ struct entry_point {
   const char *name;
   entry_point_fn f;
   const char** tuning_params;
+  const char** attrs;
   const struct type **out_types;
   bool *out_unique;
   const struct type **in_types;
@@ -649,6 +650,22 @@ void cmd_tuning_param_class(struct server_state *s, const char *args[]) {
   printf("Unknown tuning parameter: %s\n", param);
 }
 
+void cmd_attributes(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+  struct entry_point *e = get_entry_point(s, name);
+
+  if (e == NULL) {
+    failure();
+    printf("Unknown entry point: %s\n", name);
+    return;
+  }
+
+  const char **params = e->attrs;
+  for (int i = 0; params[i] != NULL; i++) {
+    printf("%s\n", params[i]);
+  }
+}
+
 void cmd_kind(struct server_state *s, const char *args[]) {
   const char *type = get_arg(args, 0);
   const struct type *t = get_type(s, type);
@@ -691,7 +708,7 @@ void cmd_shape(struct server_state *s, const char *args[]) {
     printf("Not an array type\n");
     return;
   }
-  
+
   const struct array *a = v->value.type->info;
 
   const int64_t *shape = a->shape(s->ctx, v->value.value.v_ptr);
@@ -960,7 +977,7 @@ void cmd_construct(struct server_state *s, const char *args[]) {
   }
 
   const struct sum *st = type->info;
-  
+
   for (int i = 0; i < st->num_variants; i++) {
     const struct variant *var = &st->variants[i];
     if (strcmp(var->name, variant_name) == 0) {
@@ -974,7 +991,7 @@ void cmd_construct(struct server_state *s, const char *args[]) {
         printf("%d values expected but %d values provided.\n", var->num_types, num_args);
         return;
       }
-      
+
       const void** value_ptrs = alloca(num_args * sizeof(void*));
 
       for (int i = 0; i < num_args; i++) {
@@ -1021,10 +1038,10 @@ void cmd_destruct(struct server_state *s, const char *args[]) {
     printf("Not a sum type\n");
     return;
   }
-  
+
   const struct sum *sum = v->value.type->info;
   const struct variant *var = &sum->variants[sum->variant(s->ctx, v->value.value.v_ptr)];
-  
+
   int num_args = 0;
   for (int i = 1; arg_exists(args, i); i++) {
     num_args++;
@@ -1183,6 +1200,8 @@ void process_line(struct server_state *s, char *line) {
     cmd_project(s, tokens+1);
   } else if (strcmp(command, "entry_points") == 0) {
     cmd_entry_points(s, tokens+1);
+  } else if (strcmp(command, "attributes") == 0) {
+    cmd_attributes(s, tokens+1);
   } else if (strcmp(command, "types") == 0) {
     cmd_types(s, tokens+1);
   } else {

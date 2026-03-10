@@ -16,6 +16,7 @@ import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.RTS.C (serverH, tuningH, valuesH)
 import Futhark.Manifest
 import Futhark.Util (zEncodeText)
+import Futhark.Util.Pretty (prettyText)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import Language.Futhark.Core (nameFromText)
@@ -335,7 +336,7 @@ entryTypeBoilerplate manifest =
     manifest
 
 oneEntryBoilerplate :: Manifest -> (T.Text, EntryPoint) -> ([C.Definition], C.Initializer)
-oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs) =
+oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs attrs) =
   let call_f = "call_" <> nameFromText name
       out_types = map outputType outputs
       in_types = map inputType inputs
@@ -344,6 +345,7 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs
       out_unique_name = nameFromText name <> "_out_unique"
       in_unique_name = nameFromText name <> "_in_unique"
       tuning_params_name = nameFromText name <> "_tuning_params"
+      attrs_name = nameFromText name <> "_attrs"
       (out_items, out_args)
         | null out_types = ([C.citems|(void)outs;|], mempty)
         | otherwise = unzip $ zipWith loadOut [0 ..] out_types
@@ -369,6 +371,10 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs
                   $inits:(map textInit tuning_params),
                   NULL
                 };
+                const char* $id:attrs_name[] = {
+                  $inits:(map (textInit . prettyText) attrs),
+                  NULL
+                };
                 int $id:call_f(struct futhark_context *ctx, void **outs, void **ins) {
                   $items:out_items
                   $items:in_items
@@ -382,7 +388,8 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs
             .in_types = $id:in_types_name,
             .out_types = $id:out_types_name,
             .in_unique = $id:in_unique_name,
-            .out_unique = $id:out_unique_name
+            .out_unique = $id:out_unique_name,
+            .attrs = $id:attrs_name
             }|]
       )
   where

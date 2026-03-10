@@ -19,6 +19,12 @@
                             "type": "string"
                         }
                     },
+                    "attributes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
                     "outputs": {
                         "type": "array",
                         "items": {
