@@ -80,6 +80,7 @@ void test2(struct futhark_context *ctx) {
     for (int j = 0; j < 3; j++) {
       struct futhark_opaque_t* out;
       assert(futhark_index_opaque_arr2d_t(ctx, &out, arr2_t, i, j) == 0);
+      assert(futhark_context_sync(ctx) == 0);
       int32_t out0;
       struct futhark_f32_1d *out1;
       assert(futhark_entry_unmk(ctx, &out0, &out1, out) == 0);
@@ -109,6 +110,7 @@ void test2(struct futhark_context *ctx) {
     // Now let us see if anything changed.
     struct futhark_opaque_t* out;
     assert(futhark_index_opaque_arr2d_t(ctx, &out, arr2_t, 1, 2) == 0);
+    assert(futhark_context_sync(ctx) == 0);
     int32_t out0;
     struct futhark_f32_1d *out1;
     assert(futhark_entry_unmk(ctx, &out0, &out1, out) == 0);
