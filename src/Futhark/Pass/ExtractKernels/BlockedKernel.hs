@@ -85,10 +85,8 @@ segRed ::
   m (Stms rep)
 segRed lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
   (kspace, kbody) <- prepareRedOrScan cs w map_lam arrs ispace inps
-  letBind pat $
-    Op $
-      segOp $
-        SegRed lvl kspace (lambdaReturnType map_lam) kbody ops
+  letBind pat . Op . segOp $
+    SegRed lvl kspace (lambdaReturnType map_lam) kbody ops
 
 segScan ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
@@ -97,18 +95,20 @@ segScan ::
   Certs ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
-  SegPostOp rep ->
   Lambda rep ->
+  SegPostOp rep ->
   [VName] ->
   [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this scan
   [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
   m (Stms rep)
-segScan lvl pat cs w ops post_op map_lam arrs ispace inps = runBuilder_ $ do
+segScan lvl pat cs w ops map_lam post_op arrs ispace inps = runBuilder_ $ do
+  let SegPostOp post_lam = post_op
   (kspace, kbody) <- prepareRedOrScan cs w map_lam arrs ispace inps
-  letBind pat $
-    Op $
-      segOp $
-        SegScan lvl kspace (lambdaReturnType map_lam) kbody ops post_op
+  post_lam' <- runLambdaBuilder (lambdaParams post_lam) $ do
+    mapM_ readKernelInput inps
+    bodyBind $ lambdaBody post_lam
+  letBind pat . Op . segOp $
+    SegScan lvl kspace (lambdaReturnType map_lam) kbody ops (SegPostOp post_lam')
 
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
@@ -122,10 +122,8 @@ segMap ::
   m (Stms rep)
 segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
   (kspace, kbody) <- prepareRedOrScan mempty w map_lam arrs ispace inps
-  letBind pat $
-    Op $
-      segOp $
-        SegMap lvl kspace (lambdaReturnType map_lam) kbody
+  letBind pat . Op . segOp $
+    SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim ::
   (MonadBuilder m) =>

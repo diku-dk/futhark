@@ -259,7 +259,7 @@ intrablockStm stm@(Let pat aux e) = do
               mapfun' = soacsLambdaToGPU mapfun
               post_op = SegPostOp $ soacsLambdaToGPU post_lam
           certifying (stmAuxCerts aux) $
-            addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] post_op mapfun' arrs [] []
+            addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' post_op arrs [] []
           parallelMin [w]
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form -> do

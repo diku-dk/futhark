@@ -408,7 +408,7 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
                 post_op = SegPostOp $ soacsLambdaToGPU post_lam
             lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
             addStms . fmap (certify cs)
-              =<< segScan lvl pat mempty w scan_ops post_op map_lam_sequential arrs [] []
+              =<< segScan lvl pat mempty w scan_ops map_lam_sequential post_op arrs [] []
 
           outerParallelBody =
             renameBody
