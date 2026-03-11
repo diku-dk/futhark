@@ -232,7 +232,7 @@ def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
   then []
   else let flags = map (\x -> if p x then 1 else 0) as
        let offsets = scan (+) 0 flags
-       let is = map2 (\f o -> if f == 1 then o - 1 else -1) flags offsets
+       let is = map2 (\x o -> if p x then o - 1 else -1) as offsets
        -- This following is carefully written such that the two scatters will be
        -- fused horisontally, which allows the entire thing to become a single
        -- kernel.
@@ -257,10 +257,11 @@ def partition [n] 'a (p: a -> bool) (as: [n]a) : ?[k].([k]a, [n - k]a) =
     else let flags = map (\x -> if p x then (1, 0) else (0, 1)) as
          let offset = reduce_comm (+) 0 (map (.0) flags)
          let add2 (a0, b0) (a1, b1) = (a0 + a1, b0 + b1)
-         let to_index (f, _) (o0, o1) = if f == 1i64 then o0 - 1i64 else offset + o1 - 1
          let flags' = map (\x -> if p x then (1, 0) else (0, 1)) as
+         let to_index f (o0, o1) = if f then o0 - 1i64 else offset + o1 - 1
+         let is_true = map p as
          let offsets = scan add2 (0, 0) flags'
-         let idxs = map2 to_index flags' offsets
+         let idxs = map2 to_index is_true offsets
          let res =
            scatter (#[scratch] [as][0])
                    idxs
@@ -277,19 +278,20 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
   let (res, offset0, offset1) =
     if n == 0
     then ([], 0, 0)
-    else let flags = map (\x -> if p1 x then (1, 0, 0) else if p2 x then (0, 1, 0) else (0, 0, 1)) as
+    else let flags = map (\x -> if p1 x then (1, 0) else if p2 x then (0, 1) else (0, 0)) as
          let offset0 = reduce_comm (+) 0 (map (.0) flags)
          let offset1 = reduce_comm (+) 0 (map (.1) flags)
          let add2 (a0, b0, c0) (a1, b1, c1) = (a0 + a1, b0 + b1, c0 + c1)
-         let to_index (f0, f1, _) (o0, o1, o2) =
-           if f0 == 1i64
+         let to_index (f0, f1) (o0, o1, o2) =
+           if f0
            then o0 - 1i64
-           else if f1 == 1i64
+           else if f1
            then offset0 + o1 - 1
            else offset0 + offset1 + o2 - 1
          let flags' = map (\x -> if p1 x then (1, 0, 0) else if p2 x then (0, 1, 0) else (0, 0, 1)) as
          let offsets = scan add2 (0, 0, 0) flags'
-         let idxs = map2 to_index flags' offsets
+         let flags'' = map (\x -> (p1 x, p2 x)) as
+         let idxs = map2 to_index flags'' offsets
          let res =
            scatter (#[scratch] [as][0])
                    idxs
