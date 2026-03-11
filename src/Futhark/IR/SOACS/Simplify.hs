@@ -191,6 +191,7 @@ removeLambdaResults keep lam =
     lam_body' = lam_body {bodyResult = keep' $ bodyResult lam_body}
     ret = keep' $ lambdaReturnType lam
 
+{-# NOINLINE soacRules #-}
 soacRules :: RuleBook (Wise SOACS)
 soacRules = standardRules <> ruleBook topDownRules bottomUpRules
 
@@ -217,7 +218,8 @@ topDownRules =
     RuleOp simplifyMapIota,
     RuleOp moveTransformToInput,
     RuleOp moveTransformToOutput,
-    RuleOp removeUnusedPreLamResult
+    RuleOp removeUnusedPreLamResult,
+    RuleOp removeDeadScan
   ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -557,64 +559,93 @@ isMapWithOp pat e
       Just (map_pe, stmAuxCerts aux2, w, e', lambdaParams map_lam, arrs)
   | otherwise = Nothing
 
+-- Shared checks for removeDeadReduction/removeDeadScan.
+deadRedScanCheck ::
+  (p -> Bool) ->
+  Lambda (Wise SOACS) ->
+  [SubExp] ->
+  [p] ->
+  ([p], [p], [SubExp], [Bool])
+deadRedScanCheck needed oplam nes postlam_params =
+  let (postlam_scanparams, postlam_mapparams) =
+        splitAt (length nes) postlam_params
+      oplam_deps = dataDependencies $ lambdaBody oplam
+      oplam_res = bodyResult $ lambdaBody oplam
+      oplam_params = lambdaParams oplam
+      (oplam_xparams, oplam_yparams) =
+        splitAt (length nes) oplam_params
+      used_in_postlam =
+        map snd $
+          filter (needed . fst) $
+            zip postlam_scanparams oplam_params
+      necessary =
+        findNecessaryForReturned
+          (`elem` used_in_postlam)
+          (zip oplam_params $ map resSubExp $ oplam_res <> oplam_res)
+          oplam_deps
+      alive_mask =
+        zipWith
+          (||)
+          (map ((`nameIn` necessary) . paramName) oplam_xparams)
+          (map ((`nameIn` necessary) . paramName) oplam_yparams)
+      (used_postlam_scanparams, used_nes) =
+        unzip . map snd . filter fst $ zip alive_mask $ zip postlam_scanparams nes
+   in (used_postlam_scanparams, postlam_mapparams, used_nes, alive_mask)
+
 -- | Some of the results of a reduction (or really: Redomap) may be
 -- dead.  We remove them here.  The trick is that we need to look at
 -- the data dependencies to see that the "dead" result is not
 -- actually used for computing one of the live ones.
 removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
-removeDeadReduction (_, used) pat aux (Screma w arrs form) =
-  case isRedomapSOAC form of
-    Just ([Reduce comm redlam rednes], maplam) ->
-      let mkOp lam nes' = redomapSOAC [Reduce comm lam nes']
-       in removeDeadReduction' redlam rednes maplam mkOp
-    _ ->
-      case isScanomapSOAC form of
-        Just ([Scan scanlam nes], maplam) ->
-          let mkOp lam nes' = scanomapSOAC [Scan lam nes']
-           in removeDeadReduction' scanlam nes maplam mkOp
-        _ -> Skip
-  where
-    removeDeadReduction' redlam nes maplam mkOp
-      | not $ all (`UT.used` used) $ patNames pat, -- Quick/cheap check
-        let (red_pes, map_pes) = splitAt (length nes) $ patElems pat,
-        let redlam_deps = dataDependencies $ lambdaBody redlam,
-        let redlam_res = bodyResult $ lambdaBody redlam,
-        let redlam_params = lambdaParams redlam,
-        let (redlam_xparams, redlam_yparams) =
-              splitAt (length nes) redlam_params,
-        let used_after =
-              map snd . filter ((`UT.used` used) . patElemName . fst) $
-                zip (red_pes <> red_pes) redlam_params,
-        let necessary =
-              findNecessaryForReturned
-                (`elem` used_after)
-                (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
-                redlam_deps,
-        let alive_mask =
-              zipWith
-                (||)
-                (map ((`nameIn` necessary) . paramName) redlam_xparams)
-                (map ((`nameIn` necessary) . paramName) redlam_yparams),
-        not $ and alive_mask = Simplify $ do
-          let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
-              dead_fix = zipWith fixDeadToNeutral alive_mask nes
-              (used_red_pes, used_nes) =
-                unzip . map snd . filter fst $ zip alive_mask $ zip red_pes nes
+removeDeadReduction (_, used) pat aux (Screma w arrs form)
+  | Just ([Reduce comm redlam nes], maplam) <- isRedomapSOAC form,
+    not $ all (`UT.used` used) $ patNames pat, -- Quick/cheap check
+    (used_red_pes, map_pes, used_nes, alive_mask) <-
+      deadRedScanCheck ((`UT.used` used) . patElemName) redlam nes (patElems pat),
+    used_nes /= nes = Simplify $ do
+      let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
+          dead_fix = zipWith fixDeadToNeutral alive_mask nes
 
-          when (used_nes == nes) cannotSimplify
+      let maplam' = removeLambdaResults alive_mask maplam
+      redlam' <-
+        removeLambdaResults alive_mask
+          <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
 
-          let maplam' = removeLambdaResults alive_mask maplam
-          redlam' <-
-            removeLambdaResults alive_mask
-              <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
-
-          auxing aux
-            . letBind (Pat $ used_red_pes ++ map_pes)
-            . Op
-            . Screma w arrs
-            =<< mkOp redlam' used_nes maplam'
-    removeDeadReduction' _ _ _ _ = Skip
+      auxing aux
+        . letBind (Pat $ used_red_pes ++ map_pes)
+        . Op
+        . Screma w arrs
+        =<< redomapSOAC [Reduce comm redlam' used_nes] maplam'
 removeDeadReduction _ _ _ _ = Skip
+
+{-# NOINLINE removeDeadScan #-}
+removeDeadScan :: TopDownRuleOp (Wise SOACS)
+removeDeadScan _ pat aux (Screma w arrs form)
+  | ScremaForm prelam [Scan scanlam nes] [] postlam <- form,
+    -- Quick/cheap check
+    not $ all ((`nameIn` freeIn postlam) . paramName) (lambdaParams postlam),
+    let used = (`nameIn` freeIn (lambdaBody postlam)) . paramName,
+    (used_postlam_scanparams, postlam_mapparams, used_nes, alive_mask) <-
+      deadRedScanCheck used scanlam nes (lambdaParams postlam),
+    used_nes /= nes = Simplify $ do
+      let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
+          dead_fix = zipWith fixDeadToNeutral alive_mask nes
+
+      let prelam' = removeLambdaResults alive_mask prelam
+      scanlam' <-
+        removeLambdaResults alive_mask
+          <$> fixLambdaParams scanlam (dead_fix ++ dead_fix)
+
+      postlam' <-
+        runLambdaBuilder (used_postlam_scanparams <> postlam_mapparams) $
+          bodyBind (lambdaBody postlam)
+
+      auxing aux
+        . letBind pat
+        . Op
+        . Screma w arrs
+        $ ScremaForm prelam' [Scan scanlam' used_nes] [] postlam'
+removeDeadScan _ _ _ _ = Skip
 
 {-# NOINLINE fuseConcatScatter #-}
 fuseConcatScatter :: TopDownRuleOp (Wise SOACS)
