@@ -568,15 +568,11 @@ removeOutputsExcept toKeep s = case s of
 vNameFromAdj :: G.Node -> (EdgeT, G.Node) -> VName
 vNameFromAdj n1 (edge, n2) = depsFromEdge (n2, n1, edge)
 
-removeUnusedOutputsFromContext :: DepContext -> FusionM DepContext
-removeUnusedOutputsFromContext (incoming, n1, nodeT, outgoing) =
-  pure (incoming, n1, nodeT', outgoing)
-  where
-    toKeep = map (vNameFromAdj n1) incoming
-    nodeT' = removeOutputsExcept toKeep nodeT
-
 removeUnusedOutputs :: DepGraphAug FusionM
-removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
+removeUnusedOutputs = mapAcross $ \(incoming, n1, nodeT, outgoing) ->
+  let toKeep = map (vNameFromAdj n1) incoming
+      nodeT' = removeOutputsExcept toKeep nodeT
+   in pure (incoming, n1, nodeT', outgoing)
 
 tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
 tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g}
@@ -648,7 +644,8 @@ doAllFusion =
     [ keepTrying . applyAugs $
         [ doVerticalFusion,
           doHorizontalFusion,
-          doInnerFusion
+          doInnerFusion,
+          removeUnusedOutputs
         ],
       removeUnusedOutputs
     ]
