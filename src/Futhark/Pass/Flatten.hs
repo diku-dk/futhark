@@ -226,13 +226,12 @@ transformScalarStms ::
   DistInputs ->
   [DistResult] ->
   Stms SOACS ->
-  [VName] ->
   Builder GPU DistEnv
-transformScalarStms segments env inps distres stms res = do
+transformScalarStms segments env inps distres stms = do
   vs <- letTupExp "scalar_dist" <=< renameExp <=< segMap segments $ \is -> do
     readInputs segments env (toList is) inps
     addStms $ fmap soacsStmToGPU stms
-    pure $ subExpsRes $ map Var res
+    pure $ subExpsRes $ map (Var . distResName) distres
   pure $ insertReps (zip (map distResTag distres) $ map Regular vs) env
 
 transformScalarStm ::
@@ -243,7 +242,7 @@ transformScalarStm ::
   Stm SOACS ->
   Builder GPU DistEnv
 transformScalarStm segments env inps res stm =
-  transformScalarStms segments env inps res (oneStm stm) (patNames (stmPat stm))
+  transformScalarStms segments env inps res (oneStm stm)
 
 distCerts :: DistInputs -> StmAux a -> DistEnv -> Certs
 distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
@@ -997,7 +996,9 @@ doSegScan scans flags elems =
    in genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) (scanNeutral scan) flags elems
 
 transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
-transformDistStm segments env (DistStm inps res stm) = do
+transformDistStm segments env (DistStm inps res (ScalarBatch stms)) =
+  transformScalarStms segments env inps res (stmsFromList stms)
+transformDistStm segments env (DistStm inps res (SingleStm stm)) = do
   case stm of
     Let pat aux (BasicOp e) -> do
       let ~[res'] = res

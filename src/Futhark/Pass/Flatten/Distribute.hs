@@ -8,6 +8,7 @@ module Futhark.Pass.Flatten.Distribute
     ResMap,
     Distributed (..),
     DistStm (..),
+    DistBody (..),
     DistInput (..),
     DistInputs,
     DistType (..),
@@ -21,6 +22,7 @@ import Data.Bifunctor
 import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Set qualified as S
 import Futhark.IR.SOACS
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
@@ -58,15 +60,30 @@ data DistType
       Type
   deriving (Eq, Ord, Show)
 
-data DistResult = DistResult {distResTag :: ResTag, distResType :: DistType}
+data DistResult = DistResult {distResTag :: ResTag, distResType :: DistType, distResName :: VName}
   deriving (Eq, Ord, Show)
+
+-- | The body of a distributed statement.
+data DistBody
+  = -- | A single statement that may involve parallel operations.
+    SingleStm (Stm SOACS)
+  | -- | Multiple scalar operations grouped into a single traversal
+    ScalarBatch [Stm SOACS]
+  deriving (Eq, Ord, Show)
+
+distBodyStms :: DistBody -> [Stm SOACS]
+distBodyStms (SingleStm stm) = [stm]
+distBodyStms (ScalarBatch stms) = stms
 
 data DistStm = DistStm
   { distStmInputs :: DistInputs,
     distStmResult :: [DistResult],
-    distStm :: Stm SOACS
+    distStmBody :: DistBody
   }
   deriving (Eq, Ord, Show)
+
+distStmStms :: DistStm -> [Stm SOACS]
+distStmStms = distBodyStms . distStmBody
 
 -- | First element of tuple are certificates for this result.
 --
@@ -98,11 +115,11 @@ instance Pretty DistType where
     brackets (pretty w) <> pretty r <> pretty t
 
 instance Pretty DistResult where
-  pretty (DistResult rt t) =
+  pretty (DistResult rt t _) =
     pretty rt <> colon <+> pretty t
 
 instance Pretty DistStm where
-  pretty (DistStm inputs res stm) =
+  pretty (DistStm inputs res stms) =
     "let" <+> ppTuple' (map pretty res) <+> "=" </> indent 2 stm'
     where
       stm' =
@@ -110,8 +127,8 @@ instance Pretty DistStm where
           <+> nestedBlock
             ( stack $
                 map onInput inputs
-                  ++ [ pretty stm,
-                       "return" <+> ppTuple' (map pretty res)
+                  ++ map pretty (distBodyStms stms)
+                  ++ [ "return" <+> ppTuple' (map pretty res)
                      ]
             )
       onInput (v, inp) =
@@ -134,12 +151,11 @@ instance Pretty Distributed where
         "let" <+> pretty v <+> "=" <+> "rep" <> parens (pretty tag)
 
 resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat Type -> Result -> ResMap
-resultMap avail_inputs stms pat res = mconcat $ map f stms
+resultMap avail_inputs stms pat res = foldMap f $ concatMap distStmResult stms
   where
-    f stm =
-      foldMap g $ zip (distStmResult stm) (patElems (stmPat (distStm stm)))
-    g (DistResult rt _, pe) =
-      case findRess pe of
+    pes = M.fromList [(patElemName pe, pe) | stm <- stms, pe <- concatMap (patElems . stmPat) (distStmStms stm)]
+    f (DistResult rt _ v) =
+      case maybe [] findRess  $ M.lookup v pes of
         [] -> mempty
         binds -> M.singleton rt binds
     findRess (PatElem v v_t) = do
@@ -178,7 +194,7 @@ distributeBody outer_scope w param_inputs body =
         L.mapAccumL distributeStm (ResTag (length param_inputs), param_inputs) $
           stmsToList $
             bodyStms body
-   in (avail_inputs, stms)
+   in (avail_inputs, groupScalarStms (bodyResult body) avail_inputs stms)
   where
     bound_outside = namesFromList $ M.keys outer_scope
     distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
@@ -197,9 +213,69 @@ distributeBody outer_scope w param_inputs body =
           stm' =
             DistStm
               (nubOrd $ used_free_types <> used_free)
-              (zipWith DistResult new_tags $ map distType $ patTypes pat)
-              stm
+              (zipWith3 DistResult new_tags (map distType $ patTypes pat) (patNames pat))
+              (SingleStm stm)
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
+
+-- | Is this a scalar operation that can be grouped with other scalar
+-- operations into a single parallel traversal?
+-- TODO : work on this
+isScalarDistStm :: DistStm -> Bool
+isScalarDistStm (DistStm _ _ (SingleStm (Let _ _ (BasicOp e)))) = isScalarBasicOp e
+  where
+    isScalarBasicOp BinOp {} = True
+    isScalarBasicOp CmpOp {} = True
+    isScalarBasicOp ConvOp {} = True
+    isScalarBasicOp UnOp {} = True
+    isScalarBasicOp ArrayLit {} = True
+    isScalarBasicOp _ = False
+isScalarDistStm _ = False
+
+groupScalarStms :: Result -> [(VName, DistInput)] -> [DistStm] -> [DistStm]
+groupScalarStms _ _ [] = []
+groupScalarStms bodyRes avail_inputs (d : ds)
+  | isScalarDistStm d =
+      let (moreScalars, rest) = span isScalarDistStm ds
+          scalars = d : moreScalars
+       in mergeGroup bodyRes scalars rest : groupScalarStms bodyRes avail_inputs rest
+  | otherwise = d : groupScalarStms bodyRes avail_inputs ds
+
+-- | Merge a group of scalar 'DistStm's into a single one.
+mergeGroup :: Result -> [DistStm] -> [DistStm] -> DistStm
+mergeGroup _ [d] _ = d
+mergeGroup bodyRes ds rest =
+  let resTags =
+        S.fromList $ concatMap (map distResTag . distStmResult) ds
+      isInternal (_, DistInput rt _) = rt `S.member` resTags
+      isInternal _ = False
+      externalInputs =
+        L.nubBy (\a b -> fst a == fst b) $
+          filter (not . isInternal) $
+            concatMap distStmInputs ds
+      externalResults =
+        nubOrd $
+          filter (isExternal bodyRes rest) $
+            concatMap distStmResult ds
+      allStms = concatMap distStmStms ds
+   in DistStm externalInputs externalResults (ScalarBatch allStms)
+
+-- | A result is external if it is used by a subsequent 'DistStm' or
+-- by the body result.
+isExternal :: Result  -> [DistStm] -> DistResult -> Bool
+isExternal bodyRes rest (DistResult rt _ rn) =
+  rt `S.member` usedByRest || rn `S.member` bodyResVars
+  where
+    usedByRest =
+      S.fromList
+        [rt' | (_, DistInput rt' _) <- concatMap distStmInputs rest]
+    bodyResVars =
+      S.fromList $
+        mapMaybe 
+          ( \(SubExpRes _ se) -> case se of
+              Var v -> Just v
+              _ -> Nothing
+          )
+          bodyRes
 
 -- | The input we are mapping over in 'distributeMap'.
 data MapArray t
