@@ -17,7 +17,7 @@
 -- output { 16511385i32 }
 --
 -- structure {
---   /Screma/Screma 2
+--   /Screma/Stream 1
 --   /Screma 1
 -- }
 def main (n: i64) (m: i64) : i32 =

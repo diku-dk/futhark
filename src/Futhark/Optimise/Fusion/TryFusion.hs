@@ -262,9 +262,27 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
     ( SOAC.Screma _ inp_c form_c,
       SOAC.Screma _ inp_p form_p,
       _
-      ) -> do
-        (inp, form, out) <- fuseScrema w inp_p form_p out_p inp_c form_c out_c
-        success out $ SOAC.Screma w inp form
+      ) ->
+        do
+          (inp, form, out) <- fuseScrema w inp_p form_p out_p inp_c form_c out_c
+          success out $ SOAC.Screma w inp form
+          <|> do
+            -- If these two scremas cannot be fused, then see what happens if we
+            -- turn the producer into a stream. The most common (only?) case of
+            -- this mattering is when the producer is a scan and the consumer is
+            -- a reduction.
+            Just _ <- pure $ Futhark.isScanomapSOAC form_p
+            (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
+            if soac_p' /= soac_p
+              then
+                fuseSOACwithKer
+                  mode
+                  (namesFromList (map identName newacc_ids) <> unfus_set)
+                  (map identName newacc_ids ++ outVars)
+                  soac_p'
+                  ker
+              else fail "SOAC could not be turned into stream."
+
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
