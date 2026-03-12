@@ -157,4 +157,4 @@ transformVFS vfs =
       VFS.Closed _ -> Nothing
 
 logWithSeverity :: (MonadLsp c m) => Severity -> LogAction m Text
-logWithSeverity severity = contramap (`WithSeverity` severity) $ logToLogMessage
+logWithSeverity severity = contramap (`WithSeverity` severity) logToLogMessage
