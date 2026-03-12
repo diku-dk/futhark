@@ -497,14 +497,17 @@ hFuseNodeT
           WithAcc w3_inps lam3
 hFuseNodeT _ _ = pure Nothing
 
-removeOutputsExcept :: [VName] -> NodeT -> NodeT
+removeOutputsExcept :: [VName] -> NodeT -> FusionM NodeT
 removeOutputsExcept toKeep s = case s of
-  SoacNode ots (Pat pats) (H.Screma w inp (ScremaForm pre_lam [] red post_lam)) aux1 ->
-    SoacNode
-      ots
-      (Pat $ red_pats <> new_pats)
-      (H.Screma w inp (ScremaForm new_pre [] red new_post))
-      aux1
+  SoacNode ots (Pat pats) (H.Screma w inp (ScremaForm pre_lam [] red post_lam)) aux1 -> do
+    pre_lam' <- if changed then simplifyLambda new_pre else pure new_pre
+    post_lam' <- if changed then simplifyLambda new_post else pure new_post
+    pure $
+      SoacNode
+        ots
+        (Pat $ red_pats <> new_pats)
+        (H.Screma w inp (ScremaForm pre_lam' [] red post_lam'))
+        aux1
     where
       (pre_red_res, pre_map_res) =
         splitAt (redResults red) $ resFromLambda pre_lam
@@ -520,6 +523,8 @@ removeOutputsExcept toKeep s = case s of
           (lambdaReturnType post_lam)
 
       (red_pats, map_pats) = splitAt (redResults red) pats
+
+      changed = new_post /= post_lam || new_pre /= pre_lam
 
       (new_pats, new) =
         unzip $
@@ -544,35 +549,39 @@ removeOutputsExcept toKeep s = case s of
                 { bodyResult = pre_red_res <> new_pre_map_res
                 }
           }
-  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam scan red post_lam)) aux1 ->
-    SoacNode
-      ots
-      (Pat $ pats_unchanged <> pats_new)
-      (H.Screma w inp (ScremaForm pre_lam scan red lam_new))
-      aux1
+  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam scan red post_lam)) aux1 -> do
+    post_lam' <- if changed then simplifyLambda new_post else pure new_post
+    pure $
+      SoacNode
+        ots
+        (Pat $ pats_unchanged <> pats_new)
+        (H.Screma w inp (ScremaForm pre_lam scan red post_lam'))
+        aux1
     where
       red_output_size = Futhark.redResults red
 
       (pats_unchanged, pats_toChange) = splitAt red_output_size pats1
       res_toChange = zip (resFromLambda post_lam) (lambdaReturnType post_lam)
 
+      changed = new_post /= post_lam
+
       (pats_new, res_new) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
       (results, types) = unzip res_new
-      lam_new =
+      new_post =
         post_lam
           { lambdaReturnType = types,
             lambdaBody = (lambdaBody post_lam) {bodyResult = results}
           }
-  node -> node
+  node -> pure node
 
 vNameFromAdj :: G.Node -> (EdgeT, G.Node) -> VName
 vNameFromAdj n1 (edge, n2) = depsFromEdge (n2, n1, edge)
 
 removeUnusedOutputs :: DepGraphAug FusionM
-removeUnusedOutputs = mapAcross $ \(incoming, n1, nodeT, outgoing) ->
+removeUnusedOutputs = mapAcross $ \(incoming, n1, nodeT, outgoing) -> do
   let toKeep = map (vNameFromAdj n1) incoming
-      nodeT' = removeOutputsExcept toKeep nodeT
-   in pure (incoming, n1, nodeT', outgoing)
+  nodeT' <- removeOutputsExcept toKeep nodeT
+  pure (incoming, n1, nodeT', outgoing)
 
 tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
 tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g}
@@ -640,13 +649,10 @@ keepTrying f g = do
 
 doAllFusion :: DepGraphAug FusionM
 doAllFusion =
-  applyAugs
-    [ keepTrying . applyAugs $
-        [ doVerticalFusion,
-          doHorizontalFusion,
-          doInnerFusion,
-          removeUnusedOutputs
-        ],
+  keepTrying . applyAugs $
+    [ doVerticalFusion,
+      doHorizontalFusion,
+      doInnerFusion,
       removeUnusedOutputs
     ]
 
