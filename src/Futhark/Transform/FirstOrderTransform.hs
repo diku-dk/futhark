@@ -197,9 +197,10 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
 
       let res = scan_res' <> map_res
           param_bind = resSubExp <$> res
-      forM_ (zip (paramName <$> lambdaParams post_lam) param_bind) $
-        \(par, v) -> do
-          letBindNames [par] $ BasicOp $ SubExp v
+          certs = resCerts <$> res
+      forM_ (zip3 (paramName <$> lambdaParams post_lam) param_bind certs) $
+        \(par, v, cs) -> do
+          certifying cs $ letBindNames [par] $ BasicOp $ SubExp v
 
       mapM_ addStm $ bodyStms $ lambdaBody post_lam
 
