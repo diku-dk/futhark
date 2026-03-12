@@ -56,6 +56,15 @@ test-t:
 test-c:
 	cabal run -- futhark test tests -c --backend=c
 
+test-cuda:
+	cabal run -- futhark test tests -c --backend=cuda --tuning=tuning_gpu
+
+test-hip:
+	cabal run -- futhark test tests -c --backend=hip --tuning=tuning_gpu
+
+test-opencl:
+	cabal run -- futhark test tests -c --backend=opencl --tuning=tuning_gpu
+
 test-ispc:
 	cabal run -- futhark test -c --backend=ispc tests
 
