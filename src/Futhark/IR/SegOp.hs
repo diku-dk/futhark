@@ -1249,12 +1249,22 @@ bottomUpSegOp ::
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep
-bottomUpSegOp (_vtable, _used) (Pat _kpes) _dec (SegScan {}) =
-  -- FIX ME
-  Skip
+-- Because of the postop we have to handle SegScan specially.
+bottomUpSegOp (_vtable, used) (Pat kpes) aux (SegScan lvl space kts body ops (SegPostOp postlam))
+  | -- Remove dead results from the postlam.
+    (kpes', res') <-
+      unzip $ filter keep $ zip kpes (bodyResult (lambdaBody postlam)),
+    kpes /= kpes' = Simplify $ do
+      postlam' <- mkLambda (lambdaParams postlam) $ do
+        addStms $ bodyStms $ lambdaBody postlam
+        pure res'
+      addStm $ Let (Pat kpes') aux $ Op $ segOp $ SegScan lvl space kts body ops (SegPostOp postlam')
+  | otherwise = Skip
+  where
+    keep (pe, _) = patElemName pe `UT.used` used
 bottomUpSegOp (_vtable, used) (Pat kpes) dec segop
-  -- Remove dead results. This is a bit tricky to do with scan/red
-  -- results, so we only deal with map results for now.
+  -- Remove dead results. This is a bit tricky to do with reduction results, so
+  -- we only deal with map results for now.
   | (_, kpes', kts', kres') <- unzip4 $ filter keep $ zip4 [0 ..] kpes kts kres,
     kpes' /= kpes = Simplify $ do
       kbody' <- localScope (scopeOfSegSpace space) $ mkBodyM kstms kres'
