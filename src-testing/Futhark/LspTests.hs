@@ -49,7 +49,6 @@ import System.Process (createPipe)
 import Test.Tasty (TestName, TestTree, testGroup, defaultMain)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Language.LSP.Protocol.Message (SMethod(SMethod_WorkspaceApplyEdit))
-import qualified Debug.Trace as Debug
 
 tests :: TestTree
 tests =
