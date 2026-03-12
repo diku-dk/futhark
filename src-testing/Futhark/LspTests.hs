@@ -16,6 +16,7 @@ import Futhark.CLI.LSP (serverDefinition)
 import Futhark.Fmt.Printer (fmtToText)
 import Language.Futhark.Parser.Monad (SyntaxError (..))
 import Language.LSP.Protocol.Lens (uri)
+import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))
 import Language.LSP.Protocol.Types
   ( CodeLens (CodeLens),
     Definition (Definition),
@@ -42,13 +43,13 @@ import Language.LSP.Test
     getAndResolveCodeLenses,
     getDefinitions,
     getHover,
-    runSessionWithHandles, message,
+    message,
+    runSessionWithHandles,
   )
 import System.IO (hClose)
 import System.Process (createPipe)
-import Test.Tasty (TestName, TestTree, testGroup, defaultMain)
+import Test.Tasty (TestName, TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-import Language.LSP.Protocol.Message (SMethod(SMethod_WorkspaceApplyEdit))
 
 tests :: TestTree
 tests =
