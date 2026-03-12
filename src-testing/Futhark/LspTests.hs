@@ -110,7 +110,7 @@ testHoverInformation = serverTestCase "Hover" $ do
 testDefinition :: TestTree
 testDefinition = serverTestCase "Go To Definition" $
   do
-    docIdent <- createMainDoc mainDocContents
+    docIdent <- createMainDoc mainContents
     definition <- getDefinitions docIdent fooBodyPosition
 
     let expectedDefinition =
@@ -127,7 +127,7 @@ testDefinition = serverTestCase "Go To Definition" $
 
     liftIO $ definition @?= InL expectedDefinition
   where
-    mainDocContents =
+    mainContents =
       """
       def foo = 0i32
       def bar = foo
@@ -143,10 +143,10 @@ testDefinition = serverTestCase "Go To Definition" $
 testFormatting :: TestTree
 testFormatting = serverTestCase "Formatting" $
   do
-    docIdent <- createMainDoc mainDocContents
+    docIdent <- createMainDoc mainContents
     formatDoc docIdent _formattingOptions
     lspFormattedDoc <- documentContents docIdent
-    formattedDoc <- case fmtToText "main.fut" mainDocContents of
+    formattedDoc <- case fmtToText "main.fut" mainContents of
       Left (SyntaxError loc msg) ->
         liftIO . assertFailure $
           "Formatting failed: " <> show loc <> ".\n" <> show msg
@@ -156,7 +156,7 @@ testFormatting = serverTestCase "Formatting" $
   where
     -- these are ignored by the formatter anyway
     _formattingOptions = FormattingOptions 0 False Nothing Nothing Nothing
-    mainDocContents =
+    mainContents =
       """
       -- this is where all the lines start
         def main = 
@@ -166,7 +166,7 @@ testFormatting = serverTestCase "Formatting" $
 testEvaluationComment :: TestTree
 testEvaluationComment = serverTestCase "Evaluation Comment" $
   do
-    docIdent <- createMainDoc mainDocContents
+    docIdent <- createMainDoc mainContents
     lensCommand <-
       getAndResolveCodeLenses docIdent >>= \case
         [CodeLens _ (Just command) _] -> pure command
@@ -174,15 +174,15 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $
 
     executeCommand lensCommand
 
-    newDocContents <- documentContents docIdent
-    liftIO $ newDocContents @?= expectedDocContents
+    newContents <- documentContents docIdent
+    liftIO $ newContents @?= expectedContents
   where
-    expectedDocContents =
-      mainDocContents
+    expectedContents =
+      mainContents
         <> """
            -- 47
            """
-    mainDocContents =
+    mainContents =
       """
       def x = 42i32
       -- >>> x + 5
