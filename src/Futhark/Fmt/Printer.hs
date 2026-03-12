@@ -558,7 +558,12 @@ instance Format UncheckedModTypeExp where
           ps_op = if null ps then (<>) else (<+>)
   fmt (ModTypeArrow (Just v) te0 te1 loc) =
     addComments loc $
-      parens (fmtName bindingStyle v <> ":" <+> fmt te0) <+> align ("->" </> fmt te1)
+      parens (fmtName bindingStyle v <> ":" <+> fmt te0)
+        </> "->"
+        <+> case te1 of
+          ModTypeArrow {} -> fmt te1
+          ModTypeSpecs {} -> fmt te1
+          _ -> align (fmt te1)
   fmt (ModTypeArrow Nothing te0 te1 loc) =
     addComments loc $ fmt te0 <+> "->" <+> fmt te1
 

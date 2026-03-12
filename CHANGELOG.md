@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark fmt` prints module types better.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.25.36]
+
+### Added
+
 * `futhark lsp` supports running evaluation comments in the interpreter,
     implemented by VegOwOtenks.
 
@@ -27,10 +39,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The C API now has functions for creating and updating arrays of opaque
   objects. (#2383, #2384)
-
-### Removed
-
-### Changed
 
 ### Fixed
 
