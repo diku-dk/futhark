@@ -37,6 +37,8 @@ import Language.LSP.Test
 import System.Process (createPipe)
 import Test.Tasty (TestName, TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import System.IO (hClose)
+import Data.Foldable (for_)
 
 tests :: TestTree
 tests =
@@ -58,7 +60,12 @@ runServerSessionPair session = do
     forkIO . void $
       runServerWithHandles ignoreLog ignoreLog serverIn serverOut futharkServer
 
-  runSessionWithHandles clientOut clientIn defaultConfig fullLatestClientCaps "." session
+  result <- runSessionWithHandles clientOut clientIn defaultConfig fullLatestClientCaps "." session
+
+  for_ [serverIn, clientOut, clientIn, serverOut] hClose
+
+  pure result
+
 
 createMainDoc :: Text -> Session TextDocumentIdentifier
 createMainDoc = createDoc "main.fut" futharkLanguage
