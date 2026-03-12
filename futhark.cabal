@@ -562,6 +562,7 @@ library futhark-testing
     , co-log-core
     , free
     , futhark
+    , lens
     , lsp
     , lsp-test
     , megaparsec
