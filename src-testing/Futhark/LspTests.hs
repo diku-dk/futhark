@@ -3,7 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultilineStrings #-}
 
-module Futhark.LspTests (tests) where
+module Futhark.LspTests (tests, main) where
 
 import Colog.Core (LogAction (LogAction))
 import Control.Concurrent (forkIO)
@@ -42,12 +42,14 @@ import Language.LSP.Test
     getAndResolveCodeLenses,
     getDefinitions,
     getHover,
-    runSessionWithHandles,
+    runSessionWithHandles, message,
   )
 import System.IO (hClose)
 import System.Process (createPipe)
-import Test.Tasty (TestName, TestTree, testGroup)
+import Test.Tasty (TestName, TestTree, testGroup, defaultMain)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Language.LSP.Protocol.Message (SMethod(SMethod_WorkspaceApplyEdit))
+import qualified Debug.Trace as Debug
 
 tests :: TestTree
 tests =
@@ -163,6 +165,9 @@ testFormatting = serverTestCase "Formatting" $
           0i32
       """
 
+main :: IO ()
+main = defaultMain testEvaluationComment
+
 testEvaluationComment :: TestTree
 testEvaluationComment = serverTestCase "Evaluation Comment" $
   do
@@ -174,14 +179,15 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $
 
     executeCommand lensCommand
 
+    -- this is important, it crashes with an IOError otherwise
+    _workspaceEdit <- message SMethod_WorkspaceApplyEdit
+
     newContents <- documentContents docIdent
     liftIO $ newContents @?= expectedContents
   where
     expectedContents =
       mainContents
-        <> """
-           -- 47
-           """
+        <> "-- 47\n"
     mainContents =
       """
       def x = 42i32
