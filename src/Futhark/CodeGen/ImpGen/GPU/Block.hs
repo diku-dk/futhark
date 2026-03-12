@@ -434,7 +434,7 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
 
   -- FIXME: we actually need something like blockCoverSegSpacee here, although in
   -- practice we currently do not generate virtualised scans.
-  sWhen (isActive $ zip ltids dims) $ do
+  sWhen (isActive $ zip ltids dims) . localOps threadOperations $ do
     sComment "bind scan results to post lambda params" $
       forM_ (zip scan_pars scan_out) $ \(par, acc) ->
         copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 ltids)
