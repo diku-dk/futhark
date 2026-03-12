@@ -8,12 +8,16 @@ import Colog.Core (LogAction (LogAction))
 import Control.Concurrent (forkIO)
 import Control.Lens ((^.))
 import Control.Monad.IO.Class (liftIO)
+import Data.Foldable (for_)
 import Data.Functor (void)
 import Data.Text (Text)
 import Futhark.CLI.LSP (serverDefinition)
+import Futhark.Fmt.Printer (fmtToText)
+import Language.Futhark.Parser.Monad (SyntaxError (..))
 import Language.LSP.Protocol.Lens (uri)
 import Language.LSP.Protocol.Types
   ( Definition (Definition),
+    FormattingOptions (FormattingOptions),
     Hover (Hover),
     LanguageKind (LanguageKind_Custom),
     Location (..),
@@ -29,23 +33,25 @@ import Language.LSP.Test
   ( Session,
     createDoc,
     defaultConfig,
+    documentContents,
+    formatDoc,
     fullLatestClientCaps,
     getDefinitions,
     getHover,
     runSessionWithHandles,
   )
+import System.IO (hClose)
 import System.Process (createPipe)
 import Test.Tasty (TestName, TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-import System.IO (hClose)
-import Data.Foldable (for_)
 
 tests :: TestTree
 tests =
   testGroup
     "Futhark.LspTests"
     [ testHoverInformation,
-      testDefinition
+      testDefinition,
+      testFormatting
     ]
 
 runServerSessionPair :: Session a -> IO a
@@ -65,7 +71,6 @@ runServerSessionPair session = do
   for_ [serverIn, clientOut, clientIn, serverOut] hClose
 
   pure result
-
 
 createMainDoc :: Text -> Session TextDocumentIdentifier
 createMainDoc = createDoc "main.fut" futharkLanguage
@@ -129,3 +134,26 @@ testDefinition = serverTestCase "Go To Definition" $
         { _line = 1,
           _character = 12
         }
+
+testFormatting :: TestTree
+testFormatting = serverTestCase "Formatting" $
+  do
+    docIdent <- createMainDoc mainDocContents
+    formatDoc docIdent _formattingOptions
+    lspFormattedDoc <- documentContents docIdent
+    formattedDoc <- case fmtToText "main.fut" mainDocContents of
+      Left (SyntaxError loc msg) ->
+        liftIO . assertFailure $
+          "Formatting failed: " <> show loc <> ".\n" <> show msg
+      Right d -> pure d
+
+    liftIO $ lspFormattedDoc @?= formattedDoc
+  where
+    -- these are ignored by the formatter anyway
+    _formattingOptions = FormattingOptions 0 False Nothing Nothing Nothing
+    mainDocContents =
+      """
+      -- this is where all the lines start
+        def main = 
+          0i32
+      """
