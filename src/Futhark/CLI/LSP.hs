@@ -47,26 +47,26 @@ main _prog _args = do
     0 -> exitSuccess
     _ -> exitWith $ ExitFailure code
 
-serverDefinition ::  IO (ServerDefinition ())
+serverDefinition :: IO (ServerDefinition ())
 serverDefinition = do
   state_mvar <- newIORef emptyState
-  pure $ ServerDefinition
-    { onConfigChange = const $ pure (),
-      configSection = "Futhark",
-      parseConfig = const . const $ Right (),
-      defaultConfig = (),
-      doInitialize = \env _req -> pure $ Right env,
-      staticHandlers = handlers state_mvar,
-      interpretHandler = \env -> Iso (runLspT env) liftIO,
-      options =
-        defaultOptions
-          { optTextDocumentSync =
-              Just syncOptions,
-            optExecuteCommandCommands =
-              Just $ map showText [minBound :: CommandType .. maxBound]
-          }
-    }
-
+  pure $
+    ServerDefinition
+      { onConfigChange = const $ pure (),
+        configSection = "Futhark",
+        parseConfig = const . const $ Right (),
+        defaultConfig = (),
+        doInitialize = \env _req -> pure $ Right env,
+        staticHandlers = handlers state_mvar,
+        interpretHandler = \env -> Iso (runLspT env) liftIO,
+        options =
+          defaultOptions
+            { optTextDocumentSync =
+                Just syncOptions,
+              optExecuteCommandCommands =
+                Just $ map showText [minBound :: CommandType .. maxBound]
+            }
+      }
 
 syncOptions :: TextDocumentSyncOptions
 syncOptions =
