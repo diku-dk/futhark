@@ -5,7 +5,7 @@
 -- | The handlers exposed by the language server.
 module Futhark.LSP.Handlers (handlers) where
 
-import Colog.Core (logStringStderr, (<&))
+import Colog.Core (Severity (Debug, Info), (<&))
 import Control.Lens ((^.))
 import Control.Monad.Except (ExceptT, MonadError (throwError), liftEither, throwError)
 import Control.Monad.Trans (lift)
@@ -25,7 +25,7 @@ import Futhark.LSP.CodeLens qualified as CodeLens
 import Futhark.LSP.CommandType (CommandType (CodeLens))
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
 import Futhark.LSP.State (State (..))
-import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
+import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState, logWithSeverity)
 import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locText)
@@ -64,7 +64,7 @@ import Text.Read (readMaybe)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
-  logStringStderr <& "Initialized"
+  logWithSeverity Info <& "Initialized"
 
 onHoverHandler :: IORef State -> Handlers (LspM ())
 onHoverHandler state_mvar =
@@ -72,14 +72,14 @@ onHoverHandler state_mvar =
     let TRequestMessage _ _ _ (HoverParams doc pos _workDone) = req
         Position l c = pos
         file_path = uriToFilePath $ doc ^. uri
-    logStringStderr <& ("Got hover request: " <> show (file_path, pos))
+    logWithSeverity Debug <& "Got hover request: " <> showText (file_path, pos)
     state <- tryTakeStateFromIORef state_mvar file_path
     responder $ Right $ maybe (InR Null) InL $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
 
 onDocumentFocusHandler :: IORef State -> Handlers (LspM ())
 onDocumentFocusHandler state_mvar =
   notificationHandler (SMethod_CustomMethod (Proxy @"custom/onFocusTextDocument")) $ \msg -> do
-    logStringStderr <& "Got custom request: onFocusTextDocument"
+    logWithSeverity Debug <& "Got custom request: onFocusTextDocument"
     let TNotificationMessage _ _ (Array vector_param) = msg
         String focused_uri = V.head vector_param -- only one parameter passed from the client
     tryReCompile state_mvar (uriToFilePath (Uri focused_uri))
@@ -90,7 +90,8 @@ goToDefinitionHandler state_mvar =
     let TRequestMessage _ _ _ (DefinitionParams doc pos _workDone _partial) = req
         Position l c = pos
         file_path = uriToFilePath $ doc ^. uri
-    logStringStderr <& ("Got goto definition: " <> show (file_path, pos))
+    logWithSeverity Debug
+      <& ("Got goto definition: " <> showText (file_path, pos))
     state <- tryTakeStateFromIORef state_mvar file_path
     case findDefinitionRange state file_path (fromEnum l + 1) (fromEnum c + 1) of
       Nothing -> responder $ Right $ InR $ InR Null
@@ -101,7 +102,7 @@ onDocumentSaveHandler state_mvar =
   notificationHandler SMethod_TextDocumentDidSave $ \msg -> do
     let TNotificationMessage _ _ (DidSaveTextDocumentParams doc _text) = msg
         file_path = uriToFilePath $ doc ^. uri
-    logStringStderr <& ("Saved document: " ++ show doc)
+    logWithSeverity Debug <& ("Saved document: " <> showText doc)
     tryReCompile state_mvar file_path
 
 onDocumentChangeHandler :: IORef State -> Handlers (LspM ())
@@ -124,7 +125,7 @@ onDocumentCloseHandler = notificationHandler SMethod_TextDocumentDidClose $ \_ms
 onWorkspaceDidChangeConfiguration :: IORef State -> Handlers (LspM ())
 onWorkspaceDidChangeConfiguration _state_mvar =
   notificationHandler SMethod_WorkspaceDidChangeConfiguration $ \_ ->
-    logStringStderr <& "WorkspaceDidChangeConfiguration"
+    logWithSeverity Debug <& "WorkspaceDidChangeConfiguration"
 
 onDocumentFormattingHandler :: Handlers (LspM ())
 onDocumentFormattingHandler =
@@ -133,7 +134,7 @@ onDocumentFormattingHandler =
         DocumentFormattingParams _progressToken textDoc _opts = formattingParams
         fileUri = textDoc ^. uri
      in do
-          logStringStderr <& ("Formatting: " ++ show (textDoc ^. uri))
+          logWithSeverity Debug <& "Formatting: " <> showText (textDoc ^. uri)
           result <- runExceptT $ do
             virtualFile <- getVirtualFile' fileUri
             let fileText = R.toText $ virtualFile ^. file_text
@@ -143,7 +144,7 @@ onDocumentFormattingHandler =
                 then InR Null
                 else InL [fullTextEdit formattedText]
 
-          logStringStderr <& show result
+          logWithSeverity Debug <& showText result
           report result
   where
     fullTextEdit newText =
@@ -195,7 +196,8 @@ onDocumentCodeLenses =
   requestHandler SMethod_TextDocumentCodeLens $ \request respond ->
     let textDocUri = request ^. params . textDocument . uri
      in do
-          logStringStderr <& ("textDocument/CodeLens for " ++ show textDocUri)
+          logWithSeverity Debug
+            <& ("textDocument/CodeLens for " <> showText textDocUri)
           eitherLenses <- CodeLens.evalLensesFor textDocUri
           respond $ bimap failure success eitherLenses
   where
@@ -215,7 +217,8 @@ onDocumentCodeLensResolve =
     let codeLens = request ^. params
         codeLensLine = codeLens ^. (range . start . line)
      in do
-          logStringStderr <& ("Resolving code lens on line " ++ show codeLensLine)
+          logWithSeverity Debug
+            <& ("Resolving code lens on line " <> showText codeLensLine)
           let result = runExcept $ CodeLens.resolve codeLens
           respond . first failure $ result
   where

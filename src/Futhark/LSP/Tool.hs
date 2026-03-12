@@ -9,11 +9,15 @@ module Futhark.LSP.Tool
     posToUri,
     computeMapping,
     transformVFS,
+    logWithSeverity,
   )
 where
 
+import Colog.Core (LogAction, Severity, WithSeverity (WithSeverity))
 import Control.Lens.Getter ((^.))
+import Data.Functor.Contravariant (contramap)
 import Data.Map qualified as M
+import Data.Text (Text)
 import Data.Text qualified as T
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.PositionMapping
@@ -32,8 +36,9 @@ import Language.Futhark.Query
     atPos,
     boundLoc,
   )
+import Language.LSP.Logging (logToLogMessage)
 import Language.LSP.Protocol.Types
-import Language.LSP.Server (LspM, getVirtualFile)
+import Language.LSP.Server (LspM, MonadLsp, getVirtualFile)
 import Language.LSP.VFS (VFS, VirtualFile, vfsMap, virtualFileText, virtualFileVersion)
 import Language.LSP.VFS qualified as VFS
 
@@ -150,3 +155,6 @@ transformVFS vfs =
     keepOpenFile = \case
       VFS.Open file -> Just file
       VFS.Closed _ -> Nothing
+
+logWithSeverity :: (MonadLsp c m) => Severity -> LogAction m Text
+logWithSeverity severity = contramap (`WithSeverity` severity) $ logToLogMessage

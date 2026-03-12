@@ -34,13 +34,10 @@ import Language.LSP.Server
     type (<~>) (Iso),
   )
 import System.Exit
-import System.IO (BufferMode (LineBuffering), hSetBuffering, stderr)
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
 main _prog _args = do
-  -- makes the lines appear in full in the logs
-  hSetBuffering stderr LineBuffering
   code <-
     runServer =<< serverDefinition
   case code of
