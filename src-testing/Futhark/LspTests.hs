@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultilineStrings #-}
 
 module Futhark.LspTests (tests) where
@@ -16,7 +17,8 @@ import Futhark.Fmt.Printer (fmtToText)
 import Language.Futhark.Parser.Monad (SyntaxError (..))
 import Language.LSP.Protocol.Lens (uri)
 import Language.LSP.Protocol.Types
-  ( Definition (Definition),
+  ( CodeLens (CodeLens),
+    Definition (Definition),
     FormattingOptions (FormattingOptions),
     Hover (Hover),
     LanguageKind (LanguageKind_Custom),
@@ -34,8 +36,10 @@ import Language.LSP.Test
     createDoc,
     defaultConfig,
     documentContents,
+    executeCommand,
     formatDoc,
     fullLatestClientCaps,
+    getAndResolveCodeLenses,
     getDefinitions,
     getHover,
     runSessionWithHandles,
@@ -51,7 +55,8 @@ tests =
     "Futhark.LspTests"
     [ testHoverInformation,
       testDefinition,
-      testFormatting
+      testFormatting,
+      testEvaluationComment
     ]
 
 runServerSessionPair :: Session a -> IO a
@@ -156,4 +161,29 @@ testFormatting = serverTestCase "Formatting" $
       -- this is where all the lines start
         def main = 
           0i32
+      """
+
+testEvaluationComment :: TestTree
+testEvaluationComment = serverTestCase "Evaluation Comment" $
+  do
+    docIdent <- createMainDoc mainDocContents
+    lensCommand <-
+      getAndResolveCodeLenses docIdent >>= \case
+        [CodeLens _ (Just command) _] -> pure command
+        bad -> liftIO $ assertFailure $ "Unexpected Code Lenses: " <> show bad
+
+    executeCommand lensCommand
+
+    newDocContents <- documentContents docIdent
+    liftIO $ newDocContents @?= expectedDocContents
+  where
+    expectedDocContents =
+      mainDocContents
+        <> """
+           -- 47
+           """
+    mainDocContents =
+      """
+      def x = 42i32
+      -- >>> x + 5
       """
