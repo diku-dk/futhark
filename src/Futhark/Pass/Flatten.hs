@@ -874,10 +874,11 @@ onMapInputArr ::
   DistInputs ->
   VName ->
   VName ->
+  VName ->
   Param Type ->
   VName ->
   Builder GPU (MapArray IrregularRep)
-onMapInputArr segments env inps ws_O ws_data p arr = do
+onMapInputArr segments env inps ws ws_O ws_data p arr = do
   ws_prod <- arraySize 0 <$> lookupType ws_data
   case lookup arr inps of
     Just v_inp ->
@@ -914,24 +915,37 @@ onMapInputArr segments env inps ws_O ws_data p arr = do
                             fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
                       pure $ MapArray new_flat (stripArray 1 elems_t)
                 else do
-                  -- we need to perform surgery on the metadata.
-                  ~[p_segments, p_O] <- letTupExp
-                    (baseName (paramName p) <> "_rep_inp_irreg")
-                    <=< segMap (MkSolo ws_prod)
-                    $ \(MkSolo i) -> do
-                      segment_i <-
-                        letSubExp "segment" =<< eIndex ws_data [eSubExp i]
-                      segment <-
-                        letSubExp "v" =<< eIndex (irregularS rep) [eSubExp segment_i]
-                      offset <-
-                        letSubExp "v" =<< eIndex (irregularO rep) [eSubExp segment_i]
-                      pure $ subExpsRes [segment, offset]
+                  -- We need to split multi-dimensional irregular segments
+                  -- into per-row segments. Compute per-row size by dividing
+                  -- each segment's total size by the number of inner iterations.
+                  -- Important TODO: I should ask troels about this.
+                  -- we should make this consistent.
+                  -- we can avoid getting per_row_size by division.
+                  num_segments <- arraySize 0 <$> lookupType ws
+                  -- per_row_size[s] = irregularS[s] / ws[s]
+                  per_row_size <-
+                    letExp (baseName (paramName p) <> "_per_row_size")
+                      <=< segMap (MkSolo num_segments)
+                      $ \(MkSolo s) -> do
+                        total_s <- letSubExp "total_s" =<< eIndex (irregularS rep) [eSubExp s]
+                        num_rows_s <- letSubExp "num_rows_s" =<< eIndex ws [eSubExp s]
+                        row_size <- letSubExp "row_size" <=< toExp $
+                          pe64 total_s `div` pe64 num_rows_s
+                        pure $ subExpsRes [row_size]
+                  new_S <-
+                    letExp (baseName (paramName p) <> "_new_S")
+                      <=< segMap (MkSolo ws_prod)
+                      $ \(MkSolo i) -> do
+                        seg_i <- letSubExp "seg_i" =<< eIndex ws_data [eSubExp i]
+                        sz <- letSubExp "sz" =<< eIndex per_row_size [eSubExp seg_i]
+                        pure $ subExpsRes [sz]
+                  (new_F, new_O, _new_elems) <- doSegIota new_S
                   let rep' =
                         IrregularRep
                           { irregularD = irregularD rep,
-                            irregularF = irregularF rep,
-                            irregularS = p_segments,
-                            irregularO = p_O
+                            irregularF = new_F,
+                            irregularS = new_S,
+                            irregularO = new_O
                           }
                   pure $ MapOther rep' elems_t
             Regular vs -> do
@@ -973,7 +987,7 @@ transformInnerMap segments env inps pat w arrs map_lam = do
   new_segment <- arraySize 0 <$> lookupType ws_data
   arrs' <-
     zipWithM
-      (onMapInputArr segments env inps ws_O ws_data)
+      (onMapInputArr segments env inps ws ws_O ws_data)
       (lambdaParams map_lam)
       arrs
   let free = freeIn map_lam
@@ -1614,19 +1628,14 @@ transformDistributed irregs segments dist = do
         letBindNames [v] $ BasicOp $ Replicate (segmentsShape segments) se
       Right (DistInputFree arr _) ->
         letBindNames [v] $ BasicOp $ SubExp $ Var arr
-      -- this can happen?
+      -- This can happen. ask Troels
       Right (DistInput rt t) -> do
         let shape = segmentsShape segments <> arrayShape t
         case resVar rt env of
-          Regular v' -> do
-            v_copy <-
-              letExp (baseName v) . BasicOp $
-                Replicate mempty (Var v')
-            v_copy_shape <- arrayShape <$> lookupType v_copy
-            letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
+          Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
           Irregular irreg -> do
             v_copy <-
-              letExp (baseName v) . BasicOp $
+              letExp (baseName v <> "_copy_right_dist") . BasicOp $
                 Replicate mempty (Var $ irregularD irreg)
             v_copy_shape <- arrayShape <$> lookupType v_copy
             letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
