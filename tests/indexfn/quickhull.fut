@@ -296,10 +296,16 @@ def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 
   --   points_idx : [num_points]i64 | Range points_idx (0, length segs_begx)
   -- which is annotated as both pre- and postconditions on loop_body.
   let (hull_x', hull_y', _,_,_,_, _,_,_) =
-     -- loop (hull, segs, points) =
-     --   ([], [(startx,starty, endx,endy)], map (\(x,y) -> (0, x, y)) points)
-     -- while !null points do
-    loop_body hull_x hull_y segs_bx segs_by segs_ex segs_ey points_idx points_x points_y
+    -- We have to comment out the loop itself because Futhark's existing size
+    -- type unification algorithm has to be extended to unify sizes that appear
+    -- inside our annotations, which are attached to the types.
+    --
+    -- This is wholly unrelated to the correctness of our system; our annotations
+    -- could be completely decoupled from Futhark's type checker (e.g., as
+    -- code comments).
+    --
+    -- loop (hull_x, hull_y, segs_bx, segs_by, segs_ex, segs_ey, points_idx, points_x, points_y) = (hull_x0, hull_y0, segs_bx0, segs_by0, segs_ex0, segs_ey0, points_idx0, points_x0, points_y0) while (length points_idx > 0) do
+      loop_body hull_x hull_y segs_bx segs_by segs_ex segs_ey points_idx points_x points_y
 
   let hull' = zip hull_x' (sized_like hull_x' hull_y')
   in hull'
