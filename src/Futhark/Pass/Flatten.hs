@@ -1614,8 +1614,22 @@ transformDistributed irregs segments dist = do
         letBindNames [v] $ BasicOp $ Replicate (segmentsShape segments) se
       Right (DistInputFree arr _) ->
         letBindNames [v] $ BasicOp $ SubExp $ Var arr
-      Right DistInput {} ->
-        error "replication of irregular identity result"
+      -- this can happen?
+      Right (DistInput rt t) -> do
+        let shape = segmentsShape segments <> arrayShape t
+        case resVar rt env of
+          Regular v' -> do
+            v_copy <-
+              letExp (baseName v) . BasicOp $
+                Replicate mempty (Var v')
+            v_copy_shape <- arrayShape <$> lookupType v_copy
+            letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
+          Irregular irreg -> do
+            v_copy <-
+              letExp (baseName v) . BasicOp $
+                Replicate mempty (Var $ irregularD irreg)
+            v_copy_shape <- arrayShape <$> lookupType v_copy
+            letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
 
