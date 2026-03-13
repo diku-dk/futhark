@@ -282,24 +282,63 @@ def loop_body [num_segs] [num_points]
       ) | \(_,_, res_segs_bx,_,_,_, res_points_idx,_,_) ->
         Range res_points_idx (0,length res_segs_bx)}
     =
-    let ( segs_bx'
-        , segs_by'
-        , segs_ex'
-        , segs_ey'
-        , points_idx'
-        , points_x'
-        , points_y') =
-      expand_hull segs_bx segs_by segs_ex segs_ey points_idx points_x points_y
+  let ( segs_bx
+      , segs_by
+      , segs_ex
+      , segs_ey
+      , sgm_inds
+      , points_x'
+      , points_y') =
+    expand_hull segs_bx segs_by segs_ex segs_ey points_idx points_x points_y
 
-    let ( hull_x'
-        , hull_y'
-        , segs_true_bx
-        , segs_true_by
-        , segs_true_ex
-        , segs_true_ey
-        , points_idx'') =
-          extract_empty_segments hull_x hull_y segs_bx' segs_by' segs_ex' segs_ey' points_idx'
-    in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
+  -- let ( hull_x'
+  --     , hull_y'
+  --     , segs_true_bx
+  --     , segs_true_by
+  --     , segs_true_ex
+  --     , segs_true_ey
+  --     , points_idx'') =
+  --       extract_empty_segments hull_x hull_y segs_bx' segs_by' segs_ex' segs_ey' points_idx'
+
+  -- let num_points = length sgm_inds
+  -- let num_segs = length segs_bx
+  -- let zeros = replicate num_segs false
+  -- let ones = replicate num_points true
+  let zeros = map (\_ -> false) segs_bx
+  let ones = map (\_ -> true) sgm_inds
+  let segs_inhabited = reduce_by_index zeros (||) false sgm_inds ones
+
+  let (n, inds) = partition_indices segs_inhabited
+  let zeros = replicate num_segs 0
+  let segs_parted_bx = scatter zeros inds segs_bx
+  let zeros = replicate num_segs 0
+  let segs_parted_by = scatter zeros inds segs_by
+  let zeros = replicate num_segs 0
+  let segs_parted_ex = scatter zeros inds segs_ex
+  let zeros = replicate num_segs 0
+  let segs_parted_ey = scatter zeros inds segs_ey
+
+  let zero = 0
+  let segs_true_bx = slice segs_parted_bx zero n
+  let segs_true_by = slice segs_parted_by zero n
+  let segs_true_ex = slice segs_parted_ex zero n
+  let segs_true_ey = slice segs_parted_ey zero n
+
+  let segs_false_bx = slice segs_parted_bx n num_segs
+  let segs_false_by = slice segs_parted_by n num_segs
+
+  let hull_x' = hull_x ++ segs_false_bx
+  let hull_y' = hull_y ++ segs_false_by
+
+  let segs_indicator = map (\c -> if c then 1 else 0) segs_inhabited
+  let sum_segs = scan (+) 0 segs_indicator
+
+  let sgm_inds' = map (\seg_ix ->
+      if segs_inhabited[seg_ix]
+      then sum_segs[seg_ix] - segs_indicator[seg_ix]
+      else 0
+    ) sgm_inds
+  in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds', points_x', points_y')
 -- 1. put the else in its own function with postcondition
 -- 2. implement a property inference rule for if-statements
 -- that says if the then and else branches have the same postcondition
