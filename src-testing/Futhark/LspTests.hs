@@ -161,7 +161,7 @@ testFormatting = serverTestCase "Formatting" $
     mainContents =
       """
       -- this is where all the lines start
-        def main = 
+        def main =
           0i32
       """
 
