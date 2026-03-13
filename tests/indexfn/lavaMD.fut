@@ -76,6 +76,8 @@ def main [number_boxes] [par_per_box] [num_neighbors]
     map2 (\box_num_nghbs' (l: i64) ->
       unzip4 (map4 (\rA_el_0 rA_el_1 rA_el_2 rA_el_3 ->
              let acc = (0, 0, 0, 0)
+             -- There's no need to extract this loop as a top-level
+             -- function because we don't annotate any properties on it.
              in loop (acc) for k < box_num_nghbs' + 1 do
                   let pointer =
                     if (k > 0)
