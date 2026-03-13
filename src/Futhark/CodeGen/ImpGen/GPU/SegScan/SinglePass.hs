@@ -376,7 +376,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
                   -- Write map results to private memory.
                   forM_ (zip map_private_chunks $ map kernelResultSubExp map_res) $ \(dest, src) ->
-                    maybe (pure ()) (\d -> copyDWIMFix d [i] src []) dest
+                    maybe (pure ()) (\d -> copyDWIMFix d (map Imp.le64 gtids) src (map Imp.le64 gtids)) dest
 
                   -- Write to-scan results to private memory.
                   forM_ (zip scan_private_chunks $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
@@ -692,7 +692,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
           sComment "bind map results to post lamda params" $
             forM_ (zip map_pars map_private_chunks) $ \(par, priv) -> do
-              maybe (pure ()) (\p -> copyDWIMFix par [] (Var p) [i]) priv
+              maybe (pure ()) (\p -> copyDWIMFix par (map Imp.le64 gtids) (Var p) (map Imp.le64 gtids)) priv
 
           let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
           sComment "compute post op." $ do
