@@ -84,13 +84,23 @@ def filterTrueInds [n] (bs: [n]bool) : {[]i64 | \ys -> Range ys (2,inf)} =
   let vals = map (\i -> i+2) (iota n)
   in  scatter (replicate len 0i64) inds vals
 
+def min
+    (n: {i64 | \n -> Range n (1,inf)})
+    (len: {i64 | \n -> Range n (1,inf)})
+    : {i64 | \len' ->
+      Range len' (1,inf)
+    } =
+  if n / len < len then n else len*len
+
 def oneIter [len_sq_primes]
       (n64: {i64 | \n -> Range n (1,inf)})
       (len: {i64 | \n -> Range n (1,inf)})
       (sq_primes : {[len_sq_primes]i64 | \ys -> Range ys (2,inf)})
-      : {([]i64, i64) | \(xs,_) -> Range xs (2,inf)} =
-  -- this is "len = min n (len*len)" but without running out of i64 bounds
-  -- let len = if n64 / len < len then n64 else len*len
+      : {([]i64, i64) | \(xs,len) ->
+        Range xs (2,inf) && Range len (1,inf)
+      } =
+  let lensq = len * len
+  let len = min n64 lensq
   let not_primes = irregParKerII1Expl len sq_primes
 
   let false_array = map (\_ -> false) not_primes
@@ -103,19 +113,19 @@ def oneIter [len_sq_primes]
   
 def primesFlat (n : {i64 | \n -> Range n (1,inf)}) (sq_primes: {[16]i64 | \ys -> Range ys (2,inf)}) : {[]i64 | \_ -> true} =
   let len = length sq_primes
-  let n64 = n
-  -- This loop does not typecheck (a complication from the mix of size-types and our annotations
-  -- being attached to types).
-  -- Expected: ({[loop_d₁₂]i64| \(ys: [16]i64) ->   Range ys (1, inf)}, i64)
-  -- Actual:   ({[16]i64| \(ys: [16]i64) ->   Range ys (1, inf)}, i64)
-  -- Sizes "d₁₅" and "16" do not match.
-  --
-  -- let (res, _) = loop (sq_primes, len) while len < n64 do
-  --       oneIter n64 len sq_primes
-  --
-  let (res, _) = oneIter n64 len sq_primes
+  let (res, _) =
+    -- We have to comment out the loop itself because Futhark's existing size
+    -- type unification algorithm has to be extended to unify sizes that appear
+    -- inside our annotations, which are attached to the types.
+    --
+    -- This is wholly unrelated to the correctness of our system; our annotations
+    -- could be completely decoupled from Futhark's type checker (e.g., as
+    -- code comments).
+    --
+    -- loop (sq_primes, len) while len < n64 do
+    oneIter n len sq_primes
   in res
 
--- We don't analyze entries.
+-- We don't analyze the entry.
 -- entry primes n =
 --   primesFlat n [2i64, 3i64, 5i64, 7i64, 11i64, 13i64]
