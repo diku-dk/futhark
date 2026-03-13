@@ -214,8 +214,7 @@ def expand_hull [num_segs] [num_points]
 def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -> Range b' (0,n+1)}) =
   map (\i -> x[i + a]) (iota (b - a))
 
-def extract_empty_segments [num_segs]
-    (num_points : {i64 | \x -> Range x (1, inf)})
+def extract_empty_segments [num_segs] [num_points]
     (hull_x : []real)
     (hull_y : []real)
     (segs_bx : [num_segs]real)
@@ -265,34 +264,6 @@ def extract_empty_segments [num_segs]
     ) sgm_inds
   in (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds')
 
-def empty_points [num_segs]
-    (num_points : {i64 | \x -> Equiv x 0})
-    (hull_x : []real)
-    (hull_y : []real)
-    (segs_bx : [num_segs]real)
-    (segs_by : [num_segs]real)
-    (_segs_ex : [num_segs]real)
-    (_segs_ey : [num_segs]real)
-    (sgm_inds : {[num_points]i64 | \x -> Range x (0, length segs_bx)})
-    : {( []real, []real              -- hull'
-       , []real,[]real,[]real,[]real -- segs'
-       , []i64                       -- seg_inds'
-       ) | \(_,_, segs_bx',_,_,_, sgm_inds') ->
-         Range sgm_inds' (0, length segs_bx')
-      } =
-  let segs_true_bx = map (\_ -> 0) (iota 0)
-  let segs_true_by = map (\_ -> 0) (iota 0)
-  let segs_true_ex = map (\_ -> 0) (iota 0)
-  let segs_true_ey = map (\_ -> 0) (iota 0)
-
-  let segs_false_bx = segs_bx
-  let segs_false_by = segs_by
-
-  let hull_x' = hull_x ++ segs_false_bx
-  let hull_y' = hull_y ++ segs_false_by
-  in (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey,
-    sgm_inds)
-
 def loop_body [num_segs] [num_points]
     (hull_x : []real)
     (hull_y : []real)
@@ -320,10 +291,6 @@ def loop_body [num_segs] [num_points]
         , points_y') =
       expand_hull segs_bx segs_by segs_ex segs_ey points_idx points_x points_y
 
-    -- This size business is due to limitations in Futhark's existing size type system.
-    let N = length points_idx'
-    let points_idx' = sized N points_idx'
-
     let ( hull_x'
         , hull_y'
         , segs_true_bx
@@ -331,37 +298,7 @@ def loop_body [num_segs] [num_points]
         , segs_true_ex
         , segs_true_ey
         , points_idx'') =
-      if N > 0 then
-        let ( hull_x'
-            , hull_y'
-            , segs_true_bx
-            , segs_true_by
-            , segs_true_ex
-            , segs_true_ey
-            , points_idx'') =
-          extract_empty_segments N hull_x hull_y segs_bx' segs_by' segs_ex' segs_ey' points_idx'
-        in ( hull_x' , hull_y'
-            , segs_true_bx
-            , segs_true_by
-            , segs_true_ex
-            , segs_true_ey
-            , points_idx'')
-      else
-        let ( hull_x'
-            , hull_y'
-            , segs_true_bx
-            , segs_true_by
-            , segs_true_ex
-            , segs_true_ey
-            , points_idx'') =
-          empty_points N hull_x hull_y segs_bx' segs_by' segs_ex' segs_ey' points_idx'
-        in ( hull_x' , hull_y'
-            , segs_true_bx
-            , segs_true_by
-            , segs_true_ex
-            , segs_true_ey
-            , points_idx'')
-        -- Postcondition holds vacuously here because points_idx' is empty.
+          extract_empty_segments hull_x hull_y segs_bx' segs_by' segs_ex' segs_ey' points_idx'
     in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 -- 1. put the else in its own function with postcondition
 -- 2. implement a property inference rule for if-statements
