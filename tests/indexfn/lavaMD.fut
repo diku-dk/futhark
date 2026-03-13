@@ -48,6 +48,40 @@ def neighbor [par_per_box]
      then (y0[par_per_box - 1], y1[par_per_box - 1], y2[par_per_box - 1], y3[par_per_box - 1])
      else (0f32, 0, 0, 0)
 
+
+def loop_body [number_boxes] [par_per_box] [num_neighbors]
+    (box_coefs_3: {[number_boxes]i64 | \x -> Range x (0,number_boxes)})
+    (box_nnghs_3: {[num_neighbors][number_boxes]i64 | \x -> Range x (0,number_boxes)})
+    (rv_0: [number_boxes][par_per_box]f32)
+    (rv_1: [number_boxes][par_per_box]f32)
+    (rv_2: [number_boxes][par_per_box]f32)
+    (rv_3: [number_boxes][par_per_box]f32)
+    (qv: [number_boxes][par_per_box]f32)
+    (alpha2: f32)
+    (rA_el_0: f32)
+    (rA_el_1: f32)
+    (rA_el_2: f32)
+    (rA_el_3: f32)
+    (l: i64)
+    (a1 : f32)
+    (a2 : f32)
+    (a3 : f32)
+    (a4 : f32)
+    (box_num_nghbs': i64)
+    (k: {i64 | \x -> Range x (0,box_num_nghbs'+1)}) =
+  let pointer =
+    if (k > 0)
+    then let num = box_nnghs_3[k - 1, l] in num
+    else l
+  let first_j = box_coefs_3[pointer]
+  let rB_0 = rv_0[first_j, :]
+  let rB_1 = rv_1[first_j, :]
+  let rB_2 = rv_2[first_j, :]
+  let rB_3 = rv_3[first_j, :]
+  let qB = qv[first_j, :]
+  let (r1, r2, r3, r4) = neighbor alpha2 rA_el_0 rA_el_1 rA_el_2 rA_el_3 rB_0 rB_1 rB_2 rB_3 qB
+  in (a1 + r1, a2 + r2, a3 + r3, a4 + r4)
+
 -----------------------------------------
 -- Main Computational Kernel of lavaMD --
 -----------------------------------------
@@ -71,27 +105,32 @@ def main [number_boxes] [par_per_box] [num_neighbors]
                                                 , [number_boxes][par_per_box]f32
                                                 , [number_boxes][par_per_box]f32
                                                 ) | \_ -> true} =
-  let a2 = 2 * alpha * alpha
+  let alpha2 = 2 * alpha * alpha
   in unzip4 (
     map2 (\box_num_nghbs' (l: i64) ->
       unzip4 (map4 (\rA_el_0 rA_el_1 rA_el_2 rA_el_3 ->
-             let acc = (0, 0, 0, 0)
-             -- There's no need to extract this loop as a top-level
-             -- function because we don't annotate any properties on it.
-             in loop (acc) for k < box_num_nghbs' + 1 do
-                  let pointer =
-                    if (k > 0)
-                    then let num = box_nnghs_3[k - 1, l] in num
-                    else l
-                  let first_j = box_coefs_3[pointer]
-                  let rB_0 = rv_0[first_j, :]
-                  let rB_1 = rv_1[first_j, :]
-                  let rB_2 = rv_2[first_j, :]
-                  let rB_3 = rv_3[first_j, :]
-                  let qB = qv[first_j, :]
-                  let (r1, r2, r3, r4) = neighbor a2 rA_el_0 rA_el_1 rA_el_2 rA_el_3 rB_0 rB_1 rB_2 rB_3 qB
-                  let (a1, a2, a3, a4) = acc
-                  in (a1 + r1, a2 + r2, a3 + r3, a4 + r4))
+             let (a1,a2,a3,a4) = (0, 0, 0, 0)
+             in loop (a1,a2,a3,a4) for k < box_num_nghbs' + 1 do
+               loop_body
+                 box_coefs_3
+                 box_nnghs_3
+                 rv_0
+                 rv_1
+                 rv_2
+                 rv_3
+                 qv
+                 alpha2
+                 rA_el_0
+                 rA_el_1
+                 rA_el_2
+                 rA_el_3
+                 l
+                 a1
+                 a2
+                 a3
+                 a4
+                 box_num_nghbs'
+                 k)
           rv_0[l, :] rv_1[l, :] rv_2[l, :] rv_3[l, :]))
          box_num_nghbs
          (iota (number_boxes)))
