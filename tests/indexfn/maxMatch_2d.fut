@@ -207,8 +207,8 @@ def i64_maximum xs = i64.maximum (flatten xs)
 
 def main [nEdges]
     (nVerts: i64)
-    (edges_enc: {*[nEdges][2]i64 | \x -> Range x (0, nVerts) && nVerts == i64_maximum x + 1})
-    : {[]i64 | \edgeIds' -> Injective edgeIds' }
+    (edges: {*[nEdges][2]i64 | \x -> Range x (0, nVerts) && nVerts == i64_maximum x + 1})
+    : {([]i64, []bool) | \(edgeIds', _) -> Injective edgeIds' }
     =
     let edgeIds = iota nEdges
 
@@ -217,38 +217,15 @@ def main [nEdges]
 
     let includedEdges = replicate nEdges false
 
-    -- Skipping loop; pre- and postconditions on each loop iteration
-    -- is shown by loopBody.
-    let (_, edgeIds', _, _, _) = loopBody edges_enc edgeIds markedVerts smallestEdgeId includedEdges
-    -- NOTE this is _one_ iteration of the loop, because I removed the loop construct.
-    -- Hence the index function resulting below is not correct if the loop was there.
-    in edgeIds'
-
--- def MM [nVerts] [nEdges_2] (edges: [nEdges_2]i64) (edgeIds_all: [nEdges_2]i64) (markedVerts: *[nVerts]bool)
---                          (smallestEdgeId: *[nVerts]i64) (includedEdges: *[nEdges_2]bool) =
---     let edgeIds = edgeIds_all
---     let (_, _, _, _, includedEdges) = loop (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges) while (length edges > 0) do
---         let loopres = loopBody edges edgeIds markedVerts smallestEdgeId includedEdges
---         in loopres
---     in filter (.1) (zip edgeIds_all includedEdges) |> map (.0)
-
--- def main [nEdges] (edges_enc: *[nEdges][2]i64) =
---     let edges = flatten edges_enc
---     let nVerts = edges |> i64.maximum |> (+1)
-
---     let edgeIds = iota (nEdges*2)
-
---     let markedVerts = replicate nVerts false
---     let smallestEdgeId = replicate nVerts i64.highest
-
---     let includedEdges = replicate (nEdges*2) false
-
---     in MM edges edgeIds markedVerts smallestEdgeId includedEdges
-
--- ==
--- mem_16gb input @ data/randLocalGraph_E_10_20000000.in
--- output @ data/randLocalGraph_E_10_20000000.out
--- mem_16gb input @ data/rMatGraph_E_10_20000000.in
--- output @ data/rMatGraph_E_10_20000000.out
--- input @ data/2Dgrid_E_64000000.in
--- output @ data/2Dgrid_E_64000000.out
+    let (_, edgeIds', _, _, includedEdges') =
+    -- We have to comment out the loop itself because Futhark's existing size
+    -- type unification algorithm has to be extended to unify sizes that appear
+    -- inside our annotations, which are attached to the types.
+    --
+    -- This is wholly unrelated to the correctness of our system; our annotations
+    -- could be completely decoupled from Futhark's type checker (e.g., as
+    -- code comments).
+    --
+    -- loop (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges) = (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges) while (length edges > 0) do
+      loopBody edges edgeIds markedVerts smallestEdgeId includedEdges
+    in (edgeIds', includedEdges')
