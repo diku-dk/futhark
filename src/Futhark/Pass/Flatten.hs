@@ -651,6 +651,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       reparr <- mapM (getIrregRep segments env inps) (NE.toList arr)
       rep' <- concatIrreg segments env ns reparr
       pure $ insertRep (distResTag res) (Irregular rep') env
+  --  TODO: add invaraint special handling
     Replicate (Shape [n]) (Var v) -> do
       ns <- dataArr segments env inps n
       rep <- getIrregRep segments env inps v
@@ -663,6 +664,19 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       w <- arraySize 0 <$> lookupType res_D
       res_D' <- letExp "rep_const" $ BasicOp $ Replicate (Shape [w]) (Constant v)
       pure $ insertIrregular ns res_F res_O (distResTag res) res_D' env
+    Replicate (Shape dims) (Constant v) -> do
+      dim_arrs <- mapM (dataArr segments env inps) dims
+      seg_number <- arraySize 0 <$> lookupType (head dim_arrs)
+      mul_dims <- letExp "mul_dims" <=< segMap (MkSolo seg_number) $ \(MkSolo i) -> do
+        vals <- mapM (\dim_arr -> letSubExp "dim_i" =<< eIndex dim_arr [eSubExp i]) dim_arrs
+        n <- letSubExp "n" <=< toExp $ product $ map pe64 vals
+        pure [subExpRes n]
+      (res_F, res_O, res_D) <-
+        certifying (distCerts inps aux env) $ doSegIota mul_dims
+      w <- arraySize 0 <$> lookupType res_D
+      res_D' <- letExp "rep_const" $ BasicOp $ Replicate (Shape [w]) (Constant v)
+      pure $ insertIrregular mul_dims res_F res_O (distResTag res) res_D' env
+      
     Replicate (Shape []) (Var v) ->
       case lookup v inps of
         Just (DistInputFree v' _) -> do
@@ -689,6 +703,22 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             letExp (baseName v <> "_copy_free") . BasicOp $
               Replicate (segmentsShape segments) (Var v)
           pure $ insertRegulars [distResTag res] [v'] env
+    -- Replicate dims (Var v) -> do
+    --   dim_arrs <- mapM (dataArr segments env inps) dims
+    --   rep0 <- getIrregRep segments env inps v
+    --   rep' <-
+    --     foldrM
+    --       ( \dim_arr acc ->
+    --           replicateIrreg
+    --             segments
+    --             env
+    --             dim_arr
+    --             (baseName dim_arr <> "_replicate")
+    --             acc
+    --       )
+    --       rep0
+    --       dim_arrs
+    --   pure $ insertRep (distResTag res) (Irregular rep') env
     Update _ as slice se
       | Just as_t <- distInputType <$> lookup as inps -> do
           ns <- letExp "slice_sizes"
