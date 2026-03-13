@@ -566,6 +566,7 @@ library futhark-testing
     , lsp
     , lsp-test
     , megaparsec
+    , neat-interpolation
     , process
     , srcloc
     , tasty

@@ -1,7 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultilineStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module Futhark.LspTests (tests, main) where
 
@@ -46,6 +46,7 @@ import Language.LSP.Test
     message,
     runSessionWithHandles,
   )
+import NeatInterpolation (text)
 import System.IO (hClose)
 import System.Process (createPipe)
 import Test.Tasty (TestName, TestTree, defaultMain, testGroup)
@@ -130,10 +131,10 @@ testDefinition = serverTestCase "Go To Definition" $
     liftIO $ definition @?= InL expectedDefinition
   where
     mainContents =
-      """
+      [text|
       def foo = 0i32
       def bar = foo
-      """
+      |]
 
     fooBodyPosition :: Position
     fooBodyPosition =
@@ -159,11 +160,11 @@ testFormatting = serverTestCase "Formatting" $
     -- these are ignored by the formatter anyway
     _formattingOptions = FormattingOptions 0 False Nothing Nothing Nothing
     mainContents =
-      """
+      [text|
       -- this is where all the lines start
         def main =
           0i32
-      """
+      |]
 
 main :: IO ()
 main = defaultMain testEvaluationComment
@@ -189,7 +190,7 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $
       mainContents
         <> "-- 47\n"
     mainContents =
-      """
+      [text|
       def x = 42i32
       -- >>> x + 5
-      """
+      |]
