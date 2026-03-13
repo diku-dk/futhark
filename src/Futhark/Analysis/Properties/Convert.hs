@@ -210,20 +210,49 @@ changeScope :: S.Set E.VName -> IndexFn -> IndexFnM IndexFn
 changeScope newScope f
   | fv f `S.isSubsetOf` newScope = pure f
   | fv (shape f) `S.isSubsetOf` newScope = do
-      g <- mkUninterpreted (S.toList newScope) f
-      pure $ g {shape = shape f}
+      mkUninterpretedBody (S.toList newScope) f
   | otherwise = mkUninterpreted (S.toList newScope) f
 
-mkUninterpreted :: [E.VName] -> IndexFn -> IndexFnM IndexFn
-mkUninterpreted params f = do
-  new_shape <- forM (shape f) . mapM $ \(Forall i _) ->
-    Forall i . Iota . sym2SoP . Var <$> newNameFromString "<d>"
+mkUninterpretedBody :: [E.VName] -> IndexFn -> IndexFnM IndexFn
+mkUninterpretedBody params f = do
+  new_shape <- forM (shape f) $ \dim -> do
+    case dim of
+      [Forall i (Iota n), Forall _ (Iota m)] | i `S.notMember` fv n -> do
+        -- Keeping inferred flat domains in uninterpreted functions
+        -- is unhelpful. The source code uses one index so we
+        -- will continually have to solve indexing to get the paired
+        -- 2D form, while all the body does is x(i,j) rather than x(k).
+        -- So it's not extra information for a lot of complication.
+        --
+        -- Therefore we simply get rid of the inferred structure in this case.
+        k <- newNameFromString "k"
+        nm <- rewrite $ n .*. m
+        pure [Forall k (Iota nm)]
+      _ -> pure dim
+  let indices = map (sym2SoP . Var . boundVar) (mconcat new_shape)
   x <- newNameFromString uninterpretedName
   let params' = map (sym2SoP . Var) params
   pure $
     IndexFn
       { shape = new_shape,
-        body = singleCase (sym2SoP $ Apply (Var x) (indexVars f <> (if null (indexVars f) then params' else [])))
+        body = singleCase (sym2SoP $ Apply (Var x) (indices <> (if null indices then params' else [])))
+      }
+
+mkUninterpreted :: [E.VName] -> IndexFn -> IndexFnM IndexFn
+mkUninterpreted params f = do
+  new_shape <- forM (shape f) $ \_ -> do
+    -- Note that this also discards any inferred nD structure
+    -- for flat arrays. (See comment in mkUninterpretedBody.)
+    i <- newNameFromString "j"
+    d <- newNameFromString "<d>"
+    pure [Forall i (Iota (sym2SoP (Var d)))]
+  let indices = map (sym2SoP . Var . boundVar) (mconcat new_shape)
+  x <- newNameFromString uninterpretedName
+  let params' = map (sym2SoP . Var) params
+  pure $
+    IndexFn
+      { shape = new_shape,
+        body = singleCase (sym2SoP $ Apply (Var x) (indices <> (if null indices then params' else [])))
       }
 
 bodyIsUinterpreted :: IndexFn -> Bool
@@ -983,7 +1012,6 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
             j <- newNameFromString "j"
             addProperty (Algebra.Var h) Property.Boolean
             sum_h <- toAlgebra . sym2SoP $ Sum j (dimStart d) (dimEnd d) (Apply (Var h) [sVar j])
-            printM 0 $ prettyStr sum_h
             addRel (int2SoP 1 :<=: sum_h)
           _ -> pure ()
 

@@ -214,56 +214,6 @@ def expand_hull [num_segs] [num_points]
 def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -> Range b' (0,n+1)}) =
   map (\i -> x[i + a]) (iota (b - a))
 
-def extract_empty_segments [num_segs] [num_points]
-    (hull_x : []real)
-    (hull_y : []real)
-    (segs_bx : [num_segs]real)
-    (segs_by : [num_segs]real)
-    (segs_ex : [num_segs]real)
-    (segs_ey : [num_segs]real)
-    (sgm_inds : {[num_points]i64 | \x -> Range x (0, length segs_bx)})
-    : {( []real, []real              -- hull'
-       , []real,[]real,[]real,[]real -- segs'
-       , []i64                       -- seg_inds'
-       ) | \(_,_, segs_bx',_,_,_, sgm_inds') ->
-         Range sgm_inds' (0, length segs_bx')
-      } =
-  let zeros = replicate num_segs false
-  let ones = replicate num_points true
-  let segs_inhabited = reduce_by_index zeros (||) false sgm_inds ones
-
-  let (n, inds) = partition_indices segs_inhabited
-  let zeros = replicate num_segs 0
-  let segs_parted_bx = scatter zeros inds segs_bx
-  let zeros = replicate num_segs 0
-  let segs_parted_by = scatter zeros inds segs_by
-  let zeros = replicate num_segs 0
-  let segs_parted_ex = scatter zeros inds segs_ex
-  let zeros = replicate num_segs 0
-  let segs_parted_ey = scatter zeros inds segs_ey
-
-  let zero = 0
-  let segs_true_bx = slice segs_parted_bx zero n
-  let segs_true_by = slice segs_parted_by zero n
-  let segs_true_ex = slice segs_parted_ex zero n
-  let segs_true_ey = slice segs_parted_ey zero n
-
-  let segs_false_bx = slice segs_parted_bx n num_segs
-  let segs_false_by = slice segs_parted_by n num_segs
-  
-  let hull_x' = hull_x ++ segs_false_bx
-  let hull_y' = hull_y ++ segs_false_by
-
-  let segs_indicator = map (\c -> if c then 1 else 0) segs_inhabited
-  let sum_segs = scan (+) 0 segs_indicator
-
-  let sgm_inds' = map (\seg_ix ->
-      if segs_inhabited[seg_ix]
-      then sum_segs[seg_ix] - segs_indicator[seg_ix]
-      else 0
-    ) sgm_inds
-  in (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds')
-
 def loop_body [num_segs] [num_points]
     (hull_x : []real)
     (hull_y : []real)
@@ -273,7 +223,7 @@ def loop_body [num_segs] [num_points]
     (segs_ex : [num_segs]real)
     (segs_ey : [num_segs]real)
     -- (points : [num_points](i64, real, real))
-    (points_idx: {[num_points]i64 | \x -> Range x (0,num_segs)})
+    (points_idx: {[num_points]i64 | \x -> Range x (0, length segs_bx)})
     (points_x : [num_points]real)
     (points_y : [num_points]real)
     : {( []real, []real              -- hull'
@@ -282,41 +232,33 @@ def loop_body [num_segs] [num_points]
       ) | \(_,_, res_segs_bx,_,_,_, res_points_idx,_,_) ->
         Range res_points_idx (0,length res_segs_bx)}
     =
-  let ( segs_bx
-      , segs_by
-      , segs_ex
-      , segs_ey
-      , sgm_inds
+  let ( segs_bx'
+      , segs_by'
+      , segs_ex'
+      , segs_ey'
+      , points_idx'
       , points_x'
       , points_y') =
     expand_hull segs_bx segs_by segs_ex segs_ey points_idx points_x points_y
 
-  -- let ( hull_x'
-  --     , hull_y'
-  --     , segs_true_bx
-  --     , segs_true_by
-  --     , segs_true_ex
-  --     , segs_true_ey
-  --     , points_idx'') =
-  --       extract_empty_segments hull_x hull_y segs_bx' segs_by' segs_ex' segs_ey' points_idx'
-
-  -- let num_points = length sgm_inds
-  -- let num_segs = length segs_bx
-  -- let zeros = replicate num_segs false
-  -- let ones = replicate num_points true
-  let zeros = map (\_ -> false) segs_bx
-  let ones = map (\_ -> true) sgm_inds
-  let segs_inhabited = reduce_by_index zeros (||) false sgm_inds ones
+  -- extract_empty_segments inlined here. If we don't inline it, we can still
+  -- prove the postcondition on that function definition, but the length of
+  -- segs_true_* (n) will go out of scope because it depends on segs_inhabited,
+  -- which is local to the function. This, in turn, makes it impossible to
+  -- prove the postcondition again where it is used.
+  let zeros = map (\_ -> false) segs_bx'
+  let ones = map (\_ -> true) points_idx'
+  let segs_inhabited = reduce_by_index zeros (||) false points_idx' ones
 
   let (n, inds) = partition_indices segs_inhabited
-  let zeros = replicate num_segs 0
-  let segs_parted_bx = scatter zeros inds segs_bx
-  let zeros = replicate num_segs 0
-  let segs_parted_by = scatter zeros inds segs_by
-  let zeros = replicate num_segs 0
-  let segs_parted_ex = scatter zeros inds segs_ex
-  let zeros = replicate num_segs 0
-  let segs_parted_ey = scatter zeros inds segs_ey
+  let zeros = map (\_ -> 0) segs_bx'
+  let segs_parted_bx = scatter zeros inds segs_bx'
+  let zeros = map (\_ -> 0) segs_by'
+  let segs_parted_by = scatter zeros inds segs_by'
+  let zeros = map (\_ -> 0) segs_ex'
+  let segs_parted_ex = scatter zeros inds segs_ex'
+  let zeros = map (\_ -> 0) segs_ey'
+  let segs_parted_ey = scatter zeros inds segs_ey'
 
   let zero = 0
   let segs_true_bx = slice segs_parted_bx zero n
@@ -333,25 +275,16 @@ def loop_body [num_segs] [num_points]
   let segs_indicator = map (\c -> if c then 1 else 0) segs_inhabited
   let sum_segs = scan (+) 0 segs_indicator
 
-  let sgm_inds' = map (\seg_ix ->
+  let points_idx'' = map (\seg_ix ->
       if segs_inhabited[seg_ix]
       then sum_segs[seg_ix] - segs_indicator[seg_ix]
       else 0
-    ) sgm_inds
-  in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, sgm_inds', points_x', points_y')
--- 1. put the else in its own function with postcondition
--- 2. implement a property inference rule for if-statements
--- that says if the then and else branches have the same postcondition
--- then the results also get that postcondition
--- 3. put this property inference rule in the paper
+    ) points_idx'
+  in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 
 def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 : [n]real) (points1 : [n]real) : {[](real, real) | \_ -> true}  =
-  -- We don't support branches with different sizes in the index
-  -- function implementation yet, so I comment out the case
-  -- that handles empty inputs below.
-  --
-  -- if n == 0 then map (\_ -> (startx,starty)) (iota 1)
-  -- else
+  if n == 0 then map (\_ -> (startx,starty)) (iota 1)
+  else
   let hull = map (\_ -> (0,0)) (iota 0)
   let segs = map (\_ -> (startx,starty, endx,endy)) (iota 1)
   let points_idx = map (\_ -> 0) points0
@@ -359,14 +292,13 @@ def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 
   let points_y = points1
   let (segs_bx, segs_by, segs_ex, segs_ey) = unzip4 segs
   let (hull_x, hull_y) = unzip hull
+  -- Loop invariant is:
+  --   points_idx : [num_points]i64 | Range points_idx (0, length segs_begx)
+  -- which is annotated as both pre- and postconditions on loop_body.
   let (hull_x', hull_y', _,_,_,_, _,_,_) =
      -- loop (hull, segs, points) =
      --   ([], [(startx,starty, endx,endy)], map (\(x,y) -> (0, x, y)) points)
      -- while !null points do
-    -- Loop invariant is:
-    --   points_idx : [num_points]i64 | Range points_idx (0, length segs_begx)
-    -- which is annotated as both pre- and postconditions
-    -- on both expand_hull and extract_empty_segments.
     loop_body hull_x hull_y segs_bx segs_by segs_ex segs_ey points_idx points_x points_y
 
   let hull' = zip hull_x' (sized_like hull_x' hull_y')

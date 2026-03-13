@@ -298,7 +298,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
                 let s = mkRep i_1 (e_row .+. sym2SoP (Var i_3))
                 let res = g {shape = l <> (df : r), body = repCases s (body g)}
                 printM 1 $ "  |_ g " <> prettyStr res
-                error "propFlattenSimplified succeeded (I'd like to know first time when getting rid of Cat)"
+                pure res
               Unknown -> pure g
         where
           (l, _old_iter : r) = splitAt k (shape g)
