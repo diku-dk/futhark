@@ -17,7 +17,7 @@ import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.Flatten (unflatten)
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (dimSize, domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn, dimStart, dimEnd)
+import Futhark.Analysis.Properties.IndexFnPlus (dimEnd, dimSize, dimStart, domainEnd, domainStart, index, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (MonDir (..), askRng, cloneProperty)
 import Futhark.Analysis.Properties.Property qualified as Property
@@ -29,6 +29,7 @@ import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
+import Futhark.SoP.FourierMotzkin (($<$), ($<=$), ($>$), ($>=$))
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justAffine, justConstant, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (./.), (~*~), (~+~), (~-~))
@@ -391,11 +392,17 @@ forward (E.AppExp e@(E.LetFun {}) _) =
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
   trackNamesOfFinalLetBody in_body
   fs <- forwardLetEffects [Just vn] x
+  -- TODO Merge forwardLetEffects into
+  -- 1. forward
+  -- 2. inferProperties
+  -- and then get rid of it.
+  inferProperties [Just vn] x
   bindfn vn fs >> forward in_body
 forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
   trackNamesOfFinalLetBody body
   let bound_names = map fst $ mconcat $ map patternMapAligned patterns
   fs <- forwardLetEffects bound_names x
+  inferProperties bound_names x
   forM_ (zip (mconcat $ map patternMapAligned patterns) fs) bindfnOrDiscard
   forward body
   where
@@ -584,8 +591,9 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   let gs = cases [(Var c, sVar t_branch), (neg $ Var c, sVar f_branch)]
   forM (zip ts fs) $ \(t, f) -> do
     let new_shape =
-          if dims_eq then shape t
-          else zipWith (zipWith (\(Forall i (Iota n)) (Forall _ (Iota m)) -> Forall i . Iota . flattenCases $ cases [(Var c, n), (neg (Var c), m)])) (shape t) (shape f)
+          if dims_eq
+            then shape t
+            else zipWith (zipWith (\(Forall i (Iota n)) (Forall _ (Iota m)) -> Forall i . Iota . flattenCases $ cases [(Var c, n), (neg (Var c), m)])) (shape t) (shape f)
     substParams (IndexFn new_shape gs) [(c, f_c), (t_branch, t), (f_branch, f)]
       >>= rewrite
 forward (E.Lambda _ _ _ _ loc) =
@@ -634,7 +642,9 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
     [e_arg] <- getArgs args = do
       fs <- forward e_arg
       forM fs $ \f -> do
-        pure $ IndexFn [] (singleCase $ dimSize $ head $ shape f)
+        let n = dimSize $ head $ shape f
+        addRelSymbol (n :>= int2SoP 0)
+        pure $ IndexFn [] (singleCase n)
   | Just fname <- getFun e_f,
     "zip" `L.isPrefixOf` fname = do
       mconcat <$> mapM forward (getArgs args)
@@ -977,12 +987,12 @@ forwardLetEffects [Just h] e@(E.AppExp (E.Apply e_f args _) _)
             addRel (int2SoP 1 :<=: sum_h)
           _ -> pure ()
 
-      pure [
-        y
-          { body =
-              singleCase . sym2SoP $
-                Apply (Var h) (map (sVar . boundVar) (mconcat $ shape y))
-          }
+      pure
+        [ y
+            { body =
+                singleCase . sym2SoP $
+                  Apply (Var h) (map (sVar . boundVar) (mconcat $ shape y))
+            }
         ]
   | Just "reduce_by_index" <- getFun e_f,
     [dest, e_op, e_ne, _is, _xs] <- getArgs args,
@@ -1088,6 +1098,75 @@ forwardApplyDef (E.AppExp (E.Apply f args loc) _)
         Just apply -> Just <$> apply loc args
         Nothing -> pure Nothing
 forwardApplyDef _ = pure Nothing
+
+-- Property inference.
+inferProperties :: [Maybe E.VName] -> E.Exp -> IndexFnM ()
+inferProperties [Just x_res] (E.AppExp (E.If _e_c (E.AppExp (E.LetPat _ (E.Id x_t _ _) _e1 (E.Var (E.QualName _ x_t') _ _) _) _) (E.AppExp (E.LetPat _ (E.Id x_f _ _) _e2 (E.Var (E.QualName _ x_f') _ _) _) _) _) _)
+  | x_t == x_t',
+    x_f == x_f' = do
+    rangeOverConditional x_res x_t x_f
+inferProperties vns (E.AppExp (E.If _e_c e_t e_f _) _)
+  | Just xs_t <- justANF e_t,
+    Just xs_f <- justANF e_f,
+    Just xs_res <- sequence vns,
+    length xs_res == length xs_t,
+    length xs_res == length xs_f = do
+      mapM (\(x,y,z) -> rangeOverConditional x y z) (zip3 xs_res xs_t xs_f)
+      printAlgEnv 0
+      -- TODO trouble is that properties derived in e_t and e_f are local to them.
+      -- The right way is to bind e_t and e_f to names before the conditional
+      -- and then use them in the branches.
+      -- But the derivation of e_t and e_f may need the condition in
+      -- the environment...
+      error $ "inferProperties " <> prettyStr (zip3 xs_res xs_t xs_f)
+  where
+    justANF (E.AppExp (E.LetPat _ (E.TuplePat pat _) _ (E.TupLit ret _) _) _) = do
+      xs <- mapM fst (mconcat $ map patternMapAligned pat)
+      ys <- mapM justName ret
+      if xs == ys then pure xs else Nothing
+    justANF _ = Nothing
+
+    justName (E.Var (E.QualName _ x) _ _) = Just x
+    justName _ = Nothing
+inferProperties _ _ = pure ()
+
+rangeOverConditional :: E.VName -> E.VName -> E.VName -> IndexFnM ()
+rangeOverConditional x_res x_t x_f = do
+  rt <- askRng (Algebra.Var x_t)
+  rf <- askRng (Algebra.Var x_f)
+  case (rt, rf) of
+    (Just (Property.Rng _x_t rng_t), Just (Property.Rng _x_f rng_f)) -> do
+      lb <-
+        case (,) <$> fst rng_t <*> fst rng_f of
+          Just (a, b) -> do
+            pick_a <- a $<=$ b
+            pick_b <- b $<$ a
+            pure $
+              if pick_a
+                then Just a
+                else
+                  if pick_b
+                    then Just b
+                    else Nothing
+          Nothing -> pure Nothing
+      ub <-
+        case (,) <$> snd rng_t <*> snd rng_f of
+          Just (a, b) -> do
+            pick_a <- b $<=$ a
+            pick_b <- a $<$ b
+            pure $
+              if pick_a
+                then Just a
+                else
+                  if pick_b
+                    then Just b
+                    else Nothing
+          Nothing -> pure Nothing
+      case (lb, ub) of
+        (Nothing, Nothing) -> pure ()
+        _ -> do
+          addProperty (Algebra.Var x_res) (Property.Rng x_res (lb, ub))
+    _ -> pure ()
 
 -- TODO make it return a list of functions just to remove the many undefined cases
 -- (it should never happen in practice as these functions are type checked).

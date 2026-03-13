@@ -33,7 +33,7 @@ import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.EqSimplifier
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repCases, repDomain)
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repCases, repDomain, dimSize)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Symbol
@@ -44,7 +44,7 @@ import Futhark.IR (Pretty)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad
 import Futhark.SoP.Refine (addRel, addRels)
-import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
+import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.), isZero)
 import Futhark.Util (nubOrd)
 import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
@@ -57,8 +57,16 @@ data Query
     Truth
 
 askQ :: Query -> IndexFn -> IndexFnM Answer
-askQ query fn =
-  allM $ zipWith (\_ i -> queryCase query fn i) (guards fn) [0 ..]
+askQ query fn = do
+  -- n <- simplify $ foldl (.*.) (int2SoP 1) (map dimSize (shape fn))
+  -- if isZero n
+  -- then do
+  --   printM 0 $ "askQ " <> prettyStr fn
+  --   printM 0 $ "size: " <> prettyStr n
+  --   -- Any case query holds vacuously for an empty index function.
+  --   pure Yes
+  -- else
+    allM $ zipWith (\_ i -> queryCase query fn i) (guards fn) [0 ..]
 
 askRefinement :: IndexFn -> IndexFnM Answer
 askRefinement = askQ Truth
