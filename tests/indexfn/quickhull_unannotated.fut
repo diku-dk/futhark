@@ -5,10 +5,7 @@ def to_i64 c : i64 = if c then 1 else 0
 
 def filter_indices [n]
   (cs: [n]bool)
- : {(i64, [n]i64) | \(m, is) ->
-     FiltPartInv is (\i -> cs[i]) (\_i -> true)
-       && (m == sum (map (\x -> to_i64 x) cs))
-   } =
+ : (i64, [n]i64) =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) cs)
   let new_size = if n > 0 then num_trues[n-1] else 0
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
@@ -16,10 +13,7 @@ def filter_indices [n]
 
 def partition_indices [n]
   (conds: [n]bool)
- : {(i64, [n]i64) | \(split, inds) ->
-     FiltPartInv inds (\_i -> true) (\i -> conds[i])
-       && split == sum (map (\c -> if c then 1 else 0) conds)
-   } =
+ : (i64, [n]i64) =
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs
   let indsT = scan (+) 0 tflgs
@@ -30,12 +24,7 @@ def partition_indices [n]
   in  (lst, inds)
 
 def partition3_indices [n] 't (conds: [n]i8) 
-  : {(i64,i64,[n]i64) | \(a,b,is) ->
-      FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
-      -- ^ disjointness already proven by the above
-      && Disjoint (\i -> (conds[i] == 1, conds[i] == 2, conds[i] != 1 && conds[i] != 2))
-      && Range a (0,n+1) && Range b (0,n+1)
-   } =
+  : (i64,i64,[n]i64) =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
   let eflags = map (\c -> if c == 2 then 1 else 0 ) conds
 
@@ -53,11 +42,7 @@ def partition3_indices [n] 't (conds: [n]i8)
   in  (s1, s1+s2, inds)
 
 def partition3 't [n] (conds: [n]i8) (xs: [n]t)
-   : {(i64,i64,[]t) | \(a, b, ys) ->
-     FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
-     && Disjoint (\i -> (conds[i] == 1, conds[i] == 2, conds[i] != 1 && conds[i] != 2))
-     && Range a (0,n+1) && Range b (0,n+1)
-   } =
+   : (i64,i64,[]t) =
   let (a, b, inds) = partition3_indices conds
   let scratch = map (\x -> x) xs -- copy xs.
   let ys = scatter scratch inds xs
@@ -66,16 +51,6 @@ def partition3 't [n] (conds: [n]i8) (xs: [n]t)
 
 -- Based on work by Frederik Berthelsen, Kasper Erik
 -- Schmidt-Christensen, Niels Hansen, and Mikkel Kragh Mathiesen.
---
--- Uses single precision floats.
---
--- It is a bit inefficient that we have to sort at the end to get the
--- right ordering, but the flattened quickhull does not otherwise
--- preserve it.
--- ==
--- tags { no_opencl }
--- compiled input @ data/2DinSphere_10K.in
--- output @ out.out
 
 type dist = f64
 type point = (f64, f64)
@@ -92,7 +67,7 @@ def point_less (px: f64, py: f64) (qx: f64, qy: f64) =
 def sqr  (x : f64) = x * x
 def ssqr (x : f64) = f64.abs x * x
 
-def signed_dist_to_line (px: f64, py: f64) (qx: f64, qy: f64) (rx: f64, ry: f64) : {dist | \_ -> true} =
+def signed_dist_to_line (px: f64, py: f64) (qx: f64, qy: f64) (rx: f64, ry: f64) : dist =
   let ax = qx - px
   let ay = qy - py
   let bx = rx - px
@@ -105,10 +80,8 @@ def max (i,id) (j,jd) =
 def mk2vec x y =
   map (\i -> if i == 0 then x else y) (iota 2)
 
-def remove_negatives [num_points] num_segs (x: {[num_points]i64 | \x -> Range x (-1, 2*num_segs)}) points_x points_y
-  : {([]i64, []f64, []f64) | \(y0,_,_) ->
-    FiltPart y0 x (\i -> x[i] >= 0) (\_i -> true) && Range y0 (0, 2*num_segs)
-  }  =
+def remove_negatives [num_points] num_segs (x: [num_points]i64) points_x points_y
+  : ([]i64, []f64, []f64)  =
   let bs = map (\i -> i >= 0) x
   let (n, is) = filter_indices bs
   let zeros = replicate n 0i64
@@ -124,11 +97,11 @@ def compute_new_seg_inds [num_segs] [num_points]
     (segs_begy : [num_segs]f64)
     (segs_endx : [num_segs]f64)
     (segs_endy : [num_segs]f64)
-    (points_idx : {[num_points]i64 | \x -> Range x (0, num_segs)})
+    (points_idx : [num_points]i64)
     (points_x : [num_points]f64)
     (points_y : [num_points]f64)
-    (extrema_ix_inds : {[num_segs]i64 | \x -> Range x (0, num_points)})
-    : ({[num_points]i64 | \y -> Range y (-1, 2 * num_segs)}) =
+    (extrema_ix_inds : [num_segs]i64)
+    : ([num_points]i64) =
   map4 (\ix seg_ix px py ->
       let extreme_ix = extrema_ix_inds[seg_ix]
       in if extreme_ix == ix then -1i64 else
@@ -156,14 +129,12 @@ def expand_hull [num_segs] [num_points]
     (segs_endx : [num_segs]f64)
     (segs_endy : [num_segs]f64)
     -- (points : [num_points](i64, f64, f64))
-    (points_idx : {[num_points]i64 | \x -> Range x (0, length segs_begx)})
+    (points_idx : [num_points]i64)
     (points_x : [num_points]f64)
     (points_y : [num_points]f64)
-    : {( []f64,[]f64,[]f64,[]f64 -- segs'
+    : ( []f64,[]f64,[]f64,[]f64 -- segs'
        , []i64, []f64, []f64       -- points'
-      ) | \(segs_bx',_,_,_, points_idx',_,_) ->
-        Range points_idx' (0, length segs_bx')
-    } =
+      ) =
   let dists = map3 (\seg_ix px py ->
       let ax = segs_begx[seg_ix]
       let ay = segs_begy[seg_ix]
@@ -210,7 +181,7 @@ def expand_hull [num_segs] [num_points]
   in (segs_begx', segs_begy', segs_endx', segs_endy',
       ids, points_x', points_y')
 
-def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -> Range b' (0,n+1)}) =
+def slice [n] 't (x: [n]t) (a: i64) (b: i64) =
   map (\i -> x[i + a]) (iota (b - a))
 
 def loop_body [num_segs] [num_points]
@@ -222,14 +193,13 @@ def loop_body [num_segs] [num_points]
     (segs_ex : [num_segs]f64)
     (segs_ey : [num_segs]f64)
     -- (points : [num_points](i64, f64, f64))
-    (points_idx: {[num_points]i64 | \x -> Range x (0, length segs_bx)})
+    (points_idx: [num_points]i64)
     (points_x : [num_points]f64)
     (points_y : [num_points]f64)
-    : {( []f64, []f64              -- hull'
+    : ( []f64, []f64              -- hull'
        , []f64,[]f64,[]f64,[]f64 -- segs'
        , []i64,[]f64,[]f64         -- points
-      ) | \(_,_, res_segs_bx,_,_,_, res_points_idx,_,_) ->
-        Range res_points_idx (0,length res_segs_bx)}
+      )
     =
   let ( segs_bx'
       , segs_by'
@@ -281,7 +251,7 @@ def loop_body [num_segs] [num_points]
     ) points_idx'
   in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 
-def semihull [n] (startx: f64, starty: f64) (endx: f64, endy: f64) (points0 : [n]f64) (points1 : [n]f64) : {[](f64, f64) | \_ -> true}  =
+def semihull [n] (startx: f64, starty: f64) (endx: f64, endy: f64) (points0 : [n]f64) (points1 : [n]f64) : [](f64, f64)  =
   if n == 0 then map (\_ -> (startx,starty)) (iota 1)
   else
   let hull = map (\_ -> (0,0)) (iota 0)
@@ -309,25 +279,25 @@ def semihull [n] (startx: f64, starty: f64) (endx: f64, endy: f64) (points0 : [n
   let hull' = zip hull_x' (sized_like hull_x' hull_y')
   in hull'
 
-def pmin p0 p1 q0 q1: {(f64,f64) | \_ -> true} =
+def pmin p0 p1 q0 q1: (f64,f64) =
   -- Applying the identity function makes the index function uninterpreted.
   (\x -> x) (if point_less (p0,p1) (q0,q1) then (p0,p1) else (q0,q1))
-def pmax p0 p1 q0 q1: {(f64,f64) | \_ -> true} =
+def pmax p0 p1 q0 q1: (f64,f64) =
   (\x -> x) (if point_less (p0,p1) (q0,q1) then (q0,q1) else (p0,p1))
 
-def get_leftmost (n: {i64 | \n -> Range n (1,inf)}) (ps0: [n]f64) (ps1: [n]f64): {(f64, f64) | \_ -> true} =
+def get_leftmost (n: i64) (ps0: [n]f64) (ps1: [n]f64): (f64, f64) =
   let ps = zip ps0 ps1
   let leftmosts = scan (\(p0,p1) (q0,q1) -> pmin p0 p1 q0 q1) (ps0[0], ps1[0]) ps
   in leftmosts[n-1]
 
-def get_rightmost (n: {i64 | \n -> Range n (1,inf)}) (ps0: [n]f64) (ps1: [n]f64): {(f64, f64) | \_ -> true} =
+def get_rightmost (n: i64) (ps0: [n]f64) (ps1: [n]f64): (f64, f64) =
   let ps = zip ps0 ps1
   let rightmosts = scan (\(p0,p1) (q0,q1) -> pmax p0 p1 q0 q1) (ps0[0], ps1[0]) ps
   in rightmosts[n-1]
 
-def compute (n: {i64 | \n -> Range n (3,inf)}) (ps0 : [n]f64)
+def compute (n: i64) (ps0 : [n]f64)
     (ps1 : [n]f64)
-    : {([](f64,f64), [](f64,f64)) | \_ -> true} =
+    : ([](f64,f64), [](f64,f64)) =
   let (leftmost1, leftmost2) = get_leftmost n ps0 ps1
   let (rightmost1, rightmost2) = get_rightmost n ps0 ps1
   let left = (leftmost1,leftmost2)

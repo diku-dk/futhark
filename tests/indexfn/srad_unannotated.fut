@@ -1,42 +1,42 @@
 def indexN [cols]
-    (rows: {i64 |\v -> Range v (1,inf)})
+    (rows: i64)
     (image: [rows][cols]f32)
-    (i: {i64 | \v -> Range v (0, rows)})
-    (j: {i64 | \v -> Range v (0, cols)})
-    (jc: f32): {f32 | \_ -> true } =
+    (i: i64)
+    (j: i64)
+    (jc: f32): f32 =
     -- The identitity function is a little trick to make the index function
     -- for this uninterpreted to speed up the analysis.
     let idx = image[if i == 0 then i else i - 1, j] - jc
     in (\x -> x) idx
 
 def indexS [cols]
-    (rows: {i64 |\v -> Range v (1,inf)})
+    (rows: i64)
     (image: [rows][cols]f32)
-    (i: {i64 | \v -> Range v (0, rows)})
-    (j: {i64 | \v -> Range v (0, cols)})
-    (jc: f32): {f32 | \_ -> true } =
+    (i: i64)
+    (j: i64)
+    (jc: f32): f32 =
     let idx = image[if i == rows - 1 then i else i + 1, j] - jc
     in (\x -> x) idx
 
 def indexW [rows]
-    (cols: {i64 |\v -> Range v (1,inf)})
+    (cols: i64)
     (image: [rows][cols]f32)
-    (i: {i64 | \v -> Range v (0, rows)})
-    (j: {i64 | \v -> Range v (0, cols)})
-    (jc: f32): {f32 | \_ -> true } =
+    (i: i64)
+    (j: i64)
+    (jc: f32): f32 =
     let dW_k = image[i, if j == 0 then j else j - 1] - jc
     in (\x -> x) dW_k
 
 def indexE [rows]
-    (cols: {i64 |\v -> Range v (1,inf)})
+    (cols: i64)
     (image: [rows][cols]f32)
-    (i: {i64 | \v -> Range v (0, rows)})
-    (j: {i64 | \v -> Range v (0, cols)})
-    (jc: f32): {f32 | \_ -> true } =
+    (i: i64)
+    (j: i64)
+    (jc: f32): f32 =
     let dE_k = image[i, if j == cols - 1 then j else j + 1] - jc
     in (\x -> x) dE_k
 
-def f32_sum [n] (xs: [n]f32): {f32 | \_ -> true} =
+def f32_sum [n] (xs: [n]f32): f32 =
   -- The identitity function is a little trick to make the index function
   -- for this uninterpreted because the prototype doesn't support
   -- sums over flattened arrays yet.
@@ -45,7 +45,7 @@ def f32_sum [n] (xs: [n]f32): {f32 | \_ -> true} =
 def calc_stats [rows] [cols]
     (image: [rows][cols]f32)
     (neROI: i64)
-    : {f32 | \_ -> true} =
+    : f32 =
   let flat_image = flatten image
   let sum = f32_sum flat_image
   let flat_sq = map (\x -> x*x) flat_image
@@ -78,7 +78,7 @@ def calc_c
     (dE_k: f32)
     (jc: f32)
     (q0sqr: f32)
-    : {f32 | \_ -> true} =
+    : f32 =
   let g2 =
     (dN_k * dN_k + dS_k * dS_k
      + dW_k * dW_k
@@ -107,7 +107,7 @@ def calc_d
     (dW_k: f32)
     (cE: f32)
     (dE_k: f32)
-    : {f32 | \_ -> true} =
+    : f32 =
   -- The identitity function is a little trick to make the index function
   -- for this uninterpreted. This speeds up the analysis.
   (\x -> x) (cN * dN_k + cS * dS_k + cW * dW_k + cE * dE_k)
@@ -116,7 +116,7 @@ def srad_iter [rows] [cols]
     (image: [rows][cols]f32)
     (lambda: f32)
     (neROI: i64)
-    : {[rows][cols]f32 | \_ -> true} =
+    : [rows][cols]f32 =
   -- ROI statistics for entire ROI (single number for ROI)
   let q0sqr = calc_stats image neROI
   let (dN, dS, dW, dE, c) =
@@ -176,7 +176,7 @@ def do_srad [rows] [cols]
 
 def main [rows] [cols]
     (image: [rows][cols]u8)
-    : {[rows][cols]f32 | \_ -> true} =
+    : [rows][cols]f32 =
   let niter = 100
   let lambda = 0.5
   in do_srad niter lambda image

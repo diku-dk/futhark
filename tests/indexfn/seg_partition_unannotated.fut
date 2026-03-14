@@ -5,10 +5,10 @@ def length [n] 't (_: [n]t) = n
 
 
 let mk_flag_array 't 'a [m]
-        (shape: {[m]i64 | \x -> Range x (0, inf) })
+        (shape: [m]i64)
         (zero: t)
         (xs: [m]t)
-        : {[]t | \flags -> length flags == sum shape} =
+        : []t =
   let shp_rot = map (\i -> if i==0 then 0i64 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot
   let shp_ind =
@@ -22,7 +22,7 @@ let mk_flag_array 't 'a [m]
 
 def sgm_sum [n] 't
       (flags: [n]bool)
-      (xs: [n]i64): {[n]i64 | \_ -> true} =
+      (xs: [n]i64): [n]i64 =
   let zipped = zip flags xs
   let flags_ys =
     scan (\(x_flag,x) (y_flag,y) ->
@@ -36,11 +36,8 @@ def sgm_sum [n] 't
 
 -- Expands a shape array to flat arrays of segment ids and flags.
 let segment_ids [m]
-      (shape: {[m]i64 | \x -> Range x (0, inf) })
-      : {([]i64, []bool) | \(ids, flags) ->
-           length ids == sum shape
-             && length flags == sum shape
-        } =
+      (shape: [m]i64)
+      : ([]i64, []bool) =
   let flags1 = map (\i -> i + 1) (iota m)
   let zero = 0
   let flags = mk_flag_array shape zero flags1
@@ -49,9 +46,9 @@ let segment_ids [m]
   in (sgm_sum flags_bool flags_sgmind, flags_bool)
 
 let part2indicesL 't [m][n]
-      (shape: {[m]i64 | \x -> Range x (0, inf) })
-      (csL: {[n]bool | \_ -> n == sum shape})
-      : {[n]i64 | \inds -> FiltPartInv inds (\_i -> true) (\i -> csL[i]) } =
+      (shape: [m]i64)
+      (csL: [n]bool)
+      : [n]i64 =
   let (seg_ids, flags) = segment_ids shape
 
   -- v Size hints for the existing type-system.
@@ -79,10 +76,10 @@ let part2indicesL 't [m][n]
   in inds
 
 let seg_partition 't [m][n]
-      (shape: {[m]i64 | \x -> Range x (0, inf) })
-      (csL: {[n]bool | \_ -> n == sum shape})
+      (shape: [m]i64)
+      (csL: [n]bool)
       (xs: [n]i64)
-      : {[n]i64 | \ys -> FiltPart ys xs (\_i -> true) (\i -> csL[i])} =
+      : [n]i64 =
   let inds = part2indicesL shape csL
   let zeros = replicate n 0i64
   in scatter zeros inds xs

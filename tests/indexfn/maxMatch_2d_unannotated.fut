@@ -58,17 +58,14 @@ def to_i64 c : i64 = if c then 1 else 0
 
 def filter_indices [n]
   (cs: [n]bool)
-  : {(i64, [n]i64) | \(m, is) ->
-      FiltPartInv is (\i -> cs[i]) (\_i -> true)
-        && (m == sum (map (\x -> to_i64 x) cs))
-    } =
+  : (i64, [n]i64) =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) cs)
   let new_size = if n > 0 then num_trues[n-1] else 0
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
   in (new_size, is)
 
 def filter_by [n] 't (cs: [n]bool) (xs: [n]t) (dummy: t)
-    : {(i64, []t) | \(_, ys) -> FiltPart ys xs (\i -> cs[i]) (\_i -> true)} =
+    : (i64, []t) =
   let (new_n, is) = filter_indices cs
   let scratch = replicate new_n dummy
   let xs' = scatter scratch is xs
@@ -80,11 +77,9 @@ def filter_by [n] 't (cs: [n]bool) (xs: [n]t) (dummy: t)
 def getSmallestPairs_core [arraySize]
     (nVerts: i64)
     (nEdges: i64)
-    (flat_edges: {[arraySize*2]i64 | \x -> Range x (0, nVerts)})
-    (flat_edge2Ids: {[arraySize*2]i64 | \x -> Injective x})
-    : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
-         Injective new_edges && Injective new_edgeIds
-      }
+    (flat_edges: [arraySize*2]i64)
+    (flat_edge2Ids: [arraySize*2]i64)
+    : ([]i64, []i64)
     =
     let H = hist i64.min (nEdges*2) nVerts flat_edges flat_edge2Ids
     let cs = map2 (\i j -> H[i] == j) flat_edges flat_edge2Ids
@@ -97,7 +92,7 @@ def getSmallestPairs_core [arraySize]
 --      0,  1,  2,  3,  4,  5
 --      |   |   |   |   |   |
 --      0,1 2,3 4,5 6,7 8,9 10,11
-def expandIds [n] (edgeIds: {[n]i64 | \x -> Injective x}): {[n*2]i64 | \y -> Injective y} =
+def expandIds [n] (edgeIds: [n]i64): [n*2]i64 =
     let ys = map (\i -> map (\j -> 2*i + j) (iota 2)) edgeIds
     in flatten ys
 
@@ -105,11 +100,9 @@ def expandIds [n] (edgeIds: {[n]i64 | \x -> Injective x}): {[n*2]i64 | \y -> Inj
 def getSmallestPairs [arraySize]
     (nVerts: i64)
     (nEdges: i64)
-    (edges: {[arraySize][2]i64 | \x -> Range x (0, nVerts)})
-    (edgeIds: {[arraySize]i64 | \x -> Injective x})
-    : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
-         Injective new_edges && Injective new_edgeIds
-      }
+    (edges: [arraySize][2]i64)
+    (edgeIds: [arraySize]i64)
+    : ([]i64, []i64)
     =
     -- Transforms edgeIds as follows:
     --      0,  1,  2,  3,  4,  5
@@ -124,9 +117,9 @@ def getSmallestPairs [arraySize]
 -- Return the edge if its ID is the smallest, else return placeholder
 def getMMEdges [nVerts]
     (smallestEdgeId: [nVerts]i64)
-    (e: {[2]i64 | \x -> Range x (0, nVerts)})
+    (e: [2]i64)
     (i: i64)
-    : {([2]i64, [2]i64) | \_ -> true} =
+    : ([2]i64, [2]i64) =
     if smallestEdgeId[e[0]] == i && smallestEdgeId[e[1]] == i
     then (e, replicate 2 i)
     else (replicate 2 (-1), replicate 2 (-1))
@@ -134,11 +127,11 @@ def getMMEdges [nVerts]
 -- Update the marked vertexes and included edges
 def update [arraySize] [nVerts]
     (smallestEdgeId: [nVerts]i64)
-    (edges: {[arraySize][2]i64 | \x -> Range x (0,nVerts)})
+    (edges: [arraySize][2]i64)
     (edgeIds: [arraySize]i64)
     (markedVerts: *[]bool)
     (includedEdges: *[]bool)
-    : {(*[]bool, *[]bool) | \_ -> true}
+    : (*[]bool, *[]bool)
     =
     -- The length of the flattened arrays
     let arraySizeFlat = arraySize*2
@@ -157,11 +150,9 @@ def update [arraySize] [nVerts]
 -- Remove the marked edges
 def removeMarked [arraySize] [nVerts]
     (markedVerts: [nVerts]bool)
-    (edges: {[arraySize][2]i64 | \x -> Range x (0,nVerts)})
-    (edgeIds: {[arraySize]i64 | \x -> Injective x})
-    : {([][2]i64, []i64) | \(_, new_edgeIds) ->
-          Injective new_edgeIds
-      }
+    (edges: [arraySize][2]i64)
+    (edgeIds: [arraySize]i64)
+    : ([][2]i64, []i64)
     =
     -- zip edges edgeIds
     --     |> filter (\(v, _) -> !(markedVerts[v[0]] || markedVerts[v[1]]))
@@ -177,20 +168,17 @@ def removeMarked [arraySize] [nVerts]
     in (edges', edgeIds')
 
 -- Reset the smallest id of each vertex
-def resetsmallestEdgeId [n] (_smallestEdgeId: [n]i64): {*[n]i64 | \_ -> true} =
+def resetsmallestEdgeId [n] (_smallestEdgeId: [n]i64): *[n]i64 =
     let i64_highest = 9223372036854775807i64
     in replicate n i64_highest
 
 def loopBody [nEdges] [nVerts]
-    (edges: {[][2]i64 | \x -> Range x (0,nVerts)})
-    (edgeIds: {[nEdges]i64 | \x -> Injective x})
+    (edges: [][2]i64)
+    (edgeIds: [nEdges]i64)
     (markedVerts: *[nVerts]bool)
     (smallestEdgeId: *[nVerts]i64)
     (includedEdges: *[nEdges]bool)
-    : { ([][2]i64, []i64, *[]bool, *[nVerts]i64, *[]bool) |
-          \(_, new_edgeIds, _, _, _) ->
-            Injective new_edgeIds
-      }
+    :  ([][2]i64, []i64, *[]bool, *[nVerts]i64, *[]bool)
     =
     let (smallestTargets, smallestValues) = getSmallestPairs nVerts nEdges edges edgeIds
 
@@ -207,8 +195,8 @@ def i64_maximum xs = i64.maximum (flatten xs)
 
 def main [nEdges]
     (nVerts: i64)
-    (edges: {*[nEdges][2]i64 | \x -> Range x (0, nVerts) && nVerts == i64_maximum x + 1})
-    : {([]i64, []bool) | \(edgeIds', _) -> Injective edgeIds' }
+    (edges: *[nEdges][2]i64)
+    : ([]i64, []bool)
     =
     let edgeIds = iota nEdges
 

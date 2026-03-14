@@ -2,10 +2,10 @@
 -- Prelude
 --
 def mk_flag_array 't 'a [m]
-    (shape: {[m]i64 | \x -> Range x (0,inf)})
+    (shape: [m]i64)
     (zero: t)
     (xs: [m]t)
-    : {[]t | \_ -> true} =
+    : []t =
   let shp_rot = map (\i -> if i==0 then 0i64 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot
   let shp_ind =
@@ -20,7 +20,7 @@ def mk_flag_array 't 'a [m]
 def sgm_sum [n] 't
     (flags: [n]bool)
     (xs: [n]i64)
-    : {[n]i64 | \_ -> true} =
+    : [n]i64 =
   let zipped = zip flags xs
   let flags_ys =
     scan (\(x_flag,x) (y_flag,y) ->
@@ -32,8 +32,8 @@ def sgm_sum [n] 't
   in ys
 
 def segment_ids [m]
-    (shape: {[m]i64 | \x -> Range x (0,inf)})
-    : {([]i64, []bool) | \(ids, _) -> Range ids (0,m)} =
+    (shape: [m]i64)
+    : ([]i64, []bool) =
   let flags1 = map (\i -> i + 1) (iota m)
   let zero = 0
   let flags = mk_flag_array shape zero flags1
@@ -42,8 +42,8 @@ def segment_ids [m]
   in (sgm_sum flags_bool flags_sgmind, flags_bool)
 
 def repl_segm_iota [m]
-    (shape: {[m]i64 | \x -> Range x (0,inf)})
-    : {([]i64, []i64) | \(ids, _) -> Range ids (0,m)} =
+    (shape: [m]i64)
+    : ([]i64, []i64) =
   let (ids, flags) = segment_ids shape
   let ones = map (\_ -> 1) flags
   let tmp = sgm_sum flags ones
@@ -62,13 +62,9 @@ let to_i64 (b: bool) : i64 = if b then 1 else 0
 def filter_soa [n]
     (V: i64)
     (flags: [n]bool)
-    (x1: {[n]i64 | \x -> Range x (0,V)})
-    (x2: {[n]i64 | \x -> Range x (0,V)})
-    : {(*[]i64, *[]i64) | \(y1,y2) ->
-        Range y1 (0,V) && Range y2 (0,V)
-        && FiltPart y1 x1 (\i -> flags[i]) (\_i -> true)
-        && FiltPart y2 x2 (\i -> flags[i]) (\_i -> true)
-    } =
+    (x1: [n]i64)
+    (x2: [n]i64)
+    : (*[]i64, *[]i64) =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) flags)
   let new_size = if n > 0 then num_trues[n-1] else 0
   let ranks = map2 (\c i -> if c then i-1 else -1) flags num_trues
@@ -80,11 +76,9 @@ def filter_soa [n]
 
 def remove_duplicates [Q]
     (V: i64)
-    (q_verts: {[Q]i64 | \x -> Range x (0,V)})
-    (q_parents: {[Q]i64 | \x -> Range x (0,V)})
-    : {(*[]i64, *[]i64) | \(verts, _parents) ->
-      Injective verts
-    } = 
+    (q_verts: [Q]i64)
+    (q_parents: [Q]i64)
+    : (*[]i64, *[]i64) = 
   let indexes = iota Q
   let H = hist i64.min Q V q_verts indexes
   let flags = map2 (\i j -> H[i] == j) q_verts indexes
@@ -95,26 +89,18 @@ def update_parents [V] [Q] (parents: *[V]i64) (q_verts: [Q]i64) (q_parents: [Q]i
   scatter parents q_verts q_parents
 
 def make_shape [V] [Q]
-    (offsets: {[V+1]i64 | \x -> Range x (0,inf) && Monotonic (<=) x})
-    (queue: {[Q]i64 | \x -> Range x (0,V)})
-    : {[Q]i64 | \y ->
-      For y (\i -> Range y (0, offsets[queue[i]+1] - offsets[queue[i]] + 1))
-    } =
+    (offsets: [V+1]i64)
+    (queue: [Q]i64)
+    : [Q]i64 =
   map (\q -> offsets[q+1] - offsets[q]) queue
 
 def expand_ [V] [E] [Q]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0,V)})
-    (queue: {[Q]i64 | \x -> Range x (0,V)})
+    (offsets: [V+1]i64)
+    (edges: [E]i64)
+    (queue: [Q]i64)
     (shape: [Q]i64)
-    (_dummy: {i64 | \_ ->
-      -- This property should be annotated directly on shape, but we can't
-      -- because For needs an index function to be bound to shape to infer its
-      -- domain; this won't happen until it's used in the body. I haven't fixed
-      -- this limitation yet.
-      For shape (\i -> Range shape (0, offsets[queue[i]+1] - offsets[queue[i]] + 1))
-    })
-    : {(*[]i64, *[]i64) | \_ -> true} =
+    (_dummy: i64)
+    : (*[]i64, *[]i64) =
   -- 1. Calculate vertex degrees
   let (ids, iotas) = repl_segm_iota shape
   let q_ids = map (\i -> queue[i]) ids
@@ -125,20 +111,20 @@ def expand_ [V] [E] [Q]
   in (q_ids, q_edges)
 
 def expand [V] [E] [Q]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0,V)})
-    (queue: {[Q]i64 | \x -> Range x (0,V)})
-    : {(*[]i64, *[]i64) | \_ -> true} =
+    (offsets: [V+1]i64)
+    (edges: [E]i64)
+    (queue: [Q]i64)
+    : (*[]i64, *[]i64) =
   let shape = make_shape offsets queue
   let zero = 0
   in expand_ offsets edges queue shape zero
 
 def bfs_step [V] [E] [Q]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0,V)})
+    (offsets: [V+1]i64)
+    (edges: [E]i64)
     (parents: *[V]i64)
-    (queue: {[Q]i64 | \x -> Range x (0,V)})
-    : {(*[V]i64, *[]i64) | \_ -> true} =
+    (queue: [Q]i64)
+    : (*[V]i64, *[]i64) =
   let (raw_parents, raw_verts) = expand offsets edges queue
   let valid_flags = map (\v -> parents[v] == -1) raw_verts
   let (filtered_v, filtered_p) = filter_soa V valid_flags raw_verts raw_parents

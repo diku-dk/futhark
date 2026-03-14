@@ -7,10 +7,10 @@
 -- Prelude.
 -- 
 def mk_flag_array 't 'a [m]
-    (shape: {[m]i64 | \x -> Range x (0,inf)})
+    (shape: [m]i64)
     (zero: t)
     (xs: [m]t)
-    : {[]t | \_ -> true} =
+    : []t =
   let shp_rot = map (\i -> if i==0 then 0i64 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot
   let shp_ind =
@@ -25,7 +25,7 @@ def mk_flag_array 't 'a [m]
 def sgm_sum [n] 't
     (flags: [n]bool)
     (xs: [n]i64)
-    : {[n]i64 | \_ -> true} =
+    : [n]i64 =
   let zipped = zip flags xs
   let flags_ys =
     scan (\(x_flag,x) (y_flag,y) ->
@@ -37,8 +37,8 @@ def sgm_sum [n] 't
   in ys
 
 def segment_ids [m]
-    (shape: {[m]i64 | \x -> Range x (0,inf)})
-    : {([]i64, []bool) | \(ids, _) -> Range ids (0,m)} =
+    (shape: [m]i64)
+    : ([]i64, []bool) =
   let flags1 = map (\i -> i + 1) (iota m)
   let zero = 0
   let flags = mk_flag_array shape zero flags1
@@ -47,22 +47,22 @@ def segment_ids [m]
   in (sgm_sum flags_bool flags_sgmind, flags_bool)
 
 def repl_segm_iota [m]
-    (shape: {[m]i64 | \x -> Range x (0,inf)})
-    : {([]i64, []i64) | \(ids, _) -> Range ids (0,m)} =
+    (shape: [m]i64)
+    : ([]i64, []i64) =
   let (ids, flags) = segment_ids shape
   let ones = map (\_ -> 1) flags
   let tmp = sgm_sum flags ones
   let iotas = map (\x -> x - 1) tmp
   in (ids, iotas)
 
-def sum [n] (xs: [n]i64): {i64 | \_ -> true}=
+def sum [n] (xs: [n]i64): i64=
   if n > 0 then (scan (\x y -> x + y) 0 xs)[n-1] else 0
 
 def slice [n] 't
     (x: [n]t)
-    (a: {i64 | \a' -> Range a' (0,inf)})
-    (b: {i64 | \b' -> Range b' (0,n+1)})
-    : {[]t | \_ -> true} =
+    (a: i64)
+    (b: i64)
+    : []t =
   map (\i -> x[i + a]) (iota (b - a))
 
 -- 
@@ -80,11 +80,11 @@ def valid_neighbour
     0
 
 def can_add [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0, V)})
+    (offsets: [V+1]i64)
+    (edges: [E]i64)
     (random_state: [V]i64) (C: [V]i64)
-    (index: {i64 | \x -> Range x (0,V)})
-    : {bool | \_ -> true} =
+    (index: i64)
+    : bool =
   if (C[index] == 0) then
     false
   else
@@ -108,16 +108,16 @@ def remove_neighbour_and_self [V]
   in scatter C marked zeros1
 
 def make_shape [V]
-    (offsets: {[V+1]i64 | \x -> Range x (0,inf) && Monotonic (<=) x})
+    (offsets: [V+1]i64)
     (new: [V]bool)
-    : {[V]i64 | \y -> For y (\i -> Range y (0, offsets[i+1] - offsets[i] + 1))} =
+    : [V]i64 =
   map (\i -> if new[i] then offsets[i+1] - offsets[i] else 0) (iota V)
 
 def expand [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0, V)})
+    (offsets: [V+1]i64)
+    (edges: [E]i64)
     (new: [V]bool)
-    : {[]i64 | \_ -> true} =
+    : []i64 =
   -- For each newly added vertex, get its neighbours
   let new_shape = make_shape offsets new
   let (segment_ids, iotas) = repl_segm_iota new_shape
@@ -125,12 +125,12 @@ def expand [V] [E]
   in map (\i -> edges[i]) indices
 
 def mis_step_ [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0, V)})
+    (offsets: [V+1]i64)
+    (edges: [E]i64)
     (new: [V]bool)
     (C: *[V]i64)
     (I: *[V]i64)
-    : {(*[V]i64, *[V]i64) | \_ -> true} =
+    : (*[V]i64, *[V]i64) =
   -- Update the MIS
   let targets = map2 (\added j -> if added then j else -1) new (iota V)
   let new_i64 = map (\b -> if b then 1 else 0) new
@@ -142,24 +142,24 @@ def mis_step_ [V] [E]
   in (C, I)
 
 def mis_step [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0, V)})
+    (offsets: [V+1]i64)
+    (edges: [E]i64)
     (random_state: [V]i64)
     (C: *[V]i64)
     (I: *[V]i64)
-    : {(*[V]i64, *[V]i64) | \_ -> true} =
+    : (*[V]i64, *[V]i64) =
   -- Update the MIS
   let new = map (\i -> can_add offsets edges random_state C i) (iota V)
   in mis_step_ offsets edges new C I
 
 
 def MIS [V] [E]
-    (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
-    (edges: {[E]i64 | \x -> Range x (0, V)})
+    (offsets: [V+1]i64)
+    (edges: [E]i64)
     (random_state: [V]i64)
     (C: *[V]i64)
     (I: *[V]i64)
-    : {[]i64 | \_ -> true} =
+    : []i64 =
   -- Loop until every vertex is added to or excluded from the MIS
   let (_, I) = loop (C, I) while (i64.sum C) > 0 do
     mis_step offsets edges random_state C I

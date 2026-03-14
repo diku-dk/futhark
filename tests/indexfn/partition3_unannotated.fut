@@ -1,6 +1,4 @@
-def part3indices [n] 't (conds: [n]i8) : {[n]i64 | \is ->
-       FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
-    } =
+def part3indices [n] 't (conds: [n]i8) : [n]i64 =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
   let eflags = map (\c -> if c == 2 then 1 else 0 ) conds
 
@@ -17,10 +15,7 @@ def part3indices [n] 't (conds: [n]i8) : {[n]i64 | \is ->
                    ) conds indsL indsE (iota n)
   in  inds
 
-def partition3 [n] (p: f32 -> i8) (xs: [n]f32) : {[n]f32 | \ys ->
-      let conds = map (\x -> p x) xs
-      in FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
-    } =
+def partition3 [n] (p: f32 -> i8) (xs: [n]f32) : [n]f32 =
   let conds = map (\x -> p x) xs
   let inds = part3indices conds
   in scatter (replicate n 0) inds xs

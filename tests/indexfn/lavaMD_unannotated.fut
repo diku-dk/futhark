@@ -11,7 +11,7 @@ def dot ((ax, ay, az), (bx, by, bz)) : f32 =
   ax * bx + ay * by + az * bz
 
 def f a2 rai_v rai_x rai_y rai_z rbj_v rbj_x rbj_y rbj_z qbj
-    : {(f32, f32, f32, f32)| \_ -> true}=
+    : (f32, f32, f32, f32)=
   let r2 = rai_v + rbj_v - dot ((rai_x, rai_y, rai_z), (rbj_x, rbj_y, rbj_z))
   let u2 = a2 * r2
   let vij = f32.exp (-u2)
@@ -34,7 +34,7 @@ def neighbor [par_per_box]
              (rB_1: [par_per_box]f32)
              (rB_2: [par_per_box]f32)
              (rB_3: [par_per_box]f32)
-             (qB: [par_per_box]f32) : {(f32, f32, f32, f32) | \_ -> true}=
+             (qB: [par_per_box]f32) : (f32, f32, f32, f32)=
   let rB = zip4 rB_0 rB_1 rB_2 rB_3
   let pres =
     map2 (\(rbj_v, rbj_x, rbj_y, rbj_z) qbj ->
@@ -50,8 +50,8 @@ def neighbor [par_per_box]
 
 
 def loop_body [number_boxes] [par_per_box] [num_neighbors]
-    (box_coefs_3: {[number_boxes]i64 | \x -> Range x (0,number_boxes)})
-    (box_nnghs_3: {[num_neighbors][number_boxes]i64 | \x -> Range x (0,number_boxes)})
+    (box_coefs_3: [number_boxes]i64)
+    (box_nnghs_3: [num_neighbors][number_boxes]i64)
     (rv_0: [number_boxes][par_per_box]f32)
     (rv_1: [number_boxes][par_per_box]f32)
     (rv_2: [number_boxes][par_per_box]f32)
@@ -68,7 +68,7 @@ def loop_body [number_boxes] [par_per_box] [num_neighbors]
     (a3 : f32)
     (a4 : f32)
     (box_num_nghbs': i64)
-    (k: {i64 | \x -> Range x (0,box_num_nghbs'+1)}) =
+    (k: i64) =
   let pointer =
     if (k > 0)
     then let num = box_nnghs_3[k - 1, l] in num
@@ -90,21 +90,21 @@ def main [number_boxes] [par_per_box] [num_neighbors]
          (_box_coefs_0: [number_boxes]i64)
          (_box_coefs_1: [number_boxes]i64)
          (_box_coefs_2: [number_boxes]i64)
-         (box_coefs_3: {[number_boxes]i64 | \x -> Range x (0,number_boxes)})
+         (box_coefs_3: [number_boxes]i64)
          (_box_nnghs_0: [num_neighbors][number_boxes]i64)
          (_box_nnghs_1: [num_neighbors][number_boxes]i64)
          (_box_nnghs_2: [num_neighbors][number_boxes]i64)
-         (box_nnghs_3: {[num_neighbors][number_boxes]i64 | \x -> Range x (0,number_boxes)})
-         (box_num_nghbs: {[number_boxes]i64 | \x -> Range x (0,num_neighbors)})
+         (box_nnghs_3: [num_neighbors][number_boxes]i64)
+         (box_num_nghbs: [number_boxes]i64)
          (rv_0: [number_boxes][par_per_box]f32)
          (rv_1: [number_boxes][par_per_box]f32)
          (rv_2: [number_boxes][par_per_box]f32)
          (rv_3: [number_boxes][par_per_box]f32)
-         (qv: [number_boxes][par_per_box]f32) : {( [number_boxes][par_per_box]f32
+         (qv: [number_boxes][par_per_box]f32) : ( [number_boxes][par_per_box]f32
                                                 , [number_boxes][par_per_box]f32
                                                 , [number_boxes][par_per_box]f32
                                                 , [number_boxes][par_per_box]f32
-                                                ) | \_ -> true} =
+                                                ) =
   let alpha2 = 2 * alpha * alpha
   in unzip4 (
     map2 (\box_num_nghbs' (l: i64) ->

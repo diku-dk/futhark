@@ -3,10 +3,10 @@ let sum [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 def length [n] 't (_: [n]t) = n
 
 let mk_flag_array 't 'a [m]
-        (shape: {[m]i64 | \x -> Range x (0,inf)})
+        (shape: [m]i64)
         (zero: t)
         (xs: [m]t)
-        : {([m]i64, []t) | \(_, flags) -> length flags == sum shape} =
+        : ([m]i64, []t) =
   let shp_rot = map (\i -> if i==0 then 0i64 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot
   let shp_ind =
@@ -20,7 +20,7 @@ let mk_flag_array 't 'a [m]
 
 def sgm_sum [n] 't
       (flags: [n]bool)
-      (xs: [n]i64): {[n]i64 | \_ -> true} =
+      (xs: [n]i64): [n]i64 =
   let zipped = zip flags xs
   let flags_ys =
     scan (\(x_flag,x) (y_flag,y) ->
@@ -33,11 +33,8 @@ def sgm_sum [n] 't
 
 -- Expands a shape array to flat arrays of segment ids and flags.
 let segment_ids [m]
-      (shape: {[m]i64 | \x -> Range x (0,inf)})
-      : {([]i64, [m]i64) | \(ids, flags) ->
-           length ids == sum shape
-           && Range flags (0,sum shape + 1)
-        } =
+      (shape: [m]i64)
+      : ([]i64, [m]i64) =
   let flags1 = map (\i -> i + 1) (iota m)
   let zero = 0i64
   let (B, flags) = mk_flag_array shape zero flags1
@@ -54,15 +51,15 @@ def replicate_like 't 't2 [n] (_: [n]t) (x: t2): [n]t2 =
 
 
 def divider [nops]
-    (n: {i64 | \n -> Range n (1,inf)})
-    (primes: {[nops]i64 | \ys -> Range ys (2,inf)})
-    : {[nops]i64 | \ys -> Assume (Range ys (0,inf))} =
+    (n: i64)
+    (primes: [nops]i64)
+    : [nops]i64 =
   map (\p -> n / p - 1) primes
 
 def irregParKerII1Expl [nops]
-      (n: {i64 | \n -> Range n (1,inf)})
-      (primes: {[nops]i64 | \ys -> Range ys (2,inf)})
-      : {[]i64 | \x -> Range x (1, inf)} =
+      (n: i64)
+      (primes: [nops]i64)
+      : []i64 =
   let shp = divider n primes
   let (II1, B) = segment_ids shp
   let not_primes = map2 (\sgm_ind i ->
@@ -73,7 +70,7 @@ def irregParKerII1Expl [nops]
     ) II1 (iota_like II1)
   in  not_primes
 
-def filterTrueInds [n] (bs: [n]bool) : {[]i64 | \ys -> Range ys (2,inf)} =
+def filterTrueInds [n] (bs: [n]bool) : []i64 =
   let cs = map (\b -> if b then 1 else 0) bs
   let indT = scan (+) 0 cs
   let len  = if n > 0 then indT[n-1] else 0
@@ -85,20 +82,16 @@ def filterTrueInds [n] (bs: [n]bool) : {[]i64 | \ys -> Range ys (2,inf)} =
   in  scatter (replicate len 0i64) inds vals
 
 def min
-    (n: {i64 | \n -> Range n (1,inf)})
-    (len: {i64 | \n -> Range n (1,inf)})
-    : {i64 | \len' ->
-      Range len' (1,inf)
-    } =
+    (n: i64)
+    (len: i64)
+    : i64 =
   if n / len < len then n else len*len
 
 def oneIter [len_sq_primes]
-      (n64: {i64 | \n -> Range n (1,inf)})
-      (len: {i64 | \n -> Range n (1,inf)})
-      (sq_primes : {[len_sq_primes]i64 | \ys -> Range ys (2,inf)})
-      : {([]i64, i64) | \(xs,len) ->
-        Range xs (2,inf) && Range len (1,inf)
-      } =
+      (n64: i64)
+      (len: i64)
+      (sq_primes : [len_sq_primes]i64)
+      : ([]i64, i64) =
   let lensq = len * len
   let len = min n64 lensq
   let not_primes = irregParKerII1Expl len sq_primes
@@ -111,7 +104,7 @@ def oneIter [len_sq_primes]
   let xs = filterTrueInds prime_flags
   in  (xs, len)
   
-def primesFlat (n : {i64 | \n -> Range n (1,inf)}) (sq_primes: {[16]i64 | \ys -> Range ys (2,inf)}) : {[]i64 | \_ -> true} =
+def primesFlat (n : i64) (sq_primes: [16]i64) : []i64 =
   let len = length sq_primes
   let (res, _) =
     -- We have to comment out the loop itself because Futhark's existing size
