@@ -201,6 +201,7 @@ library
       Futhark.CLI.Run
       Futhark.CLI.Script
       Futhark.CLI.Test
+      Futhark.CLI.Verify
       Futhark.CLI.WASM
       Futhark.CodeGen.Backends.CCUDA
       Futhark.CodeGen.Backends.COpenCL
