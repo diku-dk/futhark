@@ -715,7 +715,7 @@ void cmd_shape(struct server_state *s, const char *args[]) {
 
   const int64_t *shape = a->shape(s->ctx, v->value.value.v_ptr);
   for (int i = 0; i < a->rank; ++i) {
-    printf("%lld ", shape[i]);
+    printf("%lld ", (long long)shape[i]);
   }
   printf("\n");
 }
@@ -801,13 +801,13 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
 
   if (num_args - a->rank != n_values) {
     failure();
-    printf("Expected %d values, but got %d.\n", n_values, num_args - a->rank);
+    printf("Expected %d values, but got %d.\n", (int)n_values, num_args - a->rank);
     return;
   }
 
   const void** value_ptrs = alloca(n_values * sizeof(void*));
 
-  for (int i = 0; i < n_values; i++) {
+  for (int64_t i = 0; i < n_values; i++) {
     struct variable* v = get_variable(s, args[2+a->rank+i]);
 
     if (v == NULL) {
@@ -819,7 +819,7 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     if (strcmp(v->value.type->name, a->element_type->name) != 0) {
       failure();
       printf("Value %d mismatch: expected type %s, got %s\n",
-             i, a->element_type->name, v->value.type->name);
+             (int)i, a->element_type->name, v->value.type->name);
       return;
     }
 
