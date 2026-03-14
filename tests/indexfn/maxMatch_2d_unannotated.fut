@@ -178,7 +178,7 @@ def loopBody [nEdges] [nVerts]
     (markedVerts: *[nVerts]bool)
     (smallestEdgeId: *[nVerts]i64)
     (includedEdges: *[nEdges]bool)
-    :  ([][2]i64, []i64, *[]bool, *[nVerts]i64, *[]bool)
+    :  ([][2]i64, []i64, []bool, [nVerts]i64, []bool)
     =
     let (smallestTargets, smallestValues) = getSmallestPairs nVerts nEdges edges edgeIds
 
