@@ -41,6 +41,7 @@ import Language.LSP.Test
     formatDoc,
     fullLatestClientCaps,
     getAndResolveCodeLenses,
+    getAndResolveInlayHints,
     getDefinitions,
     getHover,
     message,
@@ -181,6 +182,22 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $ do
       def x = 42i32
       -- >>> x + 5
       |]
+
+testInlayTypeHint :: TestTree
+testInlayTypeHint = serverTestCase "Inlay type hint" $
+  do
+    docIdent <- createMainDoc mainContents
+    hints <- getAndResolveInlayHints docIdent fullRange
+
+    pure ()
+  where
+    fullRange =
+      Range
+        { _start = Position {_line = 0, _character = 0},
+          _end = Position {_line = 2, _character = 0}
+        }
+
+    mainContents = "def plus5 x = x + 5i32"
 
 tests :: TestTree
 tests =

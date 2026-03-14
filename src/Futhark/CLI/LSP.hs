@@ -34,10 +34,12 @@ import Language.LSP.Server
     type (<~>) (Iso),
   )
 import System.Exit
+import System.IO (hSetBuffering, BufferMode (LineBuffering), stderr)
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
 main _prog _args = do
+  hSetBuffering stderr LineBuffering
   code <-
     runServer =<< serverDefinition
   case code of
