@@ -167,12 +167,12 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                                      typename $id:c_type_name* outp,
                                      $ty:element_c_type *ps[],
                                      const typename int64_t* shape) {
-                typename uint64_t n_values = 1;
+                typename int64_t n_values = 1;
                 for (int i = 0; i < $int:rank; ++i) {
                   n_values *= shape[i];
                 }
                 $ty:element_c_type *values = alloca(n_values * sizeof($ty:element_c_type));
-                for (int i = 0; i < n_values; ++i) {
+                for (typename int64_t i = 0; i < n_values; ++i) {
                   values[i] = *ps[i];
                 }
                 *outp = $id:(arrayNew ops)(ctx, values, $args:shape_args);
@@ -182,7 +182,7 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                                 typename $id:c_type_name arr,
                                 $ty:element_c_type *val,
                                 const typename int64_t *is) {
-                const typename uint64_t *shape = $id:(arrayShape ops)(ctx, arr);
+                const typename int64_t *shape = $id:(arrayShape ops)(ctx, arr);
                 typename uint64_t idx = is[0];
                 for (int i = 1; i < $int:rank; ++i) {
                   idx *= shape[i-1];
@@ -193,7 +193,7 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
               }
               int $id:array_index_wrap(struct futhark_context *ctx,
                                        void *dest,
-                                       const typename $id:c_type_name arr,
+                                       typename $id:c_type_name arr,
                                        const typename int64_t *is) {
                 return $id:(arrayIndex ops)(ctx, dest, arr, $args:is_args);
               }
@@ -353,12 +353,12 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
                                typename $id:c_type_name *outp,
                                $ty:element_c_type *ps[],
                                const typename int64_t shape[]) {
-                typename uint64_t n_values = 1;
+                typename int64_t n_values = 1;
                 for (int i = 0; i < $int:rank; ++i) {
                   n_values *= shape[i];
                 }
                 $ty:element_c_type *values = alloca(n_values * sizeof($ty:element_c_type));
-                for (int i = 0; i < n_values; ++i) {
+                for (typename int64_t i = 0; i < n_values; ++i) {
                   values[i] = *ps[i];
                 }
                 return $id:new(ctx, outp, values, $args:shape_args);
@@ -371,7 +371,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
               }
               int $id:index_wrap(struct futhark_context *ctx,
                                  void *dest,
-                                 const typename $id:c_type_name arr,
+                                 typename $id:c_type_name arr,
                                  const typename int64_t *is) {
                 return $id:index(ctx, dest, arr, $args:is_args);
               }
