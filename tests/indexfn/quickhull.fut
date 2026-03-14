@@ -77,23 +77,22 @@ def partition3 't [n] (conds: [n]i8) (xs: [n]t)
 -- compiled input @ data/2DinSphere_10K.in
 -- output @ out.out
 
-type real = f64
 type dist = f64
 type point = (f64, f64)
 
 def zero_dist = 0f64
 def dist_less (x : dist) (y : dist) = x < y
 
-def point_eq (px: real, py: real) (qx: real, qy: real) =
+def point_eq (px: f64, py: f64) (qx: f64, qy: f64) =
   px == qx && py == qy
 
-def point_less (px: real, py: real) (qx: real, qy: real) =
+def point_less (px: f64, py: f64) (qx: f64, qy: f64) =
   px < qx || (px == qx && py < qy)
 
 def sqr  (x : f64) = x * x
 def ssqr (x : f64) = f64.abs x * x
 
-def signed_dist_to_line (px: real, py: real) (qx: real, qy: real) (rx: real, ry: real) : {dist | \_ -> true} =
+def signed_dist_to_line (px: f64, py: f64) (qx: f64, qy: f64) (rx: f64, ry: f64) : {dist | \_ -> true} =
   let ax = qx - px
   let ay = qy - py
   let bx = rx - px
@@ -107,7 +106,7 @@ def mk2vec x y =
   map (\i -> if i == 0 then x else y) (iota 2)
 
 def remove_negatives [num_points] num_segs (x: {[num_points]i64 | \x -> Range x (-1, 2*num_segs)}) points_x points_y
-  : {([]i64, []real, []real) | \(y0,_,_) ->
+  : {([]i64, []f64, []f64) | \(y0,_,_) ->
     FiltPart y0 x (\i -> x[i] >= 0) (\_i -> true) && Range y0 (0, 2*num_segs)
   }  =
   let bs = map (\i -> i >= 0) x
@@ -121,13 +120,13 @@ def remove_negatives [num_points] num_segs (x: {[num_points]i64 | \x -> Range x 
   in (ids, points_x', points_y')
 
 def compute_new_seg_inds [num_segs] [num_points]
-    (segs_begx : [num_segs]real)
-    (segs_begy : [num_segs]real)
-    (segs_endx : [num_segs]real)
-    (segs_endy : [num_segs]real)
+    (segs_begx : [num_segs]f64)
+    (segs_begy : [num_segs]f64)
+    (segs_endx : [num_segs]f64)
+    (segs_endy : [num_segs]f64)
     (points_idx : {[num_points]i64 | \x -> Range x (0, num_segs)})
-    (points_x : [num_points]real)
-    (points_y : [num_points]real)
+    (points_x : [num_points]f64)
+    (points_y : [num_points]f64)
     (extrema_ix_inds : {[num_segs]i64 | \x -> Range x (0, num_points)})
     : ({[num_points]i64 | \y -> Range y (-1, 2 * num_segs)}) =
   map4 (\ix seg_ix px py ->
@@ -151,17 +150,17 @@ def compute_new_seg_inds [num_segs] [num_points]
     ) (iota num_points) points_idx points_x points_y
 
 def expand_hull [num_segs] [num_points]
-    -- (segs   : [num_segs](real,real,real,real))
-    (segs_begx : [num_segs]real)
-    (segs_begy : [num_segs]real)
-    (segs_endx : [num_segs]real)
-    (segs_endy : [num_segs]real)
-    -- (points : [num_points](i64, real, real))
+    -- (segs   : [num_segs](f64,f64,f64,f64))
+    (segs_begx : [num_segs]f64)
+    (segs_begy : [num_segs]f64)
+    (segs_endx : [num_segs]f64)
+    (segs_endy : [num_segs]f64)
+    -- (points : [num_points](i64, f64, f64))
     (points_idx : {[num_points]i64 | \x -> Range x (0, length segs_begx)})
-    (points_x : [num_points]real)
-    (points_y : [num_points]real)
-    : {( []real,[]real,[]real,[]real -- segs'
-       , []i64, []real, []real       -- points'
+    (points_x : [num_points]f64)
+    (points_y : [num_points]f64)
+    : {( []f64,[]f64,[]f64,[]f64 -- segs'
+       , []i64, []f64, []f64       -- points'
       ) | \(segs_bx',_,_,_, points_idx',_,_) ->
         Range points_idx' (0, length segs_bx')
     } =
@@ -215,20 +214,20 @@ def slice [n] 't (x: [n]t) (a: {i64 | \a' -> Range a' (0,inf)}) (b: {i64 | \b' -
   map (\i -> x[i + a]) (iota (b - a))
 
 def loop_body [num_segs] [num_points]
-    (hull_x : []real)
-    (hull_y : []real)
-    -- (segs   : [num_segs](real,real,real,real))
-    (segs_bx : [num_segs]real)
-    (segs_by : [num_segs]real)
-    (segs_ex : [num_segs]real)
-    (segs_ey : [num_segs]real)
-    -- (points : [num_points](i64, real, real))
+    (hull_x : []f64)
+    (hull_y : []f64)
+    -- (segs   : [num_segs](f64,f64,f64,f64))
+    (segs_bx : [num_segs]f64)
+    (segs_by : [num_segs]f64)
+    (segs_ex : [num_segs]f64)
+    (segs_ey : [num_segs]f64)
+    -- (points : [num_points](i64, f64, f64))
     (points_idx: {[num_points]i64 | \x -> Range x (0, length segs_bx)})
-    (points_x : [num_points]real)
-    (points_y : [num_points]real)
-    : {( []real, []real              -- hull'
-       , []real,[]real,[]real,[]real -- segs'
-       , []i64,[]real,[]real         -- points
+    (points_x : [num_points]f64)
+    (points_y : [num_points]f64)
+    : {( []f64, []f64              -- hull'
+       , []f64,[]f64,[]f64,[]f64 -- segs'
+       , []i64,[]f64,[]f64         -- points
       ) | \(_,_, res_segs_bx,_,_,_, res_points_idx,_,_) ->
         Range res_points_idx (0,length res_segs_bx)}
     =
@@ -282,7 +281,7 @@ def loop_body [num_segs] [num_points]
     ) points_idx'
   in  (hull_x', hull_y', segs_true_bx, segs_true_by, segs_true_ex, segs_true_ey, points_idx'', points_x', points_y')
 
-def semihull [n] (startx: real, starty: real) (endx: real, endy: real) (points0 : [n]real) (points1 : [n]real) : {[](real, real) | \_ -> true}  =
+def semihull [n] (startx: f64, starty: f64) (endx: f64, endy: f64) (points0 : [n]f64) (points1 : [n]f64) : {[](f64, f64) | \_ -> true}  =
   if n == 0 then map (\_ -> (startx,starty)) (iota 1)
   else
   let hull = map (\_ -> (0,0)) (iota 0)
