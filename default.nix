@@ -40,6 +40,9 @@ let
           lsp-types =
             haskellPackagesNew.callPackage ./nix/lsp-types.nix { };
 
+          lsp-test =
+            haskellPackagesNew.callPackage ./nix/lsp-test.nix { };
+
           futhark =
             # callCabal2Nix does not do a great job at determining
             # which files must be included as source, which causes

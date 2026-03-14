@@ -1,7 +1,7 @@
 {-# LANGUAGE ExplicitNamespaces #-}
 
 -- | @futhark lsp@
-module Futhark.CLI.LSP (main) where
+module Futhark.CLI.LSP (main, serverDefinition) where
 
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.IORef (newIORef)
@@ -34,35 +34,36 @@ import Language.LSP.Server
     type (<~>) (Iso),
   )
 import System.Exit
-import System.IO (BufferMode (LineBuffering), hSetBuffering, stderr)
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
 main _prog _args = do
-  state_mvar <- newIORef emptyState
-  -- makes the lines appear in full in the logs
-  hSetBuffering stderr LineBuffering
   code <-
-    runServer $
-      ServerDefinition
-        { onConfigChange = const $ pure (),
-          configSection = "Futhark",
-          parseConfig = const . const $ Right (),
-          defaultConfig = (),
-          doInitialize = \env _req -> pure $ Right env,
-          staticHandlers = handlers state_mvar,
-          interpretHandler = \env -> Iso (runLspT env) liftIO,
-          options =
-            defaultOptions
-              { optTextDocumentSync =
-                  Just syncOptions,
-                optExecuteCommandCommands =
-                  Just $ map showText [minBound :: CommandType .. maxBound]
-              }
-        }
+    runServer =<< serverDefinition
   case code of
     0 -> exitSuccess
     _ -> exitWith $ ExitFailure code
+
+serverDefinition :: IO (ServerDefinition ())
+serverDefinition = do
+  state_mvar <- newIORef emptyState
+  pure $
+    ServerDefinition
+      { onConfigChange = const $ pure (),
+        configSection = "Futhark",
+        parseConfig = const . const $ Right (),
+        defaultConfig = (),
+        doInitialize = \env _req -> pure $ Right env,
+        staticHandlers = handlers state_mvar,
+        interpretHandler = \env -> Iso (runLspT env) liftIO,
+        options =
+          defaultOptions
+            { optTextDocumentSync =
+                Just syncOptions,
+              optExecuteCommandCommands =
+                Just $ map showText [minBound :: CommandType .. maxBound]
+            }
+      }
 
 syncOptions :: TextDocumentSyncOptions
 syncOptions =
