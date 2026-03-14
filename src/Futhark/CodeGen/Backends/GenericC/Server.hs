@@ -142,27 +142,58 @@ cKind Opaque = [C.cexp|OPAQUE|]
 -- First component is forward declaration so we don't have to worry
 -- about ordering.
 typeBoilerplate :: Manifest -> (T.Text, Type) -> (C.Definition, C.Initializer, [C.Definition])
-typeBoilerplate _ (tname, TypeArray c_type_name et rank ops) =
+typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
   let element_type_name = typeStructName et
+      element_c_type = cType manifest et
       type_name = typeStructName tname
       array_name = type_name <> "_array"
       aux_name = type_name <> "_aux"
       info_name = et <> "_info"
+      aux_array_new_wrap = arrayNew ops <> "_aux_wrap"
       array_new_wrap = arrayNew ops <> "_wrap"
+      array_set = arrayNew ops <> "_set"
       array_index_wrap = arrayIndex ops <> "_wrap"
       shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       is_args = [[C.cexp|is[$int:i]|] | i <- [0 .. rank - 1]]
    in ( [C.cedecl|const struct type $id:type_name;|],
         [C.cinit|&$id:type_name|],
         [C.cunit|
-              void* $id:array_new_wrap(struct futhark_context *ctx,
-                                       const void* p,
-                                       const typename int64_t* shape) {
+              void* $id:aux_array_new_wrap(struct futhark_context *ctx,
+                                           const void* p,
+                                           const typename int64_t* shape) {
                 return $id:(arrayNew ops)(ctx, p, $args:shape_args);
+              }
+              int $id:array_new_wrap(struct futhark_context* ctx,
+                                     typename $id:c_type_name* outp,
+                                     $ty:element_c_type *ps[],
+                                     const typename int64_t* shape) {
+                typename uint64_t n_values = 1;
+                for (int i = 0; i < $int:rank; ++i) {
+                  n_values *= shape[i];
+                }
+                $ty:element_c_type *values = alloca(n_values * sizeof($ty:element_c_type));
+                for (int i = 0; i < n_values; ++i) {
+                  values[i] = *ps[i];
+                }
+                *outp = $id:(arrayNew ops)(ctx, values, $args:shape_args);
+                return 0;
+              }
+              int $id:array_set(struct futhark_context *ctx,
+                                typename $id:c_type_name arr,
+                                $ty:element_c_type *val,
+                                const typename int64_t *is) {
+                const typename uint64_t *shape = $id:(arrayShape ops)(ctx, arr);
+                typename uint64_t idx = is[0];
+                for (int i = 1; i < $int:rank; ++i) {
+                  idx *= shape[i-1];
+                  idx += is[i];
+                }
+                (($ty:element_c_type*)$id:(arrayValuesRaw ops)(ctx, arr))[idx] = *val;
+                return 0;
               }
               int $id:array_index_wrap(struct futhark_context *ctx,
                                        void *dest,
-                                       typename $id:c_type_name arr,
+                                       const typename $id:c_type_name arr,
                                        const typename int64_t *is) {
                 return $id:(arrayIndex ops)(ctx, dest, arr, $args:is_args);
               }
@@ -170,6 +201,7 @@ typeBoilerplate _ (tname, TypeArray c_type_name et rank ops) =
                 .rank = $int:rank,
                 .element_type = &$id:element_type_name,
                 .new = (typename array_new_fn)$id:array_new_wrap,
+                .set = (typename array_set_fn)$id:array_set,
                 .shape = (typename array_shape_fn)$id:(arrayShape ops),
                 .index = (typename array_index_fn)$id:array_index_wrap,
               };
@@ -177,10 +209,10 @@ typeBoilerplate _ (tname, TypeArray c_type_name et rank ops) =
                 .name = $string:(T.unpack tname),
                 .rank = $int:rank,
                 .info = &$id:info_name,
-                .new = (typename array_new_fn)$id:array_new_wrap,
-                .free = (typename array_free_fn)$id:(arrayFree ops),
-                .shape = (typename array_shape_fn)$id:(arrayShape ops),
-                .values = (typename array_values_fn)$id:(arrayValues ops)
+                .new = (typename aux_array_new_fn)$id:aux_array_new_wrap,
+                .free = (typename aux_array_free_fn)$id:(arrayFree ops),
+                .shape = (typename aux_array_shape_fn)$id:(arrayShape ops),
+                .values = (typename aux_array_values_fn)$id:(arrayValues ops)
               };
               const struct type $id:type_name = {
                 .name = $string:(T.unpack tname),
@@ -303,26 +335,51 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
             [C.cinit|&$id:sum_name|],
             Sum
           )
-    transparentDefs type_name (Just (OpaqueArray ops')) = opaqueArrayDefs type_name (opaqueArrayRank ops') (opaqueArrayElemType ops') (opaqueArrayShape ops') (opaqueArrayIndex ops')
-    transparentDefs type_name (Just (OpaqueRecordArray ops')) = opaqueArrayDefs type_name (recordArrayRank ops') (recordArrayElemType ops') (recordArrayShape ops') (recordArrayIndex ops')
+    transparentDefs type_name (Just (OpaqueArray ops')) = opaqueArrayDefs type_name (opaqueArrayRank ops') (opaqueArrayElemType ops') (opaqueArrayNew ops') (opaqueArraySet ops') (opaqueArrayShape ops') (opaqueArrayIndex ops')
+    transparentDefs type_name (Just (OpaqueRecordArray ops')) = opaqueArrayDefs type_name (recordArrayRank ops') (recordArrayElemType ops') (recordArrayNew ops') (recordArraySet ops') (recordArrayShape ops') (recordArrayIndex ops')
     transparentDefs _ _ = ([], [C.cinit|NULL|], Opaque)
 
-    opaqueArrayDefs type_name rank et shape index =
+    opaqueArrayDefs type_name rank et new set shape index =
       let array_name = type_name <> "_array"
           element_type_name = typeStructName et
+          element_c_type = cType manifest et
+          new_wrap = new <> "_wrap"
+          set_wrap = set <> "_wrap"
           index_wrap = index <> "_wrap"
+          shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
           is_args = [[C.cexp|is[$int:i]|] | i <- [0 .. rank - 1]]
        in ( [C.cunit|
+              int $id:new_wrap(struct futhark_context *ctx,
+                               typename $id:c_type_name *outp,
+                               $ty:element_c_type *ps[],
+                               const typename int64_t shape[]) {
+                typename uint64_t n_values = 1;
+                for (int i = 0; i < $int:rank; ++i) {
+                  n_values *= shape[i];
+                }
+                $ty:element_c_type *values = alloca(n_values * sizeof($ty:element_c_type));
+                for (int i = 0; i < n_values; ++i) {
+                  values[i] = *ps[i];
+                }
+                return $id:new(ctx, outp, values, $args:shape_args);
+              }
+              int $id:set_wrap(struct futhark_context *ctx,
+                               typename $id:c_type_name arr,
+                               $ty:element_c_type *val,
+                               const typename int64_t *is) {
+                return $id:set(ctx, arr, *val, $args:is_args);
+              }
               int $id:index_wrap(struct futhark_context *ctx,
-                                       void *dest,
-                                       typename $id:c_type_name arr,
-                                       const typename int64_t *is) {
+                                 void *dest,
+                                 const typename $id:c_type_name arr,
+                                 const typename int64_t *is) {
                 return $id:index(ctx, dest, arr, $args:is_args);
               }
               const struct array $id:array_name = {
                 .rank = $int:rank,
                 .element_type = &$id:element_type_name,
-                .new = NULL,
+                .new = (typename array_new_fn)$id:new_wrap,
+                .set = (typename array_set_fn)$id:set_wrap,
                 .shape = (typename array_shape_fn)$id:shape,
                 .index = (typename array_index_fn)$id:index_wrap,
               };|],
