@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark fmt` prints module types better.
 
+* New server protocol commands: `rank`, `elemtype`, `new_array`, `set`.
+
 ### Removed
 
 ### Changed
