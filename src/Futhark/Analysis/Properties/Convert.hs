@@ -29,7 +29,7 @@ import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
-import Futhark.SoP.FourierMotzkin (($<$), ($<=$), ($>$), ($>=$))
+import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justAffine, justConstant, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (./.), (~*~), (~+~), (~-~))
@@ -129,7 +129,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
       checkPostcondition vn indexfns te
       insertTopLevel vn (mkApplyIndexFn vn size_vars params te indexfns)
       out <- mapM (changeScope (S.fromList $ size_vars <> arg_vars)) indexfns
-      printM 1 $ prettyBinding vn out
+      printM 2 $ prettyBinding vn out
       pure out
   where
     formal_args = concatMap E.patternMap params
@@ -143,7 +143,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
         type_params
     -- Adds the effect of a precondition without checking that it holds.
     addPreconditions pat = do
-      printM 1 $ warningString "+" <> " Adding precondition on " <> prettyStr pat
+      printM 2 $ warningString "+" <> " Adding precondition on " <> prettyStr pat
       ref <- getRefinement pat
       forM_ ref $ \(_, effect) -> effect emptyCheckContext
       printAlgEnv 3
@@ -152,7 +152,7 @@ mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
   pure []
 
 bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
-bindfn = bindfn_ 1
+bindfn = bindfn_ 2
 
 bindfn_ :: Int -> E.VName -> [IndexFn] -> IndexFnM [IndexFn]
 bindfn_ level vn indexfns = do
@@ -185,7 +185,7 @@ checkPostcondition vn indexfns te = do
       forM_ (zip param_names indexfns) $ \(nm, fn) ->
         when (isJust nm) . void $ bindfn (fromJust nm) [fn]
       postconds <- forward lam_body >>= mapM rewrite
-      printM 1 $
+      printM 2 $
         "Postconditions after substituting in results:\n  "
           <> prettyStr postconds
 
@@ -1205,7 +1205,7 @@ forwardPropertyPrelude f args =
       | [E.OpSection (E.QualName [] vn_op) _ _, e_X] <- getArgs args,
         Just x <- justVName e_X,
         Just dir <- opToMonDir (E.baseString vn_op) -> do
-          printM 1 $ prettyStr (IndexFn [] $ cases [(Bool True, pr $ Property.Monotonic x dir)])
+          printM 2 $ prettyStr (IndexFn [] $ cases [(Bool True, pr $ Property.Monotonic x dir)])
           pure (IndexFn [] $ cases [(Bool True, pr $ Property.Monotonic x dir)])
       where
         opToMonDir ">" = pure DecS

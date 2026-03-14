@@ -286,18 +286,18 @@ substituteOnce f g_presub (f_apply, actual_args) = do
         -- (The case where `e_3` may depend on `i_2` is still handled by Cat in
         -- this implementation.)
         | i_2 `S.notMember` fv e_3 -> do
-            printM 1 $ "propFlattenSimplified\n  |_ e_1 " <> prettyStr e_1
-            printM 1 $ "  |_ e_2 " <> prettyStr e_2
-            printM 1 $ "  |_ e_3 " <> prettyStr e_3
+            printM 5 $ "propFlattenSimplified\n  |_ e_1 " <> prettyStr e_1
+            printM 5 $ "  |_ e_2 " <> prettyStr e_2
+            printM 5 $ "  |_ e_3 " <> prettyStr e_3
             ans <- lift (e_1 $== e_2 .*. e_3)
-            printM 1 $ "  |_ ans " <> prettyStr ans
+            printM 5 $ "  |_ ans " <> prettyStr ans
             case ans of
               Yes -> do
                 e_row <- lift . rewrite $ sym2SoP (Var i_2) .*. e_3
-                printM 1 $ "  |_ e_row " <> prettyStr e_row
+                printM 5 $ "  |_ e_row " <> prettyStr e_row
                 let s = mkRep i_1 (e_row .+. sym2SoP (Var i_3))
                 let res = g {shape = l <> (df : r), body = repCases s (body g)}
-                printM 1 $ "  |_ g " <> prettyStr res
+                printM 5 $ "  |_ g " <> prettyStr res
                 pure res
               Unknown -> pure g
         where
