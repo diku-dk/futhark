@@ -749,7 +749,7 @@ void cmd_rank(struct server_state *s, const char *args[]) {
   printf("%d\n", a->rank);
 }
 
-void cmd_join(struct server_state *s, const char *args[]) {
+void cmd_new_array(struct server_state *s, const char *args[]) {
   const char *to_name = get_arg(args, 0);
   const char *type_name = get_arg(args, 1);
   const struct type *type = get_type(s, type_name);
@@ -1346,8 +1346,8 @@ void process_line(struct server_state *s, char *line) {
     cmd_elemtype(s, tokens+1);
   } else if (strcmp(command, "rank") == 0) {
     cmd_rank(s, tokens+1);
-  } else if (strcmp(command, "join") == 0) {
-    cmd_join(s, tokens+1);
+  } else if (strcmp(command, "new_array") == 0) {
+    cmd_new_array(s, tokens+1);
   } else if (strcmp(command, "set") == 0) {
     cmd_set(s, tokens+1);
   } else if (strcmp(command, "index") == 0) {
