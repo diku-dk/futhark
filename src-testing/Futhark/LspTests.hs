@@ -52,16 +52,6 @@ import System.Process (createPipe)
 import Test.Tasty (TestName, TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-tests :: TestTree
-tests =
-  testGroup
-    "Futhark.LspTests"
-    [ testHoverInformation,
-      testDefinition,
-      testFormatting,
-      testEvaluationComment
-    ]
-
 runServerSessionPair :: Session a -> IO a
 runServerSessionPair session = do
   (serverIn, clientOut) <- createPipe
@@ -111,24 +101,23 @@ testHoverInformation = serverTestCase "Hover" $ do
         }
 
 testDefinition :: TestTree
-testDefinition = serverTestCase "Go To Definition" $
-  do
-    docIdent <- createMainDoc mainContents
-    definition <- getDefinitions docIdent fooBodyPosition
+testDefinition = serverTestCase "Go To Definition" $ do
+  docIdent <- createMainDoc mainContents
+  definition <- getDefinitions docIdent fooBodyPosition
 
-    let expectedDefinition =
-          Definition $
-            InL $
-              Location
-                { _uri = docIdent ^. uri,
-                  _range =
-                    Range
-                      { _end = Position 0 15,
-                        _start = Position 0 0
-                      }
-                }
+  let expectedDefinition =
+        Definition $
+          InL $
+            Location
+              { _uri = docIdent ^. uri,
+                _range =
+                  Range
+                    { _end = Position 0 15,
+                      _start = Position 0 0
+                    }
+              }
 
-    liftIO $ definition @?= InL expectedDefinition
+  liftIO $ definition @?= InL expectedDefinition
   where
     mainContents =
       [text|
@@ -144,21 +133,20 @@ testDefinition = serverTestCase "Go To Definition" $
         }
 
 testFormatting :: TestTree
-testFormatting = serverTestCase "Formatting" $
-  do
-    docIdent <- createMainDoc mainContents
-    formatDoc docIdent _formattingOptions
-    lspFormattedDoc <- documentContents docIdent
-    formattedDoc <- case fmtToText "main.fut" mainContents of
-      Left (SyntaxError loc msg) ->
-        liftIO . assertFailure $
-          "Formatting failed: " <> show loc <> ".\n" <> show msg
-      Right d -> pure d
+testFormatting = serverTestCase "Formatting" $ do
+  docIdent <- createMainDoc mainContents
+  formatDoc docIdent formattingOptions
+  lspFormattedDoc <- documentContents docIdent
+  formattedDoc <- case fmtToText "main.fut" mainContents of
+    Left (SyntaxError loc msg) ->
+      liftIO . assertFailure $
+        "Formatting failed: " <> show loc <> ".\n" <> show msg
+    Right d -> pure d
 
-    liftIO $ lspFormattedDoc @?= formattedDoc
+  liftIO $ lspFormattedDoc @?= formattedDoc
   where
     -- these are ignored by the formatter anyway
-    _formattingOptions = FormattingOptions 0 False Nothing Nothing Nothing
+    formattingOptions = FormattingOptions 0 False Nothing Nothing Nothing
     mainContents =
       [text|
       -- this is where all the lines start
@@ -170,21 +158,20 @@ main :: IO ()
 main = defaultMain testEvaluationComment
 
 testEvaluationComment :: TestTree
-testEvaluationComment = serverTestCase "Evaluation Comment" $
-  do
-    docIdent <- createMainDoc mainContents
-    lensCommand <-
-      getAndResolveCodeLenses docIdent >>= \case
-        [CodeLens _ (Just command) _] -> pure command
-        bad -> liftIO $ assertFailure $ "Unexpected Code Lenses: " <> show bad
+testEvaluationComment = serverTestCase "Evaluation Comment" $ do
+  docIdent <- createMainDoc mainContents
+  lensCommand <-
+    getAndResolveCodeLenses docIdent >>= \case
+      [CodeLens _ (Just command) _] -> pure command
+      bad -> liftIO $ assertFailure $ "Unexpected Code Lenses: " <> show bad
 
-    executeCommand lensCommand
+  executeCommand lensCommand
 
-    -- this is important, it crashes with an IOError otherwise
-    _workspaceEdit <- message SMethod_WorkspaceApplyEdit
+  -- this is important, it crashes with an IOError otherwise
+  _workspaceEdit <- message SMethod_WorkspaceApplyEdit
 
-    newContents <- documentContents docIdent
-    liftIO $ newContents @?= expectedContents
+  newContents <- documentContents docIdent
+  liftIO $ newContents @?= expectedContents
   where
     expectedContents =
       mainContents
@@ -194,3 +181,13 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $
       def x = 42i32
       -- >>> x + 5
       |]
+
+tests :: TestTree
+tests =
+  testGroup
+    "Futhark.LspTests"
+    [ testHoverInformation,
+      testDefinition,
+      testFormatting,
+      testEvaluationComment
+    ]
