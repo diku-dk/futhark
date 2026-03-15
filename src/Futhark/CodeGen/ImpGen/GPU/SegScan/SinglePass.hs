@@ -231,11 +231,6 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       scan_tys' = lambdaReturnType $ segBinOpLambda scan_op
       map_tys' = drop (length $ segBinOpNeutral scan_op) ts
 
-      map_tys =
-        ( \x ->
-            if isAcc x then Nothing else Just $ elemType x
-        )
-          <$> map_tys'
       scan_tys = map elemType scan_tys'
 
       tblock_size_e = pe64 $ unCount $ kAttrBlockSize attrs
@@ -273,6 +268,24 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
   global_id <- genZeroes "global_dynid" 1
 
   let attrs' = attrs {kAttrConstExps = M.singleton (tvVar chunk_v) chunk_const}
+
+  map_global_chunks <-
+    forM map_tys' $ \t ->
+      if isAcc t || primType t
+        then pure Nothing
+        else
+          Just
+            <$> sAllocArray
+              "global"
+              (elemType t)
+              ( Shape
+                  [ unCount $ kAttrNumBlocks attrs,
+                    unCount $ kAttrBlockSize attrs,
+                    tvSize chunk_v
+                  ]
+                  <> arrayShape t
+              )
+              (Space "device")
 
   sKernelThread "segscan" (segFlat space) attrs' $ do
     chunk32 <- dPrimVE "chunk_size_32b" $ sExt32 $ tvExp chunk_v
@@ -350,16 +363,16 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
             (ScalarSpace [tvSize chunk_v] ty)
 
       map_private_chunks <-
-        forM map_tys $ \mty ->
-          traverse
-            ( \ty ->
-                sAllocArray
+        forM map_tys' $ \t ->
+          if isAcc t || not (primType t)
+            then pure Nothing
+            else
+              Just
+                <$> sAllocArray
                   "private"
-                  ty
+                  (elemType t)
                   (Shape [tvSize chunk_v])
-                  (ScalarSpace [tvSize chunk_v] ty)
-            )
-            mty
+                  (ScalarSpace [tvSize chunk_v] (elemType t))
 
       thd_offset <- dPrimVE "thd_offset" $ block_offset + ltid
 
@@ -374,9 +387,10 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                   let (all_scan_res, map_res) =
                         splitAt (segBinOpResults [scan_op]) $ bodyResult map_kbody
 
-                  -- Write map results to private memory.
-                  forM_ (zip map_private_chunks $ map kernelResultSubExp map_res) $ \(dest, src) ->
-                    maybe (pure ()) (\d -> copyDWIMFix d (map Imp.le64 gtids) src (map Imp.le64 gtids)) dest
+                  -- Write map results to memory.
+                  forM_ (zip3 map_private_chunks map_global_chunks $ map kernelResultSubExp map_res) $ \(priv_dest, glob_dest, src) -> do
+                    maybe (pure ()) (\d -> copyDWIMFix d [i] src []) priv_dest
+                    maybe (pure ()) (\d -> copyDWIMFix d [tvExp phys_block_id, ltid, i] src []) glob_dest
 
                   -- Write to-scan results to private memory.
                   forM_ (zip scan_private_chunks $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
@@ -691,8 +705,9 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
               copyDWIMFix par [] (Var priv) [i]
 
           sComment "bind map results to post lamda params" $
-            forM_ (zip map_pars map_private_chunks) $ \(par, priv) -> do
-              maybe (pure ()) (\p -> copyDWIMFix par (map Imp.le64 gtids) (Var p) (map Imp.le64 gtids)) priv
+            forM_ (zip3 map_pars map_private_chunks map_global_chunks) $ \(par, priv, glob) -> do
+              maybe (pure ()) (\p -> copyDWIMFix par [] (Var p) [i]) priv
+              maybe (pure ()) (\g -> copyDWIMFix par [] (Var g) [tvExp phys_block_id, ltid, i]) glob
 
           let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
           sComment "compute post op." $ do
