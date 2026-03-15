@@ -538,6 +538,7 @@ library futhark-testing
       Futhark.IR.Syntax.CoreTests
       Futhark.IR.SyntaxTests
       Futhark.Internalise.TypesValuesTests
+      Futhark.LspTests
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
       Futhark.Optimise.ArrayLayout.AnalyseTests
       Futhark.Optimise.ArrayLayout.LayoutTests
@@ -561,9 +562,15 @@ library futhark-testing
     , mtl >=2.2.1
     , base
     , containers
+    , co-log-core
     , free
     , futhark
+    , lens
+    , lsp
+    , lsp-test
     , megaparsec
+    , neat-interpolation
+    , process
     , srcloc
     , tasty
     , tasty-hunit
