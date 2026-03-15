@@ -73,15 +73,15 @@ def main():
             continue
 
         unannotated_program_path = program_path.replace(".fut", "_unannotated.fut")
-        print(f"Running futhark c for: {unannotated_program_path}")
+        print(f"Running futhark cuda for: {unannotated_program_path}")
 
-        # Run futhark c with timing
-        compile_cmd = f"{{ time -p futhark c '{unannotated_program_path}' > /dev/null; }} 2>&1"
+        # Run futhark cuda with timing
+        compile_cmd = f"{{ time -p futhark cuda '{unannotated_program_path}' > /dev/null; }} 2>&1"
         compile_time_output, _, compile_exit_status = run_command(compile_cmd, suppress_output=True)
         compile_time = extract_time_from_output(compile_time_output)
 
         if compile_exit_status != 0:
-            print(f"  futhark c failed for {unannotated_program_path} with exit status {compile_exit_status}. Aborting processing for this program.")
+            print(f"  futhark cuda failed for {unannotated_program_path} with exit status {compile_exit_status}. Aborting processing for this program.")
             continue
         if compile_time is None:
             print(f"  Failed to get compile timing for {unannotated_program_path}. Output: {compile_time_output}")
