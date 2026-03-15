@@ -1,0 +1,24 @@
+# partition
+
+```
+cd partition2
+futhark bench --backend=cuda partition2.fut
+```
+
+staticWithOpt : scatter static safe, no replicate (eliminated opt)
+staticChecked : scatter static safe, but has replicate
+staticDynChecked : safe scatter dyn check
+
+# kmeans
+
+Get datasets: https://github.com/diku-dk/futhark-ad/tree/master/kmeans/kmeans-sparse/data
+
+```
+cd kmeans-sparse
+futhark bench --backend=cuda --tuning=k10-manual.fut k10-manual-dynamic.fut
+futhark bench --backend=cuda --tuning=k10-manual.fut k10-manual-static.fut
+```
+
+kmeans has to be done manually:
+  search for "remove me and you'll see a 2x slowdown"
+futhark bench --backend=cuda k10-manual.fut
