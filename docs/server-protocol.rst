@@ -213,7 +213,7 @@ indices *i0* ... *iN-1* with the value of variable *v1*.
 ``shape`` *v*
 .............
 
-Print the shape of array-typed variable *v* as space-separated integers.
+Print the shape of array-typed variable *v*, with one integer per line.
 
 ``index`` *v0* *v1* *i0* ... *iN-1*
 ...................................

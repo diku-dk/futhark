@@ -715,9 +715,8 @@ void cmd_shape(struct server_state *s, const char *args[]) {
 
   const int64_t *shape = a->shape(s->ctx, v->value.value.v_ptr);
   for (int i = 0; i < a->rank; ++i) {
-    printf("%lld ", (long long)shape[i]);
+    printf("%lld\n", (long long)shape[i]);
   }
-  printf("\n");
 }
 
 void cmd_elemtype(struct server_state *s, const char *args[]) {
