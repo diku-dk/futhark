@@ -637,7 +637,7 @@ module i64 : (integral with t = i64) = {
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
 
   def set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (!(1 intrinsics.<< bit))) | intrinsics.zext_i32_i64 (b intrinsics.<< bit))
+    (x & (!(1i64 << i32 bit))) | (i32 b << i32 bit)
 
   def popc = intrinsics.popc64
   def mul_hi a b = intrinsics.smul_hi64 (i64 a, i64 b)
@@ -949,7 +949,7 @@ module u64 : (integral with t = u64) = {
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
 
   def set_bit (bit: i32) (x: t) (b: i32) =
-    ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+    (x & (!(1u64 << i32 bit))) | (i32 b << i32 bit)
 
   def popc x = intrinsics.popc64 (sign x)
   def mul_hi a b = unsign (intrinsics.umul_hi64 (sign a, sign b))

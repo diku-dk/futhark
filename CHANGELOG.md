@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `i64.set_bit`/`u64.set_bit` would produce wrong results in C-based backends. (#2396)
+
 ## [0.25.36]
 
 ### Added
