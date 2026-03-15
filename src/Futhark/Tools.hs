@@ -6,7 +6,9 @@ module Futhark.Tools
   ( module Futhark.Construct,
     redomapToMapAndReduce,
     scanomapToMapAndScan,
+    maposcanomapToMapScanAndMap,
     dissectScrema,
+    extractPostLambda,
     sequentialStreamWholeArray,
     partitionChunkedFoldParameters,
     withAcc,
@@ -22,7 +24,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.SOACS.SOAC
-import Futhark.Util
 
 -- | Turns a binding of a @redomap@ into two seperate bindings, a
 -- @map@ binding and a @reduce@ binding (returned in that order).
@@ -45,7 +46,7 @@ redomapToMapAndReduce ::
 redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
   (map_pat, red_pat, red_arrs) <-
     splitScanOrRedomap pes w map_lam $ map redNeutral reds
-  let map_stm = mkLet map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
+  map_stm <- mkLet map_pat . Op . Screma w arrs <$> mapSOAC map_lam
   red_stm <-
     Let red_pat (defAux ()) . Op
       <$> (Screma w red_arrs <$> reduceSOAC reds)
@@ -67,11 +68,37 @@ scanomapToMapAndScan ::
 scanomapToMapAndScan (Pat pes) (w, scans, map_lam, arrs) = do
   (map_pat, scan_pat, scan_arrs) <-
     splitScanOrRedomap pes w map_lam $ map scanNeutral scans
-  let map_stm = mkLet map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
+  map_stm <- mkLet map_pat . Op . Screma w arrs <$> mapSOAC map_lam
   scan_stm <-
     Let scan_pat (defAux ()) . Op
       <$> (Screma w scan_arrs <$> scanSOAC scans)
   pure (map_stm, scan_stm)
+
+maposcanomapToMapScanAndMap ::
+  ( MonadFreshNames m,
+    Buildable rep,
+    Op rep ~ SOAC rep
+  ) =>
+  Pat (LetDec rep) ->
+  ( SubExp,
+    Lambda rep,
+    [Scan rep],
+    Lambda rep,
+    [VName]
+  ) ->
+  m (Stm rep, Stm rep, Stm rep)
+maposcanomapToMapScanAndMap (Pat pes) (w, post_lam, scans, map_lam, arrs) = do
+  map_res <- mapM tempRes $ lambdaReturnType map_lam
+  map_stm <- mkLet map_res . Op . Screma w arrs <$> mapSOAC map_lam
+  scan_res <- mapM tempRes $ take (scanResults scans) $ lambdaReturnType map_lam
+  let (scan_arrs, map_arrs) = splitAt (scanResults scans) $ map identName map_res
+  scan_stm <- mkLet scan_res . Op . Screma w scan_arrs <$> scanSOAC scans
+  let post_arrs = map identName scan_res <> map_arrs
+      res = patElemIdent <$> pes
+  post_stm <- mkLet res . Op . Screma w post_arrs <$> mapSOAC post_lam
+  pure (map_stm, scan_stm, post_stm)
+  where
+    tempRes res = newIdent "temp_res" $ res `arrayOfRow` w
 
 splitScanOrRedomap ::
   (Typed dec, MonadFreshNames m) =>
@@ -94,7 +121,7 @@ splitScanOrRedomap pes w map_lam nes = do
       newIdent (baseName (patElemName pe) <> "_map_acc") $ acc_t `arrayOfRow` w
     arrMapPatElem = pure . patElemIdent
 
--- | Turn a Screma into a Scanomap (possibly with mapout parts) and a
+-- | Turn a Screma into a maposcanomap (possibly with mapout parts) and a
 -- Redomap.  This is used to handle Scremas that are so complicated
 -- that we cannot directly generate efficient parallel code for them.
 -- In essense, what happens is the opposite of horisontal fusion.
@@ -108,19 +135,58 @@ dissectScrema ::
   ScremaForm (Rep m) ->
   [VName] ->
   m ()
-dissectScrema pat w (ScremaForm map_lam scans reds) arrs = do
+dissectScrema pat w (ScremaForm map_lam scans reds post_lam) arrs = do
   let num_reds = redResults reds
       num_scans = scanResults scans
-      (scan_res, red_res, map_res) = splitAt3 num_scans num_reds $ patNames pat
+      reds_ts = concatMap (lambdaReturnType . redLambda) reds
+      (red_res, scan_map_res) = splitAt num_reds $ patNames pat
+      (scan_pars, map_pars) = splitAt num_scans $ lambdaParams post_lam
+      post_res = bodyResult $ lambdaBody post_lam
 
   to_red <- replicateM num_reds $ newVName "to_red"
+  red_pars <- mapM (newParam "x") reds_ts
+  let red_post_res = paramName <$> red_pars
 
-  let scanomap = scanomapSOAC scans map_lam
-  letBindNames (scan_res <> to_red <> map_res) $
-    Op (Screma w arrs scanomap)
+  let post_lam' =
+        post_lam
+          { lambdaParams = scan_pars <> red_pars <> map_pars,
+            lambdaBody =
+              (lambdaBody post_lam)
+                { bodyResult = varsRes red_post_res <> post_res
+                },
+            lambdaReturnType = reds_ts <> lambdaReturnType post_lam
+          }
+
+  maposcanomap <- maposcanomapSOAC post_lam' scans map_lam
+  letBindNames (to_red <> scan_map_res) $
+    Op (Screma w arrs maposcanomap)
 
   reduce <- reduceSOAC reds
   letBindNames red_res $ Op $ Screma w to_red reduce
+
+-- | Remove the post lambda from a screma, producing the screma with an identity
+-- post-lambda, and a new map screma that is just the post-lambda. You can apply
+-- this indefinitely in case the post-lambda is already an identity lambda, so
+-- be careful.
+extractPostLambda ::
+  ( MonadBuilder m,
+    Op (Rep m) ~ SOAC (Rep m),
+    Buildable (Rep m)
+  ) =>
+  Pat (LetDec (Rep m)) ->
+  SubExp ->
+  [VName] ->
+  ScremaForm (Rep m) ->
+  m ()
+extractPostLambda pat w arrs (ScremaForm pre_lam scans reds post_lam) = do
+  tmp_names <-
+    mapM (newVName . (<> "_extract") . baseName . paramName) (lambdaParams post_lam)
+  id_lam <- mkIdentityLambda $ map paramType $ lambdaParams post_lam
+  letBindNames (map patElemName red_res <> tmp_names) $
+    Op (Screma w arrs $ ScremaForm pre_lam scans reds id_lam)
+  letBind (Pat nonred_res) . Op . Screma w tmp_names =<< mapSOAC post_lam
+  where
+    (red_res, nonred_res) = splitAt (redResults reds) (patElems pat)
 
 -- | Turn a stream SOAC into statements that apply the stream lambda
 -- to the entire input.
@@ -231,8 +297,12 @@ doScatter desc rank dest arrs mk = do
         fmap subExpsRes $ forM (zip acc_ps_inner vs) $ \(acc_p_inner, v) ->
           letSubExp "scatter_acc" . BasicOp $
             UpdateAcc Safe (paramName acc_p_inner) is [v]
+
+    -- NOTE: Is this problematic?
     let w = arraysSize 0 arrs_ts
-    fmap varsRes . letTupExp "acc_res" . Op $
-      Screma w (map paramName acc_ps <> arrs) (mapSOAC map_lam)
+    (fmap varsRes . letTupExp "acc_res")
+      . Op
+      . Screma w (map paramName acc_ps <> arrs)
+      =<< mapSOAC map_lam
 
   letTupExp desc $ WithAcc [(acc_shape, [v], Nothing) | v <- dest] withacc_lam
