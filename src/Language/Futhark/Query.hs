@@ -43,7 +43,8 @@ data TermBinding
   | -- | Inferred Type, Type Asciption
     TermVar TermBindSrc StructType (Maybe TypeAscription)
   | -- | Function Type, Return Type, Optional return type ascription, end of parameters location
-    TermFun StructType ResRetType (Maybe TypeAscription) Pos
+    -- TODO: Remove the @Maybe@ wrapper on @Pos@
+    TermFun StructType ResRetType (Maybe TypeAscription) (Maybe Pos)
   deriving (Eq, Show)
 
 termBindingType :: TermBinding -> TypeBase Size NoUniqueness
@@ -138,11 +139,11 @@ expDefs e =
         AppExp (LetFun (name, _) (tparams, params, tasc, Info ret, _) _ loc) _ ->
           let name_t = funType params ret
               tfun = TermFun name_t ret tasc start_pos
-              start_pos = case unsnoc params of
-                Nothing -> error "expDefs: LetFun with no params"
-                Just (_, last_arg) -> case locOf last_arg of
-                  NoLoc -> error "expDefs: PatBase without Location"
-                  Loc _ end_pos -> end_pos
+              start_pos = do
+                (_, last_arg) <- unsnoc params
+                case locOf last_arg of
+                  NoLoc -> Nothing
+                  Loc _ end -> Just end
            in M.singleton name (DefBound $ BoundTerm tfun (locOf loc))
                 <> mconcat (map typeParamDefs tparams)
                 <> mconcat (map (patternDefs $ TermVar TermBindPat) params)
@@ -165,13 +166,11 @@ valBindDefs vbind =
       <> expDefs (valBindBody vbind)
   where
     term_fun = TermFun vbind_t vbind_ret_t vbind_decl_t body_start
-    body_start = case unsnoc $ valBindParams vbind of
-      Nothing -> case locOf $ valBindBody vbind of
-        NoLoc -> error "valBindDefs: Body without position"
-        Loc s _ -> s
-      Just (_, last_pat) -> case locOf last_pat of
-        NoLoc -> error "valBindDefs: Argument pattern without position"
-        Loc _ e -> e
+    body_start = do
+      (_, last_pat) <- unsnoc $ valBindParams vbind
+      case locOf last_pat of
+        NoLoc -> Nothing
+        Loc _ e -> Just e
     vbind_ret_t = unInfo $ valBindRetType vbind
     vbind_t =
       funType (valBindParams vbind) $ unInfo $ valBindRetType vbind

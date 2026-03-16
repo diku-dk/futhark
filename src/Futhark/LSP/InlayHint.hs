@@ -75,7 +75,8 @@ getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMay
         TermSize -> Nothing
         TermFun _ _ (Just _) _ -> Nothing
         TermVar _ _ (Just _) -> Nothing
-        TermFun _ rtyp Nothing rtyploc ->
+        TermFun _ _ _ Nothing -> Nothing
+        TermFun _ rtyp Nothing (Just rtyploc) ->
           Just $
             TypeHintBare (prettyText rtyp) rtyploc
         TermVar src inferredType Nothing ->
