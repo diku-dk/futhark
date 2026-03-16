@@ -273,8 +273,6 @@ onTextDocumentInlayHint state_ref =
           state <- tryTakeStateFromIORef state_ref filepath
           let result = maybe [] (getInlayHints textRange state) filepath
 
-          logWithSeverity Debug <& "Inlay hints: " <> showText result
-
           respond . Right $ InL result
 
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
