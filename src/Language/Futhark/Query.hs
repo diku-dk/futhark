@@ -159,12 +159,20 @@ expDefs e =
 
 valBindDefs :: ValBind -> Defs
 valBindDefs vbind =
-  M.insert (valBindName vbind) (DefBound $ BoundTerm termVal (locOf vbind)) $
+  M.insert (valBindName vbind) (DefBound $ BoundTerm term_fun (locOf vbind)) $
     mconcat (map typeParamDefs (valBindTypeParams vbind))
       <> mconcat (map (patternDefs (TermVar TermBindPat)) (valBindParams vbind))
       <> expDefs (valBindBody vbind)
   where
-    termVal = TermVar TermBindId vbind_t vbind_decl_t
+    term_fun = TermFun vbind_t vbind_ret_t vbind_decl_t body_start
+    body_start = case unsnoc $ valBindParams vbind of
+      Nothing -> case locOf $ valBindBody vbind of
+        NoLoc -> error "valBindDefs: Body without position"
+        Loc s _ -> s
+      Just (_, last_pat) -> case locOf last_pat of
+        NoLoc -> error "valBindDefs: Argument pattern without position"
+        Loc _ e -> e
+    vbind_ret_t = unInfo $ valBindRetType vbind
     vbind_t =
       funType (valBindParams vbind) $ unInfo $ valBindRetType vbind
     vbind_decl_t = valBindRetDecl vbind
