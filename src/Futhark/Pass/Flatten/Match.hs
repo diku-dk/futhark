@@ -1,0 +1,204 @@
+-- | Flattening of 'Match'.
+module Futhark.Pass.Flatten.Match
+  ( transformMatch,
+  )
+where
+
+import Control.Monad
+import Data.Foldable
+import Data.List qualified as L
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
+import Data.Set qualified as S
+import Data.Tuple.Solo
+import Futhark.IR.GPU
+import Futhark.IR.SOACS
+import Futhark.Pass.Flatten.Builtins
+import Futhark.Pass.Flatten.Distribute
+import Futhark.Pass.Flatten.Monad
+import Futhark.Tools
+
+transformMatch ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  [SubExp] ->
+  [Case (Body SOACS)] ->
+  Body SOACS ->
+  Builder GPU DistEnv
+transformMatch ops segments env inps res scrutinees cases defaultCase = do
+  let [w] = NE.toList segments
+  -- We need to partition the indices of the scrutinees by which case they match.
+  -- Lift the scrutinees.
+  -- If it's a variable, we know it's a scalar and the lifted version will therefore be a regular array.
+  lifted_scrutinees <- forM scrutinees $ \scrut -> do
+    (_, rep) <- liftSubExp segments inps env scrut
+    case rep of
+      Regular v' -> pure v'
+      Irregular {} ->
+        error $
+          "transformDistStm: Non-scalar match scrutinee: " ++ prettyString scrut
+  -- Cases for tagging values that match the same branch.
+  -- The default case is the 0'th equvalence class.
+  let equiv_cases =
+        zipWith
+          ( \(Case pat _) n ->
+              Case pat $ eBody [toExp $ intConst Int64 n]
+          )
+          cases
+          [1 ..]
+  let equiv_case_default = eBody [toExp $ intConst Int64 0]
+  -- Match the scrutinees againts the branch cases
+  equiv_classes <- letExp "equiv_classes" <=< segMap (MkSolo w) $ \(MkSolo i) -> do
+    scruts <- mapM (letSubExp "scruts" <=< flip eIndex [toExp i]) lifted_scrutinees
+    cls <- letSubExp "cls" =<< eMatch scruts equiv_cases equiv_case_default
+    pure [subExpRes cls]
+  let num_cases = fromIntegral $ length cases + 1
+  n_cases <- letExp "n_cases" <=< toExp $ intConst Int64 num_cases
+  -- Parition the indices of the scrutinees by their equvalence class such
+  -- that (the indices) of the scrutinees belonging to class 0 come first,
+  -- then those belonging to class 1 and so on.
+  (partition_sizes, partition_offs, partition_inds) <- doPartition n_cases equiv_classes
+  inds_t <- lookupType partition_inds
+  -- Get the indices of each scrutinee by equivalence class
+  inds <- forM [0 .. num_cases - 1] $ \i -> do
+    num_data <-
+      letSubExp ("size" <> nameFromString (show i))
+        =<< eIndex partition_sizes [toExp $ intConst Int64 i]
+    begin <-
+      letSubExp ("idx_begin" <> nameFromString (show i))
+        =<< eIndex partition_offs [toExp $ intConst Int64 i]
+    letExp ("inds_branch" <> nameFromString (show i)) $
+      BasicOp $
+        Index partition_inds $
+          fullSlice inds_t [DimSlice begin num_data (intConst Int64 1)]
+
+  -- Take the elements at index `is` from an input `v`.
+  let splitInput is v = do
+        (t, rep) <- liftSubExp segments inps env (Var v)
+        (t,v,) <$> case rep of
+          Regular arr -> do
+            -- In the regular case we just take the elements
+            -- of the array given by `is`
+            n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+            arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
+              idx <- letExp "idx" =<< eIndex is [eSubExp i]
+              subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
+            pure $ Regular arr'
+          Irregular (IrregularRep segs flags offsets elems) -> do
+            -- In the irregular case we take the elements
+            -- of the `segs` array given by `is` like in the regular case
+            n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+            segs' <- letExp "split_segs" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
+              idx <- letExp "idx" =<< eIndex is [eSubExp i]
+              subExpsRes . pure <$> (letSubExp "segs" =<< eIndex segs [toExp idx])
+            -- From this we calculate the offsets and number of elements
+            (_, offsets', num_data) <- exScanAndSum segs'
+            (_, _, ii1) <- doRepIota segs'
+            (_, _, ii2) <- doSegIota segs'
+            -- We then take the elements we need from `elems` and `flags`
+            -- For each index `i`, we roughly:
+            -- Get the offset of the segment we want to copy by indexing
+            -- `offsets` through `is` further through `ii1` i.e.
+            -- `offset = offsets[is[ii1[i]]]`
+            -- We then add `ii2[i]` to `offset`
+            -- and use that to index into `elems` and `flags`.
+            ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap (MkSolo num_data) $ \(MkSolo i) -> do
+              offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp i]]]
+              idx <- letExp "idx" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp i])
+              flags_split <- letSubExp "flags" =<< eIndex flags [toExp idx]
+              elems_split <- letSubExp "elems" =<< eIndex elems [toExp idx]
+              pure $ subExpsRes [flags_split, elems_split]
+            pure $
+              Irregular $
+                IrregularRep
+                  { irregularS = segs',
+                    irregularF = flags',
+                    irregularO = offsets',
+                    irregularD = elems'
+                  }
+  -- Given the indices for which a branch is taken and its body,
+  -- distribute the statements of the body of that branch.
+  let distributeBranch is body = do
+        (ts, vs, reps) <- unzip3 <$> mapM (splitInput is) (namesToList $ freeIn body)
+        let inputs = do
+              (v, t, i) <- zip3 vs ts [0 ..]
+              pure (v, DistInput (ResTag i) t)
+        let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
+        scope <- askScope
+        let (inputs', dstms) = distributeBody scope w inputs body
+        pure (inputs', env', dstms)
+
+  -- Distribute and lift the branch bodies.
+  -- We put the default case at the start as it's the 0'th equivalence class
+  -- and is therefore the first segment after the partition.
+  let branch_bodies = defaultCase : map (\(Case _ body) -> body) cases
+  (branch_inputs, branch_envs, branch_dstms) <- unzip3 <$> zipWithM distributeBranch inds branch_bodies
+
+  let branch_results = map bodyResult branch_bodies
+  lifted_bodies <- forM [0 .. num_cases - 1] $ \i -> do
+    size <- letSubExp "size" =<< eIndex partition_sizes [toExp $ intConst Int64 i]
+    let inputs = branch_inputs !! fromIntegral i
+    let env' = branch_envs !! fromIntegral i
+    let dstms = branch_dstms !! fromIntegral i
+    let result = branch_results !! fromIntegral i
+    res' <- flattenDistStms ops size inputs env' dstms result
+    subExpsRes
+      <$> mapM
+        ( \(SubExpRes _ se) ->
+            letSubExp ("result" <> nameFromString (show i)) =<< toExp se
+        )
+        res'
+
+  let result_types = map ((\(DistType _ _ t) -> t) . distResType) res
+  branch_reps <-
+    mapM
+      ( fmap (resultToResReps result_types)
+          . mapM (letExp "branch_result" <=< toExp . resSubExp)
+      )
+      lifted_bodies
+
+  -- Given a single result from each branch as well the *unlifted*
+  -- result type, merge the results of all branches into a single result.
+  let mergeResult iss branchesRep resType =
+        case resType of
+          -- Regular case
+          Prim pt -> do
+            let xs = map (\(Regular v) -> v) branchesRep
+            let resultType = Array pt (Shape [w]) NoUniqueness
+            -- Create the blank space for the result
+            resultSpace <- letExp "blank_res" =<< eBlank resultType
+            -- Write back the values of each branch to the blank space
+            result <- foldM scatterRegular resultSpace $ zip iss xs
+            pure $ Regular result
+          -- Irregular case
+          Array pt _ _ -> do
+            let branchesIrregRep = map (\(Irregular irregRep) -> irregRep) branchesRep
+            let segsType = Array (IntType Int64) (Shape [w]) NoUniqueness
+            -- Create a blank space for the 'segs'
+            segsSpace <- letExp "blank_segs" =<< eBlank segsType
+            -- Write back the segs of each branch to the blank space
+            segs <- foldM scatterRegular segsSpace $ zip iss (irregularS <$> branchesIrregRep)
+            (_, offsets, num_data) <- exScanAndSum segs
+            let resultType = Array pt (Shape [num_data]) NoUniqueness
+            -- Create the blank space for the result
+            resultSpace <- letExp "blank_res" =<< eBlank resultType
+            -- Write back the values of each branch to the blank space
+            elems <- foldM (scatterIrregular offsets) resultSpace $ zip iss branchesIrregRep
+            flags <- genFlags num_data offsets
+            pure $
+              Irregular $
+                IrregularRep
+                  { irregularS = segs,
+                    irregularF = flags,
+                    irregularO = offsets,
+                    irregularD = elems
+                  }
+          Acc {} -> error "transformDistStm: Acc"
+          Mem {} -> error "transformDistStm: Mem"
+
+  -- Merge the results of the branches and insert the resulting res reps
+  reps <- zipWithM (mergeResult inds) (L.transpose branch_reps) result_types
+  pure $ insertReps (zip (map distResTag res) reps) env
