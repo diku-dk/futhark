@@ -2,6 +2,7 @@
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Futhark.LspTests (tests, main) where
 
@@ -22,6 +23,7 @@ import Language.LSP.Protocol.Types
     Definition (Definition),
     FormattingOptions (FormattingOptions),
     Hover (Hover),
+    InlayHint (..),
     LanguageKind (LanguageKind_Custom),
     Location (..),
     MarkupContent (..),
@@ -29,7 +31,7 @@ import Language.LSP.Protocol.Types
     Position (..),
     Range (..),
     TextDocumentIdentifier,
-    type (|?) (..),
+    type (|?) (..), InlayHintKind (InlayHintKind_Type),
   )
 import Language.LSP.Server (runServerWithHandles)
 import Language.LSP.Test
@@ -184,21 +186,55 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $ do
       |]
 
 testInlayTypeHint :: TestTree
-testInlayTypeHint = serverTestCase "Inlay type hint" $
-  do
-    docIdent <- createMainDoc mainContents
-    hints <- getAndResolveInlayHints docIdent fullRange
-    -- TODO: Finish the test
-
-    pure ()
+testInlayTypeHint =
+  testGroup
+    "Inlay type hint"
+    [ defParamHint
+    , letHint
+    , noSizeHint
+    , loopHint
+    ]
   where
     fullRange =
       Range
-        { _start = Position {_line = 0, _character = 0},
-          _end = Position {_line = 2, _character = 0}
+        { _start = Position minBound minBound,
+          _end = Position maxBound maxBound
         }
-
-    mainContents = "def plus5 x : i32 = x + 5i32"
+    expectHint InlayHint { .. } l p = do
+      _position @?= p
+      _label @?= InL l
+      _kind @?= Just InlayHintKind_Type
+    loopHint = serverTestCase "loop hint" $
+      do
+        docIdent <- createMainDoc "def factorial (n: i32) : i32 = loop result = 1 for i < n do result * (i + 1)"
+        hints <- getAndResolveInlayHints docIdent fullRange
+        liftIO $ case hints of
+          [parenHint, typeHint] -> do
+            expectHint parenHint "(" (Position 0 36)
+            expectHint typeHint ": i32)" (Position 0 42)
+          _ -> assertFailure $ "Unexpected Inlay Hints: " ++ show hints
+    noSizeHint = serverTestCase "no size hint" $
+      do
+        docIdent <- createMainDoc "def sz [n] 'a (_: [n]a) : i64 = n"
+        hints <- getAndResolveInlayHints docIdent fullRange
+        liftIO $ hints @?= []
+    letHint = serverTestCase "let hint" $
+      do
+        docIdent <- createMainDoc "def foo : bool = let f = false in true && f"
+        hints <- getAndResolveInlayHints docIdent fullRange
+        liftIO $ case hints of
+          [typeHint] -> do
+            expectHint typeHint ": bool" (Position 0 22)
+          _ -> assertFailure $ "Unexpected Inlay Hints: " ++ show hints
+    defParamHint = serverTestCase "def param hint" $
+      do
+        docIdent <- createMainDoc "def plus5 x : i32 = x + 5i32"
+        hints <- getAndResolveInlayHints docIdent fullRange
+        liftIO $ case hints of
+          [parenHint, typeHint] -> do
+            expectHint parenHint "(" (Position 0 10)
+            expectHint typeHint ": i32)" (Position 0 11)
+          _ -> assertFailure $ "Unexpected Inlay Hints: " ++ show hints
 
 tests :: TestTree
 tests =
