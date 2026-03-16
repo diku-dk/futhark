@@ -62,6 +62,7 @@ import Language.LSP.Protocol.Types
 import Language.LSP.Server (Handlers, LspM, LspT, getVirtualFile, notificationHandler, requestHandler)
 import Language.LSP.VFS (file_text)
 import Text.Read (readMaybe)
+import GHC.Conc.Sync (TVar)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
@@ -98,7 +99,7 @@ goToDefinitionHandler state_mvar =
       Nothing -> responder $ Right $ InR $ InR Null
       Just loc -> responder $ Right $ InL $ Definition $ InL loc
 
-onDocumentSaveHandler :: IORef State -> Handlers (LspM ())
+onDocumentSaveHandler :: TVar State -> Handlers (LspM ())
 onDocumentSaveHandler state_mvar =
   notificationHandler SMethod_TextDocumentDidSave $ \msg -> do
     let TNotificationMessage _ _ (DidSaveTextDocumentParams doc _text) = msg
@@ -106,7 +107,7 @@ onDocumentSaveHandler state_mvar =
     logWithSeverity Debug <& ("Saved document: " <> showText doc)
     tryReCompile state_mvar file_path
 
-onDocumentChangeHandler :: IORef State -> Handlers (LspM ())
+onDocumentChangeHandler :: TVar State -> Handlers (LspM ())
 onDocumentChangeHandler state_mvar =
   notificationHandler SMethod_TextDocumentDidChange $ \msg -> do
     let TNotificationMessage _ _ (DidChangeTextDocumentParams doc _content) = msg
@@ -261,16 +262,17 @@ onWorkspaceExecuteCommandHandler =
           _code = err
         }
 
-onTextDocumentInlayHint :: IORef State -> Handlers (LspM ())
+onTextDocumentInlayHint :: TVar State -> Handlers (LspM ())
 onTextDocumentInlayHint state_ref =
   requestHandler SMethod_TextDocumentInlayHint $ \request respond ->
     let parameters = request ^. params
      in do
           let filepath = uriToFilePath $ parameters ^. textDocument ^. uri
           let textRange = parameters ^. range
-          logWithSeverity Debug <& "Got inlay hints: " <> showText textRange
+          logWithSeverity Debug <& "Inlay hints request for range: " <> showText textRange
 
           state <- tryTakeStateFromIORef state_ref filepath
+          logWithSeverity Debug <& "Took state from IORef"
           let result = maybe [] (getInlayHints textRange state) filepath
 
           logWithSeverity Debug <& "Inlay hints: " <> showText result
@@ -297,7 +299,7 @@ onTextDocumentInlayHintResolve =
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
-handlers :: IORef State -> ClientCapabilities -> Handlers (LspM ())
+handlers :: TVar State -> ClientCapabilities -> Handlers (LspM ())
 handlers state_mvar _ =
   mconcat
     [ onInitializeHandler,

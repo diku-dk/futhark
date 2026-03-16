@@ -19,6 +19,7 @@ import Futhark.Util.Loc (Located (locOf), contains)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Query (BoundTo (BoundTerm), allBindings)
 import Language.LSP.Protocol.Types (InlayHint (..), Position (..), Range (Range), UInt, type (|?) (InL), InlayHintKind (InlayHintKind_Type))
+import qualified Debug.Trace as Debug
 
 newtype InlayTypeHintPayload = InlayTypeHintPayload (UInt, UInt, Text)
   deriving newtype (ToJSON, FromJSON)
@@ -40,6 +41,7 @@ resolveInlayHint v = case fromJSON v of
 
 getInlayHints :: Range -> State -> FilePath -> [InlayHint]
 getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMaybe [] $ do
+  Debug.traceM "getInlayHints running"
   imports <- lpImports <$> stateProgram state
   let mapping = getStaleMapping state filepath
   posStart <- toStalePos mapping $ mkPos l1 c1
@@ -60,7 +62,7 @@ getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMay
           _tooltip = Nothing,
           _position =
             Position
-              { _line = fromIntegral line,
+              { _line = fromIntegral line - 1,
                 _character = fromIntegral col
               },
           _data_ =

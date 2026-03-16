@@ -35,6 +35,7 @@ import Language.LSP.Server
   )
 import System.Exit
 import System.IO (hSetBuffering, BufferMode (LineBuffering), stderr)
+import GHC.Conc.Sync (newTVar, newTVarIO)
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
@@ -48,7 +49,7 @@ main _prog _args = do
 
 serverDefinition :: IO (ServerDefinition ())
 serverDefinition = do
-  state_mvar <- newIORef emptyState
+  state_mvar <- newTVarIO emptyState
   pure $
     ServerDefinition
       { onConfigChange = const $ pure (),
