@@ -18,16 +18,16 @@ import Language.LSP.Protocol.Types
     toNormalizedUri,
   )
 import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
-import GHC.Conc.Sync (TVar, readTVarIO, writeTVar, atomically)
+import Data.IORef (IORef, writeIORef, readIORef)
 
 -- | Try to take state from IORef, if it's empty, try to compile.
-tryTakeStateFromIORef :: TVar State -> Maybe FilePath -> LspT () IO State
+tryTakeStateFromIORef :: IORef State -> Maybe FilePath -> LspT () IO State
 tryTakeStateFromIORef state_mvar file_path = do
-  old_state <- liftIO $ readTVarIO state_mvar
+  old_state <- liftIO $ readIORef state_mvar
   case stateProgram old_state of
     Nothing -> do
       new_state <- tryCompile old_state file_path noLoadedProg
-      liftIO $ atomically $ writeTVar state_mvar new_state
+      liftIO $ writeIORef state_mvar new_state
       pure new_state
     Just prog -> do
       -- If this is in the context of some file that is not part of
@@ -40,14 +40,14 @@ tryTakeStateFromIORef state_mvar file_path = do
               logWithSeverity Warning <& ("Program contains: " <> showText files)
               tryCompile old_state file_path noLoadedProg
         _ -> pure old_state
-      liftIO $ atomically $ writeTVar state_mvar state
+      liftIO $ writeIORef state_mvar state
       pure state
 
 -- | Try to (re)-compile, replace old state if successful.
-tryReCompile :: TVar State -> Maybe FilePath -> LspT () IO ()
+tryReCompile :: IORef State -> Maybe FilePath -> LspT () IO ()
 tryReCompile state_mvar file_path = do
   logWithSeverity Debug <& "(Re)-compiling ..."
-  old_state <- liftIO $ readTVarIO state_mvar
+  old_state <- liftIO $ readIORef state_mvar
   let loaded_prog = getLoadedProg old_state
   new_state <- tryCompile old_state file_path loaded_prog
   case stateProgram new_state of
@@ -55,10 +55,10 @@ tryReCompile state_mvar file_path = do
       logWithSeverity Debug <& "Failed to (re)-compile, using old state or Nothing"
       logWithSeverity Debug <& "Computing PositionMapping for: " <> showText file_path
       mapping <- computeMapping old_state file_path
-      liftIO $ atomically $ writeTVar state_mvar $ updateStaleMapping file_path mapping old_state
+      liftIO $ writeIORef state_mvar $ updateStaleMapping file_path mapping old_state
     Just _ -> do
       logWithSeverity Debug <& "(Re)-compile successful"
-      liftIO $ atomically $ writeTVar state_mvar new_state
+      liftIO $ writeIORef state_mvar new_state
 
 -- | Try to compile, publish diagnostics on warnings and errors, return newly compiled state.
 --  Single point where the compilation is done, and shouldn't be exported.

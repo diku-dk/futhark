@@ -8,7 +8,7 @@ module Futhark.LSP.Handlers (handlers) where
 import Colog.Core (Severity (Debug, Info), (<&))
 import Control.Lens ((^.))
 import Control.Monad.Except (ExceptT, MonadError (throwError), liftEither, throwError)
-import Control.Monad.Trans (lift, liftIO)
+import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Except (runExcept, runExceptT)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Value (Array, String))
@@ -61,13 +61,13 @@ import Language.LSP.Protocol.Types
 import Language.LSP.Server (Handlers, LspM, LspT, getVirtualFile, notificationHandler, requestHandler)
 import Language.LSP.VFS (file_text)
 import Text.Read (readMaybe)
-import GHC.Conc.Sync (TVar)
+import Data.IORef (IORef)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
   logWithSeverity Info <& "Initialized"
 
-onHoverHandler :: TVar State -> Handlers (LspM ())
+onHoverHandler :: IORef State -> Handlers (LspM ())
 onHoverHandler state_mvar =
   requestHandler SMethod_TextDocumentHover $ \req responder -> do
     let TRequestMessage _ _ _ (HoverParams doc pos _workDone) = req
@@ -77,7 +77,7 @@ onHoverHandler state_mvar =
     state <- tryTakeStateFromIORef state_mvar file_path
     responder $ Right $ maybe (InR Null) InL $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
 
-onDocumentFocusHandler :: TVar State -> Handlers (LspM ())
+onDocumentFocusHandler :: IORef State -> Handlers (LspM ())
 onDocumentFocusHandler state_mvar =
   notificationHandler (SMethod_CustomMethod (Proxy @"custom/onFocusTextDocument")) $ \msg -> do
     logWithSeverity Debug <& "Got custom request: onFocusTextDocument"
@@ -85,7 +85,7 @@ onDocumentFocusHandler state_mvar =
         String focused_uri = V.head vector_param -- only one parameter passed from the client
     tryReCompile state_mvar (uriToFilePath (Uri focused_uri))
 
-goToDefinitionHandler :: TVar State -> Handlers (LspM ())
+goToDefinitionHandler :: IORef State -> Handlers (LspM ())
 goToDefinitionHandler state_mvar =
   requestHandler SMethod_TextDocumentDefinition $ \req responder -> do
     let TRequestMessage _ _ _ (DefinitionParams doc pos _workDone _partial) = req
@@ -98,7 +98,7 @@ goToDefinitionHandler state_mvar =
       Nothing -> responder $ Right $ InR $ InR Null
       Just loc -> responder $ Right $ InL $ Definition $ InL loc
 
-onDocumentSaveHandler :: TVar State -> Handlers (LspM ())
+onDocumentSaveHandler :: IORef State -> Handlers (LspM ())
 onDocumentSaveHandler state_mvar =
   notificationHandler SMethod_TextDocumentDidSave $ \msg -> do
     let TNotificationMessage _ _ (DidSaveTextDocumentParams doc _text) = msg
@@ -106,7 +106,7 @@ onDocumentSaveHandler state_mvar =
     logWithSeverity Debug <& ("Saved document: " <> showText doc)
     tryReCompile state_mvar file_path
 
-onDocumentChangeHandler :: TVar State -> Handlers (LspM ())
+onDocumentChangeHandler :: IORef State -> Handlers (LspM ())
 onDocumentChangeHandler state_mvar =
   notificationHandler SMethod_TextDocumentDidChange $ \msg -> do
     let TNotificationMessage _ _ (DidChangeTextDocumentParams doc _content) = msg
@@ -123,7 +123,7 @@ onDocumentCloseHandler = notificationHandler SMethod_TextDocumentDidClose $ \_ms
 
 -- Sent by Eglot when first connecting - not sure when else it might
 -- be sent.
-onWorkspaceDidChangeConfiguration :: TVar State -> Handlers (LspM ())
+onWorkspaceDidChangeConfiguration :: IORef State -> Handlers (LspM ())
 onWorkspaceDidChangeConfiguration _state_mvar =
   notificationHandler SMethod_WorkspaceDidChangeConfiguration $ \_ ->
     logWithSeverity Debug <& "WorkspaceDidChangeConfiguration"
@@ -261,7 +261,7 @@ onWorkspaceExecuteCommandHandler =
           _code = err
         }
 
-onTextDocumentInlayHint :: TVar State -> Handlers (LspM ())
+onTextDocumentInlayHint :: IORef State -> Handlers (LspM ())
 onTextDocumentInlayHint state_ref =
   requestHandler SMethod_TextDocumentInlayHint $ \request respond ->
     let parameters = request ^. params
@@ -299,7 +299,7 @@ onTextDocumentInlayHintResolve =
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
-handlers :: TVar State -> ClientCapabilities -> Handlers (LspM ())
+handlers :: IORef State -> ClientCapabilities -> Handlers (LspM ())
 handlers state_mvar _ =
   mconcat
     [ onInitializeHandler,
