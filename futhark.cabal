@@ -397,20 +397,31 @@ library
       Futhark.Transform.Rename
       Futhark.Transform.Substitute
       Futhark.Util
+      Futhark.Util.BiMap
       Futhark.Util.CMath
       Futhark.Util.IntegralExp
       Futhark.Util.Html
       Futhark.Util.Loc
       Futhark.Util.Log
+      Futhark.Util.NDArray
       Futhark.Util.Options
       Futhark.Util.Pretty
       Futhark.Util.ProgressBar
       Futhark.Util.Table
+      Futhark.Util.UID
       Futhark.Version
       Language.Futhark
       Language.Futhark.Core
       Language.Futhark.Interpreter
       Language.Futhark.Interpreter.AD
+      Language.Futhark.Interpreter.FFI
+      Language.Futhark.Interpreter.FFI.Server
+      Language.Futhark.Interpreter.FFI.Server.Explorer
+      Language.Futhark.Interpreter.FFI.Server.Interface
+      Language.Futhark.Interpreter.FFI.Server.Packer
+      Language.Futhark.Interpreter.FFI.Server.TypeLayout
+      Language.Futhark.Interpreter.FFI.UIDs
+      Language.Futhark.Interpreter.FFI.Values
       Language.Futhark.Interpreter.Values
       Language.Futhark.FreeVars
       Language.Futhark.Parser

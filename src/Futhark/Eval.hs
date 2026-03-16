@@ -9,6 +9,7 @@ module Futhark.Eval
   )
 where
 
+import Control.Arrow (Arrow(second))
 import Control.Exception (IOException, catch)
 import Control.Monad (foldM, when, (<=<))
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
@@ -16,7 +17,8 @@ import Control.Monad.Free.Church (F, runF)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask)
-import Data.IORef (IORef, modifyIORef')
+import Data.Bifunctor (first)
+import Data.IORef (IORef, modifyIORef', readIORef, writeIORef, newIORef)
 import Data.Map qualified as M
 import Data.Maybe (maybeToList)
 import Data.Sequence (Seq, (|>))
@@ -27,12 +29,17 @@ import Futhark.Error (externalErrorS, prettyCompilerError)
 import Futhark.FreshNames (VNameSource)
 import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, hardline, putDocLn)
 import Language.Futhark.Interpreter qualified as I
+import Language.Futhark.Interpreter.FFI qualified as S
+import Language.Futhark.Interpreter.FFI.Server (FutharkServer)
+import Language.Futhark.Interpreter.FFI.Server qualified as S
+import Language.Futhark.Interpreter.FFI.Server.Packer qualified as SP
+import Language.Futhark.Interpreter.FFI.Values (Location (Location), Value (Atom))
 import Language.Futhark.Parser (parseExp)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
 import Language.Futhark.Pretty (toName)
 import Language.Futhark.Prop (typeOf)
 import Language.Futhark.Semantic qualified as T
-import Language.Futhark.Syntax (nameToText, typeParamName)
+import Language.Futhark.Syntax (nameToText, typeParamName, VName (VName), ProgBase (progDecs), DecBase (ValDec), ValBindBase (ValBind), nameToString, nameFromString)
 import Language.Futhark.TypeChecker qualified as T
 import Prettyprinter (Doc, align, pretty, unAnnotate, vcat, (<+>))
 import Prettyprinter.Render.Terminal (AnsiStyle)
@@ -78,17 +85,36 @@ runEvalRecordRef ::
 runEvalRecordRef msgRef (EvalRecordRef action) =
   flip runReaderT msgRef $ runExceptT action
 
-newtype InterpreterState = InterpreterState (VNameSource, T.Env, I.Ctx)
+newtype InterpreterState = InterpreterState (VNameSource, T.Env, I.Ctx, Maybe FutharkServer)
+
+-- TODO: Should NOT be IORef. This is temporary, for testing
+call :: IORef (Maybe FutharkServer) -> VName -> [I.Value] -> IO I.Value
+call s (VName n _) p = do
+  let p' = map S.fromInterpreterValue p
+  (Just s') <- readIORef s
+  (r, s'') <- first S.toInterpreterValue <$> S.runFutharkServerM (SP.call (nameToText n) p') s'
+  writeIORef s $ Just s''
+  pure r
+
+realize' l = SP.realize' l
+
+-- TODO: Should NOT be IORef. This is temporary, for testing
+realize :: IORef (Maybe FutharkServer) -> Location -> IO I.Value
+realize s l = do
+  (Just s') <- readIORef s
+  (r, s'') <- first S.toInterpreterValue <$> S.runFutharkServerM (realize' l) s'
+  writeIORef s $ Just s''
+  pure r
 
 -- | Run an expression in the given interpreter state. The expression is parsed,
 -- type checked, and then run. Returns a prettyprinted result. Must be run in a
 -- monad that supports aborting and traces.
 runExpr ::
-  (Evaluation m) =>
+  (Evaluation m, MonadIO m) =>
   InterpreterState ->
   T.Text ->
   m (Doc AnsiStyle)
-runExpr (InterpreterState (src, env, ctx)) str = do
+runExpr (InterpreterState (src, env, ctx, s)) str = do
   uexp <- case parseExp "" str of
     Left (SyntaxError _ serr) -> abort $ pretty serr
     Right e -> pure e
@@ -103,7 +129,8 @@ runExpr (InterpreterState (src, env, ctx)) str = do
             "The following types are ambiguous: "
               <> commasep (map (pretty . nameToText . toName . typeParamName) tparams)
           ]
-  pval <- runInterpreterNoBreak $ I.interpretExp ctx fexp
+  is <- liftIO $ newIORef s
+  pval <- runInterpreterNoBreak call realize is $ I.interpretExp ctx fexp
   case pval of
     Left err -> do
       abort $ I.prettyInterpreterError err
@@ -136,34 +163,59 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
       hPutDoc stderr $
         prettyWarnings ws
 
+  let modifyLast _ []     = []
+      modifyLast f [x]    = [f x]
+      modifyLast f (x:xs) = x : modifyLast f xs
+
+  (imports', s) <- case maybe_file of
+        Just file -> liftIO $
+          -- TODO: This relies quite heavily on a bunch of imports, but hey, it's a start
+          let mdec (ValDec (ValBind (Just a) (VName vn vi) c d e f g h i j)) = ValDec (ValBind (Just a) (VName (nameFromString $ "$" ++ nameToString vn) vi) c d e f g h i j)
+              mdec o = o
+              (_, m) = last imports
+              m' = m { fileProg = (fileProg m) { progDecs = map mdec $ progDecs $ fileProg m} }
+          in (modifyLast (second $ const m') imports,) . Just <$> S.startServer (take (length file - 4) file)
+        Nothing -> pure (imports, Nothing)
+
+  is <- liftIO $ newIORef s
   ictx <-
     let foldFile ctx =
           badOnLeft I.prettyInterpreterError
-            <=< runInterpreterNoBreak
+            <=< runInterpreterNoBreak call realize is
               . I.interpretImport ctx
      in foldM foldFile I.initialCtx $
-          map (fmap fileProg) imports
+          map (fmap fileProg) imports'
+  s' <- liftIO $ readIORef is
 
   let (tenv, ienv) =
-        let (iname, fm) = last imports
+        let (iname, fm) = last imports'
          in ( fileScope fm,
               ictx {I.ctxEnv = I.ctxImports ictx M.! iname}
             )
 
-  pure $ InterpreterState (src, tenv, ienv)
+  pure $ InterpreterState (src, tenv, ienv, s')
   where
     badOnLeft :: (Monad m) => (err -> err') -> Either err a -> ExceptT err' m a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
 runInterpreterNoBreak ::
-  (Evaluation m) =>
+  (Evaluation m, MonadIO m) =>
+  (IORef (Maybe FutharkServer) -> VName -> [I.Value] -> IO I.Value) ->
+  (IORef (Maybe FutharkServer) -> Location -> IO I.Value) ->
+  IORef (Maybe FutharkServer) ->
   F I.ExtOp a ->
   m (Either I.InterpreterError a)
-runInterpreterNoBreak m = runF m (pure . Right) intOp
+runInterpreterNoBreak call' realize' s m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
       trace $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
+    intOp (I.ExtOpCall n p c) = do
+      r <- liftIO $ call' s n p
+      c r
+    intOp (I.ExtOpRealize l c) = do
+      r <- liftIO $ realize' s l
+      c r
