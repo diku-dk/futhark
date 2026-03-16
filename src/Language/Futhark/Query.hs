@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Facilities for answering queries about a program, such as "what
 -- appears at this source location", or "where is this name bound".
 -- The intent is that this is used as a building block for IDE-like
@@ -9,6 +11,9 @@ module Language.Futhark.Query
     atPos,
     Pos (..),
     allBindings,
+    termBindingType,
+    TermBinding (..),
+    TermBindSrc(..),
   )
 where
 
@@ -16,7 +21,7 @@ import Control.Monad
 import Control.Monad.State
 import Data.List (find)
 import Data.Map qualified as M
-import Futhark.Util.Loc (Pos (..), contains)
+import Futhark.Util.Loc (Pos (..), contains, Loc (..))
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Traversals
@@ -24,10 +29,33 @@ import System.FilePath.Posix qualified as Posix
 
 type TypeAscription = TypeExp (ExpBase Info VName) VName
 
+data TermBindSrc
+  = -- | Term was bound where a pattern is allowed
+    TermBindPat
+  | -- | Term was bound with a let
+    TermBindLet
+  | -- | term was bound where only an identifier is allowed
+    TermBindId
+  deriving (Eq, Show)
+
+data TermBinding
+  = TermSize
+  | -- | Inferred Type, Type Asciption
+    TermVar TermBindSrc StructType (Maybe TypeAscription)
+  | -- | Function Type, Return Type, Optional return type ascription, end of parameters location
+    TermFun StructType ResRetType (Maybe TypeAscription) Pos
+  deriving (Eq, Show)
+
+termBindingType :: TermBinding -> TypeBase Size NoUniqueness
+termBindingType = \case
+  TermSize -> Scalar (Prim (Signed Int64))
+  TermVar _ t _ -> t
+  TermFun t _ _ _ -> t
+
 -- | What a name is bound to.
 data BoundTo
   = -- | inferred type, optional ascription from source
-    BoundTerm StructType (Maybe TypeAscription) Loc
+    BoundTerm TermBinding Loc
   | BoundModule Loc
   | BoundModuleType Loc
   | BoundType Loc
@@ -45,39 +73,43 @@ type Defs = M.Map VName Def
 -- | Where was a bound variable actually bound?  That is, what is the
 -- location of its definition?
 boundLoc :: BoundTo -> Loc
-boundLoc (BoundTerm _ _ loc) = loc
+boundLoc (BoundTerm _ loc) = loc
 boundLoc (BoundModule loc) = loc
 boundLoc (BoundModuleType loc) = loc
 boundLoc (BoundType loc) = loc
 
 sizeDefs :: SizeBinder VName -> Defs
 sizeDefs (SizeBinder v loc) =
-  M.singleton v $ DefBound $ BoundTerm varType varAscription (locOf loc)
-  where
-    varType = Scalar (Prim (Signed Int64))
-    varAscription = Nothing
+  M.singleton v $ DefBound $ BoundTerm TermSize (locOf loc)
 
-patternDefs :: Pat (TypeBase Size u) -> Defs
-patternDefs (Id vn (Info t) loc) =
-  M.singleton vn $ DefBound $ BoundTerm (toStruct t) Nothing (locOf loc)
-patternDefs (TuplePat pats _) =
-  mconcat $ map patternDefs pats
-patternDefs (RecordPat fields _) =
-  mconcat $ map (patternDefs . snd) fields
-patternDefs (PatParens pat _) = patternDefs pat
-patternDefs (PatAttr _ pat _) = patternDefs pat
-patternDefs Wildcard {} = mempty
-patternDefs PatLit {} = mempty
-patternDefs (PatAscription (Id vn (Info t) idLoc) texp _) =
-  M.singleton vn $ DefBound $ BoundTerm (toStruct t) (Just texp) (locOf idLoc)
-patternDefs (PatAscription pat _ _) =
-  patternDefs pat
-patternDefs (PatConstr _ _ pats _) =
-  mconcat $ map patternDefs pats
+patternDefs ::
+  (TypeBase Size NoUniqueness -> Maybe TypeAscription -> TermBinding) ->
+  Pat (TypeBase Size u) ->
+  Defs
+patternDefs mkDef (Id vn (Info t) loc) =
+  M.singleton vn $ DefBound $ BoundTerm tvar (locOf loc)
+  where
+    tvar = mkDef (toStruct t) Nothing
+patternDefs mkDef (TuplePat pats _) =
+  mconcat $ map (patternDefs mkDef) pats
+patternDefs mkDef (RecordPat fields _) =
+  mconcat $ map (patternDefs mkDef . snd) fields
+patternDefs mkDef (PatParens pat _) = patternDefs mkDef pat
+patternDefs mkDef (PatAttr _ pat _) = patternDefs mkDef pat
+patternDefs _ Wildcard {} = mempty
+patternDefs _ PatLit {} = mempty
+patternDefs mkDef (PatAscription (Id vn (Info t) idLoc) texp _) =
+  M.singleton vn $ DefBound $ BoundTerm tvar (locOf idLoc)
+  where
+    tvar = mkDef (toStruct t) (Just texp)
+patternDefs mkDef (PatAscription pat _ _) =
+  patternDefs mkDef pat
+patternDefs mkDef (PatConstr _ _ pats _) =
+  mconcat $ map (patternDefs mkDef) pats
 
 typeParamDefs :: TypeParamBase VName -> Defs
 typeParamDefs (TypeParamDim vn loc) =
-  M.singleton vn $ DefBound $ BoundTerm (Scalar $ Prim $ Signed Int64) Nothing (locOf loc)
+  M.singleton vn $ DefBound $ BoundTerm TermSize (locOf loc)
 typeParamDefs (TypeParamType _ vn loc) =
   M.singleton vn $ DefBound $ BoundType $ locOf loc
 
@@ -92,37 +124,46 @@ expDefs e =
       pure e'
 
     identDefs (Ident v (Info vt) vloc) =
-      M.singleton v $ DefBound $ BoundTerm (toStruct vt) Nothing $ locOf vloc
+      M.singleton v $
+        DefBound $
+          BoundTerm (TermVar TermBindId (toStruct vt) Nothing) $
+            locOf vloc
 
     extra =
       case e of
         AppExp (LetPat sizes pat _ _ _) _ ->
-          foldMap sizeDefs sizes <> patternDefs pat
+          foldMap sizeDefs sizes <> patternDefs (TermVar TermBindLet) pat
         Lambda params _ _ _ _ ->
-          mconcat (map patternDefs params)
+          mconcat $ map (patternDefs $ TermVar TermBindPat) params
         AppExp (LetFun (name, _) (tparams, params, tasc, Info ret, _) _ loc) _ ->
           let name_t = funType params ret
-           in M.singleton name (DefBound $ BoundTerm name_t tasc (locOf loc))
+              tfun = TermFun name_t ret tasc start_pos
+              start_pos = case locOf loc of
+                NoLoc -> 
+                  error "Impossible: All syntax tree function definitions must have a location"
+                Loc s _ -> s
+           in M.singleton name (DefBound $ BoundTerm tfun (locOf loc))
                 <> mconcat (map typeParamDefs tparams)
-                <> mconcat (map patternDefs params)
+                <> mconcat (map (patternDefs $ TermVar TermBindPat) params)
         AppExp (LetWith v _ _ _ _ _) _ ->
           identDefs v
         AppExp (Loop _ merge _ form _ _) _ ->
-          patternDefs merge
+          patternDefs (TermVar TermBindPat) merge
             <> case form of
               For i _ -> identDefs i
-              ForIn pat _ -> patternDefs pat
+              ForIn pat _ -> patternDefs (TermVar TermBindLet) pat
               While {} -> mempty
         _ ->
           mempty
 
 valBindDefs :: ValBind -> Defs
 valBindDefs vbind =
-  M.insert (valBindName vbind) (DefBound $ BoundTerm vbind_t vbind_decl_t (locOf vbind)) $
+  M.insert (valBindName vbind) (DefBound $ BoundTerm termVal (locOf vbind)) $
     mconcat (map typeParamDefs (valBindTypeParams vbind))
-      <> mconcat (map patternDefs (valBindParams vbind))
+      <> mconcat (map (patternDefs (TermVar TermBindPat)) (valBindParams vbind))
       <> expDefs (valBindBody vbind)
   where
+    termVal = TermVar TermBindId vbind_t vbind_decl_t
     vbind_t =
       funType (valBindParams vbind) $ unInfo $ valBindRetType vbind
     vbind_decl_t = valBindRetDecl vbind
@@ -166,7 +207,8 @@ specDefs :: Spec -> Defs
 specDefs spec =
   case spec of
     ValSpec v tparams texp (Info t) _ loc ->
-      let vdef = DefBound $ BoundTerm t (Just texp) (locOf loc)
+      let vdef = DefBound $ BoundTerm tval (locOf loc)
+          tval = TermVar TermBindId t (Just texp)
        in M.insert v vdef $ mconcat (map typeParamDefs tparams)
     TypeAbbrSpec tbind -> typeBindDefs tbind
     TypeSpec _ v _ _ loc ->

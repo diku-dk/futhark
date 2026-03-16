@@ -15,7 +15,7 @@ module Futhark.LSP.Tool
   )
 where
 
-import Colog.Core (LogAction, Severity, WithSeverity (WithSeverity), logStringStderr)
+import Colog.Core (LogAction, Severity, logStringStderr)
 import Control.Lens.Getter ((^.))
 import Control.Monad.Except (ExceptT)
 import Data.Functor.Contravariant (contramap)
@@ -37,9 +37,8 @@ import Language.Futhark.Query
   ( AtPos (AtName),
     BoundTo (..),
     atPos,
-    boundLoc,
+    boundLoc, termBindingType,
   )
-import Language.LSP.Logging (logToLogMessage)
 import Language.LSP.Protocol.Types
   ( ErrorCodes,
     Hover (Hover),
@@ -70,7 +69,7 @@ getHoverInfoFromState state (Just path) l c = do
   AtName _ (Just def) loc <- queryAtPos state $ Pos path l c 0
   let msg =
         case def of
-          BoundTerm t _ _ -> prettyText t
+          BoundTerm term _ -> prettyText $ termBindingType term
           BoundModule {} -> "module"
           BoundModuleType {} -> "module type"
           BoundType {} -> "type"
@@ -120,7 +119,7 @@ updateAtPos mapping (AtName qn (Just def) loc) pos state = do
       Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
   where
     updateBoundLoc :: BoundTo -> Loc -> BoundTo
-    updateBoundLoc (BoundTerm t texp _loc) current_loc = BoundTerm t texp current_loc
+    updateBoundLoc (BoundTerm t _loc) current_loc = BoundTerm t current_loc
     updateBoundLoc (BoundModule _loc) current_loc = BoundModule current_loc
     updateBoundLoc (BoundModuleType _loc) current_loc = BoundModuleType current_loc
     updateBoundLoc (BoundType _loc) current_loc = BoundType current_loc
@@ -178,4 +177,4 @@ transformVFS vfs =
       VFS.Closed _ -> Nothing
 
 logWithSeverity :: (MonadLsp c m) => Severity -> LogAction m Text
-logWithSeverity severity = contramap T.unpack logStringStderr -- contramap (`WithSeverity` severity) logToLogMessage
+logWithSeverity _severity = contramap T.unpack logStringStderr -- contramap (`WithSeverity` severity) logToLogMessage

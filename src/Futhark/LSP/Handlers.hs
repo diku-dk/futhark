@@ -24,14 +24,14 @@ import Futhark.Fmt.Printer (fmtToText)
 import Futhark.LSP.CodeLens qualified as CodeLens
 import Futhark.LSP.CommandType (CommandType (CodeLens))
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
-import Futhark.LSP.InlayHint (getInlayHints, resolveInlayHint)
+import Futhark.LSP.InlayHint (getInlayHints)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState, logWithSeverity)
 import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
-import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), arguments, command, data_, line, params, range, start)
+import Language.LSP.Protocol.Lens (textDocument, uri, arguments, command, line, params, range, start)
 import Language.LSP.Protocol.Message
   ( Method (..),
     SMethod (..),
@@ -277,22 +277,6 @@ onTextDocumentInlayHint state_ref =
 
           respond . Right $ InL result
 
-onTextDocumentInlayHintResolve :: Handlers (LspM ())
-onTextDocumentInlayHintResolve =
-  requestHandler SMethod_InlayHintResolve $ \request respond ->
-    let respondFailure msg =
-          respond . Left $
-            TResponseError
-              { _xdata = Nothing,
-                _message = msg,
-                _code = InR ErrorCodes_InvalidParams
-              }
-     in case request ^. (params . data_) of
-          Nothing -> respondFailure "No data associated with inlay hint resolve"
-          Just val -> case resolveInlayHint val of
-            Left msg -> respondFailure msg
-            Right hint -> respond $ Right hint
-
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
@@ -312,6 +296,5 @@ handlers state_mvar _ =
       goToDefinitionHandler state_mvar,
       onHoverHandler state_mvar,
       onWorkspaceDidChangeConfiguration state_mvar,
-      onWorkspaceExecuteCommandHandler,
-      onTextDocumentInlayHintResolve
+      onWorkspaceExecuteCommandHandler
     ]
