@@ -31,7 +31,7 @@ import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
-import Language.LSP.Protocol.Lens (textDocument, uri, arguments, command, line, params, range, start)
+import Language.LSP.Protocol.Lens (arguments, command, line, params, range, start, textDocument, uri)
 import Language.LSP.Protocol.Message
   ( Method (..),
     SMethod (..),

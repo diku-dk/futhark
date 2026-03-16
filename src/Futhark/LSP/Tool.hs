@@ -37,7 +37,8 @@ import Language.Futhark.Query
   ( AtPos (AtName),
     BoundTo (..),
     atPos,
-    boundLoc, termBindingType,
+    boundLoc,
+    termBindingType,
   )
 import Language.LSP.Protocol.Types
   ( ErrorCodes,

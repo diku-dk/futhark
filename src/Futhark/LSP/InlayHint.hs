@@ -46,9 +46,9 @@ getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMay
         startHint :: Pos -> InlayHint
         startHint (Pos _ l c _) =
           InlayHint
-            { _position = 
-              Position (fromIntegral l - 1) (fromIntegral c - 1),
-              _label = InL $ "(",
+            { _position =
+                Position (fromIntegral l - 1) (fromIntegral c - 1),
+              _label = InL "(",
               _kind = Just InlayHintKind_Type,
               _textEdits = Nothing,
               _tooltip = Nothing,
@@ -59,8 +59,8 @@ getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMay
         endHint :: Text -> Pos -> InlayHint
         endHint tname (Pos _ l c _) =
           InlayHint
-            { _position = 
-              Position (fromIntegral l - 1) (fromIntegral c - 1),
+            { _position =
+                Position (fromIntegral l - 1) (fromIntegral c - 1),
               _label = InL $ ": " <> tname,
               _kind = Just InlayHintKind_Type,
               _textEdits = Nothing,
@@ -92,4 +92,3 @@ getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMay
     -- increment by one: Pos counts from one onwards, LSP starts at zero
     mkPos :: UInt -> UInt -> Pos
     mkPos l c = Pos filepath (1 + fromIntegral l) (1 + fromIntegral c) (-1)
-

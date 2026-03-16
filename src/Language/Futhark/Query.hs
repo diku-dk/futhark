@@ -13,15 +13,15 @@ module Language.Futhark.Query
     allBindings,
     termBindingType,
     TermBinding (..),
-    TermBindSrc(..),
+    TermBindSrc (..),
   )
 where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List (find)
+import Data.List (find, unsnoc)
 import Data.Map qualified as M
-import Futhark.Util.Loc (Pos (..), contains, Loc (..))
+import Futhark.Util.Loc (Loc (..), Pos (..), contains)
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Traversals
@@ -138,10 +138,11 @@ expDefs e =
         AppExp (LetFun (name, _) (tparams, params, tasc, Info ret, _) _ loc) _ ->
           let name_t = funType params ret
               tfun = TermFun name_t ret tasc start_pos
-              start_pos = case locOf loc of
-                NoLoc -> 
-                  error "Impossible: All syntax tree function definitions must have a location"
-                Loc s _ -> s
+              start_pos = case unsnoc params of
+                Nothing -> error "expDefs: LetFun with no params"
+                Just (_, last_arg) -> case locOf last_arg of
+                  NoLoc -> error "expDefs: PatBase without Location"
+                  Loc _ end_pos -> end_pos
            in M.singleton name (DefBound $ BoundTerm tfun (locOf loc))
                 <> mconcat (map typeParamDefs tparams)
                 <> mconcat (map (patternDefs $ TermVar TermBindPat) params)
