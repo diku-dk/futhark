@@ -15,8 +15,20 @@ import Futhark.LSP.PositionMapping (toStalePos)
 import Futhark.LSP.State (State (stateProgram), getStaleMapping)
 import Futhark.Util.Loc (Located (locOf), contains)
 import Futhark.Util.Pretty (prettyText)
-import Language.Futhark.Query (BoundTo (BoundTerm), TermBindSrc (..), TermBinding (..), allBindings)
-import Language.LSP.Protocol.Types (InlayHint (..), InlayHintKind (InlayHintKind_Type), Position (..), Range (Range), UInt, type (|?) (InL))
+import Language.Futhark.Query
+  ( BoundTo (BoundTerm),
+    TermBindSrc (..),
+    TermBinding (..),
+    allBindings,
+  )
+import Language.LSP.Protocol.Types
+  ( InlayHint (..),
+    InlayHintKind (InlayHintKind_Type),
+    Position (..),
+    Range (Range),
+    UInt,
+    type (|?) (InL),
+  )
 
 data TypeInlayHintInfo
   = -- | type hint at the position
@@ -25,7 +37,8 @@ data TypeInlayHintInfo
     TypeHintParens Pos Text Pos
 
 getInlayHints :: Range -> State -> FilePath -> [InlayHint]
-getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMaybe [] $ do
+getInlayHints range state filepath = fromMaybe [] $ do
+  let (Range (Position l1 c1) (Position l2 c2)) = range
   imports <- lpImports <$> stateProgram state -- crash occurs here
   let mapping = getStaleMapping state filepath
   posStart <- toStalePos mapping $ mkPos l1 c1
