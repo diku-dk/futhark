@@ -12,6 +12,7 @@
 module Futhark.Pass.Flatten (flattenSOACs) where
 
 import Control.Monad
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Data.Bifunctor (bimap, first, second)
 import Data.Foldable
@@ -181,29 +182,42 @@ segmentsShape = Shape . toList
 segmentsRank :: Segments -> Int
 segmentsRank = shapeRank . segmentsShape
 
-readInput :: Segments -> DistEnv -> [SubExp] -> DistInputs -> SubExp -> Builder GPU SubExp
-readInput _ _ _ _ (Constant x) = pure $ Constant x
-readInput _segments env is inputs (Var v) =
+readInputVar :: Segments -> DistEnv -> [SubExp] -> DistInputs -> VName -> Builder GPU VName
+readInputVar _segments env is inputs v =
   case lookup v inputs of
-    Nothing -> pure $ Var v
-    Just (DistInputFree arr _) ->
-      letSubExp (baseName v) =<< eIndex arr (map eSubExp is)
-    Just (DistInput rt _) -> do
+    Nothing -> pure v
+    Just (DistInputFree arr t)
+      | isAcc t -> pure arr
+      | otherwise -> letExp (baseName v) =<< eIndex arr (map eSubExp is)
+    Just (DistInput rt t) -> do
       case resVar rt env of
-        Regular arr ->
-          letSubExp (baseName v) =<< eIndex arr (map eSubExp is)
+        Regular arr
+          | isAcc t -> pure arr
+          | otherwise -> letExp (baseName v) =<< eIndex arr (map eSubExp is)
         Irregular (IrregularRep _ _flags _offsets _elems) ->
           undefined
+
+readInput :: Segments -> DistEnv -> [SubExp] -> DistInputs -> SubExp -> Builder GPU SubExp
+readInput _ _ _ _ (Constant x) =
+  pure $ Constant x
+readInput segments env is inputs (Var v) =
+  Var <$> readInputVar segments env is inputs v
 
 readInputs :: Segments -> DistEnv -> [SubExp] -> DistInputs -> Builder GPU ()
 readInputs _segments env is = mapM_ onInput
   where
-    onInput (v, DistInputFree arr _) =
-      letBindNames [v] =<< eIndex arr (map eSubExp is)
+    onInput (v, DistInputFree arr t) =
+      letBindNames [v]
+        =<< if isAcc t
+          then eSubExp (Var arr)
+          else eIndex arr (map eSubExp is)
     onInput (v, DistInput rt t) =
       case resVar rt env of
         Regular arr ->
-          letBindNames [v] =<< eIndex arr (map eSubExp is)
+          letBindNames [v]
+            =<< if isAcc t
+              then eSubExp $ Var arr
+              else eIndex arr (map eSubExp is)
         Irregular (IrregularRep _ _ v_O v_D) -> do
           offset <- letSubExp "offset" =<< eIndex v_O (map eSubExp is)
           case arrayDims t of
@@ -651,7 +665,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       reparr <- mapM (getIrregRep segments env inps) (NE.toList arr)
       rep' <- concatIrreg segments env ns reparr
       pure $ insertRep (distResTag res) (Irregular rep') env
-  --  TODO: add invaraint special handling
+    --  TODO: add invaraint special handling
     Replicate (Shape [n]) (Var v) -> do
       ns <- dataArr segments env inps n
       rep <- getIrregRep segments env inps v
@@ -676,7 +690,6 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       w <- arraySize 0 <$> lookupType res_D
       res_D' <- letExp "rep_const" $ BasicOp $ Replicate (Shape [w]) (Constant v)
       pure $ insertIrregular mul_dims res_F res_O (distResTag res) res_D' env
-      
     Replicate (Shape []) (Var v) ->
       case lookup v inps of
         Just (DistInputFree v' _) -> do
@@ -809,6 +822,11 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           flags <- genFlags m offsets
           res_D <- letExp "scratch_D" $ BasicOp $ Scratch pt [m]
           pure $ insertIrregular ns flags offsets (distResTag res) res_D env
+    UpdateAcc {} ->
+      -- TODO: handle irregular case, which is however rare, and also needs
+      -- modifications to WithAcc. The only irregularity that is possible is in
+      -- the values to be written.
+      scalarCase
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
     scalarCase =
@@ -881,8 +899,11 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
           let inner_shape = arrayShape $ paramType p
           vs_t <- lookupType vs
           v <-
-            letExp (baseName vs <> "_flat") . BasicOp . Reshape vs $
-              reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
+            if isAcc vs_t
+              then pure vs
+              else
+                letExp (baseName vs <> "_flat") . BasicOp . Reshape vs $
+                  reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
           pure $ MapArray v t
         DistInput rt _ ->
           case resVar rt env of
@@ -923,8 +944,9 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
                       $ \(MkSolo s) -> do
                         total_s <- letSubExp "total_s" =<< eIndex (irregularS rep) [eSubExp s]
                         num_rows_s <- letSubExp "num_rows_s" =<< eIndex ws [eSubExp s]
-                        row_size <- letSubExp "row_size" <=< toExp $
-                          pe64 total_s `div` pe64 num_rows_s
+                        row_size <-
+                          letSubExp "row_size" <=< toExp $
+                            pe64 total_s `div` pe64 num_rows_s
                         pure $ subExpsRes [row_size]
                   new_S <-
                     letExp (baseName (paramName p) <> "_new_S")
@@ -1032,6 +1054,139 @@ doSegScan :: [Scan SOACS] -> VName -> [VName] -> Builder GPU [VName]
 doSegScan scans flags elems =
   let scan = singleScan scans
    in genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) (scanNeutral scan) flags elems
+
+transformWithAcc ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  StmAux () ->
+  [WithAccInput SOACS] ->
+  Lambda SOACS ->
+  Builder GPU DistEnv
+transformWithAcc segments env inps distres _withacc_pat withacc_aux withacc_inputs acc_lam = do
+  let inputTypes (_, arrs, _) = mapM lookupType arrs
+  variant <-
+    localScope (scopeOfDistInputs inps) $
+      any (any (any (isVariant inps env) . arrayDims))
+        <$> mapM inputTypes withacc_inputs
+  when variant $ error "Cannot yet handle variant WithAccs"
+
+  withacc_inputs' <- mapM onInput withacc_inputs
+  lam_params' <- newAccLamParams $ lambdaParams acc_lam
+  iota_p <- newParam "iota_p" $ Prim int64
+
+  let [w] = NE.toList segments
+
+  iota_w <-
+    letExp "withacc_flatten_iota" . BasicOp $
+      Iota w (intConst Int64 0) (intConst Int64 1) Int64
+  iota_w_t <- lookupType iota_w
+  let iota_se = Var (paramName iota_p)
+
+  acc_lam_body <-
+    runBodyBuilder $
+      localScope (scopeOfLParams lam_params') $
+        bodyBind (lambdaBody (trLam iota_se acc_lam))
+
+  scope <- askScope
+  let acc_params = drop num_accs lam_params'
+      orig_acc_params = drop num_accs $ lambdaParams acc_lam
+      interchanged_inps =
+        (paramName iota_p, DistInputFree iota_w iota_w_t)
+          : [ (paramName p, DistInputFree (paramName acc) (paramType acc))
+            | (p, acc) <- zip orig_acc_params acc_params
+            ]
+          ++ inps
+      -- FIXME: we are not using withacc_new_inputs, which has got to be wrong.
+      (withacc_new_inputs, withacc_dstms) =
+        distributeBody
+          scope
+          w
+          interchanged_inps
+          acc_lam_body
+
+  withacc_lam' <- mkLambda (map trParam lam_params') $ do
+    env' <- foldM (transformDistStm segments) env withacc_dstms
+    concat <$> mapM (liftResult segments inps env') (bodyResult $ lambdaBody acc_lam)
+
+  withacc_out_vs <-
+    certifying (distCerts inps withacc_aux env) $
+      letTupExp "withacc_flatten_out" (WithAcc withacc_inputs' withacc_lam')
+
+  let out_reps = map Regular withacc_out_vs
+  pure $ insertReps (zip (map distResTag distres) out_reps) env
+  where
+    newAccLamParams ps = do
+      let (cert_ps, acc_ps) = splitAt num_accs ps
+      -- Should not rename the certificates.
+      acc_ps' <- forM acc_ps $ \(Param attrs v t) ->
+        Param attrs <$> newName v <*> pure t
+      pure $ cert_ps <> acc_ps'
+
+    num_accs = length withacc_inputs
+    acc_certs = map paramName $ take num_accs $ lambdaParams acc_lam
+
+    onOp (op_lam, nes) = do
+      -- We need to add an additional index parameter because we are
+      -- extending the index space of the accumulator.
+      idx_p <- newParam "idx" $ Prim int64
+      pure
+        ( soacsLambdaToGPU $ op_lam {lambdaParams = idx_p : lambdaParams op_lam},
+          nes
+        )
+
+    onInput (shape, arrs, op) =
+      (segmentsShape segments <> shape,,)
+        <$> mapM onArr arrs
+        <*> traverse onOp op
+
+    onArr = readInputVar segments env [] inps
+
+    trType :: TypeBase shape u -> TypeBase shape u
+    trType (Acc acc ispace ts u)
+      | acc `elem` acc_certs =
+          Acc acc (segmentsShape segments <> ispace) ts u
+    trType t = t
+
+    trParam :: Param (TypeBase shape u) -> Param (TypeBase shape u)
+    trParam = fmap trType
+
+    trStm i (Let pat aux e) =
+      Let (fmap trType pat) aux $ trExp i pat e
+
+    trBody i (Body dec stms res) =
+      Body dec (fmap (trStm i) stms) res
+
+    trLam i (Lambda params ret body) =
+      Lambda (map trParam params) (map trType ret) (trBody i body)
+
+    trSOAC i = runIdentity . mapSOACM mapper
+      where
+        mapper =
+          identitySOACMapper {mapOnSOACLambda = pure . trLam i}
+
+    trExp i _ (WithAcc acc_inputs lam) =
+      WithAcc acc_inputs $ trLam i lam
+    trExp i (Pat [PatElem _ acc_t]) (BasicOp (UpdateAcc safety acc is ses)) = do
+      case acc_t of
+        Acc cert _ _ _
+          | cert `elem` acc_certs ->
+              BasicOp $ UpdateAcc safety acc (i : is) ses
+        _ ->
+          BasicOp $ UpdateAcc safety acc is ses
+    trExp i _ e = mapExp mapper e
+      where
+        mapper =
+          identityMapper
+            { mapOnBody = \_ -> pure . trBody i,
+              mapOnRetType = pure . trType,
+              mapOnBranchType = pure . trType,
+              mapOnFParam = pure . trParam,
+              mapOnLParam = pure . trParam,
+              mapOnOp = pure . trSOAC i
+            }
 
 transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm segments env (DistStm inps res (ScalarBatch stms)) =
@@ -1540,7 +1695,8 @@ transformDistStm segments env (DistStm inps res (SingleStm stm)) = do
               result_types = map ((\(DistType _ _ t) -> t) . distResType) res
               out_reps = resultToResReps result_types loop_out_vs'
           pure $ insertReps (zip (map distResTag res) out_reps) env
-    _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
+    Let pat aux (WithAcc inputs lam) ->
+      transformWithAcc segments env inps res pat aux inputs lam
 
 -- helper to not mess up the tags when generating new ones for the loop parameters
 -- probably won't be used in future
@@ -1668,7 +1824,7 @@ liftSubExp segments inps env se = case se of
         <$> case t of
           Prim {} -> pure $ Regular v'
           Array {} -> Irregular <$> mkIrregFromReg segments v'
-          Acc {} -> error "getRepSubExp: Acc"
+          Acc {} -> pure $ Regular v'
           Mem {} -> error "getRepSubExp: Mem"
     Just (t, Irregular irreg) -> pure (t, Irregular irreg)
     Nothing -> do
@@ -1678,7 +1834,7 @@ liftSubExp segments inps env se = case se of
         <$> case t of
           Prim {} -> pure $ Regular v'
           Array {} -> Irregular <$> mkIrregFromReg segments v'
-          Acc {} -> error "getRepSubExp: Acc"
+          Acc {} -> pure $ Regular v'
           Mem {} -> error "getRepSubExp: Mem"
 
 -- Like 'liftSubExp' but always returns a Regular result with the
