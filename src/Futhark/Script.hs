@@ -52,7 +52,7 @@ import Data.Vector.Storable qualified as SVec
 import Data.Void
 import Data.Word (Word8)
 import Futhark.Data.Parser qualified as V
-import Futhark.Server
+import Futhark.Server hiding (Record)
 import Futhark.Server.Values (getValue, putValue)
 import Futhark.Test.Values qualified as V
 import Futhark.Util (nubOrd)
