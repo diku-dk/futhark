@@ -15,7 +15,7 @@ module Futhark.LSP.Tool
   )
 where
 
-import Colog.Core (LogAction, Severity, logStringStderr)
+import Colog.Core (LogAction, Severity, WithSeverity (WithSeverity))
 import Control.Lens.Getter ((^.))
 import Control.Monad.Except (ExceptT)
 import Data.Functor.Contravariant (contramap)
@@ -59,6 +59,7 @@ import Language.LSP.Protocol.Types
 import Language.LSP.Server (LspM, LspT, MonadLsp, getVirtualFile)
 import Language.LSP.VFS (VFS, VirtualFile, vfsMap, virtualFileText, virtualFileVersion)
 import Language.LSP.VFS qualified as VFS
+import Language.LSP.Logging (logToLogMessage)
 
 -- | Request Handler code usually runs in this monad
 type Execute a = ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) a
@@ -178,4 +179,4 @@ transformVFS vfs =
       VFS.Closed _ -> Nothing
 
 logWithSeverity :: (MonadLsp c m) => Severity -> LogAction m Text
-logWithSeverity _severity = contramap T.unpack logStringStderr -- contramap (`WithSeverity` severity) logToLogMessage
+logWithSeverity severity = contramap (`WithSeverity` severity) logToLogMessage
