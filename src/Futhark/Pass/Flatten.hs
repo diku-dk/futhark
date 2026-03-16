@@ -703,22 +703,16 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             letExp (baseName v <> "_copy_free") . BasicOp $
               Replicate (segmentsShape segments) (Var v)
           pure $ insertRegulars [distResTag res] [v'] env
-    -- Replicate dims (Var v) -> do
-    --   dim_arrs <- mapM (dataArr segments env inps) dims
-    --   rep0 <- getIrregRep segments env inps v
-    --   rep' <-
-    --     foldrM
-    --       ( \dim_arr acc ->
-    --           replicateIrreg
-    --             segments
-    --             env
-    --             dim_arr
-    --             (baseName dim_arr <> "_replicate")
-    --             acc
-    --       )
-    --       rep0
-    --       dim_arrs
-    --   pure $ insertRep (distResTag res) (Irregular rep') env
+    Replicate (Shape dims) (Var v) -> do
+      dim_arrs <- mapM (dataArr segments env inps) dims
+      seg_number <- arraySize 0 <$> lookupType (head dim_arrs)
+      mul_dims <- letExp "mul_dims" <=< segMap (MkSolo seg_number) $ \(MkSolo i) -> do
+        vals <- mapM (\dim_arr -> letSubExp "dim_i" =<< eIndex dim_arr [eSubExp i]) dim_arrs
+        n <- letSubExp "n" <=< toExp $ product $ map pe64 vals
+        pure [subExpRes n]
+      rep <- getIrregRep segments env inps v
+      rep' <- replicateIrreg segments env mul_dims (baseName v) rep
+      pure $ insertRep (distResTag res) (Irregular rep') env
     Update _ as slice se
       | Just as_t <- distInputType <$> lookup as inps -> do
           ns <- letExp "slice_sizes"
@@ -1645,6 +1639,8 @@ transformDistributed irregs segments dist = do
 transformStm :: Scope SOACS -> Stm SOACS -> PassM (Stms GPU)
 transformStm scope (Let pat _ (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
+      traceM $ "&&&&transformStm: " ++ prettyString (Let pat mempty (Op (Screma w arrs form)))
+      traceM $ "W :" ++ prettyString w
       let arrs' =
             zipWith MapArray arrs $
               map paramType (lambdaParams (scremaLambda form))
