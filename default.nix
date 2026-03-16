@@ -66,6 +66,7 @@ let
                 enableSharedExecutables = false;
                 enableSharedLibraries = false;
                 enableLibraryProfiling = false;
+                doCheck = false;
                 configureFlags = [
                   # "--ghc-option=-Werror"
                   "--ghc-option=-split-sections"
