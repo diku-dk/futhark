@@ -8,13 +8,12 @@ module Futhark.LSP.Handlers (handlers) where
 import Colog.Core (Severity (Debug, Info), (<&))
 import Control.Lens ((^.))
 import Control.Monad.Except (ExceptT, MonadError (throwError), liftEither, throwError)
-import Control.Monad.Trans (lift)
+import Control.Monad.Trans (lift, liftIO)
 import Control.Monad.Trans.Except (runExcept, runExceptT)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Value (Array, String))
 import Data.Bifunctor (bimap, first)
 import Data.Function ((&))
-import Data.IORef (IORef)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -63,12 +62,13 @@ import Language.LSP.Server (Handlers, LspM, LspT, getVirtualFile, notificationHa
 import Language.LSP.VFS (file_text)
 import Text.Read (readMaybe)
 import GHC.Conc.Sync (TVar)
+import System.Mem (performMajorGC)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
   logWithSeverity Info <& "Initialized"
 
-onHoverHandler :: IORef State -> Handlers (LspM ())
+onHoverHandler :: TVar State -> Handlers (LspM ())
 onHoverHandler state_mvar =
   requestHandler SMethod_TextDocumentHover $ \req responder -> do
     let TRequestMessage _ _ _ (HoverParams doc pos _workDone) = req
@@ -78,7 +78,7 @@ onHoverHandler state_mvar =
     state <- tryTakeStateFromIORef state_mvar file_path
     responder $ Right $ maybe (InR Null) InL $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
 
-onDocumentFocusHandler :: IORef State -> Handlers (LspM ())
+onDocumentFocusHandler :: TVar State -> Handlers (LspM ())
 onDocumentFocusHandler state_mvar =
   notificationHandler (SMethod_CustomMethod (Proxy @"custom/onFocusTextDocument")) $ \msg -> do
     logWithSeverity Debug <& "Got custom request: onFocusTextDocument"
@@ -86,7 +86,7 @@ onDocumentFocusHandler state_mvar =
         String focused_uri = V.head vector_param -- only one parameter passed from the client
     tryReCompile state_mvar (uriToFilePath (Uri focused_uri))
 
-goToDefinitionHandler :: IORef State -> Handlers (LspM ())
+goToDefinitionHandler :: TVar State -> Handlers (LspM ())
 goToDefinitionHandler state_mvar =
   requestHandler SMethod_TextDocumentDefinition $ \req responder -> do
     let TRequestMessage _ _ _ (DefinitionParams doc pos _workDone _partial) = req
@@ -124,7 +124,7 @@ onDocumentCloseHandler = notificationHandler SMethod_TextDocumentDidClose $ \_ms
 
 -- Sent by Eglot when first connecting - not sure when else it might
 -- be sent.
-onWorkspaceDidChangeConfiguration :: IORef State -> Handlers (LspM ())
+onWorkspaceDidChangeConfiguration :: TVar State -> Handlers (LspM ())
 onWorkspaceDidChangeConfiguration _state_mvar =
   notificationHandler SMethod_WorkspaceDidChangeConfiguration $ \_ ->
     logWithSeverity Debug <& "WorkspaceDidChangeConfiguration"
@@ -273,6 +273,8 @@ onTextDocumentInlayHint state_ref =
 
           state <- tryTakeStateFromIORef state_ref filepath
           logWithSeverity Debug <& "Took state from IORef"
+          liftIO $ performMajorGC
+          logWithSeverity Debug <& "Survived major gc"
           let result = maybe [] (getInlayHints textRange state) filepath
 
           logWithSeverity Debug <& "Inlay hints: " <> showText result
