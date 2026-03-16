@@ -33,13 +33,11 @@ import Language.LSP.Server
     runServer,
     type (<~>) (Iso),
   )
-import System.Exit
-import System.IO (BufferMode (LineBuffering), hSetBuffering, stderr)
+import System.Exit ( ExitCode(ExitFailure), exitSuccess, exitWith )
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
 main _prog _args = do
-  hSetBuffering stderr LineBuffering
   code <-
     runServer =<< serverDefinition
   case code of
