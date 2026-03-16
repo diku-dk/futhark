@@ -42,6 +42,9 @@ data DistInput
 
 type DistInputs = [(VName, DistInput)]
 
+nubInputs :: DistInputs -> DistInputs
+nubInputs = L.nubBy (\a b -> fst a == fst b)
+
 -- | The type of a 'DistInput'.  This corresponds to the parameter
 -- type of the original map nest.
 distInputType :: DistInput -> Type
@@ -144,7 +147,7 @@ instance Pretty Distributed where
       res' = stack $ map onRes (M.toList resmap) <> map onRep reps
       stms' = stack $ map pretty stms
       onRes (rt, binds) =
-        stack [ "let" <+> pretty v <+> "=" <+> pretty rt | v <- binds ]
+        stack ["let" <+> pretty v <+> "=" <+> pretty rt | v <- binds]
       onRep (v, Left se) =
         "let" <+> pretty v <+> "=" <+> "rep" <> parens (pretty se)
       onRep (v, Right tag) =
@@ -155,7 +158,7 @@ resultMap avail_inputs stms pat res = foldMap f $ concatMap distStmResult stms
   where
     pes = M.fromList [(patElemName pe, pe) | stm <- stms, pe <- concatMap (patElems . stmPat) (distStmStms stm)]
     f (DistResult rt _ v) =
-      case maybe [] findRess  $ M.lookup v pes of
+      case maybe [] findRess $ M.lookup v pes of
         [] -> mempty
         binds -> M.singleton rt binds
     findRess (PatElem v v_t) = do
@@ -194,7 +197,7 @@ distributeBody outer_scope w param_inputs body =
         L.mapAccumL distributeStm (ResTag (length param_inputs), param_inputs) $
           stmsToList $
             bodyStms body
-   in (avail_inputs, groupScalarStms (bodyResult body) avail_inputs stms)
+   in (avail_inputs, groupScalarStms (bodyResult body) stms)
   where
     bound_outside = namesFromList $ M.keys outer_scope
     distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
@@ -212,44 +215,62 @@ distributeBody outer_scope w param_inputs body =
               $ used_free
           stm' =
             DistStm
-              (nubOrd $ used_free_types <> used_free)
+              (nubInputs $ used_free_types <> used_free)
               (zipWith3 DistResult new_tags (map distType $ patTypes pat) (patNames pat))
               (SingleStm stm)
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
 
 -- | Is this a scalar operation that can be grouped with other scalar
 -- operations into a single parallel traversal?
--- TODO : work on this
 isScalarDistStm :: DistStm -> Bool
-isScalarDistStm (DistStm _ _ (SingleStm (Let _ _ (BasicOp e)))) = isScalarBasicOp e
-  where
-    isScalarBasicOp BinOp {} = True
-    isScalarBasicOp CmpOp {} = True
-    isScalarBasicOp ConvOp {} = True
-    isScalarBasicOp UnOp {} = True
-    isScalarBasicOp ArrayLit {} = True
-    isScalarBasicOp _ = False
+isScalarDistStm ds@(DistStm _ _ (SingleStm stm)) =
+  not (isParallelStm stm) && hasRegularResults ds
 isScalarDistStm _ = False
 
-groupScalarStms :: Result -> [(VName, DistInput)] -> [DistStm] -> [DistStm]
-groupScalarStms _ _ [] = []
-groupScalarStms bodyRes avail_inputs (d : ds)
+isParallelStm :: Stm SOACS -> Bool
+isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
+  where
+    isMap BasicOp {} = False
+    -- TODO: do better
+    isMap Apply {} = True
+    isMap Match {} = False
+    isMap (Loop _ _ body) = (any isParallelStm . bodyStms) body
+    isMap (WithAcc _ lam) = (any isParallelStm . bodyStms) $ lambdaBody lam
+    isMap Op {} = True
+
+hasRegularResults :: DistStm -> Bool
+hasRegularResults (DistStm _ res _) =
+  all isRegularRes res
+  where
+    isRegularRes (DistResult _ (DistType _ (Rank r) _) _) = r == 0
+
+-- isUniformDistStm :: Names -> DistStm -> Bool
+-- isUniformDistStm bound_outside (DistStm inps res _) =
+--   all isUnifromRes res && all isUniformInp inps
+--   where
+--     isUnifromRes (DistResult _ (DistType _ (Rank r) _) _) = r == 0
+--     isUniformInp (_, DistInputFree _ _) = True
+--     isUniformInp (_, DistInput _ t) = fst (splitIrregDims bound_outside t) == mempty
+
+groupScalarStms :: Result -> [DistStm] -> [DistStm]
+groupScalarStms _ [] = []
+groupScalarStms bodyRes (d : ds)
   | isScalarDistStm d =
       let (moreScalars, rest) = span isScalarDistStm ds
           scalars = d : moreScalars
-       in mergeGroup bodyRes scalars rest : groupScalarStms bodyRes avail_inputs rest
-  | otherwise = d : groupScalarStms bodyRes avail_inputs ds
+       in mergeGroup bodyRes scalars rest : groupScalarStms bodyRes rest
+  | otherwise = d : groupScalarStms bodyRes ds
 
 -- | Merge a group of scalar 'DistStm's into a single one.
 mergeGroup :: Result -> [DistStm] -> [DistStm] -> DistStm
-mergeGroup _ [d] _ = d
+mergeGroup _ [DistStm inp res body] _ = DistStm inp res body
 mergeGroup bodyRes ds rest =
   let resTags =
         S.fromList $ concatMap (map distResTag . distStmResult) ds
       isInternal (_, DistInput rt _) = rt `S.member` resTags
       isInternal _ = False
       externalInputs =
-        L.nubBy (\a b -> fst a == fst b) $
+        nubInputs $
           filter (not . isInternal) $
             concatMap distStmInputs ds
       externalResults =
@@ -261,21 +282,24 @@ mergeGroup bodyRes ds rest =
 
 -- | A result is external if it is used by a subsequent 'DistStm' or
 -- by the body result.
-isExternal :: Result  -> [DistStm] -> DistResult -> Bool
+isExternal :: Result -> [DistStm] -> DistResult -> Bool
 isExternal bodyRes rest (DistResult rt _ rn) =
-  rt `S.member` usedByRest || rn `S.member` bodyResVars
+  rt `S.member` usedByRest || rn `S.member` bodyResVars || rn `S.member` bodyResCerts
   where
     usedByRest =
       S.fromList
         [rt' | (_, DistInput rt' _) <- concatMap distStmInputs rest]
     bodyResVars =
       S.fromList $
-        mapMaybe 
+        mapMaybe
           ( \(SubExpRes _ se) -> case se of
               Var v -> Just v
               _ -> Nothing
           )
           bodyRes
+    bodyResCerts =
+      S.fromList $
+        concatMap (\(SubExpRes cs _) -> unCerts cs) bodyRes
 
 -- | The input we are mapping over in 'distributeMap'.
 data MapArray t
