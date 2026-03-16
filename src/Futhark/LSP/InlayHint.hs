@@ -40,9 +40,8 @@ resolveInlayHint v = case fromJSON v of
       }
 
 getInlayHints :: Range -> State -> FilePath -> [InlayHint]
-getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMaybe [] $ do
-  Debug.traceM "getInlayHints running"
-  imports <- lpImports <$> stateProgram state
+getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = Debug.trace "getInlayHints entered" $ fromMaybe [] $ do
+  imports <- lpImports <$> stateProgram state -- crash occurs here
   let mapping = getStaleMapping state filepath
   posStart <- toStalePos mapping $ mkPos l1 c1
   posEnd <- toStalePos mapping $ mkPos l2 c2

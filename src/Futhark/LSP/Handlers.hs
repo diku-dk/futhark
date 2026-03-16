@@ -62,7 +62,6 @@ import Language.LSP.Server (Handlers, LspM, LspT, getVirtualFile, notificationHa
 import Language.LSP.VFS (file_text)
 import Text.Read (readMaybe)
 import GHC.Conc.Sync (TVar)
-import System.Mem (performMajorGC)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
@@ -273,8 +272,7 @@ onTextDocumentInlayHint state_ref =
 
           state <- tryTakeStateFromIORef state_ref filepath
           logWithSeverity Debug <& "Took state from IORef"
-          liftIO $ performMajorGC
-          logWithSeverity Debug <& "Survived major gc"
+          -- crash occurs here
           let result = maybe [] (getInlayHints textRange state) filepath
 
           logWithSeverity Debug <& "Inlay hints: " <> showText result
