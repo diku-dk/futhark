@@ -8,7 +8,7 @@ module Futhark.LSP.InlayHint (getInlayHints, resolveInlayHint) where
 import Data.Aeson (FromJSON, Result (..), ToJSON, Value, fromJSON, toJSON)
 import Data.Function ((&))
 import Data.Loc (Loc (Loc), Pos (Pos))
-import Data.Map qualified as Map
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -62,8 +62,8 @@ getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMay
 
   pure $
     allBindings imports
-      & Map.filter (boundToInRange (Loc posStart posEnd))
-      & Map.elems
+      & M.filter (boundToInRange (Loc posStart posEnd))
+      & M.elems
       & mapMaybe inferredTerms
       & concatMap inlayHint
   where

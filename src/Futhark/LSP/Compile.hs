@@ -6,6 +6,7 @@ module Futhark.LSP.Compile (tryTakeStateFromIORef, tryReCompile) where
 
 import Colog.Core (Severity (Debug, Warning), (<&))
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Futhark.Compiler.Program (LoadedProg, lpFilePaths, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
@@ -18,7 +19,6 @@ import Language.LSP.Protocol.Types
     toNormalizedUri,
   )
 import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
-import Data.IORef (IORef, writeIORef, readIORef)
 
 -- | Try to take state from IORef, if it's empty, try to compile.
 tryTakeStateFromIORef :: IORef State -> Maybe FilePath -> LspT () IO State

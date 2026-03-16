@@ -28,7 +28,7 @@ import Data.Text.Mixed.Rope qualified as R
 import Futhark.Compiler.Program (VFS)
 import Futhark.Eval (Evaluation (abort), InterpreterConfig (InterpreterConfig), newFutharkiState, runEvalRecordRef, runExpr)
 import Futhark.LSP.CommandType qualified as CommandType
-import Futhark.LSP.Tool (transformVFS, Execute)
+import Futhark.LSP.Tool (Execute, transformVFS)
 import Futhark.Util (showText)
 import Futhark.Util.Pretty (docText, plural, pretty, vcat)
 import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))

@@ -28,15 +28,12 @@ import Language.LSP.Protocol.Types
     MarkupKind (MarkupKind_PlainText),
     Position (..),
     Range (..),
-    TextDocumentContentChangeEvent (TextDocumentContentChangeEvent),
-    TextDocumentContentChangePartial (..),
     TextDocumentIdentifier,
     type (|?) (..),
   )
 import Language.LSP.Server (runServerWithHandles)
 import Language.LSP.Test
   ( Session,
-    changeDoc,
     createDoc,
     defaultConfig,
     documentContents,
@@ -48,14 +45,13 @@ import Language.LSP.Test
     getDefinitions,
     getHover,
     message,
-    runSessionWithHandles, getCurrentDiagnostics,
+    runSessionWithHandles,
   )
 import NeatInterpolation (text)
 import System.IO (hClose)
 import System.Process (createPipe)
 import Test.Tasty (TestName, TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-import qualified Debug.Trace as Debug
 
 runServerSessionPair :: Session a -> IO a
 runServerSessionPair session = do
@@ -192,6 +188,7 @@ testInlayTypeHint = serverTestCase "Inlay type hint" $
   do
     docIdent <- createMainDoc mainContents
     hints <- getAndResolveInlayHints docIdent fullRange
+    -- TODO: Finish the test
 
     pure ()
   where
@@ -201,42 +198,7 @@ testInlayTypeHint = serverTestCase "Inlay type hint" $
           _end = Position {_line = 2, _character = 0}
         }
 
-    mainContents = "def plus5 x = x + 5i32"
-
-testInlayTypeHintTypeChangeCrash :: TestTree
-testInlayTypeHintTypeChangeCrash = serverTestCase "Inlay type hint crash on type change" $ do
-  docIdent <- createMainDoc mainContents
-
-  updateIdeInfo docIdent
-
-  changeDoc docIdent changes
-
-  updateIdeInfo docIdent
-
-  pure ()
-  where
-    updateIdeInfo docIdent = do
-      _ <- getAndResolveInlayHints docIdent fullRange
-      _ <- getCurrentDiagnostics docIdent
-      pure ()
-    mainContents = "def x = \nlet y = 0 in y + y"
-    fullRange =
-      Range
-        { _start = Position {_line = 0, _character = 0},
-          _end = Position {_line = 2, _character = 0}
-        }
-    changes =
-      [ TextDocumentContentChangeEvent
-          . InL
-          $ TextDocumentContentChangePartial
-            { _rangeLength = Nothing,
-              _text = ".",
-              _range = Range 
-                { _end = Position 0 17
-                , _start= Position 0 17
-                }
-            }
-      ]
+    mainContents = "def plus5 x : i32 = x + 5i32"
 
 tests :: TestTree
 tests =
@@ -245,5 +207,6 @@ tests =
     [ testHoverInformation,
       testDefinition,
       testFormatting,
-      testEvaluationComment
+      testEvaluationComment,
+      testInlayTypeHint
     ]

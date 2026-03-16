@@ -34,7 +34,7 @@ import Language.LSP.Server
     type (<~>) (Iso),
   )
 import System.Exit
-import System.IO (hSetBuffering, BufferMode (LineBuffering), stderr)
+import System.IO (BufferMode (LineBuffering), hSetBuffering, stderr)
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()

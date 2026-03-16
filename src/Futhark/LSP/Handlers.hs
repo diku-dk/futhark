@@ -14,6 +14,7 @@ import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Value (Array, String))
 import Data.Bifunctor (bimap, first)
 import Data.Function ((&))
+import Data.IORef (IORef)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -61,7 +62,6 @@ import Language.LSP.Protocol.Types
 import Language.LSP.Server (Handlers, LspM, LspT, getVirtualFile, notificationHandler, requestHandler)
 import Language.LSP.VFS (file_text)
 import Text.Read (readMaybe)
-import Data.IORef (IORef)
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SMethod_Initialized $ \_msg ->
@@ -266,7 +266,7 @@ onTextDocumentInlayHint state_ref =
   requestHandler SMethod_TextDocumentInlayHint $ \request respond ->
     let parameters = request ^. params
      in do
-          let filepath = uriToFilePath $ parameters ^. textDocument ^. uri
+          let filepath = uriToFilePath $ parameters ^. (textDocument . uri)
           let textRange = parameters ^. range
           logWithSeverity Debug <& "Inlay hints request for range: " <> showText textRange
 
@@ -280,19 +280,18 @@ onTextDocumentInlayHint state_ref =
 onTextDocumentInlayHintResolve :: Handlers (LspM ())
 onTextDocumentInlayHintResolve =
   requestHandler SMethod_InlayHintResolve $ \request respond ->
-    let respondFailure msg = 
+    let respondFailure msg =
           respond . Left $
             TResponseError
               { _xdata = Nothing,
                 _message = msg,
                 _code = InR ErrorCodes_InvalidParams
-
               }
-    in case request ^. params ^. data_ of
-      Nothing -> respondFailure "No data associated with inlay hint resolve"
-      Just val -> case resolveInlayHint val of
-        Left msg -> respondFailure msg
-        Right hint -> respond $ Right hint
+     in case request ^. (params . data_) of
+          Nothing -> respondFailure "No data associated with inlay hint resolve"
+          Just val -> case resolveInlayHint val of
+            Left msg -> respondFailure msg
+            Right hint -> respond $ Right hint
 
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is

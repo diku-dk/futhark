@@ -8,4 +8,3 @@ contains a pos =
   case locOf a of
     Loc start end -> pos >= start && pos <= end
     NoLoc -> False
-
