@@ -194,7 +194,10 @@ testInlayTypeHint =
     [ defParamHint,
       letHint,
       noSizeHint,
-      loopHint
+      loopHint,
+      defReturnHint,
+      noDefConstantHint,
+      lambdaArgHint
     ]
   where
     fullRange =
@@ -216,11 +219,28 @@ testInlayTypeHint =
             else
               zip hints expectedHints
                 & mapM_ (\(h, (p, l)) -> expectHint h l p)
+    lambdaArgHint =
+      hintTestCase
+        "lambda argument hint"
+        "def lambda = \\ x -> x + 0i32"
+        [(Position 0 15, "("), (Position 0 16, ": i32)")]
+    -- TODO: Remove this test as soon as this is possible
+    noDefConstantHint =
+      hintTestCase
+        "def constant no hint"
+        "def pi = 3"
+        []
+    defReturnHint =
+      hintTestCase
+        "def return hint"
+        "def twice (x: i32) = x + x"
+        [(Position 0 18, ": i32")]
     loopHint =
       hintTestCase
         "loop hint"
         "def factorial (n: i32) : i32 = loop result = 1 for i < n do result * (i + 1)"
         [(Position 0 36, "("), (Position 0 42, ": i32)")]
+    -- this is on purpose, all sizes have type i64
     noSizeHint =
       hintTestCase
         "no size hint"
