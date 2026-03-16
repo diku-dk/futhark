@@ -11,6 +11,7 @@ import Control.Concurrent (forkIO)
 import Control.Lens ((^.))
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
+import Data.Function ((&))
 import Data.Functor (void)
 import Data.Text (Text)
 import Futhark.CLI.LSP (serverDefinition)
@@ -205,37 +206,36 @@ testInlayTypeHint =
       _position @?= p
       _label @?= InL l
       _kind @?= Just InlayHintKind_Type
-    loopHint = serverTestCase "loop hint" $
+    hintTestCase name mainDoc expectedHints = serverTestCase name $
       do
-        docIdent <- createMainDoc "def factorial (n: i32) : i32 = loop result = 1 for i < n do result * (i + 1)"
+        docIdent <- createMainDoc mainDoc
         hints <- getAndResolveInlayHints docIdent fullRange
-        liftIO $ case hints of
-          [parenHint, typeHint] -> do
-            expectHint parenHint "(" (Position 0 36)
-            expectHint typeHint ": i32)" (Position 0 42)
-          _ -> assertFailure $ "Unexpected Inlay Hints: " ++ show hints
-    noSizeHint = serverTestCase "no size hint" $
-      do
-        docIdent <- createMainDoc "def sz [n] 'a (_: [n]a) : i64 = n"
-        hints <- getAndResolveInlayHints docIdent fullRange
-        liftIO $ hints @?= []
-    letHint = serverTestCase "let hint" $
-      do
-        docIdent <- createMainDoc "def foo : bool = let f = false in true && f"
-        hints <- getAndResolveInlayHints docIdent fullRange
-        liftIO $ case hints of
-          [typeHint] -> do
-            expectHint typeHint ": bool" (Position 0 22)
-          _ -> assertFailure $ "Unexpected Inlay Hints: " ++ show hints
-    defParamHint = serverTestCase "def param hint" $
-      do
-        docIdent <- createMainDoc "def plus5 x : i32 = x + 5i32"
-        hints <- getAndResolveInlayHints docIdent fullRange
-        liftIO $ case hints of
-          [parenHint, typeHint] -> do
-            expectHint parenHint "(" (Position 0 10)
-            expectHint typeHint ": i32)" (Position 0 11)
-          _ -> assertFailure $ "Unexpected Inlay Hints: " ++ show hints
+        liftIO $
+          if length hints /= length expectedHints
+            then assertFailure $ "Unexpected inlay hints: " ++ show hints
+            else
+              zip hints expectedHints
+                & mapM_ (\(h, (p, l)) -> expectHint h l p)
+    loopHint =
+      hintTestCase
+        "loop hint"
+        "def factorial (n: i32) : i32 = loop result = 1 for i < n do result * (i + 1)"
+        [(Position 0 36, "("), (Position 0 42, ": i32)")]
+    noSizeHint =
+      hintTestCase
+        "no size hint"
+        "def sz [n] 'a (_: [n]a) : i64 = n"
+        []
+    letHint =
+      hintTestCase
+        "let hint"
+        "def foo : bool = let f = false in true && f"
+        [(Position 0 22, ": bool")]
+    defParamHint =
+      hintTestCase
+        "def param hint"
+        "def plus5 x : i32 = x + 5i32"
+        [(Position 0 10, "("), (Position 0 11, ": i32)")]
 
 tests :: TestTree
 tests =
