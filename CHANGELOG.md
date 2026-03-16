@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark fmt` prints module types better.
+
+* New server protocol commands: `rank`, `elemtype`, `new_array`, `set`.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `i64.set_bit`/`u64.set_bit` would produce wrong results in C-based backends. (#2396)
+
+## [0.25.36]
+
+### Added
+
 * `futhark lsp` supports running evaluation comments in the interpreter,
     implemented by VegOwOtenks.
 
@@ -18,16 +34,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Array and field updates can now be chained, e.g., `x with [i].f = y`,
   including in operator sections. Work by Aziz Rmadi.
 
-* New server protocol commands: `index` and `shape`.
+* New server protocol commands: `index`, `shape`, and `attributes`.
 
 * FutharkScript now supports (barely) array indexing.
 
 * `futhark autotune` now shows a progress bar when running in a terminal. Work
   by Nader Rahhal.
 
-### Removed
-
-### Changed
+* The C API now has functions for creating and updating arrays of opaque
+  objects. (#2383, #2384)
 
 ### Fixed
 

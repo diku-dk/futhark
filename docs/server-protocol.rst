@@ -175,18 +175,45 @@ this command prints *names* and not *integers*.
 
 Corresponds to :c:func:`futhark_get_tuning_param_class`.
 
+``attributes`` *entry*
+......................
+
+Print the attributes of the provided entry point in no particular order. Does
+not include the attribute brackets used in the Futhark syntax, meaning that an
+attribute written as ``#[foo]`` becomes simply ``"foo"`` in the output of this
+command.
+
 Array Commands
 ~~~~~~~~~~~~~~
 
-``elemtype`` *v*
-....................
+``rank`` *t*
+............
 
-Print the typename of the elements of array-typed variable *v*.
+Print the rank of array type *t*.
+
+``elemtype`` *t*
+................
+
+Print the typename of the elements of array type *t*.
+
+``new_array`` *v0* *t* *s0* ... *sN-1* *v1* ... *vM*
+....................................................
+
+Create a new variable *v0* of type *t*, which must be an array type of rank *N*.
+The size of each dimension of the array is given by *s0* ... *sN-1*, and the
+values by *v1* ... *vM* in row-major order, where *M* is the product of the
+dimension sizes.
+
+``set`` *v0* *v1* *i0* ... *iN-1*
+.................................
+
+Perform an in-place replacement on array-typed variable *v0* of rank *N* at
+indices *i0* ... *iN-1* with the value of variable *v1*.
 
 ``shape`` *v*
-....................
+.............
 
-Print the shape of array-typed variable *v* as space-separated integers.
+Print the shape of array-typed variable *v*, with one integer per line.
 
 ``index`` *v0* *v1* *i0* ... *iN-1*
 ...................................

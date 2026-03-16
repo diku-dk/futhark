@@ -9,6 +9,7 @@ where
 import Control.Monad
 import Control.Monad.Reader (asks)
 import Data.Maybe
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.Backends.GenericC.Types (opaqueToCType, valueTypeToCType)
@@ -135,8 +136,8 @@ onEntryPoint ::
   Name ->
   Function op ->
   CompilerM op s (Maybe (C.Definition, (T.Text, Manifest.EntryPoint)))
-onEntryPoint _ _ _ (Function Nothing _ _ _) = pure Nothing
-onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename results args)) outputs inputs _) = inNewFunction $ do
+onEntryPoint _ _ _ (Function Nothing _ _ _ _) = pure Nothing
+onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename results args)) outputs inputs attrs _) = inNewFunction $ do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -214,7 +215,8 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
             -- and what is "results/args" is different between the
             -- manifest and ImpCode.
             Manifest.entryPointOutputs = map outputManifest results,
-            Manifest.entryPointInputs = map inputManifest args
+            Manifest.entryPointInputs = map inputManifest args,
+            Manifest.entryPointAttrs = map prettyText (S.toList (unAttrs attrs))
           }
 
   pure $ Just (cdef, (nameToText ename, manifest))
