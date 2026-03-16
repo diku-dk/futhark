@@ -271,8 +271,6 @@ onTextDocumentInlayHint state_ref =
           logWithSeverity Debug <& "Inlay hints request for range: " <> showText textRange
 
           state <- tryTakeStateFromIORef state_ref filepath
-          logWithSeverity Debug <& "Took state from IORef"
-          -- crash occurs here
           let result = maybe [] (getInlayHints textRange state) filepath
 
           logWithSeverity Debug <& "Inlay hints: " <> showText result

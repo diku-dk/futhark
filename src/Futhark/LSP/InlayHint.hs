@@ -18,29 +18,43 @@ import Futhark.LSP.State (State (stateProgram), getStaleMapping)
 import Futhark.Util.Loc (Located (locOf), contains)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Query (BoundTo (BoundTerm), allBindings)
-import Language.LSP.Protocol.Types (InlayHint (..), Position (..), Range (Range), UInt, type (|?) (InL), InlayHintKind (InlayHintKind_Type))
-import qualified Debug.Trace as Debug
+import Language.LSP.Protocol.Types (InlayHint (..), InlayHintKind (InlayHintKind_Type), Position (..), Range (Range), UInt, type (|?) (InL))
 
-newtype InlayTypeHintPayload = InlayTypeHintPayload (UInt, UInt, Text)
+newtype InlayTypeHintPayload
+  = -- start pos | end pos, type text
+    InlayTypeHintPayload (Either (UInt, UInt) (UInt, UInt, Text))
   deriving newtype (ToJSON, FromJSON)
 
 resolveInlayHint :: Value -> Either Text InlayHint
 resolveInlayHint v = case fromJSON v of
   Error msg -> Left $ T.pack msg
-  Success (InlayTypeHintPayload (l, c, hint)) ->
-    Right $ InlayHint
-      { _data_ = Nothing,
-        _paddingRight = Nothing,
-        _paddingLeft = Nothing,
-        _tooltip = Nothing,
-        _textEdits = Nothing,
-        _kind = Just InlayHintKind_Type,
-        _label = InL hint,
-        _position = Position l c
-      }
+  Success (InlayTypeHintPayload (Left (l, c))) ->
+    Right $
+      InlayHint
+        { _data_ = Just v,
+          _paddingRight = Nothing,
+          _paddingLeft = Nothing,
+          _tooltip = Nothing,
+          _textEdits = Nothing,
+          _kind = Just InlayHintKind_Type,
+          _label = InL "(",
+          _position = Position l c
+        }
+  Success (InlayTypeHintPayload (Right (l, c, hint))) ->
+    Right $
+      InlayHint
+        { _data_ = Just v,
+          _paddingRight = Nothing,
+          _paddingLeft = Nothing,
+          _tooltip = Nothing,
+          _textEdits = Nothing,
+          _kind = Just InlayHintKind_Type,
+          _label = InL $ ": " <> hint <> ")",
+          _position = Position l c
+        }
 
 getInlayHints :: Range -> State -> FilePath -> [InlayHint]
-getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = Debug.trace "getInlayHints entered" $ fromMaybe [] $ do
+getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = fromMaybe [] $ do
   imports <- lpImports <$> stateProgram state -- crash occurs here
   let mapping = getStaleMapping state filepath
   posStart <- toStalePos mapping $ mkPos l1 c1
@@ -51,31 +65,63 @@ getInlayHints (Range (Position l1 c1) (Position l2 c2)) state filepath = Debug.t
       & Map.filter (boundToInRange (Loc posStart posEnd))
       & Map.elems
       & mapMaybe inferredTerms
-      & map inlayHint
+      & concatMap inlayHint
   where
-    inlayHint (Pos _ line col _, typ) =
-      InlayHint
-        { _textEdits = Nothing,
-          _paddingRight = Nothing,
-          _paddingLeft = Nothing,
-          _tooltip = Nothing,
-          _position =
-            Position
-              { _line = fromIntegral line - 1,
-                _character = fromIntegral col
+    inlayHint (Pos _ startLine startCol _, Pos _ endLine endCol _, typ) =
+      let lspEndLine = fromIntegral endLine - 1
+          -- the end is exclusive
+          lspEndCol = fromIntegral endCol - 1
+          lspStartLine = fromIntegral startLine - 1
+          -- it needs to start before the identifier
+          lspStartCol = fromIntegral startCol - 1
+       in [ InlayHint
+              { _textEdits = Nothing,
+                _paddingRight = Nothing,
+                _paddingLeft = Nothing,
+                _tooltip = Nothing,
+                _position =
+                  Position
+                    { -- translate line for LSP
+                      _line = lspEndLine,
+                      -- end is exclusive
+                      _character = lspEndCol
+                    },
+                _data_ =
+                  Just
+                    . toJSON
+                    . InlayTypeHintPayload
+                    . Right
+                    $ (lspEndLine, lspEndCol, prettyText typ),
+                _label = InL $ ": " <> prettyText typ <> ")",
+                _kind = Just InlayHintKind_Type
               },
-          _data_ =
-            Just
-              . toJSON
-              . InlayTypeHintPayload
-              $ (fromIntegral line, fromIntegral col, prettyText typ),
-          _label = InL $ prettyText typ,
-          _kind = Nothing
-        }
+            InlayHint
+              { _position =
+                  Position
+                    { _character = lspStartCol,
+                      _line = lspStartLine
+                    },
+                _label = InL "(",
+                _kind = Just InlayHintKind_Type,
+                _textEdits = Nothing,
+                _tooltip = Nothing,
+                _paddingLeft = Nothing,
+                _paddingRight = Nothing,
+                _data_ =
+                  Just
+                    . toJSON
+                    . InlayTypeHintPayload
+                    . Left
+                    $ (lspStartLine, lspStartCol)
+              }
+          ]
     inferredTerms = \case
-      BoundTerm inferredType Nothing (Loc _ e) -> Just (e, inferredType)
+      BoundTerm inferredType Nothing (Loc s e) -> Just (s, e, inferredType)
       _ -> Nothing
     boundToInRange loc bound = loc `contains` start
       where
         Loc start _ = locOf bound
-    mkPos l c = Pos filepath (fromIntegral l) (fromIntegral c) (-1)
+    mkPos :: UInt -> UInt -> Pos
+    mkPos l c = Pos filepath (1 + fromIntegral l) (1 + fromIntegral c) (-1)
+
+-- increment by one: Pos counts from one onwards, LSP starts at zero
