@@ -24,6 +24,7 @@ import Language.LSP.Protocol.Types
     FormattingOptions (FormattingOptions),
     Hover (Hover),
     InlayHint (..),
+    InlayHintKind (InlayHintKind_Type),
     LanguageKind (LanguageKind_Custom),
     Location (..),
     MarkupContent (..),
@@ -31,7 +32,7 @@ import Language.LSP.Protocol.Types
     Position (..),
     Range (..),
     TextDocumentIdentifier,
-    type (|?) (..), InlayHintKind (InlayHintKind_Type),
+    type (|?) (..),
   )
 import Language.LSP.Server (runServerWithHandles)
 import Language.LSP.Test
@@ -189,10 +190,10 @@ testInlayTypeHint :: TestTree
 testInlayTypeHint =
   testGroup
     "Inlay type hint"
-    [ defParamHint
-    , letHint
-    , noSizeHint
-    , loopHint
+    [ defParamHint,
+      letHint,
+      noSizeHint,
+      loopHint
     ]
   where
     fullRange =
@@ -200,7 +201,7 @@ testInlayTypeHint =
         { _start = Position minBound minBound,
           _end = Position maxBound maxBound
         }
-    expectHint InlayHint { .. } l p = do
+    expectHint InlayHint {..} l p = do
       _position @?= p
       _label @?= InL l
       _kind @?= Just InlayHintKind_Type

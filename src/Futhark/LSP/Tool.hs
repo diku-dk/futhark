@@ -40,6 +40,7 @@ import Language.Futhark.Query
     boundLoc,
     termBindingType,
   )
+import Language.LSP.Logging (logToLogMessage)
 import Language.LSP.Protocol.Types
   ( ErrorCodes,
     Hover (Hover),
@@ -59,7 +60,6 @@ import Language.LSP.Protocol.Types
 import Language.LSP.Server (LspM, LspT, MonadLsp, getVirtualFile)
 import Language.LSP.VFS (VFS, VirtualFile, vfsMap, virtualFileText, virtualFileVersion)
 import Language.LSP.VFS qualified as VFS
-import Language.LSP.Logging (logToLogMessage)
 
 -- | Request Handler code usually runs in this monad
 type Execute a = ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) a
