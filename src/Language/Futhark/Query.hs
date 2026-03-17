@@ -26,6 +26,7 @@ import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Traversals
 import System.FilePath.Posix qualified as Posix
+import Control.Applicative ((<|>))
 
 type TypeAscription = TypeExp (ExpBase Info VName) VName
 
@@ -166,12 +167,12 @@ valBindDefs vbind =
       <> mconcat (map (patternDefs (TermVar TermBindPat)) (valBindParams vbind))
       <> expDefs (valBindBody vbind)
   where
-    term_fun = TermFun vbind_t vbind_ret_t vbind_decl_t body_start
-    body_start = do
-      (_, last_pat) <- unsnoc $ valBindParams vbind
-      case locOf last_pat of
-        NoLoc -> Nothing
-        Loc _ e -> Just e
+    term_fun = TermFun vbind_t vbind_ret_t vbind_decl_t args_end
+    args_end = 
+      (locPos . locOf . snd =<< unsnoc (valBindParams vbind))
+      <|> (locPos . locOf . valBindNameLoc $ vbind)
+    locPos NoLoc = Nothing
+    locPos (Loc _ e) = Just e
     vbind_ret_t = unInfo $ valBindRetType vbind
     vbind_t =
       funType (valBindParams vbind) $ unInfo $ valBindRetType vbind
