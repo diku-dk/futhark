@@ -222,7 +222,8 @@ testInlayTypeHint =
         "lambda argument hint"
         "def lambda = \\ x -> x + 0i32"
         [(Position 0 15, "("), (Position 0 16, ": i32)")]
-    -- TODO: Remove this test as soon as this is possible
+    -- TODO: This test will fail as soon as it is possible to retrieve
+    -- source locations for definitions without parameters
     noDefConstantHint =
       hintTestCase
         "def constant no hint"
