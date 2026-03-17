@@ -68,15 +68,15 @@ data DistResult = DistResult {distResTag :: ResTag, distResType :: DistType, dis
 
 -- | The body of a distributed statement.
 data DistBody
-  = -- | A single statement that may involve parallel operations.
-    SingleStm (Stm SOACS)
-  | -- | Multiple scalar operations grouped into a single traversal
-    ScalarBatch [Stm SOACS]
+  = -- | A single statement That may involve parallel operations or produces non unifrom array.
+    ParallelStm (Stm SOACS)
+  | -- | Single or Multiple scalar operations grouped into a single traversal
+    ScalarStm [Stm SOACS]
   deriving (Eq, Ord, Show)
 
 distBodyStms :: DistBody -> [Stm SOACS]
-distBodyStms (SingleStm stm) = [stm]
-distBodyStms (ScalarBatch stms) = stms
+distBodyStms (ParallelStm stm) = [stm]
+distBodyStms (ScalarStm stms) = stms
 
 data DistStm = DistStm
   { distStmInputs :: DistInputs,
@@ -197,7 +197,7 @@ distributeBody outer_scope w param_inputs body =
         L.mapAccumL distributeStm (ResTag (length param_inputs), param_inputs) $
           stmsToList $
             bodyStms body
-   in (avail_inputs, groupScalarStms (bodyResult body) stms)
+   in (avail_inputs, classifyStms (bodyResult body) stms)
   where
     bound_outside = namesFromList $ M.keys outer_scope
     distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
@@ -217,13 +217,14 @@ distributeBody outer_scope w param_inputs body =
             DistStm
               (nubInputs $ used_free_types <> used_free)
               (zipWith3 DistResult new_tags (map distType $ patTypes pat) (patNames pat))
-              (SingleStm stm)
+              (ParallelStm stm)
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
 
 -- | Is this a scalar operation that can be grouped with other scalar
 -- operations into a single parallel traversal?
+-- TODO: 
 isScalarDistStm :: DistStm -> Bool
-isScalarDistStm ds@(DistStm _ _ (SingleStm stm)) =
+isScalarDistStm ds@(DistStm _ _ (ParallelStm stm)) =
   not (isParallelStm stm) && hasRegularResults ds
 isScalarDistStm _ = False
 
@@ -252,18 +253,21 @@ hasRegularResults (DistStm _ res _) =
 --     isUniformInp (_, DistInputFree _ _) = True
 --     isUniformInp (_, DistInput _ t) = fst (splitIrregDims bound_outside t) == mempty
 
-groupScalarStms :: Result -> [DistStm] -> [DistStm]
-groupScalarStms _ [] = []
-groupScalarStms bodyRes (d : ds)
+-- TODO: Change this function. We will probably 
+-- clasify in distributeBody and then we try to group 
+-- scalarStms. 
+classifyStms :: Result -> [DistStm] -> [DistStm]
+classifyStms _ [] = []
+classifyStms bodyRes (d : ds)
   | isScalarDistStm d =
       let (moreScalars, rest) = span isScalarDistStm ds
           scalars = d : moreScalars
-       in mergeGroup bodyRes scalars rest : groupScalarStms bodyRes rest
-  | otherwise = d : groupScalarStms bodyRes ds
+       in mergeGroup bodyRes scalars rest : classifyStms bodyRes rest
+  | otherwise = d : classifyStms bodyRes ds
 
 -- | Merge a group of scalar 'DistStm's into a single one.
 mergeGroup :: Result -> [DistStm] -> [DistStm] -> DistStm
-mergeGroup _ [DistStm inp res body] _ = DistStm inp res body
+mergeGroup _ [DistStm inp res (ParallelStm stm)] _ = DistStm inp res (ScalarStm [stm])
 mergeGroup bodyRes ds rest =
   let resTags =
         S.fromList $ concatMap (map distResTag . distStmResult) ds
@@ -278,7 +282,7 @@ mergeGroup bodyRes ds rest =
           filter (isExternal bodyRes rest) $
             concatMap distStmResult ds
       allStms = concatMap distStmStms ds
-   in DistStm externalInputs externalResults (ScalarBatch allStms)
+   in DistStm externalInputs externalResults (ScalarStm allStms)
 
 -- | A result is external if it is used by a subsequent 'DistStm' or
 -- by the body result.

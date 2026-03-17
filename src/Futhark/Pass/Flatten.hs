@@ -781,9 +781,9 @@ doSegScan scans flags elems =
    in genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) (scanNeutral scan) flags elems
 
 transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
-transformDistStm segments env (DistStm inps res (ScalarBatch stms)) =
+transformDistStm segments env (DistStm inps res (ScalarStm stms)) =
   transformScalarStms segments env inps res (stmsFromList stms)
-transformDistStm segments env (DistStm inps res (SingleStm stm)) = do
+transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
   case stm of
     Let pat aux (BasicOp e) -> do
       let ~[res'] = res
