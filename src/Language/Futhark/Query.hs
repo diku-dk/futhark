@@ -14,6 +14,7 @@ module Language.Futhark.Query
     termBindingType,
     TermBinding (..),
     TermBindSrc (..),
+    TermFunData (..),
   )
 where
 
@@ -45,7 +46,8 @@ data TermFunData
     termFunRetType :: ResRetType,
     termFunAscription :: Maybe TypeAscription,
     termFunArgEnd :: Maybe Pos,
-    termFunNameEnd :: Maybe Pos
+    termFunNameEnd :: Maybe Pos,
+    termFunTypeParams :: [TypeParamBase VName]
   }
   deriving (Eq, Show)
 
@@ -155,7 +157,8 @@ expDefs e =
                       termFunRetType = ret,
                       termFunAscription = tasc,
                       termFunArgEnd = start_pos,
-                      termFunNameEnd = name_end
+                      termFunNameEnd = name_end,
+                      termFunTypeParams = tparams
                     }
               name_end = case locOf name_loc of
                 NoLoc -> Nothing
@@ -189,11 +192,13 @@ valBindDefs vbind =
     term_fun =
       TermFun $
         TermFunData
-          { termFunType = vbind_t,
-            termFunRetType = vbind_ret_t,
-            termFunAscription = vbind_decl_t,
+          { termFunType =
+              funType (valBindParams vbind) $ unInfo $ valBindRetType vbind,
+            termFunRetType = unInfo $ valBindRetType vbind,
+            termFunAscription = valBindRetDecl vbind,
             termFunArgEnd = args_end,
-            termFunNameEnd = name_end_pos
+            termFunNameEnd = name_end_pos,
+            termFunTypeParams = valBindTypeParams vbind
           }
     args_end =
       (locPos . locOf . snd =<< unsnoc (valBindParams vbind))
@@ -201,10 +206,6 @@ valBindDefs vbind =
     name_end_pos = locPos . locOf . valBindNameLoc $ vbind
     locPos NoLoc = Nothing
     locPos (Loc _ e) = Just e
-    vbind_ret_t = unInfo $ valBindRetType vbind
-    vbind_t =
-      funType (valBindParams vbind) $ unInfo $ valBindRetType vbind
-    vbind_decl_t = valBindRetDecl vbind
 
 typeBindDefs :: TypeBind -> Defs
 typeBindDefs tbind =

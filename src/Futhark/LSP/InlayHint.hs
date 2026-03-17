@@ -5,7 +5,7 @@ module Futhark.LSP.InlayHint (getInlayHints) where
 import Data.Function ((&))
 import Data.Loc (Loc (Loc), Pos (Pos))
 import Data.Map qualified as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.PositionMapping (toStalePos)
@@ -16,6 +16,7 @@ import Language.Futhark.Query
   ( BoundTo (BoundTerm),
     TermBindSrc (..),
     TermBinding (..),
+    TermFunData (..),
     allBindings,
   )
 import Language.LSP.Protocol.Types
@@ -43,9 +44,9 @@ getInlayHints range state filepath = fromMaybe [] $ do
 
   pure $
     allBindings imports
-      & M.filter (boundToInRange (Loc posStart posEnd))
       & M.elems
-      & mapMaybe inferredTerms
+      & filter (boundToInRange (Loc posStart posEnd))
+      & concatMap inferredTerms
       & concatMap inlayHint
   where
     inlayHint :: TypeInlayHintInfo -> [InlayHint]
@@ -82,24 +83,25 @@ getInlayHints range state filepath = fromMaybe [] $ do
           _data_ = Nothing
         }
 
-    inferredTerms :: BoundTo -> Maybe TypeInlayHintInfo
+    inferredTerms :: BoundTo -> [TypeInlayHintInfo]
     inferredTerms (BoundTerm term (Loc termStart termEnd)) =
       case term of
-        TermSize -> Nothing
-        TermFun _ _ (Just _) _ -> Nothing
-        TermVar _ _ (Just _) -> Nothing
-        TermFun _ _ _ Nothing -> Nothing
-        TermFun _ rtyp Nothing (Just rtyploc) ->
-          Just $
-            TypeHintBare (prettyText rtyp) rtyploc
+        TermSize -> []
+        TermVar _ _ (Just _) -> []
         TermVar src inferredType Nothing ->
           ( case src of
-              TermBindId -> const Nothing
-              TermBindLet -> Just . uncurry TypeHintBare
-              TermBindPat -> Just . uncurry (TypeHintParens termStart)
+              TermBindId -> []
+              TermBindLet -> [TypeHintBare (prettyText inferredType) termEnd]
+              TermBindPat -> [TypeHintParens termStart (prettyText inferredType) termEnd]
           )
-            (prettyText inferredType, termEnd)
-    inferredTerms _ = Nothing
+        TermFun tfData ->
+          let retTypeText = prettyText $ termFunRetType tfData
+           in case (termFunAscription tfData, termFunArgEnd tfData, termFunNameEnd tfData) of
+                (Just _, _, _) -> []
+                (Nothing, Just pos, _) -> [TypeHintBare retTypeText pos]
+                (Nothing, _, Just pos) -> [TypeHintBare retTypeText pos]
+                _ -> []
+    inferredTerms _ = []
 
     boundToInRange loc bound = loc `contains` start
       where
