@@ -1573,12 +1573,12 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, _)
       | k `elem` map typeParamName tparams =
           pure Nothing
-    closeOver (k, NoConstraint l usage) =
-      pure $ Just $ Left $ TypeParamType l k $ srclocOf usage
-    closeOver (k, ParamType l loc) =
-      pure $ Just $ Left $ TypeParamType l k $ srclocOf loc
-    closeOver (k, Size Nothing usage) =
-      pure $ Just $ Left $ TypeParamDim k $ srclocOf usage
+    closeOver (k, NoConstraint l _) =
+      pure $ Just $ Left $ TypeParamType l k mempty
+    closeOver (k, ParamType l _) =
+      pure $ Just $ Left $ TypeParamType l k mempty
+    closeOver (k, Size Nothing _) =
+      pure $ Just $ Left $ TypeParamDim k mempty
     closeOver (k, UnknownSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
