@@ -1104,6 +1104,8 @@ data ValBindBase f vn = ValBind
     -- may refer to abstract types that are no longer in scope.
     valBindEntryPoint :: Maybe (f EntryPoint),
     valBindName :: vn,
+    -- | Location of the name of this binding itself.
+    valBindNameLoc :: SrcLoc,
     valBindRetDecl :: Maybe (TypeExp (ExpBase f vn) vn),
     -- | If 'valBindParams' is null, then the 'retDims' are brought
     -- into scope at this point.

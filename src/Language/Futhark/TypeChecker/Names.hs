@@ -494,7 +494,7 @@ resolveSizes sizes m = do
 -- | Resolve names in a value binding. If this succeeds, then it is
 -- guaranteed that all names references things that are in scope.
 resolveValBind :: ValBindBase NoInfo Name -> TypeM (ValBindBase NoInfo VName)
-resolveValBind (ValBind entry fname ret NoInfo tparams params body doc attrs loc) = do
+resolveValBind (ValBind entry fname fname_loc ret NoInfo tparams params body doc attrs loc) = do
   attrs' <- mapM resolveAttrInfo attrs
   checkForDuplicateNames tparams params
   checkDoNotShadow loc fname
@@ -504,4 +504,4 @@ resolveValBind (ValBind entry fname ret NoInfo tparams params body doc attrs loc
       body' <- resolveExp body
       bindSpaced1 Term fname loc $ \fname' -> do
         usedName fname'
-        pure $ ValBind entry fname' ret' NoInfo tparams' params' body' doc attrs' loc
+        pure $ ValBind entry fname' fname_loc ret' NoInfo tparams' params' body' doc attrs' loc

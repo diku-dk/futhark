@@ -474,7 +474,7 @@ fmtBinOp bop =
     leading = leadingOperator $ toName $ qualLeaf bop
 
 instance Format UncheckedValBind where
-  fmt (ValBind entry name retdecl _rettype tparams args body docs attrs loc) =
+  fmt (ValBind entry name _ retdecl _rettype tparams args body docs attrs loc) =
     addComments loc $
       fmt docs
         <> attrs'

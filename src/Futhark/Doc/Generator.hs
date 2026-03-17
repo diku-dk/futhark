@@ -378,7 +378,7 @@ synopsisValBind vb = Just $ do
   pure $ specRow lhs (mhs <> " : ") rhs
 
 valBindHtml :: Html -> ValBind -> DocM (Html, Html, Html)
-valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = do
+valBindHtml name (ValBind _ _ _ retdecl (Info rettype) tparams params _ _ _ _) = do
   tparams' <- mconcat <$> mapM (fmap (" " <>) . typeParamHtml) tparams
   let noLink' = noLink $ map typeParamName tparams <> foldMap patNames params
   rettype' <- noLink' $ maybe (retTypeHtml rettype) typeExpHtml retdecl
