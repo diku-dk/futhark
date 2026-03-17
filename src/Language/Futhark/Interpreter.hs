@@ -1234,7 +1234,7 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
     _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
-evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
+evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env tparams ps ret fbody
   sizes <- extEnv
   pure $ mempty {envTerm = M.singleton v binding} <> sizes

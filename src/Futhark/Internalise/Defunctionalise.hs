@@ -222,6 +222,7 @@ liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
       ValBind
         { valBindEntryPoint = Nothing,
           valBindName = fname,
+          valBindNameLoc = mempty,
           valBindRetDecl = Nothing,
           valBindRetType = Info rettype_st,
           valBindTypeParams = dims',
@@ -1245,13 +1246,14 @@ svFromType t = Dynamic t
 -- boolean is true if the function is a 'DynamicFun'.
 defuncValBind :: ValBind -> DefM (ValBind, Env)
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind entry name _ (Info rettype) tparams params body _ attrs loc)
+defuncValBind (ValBind entry name name_loc _ (Info rettype) tparams params body _ attrs loc)
   | Scalar Arrow {} <- retType rettype = do
       (body_pats, body', rettype') <- etaExpand (second (const mempty) rettype) body
       defuncValBind $
         ValBind
           entry
           name
+          name_loc
           Nothing
           (Info rettype')
           tparams
@@ -1260,7 +1262,7 @@ defuncValBind (ValBind entry name _ (Info rettype) tparams params body _ attrs l
           Nothing
           attrs
           loc
-defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) tparams params body _ _ _) = do
+defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)) tparams params body _ _ _) = do
   when (any isTypeParam tparams) $
     error $
       show name
