@@ -196,7 +196,7 @@ testInlayTypeHint =
       noSizeHint,
       loopHint,
       defReturnHint,
-      noDefConstantHint,
+      defConstantReturnHint,
       lambdaArgHint
     ]
   where
@@ -220,15 +220,13 @@ testInlayTypeHint =
     lambdaArgHint =
       hintTestCase
         "lambda argument hint"
-        "def lambda = \\ x -> x + 0i32"
-        [(Position 0 15, "("), (Position 0 16, ": i32)")]
-    -- TODO: This test will fail as soon as it is possible to retrieve
-    -- source locations for definitions without parameters
-    noDefConstantHint =
+        "def lambda : i32 -> i32 = \\ x -> x + 0i32"
+        [(Position 0 28, "("), (Position 0 29, ": i32)")]
+    defConstantReturnHint =
       hintTestCase
         "def constant no hint"
         "def pi = 3"
-        []
+        [(Position 0 6, ": i32")]
     defReturnHint =
       hintTestCase
         "def return hint"
