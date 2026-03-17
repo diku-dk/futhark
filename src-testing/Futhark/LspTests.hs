@@ -197,7 +197,8 @@ testInlayTypeHint =
       loopHint,
       defReturnHint,
       defConstantReturnHint,
-      lambdaArgHint
+      lambdaArgHint,
+      typeArgHint
     ]
   where
     fullRange =
@@ -217,6 +218,11 @@ testInlayTypeHint =
           if length hints /= length expectedHints
             then assertFailure $ "Unexpected inlay hints: " ++ show hints
             else zipWithM_ (\h (p, l) -> expectHint h l p) hints expectedHints
+    typeArgHint =
+      hintTestCase
+        "type argument hint"
+        "def identity = let f 'a (x: a): a = x in f"
+        []
     lambdaArgHint =
       hintTestCase
         "lambda argument hint"
