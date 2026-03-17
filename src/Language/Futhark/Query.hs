@@ -40,7 +40,7 @@ data TermBindSrc
 
 data TermBinding
   = TermSize
-  | -- | Inferred Type, Type Asciption
+  | -- | Inferred Type, Ascripted type
     TermVar TermBindSrc StructType (Maybe TypeAscription)
   | -- | Function Type, Return Type, Optional return type ascription, end of parameters location
     -- TODO: Remove the @Maybe@ wrapper on @Pos@
