@@ -4,49 +4,6 @@
 -- SIMPLIFIED VERSION:
 --   * We rewrite the program so that is restricted to the source language
 --     presented in the paper.
--- 
---
-----------------------------------------------------------------------------------------------
---- Nice benchmark demonstrating verification
----   of the injectivity property of an array:
----
---- (1) The first goal (function MM):
----   given the precondition that argument `edgeIds_all` is injective
----   we need to prove that the `edgeIds` loop-variant
----   argument of the loop (implementing `MM`) is injective.
----   This is relatively straightforward given that
----   we have the right constructors in the language
----   of properties, since initially `edgeIds` result of an
----   iteration is obtained by filtering the `edgeIds` input
----   of an iteration, hence injectivity should be preserved.
----
---- (2) The second goal is to prove that the safety of the 3 scatters
----   appearing in the code. The two scatters appearing in function
----   `update` are trivial since they have replicated values
----   (easy to check)
----
---- (3) The scatter appearing in MM's loop is the tricky one: it requires
----   proving that the first array result of function `getSmallestPairs`
----   is injective, i.e., given the precondition that the `edgeIds`
----   argument of function `getSmallestPairs` is injective, prove the
----   postcondition that the first array result of `getSmallestPairs` is
----   injective.
----   This can be tackled by proving that `flatE2i` is injective by
----   solving queries of the form:
----       forall i1 < i2, i1 and i2 being elements of edgeIds =>
----         2*i1 != 2*i2 && 2*i1+1 != 2*i2+1 && 2*i1 != 2*i1+1 && 2*i1+1 != 2*i2
----   Then we can exploit that the first result is obtained by a filter
----     operation to create the following query that if solved proves injectivity:
----       for all i1, i2 integers in [0..arraySize) satisfying the properties
----          flatE[i1] == flatE[i2] &&
----          H[flatE[i1]] == flatE2[i1] &&  -- necessary for index i1 to be kept by filter
----          H[flatE[i2]] == flatE2[i2] &&  -- necessary for index i2 to be kept by filter
----       => i1 = i2
----   The proof can be accomplished by a technique aimed at deriving new equalities, e.g.,
----     flatE[i1] == flatE[i2] == z (fresh) => 
----     H[z] == flatE2[i1] && H[z] == flatE2[i2] =>
----     flatE2[i1] == flatE2[i2] => i1 == i2 (because `flatE2` was proved injective)
-----------------------------------------------------------------------------------------------
 
 -- 
 --            Prelude
@@ -111,11 +68,6 @@ def getSmallestPairs [arraySize]
          Injective new_edges && Injective new_edgeIds
       }
     =
-    -- Transforms edgeIds as follows:
-    --      0,  1,  2,  3,  4,  5
-    --      |   |   |   |   |   |
-    --      0,1 2,3 4,5 6,7 8,9 10,11
-    -- let edge2Ids = map (\i -> map (\j -> 2*i + j) (iota 2)) edgeIds
     let flat_edges = flatten edges
     let flat_edge2Ids = expandIds edgeIds
     let (ys,zs) = getSmallestPairs_core nVerts nEdges flat_edges flat_edge2Ids
