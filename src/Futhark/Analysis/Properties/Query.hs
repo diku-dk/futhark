@@ -454,7 +454,10 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       proveFn (PFiltPartInv (predToFun pf) (map predToFun pps)) f_X
     matchProof (FiltPart y x pf pps) = do
       f_Y <- getFn y
-      newProver (FPV2 f_Y x pf pps)
+      -- Prove that the partitioning predicates are MECE over _any_ domain of indices.
+      -- FiltPartInv only proves this for
+      prove (UserFacingDisjoint pps)
+        `andM` newProver (FPV2 f_Y x pf pps)
     matchProof (For x (Predicate i p)) = do
       f_x <- getFn x
       case f_x of

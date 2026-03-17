@@ -29,12 +29,11 @@ def partition_indices [n]
   let inds  = map3 (\ c indT indF -> if c then indT-1 else indF-1) conds indsT indsF
   in  (lst, inds)
 
-def partition3_indices [n] 't (conds: [n]i8) 
-  : {(i64,i64,[n]i64) | \(a,b,is) ->
-      FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
-      -- ^ disjointness already proven by the above
-      && Disjoint (\i -> (conds[i] == 1, conds[i] == 2, conds[i] != 1 && conds[i] != 2))
-      && Range a (0,n+1) && Range b (0,n+1)
+def partition3 't [n] (conds: [n]i8) (xs: [n]t)
+   : {(i64,i64,[]t) | \(a, b, ys) ->
+     FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
+     -- && Disjoint (\i -> (conds[i] == 1, conds[i] == 2, conds[i] != 1 && conds[i] != 2))
+     && Range a (0,n+1) && Range b (0,n+1)
    } =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
   let eflags = map (\c -> if c == 2 then 1 else 0 ) conds
@@ -50,15 +49,7 @@ def partition3_indices [n] 't (conds: [n]i8)
                         else if c == 2 then s1 + indE - 1
                         else s1 + s2 + i - indsL[i] - indsE[i]
                    ) conds indsL indsE (iota n)
-  in  (s1, s1+s2, inds)
-
-def partition3 't [n] (conds: [n]i8) (xs: [n]t)
-   : {(i64,i64,[]t) | \(a, b, ys) ->
-     FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
-     && Disjoint (\i -> (conds[i] == 1, conds[i] == 2, conds[i] != 1 && conds[i] != 2))
-     && Range a (0,n+1) && Range b (0,n+1)
-   } =
-  let (a, b, inds) = partition3_indices conds
+  let (a, b) = (s1, s1+s2)
   let scratch = map (\x -> x) xs -- copy xs.
   let ys = scatter scratch inds xs
   in  (a, b, ys)

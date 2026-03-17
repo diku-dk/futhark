@@ -160,6 +160,7 @@ addRelSymbol p = do
       where
         getProps :: Symbol -> [Property Symbol]
         getProps (Assume prop) = getProps prop
+        getProps (Prop prop@(FiltPart _ _ _ pps)) = [prop, UserFacingDisjoint pps]
         getProps (Prop prop) = [prop]
         getProps (a :&& b) = getProps a <> getProps b
         getProps _ = []
