@@ -43,7 +43,8 @@ data TermBinding
   | -- | Inferred Type, Ascripted type
     TermVar TermBindSrc StructType (Maybe TypeAscription)
   | -- | Function Type, Return Type, Optional return type ascription, end of parameters location
-    -- TODO: Remove the @Maybe@ wrapper on @Pos@
+    -- TODO: Remove the @Maybe@ wrapper @Pos@ on as soon as we can figure out
+    -- positions for bindings without arguments
     TermFun StructType ResRetType (Maybe TypeAscription) (Maybe Pos)
   deriving (Eq, Show)
 
