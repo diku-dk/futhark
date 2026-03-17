@@ -84,6 +84,7 @@ def remove_duplicates [Q]
     (q_parents: {[Q]i64 | \x -> Range x (0,V)})
     : {(*[]i64, *[]i64) | \(verts, _parents) ->
       Injective verts
+      && Range verts (0,V)
     } = 
   let indexes = iota Q
   let H = hist i64.min Q V q_verts indexes
@@ -138,10 +139,30 @@ def bfs_step [V] [E] [Q]
     (edges: {[E]i64 | \x -> Range x (0,V)})
     (parents: *[V]i64)
     (queue: {[Q]i64 | \x -> Range x (0,V)})
-    : {(*[V]i64, *[]i64) | \_ -> true} =
+    : {(*[V]i64, *[]i64) | \(_parents', queue') -> Range queue' (0,V)} =
   let (raw_parents, raw_verts) = expand offsets edges queue
   let valid_flags = map (\v -> parents[v] == -1) raw_verts
   let (filtered_v, filtered_p) = filter_soa V valid_flags raw_verts raw_parents
   let (noDupes_v, noDupes_p) = remove_duplicates V filtered_v filtered_p
   let new_parents = update_parents parents noDupes_v noDupes_p
   in (new_parents, noDupes_v)
+
+def bfs [V] [E] [Q]
+    (verts: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
+    (edges: {[E]i64 | \x -> Range x (0,V)})
+    (parents: *[V]i64)
+    (queue: {[Q]i64 | \x -> Range x (0,V)})
+    : {[V]i64 | \_ -> true} =
+    -- Loop until we get an empty queue
+    let (parents, _) =
+      -- We have to comment out the loop itself because Futhark's existing size
+      -- type unification algorithm has to be extended to unify sizes that appear
+      -- inside our annotations, which are attached to the types.
+      --
+      -- This is wholly unrelated to the correctness of our system; our annotations
+      -- could be completely decoupled from Futhark's type checker (e.g., as
+      -- code comments).
+      --
+      -- loop (parents, queue) while length queue > 0 do
+        bfs_step verts edges parents queue
+    in parents
