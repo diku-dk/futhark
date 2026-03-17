@@ -37,9 +37,9 @@ def indexE [rows]
     in (\x -> x) dE_k
 
 def f32_sum [n] (xs: [n]f32): {f32 | \_ -> true} =
-  -- The identitity function is a little trick to make the index function
-  -- for this uninterpreted because the prototype doesn't support
-  -- sums over flattened arrays yet.
+  -- Applying the identity function makes the index function uninterpreted.
+  -- We do this because the implementation doesn't support sums over flattened
+  -- arrays yet.
   (\x -> x) (if n > 0 then (scan (+) 0 xs)[n-1] else 0)
 
 def calc_stats [rows] [cols]
@@ -108,8 +108,7 @@ def calc_d
     (cE: f32)
     (dE_k: f32)
     : {f32 | \_ -> true} =
-  -- The identitity function is a little trick to make the index function
-  -- for this uninterpreted. This speeds up the analysis.
+  -- Applying the identity function makes the index function uninterpreted.
   (\x -> x) (cN * dN_k + cS * dS_k + cW * dW_k + cE * dE_k)
 
 def srad_iter [rows] [cols]

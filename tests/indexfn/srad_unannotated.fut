@@ -4,8 +4,7 @@ def indexN [cols]
     (i: i64)
     (j: i64)
     (jc: f32): f32 =
-    -- The identitity function is a little trick to make the index function
-    -- for this uninterpreted to speed up the analysis.
+    -- Applying the identity function makes the index function uninterpreted.
     let idx = image[if i == 0 then i else i - 1, j] - jc
     in (\x -> x) idx
 
@@ -37,9 +36,9 @@ def indexE [rows]
     in (\x -> x) dE_k
 
 def f32_sum [n] (xs: [n]f32): f32 =
-  -- The identitity function is a little trick to make the index function
-  -- for this uninterpreted because the prototype doesn't support
-  -- sums over flattened arrays yet.
+  -- Applying the identity function makes the index function uninterpreted.
+  -- We do this because the implementation doesn't support sums over flattened
+  -- arrays yet.
   (\x -> x) (if n > 0 then (scan (+) 0 xs)[n-1] else 0)
 
 def calc_stats [rows] [cols]

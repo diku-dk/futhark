@@ -134,6 +134,7 @@ def expand [V] [E] [Q]
   let zero = 0
   in expand_ offsets edges queue shape zero
 
+-- Note that offsets is invariant to the loop.
 def bfs_step [V] [E] [Q]
     (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (edges: {[E]i64 | \x -> Range x (0,V)})

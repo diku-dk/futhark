@@ -141,6 +141,7 @@ def mis_step_ [V] [E]
   let C = remove_neighbour_and_self marked targets C
   in (C, I)
 
+-- Note that only C and I are variant to the loop.
 def mis_step [V] [E]
     (offsets: {[V+1]i64 | \x -> Range x (0,E) && Monotonic (<=) x})
     (edges: {[E]i64 | \x -> Range x (0, V)})
