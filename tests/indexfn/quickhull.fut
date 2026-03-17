@@ -32,7 +32,6 @@ def partition_indices [n]
 def partition3 't [n] (conds: [n]i8) (xs: [n]t)
    : {(i64,i64,[]t) | \(a, b, ys) ->
      FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
-     -- && Disjoint (\i -> (conds[i] == 1, conds[i] == 2, conds[i] != 1 && conds[i] != 2))
      && Range a (0,n+1) && Range b (0,n+1)
    } =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
