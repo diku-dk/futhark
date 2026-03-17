@@ -608,11 +608,8 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
     forward e_f
 
   unless (map rank ts == map rank fs) $ error "Branch types differ?"
-  -- TODO support branches of same rank (type), but different dimensions.
-  -- (E.g., use "outer" guards or bool-multiplication tricks on domain sizes.)
   let eq x y = isJust <$> (unify x y :: IndexFnM (Maybe (Substitution Symbol)))
   dims_eq <- and . mconcat <$> zipWithM (zipWithM eq) (concatMap shape ts) (concatMap shape fs)
-  -- unless dims_eq $ error "Branches with different dimensions not supported yet."
 
   c <- newVName "if-condition"
   t_branch <- newVName "t_branch"
@@ -758,20 +755,6 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
         subst f_scan >>= rewrite
   | Just "scatter" <- getFun e_f,
     [e_dest, e_inds, e_vals] <- getArgs args = do
-      -- `scatter dest is vs` calculates the equivalent of this imperative code:
-      --
-      -- ```
-      -- for k in 0 .. length is:
-      --   i = is[k]
-      --   if i >= 0 && i < length dest:
-      --     dest[i] = vs[k]
-      -- ```
-      --
-      -- Scatter generic:
-      --   - The indices are integers, so they are ordered.
-      --   - Let P be the permutation that sorts indices in ascending order.
-      --   - Then ... TODO
-      --
       dests <- forward e_dest >>= mapM rewrite
       indss <- forward e_inds >>= mapM rewrite
       valss <- forward e_vals >>= mapM rewrite
