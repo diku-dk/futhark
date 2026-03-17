@@ -9,9 +9,9 @@ module Futhark.LspTests (tests, main) where
 import Colog.Core (LogAction (LogAction))
 import Control.Concurrent (forkIO)
 import Control.Lens ((^.))
+import Control.Monad (zipWithM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
-import Data.Function ((&))
 import Data.Functor (void)
 import Data.Text (Text)
 import Futhark.CLI.LSP (serverDefinition)
@@ -216,9 +216,7 @@ testInlayTypeHint =
         liftIO $
           if length hints /= length expectedHints
             then assertFailure $ "Unexpected inlay hints: " ++ show hints
-            else
-              zip hints expectedHints
-                & mapM_ (\(h, (p, l)) -> expectHint h l p)
+            else zipWithM_ (\h (p, l) -> expectHint h l p) hints expectedHints
     lambdaArgHint =
       hintTestCase
         "lambda argument hint"
