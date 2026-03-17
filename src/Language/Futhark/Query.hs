@@ -17,6 +17,7 @@ module Language.Futhark.Query
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Monad
 import Control.Monad.State
 import Data.List (find, unsnoc)
@@ -26,7 +27,6 @@ import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Traversals
 import System.FilePath.Posix qualified as Posix
-import Control.Applicative ((<|>))
 
 type TypeAscription = TypeExp (ExpBase Info VName) VName
 
@@ -39,21 +39,29 @@ data TermBindSrc
     TermBindId
   deriving (Eq, Show)
 
+data TermFunData
+  = TermFunData
+  { termFunType :: StructType,
+    termFunRetType :: ResRetType,
+    termFunAscription :: Maybe TypeAscription,
+    termFunArgEnd :: Maybe Pos,
+    termFunNameEnd :: Maybe Pos
+  }
+  deriving (Eq, Show)
+
 data TermBinding
   = TermSize
   | -- | Inferred Type, Ascripted type
     TermVar TermBindSrc StructType (Maybe TypeAscription)
-  | -- | Function Type, Return Type, Optional return type ascription, end of parameters location
-    -- TODO: Remove the @Maybe@ wrapper @Pos@ on as soon as we can figure out
-    -- positions for bindings without arguments
-    TermFun StructType ResRetType (Maybe TypeAscription) (Maybe Pos)
+  | -- I cannot remove the @Maybe@ wrapper because @Loc@ always includes a @NoLoc@ case.
+    TermFun TermFunData
   deriving (Eq, Show)
 
 termBindingType :: TermBinding -> TypeBase Size NoUniqueness
 termBindingType = \case
   TermSize -> Scalar (Prim (Signed Int64))
   TermVar _ t _ -> t
-  TermFun t _ _ _ -> t
+  TermFun tf_data -> termFunType tf_data
 
 -- | What a name is bound to.
 data BoundTo
@@ -138,9 +146,20 @@ expDefs e =
           foldMap sizeDefs sizes <> patternDefs (TermVar TermBindLet) pat
         Lambda params _ _ _ _ ->
           mconcat $ map (patternDefs $ TermVar TermBindPat) params
-        AppExp (LetFun (name, _) (tparams, params, tasc, Info ret, _) _ loc) _ ->
+        AppExp (LetFun (name, name_loc) (tparams, params, tasc, Info ret, _) _ loc) _ ->
           let name_t = funType params ret
-              tfun = TermFun name_t ret tasc start_pos
+              tfun =
+                TermFun $
+                  TermFunData
+                    { termFunType = name_t,
+                      termFunRetType = ret,
+                      termFunAscription = tasc,
+                      termFunArgEnd = start_pos,
+                      termFunNameEnd = name_end
+                    }
+              name_end = case locOf name_loc of
+                NoLoc -> Nothing
+                Loc _ end_pos -> Just end_pos
               start_pos = do
                 (_, last_arg) <- unsnoc params
                 case locOf last_arg of
@@ -167,10 +186,19 @@ valBindDefs vbind =
       <> mconcat (map (patternDefs (TermVar TermBindPat)) (valBindParams vbind))
       <> expDefs (valBindBody vbind)
   where
-    term_fun = TermFun vbind_t vbind_ret_t vbind_decl_t args_end
-    args_end = 
+    term_fun =
+      TermFun $
+        TermFunData
+          { termFunType = vbind_t,
+            termFunRetType = vbind_ret_t,
+            termFunAscription = vbind_decl_t,
+            termFunArgEnd = args_end,
+            termFunNameEnd = name_end_pos
+          }
+    args_end =
       (locPos . locOf . snd =<< unsnoc (valBindParams vbind))
-      <|> (locPos . locOf . valBindNameLoc $ vbind)
+        <|> name_end_pos
+    name_end_pos = locPos . locOf . valBindNameLoc $ vbind
     locPos NoLoc = Nothing
     locPos (Loc _ e) = Just e
     vbind_ret_t = unInfo $ valBindRetType vbind
