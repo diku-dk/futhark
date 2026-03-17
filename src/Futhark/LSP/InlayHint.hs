@@ -1,7 +1,4 @@
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE ExplicitNamespaces #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE PartialTypeSignatures #-}
 
 module Futhark.LSP.InlayHint (getInlayHints) where
 
@@ -52,39 +49,42 @@ getInlayHints range state filepath = fromMaybe [] $ do
       & concatMap inlayHint
   where
     inlayHint :: TypeInlayHintInfo -> [InlayHint]
-    inlayHint = \case
-      TypeHintBare typName pos -> [endHint typName pos]
-      TypeHintParens s tname pos -> [startHint s, endHint (tname <> ")") pos]
-      where
-        startHint :: Pos -> InlayHint
-        startHint (Pos _ l c _) =
-          InlayHint
-            { _position =
-                Position (fromIntegral l - 1) (fromIntegral c - 1),
-              _label = InL "(",
-              _kind = Just InlayHintKind_Type,
-              _textEdits = Nothing,
-              _tooltip = Nothing,
-              _paddingLeft = Nothing,
-              _paddingRight = Nothing,
-              _data_ = Nothing
-            }
-        endHint :: Text -> Pos -> InlayHint
-        endHint tname (Pos _ l c _) =
-          InlayHint
-            { _position =
-                Position (fromIntegral l - 1) (fromIntegral c - 1),
-              _label = InL $ ": " <> tname,
-              _kind = Just InlayHintKind_Type,
-              _textEdits = Nothing,
-              _tooltip = Nothing,
-              _paddingLeft = Nothing,
-              _paddingRight = Nothing,
-              _data_ = Nothing
-            }
+    inlayHint (TypeHintBare typName pos) =
+      [endHint typName pos]
+    inlayHint (TypeHintParens s tname pos) =
+      [startHint s, endHint (tname <> ")") pos]
+
+    startHint :: Pos -> InlayHint
+    startHint (Pos _ l c _) =
+      InlayHint
+        { _position =
+            Position (fromIntegral l - 1) (fromIntegral c - 1),
+          _label = InL "(",
+          _kind = Just InlayHintKind_Type,
+          _textEdits = Nothing,
+          _tooltip = Nothing,
+          _paddingLeft = Nothing,
+          _paddingRight = Nothing,
+          _data_ = Nothing
+        }
+
+    endHint :: Text -> Pos -> InlayHint
+    endHint tname (Pos _ l c _) =
+      InlayHint
+        { _position =
+            Position (fromIntegral l - 1) (fromIntegral c - 1),
+          _label = InL $ ": " <> tname,
+          _kind = Just InlayHintKind_Type,
+          _textEdits = Nothing,
+          _tooltip = Nothing,
+          _paddingLeft = Nothing,
+          _paddingRight = Nothing,
+          _data_ = Nothing
+        }
+
     inferredTerms :: BoundTo -> Maybe TypeInlayHintInfo
-    inferredTerms = \case
-      BoundTerm term (Loc termStart termEnd) -> case term of
+    inferredTerms (BoundTerm term (Loc termStart termEnd)) =
+      case term of
         TermSize -> Nothing
         TermFun _ _ (Just _) _ -> Nothing
         TermVar _ _ (Just _) -> Nothing
@@ -99,7 +99,8 @@ getInlayHints range state filepath = fromMaybe [] $ do
               TermBindPat -> Just . uncurry (TypeHintParens termStart)
           )
             (prettyText inferredType, termEnd)
-      _ -> Nothing
+    inferredTerms _ = Nothing
+
     boundToInRange loc bound = loc `contains` start
       where
         Loc start _ = locOf bound
