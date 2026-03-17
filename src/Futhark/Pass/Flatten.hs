@@ -49,7 +49,10 @@ transformScalarStms ::
   Stms SOACS ->
   Builder GPU DistEnv
 transformScalarStms segments env inps distres stms = do
-  vs <- letTupExp "scalar_dist" <=< renameExp <=< segMap segments $ \is -> do
+  let bound_in_batch = namesFromList $ concatMap (patNames . stmPat) $ stmsToList stms
+      allCerts = foldMap (\stm -> distCerts inps (stmAux stm) env) (stmsToList stms)
+      certs = Certs $ filter (`notNameIn` bound_in_batch) $ unCerts allCerts
+  vs <- certifying certs $ letTupExp "scalar_dist" <=< renameExp <=< segMap segments $ \is -> do
     readInputs segments env (toList is) inps
     addStms $ fmap soacsStmToGPU stms
     pure $ subExpsRes $ map (Var . distResName) distres
