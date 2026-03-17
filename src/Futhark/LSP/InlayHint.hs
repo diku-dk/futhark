@@ -10,7 +10,7 @@ import Data.Text (Text)
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.PositionMapping (toStalePos)
 import Futhark.LSP.State (State (stateProgram), getStaleMapping)
-import Futhark.Util.Loc (Located (locOf), contains, Loc (NoLoc))
+import Futhark.Util.Loc (Loc (NoLoc), Located (locOf), contains)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Query
   ( BoundTo (BoundTerm),
@@ -90,28 +90,27 @@ getInlayHints range state filepath = fromMaybe [] $ do
         TermVar _ _ (Just _) -> []
         TermVar src inferredType Nothing ->
           case src of
-              TermBindId -> []
-              TermBindLet -> 
-                [TypeHintBare (": " <> prettyText inferredType) termEnd]
-              TermBindPat -> 
-                [TypeHintParens termStart (prettyText inferredType) termEnd]
+            TermBindId -> []
+            TermBindLet ->
+              [TypeHintBare (": " <> prettyText inferredType) termEnd]
+            TermBindPat ->
+              [TypeHintParens termStart (prettyText inferredType) termEnd]
         TermFun tfData ->
           -- ordering is relevant, see the lsp documentation for inlay hints
-          let
-            isSynthesized typeParam = case locOf typeParam of
-              NoLoc -> True
-              _ -> False
-            inferredTypeParams = filter isSynthesized (termFunTypeParams tfData)
-            paramInfo p = case termFunNameEnd tfData of
-              Nothing -> id
-              Just pos -> (TypeHintBare (prettyText p) pos :)
-          in foldr (\ p f hs -> paramInfo p $ f hs) id inferredTypeParams
-          $ let retTypeText = prettyText $ termFunRetType tfData
-           in case (termFunAscription tfData, termFunArgEnd tfData, termFunNameEnd tfData) of
-                (Just _, _, _) -> []
-                (Nothing, Just pos, _) -> [TypeHintBare (": " <> retTypeText) pos]
-                (Nothing, _, Just pos) -> [TypeHintBare (": " <> retTypeText) pos]
-                _ -> []
+          let isSynthesized typeParam = case locOf typeParam of
+                NoLoc -> True
+                _ -> False
+              inferredTypeParams = filter isSynthesized (termFunTypeParams tfData)
+              paramInfo p = case termFunNameEnd tfData of
+                Nothing -> id
+                Just pos -> (TypeHintBare (prettyText p) pos :)
+           in foldr (\p f hs -> paramInfo p $ f hs) id inferredTypeParams $
+                let retTypeText = prettyText $ termFunRetType tfData
+                 in case (termFunAscription tfData, termFunArgEnd tfData, termFunNameEnd tfData) of
+                      (Just _, _, _) -> []
+                      (Nothing, Just pos, _) -> [TypeHintBare (": " <> retTypeText) pos]
+                      (Nothing, _, Just pos) -> [TypeHintBare (": " <> retTypeText) pos]
+                      _ -> []
     inferredTerms _ = []
 
     boundToInRange loc bound = loc `contains` start
