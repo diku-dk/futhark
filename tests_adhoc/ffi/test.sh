@@ -6,18 +6,18 @@ FILE="$DIR/test.fut"
 # Compile the server executable
 cabal run futhark -- c --server $FILE
 
-# Expression 
+# Expression
 tests=(
 # Preloaded primitives
   "p1"   "1"
   "p2"   "2"
   "p3"   "3"
-  
+
 # Preloaded records
   "r1"  "{x = 1, y = 2}"
   "r2"  "{x = 3, y = 4}"
   "r3"  "{x = 5, y = 6}"
-  
+
 # Preloaded sums
   "s1"  "#a 2"
   "s2"  "#b 4"
