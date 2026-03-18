@@ -9,31 +9,31 @@ module Futhark.Util.NDArray
     flatten,
     mapWithIndex,
     mapMWithIndex,
-    mapMWithIndex_
+    mapMWithIndex_,
   )
 where
 
-import Data.Array qualified as A
 import Control.Monad (zipWithM, zipWithM_)
+import Data.Array qualified as A
 
 data NDArray a = NDArray [Int] (A.Array Int a)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 fromList :: [Int] -> [a] -> NDArray a
-fromList s l = NDArray s $ A.array (0, length l - 1) (zip [0..] l)
+fromList s l = NDArray s $ A.array (0, length l - 1) (zip [0 ..] l)
 
 shape :: NDArray a -> [Int]
 shape (NDArray s _) = s
 
 size :: NDArray a -> Int
-size = foldl (*) 1 . shape
+size = product . shape
 
 rank :: NDArray a -> Int
 rank = length . shape
 
 (!) :: NDArray a -> [Int] -> a
 (!) (NDArray s a) idx =
-  let i = foldl (+) 0 $ zipWith (*) (reverse idx) $ scanl (*) 1 s
+  let i = sum $ zipWith (*) (reverse idx) $ scanl (*) 1 s
    in a A.! i
 
 elems :: NDArray a -> [a]
@@ -48,12 +48,12 @@ indexOf [] _ = []
 
 mapWithIndex :: ([Int] -> a -> b) -> NDArray a -> NDArray b
 mapWithIndex f nd =
-  fromList (shape nd) $ zipWith f (map (indexOf $ shape nd) [0..size nd]) $ elems nd
+  fromList (shape nd) $ zipWith f (map (indexOf $ shape nd) [0 .. size nd]) $ elems nd
 
-mapMWithIndex :: Monad m => ([Int] -> a -> m b) -> NDArray a -> m (NDArray b)
+mapMWithIndex :: (Monad m) => ([Int] -> a -> m b) -> NDArray a -> m (NDArray b)
 mapMWithIndex f nd =
-  fromList (shape nd) <$> zipWithM f (map (indexOf $ shape nd) [0..size nd]) (elems nd)
+  fromList (shape nd) <$> zipWithM f (map (indexOf $ shape nd) [0 .. size nd]) (elems nd)
 
-mapMWithIndex_ :: Monad m => ([Int] -> a -> m b) -> NDArray a -> m ()
+mapMWithIndex_ :: (Monad m) => ([Int] -> a -> m b) -> NDArray a -> m ()
 mapMWithIndex_ f nd =
-  zipWithM_ f (map (indexOf $ shape nd) [0..size nd]) (elems nd)
+  zipWithM_ f (map (indexOf $ shape nd) [0 .. size nd]) (elems nd)

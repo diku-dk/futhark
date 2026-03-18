@@ -1,12 +1,12 @@
 module Language.Futhark.Interpreter.FFI.Server.TypeLayout
-  ( TypeLayout (..)
+  ( TypeLayout (..),
   )
 where
 
 import Data.Map qualified as M
 import Futhark.Server qualified as S
 import Language.Futhark.Interpreter.FFI.UIDs (TypeUID)
-import Language.Futhark.Interpreter.FFI.Values (PrimitiveType, Type (..))
+import Language.Futhark.Interpreter.FFI.Values (PrimitiveType)
 import Prelude hiding (init)
 
 data TypeLayout

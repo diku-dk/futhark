@@ -2,7 +2,7 @@ module Futhark.Util.BiMap
   ( BiMap,
     insert,
     lookupRight,
-    lookupLeft
+    lookupLeft,
   )
 where
 
@@ -20,8 +20,8 @@ instance (Ord a, Ord b) => Semigroup (BiMap a b) where
 insert :: (Ord a, Ord b) => a -> b -> BiMap a b -> BiMap a b
 insert l r (BiMap mr ml) = BiMap (M.insert l r mr) (M.insert r l ml)
 
-lookupRight :: Ord a => a -> BiMap a b -> Maybe b
+lookupRight :: (Ord a) => a -> BiMap a b -> Maybe b
 lookupRight l (BiMap mr _) = M.lookup l mr
 
-lookupLeft :: Ord b => b -> BiMap a b -> Maybe a
+lookupLeft :: (Ord b) => b -> BiMap a b -> Maybe a
 lookupLeft r (BiMap _ ml) = M.lookup r ml

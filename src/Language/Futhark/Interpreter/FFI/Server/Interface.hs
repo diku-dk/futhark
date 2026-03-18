@@ -1,6 +1,6 @@
 module Language.Futhark.Interpreter.FFI.Server.Interface
   ( Entry (..),
-    ServerInterface (..)
+    ServerInterface (..),
   )
 where
 
@@ -25,10 +25,11 @@ instance Monoid ServerInterface where
   mempty = ServerInterface mempty mempty mempty mempty
 
 instance Semigroup ServerInterface where
-  (<>) (ServerInterface en1 e1 tn1 t1)
-       (ServerInterface en2 e2 tn2 t2) =
-    ServerInterface
-      (en1 <> en2)
-      (e1 <> e2)
-      (tn1 <> tn2)
-      (t1 <> t2)
+  (<>)
+    (ServerInterface en1 e1 tn1 t1)
+    (ServerInterface en2 e2 tn2 t2) =
+      ServerInterface
+        (en1 <> en2)
+        (e1 <> e2)
+        (tn1 <> tn2)
+        (t1 <> t2)

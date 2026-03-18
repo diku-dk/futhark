@@ -10,14 +10,14 @@ module Language.Futhark.Interpreter.FFI
     ExFunction,
     ExInterface,
     fromInterpreterValue,
-    toInterpreterValue
+    toInterpreterValue,
   )
 where
 
 import Data.Array qualified as A
 import Data.Map qualified as M
 import Futhark.Util.NDArray qualified as ND
-import Language.Futhark.Core (Name, nameToText, nameFromText)
+import Language.Futhark.Core (Name, nameFromText, nameToText)
 import Language.Futhark.Interpreter.FFI.UIDs
 import Language.Futhark.Interpreter.FFI.Values
 import Language.Futhark.Interpreter.Values qualified as I
@@ -29,18 +29,22 @@ data Function a
 
 newtype Interface a
   = Interface (M.Map Name (Function a))
-  deriving Show
+  deriving (Show)
 
 type InFunction = Function PrimitiveType
+
 type InInterface = Interface PrimitiveType
 
 type ExTypeAtom = Either TypeUID PrimitiveType
+
 type ExValueAtom = Either Location PrimitiveValue
 
 type ExType = Type ExTypeAtom
+
 type ExValue = Value ExValueAtom
 
 type ExFunction = Function ExTypeAtom
+
 type ExInterface = Interface ExTypeAtom
 
 fromInterpreterValue :: I.Value m -> ExValue
@@ -48,7 +52,7 @@ fromInterpreterValue (I.ValuePrim v) = Atom $ Right $ fromPrimValue v
 fromInterpreterValue iv@(I.ValueArray _ _) = Array $ fmap fromInterpreterValue $ ND.fromList (dims iv) $ flatten iv
   where
     flatten :: I.Value m -> [I.Value m]
-    flatten (I.ValueArray _ a) = foldl (++) [] $ map flatten $ A.elems a
+    flatten (I.ValueArray _ a) = concatMap flatten $ A.elems a
     flatten v = [v]
 
     dims :: I.Value m -> [Int]
@@ -65,11 +69,12 @@ toInterpreterValue (Atom (Right v)) = I.ValuePrim $ toPrimValue v
 toInterpreterValue (Array nd) = unflatten []
   where
     unflatten :: [Int] -> I.Value m
-    unflatten idx = if length idx == ND.rank nd
-      then toInterpreterValue $ nd ND.! reverse idx
-      else
-        let ni = ND.shape nd !! length idx
-         in I.ValueArray S.ShapeLeaf $ A.listArray (0, ni - 1) $ map (unflatten . (:idx)) [0..ni - 1]
+    unflatten idx =
+      if length idx == ND.rank nd
+        then toInterpreterValue $ nd ND.! reverse idx
+        else
+          let ni = ND.shape nd !! length idx
+           in I.ValueArray S.ShapeLeaf $ A.listArray (0, ni - 1) $ map (unflatten . (: idx)) [0 .. ni - 1]
 toInterpreterValue (Record m) = I.ValueRecord $ M.map toInterpreterValue $ M.mapKeys nameFromText m
 -- TODO: Add shape
 toInterpreterValue (Sum n v) = I.ValueSum (I.ShapeSum M.empty) (nameFromText n) $ map toInterpreterValue v

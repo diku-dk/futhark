@@ -9,8 +9,7 @@ module Futhark.Eval
   )
 where
 
-import System.FilePath (dropExtension, (</>))
-import Control.Arrow (Arrow(second))
+import Control.Arrow (Arrow (second))
 import Control.Exception (IOException, catch)
 import Control.Monad (foldM, when, (<=<))
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
@@ -19,7 +18,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask)
 import Data.Bifunctor (first)
-import Data.IORef (IORef, modifyIORef', readIORef, writeIORef, newIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map qualified as M
 import Data.Maybe (maybeToList)
 import Data.Sequence (Seq, (|>))
@@ -40,11 +39,12 @@ import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
 import Language.Futhark.Pretty (toName)
 import Language.Futhark.Prop (typeOf)
 import Language.Futhark.Semantic qualified as T
-import Language.Futhark.Syntax (nameToText, typeParamName, VName (VName), ProgBase (progDecs), DecBase (ValDec), ValBindBase(..))
+import Language.Futhark.Syntax (DecBase (ValDec), ProgBase (progDecs), VName (VName), ValBindBase (..), nameToText, typeParamName)
 import Language.Futhark.TypeChecker qualified as T
 import Prettyprinter (Doc, align, pretty, unAnnotate, vcat, (<+>))
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import System.Exit (ExitCode (ExitFailure), exitWith)
+import System.FilePath (dropExtension, (</>))
 import System.IO (stderr)
 
 -- | The class of monads that can perform expression evaluation.
@@ -97,13 +97,11 @@ call s (VName n _) p = do
   writeIORef s $ Just s''
   pure r
 
-realize' l = SP.realize' l
-
 -- TODO: Should NOT be IORef. This is temporary, for testing
 realize :: IORef (Maybe FutharkServer) -> Location -> IO I.Value
 realize s l = do
   (Just s') <- readIORef s
-  (r, s'') <- first S.toInterpreterValue <$> S.runFutharkServerM (realize' l) s'
+  (r, s'') <- first S.toInterpreterValue <$> S.runFutharkServerM (SP.realize' l) s'
   writeIORef s $ Just s''
   pure r
 
@@ -164,20 +162,21 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
       hPutDoc stderr $
         prettyWarnings ws
 
-  let modifyLast _ []     = []
-      modifyLast f [x]    = [f x]
-      modifyLast f (x:xs) = x : modifyLast f xs
+  let modifyLast _ [] = []
+      modifyLast f [x] = [f x]
+      modifyLast f (x : xs) = x : modifyLast f xs
 
   (imports', s) <- case maybe_file of
-        Just file -> liftIO $
-          let mdec (ValDec vb) =
-                ValDec $ vb { valBindAttrs = "$external" : valBindAttrs vb }
-              mdec o = o
-              (_, m) = last imports
-              m' = m { fileProg = (fileProg m) { progDecs = progDecs $ fileProg m} }
-              prog = "." </> dropExtension file
-          in (modifyLast (second $ const m') imports,) . Just <$> S.startServer prog
-        Nothing -> pure (imports, Nothing)
+    Just file ->
+      liftIO $
+        let mdec (ValDec vb) =
+              ValDec $ vb {valBindAttrs = "$external" : valBindAttrs vb}
+            mdec o = o
+            (_, m) = last imports
+            m' = m {fileProg = (fileProg m) {progDecs = progDecs $ fileProg m}}
+            prog = "." </> dropExtension file
+         in (modifyLast (second $ const m') imports,) . Just <$> S.startServer prog
+    Nothing -> pure (imports, Nothing)
 
   is <- liftIO $ newIORef s
   ictx <-

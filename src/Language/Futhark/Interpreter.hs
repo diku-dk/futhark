@@ -59,6 +59,7 @@ import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark qualified as F
 import Language.Futhark.Interpreter.AD qualified as AD
+import Language.Futhark.Interpreter.FFI.Values (Location, indexLocation, projectLocation)
 import Language.Futhark.Interpreter.Values hiding (Value)
 import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
@@ -66,7 +67,6 @@ import Language.Futhark.Primitive qualified as P
 import Language.Futhark.Semantic qualified as T
 import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
 import Prelude hiding (break, mod)
-import Language.Futhark.Interpreter.FFI.Values (Location, indexLocation, projectLocation)
 
 data StackFrame = StackFrame
   { stackFrameLoc :: Loc,
@@ -1252,25 +1252,25 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
     _ -> error "Expected ModuleFun."
 
 extFun :: VName -> Int -> [Value] -> EvalM Value
-extFun n i _  | i  < 1 = liftF $ ExtOpCall n [] id -- Special case: Functions with 0 parameters - i.e. values
+extFun n i _ | i < 1 = liftF $ ExtOpCall n [] id -- Special case: Functions with 0 parameters - i.e. values
 extFun n i vs | i == 1 = pure . ValueFun $ \v -> liftF $ ExtOpCall n (reverse $ v : vs) id
 extFun n i vs = pure . ValueFun $ \v -> extFun n (i - 1) (v : vs)
 
 evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec vb@(ValBind (Just _) (VName vn vi) _ _ (Info ret) tparams ps fbody _ _ _))
   | "$external" `elem` valBindAttrs vb = localExts $ do
-  let n = VName (nameFromText $ nameToText vn) vi
-  binding <- evalValBinding env tparams ps ret fbody
-  case binding of
-    (TermValue (Just t) _) -> do
-      sizes <- extEnv
-      f <- extFun n (length ps) []
-      pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
-    (TermPoly (Just t) _) -> do
-      sizes <- extEnv
-      f <- extFun n (length ps) []
-      pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
-    _ -> error "TODO: Impossible? (e2huqidjnk)"
+      let n = VName (nameFromText $ nameToText vn) vi
+      binding <- evalValBinding env tparams ps ret fbody
+      case binding of
+        (TermValue (Just t) _) -> do
+          sizes <- extEnv
+          f <- extFun n (length ps) []
+          pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
+        (TermPoly (Just t) _) -> do
+          sizes <- extEnv
+          f <- extFun n (length ps) []
+          pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
+        _ -> error "TODO: Impossible? (e2huqidjnk)"
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env tparams ps ret fbody
   sizes <- extEnv
