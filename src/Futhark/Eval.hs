@@ -1,7 +1,7 @@
 module Futhark.Eval
-  ( InterpreterConfig (..),
+  ( EvalConfig (..),
     runExpr,
-    interpreterConfig,
+    evalConfig,
     newFutharkiState,
     Evaluation (..),
     EvalRecordRef (),
@@ -20,7 +20,7 @@ import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask)
 import Data.Bifunctor (first)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map qualified as M
-import Data.Maybe (maybeToList)
+import Data.Maybe (isJust, maybeToList)
 import Data.Sequence (Seq, (|>))
 import Data.Text qualified as T
 import Futhark.Compiler (prettyWarnings, readProgramFilesExceptKnown)
@@ -135,17 +135,21 @@ runExpr (InterpreterState (src, env, ctx, s)) str = do
       abort $ I.prettyInterpreterError err
     Right val -> pure $ I.prettyValue val <> hardline
 
-data InterpreterConfig = InterpreterConfig
+data EvalConfig = EvalConfig
   { interpreterPrintWarnings :: Bool,
     interpreterFile :: Maybe String
   }
 
-interpreterConfig :: InterpreterConfig
-interpreterConfig = InterpreterConfig True Nothing
+evalConfig :: EvalConfig
+evalConfig =
+  EvalConfig
+    { interpreterPrintWarnings = True,
+      interpreterFile = Nothing
+    }
 
 newFutharkiState ::
   (MonadIO m, Evaluation m) =>
-  InterpreterConfig ->
+  EvalConfig ->
   Maybe FilePath ->
   VFS ->
   m (Either (Doc AnsiStyle) InterpreterState)
@@ -167,15 +171,15 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
       modifyLast f (x : xs) = x : modifyLast f xs
 
   (imports', s) <- case maybe_file of
-    Just file ->
-      liftIO $
-        let mdec (ValDec vb) =
-              ValDec $ vb {valBindAttrs = "$external" : valBindAttrs vb}
-            mdec o = o
-            (_, m) = last imports
-            m' = m {fileProg = (fileProg m) {progDecs = progDecs $ fileProg m}}
-            prog = "." </> dropExtension file
-         in (modifyLast (second $ const m') imports,) . Just <$> S.startServer prog
+    Just file -> liftIO $ do
+      let mdec (ValDec vb)
+            | isJust $ valBindEntryPoint vb =
+                ValDec $ vb {valBindAttrs = "$external" : valBindAttrs vb}
+          mdec dec = dec
+          (_, m) = last imports
+          m' = m {fileProg = (fileProg m) {progDecs = map mdec $ progDecs $ fileProg m}}
+          prog = "." </> dropExtension file
+      (modifyLast (second $ const m') imports,) . Just <$> S.startServer prog
     Nothing -> pure (imports, Nothing)
 
   is <- liftIO $ newIORef s
