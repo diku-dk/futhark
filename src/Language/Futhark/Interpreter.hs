@@ -1257,8 +1257,9 @@ extFun n i vs | i == 1 = pure . ValueFun $ \v -> liftF $ ExtOpCall n (reverse $ 
 extFun n i vs = pure . ValueFun $ \v -> extFun n (i - 1) (v : vs)
 
 evalDec :: Env -> Dec -> EvalM Env
-evalDec env (ValDec (ValBind (Just _) (VName vn vi) _ _ (Info ret) tparams ps fbody _ _ _)) | "$" `T.isPrefixOf` nameToText vn = localExts $ do
-  let n = VName (nameFromText $ T.drop 1 $ nameToText vn) vi
+evalDec env (ValDec vb@(ValBind (Just _) (VName vn vi) _ _ (Info ret) tparams ps fbody _ _ _))
+  | "$external" `elem` valBindAttrs vb = localExts $ do
+  let n = VName (nameFromText $ nameToText vn) vi
   binding <- evalValBinding env tparams ps ret fbody
   case binding of
     (TermValue (Just t) _) -> do

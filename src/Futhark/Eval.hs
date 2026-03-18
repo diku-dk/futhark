@@ -34,13 +34,13 @@ import Language.Futhark.Interpreter.FFI qualified as S
 import Language.Futhark.Interpreter.FFI.Server (FutharkServer)
 import Language.Futhark.Interpreter.FFI.Server qualified as S
 import Language.Futhark.Interpreter.FFI.Server.Packer qualified as SP
-import Language.Futhark.Interpreter.FFI.Values (Location (Location), Value (Atom))
+import Language.Futhark.Interpreter.FFI.Values (Location)
 import Language.Futhark.Parser (parseExp)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
 import Language.Futhark.Pretty (toName)
 import Language.Futhark.Prop (typeOf)
 import Language.Futhark.Semantic qualified as T
-import Language.Futhark.Syntax (nameToText, typeParamName, VName (VName), ProgBase (progDecs), DecBase (ValDec), ValBindBase (ValBind), nameToString, nameFromString)
+import Language.Futhark.Syntax (nameToText, typeParamName, VName (VName), ProgBase (progDecs), DecBase (ValDec), ValBindBase(..))
 import Language.Futhark.TypeChecker qualified as T
 import Prettyprinter (Doc, align, pretty, unAnnotate, vcat, (<+>))
 import Prettyprinter.Render.Terminal (AnsiStyle)
@@ -170,11 +170,11 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
 
   (imports', s) <- case maybe_file of
         Just file -> liftIO $
-          -- TODO: This relies quite heavily on a bunch of imports, but hey, it's a start
-          let mdec (ValDec (ValBind (Just a) (VName vn vi) nameloc c d e f g h i j)) = ValDec (ValBind (Just a) (VName (nameFromString $ "$" ++ nameToString vn) vi) nameloc c d e f g h i j)
+          let mdec (ValDec vb) =
+                ValDec $ vb { valBindAttrs = "$external" : valBindAttrs vb }
               mdec o = o
               (_, m) = last imports
-              m' = m { fileProg = (fileProg m) { progDecs = map mdec $ progDecs $ fileProg m} }
+              m' = m { fileProg = (fileProg m) { progDecs = progDecs $ fileProg m} }
               prog = "." </> dropExtension file
           in (modifyLast (second $ const m') imports,) . Just <$> S.startServer prog
         Nothing -> pure (imports, Nothing)
