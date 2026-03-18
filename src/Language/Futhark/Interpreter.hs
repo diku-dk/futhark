@@ -1270,18 +1270,6 @@ evalDec env (ValDec (ValBind (Just _) (VName vn vi) _ _ (Info ret) tparams ps fb
       f <- extFun n (length ps) []
       pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
     _ -> error "TODO: Impossible? (e2huqidjnk)"
-evalDec env (ValDec (ValBind (Just _) n _ _ (Info ret) tparams ps h@(Hole _ _) _ _ _)) = localExts $ do
-  binding <- evalValBinding env tparams ps ret h
-  case binding of
-    (TermValue (Just t) _) -> do
-      sizes <- extEnv
-      f <- extFun n (length ps) []
-      pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
-    (TermPoly (Just t) _) -> do
-      sizes <- extEnv
-      f <- extFun n (length ps) []
-      pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
-    _ -> error "TODO: Impossible? (98quwdoijla)"
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env tparams ps ret fbody
   sizes <- extEnv
