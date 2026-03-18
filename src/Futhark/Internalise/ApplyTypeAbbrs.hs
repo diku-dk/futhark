@@ -54,7 +54,7 @@ substEntry types (EntryPoint params ret) =
 -- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Types -> ValBind -> ValBind
 removeTypeVariables types valbind = do
-  let (ValBind entry _ _ (Info (RetType dims rettype)) _ pats body _ _ _) = valbind
+  let (ValBind entry _ _ _ (Info (RetType dims rettype)) _ pats body _ _ _) = valbind
       mapper =
         ASTMapper
           { mapOnExp = onExp,

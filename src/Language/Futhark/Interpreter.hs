@@ -1257,7 +1257,7 @@ extFun n i vs | i == 1 = pure . ValueFun $ \v -> liftF $ ExtOpCall n (reverse $ 
 extFun n i vs = pure . ValueFun $ \v -> extFun n (i - 1) (v : vs)
 
 evalDec :: Env -> Dec -> EvalM Env
-evalDec env (ValDec (ValBind (Just _) (VName vn vi) _ (Info ret) tparams ps fbody _ _ _)) | "$" `T.isPrefixOf` nameToText vn = localExts $ do
+evalDec env (ValDec (ValBind (Just _) (VName vn vi) _ _ (Info ret) tparams ps fbody _ _ _)) | "$" `T.isPrefixOf` nameToText vn = localExts $ do
   let n = VName (nameFromText $ T.drop 1 $ nameToText vn) vi
   binding <- evalValBinding env tparams ps ret fbody
   case binding of
@@ -1270,7 +1270,7 @@ evalDec env (ValDec (ValBind (Just _) (VName vn vi) _ (Info ret) tparams ps fbod
       f <- extFun n (length ps) []
       pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
     _ -> error "TODO: Impossible? (e2huqidjnk)"
-evalDec env (ValDec (ValBind (Just _) n _ (Info ret) tparams ps h@(Hole _ _) _ _ _)) = localExts $ do
+evalDec env (ValDec (ValBind (Just _) n _ _ (Info ret) tparams ps h@(Hole _ _) _ _ _)) = localExts $ do
   binding <- evalValBinding env tparams ps ret h
   case binding of
     (TermValue (Just t) _) -> do
@@ -1282,7 +1282,7 @@ evalDec env (ValDec (ValBind (Just _) n _ (Info ret) tparams ps h@(Hole _ _) _ _
       f <- extFun n (length ps) []
       pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
     _ -> error "TODO: Impossible? (98quwdoijla)"
-evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
+evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env tparams ps ret fbody
   sizes <- extEnv
   pure $ mempty {envTerm = M.singleton v binding} <> sizes

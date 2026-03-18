@@ -170,7 +170,7 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
   (imports', s) <- case maybe_file of
         Just file -> liftIO $
           -- TODO: This relies quite heavily on a bunch of imports, but hey, it's a start
-          let mdec (ValDec (ValBind (Just a) (VName vn vi) c d e f g h i j)) = ValDec (ValBind (Just a) (VName (nameFromString $ "$" ++ nameToString vn) vi) c d e f g h i j)
+          let mdec (ValDec (ValBind (Just a) (VName vn vi) nameloc c d e f g h i j)) = ValDec (ValBind (Just a) (VName (nameFromString $ "$" ++ nameToString vn) vi) nameloc c d e f g h i j)
               mdec o = o
               (_, m) = last imports
               m' = m { fileProg = (fileProg m) { progDecs = map mdec $ progDecs $ fileProg m} }
