@@ -210,14 +210,13 @@ testInlayTypeHint =
       _position @?= p
       _label @?= InL l
       _kind @?= Just InlayHintKind_Type
-    hintTestCase name mainDoc expectedHints = serverTestCase name $
-      do
-        docIdent <- createMainDoc mainDoc
-        hints <- getAndResolveInlayHints docIdent fullRange
-        liftIO $
-          if length hints /= length expectedHints
-            then assertFailure $ "Unexpected inlay hints: " ++ show hints
-            else zipWithM_ (\h (p, l) -> expectHint h l p) hints expectedHints
+    hintTestCase name mainDoc expectedHints = serverTestCase name $ do
+      docIdent <- createMainDoc mainDoc
+      hints <- getAndResolveInlayHints docIdent fullRange
+      liftIO $
+        if length hints /= length expectedHints
+          then assertFailure $ "Unexpected inlay hints: " ++ show hints
+          else zipWithM_ (\h (p, l) -> expectHint h l p) hints expectedHints
     typeArgHint =
       hintTestCase
         "type argument hint"
