@@ -45,6 +45,7 @@ data TermFunData
   { termFunType :: StructType,
     termFunRetType :: ResRetType,
     termFunAscription :: Maybe TypeAscription,
+    -- I wanted to remove the @Maybe@ but @Loc@ always includes a @NoLoc@ case
     termFunArgEnd :: Maybe Pos,
     termFunNameEnd :: Maybe Pos,
     termFunTypeParams :: [TypeParamBase VName]
@@ -52,10 +53,11 @@ data TermFunData
   deriving (Eq, Show)
 
 data TermBinding
-  = TermSize
+  = -- | The bound term is a size type
+    TermSize
   | -- | Inferred Type, Ascripted type
     TermVar TermBindSrc StructType (Maybe TypeAscription)
-  | -- I cannot remove the @Maybe@ wrapper because @Loc@ always includes a @NoLoc@ case.
+  | -- | The bound term is a function
     TermFun TermFunData
   deriving (Eq, Show)
 
