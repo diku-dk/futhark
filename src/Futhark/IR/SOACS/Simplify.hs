@@ -219,7 +219,8 @@ topDownRules =
     RuleOp moveTransformToInput,
     RuleOp moveTransformToOutput,
     RuleOp removeUnusedPreLamResult,
-    RuleOp removeDeadScan
+    RuleOp removeDeadScan,
+    RuleOp removeDuplicateInput
   ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -508,6 +509,18 @@ removeDuplicateMapOutput _ (Pat pes) aux (Screma w arrs form)
           (ses_ts_pes', (pe', pe) : copies)
       | otherwise = (ses_ts_pes' ++ [(se, t, pe)], copies)
 removeDuplicateMapOutput _ _ _ _ = Skip
+
+removeDuplicateInput :: TopDownRuleOp (Wise SOACS)
+removeDuplicateInput _ pat aux (Screma w arrs form)
+  | length arrs /= length (L.nub arrs) = Simplify $ do
+      let (new_arrs, new_form) = dedupInput arrs form
+      auxing aux
+        . letBind pat
+        . Op
+        . Screma w new_arrs
+        $ new_form
+  | otherwise = Skip
+removeDuplicateInput _ _ _ _ = Skip
 
 reshapeInner :: SubExp -> NewShape SubExp -> NewShape SubExp
 reshapeInner w new_shape =
@@ -1306,8 +1319,7 @@ dedupInput ::
   ScremaForm rep ->
   -- | Deduplicated inputs and new screma
   ([a], ScremaForm rep)
-dedupInput inp form =
-  (new_inp, form {scremaLambda = new_lam})
+dedupInput inp form = (new_inp, form {scremaLambda = new_lam})
   where
     lam = scremaLambda form
     body = lambdaBody lam

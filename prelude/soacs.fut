@@ -230,9 +230,9 @@ def scatter_3d 't [k] [n] [o] [l] (dest: *[k][n][o]t) (is: [l](i64, i64, i64)) (
 def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
   if n == 0
   then []
-  else let flags = map (\x -> if p x then 1 else 0) as
-       let offsets = scan (+) 0 flags
-       let is = map2 (\f o -> if f == 1 then o - 1 else -1) flags offsets
+  else let flags = map p as
+       let offsets = scan (+) 0 (map intrinsics.btoi_bool_i64 flags)
+       let is = map2 (\f o -> if f then o - 1 else -1) flags offsets
        -- This following is carefully written such that the two scatters will be
        -- fused horisontally, which allows the entire thing to become a single
        -- kernel.
@@ -254,13 +254,21 @@ def partition [n] 'a (p: a -> bool) (as: [n]a) : ?[k].([k]a, [n - k]a) =
   let (res, offset) =
     if n == 0
     then ([], 0)
-    else let flags = map (\x -> if p x then (1, 0) else (0, 1)) as
-         let offset = reduce_comm (+) 0 (map (.0) flags)
+    else let offset =
+           reduce_comm (+) 0 (map (\x -> intrinsics.btoi_bool_i64 (p x)) as)
          let add2 (a0, b0) (a1, b1) = (a0 + a1, b0 + b1)
-         let to_index (f, _) (o0, o1) = if f == 1i64 then o0 - 1i64 else offset + o1 - 1
-         let flags' = map (\x -> if p x then (1, 0) else (0, 1)) as
-         let offsets = scan add2 (0, 0) flags'
-         let idxs = map2 to_index flags' offsets
+         let to_index f (o0, o1) = if f then o0 - 1i64 else offset + o1 - 1
+         let t_flags = map p as
+         let f_flags = map (\x -> !x) t_flags
+         let flags =
+           map2 (\x y ->
+                   ( intrinsics.btoi_bool_i64 x
+                   , intrinsics.btoi_bool_i64 y
+                   ))
+                t_flags
+                f_flags
+         let offsets = scan add2 (0, 0) flags
+         let idxs = map2 to_index (map p as) offsets
          let res =
            scatter (#[scratch] [as][0])
                    idxs
@@ -277,19 +285,31 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
   let (res, offset0, offset1) =
     if n == 0
     then ([], 0, 0)
-    else let flags = map (\x -> if p1 x then (1, 0, 0) else if p2 x then (0, 1, 0) else (0, 0, 1)) as
-         let offset0 = reduce_comm (+) 0 (map (.0) flags)
-         let offset1 = reduce_comm (+) 0 (map (.1) flags)
-         let add2 (a0, b0, c0) (a1, b1, c1) = (a0 + a1, b0 + b1, c0 + c1)
-         let to_index (f0, f1, _) (o0, o1, o2) =
-           if f0 == 1i64
+    else let t1_flags = map p1 as
+         let t2_flags = map2 (\t a -> !t && p2 a) t1_flags as
+         let offset0 = reduce_comm (+) 0 (map intrinsics.btoi_bool_i64 t1_flags)
+         let offset1 = reduce_comm (+) 0 (map intrinsics.btoi_bool_i64 t2_flags)
+         let add3 (a0, b0, c0) (a1, b1, c1) = (a0 + a1, b0 + b1, c0 + c1)
+         let to_index f0 f1 (o0, o1, o2) =
+           if f0
            then o0 - 1i64
-           else if f1 == 1i64
+           else if f1
            then offset0 + o1 - 1
            else offset0 + offset1 + o2 - 1
-         let flags' = map (\x -> if p1 x then (1, 0, 0) else if p2 x then (0, 1, 0) else (0, 0, 1)) as
-         let offsets = scan add2 (0, 0, 0) flags'
-         let idxs = map2 to_index flags' offsets
+         let t1_flags' = map p1 as
+         let t2_flags' = map2 (\t a -> !t && p2 a) t1_flags' as
+         let t3_flags' = map2 (\x y -> !(x || y)) t1_flags' t2_flags'
+         let flags' =
+           map3 (\x y z ->
+                   ( intrinsics.btoi_bool_i64 x
+                   , intrinsics.btoi_bool_i64 y
+                   , intrinsics.btoi_bool_i64 z
+                   ))
+                t1_flags'
+                t2_flags'
+                t3_flags'
+         let offsets = scan add3 (0, 0, 0) flags'
+         let idxs = map3 to_index t1_flags' t2_flags' offsets
          let res =
            scatter (#[scratch] [as][0])
                    idxs

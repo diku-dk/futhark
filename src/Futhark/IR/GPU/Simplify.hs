@@ -11,6 +11,8 @@ module Futhark.IR.GPU.Simplify
   )
 where
 
+import Data.List qualified as L
+import Data.Map qualified as M
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.GPU
@@ -23,6 +25,7 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
 import Futhark.Tools
+import Futhark.Transform.Substitute
 import Futhark.Util (focusNth)
 
 simpleGPU :: Simplify.SimpleOps GPU
@@ -100,6 +103,7 @@ kernelRules =
         RuleOp SOAC.liftIdentityMapping,
         RuleOp SOAC.simplifyMapIota,
         RuleOp SOAC.removeUnusedSOACInput,
+        -- RuleOp removeUnusedKernelBodyResultInSegScan,
         RuleBasicOp removeScalarCopy
       ]
       [ RuleBasicOp removeUnnecessaryCopy,
@@ -125,20 +129,63 @@ removeDeadGPUBodyResult (_, used) pat aux (GPUBody types body)
   | otherwise = Skip
 removeDeadGPUBodyResult _ _ _ _ = Skip
 
--- moveKernelBodyLookupSegScan :: BottomUpRuleOp (Wise GPU)
--- moveKernelBodyLookupSegScan (_, used) pat aux (SegOp (SegScan lvl space ts body seg_op post_op))
---   | -- Figure out which of the names in 'pat' are used...
---     False =
---       Skip
---   | otherwise = Skip
---   where
---     res = bodyResult body
---     stms = bodyStms body
---     isIndex (BasicOp (Index _ _)) = True
---     isIndex _ = False
---     index_stms = filter (isIndex . stmExp) $ stmsToList stms
---     var_names = concatMap (patElems . stmPat) index_stms
--- moveKernelBodyLookupSegScan _ _ _ _ = Skip
+removeUnusedKernelBodyResultInSegScan ::
+  (Buildable rep, BuilderOps rep, HasSegOp rep) =>
+  TopDownRuleOp rep
+removeUnusedKernelBodyResultInSegScan _ pat aux op
+  | -- Figure out which of the names in 'pat' are used...
+    Just (SegScan lvl space ts kbody seg_op post_op) <- asSegOp op,
+    Just (new_kbody, new_ts, new_post_op) <-
+      newKbodyPostOp kbody ts seg_op post_op = Simplify $ do
+      auxing aux
+        . letBind pat
+        . Op
+        . segOp
+        $ SegScan lvl space new_ts new_kbody seg_op new_post_op
+  | otherwise = Skip
+  where
+    newKbodyPostOp kbody ts seg_op post_op =
+      if length new_map_res_ts_pars == length map_res_ts_pars
+        then Nothing
+        else
+          Just
+            (new_kbody, new_ts, new_post_op)
+      where
+        res = bodyResult kbody
+        post_lam = segPostOpLambda post_op
+        pars = lambdaParams post_lam
+        free_vars = freeIn kbody
+        mustKeep r =
+          case kernelResultSubExp r of
+            Var name -> name `notNameIn` free_vars
+            Constant _ -> False
+
+        subst =
+          (\(r, t, p) -> (paramName p, t, kernelResultSubExp r))
+            <$> sub_map_res_ts_pars
+
+        new_kbody = kbody {bodyResult = new_res}
+        new_binds =
+          stmsFromList $
+            (\(p, t, r) -> mkLet [Ident p t] (BasicOp $ SubExp r))
+              <$> subst
+        new_post_op =
+          SegPostOp $
+            Lambda
+              { lambdaParams = new_pars,
+                lambdaBody =
+                  mkBody
+                    (new_binds <> bodyStms (lambdaBody post_lam))
+                    (bodyResult (lambdaBody post_lam)),
+                lambdaReturnType = lambdaReturnType post_lam
+              }
+
+        (new_res, new_ts, new_pars) =
+          L.unzip3 $ scan_res_ts_pars <> new_map_res_ts_pars
+        (new_map_res_ts_pars, sub_map_res_ts_pars) =
+          L.partition (\(r, _, _) -> mustKeep r) map_res_ts_pars
+        (scan_res_ts_pars, map_res_ts_pars) =
+          splitAt (segBinOpResults seg_op) $ zip3 res ts pars
 
 -- If we see an Update with a scalar where the value to be written is
 -- the result of indexing some other array, then we convert it into an
