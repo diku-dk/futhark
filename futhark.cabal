@@ -310,6 +310,7 @@ library
       Futhark.LSP.Compile
       Futhark.LSP.Diagnostic
       Futhark.LSP.Handlers
+      Futhark.LSP.InlayHint
       Futhark.LSP.Tool
       Futhark.LSP.State
       Futhark.LSP.PositionMapping

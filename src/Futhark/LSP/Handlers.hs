@@ -24,13 +24,14 @@ import Futhark.Fmt.Printer (fmtToText)
 import Futhark.LSP.CodeLens qualified as CodeLens
 import Futhark.LSP.CommandType (CommandType (CodeLens))
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
+import Futhark.LSP.InlayHint (getInlayHints)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState, logWithSeverity)
 import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
-import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), arguments, command, line, params, range, start)
+import Language.LSP.Protocol.Lens (arguments, command, line, params, range, start, textDocument, uri)
 import Language.LSP.Protocol.Message
   ( Method (..),
     SMethod (..),
@@ -260,6 +261,20 @@ onWorkspaceExecuteCommandHandler =
           _code = err
         }
 
+onTextDocumentInlayHint :: IORef State -> Handlers (LspM ())
+onTextDocumentInlayHint state_ref =
+  requestHandler SMethod_TextDocumentInlayHint $ \request respond ->
+    let parameters = request ^. params
+     in do
+          let filepath = uriToFilePath $ parameters ^. (textDocument . uri)
+          let textRange = parameters ^. range
+          logWithSeverity Debug <& "Inlay hints request for range: " <> showText textRange
+
+          state <- tryTakeStateFromIORef state_ref filepath
+          let result = maybe [] (getInlayHints textRange state) filepath
+
+          respond . Right $ InL result
+
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
@@ -272,6 +287,7 @@ handlers state_mvar _ =
       onDocumentCodeLenses,
       onDocumentCodeLensResolve,
       onDocumentFormattingHandler,
+      onTextDocumentInlayHint state_mvar,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,

@@ -47,6 +47,12 @@ Evaluation Comments
   The evaluation will be aborted after 15 seconds or when it has allocated 
   100 GB in total, only the last 100 debugging traces will be retained.
 
+Inlay Hints
+
+  Provides virtual text hints to visualize the results of type-checking.
+  Inferred types of bindings will be shown for e.g. lambda arguments, function
+  arguments, let bindings or loop bindings.
+
 SEE ALSO
 ========
 

@@ -2,12 +2,14 @@
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Futhark.LspTests (tests, main) where
 
 import Colog.Core (LogAction (LogAction))
 import Control.Concurrent (forkIO)
 import Control.Lens ((^.))
+import Control.Monad (zipWithM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Functor (void)
@@ -22,6 +24,8 @@ import Language.LSP.Protocol.Types
     Definition (Definition),
     FormattingOptions (FormattingOptions),
     Hover (Hover),
+    InlayHint (..),
+    InlayHintKind (InlayHintKind_Type),
     LanguageKind (LanguageKind_Custom),
     Location (..),
     MarkupContent (..),
@@ -41,6 +45,7 @@ import Language.LSP.Test
     formatDoc,
     fullLatestClientCaps,
     getAndResolveCodeLenses,
+    getAndResolveInlayHints,
     getDefinitions,
     getHover,
     message,
@@ -182,6 +187,78 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $ do
       -- >>> x + 5
       |]
 
+testInlayTypeHint :: TestTree
+testInlayTypeHint =
+  testGroup
+    "Inlay type hint"
+    [ defParamHint,
+      letHint,
+      noSizeHint,
+      loopHint,
+      defReturnHint,
+      defConstantReturnHint,
+      lambdaArgHint,
+      typeArgHint
+    ]
+  where
+    fullRange =
+      Range
+        { _start = Position minBound minBound,
+          _end = Position maxBound maxBound
+        }
+    expectHint InlayHint {..} l p = do
+      _position @?= p
+      _label @?= InL l
+      _kind @?= Just InlayHintKind_Type
+    hintTestCase name mainDoc expectedHints = serverTestCase name $ do
+      docIdent <- createMainDoc mainDoc
+      hints <- getAndResolveInlayHints docIdent fullRange
+      liftIO $
+        if length hints /= length expectedHints
+          then assertFailure $ "Unexpected inlay hints: " ++ show hints
+          else zipWithM_ (\h (p, l) -> expectHint h l p) hints expectedHints
+    typeArgHint =
+      hintTestCase
+        "type argument hint"
+        "def identity = let f 'a (x: a): a = x in f"
+        [(Position 0 12, " 'a\8320"), (Position 0 12, ": (x: a\8320) -> a\8320")]
+    lambdaArgHint =
+      hintTestCase
+        "lambda argument hint"
+        "def lambda : i32 -> i32 = \\ x -> x + 0i32"
+        [(Position 0 28, "("), (Position 0 29, ": i32)")]
+    defConstantReturnHint =
+      hintTestCase
+        "def constant no hint"
+        "def pi = 3"
+        [(Position 0 6, ": i32")]
+    defReturnHint =
+      hintTestCase
+        "def return hint"
+        "def twice (x: i32) = x + x"
+        [(Position 0 18, ": i32")]
+    loopHint =
+      hintTestCase
+        "loop hint"
+        "def factorial (n: i32) : i32 = loop result = 1 for i < n do result * (i + 1)"
+        [(Position 0 36, "("), (Position 0 42, ": i32)")]
+    -- this is on purpose, all sizes have type i64
+    noSizeHint =
+      hintTestCase
+        "no size hint"
+        "def sz [n] 'a (_: [n]a) : i64 = n"
+        []
+    letHint =
+      hintTestCase
+        "let hint"
+        "def foo : bool = let f = false in true && f"
+        [(Position 0 22, ": bool")]
+    defParamHint =
+      hintTestCase
+        "def param hint"
+        "def plus5 x : i32 = x + 5i32"
+        [(Position 0 10, "("), (Position 0 11, ": i32)")]
+
 tests :: TestTree
 tests =
   testGroup
@@ -189,5 +266,6 @@ tests =
     [ testHoverInformation,
       testDefinition,
       testFormatting,
-      testEvaluationComment
+      testEvaluationComment,
+      testInlayTypeHint
     ]
