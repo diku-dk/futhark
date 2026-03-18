@@ -512,7 +512,7 @@ removeDuplicateMapOutput _ _ _ _ = Skip
 
 removeDuplicateInput :: TopDownRuleOp (Wise SOACS)
 removeDuplicateInput _ pat aux (Screma w arrs form)
-  | length arrs /= length (L.nubOrd arrs) = Simplify $ do
+  | length arrs /= length (nubOrd arrs) = Simplify $ do
       let (new_arrs, new_form) = dedupInput arrs form
       auxing aux
         . letBind pat
