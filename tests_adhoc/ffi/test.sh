@@ -4,7 +4,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FILE="$DIR/test.fut"
 
 # Compile the server executable
-cabal run futhark -- c --server $FILE
+futhark c --server $FILE
 
 # Expression
 tests=(
@@ -74,7 +74,7 @@ for ((i=0; i<${#tests[@]}; i+=2)); do
   exp="${tests[i]}"
   expected="${tests[i+1]}"
 
-  output=$(cabal run futhark -- eval -f "$DIR/test.fut" "$exp" | tr '\n' ' ' | xargs)
+  output=$(futhark eval -f "$DIR/test.fut" "$exp" | tr '\n' ' ' | xargs)
 
   if [[ "$output" == "$expected" ]]; then
     echo "PASS: $exp"
