@@ -20,6 +20,7 @@ import Control.Monad.Reader (MonadIO, MonadReader, MonadTrans (lift), ReaderT (r
 import Control.Monad.State (StateT (runStateT))
 import Data.Map qualified as M
 import Futhark.Server qualified as S
+import Futhark.Util (isEnvVarAtLeast)
 import Language.Futhark.Interpreter.FFI.Server.Explorer (exploreProgram)
 import Language.Futhark.Interpreter.FFI.Server.Interface (ServerInterface (..))
 import Language.Futhark.Interpreter.FFI.Server.TypeLayout (TypeLayout (..))
@@ -48,8 +49,14 @@ init s = do
   info <- FutharkServerInfo s <$> exploreProgram s
   pure $ FutharkServer info mempty $ FutharkServerState mempty
 
+futharkServerCfg :: FilePath -> [String] -> S.ServerCfg
+futharkServerCfg prog opts =
+  (S.newServerCfg prog opts)
+    { S.cfgDebug = isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1
+    }
+
 startServer :: FilePath -> IO FutharkServer
-startServer p = S.startServer (S.newServerCfg p []) >>= init
+startServer prog = S.startServer (futharkServerCfg prog []) >>= init
 
 newtype FutharkServerM a = FutharkServerM (ReaderT FutharkServerInfo (StateT FutharkServerState (UIDSourceT IO)) a)
   deriving (Functor, Applicative, Monad, MonadIO, MonadReader FutharkServerInfo, MonadState FutharkServerState)
