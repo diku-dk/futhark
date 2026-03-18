@@ -113,9 +113,9 @@ getInlayHints range state filepath = fromMaybe [] $ do
                       _ -> []
     inferredTerms _ = []
 
-    boundToInRange loc bound = loc `contains` start
-      where
-        Loc start _ = locOf bound
+    boundToInRange locRange bound = case locOf bound of
+      NoLoc -> False
+      Loc start _ -> locRange `contains` start
     -- increment by one: Pos counts from one onwards, LSP starts at zero
     mkPos :: UInt -> UInt -> Pos
     mkPos l c = Pos filepath (1 + fromIntegral l) (1 + fromIntegral c) (-1)
