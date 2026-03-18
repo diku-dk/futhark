@@ -12,7 +12,6 @@ module Futhark.IR.GPU.Simplify
 where
 
 import Data.List qualified as L
-import Data.Map qualified as M
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.GPU
@@ -25,7 +24,6 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
 import Futhark.Tools
-import Futhark.Transform.Substitute
 import Futhark.Util (focusNth)
 
 simpleGPU :: Simplify.SimpleOps GPU
@@ -103,7 +101,7 @@ kernelRules =
         RuleOp SOAC.liftIdentityMapping,
         RuleOp SOAC.simplifyMapIota,
         RuleOp SOAC.removeUnusedSOACInput,
-        -- RuleOp removeUnusedKernelBodyResultInSegScan,
+        RuleOp removeUnusedKernelBodyResultInSegScan,
         RuleBasicOp removeScalarCopy
       ]
       [ RuleBasicOp removeUnnecessaryCopy,
@@ -155,9 +153,9 @@ removeUnusedKernelBodyResultInSegScan _ pat aux op
         post_lam = segPostOpLambda post_op
         pars = lambdaParams post_lam
         free_vars = freeIn kbody
-        mustKeep r =
+        mustKeep t r =
           case kernelResultSubExp r of
-            Var name -> name `notNameIn` free_vars
+            Var name -> name `notNameIn` free_vars || isAcc t
             Constant _ -> False
 
         subst =
@@ -183,7 +181,7 @@ removeUnusedKernelBodyResultInSegScan _ pat aux op
         (new_res, new_ts, new_pars) =
           L.unzip3 $ scan_res_ts_pars <> new_map_res_ts_pars
         (new_map_res_ts_pars, sub_map_res_ts_pars) =
-          L.partition (\(r, _, _) -> mustKeep r) map_res_ts_pars
+          L.partition (\(r, t, _) -> mustKeep t r) map_res_ts_pars
         (scan_res_ts_pars, map_res_ts_pars) =
           splitAt (segBinOpResults seg_op) $ zip3 res ts pars
 
