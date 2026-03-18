@@ -103,7 +103,7 @@ getInlayHints range state filepath = fromMaybe [] $ do
               inferredTypeParams = filter isSynthesized (termFunTypeParams tfData)
               paramInfo p = case termFunNameEnd tfData of
                 Nothing -> id
-                Just pos -> (TypeHintBare (prettyText p) pos :)
+                Just pos -> (TypeHintBare (" " <> prettyText p) pos :)
            in foldr (\p f hs -> paramInfo p $ f hs) id inferredTypeParams $
                 let retTypeText = prettyText $ termFunRetType tfData
                  in case (termFunAscription tfData, termFunArgEnd tfData, termFunNameEnd tfData) of
