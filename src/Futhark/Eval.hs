@@ -11,7 +11,7 @@ where
 
 import Control.Arrow (Arrow (second))
 import Control.Exception (IOException, catch)
-import Control.Monad (foldM, when, (<=<))
+import Control.Monad (foldM, unless, void, when, (<=<))
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Free.Church (F, runF)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -23,10 +23,12 @@ import Data.Map qualified as M
 import Data.Maybe (isJust, maybeToList)
 import Data.Sequence (Seq, (|>))
 import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Futhark.Compiler (prettyWarnings, readProgramFilesExceptKnown)
 import Futhark.Compiler.Program (VFS, fileProg, fileScope)
 import Futhark.Error (externalErrorS, prettyCompilerError)
 import Futhark.FreshNames (VNameSource)
+import Futhark.Test (FutharkExe (..), compileProgram)
 import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, hardline, putDocLn)
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Interpreter.FFI qualified as S
@@ -43,7 +45,8 @@ import Language.Futhark.Syntax (DecBase (ValDec), ProgBase (progDecs), VName (VN
 import Language.Futhark.TypeChecker qualified as T
 import Prettyprinter (Doc, align, pretty, unAnnotate, vcat, (<+>))
 import Prettyprinter.Render.Terminal (AnsiStyle)
-import System.Exit (ExitCode (ExitFailure), exitWith)
+import System.Environment (getExecutablePath)
+import System.Exit (ExitCode (ExitFailure), exitFailure, exitWith)
 import System.FilePath (dropExtension, (</>))
 import System.IO (stderr)
 
@@ -136,24 +139,53 @@ runExpr (InterpreterState (src, env, ctx, s)) str = do
     Right val -> pure $ I.prettyValue val <> hardline
 
 data EvalConfig = EvalConfig
-  { interpreterPrintWarnings :: Bool,
-    interpreterFile :: Maybe String
+  { evalPrintWarnings :: Bool,
+    evalFile :: Maybe String,
+    -- | If @Just@, compile the file using this backend.
+    evalBackend :: Maybe String,
+    evalSkipCompilation :: Bool,
+    evalExtraOptions :: [String],
+    evalCompilerOptions :: [String],
+    evalFuthark :: Maybe FilePath
   }
 
 evalConfig :: EvalConfig
 evalConfig =
   EvalConfig
-    { interpreterPrintWarnings = True,
-      interpreterFile = Nothing
+    { evalPrintWarnings = True,
+      evalFile = Nothing,
+      evalBackend = Nothing,
+      evalSkipCompilation = False,
+      evalExtraOptions = [],
+      evalCompilerOptions = [],
+      evalFuthark = Nothing
     }
+
+prepareServer :: EvalConfig -> FilePath -> String -> IO FutharkServer
+prepareServer cfg file backend = do
+  futhark <- maybe getExecutablePath pure $ evalFuthark cfg
+
+  unless (evalSkipCompilation cfg) $ do
+    let compile_options = "--server" : evalCompilerOptions cfg
+
+    let onError err = do
+          T.hPutStrLn stderr err
+          exitFailure
+
+    void $
+      either onError pure <=< runExceptT $
+        compileProgram compile_options (FutharkExe futhark) backend file
+
+  let prog = "." </> dropExtension file
+  S.startServer prog
 
 newFutharkiState ::
   (MonadIO m, Evaluation m) =>
   EvalConfig ->
-  Maybe FilePath ->
   VFS ->
   m (Either (Doc AnsiStyle) InterpreterState)
-newFutharkiState cfg maybe_file vfs = runExceptT $ do
+newFutharkiState cfg vfs = runExceptT $ do
+  let maybe_file = evalFile cfg
   (ws, imports, src) <-
     badOnLeft prettyCompilerError
       =<< liftIO
@@ -161,26 +193,25 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
             `catch` \(err :: IOException) ->
               pure (externalErrorS (show err))
         )
-  when (interpreterPrintWarnings cfg) $
-    liftIO $
-      hPutDoc stderr $
-        prettyWarnings ws
+  when (evalPrintWarnings cfg) $
+    liftIO . hPutDoc stderr $
+      prettyWarnings ws
 
   let modifyLast _ [] = []
       modifyLast f [x] = [f x]
       modifyLast f (x : xs) = x : modifyLast f xs
 
-  (imports', s) <- case maybe_file of
-    Just file -> liftIO $ do
+  (imports', s) <- case (maybe_file, evalBackend cfg) of
+    (Just file, Just backend) -> liftIO $ do
       let mdec (ValDec vb)
             | isJust $ valBindEntryPoint vb =
                 ValDec $ vb {valBindAttrs = "$external" : valBindAttrs vb}
           mdec dec = dec
           (_, m) = last imports
           m' = m {fileProg = (fileProg m) {progDecs = map mdec $ progDecs $ fileProg m}}
-          prog = "." </> dropExtension file
-      (modifyLast (second $ const m') imports,) . Just <$> S.startServer prog
-    Nothing -> pure (imports, Nothing)
+      (modifyLast (second $ const m') imports,) . Just
+        <$> prepareServer cfg file backend
+    _ -> pure (imports, Nothing)
 
   is <- liftIO $ newIORef s
   ictx <-

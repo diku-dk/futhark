@@ -51,12 +51,12 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-cuda.rst
    man/futhark-dataset.rst
    man/futhark-doc.rst
+   man/futhark-eval.rst
    man/futhark-fmt.rst
    man/futhark-hip.rst
    man/futhark-ispc.rst
    man/futhark-literate.rst
    man/futhark-lsp.rst
-   man/futhark-script.rst
    man/futhark-multicore.rst
    man/futhark-opencl.rst
    man/futhark-pkg.rst
@@ -65,6 +65,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-python.rst
    man/futhark-repl.rst
    man/futhark-run.rst
+   man/futhark-script.rst
    man/futhark-test.rst
    man/futhark-wasm-multicore.rst
    man/futhark-wasm.rst

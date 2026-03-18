@@ -289,16 +289,19 @@ executeEvalLens (EvalLensData docUri line) = do
           IO (Either (Doc AnsiStyle) (Doc AnsiStyle))
         evaluationAction traceRef = interpret $ do
           -- do not print warnings
-          let cfg = evalConfig {interpreterPrintWarnings = False}
           let filePath =
                 toNormalizedUri docUri
                   & uriToNormalizedFilePath
                   & fmap fromNormalizedFilePath
+              cfg =
+                evalConfig
+                  { evalPrintWarnings = False,
+                    evalFile = filePath
+                  }
 
           -- load the file the expression is located in
           interpreterState <-
-            newFutharkiState cfg filePath currentVFS
-              >>= either abort pure
+            newFutharkiState cfg currentVFS >>= either abort pure
 
           liftIO setupLimits
 

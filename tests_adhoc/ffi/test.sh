@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 
 FILE="test.fut"
+BACKEND=c
 
 # Compile the server executable
-futhark c --server $FILE
+futhark ${BACKEND} --server $FILE
 
 # Expression
 tests=(
@@ -73,7 +74,7 @@ for ((i=0; i<${#tests[@]}; i+=2)); do
   exp="${tests[i]}"
   expected="${tests[i+1]}"
 
-  output=$(futhark eval -f "test.fut" "$exp" | tr '\n' ' ' | xargs)
+  output=$(futhark eval --backend=${BACKEND} --skip-compilation -f "test.fut" "$exp" | tr '\n' ' ' | xargs)
 
   if [[ "$output" == "$expected" ]]; then
     echo "PASS: $exp"
