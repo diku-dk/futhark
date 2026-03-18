@@ -9,6 +9,7 @@ module Futhark.Eval
   )
 where
 
+import System.FilePath (dropExtension, (</>))
 import Control.Arrow (Arrow(second))
 import Control.Exception (IOException, catch)
 import Control.Monad (foldM, when, (<=<))
@@ -174,7 +175,8 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
               mdec o = o
               (_, m) = last imports
               m' = m { fileProg = (fileProg m) { progDecs = map mdec $ progDecs $ fileProg m} }
-          in (modifyLast (second $ const m') imports,) . Just <$> S.startServer (take (length file - 4) file)
+              prog = "." </> dropExtension file
+          in (modifyLast (second $ const m') imports,) . Just <$> S.startServer prog
         Nothing -> pure (imports, Nothing)
 
   is <- liftIO $ newIORef s

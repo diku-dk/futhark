@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FILE="$DIR/test.fut"
+FILE="test.fut"
 
 # Compile the server executable
 futhark c --server $FILE
@@ -74,7 +73,7 @@ for ((i=0; i<${#tests[@]}; i+=2)); do
   exp="${tests[i]}"
   expected="${tests[i+1]}"
 
-  output=$(futhark eval -f "$DIR/test.fut" "$exp" | tr '\n' ' ' | xargs)
+  output=$(futhark eval -f "test.fut" "$exp" | tr '\n' ' ' | xargs)
 
   if [[ "$output" == "$expected" ]]; then
     echo "PASS: $exp"
