@@ -37,7 +37,7 @@ data TypeInlayHintInfo
 getInlayHints :: Range -> State -> FilePath -> [InlayHint]
 getInlayHints range state filepath = fromMaybe [] $ do
   let (Range (Position l1 c1) (Position l2 c2)) = range
-  imports <- lpImports <$> stateProgram state -- crash occurs here
+  imports <- lpImports <$> stateProgram state
   let mapping = getStaleMapping state filepath
   posStart <- toStalePos mapping $ mkPos l1 c1
   posEnd <- toStalePos mapping $ mkPos l2 c2
