@@ -236,7 +236,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       tblock_size_e = pe64 $ unCount $ kAttrBlockSize attrs
       num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
 
-  let chunk_const = getChunkSize scan_tys'
+  let chunk_const = getChunkSize ts
   chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
   let chunk = tvExp chunk_v
 
