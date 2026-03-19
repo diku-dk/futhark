@@ -756,7 +756,7 @@ transformInnerMap segments env inps pat w arrs map_lam = do
               }
           )
       (distributed, arrmap) =
-        distributeMap scope pat new_segment (replicated <> arrs') map_lam'
+        distributeMap scope pat (NE.singleton new_segment) (replicated <> arrs') map_lam'
       m =
         transformDistributed arrmap (NE.singleton new_segment) distributed
   traceM $ unlines ["inner map distributed", prettyString distributed]
@@ -890,7 +890,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfLParams [i_param]
           scope <- askScope
           let (loop_new_inputs', loop_dstms) =
-                distributeBody scope w loop_new_inputs body
+                distributeBody scope segments loop_new_inputs body
 
           let lifted_loop_rep_types = zip lifted_loop_reps (map declTypeOf old_loop_params)
 
@@ -952,7 +952,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         -- infinite loop . later can be uniform case as well.
         Nothing -> do
           let build_scope = scopeOfFParams lifted_loop_params'
-          let (loop_new_inputs', loop_dstms) = distributeBody scope w loop_new_inputs body
+          let (loop_new_inputs', loop_dstms) = distributeBody scope segments loop_new_inputs body
           (loop_body_res, loop_body_stms) <-
             runReaderT
               (runBuilder $ liftBody w loop_new_inputs' loop_env_local loop_dstms (bodyResult body))
@@ -1028,7 +1028,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
                         (v, t, i) <- zip3 vs ts [0 ..]
                         pure (v, DistInput (ResTag i) t)
                       env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-                  let (subset_inputs', subset_dstms) = distributeBody scope num_data subset_inputs body
+                  let (subset_inputs', subset_dstms) = distributeBody scope (NE.singleton num_data) subset_inputs body
                   subset_body_res <- liftBody num_data subset_inputs' env_subset subset_dstms (bodyResult body)
                   subset_result_vs <- mapM (letExp "subset_result" <=< toExp . resSubExp) subset_body_res
                   let active_reps = resultToResReps (map declTypeOf old_loop_params) subset_result_vs
@@ -1196,7 +1196,7 @@ transformStm scope (Let pat _ (Op (Screma w arrs form)))
       let arrs' =
             zipWith MapArray arrs $
               map paramType (lambdaParams (scremaLambda form))
-          (distributed, _) = distributeMap scope pat w arrs' lam
+          (distributed, _) = distributeMap scope pat (NE.singleton w) arrs' lam
           m = transformDistributed mempty (NE.singleton w) distributed
       traceM $ prettyString distributed
       runReaderT (runBuilder_ m) scope
@@ -1456,7 +1456,7 @@ liftFunDef const_scope fd = do
         addRetAls (map paramDeclType fparams'') $
           liftRetType w (map fst rettype)
   let (inputs', dstms) =
-        distributeBody const_scope (Var (paramName wp)) inputs body
+        distributeBody const_scope (NE.singleton (Var (paramName wp))) inputs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
   -- Lift the body of the function and get the results
   (result, stms) <-
@@ -1600,7 +1600,7 @@ transformFortoWhile segments env inps res aux merge i it n body = do
   let (inps_local, env_local, _) = localiseInputs env inps
 
   scope <- askScope
-  let (inps_dist, dstms) = distributeBody scope w inps_local synthetic_body
+  let (inps_dist, dstms) = distributeBody scope segments inps_local synthetic_body
 
   lifted_res <- liftBody w inps_dist env_local dstms (bodyResult synthetic_body)
   lifted_vs <- mapM (letExp "for_variant_res" <=< toExp . resSubExp) lifted_res

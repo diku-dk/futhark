@@ -15,17 +15,31 @@ module Futhark.Pass.Flatten.Distribute
     distInputType,
     DistResult (..),
     ResTag (..),
+
+    -- * Segments
+    Segments,
+    segmentsShape,
+    segmentsRank,
   )
 where
 
 import Data.Bifunctor
 import Data.List qualified as L
+import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.SOACS
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
+
+type Segments = NE.NonEmpty SubExp
+
+segmentsShape :: Segments -> Shape
+segmentsShape = Shape . NE.toList
+
+segmentsRank :: Segments -> Int
+segmentsRank = shapeRank . segmentsShape
 
 newtype ResTag = ResTag Int
   deriving (Eq, Ord, Show)
@@ -54,7 +68,7 @@ distInputType (DistInput _ t) = t
 data DistType
   = DistType
       -- | Outer regular size.
-      SubExp
+      Segments
       -- | Irregular dimensions on top (but after the leading regular
       -- size).
       Rank
@@ -188,7 +202,7 @@ patInput tag pe =
 
 distributeBody ::
   Scope rep ->
-  SubExp ->
+  Segments ->
   DistInputs ->
   Body SOACS ->
   (DistInputs, [DistStm])
@@ -220,7 +234,6 @@ distributeBody outer_scope w param_inputs body =
               (ParallelStm stm)
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
 
-
 isParallelDistStm :: DistStm -> Bool
 isParallelDistStm (DistStm _ _ (ParallelStm stm)) =
   isParallelStm stm
@@ -236,13 +249,12 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
     isMap (WithAcc _ lam) = (any isParallelStm . bodyStms) $ lambdaBody lam
     isMap Op {} = True
 
-
 isRegularDistResult :: DistResult -> Bool
 isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 
--- TODO: Change this function. We will probably 
--- clasify in distributeBody and then we try to group 
--- scalarStms. 
+-- TODO: Change this function. We will probably
+-- clasify in distributeBody and then we try to group
+-- scalarStms.
 -- classifyStms :: Result -> [DistStm] -> [DistStm]
 -- classifyStms _ [] = []
 -- classifyStms bodyRes (d : ds)
@@ -262,7 +274,6 @@ classifyStms bodyRes ds =
         [] -> tryToMerge bodyRes scalars rest
         (p : ps) ->
           tryToMerge bodyRes scalars rest ++ [p] ++ classifyStms bodyRes ps
-
 
 -- We start from the last scalar group to see if this can be a valid
 -- group. Otherwise we consider the rightmost statement with irregular
@@ -286,7 +297,7 @@ tryToMerge bodyRes scalars rest =
                in tryToMerge bodyRes before (problem : after ++ rest)
                     ++ [problem]
                     ++ tryToMerge bodyRes after rest
-            _ -> undefined  
+            _ -> undefined
 
 -- | Merge a group of scalar 'DistStm's into a single one.
 mergeGroup :: Result -> [DistStm] -> [DistStm] -> DistStm
@@ -361,7 +372,7 @@ findReps avail_inputs map_pat lam =
 distributeMap ::
   Scope rep ->
   Pat Type ->
-  SubExp ->
+  Segments ->
   [MapArray t] ->
   Lambda SOACS ->
   (Distributed, M.Map ResTag t)

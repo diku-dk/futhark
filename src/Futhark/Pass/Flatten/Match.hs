@@ -85,10 +85,8 @@ distributeBranch segments env inps is body = do
         pure (v, DistInput (ResTag i) t)
   let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
   scope <- askScope
-  let (inputs', dstms) = distributeBody scope w inputs body
+  let (inputs', dstms) = distributeBody scope segments inputs body
   pure (inputs', env', dstms)
-  where
-    [w] = NE.toList segments
 
 -- Given a single result from each branch as well the *unlifted*
 -- result type, merge the results of all branches into a single result.

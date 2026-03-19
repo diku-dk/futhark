@@ -66,7 +66,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
       (withacc_new_inputs, withacc_dstms) =
         distributeBody
           scope
-          w
+          segments
           interchanged_inps
           acc_lam_body
 

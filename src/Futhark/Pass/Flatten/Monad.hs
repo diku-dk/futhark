@@ -8,11 +8,6 @@ module Futhark.Pass.Flatten.Monad
     ResRep (..),
     DistEnv (..),
 
-    -- * Segments
-    Segments,
-    segmentsShape,
-    segmentsRank,
-
     -- * Reading inputs
     readInputVar,
     readInputs,
@@ -198,14 +193,6 @@ inputReps inputs env = M.fromList $ map (second getRep) inputs
     getRep di = case di of
       DistInput rt t -> (t, resVar rt env)
       DistInputFree v' t -> (t, Regular v')
-
-type Segments = NE.NonEmpty SubExp
-
-segmentsShape :: Segments -> Shape
-segmentsShape = Shape . toList
-
-segmentsRank :: Segments -> Int
-segmentsRank = shapeRank . segmentsShape
 
 readInputVar :: Segments -> DistEnv -> [SubExp] -> DistInputs -> VName -> Builder GPU VName
 readInputVar _segments env is inputs v =
