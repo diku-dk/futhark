@@ -9,6 +9,7 @@ module Futhark.Pass.Flatten.Builtins
     genSegScan,
     genSegRed,
     genScatter,
+    genShapeIota,
     exScanAndSum,
     doSegIota,
     doPrefixSum,
@@ -183,6 +184,11 @@ genSegRed segments flags offsets elems red = do
   where
     nes = redNeutral red
 
+-- | Produces a multidimensional iota for the given shape.
+genShapeIota :: Shape -> Builder GPU VName
+genShapeIota shape =
+  letExp "shape_iota" =<< segMap (shapeDims shape) (pure . subExpsRes)
+
 -- Returns (#segments, segment start offsets, sum of segment sizes)
 -- Note: If given a multi-dimensional array,
 -- `#segments` and `sum of segment sizes` will be arrays, not scalars.
@@ -323,7 +329,7 @@ genFilter flags = do
   scratch <- letExp "scratch" $ BasicOp $ Scratch int64 [num_true]
   -- is this efficient or do i need to do something smarter? like scatter with guard?
   -- offsets' <- letExp "offset" <=< segMap [w] $ \[i] -> do
-  --   b' <- letSubExp "b" =<< eIndex flags [eSubExp i] 
+  --   b' <- letSubExp "b" =<< eIndex flags [eSubExp i]
   --   v' <-
   --     letSubExp "v'"
   --       =<< eIf
@@ -335,13 +341,16 @@ genFilter flags = do
   filtered <- letExp "filtered" <=< genScatter scratch w $ \gtid -> do
     b <- letSubExp "b" =<< eIndex flags [eSubExp gtid]
     -- idx <- letExp "idx" =<< eIndex offsets' [eSubExp gtid]
-    idx_se <- letSubExp "idx" =<< eIf (eSubExp b)
-      (eBody [eIndex offsets [eSubExp gtid]])
-      (eBody [toExp $ intConst Int64 (-1)])
+    idx_se <-
+      letSubExp "idx"
+        =<< eIf
+          (eSubExp b)
+          (eBody [eIndex offsets [eSubExp gtid]])
+          (eBody [toExp $ intConst Int64 (-1)])
     -- maybe cleaner?
     idx <- letExp "idx" =<< toExp idx_se
-    pure (idx, gtid) 
-  pure (num_true,filtered)
+    pure (idx, gtid)
+  pure (num_true, filtered)
 
 buildingBuiltin :: Builder GPU (FunDef GPU) -> FunDef GPU
 buildingBuiltin m = fst $ evalState (runBuilderT m mempty) blankNameSource

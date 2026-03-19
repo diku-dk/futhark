@@ -12,6 +12,7 @@ import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU)
+import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Monad
 import Futhark.Tools
@@ -38,13 +39,11 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
 
   withacc_inputs' <- mapM onInput withacc_inputs
   lam_params' <- newAccLamParams $ lambdaParams acc_lam
+
+  iota_w <- genShapeIota $ segmentsShape segments
+
   iota_p <- newParam "iota_p" $ Prim int64
 
-  let [w] = NE.toList segments
-
-  iota_w <-
-    letExp "withacc_flatten_iota" . BasicOp $
-      Iota w (intConst Int64 0) (intConst Int64 1) Int64
   iota_w_t <- lookupType iota_w
   let iota_se = Var (paramName iota_p)
 
@@ -62,6 +61,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
             | (p, acc) <- zip orig_acc_params acc_params
             ]
           ++ inps
+      [w] = NE.toList segments
       -- FIXME: we are not using withacc_new_inputs, which has got to be wrong.
       (withacc_new_inputs, withacc_dstms) =
         distributeBody
