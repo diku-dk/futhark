@@ -248,7 +248,8 @@ readInputs _segments env is = mapM_ onInput
           case arrayDims t of
             [num_elems] -> do
               let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
-              letBindNames [v] $ BasicOp $ Index v_D slice
+              v' <- letExp (baseName v <> "_inp") $ BasicOp $ Index v_D slice
+              letBindNames [v] $ BasicOp $ SubExp $ Var v'
             _ -> do
               num_elems <-
                 letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
@@ -256,8 +257,10 @@ readInputs _segments env is = mapM_ onInput
               v_flat <-
                 letExp (baseName v <> "_flat") $ BasicOp $ Index v_D slice
               v_flat_t <- lookupType v_flat
-              letBindNames [v] . BasicOp $
-                Reshape v_flat (reshapeAll (arrayShape v_flat_t) (arrayShape t))
+              v' <-
+                letExp (baseName v <> "_inp") . BasicOp $
+                  Reshape v_flat (reshapeAll (arrayShape v_flat_t) (arrayShape t))
+              letBindNames [v] $ BasicOp $ SubExp $ Var v'
 
 scopeOfDistInputs :: DistInputs -> Scope GPU
 scopeOfDistInputs = scopeOfLParams . map f
