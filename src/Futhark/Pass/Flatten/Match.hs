@@ -5,11 +5,9 @@ module Futhark.Pass.Flatten.Match
 where
 
 import Control.Monad
-import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Set qualified as S
 import Data.Tuple.Solo
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
