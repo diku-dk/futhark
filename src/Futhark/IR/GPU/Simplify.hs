@@ -196,15 +196,15 @@ removeUnusedKernelBodyResultInSegScan _ pat aux op
         scan_deps = mconcat $ (\(_, _, _, d) -> d) <$> scan_res_ts_pars
         deps = kernelBodyDependencies mempty kbody
 
-        isReturns (Returns {}) = True
-        isReturns _ = False
+        isNotReturns (Returns {}) = False
+        isNotReturns _ = True
 
         (new_res, new_ts, new_pars, _) =
           L.unzip4 $ scan_res_ts_pars <> new_map_res_ts_pars
         (new_map_res_ts_pars, sub_map_res_ts_pars) =
           L.partition
             ( \(r, t, _, d) ->
-                isReturns r && (d `namesIntersect` scan_deps || isAcc t)
+                isNotReturns r || d `namesIntersect` scan_deps || isAcc t
             )
             map_res_ts_pars
         (scan_res_ts_pars, map_res_ts_pars) =
