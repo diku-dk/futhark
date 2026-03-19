@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 -- The idea is to perform distribution on one level at a time, and
 -- produce "irregular Maps" that can accept and produce irregular
@@ -18,7 +19,7 @@ import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (isNothing, mapMaybe)
+import Data.Maybe (fromMaybe, isNothing, mapMaybe)
 import Data.Set qualified as S
 import Data.Tuple.Solo
 import Debug.Trace
@@ -721,7 +722,7 @@ transformInnerMap ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU (VName, VName, VName)
+  Builder GPU [(VName, VName, VName, VName)]
 transformInnerMap segments env inps pat w arrs map_lam = do
   ws <- dataArr segments env inps w
   (ws_F, ws_O, ws_data) <- doRepIota ws
@@ -758,10 +759,11 @@ transformInnerMap segments env inps pat w arrs map_lam = do
       (distributed, arrmap) =
         distributeMap scope pat (NE.singleton new_segment) (replicated <> arrs') map_lam'
       m =
-        transformDistributed arrmap (NE.singleton new_segment) distributed
+        transformDistributed2 (ws_F, ws_O, ws) arrmap (NE.singleton new_segment) distributed
   traceM $ unlines ["inner map distributed", prettyString distributed]
-  addStms =<< runReaderT (runBuilder_ m) scope
-  pure (ws_F, ws_O, ws)
+  (res, stms) <- runReaderT (runBuilder m) scope
+  addStms stms
+  pure res
 
 -- Reduction or scan operators may not have any free variables that are variant
 -- to the nest (that is, are inputs to the distributed operation). This is
@@ -800,17 +802,21 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         all (suitableOperator env inps . redLambda) reds -> do
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
             PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
-          (ws_F, ws_O, ws) <-
+          map_res_all <-
             transformInnerMap segments env inps map_pat w arrs map_lam
           let (redout_names, mapout_names) =
                 splitAt (redResults reds) (patNames map_pat)
+              redout_res = filter (\(_,_,_,v) -> v `elem` redout_names) map_res_all
+              mapout_res = filter (\(_,_,_,v) -> v `elem` mapout_names) map_res_all
+              (ws_F, ws_O, ws, _) = head redout_res
+              toIrreg (f, o, s, d) = Irregular $ IrregularRep {irregularS = s, irregularF = f, irregularO = o, irregularD = d}
           elems' <-
             genSegRed ws ws_F ws_O redout_names $
               singleReduce reds
           let (red_tags, map_tags) = splitAt (redResults reds) $ map distResTag res
           pure $
             insertRegulars red_tags elems' $
-              insertIrregulars ws ws_F ws_O (zip map_tags mapout_names) env
+              insertReps (zip map_tags $ map toIrreg mapout_res) env
       | Just scans <- isScanSOAC form,
         all (suitableOperator env inps . scanLambda) scans,
         Just arrs' <- mapM (`lookup` inps) arrs,
@@ -821,18 +827,23 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         all (suitableOperator env inps . scanLambda) scans -> do
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
             PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
-          (ws_F, ws_O, ws) <-
-            transformInnerMap segments env inps map_pat w arrs map_lam
+          map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
           let (scanout_names, mapout_names) =
                 splitAt (scanResults scans) (patNames map_pat)
+              scanout_res = filter (\(_,_,_,v) -> v `elem` scanout_names) map_res_all
+              mapout_res = filter (\(_,_,_,v) -> v `elem` mapout_names) map_res_all
+              (ws_F, ws_O, ws, _) = head scanout_res
+              toIrreg (f, o, s, d) = Irregular $ IrregularRep {irregularS = s, irregularF = f, irregularO = o, irregularD = d}
           elems' <- doSegScan scans ws_F scanout_names
           let (scan_tags, map_tags) = splitAt (scanResults scans) $ map distResTag res
           pure $
             insertIrregulars ws ws_F ws_O (zip scan_tags elems') $
-              insertIrregulars ws ws_F ws_O (zip map_tags mapout_names) env
+              insertReps (zip map_tags $ map toIrreg mapout_res) env
       | Just map_lam <- isMapSOAC form -> do
-          (ws_F, ws_O, ws) <- transformInnerMap segments env inps pat w arrs map_lam
-          pure $ insertIrregulars ws ws_F ws_O (zip (map distResTag res) $ patNames pat) env
+          map_res <-
+            transformInnerMap segments env inps pat w arrs map_lam
+          let toIrreg (f, o, s, d) = Irregular $ IrregularRep {irregularS = s, irregularF = f, irregularO = o, irregularD = d}
+          pure $ insertReps (zip (map distResTag res) $ map toIrreg map_res) env
       | otherwise -> do
           -- XXX: here we silently sequentialise any SOAC that is not handled
           -- above. We need to make sure that we actually handle everything we
@@ -1144,6 +1155,82 @@ distResCerts env = Certs . map f
       Regular v -> v
       Irregular {} -> error "resCerts: irregular"
 
+transformDistributed2 ::
+  (VName, VName, VName) ->
+  M.Map ResTag IrregularRep ->
+  Segments ->
+  Distributed ->
+  Builder GPU [(VName, VName, VName,VName)]
+transformDistributed2 (ws_F, ws_O, ws) irregs segments dist = do
+  let Distributed dstms (DistResults resmap reps) = dist
+  let new_inps = concat $ map distStmInputs dstms
+  let new_inp_var = S.fromList $ map fst new_inps
+  env <- foldM (transformDistStm segments) env_initial dstms
+  resmap_res <- fmap concat $ forM (M.toList resmap) $ \(rt, binds) ->
+    forM binds $ \(cs_inps, v, v_t) ->
+      certifying (distResCerts env cs_inps) $
+        -- FIXME: the copies are because we have too liberal aliases on
+        -- lifted functions.
+        case resVar rt env of
+          Regular v' -> do 
+            letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+            pure (ws_F, ws_O, ws, v)
+          Irregular irreg -> do
+            -- It might have an irregular representation, but we know
+            -- that it is actually regular because it is a result
+           let isTypeVariant vin se = case se of
+                  Var v' -> S.member v' vin
+                  _ -> False
+           if any (isTypeVariant new_inp_var) (arrayShape v_t)
+            then do 
+              -- error "transformDistributed2: result cannot be irregular if it has variant dimensions"
+              old_segment <- arraySize 0 <$> lookupType ws
+              new_shape <- letExp (baseName v <> "_outer_shape") <=< segMap (MkSolo old_segment) $ \(MkSolo is) -> do
+                -- slice_ns <- mapM (readInput old_segment env (toList is) inps) $ arrayShape v_t
+                outer_ind <- letSubExp "outer_ind" =<< eIndex ws_O [eSubExp is]
+                dims <- mapM (readInput segments env [outer_ind] new_inps) (shapeDims $ arrayShape v_t)
+                outer_ws_i <- letSubExp "outer_ws" =<< eIndex ws [eSubExp is]
+                sz <- letSubExp "sz" =<< toExp (pe64 outer_ws_i * product (map pe64 dims))
+                pure [subExpRes sz]
+              (new_ws_F, new_ws_O, _) <- doRepIota new_shape
+              letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg
+              pure (new_ws_F, new_ws_O, new_shape, v)
+             else do
+              -- let b = any (isVariant inps env) dims
+              let shape = segmentsShape segments <> arrayShape v_t
+              v_copy <-
+                letExp (baseName v) . BasicOp $
+                  Replicate mempty (Var $ irregularD irreg)
+              v_copy_shape <- arrayShape <$> lookupType v_copy
+              letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
+              pure (ws_F, ws_O, ws, v)
+  reps_res <- forM reps $ \(v, r) -> do
+    case r of
+      Left se -> do
+          letBindNames [v] $ BasicOp $ Replicate (segmentsShape segments) se
+          pure (ws_F, ws_O, ws, v)
+      Right (DistInputFree arr _) -> do
+        letBindNames [v] $ BasicOp $ SubExp $ Var arr
+        pure (ws_F, ws_O, ws, v)
+      -- This can happen. ask Troels
+      Right (DistInput rt t) -> do
+        let shape = segmentsShape segments <> arrayShape t
+        case resVar rt env of
+          Regular v' -> do
+             letBindNames [v] $ BasicOp $ SubExp $ Var v'
+             pure (ws_F, ws_O, ws, v)
+          Irregular irreg -> do
+            -- Fix here as well
+            v_copy <-
+              letExp (baseName v <> "_copy_right_dist") . BasicOp $
+                Replicate mempty (Var $ irregularD irreg)
+            v_copy_shape <- arrayShape <$> lookupType v_copy
+            letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
+            pure (ws_F, ws_O, ws, v)
+  pure $ resmap_res <> reps_res
+  where
+    env_initial = DistEnv {distResMap = M.map Irregular irregs}
+
 transformDistributed ::
   M.Map ResTag IrregularRep ->
   Segments ->
@@ -1162,6 +1249,7 @@ transformDistributed irregs segments dist = do
           Irregular irreg -> do
             -- It might have an irregular representation, but we know
             -- that it is actually regular because it is a result.
+            -- let b = any (isVariant inps env) dims
             let shape = segmentsShape segments <> arrayShape v_t
             v_copy <-
               letExp (baseName v) . BasicOp $
@@ -1228,6 +1316,8 @@ liftSubExpRegular segments inps env expectedShape se = do
 -- Check whether a loop parameter array needs irregular representation.
 -- we need the irregular representation when any of its dimensions are either:
 -- a loop parameter name or variant in the outer map context
+
+
 needsIrregular :: DistInputs -> DistEnv -> S.Set VName -> DeclType -> Bool
 needsIrregular inps env loopParamNames t =
   case t of
