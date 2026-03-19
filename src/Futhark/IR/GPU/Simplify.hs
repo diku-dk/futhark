@@ -11,7 +11,8 @@ module Futhark.IR.GPU.Simplify
   )
 where
 
-import Data.List qualified as L
+-- import Data.List qualified as L
+-- import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.GPU
@@ -24,6 +25,7 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
 import Futhark.Tools
+-- import Futhark.Transform.Rename
 import Futhark.Util (focusNth)
 
 simpleGPU :: Simplify.SimpleOps GPU
@@ -101,7 +103,7 @@ kernelRules =
         RuleOp SOAC.liftIdentityMapping,
         RuleOp SOAC.simplifyMapIota,
         RuleOp SOAC.removeUnusedSOACInput,
-        RuleOp removeUnusedKernelBodyResultInSegScan,
+        -- RuleOp removeUnusedKernelBodyResultInSegScan,
         RuleBasicOp removeScalarCopy
       ]
       [ RuleBasicOp removeUnnecessaryCopy,
@@ -127,6 +129,20 @@ removeDeadGPUBodyResult (_, used) pat aux (GPUBody types body)
   | otherwise = Skip
 removeDeadGPUBodyResult _ _ _ _ = Skip
 
+{-
+-- | Only handle returns cases.
+depsOfRes :: Dependencies -> KernelResult -> Names
+depsOfRes deps (Returns _ cs se) = depsOf deps se <> depsOfNames deps (freeIn cs)
+depsOfRes _ _ = mempty
+
+kernelBodyDependencies :: (ASTRep rep) => Dependencies -> KernelBody rep -> [Names]
+kernelBodyDependencies deps kbody =
+  let names_in_scope = freeIn kbody
+      deps' = dataDependencies' deps kbody
+   in map
+        (namesIntersection names_in_scope . depsOfRes deps')
+        (bodyResult kbody)
+
 removeUnusedKernelBodyResultInSegScan ::
   (Buildable rep, BuilderOps rep, HasSegOp rep) =>
   TopDownRuleOp rep
@@ -135,6 +151,7 @@ removeUnusedKernelBodyResultInSegScan _ pat aux op
     Just (SegScan lvl space ts kbody seg_op post_op) <- asSegOp op,
     Just (new_kbody, new_ts, new_post_op) <-
       newKbodyPostOp kbody ts seg_op post_op = Simplify $ do
+      temp_body <- renameBody kbody
       auxing aux
         . letBind pat
         . Op
@@ -145,9 +162,7 @@ removeUnusedKernelBodyResultInSegScan _ pat aux op
     newKbodyPostOp kbody ts seg_op post_op =
       if length new_map_res_ts_pars == length map_res_ts_pars
         then Nothing
-        else
-          Just
-            (new_kbody, new_ts, new_post_op)
+        else Just (new_kbody, new_ts, new_post_op)
       where
         res = bodyResult kbody
         post_lam = segPostOpLambda post_op
@@ -159,7 +174,7 @@ removeUnusedKernelBodyResultInSegScan _ pat aux op
             Constant _ -> False
 
         subst =
-          (\(r, t, p) -> (paramName p, t, kernelResultSubExp r))
+          (\(r, t, p, _) -> (paramName p, t, kernelResultSubExp r))
             <$> sub_map_res_ts_pars
 
         new_kbody = kbody {bodyResult = new_res}
@@ -178,12 +193,17 @@ removeUnusedKernelBodyResultInSegScan _ pat aux op
                 lambdaReturnType = lambdaReturnType post_lam
               }
 
-        (new_res, new_ts, new_pars) =
-          L.unzip3 $ scan_res_ts_pars <> new_map_res_ts_pars
+        scan_deps = mconcat $ (\(_, _, _, d) -> d) <$> scan_res_ts_pars
+
+        deps = kernelBodyDependencies mempty kbody
+
+        (new_res, new_ts, new_pars, _) =
+          L.unzip4 $ scan_res_ts_pars <> new_map_res_ts_pars
         (new_map_res_ts_pars, sub_map_res_ts_pars) =
-          L.partition (\(r, t, _) -> mustKeep t r) map_res_ts_pars
+          L.partition (\(_, t, _, d) -> d `namesIntersect` scan_deps || isAcc t) map_res_ts_pars
         (scan_res_ts_pars, map_res_ts_pars) =
-          splitAt (segBinOpResults seg_op) $ zip3 res ts pars
+          splitAt (segBinOpResults seg_op) $ L.zip4 res ts pars deps
+-}
 
 -- If we see an Update with a scalar where the value to be written is
 -- the result of indexing some other array, then we convert it into an
