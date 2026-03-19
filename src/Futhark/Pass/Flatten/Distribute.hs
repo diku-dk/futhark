@@ -220,54 +220,76 @@ distributeBody outer_scope w param_inputs body =
               (ParallelStm stm)
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
 
--- | Is this a scalar operation that can be grouped with other scalar
--- operations into a single parallel traversal?
--- TODO: 
-isScalarDistStm :: DistStm -> Bool
-isScalarDistStm ds@(DistStm _ _ (ParallelStm stm)) =
-  not (isParallelStm stm) && hasRegularResults ds
-isScalarDistStm _ = False
+
+isParallelDistStm :: DistStm -> Bool
+isParallelDistStm (DistStm _ _ (ParallelStm stm)) =
+  isParallelStm stm
+isParallelDistStm _ = False
 
 isParallelStm :: Stm SOACS -> Bool
 isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
   where
     isMap BasicOp {} = False
-    -- TODO: do better
     isMap Apply {} = True
     isMap Match {} = False
     isMap (Loop _ _ body) = (any isParallelStm . bodyStms) body
     isMap (WithAcc _ lam) = (any isParallelStm . bodyStms) $ lambdaBody lam
     isMap Op {} = True
 
-hasRegularResults :: DistStm -> Bool
-hasRegularResults (DistStm _ res _) =
-  all isRegularRes res
-  where
-    isRegularRes (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 
--- isUniformDistStm :: Names -> DistStm -> Bool
--- isUniformDistStm bound_outside (DistStm inps res _) =
---   all isUnifromRes res && all isUniformInp inps
---   where
---     isUnifromRes (DistResult _ (DistType _ (Rank r) _) _) = r == 0
---     isUniformInp (_, DistInputFree _ _) = True
---     isUniformInp (_, DistInput _ t) = fst (splitIrregDims bound_outside t) == mempty
+isRegularDistResult :: DistResult -> Bool
+isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 
 -- TODO: Change this function. We will probably 
 -- clasify in distributeBody and then we try to group 
 -- scalarStms. 
+-- classifyStms :: Result -> [DistStm] -> [DistStm]
+-- classifyStms _ [] = []
+-- classifyStms bodyRes (d : ds)
+--   | isScalarDistStm d =
+--       let (moreScalars, rest) = break isParallelDistStm ds
+--           scalars = d : moreScalars
+--        in tryToMerge bodyRes scalars rest ++ classifyStms bodyRes rest
+--   | otherwise = d : classifyStms bodyRes ds
+
+--  we should probably sort the DistStms first and we should assume they are sorted
+-- and then given to this function.
 classifyStms :: Result -> [DistStm] -> [DistStm]
 classifyStms _ [] = []
-classifyStms bodyRes (d : ds)
-  | isScalarDistStm d =
-      let (moreScalars, rest) = span isScalarDistStm ds
-          scalars = d : moreScalars
-       in mergeGroup bodyRes scalars rest : classifyStms bodyRes rest
-  | otherwise = d : classifyStms bodyRes ds
+classifyStms bodyRes ds =
+  let (scalars, rest) = break isParallelDistStm ds
+   in case rest of
+        [] -> tryToMerge bodyRes scalars rest
+        (p : ps) ->
+          tryToMerge bodyRes scalars rest ++ [p] ++ classifyStms bodyRes ps
+
+
+-- We start from the last scalar group to see if this can be a valid
+-- group. Otherwise we consider the rightmost statement with irregular
+-- external results as parallel and recurse on the two halves.
+tryToMerge :: Result -> [DistStm] -> [DistStm] -> [DistStm]
+tryToMerge _ [] _ = []
+tryToMerge bodyRes scalars rest =
+  let externalRes =
+        filter (isExternal bodyRes rest) $ concatMap distStmResult scalars
+      irregTags =
+        S.fromList [distResTag r | r <- externalRes, not (isRegularDistResult r)]
+      hasIrregExternal ds =
+        any (\r -> distResTag r `S.member` irregTags) (distStmResult ds)
+   in if null irregTags
+        then [mergeGroup bodyRes scalars rest]
+        else -- Find rightmost statement with irregular external result
+          case break hasIrregExternal (reverse scalars) of
+            (revAfter, problem : revBefore) ->
+              let before = reverse revBefore
+                  after = reverse revAfter
+               in tryToMerge bodyRes before (problem : after ++ rest)
+                    ++ [problem]
+                    ++ tryToMerge bodyRes after rest
+            _ -> undefined  
 
 -- | Merge a group of scalar 'DistStm's into a single one.
 mergeGroup :: Result -> [DistStm] -> [DistStm] -> DistStm
-mergeGroup _ [DistStm inp res (ParallelStm stm)] _ = DistStm inp res (ScalarStm [stm])
 mergeGroup bodyRes ds rest =
   let resTags =
         S.fromList $ concatMap (map distResTag . distStmResult) ds
