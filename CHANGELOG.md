@@ -13,11 +13,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New server protocol commands: `rank`, `elemtype`, `new_array`, `set`.
 
+* `futhark lsp` provides inlay hints, they show type ascriptions for
+    inferred types of bindings, by VegOwOtenks. (#2398)
+
+* Scan chunk size is now exposed as tuning parameter in `cuda` and `hip`
+  backends.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* `i64.set_bit`/`u64.set_bit` would produce wrong results in C-based backends. (#2396)
 
 ## [0.25.36]
 

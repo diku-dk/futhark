@@ -675,7 +675,7 @@ checkEntryPoint loc tparams params rettype
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind vb = do
-  (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) <-
+  (ValBind entry fname fname_loc maybe_tdecl NoInfo tparams params body doc attrs loc) <-
     resolveValBind vb
 
   top_level <- atTopLevel
@@ -693,7 +693,7 @@ checkValBind vb = do
     Just _ -> checkEntryPoint loc tparams' params' rettype
     _ -> pure ()
 
-  let vb' = ValBind entry' fname maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
+  let vb' = ValBind entry' fname fname_loc maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
   pure
     ( mempty
         { envVtable =

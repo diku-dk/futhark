@@ -113,6 +113,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
   addValBind $
     ValBind
       { valBindName = fname,
+        valBindNameLoc = mempty,
         valBindTypeParams = tparams,
         valBindParams = map mkParam free_ts ++ params,
         valBindRetDecl = Nothing,

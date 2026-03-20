@@ -47,7 +47,7 @@ shiftRetAls :: Int -> RetAls -> RetAls
 shiftRetAls d (RetAls pals rals) = RetAls pals $ map (+ d) rals
 
 internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
-internaliseValBind types fb@(E.ValBind entry fname _ (Info rettype) tparams params body _ attrs _) = do
+internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams params body _ attrs _) = do
   bindingFParams tparams params $ \shapeparams params' -> do
     let shapenames = map I.paramName shapeparams
         all_params = map pure shapeparams ++ concat params'
@@ -111,7 +111,7 @@ internaliseValBind types fb@(E.ValBind entry fname _ (Info rettype) tparams para
 
 generateEntryPoint :: VisibleTypes -> E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
-  let (E.ValBind _ ofname _ (Info rettype) tparams params _ _ attrs _) = vb
+  let (E.ValBind _ ofname _ _ (Info rettype) tparams params _ _ attrs _) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     let all_params = map pure shapeparams ++ concat params'
         (entry_rettype, retals) =

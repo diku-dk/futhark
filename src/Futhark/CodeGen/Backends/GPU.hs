@@ -79,7 +79,7 @@ kernelConstToExp (SizeMaxConst size_class) =
   where
     field = "max_" <> prettyString size_class
 kernelConstToExp (SizeUserParam name def) =
-  [C.cexp|$exp:name'.set ? $exp:name'.val : $exp:def|]
+  [C.cexp|$exp:name'.set ? $exp:name'.val : $exp:(compileConstExp def)|]
   where
     name' = getParamByKey name
 

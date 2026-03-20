@@ -33,7 +33,7 @@ import Language.LSP.Server
     runServer,
     type (<~>) (Iso),
   )
-import System.Exit
+import System.Exit (ExitCode (ExitFailure), exitSuccess, exitWith)
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()

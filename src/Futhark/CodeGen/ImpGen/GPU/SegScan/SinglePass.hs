@@ -291,9 +291,17 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       tblock_size_e = pe64 $ unCount $ kAttrBlockSize attrs
       num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
 
-  let chunk_const = getChunkSize . (\t -> if null t then Prim Bool : t else t) $ filter (not . shouldUseBitArray) ts
-  chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
-  let chunk = tvExp chunk_v
+  let chunk_const =
+        getChunkSize 
+          . (\t -> if null t then Prim Bool : t else t)
+          $ filter (not . shouldUseBitArray) ts
+  chunk_v <- dPrim "chunk_size"
+  let chunk_name = nameFromText $ prettyText $ tvVar chunk_v
+  addTuningParam chunk_name Nothing
+  emit . Imp.GetUserParam (tvVar chunk_v) chunk_name . isInt64
+    =<< kernelConstToExp chunk_const
+  let chunk_constexp = LeafExp (Imp.SizeUserParam chunk_name chunk_const) int64
+      chunk = tvExp chunk_v
 
   let num_words_const = bitArrayWords chunk_const
   num_words <-
@@ -331,10 +339,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
   let attrs' =
         attrs
           { kAttrConstExps =
-              M.fromList
-                [ (tvVar chunk_v, chunk_const),
-                  (tvVar num_words, num_words_const)
-                ]
+              M.singleton (tvVar chunk_v) chunk_constexp
           }
 
   map_global_chunks <-
