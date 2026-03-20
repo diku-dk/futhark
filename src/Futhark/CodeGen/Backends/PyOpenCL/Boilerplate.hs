@@ -46,7 +46,7 @@ kernelConstToExp (SizeUserParam name def) =
   Call
     (Field (Var "self.user_params") "get")
     [ Arg $ String (nameToText name),
-      Arg $ Var $ Py.compileName def
+      Arg $ compileConstExp def
     ]
 
 -- | Python code (as a string) that calls the
