@@ -215,6 +215,9 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
 bitArrayWords :: Imp.KernelConstExp -> Imp.KernelConstExp
 bitArrayWords n = untyped $ isInt64 n `divUp` 64
 
+getScanChunkSize :: [Type] -> Imp.KernelConstExp
+getScanChunkSize = untyped . (+ 2) . isInt64 . getChunkSize
+
 -- | Set a bit in a bit array stored as u64 words
 setBitInBitArray :: Imp.TExp Int64 -> VName -> Imp.TExp Int64 -> SubExp -> InKernelGen ()
 setBitInBitArray chunk bit_array idx bool_val = do
@@ -292,7 +295,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
 
   let chunk_const =
-        getChunkSize
+        getScanChunkSize
           . (\t -> if null t then Prim Bool : t else t)
           $ filter (not . shouldUseBitArray) ts
   chunk_v <- dPrim "chunk_size"
@@ -339,7 +342,10 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
   let attrs' =
         attrs
           { kAttrConstExps =
-              M.singleton (tvVar chunk_v) chunk_constexp
+              M.fromList
+                [ (tvVar chunk_v, chunk_constexp),
+                  (tvVar num_words, num_words_const)
+                ]
           }
 
   map_global_chunks <-
