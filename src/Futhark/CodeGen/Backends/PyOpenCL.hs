@@ -212,7 +212,7 @@ kernelConstToExp (Imp.SizeUserParam name def) =
   Call
     (Field (Var "self.user_params") "get")
     [ Arg $ String (nameToText name),
-      Arg $ Var $ compileName def
+      Arg $ compileConstExp def
     ]
 
 compileConstExp :: Imp.KernelConstExp -> PyExp

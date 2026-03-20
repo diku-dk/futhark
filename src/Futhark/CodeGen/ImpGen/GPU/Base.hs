@@ -295,7 +295,8 @@ kernelConstToExp = traverse f
       pure v
     f (Imp.SizeUserParam name def) = do
       v <- dPrimS (nameFromText $ prettyText name) int64
-      emit $ Imp.GetUserParam v name $ le64 def
+      def' <- kernelConstToExp def
+      emit $ Imp.GetUserParam v name $ isInt64 def'
       pure v
 
 -- | Given available register and a list of parameter types, compute
