@@ -1,12 +1,14 @@
 {-# LANGUAGE ExplicitNamespaces #-}
 
 -- | @futhark lsp@
-module Futhark.CLI.LSP (main) where
+module Futhark.CLI.LSP (main, serverDefinition) where
 
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.IORef (newIORef)
+import Futhark.LSP.CommandType (CommandType)
 import Futhark.LSP.Handlers (handlers)
 import Futhark.LSP.State (emptyState)
+import Futhark.Util (showText)
 import Language.LSP.Protocol.Types
   ( SaveOptions (SaveOptions),
     TextDocumentSyncKind (TextDocumentSyncKind_Incremental),
@@ -14,7 +16,7 @@ import Language.LSP.Protocol.Types
     type (|?) (InR),
   )
 import Language.LSP.Server
-  ( Options (optTextDocumentSync),
+  ( Options (optExecuteCommandCommands, optTextDocumentSync),
     ServerDefinition
       ( ServerDefinition,
         configSection,
@@ -31,27 +33,37 @@ import Language.LSP.Server
     runServer,
     type (<~>) (Iso),
   )
+import System.Exit (ExitCode (ExitFailure), exitSuccess, exitWith)
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
 main _prog _args = do
+  code <-
+    runServer =<< serverDefinition
+  case code of
+    0 -> exitSuccess
+    _ -> exitWith $ ExitFailure code
+
+serverDefinition :: IO (ServerDefinition ())
+serverDefinition = do
   state_mvar <- newIORef emptyState
-  _ <-
-    runServer $
-      ServerDefinition
-        { onConfigChange = const $ pure (),
-          configSection = "Futhark",
-          parseConfig = const . const $ Right (),
-          defaultConfig = (),
-          doInitialize = \env _req -> pure $ Right env,
-          staticHandlers = handlers state_mvar,
-          interpretHandler = \env -> Iso (runLspT env) liftIO,
-          options =
-            defaultOptions
-              { optTextDocumentSync = Just syncOptions
-              }
-        }
-  pure ()
+  pure $
+    ServerDefinition
+      { onConfigChange = const $ pure (),
+        configSection = "Futhark",
+        parseConfig = const . const $ Right (),
+        defaultConfig = (),
+        doInitialize = \env _req -> pure $ Right env,
+        staticHandlers = handlers state_mvar,
+        interpretHandler = \env -> Iso (runLspT env) liftIO,
+        options =
+          defaultOptions
+            { optTextDocumentSync =
+                Just syncOptions,
+              optExecuteCommandCommands =
+                Just $ map showText [minBound :: CommandType .. maxBound]
+            }
+      }
 
 syncOptions :: TextDocumentSyncOptions
 syncOptions =

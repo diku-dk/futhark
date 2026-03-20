@@ -37,14 +37,13 @@ where
 import Control.Monad
 import Control.Monad.Except (MonadError (..))
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Bifunctor (bimap)
 import Data.Binary qualified as Bin
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
 import Data.Functor
 import Data.IORef
-import Data.List (intersperse)
+import Data.List (find, intersperse)
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
@@ -53,19 +52,19 @@ import Data.Vector.Storable qualified as SVec
 import Data.Void
 import Data.Word (Word8)
 import Futhark.Data.Parser qualified as V
-import Futhark.Server
+import Futhark.Server hiding (Record)
 import Futhark.Server.Values (getValue, putValue)
 import Futhark.Test.Values qualified as V
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (line, sep, space, (</>))
-import Language.Futhark.Core (Name, nameFromText, nameToText)
+import Language.Futhark.Core (nameFromText, nameToText)
 import Language.Futhark.Tuple (areTupleFields, tupleFieldNames)
 import System.FilePath ((</>))
 import Text.Megaparsec
 import Text.Megaparsec.Char (space)
 import Text.Megaparsec.Char.Lexer (charLiteral)
 
-type TypeMap = M.Map TypeName (Maybe [(Name, TypeName)])
+type TypeMap = M.Map TypeName (Maybe [Field])
 
 typeMap :: (MonadIO m) => Server -> m TypeMap
 typeMap server = do
@@ -73,14 +72,15 @@ typeMap server = do
   where
     onTypes types = M.fromList . zip types <$> mapM onType types
     onType t =
-      either (const Nothing) (Just . map onField) <$> cmdFields server t
-    onField = bimap nameFromText (T.drop 1) . T.breakOn " "
+      either (const Nothing) Just <$> cmdFields server t
 
-isRecord :: TypeName -> TypeMap -> Maybe [(Name, TypeName)]
+isRecord :: TypeName -> TypeMap -> Maybe [Field]
 isRecord t m = join $ M.lookup t m
 
 isTuple :: TypeName -> TypeMap -> Maybe [TypeName]
-isTuple t m = areTupleFields . M.fromList =<< isRecord t m
+isTuple t m = areTupleFields . M.fromList . map unpack =<< isRecord t m
+  where
+    unpack (Field f ft) = (nameFromText f, ft)
 
 -- | Like a 'Server', but keeps a bit more state to make FutharkScript
 -- more convenient.
@@ -509,11 +509,11 @@ getField ::
   (MonadIO m, MonadError T.Text m) =>
   ScriptServer ->
   T.Text ->
-  (Name, b) ->
+  Field ->
   m VarName
-getField server from (f, _) = do
+getField server from (Field f _) = do
   to <- newVar server "field"
-  cmdMaybe $ cmdProject (scriptServer server) to from $ nameToText f
+  cmdMaybe $ cmdProject (scriptServer server) to from f
   pure to
 
 unTuple ::
@@ -525,7 +525,7 @@ unTuple _ (V.ValueTuple vs) = pure vs
 unTuple server (V.ValueAtom (SValue t (VVar v)))
   | Just ts <- isTuple t $ scriptTypes server =
       forM (zip tupleFieldNames ts) $ \(k, kt) ->
-        V.ValueAtom . SValue kt . VVar <$> getField server v (k, kt)
+        V.ValueAtom . SValue kt . VVar <$> getField server v (Field (nameToText k) kt)
 unTuple _ v = pure [v]
 
 project ::
@@ -540,12 +540,10 @@ project _ (V.ValueRecord fs) k =
     Just v -> pure v
 project server (V.ValueAtom (SValue t (VVar v))) f
   | Just fs <- isRecord t $ scriptTypes server =
-      case lookup f' fs of
+      case find ((== f) . fieldName) fs of
         Nothing -> throwError $ "Type " <> t <> " does not have a field " <> f <> "."
-        Just ft ->
-          V.ValueAtom . SValue ft . VVar <$> getField server v (f', ft)
-  where
-    f' = nameFromText f
+        Just (Field _ ft) ->
+          V.ValueAtom . SValue ft . VVar <$> getField server v (Field f ft)
 project _ _ _ =
   throwError "Cannot project from non-record."
 
@@ -631,12 +629,13 @@ evalExp builtin sserver top_level_e = do
             mkRecord t =<< zipWithM (interValToVar bad) ts vs
       interValToVar bad t (V.ValueRecord vs)
         | Just fs <- isRecord t types,
-          Just vs' <- mapM ((`M.lookup` vs) . nameToText . fst) fs =
-            mkRecord t =<< zipWithM (interValToVar bad) (map snd fs) vs'
+          Just vs' <- mapM ((`M.lookup` vs) . fieldName) fs =
+            mkRecord t =<< zipWithM (interValToVar bad) (map fieldType fs) vs'
       interValToVar _ t (V.ValueAtom (SValue vt (VVar v)))
         | Just t_fs <- isRecord t types,
           Just vt_fs <- isRecord vt types,
-          vt_fs == t_fs =
+          map fieldName vt_fs == map fieldName t_fs,
+          map fieldType vt_fs == map fieldType t_fs =
             mkRecord t =<< mapM (getField sserver v) vt_fs
       interValToVar _ t (V.ValueAtom (SValue _ (VVal v)))
         | Just v' <- coerceValue t v =
@@ -751,7 +750,7 @@ getExpValue _ (V.ValueAtom (SFun fname _ _ _)) =
   throwError $ "Function " <> fname <> " not fully applied."
 getExpValue server (V.ValueAtom (SValue t (VVar v)))
   | Just fs <- isRecord t types =
-      tupleOrRecord . M.fromList . zip (map fst fs)
+      tupleOrRecord . M.fromList . zip (map (nameFromText . fieldName) fs)
         <$> mapM (onField v) fs
   | not $ primArrayType t =
       throwError $ "Type " <> t <> " has no external representation."
@@ -763,8 +762,8 @@ getExpValue server (V.ValueAtom (SValue t (VVar v)))
     tupleOrRecord m =
       maybe (V.ValueRecord $ M.mapKeys nameToText m) V.ValueTuple $ areTupleFields m
 
-    onField from (f, ft) = do
-      to <- getField server from (f, ft)
+    onField from (Field f ft) = do
+      to <- getField server from $ Field f ft
       getExpValue server $ V.ValueAtom $ SValue ft $ VVar to
 getExpValue server (V.ValueTuple vs) =
   V.ValueTuple <$> traverse (getExpValue server) vs

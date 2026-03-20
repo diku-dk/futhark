@@ -9,22 +9,43 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark fmt` prints module types better.
+
+* New server protocol commands: `rank`, `elemtype`, `new_array`, `set`.
+
+* `futhark lsp` provides inlay hints, they show type ascriptions for
+    inferred types of bindings, by VegOwOtenks. (#2398)
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `i64.set_bit`/`u64.set_bit` would produce wrong results in C-based backends. (#2396)
+
+## [0.25.36]
+
+### Added
+
+* `futhark lsp` supports running evaluation comments in the interpreter,
+    implemented by VegOwOtenks.
+
 * New notation: `let x.f = y in z` as a shortcut for `let x = x with f = y in
   z`, by Aziz Rmadi. (#1160)
 
 * Array and field updates can now be chained, e.g., `x with [i].f = y`,
   including in operator sections. Work by Aziz Rmadi.
 
-* New server protocol commands: `index` and `shape`.
+* New server protocol commands: `index`, `shape`, and `attributes`.
 
 * FutharkScript now supports (barely) array indexing.
 
 * `futhark autotune` now shows a progress bar when running in a terminal. Work
   by Nader Rahhal.
 
-### Removed
-
-### Changed
+* The C API now has functions for creating and updating arrays of opaque
+  objects. (#2383, #2384)
 
 ### Fixed
 
@@ -41,6 +62,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Regression in the unrolling of `map`.
 
 * Occasional duplication of entry points leading to compiler crash. (#2374)
+
+* `futhark autotune` no longer tells you to report an issue when the underlying
+  program crashes. (#2388)
 
 ## [0.25.35]
 

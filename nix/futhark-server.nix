@@ -3,12 +3,15 @@
 }:
 mkDerivation {
   pname = "futhark-server";
-  version = "1.2.4.0";
-  sha256 = "a833f68d6fb03cfca2f71f0fc7d5ab8b2b2373f7f53c70858d96fd2529ab7e3f";
+  version = "1.3.2.0";
+  sha256 = "07ecac53e36a97eda44780f8a41afb27ab8bfeb386bd6b8dfcf6ad043e68fbe6";
+  revision = "1";
+  editedCabalFile = "1jfsv31s90prnh5gipyfa533sdivh8r2mxq0pbvq1vjbiwjqd81q";
   libraryHaskellDepends = [
     base binary bytestring directory futhark-data mtl process temporary
     text
   ];
+  doCheck = false;
   description = "Client implementation of the Futhark server protocol";
   license = lib.licenses.isc;
 }

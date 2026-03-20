@@ -1,3 +1,6 @@
+{-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE LambdaCase #-}
+
 -- | Generally useful definition used in various places in the
 -- language server implementation.
 module Futhark.LSP.Tool
@@ -6,9 +9,18 @@ module Futhark.LSP.Tool
     rangeFromLoc,
     posToUri,
     computeMapping,
+    transformVFS,
+    logWithSeverity,
+    Execute,
   )
 where
 
+import Colog.Core (LogAction, Severity, WithSeverity (WithSeverity))
+import Control.Lens.Getter ((^.))
+import Control.Monad.Except (ExceptT)
+import Data.Functor.Contravariant (contramap)
+import Data.Map qualified as M
+import Data.Text (Text)
 import Data.Text qualified as T
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.PositionMapping
@@ -26,10 +38,31 @@ import Language.Futhark.Query
     BoundTo (..),
     atPos,
     boundLoc,
+    termBindingType,
   )
+import Language.LSP.Logging (logToLogMessage)
 import Language.LSP.Protocol.Types
-import Language.LSP.Server (LspM, getVirtualFile)
-import Language.LSP.VFS (VirtualFile, virtualFileText, virtualFileVersion)
+  ( ErrorCodes,
+    Hover (Hover),
+    LSPErrorCodes,
+    Location (Location),
+    MarkupContent (MarkupContent),
+    MarkupKind (MarkupKind_PlainText),
+    Position (Position),
+    Range (Range),
+    Uri,
+    filePathToUri,
+    fromNormalizedFilePath,
+    toNormalizedUri,
+    uriToNormalizedFilePath,
+    type (|?) (InL),
+  )
+import Language.LSP.Server (LspM, LspT, MonadLsp, getVirtualFile)
+import Language.LSP.VFS (VFS, VirtualFile, vfsMap, virtualFileText, virtualFileVersion)
+import Language.LSP.VFS qualified as VFS
+
+-- | Request Handler code usually runs in this monad
+type Execute a = ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) a
 
 -- | Retrieve hover info for the definition referenced at the given
 -- file at the given line and column number (the two 'Int's).
@@ -38,7 +71,7 @@ getHoverInfoFromState state (Just path) l c = do
   AtName _ (Just def) loc <- queryAtPos state $ Pos path l c 0
   let msg =
         case def of
-          BoundTerm t _ -> prettyText t
+          BoundTerm term _ -> prettyText $ termBindingType term
           BoundModule {} -> "module"
           BoundModuleType {} -> "module type"
           BoundType {} -> "type"
@@ -68,31 +101,31 @@ queryAtPos state pos = do
   loaded_prog <- stateProgram state
   stale_pos <- toStalePos mapping pos
   query_result <- atPos (lpImports loaded_prog) stale_pos
-  updateAtPos mapping query_result
-  where
-    -- Update the 'AtPos' with the current mapping.
-    updateAtPos :: Maybe PositionMapping -> AtPos -> Maybe AtPos
-    updateAtPos mapping (AtName qn (Just def) loc) = do
-      let def_loc = boundLoc def
-          Loc (Pos def_file _ _ _) _ = def_loc
-          Pos current_file _ _ _ = pos
-      current_loc <- toCurrentLoc mapping loc
-      if def_file == current_file
-        then do
-          current_def_loc <- toCurrentLoc mapping def_loc
-          Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
-        else do
-          -- Defined in another file, get the corresponding PositionMapping.
-          let def_mapping = getStaleMapping state def_file
-          current_def_loc <- toCurrentLoc def_mapping def_loc
-          Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
-    updateAtPos _ _ = Nothing
+  updateAtPos mapping query_result pos state
 
+-- Update the 'AtPos' with the current mapping.
+updateAtPos :: Maybe PositionMapping -> AtPos -> Pos -> State -> Maybe AtPos
+updateAtPos mapping (AtName qn (Just def) loc) pos state = do
+  let def_loc = boundLoc def
+      Loc (Pos def_file _ _ _) _ = def_loc
+      Pos current_file _ _ _ = pos
+  current_loc <- toCurrentLoc mapping loc
+  if def_file == current_file
+    then do
+      current_def_loc <- toCurrentLoc mapping def_loc
+      Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
+    else do
+      -- Defined in another file, get the corresponding PositionMapping.
+      let def_mapping = getStaleMapping state def_file
+      current_def_loc <- toCurrentLoc def_mapping def_loc
+      Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
+  where
     updateBoundLoc :: BoundTo -> Loc -> BoundTo
     updateBoundLoc (BoundTerm t _loc) current_loc = BoundTerm t current_loc
     updateBoundLoc (BoundModule _loc) current_loc = BoundModule current_loc
     updateBoundLoc (BoundModuleType _loc) current_loc = BoundModuleType current_loc
     updateBoundLoc (BoundType _loc) current_loc = BoundType current_loc
+updateAtPos _ _ _ _ = Nothing
 
 -- | Entry point for computing PositionMapping.
 computeMapping :: State -> Maybe FilePath -> LspM () (Maybe PositionMapping)
@@ -126,3 +159,24 @@ getEndPos (Pos _ l c _) =
 rangeFromLoc :: Loc -> Range
 rangeFromLoc (Loc start end) = Range (getStartPos start) (getEndPos end)
 rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
+
+-- | Transform VFS to a map of file paths to file contents.
+-- This is used to pass the file contents to the compiler.
+transformVFS :: VFS -> M.Map FilePath T.Text
+transformVFS vfs =
+  M.foldrWithKey
+    ( \uri virtual_file acc ->
+        case uriToNormalizedFilePath uri of
+          Nothing -> acc
+          Just file_path ->
+            M.insert (fromNormalizedFilePath file_path) (virtualFileText virtual_file) acc
+    )
+    M.empty
+    (M.mapMaybe keepOpenFile (vfs ^. vfsMap))
+  where
+    keepOpenFile = \case
+      VFS.Open file -> Just file
+      VFS.Closed _ -> Nothing
+
+logWithSeverity :: (MonadLsp c m) => Severity -> LogAction m Text
+logWithSeverity severity = contramap (`WithSeverity` severity) logToLogMessage

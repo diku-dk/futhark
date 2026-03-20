@@ -534,7 +534,7 @@ instance (IsName vn) => Pretty (TypeParamBase vn) where
   pretty (TypeParamType l name _) = "'" <> pretty l <> prettyName name
 
 instance (IsName vn, Annot f) => Pretty (ValBindBase f vn) where
-  pretty (ValBind entry name retdecl rettype tparams args body _ attrs _) =
+  pretty (ValBind entry name _ retdecl rettype tparams args body _ attrs _) =
     mconcat (map ((<> line) . prettyAttr) attrs)
       <> fun
         <+> align
