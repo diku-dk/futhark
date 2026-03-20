@@ -211,6 +211,61 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
         copyDWIMFix arr [ltid] (Var $ paramName x) []
       copyDWIM (paramName y) [] (Var $ paramName x) []
 
+-- | Calculate the number of u64 words needed to store n bits
+bitArrayWords :: Imp.KernelConstExp -> Imp.KernelConstExp
+bitArrayWords n = untyped $ isInt64 n `divUp` 64
+
+-- | Set a bit in a bit array stored as u64 words
+setBitInBitArray :: Imp.TExp Int64 -> VName -> Imp.TExp Int64 -> SubExp -> InKernelGen ()
+setBitInBitArray chunk bit_array idx bool_val = do
+  let (word_idx, bit_idx) =
+        if chunk <= 64
+          then (0, idx)
+          else (idx `quot` 64, idx `rem` 64)
+
+  -- Read current word
+  current_word <- dPrimV "current_word" (0 :: Imp.TExp Int64)
+  copyDWIMFix (tvVar current_word) [] (Var bit_array) [word_idx]
+
+  -- Convert bool to int64 (0 or 1) using zero extension
+  bool_as_int <-
+    dPrimVE "bool_as_int" $
+      TPrimExp $
+        zExt Int64 $
+          toExp' Bool bool_val
+
+  -- Create mask and update word
+  let bit_mask = 1 .<<. bit_idx
+      cleared_word = tvExp current_word .&. (bit_mask .^. (-1))
+      set_bit = (bool_as_int .&. 1) .<<. bit_idx
+      new_word = cleared_word .|. set_bit
+
+  new_word_var <- dPrimV "new_word" new_word
+  copyDWIMFix bit_array [word_idx] (Var $ tvVar new_word_var) []
+
+-- | Get a bit from a bit array stored as u64 words, storing result in destination
+getBitFromBitArray :: Imp.TExp Int64 -> VName -> VName -> Imp.TExp Int64 -> InKernelGen ()
+getBitFromBitArray chunk dest bit_array idx = do
+  let (word_idx, bit_idx) =
+        if chunk <= 64
+          then (0, idx)
+          else (idx `quot` 64, idx `rem` 64)
+
+  -- Read word containing the bit
+  word <- dPrimV "bit_word_read" (0 :: Imp.TExp Int64)
+  copyDWIMFix (tvVar word) [] (Var bit_array) [word_idx]
+
+  -- Extract bit: (word >> bitIdx) & 1
+  let extracted_bit = (tvExp word .>>. bit_idx) .&. 1
+      bool_val = extracted_bit .==. 1
+
+  bool_var <- dPrimV "bool_val" bool_val
+  copyDWIMFix dest [] (Var $ tvVar bool_var) []
+
+-- | Helper to determine if a type should use bit array representation
+shouldUseBitArray :: Type -> Bool
+shouldUseBitArray t = primType t && elemType t == Bool
+
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
 compileSegScan ::
@@ -236,9 +291,15 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       tblock_size_e = pe64 $ unCount $ kAttrBlockSize attrs
       num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
 
-  let chunk_const = getChunkSize ts
+  let chunk_const = getChunkSize $ filter (not . shouldUseBitArray) ts
   chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
   let chunk = tvExp chunk_v
+
+  let num_words_const = bitArrayWords chunk_const
+  num_words <-
+    dPrimV "num_bit_words"
+      . isInt64
+      =<< kernelConstToExp num_words_const
 
   num_virt_blocks <-
     tvSize <$> dPrimV "num_virt_blocks" (n `divUp` (tblock_size_e * chunk))
@@ -267,7 +328,14 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
   global_id <- genZeroes "global_dynid" 1
 
-  let attrs' = attrs {kAttrConstExps = M.singleton (tvVar chunk_v) chunk_const}
+  let attrs' =
+        attrs
+          { kAttrConstExps =
+              M.fromList
+                [ (tvVar chunk_v, chunk_const),
+                  (tvVar num_words, num_words_const)
+                ]
+          }
 
   map_global_chunks <-
     forM map_tys' $ \t ->
@@ -367,12 +435,21 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           if isAcc t || not (primType t)
             then pure Nothing
             else
-              Just
-                <$> sAllocArray
-                  "private"
-                  (elemType t)
-                  (Shape [tvSize chunk_v])
-                  (ScalarSpace [tvSize chunk_v] (elemType t))
+              if shouldUseBitArray t
+                then do
+                  Just
+                    <$> sAllocArray
+                      "private_bits"
+                      int64
+                      (Shape [tvSize num_words])
+                      (ScalarSpace [tvSize num_words] int64)
+                else
+                  Just
+                    <$> sAllocArray
+                      "private"
+                      (elemType t)
+                      (Shape [tvSize chunk_v])
+                      (ScalarSpace [tvSize chunk_v] (elemType t))
 
       thd_offset <- dPrimVE "thd_offset" $ block_offset + ltid
 
@@ -388,9 +465,17 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                         splitAt (segBinOpResults [scan_op]) $ bodyResult map_kbody
 
                   -- Write map results to memory.
-                  forM_ (zip3 map_private_chunks map_global_chunks $ map kernelResultSubExp map_res) $ \(priv_dest, glob_dest, src) -> do
-                    maybe (pure ()) (\d -> copyDWIMFix d [i] src []) priv_dest
-                    maybe (pure ()) (\d -> copyDWIMFix d [tvExp phys_block_id, ltid, i] src []) glob_dest
+                  forM_ (zip4 map_private_chunks map_global_chunks (map kernelResultSubExp map_res) map_tys') $
+                    \(priv_dest, glob_dest, src, ty) -> do
+                      case priv_dest of
+                        Just d
+                          | shouldUseBitArray ty ->
+                              setBitInBitArray chunk d i src
+                        Just d ->
+                          copyDWIMFix d [i] src []
+                        Nothing -> pure ()
+
+                      maybe (pure ()) (\d -> copyDWIMFix d [tvExp phys_block_id, ltid, i] src []) glob_dest
 
                   -- Write to-scan results to private memory.
                   forM_ (zip scan_private_chunks $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
@@ -692,28 +777,36 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                 lambdaParams $
                   segPostOpLambda post_op
 
-      sOp local_barrier
       sComment "Compute post op and write to global memory." $ do
         sFor "i" chunk $ \i -> do
-          dScope Nothing $
-            scopeOfLParams $
-              lambdaParams $
-                segPostOpLambda post_op
+          flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
+          sWhen (flat_idx .<. n) $ do
+            dIndexSpace (zip gtids dims') flat_idx
 
-          sComment "bind scan results to post lambda params" $ do
-            forM_ (zip scan_pars scan_private_chunks) $ \(par, priv) ->
-              copyDWIMFix par [] (Var priv) [i]
+            dScope Nothing $
+              scopeOfLParams $
+                lambdaParams $
+                  segPostOpLambda post_op
 
-          sComment "bind map results to post lamda params" $
-            forM_ (zip3 map_pars map_private_chunks map_global_chunks) $ \(par, priv, glob) -> do
-              maybe (pure ()) (\p -> copyDWIMFix par [] (Var p) [i]) priv
-              maybe (pure ()) (\g -> copyDWIMFix par [] (Var g) [tvExp phys_block_id, ltid, i]) glob
+            sComment "bind scan results to post lambda params" $ do
+              forM_ (zip scan_pars scan_private_chunks) $ \(par, priv) ->
+                copyDWIMFix par [] (Var priv) [i]
 
-          let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
-          sComment "compute post op." $ do
-            flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
-            sWhen (flat_idx .<. n) $ do
-              dIndexSpace (zip gtids dims') flat_idx
+            sComment "bind map results to post lamda params" $
+              forM_ (zip4 map_pars map_private_chunks map_global_chunks map_tys') $
+                \(par, priv, glob, ty) -> do
+                  case priv of
+                    Just p
+                      | shouldUseBitArray ty ->
+                          getBitFromBitArray chunk par p i
+                    Just p ->
+                      copyDWIMFix par [] (Var p) [i]
+                    Nothing -> pure ()
+
+                  maybe (pure ()) (\g -> copyDWIMFix par [] (Var g) [tvExp phys_block_id, ltid, i]) glob
+
+            let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+            sComment "compute post op." $ do
               compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
                 sComment "write mapped values" $ do
                   forM_ (zip (patElems pat) res) $ \(pe, subexp) ->

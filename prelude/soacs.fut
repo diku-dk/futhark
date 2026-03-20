@@ -232,7 +232,8 @@ def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
   then []
   else let flags = map p as
        let offsets = scan (+) 0 (map intrinsics.btoi_bool_i64 flags)
-       let is = map2 (\f o -> if f then o - 1 else -1) flags offsets
+       let flags' = map p as
+       let is = map2 (\f o -> if f then o - 1 else -1) flags' offsets
        -- This following is carefully written such that the two scatters will be
        -- fused horisontally, which allows the entire thing to become a single
        -- kernel.
