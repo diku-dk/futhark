@@ -772,8 +772,9 @@ transformInnerMap segments env inps pat w arrs map_lam = do
 -- worth it, as such operators are extremely rare - and we can just fall back on
 -- sequentialisation.
 suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> Bool
-suitableOperator env inps =
-  allNames notVariant . freeIn
+suitableOperator env inps lam =
+  allNames notVariant (freeIn lam)
+    && all primType (lambdaReturnType lam) -- TODO
   where
     notVariant v = isNothing $ M.lookup v $ inputReps inps env
 
