@@ -315,8 +315,7 @@ getChunkSize types = do
 
       sum_sizes = sum sizes
       sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
-      max_size = maximum sizes
-
+      max_size = maximum sizes -- foldr max 1 sizes
       mem_constraint = max k_mem sum_sizes `quot` max_size
       reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
   untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
