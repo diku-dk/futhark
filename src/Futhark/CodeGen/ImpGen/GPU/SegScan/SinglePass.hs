@@ -236,8 +236,13 @@ compileSegScan pat lvl space scan_op map_kbody = do
       num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
 
   let chunk_const = getChunkSize tys'
-  chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
-  let chunk = tvExp chunk_v
+  chunk_v <- dPrim "chunk_size"
+  let chunk_name = nameFromText $ prettyText $ tvVar chunk_v
+  addTuningParam chunk_name Nothing
+  emit . Imp.GetUserParam (tvVar chunk_v) chunk_name . isInt64
+    =<< kernelConstToExp chunk_const
+  let chunk_constexp = LeafExp (Imp.SizeUserParam chunk_name chunk_const) int64
+      chunk = tvExp chunk_v
 
   num_virt_blocks <-
     tvSize <$> dPrimV "num_virt_blocks" (n `divUp` (tblock_size_e * chunk))
@@ -266,7 +271,11 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
   global_id <- genZeroes "global_dynid" 1
 
-  let attrs' = attrs {kAttrConstExps = M.singleton (tvVar chunk_v) chunk_const}
+  let attrs' =
+        attrs
+          { kAttrConstExps =
+              M.singleton (tvVar chunk_v) chunk_constexp
+          }
 
   sKernelThread "segscan" (segFlat space) attrs' $ do
     chunk32 <- dPrimVE "chunk_size_32b" $ sExt32 $ tvExp chunk_v

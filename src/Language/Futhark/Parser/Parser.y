@@ -302,9 +302,9 @@ Spec :: { SpecBase NoInfo Name }
         { let L loc (ID name) = $2
           in ValSpec name $3 $5 NoInfo Nothing (srcspan $1 $>) }
       | val BindingBinOp TypeParams ':' TypeExp
-        { ValSpec $2 $3 $5 NoInfo Nothing (srcspan $1 $>) }
+        { ValSpec (fst $2) $3 $5 NoInfo Nothing (srcspan $1 $>) }
       | val '(' BindingBinOp ')' TypeParams ':' TypeExp
-        { ValSpec $3 $5 $7 NoInfo Nothing (srcspan $1 $>) }
+        { ValSpec (fst $3) $5 $7 NoInfo Nothing (srcspan $1 $>) }
       | TypeAbbr
         { TypeAbbrSpec $1 }
 
@@ -395,43 +395,43 @@ BinOp :: { (QualName Name, Loc) }
       | '=...'     { binOpName $1 }
       | '`' QualName '`' { $2 }
 
-BindingBinOp :: { Name }
+BindingBinOp :: { (Name, SrcLoc) }
       : BinOp {% let (QualName qs name, loc) = $1 in do
                    unless (null qs) $ parseErrorAt loc $
                      Just "Cannot use a qualified name in binding position."
-                   pure name }
-      | '-'   { nameFromString "-" }
+                   pure (name, srclocOf loc) }
+      | '-'   { (nameFromString "-", srclocOf $1) }
       | '!'   {% parseErrorAt $1 $ Just $ "'!' is a prefix operator and cannot be used as infix operator." }
 
-BindingId :: { (Name, Loc) }
-     : id                   { let L loc (ID name) = $1 in (name, loc) }
-     | '(' BindingBinOp ')' { ($2, $1) }
+BindingId :: { (Name, SrcLoc) }
+     : id                   { let L loc (ID name) = $1 in (name, srclocOf loc) }
+     | '(' BindingBinOp ')' { $2 }
 
 Val    :: { ValBindBase NoInfo Name }
 Val     : def BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
-          { let (name, _) = $2
-            in ValBind Nothing name $5 NoInfo
+          { let (name, loc) = $2
+            in ValBind Nothing name loc $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
 
         | entry BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
           { let (name, loc) = $2
-            in ValBind (Just NoInfo) name $5 NoInfo
+            in ValBind (Just NoInfo) name loc $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>) }
 
         | def FunParam BindingBinOp FunParam maybeAscription(TypeExp) '=' Exp
-          { ValBind Nothing $3 $5 NoInfo [] [$2,$4] $7
+          { ValBind Nothing (fst $3) (snd $3) $5 NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
           }
 
         -- The next two for backwards compatibility.
         | let BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
-          { let (name, _) = $2
-            in ValBind Nothing name $5 NoInfo
+          { let (name, loc) = $2
+            in ValBind Nothing name loc $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
         | let FunParam BindingBinOp FunParam maybeAscription(TypeExp) '=' Exp
-          { ValBind Nothing $3 $5 NoInfo [] [$2,$4] $7
+          { ValBind Nothing (fst $3) (snd $3) $5 NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
           }
 
@@ -824,7 +824,7 @@ Pat :: { PatBase NoInfo Name StructType }
 -- Parameter patterns are slightly restricted; see #2017.
 ParamPat :: { PatBase NoInfo Name StructType }
                : id                   { let L loc (ID name) = $1 in Id name NoInfo (srclocOf loc) }
-               | '(' BindingBinOp ')' { Id $2 NoInfo (srcspan $1 $>) }
+               | '(' BindingBinOp ')' { Id (fst $2) NoInfo (srcspan $1 $>) }
                | '_'                  { Wildcard NoInfo (srclocOf $1) }
                | '(' ')'              { TuplePat [] (srcspan $1 $>) }
                | '(' Pat ')'          { PatParens $2 (srcspan $1 $>) }
@@ -841,7 +841,7 @@ Pats1 :: { [PatBase NoInfo Name StructType] }
 
 InnerPat :: { PatBase NoInfo Name StructType }
                : id                   { let L loc (ID name) = $1 in Id name NoInfo (srclocOf loc) }
-               | '(' BindingBinOp ')' { Id $2 NoInfo (srcspan $1 $>) }
+               | '(' BindingBinOp ')' { Id (fst $2) NoInfo (srcspan $1 $>) }
                | '_'                  { Wildcard NoInfo (srclocOf $1) }
                | '(' ')'              { TuplePat [] (srcspan $1 $>) }
                | '(' Pat ')'          { PatParens $2 (srcspan $1 $>) }

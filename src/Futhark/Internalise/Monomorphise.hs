@@ -1110,6 +1110,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
       ValBind
         { valBindEntryPoint = Info <$> entry,
           valBindName = name',
+          valBindNameLoc = mempty,
           valBindRetType = Info rettype',
           valBindRetDecl = Nothing,
           valBindTypeParams = tparams',
@@ -1200,7 +1201,7 @@ substPat f pat = case pat of
   PatConstr n (Info tp) ps loc -> PatConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
-toPolyBinding (ValBind entry name _ (Info rettype) tparams params body _ attrs loc) =
+toPolyBinding (ValBind entry name _ _ (Info rettype) tparams params body _ attrs loc) =
   PolyBinding (unInfo <$> entry, name, tparams, params, rettype, body, attrs, loc)
 
 transformValBind :: ValBind -> MonoM Env
