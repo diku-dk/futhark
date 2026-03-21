@@ -174,7 +174,7 @@ compileSegRed' pat grid space segbinops map_body_cont
     chunk_const =
       if Noncommutative `elem` map segBinOpComm segbinops
         && all isPrimSegBinOp segbinops
-        then getChunkSize param_types
+        then getChunkSize param_types []
         else Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed
