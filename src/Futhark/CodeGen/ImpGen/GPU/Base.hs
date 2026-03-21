@@ -304,19 +304,19 @@ kernelConstToExp = traverse f
 getChunkSize :: [Type] -> [Type] -> Imp.KernelConstExp
 getChunkSize scan_types map_types = do
   let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
-      max_block_mem   = Imp.SizeMaxConst SizeSharedMemory
-      max_block_reg   = Imp.SizeMaxConst SizeRegisters
+      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
+      max_block_reg = Imp.SizeMaxConst SizeRegisters
       k_mem = le64 max_block_mem `quot` le64 max_tblock_size
       k_reg = le64 max_block_reg `quot` le64 max_tblock_size
 
       scanned = map elemType $ filter primType scan_types
-      all'  = map elemType $ filter primType (scan_types <> map_types)
+      all' = map elemType $ filter primType (scan_types <> map_types)
 
       scanned_sizes = map primByteSize scanned
 
       -- Shared-mem model: only scanned values participate
       scanned_sum_sizes = sum scanned_sizes
-      scanned_max_size  = maximum scanned_sizes
+      scanned_max_size = maximum scanned_sizes
 
       -- Register model: both scanned and reg-only values occupy registers
       reg_sum_sizes' =
