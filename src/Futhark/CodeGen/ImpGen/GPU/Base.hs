@@ -299,23 +299,20 @@ kernelConstToExp = traverse f
       emit $ Imp.GetUserParam v name $ isInt64 def'
       pure v
 
--- scannedTypes: values used in the scan and thus also in shared memory
--- regOnlyTypes: values that must be kept in registers but are not put in shared memory
 getChunkSize :: [Type] -> [Type] -> Imp.KernelConstExp
 getChunkSize scan_types map_types = do
   let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
-      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
-      max_block_reg = Imp.SizeMaxConst SizeRegisters
+      max_block_mem   = Imp.SizeMaxConst SizeSharedMemory
+      max_block_reg   = Imp.SizeMaxConst SizeRegisters
       k_mem = le64 max_block_mem `quot` le64 max_tblock_size
       k_reg = le64 max_block_reg `quot` le64 max_tblock_size
 
       scanned = map elemType $ filter primType scan_types
-      mapped = map elemType $ filter primType map_types
+      mapped  = map elemType $ filter primType map_types
 
       scanned_sizes = map primByteSize scanned
-
       scanned_sum_sizes = sum scanned_sizes
-      scanned_max_size = maximum scanned_sizes
+      scanned_max_size  = maximum scanned_sizes
 
       reg_scan_sum_sizes =
         sum (map (sMax64 4 . primByteSize) scanned) `quot` 4
@@ -323,14 +320,18 @@ getChunkSize scan_types map_types = do
       reg_map_sum_sizes =
         sum (map (sMax64 4 . primByteSize) mapped) `quot` 4
 
-      reg_sum_sizes =
-        sum (map (sMax64 4 . primByteSize) $ scanned <> mapped) `quot` 4
-
       mem_constraint =
         max k_mem scanned_sum_sizes `quot` scanned_max_size
 
+      baseline_regs =
+        1 + reg_scan_sum_sizes + reg_map_sum_sizes
+
+      per_item_regs =
+        2 * reg_scan_sum_sizes + reg_map_sum_sizes
+
       reg_constraint =
-        (k_reg - 1 - reg_sum_sizes) `quot` (2 * reg_scan_sum_sizes + reg_map_sum_sizes)
+        (k_reg - baseline_regs) `quot` per_item_regs
+
   untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
 
 inChunkScan ::
