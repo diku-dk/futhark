@@ -722,7 +722,7 @@ transformInnerMap ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU [(VName, VName, VName, VName)]
+  Builder GPU [IrregularRep]
 transformInnerMap segments env inps pat w arrs map_lam = do
   ws <- dataArr segments env inps w
   (ws_F, ws_O, ws_data) <- doRepIota ws
@@ -759,7 +759,7 @@ transformInnerMap segments env inps pat w arrs map_lam = do
       (distributed, arrmap) =
         distributeMap scope pat (NE.singleton new_segment) (replicated <> arrs') map_lam'
       m =
-        transformDistributed2 (ws_F, ws_O, ws) arrmap (NE.singleton new_segment) distributed
+        transformDistributedInnerMap (ws_F, ws_O, ws) arrmap (NE.singleton new_segment) distributed
   traceM $ unlines ["inner map distributed", prettyString distributed]
   (res, stms) <- runReaderT (runBuilder m) scope
   addStms stms
@@ -807,17 +807,17 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
             transformInnerMap segments env inps map_pat w arrs map_lam
           let (redout_names, mapout_names) =
                 splitAt (redResults reds) (patNames map_pat)
-              redout_res = filter (\(_, _, _, v) -> v `elem` redout_names) map_res_all
-              mapout_res = filter (\(_, _, _, v) -> v `elem` mapout_names) map_res_all
-              (ws_F, ws_O, ws, _) = head redout_res
-              toIrreg (f, o, s, d) = Irregular $ IrregularRep {irregularS = s, irregularF = f, irregularO = o, irregularD = d}
+              hasPat pat_names irr_reps = irregularD irr_reps `elem` pat_names
+              redout_res = filter (hasPat redout_names) map_res_all
+              mapout_res = filter (hasPat mapout_names) map_res_all
+              (ws_F, ws_O, ws) = (,,) <$> irregularF <*> irregularO <*> irregularS $ head redout_res
           elems' <-
             genSegRed ws ws_F ws_O redout_names $
               singleReduce reds
           let (red_tags, map_tags) = splitAt (redResults reds) $ map distResTag res
           pure $
             insertRegulars red_tags elems' $
-              insertReps (zip map_tags $ map toIrreg mapout_res) env
+              insertReps (zip map_tags $ map Irregular mapout_res) env
       | Just scans <- isScanSOAC form,
         all (suitableOperator env inps . scanLambda) scans,
         Just arrs' <- mapM (`lookup` inps) arrs,
@@ -831,20 +831,19 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
           let (scanout_names, mapout_names) =
                 splitAt (scanResults scans) (patNames map_pat)
-              scanout_res = filter (\(_, _, _, v) -> v `elem` scanout_names) map_res_all
-              mapout_res = filter (\(_, _, _, v) -> v `elem` mapout_names) map_res_all
-              (ws_F, ws_O, ws, _) = head scanout_res
-              toIrreg (f, o, s, d) = Irregular $ IrregularRep {irregularS = s, irregularF = f, irregularO = o, irregularD = d}
+              hasPat pat_names irr_reps = irregularD irr_reps `elem` pat_names
+              scanout_res = filter (hasPat scanout_names) map_res_all
+              mapout_res = filter (hasPat mapout_names) map_res_all
+              (ws_F, ws_O, ws) = (,,) <$> irregularF <*> irregularO <*> irregularS $ head scanout_res
           elems' <- doSegScan scans ws_F scanout_names
           let (scan_tags, map_tags) = splitAt (scanResults scans) $ map distResTag res
           pure $
             insertIrregulars ws ws_F ws_O (zip scan_tags elems') $
-              insertReps (zip map_tags $ map toIrreg mapout_res) env
+              insertReps (zip map_tags $ map Irregular mapout_res) env
       | Just map_lam <- isMapSOAC form -> do
           map_res <-
             transformInnerMap segments env inps pat w arrs map_lam
-          let toIrreg (f, o, s, d) = Irregular $ IrregularRep {irregularS = s, irregularF = f, irregularO = o, irregularD = d}
-          pure $ insertReps (zip (map distResTag res) $ map toIrreg map_res) env
+          pure $ insertReps (zip (map distResTag res) $ map Irregular map_res) env
       | otherwise -> do
           -- XXX: here we silently sequentialise any SOAC that is not handled
           -- above. We need to make sure that we actually handle everything we
@@ -864,7 +863,6 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           dietToUnique ObservePrim = Nonunique
           param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
           rettype' = addRetAls param_ts $ liftRetType w $ map fst rettype
-
       result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
       let reps = resultToResReps (map fst rettype) result
       pure $ insertReps (zip (map distResTag res) reps) env
@@ -1156,16 +1154,54 @@ distResCerts env = Certs . map f
       Regular v -> v
       Irregular {} -> error "resCerts: irregular"
 
-transformDistributed2 ::
+irregularMapResult ::
+  (VName, VName, VName) ->
+  Segments ->
+  IrregularRep ->
+  DistEnv ->
+  VName ->
+  Type ->
+  DistInputs ->
+  Builder GPU IrregularRep
+irregularMapResult (ws, ws_F, ws_O) segments irreg env v v_t new_inps =
+  if any (isTypeVariant new_inp_var) (arrayShape v_t)
+    then do
+      old_segment <- arraySize 0 <$> lookupType ws
+      new_shape <- letExp (baseName v <> "_outer_shape") <=< segMap (MkSolo old_segment) $ \(MkSolo is) -> do
+        outer_ind <- letSubExp "outer_ind" =<< eIndex ws_O [eSubExp is]
+        dims <- mapM (readInput segments env [outer_ind] new_inps) (shapeDims $ arrayShape v_t)
+        -- we can also use irregularS and it might be a better choice:
+        -- dims <- letSubExp "outer_ind" =<< eIndex (irregularS irreg) [eSubExp outer_ind]
+        -- sz <- letSubExp "sz" =<< toExp (pe64 outer_ws_i *  pe64 dims)
+        outer_ws_i <- letSubExp "outer_ws" =<< eIndex ws [eSubExp is]
+        sz <- letSubExp "sz" =<< toExp (pe64 outer_ws_i * product (map pe64 dims))
+        pure [subExpRes sz]
+      (new_ws_F, new_ws_O, _) <- doRepIota new_shape
+      letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg
+      pure $ IrregularRep {irregularS = new_shape, irregularF = new_ws_F, irregularO = new_ws_O, irregularD = v}
+    else do
+      let shape = segmentsShape segments <> arrayShape v_t
+      v_copy <-
+        letExp (baseName v) . BasicOp $
+          Replicate mempty (Var $ irregularD irreg)
+      v_copy_shape <- arrayShape <$> lookupType v_copy
+      letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
+      pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
+  where
+    isTypeVariant vin se = case se of
+      Var v' -> S.member v' vin
+      _ -> False
+    new_inp_var = S.fromList $ map fst new_inps
+
+transformDistributedInnerMap ::
   (VName, VName, VName) ->
   M.Map ResTag IrregularRep ->
   Segments ->
   Distributed ->
-  Builder GPU [(VName, VName, VName, VName)]
-transformDistributed2 (ws_F, ws_O, ws) irregs segments dist = do
+  Builder GPU [IrregularRep]
+transformDistributedInnerMap (ws_F, ws_O, ws) irregs segments dist = do
   let Distributed dstms (DistResults resmap reps) = dist
   let new_inps = concatMap distStmInputs dstms
-  let new_inp_var = S.fromList $ map fst new_inps
   env <- foldM (transformDistStm segments) env_initial dstms
   resmap_res <- fmap concat $ forM (M.toList resmap) $ \(rt, binds) ->
     forM binds $ \(cs_inps, v, v_t) ->
@@ -1175,59 +1211,23 @@ transformDistributed2 (ws_F, ws_O, ws) irregs segments dist = do
         case resVar rt env of
           Regular v' -> do
             letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-            pure (ws_F, ws_O, ws, v)
-          Irregular irreg -> do
-            -- It might have an irregular representation, but we know
-            -- that it is actually regular because it is a result
-            let isTypeVariant vin se = case se of
-                  Var v' -> S.member v' vin
-                  _ -> False
-            if any (isTypeVariant new_inp_var) (arrayShape v_t)
-              then do
-                -- error "transformDistributed2: result cannot be irregular if it has variant dimensions"
-                old_segment <- arraySize 0 <$> lookupType ws
-                new_shape <- letExp (baseName v <> "_outer_shape") <=< segMap (MkSolo old_segment) $ \(MkSolo is) -> do
-                  -- slice_ns <- mapM (readInput old_segment env (toList is) inps) $ arrayShape v_t
-                  outer_ind <- letSubExp "outer_ind" =<< eIndex ws_O [eSubExp is]
-                  dims <- mapM (readInput segments env [outer_ind] new_inps) (shapeDims $ arrayShape v_t)
-                  outer_ws_i <- letSubExp "outer_ws" =<< eIndex ws [eSubExp is]
-                  sz <- letSubExp "sz" =<< toExp (pe64 outer_ws_i * product (map pe64 dims))
-                  pure [subExpRes sz]
-                (new_ws_F, new_ws_O, _) <- doRepIota new_shape
-                letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg
-                pure (new_ws_F, new_ws_O, new_shape, v)
-              else do
-                -- let b = any (isVariant inps env) dims
-                let shape = segmentsShape segments <> arrayShape v_t
-                v_copy <-
-                  letExp (baseName v) . BasicOp $
-                    Replicate mempty (Var $ irregularD irreg)
-                v_copy_shape <- arrayShape <$> lookupType v_copy
-                letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
-                pure (ws_F, ws_O, ws, v)
+            pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
+          Irregular irreg -> irregularMapResult (ws, ws_F, ws_O) segments irreg env v v_t new_inps
   reps_res <- forM reps $ \(v, r) -> do
     case r of
       Left se -> do
         letBindNames [v] $ BasicOp $ Replicate (segmentsShape segments) se
-        pure (ws_F, ws_O, ws, v)
+        pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
       Right (DistInputFree arr _) -> do
         letBindNames [v] $ BasicOp $ SubExp $ Var arr
-        pure (ws_F, ws_O, ws, v)
-      -- This can happen. ask Troels
-      Right (DistInput rt t) -> do
-        let shape = segmentsShape segments <> arrayShape t
+        pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
+      -- I think this can happen
+      Right (DistInput rt t) -> 
         case resVar rt env of
           Regular v' -> do
             letBindNames [v] $ BasicOp $ SubExp $ Var v'
-            pure (ws_F, ws_O, ws, v)
-          Irregular irreg -> do
-            -- Fix here as well
-            v_copy <-
-              letExp (baseName v <> "_copy_right_dist") . BasicOp $
-                Replicate mempty (Var $ irregularD irreg)
-            v_copy_shape <- arrayShape <$> lookupType v_copy
-            letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
-            pure (ws_F, ws_O, ws, v)
+            pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
+          Irregular irreg -> irregularMapResult (ws, ws_F, ws_O) segments irreg env v t new_inps
   pure $ resmap_res <> reps_res
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
@@ -1250,7 +1250,6 @@ transformDistributed irregs segments dist = do
           Irregular irreg -> do
             -- It might have an irregular representation, but we know
             -- that it is actually regular because it is a result.
-            -- let b = any (isVariant inps env) dims
             let shape = segmentsShape segments <> arrayShape v_t
             v_copy <-
               letExp (baseName v) . BasicOp $

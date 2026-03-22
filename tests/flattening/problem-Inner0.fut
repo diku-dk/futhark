@@ -9,6 +9,5 @@ def main (xs: []i64) =
   map (\x ->
          let res = opaque (iota x)
          let mes = map (+5) res
-         -- some paralell operations
          in mes[1])
       xs
