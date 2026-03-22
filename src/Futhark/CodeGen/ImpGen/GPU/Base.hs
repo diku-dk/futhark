@@ -310,23 +310,27 @@ getChunkSize scan_types map_types = do
       k_reg = le64 max_block_reg `quot` le64 max_tblock_size
 
       scanned = map elemType $ filter primType scan_types
-      all' = map elemType $ filter primType (scan_types <> map_types)
+      mapped = map elemType $ filter primType map_types
 
       scanned_sizes = map primByteSize scanned
 
-      -- Shared-mem model: only scanned values participate
       scanned_sum_sizes = sum scanned_sizes
       scanned_max_size = maximum scanned_sizes
 
-      -- Register model: both scanned and reg-only values occupy registers
-      reg_sum_sizes' =
-        sum (map (sMax64 4 . primByteSize) all') `quot` 4
+      reg_scan_sum_sizes =
+        sum (map (sMax64 4 . primByteSize) scanned) `quot` 4
+
+      reg_map_sum_sizes =
+        sum (map (sMax64 4 . primByteSize) mapped) `quot` 4
+
+      reg_sum_sizes =
+        sum (map (sMax64 4 . primByteSize) $ scanned <> mapped) `quot` 4
 
       mem_constraint =
         max k_mem scanned_sum_sizes `quot` scanned_max_size
 
       reg_constraint =
-        (k_reg - 1 - reg_sum_sizes') `quot` (2 * reg_sum_sizes')
+        (k_reg - 1 - reg_sum_sizes) `quot` (2 * reg_scan_sum_sizes + reg_map_sum_sizes)
   untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
 
 inChunkScan ::
