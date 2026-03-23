@@ -39,7 +39,8 @@ getScanChunkSize tblock_size scan_types map_types = do
         x <- isConstExp vtable $ LeafExp name $ IntType Int64
         case x of
           Just a -> pure a
-          Nothing -> error "testing"
+          Nothing ->
+            pure $ LeafExp (Imp.SizeMaxConst SizeThreadBlock) (IntType Int64)
   let max_block_mem = Imp.SizeMaxConst SizeSharedMemory
       max_block_reg = Imp.SizeMaxConst SizeRegisters
       min_bound_tblock_size =
