@@ -290,14 +290,23 @@ bitArrayWords n = untyped $ isInt64 n `divUp` 64
 -- | Set a bit in a bit array stored as u64 words
 setBitInBitArray :: Imp.TExp Int64 -> VName -> Imp.TExp Int64 -> SubExp -> InKernelGen ()
 setBitInBitArray chunk bit_array idx bool_val = do
-  let (word_idx, bit_idx) =
-        if chunk <= 64
-          then (0, idx)
-          else (idx `quot` 64, idx `rem` 64)
+  word_idx <- dPrimV "word_idx" (0 :: Imp.TExp Int64)
+  bit_idx <- dPrimV "bit_idx" idx
+
+  sIf
+    (chunk .<=. 64)
+    ( do
+        word_idx <-- 0
+        bit_idx <-- idx
+    )
+    ( do
+        word_idx <-- idx `quot` 64
+        bit_idx <-- idx `rem` 64
+    )
 
   -- Read current word
   current_word <- dPrimV "current_word" (0 :: Imp.TExp Int64)
-  copyDWIMFix (tvVar current_word) [] (Var bit_array) [word_idx]
+  copyDWIMFix (tvVar current_word) [] (Var bit_array) [tvExp word_idx]
 
   -- Convert bool to int64 (0 or 1) using zero extension
   bool_as_int <-
@@ -307,28 +316,37 @@ setBitInBitArray chunk bit_array idx bool_val = do
           toExp' Bool bool_val
 
   -- Create mask and update word
-  let bit_mask = 1 .<<. bit_idx
+  let bit_mask = 1 .<<. tvExp bit_idx
       cleared_word = tvExp current_word .&. (bit_mask .^. (-1))
-      set_bit = (bool_as_int .&. 1) .<<. bit_idx
+      set_bit = (bool_as_int .&. 1) .<<. tvExp bit_idx
       new_word = cleared_word .|. set_bit
 
   new_word_var <- dPrimV "new_word" new_word
-  copyDWIMFix bit_array [word_idx] (Var $ tvVar new_word_var) []
+  copyDWIMFix bit_array [tvExp word_idx] (Var $ tvVar new_word_var) []
 
 -- | Get a bit from a bit array stored as u64 words, storing result in destination
 getBitFromBitArray :: Imp.TExp Int64 -> VName -> VName -> Imp.TExp Int64 -> InKernelGen ()
 getBitFromBitArray chunk dest bit_array idx = do
-  let (word_idx, bit_idx) =
-        if chunk <= 64
-          then (0, idx)
-          else (idx `quot` 64, idx `rem` 64)
+  word_idx <- dPrimV "word_idx" (0 :: Imp.TExp Int64)
+  bit_idx <- dPrimV "bit_idx" idx
+
+  sIf
+    (chunk .<=. 64)
+    ( do
+        word_idx <-- 0
+        bit_idx <-- idx
+    )
+    ( do
+        word_idx <-- idx `quot` 64
+        bit_idx <-- idx `rem` 64
+    )
 
   -- Read word containing the bit
   word <- dPrimV "bit_word_read" (0 :: Imp.TExp Int64)
-  copyDWIMFix (tvVar word) [] (Var bit_array) [word_idx]
+  copyDWIMFix (tvVar word) [] (Var bit_array) [tvExp word_idx]
 
   -- Extract bit: (word >> bitIdx) & 1
-  let extracted_bit = (tvExp word .>>. bit_idx) .&. 1
+  let extracted_bit = (tvExp word .>>. tvExp bit_idx) .&. 1
       bool_val = extracted_bit .==. 1
 
   bool_var <- dPrimV "bool_val" bool_val
@@ -433,7 +451,6 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                   <> arrayShape t
               )
               (Space "device")
-
   sKernelThread "segscan" (segFlat space) attrs' $ do
     chunk32 <- dPrimVE "chunk_size_32b" $ sExt32 $ tvExp chunk_v
 
