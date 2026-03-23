@@ -1,4 +1,5 @@
 {-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE OrPatterns #-}
 
 module Futhark.LSP.InlayHint (getInlayHints) where
 
@@ -91,7 +92,7 @@ getInlayHints range state filepath = fromMaybe [] $ do
         TermVar src inferredType Nothing ->
           case src of
             TermBindId -> []
-            TermBindLet ->
+            TermBindLet; TermBindNested ->
               [TypeHintBare (": " <> prettyText inferredType) termEnd]
             TermBindPat ->
               [TypeHintParens termStart (prettyText inferredType) termEnd]
