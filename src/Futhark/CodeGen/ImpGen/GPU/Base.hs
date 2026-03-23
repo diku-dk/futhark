@@ -299,20 +299,32 @@ kernelConstToExp = traverse f
       emit $ Imp.GetUserParam v name $ isInt64 def'
       pure v
 
-getChunkSize :: [Type] -> [Type] -> Imp.KernelConstExp
-getChunkSize scan_types map_types = do
-  let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
-      max_block_mem   = Imp.SizeMaxConst SizeSharedMemory
-      max_block_reg   = Imp.SizeMaxConst SizeRegisters
-      k_mem = le64 max_block_mem `quot` le64 max_tblock_size
-      k_reg = le64 max_block_reg `quot` le64 max_tblock_size
+getChunkSize :: SubExp -> [Type] -> [Type] -> CallKernelGen Imp.KernelConstExp
+getChunkSize tblock_size scan_types map_types = do
+  tblock_size_exp <-
+    case tblock_size of
+      Constant v -> pure $ ValueExp v
+      Var name -> do
+        vtable <- getVTable
+        x <- isConstExp vtable $ LeafExp name $ IntType Int64
+        case x of
+          Just a -> pure a
+          Nothing -> error "testing"
+  let max_block_mem = Imp.SizeMaxConst SizeSharedMemory
+      max_block_reg = Imp.SizeMaxConst SizeRegisters
+      min_bound_tblock_size =
+        isInt64 $ ValueExp $ IntValue $ Int64Value 256
+      bounded_tblock_size =
+        sMax64 (isInt64 tblock_size_exp) min_bound_tblock_size
+      k_mem = le64 max_block_mem `quot` bounded_tblock_size
+      k_reg = le64 max_block_reg `quot` bounded_tblock_size
 
       scanned = map elemType $ filter primType scan_types
-      mapped  = map elemType $ filter primType map_types
+      mapped = map elemType $ filter primType map_types
 
       scanned_sizes = map primByteSize scanned
       scanned_sum_sizes = sum scanned_sizes
-      scanned_max_size  = maximum scanned_sizes
+      scanned_max_size = maximum scanned_sizes
 
       reg_scan_sum_sizes =
         sum (map (sMax64 4 . primByteSize) scanned) `quot` 4
@@ -332,7 +344,7 @@ getChunkSize scan_types map_types = do
       reg_constraint =
         (k_reg - baseline_regs) `quot` per_item_regs
 
-  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+  pure $ untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
 
 inChunkScan ::
   KernelConstants ->

@@ -151,6 +151,12 @@ compileSegRed' pat grid space segbinops map_body_cont
         )
           <> ("Pattern: " <> prettyString pat)
   | otherwise = do
+      chunk_const <-
+        if Noncommutative `elem` map segBinOpComm segbinops
+          && all isPrimSegBinOp segbinops
+          then getChunkSize (unCount $ gridBlockSize grid) param_types []
+          else pure $ Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
+
       chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
       case unSegSpace space of
         [(_, Constant (IntValue (Int64Value 1))), _] ->
@@ -170,12 +176,6 @@ compileSegRed' pat grid space segbinops map_body_cont
 
     num_tblocks = gridNumBlocks grid
     tblock_size = gridBlockSize grid
-
-    chunk_const =
-      if Noncommutative `elem` map segBinOpComm segbinops
-        && all isPrimSegBinOp segbinops
-        then getChunkSize param_types []
-        else Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed
 -- arguments go in shared memory (so we need to do the allocation of
