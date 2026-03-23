@@ -35,6 +35,7 @@ import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
+import System.IO.Silently (capture)
 import System.Process.ByteString (readProcessWithExitCode)
 import Text.Regex.TDFA
 
@@ -126,6 +127,7 @@ accErrors_ = void . accErrors
 data TestResult
   = Success
   | Failure [T.Text]
+  | PropInfo T.Text
   deriving (Eq, Show)
 
 pureTestResults :: IO [TestResult] -> TestM ()
@@ -135,6 +137,7 @@ pureTestResults m = do
   where
     collectErrors Success errs = errs
     collectErrors (Failure err) errs = err : errs
+    collectErrors (PropInfo info) errs = (["Property-based test output:\n"] <> [info]) : errs
 
 -- | The longest we are willing to wait for a test, in microseconds.
 timeout :: Int
@@ -370,7 +373,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                 normal_test_result <- concat <$> mapM run ios
 
                 propSpecs <- extractPropSpecsFromServer server
-                propResults <- runPropertyTests pbtConfig (FutharkExe futhark) server propSpecs
+                propResults <- runPropertyTests pbtConfig server propSpecs
                 pure $ normal_test_result ++ propResults
 
       when (mode == Interpreted) $
@@ -429,13 +432,10 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
 
         compareResult entry index program expected res
 
-runPropertyTests :: PBTConfig -> FutharkExe -> Server -> [PropSpec] -> IO [TestResult]
-runPropertyTests pbtConfig futhark server propSpecs = do
-  propResultsI <- runPBT pbtConfig "pbt-scratch" server propSpecs
-  let propResults = if propResultsI == 0
-        then Success
-        else Failure ["TEMP ERROR!!!!: Property-based test failed.."]
-  pure [propResults]
+runPropertyTests :: PBTConfig -> Server -> [PropSpec] -> IO [TestResult]
+runPropertyTests pbtConfig server propSpecs = do
+  (out, _) <- capture $ runPBT pbtConfig "pbt-scratch" server propSpecs
+  pure [PropInfo $ T.pack out]
 
 checkError :: (MonadError T.Text m) => ExpectedError -> T.Text -> m ()
 checkError (ThisError regex_s regex) err
@@ -706,6 +706,22 @@ runTests config paths = do
                             testStatusRunFail ts'
                               + min (numTestCases test) (length s)
                         }
+                  PropInfo s -> do
+                    when fancy moveCursorToTableTop
+                    clear
+                    putDoc $
+                      annotate bold (pretty (testCaseProgram test) <> ":")
+                        <> hardline
+                        <> vsep (map pretty (T.lines s))
+                        <> hardline
+                    when fancy spaceTable
+                    -- increment pass counters instead of leaving them unchanged
+                    let ts'' =
+                          ts
+                            { testStatusRunPass = testStatusRunPass ts + numTestCases test,
+                              testStatusPass = testStatusPass ts + 1
+                            }
+                    getResults ts''
 
   when fancy spaceTable
 
