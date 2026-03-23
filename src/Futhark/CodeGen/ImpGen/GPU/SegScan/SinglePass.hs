@@ -29,8 +29,6 @@ yParams scan =
 -- types, and map parameter types, compute the largest available chunk
 -- size given the parameters for which we want chunking and the
 -- available resources.
-
-{-
 getScanChunkSize :: SubExp -> [Type] -> [Type] -> CallKernelGen Imp.KernelConstExp
 getScanChunkSize tblock_size scan_types map_types = do
   tblock_size_exp <-
@@ -78,8 +76,8 @@ getScanChunkSize tblock_size scan_types map_types = do
         (k_reg - baseline_regs) `quot` per_item_regs
 
   pure $ untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
--}
 
+{-
 getChunkSize :: [Type] -> Imp.KernelConstExp
 getChunkSize types = do
   let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
@@ -97,6 +95,7 @@ getChunkSize types = do
       mem_constraint = max k_mem sum_sizes `quot` max_size
       reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
   untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+-}
 
 createLocalArrays ::
   Count BlockSize SubExp ->
@@ -365,9 +364,8 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
 
   chunk_const <-
-    pure $ getChunkSize scan_tys'
-  -- getScanChunkSize (unCount $ kAttrBlockSize attrs) scan_tys' $
-  --  filter (not . shouldUseBitArray) map_tys'
+    getScanChunkSize (unCount $ kAttrBlockSize attrs) scan_tys' $
+      filter (not . shouldUseBitArray) map_tys'
   chunk_v <- dPrim "chunk_size"
   let chunk_name = nameFromText $ prettyText $ tvVar chunk_v
   addTuningParam chunk_name Nothing
