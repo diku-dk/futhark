@@ -14,8 +14,10 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as LBS
+import Data.Int (Int32, Int64)
 import Data.List (delete, partition)
 import Data.Map.Strict qualified as M
+import Data.Maybe (catMaybes)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
@@ -36,6 +38,9 @@ import System.IO
 import System.Process.ByteString (readProcessWithExitCode)
 import Text.Regex.TDFA
 
+import Futhark.CLI.FutharkCheck.FutharkPBT (runPBT, PBTConfig (..), PropSpec (..))
+import Language.LSP.Protocol.Lens (HasChange(change))
+
 --- Test execution
 
 -- The use of [T.Text] here is somewhat kludgy. We use it to track how
@@ -43,6 +48,49 @@ import Text.Regex.TDFA
 -- may have multiple entry points). This should really not be done at
 -- the monadic level - a test failing should be handled explicitly.
 type TestM = ExceptT [T.Text] IO
+
+extractPropSpecsFromServer :: Server -> IO [PropSpec]
+extractPropSpecsFromServer srv = do
+  epsE <- cmdEntryPoints srv
+  eps <- either (error . show) pure epsE
+  fmap catMaybes $ mapM getOne eps
+  where
+    getOne entry = do
+      attrsE <- cmdAttributes srv entry
+      attrs <- either (error . show) pure attrsE
+      pure $ msum $ map (parsePropSpec entry) attrs
+
+parsePropSpec :: T.Text -> T.Text -> Maybe PropSpec
+parsePropSpec entry attr = do
+  argsText <- stripCall "prop" attr
+  let args = map T.strip $ T.splitOn "," argsText
+  pure PropSpec
+    { psProp = entry
+    , psGen = lookupArgText "gen" args
+    , psShrink = lookupArgText "shrink" args
+    , psSize = fmap fromInteger $ lookupArgRead "size" args
+    , psSeed = fmap fromInteger $ lookupArgRead "seed" args
+    , psPPrint = lookupArgText "pprint" args
+    }
+
+lookupArgText :: T.Text -> [T.Text] -> Maybe T.Text
+lookupArgText name = lookupArgWith name Just
+
+lookupArgRead :: Read a => T.Text -> [T.Text] -> Maybe a
+lookupArgRead name = lookupArgWith name readMaybeText
+
+lookupArgWith :: T.Text -> (T.Text -> Maybe a) -> [T.Text] -> Maybe a
+lookupArgWith name f = msum . map (stripCall name >=> f)
+
+stripCall :: T.Text -> T.Text -> Maybe T.Text
+stripCall name =
+  T.stripSuffix ")" <=< T.stripPrefix (name <> "(") . T.strip
+
+readMaybeText :: Read a => T.Text -> Maybe a
+readMaybeText t =
+  case reads (T.unpack t) of
+    [(x, "")] -> Just x
+    _ -> Nothing
 
 -- Taken from transformers-0.5.5.0.
 eitherToErrors :: Either e a -> Errors e a
@@ -134,7 +182,8 @@ data TestCase = TestCase
   { _testCaseMode :: TestMode,
     testCaseProgram :: FilePath,
     testCaseTest :: ProgramTest,
-    _testCasePrograms :: ProgConfig
+    _testCasePrograms :: ProgConfig,
+    pbtConfig :: PBTConfig
   }
   deriving (Show)
 
@@ -252,7 +301,7 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
    in accErrors_ $ map runInterpretedCase run_cases
 
 runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase mode program testcase progs) = do
+runTestCase (TestCase mode program testcase progs pbtConfig) = do
   futhark <- liftIO $ maybe getExecutablePath pure $ configFuthark progs
   let checkctx =
         mconcat
@@ -318,7 +367,11 @@ runTestCase (TestCase mode program testcase progs) = do
             context "Running compiled program" $
               withProgramServer program runner extra_options $ \server -> do
                 let run = runCompiledEntry (FutharkExe futhark) server program
-                concat <$> mapM run ios
+                normal_test_result <- concat <$> mapM run ios
+
+                propSpecs <- extractPropSpecsFromServer server
+                propResults <- runPropertyTests pbtConfig (FutharkExe futhark) server propSpecs
+                pure $ normal_test_result ++ propResults
 
       when (mode == Interpreted) $
         context "Interpreting" $
@@ -375,6 +428,14 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
               <* liftCommand (cmdFree server outs)
 
         compareResult entry index program expected res
+
+runPropertyTests :: PBTConfig -> FutharkExe -> Server -> [PropSpec] -> IO [TestResult]
+runPropertyTests pbtConfig futhark server propSpecs = do
+  propResultsI <- runPBT pbtConfig "pbt-scratch" server propSpecs
+  let propResults = if propResultsI == 0
+        then Success
+        else Failure ["TEMP ERROR!!!!: Property-based test failed.."]
+  pure [propResults]
 
 checkError :: (MonadError T.Text m) => ExpectedError -> T.Text -> m ()
 checkError (ThisError regex_s regex) err
@@ -460,7 +521,16 @@ doTest = catching . runTestM . runTestCase
 
 makeTestCase :: TestConfig -> TestMode -> (FilePath, ProgramTest) -> TestCase
 makeTestCase config mode (file, spec) =
-  excludeCases config $ TestCase mode file spec $ configPrograms config
+  excludeCases config $ TestCase mode file spec (configPrograms config) pbtcfg
+  where
+    pbtcfg =
+      PBTConfig
+        { configNumTests = configNumTests $ configPBTConfig config,
+          configMaxSize = configMaxSize $ configPBTConfig config,
+          configBaseSeed = configBaseSeed $ configPBTConfig config,
+          configVerbose = configVerbose $ configPBTConfig config,
+          configConcise = configConcise $ configPBTConfig config
+        }
 
 data ReportMsg
   = TestStarted TestCase
@@ -565,6 +635,7 @@ runTests config paths = do
   all_tests <-
     map (makeTestCase config mode)
       <$> testSpecsFromPathsOrDie paths
+  putStrLn $ "Test cases are: " ++ show (map testCaseProgram all_tests)
   testmvar <- newEmptyMVar
   reportmvar <- newEmptyMVar
   concurrency <- maybe getNumCapabilities pure $ configConcurrency config
@@ -668,13 +739,33 @@ runTests config paths = do
 --- Configuration and command line parsing
 ---
 
+-- data PropSpec = PropSpec
+--   { psProp   :: T.Text
+--   , psGen    :: Maybe T.Text
+--   , psShrink :: Maybe T.Text
+--   , psSize   :: Maybe Int64
+--   , psSeed   :: Maybe Int32
+--   , psPPrint :: Maybe T.Text
+--   }
+--   deriving (Show, Eq)
+
+-- data PBTConfig = PBTConfig
+--   { configNumTests :: Int,
+--     configMaxSize :: Int64,
+--     configBaseSeed :: Int32,
+--     configVerbose :: Bool,
+--     configConcise :: Bool
+--   }
+--   deriving (Show, Eq)
+
 data TestConfig = TestConfig
   { configTestMode :: TestMode,
     configPrograms :: ProgConfig,
     configExclude :: [T.Text],
     configLineOutput :: Bool,
     configConcurrency :: Maybe Int,
-    configEntryPoint :: Maybe String
+    configEntryPoint :: Maybe String,
+    configPBTConfig :: PBTConfig
   }
 
 defaultConfig :: TestConfig
@@ -694,7 +785,15 @@ defaultConfig =
           },
       configLineOutput = False,
       configConcurrency = Nothing,
-      configEntryPoint = Nothing
+      configEntryPoint = Nothing,
+      configPBTConfig =
+        PBTConfig
+        { configNumTests = 100,
+          configMaxSize = 50,
+          configBaseSeed = 123456,
+          configVerbose = False,
+          configConcise = False 
+        }
     }
 
 data ProgConfig = ProgConfig
@@ -711,6 +810,9 @@ data ProgConfig = ProgConfig
 
 changeProgConfig :: (ProgConfig -> ProgConfig) -> TestConfig -> TestConfig
 changeProgConfig f config = config {configPrograms = f $ configPrograms config}
+
+changePBTConfig :: (PBTConfig -> PBTConfig) -> TestConfig -> TestConfig
+changePBTConfig f config = config {configPBTConfig = f $ configPBTConfig config}
 
 setBackend :: FilePath -> ProgConfig -> ProgConfig
 setBackend backend config =
@@ -850,7 +952,65 @@ commandLineOptions =
           )
           "NAME"
       )
-      "Only run entry points with this name."
+      "Only run entry points with this name.",
+    Option
+      "n"
+      ["num-tests"]
+      ( ReqArg
+          ( \n ->
+              case reads n of
+                [(n', "")]
+                  | n' >= 0 ->
+                      Right $ changePBTConfig $ \pbt -> pbt {configNumTests = n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
+          )
+          "NUM"
+      )
+      "Number of tests to run per property (default: 100).",
+    Option
+      "m"
+      ["max-size"]
+      ( ReqArg
+          ( \n ->
+              case reads n of
+                [(n', "")]
+                  | n' >= 0 ->
+                      Right $ changePBTConfig $ \pbt -> pbt {configMaxSize = n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
+          )
+          "NUM"
+      )
+      "Maximum size parameter to use for generators (default: 50).",
+    Option
+      "base-seed"
+      ["base-seed"]
+      ( ReqArg
+          ( \n ->
+              case (reads n :: [(Integer, String)]) of
+                [(n', "")]
+                  | n' >= 0 ->
+                      Right $ changePBTConfig $ \pbt -> pbt {configBaseSeed = fromIntegral n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
+          )
+          "NUM"
+      )
+      ( "Base seed to use for generators (default: "
+          ++ show (configBaseSeed $ configPBTConfig defaultConfig)
+          ++ "). The seed for test #i will be base-seed + i."
+      ),
+    Option
+      "v"
+      ["verbose"]
+      (NoArg $ Right $ changePBTConfig $ \pbt -> pbt {configVerbose = True})
+      "Print verbose output during testing.",
+    Option
+      []
+      ["concise"]
+      (NoArg $ Right $ changePBTConfig $ \pbt -> pbt {configConcise = True})
+      "Only print concise output (e.g., no discovered properties, no shrinking progress, etc.)."
   ]
 
 excludeBackend :: TestConfig -> TestConfig

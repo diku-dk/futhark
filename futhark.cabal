@@ -445,6 +445,7 @@ library
       Language.Futhark.Parser.Parser
       Language.Futhark.Parser.Lexer
       Paths_futhark
+      Futhark.CLI.FutharkCheck.FutharkPBT
   autogen-modules:
       Paths_futhark
   build-tool-depends:
