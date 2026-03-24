@@ -349,7 +349,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
 
   chunk_const <-
-    getScanChunkSize (unCount $ kAttrBlockSize attrs) scan_tys' $
+    getScanChunkSize scan_tys' $
       filter (not . shouldUseBitArray) map_tys'
   chunk_v <- dPrim "chunk_size"
   let chunk_name = nameFromText $ prettyText $ tvVar chunk_v
