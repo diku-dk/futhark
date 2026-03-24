@@ -29,6 +29,7 @@ import Futhark.Transform.Rename
 import Futhark.Util (splitAt3)
 import Futhark.Util.Pretty
 
+-- | The fused representation of two scremas.
 data SuperScrema rep
   = SuperScrema
       SubExp
@@ -65,6 +66,7 @@ instance (PrettyRep rep) => Pretty (SuperScrema rep) where
     where
       p' xs = braces (mconcat $ L.intersperse (comma <> line) $ map pretty xs)
 
+-- | Using a boolean mask pick elements in the
 pick :: [Bool] -> [a] -> [a]
 pick bs xs = map snd $ filter fst $ zip bs xs
 
@@ -165,6 +167,9 @@ fusible inp_p form_p out_p inp_c form_c out_c = do
     num_red_c = redResults $ scremaReduces form_c
     num_scan_p = scanResults $ scremaScans form_p
 
+-- | Given two scremas that are fusible, fuse them into a super
+-- screma. This is fused but work will have to be moved around in the
+-- super
 fuseSuperScrema ::
   (MonadFreshNames m) =>
   SubExp ->
