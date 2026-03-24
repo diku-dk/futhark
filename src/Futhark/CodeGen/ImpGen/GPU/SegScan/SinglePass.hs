@@ -73,7 +73,7 @@ getScanChunkSize tblock_size scan_types map_types = do
         2 * reg_scan_sum_sizes + reg_map_sum_sizes
 
       reg_constraint =
-        c = (k_reg - baseline_regs) `quot` (2 * per_item_regs)
+        (k_reg - baseline_regs) `quot` (2 * per_item_regs)
 
   pure $ untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
 
