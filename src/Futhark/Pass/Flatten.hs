@@ -722,8 +722,11 @@ transformInnerMap ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU [IrregularRep]
-transformInnerMap segments env inps pat w arrs map_lam = do
+  Builder GPU [ResRep]
+transformInnerMap segments env inps pat w arrs map_lam
+  | not (isVariant inps env w) =
+      transformInnerMapMulDim segments env inps pat w arrs map_lam
+  | otherwise = do
   ws <- dataArr segments env inps w
   (ws_F, ws_O, ws_data) <- doRepIota ws
   new_segment <- arraySize 0 <$> lookupType ws_data
@@ -763,7 +766,110 @@ transformInnerMap segments env inps pat w arrs map_lam = do
   traceM $ unlines ["inner map distributed", prettyString distributed]
   (res, stms) <- runReaderT (runBuilder m) scope
   addStms stms
-  pure res
+  pure $ map Irregular res
+
+
+onMapInputArrMultiDim ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  Param Type ->
+  VName ->
+  Builder GPU (MapArray IrregularRep)
+onMapInputArrMultiDim old_segments env inps p arr = do
+  case lookup arr inps of
+    Just v_inp ->
+      case v_inp of
+        DistInputFree vs t -> pure $ MapArray vs t
+        DistInput rt t -> error "TODO: handle irregular inputs to multi-dimensional inner map"
+    Nothing -> do
+      arr_row_t <- rowType <$> lookupType arr
+      arr_rep <-
+        letExp (baseName arr <> "_inp_rep") . BasicOp $
+          Replicate (segmentsShape old_segments) (Var arr)
+      pure $ MapArray arr_rep arr_row_t
+
+onMapFreeVarMultiDim ::
+  Segments ->
+  SubExp ->
+  DistEnv ->
+  DistInputs ->
+  VName ->
+  Maybe (Builder GPU (VName, MapArray IrregularRep))
+onMapFreeVarMultiDim segments w env inps v = do
+  v_inp <- lookup v inps
+  pure $ fmap (v,) $ case v_inp of
+    DistInputFree v' t -> do
+      v_rep <- replicateForW segments w v'
+      pure $ MapArray v_rep t
+    DistInput rt t -> case resVar rt env of
+      Regular v' -> do
+        v_rep <- replicateForW segments w v'
+        pure $ MapArray v_rep t
+      Irregular _ -> error "TODO: irregular free var in multi-dim"
+
+-- | Replicate an array to insert a new inner dimension  after the
+-- existing segment dimensions.
+replicateForW :: Segments -> SubExp -> VName -> Builder GPU VName
+replicateForW segments w v = do
+  v_t <- lookupType v
+  let seg_rank = length (NE.toList segments)
+      v_rank = arrayRank v_t
+      perm = [1 .. seg_rank] ++ [0] ++ [seg_rank + 1 .. v_rank]
+  v_rep <-
+    letExp (baseName v <> "_free_rep") . BasicOp $
+      Replicate (Shape [w]) (Var v)
+  letExp (baseName v <> "_free_rep_tr") . BasicOp $
+    Rearrange v_rep perm
+
+transformInnerMapMulDim ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  Pat Type ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  Builder GPU [ResRep]
+transformInnerMapMulDim segments env inps pat w arrs map_lam = do
+  let new_segment = segments <> pure w
+  arrs' <-
+    zipWithM
+      (onMapInputArrMultiDim segments env inps)
+      (lambdaParams map_lam)
+      arrs
+  let free = freeIn map_lam
+  free_sizes <-
+    localScope (scopeOfDistInputs inps) $
+      foldMap freeIn <$> mapM lookupType (namesToList free)
+  let free_and_sizes = namesToList $ free <> free_sizes
+  (free_replicated, replicated) <-
+    fmap unzip . sequence $
+      mapMaybe
+        (onMapFreeVarMultiDim segments w env inps)
+        free_and_sizes
+  free_ps <-
+    zipWithM
+      newParam
+      (map ((<> "_free") . baseName) free_and_sizes)
+      (map mapArrayRowType replicated)
+  scope <- askScope
+  let substs = M.fromList $ zip free_replicated $ map paramName free_ps
+      map_lam' =
+        substituteNames
+          substs
+          ( map_lam
+              { lambdaParams = free_ps <> lambdaParams map_lam
+              }
+          )
+      (distributed, arrmap) =
+        distributeMap scope pat new_segment (replicated <> arrs') map_lam'
+      m =
+        transformDistributed arrmap new_segment distributed
+  traceM $ unlines ["inner map multi-dim distributed", prettyString distributed]
+  (_, stms) <- runReaderT (runBuilder m) scope
+  addStms stms
+  pure $ map Regular (patNames pat)
 
 -- Reduction or scan operators may not have any free variables that are variant
 -- to the nest (that is, are inputs to the distributed operation). This is
@@ -782,6 +888,20 @@ doSegScan :: [Scan SOACS] -> VName -> [VName] -> Builder GPU [VName]
 doSegScan scans flags elems =
   let scan = singleScan scans
    in genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) (scanNeutral scan) flags elems
+
+resRepData :: ResRep -> VName
+resRepData (Regular v) = v
+resRepData (Irregular rep) = irregularD rep
+
+resRepSegInfo :: Segments -> ResRep -> Builder GPU (VName, VName, VName)
+resRepSegInfo _ (Irregular rep) = pure (irregularF rep, irregularO rep, irregularS rep)
+resRepSegInfo segments (Regular _) = do
+  seg_n <- letSubExp "seg_n" =<< toExp (product $ map pe64 $ NE.toList segments)
+  ws_arr <-
+    letExp "multidim_S" . BasicOp $
+      Replicate (Shape [seg_n]) seg_n
+  (ws_F, ws_O, _) <- doRepIota ws_arr
+  pure (ws_F, ws_O, ws_arr)
 
 transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm segments env (DistStm inps res (ScalarStm stms)) =
@@ -807,17 +927,17 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
             transformInnerMap segments env inps map_pat w arrs map_lam
           let (redout_names, mapout_names) =
                 splitAt (redResults reds) (patNames map_pat)
-              hasPat pat_names irr_reps = irregularD irr_reps `elem` pat_names
+              hasPat pat_names rr = resRepData rr `elem` pat_names
               redout_res = filter (hasPat redout_names) map_res_all
               mapout_res = filter (hasPat mapout_names) map_res_all
-              (ws_F, ws_O, ws) = (,,) <$> irregularF <*> irregularO <*> irregularS $ head redout_res
+          (ws_F, ws_O, ws_S) <- resRepSegInfo segments (head redout_res)
           elems' <-
-            genSegRed ws ws_F ws_O redout_names $
+            genSegRed ws_S ws_F ws_O redout_names $
               singleReduce reds
           let (red_tags, map_tags) = splitAt (redResults reds) $ map distResTag res
           pure $
             insertRegulars red_tags elems' $
-              insertReps (zip map_tags $ map Irregular mapout_res) env
+              insertReps (zip map_tags mapout_res) env
       | Just scans <- isScanSOAC form,
         all (suitableOperator env inps . scanLambda) scans,
         Just arrs' <- mapM (`lookup` inps) arrs,
@@ -831,19 +951,19 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
           let (scanout_names, mapout_names) =
                 splitAt (scanResults scans) (patNames map_pat)
-              hasPat pat_names irr_reps = irregularD irr_reps `elem` pat_names
+              hasPat pat_names rr = resRepData rr `elem` pat_names
               scanout_res = filter (hasPat scanout_names) map_res_all
               mapout_res = filter (hasPat mapout_names) map_res_all
-              (ws_F, ws_O, ws) = (,,) <$> irregularF <*> irregularO <*> irregularS $ head scanout_res
+          (ws_F, ws_O, ws_S) <- resRepSegInfo segments (head scanout_res)
           elems' <- doSegScan scans ws_F scanout_names
           let (scan_tags, map_tags) = splitAt (scanResults scans) $ map distResTag res
           pure $
-            insertIrregulars ws ws_F ws_O (zip scan_tags elems') $
-              insertReps (zip map_tags $ map Irregular mapout_res) env
+            insertIrregulars ws_S ws_F ws_O (zip scan_tags elems') $
+              insertReps (zip map_tags mapout_res) env
       | Just map_lam <- isMapSOAC form -> do
           map_res <-
             transformInnerMap segments env inps pat w arrs map_lam
-          pure $ insertReps (zip (map distResTag res) $ map Irregular map_res) env
+          pure $ insertReps (zip (map distResTag res) map_res) env
       | otherwise -> do
           -- XXX: here we silently sequentialise any SOAC that is not handled
           -- above. We need to make sure that we actually handle everything we
