@@ -1138,6 +1138,7 @@ void cmd_construct(struct server_state *s, const char *args[]) {
   }
 
   const struct sum *st = type->info;
+
   for (int i = 0; i < st->num_variants; i++) {
     const struct variant *var = &st->variants[i];
     if (strcmp(var->name, variant_name) == 0) {
