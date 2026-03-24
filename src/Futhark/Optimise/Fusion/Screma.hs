@@ -169,7 +169,7 @@ fusible inp_p form_p out_p inp_c form_c out_c = do
 
 -- | Given two scremas that are fusible, fuse them into a super
 -- screma. This is fused but work will have to be moved around in the
--- super
+-- super screma for it to become a screma.
 fuseSuperScrema ::
   (MonadFreshNames m) =>
   SubExp ->
@@ -266,6 +266,8 @@ fuseSuperScrema w inp_p' form_p' out_p inp_c' form_c' out_c = do
   where
     inputFromOutput inp = SOAC.inputArray inp `elem` out_p
 
+-- | Moves the last scan and reduce from the super screma to the top
+-- of the super screma.
 moveRedScanSuperScrema ::
   (MonadFail m, MonadFreshNames m) =>
   SuperScrema SOACS ->
@@ -333,6 +335,8 @@ moveRedScanSuperScrema super_screma = do
     SuperScrema w inp lam scan red lam' scan' red' lam'' =
       super_screma
 
+-- | Moves all work done in the last lambda to middle lambda of the
+-- super screma.
 moveLastSuperScrema ::
   (MonadFreshNames m) =>
   SuperScrema SOACS ->
@@ -357,26 +361,35 @@ moveLastSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'') = do
 moveLastSuperScrema _ =
   error "moveLastSuperScrema must not have any scans or reduce operation in the end."
 
+-- | Find all Accumulator parameters.
 parAccs :: Lambda SOACS -> [Type]
 parAccs = filter isAcc . map typeOf . lambdaParams
 
+-- | Find all Accumulator results.
 resAccs :: Lambda SOACS -> [Type]
 resAccs = filter isAcc . lambdaReturnType
 
+-- | Check if the lambda parameters have overlapping accumulators.
 parAccsOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
 parAccsOverlap lam = any (`elem` accs) . parAccs
   where
     accs = parAccs lam
 
+-- | Check if the lambdas result have overlapping accumulators.
 resAccsOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
 resAccsOverlap lam = any (`elem` accs) . resAccs
   where
     accs = resAccs lam
 
+-- | Check if the lambdas have parameters that overlap due to
+-- consumption.
 consumedOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
 consumedOverlap =
   on namesIntersect (consumedByLambda . analyseLambda mempty)
 
+-- | Split a lambda at some index for the result and construct two
+-- lambda which do not have overlapping results but may have
+-- overlapping parameters.
 splitAtLambdaByRes ::
   (MonadFail m) =>
   Int ->
@@ -421,12 +434,14 @@ parToInp inp lam = flip M.lookup m
   where
     m = M.fromList $ flip zip inp $ paramName <$> lambdaParams lam
 
+-- | Turn a SuperScrema into Screma.
 toScrema ::
   SuperScrema SOACS ->
   ([SOAC.Input], ScremaForm SOACS)
 toScrema (SuperScrema _ inp lam scan red lam' _ _ _) =
   (inp, ScremaForm lam scan red lam')
 
+-- | Try to force the post lambda to be an indentity lambda.
 tryIdentityPost ::
   (MonadFreshNames m) => ScremaForm SOACS -> m (ScremaForm SOACS)
 tryIdentityPost (ScremaForm pre_lam [] reds post_lam)
@@ -453,6 +468,7 @@ tryIdentityPost (ScremaForm pre_lam [] reds post_lam)
         }
 tryIdentityPost form = pure form
 
+-- Tries to fuse two Scremas into one.
 fuseScrema ::
   (MonadFail m, MonadFreshNames m, HasScope SOACS m) =>
   SubExp ->
