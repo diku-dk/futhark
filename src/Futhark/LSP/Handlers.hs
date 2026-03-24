@@ -281,12 +281,13 @@ onTextDocumentCodeAction state_ref =
   requestHandler SMethod_TextDocumentCodeAction $ \request respond ->
     let parameters = request ^. params
      in do
+          let file_uri = parameters ^. (textDocument . uri)
           let filepath = uriToFilePath $ parameters ^. (textDocument . uri)
           let textRange = parameters ^. range
           logWithSeverity Debug <& "Code action request for range: " <> showText textRange
 
           state <- tryTakeStateFromIORef state_ref filepath
-          let result = maybe [] (getCodeActions textRange state) filepath
+          let result = maybe [] (getCodeActions file_uri textRange state) filepath
 
           respond $ Right $ InL result
 
