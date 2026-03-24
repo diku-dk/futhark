@@ -73,29 +73,9 @@ getScanChunkSize tblock_size scan_types map_types = do
         2 * reg_scan_sum_sizes + reg_map_sum_sizes
 
       reg_constraint =
-        (k_reg - baseline_regs) `quot` per_item_regs
+        c = (k_reg - baseline_regs) `quot` (2 * per_item_regs)
 
   pure $ untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
-
-{-
-getChunkSize :: [Type] -> Imp.KernelConstExp
-getChunkSize types = do
-  let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
-      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
-      max_block_reg = Imp.SizeMaxConst SizeRegisters
-      k_mem = le64 max_block_mem `quot` le64 max_tblock_size
-      k_reg = le64 max_block_reg `quot` le64 max_tblock_size
-      types' = map elemType $ filter primType types
-      sizes = map primByteSize types'
-
-      sum_sizes = sum sizes
-      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
-      max_size = maximum sizes
-
-      mem_constraint = max k_mem sum_sizes `quot` max_size
-      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
-  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
--}
 
 createLocalArrays ::
   Count BlockSize SubExp ->
