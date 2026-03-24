@@ -89,12 +89,13 @@ getInlayHints range state filepath = fromMaybe [] $ do
         TermSize -> []
         TermVar _ _ (Just _) -> []
         TermVar src inferredType Nothing ->
-          case src of
-            TermBindId -> []
-            TermBindLet ->
-              [TypeHintBare (": " <> prettyText inferredType) termEnd]
-            TermBindPat ->
-              [TypeHintParens termStart (prettyText inferredType) termEnd]
+          let bareHints = [TypeHintBare (": " <> prettyText inferredType) termEnd]
+           in case src of
+                TermBindId -> []
+                TermBindLet -> bareHints
+                TermBindPat ->
+                  [TypeHintParens termStart (prettyText inferredType) termEnd]
+                TermBindNested -> bareHints
         TermFun tfData ->
           -- ordering is relevant, see the lsp documentation for inlay hints
           let isSynthesized typeParam = case locOf typeParam of

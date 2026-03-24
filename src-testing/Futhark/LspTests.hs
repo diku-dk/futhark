@@ -198,7 +198,8 @@ testInlayTypeHint =
       defReturnHint,
       defConstantReturnHint,
       lambdaArgHint,
-      typeArgHint
+      typeArgHint,
+      defNestedHint
     ]
   where
     fullRange =
@@ -258,6 +259,11 @@ testInlayTypeHint =
         "def param hint"
         "def plus5 x : i32 = x + 5i32"
         [(Position 0 10, "("), (Position 0 11, ": i32)")]
+    defNestedHint =
+      hintTestCase
+        "def nested hint"
+        "def bar 'a (f: a -> a -> a) (x : a, y) : a = f x y"
+        [(Position 0 37, ": a")]
 
 tests :: TestTree
 tests =
