@@ -1,5 +1,6 @@
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 
 -- | Generally useful definition used in various places in the
 -- language server implementation.
@@ -12,12 +13,14 @@ module Futhark.LSP.Tool
     transformVFS,
     logWithSeverity,
     Execute,
+    bindingsInRange,
   )
 where
 
 import Colog.Core (LogAction, Severity, WithSeverity (WithSeverity))
 import Control.Lens.Getter ((^.))
 import Control.Monad.Except (ExceptT)
+import Data.Function ((&))
 import Data.Functor.Contravariant (contramap)
 import Data.Map qualified as M
 import Data.Text (Text)
@@ -30,12 +33,13 @@ import Futhark.LSP.PositionMapping
     toStalePos,
   )
 import Futhark.LSP.State (State (..), getStaleContent, getStaleMapping)
-import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos))
+import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), contains, locOf)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (isBuiltinLoc)
 import Language.Futhark.Query
   ( AtPos (AtName),
     BoundTo (..),
+    allBindings,
     atPos,
     boundLoc,
     termBindingType,
@@ -50,6 +54,7 @@ import Language.LSP.Protocol.Types
     MarkupKind (MarkupKind_PlainText),
     Position (Position),
     Range (Range),
+    UInt,
     Uri,
     filePathToUri,
     fromNormalizedFilePath,
@@ -180,3 +185,23 @@ transformVFS vfs =
 
 logWithSeverity :: (MonadLsp c m) => Severity -> LogAction m Text
 logWithSeverity severity = contramap (`WithSeverity` severity) logToLogMessage
+
+bindingsInRange :: Range -> State -> FilePath -> Maybe [BoundTo]
+bindingsInRange range state filepath = do
+  let (Range (Position l1 c1) (Position l2 c2)) = range
+  imports <- lpImports <$> stateProgram state
+  let mapping = getStaleMapping state filepath
+  posStart <- toStalePos mapping $ mkPos l1 c1
+  posEnd <- toStalePos mapping $ mkPos l2 c2
+
+  pure $
+    allBindings imports
+      & M.elems
+      & filter (boundToInRange (Loc posStart posEnd))
+  where
+    boundToInRange locRange bound = case locOf bound of
+      NoLoc -> False
+      Loc start _ -> locRange `contains` start
+    -- increment by one: Pos counts from one onwards, LSP starts at zero
+    mkPos :: UInt -> UInt -> Pos
+    mkPos l c = Pos filepath (1 + fromIntegral l) (1 + fromIntegral c) (-1)

@@ -21,6 +21,7 @@ import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
 import Futhark.Fmt.Printer (fmtToText)
+import Futhark.LSP.CodeAction (getCodeActions)
 import Futhark.LSP.CodeLens qualified as CodeLens
 import Futhark.LSP.CommandType (CommandType (CodeLens))
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
@@ -275,6 +276,20 @@ onTextDocumentInlayHint state_ref =
 
           respond . Right $ InL result
 
+onTextDocumentCodeAction :: IORef State -> Handlers (LspM ())
+onTextDocumentCodeAction state_ref =
+  requestHandler SMethod_TextDocumentCodeAction $ \request respond ->
+    let parameters = request ^. params
+     in do
+          let filepath = uriToFilePath $ parameters ^. (textDocument . uri)
+          let textRange = parameters ^. range
+          logWithSeverity Debug <& "Code action request for range: " <> showText textRange
+
+          state <- tryTakeStateFromIORef state_ref filepath
+          let result = maybe [] (getCodeActions textRange state) filepath
+
+          respond $ Right $ InL result
+
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
@@ -288,6 +303,7 @@ handlers state_mvar _ =
       onDocumentCodeLensResolve,
       onDocumentFormattingHandler,
       onTextDocumentInlayHint state_mvar,
+      onTextDocumentCodeAction state_mvar,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,

@@ -3,7 +3,12 @@ module Futhark.LSP.TypeAscription (TypeAscription (..), missingAscriptions) wher
 import Data.Loc (Loc (..), Pos, locOf)
 import Data.Text (Text)
 import Futhark.Util.Pretty (prettyText)
-import Language.Futhark.Query (BoundTo (..), TermBindSrc (..), TermBinding (..), TermFunData (..))
+import Language.Futhark.Query
+  ( BoundTo (..),
+    TermBindSrc (..),
+    TermBinding (..),
+    TermFunData (..),
+  )
 
 data TypeAscription
   = -- | type hint at the position

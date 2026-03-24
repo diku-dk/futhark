@@ -305,6 +305,7 @@ library
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.ReplaceRecords
       Futhark.Internalise.TypesValues
+      Futhark.LSP.CodeAction
       Futhark.LSP.CodeLens
       Futhark.LSP.CommandType
       Futhark.LSP.Compile
