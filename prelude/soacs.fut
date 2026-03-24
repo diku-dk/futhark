@@ -235,8 +235,7 @@ def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
   -- This following is carefully written such that the two scatters will be
   -- fused horisontally, which allows the entire thing to become a single
   -- kernel.
-  let result =
-    scatter (#[scratch] [as][0]) is as
+  let result = scatter (#[scratch] [as][0]) is as
   let count =
     scatter [n]
             (map (\j -> if j == n - 1 then 0 else -1) (0..1..<n))
@@ -250,27 +249,22 @@ def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
 --
 -- **Span:** *O(log(n) ✕ W(p))*
 def partition [n] 'a (p: a -> bool) (as: [n]a) : ?[k].([k]a, [n - k]a) =
-  let (res, offset) =
-    if n == 0
-    then ([], 0)
-    else let offset =
-           reduce_comm (+) 0 (map (\x -> intrinsics.btoi_bool_i64 (p x)) as)
-         let add2 (a0, b0) (a1, b1) = (a0 + a1, b0 + b1)
-         let to_index f (o0, o1) = if f then o0 - 1i64 else offset + o1 - 1
-         let t_flags = map p as
-         let f_flags = map (\x -> !x) t_flags
-         let flags =
-           map2 (\x y ->
-                   ( intrinsics.btoi_bool_i64 x
-                   , intrinsics.btoi_bool_i64 y
-                   ))
-                t_flags
-                f_flags
-         let offsets = scan add2 (0, 0) flags
-         let idxs = map2 to_index (map p as) offsets
-         let res =
-           scatter (#[scratch] [as][0]) idxs as
-         in (res, offset)
+  let offset =
+    reduce_comm (+) 0 (map (\x -> intrinsics.btoi_bool_i64 (p x)) as)
+  let add2 (a0, b0) (a1, b1) = (a0 + a1, b0 + b1)
+  let to_index f (o0, o1) = if f then o0 - 1i64 else offset + o1 - 1
+  let t_flags = map p as
+  let f_flags = map (\x -> !x) t_flags
+  let flags =
+    map2 (\x y ->
+            ( intrinsics.btoi_bool_i64 x
+            , intrinsics.btoi_bool_i64 y
+            ))
+         t_flags
+         f_flags
+  let offsets = scan add2 (0, 0) flags
+  let idxs = map2 to_index (map p as) offsets
+  let res = scatter (#[scratch] [as][0]) idxs as
   in (res[0:offset], res[offset:n])
 
 -- | Split an array by two predicates, producing three arrays.
