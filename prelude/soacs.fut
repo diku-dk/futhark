@@ -228,22 +228,20 @@ def scatter_3d 't [k] [n] [o] [l] (dest: *[k][n][o]t) (is: [l](i64, i64, i64)) (
 --
 -- **Span:** *O(log(n) ✕ W(p))*
 def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
-  if n == 0
-  then []
-  else let flags = map p as
-       let offsets = scan (+) 0 (map intrinsics.btoi_bool_i64 flags)
-       let flags' = map p as
-       let is = map2 (\f o -> if f then o - 1 else -1) flags' offsets
-       -- This following is carefully written such that the two scatters will be
-       -- fused horisontally, which allows the entire thing to become a single
-       -- kernel.
-       let result =
-         scatter (#[scratch] [as][0]) is as
-       let count =
-         scatter (#[scratch] [0])
-                 (map (\j -> if j == n - 1 then 0 else -1) (0..1..<n))
-                 offsets
-       in result[:count[0]]
+  let flags = map p as
+  let offsets = scan (+) 0 (map intrinsics.btoi_bool_i64 flags)
+  let flags' = map p as
+  let is = map2 (\f o -> if f then o - 1 else -1) flags' offsets
+  -- This following is carefully written such that the two scatters will be
+  -- fused horisontally, which allows the entire thing to become a single
+  -- kernel.
+  let result =
+    scatter (#[scratch] [as][0]) is as
+  let count =
+    scatter [n]
+            (map (\j -> if j == n - 1 then 0 else -1) (0..1..<n))
+            offsets
+  in result[:count[0]]
 
 -- | Split an array into those elements that satisfy the given
 -- predicate, and those that do not.
@@ -271,9 +269,7 @@ def partition [n] 'a (p: a -> bool) (as: [n]a) : ?[k].([k]a, [n - k]a) =
          let offsets = scan add2 (0, 0) flags
          let idxs = map2 to_index (map p as) offsets
          let res =
-           scatter (#[scratch] [as][0])
-                   idxs
-                   as
+           scatter (#[scratch] [as][0]) idxs as
          in (res, offset)
   in (res[0:offset], res[offset:n])
 
