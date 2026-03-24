@@ -27,7 +27,7 @@ getCodeActions file_uri range state filepath =
       pure $
         mkAction
           [ let Pos _ line column _ = openPos in ("(", line, column),
-            let Pos _ line column _ = pos in (text, line, column)
+            let Pos _ line column _ = pos in (": " <> text <> ")", line, column)
           ]
 
     mkAction edits =
