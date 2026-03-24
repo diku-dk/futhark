@@ -10,14 +10,10 @@ import Data.Text (Text)
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.PositionMapping (toStalePos)
 import Futhark.LSP.State (State (stateProgram), getStaleMapping)
+import Futhark.LSP.TypeAscription (TypeAscription (..), missingAscriptions)
 import Futhark.Util.Loc (Loc (NoLoc), Located (locOf), contains)
-import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Query
-  ( BoundTo (BoundTerm),
-    TermBindSrc (..),
-    TermBinding (..),
-    TermFunData (..),
-    allBindings,
+  ( allBindings,
   )
 import Language.LSP.Protocol.Types
   ( InlayHint (..),
@@ -27,12 +23,6 @@ import Language.LSP.Protocol.Types
     UInt,
     type (|?) (InL),
   )
-
-data TypeInlayHintInfo
-  = -- | type hint at the position
-    TypeHintBare Text Pos
-  | -- | type hint with parens: opening pos, hint, closing pos
-    TypeHintParens Pos Text Pos
 
 getInlayHints :: Range -> State -> FilePath -> [InlayHint]
 getInlayHints range state filepath = fromMaybe [] $ do
@@ -46,13 +36,13 @@ getInlayHints range state filepath = fromMaybe [] $ do
     allBindings imports
       & M.elems
       & filter (boundToInRange (Loc posStart posEnd))
-      & concatMap inferredTerms
+      & concatMap missingAscriptions
       & concatMap inlayHint
   where
-    inlayHint :: TypeInlayHintInfo -> [InlayHint]
-    inlayHint (TypeHintBare typName pos) =
+    inlayHint :: TypeAscription -> [InlayHint]
+    inlayHint (TypeAscBare typName pos) =
       [bareHint typName pos]
-    inlayHint (TypeHintParens s tname pos) =
+    inlayHint (TypeAscParens s tname pos) =
       [startHint s, bareHint (": " <> tname <> ")") pos]
 
     startHint :: Pos -> InlayHint
@@ -82,37 +72,6 @@ getInlayHints range state filepath = fromMaybe [] $ do
           _paddingRight = Nothing,
           _data_ = Nothing
         }
-
-    inferredTerms :: BoundTo -> [TypeInlayHintInfo]
-    inferredTerms (BoundTerm term (Loc termStart termEnd)) =
-      case term of
-        TermSize -> []
-        TermVar _ _ (Just _) -> []
-        TermVar src inferredType Nothing ->
-          let bareHints = [TypeHintBare (": " <> prettyText inferredType) termEnd]
-           in case src of
-                TermBindId -> []
-                TermBindLet -> bareHints
-                TermBindPat ->
-                  [TypeHintParens termStart (prettyText inferredType) termEnd]
-                TermBindNested -> bareHints
-        TermFun tfData ->
-          -- ordering is relevant, see the lsp documentation for inlay hints
-          let isSynthesized typeParam = case locOf typeParam of
-                NoLoc -> True
-                _ -> False
-              inferredTypeParams = filter isSynthesized (termFunTypeParams tfData)
-              paramInfo p = case termFunNameEnd tfData of
-                Nothing -> id
-                Just pos -> (TypeHintBare (" " <> prettyText p) pos :)
-           in foldr (\p f hs -> paramInfo p $ f hs) id inferredTypeParams $
-                let retTypeText = prettyText $ termFunRetType tfData
-                 in case (termFunAscription tfData, termFunArgEnd tfData, termFunNameEnd tfData) of
-                      (Just _, _, _) -> []
-                      (Nothing, Just pos, _) -> [TypeHintBare (": " <> retTypeText) pos]
-                      (Nothing, _, Just pos) -> [TypeHintBare (": " <> retTypeText) pos]
-                      _ -> []
-    inferredTerms _ = []
 
     boundToInRange locRange bound = case locOf bound of
       NoLoc -> False
