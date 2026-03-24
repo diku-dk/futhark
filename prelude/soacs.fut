@@ -298,10 +298,7 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
          t3_flags'
   let offsets = scan add3 (0, 0, 0) flags'
   let idxs = map3 to_index t1_flags' t2_flags' offsets
-  let res =
-    scatter (#[scratch] [as][0])
-            idxs
-            as
+  let res = scatter (#[scratch] [as][0]) idxs as
   in ( res[0:offset0]
      , res[offset0:offset0 + offset1] :> [offset1]a
      , res[offset0 + offset1:n] :> [n - offset0 - offset1]a
