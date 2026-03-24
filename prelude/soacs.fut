@@ -273,39 +273,35 @@ def partition [n] 'a (p: a -> bool) (as: [n]a) : ?[k].([k]a, [n - k]a) =
 --
 -- **Span:** *O(log(n) ✕ (W(p1) + W(p2)))*
 def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a, [l]a, [n - k - l]a) =
-  let (res, offset0, offset1) =
-    if n == 0
-    then ([], 0, 0)
-    else let t1_flags = map p1 as
-         let t2_flags = map2 (\t a -> !t && p2 a) t1_flags as
-         let offset0 = reduce_comm (+) 0 (map intrinsics.btoi_bool_i64 t1_flags)
-         let offset1 = reduce_comm (+) 0 (map intrinsics.btoi_bool_i64 t2_flags)
-         let add3 (a0, b0, c0) (a1, b1, c1) = (a0 + a1, b0 + b1, c0 + c1)
-         let to_index f0 f1 (o0, o1, o2) =
-           if f0
-           then o0 - 1i64
-           else if f1
-           then offset0 + o1 - 1
-           else offset0 + offset1 + o2 - 1
-         let t1_flags' = map p1 as
-         let t2_flags' = map2 (\t a -> !t && p2 a) t1_flags' as
-         let t3_flags' = map2 (\x y -> !(x || y)) t1_flags' t2_flags'
-         let flags' =
-           map3 (\x y z ->
-                   ( intrinsics.btoi_bool_i64 x
-                   , intrinsics.btoi_bool_i64 y
-                   , intrinsics.btoi_bool_i64 z
-                   ))
-                t1_flags'
-                t2_flags'
-                t3_flags'
-         let offsets = scan add3 (0, 0, 0) flags'
-         let idxs = map3 to_index t1_flags' t2_flags' offsets
-         let res =
-           scatter (#[scratch] [as][0])
-                   idxs
-                   as
-         in (res, offset0, offset1)
+  let t1_flags = map p1 as
+  let t2_flags = map2 (\t a -> !t && p2 a) t1_flags as
+  let offset0 = reduce_comm (+) 0 (map intrinsics.btoi_bool_i64 t1_flags)
+  let offset1 = reduce_comm (+) 0 (map intrinsics.btoi_bool_i64 t2_flags)
+  let add3 (a0, b0, c0) (a1, b1, c1) = (a0 + a1, b0 + b1, c0 + c1)
+  let to_index f0 f1 (o0, o1, o2) =
+    if f0
+    then o0 - 1i64
+    else if f1
+    then offset0 + o1 - 1
+    else offset0 + offset1 + o2 - 1
+  let t1_flags' = map p1 as
+  let t2_flags' = map2 (\t a -> !t && p2 a) t1_flags' as
+  let t3_flags' = map2 (\x y -> !(x || y)) t1_flags' t2_flags'
+  let flags' =
+    map3 (\x y z ->
+            ( intrinsics.btoi_bool_i64 x
+            , intrinsics.btoi_bool_i64 y
+            , intrinsics.btoi_bool_i64 z
+            ))
+         t1_flags'
+         t2_flags'
+         t3_flags'
+  let offsets = scan add3 (0, 0, 0) flags'
+  let idxs = map3 to_index t1_flags' t2_flags' offsets
+  let res =
+    scatter (#[scratch] [as][0])
+            idxs
+            as
   in ( res[0:offset0]
      , res[offset0:offset0 + offset1] :> [offset1]a
      , res[offset0 + offset1:n] :> [n - offset0 - offset1]a
