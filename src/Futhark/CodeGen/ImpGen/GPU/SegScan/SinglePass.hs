@@ -29,26 +29,13 @@ yParams scan =
 -- types, and map parameter types, compute the largest available chunk
 -- size given the parameters for which we want chunking and the
 -- available resources.
-getScanChunkSize :: SubExp -> [Type] -> [Type] -> CallKernelGen Imp.KernelConstExp
-getScanChunkSize tblock_size scan_types map_types = do
-  tblock_size_exp <-
-    case tblock_size of
-      Constant v -> pure $ ValueExp v
-      Var name -> do
-        vtable <- getVTable
-        x <- isConstExp vtable $ LeafExp name $ IntType Int64
-        case x of
-          Just a -> pure a
-          Nothing ->
-            pure $ LeafExp (Imp.SizeMaxConst SizeThreadBlock) (IntType Int64)
-  let max_block_mem = Imp.SizeMaxConst SizeSharedMemory
+getScanChunkSize :: [Type] -> [Type] -> CallKernelGen Imp.KernelConstExp
+getScanChunkSize scan_types map_types = do
+  let max_tblock = Imp.SizeMaxConst SizeThreadBlock
+      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
       max_block_reg = Imp.SizeMaxConst SizeRegisters
-      min_bound_tblock_size =
-        isInt64 $ ValueExp $ IntValue $ Int64Value 256
-      bounded_tblock_size =
-        sMax64 (isInt64 tblock_size_exp) min_bound_tblock_size
-      k_mem = le64 max_block_mem `quot` bounded_tblock_size
-      k_reg = le64 max_block_reg `quot` bounded_tblock_size
+      k_mem = le64 max_block_mem `quot` le64 max_tblock
+      k_reg = le64 max_block_reg `quot` le64 max_tblock
 
       scanned = map elemType $ filter primType scan_types
       mapped = map elemType $ filter primType map_types
