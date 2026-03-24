@@ -560,9 +560,7 @@ soacToStream soac = do
           strmlam <- fmap fst . runBuilder . mkLambda strmpar $ do
             -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
             (scan0_ids, map_resids) <-
-              fmap (splitAt (length scan_arr_ts))
-                . letTupExp "scan"
-                . Op
+              (fmap (splitAt (length scan_arr_ts)) . letTupExp "scan" . Op)
                 . Futhark.Screma chvar (map paramName strm_inpids)
                 =<< Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
             -- 2. let outerszm1id = chunksize - 1
@@ -591,9 +589,7 @@ soacToStream soac = do
             let (addlelstm, addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
             -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
             strm_resids <-
-              letTupExp "strm_res"
-                . Op
-                . Futhark.Screma chvar scan0_ids
+              letTupExp "strm_res" . Op . Futhark.Screma chvar scan0_ids
                 =<< Futhark.mapSOAC maplam
             -- 5. let acc'        = acc + lasteel_ids
             addStms addlelstm
@@ -620,16 +616,13 @@ soacToStream soac = do
           acc0_ids <- mapM (newIdent "acc0") accrtps
           -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
           insoac <-
-            Futhark.Screma
-              chvar
-              (map paramName strm_inpids)
+            Futhark.Screma chvar (map paramName strm_inpids)
               <$> Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
           let insstm = mkLet (acc0_ids ++ strm_resids) $ Op insoac
           -- 2. let acc'     = acc + acc0_ids    in
           addaccbdy <-
-            mkPlusBnds lamin $
-              map Var $
-                map paramName inpacc_ids ++ map identName acc0_ids
+            mkPlusBnds lamin . map Var $
+              map paramName inpacc_ids ++ map identName acc0_ids
           -- Construct the stream
           let (addaccstm, addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
               strmbdy =
