@@ -22,8 +22,6 @@ from itertools import islice
 from PIL import ImageFile
 from collections import OrderedDict
 
-matplotlib.use('qtagg')
-
 assert sys.version_info >= (3, 9), "Use Python 3.9 or newer."
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
