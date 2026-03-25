@@ -29,18 +29,15 @@ getCodeActions file_uri range state filepath =
     codeActions name (TypeAscLet typ (Pos _ line column _)) =
       Just $
         mkAction
-          ( let nameText = baseText name
-             in [NI.text|Insert variable type ascription: `$nameText$typeText`|]
-          )
+          [NI.text|Insert variable type ascription: `$nameText$typeText`|]
           [(typeText, line, column)]
       where
         typeText = prettyText typ
+        nameText = baseText name
     codeActions name (TypeAscParam openPos typ pos) =
       Just $
         mkAction
-          ( let nameText = baseText name
-             in [NI.text|Insert parameter type ascription: `($nameText: $typeText)`|]
-          )
+          [NI.text|Insert parameter type ascription: `($nameText: $typeText)`|]
           [ let Pos _ line column _ = openPos
              in ("(", line, column),
             let Pos _ line column _ = pos
@@ -48,15 +45,15 @@ getCodeActions file_uri range state filepath =
           ]
       where
         typeText = prettyText typ
+        nameText = baseText name
     codeActions name (TypeAscReturn typ (Pos _ line column _)) =
       Just $
         mkAction
-          ( let nameText = baseText name
-             in [NI.text|Insert return type of `$nameText`: `$typeText`|]
-          )
+          [NI.text|Insert return type of `$nameText`: `$typeText`|]
           [(typeText, line, column)]
       where
         typeText = prettyText typ
+        nameText = baseText name
     codeActions _ (TypeAscType _ _) = Nothing
 
     mkAction title edits =
