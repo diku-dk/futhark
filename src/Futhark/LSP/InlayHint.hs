@@ -8,6 +8,7 @@ import Data.Text (Text)
 import Futhark.LSP.State (State)
 import Futhark.LSP.Tool (bindingsInRange)
 import Futhark.LSP.TypeAscription (TypeAscription (..), missingAscriptions)
+import Futhark.Util.Pretty (prettyText)
 import Language.LSP.Protocol.Types
   ( InlayHint (..),
     InlayHintKind (InlayHintKind_Type),
@@ -27,13 +28,13 @@ getInlayHints range state filepath =
   where
     inlayHint :: TypeAscription -> [InlayHint]
     inlayHint (TypeAscLet typName pos) =
-      [bareHint typName pos]
+      [bareHint (": " <> prettyText typName) pos]
     inlayHint (TypeAscParam s tname pos) =
-      [startHint s, bareHint (": " <> tname <> ")") pos]
+      [startHint s, bareHint (": " <> prettyText tname <> ")") pos]
     inlayHint (TypeAscReturn typName pos) =
-      [bareHint typName pos]
+      [bareHint (": " <> prettyText typName) pos]
     inlayHint (TypeAscType typName pos) =
-      [bareHint typName pos]
+      [bareHint (" " <> prettyText typName) pos]
 
     startHint :: Pos -> InlayHint
     startHint (Pos _ l c _) =

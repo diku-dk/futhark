@@ -11,6 +11,7 @@ import Data.Maybe (mapMaybe)
 import Futhark.LSP.State (State)
 import Futhark.LSP.Tool (bindingsInRange)
 import Futhark.LSP.TypeAscription (TypeAscription (TypeAscLet, TypeAscParam, TypeAscReturn, TypeAscType), missingAscriptions)
+import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (VName, baseText)
 import Language.LSP.Protocol.Types (CodeAction (..), CodeActionKind (CodeActionKind_Custom), Command, Position (Position), Range (Range), TextEdit (..), Uri, WorkspaceEdit (..), type (|?) (InR))
 import NeatInterpolation qualified as NI
@@ -25,29 +26,37 @@ getCodeActions file_uri range state filepath =
     & map InR
   where
     codeActions :: VName -> TypeAscription -> Maybe CodeAction
-    codeActions name (TypeAscLet text (Pos _ line column _)) =
+    codeActions name (TypeAscLet typ (Pos _ line column _)) =
       Just $
         mkAction
           ( let nameText = baseText name
-             in [NI.text|Insert variable type ascription: `$nameText$text`|]
+             in [NI.text|Insert variable type ascription: `$nameText$typeText`|]
           )
-          [(text, line, column)]
-    codeActions name (TypeAscParam openPos text pos) =
+          [(typeText, line, column)]
+      where
+        typeText = prettyText typ
+    codeActions name (TypeAscParam openPos typ pos) =
       Just $
         mkAction
           ( let nameText = baseText name
-             in [NI.text|Insert parameter type ascription: `($nameText: $text)`|]
+             in [NI.text|Insert parameter type ascription: `($nameText: $typeText)`|]
           )
-          [ let Pos _ line column _ = openPos in ("(", line, column),
-            let Pos _ line column _ = pos in (": " <> text <> ")", line, column)
+          [ let Pos _ line column _ = openPos
+             in ("(", line, column),
+            let Pos _ line column _ = pos
+             in (": " <> typeText <> ")", line, column)
           ]
-    codeActions name (TypeAscReturn text (Pos _ line column _)) =
+      where
+        typeText = prettyText typ
+    codeActions name (TypeAscReturn typ (Pos _ line column _)) =
       Just $
         mkAction
           ( let nameText = baseText name
-             in [NI.text|Insert return type of `$nameText`: `$text`|]
+             in [NI.text|Insert return type of `$nameText`: `$typeText`|]
           )
-          [(text, line, column)]
+          [(typeText, line, column)]
+      where
+        typeText = prettyText typ
     codeActions _ (TypeAscType _ _) = Nothing
 
     mkAction title edits =
