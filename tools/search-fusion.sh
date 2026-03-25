@@ -1,9 +1,14 @@
-#!/bin/bash
+#!/bin/sh
+#
+# This script runs the fusion algorithm pass on an input program using the gas
+# parameter. It finds the maximal amount gas before fusion fails, if fusion does
+# not fail it will return the maximum i64 integer. This helps in determining at
+# which point fusion fails when debugging the fusion pass.
 
 [ "$#" -ne 1 ] && echo "Usage: $0 <path>" && exit 1
 [ ! -f "$1" ] && echo "File not found: $1" && exit 1
 
-test_n() { futhark dev --inline-cons --inline-cons -e --fuse=$1 "$2" &>/dev/null; }
+test_n() { cabal run -- futhark dev --inline-cons --inline-cons -e --fuse=$1 "$2" &>/dev/null; }
 
 N=1
 ! test_n $N "$1" && exit 1
