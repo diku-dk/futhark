@@ -14,12 +14,15 @@ module Futhark.LSP.Tool
     logWithSeverity,
     Execute,
     bindingsInRange,
+    bindingsInState,
+    filterByLspRange,
   )
 where
 
 import Colog.Core (LogAction, Severity, WithSeverity (WithSeverity))
 import Control.Lens.Getter ((^.))
 import Control.Monad.Except (ExceptT)
+import Data.Foldable qualified as F
 import Data.Function ((&))
 import Data.Functor.Contravariant (contramap)
 import Data.Map qualified as M
@@ -186,22 +189,37 @@ transformVFS vfs =
 logWithSeverity :: (MonadLsp c m) => Severity -> LogAction m Text
 logWithSeverity severity = contramap (`WithSeverity` severity) logToLogMessage
 
-bindingsInRange :: Range -> State -> FilePath -> Maybe [(VName, BoundTo)]
-bindingsInRange range state filepath = do
+bindingsInState :: State -> Maybe (M.Map VName BoundTo)
+bindingsInState state = allBindings . lpImports <$> stateProgram state
+
+filterByLspRange ::
+  (Foldable t) =>
+  Maybe PositionMapping ->
+  Range ->
+  FilePath ->
+  (a -> Loc) ->
+  t a ->
+  Maybe [a]
+filterByLspRange mapping range filepath f t = do
   let (Range (Position l1 c1) (Position l2 c2)) = range
-  imports <- lpImports <$> stateProgram state
-  let mapping = getStaleMapping state filepath
   posStart <- toStalePos mapping $ mkPos l1 c1
   posEnd <- toStalePos mapping $ mkPos l2 c2
-
   pure $
-    allBindings imports
-      & M.assocs
-      & filter (boundToInRange (Loc posStart posEnd) . snd)
+    F.toList t
+      & filter (isInRange (Loc posStart posEnd) . f)
   where
-    boundToInRange locRange bound = case locOf bound of
+    isInRange locRange pos = case pos of
       NoLoc -> False
       Loc start _ -> locRange `contains` start
     -- increment by one: Pos counts from one onwards, LSP starts at zero
     mkPos :: UInt -> UInt -> Pos
     mkPos l c = Pos filepath (1 + fromIntegral l) (1 + fromIntegral c) (-1)
+
+bindingsInRange :: Range -> State -> FilePath -> Maybe [(VName, BoundTo)]
+bindingsInRange range state filepath = do
+  let mapping = getStaleMapping state filepath
+  bindings <- bindingsInState state
+
+  bindings
+    & M.assocs
+    & filterByLspRange mapping range filepath (locOf . snd)

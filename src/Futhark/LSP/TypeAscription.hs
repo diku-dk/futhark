@@ -1,6 +1,14 @@
-module Futhark.LSP.TypeAscription (TypeAscription (..), missingAscriptions) where
+module Futhark.LSP.TypeAscription
+  ( TypeAscription (..),
+    missingAscriptions,
+    missingTypeParameters,
+  )
+where
 
+import Control.Arrow ((&&&))
+import Data.Function ((&))
 import Data.Loc (Loc (..), Pos, locOf)
+import Data.Map qualified as M
 import Language.Futhark.Query
   ( BoundTo (..),
     TermBindSrc (..),
@@ -12,6 +20,7 @@ import Language.Futhark.Syntax
     StructType,
     TypeParamBase,
     VName,
+    typeParamName,
   )
 
 data TypeAscription
@@ -56,3 +65,16 @@ missingAscriptions (BoundTerm term (Loc termStart termEnd)) =
                   (Nothing, _, Just pos) -> [TypeAscReturn retType pos]
                   _ -> []
 missingAscriptions _ = []
+
+missingTypeParameters :: BoundTo -> M.Map VName (Maybe Pos, TypeParamBase VName)
+missingTypeParameters (BoundTerm (TermFun tfData) _) =
+  M.fromList inferredTypeParams
+  where
+    inferredTypeParams =
+      termFunTypeParams tfData
+        & filter keepNoLoc
+        & map (typeParamName &&& (termFunNameEnd tfData,))
+    keepNoLoc located = case locOf located of
+      NoLoc -> True
+      _ -> False
+missingTypeParameters _ = M.empty
