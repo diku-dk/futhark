@@ -11,8 +11,6 @@ module Futhark.IR.GPU.Simplify
   )
 where
 
-import Data.List qualified as L
-import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.GPU
@@ -25,7 +23,6 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
 import Futhark.Tools
-import Futhark.Transform.Rename
 import Futhark.Util (focusNth)
 
 simpleGPU :: Simplify.SimpleOps GPU
