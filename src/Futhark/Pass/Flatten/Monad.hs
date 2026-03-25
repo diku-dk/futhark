@@ -215,8 +215,14 @@ readInput _ _ _ _ (Constant x) =
 readInput segments env is inputs (Var v) =
   Var <$> readInputVar segments env is inputs v
 
+segmentDims :: Segments -> [TPrimExp Int64 VName]
+segmentDims = map pe64 . shapeDims . segmentsShape
+
+flatSegmentIndex :: Segments -> [SubExp] -> TPrimExp Int64 VName
+flatSegmentIndex segments = flattenIndex (segmentDims segments) . map pe64
+
 readInputs :: Segments -> DistEnv -> [SubExp] -> DistInputs -> Builder GPU ()
-readInputs _segments env is = mapM_ onInput
+readInputs segments env is = mapM_ onInput
   where
     onInput (v, DistInputFree arr t) =
       letBindNames [v]
@@ -231,7 +237,7 @@ readInputs _segments env is = mapM_ onInput
               then eSubExp $ Var arr
               else eIndex arr (map eSubExp is)
         Irregular (IrregularRep _ _ v_O v_D) -> do
-          offset <- letSubExp "offset" =<< eIndex v_O (map eSubExp is)
+          offset <- letSubExp "offset" =<< eIndex v_O [toExp $ flatSegmentIndex segments is]
           case arrayDims t of
             [num_elems] -> do
               let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
@@ -290,12 +296,14 @@ mkIrregFromReg ::
   Builder GPU IrregularRep
 mkIrregFromReg segments arr = do
   arr_t <- lookupType arr
+  num_segments <-
+    letSubExp "reg_num_segments" <=< toExp $ product $ segmentDims segments
   segment_size <-
     letSubExp "reg_seg_size" <=< toExp . product . map pe64 $
       drop (segmentsRank segments) (arrayDims arr_t)
   arr_S <-
     letExp "reg_segments" . BasicOp $
-      Replicate (segmentsShape segments) segment_size
+      Replicate (Shape [num_segments]) segment_size
   num_elems <-
     letSubExp "reg_num_elems" <=< toExp $ product $ map pe64 $ arrayDims arr_t
   arr_D <-
@@ -304,12 +312,8 @@ mkIrregFromReg segments arr = do
   arr_F <- letExp "reg_F" <=< segMap (MkSolo num_elems) $ \(MkSolo i) -> do
     flag <- letSubExp "flag" <=< toExp $ (pe64 i `rem` pe64 segment_size) .==. 0
     pure [subExpRes flag]
-  arr_O <- letExp "reg_O" <=< segMap (shapeDims (segmentsShape segments)) $ \is -> do
-    let flat_seg_i =
-          flattenIndex
-            (map pe64 (shapeDims (segmentsShape segments)))
-            (map pe64 is)
-    offset <- letSubExp "offset" <=< toExp $ flat_seg_i * pe64 segment_size
+  arr_O <- letExp "reg_O" <=< segMap (MkSolo num_segments) $ \(MkSolo i) -> do
+    offset <- letSubExp "offset" <=< toExp $ pe64 i * pe64 segment_size
     pure [subExpRes offset]
   pure $
     IrregularRep
