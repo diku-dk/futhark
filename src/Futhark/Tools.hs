@@ -298,7 +298,6 @@ doScatter desc rank dest arrs mk = do
           letSubExp "scatter_acc" . BasicOp $
             UpdateAcc Safe (paramName acc_p_inner) is [v]
 
-    -- NOTE: Is this problematic?
     let w = arraysSize 0 arrs_ts
     (fmap varsRes . letTupExp "acc_res")
       . Op
