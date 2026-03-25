@@ -370,7 +370,7 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
 
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
-      scan = head scans
+      [scan] = scans
       shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
       scan_ts = concatMap shpT scans
       shpOfT t s =
