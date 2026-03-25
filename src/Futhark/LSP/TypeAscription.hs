@@ -44,7 +44,7 @@ missingAscriptions (BoundTerm term (Loc termStart termEnd)) =
             let retTypeText = prettyText $ termFunRetType tfData
              in case (termFunAscription tfData, termFunArgEnd tfData, termFunNameEnd tfData) of
                   (Just _, _, _) -> []
-                  (Nothing, Just pos, _) -> [TypeAscLet (": " <> retTypeText) pos]
-                  (Nothing, _, Just pos) -> [TypeAscLet (": " <> retTypeText) pos]
+                  (Nothing, Just pos, _) -> [TypeAscReturn (": " <> retTypeText) pos]
+                  (Nothing, _, Just pos) -> [TypeAscReturn (": " <> retTypeText) pos]
                   _ -> []
 missingAscriptions _ = []
