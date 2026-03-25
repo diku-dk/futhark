@@ -1,5 +1,4 @@
 {-# LANGUAGE TypeFamilies #-}
-
 -- | Code generation for segmented and non-segmented scans.  Uses a
 -- fast single-pass algorithm, but which only works on NVIDIA GPUs and
 -- with some constraints on the operator.  We use this when we can.
@@ -29,40 +28,24 @@ yParams scan =
 -- types, and map parameter types, compute the largest available chunk
 -- size given the parameters for which we want chunking and the
 -- available resources.
-getScanChunkSize :: [Type] -> [Type] -> CallKernelGen Imp.KernelConstExp
-getScanChunkSize scan_types map_types = do
-  let max_tblock = Imp.SizeMaxConst SizeThreadBlock
+getScanChunkSize :: [Type] -> CallKernelGen Imp.KernelConstExp
+getScanChunkSize types = do
+  let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
       max_block_mem = Imp.SizeMaxConst SizeSharedMemory
       max_block_reg = Imp.SizeMaxConst SizeRegisters
-      k_mem = le64 max_block_mem `quot` le64 max_tblock
-      k_reg = le64 max_block_reg `quot` le64 max_tblock
+      k_mem = le64 max_block_mem `quot` le64 max_tblock_size
+      k_reg = le64 max_block_reg `quot` le64 max_tblock_size
+      types' = map elemType $ filter primType types
+      sizes = map primByteSize types'
 
-      scanned = map elemType $ filter primType scan_types
-      mapped = map elemType $ filter primType map_types
+      sum_sizes = sum sizes
+      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
+      max_size = maximum sizes
 
-      scanned_sizes = map primByteSize scanned
-      scanned_sum_sizes = sum scanned_sizes
-      scanned_max_size = maximum scanned_sizes
+      mem_constraint = max k_mem sum_sizes `quot` max_size
+      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
+  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
 
-      reg_scan_sum_sizes =
-        sum (map (sMax64 4 . primByteSize) scanned) `quot` 4
-
-      reg_map_sum_sizes =
-        sum (map (sMax64 4 . primByteSize) mapped) `quot` 4
-
-      mem_constraint =
-        max k_mem scanned_sum_sizes `quot` scanned_max_size
-
-      baseline_regs =
-        1 + reg_scan_sum_sizes + reg_map_sum_sizes
-
-      per_item_regs =
-        2 * reg_scan_sum_sizes + reg_map_sum_sizes
-
-      reg_constraint =
-        (k_reg - baseline_regs) `quot` per_item_regs
-
-  pure $ untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
 
 createLocalArrays ::
   Count BlockSize SubExp ->
@@ -348,9 +331,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       tblock_size_e = pe64 $ unCount $ kAttrBlockSize attrs
       num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
 
-  chunk_const <-
-    getScanChunkSize scan_tys' $
-      filter (not . shouldUseBitArray) map_tys'
+  let chunk_const = getScanChunkSize scan_tys'
   chunk_v <- dPrim "chunk_size"
   let chunk_name = nameFromText $ prettyText $ tvVar chunk_v
   addTuningParam chunk_name Nothing
