@@ -1,4 +1,5 @@
 {-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 module Futhark.LSP.CodeAction (getCodeActions) where
@@ -9,6 +10,7 @@ import Data.Map qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Set qualified as S
 import Data.Text (Text)
+import Data.Text qualified as T
 import Futhark.LSP.State (State, getStaleMapping)
 import Futhark.LSP.Tool (bindingsInState, filterByLspRange)
 import Futhark.LSP.TypeAscription (TypeAscription (TypeAscLet, TypeAscParam, TypeAscReturn, TypeAscType), missingAscriptions, missingTypeParameters)
@@ -47,7 +49,7 @@ getCodeActions file_uri range state filepath = fromMaybe [] $ do
           [NI.text|Insert variable type ascription: `$nameText$typeText`|]
         $ (typeText, line, column) : typeVarEdits types (typeVars typ)
       where
-        typeText = prettyText typ
+        typeText = ": " <> prettyText typ
         nameText = baseText name
     codeActions types name (TypeAscParam openPos typ pos) =
       Just $
@@ -66,10 +68,10 @@ getCodeActions file_uri range state filepath = fromMaybe [] $ do
     codeActions types name (TypeAscReturn typ (Pos _ line column _)) =
       Just
         $ mkAction
-          [NI.text|Insert return type of `$nameText`: `$typeText`|]
+          [NI.text|Insert return type of `$nameText$typeText`|]
         $ (typeText, line, column) : typeVarEdits types retTypeVars
       where
-        typeText = prettyText typ
+        typeText = " : " <> prettyText typ
         nameText = baseText name
         retTypeVars =
           S.fromList dims `S.union` typeVars innerType
@@ -89,7 +91,7 @@ getCodeActions file_uri range state filepath = fromMaybe [] $ do
         typeTriple :: (Maybe Pos, TypeParamBase VName) -> Maybe (Text, Int, Int)
         typeTriple (pos, typ) = do
           Pos _ line col _ <- pos
-          pure (prettyText typ, line, col)
+          pure (" " <> prettyText typ, line, col)
 
     mkAction title edits =
       CodeAction
@@ -119,5 +121,19 @@ getCodeActions file_uri range state filepath = fromMaybe [] $ do
             let toLsp = fromIntegral . pred
                 insertPos = Position (toLsp line) (toLsp column)
              in Range insertPos insertPos,
-          _newText = text
+          _newText = normalizeNames text
         }
+      where
+        -- replace subscript characters
+        normalizeNames = T.map $ \case
+          '\8320' -> '0'
+          '\8321' -> '1'
+          '\8322' -> '2'
+          '\8323' -> '3'
+          '\8324' -> '4'
+          '\8325' -> '5'
+          '\8326' -> '6'
+          '\8327' -> '7'
+          '\8328' -> '8'
+          '\8329' -> '9'
+          x -> x
