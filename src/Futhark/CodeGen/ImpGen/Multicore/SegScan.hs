@@ -200,7 +200,7 @@ seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chun
     compileStms mempty (bodyStms kbody_renamed) $ do
       sComment "write mapped values results to memory" $
         forM_ (zip map_out (map kernelResultSubExp map_res)) $ \(marr, res) ->
-          maybe (pure ()) (\arr -> copyDWIMFix arr [tvExp task_id, tvExp z] res []) marr
+          forM_ marr $ \arr -> copyDWIMFix arr [tvExp task_id, tvExp z] res []
 
       forM_ (zip4 scan_out scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res, local_accums) ->
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
@@ -305,7 +305,7 @@ seqAggregate scan_out map_out i scan_ops kbody start chunk_length per_op_aggr_ar
     compileStms mempty (bodyStms kbody_renamed) $ do
       sComment "write mapped values results to memory" $
         forM_ (zip map_out (map kernelResultSubExp map_res)) $ \(marr, res) ->
-          maybe (pure ()) (\arr -> copyDWIMFix arr [tvExp task_id, tvExp j] res []) marr
+          forM_ marr $ \arr -> copyDWIMFix arr [tvExp task_id, tvExp j] res []
 
       sIf
         (tvExp j .==. 0)
@@ -386,12 +386,8 @@ applyPostOp pat scan_out map_out scan_ops post_op start chunk_length task_id = d
 
     sComment "bind map results to post lamda params" $
       forM_ (zip map_pars map_out) $ \(par, out) -> do
-        maybe
-          (pure ())
-          ( \o ->
-              copyDWIMFix (paramName par) [] (Var o) [tvExp task_id, tvExp z]
-          )
-          out
+        forM_ out $ \o ->
+          copyDWIMFix (paramName par) [] (Var o) [tvExp task_id, tvExp z]
 
     let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
     sComment "compute post op." $
