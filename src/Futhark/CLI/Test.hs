@@ -42,6 +42,7 @@ import System.Exit
 import System.FilePath
 import System.IO
 import System.IO.Silently (capture)
+import System.IO.Temp (withSystemTempFile)
 import System.Process.ByteString (readProcessWithExitCode)
 import Text.Regex.TDFA
 
@@ -105,18 +106,7 @@ throwError :: (MonadError [e] m) => e -> m a
 throwError e = E.throwError [e]
 
 runTestM :: TestM () -> IO TestResult
-runTestM m = do
-  res <- runExceptT m
-  pure $ case res of
-    Right () -> Success
-    Left errs ->
-      -- Check if any part of the error list contains our PBT_PASS marker
-      if any (T.isInfixOf "PBT_PASS:") errs
-        then PropOut $ map cleanMarker errs
-        else Failure errs
-  where
-    -- Helper to remove both the marker and the context breadcrumbs if it's a pass
-    cleanMarker t = T.replace "PBT_PASS:" "" $ last $ T.splitOn ":\n" t
+runTestM = fmap (either Failure $ const Success) . runExceptT
 
 liftExcept :: ExceptT T.Text IO a -> TestM a
 liftExcept = either (E.throwError . pure) pure <=< liftIO . runExceptT
@@ -125,9 +115,7 @@ context :: T.Text -> TestM a -> TestM a
 context s = withExceptT $
   \case
     [] -> []
-    (e : es')
-      | "PBT_PASS:" `T.isPrefixOf` e -> e : es'
-      | otherwise -> (s <> ":\n" <> e) : es'
+    (e : es') -> (s <> ":\n" <> e) : es'
 
 context1 :: (Monad m) => T.Text -> ExceptT T.Text m a -> ExceptT T.Text m a
 context1 s = withExceptT $ \e -> s <> ":\n" <> e
@@ -144,20 +132,15 @@ accErrors_ = void . accErrors
 data TestResult
   = Success
   | Failure [T.Text]
-  | PropOut [T.Text]
   deriving (Eq, Show)
 
 pureTestResults :: IO [TestResult] -> TestM ()
 pureTestResults m = do
-  results <- liftIO m
-  case foldr collect ([], []) results of
-    (f : fs, _) -> E.throwError $ concat (f : fs)
-    ([], l : ls) -> E.throwError $ map ("PBT_PASS:" <>) (concat (l : ls))
-    ([], []) -> return ()
+  errs <- foldr collectErrors mempty <$> liftIO m
+  unless (null errs) $ E.throwError $ concat errs
   where
-    collect (Failure e) (fs, ls) = (e : fs, ls)
-    collect (PropOut l) (fs, ls) = (fs, l : ls)
-    collect Success acc = acc
+    collectErrors Success errs = errs
+    collectErrors (Failure err) errs = err : errs
 
 -- | The longest we are willing to wait for a test, in microseconds.
 timeout :: Int
@@ -393,7 +376,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                 normal_test_result <- concat <$> mapM run ios
 
                 propSpecs <- extractPropSpecsFromServer server
-                propResults <- runPropertyTests pbtConfig server propSpecs
+                propResults <- runPBT pbtConfig server propSpecs
                 pure $ normal_test_result ++ propResults
 
       when (mode == Interpreted) $
@@ -451,12 +434,6 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
               <* liftCommand (cmdFree server outs)
 
         compareResult entry index program expected res
-
-runPropertyTests :: PBTConfig -> Server -> [PropSpec] -> IO [TestResult]
-runPropertyTests pbtConfig server propSpecs = do
-  -- TODO FIX SCRATCH
-  (out, _testresult) <- capture $ runPBT pbtConfig "pbt-scratch" server propSpecs
-  pure $ [PropOut [T.pack out]]
 
 checkError :: (MonadError T.Text m) => ExpectedError -> T.Text -> m ()
 checkError (ThisError regex_s regex) err
@@ -548,9 +525,7 @@ makeTestCase config mode (file, spec) =
       PBTConfig
         { configNumTests = configNumTests $ configPBTConfig config,
           configMaxSize = configMaxSize $ configPBTConfig config,
-          configBaseSeed = configBaseSeed $ configPBTConfig config,
-          configVerbose = configVerbose $ configPBTConfig config,
-          configConcise = configConcise $ configPBTConfig config
+          configBaseSeed = configBaseSeed $ configPBTConfig config
         }
 
 data ReportMsg
@@ -656,7 +631,7 @@ runTests config paths = do
   all_tests <-
     map (makeTestCase config mode)
       <$> testSpecsFromPathsOrDie paths
-  putStrLn $ "Test cases are: " ++ show (map testCaseProgram all_tests)
+  -- putStrLn $ "Test cases are: " ++ show (map testCaseProgram all_tests)
   testmvar <- newEmptyMVar
   reportmvar <- newEmptyMVar
   concurrency <- maybe getNumCapabilities pure $ configConcurrency config
@@ -683,6 +658,7 @@ runTests config paths = do
             length (concatMap iosTestRuns ios)
               + length sts
               + length wts
+              + 2 -- num of property-based tests, which we treat as a single test case here
 
       getResults ts
         | null (testStatusRemain ts) = report ts >> pure ts
@@ -727,18 +703,6 @@ runTests config paths = do
                             testStatusRunFail ts'
                               + min (numTestCases test) (length s)
                         }
-                  PropOut s -> do
-                    when fancy moveCursorToTableTop
-                    clear
-                    putDoc $
-                      annotate (bold <> bgColor Green) (pretty (testCaseProgram test) <> " (PBT Info):")
-                        <> hardline
-                        <> vsep (map pretty s)
-                        <> hardline
-                    when fancy spaceTable
-                    let ts'' = ts' {testStatusRunPass = testStatusRunPass ts' + numTestCases test}
-                    getResults $ ts'' {testStatusPass = testStatusPass ts + 1}
-
   when fancy spaceTable
 
   ts <-
@@ -789,9 +753,7 @@ data PropSpec = PropSpec
 data PBTConfig = PBTConfig
   { configNumTests :: Int,
     configMaxSize :: Int64,
-    configBaseSeed :: Int32,
-    configVerbose :: Bool,
-    configConcise :: Bool
+    configBaseSeed :: Int32
   }
   deriving (Show, Eq)
 
@@ -827,9 +789,7 @@ defaultConfig =
         PBTConfig
           { configNumTests = 100,
             configMaxSize = 50,
-            configBaseSeed = 123456,
-            configVerbose = False,
-            configConcise = False
+            configBaseSeed = 123456
           }
     }
 
@@ -1037,17 +997,7 @@ commandLineOptions =
       ( "Base seed to use for generators (default: "
           ++ show (configBaseSeed $ configPBTConfig defaultConfig)
           ++ "). The seed for test #i will be base-seed + i."
-      ),
-    Option
-      "v"
-      ["verbose"]
-      (NoArg $ Right $ changePBTConfig $ \pbt -> pbt {configVerbose = True})
-      "Print verbose output during testing.",
-    Option
-      []
-      ["concise"]
-      (NoArg $ Right $ changePBTConfig $ \pbt -> pbt {configConcise = True})
-      "Only print concise output (e.g., no discovered properties, no shrinking progress, etc.)."
+      )
   ]
 
 excludeBackend :: TestConfig -> TestConfig
@@ -1065,161 +1015,106 @@ main = mainWithOptions defaultConfig commandLineOptions "options... programs..."
     [] -> Nothing
     _ -> Just $ runTests (excludeBackend config) progs
 
-runPBT :: PBTConfig -> FilePath -> Server -> [PropSpec] -> IO [TestResult]
-runPBT config scratchBin srv specs = do
-  epsE <- cmdEntryPoints srv
-  entrypoints <- case epsE of
-    Left err -> error $ "cmdEntryPoints failed: " <> show err
-    Right xs -> pure xs
+runPBT :: PBTConfig -> Server -> [PropSpec] -> IO [TestResult]
+runPBT config srv specs = do
+  withSystemTempFile "pbt-scratch" $ \scratchBin _scratchHandle -> do
 
-  unless (configConcise config) $ do
-    if null specs
-      then putStrLn "No properties found."
-      else do
-        putStrLn "Discovered properties (via #[prop ...]):"
-        forM_ specs (T.putStrLn . ("  " <>) . psProp)
-        putStrLn ""
+    epsE <- cmdEntryPoints srv
+    entrypoints <- case epsE of
+      Left err -> error $ "cmdEntryPoints failed: " <> show err
+      Right xs -> pure xs
 
-  forM_ specs $ \s -> do
-    let prop = psProp s
+    forM_ specs $ \s -> do
+      let prop = psProp s
+      unless (prop `elem` entrypoints) $
+        error $
+          "Property is not a server entry point: " <> T.unpack prop
+      validatePropTypes srv prop
+      gen <- case psGen s of
+        Just g | g `elem` entrypoints -> pure g
+        Just g -> error $ "Generator is not a server entry point: " <> T.unpack g
+        Nothing -> error $ "No generator specified for " <> T.unpack prop
+      validateGenTypes srv prop gen
+      case psShrink s of
+        Just sh | sh `elem` entrypoints -> validateShrinkTypes srv prop sh
+        Just "auto" -> pure ()
+        Just sh -> error $ "Shrinker is not a server entry point: " <> T.unpack sh
+        Nothing -> pure ()
 
-    unless (prop `elem` entrypoints) $
-      error $
-        "Property is not a server entry point: " <> T.unpack prop
+    -- 3. Execute tests and concatenate result lists
+    results <- forM specs $ \s -> runOne s config scratchBin srv
+    pure $ results
 
-    validatePropTypes srv prop
+runOne :: PropSpec -> PBTConfig -> FilePath -> Server -> IO TestResult
+runOne s config scratchBin srv = do
+  let propName = psProp s
+      genName = fromMaybe (error "missing generator") (psGen s)
+      sizeBase = fromMaybe (configMaxSize config) (psSize s)
+      seedBase = fromMaybe (configBaseSeed config) (psSeed s)
+      serverSize = "runPBT_size"
+      serverSeed = "runPBT_seed"
+      serverIn = "runPBT_input"
+      serverOk = "runPBT_ok"
 
-    gen <- case psGen s of
-      Just g | g `elem` entrypoints -> pure g
-      Just g -> error $ "Generator is not a server entry point: " <> T.unpack g
-      Nothing -> error $ "No generator specified for " <> T.unpack prop
+  let loop i
+        | i >= configNumTests config = pure $ Success
+        | otherwise = do
+            let seed = seedBase + fromIntegral i
 
-    validateGenTypes srv prop gen
+            -- Setup and run Property
+            sendGenInputs srv serverSize serverSeed genName sizeBase seed
+            genOuts <- allocOuts srv genName
+            withFreedVars srv genOuts $ do
+              _ <- callFreeIns srv genName genOuts [serverSize, serverSeed]
+              _ <-
+                freeOnException srv [serverIn] $
+                  useInputTypeToPack scratchBin srv serverIn propName genOuts
+              pure ()
 
-    case psShrink s of
-      Just sh | sh `elem` entrypoints -> do
-        validateShrinkTypes srv prop sh
-      Just sh ->
-        if sh == "auto"
-          then pure () -- auto shrink doesn't need to be an entry point
-          else error $ "Shrinker is not a server entry point: " <> T.unpack sh
-      Nothing ->
-        pure ()
+            ok <- withCallKeepIns srv propName [serverOk] [serverIn] $ \_ ->
+              getVal srv serverOk
 
-  let runOne :: PropSpec -> IO TestResult
-      runOne s = do
-        let propName = psProp s
-            genName = fromMaybe (error "missing generator") (psGen s)
+            if ok
+              then loop (i + 1)
+              else withFreedVar srv serverIn $ do
+                let failmsg =
+                      "PBT FAIL: "
+                        <> propName
+                        <> " size="
+                        <> showText sizeBase
+                        <> " seed="
+                        <> showText seed
+                        <> " after "
+                        <> showText i
+                        <> " tests"
 
-        let sizeBase = fromMaybe (configMaxSize config) (psSize s)
-            seedBase = fromMaybe (configBaseSeed config) (psSeed s)
+                -- Collect Shrinking Logs
+                case psShrink s of
+                  Just "auto" -> autoShrinkLoop scratchBin srv propName genName serverIn sizeBase seed genOuts
+                  Just shrinkName -> shrinkLoop scratchBin srv propName serverIn shrinkName
+                  Nothing -> pure ()
 
-        let serverSize = "runPBT_size"
-            serverSeed = "runPBT_seed"
-            serverIn = "runPBT_input"
-            serverOk = "runPBT_ok"
+                -- Collect Counterexample Log
+                inputTypesE <- getInputTypes srv propName
+                counterLog <- case inputTypesE of
+                  Right (ty0 : _) -> do
+                    prettyOut <- case psPPrint s of
+                      Just futPPrint -> do
+                        prettyOuts <- allocOuts srv futPPrint
+                        withFreedVars srv prettyOuts $ do
+                          _ <- callFreeIns srv futPPrint prettyOuts [serverIn]
+                          valE <- FSV.getValue srv (head prettyOuts)
+                          case valE of
+                            Left err -> error $ "getValue failed: " <> show err
+                            Right (U8Value _ bytes) -> pure [chr (fromIntegral b) | b <- SV.toList bytes]
+                            Right _ -> error "pretty printer returned non-u8 value"
+                      Nothing -> prettyVar srv serverIn ty0
 
-        when (configVerbose config) $
-          putStrLn $
-            "Testing property: "
-              <> T.unpack propName
-              <> " with generator: "
-              <> T.unpack genName
-              <> " sizeBase: "
-              <> show sizeBase
-              <> " seedBase: "
-              <> show seedBase
+                    pure $  "Minimal counterexample: " <> T.pack prettyOut
+                  _ -> pure "Could not retrieve input types for counterexample log."
 
-        let loop :: Int -> IO TestResult
-            loop i
-              | i >= configNumTests config = do
-                  putStrLn $
-                    "PASS: "
-                      <> T.unpack propName
-                      <> " ("
-                      <> show (configNumTests config)
-                      <> " tests)\n"
-                  let propOut = "PASS: " <> T.unpack propName <> " (" <> show (configNumTests config) <> " tests)"
-                  pure $ PropOut ["PBT_PASS"] -- [T.pack propOut]
-              | otherwise = do
-                  let size = sizeBase
-                      seed = seedBase + fromIntegral i
-
-                  sendGenInputs srv serverSize serverSeed genName size seed
-                  genOuts <- allocOuts srv genName
-                  withFreedVars srv genOuts $ do
-                    _ <- callFreeIns srv genName genOuts [serverSize, serverSeed]
-                    _ <-
-                      freeOnException srv [serverIn] $
-                        useInputTypeToPack scratchBin srv serverIn propName genOuts
-                    pure ()
-
-                  ok <- withCallKeepIns srv propName [serverOk] [serverIn] $ \_ ->
-                    getVal srv serverOk
-
-                  if ok
-                    then loop (i + 1)
-                    else withFreedVar srv serverIn $ do
-                      putStrLn $
-                        "FAIL: "
-                          <> T.unpack propName
-                          <> " at size="
-                          <> show size
-                          <> " seed="
-                          <> show seed
-                      putStrLn $
-                        "Falsifiable after " <> show i <> " tests. Starting shrinking..."
-
-                      case psShrink s of
-                        Just shrinkName -> do
-                          -- if shrinName not equal to "auto" then find entrypoint shrinkName otherwise do something else
-                          if shrinkName == "auto"
-                            then do
-                              unless (configConcise config) (putStr "Auto-shrinking...")
-                              autoShrinkLoop config scratchBin srv propName genName serverIn size seed genOuts
-                              unless (configConcise config) (putStrLn "done.")
-                            else do
-                              unless (configConcise config) (putStr "Shrinking...")
-                              shrinkLoop config scratchBin srv propName serverIn shrinkName
-                              unless (configConcise config) (putStrLn "done.")
-                        Nothing ->
-                          unless (configConcise config) $
-                            putStrLn "No shrinker specified, skipping shrinking."
-
-                      inputTypesE <- getInputTypes srv propName
-                      case inputTypesE of
-                        Right (ty0 : _) -> do
-                          prettyOut <-
-                            case psPPrint s of
-                              Just futPPrint -> do
-                                prettyOuts <- allocOuts srv futPPrint
-                                withFreedVars srv prettyOuts $ do
-                                  _ <- callFreeIns srv futPPrint prettyOuts [serverIn]
-                                  valE <- FSV.getValue srv (head prettyOuts)
-                                  case valE of
-                                    Left err -> error $ "getValue failed for pretty printer output: " <> show err
-                                    Right v ->
-                                      -- pure (T.unpack (valueText v))
-                                      case v of
-                                        U8Value _ bytes ->
-                                          pure [chr (fromIntegral b) | b <- SV.toList bytes]
-                                        _ ->
-                                          error $ "pretty printer returned non-u8 value: " <> show v
-                              Nothing ->
-                                prettyVar srv serverIn ty0
-
-                          unless (configConcise config) $
-                            putStrLn $
-                              "\nMinimal counterexample input: " <> prettyOut <> "\n"
-
-                          -- return Failure with the pretty-printed counterexample
-                          pure $ PropOut ["PBT_PASS"]
-                        -- PropOut ["Minimal counterexample input: " <> T.pack prettyOut]
-
-                        _ -> pure $ PropOut ["PBT_PASS"] -- ["Failed to get input types for property. Cannot pretty-print counterexample."]
-        loop 0
-  results <- forM specs runOne
-  pure $ results
+                pure $ Failure [failmsg <> counterLog]
+  loop 0
 
 validatePropTypes :: Server -> EntryName -> IO ()
 validatePropTypes srv propName = do
@@ -1250,8 +1145,8 @@ getOutputTypes s entry = do
   outs <- cmdOutputs s entry
   pure $ fmap (map outputType) outs
 
-autoShrinkLoop :: PBTConfig -> FilePath -> Server -> EntryName -> EntryName -> VarName -> Int64 -> Int32 -> [VarName] -> IO ()
-autoShrinkLoop con scratchBin srv propName genName vIn size seed genOuts = do
+autoShrinkLoop :: FilePath -> Server -> EntryName -> EntryName -> VarName -> Int64 -> Int32 -> [VarName] -> IO ()
+autoShrinkLoop scratchBin srv propName genName vIn size seed genOuts = do
   let vCand = "qc_try"
       vOk = "qc_ok"
       serverSize = "qc_size"
@@ -1265,30 +1160,16 @@ autoShrinkLoop con scratchBin srv propName genName vIn size seed genOuts = do
     tys -> error $ "Property " <> T.unpack propName <> " has >1 input: " <> show tys
 
   let loop :: Int64 -> IO ()
-      loop i = do
-        when (configVerbose con) $
-          putStrLn $
-            "Size is: " <> show i
+      loop i
+        | i <= 1 =
+            pure ()
+        | otherwise = do
+            let newSize = i - 1
 
-        if i <= 1
-          then pure ()
-          else do
-            let newServerSize = i - 1
-                newServerSeed = seed
+            sendGenInputs srv serverSize serverSeed genName newSize seed
 
-            sendGenInputs srv serverSize serverSeed genName newServerSize newServerSeed
-
-            withFreedVars srv genOuts $
+            res <- withFreedVars srv genOuts $
               withFreedVar srv vCand $ do
-                when (configVerbose con) $ do
-                  val <- getDataVal srv serverSize
-                  putStrLn $
-                    "Actual Server size is: "
-                      <> show val
-                      <> " (should be "
-                      <> show newServerSize
-                      <> ")"
-
                 _ <- callFreeIns srv genName genOuts [serverSize, serverSeed]
                 _ <-
                   freeOnException srv [vCand] $
@@ -1298,16 +1179,18 @@ autoShrinkLoop con scratchBin srv propName genName vIn size seed genOuts = do
                   getVal srv vOk
 
                 if ok
-                  then pure ()
+                  then pure Nothing
                   else do
                     _ <-
                       freeOnException srv [vIn] $
                         packType scratchBin srv vIn propTy [vCand]
-                    loop newServerSize
+                    pure $ Just newSize
+
+            case res of
+              Nothing -> loop (i - 1)
+              Just s -> loop s
 
   loop size
-
-  pure ()
 
 data Step
   = AcceptedSame -- overwrite vIn, keep tactic
@@ -1316,22 +1199,18 @@ data Step
   | StopShrinking -- stop, do not overwrite vIn
   deriving (Eq, Show)
 
-shrinkLoop :: PBTConfig -> FilePath -> Server -> EntryName -> VarName -> EntryName -> IO ()
-shrinkLoop con scratchBin srv propName vIn shrinkName = do
+shrinkLoop :: FilePath -> Server -> EntryName -> VarName -> EntryName -> IO ()
+shrinkLoop scratchBin srv propName vIn shrinkName = do
   let vTry = "qc_try"
       vOk = "qc_ok"
       vTactic = "qc_tactic"
       vInRetyped = vIn <> "_shrinktyped"
 
-  -- Property must have exactly one input
-  propInTys <- either (error . show) pure =<< getInputTypes srv propName
-  propTy <- case propInTys of
-    [ty] -> pure ty
-    [] -> error $ "Property " <> T.unpack propName <> " has no inputs?"
-    tys -> error $ "Property " <> T.unpack propName <> " has >1 input: " <> show tys
-
-  -- Shrinker must take (x, tactic)
+  propTy <- getSingleInputType srv propName
   shrinkInTys <- either (error . show) pure =<< getInputTypes srv shrinkName
+  -- (shrinkXTy, _) <- case shrinkInTys of
+  --   [tyX, "i32"] -> pure (tyX, "i32")
+  --   tys -> error $ "Shrinker " <> T.unpack shrinkName <> " expected (x, i32), got: " <> show tys
   (shrinkXTy, tacticTy) <- case shrinkInTys of
     [tyX, tyTac] -> pure (tyX, tyTac)
     [] -> error $ "Shrinker " <> T.unpack shrinkName <> " has no inputs?"
@@ -1341,14 +1220,10 @@ shrinkLoop con scratchBin srv propName vIn shrinkName = do
   when (tacticTy /= "i32") $
     error $
       "Shrinker " <> T.unpack shrinkName <> " tactic must be i32, got: " <> T.unpack tacticTy
+  -- tactic is explicitly Int32 to resolve ambiguity
 
   let oneStep :: Int32 -> IO Step
       oneStep tactic = do
-        -- if verbose print what tactic is being run:
-        when (configVerbose con) $
-          putStr $
-            "\nRunning shrinker with tactic: " <> show tactic
-
         -- put tactic into server var (will be freed by callFreeIns below)
         freeVars srv [vTactic]
         putVal srv vTactic tactic
@@ -1356,18 +1231,16 @@ shrinkLoop con scratchBin srv propName vIn shrinkName = do
         -- ensure vIn is of shrinker’s expected x type
         _ <-
           freeOnException srv [vInRetyped] $
-            packType scratchBin srv vInRetyped shrinkXTy [vIn]
+            packType scratchBin srv (vInRetyped) shrinkXTy [vIn]
 
         -- call shrinker
         shrinkOuts <- allocOuts srv shrinkName
-        when (null shrinkOuts) $
-          error $
-            "Shrinker " <> T.unpack shrinkName <> " has no outputs?"
 
         withFreedVars srv shrinkOuts $ do
           _ <- callFreeIns srv shrinkName shrinkOuts [vInRetyped, vTactic]
 
           -- Convention: last output is status:i8, the rest are y parts.
+          -- let (yParts, statusVar) = (init shrinkOuts, last shrinkOuts)
           let (yParts, statusVar) =
                 case reverse shrinkOuts of
                   (s : rs) -> (reverse rs, s)
@@ -1388,52 +1261,41 @@ shrinkLoop con scratchBin srv propName vIn shrinkName = do
 
           -- Build vTry (candidate y) and make sure it is freed at the end of this step.
           withFreedVar srv vTry $ do
-            _ <-
-              freeOnException srv [vTry] $
-                packType scratchBin srv vTry propTy yParts
+            _ <- freeOnException srv [vTry] $ packType scratchBin srv vTry propTy yParts
 
             -- Evaluate property on y (keep inputs alive; vTry freed by withFreedVar scope anyway)
-            ok <- withCallKeepIns srv propName [vOk] [vTry] $ \_ ->
-              getVal srv vOk
+            ok <- withCallKeepIns srv propName [vOk] [vTry] $ \_ -> getVal srv vOk
 
             if ok
-              then case status of
-                2 -> pure StopShrinking
-                -- property passed => ignore status; do not overwrite vIn; tactic++
-                _ -> pure PropPassed
+              then
+                pure $
+                  if status == 2
+                    then StopShrinking
+                    -- property passed => ignore status; do not overwrite vIn; tactic++
+                    else PropPassed
               else
                 -- property failed => follow status
                 case status of
-                  0 -> do
-                    _ <-
-                      freeOnException srv [vIn] $
-                        packType scratchBin srv vIn propTy [vTry]
-                    pure AcceptedSame
-                  1 -> do
-                    _ <-
-                      freeOnException srv [vIn] $
-                        packType scratchBin srv vIn propTy [vTry]
-                    pure AcceptedInc
-                  2 ->
-                    -- stop; do not overwrite vIn (keep last failing)
-                    pure StopShrinking
-                  _ ->
-                    error $
-                      "Shrinker "
-                        <> T.unpack shrinkName
-                        <> " returned invalid status (expected 0/1/2), got: "
-                        <> show status
+                  0 ->
+                    freeVars srv [vIn]
+                      >> packType scratchBin srv vIn propTy [vTry]
+                      >> pure AcceptedSame
+                  1 ->
+                    freeVars srv [vIn]
+                      >> packType scratchBin srv vIn propTy [vTry]
+                      >> pure AcceptedInc
+                  -- stop; do not overwrite vIn (keep last failing)
+                  _ -> pure StopShrinking
 
-  let loop :: Int32 -> IO ()
-      loop tactic = do
+  let loop (tactic :: Int32) = do
         r <- oneStep tactic
         case r of
           AcceptedSame -> loop 0
-          AcceptedInc -> loop (tactic + 1)
+          AcceptedInc -> pure ()
           PropPassed -> loop (tactic + 1)
           StopShrinking -> pure ()
 
-  loop 0
+  loop (0)
 
 validateGenTypes :: Server -> EntryName -> EntryName -> IO ()
 validateGenTypes srv propName genName = do
@@ -1567,14 +1429,14 @@ isCompositeLike srv var ty = do
   typeNameE <- cmdKind srv ty
   typeName <- either (\e -> error ("kind command failed for " <> T.unpack var <> ": " <> show e)) pure typeNameE
 
-  -- putStrLn $ "Checking type: " <> T.unpack ty <> " (Kind: " <> T.unpack currentKind <> ")"
+  -- T.putStrLn $ "Checking type: " <> T.unpack ty <> " (Kind: " <> T.unpack currentKind <> ")"
 
   case typeName of
     Array -> do
       elemTyE <- cmdElemtype srv ty
       case elemTyE of
         Right et -> do
-          -- putStrLn $ "  -> Found nested element type: " <> T.unpack et
+          -- T.putStrLn $ "  -> Found nested element type: " <> T.unpack et
           isCompositeLike srv var et
         Left e -> error ("elemtype command failed for " <> T.unpack ty <> ": " <> show e)
     Record -> pure True
@@ -1643,7 +1505,7 @@ packType scratchBin srv outVar typ componentVars = do
   -- must repack if type is composite like
   let mustRepack = compLike
 
-  -- putStrLn $ "Packing type " <> T.unpack typ <> " from components " <> show componentVars <> " with mustRepack = " <> show mustRepack <> " (composite-like: " <> show comp <> ", array of composite-like: " <> show isArrComp <> ")"
+  -- T.putStrLn $ "Packing type " <> T.unpack typ <> " from components " <> show componentVars <> " with mustRepack = " <> show mustRepack <> " (composite-like: " <> show comp <> ", array of composite-like: " <> show isArrComp <> ")"
 
   if mustRepack
     then do
