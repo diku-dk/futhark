@@ -103,7 +103,6 @@ kernelRules =
         RuleOp SOAC.liftIdentityMapping,
         RuleOp SOAC.simplifyMapIota,
         RuleOp SOAC.removeUnusedSOACInput,
-        RuleOp removeUnusedKernelBodyResultInSegScan,
         RuleBasicOp removeScalarCopy
       ]
       [ RuleBasicOp removeUnnecessaryCopy,
@@ -128,87 +127,6 @@ removeDeadGPUBodyResult (_, used) pat aux (GPUBody types body)
        in Simplify $ auxing aux $ letBind (Pat pat') $ Op $ GPUBody types' body'
   | otherwise = Skip
 removeDeadGPUBodyResult _ _ _ _ = Skip
-
--- | Only handle returns cases.
-depsOfRes :: Dependencies -> KernelResult -> Names
-depsOfRes deps (Returns _ cs se) = depsOf deps se <> depsOfNames deps (freeIn cs)
-depsOfRes _ _ = mempty
-
-kernelBodyDependencies :: (ASTRep rep) => Dependencies -> KernelBody rep -> [Names]
-kernelBodyDependencies deps kbody =
-  let names_in_scope = freeIn kbody
-      deps' = dataDependencies' deps kbody
-   in map
-        (flip namesSubtract names_in_scope . depsOfRes deps')
-        (bodyResult kbody)
-
-removeUnusedKernelBodyResultInSegScan ::
-  (Buildable rep, BuilderOps rep, HasSegOp rep) =>
-  TopDownRuleOp rep
-removeUnusedKernelBodyResultInSegScan _ pat aux op
-  | -- Figure out which of the names in 'pat' are used...
-    Just (SegScan lvl space ts kbody seg_op post_op) <- asSegOp op,
-    Just (new_kbody, new_ts, m_new_post_op) <-
-      newKbodyPostOp kbody ts seg_op post_op = Simplify $ do
-      new_post_op <- m_new_post_op
-      auxing aux
-        . letBind pat
-        . Op
-        . segOp
-        $ SegScan lvl space new_ts new_kbody seg_op new_post_op
-  | otherwise = Skip
-  where
-    newKbodyPostOp kbody ts seg_op post_op =
-      if null sub_map_res_ts_pars
-        then Nothing
-        else Just (new_kbody, new_ts, new_post_op)
-      where
-        res = bodyResult kbody
-        post_lam = segPostOpLambda post_op
-        pars = lambdaParams post_lam
-
-        mkBind t p r =
-          mkLet
-            [Ident (paramName p) t]
-            (BasicOp $ SubExp $ kernelResultSubExp r)
-
-        new_kbody = kbody {bodyResult = new_res}
-        new_post_op = do
-          let sub_res = map (\(r, _, _, _) -> r) sub_map_res_ts_pars
-          temp_body <- renameBody $ kbody {bodyResult = sub_res}
-          let new_binds =
-                stmsFromList
-                  $ zipWith
-                    (\(_, t, p, _) r -> mkBind t p r)
-                    sub_map_res_ts_pars
-                  $ bodyResult temp_body
-          pure $
-            SegPostOp $
-              Lambda
-                { lambdaParams = new_pars,
-                  lambdaBody =
-                    mkBody
-                      (bodyStms temp_body <> new_binds <> bodyStms (lambdaBody post_lam))
-                      (bodyResult (lambdaBody post_lam)),
-                  lambdaReturnType = lambdaReturnType post_lam
-                }
-
-        scan_deps = mconcat $ (\(_, _, _, d) -> d) <$> scan_res_ts_pars
-        deps = kernelBodyDependencies mempty kbody
-
-        isNotReturns (Returns {}) = False
-        isNotReturns _ = True
-
-        (new_res, new_ts, new_pars, _) =
-          L.unzip4 $ scan_res_ts_pars <> new_map_res_ts_pars
-        (new_map_res_ts_pars, sub_map_res_ts_pars) =
-          L.partition
-            ( \(r, t, _, d) ->
-                isNotReturns r || d `namesIntersect` scan_deps || isAcc t
-            )
-            map_res_ts_pars
-        (scan_res_ts_pars, map_res_ts_pars) =
-          splitAt (segBinOpResults seg_op) $ L.zip4 res ts pars deps
 
 -- If we see an Update with a scalar where the value to be written is
 -- the result of indexing some other array, then we convert it into an

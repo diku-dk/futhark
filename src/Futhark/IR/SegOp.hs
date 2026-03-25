@@ -61,9 +61,11 @@ import Data.List
     unzip4,
     zip4,
   )
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -1133,6 +1135,19 @@ segOpRuleBottomUp vtable pat dec op
   | otherwise =
       Skip
 
+-- | Only handle Returns cases.
+depsOfRes :: Dependencies -> KernelResult -> Names
+depsOfRes deps (Returns _ cs se) = depsOf deps se <> depsOfNames deps (freeIn cs)
+depsOfRes _ _ = mempty
+
+kernelBodyDependencies :: (ASTRep rep) => Dependencies -> KernelBody rep -> [Names]
+kernelBodyDependencies deps kbody =
+  let names_in_scope = freeIn kbody
+      deps' = dataDependencies' deps kbody
+   in map
+        (flip namesSubtract names_in_scope . depsOfRes deps')
+        (bodyResult kbody)
+
 topDownSegOp ::
   (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   ST.SymbolTable rep ->
@@ -1222,6 +1237,71 @@ topDownSegOp _ (Pat pes) _ (SegRed lvl space ts kbody ops)
               },
             op1_aux ++ op2_aux
           )
+
+-- Remove unused kernelBody result in SegScan.
+topDownSegOp _ pat aux op
+  | SegScan lvl space ts kbody seg_op post_op <- op,
+    -- Figure out which of the names in 'pat' are used...
+    Just (new_kbody, new_ts, m_new_post_op) <-
+      newKbodyPostOp kbody ts seg_op post_op = Simplify $ do
+      new_post_op <- m_new_post_op
+      auxing aux
+        . letBind pat
+        . Op
+        . segOp
+        $ SegScan lvl space new_ts new_kbody seg_op new_post_op
+  where
+    newKbodyPostOp kbody ts seg_op post_op =
+      if null sub_map_res_ts_pars
+        then Nothing
+        else Just (new_kbody, new_ts, new_post_op)
+      where
+        res = bodyResult kbody
+        post_lam = segPostOpLambda post_op
+        pars = lambdaParams post_lam
+
+        mkBind t p r =
+          mkLet
+            [Ident (paramName p) t]
+            (BasicOp $ SubExp $ kernelResultSubExp r)
+
+        new_kbody = kbody {bodyResult = new_res}
+        new_post_op = do
+          let sub_res = map (\(r, _, _, _) -> r) sub_map_res_ts_pars
+          temp_body <- renameBody $ kbody {bodyResult = sub_res}
+          let new_binds =
+                stmsFromList
+                  $ zipWith
+                    (\(_, t, p, _) r -> mkBind t p r)
+                    sub_map_res_ts_pars
+                  $ bodyResult temp_body
+          pure $
+            SegPostOp $
+              Lambda
+                { lambdaParams = new_pars,
+                  lambdaBody =
+                    mkBody
+                      (bodyStms temp_body <> new_binds <> bodyStms (lambdaBody post_lam))
+                      (bodyResult (lambdaBody post_lam)),
+                  lambdaReturnType = lambdaReturnType post_lam
+                }
+
+        scan_deps = mconcat $ (\(_, _, _, d) -> d) <$> scan_res_ts_pars
+        deps = kernelBodyDependencies mempty kbody
+
+        isNotReturns (Returns {}) = False
+        isNotReturns _ = True
+
+        (new_res, new_ts, new_pars, _) =
+          L.unzip4 $ scan_res_ts_pars <> new_map_res_ts_pars
+        (new_map_res_ts_pars, sub_map_res_ts_pars) =
+          L.partition
+            ( \(r, t, _, d) ->
+                isNotReturns r || d `namesIntersect` scan_deps || isAcc t
+            )
+            map_res_ts_pars
+        (scan_res_ts_pars, map_res_ts_pars) =
+          splitAt (segBinOpResults seg_op) $ L.zip4 res ts pars deps
 topDownSegOp _ _ _ _ = Skip
 
 -- A convenient way of operating on the type and body of a SegOp,
