@@ -19,9 +19,13 @@ import Prelude hiding (abs, mod)
 type Substitutions = M.Map VName VName
 
 lookupSubst :: VName -> Substitutions -> VName
-lookupSubst v substs = case M.lookup v substs of
-  Just v' | v' /= v -> lookupSubst v' substs
-  _ -> v
+lookupSubst v substs = go S.empty v
+  where
+    go seen v'
+      | S.member v' seen = v'
+      | otherwise = case M.lookup v' substs of
+          Just v'' | v'' /= v' -> go (S.insert v' seen) v''
+          _ -> v'
 
 data Mod
   = -- | A pairing of a lexical closure and a module function.
