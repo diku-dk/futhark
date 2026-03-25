@@ -337,9 +337,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
   let num_words_const = bitArrayWords chunk_const
   num_words <-
-    dPrimV "num_bit_words"
-      . isInt64
-      =<< kernelConstToExp num_words_const
+    dPrimV "num_bit_words" . isInt64 =<< kernelConstToExp num_words_const
 
   num_virt_blocks <-
     tvSize <$> dPrimV "num_virt_blocks" (n `divUp` (tblock_size_e * chunk))
@@ -418,8 +416,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
     sOp $ Imp.GetBlockId (tvVar phys_block_id) 0
     iters <-
       dPrimVE "virtloop_bound" $
-        (num_virt_blocks_e - tvExp phys_block_id)
-          `divUp` num_phys_blocks_e
+        (num_virt_blocks_e - tvExp phys_block_id) `divUp` num_phys_blocks_e
 
     sFor "virtloop_i" iters $ const $ do
       dyn_id <- dPrim "dynamic_id"
@@ -792,7 +789,6 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
       sComment "Transpose scan output and to write it later in coalesced fashion to global memory" $ do
         forM_ (zip transposedArrays scan_private_chunks) $ \(locmem, priv) -> do
-          -- sOp local_barrier
           sFor "i" chunk $ \i -> do
             sharedIdx <-
               dPrimV "sharedIdx" $
@@ -845,9 +841,9 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                   maybe (pure ()) (\g -> copyDWIMFix par [] (Var g) [tvExp phys_block_id, ltid, i]) glob
 
             let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
-            sComment "compute post op." $ do
+            sComment "compute post op." $
               compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
-                sComment "write mapped values" $ do
+                sComment "write mapped values" $
                   forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
                     copyDWIMFix (patElemName pe) (map le64 gtids) subexp []
 
