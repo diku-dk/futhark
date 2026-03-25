@@ -17,6 +17,8 @@ data TypeAscription
     TypeAscParam Pos Text Pos
   | -- | type hint for a return type
     TypeAscReturn Text Pos
+  | -- | type hint for inferred type parameters
+    TypeAscType Text Pos
 
 missingAscriptions :: BoundTo -> [TypeAscription]
 missingAscriptions (BoundTerm term (Loc termStart termEnd)) =
@@ -39,7 +41,7 @@ missingAscriptions (BoundTerm term (Loc termStart termEnd)) =
           inferredTypeParams = filter isSynthesized (termFunTypeParams tfData)
           paramInfo p = case termFunNameEnd tfData of
             Nothing -> id
-            Just pos -> (TypeAscLet (" " <> prettyText p) pos :)
+            Just pos -> (TypeAscType (" " <> prettyText p) pos :)
        in foldr (\p f hs -> paramInfo p $ f hs) id inferredTypeParams $
             let retTypeText = prettyText $ termFunRetType tfData
              in case (termFunAscription tfData, termFunArgEnd tfData, termFunNameEnd tfData) of

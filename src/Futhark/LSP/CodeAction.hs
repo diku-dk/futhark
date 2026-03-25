@@ -1,16 +1,19 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module Futhark.LSP.CodeAction (getCodeActions) where
 
 import Data.Function ((&))
 import Data.Loc (Pos (Pos))
 import Data.Map qualified as M
+import Data.Maybe (mapMaybe)
 import Futhark.LSP.State (State)
 import Futhark.LSP.Tool (bindingsInRange)
-import Futhark.LSP.TypeAscription (TypeAscription (TypeAscLet, TypeAscParam, TypeAscReturn), missingAscriptions)
+import Futhark.LSP.TypeAscription (TypeAscription (TypeAscLet, TypeAscParam, TypeAscReturn, TypeAscType), missingAscriptions)
 import Language.Futhark.Core (VName, baseText)
 import Language.LSP.Protocol.Types (CodeAction (..), CodeActionKind (CodeActionKind_Custom), Command, Position (Position), Range (Range), TextEdit (..), Uri, WorkspaceEdit (..), type (|?) (InR))
+import NeatInterpolation qualified as NI
 
 getCodeActions :: Uri -> Range -> State -> FilePath -> [Command |? CodeAction]
 getCodeActions file_uri range state filepath =
@@ -18,23 +21,34 @@ getCodeActions file_uri range state filepath =
     []
     (concatMap $ \(n, b) -> (n,) <$> missingAscriptions b)
     (bindingsInRange range state filepath)
-    & map (InR . uncurry codeActions)
+    & mapMaybe (uncurry codeActions)
+    & map InR
   where
-    codeActions :: VName -> TypeAscription -> CodeAction
+    codeActions :: VName -> TypeAscription -> Maybe CodeAction
     codeActions name (TypeAscLet text (Pos _ line column _)) =
-      mkAction
-        ("Insert variable type ascription for " <> baseText name)
-        [(text, line, column)]
+      Just $
+        mkAction
+          ( let nameText = baseText name
+             in [NI.text|Insert variable type ascription: `$nameText$text`|]
+          )
+          [(text, line, column)]
     codeActions name (TypeAscParam openPos text pos) =
-      mkAction
-        ("Insert parameter type ascription for " <> baseText name)
-        [ let Pos _ line column _ = openPos in ("(", line, column),
-          let Pos _ line column _ = pos in (": " <> text <> ")", line, column)
-        ]
+      Just $
+        mkAction
+          ( let nameText = baseText name
+             in [NI.text|Insert parameter type ascription: `($nameText: $text)`|]
+          )
+          [ let Pos _ line column _ = openPos in ("(", line, column),
+            let Pos _ line column _ = pos in (": " <> text <> ")", line, column)
+          ]
     codeActions name (TypeAscReturn text (Pos _ line column _)) =
-      mkAction
-        ("Insert return type ascription for " <> baseText name)
-        [(text, line, column)]
+      Just $
+        mkAction
+          ( let nameText = baseText name
+             in [NI.text|Insert return type of `$nameText`: `$text`|]
+          )
+          [(text, line, column)]
+    codeActions _ (TypeAscType _ _) = Nothing
 
     mkAction title edits =
       CodeAction

@@ -32,6 +32,8 @@ getInlayHints range state filepath =
       [startHint s, bareHint (": " <> tname <> ")") pos]
     inlayHint (TypeAscReturn typName pos) =
       [bareHint typName pos]
+    inlayHint (TypeAscType typName pos) =
+      [bareHint typName pos]
 
     startHint :: Pos -> InlayHint
     startHint (Pos _ l c _) =
