@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
+
 -- | Code generation for segmented and non-segmented scans.  Uses a
 -- fast single-pass algorithm, but which only works on NVIDIA GPUs and
 -- with some constraints on the operator.  We use this when we can.
@@ -28,8 +29,8 @@ yParams scan =
 -- types, and map parameter types, compute the largest available chunk
 -- size given the parameters for which we want chunking and the
 -- available resources.
-getScanChunkSize :: [Type] -> CallKernelGen Imp.KernelConstExp
-getScanChunkSize types = do
+getScanChunkSize :: [Type] -> Imp.KernelConstExp
+getScanChunkSize types =
   let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
       max_block_mem = Imp.SizeMaxConst SizeSharedMemory
       max_block_reg = Imp.SizeMaxConst SizeRegisters
@@ -44,8 +45,7 @@ getScanChunkSize types = do
 
       mem_constraint = max k_mem sum_sizes `quot` max_size
       reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
-  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
-
+   in untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
 
 createLocalArrays ::
   Count BlockSize SubExp ->
