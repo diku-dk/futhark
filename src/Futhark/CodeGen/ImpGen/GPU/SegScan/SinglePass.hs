@@ -238,7 +238,7 @@ bitArrayWords :: Imp.KernelConstExp -> Imp.KernelConstExp
 bitArrayWords n = untyped $ isInt64 n `divUp` 64
 
 -- | Set a bit in a bit array stored as u64 words
-setBitInBitArray :: Imp.TExp Int64 -> VName -> Imp.TExp Int64 -> SubExp -> InKernelGen ()
+setBitInBitArray :: Imp.TExp Int64 -> VName -> Imp.TExp Int64 -> Imp.TExp Bool -> InKernelGen ()
 setBitInBitArray chunk bit_array idx bool_val = do
   word_idx <- dPrimV "word_idx" (0 :: Imp.TExp Int64)
   bit_idx <- dPrimV "bit_idx" idx
@@ -258,12 +258,7 @@ setBitInBitArray chunk bit_array idx bool_val = do
   current_word <- dPrimV "current_word" (0 :: Imp.TExp Int64)
   copyDWIMFix (tvVar current_word) [] (Var bit_array) [tvExp word_idx]
 
-  -- Convert bool to int64 (0 or 1) using zero extension
-  bool_as_int <-
-    dPrimVE "bool_as_int" $
-      TPrimExp $
-        zExt Int64 $
-          toExp' Bool bool_val
+  bool_as_int <- dPrimVE "bool_as_int" $ fromBoolExp bool_val
 
   -- Create mask and update word
   let bit_mask = 1 .<<. tvExp bit_idx
@@ -514,7 +509,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                       case priv_dest of
                         Just d
                           | shouldUseBitArray ty ->
-                              setBitInBitArray chunk d i src
+                              setBitInBitArray chunk d i $ isBool $ toExp' Bool src
                         Just d ->
                           copyDWIMFix d [i] src []
                         Nothing -> pure ()
