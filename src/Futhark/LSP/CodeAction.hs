@@ -8,29 +8,35 @@ import Data.Loc (Pos (Pos))
 import Data.Map qualified as M
 import Futhark.LSP.State (State)
 import Futhark.LSP.Tool (bindingsInRange)
-import Futhark.LSP.TypeAscription (TypeAscription (TypeAscBare, TypeAscParens), missingAscriptions)
+import Futhark.LSP.TypeAscription (TypeAscription (TypeAscLet, TypeAscParam, TypeAscReturn), missingAscriptions)
+import Language.Futhark.Core (VName, baseText)
 import Language.LSP.Protocol.Types (CodeAction (..), CodeActionKind (CodeActionKind_Custom), Command, Position (Position), Range (Range), TextEdit (..), Uri, WorkspaceEdit (..), type (|?) (InR))
 
 getCodeActions :: Uri -> Range -> State -> FilePath -> [Command |? CodeAction]
 getCodeActions file_uri range state filepath =
   maybe
     []
-    (concatMap missingAscriptions)
+    (concatMap $ \(n, b) -> (n,) <$> missingAscriptions b)
     (bindingsInRange range state filepath)
-    & concatMap codeActions
-    & map InR
+    & map (InR . uncurry codeActions)
   where
-    codeActions :: TypeAscription -> [CodeAction]
-    codeActions (TypeAscBare text (Pos _ line column _)) =
-      pure $ mkAction [(text, line, column)]
-    codeActions (TypeAscParens openPos text pos) =
-      pure $
-        mkAction
-          [ let Pos _ line column _ = openPos in ("(", line, column),
-            let Pos _ line column _ = pos in (": " <> text <> ")", line, column)
-          ]
+    codeActions :: VName -> TypeAscription -> CodeAction
+    codeActions name (TypeAscLet text (Pos _ line column _)) =
+      mkAction
+        ("Insert variable type ascription for " <> baseText name)
+        [(text, line, column)]
+    codeActions name (TypeAscParam openPos text pos) =
+      mkAction
+        ("Insert parameter type ascription for " <> baseText name)
+        [ let Pos _ line column _ = openPos in ("(", line, column),
+          let Pos _ line column _ = pos in (": " <> text <> ")", line, column)
+        ]
+    codeActions name (TypeAscReturn text (Pos _ line column _)) =
+      mkAction
+        ("Insert return type ascription for " <> baseText name)
+        [(text, line, column)]
 
-    mkAction edits =
+    mkAction title edits =
       CodeAction
         { _isPreferred = Nothing,
           _disabled = Nothing,
@@ -46,7 +52,7 @@ getCodeActions file_uri range state filepath =
                         file_uri
                         (map mkEdit edits)
                 },
-          _title = "Insert type ascription",
+          _title = title,
           _command = Nothing,
           _data_ = Nothing,
           _kind = Just $ CodeActionKind_Custom "TypeAscription"

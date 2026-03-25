@@ -35,7 +35,7 @@ import Futhark.LSP.PositionMapping
 import Futhark.LSP.State (State (..), getStaleContent, getStaleMapping)
 import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), contains, locOf)
 import Futhark.Util.Pretty (prettyText)
-import Language.Futhark.Core (isBuiltinLoc)
+import Language.Futhark.Core (VName, isBuiltinLoc)
 import Language.Futhark.Query
   ( AtPos (AtName),
     BoundTo (..),
@@ -186,7 +186,7 @@ transformVFS vfs =
 logWithSeverity :: (MonadLsp c m) => Severity -> LogAction m Text
 logWithSeverity severity = contramap (`WithSeverity` severity) logToLogMessage
 
-bindingsInRange :: Range -> State -> FilePath -> Maybe [BoundTo]
+bindingsInRange :: Range -> State -> FilePath -> Maybe [(VName, BoundTo)]
 bindingsInRange range state filepath = do
   let (Range (Position l1 c1) (Position l2 c2)) = range
   imports <- lpImports <$> stateProgram state
@@ -196,8 +196,8 @@ bindingsInRange range state filepath = do
 
   pure $
     allBindings imports
-      & M.elems
-      & filter (boundToInRange (Loc posStart posEnd))
+      & M.assocs
+      & filter (boundToInRange (Loc posStart posEnd) . snd)
   where
     boundToInRange locRange bound = case locOf bound of
       NoLoc -> False

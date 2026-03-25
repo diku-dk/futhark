@@ -11,10 +11,12 @@ import Language.Futhark.Query
   )
 
 data TypeAscription
-  = -- | type hint at the position
-    TypeAscBare Text Pos
-  | -- | type hint with parens: opening pos, hint, closing pos
-    TypeAscParens Pos Text Pos
+  = -- | type hint for a let-binding
+    TypeAscLet Text Pos
+  | -- | type hint for a parameter
+    TypeAscParam Pos Text Pos
+  | -- | type hint for a return type
+    TypeAscReturn Text Pos
 
 missingAscriptions :: BoundTo -> [TypeAscription]
 missingAscriptions (BoundTerm term (Loc termStart termEnd)) =
@@ -22,12 +24,12 @@ missingAscriptions (BoundTerm term (Loc termStart termEnd)) =
     TermSize -> []
     TermVar _ _ (Just _) -> []
     TermVar src inferredType Nothing ->
-      let bareHints = [TypeAscBare (": " <> prettyText inferredType) termEnd]
+      let bareHints = [TypeAscLet (": " <> prettyText inferredType) termEnd]
        in case src of
             TermBindId -> []
             TermBindLet -> bareHints
             TermBindPat ->
-              [TypeAscParens termStart (prettyText inferredType) termEnd]
+              [TypeAscParam termStart (prettyText inferredType) termEnd]
             TermBindNested -> bareHints
     TermFun tfData ->
       -- ordering is relevant, see the lsp documentation for inlay hints
@@ -37,12 +39,12 @@ missingAscriptions (BoundTerm term (Loc termStart termEnd)) =
           inferredTypeParams = filter isSynthesized (termFunTypeParams tfData)
           paramInfo p = case termFunNameEnd tfData of
             Nothing -> id
-            Just pos -> (TypeAscBare (" " <> prettyText p) pos :)
+            Just pos -> (TypeAscLet (" " <> prettyText p) pos :)
        in foldr (\p f hs -> paramInfo p $ f hs) id inferredTypeParams $
             let retTypeText = prettyText $ termFunRetType tfData
              in case (termFunAscription tfData, termFunArgEnd tfData, termFunNameEnd tfData) of
                   (Just _, _, _) -> []
-                  (Nothing, Just pos, _) -> [TypeAscBare (": " <> retTypeText) pos]
-                  (Nothing, _, Just pos) -> [TypeAscBare (": " <> retTypeText) pos]
+                  (Nothing, Just pos, _) -> [TypeAscLet (": " <> retTypeText) pos]
+                  (Nothing, _, Just pos) -> [TypeAscLet (": " <> retTypeText) pos]
                   _ -> []
 missingAscriptions _ = []

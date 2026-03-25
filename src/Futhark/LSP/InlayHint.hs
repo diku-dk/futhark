@@ -4,7 +4,6 @@ module Futhark.LSP.InlayHint (getInlayHints) where
 
 import Data.Function ((&))
 import Data.Loc (Pos (Pos))
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Futhark.LSP.State (State)
 import Futhark.LSP.Tool (bindingsInRange)
@@ -21,15 +20,18 @@ getInlayHints :: Range -> State -> FilePath -> [InlayHint]
 getInlayHints range state filepath =
   maybe
     []
-    (concatMap missingAscriptions)
+    (map snd)
     (bindingsInRange range state filepath)
+    & concatMap missingAscriptions
     & concatMap inlayHint
   where
     inlayHint :: TypeAscription -> [InlayHint]
-    inlayHint (TypeAscBare typName pos) =
+    inlayHint (TypeAscLet typName pos) =
       [bareHint typName pos]
-    inlayHint (TypeAscParens s tname pos) =
+    inlayHint (TypeAscParam s tname pos) =
       [startHint s, bareHint (": " <> tname <> ")") pos]
+    inlayHint (TypeAscReturn typName pos) =
+      [bareHint typName pos]
 
     startHint :: Pos -> InlayHint
     startHint (Pos _ l c _) =
