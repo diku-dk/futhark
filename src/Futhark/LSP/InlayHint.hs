@@ -19,9 +19,10 @@ import Language.LSP.Protocol.Types
 
 getInlayHints :: Range -> State -> FilePath -> [InlayHint]
 getInlayHints range state filepath =
-  bindingsInRange range state filepath
-    & fromMaybe []
-    & concatMap missingAscriptions
+  maybe
+    []
+    (concatMap missingAscriptions)
+    (bindingsInRange range state filepath)
     & concatMap inlayHint
   where
     inlayHint :: TypeAscription -> [InlayHint]
