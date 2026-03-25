@@ -143,6 +143,9 @@ readCarries chunk_id chunk_offset dims' vec_is pes scan
       pure ()
 
 -- | Produce partially scanned intervals; one per threadblock.
+--
+-- The @Maybe VName@ for the result is to cater to accumulators, which become
+-- @Nothing@.
 scanStage1 ::
   [VName] ->
   [Maybe VName] ->
@@ -209,16 +212,12 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
 
               sComment "write mapped values results to global memory" $
                 forM_ (zip map_out map_res) $ \(pe, se) ->
-                  maybe
-                    (pure ())
-                    ( \p ->
-                        copyDWIMFix
-                          p
-                          (map Imp.le64 gtids)
-                          (kernelResultSubExp se)
-                          []
-                    )
-                    pe
+                  forM pe $ \p ->
+                    copyDWIMFix
+                      p
+                      (map Imp.le64 gtids)
+                      (kernelResultSubExp se)
+                      []
 
       sComment "threads in bounds read input" $
         sWhen in_bounds when_in_bounds
@@ -488,8 +487,7 @@ scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesS
                     (Var $ paramName p)
                     []
 
-      sOp $
-        Imp.Barrier Imp.FenceLocal
+      sOp $ Imp.Barrier Imp.FenceLocal
 
       sWhen in_bounds $ do
         let (scan_pars, map_pars) = splitAt (segBinOpResults scans) $ lambdaParams $ segPostOpLambda post_op
@@ -517,8 +515,8 @@ scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesS
             sComment "write values" $
               forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
                 copyDWIMFix (patElemName pe) (map Imp.le64 gtids) subexp []
-      sOp $
-        Imp.Barrier Imp.FenceGlobal
+
+      sOp $ Imp.Barrier Imp.FenceGlobal
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
