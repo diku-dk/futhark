@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `i64.set_bit`/`u64.set_bit` would produce wrong results in C-based backends. (#2396)
 
+* Some uses of higher order modules could cause infinite loops. (#2407)
+
 ## [0.25.36]
 
 ### Added
