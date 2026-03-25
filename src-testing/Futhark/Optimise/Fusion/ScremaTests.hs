@@ -23,36 +23,14 @@ fromLines :: [String] -> Lambda SOACS
 fromLines = fromString . unlines
 
 -- | A wrapper that makes 'show' behave like 'prettyString'.
-newtype Tuple2 a b = Tuple2 (a, b)
+newtype P a = P a
   deriving (Eq, Ord)
 
-instance (Pretty a, Pretty b) => Show (Tuple2 a b) where
-  show (Tuple2 (x, y)) = "(" <> prettyString x <> ",\n" <> prettyString y <> ")"
+instance (Pretty a) => Show (P a) where
+  show (P x) = prettyString x
 
-newtype Tuple3 a b c = Tuple3 (Maybe (a, b, c))
-  deriving (Eq, Ord)
-
-instance (Pretty a, Pretty b, Pretty c) => Show (Tuple3 a b c) where
-  show (Tuple3 (Just (x, y, z))) =
-    "(" <> prettyString x <> ",\n" <> prettyString y <> ",\n" <> prettyString z <> ")"
-  show (Tuple3 Nothing) = "Nothing"
-
--- | A wrapper that makes 'pretty' behave like 'Show'.
-newtype Singleton a = Singleton a
-  deriving (Eq, Ord)
-
-instance (Pretty a) => Show (Singleton a) where
-  show (Singleton x) = prettyString x
-
-newtype SingletonError a = SingletonError (Maybe a)
-  deriving (Eq, Ord)
-
-instance (Pretty a) => Show (SingletonError a) where
-  show (SingletonError (Just x)) = prettyString x
-  show (SingletonError Nothing) = "Nothing"
-
-splitLambdaByParTester :: [VName] -> Lambda SOACS -> Tuple2 (Lambda SOACS) (Lambda SOACS)
-splitLambdaByParTester names lam = Tuple2 (lam_x', lam_y')
+splitLambdaByParTester :: [VName] -> Lambda SOACS -> P (Lambda SOACS, Lambda SOACS)
+splitLambdaByParTester names lam = P (lam_x', lam_y')
   where
     Just ((_, lam_x', _), (_, lam_y', _)) =
       withFreshNamesScopeError $
@@ -67,7 +45,7 @@ splitLambdaByParTests =
             lam_x = "\\{x_0 : i32} : {i32} -> {x_0}"
             lam_y = "\\{x_1 : i32} : {i32} -> {x_1}"
             names = ["x_0"]
-         in splitLambdaByParTester names lam @?= Tuple2 (lam_x, lam_y),
+         in splitLambdaByParTester names lam @?= P (lam_x, lam_y),
       testCase "keeps computation in first lambda" $
         let lam =
               fromLines
@@ -83,7 +61,7 @@ splitLambdaByParTests =
                 ]
             lam_y = "\\{x_0 : i32} : {i32} -> {x_0}"
             names = ["x_1"]
-         in splitLambdaByParTester names lam @?= Tuple2 (lam_x, lam_y),
+         in splitLambdaByParTester names lam @?= P (lam_x, lam_y),
       testCase "keeps computations in both lambdas" $
         let lam =
               fromLines
@@ -105,7 +83,7 @@ splitLambdaByParTests =
                   "  in {x_3}"
                 ]
             names = ["x_1"]
-         in splitLambdaByParTester names lam @?= Tuple2 (lam_x, lam_y),
+         in splitLambdaByParTester names lam @?= P (lam_x, lam_y),
       testCase "keeps line order" $
         let lam =
               fromLines
@@ -129,7 +107,7 @@ splitLambdaByParTests =
                   "  in {x_4}"
                 ]
             names = ["x_1"]
-         in splitLambdaByParTester names lam @?= Tuple2 (lam_x, lam_y),
+         in splitLambdaByParTester names lam @?= P (lam_x, lam_y),
       testCase "does redundant work" $
         let lam =
               fromLines
@@ -152,7 +130,7 @@ splitLambdaByParTests =
                   "  in {x_2}"
                 ]
             names = ["x_1"]
-         in splitLambdaByParTester names lam @?= Tuple2 (lam_x, lam_y)
+         in splitLambdaByParTester names lam @?= P (lam_x, lam_y)
     ]
 
 fuseSuperScremaTests :: TestTree
@@ -173,7 +151,7 @@ fuseSuperScremaTests =
             ident_b = "input_b_5538 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
             input_b = SOAC.identInput ident_b
-         in Tuple2
+         in P
               ( withFreshNames
                   ( fuseSuperScrema
                       "d_5537"
@@ -200,7 +178,7 @@ fuseSuperScremaTests =
                       ["defunc_0_scan_res_5569"]
                   )
               )
-              @?= Tuple2
+              @?= P
                 ( SuperScrema
                     "d_5537"
                     [input_a]
@@ -243,7 +221,7 @@ fuseSuperScremaTests =
             input_b = SOAC.identInput ident_b
             out_a = "out_a_5564145"
             out_b = "out_b_5534156"
-         in Tuple2
+         in P
               ( withFreshNames
                   ( fuseSuperScrema
                       "d_5537"
@@ -270,7 +248,7 @@ fuseSuperScremaTests =
                       [out_b]
                   )
               )
-              @?= Tuple2
+              @?= P
                 ( SuperScrema
                     "d_5537"
                     [input_a, input_b]
@@ -321,7 +299,7 @@ fuseSuperScremaTests =
             ident_b = "input_b_5538 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
             input_b = SOAC.identInput ident_b
-         in Tuple2
+         in P
               ( withFreshNames
                   ( fuseSuperScrema
                       "d_5537"
@@ -353,7 +331,7 @@ fuseSuperScremaTests =
                       ["defunc_0_scan_res_5569"]
                   )
               )
-              @?= Tuple2
+              @?= P
                 ( SuperScrema
                     "d_5537"
                     [input_a]
@@ -386,7 +364,7 @@ fuseSuperScremaTests =
             ident_b = "input_b_5538 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
             input_b = SOAC.identInput ident_b
-         in Tuple2
+         in P
               ( withFreshNames
                   ( fuseSuperScrema
                       "d_5537"
@@ -421,7 +399,7 @@ fuseSuperScremaTests =
                       ["defunc_0_scan_res_5569"]
                   )
               )
-              @?= Tuple2
+              @?= P
                 ( SuperScrema
                     "d_5537"
                     [input_a]
@@ -463,7 +441,7 @@ fuseSuperScremaTests =
             ident_b = "input_b_5538 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
             input_b = SOAC.identInput ident_b
-         in Tuple2
+         in P
               ( withFreshNames
                   ( fuseSuperScrema
                       "d_5537"
@@ -495,7 +473,7 @@ fuseSuperScremaTests =
                       ["defunc_0_scan_res_5569"]
                   )
               )
-              @?= Tuple2
+              @?= P
                 ( SuperScrema
                     "d_5537"
                     [input_a]
@@ -548,7 +526,7 @@ fuseSuperScremaTests =
             input_a = SOAC.identInput ident_a
             ident_b = "input_b_8 : [d_9]f32"
             input_b = SOAC.identInput ident_b
-         in Tuple2
+         in P
               ( withFreshNames
                   ( fuseSuperScrema
                       "d_9"
@@ -578,7 +556,7 @@ fuseSuperScremaTests =
                       ["out_b_14"]
                   )
               )
-              @?= Tuple2
+              @?= P
                 ( SuperScrema
                     "d_9"
                     [input_a, input_b]
@@ -622,7 +600,7 @@ fuseSuperScremaTests =
             input_a = SOAC.identInput ident_a
             ident_b = "input_b_8 : [d_9]f32"
             input_b = SOAC.identInput ident_b
-         in Tuple2
+         in P
               ( withFreshNames
                   ( fuseSuperScrema
                       "d_9"
@@ -660,7 +638,7 @@ fuseSuperScremaTests =
                       ["out_b_15"]
                   )
               )
-              @?= Tuple2
+              @?= P
                 ( SuperScrema
                     "d_9"
                     [input_a, input_b]
@@ -736,7 +714,7 @@ fuseSuperScremaTests =
             out_b = "out_b_21"
             out_c = "out_c_25"
             out_d = "out_d_26"
-         in Tuple2
+         in P
               ( withFreshNames
                   ( fuseSuperScrema
                       "d_27"
@@ -774,7 +752,7 @@ fuseSuperScremaTests =
                       [out_d, out_c]
                   )
               )
-              @?= Tuple2
+              @?= P
                 ( SuperScrema
                     "d_27"
                     [input_a, input_b, input_c, input_d]
@@ -805,7 +783,7 @@ fuseSuperScremaTests =
             ident_out_a = "defunc_0_map_res_5769 : [d_5648]f64"
             input_out_a = SOAC.identInput ident_out_a
             out_a = identName ident_out_a
-         in Tuple2
+         in P
               ( withFreshNames
                   ( fuseSuperScrema
                       "d_5648"
@@ -852,7 +830,7 @@ fuseSuperScremaTests =
                       ["defunc_0_map_res_5770"]
                   )
               )
-              @?= Tuple2
+              @?= P
                 ( SuperScrema
                     "d_5648"
                     [input_a]
@@ -901,7 +879,7 @@ moveRedScanSuperScremaTests =
     [ testCase "Only map" $
         let ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in SingletonError
+         in P
               ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
@@ -932,7 +910,7 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= SingletonError
+              @?= P
                 ( Just
                     ( SuperScrema
                         "d_5537"
@@ -973,7 +951,7 @@ moveRedScanSuperScremaTests =
                 ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in SingletonError
+         in P
               ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
@@ -1004,7 +982,7 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= SingletonError
+              @?= P
                 ( Just
                     ( SuperScrema
                         "d_5537"
@@ -1046,7 +1024,7 @@ moveRedScanSuperScremaTests =
                 ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in SingletonError
+         in P
               ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
@@ -1077,7 +1055,7 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= SingletonError
+              @?= P
                 ( Just
                     ( SuperScrema
                         "d_5537"
@@ -1128,7 +1106,7 @@ moveRedScanSuperScremaTests =
                 ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in SingletonError
+         in P
               ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
@@ -1159,7 +1137,7 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= SingletonError
+              @?= P
                 ( Just
                     ( SuperScrema
                         "d_5537"
@@ -1221,7 +1199,7 @@ moveRedScanSuperScremaTests =
                 ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
-         in SingletonError
+         in P
               ( withFreshNamesScopeError
                   ( moveRedScanSuperScrema
                       ( SuperScrema
@@ -1251,7 +1229,7 @@ moveRedScanSuperScremaTests =
                       )
                   )
               )
-              @?= SingletonError
+              @?= P
                 ( Just
                     ( SuperScrema
                         "d_5537"
