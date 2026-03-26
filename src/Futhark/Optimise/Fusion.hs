@@ -194,17 +194,17 @@ makeCopiesOfFusedExcept ::
   m NodeT
 makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
   case soac of
-    H.Screma w arrs (ScremaForm lam scans reduces postLam) -> do
-      localScope (scopeOf lam <> scopeOf postLam) $ do
+    H.Screma w arrs (ScremaForm lam scans reduces postlam) -> do
+      localScope (scopeOf lam <> scopeOf postlam) $ do
         fused_in_main <-
           filterM (fmap (not . isAcc) . lookupType) . namesToList . consumedByLambda $
             Alias.analyseLambda mempty lam
         fused_in_post <-
           filterM (fmap (not . isAcc) . lookupType) . namesToList . consumedByLambda $
-            Alias.analyseLambda mempty postLam
+            Alias.analyseLambda mempty postlam
         lam' <- makeCopiesInLambda (fused_in_main L.\\ noCopy) lam
-        postLam' <- makeCopiesInLambda (fused_in_post L.\\ noCopy) postLam
-        let form' = ScremaForm lam' scans reduces postLam'
+        postlam' <- makeCopiesInLambda (fused_in_post L.\\ noCopy) postlam
+        let form' = ScremaForm lam' scans reduces postlam'
         pure $ SoacNode ots pats (H.Screma w arrs form') aux
     _any -> do
       let lam = H.lambda soac
