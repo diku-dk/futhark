@@ -244,7 +244,10 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
   where
     isMap BasicOp {} = False
     isMap Apply {} = True
-    isMap Match {} = False
+    isMap (Match _ cases def_case _) =
+      any isParallelStm $
+        bodyStms def_case
+          <> mconcat (map (bodyStms . caseBody) cases)
     isMap (Loop _ _ body) = (any isParallelStm . bodyStms) body
     isMap (WithAcc _ lam) = (any isParallelStm . bodyStms) $ lambdaBody lam
     isMap Op {} = True
