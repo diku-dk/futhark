@@ -19,8 +19,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Scan chunk size is now exposed as tuning parameter in `cuda` and `hip`
   backends.
 
-+ `futhark lsp` offers code actions, they insert type ascriptions for
+* `futhark lsp` offers code actions, they insert type ascriptions for
   inferred types. Every named binding has an action.
+
+* `futhark bench` and `futhark test` can now handle entry points that return
+  opaque values, as long as there is no expected result.
 
 ### Removed
 
@@ -29,6 +32,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 
 * `i64.set_bit`/`u64.set_bit` would produce wrong results in C-based backends. (#2396)
+
+* Some uses of higher order modules could cause infinite loops. (#2407)
 
 ## [0.25.36]
 
