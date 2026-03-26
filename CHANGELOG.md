@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Scan chunk size is now exposed as tuning parameter in `cuda` and `hip`
   backends.
 
+* `futhark bench` and `futhark test` can now handle entry points that return
+  opaque values, as long as there is no expected result.
+
 ### Removed
 
 ### Changed

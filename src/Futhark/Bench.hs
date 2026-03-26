@@ -351,11 +351,9 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
           cmdMaybe . liftIO $ cmdPauseProfiling server
           pure $ Just profile_log
 
-    vs <- readResults server outs <* freeOuts
+    pure (DL.toList xs, profile_log)
 
-    pure (vs, DL.toList xs, profile_log)
-
-  (vs, call_logs, profile_log) <- case maybe_call_logs of
+  (call_logs, profile_log) <- case maybe_call_logs of
     Nothing ->
       throwError . T.pack $
         "Execution exceeded " ++ show (runTimeout opts) ++ " seconds."
@@ -373,8 +371,11 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
     liftIO $ maybe (pure Nothing) (fmap Just . getExpectedValues) expected_spec
 
   case maybe_expected of
-    Just expected -> checkResult program expected vs
-    Nothing -> pure ()
+    Just expected -> do
+      vs <- readResults server outs <* freeOuts
+      checkResult program expected vs
+    Nothing ->
+      freeOuts
 
   pure
     ( map fst call_logs,
