@@ -15,9 +15,9 @@ import Futhark.LSP.State (State, getStaleMapping)
 import Futhark.LSP.Tool (bindingsInState, filterByLspRange)
 import Futhark.LSP.TypeAscription (TypeAscription (TypeAscLet, TypeAscParam, TypeAscReturn, TypeAscType), missingAscriptions, missingTypeParameters)
 import Futhark.Util.Pretty (prettyText)
-import Language.Futhark (RetTypeBase (RetType), typeVars)
 import Language.Futhark.Core (VName, baseText)
-import Language.Futhark.Syntax (TypeParamBase)
+import Language.Futhark.Prop (typeVars)
+import Language.Futhark.Syntax (RetTypeBase (RetType), TypeParamBase)
 import Language.LSP.Protocol.Types (CodeAction (..), CodeActionKind (CodeActionKind_Custom), Command, Position (Position), Range (Range), TextEdit (..), Uri, WorkspaceEdit (..), type (|?) (InR))
 import NeatInterpolation qualified as NI
 
@@ -46,29 +46,26 @@ getCodeActions file_uri range state filepath = fromMaybe [] $ do
     codeActions types name (TypeAscLet typ (Pos _ line column _)) =
       Just
         $ mkAction
-          [NI.text|Insert variable type ascription: `$nameText$typeText`|]
+          [NI.text|Insert type: `$nameText$typeText`|]
         $ (typeText, line, column) : typeVarEdits types (typeVars typ)
       where
         typeText = ": " <> prettyText typ
         nameText = baseText name
     codeActions types name (TypeAscParam openPos typ pos) =
-      Just $
-        mkAction
-          [NI.text|Insert parameter type ascription: `($nameText: $typeText)`|]
-          ( [ let Pos _ line column _ = openPos
-               in ("(", line, column),
-              let Pos _ line column _ = pos
-               in (": " <> typeText <> ")", line, column)
-            ]
-              ++ typeVarEdits types (typeVars typ)
-          )
+      Just
+        $ mkAction
+          [NI.text|Insert type: `($nameText: $typeText)`|]
+        $ posEdit openPos "("
+          : posEdit pos (": " <> typeText <> ")")
+          : typeVarEdits types (typeVars typ)
       where
+        posEdit (Pos _ line column _) t = (t, line, column)
         typeText = prettyText typ
         nameText = baseText name
     codeActions types name (TypeAscReturn typ (Pos _ line column _)) =
       Just
         $ mkAction
-          [NI.text|Insert return type of `$nameText$typeText`|]
+          [NI.text|Insert return type: `$nameText$typeText`|]
         $ (typeText, line, column) : typeVarEdits types retTypeVars
       where
         typeText = " : " <> prettyText typ
@@ -79,6 +76,8 @@ getCodeActions file_uri range state filepath = fromMaybe [] $ do
             RetType dims innerType = typ
     codeActions _ _ (TypeAscType _ _) = Nothing
 
+    -- Text edit information for referenced types that are not yet
+    -- syntactically present
     typeVarEdits ::
       M.Map VName (Maybe Pos, TypeParamBase VName) ->
       S.Set VName ->
