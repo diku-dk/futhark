@@ -6,6 +6,7 @@ module Futhark.LSP.TypeAscription
 where
 
 import Control.Arrow ((&&&))
+import Data.Foldable (asum)
 import Data.Function ((&))
 import Data.Loc (Loc (..), Pos, locOf)
 import Data.Map qualified as M
@@ -59,10 +60,17 @@ missingAscriptions (BoundTerm term (Loc termStart termEnd)) =
             Just pos -> (TypeAscType p pos :)
        in foldr (\p f hs -> paramInfo p $ f hs) id inferredTypeParams $
             let retType = termFunRetType tfData
-             in case (termFunAscription tfData, termFunArgEnd tfData, termFunNameEnd tfData) of
-                  (Just _, _, _) -> []
-                  (Nothing, Just pos, _) -> [TypeAscReturn retType pos]
-                  (Nothing, _, Just pos) -> [TypeAscReturn retType pos]
+                retTypePos =
+                  asum $
+                    map
+                      ($ tfData)
+                      [ termFunArgEnd,
+                        termFunTypeArgEnd,
+                        termFunNameEnd
+                      ]
+             in case (termFunAscription tfData, retTypePos) of
+                  (Just _, _) -> []
+                  (Nothing, Just pos) -> [TypeAscReturn retType pos]
                   _ -> []
 missingAscriptions _ = []
 
