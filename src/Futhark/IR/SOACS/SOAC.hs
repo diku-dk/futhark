@@ -282,7 +282,7 @@ maposcanomapSOAC ::
   [Scan rep] ->
   Lambda rep ->
   m (ScremaForm rep)
-maposcanomapSOAC post_lam [] pre_lam = do
+maposcanomapSOAC pre_lam [] post_lam = do
   new_post_lam <- mkIdentityLambda $ lambdaReturnType post_lam
   let new_pre_lam =
         Lambda

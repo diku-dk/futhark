@@ -157,9 +157,8 @@ dissectScrema pat w (ScremaForm map_lam scans reds post_lam) arrs = do
             lambdaReturnType = reds_ts <> lambdaReturnType post_lam
           }
 
-  maposcanomap <- maposcanomapSOAC post_lam' scans map_lam
-  letBindNames (to_red <> scan_map_res) $
-    Op (Screma w arrs maposcanomap)
+  maposcanomap <- maposcanomapSOAC map_lam scans post_lam'
+  letBindNames (to_red <> scan_map_res) $ Op (Screma w arrs maposcanomap)
 
   reduce <- reduceSOAC reds
   letBindNames red_res $ Op $ Screma w to_red reduce
