@@ -233,8 +233,13 @@ fuseSuperScrema w inp_p' form_p' out_p inp_c' form_c' out_c = do
                 )
           }
 
-  post_forward_params <- forM (zip (bodyResult (lambdaBody (scremaPostLambda form_p))) (lambdaReturnType (scremaPostLambda form_p))) $ \(res, t) ->
-    newParam (maybe (nameFromString "x") baseName (subExpResVName res)) t
+  post_forward_params <- forM
+    ( zip
+        (bodyResult (lambdaBody (scremaPostLambda form_p)))
+        (lambdaReturnType (scremaPostLambda form_p))
+    )
+    $ \(res, t) ->
+      newParam (maybe (nameFromString "x") baseName (subExpResVName res)) t
 
   let lam3 =
         Lambda
