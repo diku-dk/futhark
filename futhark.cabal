@@ -305,15 +305,17 @@ library
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.ReplaceRecords
       Futhark.Internalise.TypesValues
+      Futhark.LSP.CodeAction
       Futhark.LSP.CodeLens
       Futhark.LSP.CommandType
       Futhark.LSP.Compile
       Futhark.LSP.Diagnostic
       Futhark.LSP.Handlers
       Futhark.LSP.InlayHint
-      Futhark.LSP.Tool
-      Futhark.LSP.State
       Futhark.LSP.PositionMapping
+      Futhark.LSP.State
+      Futhark.LSP.Tool
+      Futhark.LSP.TypeAscription
       Futhark.MonadFreshNames
       Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE
