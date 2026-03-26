@@ -1603,24 +1603,6 @@ transformDistributed irregs segments dist = do
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
 
-transformStm :: Scope SOACS -> Stm SOACS -> PassM (Stms GPU)
-transformStm scope (Let pat _ (Op (Screma w arrs form)))
-  | Just lam <- isMapSOAC form = do
-      -- traceM $ "&&&&transformStm: " ++ prettyString (Let pat mempty (Op (Screma w arrs form)))
-      -- traceM $ "W :" ++ prettyString w
-      let arrs' =
-            zipWith MapArray arrs $
-              map paramType (lambdaParams (scremaLambda form))
-          (distributed, _) = distributeMap scope pat (NE.singleton w) arrs' lam
-          m = transformDistributed mempty (NE.singleton w) distributed
-      traceM $ prettyString distributed
-      runReaderT (runBuilder_ m) scope
-transformStm _ stm = pure $ oneStm $ soacsStmToGPU stm
-
-transformStms :: Scope SOACS -> Stms SOACS -> PassM (Stms GPU)
-transformStms scope stms =
-  fold <$> traverse (transformStm (scope <> scopeOf stms)) stms
-
 -- Like 'liftSubExp' but always returns a Regular result with the
 -- given expected shape. Reshapes the underlying data if necessary.
 liftSubExpRegular :: Segments -> DistInputs -> DistEnv -> Shape -> SubExp -> Builder GPU VName
@@ -1888,17 +1870,60 @@ liftFunDef const_scope fd = do
         funDefRetType = rettype'
       }
 
+transformLambda :: Scope SOACS -> Lambda SOACS -> PassM (Lambda GPU)
+transformLambda scope (Lambda params ret body) = do
+  body' <- transformBody (scopeOfLParams params <> scope) body
+  pure $ Lambda params ret body'
+
+transformStm :: Scope SOACS -> Stm SOACS -> PassM (Stms GPU)
+transformStm scope (Let pat _ (Op (Screma w arrs form)))
+  | Just lam <- isMapSOAC form = do
+      let arrs' =
+            zipWith MapArray arrs $
+              map paramType (lambdaParams (scremaLambda form))
+          (distributed, _) = distributeMap scope pat (NE.singleton w) arrs' lam
+          m = transformDistributed mempty (NE.singleton w) distributed
+      traceM $ prettyString distributed
+      runReaderT (runBuilder_ m) scope
+transformStm scope (Let pat aux (Loop params form body)) =
+  oneStm . Let pat aux . Loop params form <$> transformBody scope' body
+  where
+    scope' = scopeOfLoopForm form <> scopeOfFParams (map fst params) <> scope
+transformStm scope (Let pat aux (Match ses cases def_body ret)) =
+  oneStm . Let pat aux
+    <$> (Match ses <$> mapM onCase cases <*> transformBody scope def_body <*> pure ret)
+  where
+    onCase = traverse (transformBody scope)
+transformStm scope (Let pat aux (WithAcc inputs withacc_lam)) =
+  oneStm . Let pat aux
+    <$> (WithAcc (map onInput inputs) <$> transformLambda scope withacc_lam)
+  where
+    onInput (shape, arrs, Nothing) =
+      (shape, arrs, Nothing)
+    onInput (shape, arrs, Just (lam, nes)) =
+      (shape, arrs, Just (soacsLambdaToGPU lam, nes))
+transformStm _ stm = pure $ oneStm $ soacsStmToGPU stm
+
+transformStms :: Scope SOACS -> Stms SOACS -> PassM (Stms GPU)
+transformStms scope stms =
+  fold <$> traverse (transformStm (scope <> scopeOf stms)) stms
+
+transformBody :: Scope SOACS -> Body SOACS -> PassM (Body GPU)
+transformBody scope (Body () stms res) = do
+  stms' <- transformStms scope stms
+  pure $ Body () stms' res
+
 transformFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
 transformFunDef consts_scope fd = do
   let FunDef
-        { funDefBody = Body () stms res,
+        { funDefBody = body,
           funDefParams = fparams,
           funDefRetType = rettype
         } = fd
-  stms' <- transformStms (consts_scope <> scopeOfFParams fparams) stms
+  body' <- transformBody (scopeOfFParams fparams <> consts_scope) body
   pure $
     fd
-      { funDefBody = Body () stms' res,
+      { funDefBody = body',
         funDefRetType = rettype,
         funDefParams = fparams
       }
