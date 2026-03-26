@@ -243,7 +243,7 @@ isParallelStm :: Stm SOACS -> Bool
 isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
   where
     isMap BasicOp {} = False
-    isMap Apply {} = True
+    isMap (Apply fname _ _ _) = not $ isBuiltInFunction fname -- TODO: do better
     isMap (Match _ cases def_case _) =
       any isParallelStm $
         bodyStms def_case
