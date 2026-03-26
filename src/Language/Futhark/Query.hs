@@ -18,7 +18,6 @@ module Language.Futhark.Query
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Monad
 import Control.Monad.State
 import Data.List (find, unsnoc)
@@ -49,6 +48,7 @@ data TermFunData
     termFunAscription :: Maybe TypeAscription,
     -- I wanted to remove the @Maybe@ but @Loc@ always includes a @NoLoc@ case
     termFunArgEnd :: Maybe Pos,
+    termFunTypeArgEnd :: Maybe Pos,
     termFunNameEnd :: Maybe Pos,
     termFunTypeParams :: [TypeParamBase VName]
   }
@@ -162,7 +162,12 @@ expDefs e =
                       termFunAscription = tasc,
                       termFunArgEnd = start_pos,
                       termFunNameEnd = name_end,
-                      termFunTypeParams = tparams
+                      termFunTypeParams = tparams,
+                      termFunTypeArgEnd = do
+                        (_, last_type_arg) <- unsnoc tparams
+                        case locOf last_type_arg of
+                          NoLoc -> Nothing
+                          Loc _ end -> Just end
                     }
               name_end = case locOf name_loc of
                 NoLoc -> Nothing
@@ -202,11 +207,12 @@ valBindDefs vbind =
             termFunAscription = valBindRetDecl vbind,
             termFunArgEnd = args_end,
             termFunNameEnd = name_end_pos,
-            termFunTypeParams = valBindTypeParams vbind
+            termFunTypeParams = valBindTypeParams vbind,
+            termFunTypeArgEnd = do
+              (_, last_type_arg) <- unsnoc $ valBindTypeParams vbind
+              locPos $ locOf last_type_arg
           }
-    args_end =
-      (locPos . locOf . snd =<< unsnoc (valBindParams vbind))
-        <|> name_end_pos
+    args_end = locPos . locOf . snd =<< unsnoc (valBindParams vbind)
     name_end_pos = locPos . locOf . valBindNameLoc $ vbind
     locPos NoLoc = Nothing
     locPos (Loc _ e) = Just e
