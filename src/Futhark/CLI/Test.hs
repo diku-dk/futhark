@@ -1086,7 +1086,7 @@ runOne s config scratchBin srv = do
                         <> showText seed
                         <> " after "
                         <> showText i
-                        <> " tests"
+                        <> " tests\n"
 
                 -- Collect Shrinking Logs
                 case psShrink s of
