@@ -39,6 +39,11 @@ import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, rem)
 
+-- data InnerMapMode  =  Regular  | IrRegular
+data InnerMapMode
+  = MultiDim
+  | SingleDim
+
 flattenOps :: FlattenOps
 flattenOps = FlattenOps {flattenDistStm = transformDistStm}
 
@@ -743,48 +748,37 @@ transformInnerMap ::
   Builder GPU [ResRep]
 transformInnerMap segments env inps pat w arrs map_lam
   | not (isVariant inps env w) =
-      transformInnerMapMulDim segments env inps pat w arrs map_lam
-  | otherwise = do
-      ws <- dataArr segments env inps w
-      (ws_F, ws_O, ws_data) <- doRepIota ws
-      new_segment <- arraySize 0 <$> lookupType ws_data
-      arrs' <-
-        zipWithM
-          (onMapInputArr segments env inps ws ws_O ws_data)
-          (lambdaParams map_lam)
-          arrs
-      let free = freeIn map_lam
-      free_sizes <-
-        localScope (scopeOfDistInputs inps) $
-          foldMap freeIn <$> mapM lookupType (namesToList free)
-      let free_and_sizes = namesToList $ free <> free_sizes
-      (free_replicated, replicated) <-
-        fmap unzip . sequence $
-          mapMaybe
-            (onMapFreeVar segments env inps ws (ws_F, ws_O, ws_data))
-            free_and_sizes
-      free_ps <-
-        zipWithM
-          newParam
-          (map ((<> "_free") . baseName) free_and_sizes)
-          (map mapArrayRowType replicated)
-      scope <- askScope
-      let substs = M.fromList $ zip free_replicated $ map paramName free_ps
-          map_lam' =
-            substituteNames
-              substs
-              ( map_lam
-                  { lambdaParams = free_ps <> lambdaParams map_lam
-                  }
-              )
-          (distributed, arrmap) =
-            distributeMap scope pat (NE.singleton new_segment) (replicated <> arrs') map_lam'
-          m =
-            transformDistributedInnerMap (ws_F, ws_O, ws) arrmap (NE.singleton new_segment) distributed
-      traceM $ unlines ["inner map distributed", prettyString distributed]
-      (res, stms) <- runReaderT (runBuilder m) scope
-      addStms stms
-      pure $ map Irregular res
+      transformInnerMapMultiDim segments env inps pat w arrs map_lam
+  | otherwise =
+      transformInnerMapSingleDim segments env inps pat w arrs map_lam
+
+transformInnerMapSingleDim ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  Pat Type ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  Builder GPU [ResRep]
+transformInnerMapSingleDim segments env inps pat w arrs map_lam = do
+  ws <- dataArr segments env inps w
+  (ws_F, ws_O, ws_data) <- doRepIota ws
+  new_segment <- arraySize 0 <$> lookupType ws_data
+  arrs' <-
+    zipWithM
+      (onMapInputArr segments env inps ws ws_O ws_data)
+      (lambdaParams map_lam)
+      arrs
+  distributeAndTransformInnerMap
+    SingleDim
+    (ws_F, ws_O, ws)
+    (NE.singleton new_segment)
+    inps
+    pat
+    arrs'
+    (onMapFreeVar segments env inps ws (ws_F, ws_O, ws_data))
+    map_lam
 
 onMapInputArrMultiDim ::
   Segments ->
@@ -887,7 +881,7 @@ replicateForW segments w v = do
   letExp (baseName v <> "_free_rep_tr") . BasicOp $
     Rearrange v_rep perm
 
-transformInnerMapMulDim ::
+transformInnerMapMultiDim ::
   Segments ->
   DistEnv ->
   DistInputs ->
@@ -896,15 +890,35 @@ transformInnerMapMulDim ::
   [VName] ->
   Lambda SOACS ->
   Builder GPU [ResRep]
-transformInnerMapMulDim segments env inps pat w arrs map_lam = do
+transformInnerMapMultiDim segments env inps pat w arrs map_lam = do
   ws <- dataArr segments env inps w
-  (ws_F, ws_O, ws_data) <- doRepIota ws
-  let new_segment = segments <> pure w
+  (ws_F, ws_O, _ws_data) <- doRepIota ws
   arrs' <-
     zipWithM
       (onMapInputArrMultiDim segments w env inps)
       (lambdaParams map_lam)
       arrs
+  distributeAndTransformInnerMap
+    MultiDim
+    (ws_F, ws_O, ws)
+    (segments <> pure w)
+    inps
+    pat
+    arrs'
+    (onMapFreeVarMultiDim segments w env inps)
+    map_lam
+
+distributeAndTransformInnerMap ::
+  InnerMapMode ->
+  (VName, VName, VName) ->
+  Segments ->
+  DistInputs ->
+  Pat Type ->
+  [MapArray IrregularRep] ->
+  (VName -> Maybe (Builder GPU (VName, MapArray IrregularRep))) ->
+  Lambda SOACS ->
+  Builder GPU [ResRep]
+distributeAndTransformInnerMap mode ws_triple new_segment inps pat arrs' onFreeVar map_lam = do
   let free = freeIn map_lam
   free_sizes <-
     localScope (scopeOfDistInputs inps) $
@@ -913,7 +927,7 @@ transformInnerMapMulDim segments env inps pat w arrs map_lam = do
   (free_replicated, replicated) <-
     fmap unzip . sequence $
       mapMaybe
-        (onMapFreeVarMultiDim segments w env inps)
+        onFreeVar
         free_and_sizes
   free_ps <-
     zipWithM
@@ -932,11 +946,11 @@ transformInnerMapMulDim segments env inps pat w arrs map_lam = do
       (distributed, arrmap) =
         distributeMap scope pat new_segment (replicated <> arrs') map_lam'
       m =
-        transformDistributedInnerMap2 (ws_F, ws_O, ws) arrmap new_segment segments distributed
-  traceM $ unlines ["inner map multi-dim distributed", prettyString distributed]
-  (reps, stms) <- runReaderT (runBuilder m) scope
+        transformDistributedInnerMap mode ws_triple arrmap new_segment distributed
+  traceM $ unlines ["inner map distributed", prettyString distributed]
+  (res, stms) <- runReaderT (runBuilder m) scope
   addStms stms
-  pure reps
+  pure res
 
 -- Reduction or scan operators may not have any free variables that are variant
 -- to the nest (that is, are inputs to the distributed operation). This is
@@ -1379,62 +1393,27 @@ distResCerts env = Certs . map f
       Regular v -> v
       Irregular {} -> error "resCerts: irregular"
 
-irregularMapResult ::
-  (VName, VName, VName) ->
-  Segments ->
-  IrregularRep ->
-  DistEnv ->
-  VName ->
-  Type ->
-  DistInputs ->
-  Builder GPU IrregularRep
-irregularMapResult (ws, ws_F, ws_O) segments irreg env v v_t new_inps =
-  if any (isTypeVariant new_inp_var) (arrayShape v_t)
-    then do
-      old_segment <- arraySize 0 <$> lookupType ws
-      new_shape <- letExp (baseName v <> "_outer_shape") <=< segMap (MkSolo old_segment) $ \(MkSolo is) -> do
-        outer_ind <- letSubExp "outer_ind" =<< eIndex ws_O [eSubExp is]
-        outer_ws_i <- letSubExp "outer_ws" =<< eIndex ws [eSubExp is]
-        sz <-
-          letSubExp "sz"
-            =<< eIf
-              (toExp $ pe64 outer_ws_i .==. 0)
-              (eBody [toExp $ intConst Int64 0])
-              ( do
-                  last_row <- letSubExp "last_row" <=< toExp $ pe64 outer_ind + pe64 outer_ws_i - 1
-                  start <- letSubExp "start" =<< eIndex (irregularO irreg) [eSubExp outer_ind]
-                  last_offset <- letSubExp "last_offset" =<< eIndex (irregularO irreg) [eSubExp last_row]
-                  last_size <- letSubExp "last_size" =<< eIndex (irregularS irreg) [eSubExp last_row]
-                  eBody [toExp $ pe64 last_offset - pe64 start + pe64 last_size]
-              )
-        pure [subExpRes sz]
-      (new_ws_F, new_ws_O, _) <- doRepIota new_shape
-      letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg
-      pure $ IrregularRep {irregularS = new_shape, irregularF = new_ws_F, irregularO = new_ws_O, irregularD = v}
-    else do
-      let shape = segmentsShape segments <> arrayShape v_t
-      v_copy <-
-        letExp (baseName v) . BasicOp $
-          Replicate mempty (Var $ irregularD irreg)
-      v_copy_shape <- arrayShape <$> lookupType v_copy
-      letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
-      pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
-  where
-    isTypeVariant vin se = case se of
-      Var v' -> S.member v' vin
-      _ -> False
-    new_inp_var = S.fromList $ map fst new_inps
+reshapeAndBind :: VName -> VName -> Shape -> Builder GPU ()
+reshapeAndBind v src shape = do
+  v_copy <- letExp (baseName v) . BasicOp $ Replicate mempty (Var src)
+  v_copy_shape <- arrayShape <$> lookupType v_copy
+  letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
 
-irregularMapResult2 ::
+mapResultRep :: InnerMapMode -> (VName, VName, VName) -> VName -> ResRep
+mapResultRep MultiDim _ v = Regular v
+mapResultRep SingleDim (ws, ws_F, ws_O) v =
+  Irregular $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
+
+irregularMapResult ::
+  InnerMapMode ->
   (VName, VName, VName) ->
   Segments ->
   IrregularRep ->
-  DistEnv ->
   VName ->
   Type ->
   DistInputs ->
   Builder GPU ResRep
-irregularMapResult2 (ws, ws_F, ws_O) segments irreg env v v_t new_inps =
+irregularMapResult mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
   if any (isTypeVariant new_inp_var) (arrayShape v_t)
     then do
       old_segment <- arraySize 0 <$> lookupType ws
@@ -1456,77 +1435,24 @@ irregularMapResult2 (ws, ws_F, ws_O) segments irreg env v v_t new_inps =
         pure [subExpRes sz]
       (new_ws_F, new_ws_O, _) <- doRepIota new_shape
       letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg
-      pure $ Irregular $ IrregularRep {irregularS = new_shape, irregularF = new_ws_F, irregularO = new_ws_O, irregularD = v}
+      pure $ mapResultRep mode (new_shape, new_ws_F, new_ws_O) v
     else do
-      let shape = segmentsShape segments <> arrayShape v_t
-      v_copy <-
-        letExp (baseName v) . BasicOp $
-          Replicate mempty (Var $ irregularD irreg)
-      v_copy_shape <- arrayShape <$> lookupType v_copy
-      letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
-      pure $ Regular v
+      reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
+      pure $ mapResultRep mode (ws, ws_F, ws_O) v
   where
     isTypeVariant vin se = case se of
       Var v' -> S.member v' vin
       _ -> False
     new_inp_var = S.fromList $ map fst new_inps
 
-transformDistributedInnerMap2 ::
+transformDistributedInnerMap ::
+  InnerMapMode ->
   (VName, VName, VName) ->
   M.Map ResTag IrregularRep ->
-  Segments ->
   Segments ->
   Distributed ->
   Builder GPU [ResRep]
-transformDistributedInnerMap2 (ws_F, ws_O, ws) irregs new_segments _ dist = do
-  let Distributed dstms (DistResults resmap reps) = dist
-  let new_inps = concatMap distStmInputs dstms
-  env <- foldM (transformDistStm new_segments) env_initial dstms
-  resmap_res <- fmap concat $ forM (M.toList resmap) $ \(rt, binds) ->
-    forM binds $ \(cs_inps, v, v_t) ->
-      certifying (distResCerts env cs_inps) $
-        -- FIXME: the copies are because we have too liberal aliases on
-        -- lifted functions.
-        case resVar rt env of
-          Regular v' -> do
-            if isAcc v_t
-              then do
-                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-                pure $ Regular v
-              else do
-                let shape = segmentsShape new_segments <> arrayShape v_t
-                -- letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-                v_copy <- letExp (baseName v) . BasicOp $ Replicate mempty (Var v')
-                v_copy_shape <- arrayShape <$> lookupType v_copy
-                letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
-                pure $ Regular v
-          Irregular irreg -> irregularMapResult2 (ws, ws_F, ws_O) new_segments irreg env v v_t new_inps
-  reps_res <- forM reps $ \(v, r) -> do
-    case r of
-      Left se -> do
-        letBindNames [v] $ BasicOp $ Replicate (segmentsShape new_segments) se
-        pure $ Regular v
-      Right (DistInputFree arr _) -> do
-        letBindNames [v] $ BasicOp $ SubExp $ Var arr
-        pure $ Regular v
-      -- I think this can happen
-      Right (DistInput rt t) ->
-        case resVar rt env of
-          Regular v' -> do
-            letBindNames [v] $ BasicOp $ SubExp $ Var v'
-            pure $ Regular v
-          Irregular irreg -> irregularMapResult2 (ws, ws_F, ws_O) new_segments irreg env v t new_inps
-  pure $ resmap_res <> reps_res
-  where
-    env_initial = DistEnv {distResMap = M.map Irregular irregs}
-
-transformDistributedInnerMap ::
-  (VName, VName, VName) ->
-  M.Map ResTag IrregularRep ->
-  Segments ->
-  Distributed ->
-  Builder GPU [IrregularRep]
-transformDistributedInnerMap (ws_F, ws_O, ws) irregs segments dist = do
+transformDistributedInnerMap mode (ws_F, ws_O, ws) irregs segments dist = do
   let Distributed dstms (DistResults resmap reps) = dist
   let new_inps = concatMap distStmInputs dstms
   env <- foldM (transformDistStm segments) env_initial dstms
@@ -1537,24 +1463,33 @@ transformDistributedInnerMap (ws_F, ws_O, ws) irregs segments dist = do
         -- lifted functions.
         case resVar rt env of
           Regular v' -> do
-            letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-            pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
-          Irregular irreg -> irregularMapResult (ws, ws_F, ws_O) segments irreg env v v_t new_inps
+            case mode of
+              MultiDim
+                | isAcc v_t -> do
+                    letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+                    pure $ Regular v
+                | otherwise -> do
+                    reshapeAndBind v v' (segmentsShape segments <> arrayShape v_t)
+                    pure $ Regular v
+              SingleDim -> do
+                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+                pure $ mapResultRep mode (ws, ws_F, ws_O) v
+          Irregular irreg -> irregularMapResult mode (ws, ws_F, ws_O) segments irreg v v_t new_inps
   reps_res <- forM reps $ \(v, r) -> do
     case r of
       Left se -> do
         letBindNames [v] $ BasicOp $ Replicate (segmentsShape segments) se
-        pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
+        pure $ mapResultRep mode (ws, ws_F, ws_O) v
       Right (DistInputFree arr _) -> do
         letBindNames [v] $ BasicOp $ SubExp $ Var arr
-        pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
+        pure $ mapResultRep mode (ws, ws_F, ws_O) v
       -- I think this can happen
       Right (DistInput rt t) ->
         case resVar rt env of
           Regular v' -> do
             letBindNames [v] $ BasicOp $ SubExp $ Var v'
-            pure $ IrregularRep {irregularS = ws, irregularF = ws_F, irregularO = ws_O, irregularD = v}
-          Irregular irreg -> irregularMapResult (ws, ws_F, ws_O) segments irreg env v t new_inps
+            pure $ mapResultRep mode (ws, ws_F, ws_O) v
+          Irregular irreg -> irregularMapResult mode (ws, ws_F, ws_O) segments irreg v t new_inps
   pure $ resmap_res <> reps_res
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
