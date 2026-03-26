@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Scan chunk size is now exposed as tuning parameter in `cuda` and `hip`
   backends.
 
++ `futhark lsp` offers code actions, they insert type ascriptions for
+  inferred types. Every named binding has an action.
+
 ### Removed
 
 ### Changed
