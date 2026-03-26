@@ -565,7 +565,8 @@ removeOutputsExcept toKeep s = case s of
 
       changed = new_post /= post_lam
 
-      (pats_new, res_new) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
+      (pats_new, res_new) =
+        unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
       (results, types) = unzip res_new
       new_post =
         post_lam
