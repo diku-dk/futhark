@@ -299,7 +299,7 @@ maposcanomapSOAC pre_lam [] post_lam = do
       stmsFromLam pre_lam
         <> composeBinds pre_lam deps deps post_lam
         <> stmsFromLam post_lam
-maposcanomapSOAC post_lam scans lam =
+maposcanomapSOAC lam scans post_lam =
   pure $ ScremaForm lam scans [] post_lam
 
 -- | Construct a Screma with possibly multiple reductions, and
