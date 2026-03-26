@@ -16,6 +16,7 @@ import Futhark.LSP.Tool (bindingsInState, filterByLspRange)
 import Futhark.LSP.TypeAscription (TypeAscription (TypeAscLet, TypeAscParam, TypeAscReturn, TypeAscType), missingAscriptions, missingTypeParameters)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (VName, baseText)
+import Language.Futhark.FreeVars (freeInType, fvVars)
 import Language.Futhark.Prop (typeVars)
 import Language.Futhark.Syntax (RetTypeBase (RetType), TypeParamBase)
 import Language.LSP.Protocol.Types (CodeAction (..), CodeActionKind (CodeActionKind_Custom), Command, Position (Position), Range (Range), TextEdit (..), Uri, WorkspaceEdit (..), type (|?) (InR))
@@ -47,7 +48,7 @@ getCodeActions file_uri range state filepath = fromMaybe [] $ do
       Just
         $ mkAction
           [NI.text|Insert type: `$nameText$typeText`|]
-        $ (typeText, line, column) : typeVarEdits types (typeVars typ)
+        $ (typeText, line, column) : typeVarEdits types (typesAndVars typ)
       where
         typeText = ": " <> prettyText typ
         nameText = baseText name
@@ -57,7 +58,7 @@ getCodeActions file_uri range state filepath = fromMaybe [] $ do
           [NI.text|Insert type: `($nameText: $typeText)`|]
         $ posEdit openPos "("
           : posEdit pos (": " <> typeText <> ")")
-          : typeVarEdits types (typeVars typ)
+          : typeVarEdits types (typesAndVars typ)
       where
         posEdit (Pos _ line column _) t = (t, line, column)
         typeText = prettyText typ
@@ -71,10 +72,12 @@ getCodeActions file_uri range state filepath = fromMaybe [] $ do
         typeText = " : " <> prettyText typ
         nameText = baseText name
         retTypeVars =
-          S.fromList dims `S.union` typeVars innerType
+          S.fromList dims `S.union` typesAndVars innerType
           where
             RetType dims innerType = typ
     codeActions _ _ (TypeAscType _ _) = Nothing
+
+    typesAndVars t = typeVars t `S.union` fvVars (freeInType t)
 
     -- Text edit information for referenced types that are not yet
     -- syntactically present
