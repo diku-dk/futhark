@@ -229,7 +229,7 @@ testInlayTypeHint =
       hintTestCase
         "type argument hint"
         "def identity = let f 'a (x: a): a = x in f"
-        [(Position 0 12, " 'a\8320"), (Position 0 12, ": (x: a\8320) -> a\8320")]
+        [(Position 0 12, " 'a\8320"), (Position 0 12, " : (x: a\8320) -> a\8320")]
     lambdaArgHint =
       hintTestCase
         "lambda argument hint"
@@ -239,12 +239,12 @@ testInlayTypeHint =
       hintTestCase
         "def constant hint"
         "def pi = 3"
-        [(Position 0 6, ": i32")]
+        [(Position 0 6, " : i32")]
     defReturnHint =
       hintTestCase
         "def return hint"
         "def twice (x: i32) = x + x"
-        [(Position 0 18, ": i32")]
+        [(Position 0 18, " : i32")]
     loopHint =
       hintTestCase
         "loop hint"

@@ -32,7 +32,7 @@ getInlayHints range state filepath =
     inlayHint (TypeAscParam s tname pos) =
       [startHint s, bareHint (": " <> prettyText tname <> ")") pos]
     inlayHint (TypeAscReturn typName pos) =
-      [bareHint (": " <> prettyText typName) pos]
+      [bareHint (" : " <> prettyText typName) pos]
     inlayHint (TypeAscType typName pos) =
       [bareHint (" " <> prettyText typName) pos]
 
