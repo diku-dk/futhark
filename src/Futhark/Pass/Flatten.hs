@@ -952,7 +952,8 @@ distributeAndTransformInnerMap mode ws_triple new_segment inps pat arrs' onFreeV
   traceM $ unlines ["inner map distributed", prettyString distributed]
   (res, stms) <- runReaderT (runBuilder m) scope
   addStms stms
-  pure res
+  -- order the result representations in the same order as the pattern
+  pure $ resRepsInPatOrder pat res
 
 -- Reduction or scan operators may not have any free variables that are variant
 -- to the nest (that is, are inputs to the distributed operation). This is
@@ -972,9 +973,18 @@ doSegScan scans flags elems =
   let scan = singleScan scans
    in genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) (scanNeutral scan) flags elems
 
-resRepData :: ResRep -> VName
-resRepData (Regular v) = v
-resRepData (Irregular rep) = irregularD rep
+-- Hacky fix to get result representations in the same order as the pattern
+resRepsInPatOrder :: Pat Type -> [(VName, ResRep)] -> [ResRep]
+resRepsInPatOrder pat reps =
+  let rep_map = M.fromList reps
+      lookupRes v =
+        case M.lookup v rep_map of
+          Just rep -> rep
+          Nothing ->
+            error $
+              "resRepsInPatOrder: missing result for "
+                ++ prettyString v
+   in map lookupRes (patNames pat)
 
 -- | Get segment info and flatten data arrays for segmented reduce/scan.
 -- For Irregular, segment info is already available.
@@ -1033,11 +1043,8 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
             PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
           map_res_all <-
             transformInnerMap segments env inps map_pat w arrs map_lam
-          let (redout_names, mapout_names) =
-                splitAt (redResults reds) (patNames map_pat)
-              hasPat pat_names rr = resRepData rr `elem` pat_names
-              redout_res = filter (hasPat redout_names) map_res_all
-              mapout_res = filter (hasPat mapout_names) map_res_all
+          let (redout_names, _) = splitAt (redResults reds) (patNames map_pat)
+              (redout_res, mapout_res) = splitAt (redResults reds) map_res_all
           (ws_F, ws_O, ws_S) <- resRepSegInfo segments env inps w (head redout_res)
           -- For multi-dim (Regular) results, flatten to 1D before segmented reduce.
           redout_names' <- case head redout_res of
@@ -1066,11 +1073,8 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
             PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
           map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
-          let (scanout_names, mapout_names) =
-                splitAt (scanResults scans) (patNames map_pat)
-              hasPat pat_names rr = resRepData rr `elem` pat_names
-              scanout_res = filter (hasPat scanout_names) map_res_all
-              mapout_res = filter (hasPat mapout_names) map_res_all
+          let (scanout_names, _) = splitAt (scanResults scans) (patNames map_pat)
+              (scanout_res, mapout_res) = splitAt (scanResults scans) map_res_all
           (ws_F, ws_O, ws_S) <- resRepSegInfo segments env inps w (head scanout_res)
           -- For Regular results, flatten to 1D before segmented scan.
           scanout_names' <- case head scanout_res of
@@ -1453,7 +1457,7 @@ transformDistributedInnerMap ::
   M.Map ResTag IrregularRep ->
   Segments ->
   Distributed ->
-  Builder GPU [ResRep]
+  Builder GPU [(VName, ResRep)]
 transformDistributedInnerMap mode (ws_F, ws_O, ws) irregs segments dist = do
   let Distributed dstms (DistResults resmap reps) = dist
   let new_inps = concatMap distStmInputs dstms
@@ -1469,29 +1473,32 @@ transformDistributedInnerMap mode (ws_F, ws_O, ws) irregs segments dist = do
               MultiDim
                 | isAcc v_t -> do
                     letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-                    pure $ Regular v
+                    pure (v, Regular v)
                 | otherwise -> do
                     reshapeAndBind v v' (segmentsShape segments <> arrayShape v_t)
-                    pure $ Regular v
+                    pure (v, Regular v)
               SingleDim -> do
                 letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-                pure $ mapResultRep mode (ws, ws_F, ws_O) v
-          Irregular irreg -> irregularMapResult mode (ws, ws_F, ws_O) segments irreg v v_t new_inps
+                pure (v, mapResultRep mode (ws, ws_F, ws_O) v)
+          Irregular irreg -> do
+            rep <- irregularMapResult mode (ws, ws_F, ws_O) segments irreg v v_t new_inps
+            pure (v, rep)
   reps_res <- forM reps $ \(v, r) -> do
     case r of
       Left se -> do
         letBindNames [v] $ BasicOp $ Replicate (segmentsShape segments) se
-        pure $ mapResultRep mode (ws, ws_F, ws_O) v
+        pure (v, mapResultRep mode (ws, ws_F, ws_O) v)
       Right (DistInputFree arr _) -> do
         letBindNames [v] $ BasicOp $ SubExp $ Var arr
-        pure $ mapResultRep mode (ws, ws_F, ws_O) v
-      -- I think this can happen
+        pure (v, mapResultRep mode (ws, ws_F, ws_O) v)
       Right (DistInput rt t) ->
         case resVar rt env of
           Regular v' -> do
             letBindNames [v] $ BasicOp $ SubExp $ Var v'
-            pure $ mapResultRep mode (ws, ws_F, ws_O) v
-          Irregular irreg -> irregularMapResult mode (ws, ws_F, ws_O) segments irreg v t new_inps
+            pure (v, mapResultRep mode (ws, ws_F, ws_O) v)
+          Irregular irreg -> do
+            rep <- irregularMapResult mode (ws, ws_F, ws_O) segments irreg v t new_inps
+            pure (v, rep)
   pure $ resmap_res <> reps_res
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
