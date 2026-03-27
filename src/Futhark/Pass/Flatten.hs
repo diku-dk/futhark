@@ -37,7 +37,7 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
-import Prelude hiding (div, rem)
+import Prelude hiding (div, quot, rem)
 
 -- data InnerMapMode  =  Regular  | IrRegular
 data InnerMapMode
@@ -838,7 +838,7 @@ onMapFreeVarMultiDim segments w env inps v = do
           letExp (baseName v <> "_new_S")
             <=< segMap (MkSolo new_nseg)
             $ \(MkSolo i) -> do
-              old_seg <- letSubExp "old_seg" <=< toExp $ pe64 i `Futhark.Util.IntegralExp.quot` pe64 w
+              old_seg <- letSubExp "old_seg" <=< toExp $ pe64 i `quot` pe64 w
               s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp old_seg]
               pure [subExpRes s]
 
@@ -850,7 +850,7 @@ onMapFreeVarMultiDim segments w env inps v = do
             <=< segMap (MkSolo m)
             $ \(MkSolo i) -> do
               new_seg <- letSubExp "new_seg" =<< eIndex new_II1 [eSubExp i]
-              old_seg <- letSubExp "old_seg" <=< toExp $ pe64 new_seg `Futhark.Util.IntegralExp.quot` pe64 w
+              old_seg <- letSubExp "old_seg" <=< toExp $ pe64 new_seg `quot` pe64 w
               new_off <- letSubExp "new_off" =<< eIndex new_O [eSubExp new_seg]
               old_off <- letSubExp "old_off" =<< eIndex (irregularO rep) [eSubExp old_seg]
               j <- letSubExp "j" <=< toExp $ pe64 i - pe64 new_off
@@ -1509,15 +1509,10 @@ transformDistributed irregs segments dist = do
         -- lifted functions.
         case resVar rt env of
           Regular v' -> letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-          Irregular irreg -> do
+          Irregular irreg ->
             -- It might have an irregular representation, but we know
             -- that it is actually regular because it is a result.
-            let shape = segmentsShape segments <> arrayShape v_t
-            v_copy <-
-              letExp (baseName v) . BasicOp $
-                Replicate mempty (Var $ irregularD irreg)
-            v_copy_shape <- arrayShape <$> lookupType v_copy
-            letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
+            reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
   forM_ reps $ \(v, r) ->
     case r of
       Left se ->
@@ -1525,16 +1520,11 @@ transformDistributed irregs segments dist = do
       Right (DistInputFree arr _) ->
         letBindNames [v] $ BasicOp $ SubExp $ Var arr
       -- This can happen. ask Troels
-      Right (DistInput rt t) -> do
-        let shape = segmentsShape segments <> arrayShape t
+      Right (DistInput rt t) ->
         case resVar rt env of
           Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
-          Irregular irreg -> do
-            v_copy <-
-              letExp (baseName v <> "_copy_right_dist") . BasicOp $
-                Replicate mempty (Var $ irregularD irreg)
-            v_copy_shape <- arrayShape <$> lookupType v_copy
-            letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
+          Irregular irreg ->
+            reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape t)
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
 
