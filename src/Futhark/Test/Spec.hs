@@ -218,9 +218,34 @@ parseAction sep =
   choice
     [ CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError sep),
       RunCases
-        <$> parseInputOutputs sep
+        <$> (parseInputOutputs sep <|> parseInputOutputsProp sep)
         <*> many (parseExpectedStructure sep)
         <*> many (parseWarning sep)
+    ]
+
+parseInputOutputsProp :: Parser () -> (Parser [InputOutputs])
+parseInputOutputsProp sep = do
+  entrys <- parseEntryPointsProp sep
+  runs <- parseNumTests sep
+  pure $
+    if null entrys
+      then []
+      else map (`InputOutputs` runs) entrys
+
+parseEntryPointsProp :: Parser () -> Parser [T.Text]
+parseEntryPointsProp sep =
+  (lexeme' "property:" *> many entry <* sep)
+  where
+    constituent c = not (isSpace c) && c /= '}'
+    entry = lexeme' $ takeWhile1P Nothing constituent 
+
+parseNumTests :: Parser () -> Parser [TestRun]
+parseNumTests sep = do
+  mn <- optional $ lexstr' "num:" *> parseNatural sep
+  let n = fromMaybe 1 mn
+  pure
+    [ TestRun [] (GenValues []) (Succeeds Nothing) i ("#" <> showText i)
+    | i <- [0 .. n - 1]
     ]
 
 parseInputOutputs :: Parser () -> Parser [InputOutputs]
@@ -403,7 +428,7 @@ pProgramTest = do
     pNonTestLine =
       void $ notFollowedBy "-- ==" *> restOfLine
     pInputOutputs =
-      "--" *> sep *> parseDescription sep *> parseInputOutputs sep <* pEndOfTestBlock
+      "--" *> sep *> parseDescription sep *> (parseInputOutputsProp sep <|> parseInputOutputs sep) <* pEndOfTestBlock
 
 validate :: FilePath -> ProgramTest -> Either String ProgramTest
 validate path pt = do

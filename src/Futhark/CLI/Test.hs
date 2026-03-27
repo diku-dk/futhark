@@ -18,7 +18,7 @@ import Data.Char (chr)
 import Data.Int (Int32, Int64, Int8)
 import Data.List (delete, intercalate, partition)
 import Data.Map.Strict qualified as M
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
@@ -41,7 +41,6 @@ import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
-import System.IO.Silently (capture)
 import System.IO.Temp (withSystemTempFile)
 import System.Process.ByteString (readProcessWithExitCode)
 import Text.Regex.TDFA
@@ -58,12 +57,12 @@ extractPropSpecsFromServer :: Server -> IO [PropSpec]
 extractPropSpecsFromServer srv = do
   epsE <- cmdEntryPoints srv
   eps <- either (error . show) pure epsE
-  fmap catMaybes $ mapM getOne eps
+  concat <$> mapM getOne eps
   where
     getOne entry = do
       attrsE <- cmdAttributes srv entry
       attrs <- either (error . show) pure attrsE
-      pure $ msum $ map (parsePropSpec entry) attrs
+      pure $ mapMaybe (parsePropSpec entry) attrs
 
 parsePropSpec :: T.Text -> T.Text -> Maybe PropSpec
 parsePropSpec entry attr = do
@@ -373,10 +372,22 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
             context "Running compiled program" $
               withProgramServer program runner extra_options $ \server -> do
                 let run = runCompiledEntry (FutharkExe futhark) server program
-                normal_test_result <- concat <$> mapM run ios
-
                 propSpecs <- extractPropSpecsFromServer server
-                propResults <- runPBT pbtConfig server propSpecs
+                let isProp io =
+                      any
+                        ( \p -> case runInput p of
+                            GenValues [] -> True
+                            _ -> False
+                        )
+                        (iosTestRuns io)
+
+                let (propIOs, normalIOs) = partition isProp ios
+                normal_test_result <- concat <$> mapM run normalIOs
+
+                let requestedNames = map iosEntryPoint propIOs
+                let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
+                propResults <- runPBT pbtConfig server verifiedProps
+                
                 pure $ normal_test_result ++ propResults
 
       when (mode == Interpreted) $
@@ -658,8 +669,6 @@ runTests config paths = do
             length (concatMap iosTestRuns ios)
               + length sts
               + length wts
-              + 2 -- num of property-based tests, which we treat as a single test case here
-
       getResults ts
         | null (testStatusRemain ts) = report ts >> pure ts
         | otherwise = do
@@ -751,7 +760,7 @@ data PropSpec = PropSpec
   deriving (Show, Eq)
 
 data PBTConfig = PBTConfig
-  { configNumTests :: Int,
+  { configNumTests :: Int32,
     configMaxSize :: Int64,
     configBaseSeed :: Int32
   }
@@ -1018,7 +1027,6 @@ main = mainWithOptions defaultConfig commandLineOptions "options... programs..."
 runPBT :: PBTConfig -> Server -> [PropSpec] -> IO [TestResult]
 runPBT config srv specs = do
   withSystemTempFile "pbt-scratch" $ \scratchBin _scratchHandle -> do
-
     epsE <- cmdEntryPoints srv
     entrypoints <- case epsE of
       Left err -> error $ "cmdEntryPoints failed: " <> show err
@@ -1059,7 +1067,7 @@ runOne s config scratchBin srv = do
   let loop i
         | i >= configNumTests config = pure $ Success
         | otherwise = do
-            let seed = seedBase + fromIntegral i
+            let seed = seedBase + i
 
             -- Setup and run Property
             sendGenInputs srv serverSize serverSeed genName sizeBase seed
@@ -1110,7 +1118,7 @@ runOne s config scratchBin srv = do
                             Right _ -> error "pretty printer returned non-u8 value"
                       Nothing -> prettyVar srv serverIn ty0
 
-                    pure $  "Minimal counterexample: " <> T.pack prettyOut
+                    pure $ "Minimal counterexample: " <> T.pack prettyOut
                   _ -> pure "Could not retrieve input types for counterexample log."
 
                 pure $ Failure [failmsg <> counterLog]
