@@ -920,8 +920,10 @@ distributeAndTransformInnerMap ::
   Builder GPU [ResRep]
 distributeAndTransformInnerMap mode ws_triple new_segment inps pat arrs' onFreeVar map_lam = do
   let free = freeIn map_lam
+  outer_scope <- askScope
+  let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
   free_sizes <-
-    localScope (scopeOfDistInputs inps) $
+    localScope input_scope $
       foldMap freeIn <$> mapM lookupType (namesToList free)
   let free_and_sizes = namesToList $ free <> free_sizes
   (free_replicated, replicated) <-
