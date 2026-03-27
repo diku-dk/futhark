@@ -764,22 +764,24 @@ updateFieldPath ::
   StructType ->
   StructType ->
   TermTypeM StructType
-updateFieldPath src [] ve_t src_leaf_t = do
-  (src_leaf_t', _) <- allDimsFreshInType usage Nonrigid "any" src_leaf_t
-  onFailure (CheckingRecordUpdate [] src_leaf_t' ve_t) $
-    unify usage src_leaf_t' ve_t
-  pure ve_t
+updateFieldPath src all_fs ve_t = recurse [] all_fs
   where
-    usage = mkUsage (locOf src) "record update"
-updateFieldPath src (f : fs) ve_t (Scalar (Record m))
-  | Just f_t <- M.lookup f m = do
-      f_t' <- updateFieldPath src fs ve_t f_t
-      pure $ Scalar $ Record $ M.insert f f_t' m
-updateFieldPath src _ _ _ =
-  typeError (locOf src) mempty . withIndexLink "record-type-not-known" $
-    "Full type of"
-      </> indent 2 (pretty src)
-      </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
+    recurse seen [] t = do
+      (t', _) <- allDimsFreshInType usage Nonrigid "any" t
+      onFailure (CheckingRecordUpdate seen t' ve_t) $
+        unify usage t' ve_t
+      pure ve_t
+      where
+        usage = mkUsage (locOf src) "record update"
+    recurse seen (f : fs) (Scalar (Record m))
+      | Just f_t <- M.lookup f m = do
+          f_t' <- recurse (seen ++ [f]) fs f_t
+          pure $ Scalar $ Record $ M.insert f f_t' m
+    recurse _ _ _ =
+      typeError (locOf src) mempty . withIndexLink "record-type-not-known" $
+        "Full type of"
+          </> indent 2 (pretty src)
+          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
 
 checkUpdateSteps ::
   SrcLoc ->
