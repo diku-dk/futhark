@@ -1,5 +1,4 @@
 {-# LANGUAGE TypeFamilies #-}
-{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 -- The idea is to perform distribution on one level at a time, and
 -- produce "irregular Maps" that can accept and produce irregular
@@ -960,10 +959,10 @@ distributeAndTransformInnerMap mode ws_triple new_segment inps pat arrs' onFreeV
 -- because we would be unable to express them as SegScan/SegReds. Fixing this
 -- would require modifications to the SegOp representation, but it is likely not
 -- worth it, as such operators are extremely rare - and we can just fall back on
--- sequentialisation.
-suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> Bool
-suitableOperator env inps lam =
+suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
+suitableOperator env inps lam nes =
   allNames notVariant (freeIn lam)
+    && not (any (isVariant inps env) nes) -- TODO: maybe not needed
     && all primType (lambdaReturnType lam) -- TODO
   where
     notVariant v = isNothing $ M.lookup v $ inputReps inps env
@@ -1032,13 +1031,13 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       transformDistBasicOp segments env (inps, res', pe, aux, e)
     Let pat aux (Op (Screma w arrs form))
       | Just reds <- isReduceSOAC form,
-        all (suitableOperator env inps . redLambda) reds,
+        all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds,
         Just arrs' <- mapM (`lookup` inps) arrs,
         (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
           elems' <- genSegRed arr_segments flags offsets elems $ singleReduce reds
           pure $ insertReps (zip (map distResTag res) (map Regular elems')) env
       | Just (reds, map_lam) <- isRedomapSOAC form,
-        all (suitableOperator env inps . redLambda) reds -> do
+        all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
             PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
           map_res_all <-
@@ -1063,13 +1062,13 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
             insertRegulars red_tags elems'' $
               insertReps (zip map_tags mapout_res) env
       | Just scans <- isScanSOAC form,
-        all (suitableOperator env inps . scanLambda) scans,
+        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans,
         Just arrs' <- mapM (`lookup` inps) arrs,
         (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
           elems' <- doSegScan scans flags elems
           pure $ insertIrregulars arr_segments flags offsets (zip (map distResTag res) elems') env
       | Just (scans, map_lam) <- isScanomapSOAC form,
-        all (suitableOperator env inps . scanLambda) scans -> do
+        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
             PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
           map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
@@ -1093,9 +1092,9 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           -- XXX: here we silently sequentialise any SOAC that is not handled
           -- above. We need to make sure that we actually handle everything we
           -- care about!
-          error $ "unhandled SOAC:\n" ++ prettyString stm
-    -- transformScalarStm segments env inps res $
-    --   Let { stmPat = pat, stmAux = aux, stmExp = (Op (Screma w arrs form)) }
+          error "unhandled SOAC"
+        -- transformScalarStm segments env inps res $
+        --   Let { stmPat = pat, stmAux = aux, stmExp = Op (Screma w arrs form) }
     Let _ _ (Match scrutinees cases defaultCase _) ->
       transformMatch flattenOps segments env inps res scrutinees cases defaultCase
     Let _ _ (Apply name args rettype s) -> do
@@ -1372,7 +1371,10 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           pure $ insertReps (zip (map distResTag res) out_reps) env
     Let pat aux (WithAcc inputs lam) ->
       transformWithAcc flattenOps segments env inps res pat aux inputs lam
-
+    Let _ _ (Op (Stream {})) -> error "Unhandled Stream"
+    Let _ _ (Op (Hist {})) -> error "Unhandled Hist"
+    Let _ _ (Op (JVP {})) -> error  "Unhandled JVP"
+    Let _ _ (Op (VJP {})) -> error  "Unhandled VJP"
 -- helper to not mess up the tags when generating new ones for the loop parameters
 -- probably won't be used in future
 localiseInputs :: DistEnv -> DistInputs -> (DistInputs, DistEnv, Int)
