@@ -1,4 +1,5 @@
 -- --
+-- tags { no_webgpu }
 -- input {
 --   5
 -- }

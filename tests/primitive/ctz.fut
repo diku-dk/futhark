@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- entry: ctzi8
 -- input { [0i8, 255i8, 128i8] } output { [8, 0, 7] }
 

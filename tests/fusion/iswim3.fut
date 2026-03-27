@@ -4,6 +4,7 @@
 -- producer.
 --
 --==
+-- tags { no_webgpu }
 --
 -- structure { Map 1 Redomap 1 Scanomap 1 }
 

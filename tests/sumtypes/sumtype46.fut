@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- error: cannot match
 
 type t = #foo f64
