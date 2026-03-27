@@ -224,15 +224,21 @@ flatSegmentIndex segments = flattenIndex (segmentDims segments) . map pe64
 readInputs :: Segments -> DistEnv -> [SubExp] -> DistInputs -> Builder GPU ()
 readInputs segments env is = mapM_ onInput
   where
+    bindInputName v e
+      | v `nameIn` freeIn e = do
+          v' <- letExp (baseName v <> "_inp") e
+          letBindNames [v] $ BasicOp $ SubExp $ Var v'
+      | otherwise =
+          letBindNames [v] e
     onInput (v, DistInputFree arr t) =
-      letBindNames [v]
+      bindInputName v
         =<< if isAcc t
           then eSubExp (Var arr)
           else eIndex arr (map eSubExp is)
     onInput (v, DistInput rt t) =
       case resVar rt env of
         Regular arr ->
-          letBindNames [v]
+          bindInputName v
             =<< if isAcc t
               then eSubExp $ Var arr
               else eIndex arr (map eSubExp is)
@@ -241,8 +247,7 @@ readInputs segments env is = mapM_ onInput
           case arrayDims t of
             [num_elems] -> do
               let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
-              v' <- letExp (baseName v <> "_inp") $ BasicOp $ Index v_D slice
-              letBindNames [v] $ BasicOp $ SubExp $ Var v'
+              bindInputName v $ BasicOp $ Index v_D slice
             _ -> do
               num_elems <-
                 letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
