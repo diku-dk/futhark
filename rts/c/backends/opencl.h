@@ -811,6 +811,12 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     ctx->max_shared_memory = max_shared_memory;
   }
 
+  // XXX: this is a hack due to the inability of two-pass scan to handle a
+  // grid size that is larger than the maximum block size.
+  if (ctx->cfg->gpu.default_grid_size > max_thread_block_size) {
+    ctx->cfg->gpu.default_grid_size = max_thread_block_size;
+  }
+
   // Now we go through all the sizes, clamp them to the valid range,
   // or set them to the default.
   for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
