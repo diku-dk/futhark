@@ -22,6 +22,7 @@ module Futhark.Script
     valToExpValue,
     storeExpValue,
     isScriptTuple,
+    project,
 
     -- * Evaluation
     EvalBuiltin,
@@ -509,7 +510,7 @@ cannotApply fname expected actual =
 getField ::
   (MonadIO m, MonadError T.Text m) =>
   ScriptServer ->
-  T.Text ->
+  VarName ->
   Field ->
   m VarName
 getField server from (Field f _) = do
@@ -543,6 +544,7 @@ unTuple server v
   | Just m <- tupleElements server v = m
 unTuple _ v = pure [v]
 
+-- | Extract field from record.
 project ::
   (MonadIO m, MonadError T.Text m) =>
   ScriptServer ->
