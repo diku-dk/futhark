@@ -663,7 +663,7 @@ pEntry =
       <* pComma
       <*> pEntryPointInputs
       <* pComma
-      <*> braces pEntryPointResult
+      <*> pEntryPointResult
   where
     pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
     pEntryPointInput =
