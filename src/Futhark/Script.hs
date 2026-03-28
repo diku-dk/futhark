@@ -3,7 +3,7 @@
 -- literate@ command is the main user.
 module Futhark.Script
   ( -- * Server
-    ScriptServer,
+    ScriptServer (scriptServer),
     withScriptServer,
     withScriptServer',
 
@@ -21,6 +21,7 @@ module Futhark.Script
     ExpValue,
     valToExpValue,
     storeExpValue,
+    isScriptTuple,
 
     -- * Evaluation
     EvalBuiltin,
@@ -516,16 +517,30 @@ getField server from (Field f _) = do
   cmdMaybe $ cmdProject (scriptServer server) to from f
   pure to
 
+-- | Is this a server-side tuple? If so, return the element types.
+isScriptTuple :: ScriptServer -> TypeName -> Maybe [TypeName]
+isScriptTuple server t =
+  isTuple t $ scriptTypes server
+
+-- | If a tuple, produce a monadic action that can retrieve its elements.
+tupleElements ::
+  (MonadIO m, MonadError T.Text m) =>
+  ScriptServer -> ExpValue -> Maybe (m [ExpValue])
+tupleElements _ (V.ValueTuple vs) = pure $ pure vs
+tupleElements server (V.ValueAtom (SValue t (VVar v)))
+  | Just ts <- isTuple t $ scriptTypes server =
+      Just $ forM (zip tupleFieldNames ts) $ \(k, kt) ->
+        V.ValueAtom . SValue kt . VVar <$> getField server v (Field (nameToText k) kt)
+tupleElements _ _ = Nothing
+
+-- | If a tuple value, convert it to its components.
 unTuple ::
   (MonadIO m, MonadError T.Text m) =>
   ScriptServer ->
   ExpValue ->
   m [ExpValue]
-unTuple _ (V.ValueTuple vs) = pure vs
-unTuple server (V.ValueAtom (SValue t (VVar v)))
-  | Just ts <- isTuple t $ scriptTypes server =
-      forM (zip tupleFieldNames ts) $ \(k, kt) ->
-        V.ValueAtom . SValue kt . VVar <$> getField server v (Field (nameToText k) kt)
+unTuple server v
+  | Just m <- tupleElements server v = m
 unTuple _ v = pure [v]
 
 project ::

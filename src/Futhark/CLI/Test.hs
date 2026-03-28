@@ -337,20 +337,19 @@ liftCommand m = do
 
 runCompiledEntry :: FutharkExe -> Server -> FilePath -> InputOutputs -> IO [TestResult]
 runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
-  output_types <- cmdOutputs server entry
   input_types <- cmdInputs server entry
-  case (,) <$> output_types <*> input_types of
+  case input_types of
     Left (CmdFailure _ err) ->
       pure [Failure err]
-    Right (output_types', input_types') -> do
-      let outs = ["out" <> showText i | i <- [0 .. length output_types' - 1]]
+    Right input_types' -> do
+      let out = "out"
           ins = ["in" <> showText i | i <- [0 .. length input_types' - 1]]
           onRes = either (Failure . pure) (const Success)
-      mapM (fmap onRes . runCompiledCase input_types' outs ins) run_cases
+      mapM (fmap onRes . runCompiledCase input_types' out ins) run_cases
   where
     dir = takeDirectory program
 
-    runCompiledCase input_types outs ins run = runExceptT $ do
+    runCompiledCase input_types out ins run = runExceptT $ do
       let TestRun _ input_spec _ index _ = run
           case_ctx =
             "Entry point: "
@@ -363,7 +362,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
 
         valuesAsVars server (zip ins (map inputType input_types)) futhark dir input_spec
 
-        call_r <- liftIO $ cmdCall server entry outs ins
+        call_r <- liftIO $ cmdCall server entry [out] ins
         liftCommand $ cmdFree server ins
 
         let res = case call_r of
@@ -371,8 +370,8 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
                 ErrorResult $ T.unlines err
               Right _ ->
                 SuccessResult
-                  (readResults server outs <* liftCommand (cmdFree server outs))
-                  (liftCommand (cmdFree server outs))
+                  (readResults server out <* liftCommand (cmdFree server [out]))
+                  (liftCommand (cmdFree server [out]))
 
         compareResult entry index program expected res
 

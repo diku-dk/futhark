@@ -324,14 +324,11 @@ language, enabling integration into a larger program.
 General Concerns
 ^^^^^^^^^^^^^^^^
 
-Futhark entry points are mapped to some form of function or method in
-the target language.  Generally, an entry point taking *n* parameters
-will result in a function taking *n* parameters.  If the entry point
-returns an *m*-element tuple, then the function will return *m* values
-(although the tuple can be replaced with a single opaque value, see
-below).  Extra parameters may be added to pass in context data, or
-*out*-parameters for writing the result, for target languages that do
-not support multiple return values from functions.
+Futhark entry points are mapped to some form of function or method in the target
+language. Generally, an entry point taking *n* parameters will result in a
+function taking *n* parameters. Extra parameters may be added to pass in context
+data, or results may be passed in an *out*-parameter for writing the result, for
+target languages that do not support multiple return values from functions.
 
 The entry point should have a name that is also a valid identifier in
 the target language (usually C).

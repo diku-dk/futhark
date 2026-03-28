@@ -302,16 +302,15 @@ benchmarkDataset ::
   FilePath ->
   IO (Either T.Text ([RunResult], T.Text, ProfilingReport))
 benchmarkDataset server opts futhark program entry input_spec expected_spec ref_out = runExceptT $ do
-  output_types <- cmdEither $ cmdOutputs server entry
   input_types <- cmdEither $ cmdInputs server entry
-  let outs = ["out" <> showText i | i <- [0 .. length output_types - 1]]
+  let out = "out"
       ins = ["in" <> showText i | i <- [0 .. length input_types - 1]]
 
   cmdMaybe . liftIO $ cmdClear server
 
   cmdMaybe . liftIO $ cmdPauseProfiling server
 
-  let freeOuts = cmdMaybe (cmdFree server outs)
+  let freeOut = cmdMaybe (cmdFree server [out])
       freeIns = cmdMaybe (cmdFree server ins)
       loadInput = valuesAsVars server (zip ins $ map inputType input_types) futhark dir input_spec
       reloadInput = freeIns >> loadInput
@@ -326,7 +325,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
             Nothing
 
       doRun = do
-        call_lines <- cmdEither (cmdCall server entry outs ins)
+        call_lines <- cmdEither (cmdCall server entry [out] ins)
         when (any inputConsumed input_types) reloadInput
         case mapMaybe runtime call_lines of
           [call_runtime] -> pure (RunResult call_runtime, call_lines)
@@ -335,11 +334,11 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   maybe_call_logs <- liftIO . timeout (runTimeout opts * 1000000) . runExceptT $ do
     -- First one uncounted warmup run.
-    void $ cmdEither $ cmdCall server entry outs ins
+    void $ cmdEither $ cmdCall server entry [out] ins
 
-    ys <- runMinimum (freeOuts *> doRun) opts 0 0 mempty
+    ys <- runMinimum (freeOut *> doRun) opts 0 0 mempty
 
-    xs <- runConvergence (freeOuts *> doRun) opts ys
+    xs <- runConvergence (freeOut *> doRun) opts ys
 
     -- Possibly a profiled run at the end.
     profile_log <-
@@ -347,7 +346,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
         then pure Nothing
         else do
           cmdMaybe . liftIO $ cmdUnpauseProfiling server
-          profile_log <- freeOuts *> doRun
+          profile_log <- freeOut *> doRun
           cmdMaybe . liftIO $ cmdPauseProfiling server
           pure $ Just profile_log
 
@@ -372,10 +371,10 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   case maybe_expected of
     Just expected -> do
-      vs <- readResults server outs <* freeOuts
+      vs <- readResults server out <* freeOut
       checkResult program expected vs
     Nothing ->
-      freeOuts
+      freeOut
 
   pure
     ( map fst call_logs,

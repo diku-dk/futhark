@@ -663,10 +663,9 @@ pEntry =
       <* pComma
       <*> pEntryPointInputs
       <* pComma
-      <*> pEntryPointResults
+      <*> braces pEntryPointResult
   where
     pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
-    pEntryPointResults = braces (pEntryPointResult `sepBy` pComma)
     pEntryPointInput =
       EntryParam <$> pName <* pColon <*> pUniqueness <*> pEntryPointType
     pEntryPointResult =
