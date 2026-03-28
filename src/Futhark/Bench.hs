@@ -303,6 +303,7 @@ benchmarkDataset ::
   IO (Either T.Text ([RunResult], T.Text, ProfilingReport))
 benchmarkDataset server opts futhark program entry input_spec expected_spec ref_out = runExceptT $ do
   input_types <- cmdEither $ cmdInputs server entry
+  output_type <- fmap head $ cmdEither $ cmdOutputs server entry
   let out = "out"
       ins = ["in" <> showText i | i <- [0 .. length input_types - 1]]
 
@@ -371,7 +372,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   case maybe_expected of
     Just expected -> do
-      vs <- readResults server out <* freeOut
+      vs <- readResults server (out, outputType output_type) <* freeOut
       checkResult program expected vs
     Nothing ->
       freeOut

@@ -338,18 +338,19 @@ liftCommand m = do
 runCompiledEntry :: FutharkExe -> Server -> FilePath -> InputOutputs -> IO [TestResult]
 runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
   input_types <- cmdInputs server entry
-  case input_types of
+  output_type <- fmap (outputType . head) <$> cmdOutputs server entry
+  case (,) <$> input_types <*> output_type of
     Left (CmdFailure _ err) ->
       pure [Failure err]
-    Right input_types' -> do
+    Right (input_types', out_t) -> do
       let out = "out"
           ins = ["in" <> showText i | i <- [0 .. length input_types' - 1]]
           onRes = either (Failure . pure) (const Success)
-      mapM (fmap onRes . runCompiledCase input_types' out ins) run_cases
+      mapM (fmap onRes . runCompiledCase input_types' (out, out_t) ins) run_cases
   where
     dir = takeDirectory program
 
-    runCompiledCase input_types out ins run = runExceptT $ do
+    runCompiledCase input_types (out, out_t) ins run = runExceptT $ do
       let TestRun _ input_spec _ index _ = run
           case_ctx =
             "Entry point: "
@@ -370,7 +371,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
                 ErrorResult $ T.unlines err
               Right _ ->
                 SuccessResult
-                  (readResults server out <* liftCommand (cmdFree server [out]))
+                  (readResults server (out, out_t) <* liftCommand (cmdFree server [out]))
                   (liftCommand (cmdFree server [out]))
 
         compareResult entry index program expected res

@@ -401,30 +401,28 @@ getTupleElems server v k = do
   mapM (getValueM server) elem_vs <* cmdMaybe (cmdFree server elem_vs)
 
 isServerTuple ::
-  (MonadIO m, MonadError T.Text m) =>
+  (MonadIO m) =>
   Server ->
   TypeName ->
   m (Maybe [TypeName])
 isServerTuple server v_t = do
-  v_k <- cmdEither $ cmdKind server v_t
-  case v_k of
-    Record -> do
-      fields <- cmdEither $ cmdFields server v_t
+  x <- liftIO $ cmdFields server v_t
+  case x of
+    Right fields -> do
       let onField f = (nameFromText $ fieldName f, fieldType f)
       case areTupleFields $ M.fromList $ map onField fields of
         Just ts -> pure $ Just ts
         Nothing -> pure Nothing
-    _ -> pure Nothing
+    Left _ -> pure Nothing
 
 -- | Read the given variable from a running server. As a special case, if the
 -- result is a tuple, we unpack it and return the elements individually.
 readResults ::
   (MonadIO m, MonadError T.Text m) =>
   Server ->
-  VarName ->
+  (VarName, TypeName) ->
   m [V.Value]
-readResults server v = do
-  v_t <- cmdEither $ cmdType server v
+readResults server (v, v_t) = do
   maybe_elems <- isServerTuple server v_t
   case maybe_elems of
     Just ts ->
