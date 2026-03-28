@@ -313,7 +313,7 @@ static void hip_size_setup(struct futhark_context *ctx) {
     // XXX: this is a hack due to the inability of two-pass scan to handle a
     // grid size that is larger than the maximum block size.
     if (cfg->gpu.default_grid_size > ctx->max_thread_block_size) {
-      cfg->gpumax_grid_size = ctx->max_thread_block_size;
+      cfg->gpu->max_grid_size = ctx->max_thread_block_size;
     }
   }
 
