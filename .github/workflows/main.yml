@@ -526,13 +526,13 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
-        version: 2.0.18
+        version: latest
         actions-cache-folder: 'emsdk-cache'
         cache-key: emsdk-wasm
 
-    - uses: actions/setup-node@v3.5.1
+    - uses: actions/setup-node@v4
       with:
-        node-version: '16.x'
+        node-version: '22.x'
 
     - uses: actions/download-artifact@v4
       with:
@@ -563,13 +563,13 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
-        version: 2.0.18
+        version: latest
         actions-cache-folder: 'emsdk-mc-cache'
         cache-key: emsdk-wasm-multicore
 
-    - uses: actions/setup-node@v3.5.1
+    - uses: actions/setup-node@v4
       with:
-        node-version: '16.x'
+        node-version: '22.x'
 
     - uses: actions/download-artifact@v4
       with:
@@ -584,7 +584,7 @@ jobs:
     - name: Run tests
       run: |
         node --version
-        export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1 -s PTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
+        export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1 -sPTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --exclude=no_wasm tests
 
   test-wasm-lib:
@@ -596,13 +596,13 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
-        version: 2.0.18
+        version: latest
         actions-cache-folder: 'emsdk-cache'
         cache-key: emsdk-wasm-lib
 
-    - uses: actions/setup-node@v3.5.1
+    - uses: actions/setup-node@v4
       with:
-        node-version: '16.x'
+        node-version: '22.x'
 
     - uses: actions/download-artifact@v4
       with:
