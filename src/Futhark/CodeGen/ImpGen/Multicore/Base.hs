@@ -492,6 +492,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
           _ -> (id, id)
 
       int
+        | primBitSize t == 8 = int8
         | primBitSize t == 16 = int16
         | primBitSize t == 32 = int32
         | otherwise = int64
