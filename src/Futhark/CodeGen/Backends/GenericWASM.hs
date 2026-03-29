@@ -141,8 +141,8 @@ getErrorFun =
   [text|
   get_error() {
     var ptr = this.wasm._futhark_context_get_error(this.ctx);
-    var len = HEAP8.subarray(ptr).indexOf(0);
-    var str = String.fromCharCode(...HEAP8.subarray(ptr, ptr + len));
+    var len = this.wasm.HEAP8.subarray(ptr).indexOf(0);
+    var str = String.fromCharCode(...this.wasm.HEAP8.subarray(ptr, ptr + len));
     this.wasm._free(ptr);
     return str;
   }
