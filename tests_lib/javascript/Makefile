@@ -2,7 +2,7 @@ FUTHARK_BACKEND ?= wasm
 
 .PHONY: test clean
 
-test: do_test_a do_test_array
+test: do_test_a do_test_array do_test_tuple
 
 do_test_%: test_%.js %.mjs
 	node test_$*.js

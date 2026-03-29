@@ -58,8 +58,8 @@ compileProg version prog = do
   pure
     ( ws,
       ( prog'',
-        javascriptWrapper (fRepMyRep prog'),
-        "_futhark_context_config_set_num_threads" : emccExportNames (fRepMyRep prog')
+        javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')),
+        "_futhark_context_config_set_num_threads" : emccExportNames (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog'))
       )
     )
 

@@ -16,7 +16,10 @@ class Server {
                        'pause_profiling',
                        'unpause_profiling',
                        'report',
-                       'rename'
+                       'rename',
+                       'types',
+                       'fields',
+                       'project'
                      ];
   }
 
@@ -95,6 +98,63 @@ class Server {
     this._types[newname] = this._types[oldname];
     delete this._vars[oldname];
     delete this._types[oldname];
+  }
+
+  _cmd_types(args) {
+    var types = this.ctx.get_types();
+    for (var t in types) {
+      console.log(t);
+    }
+  }
+
+  _cmd_fields(args) {
+    var type_name = this._get_arg(args, 0);
+    var types = this.ctx.get_types();
+    var type_info = types[type_name];
+    if (!type_info || type_info[0] !== "record") {
+      throw "Not a record type: " + type_name;
+    }
+    var fields = type_info[1];
+    for (var i = 0; i < fields.length; i++) {
+      console.log(fields[i][0] + " " + fields[i][1]);
+    }
+  }
+
+  _cmd_project(args) {
+    var to_name = this._get_arg(args, 0);
+    var from_name = this._get_arg(args, 1);
+    var field_name = this._get_arg(args, 2);
+
+    if (to_name in this._vars) {
+      throw "Variable already exists: " + to_name;
+    }
+
+    var from_val = this._get_var(from_name);
+    var from_type = this._get_type(from_name);
+
+    var types = this.ctx.get_types();
+    var type_info = types[from_type];
+    if (!type_info || type_info[0] !== "record") {
+      throw "Not a record type: " + from_type;
+    }
+
+    var fields = type_info[1];
+    var field_info = null;
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i][0] === field_name) {
+        field_info = fields[i];
+        break;
+      }
+    }
+
+    if (field_info === null) {
+      throw "No such field: " + field_name;
+    }
+
+    var field_type = field_info[1];
+    var project_fn = field_info[2];
+    var result = this.ctx[project_fn](from_val);
+    this._set_var(to_name, result, field_type);
   }
 
   _cmd_call(args) {
@@ -221,6 +281,9 @@ class Server {
         case 'unpause_profiling': this._cmd_dummy(args); break
         case 'report': this._cmd_dummy(args); break
         case 'rename': this._cmd_rename(args); break
+        case 'types': this._cmd_types(args); break
+        case 'fields': this._cmd_fields(args); break
+        case 'project': this._cmd_project(args); break
         }
       } else {
         throw "Unknown command: " + cmd;

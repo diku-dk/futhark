@@ -49,7 +49,7 @@ compileProg version prog = do
       (DefaultSpace, [DefaultSpace])
       []
       prog'
-  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog'), emccExportNames (fRepMyRep prog')))
+  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')), emccExportNames (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog'))))
   where
     operations :: GC.Operations Imp.Sequential ()
     operations =
