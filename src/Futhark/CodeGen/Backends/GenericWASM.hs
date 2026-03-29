@@ -7,9 +7,12 @@ module Futhark.CodeGen.Backends.GenericWASM
     GC.asServer,
     EntryPointType,
     JSEntryPoint (..),
+    JSRecordField (..),
+    JSOpaqueType (..),
     emccExportNames,
     javascriptWrapper,
     extToString,
+    opaqueToJS,
     runServer,
     libraryExports,
   )
@@ -18,10 +21,11 @@ where
 import Data.List (intercalate)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
-import Futhark.CodeGen.Backends.SimpleRep (opaqueName)
+import Futhark.CodeGen.Backends.SimpleRep (isValidCName, opaqueName)
 import Futhark.CodeGen.ImpCode.Sequential qualified as Imp
 import Futhark.CodeGen.RTS.JavaScript
-import Futhark.Util (nubOrd, showText)
+import Futhark.Util (nubOrd, showText, zEncodeText)
+import Language.Futhark.Core (nameToText)
 import Language.Futhark.Primitive
 import NeatInterpolation (text)
 
@@ -51,8 +55,71 @@ data JSEntryPoint = JSEntryPoint
     ret :: [EntryPointType]
   }
 
-emccExportNames :: [JSEntryPoint] -> [String]
-emccExportNames jses =
+-- | A field in a JavaScript record opaque type.
+data JSRecordField = JSRecordField
+  { -- | Original field name (used in the server protocol).
+    jsrfName :: String,
+    -- | JavaScript type string (e.g. @"i32"@, @"[]f64"@, @"opaque_foo"@).
+    jsrfType :: EntryPointType,
+    -- | JavaScript method name on @FutharkContext@ (e.g. @"project_opaque_foo_x"@).
+    jsrfProjectFn :: String
+  }
+
+-- | How an opaque type is represented for the JavaScript server.
+data JSOpaqueType
+  = -- | A record type with named, projectable fields.
+    JSOpaqueRecord [JSRecordField]
+  | -- | Any other opaque type (no project support).
+    JSOpaqueOther
+
+-- | Convert the opaque-type table from an ImpCode program into the
+-- JavaScript-oriented representation used by the code generator.
+opaqueToJS :: Imp.OpaqueTypes -> [(String, JSOpaqueType)]
+opaqueToJS (Imp.OpaqueTypes types) = map convertOne types
+  where
+    convertOne (desc, Imp.OpaqueRecord fields) =
+      (T.unpack (opaqueName desc), JSOpaqueRecord (map (convertField desc) fields))
+    convertOne (desc, _) =
+      (T.unpack (opaqueName desc), JSOpaqueOther)
+
+    convertField desc (fname, etype) =
+      JSRecordField
+        { jsrfName = T.unpack (nameToText fname),
+          jsrfType = entryTypeToJSString etype,
+          jsrfProjectFn =
+            "project_"
+              ++ T.unpack (opaqueName desc)
+              ++ "_"
+              ++ T.unpack f'
+        }
+      where
+        f'
+          | isValidCName (opaqueName desc <> "_" <> nameToText fname) =
+              nameToText fname
+          | otherwise = zEncodeText (nameToText fname)
+
+-- | Convert an 'Imp.EntryPointType' to its JavaScript string representation.
+entryTypeToJSString :: Imp.EntryPointType -> String
+entryTypeToJSString (Imp.TypeOpaque desc) = T.unpack $ opaqueName desc
+entryTypeToJSString (Imp.TypeTransparent (Imp.ValueType sign (Imp.Rank rank) pt)) =
+  concat (replicate rank "[]") ++ primToJSString sign pt
+  where
+    primToJSString _ (FloatType Float16) = "f16"
+    primToJSString _ (FloatType Float32) = "f32"
+    primToJSString _ (FloatType Float64) = "f64"
+    primToJSString Imp.Signed (IntType Int8) = "i8"
+    primToJSString Imp.Signed (IntType Int16) = "i16"
+    primToJSString Imp.Signed (IntType Int32) = "i32"
+    primToJSString Imp.Signed (IntType Int64) = "i64"
+    primToJSString Imp.Unsigned (IntType Int8) = "u8"
+    primToJSString Imp.Unsigned (IntType Int16) = "u16"
+    primToJSString Imp.Unsigned (IntType Int32) = "u32"
+    primToJSString Imp.Unsigned (IntType Int64) = "u64"
+    primToJSString _ Bool = "bool"
+    primToJSString _ Unit = error "entryTypeToJSString: Unit"
+
+emccExportNames :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> [String]
+emccExportNames jses opaqueTypes =
   map (\jse -> "'_futhark_entry_" ++ T.unpack (GC.escapeName (T.pack (name jse))) ++ "'") jses
     ++ map (\arg -> "'" ++ gfn "new" arg ++ "'") arrays
     ++ map (\arg -> "'" ++ gfn "free" arg ++ "'") arrays
@@ -60,6 +127,7 @@ emccExportNames jses =
     ++ map (\arg -> "'" ++ gfn "values_raw" arg ++ "'") arrays
     ++ map (\arg -> "'" ++ gfn "values" arg ++ "'") arrays
     ++ map (\arg -> "'" ++ "_futhark_free_" ++ arg ++ "'") opaques
+    ++ map (\rf -> "'_futhark_" ++ jsrfProjectFn rf ++ "'") allRecordFields
     ++ [ "_futhark_context_config_new",
          "_futhark_context_config_free",
          "_futhark_context_new",
@@ -67,29 +135,35 @@ emccExportNames jses =
          "_futhark_context_get_error"
        ]
   where
-    arrays = filter isArray typs
-    opaques = filter isOpaque typs
-    typs = nubOrd $ concatMap (\jse -> parameters jse ++ ret jse) jses
+    -- Include array types from both entry points and record fields.
+    arrays = nubOrd $ filter isArray (entryPointTypes ++ recordFieldTypes)
+    -- Include opaque types from both entry points and record fields.
+    opaques = nubOrd $ filter isOpaque (entryPointTypes ++ recordFieldTypes)
+    entryPointTypes = concatMap (\jse -> parameters jse ++ ret jse) jses
+    recordFieldTypes = [jsrfType rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
     gfn typ str = "_futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
+    allRecordFields = [rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
 
-javascriptWrapper :: [JSEntryPoint] -> T.Text
-javascriptWrapper entryPoints =
+javascriptWrapper :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
+javascriptWrapper entryPoints opaqueTypes =
   T.unlines
     [ serverJs,
       valuesJs,
       wrapperclassesJs,
-      classFutharkContext entryPoints
+      classFutharkContext entryPoints opaqueTypes
     ]
 
-classFutharkContext :: [JSEntryPoint] -> T.Text
-classFutharkContext entryPoints =
+classFutharkContext :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
+classFutharkContext entryPoints opaqueTypes =
   T.unlines
     [ "class FutharkContext {",
-      constructor entryPoints,
+      constructor entryPoints opaqueTypes,
       getFreeFun,
       getEntryPointsFun,
+      getTypesFun,
       getErrorFun,
       T.unlines $ map toFutharkArray arrays,
+      T.unlines $ concatMap (generateProjectMethods . snd) opaqueTypes,
       T.unlines $ map jsWrapEntryPoint entryPoints,
       "}",
       [text|
@@ -100,11 +174,14 @@ classFutharkContext entryPoints =
       |]
     ]
   where
-    arrays = filter isArray typs
-    typs = nubOrd $ concatMap (\jse -> parameters jse ++ ret jse) entryPoints
+    -- Collect array types from entry points AND from record fields so the
+    -- array constructors are always available when returning projected values.
+    arrays = nubOrd $ filter isArray (entryPointTypes ++ recordFieldTypes)
+    entryPointTypes = concatMap (\jse -> parameters jse ++ ret jse) entryPoints
+    recordFieldTypes = [jsrfType rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
 
-constructor :: [JSEntryPoint] -> T.Text
-constructor jses =
+constructor :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
+constructor jses opaqueTypes =
   [text|
   constructor(wasm, num_threads) {
     this.wasm = wasm;
@@ -114,10 +191,14 @@ constructor jses =
     this.entry_points = {
       ${entries}
     };
+    this.types = {
+      ${type_entries}
+    };
   }
   |]
   where
     entries = T.intercalate "," $ map dicEntry jses
+    type_entries = T.intercalate "," $ map dicTypeEntry opaqueTypes
 
 getFreeFun :: T.Text
 getFreeFun =
@@ -133,6 +214,14 @@ getEntryPointsFun =
   [text|
   get_entry_points() {
     return this.entry_points;
+  }
+  |]
+
+getTypesFun :: T.Text
+getTypesFun =
+  [text|
+  get_types() {
+    return this.types;
   }
   |]
 
@@ -158,6 +247,54 @@ dicEntry jse =
     ename = T.pack $ name jse
     params = showText $ parameters jse
     rets = showText $ ret jse
+
+-- | Generate the @types@ dictionary entry for a single opaque type.
+dicTypeEntry :: (String, JSOpaqueType) -> T.Text
+dicTypeEntry (tname, JSOpaqueRecord fields) =
+  T.pack $
+    show tname
+      ++ ": [\"record\", ["
+      ++ intercalate ", " (map fieldEntry fields)
+      ++ "]]"
+  where
+    fieldEntry rf =
+      "["
+        ++ show (jsrfName rf)
+        ++ ", "
+        ++ show (jsrfType rf)
+        ++ ", \""
+        ++ jsrfProjectFn rf
+        ++ "\"]"
+dicTypeEntry (tname, JSOpaqueOther) =
+  T.pack $ show tname ++ ": [\"opaque\"]"
+
+-- | Generate @project_*@ wrapper methods for a record opaque type.
+generateProjectMethods :: JSOpaqueType -> [T.Text]
+generateProjectMethods (JSOpaqueRecord fields) = map generateProjectMethod fields
+generateProjectMethods JSOpaqueOther = []
+
+generateProjectMethod :: JSRecordField -> T.Text
+generateProjectMethod rf =
+  T.pack $
+    unlines
+      [ "  " ++ jsrfProjectFn rf ++ "(obj) {",
+        "    var out = this.wasm._malloc(" ++ show (typeSize ftype) ++ ");",
+        "    this.wasm._futhark_" ++ jsrfProjectFn rf ++ "(this.ctx, out, obj.ptr);",
+        "    var result = " ++ readResult ++ ";",
+        "    this.wasm._free(out);",
+        "    return result;",
+        "  }"
+      ]
+  where
+    ftype = jsrfType rf
+    readout = typeHeap ftype ++ "[out >> " ++ show (typeShift ftype) ++ "]"
+    readResult
+      | isArray ftype =
+          "this.new_" ++ baseType ftype ++ "_" ++ show (dim ftype) ++ "d_from_ptr(" ++ readout ++ ")"
+      | isOpaque ftype =
+          "new FutharkOpaque(this, " ++ readout ++ ", this.wasm._futhark_free_" ++ ftype ++ ")"
+      | ftype == "bool" = readout ++ "!==0"
+      | otherwise = readout
 
 jsWrapEntryPoint :: JSEntryPoint -> T.Text
 jsWrapEntryPoint jse =
