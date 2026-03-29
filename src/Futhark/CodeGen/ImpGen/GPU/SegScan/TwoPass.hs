@@ -489,34 +489,44 @@ scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesS
 
       sOp $ Imp.Barrier Imp.FenceLocal
 
-      sWhen in_bounds $ do
-        let (scan_pars, map_pars) = splitAt (segBinOpResults scans) $ lambdaParams $ segPostOpLambda post_op
-        dScope Nothing $
-          scopeOfLParams $
-            lambdaParams $
-              segPostOpLambda post_op
+      if isIdentityPostOp post_op
+        then pure ()
+        else do
+          sWhen in_bounds $ do
+            let (scan_pars, map_pars) = splitAt (segBinOpResults scans) $ lambdaParams $ segPostOpLambda post_op
+            dScope Nothing $
+              scopeOfLParams $
+                lambdaParams $
+                  segPostOpLambda post_op
 
-        sComment "bind scan results to post lambda params" $ do
-          forM_ (zip scan_pars scan_out) $ \(par, acc) ->
-            copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 gtids)
+            sComment "bind scan results to post lambda params" $ do
+              forM_ (zip scan_pars scan_out) $ \(par, acc) ->
+                copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 gtids)
 
-        sComment "bind map results to post lamda params" $
-          forM_ (zip map_pars map_out) $ \(par, out) -> do
-            maybe
-              (pure ())
-              ( \o ->
-                  copyDWIMFix (paramName par) [] (Var o) (map Imp.le64 gtids)
-              )
-              out
+            sComment "bind map results to post lamda params" $
+              forM_ (zip map_pars map_out) $ \(par, out) -> do
+                maybe
+                  (pure ())
+                  ( \o ->
+                      copyDWIMFix (paramName par) [] (Var o) (map Imp.le64 gtids)
+                  )
+                  out
 
-        let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
-        sComment "compute post op." $
-          compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
-            sComment "write values" $
-              forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
-                copyDWIMFix (patElemName pe) (map Imp.le64 gtids) subexp []
+            let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+            sComment "compute post op." $
+              compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
+                sComment "write values" $
+                  forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
+                    copyDWIMFix (patElemName pe) (map Imp.le64 gtids) subexp []
 
       sOp $ Imp.Barrier Imp.FenceGlobal
+
+isIdentityPostOp :: SegPostOp rep -> Bool
+isIdentityPostOp post_op =
+  map resSubExp (bodyResult (lambdaBody lam))
+    == map (Var . paramName) (lambdaParams lam)
+  where
+    lam = segPostOpLambda post_op
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
@@ -552,13 +562,28 @@ compileSegScan pat lvl space ts scans kbody post_op = do
           foldr (flip arrayOfRow) (arrayOfShape t s) $
             segSpaceDims space
 
-  scan_out <- forM scan_ts $ \(s, t) ->
-    sAllocArray "scan_out" (elemType t) (shpOfT t s) (Space "device")
+  (scan_out, map_out) <-
+    if isIdentityPostOp post_op
+      then
+        let (scan_out, map_out) = splitAt (segBinOpResults scans) $ patElemName <$> patElems pat
+            map_out' =
+              zipWith
+                ( \t n ->
+                    if isAcc t then Nothing else Just n
+                )
+                (drop (segBinOpResults scans) ts)
+                map_out
+         in pure (scan_out, map_out')
+      else do
+        scan_out <- forM scan_ts $ \(s, t) ->
+          sAllocArray "scan_out" (elemType t) (shpOfT t s) (Space "device")
 
-  map_out <- forM (drop (segBinOpResults scans) ts) $ \t ->
-    if isAcc t
-      then pure Nothing
-      else Just <$> sAllocArray "map_out" (elemType t) (shpOfT t mempty) (Space "device")
+        map_out <- forM (drop (segBinOpResults scans) ts) $ \t ->
+          if isAcc t
+            then pure Nothing
+            else Just <$> sAllocArray "map_out" (elemType t) (shpOfT t mempty) (Space "device")
+
+        pure (scan_out, map_out)
 
   (stage1_num_threads, elems_per_group, crossesSegment) <-
     scanStage1 scan_out map_out stage1_num_tblocks (kAttrBlockSize attrs) space scans kbody
