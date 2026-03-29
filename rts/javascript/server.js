@@ -18,6 +18,7 @@ class Server {
                        'report',
                        'rename',
                        'types',
+                       'fields',
                        'project'
                      ];
   }
@@ -103,6 +104,19 @@ class Server {
     var types = this.ctx.get_types();
     for (var t in types) {
       console.log(t);
+    }
+  }
+
+  _cmd_fields(args) {
+    var type_name = this._get_arg(args, 0);
+    var types = this.ctx.get_types();
+    var type_info = types[type_name];
+    if (!type_info || type_info[0] !== "record") {
+      throw "Not a record type: " + type_name;
+    }
+    var fields = type_info[1];
+    for (var i = 0; i < fields.length; i++) {
+      console.log(fields[i][0] + " " + fields[i][1]);
     }
   }
 
@@ -268,6 +282,7 @@ class Server {
         case 'report': this._cmd_dummy(args); break
         case 'rename': this._cmd_rename(args); break
         case 'types': this._cmd_types(args); break
+        case 'fields': this._cmd_fields(args); break
         case 'project': this._cmd_project(args); break
         }
       } else {
