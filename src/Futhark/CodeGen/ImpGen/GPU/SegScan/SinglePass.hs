@@ -6,7 +6,7 @@
 module Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass (compileSegScan) where
 
 import Control.Monad
-import Data.List (zip4, zip7)
+import Data.List (zip4, zip5, zip7)
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
@@ -301,6 +301,27 @@ getBitFromBitArray chunk dest bit_array idx = do
 shouldUseBitArray :: Type -> Bool
 shouldUseBitArray t = primType t && elemType t == Bool
 
+earlyReturn ::
+  Pat LetDecMem ->
+  SegBinOp GPUMem ->
+  SegPostOp GPUMem ->
+  ([[PatElem LetDecMem]], [Bool])
+earlyReturn pat scan_op post_op = (early_write_pats, res_flags)
+  where
+    post_lam = segPostOpLambda post_op
+    num_scan_res = length $ segBinOpNeutral scan_op
+    earlyWrite i par =
+      if num_scan_res < i && paramName par `notNameIn` free_in_post
+        then
+          filter ((== Just (paramName par)) . subExpResVName . fst)
+            . zip (bodyResult $ lambdaBody post_lam)
+            $ patElems pat
+        else []
+    early_writes = zipWith earlyWrite [1 ..] $ lambdaParams post_lam
+    res_flags = (`elem` mconcat early_write_pats) <$> patElems pat
+    early_write_pats = drop num_scan_res $ map snd <$> early_writes
+    free_in_post = freeIn $ bodyStms $ lambdaBody post_lam
+
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
 compileSegScan ::
@@ -325,6 +346,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
       tblock_size_e = pe64 $ unCount $ kAttrBlockSize attrs
       num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
+      (early_write_pats, res_flags) = earlyReturn pat scan_op post_op
 
   let chunk_const = getScanChunkSize scan_tys'
   chunk_v <- dPrim "chunk_size"
@@ -376,8 +398,8 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           }
 
   map_global_chunks <-
-    forM map_tys' $ \t ->
-      if isAcc t || primType t
+    forM (zip map_tys' early_write_pats) $ \(t, pats) ->
+      if isAcc t || primType t || not (null pats)
         then pure Nothing
         else
           Just
@@ -467,8 +489,8 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
             (ScalarSpace [tvSize chunk_v] ty)
 
       map_private_chunks <-
-        forM map_tys' $ \t ->
-          if isAcc t || not (primType t)
+        forM (zip map_tys' early_write_pats) $ \(t, pats) ->
+          if isAcc t || not (primType t) || not (null pats)
             then pure Nothing
             else
               if shouldUseBitArray t
@@ -501,8 +523,8 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                         splitAt (segBinOpResults [scan_op]) $ bodyResult map_kbody
 
                   -- Write map results to memory.
-                  forM_ (zip4 map_private_chunks map_global_chunks (map kernelResultSubExp map_res) map_tys') $
-                    \(priv_dest, glob_dest, src, ty) -> do
+                  forM_ (zip5 map_private_chunks map_global_chunks (map kernelResultSubExp map_res) map_tys' early_write_pats) $
+                    \(priv_dest, glob_dest, src, ty, pats) -> do
                       case priv_dest of
                         Just d
                           | shouldUseBitArray ty ->
@@ -512,6 +534,10 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                         Nothing -> pure ()
 
                       maybe (pure ()) (\d -> copyDWIMFix d [tvExp phys_block_id, ltid, i] src []) glob_dest
+
+                      if null pats
+                        then pure ()
+                        else forM_ pats $ \pe -> copyDWIMFix (patElemName pe) (map le64 gtids) src []
 
                   -- Write to-scan results to private memory.
                   forM_ (zip scan_private_chunks $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
@@ -844,8 +870,10 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
             sComment "compute post op." $
               compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
                 sComment "write mapped values" $
-                  forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
-                    copyDWIMFix (patElemName pe) (map le64 gtids) subexp []
+                  forM_ (zip3 (patElems pat) res res_flags) $ \(pe, subexp, flag) ->
+                    if flag
+                      then pure ()
+                      else copyDWIMFix (patElemName pe) (map le64 gtids) subexp []
 
       sOp local_barrier
 {-# NOINLINE compileSegScan #-}
