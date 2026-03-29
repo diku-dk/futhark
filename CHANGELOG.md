@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark bench` and `futhark test` can now handle entry points that return
   opaque values, as long as there is no expected result.
 
+* Better fusion for `scan` SOACs.
+
 ### Removed
 
 ### Changed
