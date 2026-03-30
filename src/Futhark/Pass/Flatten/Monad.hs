@@ -12,6 +12,7 @@ module Futhark.Pass.Flatten.Monad
     readInputVar,
     readInputs,
     readInput,
+    readTypeDims,
 
     -- * Insertions
     insertRep,
@@ -214,6 +215,16 @@ readInput _ _ _ _ (Constant x) =
   pure $ Constant x
 readInput segments env is inputs (Var v) =
   Var <$> readInputVar segments env is inputs v
+
+readTypeDims ::
+  Segments ->
+  DistEnv ->
+  [SubExp] ->
+  DistInputs ->
+  TypeBase Shape u ->
+  Builder GPU [SubExp]
+readTypeDims segments env is inputs =
+  mapM (readInput segments env is inputs) . arrayDims
 
 segmentDims :: Segments -> [TPrimExp Int64 VName]
 segmentDims = map pe64 . shapeDims . segmentsShape

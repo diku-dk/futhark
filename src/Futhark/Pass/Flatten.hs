@@ -294,11 +294,12 @@ segmentCount = product . map pe64 . shapeDims . segmentsShape
 rearrangeIrreg ::
   Segments ->
   DistEnv ->
+  DistInputs ->
   TypeBase Shape u ->
   [Int] ->
   IrregularRep ->
   Builder GPU IrregularRep
-rearrangeIrreg _segments _env v_t perm ir = do
+rearrangeIrreg segments env inps v_t perm ir = do
   (IrregularRep shape flags offsets elems) <- flattenIrregularRep ir
   m <- arraySize 0 <$> lookupType elems
   (_, _, ii1_vss) <- doRepIota shape
@@ -308,8 +309,10 @@ rearrangeIrreg _segments _env v_t perm ir = do
       seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp i]
       offset <- letSubExp "offset" =<< eIndex offsets [eSubExp seg_i]
       in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp i]
-      let v_dims = map pe64 $ arrayDims v_t
-          in_seg_is_tr = rearrangeFlat perm v_dims $ pe64 in_seg_i
+      seg_is <- segmentCoordsFromFlat segments seg_i
+      v_dims <- readTypeDims segments env seg_is inps v_t
+      let v_dims' = map pe64 v_dims
+          in_seg_is_tr = rearrangeFlat perm v_dims' $ pe64 in_seg_i
       v' <-
         letSubExp "v"
           =<< eIndex elems [toExp $ pe64 offset + in_seg_is_tr]
@@ -481,7 +484,8 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
               seg_is <- segmentCoordsFromFlat segments seg_i
               readInputs segments env seg_is $
                 filter ((`elem` sliceDims slice) . Var . fst) inps
-              n <- letSubExp "n" <=< toExp $ product $ map pe64 $ sliceDims slice
+              slice_dims <- mapM (readInput segments env seg_is inps) $ sliceDims slice
+              n <- letSubExp "n" <=< toExp $ product $ map pe64 slice_dims
               pure [subExpRes n]
           -- Irregular representation of `as`
           IrregularRep shape flags offsets elems <- getIrregRep segments env inps as
@@ -495,15 +499,16 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp gid]
             seg_is <- segmentCoordsFromFlat segments seg_i
             readInputs segments env seg_is $ filter ((/= as) . fst) inps
+            as_dims <- readTypeDims segments env seg_is inps as_t
+            slice_dims <- mapM (readInput segments env seg_is inps) $ sliceDims slice
             case se of
               Var v -> do
-                v_t <- lookupType v
                 let in_seg_is =
-                      unflattenIndex (map pe64 (arrayDims v_t)) (pe64 in_seg_i)
+                      unflattenIndex (map pe64 slice_dims) (pe64 in_seg_i)
                     slice' = fmap pe64 slice
                     flat_i =
                       flattenIndex
-                        (map pe64 $ arrayDims as_t)
+                        (map pe64 as_dims)
                         (fixSlice slice' in_seg_is)
                 -- Value to write
                 v' <- letSubExp "v" =<< eIndex v (map toExp in_seg_is)
@@ -513,7 +518,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
                 pure (i, v')
               Constant c -> do
                 let slice' = fmap pe64 slice
-                    flat_i = flattenIndex (map pe64 $ arrayDims as_t) (fixSlice slice' [])
+                    flat_i = flattenIndex (map pe64 as_dims) (fixSlice slice' [])
                 o' <- letSubExp "o" =<< eIndex offsets [eSubExp seg_i]
                 i <- letExp "i" =<< toExp (pe64 o' + flat_i)
                 pure (i, Constant c)
@@ -532,7 +537,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             Irregular rep -> do
               rep' <-
                 certifying (distCerts inps aux env) $
-                  rearrangeIrreg segments env v_t perm rep
+                  rearrangeIrreg segments env inps v_t perm rep
               pure $ insertRep (distResTag res) (Irregular rep') env
             Regular v' -> do
               let r = segmentsRank segments
