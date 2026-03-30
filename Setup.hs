@@ -4,4 +4,5 @@ import Distribution.Simple
 
 main :: IO ()
 main = defaultMainWithHooks myHooks
-  where myHooks = simpleUserHooks
+  where
+    myHooks = simpleUserHooks
