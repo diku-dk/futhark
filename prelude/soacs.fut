@@ -162,6 +162,15 @@ def reduce_by_index_3d 'a [k] [n] [m] [l] (dest: *[k][m][l]a) (f: a -> a -> a) (
 def scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a) : *[n]a =
   intrinsics.scan op ne as
 
+-- | Exclusive prefix scan.  Has the same caveats with respect to
+-- associativity and complexity as `scan`.
+--
+-- **Work:** *O(n ✕ W(op))*
+--
+-- **Span:** *O(log(n) ✕ W(op))*
+def exscan [n] 't (f: t -> t -> t) (ne: t) (xs: [n]t) =
+  scatter (rep ne : [n]t) (map (+ 1) (iota n)) (scan f ne xs)
+
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.
 --
