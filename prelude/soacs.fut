@@ -168,8 +168,10 @@ def scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a) : *[n]a =
 -- **Work:** *O(n ✕ W(op))*
 --
 -- **Span:** *O(log(n) ✕ W(op))*
-def exscan [n] 't (f: t -> t -> t) (ne: t) (xs: [n]t) =
-  scatter (rep ne : [n]t) (map (+ 1) (iota n)) (scan f ne xs)
+def exscan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a) : *[n]a =
+  intrinsics.scatter (map (\_ -> ne) (0..<n))
+                     (map (+ 1) (0..<n))
+                     (scan op ne as)
 
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.
