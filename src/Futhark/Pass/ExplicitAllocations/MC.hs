@@ -21,8 +21,10 @@ handleSegOp op = do
       identitySegOpMapper
         { mapOnSegOpBody =
             localScope scope . allocInKernelBody,
-          mapOnSegOpLambda =
-            allocInBinOpLambda num_threads (segSpace op)
+          mapOnSegBinOpLambda =
+            allocInBinOpLambda num_threads (segSpace op),
+          mapOnSegPostOpLambda =
+            allocInPostOpLambda num_threads (segSpace op)
         }
 
 handleMCOp :: Op MC -> AllocM MC MCMem (Op MCMem)

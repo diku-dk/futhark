@@ -16,6 +16,8 @@ module Futhark.Pass.ExplicitAllocations
     AllocEnv (..),
     SizeSubst (..),
     allocInStms,
+    allocInLambda,
+    allocInLParams,
     allocForArray,
     simplifiable,
     mkLetNamesB',
@@ -1131,3 +1133,28 @@ data ExpHint
 
 defaultExpHints :: (ASTRep rep, HasScope rep m) => Exp rep -> m [ExpHint]
 defaultExpHints e = map (const NoHint) <$> expExtType e
+
+-- I have no Idea if this is correct
+allocInLParams ::
+  (Allocable fromrep torep inner) =>
+  SubExp ->
+  TPrimExp Int64 VName ->
+  [LParam fromrep] ->
+  AllocM fromrep torep [LParam torep]
+allocInLParams num_threads idxs = mapM alloc
+  where
+    alloc x =
+      case paramType x of
+        Array pt shape u -> do
+          let t = paramType x `arrayOfRow` num_threads
+          mem <- allocForArray t =<< askDefaultSpace
+          let base_dims = map pe64 $ arrayDims t
+              lmad_base = LMAD.iota 0 base_dims
+              lmad_x =
+                LMAD.slice lmad_base $
+                  fullSliceNum base_dims [DimFix idxs]
+          pure $ x {paramDec = MemArray pt shape u $ ArrayIn mem lmad_x}
+        Prim bt -> pure $ x {paramDec = MemPrim bt}
+        Mem space -> pure $ x {paramDec = MemMem space}
+        -- This next case will never happen.
+        Acc acc ispace ts u -> pure $ x {paramDec = MemAcc acc ispace ts u}

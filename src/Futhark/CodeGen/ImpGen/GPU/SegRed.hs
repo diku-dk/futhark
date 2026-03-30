@@ -73,6 +73,27 @@ import Prelude hiding (quot, rem)
 forM2_ :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m ()
 forM2_ xs ys f = forM_ (zip xs ys) (uncurry f)
 
+-- | Given available register and a list of parameter types, compute
+-- the largest available chunk size given the parameters for which we
+-- want chunking and the available resources.
+getRedChunkSize :: [Type] -> Imp.KernelConstExp
+getRedChunkSize types = do
+  let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
+      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
+      max_block_reg = Imp.SizeMaxConst SizeRegisters
+      k_mem = le64 max_block_mem `quot` le64 max_tblock_size
+      k_reg = le64 max_block_reg `quot` le64 max_tblock_size
+      types' = map elemType $ filter primType types
+      sizes = map primByteSize types'
+
+      sum_sizes = sum sizes
+      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
+      max_size = maximum sizes
+
+      mem_constraint = max k_mem sum_sizes `quot` max_size
+      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
+  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+
 -- | The maximum number of operators we support in a single SegRed.
 -- This limit arises out of the static allocation of counters.
 maxNumOps :: Int
@@ -174,7 +195,7 @@ compileSegRed' pat grid space segbinops map_body_cont
     chunk_const =
       if Noncommutative `elem` map segBinOpComm segbinops
         && all isPrimSegBinOp segbinops
-        then getChunkSize param_types
+        then getRedChunkSize param_types
         else Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed

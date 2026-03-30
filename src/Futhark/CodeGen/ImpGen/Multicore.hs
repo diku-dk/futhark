@@ -169,8 +169,8 @@ compileSegOp ::
   ImpM MCMem HostEnv Imp.Multicore ()
 compileSegOp pat (SegHist _ space _ kbody histops) ntasks =
   compileSegHist pat space histops kbody ntasks
-compileSegOp pat (SegScan _ space _ kbody scans) ntasks =
-  compileSegScan pat space scans kbody ntasks
+compileSegOp pat (SegScan _ space ts kbody scans post_op) ntasks =
+  compileSegScan pat space ts kbody scans post_op ntasks
 compileSegOp pat (SegRed _ space _ kbody reds) ntasks =
   compileSegRed pat space reds kbody ntasks
 compileSegOp pat (SegMap _ space _ kbody) _ =

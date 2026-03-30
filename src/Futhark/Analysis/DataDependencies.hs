@@ -2,13 +2,16 @@
 module Futhark.Analysis.DataDependencies
   ( Dependencies,
     dataDependencies,
+    dataDependencies',
     depsOf,
     depsOf',
+    depsOfVar,
     depsOfArrays,
     depsOfShape,
     lambdaDependencies,
     reductionDependencies,
     findNecessaryForReturned,
+    depsOfNames,
   )
 where
 
@@ -23,13 +26,13 @@ import Futhark.IR
 type Dependencies = M.Map VName Names
 
 -- | Compute the data dependencies for an entire body.
-dataDependencies :: (ASTRep rep) => Body rep -> Dependencies
+dataDependencies :: (ASTRep rep) => GBody rep res -> Dependencies
 dataDependencies = dataDependencies' M.empty
 
 dataDependencies' ::
   (ASTRep rep) =>
   Dependencies ->
-  Body rep ->
+  GBody rep res ->
   Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where

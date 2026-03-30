@@ -336,7 +336,7 @@ tabNest = tabNest' []
         ret <- mapM lookupType res
         pure (ret, varsRes res)
       let lam = Lambda (iparam : params) ret (Body () stms res)
-      letTupExp "tab" $ Op $ Screma w (iota : vs) (mapSOAC lam)
+      letTupExp "tab" . Op . Screma w (iota : vs) =<< mapSOAC lam
 
 -- | Construct a lambda for adding two values of the given type.
 addLambda :: Type -> ADM (Lambda SOACS)
@@ -347,8 +347,10 @@ addLambda t@Array {} = do
   lam <- addLambda $ rowType t
   body <- insertStmsM $ do
     res <-
-      letSubExp "lam_map" . Op $
-        Screma (arraySize 0 t) [paramName xs_p, paramName ys_p] (mapSOAC lam)
+      letSubExp "lam_map"
+        . Op
+        . Screma (arraySize 0 t) [paramName xs_p, paramName ys_p]
+        =<< mapSOAC lam
     pure $ resultBody [res]
   pure
     Lambda
@@ -368,7 +370,7 @@ addExp x y = do
       pure $ BasicOp $ BinOp (addBinOp pt) (Var x) (Var y)
     Array {} -> do
       lam <- addLambda $ rowType x_t
-      pure $ Op $ Screma (arraySize 0 x_t) [x, y] (mapSOAC lam)
+      Op . Screma (arraySize 0 x_t) [x, y] <$> mapSOAC lam
     _ ->
       error $ "addExp: unexpected type: " ++ prettyString x_t
 

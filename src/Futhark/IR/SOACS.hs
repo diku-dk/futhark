@@ -55,10 +55,11 @@ usesAD prog = any stmUsesAD (progConsts prog) || any funUsesAD (progFuns prog)
     expUsesAD (Op JVP {}) = True
     expUsesAD (Op VJP {}) = True
     expUsesAD (Op (Stream _ _ _ lam)) = lamUsesAD lam
-    expUsesAD (Op (Screma _ _ (ScremaForm lam scans reds))) =
+    expUsesAD (Op (Screma _ _ (ScremaForm lam scans reds post_lam))) =
       lamUsesAD lam
         || any (lamUsesAD . scanLambda) scans
         || any (lamUsesAD . redLambda) reds
+        || lamUsesAD post_lam
     expUsesAD (Op (Hist _ _ ops lam)) =
       lamUsesAD lam || any (lamUsesAD . histOp) ops
     expUsesAD (Match _ cases def_case _) =

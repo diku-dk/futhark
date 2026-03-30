@@ -11,6 +11,7 @@ import Futhark.IR.Syntax.CoreTests qualified
 import Futhark.Internalise.TypesValuesTests qualified
 import Futhark.LspTests qualified
 import Futhark.Optimise.ArrayLayoutTests qualified
+import Futhark.Optimise.FusionTests qualified
 import Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests qualified
 import Futhark.Pkg.SolveTests qualified
 import Language.Futhark.PrettyTests qualified
@@ -41,6 +42,7 @@ allTests =
       Language.Futhark.TypeCheckerTests.tests,
       Language.Futhark.SemanticTests.tests,
       Futhark.Optimise.ArrayLayoutTests.tests,
+      Futhark.Optimise.FusionTests.tests,
       Futhark.LspTests.tests
     ]
 
