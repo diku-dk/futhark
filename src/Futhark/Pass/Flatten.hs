@@ -180,6 +180,130 @@ concatIrreg _segments _env ns reparr = do
         irregularD = elems
       }
 
+-- We also can do reearange -> concat -> rearrange but this should be more efficient
+concatIrregAlongDim ::
+  Segments ->
+  DistEnv ->
+  VName ->
+  [IrregularRep] ->
+  [Type] ->
+  DistInputs ->
+  Int ->
+  Builder GPU IrregularRep
+concatIrregAlongDim segments env ns reparr typearr inps d = do
+  num_segments <- arraySize 0 <$> lookupType ns
+
+  let zero = Constant $ IntValue $ intValue Int64 (0 :: Int)
+  ns_full <- letExp (baseName ns <> "_full") <=< segMap (MkSolo num_segments) $
+    \(MkSolo i) -> do
+      old_segments <-
+        forM reparr $ \rep ->
+          letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp i]
+      new_segment <-
+        letSubExp "new_segment"
+          =<< toExp (foldl (+) (pe64 zero) $ map pe64 old_segments)
+      pure $ subExpsRes [new_segment]
+
+  (ns_full_F, ns_full_O, _ns_II1) <- doRepIota ns_full
+
+  repIota <- mapM (doRepIota . irregularS) reparr
+  segIota <- mapM (doSegIota . irregularS) reparr
+
+  let (_, _, rep_II1) = unzip3 repIota
+  let (_, _, rep_II2) = unzip3 segIota
+
+  n_arr <- mapM (fmap (arraySize 0) . lookupType) rep_II1
+
+  scatter_info <-
+    letTupExp "irregular_scatter_offsets" <=< segMap (MkSolo num_segments) $
+      \(MkSolo i) -> do
+        seg_is <- segmentCoordsFromFlat segments i
+
+        block_sizes <-
+          forM typearr $ \t -> do
+            v_dims <- readTypeDims segments env seg_is inps t
+            letSubExp "block_size" =<< toExp (product $ map pe64 $ drop d v_dims)
+
+        total_block <-
+          letSubExp "total_block"
+            <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0)
+            $ block_sizes
+
+        let prefixes = L.init $ L.inits block_sizes
+
+        sumprefix <-
+          mapM
+            ( letSubExp "segment_prefix"
+                <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0)
+            )
+            prefixes
+
+        pure $ subExpsRes (block_sizes <> sumprefix <> [total_block])
+
+  let k = length typearr
+      (scatter_blocks, rest) = splitAt k scatter_info
+      (scatter_offsets, [total_block_size]) = splitAt k rest
+
+  m <- arraySize 0 <$> lookupType ns_full_F
+  data_t <- lookupType (irregularD (head reparr))
+  let pt = elemType data_t
+  let resultType = Array pt (Shape [m]) NoUniqueness
+  elems_blank <- letExp "blank_res" =<< eBlank resultType
+
+  -- Scatter data into result array
+  elems <-
+    foldlM
+      ( \elems (reparr1, scatter_block, scatter_offset, n, ii1, ii2) -> do
+          letExp "irregular_scatter_elems" <=< genScatter elems n $ \gid -> do
+            -- Which segment we are in.
+            segment_i <-
+              letSubExp "segment_i" =<< eIndex ii1 [eSubExp gid]
+
+            -- Get segment offset in final array
+            segment_o <-
+              letSubExp "segment_o" =<< eIndex ns_full_O [eSubExp segment_i]
+
+            -- Get local segment offset
+            segment_local_o <-
+              letSubExp "segment_local_o"
+                =<< eIndex scatter_offset [eSubExp segment_i]
+
+            -- Value to write
+            v' <-
+              letSubExp "v" =<< eIndex (irregularD reparr1) [eSubExp gid]
+
+            o' <- letSubExp "o" =<< eIndex ii2 [eSubExp gid]
+
+            scatter_block_size <-
+              letSubExp "scatter_block_size" =<< eIndex scatter_block [eSubExp segment_i]
+
+            scatter_total_block_size <-
+              letSubExp "scatter_total_block_size" =<< eIndex total_block_size [eSubExp segment_i]
+
+            outer_i <-
+              letSubExp "outer_i" =<< toExp (pe64 o' `div` pe64 scatter_block_size)
+
+            i <-
+              letExp "i"
+                =<< toExp
+                  ( pe64 o'
+                      + pe64 outer_i * (pe64 scatter_total_block_size - pe64 scatter_block_size)
+                      + pe64 segment_local_o
+                      + pe64 segment_o
+                  )
+            pure (i, v')
+      )
+      elems_blank
+      $ L.zip6 reparr scatter_blocks scatter_offsets n_arr rep_II1 rep_II2
+
+  pure $
+    IrregularRep
+      { irregularS = ns_full,
+        irregularF = ns_full_F,
+        irregularO = ns_full_O,
+        irregularD = elems
+      }
+
 -- Do 'map2 replicate ns A', where 'A' is an irregular array (and so
 -- is the result, obviously).
 replicateIrreg ::
@@ -413,6 +537,19 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       reparr <- mapM (getIrregRep segments env inps) (NE.toList arr)
       rep' <- concatIrreg segments env ns reparr
       pure $ insertRep (distResTag res) (Irregular rep') env
+    -- TODO: add invariant special handling
+    Concat d arr shp -> do
+      ns <- dataArr segments env inps shp
+      reparr <- mapM (getIrregRep segments env inps) (NE.toList arr)
+      -- typearr <- mapM lookupType arr
+      typearr <-
+        forM arr $ \v ->
+          case lookup v inps of
+            Just inp -> pure $ distInputType inp
+            Nothing -> lookupType v
+      rep' <- concatIrregAlongDim segments env ns reparr (NE.toList typearr) inps d
+      pure $ insertRep (distResTag res) (Irregular rep') env
+
     --  TODO: add invaraint special handling
     Replicate (Shape [n]) (Var v) -> do
       ns <- dataArr segments env inps n
@@ -750,11 +887,11 @@ transformInnerMap ::
   [VName] ->
   Lambda SOACS ->
   Builder GPU [ResRep]
-transformInnerMap segments env inps pat w arrs map_lam
-  | not (isVariant inps env w) =
-      transformInnerMapMultiDim segments env inps pat w arrs map_lam
-  | otherwise =
-      transformInnerMapSingleDim segments env inps pat w arrs map_lam
+transformInnerMap segments env inps pat w arrs map_lam =
+  -- \| not (isVariant inps env w) =
+  --     transformInnerMapMultiDim segments env inps pat w arrs map_lam
+  -- \| otherwise =
+  transformInnerMapSingleDim segments env inps pat w arrs map_lam
 
 transformInnerMapSingleDim ::
   Segments ->
@@ -1098,8 +1235,8 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           -- above. We need to make sure that we actually handle everything we
           -- care about!
           error "unhandled SOAC"
-        -- transformScalarStm segments env inps res $
-        --   Let { stmPat = pat, stmAux = aux, stmExp = Op (Screma w arrs form) }
+    -- transformScalarStm segments env inps res $
+    --   Let { stmPat = pat, stmAux = aux, stmExp = Op (Screma w arrs form) }
     Let _ _ (Match scrutinees cases defaultCase _) ->
       transformMatch flattenOps segments env inps res scrutinees cases defaultCase
     Let _ _ (Apply name args rettype s) -> do
@@ -1378,8 +1515,9 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       transformWithAcc flattenOps segments env inps res pat aux inputs lam
     Let _ _ (Op (Stream {})) -> error "Unhandled Stream"
     Let _ _ (Op (Hist {})) -> error "Unhandled Hist"
-    Let _ _ (Op (JVP {})) -> error  "Unhandled JVP"
-    Let _ _ (Op (VJP {})) -> error  "Unhandled VJP"
+    Let _ _ (Op (JVP {})) -> error "Unhandled JVP"
+    Let _ _ (Op (VJP {})) -> error "Unhandled VJP"
+
 -- helper to not mess up the tags when generating new ones for the loop parameters
 -- probably won't be used in future
 localiseInputs :: DistEnv -> DistInputs -> (DistInputs, DistEnv, Int)
