@@ -242,7 +242,15 @@ isParallelDistStm _ = False
 isParallelStm :: Stm SOACS -> Bool
 isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
   where
-    isMap BasicOp {} = False
+    isParallelOp Stream {} = error "isParallelStm: Stream"
+    isParallelOp JVP {} = error "isParallelStm: JVP"
+    isParallelOp VJP {} = error "isParallelStm: VJP"
+    isParallelOp _ = True
+    -- TODO: actully implement this.
+    isParallelBasicOp Concat {} = True
+    isParallelBasicOp _ = False
+
+    isMap (BasicOp op) = isParallelBasicOp op
     isMap (Apply fname _ _ _) = not $ isBuiltInFunction fname -- TODO: do better
     isMap (Match _ cases def_case _) =
       any isParallelStm $
@@ -250,7 +258,7 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
           <> mconcat (map (bodyStms . caseBody) cases)
     isMap (Loop _ _ body) = (any isParallelStm . bodyStms) body
     isMap (WithAcc _ lam) = (any isParallelStm . bodyStms) $ lambdaBody lam
-    isMap Op {} = True
+    isMap (Op op) = isParallelOp op
 
 isRegularDistResult :: DistResult -> Bool
 isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0

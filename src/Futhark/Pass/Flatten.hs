@@ -32,6 +32,7 @@ import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Match
 import Futhark.Pass.Flatten.Monad
 import Futhark.Pass.Flatten.WithAcc
+import Futhark.Pass.Flatten.PreProcess
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -887,12 +888,12 @@ transformInnerMap ::
   [VName] ->
   Lambda SOACS ->
   Builder GPU [ResRep]
-transformInnerMap segments env inps pat w arrs map_lam =
-  -- \| not (isVariant inps env w) =
-  --     transformInnerMapMultiDim segments env inps pat w arrs map_lam
-  -- \| otherwise =
-  transformInnerMapSingleDim segments env inps pat w arrs map_lam
-
+transformInnerMap segments env inps pat w arrs map_lam
+  | not (isVariant inps env w) =
+      transformInnerMapMultiDim segments env inps pat w arrs map_lam
+  | otherwise =
+      transformInnerMapSingleDim segments env inps pat w arrs map_lam
+      
 transformInnerMapSingleDim ::
   Segments ->
   DistEnv ->
@@ -1513,7 +1514,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           pure $ insertReps (zip (map distResTag res) out_reps) env
     Let pat aux (WithAcc inputs lam) ->
       transformWithAcc flattenOps segments env inps res pat aux inputs lam
-    Let _ _ (Op (Stream {})) -> error "Unhandled Stream"
+    Let _ _ (Op (Stream {})) -> error "transformDistStm: Stream should have been removed"
     Let _ _ (Op (Hist {})) -> error "Unhandled Hist"
     Let _ _ (Op (JVP {})) -> error "Unhandled JVP"
     Let _ _ (Op (VJP {})) -> error "Unhandled VJP"
@@ -2009,12 +2010,13 @@ transformFunDef consts_scope fd = do
 
 transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do
-  consts' <- transformStms mempty $ progConsts prog
-  funs' <- mapM (transformFunDef $ scopeOf (progConsts prog)) $ progFuns prog
+  progAfterPreProcessing <- preprocessProg prog
+  consts' <- transformStms mempty $ progConsts progAfterPreProcessing
+  funs' <- mapM (transformFunDef $ scopeOf (progConsts progAfterPreProcessing)) $ progFuns progAfterPreProcessing
   lifted_funs <-
-    mapM (liftFunDef $ scopeOf (progConsts prog)) $
+    mapM (liftFunDef $ scopeOf (progConsts progAfterPreProcessing)) $
       filter (isNothing . funDefEntryPoint) $
-        progFuns prog
+        progFuns progAfterPreProcessing
   -- In extremely unlikely cases (mostly empty programs), we may end up having a
   -- name source that overlaps the names used in the builtin functions. Avoid
   -- that by bumping it by enough that we probably will not have a conflict.

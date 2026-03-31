@@ -377,6 +377,7 @@ library
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.Flatten
       Futhark.Pass.Flatten.Builtins
+      Futhark.Pass.Flatten.PreProcess
       Futhark.Pass.Flatten.Distribute
       Futhark.Pass.Flatten.Match
       Futhark.Pass.Flatten.Monad
