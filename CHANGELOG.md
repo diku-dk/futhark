@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Better fusion for `scan` SOACs.
 
+* New prelude function: `exscan`, an exclusive scan.
+
 ### Removed
 
 ### Changed
