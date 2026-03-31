@@ -480,9 +480,10 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           pure $ insertRep (distResTag res) (resVar rt_in env) env
       | otherwise ->
           scalarCase
-    Reshape arr _
-      | Just (DistInput rt_in _) <- lookup arr inps ->
-          pure $ insertRep (distResTag res) (resVar rt_in env) env
+    -- TODO: Probably have to change this.
+    Reshape arr _ -> do
+      irreg_v <- getIrregRep segments env inps arr
+      pure $ insertRep (distResTag res) (Irregular irreg_v) env
     Index arr slice
       | null $ sliceDims slice ->
           scalarCase
