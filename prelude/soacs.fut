@@ -203,6 +203,17 @@ def spread 't [n] (k: i64) (x: t) (is: [n]i64) (vs: [n]t) : *[k]t =
 def scatter 't [k] [n] (dest: *[k]t) (is: [n]i64) (vs: [n]t) : *[k]t =
   intrinsics.scatter dest is vs
 
+-- | Exclusive prefix scan.  Has the same caveats with respect to
+-- associativity and complexity as `scan`.
+--
+-- **Work:** *O(n ✕ W(op))*
+--
+-- **Span:** *O(log(n) ✕ W(op))*
+def exscan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a) : *[n]a =
+  scatter (map (\_ -> ne) (0..1..<n))
+          (map (+ 1) (0..1..<n))
+          (scan op ne as)
+
 -- | `scatter_2d as is vs` is the equivalent of a `scatter` on a 2-dimensional
 -- array.
 --
