@@ -8,7 +8,10 @@ module Futhark.Pass.Flatten.PreProcess (preprocessProg) where
 import Data.Maybe (isNothing)
 import Futhark.Builder
 import Futhark.IR.SOACS
+import Futhark.IR.SOACS.Simplify (simplifyStms)
+import Futhark.IR.SOACS.Simplify qualified as SOACS
 import Futhark.Pass
+import Futhark.Pass.Flatten.ISRWIM (irwim, iswim)
 import Futhark.Tools
 
 shouldDissectForm :: ScremaForm SOACS -> Bool
@@ -23,6 +26,13 @@ soacMapper :: Scope SOACS -> SOACMapper SOACS SOACS PassM
 soacMapper scope =
   identitySOACMapper {mapOnSOACLambda = onLambda scope}
 
+runSimplifiedBuilder ::
+  Scope SOACS ->
+  BuilderT SOACS PassM a ->
+  PassM (Stms SOACS)
+runSimplifiedBuilder scope m =
+  fst <$> runBuilderT (simplifyStms =<< collectStms_ m) scope
+
 -- TODO: maybe it is better to seperate these as they are doing different things.
 onStm :: Scope SOACS -> Stm SOACS -> PassM (Stms SOACS)
 onStm scope (Let pat aux (Op (Stream w arrs nes lam))) = do
@@ -31,13 +41,23 @@ onStm scope (Let pat aux (Op (Stream w arrs nes lam))) = do
 onStm scope (Let pat aux (Op (Screma w arrs form))) = do
   soac' <- mapSOACM (soacMapper scope) (Screma w arrs form)
   case soac' of
-    Screma w' arrs' form' ->
-      if shouldDissectForm form'
-        then
+    Screma w' arrs' form'
+      | Just scans <- isScanSOAC form',
+        Scan scan_lam nes <- singleScan scans,
+        Just do_iswim <- iswim pat w' scan_lam (zip nes arrs') ->
+          runSimplifiedBuilder scope $ auxing aux do_iswim
+      | Just [Reduce comm red_fun nes] <- isReduceSOAC form',
+        let comm'
+              | commutativeLambda red_fun = Commutative
+              | otherwise = comm,
+        Just do_irwim <- irwim pat w' comm' red_fun (zip nes arrs') ->
+          runSimplifiedBuilder scope $ auxing aux do_irwim
+      | shouldDissectForm form' ->
           runBuilderT_ (auxing aux $ dissectScrema pat w' form' arrs') scope
-        else
+      | otherwise ->
           pure $ oneStm $ Let pat aux $ Op $ Screma w' arrs' form'
-    _ -> undefined
+    _ ->
+      error "onStm: impossible non-Screma"
 onStm scope (Let pat aux e) =
   oneStm . Let pat aux <$> mapExpM mapper e
   where
@@ -68,7 +88,10 @@ onFun consts fd = do
   pure $ fd {funDefBody = body}
 
 preprocessProg :: Prog SOACS -> PassM (Prog SOACS)
-preprocessProg =
-  intraproceduralTransformationWithConsts
-    (onStms mempty)
-    onFun
+preprocessProg prog = do
+  prog' <-
+    intraproceduralTransformationWithConsts
+      (onStms mempty)
+      onFun
+      prog
+  SOACS.simplifySOACS prog' -- Is this a good idea?

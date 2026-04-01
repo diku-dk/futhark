@@ -31,15 +31,14 @@ import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Match
 import Futhark.Pass.Flatten.Monad
-import Futhark.Pass.Flatten.WithAcc
 import Futhark.Pass.Flatten.PreProcess
+import Futhark.Pass.Flatten.WithAcc
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, quot, rem)
 
--- data InnerMapMode  =  Regular  | IrRegular
 data InnerMapMode
   = MultiDim
   | SingleDim
@@ -894,7 +893,7 @@ transformInnerMap segments env inps pat w arrs map_lam
       transformInnerMapMultiDim segments env inps pat w arrs map_lam
   | otherwise =
       transformInnerMapSingleDim segments env inps pat w arrs map_lam
-      
+
 transformInnerMapSingleDim ::
   Segments ->
   DistEnv ->
@@ -1069,6 +1068,8 @@ distributeAndTransformInnerMap mode ws_triple new_segment inps pat arrs' onFreeV
     localScope input_scope $
       foldMap freeIn <$> mapM lookupType (namesToList free)
   let free_and_sizes = namesToList $ free <> free_sizes
+  traceM "distributing inner map with free variables\n"
+  traceM $ unlines ["inputs: ", prettyString inps, "free variables:", prettyString free_and_sizes]
   (free_replicated, replicated) <-
     fmap unzip . sequence $
       mapMaybe
@@ -1106,15 +1107,20 @@ distributeAndTransformInnerMap mode ws_triple new_segment inps pat arrs' onFreeV
 suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
 suitableOperator env inps lam nes =
   allNames notVariant (freeIn lam)
-    && not (any (isVariant inps env) nes) -- TODO: maybe not needed
+    -- && not (any (isVariant inps env) nes) -- TODO: maybe not needed
     && all primType (lambdaReturnType lam) -- TODO
   where
     notVariant v = isNothing $ M.lookup v $ inputReps inps env
 
-doSegScan :: [Scan SOACS] -> VName -> [VName] -> Builder GPU [VName]
-doSegScan scans flags elems =
+-- doSegScan :: [Scan SOACS] -> VName -> [VName] -> Builder GPU [VName]
+doSegScan :: [Scan SOACS] -> VName -> [VName] -> Segments -> DistInputs -> DistEnv -> Builder GPU [VName]
+doSegScan scans flags elems segments inps env = do
   let scan = singleScan scans
-   in genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) (scanNeutral scan) flags elems
+  -- TODO: FixME: this is temp hack
+  let zeros = replicate (segmentsRank segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+  let nes = scanNeutral scan
+  nes' <- mapM (readInput segments env zeros inps) nes
+  genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) nes' flags elems
 
 -- Hacky fix to get result representations in the same order as the pattern
 resRepsInPatOrder :: Pat Type -> [(VName, ResRep)] -> [ResRep]
@@ -1178,7 +1184,12 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds,
         Just arrs' <- mapM (`lookup` inps) arrs,
         (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
-          elems' <- genSegRed arr_segments flags offsets elems $ singleReduce reds
+          -- TODO: FixME: this is temp hack
+          let sing_red = singleReduce reds
+          let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+          nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
+          let sing_red' = sing_red {redNeutral = nes'}
+          elems' <- genSegRed arr_segments flags offsets elems sing_red'
           pure $ insertReps (zip (map distResTag res) (map Regular elems')) env
       | Just (reds, map_lam) <- isRedomapSOAC form,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
@@ -1193,9 +1204,13 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           redout_names' <- case head redout_res of
             Regular _ -> mapM (flattenRegular segments) redout_names
             Irregular _ -> pure redout_names
+          -- TODO: FixME: this is temp hack
+          let sing_red = singleReduce reds
+          let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+          nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
+          let sing_red' = sing_red {redNeutral = nes'}
           elems' <-
-            genSegRed ws_S ws_F ws_O redout_names' $
-              singleReduce reds
+            genSegRed ws_S ws_F ws_O redout_names' sing_red'
           elems'' <- forM elems' $ \v -> do
             v_t <- lookupType v
             letExp (baseName v <> "_reshaped") . BasicOp $
@@ -1209,7 +1224,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans,
         Just arrs' <- mapM (`lookup` inps) arrs,
         (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
-          elems' <- doSegScan scans flags elems
+          elems' <- doSegScan scans flags elems segments inps env
           pure $ insertIrregulars arr_segments flags offsets (zip (map distResTag res) elems') env
       | Just (scans, map_lam) <- isScanomapSOAC form,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
@@ -1223,7 +1238,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           scanout_names' <- case head scanout_res of
             Regular _ -> mapM (flattenRegular segments) scanout_names
             Irregular _ -> pure scanout_names
-          elems' <- doSegScan scans ws_F scanout_names'
+          elems' <- doSegScan scans ws_F scanout_names' segments inps env
           let (scan_tags, map_tags) = splitAt (scanResults scans) $ map distResTag res
           pure $
             insertIrregulars ws_S ws_F ws_O (zip scan_tags elems') $
@@ -2012,6 +2027,7 @@ transformFunDef consts_scope fd = do
 transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do
   progAfterPreProcessing <- preprocessProg prog
+  traceM $ "After preprocessProg:" <> prettyString progAfterPreProcessing
   consts' <- transformStms mempty $ progConsts progAfterPreProcessing
   funs' <- mapM (transformFunDef $ scopeOf (progConsts progAfterPreProcessing)) $ progFuns progAfterPreProcessing
   lifted_funs <-
