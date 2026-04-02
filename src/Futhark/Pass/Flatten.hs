@@ -804,66 +804,7 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
         DistInput rt _ ->
           case resVar rt env of
             Irregular rep -> do
-              -- This should be 1D
-              rep_t <- lookupType $ irregularD rep
-              when (arrayRank rep_t > 1) $
-                error $
-                  error "onMapInputArr: irregularD is not 1D"
-              if null (arrayDims $ paramType p)
-                then do
-                  data_size <- arraySize 0 <$> lookupType (irregularD rep)
-                  if data_size == ws_prod
-                    then
-                      -- Data already has the right layout and we can map it directly.
-                      pure $ MapArray (irregularD rep) (stripArray 1 rep_t)
-                    else do
-                      -- We need to materialize the data.
-                      new_flat <-
-                        letExp (baseName arr <> "_flat_expand")
-                          <=< segMap (MkSolo ws_prod)
-                          $ \(MkSolo i) -> do
-                            j <- letSubExp "j" =<< eIndex ws_data [eSubExp i]
-                            data_off <- letSubExp "data_off" =<< eIndex (irregularO rep) [eSubExp j]
-                            seg_start <- letSubExp "seg_start" =<< eIndex ws_O [eSubExp j]
-                            local_pos <- letSubExp "local_pos" <=< toExp $ pe64 i - pe64 seg_start
-                            flat_idx <- letSubExp "flat_idx" <=< toExp $ pe64 data_off + pe64 local_pos
-                            fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
-                      pure $ MapArray new_flat (stripArray 1 rep_t)
-                else do
-                  -- We need to split multi-dimensional irregular segments
-                  -- into per-row segments. Compute per-row size by dividing
-                  -- each segment's total size by the number of inner iterations.
-                  -- Important TODO: I should ask troels about this.
-                  -- we should make this consistent.
-                  -- we can avoid getting per_row_size by division.
-                  num_segments <- arraySize 0 <$> lookupType ws
-                  -- per_row_size[s] = irregularS[s] / ws[s]
-                  per_row_size <-
-                    letExp (baseName (paramName p) <> "_per_row_size")
-                      <=< segMap (MkSolo num_segments)
-                      $ \(MkSolo s) -> do
-                        total_s <- letSubExp "total_s" =<< eIndex (irregularS rep) [eSubExp s]
-                        num_rows_s <- letSubExp "num_rows_s" =<< eIndex ws [eSubExp s]
-                        row_size <-
-                          letSubExp "row_size" <=< toExp $
-                            pe64 total_s `div` pe64 num_rows_s
-                        pure $ subExpsRes [row_size]
-                  new_S <-
-                    letExp (baseName (paramName p) <> "_new_S")
-                      <=< segMap (MkSolo ws_prod)
-                      $ \(MkSolo i) -> do
-                        seg_i <- letSubExp "seg_i" =<< eIndex ws_data [eSubExp i]
-                        sz <- letSubExp "sz" =<< eIndex per_row_size [eSubExp seg_i]
-                        pure $ subExpsRes [sz]
-                  (new_F, new_O, _new_elems) <- doSegIota new_S
-                  let rep' =
-                        IrregularRep
-                          { irregularD = irregularD rep,
-                            irregularF = new_F,
-                            irregularS = new_S,
-                            irregularO = new_O
-                          }
-                  pure $ MapOther rep' rep_t
+              onMapIrregularInputArr ws ws_O ws_data p arr rep ws_prod
             Regular vs -> do
               let inner_shape = arrayShape $ paramType p
               vs_t <- lookupType vs
@@ -926,6 +867,76 @@ transformInnerMapSingleDim segments env inps pat w arrs map_lam = do
     (onMapFreeVar segments env inps ws (ws_F, ws_O, ws_data))
     map_lam
 
+onMapIrregularInputArr ::
+  VName ->
+  VName ->
+  VName ->
+  Param Type ->
+  VName ->
+  IrregularRep ->
+  SubExp ->
+  Builder GPU (MapArray IrregularRep)
+onMapIrregularInputArr ws ws_O ws_data p arr rep ws_prod = do
+  rep_t <- lookupType $ irregularD rep
+  when (arrayRank rep_t > 1) $
+    error $
+      error "onMapInputArrMultiDim: irregularD is not 1D"
+  if null (arrayDims $ paramType p)
+    then do
+      data_size <- arraySize 0 <$> lookupType (irregularD rep)
+      if data_size == ws_prod
+        then
+          -- Data already has the right layout and we can map it directly.
+          pure $ MapArray (irregularD rep) (stripArray 1 rep_t)
+        else do
+          -- We need to materialize the data.
+          new_flat <-
+            letExp (baseName arr <> "_flat_expand")
+              <=< segMap (MkSolo ws_prod)
+              $ \(MkSolo i) -> do
+                j <- letSubExp "j" =<< eIndex ws_data [eSubExp i]
+                data_off <- letSubExp "data_off" =<< eIndex (irregularO rep) [eSubExp j]
+                seg_start <- letSubExp "seg_start" =<< eIndex ws_O [eSubExp j]
+                local_pos <- letSubExp "local_pos" <=< toExp $ pe64 i - pe64 seg_start
+                flat_idx <- letSubExp "flat_idx" <=< toExp $ pe64 data_off + pe64 local_pos
+                fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
+          pure $ MapArray new_flat (stripArray 1 rep_t)
+    else do
+      -- We need to split multi-dimensional irregular segments
+      -- into per-row segments. Compute per-row size by dividing
+      -- each segment's total size by the number of inner iterations.
+      -- Important TODO: I should ask troels about this.
+      -- we should make this consistent.
+      -- we can avoid getting per_row_size by division.
+      num_segments <- arraySize 0 <$> lookupType ws
+      -- per_row_size[s] = irregularS[s] / ws[s]
+      per_row_size <-
+        letExp (baseName (paramName p) <> "_per_row_size")
+          <=< segMap (MkSolo num_segments)
+          $ \(MkSolo s) -> do
+            total_s <- letSubExp "total_s" =<< eIndex (irregularS rep) [eSubExp s]
+            num_rows_s <- letSubExp "num_rows_s" =<< eIndex ws [eSubExp s]
+            row_size <-
+              letSubExp "row_size" <=< toExp $
+                pe64 total_s `div` pe64 num_rows_s
+            pure $ subExpsRes [row_size]
+      new_S <-
+        letExp (baseName (paramName p) <> "_new_S")
+          <=< segMap (MkSolo ws_prod)
+          $ \(MkSolo i) -> do
+            seg_i <- letSubExp "seg_i" =<< eIndex ws_data [eSubExp i]
+            sz <- letSubExp "sz" =<< eIndex per_row_size [eSubExp seg_i]
+            pure $ subExpsRes [sz]
+      (new_F, new_O, _new_elems) <- doSegIota new_S
+      let rep' =
+            IrregularRep
+              { irregularD = irregularD rep,
+                irregularF = new_F,
+                irregularS = new_S,
+                irregularO = new_O
+              }
+      pure $ MapOther rep' rep_t
+
 onMapInputArrMultiDim ::
   Segments ->
   SubExp ->
@@ -938,73 +949,14 @@ onMapInputArrMultiDim ::
   VName ->
   Builder GPU (MapArray IrregularRep)
 onMapInputArrMultiDim old_segments w env inps ws ws_O ws_data p arr = do
-  ws_prod <- arraySize 0 <$> lookupType ws_data
   case lookup arr inps of
     Just v_inp ->
       case v_inp of
         DistInputFree vs t -> pure $ MapArray vs t
         DistInput rt t -> case resVar rt env of
           Irregular rep -> do
-            -- This should be 1D
-            rep_t <- lookupType $ irregularD rep
-            when (arrayRank rep_t > 1) $
-              error $
-                error "onMapInputArrMultiDim: irregularD is not 1D"
-            if null (arrayDims $ paramType p)
-              then do
-                data_size <- arraySize 0 <$> lookupType (irregularD rep)
-                if data_size == ws_prod
-                  then
-                    -- Data already has the right layout and we can map it directly.
-                    pure $ MapArray (irregularD rep) (stripArray 1 rep_t)
-                  else do
-                    -- We need to materialize the data.
-                    new_flat <-
-                      letExp (baseName arr <> "_flat_expand")
-                        <=< segMap (MkSolo ws_prod)
-                        $ \(MkSolo i) -> do
-                          j <- letSubExp "j" =<< eIndex ws_data [eSubExp i]
-                          data_off <- letSubExp "data_off" =<< eIndex (irregularO rep) [eSubExp j]
-                          seg_start <- letSubExp "seg_start" =<< eIndex ws_O [eSubExp j]
-                          local_pos <- letSubExp "local_pos" <=< toExp $ pe64 i - pe64 seg_start
-                          flat_idx <- letSubExp "flat_idx" <=< toExp $ pe64 data_off + pe64 local_pos
-                          fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
-                    pure $ MapArray new_flat (stripArray 1 rep_t)
-              else do
-                -- We need to split multi-dimensional irregular segments
-                -- into per-row segments. Compute per-row size by dividing
-                -- each segment's total size by the number of inner iterations.
-                -- Important TODO: I should ask troels about this.
-                -- we should make this consistent.
-                -- we can avoid getting per_row_size by division.
-                num_segments <- arraySize 0 <$> lookupType ws
-                -- per_row_size[s] = irregularS[s] / ws[s]
-                per_row_size <-
-                  letExp (baseName (paramName p) <> "_per_row_size")
-                    <=< segMap (MkSolo num_segments)
-                    $ \(MkSolo s) -> do
-                      total_s <- letSubExp "total_s" =<< eIndex (irregularS rep) [eSubExp s]
-                      num_rows_s <- letSubExp "num_rows_s" =<< eIndex ws [eSubExp s]
-                      row_size <-
-                        letSubExp "row_size" <=< toExp $
-                          pe64 total_s `div` pe64 num_rows_s
-                      pure $ subExpsRes [row_size]
-                new_S <-
-                  letExp (baseName (paramName p) <> "_new_S")
-                    <=< segMap (MkSolo ws_prod)
-                    $ \(MkSolo i) -> do
-                      seg_i <- letSubExp "seg_i" =<< eIndex ws_data [eSubExp i]
-                      sz <- letSubExp "sz" =<< eIndex per_row_size [eSubExp seg_i]
-                      pure $ subExpsRes [sz]
-                (new_F, new_O, _new_elems) <- doSegIota new_S
-                let rep' =
-                      IrregularRep
-                        { irregularD = irregularD rep,
-                          irregularF = new_F,
-                          irregularS = new_S,
-                          irregularO = new_O
-                        }
-                pure $ MapOther rep' rep_t
+            ws_prod <- arraySize 0 <$> lookupType ws_data
+            onMapIrregularInputArr ws ws_O ws_data p arr rep ws_prod
           Regular vs -> do
             vs_t <- lookupType vs
             -- let's be cautious and make sure it has the correct shape
