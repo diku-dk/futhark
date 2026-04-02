@@ -806,8 +806,9 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
             Irregular rep -> do
               -- This should be 1D
               rep_t <- lookupType $ irregularD rep
-              when (arrayRank rep_t > 1 ) $
-                error $ error "onMapInputArr: irregularD is not 1D"
+              when (arrayRank rep_t > 1) $
+                error $
+                  error "onMapInputArr: irregularD is not 1D"
               if null (arrayDims $ paramType p)
                 then do
                   data_size <- arraySize 0 <$> lookupType (irregularD rep)
@@ -946,13 +947,14 @@ onMapInputArrMultiDim old_segments w env inps ws ws_O ws_data p arr = do
           Irregular rep -> do
             -- This should be 1D
             rep_t <- lookupType $ irregularD rep
-            when (arrayRank rep_t > 1 ) $
-              error $ error "onMapInputArrMultiDim: irregularD is not 1D"
+            when (arrayRank rep_t > 1) $
+              error $
+                error "onMapInputArrMultiDim: irregularD is not 1D"
             if null (arrayDims $ paramType p)
               then do
                 data_size <- arraySize 0 <$> lookupType (irregularD rep)
                 if data_size == ws_prod
-                  then 
+                  then
                     -- Data already has the right layout and we can map it directly.
                     pure $ MapArray (irregularD rep) (stripArray 1 rep_t)
                   else do
@@ -1690,15 +1692,13 @@ irregularMapResult mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
       (new_ws_F, new_ws_O, _) <- doRepIota new_shape
       letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg
       mapResultRep SingleDim (new_shape, new_ws_F, new_ws_O) v
-    else case mode of 
-        MultiDim -> do
-          reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
-          mapResultRep MultiDim (ws, ws_F, ws_O) v
-        SingleDim -> do
-          letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg
-          mapResultRep SingleDim (ws, ws_F, ws_O) v
-
-      
+    else case mode of
+      MultiDim -> do
+        reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
+        mapResultRep MultiDim (ws, ws_F, ws_O) v
+      SingleDim -> do
+        letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg
+        mapResultRep SingleDim (ws, ws_F, ws_O) v
   where
     isTypeVariant vin se = case se of
       Var v' -> S.member v' vin
