@@ -750,19 +750,32 @@ onMapFreeVar segments env inps _ws (_ws_F, _ws_O, ws_data) v = do
       -- subExpsRes . pure <$> readInput segments env segment_is inps (Var v)
       DistInput rt t -> case resVar rt env of
         Irregular rep -> do
-          ~[new_S, offsets] <- letTupExp (baseName v <> "_rep_free_irreg")
-            <=< segMap (MkSolo ws_prod)
-            $ \(MkSolo i) -> do
-              segment <- letSubExp "segment" =<< eIndex ws_data [eSubExp i]
-              s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp segment]
-              o <- letSubExp "o" =<< eIndex (irregularO rep) [eSubExp segment]
-              pure $ subExpsRes [s, o]
+          new_S <-
+            letExp (baseName v <> "_rep_free_irreg_S")
+              <=< segMap (MkSolo ws_prod)
+              $ \(MkSolo i) -> do
+                old_seg <- letSubExp "old_seg" =<< eIndex ws_data [eSubExp i]
+                s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp old_seg]
+                pure [subExpRes s]
+          (new_F, new_O, new_II1) <- doRepIota new_S
+          m <- arraySize 0 <$> lookupType new_II1
+          new_D <-
+            letExp (baseName v <> "_new_D")
+              <=< segMap (MkSolo m)
+              $ \(MkSolo i) -> do
+                new_seg <- letSubExp "new_seg" =<< eIndex new_II1 [eSubExp i]
+                old_seg <- letSubExp "old_seg" =<< eIndex ws_data [eSubExp new_seg]
+                new_off <- letSubExp "new_off" =<< eIndex new_O [eSubExp new_seg]
+                old_off <- letSubExp "old_off" =<< eIndex (irregularO rep) [eSubExp old_seg]
+                j <- letSubExp "j" <=< toExp $ pe64 i - pe64 new_off
+                x <- letSubExp "x" =<< eIndex (irregularD rep) [toExp $ pe64 old_off + pe64 j]
+                pure [subExpRes x]
           let rep' =
                 IrregularRep
                   { irregularS = new_S,
-                    irregularF = irregularF rep,
-                    irregularO = offsets,
-                    irregularD = irregularD rep
+                    irregularF = new_F,
+                    irregularO = new_O,
+                    irregularD = new_D
                   }
           pure $ MapOther rep' t
         Regular vs ->
@@ -804,7 +817,7 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
         DistInput rt _ ->
           case resVar rt env of
             Irregular rep -> do
-              onMapIrregularInputArr ws ws_O ws_data p arr rep ws_prod
+              onMapIrregularInputArr SingleDim segments ws ws_O ws_data p arr rep ws_prod
             Regular vs -> do
               let inner_shape = arrayShape $ paramType p
               vs_t <- lookupType vs
@@ -868,6 +881,8 @@ transformInnerMapSingleDim segments env inps pat w arrs map_lam = do
     map_lam
 
 onMapIrregularInputArr ::
+  InnerMapMode ->
+  Segments ->
   VName ->
   VName ->
   VName ->
@@ -876,31 +891,22 @@ onMapIrregularInputArr ::
   IrregularRep ->
   SubExp ->
   Builder GPU (MapArray IrregularRep)
-onMapIrregularInputArr ws ws_O ws_data p arr rep ws_prod = do
+onMapIrregularInputArr mode new_segments ws ws_O ws_data p arr rep ws_prod = do
+  -- new_segments has already has the the new w inside unlike other functions
   rep_t <- lookupType $ irregularD rep
   when (arrayRank rep_t > 1) $
     error $
       error "onMapInputArrMultiDim: irregularD is not 1D"
   if null (arrayDims $ paramType p)
     then do
-      data_size <- arraySize 0 <$> lookupType (irregularD rep)
-      if data_size == ws_prod
-        then
-          -- Data already has the right layout and we can map it directly.
-          pure $ MapArray (irregularD rep) (stripArray 1 rep_t)
-        else do
-          -- We need to materialize the data.
-          new_flat <-
-            letExp (baseName arr <> "_flat_expand")
-              <=< segMap (MkSolo ws_prod)
-              $ \(MkSolo i) -> do
-                j <- letSubExp "j" =<< eIndex ws_data [eSubExp i]
-                data_off <- letSubExp "data_off" =<< eIndex (irregularO rep) [eSubExp j]
-                seg_start <- letSubExp "seg_start" =<< eIndex ws_O [eSubExp j]
-                local_pos <- letSubExp "local_pos" <=< toExp $ pe64 i - pe64 seg_start
-                flat_idx <- letSubExp "flat_idx" <=< toExp $ pe64 data_off + pe64 local_pos
-                fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
-          pure $ MapArray new_flat (stripArray 1 rep_t)
+      -- assuimg the irregD is 1D size(irregularD rep) == ws_prod should hold and this should be fine
+      let old_shape = arrayShape rep_t
+          new_shape =
+            case mode of
+              SingleDim -> Shape [ws_prod]
+              MultiDim -> segmentsShape new_segments 
+      v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $  BasicOp $ Reshape (irregularD rep) $ reshapeAll old_shape new_shape      
+      pure $ MapArray v_reshaped (stripArray 1 rep_t)
     else do
       -- We need to split multi-dimensional irregular segments
       -- into per-row segments. Compute per-row size by dividing
@@ -956,7 +962,7 @@ onMapInputArrMultiDim old_segments w env inps ws ws_O ws_data p arr = do
         DistInput rt t -> case resVar rt env of
           Irregular rep -> do
             ws_prod <- arraySize 0 <$> lookupType ws_data
-            onMapIrregularInputArr ws ws_O ws_data p arr rep ws_prod
+            onMapIrregularInputArr MultiDim (old_segments <> pure w) ws ws_O ws_data p arr rep ws_prod
           Regular vs -> do
             vs_t <- lookupType vs
             -- let's be cautious and make sure it has the correct shape
@@ -1649,7 +1655,8 @@ irregularMapResult mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
         reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
         mapResultRep MultiDim (ws, ws_F, ws_O) v
       SingleDim -> do
-        letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg
+        -- TODO: have to do this even it seems very annoying should think something better
+        reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
         mapResultRep SingleDim (ws, ws_F, ws_O) v
   where
     isTypeVariant vin se = case se of
