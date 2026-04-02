@@ -804,14 +804,17 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
         DistInput rt _ ->
           case resVar rt env of
             Irregular rep -> do
-              elems_t <- lookupType $ irregularD rep
-              if stripArray (segmentsRank segments) elems_t == paramType p
+              -- This should be 1D
+              rep_t <- lookupType $ irregularD rep
+              when (arrayRank rep_t > 1 ) $
+                error $ error "onMapInputArr: irregularD is not 1D"
+              if null (arrayDims $ paramType p)
                 then do
                   data_size <- arraySize 0 <$> lookupType (irregularD rep)
                   if data_size == ws_prod
                     then
                       -- Data already has the right layout and we can map it directly.
-                      pure $ MapArray (irregularD rep) (stripArray 1 elems_t)
+                      pure $ MapArray (irregularD rep) (stripArray 1 rep_t)
                     else do
                       -- We need to materialize the data.
                       new_flat <-
@@ -824,7 +827,7 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
                             local_pos <- letSubExp "local_pos" <=< toExp $ pe64 i - pe64 seg_start
                             flat_idx <- letSubExp "flat_idx" <=< toExp $ pe64 data_off + pe64 local_pos
                             fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
-                      pure $ MapArray new_flat (stripArray 1 elems_t)
+                      pure $ MapArray new_flat (stripArray 1 rep_t)
                 else do
                   -- We need to split multi-dimensional irregular segments
                   -- into per-row segments. Compute per-row size by dividing
@@ -859,7 +862,7 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
                             irregularS = new_S,
                             irregularO = new_O
                           }
-                  pure $ MapOther rep' elems_t
+                  pure $ MapOther rep' rep_t
             Regular vs -> do
               let inner_shape = arrayShape $ paramType p
               vs_t <- lookupType vs
