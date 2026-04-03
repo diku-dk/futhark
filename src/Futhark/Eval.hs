@@ -17,6 +17,7 @@ import Control.Monad.Free.Church (F, runF)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask)
+import Data.Array qualified as A
 import Data.Bifunctor (first)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map qualified as M
@@ -31,6 +32,7 @@ import Futhark.FreshNames (VNameSource)
 import Futhark.Test (FutharkExe (..), compileProgram)
 import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, hardline, putDocLn)
 import Language.Futhark.Interpreter qualified as I
+import Language.Futhark.Interpreter.Values qualified as IV
 import Language.Futhark.Interpreter.FFI qualified as S
 import Language.Futhark.Interpreter.FFI.Server (FutharkServer)
 import Language.Futhark.Interpreter.FFI.Server qualified as S
@@ -108,6 +110,29 @@ realize s l = do
   writeIORef s $ Just s''
   pure r
 
+secondM :: Monad m => (b -> m c) -> (a,b) -> m (a,c)
+secondM f (x,y) = do
+  y' <- f y
+  return (x,y')
+
+fullyRealize :: IORef (Maybe FutharkServer) -> I.Value -> IO I.Value
+fullyRealize _ (IV.ValuePrim p) = pure $ IV.ValuePrim p
+fullyRealize s (IV.ValueArray sh a) = do
+  let (l, u) = A.bounds a
+      idxs = A.range (l, u)
+  bs <- mapM (fullyRealize s . (a A.!)) idxs
+  pure $ IV.ValueArray sh $ A.listArray (l, u) bs
+fullyRealize s (IV.ValueRecord m) = IV.ValueRecord . M.fromList <$> (mapM $ secondM $ fullyRealize s) (M.toList m)
+fullyRealize _ (IV.ValueFun f) = pure $ IV.ValueFun f
+fullyRealize s (IV.ValueAcc sh f a) = do
+  let (l, u) = A.bounds a
+      idxs = A.range (l, u)
+  bs <- mapM (fullyRealize s . (a A.!)) idxs
+  pure $ IV.ValueAcc sh f $ A.listArray (l, u) bs
+fullyRealize s (IV.ValueSum sh n vs) = IV.ValueSum sh n <$> mapM (fullyRealize s) vs
+fullyRealize _ (IV.ValueAD d v) = pure $ IV.ValueAD d v
+fullyRealize s (IV.ValueExt l _) = realize s l
+
 -- | Run an expression in the given interpreter state. The expression is parsed,
 -- type checked, and then run. Returns a prettyprinted result. Must be run in a
 -- monad that supports aborting and traces.
@@ -136,7 +161,9 @@ runExpr (InterpreterState (src, env, ctx, s)) str = do
   case pval of
     Left err -> do
       abort $ I.prettyInterpreterError err
-    Right val -> pure $ I.prettyValue val <> hardline
+    Right val -> do
+      val' <- liftIO $ fullyRealize is val
+      pure $ I.prettyValue val' <> hardline
 
 data EvalConfig = EvalConfig
   { evalPrintWarnings :: Bool,
