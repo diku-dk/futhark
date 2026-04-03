@@ -373,22 +373,20 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
               withProgramServer program runner extra_options $ \server -> do
                 let run = runCompiledEntry (FutharkExe futhark) server program
                 propSpecs <- extractPropSpecsFromServer server
-                let isProp io =
-                      any
-                        ( \p -> case runInput p of
-                            GenValues [] -> True
-                            _ -> False
-                        )
-                        (iosTestRuns io)
 
-                let (propIOs, normalIOs) = partition isProp ios
+                let (propIOs, normalIOs) = partition isPropertyInputOutput ios
                 normal_test_result <- concat <$> mapM run normalIOs
 
-                let requestedNames = map iosEntryPoint propIOs
-                let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
-                propResults <- runPBT pbtConfig server verifiedProps
-                
-                pure $ normal_test_result ++ propResults
+                let requestedNames = requestedPropertyNames propIOs
+                let diagnostics = propertyDiagnostics requestedNames propSpecs
+
+                if null diagnostics
+                  then do
+                    let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
+                    propResults <- runPBT pbtConfig server verifiedProps
+                    pure $ normal_test_result ++ propResults ++ diagnostics
+                  else
+                    pure $ normal_test_result ++ diagnostics
 
       when (mode == Interpreted) $
         context "Interpreting" $
@@ -1631,3 +1629,66 @@ outsMatchType srv propTy outs = do
         Right fs ->
           let ftys = map fieldType fs
            in pure (outs == ftys)
+
+
+-- Helper fuctions for checking property comments and attributes match
+
+isPropertyPlaceholderRun :: TestRun -> Bool
+isPropertyPlaceholderRun (TestRun _ (GenValues []) (Succeeds Nothing) _ _) = True
+isPropertyPlaceholderRun _ = False
+
+isPropertyInputOutput :: InputOutputs -> Bool
+isPropertyInputOutput io =
+  any isPropertyPlaceholderRun (iosTestRuns io)
+
+requestedPropertyNames :: [InputOutputs] -> [T.Text]
+requestedPropertyNames ios =
+  nubText [iosEntryPoint io | io <- ios, isPropertyInputOutput io]
+
+declaredPropertyNames :: [PropSpec] -> [T.Text]
+declaredPropertyNames specs =
+  nubText $ map psProp specs
+
+nubText :: [T.Text] -> [T.Text]
+nubText = go []
+  where
+    go _ [] = []
+    go seen (x:xs)
+      | x `elem` seen = go seen xs
+      | otherwise = x : go (x : seen) xs
+
+propertyDiagnostics :: [T.Text] -> [PropSpec] -> [TestResult]
+propertyDiagnostics requested specs =
+  missingRequested ++ missingDeclarations
+  where
+    declared = declaredPropertyNames specs
+
+    requestedWithoutAttr =
+      [ name | name <- requested, name `notElem` declared ]
+
+    declaredWithoutRequest =
+      [ name | name <- declared, name `notElem` requested ]
+
+    missingRequested =
+      [ Failure
+          [ "Unknown property in test specification: "
+              <> name
+              <> "\nThere is a '-- property: "
+              <> name
+              <> "' block, but no matching #[prop(...)] attribute on that entry point."
+          ]
+      | name <- requestedWithoutAttr
+      ]
+
+    missingDeclarations =
+      [ Failure
+          [ "Undeclared property test block for attribute-backed property: "
+              <> name
+              <> "\nThere is a #[prop(...)] attribute on entry point '"
+              <> name
+              <> "', but no matching '-- property: "
+              <> name
+              <> "' block in the test specification."
+          ]
+      | name <- declaredWithoutRequest
+      ]
