@@ -20,7 +20,7 @@ where
 
 import Data.Map qualified as M
 import Data.Text qualified as T
-import Futhark.Util.NDArray (NDArray)
+import Language.Futhark.Interpreter.FFI.Util.NDArray (NDArray)
 import Language.Futhark.Core (Half, Int16, Int32, Int64, Int8, Word16, Word32, Word64, Word8)
 import Language.Futhark.Interpreter.FFI.UIDs (ValueUID)
 import Language.Futhark.Syntax qualified as I

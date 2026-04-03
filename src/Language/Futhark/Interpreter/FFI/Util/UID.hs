@@ -1,6 +1,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 
-module Futhark.Util.UID
+module Language.Futhark.Interpreter.FFI.Util.UID
   ( -- Unique IDs
     UID (uid),
     -- Unique ID source

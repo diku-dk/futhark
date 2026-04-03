@@ -1,4 +1,4 @@
-module Futhark.Util.BiMap
+module Language.Futhark.Interpreter.FFI.Util.BiMap
   ( BiMap,
     insert,
     lookupRight,

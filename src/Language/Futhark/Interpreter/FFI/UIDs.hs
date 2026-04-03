@@ -13,7 +13,7 @@ module Language.Futhark.Interpreter.FFI.UIDs
   )
 where
 
-import Futhark.Util.UID qualified as UID
+import Language.Futhark.Interpreter.FFI.Util.UID qualified as UID
 
 data Entry
 

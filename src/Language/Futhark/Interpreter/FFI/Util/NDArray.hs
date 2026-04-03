@@ -1,4 +1,4 @@
-module Futhark.Util.NDArray
+module Language.Futhark.Interpreter.FFI.Util.NDArray
   ( NDArray,
     fromList,
     shape,

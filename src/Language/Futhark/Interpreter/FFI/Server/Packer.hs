@@ -18,8 +18,8 @@ import Data.Maybe (fromJust, fromMaybe)
 import Data.Text qualified as T
 import Futhark.Server qualified as S
 import Futhark.Test.Values qualified as V
-import Futhark.Util.BiMap qualified as BM
-import Futhark.Util.NDArray qualified as ND
+import Language.Futhark.Interpreter.FFI.Util.BiMap qualified as BM
+import Language.Futhark.Interpreter.FFI.Util.NDArray qualified as ND
 import GHC.IO.Handle (hClose)
 import Language.Futhark.Interpreter.FFI (ExValue, ExValueAtom)
 import Language.Futhark.Interpreter.FFI.Server (FutharkServerM)
