@@ -471,70 +471,107 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       scalarCase
     Assert {} ->
       scalarCase
-    ArrayLit [] row_type -> do
-      ns <- dataArr segments env inps $ intConst Int64 0
-      (flags, offsets, _elems) <- doRepIota ns
-      let resultType = Array (elemType row_type) (Shape [intConst Int64 0]) NoUniqueness
-      elems <- letExp "arraylit_empty_elems" =<< eBlank resultType
-      pure $ insertIrregular ns flags offsets (distResTag res) elems env
-    ArrayLit vs row_type -> do
-      let arr_outer_dim = intConst Int64 $ fromIntegral $ length vs
-      vs_reparr <- mapM (dataArr segments env inps) vs
-      dim_arrs <- mapM (dataArr segments env inps) (arrayDims row_type)
-      num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
-      ~[row_size, full_size] <- letTupExp "arraylit_row_size" <=< segMap (MkSolo num_segments) $ \(MkSolo i) -> do
-        vals <- mapM (\dim_arr -> letSubExp "dim_i" =<< eIndex dim_arr [eSubExp i]) dim_arrs
-        n <- letSubExp "n" <=< toExp $ product $ map pe64 vals
-        fs <- letSubExp "fs" <=< toExp $ pe64 n * pe64 arr_outer_dim
-        pure $ subExpsRes [n, fs]
+    -- Potentially no need for this
+    ArrayLit [] row_type
+      | not $ any (isVariant inps env) (arrayDims row_type) -> do
+          let resultType =
+                Array
+                  (elemType row_type)
+                  (segmentsShape segments <> Shape [intConst Int64 0] <> arrayShape row_type)
+                  NoUniqueness
+          v <- letExp "arraylit_empty_reg" =<< eBlank resultType
+          pure $ insertRegulars [distResTag res] [v] env
+      | otherwise -> do
+          ns <- dataArr segments env inps $ intConst Int64 0
+          (flags, offsets, _elems) <- doRepIota ns
+          let resultType = Array (elemType row_type) (Shape [intConst Int64 0]) NoUniqueness
+          elems <- letExp "arraylit_empty_elems" =<< eBlank resultType
+          pure $ insertIrregular ns flags offsets (distResTag res) elems env
+    ArrayLit vs row_type
+      | not $ any (isVariant inps env) (arrayDims row_type) -> do
+          let seg_shape = segmentsShape segments
+              one = intConst Int64 1
+              arr_outer_dim = intConst Int64 $ toInteger $ length vs
+              expected = seg_shape <> arrayShape row_type
+              stacked = seg_shape <> Shape [one] <> arrayShape row_type
+              d = segmentsRank segments
 
-      (_, _, row_II1) <- doRepIota row_size
-      (_, _, row_II2) <- doSegIota row_size
+          vs_reg <- mapM (liftSubExpRegular segments inps env expected) vs
 
-      row_flat_size <- arraySize 0 <$> lookupType row_II1
+          vs_reg_1 <-
+            forM vs_reg $ \v -> do
+              v_t <- lookupType v
+              letExp (baseName v <> "_stack") $
+                BasicOp $
+                  Reshape v $
+                    reshapeAll (arrayShape v_t) stacked
 
-      (full_flags, full_offset, full_II1) <- doRepIota full_size
+          res_v <-
+            case vs_reg_1 of
+              [] -> undefined
+              [v] ->
+                pure v
+              v : vs' ->
+                letExp "arraylit_reg" $ BasicOp $ Concat d (v NE.:| vs') arr_outer_dim
+          pure $ insertRegulars [distResTag res] [res_v] env
+      | otherwise -> do
+          let arr_outer_dim = intConst Int64 $ fromIntegral $ length vs
+          vs_reparr <- mapM (dataArr segments env inps) vs
+          dim_arrs <- mapM (dataArr segments env inps) (arrayDims row_type)
+          num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+          ~[row_size, full_size] <- letTupExp "arraylit_row_size" <=< segMap (MkSolo num_segments) $ \(MkSolo i) -> do
+            vals <- mapM (\dim_arr -> letSubExp "dim_i" =<< eIndex dim_arr [eSubExp i]) dim_arrs
+            n <- letSubExp "n" <=< toExp $ product $ map pe64 vals
+            fs <- letSubExp "fs" <=< toExp $ pe64 n * pe64 arr_outer_dim
+            pure $ subExpsRes [n, fs]
 
-      m <- arraySize 0 <$> lookupType full_II1
-      data_t <- lookupType (head vs_reparr)
-      let pt = elemType data_t
-      let resultType = Array pt (Shape [m]) NoUniqueness
-      elems_blank <- letExp "blank_res" =<< eBlank resultType
+          (_, _, row_II1) <- doRepIota row_size
+          (_, _, row_II2) <- doSegIota row_size
 
-      elems <-
-        foldlM
-          ( \elems (var_num, arr) -> do
-              letExp "irregular_scatter_elems" <=< genScatter elems row_flat_size $ \gid -> do
-                -- Which segment we are in.
-                segment_i <-
-                  letSubExp "segment_i" =<< eIndex row_II1 [eSubExp gid]
+          row_flat_size <- arraySize 0 <$> lookupType row_II1
 
-                row_size_i <-
-                  letSubExp "row_size_i" =<< eIndex row_size [eSubExp segment_i]
+          (full_flags, full_offset, full_II1) <- doRepIota full_size
 
-                segment_global_o <-
-                  letSubExp "segment_global_o"
-                    =<< eIndex full_offset [eSubExp segment_i]
+          m <- arraySize 0 <$> lookupType full_II1
+          data_t <- lookupType (head vs_reparr)
+          let pt = elemType data_t
+          let resultType = Array pt (Shape [m]) NoUniqueness
+          elems_blank <- letExp "blank_res" =<< eBlank resultType
 
-                v' <-
-                  letSubExp "v" =<< eIndex arr [eSubExp gid]
+          elems <-
+            foldlM
+              ( \elems (var_num, arr) -> do
+                  letExp "irregular_scatter_elems" <=< genScatter elems row_flat_size $ \gid -> do
+                    -- Which segment we are in.
+                    segment_i <-
+                      letSubExp "segment_i" =<< eIndex row_II1 [eSubExp gid]
 
-                o' <- letSubExp "o" =<< eIndex row_II2 [eSubExp gid]
+                    row_size_i <-
+                      letSubExp "row_size_i" =<< eIndex row_size [eSubExp segment_i]
 
-                i <-
-                  letExp "i"
-                    =<< toExp
-                      ( pe64 o'
-                          + pe64 segment_global_o
-                          + pe64 row_size_i * pe64 (intConst Int64 var_num)
-                      )
+                    segment_global_o <-
+                      letSubExp "segment_global_o"
+                        =<< eIndex full_offset [eSubExp segment_i]
 
-                pure (i, v')
-          )
-          elems_blank
-          $ zip [0 ..] vs_reparr
+                    v' <-
+                      letSubExp "v" =<< eIndex arr [eSubExp gid]
 
-      pure $ insertIrregular full_size full_flags full_offset (distResTag res) elems env
+                    o' <- letSubExp "o" =<< eIndex row_II2 [eSubExp gid]
+
+                    i <-
+                      letExp "i"
+                        =<< toExp
+                          ( pe64 o'
+                              + pe64 segment_global_o
+                              + pe64 row_size_i * pe64 (intConst Int64 var_num)
+                          )
+
+                    pure (i, v')
+              )
+              elems_blank
+              $ zip [0 ..] vs_reparr
+
+          pure $ insertIrregular full_size full_flags full_offset (distResTag res) elems env
     Opaque _op se
       | Var v <- se,
         Just (DistInput rt_in _) <- lookup v inps ->
