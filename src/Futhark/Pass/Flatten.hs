@@ -1790,9 +1790,14 @@ transformDistributedInnerMap mode (ws_F, ws_O, ws) irregs segments dist = do
                 reshapeAndBind v v' (segmentsShape segments <> arrayShape v_t)
                 pure (v, Regular v)
           (SingleDim, Regular v') -> do
-            letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-            rep <- mapResultRep SingleDim (ws, ws_F, ws_O) v
-            pure (v, rep)
+            if isAcc v_t
+              then do
+                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+                pure (v, Regular v)
+            else do 
+              letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+              rep <- mapResultRep SingleDim (ws, ws_F, ws_O) v
+              pure (v, rep)
           (result_mode, Irregular irreg) -> do
             rep <- irregularMapResult result_mode (ws, ws_F, ws_O) segments irreg v v_t new_inps
             pure (v, rep)
