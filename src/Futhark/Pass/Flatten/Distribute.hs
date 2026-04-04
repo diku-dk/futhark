@@ -248,6 +248,7 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
     isParallelOp _ = True
     -- TODO: actully implement this.
     isParallelBasicOp Concat {} = True
+    isParallelBasicOp ArrayLit {} = True
     isParallelBasicOp _ = False
 
     isMap (BasicOp op) = isParallelBasicOp op

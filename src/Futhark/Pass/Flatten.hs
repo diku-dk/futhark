@@ -471,7 +471,71 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       scalarCase
     Assert {} ->
       scalarCase
-    ArrayLit {} -> scalarCase
+    ArrayLit [] row_type -> do
+      ns <- dataArr segments env inps $ intConst Int64 0
+      (flags, offsets, _elems) <- doRepIota ns
+      let resultType = Array (elemType row_type) (Shape [intConst Int64 0]) NoUniqueness
+      elems <- letExp "arraylit_empty_elems" =<< eBlank resultType
+      pure $ insertIrregular ns flags offsets (distResTag res) elems env
+    ArrayLit vs row_type -> do
+      let arr_outer_dim = intConst Int64 $ fromIntegral $ length vs
+      vs_reparr <- mapM (dataArr segments env inps) vs
+      dim_arrs <- mapM (dataArr segments env inps) (arrayDims row_type)
+      num_segments <- arraySize 0 <$> lookupType (head dim_arrs)
+
+      ~[row_size, full_size] <- letTupExp "arraylit_row_size" <=< segMap (MkSolo num_segments) $ \(MkSolo i) -> do
+        vals <- mapM (\dim_arr -> letSubExp "dim_i" =<< eIndex dim_arr [eSubExp i]) dim_arrs
+        n <- letSubExp "n" <=< toExp $ product $ map pe64 vals
+        fs <- letSubExp "fs" <=< toExp $ pe64 n * pe64 arr_outer_dim
+        pure $ subExpsRes [n, fs]
+
+      (_, _, row_II1) <- doRepIota row_size
+      (_, _, row_II2) <- doSegIota row_size
+
+      row_flat_size <- arraySize 0 <$> lookupType row_II1
+
+      (full_flags, full_offset, full_II1) <- doRepIota full_size
+
+      m <- arraySize 0 <$> lookupType full_II1
+      data_t <- lookupType (head vs_reparr)
+      let pt = elemType data_t
+      let resultType = Array pt (Shape [m]) NoUniqueness
+      elems_blank <- letExp "blank_res" =<< eBlank resultType
+
+      elems <-
+        foldlM
+          ( \elems (var_num, arr) -> do
+              letExp "irregular_scatter_elems" <=< genScatter elems row_flat_size $ \gid -> do
+                -- Which segment we are in.
+                segment_i <-
+                  letSubExp "segment_i" =<< eIndex row_II1 [eSubExp gid]
+
+                row_size_i <-
+                  letSubExp "row_size_i" =<< eIndex row_size [eSubExp segment_i]
+
+                segment_global_o <-
+                  letSubExp "segment_global_o"
+                    =<< eIndex full_offset [eSubExp segment_i]
+
+                v' <-
+                  letSubExp "v" =<< eIndex arr [eSubExp gid]
+
+                o' <- letSubExp "o" =<< eIndex row_II2 [eSubExp gid]
+
+                i <-
+                  letExp "i"
+                    =<< toExp
+                      ( pe64 o'
+                          + pe64 segment_global_o
+                          + pe64 row_size_i * pe64 (intConst Int64 var_num)
+                      )
+
+                pure (i, v')
+          )
+          elems_blank
+          $ zip [0 ..] vs_reparr
+
+      pure $ insertIrregular full_size full_flags full_offset (distResTag res) elems env
     Opaque _op se
       | Var v <- se,
         Just (DistInput rt_in _) <- lookup v inps ->
@@ -904,8 +968,8 @@ onMapIrregularInputArr mode new_segments ws ws_O ws_data p arr rep ws_prod = do
           new_shape =
             case mode of
               SingleDim -> Shape [ws_prod]
-              MultiDim -> segmentsShape new_segments 
-      v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $  BasicOp $ Reshape (irregularD rep) $ reshapeAll old_shape new_shape      
+              MultiDim -> segmentsShape new_segments
+      v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape (irregularD rep) $ reshapeAll old_shape new_shape
       pure $ MapArray v_reshaped (stripArray 1 rep_t)
     else do
       -- We need to split multi-dimensional irregular segments
