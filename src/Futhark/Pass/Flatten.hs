@@ -481,8 +481,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       let arr_outer_dim = intConst Int64 $ fromIntegral $ length vs
       vs_reparr <- mapM (dataArr segments env inps) vs
       dim_arrs <- mapM (dataArr segments env inps) (arrayDims row_type)
-      num_segments <- arraySize 0 <$> lookupType (head dim_arrs)
-
+      num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
       ~[row_size, full_size] <- letTupExp "arraylit_row_size" <=< segMap (MkSolo num_segments) $ \(MkSolo i) -> do
         vals <- mapM (\dim_arr -> letSubExp "dim_i" =<< eIndex dim_arr [eSubExp i]) dim_arrs
         n <- letSubExp "n" <=< toExp $ product $ map pe64 vals
