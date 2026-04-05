@@ -487,32 +487,44 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           let resultType = Array (elemType row_type) (Shape [intConst Int64 0]) NoUniqueness
           elems <- letExp "arraylit_empty_elems" =<< eBlank resultType
           pure $ insertIrregular ns flags offsets (distResTag res) elems env
+    -- TODO: not sure about this
+    ArrayVal vs row_type -> do
+      base_v <- letExp "arraylit_base" $ BasicOp $ ArrayVal vs row_type
+      res_v <- letExp "arraylit_reg" $ BasicOp $ Replicate (segmentsShape segments) (Var base_v)
+      pure $ insertRegulars [distResTag res] [res_v] env
     ArrayLit vs row_type
       | not $ any (isVariant inps env) (arrayDims row_type) -> do
-          let seg_shape = segmentsShape segments
-              one = intConst Int64 1
-              arr_outer_dim = intConst Int64 $ toInteger $ length vs
-              expected = seg_shape <> arrayShape row_type
-              stacked = seg_shape <> Shape [one] <> arrayShape row_type
-              d = segmentsRank segments
-
-          vs_reg <- mapM (liftSubExpRegular segments inps env expected) vs
-
-          vs_reg_1 <-
-            forM vs_reg $ \v -> do
-              v_t <- lookupType v
-              letExp (baseName v <> "_stack") $
-                BasicOp $
-                  Reshape v $
-                    reshapeAll (arrayShape v_t) stacked
-
           res_v <-
-            case vs_reg_1 of
-              [] -> undefined
-              [v] ->
-                pure v
-              v : vs' ->
-                letExp "arraylit_reg" $ BasicOp $ Concat d (v NE.:| vs') arr_outer_dim
+            if any (isVariant inps env) vs
+              then do
+                let seg_shape = segmentsShape segments
+                    one = intConst Int64 1
+                    arr_outer_dim = intConst Int64 $ toInteger $ length vs
+                    expected = seg_shape <> arrayShape row_type
+                    stacked = seg_shape <> Shape [one] <> arrayShape row_type
+                    d = segmentsRank segments
+
+                vs_reg <- mapM (liftSubExpRegular segments inps env expected) vs
+
+                vs_reg_1 <-
+                  forM vs_reg $ \v -> do
+                    v_t <- lookupType v
+                    letExp (baseName v <> "_stack") $
+                      BasicOp $
+                        Reshape v $
+                          reshapeAll (arrayShape v_t) stacked
+
+                case vs_reg_1 of
+                  [] -> undefined
+                  [v] ->
+                    pure v
+                  v : vs' ->
+                    letExp "arraylit_reg" $ BasicOp $ Concat d (v NE.:| vs') arr_outer_dim
+              else do
+                base_v <- letExp "arraylit_base" $ BasicOp $ ArrayLit vs row_type
+                letExp "arraylit_reg" $
+                  BasicOp $
+                    Replicate (segmentsShape segments) (Var base_v)
           pure $ insertRegulars [distResTag res] [res_v] env
       | otherwise -> do
           let arr_outer_dim = intConst Int64 $ fromIntegral $ length vs
@@ -1794,10 +1806,10 @@ transformDistributedInnerMap mode (ws_F, ws_O, ws) irregs segments dist = do
               then do
                 letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
                 pure (v, Regular v)
-            else do 
-              letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-              rep <- mapResultRep SingleDim (ws, ws_F, ws_O) v
-              pure (v, rep)
+              else do
+                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+                rep <- mapResultRep SingleDim (ws, ws_F, ws_O) v
+                pure (v, rep)
           (result_mode, Irregular irreg) -> do
             rep <- irregularMapResult result_mode (ws, ws_F, ws_O) segments irreg v v_t new_inps
             pure (v, rep)
