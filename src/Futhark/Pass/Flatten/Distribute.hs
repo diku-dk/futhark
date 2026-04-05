@@ -246,9 +246,16 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
     isParallelOp JVP {} = error "isParallelStm: JVP"
     isParallelOp VJP {} = error "isParallelStm: VJP"
     isParallelOp _ = True
-    -- TODO: actully implement this.
+    
+    -- TODO: Check other operations
+    isParallelBasicOp Update {} = True
     isParallelBasicOp Concat {} = True
+    isParallelBasicOp Iota {} = True
+    isParallelBasicOp (Replicate (Shape dims) _) = not $ null dims
     isParallelBasicOp ArrayLit {} = True
+    isParallelBasicOp ArrayVal {} = True
+    isParallelBasicOp FlatUpdate {} = error "isParallelStm: flatUpdate"
+    isParallelBasicOp FlatIndex {} = error "isParallelStm: flatIndex"
     isParallelBasicOp _ = False
 
     isMap (BasicOp op) = isParallelBasicOp op
