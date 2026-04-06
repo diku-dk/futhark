@@ -12,7 +12,12 @@ entry gen_simple (size: i64) (seed: i32) : i8 =
 let simple_succ (x: i8) : i8 =
   i8.abs x
 
--- sometimes fails
+--==
+-- property: prop_simple_succ
+
+--==
+-- property: prop_simple_fail
+
 #[prop(gen(gen_simple), shrink(shrink_simple), size(10), seed(654321))]
 entry prop_simple_succ (x: i8) : bool =
     simple_succ x == i8.abs x
