@@ -13,8 +13,8 @@ entry gen_simple (size: i64) (seed: i32) : f64 =
 
 let simple_succ (x: f64) : f64 =
   f64.abs x
-
---==
+  
+-- ==
 -- property: prop_simple_succ
 #[prop(gen(gen_simple), shrink(shrink_simple))]
 entry prop_simple_succ (x: f64) : bool =
@@ -24,7 +24,7 @@ entry prop_simple_succ (x: f64) : bool =
 let simple_fail (x: f64) : f64 =
   f64.abs x
 
---==
+-- ==
 -- property: prop_simple_fail
 #[prop(gen(gen_simple), shrink(shrink_simple))]
 entry prop_simple_fail (x: f64) : bool =

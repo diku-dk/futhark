@@ -42,7 +42,7 @@ let simple_fail (x: i8) : i8 =
 
 
 -- this should not run but it should use num to increase number of tests
--- ==
+-- n==
 -- property: prop_simple_fai
 -- num: 3
 

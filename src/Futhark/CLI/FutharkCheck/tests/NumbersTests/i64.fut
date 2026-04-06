@@ -14,10 +14,10 @@ entry gen_simple (size: i64) (seed: i32) : i64 =
 let simple_succ (x: i64) : i64 =
   i64.abs x
 
---==
+-- ==
 -- property: prop_simple_succ
 
---==
+-- ==
 -- property: prop_simple_fail
 
 #[prop(gen(gen_simple), shrink(shrink_simple))]

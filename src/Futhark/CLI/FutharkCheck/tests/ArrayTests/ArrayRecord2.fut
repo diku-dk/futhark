@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_record_sums_succ
+
+-- ==
+-- property: prop_record_sums_fail
+
 -- File 2: ONLY record is a type alias (array is []record)
 import "../../libraries/toString/toString"
 

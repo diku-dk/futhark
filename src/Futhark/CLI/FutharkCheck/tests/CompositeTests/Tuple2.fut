@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_simple_succ
+
+-- ==
+-- property: prop_simple_fail
+
 -- More complex test for a (i32, i32)
 import "../lib/github.com/diku-dk/cpprandom/random"
 

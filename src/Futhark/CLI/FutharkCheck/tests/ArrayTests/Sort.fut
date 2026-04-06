@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_simple_succ
+
+-- ==
+-- property: prop_simple_fail
+
 import "../lib/github.com/diku-dk/sorts/radix_sort"
 
 let real_sort (xs: []i32) : []i32 =

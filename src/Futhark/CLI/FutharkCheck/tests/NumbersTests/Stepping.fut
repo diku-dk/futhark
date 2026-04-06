@@ -16,7 +16,7 @@ entry gen_pair (size: i64) (seed: i32) : pair =
 let bad_pair ((x, y): pair) : bool =
   not (x > y && y > 0)
 
---==
+-- ==
 -- property: prop_pair_backtrack
 
 

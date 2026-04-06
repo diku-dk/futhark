@@ -218,7 +218,7 @@ parseAction sep =
   choice
     [ CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError sep),
       RunCases
-        <$> (parseInputOutputs sep <|> parseInputOutputsProp sep)
+        <$> (parseInputOutputsProp sep <|> parseInputOutputs sep)
         <*> many (parseExpectedStructure sep)
         <*> many (parseWarning sep)
     ]

@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_matrix_sums_succ
+
+-- ==
+-- property: prop_matrix_sums_fail
+
 -- Property target:
 -- For a rectangular matrix, compute the sum of each row.
 -- Check these row-sums are nondecreasing: sums[0] <= sums[1] <= ... <= sums[r-1].
@@ -137,8 +143,6 @@ let update_cell_rc [r][c] (ri: i64) (ci: i64) (xss: [r][c]i32) : [r][c]i32 =
             tabulate r (\i ->
               tabulate c (\j ->
                 if i == ri && j == ci then new else xss[i][j]))
-
-
 
 
 entry shrink_matrix (xss: [][]i32) (tactic: i32) : ([][]i32, i8) =

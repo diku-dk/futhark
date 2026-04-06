@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_record_sums_succ
+
+-- ==
+-- property: prop_record_sums_fail
+
 -- Simple array shrinking demo (new protocol: (x,tactic)->(x',status:i8))
 --
 -- We test: "all elements are 1".

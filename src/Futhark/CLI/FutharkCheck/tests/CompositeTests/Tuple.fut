@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_simple_succ
+
+-- ==
+-- property: prop_simple_fail
+
 -- More complex test for a tuple with an int inside
 import "../lib/github.com/diku-dk/cpprandom/random"
 type tuple = (i32, i32)

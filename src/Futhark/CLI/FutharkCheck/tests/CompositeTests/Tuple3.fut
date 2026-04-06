@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_simple_succ
+
+-- ==
+-- property: prop_simple_fail
+
 -- More complex test for a tuple
 import "../lib/github.com/diku-dk/cpprandom/random"
 

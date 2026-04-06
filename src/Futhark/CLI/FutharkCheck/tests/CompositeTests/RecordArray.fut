@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_record_sums_succ
+
+-- ==
+-- property: prop_record_sums_fail
+
 type~ record = { s: []i32, a: []i32 }
 
 let all_equal (xs: []i32) : bool =

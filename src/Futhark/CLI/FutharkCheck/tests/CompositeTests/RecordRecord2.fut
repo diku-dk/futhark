@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_simple_succ
+
+-- ==
+-- property: prop_simple_fail
+
 import "../lib/github.com/diku-dk/cpprandom/random"
 type record = {x: {z: i32, b: i32}, y: {o: i32, p: i32}}
 

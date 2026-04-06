@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_simple_succ
+
+-- ==
+-- property: prop_simple_fail
+
 -- More complex test for a record with an int inside
 import "../lib/github.com/diku-dk/cpprandom/random"
 type record = {x: i32, y: i32}

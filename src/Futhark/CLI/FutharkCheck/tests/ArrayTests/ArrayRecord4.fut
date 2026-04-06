@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_record_sums_succ
+
+-- ==
+-- property: prop_record_sums_fail
+
 -- File 4: NO type aliases (record inline, array is []{...})
 import "../../libraries/toString/toString"
 

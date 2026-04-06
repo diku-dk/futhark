@@ -13,10 +13,10 @@ let simple_succ (x: i8) : i8 =
   i8.abs x
 
 
---==
+-- ==
 -- property: prop_simple_succ
 
---==
+-- ==
 -- property: prop_simple_fail
 
 -- suceeds

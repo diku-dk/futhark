@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_simple_succ
+
+-- ==
+-- property: prop_simple_fail
+
 import "../lib/github.com/diku-dk/cpprandom/random"
 type pair = ({a: i32, b: i32}, {o: i32, p: i32} )
 

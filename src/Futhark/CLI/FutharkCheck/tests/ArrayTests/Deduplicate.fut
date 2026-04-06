@@ -1,3 +1,9 @@
+-- ==
+-- property: prop_deduplicate_succ
+
+-- ==
+-- property: prop_deduplicate_fail
+
 -- Deduplicate demo with NEW shrink protocol: (x,tactic)->(x',status:i8)
 --
 -- Property we test:
