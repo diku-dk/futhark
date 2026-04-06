@@ -384,6 +384,11 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                   then do
                     let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
                     propResults <- runPBT pbtConfig server verifiedProps
+                    -- if any properties failed, write them to a file for later inspection
+                    when (any (\r -> case r of
+                                      Failure _ -> True
+                                      Success   -> False) propResults) $
+                        liftIO $ propToFile program propResults
                     pure $ normal_test_result ++ propResults ++ diagnostics
                   else
                     pure $ normal_test_result ++ diagnostics
@@ -1692,3 +1697,15 @@ propertyDiagnostics requested specs =
           ]
       | name <- declaredWithoutRequest
       ]
+
+-- Save to file helper functions
+propToFile :: FilePath -> [TestResult] -> IO ()
+propToFile testFile results = do
+  let fileName = testFile <> ".propResult"
+      textResults = T.unlines $ concatMap resultLines results
+  withFile fileName WriteMode $ \h ->
+    T.hPutStr h textResults
+  where
+    resultLines :: TestResult -> [T.Text]
+    resultLines Success = []
+    resultLines (Failure msgs) = msgs

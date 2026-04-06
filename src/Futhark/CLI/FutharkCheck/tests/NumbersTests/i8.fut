@@ -36,7 +36,6 @@ let simple_fail (x: i8) : i8 =
 -- entry: prop_simple_fail
 -- input {10i8}
 -- output {true}
-
 -- input {-10i8}
 -- output {true}
 
