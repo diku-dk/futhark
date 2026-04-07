@@ -277,10 +277,12 @@ classifyStms :: Result -> [DistStm] -> [DistStm]
 classifyStms _ [] = []
 classifyStms bodyRes ds =
   let (scalars, rest) = break isParallelDistStm ds
+      scalar_grouped =
+        [mergeGroup bodyRes scalars rest | not (null scalars)]
    in case rest of
-        [] -> [mergeGroup bodyRes scalars rest]
-        (p : ps) ->
-          mergeGroup bodyRes scalars rest : (p:  classifyStms bodyRes ps)
+        [] -> scalar_grouped
+        p : ps ->
+          scalar_grouped ++ (p : classifyStms bodyRes ps)
 
 -- | Merge a group of scalar 'DistStm's into a single one.
 mergeGroup :: Result -> [DistStm] -> [DistStm] -> DistStm
