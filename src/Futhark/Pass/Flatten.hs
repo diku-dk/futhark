@@ -1411,13 +1411,12 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       if isVariant inps env n
         then transformFortoWhile segments env inps res aux merge i it n body
         else do
-          let [w] = NE.toList segments
-              old_loop_params = map fst merge
+          let old_loop_params = map fst merge
               old_loop_inits = map snd merge
               loopParamNames = S.fromList $ map paramName old_loop_params
 
           (lifted_loop_params, lifted_loop_reps, lifted_init) <-
-            unzip3 <$> mapM (liftLoopParam segments inps env loopParamNames w) (zip old_loop_params old_loop_inits)
+            unzip3 <$> mapM (liftLoopParam segments inps env loopParamNames) (zip old_loop_params old_loop_inits)
 
           let lifted_loop_params' = concat lifted_loop_params
               lifted_init' = concat lifted_init
@@ -1448,7 +1447,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           (loop_body_res, loop_body_stms) <-
             runReaderT
               ( runBuilder $
-                  liftLoopBody w loop_new_inputs' loop_env_local loop_dstms lifted_loop_rep_types (bodyResult body)
+                  liftLoopBody segments loop_new_inputs' loop_env_local loop_dstms lifted_loop_rep_types (bodyResult body)
               )
               (scope <> build_scope)
 
@@ -1912,24 +1911,27 @@ liftLoopParam ::
   DistInputs ->
   DistEnv ->
   S.Set VName ->
-  SubExp ->
   (FParam SOACS, SubExp) ->
   Builder GPU ([FParam GPU], ResRep, [SubExp])
-liftLoopParam segments inps env loopParamNames w (fparam, initSE) = do
+liftLoopParam segments inps env loopParamNames (fparam, initSE) = do
   let t = declTypeOf fparam
+  num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
   case t of
-    Prim _ -> do
-      (params, rep) <- liftParam w fparam
-      initV <- liftSubExpRegular segments inps env (Shape [w]) initSE
-      pure (params, rep, [Var initV])
+    Prim pt -> do
+      param <-
+        newParam
+          (baseName (paramName fparam) <> "_lifted")
+          (arrayOf (Prim pt) (segmentsShape segments) Nonunique)
+      initV <- liftSubExpRegular segments inps env (segmentsShape segments) initSE
+      pure ([param], Regular $ paramName param, [Var initV])
     Array pt _ u
       | needsIrregular inps env loopParamNames t -> do
-          (params, rep) <- liftParam w fparam
+          (params, rep) <- liftParam num_segments fparam
           initVals <- liftLoopInit segments inps env initSE
           pure (params, rep, initVals)
       | otherwise -> do
           -- Regular case: all dims are invariant, just add w as outermost dim
-          let pShape = Shape [w] <> arrayShape t
+          let pShape = segmentsShape segments <> arrayShape t
           p <-
             newParam
               (baseName (paramName fparam) <> "_lifted")
@@ -2068,16 +2070,14 @@ liftLoopResult :: Segments -> DistInputs -> DistEnv -> (ResRep, DeclType) -> Sub
 liftLoopResult segments inps env (paramRep, origType) res =
   case paramRep of
     Regular _ -> do
-      let [w] = NE.toList segments
-          expectedShape = Shape [w] <> arrayShape origType
+      let expectedShape = segmentsShape segments <> arrayShape origType
       v <- liftSubExpRegular segments inps env expectedShape (resSubExp res)
       pure [SubExpRes mempty (Var v)]
     Irregular _ ->
       liftResult segments inps env res
 
-liftLoopBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> [(ResRep, DeclType)] -> Result -> Builder GPU Result
-liftLoopBody w inputs env dstms paramRepTypes result = do
-  let segments = NE.singleton w
+liftLoopBody :: Segments -> DistInputs -> DistEnv -> [DistStm] -> [(ResRep, DeclType)] -> Result -> Builder GPU Result
+liftLoopBody segments inputs env dstms paramRepTypes result = do
   env' <- foldM (transformDistStm segments) env dstms
   results <- zipWithM (liftLoopResult segments inputs env') paramRepTypes result
   pure $ concat results
