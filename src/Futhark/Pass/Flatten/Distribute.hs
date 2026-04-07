@@ -235,8 +235,8 @@ distributeBody outer_scope w param_inputs body =
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
 
 isParallelDistStm :: DistStm -> Bool
-isParallelDistStm (DistStm _ _ (ParallelStm stm)) =
-  isParallelStm stm
+isParallelDistStm (DistStm _ res (ParallelStm stm)) =
+  isParallelStm stm || not (all isRegularDistResult res)
 isParallelDistStm _ = False
 
 isParallelStm :: Stm SOACS -> Bool
@@ -271,18 +271,6 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
 isRegularDistResult :: DistResult -> Bool
 isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 
--- TODO: Change this function. We will probably
--- clasify in distributeBody and then we try to group
--- scalarStms.
--- classifyStms :: Result -> [DistStm] -> [DistStm]
--- classifyStms _ [] = []
--- classifyStms bodyRes (d : ds)
---   | isScalarDistStm d =
---       let (moreScalars, rest) = break isParallelDistStm ds
---           scalars = d : moreScalars
---        in tryToMerge bodyRes scalars rest ++ classifyStms bodyRes rest
---   | otherwise = d : classifyStms bodyRes ds
-
 --  we should probably sort the DistStms first and we should assume they are sorted
 -- and then given to this function.
 classifyStms :: Result -> [DistStm] -> [DistStm]
@@ -290,33 +278,9 @@ classifyStms _ [] = []
 classifyStms bodyRes ds =
   let (scalars, rest) = break isParallelDistStm ds
    in case rest of
-        [] -> tryToMerge bodyRes scalars rest
+        [] -> [mergeGroup bodyRes scalars rest]
         (p : ps) ->
-          tryToMerge bodyRes scalars rest ++ [p] ++ classifyStms bodyRes ps
-
--- We start from the last scalar group to see if this can be a valid
--- group. Otherwise we consider the rightmost statement with irregular
--- external results as parallel and recurse on the two halves.
-tryToMerge :: Result -> [DistStm] -> [DistStm] -> [DistStm]
-tryToMerge _ [] _ = []
-tryToMerge bodyRes scalars rest =
-  let externalRes =
-        filter (isExternal bodyRes rest) $ concatMap distStmResult scalars
-      irregTags =
-        S.fromList [distResTag r | r <- externalRes, not (isRegularDistResult r)]
-      hasIrregExternal ds =
-        any (\r -> distResTag r `S.member` irregTags) (distStmResult ds)
-   in if null irregTags
-        then [mergeGroup bodyRes scalars rest]
-        else -- Find rightmost statement with irregular external result
-          case break hasIrregExternal (reverse scalars) of
-            (revAfter, problem : revBefore) ->
-              let before = reverse revBefore
-                  after = reverse revAfter
-               in tryToMerge bodyRes before (problem : after ++ rest)
-                    ++ [problem]
-                    ++ tryToMerge bodyRes after rest
-            _ -> undefined
+          mergeGroup bodyRes scalars rest : (p:  classifyStms bodyRes ps)
 
 -- | Merge a group of scalar 'DistStm's into a single one.
 mergeGroup :: Result -> [DistStm] -> [DistStm] -> DistStm
