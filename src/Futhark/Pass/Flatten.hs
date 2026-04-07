@@ -1415,11 +1415,14 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
               old_loop_inits = map snd merge
               loopParamNames = S.fromList $ map paramName old_loop_params
 
+          num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
           (lifted_loop_params, lifted_loop_reps, lifted_init) <-
-            unzip3 <$> mapM (liftLoopParam segments inps env loopParamNames) (zip old_loop_params old_loop_inits)
+            unzip3 <$> mapM (liftLoopParam segments num_segments inps env loopParamNames) (zip old_loop_params old_loop_inits)
 
           let lifted_loop_params' = concat lifted_loop_params
               lifted_init' = concat lifted_init
+
+          traceM $ unlines ["lifted_loop_params:", prettyString lifted_loop_params', "lifted_init:", prettyString lifted_init']
 
           let (inps_local, env_local0, next0) = localiseInputs env inps
               loop_param_inputs_local =
@@ -1447,7 +1450,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           (loop_body_res, loop_body_stms) <-
             runReaderT
               ( runBuilder $
-                  liftLoopBody segments loop_new_inputs' loop_env_local loop_dstms lifted_loop_rep_types (bodyResult body)
+                  liftLoopBody segments num_segments loop_new_inputs' loop_env_local loop_dstms lifted_loop_rep_types (bodyResult body)
               )
               (scope <> build_scope)
 
@@ -1908,14 +1911,14 @@ needsIrregular inps env loopParamNames t =
 -- we lift it to a regular array. Otherwise we fall back to irregular.
 liftLoopParam ::
   Segments ->
+  SubExp ->
   DistInputs ->
   DistEnv ->
   S.Set VName ->
   (FParam SOACS, SubExp) ->
   Builder GPU ([FParam GPU], ResRep, [SubExp])
-liftLoopParam segments inps env loopParamNames (fparam, initSE) = do
+liftLoopParam segments num_segments inps env loopParamNames (fparam, initSE) = do
   let t = declTypeOf fparam
-  num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
   case t of
     Prim pt -> do
       param <-
@@ -1927,7 +1930,7 @@ liftLoopParam segments inps env loopParamNames (fparam, initSE) = do
     Array pt _ u
       | needsIrregular inps env loopParamNames t -> do
           (params, rep) <- liftParam num_segments fparam
-          initVals <- liftLoopInit segments inps env initSE
+          initVals <- liftLoopInit2 segments inps env initSE num_segments
           pure (params, rep, initVals)
       | otherwise -> do
           -- Regular case: all dims are invariant, just add w as outermost dim
@@ -2033,6 +2036,33 @@ liftLoopInit segments inps env se = do
         elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
         pure $ map Var [num_data, segs, flags', offsets, elems']
 
+liftLoopInit2 :: Segments -> DistInputs -> DistEnv -> SubExp -> SubExp -> Builder GPU [SubExp]
+liftLoopInit2 segments inps env se num_segments = do
+  (_, rep) <- liftSubExp segments inps env se
+  case rep of
+    Regular v -> pure [Var v]
+    Irregular irreg -> mkIrrep irreg
+  where
+    mkIrrep
+      ( IrregularRep
+          { irregularS = segs,
+            irregularF = flags,
+            irregularO = offsets,
+            irregularD = elems
+          }
+        ) = do
+        t <- lookupType elems
+        t_o <- lookupType offsets
+        flags_t <- lookupType flags
+        num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
+        let shape = Shape [Var num_data]
+        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
+        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
+        -- I'm not sure why I need this reshapes
+        segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [num_segments])
+        offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
+        pure $ map Var [num_data, segs', flags', offsets', elems']
+
 -- Lifts a functions return type such that it matches the lifted functions return type.
 liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
 liftRetType w = concat . snd . L.mapAccumL liftType 0
@@ -2066,20 +2096,54 @@ loopResultToResReps paramReps results =
       results
       paramReps
 
-liftLoopResult :: Segments -> DistInputs -> DistEnv -> (ResRep, DeclType) -> SubExpRes -> Builder GPU Result
-liftLoopResult segments inps env (paramRep, origType) res =
+liftLoopResult ::
+  Segments ->
+  SubExp ->
+  DistInputs ->
+  DistEnv ->
+  (ResRep, DeclType) ->
+  SubExpRes ->
+  Builder GPU Result
+liftLoopResult segments num_segments inps env (paramRep, origType) res =
   case paramRep of
     Regular _ -> do
       let expectedShape = segmentsShape segments <> arrayShape origType
       v <- liftSubExpRegular segments inps env expectedShape (resSubExp res)
       pure [SubExpRes mempty (Var v)]
     Irregular _ ->
-      liftResult segments inps env res
+      liftMyLoopResult segments num_segments inps env res
 
-liftLoopBody :: Segments -> DistInputs -> DistEnv -> [DistStm] -> [(ResRep, DeclType)] -> Result -> Builder GPU Result
-liftLoopBody segments inputs env dstms paramRepTypes result = do
+liftMyLoopResult :: Segments -> SubExp ->  DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
+liftMyLoopResult segments num_segments inps env res = map (SubExpRes mempty . Var) <$> vs
+  where
+    vs = do
+      (_, rep) <- liftSubExp segments inps env (resSubExp res)
+      case rep of
+        Regular v -> pure [v]
+        Irregular irreg -> mkIrrep irreg
+    mkIrrep
+      ( IrregularRep
+          { irregularS = segs,
+            irregularF = flags,
+            irregularO = offsets,
+            irregularD = elems
+          }
+        ) = do
+        flags_t <- lookupType flags
+        t <- lookupType elems
+        t_o <- lookupType offsets
+        num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
+        let shape = Shape [Var num_data]
+        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
+        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
+        segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [num_segments])
+        offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
+        pure [num_data, segs', flags', offsets', elems']
+
+liftLoopBody :: Segments -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> [(ResRep, DeclType)] -> Result -> Builder GPU Result
+liftLoopBody segments num_segments inputs env dstms paramRepTypes result = do
   env' <- foldM (transformDistStm segments) env dstms
-  results <- zipWithM (liftLoopResult segments inputs env') paramRepTypes result
+  results <- zipWithM (liftLoopResult segments num_segments inputs env') paramRepTypes result
   pure $ concat results
 
 liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
