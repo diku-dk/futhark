@@ -35,6 +35,7 @@ import Futhark.Util.Pretty (annotate, bgColor, bold, hardline, pretty, putDoc, v
 import Futhark.Util.Table
 import GHC.Stack (HasCallStack)
 import Language.LSP.Protocol.Lens (HasChange (change))
+import System.Random (randomIO)
 import System.Console.ANSI (clearFromCursorToScreenEnd, clearLine, cursorUpLine)
 import System.Console.Terminal.Size qualified as Terminal
 import System.Environment
@@ -1058,10 +1059,11 @@ runPBT config srv specs = do
 
 runOne :: PropSpec -> PBTConfig -> FilePath -> Server -> IO TestResult
 runOne s config scratchBin srv = do
+  randomValue <- randomIO
   let propName = psProp s
       genName = fromMaybe (error "missing generator") (psGen s)
       sizeBase = fromMaybe (configMaxSize config) (psSize s)
-      seedBase = fromMaybe (configBaseSeed config) (psSeed s)
+      seedBase = fromMaybe (configBaseSeed config + randomValue) (psSeed s)
       serverSize = "runPBT_size"
       serverSeed = "runPBT_seed"
       serverIn = "runPBT_input"
