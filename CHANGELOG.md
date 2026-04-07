@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* The C-based backends no longer emit constants `-9223372036854775808`, as these
+  cause C compilers to issue warnings.
+
 ## [0.25.37]
 
 ### Added
