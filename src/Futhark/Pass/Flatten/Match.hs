@@ -32,8 +32,10 @@ splitInput segments env inps is v = do
       -- of the array given by `is`
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
       arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
-        idx <- letExp "idx" =<< eIndex is [eSubExp i]
-        subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
+        idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
+         -- unflatten index
+        let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
+        subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
       pure $ Regular arr'
     Irregular (IrregularRep segs flags offsets elems) -> do
       -- In the irregular case we take the elements
@@ -91,12 +93,12 @@ distributeBranch segments env inps is body = do
 -- Given a single result from each branch as well the *unlifted*
 -- result type, merge the results of all branches into a single result.
 mergeResult ::
-  Segments ->
+  SubExp ->
   [VName] ->
   [ResRep] ->
   Type ->
   Builder GPU ResRep
-mergeResult segments iss branchesRep resType =
+mergeResult w iss branchesRep resType =
   case resType of
     -- Regular case
     Prim pt -> do
@@ -132,8 +134,6 @@ mergeResult segments iss branchesRep resType =
             }
     Acc {} -> error "transformDistStm: Acc"
     Mem {} -> error "transformDistStm: Mem"
-  where
-    [w] = NE.toList segments
 
 transformMatch ::
   FlattenOps ->
@@ -146,7 +146,7 @@ transformMatch ::
   Body SOACS ->
   Builder GPU DistEnv
 transformMatch ops segments env inps res scrutinees cases defaultCase = do
-  let [w] = NE.toList segments
+  w <- letSubExp "w" <=< toExp $ product $ segmentDims segments
   -- We need to partition the indices of the scrutinees by which case they match.
   -- Lift the scrutinees.
   -- If it's a variable, we know it's a scalar and the lifted version will therefore be a regular array.
@@ -167,7 +167,9 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
   let equiv_case_default = eBody [toExp $ intConst Int64 0]
   -- Match the scrutinees againts the branch cases
   equiv_classes <- letExp "equiv_classes" <=< segMap (MkSolo w) $ \(MkSolo i) -> do
-    scruts <- mapM (letSubExp "scruts" <=< flip eIndex [toExp i]) lifted_scrutinees
+     -- unflatten index 
+    let seg_is = unflattenIndex (segmentDims segments) (pe64 i)
+    scruts <- mapM (letSubExp "scruts" <=< flip eIndex (map toExp seg_is)) lifted_scrutinees
     cls <- letSubExp "cls" =<< eMatch scruts equiv_cases equiv_case_default
     pure [subExpRes cls]
   let num_cases = fromIntegral $ length cases + 1
@@ -214,5 +216,5 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
         . mapM (letExp "branch_result" <=< toExp . resSubExp)
 
   -- Merge the results of the branches and insert the resulting res reps
-  reps <- zipWithM (mergeResult segments inds) (L.transpose branch_reps) result_types
+  reps <- zipWithM (mergeResult w inds) (L.transpose branch_reps) result_types
   pure $ insertReps (zip (map distResTag res) reps) env

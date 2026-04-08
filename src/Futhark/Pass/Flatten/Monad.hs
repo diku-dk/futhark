@@ -39,6 +39,7 @@ module Futhark.Pass.Flatten.Monad
     resultToResReps,
     isVariant,
     flattenDistStms,
+    segmentDims,
     FlattenOps (..),
   )
 where
