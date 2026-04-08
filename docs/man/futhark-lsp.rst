@@ -53,6 +53,13 @@ Inlay Hints
   Inferred types of bindings will be shown for e.g. lambda arguments, function
   arguments, let bindings or loop bindings.
 
+Code Actions
+
+  Every name binding with an inlay type hint has an associated code action that
+  inserts exactly the type ascription the virtual text shows.
+  If the type contains any inferred type variables or sizes, they will also be
+  introduced at the appropriate position.
+
 SEE ALSO
 ========
 

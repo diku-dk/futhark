@@ -25,7 +25,6 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Text qualified as T
 import Futhark.MonadFreshNames
 import Futhark.Util (showText)
 import Futhark.Util.Loc (srcspan)
@@ -33,18 +32,15 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
--- Modifier to apply on binding, this is used to propagate attributes and move assertions
-data BindModifier
-  = Ass Exp (Info T.Text) SrcLoc
-  | Att (AttrInfo VName)
+-- Modifier to apply on bindings, this is used to propagate attributes.
+newtype BindModifier
+  = Att (AttrInfo VName)
 
 -- Apply a list of modifiers, removing the assertions as it is not needed to check them multiple times
 applyModifiers :: Exp -> [BindModifier] -> (Exp, [BindModifier])
 applyModifiers =
   foldr f . (,[])
   where
-    f (Ass ass txt loc) (body, modifs) =
-      (Assert ass body txt loc, modifs)
     f (Att attr) (body, modifs) =
       (Attr attr body mempty, Att attr : modifs)
 
@@ -136,18 +132,8 @@ argRepName e i = expRepName e <> "_arg" <> nameFromText (showText i)
 getOrdering :: Bool -> Exp -> OrderingM Exp
 getOrdering final (Assert ass e txt loc) = do
   ass' <- getOrdering False ass
-  l_prev <- OrderingM $ gets $ length . snd . fst
-  addModifier $ Ass ass' txt loc
   e' <- getOrdering final e
-  l_after <- OrderingM $ gets $ length . snd . fst
-  -- if the list of modifier has reduced in size, that means that
-  -- all assertions as been inserted,
-  -- else, we have to introduce the assertion ourself
-  if l_after <= l_prev
-    then pure e'
-    else do
-      rmModifier
-      pure $ Assert ass' e' txt loc
+  pure $ Assert ass' e' txt loc
 getOrdering final (Attr attr e loc) = do
   -- propagate attribute
   addModifier $ Att attr

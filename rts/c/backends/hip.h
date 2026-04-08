@@ -309,6 +309,12 @@ static void hip_size_setup(struct futhark_context *ctx) {
       (device_query(ctx->dev, hipDeviceAttributePhysicalMultiProcessorCount) *
        device_query(ctx->dev, hipDeviceAttributeMaxThreadsPerMultiProcessor))
       / cfg->gpu.default_block_size;
+
+    // XXX: this is a hack due to the inability of two-pass scan to handle a
+    // grid size that is larger than the maximum block size.
+    if (cfg->gpu.default_grid_size > ctx->max_thread_block_size) {
+      cfg->gpu.default_grid_size = ctx->max_thread_block_size;
+    }
   }
 
   for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
