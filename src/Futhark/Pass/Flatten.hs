@@ -1392,8 +1392,51 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           error "unhandled SOAC"
     -- transformScalarStm segments env inps res $
     --   Let { stmPat = pat, stmAux = aux, stmExp = Op (Screma w arrs form) }
-    Let _ _ (Match scrutinees cases defaultCase _) ->
-      transformMatch flattenOps segments env inps res scrutinees cases defaultCase
+    Let _ aux (Match scrutinees cases defaultCase rt) ->
+      if any (isVariant inps env) scrutinees
+        then
+          transformMatch flattenOps segments env inps res scrutinees cases defaultCase
+        -- else error $ unlines ["scrutinees: ", prettyString scrutinees, "cases:", prettyString cases, "defaultCase:", prettyString defaultCase]
+        else do
+          scope <- askScope
+          new_cases <- forM cases $ \(Case c body) -> do
+            let (case_body_inputs, case_dstms) = distributeBody scope segments inps body
+
+            (case_body_res, case_body_stms) <-
+              runReaderT
+                ( runBuilder $
+                    liftBodyWithDistResults segments case_body_inputs env case_dstms res (bodyResult body)
+                )
+                scope
+            pure $ Case c $ Body () case_body_stms case_body_res
+          new_default_body <- do
+            let (new_default_body_inputs, new_default_dstms) = distributeBody scope segments inps defaultCase
+            (new_default_body_res, new_default_body_stms) <-
+              runReaderT
+                ( runBuilder $
+                    liftBodyWithDistResults segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)
+                )
+                scope
+            pure $ Body () new_default_body_stms new_default_body_res
+
+          -- Maybe it is better to build MatchDec ourselves
+          match_e <-
+            eMatch'
+              scrutinees
+              [Case c (pure body) | Case c body <- new_cases]
+              (pure new_default_body)
+              (matchSort rt)
+
+          match_res <-
+            certifying (distCerts inps aux env) $
+              letTupExp "match_res" match_e
+
+          rets <- expExtType match_e
+          -- get rid of the existential context
+          traceM $ unlines ["match res type:", prettyString rets]
+          let payload_res = drop (S.size (shapeContext rets)) match_res
+          let reps = distResultsToResReps res payload_res
+          pure $ insertReps (zip (map distResTag res) reps) env
     Let _ _ (Apply name args rettype s) -> do
       let [w] = NE.toList segments
           name' = liftFunName name
@@ -2113,7 +2156,7 @@ liftLoopResult segments num_segments inps env (paramRep, origType) res =
     Irregular _ ->
       liftMyLoopResult segments num_segments inps env res
 
-liftMyLoopResult :: Segments -> SubExp ->  DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
+liftMyLoopResult :: Segments -> SubExp -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
 liftMyLoopResult segments num_segments inps env res = map (SubExpRes mempty . Var) <$> vs
   where
     vs = do
@@ -2145,6 +2188,42 @@ liftLoopBody segments num_segments inputs env dstms paramRepTypes result = do
   env' <- foldM (transformDistStm segments) env dstms
   results <- zipWithM (liftLoopResult segments num_segments inputs env') paramRepTypes result
   pure $ concat results
+
+distResultsToResReps :: [DistResult] -> [VName] -> [ResRep]
+distResultsToResReps dist_res results =
+  snd $
+    L.mapAccumL
+      ( \rs dist_res' ->
+          if isRegularDistResult dist_res'
+            then
+              let (v : rs') = rs
+               in (rs', Regular v)
+            else
+              let (segs : flags : offsets : elems : rs') = rs
+               in (rs', Irregular $ IrregularRep segs flags offsets elems)
+      )
+      results
+      dist_res
+
+liftDistResult :: Segments -> DistInputs -> DistEnv -> DistResult -> SubExpRes -> Builder GPU Result
+liftDistResult segments inps env dist_res res =
+  if isRegularDistResult dist_res
+    then do
+      let (DistType _ _ t) = distResType dist_res
+      let expectedShape = segmentsShape segments <> arrayShape t
+      v <- liftSubExpRegular segments inps env expectedShape (resSubExp res)
+      pure [SubExpRes mempty (Var v)]
+    else case resSubExp res of
+      Var v -> do
+        irreg <- getIrregRep segments env inps v
+        pure $ map (SubExpRes mempty . Var) [irregularS irreg, irregularF irreg, irregularO irreg, irregularD irreg]
+      _ -> undefined
+
+liftBodyWithDistResults :: Segments -> DistInputs -> DistEnv -> [DistStm] -> [DistResult] -> Result -> Builder GPU Result
+liftBodyWithDistResults segments inputs env dstms dist_res result = do
+  env' <- foldM (transformDistStm segments) env dstms
+  result' <- zipWithM (liftDistResult segments inputs env') dist_res result
+  pure $ concat result'
 
 liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
 liftBody w inputs env dstms result = do

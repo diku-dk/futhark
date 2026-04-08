@@ -15,6 +15,7 @@ module Futhark.Pass.Flatten.Distribute
     distInputType,
     DistResult (..),
     ResTag (..),
+    isRegularDistResult,
 
     -- * Segments
     Segments,
