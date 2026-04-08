@@ -223,7 +223,7 @@ parseAction sep =
         <*> many (parseWarning sep)
     ]
 
-parseInputOutputsProp :: Parser () -> (Parser [InputOutputs])
+parseInputOutputsProp :: Parser () -> Parser [InputOutputs]
 parseInputOutputsProp sep = do
   entrys <- parseEntryPointsProp sep
   runs <- parseNumTests sep
@@ -234,10 +234,10 @@ parseInputOutputsProp sep = do
 
 parseEntryPointsProp :: Parser () -> Parser [T.Text]
 parseEntryPointsProp sep =
-  (lexeme' "property:" *> many entry <* sep)
+  lexeme' "property:" *> many entry <* sep
   where
     constituent c = not (isSpace c) && c /= '}'
-    entry = lexeme' $ takeWhile1P Nothing constituent 
+    entry = lexeme' $ takeWhile1P Nothing constituent
 
 parseNumTests :: Parser () -> Parser [TestRun]
 parseNumTests sep = do
