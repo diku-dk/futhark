@@ -25,7 +25,6 @@ import Futhark.Server
 import Futhark.Server.Values qualified as FSV
 import Futhark.Test.Spec
 import Futhark.Util (showText)
-import GHC.Stack (HasCallStack)
 import System.Random (randomIO)
 import System.IO.Temp (withSystemTempFile)
 
@@ -69,24 +68,24 @@ runPBT config srv specs = do
   withSystemTempFile "pbt-scratch" $ \scratchBin _scratchHandle -> do
     epsE <- cmdEntryPoints srv
     entrypoints <- case epsE of
-      Left err -> error $ "cmdEntryPoints failed: " <> show err
+      Left err -> fail $ "cmdEntryPoints failed: " <> show err
       Right xs -> pure xs
 
     forM_ specs $ \s -> do
       let prop = psProp s
       unless (prop `elem` entrypoints) $
-        error $
+        fail $
           "Property is not a server entry point: " <> T.unpack prop
       validatePropTypes srv prop
       gen <- case psGen s of
         Just g | g `elem` entrypoints -> pure g
-        Just g -> error $ "Generator is not a server entry point: " <> T.unpack g
-        Nothing -> error $ "No generator specified for " <> T.unpack prop
+        Just g -> fail $ "Generator is not a server entry point: " <> T.unpack g
+        Nothing -> fail $ "No generator specified for " <> T.unpack prop
       validateGenTypes srv prop gen
       case psShrink s of
         Just sh | sh `elem` entrypoints -> validateShrinkTypes srv prop sh
         Just "auto" -> pure ()
-        Just sh -> error $ "Shrinker is not a server entry point: " <> T.unpack sh
+        Just sh -> fail $ "Shrinker is not a server entry point: " <> T.unpack sh
         Nothing -> pure ()
 
     -- 3. Execute tests and concatenate result lists
@@ -157,9 +156,9 @@ runOne s config scratchBin srv = do
                           _ <- callFreeIns srv futPPrint prettyOuts [serverIn]
                           valE <- FSV.getValue srv (head prettyOuts)
                           case valE of
-                            Left err -> error $ "getValue failed: " <> show err
+                            Left err -> fail $ "getValue failed: " <> show err
                             Right (U8Value _ bytes) -> pure [chr (fromIntegral b) | b <- SV.toList bytes]
-                            Right _ -> error "pretty printer returned non-u8 value"
+                            Right _ -> fail "pretty printer returned non-u8 value"
                       Nothing -> prettyVar srv serverIn ty0
 
                     pure $ "Minimal counterexample: " <> T.pack prettyOut
@@ -172,20 +171,20 @@ validatePropTypes :: Server -> EntryName -> IO ()
 validatePropTypes srv propName = do
   -- Exactly one input
   insE <- getInputTypes srv propName
-  ins <- either (error . show) pure insE
+  ins <- either (fail . show) pure insE
   case ins of
     [_] -> pure ()
-    [] -> error $ "Property " <> T.unpack propName <> " has no inputs? Expected 1."
-    tys -> error $ "Property " <> T.unpack propName <> " has " <> show (length tys) <> " inputs; expected 1: " <> show tys
+    [] -> fail $ "Property " <> T.unpack propName <> " has no inputs? Expected 1."
+    tys -> fail $ "Property " <> T.unpack propName <> " has " <> show (length tys) <> " inputs; expected 1: " <> show tys
 
   -- Exactly one output, and it must be bool
   outsE <- getOutputTypes srv propName
-  outs <- either (error . show) pure outsE
+  outs <- either (fail . show) pure outsE
   case outs of
     ["bool"] -> pure ()
-    [] -> error $ "Property " <> T.unpack propName <> " has no outputs? Expected 1 bool."
-    [ty] -> error $ "Property " <> T.unpack propName <> " output must be bool, got: " <> T.unpack ty
-    tys -> error $ "Property " <> T.unpack propName <> " has " <> show (length tys) <> " outputs; expected 1 bool: " <> show tys
+    [] -> fail $ "Property " <> T.unpack propName <> " has no outputs? Expected 1 bool."
+    [ty] -> fail $ "Property " <> T.unpack propName <> " output must be bool, got: " <> T.unpack ty
+    tys -> fail $ "Property " <> T.unpack propName <> " has " <> show (length tys) <> " outputs; expected 1 bool: " <> show tys
 
 getInputTypes :: Server -> EntryName -> IO (Either CmdFailure [TypeName])
 getInputTypes srv entry = do
@@ -205,11 +204,11 @@ autoShrinkLoop scratchBin srv propName genName vIn size seed genOuts = do
       serverSeed = "qc_seed"
 
   -- Property must have exactly one input
-  propInTys <- either (error . show) pure =<< getInputTypes srv propName
+  propInTys <- either (fail . show) pure =<< getInputTypes srv propName
   propTy <- case propInTys of
     [ty] -> pure ty
-    [] -> error $ "Property " <> T.unpack propName <> " has no inputs?"
-    tys -> error $ "Property " <> T.unpack propName <> " has >1 input: " <> show tys
+    [] -> fail $ "Property " <> T.unpack propName <> " has no inputs?"
+    tys -> fail $ "Property " <> T.unpack propName <> " has >1 input: " <> show tys
 
   let loop :: Int64 -> IO ()
       loop i
@@ -259,18 +258,18 @@ shrinkLoop scratchBin srv propName vIn shrinkName = do
       vInRetyped = vIn <> "_shrinktyped"
 
   propTy <- getSingleInputType srv propName
-  shrinkInTys <- either (error . show) pure =<< getInputTypes srv shrinkName
+  shrinkInTys <- either (fail . show) pure =<< getInputTypes srv shrinkName
   -- (shrinkXTy, _) <- case shrinkInTys of
   --   [tyX, "i32"] -> pure (tyX, "i32")
-  --   tys -> error $ "Shrinker " <> T.unpack shrinkName <> " expected (x, i32), got: " <> show tys
+  --   tys -> fail $ "Shrinker " <> T.unpack shrinkName <> " expected (x, i32), got: " <> show tys
   (shrinkXTy, tacticTy) <- case shrinkInTys of
     [tyX, tyTac] -> pure (tyX, tyTac)
-    [] -> error $ "Shrinker " <> T.unpack shrinkName <> " has no inputs?"
-    [_] -> error $ "Shrinker " <> T.unpack shrinkName <> " has 1 input; expected 2 (x,tactic)."
-    tys -> error $ "Shrinker " <> T.unpack shrinkName <> " has " <> show (length tys) <> " inputs; expected 2."
+    [] -> fail $ "Shrinker " <> T.unpack shrinkName <> " has no inputs?"
+    [_] -> fail $ "Shrinker " <> T.unpack shrinkName <> " has 1 input; expected 2 (x,tactic)."
+    tys -> fail $ "Shrinker " <> T.unpack shrinkName <> " has " <> show (length tys) <> " inputs; expected 2."
 
   when (tacticTy /= "i32") $
-    error $
+    fail $
       "Shrinker " <> T.unpack shrinkName <> " tactic must be i32, got: " <> T.unpack tacticTy
   -- tactic is explicitly Int32 to resolve ambiguity
 
@@ -300,10 +299,10 @@ shrinkLoop scratchBin srv propName vIn shrinkName = do
 
           -- status must be i8
           statusTyE <- getOutputTypes srv shrinkName
-          statusTys <- either (error . show) pure statusTyE
+          statusTys <- either (fail . show) pure statusTyE
           let statusTy = last statusTys
           when (statusTy /= "i8") $
-            error $
+            fail $
               "Shrinker "
                 <> T.unpack shrinkName
                 <> " last output must be i8 status, got: "
@@ -337,13 +336,14 @@ shrinkLoop scratchBin srv propName vIn shrinkName = do
                       >> packType scratchBin srv vIn propTy [vTry]
                       >> pure AcceptedInc
                   -- stop; do not overwrite vIn (keep last failing)
-                  _ -> pure StopShrinking
+                  2 -> pure StopShrinking
+                  _ -> fail $ "Shrinker " <> T.unpack shrinkName <> " returned invalid status: " <> show status
 
   let loop (tactic :: Int32) = do
         r <- oneStep tactic
         case r of
           AcceptedSame -> loop 0
-          AcceptedInc -> pure ()
+          AcceptedInc -> loop (tactic + 1)
           PropPassed -> loop (tactic + 1)
           StopShrinking -> pure ()
 
@@ -354,10 +354,10 @@ validateGenTypes srv propName genName = do
   propTy <- getSingleInputType srv propName
 
   genOutsE <- getOutputTypes srv genName
-  genOuts <- either (error . show) pure genOutsE
+  genOuts <- either (fail . show) pure genOutsE
   ok <- outsMatchType srv propTy genOuts
   unless ok $
-    error $
+    fail $
       "Generator type mismatch.\n"
         <> "  property "
         <> T.unpack propName
@@ -377,11 +377,11 @@ validateShrinkTypes srv propName shrinkName = do
 
   -- Inputs: (x, tactic)
   shrinkInsE <- getInputTypes srv shrinkName
-  shrinkIns <- either (error . show) pure shrinkInsE
+  shrinkIns <- either (fail . show) pure shrinkInsE
   case shrinkIns of
     [xTy, tacTy] -> do
       unless (xTy == propTy) $
-        error $
+        fail $
           "Shrinker input mismatch.\n"
             <> "  property "
             <> T.unpack propName
@@ -395,7 +395,7 @@ validateShrinkTypes srv propName shrinkName = do
             <> "\n"
             <> "Expected shrinker's first input to be exactly the property input type."
       unless (tacTy == "i32") $
-        error $
+        fail $
           "Shrinker tactic type mismatch.\n"
             <> "  shrinker "
             <> T.unpack shrinkName
@@ -404,7 +404,7 @@ validateShrinkTypes srv propName shrinkName = do
             <> "\n"
             <> "Expected tactic to be i32."
     _ ->
-      error $
+      fail $
         "Shrinker input arity mismatch.\n"
           <> "  shrinker "
           <> T.unpack shrinkName
@@ -417,16 +417,16 @@ validateShrinkTypes srv propName shrinkName = do
 
   -- Outputs: (y, done)
   shrinkOutsE <- getOutputTypes srv shrinkName
-  shrinkOuts <- either (error . show) pure shrinkOutsE
+  shrinkOuts <- either (fail . show) pure shrinkOutsE
   when (null shrinkOuts) $
-    error $
+    fail $
       "Shrinker " <> T.unpack shrinkName <> " has no outputs? Expected (testType, bool)."
 
   let doneTy = last shrinkOuts
       yOuts = init shrinkOuts
 
   unless (doneTy == "i8") $
-    error $
+    fail $
       "Shrinker output mismatch.\n"
         <> "  shrinker "
         <> T.unpack shrinkName
@@ -437,7 +437,7 @@ validateShrinkTypes srv propName shrinkName = do
 
   ok <- outsMatchType srv propTy yOuts
   unless ok $
-    error $
+    fail $
       "Shrinker output mismatch.\n"
         <> "  property "
         <> T.unpack propName
@@ -454,7 +454,7 @@ validateShrinkTypes srv propName shrinkName = do
 sendGenInputs :: Server -> VarName -> VarName -> VarName -> Int64 -> Int32 -> IO ()
 sendGenInputs srv sizeName seedName genName size seed = do
   insE <- cmdInputs srv genName
-  ins <- either (\err -> error ("cmdInputs failed for " <> T.unpack genName <> ": " <> show err)) pure insE
+  ins <- either (\err -> fail ("cmdInputs failed for " <> T.unpack genName <> ": " <> show err)) pure insE
 
   case map inputType ins of
     [sizeTy, seedTy]
@@ -462,9 +462,9 @@ sendGenInputs srv sizeName seedName genName size seed = do
           putVal srv sizeName size
           putVal srv seedName seed
       | otherwise ->
-          error ("Expected both size and seed to be i64 and i32, got: " <> T.unpack sizeTy <> ", " <> T.unpack seedTy)
+          fail ("Expected both size and seed to be i64 and i32, got: " <> T.unpack sizeTy <> ", " <> T.unpack seedTy)
     tys ->
-      error ("Expected generator to have exactly two inputs, got types: " <> show tys)
+      fail ("Expected generator to have exactly two inputs, got types: " <> show tys)
 
 --- | Allocate output variables for a generator entry point.
 -- needed because eg. tuples return multiple outputs, and we need to know how many to allocate. We name them like genName_out0, genName_out1, etc.
@@ -472,14 +472,14 @@ sendGenInputs srv sizeName seedName genName size seed = do
 allocOuts :: Server -> VarName -> IO [VarName]
 allocOuts srv entry = do
   outsE <- cmdOutputs srv entry
-  outs <- either (\e -> error ("cmdOutputs failed for " <> T.unpack entry <> ": " <> show e)) pure outsE
+  outs <- either (\e -> fail ("cmdOutputs failed for " <> T.unpack entry <> ": " <> show e)) pure outsE
   pure [entry <> "_out" <> T.pack (show i) | (i, _) <- zip [(0 :: Int) ..] outs]
 
 isCompositeLike :: Server -> VarName -> TypeName -> IO Bool
 isCompositeLike srv var ty = do
   -- 1. Check the 'kind' of the current type
   typeNameE <- cmdKind srv ty
-  typeName <- either (\e -> error ("kind command failed for " <> T.unpack var <> ": " <> show e)) pure typeNameE
+  typeName <- either (\e -> fail ("kind command failed for " <> T.unpack var <> ": " <> show e)) pure typeNameE
 
   -- T.putStrLn $ "Checking type: " <> T.unpack ty <> " (Kind: " <> T.unpack currentKind <> ")"
 
@@ -490,7 +490,7 @@ isCompositeLike srv var ty = do
         Right et -> do
           -- T.putStrLn $ "  -> Found nested element type: " <> T.unpack et
           isCompositeLike srv var et
-        Left e -> error ("elemtype command failed for " <> T.unpack ty <> ": " <> show e)
+        Left e -> fail ("elemtype command failed for " <> T.unpack ty <> ": " <> show e)
     Record -> pure True
     _ -> pure False
 
@@ -500,7 +500,7 @@ putVal s name x = do
   mFail <- FSV.putValue s name v
   case mFail of
     Nothing -> pure ()
-    Just err -> error $ "putValue failed for " <> T.unpack name <> ": " <> show err
+    Just err -> fail $ "putValue failed for " <> T.unpack name <> ": " <> show err
 
 freeVars :: Server -> [T.Text] -> IO ()
 freeVars s vs = do
@@ -510,35 +510,35 @@ freeVars s vs = do
     Just err
       | any (T.isPrefixOf "Unknown variable:") (failureMsg err) -> pure ()
       | otherwise ->
-          error $ "cmdFree failed for " <> show vs <> ": " <> show err
+          fail $ "cmdFree failed for " <> show vs <> ": " <> show (failureMsg err)
 
-callFreeIns :: (HasCallStack) => Server -> EntryName -> [VarName] -> [VarName] -> IO [VarName]
+callFreeIns :: Server -> EntryName -> [VarName] -> [VarName] -> IO [VarName]
 callFreeIns s entry outs ins = do
   freeVars s outs
   r <- cmdCall s entry outs ins
   freeVars s ins
   case r of
-    Left err -> error $ "cmdCall failed for " <> T.unpack entry <> ": " <> show err
+    Left err -> fail $ T.unpack entry <> ": " <> show (failureMsg err)
     Right okLines -> pure okLines
 
-callKeepIns :: (HasCallStack) => Server -> EntryName -> [VarName] -> [VarName] -> IO [VarName]
+callKeepIns :: Server -> EntryName -> [VarName] -> [VarName] -> IO [VarName]
 callKeepIns s entry outs ins = do
   freeVars s outs
   r <- cmdCall s entry outs ins
   case r of
-    Left err -> error $ "cmdCall failed for " <> T.unpack entry <> ": " <> show err
+    Left err -> fail $ T.unpack entry <> ": " <> show (failureMsg err)
     Right okLines -> pure okLines
 
 freeOnException :: Server -> [VarName] -> IO a -> IO a
 freeOnException srv vs action =
   action `onException` freeVars srv vs
 
-withCallFreeIns :: (HasCallStack) => Server -> EntryName -> [VarName] -> [VarName] -> ([VarName] -> IO a) -> IO a
+withCallFreeIns :: Server -> EntryName -> [VarName] -> [VarName] -> ([VarName] -> IO a) -> IO a
 withCallFreeIns srv entry outs ins k = do
   _ <- callFreeIns srv entry outs ins
   k outs `finally` freeVars srv outs
 
-withCallKeepIns :: (HasCallStack) => Server -> EntryName -> [VarName] -> [VarName] -> ([VarName] -> IO a) -> IO a
+withCallKeepIns :: Server -> EntryName -> [VarName] -> [VarName] -> ([VarName] -> IO a) -> IO a
 withCallKeepIns srv entry outs ins k = do
   _ <- callKeepIns srv entry outs ins
   k outs `finally` freeVars srv outs
@@ -564,7 +564,7 @@ packType scratchBin srv outVar typ componentVars = do
       -- store the (possibly split) representation
       m1 <- cmdStore srv scratchBin componentVars
       case m1 of
-        Just err -> error ("cmdStore failed: " <> show err)
+        Just err -> fail ("cmdStore failed: " <> show err)
         Nothing -> pure ()
 
       -- make destination reusable
@@ -573,7 +573,7 @@ packType scratchBin srv outVar typ componentVars = do
       -- restore as the requested type/name
       m2 <- cmdRestore srv scratchBin [(outVar, typ)]
       case m2 of
-        Just err -> error ("cmdRestore failed: " <> show err)
+        Just err -> fail ("cmdRestore failed: " <> show err)
         Nothing -> pure ()
 
       pure outVar
@@ -586,11 +586,11 @@ packType scratchBin srv outVar typ componentVars = do
 
 useInputTypeToPack :: FilePath -> Server -> VarName -> EntryName -> [VarName] -> IO VarName
 useInputTypeToPack scratchBin srv var propName componentVars = do
-  insP <- either (error . show) pure =<< cmdInputs srv propName
+  insP <- either (fail . show) pure =<< cmdInputs srv propName
   inputType <- case insP of
     [inp] -> pure (inputType inp) -- this is the important fix
-    [] -> error $ "Expected property " <> T.unpack propName <> " to have exactly one input, got none."
-    tys -> error $ "Expected property " <> T.unpack propName <> " to have exactly one input, got: " <> show (map inputType tys)
+    [] -> fail $ "Expected property " <> T.unpack propName <> " to have exactly one input, got none."
+    tys -> fail $ "Expected property " <> T.unpack propName <> " to have exactly one input, got: " <> show (map inputType tys)
 
   packType scratchBin srv var inputType componentVars
 
@@ -600,13 +600,13 @@ getVal s name = do
   case getValue v of
     Just b -> pure b
     -- expected type of a
-    Nothing -> error $ "Expected " <> T.unpack name <> " to decode, got: " <> T.unpack (valueText v)
+    Nothing -> fail $ "Expected " <> T.unpack name <> " to decode, got: " <> T.unpack (valueText v)
 
 getDataVal :: Server -> VarName -> IO Value
 getDataVal s name = do
   r <- FSV.getValue s name
   case r of
-    Left msg -> error $ "getValue failed for " <> T.unpack name <> ": " <> T.unpack msg
+    Left msg -> fail $ "getValue failed for " <> T.unpack name <> ": " <> T.unpack msg
     Right v -> pure v
 
 prettyVar :: Server -> VarName -> TypeName -> IO String
@@ -633,7 +633,7 @@ prettyVar srv v ty = do
         sField <- withFreedVar srv tmp $ do
           mFail <- cmdProject srv tmp v fname
           case mFail of
-            Just err -> error $ "cmdProject failed for field " <> T.unpack fname <> ": " <> show err
+            Just err -> fail $ "cmdProject failed for field " <> T.unpack fname <> ": " <> show err
             Nothing -> pure ()
 
           prettyVar srv tmp fty
@@ -658,11 +658,11 @@ prettyLeaf = T.unpack . valueText
 getSingleInputType :: Server -> EntryName -> IO TypeName
 getSingleInputType srv ep = do
   tysE <- getInputTypes srv ep
-  tys <- either (error . show) pure tysE
+  tys <- either (fail . show) pure tysE
   case tys of
     [ty] -> pure ty
-    [] -> error $ "Entrypoint " <> T.unpack ep <> " has no inputs (expected 1)."
-    _ -> error $ "Entrypoint " <> T.unpack ep <> " has >1 input (expected 1): " <> show tys
+    [] -> fail $ "Entrypoint " <> T.unpack ep <> " has no inputs (expected 1)."
+    _ -> fail $ "Entrypoint " <> T.unpack ep <> " has >1 input (expected 1): " <> show tys
 
 outsMatchType :: Server -> TypeName -> [TypeName] -> IO Bool
 outsMatchType srv propTy outs = do
