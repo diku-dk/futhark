@@ -2,7 +2,8 @@
 -- program is an ordinary Futhark program where an initial comment
 -- block specifies input- and output-sets.
 module Futhark.Test
-  ( module Futhark.Test.Spec,
+  ( module Futhark.Test.Property,
+    module Futhark.Test.Spec,
     valuesFromByteString,
     FutharkExe (..),
     getValues,
@@ -44,6 +45,7 @@ import Data.Text.IO qualified as T
 import Futhark.Script qualified as Script
 import Futhark.Server
 import Futhark.Server.Values
+import Futhark.Test.Property
 import Futhark.Test.Spec
 import Futhark.Test.Values qualified as V
 import Futhark.Util (ensureCacheDirectory, isEnvVarAtLeast, pmapIO, showText)
