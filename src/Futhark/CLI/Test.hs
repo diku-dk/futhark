@@ -14,35 +14,26 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as LBS
-import Data.Char (chr)
-import Data.Int (Int32, Int64, Int8)
-import Data.List (delete, intercalate, partition)
+import Data.List (delete, partition)
 import Data.Map.Strict qualified as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (mapMaybe)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
 import Data.Time.Clock.System (SystemTime (..), getSystemTime)
-import Data.Vector.Storable qualified as SV
 import Futhark.Analysis.Metrics.Type
-import Futhark.Data
 import Futhark.Server
-import Futhark.Server.Values qualified as FSV
 import Futhark.Test
 import Futhark.Util (atMostChars, fancyTerminal, showText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (annotate, bgColor, bold, hardline, pretty, putDoc, vsep)
 import Futhark.Util.Table
-import GHC.Stack (HasCallStack)
-import Language.LSP.Protocol.Lens (HasChange (change))
-import System.Random (randomIO)
 import System.Console.ANSI (clearFromCursorToScreenEnd, clearLine, cursorUpLine)
 import System.Console.Terminal.Size qualified as Terminal
 import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
-import System.IO.Temp (withSystemTempFile)
 import System.Process.ByteString (readProcessWithExitCode)
 import Text.Regex.TDFA
 
