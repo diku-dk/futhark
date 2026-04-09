@@ -15,7 +15,7 @@ let simple_succ (x: i8) : i8 =
 
 
 -- Regular test case for the shrinking to fail on.
--- n== 
+-- == 
 -- entry: prop_simple_succ
 -- input {-10i8}
 -- output {true}
@@ -32,13 +32,12 @@ let simple_fail (x: i8) : i8 =
   i8.abs x
 
 -- Regular test case for the shrinking to fail on.
--- n== 
+-- == 
 -- entry: prop_simple_fail
 -- input {10i8}
 -- output {true}
 -- input {-10i8}
 -- output {true}
-
 
 -- this should not run but it should use num to increase number of tests
 -- n==

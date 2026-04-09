@@ -66,7 +66,6 @@ parsePropSpec entry attr = do
         psGen = lookupArgText "gen" args,
         psShrink = lookupArgText "shrink" args,
         psSize = fmap fromInteger $ lookupArgRead "size" args,
-        psSeed = fmap fromInteger $ lookupArgRead "seed" args,
         psPPrint = lookupArgText "pprint" args
       }
 
@@ -316,7 +315,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
               ExitSuccess -> pure ()
               ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
               ExitFailure _ -> throwError $ T.decodeUtf8 err
-    RunCases ios structures warnings -> do
+    RunCases ios structures warnings properties -> do
       -- Compile up-front and reuse same executable for several entry points.
       let backend = configBackend progs
           extra_compiler_options = configExtraCompilerOptions progs
@@ -347,10 +346,9 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                 let run = runCompiledEntry (FutharkExe futhark) server program
                 propSpecs <- extractPropSpecsFromServer server
 
-                let (propIOs, normalIOs) = partition isPropertyInputOutput ios
-                normal_test_result <- concat <$> mapM run normalIOs
+                normal_test_result <- concat <$> mapM run ios
 
-                let requestedNames = requestedPropertyNames propIOs
+                let requestedNames = [propName | PropertyCase propName <- properties]
                 let diagnostics = propertyDiagnostics requestedNames propSpecs
 
                 if null diagnostics
@@ -519,7 +517,7 @@ makeTestCase config mode (file, spec) =
       PBTConfig
         { configNumTests = configNumTests $ configPBTConfig config,
           configMaxSize = configMaxSize $ configPBTConfig config,
-          configBaseSeed = configBaseSeed $ configPBTConfig config
+          configSeed = configSeed $ configPBTConfig config
         }
 
 data ReportMsg
@@ -545,8 +543,8 @@ excludeCases config tcase =
   where
     onTest (ProgramTest desc tags action) =
       ProgramTest desc tags $ onAction action
-    onAction (RunCases ios stest wtest) =
-      RunCases (map onIOs $ filter relevantEntry ios) stest wtest
+    onAction (RunCases ios stest wtest properties) =
+      RunCases (map onIOs $ filter relevantEntry ios) stest wtest properties
     onAction action = action
     onIOs (InputOutputs entry runs) =
       InputOutputs entry $ filter (not . any excluded . runTags) runs
@@ -648,10 +646,11 @@ runTests config paths = do
       numTestCases tc =
         case testAction $ testCaseTest tc of
           CompileTimeFailure _ -> 1
-          RunCases ios sts wts ->
+          RunCases ios sts wts pbts ->
             length (concatMap iosTestRuns ios)
               + length sts
               + length wts
+              + length pbts
       getResults ts
         | null (testStatusRemain ts) = report ts >> pure ts
         | otherwise = do
@@ -764,7 +763,7 @@ defaultConfig =
         PBTConfig
           { configNumTests = 100,
             configMaxSize = 50,
-            configBaseSeed = 123456
+            configSeed = Nothing
           }
     }
 
@@ -956,22 +955,20 @@ commandLineOptions =
       )
       "Maximum size parameter to use for generators (default: 50).",
     Option
-      "base-seed"
-      ["base-seed"]
+      []
+      ["seed"]
       ( ReqArg
           ( \n ->
               case (reads n :: [(Integer, String)]) of
                 [(n', "")]
                   | n' >= 0 ->
-                      Right $ changePBTConfig $ \pbt -> pbt {configBaseSeed = fromIntegral n'}
+                      Right $ changePBTConfig $ \pbt -> pbt {configSeed = Just $ fromIntegral n'}
                 _ ->
                   Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
           )
           "NUM"
       )
-      ( "Base seed to use for generators (default: "
-          ++ show (configBaseSeed $ configPBTConfig defaultConfig)
-          ++ "). The seed for test #i will be base-seed + i."
+      ( "Set seed for all tests to use for generators."
       )
   ]
 
@@ -992,15 +989,7 @@ main = mainWithOptions defaultConfig commandLineOptions "options... programs..."
 
 declaredPropertyNames :: [PropSpec] -> [T.Text]
 declaredPropertyNames specs =
-  nubText $ map psProp specs
-
-nubText :: [T.Text] -> [T.Text]
-nubText = go []
-  where
-    go _ [] = []
-    go seen (x:xs)
-      | x `elem` seen = go seen xs
-      | otherwise = x : go (x : seen) xs
+  map psProp specs
 
 propertyDiagnostics :: [T.Text] -> [PropSpec] -> [TestResult]
 propertyDiagnostics requested specs =

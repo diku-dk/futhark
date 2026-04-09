@@ -4,7 +4,6 @@ module Futhark.Test.Property
   (
     runPBT,
     isPropertyInputOutput,
-    requestedPropertyNames,
     PBTConfig (..),
     PropSpec (..),
     lookupArgRead,
@@ -33,7 +32,7 @@ import System.IO.Temp (withSystemTempFile)
 data PBTConfig = PBTConfig
   { configNumTests :: Int32,
     configMaxSize :: Int64,
-    configBaseSeed :: Int32
+    configSeed :: Maybe Int32
   }
   deriving (Show, Eq)
 
@@ -42,7 +41,6 @@ data PropSpec = PropSpec
     psGen :: Maybe T.Text,
     psShrink :: Maybe T.Text,
     psSize :: Maybe Int64,
-    psSeed :: Maybe Int32,
     psPPrint :: Maybe T.Text
   }
   deriving (Show, Eq)
@@ -97,11 +95,10 @@ runPBT config srv specs = do
 
 runOne :: PropSpec -> PBTConfig -> FilePath -> Server -> IO (Maybe T.Text)
 runOne s config scratchBin srv = do
-  randomValue <- randomIO
+  
   let propName = psProp s
       genName = fromMaybe (error "missing generator") (psGen s)
       sizeBase = fromMaybe (configMaxSize config) (psSize s)
-      seedBase = fromMaybe (configBaseSeed config + randomValue) (psSeed s)
       serverSize = "runPBT_size"
       serverSeed = "runPBT_seed"
       serverIn = "runPBT_input"
@@ -110,7 +107,11 @@ runOne s config scratchBin srv = do
   let loop i
         | i >= configNumTests config = pure $ Nothing
         | otherwise = do
-            let seed = seedBase + i
+            randomValue <- randomIO :: IO Int32
+            let seed = case configSeed config of
+                  Just s -> s
+                  Nothing -> do
+                    randomValue
 
             -- Setup and run Property
             sendGenInputs srv serverSize serverSeed genName sizeBase seed
@@ -685,15 +686,3 @@ isPropertyPlaceholderRun _ = False
 isPropertyInputOutput :: InputOutputs -> Bool
 isPropertyInputOutput io =
   any isPropertyPlaceholderRun (iosTestRuns io)
-
-requestedPropertyNames :: [InputOutputs] -> [T.Text]
-requestedPropertyNames ios =
-  nubText [iosEntryPoint io | io <- ios, isPropertyInputOutput io]
-
-nubText :: [T.Text] -> [T.Text]
-nubText = go []
-  where
-    go _ [] = []
-    go seen (x:xs)
-      | x `elem` seen = go seen xs
-      | otherwise = x : go (x : seen) xs
