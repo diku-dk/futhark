@@ -1488,12 +1488,10 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           let (loop_new_inputs', loop_dstms) =
                 distributeBody scope segments loop_new_inputs body
 
-          let lifted_loop_rep_types = zip lifted_loop_reps (map declTypeOf old_loop_params)
-
           (loop_body_res, loop_body_stms) <-
             runReaderT
               ( runBuilder $
-                  liftLoopBody segments num_segments loop_new_inputs' loop_env_local loop_dstms lifted_loop_rep_types (bodyResult body)
+                  liftLoopBody segments num_segments loop_new_inputs' loop_env_local loop_dstms res (bodyResult body)
               )
               (scope <> build_scope)
 
@@ -1508,7 +1506,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
             certifying (distCerts inps aux env) $
               letTupExp "loop_res_out" loop_exp_gpu
 
-          let out_reps = loopResultToResReps lifted_loop_reps loop_out_vs
+          let out_reps = loopResultToResReps res loop_out_vs
           pure $ insertReps (zip (map distResTag res) out_reps) env
     Let _ aux (Loop merge (WhileLoop cond) body) -> do
       -- TODO:
@@ -2124,46 +2122,36 @@ liftRetType w = concat . snd . L.mapAccumL liftType 0
             Mem {} -> error "liftRetType: Mem"
        in (i + length lifted, lifted)
 
-loopResultToResReps :: [ResRep] -> [VName] -> [ResRep]
-loopResultToResReps paramReps results =
+loopResultToResReps :: [DistResult] -> [VName] -> [ResRep]
+loopResultToResReps dist_res results =
   snd $
     L.mapAccumL
-      ( \rs rep -> case rep of
-          Regular _ ->
-            let (v : rs') = rs
-             in (rs', Regular v)
-          Irregular _ ->
-            let (_ : segs : flags : offsets : elems : rs') = rs
-             in (rs', Irregular $ IrregularRep segs flags offsets elems)
+      ( \rs dist_res' ->
+          if isRegularDistResult dist_res'
+            then
+              let (v : rs') = rs
+               in (rs', Regular v)
+            else
+              let (_: segs : flags : offsets : elems : rs') = rs
+               in (rs', Irregular $ IrregularRep segs flags offsets elems)
       )
       results
-      paramReps
+      dist_res
 
-liftLoopResult ::
-  Segments ->
-  SubExp ->
-  DistInputs ->
-  DistEnv ->
-  (ResRep, DeclType) ->
-  SubExpRes ->
-  Builder GPU Result
-liftLoopResult segments num_segments inps env (paramRep, origType) res =
-  case paramRep of
-    Regular _ -> do
-      let expectedShape = segmentsShape segments <> arrayShape origType
+liftLoopResult :: Segments -> SubExp -> DistInputs -> DistEnv -> DistResult -> SubExpRes -> Builder GPU Result
+liftLoopResult segments num_segments inps env dist_res res = 
+  if isRegularDistResult dist_res
+    then do
+      let (DistType _ _ t) = distResType dist_res
+      let expectedShape = segmentsShape segments <> arrayShape t
       v <- liftSubExpRegular segments inps env expectedShape (resSubExp res)
       pure [SubExpRes mempty (Var v)]
-    Irregular _ ->
-      liftMyLoopResult segments num_segments inps env res
-
-liftMyLoopResult :: Segments -> SubExp -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
-liftMyLoopResult segments num_segments inps env res = map (SubExpRes mempty . Var) <$> vs
+    else case resSubExp res of
+      Var v -> do
+        irreg <- getIrregRep segments env inps v
+        map (SubExpRes mempty . Var) <$> mkIrrep irreg
+      _ -> undefined 
   where
-    vs = do
-      (_, rep) <- liftSubExp segments inps env (resSubExp res)
-      case rep of
-        Regular v -> pure [v]
-        Irregular irreg -> mkIrrep irreg
     mkIrrep
       ( IrregularRep
           { irregularS = segs,
@@ -2183,10 +2171,10 @@ liftMyLoopResult segments num_segments inps env res = map (SubExpRes mempty . Va
         offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
         pure [num_data, segs', flags', offsets', elems']
 
-liftLoopBody :: Segments -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> [(ResRep, DeclType)] -> Result -> Builder GPU Result
-liftLoopBody segments num_segments inputs env dstms paramRepTypes result = do
+liftLoopBody :: Segments -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> [DistResult] -> Result -> Builder GPU Result
+liftLoopBody segments num_segments inputs env dstms dist_res result = do
   env' <- foldM (transformDistStm segments) env dstms
-  results <- zipWithM (liftLoopResult segments num_segments inputs env') paramRepTypes result
+  results <- zipWithM (liftLoopResult segments num_segments inputs env') dist_res result
   pure $ concat results
 
 distResultsToResReps :: [DistResult] -> [VName] -> [ResRep]
