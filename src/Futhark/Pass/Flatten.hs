@@ -1524,10 +1524,6 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       let old_loop_params = map fst merge
           old_loop_inits = map snd merge
           loopParamNames = S.fromList $ map paramName old_loop_params
-      -- (lifted_loop_params, lifted_loop_reps) <- mapAndUnzipM (liftParam w) old_loop_params
-      -- lifted_init <- mapM (liftLoopInit segments inps env) old_loop_inits
-      -- let lifted_loop_params' = concat lifted_loop_params
-      --     lifted_init' = concat lifted_init
       w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
       (lifted_loop_params, lifted_loop_reps, lifted_init) <-
         unzip3 <$> mapM (liftLoopParam segments w inps env loopParamNames) (zip old_loop_params old_loop_inits)
@@ -2130,22 +2126,6 @@ liftRetType w = concat . snd . L.mapAccumL liftType 0
             Acc {} -> error "liftRetType: Acc"
             Mem {} -> error "liftRetType: Mem"
        in (i + length lifted, lifted)
-
-loopTupleToResReps :: [ResRep] -> [VName] -> [ResRep]
-loopTupleToResReps reps results =
-  snd $
-    L.mapAccumL
-      ( \rs rep ->
-          case rep of
-            Regular _ ->
-              let (v : rs') = rs
-               in (rs', Regular v)
-            Irregular _ ->
-              let (_ : segs : flags : offsets : elems : rs') = rs
-               in (rs', Irregular $ IrregularRep segs flags offsets elems)
-      )
-      results
-      reps
 
 loopResultToResReps :: [DistResult] -> [VName] -> [ResRep]
 loopResultToResReps dist_res results =
