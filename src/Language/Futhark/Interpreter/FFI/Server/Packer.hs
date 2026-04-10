@@ -18,8 +18,6 @@ import Data.Maybe (fromJust, fromMaybe)
 import Data.Text qualified as T
 import Futhark.Server qualified as S
 import Futhark.Test.Values qualified as V
-import Language.Futhark.Interpreter.FFI.Util.BiMap qualified as BM
-import Language.Futhark.Interpreter.FFI.Util.NDArray qualified as ND
 import GHC.IO.Handle (hClose)
 import Language.Futhark.Interpreter.FFI (ExValue, ExValueAtom)
 import Language.Futhark.Interpreter.FFI.Server (FutharkServerM)
@@ -27,6 +25,8 @@ import Language.Futhark.Interpreter.FFI.Server qualified as FS
 import Language.Futhark.Interpreter.FFI.Server.Interface (Entry (Entry), ServerInterface (..))
 import Language.Futhark.Interpreter.FFI.Server.TypeLayout (TypeLayout (..))
 import Language.Futhark.Interpreter.FFI.UIDs
+import Language.Futhark.Interpreter.FFI.Util.BiMap qualified as BM
+import Language.Futhark.Interpreter.FFI.Util.NDArray qualified as ND
 import Language.Futhark.Interpreter.FFI.Values
 import System.IO.Temp (withSystemTempFile)
 import Prelude hiding (init)

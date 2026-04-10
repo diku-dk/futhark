@@ -32,12 +32,12 @@ import Futhark.FreshNames (VNameSource)
 import Futhark.Test (FutharkExe (..), compileProgram)
 import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, hardline, putDocLn)
 import Language.Futhark.Interpreter qualified as I
-import Language.Futhark.Interpreter.Values qualified as IV
 import Language.Futhark.Interpreter.FFI qualified as S
 import Language.Futhark.Interpreter.FFI.Server (FutharkServer)
 import Language.Futhark.Interpreter.FFI.Server qualified as S
 import Language.Futhark.Interpreter.FFI.Server.Packer qualified as SP
 import Language.Futhark.Interpreter.FFI.Values (Location)
+import Language.Futhark.Interpreter.Values qualified as IV
 import Language.Futhark.Parser (parseExp)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
 import Language.Futhark.Pretty (toName)
@@ -110,10 +110,10 @@ realize s l = do
   writeIORef s $ Just s''
   pure r
 
-secondM :: Monad m => (b -> m c) -> (a,b) -> m (a,c)
-secondM f (x,y) = do
+secondM :: (Monad m) => (b -> m c) -> (a, b) -> m (a, c)
+secondM f (x, y) = do
   y' <- f y
-  return (x,y')
+  pure (x, y')
 
 fullyRealize :: IORef (Maybe FutharkServer) -> I.Value -> IO I.Value
 fullyRealize _ (IV.ValuePrim p) = pure $ IV.ValuePrim p

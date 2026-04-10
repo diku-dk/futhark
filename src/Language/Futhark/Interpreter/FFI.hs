@@ -16,9 +16,9 @@ where
 
 import Data.Array qualified as A
 import Data.Map qualified as M
-import Language.Futhark.Interpreter.FFI.Util.NDArray qualified as ND
 import Language.Futhark.Core (Name, nameFromText, nameToText)
 import Language.Futhark.Interpreter.FFI.UIDs
+import Language.Futhark.Interpreter.FFI.Util.NDArray qualified as ND
 import Language.Futhark.Interpreter.FFI.Values
 import Language.Futhark.Interpreter.Values qualified as I
 import Language.Futhark.Interpreter.Values qualified as S

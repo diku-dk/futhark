@@ -6,9 +6,9 @@ where
 
 import Data.Map qualified as M
 import Futhark.Server qualified as S
-import Language.Futhark.Interpreter.FFI.Util.BiMap qualified as BM
 import Language.Futhark.Interpreter.FFI.Server.TypeLayout (TypeLayout)
 import Language.Futhark.Interpreter.FFI.UIDs (EntryUID, TypeUID)
+import Language.Futhark.Interpreter.FFI.Util.BiMap qualified as BM
 
 data Entry = Entry [TypeUID] [TypeUID]
   deriving (Eq, Ord, Show)

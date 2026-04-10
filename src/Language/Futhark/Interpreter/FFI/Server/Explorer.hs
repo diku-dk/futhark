@@ -7,10 +7,10 @@ import Control.Monad (forM)
 import Control.Monad.State (MonadIO (liftIO), MonadState, StateT (runStateT), gets, modify)
 import Data.Map qualified as M
 import Futhark.Server qualified as S
-import Language.Futhark.Interpreter.FFI.Util.BiMap qualified as BM
 import Language.Futhark.Interpreter.FFI.Server.Interface (Entry (..), ServerInterface (..))
 import Language.Futhark.Interpreter.FFI.Server.TypeLayout (TypeLayout (..))
 import Language.Futhark.Interpreter.FFI.UIDs
+import Language.Futhark.Interpreter.FFI.Util.BiMap qualified as BM
 import Language.Futhark.Interpreter.FFI.Values (PrimitiveType (..))
 
 -- The explorer monad
