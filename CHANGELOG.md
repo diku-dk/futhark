@@ -9,17 +9,47 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* `futhark fmt` prints module types better.
-
-* New server protocol commands: `rank`, `elemtype`, `new_array`, `set`.
-
 ### Removed
 
 ### Changed
 
 ### Fixed
 
+* The C-based backends no longer emit constants `-9223372036854775808`, as these
+  cause C compilers to issue warnings.
+
+* A case where user-defined assertions could be removed when used in conjunction
+  with `#[scratch]`. (#2417)
+
+## [0.25.37]
+
+### Added
+
+* `futhark fmt` prints module types better.
+
+* New server protocol commands: `rank`, `elemtype`, `new_array`, `set`.
+
+* `futhark lsp` provides inlay hints, they show type ascriptions for
+    inferred types of bindings, by VegOwOtenks. (#2398)
+
+* Scan chunk size is now exposed as tuning parameter in `cuda` and `hip`
+  backends.
+
+* `futhark lsp` offers code actions, they insert type ascriptions for
+  inferred types. Every named binding has an action.
+
+* `futhark bench` and `futhark test` can now handle entry points that return
+  opaque values, as long as there is no expected result.
+
+* Better fusion for `scan` SOACs.
+
+* New prelude function: `exscan`, an exclusive scan.
+
+### Fixed
+
 * `i64.set_bit`/`u64.set_bit` would produce wrong results in C-based backends. (#2396)
+
+* Some uses of higher order modules could cause infinite loops. (#2407)
 
 ## [0.25.36]
 

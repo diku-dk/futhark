@@ -9,7 +9,7 @@ import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (AllocationLimitExceeded (AllocationLimitExceeded), handle)
 import Control.Lens ((^.))
 import Control.Monad (void)
-import Control.Monad.Except (Except, ExceptT, MonadError (throwError), runExceptT)
+import Control.Monad.Except (Except, MonadError (throwError), runExceptT)
 import Control.Monad.Trans (MonadIO (liftIO), lift)
 import Data.Aeson (FromJSON (parseJSON))
 import Data.Aeson qualified as Aeson
@@ -28,11 +28,11 @@ import Data.Text.Mixed.Rope qualified as R
 import Futhark.Compiler.Program (VFS)
 import Futhark.Eval (EvalConfig (..), Evaluation (abort), evalConfig, newFutharkiState, runEvalRecordRef, runExpr)
 import Futhark.LSP.CommandType qualified as CommandType
-import Futhark.LSP.Tool (transformVFS)
+import Futhark.LSP.Tool (Execute, transformVFS)
 import Futhark.Util (showText)
 import Futhark.Util.Pretty (docText, plural, pretty, vcat)
 import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))
-import Language.LSP.Protocol.Types (ApplyWorkspaceEditParams (..), CodeLens (..), Command (..), ErrorCodes (ErrorCodes_InvalidParams), LSPErrorCodes, Position (..), Range (..), TextEdit (..), UInt, Uri, WorkspaceEdit (..), fromNormalizedFilePath, toNormalizedUri, uriToNormalizedFilePath, type (|?) (..))
+import Language.LSP.Protocol.Types (ApplyWorkspaceEditParams (..), CodeLens (..), Command (..), ErrorCodes (ErrorCodes_InvalidParams), Position (..), Range (..), TextEdit (..), UInt, Uri, WorkspaceEdit (..), fromNormalizedFilePath, toNormalizedUri, uriToNormalizedFilePath, type (|?) (..))
 import Language.LSP.Server (LspT, getVirtualFile, getVirtualFiles, sendRequest)
 import Language.LSP.VFS (file_text)
 import Prettyprinter (Doc)
@@ -143,8 +143,6 @@ resolve (CodeLens range Nothing (Just payload)) =
                     _command = showText CommandType.CodeLens
                   }
           }
-
-type Execute a = ExceptT (Text, LSPErrorCodes |? ErrorCodes) (LspT () IO) a
 
 -- | Decode the arguments
 execute :: Maybe [Aeson.Value] -> Execute ()

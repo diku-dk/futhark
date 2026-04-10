@@ -21,16 +21,18 @@ import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
 import Data.Vector qualified as V
 import Futhark.Fmt.Printer (fmtToText)
+import Futhark.LSP.CodeAction (getCodeActions)
 import Futhark.LSP.CodeLens qualified as CodeLens
 import Futhark.LSP.CommandType (CommandType (CodeLens))
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
+import Futhark.LSP.InlayHint (getInlayHints)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState, logWithSeverity)
 import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
-import Language.LSP.Protocol.Lens (HasTextDocument (textDocument), HasUri (uri), arguments, command, line, params, range, start)
+import Language.LSP.Protocol.Lens (arguments, command, line, params, range, start, textDocument, uri)
 import Language.LSP.Protocol.Message
   ( Method (..),
     SMethod (..),
@@ -129,23 +131,22 @@ onWorkspaceDidChangeConfiguration _state_mvar =
 
 onDocumentFormattingHandler :: Handlers (LspM ())
 onDocumentFormattingHandler =
-  requestHandler SMethod_TextDocumentFormatting $ \message report ->
+  requestHandler SMethod_TextDocumentFormatting $ \message report -> do
     let TRequestMessage _ _ _ formattingParams = message
         DocumentFormattingParams _progressToken textDoc _opts = formattingParams
         fileUri = textDoc ^. uri
-     in do
-          logWithSeverity Debug <& "Formatting: " <> showText (textDoc ^. uri)
-          result <- runExceptT $ do
-            virtualFile <- getVirtualFile' fileUri
-            let fileText = R.toText $ virtualFile ^. file_text
-            formattedText <- fmtToText' (show fileUri) fileText
-            pure $
-              if formattedText == fileText
-                then InR Null
-                else InL [fullTextEdit formattedText]
+    logWithSeverity Debug <& "Formatting: " <> showText (textDoc ^. uri)
+    result <- runExceptT $ do
+      virtualFile <- getVirtualFile' fileUri
+      let fileText = R.toText $ virtualFile ^. file_text
+      formattedText <- fmtToText' (show fileUri) fileText
+      pure $
+        if formattedText == fileText
+          then InR Null
+          else InL [fullTextEdit formattedText]
 
-          logWithSeverity Debug <& showText result
-          report result
+    logWithSeverity Debug <& showText result
+    report result
   where
     fullTextEdit newText =
       TextEdit
@@ -193,13 +194,12 @@ onDocumentFormattingHandler =
 
 onDocumentCodeLenses :: Handlers (LspM ())
 onDocumentCodeLenses =
-  requestHandler SMethod_TextDocumentCodeLens $ \request respond ->
+  requestHandler SMethod_TextDocumentCodeLens $ \request respond -> do
     let textDocUri = request ^. params . textDocument . uri
-     in do
-          logWithSeverity Debug
-            <& ("textDocument/CodeLens for " <> showText textDocUri)
-          eitherLenses <- CodeLens.evalLensesFor textDocUri
-          respond $ bimap failure success eitherLenses
+    logWithSeverity Debug
+      <& ("textDocument/CodeLens for " <> showText textDocUri)
+    eitherLenses <- CodeLens.evalLensesFor textDocUri
+    respond $ bimap failure success eitherLenses
   where
     success :: [CodeLens] -> [CodeLens] |? Null
     success = InL
@@ -213,14 +213,13 @@ onDocumentCodeLenses =
 
 onDocumentCodeLensResolve :: Handlers (LspM ())
 onDocumentCodeLensResolve =
-  requestHandler SMethod_CodeLensResolve $ \request respond ->
+  requestHandler SMethod_CodeLensResolve $ \request respond -> do
     let codeLens = request ^. params
         codeLensLine = codeLens ^. (range . start . line)
-     in do
-          logWithSeverity Debug
-            <& ("Resolving code lens on line " <> showText codeLensLine)
-          let result = runExcept $ CodeLens.resolve codeLens
-          respond . first failure $ result
+    logWithSeverity Debug
+      <& ("Resolving code lens on line " <> showText codeLensLine)
+    let result = runExcept $ CodeLens.resolve codeLens
+    respond . first failure $ result
   where
     failure :: Text -> TResponseError Method_CodeLensResolve
     failure text =
@@ -245,13 +244,12 @@ executeCommand cmd_name cmd_params = case readMaybe $ T.unpack cmd_name of
 
 onWorkspaceExecuteCommandHandler :: Handlers (LspM ())
 onWorkspaceExecuteCommandHandler =
-  requestHandler SMethod_WorkspaceExecuteCommand $ \request respond ->
+  requestHandler SMethod_WorkspaceExecuteCommand $ \request respond -> do
     let parameters = request ^. params
-     in do
-          let commandName = parameters ^. command
-          let commandArgs = parameters ^. arguments
-          result <- runExceptT $ executeCommand commandName commandArgs
-          respond $ bimap (uncurry failure) (const $ InR Null) result
+        commandName = parameters ^. command
+        commandArgs = parameters ^. arguments
+    result <- runExceptT $ executeCommand commandName commandArgs
+    respond $ bimap (uncurry failure) (const $ InR Null) result
   where
     failure message err =
       TResponseError
@@ -259,6 +257,33 @@ onWorkspaceExecuteCommandHandler =
           _message = message,
           _code = err
         }
+
+onTextDocumentInlayHint :: IORef State -> Handlers (LspM ())
+onTextDocumentInlayHint state_ref =
+  requestHandler SMethod_TextDocumentInlayHint $ \request respond -> do
+    let parameters = request ^. params
+        filepath = uriToFilePath $ parameters ^. (textDocument . uri)
+        textRange = parameters ^. range
+    logWithSeverity Debug <& "Inlay hints request for range: " <> showText textRange
+
+    state <- tryTakeStateFromIORef state_ref filepath
+    let result = maybe [] (getInlayHints textRange state) filepath
+
+    respond . Right $ InL result
+
+onTextDocumentCodeAction :: IORef State -> Handlers (LspM ())
+onTextDocumentCodeAction state_ref =
+  requestHandler SMethod_TextDocumentCodeAction $ \request respond -> do
+    let parameters = request ^. params
+        file_uri = parameters ^. (textDocument . uri)
+        filepath = uriToFilePath $ parameters ^. (textDocument . uri)
+        textRange = parameters ^. range
+    logWithSeverity Debug <& "Code action request for range: " <> showText textRange
+
+    state <- tryTakeStateFromIORef state_ref filepath
+    let result = maybe [] (getCodeActions file_uri textRange state) filepath
+
+    respond $ Right $ InL result
 
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
@@ -272,6 +297,8 @@ handlers state_mvar _ =
       onDocumentCodeLenses,
       onDocumentCodeLensResolve,
       onDocumentFormattingHandler,
+      onTextDocumentInlayHint state_mvar,
+      onTextDocumentCodeAction state_mvar,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,

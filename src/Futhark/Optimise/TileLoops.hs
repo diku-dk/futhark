@@ -837,7 +837,7 @@ processTile1D gid gtid kdim tile_size (KernelGrid _num_tblocks tblock_size) tile
 
     tiles' <- mapM sliceTile tiles
 
-    let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
+    form' <- redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
     fmap varsRes $
       letTupExp "acc"
         =<< eIf
@@ -1091,9 +1091,9 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size tile_ar
       -- point).
       thread_accs <- forM accs $ \acc ->
         letSubExp "acc" $ BasicOp $ Index acc $ Slice [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
-      let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
+      form' <- redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
 
-          sliceTile (InputUntiled arr) =
+      let sliceTile (InputUntiled arr) =
             sliceUntiled arr tile_id tile_size actual_tile_size
           sliceTile (InputTiled perm tile) = do
             tile_t <- lookupType tile

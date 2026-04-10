@@ -2,26 +2,33 @@
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Futhark.LspTests (tests, main) where
 
 import Colog.Core (LogAction (LogAction))
 import Control.Concurrent (forkIO)
 import Control.Lens ((^.))
+import Control.Monad (zipWithM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Functor (void)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
+import Data.Text qualified as T
 import Futhark.CLI.LSP (serverDefinition)
 import Futhark.Fmt.Printer (fmtToText)
 import Language.Futhark.Parser.Monad (SyntaxError (..))
 import Language.LSP.Protocol.Lens (uri)
 import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))
 import Language.LSP.Protocol.Types
-  ( CodeLens (CodeLens),
+  ( CodeAction (..),
+    CodeLens (CodeLens),
     Definition (Definition),
     FormattingOptions (FormattingOptions),
     Hover (Hover),
+    InlayHint (..),
+    InlayHintKind (InlayHintKind_Type),
     LanguageKind (LanguageKind_Custom),
     Location (..),
     MarkupContent (..),
@@ -37,10 +44,13 @@ import Language.LSP.Test
     createDoc,
     defaultConfig,
     documentContents,
+    executeCodeAction,
     executeCommand,
     formatDoc,
     fullLatestClientCaps,
     getAndResolveCodeLenses,
+    getAndResolveInlayHints,
+    getCodeActions,
     getDefinitions,
     getHover,
     message,
@@ -182,6 +192,166 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $ do
       -- >>> x + 5
       |]
 
+fullRange :: Range
+fullRange =
+  Range
+    { _start = Position minBound minBound,
+      _end = Position maxBound maxBound
+    }
+
+testInlayTypeHint :: TestTree
+testInlayTypeHint =
+  testGroup
+    "Inlay type hint"
+    [ defParamHint,
+      letHint,
+      noSizeHint,
+      loopHint,
+      defReturnHint,
+      defConstantReturnHint,
+      lambdaArgHint,
+      typeArgHint,
+      defNestedHint
+    ]
+  where
+    expectHint InlayHint {..} l p = do
+      _position @?= p
+      _label @?= InL l
+      _kind @?= Just InlayHintKind_Type
+    hintTestCase name mainDoc expectedHints = serverTestCase name $ do
+      docIdent <- createMainDoc mainDoc
+      hints <- getAndResolveInlayHints docIdent fullRange
+      liftIO $
+        if length hints /= length expectedHints
+          then assertFailure $ "Unexpected inlay hints: " ++ show hints
+          else zipWithM_ (\h (p, l) -> expectHint h l p) hints expectedHints
+    typeArgHint =
+      hintTestCase
+        "type argument hint"
+        "def identity = let f 'a (x: a): a = x in f"
+        [(Position 0 12, " 'a\8320"), (Position 0 12, " : (x: a\8320) -> a\8320")]
+    lambdaArgHint =
+      hintTestCase
+        "lambda argument hint"
+        "def lambda : i32 -> i32 = \\ x -> x + 0i32"
+        [(Position 0 28, "("), (Position 0 29, ": i32)")]
+    defConstantReturnHint =
+      hintTestCase
+        "def constant hint"
+        "def pi = 3"
+        [(Position 0 6, " : i32")]
+    defReturnHint =
+      hintTestCase
+        "def return hint"
+        "def twice (x: i32) = x + x"
+        [(Position 0 18, " : i32")]
+    loopHint =
+      hintTestCase
+        "loop hint"
+        "def factorial (n: i32) : i32 = loop result = 1 for i < n do result * (i + 1)"
+        [(Position 0 36, "("), (Position 0 42, ": i32)")]
+    -- this is on purpose, all sizes have type i64
+    noSizeHint =
+      hintTestCase
+        "no size hint"
+        "def sz [n] 'a (_: [n]a) : i64 = n"
+        []
+    letHint =
+      hintTestCase
+        "let hint"
+        "def foo : bool = let f = false in true && f"
+        [(Position 0 22, ": bool")]
+    defParamHint =
+      hintTestCase
+        "def param hint"
+        "def plus5 x : i32 = x + 5i32"
+        [(Position 0 10, "("), (Position 0 11, ": i32)")]
+    defNestedHint =
+      hintTestCase
+        "def nested hint"
+        "def bar 'a (f: a -> a -> a) (x : a, y) : a = f x y"
+        [(Position 0 37, ": a")]
+
+testTypeCompletionCodeAction :: TestTree
+testTypeCompletionCodeAction =
+  testGroup
+    "Type completion code action"
+    [ testDefReturn,
+      testDefParam,
+      testDefParamTypeArg,
+      testNestedTypeArg,
+      testLetType,
+      testLetArg,
+      testDefDim,
+      testDefConstantReturnPosition
+    ]
+  where
+    -- Retrieves code actions, selects the one containing the title phrase
+    -- and checks that the new document looks like expected
+    actionTestCase name contents actionTitleLike newContents =
+      serverTestCase name $ do
+        docIdent <- createMainDoc contents
+        actions <- getCodeActions docIdent fullRange
+        let filterAction = \case
+              InL _ -> Nothing
+              InR c@(CodeAction {..})
+                | actionTitleLike `T.isInfixOf` _title -> Just c
+                | otherwise -> Nothing
+        selectedAction <- liftIO $ case mapMaybe filterAction actions of
+          [a] -> pure a
+          rest -> assertFailure $ "No single action found: " ++ show rest
+
+        executeCodeAction selectedAction
+        documentContents docIdent >>= liftIO . (@?= newContents)
+    testDefReturn =
+      actionTestCase
+        "def return"
+        "def pi = 3i32"
+        "return type"
+        "def pi : i32 = 3i32"
+    testDefParam =
+      actionTestCase
+        "param type"
+        "def identity 'a x : a = x"
+        "Insert type"
+        "def identity 'a (x: a) : a = x"
+    testDefParamTypeArg =
+      actionTestCase
+        "param type arg"
+        "def identity x = x"
+        "Insert type"
+        "def identity '^t0 (x: t0) = x"
+    testNestedTypeArg =
+      actionTestCase
+        "nested type arg"
+        "def identity x = let y = x in y"
+        "Insert type: `y"
+        "def identity '^t0 x = let y: t0 = x in y"
+    testLetType =
+      actionTestCase
+        "let type"
+        "def inc x = let y = x + 1i32 in y"
+        "Insert type: `y"
+        "def inc x = let y: i32 = x + 1i32 in y"
+    testLetArg =
+      actionTestCase
+        "let arg"
+        "def inc x = let f y = y + 1i32 in f x"
+        "Insert type: `(y"
+        "def inc x = let f (y: i32) = y + 1i32 in f x"
+    testDefDim =
+      actionTestCase
+        "def dim"
+        "def id'arr 'a (xs: []a) = xs"
+        "return type"
+        "def id'arr [d0] 'a (xs: []a) : [d0]a = xs"
+    testDefConstantReturnPosition =
+      actionTestCase
+        "def constant return position"
+        "def it '^t = \\(x: t) -> x"
+        "return type"
+        "def it '^t : (x: t) -> t = \\(x: t) -> x"
+
 tests :: TestTree
 tests =
   testGroup
@@ -189,5 +359,7 @@ tests =
     [ testHoverInformation,
       testDefinition,
       testFormatting,
-      testEvaluationComment
+      testEvaluationComment,
+      testInlayTypeHint,
+      testTypeCompletionCodeAction
     ]

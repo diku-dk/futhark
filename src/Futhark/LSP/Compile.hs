@@ -71,6 +71,7 @@ tryCompile state (Just path) old_loaded_prog = do
   flushDiagnosticsBySource maxDiagnostic diagnosticSource
   case res of
     Right new_loaded_prog -> do
+      logWithSeverity Debug <& "Successfully compiled, publishing warnings"
       publishWarningDiagnostics $ listWarnings $ lpWarnings new_loaded_prog
       maybe_virtual_file <- getVirtualFile $ toNormalizedUri $ filePathToUri path
       case maybe_virtual_file of
