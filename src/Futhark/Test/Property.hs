@@ -227,7 +227,7 @@ runOne s config scratchBin srv entryNameRef = do
                       , phaseSeed = Just seed
                       , phaseTactic = Nothing
                       }
-                    autoShrinkLoop scratchBin srv propName genName serverIn sizeBase seed genOuts
+                    autoShrinkLoop scratchBin srv propName genName serverIn sizeBase seed genOuts entryNameRef
                   Just shrinkName -> do
                     writeIORef entryNameRef $ PBTPhase
                       { activeTest = Just propName
@@ -248,8 +248,8 @@ runOne s config scratchBin srv entryNameRef = do
                   { activeTest = Just propName
                   , phase = Just "prettyPrint"
                   , shrinkWith = Nothing
-                  , phaseSize = Just sizeBase
-                  , phaseSeed = Just seed
+                  , phaseSize = Nothing
+                  , phaseSeed = Nothing
                   , phaseTactic = Nothing
                   }
 
@@ -302,8 +302,8 @@ getOutputTypes s entry = do
   outs <- cmdOutputs s entry
   pure $ fmap (map outputType) outs
 
-autoShrinkLoop :: FilePath -> Server -> EntryName -> EntryName -> VarName -> Int64 -> Int32 -> [VarName] -> IO ()
-autoShrinkLoop scratchBin srv propName genName vIn size seed genOuts = do
+autoShrinkLoop :: FilePath -> Server -> EntryName -> EntryName -> VarName -> Int64 -> Int32 -> [VarName] -> IORef PBTPhase -> IO ()
+autoShrinkLoop scratchBin srv propName genName vIn size seed genOuts phaseRef = do
   let vCand = "qc_try"
       vOk = "qc_ok"
       serverSize = "qc_size"
@@ -327,13 +327,41 @@ autoShrinkLoop scratchBin srv propName genName vIn size seed genOuts = do
 
             res <- withFreedVars srv genOuts $
               withFreedVar srv vCand $ do
+
+                writeIORef phaseRef $ PBTPhase
+                  { activeTest = Just propName
+                  , phase = Just "autoShrinkLoop"
+                  , shrinkWith = Just genName
+                  , phaseSize = Just newSize
+                  , phaseSeed = Just seed
+                  , phaseTactic = Nothing
+                  }
+
                 _ <- callFreeIns srv genName genOuts [serverSize, serverSeed]
                 _ <-
                   freeOnException srv [vCand] $
                     packType scratchBin srv vCand propTy genOuts
 
+                writeIORef phaseRef $ PBTPhase
+                  { activeTest = Just propName
+                  , phase = Just "autoShrinkLoop"
+                  , shrinkWith = Just propName
+                  , phaseSize = Just newSize
+                  , phaseSeed = Just seed
+                  , phaseTactic = Nothing
+                  }
+
                 ok <- withCallKeepIns srv propName [vOk] [vCand] $ \_ ->
                   getVal srv vOk
+
+                writeIORef phaseRef $ PBTPhase
+                  { activeTest = Just propName
+                  , phase = Just "autoShrinkLoop"
+                  , shrinkWith = Nothing
+                  , phaseSize = Just newSize
+                  , phaseSeed = Just seed
+                  , phaseTactic = Nothing
+                  }
 
                 if ok
                   then pure Nothing

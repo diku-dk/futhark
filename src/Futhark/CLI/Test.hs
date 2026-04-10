@@ -139,20 +139,22 @@ withProgramServer program runner extra_options phaseRef f = do
         Left _ -> do
           abortServer server
           st <- readIORef phaseRef
-          case activeTest st of
-            Nothing -> fail $ "test timeout after " <> show timeout <> " microseconds"
-            Just activeTestName ->
-               let phaseInfo = case phase st of
-                     Nothing -> ""
-                     Just phaseName -> " during phase " <> phaseName
-                   shrinkInfo = case shrinkWith st of
-                     Nothing -> ""
-                     Just shrinkName -> " while shrinking with " <> shrinkName
-                   sizeInfo = maybe "" (\s -> " at size " <> showText s) (phaseSize st)
-                   seedInfo = maybe "" (\s -> " with seed " <> showText s) (phaseSeed st)
-                   tacticInfo = maybe "" (\t -> " with tactic " <> showText t) (phaseTactic st)
-                   msg = T.unpack activeTestName <> T.unpack phaseInfo <> T.unpack shrinkInfo <> T.unpack sizeInfo <> T.unpack seedInfo <> T.unpack tacticInfo
-                in fail $ "test timeout after " <> show timeout <> " microseconds while testing " <> msg
+          fail $ "test timeout after " <> show timeout <> " microseconds" <> case activeTest st of
+            Nothing -> mempty
+            Just activeTestName -> do
+              -- use annotate to make the phase name stand out in the error message, since it is the most likely place to find out what went wrong
+              let phaseInfo = maybe mempty (\phaseName -> " during phase " <> phaseName) (phase st)
+                  shrinkInfo = maybe mempty (\shrinkPhase -> " while shrinking with " <> shrinkPhase) (shrinkWith st)
+                  sizeInfo = maybe mempty (\size -> " at size " <> showText size) (phaseSize st)
+                  seedInfo = maybe mempty (\seed -> " with seed " <> showText seed) (phaseSeed st)
+                  tacticInfo = maybe mempty (\tactic -> " with tactic " <> showText tactic) (phaseTactic st)
+              ". Was evaluating property:\n"
+                <> T.unpack activeTestName
+                <> T.unpack phaseInfo
+                <> T.unpack shrinkInfo
+                <> T.unpack sizeInfo
+                <> T.unpack seedInfo
+                <> T.unpack tacticInfo
         Right r -> pure r
 
 data TestMode
