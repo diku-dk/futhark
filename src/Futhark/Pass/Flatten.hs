@@ -1589,12 +1589,12 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           let [cond_scanned_v] = cond_scanned
 
           any_active_init <-
-            letSubExp "any_active_init" =<<
-              eIf
+            letSubExp "any_active_init"
+              =<< eIf
                 (toExp $ pe64 w .==. 0)
                 (eBody [eSubExp $ constant False])
                 (eBody [eIndex cond_scanned_v [toExp $ pe64 w - 1]])
-          
+
           any_active_param <- newParam "any_active" (Prim Bool)
           let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfFParams [any_active_param]
           -- ‌build body
@@ -1647,72 +1647,69 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
                         pure (v, DistInput (ResTag i) t)
                       env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
                   let suset_segments = NE.singleton num_data
-                  let (subset_inputs', subset_dstms) = distributeBody scope suset_segments subset_inputs body                  
-                  env_subset' <- foldM (transformDistStm suset_segments ) env_subset subset_dstms
+                  let (subset_inputs', subset_dstms) = distributeBody scope suset_segments subset_inputs body
+                  env_subset' <- foldM (transformDistStm suset_segments) env_subset subset_dstms
                   active_reps <-
                     mapM
-                      (\(p, template, body_res) -> liftLoopResultRep suset_segments  subset_inputs' env_subset' p template body_res)
+                      (\(p, template, body_res) -> liftLoopResultRep suset_segments subset_inputs' env_subset' p template body_res)
                       (zip3 old_loop_params lifted_loop_reps (bodyResult body))
 
                   let mergeOneLifted t rep0 rep1 =
-                        case (rep0 , rep1) of
-                            (Regular x0, Regular x1) -> do
-                              
-                              let initial_shape = Shape [w] <> arrayShape t
-                              let final_shape = segmentsShape segments <> arrayShape t
-                              let pt = elemType t
-                              space <- letExp "blank" =<< eBlank (Array pt initial_shape NoUniqueness)
+                        case (rep0, rep1) of
+                          (Regular x0, Regular x1) -> do
+                            let initial_shape = Shape [w] <> arrayShape t
+                            let final_shape = segmentsShape segments <> arrayShape t
+                            let pt = elemType t
+                            space <- letExp "blank" =<< eBlank (Array pt initial_shape NoUniqueness)
 
-                              out <-
-                                foldM
-                                  scatterRegular
-                                  space
-                                  [(inactive_inds, x0), (active_inds, x1)]
+                            out <-
+                              foldM
+                                scatterRegular
+                                space
+                                [(inactive_inds, x0), (active_inds, x1)]
 
-                              out_type <- arrayShape <$> lookupType out
-                              out_reshaped <- letExp "out_reshaped" . BasicOp $
+                            out_type <- arrayShape <$> lookupType out
+                            out_reshaped <-
+                              letExp "out_reshaped" . BasicOp $
                                 Reshape out $
                                   reshapeAll out_type final_shape
-                            
-                              pure [SubExpRes mempty (Var out_reshaped)]
 
+                            pure [SubExpRes mempty (Var out_reshaped)]
+                          (Irregular ir0, Irregular ir1) -> do
+                            segsSpace <-
+                              letExp "blank_segs"
+                                =<< eBlank (Array int64 (Shape [w]) NoUniqueness)
 
-                            (Irregular ir0, Irregular ir1) -> do 
-                              segsSpace <-
-                                letExp "blank_segs"
-                                  =<< eBlank (Array int64 (Shape [w]) NoUniqueness)
+                            segs <-
+                              foldM
+                                scatterRegular
+                                segsSpace
+                                [(inactive_inds, irregularS ir0), (active_inds, irregularS ir1)]
 
-                              segs <-
-                                foldM
-                                  scatterRegular
-                                  segsSpace
-                                  [(inactive_inds, irregularS ir0), (active_inds, irregularS ir1)]
+                            (_, offsets, num_data) <- exScanAndSum segs
 
-                              (_, offsets, num_data) <- exScanAndSum segs
+                            let pt = elemType t
+                            elemsSpace <-
+                              letExp "blank_elems"
+                                =<< eBlank (Array pt (Shape [num_data]) NoUniqueness)
 
-                              let pt = elemType t
-                              elemsSpace <-
-                                letExp "blank_elems"
-                                  =<< eBlank (Array pt (Shape [num_data]) NoUniqueness)
+                            elems <-
+                              foldM
+                                (scatterIrregular offsets)
+                                elemsSpace
+                                [(inactive_inds, ir0), (active_inds, ir1)]
 
-                              elems <-
-                                foldM
-                                  (scatterIrregular offsets)
-                                  elemsSpace
-                                  [(inactive_inds, ir0), (active_inds, ir1)]
+                            flags <- genFlags num_data offsets
 
-                              flags <- genFlags num_data offsets
+                            pure
+                              [ SubExpRes mempty num_data,
+                                SubExpRes mempty (Var segs),
+                                SubExpRes mempty (Var flags),
+                                SubExpRes mempty (Var offsets),
+                                SubExpRes mempty (Var elems)
+                              ]
+                          _ -> error "mergeOneLifted: mismatched reps"
 
-                              pure
-                                [ SubExpRes mempty num_data,
-                                  SubExpRes mempty (Var segs),
-                                  SubExpRes mempty (Var flags),
-                                  SubExpRes mempty (Var offsets),
-                                  SubExpRes mempty (Var elems)
-                                ]
-                            _ -> error "mergeOneLifted: mismatched reps"
-                 
-                                                  
                   merged_results <-
                     concat
                       <$> zipWithM
@@ -2007,7 +2004,7 @@ liftLoopParam segments num_segments inps env loopParamNames (fparam, initSE) = d
     Array pt _ u
       | needsIrregular inps env loopParamNames t -> do
           (params, rep) <- liftParam num_segments fparam
-          initVals <- liftLoopInit2 segments inps env initSE num_segments
+          initVals <- liftLoopInit segments inps env initSE num_segments
           pure (params, rep, initVals)
       | otherwise -> do
           -- Regular case: all dims are invariant, just add w as outermost dim
@@ -2089,8 +2086,8 @@ liftArg segments inps env (se, d) = do
         let diets = replicate 4 Observe ++ [d]
         pure $ zipWith (curry (first Var)) [num_data, segs, flags', offsets, elems'] diets
 
-liftLoopInit2 :: Segments -> DistInputs -> DistEnv -> SubExp -> SubExp -> Builder GPU [SubExp]
-liftLoopInit2 segments inps env se num_segments = do
+liftLoopInit :: Segments -> DistInputs -> DistEnv -> SubExp -> SubExp -> Builder GPU [SubExp]
+liftLoopInit segments inps env se num_segments = do
   (_, rep) <- liftSubExp segments inps env se
   case rep of
     Regular v -> pure [Var v]
@@ -2150,7 +2147,6 @@ loopTupleToResReps reps results =
       results
       reps
 
-
 loopResultToResReps :: [DistResult] -> [VName] -> [ResRep]
 loopResultToResReps dist_res results =
   snd $
@@ -2161,14 +2157,14 @@ loopResultToResReps dist_res results =
               let (v : rs') = rs
                in (rs', Regular v)
             else
-              let (_: segs : flags : offsets : elems : rs') = rs
+              let (_ : segs : flags : offsets : elems : rs') = rs
                in (rs', Irregular $ IrregularRep segs flags offsets elems)
       )
       results
       dist_res
 
 liftLoopResult :: Segments -> SubExp -> DistInputs -> DistEnv -> DistResult -> SubExpRes -> Builder GPU Result
-liftLoopResult segments num_segments inps env dist_res res = 
+liftLoopResult segments num_segments inps env dist_res res =
   if isRegularDistResult dist_res
     then do
       let (DistType _ _ t) = distResType dist_res
@@ -2179,7 +2175,7 @@ liftLoopResult segments num_segments inps env dist_res res =
       Var v -> do
         irreg <- getIrregRep segments env inps v
         map (SubExpRes mempty . Var) <$> mkIrrep irreg
-      _ -> undefined 
+      _ -> undefined
   where
     mkIrrep
       ( IrregularRep
