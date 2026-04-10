@@ -1328,7 +1328,12 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
           let sing_red' = sing_red {redNeutral = nes'}
           elems' <- genSegRed arr_segments flags offsets elems sing_red'
-          pure $ insertReps (zip (map distResTag res) (map Regular elems')) env
+          elems'' <- forM elems' $ \v -> do
+            v_t <- lookupType v
+            letExp (baseName v <> "_reshaped") . BasicOp $
+              Reshape v $
+                reshapeAll (arrayShape v_t) (segmentsShape segments)
+          pure $ insertRegulars (map distResTag res) elems'' env
       | Just (reds, map_lam) <- isRedomapSOAC form,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
@@ -1516,12 +1521,17 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       -- inside the body we should compute the indices for which the condition is true and for which it is false, and then distribute the body based on that.
       --  We can then merge the results of the two branches by writing them back to a blank space like we do for the branches of a match.
 
-      let [w] = NE.toList segments
-          old_loop_params = map fst merge
+      let old_loop_params = map fst merge
           old_loop_inits = map snd merge
+          loopParamNames = S.fromList $ map paramName old_loop_params
+      -- (lifted_loop_params, lifted_loop_reps) <- mapAndUnzipM (liftParam w) old_loop_params
+      -- lifted_init <- mapM (liftLoopInit segments inps env) old_loop_inits
+      -- let lifted_loop_params' = concat lifted_loop_params
+      --     lifted_init' = concat lifted_init
+      w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+      (lifted_loop_params, lifted_loop_reps, lifted_init) <-
+        unzip3 <$> mapM (liftLoopParam segments w inps env loopParamNames) (zip old_loop_params old_loop_inits)
 
-      (lifted_loop_params, lifted_loop_reps) <- mapAndUnzipM (liftParam w) old_loop_params
-      lifted_init <- mapM (liftLoopInit segments inps env) old_loop_inits
       let lifted_loop_params' = concat lifted_loop_params
           lifted_init' = concat lifted_init
 
@@ -1544,6 +1554,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       scope <- askScope
       case maybe_cond of
         -- infinite loop . later can be uniform case as well.
+        -- !!! TODO: !!!! update this as well.
         Nothing -> do
           let build_scope = scopeOfFParams lifted_loop_params'
           let (loop_new_inputs', loop_dstms) = distributeBody scope segments loop_new_inputs body
@@ -1567,23 +1578,33 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
                 Irregular {} -> error "WhileLoop condition cannot be irregular"
 
           -- latter chagne to reduction
-          or_lam <- binOpLambda LogOr Bool
-          cond_scanned <- genScan "any_scan" [w] or_lam [constant False] [cond_init_arr_v]
-          let [cond_scanned_v] = cond_scanned
-          any_active_init <-
-            letSubExp "any_active_init"
-              =<< eIndex cond_scanned_v [toExp $ pe64 w - 1]
+          cond_init_arr_t <- lookupType cond_init_arr_v
+          cond_init_flat <-
+            letExp "cond_init_flat" . BasicOp $
+              Reshape cond_init_arr_v $
+                reshapeAll (arrayShape cond_init_arr_t) (Shape [w])
 
+          or_lam <- binOpLambda LogOr Bool
+          cond_scanned <- genScan "any_scan" (NE.singleton w) or_lam [constant False] [cond_init_flat]
+          let [cond_scanned_v] = cond_scanned
+
+          any_active_init <-
+            letSubExp "any_active_init" =<<
+              eIf
+                (toExp $ pe64 w .==. 0)
+                (eBody [eSubExp $ constant False])
+                (eBody [eIndex cond_scanned_v [toExp $ pe64 w - 1]])
+          
           any_active_param <- newParam "any_active" (Prim Bool)
           let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfFParams [any_active_param]
-
           -- ‌build body
           (loop_body_res, loop_body_stms) <-
             runReaderT
               ( runBuilder $ do
                   -- (num_data, active_inds) <- genFilter cond_lifted_param
                   equiv_classes <- letExp "equiv_classes" <=< segMap (MkSolo w) $ \(MkSolo i) -> do
-                    c <- letSubExp "c" =<< eIndex cond_lifted_param [eSubExp i]
+                    let seg_is = unflattenIndex (segmentDims segments) (pe64 i)
+                    c <- letSubExp "c" =<< eIndex cond_lifted_param (map toExp seg_is)
                     cls <-
                       letSubExp "cls"
                         =<< eIf
@@ -1609,73 +1630,89 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
 
                   inactive_inds <- getInds "inactive" 0
                   active_inds <- getInds "active" 1
+                  inactive_size <- arraySize 0 <$> lookupType inactive_inds
                   num_data <- letSubExp "num_data" =<< eIndex partition_sizes [toExp $ intConst Int64 1]
 
                   inactive_reps <- forM old_loop_params $ \p -> do
                     (_, _, rep) <- splitInput segments loop_new_inputs loop_env_local inactive_inds (paramName p)
                     pure rep
 
-                  let free_in_body = namesToList $ freeIn body
-                  -- free_sizes <- localScope (scopeOfDistInputs loop_new_inputs) $ foldMap freeIn <$> mapM lookupType (namesToList $ freeIn body)
+                  let free_in_body =
+                        filter
+                          (isVariant loop_new_inputs loop_env_local . Var)
+                          (namesToList $ freeIn body)
                   (ts, vs, reps) <- unzip3 <$> mapM (splitInput segments loop_new_inputs loop_env_local active_inds) free_in_body
                   let subset_inputs = do
                         (v, t, i) <- zip3 vs ts [0 ..]
                         pure (v, DistInput (ResTag i) t)
                       env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-                  let (subset_inputs', subset_dstms) = distributeBody scope (NE.singleton num_data) subset_inputs body
-                  subset_body_res <- liftBody num_data subset_inputs' env_subset subset_dstms (bodyResult body)
-                  subset_result_vs <- mapM (letExp "subset_result" <=< toExp . resSubExp) subset_body_res
-                  let active_reps = resultToResReps (map declTypeOf old_loop_params) subset_result_vs
+                  let suset_segments = NE.singleton num_data
+                  let (subset_inputs', subset_dstms) = distributeBody scope suset_segments subset_inputs body                  
+                  env_subset' <- foldM (transformDistStm suset_segments ) env_subset subset_dstms
+                  active_reps <-
+                    mapM
+                      (\(p, template, body_res) -> liftLoopResultRep suset_segments  subset_inputs' env_subset' p template body_res)
+                      (zip3 old_loop_params lifted_loop_reps (bodyResult body))
 
                   let mergeOneLifted t rep0 rep1 =
-                        case t of
-                          Prim pt -> do
-                            let Regular xs0 = rep0
-                                Regular xs1 = rep1
-                            space <- letExp "blank" =<< eBlank (Array pt (Shape [w]) NoUniqueness)
-                            out <-
-                              foldM
-                                scatterRegular
-                                space
-                                [(inactive_inds, xs0), (active_inds, xs1)]
-                            pure [SubExpRes mempty (Var out)]
-                          Array pt _ _ -> do
-                            let Irregular ir0 = rep0
-                                Irregular ir1 = rep1
-                            segsSpace <-
-                              letExp "blank_segs"
-                                =<< eBlank (Array int64 (Shape [w]) NoUniqueness)
+                        case (rep0 , rep1) of
+                            (Regular x0, Regular x1) -> do
+                              
+                              let initial_shape = Shape [w] <> arrayShape t
+                              let final_shape = segmentsShape segments <> arrayShape t
+                              let pt = elemType t
+                              space <- letExp "blank" =<< eBlank (Array pt initial_shape NoUniqueness)
 
-                            segs <-
-                              foldM
-                                scatterRegular
-                                segsSpace
-                                [(inactive_inds, irregularS ir0), (active_inds, irregularS ir1)]
+                              out <-
+                                foldM
+                                  scatterRegular
+                                  space
+                                  [(inactive_inds, x0), (active_inds, x1)]
 
-                            (_, offsets, num_data) <- exScanAndSum segs
+                              out_type <- arrayShape <$> lookupType out
+                              out_reshaped <- letExp "out_reshaped" . BasicOp $
+                                Reshape out $
+                                  reshapeAll out_type final_shape
+                            
+                              pure [SubExpRes mempty (Var out_reshaped)]
 
-                            elemsSpace <-
-                              letExp "blank_elems"
-                                =<< eBlank (Array pt (Shape [num_data]) NoUniqueness)
 
-                            elems <-
-                              foldM
-                                (scatterIrregular offsets)
-                                elemsSpace
-                                [(inactive_inds, ir0), (active_inds, ir1)]
+                            (Irregular ir0, Irregular ir1) -> do 
+                              segsSpace <-
+                                letExp "blank_segs"
+                                  =<< eBlank (Array int64 (Shape [w]) NoUniqueness)
 
-                            flags <- genFlags num_data offsets
+                              segs <-
+                                foldM
+                                  scatterRegular
+                                  segsSpace
+                                  [(inactive_inds, irregularS ir0), (active_inds, irregularS ir1)]
 
-                            pure
-                              [ SubExpRes mempty num_data,
-                                SubExpRes mempty (Var segs),
-                                SubExpRes mempty (Var flags),
-                                SubExpRes mempty (Var offsets),
-                                SubExpRes mempty (Var elems)
-                              ]
-                          Acc {} -> error "WhileLoop: Acc merge param not supported"
-                          Mem {} -> error "WhileLoop: Mem merge param not supported"
+                              (_, offsets, num_data) <- exScanAndSum segs
 
+                              let pt = elemType t
+                              elemsSpace <-
+                                letExp "blank_elems"
+                                  =<< eBlank (Array pt (Shape [num_data]) NoUniqueness)
+
+                              elems <-
+                                foldM
+                                  (scatterIrregular offsets)
+                                  elemsSpace
+                                  [(inactive_inds, ir0), (active_inds, ir1)]
+
+                              flags <- genFlags num_data offsets
+
+                              pure
+                                [ SubExpRes mempty num_data,
+                                  SubExpRes mempty (Var segs),
+                                  SubExpRes mempty (Var flags),
+                                  SubExpRes mempty (Var offsets),
+                                  SubExpRes mempty (Var elems)
+                                ]
+                            _ -> error "mergeOneLifted: mismatched reps"
+                 
+                                                  
                   merged_results <-
                     concat
                       <$> zipWithM
@@ -1706,8 +1743,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
             certifying (distCerts inps aux env) $
               letTupExp "loop_res_out" loop_exp_gpu
           let loop_out_vs' = L.init loop_out_vs
-              result_types = map ((\(DistType _ _ t) -> t) . distResType) res
-              out_reps = resultToResReps result_types loop_out_vs'
+          let out_reps = loopResultToResReps res loop_out_vs'
           pure $ insertReps (zip (map distResTag res) out_reps) env
     Let pat aux (WithAcc inputs lam) ->
       transformWithAcc flattenOps segments env inps res pat aux inputs lam
@@ -2053,30 +2089,6 @@ liftArg segments inps env (se, d) = do
         let diets = replicate 4 Observe ++ [d]
         pure $ zipWith (curry (first Var)) [num_data, segs, flags', offsets, elems'] diets
 
--- Mostly same as liftArg
-liftLoopInit :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU [SubExp]
-liftLoopInit segments inps env se = do
-  (_, rep) <- liftSubExp segments inps env se
-  case rep of
-    Regular v -> pure [Var v]
-    Irregular irreg -> mkIrrep irreg
-  where
-    mkIrrep
-      ( IrregularRep
-          { irregularS = segs,
-            irregularF = flags,
-            irregularO = offsets,
-            irregularD = elems
-          }
-        ) = do
-        t <- lookupType elems
-        flags_t <- lookupType flags
-        num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
-        let shape = Shape [Var num_data]
-        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
-        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
-        pure $ map Var [num_data, segs, flags', offsets, elems']
-
 liftLoopInit2 :: Segments -> DistInputs -> DistEnv -> SubExp -> SubExp -> Builder GPU [SubExp]
 liftLoopInit2 segments inps env se num_segments = do
   (_, rep) <- liftSubExp segments inps env se
@@ -2121,6 +2133,23 @@ liftRetType w = concat . snd . L.mapAccumL liftType 0
             Acc {} -> error "liftRetType: Acc"
             Mem {} -> error "liftRetType: Mem"
        in (i + length lifted, lifted)
+
+loopTupleToResReps :: [ResRep] -> [VName] -> [ResRep]
+loopTupleToResReps reps results =
+  snd $
+    L.mapAccumL
+      ( \rs rep ->
+          case rep of
+            Regular _ ->
+              let (v : rs') = rs
+               in (rs', Regular v)
+            Irregular _ ->
+              let (_ : segs : flags : offsets : elems : rs') = rs
+               in (rs', Irregular $ IrregularRep segs flags offsets elems)
+      )
+      results
+      reps
+
 
 loopResultToResReps :: [DistResult] -> [VName] -> [ResRep]
 loopResultToResReps dist_res results =
@@ -2170,6 +2199,26 @@ liftLoopResult segments num_segments inps env dist_res res =
         segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [num_segments])
         offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
         pure [num_data, segs', flags', offsets', elems']
+
+liftLoopResultRep ::
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  FParam SOACS ->
+  ResRep ->
+  SubExpRes ->
+  Builder GPU ResRep
+liftLoopResultRep segments inputs env p template res =
+  case template of
+    Regular _ -> do
+      let t = declTypeOf p
+          expectedShape = segmentsShape segments <> arrayShape t
+      v <- liftSubExpRegular segments inputs env expectedShape (resSubExp res)
+      pure $ Regular v
+    Irregular _ ->
+      case resSubExp res of
+        Var v -> Irregular <$> getIrregRep segments env inputs v
+        _ -> error "liftLoopResultRep: irregular result is not a variable"
 
 liftLoopBody :: Segments -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> [DistResult] -> Result -> Builder GPU Result
 liftLoopBody segments num_segments inputs env dstms dist_res result = do
@@ -2461,13 +2510,15 @@ splitInput ::
   VName ->
   Builder GPU (Type, VName, ResRep)
 splitInput segments inps env is v = do
-  (t, rep) <- liftSubExp segments inps env (Var v)
+  (t, rep) <- liftSubExp2 segments inps env (Var v)
   (t,v,) <$> case rep of
     Regular arr -> do
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+      -- isnt' it better to do the segmap over all dims?
       arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
         idx <- letExp "idx" =<< eIndex is [eSubExp i]
-        subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
+        let arr_is = unflattenIndex (segmentDims segments) (pe64 $ Var idx)
+        subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
       pure $ Regular arr'
     Irregular (IrregularRep segs flags offsets elems) -> do
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
@@ -2491,6 +2542,30 @@ splitInput segments inps env is v = do
               irregularO = offsets',
               irregularD = elems'
             }
+
+liftSubExp2 :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU (Type, ResRep)
+liftSubExp2 segments inps env se = case se of
+  c@(Constant prim) ->
+    let t = Prim $ primValueType prim
+     in ((t,) . Regular <$> letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c))
+  Var v -> case M.lookup v $ inputReps inps env of
+    Just (t, Regular v') -> do
+      (t,)
+        <$> case t of
+          Prim {} -> pure $ Regular v'
+          Array {} -> pure $ Regular v'
+          Acc {} -> pure $ Regular v'
+          Mem {} -> error "getRepSubExp: Mem"
+    Just (t, Irregular irreg) -> pure (t, Irregular irreg)
+    Nothing -> do
+      t <- lookupType v
+      v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
+      (t,)
+        <$> case t of
+          Prim {} -> pure $ Regular v'
+          Array {} -> pure $ Regular v'
+          Acc {} -> pure $ Regular v'
+          Mem {} -> error "getRepSubExp: Mem"
 
 -- | Transform a SOACS program to a GPU program, using flattening.
 flattenSOACs :: Pass SOACS GPU

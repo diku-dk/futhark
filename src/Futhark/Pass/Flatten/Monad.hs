@@ -461,7 +461,7 @@ scatterRegular ::
   (VName, VName) ->
   Builder GPU VName
 scatterRegular space (is, xs) = do
-  ~(Array _ (Shape [size]) _) <- lookupType xs
+  size <- arraySize 0 <$> lookupType xs
   letExp "regular_scatter" <=< genScatter space size $ \gtid -> do
     x <- letSubExp "x" =<< eIndex xs [eSubExp gtid]
     i <- letExp "i" =<< eIndex is [eSubExp gtid]

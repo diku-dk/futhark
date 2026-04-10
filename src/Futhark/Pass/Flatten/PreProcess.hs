@@ -21,6 +21,7 @@ shouldDissectForm form =
     && isNothing (isScanSOAC form)
     && isNothing (isRedomapSOAC form)
     && isNothing (isScanomapSOAC form)
+    && isNothing (isMaposcanomapSOAC form)
 
 soacMapper :: Scope SOACS -> SOACMapper SOACS SOACS PassM
 soacMapper scope =
