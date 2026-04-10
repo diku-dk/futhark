@@ -14,6 +14,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as LBS
+import Data.IORef
 import Data.List (delete, partition)
 import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
@@ -117,8 +118,8 @@ pureTestResults m = do
 timeout :: Int
 timeout = 5 * 60 * 1000000
 
-withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO [TestResult]) -> TestM ()
-withProgramServer program runner extra_options f = do
+withProgramServer :: FilePath -> FilePath -> [String] -> IORef PBTPhase -> (Server -> IO [TestResult]) -> TestM ()
+withProgramServer program runner extra_options phaseRef f = do
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no path component.
@@ -137,7 +138,21 @@ withProgramServer program runner extra_options f = do
       race (threadDelay timeout) (f server) >>= \case
         Left _ -> do
           abortServer server
-          fail $ "test timeout after " <> show timeout <> " microseconds"
+          st <- readIORef phaseRef
+          case activeTest st of
+            Nothing -> fail $ "test timeout after " <> show timeout <> " microseconds"
+            Just activeTestName ->
+               let phaseInfo = case phase st of
+                     Nothing -> ""
+                     Just phaseName -> " during phase " <> phaseName
+                   shrinkInfo = case shrinkWith st of
+                     Nothing -> ""
+                     Just shrinkName -> " while shrinking with " <> shrinkName
+                   sizeInfo = maybe "" (\s -> " at size " <> showText s) (phaseSize st)
+                   seedInfo = maybe "" (\s -> " with seed " <> showText s) (phaseSeed st)
+                   tacticInfo = maybe "" (\t -> " with tactic " <> showText t) (phaseTactic st)
+                   msg = T.unpack activeTestName <> T.unpack phaseInfo <> T.unpack shrinkInfo <> T.unpack sizeInfo <> T.unpack seedInfo <> T.unpack tacticInfo
+                in fail $ "test timeout after " <> show timeout <> " microseconds while testing " <> msg
         Right r -> pure r
 
 data TestMode
@@ -320,6 +335,15 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
       let backend = configBackend progs
           extra_compiler_options = configExtraCompilerOptions progs
 
+      phaseRef <- liftIO $ newIORef $ PBTPhase 
+        { activeTest = Nothing
+        , phase = Nothing
+        , shrinkWith = Nothing
+        , phaseSize = Nothing
+        , phaseSeed = Nothing
+        , phaseTactic = Nothing 
+        }
+
       when (mode `elem` [Compiled, Interpreted]) $
         context "Generating reference outputs" $
           -- We probably get the concurrency at the test program level,
@@ -342,7 +366,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                     ++ configExtraOptions progs
                 runner = configRunner progs
             context "Running compiled program" $
-              withProgramServer program runner extra_options $ \server -> do
+              withProgramServer program runner extra_options phaseRef $ \server -> do
                 let run = runCompiledEntry (FutharkExe futhark) server program
                 propSpecs <- extractPropSpecsFromServer server
 
@@ -354,7 +378,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                 if null diagnostics
                   then do
                     let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
-                    propResultsM <- runPBT pbtConfig server verifiedProps
+                    propResultsM <- runPBT pbtConfig server verifiedProps phaseRef
                     let propResults = map (\case
                                             Just err -> Failure [err]
                                             Nothing  -> Success) propResultsM

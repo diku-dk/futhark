@@ -25,7 +25,6 @@ entry gen_simple3 (size: i64) (seed: i32) : i8 =
 let simple_succ (x: i8) : i8 =
   i8.abs x
 
-
 -- ==
 -- property: prop_simple_succ2
 #[prop(gen(gen_simple2), shrink(shrink_simple))]
@@ -37,7 +36,7 @@ entry prop_simple_succ2 (x: i8) : bool =
 #[prop(gen(gen_simple), shrink(shrink_simple))]
 entry prop_simple_succ (x: i8) : bool =
     simple_succ x == i8.abs x
-    
+
 -- ==
 -- property: prop_simple_succ3
 #[prop(gen(gen_simple3), shrink(shrink_simple))]
@@ -52,4 +51,3 @@ entry shrink_simple (x: i8) (tactic: i32) : (i8, i8) =
       (x + 2, i8.bool (x + 1 == x)) 
   else 
     (x, 2) 
-

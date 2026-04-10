@@ -33,6 +33,3 @@ entry shrink_simple (r: tuple) (tactic: i32) : (tuple, i8) =
     ({0 = r.0, 1 = step r.1}, 0)
   else
     (r, 2)
-
-
-

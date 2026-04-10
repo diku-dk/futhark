@@ -5,6 +5,7 @@ module Futhark.Test.Property
     runPBT,
     isPropertyInputOutput,
     PBTConfig (..),
+    PBTPhase (..),
     PropSpec (..),
     lookupArgRead,
     lookupArgText,
@@ -16,6 +17,7 @@ import Control.Exception
 import Control.Monad
 import Data.Char (chr)
 import Data.Int (Int32, Int64, Int8)
+import Data.IORef
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
@@ -44,6 +46,51 @@ data PropSpec = PropSpec
   }
   deriving (Show, Eq)
 
+-- iroef = simple_gen, propname, seed, null, null
+-- generator
+
+-- iroef = propname, propname, seed, null, value
+-- prop 
+
+-- loop
+
+
+-- Enten: 
+-- iroef = shrink_simple, propname, seed, tactic, value
+-- shrinker
+
+-- iroef = shrink_simple: propname, propname, seed, tactic, value, shirnkprop true
+-- prop
+
+--Eller:
+-- ioref = shrink_auto, propname, seed, tactic, value
+-- generator
+
+-- iroef = shrink_auto propname, propname, seed, tactic, value, shirnkprop true
+-- prop
+
+
+-- iroef = null, null, null, null, null
+
+
+-- endloop
+-- print
+
+-- shrinker: Shrinkeren er gået galt eller propertien i shrinkeren er gået galt
+-- auto_shrinker: generatoren er gået galt eller propertien i generatoen er gået galt
+
+data PBTPhase
+  = PBTPhase
+    { activeTest :: Maybe EntryName  -- property being tested (same for generator and shrinker phases)
+    , phase :: Maybe EntryName -- current entrypoint being called (property, generator, or shrinker)
+    , shrinkWith :: Maybe EntryName -- property or generator (only for auto)
+    , phaseSize :: Maybe Int64
+    , phaseSeed :: Maybe Int32
+    , phaseTactic :: Maybe Int32
+    -- , phaseValue :: Maybe T.Text
+    }
+  deriving (Show, Eq)
+
 lookupArgText :: T.Text -> [T.Text] -> Maybe T.Text
 lookupArgText name = lookupArgWith name Just
 
@@ -63,8 +110,8 @@ readMaybeText t =
     [(x, "")] -> Just x
     _ -> Nothing
 
-runPBT :: PBTConfig -> Server -> [PropSpec] -> IO [Maybe T.Text]
-runPBT config srv specs = do
+runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> IO [Maybe T.Text]
+runPBT config srv specs entryNameRef = do
   withSystemTempFile "pbt-scratch" $ \scratchBin _scratchHandle -> do
     epsE <- cmdEntryPoints srv
     entrypoints <- case epsE of
@@ -89,11 +136,11 @@ runPBT config srv specs = do
         Nothing -> pure ()
 
     -- 3. Execute tests and concatenate result lists
-    results <- forM specs $ \s -> runOne s config scratchBin srv
+    results <- forM specs $ \s -> runOne s config scratchBin srv entryNameRef
     pure $ results
 
-runOne :: PropSpec -> PBTConfig -> FilePath -> Server -> IO (Maybe T.Text)
-runOne s config scratchBin srv = do
+runOne :: PropSpec -> PBTConfig -> FilePath -> Server -> IORef PBTPhase -> IO (Maybe T.Text)
+runOne s config scratchBin srv entryNameRef = do
   
   let propName = psProp s
       genName = fromMaybe (error "missing generator") (psGen s)
@@ -102,6 +149,8 @@ runOne s config scratchBin srv = do
       serverSeed = "runPBT_seed"
       serverIn = "runPBT_input"
       serverOk = "runPBT_ok"
+
+  -- write active test is propName to entryNameRef for logging purposes
 
   let loop i
         | i >= configNumTests config = pure $ Nothing
@@ -112,15 +161,43 @@ runOne s config scratchBin srv = do
                   Nothing -> do
                     randomValue
 
+            writeIORef entryNameRef $ PBTPhase
+              { activeTest = Just propName
+              , phase = Nothing
+              , shrinkWith = Nothing
+              , phaseSize = Just sizeBase
+              , phaseSeed = Just seed
+              , phaseTactic = Nothing
+              }
+
             -- Setup and run Property
             sendGenInputs srv serverSize serverSeed genName sizeBase seed
             genOuts <- allocOuts srv genName
+
+            writeIORef entryNameRef $ PBTPhase
+              { activeTest = Just propName
+              , phase = Just genName
+              , shrinkWith = Nothing
+              , phaseSize = Just sizeBase
+              , phaseSeed = Just seed
+              , phaseTactic = Nothing
+              }
+
             withFreedVars srv genOuts $ do
               _ <- callFreeIns srv genName genOuts [serverSize, serverSeed]
               _ <-
                 freeOnException srv [serverIn] $
                   useInputTypeToPack scratchBin srv serverIn propName genOuts
               pure ()
+
+            writeIORef entryNameRef $ PBTPhase
+              { activeTest = Just propName
+              , phase = Just propName
+              , shrinkWith = Nothing
+              , phaseSize = Just sizeBase
+              , phaseSeed = Just seed
+              , phaseTactic = Nothing
+              }
 
             ok <- withCallKeepIns srv propName [serverOk] [serverIn] $ \_ ->
               getVal srv serverOk
@@ -141,12 +218,41 @@ runOne s config scratchBin srv = do
 
                 -- Collect Shrinking Logs
                 case psShrink s of
-                  Just "auto" -> autoShrinkLoop scratchBin srv propName genName serverIn sizeBase seed genOuts
-                  Just shrinkName -> shrinkLoop scratchBin srv propName serverIn shrinkName
+                  Just "auto" -> do
+                    writeIORef entryNameRef $ PBTPhase
+                      { activeTest = Just propName
+                      , phase = Just "autoShrinkLoop"
+                      , shrinkWith = Just genName
+                      , phaseSize = Just sizeBase
+                      , phaseSeed = Just seed
+                      , phaseTactic = Nothing
+                      }
+                    autoShrinkLoop scratchBin srv propName genName serverIn sizeBase seed genOuts
+                  Just shrinkName -> do
+                    writeIORef entryNameRef $ PBTPhase
+                      { activeTest = Just propName
+                      , phase = Just shrinkName
+                      , shrinkWith = Nothing
+                      , phaseSize = Just sizeBase
+                      , phaseSeed = Just seed
+                      , phaseTactic = Nothing
+                      }
+                    shrinkLoop scratchBin srv propName serverIn shrinkName entryNameRef
                   Nothing -> pure ()
 
                 -- Collect Counterexample Log
                 inputTypesE <- getInputTypes srv propName
+
+                -- pretty pritner
+                writeIORef entryNameRef $ PBTPhase
+                  { activeTest = Just propName
+                  , phase = Just "prettyPrint"
+                  , shrinkWith = Nothing
+                  , phaseSize = Just sizeBase
+                  , phaseSeed = Just seed
+                  , phaseTactic = Nothing
+                  }
+
                 counterLog <- case inputTypesE of
                   Right (ty0 : _) -> do
                     prettyOut <- case psPPrint s of
@@ -250,12 +356,25 @@ data Step
   | StopShrinking -- stop, do not overwrite vIn
   deriving (Eq, Show)
 
-shrinkLoop :: FilePath -> Server -> EntryName -> VarName -> EntryName -> IO ()
-shrinkLoop scratchBin srv propName vIn shrinkName = do
+shrinkLoop :: FilePath -> Server -> EntryName -> VarName -> EntryName -> IORef PBTPhase-> IO ()
+shrinkLoop scratchBin srv propName vIn shrinkName phaseRef = do
   let vTry = "qc_try"
       vOk = "qc_ok"
       vTactic = "qc_tactic"
       vInRetyped = vIn <> "_shrinktyped"
+  
+  oldRef <- readIORef phaseRef
+  size <- pure $ fromMaybe 0 (phaseSize oldRef)
+  seed <- pure $ fromMaybe 0 (phaseSeed oldRef)
+
+  writeIORef phaseRef $ PBTPhase
+              { activeTest = Just propName
+              , phase = Just shrinkName
+              , shrinkWith = Nothing
+              , phaseSize = Just size
+              , phaseSeed = Just seed
+              , phaseTactic = Nothing
+              }
 
   propTy <- getSingleInputType srv propName
   shrinkInTys <- either (fail . show) pure =<< getInputTypes srv shrinkName
@@ -286,7 +405,15 @@ shrinkLoop scratchBin srv propName vIn shrinkName = do
 
         -- call shrinker
         shrinkOuts <- allocOuts srv shrinkName
-
+        
+        writeIORef phaseRef $ PBTPhase
+              { activeTest = Just propName
+              , phase = Just shrinkName
+              , shrinkWith = Nothing
+              , phaseSize = Just size
+              , phaseSeed = Just seed
+              , phaseTactic = Nothing
+              }
         withFreedVars srv shrinkOuts $ do
           _ <- callFreeIns srv shrinkName shrinkOuts [vInRetyped, vTactic]
 
@@ -315,7 +442,23 @@ shrinkLoop scratchBin srv propName vIn shrinkName = do
             _ <- freeOnException srv [vTry] $ packType scratchBin srv vTry propTy yParts
 
             -- Evaluate property on y (keep inputs alive; vTry freed by withFreedVar scope anyway)
+            writeIORef phaseRef $ PBTPhase
+              { activeTest = Just propName
+              , phase = Just shrinkName
+              , shrinkWith = Just propName
+              , phaseSize = Just size
+              , phaseSeed = Just seed
+              , phaseTactic = Nothing
+              }
             ok <- withCallKeepIns srv propName [vOk] [vTry] $ \_ -> getVal srv vOk
+            writeIORef phaseRef $ PBTPhase
+              { activeTest = Just propName
+              , phase = Just shrinkName
+              , shrinkWith = Nothing
+              , phaseSize = Just size
+              , phaseSeed = Just seed
+              , phaseTactic = Nothing
+              }
 
             if ok
               then
