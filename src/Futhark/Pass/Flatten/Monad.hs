@@ -23,6 +23,7 @@ module Futhark.Pass.Flatten.Monad
 
     -- * Building blocks
     liftResult,
+    liftDistResultRep,
     liftSubExp,
     liftSubExpPreserveRep,
     liftSubExpRegular,
@@ -308,6 +309,23 @@ liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
         flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
         elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
         pure [num_data, segs, flags', offsets, elems']
+
+liftDistResultRep ::
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  DistResult ->
+  SubExpRes ->
+  Builder GPU ResRep
+liftDistResultRep segments inps env dist_res res
+  | isRegularDistResult dist_res = do
+      let (DistType _ _ t) = distResType dist_res
+          expectedShape = segmentsShape segments <> arrayShape t
+      Regular <$> liftSubExpRegular segments inps env expectedShape (resSubExp res)
+  | otherwise =
+      case resSubExp res of
+        Var v -> Irregular <$> getIrregRep segments env inps v
+        _ -> error "liftBranchResultRep: irregular result is not a variable"
 
 mkIrregFromReg ::
   Segments ->

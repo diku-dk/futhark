@@ -1646,9 +1646,10 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
                   let (subset_inputs', subset_dstms) = distributeBody scope suset_segments subset_inputs body
                   env_subset' <- foldM (transformDistStm suset_segments) env_subset subset_dstms
                   active_reps <-
-                    mapM
-                      (\(p, template, body_res) -> liftLoopResultRep suset_segments subset_inputs' env_subset' p template body_res)
-                      (zip3 old_loop_params lifted_loop_reps (bodyResult body))
+                    zipWithM
+                      (liftDistResultRep suset_segments subset_inputs' env_subset')
+                      res
+                      (bodyResult body)
 
                   let mergeOneLifted t rep0 rep1 =
                         case (rep0, rep1) of
@@ -2157,26 +2158,6 @@ liftLoopResult segments num_segments inps env dist_res res =
         offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
         pure [num_data, segs', flags', offsets', elems']
 
-liftLoopResultRep ::
-  Segments ->
-  DistInputs ->
-  DistEnv ->
-  FParam SOACS ->
-  ResRep ->
-  SubExpRes ->
-  Builder GPU ResRep
-liftLoopResultRep segments inputs env p template res =
-  case template of
-    Regular _ -> do
-      let t = declTypeOf p
-          expectedShape = segmentsShape segments <> arrayShape t
-      v <- liftSubExpRegular segments inputs env expectedShape (resSubExp res)
-      pure $ Regular v
-    Irregular _ ->
-      case resSubExp res of
-        Var v -> Irregular <$> getIrregRep segments env inputs v
-        _ -> error "liftLoopResultRep: irregular result is not a variable"
-
 liftLoopBody :: Segments -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> [DistResult] -> Result -> Builder GPU Result
 liftLoopBody segments num_segments inputs env dstms dist_res result = do
   env' <- foldM (transformDistStm segments) env dstms
@@ -2473,8 +2454,8 @@ splitInput segments inps env is v = do
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
       -- isnt' it better to do the segmap over all dims?
       arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
-        idx <- letExp "idx" =<< eIndex is [eSubExp i]
-        let arr_is = unflattenIndex (segmentDims segments) (pe64 $ Var idx)
+        idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
+        let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
         subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
       pure $ Regular arr'
     Irregular (IrregularRep segs flags offsets elems) -> do

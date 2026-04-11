@@ -91,23 +91,6 @@ distributeBranch segments env inps is body = do
   let (inputs', dstms) = distributeBody scope segments inputs body
   pure (inputs', env', dstms)
 
-liftBranchResultRep ::
-  Segments ->
-  DistInputs ->
-  DistEnv ->
-  DistResult ->
-  SubExpRes ->
-  Builder GPU ResRep
-liftBranchResultRep segments inps env dist_res res
-  | isRegularDistResult dist_res = do
-      let (DistType _ _ t) = distResType dist_res
-          expectedShape = segmentsShape segments <> arrayShape t
-      Regular <$> liftSubExpRegular segments inps env expectedShape (resSubExp res)
-  | otherwise =
-      case resSubExp res of
-        Var v -> Irregular <$> getIrregRep segments env inps v
-        _ -> error "liftBranchResultRep: irregular result is not a variable"
-
 -- Given a single result from each branch as well the *unlifted*
 -- result type, merge the results of all branches into a single result.
 mergeResult ::
@@ -237,7 +220,7 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
     let result = branch_results !! fromIntegral i
         branch_segments = NE.singleton size
     env'' <- foldM (flattenDistStm ops branch_segments) env' dstms
-    zipWithM (liftBranchResultRep branch_segments inputs env'') res result
+    zipWithM (liftDistResultRep branch_segments inputs env'') res result
 
   -- Merge the results of the branches and insert the resulting res reps
   reps <- zipWithM (mergeResult segments w inds) (L.transpose branch_reps) res
