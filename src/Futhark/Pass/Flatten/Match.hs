@@ -25,7 +25,7 @@ splitInput ::
   VName ->
   Builder GPU (Type, VName, ResRep)
 splitInput segments env inps is v = do
-  (t, rep) <- liftSubExp2 segments inps env (Var v)
+  (t, rep) <- liftSubExpPreserveRep segments inps env (Var v)
   (t,v,) <$> case rep of
     Regular arr -> do
       -- In the regular case we just take the elements
@@ -90,53 +90,6 @@ distributeBranch segments env inps is body = do
   scope <- askScope
   let (inputs', dstms) = distributeBody scope segments inputs body
   pure (inputs', env', dstms)
-
-liftSubExp2 :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU (Type, ResRep)
-liftSubExp2 segments inps env se = case se of
-  c@(Constant prim) ->
-    let t = Prim $ primValueType prim
-     in ((t,) . Regular <$> letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c))
-  Var v -> case M.lookup v $ inputReps inps env of
-    Just (t, Regular v') -> do
-      (t,)
-        <$> case t of
-          Prim {} -> pure $ Regular v'
-          Array {} -> pure $ Regular v'
-          Acc {} -> pure $ Regular v'
-          Mem {} -> error "liftSubExp2: Mem"
-    Just (t, Irregular irreg) -> pure (t, Irregular irreg)
-    Nothing -> do
-      t <- lookupType v
-      v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
-      (t,)
-        <$> case t of
-          Prim {} -> pure $ Regular v'
-          Array {} -> pure $ Regular v'
-          Acc {} -> pure $ Regular v'
-          Mem {} -> error "liftSubExp2: Mem"
-
-liftSubExpRegular ::
-  Segments ->
-  DistInputs ->
-  DistEnv ->
-  Shape ->
-  SubExp ->
-  Builder GPU VName
-liftSubExpRegular segments inps env expectedShape se = do
-  v <- case se of
-    c@(Constant _) ->
-      letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
-    Var x -> case M.lookup x $ inputReps inps env of
-      Just (_, Regular v') -> pure v'
-      Just (_, Irregular irreg) -> pure $ irregularD irreg
-      Nothing ->
-        letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
-  v_t <- lookupType v
-  if arrayShape v_t == expectedShape
-    then pure v
-    else
-      letExp "reg_lifted" . BasicOp $
-        Reshape v (reshapeAll (arrayShape v_t) expectedShape)
 
 liftBranchResultRep ::
   Segments ->

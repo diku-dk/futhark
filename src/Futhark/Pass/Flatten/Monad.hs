@@ -24,6 +24,8 @@ module Futhark.Pass.Flatten.Monad
     -- * Building blocks
     liftResult,
     liftSubExp,
+    liftSubExpPreserveRep,
+    liftSubExpRegular,
     mkIrregFromReg,
     distCerts,
     dataArr,
@@ -366,6 +368,45 @@ liftSubExp segments inps env se = case se of
           Array {} -> Irregular <$> mkIrregFromReg segments v'
           Acc {} -> pure $ Regular v'
           Mem {} -> error "getRepSubExp: Mem"
+
+liftSubExpPreserveRep :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU (Type, ResRep)
+liftSubExpPreserveRep segments inps env se = case se of
+  c@(Constant prim) ->
+    let t = Prim $ primValueType prim
+     in do
+          v <- letExp "lifted_const" $ BasicOp $ Replicate (segmentsShape segments) c
+          pure (t, Regular v)
+  Var v -> case M.lookup v $ inputReps inps env of
+    Just (t, rep) -> pure (t, rep)
+    Nothing -> do
+      t <- lookupType v
+      v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
+      pure (t, Regular v')
+
+-- | Like 'liftSubExp' but always returns a Regular result with the
+-- given expected shape. Reshapes the underlying data if necessary.
+liftSubExpRegular ::
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  Shape ->
+  SubExp ->
+  Builder GPU VName
+liftSubExpRegular segments inps env expectedShape se = do
+  v <- case se of
+    c@(Constant _) ->
+      letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
+    Var x -> case M.lookup x $ inputReps inps env of
+      Just (_, Regular v') -> pure v'
+      Just (_, Irregular irreg) -> pure $ irregularD irreg
+      Nothing ->
+        letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
+  v_t <- lookupType v
+  if arrayShape v_t == expectedShape
+    then pure v
+    else
+      letExp "reg_lifted" . BasicOp $
+        Reshape v (reshapeAll (arrayShape v_t) expectedShape)
 
 distCerts :: DistInputs -> StmAux a -> DistEnv -> Certs
 distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux

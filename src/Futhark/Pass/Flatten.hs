@@ -1944,25 +1944,6 @@ transformDistributed irregs segments dist = do
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
 
--- Like 'liftSubExp' but always returns a Regular result with the
--- given expected shape. Reshapes the underlying data if necessary.
-liftSubExpRegular :: Segments -> DistInputs -> DistEnv -> Shape -> SubExp -> Builder GPU VName
-liftSubExpRegular segments inps env expectedShape se = do
-  v <- case se of
-    c@(Constant _) ->
-      letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
-    Var x -> case M.lookup x $ inputReps inps env of
-      Just (_, Regular v') -> pure v'
-      Just (_, Irregular irreg) -> pure $ irregularD irreg
-      Nothing ->
-        letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
-  v_t <- lookupType v
-  if arrayShape v_t == expectedShape
-    then pure v
-    else
-      letExp "reg_lifted" . BasicOp $
-        Reshape v (reshapeAll (arrayShape v_t) expectedShape)
-
 -- Check whether a loop parameter array needs irregular representation.
 -- we need the irregular representation when any of its dimensions are either:
 -- a loop parameter name or variant in the outer map context
@@ -2486,7 +2467,7 @@ splitInput ::
   VName ->
   Builder GPU (Type, VName, ResRep)
 splitInput segments inps env is v = do
-  (t, rep) <- liftSubExp2 segments inps env (Var v)
+  (t, rep) <- liftSubExpPreserveRep segments inps env (Var v)
   (t,v,) <$> case rep of
     Regular arr -> do
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
@@ -2518,30 +2499,6 @@ splitInput segments inps env is v = do
               irregularO = offsets',
               irregularD = elems'
             }
-
-liftSubExp2 :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU (Type, ResRep)
-liftSubExp2 segments inps env se = case se of
-  c@(Constant prim) ->
-    let t = Prim $ primValueType prim
-     in ((t,) . Regular <$> letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c))
-  Var v -> case M.lookup v $ inputReps inps env of
-    Just (t, Regular v') -> do
-      (t,)
-        <$> case t of
-          Prim {} -> pure $ Regular v'
-          Array {} -> pure $ Regular v'
-          Acc {} -> pure $ Regular v'
-          Mem {} -> error "getRepSubExp: Mem"
-    Just (t, Irregular irreg) -> pure (t, Irregular irreg)
-    Nothing -> do
-      t <- lookupType v
-      v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
-      (t,)
-        <$> case t of
-          Prim {} -> pure $ Regular v'
-          Array {} -> pure $ Regular v'
-          Acc {} -> pure $ Regular v'
-          Mem {} -> error "getRepSubExp: Mem"
 
 -- | Transform a SOACS program to a GPU program, using flattening.
 flattenSOACs :: Pass SOACS GPU
