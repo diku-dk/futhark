@@ -2349,9 +2349,7 @@ transformFortoWhile ::
   Body SOACS ->
   Builder GPU DistEnv
 transformFortoWhile segments env inps res aux merge i it n body = do
-  let [w] = NE.toList segments
-      old_loop_params = map fst merge
-
+  let old_loop_params = map fst merge
   -- Fresh names used only in the synthetic rewritten body.
   cond_param_v <- newVName "for_cond"
   cond0_v <- newVName "for_cond0"
@@ -2432,13 +2430,10 @@ transformFortoWhile segments env inps res aux merge i it n body = do
   scope <- askScope
   let (inps_dist, dstms) = distributeBody scope segments inps_local synthetic_body
 
-  lifted_res <- liftBody w inps_dist env_local dstms (bodyResult synthetic_body)
+  lifted_res <- liftBodyWithDistResults segments inps_dist env_local dstms res (bodyResult synthetic_body)
   lifted_vs <- mapM (letExp "for_variant_res" <=< toExp . resSubExp) lifted_res
-
-  let result_types = map ((\(DistType _ _ t) -> t) . distResType) res
-      out_reps = resultToResReps result_types lifted_vs
-
-  pure $ insertReps (zip (map distResTag res) out_reps) env
+  let reps = distResultsToResReps res lifted_vs
+  pure $ insertReps (zip (map distResTag res) reps) env
 
 splitInput ::
   Segments ->
