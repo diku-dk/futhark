@@ -25,7 +25,7 @@ splitInput ::
   VName ->
   Builder GPU (Type, VName, ResRep)
 splitInput segments env inps is v = do
-  (t, rep) <- liftSubExp segments inps env (Var v)
+  (t, rep) <- liftSubExp2 segments inps env (Var v)
   (t,v,) <$> case rep of
     Regular arr -> do
       -- In the regular case we just take the elements
@@ -80,8 +80,9 @@ distributeBranch ::
   Body SOACS ->
   Builder GPU (DistInputs, DistEnv, [DistStm])
 distributeBranch segments env inps is body = do
+  let free_in_body = filter (isVariant inps env . Var) (namesToList $ freeIn body)
   (ts, vs, reps) <-
-    unzip3 <$> mapM (splitInput segments env inps is) (namesToList $ freeIn body)
+    unzip3 <$> mapM (splitInput segments env inps is) free_in_body
   let inputs = do
         (v, t, i) <- zip3 vs ts [0 ..]
         pure (v, DistInput (ResTag i) t)
@@ -90,28 +91,98 @@ distributeBranch segments env inps is body = do
   let (inputs', dstms) = distributeBody scope segments inputs body
   pure (inputs', env', dstms)
 
+liftSubExp2 :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU (Type, ResRep)
+liftSubExp2 segments inps env se = case se of
+  c@(Constant prim) ->
+    let t = Prim $ primValueType prim
+     in ((t,) . Regular <$> letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c))
+  Var v -> case M.lookup v $ inputReps inps env of
+    Just (t, Regular v') -> do
+      (t,)
+        <$> case t of
+          Prim {} -> pure $ Regular v'
+          Array {} -> pure $ Regular v'
+          Acc {} -> pure $ Regular v'
+          Mem {} -> error "liftSubExp2: Mem"
+    Just (t, Irregular irreg) -> pure (t, Irregular irreg)
+    Nothing -> do
+      t <- lookupType v
+      v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
+      (t,)
+        <$> case t of
+          Prim {} -> pure $ Regular v'
+          Array {} -> pure $ Regular v'
+          Acc {} -> pure $ Regular v'
+          Mem {} -> error "liftSubExp2: Mem"
+
+liftSubExpRegular ::
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  Shape ->
+  SubExp ->
+  Builder GPU VName
+liftSubExpRegular segments inps env expectedShape se = do
+  v <- case se of
+    c@(Constant _) ->
+      letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
+    Var x -> case M.lookup x $ inputReps inps env of
+      Just (_, Regular v') -> pure v'
+      Just (_, Irregular irreg) -> pure $ irregularD irreg
+      Nothing ->
+        letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
+  v_t <- lookupType v
+  if arrayShape v_t == expectedShape
+    then pure v
+    else
+      letExp "reg_lifted" . BasicOp $
+        Reshape v (reshapeAll (arrayShape v_t) expectedShape)
+
+liftBranchResultRep ::
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  DistResult ->
+  SubExpRes ->
+  Builder GPU ResRep
+liftBranchResultRep segments inps env dist_res res
+  | isRegularDistResult dist_res = do
+      let (DistType _ _ t) = distResType dist_res
+          expectedShape = segmentsShape segments <> arrayShape t
+      Regular <$> liftSubExpRegular segments inps env expectedShape (resSubExp res)
+  | otherwise =
+      case resSubExp res of
+        Var v -> Irregular <$> getIrregRep segments env inps v
+        _ -> error "liftBranchResultRep: irregular result is not a variable"
+
 -- Given a single result from each branch as well the *unlifted*
 -- result type, merge the results of all branches into a single result.
 mergeResult ::
+  Segments ->
   SubExp ->
   [VName] ->
   [ResRep] ->
-  Type ->
+  DistResult ->
   Builder GPU ResRep
-mergeResult w iss branchesRep resType =
-  case resType of
-    -- Regular case
-    Prim pt -> do
-      let xs = map (\(Regular v) -> v) branchesRep
-      let resultType = Array pt (Shape [w]) NoUniqueness
+mergeResult segments w iss branchesRep dist_res
+  -- Regular case
+  | isRegularDistResult dist_res = do
+      let (DistType _ _ resType) = distResType dist_res
+          resultType =
+            Array (elemType resType) (Shape [w] <> arrayShape resType) NoUniqueness
+      xs <- mapM regularBranch branchesRep
       -- Create the blank space for the result
       resultSpace <- letExp "blank_res" =<< eBlank resultType
       -- Write back the values of each branch to the blank space
       result <- foldM scatterRegular resultSpace $ zip iss xs
-      pure $ Regular result
-    -- Irregular case
-    Array pt _ _ -> do
-      let branchesIrregRep = map (\(Irregular irregRep) -> irregRep) branchesRep
+      result_t <- arrayShape <$> lookupType result
+      result' <-
+        letExp "match_res_reg" . BasicOp $
+          Reshape result (reshapeAll result_t (segmentsShape segments <> arrayShape resType))
+      pure $ Regular result'
+  -- Irregular case
+  | DistType _ _ (Array pt _ _) <- distResType dist_res = do
+      branchesIrregRep <- mapM irregularBranch branchesRep
       let segsType = Array (IntType Int64) (Shape [w]) NoUniqueness
       -- Create a blank space for the 'segs'
       segsSpace <- letExp "blank_segs" =<< eBlank segsType
@@ -132,8 +203,14 @@ mergeResult w iss branchesRep resType =
               irregularO = offsets,
               irregularD = elems
             }
-    Acc {} -> error "transformDistStm: Acc"
-    Mem {} -> error "transformDistStm: Mem"
+  | otherwise = error "mergeResult: non-array irregular result"
+  where
+    regularBranch (Regular v) = pure v
+    regularBranch _ = error "mergeResult: mismatched reps"
+
+    irregularBranch (Irregular irreg) = pure irreg
+    irregularBranch _ = error "mergeResult: mismatched reps"
+
 
 transformMatch ::
   FlattenOps ->
@@ -199,22 +276,16 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
     unzip3 <$> zipWithM (distributeBranch segments env inps) inds branch_bodies
 
   let branch_results = map bodyResult branch_bodies
-  lifted_bodies <- forM [0 .. num_cases - 1] $ \i -> do
+  branch_reps <- forM [0 .. num_cases - 1] $ \i -> do
     size <- letSubExp "size" =<< eIndex partition_sizes [toExp $ intConst Int64 i]
     let inputs = branch_inputs !! fromIntegral i
     let env' = branch_envs !! fromIntegral i
     let dstms = branch_dstms !! fromIntegral i
     let result = branch_results !! fromIntegral i
-    res' <- flattenDistStms ops size inputs env' dstms result
-    fmap subExpsRes . forM res' $ \(SubExpRes _ se) ->
-      letSubExp ("result" <> nameFromString (show i)) =<< toExp se
-
-  let result_types = map ((\(DistType _ _ t) -> t) . distResType) res
-  branch_reps <-
-    forM lifted_bodies $
-      fmap (resultToResReps result_types)
-        . mapM (letExp "branch_result" <=< toExp . resSubExp)
+        branch_segments = NE.singleton size
+    env'' <- foldM (flattenDistStm ops branch_segments) env' dstms
+    zipWithM (liftBranchResultRep branch_segments inputs env'') res result
 
   -- Merge the results of the branches and insert the resulting res reps
-  reps <- zipWithM (mergeResult w inds) (L.transpose branch_reps) result_types
+  reps <- zipWithM (mergeResult segments w inds) (L.transpose branch_reps) res
   pure $ insertReps (zip (map distResTag res) reps) env
