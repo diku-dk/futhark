@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}"
-
 BASE="${HOME}/fut-webgpu-ci"
-FUTHARK_DIR="${GITHUB_WORKSPACE}"
 WEBGPU_DIR="${BASE}/futhark-webgpu"
 
 export PATH="${HOME}/.local/bin:${PATH}"
@@ -13,7 +10,6 @@ export PLAYWRIGHT_BROWSERS_PATH="${HOME}/pw-browsers"
 
 mkdir -p "${BASE}" "${HOME}/opt" "${HOME}/.local/lib" "${XDG_CACHE_HOME}"
 
-# Make 'module' available in non-interactive shells.
 if ! type module >/dev/null 2>&1; then
   [ -f /etc/profile.d/modules.sh ] && source /etc/profile.d/modules.sh
   [ -f /usr/share/Modules/init/bash ] && source /usr/share/Modules/init/bash
@@ -28,27 +24,6 @@ module load python/3.12.8
 python3 --version
 which python3
 
-# ghcup + GHC/Cabal
-if [ ! -f "${HOME}/.ghcup/env" ]; then
-  curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | \
-    BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
-    BOOTSTRAP_HASKELL_MINIMAL=1 \
-    sh
-fi
-
-# shellcheck source=/dev/null
-source "${HOME}/.ghcup/env"
-
-if ! ghcup whereis ghc 9.10.3 >/dev/null 2>&1; then
-  ghcup install ghc 9.10.3
-fi
-ghcup set ghc 9.10.3
-
-if ! command -v cabal >/dev/null 2>&1; then
-  ghcup install cabal
-fi
-ghcup set cabal
-
 # emsdk
 if [ ! -d "${HOME}/opt/emsdk" ]; then
   git clone https://github.com/emscripten-core/emsdk.git "${HOME}/opt/emsdk"
@@ -58,7 +33,6 @@ pushd "${HOME}/opt/emsdk" >/dev/null
 ./emsdk install 5.0.0
 ./emsdk activate 5.0.0
 export EMSDK_QUIET=1
-# shellcheck source=/dev/null
 source "${HOME}/opt/emsdk/emsdk_env.sh"
 popd >/dev/null
 
@@ -83,13 +57,6 @@ if [ ! -x "${NODE_BIN}/node" ]; then
 fi
 
 export PATH="${NODE_BIN}:${PATH}"
-
-# Build/install the checked-out Futhark repo under test.
-pushd "${FUTHARK_DIR}" >/dev/null
-make configure
-make build
-make install
-popd >/dev/null
 
 # Clone the WebGPU examples repo for smoke testing.
 if [ ! -d "${WEBGPU_DIR}/.git" ]; then

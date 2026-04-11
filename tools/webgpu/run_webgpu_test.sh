@@ -7,9 +7,17 @@ TESTROOT="${WEBGPU_DIR}/examples/hendrix-ci"
 
 cd "${TESTROOT}"
 
-npm init -y
-npm i playwright
-npx playwright install chromium
+if [ ! -f package.json ]; then
+  npm init -y
+fi
+
+if [ ! -d node_modules/playwright ]; then
+  npm i playwright
+fi
+
+if ! find "${PLAYWRIGHT_BROWSERS_PATH}" -maxdepth 1 -type d -name 'chromium-*' | grep -q .; then
+  npx playwright install chromium
+fi
 
 node check-headless/check_webgpu.mjs
 make -C test1 run
