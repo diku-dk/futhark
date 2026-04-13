@@ -14,6 +14,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as LBS
+import Data.Either (partitionEithers)
 import Data.IORef
 import Data.List (delete, partition)
 import Data.Map.Strict qualified as M
@@ -343,7 +344,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
         , shrinkWith = Nothing
         , phaseSize = Nothing
         , phaseSeed = Nothing
-        , phaseTactic = Nothing 
+        , phaseTactic = Nothing
         }
 
       when (mode `elem` [Compiled, Interpreted]) $
@@ -381,15 +382,16 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                   then do
                     let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
                     propResultsM <- runPBT pbtConfig server verifiedProps phaseRef
+                    let (failures, outputs) = partitionEithers propResultsM
                     let propResults = map (\case
                                             Just err -> Failure [err]
-                                            Nothing  -> Success) propResultsM
+                                            Nothing  -> Success) outputs
                     -- if any properties failed, write them to a file for later inspection
                     when (any (\r -> case r of
                                       Failure _ -> True
                                       Success   -> False) propResults) $
                         liftIO $ propToFile program propResults
-                    pure $ normal_test_result ++ propResults ++ diagnostics
+                    pure $ normal_test_result ++ propResults ++ diagnostics ++ [Failure failures]
                   else
                     pure $ normal_test_result ++ diagnostics
 
