@@ -55,8 +55,19 @@ extractPropSpecsFromServer srv = do
   where
     getOne entry = do
       attrsE <- cmdAttributes srv entry
-      attrs <- either (error . show) pure attrsE
-      pure $ mapMaybe (parsePropSpec entry) attrs
+      attrs <- either (fail . show) pure attrsE
+      atMostOnePropAttr entry attrs
+
+atMostOnePropAttr :: T.Text -> [T.Text] -> IO [PropSpec]
+atMostOnePropAttr entry attrs =
+  case mapMaybe (parsePropSpec entry) attrs of
+    [] -> pure []
+    [spec] -> pure [spec]
+    _ ->
+      fail $
+        "Entry point '"
+          <> T.unpack entry
+          <> "' has more than one #[prop(...)] attribute."
 
 parsePropSpec :: T.Text -> T.Text -> Maybe PropSpec
 parsePropSpec entry attr = do
