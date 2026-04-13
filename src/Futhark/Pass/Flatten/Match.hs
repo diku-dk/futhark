@@ -164,12 +164,7 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
   -- Lift the scrutinees.
   -- If it's a variable, we know it's a scalar and the lifted version will therefore be a regular array.
   lifted_scrutinees <- forM scrutinees $ \scrut -> do
-    (_, rep) <- liftSubExp segments inps env scrut
-    case rep of
-      Regular v' -> pure v'
-      Irregular {} ->
-        error $
-          "transformDistStm: Non-scalar match scrutinee: " ++ prettyString scrut
+    liftSubExpRegular segments inps env (segmentsShape segments) scrut
   -- Cases for tagging values that match the same branch.
   -- The default case is the 0'th equvalence class.
   let equiv_cases =
