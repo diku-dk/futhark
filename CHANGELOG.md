@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A case where user-defined assertions could be removed when used in conjunction
   with `#[scratch]`. (#2417)
 
+* Various miscompilations and compiler crashes in fusion of `scatter`
+  operations.
+
 ## [0.25.37]
 
 ### Added
