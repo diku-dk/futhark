@@ -46,28 +46,13 @@ import Futhark.Transform.Substitute
 --   2.   the withacc input
 --   3-5  withacc's lambda corresponding acc-certificate param,
 --           argument param and result name
-type AccTup =
-  ( [PatElem (LetDec SOACS)],
-    WithAccInput SOACS,
-    LParam SOACS,
-    LParam SOACS,
-    (VName, Certs)
-  )
-
-accTup1 :: AccTup -> [PatElem (LetDec SOACS)]
-accTup1 (a, _, _, _, _) = a
-
-accTup2 :: AccTup -> WithAccInput SOACS
-accTup2 (_, a, _, _, _) = a
-
-accTup3 :: AccTup -> LParam SOACS
-accTup3 (_, _, a, _, _) = a
-
-accTup4 :: AccTup -> LParam SOACS
-accTup4 (_, _, _, a, _) = a
-
-accTup5 :: AccTup -> (VName, Certs)
-accTup5 (_, _, _, _, a) = a
+data AccTup = AccTup
+  { accTup1 :: [PatElem (LetDec SOACS)],
+    accTup2 :: WithAccInput SOACS,
+    accTup3 :: LParam SOACS,
+    accTup4 :: LParam SOACS,
+    accTup5 :: (VName, Certs)
+  }
 
 -- | Simple case for fusing two withAccs (can be extended):
 --    let (b1, ..., bm, x1, ..., xq) = withAcc a1 ... am lam1
@@ -104,14 +89,13 @@ tryFuseWithAccs
         groupCommonAccs acc_tup1 acc_tup2,
       -- safety 0: make sure that the accs from acc_tup1' and
       --           acc_tup2' do not overlap
-      pnms_1' <- map patElemName $ concatMap (\(nms, _, _, _, _) -> nms) acc_tup1',
-      winp_2' <- concatMap (\(_, (_, nms, _), _, _, _) -> nms) acc_tup2',
+      pnms_1' <- map patElemName $ concatMap accTup1 acc_tup1',
+      winp_2' <- concatMap ((\(_, xs, _) -> xs) . accTup2) acc_tup2',
       not $ namesIntersect (namesFromList pnms_1') (namesFromList winp_2'),
       -- safety 1: we have already determined the commons;
       --           now we also need to check NOT-IN FV(lam2)
       not $ namesIntersect (namesFromList pnms_1') (freeIn lam2),
       -- safety 2:
-      -- bs <- map patElemName $ concatMap accTup1 acc_tup1,
       bs <- map patElemName $ concatMap (accTup1 . fst) tup_common,
       all (`notElem` infusible) bs,
       -- safety 3:
@@ -196,11 +180,10 @@ tryFuseWithAccs
         (par_acc : lam_par_accs)
         (res_se : lam_res_ses)
           | n <- length inp,
-            (n <= length pat_els) && (n <= (1 + length lam_res_ses)),
             Var res_nm <- resSubExp res_se =
               let (pat_els_cur, pat_els') = splitAt n pat_els
                   (rec1, rec2) = groupAccsHlp pat_els' wacc_inps lam_par_crts lam_par_accs lam_res_ses
-               in ((pat_els_cur, winp, par_crt, par_acc, (res_nm, resCerts res_se)) : rec1, rec2)
+               in (AccTup pat_els_cur winp par_crt par_acc (res_nm, resCerts res_se) : rec1, rec2)
       groupAccsHlp _ _ _ _ _ =
         error "Unreachable case reached in groupAccsHlp!"
       --
@@ -280,8 +263,8 @@ equivStm vtab _ _ = (vtab, False)
 
 matchingAccTup :: AccTup -> AccTup -> Bool
 matchingAccTup
-  (pat_els1, (shp1, _winp_arrs1, mlam1), _, _, _)
-  (_, (shp2, winp_arrs2, mlam2), _, _, _) =
+  (AccTup pat_els1 (shp1, _winp_arrs1, mlam1) _ _ _)
+  (AccTup _ (shp2, winp_arrs2, mlam2) _ _ _) =
     shapeDims shp1 == shapeDims shp2
       && map patElemName pat_els1 == winp_arrs2
       && case (mlam1, mlam2) of
