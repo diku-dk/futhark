@@ -3,6 +3,7 @@
 -- random no_python compiled input { 100 [100][16][16]bool } auto output
 -- random no_python compiled input { 1000 [100][16][16]bool } auto output
 -- random no_python compiled input { 3000 [100][16][16]bool } auto output
+-- structure gpu { /SegMap 1 /SegMap/Loop/SegMap 1 }
 
 def bint : bool -> i32 = i32.bool
 
@@ -50,4 +51,5 @@ def life (iterations: i32) (board: [][]bool) =
   loop board for _i < iterations do iteration board
 
 def main (iterations: i32) (board: [][][]bool) =
+  #[incremental_flattening(only_intra)]
   map (life iterations) board
