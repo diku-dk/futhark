@@ -4,7 +4,8 @@
 -- representations, except perhaps the ones that are completely local to another
 -- module.
 module Futhark.Pass.Flatten.Monad
-  ( IrregularRep (..),
+  ( IrregularKind (..),
+    IrregularRep (..),
     ResRep (..),
     DistEnv (..),
 
@@ -127,12 +128,18 @@ import Prelude hiding (div, rem)
 --
 --   A_II2 = [0,0,0,1,3,3,0,2,2,2]
 
+data IrregularKind
+  = Dense
+  | Replicated
+  deriving (Show)
+
 data IrregularRep = IrregularRep
   { -- | Array of size of each segment, type @[]i64@.
     irregularS :: VName,
     irregularF :: VName,
     irregularO :: VName,
-    irregularD :: VName
+    irregularD :: VName,
+    irregularK :: IrregularKind
   }
   deriving (Show)
 
@@ -154,15 +161,23 @@ insertRep rt rep env = env {distResMap = M.insert rt rep $ distResMap env}
 insertReps :: [(ResTag, ResRep)] -> DistEnv -> DistEnv
 insertReps = flip $ foldl (flip $ uncurry insertRep)
 
-insertIrregular :: VName -> VName -> VName -> ResTag -> VName -> DistEnv -> DistEnv
-insertIrregular ns flags offsets rt elems env =
-  let rep = Irregular $ IrregularRep ns flags offsets elems
+insertIrregular :: VName -> VName -> VName -> ResTag -> VName -> IrregularKind -> DistEnv -> DistEnv
+insertIrregular ns flags offsets rt elems kind env =
+  let rep = Irregular $ IrregularRep ns flags offsets elems kind
    in insertRep rt rep env
 
-insertIrregulars :: VName -> VName -> VName -> [(ResTag, VName)] -> DistEnv -> DistEnv
-insertIrregulars ns flags offsets bnds env =
+insertIrregulars :: VName -> VName -> VName -> [(ResTag, VName)] -> IrregularKind -> DistEnv -> DistEnv
+insertIrregulars ns flags offsets bnds kind env =
   let (tags, elems) = unzip bnds
-      mkRep = Irregular . IrregularRep ns flags offsets
+      mkRep elem =
+        Irregular $
+          IrregularRep
+            { irregularS = ns,
+              irregularF = flags,
+              irregularO = offsets,
+              irregularD = elem,
+              irregularK = kind
+            }
    in insertReps (zip tags $ map mkRep elems) env
 
 insertRegulars :: [ResTag] -> [VName] -> DistEnv -> DistEnv
@@ -188,7 +203,7 @@ segsAndElems env (DistInput rt _ : vs) =
   case resVar rt env of
     Regular v' ->
       second (v' :) $ segsAndElems env vs
-    Irregular (IrregularRep segments flags offsets elems) ->
+    Irregular (IrregularRep segments flags offsets elems kind) ->
       bimap (mplus $ Just (segments, flags, offsets)) (elems :) $ segsAndElems env vs
 
 -- Mapping from original variable names to their distributed resreps
@@ -211,7 +226,7 @@ readInputVar _segments env is inputs v =
         Regular arr
           | isAcc t -> pure arr
           | otherwise -> letExp (baseName v) =<< eIndex arr (map eSubExp is)
-        Irregular (IrregularRep _ _flags _offsets _elems) ->
+        Irregular (IrregularRep _ _flags _offsets _elems _) ->
           undefined
 
 readInput :: Segments -> DistEnv -> [SubExp] -> DistInputs -> SubExp -> Builder GPU SubExp
@@ -257,7 +272,7 @@ readInputs segments env is = mapM_ onInput
             =<< if isAcc t
               then eSubExp $ Var arr
               else eIndex arr (map eSubExp is)
-        Irregular (IrregularRep _ _ v_O v_D) -> do
+        Irregular (IrregularRep _ _ v_O v_D _) -> do
           offset <- letSubExp "offset" =<< eIndex v_O [toExp $ flatSegmentIndex segments is]
           case arrayDims t of
             [num_elems] -> do
@@ -487,7 +502,7 @@ resultToResReps types results =
              in (rs', rep)
           Array {} ->
             let (_ : segs : flags : offsets : elems : rs') = rs
-                rep = Irregular $ IrregularRep segs flags offsets elems
+                rep = Irregular $ IrregularRep segs flags offsets elems Dense
              in (rs', rep)
           Acc {} -> error "resultToResReps: Illegal type 'Acc'"
           Mem {} -> error "resultToResReps: Illegal type 'Mem'"
