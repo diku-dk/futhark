@@ -862,32 +862,19 @@ onMapFreeVar segments env inps _ws (_ws_F, _ws_O, ws_data) v = do
       -- subExpsRes . pure <$> readInput segments env segment_is inps (Var v)
       DistInput rt t -> case resVar rt env of
         Irregular rep -> do
-          new_S <-
-            letExp (baseName v <> "_rep_free_irreg_S")
-              <=< segMap (MkSolo ws_prod)
-              $ \(MkSolo i) -> do
-                old_seg <- letSubExp "old_seg" =<< eIndex ws_data [eSubExp i]
-                s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp old_seg]
-                pure [subExpRes s]
-          (new_F, new_O, new_II1) <- doRepIota new_S
-          m <- arraySize 0 <$> lookupType new_II1
-          new_D <-
-            letExp (baseName v <> "_new_D")
-              <=< segMap (MkSolo m)
-              $ \(MkSolo i) -> do
-                new_seg <- letSubExp "new_seg" =<< eIndex new_II1 [eSubExp i]
-                old_seg <- letSubExp "old_seg" =<< eIndex ws_data [eSubExp new_seg]
-                new_off <- letSubExp "new_off" =<< eIndex new_O [eSubExp new_seg]
-                old_off <- letSubExp "old_off" =<< eIndex (irregularO rep) [eSubExp old_seg]
-                j <- letSubExp "j" <=< toExp $ pe64 i - pe64 new_off
-                x <- letSubExp "x" =<< eIndex (irregularD rep) [toExp $ pe64 old_off + pe64 j]
-                pure [subExpRes x]
+          ~[new_S, offsets] <- letTupExp (baseName v <> "_rep_free_irreg")
+            <=< segMap (MkSolo ws_prod)
+            $ \(MkSolo i) -> do
+              segment <- letSubExp "segment" =<< eIndex ws_data [eSubExp i]
+              s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp segment]
+              o <- letSubExp "o" =<< eIndex (irregularO rep) [eSubExp segment]
+              pure $ subExpsRes [s, o]
           let rep' =
                 IrregularRep
                   { irregularS = new_S,
-                    irregularF = new_F,
-                    irregularO = new_O,
-                    irregularD = new_D
+                    irregularF = irregularF rep,
+                    irregularO = offsets,
+                    irregularD = irregularD rep
                   }
           pure $ MapOther rep' t
         Regular vs ->
@@ -959,9 +946,11 @@ transformInnerMap ::
   Lambda SOACS ->
   Builder GPU [ResRep]
 transformInnerMap segments env inps pat w arrs map_lam
-  | not (isVariant inps env w) =
+  | not (isVariant inps env w) = do
+      traceM "transformInnerMap: w is invariant, treating as single-dim map"
       transformInnerMapMultiDim segments env inps pat w arrs map_lam
-  | otherwise =
+  | otherwise = do
+      traceM "transformInnerMap: w is variant, treating as single-dim map"
       transformInnerMapSingleDim segments env inps pat w arrs map_lam
 
 transformInnerMapSingleDim ::
@@ -1017,7 +1006,27 @@ onMapIrregularInputArr mode new_segments ws ws_O ws_data p arr rep ws_prod = do
             case mode of
               SingleDim -> Shape [ws_prod]
               MultiDim -> segmentsShape new_segments
-      v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape (irregularD rep) $ reshapeAll old_shape new_shape
+      new_flat <-
+        letExp (baseName arr <> "_flat_expand")
+          <=< segMap (MkSolo ws_prod)
+          $ \(MkSolo i) -> do
+            j <- letSubExp "j" =<< eIndex ws_data [eSubExp i]
+            data_off <- letSubExp "data_off" =<< eIndex (irregularO rep) [eSubExp j]
+            seg_start <- letSubExp "seg_start" =<< eIndex ws_O [eSubExp j]
+            local_pos <- letSubExp "local_pos" <=< toExp $ pe64 i - pe64 seg_start
+            flat_idx <- letSubExp "flat_idx" <=< toExp $ pe64 data_off + pe64 local_pos
+            fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
+      -- v_materlised <- letExp (baseName (paramName p) <> "_materlised")
+      --   <=<
+      --   segMap (MkSolo ws_prod)
+      --   $ \(MkSolo i) -> do
+      --     segment <- letSubExp "segment" =<< eIndex ws_data [eSubExp i]
+      --     offset <- letSubExp "offset" =<< eIndex (irregularO rep) [eSubExp segment]
+      --     v <- letSubExp "v" =<< eIndex (irregularD rep) [toExp $ pe64 offset]
+      --     pure $ subExpsRes [v]
+      -- segment_is <- segmentCoordsFromFlat segments segment
+      -- subExpsRes . pure <$> (letSubExp "v" =<< eIndex v' (map eSubExp segment_is))
+      v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape new_flat $ reshapeAll old_shape new_shape
       pure $ MapArray v_reshaped (stripArray 1 rep_t)
     else do
       -- We need to split multi-dimensional irregular segments
@@ -1111,41 +1120,60 @@ onMapFreeVarMultiDim segments w env inps v = do
         v_rep <- replicateForW segments w v'
         pure $ MapArray v_rep t
       Irregular rep -> do
+        -- Can replicate as well
         old_nseg <- arraySize 0 <$> lookupType (irregularS rep)
         new_nseg <- letSubExp "new_nseg" <=< toExp $ pe64 old_nseg * pe64 w
+        ~[new_S, offsets] <- letTupExp (baseName v <> "_rep_free_irreg")
+          <=< segMap (MkSolo new_nseg)
+          $ \(MkSolo i) -> do
+            old_seg <- letSubExp "old_seg" <=< toExp $ pe64 i `quot` pe64 w
+            s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp old_seg]
+            o <- letSubExp "o" =<< eIndex (irregularO rep) [eSubExp old_seg]
+            pure $ subExpsRes [s, o]
+        let rep' =
+              IrregularRep
+                { irregularS = new_S,
+                  irregularF = irregularF rep,
+                  irregularO = offsets,
+                  irregularD = irregularD rep
+                }
+        pure $ MapOther rep' t
 
-        new_S <-
-          letExp (baseName v <> "_new_S")
-            <=< segMap (MkSolo new_nseg)
-            $ \(MkSolo i) -> do
-              old_seg <- letSubExp "old_seg" <=< toExp $ pe64 i `quot` pe64 w
-              s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp old_seg]
-              pure [subExpRes s]
+-- old_nseg <- arraySize 0 <$> lookupType (irregularS rep)
+-- new_nseg <- letSubExp "new_nseg" <=< toExp $ pe64 old_nseg * pe64 w
 
-        (new_F, new_O, new_II1) <- doRepIota new_S
-        m <- arraySize 0 <$> lookupType new_II1
+-- new_S <-
+--   letExp (baseName v <> "_new_S")
+--     <=< segMap (MkSolo new_nseg)
+--     $ \(MkSolo i) -> do
+--       old_seg <- letSubExp "old_seg" <=< toExp $ pe64 i `quot` pe64 w
+--       s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp old_seg]
+--       pure [subExpRes s]
 
-        new_D <-
-          letExp (baseName v <> "_new_D")
-            <=< segMap (MkSolo m)
-            $ \(MkSolo i) -> do
-              new_seg <- letSubExp "new_seg" =<< eIndex new_II1 [eSubExp i]
-              old_seg <- letSubExp "old_seg" <=< toExp $ pe64 new_seg `quot` pe64 w
-              new_off <- letSubExp "new_off" =<< eIndex new_O [eSubExp new_seg]
-              old_off <- letSubExp "old_off" =<< eIndex (irregularO rep) [eSubExp old_seg]
-              j <- letSubExp "j" <=< toExp $ pe64 i - pe64 new_off
-              x <- letSubExp "x" =<< eIndex (irregularD rep) [toExp $ pe64 old_off + pe64 j]
-              pure [subExpRes x]
+-- (new_F, new_O, new_II1) <- doRepIota new_S
+-- m <- arraySize 0 <$> lookupType new_II1
 
-        pure $
-          MapOther
-            IrregularRep
-              { irregularS = new_S,
-                irregularF = new_F,
-                irregularO = new_O,
-                irregularD = new_D
-              }
-            t
+-- new_D <-
+--   letExp (baseName v <> "_new_D")
+--     <=< segMap (MkSolo m)
+--     $ \(MkSolo i) -> do
+--       new_seg <- letSubExp "new_seg" =<< eIndex new_II1 [eSubExp i]
+--       old_seg <- letSubExp "old_seg" <=< toExp $ pe64 new_seg `quot` pe64 w
+--       new_off <- letSubExp "new_off" =<< eIndex new_O [eSubExp new_seg]
+--       old_off <- letSubExp "old_off" =<< eIndex (irregularO rep) [eSubExp old_seg]
+--       j <- letSubExp "j" <=< toExp $ pe64 i - pe64 new_off
+--       x <- letSubExp "x" =<< eIndex (irregularD rep) [toExp $ pe64 old_off + pe64 j]
+--       pure [subExpRes x]
+
+-- pure $
+--   MapOther
+--     IrregularRep
+--       { irregularS = new_S,
+--         irregularF = new_F,
+--         irregularO = new_O,
+--         irregularD = new_D
+--       }
+--     t
 
 -- | Replicate an array to insert a new inner dimension  after the
 -- existing segment dimensions.
