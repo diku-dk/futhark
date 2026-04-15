@@ -33,11 +33,11 @@ splitInput segments env inps is v = do
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
       arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
         idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
-         -- unflatten index
+        -- unflatten index
         let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
         subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
       pure $ Regular arr'
-    Irregular (IrregularRep segs flags offsets elems) -> do
+    Irregular (IrregularRep segs flags offsets elems _) -> do
       -- In the irregular case we take the elements
       -- of the `segs` array given by `is` like in the regular case
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
@@ -67,7 +67,8 @@ splitInput segments env inps is v = do
             { irregularS = segs',
               irregularF = flags',
               irregularO = offsets',
-              irregularD = elems'
+              irregularD = elems',
+              irregularK = Dense
             }
 
 -- Given the indices for which a branch is taken and its body,
@@ -137,7 +138,8 @@ mergeResult segments w iss branchesRep dist_res
             { irregularS = segs,
               irregularF = flags,
               irregularO = offsets,
-              irregularD = elems
+              irregularD = elems,
+              irregularK = Dense
             }
   | otherwise = error "mergeResult: non-array irregular result"
   where
@@ -146,7 +148,6 @@ mergeResult segments w iss branchesRep dist_res
 
     irregularBranch (Irregular irreg) = pure irreg
     irregularBranch _ = error "mergeResult: mismatched reps"
-
 
 transformMatch ::
   FlattenOps ->
@@ -175,7 +176,7 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
   let equiv_case_default = eBody [toExp $ intConst Int64 0]
   -- Match the scrutinees againts the branch cases
   equiv_classes <- letExp "equiv_classes" <=< segMap (MkSolo w) $ \(MkSolo i) -> do
-     -- unflatten index 
+    -- unflatten index
     let seg_is = unflattenIndex (segmentDims segments) (pe64 i)
     scruts <- mapM (letSubExp "scruts" <=< flip eIndex (map toExp seg_is)) lifted_scrutinees
     cls <- letSubExp "cls" =<< eMatch scruts equiv_cases equiv_case_default

@@ -23,6 +23,7 @@ module Futhark.Pass.Flatten.Monad
     insertRegulars,
 
     -- * Building blocks
+    ensureDenseIrregular,
     liftResult,
     liftDistResultRep,
     liftSubExp,
@@ -131,7 +132,7 @@ import Prelude hiding (div, rem)
 data IrregularKind
   = Dense
   | Replicated
-  deriving (Show)
+  deriving (Show,Eq)
 
 data IrregularRep = IrregularRep
   { -- | Array of size of each segment, type @[]i64@.
@@ -203,8 +204,12 @@ segsAndElems env (DistInput rt _ : vs) =
   case resVar rt env of
     Regular v' ->
       second (v' :) $ segsAndElems env vs
-    Irregular (IrregularRep segments flags offsets elems kind) ->
-      bimap (mplus $ Just (segments, flags, offsets)) (elems :) $ segsAndElems env vs
+    Irregular (IrregularRep segments flags offsets elems k) -> do
+      case k of
+        Dense -> do
+          bimap (mplus $ Just (segments, flags, offsets)) (elems :) $ segsAndElems env vs
+        Replicated ->
+          second ( flags :) $ segsAndElems env vs
 
 -- Mapping from original variable names to their distributed resreps
 inputReps :: DistInputs -> DistEnv -> M.Map VName (Type, ResRep)
@@ -300,6 +305,27 @@ isVariant inps env se = case se of
   Constant _ -> False
   Var v -> isJust $ M.lookup v $ inputReps inps env
 
+ensureDenseIrregular :: Name -> IrregularRep -> Builder GPU IrregularRep
+ensureDenseIrregular _ rep@IrregularRep {irregularK = Dense} =
+  pure rep
+ensureDenseIrregular desc rep@IrregularRep {} = do
+  (new_F, new_O, ii1) <- doRepIota (irregularS rep)
+  m <- arraySize 0 <$> lookupType ii1
+  new_D <- letExp (desc <> "_dense_D") <=< segMap (MkSolo m) $ \(MkSolo i) -> do
+    seg <- letSubExp "seg" =<< eIndex ii1 [eSubExp i]
+    old_off <- letSubExp "old_off" =<< eIndex (irregularO rep) [eSubExp seg]
+    new_off <- letSubExp "new_off" =<< eIndex new_O [eSubExp seg]
+    j <- letSubExp "j" <=< toExp $ pe64 i - pe64 new_off
+    x <- letSubExp "x" =<< eIndex (irregularD rep) [toExp $ pe64 old_off + pe64 j]
+    pure [subExpRes x]
+  pure $
+    IrregularRep
+      { irregularS = irregularS rep,
+        irregularF = new_F,
+        irregularO = new_O,
+        irregularD = new_D,
+        irregularK = Dense
+      }
 -- Lift a result of a function.
 liftResult :: Segments -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
 liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
@@ -372,7 +398,8 @@ mkIrregFromReg segments arr = do
       { irregularS = arr_S,
         irregularF = arr_F,
         irregularO = arr_O,
-        irregularD = arr_D
+        irregularD = arr_D,
+        irregularK = Dense
       }
 
 -- If the sub-expression is a constant, replicate it to match the shape of `segments`
@@ -431,7 +458,9 @@ liftSubExpRegular segments inps env expectedShape se = do
       letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
     Var x -> case M.lookup x $ inputReps inps env of
       Just (_, Regular v') -> pure v'
-      Just (_, Irregular irreg) -> pure $ irregularD irreg
+      Just (_, Irregular irreg) -> do 
+        rep_dense <- ensureDenseIrregular "lifted_irreg" irreg
+        pure $ irregularD rep_dense
       Nothing ->
         letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
   v_t <- lookupType v
@@ -459,7 +488,9 @@ dataArr segments env inps (Var v)
       case v_inp of
         DistInputFree vs _ -> irregularD <$> mkIrregFromReg segments vs
         DistInput rt _ -> case resVar rt env of
-          Irregular r -> pure $ irregularD r
+          Irregular r ->  do
+            rep_dense <- ensureDenseIrregular "dataArr" r
+            pure $ irregularD rep_dense
           Regular vs -> irregularD <$> mkIrregFromReg segments vs
 dataArr segments _ _ se = do
   rep <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
@@ -519,7 +550,8 @@ scatterIrregular ::
   (VName, IrregularRep) ->
   Builder GPU VName
 scatterIrregular offsets space (is, irregRep) = do
-  let IrregularRep {irregularS = segs, irregularD = elems} = irregRep
+  dense_irreg <- ensureDenseIrregular "scatter_irreg" irregRep
+  let IrregularRep {irregularS = segs, irregularD = elems, irregularK = kind} = dense_irreg
   (_, _, ii1) <- doRepIota segs
   (_, _, ii2) <- doSegIota segs
   ~(Array _ (Shape [size]) _) <- lookupType elems
