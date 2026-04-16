@@ -16,6 +16,7 @@ import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Either (partitionEithers)
 import Data.IORef
+import Data.Int (Int32)
 import Data.List (delete, partition)
 import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
@@ -998,17 +999,15 @@ commandLineOptions =
       ["seed"]
       ( ReqArg
           ( \n ->
-              case (reads n :: [(Integer, String)]) of
-                [(n', "")]
-                  | n' >= 0 ->
-                      Right $ changePBTConfig $ \pbt -> pbt {configSeed = Just $ fromIntegral n'}
+              case (reads n :: [(Int32, String)]) of
+                [(n', "")] ->
+                      Right $ changePBTConfig $ \pbt -> pbt {configSeed = Just n'}
                 _ ->
-                  Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
+                  Left . optionsError $ "'" ++ n ++ "' is not a valid integer."
           )
           "NUM"
       )
-      ( "Set seed for all tests to use for generators."
-      )
+      "Set seed for all tests to use for generators."
   ]
 
 excludeBackend :: TestConfig -> TestConfig
