@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* The C-based backends no longer emit constants `-9223372036854775808`, as these
+  cause C compilers to issue warnings.
+
+* A case where user-defined assertions could be removed when used in conjunction
+  with `#[scratch]`. (#2417)
+
+* Various miscompilations and compiler crashes in fusion of `scatter`
+  operations.
+
 ## [0.25.37]
 
 ### Added
