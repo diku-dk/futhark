@@ -1,3 +1,4 @@
+import "../libraries/shrinkers/integerShrinker"
 import "../lib/github.com/diku-dk/cpprandom/random"
 
 ------------------ i64 tests ------------------
@@ -32,12 +33,6 @@ let simple_fail (x: i64) : i64 =
 entry prop_simple_fail (x: i64) : bool =
     simple_fail x == x
 
-entry shrink_simple (x: i64) (tactic: i32) : (i64, i8) =
-  if tactic == 0 then
-    if x > 0 then
-      (x - 1, i8.bool (x - 1 == x))
-    else
-      (x + 1, i8.bool (x + 1 == x)) 
-  else 
-    (x, 2) 
-
+module shrink_i64 = integralShrinker i64
+entry shrink_simple (x: i64) (random: i32) : i64 =
+  shrink_i64.shrinker x random

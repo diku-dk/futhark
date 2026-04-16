@@ -1,8 +1,10 @@
+import "../libraries/shrinkers/integerShrinker"
 import "../lib/github.com/diku-dk/cpprandom/random"
 --------------------- u32 tests ------------------
 -- Uniform u32 distribution using minstd_rand (u32 engine) underneath.
 module rng_engine = minstd_rand
 module rand_u32 = uniform_int_distribution u32 u32 rng_engine
+module shrink_u32 = integralShrinker u32
 
 entry gen_simple (size: i64) (seed: i32) : u32 =
   let rng0 = rng_engine.rng_from_seed [seed]
@@ -31,12 +33,5 @@ let simple_fail (x: u32) : u32 =
 entry prop_simple_fail (x: u32) : bool =
     simple_fail x < x
 
-entry shrink_simple (x: u32) (tactic: i32) : (u32, i8) =
-  if tactic == 0 then
-    if x > 0 then
-      (x - 1, i8.bool (x - 1 == x))
-    else
-      (x + 1, i8.bool (x + 1 == x)) 
-  else 
-    (x, 2) 
-
+entry shrink_simple (x: u32) (tactic: i32) : u32 =
+  shrink_u32.shrinker x tactic

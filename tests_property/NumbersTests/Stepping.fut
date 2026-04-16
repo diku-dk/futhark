@@ -19,8 +19,6 @@ let bad_pair ((x, y): pair) : bool =
 -- ==
 -- property: prop_pair_backtrack
 
-
-
 #[prop(gen(gen_pair), shrink(shrink_pair))]
 entry prop_pair_backtrack (p: pair) : bool =
   bad_pair p
@@ -30,12 +28,11 @@ let step_towards_zero (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_pair ((x, y): pair) (tactic: i32) : (pair, i8) =
+entry shrink_pair ((x, y): pair) (random: i32) : pair =
+  let tactic = random % 2 in
   if tactic == 0 then
     let x' = step_towards_zero x
-    in ((x', y), i8.bool (x' == x))
-  else if tactic == 1 then
-    let y' = step_towards_zero y
-    in ((x, y'), i8.bool (y' == y))
+    in (x', y)
   else
-    ((x, y), 2)
+    let y' = step_towards_zero y
+    in (x, y')

@@ -1,3 +1,4 @@
+import "../libraries/shrinkers/integerShrinker"
 import "../lib/github.com/diku-dk/cpprandom/random"
 --------------------- i32 tests ------------------
 -- Uniform i32 distribution using minstd_rand (u32 engine) underneath.
@@ -31,12 +32,6 @@ let simple_fail (x: i32) : i32 =
 entry prop_simple_fail (x: i32) : bool =
     simple_fail x == x
 
-entry shrink_simple (x: i32) (tactic: i32) : (i32, i8) =
-  if tactic == 0 then
-    if x > 0 then
-      (x - 1, i8.bool (x - 1 == x))
-    else
-      (x + 1, i8.bool (x + 1 == x)) 
-  else 
-    (x, 2) 
-
+module shrink_i32 = integralShrinker i32
+entry shrink_simple (x: i32) (random: i32) : i32 =
+  shrink_i32.shrinker x random

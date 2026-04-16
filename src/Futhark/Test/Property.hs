@@ -418,18 +418,17 @@ shrinkLoop scratchBin srv propName vIn shrinkName seed numTries phaseRef = do
               -- seed is explicitly Int32 to resolve ambiguity
             True -> pure . Left $ T.pack $ "Shrinker " <> T.unpack shrinkName <> " random value must be i32, got: " <> T.unpack seedTy -- this is user error (seed is wrong type)
             False -> do
-              let loop (pseudoRandom :: Int32, acc :: Int, totalCounter :: Int) =
-                    if acc >= numTries
-                      then pure $ Right Nothing
-                      else do
-                        r <- oneStep shrinkXTy propTy size pseudoRandom
-                        let branchGen = mkStdGen (fromIntegral pseudoRandom)
-                        let (pseudoRandom', _) = random branchGen
-                        case r of
-                          AcceptedShrink    -> loop (pseudoRandom', 0, totalCounter + 1)
-                          NotAcceptedShrink -> loop (pseudoRandom', acc + 1, totalCounter + 1)
-                          ErrorInShrink err -> pure . Left $ T.pack $ "Error in shrink: " <> T.unpack err
-                in loop (seed, 0, 0)
+              let loop (pseudoRandom :: Int32) (acc :: Int) (totalCounter :: Int)
+                    | acc >= numTries = pure $ Right Nothing
+                    | otherwise = do
+                      r <- oneStep shrinkXTy propTy size pseudoRandom
+                      let branchGen = mkStdGen (fromIntegral pseudoRandom)
+                      let (pseudoRandom', _) = random branchGen
+                      case r of
+                        AcceptedShrink    -> loop pseudoRandom' 0 (totalCounter + 1)
+                        NotAcceptedShrink -> loop pseudoRandom' (acc + 1) (totalCounter + 1)
+                        ErrorInShrink err -> pure . Left $ T.pack $ "Error in shrink: " <> T.unpack err
+              loop seed 0 0
   where
     oneStep shrinkXTy propTy size tactic = do
       let vTry = "qc_try"

@@ -1,8 +1,10 @@
+import "../libraries/shrinkers/integerShrinker"
 import "../lib/github.com/diku-dk/cpprandom/random"
 --------------------- i8 tests ------------------
 -- Uniform i8 distribution using minstd_rand (u32 engine) underneath.
 module rng_engine = minstd_rand
 module rand_i8 = uniform_int_distribution i8 u32 rng_engine
+module shrink_i8 = integralShrinker i8
 
 entry gen_simple (size: i64) (seed: i32) : i8 =
   let rng0 = rng_engine.rng_from_seed [seed]
@@ -52,12 +54,5 @@ entry prop_simple_fail (x: i8) : bool =
     simple_fail x == x
 
 entry shrink_simple (x: i8) (random: i32) : i8 =
-  let tactic = random % 2 in
-  if tactic == 0 then
-      x//2
-  else
-    if x > 0 then
-      x - 1
-    else
-      x + 1
+  shrink_i8.shrinker x random
 
