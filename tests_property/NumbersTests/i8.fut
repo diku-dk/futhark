@@ -13,7 +13,6 @@ entry gen_simple (size: i64) (seed: i32) : i8 =
 let simple_succ (x: i8) : i8 =
   i8.abs x
 
-
 -- Regular test case for the shrinking to fail on.
 -- == 
 -- entry: prop_simple_succ
@@ -52,12 +51,13 @@ let simple_fail (x: i8) : i8 =
 entry prop_simple_fail (x: i8) : bool =
     simple_fail x == x
 
-entry shrink_simple (x: i8) (tactic: i32) : (i8, i8) =
+entry shrink_simple (x: i8) (random: i32) : i8 =
+  let tactic = random % 2 in
   if tactic == 0 then
+      x//2
+  else
     if x > 0 then
-      (x - 1, i8.bool (x - 1 == x))
+      x - 1
     else
-      (x + 1, i8.bool (x + 1 == x)) 
-  else 
-    (x, 2) 
+      x + 1
 

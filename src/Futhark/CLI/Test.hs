@@ -557,7 +557,8 @@ makeTestCase config mode (file, spec) =
       PBTConfig
         { configNumTests = configNumTests $ configPBTConfig config,
           configMaxSize = configMaxSize $ configPBTConfig config,
-          configSeed = configSeed $ configPBTConfig config
+          configSeed = configSeed $ configPBTConfig config,
+          configShrinkTries = configShrinkTries $ configPBTConfig config
         }
 
 data ReportMsg
@@ -803,7 +804,8 @@ defaultConfig =
         PBTConfig
           { configNumTests = 100,
             configMaxSize = 50,
-            configSeed = Nothing
+            configSeed = Nothing,
+            configShrinkTries = 5
           }
     }
 
@@ -977,8 +979,8 @@ commandLineOptions =
                   Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
           )
           "NUM"
-      )
-      "Number of tests to run per property (default: 100).",
+      ) $
+      "Number of tests to run per property (default: " <> show (configNumTests . configPBTConfig $ defaultConfig) <> ").",
     Option
       "m"
       ["max-size"]
@@ -992,8 +994,8 @@ commandLineOptions =
                   Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
           )
           "NUM"
-      )
-      "Maximum size parameter to use for generators (default: 50).",
+      ) $
+      "Maximum size parameter to use for generators (default: " <> show (configMaxSize . configPBTConfig $ defaultConfig) <> ").",
     Option
       []
       ["seed"]
@@ -1007,7 +1009,22 @@ commandLineOptions =
           )
           "NUM"
       )
-      "Set seed for all tests to use for generators."
+      "Set seed for all tests to use for generators.",
+    Option
+      []
+      ["num-tries"]
+      ( ReqArg
+          ( \n ->
+              case reads n of
+                [(n', "")]
+                  | n' >= 0 ->
+                      Right $ changePBTConfig $ \pbt -> pbt {configShrinkTries = n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
+          )
+          "NUM"
+      ) $
+      "The number of tries the shrinker will perform before giving up (default: " <> show (configShrinkTries . configPBTConfig $ defaultConfig) <> ")."
   ]
 
 excludeBackend :: TestConfig -> TestConfig
