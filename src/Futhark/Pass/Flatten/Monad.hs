@@ -81,7 +81,7 @@ import Prelude hiding (div, rem)
 --
 --   - A_D : [m]t; the "data array".
 --
---   - A_S : [n]i64; the "shape array" giving the size of each segment.
+--   - A_S : [n]i64; the "shape array" giving the number of scalar elements of each segment.
 --
 --   - A_F : [m]bool; the "flag array", indicating when an element begins a
 --     new segment.
@@ -119,7 +119,7 @@ import Prelude hiding (div, rem)
 --
 --   A_D = [1,2,3,4,5,6,7,8,9,10]
 --
---   A_S = [0, 4, 3]
+--   A_S = [0, 6, 4]
 --
 --   A_F = [T,F,F,F,F,F,T,F,F,F]
 --
