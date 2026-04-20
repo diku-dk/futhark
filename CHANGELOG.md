@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Various miscompilations and compiler crashes in fusion of `scatter`
   operations.
 
+* Multi-dimensional histograms (`reduce_by_index_2d`) were not handled correctly
+  by the intrablock code generator in the GPU backends.
+
 ## [0.25.37]
 
 ### Added
