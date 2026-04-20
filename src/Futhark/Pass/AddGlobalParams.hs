@@ -30,7 +30,7 @@ module Futhark.Pass.AddGlobalParams (addGlobalParams) where
 
 import Control.Monad
 import Control.Monad.Identity
-import Control.Monad.Writer.Strict
+import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
 import Data.Set qualified as S
@@ -88,8 +88,12 @@ callsInExp mode in_parallel = \case
 callsInLambda :: CallMode -> Bool -> Lambda GPU -> S.Set Name
 callsInLambda mode in_parallel (Lambda _ _ body) = callsInBody mode in_parallel body
 
+tell :: (MonadState s m, Semigroup s) => s -> m ()
+tell x = modify (<> x)
+
 callsInSOAC :: CallMode -> Bool -> SOAC GPU -> S.Set Name
-callsInSOAC mode in_parallel soac = execWriter $ void $ mapSOACM mapper soac
+callsInSOAC mode in_parallel soac =
+  execState (void $ mapSOACM mapper soac) mempty
   where
     mapper =
       identitySOACMapper
@@ -99,7 +103,8 @@ callsInSOAC mode in_parallel soac = execWriter $ void $ mapSOACM mapper soac
         }
 
 callsInSegOp :: CallMode -> SegOp SegLevel GPU -> S.Set Name
-callsInSegOp mode segop = execWriter $ void $ mapSegOpM mapper segop
+callsInSegOp mode segop =
+  execState (void $ mapSegOpM mapper segop) mempty
   where
     mapper =
       identitySegOpMapper
