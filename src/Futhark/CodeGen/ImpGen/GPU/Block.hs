@@ -575,7 +575,8 @@ compileBlockOp pat (Inner (SegOp (SegHist lvl space _ kbody ops))) = do
   -- We don't need the red_pes, because it is guaranteed by our type
   -- rules that they occupy the same memory as the destinations for
   -- the ops.
-  let num_red_res = length ops + sum (map (length . histNeutral) ops)
+  let num_is_res = sum $ map (shapeRank . histShape) ops
+      num_red_res = num_is_res + sum (map (length . histNeutral) ops)
       (_red_pes, map_pes) =
         splitAt num_red_res $ patElems pat
 
@@ -588,17 +589,18 @@ compileBlockOp pat (Inner (SegOp (SegHist lvl space _ kbody ops))) = do
   blockCoverSegSpace (segVirt lvl) space $
     compileStms mempty (bodyStms kbody) $ do
       let (red_res, map_res) = splitAt num_red_res $ bodyResult kbody
-          (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
+          (red_is, red_vs) = splitAt num_is_res $ map kernelResultSubExp red_res
       zipWithM_ (compileThreadResult space) map_pes map_res
 
-      let vs_per_op = chunks (map (length . histDest) ops) red_vs
+      let is_per_op = chunks (map (shapeRank . histShape) ops) red_is
+          vs_per_op = chunks (map (length . histDest) ops) red_vs
 
-      forM_ (zip4 red_is vs_per_op ops' ops) $
+      forM_ (zip4 is_per_op vs_per_op ops' ops) $
         \(bin, op_vs, do_op, HistOp dest_shape _ _ _ shape lam) -> do
-          let bin' = pe64 bin
+          let bin' = map pe64 bin
               dest_shape' = map pe64 $ shapeDims dest_shape
-              bin_in_bounds = inBounds (Slice [DimFix bin']) dest_shape'
-              bin_is = map Imp.le64 (init ltids) ++ [bin']
+              bin_in_bounds = inBounds (Slice $ map DimFix bin') dest_shape'
+              bin_is = map Imp.le64 (init ltids) ++ bin'
               vs_params = takeLast (length op_vs) $ lambdaParams lam
 
           sComment "perform atomic updates" $
