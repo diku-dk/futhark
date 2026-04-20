@@ -14,14 +14,128 @@ import Futhark.MonadFreshNames
 import Futhark.Pass
 import Futhark.Transform.Substitute
 
--- | Ensure that device functions do not reference global names directly.
-addGlobalParams :: Pass GPU GPU
-addGlobalParams =
-  Pass
-    { passName = "add global params",
-      passDescription = "Thread global names explicitly into device functions.",
-      passFunction = transformProg
-    }
+data CallMode = AllCalls | ParallelCalls
+  deriving (Eq)
+
+callsInProg :: CallMode -> Prog GPU -> S.Set Name
+callsInProg mode prog =
+  callsInStms mode False (progConsts prog)
+    <> foldMap (callsInBody mode False . funDefBody) (progFuns prog)
+
+calledInParallel :: Prog GPU -> S.Set Name
+calledInParallel = callsInProg ParallelCalls
+
+callsInGBody :: CallMode -> Bool -> GBody GPU res -> S.Set Name
+callsInGBody mode in_parallel = callsInStms mode in_parallel . bodyStms
+
+callsInBody :: CallMode -> Bool -> Body GPU -> S.Set Name
+callsInBody = callsInGBody
+
+callsInKernelBody :: CallMode -> KernelBody GPU -> S.Set Name
+callsInKernelBody mode = callsInGBody mode True
+
+callsInStms :: CallMode -> Bool -> Stms GPU -> S.Set Name
+callsInStms mode in_parallel =
+  foldMap (callsInExp mode in_parallel . stmExp) . stmsToList
+
+callsInExp :: CallMode -> Bool -> Exp GPU -> S.Set Name
+callsInExp mode in_parallel = \case
+  Apply fname _ _ _
+    | mode == AllCalls || in_parallel -> S.singleton fname
+    | otherwise -> mempty
+  Match _ cases defbody _ ->
+    foldMap (callsInBody mode in_parallel . caseBody) cases
+      <> callsInBody mode in_parallel defbody
+  Loop _ _ body ->
+    callsInBody mode in_parallel body
+  WithAcc inputs lam ->
+    foldMap
+      ( \(_, _, op) ->
+          maybe mempty (\(f, _) -> callsInLambda mode in_parallel f) op
+      )
+      inputs
+      <> callsInLambda mode in_parallel lam
+  Op op ->
+    callsInOp mode in_parallel op
+  _ ->
+    mempty
+
+callsInLambda :: CallMode -> Bool -> Lambda GPU -> S.Set Name
+callsInLambda mode in_parallel (Lambda _ _ body) = callsInBody mode in_parallel body
+
+callsInSOAC :: CallMode -> Bool -> SOAC GPU -> S.Set Name
+callsInSOAC mode in_parallel soac = execWriter $ void $ mapSOACM mapper soac
+  where
+    mapper =
+      identitySOACMapper
+        { mapOnSOACLambda = \lam -> do
+            tell $ callsInLambda mode in_parallel lam
+            pure lam
+        }
+
+callsInSegOp :: CallMode -> SegOp SegLevel GPU -> S.Set Name
+callsInSegOp mode segop = execWriter $ void $ mapSegOpM mapper segop
+  where
+    mapper =
+      identitySegOpMapper
+        { mapOnSegBinOpLambda = \lam -> do
+            tell $ callsInLambda mode True lam
+            pure lam,
+          mapOnSegPostOpLambda = \lam -> do
+            tell $ callsInLambda mode True lam
+            pure lam,
+          mapOnSegOpBody = \body -> do
+            tell $ callsInKernelBody mode body
+            pure body
+        }
+
+callsInOp :: CallMode -> Bool -> Op GPU -> S.Set Name
+callsInOp mode in_parallel = \case
+  SegOp segop ->
+    callsInSegOp mode segop
+  OtherOp soac ->
+    callsInSOAC mode in_parallel soac
+  GPUBody _ body ->
+    callsInBody mode True body
+  _ ->
+    mempty
+
+buildCallGraphGPU :: Prog GPU -> M.Map Name (S.Set Name)
+buildCallGraphGPU =
+  M.fromList
+    . map (\fd -> (funDefName fd, callsInBody AllCalls False $ funDefBody fd))
+    . progFuns
+
+transitiveClosure :: (Ord k) => M.Map k (S.Set k) -> S.Set k -> S.Set k
+transitiveClosure graph = go
+  where
+    go seen =
+      let seen' = seen <> S.unions [M.findWithDefault mempty f graph | f <- S.toList seen]
+       in if seen' == seen then seen else go seen'
+
+globalsPerFun :: M.Map Name (S.Set Name) -> M.Map Name (S.Set VName) -> M.Map Name (S.Set VName)
+globalsPerFun call_graph = fixpoint
+  where
+    fixpoint m =
+      let step f gs =
+            gs
+              <> S.unions
+                [ M.findWithDefault mempty g m
+                | g <- S.toList $ M.findWithDefault mempty f call_graph
+                ]
+          m' = M.mapWithKey step m
+       in if m' == m then m else fixpoint m'
+
+globalTypes :: Stms GPU -> M.Map VName DeclType
+globalTypes =
+  M.fromList
+    . concatMap
+      ( map
+          (\pe -> (patElemName pe, toDecl (patElemType pe) Nonunique))
+          . patElems
+          . stmPat
+      )
+    . stmsToList
 
 transformProg :: Prog GPU -> PassM (Prog GPU)
 transformProg prog = do
@@ -135,125 +249,11 @@ transformProg prog = do
         progFuns = map rewriteFun $ progFuns prog
       }
 
-globalTypes :: Stms GPU -> M.Map VName DeclType
-globalTypes =
-  M.fromList
-    . concatMap
-      ( map
-          (\pe -> (patElemName pe, toDecl (patElemType pe) Nonunique))
-          . patElems
-          . stmPat
-      )
-    . stmsToList
-
-data CallMode = AllCalls | ParallelCalls
-  deriving (Eq)
-
-callsInProg :: CallMode -> Prog GPU -> S.Set Name
-callsInProg mode prog =
-  callsInStms mode False (progConsts prog)
-    <> foldMap (callsInBody mode False . funDefBody) (progFuns prog)
-
-calledInParallel :: Prog GPU -> S.Set Name
-calledInParallel = callsInProg ParallelCalls
-
-callsInGBody :: CallMode -> Bool -> GBody GPU res -> S.Set Name
-callsInGBody mode in_parallel = callsInStms mode in_parallel . bodyStms
-
-callsInBody :: CallMode -> Bool -> Body GPU -> S.Set Name
-callsInBody = callsInGBody
-
-callsInKernelBody :: CallMode -> KernelBody GPU -> S.Set Name
-callsInKernelBody mode = callsInGBody mode True
-
-callsInStms :: CallMode -> Bool -> Stms GPU -> S.Set Name
-callsInStms mode in_parallel =
-  foldMap (callsInExp mode in_parallel . stmExp) . stmsToList
-
-callsInExp :: CallMode -> Bool -> Exp GPU -> S.Set Name
-callsInExp mode in_parallel = \case
-  Apply fname _ _ _
-    | mode == AllCalls || in_parallel -> S.singleton fname
-    | otherwise -> mempty
-  Match _ cases defbody _ ->
-    foldMap (callsInBody mode in_parallel . caseBody) cases
-      <> callsInBody mode in_parallel defbody
-  Loop _ _ body ->
-    callsInBody mode in_parallel body
-  WithAcc inputs lam ->
-    foldMap
-      ( \(_, _, op) ->
-          maybe mempty (\(f, _) -> callsInLambda mode in_parallel f) op
-      )
-      inputs
-      <> callsInLambda mode in_parallel lam
-  Op op ->
-    callsInOp mode in_parallel op
-  _ ->
-    mempty
-
-callsInLambda :: CallMode -> Bool -> Lambda GPU -> S.Set Name
-callsInLambda mode in_parallel (Lambda _ _ body) = callsInBody mode in_parallel body
-
-callsInSOAC :: CallMode -> Bool -> SOAC GPU -> S.Set Name
-callsInSOAC mode in_parallel soac = execWriter $ void $ mapSOACM mapper soac
-  where
-    mapper =
-      identitySOACMapper
-        { mapOnSOACLambda = \lam -> do
-            tell $ callsInLambda mode in_parallel lam
-            pure lam
-        }
-
-callsInSegOp :: CallMode -> SegOp SegLevel GPU -> S.Set Name
-callsInSegOp mode segop = execWriter $ void $ mapSegOpM mapper segop
-  where
-    mapper =
-      identitySegOpMapper
-        { mapOnSegBinOpLambda = \lam -> do
-            tell $ callsInLambda mode True lam
-            pure lam,
-          mapOnSegPostOpLambda = \lam -> do
-            tell $ callsInLambda mode True lam
-            pure lam,
-          mapOnSegOpBody = \body -> do
-            tell $ callsInKernelBody mode body
-            pure body
-        }
-
-callsInOp :: CallMode -> Bool -> Op GPU -> S.Set Name
-callsInOp mode in_parallel = \case
-  SegOp segop ->
-    callsInSegOp mode segop
-  OtherOp soac ->
-    callsInSOAC mode in_parallel soac
-  GPUBody _ body ->
-    callsInBody mode True body
-  _ ->
-    mempty
-
-buildCallGraphGPU :: Prog GPU -> M.Map Name (S.Set Name)
-buildCallGraphGPU =
-  M.fromList
-    . map (\fd -> (funDefName fd, callsInBody AllCalls False $ funDefBody fd))
-    . progFuns
-
-transitiveClosure :: (Ord k) => M.Map k (S.Set k) -> S.Set k -> S.Set k
-transitiveClosure graph = go
-  where
-    go seen =
-      let seen' = seen <> S.unions [M.findWithDefault mempty f graph | f <- S.toList seen]
-       in if seen' == seen then seen else go seen'
-
-globalsPerFun :: M.Map Name (S.Set Name) -> M.Map Name (S.Set VName) -> M.Map Name (S.Set VName)
-globalsPerFun call_graph = fixpoint
-  where
-    fixpoint m =
-      let step f gs =
-            gs
-              <> S.unions
-                [ M.findWithDefault mempty g m
-                | g <- S.toList $ M.findWithDefault mempty f call_graph
-                ]
-          m' = M.mapWithKey step m
-       in if m' == m then m else fixpoint m'
+-- | Ensure that device functions do not reference global names directly.
+addGlobalParams :: Pass GPU GPU
+addGlobalParams =
+  Pass
+    { passName = "add global params",
+      passDescription = "Thread global names explicitly into device functions.",
+      passFunction = transformProg
+    }
