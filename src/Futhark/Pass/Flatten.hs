@@ -1010,7 +1010,7 @@ onMapIrregularInputArr mode new_segments ws ws_O ws_data p arr rep ws_prod = do
   rep_t <- lookupType $ irregularD rep
   when (arrayRank rep_t > 1) $
     error $
-      error "onMapInputArrMultiDim: irregularD is not 1D"
+      error "onMapIrregularInputArr: irregularD is not 1D"
   if null (arrayDims $ paramType p)
     then do
       -- assuimg the irregD is 1D size(irregularD rep) == ws_prod should hold and this should be fine
@@ -1087,10 +1087,10 @@ onMapIrregularInputArr mode new_segments ws ws_O ws_data p arr rep ws_prod = do
                 row_in_seg <- letSubExp "row_in_seg" <=< toExp $ pe64 i - pe64 seg_row_start
                 base_off <- letSubExp "base_off" =<< eIndex (irregularO rep) [eSubExp seg_i]
                 off <- letSubExp "off" <=< toExp $ pe64 base_off + pe64 row_in_seg * pe64 row_size
-                pure $ subExpsRes [off]     
+                pure $ subExpsRes [off]
           m <- arraySize 0 <$> lookupType (irregularD rep)
           -- we will have mutliple write but it is the same value so it should be fine.
-          new_F <- genFlags m new_O     
+          new_F <- genFlags m new_O
           pure $
             IrregularRep
               { irregularD = irregularD rep,
@@ -1339,23 +1339,60 @@ resRepsInPatOrder pat reps =
                 ++ prettyString v
    in map lookupRes (patNames pat)
 
--- | Get segment info and flatten data arrays for segmented reduce/scan.
--- For Irregular, segment info is already available.
--- For Regular (multi-dim), flatten data to 1D and construct segment descriptors.
-resRepSegInfo ::
+-- basically we need to make our arrays ready for our segscan/segred.
+-- every array need to be flattened to 1D.
+-- we need to check the dense/replciated status of the input.
+-- if all of scan inptus are replicated we are fine.
+-- otherwise, we need to make the replicated inptus dense.
+-- for regulars we can just use the segment discriptor and this should be also the same descriptor for dense irregulars.
+prepareSegOpInputs ::
   Segments ->
   DistEnv ->
   DistInputs ->
   SubExp ->
-  ResRep ->
-  Builder GPU (VName, VName, VName)
-resRepSegInfo _ _ _ _ (Irregular rep) = do
-  -- TODO: Think more here. Could go wrong 
-  pure (irregularF rep, irregularO rep, irregularS rep)
-resRepSegInfo segments env inps w (Regular _) = do
-  ws_arr <- dataArr segments env inps w
-  (ws_F, ws_O, _) <- doRepIota ws_arr
-  pure (ws_F, ws_O, ws_arr)
+  [ResRep] ->
+  [VName] ->
+  Builder GPU (VName, VName, VName, [VName])
+prepareSegOpInputs segments env inps w reps names
+  | all isRegular reps = do
+      ws <- dataArr segments env inps w
+      (ws_F, ws_O, _) <- doRepIota ws
+      names' <- mapM (flattenRegular segments) names
+      pure (ws_F, ws_O, ws, names')
+  | all isReplicatedIrregular reps = do
+      let Irregular rep0 = head reps
+      pure (irregularF rep0, irregularO rep0, irregularS rep0, map getData reps)
+  | otherwise = do
+      desc_rep <- findOrMakeDense reps
+      names' <- zipWithM normalise reps names
+      pure (irregularF desc_rep, irregularO desc_rep, irregularS desc_rep, names')
+  where
+    isRegular (Regular _) = True
+    isRegular _ = False
+
+    isReplicatedIrregular (Irregular rep) = irregularK rep == Replicated
+    isReplicatedIrregular _ = False
+
+    getData (Irregular rep) = irregularD rep
+    getData _ = error "prepareSegOpInputs: impossible"
+
+    findOrMakeDense rs =
+      case [rep | Irregular rep <- rs, irregularK rep == Dense] of
+        rep : _ -> pure rep
+        [] ->
+          case [rep | Irregular rep <- rs] of
+            rep : _ -> ensureDenseIrregular "segop_desc" rep
+            [] -> error "prepareSegOpInputs: impossible"
+
+    normalise rep v =
+      case rep of
+        Regular _ ->
+          flattenRegular segments v
+        Irregular ir
+          | irregularK ir == Dense ->
+              pure $ irregularD ir
+          | otherwise ->
+              irregularD <$> ensureDenseIrregular (baseName v <> "_dense") ir
 
 -- | Flatten a Regular (multi-dim) result array to 1D.
 -- flattenRegular :: Segments -> VName -> Builder GPU VName
@@ -1406,18 +1443,15 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       | Just (reds, map_lam) <- isRedomapSOAC form,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
           traceM "HELLO REDOMAP"
-          let is = isNothing $ isReduceSOAC form          
+          let is = isNothing $ isReduceSOAC form
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
             PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
           map_res_all <-
             transformInnerMap segments env inps map_pat w arrs map_lam
           let (redout_names, _) = splitAt (redResults reds) (patNames map_pat)
               (redout_res, mapout_res) = splitAt (redResults reds) map_res_all
-          (ws_F, ws_O, ws_S) <- resRepSegInfo segments env inps w (head redout_res)
+          (ws_F, ws_O, ws_S, redout_names') <- prepareSegOpInputs segments env inps w redout_res redout_names
           -- For multi-dim (Regular) results, flatten to 1D before segmented reduce.
-          redout_names' <- case head redout_res of
-            Regular _ -> mapM (flattenRegular segments) redout_names
-            Irregular _ -> pure redout_names
           -- TODO: FixME: this is temp hack
           let sing_red = singleReduce reds
           let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
@@ -1435,9 +1469,16 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
             insertRegulars red_tags elems'' $
               insertReps (zip map_tags mapout_res) env
       | Just scans <- isScanSOAC form,
-        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans,
-        Just arrs' <- mapM (`lookup` inps) arrs,
-        (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
+        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
+          reps <- forM arrs $ \arr ->
+            case lookup arr inps of
+              Just (DistInput rt _) ->
+                pure $ resVar rt env
+              _ ->
+                -- we should probably do better here
+                Irregular <$> getIrregRep segments env inps arr
+          (flags, offsets, arr_segments, elems) <-
+            prepareSegOpInputs segments env inps w reps arrs
           elems' <- doSegScan scans flags elems segments inps env
           pure $ insertIrregulars arr_segments flags offsets (zip (map distResTag res) elems') Dense env
       | Just (scans, map_lam) <- isScanomapSOAC form,
@@ -1447,11 +1488,8 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
           let (scanout_names, _) = splitAt (scanResults scans) (patNames map_pat)
               (scanout_res, mapout_res) = splitAt (scanResults scans) map_res_all
-          (ws_F, ws_O, ws_S) <- resRepSegInfo segments env inps w (head scanout_res)
+          (ws_F, ws_O, ws_S, scanout_names') <- prepareSegOpInputs segments env inps w scanout_res scanout_names
           -- For Regular results, flatten to 1D before segmented scan.
-          scanout_names' <- case head scanout_res of
-            Regular _ -> mapM (flattenRegular segments) scanout_names
-            Irregular _ -> pure scanout_names
           elems' <- doSegScan scans ws_F scanout_names' segments inps env
           let (scan_tags, map_tags) = splitAt (scanResults scans) $ map distResTag res
           pure $
