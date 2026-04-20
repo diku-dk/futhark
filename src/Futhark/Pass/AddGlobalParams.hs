@@ -232,16 +232,13 @@ transformProg prog = do
                     ]
                 substs = env
                 extra_params = params_for gs
-                body' =
-                  substituteNames substs $ funDefBody fd
+                body' = substituteNames substs $ funDefBody fd
              in fd
                   { funDefParams = funDefParams fd <> extra_params,
                     funDefBody = rewriteBody env body'
                   }
         | otherwise =
-            fd
-              { funDefBody = rewriteBody mempty (funDefBody fd)
-              }
+            fd {funDefBody = rewriteBody mempty (funDefBody fd)}
 
   pure
     prog
