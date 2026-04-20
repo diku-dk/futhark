@@ -2,11 +2,30 @@
 
 -- | Add explicit parameters for global names used in device functions.
 --
--- This is because the GPU code generator cannot handle functions called on the
--- device that have free variables. modifying the IR program is a lot easier
--- than handling this in the code generator. A caveat is that we must ensure we
--- do not add free variables to device functions after running this pass,
--- although we could in principle just run it again.
+-- The purpose of this pass is to ensure that no functions called from within a
+-- parallel section (identified by `SegMap`, `SegRed`, `SegScan, `SegHist`, or
+-- `GPUBody`) reference a global name directly. We call these functions "device
+-- functions". A global name is a name bound by a statement outside of any
+-- defunction definition. This is done by:
+--
+-- 1. Identifying which global names are referenced by each device function.
+-- Since device functions can call each other, this must be determined
+-- transitively, using a call graph.
+--
+-- 2. Adding new parameters to each device function corresponding to each of the
+-- global names used by that function.
+--
+-- 3. Updating each application of a device function to include these new names.
+--
+-- The main complication is that it is not allowed for a device function to have
+-- parameter names that are the same as global names - shadowing is not allowed.
+-- However, it is legal for different device functions to have the same
+-- parameter names. Hence, once it has been determined which global names are
+-- used in device functions, we compute a map that associates the global names
+-- to parameter names, and use these. This implies that these names must also be
+-- substituted into the device function bodies. Note that when modifying the
+-- application of the outermost device function call with additional function
+-- arguments, we must use the original global names.
 module Futhark.Pass.AddGlobalParams (addGlobalParams) where
 
 import Control.Monad
@@ -116,10 +135,16 @@ transitiveClosure :: (Ord k) => M.Map k (S.Set k) -> S.Set k -> S.Set k
 transitiveClosure graph = go
   where
     go seen =
-      let seen' = seen <> S.unions [M.findWithDefault mempty f graph | f <- S.toList seen]
+      let seen' =
+            seen
+              <> S.unions
+                [M.findWithDefault mempty f graph | f <- S.toList seen]
        in if seen' == seen then seen else go seen'
 
-globalsPerFun :: M.Map Name (S.Set Name) -> M.Map Name (S.Set VName) -> M.Map Name (S.Set VName)
+globalsPerFun ::
+  M.Map Name (S.Set Name) ->
+  M.Map Name (S.Set VName) ->
+  M.Map Name (S.Set VName)
 globalsPerFun call_graph = fixpoint
   where
     fixpoint m =
