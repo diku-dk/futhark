@@ -35,12 +35,11 @@ let step (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple ((x: i32, y: i32)) (tactic: i32) : ((i32, i32), i8) =
+entry shrink_simple ((x: i32, y: i32)) (random: i32) : (i32, i32) =
+  let tactic = random % 2 in
   if tactic == 0 then
     let x' = step x
-    in ({0 = x', 1 = y}, i8.bool (x'==x))  -- done=true if x can't be changed
-  else if tactic == 1 then
-    let y' = step y
-    in ({0 = x, 1 = y'}, i8.bool (y'==y))  -- done=true if y can't be changed
+    in {0 = x', 1 = y}
   else
-    ((x,y), 2)
+    let y' = step y
+    in {0 = x, 1 = y'}

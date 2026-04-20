@@ -32,6 +32,6 @@ let simple_fail (x: i32) : i32 =
 entry prop_simple_fail (x: i32) : bool =
     simple_fail x == x
 
-module shrink_i32 = integralShrinker i32
+module shrink_i32 = integerlShrinkers i32
 entry shrink_simple (x: i32) (random: i32) : i32 =
   shrink_i32.shrinker x random

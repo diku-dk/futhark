@@ -1,0 +1,2 @@
+PBT FAIL: prop_simple_fail size=50 seed=REDACTED after N tests
+Minimal counterexample: {x = {b = 0i32, z = 0i32}, y = {o = -1i32, p = 0i32}}

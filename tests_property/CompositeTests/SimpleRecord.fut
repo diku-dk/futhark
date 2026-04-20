@@ -36,9 +36,6 @@ let step (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple (r: record) (tactic: i32) : (record, i8) =
-  if tactic == 0 then
-    let x' = step r.x
-    in ({x = x'}, i8.bool (x'==r.x))
-  else 
-    (r, 2)
+entry shrink_simple (r: record) (_random: i32) : record =
+  let x' = step r.x
+  in {x = x'}

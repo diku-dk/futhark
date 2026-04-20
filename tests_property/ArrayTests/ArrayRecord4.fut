@@ -5,7 +5,7 @@
 -- property: prop_record_sums_fail
 
 -- File 4: NO type aliases (record inline, array is []{...})
-import "../../libraries/toString/toString"
+import "../libraries/toString/toString"
 
 let all_equal (r: { s: i32, a: i32 }) : bool =
   r.s == r.a
@@ -32,39 +32,47 @@ let shrink_i32 (v: i32) : i32 =
   else if i32.abs v <= 1i32 then 0i32
   else v / 2i32
 
-let update_at_n [n] (kk: i64) (xs: [n]{ s: i32, a: i32 }) : ([n]{ s: i32, a: i32 }, bool) =
-  let r = xs[kk]
-  let s' = shrink_i32 r.s
-  let a' = shrink_i32 r.a
-  let r' =
-    if s' != r.s then {s = s', a = r.a}
-    else if a' != r.a then {s = r.s, a = a'}
-    else r
-  let changed = r' != r
-  let xs' = tabulate n (\i -> if i == kk then r' else xs[i])
-  in (xs', changed)
+let shrink_record_field (r: { s: i32, a: i32 }) (field: i32) : ({ s: i32, a: i32 }, bool) =
+  if field == 0i32 then
+    let s' = shrink_i32 r.s
+    let r' = {s = s', a = r.a}
+    in (r', r' != r)
+  else
+    let a' = shrink_i32 r.a
+    let r' = {s = r.s, a = a'}
+    in (r', r' != r)
 
-entry shrink_arr_record (xs: []{ s: i32, a: i32 }) (tactic: i32) : ([]{ s: i32, a: i32 }, i8) =
-  let s0 : i8 = i8.i32 0
-  let s1 : i8 = i8.i32 1
-  let s2 : i8 = i8.i32 2
+let replace_at [n] (xs: [n]{ s: i32, a: i32 }) (idx: i64) (v: { s: i32, a: i32 }) : [n]{ s: i32, a: i32 } =
+  tabulate n (\i -> if i == idx then v else xs[i])
+
+entry shrink_arr_record (xs: []{ s: i32, a: i32 }) (random: i32) : []{ s: i32, a: i32 } =
   let n : i64 = length xs
+  let tactic = random % i32.i64 n
+
+  let field_tactics : i32 = 2i32 * i32.i64 n
+  let total_tactics : i32 =
+    if n <= 1 then field_tactics
+    else 2i32 + field_tactics
+
   let t : i32 = if tactic < 0i32 then 0i32 else tactic
-  let n_i32 : i32 = i32.i64 n
-  in if n == 0 then
-       (xs, s2)
-     else if t < n_i32 then
-       let kk =
-         let k64 = i64.i32 t
-         in if k64 < 0 then 0
-            else if k64 >= n then n-1
-            else k64
-       let xsN : [n]{ s: i32, a: i32 } = xs :> [n]{ s: i32, a: i32 }
-       let (xsN', changed) = update_at_n kk xsN
-       let out : []{ s: i32, a: i32 } = xsN' :> []{ s: i32, a: i32 }
-       in if changed then (out, s0) else (xs, s1)
+  in if t >= total_tactics then
+       xs
+     else if n > 1 && t == 0i32 then
+       let xs' = take (n - 1) xs
+       in xs'
+     else if n > 1 && t == 1i32 then
+       let xs' = drop 1 xs
+       in xs'
      else
-       (xs, s2)
+       let loc : i32 = if n > 1 then t - 2i32 else t
+       let idx : i64 = i64.i32 (loc / 2i32)
+       let field : i32 = loc % 2i32
+       let xsn : [n]{ s: i32, a: i32 } = xs :> [n]{ s: i32, a: i32 }
+       let old = xsn[idx]
+       let (new, changed) = shrink_record_field old field
+       let ysn = replace_at xsn idx new
+       let ys = ysn :> [n]{ s: i32, a: i32 }
+       in if changed then ys else xs
 
 #[prop(gen(gen_record_sums_fail), shrink(shrink_arr_record), pprint(pp_arrRecord))]
 entry prop_record_sums_fail (input: []{ s: i32, a: i32 }) : bool =

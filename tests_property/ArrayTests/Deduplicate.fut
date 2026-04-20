@@ -78,42 +78,39 @@ entry gen_deduplicate_bad (size: i64) (_seed: i32) : []i32 =
 --
 -- This tends to shrink toward the minimal witness [0,1].
 
-entry shrink_deduplicate (xs: []i32) (tactic: i32) : ([]i32, i8) =
-  let s0 : i8 = i8.i32 0
-  let s1 : i8 = i8.i32 1
-  let s2 : i8 = i8.i32 2
-
+entry shrink_deduplicate (xs: []i32) (random: i32) : []i32 =
   let n64 : i64 = length xs
   let n   : i32 = i32.i64 n64
+  let tactic : i32 = random % n
   let t   : i32 = if tactic < 0i32 then 0i32 else tactic
 
   -- ---- Phase A: shrink scalars toward targets ----
   in if t < n then
        if n64 == 0 then
-         (xs, s2)
+         xs
        else
          let i : i64 = i64.i32 t
          let old = xs[i]
          let target = if t == 0i32 then 0i32 else 1i32
          in if old == target then
-              (xs, s1)
+              xs
             else
-              (tabulate n64 (\j -> if j == i then target else xs[j]), s0)
+              tabulate n64 (\j -> if j == i then target else xs[j])
 
      -- ---- Phase B: remove one element ----
      else if t < 2i32 * n then
        if n64 == 0 then
-         (xs, s2)
+         xs
        else
          let k : i32 = t - n
          let i : i64 = i64.i32 k
          in if n64 == 1 then
-              ([], s0)
+              []
             else
-              (take i xs ++ drop (i+1) xs, s0)
+              take i xs ++ drop (i+1) xs
 
      else
-       (xs, s2)
+       xs
 
 -- ---------- failing property using shrinker ----------
 

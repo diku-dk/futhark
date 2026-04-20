@@ -36,14 +36,12 @@ let step0 (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple (r: record) (tactic: i32) : (record, i8) =
+entry shrink_simple (r: record) (random: i32) : record =
+  let tactic = random % 2 in
   if tactic == 0 then
     let x' = step0 r.x
-    in ({x = x', xs = r.xs}, i8.bool (x' == r.x))
-
-  else if tactic == 1 then
-    let xs' = map step0 r.xs
-    in ({x = r.x, xs = xs'}, i8.bool (array_eq xs' r.xs))
+    in {x = x', xs = r.xs}
 
   else
-    (r, 2)
+    let xs' = map step0 r.xs
+    in {x = r.x, xs = xs'}

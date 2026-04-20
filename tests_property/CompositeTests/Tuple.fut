@@ -35,12 +35,9 @@ let step (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple (r: tuple) (tactic: i32) : (tuple, i8) =
+entry shrink_simple (r: tuple) (random: i32) : tuple =
+  let tactic = random % 2 in
   if tactic == 0 then
-    let x' = step r.0
-    in ({0 = step r.0, 1 = r.1}, i8.bool (x'==r.0))  -- done=true if x can't be changed
-  else if tactic == 1 then
-    let y' = step r.1
-    in ({0 = r.0, 1 = step r.1}, i8.bool (y'==r.1))  -- done=true if y can't be changed
+    {0 = step r.0, 1 = r.1}
   else
-    (r, 2)
+    {0 = r.0, 1 = step r.1}

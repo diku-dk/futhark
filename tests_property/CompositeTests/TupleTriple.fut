@@ -35,16 +35,15 @@ let step0 (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple (t: (i32, i32, i32)) (tactic: i32) : ((i32, i32, i32), i8) =
-  let (a, b, c) = t
-  in if tactic == 0 then
-       let a' = step0 a
-       in ((a', b, c), i8.bool (a' == a))
-     else if tactic == 1 then
-       let b' = step0 b
-       in ((a, b', c), i8.bool (b' == b))
-     else if tactic == 2 then
-       let c' = step0 c
-       in ((a, b, c'), i8.bool (c' == c))
-     else
-       (t, 2)
+entry shrink_simple (t: (i32, i32, i32)) (random: i32) : (i32, i32, i32) =
+  let tactic = random % 3 in
+  let (a, b, c) = t in
+  if tactic == 0 then
+    let a' = step0 a
+    in (a', b, c)
+  else if tactic == 1 then
+    let b' = step0 b
+    in (a, b', c)
+  else 
+    let c' = step0 c
+    in (a, b, c')

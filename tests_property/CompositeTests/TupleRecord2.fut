@@ -38,40 +38,38 @@ let step0 (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple (r: pair) (tactic: i32) : (pair, i8) =
+entry shrink_simple (r: pair) (random: i32) : pair =
+  let tactic = random % 6 in
   if tactic == 0 then
     let a' = step0 r.0.a
     let o' = step0 r.1.o
     let r' = ({a = a', b = r.0.b},
               {o = o', p = r.1.p})
-    in (r', i8.bool (a' == r.0.a && o' == r.1.o))
+    in r'
 
   else if tactic == 1 then
     let b' = step0 r.0.b
     let p' = step0 r.1.p
     let r' = ({a = r.0.a, b = b'},
               {o = r.1.o, p = p'})
-    in (r', i8.bool (b' == r.0.b && p' == r.1.p))
+    in r'
 
   else if tactic == 2 then
     let a' = step0 r.0.a
     let r' = ({a = a', b = r.0.b}, r.1)
-    in (r', i8.bool (a' == r.0.a))
+    in r'
 
   else if tactic == 3 then
     let b' = step0 r.0.b
     let r' = ({a = r.0.a, b = b'}, r.1)
-    in (r', i8.bool (b' == r.0.b))
+    in r'
 
   else if tactic == 4 then
     let o' = step0 r.1.o
     let r' = (r.0, {o = o', p = r.1.p})
-    in (r', i8.bool (o' == r.1.o))
-
-  else if tactic == 5 then
-    let p' = step0 r.1.p
-    let r' = (r.0, {o = r.1.o, p = p'})
-    in (r', i8.bool (p' == r.1.p))
+    in r'
 
   else
-    (r, 2)
+    let p' = step0 r.1.p
+    let r' = (r.0, {o = r.1.o, p = p'})
+    in r'

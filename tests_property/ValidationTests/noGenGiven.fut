@@ -3,6 +3,6 @@ entry gen (_: i64) (_: i32) : i8 =
 
 -- ==
 -- property: prop
-#[prop]
+#[prop()]
 entry prop (x: i8) : bool =
   x == 0

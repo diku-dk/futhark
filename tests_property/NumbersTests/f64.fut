@@ -30,12 +30,8 @@ let simple_fail (x: f64) : f64 =
 entry prop_simple_fail (x: f64) : bool =
     simple_fail x == x
 
-entry shrink_simple (x: i8) (random: i32) : i8 =
-  let tactic = random % 2 in
-  if tactic == 0 then
-      x//2
+entry shrink_simple (x: f64) (_random: i32) : f64 =
+  if x > 0 then
+    x - 1
   else
-    if x > 0 then
-      x - 1
-    else
-      x + 1
+    x + 1

@@ -39,38 +39,36 @@ let step0 (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple (r: tuple) (tactic: i32) : (tuple, i8) =
+entry shrink_simple (r: tuple) (random: i32) : tuple =
+  let tactic = random % 6 in
   if tactic == 0 then
     let x0' = step0 r.0.0
     let y0' = step0 r.1.0
     let r' = ((x0', r.0.1), (y0', r.1.1))
-    in (r', i8.bool (x0' == r.0.0 && y0' == r.1.0))
+    in r'
 
   else if tactic == 1 then
     let x1' = step0 r.0.1
     let y1' = step0 r.1.1
     let r' = ((r.0.0, x1'), (r.1.0, y1'))
-    in (r', i8.bool (x1' == r.0.1 && y1' == r.1.1))
+    in r'
 
   else if tactic == 2 then
     let x0' = step0 r.0.0
     let r' = ((x0', r.0.1), r.1)
-    in (r', i8.bool (x0' == r.0.0))
+    in r'
 
   else if tactic == 3 then
     let x1' = step0 r.0.1
     let r' = ((r.0.0, x1'), r.1)
-    in (r', i8.bool (x1' == r.0.1))
+    in r'
 
   else if tactic == 4 then
     let y0' = step0 r.1.0
     let r' = (r.0, (y0', r.1.1))
-    in (r', i8.bool (y0' == r.1.0))
-
-  else if tactic == 5 then
-    let y1' = step0 r.1.1
-    let r' = (r.0, (r.1.0, y1'))
-    in (r', i8.bool (y1' == r.1.1))
+    in r'
 
   else
-    (r, 2)
+    let y1' = step0 r.1.1
+    let r' = (r.0, (r.1.0, y1'))
+    in r'

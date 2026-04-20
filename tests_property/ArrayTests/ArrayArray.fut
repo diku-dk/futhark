@@ -50,20 +50,19 @@ entry prop_matrix_sums_succ (input: [][]i32) : bool =
 --   0 = produced candidate (normal)
 --   1 = produced candidate but "advance tactic" hint (runner rule: if FAIL and status=1 then tactic=0 anyway, but we keep the channel)
 --   2 = stop
-entry shrink_matrix_sums (xss: [][]i32) (tactic: i32) : ([][]i32, i8) =
-  let r = length xss
-  in if r <= 1 then
-       (xss, 2i8)
-     else if tactic == 0 then
-       -- drop last row
-       let xss' = take (r-1) xss
-       in (xss', 0i8)
-     else if tactic == 1 then
-       -- drop first row
-       let xss' = drop 1 xss
-       in (xss', 0i8)
-     else
-       (xss, 2i8)
+entry shrink_matrix_sums (xss: [][]i32) (random: i32) : [][]i32 =
+  let tactic = random % 2
+  let r = length xss in
+  if r <= 1 then
+    xss
+  else if tactic == 0 then
+    -- drop last row
+    let xss' = take (r-1) xss
+    in xss'
+  else
+    -- drop first row
+    let xss' = drop 1 xss
+    in xss'
 
 
 entry gen_matrix_sums_bad (size: i64) (seed: i32) : [][]i32 =
@@ -145,7 +144,8 @@ let update_cell_rc [r][c] (ri: i64) (ci: i64) (xss: [r][c]i32) : [r][c]i32 =
                 if i == ri && j == ci then new else xss[i][j]))
 
 
-entry shrink_matrix (xss: [][]i32) (tactic: i32) : ([][]i32, i8) =
+entry shrink_matrix (xss: [][]i32) (random: i32) : [][]i32 =
+  let tactic = random % 3
   let r : i64 = length xss
   let c : i64 = if r == 0 then 0 else length xss[0]
 
@@ -160,24 +160,20 @@ entry shrink_matrix (xss: [][]i32) (tactic: i32) : ([][]i32, i8) =
 
   let t : i64 = if tactic < 0i32 then 0i64 else i64.i32 tactic
 
-  let s0 : i8 = i8.i32 0
-  let s1 : i8 = i8.i32 1
-  let s2 : i8 = i8.i32 2
-
   in if t < rowCount then
        -- remove row t
-       (remove_row (i32.i64 t) xss, s0)
+       remove_row (i32.i64 t) xss
 
      else if t < rowCount + colCount then
        -- remove column j = t-rowCount
        let j : i32 = i32.i64 (t - rowCount)
-       in (remove_col j xss, s0)
+       in remove_col j xss
 
      else if t < rowCount + colCount + scalarCount then
        -- shrink one cell k = t-rowCount-colCount
        let k : i64 = t - rowCount - colCount
        in if r == 0 || c == 0 then
-            (xss, s1)
+            xss
           else
             let ri : i64 = k / c
             let ci : i64 = k % c
@@ -186,18 +182,18 @@ entry shrink_matrix (xss: [][]i32) (tactic: i32) : ([][]i32, i8) =
             let new : i32 = shrink_i32 old
             in if new == old then
                  -- no-op: advance tactic
-                 (xss, s1)
+                 xss
                else
                  let xss_rc' : [r][c]i32 =
                    tabulate r (\i ->
                      tabulate c (\j ->
                        if i == ri && j == ci then new else xss_rc[i][j]))
                  let xss' : [][]i32 = xss_rc' :> [][]i32
-                 in (xss', s0)
+                 in xss'
 
      else
        -- exhausted tactics
-       (xss, s2)
+       xss
 
 
 #[prop(gen(gen_matrix_sums_bad), shrink(shrink_matrix))]

@@ -5,7 +5,7 @@
 -- property: prop_record_sums_fail
 
 -- File 2: ONLY record is a type alias (array is []record)
-import "../../libraries/toString/toString"
+import "../libraries/toString/toString"
 
 type record = { s: i32, a: i32 }
 
@@ -46,15 +46,13 @@ let update_at_n [n] (kk: i64) (xs: [n]record) : ([n]record, bool) =
   let xs' = tabulate n (\i -> if i == kk then r' else xs[i])
   in (xs', changed)
 
-entry shrink_arr_record (xs: []record) (tactic: i32) : ([]record, i8) =
-  let s0 : i8 = i8.i32 0
-  let s1 : i8 = i8.i32 1
-  let s2 : i8 = i8.i32 2
+entry shrink_arr_record (xs: []record) (random: i32) : []record =
   let n : i64 = length xs
+  let tactic = random % i32.i64 n
   let t : i32 = if tactic < 0i32 then 0i32 else tactic
   let n_i32 : i32 = i32.i64 n
   in if n == 0 then
-       (xs, s2)
+       xs
      else if t < n_i32 then
        let kk =
          let k64 = i64.i32 t
@@ -64,9 +62,9 @@ entry shrink_arr_record (xs: []record) (tactic: i32) : ([]record, i8) =
        let xsN : [n]record = xs :> [n]record
        let (xsN', changed) = update_at_n kk xsN
        let out : []record = xsN' :> []record
-       in if changed then (out, s0) else (xs, s1)
+       in if changed then out else xs
      else
-       (xs, s2)
+       xs
 
 #[prop(gen(gen_record_sums_fail), shrink(shrink_arr_record), pprint(pp_arrRecord))]
 entry prop_record_sums_fail (input: []record) : bool =

@@ -26,10 +26,9 @@ let step (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple (r: tuple) (tactic: i32) : (tuple, i8) =
+entry shrink_simple (r: tuple) (random: i32) : tuple =
+  let tactic : i32 = random % 2 in
   if tactic == 0 then
-    ({0 = step r.0, 1 = r.1}, 0)
-  else if tactic == 1 then
-    ({0 = r.0, 1 = step r.1}, 0)
+    {0 = step r.0, 1 = r.1}
   else
-    (r, 2)
+    {0 = r.0, 1 = step r.1}

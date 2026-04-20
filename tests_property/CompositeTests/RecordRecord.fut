@@ -41,40 +41,38 @@ let step0 (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple (r: record) (tactic: i32) : (record, i8) =
+entry shrink_simple (r: record) (random: i32) : record =
+  let tactic = random % 6 in
   if tactic == 0 then
     let z' = step0 r.x.z
     let o' = step0 r.y.o
     let r' = {x = {z = z', b = r.x.b},
               y = {o = o', p = r.y.p}}
-    in (r', i8.bool (z' == r.x.z && o' == r.y.o))
+    in r'
 
   else if tactic == 1 then
     let b' = step0 r.x.b
     let p' = step0 r.y.p
     let r' = {x = {z = r.x.z, b = b'},
               y = {o = r.y.o, p = p'}}
-    in (r', i8.bool (b' == r.x.b && p' == r.y.p))
+    in r'
 
   else if tactic == 2 then
     let z' = step0 r.x.z
     let r' = {x = {z = z', b = r.x.b}, y = r.y}
-    in (r', i8.bool (z' == r.x.z))
+    in r'
 
   else if tactic == 3 then
     let b' = step0 r.x.b
     let r' = {x = {z = r.x.z, b = b'}, y = r.y}
-    in (r', i8.bool (b' == r.x.b))
+    in r'
 
   else if tactic == 4 then
     let o' = step0 r.y.o
     let r' = {x = r.x, y = {o = o', p = r.y.p}}
-    in (r', i8.bool (o' == r.y.o))
-
-  else if tactic == 5 then
-    let p' = step0 r.y.p
-    let r' = {x = r.x, y = {o = r.y.o, p = p'}}
-    in (r', i8.bool (p' == r.y.p))
+    in r'
 
   else
-    (r, 2)
+    let p' = step0 r.y.p
+    let r' = {x = r.x, y = {o = r.y.o, p = p'}}
+    in r'

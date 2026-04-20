@@ -35,39 +35,36 @@ let step0 (v: i32) : i32 =
   else if v < 0 then v + 1
   else 0
 
-entry shrink_simple ((a: i32, b: i32), (c: i32, d: i32)) (tactic: i32)
-  : (((i32, i32), (i32, i32)), i8) =
+entry shrink_simple ((a: i32, b: i32), (c: i32, d: i32)) (random: i32) : ((i32, i32), (i32, i32)) =
+  let tactic = random % 6 in
   if tactic == 0 then
     let x0' = step0 a
     let y0' = step0 c
     let r' = ((x0', b), (y0', d))
-    in (r', i8.bool (x0' == a && y0' == c))
+    in r'
 
   else if tactic == 1 then
     let x1' = step0 b
     let y1' = step0 d
     let r' = ((a, x1'), (c, y1'))
-    in (r', i8.bool (x1' == b && y1' == d))
+    in r'
 
   else if tactic == 2 then
     let x0' = step0 a
     let r' = ((x0', b), (c, d))
-    in (r', i8.bool (x0' == a))
+    in r'
 
   else if tactic == 3 then
     let x1' = step0 b
     let r' = ((a, x1'), (c, d))
-    in (r', i8.bool (x1' == b))
+    in r'
 
   else if tactic == 4 then
     let y0' = step0 c
     let r' = ((a, b), (y0', d))
-    in (r', i8.bool (y0' == c))
-
-  else if tactic == 5 then
-    let y1' = step0 d
-    let r' = ((a, b), (c, y1'))
-    in (r', i8.bool (y1' == d))
+    in r'
 
   else
-    (((a, b), (c, d)), 2)
+    let y1' = step0 d
+    let r' = ((a, b), (c, y1'))
+    in r'

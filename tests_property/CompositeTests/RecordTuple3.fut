@@ -39,41 +39,39 @@ let step0 (v: i32) : i32 =
 
 entry shrink_simple
   (r: {x: (i32, i32), y: (i32, i32)})
-  (tactic: i32)
-  : ({x: (i32, i32), y: (i32, i32)}, i8) =
+  (random: i32)
+  : {x: (i32, i32), y: (i32, i32)} =
+  let tactic = random % 6 in
   if tactic == 0 then
     let x0' = step0 r.x.0
     let y0' = step0 r.y.0
     let r' = {x = (x0', r.x.1),
               y = (y0', r.y.1)}
-    in (r', i8.bool (x0' == r.x.0 && y0' == r.y.0))
+    in r'
 
   else if tactic == 1 then
     let x1' = step0 r.x.1
     let y1' = step0 r.y.1
     let r' = {x = (r.x.0, x1'),
               y = (r.y.0, y1')}
-    in (r', i8.bool (x1' == r.x.1 && y1' == r.y.1))
+    in r'
 
   else if tactic == 2 then
     let x0' = step0 r.x.0
     let r' = {x = (x0', r.x.1), y = r.y}
-    in (r', i8.bool (x0' == r.x.0))
+    in r'
 
   else if tactic == 3 then
     let x1' = step0 r.x.1
     let r' = {x = (r.x.0, x1'), y = r.y}
-    in (r', i8.bool (x1' == r.x.1))
+    in r'
 
   else if tactic == 4 then
     let y0' = step0 r.y.0
     let r' = {x = r.x, y = (y0', r.y.1)}
-    in (r', i8.bool (y0' == r.y.0))
-
-  else if tactic == 5 then
-    let y1' = step0 r.y.1
-    let r' = {x = r.x, y = (r.y.0, y1')}
-    in (r', i8.bool (y1' == r.y.1))
+    in r'
 
   else
-    (r, 2)
+    let y1' = step0 r.y.1
+    let r' = {x = r.x, y = (r.y.0, y1')}
+    in r'

@@ -4,7 +4,7 @@ import "../lib/github.com/diku-dk/cpprandom/random"
 -- Uniform i8 distribution using minstd_rand (u32 engine) underneath.
 module rng_engine = minstd_rand
 module rand_i8 = uniform_int_distribution i8 u32 rng_engine
-module shrink_i8 = integralShrinker i8
+module shrink_i8 = integerlShrinkers i8
 
 entry gen_simple (size: i64) (seed: i32) : i8 =
   let rng0 = rng_engine.rng_from_seed [seed]

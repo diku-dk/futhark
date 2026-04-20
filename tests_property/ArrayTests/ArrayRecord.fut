@@ -47,12 +47,10 @@ let shrink_record_field (r: record) (field: i32) : (record, bool) =
 let replace_at [n] (xs: [n]record) (idx: i64) (v: record) : [n]record =
   tabulate n (\i -> if i == idx then v else xs[i])
 
-entry shrink_arr_record (xs: arr) (tactic: i32) : (arr, i8) =
-  let ok  : i8 = i8.i32 0
-  let nop : i8 = i8.i32 1
-  let end : i8 = i8.i32 2
-
+entry shrink_arr_record (xs: arr) (random: i32) : arr =
   let n : i64 = length xs
+  let tactic = random % i32.i64 n
+
   let field_tactics : i32 = 2i32 * i32.i64 n
   let total_tactics : i32 =
     if n <= 1 then field_tactics
@@ -60,13 +58,13 @@ entry shrink_arr_record (xs: arr) (tactic: i32) : (arr, i8) =
 
   let t : i32 = if tactic < 0i32 then 0i32 else tactic
   in if t >= total_tactics then
-       (xs, end)
+       xs
      else if n > 1 && t == 0i32 then
        let xs' = take (n - 1) xs
-       in (xs', ok)
+       in xs'
      else if n > 1 && t == 1i32 then
        let xs' = drop 1 xs
-       in (xs', ok)
+       in xs'
      else
        let loc : i32 = if n > 1 then t - 2i32 else t
        let idx : i64 = i64.i32 (loc / 2i32)
@@ -76,7 +74,7 @@ entry shrink_arr_record (xs: arr) (tactic: i32) : (arr, i8) =
        let (new, changed) = shrink_record_field old field
        let ysn = replace_at xsn idx new
        let ys : arr = ysn :> arr
-       in if changed then (ys, ok) else (xs, nop)
+       in if changed then ys else xs
 
 #[prop(gen(gen_record_sums_fail), shrink(shrink_arr_record), pprint(pp_arrRecord))]
 entry prop_record_sums_fail (input: arr) : bool =

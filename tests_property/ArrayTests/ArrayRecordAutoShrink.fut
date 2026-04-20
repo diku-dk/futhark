@@ -5,7 +5,7 @@
 -- property: prop_record_sums_fail
 
 -- File 1: BOTH are type aliases (record + array)
-import "../../libraries/toString/toString"
+import "../libraries/toString/toString"
 
 type record = { s: i32, a: i32 }
 type~ arr = []record

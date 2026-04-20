@@ -40,43 +40,42 @@ entry gen_record_sums_fail (size: i64) (_: i32) : []i32 =
   in map (\i -> if i == 0i64 then 1i32 else 0i32) idx
 
 -- New-protocol shrinker for []i32 (SWAPPED order)
-entry shrink_arr (xs: []i32) (tactic: i32) : ([]i32, i8) =
-  let s0 : i8 = i8.i32 0
-  let s1 : i8 = i8.i32 1
-  let s2 : i8 = i8.i32 2
+entry shrink_arr (xs: []i32) (random: i32) : []i32 =
+  let tactic = random % 4
 
   let n64 : i64 = length xs
   let n  : i32 = i32.i64 n64
   let t  : i32 = if tactic < 0i32 then 0i32 else tactic
 
-  -- ----- Phase 1: shrink scalars toward 1 (t in [0..n-1]) -----
+  -- ----- Phase 1: remove one element (t in [0..n-1]) -----
   in if t < n then
-       if n64 == 0 then
-         (xs, s2)
+       if n64 <= 0 then
+         xs
+       else if n64 == 1 then
+         -- removing would make it empty; allow it (often helps)
+         []
        else
-         let ki : i64 = i64.i32 t
-         let old = xs[ki]
-         in if old == 1i32 then
-              (xs, s1)   -- no-op; advance tactic
-            else
-              (tabulate n64 (\i -> if i == ki then 1i32 else xs[i]), s0)
+         let i : i64 = i64.i32 t
+         let pre  = take i xs
+         let post = drop (i+1) xs
+         in pre ++ post
 
-     -- ----- Phase 2: remove one element (t in [n..2n-1]) -----
+     -- ----- Phase 2: shrink scalars toward 1 (t in [n..2n-1]) -----
      else if t < 2i32 * n then
        if n64 == 0 then
-         (xs, s2)
+         xs
        else
-         let k : i32 = t - n
-         let i : i64 = i64.i32 k
-         in if n64 == 1 then
-              ([], s0)
+         let k  : i32 = t - n
+         let ki : i64 = i64.i32 k
+         -- set xs[k] to 1 if it isn't already
+         let old = xs[ki]
+         in if old == 1i32 then
+              xs
             else
-              let pre  = take i xs
-              let post = drop (i+1) xs
-              in (pre ++ post, s0)
+              tabulate n64 (\i -> if i == ki then 1i32 else xs[i])
 
      else
-       (xs, s2)
+       xs
 
 #[prop(gen(gen_record_sums_fail), shrink(shrink_arr))]
 entry prop_record_sums_fail (input: []i32) : bool =

@@ -1,0 +1,2 @@
+PBT FAIL: prop_simple_fail size=10 seed=REDACTED after N tests
+Minimal counterexample: -1i8
