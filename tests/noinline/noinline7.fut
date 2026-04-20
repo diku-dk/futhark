@@ -3,16 +3,14 @@
 -- A noninlined function that references a top level computation. Actually we
 -- use an intermediate function to make it even more tricky.
 -- ==
--- input { [1i64, 0i64, 2i64] }
--- output { [2, 1, 3] }
--- structure { /Apply 1 /Screma/Apply 1 /ArrayLit 1 }
+-- input { [1,2,3] } output { [4,5,6] }
 
-def A : []i32 = #[opaque] [1, 2, 3]
+def A : i32 = #[opaque] 3i32
 
 #[noinline]
-def f (i: i64) = A[i]
+def f (x: i32) = x + A
 
 #[noinline]
-def g (i: i64) = f i
+def g (x: i32) = f x
 
-entry main (is: []i64) = map g is
+entry main (xs: []i32) = map g xs
