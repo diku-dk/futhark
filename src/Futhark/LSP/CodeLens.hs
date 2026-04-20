@@ -26,7 +26,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
 import Futhark.Compiler.Program (VFS)
-import Futhark.Eval (Evaluation (abort), InterpreterConfig (InterpreterConfig), newFutharkiState, runEvalRecordRef, runExpr)
+import Futhark.Eval (EvalConfig (..), Evaluation (abort), evalConfig, newFutharkiState, runEvalRecordRef, runExpr)
 import Futhark.LSP.CommandType qualified as CommandType
 import Futhark.LSP.Tool (Execute, transformVFS)
 import Futhark.Util (showText)
@@ -286,17 +286,20 @@ executeEvalLens (EvalLensData docUri line) = do
           IORef (Seq (Doc AnsiStyle)) ->
           IO (Either (Doc AnsiStyle) (Doc AnsiStyle))
         evaluationAction traceRef = interpret $ do
-          -- do not print warnings, no file
-          let interpreterConfig = InterpreterConfig False Nothing
+          -- do not print warnings
           let filePath =
                 toNormalizedUri docUri
                   & uriToNormalizedFilePath
                   & fmap fromNormalizedFilePath
+              cfg =
+                evalConfig
+                  { evalPrintWarnings = False,
+                    evalFile = filePath
+                  }
 
           -- load the file the expression is located in
           interpreterState <-
-            newFutharkiState interpreterConfig filePath currentVFS
-              >>= either abort pure
+            newFutharkiState cfg currentVFS >>= either abort pure
 
           liftIO setupLimits
 

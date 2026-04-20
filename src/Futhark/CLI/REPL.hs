@@ -312,6 +312,8 @@ breakForReason s top _ =
 runInterpreter :: F I.ExtOp a -> FutharkiM (Either I.InterpreterError a)
 runInterpreter m = runF m (pure . Right) intOp
   where
+    intOp (I.ExtOpCall {}) = error "Unexpected ExtOpCall"
+    intOp (I.ExtOpRealize {}) = error "Unexpected ExtOpRealize"
     intOp (I.ExtOpError err) =
       pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
@@ -365,6 +367,8 @@ runInterpreter m = runF m (pure . Right) intOp
 runInterpreterNoBreak :: (MonadIO m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
+    intOp (I.ExtOpCall {}) = error "Unexpected ExtOpCall"
+    intOp (I.ExtOpRealize {}) = error "Unexpected ExtOpRealize"
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putDocLn $ pretty w <> ":" <+> align (unAnnotate v)

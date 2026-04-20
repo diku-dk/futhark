@@ -59,6 +59,7 @@ import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark qualified as F
 import Language.Futhark.Interpreter.AD qualified as AD
+import Language.Futhark.Interpreter.FFI.Values (Location, indexLocation, projectLocation)
 import Language.Futhark.Interpreter.Values hiding (Value)
 import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
@@ -86,11 +87,15 @@ data ExtOp a
   = ExtOpTrace T.Text (Doc ()) a
   | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
+  | ExtOpCall VName [Value] (Value -> a)
+  | ExtOpRealize Location (Value -> a)
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
   fmap f (ExtOpBreak w why backtrace x) = ExtOpBreak w why backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
+  fmap f (ExtOpCall n p c) = ExtOpCall n p $ f . c
+  fmap f (ExtOpRealize l c) = ExtOpRealize l $ f . c
 
 type Stack = [StackFrame]
 
@@ -134,6 +139,11 @@ stacktrace = asks $ map stackFrameLoc . fst
 -- of the stack as a proxy.
 adDepth :: EvalM AD.Depth
 adDepth = AD.Depth . length <$> stacktrace
+
+realize :: Value -> EvalM Value
+realize (ValueExt _ (Just v)) = pure v
+realize (ValueExt l Nothing) = liftF $ ExtOpRealize l id
+realize v = pure v
 
 lookupImport :: ImportName -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
@@ -467,6 +477,8 @@ fromArray v = error $ "Expected array value, but found: " <> show v
 project :: Name -> Value -> Value
 project f (ValueRecord fs)
   | Just v' <- M.lookup f fs = v'
+project f (ValueExt _ (Just v)) = project f v
+project f (ValueExt l Nothing) = ValueExt (projectLocation (nameToText f) l) Nothing
 project _ _ = error "Value does not have expected field."
 
 apply :: SrcLoc -> Env -> Value -> Value -> EvalM Value
@@ -597,6 +609,12 @@ indexArray (IndexingFix i : is) (ValueArray _ arr)
 indexArray (IndexingSlice start end stride : is) (ValueArray (ShapeDim _ rowshape) arr) = do
   js <- indexesFor start end stride $ arrayLength arr
   toArray' (indexShape is rowshape) <$> mapM (indexArray is . (arr !)) js
+indexArray is (ValueExt l Nothing) = Just $ ValueExt (indexLocation (map fromIntegral $ convertIs is) l) Nothing
+  where
+    convertIs (IndexingFix i : is') = i : convertIs is'
+    convertIs [] = []
+    convertIs _ = error "TODO (89r12quiowdjl)"
+indexArray is (ValueExt _ (Just v)) = indexArray is v
 indexArray _ v = Just v
 
 writeArray :: [Indexing] -> Value -> Value -> Maybe Value
@@ -1233,7 +1251,26 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
       pure (f_env <> e_env <> res_env <> env_substs, res_mod)
     _ -> error "Expected ModuleFun."
 
+extFun :: VName -> Int -> [Value] -> EvalM Value
+extFun n i _ | i < 1 = liftF $ ExtOpCall n [] id -- Special case: Functions with 0 parameters - i.e. values
+extFun n i vs | i == 1 = pure . ValueFun $ \v -> liftF $ ExtOpCall n (reverse $ v : vs) id
+extFun n i vs = pure . ValueFun $ \v -> extFun n (i - 1) (v : vs)
+
 evalDec :: Env -> Dec -> EvalM Env
+evalDec env (ValDec vb@(ValBind (Just _) (VName vn vi) _ _ (Info ret) tparams ps fbody _ _ _))
+  | "$external" `elem` valBindAttrs vb = localExts $ do
+      let n = VName (nameFromText $ nameToText vn) vi
+      binding <- evalValBinding env tparams ps ret fbody
+      case binding of
+        (TermValue (Just t) _) -> do
+          sizes <- extEnv
+          f <- extFun n (length ps) []
+          pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
+        (TermPoly (Just t) _) -> do
+          sizes <- extEnv
+          f <- extFun n (length ps) []
+          pure $ mempty {envTerm = M.singleton n $ TermValue (Just t) f} <> sizes
+        _ -> error "TODO: Impossible? (e2huqidjnk)"
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env tparams ps ret fbody
   sizes <- extEnv
@@ -1590,7 +1627,9 @@ initialCtx =
 
     bopDef fs = fun2 $ \x y -> do
       i <- getCounter
-      case (x, y) of
+      x''' <- realize x
+      y''' <- realize y
+      case (x''', y''') of
         (ValuePrim x', ValuePrim y')
           | Just z <- msum $ map (`bopDef'` (x', y')) fs -> do
               breakOnNaN [x', y'] z

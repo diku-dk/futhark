@@ -416,6 +416,17 @@ library
       Language.Futhark.Core
       Language.Futhark.Interpreter
       Language.Futhark.Interpreter.AD
+      Language.Futhark.Interpreter.FFI
+      Language.Futhark.Interpreter.FFI.Server
+      Language.Futhark.Interpreter.FFI.Server.Explorer
+      Language.Futhark.Interpreter.FFI.Server.Interface
+      Language.Futhark.Interpreter.FFI.Server.Packer
+      Language.Futhark.Interpreter.FFI.Server.TypeLayout
+      Language.Futhark.Interpreter.FFI.UIDs
+      Language.Futhark.Interpreter.FFI.Util.BiMap
+      Language.Futhark.Interpreter.FFI.Util.NDArray
+      Language.Futhark.Interpreter.FFI.Util.UID
+      Language.Futhark.Interpreter.FFI.Values
       Language.Futhark.Interpreter.Values
       Language.Futhark.FreeVars
       Language.Futhark.Parser
@@ -478,7 +489,7 @@ library
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=5.1.10
-    , futhark-data >= 1.1.3.0
+    , futhark-data >= 1.1.4.0
     , futhark-server >= 1.3.3.0
     , futhark-manifest == 1.7.0.0
     , githash >=0.1.6.1
