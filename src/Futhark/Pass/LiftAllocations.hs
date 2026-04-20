@@ -108,8 +108,8 @@ liftAllocationsInStms stms_orig = do
           Op Alloc {} -> liftStm stm'
           _ -> do
             let pat_names = namesFromList $ patNames $ stmPat stm'
-                free_in_stm = freeIn stm
-                expand v = maybe [v] namesToList $ M.lookup v $ fst aliases
+                free_in_stm = freeIn stm'
+                expand v = v : maybe [] namesToList (M.lookup v $ fst aliases)
             if (pat_names `namesIntersect` to_lift)
               || any (`nameIn` free_in_stm) (foldMap expand $ namesToList consumed)
               then liftStm stm'
