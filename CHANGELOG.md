@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Multi-dimensional histograms (`reduce_by_index_2d`) were not handled correctly
   by the intrablock code generator in the GPU backends.
 
+* The interpreter implementation of AD handled some integer/floating-point
+  conversions incorrectly. (#2425)
+
 ## [0.25.37]
 
 ### Added
