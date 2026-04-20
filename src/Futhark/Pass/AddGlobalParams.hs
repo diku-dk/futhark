@@ -1,6 +1,12 @@
 {-# LANGUAGE LambdaCase #-}
 
 -- | Add explicit parameters for global names used in device functions.
+--
+-- This is because the GPU code generator cannot handle functions called on the
+-- device that have free variables. modifying the IR program is a lot easier
+-- than handling this in the code generator. A caveat is that we must ensure we
+-- do not add free variables to device functions after running this pass,
+-- although we could in principle just run it again.
 module Futhark.Pass.AddGlobalParams (addGlobalParams) where
 
 import Control.Monad
