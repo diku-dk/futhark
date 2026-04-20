@@ -33,8 +33,8 @@ transformProg prog = do
       direct_globals =
         M.fromList
           [ (funDefName fd, S.fromList (namesToList $ freeIn fd) `S.intersection` globals)
-            | fd <- progFuns prog,
-              funDefName fd `S.member` device_funs
+          | fd <- progFuns prog,
+            funDefName fd `S.member` device_funs
           ]
       transitive_globals = globalsPerFun call_graph direct_globals
       all_used_globals = S.unions $ M.elems transitive_globals
@@ -54,7 +54,7 @@ transformProg prog = do
       use_name env g = M.findWithDefault g g env
       call_args env f =
         [ (Var $ use_name env g, Observe)
-          | g <- globals_for_fun f
+        | g <- globals_for_fun f
         ]
       call_rewriter :: M.Map VName VName -> Exp GPU -> Exp GPU
       call_rewriter env (Apply fname args rettype safety) =
@@ -113,8 +113,8 @@ transformProg prog = do
                 env =
                   M.fromList
                     [ (g, p)
-                      | g <- gs,
-                        Just p <- [M.lookup g global_to_param]
+                    | g <- gs,
+                      Just p <- [M.lookup g global_to_param]
                     ]
                 substs = env
                 extra_params = params_for gs
@@ -139,11 +139,10 @@ globalTypes :: Stms GPU -> M.Map VName DeclType
 globalTypes =
   M.fromList
     . concatMap
-      ( \stm ->
-          map
-            (\pe -> (patElemName pe, toDecl (patElemType pe) Nonunique))
-            $ patElems
-            $ stmPat stm
+      ( map
+          (\pe -> (patElemName pe, toDecl (patElemType pe) Nonunique))
+          . patElems
+          . stmPat
       )
     . stmsToList
 
@@ -247,14 +246,14 @@ transitiveClosure graph = go
        in if seen' == seen then seen else go seen'
 
 globalsPerFun :: M.Map Name (S.Set Name) -> M.Map Name (S.Set VName) -> M.Map Name (S.Set VName)
-globalsPerFun call_graph direct = fixpoint direct
+globalsPerFun call_graph = fixpoint
   where
     fixpoint m =
       let step f gs =
             gs
               <> S.unions
                 [ M.findWithDefault mempty g m
-                  | g <- S.toList $ M.findWithDefault mempty f call_graph
+                | g <- S.toList $ M.findWithDefault mempty f call_graph
                 ]
           m' = M.mapWithKey step m
        in if m' == m then m else fixpoint m'
