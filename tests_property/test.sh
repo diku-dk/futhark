@@ -23,6 +23,9 @@ run_test() {
         Record* | Tuple* | "Stepping.fut")
             seed_flag="--seed=-2070821161"
             ;;
+        ArrayRecord* | "Arrayi32(2).fut")
+            seed_flag="--seed=976321339"
+            ;;
     esac
 
     test_file_full_path="$TEST_DIR/${test_file#./}"
