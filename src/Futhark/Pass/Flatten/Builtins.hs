@@ -7,6 +7,7 @@ module Futhark.Pass.Flatten.Builtins
     genScan,
     genFilter,
     genSegScan,
+    genSegScanomap,
     genSegRed,
     genScatter,
     genShapeIota,
@@ -18,7 +19,7 @@ module Futhark.Pass.Flatten.Builtins
   )
 where
 
-import Control.Monad (forM, (<=<))
+import Control.Monad (forM, forM_, (<=<))
 import Control.Monad.State.Strict
 import Data.Foldable (toList)
 import Data.Maybe (fromMaybe)
@@ -53,43 +54,68 @@ segMap segments f = do
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
-genScanomap ::
+genScanWithKernelBody ::
   (Traversable f) =>
   Name ->
   f SubExp ->
   Lambda GPU ->
   [SubExp] ->
-  (f SubExp -> Builder GPU [SubExp]) ->
+  (f SubExp -> Builder GPU Result) ->
   Builder GPU [VName]
-genScanomap desc segments lam nes m = do
+genScanWithKernelBody desc segments lam nes m = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
     res <- m $ fmap Var gtids
-    res_t <- mapM subExpType res
-    pure (map (Returns ResultMaySimplify mempty) res, res_t)
+    res_t <- mapM (subExpType . resSubExp) res
+    pure (map mkResult res, res_t)
   let kbody = Body () stms res
       op = SegBinOp Commutative lam nes mempty
   post_lam <- mkIdentityLambda res_t
   letTupExp desc $ Op $ SegOp $ SegScan lvl space res_t kbody [op] (SegPostOp post_lam)
   where
     lvl = SegThread SegVirt Nothing
+    mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
+
+bindLambdaInputArrays ::
+  (Traversable f) =>
+  f SubExp ->
+  Lambda GPU ->
+  [VName] ->
+  Builder GPU ()
+bindLambdaInputArrays gtids lam arrs = do
+  let idxs = toList gtids
+  forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) ->
+    letBindNames [paramName p]
+      =<< case paramType p of
+        Acc {} ->
+          eSubExp $ Var arr
+        _ ->
+          eIndex arr $ map eSubExp idxs
 
 genScan :: (Traversable f) => Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
 genScan desc segments lam nes arrs =
-  genScanomap desc segments lam nes $ \gtids -> forM arrs $ \arr ->
-    letSubExp (baseName arr <> "_elem") =<< eIndex arr (toList $ fmap eSubExp gtids)
+  genScanWithKernelBody desc segments lam nes $ \gtids ->
+    subExpsRes
+      <$> forM
+        arrs
+        ( \arr ->
+            letSubExp (baseName arr <> "_elem") =<< eIndex arr (toList $ fmap eSubExp gtids)
+        )
 
 -- Also known as a prescan.
 genExScan :: (Traversable f) => Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
 genExScan desc segments lam nes arrs =
-  genScanomap desc segments lam nes $ \gtids ->
+  genScanWithKernelBody desc segments lam nes $ \gtids ->
     let Just (outerDims, innerDim) = unsnoc $ toList gtids
-     in letTupExp' "to_prescan"
-          =<< eIf
-            (toExp $ pe64 innerDim .==. 0)
-            (eBody (map eSubExp nes))
-            (eBody (map (`eIndex` (map toExp outerDims ++ [toExp $ pe64 innerDim - 1])) arrs))
+     in do
+          prescan <-
+            letTupExp' "to_prescan"
+              =<< eIf
+                (toExp $ pe64 innerDim .==. 0)
+                (eBody (map eSubExp nes))
+                (eBody (map (`eIndex` (map toExp outerDims ++ [toExp $ pe64 innerDim - 1])) arrs))
+          pure $ subExpsRes prescan
 
 segScanLambda ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType, LParamInfo (Rep m) ~ Type) =>
@@ -115,6 +141,31 @@ genSegScan desc lam nes flags arrs = do
   w <- arraySize 0 <$> lookupType flags
   lam' <- segScanLambda lam
   drop 1 <$> genScan desc [w] lam' (constant False : nes) (flags : arrs)
+
+genSegScanomap ::
+  Name ->
+  Lambda GPU ->
+  [SubExp] ->
+  VName ->
+  Lambda GPU ->
+  [VName] ->
+  Builder GPU [VName]
+genSegScanomap desc scan_lam nes flags map_lam arrs = do
+  w <- arraySize 0 <$> lookupType flags
+  scan_lam' <- segScanLambda scan_lam
+  drop 1
+    <$> genScanWithKernelBody
+      desc
+      [w]
+      scan_lam'
+      (constant False : nes)
+      ( \gtids -> do
+          let [gtid] = toList gtids
+          flag <- letSubExp "flag" =<< eIndex flags [eSubExp gtid]
+          bindLambdaInputArrays gtids map_lam arrs
+          map_res <- bodyBind (lambdaBody map_lam)
+          pure (subExpRes flag : map_res)
+      )
 
 genPrefixSum :: Name -> VName -> Builder GPU VName
 genPrefixSum desc ns = do
