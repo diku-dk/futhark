@@ -1316,6 +1316,12 @@ suitableOperator env inps lam nes =
   where
     notVariant v = isNothing $ M.lookup v $ inputReps inps env
 
+suitableSegOpMap :: DistEnv -> DistInputs -> Lambda SOACS -> Bool
+suitableSegOpMap env inps map_lam =
+  not (any isParallelStm (bodyStms $ lambdaBody map_lam))
+    -- TODO: do we want to add variants as inputs?
+    && allNames (not . isVariant inps env . Var) (freeIn map_lam)
+
 -- doSegScan :: [Scan SOACS] -> VName -> [VName] -> Builder GPU [VName]
 doSegScan :: [Scan SOACS] -> VName -> [VName] -> Segments -> DistInputs -> DistEnv -> Builder GPU [VName]
 doSegScan scans flags elems segments inps env = do
@@ -1325,6 +1331,28 @@ doSegScan scans flags elems segments inps env = do
   let nes = scanNeutral scan
   nes' <- mapM (readInput segments env zeros inps) nes
   genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) nes' flags elems
+
+doSegScanomap ::
+  [Scan SOACS] ->
+  VName ->
+  [VName] ->
+  Lambda SOACS ->
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  Builder GPU [VName]
+doSegScanomap scans flags elems map_lam segments inps env = do
+  let scan = singleScan scans
+  let zeros = replicate (segmentsRank segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+  let nes = scanNeutral scan
+  nes' <- mapM (readInput segments env zeros inps) nes
+  genSegScanomap
+    "scanomap"
+    (soacsLambdaToGPU $ scanLambda scan)
+    nes'
+    flags
+    (soacsLambdaToGPU map_lam)
+    elems
 
 -- Hacky fix to get result representations in the same order as the pattern
 resRepsInPatOrder :: Pat Type -> [(VName, ResRep)] -> [ResRep]
@@ -1432,6 +1460,30 @@ flattenRegular _ v = do
     Reshape v $
       reshapeAll (arrayShape v_t) (Shape [num_elems])
 
+insertSegOpMapResults ::
+  Segments ->
+  VName ->
+  VName ->
+  VName ->
+  IrregularKind ->
+  [(DistResult, VName)] ->
+  DistEnv ->
+  Builder GPU DistEnv
+insertSegOpMapResults segments segs flags offsets kind bnds env0 =
+  foldM insert env0 bnds
+  where
+    insert env (dist_res, v)
+      | isRegularDistResult dist_res = do
+          let DistType _ _ t = distResType dist_res
+              expected_shape = segmentsShape segments <> arrayShape t
+          v_t <- lookupType v
+          v' <- letExp (baseName v <> "_reshaped") . BasicOp $
+            Reshape v $
+              reshapeAll (arrayShape v_t) expected_shape
+          pure $ insertRegulars [distResTag dist_res] [v'] env
+      | otherwise =
+          pure $ insertIrregular segs flags offsets (distResTag dist_res) v kind env
+
 transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm segments env (DistStm inps res (ScalarStm stms)) =
   transformScalarStms segments env inps res (stmsFromList stms)
@@ -1460,6 +1512,35 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
               Reshape v $
                 reshapeAll (arrayShape v_t) (segmentsShape segments)
           pure $ insertRegulars (map distResTag res) elems'' env
+      | Just (reds, map_lam) <- isRedomapSOAC form,
+        suitableSegOpMap env inps map_lam,
+        all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
+          traceM "HELLO Fast REDOMAP"
+          reps <- mapM (segOpInputRep segments env inps) arrs
+          (ws_F, ws_O, ws_S, elems, elems_kind) <-
+            prepareSegOpInputs segments env inps w reps arrs
+          let sing_red = singleReduce reds
+          let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+          nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
+          let sing_red' = sing_red {redNeutral = nes'}
+          (red_elems, mapout_elems) <-
+            genSegRedomap ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam)
+          red_elems' <- forM red_elems $ \v -> do
+            v_t <- lookupType v
+            letExp (baseName v <> "_reshaped") . BasicOp $
+              Reshape v $
+                reshapeAll (arrayShape v_t) (segmentsShape segments)
+          let (red_res, map_res) = splitAt (redResults reds) res
+          env' <-
+            insertSegOpMapResults
+              segments
+              ws_S
+              ws_F
+              ws_O
+              elems_kind
+              (zip map_res mapout_elems)
+              env
+          pure $ insertRegulars (map distResTag red_res) red_elems' env'
       | Just (reds, map_lam) <- isRedomapSOAC form,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
           traceM "HELLO REDOMAP"
@@ -1497,6 +1578,26 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           elems' <- doSegScan scans flags elems segments inps env
           pure $
             insertIrregulars arr_segments flags offsets (zip (map distResTag res) elems') elems_kind env
+      | Just (scans, map_lam) <- isScanomapSOAC form,
+        suitableSegOpMap env inps map_lam,
+        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
+          reps <- mapM (segOpInputRep segments env inps) arrs
+          (ws_F, ws_O, ws_S, elems, elems_kind) <-
+            prepareSegOpInputs segments env inps w reps arrs
+          elems' <- doSegScanomap scans ws_F elems map_lam segments inps env
+          let (scanout_elems, mapout_elems) = splitAt (scanResults scans) elems'
+              (scan_res, map_res) = splitAt (scanResults scans) res
+          env' <-
+            insertSegOpMapResults
+              segments
+              ws_S
+              ws_F
+              ws_O
+              elems_kind
+              (zip map_res mapout_elems)
+              env
+          pure $
+            insertIrregulars ws_S ws_F ws_O (zip (map distResTag scan_res) scanout_elems) elems_kind env'
       | Just (scans, map_lam) <- isScanomapSOAC form,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
