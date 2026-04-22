@@ -328,76 +328,164 @@ scanStage2 ::
   TV Int32 ->
   Imp.TExp Int64 ->
   Count NumBlocks SubExp ->
+  Count BlockSize SubExp ->
   CrossesSegment ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage2 scan_out stage1_num_threads elems_per_group num_tblocks crossesSegment space scans = do
+scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2_tblock_size crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
+      stage1_num_tblocks_e = pe64 $ unCount stage1_num_tblocks
+      stage2_tblock_size_e = pe64 $ unCount stage2_tblock_size
 
-  -- Our group size is the number of groups for the stage 1 kernel.
-  let tblock_size = Count $ unCount num_tblocks
+  -- Number of chunks needed to cover all stage-1 blocks.
+  num_chunks <-
+    dPrimVE "stage2_num_chunks" $
+      stage1_num_tblocks_e `divUp` stage2_tblock_size_e
 
-  let crossesSegment' = do
-        f <- crossesSegment
-        Just $ \from to ->
-          f
-            ((sExt64 from + 1) * elems_per_group - 1)
-            ((sExt64 to + 1) * elems_per_group - 1)
-
-  sKernelThread "scan_stage2" (segFlat space) (defKernelAttrs (Count (intConst Int64 1)) tblock_size) $ do
+  sKernelThread "scan_stage2" (segFlat space) (defKernelAttrs (Count (intConst Int64 1)) stage2_tblock_size) $ do
     constants <- kernelConstants <$> askEnv
-    per_scan_local_arrs <- makeLocalArrays tblock_size (tvSize stage1_num_threads) scans
+    per_scan_local_arrs <- makeLocalArrays stage2_tblock_size (tvSize stage1_num_threads) scans
     let per_scan_rets = map (lambdaReturnType . segBinOpLambda) scans
         per_scan_pes = segBinOpChunks scans scan_out
 
-    flat_idx <-
-      dPrimV "flat_idx" $
-        (sExt64 (kernelLocalThreadId constants) + 1) * elems_per_group - 1
-    -- Construct segment indices.
-    zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
+    -- Declare lambda params and initialise carries (xParams) to the
+    -- neutral element.  For scalar scans these persist across chunk
+    -- iterations as registers; for array scans they are reloaded from
+    -- global memory at the start of each chunk.
+    forM_ scans $ \scan -> do
+      dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan
+      forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
+        copyDWIMFix (paramName p) [] ne []
 
-    forM_ (L.zip4 scans per_scan_local_arrs per_scan_rets per_scan_pes) $
-      \(SegBinOp _ scan_op nes vec_shape, local_arrs, rets, pes) ->
-        sLoopNest vec_shape $ \vec_is -> do
-          let glob_is = map Imp.le64 gtids ++ vec_is
+    sFor "chunk_id" num_chunks $ \chunk_id -> do
+      let chunk_offset = chunk_id * stage2_tblock_size_e
 
-              in_bounds =
-                foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
+      flat_idx <-
+        dPrimV "flat_idx" $
+          (chunk_offset + sExt64 (kernelLocalThreadId constants) + 1) * elems_per_group - 1
+      -- Construct segment indices.
+      zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
 
-              when_in_bounds = forM_ (zip3 rets local_arrs pes) $ \(t, arr, pe) ->
-                copyDWIMFix
-                  arr
-                  [localArrayIndex constants t]
-                  (Var pe)
-                  glob_is
+      forM_ (L.zip4 scans per_scan_local_arrs per_scan_rets per_scan_pes) $
+        \(scan@(SegBinOp _ scan_op nes vec_shape), local_arrs, rets, pes) ->
+          sComment "do one stage-2 scan chunk" $ do
+            let (array_scan, fence, barrier) = barrierFor scan_op
+                scan_x_params = xParams scan
+                scan_y_params = yParams scan
 
-              when_out_of_bounds = forM_ (zip3 rets local_arrs nes) $ \(t, arr, ne) ->
-                copyDWIMFix arr [localArrayIndex constants t] ne []
-              (_, _, barrier) =
-                barrierFor scan_op
+            when array_scan barrier
 
-          sComment "threads in bound read carries; others get neutral element" $
-            sIf in_bounds when_in_bounds when_out_of_bounds
+            sLoopNest vec_shape $ \vec_is -> do
+              let glob_is = map Imp.le64 gtids ++ vec_is
+                  in_bounds =
+                    foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
+                  -- Element index of the last element of the previous chunk,
+                  -- used to load the inter-chunk carry for array scans.
+                  prev_chunk_last = chunk_offset * elems_per_group - 1
 
-          barrier
+              -- For array scans, reload carry (xParams) from the scan
+              -- output written by the previous chunk.  Thread 0 reads
+              -- the last element of the previous chunk, unless a segment
+              -- boundary falls between the chunks.
+              when array_scan $ do
+                crosses_seg <-
+                  dPrimVE "crosses_seg" $
+                    case crossesSegment of
+                      Nothing -> false
+                      Just f -> f prev_chunk_last (prev_chunk_last + 1)
+                sIf
+                  (chunk_id .>. 0 .&&. kernelLocalThreadId constants .==. 0 .&&. bNot crosses_seg)
+                  ( do
+                      let carry_is = unflattenIndex dims' prev_chunk_last
+                      forM_ (zip scan_x_params pes) $ \(p, pe) ->
+                        copyDWIMFix (paramName p) [] (Var pe) (carry_is ++ vec_is)
+                  )
+                  ( forM_ (zip scan_x_params nes) $ \(p, ne) ->
+                      copyDWIMFix (paramName p) [] ne []
+                  )
 
-          blockScan
-            crossesSegment'
-            (sExt64 $ tvExp stage1_num_threads)
-            (sExt64 $ kernelBlockSize constants)
-            scan_op
-            local_arrs
+              -- Load the stage-1 partial-scan result for this thread's
+              -- block into yParams (or the neutral element when out of
+              -- bounds).
+              sIf
+                in_bounds
+                ( forM_ (zip scan_y_params pes) $ \(p, pe) ->
+                    copyDWIMFix (paramName p) [] (Var pe) glob_is
+                )
+                ( forM_ (zip scan_y_params nes) $ \(p, ne) ->
+                    copyDWIMFix (paramName p) [] ne []
+                )
 
-          sComment "threads in bounds write scanned carries" $
-            sWhen in_bounds $
-              forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
-                copyDWIMFix
-                  pe
-                  glob_is
-                  (Var arr)
-                  [localArrayIndex constants t]
+              -- Combine carry (xParams) with new value (yParams) and
+              -- write the result to shared/local memory.  Thread 0
+              -- incorporates the inter-chunk carry; other threads have
+              -- neutral in xParams, so the op is a no-op for them.
+              compileStms mempty (bodyStms $ lambdaBody scan_op) $
+                forM_ (zip3 rets local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
+                  \(t, arr, se) ->
+                    copyDWIMFix arr [localArrayIndex constants t] se []
+
+              sOp $ Imp.ErrorSync fence
+
+              -- crossesSegment' maps block-local thread IDs to element
+              -- indices, adjusting for the current chunk offset.
+              let crossesSegment' =
+                    crossesSegment >>= \f ->
+                      Just $ \from to ->
+                        f
+                          ((chunk_offset + sExt64 from + 1) * elems_per_group - 1)
+                          ((chunk_offset + sExt64 to + 1) * elems_per_group - 1)
+
+              scan_op_renamed <- renameLambda scan_op
+              blockScan
+                crossesSegment'
+                (sExt64 $ tvExp stage1_num_threads)
+                (sExt64 $ kernelBlockSize constants)
+                scan_op_renamed
+                local_arrs
+
+              sComment "threads in bounds write scanned carries" $
+                sWhen in_bounds $
+                  forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
+                    copyDWIMFix
+                      pe
+                      glob_is
+                      (Var arr)
+                      [localArrayIndex constants t]
+
+              barrier
+
+              -- For scalar scans, update the carry register (xParams)
+              -- so the next chunk can use it.  For array scans the carry
+              -- is reloaded from global memory at the start of each chunk.
+              unless array_scan $ do
+                let next_chunk_start = chunk_offset + stage2_tblock_size_e
+                crosses_seg2 <-
+                  dPrimVE "crosses_seg" $
+                    case crossesSegment of
+                      Nothing -> false
+                      Just f ->
+                        f
+                          (next_chunk_start * elems_per_group - 1)
+                          (next_chunk_start * elems_per_group)
+                let should_load_carry =
+                      kernelLocalThreadId constants .==. 0 .&&. bNot crosses_seg2
+                    load_carry =
+                      forM_ (zip local_arrs scan_x_params) $ \(arr, p) ->
+                        copyDWIMFix
+                          (paramName p)
+                          []
+                          (Var arr)
+                          [sExt64 (kernelBlockSize constants) - 1]
+                    load_neutral =
+                      forM_ (zip nes scan_x_params) $ \(ne, p) ->
+                        copyDWIMFix (paramName p) [] ne []
+                sWhen should_load_carry load_carry
+                sUnless should_load_carry load_neutral
+
+              barrier
 
 scanStage3 ::
   Pat LetDecMem ->
@@ -542,18 +630,20 @@ compileSegScan ::
 compileSegScan pat lvl space ts scans kbody post_op = do
   attrs <- lvlKernelAttrs lvl
 
-  -- Since stage 2 involves a group size equal to the number of groups
-  -- used for stage 1, we have to cap this number to the maximum group
-  -- size.
-  stage1_max_num_tblocks <- dPrim "stage1_max_num_tblocks"
-  sOp $ Imp.GetSizeMax (tvVar stage1_max_num_tblocks) SizeThreadBlock
+  -- Stage 2 uses loop virtualization, so stage1_num_tblocks is no
+  -- longer capped by the maximum thread block size.  Instead we query
+  -- the maximum to use as the stage-2 block size.
+  stage2_max_tblock_size <- dPrim "stage2_max_tblock_size"
+  sOp $ Imp.GetSizeMax (tvVar stage2_max_tblock_size) SizeThreadBlock
 
-  stage1_num_tblocks <-
+  let stage1_num_tblocks = kAttrNumBlocks attrs
+
+  stage2_tblock_size <-
     fmap (Imp.Count . tvSize) $
-      dPrimV "stage1_num_tblocks" $
-        sMin64 (tvExp stage1_max_num_tblocks) $
-          pe64 . Imp.unCount . kAttrNumBlocks $
-            attrs
+      dPrimV "stage2_tblock_size" $
+        sMin64 (tvExp stage2_max_tblock_size) $
+          pe64 . Imp.unCount $
+            stage1_num_tblocks
 
   let shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
       scan_ts = concatMap shpT scans
@@ -590,5 +680,5 @@ compileSegScan pat lvl space ts scans kbody post_op = do
 
   emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
 
-  scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks crossesSegment space scans
+  scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2_tblock_size crossesSegment space scans
   scanStage3 pat scan_out map_out (kAttrNumBlocks attrs) (kAttrBlockSize attrs) elems_per_group crossesSegment space scans post_op
