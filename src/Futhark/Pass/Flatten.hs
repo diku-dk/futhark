@@ -1790,9 +1790,9 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           let reps = distResultsToResReps res payload_res
           pure $ insertReps (zip (map distResTag res) reps) env
     Let _ _ (Apply name args rettype s) -> do
-      let [w] = NE.toList segments
-          name' = liftFunName name
-      args' <- ((w, Observe) :) . concat <$> mapM (liftArg segments inps env) args
+      let name' = liftFunName name
+      w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+      args' <- ((w, Observe) :) . concat <$> mapM (liftArg segments w inps env) args
       args_ts <- mapM (subExpType . fst) args'
       let dietToUnique Consume = Unique
           dietToUnique Observe = Nonunique
@@ -1800,7 +1800,8 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
           rettype' = addRetAls param_ts $ liftRetType w $ map fst rettype
       result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
-      let reps = resultToResReps (map fst rettype) result
+      reps <- zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) $
+        resultToResReps (map fst rettype) result
       pure $ insertReps (zip (map distResTag res) reps) env
     Let _ aux (Loop merge (ForLoop i it n) body) -> do
       if isVariant inps env n
@@ -1966,15 +1967,15 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
                         off <-
                           letSubExp (nm <> "_off")
                             =<< eIndex partition_offs [toExp $ intConst Int64 k]
-                        letExp (nm <> "_inds") $
-                          BasicOp $
-                            Index partition_inds $
-                              fullSlice inds_t [DimSlice off sz (intConst Int64 1)]
+                        inds <-
+                          letExp (nm <> "_inds") $
+                            BasicOp $
+                              Index partition_inds $
+                                fullSlice inds_t [DimSlice off sz (intConst Int64 1)]
+                        pure (sz, inds)
 
-                  inactive_inds <- getInds "inactive" 0
-                  active_inds <- getInds "active" 1
-                  inactive_size <- arraySize 0 <$> lookupType inactive_inds
-                  num_data <- letSubExp "num_data" =<< eIndex partition_sizes [toExp $ intConst Int64 1]
+                  (_, inactive_inds) <- getInds "inactive" 0
+                  (active_size, active_inds) <- getInds "active" 1
 
                   inactive_reps <- forM old_loop_params $ \p -> do
                     (_, _, rep) <- splitInput segments loop_new_inputs loop_env_local inactive_inds (paramName p)
@@ -1989,12 +1990,12 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
                         (v, t, i) <- zip3 vs ts [0 ..]
                         pure (v, DistInput (ResTag i) t)
                       env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-                  let suset_segments = NE.singleton num_data
-                  let (subset_inputs', subset_dstms) = distributeBody scope suset_segments subset_inputs body
-                  env_subset' <- foldM (transformDistStm suset_segments) env_subset subset_dstms
+                  let subset_segments = NE.singleton active_size
+                  let (subset_inputs', subset_dstms) = distributeBody scope subset_segments subset_inputs body
+                  env_subset' <- foldM (transformDistStm subset_segments) env_subset subset_dstms
                   active_reps <-
                     zipWithM
-                      (liftDistResultRep suset_segments subset_inputs' env_subset')
+                      (liftDistResultRep subset_segments subset_inputs' env_subset')
                       res
                       (bodyResult body)
 
@@ -2065,7 +2066,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
                   any_active <-
                     letSubExp "any_active"
                       =<< eIf
-                        (toExp $ pe64 num_data .==. 0)
+                        (toExp $ pe64 active_size .==. 0)
                         (eBody [eSubExp $ constant False])
                         (eBody [eSubExp $ constant True])
 
@@ -2394,11 +2395,19 @@ liftParam w fparam =
   where
     desc = baseName (paramName fparam)
 
-liftArg :: Segments -> DistInputs -> DistEnv -> (SubExp, Diet) -> Builder GPU [(SubExp, Diet)]
-liftArg segments inps env (se, d) = do
+liftArg :: Segments -> SubExp -> DistInputs -> DistEnv -> (SubExp, Diet) -> Builder GPU [(SubExp, Diet)]
+liftArg segments w inps env (se, d) = do
   (_, rep) <- liftSubExp segments inps env se
   case rep of
-    Regular v -> pure [(Var v, d)]
+    Regular v -> do
+      v_t <- lookupType v
+      v' <-
+        if arrayShape v_t == Shape [w]
+          then pure v
+          else
+            letExp "lifted_arg_flat" . BasicOp $
+              Reshape v $ reshapeAll (arrayShape v_t) (Shape [w])
+      pure [(Var v', d)]
     Irregular irreg -> mkIrrep irreg
   where
     mkIrrep
@@ -2410,15 +2419,32 @@ liftArg segments inps env (se, d) = do
           }
         ) = do
         t <- lookupType elems
+        t_o <- lookupType offsets
         flags_t <- lookupType flags
         num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
         let shape = Shape [Var num_data]
         flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
         elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
+        segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [w])
+        offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [w])
+
         -- Only apply the original diet to the 'elems' array
         let diets = replicate 4 Observe ++ [d]
-        pure $ zipWith (curry (first Var)) [num_data, segs, flags', offsets, elems'] diets
+        pure $ zipWith (curry (first Var)) [num_data, segs', flags', offsets', elems'] diets
 
+reshapeLiftedApplyResult :: Segments -> RetType SOACS -> ResRep -> Builder GPU ResRep
+reshapeLiftedApplyResult segments Prim {} (Regular v) = do
+  v_t <- lookupType v
+  let expectedShape = segmentsShape segments
+  v' <-
+    if arrayShape v_t == expectedShape
+      then pure v
+      else
+        letExp "lifted_apply_res" . BasicOp $
+          Reshape v $ reshapeAll (arrayShape v_t) expectedShape
+  pure $ Regular v'
+reshapeLiftedApplyResult _ _ rep =
+  pure rep
 liftLoopInit :: Segments -> DistInputs -> DistEnv -> SubExp -> SubExp -> Builder GPU [SubExp]
 liftLoopInit segments inps env se num_segments = do
   (_, rep) <- liftSubExp segments inps env se

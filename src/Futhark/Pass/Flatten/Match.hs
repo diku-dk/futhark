@@ -189,16 +189,19 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
   (partition_sizes, partition_offs, partition_inds) <- doPartition n_cases equiv_classes
   inds_t <- lookupType partition_inds
   -- Get the indices of each scrutinee by equivalence class
-  inds <- forM [0 .. num_cases - 1] $ \i -> do
+  branch_info <- forM [0 .. num_cases - 1] $ \i -> do
     num_data <-
       letSubExp ("size" <> nameFromString (show i))
         =<< eIndex partition_sizes [toExp $ intConst Int64 i]
     begin <-
       letSubExp ("idx_begin" <> nameFromString (show i))
         =<< eIndex partition_offs [toExp $ intConst Int64 i]
-    letExp ("inds_branch" <> nameFromString (show i)) $
-      BasicOp . Index partition_inds $
-        fullSlice inds_t [DimSlice begin num_data (intConst Int64 1)]
+    inds <-
+      letExp ("inds_branch" <> nameFromString (show i)) $
+        BasicOp . Index partition_inds $
+          fullSlice inds_t [DimSlice begin num_data (intConst Int64 1)]
+    pure (num_data, inds)
+  let (branch_sizes, inds) = unzip branch_info
 
   -- Distribute and lift the branch bodies.
   -- We put the default case at the start as it's the 0'th equivalence class
@@ -209,12 +212,11 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
 
   let branch_results = map bodyResult branch_bodies
   branch_reps <- forM [0 .. num_cases - 1] $ \i -> do
-    size <- letSubExp "size" =<< eIndex partition_sizes [toExp $ intConst Int64 i]
     let inputs = branch_inputs !! fromIntegral i
     let env' = branch_envs !! fromIntegral i
     let dstms = branch_dstms !! fromIntegral i
     let result = branch_results !! fromIntegral i
-        branch_segments = NE.singleton size
+        branch_segments = NE.singleton $ branch_sizes !! fromIntegral i
     env'' <- foldM (flattenDistStm ops branch_segments) env' dstms
     zipWithM (liftDistResultRep branch_segments inputs env'') res result
 

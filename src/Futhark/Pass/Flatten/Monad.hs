@@ -418,7 +418,9 @@ liftSubExp segments inps env se = case se of
           Array {} -> Irregular <$> mkIrregFromReg segments v'
           Acc {} -> pure $ Regular v'
           Mem {} -> error "getRepSubExp: Mem"
-    Just (t, Irregular irreg) -> pure (t, Irregular irreg)
+    Just (t, Irregular irreg) -> do
+      irreg' <- ensureDenseIrregular "lifted_irreg" irreg
+      pure (t, Irregular irreg')
     Nothing -> do
       t <- lookupType v
       v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
