@@ -81,9 +81,9 @@ echo "$TESTS" | xargs -I {} -P "$CORES" sh "$0" "--worker" "$FUTHARK_BIN" "{}"
 
 # Final status check
 if [ $? -ne 0 ]; then
-    echo "\nSome tests failed out of the $NUMTESTS tests."
+    printf "\nSome tests failed out of the $NUMTESTS tests.\n"
     exit 1
 else
-    echo "\nAll $NUMTESTS tests passed!"
+    printf "\nAll $NUMTESTS tests passed!\n"
     exit 0
 fi
