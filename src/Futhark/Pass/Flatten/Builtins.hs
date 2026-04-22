@@ -8,6 +8,7 @@ module Futhark.Pass.Flatten.Builtins
     genFilter,
     genSegScan,
     genSegScanomap,
+    genSegScanomapWithPost,
     genSegRed,
     genSegRedomap,
     genScatter,
@@ -63,7 +64,19 @@ genScanWithKernelBody ::
   [SubExp] ->
   (f SubExp -> Builder GPU Result) ->
   Builder GPU [VName]
-genScanWithKernelBody desc segments lam nes m = do
+genScanWithKernelBody desc segments lam nes =
+  genScanWithKernelBodyAndPost desc segments lam nes mkIdentityLambda
+
+genScanWithKernelBodyAndPost ::
+  (Traversable f) =>
+  Name ->
+  f SubExp ->
+  Lambda GPU ->
+  [SubExp] ->
+  ([Type] -> Builder GPU (Lambda GPU)) ->
+  (f SubExp -> Builder GPU Result) ->
+  Builder GPU [VName]
+genScanWithKernelBodyAndPost desc segments lam nes mkPostLam m = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
@@ -72,7 +85,7 @@ genScanWithKernelBody desc segments lam nes m = do
     pure (map mkResult res, res_t)
   let kbody = Body () stms res
       op = SegBinOp Commutative lam nes mempty
-  post_lam <- mkIdentityLambda res_t
+  post_lam <- mkPostLam res_t
   letTupExp desc $ Op $ SegOp $ SegScan lvl space res_t kbody [op] (SegPostOp post_lam)
   where
     lvl = SegThread SegVirt Nothing
@@ -143,6 +156,14 @@ genSegScan desc lam nes flags arrs = do
   lam' <- segScanLambda lam
   drop 1 <$> genScan desc [w] lam' (constant False : nes) (flags : arrs)
 
+segScanomapPostLambda ::
+  (MonadBuilder m, LParamInfo (Rep m) ~ Type) =>
+  Lambda (Rep m) ->
+  m (Lambda (Rep m))
+segScanomapPostLambda lam = do
+  flag_p <- newParam "seg_flag" $ Prim Bool
+  mkLambda (flag_p : lambdaParams lam) $
+    bodyBind $ lambdaBody lam
 genSegScanomap ::
   Name ->
   Lambda GPU ->
@@ -152,21 +173,35 @@ genSegScanomap ::
   [VName] ->
   Builder GPU [VName]
 genSegScanomap desc scan_lam nes flags map_lam arrs = do
+  post_lam <- mkIdentityLambda $ lambdaReturnType map_lam
+  genSegScanomapWithPost desc scan_lam nes flags post_lam map_lam arrs
+
+genSegScanomapWithPost ::
+  Name ->
+  Lambda GPU ->
+  [SubExp] ->
+  VName ->
+  Lambda GPU ->
+  Lambda GPU ->
+  [VName] ->
+  Builder GPU [VName]
+genSegScanomapWithPost desc scan_lam nes flags post_lam map_lam arrs = do
   w <- arraySize 0 <$> lookupType flags
   scan_lam' <- segScanLambda scan_lam
-  drop 1
-    <$> genScanWithKernelBody
-      desc
-      [w]
-      scan_lam'
-      (constant False : nes)
-      ( \gtids -> do
-          let [gtid] = toList gtids
-          flag <- letSubExp "flag" =<< eIndex flags [eSubExp gtid]
-          bindLambdaInputArrays gtids map_lam arrs
-          map_res <- bodyBind (lambdaBody map_lam)
-          pure (subExpRes flag : map_res)
-      )
+  post_lam' <- segScanomapPostLambda post_lam
+  genScanWithKernelBodyAndPost
+    desc
+    [w]
+    scan_lam'
+    (constant False : nes)
+    (const $ pure post_lam')
+    ( \gtids -> do
+        let [gtid] = toList gtids
+        flag <- letSubExp "flag" =<< eIndex flags [eSubExp gtid]
+        bindLambdaInputArrays gtids map_lam arrs
+        map_res <- bodyBind (lambdaBody map_lam)
+        pure (subExpRes flag : map_res)
+    )
 
 genPrefixSum :: Name -> VName -> Builder GPU VName
 genPrefixSum desc ns = do

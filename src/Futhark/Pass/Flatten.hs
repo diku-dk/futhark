@@ -18,7 +18,7 @@ import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (fromMaybe, isNothing, mapMaybe)
+import Data.Maybe (isNothing, mapMaybe)
 import Data.Set qualified as S
 import Data.Tuple.Solo
 import Debug.Trace
@@ -1354,6 +1354,139 @@ doSegScanomap scans flags elems map_lam segments inps env = do
     (soacsLambdaToGPU map_lam)
     elems
 
+doSegMaposcanomap ::
+  [Scan SOACS] ->
+  VName ->
+  [VName] ->
+  Lambda SOACS ->
+  Lambda SOACS ->
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  Builder GPU [VName]
+doSegMaposcanomap scans flags elems post_lam map_lam segments inps env = do
+  let scan = singleScan scans
+  let zeros = replicate (segmentsRank segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+  let nes = scanNeutral scan
+  nes' <- mapM (readInput segments env zeros inps) nes
+  genSegScanomapWithPost
+    "maposcanomap"
+    (soacsLambdaToGPU $ scanLambda scan)
+    nes'
+    flags
+    (soacsLambdaToGPU post_lam)
+    (soacsLambdaToGPU map_lam)
+    elems
+
+transformPostMaposcanomap ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  [Scan SOACS] ->
+  Lambda SOACS ->
+  Builder GPU DistEnv
+transformPostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam = do
+  reps <- mapM (segOpInputRep segments env inps) arrs
+  (ws_F, ws_O, ws_S, elems, elems_kind) <-
+    prepareSegOpInputs segments env inps w reps arrs
+  elems' <- doSegScanomap scans ws_F elems map_lam segments inps env
+  transformMaposcanomapPostResults segments env inps res pat w ws_F ws_O ws_S elems_kind elems' post_lam
+
+transformMaposcanomapPostResults ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  SubExp ->
+  VName ->
+  VName ->
+  VName ->
+  IrregularKind ->
+  [VName] ->
+  Lambda SOACS ->
+  Builder GPU DistEnv
+transformMaposcanomapPostResults segments env inps res pat w ws_F ws_O ws_S elems_kind elems post_lam = do
+  let (inps_local, env_local, next_tag) = localiseInputs env inps
+      post_params = lambdaParams post_lam
+      post_tags = map ResTag [next_tag ..]
+      post_inputs =
+        zipWith
+          (\p tag -> (paramName p, DistInput tag (paramType p)))
+          post_params
+          post_tags
+          <> inps_local
+      post_reps =
+        [ Irregular $
+            IrregularRep
+              { irregularS = ws_S,
+                irregularF = ws_F,
+                irregularO = ws_O,
+                irregularD = elem_v,
+                irregularK = elems_kind
+              }
+          | elem_v <- elems
+        ]
+      post_env = insertReps (zip post_tags post_reps) env_local
+      post_arrs = map paramName post_params
+  post_res <- transformInnerMap segments post_env post_inputs pat w post_arrs post_lam
+  pure $ insertReps (zip (map distResTag res) post_res) env
+
+transformPreMaposcanomap ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  [Scan SOACS] ->
+  Lambda SOACS ->
+  Builder GPU DistEnv
+transformPreMaposcanomap segments env inps res w arrs post_lam scans map_lam = do
+  map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
+    PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
+  map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
+  (ws_F, ws_O, ws_S, elems, elems_kind) <-
+    prepareSegOpInputs segments env inps w map_res_all (patNames map_pat)
+  id_lam <- mkIdentityLambda $ lambdaReturnType map_lam
+  elems' <- doSegMaposcanomap scans ws_F elems post_lam id_lam segments inps env
+  insertSegOpMapResults
+    segments
+    ws_S
+    ws_F
+    ws_O
+    elems_kind
+    (zip res elems')
+    env
+
+transformPrePostMaposcanomap ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  [Scan SOACS] ->
+  Lambda SOACS ->
+  Builder GPU DistEnv
+transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam = do
+  map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
+    PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
+  map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
+  (ws_F, ws_O, ws_S, elems, elems_kind) <-
+    prepareSegOpInputs segments env inps w map_res_all (patNames map_pat)
+  id_lam <- mkIdentityLambda $ lambdaReturnType map_lam
+  elems' <- doSegScanomap scans ws_F elems id_lam segments inps env
+  transformMaposcanomapPostResults segments env inps res pat w ws_F ws_O ws_S elems_kind elems' post_lam
+
 -- Hacky fix to get result representations in the same order as the pattern
 resRepsInPatOrder :: Pat Type -> [(VName, ResRep)] -> [ResRep]
 resRepsInPatOrder pat reps =
@@ -1382,12 +1515,13 @@ segOpInputRep segments env inps arr =
     Nothing ->
       Irregular <$> getIrregRep segments env inps arr
 
--- basically we need to make our arrays ready for our segscan/segred.
--- every array need to be flattened to 1D.
--- we need to check the dense/replciated status of the input.
--- if all of scan inptus are replicated we are fine.
--- otherwise, we need to make the replicated inptus dense.
--- for regulars we can just use the segment discriptor and this should be also the same descriptor for dense irregulars.
+-- Basically we need to make our arrays ready for our segscan/segred.
+-- Regular arrays are flattened only across the outer segment dimensions and
+-- the SOAC width; any row shape expected by the consumer is preserved.
+-- we need to check the dense/replicated status of the input.
+-- if all of scan inputs are replicated we are fine.
+-- otherwise, we need to make the replicated inputs dense.
+-- for regulars we can just use the segment descriptor and this should be also the same descriptor for dense irregulars.
 prepareSegOpInputs ::
   Segments ->
   DistEnv ->
@@ -1399,15 +1533,17 @@ prepareSegOpInputs ::
 prepareSegOpInputs segments env inps w reps names
   | all isRegular reps = do
       ws <- dataArr segments env inps w
-      (ws_F, ws_O, _) <- doRepIota ws
-      names' <- mapM flattenRegularRep reps
+      (ws_F, ws_O, ws_data) <- doRepIota ws
+      m <- arraySize 0 <$> lookupType ws_data
+      names' <- mapM (flattenRegularRep m) reps
       pure (ws_F, ws_O, ws, names', Dense)
   | all isReplicatedIrregular reps = do
       let Irregular rep0 = head reps
       pure (irregularF rep0, irregularO rep0, irregularS rep0, map getData reps, Replicated)
   | otherwise = do
       desc_rep <- findOrMakeDense reps
-      names' <- zipWithM normalise reps names
+      m <- arraySize 0 <$> lookupType (irregularD desc_rep)
+      names' <- zipWithM (normalise m) reps names
       pure (irregularF desc_rep, irregularO desc_rep, irregularS desc_rep, names', Dense)
   where
     isRegular (Regular _) = True
@@ -1415,10 +1551,10 @@ prepareSegOpInputs segments env inps w reps names
 
     isReplicatedIrregular (Irregular rep) = irregularK rep == Replicated
     isReplicatedIrregular _ = False
-    
-    flattenRegularRep (Regular v) =
-      flattenRegular segments v
-    flattenRegularRep _ =
+
+    flattenRegularRep m (Regular v) =
+      flattenRegularToRows segments m v
+    flattenRegularRep _ _ =
       error "prepareSegOpInputs: impossible irregular regular input"
     getData (Irregular rep) = irregularD rep
     getData _ = error "prepareSegOpInputs: impossible"
@@ -1431,34 +1567,25 @@ prepareSegOpInputs segments env inps w reps names
             rep : _ -> ensureDenseIrregular "segop_desc" rep
             [] -> error "prepareSegOpInputs: impossible"
 
-    normalise rep v =
+    normalise m rep v =
       case rep of
         Regular v' ->
-          flattenRegular segments v'
+          flattenRegularToRows segments m v'
         Irregular ir
           | irregularK ir == Dense ->
               pure $ irregularD ir
           | otherwise ->
               irregularD <$> ensureDenseIrregular (baseName v <> "_dense") ir
 
--- | Flatten a Regular (multi-dim) result array to 1D.
--- flattenRegular :: Segments -> VName -> Builder GPU VName
--- flattenRegular segments v = do
---   v_t <- lookupType v
---   let v_shape = arrayShape v_t
---       -- seg_rank = segmentsRank segments
---       -- segment_dims = take seg_rank (shapeDims v_shape)
---       segment_dims = segmentsShape segments
---   flat_n <- letSubExp "flat_n" =<< toExp (product $ fmap pe64 segment_dims)
---   letExp (baseName v <> "_flat") . BasicOp . Reshape v $
---     reshapeAll v_shape (Shape [flat_n])
-flattenRegular :: Segments -> VName -> Builder GPU VName
-flattenRegular _ v = do
+flattenRegularToRows :: Segments -> SubExp -> VName -> Builder GPU VName
+flattenRegularToRows segments m v = do
   v_t <- lookupType v
-  num_elems <- letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims v_t)
+  when (arrayRank v_t < segmentsRank segments + 1) $
+    error "prepareSegOpInputs: regular input rank too small"
+  let row_shape = arrayShape $ stripArray (segmentsRank segments + 1) v_t
   letExp (baseName v <> "_flat") . BasicOp $
     Reshape v $
-      reshapeAll (arrayShape v_t) (Shape [num_elems])
+      reshapeAll (arrayShape v_t) (Shape [m] <> row_shape)
 
 insertSegOpMapResults ::
   Segments ->
@@ -1493,7 +1620,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       let ~[res'] = res
           ~[pe] = patElems pat
       transformDistBasicOp segments env (inps, res', pe, aux, e)
-    Let pat aux (Op (Screma w arrs form))
+    Let pat _ (Op (Screma w arrs form))
       | Just reds <- isReduceSOAC form,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
           traceM "HELLO REDUCE"
@@ -1544,7 +1671,6 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       | Just (reds, map_lam) <- isRedomapSOAC form,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
           traceM "HELLO REDOMAP"
-          let is = isNothing $ isReduceSOAC form
           map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
             PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
           map_res_all <-
@@ -1578,40 +1704,35 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           elems' <- doSegScan scans flags elems segments inps env
           pure $
             insertIrregulars arr_segments flags offsets (zip (map distResTag res) elems') elems_kind env
-      | Just (scans, map_lam) <- isScanomapSOAC form,
+      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
         suitableSegOpMap env inps map_lam,
+        suitableSegOpMap env inps post_lam,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
           reps <- mapM (segOpInputRep segments env inps) arrs
           (ws_F, ws_O, ws_S, elems, elems_kind) <-
             prepareSegOpInputs segments env inps w reps arrs
-          elems' <- doSegScanomap scans ws_F elems map_lam segments inps env
-          let (scanout_elems, mapout_elems) = splitAt (scanResults scans) elems'
-              (scan_res, map_res) = splitAt (scanResults scans) res
-          env' <-
-            insertSegOpMapResults
-              segments
-              ws_S
-              ws_F
-              ws_O
-              elems_kind
-              (zip map_res mapout_elems)
-              env
-          pure $
-            insertIrregulars ws_S ws_F ws_O (zip (map distResTag scan_res) scanout_elems) elems_kind env'
-      | Just (scans, map_lam) <- isScanomapSOAC form,
+          elems' <- doSegMaposcanomap scans ws_F elems post_lam map_lam segments inps env
+          insertSegOpMapResults
+            segments
+            ws_S
+            ws_F
+            ws_O
+            elems_kind
+            (zip res elems')
+            env
+      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
+        suitableSegOpMap env inps map_lam,
+        not $ suitableSegOpMap env inps post_lam,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
-          map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
-            PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
-          map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
-          let (scanout_names, _) = splitAt (scanResults scans) (patNames map_pat)
-              (scanout_res, mapout_res) = splitAt (scanResults scans) map_res_all
-          (ws_F, ws_O, ws_S, scanout_names', scanout_kind) <-
-            prepareSegOpInputs segments env inps w scanout_res scanout_names
-          elems' <- doSegScan scans ws_F scanout_names' segments inps env
-          let (scan_tags, map_tags) = splitAt (scanResults scans) $ map distResTag res
-          pure $
-            insertIrregulars ws_S ws_F ws_O (zip scan_tags elems') scanout_kind $
-              insertReps (zip map_tags mapout_res) env
+          transformPostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
+      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
+        suitableSegOpMap env inps post_lam,
+        not $ suitableSegOpMap env inps map_lam,
+        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans ->
+          transformPreMaposcanomap segments env inps res w arrs post_lam scans map_lam
+      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
+        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans ->
+          transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
       | Just map_lam <- isMapSOAC form -> do
           map_res <-
             transformInnerMap segments env inps pat w arrs map_lam
