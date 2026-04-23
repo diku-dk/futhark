@@ -34,6 +34,7 @@ import Futhark.Pass.Flatten.Monad
 import Futhark.Pass.Flatten.PreProcess
 import Futhark.Pass.Flatten.WithAcc
 import Futhark.Tools
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
@@ -530,40 +531,45 @@ runMapLambdaBody ::
   Lambda SOACS ->
   Builder GPU [VName]
 runMapLambdaBody segments env inps w arrs map_lam = do
+  outer_scope <- askScope
+  let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
+  map_lam' <- localScope input_scope $ FOT.transformLambda map_lam
   ws <- dataArr segments env inps w
   (_ws_F, ws_O, ws_data) <- doRepIota ws
   arrs' <-
     zipWithM
       (onMapInputArrMultiDim segments w env inps ws ws_O ws_data)
-      (lambdaParams map_lam)
+      (lambdaParams map_lam')
       arrs
 
-  outer_scope <- askScope
-  let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
-      free = freeIn map_lam
+  let free = freeIn map_lam'
   free_sizes <-
     localScope input_scope $
       foldMap freeIn <$> mapM lookupType (namesToList free)
 
-  
+      
   let new_segments = segments <> pure w
       (param_env, param_inputs) =
-        mapArraysToInputs (lambdaParams map_lam) arrs'
+        mapArraysToInputs (lambdaParams map_lam') arrs'
       free_inputs =
         [ (v, inp)
         | v <- namesToList $ free_sizes <> free
         , Just inp <- [lookup v inps]
         ]
 
-  letTupExp "outer_map" <=< renameExp <=< segMap new_segments $ \is -> do
+  vs <- letTupExp "outer_map" <=< renameExp <=< segMap new_segments $ \is -> do
     let full_is = toList is
         outer_is = take (segmentsRank segments) full_is
 
     readInputs segments env outer_is free_inputs
     readInputs new_segments param_env full_is param_inputs
 
-    addStms $ fmap soacsStmToGPU $ bodyStms $ lambdaBody map_lam
-    pure $ bodyResult $ lambdaBody map_lam
+    addStms $ bodyStms $ lambdaBody map_lam'
+    pure $ bodyResult $ lambdaBody map_lam'
+  
+  forM vs $ \v ->
+    letExp (baseName v <> "_copy") . BasicOp $
+      Replicate mempty (Var v)
 
 
 regularRepVars :: [ResRep] -> [VName]
