@@ -72,7 +72,8 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
 
   withacc_lam' <- mkLambda (map trParam lam_params') $ do
     env' <- foldM (flattenDistStm ops segments) env withacc_dstms
-    concat <$> mapM (liftResult segments inps env') (bodyResult $ lambdaBody acc_lam)
+    -- TODO: Isn't this the fix that we need?
+    concat <$> mapM (liftResult segments withacc_new_inputs env') (bodyResult $ lambdaBody acc_lam)
 
   withacc_out_vs <-
     certifying (distCerts inps withacc_aux env) $
