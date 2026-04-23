@@ -34,6 +34,7 @@ import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.AD
+import Futhark.Pass.AddGlobalParams
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
@@ -87,6 +88,7 @@ gpuPipeline =
     >>> onePass flattenSOACs
     >>> passes
       [ simplifyGPU,
+        addGlobalParams,
         optimiseGenRed,
         simplifyGPU,
         tileLoops,

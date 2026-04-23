@@ -48,6 +48,7 @@ import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass
 import Futhark.Pass.AD
+import Futhark.Pass.AddGlobalParams
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
@@ -715,6 +716,7 @@ commandLineOptions =
     soacsPassOption applyADInnermost [],
     kernelsPassOption optimiseArrayLayoutGPU [],
     mcPassOption optimiseArrayLayoutMC [],
+    kernelsPassOption addGlobalParams [],
     kernelsPassOption optimiseGenRed [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],
