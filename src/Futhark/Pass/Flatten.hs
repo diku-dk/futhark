@@ -504,15 +504,67 @@ kernelAlternatives desc result_ts default_body ((cond, alt) : alts) = do
     Match [cond] [Case [Just $ BoolValue True] alt] fallback_body $
       MatchDec (staticShapes result_ts) MatchEquiv
 
-regularResultVars :: [DistResult] -> DistEnv -> [VName]
-regularResultVars ress env =
-  map onRes ress
+mapArraysToInputs ::
+  [Param Type] ->
+  [MapArray IrregularRep] ->
+  (DistEnv, DistInputs)
+mapArraysToInputs params arrs =
+  let ((_, env), inputs) =
+        L.mapAccumL onInput (0, mempty) $ zip params arrs
+   in (env, inputs)
   where
-    onRes res =
-      case resVar (distResTag res) env of
-        Regular v -> v
-        Irregular {} ->
-          error "regularResultVars: expected regular result"
+    onInput (tag, env) (p, MapArray arr _) =
+      ((tag, env), (paramName p, DistInputFree arr (paramType p)))
+    onInput (tag, env) (p, MapOther rep _) =
+      let rt = ResTag tag
+       in ( (tag + 1, insertRep rt (Irregular rep) env),
+            (paramName p, DistInput rt (paramType p))
+          )
+
+runMapLambdaBody ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  Builder GPU [VName]
+runMapLambdaBody segments env inps w arrs map_lam = do
+  ws <- dataArr segments env inps w
+  (_ws_F, ws_O, ws_data) <- doRepIota ws
+  arrs' <-
+    zipWithM
+      (onMapInputArrMultiDim segments w env inps ws ws_O ws_data)
+      (lambdaParams map_lam)
+      arrs
+
+  outer_scope <- askScope
+  let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
+      free = freeIn map_lam
+  free_sizes <-
+    localScope input_scope $
+      foldMap freeIn <$> mapM lookupType (namesToList free)
+
+  
+  let new_segments = segments <> pure w
+      (param_env, param_inputs) =
+        mapArraysToInputs (lambdaParams map_lam) arrs'
+      free_inputs =
+        [ (v, inp)
+        | v <- namesToList $ free_sizes <> free
+        , Just inp <- [lookup v inps]
+        ]
+
+  letTupExp "outer_map" <=< renameExp <=< segMap new_segments $ \is -> do
+    let full_is = toList is
+        outer_is = take (segmentsRank segments) full_is
+
+    readInputs segments env outer_is free_inputs
+    readInputs new_segments param_env full_is param_inputs
+
+    addStms $ fmap soacsStmToGPU $ bodyStms $ lambdaBody map_lam
+    pure $ bodyResult $ lambdaBody map_lam
+
 
 regularRepVars :: [ResRep] -> [VName]
 regularRepVars =
@@ -522,8 +574,8 @@ regularRepVars =
     onRep Irregular {} =
       error "regularRepVars: expected regular result"
 
-isVersionableRegularResult :: DistResult -> Bool
-isVersionableRegularResult = isRegularDistResult
+isVersionableMap :: DistInputs -> DistEnv -> SubExp -> [DistResult] -> Bool
+isVersionableMap inps env w dist_res = all isRegularDistResult dist_res && not (isVariant inps env w)
 
 regularBranchBody ::
   Builder GPU [VName] ->
@@ -541,23 +593,17 @@ versionedRegularMap ::
   StmAux () ->
   SubExp ->
   [VName] ->
-  ScremaForm SOACS ->
   Lambda SOACS ->
   Builder GPU DistEnv
-versionedRegularMap segments env inps ress pat aux w arrs form map_lam = do
+versionedRegularMap segments env inps ress pat aux w arrs map_lam = do
   (outer_suff, _) <-
-    sufficientParallelism "suff_outer_map" (NE.toList segments) mempty Nothing
+    sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
 
   let fullFlatten =
         regularRepVars <$> transformInnerMap segments env inps pat w arrs map_lam
 
-      outerOnly = do
-        env' <-
-          transformScalarStm segments env inps ress $
-            Let pat aux $
-              Op $
-                Screma w arrs form
-        pure $ regularResultVars ress env'
+      outerOnly =
+        runMapLambdaBody segments env inps w arrs map_lam
 
   full_body <- regularBranchBody fullFlatten
   outer_body <- regularBranchBody outerOnly
@@ -1912,8 +1958,8 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           traceM "Status Nothing integerated"
           transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
       | Just map_lam <- isMapSOAC form,
-        all isVersionableRegularResult res ->
-          versionedRegularMap segments env inps res pat aux w arrs form map_lam
+         isVersionableMap inps env w res ->
+          versionedRegularMap segments env inps res pat aux w arrs map_lam
       | Just map_lam <- isMapSOAC form -> do
           map_res <-
             transformInnerMap segments env inps pat w arrs map_lam
