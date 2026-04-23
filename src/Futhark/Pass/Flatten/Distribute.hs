@@ -16,6 +16,7 @@ module Futhark.Pass.Flatten.Distribute
     DistResult (..),
     ResTag (..),
     isRegularDistResult,
+    isParallelStm,
 
     -- * Segments
     Segments,

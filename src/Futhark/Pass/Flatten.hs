@@ -459,6 +459,120 @@ rearrangeIrreg segments env inps v_t perm ir = do
         irregularK = Dense
       }
 
+sufficientParallelism ::
+  Name ->
+  [SubExp] ->
+  KernelPath ->
+  Maybe Int64 ->
+  Builder GPU (SubExp, Name)
+sufficientParallelism desc ws path def = do
+  size_key <- nameFromText . prettyText <$> newVName desc
+
+  amount <-
+    letSubExp "comparatee"
+      =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ws
+
+  cmp_res <-
+    letSubExp desc $
+      Op $
+        SizeOp $
+          CmpSizeLe size_key (SizeThreshold path def) amount
+
+  pure (cmp_res, size_key)
+
+kernelAlternatives ::
+  Name ->
+  [Type] ->
+  Body GPU ->
+  [(SubExp, Body GPU)] ->
+  Builder GPU [VName]
+kernelAlternatives desc _ default_body [] = do
+  ses <- bodyBind default_body
+  forM ses $ \(SubExpRes cs se) ->
+    certifying cs $
+      letExp desc $
+        BasicOp $
+          SubExp se
+kernelAlternatives desc result_ts default_body ((cond, alt) : alts) = do
+  fallback_body <- do
+    (fallback_vs, fallback_stms) <-
+      collectStms $
+        kernelAlternatives desc result_ts default_body alts
+    pure $ mkBody fallback_stms $ varsRes fallback_vs
+
+  letTupExp desc $
+    Match [cond] [Case [Just $ BoolValue True] alt] fallback_body $
+      MatchDec (staticShapes result_ts) MatchEquiv
+
+regularResultVars :: [DistResult] -> DistEnv -> [VName]
+regularResultVars ress env =
+  map onRes ress
+  where
+    onRes res =
+      case resVar (distResTag res) env of
+        Regular v -> v
+        Irregular {} ->
+          error "regularResultVars: expected regular result"
+
+regularRepVars :: [ResRep] -> [VName]
+regularRepVars =
+  map onRep
+  where
+    onRep (Regular v) = v
+    onRep Irregular {} =
+      error "regularRepVars: expected regular result"
+
+isVersionableRegularResult :: DistResult -> Bool
+isVersionableRegularResult = isRegularDistResult
+
+regularBranchBody ::
+  Builder GPU [VName] ->
+  Builder GPU (Body GPU)
+regularBranchBody m = do
+  (vs, stms) <- collectStms m
+  renameBody $ mkBody stms $ varsRes vs
+
+versionedRegularMap ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  StmAux () ->
+  SubExp ->
+  [VName] ->
+  ScremaForm SOACS ->
+  Lambda SOACS ->
+  Builder GPU DistEnv
+versionedRegularMap segments env inps ress pat aux w arrs form map_lam = do
+  (outer_suff, _) <-
+    sufficientParallelism "suff_outer_map" (NE.toList segments) mempty Nothing
+
+  let fullFlatten =
+        regularRepVars <$> transformInnerMap segments env inps pat w arrs map_lam
+
+      outerOnly = do
+        env' <-
+          transformScalarStm segments env inps ress $
+            Let pat aux $
+              Op $
+                Screma w arrs form
+        pure $ regularResultVars ress env'
+
+  full_body <- regularBranchBody fullFlatten
+  outer_body <- regularBranchBody outerOnly
+
+  let result_ts =
+        [ t `arrayOfShape` segmentsShape segments
+        | DistResult _ (DistType _ _ t) _ <- ress
+        ]
+
+  match_res <-
+    certifying (distCerts inps aux env) $
+      kernelAlternatives "match_res" result_ts full_body [(outer_suff, outer_body)]
+
+  pure $ insertRegulars (map distResTag ress) match_res env
+
 transformDistBasicOp ::
   Segments ->
   DistEnv ->
@@ -1430,7 +1544,7 @@ transformMaposcanomapPostResults segments env inps res pat w ws_F ws_O ws_S elem
                 irregularD = elem_v,
                 irregularK = elems_kind
               }
-          | elem_v <- elems
+        | elem_v <- elems
         ]
       post_env = insertReps (zip post_tags post_reps) env_local
       post_arrs = map paramName post_params
@@ -1604,9 +1718,10 @@ insertSegOpMapResults segments segs flags offsets kind bnds env0 =
           let DistType _ _ t = distResType dist_res
               expected_shape = segmentsShape segments <> arrayShape t
           v_t <- lookupType v
-          v' <- letExp (baseName v <> "_reshaped") . BasicOp $
-            Reshape v $
-              reshapeAll (arrayShape v_t) expected_shape
+          v' <-
+            letExp (baseName v <> "_reshaped") . BasicOp $
+              Reshape v $
+                reshapeAll (arrayShape v_t) expected_shape
           pure $ insertRegulars [distResTag dist_res] [v'] env
       | otherwise =
           pure $ insertIrregular segs flags offsets (distResTag dist_res) v kind env
@@ -1620,7 +1735,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       let ~[res'] = res
           ~[pe] = patElems pat
       transformDistBasicOp segments env (inps, res', pe, aux, e)
-    Let pat _ (Op (Screma w arrs form))
+    Let pat aux (Op (Screma w arrs form))
       | Just reds <- isReduceSOAC form,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
           traceM "HELLO REDUCE"
@@ -1733,6 +1848,9 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
       | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans ->
           transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
+      | Just map_lam <- isMapSOAC form,
+        all isVersionableRegularResult res ->
+          versionedRegularMap segments env inps res pat aux w arrs form map_lam
       | Just map_lam <- isMapSOAC form -> do
           map_res <-
             transformInnerMap segments env inps pat w arrs map_lam
@@ -1800,8 +1918,9 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
           rettype' = addRetAls param_ts $ liftRetType w $ map fst rettype
       result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
-      reps <- zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) $
-        resultToResReps (map fst rettype) result
+      reps <-
+        zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) $
+          resultToResReps (map fst rettype) result
       pure $ insertReps (zip (map distResTag res) reps) env
     Let _ aux (Loop merge (ForLoop i it n) body) -> do
       if isVariant inps env n
@@ -2406,7 +2525,8 @@ liftArg segments w inps env (se, d) = do
           then pure v
           else
             letExp "lifted_arg_flat" . BasicOp $
-              Reshape v $ reshapeAll (arrayShape v_t) (Shape [w])
+              Reshape v $
+                reshapeAll (arrayShape v_t) (Shape [w])
       pure [(Var v', d)]
     Irregular irreg -> mkIrrep irreg
   where
@@ -2441,10 +2561,12 @@ reshapeLiftedApplyResult segments Prim {} (Regular v) = do
       then pure v
       else
         letExp "lifted_apply_res" . BasicOp $
-          Reshape v $ reshapeAll (arrayShape v_t) expectedShape
+          Reshape v $
+            reshapeAll (arrayShape v_t) expectedShape
   pure $ Regular v'
 reshapeLiftedApplyResult _ _ rep =
   pure rep
+
 liftLoopInit :: Segments -> DistInputs -> DistEnv -> SubExp -> SubExp -> Builder GPU [SubExp]
 liftLoopInit segments inps env se num_segments = do
   (_, rep) <- liftSubExp segments inps env se
