@@ -20,8 +20,6 @@ module Futhark.IR.SOACS.SOAC
     soacType,
     typeCheckSOAC,
     mkIdentityLambda,
-    isIdentityLambda,
-    isNilLambda,
     nilFn,
     maposcanomapSOAC,
     scanomapSOAC,
@@ -247,18 +245,6 @@ mkIdentityLambda ts = do
         lambdaBody = mkBody mempty $ varsRes $ map paramName params,
         lambdaReturnType = ts
       }
-
--- | Is the given lambda an identity lambda?
-isIdentityLambda :: Lambda rep -> Bool
-isIdentityLambda lam =
-  map resSubExp (bodyResult (lambdaBody lam))
-    == map (Var . paramName) (lambdaParams lam)
-
--- | Is the given lambda a nil lambda?
-isNilLambda :: Lambda rep -> Bool
-isNilLambda lam =
-  null (lambdaParams lam)
-    && isIdentityLambda lam
 
 -- | A lambda with no parameters that returns no values.
 nilFn :: (Buildable rep) => Lambda rep
