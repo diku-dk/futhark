@@ -1492,6 +1492,32 @@ doSegMaposcanomap scans flags elems post_lam map_lam segments inps env = do
     (soacsLambdaToGPU map_lam)
     elems
 
+postMapResultRep :: Segments -> DistEnv -> DistInputs -> SubExp -> VName -> VName -> VName -> VName -> IrregularKind -> Param Type -> Builder GPU ResRep
+postMapResultRep segments env inps w ws_F ws_O ws_S elems elems_kind post_param
+  | isVariant inps env w || any isTypeVariant (arrayDims p_t) =
+      pure $
+        Irregular $
+          IrregularRep
+            { irregularS = ws_S,
+              irregularF = ws_F,
+              irregularO = ws_O,
+              irregularD = elems,
+              irregularK = elems_kind
+            }
+  | otherwise = do
+      elem_t <- lookupType elems
+      elem_v' <-
+        letExp (baseName elems <> "_reshaped") . BasicOp $
+          Reshape elems $
+            reshapeAll (arrayShape elem_t) expected_shape
+      pure $ Regular elem_v'
+  where
+    p_t = paramType post_param
+    expected_shape = segmentsShape segments <> Shape [w] <> arrayShape p_t
+
+    isTypeVariant (Var v) = isVariant inps env (Var v)
+    isTypeVariant Constant {} = False
+
 transformPostMaposcanomap ::
   Segments ->
   DistEnv ->
@@ -1509,45 +1535,43 @@ transformPostMaposcanomap segments env inps res pat w arrs post_lam scans map_la
   (ws_F, ws_O, ws_S, elems, elems_kind) <-
     prepareSegOpInputs segments env inps w reps arrs
   elems' <- doSegScanomap scans ws_F elems map_lam segments inps env
-  transformMaposcanomapPostResults segments env inps res pat w ws_F ws_O ws_S elems_kind elems' post_lam
 
-transformMaposcanomapPostResults ::
+  let post_params = lambdaParams post_lam
+
+  post_reps <-
+    zipWithM
+      (\elem' post_param ->
+        postMapResultRep
+          segments env inps w ws_F ws_O ws_S
+          elem' elems_kind post_param)
+      elems'
+      post_params
+
+  transformMaposcanomapPostReps segments env inps res pat w post_reps post_lam
+
+transformMaposcanomapPostReps ::
   Segments ->
   DistEnv ->
   DistInputs ->
   [DistResult] ->
   Pat Type ->
   SubExp ->
-  VName ->
-  VName ->
-  VName ->
-  IrregularKind ->
-  [VName] ->
+  [ResRep] ->
   Lambda SOACS ->
   Builder GPU DistEnv
-transformMaposcanomapPostResults segments env inps res pat w ws_F ws_O ws_S elems_kind elems post_lam = do
+transformMaposcanomapPostReps segments env inps res pat w post_reps post_lam = do
   let (inps_local, env_local, next_tag) = localiseInputs env inps
       post_params = lambdaParams post_lam
       post_tags = map ResTag [next_tag ..]
       post_inputs =
         zipWith
-          (\p tag -> (paramName p, DistInput tag (paramType p)))
+          (\p tag -> (paramName p, DistInput tag (paramType p `arrayOfRow` w)))
           post_params
           post_tags
           <> inps_local
-      post_reps =
-        [ Irregular $
-            IrregularRep
-              { irregularS = ws_S,
-                irregularF = ws_F,
-                irregularO = ws_O,
-                irregularD = elem_v,
-                irregularK = elems_kind
-              }
-        | elem_v <- elems
-        ]
       post_env = insertReps (zip post_tags post_reps) env_local
       post_arrs = map paramName post_params
+  traceM "transforming post maposcanomap results with inputs\n"
   post_res <- transformInnerMap segments post_env post_inputs pat w post_arrs post_lam
   pure $ insertReps (zip (map distResTag res) post_res) env
 
@@ -1594,12 +1618,47 @@ transformPrePostMaposcanomap ::
 transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam = do
   map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
     PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
+
   map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
-  (ws_F, ws_O, ws_S, elems, elems_kind) <-
-    prepareSegOpInputs segments env inps w map_res_all (patNames map_pat)
-  id_lam <- mkIdentityLambda $ lambdaReturnType map_lam
-  elems' <- doSegScanomap scans ws_F elems id_lam segments inps env
-  transformMaposcanomapPostResults segments env inps res pat w ws_F ws_O ws_S elems_kind elems' post_lam
+
+  let num_scan_results = scanResults scans
+      post_params = lambdaParams post_lam
+      (scan_res_names, _) = splitAt num_scan_results $ patNames map_pat
+      (scan_params, _) = splitAt num_scan_results post_params
+      (scan_res, map_res) = splitAt num_scan_results map_res_all
+
+  (ws_F, ws_O, ws_S, scan_elems, scan_elems_kind) <-
+    prepareSegOpInputs segments env inps w scan_res scan_res_names
+
+  scan_elems' <- doSegScan scans ws_F scan_elems segments inps env
+
+  scan_res' <-
+    zipWithM
+      ( \elem' scan_param ->
+          postMapResultRep
+            segments
+            env
+            inps
+            w
+            ws_F
+            ws_O
+            ws_S
+            elem'
+            scan_elems_kind
+            scan_param
+      )
+      scan_elems'
+      scan_params
+
+  transformMaposcanomapPostReps
+    segments
+    env
+    inps
+    res
+    pat
+    w
+    (scan_res' <> map_res)
+    post_lam
 
 -- Hacky fix to get result representations in the same order as the pattern
 resRepsInPatOrder :: Pat Type -> [(VName, ResRep)] -> [ResRep]
@@ -1823,6 +1882,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         suitableSegOpMap env inps map_lam,
         suitableSegOpMap env inps post_lam,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
+          traceM "Status: everything integetrated"
           reps <- mapM (segOpInputRep segments env inps) arrs
           (ws_F, ws_O, ws_S, elems, elems_kind) <-
             prepareSegOpInputs segments env inps w reps arrs
@@ -1839,14 +1899,17 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         suitableSegOpMap env inps map_lam,
         not $ suitableSegOpMap env inps post_lam,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
+          traceM "Status: pre map integetrated"
           transformPostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
       | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
         suitableSegOpMap env inps post_lam,
         not $ suitableSegOpMap env inps map_lam,
-        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans ->
+        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
+          traceM "Status: post map integetrated"
           transformPreMaposcanomap segments env inps res w arrs post_lam scans map_lam
       | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans ->
+        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
+          traceM "Status Nothing integerated"
           transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
       | Just map_lam <- isMapSOAC form,
         all isVersionableRegularResult res ->
