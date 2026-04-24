@@ -557,6 +557,23 @@ mapArraysToInputs params arrs =
             (paramName p, DistInput rt (paramType p))
           )
 
+mapArraysToInputs2 ::
+  [VName] ->
+  [MapArray IrregularRep] ->
+  (DistEnv, DistInputs)
+mapArraysToInputs2 param_names arrs =
+  let ((_, env), inputs) =
+        L.mapAccumL onInput (0, mempty) $ zip param_names arrs
+   in (env, inputs)
+  where
+    onInput (tag, env) (p, MapArray arr t) =
+      ((tag, env), (p, DistInputFree arr t))
+    onInput (tag, env) (p, MapOther rep t) =
+      let rt = ResTag tag
+       in ( (tag + 1, insertRep rt (Irregular rep) env),
+            (p, DistInput rt t)
+          )
+
 runMapLambdaBody ::
   Segments ->
   DistEnv ->
@@ -1521,7 +1538,7 @@ suitableSegOpMap :: DistEnv -> DistInputs -> Lambda SOACS -> Bool
 suitableSegOpMap env inps map_lam =
   not (any isParallelStm (bodyStms $ lambdaBody map_lam))
     -- TODO: do we want to add variants as inputs?
-    && allNames (not . isVariant inps env . Var) (freeIn map_lam)
+    -- && allNames (not . isVariant inps env . Var) (freeIn map_lam)
 
 -- doSegScan :: [Scan SOACS] -> VName -> [VName] -> Builder GPU [VName]
 doSegScan :: [Scan SOACS] -> VName -> [VName] -> Segments -> DistInputs -> DistEnv -> Builder GPU [VName]
@@ -1533,28 +1550,6 @@ doSegScan scans flags elems segments inps env = do
   nes' <- mapM (readInput segments env zeros inps) nes
   genSegScan "scan" (soacsLambdaToGPU $ scanLambda scan) nes' flags elems
 
-doSegScanomap ::
-  [Scan SOACS] ->
-  VName ->
-  [VName] ->
-  Lambda SOACS ->
-  Segments ->
-  DistInputs ->
-  DistEnv ->
-  Builder GPU [VName]
-doSegScanomap scans flags elems map_lam segments inps env = do
-  let scan = singleScan scans
-  let zeros = replicate (segmentsRank segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-  let nes = scanNeutral scan
-  nes' <- mapM (readInput segments env zeros inps) nes
-  genSegScanomap
-    "scanomap"
-    (soacsLambdaToGPU $ scanLambda scan)
-    nes'
-    flags
-    (soacsLambdaToGPU map_lam)
-    elems
-
 doSegMaposcanomap ::
   [Scan SOACS] ->
   VName ->
@@ -1564,8 +1559,9 @@ doSegMaposcanomap ::
   Segments ->
   DistInputs ->
   DistEnv ->
+  ([SubExp] -> Builder GPU ()) ->
   Builder GPU [VName]
-doSegMaposcanomap scans flags elems post_lam map_lam segments inps env = do
+doSegMaposcanomap scans flags elems post_lam map_lam segments inps env readFree = do
   let scan = singleScan scans
   let zeros = replicate (segmentsRank segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
   let nes = scanNeutral scan
@@ -1578,183 +1574,7 @@ doSegMaposcanomap scans flags elems post_lam map_lam segments inps env = do
     (soacsLambdaToGPU post_lam)
     (soacsLambdaToGPU map_lam)
     elems
-
-postMapResultRep :: Segments -> DistEnv -> DistInputs -> SubExp -> VName -> VName -> VName -> VName -> IrregularKind -> Param Type -> Builder GPU ResRep
-postMapResultRep segments env inps w ws_F ws_O ws_S elems elems_kind post_param
-  | isVariant inps env w || any isTypeVariant (arrayDims p_t) =
-      pure $
-        Irregular $
-          IrregularRep
-            { irregularS = ws_S,
-              irregularF = ws_F,
-              irregularO = ws_O,
-              irregularD = elems,
-              irregularK = elems_kind
-            }
-  | otherwise = do
-      elem_t <- lookupType elems
-      elem_v' <-
-        letExp (baseName elems <> "_reshaped") . BasicOp $
-          Reshape elems $
-            reshapeAll (arrayShape elem_t) expected_shape
-      pure $ Regular elem_v'
-  where
-    p_t = paramType post_param
-    expected_shape = segmentsShape segments <> Shape [w] <> arrayShape p_t
-
-    isTypeVariant (Var v) = isVariant inps env (Var v)
-    isTypeVariant Constant {} = False
-
-transformPostMaposcanomap ::
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  [DistResult] ->
-  Pat Type ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  [Scan SOACS] ->
-  Lambda SOACS ->
-  Builder GPU DistEnv
-transformPostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam = do
-  reps <- mapM (segOpInputRep segments env inps) arrs
-  (ws_F, ws_O, ws_S, elems, elems_kind) <-
-    prepareSegOpInputs segments env inps w reps arrs
-  elems' <- doSegScanomap scans ws_F elems map_lam segments inps env
-
-  let post_params = lambdaParams post_lam
-
-  post_reps <-
-    zipWithM
-      ( \elem' post_param ->
-          postMapResultRep
-            segments
-            env
-            inps
-            w
-            ws_F
-            ws_O
-            ws_S
-            elem'
-            elems_kind
-            post_param
-      )
-      elems'
-      post_params
-
-  transformMaposcanomapPostReps segments env inps res pat w post_reps post_lam
-
-transformMaposcanomapPostReps ::
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  [DistResult] ->
-  Pat Type ->
-  SubExp ->
-  [ResRep] ->
-  Lambda SOACS ->
-  Builder GPU DistEnv
-transformMaposcanomapPostReps segments env inps res pat w post_reps post_lam = do
-  let (inps_local, env_local, next_tag) = localiseInputs env inps
-      post_params = lambdaParams post_lam
-      post_tags = map ResTag [next_tag ..]
-      post_inputs =
-        zipWith
-          (\p tag -> (paramName p, DistInput tag (paramType p `arrayOfRow` w)))
-          post_params
-          post_tags
-          <> inps_local
-      post_env = insertReps (zip post_tags post_reps) env_local
-      post_arrs = map paramName post_params
-  traceM "transforming post maposcanomap results with inputs\n"
-  post_res <- transformInnerMap segments post_env post_inputs pat w post_arrs post_lam
-  pure $ insertReps (zip (map distResTag res) post_res) env
-
-transformPreMaposcanomap ::
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  [DistResult] ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  [Scan SOACS] ->
-  Lambda SOACS ->
-  Builder GPU DistEnv
-transformPreMaposcanomap segments env inps res w arrs post_lam scans map_lam = do
-  map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
-    PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
-  map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
-  (ws_F, ws_O, ws_S, elems, elems_kind) <-
-    prepareSegOpInputs segments env inps w map_res_all (patNames map_pat)
-  id_lam <- mkIdentityLambda $ lambdaReturnType map_lam
-  elems' <- doSegMaposcanomap scans ws_F elems post_lam id_lam segments inps env
-  insertSegOpMapResults
-    segments
-    ws_S
-    ws_F
-    ws_O
-    elems_kind
-    (zip res elems')
-    env
-
-transformPrePostMaposcanomap ::
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  [DistResult] ->
-  Pat Type ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  [Scan SOACS] ->
-  Lambda SOACS ->
-  Builder GPU DistEnv
-transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam = do
-  map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
-    PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
-
-  map_res_all <- transformInnerMap segments env inps map_pat w arrs map_lam
-
-  let num_scan_results = scanResults scans
-      post_params = lambdaParams post_lam
-      (scan_res_names, _) = splitAt num_scan_results $ patNames map_pat
-      (scan_params, _) = splitAt num_scan_results post_params
-      (scan_res, map_res) = splitAt num_scan_results map_res_all
-
-  (ws_F, ws_O, ws_S, scan_elems, scan_elems_kind) <-
-    prepareSegOpInputs segments env inps w scan_res scan_res_names
-
-  scan_elems' <- doSegScan scans ws_F scan_elems segments inps env
-
-  scan_res' <-
-    zipWithM
-      ( \elem' scan_param ->
-          postMapResultRep
-            segments
-            env
-            inps
-            w
-            ws_F
-            ws_O
-            ws_S
-            elem'
-            scan_elems_kind
-            scan_param
-      )
-      scan_elems'
-      scan_params
-
-  transformMaposcanomapPostReps
-    segments
-    env
-    inps
-    res
-    pat
-    w
-    (scan_res' <> map_res)
-    post_lam
+    readFree
 
 -- Hacky fix to get result representations in the same order as the pattern
 resRepsInPatOrder :: Pat Type -> [(VName, ResRep)] -> [ResRep]
@@ -1798,15 +1618,16 @@ prepareSegOpInputs ::
   SubExp ->
   [ResRep] ->
   [VName] ->
+  Bool ->
   Builder GPU (VName, VName, VName, [VName], IrregularKind)
-prepareSegOpInputs segments env inps w reps names
+prepareSegOpInputs segments env inps w reps names hasNoFreeVariant
   | all isRegular reps = do
       ws <- dataArr segments env inps w
       (ws_F, ws_O, ws_data) <- doRepIota ws
       m <- arraySize 0 <$> lookupType ws_data
       names' <- mapM (flattenRegularRep m) reps
       pure (ws_F, ws_O, ws, names', Dense)
-  | all isReplicatedIrregular reps = do
+  | all isReplicatedIrregular reps && hasNoFreeVariant = do
       let Irregular rep0 = head reps
       pure (irregularF rep0, irregularO rep0, irregularS rep0, map getData reps, Replicated)
   | otherwise = do
@@ -1895,11 +1716,13 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
           traceM "HELLO REDUCE"
           reps <- mapM (segOpInputRep segments env inps) arrs
-          (flags, offsets, arr_segments, elems, _elems_kind) <-
-            prepareSegOpInputs segments env inps w reps arrs
           -- TODO: FixME: this is temp hack
           let sing_red = singleReduce reds
           let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+          let hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn sing_red)
+          (flags, offsets, arr_segments, elems, _elems_kind) <-
+            prepareSegOpInputs segments env inps w reps arrs hasNoFreeVariant
+
           nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
           let sing_red' = sing_red {redNeutral = nes'}
           elems' <- genSegRed arr_segments flags offsets elems sing_red'
@@ -1914,14 +1737,34 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
           traceM "HELLO Fast REDOMAP"
           reps <- mapM (segOpInputRep segments env inps) arrs
-          (ws_F, ws_O, ws_S, elems, elems_kind) <-
-            prepareSegOpInputs segments env inps w reps arrs
           let sing_red = singleReduce reds
-          let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+              zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+              hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn sing_red <> freeIn map_lam)
+          (ws_F, ws_O, ws_S, elems, elems_kind) <-
+            prepareSegOpInputs segments env inps w reps arrs hasNoFreeVariant
           nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
           let sing_red' = sing_red {redNeutral = nes'}
+          let free = freeIn map_lam <> freeIn sing_red
+          outer_scope <- askScope
+          let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
+          free_sizes <-
+            localScope input_scope $
+              foldMap freeIn <$> mapM lookupType (namesToList free)
+          let free_and_sizes = namesToList $ free <> free_sizes
+          ws <- dataArr segments env inps w
+          (_, _, ws_data) <- doRepIota ws_S
+          -- TODO: this will break in certain cases where the free variable is an irregular that needs to be replicated
+          (free_replicated, replicated) <-
+            fmap unzip . sequence $
+              mapMaybe
+                (onMapFreeVar segments env inps ws (ws_F, ws_O, ws_data))
+                free_and_sizes
+          let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+          
+          new_segment <- arraySize 0 <$> lookupType ws_F
+          let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs 
           (red_elems, mapout_elems) <-
-            genSegRedomap ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam)
+            genSegRedomap ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam) readFree
           red_elems' <- forM red_elems $ \v -> do
             v_t <- lookupType v
             letExp (baseName v <> "_reshaped") . BasicOp $
@@ -1938,39 +1781,12 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
               (zip map_res mapout_elems)
               env
           pure $ insertRegulars (map distResTag red_res) red_elems' env'
-      | Just (reds, map_lam) <- isRedomapSOAC form,
-        all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
-          traceM "HELLO REDOMAP"
-          map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
-            PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
-          map_res_all <-
-            transformInnerMap segments env inps map_pat w arrs map_lam
-          let (redout_names, _) = splitAt (redResults reds) (patNames map_pat)
-              (redout_res, mapout_res) = splitAt (redResults reds) map_res_all
-          (ws_F, ws_O, ws_S, redout_names', _redout_kind) <-
-            prepareSegOpInputs segments env inps w redout_res redout_names
-          -- For multi-dim (Regular) results, flatten to 1D before segmented reduce.
-          -- TODO: FixME: this is temp hack
-          let sing_red = singleReduce reds
-          let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-          nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
-          let sing_red' = sing_red {redNeutral = nes'}
-          elems' <-
-            genSegRed ws_S ws_F ws_O redout_names' sing_red'
-          elems'' <- forM elems' $ \v -> do
-            v_t <- lookupType v
-            letExp (baseName v <> "_reshaped") . BasicOp $
-              Reshape v $
-                reshapeAll (arrayShape v_t) (segmentsShape segments)
-          let (red_tags, map_tags) = splitAt (redResults reds) $ map distResTag res
-          pure $
-            insertRegulars red_tags elems'' $
-              insertReps (zip map_tags mapout_res) env
       | Just scans <- isScanSOAC form,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
           reps <- mapM (segOpInputRep segments env inps) arrs
+          let hasNoFreeVariant = allNames (not . isVariant inps env . Var) (foldMap freeIn scans)
           (flags, offsets, arr_segments, elems, elems_kind) <-
-            prepareSegOpInputs segments env inps w reps arrs
+            prepareSegOpInputs segments env inps w reps arrs hasNoFreeVariant
           elems' <- doSegScan scans flags elems segments inps env
           pure $
             insertIrregulars arr_segments flags offsets (zip (map distResTag res) elems') elems_kind env
@@ -1980,9 +1796,28 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
           traceM "Status: everything integetrated"
           reps <- mapM (segOpInputRep segments env inps) arrs
+          let hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn post_lam <> freeIn map_lam <> foldMap freeIn scans)
           (ws_F, ws_O, ws_S, elems, elems_kind) <-
-            prepareSegOpInputs segments env inps w reps arrs
-          elems' <- doSegMaposcanomap scans ws_F elems post_lam map_lam segments inps env
+            prepareSegOpInputs segments env inps w reps arrs hasNoFreeVariant
+          let free = freeIn map_lam <> freeIn post_lam <> foldMap freeIn scans
+          outer_scope <- askScope
+          let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
+          free_sizes <-
+            localScope input_scope $
+              foldMap freeIn <$> mapM lookupType (namesToList free)
+          let free_and_sizes = namesToList $ free <> free_sizes
+          ws <- dataArr segments env inps w
+          (_, _, ws_data) <- doRepIota ws_S
+          -- TODO: this will break in certain cases where the free variable is an irregular that needs to be replicated
+          (free_replicated, replicated) <-
+            fmap unzip . sequence $
+              mapMaybe
+                (onMapFreeVar segments env inps ws (ws_F, ws_O, ws_data))
+                free_and_sizes
+          let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+          new_segment <- arraySize 0 <$> lookupType ws_F
+          let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs 
+          elems' <- doSegMaposcanomap scans ws_F elems post_lam map_lam segments inps env readFree
           insertSegOpMapResults
             segments
             ws_S
@@ -1990,23 +1825,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
             ws_O
             elems_kind
             (zip res elems')
-            env
-      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-        suitableSegOpMap env inps map_lam,
-        not $ suitableSegOpMap env inps post_lam,
-        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
-          traceM "Status: pre map integetrated"
-          transformPostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
-      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-        suitableSegOpMap env inps post_lam,
-        not $ suitableSegOpMap env inps map_lam,
-        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
-          traceM "Status: post map integetrated"
-          transformPreMaposcanomap segments env inps res w arrs post_lam scans map_lam
-      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
-          traceM "Status Nothing integerated"
-          transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
+            env      
       | Just map_lam <- isMapSOAC form,
         isVersionableMap inps env w res map_lam ->
           versionedRegularMap segments env inps res pat aux w arrs map_lam

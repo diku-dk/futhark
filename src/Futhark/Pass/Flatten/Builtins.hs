@@ -32,6 +32,7 @@ import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace)
 import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU)
 import Futhark.Tools
+import Futhark.Transform.Rename (renameBody, renameLambda)
 import Futhark.Util (unsnoc)
 
 builtinName :: T.Text -> Name
@@ -65,28 +66,45 @@ genScanWithKernelBody ::
   (f SubExp -> Builder GPU Result) ->
   Builder GPU [VName]
 genScanWithKernelBody desc segments lam nes =
-  genScanWithKernelBodyAndPost desc segments lam nes mkIdentityLambda
+  genScanWithKernelBodyAndPost
+    desc
+    segments
+    (\_ -> pure lam)
+    nes
+    (\_ res_t -> mkIdentityLambda res_t)
 
 genScanWithKernelBodyAndPost ::
   (Traversable f) =>
   Name ->
   f SubExp ->
-  Lambda GPU ->
+  (f SubExp -> Builder GPU (Lambda GPU)) ->
   [SubExp] ->
-  ([Type] -> Builder GPU (Lambda GPU)) ->
+  (f SubExp -> [Type] -> Builder GPU (Lambda GPU)) ->
   (f SubExp -> Builder GPU Result) ->
   Builder GPU [VName]
-genScanWithKernelBodyAndPost desc segments lam nes mkPostLam m = do
+genScanWithKernelBodyAndPost desc segments mkScanLam nes mkPostLam m = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
+  let gtids' = fmap Var gtids
   ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
-    res <- m $ fmap Var gtids
+    res <- m gtids'
     res_t <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, res_t)
-  let kbody = Body () stms res
-      op = SegBinOp Commutative lam nes mempty
-  post_lam <- mkPostLam res_t
-  letTupExp desc $ Op $ SegOp $ SegScan lvl space res_t kbody [op] (SegPostOp post_lam)
+
+  scan_lam <-
+    localScope (scopeOfSegSpace space) $
+      mkScanLam gtids'
+  post_lam <-
+    localScope (scopeOfSegSpace space) $
+      mkPostLam gtids' res_t
+  -- We have to rename since we are using a global readFree
+  scan_lam' <- renameLambda scan_lam
+  post_lam' <- renameLambda post_lam
+
+  kbody <- renameBody $ Body () stms res
+  let op = SegBinOp Commutative scan_lam' nes mempty
+
+  letTupExp desc $ Op $ SegOp $ SegScan lvl space res_t kbody [op] (SegPostOp post_lam')
   where
     lvl = SegThread SegVirt Nothing
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
@@ -132,10 +150,11 @@ genExScan desc segments lam nes arrs =
           pure $ subExpsRes prescan
 
 segScanLambda ::
-  (MonadBuilder m, BranchType (Rep m) ~ ExtType, LParamInfo (Rep m) ~ Type) =>
-  Lambda (Rep m) ->
-  m (Lambda (Rep m))
-segScanLambda lam = do
+  Lambda GPU ->
+  ([SubExp] -> Builder GPU ()) ->
+  [SubExp] ->
+  Builder GPU (Lambda GPU)
+segScanLambda lam readFree gtids = do
   x_flag_p <- newParam "x_flag" $ Prim Bool
   y_flag_p <- newParam "y_flag" $ Prim Bool
   let ts = lambdaReturnType lam
@@ -147,23 +166,29 @@ segScanLambda lam = do
           eIf
             (eParam y_flag_p)
             (eBody (map eParam yps))
-            (pure $ lambdaBody lam)
+            ( do
+                readFree gtids
+                pure $ lambdaBody lam
+            )
         ]
 
 genSegScan :: Name -> Lambda GPU -> [SubExp] -> VName -> [VName] -> Builder GPU [VName]
 genSegScan desc lam nes flags arrs = do
   w <- arraySize 0 <$> lookupType flags
-  lam' <- segScanLambda lam
+  lam' <- segScanLambda lam (const $ pure ()) []
   drop 1 <$> genScan desc [w] lam' (constant False : nes) (flags : arrs)
 
 segScanomapPostLambda ::
-  (MonadBuilder m, LParamInfo (Rep m) ~ Type) =>
-  Lambda (Rep m) ->
-  m (Lambda (Rep m))
-segScanomapPostLambda lam = do
+  Lambda GPU ->
+  ([SubExp] -> Builder GPU ()) ->
+  [SubExp] ->
+  Builder GPU (Lambda GPU)
+segScanomapPostLambda lam readFree gtids = do
   flag_p <- newParam "seg_flag" $ Prim Bool
-  mkLambda (flag_p : lambdaParams lam) $
+  mkLambda (flag_p : lambdaParams lam) $ do
+    readFree gtids
     bodyBind $ lambdaBody lam
+
 genSegScanomap ::
   Name ->
   Lambda GPU ->
@@ -171,10 +196,11 @@ genSegScanomap ::
   VName ->
   Lambda GPU ->
   [VName] ->
+  ([SubExp] -> Builder GPU ()) ->
   Builder GPU [VName]
-genSegScanomap desc scan_lam nes flags map_lam arrs = do
+genSegScanomap desc scan_lam nes flags map_lam arrs readFree = do
   post_lam <- mkIdentityLambda $ lambdaReturnType map_lam
-  genSegScanomapWithPost desc scan_lam nes flags post_lam map_lam arrs
+  genSegScanomapWithPost desc scan_lam nes flags post_lam map_lam arrs readFree
 
 genSegScanomapWithPost ::
   Name ->
@@ -184,20 +210,23 @@ genSegScanomapWithPost ::
   Lambda GPU ->
   Lambda GPU ->
   [VName] ->
+  ([SubExp] -> Builder GPU ()) ->
   Builder GPU [VName]
-genSegScanomapWithPost desc scan_lam nes flags post_lam map_lam arrs = do
+genSegScanomapWithPost desc scan_lam nes flags post_lam map_lam arrs readFree = do
   w <- arraySize 0 <$> lookupType flags
-  scan_lam' <- segScanLambda scan_lam
-  post_lam' <- segScanomapPostLambda post_lam
+
   genScanWithKernelBodyAndPost
     desc
     [w]
-    scan_lam'
+    (segScanLambda scan_lam readFree)
     (constant False : nes)
-    (const $ pure post_lam')
+    ( \gtids _res_t ->
+        segScanomapPostLambda post_lam readFree gtids
+    )
     ( \gtids -> do
         let [gtid] = toList gtids
         flag <- letSubExp "flag" =<< eIndex flags [eSubExp gtid]
+        readFree gtids
         bindLambdaInputArrays gtids map_lam arrs
         map_res <- bodyBind (lambdaBody map_lam)
         pure (subExpRes flag : map_res)
@@ -279,8 +308,9 @@ genSegRedomap ::
   [VName] ->
   Reduce SOACS ->
   Lambda GPU ->
+  ([SubExp] -> Builder GPU ()) ->
   Builder GPU ([VName], [VName])
-genSegRedomap segments flags offsets elems red map_lam = do
+genSegRedomap segments flags offsets elems red map_lam readFree = do
   scanned_and_map <-
     genSegScanomap
       "redomap"
@@ -289,6 +319,7 @@ genSegRedomap segments flags offsets elems red map_lam = do
       flags
       map_lam
       elems
+      readFree
   let (scanned, mapout) = splitAt (length nes) scanned_and_map
   num_segments <- arraySize 0 <$> lookupType offsets
   reds <- letTupExp "segred" <=< genTabulate num_segments $ \i -> do

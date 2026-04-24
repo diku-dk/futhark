@@ -11,6 +11,7 @@ import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify (simplifyStms)
 import Futhark.IR.SOACS.Simplify qualified as SOACS
 import Futhark.Pass
+import Futhark.Pass.Flatten.Distribute (isParallelStm)
 import Futhark.Pass.Flatten.ISRWIM (irwim, iswim)
 import Futhark.Tools
 
@@ -55,6 +56,36 @@ onStm scope (Let pat aux (Op (Screma w arrs form))) = do
           runSimplifiedBuilder scope $ auxing aux do_irwim
       | shouldDissectForm form' ->
           runBuilderT_ (auxing aux $ dissectScrema pat w' form' arrs') scope
+      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form',
+        any isParallelStm (bodyStms $ lambdaBody map_lam),
+        any isParallelStm (bodyStms $ lambdaBody post_lam) -> do
+          (mapstm, scanstm, poststm) <-
+            maposcanomapToMapScanAndMap
+              pat
+              (w', post_lam, scans, map_lam, arrs')
+          onStms scope $ stmsFromList [mapstm, scanstm, poststm]
+      | Just (post_lam, _, _) <- isMaposcanomapSOAC form',
+        any isParallelStm (bodyStms $ lambdaBody post_lam) -> do
+          stms <-
+            runSimplifiedBuilder scope $
+              auxing aux $
+                extractPostLambda pat w' arrs' form'
+          onStms scope stms
+
+      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form',
+        any isParallelStm (bodyStms $ lambdaBody map_lam) -> do
+          (mapstm, scanstm) <-
+            maposcanomapToMaposcanAndMap
+              pat
+              (w', post_lam, scans, map_lam, arrs')
+          onStms scope $ stmsFromList [mapstm, scanstm]   
+      | Just (reds, map_lam) <- isRedomapSOAC form',
+        any isParallelStm (bodyStms $ lambdaBody map_lam) -> do
+          (mapstm, redstm) <-
+            redomapToMapAndReduce
+              pat
+              (w, reds, map_lam, arrs)
+          onStms scope $ stmsFromList [mapstm, redstm]
       | otherwise ->
           pure $ oneStm $ Let pat aux $ Op $ Screma w' arrs' form'
     _ ->
