@@ -529,8 +529,10 @@ runMapLambdaBody ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
+  Pat Type ->
+  [DistResult] ->
   Builder GPU [VName]
-runMapLambdaBody segments env inps w arrs map_lam = do
+runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
   outer_scope <- askScope
   let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
   map_lam' <- localScope input_scope $ FOT.transformLambda map_lam
@@ -547,14 +549,13 @@ runMapLambdaBody segments env inps w arrs map_lam = do
     localScope input_scope $
       foldMap freeIn <$> mapM lookupType (namesToList free)
 
-      
   let new_segments = segments <> pure w
       (param_env, param_inputs) =
         mapArraysToInputs (lambdaParams map_lam') arrs'
       free_inputs =
         [ (v, inp)
-        | v <- namesToList $ free_sizes <> free
-        , Just inp <- [lookup v inps]
+        | v <- namesToList $ free_sizes <> free,
+          Just inp <- [lookup v inps]
         ]
 
   vs <- letTupExp "outer_map" <=< renameExp <=< segMap new_segments $ \is -> do
@@ -566,11 +567,10 @@ runMapLambdaBody segments env inps w arrs map_lam = do
 
     addStms $ bodyStms $ lambdaBody map_lam'
     pure $ bodyResult $ lambdaBody map_lam'
-  
-  forM vs $ \v ->
-    letExp (baseName v <> "_copy") . BasicOp $
-      Replicate mempty (Var v)
-
+  forM vs $ \v -> do
+    letExp (baseName v <> "_copy") $
+      BasicOp $
+        Replicate mempty (Var v)
 
 regularRepVars :: [ResRep] -> [VName]
 regularRepVars =
@@ -609,7 +609,7 @@ versionedRegularMap segments env inps ress pat aux w arrs map_lam = do
         regularRepVars <$> transformInnerMap segments env inps pat w arrs map_lam
 
       outerOnly =
-        runMapLambdaBody segments env inps w arrs map_lam
+        runMapLambdaBody segments env inps w arrs map_lam pat ress
 
   full_body <- regularBranchBody fullFlatten
   outer_body <- regularBranchBody outerOnly
@@ -1592,10 +1592,19 @@ transformPostMaposcanomap segments env inps res pat w arrs post_lam scans map_la
 
   post_reps <-
     zipWithM
-      (\elem' post_param ->
-        postMapResultRep
-          segments env inps w ws_F ws_O ws_S
-          elem' elems_kind post_param)
+      ( \elem' post_param ->
+          postMapResultRep
+            segments
+            env
+            inps
+            w
+            ws_F
+            ws_O
+            ws_S
+            elem'
+            elems_kind
+            post_param
+      )
       elems'
       post_params
 
@@ -1964,7 +1973,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           traceM "Status Nothing integerated"
           transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
       | Just map_lam <- isMapSOAC form,
-         isVersionableMap inps env w res ->
+        isVersionableMap inps env w res ->
           versionedRegularMap segments env inps res pat aux w arrs map_lam
       | Just map_lam <- isMapSOAC form -> do
           map_res <-
