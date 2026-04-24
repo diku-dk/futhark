@@ -18,7 +18,7 @@ import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (isNothing, mapMaybe)
+import Data.Maybe (isJust, isNothing, mapMaybe)
 import Data.Set qualified as S
 import Data.Tuple.Solo
 import Debug.Trace
@@ -460,6 +460,41 @@ rearrangeIrreg segments env inps v_t perm ir = do
         irregularK = Dense
       }
 
+-- | A lambda is worth sequentialising if it contains enough nested
+-- parallelism of an interesting kind.
+worthSequentialising :: Lambda SOACS -> Bool
+worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
+  where
+    bodyInterest depth body =
+      sum $ interest depth <$> bodyStms body
+    interest depth stm
+      | "sequential" `inAttrs` attrs =
+          0 :: Int
+      | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm,
+        isJust $ isMapSOAC form =
+          if sequential_inner
+            then 0
+            else bodyInterest (depth + 1) (lambdaBody lam')
+      | Loop _ ForLoop {} body <- stmExp stm =
+          bodyInterest (depth + 1) body * 10
+      | WithAcc _ withacc_lam <- stmExp stm =
+          bodyInterest (depth + 1) (lambdaBody withacc_lam)
+      | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm =
+          1
+            + bodyInterest (depth + 1) (lambdaBody lam')
+            +
+            -- Give this a bigger score if it's a redomap just inside
+            -- the the outer lambda, as these are often tileable and
+            -- thus benefit more from sequentialisation.
+            case (isRedomapSOAC form, depth) of
+              (Just _, 0) -> 1
+              _ -> 0
+      | otherwise =
+          0
+      where
+        attrs = stmAuxAttrs $ stmAux stm
+        sequential_inner = "sequential_inner" `inAttrs` attrs
+        
 sufficientParallelism ::
   Name ->
   [SubExp] ->
@@ -580,8 +615,8 @@ regularRepVars =
     onRep Irregular {} =
       error "regularRepVars: expected regular result"
 
-isVersionableMap :: DistInputs -> DistEnv -> SubExp -> [DistResult] -> Bool
-isVersionableMap inps env w dist_res = all isRegularDistResult dist_res && not (isVariant inps env w)
+isVersionableMap :: DistInputs -> DistEnv -> SubExp -> [DistResult] -> Lambda SOACS -> Bool
+isVersionableMap inps env w dist_res map_lam = worthSequentialising map_lam  && all isRegularDistResult dist_res && not (isVariant inps env w)
 
 regularBranchBody ::
   Builder GPU [VName] ->
@@ -1973,7 +2008,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           traceM "Status Nothing integerated"
           transformPrePostMaposcanomap segments env inps res pat w arrs post_lam scans map_lam
       | Just map_lam <- isMapSOAC form,
-        isVersionableMap inps env w res ->
+        isVersionableMap inps env w res map_lam ->
           versionedRegularMap segments env inps res pat aux w arrs map_lam
       | Just map_lam <- isMapSOAC form -> do
           map_res <-
