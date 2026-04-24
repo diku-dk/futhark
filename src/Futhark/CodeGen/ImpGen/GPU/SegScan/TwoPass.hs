@@ -631,19 +631,19 @@ compileSegScan pat lvl space ts scans kbody post_op = do
   attrs <- lvlKernelAttrs lvl
 
   -- Stage 2 uses loop virtualization, so stage1_num_tblocks is no
-  -- longer capped by the maximum thread block size.  Instead we query
-  -- the maximum to use as the stage-2 block size.
-  stage2_max_tblock_size <- dPrim "stage2_max_tblock_size"
-  sOp $ Imp.GetSizeMax (tvVar stage2_max_tblock_size) SizeThreadBlock
-
+  -- longer capped by the maximum thread block size.
   let stage1_num_tblocks = kAttrNumBlocks attrs
 
+  -- The stage-2 block size is a tunable/user-settable parameter,
+  -- clamped to the hardware maximum.  It is independent of
+  -- stage1_num_tblocks so the autotuner can treat it as a fixed knob.
+  stage2_max_tblock_size <- dPrim "stage2_max_tblock_size"
+  sOp $ Imp.GetSizeMax (tvVar stage2_max_tblock_size) SizeThreadBlock
+  stage2_tblock_size_param <- getSize "scan_stage2_tblock_size" SizeThreadBlock
   stage2_tblock_size <-
     fmap (Imp.Count . tvSize) $
       dPrimV "stage2_tblock_size" $
-        sMin64 (tvExp stage2_max_tblock_size) $
-          pe64 . Imp.unCount $
-            stage1_num_tblocks
+        sMin64 (tvExp stage2_max_tblock_size) (tvExp stage2_tblock_size_param)
 
   let shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
       scan_ts = concatMap shpT scans
