@@ -3,7 +3,10 @@
 -- scan_stage2_tblock_size.  The .tuning_gpu file sets
 -- scan_stage2_tblock_size to a small value so that even a modest
 -- input forces multiple stage-2 iterations.
+--
+-- Only OpenCL uses the two-pass scan; CUDA and HIP use single-pass.
 -- ==
+-- tags { no_cuda no_hip }
 -- input { [1i32, 1i32, 1i32, 1i32, 1i32, 1i32, 1i32, 1i32,
 --          1i32, 1i32, 1i32, 1i32, 1i32, 1i32, 1i32, 1i32,
 --          1i32, 1i32, 1i32, 1i32, 1i32, 1i32, 1i32, 1i32,
@@ -12,5 +15,6 @@
 --           9i32, 10i32, 11i32, 12i32, 13i32, 14i32, 15i32, 16i32,
 --           17i32, 18i32, 19i32, 20i32, 21i32, 22i32, 23i32, 24i32,
 --           25i32, 26i32, 27i32, 28i32, 29i32, 30i32, 31i32, 32i32] }
+-- compiled random input { [1000000]i32 } auto output
 
 def main (a: []i32) : []i32 = scan (+) 0 a
