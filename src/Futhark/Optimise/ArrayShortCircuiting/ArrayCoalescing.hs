@@ -224,7 +224,8 @@ shortCircuitSegOp lvlOK lutab pat pat_certs (SegScan lvl space _ kernel_body bin
   -- postop. We might lose some optimisation possibilities due to this
   -- conservative check.
   | not $ isIdentityLambda $ segPostOpLambda post_op =
-      pure bu_env
+      let (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys (activeCoals bu_env)
+       in pure $ bu_env {activeCoals = active, inhibit = inh}
   | otherwise =
       -- Like in the handling of 'SegRed', we do not want to coalesce anything that
       -- is used in the 'SegBinOp'. We do not coalesce anything that is using in SegPostOp either.
