@@ -84,7 +84,7 @@ onStm scope (Let pat aux (Op (Screma w arrs form))) = do
           (mapstm, redstm) <-
             redomapToMapAndReduce
               pat
-              (w, reds, map_lam, arrs)
+              (w', reds, map_lam, arrs')
           onStms scope $ stmsFromList [mapstm, redstm]
       | otherwise ->
           pure $ oneStm $ Let pat aux $ Op $ Screma w' arrs' form'
