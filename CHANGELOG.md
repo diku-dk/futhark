@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The interpreter implementation of AD handled some integer/floating-point
   conversions incorrectly. (#2425)
 
+* Compiler crash when inserting memory information. (#2432)
+
 ## [0.25.37]
 
 ### Added
