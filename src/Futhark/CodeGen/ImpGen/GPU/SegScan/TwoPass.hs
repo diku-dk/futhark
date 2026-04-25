@@ -637,7 +637,7 @@ compileSegScan pat lvl space ts scans kbody post_op = do
   -- The stage-2 block size is a tunable/user-settable parameter.  It
   -- is independent of stage1_num_tblocks so the autotuner can treat
   -- it as a fixed knob.
-  stage2_tblock_size_param <- getSize "scan_stage2_tblock_size" SizeThreadBlock
+  stage2_tblock_size_param <- getSize "segscan_stage2_tblock_size" SizeThreadBlock
   stage2_tblock_size <-
     fmap (Imp.Count . tvSize) $
       dPrimV "stage2_tblock_size" $
