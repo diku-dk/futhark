@@ -469,7 +469,7 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
                       Just f ->
                         f
                           (next_chunk_start * elems_per_group - 1)
-                          (next_chunk_start * elems_per_group)
+                          ((next_chunk_start + 1) * elems_per_group - 1)
                 let should_load_carry =
                       kernelLocalThreadId constants .==. 0 .&&. bNot crosses_seg2
                     load_carry =
