@@ -374,22 +374,28 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
             let (array_scan, fence, barrier) = barrierFor scan_op
                 scan_x_params = xParams scan
                 scan_y_params = yParams scan
+                -- Scalar scans with a non-trivial vec_shape need per-vec-element
+                -- carries reloaded from global memory, just like array scans.
+                -- The scalar carry register cannot hold independent carries for
+                -- each vector element across chunk iterations.
+                use_global_carry = array_scan || not (null (shapeDims vec_shape))
 
-            when array_scan barrier
+            when use_global_carry (sOp $ Imp.Barrier Imp.FenceGlobal)
 
             sLoopNest vec_shape $ \vec_is -> do
               let glob_is = map Imp.le64 gtids ++ vec_is
                   in_bounds =
                     foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
                   -- Element index of the last element of the previous chunk,
-                  -- used to load the inter-chunk carry for array scans.
+                  -- used to load the inter-chunk carry from global memory.
                   prev_chunk_last = chunk_offset * elems_per_group - 1
 
-              -- For array scans, reload carry (xParams) from the scan
-              -- output written by the previous chunk.  Thread 0 reads
-              -- the last element of the previous chunk, unless a segment
-              -- boundary falls between the chunks.
-              when array_scan $ do
+              -- For array scans and scalar scans with non-trivial vec_shape,
+              -- reload carry (xParams) from the scan output written by the
+              -- previous chunk.  Thread 0 reads the last element of the
+              -- previous chunk, unless a segment boundary falls between the
+              -- chunks.
+              when use_global_carry $ do
                 crosses_seg <-
                   dPrimVE "crosses_seg" $
                     case crossesSegment of
@@ -457,10 +463,12 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
 
               barrier
 
-              -- For scalar scans, update the carry register (xParams)
-              -- so the next chunk can use it.  For array scans the carry
-              -- is reloaded from global memory at the start of each chunk.
-              unless array_scan $ do
+              -- For scalar scans with trivial vec_shape (no vec loop), update
+              -- the carry register (xParams) so the next chunk can use it.
+              -- For array scans and scalar scans with non-trivial vec_shape,
+              -- the carry is reloaded from global memory at the start of each
+              -- chunk (above), so no register update is needed here.
+              unless use_global_carry $ do
                 let next_chunk_start = chunk_offset + stage2_tblock_size_e
                 crosses_seg2 <-
                   dPrimVE "crosses_seg" $
