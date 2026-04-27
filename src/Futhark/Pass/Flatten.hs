@@ -516,6 +516,28 @@ sufficientParallelism desc ws path def = do
 
   pure (cmp_res, size_key)
 
+
+kernelAlternativesTopLevel ::
+  (MonadFreshNames m, HasScope GPU m) =>
+  Pat Type ->
+  Body GPU ->
+  [(SubExp, Body GPU)] ->
+  m (Stms GPU)
+kernelAlternativesTopLevel pat default_body [] = runBuilder_ $ do
+  ses <- bodyBind default_body
+  forM_ (zip (patNames pat) ses) $ \(name, SubExpRes cs se) ->
+    certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
+kernelAlternativesTopLevel pat default_body ((cond, alt) : alts) = runBuilder_ $ do
+  alts_pat <- fmap Pat . forM (patElems pat) $ \pe -> do
+    name <- newName $ patElemName pe
+    pure pe {patElemName = name}
+
+  alt_stms <- kernelAlternativesTopLevel alts_pat default_body alts
+  let alt_body = mkBody alt_stms $ varsRes $ patNames alts_pat
+
+  letBind pat . Match [cond] [Case [Just $ BoolValue True] alt] alt_body $
+    MatchDec (staticShapes (patTypes pat)) MatchEquiv
+
 kernelAlternatives ::
   Name ->
   [Type] ->
@@ -1144,17 +1166,20 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
                 letExp (baseName vs <> "_flat") . BasicOp . Reshape vs $
                   reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
           pure $ MapArray v t
-        DistInput rt _ ->
+        DistInput rt t ->
           case resVar rt env of
             Irregular rep -> do
               onMapIrregularInputArr SingleDim segments ws ws_O ws_data p arr rep ws_prod
             Regular vs -> do
               let inner_shape = arrayShape $ paramType p
               vs_t <- lookupType vs
-              v <-
-                letExp (baseName arr <> "_reg_flat") . BasicOp . Reshape vs $
-                  reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
-              pure $ MapArray v (stripArray 1 vs_t)
+              if isAcc vs_t
+                then pure $ MapArray vs t
+                else do
+                v <-
+                  letExp (baseName arr <> "_reg_flat") . BasicOp . Reshape vs $
+                    reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
+                pure $ MapArray v (stripArray 1 vs_t)
     -- undefined
     Nothing -> do
       arr_row_t <- rowType <$> lookupType arr
@@ -1341,15 +1366,18 @@ onMapInputArrMultiDim old_segments w env inps ws ws_O ws_data p arr = do
             onMapIrregularInputArr MultiDim (old_segments <> pure w) ws ws_O ws_data p arr rep ws_prod
           Regular vs -> do
             vs_t <- lookupType vs
-            -- let's be cautious and make sure it has the correct shape
-            let expected_shape = segmentsShape old_segments <> arrayShape t
-            if arrayShape vs_t == expected_shape
+            if isAcc vs_t
               then pure $ MapArray vs t
               else do
-                v <-
-                  letExp (baseName arr <> "_reg_reshape") . BasicOp . Reshape vs $
-                    reshapeAll (arrayShape vs_t) expected_shape
-                pure $ MapArray v t
+            -- let's be cautious and make sure it has the correct shape
+              let expected_shape = segmentsShape old_segments <> arrayShape t
+              if arrayShape vs_t == expected_shape
+                then pure $ MapArray vs t
+                else do
+                  v <-
+                    letExp (baseName arr <> "_reg_reshape") . BasicOp . Reshape vs $
+                      reshapeAll (arrayShape vs_t) expected_shape
+                  pure $ MapArray v t
     Nothing -> do
       arr_row_t <- rowType <$> lookupType arr
       arr_rep <-
@@ -1670,12 +1698,15 @@ prepareSegOpInputs segments env inps w reps names hasNoFreeVariant
 flattenRegularToRows :: Segments -> SubExp -> VName -> Builder GPU VName
 flattenRegularToRows segments m v = do
   v_t <- lookupType v
-  when (arrayRank v_t < segmentsRank segments + 1) $
-    error "prepareSegOpInputs: regular input rank too small"
-  let row_shape = arrayShape $ stripArray (segmentsRank segments + 1) v_t
-  letExp (baseName v <> "_flat") . BasicOp $
-    Reshape v $
-      reshapeAll (arrayShape v_t) (Shape [m] <> row_shape)
+  if isAcc v_t
+    then pure v
+    else do
+    when (arrayRank v_t < segmentsRank segments + 1) $
+      error "prepareSegOpInputs: regular input rank too small"
+    let row_shape = arrayShape $ stripArray (segmentsRank segments + 1) v_t
+    letExp (baseName v <> "_flat") . BasicOp $
+      Reshape v $
+        reshapeAll (arrayShape v_t) (Shape [m] <> row_shape)
 
 insertSegOpMapResults ::
   Segments ->
@@ -1692,13 +1723,16 @@ insertSegOpMapResults segments segs flags offsets kind bnds env0 =
     insert env (dist_res, v)
       | isRegularDistResult dist_res = do
           let DistType _ _ t = distResType dist_res
-              expected_shape = segmentsShape segments <> arrayShape t
-          v_t <- lookupType v
-          v' <-
-            letExp (baseName v <> "_reshaped") . BasicOp $
-              Reshape v $
-                reshapeAll (arrayShape v_t) expected_shape
-          pure $ insertRegulars [distResTag dist_res] [v'] env
+          if isAcc t
+            then pure $ insertRegulars [distResTag dist_res] [v] env
+            else do
+              let expected_shape = segmentsShape segments <> arrayShape t
+              v_t <- lookupType v
+              v' <-
+                letExp (baseName v <> "_reshaped") . BasicOp $
+                  Reshape v $
+                    reshapeAll (arrayShape v_t) expected_shape
+              pure $ insertRegulars [distResTag dist_res] [v'] env
       | otherwise =
           pure $ insertIrregular segs flags offsets (distResTag dist_res) v kind env
 
@@ -1763,6 +1797,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
           
           new_segment <- arraySize 0 <$> lookupType ws_F
           let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs 
+          traceM "Status: about to gen redomap"
           (red_elems, mapout_elems) <-
             genSegRedomap ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam) readFree
           red_elems' <- forM red_elems $ \v -> do
@@ -1780,6 +1815,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
               elems_kind
               (zip map_res mapout_elems)
               env
+          traceM "Status: redomap done"
           pure $ insertRegulars (map distResTag red_res) red_elems' env'
       | Just scans <- isScanSOAC form,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
@@ -2343,15 +2379,21 @@ transformDistributedInnerMap mode (ws_F, ws_O, ws) irregs segments dist = do
         pure (v, rep)
       Right (DistInputFree arr t) -> do
         letBindNames [v] $ BasicOp $ SubExp $ Var arr
-        rep <- mapResultRep (resultMapMode mode new_inps t) (ws, ws_F, ws_O) v
-        pure (v, rep)
+        if isAcc t
+          then pure (v, Regular v)
+          else do
+            rep <- mapResultRep (resultMapMode mode new_inps t) (ws, ws_F, ws_O) v
+            pure (v, rep)
       Right (DistInput rt t) ->
         let result_mode = resultMapMode mode new_inps t
          in case resVar rt env of
               Regular v' -> do
                 letBindNames [v] $ BasicOp $ SubExp $ Var v'
-                rep <- mapResultRep result_mode (ws, ws_F, ws_O) v
-                pure (v, rep)
+                if isAcc t
+                  then pure (v, Regular v)
+                  else do
+                    rep <- mapResultRep result_mode (ws, ws_F, ws_O) v
+                    pure (v, rep)
               Irregular irreg -> do
                 rep <- irregularMapResult result_mode (ws, ws_F, ws_O) segments irreg v t new_inps
                 pure (v, rep)
@@ -2744,15 +2786,35 @@ transformLambda scope (Lambda params ret body) = do
   pure $ Lambda params ret body'
 
 transformStm :: Scope SOACS -> Stm SOACS -> PassM (Stms GPU)
-transformStm scope (Let pat _ (Op (Screma w arrs form)))
+transformStm scope (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
+      let gpu = soacsStmToGPU (Let pat aux (Op (Screma w arrs form)))
+      let gpu_stms = oneStm gpu
       let arrs' =
             zipWith MapArray arrs $
               map paramType (lambdaParams (scremaLambda form))
           (distributed, _) = distributeMap scope pat (NE.singleton w) arrs' lam
           m = transformDistributed mempty (NE.singleton w) distributed
       traceM $ prettyString distributed
-      runReaderT (runBuilder_ m) scope
+      stms <- runReaderT (runBuilder_ m) scope
+      let fullFlattenBody0 = mkBody stms $ varsRes $ patNames pat
+          outerOnlyBody0 = mkBody gpu_stms $ varsRes $ patNames $ stmPat gpu
+      fullFlattenBody <- renameBody fullFlattenBody0
+      outerOnlyBody <- renameBody outerOnlyBody0
+      runReaderT
+        ( runBuilder_ $ do
+            (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
+            alt_vs <-
+              kernelAlternatives
+                "top_level_map_alt"
+                (patTypes pat)
+                fullFlattenBody
+                [(outer_suff, outerOnlyBody)]
+            forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
+              letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
+        )
+        scope
+
 transformStm scope (Let pat aux (Loop params form body)) =
   oneStm . Let pat aux . Loop params form <$> transformBody scope' body
   where
