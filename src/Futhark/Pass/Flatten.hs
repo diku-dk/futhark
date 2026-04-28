@@ -516,28 +516,6 @@ sufficientParallelism desc ws path def = do
 
   pure (cmp_res, size_key)
 
-
-kernelAlternativesTopLevel ::
-  (MonadFreshNames m, HasScope GPU m) =>
-  Pat Type ->
-  Body GPU ->
-  [(SubExp, Body GPU)] ->
-  m (Stms GPU)
-kernelAlternativesTopLevel pat default_body [] = runBuilder_ $ do
-  ses <- bodyBind default_body
-  forM_ (zip (patNames pat) ses) $ \(name, SubExpRes cs se) ->
-    certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
-kernelAlternativesTopLevel pat default_body ((cond, alt) : alts) = runBuilder_ $ do
-  alts_pat <- fmap Pat . forM (patElems pat) $ \pe -> do
-    name <- newName $ patElemName pe
-    pure pe {patElemName = name}
-
-  alt_stms <- kernelAlternativesTopLevel alts_pat default_body alts
-  let alt_body = mkBody alt_stms $ varsRes $ patNames alts_pat
-
-  letBind pat . Match [cond] [Case [Just $ BoolValue True] alt] alt_body $
-    MatchDec (staticShapes (patTypes pat)) MatchEquiv
-
 kernelAlternatives ::
   Name ->
   [Type] ->
@@ -2296,9 +2274,9 @@ irregularMapResult ::
   Builder GPU ResRep
 irregularMapResult mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
   do
-    irreg_dense <- ensureDenseIrregular (baseName v <> "_map_result") irreg
     if any (isTypeVariant new_inp_var) (arrayShape v_t)
       then do
+        irreg_dense <- ensureDenseIrregular (baseName v <> "_map_result") irreg
         old_segment <- arraySize 0 <$> lookupType ws
         new_shape <- letExp (baseName v <> "_outer_shape") <=< segMap (MkSolo old_segment) $ \(MkSolo is) -> do
           outer_ind <- letSubExp "outer_ind" =<< eIndex ws_O [eSubExp is]
@@ -2321,11 +2299,11 @@ irregularMapResult mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
         mapResultRep SingleDim (new_shape, new_ws_F, new_ws_O) v
       else case mode of
         MultiDim -> do
-          reshapeAndBind v (irregularD irreg_dense) (segmentsShape segments <> arrayShape v_t)
+          reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
           mapResultRep MultiDim (ws, ws_F, ws_O) v
         SingleDim -> do
           -- TODO: have to do this even it seems very annoying should think something better
-          reshapeAndBind v (irregularD irreg_dense) (segmentsShape segments <> arrayShape v_t)
+          reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
           mapResultRep SingleDim (ws, ws_F, ws_O) v
   where
     isTypeVariant vin se = case se of
