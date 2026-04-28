@@ -70,10 +70,7 @@ class Server {
 
   _cmd_outputs(args) {
     var entry = this._get_arg(args, 0);
-    var outputs = this._get_entry_point(entry)[2];
-    for (var i = 0; i < outputs.length; i++) {
-      console.log(outputs[i]);
-    }
+    console.log(this._get_entry_point(entry)[2]);
   }
 
   _cmd_dummy(args) {
@@ -160,19 +157,16 @@ class Server {
   _cmd_call(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
     var num_ins = entry[1].length;
-    var num_outs = entry[2].length;
+    var num_outs = 1;
     var expected_len = 1 + num_outs + num_ins
 
     if (args.length != expected_len) {
       throw "Invalid argument count, expected " + expected_len
     }
 
-    var out_vnames = args.slice(1, num_outs+1)
-    for (var i = 0; i < out_vnames.length; i++) {
-      var out_vname = out_vnames[i];
-      if (out_vname in this._vars) {
-        throw "Variable already exists: " + out_vname;
-      }
+    var out_vname = args[1];
+    if (out_vname in this._vars) {
+      throw "Variable already exists: " + out_vname;
     }
     var in_vnames = args.slice(1+num_outs);
     var ins = [];
@@ -183,13 +177,7 @@ class Server {
     var bef = performance.now()*1000;
     var vals = this.ctx[entry[0]].apply(this.ctx, ins);
     var aft = performance.now()*1000;
-    if (num_outs == 1) {
-      this._set_var(out_vnames[0], vals, entry[2][0]);
-    } else {
-      for (var i = 0; i < out_vnames.length; i++) {
-        this._set_var(out_vnames[i], vals[i], entry[2][i]);
-      }
-    }
+    this._set_var(out_vname, vals, entry[2]);
     console.log("runtime: " + Math.round(aft-bef));
   }
 

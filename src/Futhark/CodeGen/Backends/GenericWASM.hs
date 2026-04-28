@@ -321,11 +321,9 @@ jsWrapEntryPoint jse =
     ins = T.pack $ intercalate ", " [maybeDerefence ("in" ++ show i) $ parameters jse !! i | i <- alp]
     paramsToPtr = T.pack $ unlines $ filter ("" /=) [arrayPointer ("in" ++ show i) $ parameters jse !! i | i <- alp]
 
-    alr = [0 .. length (ret jse) - 1]
     outparams = showText $ typeSize $ ret jse
     results = T.pack $ makeResult 0 $ ret jse
-    res_array = intercalate ", " ["result" ++ show i | i <- alr]
-    res = T.pack $ if length (ret jse) == 1 then "result0" else "[" ++ res_array ++ "]"
+    res = "result0"
 
 maybeDerefence :: String -> String -> String
 maybeDerefence arg typ =
