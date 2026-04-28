@@ -494,7 +494,7 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
       where
         attrs = stmAuxAttrs $ stmAux stm
         sequential_inner = "sequential_inner" `inAttrs` attrs
-        
+
 sufficientParallelism ::
   Name ->
   [SubExp] ->
@@ -633,7 +633,7 @@ regularRepVars =
       error "regularRepVars: expected regular result"
 
 isVersionableMap :: DistInputs -> DistEnv -> SubExp -> [DistResult] -> Lambda SOACS -> Bool
-isVersionableMap inps env w dist_res map_lam = worthSequentialising map_lam  && all isRegularDistResult dist_res && not (isVariant inps env w)
+isVersionableMap inps env w dist_res map_lam = worthSequentialising map_lam && all isRegularDistResult dist_res && not (isVariant inps env w)
 
 regularBranchBody ::
   Builder GPU [VName] ->
@@ -1154,10 +1154,10 @@ onMapInputArr segments env inps ws ws_O ws_data p arr = do
               if isAcc vs_t
                 then pure $ MapArray vs t
                 else do
-                v <-
-                  letExp (baseName arr <> "_reg_flat") . BasicOp . Reshape vs $
-                    reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
-                pure $ MapArray v (stripArray 1 vs_t)
+                  v <-
+                    letExp (baseName arr <> "_reg_flat") . BasicOp . Reshape vs $
+                      reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
+                  pure $ MapArray v (stripArray 1 vs_t)
     -- undefined
     Nothing -> do
       arr_row_t <- rowType <$> lookupType arr
@@ -1347,15 +1347,15 @@ onMapInputArrMultiDim old_segments w env inps ws ws_O ws_data p arr = do
             if isAcc vs_t
               then pure $ MapArray vs t
               else do
-            -- let's be cautious and make sure it has the correct shape
-              let expected_shape = segmentsShape old_segments <> arrayShape t
-              if arrayShape vs_t == expected_shape
-                then pure $ MapArray vs t
-                else do
-                  v <-
-                    letExp (baseName arr <> "_reg_reshape") . BasicOp . Reshape vs $
-                      reshapeAll (arrayShape vs_t) expected_shape
-                  pure $ MapArray v t
+                -- let's be cautious and make sure it has the correct shape
+                let expected_shape = segmentsShape old_segments <> arrayShape t
+                if arrayShape vs_t == expected_shape
+                  then pure $ MapArray vs t
+                  else do
+                    v <-
+                      letExp (baseName arr <> "_reg_reshape") . BasicOp . Reshape vs $
+                        reshapeAll (arrayShape vs_t) expected_shape
+                    pure $ MapArray v t
     Nothing -> do
       arr_row_t <- rowType <$> lookupType arr
       arr_rep <-
@@ -1543,8 +1543,9 @@ suitableOperator env inps lam nes =
 suitableSegOpMap :: DistEnv -> DistInputs -> Lambda SOACS -> Bool
 suitableSegOpMap env inps map_lam =
   not (any isParallelStm (bodyStms $ lambdaBody map_lam))
-    -- TODO: do we want to add variants as inputs?
-    -- && allNames (not . isVariant inps env . Var) (freeIn map_lam)
+
+-- TODO: do we want to add variants as inputs?
+-- && allNames (not . isVariant inps env . Var) (freeIn map_lam)
 
 -- doSegScan :: [Scan SOACS] -> VName -> [VName] -> Builder GPU [VName]
 doSegScan :: [Scan SOACS] -> VName -> [VName] -> Segments -> DistInputs -> DistEnv -> Builder GPU [VName]
@@ -1679,12 +1680,12 @@ flattenRegularToRows segments m v = do
   if isAcc v_t
     then pure v
     else do
-    when (arrayRank v_t < segmentsRank segments + 1) $
-      error "prepareSegOpInputs: regular input rank too small"
-    let row_shape = arrayShape $ stripArray (segmentsRank segments + 1) v_t
-    letExp (baseName v <> "_flat") . BasicOp $
-      Reshape v $
-        reshapeAll (arrayShape v_t) (Shape [m] <> row_shape)
+      when (arrayRank v_t < segmentsRank segments + 1) $
+        error "prepareSegOpInputs: regular input rank too small"
+      let row_shape = arrayShape $ stripArray (segmentsRank segments + 1) v_t
+      letExp (baseName v <> "_flat") . BasicOp $
+        Reshape v $
+          reshapeAll (arrayShape v_t) (Shape [m] <> row_shape)
 
 insertSegOpMapResults ::
   Segments ->
@@ -1772,9 +1773,9 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
                 (onMapFreeVar segments env inps ws (ws_F, ws_O, ws_data))
                 free_and_sizes
           let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
-          
+
           new_segment <- arraySize 0 <$> lookupType ws_F
-          let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs 
+          let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
           traceM "Status: about to gen redomap"
           (red_elems, mapout_elems) <-
             genSegRedomap ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam) readFree
@@ -1830,7 +1831,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
                 free_and_sizes
           let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
           new_segment <- arraySize 0 <$> lookupType ws_F
-          let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs 
+          let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
           elems' <- doSegMaposcanomap scans ws_F elems post_lam map_lam segments inps env readFree
           insertSegOpMapResults
             segments
@@ -1839,7 +1840,7 @@ transformDistStm segments env (DistStm inps res (ParallelStm stm)) = do
             ws_O
             elems_kind
             (zip res elems')
-            env      
+            env
       | Just map_lam <- isMapSOAC form,
         isVersionableMap inps env w res map_lam ->
           versionedRegularMap segments env inps res pat aux w arrs map_lam
@@ -2792,7 +2793,6 @@ transformStm scope (Let pat aux (Op (Screma w arrs form)))
               letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
         )
         scope
-
 transformStm scope (Let pat aux (Loop params form body)) =
   oneStm . Let pat aux . Loop params form <$> transformBody scope' body
   where
