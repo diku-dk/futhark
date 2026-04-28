@@ -405,7 +405,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
          ]
       ++ prog'
   where
-    Imp.Definitions params _types consts (Imp.Functions funs) = prog
+    Imp.Definitions params opaques consts (Imp.Functions funs) = prog
     compileProg' = withConstantSubsts consts $ do
       compileConstants consts
 
@@ -421,6 +421,21 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
                 ]
             )
 
+          pair x y = Tuple [x, y]
+
+          opaques_def =
+            Assign
+              (Var "opaques")
+              ( Dict $
+                  zip
+                    (map String opaque_names)
+                    ( zipWith
+                        pair
+                        (map Tuple opaque_payloads)
+                        (map opaqueTupleElems opaque_names)
+                    )
+              )
+
       case mode of
         ToLibrary -> do
           (entry_points, entry_point_types) <-
@@ -431,9 +446,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
                   [ Assign
                       (Var "entry_points")
                       (Dict entry_point_types),
-                    Assign
-                      (Var "opaques")
-                      (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads)),
+                    opaques_def,
                     Assign
                       (Var "sizes")
                       (Dict $ map paramAssign $ M.toList params)
@@ -450,9 +463,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
                          [ Assign
                              (Var "entry_points")
                              (Dict entry_point_types),
-                           Assign
-                             (Var "opaques")
-                             (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads)),
+                           opaques_def,
                            Assign
                              (Var "sizes")
                              (Dict $ map paramAssign $ M.toList params)
@@ -494,6 +505,17 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
 
     (opaque_names, opaque_payloads) =
       unzip $ M.toList $ opaqueDefs $ Imp.defFuns prog
+
+    opaqueTupleElems opaque_name =
+      case opaques of
+        Imp.OpaqueTypes m
+          | Just (Imp.OpaqueRecord ts) <- lookup (nameFromText opaque_name) m ->
+              -- XXX: might not be tuple.
+              Tuple $ map (String . p . snd) ts
+          where
+            p (Imp.TypeOpaque tname) = nameToText tname
+            p (Imp.TypeTransparent vt) = prettyText vt
+        _ -> None
 
     selectEntryPoint entry_point_names entry_points =
       [ Assign (Var "entry_points") $

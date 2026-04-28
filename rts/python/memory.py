@@ -39,26 +39,31 @@ class opaque(object):
         self.desc = desc
 
     def __len__(self):
-        return len(self.opaques[self.desc])
+        return len(self.opaques[self.desc][1])
 
     # Return number of Python values used to represent Futhark value of given
     # type.
     def __num_elems(self, t):
         if t in self.opaques:
-            return sum(map(self.__num_elems, self.opaques[t]))
+            return sum(map(self.__num_elems, self.opaques[t][0]))
         else:
             return 1
 
     def __getitem__(self, i):
-        layout = self.opaques[self.desc]
-        ks = list(map(self.__num_elems, layout))
-        t = layout[i]
-        if t in self.opaques:
-            return opaque(
-                layout[i], self.opaques, self.data[sum(ks[0:i]) : ks[i]]
-            )
+        layout = self.opaques[self.desc][1]
+        if layout is not None:
+            if i < 0 or i >= len(layout):
+                raise IndexError
+            ks = list(map(self.__num_elems, layout))
+            t = layout[i]
+            if t in self.opaques:
+                return opaque(
+                    layout[i], self.opaques, *self.data[sum(ks[0:i]) : ks[i]]
+                )
+            else:
+                return self.data[sum(ks[0:i])]
         else:
-            return self.data[sum(ks[0:i])]
+            raise TypeError
 
     def __repr__(self):
         return "<opaque Futhark value of type {}>".format(self.desc)
