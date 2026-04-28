@@ -45,8 +45,7 @@ class Server:
 
     def _cmd_outputs(self, args):
         entry = self._get_arg(args, 0)
-        for t in self._get_entry_point(entry)[2]:
-            print(t)
+        print(self._get_entry_point(entry)[2])
 
     def _cmd_dummy(self, args):
         pass
@@ -68,18 +67,16 @@ class Server:
         entry = self._get_entry_point(self._get_arg(args, 0))
         entry_fname = entry[0]
         num_ins = len(entry[1])
-        num_outs = len(entry[2])
-        exp_len = 1 + num_outs + num_ins
+        exp_len = 2 + num_ins
 
         if len(args) != exp_len:
             raise self.Failure("Invalid argument count, expected %d" % exp_len)
 
-        out_vnames = args[1 : num_outs + 1]
+        out_vname = args[1]
 
-        for out_vname in out_vnames:
-            self._check_new_var(out_vname)
+        self._check_new_var(out_vname)
 
-        in_vnames = args[1 + num_outs :]
+        in_vnames = args[2:]
         ins = [self._get_var(in_vname) for in_vname in in_vnames]
 
         try:
@@ -89,7 +86,7 @@ class Server:
 
         print("runtime: %d" % runtime)
 
-        self._vars[out_vnames[0]] = vals
+        self._vars[out_vname] = vals
 
     def _store_val(self, f, value):
         # In case we are using the PyOpenCL backend, we first
@@ -165,9 +162,9 @@ class Server:
             raise self.Failure(f"Unknown type {tname}")
         else:
             t = self._ctx.opaques[tname]
-            if type(t) is tuple:
+            if type(t[1]) is tuple:
                 i = 0
-                for x in t:
+                for x in t[1]:
                     print(i, x)
                     i += 1
 
