@@ -583,7 +583,12 @@ unpackDim arr_name (Imp.Var var) i = do
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
 entryPointOutput (Imp.OpaqueValue desc vs) =
-  simpleCall "opaque" . (String (prettyText desc) :)
+  simpleCall "opaque"
+    . ( [ String (prettyText desc),
+          Field (Var "self") "opaques"
+        ]
+          <>
+      )
     <$> mapM (entryPointOutput . Imp.TransparentValue) vs
 entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) = do
   name' <- compileVar name

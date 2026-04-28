@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+
+import pair
+import numpy as np
+
+obj = pair.pair()
+
+x,y = obj.get_pair(np.int32(42))
+
+assert(x == np.int32(43))
+assert(y == np.int32(44))
+
+assert(obj.use_pair(obj.get_pair(np.int32(1337))) == 2677)
+
+# ((x,y),z) = obj.get_nested_pair(np.int32(42))
+# assert(x == np.int32(43))
+# assert(y == np.int32(44))
+# assert(z == np.int32(45))
