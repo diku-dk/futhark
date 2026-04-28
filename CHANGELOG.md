@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+* The C-based backends no longer emit constants `-9223372036854775808`, as these
+  cause C compilers to issue warnings.
+
+* A case where user-defined assertions could be removed when used in conjunction
+  with `#[scratch]`. (#2417)
+
+* Various miscompilations and compiler crashes in fusion of `scatter`
+  operations.
+
+* Multi-dimensional histograms (`reduce_by_index_2d`) were not handled correctly
+  by the intrablock code generator in the GPU backends.
+
+* The interpreter implementation of AD handled some integer/floating-point
+  conversions incorrectly. (#2425)
+
+* Compiler crash when inserting memory information. (#2432)
+
+## [0.25.37]
+
+### Added
+
 * `futhark fmt` prints module types better.
 
 * New server protocol commands: `rank`, `elemtype`, `new_array`, `set`.
@@ -27,9 +54,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Better fusion for `scan` SOACs.
 
-### Removed
-
-### Changed
+* New prelude function: `exscan`, an exclusive scan.
 
 ### Fixed
 
