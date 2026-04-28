@@ -82,11 +82,11 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
 
       pure ([C.cty|$ty:ty*|], checks)
 
-prepareEntryOutputs :: [ExternalValue] -> CompilerM op s ([C.Param], [C.BlockItem])
-prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
+prepareEntryOutput :: ExternalValue -> CompilerM op s (C.Param, [C.BlockItem])
+prepareEntryOutput = collect' . prepare
   where
-    prepare pno (TransparentValue vd) = do
-      let pname = "out" ++ show pno
+    prepare (TransparentValue vd) = do
+      let pname = "out" :: T.Text
       ty <- valueTypeToCType Public $ valueDescToType vd
 
       case vd of
@@ -97,8 +97,8 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
         ScalarValue {} -> do
           prepareValue [C.cexp|*$id:pname|] vd
           pure [C.cparam|$ty:ty *$id:pname|]
-    prepare pno (OpaqueValue desc vds) = do
-      let pname = "out" ++ show pno
+    prepare (OpaqueValue desc vds) = do
+      let pname = "out" :: T.Text
       ty <- opaqueToCType desc
       vd_ts <- mapM (valueTypeToCType Private . valueDescToType) vds
 
@@ -150,8 +150,8 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
   (inputs', unpack_entry_inputs) <- prepareEntryInputs $ map snd args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
 
-  (entry_point_output_params, pack_entry_outputs) <-
-    prepareEntryOutputs $ map snd results
+  (entry_point_output_param, pack_entry_outputs) <-
+    prepareEntryOutput $ snd results
 
   ctx_ty <- contextType
 
@@ -159,7 +159,7 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
     EntryDecl
     [C.cedecl|int $id:entry_point_function_name
                                      ($ty:ctx_ty *ctx,
-                                      $params:entry_point_output_params,
+                                      $params:([entry_point_output_param]),
                                       $params:entry_point_input_params);|]
 
   let checks = catMaybes entry_point_input_checks
@@ -194,7 +194,7 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
         [C.cedecl|
        int $id:entry_point_function_name
            ($ty:ctx_ty *ctx,
-            $params:entry_point_output_params,
+            $params:([entry_point_output_param]),
             $params:entry_point_input_params) {
          $items:inputdecls
          $items:outputdecls
@@ -214,7 +214,7 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
             -- Note that our convention about what is "input/output"
             -- and what is "results/args" is different between the
             -- manifest and ImpCode.
-            Manifest.entryPointOutputs = map outputManifest results,
+            Manifest.entryPointOutputs = [outputManifest results],
             Manifest.entryPointInputs = map inputManifest args,
             Manifest.entryPointAttrs = map prettyText (S.toList (unAttrs attrs))
           }

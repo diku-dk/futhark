@@ -52,7 +52,7 @@ type EntryPointType = String
 data JSEntryPoint = JSEntryPoint
   { name :: String,
     parameters :: [EntryPointType],
-    ret :: [EntryPointType]
+    ret :: EntryPointType
   }
 
 -- | A field in a JavaScript record opaque type.
@@ -139,7 +139,7 @@ emccExportNames jses opaqueTypes =
     arrays = nubOrd $ filter isArray (entryPointTypes ++ recordFieldTypes)
     -- Include opaque types from both entry points and record fields.
     opaques = nubOrd $ filter isOpaque (entryPointTypes ++ recordFieldTypes)
-    entryPointTypes = concatMap (\jse -> parameters jse ++ ret jse) jses
+    entryPointTypes = concatMap (\jse -> parameters jse ++ [ret jse]) jses
     recordFieldTypes = [jsrfType rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
     gfn typ str = "_futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
     allRecordFields = [rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
@@ -177,7 +177,7 @@ classFutharkContext entryPoints opaqueTypes =
     -- Collect array types from entry points AND from record fields so the
     -- array constructors are always available when returning projected values.
     arrays = nubOrd $ filter isArray (entryPointTypes ++ recordFieldTypes)
-    entryPointTypes = concatMap (\jse -> parameters jse ++ ret jse) entryPoints
+    entryPointTypes = concatMap (\jse -> parameters jse ++ [ret jse]) entryPoints
     recordFieldTypes = [jsrfType rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
 
 constructor :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
@@ -322,8 +322,8 @@ jsWrapEntryPoint jse =
     paramsToPtr = T.pack $ unlines $ filter ("" /=) [arrayPointer ("in" ++ show i) $ parameters jse !! i | i <- alp]
 
     alr = [0 .. length (ret jse) - 1]
-    outparams = T.pack $ intercalate ", " [show $ typeSize $ ret jse !! i | i <- alr]
-    results = T.pack $ unlines [makeResult i $ ret jse !! i | i <- alr]
+    outparams = showText $ typeSize $ ret jse
+    results = T.pack $ makeResult 0 $ ret jse
     res_array = intercalate ", " ["result" ++ show i | i <- alr]
     res = T.pack $ if length (ret jse) == 1 then "result0" else "[" ++ res_array ++ "]"
 

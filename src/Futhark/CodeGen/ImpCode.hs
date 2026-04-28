@@ -216,7 +216,7 @@ data ExternalValue
 -- | Information about how this function can be called from the outside world.
 data EntryPoint = EntryPoint
   { entryPointName :: Name,
-    entryPointResults :: [(Uniqueness, ExternalValue)],
+    entryPointResults :: (Uniqueness, ExternalValue),
     entryPointArgs :: [((Name, Uniqueness), ExternalValue)]
   }
   deriving (Show)
@@ -515,11 +515,11 @@ instance (Pretty op) => Pretty (Constants op) where
       <+> nestedBlock (pretty code)
 
 instance Pretty EntryPoint where
-  pretty (EntryPoint name results args) =
+  pretty (EntryPoint name result args) =
     stack
       [ "name" <+> nestedBlock (dquotes (pretty name)),
         "arguments" <+> nestedBlock (stack $ map ppArg args),
-        "results" <+> nestedBlock (stack $ map ppRes results)
+        "results" <+> nestedBlock (ppRes result)
       ]
     where
       ppArg ((p, u), t) = pretty p <+> ":" <+> ppRes (u, t)
@@ -778,7 +778,7 @@ declaredIn _ = mempty
 
 instance FreeIn EntryPoint where
   freeIn' (EntryPoint _ res args) =
-    freeIn' (map snd res) <> freeIn' (map snd args)
+    freeIn' (snd res) <> freeIn' (map snd args)
 
 instance (FreeIn a) => FreeIn (Functions a) where
   freeIn' (Functions fs) = foldMap (onFun . snd) fs
