@@ -1,8 +1,8 @@
 #!/bin/sh
 set -u
 
-FUTHARK_BIN="${1:-cabal run -v0 -- futhark}"
-TEST_DIR="tests_property"
+FUTHARK_BIN=futhark
+TEST_DIR=.
 
 run_test() {
     test_file="$1"
@@ -33,7 +33,7 @@ run_test() {
     expected="${test_file%.fut}.out"
     actual="${test_file%.fut}.outactual"
 
-    (cd .. && $futhark_cmd test $seed_flag "$test_file_full_path") 2>&1 | \
+    ($futhark_cmd test $seed_flag "$test_file_full_path") 2>&1 | \
         grep -vE "Compiling with|Running compiled|Running .*/|^$TEST_DIR/|[0-9]+ failed|[0-9]+ passed|[0-9]+/[0-9]+ passed" | \
         sed -E -e 's/seed=-?[0-9]+/seed=REDACTED/g' \
                -e 's/after [0-9]+ tests/after N tests/g' \

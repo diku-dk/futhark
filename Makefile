@@ -85,7 +85,7 @@ test-literate:
 	cd tests_literate && sh test.sh
 
 test-property:
-	cd tests_property && cabal run -v0 -- futhark pkg sync && sh test.sh
+	cd tests_property && sh test.sh
 
 clean:
 	cabal clean
