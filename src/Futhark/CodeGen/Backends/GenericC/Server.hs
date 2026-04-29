@@ -393,30 +393,18 @@ entryTypeBoilerplate manifest =
     manifest
 
 oneEntryBoilerplate :: Manifest -> (T.Text, EntryPoint) -> ([C.Definition], C.Initializer)
-oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs attrs) =
+oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs attrs) =
   let call_f = "call_" <> nameFromText name
-      out_types = map outputType outputs
+      out_type = outputType output
       in_types = map inputType inputs
-      out_types_name = nameFromText name <> "_out_types"
       in_types_name = nameFromText name <> "_in_types"
-      out_unique_name = nameFromText name <> "_out_unique"
       in_unique_name = nameFromText name <> "_in_unique"
       tuning_params_name = nameFromText name <> "_tuning_params"
       attrs_name = nameFromText name <> "_attrs"
-      (out_items, out_args)
-        | null out_types = ([C.citems|(void)outs;|], mempty)
-        | otherwise = unzip $ zipWith loadOut [0 ..] out_types
       (in_items, in_args)
         | null in_types = ([C.citems|(void)ins;|], mempty)
         | otherwise = unzip $ zipWith loadIn [0 ..] in_types
    in ( [C.cunit|
-                const struct type* $id:out_types_name[] = {
-                  $inits:(map typeStructInit out_types),
-                  NULL
-                };
-                bool $id:out_unique_name[] = {
-                  $inits:(map outputUniqueInit outputs)
-                };
                 const struct type* $id:in_types_name[] = {
                   $inits:(map typeStructInit in_types),
                   NULL
@@ -432,10 +420,9 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs
                   $inits:(map (textInit . prettyText) attrs),
                   NULL
                 };
-                int $id:call_f(struct futhark_context *ctx, void **outs, void **ins) {
-                  $items:out_items
+                int $id:call_f(struct futhark_context *ctx, void *out, void **ins) {
                   $items:in_items
-                  return $id:cfun(ctx, $args:out_args, $args:in_args);
+                  return $id:cfun(ctx, out, $args:in_args);
                 }
                 |],
         [C.cinit|{
@@ -443,9 +430,9 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs
             .f = $id:call_f,
             .tuning_params = $id:tuning_params_name,
             .in_types = $id:in_types_name,
-            .out_types = $id:out_types_name,
+            .out_type = $init:(typeStructInit out_type),
             .in_unique = $id:in_unique_name,
-            .out_unique = $id:out_unique_name,
+            .out_unique = $init:(outputUniqueInit output),
             .attrs = $id:attrs_name
             }|]
       )
@@ -456,11 +443,6 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs
     uniqueInit True = [C.cinit|true|]
     uniqueInit False = [C.cinit|false|]
 
-    loadOut i tname =
-      let v = "out" ++ show (i :: Int)
-       in ( [C.citem|$ty:(cType manifest tname) *$id:v = outs[$int:i];|],
-            [C.cexp|$id:v|]
-          )
     loadIn i tname =
       let v = "in" ++ show (i :: Int)
        in ( [C.citem|$ty:(cType manifest tname) $id:v = *($ty:(cType manifest tname)*)ins[$int:i];|],
