@@ -37,6 +37,7 @@ import Data.Binary qualified as Bin
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as BS
 import Data.Char
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
@@ -50,6 +51,8 @@ import Futhark.Test.Spec
 import Futhark.Test.Values qualified as V
 import Futhark.Util (ensureCacheDirectory, isEnvVarAtLeast, pmapIO, showText)
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
+import Language.Futhark.Core (nameFromText, nameToText)
+import Language.Futhark.Tuple (areTupleFields, tupleFieldNames)
 import System.Directory
 import System.Exit
 import System.FilePath
@@ -131,7 +134,7 @@ valueAsVar server v val =
 -- Frees the expression on error.
 scriptValueAsVars ::
   (MonadError T.Text m, MonadIO m) =>
-  Server ->
+  Script.ScriptServer ->
   [(VarName, TypeName)] ->
   Script.ExpValue ->
   m ()
@@ -145,17 +148,24 @@ scriptValueAsVars server names_and_types val
       | t0 == t1 =
           Just $ case sval of
             Script.VVar oldname ->
-              cmdMaybe $ cmdRename server oldname v
+              cmdMaybe $ cmdRename (Script.scriptServer server) oldname v
             Script.VVal sval' ->
-              valueAsVar server v sval'
+              valueAsVar (Script.scriptServer server) v sval'
     f _ _ = Nothing
+scriptValueAsVars server names_and_types val
+  | V.ValueAtom (Script.SValue t (Script.VVar vv)) <- val,
+    Just ts <- Script.isScriptTuple server t,
+    ts == map snd names_and_types = do
+      forM_ (zip (map fst names_and_types) tupleFieldNames) $ \(v, k) ->
+        cmdMaybe $ cmdProject (Script.scriptServer server) v vv (nameToText k)
+      cmdMaybe $ cmdFree (Script.scriptServer server) $ S.toList $ Script.serverVarsInValue val
 scriptValueAsVars server names_and_types val = do
-  cmdMaybe $ cmdFree server $ S.toList $ Script.serverVarsInValue val
+  cmdMaybe $ cmdFree (Script.scriptServer server) $ S.toList $ Script.serverVarsInValue val
   throwError $
     "Expected value of type: "
-      <> prettyTextOneLine (V.mkCompound (map (V.ValueAtom . snd) names_and_types))
+      <> showText names_and_types -- prettyTextOneLine (V.mkCompound (map (V.ValueAtom . snd) names_and_types))
       <> "\nBut got value of type:  "
-      <> prettyTextOneLine (fmap Script.scriptValueType val)
+      <> showText val -- prettyTextOneLine (fmap Script.scriptValueType val)
       <> notes
   where
     notes = mconcat $ mapMaybe note names_and_types
@@ -227,7 +237,7 @@ valuesAsVars server names_and_types _ _ (Values vs) = do
 valuesAsVars server names_and_types _ dir (ScriptValues e) =
   Script.withScriptServer' server $ \server' -> do
     e_v <- Script.evalExp (Script.scriptBuiltin dir) server' e
-    scriptValueAsVars server names_and_types e_v
+    scriptValueAsVars server' names_and_types e_v
 valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
   e <-
     either throwError pure . Script.parseExpFromText f
@@ -371,16 +381,58 @@ compileProgram extra_options (FutharkExe futhark) backend program = do
     options = [program, "-o", binOutputf] ++ extra_options
     progNotFound s = s <> ": command not found"
 
--- | Read the given variables from a running server.
+getValueM :: (MonadIO m, MonadError T.Text m) => Server -> VarName -> m V.Value
+getValueM server = either throwError pure <=< liftIO . getValue server
+
+-- Retrieve components of tuple.
+getTupleElems ::
+  (MonadIO m, MonadError T.Text m) =>
+  Server ->
+  VarName ->
+  Int ->
+  m [V.Value]
+getTupleElems server v k = do
+  -- We construct intermediate variables for the elements that we free at the
+  -- end. However, they are leaked if we have a failure along the way, and
+  -- getValueM may fail. This is not a big problem in practice we hope, as a
+  -- failing test results in the server being shut down soon after.
+  let is = [0 .. k - 1]
+      elem_vs = [v <> "_elem" <> showText i | i <- is]
+  forM_ (zip is elem_vs) $ \(i, elem_v) ->
+    cmdMaybe $ cmdProject server elem_v v (showText i)
+  mapM (getValueM server) elem_vs <* cmdMaybe (cmdFree server elem_vs)
+
+isServerTuple ::
+  (MonadIO m) =>
+  Server ->
+  TypeName ->
+  m (Maybe [TypeName])
+isServerTuple server v_t = do
+  x <- liftIO $ cmdFields server v_t
+  case x of
+    Right fields -> do
+      let onField f = (nameFromText $ fieldName f, fieldType f)
+      case areTupleFields $ M.fromList $ map onField fields of
+        Just ts -> pure $ Just ts
+        Nothing -> pure Nothing
+    Left _ -> pure Nothing
+
+-- | Read the given variable from a running server. As a special case, if the
+-- result is a tuple, we unpack it and return the elements individually.
 readResults ::
   (MonadIO m, MonadError T.Text m) =>
   Server ->
-  [VarName] ->
+  (VarName, TypeName) ->
   m [V.Value]
-readResults server =
-  mapM (either throwError pure <=< liftIO . getValue server)
+readResults server (v, v_t) = do
+  maybe_elems <- isServerTuple server v_t
+  case maybe_elems of
+    Just ts ->
+      getTupleElems server v $ length ts
+    Nothing ->
+      pure <$> getValueM server v
 
--- | Call an entry point. Returns server variables storing the result.
+-- | Call an entry point. Returns server variable storing the result.
 callEntry ::
   (MonadIO m, MonadError T.Text m) =>
   FutharkExe ->
@@ -388,17 +440,16 @@ callEntry ::
   FilePath ->
   EntryName ->
   Values ->
-  m [VarName]
+  m VarName
 callEntry futhark server prog entry input = do
-  output_types <- cmdEither $ cmdOutputs server entry
   input_types <- cmdEither $ cmdInputs server entry
-  let outs = ["out" <> showText i | i <- [0 .. length output_types - 1]]
+  let out = "out"
       ins = ["in" <> showText i | i <- [0 .. length input_types - 1]]
       ins_and_types = zip ins (map inputType input_types)
   valuesAsVars server ins_and_types futhark dir input
-  _ <- cmdEither $ cmdCall server entry outs ins
+  _ <- cmdEither $ cmdCall server entry out ins
   cmdMaybe $ cmdFree server ins
-  pure outs
+  pure out
   where
     dir = takeDirectory prog
 
@@ -421,11 +472,11 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
 
     res <- liftIO . flip (pmapIO concurrency) missing $ \(entry, tr) ->
       withServer server_cfg $ \server -> runExceptT $ do
-        outs <- callEntry futhark server prog entry $ runInput tr
+        out <- callEntry futhark server prog entry $ runInput tr
         let f = file entry tr
         liftIO $ ensureCacheDirectory $ takeDirectory f
-        cmdMaybe $ cmdStore server f outs
-        cmdMaybe $ cmdFree server outs
+        cmdMaybe $ cmdStore server f [out]
+        cmdMaybe $ cmdFree server [out]
     either throwError (const (pure ())) (sequence_ res)
   where
     server_cfg = futharkServerCfg ("." </> dropExtension prog) []

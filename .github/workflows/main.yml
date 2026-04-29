@@ -701,6 +701,9 @@ jobs:
         cd tests_fmt && sh test.sh
 
     - run: |
+        cd tests_property && sh test.sh
+
+    - run: |
         futhark doc -o prelude-docs /dev/null
         tar -Jcf prelude-docs.tar.xz prelude-docs
 

@@ -610,7 +610,7 @@ data EntryResult = EntryResult
 
 -- | Information about the inputs and outputs (return value) of an entry
 -- point.
-type EntryPoint = (Name, [EntryParam], [EntryResult])
+type EntryPoint = (Name, [EntryParam], EntryResult)
 
 -- | An entire Futhark program.
 data Prog rep = Prog

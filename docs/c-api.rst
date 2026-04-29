@@ -566,8 +566,8 @@ following functions are also available:
 Entry points
 ------------
 
-Entry points are mapped 1:1 to C functions.  Return values are handled
-with *out*-parameters.
+Entry points are mapped 1:1 to C functions. The return value is stored in an
+*out*-parameter.
 
 For example, this Futhark entry point::
 
@@ -582,7 +582,7 @@ Results in the following C function:
    of ``out0``.
 
 Errors are indicated by a nonzero return value.  On error, the
-*out*-parameters are not touched.
+*out*-parameter is not touched.
 
 The precise semantics of the return value depends on the backend.  For
 the sequential C backend, errors will always be available when the

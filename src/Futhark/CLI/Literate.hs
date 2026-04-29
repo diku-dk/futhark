@@ -848,7 +848,8 @@ processDirective env (DirectiveVideo e params) = do
               zipWithM_ (writeBMPFile dir) [0 ..] bmps
               onWebM videofile =<< bmpsToVideo dir
       ValueTuple [stepfun, initial, num_frames]
-        | ValueAtom (SFun stepfun' _ [_, _] closure) <- stepfun,
+        | ValueAtom (SFun stepfun' _ stepret closure) <- stepfun,
+          Just [_, _] <- isScriptTuple (envServer env) stepret,
           ValueAtom (SValue "i64" _) <- num_frames -> do
             Just (ValueAtom num_frames') <-
               mapM getValue <$> getExpValue (envServer env) num_frames
@@ -900,16 +901,18 @@ processDirective env (DirectiveVideo e params) = do
                   "Cannot handle step function return type: "
                     <> prettyText (fmap scriptValueType v)
 
-          case v of
-            ValueTuple [arr_v@(ValueAtom SValue {}), new_state] -> do
-              ValueAtom arr <- getExpValue (envServer env) arr_v
-              freeValue (envServer env) arr_v
-              case valueToBMP arr of
-                Nothing -> nope
-                Just bmp -> do
-                  writeBMPFile dir j bmp
-                  pure new_state
-            _ -> nope
+          arr <- project (envServer env) v "0"
+          new_state <- project (envServer env) v "1"
+
+          ValueAtom arr' <- getExpValue (envServer env) arr
+          freeValue (envServer env) arr
+          freeValue (envServer env) v
+
+          case valueToBMP arr' of
+            Nothing -> nope
+            Just bmp -> do
+              writeBMPFile dir j bmp
+              pure new_state
 
     writeBMPFile dir j bmp =
       liftIO $ LBS.writeFile (bmpfile dir j) bmp

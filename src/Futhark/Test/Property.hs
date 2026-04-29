@@ -15,15 +15,13 @@ where
 
 import Control.Exception
 import Control.Monad
-import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except
 import Data.Char (chr)
-import Data.Either (either)
 import Data.IORef
-import Data.Int (Int32, Int64, Int8)
+import Data.Int (Int32, Int64)
 import Data.List (intercalate)
-import Data.Maybe (fromMaybe, maybe)
+import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Vector.Storable qualified as SV
 import Futhark.Data
@@ -87,10 +85,10 @@ readMaybeText t =
 runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> IO [Either PBTFailure PBTOutput]
 runPBT config srv specs entryNameRef =
   withSystemTempFile "pbt-scratch" $ \scratchBin _scratchHandle -> do
-  eps <- cmdErrorHandlerE "Failed to get entry points: " $ cmdEntryPoints srv -- error should not be reached by the user
-  forM specs $ \spec -> do
-    validation <- validateOneSpec srv eps spec
-    maybe (runOne spec config scratchBin srv entryNameRef) (pure . Left) validation
+    eps <- cmdErrorHandlerE "Failed to get entry points: " $ cmdEntryPoints srv -- error should not be reached by the user
+    forM specs $ \spec -> do
+      validation <- validateOneSpec srv eps spec
+      maybe (runOne spec config scratchBin srv entryNameRef) (pure . Left) validation
 
 validateOneSpec :: Server -> [EntryName] -> PropSpec -> IO (Maybe PBTFailure)
 validateOneSpec srv eps spec = do
@@ -133,24 +131,24 @@ validatePropTypes srv propName = fmap (either Just (const Nothing)) . runExceptT
     [] -> throwE $ "Property " <> propName <> " has no inputs? Expected 1."
     _ -> throwE $ "Property " <> propName <> " has " <> showText (length ins) <> " inputs; expected 1."
 
-  outs <- liftIO $ getOutputTypes srv propName
-  case outs of
-    ["bool"] -> pure ()
-    [] -> throwE $ "Property " <> propName <> " has no outputs? Expected 1 bool."
-    [ty] -> throwE $ "Property " <> propName <> " output must be bool, got: " <> ty
-    _ -> throwE $ "Property " <> propName <> " has multiple outputs; expected 1 bool."
+  out <- liftIO $ getOutputType srv propName
+  case out of
+    "bool" -> pure ()
+    ty -> throwE $ "Property " <> propName <> " output must be bool, got: " <> ty
 
 getInputTypes :: Server -> EntryName -> IO [TypeName]
 getInputTypes srv entry = do
-  ins <- cmdErrorHandlerE ("Failed to get input types for " <> entry <> ": ")
-    $ cmdInputs srv entry
+  ins <-
+    cmdErrorHandlerE ("Failed to get input types for " <> entry <> ": ") $
+      cmdInputs srv entry
   pure $ map inputType ins
 
-getOutputTypes :: Server -> EntryName -> IO [TypeName]
-getOutputTypes s entry = do
-  outs <- cmdErrorHandlerE ("Failed to get output types for " <> entry <> ": ")
-    $ cmdOutputs s entry
-  pure $ map outputType outs
+getOutputType :: Server -> EntryName -> IO TypeName
+getOutputType s entry = do
+  out <-
+    cmdErrorHandlerE ("Failed to get output types for " <> entry <> ": ") $
+      cmdOutput s entry
+  pure $ outputType out
 
 validateGenTypes :: Server -> EntryName -> EntryName -> IO (Maybe PBTFailure)
 validateGenTypes srv propName genName = fmap (either Just (const Nothing)) . runExceptT $ do
@@ -159,9 +157,9 @@ validateGenTypes srv propName genName = fmap (either Just (const Nothing)) . run
       Left err -> throwE $ showText err
       Right ty -> pure ty
 
-  genOuts <- liftIO $ getOutputTypes srv genName
+  genOut <- liftIO $ getOutputType srv genName
 
-  isMatch <- liftIO $ outsMatchType srv propTy genOuts
+  isMatch <- liftIO $ outsMatchType srv propTy genOut
 
   unless isMatch $
     throwE $
@@ -172,49 +170,70 @@ validateGenTypes srv propName genName = fmap (either Just (const Nothing)) . run
         <> "\nGenerator "
         <> genName
         <> " produces: "
-        <> showText genOuts
+        <> showText genOut
         <> "\nExpected generator outputs to equal the property input type "
         <> "(possibly split for tuples/records)."
 
 validateShrinkTypes :: Server -> EntryName -> EntryName -> IO (Maybe PBTFailure)
 validateShrinkTypes srv propName shrinkName = fmap (either Just (const Nothing)) . runExceptT $ do
-  propTy <- liftIO (getSingleInputType srv propName) >>= \case
-    Left err -> throwE $ showText err
-    Right ty -> pure ty
+  propTy <-
+    liftIO (getSingleInputType srv propName) >>= \case
+      Left err -> throwE $ showText err
+      Right ty -> pure ty
 
   shrinkIns <- liftIO $ getInputTypes srv shrinkName
-  
+
   case shrinkIns of
     [xTy, randTy] -> do
       unless (xTy == propTy) $
-        throwE $ "Shrinker input mismatch.\n property " <> propName 
-                 <> " expects: " <> propTy 
-                 <> "\n shrinker " <> shrinkName <> " takes x: " <> xTy
-                 <> "\nExpected shrinker's first input to be exactly the property input type."
-      
+        throwE $
+          "Shrinker input mismatch.\n property "
+            <> propName
+            <> " expects: "
+            <> propTy
+            <> "\n shrinker "
+            <> shrinkName
+            <> " takes x: "
+            <> xTy
+            <> "\nExpected shrinker's first input to be exactly the property input type."
+
       unless (randTy == "i32") $
-        throwE $ "Shrinker random-value type mismatch.\n shrinker " <> shrinkName 
-                 <> " takes random value: " <> randTy 
-                 <> "\nExpected random value to be i32."
+        throwE $
+          "Shrinker random-value type mismatch.\n shrinker "
+            <> shrinkName
+            <> " takes random value: "
+            <> randTy
+            <> "\nExpected random value to be i32."
+    tys ->
+      throwE $
+        "Shrinker input arity mismatch.\n shrinker "
+          <> shrinkName
+          <> " inputs: "
+          <> showText tys
+          <> "\nExpected exactly 2 inputs: ("
+          <> propTy
+          <> ", i32)."
 
-    tys -> throwE $ "Shrinker input arity mismatch.\n shrinker " <> shrinkName 
-                    <> " inputs: " <> showText tys 
-                    <> "\nExpected exactly 2 inputs: (" <> propTy <> ", i32)."
+  shrinkOut <- liftIO $ getOutputType srv shrinkName
+  isMatch <- liftIO $ outsMatchType srv propTy shrinkOut
 
-  shrinkOuts <- liftIO $ getOutputTypes srv shrinkName
-  isMatch <- liftIO $ outsMatchType srv propTy shrinkOuts
-  
   unless isMatch $
-    throwE $ "Shrinker output mismatch.\n property " <> propName 
-             <> " expects: " <> propTy 
-             <> "\n shrinker " <> shrinkName <> " returns: " <> showText shrinkOuts
-             <> "\nExpected shrinker output to equal the property input type."
+    throwE $
+      "Shrinker output mismatch.\n property "
+        <> propName
+        <> " expects: "
+        <> propTy
+        <> "\n shrinker "
+        <> shrinkName
+        <> " returns: "
+        <> showText shrinkOut
+        <> "\nExpected shrinker output to equal the property input type."
 
 runOne :: PropSpec -> PBTConfig -> FilePath -> Server -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
 runOne s config scratchBin srv entryNameRef = do
   let propName = psProp s
-      genName  = fromMaybe (error "missing generator") (psGen s)
-      size     = fromMaybe (configMaxSize config) (psSize s)
+      genName = fromMaybe (error "missing generator") (psGen s)
+      size = fromMaybe (configMaxSize config) (psSize s)
       numTests = configNumTests config
       serverSize = "runPBT_size"
       serverSeed = "runPBT_seed"
@@ -228,29 +247,37 @@ runOne s config scratchBin srv entryNameRef = do
               randomValue <- liftIO (randomIO :: IO Int32)
               let seed = fromMaybe randomValue (configSeed config)
               let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
-              
+
               runUpdate propName
 
               checkIO $ sendGenInputs srv serverSize serverSeed genName size seed
-              
+
               runUpdate genName
-              genOuts <- liftIO $ generatorPhase genName serverSize serverSeed serverIn propName
-              
+              genOut <- liftIO $ generatorPhase genName serverSize serverSeed serverIn propName
+
               runUpdate propName
 
-              ok <- liftIO $ withCallKeepIns srv propName [serverOk] [serverIn] $ \_ ->
+              ok <- liftIO $ withCallKeepIns srv propName serverOk [serverIn] $ \_ ->
                 getVal srv serverOk
 
               if ok
                 then loop (i + 1)
                 else do
-                  let failmsg = "PBT FAIL: " <> propName <> " size=" <> showText size 
-                              <> " seed=" <> showText seed <> " after " <> showText i <> " tests\n"
+                  let failmsg =
+                        "PBT FAIL: "
+                          <> propName
+                          <> " size="
+                          <> showText size
+                          <> " seed="
+                          <> showText seed
+                          <> " after "
+                          <> showText i
+                          <> " tests\n"
 
                   shrinkRes <- case psShrink s of
-                    Just "auto" -> liftIO $ autoShrinkLoop scratchBin srv propName genName serverIn size seed genOuts entryNameRef
-                    Just sh     -> liftIO $ shrinkLoop scratchBin srv propName serverIn sh seed (configShrinkTries config) entryNameRef
-                    Nothing     -> pure (Right Nothing)
+                    Just "auto" -> liftIO $ autoShrinkLoop scratchBin srv propName genName serverIn size seed genOut entryNameRef
+                    Just sh -> liftIO $ shrinkLoop scratchBin srv propName serverIn sh seed (configShrinkTries config) entryNameRef
+                    Nothing -> pure (Right Nothing)
 
                   case shrinkRes of
                     Left err -> throwE $ failmsg <> "Shrink failed: " <> err
@@ -262,13 +289,13 @@ runOne s config scratchBin srv entryNameRef = do
     loop 0
   where
     generatorPhase genName serverSize serverSeed serverIn propName = do
-      genOuts <- allocOuts srv genName
-      withFreedVars srv genOuts $ do
-        _ <- callFreeIns srv genName genOuts [serverSize, serverSeed]
+      let genOut = outName genName
+      withFreedVars srv [genOut] $ do
+        _ <- callFreeIns srv genName genOut [serverSize, serverSeed]
         _ <-
           freeOnException srv [serverIn] $
-            useInputTypeToPack scratchBin srv serverIn propName genOuts
-        pure genOuts
+            useInputTypeToPack scratchBin srv serverIn propName [genOut]
+        pure genOut
 
     pPrintPhase propName serverIn = do
       inputTypes <- getInputTypes srv propName
@@ -276,14 +303,14 @@ runOne s config scratchBin srv entryNameRef = do
         (ty0 : _) -> do
           prettyOut <- case psPPrint s of
             Just futPPrint -> do
-              prettyOuts <- allocOuts srv futPPrint
-              withFreedVars srv prettyOuts $ do
+              let prettyOuts = outName futPPrint
+              withFreedVars srv [prettyOuts] $ do
                 _ <- callFreeIns srv futPPrint prettyOuts [serverIn]
-                valE <- FSV.getValue srv (head prettyOuts)
+                valE <- FSV.getValue srv prettyOuts
                 case valE of
                   Left err -> fail $ "getValue failed: " <> show err -- this is server error, not user error, so we can just fail
                   Right (U8Value _ bytes) -> pure $ T.pack [chr (fromIntegral b) | b <- SV.toList bytes]
-                  Right _ -> pure $ T.pack $ "pretty printer returned non-u8 value" -- this is user error
+                  Right _ -> pure $ T.pack "pretty printer returned non-u8 value" -- this is user error
             Nothing -> do
               prettyOut <- prettyVar srv serverIn ty0
               pure $ T.pack prettyOut
@@ -307,56 +334,58 @@ updatePhase propName phase activeTest size seed tactic phaseRef =
         phaseTactic = tactic
       }
 
-autoShrinkLoop :: FilePath -> Server -> EntryName -> EntryName -> VarName -> Int64 -> Int32 -> [VarName] -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
-autoShrinkLoop scratchBin srv propName genName vIn size seed genOuts phaseRef = runExceptT $ do
-  let autoShrinkUpdatePhase activeTest = 
+autoShrinkLoop :: FilePath -> Server -> EntryName -> EntryName -> VarName -> Int64 -> Int32 -> VarName -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
+autoShrinkLoop scratchBin srv propName genName vIn size seed genOut phaseRef = runExceptT $ do
+  let autoShrinkUpdatePhase activeTest =
         liftIO $ updatePhase (Just propName) (Just "autoShrinkLoop") activeTest (Just size) (Just seed) Nothing phaseRef
-      
+
       vCand = "qc_try"
       vOk = "qc_ok"
       serverSize = "qc_size"
       serverSeed = "qc_seed"
 
   -- 1. Validate property input arity using our Either-to-ExceptT logic
-  propTy <- liftIO (getInputTypes srv propName) >>= \case
-    [ty] -> pure ty
-    []   -> throwE $ "Property " <> propName <> " has no inputs?"
-    tys  -> throwE $ "Property " <> propName <> " has >1 input: " <> showText tys
+  propTy <-
+    liftIO (getInputTypes srv propName) >>= \case
+      [ty] -> pure ty
+      [] -> throwE $ "Property " <> propName <> " has no inputs?"
+      tys -> throwE $ "Property " <> propName <> " has >1 input: " <> showText tys
 
   -- 2. The Loop
   let loop i
         | i <= 1 = pure Nothing
         | otherwise = do
             let newSize = i - 1
-            
+
             -- Use checkIO for the generator inputs
             checkIO $ sendGenInputs srv serverSize serverSeed genName newSize seed
 
-            -- Note: Since withFreedVars manages server-side resources, 
+            -- Note: Since withFreedVars manages server-side resources,
             -- we lift the whole block into IO then handle the result.
-            res <- liftIO $ withFreedVars srv (genOuts ++ [vCand]) $ do
+            res <- liftIO $ withFreedVars srv [genOut, vCand] $ do
               autoShrinkUpdatePhase (Just genName)
-              _ <- callFreeIns srv genName genOuts [serverSize, serverSeed]
-              
-              _ <- freeOnException srv [vCand] $
-                     packType scratchBin srv vCand propTy genOuts
-              
+              _ <- callFreeIns srv genName genOut [serverSize, serverSeed]
+
+              _ <-
+                freeOnException srv [vCand] $
+                  packType scratchBin srv vCand propTy [genOut]
+
               autoShrinkUpdatePhase (Just propName)
-              ok <- withCallKeepIns srv propName [vOk] [vCand] $ \_ ->
-                      getVal srv vOk
-              
+              ok <- withCallKeepIns srv propName vOk [vCand] $ \_ ->
+                getVal srv vOk
+
               autoShrinkUpdatePhase Nothing
 
-              if ok 
-                then pure Nothing    -- Shrink didn't find a smaller failure
+              if ok
+                then pure Nothing -- Shrink didn't find a smaller failure
                 else do
-                  _ <- freeOnException srv [vIn] $
-                         packType scratchBin srv vIn propTy [vCand]
+                  _ <-
+                    freeOnException srv [vIn] $
+                      packType scratchBin srv vIn propTy [vCand]
                   pure (Just newSize) -- Found a smaller failing size!
-
             case res of
               Nothing -> loop (i - 1)
-              Just s  -> loop s
+              Just s -> loop s
   loop size
 
 data Step
@@ -375,33 +404,36 @@ shrinkLoop scratchBin srv propName vIn shrinkName seed numTries phaseRef = runEx
   shrinkUpdatePhase Nothing
 
   -- 2. Validate Types (Flattened)
-  propTy <- liftIO (getSingleInputType srv propName) >>= \case
-    Left err -> throwE $ showText err
-    Right ty -> pure ty
+  propTy <-
+    liftIO (getSingleInputType srv propName) >>= \case
+      Left err -> throwE $ showText err
+      Right ty -> pure ty
 
-  (shrinkXTy, seedTy) <- liftIO (getInputTypes srv shrinkName) >>= \case
-    [xTy, sTy] -> pure (xTy, sTy)
-    []         -> throwE $ "Shrinker " <> shrinkName <> " has no inputs?"
-    [_]        -> throwE $ "Shrinker " <> shrinkName <> " has 1 input; expected 2 (x, random value)."
-    tys        -> throwE $ "Shrinker " <> shrinkName <> " has " <> showText (length tys) <> " inputs; expected 2."
+  (shrinkXTy, seedTy) <-
+    liftIO (getInputTypes srv shrinkName) >>= \case
+      [xTy, sTy] -> pure (xTy, sTy)
+      [] -> throwE $ "Shrinker " <> shrinkName <> " has no inputs?"
+      [_] -> throwE $ "Shrinker " <> shrinkName <> " has 1 input; expected 2 (x, random value)."
+      tys -> throwE $ "Shrinker " <> shrinkName <> " has " <> showText (length tys) <> " inputs; expected 2."
 
   unless (seedTy == "i32") $
-    throwE $ "Shrinker " <> shrinkName <> " random value must be i32, got: " <> seedTy
+    throwE $
+      "Shrinker " <> shrinkName <> " random value must be i32, got: " <> seedTy
 
   let loop (pseudoRandom :: Int32) (acc :: Int) (totalCounter :: Int)
         | acc >= numTries = pure Nothing
         | otherwise = do
             stepResult <- liftIO $ oneStep propTy shrinkXTy size pseudoRandom
-            
+
             let branchGen = mkStdGen (fromIntegral pseudoRandom)
             let (pseudoRandom', _) = random branchGen
-            
+
             case stepResult of
-              AcceptedShrink -> 
+              AcceptedShrink ->
                 loop pseudoRandom' 0 (totalCounter + 1) -- Reset trials on success
-              NotAcceptedShrink -> 
+              NotAcceptedShrink ->
                 loop pseudoRandom' (acc + 1) (totalCounter + 1) -- Increment trials
-              ErrorInShrink err -> 
+              ErrorInShrink err ->
                 throwE $ "Error in shrinker: " <> err
   loop seed 0 0
   where
@@ -411,24 +443,25 @@ shrinkLoop scratchBin srv propName vIn shrinkName seed numTries phaseRef = runEx
           vOk = "qc_ok"
           vTactic = "qc_tactic"
           vInRetyped = vIn <> "_shrinktyped"
-          
+
       let shrinkUpdatePhase activeTest = updatePhase (Just propName) (Just shrinkName) activeTest (Just size) (Just seed) Nothing phaseRef
 
       freeVars srv [vTactic]
       putVal srv vTactic tactic
 
-      _ <- freeOnException srv [vInRetyped] $
-             packType scratchBin srv vInRetyped shrinkXTy [vIn]
+      _ <-
+        freeOnException srv [vInRetyped] $
+          packType scratchBin srv vInRetyped shrinkXTy [vIn]
 
-      shrinkOuts <- allocOuts srv shrinkName
+      let shrinkOuts = outName shrinkName
       shrinkUpdatePhase Nothing
 
-      withFreedVars srv (shrinkOuts++[vTry]) $ do
+      withFreedVars srv [shrinkOuts, vTry] $ do
         _ <- callFreeIns srv shrinkName shrinkOuts [vInRetyped, vTactic]
-        _ <- freeOnException srv [vTry] $ packType scratchBin srv vTry propTy shrinkOuts
+        _ <- freeOnException srv [vTry] $ packType scratchBin srv vTry propTy [shrinkOuts]
 
         shrinkUpdatePhase Nothing
-        ok <- withCallKeepIns srv propName [vOk] [vTry] $ \_ -> getVal srv vOk
+        ok <- withCallKeepIns srv propName vOk [vTry] $ \_ -> getVal srv vOk
         shrinkUpdatePhase Nothing
 
         case ok of
@@ -455,14 +488,9 @@ sendGenInputs srv sizeName seedName genName size seed = do
       tys ->
         pure . Just $ T.pack $ "Expected generator to have exactly two inputs, got types: " <> show tys
 
---- | Allocate output variables for a generator entry point.
--- needed because eg. tuples return multiple outputs, and we need to know how many to allocate. We name them like genName_out0, genName_out1, etc.
--- Calls cmdOutputs to find how many outputs the entrypoint has and allocates that many variables in the server, returning their names.
-allocOuts :: Server -> EntryName -> IO [VarName]
-allocOuts srv entry = do
-  outs <- cmdErrorHandlerE ("cmdOutputs failed for " <> entry <> ": ") -- can only fail if something is very wrong, we already check if generator is an entry
-    $ cmdOutputs srv entry 
-  pure [entry <> "_out" <> T.pack (show i) | (i, _) <- zip [(0 :: Int) ..] outs]
+-- | Name of out-variable for this entry point.
+outName :: EntryName -> VarName
+outName = (<> "_out")
 
 isCompositeLike :: Server -> VarName -> TypeName -> IO Bool
 isCompositeLike srv var ty = do
@@ -491,32 +519,27 @@ freeVars s vs = do
       | otherwise ->
           fail $ "cmdFree failed for " <> show vs <> ": " <> show (failureMsg err)
 
-callFreeIns :: Server -> EntryName -> [VarName] -> [VarName] -> IO [VarName]
-callFreeIns s entry outs ins = do
-  freeVars s outs
-  r <- cmdCall s entry outs ins
+callFreeIns :: Server -> EntryName -> VarName -> [VarName] -> IO [VarName]
+callFreeIns s entry out ins = do
+  freeVars s [out]
+  r <- cmdCall s entry out ins
   freeVars s ins
   either (\err -> fail $ T.unpack entry <> ": " <> show (failureMsg err)) pure r
 
-callKeepIns :: Server -> EntryName -> [VarName] -> [VarName] -> IO [VarName]
-callKeepIns s entry outs ins = do
-  freeVars s outs
-  r <- cmdCall s entry outs ins
+callKeepIns :: Server -> EntryName -> VarName -> [VarName] -> IO [VarName]
+callKeepIns s entry out ins = do
+  freeVars s [out]
+  r <- cmdCall s entry out ins
   either (\err -> fail $ T.unpack entry <> ": " <> show (failureMsg err)) pure r
 
 freeOnException :: Server -> [VarName] -> IO a -> IO a
 freeOnException srv vs action =
   action `onException` freeVars srv vs
 
-withCallFreeIns :: Server -> EntryName -> [VarName] -> [VarName] -> ([VarName] -> IO a) -> IO a
-withCallFreeIns srv entry outs ins k = do
-  _ <- callFreeIns srv entry outs ins
-  k outs `finally` freeVars srv outs
-
-withCallKeepIns :: Server -> EntryName -> [VarName] -> [VarName] -> ([VarName] -> IO a) -> IO a
-withCallKeepIns srv entry outs ins k = do
-  _ <- callKeepIns srv entry outs ins
-  k outs `finally` freeVars srv outs
+withCallKeepIns :: Server -> EntryName -> VarName -> [VarName] -> (VarName -> IO a) -> IO a
+withCallKeepIns srv entry out ins k = do
+  _ <- callKeepIns srv entry out ins
+  k out `finally` freeVars srv [out]
 
 withFreedVars :: Server -> [VarName] -> IO a -> IO a
 withFreedVars srv vs action =
@@ -526,7 +549,7 @@ withFreedVars srv vs action =
 withFreedVar :: Server -> VarName -> IO a -> IO a
 withFreedVar srv v = withFreedVars srv [v]
 
-packType :: FilePath -> Server -> VarName -> TypeName -> [VarName] -> IO (VarName)
+packType :: FilePath -> Server -> VarName -> TypeName -> [VarName] -> IO VarName
 packType scratchBin srv outVar typ componentVars = do
   mustRepack <- isCompositeLike srv outVar typ
   if mustRepack
@@ -541,24 +564,32 @@ packType scratchBin srv outVar typ componentVars = do
       _ <- FSV.putValue srv outVar val
       pure outVar
 
-cmdErrorHandlerM :: T.Text ->  IO (Maybe CmdFailure) -> IO ()
+cmdErrorHandlerM :: T.Text -> IO (Maybe CmdFailure) -> IO ()
 cmdErrorHandlerM msg action = action >>= maybe (pure ()) (fail . format)
-  where format err = T.unpack msg <> show err
+  where
+    format err = T.unpack msg <> show err
 
-cmdErrorHandlerE :: T.Text -> IO (Either CmdFailure a) -> IO (a)
+cmdErrorHandlerE :: T.Text -> IO (Either CmdFailure a) -> IO a
 cmdErrorHandlerE msg action = action >>= either (fail . format) pure
-  where format err = T.unpack msg <> show err
+  where
+    format err = T.unpack msg <> show err
 
 useInputTypeToPack :: FilePath -> Server -> VarName -> EntryName -> [VarName] -> IO (Either PBTFailure VarName)
 useInputTypeToPack scratchBin srv var propName componentVars = runExceptT $ do
-  ins <- liftIO $ cmdErrorHandlerE ("cmdInputs failed for " <> propName <> ": ")
-   $ cmdInputs srv propName
+  ins <-
+    liftIO $
+      cmdErrorHandlerE ("cmdInputs failed for " <> propName <> ": ") $
+        cmdInputs srv propName
 
   inputTypeToUse <- case ins of
     [inp] -> pure $ inputType inp
-    []    -> throwE $ "Expected property " <> propName <> " to have exactly one input, got none."
-    tys   -> throwE $ "Expected property " <> propName <> " to have exactly one input, got: " 
-                     <> showText (map inputType tys)
+    [] -> throwE $ "Expected property " <> propName <> " to have exactly one input, got none."
+    tys ->
+      throwE $
+        "Expected property "
+          <> propName
+          <> " to have exactly one input, got: "
+          <> showText (map inputType tys)
 
   liftIO $ packType scratchBin srv var inputTypeToUse componentVars
 
@@ -584,10 +615,10 @@ prettyVar srv v ty = do
       -- convert from Field to text and type pairs
 
       let fnames = map fieldName fieldLines
-          ftypes = map (fieldType) fieldLines
+          ftypes = map fieldType fieldLines
           isTuple =
             and
-              [ fname == T.pack (show i)
+              [ fname == showText i
               | (fname, i) <- zip fnames [0 .. (length fnames - 1)]
               ]
 
@@ -627,9 +658,9 @@ getSingleInputType srv ep = do
     [] -> pure $ Left $ T.pack $ "Entrypoint " <> T.unpack ep <> " has no inputs (expected 1)."
     _ -> pure $ Left $ T.pack $ "Entrypoint " <> T.unpack ep <> " has >1 input (expected 1): " <> show tys
 
-outsMatchType :: Server -> TypeName -> [TypeName] -> IO Bool
-outsMatchType srv propTy outs
-  | outs == [propTy] = pure True
+outsMatchType :: Server -> TypeName -> TypeName -> IO Bool
+outsMatchType srv propTy out
+  | out == propTy = pure True
   | otherwise = do
       res <- cmdFields srv propTy
-      pure $ either (const False) (\fs -> outs == map fieldType fs) res
+      pure $ either (const False) (\fs -> [out] == map fieldType fs) res

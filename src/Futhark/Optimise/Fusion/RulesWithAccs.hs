@@ -31,6 +31,7 @@ module Futhark.Optimise.Fusion.RulesWithAccs
 where
 
 import Control.Monad
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
@@ -46,28 +47,75 @@ import Futhark.Transform.Substitute
 --   2.   the withacc input
 --   3-5  withacc's lambda corresponding acc-certificate param,
 --           argument param and result name
-type AccTup =
-  ( [PatElem (LetDec SOACS)],
-    WithAccInput SOACS,
-    LParam SOACS,
-    LParam SOACS,
-    (VName, Certs)
-  )
+data AccTup = AccTup
+  { accTup1 :: [PatElem (LetDec SOACS)],
+    accTup2 :: WithAccInput SOACS,
+    accTup3 :: LParam SOACS,
+    accTup4 :: LParam SOACS,
+    accTup5 :: (VName, Certs)
+  }
+  deriving (Show)
 
-accTup1 :: AccTup -> [PatElem (LetDec SOACS)]
-accTup1 (a, _, _, _, _) = a
+groupAccs ::
+  [PatElem (LetDec SOACS)] ->
+  [WithAccInput SOACS] ->
+  Lambda SOACS ->
+  ([AccTup], [(PatElem (LetDec SOACS), SubExpRes)])
+groupAccs pat_els wacc_inps wlam =
+  let lam_params = lambdaParams wlam
+      n = length lam_params
+      (lam_par_crts, lam_par_accs) = splitAt (n `div` 2) lam_params
+      lab_res_ses = bodyResult $ lambdaBody wlam
+   in groupAccsHlp pat_els wacc_inps lam_par_crts lam_par_accs lab_res_ses
 
-accTup2 :: AccTup -> WithAccInput SOACS
-accTup2 (_, a, _, _, _) = a
+groupAccsHlp ::
+  [PatElem (LetDec SOACS)] ->
+  [WithAccInput SOACS] ->
+  [LParam SOACS] ->
+  [LParam SOACS] ->
+  [SubExpRes] ->
+  ([AccTup], [(PatElem (LetDec SOACS), SubExpRes)])
+groupAccsHlp pat_els [] [] [] lam_res_ses
+  | length pat_els == length lam_res_ses =
+      ([], zip pat_els lam_res_ses)
+groupAccsHlp
+  pat_els
+  (winp@(_, inp, _) : wacc_inps)
+  (par_crt : lam_par_crts)
+  (par_acc : lam_par_accs)
+  (res_se : lam_res_ses)
+    | n <- length inp,
+      Var res_nm <- resSubExp res_se =
+        let (pat_els_cur, pat_els') = splitAt n pat_els
+            (rec1, rec2) = groupAccsHlp pat_els' wacc_inps lam_par_crts lam_par_accs lam_res_ses
+         in (AccTup pat_els_cur winp par_crt par_acc (res_nm, resCerts res_se) : rec1, rec2)
+groupAccsHlp _ _ _ _ _ =
+  error "Unreachable case reached in groupAccsHlp!"
 
-accTup3 :: AccTup -> LParam SOACS
-accTup3 (_, _, a, _, _) = a
+matchingAccTup :: AccTup -> AccTup -> Bool
+matchingAccTup
+  (AccTup pat_els1 (shp1, _winp_arrs1, mlam1) _ _ _)
+  (AccTup _ (shp2, winp_arrs2, mlam2) _ _ _) =
+    shapeDims shp1 == shapeDims shp2
+      && map patElemName pat_els1 == winp_arrs2
+      && case (mlam1, mlam2) of
+        (Nothing, Nothing) -> True
+        (Just (lam1, see1), Just (lam2, see2)) ->
+          see1 == see2 && equivLambda M.empty lam1 lam2
+        _ -> False
 
-accTup4 :: AccTup -> LParam SOACS
-accTup4 (_, _, _, a, _) = a
-
-accTup5 :: AccTup -> (VName, Certs)
-accTup5 (_, _, _, _, a) = a
+groupCommonAccs :: [AccTup] -> [AccTup] -> ([(AccTup, AccTup)], [AccTup], [AccTup])
+groupCommonAccs [] tup_accs2 =
+  ([], [], tup_accs2)
+groupCommonAccs (tup_acc1 : tup_accs1) tup_accs2
+  | (commons2, uncommons2) <- L.partition (matchingAccTup tup_acc1) tup_accs2,
+    length commons2 <= 1 =
+      let (rec1, rec2, rec3) = groupCommonAccs tup_accs1 uncommons2
+       in if null commons2
+            then (rec1, tup_acc1 : rec2, rec3)
+            else ((tup_acc1, head commons2) : rec1, rec2, rec3)
+groupCommonAccs _ _ =
+  error "Unreachable case reached in groupCommonAccs!"
 
 -- | Simple case for fusing two withAccs (can be extended):
 --    let (b1, ..., bm, x1, ..., xq) = withAcc a1 ... am lam1
@@ -104,14 +152,13 @@ tryFuseWithAccs
         groupCommonAccs acc_tup1 acc_tup2,
       -- safety 0: make sure that the accs from acc_tup1' and
       --           acc_tup2' do not overlap
-      pnms_1' <- map patElemName $ concatMap (\(nms, _, _, _, _) -> nms) acc_tup1',
-      winp_2' <- concatMap (\(_, (_, nms, _), _, _, _) -> nms) acc_tup2',
+      pnms_1' <- map patElemName $ concatMap accTup1 acc_tup1',
+      winp_2' <- concatMap ((\(_, xs, _) -> xs) . accTup2) acc_tup2',
       not $ namesIntersect (namesFromList pnms_1') (namesFromList winp_2'),
       -- safety 1: we have already determined the commons;
       --           now we also need to check NOT-IN FV(lam2)
       not $ namesIntersect (namesFromList pnms_1') (freeIn lam2),
       -- safety 2:
-      -- bs <- map patElemName $ concatMap accTup1 acc_tup1,
       bs <- map patElemName $ concatMap (accTup1 . fst) tup_common,
       all (`notElem` infusible) bs,
       -- safety 3:
@@ -129,34 +176,25 @@ tryFuseWithAccs
             bdyres_accse = map Var comm_res_nms ++ map (Var . fst . accTup5) (acc_tup1' ++ acc_tup2')
             bdy_res_accs = zipWith SubExpRes bdyres_certs bdyres_accse
             bdy_res_others = map snd $ other_pr1 ++ other_pr2
-        scope <- askScope
-        lam_bdy <-
-          runBodyBuilder $ do
-            localScope (scope <> scopeOfLParams (rcrt_params ++ racc_params)) $ do
-              -- add the stms of lam1
-              mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam1
-              -- add the copy stms for the common accumulator
-              forM_ tup_common $ \(tup1, tup2) -> do
-                let (lpar1, lpar2) = (accTup4 tup1, accTup4 tup2)
-                    ((nm1, _), nm2, tp_acc) = (accTup5 tup1, paramName lpar2, paramDec lpar1)
-                letBind (Pat [PatElem nm2 tp_acc]) $ BasicOp $ SubExp $ Var nm1
-              -- add copy stms to bring in scope x1 ... xq
-              forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
-                let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
-                certifying (resCerts bdy_res) $
-                  letBind (Pat [PatElem nm tp]) $
-                    BasicOp (SubExp se)
-              -- add the statements of lam2 (in which the acc-certificates have been substituted)
-              mapM_ addStm $ stmsToList $ bodyStms lam2_bdy'
-              -- build the result of body
-              pure $ bdy_res_accs ++ bdy_res_others
-        let tp_res_other = map (patElemType . fst) (other_pr1 ++ other_pr2)
-            res_lam =
-              Lambda
-                { lambdaParams = rcrt_params ++ racc_params,
-                  lambdaBody = lam_bdy,
-                  lambdaReturnType = map paramDec racc_params ++ tp_res_other
-                }
+        res_lam <-
+          runLambdaBuilder (rcrt_params ++ racc_params) $ do
+            -- add the stms of lam1
+            mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam1
+            -- add the copy stms for the common accumulator
+            forM_ tup_common $ \(tup1, tup2) -> do
+              let (lpar1, lpar2) = (accTup4 tup1, accTup4 tup2)
+                  ((nm1, _), nm2, tp_acc) = (accTup5 tup1, paramName lpar2, paramDec lpar1)
+              letBind (Pat [PatElem nm2 tp_acc]) $ BasicOp $ SubExp $ Var nm1
+            -- add copy stms to bring in scope x1 ... xq
+            forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
+              let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
+              certifying (resCerts bdy_res) $
+                letBind (Pat [PatElem nm tp]) $
+                  BasicOp (SubExp se)
+            -- add the statements of lam2 (in which the acc-certificates have been substituted)
+            mapM_ addStm $ stmsToList $ bodyStms lam2_bdy'
+            -- build the result of body
+            pure $ bdy_res_accs ++ bdy_res_others
         res_lam' <- renameLambda res_lam
         let res_pat =
               concatMap (accTup1 . snd) tup_common
@@ -166,60 +204,6 @@ tryFuseWithAccs
         res_w_inps' <- mapM renameLamInWAccInp res_w_inps
         pure $ Let (Pat res_pat) (aux1 <> aux2) $ WithAcc res_w_inps' res_lam'
     where
-      -- local helpers:
-
-      groupAccs ::
-        [PatElem (LetDec SOACS)] ->
-        [WithAccInput SOACS] ->
-        Lambda SOACS ->
-        ([AccTup], [(PatElem (LetDec SOACS), SubExpRes)])
-      groupAccs pat_els wacc_inps wlam =
-        let lam_params = lambdaParams wlam
-            n = length lam_params
-            (lam_par_crts, lam_par_accs) = splitAt (n `div` 2) lam_params
-            lab_res_ses = bodyResult $ lambdaBody wlam
-         in groupAccsHlp pat_els wacc_inps lam_par_crts lam_par_accs lab_res_ses
-      groupAccsHlp ::
-        [PatElem (LetDec SOACS)] ->
-        [WithAccInput SOACS] ->
-        [LParam SOACS] ->
-        [LParam SOACS] ->
-        [SubExpRes] ->
-        ([AccTup], [(PatElem (LetDec SOACS), SubExpRes)])
-      groupAccsHlp pat_els [] [] [] lam_res_ses
-        | length pat_els == length lam_res_ses =
-            ([], zip pat_els lam_res_ses)
-      groupAccsHlp
-        pat_els
-        (winp@(_, inp, _) : wacc_inps)
-        (par_crt : lam_par_crts)
-        (par_acc : lam_par_accs)
-        (res_se : lam_res_ses)
-          | n <- length inp,
-            (n <= length pat_els) && (n <= (1 + length lam_res_ses)),
-            Var res_nm <- resSubExp res_se =
-              let (pat_els_cur, pat_els') = splitAt n pat_els
-                  (rec1, rec2) = groupAccsHlp pat_els' wacc_inps lam_par_crts lam_par_accs lam_res_ses
-               in ((pat_els_cur, winp, par_crt, par_acc, (res_nm, resCerts res_se)) : rec1, rec2)
-      groupAccsHlp _ _ _ _ _ =
-        error "Unreachable case reached in groupAccsHlp!"
-      --
-      groupCommonAccs :: [AccTup] -> [AccTup] -> ([(AccTup, AccTup)], [AccTup], [AccTup])
-      groupCommonAccs [] tup_accs2 =
-        ([], [], tup_accs2)
-      groupCommonAccs (tup_acc1 : tup_accs1) tup_accs2
-        | commons2 <- filter (matchingAccTup tup_acc1) tup_accs2,
-          length commons2 <= 1 =
-            let (rec1, rec2, rec3) =
-                  groupCommonAccs tup_accs1 $
-                    if null commons2
-                      then tup_accs2
-                      else filter (not . matchingAccTup tup_acc1) tup_accs2
-             in if null commons2
-                  then (rec1, tup_acc1 : rec2, rec3)
-                  else ((tup_acc1, head commons2) : rec1, tup_accs1, rec3)
-      groupCommonAccs _ _ =
-        error "Unreachable case reached in groupCommonAccs!"
       renameLamInWAccInp (shp, inps, Just (lam, se)) = do
         lam' <- renameLambda lam
         pure (shp, inps, Just (lam', se))
@@ -231,6 +215,13 @@ tryFuseWithAccs _ _ _ =
 -------------------------------
 --- simple helper functions ---
 -------------------------------
+
+substInSEs :: M.Map VName VName -> [SubExp] -> [SubExp]
+substInSEs vtab = map substInSE
+  where
+    substInSE (Var x)
+      | Just y <- M.lookup x vtab = Var y
+    substInSE z = z
 
 equivLambda ::
   M.Map VName VName ->
@@ -277,22 +268,3 @@ equivStm
          in (M.union stab_new stab, True)
 -- To Be Continued ...
 equivStm vtab _ _ = (vtab, False)
-
-matchingAccTup :: AccTup -> AccTup -> Bool
-matchingAccTup
-  (pat_els1, (shp1, _winp_arrs1, mlam1), _, _, _)
-  (_, (shp2, winp_arrs2, mlam2), _, _, _) =
-    shapeDims shp1 == shapeDims shp2
-      && map patElemName pat_els1 == winp_arrs2
-      && case (mlam1, mlam2) of
-        (Nothing, Nothing) -> True
-        (Just (lam1, see1), Just (lam2, see2)) ->
-          (see1 == see2) && equivLambda M.empty lam1 lam2
-        _ -> False
-
-substInSEs :: M.Map VName VName -> [SubExp] -> [SubExp]
-substInSEs vtab = map substInSE
-  where
-    substInSE (Var x)
-      | Just y <- M.lookup x vtab = Var y
-    substInSE z = z
