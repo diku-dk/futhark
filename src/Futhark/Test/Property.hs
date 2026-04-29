@@ -294,7 +294,7 @@ runOne s config scratchBin srv entryNameRef = do
         _ <- callFreeIns srv genName genOut [serverSize, serverSeed]
         _ <-
           freeOnException srv [serverIn] $
-            useInputTypeToPack scratchBin srv serverIn propName [genOut]
+            useInputTypeToPack scratchBin srv serverIn propName genOut
         pure genOut
 
     pPrintPhase propName serverIn = do
@@ -368,7 +368,7 @@ autoShrinkLoop scratchBin srv propName genName vIn size seed genOut phaseRef = r
 
               _ <-
                 freeOnException srv [vCand] $
-                  packType scratchBin srv vCand propTy [genOut]
+                  copyVar scratchBin srv vCand propTy genOut
 
               autoShrinkUpdatePhase (Just propName)
               ok <- withCallKeepIns srv propName vOk [vCand] $ \_ ->
@@ -381,7 +381,7 @@ autoShrinkLoop scratchBin srv propName genName vIn size seed genOut phaseRef = r
                 else do
                   _ <-
                     freeOnException srv [vIn] $
-                      packType scratchBin srv vIn propTy [vCand]
+                      copyVar scratchBin srv vIn propTy vCand
                   pure (Just newSize) -- Found a smaller failing size!
             case res of
               Nothing -> loop (i - 1)
@@ -451,14 +451,14 @@ shrinkLoop scratchBin srv propName vIn shrinkName seed numTries phaseRef = runEx
 
       _ <-
         freeOnException srv [vInRetyped] $
-          packType scratchBin srv vInRetyped shrinkXTy [vIn]
+          copyVar scratchBin srv vInRetyped shrinkXTy vIn
 
       let shrinkOuts = outName shrinkName
       shrinkUpdatePhase Nothing
 
       withFreedVars srv [shrinkOuts, vTry] $ do
         _ <- callFreeIns srv shrinkName shrinkOuts [vInRetyped, vTactic]
-        _ <- freeOnException srv [vTry] $ packType scratchBin srv vTry propTy [shrinkOuts]
+        _ <- freeOnException srv [vTry] $ copyVar scratchBin srv vTry propTy shrinkOuts
 
         shrinkUpdatePhase Nothing
         ok <- withCallKeepIns srv propName vOk [vTry] $ \_ -> getVal srv vOk
@@ -468,7 +468,7 @@ shrinkLoop scratchBin srv propName vIn shrinkName seed numTries phaseRef = runEx
           True -> pure NotAcceptedShrink
           False -> do
             freeVars srv [vIn]
-            _ <- packType scratchBin srv vIn propTy [vTry]
+            _ <- copyVar scratchBin srv vIn propTy vTry
             pure AcceptedShrink
 
 sendGenInputs :: Server -> VarName -> VarName -> VarName -> Int64 -> Int32 -> IO (Maybe PBTFailure)
@@ -537,9 +537,9 @@ withFreedVars srv vs action =
 withFreedVar :: Server -> VarName -> IO a -> IO a
 withFreedVar srv v = withFreedVars srv [v]
 
-packType :: FilePath -> Server -> VarName -> TypeName -> [VarName] -> IO VarName
-packType scratchBin srv outVar typ componentVars = do
-  cmdErrorHandlerM "cmdStore failed: " $ cmdStore srv scratchBin componentVars
+copyVar :: FilePath -> Server -> VarName -> TypeName -> VarName -> IO VarName
+copyVar scratchBin srv outVar typ componentVars = do
+  cmdErrorHandlerM "cmdStore failed: " $ cmdStore srv scratchBin [componentVars]
   freeVars srv [outVar]
   cmdErrorHandlerM "cmdRestore failed: " $ cmdRestore srv scratchBin [(outVar, typ)]
   pure outVar
@@ -554,7 +554,7 @@ cmdErrorHandlerE msg action = action >>= either (fail . format) pure
   where
     format err = T.unpack msg <> show err
 
-useInputTypeToPack :: FilePath -> Server -> VarName -> EntryName -> [VarName] -> IO (Either PBTFailure VarName)
+useInputTypeToPack :: FilePath -> Server -> VarName -> EntryName -> VarName -> IO (Either PBTFailure VarName)
 useInputTypeToPack scratchBin srv var propName componentVars = runExceptT $ do
   ins <-
     liftIO $
@@ -571,7 +571,7 @@ useInputTypeToPack scratchBin srv var propName componentVars = runExceptT $ do
           <> " to have exactly one input, got: "
           <> showText (map inputType tys)
 
-  liftIO $ packType scratchBin srv var inputTypeToUse componentVars
+  liftIO $ copyVar scratchBin srv var inputTypeToUse componentVars
 
 getVal :: (GetValue a) => Server -> VarName -> IO a
 getVal srv name = do
