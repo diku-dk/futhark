@@ -2,7 +2,7 @@ FUTHARK_BACKEND ?= python
 
 .PHONY: test clean
 
-test: do_test_a do_test_g
+test: do_test_a do_test_g do_test_pair
 
 do_test_%: test_% %.py
 	./test_$*

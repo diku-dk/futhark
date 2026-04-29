@@ -299,15 +299,15 @@ printResult manifest = concatMap f
 
 cliEntryPoint ::
   Manifest -> T.Text -> EntryPoint -> (C.Definition, C.Initializer)
-cliEntryPoint manifest entry_point_name (EntryPoint cfun _tuning_params outputs inputs _attrs) =
+cliEntryPoint manifest entry_point_name (EntryPoint cfun _tuning_params output inputs _attrs) =
   let (input_items, pack_input, free_input, free_parsed, input_args) =
         unzip5 $ readInputs manifest $ map inputType inputs
 
       (output_decls, output_vals, free_outputs) =
-        unzip3 $ prepareOutputs manifest $ map outputType outputs
+        unzip3 $ prepareOutputs manifest [outputType output]
 
       printstms =
-        printResult manifest $ zip (map outputType outputs) output_vals
+        printResult manifest $ zip [outputType output] output_vals
 
       cli_entry_point_function_name =
         "futrts_cli_entry_" <> T.unpack (escapeName entry_point_name)

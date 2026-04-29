@@ -43,10 +43,9 @@ class Server:
         for t in self._get_entry_point(entry)[1]:
             print(t)
 
-    def _cmd_outputs(self, args):
+    def _cmd_output(self, args):
         entry = self._get_arg(args, 0)
-        for t in self._get_entry_point(entry)[2]:
-            print(t)
+        print(self._get_entry_point(entry)[2])
 
     def _cmd_dummy(self, args):
         pass
@@ -68,18 +67,16 @@ class Server:
         entry = self._get_entry_point(self._get_arg(args, 0))
         entry_fname = entry[0]
         num_ins = len(entry[1])
-        num_outs = len(entry[2])
-        exp_len = 1 + num_outs + num_ins
+        exp_len = 2 + num_ins
 
         if len(args) != exp_len:
             raise self.Failure("Invalid argument count, expected %d" % exp_len)
 
-        out_vnames = args[1 : num_outs + 1]
+        out_vname = args[1]
 
-        for out_vname in out_vnames:
-            self._check_new_var(out_vname)
+        self._check_new_var(out_vname)
 
-        in_vnames = args[1 + num_outs :]
+        in_vnames = args[2:]
         ins = [self._get_var(in_vname) for in_vname in in_vnames]
 
         try:
@@ -89,11 +86,7 @@ class Server:
 
         print("runtime: %d" % runtime)
 
-        if num_outs == 1:
-            self._vars[out_vnames[0]] = vals
-        else:
-            for out_vname, val in zip(out_vnames, vals):
-                self._vars[out_vname] = val
+        self._vars[out_vname] = vals
 
     def _store_val(self, f, value):
         # In case we are using the PyOpenCL backend, we first
@@ -163,13 +156,34 @@ class Server:
         for k in self._ctx.opaques.keys():
             print(k)
 
+    def _cmd_fields(self, args):
+        tname = self._get_arg(args, 0)
+        if not tname in self._ctx.opaques:
+            raise self.Failure(f"Unknown type {tname}")
+        else:
+            t = self._ctx.opaques[tname]
+            if type(t[1]) is tuple:
+                i = 0
+                for x in t[1]:
+                    print(i, x)
+                    i += 1
+
+    def _cmd_project(self, args):
+        dst = self._get_arg(args, 0)
+        src = self._get_arg(args, 1)
+        field = self._get_arg(args, 2)
+        self._check_new_var(dst)
+        self._check_var(src)
+        # FIXME: assuming a tuple.
+        self._vars[dst] = self._vars[src].data[int(field)]
+
     def _cmd_entry_points(self, args):
         for k in self._ctx.entry_points.keys():
             print(k)
 
     _commands = {
         "inputs": _cmd_inputs,
-        "outputs": _cmd_outputs,
+        "output": _cmd_output,
         "call": _cmd_call,
         "restore": _cmd_restore,
         "store": _cmd_store,
@@ -181,6 +195,8 @@ class Server:
         "report": _cmd_dummy,
         "types": _cmd_types,
         "entry_points": _cmd_entry_points,
+        "fields": _cmd_fields,
+        "project": _cmd_project,
     }
 
     def _process_line(self, line):
@@ -193,7 +209,7 @@ class Server:
             raise self.Failure("Empty line")
         else:
             cmd = words[0]
-            args = words[1:]
+            args = [w.strip('"') for w in words[1:]]
             if cmd in self._commands:
                 self._commands[cmd](self, args)
             else:

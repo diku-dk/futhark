@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+* In the C and Python APIs, entry points returning tuples no longer implicitly
+  unpack them.
+
 ### Fixed
 
 * The C-based backends no longer emit constants `-9223372036854775808`, as these

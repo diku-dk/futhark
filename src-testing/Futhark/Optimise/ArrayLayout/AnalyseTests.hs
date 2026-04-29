@@ -212,9 +212,7 @@ analyseDimAccessesTests = testGroup
     prog0 :: Prog GPU
     prog0 =
       "\
-      \entry(\"main\",\
-      \      {xss: [][]i64},\
-      \      {[]i64})\
+      \fun\
       \  entry_main (n_5142 : i64,\
       \              m_5143 : i64,\
       \              xss_5144 : [n_5142][m_5143]i64)\
