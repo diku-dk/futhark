@@ -20,7 +20,6 @@ import Control.Monad.Trans.Except
 import Data.Char (chr)
 import Data.IORef
 import Data.Int (Int32, Int64)
-import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Vector.Storable qualified as SV
@@ -309,9 +308,8 @@ runOne s config scratchBin srv entryNameRef = do
                   Left err -> fail $ "getValue failed: " <> show err -- this is server error, not user error, so we can just fail
                   Right (U8Value _ bytes) -> pure $ T.pack [chr (fromIntegral b) | b <- SV.toList bytes]
                   Right _ -> pure $ T.pack "pretty printer returned non-u8 value" -- this is user error
-            Nothing -> do
-              prettyOut <- prettyVar srv serverIn ty0
-              pure $ T.pack prettyOut
+            Nothing ->
+              prettyVar srv serverIn ty0
 
           pure $ "Minimal counterexample: " <> prettyOut
         _ -> pure "Could not retrieve input types for counterexample log."
@@ -564,7 +562,7 @@ getDataVal s name = do
     Left msg -> fail $ "getValue failed for " <> T.unpack name <> ": " <> T.unpack msg
     Right v -> pure v
 
-prettyVar :: Server -> VarName -> TypeName -> IO String
+prettyVar :: Server -> VarName -> TypeName -> IO T.Text
 prettyVar srv v ty = do
   fieldsRes <- cmdFields srv ty
   case fieldsRes of
@@ -592,20 +590,17 @@ prettyVar srv v ty = do
 
         if isTuple
           then pure sField
-          else pure (T.unpack fname <> " = " <> sField)
+          else pure (fname <> " = " <> sField)
 
       if isTuple
-        then pure $ "(" <> intercalate ", " rendered <> ")"
+        then pure $ "(" <> T.intercalate ", " rendered <> ")"
         else do
-          pure $ "{" <> intercalate ", " rendered <> "}"
+          pure $ "{" <> T.intercalate ", " rendered <> "}"
     Left _notARecord -> do
       valRes <- FSV.getValue srv v
       case valRes of
-        Right val -> pure (prettyLeaf val)
-        Left _opaqueOrFailed -> pure ("<opaque:" <> T.unpack ty <> ">")
-
-prettyLeaf :: Value -> String
-prettyLeaf = T.unpack . valueText
+        Right val -> pure (valueText val)
+        Left _opaqueOrFailed -> pure ("<opaque:" <> ty <> ">")
 
 getSingleInputType :: Server -> EntryName -> IO (Either PBTFailure TypeName)
 getSingleInputType srv ep = do
