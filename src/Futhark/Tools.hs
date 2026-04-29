@@ -7,6 +7,7 @@ module Futhark.Tools
     redomapToMapAndReduce,
     scanomapToMapAndScan,
     maposcanomapToMapScanAndMap,
+    maposcanomapToMaposcanAndMap,
     dissectScrema,
     extractPostLambda,
     sequentialStreamWholeArray,
@@ -97,6 +98,30 @@ maposcanomapToMapScanAndMap (Pat pes) (w, post_lam, scans, map_lam, arrs) = do
       res = patElemIdent <$> pes
   post_stm <- mkLet res . Op . Screma w post_arrs <$> mapSOAC post_lam
   pure (map_stm, scan_stm, post_stm)
+  where
+    tempRes res = newIdent "temp_res" $ res `arrayOfRow` w
+
+maposcanomapToMaposcanAndMap ::
+  ( MonadFreshNames m,
+    Buildable rep,
+    Op rep ~ SOAC rep
+  ) =>
+  Pat (LetDec rep) ->
+  ( SubExp,
+    Lambda rep,
+    [Scan rep],
+    Lambda rep,
+    [VName]
+  ) ->
+  m (Stm rep, Stm rep)
+maposcanomapToMaposcanAndMap (Pat pes) (w, post_lam, scans, map_lam, arrs) = do
+  map_res <- mapM tempRes $ lambdaReturnType map_lam
+  map_stm <- mkLet map_res . Op . Screma w arrs <$> mapSOAC map_lam
+  id_lam <- mkIdentityLambda $ lambdaReturnType map_lam
+  let res = patElemIdent <$> pes
+      pre_arrs = map identName map_res
+  post_stm <- mkLet res . Op . Screma w pre_arrs <$> maposcanomapSOAC id_lam scans post_lam
+  pure (map_stm, post_stm)
   where
     tempRes res = newIdent "temp_res" $ res `arrayOfRow` w
 
