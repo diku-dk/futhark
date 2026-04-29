@@ -492,18 +492,6 @@ sendGenInputs srv sizeName seedName genName size seed = do
 outName :: EntryName -> VarName
 outName = (<> "_out")
 
-isCompositeLike :: Server -> VarName -> TypeName -> IO Bool
-isCompositeLike srv var ty = do
-  -- 1. Check the 'kind' of the current type
-  typeName <- cmdErrorHandlerE ("kind command failed for " <> var <> ": ") $ cmdKind srv ty
-  -- T.putStrLn $ "Checking type: " <> T.unpack ty <> " (Kind: " <> T.unpack currentKind <> ")"
-  case typeName of
-    Array -> do
-      et <- cmdErrorHandlerE ("elemtype command failed for " <> ty <> ": ") $ cmdElemtype srv ty
-      isCompositeLike srv var et
-    Record -> pure True
-    _ -> pure False
-
 putVal :: (PutValue1 a) => Server -> T.Text -> a -> IO ()
 putVal s name x = do
   let v = putValue1 x
@@ -551,18 +539,10 @@ withFreedVar srv v = withFreedVars srv [v]
 
 packType :: FilePath -> Server -> VarName -> TypeName -> [VarName] -> IO VarName
 packType scratchBin srv outVar typ componentVars = do
-  mustRepack <- isCompositeLike srv outVar typ
-  if mustRepack
-    then do
-      cmdErrorHandlerM "cmdStore failed: " $ cmdStore srv scratchBin componentVars
-      freeVars srv [outVar]
-      cmdErrorHandlerM "cmdRestore failed: " $ cmdRestore srv scratchBin [(outVar, typ)]
-      pure outVar
-    else do
-      val <- getDataVal srv (head componentVars)
-      freeVars srv [outVar]
-      _ <- FSV.putValue srv outVar val
-      pure outVar
+  cmdErrorHandlerM "cmdStore failed: " $ cmdStore srv scratchBin componentVars
+  freeVars srv [outVar]
+  cmdErrorHandlerM "cmdRestore failed: " $ cmdRestore srv scratchBin [(outVar, typ)]
+  pure outVar
 
 cmdErrorHandlerM :: T.Text -> IO (Maybe CmdFailure) -> IO ()
 cmdErrorHandlerM msg action = action >>= maybe (pure ()) (fail . format)
