@@ -1066,6 +1066,43 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       transformScalarStm segments env inps [res] $
         Let (Pat [pe]) aux (BasicOp e)
 
+regularToReplicatedIrregularRep ::
+  Segments ->
+  VName ->
+  VName ->
+  Builder GPU IrregularRep
+regularToReplicatedIrregularRep segments ws_data v' = do
+  ws_prod <- arraySize 0 <$> lookupType ws_data
+  arr_t <- lookupType v'
+  segment_size <-
+    letSubExp "reg_seg_size" <=< toExp . product . map pe64 $
+      drop (segmentsRank segments) (arrayDims arr_t)
+  num_elems <-
+    letSubExp "reg_num_elems" <=< toExp $ product $ map pe64 $ arrayDims arr_t
+  arr_D <-
+    letExp "reg_D" . BasicOp $
+      Reshape v' (reshapeAll (arrayShape arr_t) (Shape [num_elems]))
+  arr_F <- letExp "reg_F" <=< segMap (MkSolo num_elems) $ \(MkSolo i) -> do
+    flag <- letSubExp "flag" <=< toExp $ (pe64 i `rem` pe64 segment_size) .==. 0
+    pure [subExpRes flag]
+
+  arr_S <-
+    letExp "reg_segments" . BasicOp $
+      Replicate (Shape [ws_prod]) segment_size
+  arr_O <- letExp "reg_O" <=< segMap (MkSolo ws_prod) $ \(MkSolo i) -> do
+    segment <- letSubExp "segment" =<< eIndex ws_data [eSubExp i]
+    offset <- letSubExp "offset" <=< toExp $ pe64 segment * pe64 segment_size
+    pure [subExpRes offset]
+  let rep' =
+        IrregularRep
+          { irregularS = arr_S,
+            irregularF = arr_F,
+            irregularO = arr_O,
+            irregularD = arr_D,
+            irregularK = Replicated
+          }
+  pure rep'
+
 -- Replicates inner dimension for inputs.
 onMapFreeVar ::
   Segments ->
@@ -1076,20 +1113,13 @@ onMapFreeVar ::
   VName ->
   Maybe (Builder GPU (VName, MapArray IrregularRep))
 onMapFreeVar segments env inps _ws (_ws_F, _ws_O, ws_data) v = do
-  let segments_per_elem = ws_data
   v_inp <- lookup v inps
   pure $ do
     ws_prod <- arraySize 0 <$> lookupType ws_data
     fmap (v,) $ case v_inp of
-      DistInputFree v' t -> do
-        fmap (`MapArray` t)
-          . letExp (baseName v <> "_rep_free_free_inp")
-          <=< segMap (MkSolo ws_prod)
-          $ \(MkSolo i) -> do
-            segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
-            segment_is <- segmentCoordsFromFlat segments segment
-            subExpsRes . pure <$> (letSubExp "v" =<< eIndex v' (map eSubExp segment_is))
-      -- subExpsRes . pure <$> readInput segments env segment_is inps (Var v)
+      DistInputFree v' t ->
+        --  I'm not totally sure if this will be better than previous approach
+        (`MapOther` t) <$> regularToReplicatedIrregularRep segments ws_data v'
       DistInput rt t -> case resVar rt env of
         Irregular rep -> do
           ~[new_S, offsets] <- letTupExp (baseName v <> "_rep_free_irreg")
@@ -1109,13 +1139,7 @@ onMapFreeVar segments env inps _ws (_ws_F, _ws_O, ws_data) v = do
                   }
           pure $ MapOther rep' t
         Regular vs ->
-          fmap (`MapArray` t)
-            . letExp (baseName v <> "_rep_free_reg_inp")
-            <=< segMap (MkSolo ws_prod)
-            $ \(MkSolo i) -> do
-              segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
-              segment_is <- segmentCoordsFromFlat segments segment
-              subExpsRes . pure <$> (letSubExp "v" =<< eIndex vs (map eSubExp segment_is))
+          (`MapOther` t) <$> regularToReplicatedIrregularRep segments ws_data vs
 
 onMapInputArr ::
   Segments ->
