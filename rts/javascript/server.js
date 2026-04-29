@@ -6,21 +6,6 @@ class Server {
     this.ctx = ctx;
     this._vars = {};
     this._types = {};
-    this._commands = [ 'inputs',
-                       'outputs',
-                       'call',
-                       'restore',
-                       'store',
-                       'free',
-                       'clear',
-                       'pause_profiling',
-                       'unpause_profiling',
-                       'report',
-                       'rename',
-                       'types',
-                       'fields',
-                       'project'
-                     ];
   }
 
   _get_arg(args, i) {
@@ -68,7 +53,7 @@ class Server {
     }
   }
 
-  _cmd_outputs(args) {
+  _cmd_output(args) {
     var entry = this._get_arg(args, 0);
     console.log(this._get_entry_point(entry)[2]);
   }
@@ -256,25 +241,22 @@ class Server {
     } else {
       var cmd = words[0];
       var args = words.splice(1);
-      if (this._commands.includes(cmd)) {
-        switch (cmd) {
-        case 'inputs': this._cmd_inputs(args); break;
-        case 'outputs': this._cmd_outputs(args); break
-        case 'call': this._cmd_call(args); break
-        case 'restore': this._cmd_restore(args); break
-        case 'store': this._cmd_store(args); break
-        case 'free': this._cmd_free(args); break
-        case 'clear': this._cmd_dummy(args); break
-        case 'pause_profiling': this._cmd_dummy(args); break
-        case 'unpause_profiling': this._cmd_dummy(args); break
-        case 'report': this._cmd_dummy(args); break
-        case 'rename': this._cmd_rename(args); break
-        case 'types': this._cmd_types(args); break
-        case 'fields': this._cmd_fields(args); break
-        case 'project': this._cmd_project(args); break
-        }
-      } else {
-        throw "Unknown command: " + cmd;
+      switch (cmd) {
+      case 'inputs': this._cmd_inputs(args); break;
+      case 'output': this._cmd_output(args); break
+      case 'call': this._cmd_call(args); break
+      case 'restore': this._cmd_restore(args); break
+      case 'store': this._cmd_store(args); break
+      case 'free': this._cmd_free(args); break
+      case 'clear': this._cmd_dummy(args); break
+      case 'pause_profiling': this._cmd_dummy(args); break
+      case 'unpause_profiling': this._cmd_dummy(args); break
+      case 'report': this._cmd_dummy(args); break
+      case 'rename': this._cmd_rename(args); break
+      case 'types': this._cmd_types(args); break
+      case 'fields': this._cmd_fields(args); break
+      case 'project': this._cmd_project(args); break
+      default: throw "Unknown command: " + cmd;
       }
     }
   }
