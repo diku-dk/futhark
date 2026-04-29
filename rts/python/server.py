@@ -43,7 +43,7 @@ class Server:
         for t in self._get_entry_point(entry)[1]:
             print(t)
 
-    def _cmd_outputs(self, args):
+    def _cmd_output(self, args):
         entry = self._get_arg(args, 0)
         print(self._get_entry_point(entry)[2])
 
@@ -183,7 +183,7 @@ class Server:
 
     _commands = {
         "inputs": _cmd_inputs,
-        "outputs": _cmd_outputs,
+        "output": _cmd_output,
         "call": _cmd_call,
         "restore": _cmd_restore,
         "store": _cmd_store,

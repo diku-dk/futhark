@@ -430,7 +430,7 @@ readResults server (v, v_t) = do
     Nothing ->
       pure <$> getValueM server v
 
--- | Call an entry point. Returns server variables storing the result.
+-- | Call an entry point. Returns server variable storing the result.
 callEntry ::
   (MonadIO m, MonadError T.Text m) =>
   FutharkExe ->
@@ -438,17 +438,16 @@ callEntry ::
   FilePath ->
   EntryName ->
   Values ->
-  m [VarName]
+  m VarName
 callEntry futhark server prog entry input = do
-  output_types <- cmdEither $ cmdOutputs server entry
   input_types <- cmdEither $ cmdInputs server entry
-  let outs = ["out" <> showText i | i <- [0 .. length output_types - 1]]
+  let out = "out"
       ins = ["in" <> showText i | i <- [0 .. length input_types - 1]]
       ins_and_types = zip ins (map inputType input_types)
   valuesAsVars server ins_and_types futhark dir input
-  _ <- cmdEither $ cmdCall server entry outs ins
+  _ <- cmdEither $ cmdCall server entry out ins
   cmdMaybe $ cmdFree server ins
-  pure outs
+  pure out
   where
     dir = takeDirectory prog
 
@@ -471,11 +470,11 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
 
     res <- liftIO . flip (pmapIO concurrency) missing $ \(entry, tr) ->
       withServer server_cfg $ \server -> runExceptT $ do
-        outs <- callEntry futhark server prog entry $ runInput tr
+        out <- callEntry futhark server prog entry $ runInput tr
         let f = file entry tr
         liftIO $ ensureCacheDirectory $ takeDirectory f
-        cmdMaybe $ cmdStore server f outs
-        cmdMaybe $ cmdFree server outs
+        cmdMaybe $ cmdStore server f [out]
+        cmdMaybe $ cmdFree server [out]
     either throwError (const (pure ())) (sequence_ res)
   where
     server_cfg = futharkServerCfg ("." </> dropExtension prog) []

@@ -303,7 +303,7 @@ benchmarkDataset ::
   IO (Either T.Text ([RunResult], T.Text, ProfilingReport))
 benchmarkDataset server opts futhark program entry input_spec expected_spec ref_out = runExceptT $ do
   input_types <- cmdEither $ cmdInputs server entry
-  output_type <- fmap head $ cmdEither $ cmdOutputs server entry
+  output_type <- cmdEither $ cmdOutput server entry
   let out = "out"
       ins = ["in" <> showText i | i <- [0 .. length input_types - 1]]
 
@@ -326,7 +326,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
             Nothing
 
       doRun = do
-        call_lines <- cmdEither (cmdCall server entry [out] ins)
+        call_lines <- cmdEither (cmdCall server entry out ins)
         when (any inputConsumed input_types) reloadInput
         case mapMaybe runtime call_lines of
           [call_runtime] -> pure (RunResult call_runtime, call_lines)
@@ -335,7 +335,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   maybe_call_logs <- liftIO . timeout (runTimeout opts * 1000000) . runExceptT $ do
     -- First one uncounted warmup run.
-    void $ cmdEither $ cmdCall server entry [out] ins
+    void $ cmdEither $ cmdCall server entry out ins
 
     ys <- runMinimum (freeOut *> doRun) opts 0 0 mempty
 

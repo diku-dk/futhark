@@ -214,7 +214,7 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
             -- Note that our convention about what is "input/output"
             -- and what is "results/args" is different between the
             -- manifest and ImpCode.
-            Manifest.entryPointOutputs = [outputManifest results],
+            Manifest.entryPointOutput = outputManifest results,
             Manifest.entryPointInputs = map inputManifest args,
             Manifest.entryPointAttrs = map prettyText (S.toList (unAttrs attrs))
           }

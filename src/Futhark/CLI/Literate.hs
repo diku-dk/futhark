@@ -848,7 +848,7 @@ processDirective env (DirectiveVideo e params) = do
               zipWithM_ (writeBMPFile dir) [0 ..] bmps
               onWebM videofile =<< bmpsToVideo dir
       ValueTuple [stepfun, initial, num_frames]
-        | ValueAtom (SFun stepfun' _ [stepret] closure) <- stepfun,
+        | ValueAtom (SFun stepfun' _ stepret closure) <- stepfun,
           Just [_, _] <- isScriptTuple (envServer env) stepret,
           ValueAtom (SValue "i64" _) <- num_frames -> do
             Just (ValueAtom num_frames') <-

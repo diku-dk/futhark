@@ -338,7 +338,7 @@ liftCommand m = do
 runCompiledEntry :: FutharkExe -> Server -> FilePath -> InputOutputs -> IO [TestResult]
 runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
   input_types <- cmdInputs server entry
-  output_type <- fmap (outputType . head) <$> cmdOutputs server entry
+  output_type <- fmap outputType <$> cmdOutput server entry
   case (,) <$> input_types <*> output_type of
     Left (CmdFailure _ err) ->
       pure [Failure err]
@@ -363,7 +363,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
 
         valuesAsVars server (zip ins (map inputType input_types)) futhark dir input_spec
 
-        call_r <- liftIO $ cmdCall server entry [out] ins
+        call_r <- liftIO $ cmdCall server entry out ins
         liftCommand $ cmdFree server ins
 
         let res = case call_r of

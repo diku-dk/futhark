@@ -269,9 +269,9 @@ writeVar server v val =
 -- FutharkScript, but we sort of have closures.
 data ScriptValue v
   = SValue TypeName v
-  | -- | Ins, then outs.  Yes, this is the opposite of more or less
+  | -- | Ins, then out.  Yes, this is the opposite of more or less
     -- everywhere else.
-    SFun EntryName [TypeName] [TypeName] [ScriptValue v]
+    SFun EntryName [TypeName] TypeName [ScriptValue v]
   deriving (Show)
 
 instance Functor ScriptValue where
@@ -288,18 +288,14 @@ instance Traversable ScriptValue where
 -- | The type of a 'ScriptValue' - either a value type or a function type.
 data ScriptValueType
   = STValue TypeName
-  | -- | Ins, then outs.
-    STFun [TypeName] [TypeName]
+  | -- | Ins, then out.
+    STFun [TypeName] TypeName
   deriving (Eq, Show)
 
 instance Pretty ScriptValueType where
   pretty (STValue t) = pretty t
-  pretty (STFun ins outs) =
-    hsep $ intersperse "->" (map pretty ins ++ [outs'])
-    where
-      outs' = case outs of
-        [out] -> pretty out
-        _ -> parens $ commasep $ map pretty outs
+  pretty (STFun ins out) =
+    hsep $ intersperse "->" (map pretty ins ++ [pretty out])
 
 -- | A Haskell-level value or a variable on the server.
 data ValOrVar = VVal V.Value | VVar VarName
@@ -317,7 +313,7 @@ valToExpValue = fmap $ \v ->
 -- | The type of a 'ScriptValue'.
 scriptValueType :: ScriptValue v -> ScriptValueType
 scriptValueType (SValue t _) = STValue t
-scriptValueType (SFun _ ins outs _) = STFun ins outs
+scriptValueType (SFun _ ins out _) = STFun ins out
 
 -- | The set of server-side variables in the value.
 serverVarsInValue :: ExpValue -> S.Set VarName
@@ -692,7 +688,7 @@ evalExp builtin sserver top_level_e = do
             pure e
         | otherwise = do
             in_types <- fmap (map inputType) $ cmdEither $ cmdInputs server name
-            out_types <- fmap (map outputType) $ cmdEither $ cmdOutputs server name
+            out_type <- fmap outputType $ cmdEither $ cmdOutput server name
 
             es' <- mapM (evalExp' vtable) es
 
@@ -702,12 +698,11 @@ evalExp builtin sserver top_level_e = do
 
                   if length in_types == length arg_types
                     then do
-                      outs <- replicateM (length out_types) $ newVar' "out"
-                      void $ cmdEither $ cmdCall server name outs arg_types
-                      pure . V.mkCompound . map V.ValueAtom $
-                        zipWith SValue out_types (map VVar outs)
+                      out <- newVar' "out"
+                      void $ cmdEither $ cmdCall server name out arg_types
+                      pure . V.ValueAtom $ SValue out_type $ VVar out
                     else
-                      pure . V.ValueAtom . SFun name in_types out_types $
+                      pure . V.ValueAtom . SFun name in_types out_type $
                         zipWith SValue in_types (map VVar arg_types)
 
             -- Careful to not require saturated application, but do still
