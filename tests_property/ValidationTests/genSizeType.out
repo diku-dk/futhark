@@ -1,0 +1,1 @@
+Expected size and seed to be i64 and i32, got: size type=i32 and seed type=i32

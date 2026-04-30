@@ -13,6 +13,7 @@ module Futhark.Test.Spec
     TestAction (..),
     ExpectedError (..),
     InputOutputs (..),
+    PropertyCase (..),
     TestRun (..),
     ExpectedResult (..),
     Success (..),
@@ -26,6 +27,7 @@ import Control.Applicative
 import Control.Exception (catch)
 import Control.Monad
 import Data.Char
+import Data.Either (partitionEithers)
 import Data.Functor
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
@@ -62,7 +64,7 @@ data ProgramTest = ProgramTest
 -- | How to test a program.
 data TestAction
   = CompileTimeFailure ExpectedError
-  | RunCases [InputOutputs] [StructureTest] [WarningTest]
+  | RunCases [InputOutputs] [StructureTest] [WarningTest] [PropertyCase]
   deriving (Show)
 
 -- | Input and output pairs for some entry point(s).
@@ -70,6 +72,10 @@ data InputOutputs = InputOutputs
   { iosEntryPoint :: T.Text,
     iosTestRuns :: [TestRun]
   }
+  deriving (Show)
+
+data PropertyCase = PropertyCase
+  { propertyEntryPoint :: T.Text}
   deriving (Show)
 
 -- | The error expected for a negative test.
@@ -217,11 +223,35 @@ parseAction :: Parser () -> Parser TestAction
 parseAction sep =
   choice
     [ CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError sep),
+      try parseAsProperty, 
+      parseAsRunCase
+    ]
+  where
+    parseAsProperty = do
+      props <- parseProperty sep
+      pure $ RunCases [] [] [] props
+
+    parseAsRunCase = 
       RunCases
         <$> parseInputOutputs sep
         <*> many (parseExpectedStructure sep)
         <*> many (parseWarning sep)
-    ]
+        <*> pure []
+
+parseProperty :: Parser () -> Parser [PropertyCase]
+parseProperty sep = do
+  entrys <- parseEntryPointsProp sep
+  pure $
+    if null entrys
+      then []
+      else map PropertyCase entrys
+
+parseEntryPointsProp :: Parser () -> Parser [T.Text]
+parseEntryPointsProp sep =
+  lexeme' "property:" *> many entry <* sep
+  where
+    constituent c = not (isSpace c)
+    entry = lexeme' $ takeWhile1P Nothing constituent
 
 parseInputOutputs :: Parser () -> Parser [InputOutputs]
 parseInputOutputs sep = do
@@ -382,9 +412,17 @@ pProgramTest = do
     optional ("--" *> sep *> testSpec sep) <* pEndOfTestBlock <* many pNonTestLine
   case maybe_spec of
     Just spec
-      | RunCases old_cases structures warnings <- testAction spec -> do
-          cases <- many $ pInputOutputs <* many pNonTestLine
-          pure spec {testAction = RunCases (old_cases ++ concat cases) structures warnings}
+      | RunCases old_cases structures warnings old_properties <- testAction spec -> do
+          let pAnyBlock =  (Left <$> pInputOutputs) <|> (Right <$> pPropertyCases)
+          restBlocks <- many (pAnyBlock <* many pNonTestLine)
+          let (restCases, restProperties) = partitionEithers restBlocks
+          pure spec 
+            { testAction = RunCases 
+                (old_cases ++ concat restCases) 
+                structures 
+                warnings 
+                (old_properties ++ concat restProperties) 
+            }
       | otherwise ->
           many pNonTestLine
             *> notFollowedBy "-- =="
@@ -396,20 +434,22 @@ pProgramTest = do
     sep = void $ hspace *> optional (try $ eol *> "--" *> sep)
 
     noTest =
-      ProgramTest mempty mempty (RunCases mempty mempty mempty)
+      ProgramTest mempty mempty (RunCases mempty mempty mempty mempty)
 
     pEndOfTestBlock =
       (void eol <|> eof) *> notFollowedBy "--"
     pNonTestLine =
       void $ notFollowedBy "-- ==" *> restOfLine
-    pInputOutputs =
+    pInputOutputs = try $
       "--" *> sep *> parseDescription sep *> parseInputOutputs sep <* pEndOfTestBlock
+    pPropertyCases =
+      "--" *> sep *> parseDescription sep *> parseProperty sep <* pEndOfTestBlock
 
 validate :: FilePath -> ProgramTest -> Either String ProgramTest
 validate path pt = do
   case testAction pt of
     CompileTimeFailure {} -> pure pt
-    RunCases ios _ _ -> do
+    RunCases ios _ _ _ -> do
       mapM_ (noDups . map runDescription . iosTestRuns) ios
       Right pt
   where

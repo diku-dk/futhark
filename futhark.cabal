@@ -394,6 +394,7 @@ library
       Futhark.Profile.SourceRange
       Futhark.Script
       Futhark.Test
+      Futhark.Test.Property
       Futhark.Test.Spec
       Futhark.Test.Values
       Futhark.Tools

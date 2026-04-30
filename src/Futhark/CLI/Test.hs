@@ -14,8 +14,12 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as LBS
+import Data.Either (partitionEithers)
+import Data.IORef
+import Data.Int (Int32)
 import Data.List (delete, partition)
 import Data.Map.Strict qualified as M
+import Data.Maybe (mapMaybe)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
@@ -43,6 +47,41 @@ import Text.Regex.TDFA
 -- may have multiple entry points). This should really not be done at
 -- the monadic level - a test failing should be handled explicitly.
 type TestM = ExceptT [T.Text] IO
+
+extractPropSpecsFromServer :: Server -> IO [PropSpec]
+extractPropSpecsFromServer srv = do
+  epsE <- cmdEntryPoints srv
+  eps <- either (error . show) pure epsE
+  concat <$> mapM getOne eps
+  where
+    getOne entry = do
+      attrsE <- cmdAttributes srv entry
+      attrs <- either (fail . show) pure attrsE
+      atMostOnePropAttr entry attrs
+
+atMostOnePropAttr :: T.Text -> [T.Text] -> IO [PropSpec]
+atMostOnePropAttr entry attrs =
+  case mapMaybe (parsePropSpec entry) attrs of
+    [] -> pure []
+    [spec] -> pure [spec]
+    _ ->
+      fail $
+        "Entry point '"
+          <> T.unpack entry
+          <> "' has more than one #[prop(...)] attribute."
+
+parsePropSpec :: T.Text -> T.Text -> Maybe PropSpec
+parsePropSpec entry attr = do
+  argsText <- stripCall "prop" attr
+  let args = map T.strip $ T.splitOn "," argsText
+  pure
+    PropSpec
+      { psProp = entry,
+        psGen = lookupArgText "gen" args,
+        psShrink = lookupArgText "shrink" args,
+        psSize = fmap fromInteger $ lookupArgRead "size" args,
+        psPPrint = lookupArgText "pprint" args
+      }
 
 -- Taken from transformers-0.5.5.0.
 eitherToErrors :: Either e a -> Errors e a
@@ -92,8 +131,8 @@ pureTestResults m = do
 timeout :: Int
 timeout = 5 * 60 * 1000000
 
-withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO [TestResult]) -> TestM ()
-withProgramServer program runner extra_options f = do
+withProgramServer :: FilePath -> FilePath -> [String] -> IORef PBTPhase -> (Server -> IO [TestResult]) -> TestM ()
+withProgramServer program runner extra_options phaseRef f = do
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no path component.
@@ -112,7 +151,23 @@ withProgramServer program runner extra_options f = do
       race (threadDelay timeout) (f server) >>= \case
         Left _ -> do
           abortServer server
-          fail $ "test timeout after " <> show timeout <> " microseconds"
+          st <- readIORef phaseRef
+          fail $ "test timeout after " <> show timeout <> " microseconds" <> case activeTest st of
+            Nothing -> mempty
+            Just activeTestName -> do
+              -- use annotate to make the phase name stand out in the error message, since it is the most likely place to find out what went wrong
+              let phaseInfo = maybe mempty (\phaseName -> " during phase " <> phaseName) (phase st)
+                  shrinkInfo = maybe mempty (\shrinkPhase -> " while shrinking with " <> shrinkPhase) (shrinkWith st)
+                  sizeInfo = maybe mempty (\size -> " at size " <> showText size) (phaseSize st)
+                  seedInfo = maybe mempty (\seed -> " with seed " <> showText seed) (phaseSeed st)
+                  tacticInfo = maybe mempty (\tactic -> " with tactic " <> showText tactic) (phaseTactic st)
+              ". Was evaluating property:\n"
+                <> T.unpack activeTestName
+                <> T.unpack phaseInfo
+                <> T.unpack shrinkInfo
+                <> T.unpack sizeInfo
+                <> T.unpack seedInfo
+                <> T.unpack tacticInfo
         Right r -> pure r
 
 data TestMode
@@ -134,7 +189,8 @@ data TestCase = TestCase
   { _testCaseMode :: TestMode,
     testCaseProgram :: FilePath,
     testCaseTest :: ProgramTest,
-    _testCasePrograms :: ProgConfig
+    _testCasePrograms :: ProgConfig,
+    pbtConfig :: PBTConfig
   }
   deriving (Show)
 
@@ -252,7 +308,7 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
    in accErrors_ $ map runInterpretedCase run_cases
 
 runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase mode program testcase progs) = do
+runTestCase (TestCase mode program testcase progs pbtConfig) = do
   futhark <- liftIO $ maybe getExecutablePath pure $ configFuthark progs
   let checkctx =
         mconcat
@@ -289,10 +345,19 @@ runTestCase (TestCase mode program testcase progs) = do
               ExitSuccess -> pure ()
               ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
               ExitFailure _ -> throwError $ T.decodeUtf8 err
-    RunCases ios structures warnings -> do
+    RunCases ios structures warnings properties -> do
       -- Compile up-front and reuse same executable for several entry points.
       let backend = configBackend progs
           extra_compiler_options = configExtraCompilerOptions progs
+
+      phaseRef <- liftIO $ newIORef $ PBTPhase 
+        { activeTest = Nothing
+        , phase = Nothing
+        , shrinkWith = Nothing
+        , phaseSize = Nothing
+        , phaseSeed = Nothing
+        , phaseTactic = Nothing
+        }
 
       when (mode `elem` [Compiled, Interpreted]) $
         context "Generating reference outputs" $
@@ -316,9 +381,31 @@ runTestCase (TestCase mode program testcase progs) = do
                     ++ configExtraOptions progs
                 runner = configRunner progs
             context "Running compiled program" $
-              withProgramServer program runner extra_options $ \server -> do
+              withProgramServer program runner extra_options phaseRef $ \server -> do
                 let run = runCompiledEntry (FutharkExe futhark) server program
-                concat <$> mapM run ios
+                propSpecs <- extractPropSpecsFromServer server
+
+                normal_test_result <- concat <$> mapM run ios
+
+                let requestedNames = [propName | PropertyCase propName <- properties]
+                let diagnostics = propertyDiagnostics requestedNames propSpecs
+
+                if null diagnostics
+                  then do
+                    let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
+                    propResultsM <- runPBT pbtConfig server verifiedProps phaseRef
+                    let (failures, outputs) = partitionEithers propResultsM
+                    let propResults = map (\case
+                                            Just err -> Failure [err]
+                                            Nothing  -> Success) outputs
+                    -- if any properties failed, write them to a file for later inspection
+                    when (any (\r -> case r of
+                                      Failure _ -> True
+                                      Success   -> False) propResults) $
+                        liftIO $ propToFile program propResults
+                    pure $ normal_test_result ++ propResults ++ diagnostics ++ [Failure failures]
+                  else
+                    pure $ normal_test_result ++ diagnostics
 
       when (mode == Interpreted) $
         context "Interpreting" $
@@ -464,7 +551,15 @@ doTest = catching . runTestM . runTestCase
 
 makeTestCase :: TestConfig -> TestMode -> (FilePath, ProgramTest) -> TestCase
 makeTestCase config mode (file, spec) =
-  excludeCases config $ TestCase mode file spec $ configPrograms config
+  excludeCases config $ TestCase mode file spec (configPrograms config) pbtcfg
+  where
+    pbtcfg =
+      PBTConfig
+        { configNumTests = configNumTests $ configPBTConfig config,
+          configMaxSize = configMaxSize $ configPBTConfig config,
+          configSeed = configSeed $ configPBTConfig config,
+          configShrinkTries = configShrinkTries $ configPBTConfig config
+        }
 
 data ReportMsg
   = TestStarted TestCase
@@ -489,8 +584,8 @@ excludeCases config tcase =
   where
     onTest (ProgramTest desc tags action) =
       ProgramTest desc tags $ onAction action
-    onAction (RunCases ios stest wtest) =
-      RunCases (map onIOs $ filter relevantEntry ios) stest wtest
+    onAction (RunCases ios stest wtest properties) =
+      RunCases (map onIOs $ filter relevantEntry ios) stest wtest properties
     onAction action = action
     onIOs (InputOutputs entry runs) =
       InputOutputs entry $ filter (not . any excluded . runTags) runs
@@ -569,6 +664,7 @@ runTests config paths = do
   all_tests <-
     map (makeTestCase config mode)
       <$> testSpecsFromPathsOrDie paths
+  -- putStrLn $ "Test cases are: " ++ show (map testCaseProgram all_tests)
   testmvar <- newEmptyMVar
   reportmvar <- newEmptyMVar
   concurrency <- maybe getNumCapabilities pure $ configConcurrency config
@@ -591,11 +687,11 @@ runTests config paths = do
       numTestCases tc =
         case testAction $ testCaseTest tc of
           CompileTimeFailure _ -> 1
-          RunCases ios sts wts ->
+          RunCases ios sts wts pbts ->
             length (concatMap iosTestRuns ios)
               + length sts
               + length wts
-
+              + length pbts
       getResults ts
         | null (testStatusRemain ts) = report ts >> pure ts
         | otherwise = do
@@ -639,7 +735,6 @@ runTests config paths = do
                             testStatusRunFail ts'
                               + min (numTestCases test) (length s)
                         }
-
   when fancy spaceTable
 
   ts <-
@@ -659,7 +754,12 @@ runTests config paths = do
   -- Removes "Now testing" output.
   if fancy
     then cursorUpLine 1 >> clearLine
-    else putStrLn $ show (testStatusPass ts) <> "/" <> show (testStatusTotal ts) <> " passed."
+    else
+      putStrLn $
+        show (testStatusPass ts)
+          <> "/"
+          <> show (testStatusTotal ts)
+          <> " passed."
 
   unless (null excluded) . putStrLn $
     show (length excluded) ++ " program(s) excluded."
@@ -678,7 +778,8 @@ data TestConfig = TestConfig
     configExclude :: [T.Text],
     configLineOutput :: Bool,
     configConcurrency :: Maybe Int,
-    configEntryPoint :: Maybe String
+    configEntryPoint :: Maybe String,
+    configPBTConfig :: PBTConfig
   }
 
 defaultConfig :: TestConfig
@@ -698,7 +799,14 @@ defaultConfig =
           },
       configLineOutput = False,
       configConcurrency = Nothing,
-      configEntryPoint = Nothing
+      configEntryPoint = Nothing,
+      configPBTConfig =
+        PBTConfig
+          { configNumTests = 100,
+            configMaxSize = 50,
+            configSeed = Nothing,
+            configShrinkTries = 5
+          }
     }
 
 data ProgConfig = ProgConfig
@@ -715,6 +823,9 @@ data ProgConfig = ProgConfig
 
 changeProgConfig :: (ProgConfig -> ProgConfig) -> TestConfig -> TestConfig
 changeProgConfig f config = config {configPrograms = f $ configPrograms config}
+
+changePBTConfig :: (PBTConfig -> PBTConfig) -> TestConfig -> TestConfig
+changePBTConfig f config = config {configPBTConfig = f $ configPBTConfig config}
 
 setBackend :: FilePath -> ProgConfig -> ProgConfig
 setBackend backend config =
@@ -854,7 +965,66 @@ commandLineOptions =
           )
           "NAME"
       )
-      "Only run entry points with this name."
+      "Only run entry points with this name.",
+    Option
+      "n"
+      ["num-tests"]
+      ( ReqArg
+          ( \n ->
+              case reads n of
+                [(n', "")]
+                  | n' >= 0 ->
+                      Right $ changePBTConfig $ \pbt -> pbt {configNumTests = n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
+          )
+          "NUM"
+      ) $
+      "Number of tests to run per property (default: " <> show (configNumTests . configPBTConfig $ defaultConfig) <> ").",
+    Option
+      "m"
+      ["max-size"]
+      ( ReqArg
+          ( \n ->
+              case reads n of
+                [(n', "")]
+                  | n' >= 0 ->
+                      Right $ changePBTConfig $ \pbt -> pbt {configMaxSize = n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
+          )
+          "NUM"
+      ) $
+      "Maximum size parameter to use for generators (default: " <> show (configMaxSize . configPBTConfig $ defaultConfig) <> ").",
+    Option
+      []
+      ["seed"]
+      ( ReqArg
+          ( \n ->
+              case (reads n :: [(Int32, String)]) of
+                [(n', "")] ->
+                      Right $ changePBTConfig $ \pbt -> pbt {configSeed = Just n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a valid integer."
+          )
+          "NUM"
+      )
+      "Set seed for all tests to use for generators.",
+    Option
+      []
+      ["num-tries"]
+      ( ReqArg
+          ( \n ->
+              case reads n of
+                [(n', "")]
+                  | n' >= 0 ->
+                      Right $ changePBTConfig $ \pbt -> pbt {configShrinkTries = n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
+          )
+          "NUM"
+      ) $
+      "The number of tries the shrinker will perform before giving up (default: " <> show (configShrinkTries . configPBTConfig $ defaultConfig) <> ")."
   ]
 
 excludeBackend :: TestConfig -> TestConfig
@@ -871,3 +1041,55 @@ main = mainWithOptions defaultConfig commandLineOptions "options... programs..."
   case progs of
     [] -> Nothing
     _ -> Just $ runTests (excludeBackend config) progs
+
+declaredPropertyNames :: [PropSpec] -> [T.Text]
+declaredPropertyNames specs =
+  map psProp specs
+
+propertyDiagnostics :: [T.Text] -> [PropSpec] -> [TestResult]
+propertyDiagnostics requested specs =
+  missingRequested ++ missingDeclarations
+  where
+    declared = declaredPropertyNames specs
+
+    requestedWithoutAttr =
+      [ name | name <- requested, name `notElem` declared ]
+
+    declaredWithoutRequest =
+      [ name | name <- declared, name `notElem` requested ]
+
+    missingRequested =
+      [ Failure
+          [ "Unknown property in test specification: "
+              <> name
+              <> "\nThere is a '-- property: "
+              <> name
+              <> "' block, but no matching #[prop(...)] attribute on that entry point."
+          ]
+      | name <- requestedWithoutAttr
+      ]
+
+    missingDeclarations =
+      [ Failure
+          [ "Undeclared property test block for attribute-backed property: "
+              <> name
+              <> "\nThere is a #[prop(...)] attribute on entry point '"
+              <> name
+              <> "', but no matching '-- property: "
+              <> name
+              <> "' block in the test specification."
+          ]
+      | name <- declaredWithoutRequest
+      ]
+
+-- Save to file helper functions
+propToFile :: FilePath -> [TestResult] -> IO ()
+propToFile testFile results = do
+  let fileName = testFile <> ".propResult"
+      textResults = T.unlines $ concatMap resultLines results
+  withFile fileName WriteMode $ \h ->
+    T.hPutStr h textResults
+  where
+    resultLines :: TestResult -> [T.Text]
+    resultLines Success = []
+    resultLines (Failure msgs) = msgs

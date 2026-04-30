@@ -1,0 +1,2 @@
+PBT FAIL: prop_record_sums_fail size=50 seed=REDACTED after N tests
+Minimal counterexample: [{s: 1, a: 0}]
