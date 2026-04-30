@@ -1,5 +1,7 @@
-with import <nixpkgs> {};
-stdenv.mkDerivation {
-    name = "futhark-docs";
-    buildInputs = [ python37Packages.sphinx ];
+{
+  pkgs ? import (import ../nix/sources.nix).nixpkgs { },
+}:
+pkgs.stdenv.mkDerivation {
+  name = "futhark-docs";
+  buildInputs = [ pkgs.python37Packages.sphinx ];
 }
