@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Compiler crash when inserting memory information. (#2432)
 
+* Out-of-bounds indexing in generated code for reverse-mode AD of `scatter`.
+
 ## [0.25.37]
 
 ### Added
