@@ -9,7 +9,7 @@ Style
 ```bash
 ./style-check.sh src/futhark.hs
 ```
-Similarly  `run-formatter.sh` is a convienent tool for automatic code formatting. Useful for catching some obvious issues that trigger the style checker. It requires [ormolu](https://github.com/tweag/ormolu) to be installed. It can be run on files or whole directories.
+Similarly  `run-formatter.sh` is a convenient tool for automatic code formatting. Useful for catching some obvious issues that trigger the style checker. It requires [ormolu](https://github.com/tweag/ormolu) to be installed. It can be run on files or whole directories.
 ```bash
 ./run-formatter.sh src src-testing
 ```
