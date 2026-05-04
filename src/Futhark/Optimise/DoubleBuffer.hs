@@ -104,7 +104,8 @@ type OptimiseOp rep =
 data Env rep = Env
   { envScope :: Scope rep,
     envOptimiseLoop :: OptimiseLoop rep,
-    envOptimiseOp :: OptimiseOp rep
+    envOptimiseOp :: OptimiseOp rep,
+    envBlockSpace :: Maybe Space
   }
 
 newtype DoubleBufferM rep a = DoubleBufferM
@@ -159,7 +160,13 @@ optimiseGPUOp (Inner (SegOp op)) =
           mapOnSegPostOpLambda = optimiseLambda,
           mapOnSegOpBody = optimiseKernelBody
         }
-    inSegOp env = env {envOptimiseLoop = optimiseLoop}
+    inSegOp env =
+      env
+        { envOptimiseLoop = optimiseLoop,
+          envBlockSpace = case segLevel op of
+            SegBlock {} -> Just $ Space "shared"
+            _ -> envBlockSpace env
+        }
 optimiseGPUOp op = pure op
 
 optimiseMCOp :: OptimiseOp MCMem
@@ -226,9 +233,10 @@ doubleBufferSpace _ = True
 
 optimiseLoop :: (Constraints rep inner) => OptimiseLoop rep
 optimiseLoop (Pat pes) merge body@(Body _ body_stms body_res) = do
+  blockSpace <- asks envBlockSpace
   ((pat', merge', body'), outer_stms) <- runBuilder $ do
     ((param_changes, body_stms'), (pes', merge', body_res')) <-
-      second unzip3 <$> mapAccumLM check (id, body_stms) (zip3 pes merge body_res)
+      second unzip3 <$> mapAccumLM (check blockSpace) (id, body_stms) (zip3 pes merge body_res)
     pure
       ( Pat $ mconcat pes',
         map param_changes $ mconcat merge',
@@ -251,7 +259,7 @@ optimiseLoop (Pat pes) merge body@(Body _ body_stms body_res) = do
     changeParam p_needle new (p, p_initial) =
       if p == p_needle then new else (p, p_initial)
 
-    check (param_changes, body_stms') (pe, (param, arg), res)
+    check blockSpace (param_changes, body_stms') (pe, (param, arg), res)
       | Mem space <- paramType param,
         doubleBufferSpace space,
         Var arg_v <- arg,
@@ -266,21 +274,34 @@ optimiseLoop (Pat pes) merge body@(Body _ body_stms body_res) = do
         Just arr_lmad <- findLmadOfArray arr_v,
         Just (arr_mem_out_alloc, body_stms'') <-
           extractAllocOf bound_in_loop arr_mem_out body_stms' = do
-          -- Put the allocations outside the loop.
+          -- Use the space from the body alloc rather than the loop parameter,
+          -- since ExplicitAllocations may have given the parameter a strided
+          -- device layout (e.g. when fed from exscan_last), even though the
+          -- actual array only lives within the thread block.
+          let (alloc_space, arr_mem_out_alloc') =
+                case (blockSpace, arr_mem_out_alloc) of
+                  (Just bs, Let (Pat [pe']) a (Op (Alloc sz@(Constant _) _))) ->
+                    ( bs,
+                      Let (Pat [pe' {patElemDec = MemMem bs}]) a (Op (Alloc sz bs))
+                    )
+                  _any ->
+                    (space, arr_mem_out_alloc)
           num_bytes <-
             letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + LMAD.range arr_lmad))
           arr_mem_in <-
-            letExp (baseName arg_v <> "_in") $ Op $ Alloc num_bytes space
-          addStm arr_mem_out_alloc
+            letExp (baseName arg_v <> "_in") $ Op $ Alloc num_bytes alloc_space
+          addStm arr_mem_out_alloc'
 
           -- Construct additional pattern element and parameter for
           -- the memory block that is not used afterwards.
           pe_unused <-
             PatElem
               <$> newVName (baseName (patElemName pe) <> "_unused")
-              <*> pure (MemMem space)
+              <*> pure (MemMem alloc_space)
           param_out <-
-            newParam (baseName (paramName param) <> "_out") (MemMem space)
+            newParam (baseName (paramName param) <> "_out") (MemMem alloc_space)
+
+          let param_in = param {paramDec = MemMem alloc_space}
 
           -- Copy the initial array value to the input memory, with
           -- the same index function as the result.
@@ -309,14 +330,16 @@ optimiseLoop (Pat pes) merge body@(Body _ body_stms body_res) = do
               updateLmadParam =
                 foldl (.) id $ map mkUpdate $ namesToList $ freeIn param_lmad
 
+          let pe' = pe {patElemDec = MemMem alloc_space}
+
           pure
             ( ( updateLmadParam
                   . changeParam arr_param (arr_param', Var arr_v_copy)
                   . param_changes,
                 substituteNames (M.singleton arr_mem_out (paramName param_out)) body_stms''
               ),
-              ( [pe, pe_unused],
-                [(param, Var arr_mem_in), (param_out, Var arr_mem_out)],
+              ( [pe', pe_unused],
+                [(param_in, Var arr_mem_in), (param_out, Var arr_mem_out)],
                 [ res {resSubExp = Var $ paramName param_out},
                   subExpRes $ Var $ paramName param
                 ]
@@ -342,7 +365,7 @@ doubleBuffer name desc onOp =
             runDoubleBufferM $ localScope scope $ optimiseStms $ stmsToList stms
        in runState (runReaderT m env) src
 
-    env = Env mempty doNotTouchLoop onOp
+    env = Env mempty doNotTouchLoop onOp Nothing
     doNotTouchLoop pat merge body = pure (mempty, pat, merge, body)
 
 -- | The pass for GPU kernels.
