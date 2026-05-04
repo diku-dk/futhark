@@ -190,15 +190,15 @@ struct variable {
   struct value value;
 };
 
-typedef int (*entry_point_fn)(struct futhark_context*, void**, void**);
+typedef int (*entry_point_fn)(struct futhark_context*, void*, void**);
 
 struct entry_point {
   const char *name;
   entry_point_fn f;
   const char** tuning_params;
   const char** attrs;
-  const struct type **out_types;
-  bool *out_unique;
+  const struct type *out_type;
+  bool out_unique;
   const struct type **in_types;
   bool *in_unique;
 };
@@ -206,14 +206,6 @@ struct entry_point {
 int entry_num_ins(struct entry_point *e) {
   int count = 0;
   while (e->in_types[count]) {
-    count++;
-  }
-  return count;
-}
-
-int entry_num_outs(struct entry_point *e) {
-  int count = 0;
-  while (e->out_types[count]) {
     count++;
   }
   return count;
@@ -354,14 +346,13 @@ void cmd_call(struct server_state *s, const char *args[]) {
     return;
   }
 
-  int num_outs = entry_num_outs(e);
   int num_ins = entry_num_ins(e);
   // +1 to avoid zero-size arrays, which is UB.
-  void* outs[num_outs+1];
+  void* out;
   void* ins[num_ins+1];
 
   for (int i = 0; i < num_ins; i++) {
-    const char *in_name = get_arg(args, 1+num_outs+i);
+    const char *in_name = get_arg(args, 2+i);
     struct variable *v = get_variable(s, in_name);
     if (v == NULL) {
       failure();
@@ -377,19 +368,17 @@ void cmd_call(struct server_state *s, const char *args[]) {
     ins[i] = value_ptr(&v->value);
   }
 
-  for (int i = 0; i < num_outs; i++) {
-    const char *out_name = get_arg(args, 1+i);
-    struct variable *v = create_variable(s, out_name, e->out_types[i]);
-    if (v == NULL) {
-      failure();
-      printf("Variable already exists: %s\n", out_name);
-      return;
-    }
-    outs[i] = value_ptr(&v->value);
+  const char *out_name = get_arg(args, 1);
+  struct variable *v = create_variable(s, out_name, e->out_type);
+  if (v == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", out_name);
+    return;
   }
+  out = value_ptr(&v->value);
 
   int64_t t_start = get_wall_time();
-  int err = e->f(s->ctx, outs, ins);
+  int err = e->f(s->ctx, out, ins);
   err |= futhark_context_sync(s->ctx);
   int64_t t_end = get_wall_time();
   long long int elapsed_usec = t_end - t_start;
@@ -397,14 +386,12 @@ void cmd_call(struct server_state *s, const char *args[]) {
 
   error_check(s, err);
   if (err != 0) {
-    // Need to uncreate the output variables, which would otherwise be left
+    // Need to uncreate the output variable, which would otherwise be left
     // in an uninitialised state.
-    for (int i = 0; i < num_outs; i++) {
-      const char *out_name = get_arg(args, 1+i);
-      struct variable *v = get_variable(s, out_name);
-      if (v) {
-        drop_variable(v);
-      }
+    const char *out_name = get_arg(args, 1);
+    struct variable *v = get_variable(s, out_name);
+    if (v) {
+      drop_variable(v);
     }
   }
 }
@@ -546,7 +533,7 @@ void cmd_inputs(struct server_state *s, const char *args[]) {
   }
 }
 
-void cmd_outputs(struct server_state *s, const char *args[]) {
+void cmd_output(struct server_state *s, const char *args[]) {
   const char *name = get_arg(args, 0);
   struct entry_point *e = get_entry_point(s, name);
 
@@ -556,13 +543,10 @@ void cmd_outputs(struct server_state *s, const char *args[]) {
     return;
   }
 
-  int num_outs = entry_num_outs(e);
-  for (int i = 0; i < num_outs; i++) {
-    if (e->out_unique[i]) {
-      putchar('*');
-    }
-    puts(e->out_types[i]->name);
+  if (e->out_unique) {
+    putchar('*');
   }
+  puts(e->out_type->name);
 }
 
 void cmd_clear(struct server_state *s, const char *args[]) {
@@ -1319,8 +1303,8 @@ void process_line(struct server_state *s, char *line) {
     cmd_rename(s, tokens+1);
   } else if (strcmp(command, "inputs") == 0) {
     cmd_inputs(s, tokens+1);
-  } else if (strcmp(command, "outputs") == 0) {
-    cmd_outputs(s, tokens+1);
+  } else if (strcmp(command, "output") == 0) {
+    cmd_output(s, tokens+1);
   } else if (strcmp(command, "clear") == 0) {
     cmd_clear(s, tokens+1);
   } else if (strcmp(command, "pause_profiling") == 0) {

@@ -271,22 +271,8 @@ entryPoint types name params (eret, crets) =
   runGenOpaque $
     (name,,)
       <$> mapM onParam params
-      <*> ( map (uncurry I.EntryResult)
-              <$> case ( E.isTupleRecord $ E.entryType eret,
-                         E.entryAscribed eret
-                       ) of
-                (Just ts, Just (E.TETuple e_ts _)) ->
-                  zipWithM
-                    (entryPointType types)
-                    (zipWith E.EntryType ts (map Just e_ts))
-                    crets
-                (Just ts, Nothing) ->
-                  zipWithM
-                    (entryPointType types)
-                    (map (`E.EntryType` Nothing) ts)
-                    crets
-                _ ->
-                  pure <$> entryPointType types eret (concat crets)
+      <*> ( uncurry I.EntryResult
+              <$> entryPointType types eret (concat crets)
           )
   where
     onParam (E.EntryParam e_p e_t, ps) =

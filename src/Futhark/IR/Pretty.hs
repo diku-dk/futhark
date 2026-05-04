@@ -422,7 +422,7 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
                   <> comma
                     </> ppTupleLines' (map pretty p_entry)
                   <> comma
-                    </> ppTupleLines' (map pretty ret_entry)
+                    </> pretty ret_entry
               )
 
 instance Pretty OpaqueType where

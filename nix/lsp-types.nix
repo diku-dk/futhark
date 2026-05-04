@@ -1,10 +1,39 @@
-{ mkDerivation, aeson, base, binary, containers, data-default
-, deepseq, Diff, directory, dlist, exceptions, file-embed, filepath
-, generic-arbitrary, hashable, hspec, hspec-discover, hspec-golden
-, indexed-traversable, indexed-traversable-instances, lens, lib
-, mod, mtl, network-uri, prettyprinter, QuickCheck
-, quickcheck-instances, regex, row-types, safe, some
-, template-haskell, text, witherable
+{
+  mkDerivation,
+  aeson,
+  base,
+  binary,
+  containers,
+  data-default,
+  deepseq,
+  Diff,
+  directory,
+  dlist,
+  exceptions,
+  file-embed,
+  filepath,
+  generic-arbitrary,
+  hashable,
+  hspec,
+  hspec-discover,
+  hspec-golden,
+  indexed-traversable,
+  indexed-traversable-instances,
+  lens,
+  lib,
+  mod,
+  mtl,
+  network-uri,
+  prettyprinter,
+  QuickCheck,
+  quickcheck-instances,
+  regex,
+  row-types,
+  safe,
+  some,
+  template-haskell,
+  text,
+  witherable,
 }:
 mkDerivation {
   pname = "lsp-types";
@@ -13,19 +42,57 @@ mkDerivation {
   isLibrary = true;
   isExecutable = true;
   libraryHaskellDepends = [
-    aeson base binary containers data-default deepseq Diff dlist
-    exceptions file-embed filepath generic-arbitrary hashable
-    indexed-traversable indexed-traversable-instances lens mod mtl
-    network-uri prettyprinter QuickCheck quickcheck-instances row-types
-    safe some template-haskell text
+    aeson
+    base
+    binary
+    containers
+    data-default
+    deepseq
+    Diff
+    dlist
+    exceptions
+    file-embed
+    filepath
+    generic-arbitrary
+    hashable
+    indexed-traversable
+    indexed-traversable-instances
+    lens
+    mod
+    mtl
+    network-uri
+    prettyprinter
+    QuickCheck
+    quickcheck-instances
+    row-types
+    safe
+    some
+    template-haskell
+    text
   ];
   executableHaskellDepends = [
-    base containers directory filepath mtl prettyprinter regex text
+    base
+    containers
+    directory
+    filepath
+    mtl
+    prettyprinter
+    regex
+    text
     witherable
   ];
   testHaskellDepends = [
-    aeson base filepath hspec hspec-golden lens network-uri
-    prettyprinter QuickCheck quickcheck-instances text
+    aeson
+    base
+    filepath
+    hspec
+    hspec-golden
+    lens
+    network-uri
+    prettyprinter
+    QuickCheck
+    quickcheck-instances
+    text
   ];
   testToolDepends = [ hspec-discover ];
   doHaddock = false;
