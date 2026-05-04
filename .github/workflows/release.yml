@@ -27,7 +27,7 @@ jobs:
     - name: Build tarball
       env:
         VERSION: ${{ steps.metadata.outputs.VERSION }}
-      run: nix build .#tarball --impure
+      run: nix build .#tarball
 
     - name: Extract release changes
       env:

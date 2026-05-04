@@ -76,7 +76,19 @@
           # The Nix 'system' convention is unfortunately the opposite of what we use
           # in our tarballs, so flip them around here.
           platform =
-            lib.replaceStrings [ "x86_64-linux" "aarch64-linux" ] [ "linux-x86_64" "linux-aarch64" ]
+            lib.replaceStrings
+              [
+                "x86_64-linux"
+                "aarch64-linux"
+                "x86_64-darwin"
+                "aarch64-darwin"
+              ]
+              [
+                "linux-x86_64"
+                "linux-aarch64"
+                "x86_darwin-64"
+                "darwin-aarch64"
+              ]
               system;
 
           pkgs' = import pkgs.path {
@@ -108,34 +120,33 @@
                       enableSharedExecutables = !pkgs.stdenv.isLinux;
                       enableSharedLibraries = !pkgs.stdenv.isLinux;
 
-                      configureFlags =
+                      configureFlags = [
+                        "--ghc-option=-Werror"
+                        "--ghc-option=-split-sections"
+                      ]
+                      ++ lib.optionals pkgs.stdenv.isLinux (
                         [
-                          "--ghc-option=-Werror"
-                          "--ghc-option=-split-sections"
+                          # static linking
+                          "--ghc-option=-optl=-static"
+                          "--ghc-option=-optl=-lbz2"
+                          "--ghc-option=-optl=-lz"
+                          "--ghc-option=-optl=-lelf"
+                          "--ghc-option=-optl=-llzma"
+                          "--ghc-option=-optl=-lzstd"
                         ]
-                        ++ lib.optionals pkgs.stdenv.isLinux (
-                          [
-                            # static linking
-                            "--ghc-option=-optl=-static"
-                            "--ghc-option=-optl=-lbz2"
-                            "--ghc-option=-optl=-lz"
-                            "--ghc-option=-optl=-lelf"
-                            "--ghc-option=-optl=-llzma"
-                            "--ghc-option=-optl=-lzstd"
-                          ]
-                          ++ map (p: "--extra-lib-dirs=${p}/lib") [
-                            pkgs.glibc.static
-                            (pkgs.ncurses.override { enableStatic = true; })
-                            (pkgs.gmp6.override { withStatic = true; })
-                            (pkgs.libffi.overrideAttrs { dontDisableStatic = true; })
-                            (pkgs.numactl.overrideAttrs { dontDisableStatic = true; })
-                            pkgs.zlib.static
-                            (pkgs.xz.override { enableStatic = true; }).out
-                            (pkgs.zstd.override { enableStatic = true; }).out
-                            (pkgs.bzip2.override { enableStatic = true; }).out
-                            (pkgs.elfutils.overrideAttrs { dontDisableStatic = true; }).out
-                          ]
-                        );
+                        ++ map (p: "--extra-lib-dirs=${p}/lib") [
+                          pkgs.glibc.static
+                          (pkgs.ncurses.override { enableStatic = true; })
+                          (pkgs.gmp6.override { withStatic = true; })
+                          (pkgs.libffi.overrideAttrs { dontDisableStatic = true; })
+                          (pkgs.numactl.overrideAttrs { dontDisableStatic = true; })
+                          pkgs.zlib.static
+                          (pkgs.xz.override { enableStatic = true; }).out
+                          (pkgs.zstd.override { enableStatic = true; }).out
+                          (pkgs.bzip2.override { enableStatic = true; }).out
+                          (pkgs.elfutils.overrideAttrs { dontDisableStatic = true; }).out
+                        ]
+                      );
 
                       preBuild = "echo ${commit} > commit-id";
                     });
@@ -143,9 +154,6 @@
               };
             };
           };
-
-          # Extract version number from Futhark derivation.
-          versionFromCabal = pkgs'.haskellPackages.futhark.version;
 
           # Compiled Futhark binary with documentation, parameterised over the
           # version number in the file names.
@@ -201,6 +209,9 @@
                 cp futhark-${futhark.version}-${platform}.tar.xz $out/
               '';
             };
+
+          # Extract version number from Futhark derivation.
+          versionFromCabal = pkgs'.haskellPackages.futhark.version;
         in
         {
           futhark = futhark versionFromCabal;
