@@ -90,6 +90,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 #include <signal.h>
 
 #if defined(_WIN32)
+#define NOGDI
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <sys/sysctl.h>

@@ -16,5 +16,5 @@ with pkgs;
 
   opencl-headers
   ocl-icd
-  (pkgs.callPackage ./oclgrind.nix {})
+  (pkgs.callPackage ./oclgrind.nix { })
 ]
