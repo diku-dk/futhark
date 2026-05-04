@@ -8,7 +8,7 @@
   python3,
 }:
 
-stdenv.mkDerivation rec {
+stdenv.mkDerivation {
   pname = "oclgrind";
   version = "dev";
 
