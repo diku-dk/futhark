@@ -201,7 +201,7 @@
               buildPhase = ''
                 mkdir -p futhark-${futhark.version}-${platform}
                 cp -r ${futhark}/* futhark-${futhark.version}-${platform}/
-                tar -cJf futhark-${futhark.version}-${platform}.tar.xz futhark-${futhark.version}-${platform}
+                tar -c -f futhark-${futhark.version}-${platform}.tar.xz -J --mode 'u+w' futhark-${futhark.version}-${platform}
               '';
 
               installPhase = ''
