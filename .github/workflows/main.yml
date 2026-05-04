@@ -414,10 +414,6 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        set -e
-        python -m venv virtualenv
-        source virtualenv/bin/activate
-        pip install 'numpy<2.0.0' pyopencl jsonschema
         futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh --tuning=tuning_gpu
 
   test-opencl:
