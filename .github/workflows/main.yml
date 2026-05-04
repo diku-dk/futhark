@@ -5,7 +5,6 @@ on:
 
   push:
     branches: [ master ]
-
 jobs:
   build-linux-nix:
     runs-on: ubuntu-24.04
@@ -22,7 +21,7 @@ jobs:
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
     - name: Build Futhark
-      run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
+      run: nix build .#tarball-nightly
 
     - uses: actions/upload-artifact@v4
       with:
@@ -162,7 +161,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-style.nix
+        devShell: .#style
 
     - name: Style check
       run: make check
@@ -179,7 +178,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-style.nix
+        devShell: .#style
 
     - name: Style check
       run: black --check rts docs
@@ -207,7 +206,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        devShell: .#default
 
     - name: Run haddock
       run: |
@@ -264,7 +263,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -292,7 +291,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -320,7 +319,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -349,7 +348,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -376,7 +375,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -402,7 +401,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -670,7 +669,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
