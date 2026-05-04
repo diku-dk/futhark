@@ -15,9 +15,10 @@ jobs:
     - name: Install Nix
       uses: cachix/install-nix-action@v27
 
-    - uses: cachix/cachix-action@v15
+    - uses: cachix/cachix-action@v17
       with:
         name: futhark
+        authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
     - name: Build Futhark
