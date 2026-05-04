@@ -274,10 +274,10 @@ optimiseLoop (Pat pes) merge body@(Body _ body_stms body_res) = do
         Just arr_lmad <- findLmadOfArray arr_v,
         Just (arr_mem_out_alloc, body_stms'') <-
           extractAllocOf bound_in_loop arr_mem_out body_stms' = do
-          -- Use the space from the body alloc rather than the loop parameter,
-          -- since ExplicitAllocations may have given the parameter a strided
-          -- device layout (e.g. when fed from exscan_last), even though the
-          -- actual array only lives within the thread block.
+          -- Use the space from the body alloc rather than the loop
+          -- parameter, since ExplicitAllocations may have given the
+          -- parameter a strided device layout, even though the actual
+          -- array only lives within the thread block.
           let (alloc_space, arr_mem_out_alloc') =
                 case (blockSpace, arr_mem_out_alloc) of
                   (Just bs, Let (Pat [pe']) a (Op (Alloc sz@(Constant _) _))) ->
