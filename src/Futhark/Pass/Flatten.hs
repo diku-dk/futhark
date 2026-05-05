@@ -1483,7 +1483,13 @@ distributeAndTransformInnerMap mode ws_triple new_segment inps pat arrs' onFreeV
       foldMap freeIn <$> mapM lookupType (namesToList free)
   let free_and_sizes = namesToList $ free <> free_sizes
   traceM "distributing inner map with free variables\n"
-  traceM $ unlines ["inputs: ", prettyString inps, "free variables:", prettyString free_and_sizes]
+  traceM $
+    unlines
+      [ "inputs: ",
+        prettyString inps,
+        "free variables:",
+        prettyString free_and_sizes
+      ]
   (free_replicated, replicated) <-
     fmap unzip . sequence $
       mapMaybe
