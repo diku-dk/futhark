@@ -255,11 +255,18 @@ fuseSuperScrema w inp_p' form_p' out_p inp_c' form_c' out_c = do
                     <> varsRes (map paramName post_forward_params)
                 )
           }
+  -- Deduplicate inp_r: when inp_p and inp_c_real share inputs, the
+  -- combined input list contains duplicates.  Remove them by keeping
+  -- only one copy of each unique input and replacing the extra lambda
+  -- parameters in lam1 with let-bindings.
+  let nil_post = Lambda [] [] (mkBody mempty [])
+      (inp_r', form_lam1') = dedupInput inp_r (ScremaForm lam1 [] [] nil_post)
+      lam1' = scremaLambda form_lam1'
   pure
     ( SuperScrema
         w
-        inp_r
-        lam1
+        inp_r'
+        lam1'
         (scremaScans form_p)
         (scremaReduces form_p)
         lam2
