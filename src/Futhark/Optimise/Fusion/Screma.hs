@@ -491,5 +491,6 @@ fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
     fmap (second prunePreLambdaResults . toScrema) $
       moveRedScanSuperScrema super_screma
         >>= moveLastSuperScrema
-  form <- tryIdentityPost form'
-  pure (new_inp, form, new_out)
+  form'' <- tryIdentityPost form'
+  let (deduped_inp, deduped_form) = dedupInput new_inp form''
+  pure (deduped_inp, deduped_form, new_out)
