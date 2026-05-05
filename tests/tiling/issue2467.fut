@@ -1,7 +1,7 @@
 -- Regression test for issue #2467: TileLoops must not produce invalid
 -- IR when a redomap input array is also used in postlude code.
 -- ==
--- compiled random input { [4][8]i32 [8][6]i32 [8][6]i32 } auto output
+-- structure gpu { /SegMap 1 /SegMap/Loop 1 }
 
 def dotprod [n] (xs: [n]i32) (ys: [n]i32) : i32 =
   #[sequential] i32.sum (map2 (i32.*) xs ys)
