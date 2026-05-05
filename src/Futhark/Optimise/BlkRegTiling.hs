@@ -678,7 +678,13 @@ matchesBlkRegTile seg_space kstms
         code1,
     -- identify load_A, load_B
     tmp_stms <- mapMaybe (`M.lookup` tab_inv_stm) arrs,
-    length tmp_stms == length arrs =
+    length tmp_stms == length arrs,
+    -- If any tiled-loop input array is also used in the postlude code,
+    -- we cannot safely apply this optimization (the array won't be in
+    -- scope in the epilogue).  See issue #2467.
+    not $
+      namesFromList (M.keys tab_inv_stm)
+        `namesIntersect` freeIn (code2'' <> code2) =
       let zip_AB = zip3 tmp_stms arrs [map_t1_0, map_t2_0]
           [(load_A, inp_A, map_t1), (load_B, inp_B, map_t2)] =
             if var_dims == [0, 1]
