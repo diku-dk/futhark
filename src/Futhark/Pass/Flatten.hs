@@ -587,7 +587,7 @@ runMapLambdaBody ::
 runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
   outer_scope <- askScope
   let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
-  map_lam' <- localScope input_scope $ FOT.transformLambda map_lam
+  map_lam' <- renameLambda $ soacsLambdaToGPU map_lam
   ws <- dataArr segments env inps w
   (_ws_F, ws_O, ws_data) <- doRepIota ws
   arrs' <-
