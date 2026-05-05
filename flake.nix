@@ -53,7 +53,7 @@
       cleanSource =
         src:
         builtins.path {
-          name = "futhark-${commit}-src";
+          name = "futhark-src";
           path = src;
           filter =
             path: type:
