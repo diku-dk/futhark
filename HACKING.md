@@ -8,10 +8,9 @@ architecture](https://hackage-content.haskell.org/package/futhark-0.25.33/docs/F
 
 To build the compiler, you need a recent version of
 [GHC](http://ghc.haskell.org/), which can be installed via
-[ghcup](https://www.haskell.org/ghcup/).  Alternatively, if you
-[install Nix](https://nixos.org/download.html#download-nix) then you
-can run `nix-shell` to get a shell environment in which all necessary
-tools are installed.
+[ghcup](https://www.haskell.org/ghcup/). Alternatively, if you [install
+Nix](https://nixos.org/download.html#download-nix) then you can run `nix
+develop` to get a shell environment in which all necessary tools are installed.
 
 After that, run `make docs` to generate internal compiler
 documentation in HTML format.  The last few lines of output will tell
