@@ -1,13 +1,18 @@
 -- | Flattening of 'WithAcc'.
+--
+-- The basic idea is that in the nonuniform case, we change the 'WithAcc' to be
+-- over the data array of the irregular representation. We then update all the
+-- 'UpdateAcc' operations to compute flat indexes, via the usual metadata
+-- arrays.
 module Futhark.Pass.Flatten.WithAcc
   ( transformWithAcc,
   )
 where
 
 import Control.Monad
-import Control.Monad.Identity
 import Data.Foldable
-import Data.List.NonEmpty qualified as NE
+import Data.List qualified as L
+import Debug.Trace
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -18,6 +23,27 @@ import Futhark.Pass.Flatten.Monad
 import Futhark.Tools
 import Prelude hiding (div, rem)
 
+flatSegmentIndex :: Segments -> [SubExp] -> TPrimExp Int64 VName
+flatSegmentIndex segments = flattenIndex (segmentDims segments) . map pe64
+
+indexIrreg ::
+  (MonadBuilder m) =>
+  Segments ->
+  DistEnv ->
+  IrregularRep ->
+  [SubExp] ->
+  ShapeBase SubExp ->
+  [SubExp] ->
+  m SubExp
+indexIrreg segments _env rep is shape js = do
+  offset <- letSubExp "uacc_segment_offset" =<< eIndex (irregularO rep) [toExp $ flatSegmentIndex segments is]
+  letSubExp "flat_uacc_idx" <=< toExp $
+    pe64 offset
+      + flattenIndex
+        (map pe64 (shapeDims shape))
+        (map pe64 js)
+
+-- If just one input is nonuniform, we treat them all as nonuniform.
 transformWithAcc ::
   FlattenOps ->
   Segments ->
@@ -31,26 +57,47 @@ transformWithAcc ::
   Builder GPU DistEnv
 transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_inputs acc_lam = do
   let inputTypes (_, arrs, _) = mapM lookupType arrs
-  variant <-
+
+  lam_params' <- newAccLamParams $ lambdaParams acc_lam
+  iota_w <- genShapeIota $ segmentsShape segments
+  iota_p <- newParam "iota_p" $ Prim int64
+  iota_w_t <- lookupType iota_w
+  let iota_se = Var (paramName iota_p)
+
+  nonuniform <-
     localScope (scopeOfDistInputs inps) $
       any (any (any (isVariant inps env) . arrayDims))
         <$> mapM inputTypes withacc_inputs
-  when variant $ error "Cannot yet handle variant WithAccs"
 
-  withacc_inputs' <- mapM onInput withacc_inputs
-  lam_params' <- newAccLamParams $ lambdaParams acc_lam
+  (withacc_inputs', trAccIndex) <-
+    if nonuniform
+      then do
+        (withacc_inputs', input_reps) <-
+          mapAndUnzipM onNonuniformInput withacc_inputs
+        let trAccIndex c is = do
+              ((shape, _, _), rep : _) <-
+                L.lookup c $
+                  zip (map paramName lam_params') $
+                    zip withacc_inputs input_reps
+              Just $ L.singleton <$> indexIrreg segments env rep [iota_se] shape is
+        pure (withacc_inputs', trAccIndex)
+      else do
+        withacc_inputs' <- mapM onUniformInput withacc_inputs
+        let trAccIndex c is = do
+              _ <-
+                L.lookup c $ zip (map paramName lam_params') withacc_inputs
+              Just $ pure $ iota_se : is
+        pure (withacc_inputs', trAccIndex)
 
-  iota_w <- genShapeIota $ segmentsShape segments
-
-  iota_p <- newParam "iota_p" $ Prim int64
-
-  iota_w_t <- lookupType iota_w
-  let iota_se = Var (paramName iota_p)
+  let trAccShape c = do
+        (ispace, _, _) <- L.lookup c $ zip (map paramName lam_params') withacc_inputs'
+        pure ispace
+      sf = (trAccShape, trAccIndex)
 
   acc_lam_body <-
     runBodyBuilder $
       localScope (scopeOfLParams lam_params') $
-        bodyBind (lambdaBody (trLam iota_se acc_lam))
+        bodyBind . lambdaBody =<< trLam sf acc_lam
 
   scope <- askScope
   let acc_params = drop num_accs lam_params'
@@ -61,19 +108,30 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
             | (p, acc) <- zip orig_acc_params acc_params
             ]
           ++ inps
-      [w] = NE.toList segments
-      -- FIXME: we are not using withacc_new_inputs, which has got to be wrong.
-      (withacc_new_inputs, withacc_dstms) =
+
+  traceM $
+    unlines
+      [ "transformWithAcc",
+        show nonuniform,
+        prettyString interchanged_inps,
+        prettyString acc_lam_body
+      ]
+
+  -- FIXME: we are not using withacc_new_inputs, which has got to be wrong.
+  let (withacc_new_inputs, withacc_dstms) =
         distributeBody
           scope
           segments
           interchanged_inps
           acc_lam_body
 
-  withacc_lam' <- mkLambda (map trParam lam_params') $ do
+  withacc_lam' <- mkLambda (map (trParam sf) lam_params') $ do
     env' <- foldM (flattenDistStm ops segments) env withacc_dstms
     -- TODO: Isn't this the fix that we need?
-    concat <$> mapM (liftResult segments withacc_new_inputs env') (bodyResult $ lambdaBody acc_lam)
+    concat
+      <$> mapM
+        (liftResult segments withacc_new_inputs env')
+        (bodyResult $ lambdaBody acc_lam)
 
   withacc_out_vs <-
     certifying (distCerts inps withacc_aux env) $
@@ -90,7 +148,6 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
       pure $ cert_ps <> acc_ps'
 
     num_accs = length withacc_inputs
-    acc_certs = map paramName $ take num_accs $ lambdaParams acc_lam
 
     onOp (op_lam, nes) = do
       -- We need to add an additional index parameter because we are
@@ -101,53 +158,67 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
           nes
         )
 
-    onInput (shape, arrs, op) =
+    onUniformInput (shape, arrs, op) =
       (segmentsShape segments <> shape,,)
         <$> mapM onArr arrs
         <*> traverse onOp op
+      where
+        onArr =
+          readInputVar segments env [] inps
 
-    onArr = readInputVar segments env [] inps
+    onNonuniformInput (_shape, arrs, op) = do
+      reps <- mapM (getIrregRep segments env inps) arrs
+      let arrs' = map irregularD reps
+      w <- fmap (arraySize 0) . lookupType $ head arrs'
+      (,reps) . (Shape [w],arrs',) <$> traverse onOp op
 
-    trType :: TypeBase shape u -> TypeBase shape u
-    trType (Acc acc ispace ts u)
-      | acc `elem` acc_certs =
-          Acc acc (segmentsShape segments <> ispace) ts u
-    trType t = t
+    trType ::
+      (VName -> Maybe Shape, VName -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
+      TypeBase shape u ->
+      TypeBase shape u
+    trType sf (Acc acc _ ts u)
+      | Just shape <- fst sf acc =
+          Acc acc shape ts u
+    trType _ t = t
 
-    trParam :: Param (TypeBase shape u) -> Param (TypeBase shape u)
-    trParam = fmap trType
+    trParam ::
+      (VName -> Maybe Shape, VName -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
+      Param (TypeBase Shape u) ->
+      Param (TypeBase Shape u)
+    trParam sf = fmap $ trType sf
 
-    trStm i (Let pat aux e) =
-      Let (fmap trType pat) aux $ trExp i pat e
+    trBody sf (Body dec stms res) =
+      Body dec <$> collectStms_ (traverse_ onStm stms) <*> pure res
+      where
+        onStm (Let pat aux e) =
+          addStm . Let (fmap (trType sf) pat) aux =<< trExp sf pat e
 
-    trBody i (Body dec stms res) =
-      Body dec (fmap (trStm i) stms) res
+    trLam sf (Lambda params ret body) =
+      Lambda (map (trParam sf) params) (map (trType sf) ret) <$> trBody sf body
 
-    trLam i (Lambda params ret body) =
-      Lambda (map trParam params) (map trType ret) (trBody i body)
-
-    trSOAC i = runIdentity . mapSOACM mapper
+    trSOAC sf = mapSOACM mapper
       where
         mapper =
-          identitySOACMapper {mapOnSOACLambda = pure . trLam i}
+          identitySOACMapper {mapOnSOACLambda = trLam sf}
 
-    trExp i _ (WithAcc acc_inputs lam) =
-      WithAcc acc_inputs $ trLam i lam
-    trExp i (Pat [PatElem _ acc_t]) (BasicOp (UpdateAcc safety acc is ses)) = do
+    trExp sf _ (WithAcc acc_inputs lam) =
+      WithAcc acc_inputs <$> trLam sf lam
+    trExp sf (Pat [PatElem _ acc_t]) (BasicOp (UpdateAcc safety acc is ses)) = do
       case acc_t of
         Acc cert _ _ _
-          | cert `elem` acc_certs ->
-              BasicOp $ UpdateAcc safety acc (i : is) ses
+          | Just mk <- snd sf cert is -> do
+              is' <- mk
+              pure $ BasicOp $ UpdateAcc safety acc is' ses
         _ ->
-          BasicOp $ UpdateAcc safety acc is ses
-    trExp i _ e = mapExp mapper e
+          pure $ BasicOp $ UpdateAcc safety acc is ses
+    trExp sf _ e = mapExpM mapper e
       where
         mapper =
           identityMapper
-            { mapOnBody = \_ -> pure . trBody i,
-              mapOnRetType = pure . trType,
-              mapOnBranchType = pure . trType,
-              mapOnFParam = pure . trParam,
-              mapOnLParam = pure . trParam,
-              mapOnOp = pure . trSOAC i
+            { mapOnBody = \_ -> trBody sf,
+              mapOnRetType = pure . trType sf,
+              mapOnBranchType = pure . trType sf,
+              mapOnFParam = pure . trParam sf,
+              mapOnLParam = pure . trParam sf,
+              mapOnOp = trSOAC sf
             }
