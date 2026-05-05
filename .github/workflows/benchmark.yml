@@ -20,13 +20,14 @@ jobs:
     - name: Install Nix
       uses: cachix/install-nix-action@v27
 
-    # - uses: cachix/cachix-action@v15
-    #   with:
-    #     name: futhark
-    #     signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+    - uses: cachix/cachix-action@v17
+      with:
+        name: futhark
+        authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
     - name: Build Futhark
-      run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
+      run: nix build .#tarball-nightly
 
     - uses: actions/upload-artifact@v4
       with:
