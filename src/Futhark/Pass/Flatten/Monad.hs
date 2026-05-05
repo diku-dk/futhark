@@ -132,7 +132,7 @@ import Prelude hiding (div, rem)
 data IrregularKind
   = Dense
   | Replicated
-  deriving (Show,Eq)
+  deriving (Show, Eq)
 
 data IrregularRep = IrregularRep
   { -- | Array of size of each segment, type @[]i64@.
@@ -145,12 +145,10 @@ data IrregularRep = IrregularRep
   deriving (Show)
 
 data ResRep
-  = -- | This variable is represented
-    -- completely straightforwardly- if it is
-    -- an array, it is a regular array.
+  = -- | This variable is represented completely straightforwardly- if it is an
+    -- array, it is a regular array.
     Regular VName
-  | -- | The representation of an
-    -- irregular array.
+  | -- | The representation of an irregular array.
     Irregular IrregularRep
   deriving (Show)
 
@@ -209,7 +207,7 @@ segsAndElems env (DistInput rt _ : vs) =
         Dense -> do
           bimap (mplus $ Just (segments, flags, offsets)) (elems :) $ segsAndElems env vs
         Replicated ->
-          second ( flags :) $ segsAndElems env vs
+          second (flags :) $ segsAndElems env vs
 
 -- Mapping from original variable names to their distributed resreps
 inputReps :: DistInputs -> DistEnv -> M.Map VName (Type, ResRep)
@@ -326,6 +324,7 @@ ensureDenseIrregular desc rep@IrregularRep {} = do
         irregularD = new_D,
         irregularK = Dense
       }
+
 -- Lift a result of a function.
 liftResult :: Segments -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
 liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
@@ -460,7 +459,7 @@ liftSubExpRegular segments inps env expectedShape se = do
       letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
     Var x -> case M.lookup x $ inputReps inps env of
       Just (_, Regular v') -> pure v'
-      Just (_, Irregular irreg) -> do 
+      Just (_, Irregular irreg) -> do
         rep_dense <- ensureDenseIrregular "lifted_irreg" irreg
         pure $ irregularD rep_dense
       Nothing ->
@@ -490,7 +489,7 @@ dataArr segments env inps (Var v)
       case v_inp of
         DistInputFree vs _ -> irregularD <$> mkIrregFromReg segments vs
         DistInput rt _ -> case resVar rt env of
-          Irregular r ->  do
+          Irregular r -> do
             rep_dense <- ensureDenseIrregular "dataArr" r
             pure $ irregularD rep_dense
           Regular vs -> irregularD <$> mkIrregFromReg segments vs
