@@ -52,18 +52,27 @@
       # --- Source filtering (shared) ---
       cleanSource =
         src:
-        lib.sourceByRegex src [
-          "futhark.cabal"
-          "Setup.hs"
-          "LICENSE"
-          "^src.*"
-          "^rts.*"
-          "^docs.*"
-          "^prelude.*"
-          "^assets.*"
-          "^src-testing.*"
-          "^tools.*"
-        ];
+        builtins.path {
+          name = "futhark-${commit}-src";
+          path = src;
+          filter =
+            path: type:
+            let
+              relPath = lib.removePrefix (toString src + "/") (toString path);
+            in
+            builtins.any (regex: builtins.match regex relPath != null) [
+              "futhark.cabal"
+              "Setup.hs"
+              "LICENSE"
+              "^src.*"
+              "^rts.*"
+              "^docs.*"
+              "^prelude.*"
+              "^assets.*"
+              "^src-testing.*"
+              "^tools.*"
+            ];
+        };
     in
     {
       packages = forAllSystems (
@@ -293,5 +302,7 @@
           };
         }
       );
+
+      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-tree);
     };
 }
