@@ -278,6 +278,10 @@ readInputs segments env is = mapM_ onInput
         Irregular (IrregularRep _ _ v_O v_D _) -> do
           offset <- letSubExp "offset" =<< eIndex v_O [toExp $ flatSegmentIndex segments is]
           case arrayDims t of
+            -- We can have scalar irreugalrs because of replication rep
+            [] -> do 
+              res <- letSubExp "segment" =<< eIndex v_D [eSubExp offset]
+              bindInputName v $ BasicOp $ SubExp res
             [num_elems] -> do
               let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
               bindInputName v $ BasicOp $ Index v_D slice
