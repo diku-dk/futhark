@@ -119,7 +119,7 @@ validateOneSpec srv eps spec = do
           throwE $
             "Shrinker is not a server entry point: " <> sh
         liftIO (validateShrinkTypes srv prop sh) >>= maybe (pure ()) throwE
-    
+
     case psPPrint spec of
       Nothing -> pure ()
       Just pp -> do
