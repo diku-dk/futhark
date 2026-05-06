@@ -43,9 +43,11 @@ where
 
 import Control.Monad
 import Control.Monad.RWS hiding (reader, writer)
+import Data.Bifunctor (first)
 import Data.Char (isAlpha, isAlphaNum)
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
@@ -438,14 +440,14 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
 
       case mode of
         ToLibrary -> do
-          (entry_points, entry_point_types) <-
+          (entry_points, entry_point_info) <-
             unzip . catMaybes <$> mapM (compileEntryFun sync DoNotReturnTiming) funs
           pure
             [ ClassDef $
                 Class class_name $
                   [ Assign
                       (Var "entry_points")
-                      (Dict entry_point_types),
+                      (strDict entry_point_info),
                     opaques_def,
                     Assign
                       (Var "sizes")
@@ -454,7 +456,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
                     <> map FunDef (constructor' : definitions ++ entry_points)
             ]
         ToServer -> do
-          (entry_points, entry_point_types) <-
+          (entry_points, entry_point_info) <-
             unzip . catMaybes <$> mapM (compileEntryFun sync ReturnTiming) funs
           pure $
             parse_options_server
@@ -462,7 +464,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
                      ( Class class_name $
                          [ Assign
                              (Var "entry_points")
-                             (Dict entry_point_types),
+                             (strDict entry_point_info),
                            opaques_def,
                            Assign
                              (Var "sizes")
@@ -519,8 +521,8 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
 
     selectEntryPoint entry_point_names entry_points =
       [ Assign (Var "entry_points") $
-          Dict $
-            zip (map String entry_point_names) entry_points,
+          strDict $
+            zip entry_point_names entry_points,
         Assign (Var "entry_point_fun") $
           simpleCall "entry_points.get" [Var "entry_point"],
         If
@@ -899,11 +901,15 @@ prepareEntry (Imp.EntryPoint _ result args) (fname, Imp.Function _ outputs input
 
 data ReturnTiming = ReturnTiming | DoNotReturnTiming
 
+-- | Construct a dictionary with string keys.
+strDict :: [(T.Text, PyExp)] -> PyExp
+strDict = Dict . map (first String)
+
 compileEntryFun ::
   [PyStmt] ->
   ReturnTiming ->
   (Name, Imp.Function op) ->
-  CompilerM op s (Maybe (PyFunDef, (PyExp, PyExp)))
+  CompilerM op s (Maybe (PyFunDef, (T.Text, PyExp)))
 compileEntryFun sync timing fun
   | Just entry <- Imp.functionEntry $ snd fun = do
       let ename = Imp.entryPointName entry
@@ -939,11 +945,16 @@ compileEntryFun sync timing fun
         Just
           ( Def (T.unpack (escapeName ename)) ("self" : params) $
               prepareIn ++ do_run ++ prepareOut ++ sync ++ [ret],
-            ( String (nameToText ename),
-              Tuple
-                [ String (escapeName ename),
-                  List (map String pts),
-                  String rts
+            ( nameToText ename,
+              strDict
+                [ ("name", String (escapeName ename)),
+                  ("inputs", List (map String pts)),
+                  ("output", String rts),
+                  ( "attributes",
+                    List . map (String . prettyText) $
+                      S.toList . Imp.unAttrs . Imp.functionAttrs $
+                        snd fun
+                  )
                 ]
             )
           )
