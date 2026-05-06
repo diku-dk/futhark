@@ -1043,13 +1043,6 @@ excludeBackend config =
           : configExclude config
     }
 
--- | Run @futhark test@.
-main :: String -> [String] -> IO ()
-main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
-  case progs of
-    [] -> Nothing
-    _ -> Just $ runTests (excludeBackend config) progs
-
 declaredPropertyNames :: [PropSpec] -> [T.Text]
 declaredPropertyNames = map psProp
 
@@ -1100,3 +1093,10 @@ propToFile testFile results = do
     resultLines :: TestResult -> [T.Text]
     resultLines Success = []
     resultLines (Failure msgs) = msgs
+
+-- | Run @futhark test@.
+main :: String -> [String] -> IO ()
+main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
+  case progs of
+    [] -> Nothing
+    _ -> Just $ runTests (excludeBackend config) progs
