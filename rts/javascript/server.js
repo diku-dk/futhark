@@ -256,6 +256,9 @@ class Server {
       case 'types': this._cmd_types(args); break
       case 'fields': this._cmd_fields(args); break
       case 'project': this._cmd_project(args); break
+          // XXX: these should be implemented.
+      case 'attributes': this._cmd_dummy(args); break
+      case 'entry_points': this._cmd_dummy(args); break
       default: throw "Unknown command: " + cmd;
       }
     }

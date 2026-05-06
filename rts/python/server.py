@@ -40,12 +40,12 @@ class Server:
 
     def _cmd_inputs(self, args):
         entry = self._get_arg(args, 0)
-        for t in self._get_entry_point(entry)[1]:
+        for t in self._get_entry_point(entry)["inputs"]:
             print(t)
 
     def _cmd_output(self, args):
         entry = self._get_arg(args, 0)
-        print(self._get_entry_point(entry)[2])
+        print(self._get_entry_point(entry)["output"])
 
     def _cmd_dummy(self, args):
         pass
@@ -65,8 +65,8 @@ class Server:
 
     def _cmd_call(self, args):
         entry = self._get_entry_point(self._get_arg(args, 0))
-        entry_fname = entry[0]
-        num_ins = len(entry[1])
+        entry_fname = entry["name"]
+        num_ins = len(entry["inputs"])
         exp_len = 2 + num_ins
 
         if len(args) != exp_len:
@@ -177,6 +177,9 @@ class Server:
         # FIXME: assuming a tuple.
         self._vars[dst] = self._vars[src].data[int(field)]
 
+    def _cmd_attributes(self, args):
+        return self._get_entry_point(self._get_arg(args, 0))["attributes"]
+
     def _cmd_entry_points(self, args):
         for k in self._ctx.entry_points.keys():
             print(k)
@@ -197,6 +200,7 @@ class Server:
         "entry_points": _cmd_entry_points,
         "fields": _cmd_fields,
         "project": _cmd_project,
+        "attributes": _cmd_attributes,
     }
 
     def _process_line(self, line):
