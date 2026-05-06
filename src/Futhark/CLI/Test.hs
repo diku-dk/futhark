@@ -151,8 +151,8 @@ withProgramServer program runner extra_options phaseRef f = do
         Left _ -> do
           abortServer server
           st <- readIORef phaseRef
-          fail $
-            "test timeout after " <> show timeout <> " microseconds" <> case activeTest st of
+          fail . T.unpack $
+            "test timeout after " <> showText timeout <> " microseconds" <> case activeTest st of
               Nothing -> mempty
               Just activeTestName -> do
                 -- use annotate to make the phase name stand out in the error message, since it is the most likely place to find out what went wrong
@@ -162,12 +162,12 @@ withProgramServer program runner extra_options phaseRef f = do
                     seedInfo = maybe mempty ((" with seed " <>) . showText) (phaseSeed st)
                     tacticInfo = maybe mempty ((" with tactic " <>) . showText) (phaseTactic st)
                 ". Was evaluating property:\n"
-                  <> T.unpack activeTestName
-                  <> T.unpack phaseInfo
-                  <> T.unpack shrinkInfo
-                  <> T.unpack sizeInfo
-                  <> T.unpack seedInfo
-                  <> T.unpack tacticInfo
+                  <> activeTestName
+                  <> phaseInfo
+                  <> shrinkInfo
+                  <> sizeInfo
+                  <> seedInfo
+                  <> tacticInfo
         Right r -> pure r
 
 data TestMode
