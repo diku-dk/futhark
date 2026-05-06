@@ -74,8 +74,8 @@ data InputOutputs = InputOutputs
   }
   deriving (Show)
 
-data PropertyCase = PropertyCase
-  { propertyEntryPoint :: T.Text}
+newtype PropertyCase = PropertyCase
+  {propertyEntryPoint :: T.Text}
   deriving (Show)
 
 -- | The error expected for a negative test.
@@ -223,7 +223,7 @@ parseAction :: Parser () -> Parser TestAction
 parseAction sep =
   choice
     [ CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError sep),
-      try parseAsProperty, 
+      try parseAsProperty,
       parseAsRunCase
     ]
   where
@@ -231,7 +231,7 @@ parseAction sep =
       props <- parseProperty sep
       pure $ RunCases [] [] [] props
 
-    parseAsRunCase = 
+    parseAsRunCase =
       RunCases
         <$> parseInputOutputs sep
         <*> many (parseExpectedStructure sep)
@@ -413,16 +413,18 @@ pProgramTest = do
   case maybe_spec of
     Just spec
       | RunCases old_cases structures warnings old_properties <- testAction spec -> do
-          let pAnyBlock =  (Left <$> pInputOutputs) <|> (Right <$> pPropertyCases)
+          let pAnyBlock = (Left <$> pInputOutputs) <|> (Right <$> pPropertyCases)
           restBlocks <- many (pAnyBlock <* many pNonTestLine)
           let (restCases, restProperties) = partitionEithers restBlocks
-          pure spec 
-            { testAction = RunCases 
-                (old_cases ++ concat restCases) 
-                structures 
-                warnings 
-                (old_properties ++ concat restProperties) 
-            }
+          pure
+            spec
+              { testAction =
+                  RunCases
+                    (old_cases ++ concat restCases)
+                    structures
+                    warnings
+                    (old_properties ++ concat restProperties)
+              }
       | otherwise ->
           many pNonTestLine
             *> notFollowedBy "-- =="
@@ -440,8 +442,9 @@ pProgramTest = do
       (void eol <|> eof) *> notFollowedBy "--"
     pNonTestLine =
       void $ notFollowedBy "-- ==" *> restOfLine
-    pInputOutputs = try $
-      "--" *> sep *> parseDescription sep *> parseInputOutputs sep <* pEndOfTestBlock
+    pInputOutputs =
+      try $
+        "--" *> sep *> parseDescription sep *> parseInputOutputs sep <* pEndOfTestBlock
     pPropertyCases =
       "--" *> sep *> parseDescription sep *> parseProperty sep <* pEndOfTestBlock
 
