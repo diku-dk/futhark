@@ -85,6 +85,7 @@ module Futhark.Construct
     eAll,
     eAny,
     eDimInBounds,
+    eShapeInBounds,
     eOutOfBounds,
     eIndex,
     eLast,
@@ -392,6 +393,13 @@ eDimInBounds w i =
     LogAnd
     (eCmpOp (CmpSle Int64) (eSubExp (intConst Int64 0)) i)
     (eCmpOp (CmpSlt Int64) i w)
+
+-- | Check if the given indexes are in-bounds for the given shape. The shape may have extra dimensions.
+eShapeInBounds :: (MonadBuilder m) => Shape -> [m (Exp (Rep m))] -> m (Exp (Rep m))
+eShapeInBounds (Shape ds) is =
+  eAll
+    =<< mapM (letSubExp "dim_in_bounds")
+    =<< zipWithM eDimInBounds (map eSubExp (take (length is) ds)) is
 
 -- | Are these indexes out-of-bounds for the array?
 eOutOfBounds ::

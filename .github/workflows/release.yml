@@ -27,7 +27,7 @@ jobs:
     - name: Build tarball
       env:
         VERSION: ${{ steps.metadata.outputs.VERSION }}
-      run: nix-build --argstr suffix $VERSION-linux-x86_64 --argstr commit $GITHUB_SHA
+      run: nix build .#tarball
 
     - name: Extract release changes
       env:
@@ -75,8 +75,8 @@ jobs:
       run: |
         export HACKAGE_KEY
         export VERSION
-        nix-shell --run 'cabal update'
-        nix-shell --run tools/release/hackage.sh
+        nix develop --command cabal update
+        nix develop --command tools/release/hackage.sh
       env:
         HACKAGE_KEY: ${{ secrets.HACKAGE_KEY }}
         VERSION: ${{ steps.metadata.outputs.VERSION }}
