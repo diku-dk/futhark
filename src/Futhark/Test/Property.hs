@@ -102,7 +102,7 @@ validateOneSpec srv eps spec = do
 
     genName <- case psGen spec of
       Nothing ->
-        throwE $ "No generator specified for " <> prop
+        throwE $ "No generator specified for " <> prop -- here we could use gen library?
       Just g
         | g `notElem` eps ->
             throwE $ "Generator is not a server entry point: " <> g
@@ -119,6 +119,14 @@ validateOneSpec srv eps spec = do
           throwE $
             "Shrinker is not a server entry point: " <> sh
         liftIO (validateShrinkTypes srv prop sh) >>= maybe (pure ()) throwE
+    
+    case psPPrint spec of
+      Nothing -> pure ()
+      Just pp -> do
+        unless (pp `elem` eps) $
+          throwE $
+            "Pretty-printer is not a server entry point: " <> pp
+        liftIO (validatePPrintTypes srv prop pp) >>= maybe (pure ()) throwE
 
   pure $ either Just (const Nothing) result
 
@@ -227,6 +235,48 @@ validateShrinkTypes srv propName shrinkName = fmap (either Just (const Nothing))
         <> " returns: "
         <> showText shrinkOut
         <> "\nExpected shrinker output to equal the property input type."
+
+validatePPrintTypes :: Server -> EntryName -> EntryName -> IO (Maybe PBTFailure)
+validatePPrintTypes srv propName ppName = fmap (either Just (const Nothing)) . runExceptT $ do
+  propTy <-
+    liftIO (getSingleInputType srv propName) >>= \case
+      Left err -> throwE $ showText err
+      Right ty -> pure ty
+
+  ppIns <- liftIO $ getInputTypes srv ppName
+
+  case ppIns of
+    [xTy] -> do
+      unless (xTy == propTy) $
+        throwE $
+          "Pretty-printer input mismatch.\n property "
+            <> propName
+            <> " expects: "
+            <> propTy
+            <> "\n pretty-printer "
+            <> ppName
+            <> " takes: "
+            <> xTy
+            <> "\nExpected pretty-printer input to be exactly the property input type."
+    tys ->
+      throwE $
+        "Pretty-printer input arity mismatch.\n pretty-printer "
+          <> ppName
+          <> " inputs: "
+          <> showText tys
+          <> "\nExpected exactly 1 input: "
+          <> propTy
+          <> "."
+
+  ppOut <- liftIO $ getOutputType srv ppName
+
+  unless (ppOut == "[]u8") $
+    throwE $
+      "Pretty-printer output mismatch.\n pretty-printer "
+        <> ppName
+        <> " returns: "
+        <> ppOut
+        <> "\nExpected pretty-printer output to be []u8."
 
 runOne :: PropSpec -> PBTConfig -> FilePath -> Server -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
 runOne s config scratchBin srv entryNameRef = do
