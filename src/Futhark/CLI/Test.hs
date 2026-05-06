@@ -14,7 +14,6 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as LBS
-import Data.Either (partitionEithers)
 import Data.IORef
 import Data.Int (Int32)
 import Data.List (delete, partition)
@@ -79,7 +78,7 @@ parsePropSpec entry attr = do
       { psProp = entry,
         psGen = lookupArgText "gen" args,
         psShrink = lookupArgText "shrink" args,
-        psSize = fmap fromInteger $ lookupArgRead "size" args,
+        psSize = fromInteger <$> lookupArgRead "size" args,
         psPPrint = lookupArgText "pprint" args
       }
 
@@ -152,22 +151,23 @@ withProgramServer program runner extra_options phaseRef f = do
         Left _ -> do
           abortServer server
           st <- readIORef phaseRef
-          fail $ "test timeout after " <> show timeout <> " microseconds" <> case activeTest st of
-            Nothing -> mempty
-            Just activeTestName -> do
-              -- use annotate to make the phase name stand out in the error message, since it is the most likely place to find out what went wrong
-              let phaseInfo = maybe mempty (\phaseName -> " during phase " <> phaseName) (phase st)
-                  shrinkInfo = maybe mempty (\shrinkPhase -> " while shrinking with " <> shrinkPhase) (shrinkWith st)
-                  sizeInfo = maybe mempty (\size -> " at size " <> showText size) (phaseSize st)
-                  seedInfo = maybe mempty (\seed -> " with seed " <> showText seed) (phaseSeed st)
-                  tacticInfo = maybe mempty (\tactic -> " with tactic " <> showText tactic) (phaseTactic st)
-              ". Was evaluating property:\n"
-                <> T.unpack activeTestName
-                <> T.unpack phaseInfo
-                <> T.unpack shrinkInfo
-                <> T.unpack sizeInfo
-                <> T.unpack seedInfo
-                <> T.unpack tacticInfo
+          fail . T.unpack $
+            "test timeout after " <> showText timeout <> " microseconds" <> case activeTest st of
+              Nothing -> mempty
+              Just activeTestName -> do
+                -- use annotate to make the phase name stand out in the error message, since it is the most likely place to find out what went wrong
+                let phaseInfo = maybe mempty (" during phase " <>) (phase st)
+                    shrinkInfo = maybe mempty (" while shrinking with " <>) (shrinkWith st)
+                    sizeInfo = maybe mempty ((" at size " <>) . showText) (phaseSize st)
+                    seedInfo = maybe mempty ((" with seed " <>) . showText) (phaseSeed st)
+                    tacticInfo = maybe mempty ((" with tactic " <>) . showText) (phaseTactic st)
+                ". Was evaluating property:\n"
+                  <> activeTestName
+                  <> phaseInfo
+                  <> shrinkInfo
+                  <> sizeInfo
+                  <> seedInfo
+                  <> tacticInfo
         Right r -> pure r
 
 data TestMode
@@ -350,14 +350,17 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
       let backend = configBackend progs
           extra_compiler_options = configExtraCompilerOptions progs
 
-      phaseRef <- liftIO $ newIORef $ PBTPhase 
-        { activeTest = Nothing
-        , phase = Nothing
-        , shrinkWith = Nothing
-        , phaseSize = Nothing
-        , phaseSeed = Nothing
-        , phaseTactic = Nothing
-        }
+      phaseRef <-
+        liftIO $
+          newIORef $
+            PBTPhase
+              { activeTest = Nothing,
+                phase = Nothing,
+                shrinkWith = Nothing,
+                phaseSize = Nothing,
+                phaseSeed = Nothing,
+                phaseTactic = Nothing
+              }
 
       when (mode `elem` [Compiled, Interpreted]) $
         context "Generating reference outputs" $
@@ -390,22 +393,27 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                 let requestedNames = [propName | PropertyCase propName <- properties]
                 let diagnostics = propertyDiagnostics requestedNames propSpecs
 
-                if null diagnostics
-                  then do
-                    let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
-                    propResultsM <- runPBT pbtConfig server verifiedProps phaseRef
-                    let (failures, outputs) = partitionEithers propResultsM
-                    let propResults = map (\case
-                                            Just err -> Failure [err]
-                                            Nothing  -> Success) outputs
-                    -- if any properties failed, write them to a file for later inspection
-                    when (any (\r -> case r of
-                                      Failure _ -> True
-                                      Success   -> False) propResults) $
-                        liftIO $ propToFile program propResults
-                    pure $ normal_test_result ++ propResults ++ diagnostics ++ [Failure failures]
-                  else
-                    pure $ normal_test_result ++ diagnostics
+                propResults <-
+                  if null diagnostics
+                    then do
+                      let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
+                      propResultsE <- runPBT pbtConfig server verifiedProps phaseRef
+
+                      let allResults = flip map propResultsE $ \case
+                            Left err -> Failure [err]
+                            Right (Just e) -> Failure [e]
+                            Right Nothing -> Success
+
+                      let hasFailures = any (\case Failure _ -> True; _ -> False) allResults
+
+                      when hasFailures $
+                        liftIO $
+                          propToFile program allResults
+
+                      pure allResults
+                    else pure []
+
+                pure $ normal_test_result ++ diagnostics ++ propResults
 
       when (mode == Interpreted) $
         context "Interpreting" $
@@ -979,8 +987,8 @@ commandLineOptions =
                   Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
           )
           "NUM"
-      ) $
-      "Number of tests to run per property (default: " <> show (configNumTests . configPBTConfig $ defaultConfig) <> ").",
+      )
+      $ "Number of tests to run per property (default: " <> show (configNumTests . configPBTConfig $ defaultConfig) <> ").",
     Option
       "m"
       ["max-size"]
@@ -994,8 +1002,8 @@ commandLineOptions =
                   Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
           )
           "NUM"
-      ) $
-      "Maximum size parameter to use for generators (default: " <> show (configMaxSize . configPBTConfig $ defaultConfig) <> ").",
+      )
+      $ "Maximum size parameter to use for generators (default: " <> show (configMaxSize . configPBTConfig $ defaultConfig) <> ").",
     Option
       []
       ["seed"]
@@ -1003,7 +1011,7 @@ commandLineOptions =
           ( \n ->
               case (reads n :: [(Int32, String)]) of
                 [(n', "")] ->
-                      Right $ changePBTConfig $ \pbt -> pbt {configSeed = Just n'}
+                  Right $ changePBTConfig $ \pbt -> pbt {configSeed = Just n'}
                 _ ->
                   Left . optionsError $ "'" ++ n ++ "' is not a valid integer."
           )
@@ -1023,8 +1031,8 @@ commandLineOptions =
                   Left . optionsError $ "'" ++ n ++ "' is not a non-negative integer."
           )
           "NUM"
-      ) $
-      "The number of tries the shrinker will perform before giving up (default: " <> show (configShrinkTries . configPBTConfig $ defaultConfig) <> ")."
+      )
+      $ "The number of tries the shrinker will perform before giving up (default: " <> show (configShrinkTries . configPBTConfig $ defaultConfig) <> ")."
   ]
 
 excludeBackend :: TestConfig -> TestConfig
@@ -1035,16 +1043,8 @@ excludeBackend config =
           : configExclude config
     }
 
--- | Run @futhark test@.
-main :: String -> [String] -> IO ()
-main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
-  case progs of
-    [] -> Nothing
-    _ -> Just $ runTests (excludeBackend config) progs
-
 declaredPropertyNames :: [PropSpec] -> [T.Text]
-declaredPropertyNames specs =
-  map psProp specs
+declaredPropertyNames = map psProp
 
 propertyDiagnostics :: [T.Text] -> [PropSpec] -> [TestResult]
 propertyDiagnostics requested specs =
@@ -1053,10 +1053,10 @@ propertyDiagnostics requested specs =
     declared = declaredPropertyNames specs
 
     requestedWithoutAttr =
-      [ name | name <- requested, name `notElem` declared ]
+      [name | name <- requested, name `notElem` declared]
 
     declaredWithoutRequest =
-      [ name | name <- declared, name `notElem` requested ]
+      [name | name <- declared, name `notElem` requested]
 
     missingRequested =
       [ Failure
@@ -1093,3 +1093,10 @@ propToFile testFile results = do
     resultLines :: TestResult -> [T.Text]
     resultLines Success = []
     resultLines (Failure msgs) = msgs
+
+-- | Run @futhark test@.
+main :: String -> [String] -> IO ()
+main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
+  case progs of
+    [] -> Nothing
+    _ -> Just $ runTests (excludeBackend config) progs

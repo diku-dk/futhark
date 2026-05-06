@@ -197,14 +197,25 @@ diffBasicOp pat aux e m =
           updateAdj arr
             =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj slice zeroes)
     -- See Note [Adjoints of accumulators]
-    UpdateAcc _ _ is vs -> do
+    UpdateAcc safety _ is vs -> do
       addStm $ Let pat aux $ BasicOp e
       m
       pat_adjs <- mapM lookupAdjVal (patNames pat)
       returnSweepCode $ do
         forM_ (zip pat_adjs vs) $ \(adj, v) -> do
           adj_t <- lookupType adj
-          adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
+          let index_adj = pure $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
+          adj_i <-
+            letExp "updateacc_val_adj" =<< case safety of
+              Unsafe ->
+                index_adj
+              Safe ->
+                -- The primal UpdateAcc may be out-of-bounds, in which case
+                -- indexing the adjoint is dangerous.
+                eIf
+                  (eShapeInBounds (arrayShape adj_t) (map eSubExp is))
+                  (eBody [index_adj])
+                  (eBody [pure $ zeroExp $ stripArray (length is) adj_t])
           updateSubExpAdj v adj_i
     --
     UserParam {} ->

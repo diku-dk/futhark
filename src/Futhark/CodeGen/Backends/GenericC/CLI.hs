@@ -6,7 +6,7 @@ module Futhark.CodeGen.Backends.GenericC.CLI
   )
 where
 
-import Data.List (unzip5)
+import Data.List (intersperse, unzip5)
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -20,6 +20,7 @@ import Futhark.CodeGen.Backends.SimpleRep
   )
 import Futhark.CodeGen.RTS.C (tuningH, valuesH)
 import Futhark.Manifest
+import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyString)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -262,6 +263,15 @@ prepareOutputs manifest = zipWith prepareResult [(0 :: Int) ..]
             [C.cstm|assert($id:(opaqueFree ops)(ctx, $id:result) == 0);|]
           )
 
+recordFieldCType :: Manifest -> RecordField -> C.Type
+recordFieldCType manifest field =
+  case M.lookup t $ manifestTypes manifest of
+    Nothing -> uncurry primAPIType $ scalarToPrim t
+    Just (TypeArray tname _ _ _) -> [C.cty|typename $id:tname|]
+    Just (TypeOpaque tname _ _) -> [C.cty|typename $id:tname|]
+  where
+    t = recordFieldType field
+
 -- | Return a statement printing the given external value.
 printStm :: Manifest -> T.Text -> C.Exp -> C.Stm
 printStm manifest tname e =
@@ -269,6 +279,22 @@ printStm manifest tname e =
     Nothing ->
       let info = tname <> "_info"
        in [C.cstm|write_scalar(stdout, binary_output, &$id:info, &$exp:e);|]
+    Just (TypeOpaque _ _ (Just (OpaqueRecord record)))
+      | map recordFieldName fields == take (length fields) (map showText [0 :: Int ..]) ->
+          [C.cstm|{$stms:(intersperse newline (map getField fields))}|]
+      where
+        fields = recordFields record
+        printField field =
+          printStm manifest (recordFieldType field) [C.cexp|field|]
+        newline = [C.cstm|puts("");|]
+        getField field =
+          [C.cstm|{$ty:(recordFieldCType manifest field) field;
+                   if ($id:(recordFieldProject field)(ctx, &field, $exp:e) != FUTHARK_SUCCESS) {
+                     futhark_panic(1, "Failed to project field %s from result\n", $string:(T.unpack (recordFieldName field)));
+                   } else {
+                     $stm:(printField field)
+                   }
+                   }|]
     Just (TypeOpaque desc _ _) ->
       [C.cstm|{
          fprintf(stderr, "Values of type \"%s\" have no external representation.\n", $string:(T.unpack desc));
@@ -295,7 +321,7 @@ printStm manifest tname e =
 printResult :: Manifest -> [(T.Text, C.Exp)] -> [C.Stm]
 printResult manifest = concatMap f
   where
-    f (v, e) = [printStm manifest v e, [C.cstm|printf("\n");|]]
+    f (v, e) = [printStm manifest v e, [C.cstm|puts("");|]]
 
 cliEntryPoint ::
   Manifest -> T.Text -> EntryPoint -> (C.Definition, C.Initializer)

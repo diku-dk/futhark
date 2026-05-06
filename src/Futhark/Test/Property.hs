@@ -307,8 +307,9 @@ runOne s config scratchBin srv entryNameRef = do
 
               runUpdate propName
 
-              okE <- liftIO $ withCallKeepIns srv propName serverOk [serverIn] $
-                \vOk -> getVal srv vOk
+              okE <- liftIO $
+                withCallKeepIns srv propName serverOk [serverIn] $
+                  \vOk -> getVal srv vOk
               ok <- either (throwE . ("Property " <>)) pure okE
 
               if ok
@@ -367,7 +368,7 @@ runOne s config scratchBin srv entryNameRef = do
           case prettyOutE of
             -- TODO: report necessary info like the example resulting in the counterexample and other useful information like size and seed.
             Left err -> pure err -- report as user a 'regular' error/users fault
-            Right prettyOut ->  pure $ "Minimal counterexample: " <> prettyOut
+            Right prettyOut -> pure $ "Minimal counterexample: " <> prettyOut
         _ -> pure "Could not retrieve input types for counterexample log."
 
 -- Bridges IO (Maybe Error) into our ExceptT block
@@ -418,13 +419,15 @@ autoShrinkLoop scratchBin srv propName genName vIn size seed genOut phaseRef = r
               errM <- liftIO $ callFreeIns srv genName genOut [serverSize, serverSeed]
               maybe (pure ()) (throwE . (("Generator failed: " <> genName <> " has ") <>)) errM
 
-              _ <- liftIO $
-                freeOnException srv [vCand] $
-                  copyVar scratchBin srv vCand genOut
+              _ <-
+                liftIO $
+                  freeOnException srv [vCand] $
+                    copyVar scratchBin srv vCand genOut
 
               liftIO $ autoShrinkUpdatePhase (Just propName)
-              okE <- liftIO $ withCallKeepIns srv propName vOk [vCand] $
-                \vOk' -> getVal srv vOk'
+              okE <- liftIO $
+                withCallKeepIns srv propName vOk [vCand] $
+                  \vOk' -> getVal srv vOk'
               ok <- either (throwE . ("Property " <>)) pure okE
 
               liftIO $ autoShrinkUpdatePhase Nothing
@@ -432,9 +435,10 @@ autoShrinkLoop scratchBin srv propName genName vIn size seed genOut phaseRef = r
               if ok
                 then pure Nothing -- Shrink didn't find a smaller failure
                 else do
-                  _ <- liftIO $
-                    freeOnException srv [vIn] $
-                      copyVar scratchBin srv vIn vCand
+                  _ <-
+                    liftIO $
+                      freeOnException srv [vIn] $
+                        copyVar scratchBin srv vIn vCand
                   pure (Just newSize) -- Found a smaller failing size!
             case res of
               Left err -> throwE err
@@ -465,7 +469,7 @@ shrinkLoop scratchBin srv propName vIn shrinkName seed numTries phaseRef = runEx
   seedTy <-
     liftIO (getInputTypes srv shrinkName) >>= \case
       [_, sTy] -> pure sTy
-      []  -> throwE $ "Shrinker " <> shrinkName <> " has no inputs?"
+      [] -> throwE $ "Shrinker " <> shrinkName <> " has no inputs?"
       [_] -> throwE $ "Shrinker " <> shrinkName <> " has 1 input; expected 2 (x, random value)."
       tys -> throwE $ "Shrinker " <> shrinkName <> " has " <> showText (length tys) <> " inputs; expected 2."
 
@@ -578,8 +582,12 @@ isRuntimeError failure = any ("runtime: " `T.isPrefixOf`) (failureLog failure)
 handleRuntimeError :: EntryName -> CmdFailure -> Maybe PBTFailure
 handleRuntimeError entry err
   | isRuntimeError err = Just $ "Runtime error: " <> showText (failureMsg err)
-  | otherwise          = fail . T.unpack $ "Fatal Error on " <> entry
-                          <> ": " <> showText (failureMsg err)
+  | otherwise =
+      fail . T.unpack $
+        "Fatal Error on "
+          <> entry
+          <> ": "
+          <> showText (failureMsg err)
 
 callKeepIns :: Server -> EntryName -> VarName -> [VarName] -> IO (Maybe PBTFailure)
 callKeepIns s entry out ins = do
@@ -594,9 +602,10 @@ freeOnException srv vs action =
 withCallKeepIns :: Server -> EntryName -> VarName -> [VarName] -> (VarName -> IO a) -> IO (Either PBTFailure a)
 withCallKeepIns srv entry out ins k = do
   errM <- callKeepIns srv entry out ins
-  maybe (Right <$> (k out `finally` freeVars srv [out])) 
-        (pure . Left . ((entry <> " has ") <>))
-        errM
+  maybe
+    (Right <$> (k out `finally` freeVars srv [out]))
+    (pure . Left . ((entry <> " has ") <>))
+    errM
 
 withFreedVars :: Server -> [VarName] -> IO a -> IO a
 withFreedVars srv vs action =

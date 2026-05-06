@@ -1,8 +1,13 @@
-{ pkgs, python, haskell }:
+{
+  pkgs,
+  python,
+  haskell,
+}:
 with pkgs;
-[hlint
- ormolu
- parallel
- python.mypy
- python.black
+[
+  hlint
+  ormolu
+  parallel
+  python.mypy
+  python.black
 ]
