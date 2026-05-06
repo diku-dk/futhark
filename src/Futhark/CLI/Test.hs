@@ -78,7 +78,7 @@ parsePropSpec entry attr = do
       { psProp = entry,
         psGen = lookupArgText "gen" args,
         psShrink = lookupArgText "shrink" args,
-        psSize = fmap fromInteger $ lookupArgRead "size" args,
+        psSize = fromInteger <$> lookupArgRead "size" args,
         psPPrint = lookupArgText "pprint" args
       }
 
@@ -156,11 +156,11 @@ withProgramServer program runner extra_options phaseRef f = do
               Nothing -> mempty
               Just activeTestName -> do
                 -- use annotate to make the phase name stand out in the error message, since it is the most likely place to find out what went wrong
-                let phaseInfo = maybe mempty (\phaseName -> " during phase " <> phaseName) (phase st)
-                    shrinkInfo = maybe mempty (\shrinkPhase -> " while shrinking with " <> shrinkPhase) (shrinkWith st)
-                    sizeInfo = maybe mempty (\size -> " at size " <> showText size) (phaseSize st)
-                    seedInfo = maybe mempty (\seed -> " with seed " <> showText seed) (phaseSeed st)
-                    tacticInfo = maybe mempty (\tactic -> " with tactic " <> showText tactic) (phaseTactic st)
+                let phaseInfo = maybe mempty (" during phase " <>) (phase st)
+                    shrinkInfo = maybe mempty (" while shrinking with " <>) (shrinkWith st)
+                    sizeInfo = maybe mempty ((" at size " <>) . showText) (phaseSize st)
+                    seedInfo = maybe mempty ((" with seed " <>) . showText) (phaseSeed st)
+                    tacticInfo = maybe mempty ((" with tactic " <>) . showText) (phaseTactic st)
                 ". Was evaluating property:\n"
                   <> T.unpack activeTestName
                   <> T.unpack phaseInfo
@@ -1051,8 +1051,7 @@ main = mainWithOptions defaultConfig commandLineOptions "options... programs..."
     _ -> Just $ runTests (excludeBackend config) progs
 
 declaredPropertyNames :: [PropSpec] -> [T.Text]
-declaredPropertyNames specs =
-  map psProp specs
+declaredPropertyNames = map psProp
 
 propertyDiagnostics :: [T.Text] -> [PropSpec] -> [TestResult]
 propertyDiagnostics requested specs =
