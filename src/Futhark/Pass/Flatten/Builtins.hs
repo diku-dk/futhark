@@ -44,8 +44,15 @@ repIotaName = builtinName "repiota"
 prefixSumName = builtinName "prefixsum"
 partitionName = builtinName "partition"
 
-segMap :: (Traversable f) => f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
-segMap segments f = do
+inlineBuiltinAtLevel :: SegLevel -> Bool
+inlineBuiltinAtLevel SegThreadInBlock {} = True
+inlineBuiltinAtLevel _ = False
+
+regularSegLevel :: SegLevel
+regularSegLevel = SegThread SegVirt Nothing
+
+segMap :: (Traversable f) => SegLevel -> f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
+segMap lvl segments f = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
@@ -53,20 +60,22 @@ segMap segments f = do
     ts <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, ts)
   let kbody = Body () stms res
-  pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
+  pure $ Op $ SegOp $ SegMap lvl space ts kbody
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 genScanWithKernelBody ::
   (Traversable f) =>
+  SegLevel ->
   Name ->
   f SubExp ->
   Lambda GPU ->
   [SubExp] ->
   (f SubExp -> Builder GPU Result) ->
   Builder GPU [VName]
-genScanWithKernelBody desc segments lam nes =
+genScanWithKernelBody lvl desc segments lam nes =
   genScanWithKernelBodyAndPost
+    lvl
     desc
     segments
     (\_ -> pure lam)
@@ -75,6 +84,7 @@ genScanWithKernelBody desc segments lam nes =
 
 genScanWithKernelBodyAndPost ::
   (Traversable f) =>
+  SegLevel ->
   Name ->
   f SubExp ->
   (f SubExp -> Builder GPU (Lambda GPU)) ->
@@ -82,7 +92,7 @@ genScanWithKernelBodyAndPost ::
   (f SubExp -> [Type] -> Builder GPU (Lambda GPU)) ->
   (f SubExp -> Builder GPU Result) ->
   Builder GPU [VName]
-genScanWithKernelBodyAndPost desc segments mkScanLam nes mkPostLam m = do
+genScanWithKernelBodyAndPost lvl desc segments mkScanLam nes mkPostLam m = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
@@ -106,7 +116,6 @@ genScanWithKernelBodyAndPost desc segments mkScanLam nes mkPostLam m = do
 
   letTupExp desc $ Op $ SegOp $ SegScan lvl space res_t kbody [op] (SegPostOp post_lam')
   where
-    lvl = SegThread SegVirt Nothing
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 bindLambdaInputArrays ::
@@ -125,9 +134,9 @@ bindLambdaInputArrays gtids lam arrs = do
         _ ->
           eIndex arr $ map eSubExp idxs
 
-genScan :: (Traversable f) => Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
-genScan desc segments lam nes arrs =
-  genScanWithKernelBody desc segments lam nes $ \gtids ->
+genScan :: (Traversable f) => SegLevel -> Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genScan lvl desc segments lam nes arrs =
+  genScanWithKernelBody lvl desc segments lam nes $ \gtids ->
     subExpsRes
       <$> forM
         arrs
@@ -135,10 +144,9 @@ genScan desc segments lam nes arrs =
             letSubExp (baseName arr <> "_elem") =<< eIndex arr (toList $ fmap eSubExp gtids)
         )
 
--- Also known as a prescan.
-genExScan :: (Traversable f) => Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
-genExScan desc segments lam nes arrs =
-  genScanWithKernelBody desc segments lam nes $ \gtids ->
+genExScan :: (Traversable f) => SegLevel -> Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genExScan lvl desc segments lam nes arrs =
+  genScanWithKernelBody lvl desc segments lam nes $ \gtids ->
     let Just (outerDims, innerDim) = unsnoc $ toList gtids
      in do
           prescan <-
@@ -172,11 +180,11 @@ segScanLambda lam readFree gtids = do
             )
         ]
 
-genSegScan :: Name -> Lambda GPU -> [SubExp] -> VName -> [VName] -> Builder GPU [VName]
-genSegScan desc lam nes flags arrs = do
+genSegScan :: SegLevel -> Name -> Lambda GPU -> [SubExp] -> VName -> [VName] -> Builder GPU [VName]
+genSegScan lvl desc lam nes flags arrs = do
   w <- arraySize 0 <$> lookupType flags
   lam' <- segScanLambda lam (const $ pure ()) []
-  drop 1 <$> genScan desc [w] lam' (constant False : nes) (flags : arrs)
+  drop 1 <$> genScan lvl desc [w] lam' (constant False : nes) (flags : arrs)
 
 segScanomapPostLambda ::
   Lambda GPU ->
@@ -190,6 +198,7 @@ segScanomapPostLambda lam readFree gtids = do
     bodyBind $ lambdaBody lam
 
 genSegScanomap ::
+  SegLevel ->
   Name ->
   Lambda GPU ->
   [SubExp] ->
@@ -198,11 +207,12 @@ genSegScanomap ::
   [VName] ->
   ([SubExp] -> Builder GPU ()) ->
   Builder GPU [VName]
-genSegScanomap desc scan_lam nes flags map_lam arrs readFree = do
+genSegScanomap lvl desc scan_lam nes flags map_lam arrs readFree = do
   post_lam <- mkIdentityLambda $ lambdaReturnType map_lam
-  genSegScanomapWithPost desc scan_lam nes flags post_lam map_lam arrs readFree
+  genSegScanomapWithPost lvl desc scan_lam nes flags post_lam map_lam arrs readFree
 
 genSegScanomapWithPost ::
+  SegLevel ->
   Name ->
   Lambda GPU ->
   [SubExp] ->
@@ -212,10 +222,11 @@ genSegScanomapWithPost ::
   [VName] ->
   ([SubExp] -> Builder GPU ()) ->
   Builder GPU [VName]
-genSegScanomapWithPost desc scan_lam nes flags post_lam map_lam arrs readFree = do
+genSegScanomapWithPost lvl desc scan_lam nes flags post_lam map_lam arrs readFree = do
   w <- arraySize 0 <$> lookupType flags
 
   genScanWithKernelBodyAndPost
+    lvl
     desc
     [w]
     (segScanLambda scan_lam readFree)
@@ -232,25 +243,25 @@ genSegScanomapWithPost desc scan_lam nes flags post_lam map_lam arrs readFree = 
         pure (subExpRes flag : map_res)
     )
 
-genPrefixSum :: Name -> VName -> Builder GPU VName
-genPrefixSum desc ns = do
+genPrefixSum :: SegLevel -> Name -> VName -> Builder GPU VName
+genPrefixSum lvl desc ns = do
   ws <- arrayDims <$> lookupType ns
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
-  head <$> genScan desc ws add_lam [intConst Int64 0] [ns]
+  head <$> genScan lvl desc ws add_lam [intConst Int64 0] [ns]
 
-genExPrefixSum :: Name -> VName -> Builder GPU VName
-genExPrefixSum desc ns = do
+genExPrefixSum :: SegLevel -> Name -> VName -> Builder GPU VName
+genExPrefixSum lvl desc ns = do
   ws <- arrayDims <$> lookupType ns
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
-  head <$> genExScan desc ws add_lam [intConst Int64 0] [ns]
+  head <$> genExScan lvl desc ws add_lam [intConst Int64 0] [ns]
 
-genSegPrefixSum :: Name -> VName -> VName -> Builder GPU VName
-genSegPrefixSum desc flags ns = do
+genSegPrefixSum :: SegLevel -> Name -> VName -> VName -> Builder GPU VName
+genSegPrefixSum lvl desc flags ns = do
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
-  head <$> genSegScan desc add_lam [intConst Int64 0] flags [ns]
+  head <$> genSegScan lvl desc add_lam [intConst Int64 0] flags [ns]
 
-genScatter :: VName -> SubExp -> (SubExp -> Builder GPU (VName, SubExp)) -> Builder GPU (Exp GPU)
-genScatter dest n f = do
+genScatter :: SegLevel -> VName -> SubExp -> (SubExp -> Builder GPU (VName, SubExp)) -> Builder GPU (Exp GPU)
+genScatter lvl dest n f = do
   gtid <- newVName "gtid"
   space <- mkSegSpace [(gtid, n)]
   withAcc [dest] 1 $ \ ~[acc] -> do
@@ -259,10 +270,10 @@ genScatter dest n f = do
       acc' <- letExp (baseName acc) $ BasicOp $ UpdateAcc Safe acc [Var i] [v]
       pure [Returns ResultMaySimplify mempty $ Var acc']
     acc_t <- lookupType acc
-    letTupExp' "scatter" $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space [acc_t] kbody
+    letTupExp' "scatter" $ Op $ SegOp $ SegMap lvl space [acc_t] kbody
 
-genTabulate :: SubExp -> (SubExp -> Builder GPU [SubExp]) -> Builder GPU (Exp GPU)
-genTabulate w m = do
+genTabulate :: SegLevel -> SubExp -> (SubExp -> Builder GPU [SubExp]) -> Builder GPU (Exp GPU)
+genTabulate lvl w m = do
   gtid <- newVName "gtid"
   space <- mkSegSpace [(gtid, w)]
   ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
@@ -270,29 +281,30 @@ genTabulate w m = do
     ts <- mapM subExpType ses
     pure (map (Returns ResultMaySimplify mempty) ses, ts)
   let kbody = Body () stms res
-  pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
+  pure $ Op $ SegOp $ SegMap lvl space ts kbody
 
-genFlags :: SubExp -> VName -> Builder GPU VName
-genFlags m offsets = do
+genFlags :: SegLevel -> SubExp -> VName -> Builder GPU VName
+genFlags lvl m offsets = do
   flags_allfalse <-
     letExp "flags_allfalse" . BasicOp $
       Replicate (Shape [m]) (constant False)
   n <- arraySize 0 <$> lookupType offsets
-  letExp "flags" <=< genScatter flags_allfalse n $ \gtid -> do
+  letExp "flags" <=< genScatter lvl flags_allfalse n $ \gtid -> do
     i <- letExp "i" =<< eIndex offsets [eSubExp gtid]
     pure (i, constant True)
 
-genSegRed :: VName -> VName -> VName -> [VName] -> Reduce SOACS -> Builder GPU [VName]
-genSegRed segments flags offsets elems red = do
+genSegRed :: SegLevel -> VName -> VName -> VName -> [VName] -> Reduce SOACS -> Builder GPU [VName]
+genSegRed lvl segments flags offsets elems red = do
   scanned <-
     genSegScan
+      lvl
       "red"
       (soacsLambdaToGPU $ redLambda red)
       (redNeutral red)
       flags
       elems
   num_segments <- arraySize 0 <$> lookupType offsets
-  letTupExp "segred" <=< genTabulate num_segments $ \i -> do
+  letTupExp "segred" <=< genTabulate lvl num_segments $ \i -> do
     n <- letSubExp "n" =<< eIndex segments [eSubExp i]
     offset <- letSubExp "offset" =<< eIndex offsets [toExp (pe64 i)]
     letTupExp' "segment_res" <=< eIf (toExp $ pe64 n .==. 0) (eBody $ map eSubExp nes) $
@@ -302,6 +314,7 @@ genSegRed segments flags offsets elems red = do
     nes = redNeutral red
 
 genSegRedomap ::
+  SegLevel ->
   VName ->
   VName ->
   VName ->
@@ -310,9 +323,10 @@ genSegRedomap ::
   Lambda GPU ->
   ([SubExp] -> Builder GPU ()) ->
   Builder GPU ([VName], [VName])
-genSegRedomap segments flags offsets elems red map_lam readFree = do
+genSegRedomap lvl segments flags offsets elems red map_lam readFree = do
   scanned_and_map <-
     genSegScanomap
+      lvl
       "redomap"
       (soacsLambdaToGPU $ redLambda red)
       (redNeutral red)
@@ -322,7 +336,7 @@ genSegRedomap segments flags offsets elems red map_lam readFree = do
       readFree
   let (scanned, mapout) = splitAt (length nes) scanned_and_map
   num_segments <- arraySize 0 <$> lookupType offsets
-  reds <- letTupExp "segred" <=< genTabulate num_segments $ \i -> do
+  reds <- letTupExp "segred" <=< genTabulate lvl num_segments $ \i -> do
     n <- letSubExp "n" =<< eIndex segments [eSubExp i]
     offset <- letSubExp "offset" =<< eIndex offsets [toExp (pe64 i)]
     letTupExp' "segment_res" <=< eIf (toExp $ pe64 n .==. 0) (eBody $ map eSubExp nes) $
@@ -333,16 +347,16 @@ genSegRedomap segments flags offsets elems red map_lam readFree = do
     nes = redNeutral red
 
 -- | Produces a multidimensional iota for the given shape.
-genShapeIota :: Shape -> Builder GPU VName
-genShapeIota shape =
-  letExp "shape_iota" =<< segMap (shapeDims shape) (pure . subExpsRes)
+genShapeIota :: SegLevel -> Shape -> Builder GPU VName
+genShapeIota lvl shape =
+  letExp "shape_iota" =<< segMap lvl (shapeDims shape) (pure . subExpsRes)
 
 -- Returns (#segments, segment start offsets, sum of segment sizes)
 -- Note: If given a multi-dimensional array,
 -- `#segments` and `sum of segment sizes` will be arrays, not scalars.
 -- `segment start offsets` will always have the same shape as `ks`.
-exScanAndSum :: VName -> Builder GPU (SubExp, VName, SubExp)
-exScanAndSum ks = do
+exScanAndSum :: SegLevel -> VName -> Builder GPU (SubExp, VName, SubExp)
+exScanAndSum lvl ks = do
   ns <- arrayDims <$> lookupType ks
   -- If `ks` only has a single dimension
   -- the size will be a scalar, otherwise it's an array.
@@ -357,8 +371,8 @@ exScanAndSum ks = do
               [n] -> toExp (pe64 n .==. 0)
               _ -> eLast ns' >>= letSubExp "n" >>= (\n -> toExp $ pe64 n .==. 0)
           )
-  offsets <- letExp "offsets" =<< toExp =<< genExPrefixSum "offsets" ks
-  ms <- letExp "ms" <=< segMap (init ns) $ \gtids -> do
+  offsets <- letExp "offsets" =<< toExp =<< genExPrefixSum lvl "offsets" ks
+  ms <- letExp "ms" <=< segMap lvl (init ns) $ \gtids -> do
     let idxs = map toExp gtids
     offset <- letExp "offset" =<< eIndex offsets idxs
     k <- letExp "k" =<< eIndex ks idxs
@@ -373,23 +387,23 @@ exScanAndSum ks = do
     pure [subExpRes m]
   pure (Var ns', offsets, Var ms)
 
-genSegIota :: VName -> Builder GPU (VName, VName, VName)
-genSegIota ks = do
-  (_n, offsets, m) <- exScanAndSum ks
-  flags <- genFlags m offsets
+genSegIota :: SegLevel -> VName -> Builder GPU (VName, VName, VName)
+genSegIota lvl ks = do
+  (_n, offsets, m) <- exScanAndSum lvl ks
+  flags <- genFlags lvl m offsets
   ones <- letExp "ones" $ BasicOp $ Replicate (Shape [m]) one
-  iotas <- genSegPrefixSum "iotas" flags ones
-  res <- letExp "res" <=< genTabulate m $ \i -> do
+  iotas <- genSegPrefixSum lvl "iotas" flags ones
+  res <- letExp "res" <=< genTabulate lvl m $ \i -> do
     x <- letSubExp "x" =<< eIndex iotas [eSubExp i]
     letTupExp' "xm1" $ BasicOp $ BinOp (Sub Int64 OverflowUndef) x one
   pure (flags, offsets, res)
   where
     one = intConst Int64 1
 
-genRepIota :: VName -> Builder GPU (VName, VName, VName)
-genRepIota ks = do
-  (n, offsets, m) <- exScanAndSum ks
-  is <- letExp "is" <=< genTabulate n $ \i -> do
+genRepIota :: SegLevel -> VName -> Builder GPU (VName, VName, VName)
+genRepIota lvl ks = do
+  (n, offsets, m) <- exScanAndSum lvl ks
+  is <- letExp "is" <=< genTabulate lvl n $ \i -> do
     o <- letSubExp "o" =<< eIndex offsets [eSubExp i]
     k <- letSubExp "n" =<< eIndex ks [eSubExp i]
     letTupExp' "i"
@@ -399,20 +413,20 @@ genRepIota ks = do
         (eBody [toExp $ pe64 o])
   zeroes <- letExp "zeroes" $ BasicOp $ Replicate (Shape [m]) zero
   starts <-
-    letExp "starts" <=< genScatter zeroes n $ \gtid -> do
+    letExp "starts" <=< genScatter lvl zeroes n $ \gtid -> do
       i <- letExp "i" =<< eIndex is [eSubExp gtid]
       pure (i, gtid)
-  flags <- letExp "flags" <=< genTabulate m $ \i -> do
+  flags <- letExp "flags" <=< genTabulate lvl m $ \i -> do
     x <- letSubExp "x" =<< eIndex starts [eSubExp i]
     letTupExp' "nonzero" =<< toExp (pe64 x .>. 0)
-  res <- genSegPrefixSum "res" flags starts
+  res <- genSegPrefixSum lvl "res" flags starts
   pure (flags, offsets, res)
   where
     zero = intConst Int64 0
     negone = intConst Int64 (-1)
 
-genPartition :: VName -> VName -> VName -> Builder GPU (VName, VName, VName)
-genPartition n k cls = do
+genPartition :: SegLevel -> VName -> VName -> VName -> Builder GPU (VName, VName, VName)
+genPartition lvl n k cls = do
   let n' = Var n
   let k' = Var k
   let dims = [k', n']
@@ -421,7 +435,7 @@ genPartition n k cls = do
   -- the `i`th row is a flag array for equivalence class `i`.
   cls_flags <-
     letExp "flags"
-      <=< segMap dims
+      <=< segMap lvl dims
       $ \[i, j] -> do
         c <- letSubExp "c" =<< eIndex cls [toExp j]
         cls_flag <-
@@ -433,15 +447,15 @@ genPartition n k cls = do
         pure [subExpRes cls_flag]
 
   -- Offsets of each of the individual equivalence classes.
-  (_, local_offs, _counts) <- exScanAndSum cls_flags
+  (_, local_offs, _counts) <- exScanAndSum lvl cls_flags
   -- The number of elems in each class
   counts <- letExp "counts" =<< toExp _counts
   -- Offsets of the whole equivalence classes
-  global_offs <- genExPrefixSum "global_offs" counts
+  global_offs <- genExPrefixSum lvl "global_offs" counts
   -- Offsets over all of the equivalence classes.
   cls_offs <-
     letExp "cls_offs" =<< do
-      segMap dims $ \[i, j] -> do
+      segMap lvl dims $ \[i, j] -> do
         global_offset <- letExp "global_offset" =<< eIndex global_offs [toExp i]
         offset <-
           letSubExp "offset"
@@ -452,17 +466,17 @@ genPartition n k cls = do
         pure [subExpRes offset]
 
   scratch <- letExp "scratch" $ BasicOp $ Scratch int64 [n']
-  res <- letExp "scatter_res" <=< genScatter scratch n' $ \gtid -> do
+  res <- letExp "scatter_res" <=< genScatter lvl scratch n' $ \gtid -> do
     c <- letExp "c" =<< eIndex cls [toExp gtid]
     ind <- letExp "ind" =<< eIndex cls_offs [toExp c, toExp gtid]
     i <- letSubExp "i" =<< toExp gtid
     pure (ind, i)
   pure (counts, global_offs, res)
 
-genFilter :: VName -> BuilderT GPU (State VNameSource) (SubExp, VName)
-genFilter flags = do
+genFilter :: SegLevel -> VName -> BuilderT GPU (State VNameSource) (SubExp, VName)
+genFilter lvl flags = do
   w <- arraySize 0 <$> lookupType flags
-  flags_int <- letExp "flags_int" <=< segMap [w] $ \[i] -> do
+  flags_int <- letExp "flags_int" <=< segMap lvl [w] $ \[i] -> do
     b <- letSubExp "b" =<< eIndex flags [eSubExp i]
     v <-
       letSubExp "v"
@@ -472,7 +486,7 @@ genFilter flags = do
           (eBody [toExp $ intConst Int64 0])
     pure [subExpRes v]
   -- offsets <- genExPrefixSum "filter_offs" flags_int
-  (_n, offsets, num_true) <- exScanAndSum flags_int
+  (_n, offsets, num_true) <- exScanAndSum lvl flags_int
   -- num_true <- letSubExp "num_true"  =<< eIndex flags_int [toExp $ pe64 w - 1]
   scratch <- letExp "scratch" $ BasicOp $ Scratch int64 [num_true]
   -- is this efficient or do i need to do something smarter? like scatter with guard?
@@ -486,7 +500,7 @@ genFilter flags = do
   --         (eBody [toExp $ intConst Int64 (-1)])
   --   pure [subExpRes v']
 
-  filtered <- letExp "filtered" <=< genScatter scratch w $ \gtid -> do
+  filtered <- letExp "filtered" <=< genScatter lvl scratch w $ \gtid -> do
     b <- letSubExp "b" =<< eIndex flags [eSubExp gtid]
     -- idx <- letExp "idx" =<< eIndex offsets' [eSubExp gtid]
     idx_se <-
@@ -509,7 +523,7 @@ segIotaBuiltin = buildingBuiltin $ do
   nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
     localScope (scopeOfFParams [np, nsp]) . buildBody_ $ do
-      (flags, offsets, res) <- genSegIota (paramName nsp)
+      (flags, offsets, res) <- genSegIota regularSegLevel (paramName nsp)
       m <- arraySize 0 <$> lookupType res
       pure $ subExpsRes [m, Var flags, Var offsets, Var res]
   pure
@@ -535,7 +549,7 @@ repIotaBuiltin = buildingBuiltin $ do
   nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
     localScope (scopeOfFParams [np, nsp]) . buildBody_ $ do
-      (flags, offsets, res) <- genRepIota (paramName nsp)
+      (flags, offsets, res) <- genRepIota regularSegLevel (paramName nsp)
       m <- arraySize 0 <$> lookupType res
       pure $ subExpsRes [m, Var flags, Var offsets, Var res]
   pure
@@ -561,7 +575,7 @@ prefixSumBuiltin = buildingBuiltin $ do
   nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
     localScope (scopeOfFParams [np, nsp]) . buildBody_ $
-      varsRes . pure <$> genPrefixSum "res" (paramName nsp)
+      varsRes . pure <$> genPrefixSum regularSegLevel "res" (paramName nsp)
   pure
     FunDef
       { funDefEntryPoint = Nothing,
@@ -580,7 +594,7 @@ partitionBuiltin = buildingBuiltin $ do
   csp <- newParam "cs" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
     localScope (scopeOfFParams [np, kp, csp]) . buildBody_ $ do
-      (counts, offsets, res) <- genPartition (paramName np) (paramName kp) (paramName csp)
+      (counts, offsets, res) <- genPartition regularSegLevel (paramName np) (paramName kp) (paramName csp)
       pure $ varsRes [counts, offsets, res]
   pure
     FunDef
@@ -611,83 +625,97 @@ flatteningBuiltins =
   ]
 
 -- | @[0,1,2,0,1,0,1,2,3,4,...]@.  Returns @(flags,offsets,elems)@.
-doSegIota :: VName -> Builder GPU (VName, VName, VName)
-doSegIota ns = do
-  ns_t <- lookupType ns
-  let n = arraySize 0 ns_t
-  m <- newVName "m"
-  flags <- newVName "segiota_flags"
-  offsets <- newVName "segiota_offsets"
-  elems <- newVName "segiota_elems"
-  let args = [(n, Prim int64), (Var ns, ns_t)]
-      restype =
-        fromMaybe (error "doSegIota: bad application") $
-          applyRetType
-            (map fst $ funDefRetType segIotaBuiltin)
-            (funDefParams segIotaBuiltin)
-            args
-  letBindNames [m, flags, offsets, elems] $
-    Apply
-      (funDefName segIotaBuiltin)
-      [(n, Observe), (Var ns, Observe)]
-      (map (,mempty) restype)
-      Safe
-  pure (flags, offsets, elems)
+doSegIota :: SegLevel -> VName -> Builder GPU (VName, VName, VName)
+doSegIota lvl ns
+  | inlineBuiltinAtLevel lvl =
+      genSegIota lvl ns
+  | otherwise = do
+      ns_t <- lookupType ns
+      let n = arraySize 0 ns_t
+      m <- newVName "m"
+      flags <- newVName "segiota_flags"
+      offsets <- newVName "segiota_offsets"
+      elems <- newVName "segiota_elems"
+      let args = [(n, Prim int64), (Var ns, ns_t)]
+          restype =
+            fromMaybe (error "doSegIota: bad application") $
+              applyRetType
+                (map fst $ funDefRetType segIotaBuiltin)
+                (funDefParams segIotaBuiltin)
+                args
+      letBindNames [m, flags, offsets, elems] $
+        Apply
+          (funDefName segIotaBuiltin)
+          [(n, Observe), (Var ns, Observe)]
+          (map (,mempty) restype)
+          Safe
+      pure (flags, offsets, elems)
 
 -- | Produces @[0,0,0,1,1,2,2,2,...]@.  Returns @(flags, offsets,
 -- elems)@.
-doRepIota :: VName -> Builder GPU (VName, VName, VName)
-doRepIota ns = do
-  ns_t <- lookupType ns
-  let n = arraySize 0 ns_t
-  m <- newVName "m"
-  flags <- newVName "repiota_flags"
-  offsets <- newVName "repiota_offsets"
-  elems <- newVName "repiota_elems"
-  let args = [(n, Prim int64), (Var ns, ns_t)]
-      restype =
-        fromMaybe (error "doRepIota: bad application") $
-          applyRetType
-            (map fst $ funDefRetType repIotaBuiltin)
-            (funDefParams repIotaBuiltin)
-            args
-  letBindNames [m, flags, offsets, elems] $
-    Apply
-      (funDefName repIotaBuiltin)
-      [(n, Observe), (Var ns, Observe)]
-      (map (,mempty) restype)
-      Safe
-  pure (flags, offsets, elems)
+doRepIota :: SegLevel -> VName -> Builder GPU (VName, VName, VName)
+doRepIota lvl ns
+  | inlineBuiltinAtLevel lvl =
+      genRepIota lvl ns
+  | otherwise = do
+      ns_t <- lookupType ns
+      let n = arraySize 0 ns_t
+      m <- newVName "m"
+      flags <- newVName "repiota_flags"
+      offsets <- newVName "repiota_offsets"
+      elems <- newVName "repiota_elems"
+      let args = [(n, Prim int64), (Var ns, ns_t)]
+          restype =
+            fromMaybe (error "doRepIota: bad application") $
+              applyRetType
+                (map fst $ funDefRetType repIotaBuiltin)
+                (funDefParams repIotaBuiltin)
+                args
+      letBindNames [m, flags, offsets, elems] $
+        Apply
+          (funDefName repIotaBuiltin)
+          [(n, Observe), (Var ns, Observe)]
+          (map (,mempty) restype)
+          Safe
+      pure (flags, offsets, elems)
 
-doPrefixSum :: VName -> Builder GPU VName
-doPrefixSum ns = do
-  ns_t <- lookupType ns
-  let n = arraySize 0 ns_t
-  letExp "prefix_sum" $
-    Apply
-      (funDefName prefixSumBuiltin)
-      [(n, Observe), (Var ns, Observe)]
-      [(toDecl (staticShapes1 ns_t) Unique, mempty)]
-      Safe
+doPrefixSum :: SegLevel -> VName -> Builder GPU VName
+doPrefixSum lvl ns
+  | inlineBuiltinAtLevel lvl =
+      genPrefixSum lvl "prefix_sum" ns
+  | otherwise = do
+      ns_t <- lookupType ns
+      let n = arraySize 0 ns_t
+      letExp "prefix_sum" $
+        Apply
+          (funDefName prefixSumBuiltin)
+          [(n, Observe), (Var ns, Observe)]
+          [(toDecl (staticShapes1 ns_t) Unique, mempty)]
+          Safe
 
-doPartition :: VName -> VName -> Builder GPU (VName, VName, VName)
-doPartition k cs = do
-  cs_t <- lookupType cs
-  let n = arraySize 0 cs_t
-  counts <- newVName "partition_counts"
-  offsets <- newVName "partition_offsets"
-  res <- newVName "partition_res"
-  let args = [(n, Prim int64), (Var k, Prim int64), (Var cs, cs_t)]
-      restype =
-        fromMaybe (error "doPartition: bad application") $
-          applyRetType
-            (map fst $ funDefRetType partitionBuiltin)
-            (funDefParams partitionBuiltin)
-            args
-  letBindNames [counts, offsets, res] $
-    Apply
-      (funDefName partitionBuiltin)
-      [(n, Observe), (Var k, Observe), (Var cs, Observe)]
-      (map (,mempty) restype)
-      Safe
-  pure (counts, offsets, res)
+doPartition :: SegLevel -> VName -> VName -> Builder GPU (VName, VName, VName)
+doPartition lvl k cs
+  | inlineBuiltinAtLevel lvl = do
+      cs_t <- lookupType cs
+      n <- letExp "n" $ BasicOp $ SubExp $ arraySize 0 cs_t
+      genPartition lvl n k cs
+  | otherwise = do
+      cs_t <- lookupType cs
+      let n = arraySize 0 cs_t
+      counts <- newVName "partition_counts"
+      offsets <- newVName "partition_offsets"
+      res <- newVName "partition_res"
+      let args = [(n, Prim int64), (Var k, Prim int64), (Var cs, cs_t)]
+          restype =
+            fromMaybe (error "doPartition: bad application") $
+              applyRetType
+                (map fst $ funDefRetType partitionBuiltin)
+                (funDefParams partitionBuiltin)
+                args
+      letBindNames [counts, offsets, res] $
+        Apply
+          (funDefName partitionBuiltin)
+          [(n, Observe), (Var k, Observe), (Var cs, Observe)]
+          (map (,mempty) restype)
+          Safe
+      pure (counts, offsets, res)

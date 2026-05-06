@@ -18,20 +18,21 @@ import Futhark.Tools
 
 -- Take the elements at index `is` from an input `v`.
 splitInput ::
+  SegLevel ->
   Segments ->
   DistEnv ->
   DistInputs ->
   VName ->
   VName ->
   Builder GPU (Type, VName, ResRep)
-splitInput segments env inps is v = do
+splitInput lvl segments env inps is v = do
   (t, rep) <- liftSubExpPreserveRep segments inps env (Var v)
   (t,v,) <$> case rep of
     Regular arr -> do
       -- In the regular case we just take the elements
       -- of the array given by `is`
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-      arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
+      arr' <- letExp "split_arr" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
         idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
         -- unflatten index
         let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
@@ -41,13 +42,13 @@ splitInput segments env inps is v = do
       -- In the irregular case we take the elements
       -- of the `segs` array given by `is` like in the regular case
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-      segs' <- letExp "split_segs" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
+      segs' <- letExp "split_segs" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
         idx <- letExp "idx" =<< eIndex is [eSubExp i]
         subExpsRes . pure <$> (letSubExp "segs" =<< eIndex segs [toExp idx])
       -- From this we calculate the offsets and number of elements
-      (_, offsets', num_data) <- exScanAndSum segs'
-      (_, _, ii1) <- doRepIota segs'
-      (_, _, ii2) <- doSegIota segs'
+      (_, offsets', num_data) <- exScanAndSum lvl segs'
+      (_, _, ii1) <- doRepIota lvl segs'
+      (_, _, ii2) <- doSegIota lvl segs'
       -- We then take the elements we need from `elems` and `flags`
       -- For each index `i`, we roughly:
       -- Get the offset of the segment we want to copy by indexing
@@ -55,7 +56,7 @@ splitInput segments env inps is v = do
       -- `offset = offsets[is[ii1[i]]]`
       -- We then add `ii2[i]` to `offset`
       -- and use that to index into `elems` and `flags`.
-      ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap (MkSolo num_data) $ \(MkSolo i) -> do
+      ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap lvl (MkSolo num_data) $ \(MkSolo i) -> do
         offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp i]]]
         idx <- letExp "idx" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp i])
         flags_split <- letSubExp "flags" =<< eIndex flags [toExp idx]
@@ -74,16 +75,17 @@ splitInput segments env inps is v = do
 -- Given the indices for which a branch is taken and its body,
 -- distribute the statements of the body of that branch.
 distributeBranch ::
+  SegLevel ->
   Segments ->
   DistEnv ->
   DistInputs ->
   VName ->
   Body SOACS ->
   Builder GPU (DistInputs, DistEnv, [DistStm])
-distributeBranch segments env inps is body = do
+distributeBranch lvl segments env inps is body = do
   let free_in_body = filter (isVariant inps env . Var) (namesToList $ freeIn body)
   (ts, vs, reps) <-
-    unzip3 <$> mapM (splitInput segments env inps is) free_in_body
+    unzip3 <$> mapM (splitInput lvl segments env inps is) free_in_body
   let inputs = do
         (v, t, i) <- zip3 vs ts [0 ..]
         pure (v, DistInput (ResTag i) t)
@@ -95,13 +97,14 @@ distributeBranch segments env inps is body = do
 -- Given a single result from each branch as well the *unlifted*
 -- result type, merge the results of all branches into a single result.
 mergeResult ::
+  SegLevel ->
   Segments ->
   SubExp ->
   [VName] ->
   [ResRep] ->
   DistResult ->
   Builder GPU ResRep
-mergeResult segments w iss branchesRep dist_res
+mergeResult lvl segments w iss branchesRep dist_res
   -- Regular case
   | isRegularDistResult dist_res = do
       let (DistType _ _ resType) = distResType dist_res
@@ -111,7 +114,7 @@ mergeResult segments w iss branchesRep dist_res
       -- Create the blank space for the result
       resultSpace <- letExp "blank_res" =<< eBlank resultType
       -- Write back the values of each branch to the blank space
-      result <- foldM scatterRegular resultSpace $ zip iss xs
+      result <- foldM (scatterRegular lvl) resultSpace $ zip iss xs
       result_t <- arrayShape <$> lookupType result
       result' <-
         letExp "match_res_reg" . BasicOp $
@@ -124,14 +127,14 @@ mergeResult segments w iss branchesRep dist_res
       -- Create a blank space for the 'segs'
       segsSpace <- letExp "blank_segs" =<< eBlank segsType
       -- Write back the segs of each branch to the blank space
-      segs <- foldM scatterRegular segsSpace $ zip iss (irregularS <$> branchesIrregRep)
-      (_, offsets, num_data) <- exScanAndSum segs
+      segs <- foldM (scatterRegular lvl) segsSpace $ zip iss (irregularS <$> branchesIrregRep)
+      (_, offsets, num_data) <- exScanAndSum lvl segs
       let resultType = Array pt (Shape [num_data]) NoUniqueness
       -- Create the blank space for the result
       resultSpace <- letExp "blank_res" =<< eBlank resultType
       -- Write back the values of each branch to the blank space
-      elems <- foldM (scatterIrregular offsets) resultSpace $ zip iss branchesIrregRep
-      flags <- genFlags num_data offsets
+      elems <- foldM (scatterIrregular lvl offsets) resultSpace $ zip iss branchesIrregRep
+      flags <- genFlags lvl num_data offsets
       pure $
         Irregular $
           IrregularRep
@@ -160,12 +163,13 @@ transformMatch ::
   Body SOACS ->
   Builder GPU DistEnv
 transformMatch ops segments env inps res scrutinees cases defaultCase = do
+  let lvl = flattenSegLevel ops
   w <- letSubExp "w" <=< toExp $ product $ segmentDims segments
   -- We need to partition the indices of the scrutinees by which case they match.
   -- Lift the scrutinees.
   -- If it's a variable, we know it's a scalar and the lifted version will therefore be a regular array.
   lifted_scrutinees <- forM scrutinees $ \scrut -> do
-    liftSubExpRegular segments inps env (segmentsShape segments) scrut
+    liftSubExpRegular lvl segments inps env (segmentsShape segments) scrut
   -- Cases for tagging values that match the same branch.
   -- The default case is the 0'th equvalence class.
   let equiv_cases =
@@ -175,7 +179,7 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
           [1 ..]
   let equiv_case_default = eBody [toExp $ intConst Int64 0]
   -- Match the scrutinees againts the branch cases
-  equiv_classes <- letExp "equiv_classes" <=< segMap (MkSolo w) $ \(MkSolo i) -> do
+  equiv_classes <- letExp "equiv_classes" <=< segMap lvl (MkSolo w) $ \(MkSolo i) -> do
     -- unflatten index
     let seg_is = unflattenIndex (segmentDims segments) (pe64 i)
     scruts <- mapM (letSubExp "scruts" <=< flip eIndex (map toExp seg_is)) lifted_scrutinees
@@ -186,7 +190,7 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
   -- Parition the indices of the scrutinees by their equvalence class such
   -- that (the indices) of the scrutinees belonging to class 0 come first,
   -- then those belonging to class 1 and so on.
-  (partition_sizes, partition_offs, partition_inds) <- doPartition n_cases equiv_classes
+  (partition_sizes, partition_offs, partition_inds) <- doPartition lvl n_cases equiv_classes
   inds_t <- lookupType partition_inds
   -- Get the indices of each scrutinee by equivalence class
   branch_info <- forM [0 .. num_cases - 1] $ \i -> do
@@ -208,7 +212,7 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
   -- and is therefore the first segment after the partition.
   let branch_bodies = defaultCase : map (\(Case _ body) -> body) cases
   (branch_inputs, branch_envs, branch_dstms) <-
-    unzip3 <$> zipWithM (distributeBranch segments env inps) inds branch_bodies
+    unzip3 <$> zipWithM (distributeBranch lvl segments env inps) inds branch_bodies
 
   let branch_results = map bodyResult branch_bodies
   branch_reps <- forM [0 .. num_cases - 1] $ \i -> do
@@ -218,8 +222,8 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
     let result = branch_results !! fromIntegral i
         branch_segments = NE.singleton $ branch_sizes !! fromIntegral i
     env'' <- foldM (flattenDistStm ops branch_segments) env' dstms
-    zipWithM (liftDistResultRep branch_segments inputs env'') res result
+    zipWithM (liftDistResultRep lvl branch_segments inputs env'') res result
 
   -- Merge the results of the branches and insert the resulting res reps
-  reps <- zipWithM (mergeResult segments w inds) (L.transpose branch_reps) res
+  reps <- zipWithM (mergeResult lvl segments w inds) (L.transpose branch_reps) res
   pure $ insertReps (zip (map distResTag res) reps) env

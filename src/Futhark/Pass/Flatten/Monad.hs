@@ -307,13 +307,13 @@ isVariant inps env se = case se of
   Constant _ -> False
   Var v -> isJust $ M.lookup v $ inputReps inps env
 
-ensureDenseIrregular :: Name -> IrregularRep -> Builder GPU IrregularRep
-ensureDenseIrregular _ rep@IrregularRep {irregularK = Dense} =
+ensureDenseIrregular :: SegLevel -> Name -> IrregularRep -> Builder GPU IrregularRep
+ensureDenseIrregular _ _ rep@IrregularRep {irregularK = Dense} =
   pure rep
-ensureDenseIrregular desc rep@IrregularRep {} = do
-  (new_F, new_O, ii1) <- doRepIota (irregularS rep)
+ensureDenseIrregular lvl desc rep@IrregularRep {} = do
+  (new_F, new_O, ii1) <- doRepIota lvl (irregularS rep)
   m <- arraySize 0 <$> lookupType ii1
-  new_D <- letExp (desc <> "_dense_D") <=< segMap (MkSolo m) $ \(MkSolo i) -> do
+  new_D <- letExp (desc <> "_dense_D") <=< segMap lvl (MkSolo m) $ \(MkSolo i) -> do
     seg <- letSubExp "seg" =<< eIndex ii1 [eSubExp i]
     old_off <- letSubExp "old_off" =<< eIndex (irregularO rep) [eSubExp seg]
     new_off <- letSubExp "new_off" =<< eIndex new_O [eSubExp seg]
@@ -330,11 +330,11 @@ ensureDenseIrregular desc rep@IrregularRep {} = do
       }
 
 -- Lift a result of a function.
-liftResult :: Segments -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
-liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
+liftResult :: SegLevel -> Segments -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
+liftResult lvl segments inps env res = map (SubExpRes mempty . Var) <$> vs
   where
     vs = do
-      (_, rep) <- liftSubExp segments inps env (resSubExp res)
+      (_, rep) <- liftSubExp lvl segments inps env (resSubExp res)
       case rep of
         Regular v -> pure [v]
         Irregular irreg -> mkIrrep irreg
@@ -355,27 +355,29 @@ liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
         pure [num_data, segs, flags', offsets, elems']
 
 liftDistResultRep ::
+  SegLevel ->
   Segments ->
   DistInputs ->
   DistEnv ->
   DistResult ->
   SubExpRes ->
   Builder GPU ResRep
-liftDistResultRep segments inps env dist_res res
+liftDistResultRep lvl segments inps env dist_res res
   | isRegularDistResult dist_res = do
       let (DistType _ _ t) = distResType dist_res
           expectedShape = segmentsShape segments <> arrayShape t
-      Regular <$> liftSubExpRegular segments inps env expectedShape (resSubExp res)
+      Regular <$> liftSubExpRegular lvl segments inps env expectedShape (resSubExp res)
   | otherwise =
       case resSubExp res of
-        Var v -> Irregular <$> getIrregRep segments env inps v
+        Var v -> Irregular <$> getIrregRep lvl segments env inps v
         _ -> error "liftBranchResultRep: irregular result is not a variable"
 
 mkIrregFromReg ::
+  SegLevel ->
   Segments ->
   VName ->
   Builder GPU IrregularRep
-mkIrregFromReg segments arr = do
+mkIrregFromReg lvl segments arr = do
   arr_t <- lookupType arr
   num_segments <-
     letSubExp "reg_num_segments" <=< toExp $ product $ segmentDims segments
@@ -390,10 +392,10 @@ mkIrregFromReg segments arr = do
   arr_D <-
     letExp "reg_D" . BasicOp $
       Reshape arr (reshapeAll (arrayShape arr_t) (Shape [num_elems]))
-  arr_F <- letExp "reg_F" <=< segMap (MkSolo num_elems) $ \(MkSolo i) -> do
+  arr_F <- letExp "reg_F" <=< segMap lvl (MkSolo num_elems) $ \(MkSolo i) -> do
     flag <- letSubExp "flag" <=< toExp $ (pe64 i `rem` pe64 segment_size) .==. 0
     pure [subExpRes flag]
-  arr_O <- letExp "reg_O" <=< segMap (MkSolo num_segments) $ \(MkSolo i) -> do
+  arr_O <- letExp "reg_O" <=< segMap lvl (MkSolo num_segments) $ \(MkSolo i) -> do
     offset <- letSubExp "offset" <=< toExp $ pe64 i * pe64 segment_size
     pure [subExpRes offset]
   pure $
@@ -408,8 +410,8 @@ mkIrregFromReg segments arr = do
 -- If the sub-expression is a constant, replicate it to match the shape of `segments`
 -- If it's a variable, lookup the variable in the dist inputs and dist env,
 -- and if it can't be found it is a free variable, so we replicate it to match the shape of `segments`.
-liftSubExp :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU (Type, ResRep)
-liftSubExp segments inps env se = case se of
+liftSubExp :: SegLevel -> Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU (Type, ResRep)
+liftSubExp lvl segments inps env se = case se of
   c@(Constant prim) ->
     let t = Prim $ primValueType prim
      in ((t,) . Regular <$> letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c))
@@ -418,11 +420,11 @@ liftSubExp segments inps env se = case se of
       (t,)
         <$> case t of
           Prim {} -> pure $ Regular v'
-          Array {} -> Irregular <$> mkIrregFromReg segments v'
+          Array {} -> Irregular <$> mkIrregFromReg lvl segments v'
           Acc {} -> pure $ Regular v'
           Mem {} -> error "getRepSubExp: Mem"
     Just (t, Irregular irreg) -> do
-      irreg' <- ensureDenseIrregular "lifted_irreg" irreg
+      irreg' <- ensureDenseIrregular lvl "lifted_irreg" irreg
       pure (t, Irregular irreg')
     Nothing -> do
       t <- lookupType v
@@ -430,7 +432,7 @@ liftSubExp segments inps env se = case se of
       (t,)
         <$> case t of
           Prim {} -> pure $ Regular v'
-          Array {} -> Irregular <$> mkIrregFromReg segments v'
+          Array {} -> Irregular <$> mkIrregFromReg lvl segments v'
           Acc {} -> pure $ Regular v'
           Mem {} -> error "getRepSubExp: Mem"
 
@@ -451,20 +453,21 @@ liftSubExpPreserveRep segments inps env se = case se of
 -- | Like 'liftSubExp' but always returns a Regular result with the
 -- given expected shape. Reshapes the underlying data if necessary.
 liftSubExpRegular ::
+  SegLevel ->
   Segments ->
   DistInputs ->
   DistEnv ->
   Shape ->
   SubExp ->
   Builder GPU VName
-liftSubExpRegular segments inps env expectedShape se = do
+liftSubExpRegular lvl segments inps env expectedShape se = do
   v <- case se of
     c@(Constant _) ->
       letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
     Var x -> case M.lookup x $ inputReps inps env of
       Just (_, Regular v') -> pure v'
-      Just (_, Irregular irreg) -> do
-        rep_dense <- ensureDenseIrregular "lifted_irreg" irreg
+      Just (_, Irregular irreg) -> do 
+        rep_dense <- ensureDenseIrregular lvl "lifted_irreg" irreg
         pure $ irregularD rep_dense
       Nothing ->
         letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
@@ -487,17 +490,17 @@ distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
           Irregular r -> irregularD r
 
 -- | Only sensible for variables of segment-invariant type.
-dataArr :: Segments -> DistEnv -> DistInputs -> SubExp -> Builder GPU VName
-dataArr segments env inps (Var v)
+dataArr :: SegLevel -> Segments -> DistEnv -> DistInputs -> SubExp -> Builder GPU VName
+dataArr lvl segments env inps (Var v)
   | Just v_inp <- lookup v inps =
       case v_inp of
-        DistInputFree vs _ -> irregularD <$> mkIrregFromReg segments vs
+        DistInputFree vs _ -> irregularD <$> mkIrregFromReg lvl segments vs
         DistInput rt _ -> case resVar rt env of
-          Irregular r -> do
-            rep_dense <- ensureDenseIrregular "dataArr" r
+          Irregular r ->  do
+            rep_dense <- ensureDenseIrregular lvl "dataArr" r
             pure $ irregularD rep_dense
-          Regular vs -> irregularD <$> mkIrregFromReg segments vs
-dataArr segments _ _ se = do
+          Regular vs -> irregularD <$> mkIrregFromReg lvl segments vs
+dataArr _ segments _ _ se = do
   rep <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
   rep_t <- lookupType rep
   let dims = arrayDims rep_t
@@ -508,19 +511,19 @@ dataArr segments _ _ se = do
       letExp "reshape" $ BasicOp $ Reshape rep $ reshapeAll (arrayShape rep_t) (Shape [n])
 
 -- | Get the irregular representation of a var.
-getIrregRep :: Segments -> DistEnv -> DistInputs -> VName -> Builder GPU IrregularRep
-getIrregRep segments env inps v =
+getIrregRep :: SegLevel -> Segments -> DistEnv -> DistInputs -> VName -> Builder GPU IrregularRep
+getIrregRep lvl segments env inps v =
   case lookup v inps of
     Just v_inp -> case v_inp of
-      DistInputFree arr _ -> mkIrregFromReg segments arr
+      DistInputFree arr _ -> mkIrregFromReg lvl segments arr
       DistInput rt _ -> case resVar rt env of
         Irregular r -> pure r
-        Regular arr -> mkIrregFromReg segments arr
+        Regular arr -> mkIrregFromReg lvl segments arr
     Nothing -> do
       v' <-
         letExp (baseName v <> "_rep") . BasicOp $
           Replicate (segmentsShape segments) (Var v)
-      mkIrregFromReg segments v'
+      mkIrregFromReg lvl segments v'
 
 -- | This function walks through the *unlifted* result types
 -- and uses the *lifted* results to construct the corresponding res reps.
@@ -550,17 +553,18 @@ resultToResReps types results =
 -- The `offsets` variable is the offsets of the final result, whereas `irregRep`
 -- is the irregular representation of the result.
 scatterIrregular ::
+  SegLevel ->
   VName ->
   VName ->
   (VName, IrregularRep) ->
   Builder GPU VName
-scatterIrregular offsets space (is, irregRep) = do
-  dense_irreg <- ensureDenseIrregular "scatter_irreg" irregRep
+scatterIrregular lvl offsets space (is, irregRep) = do
+  dense_irreg <- ensureDenseIrregular lvl "scatter_irreg" irregRep
   let IrregularRep {irregularS = segs, irregularD = elems, irregularK = kind} = dense_irreg
-  (_, _, ii1) <- doRepIota segs
-  (_, _, ii2) <- doSegIota segs
+  (_, _, ii1) <- doRepIota lvl segs
+  (_, _, ii2) <- doSegIota lvl segs
   ~(Array _ (Shape [size]) _) <- lookupType elems
-  letExp "irregular_scatter" <=< genScatter space size $ \gtid -> do
+  letExp "irregular_scatter" <=< genScatter lvl space size $ \gtid -> do
     x <- letSubExp "x" =<< eIndex elems [eSubExp gtid]
     offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp gtid]]]
     i <- letExp "i" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp gtid])
@@ -568,25 +572,27 @@ scatterIrregular offsets space (is, irregRep) = do
 
 -- | Write back the regular results to a (partially) blank space
 scatterRegular ::
+  SegLevel ->
   VName ->
   (VName, VName) ->
   Builder GPU VName
-scatterRegular space (is, xs) = do
+scatterRegular lvl space (is, xs) = do
   size <- arraySize 0 <$> lookupType xs
-  letExp "regular_scatter" <=< genScatter space size $ \gtid -> do
+  letExp "regular_scatter" <=< genScatter lvl space size $ \gtid -> do
     x <- letSubExp "x" =<< eIndex xs [eSubExp gtid]
     i <- letExp "i" =<< eIndex is [eSubExp gtid]
     pure (i, x)
 
 -- | Functions for tying together disparate modules - this is to avoid mutually
 -- recursive modules.
-newtype FlattenOps = FlattenOps
-  { flattenDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
+data FlattenOps = FlattenOps
+  { flattenSegLevel :: SegLevel,
+    flattenDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
   }
 
 flattenDistStms :: FlattenOps -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
 flattenDistStms ops w inputs env dstms result = do
   let segments = NE.singleton w
   env' <- foldM (flattenDistStm ops segments) env dstms
-  result' <- mapM (liftResult segments inputs env') result
+  result' <- mapM (liftResult (flattenSegLevel ops) segments inputs env') result
   pure $ concat result'

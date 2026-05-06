@@ -59,7 +59,9 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
   let inputTypes (_, arrs, _) = mapM lookupType arrs
 
   lam_params' <- newAccLamParams $ lambdaParams acc_lam
-  iota_w <- genShapeIota $ segmentsShape segments
+
+  iota_w <- genShapeIota (flattenSegLevel ops) $ segmentsShape segments
+
   iota_p <- newParam "iota_p" $ Prim int64
   iota_w_t <- lookupType iota_w
   let iota_se = Var (paramName iota_p)
@@ -128,10 +130,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
   withacc_lam' <- mkLambda (map (trParam sf) lam_params') $ do
     env' <- foldM (flattenDistStm ops segments) env withacc_dstms
     -- TODO: Isn't this the fix that we need?
-    concat
-      <$> mapM
-        (liftResult segments withacc_new_inputs env')
-        (bodyResult $ lambdaBody acc_lam)
+    concat <$> mapM (liftResult (flattenSegLevel ops) segments withacc_new_inputs env') (bodyResult $ lambdaBody acc_lam)
 
   withacc_out_vs <-
     certifying (distCerts inps withacc_aux env) $
@@ -167,7 +166,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
           readInputVar segments env [] inps
 
     onNonuniformInput (_shape, arrs, op) = do
-      reps <- mapM (getIrregRep segments env inps) arrs
+      reps <- mapM (getIrregRep (flattenSegLevel ops) segments env inps) arrs
       let arrs' = map irregularD reps
       w <- fmap (arraySize 0) . lookupType $ head arrs'
       (,reps) . (Shape [w],arrs',) <$> traverse onOp op
