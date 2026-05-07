@@ -1,1 +1,0 @@
-Generator failed: gen_simple has Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./Generator/Crash.fut:11:7-9",""]

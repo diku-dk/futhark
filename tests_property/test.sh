@@ -40,6 +40,7 @@ run_test() {
         grep -vE "Compiling with|Running compiled|Running .*/|^$TEST_DIR/|[0-9]+ failed|[0-9]+ passed|[0-9]+/[0-9]+ passed" | \
         sed -E -e 's/seed=-?[0-9]+/seed=REDACTED/g' \
                -e 's/after [0-9]+ tests/after N tests/g' \
+               -e 's/candidate=-?[0-9]+/candidate=REDACTED/g' \
         > "$actual"
 
     if diff -u "$expected" "$actual" > /dev/null; then
