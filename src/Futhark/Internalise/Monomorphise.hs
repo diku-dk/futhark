@@ -37,7 +37,7 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
 import Data.Function
-import Data.List (intersperse, partition, sortBy)
+import Data.List (findIndex, intersperse, partition, sortBy)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust, isNothing)
@@ -175,7 +175,7 @@ withParams params = local $ \env -> env {envParametrized = params <> envParametr
 
 -- Mapping from function name and instance list to a new function name in case
 -- the function has already been instantiated with those concrete types.
-type Lifts = M.Map (VName, MonoType) (VName, InferSizeArgs)
+type Lifts = M.Map (VName, MonoType) (VName, InferSizeArgs, Int)
 
 data MonoState = MonoState
   { sVNameSource :: !VNameSource,
@@ -235,7 +235,7 @@ putExpReplacements x = modify $ \s -> s {sExpReplacements = x}
 getLifts :: MonoM Lifts
 getLifts = gets sLifts
 
-addLifted :: VName -> MonoType -> (VName, InferSizeArgs) -> MonoM ()
+addLifted :: VName -> MonoType -> (VName, InferSizeArgs, Int) -> MonoM ()
 addLifted fname il liftf =
   modify $ \s ->
     s
@@ -243,7 +243,7 @@ addLifted fname il liftf =
         sLiftedNames = S.insert (fst liftf) $ sLiftedNames s
       }
 
-lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
+lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs, Int))
 lookupLifted fname t = M.lookup (fname, t) <$> getLifts
 
 -- | Asks the introduced variables in a set of argument,
@@ -306,8 +306,8 @@ scoping :: S.Set VName -> MonoM Exp -> MonoM Exp
 scoping argset m =
   withArgs argset m >>= unscoping argset
 
--- Given instantiated type of function, produce size arguments.
-type InferSizeArgs = StructType -> MonoM [Exp]
+-- Given instantiated type of function, produce positioned size arguments.
+type InferSizeArgs = StructType -> MonoM [(Int, Exp)]
 
 -- | The integer encodes an equivalence class, so we can keep
 -- track of sizes that are statically identical.
@@ -401,38 +401,24 @@ transformFName loc fname ft = do
       maybe_funbind <- lookupFun $ qualLeaf fname
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphised.
-        (Just (fname', infer), _) ->
-          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
+        (Just (fname', _, num_size_args), _) ->
+          pure $ sizedVar fname' t' num_size_args
         -- An intrinsic function.
         (Nothing, Nothing) -> pure $ var fname t'
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
-          (fname', infer, funbind') <- monomorphiseBinding funbind mono_t
+          (fname', infer, num_size_args, funbind') <- monomorphiseBinding funbind mono_t
           addValBind funbind'
-          addLifted (qualLeaf fname) mono_t (fname', infer)
-          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
+          addLifted (qualLeaf fname) mono_t (fname', infer, num_size_args)
+          pure $ sizedVar fname' t' num_size_args
   where
     var fname' t' = Var fname' (Info t') loc
-
-    applySizeArg t (i, f) size_arg =
-      ( i - 1,
-        mkApply
-          f
-          [(Nothing, size_arg)]
-          (AppRes (foldFunType (replicate i i64) (RetType [] t)) [])
-      )
-
-    applySizeArgs fname' t size_args =
-      setApplyLoc loc . snd $
-        foldl'
-          (applySizeArg t)
-          ( length size_args - 1,
-            Var
-              (qualName fname')
-              (Info (foldFunType (map (const i64) size_args) (RetType [] t)))
-              loc
-          )
-          size_args
+    sizedVar fname' t' 0 = var (qualName fname') t'
+    sizedVar fname' t' num_size_args =
+      Var
+        (qualName fname')
+        (Info (foldFunType (replicate num_size_args i64) (RetType [] t')))
+        loc
 
 transformType :: TypeBase Size u -> MonoM (TypeBase Size u)
 transformType typ =
@@ -520,9 +506,46 @@ transformAppExp LetFun {} _ =
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> (Info <$> transformAppRes res)
 transformAppExp (Apply fe args loc) res =
-  setApplyLoc loc
-    <$> (mkApply <$> transformExp fe <*> mapM onArg (NE.toList args) <*> transformAppRes res)
+  case fe of
+    Var fname (Info ft) floc
+      | baseTag (qualLeaf fname) > maxIntrinsicTag -> do
+          let mono_t = monoType $ toStruct ft
+          maybe_fname <- lookupLifted (qualLeaf fname) mono_t
+          maybe_funbind <- lookupFun $ qualLeaf fname
+          case (maybe_fname, maybe_funbind) of
+            (Nothing, Nothing) ->
+              fallback
+            _ -> do
+              (infer, num_size_args) <- case maybe_fname of
+                Just (_, infer', num_size_args') ->
+                  pure (infer', num_size_args')
+                Nothing ->
+                  case maybe_funbind of
+                    Just funbind -> do
+                      (fname', infer', num_size_args', funbind') <- monomorphiseBinding funbind mono_t
+                      addValBind funbind'
+                      addLifted (qualLeaf fname) mono_t (fname', infer', num_size_args')
+                      pure (infer', num_size_args')
+                    Nothing ->
+                      fallbackLiftInfo
+              fe' <- transformFName floc fname $ toStruct ft
+              args' <- mapM onArg (NE.toList args)
+              AppRes res_t ext <- transformAppRes res
+              size_args <-
+                if num_size_args == 0
+                  then pure []
+                  else infer $ buildActualType (map (typeOf . snd) args') res_t
+              pure $
+                setApplyLoc loc $
+                  mkApply fe' (insertSizeArgs size_args args') (AppRes res_t ext)
+      where
+        fallbackLiftInfo = error "transformAppExp: impossible missing lift info"
+    _ ->
+      fallback
   where
+    fallback =
+      setApplyLoc loc
+        <$> (mkApply <$> transformExp fe <*> mapM onArg (NE.toList args) <*> transformAppRes res)
     onArg (Info ext, e) = (ext,) <$> transformExp e
 transformAppExp (Loop sparams pat loopinit form body loc) res = do
   e1' <- transformExp $ loopInitExp loopinit
@@ -875,13 +898,13 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
 
     freeVarsInExp = fvVars . freeInExp
 
-inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> MonoM [Exp]
+inferSizeArgs :: [(TypeParam, Int)] -> StructType -> ExpReplacements -> StructType -> MonoM [(Int, Exp)]
 inferSizeArgs tparams bind_t bind_r t = do
   r <- (<>) <$> getExpReplacements <*> asks envParametrized
   let dinst = dimMapping bind_t t bind_r r
   mapM (tparamArg dinst) tparams
   where
-    tparamArg dinst tp =
+    tparamArg dinst (tp, pos) =
       case M.lookup (typeParamName tp) dinst of
         Just e
           -- In some cases we infer anySizes for size arguments. This
@@ -889,9 +912,41 @@ inferSizeArgs tparams bind_t bind_r t = do
           -- on wood...), but we should never actually insert anySize
           -- as a concrete argument.
           | Nothing <- isAnySize e ->
-              replaceExp e
+              do
+                e' <- replaceExp e
+                pure (pos, e')
         _ ->
-          pure $ sizeFromInteger 0 mempty
+          pure (pos, sizeFromInteger 0 mempty)
+
+buildActualType :: [StructType] -> StructType -> StructType
+buildActualType arg_ts ret_t =
+  foldFunType (map (toParam Observe) arg_ts) (toRes Nonunique ret_t)
+
+insertSizeArgs :: [(Int, Exp)] -> [(Maybe VName, Exp)] -> [(Maybe VName, Exp)]
+insertSizeArgs extras =
+  interleaveByPosition (Nothing,) (map (\(pos, e) -> (e, pos)) extras)
+
+interleaveShapeParams ::
+  (TypeParam -> Pat ParamType) ->
+  [(TypeParam, Int)] ->
+  [Pat ParamType] ->
+  [Pat ParamType]
+interleaveShapeParams = interleaveByPosition
+
+interleaveByPosition :: (a -> b) -> [(a, Int)] -> [b] -> [b]
+interleaveByPosition mkExtra extras0 xs0 = go 0 extras0 xs0
+  where
+    go i extras [] =
+      map (mkExtra . fst) extras
+    go i [] xs =
+      xs
+    go i extras xs@(x : xs')
+      | snd (head extras) == i =
+          map (mkExtra . fst) before ++ go i after xs
+      | otherwise =
+          x : go (i + 1) extras xs'
+      where
+        (before, after) = span ((== i) . snd) extras
 
 -- Monomorphising higher-order functions can result in function types
 -- where the same named parameter occurs in multiple spots.  When
@@ -1012,7 +1067,7 @@ removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, l
 monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
-  MonoM (VName, InferSizeArgs, ValBind)
+  MonoM (VName, InferSizeArgs, Int, ValBind)
 monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
   let bind_t = funType params rettype
   (substs, t_shape_params) <-
@@ -1043,6 +1098,8 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
       (shape_params_explicit, shape_params_implicit) =
         partition (mkExplicit . typeParamName) $
           shape_params ++ t_shape_params ++ map (`TypeParamDim` mempty) (S.toList new_params)
+      shape_params_explicit' =
+        map (\tp -> (tp, paramPosition params'' tp)) shape_params_explicit
       exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
 
       bind_t'' = funType params'' rettype''
@@ -1065,7 +1122,8 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
       -- need any explicit size arguments (checked by type checker).
       if isJust entry
         then const $ pure []
-        else inferSizeArgs shape_params_explicit bind_t'' bind_r,
+        else inferSizeArgs shape_params_explicit' bind_t'' bind_r,
+      length shape_params_explicit,
       if isJust entry
         then
           toValBinding
@@ -1078,7 +1136,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
           toValBinding
             name'
             shape_params_implicit
-            (map shapeParam shape_params_explicit ++ params'')
+            (interleaveShapeParams shapeParam shape_params_explicit' params'')
             rettype''
             body'''
     )
@@ -1105,6 +1163,16 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
         }
 
     shapeParam tp = Id (typeParamName tp) (Info i64) $ srclocOf tp
+
+    paramPosition params'' tp =
+      maybe (length params'') id $
+        findIndex
+          ( (typeParamName tp `S.member`)
+              . fvVars
+              . freeInType
+              . patternType
+          )
+          params''
 
     toValBinding name' tparams' params'' rettype' body'' =
       ValBind
@@ -1213,9 +1281,9 @@ transformValBind valbind = do
           funType (valBindParams valbind) $
             unInfo $
               valBindRetType valbind
-    (name, infer, valbind'') <- monomorphiseBinding valbind' $ monoType t
+    (name, infer, num_size_args, valbind'') <- monomorphiseBinding valbind' $ monoType t
     addValBind valbind''
-    addLifted (valBindName valbind) (monoType t) (name, infer)
+    addLifted (valBindName valbind) (monoType t) (name, infer, num_size_args)
 
   let global =
         if null (valBindParams valbind)
