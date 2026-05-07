@@ -307,7 +307,7 @@ scoping argset m =
   withArgs argset m >>= unscoping argset
 
 -- Given instantiated type of function, produce size arguments.
-type InferSizeArgs = StructType -> MonoM [Exp]
+type InferSizeArgs = StructType -> M.Map VName Exp -> MonoM [Exp]
 
 -- | The integer encodes an equivalence class, so we can keep
 -- track of sizes that are statically identical.
@@ -391,7 +391,10 @@ replaceExp e =
     maybeNormalisedSize _ = Nothing
 
 transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
-transformFName loc fname ft = do
+transformFName loc fname ft = transformFNameWithSubsts loc fname ft mempty
+
+transformFNameWithSubsts :: SrcLoc -> QualName VName -> StructType -> M.Map VName Exp -> MonoM Exp
+transformFNameWithSubsts loc fname ft arg_substs = do
   t' <- transformType ft
   let mono_t = monoType ft
   if baseTag (qualLeaf fname) <= maxIntrinsicTag
@@ -402,7 +405,7 @@ transformFName loc fname ft = do
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphised.
         (Just (fname', infer), _) ->
-          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
+          applySizeArgs fname' (toRes Nonunique t') <$> infer t' arg_substs
         -- An intrinsic function.
         (Nothing, Nothing) -> pure $ var fname t'
         -- A polymorphic function.
@@ -410,7 +413,7 @@ transformFName loc fname ft = do
           (fname', infer, funbind') <- monomorphiseBinding funbind mono_t
           addValBind funbind'
           addLifted (qualLeaf fname) mono_t (fname', infer)
-          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
+          applySizeArgs fname' (toRes Nonunique t') <$> infer t' arg_substs
   where
     var fname' t' = Var fname' (Info t') loc
 
@@ -519,11 +522,32 @@ transformAppExp LetFun {} _ =
   error "transformAppExp: LetFun is not supposed to occur"
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> (Info <$> transformAppRes res)
-transformAppExp (Apply fe args loc) res =
-  setApplyLoc loc
-    <$> (mkApply <$> transformExp fe <*> mapM onArg (NE.toList args) <*> transformAppRes res)
+transformAppExp (Apply fe args loc) res = do
+  args' <- mapM onArg (NE.toList args)
+  fe' <-
+    case fe of
+      Var fname (Info t) floc ->
+        transformFNameWithSubsts
+          floc
+          fname
+          (toStruct t)
+          (argSubstsFromApply (toStruct t) (map snd args'))
+      _ ->
+        transformExp fe
+  res' <- transformAppRes res
+  pure $ setApplyLoc loc $ mkApply fe' args' res'
   where
     onArg (Info ext, e) = (ext,) <$> transformExp e
+    argSubstsFromApply :: TypeBase Size u -> [Exp] -> M.Map VName Exp
+    argSubstsFromApply = go
+      where
+        go :: TypeBase Size u -> [Exp] -> M.Map VName Exp
+        go (Scalar (Arrow _ (Named vn) _ _ (RetType _ t'))) (e : es) =
+          M.insert vn e $ go t' es
+        go (Scalar (Arrow _ Unnamed _ _ (RetType _ t'))) (_ : es) =
+          go t' es
+        go _ _ =
+          mempty
 transformAppExp (Loop sparams pat loopinit form body loc) res = do
   e1' <- transformExp $ loopInitExp loopinit
 
@@ -875,8 +899,8 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
 
     freeVarsInExp = fvVars . freeInExp
 
-inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> MonoM [Exp]
-inferSizeArgs tparams bind_t bind_r t = do
+inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> M.Map VName Exp -> MonoM [Exp]
+inferSizeArgs tparams bind_t bind_r t arg_substs = do
   r <- (<>) <$> getExpReplacements <*> asks envParametrized
   let dinst = dimMapping bind_t t bind_r r
   mapM (tparamArg dinst) tparams
@@ -890,8 +914,15 @@ inferSizeArgs tparams bind_t bind_r t = do
           -- as a concrete argument.
           | Nothing <- isAnySize e ->
               replaceExp e
+        _ | Just (ReplacedExp e, _) <- find ((== typeParamName tp) . snd) bind_r -> do
+              let e' = applySubst (\v -> ExpSubst <$> M.lookup v arg_substs) e
+              scope <- askScope
+              if S.filter notIntrinsic (fvVars (freeInExp e')) `S.isSubsetOf` scope
+                then replaceExp e'
+                else pure $ sizeFromInteger 0 mempty
         _ ->
           pure $ sizeFromInteger 0 mempty
+    notIntrinsic vn = baseTag vn > maxIntrinsicTag
 
 -- Monomorphising higher-order functions can result in function types
 -- where the same named parameter occurs in multiple spots.  When
@@ -1064,7 +1095,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
       -- If the function is an entry point, then it cannot possibly
       -- need any explicit size arguments (checked by type checker).
       if isJust entry
-        then const $ pure []
+        then \_ _ -> pure []
         else inferSizeArgs shape_params_explicit bind_t'' bind_r,
       if isJust entry
         then
