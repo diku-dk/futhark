@@ -368,18 +368,14 @@ runOne s config srv entryNameRef = do
               let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
 
               runUpdate genName
-              -- liftIO $ putStrLn $ "About to do generation!"
               generatorCandidateE <- if genName == "$no_gen$"
                 then do
-                  -- If no generator is given, we just put the size and seed variables and expect the property to use them directly.
-                  -- liftIO $ putStrLn "\nTrying to run haskell generator..."
                   liftIO $ freeVars srv [serverIn]
                   propType <- liftIO (getSingleInputType srv propName) >>= \case
                     Left err -> throwE $ showText err
                     Right ty -> pure ty
                   errE <- liftIO $ makeFutGenerator srv serverIn propType size seed
                   either (throwE . ("Haskell generator failed: " <>)) pure errE
-                  -- liftIO $ putStrLn "Haskell generator finished."
                   pure $ Right ()
                 else do liftIO $ generatorPhase genName serverSize serverSeed serverIn size seed
               either throwE pure generatorCandidateE
@@ -415,7 +411,6 @@ runOne s config srv entryNameRef = do
                           <> showText i
                           <> " tests\n"
 
-                  -- liftIO $ putStrLn $ "Calling shrinker with generator: " <> show genName <> " and shrinker: " <> show (psShrink s)
                   shrinkRes <- case psShrink s of
                     Just "auto" -> liftIO $ autoShrinkLoop srv propName genName serverIn size seed entryNameRef
                     Just sh -> liftIO $ shrinkLoop srv propName serverIn sh seed (configShrinkTries config) entryNameRef
