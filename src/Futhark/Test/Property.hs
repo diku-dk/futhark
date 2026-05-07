@@ -19,14 +19,16 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except
 import Data.Char (chr)
 import Data.IORef
-import Data.Int (Int32, Int64)
+import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Vector.Storable qualified as SV
+import Data.Word (Word8, Word16, Word32, Word64)
 import Futhark.Data
 import Futhark.Server
 import Futhark.Server.Values qualified as FSV
 import Futhark.Util (showText)
+import Numeric.Half (Half)
 import System.Random (mkStdGen, random, randomIO)
 
 data PBTConfig = PBTConfig
@@ -70,8 +72,11 @@ lookupArgWith :: T.Text -> (T.Text -> Maybe a) -> [T.Text] -> Maybe a
 lookupArgWith name f = msum . map (stripCall name >=> f)
 
 stripCall :: T.Text -> T.Text -> Maybe T.Text
-stripCall name =
-  T.stripSuffix ")" <=< T.stripPrefix (name <> "(") . T.strip
+stripCall name t =
+  let s = T.strip t
+  in if s == name
+     then Just "" 
+     else T.stripSuffix ")" <=< T.stripPrefix (name <> "(") $ s
 
 readMaybeText :: (Read a) => T.Text -> Maybe a
 readMaybeText t =
@@ -99,7 +104,8 @@ validateOneSpec srv eps spec = do
 
     genName <- case psGen spec of
       Nothing ->
-        throwE $ "No generator specified for " <> prop -- here we could use gen library?
+        pure "$no_gen$" -- placeholder name for entrypoint that user cannot write.
+                        -- not the most elegant solution but allows us to reuse most of the logic. 
       Just g
         | g `notElem` eps ->
             throwE $ "Generator is not a server entry point: " <> g
@@ -154,7 +160,52 @@ getOutputType s entry = do
       cmdOutput s entry
   pure $ outputType out
 
+makeFutGenerator :: Server -> EntryName -> TypeName -> Int64 -> Int32 -> IO (Either PBTFailure ())
+makeFutGenerator srv candidate genTy size seed = do
+  let branchGen = mkStdGen (fromIntegral seed)
+  let ((pseudoRandom :: Int64), _) = random branchGen
+  -- max allowed number decided by size
+  let maxAllowed = if size < pseudoRandom then size else pseudoRandom
+  case genTy of
+    -- Primitives (Base Cases)
+    "i8"  -> putVal srv candidate (fromIntegral maxAllowed :: Int8) >> pure (Right ())
+    "i16" -> putVal srv candidate (fromIntegral maxAllowed :: Int16) >> pure (Right ())
+    "i32" -> putVal srv candidate (fromIntegral maxAllowed :: Int32) >> pure (Right ())
+    "u8"  -> putVal srv candidate (fromIntegral maxAllowed :: Word8) >> pure (Right ())
+    "u16" -> putVal srv candidate (fromIntegral maxAllowed :: Word16) >> pure (Right ())
+    "u32" -> putVal srv candidate (fromIntegral maxAllowed :: Word32) >> pure (Right ())
+    "u64" -> putVal srv candidate (fromIntegral maxAllowed :: Word64) >> pure (Right ())
+    "i64" -> putVal srv candidate (fromIntegral maxAllowed :: Int64) >> pure (Right ())
+    "f32" -> putVal srv candidate (fromIntegral maxAllowed :: Float) >> pure (Right ())
+    "f64" -> putVal srv candidate (fromIntegral maxAllowed :: Double) >> pure (Right ())
+    "bool" -> putVal srv candidate (seed `mod` 2 == 0) >> pure (Right ())
+    _ | "[]" `T.isPrefixOf` genTy -> do
+      let innerTy = T.drop 2 genTy
+      let len = size
+
+      let elemNames = [candidate <> "_e" <> showText i | i <- [0 .. len - 1]]
+
+      results <- forM (zip [0..] elemNames) $ \(i, eName) -> do
+        let branchGen' = mkStdGen (fromIntegral pseudoRandom + fromIntegral i)
+        let (pseudoRandom', _) = random branchGen'
+        makeFutGenerator srv eName innerTy (fromIntegral i) pseudoRandom'
+
+      case sequence results of
+        Left err -> pure $ Left err
+        Right _  -> do
+          let shape = [fromIntegral len]
+          freeVars srv [candidate]
+          cmdErrorHandlerM ("new_array failed for " <> candidate <> ": ") $
+            cmdNewArray srv candidate genTy shape elemNames
+          
+          freeVars srv elemNames
+          pure $ Right ()
+
+    _ -> pure $ Left ("Haskell-side generation not implemented for type: " <> genTy)
+
+
 validateGenTypes :: Server -> EntryName -> EntryName -> IO (Maybe PBTFailure)
+validateGenTypes _ _ "$no_gen$" = pure Nothing -- should have more logic to see if we can actually generate anything
 validateGenTypes srv propName genName = fmap (either Just (const Nothing)) . runExceptT $ do
   -- find expected input types for generator
   genIns <- liftIO $ getInputTypes srv genName
@@ -299,7 +350,8 @@ validatePPrintTypes srv propName ppName = fmap (either Just (const Nothing)) . r
 runOne :: PropSpec -> PBTConfig -> Server -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
 runOne s config srv entryNameRef = do
   let propName = psProp s
-      genName = fromMaybe (error "missing generator") (psGen s)
+      -- genName = fromMaybe (error "missing generator") (psGen s)
+      genName = fromMaybe "$no_gen$" (psGen s) -- placeholder to allow attribute to not specify a generator.
       size = fromMaybe (configMaxSize config) (psSize s)
       numTests = configNumTests config
       serverSize = "runPBT_size"
@@ -316,7 +368,20 @@ runOne s config srv entryNameRef = do
               let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
 
               runUpdate genName
-              generatorCandidateE <- liftIO $ generatorPhase genName serverSize serverSeed serverIn size seed
+              -- liftIO $ putStrLn $ "About to do generation!"
+              generatorCandidateE <- if genName == "$no_gen$"
+                then do
+                  -- If no generator is given, we just put the size and seed variables and expect the property to use them directly.
+                  -- liftIO $ putStrLn "\nTrying to run haskell generator..."
+                  liftIO $ freeVars srv [serverIn]
+                  propType <- liftIO (getSingleInputType srv propName) >>= \case
+                    Left err -> throwE $ showText err
+                    Right ty -> pure ty
+                  errE <- liftIO $ makeFutGenerator srv serverIn propType size seed
+                  either (throwE . ("Haskell generator failed: " <>)) pure errE
+                  -- liftIO $ putStrLn "Haskell generator finished."
+                  pure $ Right ()
+                else do liftIO $ generatorPhase genName serverSize serverSeed serverIn size seed
               either throwE pure generatorCandidateE
 
               runUpdate propName
@@ -350,6 +415,7 @@ runOne s config srv entryNameRef = do
                           <> showText i
                           <> " tests\n"
 
+                  -- liftIO $ putStrLn $ "Calling shrinker with generator: " <> show genName <> " and shrinker: " <> show (psShrink s)
                   shrinkRes <- case psShrink s of
                     Just "auto" -> liftIO $ autoShrinkLoop srv propName genName serverIn size seed entryNameRef
                     Just sh -> liftIO $ shrinkLoop srv propName serverIn sh seed (configShrinkTries config) entryNameRef
@@ -452,18 +518,21 @@ autoShrinkLoop srv propName genName vCounterExample size seed phaseRef = runExce
         | otherwise = do
             let newSize = i - 1
 
-            insE <- liftIO $ cmdInputs srv genName
-            liftIO $
-              either
-                (fail . show)
-                (\_ -> putVal srv serverSize newSize >> putVal srv serverSeed seed)
-                insE
+            liftIO $ putVal srv serverSize newSize >> putVal srv serverSeed seed
 
             -- Note: Since withFreedVars manages server-side resources,
             -- we lift the whole block into IO then handle the result.
             res <- liftIO $ withFreedVars srv [vCandidate] $ runExceptT $ do
               liftIO $ autoShrinkUpdatePhase (Just genName)
-              errM <- liftIO $ callFreeIns srv genName vCandidate [serverSize, serverSeed]
+              errM <- if genName == "$no_gen$"
+                then do
+                  propertyType <- liftIO (getSingleInputType srv propName) >>= \case
+                    Left err -> throwE $ showText err
+                    Right ty -> pure ty
+                  liftIO $ freeVars srv [serverSize, serverSeed]
+                  errE <- liftIO $ makeFutGenerator srv vCandidate propertyType newSize seed
+                  either (throwE . ("Haskell generator failed for auto shrinking: " <>)) (const $ pure Nothing) errE
+                else liftIO $ callFreeIns srv genName vCandidate [serverSize, serverSeed]
               maybe (pure ()) (throwE . (("Generator failed: " <> genName <> " has ") <>)) errM
 
               liftIO $ autoShrinkUpdatePhase (Just propName)
@@ -525,27 +594,27 @@ shrinkLoop srv propName counterExample shrinkName seed numTries phaseRef = runEx
       let vOk = "qc_ok"
           vRandomValue = "qc_random"
 
-      let shrinkUpdatePhase activeTest = updatePhase (Just propName) (Just shrinkName) activeTest (Just size) (Just seed) Nothing phaseRef
+      let shrinkUpdatePhase activeTest randomNum = updatePhase (Just propName) (Just shrinkName) activeTest (Just size) (Just seed) randomNum phaseRef
 
       freeVars srv [vRandomValue]
       putVal srv vRandomValue randomValue
 
       let shrinkerCandidate = outName shrinkName
-      shrinkUpdatePhase Nothing
+      shrinkUpdatePhase Nothing $ Just randomValue
 
       withFreedVar srv shrinkerCandidate $ runExceptT $ do
         errE <- liftIO $ callKeepIns srv shrinkName shrinkerCandidate [counterExample, vRandomValue]
         liftIO $ freeVars srv [vRandomValue]
         maybe (pure ()) (throwE . ((shrinkName <> " has ") <>)) errE
 
-        liftIO $ shrinkUpdatePhase Nothing
+        liftIO $ shrinkUpdatePhase Nothing $ Just randomValue
 
         okE <- liftIO $
           withCallKeepIns srv propName vOk [shrinkerCandidate] $
             \vOk' -> getVal srv vOk'
         ok <- either (throwE . ("Property " <>)) pure okE
 
-        liftIO $ shrinkUpdatePhase Nothing
+        liftIO $ shrinkUpdatePhase Nothing $ Just randomValue
 
         case ok of
           True -> pure NotAcceptedShrink
@@ -560,7 +629,9 @@ outName = (<> "_out")
 putVal :: (PutValue1 a) => Server -> T.Text -> a -> IO ()
 putVal s name x = do
   let v = putValue1 x
+  -- freeVars s [name]
   cmdErrorHandlerM ("putValue failed for " <> name <> ": ") $ FSV.putValue s name v
+
 
 freeVars :: Server -> [VarName] -> IO ()
 freeVars s vs = do

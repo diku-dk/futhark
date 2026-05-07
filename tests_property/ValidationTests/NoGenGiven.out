@@ -1,0 +1,8 @@
+PBT FAIL: boolArr size=50 seed=REDACTED after N tests
+Minimal counterexample: [true, true, false]
+PBT FAIL: prop size=50 seed=REDACTED after N tests
+Minimal counterexample: -51i8
+PBT FAIL: prop2 size=50 seed=REDACTED after N tests
+Minimal counterexample: [0i8, 52i8, 2i8, 3i8, 4i8]
+PBT FAIL: prop3 size=50 seed=REDACTED after N tests
+Minimal counterexample: [0u64, 12566788057432165940u64]
