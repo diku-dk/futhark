@@ -236,11 +236,11 @@ getLifts :: MonoM Lifts
 getLifts = gets sLifts
 
 addLifted :: VName -> MonoType -> (VName, InferSizeArgs, Int) -> MonoM ()
-addLifted fname il liftf =
+addLifted fname il liftf@(lname, _, _) =
   modify $ \s ->
     s
       { sLifts = M.insert (fname, il) liftf (sLifts s),
-        sLiftedNames = S.insert (fst liftf) $ sLiftedNames s
+        sLiftedNames = S.insert lname $ sLiftedNames s
       }
 
 lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs, Int))
@@ -417,7 +417,7 @@ transformFName loc fname ft = do
     sizedVar fname' t' num_size_args =
       Var
         (qualName fname')
-        (Info (foldFunType (replicate num_size_args i64) (RetType [] t')))
+        (Info (foldFunType (replicate num_size_args i64) (toResRet Nonunique (RetType [] t'))))
         loc
 
 transformType :: TypeBase Size u -> MonoM (TypeBase Size u)
@@ -920,7 +920,7 @@ inferSizeArgs tparams bind_t bind_r t = do
 
 buildActualType :: [StructType] -> StructType -> StructType
 buildActualType arg_ts ret_t =
-  foldFunType (map (toParam Observe) arg_ts) (toRes Nonunique ret_t)
+  foldFunType (map (toParam Observe) arg_ts) (RetType [] (toRes Nonunique ret_t))
 
 insertSizeArgs :: [(Int, Exp)] -> [(Maybe VName, Exp)] -> [(Maybe VName, Exp)]
 insertSizeArgs extras =
