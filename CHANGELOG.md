@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* A regression in fusion (#2444).
+
+* A potential compiler crash in register tiling (#2441).
+
 ## [0.26.1]
 
 ### Changed
