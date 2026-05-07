@@ -1679,7 +1679,7 @@ distributeAndTransformInnerMap lvl mode ws_triple new_segment inps pat arrs' onF
   free_ps <-
     zipWithM
       newParam
-      (map ((<> "_free") . baseName) free_and_sizes) -- this should free_replicated?
+      (map ((<> "_free") . baseName) free_replicated) -- this should free_replicated?
       (map mapArrayRowType replicated)
   scope <- askScope
   let substs = M.fromList $ zip free_replicated $ map paramName free_ps
