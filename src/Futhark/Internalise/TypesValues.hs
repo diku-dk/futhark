@@ -221,7 +221,7 @@ internaliseDim exts d =
     e | Just _ <- E.isAnySize e -> Ext <$> newId
     (E.IntLit n _ _) -> pure $ I.Free $ intConst I.Int64 n
     (E.Var name _ _) -> pure $ namedDim name
-    e -> error $ "Unexpected size expression: " ++ prettyString e
+    _ -> Ext <$> newId
   where
     namedDim (E.QualName _ name)
       | Just x <- name `M.lookup` exts = I.Ext x

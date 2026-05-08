@@ -849,8 +849,7 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
           error "lowerPath: unexpected anonymous size in slice type"
     dimOfSize (E.IntLit n _ _) = pure $ intConst Int64 n
     dimOfSize (E.Var (E.QualName _ v) _ _) = pure $ I.Var v
-    dimOfSize d =
-      error $ "lowerPath: unexpected size expression " ++ prettyString d
+    dimOfSize d = fst <$> internaliseSizeExp "dim" d
 
     splitField ::
       E.StructType ->

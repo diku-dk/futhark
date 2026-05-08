@@ -362,34 +362,6 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
             )
           pure $ MonoKnown i
 
-sizeVarName :: Exp -> Name
-sizeVarName e = "d<{" <> nameFromText (prettyText (bareExp e)) <> "}>"
-
--- | Creates a new expression replacement if needed, this always produces normalised sizes.
--- (e.g. single variable or constant)
-replaceExp :: Exp -> MonoM Exp
-replaceExp e =
-  case maybeNormalisedSize e of
-    Just e' -> pure e'
-    Nothing -> do
-      let e' = ReplacedExp e
-      prev <- lookup e' <$> getExpReplacements
-      prev_param <- asks $ lookup e' . envParametrized
-      case (prev_param, prev) of
-        (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
-        (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
-        (Nothing, Nothing) -> do
-          vn <- newVName $ sizeVarName e
-          putExpReplacements . ((e', vn) :) =<< getExpReplacements
-          pure $ sizeFromName (qualName vn) (srclocOf e)
-  where
-    -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
-    maybeNormalisedSize e'
-      | Just e'' <- stripExp e' = maybeNormalisedSize e''
-    maybeNormalisedSize (Var qn _ loc) = Just $ sizeFromName qn loc
-    maybeNormalisedSize (IntLit v _ loc) = Just $ IntLit v (Info i64) loc
-    maybeNormalisedSize _ = Nothing
-
 transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
 transformFName loc fname ft = do
   t' <- transformType ft
@@ -465,7 +437,7 @@ transformType typ =
 
     onDim e
       | Just _ <- isAnySize e = pure e
-      | otherwise = replaceExp =<< transformExp e
+      | otherwise = transformExp e
 
 transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
 transformRetTypeSizes argset (RetType dims ty) = do
@@ -882,14 +854,14 @@ inferSizeArgs tparams bind_t bind_r t = do
   mapM (tparamArg dinst) tparams
   where
     tparamArg dinst tp =
-      case M.lookup (typeParamName tp) dinst of
-        Just e
-          -- In some cases we infer anySizes for size arguments. This
-          -- only occurs when those sizes don't actually matter (knock
-          -- on wood...), but we should never actually insert anySize
-          -- as a concrete argument.
-          | Nothing <- isAnySize e ->
-              replaceExp e
+        case M.lookup (typeParamName tp) dinst of
+          Just e
+            -- In some cases we infer anySizes for size arguments. This
+            -- only occurs when those sizes don't actually matter (knock
+            -- on wood...), but we should never actually insert anySize
+            -- as a concrete argument.
+            | Nothing <- isAnySize e ->
+                pure e
         _ ->
           pure $ sizeFromInteger 0 mempty
 
