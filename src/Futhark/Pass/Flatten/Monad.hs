@@ -472,7 +472,7 @@ liftSubExpRegular lvl segments inps env expectedShape se = do
       Nothing ->
         letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
   v_t <- lookupType v
-  if arrayShape v_t == expectedShape
+  if isAcc v_t || arrayShape v_t == expectedShape
     then pure v
     else
       letExp "reg_lifted" . BasicOp $
