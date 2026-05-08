@@ -437,7 +437,20 @@ transformType typ =
 
     onDim e
       | Just _ <- isAnySize e = pure e
-      | otherwise = transformExp e
+      | otherwise = do
+          e' <- transformExp e
+          case e' of
+            IntLit {} -> pure e'
+            Var {} -> pure e'
+            _ -> do
+              repl <- getExpReplacements
+              case lookup (ReplacedExp e') repl of
+                Just v ->
+                  pure $ sizeFromName (qualName v) mempty
+                Nothing -> do
+                  v <- newVName "size"
+                  putExpReplacements $ (ReplacedExp e', v) : repl
+                  pure $ sizeFromName (qualName v) mempty
 
 transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
 transformRetTypeSizes argset (RetType dims ty) = do
