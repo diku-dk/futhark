@@ -490,6 +490,20 @@ transformAppExp (Range e1 me incl loc) res = do
   pure $ AppExp (Range e1' me' incl' loc) (Info res')
 transformAppExp (LetPat sizes pat e body loc) res = do
   e' <- transformExp e
+  -- If the RHS is a reference to a lifted (size-augmented) function, propagate
+  -- the lift info to the names bound in the pattern. This ensures that
+  -- subsequent applications of those names (e.g. 'let h = f; h a b g') also
+  -- insert the required size arguments, making the occurrences fully saturated.
+  case e of
+    Var fname (Info ft) _
+      | baseTag (qualLeaf fname) > maxIntrinsicTag -> do
+          let mono_t = monoType $ toStruct ft
+          maybe_lifted <- lookupLifted (qualLeaf fname) mono_t
+          case maybe_lifted of
+            Just lift_info ->
+              mapM_ (\vn -> addLifted vn mono_t lift_info) (patNames pat)
+            Nothing -> pure ()
+    _ -> pure ()
   let dimArgs = S.fromList (map sizeName sizes)
   implicitDims <- withArgs dimArgs $ askIntros $ fvVars $ freeInPat pat
   let dimArgs' = dimArgs <> implicitDims
