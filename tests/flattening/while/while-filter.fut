@@ -1,5 +1,5 @@
 -- == Currently fails
--- input { [3i64, 7i64, 100i64, 1i64, 1000i64] }
+-- input { [3i64, 7i64, 9i64, 1i64, 7i64] }
 -- auto output
 def main (xs) =
   map (\x ->
