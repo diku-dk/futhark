@@ -348,8 +348,13 @@ genSegRedomap lvl segments flags offsets elems red map_lam readFree = do
 
 -- | Produces a multidimensional iota for the given shape.
 genShapeIota :: SegLevel -> Shape -> Builder GPU VName
-genShapeIota lvl shape =
-  letExp "shape_iota" =<< segMap lvl (shapeDims shape) (pure . subExpsRes)
+genShapeIota lvl shape = do
+  let dims = shapeDims shape
+  letExp "shape_iota" <=< segMap lvl dims $ \gtids -> do
+    i <-
+      toSubExp "shape_iota_elem" $
+        flattenIndex (map pe64 dims) (map pe64 gtids)
+    pure [subExpRes i]
 
 -- Returns (#segments, segment start offsets, sum of segment sizes)
 -- Note: If given a multi-dimensional array,

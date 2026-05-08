@@ -23,20 +23,18 @@ import Futhark.Pass.Flatten.Monad
 import Futhark.Tools
 import Prelude hiding (div, rem)
 import Data.Map qualified as M
-flatSegmentIndex :: Segments -> [SubExp] -> TPrimExp Int64 VName
-flatSegmentIndex segments = flattenIndex (segmentDims segments) . map pe64
 
 indexIrreg ::
   (MonadBuilder m) =>
   Segments ->
   DistEnv ->
   IrregularRep ->
-  [SubExp] ->
+  SubExp ->
   ShapeBase SubExp ->
   [SubExp] ->
   m SubExp
-indexIrreg segments _env rep is shape js = do
-  offset <- letSubExp "uacc_segment_offset" =<< eIndex (irregularO rep) [toExp $ flatSegmentIndex segments is]
+indexIrreg _segments _env rep is shape js = do
+  offset <- letSubExp "uacc_segment_offset" =<< eIndex (irregularO rep) [eSubExp is]
   letSubExp "flat_uacc_idx" <=< toExp $
     pe64 offset
       + flattenIndex
@@ -83,16 +81,18 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
                 L.lookup c $
                   zip (map paramName lam_params') $
                     zip withacc_inputs input_reps
-              Just $ L.singleton <$> indexIrreg segments env rep [iota_se] shape is
+              Just $ L.singleton <$> indexIrreg segments env rep iota_se shape is
         pure (withacc_inputs', trAccIndex, concat input_reps)
       else do
         withacc_inputs' <- mapM onUniformInput withacc_inputs
         let trAccIndex c is = do
-              _ <-
-                L.lookup c $ zip (map paramName lam_params') withacc_inputs
-              Just $ pure $ iota_se : is
+              _ <- L.lookup c $ zip (map paramName lam_params') withacc_inputs
+              Just $ do
+                iota_se_unflat <-
+                  mapM (letSubExp "iota_idx" <=< toExp) $
+                    unflattenIndex (segmentDims segments) (pe64 iota_se)
+                pure $ iota_se_unflat ++ is
         pure (withacc_inputs', trAccIndex, [])
-
   let trAccShape c = do
         (ispace, _, _) <- L.lookup c $ zip (map paramName lam_params') withacc_inputs'
         pure ispace
@@ -166,12 +166,14 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
 
     num_accs = length withacc_inputs
 
-    onOp (op_lam, nes) = do
+    onOpWithIndexRank index_rank (op_lam, nes) = do
       -- We need to add an additional index parameter because we are
       -- extending the index space of the accumulator.
-      idx_p <- newParam "idx" $ Prim int64
+      -- In the unifrom case we have the full index space of the segments, while in the nonuniform case we only have one additional dimension.
+      idx_ps <- replicateM index_rank $ newParam "idx" $ Prim int64
       pure
-        ( soacsLambdaToGPU $ op_lam {lambdaParams = idx_p : lambdaParams op_lam},
+        ( soacsLambdaToGPU $
+            op_lam {lambdaParams = idx_ps <> lambdaParams op_lam},
           nes
         )
 
@@ -179,7 +181,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
     onUniformInput (shape, arrs, op) =
       (segmentsShape segments <> shape,,)
         <$> mapM onArr arrs
-        <*> traverse onOp op
+        <*> traverse (onOpWithIndexRank (segmentsRank segments)) op
       where
         onArr arr =
           liftSubExpRegular (flattenSegLevel ops) segments inps env (segmentsShape segments <> shape) (Var arr)
@@ -190,7 +192,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
       reps_dense <- mapM (ensureDenseIrregular (flattenSegLevel ops) "withacc_input") reps
       let arrs' = map irregularD reps_dense
       w <- fmap (arraySize 0) . lookupType $ head arrs'
-      (,reps_dense) . (Shape [w],arrs',) <$> traverse onOp op
+      (,reps_dense) . (Shape [w],arrs',) <$> traverse (onOpWithIndexRank 1) op
 
     liftWithAccResult lvl segs inputs env' (dist_res, res) = 
       case resSubExp res of
