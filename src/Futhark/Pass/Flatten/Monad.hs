@@ -369,7 +369,9 @@ liftDistResultRep lvl segments inps env dist_res res
       Regular <$> liftSubExpRegular lvl segments inps env expectedShape (resSubExp res)
   | otherwise =
       case resSubExp res of
-        Var v -> Irregular <$> getIrregRep lvl segments env inps v
+        Var v -> do 
+          rep <- getIrregRep lvl segments env inps v
+          Irregular <$>  ensureDenseIrregular lvl "liftDistResultRep_dense" rep
         _ -> error "liftBranchResultRep: irregular result is not a variable"
 
 mkIrregFromReg ::
