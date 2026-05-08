@@ -854,14 +854,14 @@ inferSizeArgs tparams bind_t bind_r t = do
   mapM (tparamArg dinst) tparams
   where
     tparamArg dinst tp =
-        case M.lookup (typeParamName tp) dinst of
-          Just e
-            -- In some cases we infer anySizes for size arguments. This
-            -- only occurs when those sizes don't actually matter (knock
-            -- on wood...), but we should never actually insert anySize
-            -- as a concrete argument.
-            | Nothing <- isAnySize e ->
-                pure e
+      case M.lookup (typeParamName tp) dinst of
+        Just e
+          -- In some cases we infer anySizes for size arguments. This
+          -- only occurs when those sizes don't actually matter (knock
+          -- on wood...), but we should never actually insert anySize
+          -- as a concrete argument.
+          | Nothing <- isAnySize e ->
+              pure e
         _ ->
           pure $ sizeFromInteger 0 mempty
 
