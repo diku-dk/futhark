@@ -48,23 +48,34 @@ let update_at_n [n] (kk: i64) (xs: [n]{ s: i32, a: i32 }) : ([n]{ s: i32, a: i32
 
 entry shrink_arr_record (xs: arr) (random: i32) : arr =
   let n : i64 = length xs
-  let tactic = random % i32.i64 n
-  let t : i32 = if tactic < 0i32 then 0i32 else tactic
-  let n_i32 : i32 = i32.i64 n
   in if n == 0 then
        xs
-     else if t < n_i32 then
-       let kk =
-         let k64 = i64.i32 t
-         in if k64 < 0 then 0
-            else if k64 >= n then n-1
-            else k64
-       let xsN : [n]{ s: i32, a: i32 } = xs :> [n]{ s: i32, a: i32 }
-       let (xsN', changed) = update_at_n kk xsN
-       let out : arr = xsN' :> arr
-       in if changed then out else xs
      else
-       xs
+       let r0 = i64.i32 random
+       let r = if r0 < 0 then -r0 else r0
+       let t = r % (2 * n)
+
+       -- Phase 1: try to shrink one record field.
+       in if t < n then
+            let xsN : [n]{ s: i32, a: i32 } = xs :> [n]{ s: i32, a: i32 }
+            let (xsN', changed) = update_at_n t xsN
+            let out : arr = xsN' :> arr
+            in if changed then
+                 out
+               else
+                 -- Avoid returning the same failing candidate.
+                 if n == 1 then
+                   []
+                 else
+                   take t xs ++ drop (t + 1) xs
+
+          -- Phase 2: drop one record.
+          else
+            let i = t - n
+            in if n == 1 then
+                 []
+               else
+                 take i xs ++ drop (i + 1) xs
 
 #[prop(gen(gen_record_sums_fail), shrink(shrink_arr_record), pprint(pp_arrRecord))]
 entry prop_record_sums_fail (input: arr) : bool =

@@ -80,37 +80,34 @@ entry gen_deduplicate_bad (size: i64) (_seed: i32) : []i32 =
 
 entry shrink_deduplicate (xs: []i32) (random: i32) : []i32 =
   let n64 : i64 = length xs
-  let n   : i32 = i32.i64 n64
-  let tactic : i32 = random % n
-  let t   : i32 = if tactic < 0i32 then 0i32 else tactic
-
-  -- ---- Phase A: shrink scalars toward targets ----
-  in if t < n then
-       if n64 == 0 then
-         xs
-       else
-         let i : i64 = i64.i32 t
-         let old = xs[i]
-         let target = if t == 0i32 then 0i32 else 1i32
-         in if old == target then
-              xs
-            else
-              tabulate n64 (\j -> if j == i then target else xs[j])
-
-     -- ---- Phase B: remove one element ----
-     else if t < 2i32 * n then
-       if n64 == 0 then
-         xs
-       else
-         let k : i32 = t - n
-         let i : i64 = i64.i32 k
-         in if n64 == 1 then
-              []
-            else
-              take i xs ++ drop (i+1) xs
-
-     else
+  in if n64 == 0 then
        xs
+     else
+       let r0 = i64.i32 random
+       let r = if r0 < 0 then -r0 else r0
+       let t = r % (2 * n64)
+
+       -- Phase A: shrink scalars toward targets.
+       in if t < n64 then
+            let old = xs[t]
+            let target = if t == 0 then 0i32 else 1i32
+            in if old == target then
+                 -- Avoid returning the same failing candidate.
+                 -- Fall back to removing an element.
+                 if n64 == 1 then
+                   []
+                 else
+                   take t xs ++ drop (t + 1) xs
+               else
+                 tabulate n64 (\j -> if j == t then target else xs[j])
+
+          -- Phase B: remove one element.
+          else
+            let i = t - n64
+            in if n64 == 1 then
+                 []
+               else
+                 take i xs ++ drop (i + 1) xs
 
 -- ---------- failing property using shrinker ----------
 
