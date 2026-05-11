@@ -434,7 +434,6 @@ runOne s config srv entryNameRef = do
                   shrinkRes <- case psShrink s of
                     Just "auto" ->
                       liftIO $ autoShrinkLoop srv propName genName serverIn size seed entryNameRef
-
                     Just sh -> do
                       userShrinkRes <-
                         liftIO $
@@ -443,7 +442,6 @@ runOne s config srv entryNameRef = do
                       case userShrinkRes of
                         Right Nothing ->
                           pure (Right Nothing)
-
                         Right (Just err) -> do
                           autoRes <-
                             liftIO $
@@ -456,7 +454,6 @@ runOne s config srv entryNameRef = do
                                   <> err
                                   <> "\nAttempted auto-shrinker fallback."
                                   <> formatAutoShrinkResult autoRes
-
                         Left err -> do
                           autoRes <-
                             liftIO $
@@ -469,7 +466,6 @@ runOne s config srv entryNameRef = do
                                   <> err
                                   <> "\nAttempted auto-shrinker fallback."
                                   <> formatAutoShrinkResult autoRes
-
                     Nothing ->
                       pure (Right Nothing)
 
@@ -484,7 +480,6 @@ runOne s config srv entryNameRef = do
                             <> err
                             <> "\nCounterexample: "
                             <> counterLog
-
                     Right (Just note) -> do
                       runUpdate "prettyPrint"
                       counterLog <- liftIO $ pPrintPhase propName serverIn size seed
@@ -495,7 +490,6 @@ runOne s config srv entryNameRef = do
                             <> note
                             <> "\nCounterexample: "
                             <> counterLog
-
                     Right Nothing -> do
                       runUpdate "prettyPrint"
                       counterLog <- liftIO $ pPrintPhase propName serverIn size seed
@@ -532,10 +526,8 @@ formatAutoShrinkResult autoRes =
   case autoRes of
     Right Nothing ->
       "\nAuto-shrinker fallback completed."
-
     Right (Just msg) ->
       "\nAuto-shrinker fallback completed with note: " <> msg
-
     Left autoErr ->
       "\nAuto-shrinker fallback also failed: " <> autoErr
 
@@ -634,13 +626,16 @@ shrinkLoop srv propName counterExample shrinkName seed numTries phaseRef = runEx
         | otherwise = do
             stepResultE <- liftIO $ oneStep size pseudoRandom
             stepResult <-
-              either(\err ->throwE $
-                    "Error in shrinker "
-                      <> shrinkName
-                      <> " with random="
-                      <> showText pseudoRandom
-                      <> ": "
-                      <> err)
+              either
+                ( \err ->
+                    throwE $
+                      "Error in shrinker "
+                        <> shrinkName
+                        <> " with random="
+                        <> showText pseudoRandom
+                        <> ": "
+                        <> err
+                )
                 pure
                 stepResultE
 
@@ -694,12 +689,10 @@ pPrintWithFallback srv spec propName serverIn size seed = do
   case inputTypes of
     [] ->
       pure "Could not retrieve input type for counterexample."
-
     ty0 : _ -> do
       case psPPrint spec of
         Nothing ->
           prettyVar srv serverIn ty0
-
         Just futPPrint -> do
           let prettyOuts = outName futPPrint
 
@@ -707,13 +700,18 @@ pPrintWithFallback srv spec propName serverIn size seed = do
             errM <- liftIO $ callKeepIns srv futPPrint prettyOuts [serverIn]
             maybe
               (pure ())
-              (throwE . (("Pretty printer "
-                <> futPPrint
-                <> " failed with size="
-                <> showText size
-                <> " and seed="
-                <> showText seed
-                <> " with error: ") <>))
+              ( throwE
+                  . ( ( "Pretty printer "
+                          <> futPPrint
+                          <> " failed with size="
+                          <> showText size
+                          <> " and seed="
+                          <> showText seed
+                          <> " with error: "
+                      )
+                        <>
+                    )
+              )
               errM
 
             valE <- liftIO $ FSV.getValue srv prettyOuts
@@ -732,7 +730,6 @@ pPrintWithFallback srv spec propName serverIn size seed = do
           case userPrinterE of
             Right rendered ->
               pure rendered
-
             Left ppErr -> do
               runnerPrinterE <- try (prettyVar srv serverIn ty0) :: IO (Either SomeException T.Text)
               case runnerPrinterE of
@@ -742,7 +739,6 @@ pPrintWithFallback srv spec propName serverIn size seed = do
                       <> ppErr
                       <> "\nFallback counterexample: "
                       <> fallbackRendered
-
                 Left runnerErr ->
                   pure $
                     "Counterexample found, but printing failed.\n"
