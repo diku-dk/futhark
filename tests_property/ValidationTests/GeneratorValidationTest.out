@@ -1,0 +1,9 @@
+Generator is not a server entry point: helper_not_entry
+Generator output type mismatch.
+Property prop_bad_output expects: i32
+Generator gen_bad_output produces: "bool"
+Expected generator output type to equal the property input type.
+Generator gen_bad_arity has 1 inputs; expected 2 (size and seed).
+Generator input type mismatch.
+Generator gen_bad_input_types takes size: i32 and seed: i64
+Expected size and seed to be i64 and i32, got: size type=i32 and seed type=i64

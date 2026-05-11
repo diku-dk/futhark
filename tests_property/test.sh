@@ -32,6 +32,12 @@ run_test() {
         "NoGenGiven.fut")
             seed_flag="--seed=98473829849"
             ;;
+        "Sort.fut")
+            seed_flag="--seed=98473829849"
+            ;;
+        "ShrinkerError.fut")
+            seed_flag="--seed=98473829849"
+            ;;
     esac
 
     test_file_full_path="$TEST_DIR/${test_file#./}"

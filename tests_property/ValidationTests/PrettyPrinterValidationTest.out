@@ -1,0 +1,12 @@
+Pretty-printer is not a server entry point: pp_not_entry
+Pretty-printer input type mismatch.
+Property prop_pp_wrong_input expects: i32
+Pretty-printer pp_wrong_input takes: []i32
+Expected pretty-printer input to be exactly the property input type.
+Pretty-printer output mismatch.
+Pretty-printer pp_wrong_output returns: i32
+Expected pretty-printer output to be []u8.
+Pretty-printer input arity mismatch.
+Property prop_pp_wrong_arity expects: i32
+Pretty-printer pp_wrong_arity takes: ["i32","i32"]
+Expected exactly 1 input with property input type.
