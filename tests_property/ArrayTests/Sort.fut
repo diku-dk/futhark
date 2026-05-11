@@ -62,38 +62,35 @@ let shrink_i32_to_witness (v: i32) : i32 =
   else if v > 0i32 then 1i32
   else -1i32
 
--- status: 0=changed, 1=no-op, 2=stop
 entry shrink_simple (xs: []i32) (random: i32) : []i32 =
-
   let n64 : i64 = length xs
-  let n   : i32 = i32.i64 n64
-  let tactic : i32 = random % n
-  let t   : i32 = if tactic < 0i32 then 0i32 else tactic
-
-  -- Phase 1: shrink one element into {-1,0,1}
-  in if t < n then
-       if n64 == 0 then
-         xs
-       else
-         let i : i64 = i64.i32 t
-         let old = xs[i]
-         let new = shrink_i32_to_witness old
-         in if new == old then
-              xs
-            else
-              tabulate n64 (\j -> if j == i then new else xs[j])
-
-     -- Phase 2: drop one element
-     else if t < 2i32 * n then
-       if n64 == 0 then
-         xs
-       else
-         let k : i32 = t - n
-         let i : i64 = i64.i32 k
-         in if n64 == 1 then
-              []
-            else
-              take i xs ++ drop (i+1) xs
-
-     else
+  in if n64 == 0 then
        xs
+     else
+       let n : i32 = i32.i64 n64
+       let r = i32.abs random
+       let t : i32 = r % (2i32 * n)
+
+       -- Phase 1: shrink one element into {-1,0,1}.
+       in if t < n then
+            let i : i64 = i64.i32 t
+            let old = xs[i]
+            let new = shrink_i32_to_witness old
+            in if new == old then
+                 -- Avoid returning the same failing candidate.
+                 -- Drop an element instead.
+                 if n64 == 1 then
+                   []
+                 else
+                   take i xs ++ drop (i+1) xs
+               else
+                 tabulate n64 (\j -> if j == i then new else xs[j])
+
+          -- Phase 2: drop one element.
+          else
+            let k : i32 = t - n
+            let i : i64 = i64.i32 k
+            in if n64 == 1 then
+                 []
+               else
+                 take i xs ++ drop (i+1) xs

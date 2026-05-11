@@ -41,38 +41,34 @@ entry gen_record_sums_fail (size: i64) (_: i32) : arr =
   let idx = iota n |> map (\i -> i32.i64 i)
   in map (\i -> if i == 0i32 then 1i32 else 0i32) idx
 
--- New-protocol shrinker for []i32 (SWAPPED order)
 entry shrink_arr (xs: arr) (random: i32) : arr =
-  let tactic = random % 4
   let n64 : i64 = length xs
-  let n  : i32 = i32.i64 n64
-  let t  : i32 = if tactic < 0i32 then 0i32 else tactic
-
-  -- ----- Phase 1: shrink scalars toward 1 (t in [0..n-1]) -----
-  in if t < n then
-       if n64 == 0 then
-         xs
-       else
-         let ki : i64 = i64.i32 t
-         let old = xs[ki]
-         in if old == 1i32 then
-              xs   -- no-op; advance tactic
-            else
-              tabulate n64 (\i -> if i == ki then 1i32 else xs[i])
-
-     -- ----- Phase 2: remove one element (t in [n..2n-1]) -----
+  in if n64 == 0 then
+       xs
      else
-       if n64 <= 0 then
-         xs
-       else
-         let k : i32 = t - n
-         let i : i64 = i64.i32 k in
-         if n64 == 1 then
-           []
-         else
-           let pre  = take i xs
-           let post = drop (i+1) xs
-           in pre ++ post
+       let r0 = i64.i32 random
+       let r = if r0 < 0 then -r0 else r0
+       let t = r % (2 * n64)
+
+       -- Phase 1: try to set one element to 1.
+       in if t < n64 then
+            let old = xs[t]
+            in if old == 1i32 then
+                 -- Avoid returning the same candidate. Fall back to dropping.
+                 if n64 == 1 then
+                   []
+                 else
+                   take t xs ++ drop (t + 1) xs
+               else
+                 tabulate n64 (\i -> if i == t then 1i32 else xs[i])
+
+          -- Phase 2: remove one element.
+          else
+            let i = t - n64
+            in if n64 == 1 then
+                 []
+               else
+                 take i xs ++ drop (i + 1) xs
 
 #[prop(gen(gen_record_sums_fail), shrink(shrink_arr))]
 entry prop_record_sums_fail (input: arr) : bool =

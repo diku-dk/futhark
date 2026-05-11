@@ -1,0 +1,6 @@
+PBT FAIL: prop_i32_fail size=50 seed=REDACTED after N tests
+Counterexample: 1i32
+PBT FAIL: prop_i32_fail size=50 seed=REDACTED after N tests
+Counterexample: 1i32
+PBT FAIL: prop_i32_fail size=50 seed=REDACTED after N tests
+Counterexample: 1i32
