@@ -1,30 +1,74 @@
 -- ==
--- property: prop
+-- property: i8_val
 #[prop]
-entry prop (i: i8) : bool =
+entry i8_val (i: i8) : bool =
   i > 0
 
 -- ==
--- property: prop2
+-- property: i8_arr
 #[prop(shrink(auto))]
-entry prop2 (i: []i8) : bool =
-    length i < 5
+entry i8_arr (i: []i8) : bool =
+    length i < 2
 
 -- ==
--- property: prop3
+-- property: u64_arr
 #[prop(shrink(auto))]
-entry prop3 (i: []u64) : bool =
-    length i < 5 && u64.sum i < 100
+entry u64_arr (i: []u64) : bool =
+  length i < 2 && u64.sum i < 100
 
 -- ==
--- property: boolArr
+-- property: bool_arr
 #[prop(shrink(auto))]
-entry boolArr (xs: []bool): bool =
+entry bool_arr (xs: []bool): bool =
   and xs
 
+-- ==
+-- property: u8_arr_arr
+#[prop(shrink(auto))]
+entry u8_arr_arr (xs: [][]u8) : bool =
+  length xs < 2 && u8.sum (map (\x -> u8.sum x) xs) < 100
 
--- n==
--- property: prop4
-#[nprop(shrink(auto))]
-entry prop4 (i: [][]u8) : bool =
-    length i > 5
+-- ==
+-- property: i16_arr_arr_arr
+#[prop(shrink(auto))]
+entry i16_arr_arr_arr (xss: [][][]i16) : bool =
+  length xss < 2 && i16.sum (map (\xs -> i16.sum (map (\x -> i16.sum x) xs)) xss) < 100
+
+-- ==
+-- property: i8_arr_arr_arr_arr
+#[prop(shrink(auto))]
+entry i8_arr_arr_arr_arr (xsss: [][][][]i8) : bool =
+  length xsss < 2 && i8.sum (map (\xss -> i8.sum (map (\xs -> i8.sum (map (\x -> i8.sum x) xs)) xss)) xsss) < 100
+
+-- ==
+-- property: tuple_val
+#[prop(shrink(auto))]
+entry tuple_val ((x: i8, y: u8)) : bool =
+  x < 0 && y < 100
+
+
+-- ==
+-- property: record_val
+#[prop(shrink(auto))]
+entry record_val ({x: i8, y: u8}) : bool =
+  x < 0 && y < 100
+
+-- ==
+-- property: tuple_with_arrs
+#[prop(shrink(auto))]
+entry tuple_with_arrs ((xs: []i8, ys: []u8)) : bool =
+  -- x < 0 && y < 100
+  map2 (\x y -> x < 0 && y < 100) xs ys |> and
+
+
+-- ==
+-- property: record_with_arrs
+#[prop(shrink(auto))]
+entry record_with_arrs ({xs: []i8, ys: []u8}) : bool =
+  map2 (\x y -> x < 0 && y < 100) xs ys |> and
+
+-- -- ==
+-- -- property: tuple_arr
+-- #[prop(shrink(auto))]
+-- entry tuple_arr (xs : [](i8, u8)) : bool =
+--   map (\(x, y) -> x < 0 && y < 100) xs |> and

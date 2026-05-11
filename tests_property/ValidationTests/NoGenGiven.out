@@ -1,8 +1,29 @@
-PBT FAIL: boolArr size=50 seed=REDACTED after N tests
-Minimal counterexample: [true, true, false]
-PBT FAIL: prop size=50 seed=REDACTED after N tests
+PBT FAIL: bool_arr size=50 seed=REDACTED after N tests
+Minimal counterexample: [true, false]
+PBT FAIL: i16_arr_arr_arr size=50 seed=REDACTED after N tests
+Minimal counterexample: [[[17869i16]]]
+PBT FAIL: i8_arr size=50 seed=REDACTED after N tests
+Minimal counterexample: [-51i8, -84i8]
+PBT FAIL: i8_arr_arr_arr_arr size=50 seed=REDACTED after N tests
+Minimal counterexample: [[[[-51i8, -84i8],
+[-28i8, 47i8]],
+[[-95i8, -98i8],
+[-107i8, 80i8]]],
+[[[-65i8, -46i8],
+[55i8, 74i8]],
+[[-79i8, -30i8],
+[-78i8, -87i8]]]]
+PBT FAIL: i8_val size=50 seed=REDACTED after N tests
 Minimal counterexample: -51i8
-PBT FAIL: prop2 size=50 seed=REDACTED after N tests
-Minimal counterexample: [0i8, 52i8, 2i8, 3i8, 4i8]
-PBT FAIL: prop3 size=50 seed=REDACTED after N tests
-Minimal counterexample: [0u64, 12566788057432165940u64]
+PBT FAIL: record_val size=50 seed=REDACTED after N tests
+Minimal counterexample: {x = -124i8, y = 175u8}
+PBT FAIL: record_with_arrs size=50 seed=REDACTED after N tests
+Minimal counterexample: {xs = [-124i8], ys = [175u8]}
+PBT FAIL: tuple_val size=50 seed=REDACTED after N tests
+Minimal counterexample: (-124i8, 175u8)
+PBT FAIL: tuple_with_arrs size=50 seed=REDACTED after N tests
+Minimal counterexample: ([-124i8], [175u8])
+PBT FAIL: u64_arr size=50 seed=REDACTED after N tests
+Minimal counterexample: [13102795607757309389u64]
+PBT FAIL: u8_arr_arr size=50 seed=REDACTED after N tests
+Minimal counterexample: [[205u8]]
