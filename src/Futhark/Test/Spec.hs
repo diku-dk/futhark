@@ -240,15 +240,12 @@ parseAction sep =
 
 parseProperty :: Parser () -> Parser [PropertyCase]
 parseProperty sep = do
-  entrys <- parseEntryPointsProp sep
-  pure $
-    if null entrys
-      then []
-      else map PropertyCase entrys
+  entryss <- some (parseEntryPointsProp sep)
+  pure $ map PropertyCase (concat entryss)
 
 parseEntryPointsProp :: Parser () -> Parser [T.Text]
 parseEntryPointsProp sep =
-  lexeme' "property:" *> many entry <* sep
+  lexeme' "property:" *> some entry <* sep
   where
     constituent c = not (isSpace c)
     entry = lexeme' $ takeWhile1P Nothing constituent

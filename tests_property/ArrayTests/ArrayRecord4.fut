@@ -47,32 +47,31 @@ let replace_at [n] (xs: [n]{ s: i32, a: i32 }) (idx: i64) (v: { s: i32, a: i32 }
 
 entry shrink_arr_record (xs: []{ s: i32, a: i32 }) (random: i32) : []{ s: i32, a: i32 } =
   let n : i64 = length xs
-  let tactic = random % i32.i64 n
-
-  let field_tactics : i32 = 2i32 * i32.i64 n
-  let total_tactics : i32 =
-    if n <= 1 then field_tactics
-    else 2i32 + field_tactics
-
-  let t : i32 = if tactic < 0i32 then 0i32 else tactic
-  in if t >= total_tactics then
+  in if n == 0 then
        xs
-     else if n > 1 && t == 0i32 then
-       let xs' = take (n - 1) xs
-       in xs'
-     else if n > 1 && t == 1i32 then
-       let xs' = drop 1 xs
-       in xs'
      else
-       let loc : i32 = if n > 1 then t - 2i32 else t
-       let idx : i64 = i64.i32 (loc / 2i32)
-       let field : i32 = loc % 2i32
-       let xsn : [n]{ s: i32, a: i32 } = xs :> [n]{ s: i32, a: i32 }
-       let old = xsn[idx]
-       let (new, changed) = shrink_record_field old field
-       let ysn = replace_at xsn idx new
-       let ys = ysn :> [n]{ s: i32, a: i32 }
-       in if changed then ys else xs
+       let field_tactics : i32 = 2i32 * i32.i64 n
+       let total_tactics : i32 =
+         if n <= 1 then field_tactics
+         else 2i32 + field_tactics
+
+       let tactic = random % total_tactics
+       let t : i32 = if tactic < 0i32 then 0i32 else tactic
+
+       in if n > 1 && t == 0i32 then
+            take (n - 1) xs
+          else if n > 1 && t == 1i32 then
+            drop 1 xs
+          else
+            let loc : i32 = if n > 1 then t - 2i32 else t
+            let idx : i64 = i64.i32 (loc / 2i32)
+            let field : i32 = loc % 2i32
+            let xsn : [n]{ s: i32, a: i32 } = xs :> [n]{ s: i32, a: i32 }
+            let old = xsn[idx]
+            let (new, changed) = shrink_record_field old field
+            let ysn = replace_at xsn idx new
+            let ys = ysn :> [n]{ s: i32, a: i32 }
+            in if changed then ys else []
 
 #[prop(gen(gen_record_sums_fail), shrink(shrink_arr_record), pprint(pp_arrRecord))]
 entry prop_record_sums_fail (input: []{ s: i32, a: i32 }) : bool =

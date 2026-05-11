@@ -874,8 +874,5 @@ getSingleInputType srv ep = do
     _ -> pure $ Left $ T.pack $ "Entrypoint " <> T.unpack ep <> " has >1 input (expected 1): " <> show tys
 
 outsMatchType :: Server -> TypeName -> TypeName -> IO Bool
-outsMatchType srv propTy out
-  | out == propTy = pure True
-  | otherwise = do
-      res <- cmdFields srv propTy
-      pure $ either (const False) (\fs -> [out] == map fieldType fs) res
+outsMatchType _ propTy out =
+  pure (out == propTy)

@@ -396,7 +396,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                 propResults <-
                   if null diagnostics
                     then do
-                      let verifiedProps = filter (\p -> psProp p `elem` requestedNames) propSpecs
+                      let verifiedProps = selectRequestedPropSpecs properties propSpecs
                       propResultsE <- runPBT pbtConfig server verifiedProps phaseRef
 
                       let allResults = flip map propResultsE $ \case
@@ -1081,6 +1081,19 @@ propertyDiagnostics requested specs =
           ]
       | name <- declaredWithoutRequest
       ]
+
+selectRequestedPropSpecs :: [PropertyCase] -> [PropSpec] -> [PropSpec]
+selectRequestedPropSpecs properties specs =
+  mapMaybe lookupSpec properties
+  where
+    lookupSpec (PropertyCase name) =
+      firstMatching name specs
+
+    firstMatching _ [] =
+      Nothing
+    firstMatching name (spec : rest)
+      | psProp spec == name = Just spec
+      | otherwise = firstMatching name rest
 
 -- Save to file helper functions
 propToFile :: FilePath -> [TestResult] -> IO ()

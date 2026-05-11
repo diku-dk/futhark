@@ -1,0 +1,18 @@
+-- ==
+-- property: prop_auto_shrink_reuses_putval_names
+
+-- This test is not about the Futhark property itself.
+-- It is an implementation test for the runner.
+--
+-- The auto-shrinker repeatedly calls the generator with smaller sizes.
+-- This forces the runner to repeatedly write qc_size and qc_seed with putVal.
+-- If putVal does not correctly handle reused server variable names, this test
+-- may fail with a variable/name-collision error.
+
+entry gen_array (size: i64) (seed: i32) : []i32 =
+  let n = if size < 0 then 0 else size
+  in replicate n seed
+
+#[prop(gen(gen_array), shrink(auto), size(10))]
+entry prop_auto_shrink_reuses_putval_names (_xs: []i32) : bool =
+  false
