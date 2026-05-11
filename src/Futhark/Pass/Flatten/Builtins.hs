@@ -9,6 +9,8 @@ module Futhark.Pass.Flatten.Builtins
     genSegScan,
     genSegScanomap,
     genSegScanomapWithPost,
+    genUniformSegScanomapWithPost,
+    genUniformSegRed,
     genSegRed,
     genSegRedomap,
     genScatter,
@@ -81,6 +83,43 @@ genScanWithKernelBody lvl desc segments lam nes =
     (\_ -> pure lam)
     nes
     (\_ res_t -> mkIdentityLambda res_t)
+
+genUniformSegRed ::
+  SegLevel ->
+  Name ->
+  [SubExp] ->
+  Reduce GPU ->
+  Lambda GPU ->
+  [VName] ->
+  ([SubExp] -> Builder GPU ()) ->
+  Builder GPU [VName]
+genUniformSegRed lvl desc segments red_op map_lam arrs readFree = do
+  let red_lam = redLambda red_op
+      nes = redNeutral red_op
+      comm = redComm red_op
+  -- todo: check reasoning of neutral elemtn both here and in scan
+  gtids <- traverse (const $ newVName "gtid") segments
+  space <- mkSegSpace $ zip (toList gtids) (toList segments)
+  let gtids' = fmap Var gtids
+  ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
+    readFree gtids'
+    bindLambdaInputArrays gtids' map_lam arrs
+    res <- bodyBind (lambdaBody map_lam)
+    res_t <- mapM (subExpType . resSubExp) res
+    pure (map mkResult res, res_t)
+
+  red_lam' <-
+    localScope (scopeOfSegSpace space) $
+      withReadFree red_lam readFree gtids'
+  -- We have to rename since we are using a global readFree
+  red_lam'' <- renameLambda red_lam'
+
+  kbody <- renameBody $ Body () stms res
+  let op = SegBinOp comm red_lam'' nes mempty
+
+  letTupExp desc $ Op $ SegOp $ SegRed lvl space res_t kbody [op]
+  where
+    mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 genScanWithKernelBodyAndPost ::
   (Traversable f) =>
@@ -241,6 +280,41 @@ genSegScanomapWithPost lvl desc scan_lam nes flags post_lam map_lam arrs readFre
         bindLambdaInputArrays gtids map_lam arrs
         map_res <- bodyBind (lambdaBody map_lam)
         pure (subExpRes flag : map_res)
+    )
+
+withReadFree ::
+  Lambda GPU ->
+  ([SubExp] -> Builder GPU ()) ->
+  [SubExp] ->
+  Builder GPU (Lambda GPU)
+withReadFree lam readFree gtids =
+  mkLambda (lambdaParams lam) $ do
+    readFree gtids
+    bodyBind $ lambdaBody lam
+
+genUniformSegScanomapWithPost ::
+  SegLevel ->
+  [SubExp] ->
+  Name ->
+  Lambda GPU ->
+  [SubExp] ->
+  Lambda GPU ->
+  Lambda GPU ->
+  [VName] ->
+  ([SubExp] -> Builder GPU ()) ->
+  Builder GPU [VName]
+genUniformSegScanomapWithPost lvl segments desc scan_lam nes post_lam map_lam arrs readFree = do
+  genScanWithKernelBodyAndPost
+    lvl
+    desc
+    segments
+    (withReadFree scan_lam readFree)
+    nes
+    (\gtids _res_t -> withReadFree post_lam readFree gtids)
+    ( \gtids -> do
+        readFree gtids
+        bindLambdaInputArrays gtids map_lam arrs
+        bodyBind (lambdaBody map_lam)
     )
 
 genPrefixSum :: SegLevel -> Name -> VName -> Builder GPU VName
