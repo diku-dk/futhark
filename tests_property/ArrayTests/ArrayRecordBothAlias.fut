@@ -76,6 +76,8 @@ entry shrink_arr_record (xs: arr) (random: i32) : arr =
        let ys : arr = ysn :> arr
        in if changed then ys else xs
 
+
+--#[prop(gen(gen_record_sums_fail), shrink(shrink_arr_record))]
 #[prop(gen(gen_record_sums_fail), shrink(shrink_arr_record), pprint(pp_arrRecord))]
 entry prop_record_sums_fail (input: arr) : bool =
   prop_all_equal input
@@ -94,3 +96,6 @@ entry pp_arrRecord (input: arr) : []u8 =
       let sep = if i == 0 then "" else ", "
       in acc ++ sep ++ pp_record input[i]
   in "[" ++ body ++ "]"
+
+entry pp_arrRecord_fail (input: arr) : []u32 =
+  [7]
