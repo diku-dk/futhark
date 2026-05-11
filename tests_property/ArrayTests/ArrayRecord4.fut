@@ -46,32 +46,39 @@ let replace_at [n] (xs: [n]{ s: i32, a: i32 }) (idx: i64) (v: { s: i32, a: i32 }
   tabulate n (\i -> if i == idx then v else xs[i])
 
 entry shrink_arr_record (xs: []{ s: i32, a: i32 }) (random: i32) : []{ s: i32, a: i32 } =
-  let n : i64 = length xs
+  let n = length xs
   in if n == 0 then
        xs
      else
-       let field_tactics : i32 = 2i32 * i32.i64 n
-       let total_tactics : i32 =
-         if n <= 1 then field_tactics
-         else 2i32 + field_tactics
+       let r0 = i64.i32 random
+       let r = if r0 < 0 then -r0 else r0
 
-       let tactic = random % total_tactics
-       let t : i32 = if tactic < 0i32 then 0i32 else tactic
+       let total_tactics = n + n
+       let t = r % total_tactics
 
-       in if n > 1 && t == 0i32 then
-            take (n - 1) xs
-          else if n > 1 && t == 1i32 then
-            drop 1 xs
+       in if t < n then
+            -- Drop one element. If n == 1, this gives [], which passes.
+            take t xs ++ drop (t + 1) xs
           else
-            let loc : i32 = if n > 1 then t - 2i32 else t
-            let idx : i64 = i64.i32 (loc / 2i32)
-            let field : i32 = loc % 2i32
+            let i = t - n
             let xsn : [n]{ s: i32, a: i32 } = xs :> [n]{ s: i32, a: i32 }
-            let old = xsn[idx]
-            let (new, changed) = shrink_record_field old field
-            let ysn = replace_at xsn idx new
-            let ys = ysn :> [n]{ s: i32, a: i32 }
-            in if changed then ys else []
+            let old = xsn[i]
+
+            let new =
+              if old.s == old.a then
+                old
+              else if old.s != 1i32 || old.a != 0i32 then
+                {s = 1i32, a = 0i32}
+              else
+                old
+
+            in if new == old then
+                 -- No progress possible. Return a passing candidate so the
+                 -- runner rejects it and advances the failed-shrink counter.
+                 []
+               else
+                 let ysn = replace_at xsn i new
+                 in ysn :> []{ s: i32, a: i32 }
 
 #[prop(gen(gen_record_sums_fail), shrink(shrink_arr_record), pprint(pp_arrRecord))]
 entry prop_record_sums_fail (input: []{ s: i32, a: i32 }) : bool =
