@@ -1679,7 +1679,7 @@ distributeAndTransformInnerMap lvl mode ws_triple new_segment inps pat arrs' onF
   free_ps <-
     zipWithM
       newParam
-      (map ((<> "_free") . baseName) free_and_sizes) -- this should free_replicated?
+      (map ((<> "_free") . baseName) free_replicated) -- this should free_replicated?
       (map mapArrayRowType replicated)
   scope <- askScope
   let substs = M.fromList $ zip free_replicated $ map paramName free_ps
@@ -1707,9 +1707,9 @@ distributeAndTransformInnerMap lvl mode ws_triple new_segment inps pat arrs' onF
 -- worth it, as such operators are extremely rare - and we can just fall back on
 suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
 suitableOperator env inps lam _nes =
-  allNames notVariant (freeIn lam)
+  -- allNames notVariant (freeIn lam)
     -- && not (any (isVariant inps env) nes) -- TODO: maybe not needed
-    && all primType (lambdaReturnType lam) -- TODO
+    all primType (lambdaReturnType lam) -- TODO
   where
     notVariant v = isNothing $ M.lookup v $ inputReps inps env
 
@@ -1719,15 +1719,6 @@ suitableSegOpMap _env _inps map_lam =
 
 -- TODO: do we want to add variants as inputs?
 -- && allNames (not . isVariant inps env . Var) (freeIn map_lam)
-
-doSegScan :: SegLevel -> [Scan SOACS] -> VName -> [VName] -> Segments -> DistInputs -> DistEnv -> Builder GPU [VName]
-doSegScan lvl scans flags elems segments inps env = do
-  let scan = singleScan scans
-  -- TODO: FixME: this is temp hack
-  let zeros = replicate (segmentsRank segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-  let nes = scanNeutral scan
-  nes' <- mapM (readInput segments env zeros inps) nes
-  genSegScan lvl "scan" (soacsLambdaToGPU $ scanLambda scan) nes' flags elems
 
 doSegMaposcanomap ::
   SegLevel ->
@@ -1755,6 +1746,35 @@ doSegMaposcanomap lvl scans flags elems post_lam map_lam segments inps env readF
     (soacsLambdaToGPU post_lam)
     (soacsLambdaToGPU map_lam)
     elems
+    readFree
+
+doUniformSegMaposcanomap ::
+  SegLevel ->
+  [Scan SOACS] ->
+  [VName] ->
+  Lambda SOACS ->
+  Lambda SOACS ->
+  Segments ->
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  ([SubExp] -> Builder GPU ()) ->
+  Builder GPU [VName]
+doUniformSegMaposcanomap lvl scans arrs post_lam map_lam old_segments new_segment inps env readFree = do
+  -- TODO: different segemnts fix
+  let scan = singleScan scans
+  let zeros = replicate (segmentsRank old_segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+  let nes = scanNeutral scan
+  nes' <- mapM (readInput old_segments env zeros inps) nes
+  genUniformSegScanomapWithPost
+    lvl
+    (NE.toList new_segment)
+    "uniformmaposcanomap"
+    (soacsLambdaToGPU $ scanLambda scan)
+    nes'
+    (soacsLambdaToGPU post_lam)
+    (soacsLambdaToGPU map_lam)
+    arrs
     readFree
 
 -- Hacky fix to get result representations in the same order as the pattern
@@ -1900,27 +1920,56 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
       let ~[res'] = res
           ~[pe] = patElems pat
       transformDistBasicOp lvl segments env (inps, res', pe, aux, e)
-    Let pat aux (Op (Screma w arrs form))
-      | Just reds <- isReduceSOAC form,
+    Let pat aux (Op (Screma w arrs form))      
+      | Just (reds, map_lam) <- isRedomapSOAC form,
+        not $ isVariant inps env w,
+        all isRegularDistResult res,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
-          traceM "HELLO REDUCE"
-          reps <- mapM (segOpInputRep lvl segments env inps) arrs
-          -- TODO: FixME: this is temp hack
+          traceM "Unfirm Redomap"
           let sing_red = singleReduce reds
-          let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-          let hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn sing_red)
-          (flags, offsets, arr_segments, elems, _elems_kind) <-
-            prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
-
+              zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+              free = freeIn sing_red <> freeIn map_lam
+              new_segment = segments <> pure w
           nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
-          let sing_red' = sing_red {redNeutral = nes'}
-          elems' <- genSegRed lvl arr_segments flags offsets elems sing_red'
-          elems'' <- forM elems' $ \v -> do
-            v_t <- lookupType v
-            letExp (baseName v <> "_reshaped") . BasicOp $
-              Reshape v $
-                reshapeAll (arrayShape v_t) (segmentsShape segments)
-          pure $ insertRegulars (map distResTag res) elems'' env
+          outer_scope <- askScope
+          let red_lam = redLambda sing_red
+          let comm 
+                | commutativeLambda red_lam = Commutative
+                | otherwise = redComm sing_red
+          let sing_red_gpu = Reduce comm  (soacsLambdaToGPU red_lam) nes' 
+
+          let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
+          free_sizes <-
+            localScope input_scope $
+              foldMap freeIn <$> mapM lookupType (namesToList free)
+          let free_and_sizes = namesToList $ free <> free_sizes
+          (free_replicated, replicated) <-
+            fmap unzip . sequence $
+              mapMaybe
+                (onMapFreeVarMultiDim lvl segments w env inps)
+                free_and_sizes
+
+          arrs' <-
+            zipWithM
+              ( \p arr ->
+                  liftSubExpRegular
+                    lvl
+                    segments
+                    inps
+                    env
+                    (segmentsShape new_segment <> arrayShape (paramType p))
+                    (Var arr)
+              )
+              (lambdaParams map_lam)
+              arrs
+         
+          let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+          let readFree is = readInputs new_segment free_env is free_inputs
+          elems' <- 
+            genUniformSegRed lvl "uniformSegRed" (NE.toList new_segment) sing_red_gpu (soacsLambdaToGPU map_lam) arrs' readFree
+          traceM "Status: redomap done"
+          pure $ insertRegulars (map distResTag res) elems' env
+      
       | Just (reds, map_lam) <- isRedomapSOAC form,
         suitableSegOpMap env inps map_lam,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
@@ -1972,15 +2021,45 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
               env
           traceM "Status: redomap done"
           pure $ insertRegulars (map distResTag red_res) red_elems' env'
-      | Just scans <- isScanSOAC form,
-        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
-          reps <- mapM (segOpInputRep lvl segments env inps) arrs
-          let hasNoFreeVariant = allNames (not . isVariant inps env . Var) (foldMap freeIn scans)
-          (flags, offsets, arr_segments, elems, elems_kind) <-
-            prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
-          elems' <- doSegScan lvl scans flags elems segments inps env
-          pure $
-            insertIrregulars arr_segments flags offsets (zip (map distResTag res) elems') elems_kind env
+            
+      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
+      not $ isVariant inps env w,
+      all isRegularDistResult res,
+      -- TODO: DO we still need this tho?
+      all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
+        traceM "Unfirm MAPOSCANOMAP"
+        let free = freeIn map_lam <> freeIn post_lam <> foldMap freeIn scans
+            new_segment = segments <> pure w
+        outer_scope <- askScope
+        let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
+        free_sizes <-
+          localScope input_scope $
+            foldMap freeIn <$> mapM lookupType (namesToList free)
+        let free_and_sizes = namesToList $ free <> free_sizes
+        -- TODO: we can also just not replicate and read from the original segments but the simplifier should handle this
+        (free_replicated, replicated) <-
+          fmap unzip . sequence $
+            mapMaybe
+              (onMapFreeVarMultiDim lvl segments w env inps)
+              free_and_sizes
+        arrs' <-
+          zipWithM
+            ( \p arr ->
+                liftSubExpRegular
+                  lvl
+                  segments
+                  inps
+                  env
+                  (segmentsShape new_segment <> arrayShape (paramType p))
+                  (Var arr)
+            )
+            (lambdaParams map_lam)
+            arrs
+        let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+        let readFree is = readInputs new_segment free_env is free_inputs
+        elems' <- doUniformSegMaposcanomap lvl scans arrs' post_lam map_lam segments new_segment inps env readFree
+        pure $ insertRegulars (map distResTag res) elems' env
+  
       | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
         suitableSegOpMap env inps map_lam,
         suitableSegOpMap env inps post_lam,
@@ -2016,7 +2095,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
             ws_O
             elems_kind
             (zip res elems')
-            env
+            env      
       | Just map_lam <- isMapSOAC form,
         allowVersioning lvl,
         isVersionableMap inps env w res map_lam ->

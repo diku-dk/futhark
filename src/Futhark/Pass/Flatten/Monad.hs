@@ -369,7 +369,9 @@ liftDistResultRep lvl segments inps env dist_res res
       Regular <$> liftSubExpRegular lvl segments inps env expectedShape (resSubExp res)
   | otherwise =
       case resSubExp res of
-        Var v -> Irregular <$> getIrregRep lvl segments env inps v
+        Var v -> do 
+          rep <- getIrregRep lvl segments env inps v
+          Irregular <$>  ensureDenseIrregular lvl "liftDistResultRep_dense" rep
         _ -> error "liftBranchResultRep: irregular result is not a variable"
 
 mkIrregFromReg ::
@@ -472,7 +474,7 @@ liftSubExpRegular lvl segments inps env expectedShape se = do
       Nothing ->
         letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
   v_t <- lookupType v
-  if arrayShape v_t == expectedShape
+  if isAcc v_t || arrayShape v_t == expectedShape
     then pure v
     else
       letExp "reg_lifted" . BasicOp $
