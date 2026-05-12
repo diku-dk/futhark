@@ -2,6 +2,6 @@
 -- ==
 -- error: vector
 
-module type mt = { type~ vector }
+module type mt = {type~ vector}
 
-module m = { type^ vector = []i32 } : mt
+module m = {type^ vector = []i32}: mt

@@ -5,5 +5,5 @@
 
 def main (n: i64) (xs: []i32) =
   tabulate n (\i ->
-                let ys = #[unsafe] xs[i:i+3] :> [3]i32
-                in map (+i32.i64 i) ys)
+                let ys = #[unsafe] xs[i:i + 3] :> [3]i32
+                in map (+ i32.i64 i) ys)

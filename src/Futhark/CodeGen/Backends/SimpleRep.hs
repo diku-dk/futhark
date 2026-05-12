@@ -24,6 +24,8 @@ module Futhark.CodeGen.Backends.SimpleRep
     fromStorage,
     cproduct,
     csum,
+    allEqual,
+    allTrue,
     scalarToPrim,
 
     -- * Primitive value operations
@@ -36,13 +38,17 @@ module Futhark.CodeGen.Backends.SimpleRep
   )
 where
 
+import Control.Monad (void)
 import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Data.Text qualified as T
+import Data.Void (Void)
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
 import Futhark.Util (hashText, showText, zEncodeText)
 import Language.C.Quote.C qualified as C
 import Language.C.Syntax qualified as C
+import Text.Megaparsec
+import Text.Megaparsec.Char (space)
 
 -- | The C type corresponding to a signed integer type.
 intTypeToCType :: IntType -> C.Type
@@ -82,12 +88,12 @@ primAPIType _ t = primStorageType t
 
 -- | Convert from scalar to storage representation for the given type.
 toStorage :: PrimType -> C.Exp -> C.Exp
-toStorage (FloatType Float16) e = [C.cexp|futrts_to_bits16($exp:e)|]
+toStorage (FloatType Float16) e = [C.cexp|fptobits_f16_i16($exp:e)|]
 toStorage _ e = e
 
 -- | Convert from storage to scalar representation for the given type.
 fromStorage :: PrimType -> C.Exp -> C.Exp
-fromStorage (FloatType Float16) e = [C.cexp|futrts_from_bits16($exp:e)|]
+fromStorage (FloatType Float16) e = [C.cexp|bitstofp_i16_f16($exp:e)|]
 fromStorage _ e = e
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
@@ -132,28 +138,54 @@ valid s =
   where
     ok c = isAlphaNum c || c == '_'
 
-isArrayName :: T.Text -> (Int, T.Text)
-isArrayName s =
-  if "[]" `T.isPrefixOf` s
-    then
-      let (k, s') = isArrayName (T.drop 2 s)
-       in (k + 1, s')
-    else (0, s)
+-- | Find a nice C type name name for the Futhark type. This solely
+-- serves to make the generated header file easy to read, and we can
+-- always fall back on an ugly hash.
+findPrettyName :: T.Text -> Either String T.Text
+findPrettyName =
+  either (Left . errorBundlePretty) Right . parse (p <* eof) "type name"
+  where
+    p :: Parsec Void T.Text T.Text
+    p = choice [pArr, pTup, pRec, pQual]
+    pArr = do
+      dims <- some "[]"
+      (("arr" <> showText (length dims) <> "d_") <>) <$> p
+    pTup = between "(" ")" $ do
+      ts <- p `sepBy` pComma
+      pure $
+        if null ts
+          then "unit"
+          else "tup" <> showText (length ts) <> "_" <> T.intercalate "_" ts
+    pRec = between "{" "}" $ do
+      fs <- pField `sepBy` pComma
+      pure $ "rec__" <> T.intercalate "__" fs
+    pAtom = T.pack <$> some (satisfy (`notElem` ("[]{}(),.:" :: String)))
+    pComma = void $ "," <* space
+    -- Rewrite 'x.y' to 'x_y'.
+    pQual = do
+      x <- pAtom
+      choice
+        [ "." >> ((x <> "_") <>) <$> pAtom,
+          pure x
+        ]
+    pField = do
+      f <- pAtom <* ":"
+      t <- p
+      pure $ f <> "_" <> t
 
 -- | The name of exposed opaque types.
 opaqueName :: Name -> T.Text
 opaqueName "()" = "opaque_unit" -- Hopefully this ad-hoc convenience won't bite us.
 opaqueName s
-  | (k, s'') <- isArrayName s',
-    k > 0,
-    valid s'' =
-      "opaque_arr_" <> s'' <> "_" <> showText k <> "d"
+  | Right v <- findPrettyName s',
+    valid v =
+      "opaque_" <> v
   | valid s' = "opaque_" <> s'
   where
     s' = nameToText s
 opaqueName s = "opaque_" <> hashText (nameToText s)
 
--- | The 'PrimType' (and sign) correspond to a human-readable scalar
+-- | The 'PrimType' (and sign) corresponding to a human-readable scalar
 -- type name (e.g. @f64@).  Beware: partial!
 scalarToPrim :: T.Text -> (Signedness, PrimType)
 scalarToPrim "bool" = (Signed, Bool)
@@ -186,6 +218,19 @@ csum (e : es) = foldl mult e es
   where
     mult x y = [C.cexp|$exp:x + $exp:y|]
 
+-- | An expression that is true if these are also all true.
+allTrue :: [C.Exp] -> C.Exp
+allTrue [] = [C.cexp|true|]
+allTrue [x] = x
+allTrue (x : xs) = [C.cexp|$exp:x && $exp:(allTrue xs)|]
+
+-- | An expression that is true if these expressions are all equal by
+-- @==@.
+allEqual :: [C.Exp] -> C.Exp
+allEqual [x, y] = [C.cexp|$exp:x == $exp:y|]
+allEqual (x : y : xs) = [C.cexp|$exp:x == $exp:y && $exp:(allEqual(y:xs))|]
+allEqual _ = [C.cexp|true|]
+
 instance C.ToIdent Name where
   toIdent = C.toIdent . zEncodeText . nameToText
 
@@ -203,7 +248,13 @@ instance C.ToExp IntValue where
   toExp (Int8Value k) _ = [C.cexp|(typename int8_t)$int:k|]
   toExp (Int16Value k) _ = [C.cexp|(typename int16_t)$int:k|]
   toExp (Int32Value k) _ = [C.cexp|$int:k|]
-  toExp (Int64Value k) _ = [C.cexp|(typename int64_t)$int:k|]
+  toExp (Int64Value k) _
+    -- C compilers warn on encountering -9223372036854775808, because this is
+    -- read as the negation operator applied to 9223372036854775808, and this
+    -- number is larger than the largest signed number. As a dumb workaround, we
+    -- construct an equivalent expression.
+    | k == minBound = [C.cexp|(typename int64_t)$int:(minBound+1::Int64)-1|]
+    | otherwise = [C.cexp|(typename int64_t)$int:k|]
 
 instance C.ToExp FloatValue where
   toExp (Float16Value x) _

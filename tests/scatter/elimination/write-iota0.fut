@@ -7,7 +7,7 @@
 -- output {
 --   [100, 200, 300, 20, 25, 30]
 -- }
--- structure { Scatter 1 }
+-- structure { Screma 1 }
 
-def main [k][n] (values: [k]i32) (array: *[n]i32): [n]i32 =
+def main [k] [n] (values: [k]i32) (array: *[n]i32) : [n]i32 =
   scatter array (iota k) values

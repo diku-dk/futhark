@@ -26,14 +26,13 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   (params, body, rettype) <- internaliseLambda lam $ acctypes ++ rowtypes
   let rettype' =
         [ t `I.setArrayShape` I.arrayShape shape
-          | (t, shape) <- zip rettype acctypes
+        | (t, shape) <- zip rettype acctypes
         ]
   -- The result of the body must have the exact same shape as the
   -- initial accumulator.
   mkLambda params $
     ensureResultShape
       (ErrorMsg [ErrorString "shape of result does not match shape of initial value"])
-      (srclocOf lam)
       rettype'
       =<< bodyBind body
 
@@ -80,4 +79,4 @@ internalisePartitionLambda internaliseLambda k lam args = do
     lambdaWithIncrement lam_body = runBodyBuilder $ do
       eq_class <-
         maybe (intConst Int64 0) resSubExp . listToMaybe <$> bodyBind lam_body
-      resultBody <$> mkResult eq_class 0
+      subExpsRes <$> mkResult eq_class 0

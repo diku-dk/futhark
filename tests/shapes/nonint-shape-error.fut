@@ -4,5 +4,5 @@
 -- ==
 -- error: bool
 
-def main(as: []i32, b: bool): [][]i32 =
-  map (\i: [b]i32 -> replicate 3 i) as
+def main (as: []i32, b: bool) : [][]i32 =
+  map (\i : [b]i32 -> replicate 3 i) as

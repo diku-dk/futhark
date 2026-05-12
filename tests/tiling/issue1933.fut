@@ -5,8 +5,11 @@
 -- going on in the kernel.  Feel free to remove this program if one
 -- day we improve tiling to detect that it is not profitable.
 
+-- ==
+-- tags { autodiff }
+
 local
-let hash(x: i32): i32 =
+def hash (x: i32) : i32 =
   let x = u32.i32 x
   let x = ((x >> 16) ^ x) * 0x45d9f3b
   let x = ((x >> 16) ^ x) * 0x45d9f3b
@@ -15,26 +18,26 @@ let hash(x: i32): i32 =
 
 type rng = {state: u64, inc: u64}
 
-let rand ({state, inc}: rng) =
+def rand ({state, inc}: rng) =
   let oldstate = state
-  let state = oldstate * 6364136223846793005u64 + (inc|1u64)
+  let state = oldstate * 6364136223846793005u64 + (inc | 1u64)
   let xorshifted = u32.u64 (((oldstate >> 18u64) ^ oldstate) >> 27u64)
   let rot = u32.u64 (oldstate >> 59u64)
-  in ({state, inc},
-      (xorshifted >> rot) | (xorshifted << ((-rot) & 31u32)))
+  in ( {state, inc}
+     , (xorshifted >> rot) | (xorshifted << ((-rot) & 31u32))
+     )
 
-type^ distribution [n] 'rng 'a 'b = {
-  sample: rng -> (rng, [n]a),
-  transform: [n]a -> [n]a,
-  log_prob: [n]a -> b,
-  log_prob_base: [n]a -> b
-}
+type^ distribution [n] 'rng 'a 'b =
+  { sample: rng -> (rng, [n]a)
+  , transform: [n]a -> [n]a
+  , log_prob: [n]a -> b
+  , log_prob_base: [n]a -> b
+  }
 
 module normal_diag = {
+  def log_sqrt_2pi = f32.log <| f32.sqrt <| 2 * f32.pi
 
-  let log_sqrt_2pi = f32.log <| f32.sqrt  <| 2 * f32.pi
-
-  def sample n rng: (rng, [n]f32) =
+  def sample n rng : (rng, [n]f32) =
     let rngs = replicate n rng
     let (rngs, xs) = map rand rngs |> unzip
     in (rngs[0], map f32.u32 xs)
@@ -42,48 +45,51 @@ module normal_diag = {
   def transform n means stds (xs: [n]f32) =
     map3 (\mean std x -> mean + x * std) means stds xs
 
-  def log_prob n means stds (xs: [n]f32) = map3 (\mean std x ->
-    (-1) * ((x-mean)**2)/(2*std**2) - f32.log std - log_sqrt_2pi
-  ) means stds xs |> f32.sum
+  def log_prob n means stds (xs: [n]f32) =
+    map3 (\mean std x ->
+            (-1) * ((x - mean) ** 2) / (2 * std ** 2) - f32.log std - log_sqrt_2pi)
+         means
+         stds
+         xs
+    |> f32.sum
 
   def log_prob_base n (xs: [n]f32) =
-    map (\x -> (-1) * (x**2)/2 - log_sqrt_2pi) xs |> f32.sum
+    map (\x -> (-1) * (x ** 2) / 2 - log_sqrt_2pi) xs |> f32.sum
 
-  def mk_dist [n] (means: [n]f32) stds: distribution [n] rng f32 f32 = {
-    sample = sample n,
-    transform = transform n means stds,
-    log_prob = log_prob n means stds,
-    log_prob_base = log_prob_base n
-  }
+  def mk_dist [n] (means: [n]f32) stds : distribution [n] rng f32 f32 =
+    { sample = sample n
+    , transform = transform n means stds
+    , log_prob = log_prob n means stds
+    , log_prob_base = log_prob_base n
+    }
 }
 
 def mean [n] (xs: [n]f32) = f32.sum xs / f32.i64 n
 
-
 def MAX_NUM_RV = 3i64
 type addr = i64
 
-type state [n] [n2] = {
-  rng: rng,
-  log_like: f32,
-  trace: [MAX_NUM_RV](bool, [n]f32),
-  conditioned: [MAX_NUM_RV](bool, [n]f32),
-  log_probs: [MAX_NUM_RV](bool, f32),
-  fix_unknown_size_n2: [n2]f32
-}
+type state [n] [n2] =
+  { rng: rng
+  , log_like: f32
+  , trace: [MAX_NUM_RV](bool, [n]f32)
+  , conditioned: [MAX_NUM_RV](bool, [n]f32)
+  , log_probs: [MAX_NUM_RV](bool, f32)
+  , fix_unknown_size_n2: [n2]f32
+  }
 
-def mk_empty_state n n2 rng_init = {
-  rng=rng_init,
-  log_like = 0f32,
-  trace = replicate MAX_NUM_RV (false, replicate n 0f32),
-  conditioned = replicate MAX_NUM_RV (false, replicate n 0f32),
-  log_probs = replicate MAX_NUM_RV (false, 0f32),
-  fix_unknown_size_n2 = replicate n2 0f32
-}
+def mk_empty_state n n2 rng_init =
+  { rng = rng_init
+  , log_like = 0f32
+  , trace = replicate MAX_NUM_RV (false, replicate n 0f32)
+  , conditioned = replicate MAX_NUM_RV (false, replicate n 0f32)
+  , log_probs = replicate MAX_NUM_RV (false, 0f32)
+  , fix_unknown_size_n2 = replicate n2 0f32
+  }
 
 -- Handlers.
 type^ message [n] [n2] 'c 't2 =
-  #sample (state [n] [n2]) addr (distribution [n] rng c f32)
+    #sample (state [n] [n2]) addr (distribution [n] rng c f32)
   | #observe (state [n] [n2]) addr (distribution [n2] rng t2 f32) ([n]c) [n2]t2
   | #return (state [n] [n2]) [n]c
 
@@ -91,8 +97,9 @@ type^ handler [n] [n2] 'c 't2 = message [n] [n2] c t2 -> (state [n] [n2], [n]c)
 
 def default_handler [n] [n2] 'c 't2 (req: message [n] [n2] c t2) =
   match req
-  case #sample s _a d -> let (rng', c) = d.sample s.rng
-                         in (s with rng = rng', c)
+  case #sample s _a d ->
+    let (rng', c) = d.sample s.rng
+    in (s with rng = rng', c)
   case #observe s _a _d c _obs -> (s, c)
   case #return s c -> (s, c)
 
@@ -100,21 +107,22 @@ def store_log_probs_and_transform [n] [n2] 'c 't2
                                   (parent_handler: handler [n] [n2] c t2)
                                   (req: message [n] [n2] c t2) =
   match req
-   case #sample _s a d ->
-     let (s: state [n] [n2], c) = parent_handler req
-     let log_probs' = (copy s.log_probs) with [a] = (true, d.log_prob_base c)
-     in (s with log_probs = log_probs', d.transform c)
-   case #observe _s a d _c obs ->
-     let (s: state [n] [n2], c) = parent_handler req
-     let log_probs' = (copy s.log_probs) with [a] = (true, d.log_prob obs)
-     in (s with log_probs = log_probs', c)
-   case _ -> parent_handler req
+  case #sample _s a d ->
+    let (s: state [n] [n2], c) = parent_handler req
+    let log_probs' = (copy s.log_probs) with [a] = (true, d.log_prob_base c)
+    in (s with log_probs = log_probs', d.transform c)
+  case #observe _s a d _c obs ->
+    let (s: state [n] [n2], c) = parent_handler req
+    let log_probs' = (copy s.log_probs) with [a] = (true, d.log_prob obs)
+    in (s with log_probs = log_probs', c)
+  case _ -> parent_handler req
 
 def store_trace [n] [n2] 'c 't2 parent_handler (req: message [n] [n2] c t2) =
   match req
-  case #sample _s a _d -> let (s: state [n] [n2], c) = parent_handler req
-                          let trace' = (copy s.trace) with [a] = (true, c)
-                          in (s with trace = trace', c)
+  case #sample _s a _d ->
+    let (s: state [n] [n2], c) = parent_handler req
+    let trace' = (copy s.trace) with [a] = (true, c)
+    in (s with trace = trace', c)
   case _ -> parent_handler req
 
 def reuse_conditioned [n] [n2] 'c 't2 parent_handler (req: message [n] [n2] c t2) =
@@ -125,7 +133,6 @@ def reuse_conditioned [n] [n2] 'c 't2 parent_handler (req: message [n] [n2] c t2
     let trace' = copy s.trace with [a] = (true, c)
     in (s with trace = trace', c)
   case _ -> parent_handler req
-
 
 def sample [n] [n2] 'c 't2 (h: handler [n] [n2] c t2) s a d =
   h (#sample s a d)
@@ -138,8 +145,9 @@ def log_weight [n] [n2] (state_p: state [n] [n2]) (state_q: state [n] [n2]) =
   let log_qs = state_q.log_probs
   let log_p_div_q =
     map2 (\(in_p, log_p) (in_q, log_q) ->
-           if in_p && in_q then log_p - log_q else 0
-         ) log_ps log_qs
+            if in_p && in_q then log_p - log_q else 0)
+         log_ps
+         log_qs
     |> reduce (+) 0f32
   in state_p.log_like + log_p_div_q
 
@@ -162,7 +170,7 @@ def normal (means, stddevs) =
 def dot (xs: []f32) (ys: []f32) =
   f32.sum (map2 (*) xs ys)
 
-def matvecmul [n][m] (xss: [n][m]f32) (ys: [m]f32): *[n]f32 =
+def matvecmul [n] [m] (xss: [n][m]f32) (ys: [m]f32) : *[n]f32 =
   map (dot ys) xss
 
 def dense (in_dim: i64) (out_dim: i64) =
@@ -170,8 +178,7 @@ def dense (in_dim: i64) (out_dim: i64) =
     let (rng, weights) = initfn (in_dim * out_dim) rng
     let (_, bias) = initfn out_dim rng
     in (unflatten weights, bias)
-  let apply (params: ([out_dim][in_dim]f32, [out_dim]f32))
-            (xs: [in_dim]f32): [out_dim]f32 =
+  let apply (params: ([out_dim][in_dim]f32, [out_dim]f32)) (xs: [in_dim]f32): [out_dim]f32 =
     let (weightsT, bias) = params
     in map2 (+) (matvecmul weightsT xs) bias
   in apply
@@ -189,15 +196,14 @@ def model decoder handler s y theta =
 entry main [batch_sz] rng theta phi (ys: [batch_sz][INPUT_DIM]f32) =
   let (f_apply) = dense LATENT_DIM INPUT_DIM
   let fake_init n rng = (rng, replicate n 1f32)
-
   let (model, guide) = (model f_apply, model f_apply)
-
   let elbo_loss rngs ys (theta, phi) =
-      let elbos = map2 (\rng y ->
-        let (_rng, log_w, log_p) =
-          importance_sampling LATENT_DIM INPUT_DIM rng y model theta guide phi
-        in log_w * log_p
-      ) rngs ys
-      in mean elbos
-
+    let elbos =
+      map2 (\rng y ->
+              let (_rng, log_w, log_p) =
+                importance_sampling LATENT_DIM INPUT_DIM rng y model theta guide phi
+              in log_w * log_p)
+           rngs
+           ys
+    in mean elbos
   in grad (elbo_loss rng ys) (theta, phi)

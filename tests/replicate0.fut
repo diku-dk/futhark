@@ -15,7 +15,7 @@
 --    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
 --    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]]
 -- }
-def main(n: i64): [][]i32 =
-    let x  = 0..1..<i32.i64 n
-    let y  = replicate n x
-    in y
+def main (n: i64) : [][]i32 =
+  let x = 0..1..<i32.i64 n
+  let y = replicate n x
+  in y

@@ -4,4 +4,4 @@
 -- input { [1,2,3] } output { [3,5] }
 -- structure gpu { Index 1 }
 
-def main (xs: []i32) = (map (+2) xs)[::2]
+def main (xs: []i32) = (map (+ 2) xs)[::2]

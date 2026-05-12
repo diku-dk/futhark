@@ -5,4 +5,4 @@
 -- input { 2i64 }
 -- output { [0i64,1i64] }
 
-def main(n: i64): []i64 = iota(n)
+def main (n: i64) : []i64 = iota (n)

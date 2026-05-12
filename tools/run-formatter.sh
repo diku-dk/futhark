@@ -4,6 +4,6 @@
 #
 # Example command:
 #
-#   ./run-formatter.sh src unittests
+#   ./run-formatter.sh src src-testing
 
 find "$@" -name '*.hs' -print -exec ormolu --mode inplace --check-idempotence {} \;

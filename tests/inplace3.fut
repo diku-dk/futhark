@@ -9,5 +9,5 @@
 --   [[1],[2],[42],[4],[5]]
 -- }
 
-def main [k][n] (a: *[k][n]i32) (i: i32) (v: i32): [][]i32 =
+def main [k] [n] (a: *[k][n]i32) (i: i32) (v: i32) : [][]i32 =
   a with [i] = replicate n v

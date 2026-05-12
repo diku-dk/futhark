@@ -1,7 +1,8 @@
 packages: futhark.cabal
-index-state: 2024-05-22T04:42:44Z
+index-state: 2026-04-29T08:56:57Z
+multi-repl: True
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
 
-allow-newer: base, template-haskell
+allow-newer: base, template-haskell, ghc-prim

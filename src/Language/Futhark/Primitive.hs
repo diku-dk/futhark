@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MagicHash #-}
 
 -- | Definitions of primitive types, the values that inhabit these
 -- types, and operations on these values.  A primitive value can also
@@ -92,6 +93,8 @@ module Language.Futhark.Primitive
 
     -- * Primitive functions
     primFuns,
+    condFun,
+    isCondFun,
 
     -- * Utility
     zeroIsh,
@@ -128,6 +131,7 @@ import Data.Bits
   )
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Word (Word16, Word32, Word64, Word8)
@@ -135,6 +139,7 @@ import Foreign.C.Types (CUShort (..))
 import Futhark.Util (convFloat)
 import Futhark.Util.CMath
 import Futhark.Util.Pretty
+import GHC.Exts (Double (D#), Float (F#), fmaddDouble#, fmaddFloat#)
 import Numeric (log1p)
 import Numeric.Half
 import Prelude hiding (id, (.))
@@ -378,8 +383,8 @@ onePrimValue Unit = UnitValue
 -- operator and what is a built-in function.  Perhaps these should all
 -- go away eventually.
 data UnOp
-  = -- | E.g., @! True == False@.
-    Not
+  = -- | Flip sign. Logical negation for booleans.
+    Neg PrimType
   | -- | E.g., @~(~1) = 1@.
     Complement IntType
   | -- | @abs(-2) = 2@.
@@ -563,6 +568,10 @@ data ConvOp
     UIToFP IntType FloatType
   | -- | Convert a signed integer to a floating-point value.
     SIToFP IntType FloatType
+  | -- | Convert floating point number to its bitwise representation.
+    FPToBits FloatType
+  | -- | Convert bitwise representation to a floating point number.
+    BitsToFP FloatType
   | -- | Convert an integer to a boolean value.  Zero
     -- becomes false; anything else is true.
     IToB IntType
@@ -580,8 +589,8 @@ data ConvOp
 -- | A list of all unary operators for all types.
 allUnOps :: [UnOp]
 allUnOps =
-  Not
-    : map Complement [minBound .. maxBound]
+  map Neg [minBound .. maxBound]
+    ++ map Complement [minBound .. maxBound]
     ++ map Abs [minBound .. maxBound]
     ++ map FAbs [minBound .. maxBound]
     ++ map SSignum [minBound .. maxBound]
@@ -650,6 +659,8 @@ allConvOps =
       FPToSI <$> allFloatTypes <*> allIntTypes,
       UIToFP <$> allIntTypes <*> allFloatTypes,
       SIToFP <$> allIntTypes <*> allFloatTypes,
+      FPToBits <$> allFloatTypes,
+      BitsToFP <$> allFloatTypes,
       IToB <$> allIntTypes,
       BToI <$> allIntTypes,
       FToB <$> allFloatTypes,
@@ -659,7 +670,9 @@ allConvOps =
 -- | Apply an 'UnOp' to an operand.  Returns 'Nothing' if the
 -- application is mistyped.
 doUnOp :: UnOp -> PrimValue -> Maybe PrimValue
-doUnOp Not (BoolValue b) = Just $ BoolValue $ not b
+doUnOp (Neg _) (BoolValue b) = Just $ BoolValue $ not b
+doUnOp (Neg _) (FloatValue v) = Just $ FloatValue $ doFNeg v
+doUnOp (Neg _) (IntValue v) = Just $ IntValue $ doIntNeg v
 doUnOp Complement {} (IntValue v) = Just $ IntValue $ doComplement v
 doUnOp Abs {} (IntValue v) = Just $ IntValue $ doAbs v
 doUnOp FAbs {} (FloatValue v) = Just $ FloatValue $ doFAbs v
@@ -667,6 +680,17 @@ doUnOp SSignum {} (IntValue v) = Just $ IntValue $ doSSignum v
 doUnOp USignum {} (IntValue v) = Just $ IntValue $ doUSignum v
 doUnOp FSignum {} (FloatValue v) = Just $ FloatValue $ doFSignum v
 doUnOp _ _ = Nothing
+
+doFNeg :: FloatValue -> FloatValue
+doFNeg (Float16Value x) = Float16Value $ negate x
+doFNeg (Float32Value x) = Float32Value $ negate x
+doFNeg (Float64Value x) = Float64Value $ negate x
+
+doIntNeg :: IntValue -> IntValue
+doIntNeg (Int8Value x) = Int8Value $ -x
+doIntNeg (Int16Value x) = Int16Value $ -x
+doIntNeg (Int32Value x) = Int32Value $ -x
+doIntNeg (Int64Value x) = Int64Value $ -x
 
 -- | E.g., @~(~1) = 1@.
 doComplement :: IntValue -> IntValue
@@ -914,11 +938,29 @@ doConvOp (FPToUI _ to) (FloatValue v) = Just $ IntValue $ doFPToUI v to
 doConvOp (FPToSI _ to) (FloatValue v) = Just $ IntValue $ doFPToSI v to
 doConvOp (UIToFP _ to) (IntValue v) = Just $ FloatValue $ doUIToFP v to
 doConvOp (SIToFP _ to) (IntValue v) = Just $ FloatValue $ doSIToFP v to
+doConvOp FPToBits {} (FloatValue (Float16Value x)) =
+  Just $ IntValue $ Int16Value $ fromIntegral $ halfToWord x
+doConvOp FPToBits {} (FloatValue (Float32Value x)) =
+  Just $ IntValue $ Int32Value $ fromIntegral $ floatToWord x
+doConvOp FPToBits {} (FloatValue (Float64Value x)) =
+  Just $ IntValue $ Int64Value $ fromIntegral $ doubleToWord x
+doConvOp BitsToFP {} (IntValue (Int16Value x)) =
+  Just $ FloatValue $ Float16Value $ wordToHalf $ fromIntegral x
+doConvOp BitsToFP {} (IntValue (Int32Value x)) =
+  Just $ FloatValue $ Float32Value $ wordToFloat $ fromIntegral x
+doConvOp BitsToFP {} (IntValue (Int64Value x)) =
+  Just $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x
 doConvOp (IToB _) (IntValue v) = Just $ BoolValue $ intToInt64 v /= 0
 doConvOp (BToI to) (BoolValue v) = Just $ IntValue $ intValue to $ if v then 1 else 0 :: Int
 doConvOp (FToB _) (FloatValue v) = Just $ BoolValue $ floatToDouble v /= 0
 doConvOp (BToF to) (BoolValue v) = Just $ FloatValue $ floatValue to $ if v then 1 else 0 :: Double
 doConvOp _ _ = Nothing
+
+-- | The integer type with the same size as the given floating point type.
+matchingInt :: FloatType -> IntType
+matchingInt Float16 = Int16
+matchingInt Float32 = Int32
+matchingInt Float64 = Int64
 
 -- | Turn the conversion the other way around.  Note that most
 -- conversions are lossy, so there is no guarantee the value will
@@ -931,6 +973,8 @@ flipConvOp (FPToUI from to) = UIToFP to from
 flipConvOp (FPToSI from to) = SIToFP to from
 flipConvOp (UIToFP from to) = FPToSI to from
 flipConvOp (SIToFP from to) = FPToSI to from
+flipConvOp (FPToBits from) = BitsToFP from
+flipConvOp (BitsToFP to) = FPToBits to
 flipConvOp (IToB from) = BToI from
 flipConvOp (BToI to) = IToB to
 flipConvOp (FToB from) = BToF from
@@ -994,6 +1038,7 @@ doCmpOp _ _ _ = Nothing
 
 -- | Compare any two primtive values for exact equality.
 doCmpEq :: PrimValue -> PrimValue -> Bool
+doCmpEq (FloatValue (Float16Value v1)) (FloatValue (Float16Value v2)) = v1 == v2
 doCmpEq (FloatValue (Float32Value v1)) (FloatValue (Float32Value v2)) = v1 == v2
 doCmpEq (FloatValue (Float64Value v1)) (FloatValue (Float64Value v2)) = v1 == v2
 doCmpEq v1 v2 = v1 == v2
@@ -1130,7 +1175,7 @@ cmpOpType CmpLle = Bool
 unOpType :: UnOp -> PrimType
 unOpType (SSignum t) = IntType t
 unOpType (USignum t) = IntType t
-unOpType Not = Bool
+unOpType (Neg t) = t
 unOpType (Complement t) = IntType t
 unOpType (Abs t) = IntType t
 unOpType (FAbs t) = FloatType t
@@ -1145,6 +1190,8 @@ convOpType (FPToUI from to) = (FloatType from, IntType to)
 convOpType (FPToSI from to) = (FloatType from, IntType to)
 convOpType (UIToFP from to) = (IntType from, FloatType to)
 convOpType (SIToFP from to) = (IntType from, FloatType to)
+convOpType (FPToBits from) = (FloatType from, IntType $ matchingInt from)
+convOpType (BitsToFP to) = (IntType $ matchingInt to, FloatType to)
 convOpType (IToB from) = (IntType from, Bool)
 convOpType (BToI to) = (Bool, IntType to)
 convOpType (FToB from) = (FloatType from, Bool)
@@ -1168,20 +1215,35 @@ doubleToWord = G.runGet G.getWord64le . P.runPut . P.putDoublele
 wordToDouble :: Word64 -> Double
 wordToDouble = G.runGet G.getDoublele . P.runPut . P.putWord64le
 
+-- | @condFun t@ is the name of the ternary conditional function that
+-- accepts operands of type @[Bool, t, t]@, and returns either the
+-- first or second @t@ based on the truth value of the @Bool@.
+condFun :: PrimType -> T.Text
+condFun t = "cond_" <> prettyText t
+
+-- | Is this the name of a condition function as per 'condFun', and
+-- for which type?
+isCondFun :: T.Text -> Maybe PrimType
+isCondFun v = L.find (\t -> condFun t == v) allPrimTypes
+
 -- | A mapping from names of primitive functions to their parameter
 -- types, their result type, and a function for evaluating them.
 primFuns ::
   M.Map
-    String
+    T.Text
     ( [PrimType],
       PrimType,
       [PrimValue] -> Maybe PrimValue
     )
 primFuns =
-  M.fromList
+  M.fromList $
     [ f16 "sqrt16" sqrt,
       f32 "sqrt32" sqrt,
       f64 "sqrt64" sqrt,
+      --
+      f16 "rsqrt16" $ recip . sqrt,
+      f32 "rsqrt32" $ recip . sqrt,
+      f64 "rsqrt64" $ recip . sqrt,
       --
       f16 "cbrt16" $ convFloat . cbrtf . convFloat,
       f32 "cbrt32" cbrtf,
@@ -1211,6 +1273,10 @@ primFuns =
       f32 "sin32" sin,
       f64 "sin64" sin,
       --
+      f16 "sinpi16" $ sin . (pi *),
+      f32 "sinpi32" $ sin . (pi *),
+      f64 "sinpi64" $ sin . (pi *),
+      --
       f16 "sinh16" sinh,
       f32 "sinh32" sinh,
       f64 "sinh64" sinh,
@@ -1218,6 +1284,10 @@ primFuns =
       f16 "cos16" cos,
       f32 "cos32" cos,
       f64 "cos64" cos,
+      --
+      f16 "cospi16" $ cos . (pi *),
+      f32 "cospi32" $ cos . (pi *),
+      f64 "cospi64" $ cos . (pi *),
       --
       f16 "cosh16" cosh,
       f32 "cosh32" cosh,
@@ -1227,6 +1297,10 @@ primFuns =
       f32 "tan32" tan,
       f64 "tan64" tan,
       --
+      f16 "tanpi16" $ tan . (pi *),
+      f32 "tanpi32" $ tan . (pi *),
+      f64 "tanpi64" $ tan . (pi *),
+      --
       f16 "tanh16" tanh,
       f32 "tanh32" tanh,
       f64 "tanh64" tanh,
@@ -1234,6 +1308,10 @@ primFuns =
       f16 "asin16" asin,
       f32 "asin32" asin,
       f64 "asin64" asin,
+      --
+      f16 "asinpi16" $ (/ pi) . asin,
+      f32 "asinpi32" $ (/ pi) . asin,
+      f64 "asinpi64" $ (/ pi) . asin,
       --
       f16 "asinh16" asinh,
       f32 "asinh32" asinh,
@@ -1243,6 +1321,10 @@ primFuns =
       f32 "acos32" acos,
       f64 "acos64" acos,
       --
+      f16 "acospi16" $ (/ pi) . acos,
+      f32 "acospi32" $ (/ pi) . acos,
+      f64 "acospi64" $ (/ pi) . acos,
+      --
       f16 "acosh16" acosh,
       f32 "acosh32" acosh,
       f64 "acosh64" acosh,
@@ -1250,6 +1332,10 @@ primFuns =
       f16 "atan16" atan,
       f32 "atan32" atan,
       f64 "atan64" atan,
+      --
+      f16 "atanpi16" $ (/ pi) . atan,
+      f32 "atanpi32" $ (/ pi) . atan,
+      f64 "atanpi64" $ (/ pi) . atan,
       --
       f16 "atanh16" atanh,
       f32 "atanh32" atanh,
@@ -1376,6 +1462,33 @@ primFuns =
             _ -> Nothing
         )
       ),
+      ( "atan2pi_16",
+        ( [FloatType Float16, FloatType Float16],
+          FloatType Float16,
+          \case
+            [FloatValue (Float16Value x), FloatValue (Float16Value y)] ->
+              Just $ FloatValue $ Float16Value $ atan2 x y / pi
+            _ -> Nothing
+        )
+      ),
+      ( "atan2pi_32",
+        ( [FloatType Float32, FloatType Float32],
+          FloatType Float32,
+          \case
+            [FloatValue (Float32Value x), FloatValue (Float32Value y)] ->
+              Just $ FloatValue $ Float32Value $ atan2 x y / pi
+            _ -> Nothing
+        )
+      ),
+      ( "atan2pi_64",
+        ( [FloatType Float64, FloatType Float64],
+          FloatType Float64,
+          \case
+            [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
+              Just $ FloatValue $ Float64Value $ atan2 x y / pi
+            _ -> Nothing
+        )
+      ),
       --
       ( "hypot16",
         ( [FloatType Float16, FloatType Float16],
@@ -1452,71 +1565,32 @@ primFuns =
             _ -> Nothing
         )
       ),
-      ( "to_bits16",
-        ( [FloatType Float16],
-          IntType Int16,
-          \case
-            [FloatValue (Float16Value x)] ->
-              Just $ IntValue $ Int16Value $ fromIntegral $ halfToWord x
-            _ -> Nothing
-        )
-      ),
-      ( "to_bits32",
-        ( [FloatType Float32],
-          IntType Int32,
-          \case
-            [FloatValue (Float32Value x)] ->
-              Just $ IntValue $ Int32Value $ fromIntegral $ floatToWord x
-            _ -> Nothing
-        )
-      ),
-      ( "to_bits64",
-        ( [FloatType Float64],
-          IntType Int64,
-          \case
-            [FloatValue (Float64Value x)] ->
-              Just $ IntValue $ Int64Value $ fromIntegral $ doubleToWord x
-            _ -> Nothing
-        )
-      ),
-      ( "from_bits16",
-        ( [IntType Int16],
-          FloatType Float16,
-          \case
-            [IntValue (Int16Value x)] ->
-              Just $ FloatValue $ Float16Value $ wordToHalf $ fromIntegral x
-            _ -> Nothing
-        )
-      ),
-      ( "from_bits32",
-        ( [IntType Int32],
-          FloatType Float32,
-          \case
-            [IntValue (Int32Value x)] ->
-              Just $ FloatValue $ Float32Value $ wordToFloat $ fromIntegral x
-            _ -> Nothing
-        )
-      ),
-      ( "from_bits64",
-        ( [IntType Int64],
-          FloatType Float64,
-          \case
-            [IntValue (Int64Value x)] ->
-              Just $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x
-            _ -> Nothing
-        )
-      ),
       f16_3 "lerp16" (\v0 v1 t -> v0 + (v1 - v0) * max 0 (min 1 t)),
       f32_3 "lerp32" (\v0 v1 t -> v0 + (v1 - v0) * max 0 (min 1 t)),
       f64_3 "lerp64" (\v0 v1 t -> v0 + (v1 - v0) * max 0 (min 1 t)),
       f16_3 "mad16" (\a b c -> a * b + c),
       f32_3 "mad32" (\a b c -> a * b + c),
       f64_3 "mad64" (\a b c -> a * b + c),
-      f16_3 "fma16" (\a b c -> a * b + c),
-      f32_3 "fma32" (\a b c -> a * b + c),
-      f64_3 "fma64" (\a b c -> a * b + c)
+      f16_3 "fma16" fma16,
+      f32_3 "fma32" (\(F# a) (F# b) (F# c) -> F# (fmaddFloat# a b c)),
+      f64_3 "fma64" (\(D# a) (D# b) (D# c) -> D# (fmaddDouble# a b c))
     ]
+      <> [ ( condFun t,
+             ( [Bool, t, t],
+               t,
+               \case
+                 [BoolValue b, tv, fv] ->
+                   Just $ if b then tv else fv
+                 _ -> Nothing
+             )
+           )
+         | t <- allPrimTypes
+         ]
   where
+    fma16 a b c
+      | isNaN a || isInfinite a || isNaN b || isInfinite b = a * b + c
+      | isNaN c || isInfinite c = c
+      | otherwise = fromRational (toRational a * toRational b + toRational c)
     i8 s f = (s, ([IntType Int8], IntType Int32, i8PrimFun f))
     i16 s f = (s, ([IntType Int16], IntType Int32, i16PrimFun f))
     i32 s f = (s, ([IntType Int32], IntType Int32, i32PrimFun f))
@@ -1839,7 +1913,7 @@ instance Pretty ConvOp where
       (from, to) = convOpType op
 
 instance Pretty UnOp where
-  pretty Not = "not"
+  pretty (Neg t) = "neg_" <> pretty t
   pretty (Abs t) = taggedI "abs" t
   pretty (FAbs t) = taggedF "fabs" t
   pretty (SSignum t) = taggedI "ssignum" t
@@ -1857,6 +1931,8 @@ convOpFun FPToUI {} = "fptoui"
 convOpFun FPToSI {} = "fptosi"
 convOpFun UIToFP {} = "uitofp"
 convOpFun SIToFP {} = "sitofp"
+convOpFun FPToBits {} = "fptobits"
+convOpFun BitsToFP {} = "bitstofp"
 convOpFun IToB {} = "itob"
 convOpFun BToI {} = "btoi"
 convOpFun FToB {} = "ftob"

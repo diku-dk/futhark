@@ -14,5 +14,5 @@
 -- output { false }
 -- warning: deprecated
 
-def main [n][m] (xs: [n]i32) (ys: [m]i32) =
+def main [n] [m] (xs: [n]i32) (ys: [m]i32) =
   n == m && xs == (ys :> [n]i32)

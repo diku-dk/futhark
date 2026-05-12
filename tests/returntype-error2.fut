@@ -2,4 +2,4 @@
 -- ==
 -- error:
 
-def main(): i32 = 2.0
+def main () : i32 = 2.0

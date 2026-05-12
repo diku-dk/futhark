@@ -40,9 +40,9 @@ ruleMatch _ pat _ (cond, cases, _, ifdec)
     new_default : _ <- reverse always_matches =
       Simplify $ letBind pat $ Match cond cases' (caseBody new_default) ifdec
 -- Remove caseless match.
-ruleMatch _ pat (StmAux cs _ _) (_, [], defbody, _) = Simplify $ do
+ruleMatch _ pat aux (_, [], defbody, _) = Simplify $ do
   defbody_res <- bodyBind defbody
-  certifying cs $ forM_ (zip (patElems pat) defbody_res) $ \(pe, res) ->
+  certifying (stmAuxCerts aux) $ forM_ (zip (patElems pat) defbody_res) $ \(pe, res) ->
     certifying (resCerts res) . letBind (Pat [pe]) $
       BasicOp (SubExp $ resSubExp res)
 -- IMPROVE: the following two rules can be generalised to work in more
@@ -80,7 +80,7 @@ ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, MatchDec ts _)
           (pure $ BasicOp $ BinOp LogAnd cond tres)
           ( eBinOp
               LogAnd
-              (pure $ BasicOp $ UnOp Not cond)
+              (pure $ BasicOp $ UnOp (Neg Bool) cond)
               (pure $ BasicOp $ SubExp fres)
           )
       certifying (tcs <> fcs) $ letBind pat e
@@ -90,7 +90,7 @@ ruleMatch _ pat _ (_, [Case _ tbranch], _, MatchDec _ MatchFallback)
       addStms $ bodyStms tbranch
       sequence_
         [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-          | (p, SubExpRes cs se) <- zip (patElems pat) ses
+        | (p, SubExpRes cs se) <- zip (patElems pat) ses
         ]
 ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, _)
   | Body _ _ [SubExpRes tcs (Constant (IntValue t))] <- tb,
@@ -102,7 +102,7 @@ ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, _)
         else
           if zeroIshInt t && oneIshInt f
             then Simplify $ do
-              cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
+              cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp (Neg Bool) cond
               letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond_neg
             else Skip
 -- Simplify

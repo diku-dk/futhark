@@ -11,8 +11,10 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Parallel.Strategies
+import Data.Functor (($>))
 import Data.List (partition)
 import Data.Map.Strict qualified as M
+import Data.Maybe
 import Data.Set qualified as S
 import Futhark.Analysis.CallGraph
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -85,7 +87,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
                 consts' <-
                   simplifyConsts . performCSEOnStms
                     =<< inlineInStms inlinemap consts
-                pure (ST.insertStms (informStms consts') mempty, consts')
+                pure (ST.insertStms (informStms consts') ST.empty, consts')
               else pure (vtable, consts)
 
           let simplifyFun' fd
@@ -106,16 +108,88 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
             to_inline_later
 
 calledOnce :: CallGraph -> S.Set Name
-calledOnce = S.fromList . map fst . filter ((== 1) . snd) . M.toList . numOccurences
+calledOnce =
+  S.fromList . map fst . filter ((== 1) . snd) . M.toList . numOccurences
 
 inlineBecauseTiny :: Prog SOACS -> S.Set Name
 inlineBecauseTiny = foldMap onFunDef . progFuns
   where
     onFunDef fd
-      | (length (bodyStms (funDefBody fd)) < 2)
+      | (length (bodyStms (funDefBody fd)) <= k)
           || ("inline" `inAttrs` funDefAttrs fd) =
           S.singleton (funDefName fd)
       | otherwise = mempty
+      where
+        k = length (funDefRetType fd) + length (funDefParams fd)
+
+progStms :: Prog SOACS -> Stms SOACS
+progStms prog =
+  progConsts prog <> foldMap (bodyStms . funDefBody) (progFuns prog)
+
+data Used = InSOAC | InAD deriving (Eq, Ord, Show)
+
+directlyCalledInSOACs :: Prog SOACS -> M.Map Name Used
+directlyCalledInSOACs = flip execState mempty . mapM_ (onStm Nothing) . progStms
+  where
+    onBody :: Maybe Used -> Body SOACS -> State (M.Map Name Used) ()
+    onBody u = mapM_ (onStm u) . bodyStms
+    onStm u stm = onExp u (stmExp stm) $> stm
+    onExp (Just u) (Apply fname _ _ _) = modify $ M.insertWith max fname u
+    onExp Nothing Apply {} = pure ()
+    onExp u e = walkExpM (walker u) e
+    onSOAC u soac = void $ traverseSOACStms (const (traverse (onStm u'))) soac
+      where
+        u' = max u $ Just $ usage soac
+    usage JVP {} = InAD
+    usage VJP {} = InAD
+    usage _ = InSOAC
+    walker u =
+      (identityWalker :: Walker SOACS (State (M.Map Name Used)))
+        { walkOnBody = const (onBody u),
+          walkOnOp = onSOAC u
+        }
+
+-- Expand set of function names with all reachable functions.
+withTransitiveCalls :: CallGraph -> M.Map Name Used -> M.Map Name Used
+withTransitiveCalls cg fs
+  | fs == fs' = fs
+  | otherwise = withTransitiveCalls cg fs'
+  where
+    look :: (Name, Used) -> M.Map Name Used
+    look (f, u) = M.fromList $ map (,u) (S.toList (allCalledBy f cg))
+    fs' = foldr (M.unionWith max . look) fs $ M.toList fs
+
+calledInSOACs :: CallGraph -> Prog SOACS -> M.Map Name Used
+calledInSOACs cg prog = withTransitiveCalls cg $ directlyCalledInSOACs prog
+
+-- Inline those functions that are used in SOACs, and which involve
+-- arrays of any kind, as well as any functions used in AD.
+inlineBecauseSOACs :: CallGraph -> Prog SOACS -> S.Set Name
+inlineBecauseSOACs cg prog =
+  S.fromList $ mapMaybe onFunDef (progFuns prog)
+  where
+    called = calledInSOACs cg prog
+    isArray = not . primType
+    inline _ InAD = True
+    inline fd InSOAC =
+      any (isArray . paramType) (funDefParams fd)
+        || any (isArray . fst) (funDefRetType fd)
+        || arrayInBody (funDefBody fd)
+    onFunDef fd = do
+      guard $ maybe False (inline fd) $ M.lookup (funDefName fd) called
+      Just $ funDefName fd
+    arrayInBody = any arrayInStm . bodyStms
+    arrayInStm stm =
+      any isArray (patTypes (stmPat stm)) || arrayInExp (stmExp stm)
+    arrayInExp (Match _ cases defbody _) =
+      any arrayInBody $ defbody : map caseBody cases
+    arrayInExp (Loop _ _ body) =
+      arrayInBody body
+    -- Might be indexing a global array, see #2341. This one could perhaps be
+    -- fixed.
+    arrayInExp (BasicOp Index {}) =
+      True
+    arrayInExp _ = False
 
 -- Conservative inlining of functions that are called just once, or
 -- have #[inline] on them.
@@ -125,10 +199,10 @@ consInlineFunctions prog =
   where
     cg = buildCallGraph prog
 
--- Inline everything that is not #[noinline].
+-- Inline aggressively; in particular most things called from a SOAC.
 aggInlineFunctions :: (MonadFreshNames m) => Prog SOACS -> m (Prog SOACS)
 aggInlineFunctions prog =
-  inlineFunctions 3 cg (S.fromList $ map funDefName $ progFuns prog) prog
+  inlineFunctions 3 cg (inlineBecauseTiny prog <> inlineBecauseSOACs cg prog) prog
   where
     cg = buildCallGraph prog
 
@@ -150,10 +224,11 @@ inlineFunction ::
   Pat Type ->
   StmAux dec ->
   [(SubExp, Diet)] ->
-  (Safety, SrcLoc, [SrcLoc]) ->
+  Safety ->
+  Provenance ->
   FunDef SOACS ->
   m (Stms SOACS)
-inlineFunction pat aux args (safety, loc, locs) fun = do
+inlineFunction pat aux args safety p fun = do
   Body _ stms res <-
     renameBody $ mkBody (param_stms <> body_stms) (bodyResult (funDefBody fun))
   pure $ stms <> stmsFromList (zipWith bindSubExpRes (patIdents pat) res)
@@ -164,9 +239,7 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
           <$> zipWith bindSubExp (map paramIdent $ funDefParams fun) (map fst args)
 
     body_stms =
-      addLocations (stmAuxAttrs aux) safety (filter notmempty (loc : locs)) $
-        bodyStms $
-          funDefBody fun
+      addLocations (stmAuxAttrs aux) safety p $ bodyStms $ funDefBody fun
 
     -- Note that the sizes of arrays may not be correct at this
     -- point - it is crucial that we run copy propagation before
@@ -176,8 +249,6 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
 
     bindSubExpRes ident (SubExpRes cs se) =
       certify cs $ bindSubExp ident se
-
-    notmempty = (/= mempty) . locOf
 
 inlineInStms ::
   (MonadFreshNames m) =>
@@ -194,11 +265,13 @@ inlineInBody ::
   m (Body SOACS)
 inlineInBody fdmap = onBody
   where
-    inline (Let pat aux (Apply fname args _ what) : rest)
+    inline (Let pat aux (Apply fname args _ safety) : rest)
       | Just fd <- M.lookup fname fdmap,
         not $ "noinline" `inAttrs` funDefAttrs fd,
         not $ "noinline" `inAttrs` stmAuxAttrs aux =
-          (<>) <$> inlineFunction pat aux args what fd <*> inline rest
+          (<>)
+            <$> inlineFunction pat aux args safety (stmAuxLoc aux) fd
+            <*> inline rest
     inline (stm@(Let _ _ BasicOp {}) : rest) =
       (oneStm stm <>) <$> inline rest
     inline (stm : rest) =
@@ -222,39 +295,43 @@ inlineInBody fdmap = onBody
     onLambda (Lambda params ret body) =
       Lambda params ret <$> onBody body
 
--- Propagate source locations and attributes to the inlined
--- statements.  Attributes are propagated only when applicable (this
--- probably means that every supported attribute needs to be handled
--- specially here).
-addLocations :: Attrs -> Safety -> [SrcLoc] -> Stms SOACS -> Stms SOACS
-addLocations attrs caller_safety more_locs = fmap onStm
+traceLocs :: Provenance -> StmAux () -> StmAux ()
+traceLocs p aux =
+  aux {stmAuxLoc = stackProvenance p $ stmAuxLoc aux}
+
+-- Propagate source locations and attributes to the inlined statements.
+-- Attributes are propagated only when applicable (this probably means that
+-- every supported attribute needs to be handled specially here).
+addLocations :: Attrs -> Safety -> Provenance -> Stms SOACS -> Stms SOACS
+addLocations attrs caller_safety p = fmap onStm
   where
-    onStm (Let pat aux (Apply fname args t (safety, loc, locs))) =
+    onStm (Let pat aux (BasicOp (Assert cond desc))) =
       Let pat aux' $
-        Apply fname args t (min caller_safety safety, loc, locs ++ more_locs)
-      where
-        aux' = aux {stmAuxAttrs = attrs <> stmAuxAttrs aux}
-    onStm (Let pat aux (BasicOp (Assert cond desc (loc, locs)))) =
-      Let pat (withAttrs (attrsForAssert attrs) aux) $
         case caller_safety of
-          Safe -> BasicOp $ Assert cond desc (loc, locs ++ more_locs)
+          Safe -> BasicOp $ Assert cond desc
           Unsafe -> BasicOp $ SubExp $ Constant UnitValue
-    onStm (Let pat aux (Op soac)) =
-      Let pat (withAttrs attrs' aux) $
-        Op $
-          runIdentity $
-            mapSOACM
-              identitySOACMapper
-                { mapOnSOACLambda = pure . onLambda
-                }
-              soac
       where
+        aux' = traceLocs p (withAttrs (attrsForAssert attrs) aux)
+    onStm (Let pat aux (Apply fname args t safety)) =
+      Let pat aux' $ Apply fname args t $ min caller_safety safety
+      where
+        aux' = traceLocs p $ aux {stmAuxAttrs = attrs <> stmAuxAttrs aux}
+    onStm (Let pat aux (Op soac)) =
+      Let pat aux' . Op $
+        runIdentity $
+          mapSOACM
+            identitySOACMapper
+              { mapOnSOACLambda = pure . onLambda
+              }
+            soac
+      where
+        aux' = traceLocs p $ withAttrs attrs' aux
         attrs' = attrs `withoutAttrs` for_assert
         for_assert = attrsForAssert attrs
         onLambda lam =
           lam {lambdaBody = onBody for_assert $ lambdaBody lam}
     onStm (Let pat aux e) =
-      Let pat aux $ onExp e
+      Let pat (traceLocs p aux) $ onExp e
 
     onExp =
       mapExp
@@ -266,9 +343,7 @@ addLocations attrs caller_safety more_locs = fmap onStm
 
     onBody attrs' body =
       body
-        { bodyStms =
-            addLocations attrs' caller_safety more_locs $
-              bodyStms body
+        { bodyStms = addLocations attrs' caller_safety p $ bodyStms body
         }
 
 -- | Remove functions not ultimately called from an entry point or a

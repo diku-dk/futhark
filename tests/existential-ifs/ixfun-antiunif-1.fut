@@ -7,7 +7,8 @@
 -- output { [ 2.0f32, 6.0f32, 10.0f32] }
 
 def main [n] (arr: [n]f32) =
-  let x = if(arr[0] < 0.0)
-          then arr[10:n]
-          else map (*2.0f32) arr[0:n-10]
+  let x =
+    if (arr[0] < 0.0)
+    then arr[10:n]
+    else map (* 2.0f32) arr[0:n - 10]
   in x

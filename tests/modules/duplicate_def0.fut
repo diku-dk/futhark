@@ -5,9 +5,10 @@
 -- output { 4 }
 
 type foo = i32
-def foo(a: i32): foo = a + a
+def foo (a: i32) : foo = a + a
+
 module Foo = {
-  def one(): i32 = 1
+  def one () : i32 = 1
 }
 
-def main(x: i32): i32 = x
+def main (x: i32) : i32 = x

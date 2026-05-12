@@ -2,6 +2,6 @@
 
 type t = i32
 type ts [n] = [n]t
-type tss [n][m] = [n](ts [m])
+type tss [n] [m] = [n](ts [m])
 
-def main(xss: tss [][]): tss [][] = xss
+def main (xss: tss [] []) : tss [] [] = xss

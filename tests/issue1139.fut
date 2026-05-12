@@ -1,15 +1,20 @@
 type LandCounts = [5]i8
 type ColorRequirement = {masks: LandCounts, count: i8}
 type ProbTable = [16][9][4][18][18]f32
-type ColorRequirements = #one_requirement i8 ColorRequirement
-                       | #two_requirements i8 ColorRequirement ColorRequirement
+
+type ColorRequirements =
+    #one_requirement i8 ColorRequirement
+  | #two_requirements i8 ColorRequirement ColorRequirement
 
 def sum_with_mask (counts: LandCounts) (masks: LandCounts) = reduce (+) 0 (map2 (&) counts masks)
 
 def get_casting_probability_1 (lands: LandCounts) (cmc: i8) (requirement: ColorRequirement) (prob_to_cast: ProbTable) =
   prob_to_cast[cmc, requirement.count, 0, sum_with_mask lands requirement.masks, 0]
 
-def get_casting_probability_2 (lands: LandCounts) (cmc: i8) (req1: ColorRequirement) (req2: ColorRequirement)
+def get_casting_probability_2 (lands: LandCounts)
+                              (cmc: i8)
+                              (req1: ColorRequirement)
+                              (req2: ColorRequirement)
                               (prob_to_cast: ProbTable) =
   prob_to_cast[cmc, req1.count, req2.count, sum_with_mask lands req1.masks, sum_with_mask lands req2.masks]
 

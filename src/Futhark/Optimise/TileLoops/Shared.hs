@@ -13,6 +13,7 @@ module Futhark.Optimise.TileLoops.Shared
     varianceInStms,
     isTileableRedomap,
     changeEnv,
+    initialIxFnEnv,
     TileKind (..),
   )
 where
@@ -20,8 +21,9 @@ where
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (foldl', zip4)
+import Data.List (zip4)
 import Data.Map qualified as M
+import Data.Maybe
 import Futhark.IR.GPU
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SeqMem qualified as ExpMem
@@ -36,13 +38,13 @@ data TileKind = TilePartial | TileFull
 
 -- index an array with indices given in outer_indices; any inner
 -- dims of arr not indexed by outer_indices are sliced entirely
-index :: (MonadBuilder m) => String -> VName -> [VName] -> m VName
+index :: (MonadBuilder m) => Name -> VName -> [VName] -> m VName
 index se_desc arr outer_indices = do
   arr_t <- lookupType arr
   let slice = fullSlice arr_t $ map (DimFix . Var) outer_indices
   letExp se_desc $ BasicOp $ Index arr slice
 
-update :: (MonadBuilder m) => String -> VName -> [VName] -> SubExp -> m VName
+update :: (MonadBuilder m) => Name -> VName -> [VName] -> SubExp -> m VName
 update se_desc arr indices new_elem =
   letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) indices) new_elem
 
@@ -62,9 +64,10 @@ forLoop' i_bound merge body = do
   loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
 
   loop_body <-
-    runBodyBuilder . localScope (scopeOfLoopForm loop_form <> scopeOfFParams loop_inits) $
-      body i $
-        map paramName loop_inits
+    insertStmsM $
+      localScope (scopeOfLoopForm loop_form <> scopeOfFParams loop_inits) $
+        body i $
+          map paramName loop_inits
 
   letTupExp "loop" $
     Loop (zip loop_inits $ map Var merge) loop_form loop_body
@@ -79,7 +82,7 @@ forLoop i_bound merge body = do
   pure $ head res_list
 
 segMap1D ::
-  String ->
+  Name ->
   SegLevel ->
   ResultManifest ->
   SubExp -> -- dim_x
@@ -97,14 +100,11 @@ segMap1D desc lvl manifest w f = do
   Body _ stms' res' <- renameBody $ mkBody stms res
 
   let ret (SubExpRes cs se) = Returns manifest cs se
-  letTupExp desc $
-    Op . SegOp $
-      SegMap lvl space ts $
-        KernelBody () stms' $
-          map ret res'
+  letTupExp desc . Op . SegOp $
+    SegMap lvl space ts (Body () stms' $ map ret res')
 
 segMap2D ::
-  String -> -- desc
+  Name -> -- desc
   SegLevel -> -- lvl
   ResultManifest -> -- manifest
   (SubExp, SubExp) -> -- (dim_x, dim_y)
@@ -125,13 +125,11 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op . SegOp $
-      SegMap lvl segspace ts $
-        KernelBody () stms $
-          map ret res
+    Op . SegOp . SegMap lvl segspace ts $
+      Body () stms (map ret res)
 
 segMap3D ::
-  String -> -- desc
+  Name -> -- desc
   SegLevel -> -- lvl
   ResultManifest -> -- manifest
   (SubExp, SubExp, SubExp) -> -- (dim_z, dim_y, dim_x)
@@ -153,40 +151,40 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op . SegOp $
-      SegMap lvl segspace ts $
-        KernelBody () stms $
-          map ret res
+    Op . SegOp . SegMap lvl segspace ts $
+      Body () stms (map ret res)
 
 segScatter2D ::
-  String ->
+  Name ->
   VName ->
   [SubExp] -> -- dims of sequential loop on top
   (SubExp, SubExp) -> -- (dim_y, dim_x)
   ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
   Builder GPU VName
-segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f = do
-  ltid_flat <- newVName "ltid_flat"
-  ltid_y <- newVName "ltid_y"
-  ltid_x <- newVName "ltid_x"
+segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f =
+  letExp desc <=< withAcc [updt_arr] 1 $ \ ~[acc] -> do
+    ltid_flat <- newVName "ltid_flat"
+    ltid_y <- newVName "ltid_y"
+    ltid_x <- newVName "ltid_x"
 
-  seq_is <- replicateM (length seq_dims) (newVName "ltid_seq")
-  let seq_space = zip seq_is seq_dims
+    seq_is <- replicateM (length seq_dims) (newVName "ltid_seq")
+    let seq_space = zip seq_is seq_dims
 
-  let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_y, dim_y), (ltid_x, dim_x)]
-      lvl =
-        SegThreadInBlock
-          (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
+    let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_y, dim_y), (ltid_x, dim_x)]
+        lvl =
+          SegThreadInBlock
+            (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
 
-  ((res_v, res_i), stms) <-
-    runBuilder . localScope (scopeOfSegSpace segspace) $
-      f seq_is (ltid_y, ltid_x)
+    body <- buildBody_ $ do
+      (res_v, res_i) <-
+        localScope (scopeOfSegSpace segspace) $
+          f seq_is (ltid_y, ltid_x)
+      acc' <- letExp "acc" $ BasicOp $ UpdateAcc Safe acc [res_i] [res_v]
+      pure [Returns ResultMaySimplify mempty $ Var acc']
 
-  let ret = WriteReturns mempty updt_arr [(Slice [DimFix res_i], res_v)]
-  let body = KernelBody () stms [ret]
-
-  updt_arr_t <- lookupType updt_arr
-  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [updt_arr_t] body
+    acc_t <- lookupType acc
+    fmap pure . letSubExp desc <=< renameExp $
+      Op (SegOp $ SegMap lvl segspace [acc_t] body)
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices
@@ -274,18 +272,28 @@ changeEnv (with_env, ixfn_env) y e = do
   ixfn_env' <- changeIxFnEnv ixfn_env y e
   pure (with_env', ixfn_env')
 
+-- | Construct an initial 'IxFnEnv' where it is assumed that every array
+-- parameter in the scope has a row-major index function.
+initialIxFnEnv :: Scope GPU -> IxFnEnv
+initialIxFnEnv = M.mapMaybe f
+  where
+    f info =
+      case typeOf info of
+        Array _ shape _ -> Just $ LMAD.iota 0 $ map pe64 $ shapeDims shape
+        _ -> Nothing
+
 changeWithEnv :: WithEnv -> Exp GPU -> TileM WithEnv
 changeWithEnv with_env (WithAcc accum_decs inner_lam) = do
-  let bindings = map mapfun accum_decs
+  let bindings = mapMaybe mapfun accum_decs
       par_tps = take (length bindings) $ map paramName $ lambdaParams inner_lam
       with_env' = M.union with_env $ M.fromList $ zip par_tps bindings
   pure with_env'
   where
-    mapfun (_, _, Nothing) = error "What the hack is an accumulator without operator?"
+    mapfun (_, _, Nothing) = Nothing
     mapfun (shp, _, Just (lam_inds, ne)) =
       let len_inds = length $ shapeDims shp
           lam_op = lam_inds {lambdaParams = drop len_inds $ lambdaParams lam_inds}
-       in (lam_op, ne)
+       in Just (lam_op, ne)
 changeWithEnv with_env _ = pure with_env
 
 composeIxfuns :: IxFnEnv -> VName -> VName -> (LMAD -> Maybe LMAD) -> TileM IxFnEnv
@@ -301,11 +309,13 @@ composeIxfuns env y x ixf_fun =
         _ -> env
 
 changeIxFnEnv :: IxFnEnv -> VName -> Exp GPU -> TileM IxFnEnv
-changeIxFnEnv env y (BasicOp (Reshape ReshapeArbitrary shp_chg x)) =
-  composeIxfuns env y x (`LMAD.reshape` fmap ExpMem.pe64 (shapeDims shp_chg))
-changeIxFnEnv env y (BasicOp (Reshape ReshapeCoerce shp_chg x)) =
-  composeIxfuns env y x (Just . (`LMAD.coerce` fmap ExpMem.pe64 (shapeDims shp_chg)))
-changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
+changeIxFnEnv env y (BasicOp (Reshape x shp_chg)) =
+  case reshapeKind shp_chg of
+    ReshapeCoerce ->
+      composeIxfuns env y x (Just . (`LMAD.coerce` fmap ExpMem.pe64 (shapeDims $ newShape shp_chg)))
+    ReshapeArbitrary ->
+      composeIxfuns env y x (`LMAD.reshape` fmap ExpMem.pe64 (shapeDims $ newShape shp_chg))
+changeIxFnEnv env y (BasicOp (Manifest x perm)) = do
   tp <- lookupType x
   case tp of
     Array _ptp shp _u -> do
@@ -313,7 +323,7 @@ changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
       let ixfn = LMAD.permute (LMAD.iota 0 shp') perm
       pure $ M.insert y ixfn env
     _ -> error "In TileLoops/Shared.hs, changeIxFnEnv: manifest applied to a non-array!"
-changeIxFnEnv env y (BasicOp (Rearrange perm x)) =
+changeIxFnEnv env y (BasicOp (Rearrange x perm)) =
   composeIxfuns env y x (Just . (`LMAD.permute` perm))
 changeIxFnEnv env y (BasicOp (Index x slc)) =
   composeIxfuns env y x (Just . (`LMAD.slice` Slice (map (fmap ExpMem.pe64) $ unSlice slc)))

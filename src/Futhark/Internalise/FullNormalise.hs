@@ -25,24 +25,22 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Text qualified as T
 import Futhark.MonadFreshNames
+import Futhark.Util (showText)
+import Futhark.Util.Loc (srcspan)
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
--- Modifier to apply on binding, this is used to propagate attributes and move assertions
-data BindModifier
-  = Ass Exp (Info T.Text) SrcLoc
-  | Att (AttrInfo VName)
+-- Modifier to apply on bindings, this is used to propagate attributes.
+newtype BindModifier
+  = Att (AttrInfo VName)
 
 -- Apply a list of modifiers, removing the assertions as it is not needed to check them multiple times
 applyModifiers :: Exp -> [BindModifier] -> (Exp, [BindModifier])
 applyModifiers =
   foldr f . (,[])
   where
-    f (Ass ass txt loc) (body, modifs) =
-      (Assert ass body txt loc, modifs)
     f (Att attr) (body, modifs) =
       (Attr attr body mempty, Att attr : modifs)
 
@@ -62,9 +60,9 @@ type NormState = (([Binding], [BindModifier]), VNameSource)
 --   they have to be in the same list to conserve their order
 -- Direct interaction with the inside state should be done with caution, that's why their
 -- no instance of `MonadState`.
-newtype OrderingM a = OrderingM (StateT NormState (Reader String) a)
+newtype OrderingM a = OrderingM (StateT NormState (Reader Name) a)
   deriving
-    (Functor, Applicative, Monad, MonadReader String, MonadState NormState)
+    (Functor, Applicative, Monad, MonadReader Name, MonadState NormState)
 
 instance MonadFreshNames OrderingM where
   getNameSource = OrderingM $ gets snd
@@ -97,7 +95,7 @@ runOrdering (OrderingM m) =
         then ((a, binds), src)
         else error "not all bind modifiers were freed"
 
-naming :: String -> OrderingM a -> OrderingM a
+naming :: Name -> OrderingM a -> OrderingM a
 naming s = local (const s)
 
 -- | From now, we say an expression is "final" if it's going to be stored in a let-bind
@@ -107,7 +105,7 @@ naming s = local (const s)
 nameExp :: Bool -> Exp -> OrderingM Exp
 nameExp True e = pure e
 nameExp False e = do
-  name <- newNameFromString =<< ask -- "e<{" ++ prettyString e ++ "}>"
+  name <- newVName =<< ask -- "e<{" ++ prettyString e ++ "}>"
   let ty = typeOf e
       loc = srclocOf e
       pat = Id name (Info ty) loc
@@ -116,36 +114,26 @@ nameExp False e = do
 
 -- An evocative name to use when naming subexpressions of the
 -- expression bound to this pattern.
-patRepName :: Pat t -> String
+patRepName :: Pat t -> Name
 patRepName (PatAscription p _ _) = patRepName p
-patRepName (Id v _ _) = baseString v
+patRepName (Id v _ _) = baseName v
 patRepName _ = "tmp"
 
-expRepName :: Exp -> String
-expRepName (Var v _ _) = prettyString v
-expRepName e = "d<{" ++ prettyString (bareExp e) ++ "}>"
+expRepName :: Exp -> Name
+expRepName (Var v _ _) = nameFromText $ prettyText v
+expRepName e = "d<{" <> nameFromText (prettyText (bareExp e)) <> "}>"
 
 -- An evocative name to use when naming arguments to an application.
-argRepName :: Exp -> Int -> String
-argRepName e i = expRepName e <> "_arg" <> show i
+argRepName :: Exp -> Int -> Name
+argRepName e i = expRepName e <> "_arg" <> nameFromText (showText i)
 
 -- Modify an expression as describe in module introduction,
 -- introducing the let-bindings in the state.
 getOrdering :: Bool -> Exp -> OrderingM Exp
 getOrdering final (Assert ass e txt loc) = do
   ass' <- getOrdering False ass
-  l_prev <- OrderingM $ gets $ length . snd . fst
-  addModifier $ Ass ass' txt loc
   e' <- getOrdering final e
-  l_after <- OrderingM $ gets $ length . snd . fst
-  -- if the list of modifier has reduced in size, that means that
-  -- all assertions as been inserted,
-  -- else, we have to introduce the assertion ourself
-  if l_after <= l_prev
-    then pure e'
-    else do
-      rmModifier
-      pure $ Assert ass' e' txt loc
+  pure $ Assert ass' e' txt loc
 getOrdering final (Attr attr e loc) = do
   -- propagate attribute
   addModifier $ Att attr
@@ -170,11 +158,20 @@ getOrdering _ (RecordLit fs loc) = do
     f (RecordFieldExplicit n e floc) = do
       e' <- getOrdering False e
       pure $ RecordFieldExplicit n e' floc
-    f (RecordFieldImplicit v t _) =
-      f $ RecordFieldExplicit (baseName v) (Var (qualName v) t loc) loc
-getOrdering _ (ArrayLit es ty loc) = do
-  es' <- mapM (getOrdering False) es
-  pure $ ArrayLit es' ty loc
+    f (RecordFieldImplicit (L vloc v) t _) =
+      f $ RecordFieldExplicit (L vloc (baseName v)) (Var (qualName v) t loc) loc
+getOrdering _ (ArrayVal vs t loc) =
+  pure $ ArrayVal vs t loc
+getOrdering _ (ArrayLit es ty loc)
+  | Just vs <- mapM isLiteral es,
+    Info (Array _ (Shape [_]) (Prim t)) <- ty =
+      pure $ ArrayVal vs t loc
+  | otherwise = do
+      es' <- mapM (getOrdering False) es
+      pure $ ArrayLit es' ty loc
+  where
+    isLiteral (Literal v _) = Just v
+    isLiteral _ = Nothing
 getOrdering _ (Project n e ty loc) = do
   e' <- getOrdering False e
   pure $ Project n e' ty loc
@@ -187,17 +184,17 @@ getOrdering _ (Not e loc) = do
 getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
   nameExp final $ Constr n es' ty loc
-getOrdering final (Update eb slice eu loc) = do
+getOrdering final (Update eb steps eu ty loc) = do
+  steps' <- mapM onStep steps
   eu' <- getOrdering False eu
-  slice' <- astMap mapper slice
   eb' <- getOrdering False eb
-  nameExp final $ Update eb' slice' eu' loc
+  nameExp final $ Update eb' steps' eu' ty loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
-getOrdering final (RecordUpdate eb ns eu ty loc) = do
-  eb' <- getOrdering False eb
-  eu' <- getOrdering False eu
-  nameExp final $ RecordUpdate eb' ns eu' ty loc
+    onStep (UpdateStepSlice slice) =
+      UpdateStepSlice <$> astMap mapper slice
+    onStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 getOrdering final (Lambda params body mte ret loc) = do
   body' <- transformBody body
   nameExp final $ Lambda params body' mte ret loc
@@ -205,11 +202,11 @@ getOrdering _ (OpSection qn ty loc) =
   pure $ Var qn ty loc
 getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (Info (RetType dims ret), Info exts) loc) = do
   x <- getOrdering False e
-  yn <- newNameFromString "y"
+  yn <- newVName "y"
   let y = Var (qualName yn) (Info $ toStruct yty) mempty
       ret' = applySubst (pSubst x y) ret
       body =
-        mkApply (Var op ty mempty) [(xext, x), (Nothing, y)] $
+        mkApply (Var op ty loc) [(xext, x), (Nothing, y)] $
           AppRes (toStruct ret') exts
   nameExp final $ Lambda [Id yn (Info yty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
@@ -218,48 +215,53 @@ getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (I
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
 getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (Info (RetType dims ret)) loc) = do
-  xn <- newNameFromString "x"
+  xn <- newVName "x"
   y <- getOrdering False e
   let x = Var (qualName xn) (Info $ toStruct xty) mempty
       ret' = applySubst (pSubst x y) ret
-      body = mkApply (Var op ty mempty) [(Nothing, x), (yext, y)] $ AppRes (toStruct ret') []
+      body = mkApply (Var op ty loc) [(Nothing, x), (yext, y)] $ AppRes (toStruct ret') []
   nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
     pSubst x y vn
       | Named p <- xp, p == vn = Just $ ExpSubst x
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
-getOrdering final (ProjectSection names (Info ty) loc) = do
-  xn <- newNameFromString "x"
+getOrdering final (UpdateSection steps (Info ty) loc) = do
+  steps' <- mapM transformStep steps
+  xn <- newVName "x"
   let (xty, RetType dims ret) = case ty of
         Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
-        _ -> error $ "not a function type for project section: " ++ prettyString ty
+        _ -> error $ "not a function type for section update: " ++ prettyString ty
       x = Var (qualName xn) (Info $ toStruct xty) mempty
-      body = foldl project x names
-  nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret)) loc
-  where
-    project e field =
-      case typeOf e of
-        Scalar (Record fs)
-          | Just t <- M.lookup field fs ->
-              Project field e (Info t) mempty
-        t ->
-          error $
-            "desugar ProjectSection: type "
-              ++ prettyString t
-              ++ " does not have field "
-              ++ prettyString field
-getOrdering final (IndexSection slice (Info ty) loc) = do
-  slice' <- astMap mapper slice
-  xn <- newNameFromString "x"
-  let (xty, RetType dims ret) = case ty of
-        Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
-        _ -> error $ "not a function type for index section: " ++ prettyString ty
-      x = Var (qualName xn) (Info $ toStruct xty) mempty
-      body = AppExp (Index x slice' loc) (Info (AppRes (toStruct ret) []))
+      body = fst $ foldl applyStep (x, toStruct xty) steps'
   nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret)) loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
+
+    transformStep (UpdateStepField f) =
+      pure $ UpdateStepField f
+    transformStep (UpdateStepSlice slice) =
+      UpdateStepSlice <$> astMap mapper slice
+
+    applyStep (e, t) (UpdateStepField field) =
+      case t of
+        Scalar (Record fs)
+          | Just t' <- M.lookup field fs ->
+              (Project field e (Info t') mempty, t')
+        _ ->
+          error $
+            "desugar UpdateSection: type "
+              ++ prettyString t
+              ++ " does not have field "
+              ++ prettyString field
+    applyStep (e, t) (UpdateStepSlice slice) =
+      let t' = stripArray (fixedDims slice) t
+          e' = AppExp (Index e slice loc) (Info (AppRes t' []))
+       in (e', t')
+
+    fixedDims = length . filter isFix
+    isFix DimFix {} = True
+    isFix _ = False
 getOrdering _ (Ascript e _ _) = getOrdering False e
 getOrdering final (AppExp (Apply f args loc) resT) = do
   args' <-
@@ -281,7 +283,7 @@ getOrdering final (AppExp (LetPat sizes pat expr body _) _) = do
   expr' <- naming (patRepName pat) $ getOrdering True expr
   addBind $ PatBind sizes pat expr'
   getOrdering final body
-getOrdering final (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
+getOrdering final (AppExp (LetFun (vn, _) (tparams, params, mrettype, rettype, body) e _) _) = do
   body' <- transformBody body
   addBind $ FunBind vn (tparams, params, mrettype, rettype, body')
   getOrdering final e
@@ -291,13 +293,13 @@ getOrdering final (AppExp (If cond et ef loc) resT) = do
   ef' <- transformBody ef
   nameExp final $ AppExp (If cond' et' ef' loc) resT
 getOrdering final (AppExp (Loop sizes pat einit form body loc) resT) = do
-  einit' <- getOrdering False einit
+  einit' <- getOrdering False $ loopInitExp einit
   form' <- case form of
     For ident e -> For ident <$> getOrdering True e
     ForIn fpat e -> ForIn fpat <$> getOrdering True e
     While e -> While <$> transformBody e
   body' <- transformBody body
-  nameExp final $ AppExp (Loop sizes pat einit' form' body' loc) resT
+  nameExp final $ AppExp (Loop sizes pat (LoopInitExplicit einit') form' body' loc) resT
 getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) loc) (Info resT)) = do
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
@@ -309,20 +311,27 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
       er' <- naming "and_rhs" $ transformBody er
       pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
     (False, False) -> do
-      el' <- naming (prettyString op <> "_lhs") $ getOrdering False el
-      er' <- naming (prettyString op <> "_rhs") $ getOrdering False er
+      el' <- naming (nameFromText (prettyText op) <> "_lhs") $ getOrdering False el
+      er' <- naming (nameFromText (prettyText op) <> "_rhs") $ getOrdering False er
       pure $ mkApply (Var op opT oloc) [(elp, el'), (erp, er')] resT
   nameExp final expr'
   where
     isOr = baseName (qualLeaf op) == "||"
     isAnd = baseName (qualLeaf op) == "&&"
-getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
+getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) steps e body _) _) = do
+  steps' <- mapM onStep steps
   e' <- getOrdering False e
-  slice' <- astMap mapper slice
-  addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc)
+  let loc' = srcspan dloc e
+  addBind $
+    PatBind
+      []
+      (Id dest dty dloc)
+      (Update (Var (qualName src) sty sloc) steps' e' (Info (unInfo sty)) loc')
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
+    onStep (UpdateStepSlice slice) = UpdateStepSlice <$> astMap mapper slice
+    onStep (UpdateStepField f) = pure $ UpdateStepField f
 getOrdering final (AppExp (Index e slice loc) resT) = do
   e' <- getOrdering False e
   slice' <- astMap mapper slice
@@ -354,7 +363,7 @@ transformBody e = do
     f body (PatBind sizes p expr) =
       AppExp (LetPat sizes p expr body mempty) appRes
     f body (FunBind vn infos) =
-      AppExp (LetFun vn infos body mempty) appRes
+      AppExp (LetFun (vn, mempty) infos body mempty) appRes
 
 transformValBind :: (MonadFreshNames m) => ValBind -> m ValBind
 transformValBind valbind = do

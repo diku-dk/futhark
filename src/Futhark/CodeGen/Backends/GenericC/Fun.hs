@@ -47,15 +47,16 @@ compileInput (MemParam name space) = do
 compileOutput :: Param -> CompilerM op s (C.Param, C.Exp)
 compileOutput (ScalarParam name bt) = do
   let ctp = primTypeToCType bt
-  p_name <- newVName $ "out_" ++ baseString name
+  p_name <- newVName $ "out_" <> baseName name
   pure ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
 compileOutput (MemParam name space) = do
   ty <- memToCType name space
-  p_name <- newVName $ baseString name ++ "_p"
+  p_name <- newVName $ baseName name <> "_p"
   pure ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
 compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = inNewFunction $ do
+compileFun get_constants extra (fname, func) = inNewFunction $ do
+  let (Function _ outputs inputs _ body) = func
   (outparams, out_ptrs) <- mapAndUnzipM compileOutput outputs
   inparams <- mapM compileInput inputs
 
@@ -92,7 +93,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = 
 -- fail) and has no extra parameters (meaning it cannot allocate
 -- memory non-lexxical or do anything fancy).
 compileVoidFun :: [C.BlockItem] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileVoidFun get_constants (fname, func@(Function _ outputs inputs body)) = inNewFunction $ do
+compileVoidFun get_constants (fname, func@(Function _ outputs inputs _ body)) = inNewFunction $ do
   (outparams, out_ptrs) <- mapAndUnzipM compileOutput outputs
   inparams <- mapM compileInput inputs
 

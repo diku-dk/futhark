@@ -53,6 +53,7 @@ module Futhark.Util
     concatMapM,
     topologicalSort,
     debugTraceM,
+    ensureCacheDirectory,
   )
 where
 
@@ -77,17 +78,20 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.Encoding.Error qualified as T
+import Data.Text.IO qualified as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
 import Debug.Trace
 import Numeric
+import System.Directory (createDirectoryIfMissing, listDirectory)
 import System.Directory.Tree qualified as Dir
 import System.Environment
 import System.Exit
+import System.FilePath ((</>))
 import System.FilePath qualified as Native
 import System.FilePath.Posix qualified as Posix
 import System.IO (Handle, hIsTerminalDevice, stdout)
-import System.IO.Error (isDoesNotExistError)
+import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import System.IO.Unsafe
 import System.Process.ByteString
 import Text.Read (readMaybe)
@@ -521,3 +525,24 @@ debugTraceM :: (Monad m) => Int -> String -> m ()
 debugTraceM level
   | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" level = traceM
   | otherwise = const $ pure ()
+
+-- | Create a directory with the given name (including parents if necessary). If
+-- the directory is then empty (which as a special case it will be if newly
+-- created), populate it with a @CACHEDIR.TAG@ file according to the
+-- specification at <https://bford.info/cachedir/>.
+ensureCacheDirectory :: FilePath -> IO ()
+ensureCacheDirectory fpath = do
+  createDirectoryIfMissing True fpath
+  l <- listDirectory fpath
+  when (null l) . okIfInUse . T.writeFile (fpath </> "CACHEDIR.TAG") . T.unlines $
+    [ "Signature: 8a477f597d28d172789f06886806bc55",
+      "# This file is a cache directory tag created by futhark.",
+      "# For information about cache directory tags, see:",
+      "#     https://bford.info/cachedir/"
+    ]
+  where
+    -- Several threads may be trying to create this file concurrently, which
+    -- will normally result in an exception due to locking - but it is actually
+    -- fine. They will all be trying to write the same thing anyway.
+    okIfInUse m =
+      catchJust (guard . isAlreadyInUseError) m (const $ pure ())

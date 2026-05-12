@@ -22,8 +22,8 @@ import Futhark.Test
 import Futhark.Util (hashText, interactWithFileSafely)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyTextOneLine)
+import Language.Futhark.Core (isBuiltin)
 import Language.Futhark.Parser.Lexer (scanTokensText)
-import Language.Futhark.Prop (isBuiltin)
 import Language.Futhark.Semantic (includeToString)
 import System.Environment (getExecutablePath)
 import System.Exit
@@ -128,7 +128,7 @@ mainTokens = mainWithOptions () [] "program" $ \args () ->
         Just (Right (Left e)) -> do
           hPrint stderr e
           exitWith $ ExitFailure 2
-        Just (Right (Right (tokens, _))) ->
+        Just (Right (Right tokens)) ->
           mapM_ printToken tokens
     _ -> Nothing
   where

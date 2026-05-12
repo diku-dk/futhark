@@ -12,4 +12,3 @@
 
 entry testMax = map2 u16.max
 entry testMin = map2 u16.min
-

@@ -9,7 +9,7 @@
 -- tags { no_python }
 -- compiled input { [0,0,0] [1,2,3] 100001i64 } output { 233120i32 }
 
-def main [n] (a: [n]i32) (b: [n]i32) (m: i64): i32 =
+def main [n] (a: [n]i32) (b: [n]i32) (m: i64) : i32 =
   let contribs = replicate m b
   let res = scan (map2 (+)) a contribs
   in reduce (^) 0 (flatten res)

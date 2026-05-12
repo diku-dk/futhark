@@ -7,8 +7,6 @@ module Language.Futhark.Prop
     Intrinsic (..),
     intrinsics,
     intrinsicVar,
-    isBuiltin,
-    isBuiltinLoc,
     maxIntrinsicTag,
     namesToPrimTypes,
     qualName,
@@ -24,6 +22,8 @@ module Language.Futhark.Prop
     defaultEntryPoint,
     paramName,
     anySize,
+    isAnySize,
+    setApplyLoc,
 
     -- * Queries on expressions
     typeOf,
@@ -31,7 +31,9 @@ module Language.Futhark.Prop
     valBindBound,
     funType,
     stripExp,
+    subExps,
     similarExps,
+    sameExp,
 
     -- * Queries on patterns and params
     patIdents,
@@ -133,18 +135,17 @@ import Data.Char
 import Data.Foldable
 import Data.List (genericLength, isPrefixOf, sortOn)
 import Data.List.NonEmpty qualified as NE
-import Data.Loc (Loc (..), posFile)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Util (maxinum)
 import Futhark.Util.Pretty
 import Language.Futhark.Primitive qualified as Primitive
 import Language.Futhark.Syntax
 import Language.Futhark.Traversals
 import Language.Futhark.Tuple
-import System.FilePath (takeDirectory)
 
 -- | The name of the default program entry point (@main@).
 defaultEntryPoint :: Name
@@ -358,19 +359,35 @@ paramName :: PName -> Maybe VName
 paramName (Named v) = Just v
 paramName Unnamed = Nothing
 
--- | A special expression representing no known size.  When present in
--- a type, each instance represents a distinct size.  The type checker
--- should _never_ produce these - they are a (hopefully temporary)
--- thing introduced by defunctorisation and monomorphisation.  They
--- represent a flaw in our implementation.  When they occur in a
--- return type, they can be replaced with freshly created existential
--- sizes.  When they occur in parameter types, they can be replaced
--- with size parameters.
-anySize :: Size
-anySize =
-  -- The definition here is weird to avoid seeing this as a free
-  -- variable.
-  StringLit [65, 78, 89] mempty
+-- | A special expression representing no known size, but encoding an
+-- equivalence class (represented by the integer) that can be used to detect
+-- unknown-but-equal sizes. This is important so that we do not throw away size
+-- equalities just because the names become unknown to us (e.g. see #2326). The
+-- type checker should _never_ produce anySizes - they are a (hopefully
+-- temporary) thing introduced by defunctorisation and monomorphisation. They
+-- represent a flaw in our implementation. When they occur in a return type,
+-- they can be replaced with freshly created existential sizes. When they occur
+-- in parameter types, they can be replaced with size parameters.
+anySize :: Int -> Size
+anySize x =
+  -- The definition here is weird to avoid seeing this as a free variable.
+  StringLit (map (fromIntegral . ord) (show x)) mempty
+
+-- | If this is any size, retrieve the key for the equivalence class.
+isAnySize :: Size -> Maybe Int
+isAnySize (StringLit xs _) = Just $ read $ map (chr . fromIntegral) xs
+isAnySize _ = Nothing
+
+-- | Override the location of an 'Apply' expression.
+--
+-- This is useful because 'mkApply' sets the location to be the span of the
+-- function and all arguments, but during many frontend transformations we
+-- insert additional arguments for which we do not care about the original
+-- source location. Our goal is to maintain a correspondence between the
+-- original source code and the generated code.
+setApplyLoc :: SrcLoc -> Exp -> Exp
+setApplyLoc loc (AppExp (Apply f args _) info) = AppExp (Apply f args loc) info
+setApplyLoc _ e = e
 
 -- | Match the dimensions of otherwise assumed-equal types.  The
 -- combining function is also passed the names bound within the type
@@ -460,9 +477,11 @@ typeOf (TupLit es _) = Scalar $ tupleRecord $ map typeOf es
 typeOf (RecordLit fs _) =
   Scalar $ Record $ M.fromList $ map record fs
   where
-    record (RecordFieldExplicit name e _) = (name, typeOf e)
-    record (RecordFieldImplicit name (Info t) _) = (baseName name, t)
+    record (RecordFieldExplicit (L _ name) e _) = (name, typeOf e)
+    record (RecordFieldImplicit (L _ name) (Info t) _) = (baseName name, t)
 typeOf (ArrayLit _ (Info t) _) = t
+typeOf (ArrayVal vs t loc) =
+  Array mempty (Shape [sizeFromInteger (genericLength vs) loc]) (Prim t)
 typeOf (StringLit vs loc) =
   Array
     mempty
@@ -475,8 +494,7 @@ typeOf (Ascript e _ _) = typeOf e
 typeOf (Coerce _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (Not e _) = typeOf e
-typeOf (Update e _ _ _) = typeOf e
-typeOf (RecordUpdate _ _ _ (Info t) _) = t
+typeOf (Update _ _ _ (Info t) _) = t
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (Lambda params _ _ (Info t) _) = funType params t
 typeOf (OpSection _ (Info t) _) = t
@@ -484,8 +502,7 @@ typeOf (OpSectionLeft _ _ _ (_, Info (pn, pt2)) (Info ret, _) _) =
   Scalar $ Arrow mempty pn (diet pt2) (toStruct pt2) ret
 typeOf (OpSectionRight _ _ _ (Info (pn, pt1), _) (Info ret) _) =
   Scalar $ Arrow mempty pn (diet pt1) (toStruct pt1) ret
-typeOf (ProjectSection _ (Info t) _) = t
-typeOf (IndexSection _ (Info t) _) = t
+typeOf (UpdateSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t
 typeOf (Attr _ e _) = typeOf e
 typeOf (AppExp _ (Info res)) = appResType res
@@ -594,7 +611,8 @@ patternType (Wildcard (Info t) _) = t
 patternType (PatParens p _) = patternType p
 patternType (Id _ (Info t) _) = t
 patternType (TuplePat pats _) = Scalar $ tupleRecord $ map patternType pats
-patternType (RecordPat fs _) = Scalar $ Record $ patternType <$> M.fromList fs
+patternType (RecordPat fs _) =
+  Scalar $ Record $ patternType <$> M.fromList (map (first unLoc) fs)
 patternType (PatAscription p _ _) = patternType p
 patternType (PatLit _ (Info t) _) = t
 patternType (PatConstr _ (Info t) _ _) = t
@@ -625,12 +643,12 @@ patternParam p =
 namesToPrimTypes :: M.Map Name PrimType
 namesToPrimTypes =
   M.fromList
-    [ (nameFromString $ prettyString t, t)
-      | t <-
-          Bool
-            : map Signed [minBound .. maxBound]
-            ++ map Unsigned [minBound .. maxBound]
-            ++ map FloatType [minBound .. maxBound]
+    [ (nameFromText $ prettyText t, t)
+    | t <-
+        Bool
+          : map Signed [minBound .. maxBound]
+          ++ map Unsigned [minBound .. maxBound]
+          ++ map FloatType [minBound .. maxBound]
     ]
 
 -- | The nature of something predefined.  For functions, these can
@@ -704,7 +722,7 @@ intrinsics =
                   [Scalar $ t_a mempty]
                   $ RetType []
                   $ Scalar
-                  $ t_a mempty
+                  $ t_a Unique
               ),
               ( "flatten",
                 IntrinsicPolyFun
@@ -1063,12 +1081,20 @@ intrinsics =
             )
           ++
           -- This overrides the ! from Primitive.
-
-          -- This overrides the ! from Primitive.
           [ ( "!",
               IntrinsicOverloadedFun
                 ( map Signed [minBound .. maxBound]
                     ++ map Unsigned [minBound .. maxBound]
+                    ++ [Bool]
+                )
+                [Nothing]
+                Nothing
+            ),
+            ( "neg",
+              IntrinsicOverloadedFun
+                ( map Signed [minBound .. maxBound]
+                    ++ map Unsigned [minBound .. maxBound]
+                    ++ map FloatType [minBound .. maxBound]
                     ++ [Bool]
                 )
                 [Nothing]
@@ -1082,7 +1108,7 @@ intrinsics =
 
     intrinsicStart = 1 + baseTag (fst $ last primOp)
 
-    [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
+    [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromText ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
     t_a u = TypeVar u (qualName a) []
     array_a u s = Array u s $ t_a mempty
@@ -1108,37 +1134,37 @@ intrinsics =
     accType u t =
       TypeVar u (qualName (fst intrinsicAcc)) [TypeArgType t]
 
-    namify i (x, y) = (VName (nameFromString x) i, y)
+    namify i (x, y) = (VName (nameFromText x) i, y)
 
     primFun (name, (ts, t, _)) =
       (name, IntrinsicMonoFun (map unPrim ts) $ unPrim t)
 
-    unOpFun bop = (prettyString bop, IntrinsicMonoFun [t] t)
+    unOpFun bop = (prettyText bop, IntrinsicMonoFun [t] t)
       where
         t = unPrim $ Primitive.unOpType bop
 
-    binOpFun bop = (prettyString bop, IntrinsicMonoFun [t, t] t)
+    binOpFun bop = (prettyText bop, IntrinsicMonoFun [t, t] t)
       where
         t = unPrim $ Primitive.binOpType bop
 
-    cmpOpFun bop = (prettyString bop, IntrinsicMonoFun [t, t] Bool)
+    cmpOpFun bop = (prettyText bop, IntrinsicMonoFun [t, t] Bool)
       where
         t = unPrim $ Primitive.cmpOpType bop
 
-    convOpFun cop = (prettyString cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
+    convOpFun cop = (prettyText cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
       where
         (ft, tt) = Primitive.convOpType cop
 
-    signFun t = ("sign_" ++ prettyString t, IntrinsicMonoFun [Unsigned t] $ Signed t)
+    signFun t = ("sign_" <> prettyText t, IntrinsicMonoFun [Unsigned t] $ Signed t)
 
-    unsignFun t = ("unsign_" ++ prettyString t, IntrinsicMonoFun [Signed t] $ Unsigned t)
+    unsignFun t = ("unsign_" <> prettyText t, IntrinsicMonoFun [Signed t] $ Unsigned t)
 
     unPrim (Primitive.IntType t) = Signed t
     unPrim (Primitive.FloatType t) = FloatType t
     unPrim Primitive.Bool = Bool
     unPrim Primitive.Unit = Bool
 
-    intrinsicPrim t = (prettyString t, IntrinsicType Unlifted [] $ Scalar $ Prim t)
+    intrinsicPrim t = (prettyText t, IntrinsicType Unlifted [] $ Scalar $ Prim t)
 
     anyIntType =
       map Signed [minBound .. maxBound]
@@ -1148,10 +1174,10 @@ intrinsics =
         ++ map FloatType [minBound .. maxBound]
     anyPrimType = Bool : anyNumberType
 
-    mkIntrinsicBinOp :: BinOp -> Maybe (String, Intrinsic)
+    mkIntrinsicBinOp :: BinOp -> Maybe (T.Text, Intrinsic)
     mkIntrinsicBinOp op = do
       op' <- intrinsicBinOp op
-      pure (prettyString op, op')
+      pure (prettyText op, op')
 
     binOp ts = Just $ IntrinsicOverloadedFun ts [Nothing, Nothing] Nothing
     ordering = Just $ IntrinsicOverloadedFun anyPrimType [Nothing, Nothing] (Just Bool)
@@ -1183,18 +1209,6 @@ intrinsics =
       Prim $ Signed Int64
     tupInt64 x =
       tupleRecord $ replicate x $ Scalar $ Prim $ Signed Int64
-
--- | Is this include part of the built-in prelude?
-isBuiltin :: FilePath -> Bool
-isBuiltin = (== "/prelude") . takeDirectory
-
--- | Is the position of this thing builtin as per 'isBuiltin'?  Things
--- without location are considered not built-in.
-isBuiltinLoc :: (Located a) => a -> Bool
-isBuiltinLoc x =
-  case locOf x of
-    NoLoc -> False
-    Loc pos _ -> isBuiltin $ posFile pos
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
@@ -1360,6 +1374,20 @@ stripExp (Attr _ e _) = stripExp e `mplus` Just e
 stripExp (Ascript e _ _) = stripExp e `mplus` Just e
 stripExp _ = Nothing
 
+-- | All non-trivial subexpressions (as by stripExp) of some
+-- expression, not including the expression itself.
+subExps :: Exp -> [Exp]
+subExps e
+  | Just e' <- stripExp e = subExps e'
+  | otherwise = astMap mapper e `execState` mempty
+  where
+    mapOnExp e'
+      | Just e'' <- stripExp e' = mapOnExp e''
+      | otherwise = do
+          modify (e' :)
+          astMap mapper e'
+    mapper = identityMapper {mapOnExp}
+
 similarSlices :: Slice -> Slice -> Maybe [(Exp, Exp)]
 similarSlices slice1 slice2
   | length slice1 == length slice2 = do
@@ -1407,9 +1435,9 @@ similarExps (RecordLit fs1 _) (RecordLit fs2 _)
   | length fs1 == length fs2 =
       zipWithM onFields fs1 fs2
   where
-    onFields (RecordFieldExplicit n1 fe1 _) (RecordFieldExplicit n2 fe2 _)
+    onFields (RecordFieldExplicit (L _ n1) fe1 _) (RecordFieldExplicit (L _ n2) fe2 _)
       | n1 == n2 = Just (fe1, fe2)
-    onFields (RecordFieldImplicit vn1 ty1 _) (RecordFieldImplicit vn2 ty2 _) =
+    onFields (RecordFieldImplicit (L _ vn1) ty1 _) (RecordFieldImplicit (L _ vn2) ty2 _) =
       Just (Var (qualName vn1) ty1 mempty, Var (qualName vn2) ty2 mempty)
     onFields _ _ = Nothing
 similarExps (ArrayLit es1 _ _) (ArrayLit es2 _ _)
@@ -1426,22 +1454,39 @@ similarExps (Constr n1 es1 _ _) (Constr n2 es2 _ _)
   | length es1 == length es2,
     n1 == n2 =
       Just $ zip es1 es2
-similarExps (Update e1 slice1 e'1 _) (Update e2 slice2 e'2 _) =
-  ([(e1, e2), (e'1, e'2)] ++) <$> similarSlices slice1 slice2
-similarExps (RecordUpdate e1 names1 e'1 _ _) (RecordUpdate e2 names2 e'2 _ _)
-  | names1 == names2 =
-      Just [(e1, e2), (e'1, e'2)]
+similarExps (Update e1 steps1 e'1 _ _) (Update e2 steps2 e'2 _ _)
+  | length steps1 == length steps2 = do
+      step_pairs <- concat <$> zipWithM similarStep steps1 steps2
+      pure $ [(e1, e2), (e'1, e'2)] ++ step_pairs
+  where
+    similarStep (UpdateStepField f1) (UpdateStepField f2)
+      | f1 == f2 = Just []
+    similarStep (UpdateStepSlice s1) (UpdateStepSlice s2) =
+      similarSlices s1 s2
+    similarStep _ _ = Nothing
 similarExps (OpSection op1 _ _) (OpSection op2 _ _)
   | op1 == op2 = Just []
 similarExps (OpSectionLeft op1 _ x1 _ _ _) (OpSectionLeft op2 _ x2 _ _ _)
   | op1 == op2 = Just [(x1, x2)]
 similarExps (OpSectionRight op1 _ x1 _ _ _) (OpSectionRight op2 _ x2 _ _ _)
   | op1 == op2 = Just [(x1, x2)]
-similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
-  | names1 == names2 = Just []
-similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
-  similarSlices slice1 slice2
+similarExps (UpdateSection steps1 _ _) (UpdateSection steps2 _ _)
+  | length steps1 == length steps2 = concat <$> zipWithM similarStep steps1 steps2
+  where
+    similarStep (UpdateStepField f1) (UpdateStepField f2)
+      | f1 == f2 = Just []
+    similarStep (UpdateStepSlice s1) (UpdateStepSlice s2) =
+      similarSlices s1 s2
+    similarStep _ _ = Nothing
 similarExps _ _ = Nothing
+
+-- | Are these the same expression as per recursively invoking
+-- 'similarExps'?
+sameExp :: Exp -> Exp -> Bool
+sameExp e1 e2
+  | Just es <- similarExps e1 e2 =
+      all (uncurry sameExp) es
+  | otherwise = False
 
 -- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName

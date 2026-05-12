@@ -36,11 +36,16 @@ module Futhark.Optimise.Fusion.GraphRep
     isCons,
     isDep,
     isInf,
+    isFake,
 
     -- * Construction
     mkDepGraph,
     mkDepGraphForFun,
     pprg,
+    isWithAccNodeT,
+    isWithAccNodeId,
+    vFusionFeasability,
+    hFusionFeasability,
   )
 where
 
@@ -70,7 +75,7 @@ data EdgeT
   | Cons VName
   | Fake VName
   | Res VName
-  deriving (Eq, Ord)
+  deriving (Show, Eq, Ord)
 
 -- | Information associated with a node in the graph.
 data NodeT
@@ -89,8 +94,10 @@ data NodeT
     FreeNode VName
   | MatchNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
+  deriving (Show, Eq)
+{--
   deriving (Eq)
-
+  -- 
 instance Show EdgeT where
   show (Dep vName) = "Dep " <> prettyString vName
   show (InfDep vName) = "iDep " <> prettyString vName
@@ -107,6 +114,8 @@ instance Show NodeT where
   show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
   show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
   show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
+--}
+
 
 -- | The name that this edge depends on.
 getName :: EdgeT -> VName
@@ -128,7 +137,22 @@ isRealNode _ = True
 
 -- | Prettyprint dependency graph.
 pprg :: DepGraph -> String
-pprg = G.showDot . G.fglToDotString . G.nemap show show . dgGraph
+pprg = G.showDot . G.fglToDotString . G.nemap onNode onEdge . dgGraph
+  where
+    onEdge (Dep vName) = "Dep " <> prettyString vName
+    onEdge (InfDep vName) = "iDep " <> prettyString vName
+    onEdge (Cons _) = "Cons"
+    onEdge (Fake _) = "Fake"
+    onEdge (Res _) = "Res"
+    onEdge (Alias _) = "Alias"
+
+    onNode (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
+    onNode (SoacNode _ pat _ _) = prettyString pat
+    onNode (TransNode _ tr _) = prettyString tr
+    onNode (ResNode name) = prettyString $ "Res: " ++ prettyString name
+    onNode (FreeNode name) = prettyString $ "Input: " ++ prettyString name
+    onNode (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
+    onNode (DoNode stm _) = "Do: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
 
 -- | A pair of a 'G.Node' and the node label.
 type DepNode = G.LNode NodeT
@@ -293,7 +317,7 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
     pure $ MatchNode s []
   e
     | [output] <- patNames pat,
-      Just (ia, tr) <- H.transformFromExp (stmAuxCerts aux) e ->
+      Just (ia, tr) <- H.transformFromExp aux e ->
         pure $ TransNode output tr ia
   _ -> pure n
 nodeToSoacNode n = pure n
@@ -388,9 +412,7 @@ expInputs (Loop params form b1) =
 expInputs (Op soac) = case soac of
   Futhark.Screma w is form -> inputs is <> freeClassifications (w, form)
   Futhark.Hist w is ops lam -> inputs is <> freeClassifications (w, ops, lam)
-  Futhark.Scatter w is lam iws -> inputs is <> freeClassifications (w, lam, iws)
-  Futhark.Stream w is nes lam ->
-    inputs is <> freeClassifications (w, nes, lam)
+  Futhark.Stream w is nes lam -> inputs is <> freeClassifications (w, nes, lam)
   Futhark.JVP {} -> freeClassifications soac
   Futhark.VJP {} -> freeClassifications soac
   where
@@ -427,7 +449,33 @@ isInf (_, _, e) = case e of
   Fake _ -> True -- this is infusible to avoid simultaneous cons/dep edges
   _ -> False
 
+isFake :: EdgeT -> Bool
+isFake (Fake _) = True
+isFake _ = False
+
 -- | Is this a 'Cons' edge?
 isCons :: EdgeT -> Bool
 isCons (Cons _) = True
 isCons _ = False
+
+-- | Is this a withAcc?
+isWithAccNodeT :: NodeT -> Bool
+isWithAccNodeT (StmNode (Let _ _ (WithAcc _ _))) = True
+isWithAccNodeT _ = False
+
+isWithAccNodeId :: G.Node -> DepGraph -> Bool
+isWithAccNodeId node_id (DepGraph {dgGraph = g}) =
+  let (_, _, nT, _) = G.context g node_id
+   in isWithAccNodeT nT
+
+unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> Bool
+unreachableEitherDir g a b =
+  not (reachable g a b || reachable g b a)
+
+vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
+vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
+  (isWithAccNodeId n2 dg || not (any isInf (edgesBetween dg n1 n2)))
+    && not (any (reachable dg n2) (filter (/= n2) (G.pre g n1)))
+
+hFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
+hFusionFeasability = unreachableEitherDir

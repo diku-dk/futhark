@@ -73,6 +73,27 @@ import Prelude hiding (quot, rem)
 forM2_ :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m ()
 forM2_ xs ys f = forM_ (zip xs ys) (uncurry f)
 
+-- | Given available register and a list of parameter types, compute
+-- the largest available chunk size given the parameters for which we
+-- want chunking and the available resources.
+getRedChunkSize :: [Type] -> Imp.KernelConstExp
+getRedChunkSize types = do
+  let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
+      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
+      max_block_reg = Imp.SizeMaxConst SizeRegisters
+      k_mem = le64 max_block_mem `quot` le64 max_tblock_size
+      k_reg = le64 max_block_reg `quot` le64 max_tblock_size
+      types' = map elemType $ filter primType types
+      sizes = map primByteSize types'
+
+      sum_sizes = sum sizes
+      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
+      max_size = maximum sizes
+
+      mem_constraint = max k_mem sum_sizes `quot` max_size
+      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
+  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+
 -- | The maximum number of operators we support in a single SegRed.
 -- This limit arises out of the static allocation of counters.
 maxNumOps :: Int
@@ -113,8 +134,8 @@ compileSegRed pat lvl space segbinops map_kbody = do
 
   compileSegRed' pat grid space segbinops $ \red_cont ->
     sComment "apply map function" $
-      compileStms mempty (kernelBodyStms map_kbody) $ do
-        let (red_res, map_res) = splitAt (segBinOpResults segbinops) $ kernelBodyResult map_kbody
+      compileStms mempty (bodyStms map_kbody) $ do
+        let (red_res, map_res) = splitAt (segBinOpResults segbinops) $ bodyResult map_kbody
 
         let mapout_arrs = drop (segBinOpResults segbinops) $ patElems pat
         unless (null mapout_arrs) $
@@ -143,7 +164,12 @@ compileSegRed' ::
 compileSegRed' pat grid space segbinops map_body_cont
   | genericLength segbinops > maxNumOps =
       compilerLimitationS $
-        ("compileSegRed': at most " <> show maxNumOps <> " reduction operators are supported.\n")
+        ( "compileSegRed': at most "
+            <> show maxNumOps
+            <> " reduction operators are supported,\nbut found kernel with "
+            <> show (length segbinops)
+            <> ".\n"
+        )
           <> ("Pattern: " <> prettyString pat)
   | otherwise = do
       chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
@@ -169,7 +195,7 @@ compileSegRed' pat grid space segbinops map_body_cont
     chunk_const =
       if Noncommutative `elem` map segBinOpComm segbinops
         && all isPrimSegBinOp segbinops
-        then getChunkSize param_types
+        then getRedChunkSize param_types
         else Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed
@@ -192,7 +218,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     all isPrimSegBinOp segbinops =
       noncommPrimSegRedInterms
   | otherwise =
-      generalSegRedInterms tblock_id tblock_size segbinops
+      generalSegRedInterms False tblock_id tblock_size segbinops
   where
     params = map paramOf segbinops
 
@@ -217,7 +243,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
       lmem <- sAlloc "local_mem" lmem_total_size (Space "shared")
       let arrInLMem ptype name len_se offset =
             sArray
-              (name ++ "_" ++ prettyString ptype)
+              (name <> "_" <> nameFromText (prettyText ptype))
               ptype
               (Shape [len_se])
               lmem
@@ -231,7 +257,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
               <$> arrInLMem ptype "coll_copy_arr" block_worksize 0
               <*> arrInLMem ptype "block_red_arr" tblock_size offset
               <*> sAllocArray
-                ("chunk_" ++ prettyString ptype)
+                ("chunk_" <> nameFromText (prettyText ptype))
                 ptype
                 (Shape [chunk])
                 (ScalarSpace [chunk] ptype)
@@ -246,24 +272,28 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
 
 generalSegRedInterms ::
+  Bool ->
   Imp.TExp Int64 ->
   SubExp ->
   [SegBinOp GPUMem] ->
   InKernelGen [SegRedIntermediateArrays]
-generalSegRedInterms tblock_id tblock_size segbinops =
-  fmap (map GeneralSegRedInterms) $
-    forM (map paramOf segbinops) $
-      mapM $ \p ->
-        case paramDec p of
-          MemArray pt shape _ (ArrayIn mem _) -> do
-            let shape' = Shape [tblock_size] <> shape
-            let shape_E = map pe64 $ shapeDims shape'
-            sArray ("red_arr_" ++ prettyString pt) pt shape' mem $
-              LMAD.iota (tblock_id * product shape_E) shape_E
-          _ -> do
-            let pt = elemType $ paramType p
-                shape = Shape [tblock_size]
-            sAllocArray ("red_arr_" ++ prettyString pt) pt shape $ Space "shared"
+generalSegRedInterms segmented tblock_id tblock_size segbinops =
+  fmap (map GeneralSegRedInterms) . forM (map paramOf segbinops) . mapM $ \p ->
+    case paramDec p of
+      MemArray pt shape _ (ArrayIn mem ixfun) -> do
+        let shape' = Shape [tblock_size] <> shape
+        let shape_E = map pe64 $ shapeDims shape'
+        sArray ("red_arr_" <> nameFromText (prettyText pt)) pt shape' mem $
+          -- This 'segmented' thing here is a hack, related to #2227.
+          -- There absolutely must be some unifying principle we are
+          -- missing.
+          if segmented
+            then ixfun
+            else LMAD.iota (tblock_id * product shape_E) shape_E
+      _ -> do
+        let pt = elemType $ paramType p
+            shape = Shape [tblock_size]
+        sAllocArray ("red_arr_" <> nameFromText (prettyText pt)) pt shape $ Space "shared"
 
 -- | Arrays for storing block results.
 --
@@ -380,7 +410,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
     dPrimVE "segment_size_nonzero" $ sMax64 1 segment_size
 
   let tblock_size_se = unCount tblock_size
-      num_tblocks_se = unCount tblock_size
+      num_tblocks_se = unCount num_tblocks
       num_tblocks' = pe64 num_tblocks_se
       tblock_size' = pe64 tblock_size_se
   num_threads <- fmap tvSize $ dPrimV "num_threads" $ num_tblocks' * tblock_size'
@@ -399,7 +429,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
     let tblock_id = kernelBlockSize constants
         ltid = sExt64 $ kernelLocalThreadId constants
 
-    interms <- generalSegRedInterms tblock_id tblock_size_se segbinops
+    interms <- generalSegRedInterms True tblock_id tblock_size_se segbinops
     let reds_arrs = map blockRedArrs interms
 
     -- We probably do not have enough actual threadblocks to cover the
@@ -638,7 +668,7 @@ segBinOpSlug ltid tblock_id (op, interms, block_res_arrs) = do
     mkAcc p block_res_arr
       | Prim t <- paramType p,
         shapeRank (segBinOpShape op) == 0 = do
-          block_res_acc <- dPrimS (baseString (paramName p) <> "_block_res_acc") t
+          block_res_acc <- dPrimS (baseName (paramName p) <> "_block_res_acc") t
           pure (block_res_acc, [])
       -- if this is a non-primitive reduction, the global mem result array will
       -- double as accumulator.
@@ -921,10 +951,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
       block_res_arrs = blockResArrs slug
 
   old_counter <- dPrim "old_counter"
-  (counter_mem, _, counter_offset) <-
-    fullyIndexArray
-      counters
-      [counter_idx]
+  (counter_mem, _, counter_offset) <- fullyIndexArray counters [counter_idx]
   sComment "first thread in block saves block result to global memory" $
     sWhen (ltid32 .==. 0) $ do
       forM_ (take (length nes) $ zip block_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->

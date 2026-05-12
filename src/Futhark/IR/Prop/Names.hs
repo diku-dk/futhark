@@ -18,6 +18,7 @@ module Futhark.IR.Prop.Names
     namesIntersect,
     namesSubtract,
     mapNames,
+    allNames,
 
     -- * Class
     FreeIn (..),
@@ -115,6 +116,10 @@ namesSubtract (Names vs1) (Names vs2) = Names $ IM.difference vs1 vs2
 mapNames :: (VName -> VName) -> Names -> Names
 mapNames f vs = namesFromList $ map f $ namesToList vs
 
+-- | Check if predicate holds for all names in set.
+allNames :: (VName -> Bool) -> Names -> Bool
+allNames f (Names vs) = all f vs
+
 -- | A computation to build a free variable set.
 newtype FV = FV {unFV :: Names}
 
@@ -176,10 +181,11 @@ freeInStmsAndRes ::
     FreeDec (BodyDec rep),
     FreeIn (RetType rep),
     FreeIn (BranchType rep),
-    FreeDec (ExpDec rep)
+    FreeDec (ExpDec rep),
+    FreeIn res
   ) =>
   Stms rep ->
-  Result ->
+  res ->
   FV
 freeInStmsAndRes stms res =
   fvBind (boundByStms stms) $ foldMap freeIn' stms <> freeIn' res
@@ -264,9 +270,10 @@ instance
     FreeIn (LetDec rep),
     FreeIn (RetType rep),
     FreeIn (BranchType rep),
-    FreeIn (Op rep)
+    FreeIn (Op rep),
+    FreeIn res
   ) =>
-  FreeIn (Body rep)
+  FreeIn (GBody rep res)
   where
   freeIn' (Body dec stms res) =
     precomputed dec $ freeIn' dec <> freeInStmsAndRes stms res
@@ -307,7 +314,7 @@ instance
   ) =>
   FreeIn (Stm rep)
   where
-  freeIn' (Let pat (StmAux cs attrs dec) e) =
+  freeIn' (Let pat (StmAux cs attrs _ dec) e) =
     freeIn' cs
       <> freeIn' attrs
       <> precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
@@ -344,6 +351,9 @@ instance FreeIn Space where
 
 instance (FreeIn d) => FreeIn (ShapeBase d) where
   freeIn' = freeIn' . shapeDims
+
+instance (FreeIn d) => FreeIn (NewShape d) where
+  freeIn' = foldMap freeIn'
 
 instance (FreeIn d) => FreeIn (Ext d) where
   freeIn' (Free x) = freeIn' x
@@ -396,7 +406,7 @@ instance FreeIn Attrs where
   freeIn' (Attrs _) = mempty
 
 instance (FreeIn dec) => FreeIn (StmAux dec) where
-  freeIn' (StmAux cs attrs dec) = freeIn' cs <> freeIn' attrs <> freeIn' dec
+  freeIn' (StmAux cs attrs _ dec) = freeIn' cs <> freeIn' attrs <> freeIn' dec
 
 instance (FreeIn a) => FreeIn (MatchDec a) where
   freeIn' (MatchDec r _) = freeIn' r

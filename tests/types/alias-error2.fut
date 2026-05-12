@@ -5,4 +5,4 @@
 
 type t = i32
 
-def main(x: *t): t = x
+def main (x: *t) : t = x

@@ -43,40 +43,48 @@
 --           [[0.226438f32, -0.114818f32], [-0.527942f32, 0.242899f32]]]
 -- }
 
+def tridagSeq [n] [m] (a: [n]f32) (b: *[m]f32) (c: [m]f32) (y: *[m]f32) : *[m]f32 =
+  let (y, b) =
+    loop ((y, b))
+    for i < n - 1 do
+      let i = i + 1
+      let beta = a[i] / b[i - 1]
+      let b[i] = b[i] - beta * c[i - 1]
+      let y[i] = y[i] - beta * y[i - 1]
+      in (y, b)
+  let y[n - 1] = y[n - 1] / b[n - 1]
+  in loop (y) for j < n - 1 do
+       let i = n - 2 - j
+       let y[i] = (y[i] - c[i] * y[i + 1]) / b[i]
+       in y
 
-def tridagSeq [n][m] (a:  [n]f32) (b: *[m]f32) (c: [m]f32) (y: *[m]f32 ): *[m]f32 =
-    let (y,b) = loop ((y, b))
-      for i < n-1 do
-        let i    = i + 1
-        let beta = a[i] / b[i-1]
-        let b[i] = b[i] - beta*c[i-1]
-        let y[i] = y[i] - beta*y[i-1]
-        in  (y, b)
-
-    let y[n-1] = y[n-1]/b[n-1] in
-    loop (y) for j < n - 1 do
-               let i    = n - 2 - j
-               let y[i] = (y[i] - c[i]*y[i+1]) / b[i]
-               in  y
-
-def implicitMethod [n][m] (myD:  [m][3]f32,  myDD: [m][3]f32,
-                           myMu: [n][m]f32, myVar: [n][m]f32,
-                           u: [n][m]f32)
-                          (dtInv: f32): *[n][m]f32 =
-  map (\(tup:  ([]f32,[]f32,[]f32) )   ->
-         let (mu_row,var_row,u_row) = tup
-         let (a,b,c) = unzip3 (map (\(tup: (f32,f32,[]f32,[]f32)): (f32,f32,f32)  ->
-                                   let (mu, var, d, dd) = tup in
-                                   ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
-                                   , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
-                                   , 0.0   - 0.5*(mu*d[2] + 0.5*var*dd[2])))
-                              (zip4 (mu_row) (var_row) myD myDD))
+def implicitMethod [n] [m]
+                   ( myD: [m][3]f32
+                   , myDD: [m][3]f32
+                   , myMu: [n][m]f32
+                   , myVar: [n][m]f32
+                   , u: [n][m]f32
+                   )
+                   (dtInv: f32) : *[n][m]f32 =
+  map (\(tup: ([]f32, []f32, []f32)) ->
+         let (mu_row, var_row, u_row) = tup
+         let (a, b, c) =
+           unzip3 (map (\(tup: (f32, f32, []f32, []f32)) : (f32, f32, f32) ->
+                          let (mu, var, d, dd) = tup
+                          in ( 0.0 - 0.5 * (mu * d[0] + 0.5 * var * dd[0])
+                             , dtInv - 0.5 * (mu * d[1] + 0.5 * var * dd[1])
+                             , 0.0 - 0.5 * (mu * d[2] + 0.5 * var * dd[2])
+                             ))
+                       (zip4 (mu_row) (var_row) myD myDD))
          in tridagSeq a (copy b) c (copy u_row))
       (zip3 myMu myVar u)
 
-def main [m][n] (myD:  [m][3]f32) (myDD: [m][3]f32)
-                (myMu: [n][m]f32) (myVar: [n][m]f32)
-                (u: *[n][m]f32)   (dtInv: f32)
-                (num_samples: i64): *[num_samples][n][m]f32 =
-  map (implicitMethod(myD,myDD,myMu,myVar,u)) (
-      map (*dtInv) (map  (/f32.i64(num_samples)) (map f32.i64 (map (+1) (iota(num_samples))))))
+def main [m] [n]
+         (myD: [m][3]f32)
+         (myDD: [m][3]f32)
+         (myMu: [n][m]f32)
+         (myVar: [n][m]f32)
+         (u: *[n][m]f32)
+         (dtInv: f32)
+         (num_samples: i64) : *[num_samples][n][m]f32 =
+  map (implicitMethod (myD, myDD, myMu, myVar, u)) (map (* dtInv) (map (/ f32.i64 (num_samples)) (map f32.i64 (map (+ 1) (iota (num_samples))))))

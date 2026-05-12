@@ -5,7 +5,7 @@
 -- ==
 -- error: Loop body does not have expected type
 
-let main [n] (xs: [n]i32) (ys: [n]i32) =
-  loop (xs,ys) for i < 10 do
-  let zs = filter (>0) (map2 (+) xs ys)
-  in (xs, zs)
+def main [n] (xs: [n]i32) (ys: [n]i32) =
+  loop (xs, ys) for i < 10 do
+    let zs = filter (> 0) (map2 (+) xs ys)
+    in (xs, zs)

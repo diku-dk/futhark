@@ -8,5 +8,5 @@ module type withvec_mt = {
 
 module withvec : withvec_mt = {
   def n = 3i64
-  def xs : []i64 = iota (n+1)
+  def xs : []i64 = iota (n + 1)
 }

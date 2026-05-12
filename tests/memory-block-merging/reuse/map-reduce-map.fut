@@ -8,8 +8,8 @@
 def main (xss: [][]i32) =
   #[incremental_flattening(only_intra)]
   map (\xs ->
-         let as = map (+1) xs |> opaque
+         let as = map (+ 1) xs |> opaque
          let a = reduce (+) 0 as
-         let bs = map (+a) xs
+         let bs = map (+ a) xs
          in bs)
       xss

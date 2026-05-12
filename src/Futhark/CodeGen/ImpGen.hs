@@ -36,6 +36,7 @@ module Futhark.CodeGen.ImpGen
     emit,
     emitFunction,
     hasFunction,
+    addTuningParam,
     collect,
     collect',
     VarEntry (..),
@@ -48,6 +49,7 @@ module Futhark.CodeGen.ImpGen
     lookupMemory,
     lookupAcc,
     askAttrs,
+    askProvenance,
 
     -- * Building Blocks
     TV,
@@ -138,6 +140,8 @@ import Futhark.CodeGen.ImpCode
   ( Bytes,
     Count,
     Elements,
+    ParamMap,
+    SizeClass,
     elements,
   )
 import Futhark.CodeGen.ImpCode qualified as Imp
@@ -145,9 +149,9 @@ import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
+import Futhark.Transform.Rename (renameLambda)
 import Futhark.Util
 import Futhark.Util.IntegralExp
-import Futhark.Util.Loc (noLoc)
 import Futhark.Util.Pretty hiding (nest, space)
 import Language.Futhark.Warnings
 import Prelude hiding (mod, quot)
@@ -258,7 +262,10 @@ data Env rep r op = Env
     envFunction :: Maybe Name,
     -- | The set of attributes that are active on the enclosing
     -- statements (including the one we are currently compiling).
-    envAttrs :: Attrs
+    envAttrs :: Attrs,
+    -- | The provenance of whatever we are currently generating code for. This
+    -- can be used to insert information in the generated code.
+    envProvenance :: Provenance
   }
 
 newEnv :: r -> Operations rep r op -> Imp.Space -> Env rep r op
@@ -273,7 +280,8 @@ newEnv r ops ds =
       envVolatility = Imp.Nonvolatile,
       envEnv = r,
       envFunction = Nothing,
-      envAttrs = mempty
+      envAttrs = mempty,
+      envProvenance = mempty
     }
 
 -- | The symbol table used during compilation.
@@ -284,6 +292,7 @@ data ImpState rep r op = ImpState
     stateFunctions :: Imp.Functions op,
     stateCode :: Imp.Code op,
     stateConstants :: Imp.Constants op,
+    stateParams :: ParamMap,
     stateWarnings :: Warnings,
     -- | Maps the arrays backing each accumulator to their
     -- update function and neutral elements.  This works
@@ -296,7 +305,7 @@ data ImpState rep r op = ImpState
   }
 
 newState :: VNameSource -> ImpState rep r op
-newState = ImpState mempty mempty mempty mempty mempty mempty
+newState = ImpState mempty mempty mempty mempty mempty mempty mempty
 
 newtype ImpM rep r op a
   = ImpM (ReaderT (Env rep r op) (State (ImpState rep r op)) a)
@@ -371,11 +380,13 @@ subImpM r ops (ImpM m) = do
             stateNameSource = stateNameSource s,
             stateConstants = mempty,
             stateWarnings = mempty,
+            stateParams = stateParams s,
             stateAccs = stateAccs s
           }
       (x, s'') = runState (runReaderT m env') s'
 
   putNameSource $ stateNameSource s''
+  modify $ \s''' -> s''' {stateParams = stateParams s''}
   warnings $ stateWarnings s''
   pure (x, stateCode s'')
 
@@ -417,6 +428,15 @@ hasFunction fname = gets $ \s ->
   let Imp.Functions fs = stateFunctions s
    in isJust $ lookup fname fs
 
+-- | Add a tuning parameter. You can call this function with the same parameter
+-- name multiple times, but they must have the same class.
+addTuningParam :: Name -> Maybe SizeClass -> ImpM rep r op ()
+addTuningParam key sclass = do
+  user <- asks $ maybe mempty S.singleton . envFunction
+  modify $ \s -> s {stateParams = M.insertWith comb key (sclass, user) $ stateParams s}
+  where
+    comb (c, x) (_, y) = (c, x <> y)
+
 constsVTable :: (Mem rep inner) => Stms rep -> VTable rep
 constsVTable = foldMap stmVtable
   where
@@ -443,8 +463,9 @@ compileProg r ops space (Prog types consts funs) =
             combineStates ss
      in ( ( stateWarnings s',
             Imp.Definitions
+              (stateParams s')
               types
-              (stateConstants s' <> foldMap stateConstants ss)
+              (foldMap stateConstants ss <> stateConstants s')
               (stateFunctions s')
           ),
           stateNameSource s'
@@ -461,11 +482,14 @@ compileProg r ops space (Prog types consts funs) =
     combineStates ss =
       let Imp.Functions funs' = mconcat $ map stateFunctions ss
           src = mconcat (map stateNameSource ss)
+          mixParam (c, x) (_, y) = (c, x <> y)
        in (newState src)
             { stateFunctions =
                 Imp.Functions $ M.toList $ M.fromList funs',
               stateWarnings =
-                mconcat $ map stateWarnings ss
+                mconcat $ map stateWarnings ss,
+              stateParams =
+                foldl' (M.unionWith mixParam) mempty $ map stateParams ss
             }
 
 compileConsts :: Names -> Stms rep -> ImpM rep r op ()
@@ -487,6 +511,8 @@ entryPointSignedness _ (TypeTransparent vt) = [valueTypeSign vt]
 entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> map valueTypeSign vts
+    OpaqueArray _ _ vts -> map valueTypeSign vts
+    OpaqueRecordArray _ _ fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueSum vts _ -> map valueTypeSign vts
 
@@ -499,6 +525,8 @@ entryPointSize _ (TypeTransparent _) = 1
 entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> length vts
+    OpaqueArray _ _ vts -> length vts
+    OpaqueRecordArray _ _ fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueSum vts _ -> length vts
 
@@ -596,13 +624,13 @@ compileExternalValues ::
   (Mem rep inner) =>
   OpaqueTypes ->
   [RetType rep] ->
-  [EntryResult] ->
+  EntryResult ->
   [Maybe Imp.Param] ->
-  ImpM rep r op [(Uniqueness, Imp.ExternalValue)]
+  ImpM rep r op (Uniqueness, Imp.ExternalValue)
 compileExternalValues types orig_rts orig_epts maybe_params = do
   let (ctx_rts, val_rts) =
         splitAt
-          (length orig_rts - sum (map (entryPointSize types . entryResultType) orig_epts))
+          (length orig_rts - entryPointSize types (entryResultType orig_epts))
           orig_rts
 
   let nthOut i = case maybeNth i maybe_params of
@@ -629,25 +657,24 @@ compileExternalValues types orig_rts orig_epts maybe_params = do
       mkValueDesc _ _ MemMem {} =
         error "mkValueDesc: unexpected MemMem output."
 
-      mkExts i (EntryResult u et@(TypeOpaque desc) : epts) rets = do
-        let signs = entryPointSignedness types et
-            n = entryPointSize types et
-            (rets', rest) = splitAt n rets
-        vds <- forM (zip3 [i ..] signs rets') $ \(j, s, r) -> mkValueDesc j s r
-        ((u, Imp.OpaqueValue desc vds) :) <$> mkExts (i + n) epts rest
-      mkExts i (EntryResult u (TypeTransparent (ValueType s _ _)) : epts) (ret : rets) = do
-        vd <- mkValueDesc i s ret
-        ((u, Imp.TransparentValue vd) :) <$> mkExts (i + 1) epts rets
-      mkExts _ _ _ = pure []
+      num_ctx = length ctx_rts
 
-  mkExts (length ctx_rts) orig_epts val_rts
+  case (orig_epts, val_rts) of
+    (EntryResult u et@(TypeOpaque desc), rets) -> do
+      let signs = entryPointSignedness types et
+      vds <- forM (zip3 [num_ctx ..] signs rets) $ \(j, s, r) -> mkValueDesc j s r
+      pure (u, Imp.OpaqueValue desc vds)
+    (EntryResult u (TypeTransparent (ValueType s _ _)), [ret]) -> do
+      vd <- mkValueDesc num_ctx s ret
+      pure (u, Imp.TransparentValue vd)
+    _ -> error "compileExternalValues: invalid inputs."
 
 compileOutParams ::
   (Mem rep inner) =>
   OpaqueTypes ->
   [RetType rep] ->
-  Maybe [EntryResult] ->
-  ImpM rep r op (Maybe [(Uniqueness, Imp.ExternalValue)], [Imp.Param], [ValueDestination])
+  Maybe EntryResult ->
+  ImpM rep r op (Maybe (Uniqueness, Imp.ExternalValue), [Imp.Param], [ValueDestination])
 compileOutParams types orig_rts maybe_orig_epts = do
   (maybe_params, dests) <- mapAndUnzipM compileOutParam orig_rts
   evs <- case maybe_orig_epts of
@@ -661,7 +688,7 @@ compileFunDef ::
   OpaqueTypes ->
   FunDef rep ->
   ImpM rep r op ()
-compileFunDef types (FunDef entry _ fname rettype params body) =
+compileFunDef types (FunDef entry attrs fname rettype params body) =
   local (\env -> env {envFunction = name_entry `mplus` Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
     let entry' = case (name_entry, results, args) of
@@ -669,7 +696,7 @@ compileFunDef types (FunDef entry _ fname rettype params body) =
             Just $ Imp.EntryPoint name_entry' results' args'
           _ ->
             Nothing
-    emitFunction fname $ Imp.Function entry' outparams inparams body'
+    emitFunction fname $ Imp.Function entry' outparams inparams attrs body'
   where
     (name_entry, params_entry, ret_entry) = case entry of
       Nothing -> (Nothing, Nothing, Nothing)
@@ -708,7 +735,7 @@ compileLoopBody mergeparams (Body _ stms ses) = do
   -- variables mirroring the merge parameters, and then copy this
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
-  tmpnames <- mapM (newVName . (++ "_tmp") . baseString . paramName) mergeparams
+  tmpnames <- mapM (newVName . (<> "_tmp") . baseName . paramName) mergeparams
   compileStms (freeIn ses) stms $ do
     copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p, tmp, SubExpRes _ se) ->
       case typeOf p of
@@ -728,6 +755,12 @@ compileStms alive_after_stms all_stms m = do
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 
+attachProvenance :: Provenance -> Imp.Code op -> Imp.Code op
+attachProvenance _ Imp.Skip = Imp.Skip
+attachProvenance p c
+  | p == mempty = c
+  | otherwise = Imp.Meta (Imp.MetaProvenance p) <> c
+
 defCompileStms ::
   (Mem rep inner, FreeIn op) =>
   Names ->
@@ -742,12 +775,13 @@ defCompileStms alive_after_stms all_stms m =
   void $ compileStms' mempty $ stmsToList all_stms
   where
     compileStms' allocs (Let pat aux e : bs) = do
-      dVars (Just e) (patElems pat)
-
-      e_code <-
-        localAttrs (stmAuxAttrs aux) $
-          collect $
-            compileExp pat e
+      e_code <- fmap (attachProvenance (stmAuxLoc aux))
+        . localAttrs (stmAuxAttrs aux)
+        . collect
+        . localProvenance (stmAuxLoc aux)
+        $ do
+          dVars (Just e) (patElems pat)
+          compileExp pat e
       (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
       let dies_here v =
             (v `notNameIn` live_after) && (v `nameIn` freeIn e_code)
@@ -892,14 +926,15 @@ defCompileBasicOp (Pat [pe]) (CmpOp bop x y) = do
   x' <- toExp x
   y' <- toExp y
   patElemName pe <~~ Imp.CmpOpExp bop x' y'
-defCompileBasicOp _ (Assert e msg loc) = do
+defCompileBasicOp _ (Assert e msg) = do
   e' <- toExp e
   msg' <- traverse toExp msg
-  emit $ Imp.Assert e' msg' loc
+  Imp.Provenance locs loc <- askProvenance
+  emit $ Imp.Assert e' msg' (loc, reverse locs)
 
   attrs <- askAttrs
   when (AttrComp "warn" ["safety_checks"] `inAttrs` attrs) $
-    uncurry warn loc "Safety check required at run-time."
+    warn loc (reverse locs) "Safety check required at run-time."
 defCompileBasicOp (Pat [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
       copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . pe64) idxs
@@ -938,7 +973,7 @@ defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
         BinOpExp (Add it OverflowUndef) e' $
           BinOpExp (Mul it OverflowUndef) i' s'
     copyDWIMFix (patElemName pe) [i] (Var (tvVar x)) []
-defCompileBasicOp (Pat [pe]) (Manifest _ src) =
+defCompileBasicOp (Pat [pe]) (Manifest src _) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
   offs_glb <- dPrimV "tmp_offs" 0
@@ -954,17 +989,19 @@ defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
         destslice = skip_slices ++ [DimSlice (tvExp offs_glb) rows 1]
     copyDWIM (patElemName pe) destslice (Var y) []
     offs_glb <-- tvExp offs_glb + rows
+defCompileBasicOp (Pat [pe]) (ArrayVal vs t) = do
+  dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
+  static_array <- newVNameForFun "static_array"
+  emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
+  let static_src =
+        MemLoc static_array [intConst Int64 $ fromIntegral $ length vs] $
+          LMAD.iota 0 [fromIntegral $ length vs]
+  addVar static_array $ MemVar Nothing $ MemEntry DefaultSpace
+  copy t dest_mem static_src
 defCompileBasicOp (Pat [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
-      dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
       let t = primValueType v
-      static_array <- newVNameForFun "static_array"
-      emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
-      let static_src =
-            MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
-              LMAD.iota 0 [fromIntegral $ length es]
-      addVar static_array $ MemVar Nothing $ MemEntry DefaultSpace
-      copy t dest_mem static_src
+      defCompileBasicOp (Pat [pe]) (ArrayVal vs t)
   | otherwise =
       forM_ (zip [0 ..] es) $ \(i, e) ->
         copyDWIMFix (patElemName pe) [fromInteger i] e []
@@ -976,11 +1013,6 @@ defCompileBasicOp _ Rearrange {} =
 defCompileBasicOp _ Reshape {} =
   pure ()
 defCompileBasicOp _ (UpdateAcc safety acc is vs) = sComment "UpdateAcc" $ do
-  -- We are abusing the comment mechanism to wrap the operator in
-  -- braces when we end up generating code.  This is necessary because
-  -- we might otherwise end up declaring lambda parameters (if any)
-  -- multiple times, as they are duplicated every time we do an
-  -- UpdateAcc for the same accumulator.
   let is' = map pe64 is
 
   -- We need to figure out whether we are updating a scatter-like
@@ -1012,6 +1044,9 @@ defCompileBasicOp _ (UpdateAcc safety acc is vs) = sComment "UpdateAcc" $ do
         compileStms mempty (bodyStms $ lambdaBody lam) $
           forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, SubExpRes _ se) ->
             copyDWIMFix arr is' se []
+defCompileBasicOp (Pat [PatElem v _]) (UserParam name se) = do
+  addTuningParam name Nothing
+  emit $ Imp.GetUserParam v name $ pe64 se
 defCompileBasicOp pat e =
   error $
     "ImpGen.defCompileBasicOp: Invalid pattern\n  "
@@ -1062,7 +1097,7 @@ dFParams = dScope Nothing . scopeOfFParams
 dLParams :: (Mem rep inner) => [LParam rep] -> ImpM rep r op ()
 dLParams = dScope Nothing . scopeOfLParams
 
-dPrimVol :: String -> PrimType -> Imp.TExp t -> ImpM rep r op (TV t)
+dPrimVol :: Name -> PrimType -> Imp.TExp t -> ImpM rep r op (TV t)
 dPrimVol name t e = do
   name' <- newVName name
   emit $ Imp.DeclareScalar name' Imp.Volatile t
@@ -1078,7 +1113,7 @@ dPrim_ name t = do
 -- | Create variable of some provided dynamic type. You'll need this
 -- when you are compiling program code of Haskell-level unknown type.
 -- For other things, use other functions.
-dPrimS :: String -> PrimType -> ImpM rep r op VName
+dPrimS :: Name -> PrimType -> ImpM rep r op VName
 dPrimS name t = do
   name' <- newVName name
   dPrim_ name' t
@@ -1086,11 +1121,11 @@ dPrimS name t = do
 
 -- | Create 'TV' of some provided dynamic type. No guarantee that the
 -- dynamic type matches the inferred type.
-dPrimSV :: String -> PrimType -> ImpM rep r op (TV t)
+dPrimSV :: Name -> PrimType -> ImpM rep r op (TV t)
 dPrimSV name t = TV <$> dPrimS name t <*> pure t
 
 -- | Create 'TV' of some fixed type.
-dPrim :: (MkTV t) => String -> ImpM rep r op (TV t)
+dPrim :: (MkTV t) => Name -> ImpM rep r op (TV t)
 dPrim name = do
   name' <- newVName name
   let tv = mkTV name'
@@ -1104,7 +1139,7 @@ dPrimV_ name e = do
   where
     t = primExpType $ untyped e
 
-dPrimV :: String -> Imp.TExp t -> ImpM rep r op (TV t)
+dPrimV :: Name -> Imp.TExp t -> ImpM rep r op (TV t)
 dPrimV name e = do
   name' <- dPrimS name pt
   let tv = TV name' pt
@@ -1113,7 +1148,7 @@ dPrimV name e = do
   where
     pt = primExpType $ untyped e
 
-dPrimVE :: String -> Imp.TExp t -> ImpM rep r op (Imp.TExp t)
+dPrimVE :: Name -> Imp.TExp t -> ImpM rep r op (Imp.TExp t)
 dPrimVE name e = do
   name' <- dPrimS name pt
   let tv = TV name' pt
@@ -1295,16 +1330,16 @@ askFunction :: ImpM rep r op (Maybe Name)
 askFunction = asks envFunction
 
 -- | Generate a 'VName', prefixed with 'askFunction' if it exists.
-newVNameForFun :: String -> ImpM rep r op VName
+newVNameForFun :: Name -> ImpM rep r op VName
 newVNameForFun s = do
-  fname <- fmap nameToString <$> askFunction
-  newVName $ maybe "" (++ ".") fname ++ s
+  fname <- askFunction
+  newVName $ maybe "" (<> ".") fname <> s
 
 -- | Generate a 'Name', prefixed with 'askFunction' if it exists.
-nameForFun :: String -> ImpM rep r op Name
+nameForFun :: Name -> ImpM rep r op Name
 nameForFun s = do
   fname <- askFunction
-  pure $ maybe "" (<> ".") fname <> nameFromString s
+  pure $ maybe "" (<> ".") fname <> s
 
 askEnv :: ImpM rep r op r
 askEnv = asks envEnv
@@ -1320,6 +1355,25 @@ askAttrs = asks envAttrs
 -- | Add more attributes to what is returning by 'askAttrs'.
 localAttrs :: Attrs -> ImpM rep r op a -> ImpM rep r op a
 localAttrs attrs = local $ \env -> env {envAttrs = attrs <> envAttrs env}
+
+-- | The provenance of whatever we are currently generating code for.
+askProvenance :: ImpM rep r op Provenance
+askProvenance = asks envProvenance
+
+-- | Wrap any code emitted in the enclosed section with the current provenance,
+-- if any.
+withProvenance :: ImpM rep r op () -> ImpM rep r op ()
+withProvenance m = do
+  p <- askProvenance
+  if p == mempty
+    then m
+    else do
+      c <- collect m
+      emit $ Imp.Meta (Imp.MetaProvenance p) <> c
+
+-- | Replace (*not* extend) the provenance while executing some action.
+localProvenance :: Provenance -> ImpM rep r op a -> ImpM rep r op a
+localProvenance p = local $ \env -> env {envProvenance = p}
 
 localOps :: Operations rep r op -> ImpM rep r op a -> ImpM rep r op a
 localOps ops = local $ \env ->
@@ -1378,6 +1432,7 @@ lookupArraySpace =
 -- | In the case of a histogram-like accumulator, also sets the index
 -- parameters.
 lookupAcc ::
+  (Mem rep inner) =>
   VName ->
   [Imp.TExp Int64] ->
   ImpM rep r op (VName, Space, [VName], [Imp.TExp Int64], Maybe (Lambda rep))
@@ -1389,8 +1444,11 @@ lookupAcc name is = do
       case acc' of
         Just ([], _) ->
           error $ "Accumulator with no arrays: " ++ prettyString name
-        Just (arrs@(arr : _), Just (op, _)) -> do
+        Just (arrs@(arr : _), Just (op_orig, _)) -> do
           space <- lookupArraySpace arr
+          -- We must rename the lambda in order to avoid duplicate names in the
+          -- likely case where the accumulator is used multiple times.
+          op <- renameLambda op_orig
           let (i_params, ps) = splitAt (length is) $ lambdaParams op
           zipWithM_ dPrimV_ (map paramName i_params) is
           pure
@@ -1473,7 +1531,7 @@ lmadCopy t dstloc srcloc = do
       srclmad = memLocLMAD srcloc
   srcspace <- entryMemSpace <$> lookupMemory srcmem
   dstspace <- entryMemSpace <$> lookupMemory dstmem
-  emit $
+  withProvenance . emit $
     Imp.Copy
       t
       (elements <$> LMAD.shape dstlmad)
@@ -1712,7 +1770,7 @@ sFor' i bound body = do
   body' <- collect body
   emit $ Imp.For i bound body'
 
-sFor :: String -> Imp.TExp t -> (Imp.TExp t -> ImpM rep r op ()) -> ImpM rep r op ()
+sFor :: Name -> Imp.TExp t -> (Imp.TExp t -> ImpM rep r op ()) -> ImpM rep r op ()
 sFor i bound body = do
   i' <- newVName i
   sFor' i' (untyped bound) $
@@ -1728,11 +1786,11 @@ sWhile cond body = do
   emit $ Imp.While cond body'
 
 -- | Execute a code generation action, wrapping the generated code
--- within a 'Imp.Comment' with the given description.
+-- within a 'Imp.MetaComment' with the given description.
 sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code
-  emit $ Imp.Comment s code'
+  emit $ Imp.Meta (Imp.MetaComment s) <> code'
 
 sIf :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op () -> ImpM rep r op ()
 sIf cond tbranch fbranch = do
@@ -1756,7 +1814,7 @@ sUnless cond = sIf cond (pure ())
 sOp :: op -> ImpM rep r op ()
 sOp = emit . Imp.Op
 
-sDeclareMem :: String -> Space -> ImpM rep r op VName
+sDeclareMem :: Name -> Space -> ImpM rep r op VName
 sDeclareMem name space = do
   name' <- newVName name
   emit $ Imp.DeclareMem name' space
@@ -1770,20 +1828,20 @@ sAlloc_ name' size' space = do
     Nothing -> emit $ Imp.Allocate name' size' space
     Just allocator' -> allocator' name' size'
 
-sAlloc :: String -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM rep r op VName
+sAlloc :: Name -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM rep r op VName
 sAlloc name size space = do
   name' <- sDeclareMem name space
   sAlloc_ name' size space
   pure name'
 
-sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
+sArray :: Name -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
 sArray name bt shape mem lmad = do
   name' <- newVName name
   dArray name' bt shape mem lmad
   pure name'
 
 -- | Declare an array in row-major order in the given memory block.
-sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName
+sArrayInMem :: Name -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName
 sArrayInMem name pt shape mem =
   sArray name pt shape mem $
     LMAD.iota 0 $
@@ -1791,28 +1849,28 @@ sArrayInMem name pt shape mem =
         shapeDims shape
 
 -- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
-sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
+sAllocArrayPerm :: Name -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
-  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
+  mem <- sAlloc (name <> "_mem") (typeSize (Array pt shape NoUniqueness)) space
   let iota_lmad = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
     LMAD.permute iota_lmad $
       rearrangeInverse perm
 
 -- | Uses linear/iota index function.
-sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM rep r op VName
+sAllocArray :: Name -> PrimType -> ShapeBase SubExp -> Space -> ImpM rep r op VName
 sAllocArray name pt shape space =
   sAllocArrayPerm name pt shape space [0 .. shapeRank shape - 1]
 
 -- | Uses linear/iota index function.
-sStaticArray :: String -> PrimType -> Imp.ArrayContents -> ImpM rep r op VName
+sStaticArray :: Name -> PrimType -> Imp.ArrayContents -> ImpM rep r op VName
 sStaticArray name pt vs = do
   let num_elems = case vs of
         Imp.ArrayValues vs' -> length vs'
         Imp.ArrayZeros n -> fromIntegral n
       shape = Shape [intConst Int64 $ toInteger num_elems]
-  mem <- newVNameForFun $ name ++ "_mem"
+  mem <- newVNameForFun $ name <> "_mem"
   emit $ Imp.DeclareArray mem pt vs
   addVar mem $ MemVar Nothing $ MemEntry DefaultSpace
   sArray name pt shape mem $ LMAD.iota 0 [fromIntegral num_elems]
@@ -1868,7 +1926,7 @@ function fname outputs inputs m = local newFunction $ do
   body <- collect $ do
     mapM_ addParam $ outputs ++ inputs
     m
-  emitFunction fname $ Imp.Function Nothing outputs inputs body
+  emitFunction fname $ Imp.Function Nothing outputs inputs mempty body
   where
     addParam (Imp.MemParam name space) =
       addVar name $ MemVar Nothing $ MemEntry space
@@ -1940,7 +1998,7 @@ dIndexSpace vs_ds j = do
 -- | Like 'dIndexSpace', but invent some new names for the indexes
 -- based on the given template.
 dIndexSpace' ::
-  String ->
+  Name ->
   [Imp.TExp Int64] ->
   Imp.TExp Int64 ->
   ImpM rep r op [Imp.TExp Int64]

@@ -9,7 +9,7 @@ import Control.Monad.Except
 import Control.Monad.Free.Church
 import Control.Monad.State
 import Data.Char
-import Data.List (intersperse)
+import Data.List (intersperse, isPrefixOf)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
@@ -55,6 +55,10 @@ main = mainWithOptions () [] "options... [program.fut]" run
 
 data StopReason = EOF | Stop | Exit | Load FilePath | Interrupt
 
+replSettings :: Haskeline.Settings IO
+replSettings =
+  Haskeline.setComplete replComplete Haskeline.defaultSettings
+
 repl :: Maybe FilePath -> IO ()
 repl maybe_prog = do
   when fancyTerminal $ do
@@ -89,9 +93,7 @@ repl maybe_prog = do
                 toploop s'
           Right _ -> pure ()
 
-      finish s = do
-        quit <- if fancyTerminal then confirmQuit else pure True
-        if quit then pure () else toploop s
+      finish _s = pure ()
 
   maybe_init_state <- liftIO $ newFutharkiState 0 noLoadedProg maybe_prog
   s <- case maybe_init_state of
@@ -105,25 +107,15 @@ repl maybe_prog = do
           pure s {futharkiLoaded = maybe_prog}
     Right s ->
       pure s
-  Haskeline.runInputT Haskeline.defaultSettings $ toploop s
+  Haskeline.runInputT replSettings $ toploop s
 
   putStrLn "Leaving 'futhark repl'."
-
-confirmQuit :: Haskeline.InputT IO Bool
-confirmQuit = do
-  c <- Haskeline.getInputChar "Quit REPL? (y/n) "
-  case c of
-    Nothing -> pure True -- EOF
-    Just 'y' -> pure True
-    Just 'n' -> pure False
-    _ -> confirmQuit
 
 -- | Representation of breaking at a breakpoint, to allow for
 -- navigating through the stack frames and such.
 data Breaking = Breaking
   { breakingStack :: NE.NonEmpty I.StackFrame,
-    -- | Index of the current breakpoint (with
-    -- 0 being the outermost).
+    -- | Index of the current breakpoint (with 0 being the outermost).
     breakingAt :: Int
   }
 
@@ -383,6 +375,15 @@ runInterpreterNoBreak m = runF m (pure . Right) intOp
         T.putStrLn $
           locText w <> ": " <> "ignoring breakpoint when computating constant."
       c
+
+replComplete :: Haskeline.CompletionFunc IO
+replComplete = loadComplete
+  where
+    loadComplete (prev, aft)
+      | ":load " `isPrefixOf` reverse prev =
+          Haskeline.completeFilename (prev, aft)
+      | otherwise =
+          Haskeline.noCompletion (prev, aft)
 
 type Command = T.Text -> FutharkiM ()
 

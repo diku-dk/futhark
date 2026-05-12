@@ -9,6 +9,7 @@ module Language.Futhark.TypeChecker.Modules
 where
 
 import Control.Monad
+import Control.Monad.Identity
 import Data.Either
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -17,6 +18,7 @@ import Data.Set qualified as S
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Semantic
+import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify (doUnification)
@@ -34,7 +36,7 @@ substituteTypesInMTy substs (MTy abs mod) = MTy abs $ substituteTypesInMod subst
 substituteTypesInEnv :: TypeSubs -> Env -> Env
 substituteTypesInEnv substs env =
   env
-    { envVtable = M.map (substituteTypesInBoundV substs) $ envVtable env,
+    { envVtable = M.map (snd . substituteTypesInBoundV substs) $ envVtable env,
       envTypeTable = M.mapWithKey subT $ envTypeTable env,
       envModTable = M.map (substituteTypesInMod substs) $ envModTable env
     }
@@ -44,10 +46,14 @@ substituteTypesInEnv substs env =
     subT _ (TypeAbbr l ps (RetType dims t)) =
       TypeAbbr l ps $ applySubst substs $ RetType dims t
 
-substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
+-- Also returns names of new sizes arising from substituting a
+-- size-lifted type at the outermost part of the type. This is a
+-- somewhat rare case (see #2120). The right solution is to generally
+-- fresh (or at least unique) names.
+substituteTypesInBoundV :: TypeSubs -> BoundV -> ([VName], BoundV)
 substituteTypesInBoundV substs (BoundV tps t) =
   let RetType dims t' = applySubst substs $ RetType [] t
-   in BoundV (tps ++ map (`TypeParamDim` mempty) dims) t'
+   in (dims, BoundV (tps <> map (`TypeParamDim` mempty) dims) t')
 
 -- | All names defined anywhere in the 'Env'.
 allNamesInEnv :: Env -> S.Set VName
@@ -105,9 +111,20 @@ newNamesForMTy orig_mty = do
         substitute v =
           fromMaybe v $ M.lookup v substs
 
-        -- For applySubst and friends.
-        subst v =
-          ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v substs
+        substituteInExp :: Exp -> Exp
+        substituteInExp = runIdentity . astMap mapper
+          where
+            mapper =
+              ASTMapper
+                { mapOnExp = pure . substituteInExp,
+                  mapOnName = pure . substituteInQualName,
+                  mapOnStructType = pure . substituteInType,
+                  mapOnParamType = pure . substituteInType,
+                  mapOnResRetType = pure . substituteInRetType
+                }
+
+        substituteInQualName (QualName qs v) =
+          QualName (map substitute qs) (substitute v)
 
         substituteInMap f m =
           let (ks, vs) = unzip $ M.toList m
@@ -139,9 +156,8 @@ newNamesForMTy orig_mty = do
           TypeParamType l (substitute p) loc
 
         substituteInScalarType :: ScalarTypeBase Size u -> ScalarTypeBase Size u
-        substituteInScalarType (TypeVar u (QualName qs v) targs) =
-          TypeVar u (QualName (map substitute qs) $ substitute v) $
-            map substituteInTypeArg targs
+        substituteInScalarType (TypeVar u v targs) =
+          TypeVar u (substituteInQualName v) $ map substituteInTypeArg targs
         substituteInScalarType (Prim t) =
           Prim t
         substituteInScalarType (Record ts) =
@@ -151,15 +167,18 @@ newNamesForMTy orig_mty = do
         substituteInScalarType (Arrow als v d1 t1 (RetType dims t2)) =
           Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
 
+        substituteInRetType :: RetTypeBase Size u -> RetTypeBase Size u
+        substituteInRetType (RetType ext t) = RetType ext $ substituteInType t
+
         substituteInType :: TypeBase Size u -> TypeBase Size u
         substituteInType (Scalar t) = Scalar $ substituteInScalarType t
         substituteInType (Array u shape t) =
           Array u (substituteInShape shape) $ substituteInScalarType t
 
-        substituteInShape (Shape ds) = Shape $ map (applySubst subst) ds
+        substituteInShape (Shape ds) = Shape $ map substituteInExp ds
 
         substituteInTypeArg (TypeArgDim e) =
-          TypeArgDim $ applySubst subst e
+          TypeArgDim $ substituteInExp e
         substituteInTypeArg (TypeArgType t) =
           TypeArgType $ substituteInType t
 
@@ -178,13 +197,19 @@ envTypeAbbrs env =
     <> (mconcat . map modTypeAbbrs . M.elems . envModTable) env
 
 -- | Refine the given type name in the given env.
+--
+-- XXX: we do not check whether this results in a meaningful module type. In
+-- particular, we may refine a nonlifted type to contain a function or
+-- existentially quantified sizes. However, it is still not possible to
+-- construct a module that matches such malformed module types, so this is not a
+-- soundness issue, merely an ergonomic issue.
 refineEnv ::
   SrcLoc ->
   TySet ->
   Env ->
   QualName Name ->
   [TypeParam] ->
-  StructType ->
+  StructRetType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
   | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar _ (QualName qs v) _)))) <-
@@ -198,8 +223,8 @@ refineEnv loc tset env tname ps t
               substituteTypesInEnv
                 ( flip M.lookup $
                     M.fromList
-                      [ (qualLeaf tname', Subst cur_ps $ RetType [] t),
-                        (v, Subst ps $ RetType [] t)
+                      [ (qualLeaf tname', Subst cur_ps t),
+                        (v, Subst ps t)
                       ]
                 )
                 env
@@ -339,17 +364,22 @@ resolveMTyNames = resolveMTyNames'
 missingType :: (Pretty a) => Loc -> a -> Either TypeError b
 missingType loc name =
   Left . TypeError loc mempty $
-    "Module does not define a type named" <+> pretty name <> "."
+    "Module does not define a type named" <+> dquotes (pretty name) <> "."
 
 missingVal :: (Pretty a) => Loc -> a -> Either TypeError b
 missingVal loc name =
   Left . TypeError loc mempty $
-    "Module does not define a value named" <+> pretty name <> "."
+    "Module does not define a value named" <+> dquotes (pretty name) <> "."
+
+topLevelSize :: Loc -> VName -> Either TypeError b
+topLevelSize loc name =
+  Left . TypeError loc mempty $
+    "Type substitution in" <+> dquotes (prettyName name) <+> "results in a top-level size."
 
 missingMod :: (Pretty a) => Loc -> a -> Either TypeError b
 missingMod loc name =
   Left . TypeError loc mempty $
-    "Module does not define a module named" <+> pretty name <> "."
+    "Module does not define a module named" <+> dquotes (pretty name) <> "."
 
 mismatchedType ::
   Loc ->
@@ -470,7 +500,12 @@ matchMTys orig_mty orig_mty_sig =
             abs_name_substs = M.map (qualLeaf . fst) abs_substs
         pmod_substs <- matchMods p_abs_subst_to_type quals sig_pmod mod_pmod loc
         mod_substs <- matchMTys' abs_subst_to_type quals mod_mod sig_mod loc
-        pure (pmod_substs <> mod_substs <> abs_name_substs)
+        pure $
+          -- Avoid including substitutions that refer to abstract types, as this
+          -- results in circular substitutions (#2407).
+          M.filterWithKey (\k _ -> qualName k `M.notMember` mod_abs) pmod_substs
+            <> mod_substs
+            <> abs_name_substs
 
     matchEnvs ::
       M.Map VName (Subst StructRetType) ->
@@ -499,7 +534,11 @@ matchMTys orig_mty orig_mty_sig =
       -- abstract types first.
       val_substs <- fmap M.fromList $
         forM (M.toList $ envVtable sig) $ \(name, spec_bv) -> do
-          let spec_bv' = substituteTypesInBoundV (`M.lookup` abs_subst_to_type) spec_bv
+          let (spec_dims, spec_bv') =
+                substituteTypesInBoundV (`M.lookup` abs_subst_to_type) spec_bv
+              (spec_witnesses, _) = determineSizeWitnesses $ boundValType spec_bv'
+          -- The hacky check for #2120.
+          when (any (`S.member` spec_witnesses) spec_dims) $ topLevelSize loc name
           case findBinding envVtable Term (baseName name) env of
             Just (name', bv) -> matchVal loc quals name spec_bv' name' bv
             _ -> missingVal loc (baseName name)

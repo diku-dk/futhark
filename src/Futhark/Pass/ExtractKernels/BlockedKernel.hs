@@ -42,7 +42,7 @@ type DistRep rep =
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
 
 type MkSegLevel rep m =
-  [SubExp] -> String -> ThreadRecommendation -> BuilderT rep m (SegOpLevel rep)
+  [SubExp] -> Name -> ThreadRecommendation -> BuilderT rep m (SegOpLevel rep)
 
 mkSegSpace :: (MonadFreshNames m) => [(VName, SubExp)] -> m SegSpace
 mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims
@@ -59,7 +59,7 @@ prepareRedOrScan ::
 prepareRedOrScan cs w map_lam arrs ispace inps = do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, w)]
-  kbody <- fmap (uncurry (flip (KernelBody ()))) $
+  kbody <- fmap (uncurry (flip (Body ()))) $
     runBuilder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
@@ -85,10 +85,8 @@ segRed ::
   m (Stms rep)
 segRed lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
   (kspace, kbody) <- prepareRedOrScan cs w map_lam arrs ispace inps
-  letBind pat $
-    Op $
-      segOp $
-        SegRed lvl kspace ops (lambdaReturnType map_lam) kbody
+  letBind pat . Op . segOp $
+    SegRed lvl kspace (lambdaReturnType map_lam) kbody ops
 
 segScan ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
@@ -98,16 +96,19 @@ segScan ::
   SubExp -> -- segment size
   [SegBinOp rep] ->
   Lambda rep ->
+  SegPostOp rep ->
   [VName] ->
   [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this scan
   [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
   m (Stms rep)
-segScan lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
+segScan lvl pat cs w ops map_lam post_op arrs ispace inps = runBuilder_ $ do
+  let SegPostOp post_lam = post_op
   (kspace, kbody) <- prepareRedOrScan cs w map_lam arrs ispace inps
-  letBind pat $
-    Op $
-      segOp $
-        SegScan lvl kspace ops (lambdaReturnType map_lam) kbody
+  post_lam' <- runLambdaBuilder (lambdaParams post_lam) $ do
+    mapM_ readKernelInput inps
+    bodyBind $ lambdaBody post_lam
+  letBind pat . Op . segOp $
+    SegScan lvl kspace (lambdaReturnType map_lam) kbody ops (SegPostOp post_lam')
 
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
@@ -121,10 +122,8 @@ segMap ::
   m (Stms rep)
 segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
   (kspace, kbody) <- prepareRedOrScan mempty w map_lam arrs ispace inps
-  letBind pat $
-    Op $
-      segOp $
-        SegMap lvl kspace (lambdaReturnType map_lam) kbody
+  letBind pat . Op . segOp $
+    SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim ::
   (MonadBuilder m) =>
@@ -183,7 +182,7 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBuilder_ $ do
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, arr_w)]
 
-  kbody <- fmap (uncurry (flip $ KernelBody ())) $
+  kbody <- fmap (uncurry (flip $ Body ())) $
     runBuilder $
       localScope (scopeOfSegSpace space) $ do
         mapM_ readKernelInput inps
@@ -197,7 +196,7 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBuilder_ $ do
         forM res $ \(SubExpRes cs se) ->
           pure $ Returns ResultMaySimplify cs se
 
-  letBind pat $ Op $ segOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
+  letBind pat $ Op $ segOp $ SegHist lvl space (lambdaReturnType lam) kbody ops
 
 mapKernelSkeleton ::
   (DistRep rep, HasScope rep m, MonadFreshNames m) =>
@@ -218,10 +217,10 @@ mapKernel ::
   [Type] ->
   KernelBody rep ->
   m (SegOp (SegOpLevel rep) rep, Stms rep)
-mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBuilderT' $ do
+mapKernel mk_lvl ispace inputs rts (Body () kstms krets) = runBuilderT' $ do
   (space, read_input_stms) <- mapKernelSkeleton ispace inputs
 
-  let kbody' = KernelBody () (read_input_stms <> kstms) krets
+  let kbody' = Body () (read_input_stms <> kstms) krets
 
   -- If the kernel creates arrays (meaning it will require memory
   -- expansion), we want to truncate the amount of threads.

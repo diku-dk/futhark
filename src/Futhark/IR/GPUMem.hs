@@ -51,7 +51,7 @@ instance TC.Checkable GPUMem where
         MemOp (HostOp NoOp) (Aliases GPUMem) ->
         TC.TypeM GPUMem ()
       typeCheckMemoryOp _ (Alloc size _) =
-        TC.require [Prim int64] size
+        TC.require (Prim int64) size
       typeCheckMemoryOp lvl (Inner op) =
         typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ pure ()) op
   checkFParamDec = checkMemInfo
@@ -95,7 +95,7 @@ simpleGPUMem =
     -- importantly, past the versioning If, but see also #1569).
     usage (SegOp (SegMap _ _ _ kbody)) = localAllocs kbody
     usage _ = mempty
-    localAllocs = foldMap stmSharedAlloc . kernelBodyStms
+    localAllocs = foldMap stmSharedAlloc . bodyStms
     stmSharedAlloc = expSharedAlloc . stmExp
     expSharedAlloc (Op (Alloc (Var v) _)) =
       UT.sizeUsage v

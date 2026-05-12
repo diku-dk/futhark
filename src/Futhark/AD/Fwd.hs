@@ -81,7 +81,7 @@ runADM (ADM m) =
         (RState mempty vn)
 
 tanVName :: VName -> ADM VName
-tanVName v = newVName (baseString v <> "_tan")
+tanVName v = newVName (baseName v <> "_tan")
 
 insertTan :: VName -> VName -> ADM ()
 insertTan v v' =
@@ -160,7 +160,7 @@ instance Tangent VName where
       Just v_tan -> pure v_tan
       Nothing -> do
         t <- lookupType v
-        letExp (baseString v <> "_implicit_tan") $ zeroExp t
+        letExp (baseName v <> "_implicit_tan") $ zeroExp t
   bundleTan v = do
     t <- lookupType v
     if isAcc t
@@ -210,7 +210,7 @@ basicFwd pat aux op = do
         letBindNames (patNames pat_tan) <=< toExp $
           x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
     CmpOp {} ->
-      addStm $ Let pat_tan aux $ BasicOp op
+      addStm $ Let pat_tan aux $ zeroExp $ Prim Bool
     ConvOp cop x -> do
       x_tan <- tangent x
       addStm $ Let pat_tan aux $ BasicOp $ ConvOp cop x_tan
@@ -226,9 +226,9 @@ basicFwd pat aux op = do
       arr_tan <- tangent arr
       arrs_tans <- mapM tangent arrs
       addStm $ Let pat_tan aux $ BasicOp $ Concat d (arr_tan :| arrs_tans) w
-    Manifest ds arr -> do
+    Manifest arr ds -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Manifest ds arr_tan
+      addStm $ Let pat_tan aux $ BasicOp $ Manifest arr_tan ds
     Iota n _ _ it -> do
       addStm $ Let pat_tan aux $ BasicOp $ Replicate (Shape [n]) (intConst it 0)
     Replicate n x -> do
@@ -236,12 +236,12 @@ basicFwd pat aux op = do
       addStm $ Let pat_tan aux $ BasicOp $ Replicate n x_tan
     Scratch t shape ->
       addStm $ Let pat_tan aux $ BasicOp $ Scratch t shape
-    Reshape k reshape arr -> do
+    Reshape arr reshape -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Reshape k reshape arr_tan
-    Rearrange perm arr -> do
+      addStm $ Let pat_tan aux $ BasicOp $ Reshape arr_tan reshape
+    Rearrange arr perm -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Rearrange perm arr_tan
+      addStm $ Let pat_tan aux $ BasicOp $ Rearrange arr_tan perm
     _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
 
 fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)
@@ -264,13 +264,14 @@ zeroFromSubExp (Var v) = do
   letExp "zero" $ zeroExp t
 
 fwdSOAC :: Pat Type -> StmAux () -> SOAC SOACS -> ADM ()
-fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
+fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds post_lam)) = do
   pat' <- bundleNewPat pat
   xs' <- bundleTangents xs
+  f' <- fwdLambda f
   scs' <- mapM fwdScan scs
   reds' <- mapM fwdRed reds
-  f' <- fwdLambda f
-  addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm scs' reds' f'
+  post_lam' <- fwdLambda post_lam
+  addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm f' scs' reds' post_lam'
   where
     fwdScan :: Scan SOACS -> ADM (Scan SOACS)
     fwdScan sc = do
@@ -330,32 +331,6 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
-fwdSOAC (Pat pes) aux (Scatter w ivs lam as) = do
-  as_tan <- mapM (\(s, n, a) -> do a_tan <- tangent a; pure (s, n, a_tan)) as
-  pes_tan <- mapM newTan pes
-  ivs' <- bundleTangents ivs
-  let (as_ws, as_ns, _as_vs) = unzip3 as
-      n_indices = sum $ zipWith (*) as_ns $ map length as_ws
-  lam' <- fwdScatterLambda n_indices lam
-  let s = Let (Pat (pes ++ pes_tan)) aux $ Op $ Scatter w ivs' lam' $ as ++ as_tan
-  addStm s
-  where
-    fwdScatterLambda :: Int -> Lambda SOACS -> ADM (Lambda SOACS)
-    fwdScatterLambda n_indices (Lambda params ret body) = do
-      params' <- bundleNewList params
-      ret_tan <- mapM tangent $ drop n_indices ret
-      body' <- fwdBodyScatter n_indices body
-      let indices = concat $ replicate 2 $ take n_indices ret
-          ret' = indices ++ drop n_indices ret ++ ret_tan
-      pure $ Lambda params' ret' body'
-    fwdBodyScatter :: Int -> Body SOACS -> ADM (Body SOACS)
-    fwdBodyScatter n_indices (Body _ stms res) = do
-      (res_tan, stms') <- collectStms $ do
-        mapM_ fwdStm stms
-        mapM tangent $ drop n_indices res
-      let indices = concat $ replicate 2 $ take n_indices res
-          res' = indices ++ drop n_indices res ++ res_tan
-      pure $ mkBody stms' res'
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =
@@ -394,8 +369,8 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
                       _ -> error $ "fwdStm.convertTo: " ++ prettyString (f, tt, e_t)
                 where
                   e_t = primExpType e
-          zipWithM_ (letBindNames . pure) (patNames pat_tan)
-            =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
+          letBindNames (patNames pat_tan)
+            =<< toExp (foldl1 (~+~) $ zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
 fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
   cases' <- slocal' $ mapM (traverse fwdBody) cases
   defbody' <- slocal' $ fwdBody defbody

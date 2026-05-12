@@ -80,10 +80,11 @@ instance Substitute Attrs where
   substituteNames _ attrs = attrs
 
 instance (Substitute dec) => Substitute (StmAux dec) where
-  substituteNames substs (StmAux cs attrs dec) =
+  substituteNames substs (StmAux cs attrs loc dec) =
     StmAux
       (substituteNames substs cs)
       (substituteNames substs attrs)
+      loc
       (substituteNames substs dec)
 
 instance (Substitute dec) => Substitute (Param dec) where
@@ -112,7 +113,7 @@ instance (Substitutable rep) => Substitute (Stm rep) where
       (substituteNames substs annot)
       (substituteNames substs e)
 
-instance (Substitutable rep) => Substitute (Body rep) where
+instance (Substitutable rep, Substitute res) => Substitute (GBody rep res) where
   substituteNames substs (Body dec stms res) =
     Body
       (substituteNames substs dec)
@@ -142,8 +143,10 @@ instance Substitute (NoOp rep) where
   substituteNames _ = id
 
 instance (Substitute d) => Substitute (ShapeBase d) where
-  substituteNames substs (Shape es) =
-    Shape $ map (substituteNames substs) es
+  substituteNames substs = fmap (substituteNames substs)
+
+instance (Substitute d) => Substitute (NewShape d) where
+  substituteNames substs = fmap (substituteNames substs)
 
 instance (Substitute d) => Substitute (Ext d) where
   substituteNames substs (Free x) = Free $ substituteNames substs x

@@ -4,4 +4,4 @@
 
 def main (xss: *[][]i32) =
   let xss' = transpose xss
-  in xss' with [0,1] = 2
+  in xss' with [0, 1] = 2

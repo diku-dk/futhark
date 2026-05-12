@@ -7,5 +7,10 @@
 --                                                                           500,
 --                                                                           600]]]
 -- }
-def main(a: [][][]i32): [][][]i32 =
+-- compiled random input { [65537][16][16]i32 } auto output
+-- compiled random input { [65537][2][2]i32 } auto output
+-- compiled random input { [65537][128][2]i32 } auto output
+-- compiled random input { [65537][2][128]i32 } auto output
+
+def main (a: [][][]i32) : [][][]i32 =
   map transpose a

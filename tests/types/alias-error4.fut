@@ -5,4 +5,4 @@
 
 type foo = bar
 
-def main(x: foo): foo = x
+def main (x: foo) : foo = x

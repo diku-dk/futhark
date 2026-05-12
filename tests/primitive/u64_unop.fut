@@ -18,5 +18,3 @@
 entry negateu64 = map (\x : u64 -> -x)
 entry absu64 = map (u64.abs)
 entry sgnu64 = map (u64.sgn)
-
-

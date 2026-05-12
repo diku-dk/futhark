@@ -16,18 +16,18 @@
 -- output { [0, 0, 0, 0, 1, 1, 0, 1, 0, 0] }
 
 -- From http://stackoverflow.com/a/12996028
-def hash(x: i32): i32 =
+def hash (x: i32) : i32 =
   let x = ((x >> 16) ^ x) * 0x45d9f3b
   let x = ((x >> 16) ^ x) * 0x45d9f3b
-  let x = ((x >> 16) ^ x) in
-  x
+  let x = ((x >> 16) ^ x)
+  in x
 
-def rand_array (n: i64) (lower: i32) (upper: i32): [n]i32 =
-  map (\(i: i64): i32  ->
-        -- We hash i+n to ensure that a random length-n array is not a
-        -- prefix of a random length-(n+m) array.
-        hash(i32.i64 (i + n)) % (upper-lower+1) + lower) (
-      iota(n))
+def rand_array (n: i64) (lower: i32) (upper: i32) : [n]i32 =
+  map (\(i: i64) : i32 ->
+         -- We hash i+n to ensure that a random length-n array is not a
+         -- prefix of a random length-(n+m) array.
+         hash (i32.i64 (i + n)) % (upper - lower + 1) + lower)
+      (iota (n))
 
-def main (x: i64) (lower: i32) (upper: i32): []i32 =
+def main (x: i64) (lower: i32) (upper: i32) : []i32 =
   rand_array x lower upper

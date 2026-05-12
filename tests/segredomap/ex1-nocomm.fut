@@ -12,10 +12,10 @@
 
 -- Add a data-driven branch to prevent the compiler from noticing that
 -- this is commutative.
-def add (b: bool) (x : i64) (y : i64): i64 = if b then x + y else x - y
+def add (b: bool) (x: i64) (y: i64) : i64 = if b then x + y else x - y
 
-def main [m][n] (b: bool) (xss : [m][n]f32): ([m]i64, [m][n]f64) =
-  unzip (map( \(xs : [n]f32) : (i64, [n]f64) ->
-         let (xs_int, xs_neg) = unzip (map(\x -> (i64.f32 x, f64.f32(-x))) xs)
-         in (reduce (add b) 0 xs_int, xs_neg)
-     ) xss)
+def main [m] [n] (b: bool) (xss: [m][n]f32) : ([m]i64, [m][n]f64) =
+  unzip (map (\(xs: [n]f32) : (i64, [n]f64) ->
+                let (xs_int, xs_neg) = unzip (map (\x -> (i64.f32 x, f64.f32 (-x))) xs)
+                in (reduce (add b) 0 xs_int, xs_neg))
+             xss)

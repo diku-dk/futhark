@@ -4,6 +4,6 @@
 -- script input { mkdata 10000i64 }
 -- script input { mkdata 1000000i64 }
 
-entry mkdata n = (n,map f32.i64 (iota n))
+entry mkdata n = (n, map f32.i64 (iota n))
 
 entry doeswork n arr = f32.sum arr + f32.i64 n

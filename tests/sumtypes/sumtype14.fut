@@ -11,11 +11,13 @@ module type foobar_mod = {
 
 module sum_module : foobar_mod = {
   type^ foobar = #foo i32 | #bar (i32 -> i32)
-  def f (fb : foobar) (x : i32) : i32 =
+
+  def f (fb: foobar) (x: i32) : i32 =
     match fb
-      case (#foo y) -> x + y
-      case (#bar f) -> f x
-  def bar = (#bar (+5)) : foobar
+    case (#foo y) -> x + y
+    case (#bar f) -> f x
+
+  def bar = (#bar (+ 5)) : foobar
 }
 
 def main : i32 = sum_module.f sum_module.bar 10

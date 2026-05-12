@@ -7,9 +7,9 @@ module type MT = {
   type i32matrix = [](vector i32)
 }
 
-module M1: MT = {
+module M1 : MT = {
   type vector 'a = [2]a
   type i32matrix = [][2]f32
 }
 
-def main() = 2
+def main () = 2

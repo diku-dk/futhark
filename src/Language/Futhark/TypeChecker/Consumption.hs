@@ -2,6 +2,12 @@
 -- constraints.
 module Language.Futhark.TypeChecker.Consumption
   ( checkValDef,
+
+    -- * For testing
+    Alias (..),
+    Aliases,
+    TypeAliases,
+    inferReturnUniqueness,
   )
 where
 
@@ -70,10 +76,17 @@ addAliases = flip second
 aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
 
-setFieldAliases :: TypeAliases -> [Name] -> TypeAliases -> TypeAliases
-setFieldAliases ve_als (x : xs) (Scalar (Record fs)) =
-  Scalar $ Record $ M.adjust (setFieldAliases ve_als xs) x fs
-setFieldAliases ve_als _ _ = ve_als
+updateAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
+updateAliases _ [] ve_als =
+  ve_als
+updateAliases src_als (UpdateStepField f : rest) ve_als =
+  case src_als of
+    Scalar (Record fs)
+      | Just sub <- M.lookup f fs ->
+          Scalar $ Record $ M.insert f (updateAliases sub rest ve_als) fs
+    _ ->
+      src_als
+updateAliases src_als (UpdateStepSlice _ : _) _ = second (const mempty) src_als
 
 data Entry a
   = Consumable {entryAliases :: a}
@@ -229,7 +242,7 @@ matchPat (RecordPat fs1 _) (Scalar (Record fs2)) =
   mconcat $
     zipWith
       matchPat
-      (map snd (sortFields (M.fromList fs1)))
+      (map snd (sortFields (M.fromList (map (first unLoc) fs1))))
       (map snd (sortFields fs2))
 matchPat (Id v (Info t) _) als = DL.singleton (v, (t, als))
 matchPat (PatAscription p _ _) t = matchPat p t
@@ -334,10 +347,6 @@ consumeAliases loc als = do
   where
     als' = M.fromList $ map ((,loc) . aliasVar) $ S.toList als
 
-consume :: Loc -> VName -> StructType -> CheckM ()
-consume loc v t =
-  consumeAliases loc . aliases =<< observeVar loc v t
-
 -- | Observe the given name here and return its aliases.
 observeVar :: Loc -> VName -> StructType -> CheckM TypeAliases
 observeVar loc v t = do
@@ -414,6 +423,10 @@ aliasesMultipleTimes = S.fromList . map fst . filter ((> 1) . snd) . M.toList . 
   where
     delve (Scalar (Record fs)) =
       foldl' (M.unionWith (+)) mempty $ map delve $ M.elems fs
+    delve (Scalar (TypeVar als _ _)) =
+      -- We cannot know anything about abstract types, but must conservatively
+      -- assume the worst.
+      M.fromList $ map ((,2 :: Int) . aliasVar) $ S.toList als
     delve t =
       M.fromList $ map ((,1 :: Int) . aliasVar) $ S.toList $ aliases t
 
@@ -557,7 +570,7 @@ boundFreeInExp e = do
 -- Loops are tricky because we want to infer the uniqueness of their
 -- parameters.  This is pretty unusual: we do not do this for ordinary
 -- functions.
-type Loop = (Pat ParamType, Exp, LoopFormBase Info VName, Exp)
+type Loop = (Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
 
 -- | Mark bindings of consumed names as Consume, except those under a
 -- 'PatAscription', which are left unchanged.
@@ -616,6 +629,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
               && not (S.null (aliases t `S.intersection` (cons <> obs)))
           )
           $ lift . addError loop_loc mempty
+          $ withIndexLink "aliases-previously-returned"
           $ "Return value for consuming loop parameter"
             <+> dquotes (prettyName pat_v)
             <+> "aliases previously returned value."
@@ -631,9 +645,12 @@ convergeLoopParam loop_loc param body_cons body_als = do
       checkMergeReturn (PatAscription p _ _) t =
         checkMergeReturn p t
       checkMergeReturn (RecordPat pfs patloc) (Scalar (Record tfs)) =
-        RecordPat . M.toList <$> sequence pfs' <*> pure patloc
+        RecordPat . map unshuffle . M.toList <$> sequence pfs' <*> pure patloc
         where
-          pfs' = M.intersectionWith checkMergeReturn (M.fromList pfs) tfs
+          pfs' = M.intersectionWith check (M.fromList (map shuffle pfs)) tfs
+          check (loc, x) y = (loc,) <$> checkMergeReturn x y
+          shuffle (L loc v, t) = (v, (loc, t))
+          unshuffle (v, (loc, t)) = (L loc v, t)
       checkMergeReturn (TuplePat pats patloc) t
         | Just ts <- isTupleRecord t =
             TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
@@ -664,18 +681,31 @@ checkLoop loop_loc (param, arg, form, body) = do
   param' <- convergeLoopParam loop_loc param (M.keysSet body_cons) body_als
 
   let param_t = patternType param'
-  ((arg', arg_als), arg_cons) <- contain $ checkArg [] param_t arg
+  ((arg', arg_als), arg_cons) <- case arg of
+    LoopInitImplicit (Info e) ->
+      contain $ first (LoopInitImplicit . Info) <$> checkArg [] param_t e
+    LoopInitExplicit e ->
+      contain $ first LoopInitExplicit <$> checkArg [] param_t e
   consumed arg_cons
-  free_bound <- boundFreeInExp body
 
-  let bad = any (`M.member` arg_cons) . boundAliases . aliases . snd
-  forM_ (filter bad $ M.toList free_bound) $ \(v, _) -> do
-    v' <- describeVar v
-    addError loop_loc mempty $
-      "Loop body uses"
-        <+> v'
-        <> " (or an alias),"
-          </> "but this is consumed by the initial loop argument."
+  let checkFree what e = do
+        free_bound <- boundFreeInExp e
+
+        let bad = any (`M.member` arg_cons) . boundAliases . aliases . snd
+        forM_ (filter bad $ M.toList free_bound) $ \(v, _) -> do
+          v' <- describeVar v
+          addError loop_loc mempty $
+            what
+              <+> "uses"
+              <+> v'
+              <> " (or an alias),"
+                </> "but this is consumed by the initial loop argument."
+
+  checkFree "Loop body" body
+
+  case form of
+    While cond -> checkFree "Loop condition" cond
+    _ -> pure ()
 
   v <- VName "internal_loop_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameLoopRes (srclocOf loop_loc)) $ stateNames s}
@@ -726,10 +756,11 @@ checkExp (AppExp (Apply f args loc) appres) = do
       error $ "checkArgs: " <> prettyString t
 
 --
-checkExp (AppExp (Loop sparams pat args form body loc) appres) = do
-  ((pat', args', form', body'), als) <- checkLoop (locOf loc) (pat, args, form, body)
+checkExp (AppExp (Loop sparams pat loopinit form body loc) appres) = do
+  ((pat', loopinit', form', body'), als) <-
+    checkLoop (locOf loc) (pat, loopinit, form, body)
   pure
-    ( AppExp (Loop sparams pat' args' form' body' loc) appres,
+    ( AppExp (Loop sparams pat' loopinit' form' body' loc) appres,
       als
     )
 
@@ -796,7 +827,7 @@ checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), fu
         als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure ((ret', funbody'), ftype)
-  (letbody', letbody_als) <- bindingFun fname ftype $ checkExp letbody
+  (letbody', letbody_als) <- bindingFun (fst fname) ftype $ checkExp letbody
   pure
     ( AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret'), funbody') letbody' loc) appres,
       letbody_als
@@ -832,23 +863,43 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
       )
 
 --
-checkExp (AppExp (LetWith dst src slice ve body loc) appres) = do
-  src_als <- observeVar (locOf dst) (identName src) (unInfo $ identType src)
-  slice' <- checkSubExps slice
+checkExp (AppExp (LetWith dst src steps ve body loc) appres) = do
+  steps' <- mapM checkStep steps
   (ve', ve_als) <- checkExp ve
-  consume (locOf src) (identName src) (unInfo (identType src))
-  overlapCheck (locOf ve) (src, src_als) (ve', ve_als)
-  (body', body_als) <- bindingIdent Consume dst $ checkExp body
-  pure (AppExp (LetWith dst src slice' ve' body' loc) appres, body_als)
+  src_als <- observeVar (locOf src) (identName src) (unInfo $ identType src)
 
+  let hasIndex = any isIndex steps
+
+  when hasIndex $ do
+    overlapCheck (locOf ve) (src, src_als) (ve', ve_als)
+    consumeAliases (locOf loc) $ aliases src_als
+
+  (body', body_als) <- bindingIdent Consume dst $ checkExp body
+  pure (AppExp (LetWith dst src steps' ve' body' loc) appres, body_als)
+  where
+    isIndex UpdateStepSlice {} = True
+    isIndex _ = False
+    checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
+    checkStep (UpdateStepField f) = pure $ UpdateStepField f
 --
-checkExp (Update src slice ve loc) = do
-  slice' <- checkSubExps slice
+checkExp (Update src steps ve t loc) = do
+  steps' <- mapM checkStep steps
   (ve', ve_als) <- checkExp ve
   (src', src_als) <- checkExp src
-  overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
-  consumeAliases (locOf loc) $ aliases src_als
-  pure (Update src' slice' ve' loc, second (const mempty) src_als)
+  let hasIndex = any isIndex steps
+  res_als <-
+    if hasIndex
+      then do
+        overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
+        consumeAliases (locOf loc) $ aliases src_als
+        pure $ second (const mempty) src_als
+      else pure $ updateAliases src_als steps ve_als
+  pure (Update src' steps' ve' t loc, res_als)
+  where
+    isIndex UpdateStepSlice {} = True
+    isIndex _ = False
+    checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
+    checkStep (UpdateStepField f) = pure $ UpdateStepField f
 
 -- Cases that simply propagate aliases directly.
 checkExp (Var v (Info t) loc) = do
@@ -877,11 +928,12 @@ checkExp (OpSectionRight op ftype arg arginfo retinfo loc) = do
     ( OpSectionRight op ftype arg' arginfo retinfo loc,
       Scalar $ Arrow (aliases arg_als <> aliases als) pn (diet pt2) (toStruct pt2) ret
     )
-checkExp (IndexSection slice t loc) = do
-  slice' <- checkSubExps slice
-  pure (IndexSection slice' t loc, unInfo t `setAliases` mempty)
-checkExp (ProjectSection fs t loc) = do
-  pure (ProjectSection fs t loc, unInfo t `setAliases` mempty)
+checkExp (UpdateSection steps t loc) = do
+  steps' <- mapM checkStep steps
+  pure (UpdateSection steps' t loc, unInfo t `setAliases` mempty)
+  where
+    checkStep (UpdateStepField f) = pure $ UpdateStepField f
+    checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
 checkExp (Coerce e te t loc) = do
   (e', e_als) <- checkExp e
   pure (Coerce e' te t loc, e_als)
@@ -930,23 +982,16 @@ checkExp (Constr name es t loc) = do
             M.map (map (`setAliases` mempty)) cs
         t' -> error $ "checkExp Constr: bad type " <> prettyString t'
     )
-checkExp (RecordUpdate src fields ve t loc) = do
-  (src', src_als) <- checkExp src
-  (ve', ve_als) <- checkExp ve
-  pure
-    ( RecordUpdate src' fields ve' t loc,
-      setFieldAliases ve_als fields src_als
-    )
 checkExp (RecordLit fs loc) = do
   (fs', fs_als) <- mapAndUnzipM checkField fs
   pure (RecordLit fs' loc, Scalar $ Record $ M.fromList fs_als)
   where
     checkField (RecordFieldExplicit name e floc) = do
       (e', e_als) <- checkExp e
-      pure (RecordFieldExplicit name e' floc, (name, e_als))
+      pure (RecordFieldExplicit name e' floc, (unLoc name, e_als))
     checkField (RecordFieldImplicit name t floc) = do
-      name_als <- observeVar (locOf floc) name $ unInfo t
-      pure (RecordFieldImplicit name t floc, (baseName name, name_als))
+      name_als <- observeVar (locOf floc) (unLoc name) $ unInfo t
+      pure (RecordFieldImplicit name t floc, (baseName (unLoc name), name_als))
 
 -- Cases that create alias-free values.
 checkExp e@(AppExp Range {} _) = noAliases e
@@ -954,6 +999,7 @@ checkExp e@IntLit {} = noAliases e
 checkExp e@FloatLit {} = noAliases e
 checkExp e@Literal {} = noAliases e
 checkExp e@StringLit {} = noAliases e
+checkExp e@ArrayVal {} = noAliases e
 checkExp e@ArrayLit {} = noAliases e
 checkExp e@Negate {} = noAliases e
 checkExp e@Not {} = noAliases e
@@ -993,7 +1039,10 @@ checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (l
           addError retdecl' mempty "A top-level constant cannot have a unique type."
         pure $ RetType ext ret
       Nothing ->
-        pure $ RetType ext $ inferReturnUniqueness params ret body_als
+        pure $
+          RetType ext $
+            inferReturnUniqueness params ret body_als
+
     pure
       ( (body', ret'),
         body_als -- Don't matter.

@@ -8,14 +8,14 @@
 -- output { 24.0f32 }
 -- structure gpu { SegRed 1 }
 
-def max(a: f32) (b: f32): f32 = if(a < b) then b else a
+def max (a: f32) (b: f32) : f32 = if (a < b) then b else a
 
-def exactYhat(xs: []f32, x: f32): f32 =
-  let ups = map (+x) xs
+def exactYhat (xs: []f32, x: f32) : f32 =
+  let ups = map (+ x) xs
   let lo = reduce max (0.0) ups
   in lo + ups[0]
 
-def main (xs: []f32) (mux: f32) (eps: f32): f32 =
-  let g = exactYhat(xs, mux + eps)
-  let h = exactYhat(xs, mux - eps)
+def main (xs: []f32) (mux: f32) (eps: f32) : f32 =
+  let g = exactYhat (xs, mux + eps)
+  let h = exactYhat (xs, mux - eps)
   in g + h

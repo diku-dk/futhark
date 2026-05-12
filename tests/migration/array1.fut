@@ -7,4 +7,4 @@
 
 def main (i: i64) : i32 =
   let xs = [0, 1, 2, 3, 4]
-  in xs[i%5]
+  in xs[i % 5]

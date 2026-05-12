@@ -14,8 +14,8 @@
 --    [5,6,10,0]]
 -- }
 
-def oneToEach [n] (r: [n]i32): [n]i32 =
-  map (+1) r
+def oneToEach [n] (r: [n]i32) : [n]i32 =
+  map (+ 1) r
 
-def main(a: [][]i32): [][]i32 =
+def main (a: [][]i32) : [][]i32 =
   map oneToEach a

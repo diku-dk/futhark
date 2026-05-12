@@ -39,7 +39,7 @@ flattenArray :: Int -> TV Int64 -> VName -> ImpM rep r op VName
 flattenArray k flat arr = do
   ArrayEntry arr_loc pt <- lookupArray arr
   let flat_shape = Shape $ Var (tvVar flat) : drop k (memLocShape arr_loc)
-  sArray (baseString arr ++ "_flat") pt flat_shape (memLocName arr_loc) $
+  sArray (baseName arr <> "_flat") pt flat_shape (memLocName arr_loc) $
     fromMaybe (error "flattenArray") $
       LMAD.reshape (memLocLMAD arr_loc) (map pe64 $ shapeDims flat_shape)
 
@@ -52,7 +52,7 @@ sliceArray start size arr = do
           (map Imp.pe64 (arrayDims arr_t))
           [DimSlice start (tvExp size) 1]
   sArray
-    (baseString arr ++ "_chunk")
+    (baseName arr <> "_chunk")
     (elemType arr_t)
     (arrayShape arr_t `setOuterDim` Var (tvVar size))
     mem
@@ -278,6 +278,8 @@ compileBlockExp (Pat [pe]) (BasicOp (Opaque _ se)) =
   -- Cannot print in GPU code.
   copyDWIM (patElemName pe) [] se []
 -- The static arrays stuff does not work inside kernels.
+compileBlockExp (Pat [dest]) (BasicOp (ArrayVal vs t)) =
+  compileBlockExp (Pat [dest]) (BasicOp (ArrayLit (map Constant vs) (Prim t)))
 compileBlockExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
@@ -359,27 +361,50 @@ compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   compileFlatId space
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $
+    compileStms mempty (bodyStms body) $
       zipWithM_ (compileThreadResult space) (patElems pat) $
-        kernelBodyResult body
+        bodyResult body
   sOp $ Imp.ErrorSync Imp.FenceLocal
-compileBlockOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
+compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
   compileFlatId space
 
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
+      [scan] = scans
+      shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
+      scan_ts = concatMap shpT scans
+      shpOfT t s =
+        arrayShape $
+          foldr (flip arrayOfRow) (arrayOfShape t s) $
+            segSpaceDims space
+      (scan_pars, map_pars) =
+        splitAt (length $ segBinOpNeutral scan) $ lambdaParams $ segPostOpLambda post_op
+      (body_scan_res, body_map_res) =
+        splitAt (length $ segBinOpNeutral scan) $ bodyResult body
+
+  scan_out <- forM scan_ts $ \(s, t) ->
+    sAllocArray "scan_out" (elemType t) (shpOfT t s) $ Space "shared"
+
+  dScope Nothing $ scopeOfLParams $ lambdaParams $ segPostOpLambda post_op
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $
-      forM_ (zip (patNames pat) $ kernelBodyResult body) $ \(dest, res) ->
+    compileStms mempty (bodyStms body) $ do
+      forM_ (zip scan_out body_scan_res) $ \(dest, res) ->
         copyDWIMFix
           dest
           (map Imp.le64 ltids)
           (kernelResultSubExp res)
           []
 
-  fence <- fenceForArrays $ patNames pat
-  sOp $ Imp.ErrorSync fence
+      sComment "bind map results to post lambda params" $
+        forM_ (zip map_pars body_map_res) $ \(par, res) ->
+          copyDWIMFix
+            (paramName par)
+            []
+            (kernelResultSubExp res)
+            []
+
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
   let segment_size = last dims'
       crossesSegment from to =
@@ -389,12 +414,8 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   -- array of scan elements, so we invent some new flattened arrays
   -- here.
   dims_flat <- dPrimV "dims_flat" $ product dims'
-  let scan = head scans
-      num_scan_results = length $ segBinOpNeutral scan
   arrs_flat <-
-    mapM (flattenArray (length dims') dims_flat) $
-      take num_scan_results $
-        patNames pat
+    mapM (flattenArray (length dims') dims_flat) scan_out
 
   case segVirt lvl of
     SegVirt ->
@@ -410,7 +431,23 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
         (product dims')
         (segBinOpLambda scan)
         arrs_flat
-compileBlockOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
+
+  -- FIXME: we actually need something like blockCoverSegSpacee here, although in
+  -- practice we currently do not generate virtualised scans.
+  sWhen (isActive $ zip ltids dims) . localOps threadOperations $ do
+    sComment "bind scan results to post lambda params" $
+      forM_ (zip scan_pars scan_out) $ \(par, acc) ->
+        copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 ltids)
+
+    let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+    sComment "compute post op." $
+      compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+        sComment "write values" $
+          forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
+            copyDWIMFix (patElemName pe) (map le64 ltids) subexp []
+
+  sOp $ Imp.Barrier Imp.FenceGlobal
+compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
   compileFlatId space
 
   let dims' = map pe64 dims
@@ -419,9 +456,9 @@ compileBlockOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $ do
+    compileStms mempty (bodyStms body) $ do
       let (red_res, map_res) =
-            splitAt (segBinOpResults ops) $ kernelBodyResult body
+            splitAt (segBinOpResults ops) $ bodyResult body
       forM_ (zip tmp_arrs red_res) $ \(dest, res) ->
         copyDWIMFix dest (map Imp.le64 ltids) (kernelResultSubExp res) []
       zipWithM_ (compileThreadResult space) map_pes map_res
@@ -531,14 +568,15 @@ compileBlockOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
             (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
 
       sOp $ Imp.Barrier Imp.FenceLocal
-compileBlockOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
+compileBlockOp pat (Inner (SegOp (SegHist lvl space _ kbody ops))) = do
   compileFlatId space
   let (ltids, dims) = unzip $ unSegSpace space
 
   -- We don't need the red_pes, because it is guaranteed by our type
   -- rules that they occupy the same memory as the destinations for
   -- the ops.
-  let num_red_res = length ops + sum (map (length . histNeutral) ops)
+  let num_is_res = sum $ map (shapeRank . histShape) ops
+      num_red_res = num_is_res + sum (map (length . histNeutral) ops)
       (_red_pes, map_pes) =
         splitAt num_red_res $ patElems pat
 
@@ -549,19 +587,20 @@ compileBlockOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   sOp $ Imp.Barrier Imp.FenceLocal
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms kbody) $ do
-      let (red_res, map_res) = splitAt num_red_res $ kernelBodyResult kbody
-          (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
+    compileStms mempty (bodyStms kbody) $ do
+      let (red_res, map_res) = splitAt num_red_res $ bodyResult kbody
+          (red_is, red_vs) = splitAt num_is_res $ map kernelResultSubExp red_res
       zipWithM_ (compileThreadResult space) map_pes map_res
 
-      let vs_per_op = chunks (map (length . histDest) ops) red_vs
+      let is_per_op = chunks (map (shapeRank . histShape) ops) red_is
+          vs_per_op = chunks (map (length . histDest) ops) red_vs
 
-      forM_ (zip4 red_is vs_per_op ops' ops) $
+      forM_ (zip4 is_per_op vs_per_op ops' ops) $
         \(bin, op_vs, do_op, HistOp dest_shape _ _ _ shape lam) -> do
-          let bin' = pe64 bin
+          let bin' = map pe64 bin
               dest_shape' = map pe64 $ shapeDims dest_shape
-              bin_in_bounds = inBounds (Slice [DimFix bin']) dest_shape'
-              bin_is = map Imp.le64 (init ltids) ++ [bin']
+              bin_in_bounds = inBounds (Slice $ map DimFix bin') dest_shape'
+              bin_is = map Imp.le64 (init ltids) ++ bin'
               vs_params = takeLast (length op_vs) $ lambdaParams lam
 
           sComment "perform atomic updates" $
@@ -576,6 +615,7 @@ compileBlockOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
 compileBlockOp pat _ =
   compilerBugS $ "compileBlockOp: cannot compile rhs of binding " ++ prettyString pat
 
+-- | The operations for block-level kernels.
 blockOperations :: Operations GPUMem KernelEnv Imp.KernelOp
 blockOperations =
   (defaultOperations compileBlockOp)
@@ -596,14 +636,17 @@ arrayInSharedMemory (Var name) = do
     _ -> pure False
 arrayInSharedMemory Constant {} = pure False
 
+-- | Create a kernel with GPU operations at the block level.
 sKernelBlock ::
-  String ->
+  Name ->
   VName ->
   KernelAttrs ->
   InKernelGen () ->
   CallKernelGen ()
 sKernelBlock = sKernel blockOperations $ sExt64 . kernelBlockId
 
+-- | Generate code for writing this result of a block-level kernel. The
+-- 'PatElem' and 'KernelResult' must be matched as in the original segop.
 compileBlockResult ::
   SegSpace ->
   PatElem LetDecMem ->
@@ -692,8 +735,6 @@ compileBlockResult space pe (Returns _ _ what) = do
     -- block.  TODO: also do this if the array is in global memory
     -- (but this is a bit more tricky, synchronisation-wise).
       copyDWIMFix (patElemName pe) gids what []
-compileBlockResult _ _ WriteReturns {} =
-  compilerLimitationS "compileBlockResult: WriteReturns not handled yet."
 
 -- | The sizes of nested iteration spaces in the kernel.
 type SegOpSizes = S.Set [SubExp]

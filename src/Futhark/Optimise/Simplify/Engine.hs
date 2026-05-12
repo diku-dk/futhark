@@ -68,7 +68,7 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bitraversable
 import Data.Either
-import Data.List (find, foldl', inits, mapAccumL)
+import Data.List (find, inits, mapAccumL)
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -109,7 +109,7 @@ emptyEnv rules blockers =
   Env
     { envRules = rules,
       envHoistBlockers = blockers,
-      envVtable = mempty
+      envVtable = ST.empty
     }
 
 -- | A function that protects a hoisted operation (if possible).  The
@@ -185,7 +185,7 @@ instance
   (SimplifiableRep rep) =>
   LocalScope (Wise rep) (SimpleM rep)
   where
-  localScope types = localVtable (<> ST.fromScope types)
+  localScope types = localVtable (ST.insertScope types)
 
 runSimpleM ::
   SimpleM rep a ->
@@ -296,10 +296,10 @@ protectIf _ _ taken (Let pat aux (Match [cond] [Case [Just (BoolValue True)] tak
   auxing aux . letBind pat $
     Match [cond'] [Case [Just (BoolValue True)] taken_body] untaken_body $
       MatchDec if_ts MatchFallback
-protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
-  not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
+protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg))) = do
+  not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp (Neg Bool) taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
-  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
+  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg
 protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
       auxing aux m
@@ -380,7 +380,7 @@ matchingExactlyThis ses prior this = do
   letSubExp "matching_just_this"
     =<< eBinOp
       LogAnd
-      (eUnOp Not (eAny prior_matches))
+      (eUnOp (Neg Bool) (eAny prior_matches))
       (eSubExp =<< matching (zip ses this))
 
 -- | We are willing to hoist potentially unsafe statements out of
@@ -423,11 +423,11 @@ nonrecSimplifyStm ::
   (SimplifiableRep rep) =>
   Stm (Wise rep) ->
   SimpleM rep (Stm (Wise rep))
-nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
+nonrecSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) = do
   cs' <- simplify cs
   e' <- simplifyExpBase e
   (pat', pat_cs) <- collectCerts $ traverse simplify $ removePatWisdom pat
-  let aux' = StmAux (cs' <> pat_cs) attrs dec
+  let aux' = StmAux (cs' <> pat_cs) attrs loc dec
   pure $ mkWiseStm pat' aux' e'
 
 -- Bottom-up simplify a statement.  Recurses into sub-Bodies and Ops.
@@ -439,9 +439,9 @@ recSimplifyStm ::
   Stm (Wise rep) ->
   UT.UsageTable ->
   SimpleM rep (Stms (Wise rep), Stm (Wise rep))
-recSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) usage = do
+recSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) usage = do
   ((e', e_hoisted), e_cs) <- collectCerts $ simplifyExp (usage <> UT.usageInPat pat) pat e
-  let aux' = StmAux (cs <> e_cs) attrs dec
+  let aux' = StmAux (cs <> e_cs) attrs loc dec
   pure (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
 
 hoistStms ::
@@ -589,8 +589,15 @@ andAlso p1 p2 body vtable need = p1 body vtable need && p2 body vtable need
 isConsumed :: BlockPred rep
 isConsumed _ utable = any (`UT.isConsumed` utable) . patNames . stmPat
 
+-- The main purpose of this rule is to avoid hoisting 'inblock' SegOps
+-- out of their enclosing SegOp, *including* when those are present in
+-- nested Bodies.
 isOp :: BlockPred rep
 isOp _ _ (Let _ _ Op {}) = True
+isOp vtable utable (Let _ _ (Match _ cs def_body _)) =
+  any (any (isOp vtable utable) . bodyStms) $ def_body : map caseBody cs
+isOp vtable utable (Let _ _ (Loop _ _ body)) =
+  any (isOp vtable utable) $ bodyStms body
 isOp _ _ _ = False
 
 constructBody ::
@@ -650,7 +657,7 @@ cheapExp _ = True -- Used to be False, but
 
 loopInvariantStm :: (ASTRep rep) => ST.SymbolTable rep -> Stm rep -> Bool
 loopInvariantStm vtable =
-  all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
+  allNames (`nameIn` ST.availableAtClosestLoop vtable) . freeIn
 
 matchBlocker ::
   (SimplifiableRep rep) =>
@@ -670,7 +677,7 @@ matchBlocker cond (MatchDec _ ifsort) = do
       -- contributes to memory or array size, because that will allow
       -- allocations to be hoisted.
       cond_loop_invariant =
-        all (`nameIn` ST.availableAtClosestLoop vtable) $ namesToList $ freeIn cond
+        allNames (`nameIn` ST.availableAtClosestLoop vtable) $ freeIn cond
 
       desirableToHoist usage stm =
         is_alloc_fun stm
@@ -892,8 +899,14 @@ simplifyExp usage _ (WithAcc inputs lam) = do
         pure (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
   let noteAcc = ST.noteAccTokens (zip (map paramName (lambdaParams lam)) inputs')
-  (lam', lam_stms) <- simplifyLambdaWith noteAcc (isFalse True) usage lam
+  (lam', lam_stms) <-
+    consumeInput inputs' $
+      simplifyLambdaWith noteAcc (isFalse True) usage lam
   pure (WithAcc inputs' lam', mconcat inputs_stms <> lam_stms)
+  where
+    inputArrs (_, arrs, _) = arrs
+    consumeInput =
+      localVtable . flip (foldl' (flip ST.consume)) . concatMap inputArrs
 simplifyExp _ _ e = do
   e' <- simplifyExpBase e
   pure (e', mempty)
@@ -1026,7 +1039,7 @@ instance Simplifiable VName where
       _ -> pure v
 
 instance (Simplifiable d) => Simplifiable (ShapeBase d) where
-  simplify = fmap Shape . simplify . shapeDims
+  simplify = traverse simplify
 
 instance Simplifiable ExtSize where
   simplify (Free se) = Free <$> simplify se

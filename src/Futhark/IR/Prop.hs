@@ -28,12 +28,16 @@ module Futhark.IR.Prop
     defAux,
     stmCerts,
     certify,
+    attribute,
     expExtTypesFromPat,
     attrsForAssert,
     lamIsBinOp,
+    isIdentityLambda,
+    isNilLambda,
     ASTConstraints,
     IsOp (..),
     ASTRep (..),
+    IsResult (..),
   )
 where
 
@@ -65,7 +69,7 @@ isBuiltInFunction fnm = fnm `M.member` builtInFunctions
 builtInFunctions :: M.Map Name (PrimType, [PrimType])
 builtInFunctions = M.fromList $ map namify $ M.toList primFuns
   where
-    namify (k, (paramts, ret, _)) = (nameFromString k, (ret, paramts))
+    namify (k, (paramts, ret, _)) = (nameFromText k, (ret, paramts))
 
 -- | If the expression is a t'BasicOp', return it, otherwise 'Nothing'.
 asBasicOp :: Exp rep -> Maybe BasicOp
@@ -167,7 +171,7 @@ commutativeLambda lam =
 
 -- | A 'StmAux' with empty 'Certs'.
 defAux :: dec -> StmAux dec
-defAux = StmAux mempty mempty
+defAux = StmAux mempty mempty mempty
 
 -- | The certificates associated with a statement.
 stmCerts :: Stm rep -> Certs
@@ -175,8 +179,13 @@ stmCerts = stmAuxCerts . stmAux
 
 -- | Add certificates to a statement.
 certify :: Certs -> Stm rep -> Stm rep
-certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
-  Let pat (StmAux (cs2 <> cs1) attrs dec) e
+certify cs1 (Let pat aux e) =
+  Let pat (aux {stmAuxCerts = stmAuxCerts aux <> cs1}) e
+
+-- | Add attributes to a statement.
+attribute :: Attrs -> Stm rep -> Stm rep
+attribute attrs (Let pat aux e) =
+  Let pat (aux {stmAuxAttrs = stmAuxAttrs aux <> attrs}) e
 
 -- | A handy shorthand for properties that we usually want for things
 -- we stuff into ASTs.
@@ -198,6 +207,17 @@ instance IsOp NoOp where
   safeOp NoOp = True
   cheapOp NoOp = True
   opDependencies NoOp = []
+
+-- | Something that can be returned from a 'GBody'.
+class (FreeIn res) => IsResult res where
+  -- | The names that may or may not contribute to the aliases of this result.
+  resAliases :: res -> Names
+
+instance IsResult SubExpRes where
+  resAliases = freeIn . resSubExp
+
+instance IsResult () where
+  resAliases () = mempty
 
 -- | Representation-specific attributes; also means the rep supports
 -- some basic facilities.
@@ -263,3 +283,15 @@ lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
       Prim t <- Just $ patElemType pe
       pure (op, t, paramName xp, paramName yp)
     splitStm _ = Nothing
+
+-- | Is the given lambda an identity lambda?
+isIdentityLambda :: Lambda rep -> Bool
+isIdentityLambda lam =
+  map resSubExp (bodyResult (lambdaBody lam))
+    == map (Var . paramName) (lambdaParams lam)
+
+-- | Is the given lambda a nil lambda?
+isNilLambda :: Lambda rep -> Bool
+isNilLambda lam =
+  null (lambdaParams lam)
+    && isIdentityLambda lam

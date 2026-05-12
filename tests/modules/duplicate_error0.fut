@@ -3,9 +3,10 @@
 -- error: .*Dup.*
 
 module Foo = {
-  def foo(): i32 = 1
+  def foo () : i32 = 1
 }
-def bar(): i32 = 1
-def bar(): i32 = 2
 
-def main(): i32 = 0
+def bar () : i32 = 1
+def bar () : i32 = 2
+
+def main () : i32 = 0

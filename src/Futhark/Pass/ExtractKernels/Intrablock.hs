@@ -70,7 +70,7 @@ intrablockParallelise knest lam = runMaybeT $ do
   let available v =
         v `M.member` outside_scope
           && v `notElem` map kernelInputName inps
-  unless (all available $ namesToList $ freeIn (wss_min ++ wss_avail)) $
+  unless (allNames available $ freeIn (wss_min ++ wss_avail)) $
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $
@@ -109,14 +109,13 @@ intrablockParallelise knest lam = runMaybeT $ do
       space <- SegSpace <$> newVName "phys_tblock_id" <*> pure ispace
       pure (intra_avail_par, space, read_input_stms)
 
-  let kbody' = kbody {kernelBodyStms = read_input_stms <> kernelBodyStms kbody}
+  let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
 
   let nested_pat = loopNestingPat first_nest
       rts = map (length ispace `stripArray`) $ patTypes nested_pat
       grid = KernelGrid (Count num_tblocks) (Count $ Var tblock_size)
       lvl = SegBlock SegNoVirt (Just grid)
-      kstm =
-        Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
+      kstm = Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
   pure
@@ -136,7 +135,7 @@ readGroupKernelInput ::
   m ()
 readGroupKernelInput inp
   | Array {} <- kernelInputType inp = do
-      v <- newVName $ baseString $ kernelInputName inp
+      v <- newName $ kernelInputName inp
       readKernelInput inp {kernelInputName = v}
       letBindNames [kernelInputName inp] $ BasicOp $ Replicate mempty $ Var v
   | otherwise =
@@ -252,14 +251,15 @@ intrablockStm stm@(Let pat aux e) = do
           addStms
             =<< runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
     Op (Screma w arrs form)
-      | Just (scans, mapfun) <- isScanomapSOAC form,
+      | Just (post_lam, scans, mapfun) <- isMaposcanomapSOAC form,
         -- FIXME: Futhark.CodeGen.ImpGen.GPU.Block.compileGroupOp
         -- cannot handle multiple scan operators yet.
         Scan scanfun nes <- singleScan scans -> do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
+              post_op = SegPostOp $ soacsLambdaToGPU post_lam
           certifying (stmAuxCerts aux) $
-            addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
+            addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' post_op arrs [] []
           parallelMin [w]
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form -> do
@@ -295,33 +295,6 @@ intrablockStm stm@(Let pat aux e) = do
               replaceSets (IntraAcc x y log) =
                 IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
           censor replaceSets $ intrablockStms stream_stms
-    Op (Scatter w ivs lam dests) -> do
-      write_i <- newVName "write_i"
-      space <- mkSegSpace [(write_i, w)]
-
-      let lam' = soacsLambdaToGPU lam
-          krets = do
-            (_a_w, a, is_vs) <-
-              groupScatterResults dests $ bodyResult $ lambdaBody lam'
-            let cs =
-                  foldMap (foldMap resCerts . fst) is_vs
-                    <> foldMap (resCerts . snd) is_vs
-                is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-            pure $ WriteReturns cs a is_vs'
-          inputs = do
-            (p, p_a) <- zip (lambdaParams lam') ivs
-            pure $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
-
-      kstms <- runBuilder_ $
-        localScope (scopeOfSegSpace space) $ do
-          mapM_ readKernelInput inputs
-          addStms $ bodyStms $ lambdaBody lam'
-
-      certifying (stmAuxCerts aux) $ do
-        let body = KernelBody () kstms krets
-        letBind pat $ Op $ SegOp $ SegMap lvl space (patTypes pat) body
-
-      parallelMin [w]
     _ ->
       addStm $ soacsStmToGPU stm
 
@@ -339,7 +312,7 @@ intrablockParalleliseBody body = do
     ( S.toList min_ws,
       S.toList avail_ws,
       log,
-      KernelBody () kstms $ map ret $ bodyResult body
+      Body () kstms $ map ret $ bodyResult body
     )
   where
     ret (SubExpRes cs se) = Returns ResultMaySimplify cs se

@@ -11,5 +11,5 @@ def f2 (x: i32) =
   let g (y: i32) = x - y
   in g x
 
-def main(x: i32) =
+def main (x: i32) =
   (f1 x, f2 x)

@@ -16,12 +16,11 @@
 -- structure seq-mem { Alloc 2 }
 -- structure gpu-mem { Alloc 2 }
 
-let main [n] (i: i64) (ys0: [n]i64): ([n][n]i64, [n]i64) =
-  let xs = tabulate_2d n n (\i j -> i*n + j) |> opaque
-
+def main [n] (i: i64) (ys0: [n]i64) : ([n][n]i64, [n]i64) =
+  let xs = tabulate_2d n n (\i j -> i * n + j) |> opaque
   let ys = map (+ 1) ys0
   let xs[i] = ys
-
-  let zs = map (+ 1) ys -- This could also be a short-circuit point in SeqMem
+  let zs = map (+ 1) ys
+  -- This could also be a short-circuit point in SeqMem
 
   in (xs, zs)

@@ -3,7 +3,7 @@
 -- ==
 -- error: Consuming variable "a"
 
-def consume(a: *[]i32): []i32 = a
+def consume (a: *[]i32) : []i32 = a
 
-def main(a: *[]i32): [][]i32 =
+def main (a: *[]i32) : [][]i32 =
   map (\i -> consume a) (iota 10)

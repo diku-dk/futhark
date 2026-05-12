@@ -6,4 +6,4 @@
 -- error:
 
 def main [m] (n: i64) (xs: [m]i32) =
-  map (+2) (map (+1) (xs :> [n]i32))
+  map (+ 2) (map (+ 1) (xs :> [n]i32))

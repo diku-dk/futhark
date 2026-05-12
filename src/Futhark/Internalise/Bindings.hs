@@ -147,7 +147,7 @@ processFlatPat x y = processFlatPat' [] x y
       let name = E.identName bindee
       case internalisedTypeSize $ E.unInfo $ E.identType bindee of
         1 -> pure [name]
-        n -> replicateM n $ newVName $ baseString name
+        n -> replicateM n $ newName name
 
 bindingFlatPat ::
   (Show t) =>
@@ -180,7 +180,7 @@ flattenPat = flattenPat'
     flattenPat' (E.TuplePat pats _) =
       concat <$> mapM flattenPat' pats
     flattenPat' (E.RecordPat fs loc) =
-      flattenPat' $ E.TuplePat (map snd $ sortFields $ M.fromList fs) loc
+      flattenPat' $ E.TuplePat (map snd $ sortFields $ M.fromList $ map (first unLoc) fs) loc
     flattenPat' (E.PatAscription p _ _) =
       flattenPat' p
     flattenPat' (E.PatLit _ t loc) =

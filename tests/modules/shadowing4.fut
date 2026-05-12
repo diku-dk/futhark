@@ -8,4 +8,4 @@ module m = {
   type t = t
 }
 
-def main: t = 2
+def main : t = 2

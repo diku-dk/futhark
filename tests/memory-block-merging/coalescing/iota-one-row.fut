@@ -7,5 +7,5 @@
 -- structure gpu-mem { Alloc 0 }
 -- structure seq-mem { Alloc 0 }
 
-entry iota_one_row [n][m] (i: i64) (xs: *[n][m]i64): *[n][m]i64 =
+entry iota_one_row [n] [m] (i: i64) (xs: *[n][m]i64) : *[n][m]i64 =
   xs with [i] = iota m

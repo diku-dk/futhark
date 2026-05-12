@@ -4,4 +4,4 @@
 
 module M = intrinsics
 
-def main() = 0
+def main () = 0

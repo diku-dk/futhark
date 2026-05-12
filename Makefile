@@ -30,7 +30,7 @@ install: build
 	install "$$(cabal -v0 list-bin exe:futhark)" $(INSTALLBIN)
 
 docs:
-	cabal haddock \
+	cabal haddock lib:futhark \
 		--enable-documentation \
 		--haddock-html \
 		--haddock-options=--show-all \
@@ -39,13 +39,50 @@ docs:
 		--haddock-options=--hyperlinked-source
 
 check:
-	tools/style-check.sh src unittests
+	tools/style-check.sh src src-testing
 
 check-commit:
 	tools/style-check.sh $$(git diff-index --cached --ignore-submodules=all --name-status HEAD | awk '$$1 != "D" { print $$2 }')
 
 unittest:
-	cabal run unit
+	cabal run unit -- --hide-successes
+
+test-oclgrind:
+	cabal run -- futhark test tests -c --backend=opencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh --tuning=tuning_gpu
+
+test-t:
+	cabal run -- futhark test tests -t
+
+test-c:
+	cabal run -- futhark test tests -c --backend=c
+
+test-cuda:
+	cabal run -- futhark test tests -c --backend=cuda --tuning=tuning_gpu
+
+test-hip:
+	cabal run -- futhark test tests -c --backend=hip --tuning=tuning_gpu
+
+test-opencl:
+	cabal run -- futhark test tests -c --backend=opencl --tuning=tuning_gpu
+
+test-ispc:
+	cabal run -- futhark test -c --backend=ispc tests
+
+test-multicore:
+	cabal run -- futhark test tests -c --backend=multicore
+
+test-python:
+	cabal run -- futhark test tests -c --backend=python --exclude=no_python --exclude=compiled
+
+test-interpreter:
+	cabal run -- futhark test tests -i
+
+test-structure:
+	cabal run -- futhark test tests -s
+
+# Note: does not do cabal run.
+test-literate:
+	cd tests_literate && sh test.sh
 
 clean:
 	cabal clean

@@ -4,5 +4,5 @@
 -- output { 2 }
 
 def main (x: []i32) (y: i32) =
-  let t = (x,y)
+  let t = (x, y)
   in t.0[1]

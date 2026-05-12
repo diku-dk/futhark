@@ -8,4 +8,4 @@
 
 def main (i: i64) (v: i32) : i32 =
   let xs = [0, 1, 2, 3, v]
-  in xs[i%5]
+  in xs[i % 5]

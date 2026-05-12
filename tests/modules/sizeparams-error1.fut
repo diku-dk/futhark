@@ -5,13 +5,13 @@
 type ints [n] = [n]i32
 
 module type MT = {
-  val k: i64
+  val k : i64
   type k_ints = ints [k]
 }
 
-module M_k2: MT = {
+module M_k2 : MT = {
   def k = 2i64
   type k_ints = ints [2]
 }
 
-def main(n: i32): M_k2.k_ints = iota n
+def main (n: i32) : M_k2.k_ints = iota n

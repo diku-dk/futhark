@@ -1,6 +1,5 @@
 -- Tests of various array functions from the basis library.
 
-
 -- ==
 -- entry: test_length
 -- input { empty([0]i32) } output { 0i64 }

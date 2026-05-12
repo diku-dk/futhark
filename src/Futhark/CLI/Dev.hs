@@ -32,6 +32,7 @@ import Futhark.Internalise.FullNormalise as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.ReplaceRecords as ReplaceRecords
+import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
@@ -47,6 +48,7 @@ import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass
 import Futhark.Pass.AD
+import Futhark.Pass.AddGlobalParams
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
@@ -199,6 +201,27 @@ passOption desc pass short long =
     )
     desc
 
+passOptionWithArg ::
+  String ->
+  (Maybe String -> UntypedPass) ->
+  String ->
+  [String] ->
+  String ->
+  String ->
+  FutharkOption
+passOptionWithArg desc makePass short long argName argDesc =
+  Option
+    short
+    long
+    ( OptArg
+        ( \arg -> Right $ \cfg ->
+            let pass = makePass arg
+             in cfg {futharkPipeline = Pipeline $ getFutharkPipeline cfg ++ [pass]}
+        )
+        argName
+    )
+    (desc ++ " " ++ argDesc)
+
 kernelsMemProg ::
   String ->
   UntypedPassState ->
@@ -269,6 +292,40 @@ typedPassOption getProg putProg pass short =
 soacsPassOption :: Pass SOACS.SOACS SOACS.SOACS -> String -> FutharkOption
 soacsPassOption =
   typedPassOption soacsProg SOACS
+
+typedPassOptionWithArg ::
+  (Checkable torep) =>
+  (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
+  (Prog torep -> UntypedPassState) ->
+  (Maybe String -> Either String (Pass fromrep torep)) ->
+  String ->
+  [String] ->
+  String ->
+  String ->
+  FutharkOption
+typedPassOptionWithArg getProg putProg makePass =
+  passOptionWithArg desc (UntypedPass . perform)
+  where
+    desc = case makePass Nothing of
+      Right pass -> passDescription pass
+      Left _ -> "Pass with argument"
+
+    perform arg s config = do
+      case makePass arg of
+        Left err -> externalErrorS err
+        Right pass -> do
+          prog <- getProg (passName pass) s
+          putProg <$> runPipeline (onePass pass) config prog
+
+soacsPassOptionWithArg ::
+  (Maybe String -> Either String (Pass SOACS.SOACS SOACS.SOACS)) ->
+  String ->
+  [String] ->
+  String ->
+  String ->
+  FutharkOption
+soacsPassOptionWithArg =
+  typedPassOptionWithArg soacsProg SOACS
 
 kernelsPassOption ::
   Pass GPU.GPU GPU.GPU ->
@@ -431,6 +488,12 @@ unstreamOption short =
 
     long = [passLongOption pass]
     pass = unstreamGPU
+
+parseGas :: Maybe String -> Either String (Maybe Int)
+parseGas Nothing = Right Nothing
+parseGas (Just s) = case reads s of
+  [(n, "")] -> Right (Just n)
+  _any -> Left $ "Invalid gas value: " <> s
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
@@ -639,7 +702,12 @@ commandLineOptions =
       (NoArg $ Right $ \opts -> opts {futharkCompilerMode = ToServer})
       "Generate a server executable.",
     typedPassOption soacsProg Seq firstOrderTransform "f",
-    soacsPassOption fuseSOACs "o",
+    soacsPassOptionWithArg
+      (fmap fuseSOACs . parseGas)
+      "o"
+      ["fuse"]
+      "GAS"
+      "(default: infinite, provide integer to limit)",
     soacsPassOption inlineAggressively [],
     soacsPassOption inlineConservatively [],
     soacsPassOption removeDeadFunctions [],
@@ -647,6 +715,7 @@ commandLineOptions =
     soacsPassOption applyADInnermost [],
     kernelsPassOption optimiseArrayLayoutGPU [],
     mcPassOption optimiseArrayLayoutMC [],
+    kernelsPassOption addGlobalParams [],
     kernelsPassOption optimiseGenRed [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],
@@ -801,17 +870,22 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
+                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
         Monomorphise -> do
           (_, imports, src) <- readProgram'
-          liftIO $
-            p $
-              flip evalState src $
-                Defunctorise.transformProg imports
-                  >>= ApplyTypeAbbrs.transformProg
-                  >>= FullNormalise.transformProg
-                  >>= LiftLambdas.transformProg
-                  >>= Monomorphise.transformProg
+          let (prog, stats) =
+                flip evalState src $
+                  Defunctorise.transformProg imports
+                    >>= ApplyTypeAbbrs.transformProg
+                    >>= FullNormalise.transformProg
+                    >>= ReplaceRecords.transformProg
+                    >>= LiftLambdas.transformProg
+                    >>= Monomorphise.transformProg
+          liftIO $ do
+            p prog
+            putStrLn ""
+            PP.putDocLn $ PP.pretty stats
         Defunctionalise -> do
           (_, imports, src) <- readProgram'
           liftIO $
@@ -820,20 +894,21 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
-                  >>= LiftLambdas.transformProg
-                  >>= Monomorphise.transformProg
                   >>= ReplaceRecords.transformProg
+                  >>= LiftLambdas.transformProg
+                  >>= fmap fst . Monomorphise.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} -> do
           let (base, ext) = splitExtension file
 
-              readCore parse construct = do
+              readIR parse construct = do
                 logMsg $ "Reading " <> file <> "..."
                 input <- liftIO $ T.readFile file
                 logMsg ("Parsing..." :: T.Text)
                 case parse file input of
                   Left err -> externalErrorS $ T.unpack err
-                  Right prog -> do
+                  Right (src, prog) -> do
+                    modifyNameSource $ const ((), src)
                     logMsg ("Typechecking..." :: T.Text)
                     case checkProg $ Alias.aliasAnalysis prog of
                       Left err -> externalErrorS $ show err
@@ -845,13 +920,13 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                       prog <- runPipelineOnProgram (futharkConfig config) id file
                       runPolyPasses config base (SOACS prog)
                   ),
-                  (".fut_soacs", readCore parseSOACS SOACS),
-                  (".fut_seq", readCore parseSeq Seq),
-                  (".fut_seq_mem", readCore parseSeqMem SeqMem),
-                  (".fut_gpu", readCore parseGPU GPU),
-                  (".fut_gpu_mem", readCore parseGPUMem GPUMem),
-                  (".fut_mc", readCore parseMC MC),
-                  (".fut_mc_mem", readCore parseMCMem MCMem)
+                  (".fut_soacs", readIR parseSOACS SOACS),
+                  (".fut_seq", readIR parseSeq Seq),
+                  (".fut_seq_mem", readIR parseSeqMem SeqMem),
+                  (".fut_gpu", readIR parseGPU GPU),
+                  (".fut_gpu_mem", readIR parseGPUMem GPUMem),
+                  (".fut_mc", readIR parseMC MC),
+                  (".fut_mc_mem", readIR parseMCMem MCMem)
                 ]
           case lookup ext handlers of
             Just handler -> handler

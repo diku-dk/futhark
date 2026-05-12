@@ -9,8 +9,8 @@
 -- propagation).
 -- ==
 
-def main [n] (a: *[n][]f64, u: *[][]f64): ([][]f64, [][]f64) =
-  loop ((a,u)) for k < n do
-      let u[k,k] = a[k,k] in
-      let a = loop (a) for i < n-k do a
-      in (a,u)
+def main [n] (a: *[n][]f64, u: *[][]f64) : ([][]f64, [][]f64) =
+  loop ((a, u)) for k < n do
+    let u[k, k] = a[k, k]
+    let a = loop (a) for i < n - k do a
+    in (a, u)

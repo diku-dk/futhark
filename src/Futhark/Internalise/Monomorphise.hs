@@ -21,20 +21,27 @@
 --
 -- Note that these changes are unfortunately not visible in the AST
 -- representation.
-module Futhark.Internalise.Monomorphise (transformProg) where
+module Futhark.Internalise.Monomorphise
+  ( transformProg,
+    MonoType,
+    MonoStats,
+  )
+where
 
 import Control.Monad
 import Control.Monad.Identity
-import Control.Monad.RWS (MonadReader (..), MonadWriter (..), RWST, asks, runRWST)
+import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Writer (Writer, runWriter, runWriterT)
+import Control.Monad.Writer
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
-import Data.List (partition)
+import Data.Function
+import Data.List (intersperse, partition, sortBy)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Sequence qualified as Seq
+import Data.Maybe (isJust, isNothing)
+import Data.Ord (Down (..), comparing)
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
 import Futhark.Util (nubOrd, topologicalSort)
@@ -51,7 +58,8 @@ i64 = Scalar $ Prim $ Signed Int64
 -- parameters.
 newtype PolyBinding
   = PolyBinding
-      ( VName,
+      ( Maybe EntryPoint,
+        VName,
         [TypeParam],
         [Pat ParamType],
         ResRetType,
@@ -60,10 +68,10 @@ newtype PolyBinding
         SrcLoc
       )
 
--- | To deduplicate size expressions, we want a looser notation of
+-- | To deduplicate size expressions, we want a looser notion of
 -- equality than the strict syntactical equality provided by the Eq
--- instance on Exp.  This newtype wrapper provides such a looser
--- notion of equality.
+-- instance on Exp. This newtype wrapper provides such a looser notion
+-- of equality.
 newtype ReplacedExp = ReplacedExp {unReplaced :: Exp}
   deriving (Show)
 
@@ -134,21 +142,20 @@ data Env = Env
     envParametrized :: ExpReplacements
   }
 
-instance Semigroup Env where
-  Env pb1 sc1 gs1 pr1 <> Env pb2 sc2 gs2 pr2 = Env (pb1 <> pb2) (sc1 <> sc2) (gs1 <> gs2) (pr1 <> pr2)
-
-instance Monoid Env where
-  mempty = Env mempty mempty mempty mempty
-
-localEnv :: Env -> MonoM a -> MonoM a
-localEnv env = local (env <>)
-
 isolateNormalisation :: MonoM a -> MonoM a
 isolateNormalisation m = do
-  prevRepl <- get
-  put mempty
-  ret <- local (\env -> env {envScope = mempty, envParametrized = mempty}) m
-  put prevRepl
+  prevRepl <- getExpReplacements
+  putExpReplacements mempty
+  ret <-
+    local
+      ( \env ->
+          env
+            { envScope = envGlobalScope env <> M.keysSet (envPolyBindings env),
+              envParametrized = mempty
+            }
+      )
+      m
+  putExpReplacements prevRepl
   pure ret
 
 -- | These now have monomorphic types in the given action. This is
@@ -161,41 +168,47 @@ withMono vs = local $ \env ->
     keep v _ = v `notElem` vs
 
 withArgs :: S.Set VName -> MonoM a -> MonoM a
-withArgs args = localEnv $ mempty {envScope = args}
+withArgs args = local $ \env -> env {envScope = args <> envScope env}
 
 withParams :: ExpReplacements -> MonoM a -> MonoM a
-withParams params = localEnv $ mempty {envParametrized = params}
+withParams params = local $ \env -> env {envParametrized = params <> envParametrized env}
+
+-- Mapping from function name and instance list to a new function name in case
+-- the function has already been instantiated with those concrete types.
+type Lifts = M.Map (VName, MonoType) (VName, InferSizeArgs)
+
+data MonoState = MonoState
+  { sVNameSource :: !VNameSource,
+    sExpReplacements :: ExpReplacements,
+    sLifts :: Lifts,
+    sLiftedNames :: S.Set VName,
+    sValBinds :: [ValBind]
+  }
 
 -- The monomorphization monad.
 newtype MonoM a
-  = MonoM
-      ( RWST
-          Env
-          (Seq.Seq (VName, ValBind))
-          (ExpReplacements, VNameSource)
-          (State Lifts)
-          a
-      )
+  = MonoM (ReaderT Env (State MonoState) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadReader Env,
-      MonadWriter (Seq.Seq (VName, ValBind))
+      MonadState MonoState
     )
 
 instance MonadFreshNames MonoM where
-  getNameSource = MonoM $ gets snd
-  putNameSource = MonoM . modify . second . const
+  getNameSource = gets sVNameSource
+  putNameSource src = modify $ \s -> s {sVNameSource = src}
 
-instance MonadState ExpReplacements MonoM where
-  get = MonoM $ gets fst
-  put = MonoM . modify . first . const
-
-runMonoM :: VNameSource -> MonoM a -> ((a, Seq.Seq (VName, ValBind)), VNameSource)
-runMonoM src (MonoM m) = ((a, defs), src')
+runMonoM :: VNameSource -> MonoM () -> (([ValBind], Lifts), VNameSource)
+runMonoM src (MonoM m) =
+  ( (reverse (sValBinds final_state), sLifts final_state),
+    sVNameSource final_state
+  )
   where
-    (a, (_, src'), defs) = evalState (runRWST m mempty (mempty, src)) mempty
+    ((), final_state) = runState (runReaderT m initial_env) initial_state
+    initial_state = MonoState src mempty mempty mempty mempty
+    initial_env = Env mempty mempty mempty mempty
 
 lookupFun :: VName -> MonoM (Maybe PolyBinding)
 lookupFun vn = do
@@ -204,12 +217,34 @@ lookupFun vn = do
     Just valbind -> pure $ Just valbind
     Nothing -> pure Nothing
 
+addValBind :: ValBind -> MonoM ()
+addValBind funbind =
+  modify $ \s -> s {sValBinds = funbind : sValBinds s}
+
 askScope :: MonoM (S.Set VName)
 askScope = do
   scope <- asks envScope
-  scope' <- asks $ S.union scope . envGlobalScope
-  scope'' <- asks $ S.union scope' . M.keysSet . envPolyBindings
-  S.union scope'' . S.fromList . map (fst . snd) <$> getLifts
+  gets $ S.union scope . sLiftedNames
+
+getExpReplacements :: MonoM ExpReplacements
+getExpReplacements = gets sExpReplacements
+
+putExpReplacements :: ExpReplacements -> MonoM ()
+putExpReplacements x = modify $ \s -> s {sExpReplacements = x}
+
+getLifts :: MonoM Lifts
+getLifts = gets sLifts
+
+addLifted :: VName -> MonoType -> (VName, InferSizeArgs) -> MonoM ()
+addLifted fname il liftf =
+  modify $ \s ->
+    s
+      { sLifts = M.insert (fname, il) liftf (sLifts s),
+        sLiftedNames = S.insert (fst liftf) $ sLiftedNames s
+      }
+
+lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
+lookupLifted fname t = M.lookup (fname, t) <$> getLifts
 
 -- | Asks the introduced variables in a set of argument,
 -- that is arguments not currently in scope.
@@ -226,28 +261,17 @@ parametrizing :: S.Set VName -> MonoM ExpReplacements
 parametrizing argset = do
   intros <- askIntros argset
   let usesIntros = not . S.disjoint intros . fvVars . freeInExp
-  (params, nxtBind) <- gets $ partition (usesIntros . unReplaced . fst)
-  put nxtBind
+  (params, nxtBind) <-
+    partition (usesIntros . unReplaced . fst) <$> getExpReplacements
+  putExpReplacements nxtBind
   pure params
 
 calculateDims :: Exp -> ExpReplacements -> MonoM Exp
 calculateDims body repl =
   foldCalc top_repl $ expReplace top_repl body
   where
-    -- list of strict sub-expressions of e
-    subExps e
-      | Just e' <- stripExp e = subExps e'
-      | otherwise = astMap mapper e `execState` mempty
-      where
-        mapOnExp e'
-          | Just e'' <- stripExp e' = mapOnExp e''
-          | otherwise = do
-              modify (ReplacedExp e' :)
-              astMap mapper e'
-        mapper = identityMapper {mapOnExp}
-    depends (a, _) (b, _) = b `elem` subExps (unReplaced a)
-    top_repl =
-      topologicalSort depends repl
+    depends (a, _) (b, _) = unReplaced b `elem` subExps (unReplaced a)
+    top_repl = topologicalSort depends repl
 
     ---- Calculus insertion
     foldCalc [] body' = pure body'
@@ -290,7 +314,7 @@ type InferSizeArgs = StructType -> MonoM [Exp]
 data MonoSize
   = MonoKnown Int
   | MonoAnon Int
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 instance Pretty MonoSize where
   pretty (MonoKnown i) = "?" <> pretty i
@@ -299,9 +323,9 @@ instance Pretty MonoSize where
 instance Pretty (Shape MonoSize) where
   pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
 
--- The kind of type relative to which we monomorphise.  What is most
--- important to us is not the specific dimensions, but merely whether
--- they are known or anonymous/local.
+-- | The kind of type relative to which we monomorphise. What is most important
+-- to us is not the specific dimensions, but merely whether they are known or
+-- anonymous/local.
 type MonoType = TypeBase MonoSize NoUniqueness
 
 monoType :: TypeBase Size als -> MonoType
@@ -332,28 +356,14 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
         Just prev ->
           pure $ MonoKnown prev
         Nothing -> do
-          put (i + 1, M.insert d i m)
+          put
+            ( i + 1,
+              M.insert d i m
+            )
           pure $ MonoKnown i
 
--- Mapping from function name and instance list to a new function name in case
--- the function has already been instantiated with those concrete types.
-type Lifts = [((VName, MonoType), (VName, InferSizeArgs))]
-
-getLifts :: MonoM Lifts
-getLifts = MonoM $ lift get
-
-modifyLifts :: (Lifts -> Lifts) -> MonoM ()
-modifyLifts = MonoM . lift . modify
-
-addLifted :: VName -> MonoType -> (VName, InferSizeArgs) -> MonoM ()
-addLifted fname il liftf =
-  modifyLifts (((fname, il), liftf) :)
-
-lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
-lookupLifted fname t = lookup (fname, t) <$> getLifts
-
-sizeVarName :: Exp -> String
-sizeVarName e = "d<{" <> prettyString (bareExp e) <> "}>"
+sizeVarName :: Exp -> Name
+sizeVarName e = "d<{" <> nameFromText (prettyText (bareExp e)) <> "}>"
 
 -- | Creates a new expression replacement if needed, this always produces normalised sizes.
 -- (e.g. single variable or constant)
@@ -363,14 +373,14 @@ replaceExp e =
     Just e' -> pure e'
     Nothing -> do
       let e' = ReplacedExp e
-      prev <- gets $ lookup e'
+      prev <- lookup e' <$> getExpReplacements
       prev_param <- asks $ lookup e' . envParametrized
       case (prev_param, prev) of
         (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
-          vn <- newNameFromString $ sizeVarName e
-          modify ((e', vn) :)
+          vn <- newVName $ sizeVarName e
+          putExpReplacements . ((e', vn) :) =<< getExpReplacements
           pure $ sizeFromName (qualName vn) (srclocOf e)
   where
     -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
@@ -397,8 +407,8 @@ transformFName loc fname ft = do
         (Nothing, Nothing) -> pure $ var fname t'
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
-          (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
-          tell $ Seq.singleton (qualLeaf fname, funbind')
+          (fname', infer, funbind') <- monomorphiseBinding funbind mono_t
+          addValBind funbind'
           addLifted (qualLeaf fname) mono_t (fname', infer)
           applySizeArgs fname' (toRes Nonunique t') <$> infer t'
   where
@@ -413,7 +423,7 @@ transformFName loc fname ft = do
       )
 
     applySizeArgs fname' t size_args =
-      snd $
+      setApplyLoc loc . snd $
         foldl'
           (applySizeArg t)
           ( length size_args - 1,
@@ -454,7 +464,7 @@ transformType typ =
     transformScalarSizes ty@Prim {} = pure ty
 
     onDim e
-      | e == anySize = pure e
+      | Just _ <- isAnySize e = pure e
       | otherwise = replaceExp =<< transformExp e
 
 transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
@@ -467,13 +477,18 @@ transformRetTypeSizes argset (RetType dims ty) = do
 sizesForPat :: (MonadFreshNames m) => Pat ParamType -> m ([VName], Pat ParamType)
 sizesForPat pat = do
   (params', sizes) <- runStateT (traverse (bitraverse onDim pure) pat) []
-  pure (sizes, params')
+  pure (map snd sizes, params')
   where
     onDim d
-      | d == anySize = do
-          v <- lift $ newVName "size"
-          modify (v :)
-          pure $ sizeFromName (qualName v) mempty
+      | Just k <- isAnySize d = do
+          prev <- gets $ lookup k
+          case prev of
+            Nothing -> do
+              v <- lift $ newVName "size"
+              modify ((k, v) :)
+              pure $ sizeFromName (qualName v) mempty
+            Just v ->
+              pure $ sizeFromName (qualName v) mempty
       | otherwise = pure d
 
 transformAppRes :: AppRes -> MonoM AppRes
@@ -504,15 +519,13 @@ transformAppExp LetFun {} _ =
   error "transformAppExp: LetFun is not supposed to occur"
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> (Info <$> transformAppRes res)
-transformAppExp (Apply fe args _) res =
-  mkApply
-    <$> transformExp fe
-    <*> mapM onArg (NE.toList args)
-    <*> transformAppRes res
+transformAppExp (Apply fe args loc) res =
+  setApplyLoc loc
+    <$> (mkApply <$> transformExp fe <*> mapM onArg (NE.toList args) <*> transformAppRes res)
   where
     onArg (Info ext, e) = (ext,) <$> transformExp e
-transformAppExp (Loop sparams pat e1 form body loc) res = do
-  e1' <- transformExp e1
+transformAppExp (Loop sparams pat loopinit form body loc) res = do
+  e1' <- transformExp $ loopInitExp loopinit
 
   let dimArgs = S.fromList sparams
   pat' <- withArgs dimArgs $ transformPat pat
@@ -538,7 +551,7 @@ transformAppExp (Loop sparams pat e1 form body loc) res = do
   -- sizes for them.
   (pat_sizes, pat'') <- sizesForPat pat'
   res' <- transformAppRes res
-  pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res')
+  pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' (LoopInitExplicit e1') form' body' loc) (Info res')
 transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
   (AppRes ret ext) <- transformAppRes res
   fname' <- transformFName loc fname (toStruct t)
@@ -580,7 +593,7 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
 
     makeVarParam arg = do
       let argtype = typeOf arg
-      x <- newNameFromString "binop_p"
+      x <- newVName "binop_p"
       pure
         ( Var (qualName x) (Info argtype) mempty,
           Id x (Info argtype) mempty
@@ -599,7 +612,7 @@ transformAppExp (Match e cs loc) res = do
   if S.null implicitDims
     then pure $ AppExp (Match e' cs' loc) (Info res')
     else do
-      tmpVar <- newNameFromString "matched_variable"
+      tmpVar <- newVName "matched_variable"
       pure $
         AppExp
           ( LetPat
@@ -631,13 +644,15 @@ transformExp (RecordLit fs loc) =
   where
     transformField (RecordFieldExplicit name e loc') =
       RecordFieldExplicit name <$> transformExp e <*> pure loc'
-    transformField (RecordFieldImplicit v t _) = do
+    transformField (RecordFieldImplicit (L vloc v) t _) = do
       t' <- traverse transformType t
       transformField $
         RecordFieldExplicit
-          (baseName v)
+          (L vloc (baseName v))
           (Var (qualName v) t' loc)
           loc
+transformExp (ArrayVal vs t loc) =
+  pure $ ArrayVal vs t loc
 transformExp (ArrayLit es t loc) =
   ArrayLit <$> mapM transformExp es <*> traverse transformType t <*> pure loc
 transformExp (AppExp e res) =
@@ -682,29 +697,31 @@ transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
     (yp, ytype, yargext)
     (rettype, [])
     loc
-transformExp (ProjectSection fields (Info t) loc) = do
+transformExp (UpdateSection steps (Info t) loc) = do
   t' <- transformType t
-  desugarProjectSection fields t' loc
-transformExp (IndexSection idxs (Info t) loc) = do
-  idxs' <- mapM transformDimIndex idxs
-  desugarIndexSection idxs' t loc
+  steps' <- mapM transformStep steps
+  desugarUpdateSection steps' t' loc
+  where
+    transformStep (UpdateStepSlice idxs) =
+      UpdateStepSlice <$> mapM transformDimIndex idxs
+    transformStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 transformExp (Project n e tp loc) = do
   tp' <- traverse transformType tp
   e' <- transformExp e
   pure $ Project n e' tp' loc
-transformExp (Update e1 idxs e2 loc) =
+transformExp (Update e1 steps e2 t loc) =
   Update
     <$> transformExp e1
-    <*> mapM transformDimIndex idxs
-    <*> transformExp e2
-    <*> pure loc
-transformExp (RecordUpdate e1 fs e2 t loc) =
-  RecordUpdate
-    <$> transformExp e1
-    <*> pure fs
+    <*> mapM transformStep steps
     <*> transformExp e2
     <*> traverse transformType t
     <*> pure loc
+  where
+    transformStep (UpdateStepSlice idxs) =
+      UpdateStepSlice <$> mapM transformDimIndex idxs
+    transformStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 transformExp (Constr name all_es t loc) =
@@ -759,7 +776,7 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
     Lambda (p1 ++ p2) body Nothing (Info rettype'') loc
   where
     patAndVar argtype = do
-      x <- newNameFromString "x"
+      x <- newVName "x"
       pure
         ( x,
           Id x (Info argtype) mempty,
@@ -775,10 +792,10 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
       (v, pat, var_e) <- patAndVar argtype
       pure (v, id, var_e, [pat])
 
-desugarProjectSection :: [Name] -> StructType -> SrcLoc -> MonoM Exp
-desugarProjectSection fields (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
-  p <- newVName "project_p"
-  let body = foldl project (Var (qualName p) (Info t1) mempty) fields
+desugarUpdateSection :: [UpdateStep Info VName] -> StructType -> SrcLoc -> MonoM Exp
+desugarUpdateSection steps (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
+  p <- newVName "section_p"
+  let body = fst $ foldl applyStep (Var (qualName p) (Info t1) mempty, t1) steps
   pure $
     Lambda
       [Id p (Info $ toParam Observe t1) mempty]
@@ -787,33 +804,26 @@ desugarProjectSection fields (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = d
       (Info (RetType dims t2))
       loc
   where
-    project e field =
-      case typeOf e of
+    applyStep (e, t) (UpdateStepField field) =
+      case t of
         Scalar (Record fs)
-          | Just t <- M.lookup field fs ->
-              Project field e (Info t) mempty
-        t ->
+          | Just t' <- M.lookup field fs ->
+              (Project field e (Info t') mempty, t')
+        _ ->
           error $
-            "desugarOpSection: type "
+            "desugarUpdateSection: type "
               ++ prettyString t
               ++ " does not have field "
               ++ prettyString field
-desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " ++ prettyString t
+    applyStep (e, t) (UpdateStepSlice idxs) =
+      let t' = stripArray (fixedDims idxs) t
+          e' = AppExp (Index e idxs loc) (Info (AppRes t' []))
+       in (e', t')
 
-desugarIndexSection :: [DimIndex] -> StructType -> SrcLoc -> MonoM Exp
-desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
-  p <- newVName "index_i"
-  t1' <- transformType t1
-  t2' <- transformType t2
-  let body = AppExp (Index (Var (qualName p) (Info t1') loc) idxs loc) (Info (AppRes (toStruct t2') []))
-  pure $
-    Lambda
-      [Id p (Info $ toParam Observe t1') mempty]
-      body
-      Nothing
-      (Info (RetType dims t2'))
-      loc
-desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
+    fixedDims = length . filter isFix
+    isFix DimFix {} = True
+    isFix _ = False
+desugarUpdateSection _ t _ = error $ "desugarUpdateSection: not a function type: " ++ prettyString t
 
 transformPat :: Pat (TypeBase Size u) -> MonoM (Pat (TypeBase Size u))
 transformPat = traverse transformType
@@ -837,15 +847,27 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
       onExps bound e1 e2
       pure e1
 
+    -- XXX: It is intentional that we throw away the 'bound'
+    -- information after looking up ExpReplacements, as there are
+    -- cases (particularly including the function types that occur
+    -- after lambda lifting) where some troublesome shadowing occurs,
+    -- and the names are not actually locally bound. We cannot just
+    -- ignore the bound information entirely, and expect that any
+    -- instantiation uses only names in scope at the outer level, due
+    -- to truly exotic cases like entry-lifted.fut, where the real
+    -- sizes were not visible to the type checker. Arguably that is
+    -- the thing that should be fixed, but it requires fiddling with
+    -- the defunctorisation of size-lifted types.
+
     onExps bound (Var v _ _) e = do
       unless (any (`elem` bound) $ freeVarsInExp e) $
         modify (M.insert (qualLeaf v) e)
       case lookup (qualLeaf v) named1 of
-        Just rexp -> onExps bound (unReplaced rexp) e
+        Just rexp -> onExps mempty (unReplaced rexp) e
         Nothing -> pure ()
-    onExps bound e (Var v _ _)
+    onExps _bound e (Var v _ _)
       | Just rexp <- lookup (qualLeaf v) named2 =
-          onExps bound e (unReplaced rexp)
+          onExps mempty e (unReplaced rexp)
     onExps bound e1 e2
       | Just es <- similarExps e1 e2 =
           mapM_ (uncurry $ onExps bound) es
@@ -855,15 +877,20 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
 
 inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> MonoM [Exp]
 inferSizeArgs tparams bind_t bind_r t = do
-  r <- gets (<>) <*> asks envParametrized
+  r <- (<>) <$> getExpReplacements <*> asks envParametrized
   let dinst = dimMapping bind_t t bind_r r
   mapM (tparamArg dinst) tparams
   where
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
-        Just e ->
-          replaceExp e
-        Nothing ->
+        Just e
+          -- In some cases we infer anySizes for size arguments. This
+          -- only occurs when those sizes don't actually matter (knock
+          -- on wood...), but we should never actually insert anySize
+          -- as a concrete argument.
+          | Nothing <- isAnySize e ->
+              replaceExp e
+        _ ->
           pure $ sizeFromInteger 0 mempty
 
 -- Monomorphising higher-order functions can result in function types
@@ -928,10 +955,9 @@ arrowArg scope argset args_params rety =
         notIntrisic vn = baseTag vn > maxIntrinsicTag
         argset' = fvVars $ freeInType argT
         fullArgset =
-          argset'
-            <> case argName of
-              Unnamed -> mempty
-              Named vn -> S.singleton vn
+          case argName of
+            Unnamed -> argset'
+            Named vn -> S.insert vn argset'
     arrowArgScalar env (TypeVar u qn args) =
       TypeVar u qn <$> mapM arrowArgArg args
       where
@@ -976,15 +1002,18 @@ arrowArg scope argset args_params rety =
     arrowCleanType paramed (Scalar ty) =
       Scalar $ arrowCleanScalar paramed ty
 
+removeEntryPoint :: PolyBinding -> PolyBinding
+removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, loc)) =
+  PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
+
 -- Monomorphise a polymorphic function at the types given in the instance
 -- list. Monomorphises the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
 monomorphiseBinding ::
-  Bool ->
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
+monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
   let bind_t = funType params rettype
   (substs, t_shape_params) <-
     typeSubstsM loc bind_t $ noNamedParams inst_t
@@ -994,7 +1023,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
         substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
       params' = map (substPat substStructType) params
   params'' <- withArgs shape_names $ mapM transformPat params'
-  exp_naming <- paramGetClean
+  exp_naming <- getExpReplacements <* putExpReplacements mempty
 
   let args = S.fromList $ foldMap patNames params
       arg_params = map snd exp_naming
@@ -1003,7 +1032,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
     withParams exp_naming $
       withArgs (args <> shape_names) $
         hardTransformRetType (applySubst (`M.lookup` substs') rettype)
-  extNaming <- paramGetClean
+  extNaming <- getExpReplacements <* putExpReplacements mempty
   scope <- S.union shape_names <$> askScope'
   let (rettype'', new_params) = arrowArg scope args arg_params rettype'
       bind_t' = substTypesAny (`M.lookup` substs') bind_t
@@ -1022,18 +1051,22 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
   body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
   scope' <- S.union (shape_names <> args) <$> askScope'
   body''' <-
-    expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< get)
+    expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< getExpReplacements)
 
-  seen_before <- elem name . map (fst . fst) <$> getLifts
+  seen_before <- elem name . map fst . M.keys <$> getLifts
   name' <-
-    if null tparams && not entry && not seen_before
+    if null tparams && isNothing entry && not seen_before
       then pure name
       else newName name
 
   pure
     ( name',
-      inferSizeArgs shape_params_explicit bind_t'' bind_r,
-      if entry
+      -- If the function is an entry point, then it cannot possibly
+      -- need any explicit size arguments (checked by type checker).
+      if isJust entry
+        then const $ pure []
+        else inferSizeArgs shape_params_explicit bind_t'' bind_r,
+      if isJust entry
         then
           toValBinding
             name'
@@ -1056,11 +1089,6 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
 
     updateExpTypes substs = astMap (mapper substs)
 
-    paramGetClean = do
-      ret <- get
-      put mempty
-      pure ret
-
     hardTransformRetType (RetType dims ty) = do
       ty' <- transformType ty
       unbounded <- askIntros $ fvVars $ freeInType ty'
@@ -1080,8 +1108,9 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
 
     toValBinding name' tparams' params'' rettype' body'' =
       ValBind
-        { valBindEntryPoint = Nothing,
+        { valBindEntryPoint = Info <$> entry,
           valBindName = name',
+          valBindNameLoc = mempty,
           valBindRetType = Info rettype',
           valBindRetDecl = Nothing,
           valBindTypeParams = tparams',
@@ -1153,7 +1182,7 @@ typeSubstsM loc orig_t1 orig_t2 =
     onDim (MonoAnon i) = do
       (_, sizes) <- get
       case M.lookup i sizes of
-        Nothing -> pure anySize
+        Nothing -> pure $ anySize i
         Just d -> pure d
 
 -- Perform a given substitution on the types in a pattern.
@@ -1172,42 +1201,72 @@ substPat f pat = case pat of
   PatConstr n (Info tp) ps loc -> PatConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
-toPolyBinding (ValBind _ name _ (Info rettype) tparams params body _ attrs loc) =
-  PolyBinding (name, tparams, params, rettype, body, attrs, loc)
+toPolyBinding (ValBind entry name _ _ (Info rettype) tparams params body _ attrs loc) =
+  PolyBinding (unInfo <$> entry, name, tparams, params, rettype, body, attrs, loc)
 
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   let valbind' = toPolyBinding valbind
 
-  case valBindEntryPoint valbind of
-    Nothing -> pure ()
-    Just entry -> do
-      let t =
-            funType (valBindParams valbind) $
-              unInfo $
-                valBindRetType valbind
-      (name, infer, valbind'') <- monomorphiseBinding True valbind' $ monoType t
-      tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = Just entry})
-      addLifted (valBindName valbind) (monoType t) (name, infer)
+  when (isJust $ valBindEntryPoint valbind) $ do
+    let t =
+          funType (valBindParams valbind) $
+            unInfo $
+              valBindRetType valbind
+    (name, infer, valbind'') <- monomorphiseBinding valbind' $ monoType t
+    addValBind valbind''
+    addLifted (valBindName valbind) (monoType t) (name, infer)
+
+  let global =
+        if null (valBindParams valbind)
+          then S.fromList $ retDims $ unInfo $ valBindRetType valbind
+          else mempty
+
+  env <- ask
 
   pure
-    mempty
-      { envPolyBindings = M.singleton (valBindName valbind) valbind',
-        envGlobalScope =
-          if null (valBindParams valbind)
-            then S.fromList $ retDims $ unInfo $ valBindRetType valbind
-            else mempty
+    env
+      { envPolyBindings =
+          M.insert (valBindName valbind) (removeEntryPoint valbind') $
+            envPolyBindings env,
+        envGlobalScope = global <> envGlobalScope env,
+        envScope =
+          S.insert (valBindName valbind) global
+            <> envScope env
       }
 
 transformValBinds :: [ValBind] -> MonoM ()
 transformValBinds [] = pure ()
 transformValBinds (valbind : ds) = do
   env <- transformValBind valbind
-  localEnv env $ transformValBinds ds
+  local (const env) $ transformValBinds ds
+
+-- | Statistics about which functions were monomorphised.
+newtype MonoStats = MonoStats [(VName, [MonoType])]
+
+instance Pretty MonoStats where
+  pretty (MonoStats l) =
+    stack $ intersperse "" $ map pf l
+    where
+      comment = ("-- " <>)
+      pf (name, ts) =
+        comment (pretty (baseName name) <> "_" <> pretty (baseTag name))
+          <+> parens (pretty (length ts) <+> "instantiations")
+          <> ":"
+            </> stack (map (comment . indent 2 . pretty) ts)
 
 -- | Monomorphise a list of top-level value bindings.
-transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
-transformProg decs =
-  fmap (toList . fmap snd . snd) $
+transformProg :: (MonadFreshNames m) => [ValBind] -> m ([ValBind], MonoStats)
+transformProg decs = do
+  (a, b) <-
     modifyNameSource $ \namesrc ->
       runMonoM namesrc $ transformValBinds decs
+  pure
+    ( toList a,
+      MonoStats . sortBy (comparing (Down . length . snd)) $
+        map (\l -> (fst (NE.head l), NE.toList $ fmap snd l)) $
+          NE.groupBy ((==) `on` fst) $
+            sortBy (comparing fst) $
+              map fst $
+                M.toList b
+    )

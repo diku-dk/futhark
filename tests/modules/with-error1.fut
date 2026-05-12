@@ -2,5 +2,5 @@
 -- ==
 -- error: Cannot refine a type
 
-module type has_t = { type t }
+module type has_t = {type t}
 module type has_t' = has_t with t 'a = a

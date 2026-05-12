@@ -10,7 +10,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor
 import Data.Either (rights)
-import Data.List (find, foldl')
+import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
@@ -117,28 +117,29 @@ transformExp (Op (Inner (SegOp (SegMap lvl space ts kbody)))) = do
     ( alloc_stms,
       Op $ Inner $ SegOp $ SegMap lvl' space ts kbody'
     )
-transformExp (Op (Inner (SegOp (SegRed lvl space reds ts kbody)))) = do
+transformExp (Op (Inner (SegOp (SegRed lvl space ts kbody reds)))) = do
   (alloc_stms, (lvl', lams, kbody')) <-
     transformScanRed lvl space (map segBinOpLambda reds) kbody
   let reds' = zipWith (\red lam -> red {segBinOpLambda = lam}) reds lams
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegRed lvl' space reds' ts kbody'
+      Op $ Inner $ SegOp $ SegRed lvl' space ts kbody' reds'
     )
-transformExp (Op (Inner (SegOp (SegScan lvl space scans ts kbody)))) = do
-  (alloc_stms, (lvl', lams, kbody')) <-
-    transformScanRed lvl space (map segBinOpLambda scans) kbody
+transformExp (Op (Inner (SegOp (SegScan lvl space ts kbody scans post_op)))) = do
+  (alloc_stms, (lvl', lams', kbody')) <-
+    transformScanRed lvl space (segPostOpLambda post_op : map segBinOpLambda scans) kbody
+  let post_op_lam : lams = lams'
   let scans' = zipWith (\red lam -> red {segBinOpLambda = lam}) scans lams
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegScan lvl' space scans' ts kbody'
+      Op $ Inner $ SegOp $ SegScan lvl' space ts kbody' scans' (post_op {segPostOpLambda = post_op_lam})
     )
-transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
+transformExp (Op (Inner (SegOp (SegHist lvl space ts kbody ops)))) = do
   (alloc_stms, (lvl', lams', kbody')) <- transformScanRed lvl space lams kbody
   let ops' = zipWith onOp ops lams'
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegHist lvl' space ops' ts kbody'
+      Op $ Inner $ SegOp $ SegHist lvl' space ts kbody' ops'
     )
   where
     lams = map histOp ops
@@ -205,7 +206,7 @@ ensureGridKnown lvl =
       pure (stms, f $ Just grid, grid)
 
     getSize desc size_class = do
-      size_key <- nameFromString . prettyString <$> newVName desc
+      size_key <- nameFromText . prettyText <$> newVName desc
       letSubExp desc $ Op $ Inner $ SizeOp $ GetSize size_key size_class
 
 transformScanRed ::
@@ -259,11 +260,11 @@ transformScanRed lvl space ops kbody = do
         <> boundInKernelBody kbody
 
 boundInKernelBody :: KernelBody GPUMem -> Names
-boundInKernelBody = namesFromList . M.keys . scopeOf . kernelBodyStms
+boundInKernelBody = namesFromList . M.keys . scopeOf . bodyStms
 
 addStmsToKernelBody :: Stms GPUMem -> KernelBody GPUMem -> KernelBody GPUMem
 addStmsToKernelBody stms kbody =
-  kbody {kernelBodyStms = stms <> kernelBodyStms kbody}
+  kbody {bodyStms = stms <> bodyStms kbody}
 
 allocsForBody ::
   Extraction ->
@@ -279,7 +280,7 @@ allocsForBody variant_allocs invariant_allocs grid space kbody kbody' m = do
     memoryRequirements
       grid
       space
-      (kernelBodyStms kbody)
+      (bodyStms kbody)
       variant_allocs
       invariant_allocs
 
@@ -358,8 +359,8 @@ extractKernelBodyAllocations ::
     Extraction
   )
 extractKernelBodyAllocations lvl bound_outside bound_kernel =
-  extractGenericBodyAllocations lvl bound_outside bound_kernel kernelBodyStms $
-    \stms kbody -> kbody {kernelBodyStms = stms}
+  extractGenericBodyAllocations lvl bound_outside bound_kernel bodyStms $
+    \stms kbody -> kbody {bodyStms = stms}
 
 extractBodyAllocations ::
   User ->
@@ -455,7 +456,8 @@ extractStmAllocations user bound_outside bound_kernel stm = do
 
     opMapper user' =
       identitySegOpMapper
-        { mapOnSegOpLambda = onLambda user',
+        { mapOnSegBinOpLambda = onLambda user',
+          mapOnSegPostOpLambda = onLambda user',
           mapOnSegOpBody = onKernelBody user'
         }
 
@@ -615,8 +617,8 @@ offsetMemoryInKernelBody :: RebaseMap -> KernelBody GPUMem -> OffsetM (KernelBod
 offsetMemoryInKernelBody offsets kbody = do
   stms' <-
     collectStms_ $
-      mapM_ (addStm <=< offsetMemoryInStm offsets) (kernelBodyStms kbody)
-  pure kbody {kernelBodyStms = stms'}
+      mapM_ (addStm <=< offsetMemoryInStm offsets) (bodyStms kbody)
+  pure kbody {bodyStms = stms'}
 
 offsetMemoryInBody :: RebaseMap -> Body GPUMem -> OffsetM (Body GPUMem)
 offsetMemoryInBody offsets (Body _ stms res) = do
@@ -657,7 +659,7 @@ addPatternContext (Pat pes) = localScope (scopeOfPat (Pat pes)) $ do
       acc
       (PatElem pe_v (MemArray pt pe_shape pe_u (ArrayIn pe_mem lmad))) = do
         space <- lookupMemSpace pe_mem
-        pe_mem' <- newVName $ baseString pe_mem <> "_ext"
+        pe_mem' <- newVName $ baseName pe_mem <> "_ext"
         let num_exts = length (LMAD.existentialized lmad)
         lmad_exts <-
           replicateM num_exts $
@@ -678,7 +680,7 @@ addParamsContext ps = localScope (scopeOfFParams ps) $ do
   where
     onType acc (Param attr v (MemArray pt shape u (ArrayIn mem lmad))) = do
       space <- lookupMemSpace mem
-      mem' <- newVName $ baseString mem <> "_ext"
+      mem' <- newVName $ baseName mem <> "_ext"
       let num_exts = length (LMAD.existentialized lmad)
       lmad_exts <-
         replicateM num_exts $
@@ -710,7 +712,7 @@ offsetBranch (Pat pes) ts = do
             pure (space, lmad)
           ReturnsNewBlock space _ lmad ->
             pure (space, lmad)
-        pe_mem' <- newVName $ baseString pe_mem <> "_ext"
+        pe_mem' <- newVName $ baseName pe_mem <> "_ext"
         let start = length ts + length acc
             num_exts = length (LMAD.existentialized lmad)
             ext (Free se) = Free <$> pe64 se
@@ -812,7 +814,8 @@ offsetMemoryInExp offsets = mapExpM recurse
         segOpMapper =
           identitySegOpMapper
             { mapOnSegOpBody = offsetMemoryInKernelBody offsets,
-              mapOnSegOpLambda = offsetMemoryInLambda offsets
+              mapOnSegBinOpLambda = offsetMemoryInLambda offsets,
+              mapOnSegPostOpLambda = offsetMemoryInLambda offsets
             }
     onOp op = pure op
 
@@ -870,8 +873,8 @@ unAllocGPUStms = unAllocStms False
     unAllocBody (Body dec stms res) =
       Body dec <$> unAllocStms True stms <*> pure res
 
-    unAllocKernelBody (KernelBody dec stms res) =
-      KernelBody dec <$> unAllocStms True stms <*> pure res
+    unAllocKernelBody (Body dec stms res) =
+      Body dec <$> unAllocStms True stms <*> pure res
 
     unAllocStms nested = mapM (unAllocStm nested)
 
@@ -900,7 +903,8 @@ unAllocGPUStms = unAllocStms False
       where
         mapper =
           identitySegOpMapper
-            { mapOnSegOpLambda = unAllocLambda,
+            { mapOnSegBinOpLambda = unAllocLambda,
+              mapOnSegPostOpLambda = unAllocLambda,
               mapOnSegOpBody = unAllocKernelBody
             }
 
@@ -947,7 +951,7 @@ copyConsumed stms = do
     let substs = M.fromList (zip consumed consumed')
     addStms $ substituteNames substs stms
   where
-    copy v = letExp (baseString v <> "_copy") $ BasicOp $ Replicate mempty $ Var v
+    copy v = letExp (baseName v <> "_copy") $ BasicOp $ Replicate mempty $ Var v
 
 -- Important for edge cases (#1838) that the Stms here still have the
 -- Allocs we are actually trying to get rid of.

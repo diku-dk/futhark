@@ -9,7 +9,7 @@
 --   /SegMap 1
 -- }
 
-entry vector_norm [n] (A: [n]f32): [n]f32 =
-  let pow2 = map (\x -> x*x) A
+entry vector_norm [n] (A: [n]f32) : [n]f32 =
+  let pow2 = map (\x -> x * x) A
   let len = reduce (+) 0 pow2 |> f32.sqrt
-  in  map (/len) A
+  in map (/ len) A

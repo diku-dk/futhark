@@ -15,3 +15,6 @@
 - error: {lhs: "copyDWIM p [] y [DimFix i]", rhs: "copyDWIMFix p [] y [i]" }
 - error: {lhs: "copyDWIM x [DimFix i] y []", rhs: "copyDWIMFix x [i] y []" }
 - error: {lhs: "copyDWIM x [DimFix i] y [DimFix j]", rhs: "copyDWIMFix x [i] y [j]" }
+- error: {lhs: "newVName (baseName x)", rhs: "newName x" }
+- error: {lhs: "nameFromString (prettyString x)", rhs: "nameFromText (prettyText x)" }
+- error: {lhs: "all p (namesToList x)", rhs: "allNames p x" }

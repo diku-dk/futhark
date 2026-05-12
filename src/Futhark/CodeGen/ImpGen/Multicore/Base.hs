@@ -18,7 +18,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     getLoopBounds,
     getIterationDomain,
     getReturnParams,
-    segOpString,
+    segOpName,
     ChunkLoopVectorization (..),
     generateChunkLoop,
     generateUniformizeLoop,
@@ -26,11 +26,11 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     inISPC,
     toParam,
     sLoopNestVectorized,
+    taskProvenance,
   )
 where
 
 import Control.Monad
-import Data.Bifunctor
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
@@ -58,11 +58,11 @@ data HostEnv = HostEnv
 
 type MulticoreGen = ImpM MCMem HostEnv Imp.Multicore
 
-segOpString :: SegOp () MCMem -> MulticoreGen String
-segOpString SegMap {} = pure "segmap"
-segOpString SegRed {} = pure "segred"
-segOpString SegScan {} = pure "segscan"
-segOpString SegHist {} = pure "seghist"
+segOpName :: SegOp () MCMem -> MulticoreGen Name
+segOpName SegMap {} = pure "segmap"
+segOpName SegRed {} = pure "segred"
+segOpName SegScan {} = pure "segscan"
+segOpName SegHist {} = pure "seghist"
 
 arrParam :: VName -> MulticoreGen Imp.Param
 arrParam arr = do
@@ -81,7 +81,7 @@ toParam _name Acc {} = pure [] -- FIXME?  Are we sure this works?
 getSpace :: SegOp () MCMem -> SegSpace
 getSpace (SegHist _ space _ _ _) = space
 getSpace (SegRed _ space _ _ _) = space
-getSpace (SegScan _ space _ _ _) = space
+getSpace (SegScan _ space _ _ _ _) = space
 getSpace (SegMap _ space _ _) = space
 
 getLoopBounds :: MulticoreGen (Imp.TExp Int64, Imp.TExp Int64)
@@ -134,8 +134,6 @@ compileThreadResult ::
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ _ WriteReturns {} =
-  compilerBugS "compileThreadResult: WriteReturns unhandled."
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
 compileThreadResult _ _ RegTileReturns {} =
@@ -151,7 +149,6 @@ isLoadBalanced :: Imp.MCCode -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b) = isLoadBalanced a && isLoadBalanced b
-isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While {} = False
 isLoadBalanced (Imp.Op (Imp.ParLoop _ code _)) = isLoadBalanced code
 isLoadBalanced (Imp.Op (Imp.ForEachActive _ a)) = isLoadBalanced a
@@ -189,8 +186,6 @@ extractAllocations segop_code = f segop_code
       (mempty, Imp.While cond body)
     f (Imp.For i bound body) =
       (mempty, Imp.For i bound body)
-    f (Imp.Comment s code) =
-      second (Imp.Comment s) (f code)
     f Imp.Free {} =
       mempty
     f (Imp.If cond tcode fcode) =
@@ -202,8 +197,7 @@ extractAllocations segop_code = f segop_code
           (free_allocs, here_allocs) = f body_allocs
           free' =
             filter
-              ( (`notNameIn` Imp.declaredIn body_allocs) . Imp.paramName
-              )
+              ((`notNameIn` Imp.declaredIn body_allocs) . Imp.paramName)
               free
        in ( free_allocs,
             here_allocs <> Imp.Op (Imp.ParLoop s body' free')
@@ -222,7 +216,7 @@ data ChunkLoopVectorization = Vectorized | Scalar
 -- The action is called with the (symbolic) index of the current
 -- iteration.
 generateChunkLoop ::
-  String ->
+  Name ->
   ChunkLoopVectorization ->
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
@@ -305,7 +299,7 @@ sForVectorized' i bound body = do
   body' <- collect body
   emit $ Imp.Op $ Imp.ForEach i (Imp.ValueExp $ blankPrimValue $ Imp.IntType Imp.Int64) bound body'
 
-sForVectorized :: String -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
+sForVectorized :: Name -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
 sForVectorized i bound body = do
   i' <- newVName i
   sForVectorized' i' (untyped bound) $
@@ -491,21 +485,14 @@ atomicUpdateCAS t arr old bucket x do_op = do
   bytes <- toIntegral $ primBitSize t
   let (toBits, fromBits) =
         case t of
-          FloatType Float16 ->
-            ( \v -> Imp.FunExp "to_bits16" [v] int16,
-              \v -> Imp.FunExp "from_bits16" [v] t
-            )
-          FloatType Float32 ->
-            ( \v -> Imp.FunExp "to_bits32" [v] int32,
-              \v -> Imp.FunExp "from_bits32" [v] t
-            )
-          FloatType Float64 ->
-            ( \v -> Imp.FunExp "to_bits64" [v] int64,
-              \v -> Imp.FunExp "from_bits64" [v] t
+          FloatType ft ->
+            ( Imp.ConvOpExp (FPToBits ft),
+              Imp.ConvOpExp (BitsToFP ft)
             )
           _ -> (id, id)
 
       int
+        | primBitSize t == 8 = int8
         | primBitSize t == 16 = int16
         | primBitSize t == 32 = int32
         | otherwise = int64
@@ -544,3 +531,17 @@ toIntegral 16 = pure int16
 toIntegral 32 = pure int32
 toIntegral 64 = pure int64
 toIntegral b = error $ "number of bytes is not supported for CAS - " ++ prettyString b
+
+-- | Find the provenance of a task given its body. This is done by folding the
+-- provenance of the code in the body.
+taskProvenance :: Imp.MCCode -> Provenance
+taskProvenance = Imp.foldProvenances onOp
+  where
+    onOp (Imp.ParLoop _ code _) = taskProvenance code
+    onOp (Imp.SegOp _ _ task1 task2 _ _) =
+      onTask task1 <> maybe mempty onTask task2
+    onOp (Imp.ISPCKernel code _) = taskProvenance code
+    onOp (Imp.ForEach _ _ _ code) = taskProvenance code
+    onOp (Imp.ForEachActive _ code) = taskProvenance code
+    onOp _ = mempty
+    onTask (Imp.ParallelTask code) = taskProvenance code

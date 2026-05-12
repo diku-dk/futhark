@@ -53,7 +53,8 @@ freeInExp expr = case expr of
   RecordLit fs _ -> foldMap freeInExpField fs
     where
       freeInExpField (RecordFieldExplicit _ e _) = freeInExp e
-      freeInExpField (RecordFieldImplicit vn t _) = ident $ Ident vn t mempty
+      freeInExpField (RecordFieldImplicit (L _ vn) t _) = ident $ Ident vn t mempty
+  ArrayVal {} -> mempty
   ArrayLit es t _ ->
     foldMap freeInExp es <> freeInType (unInfo t)
   AppExp (Range e me incl _) _ ->
@@ -67,7 +68,7 @@ freeInExp expr = case expr of
       <> ( (freeInPat pat <> freeInExp e2)
              `freeWithoutL` (patNames pat <> map sizeName let_sizes)
          )
-  AppExp (LetFun vn (tparams, pats, _, _, e1) e2 _) _ ->
+  AppExp (LetFun (vn, _) (tparams, pats, _, _, e1) e2 _) _ ->
     ( (freeInExp e1 <> foldMap freeInPat pats)
         `freeWithoutL` (foldMap patNames pats <> map typeParamName tparams)
     )
@@ -82,11 +83,10 @@ freeInExp expr = case expr of
   OpSection {} -> mempty
   OpSectionLeft _ _ e _ _ _ -> freeInExp e
   OpSectionRight _ _ e _ _ _ -> freeInExp e
-  ProjectSection {} -> mempty
-  IndexSection idxs _ _ -> foldMap freeInDimIndex idxs
+  UpdateSection steps _ _ -> foldMap freeInUpdateStep steps
   AppExp (Loop sparams pat e1 form e3 _) _ ->
     let (e2fv, e2ident) = formVars form
-     in freeInExp e1
+     in freeInExp (loopInitExp e1)
           <> ( (e2fv <> freeInExp e3)
                  `freeWithoutL` (sparams <> patNames pat <> e2ident)
              )
@@ -99,14 +99,14 @@ freeInExp expr = case expr of
       <> freeInExp e1
       <> freeInExp e2
   Project _ e _ _ -> freeInExp e
-  AppExp (LetWith id1 id2 idxs e1 e2 _) _ ->
+  AppExp (LetWith id1 id2 steps e1 e2 _) _ ->
     ident id2
-      <> foldMap freeInDimIndex idxs
+      <> foldMap freeInUpdateStep steps
       <> freeInExp e1
       <> (freeInExp e2 `freeWithout` S.singleton (identName id1))
   AppExp (Index e idxs _) _ -> freeInExp e <> foldMap freeInDimIndex idxs
-  Update e1 idxs e2 _ -> freeInExp e1 <> foldMap freeInDimIndex idxs <> freeInExp e2
-  RecordUpdate e1 _ e2 _ _ -> freeInExp e1 <> freeInExp e2
+  Update e1 steps e2 _ _ ->
+    freeInExp e1 <> foldMap freeInUpdateStep steps <> freeInExp e2
   Assert e1 e2 _ _ -> freeInExp e1 <> freeInExp e2
   Constr _ es _ _ -> foldMap freeInExp es
   Attr _ e _ -> freeInExp e
@@ -115,6 +115,10 @@ freeInExp expr = case expr of
       caseFV (CasePat p eCase _) =
         (freeInPat p <> freeInExp eCase)
           `freeWithoutL` patNames p
+
+freeInUpdateStep :: UpdateStep Info VName -> FV
+freeInUpdateStep (UpdateStepSlice idxs) = foldMap freeInDimIndex idxs
+freeInUpdateStep (UpdateStepField _) = mempty
 
 freeInDimIndex :: DimIndexBase Info VName -> FV
 freeInDimIndex (DimFix e) = freeInExp e

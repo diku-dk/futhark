@@ -9,5 +9,5 @@
 def main (A: [10]i64) : [10]i64 =
   let x = A[0]
   in loop A for y in A do
-       let z = x+y
-        in map (+z) A
+       let z = x + y
+       in map (+ z) A

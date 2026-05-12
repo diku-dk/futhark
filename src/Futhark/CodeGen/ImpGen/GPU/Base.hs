@@ -33,7 +33,8 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     genZeroes,
     isPrimParam,
     kernelConstToExp,
-    getChunkSize,
+    getSize,
+    isConstExp,
 
     -- * Host-level bulk operations
     sReplicate,
@@ -116,7 +117,7 @@ kernelBlockId = tvExp . kernelBlockIdVar
 
 keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
-  nameFromString $ maybe "" ((++ ".") . nameToString) fname ++ nameToString key
+  maybe "" (<> ".") fname <> key
 
 allocLocal :: AllocCompiler GPUMem r Imp.KernelOp
 allocLocal mem size =
@@ -145,33 +146,41 @@ updateAcc safety acc is vs = sComment "UpdateAcc" $ do
         case safety of
           Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
           _ -> id
-  boundsCheck $
-    case op of
-      Nothing ->
-        forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
-      Just lam -> do
-        dLParams $ lambdaParams lam
-        let (_x_params, y_params) =
-              splitAt (length vs) $ map paramName $ lambdaParams lam
-        forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
-        atomics <- kernelAtomics <$> askEnv
-        case atomicUpdateLocking atomics lam of
-          AtomicPrim f -> f space arrs is'
-          AtomicCAS f -> f space arrs is'
-          AtomicLocking f -> do
-            c_locks <- M.lookup c . kernelLocks <$> askEnv
-            case c_locks of
-              Just (Locks locks num_locks) -> do
-                let locking =
-                      Locking locks 0 1 0 $
-                        pure . (`rem` fromIntegral num_locks) . flattenIndex dims
-                f locking space arrs is'
-              Nothing ->
-                error $ "Missing locks for " ++ prettyString acc
+  boundsCheck $ case op of
+    Nothing ->
+      forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
+    Just lam -> do
+      dLParams $ lambdaParams lam
+      let (x_params, y_params) =
+            splitAt (length vs) $ map paramName $ lambdaParams lam
+      forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
+
+      atomics <- kernelAtomics <$> askEnv
+      case (space, atomicUpdateLocking atomics lam) of
+        (ScalarSpace {}, _) -> do
+          -- In this case we are dealing with an array that simply cannot be
+          -- shared, and so we do not (and should not) use an atomic. Ideally,
+          -- such cases are optimised away before code generation.
+          forM_ (zip x_params arrs) $ \(xp, arr) -> copyDWIMFix xp [] (Var arr) is'
+          compileBody' mempty $ lambdaBody lam
+          forM_ (zip arrs $ bodyResult $ lambdaBody lam) $ \(arr, r) ->
+            copyDWIMFix arr is' (resSubExp r) []
+        (_, AtomicPrim f) -> f space arrs is'
+        (_, AtomicCAS f) -> f space arrs is'
+        (_, AtomicLocking f) -> do
+          c_locks <- M.lookup c . kernelLocks <$> askEnv
+          case c_locks of
+            Just (Locks locks num_locks) -> do
+              let locking =
+                    Locking locks 0 1 0 $
+                      pure . (`rem` fromIntegral num_locks) . flattenIndex dims
+              f locking space arrs is'
+            Nothing ->
+              error $ "Missing locks for " ++ prettyString acc
 
 -- | Generate a constant device array of 32-bit integer zeroes with
 -- the given number of elements.  Initialised with a replicate.
-genZeroes :: String -> Int -> CallKernelGen VName
+genZeroes :: Name -> Int -> CallKernelGen VName
 genZeroes desc n = genConstants $ do
   counters_mem <- sAlloc (desc <> "_mem") (4 * fromIntegral n) (Space "device")
   let shape = Shape [intConst Int64 (fromIntegral n)]
@@ -183,6 +192,9 @@ compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
   -- Cannot print in GPU code.
   copyDWIM (patElemName pe) [] se []
+-- The static arrays stuff does not work inside kernels.
+compileThreadExp (Pat [dest]) (BasicOp (ArrayVal vs t)) =
+  compileThreadExp (Pat [dest]) (BasicOp (ArrayLit (map Constant vs) (Prim t)))
 compileThreadExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
@@ -273,36 +285,19 @@ kernelConstToExp :: Imp.KernelConstExp -> CallKernelGen Imp.Exp
 kernelConstToExp = traverse f
   where
     f (Imp.SizeMaxConst c) = do
-      v <- dPrimS (prettyString c) int64
+      v <- dPrimS (nameFromText $ prettyText c) int64
       sOp $ Imp.GetSizeMax v c
       pure v
     f (Imp.SizeConst k c) = do
-      v <- dPrimS (nameToString k) int64
+      v <- dPrimS (nameFromText $ prettyText k) int64
+      addTuningParam k $ Just c
       sOp $ Imp.GetSize v k c
       pure v
-
--- | Given available register and a list of parameter types, compute
--- the largest available chunk size given the parameters for which we
--- want chunking and the available resources. Used in
--- 'SegScan.SinglePass.compileSegScan', and 'SegRed.compileSegRed'
--- (with primitive non-commutative operators only).
-getChunkSize :: [Type] -> Imp.KernelConstExp
-getChunkSize types = do
-  let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
-      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
-      max_block_reg = Imp.SizeMaxConst SizeRegisters
-      k_mem = le64 max_block_mem `quot` le64 max_tblock_size
-      k_reg = le64 max_block_reg `quot` le64 max_tblock_size
-      types' = map elemType $ filter primType types
-      sizes = map primByteSize types'
-
-      sum_sizes = sum sizes
-      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
-      max_size = maximum sizes
-
-      mem_constraint = max k_mem sum_sizes `quot` max_size
-      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
-  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+    f (Imp.SizeUserParam name def) = do
+      v <- dPrimS (nameFromText $ prettyText name) int64
+      def' <- kernelConstToExp def
+      emit $ Imp.GetUserParam v name $ isInt64 def'
+      pure v
 
 inChunkScan ::
   KernelConstants ->
@@ -740,13 +735,13 @@ atomicUpdateLocking ::
   AtomicUpdate GPUMem KernelEnv
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
-    all (\(_, t, _, _) -> primBitSize t `elem` [32, 64]) ops_and_ts =
+    all (\(_, t, _, _) -> primBitSize t `elem` [8, 16, 32, 64]) ops_and_ts =
       primOrCas ops_and_ts $ \space arrs bucket ->
-        -- If the operator is a vectorised binary operator on 32/64-bit
-        -- values, we can use a particularly efficient
-        -- implementation. If the operator has an atomic implementation
-        -- we use that, otherwise it is still a binary operator which
-        -- can be implemented by atomic compare-and-swap if 32/64 bits.
+        -- If the operator is a vectorised binary operator on single values, we
+        -- can use a particularly efficient implementation. If the operator has
+        -- an atomic implementation we use that, otherwise it is still a binary
+        -- operator which can be implemented by atomic compare-and-swap if 32/64
+        -- bits.
         forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
           -- Common variables.
           old <- dPrimS "old" t
@@ -767,15 +762,19 @@ atomicUpdateLocking atomicBinOp lam
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
 
-    isPrim (op, _, _, _) = isJust $ atomicBinOp op
+    -- Only operators of at least 32-bit integers are actually truly atomic with
+    -- our current GPU backends - the rest are emulated with CAS-loops in their
+    -- implementation.
+    isPrim (op, _, _, _) =
+      isJust (atomicBinOp op)
+        && primByteSize (binOpType op) >= (4 :: Int)
 
--- If the operator functions purely on single 32/64-bit values, we can
--- use an implementation based on CAS, no matter what the operator
--- does.
+-- If the operator functions purely on single single values, we can use an
+-- implementation based on CAS, no matter what the operator does.
 atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
-    primBitSize t `elem` [32, 64] = AtomicCAS $ \space [arr] bucket -> do
+    primBitSize t `elem` [8, 16, 32, 64] = AtomicCAS $ \space [arr] bucket -> do
       old <- dPrimS "old" t
       atomicUpdateCAS space t arr old bucket (paramName xp) $
         compileBody' [xp] (lambdaBody op)
@@ -885,24 +884,18 @@ atomicUpdateCAS space t arr old bucket x do_op = do
   -- While-loop: Try to insert your value
   let (toBits, fromBits) =
         case t of
-          FloatType Float16 ->
-            ( \v -> Imp.FunExp "to_bits16" [v] int16,
-              \v -> Imp.FunExp "from_bits16" [v] t
-            )
-          FloatType Float32 ->
-            ( \v -> Imp.FunExp "to_bits32" [v] int32,
-              \v -> Imp.FunExp "from_bits32" [v] t
-            )
-          FloatType Float64 ->
-            ( \v -> Imp.FunExp "to_bits64" [v] int64,
-              \v -> Imp.FunExp "from_bits64" [v] t
+          FloatType ft ->
+            ( Imp.ConvOpExp (FPToBits ft),
+              Imp.ConvOpExp (BitsToFP ft)
             )
           _ -> (id, id)
 
-      int
-        | primBitSize t == 16 = int16
-        | primBitSize t == 32 = int32
-        | otherwise = int64
+      int = case primBitSize t of
+        8 -> int8
+        16 -> int16
+        32 -> int32
+        64 -> int64
+        _ -> error "impossible integer bit size"
 
   sWhile (tvExp run_loop) $ do
     assumed <~~ Imp.var old t
@@ -1042,7 +1035,8 @@ simpleKernelBlocks ::
 simpleKernelBlocks max_num_tblocks kernel_size = do
   tblock_size <- dPrim "tblock_size"
   fname <- askFunction
-  let tblock_size_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar tblock_size
+  let tblock_size_key = keyWithEntryPoint fname $ nameFromText $ prettyText $ tvVar tblock_size
+  addTuningParam tblock_size_key $ Just Imp.SizeThreadBlock
   sOp $ Imp.GetSize (tvVar tblock_size) tblock_size_key Imp.SizeThreadBlock
   virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `divUp` tvExp tblock_size
   num_tblocks <- dPrimV "num_tblocks" $ virt_num_tblocks `sMin64` max_num_tblocks
@@ -1050,7 +1044,7 @@ simpleKernelBlocks max_num_tblocks kernel_size = do
 
 simpleKernelConstants ::
   Imp.TExp Int64 ->
-  String ->
+  Name ->
   CallKernelGen
     ( (Imp.TExp Int64 -> InKernelGen ()) -> InKernelGen (),
       KernelConstants
@@ -1062,9 +1056,9 @@ simpleKernelConstants kernel_size desc = do
   -- GPU will possibly need.  Feel free to come back and laugh at me
   -- in the future.
   let max_num_tblocks = 1024 * 1024
-  thread_gtid <- newVName $ desc ++ "_gtid"
-  thread_ltid <- newVName $ desc ++ "_ltid"
-  tblock_id <- newVName $ desc ++ "_gid"
+  thread_gtid <- newVName $ desc <> "_gtid"
+  thread_ltid <- newVName $ desc <> "_ltid"
+  tblock_id <- newVName $ desc <> "_gid"
   inner_tblock_size <- newVName "tblock_size"
   (virt_num_tblocks, num_tblocks, tblock_size) <-
     simpleKernelBlocks max_num_tblocks kernel_size
@@ -1165,11 +1159,14 @@ defKernelAttrs num_tblocks tblock_size =
       kAttrConstExps = mempty
     }
 
-getSize :: String -> SizeClass -> CallKernelGen (TV Int64)
+-- | Retrieve a size of the given size class and put it in a variable
+-- with the given name.
+getSize :: Name -> SizeClass -> CallKernelGen (TV Int64)
 getSize desc size_class = do
   v <- dPrim desc
   fname <- askFunction
-  let v_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar v
+  let v_key = keyWithEntryPoint fname $ nameFromText $ prettyText $ tvVar v
+  addTuningParam v_key $ Just size_class
   sOp $ Imp.GetSize (tvVar v) v_key size_class
   pure v
 
@@ -1195,7 +1192,7 @@ lvlKernelAttrs lvl =
 sKernel ::
   Operations GPUMem KernelEnv Imp.KernelOp ->
   (KernelConstants -> Imp.TExp Int64) ->
-  String ->
+  Name ->
   VName ->
   KernelAttrs ->
   InKernelGen () ->
@@ -1203,14 +1200,14 @@ sKernel ::
 sKernel ops flatf name v attrs f = do
   (constants, set_constants) <-
     kernelInitialisationSimple (kAttrNumBlocks attrs) (kAttrBlockSize attrs)
-  name' <- nameForFun $ name ++ "_" ++ show (baseTag v)
+  name' <- nameForFun $ name <> "_" <> nameFromString (show (baseTag v))
   sKernelOp attrs constants ops name' $ do
     set_constants
     dPrimV_ v $ flatf constants
     f
 
 sKernelThread ::
-  String ->
+  Name ->
   VName ->
   KernelAttrs ->
   InKernelGen () ->
@@ -1229,6 +1226,11 @@ sKernelOp attrs constants ops name m = do
   body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
   uses <- computeKernelUses body $ M.keys $ kAttrConstExps attrs
   tblock_size <- onBlockSize $ kernelBlockSize constants
+  -- XXX: the provenance of the kernel itself is usually boring (it just points
+  -- to somewhere in /prelude), so try to synthesize it from the body instead.
+  -- It may be that we should do this earlier in the compiler.
+  let p = Imp.foldProvenances (const mempty) body
+  when (p /= mempty) $ emit $ Imp.Meta $ Imp.MetaProvenance p
   emit . Imp.Op . Imp.CallKernel $
     Imp.Kernel
       { Imp.kernelBody = body,
@@ -1293,8 +1295,8 @@ sReplicateKernel arr se = do
   fname <- askFunction
   let name =
         keyWithEntryPoint fname $
-          nameFromString $
-            "replicate_" ++ show (baseTag $ tvVar $ kernelGlobalThreadIdVar constants)
+          "replicate_"
+            <> nameFromString (show (baseTag $ tvVar $ kernelGlobalThreadIdVar constants))
 
   sKernelFailureTolerant True threadOperations constants name $
     virtualise $ \gtid -> do
@@ -1455,12 +1457,5 @@ compileThreadResult _ _ RegTileReturns {} =
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ pe (WriteReturns _ arr dests) = do
-  arr_t <- lookupType arr
-  let rws' = map pe64 $ arrayDims arr_t
-  forM_ dests $ \(slice, e) -> do
-    let slice' = fmap pe64 slice
-        write = inBounds slice' rws'
-    sWhen write $ copyDWIM (patElemName pe) (unSlice slice') e []
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."

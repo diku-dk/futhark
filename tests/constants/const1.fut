@@ -3,7 +3,8 @@
 -- ==
 -- input {} output { 3 }
 
-def v: [](i32,i32) = [(1,2)]
+def v : [](i32, i32) = [(1, 2)]
 
-def main: i32 = let (x,y) = v[0]
-                in x + y
+def main : i32 =
+  let (x, y) = v[0]
+  in x + y

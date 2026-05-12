@@ -15,5 +15,5 @@
 --   [1,2,3]
 -- }
 
-def main (a: []i32) (b: []i32): []i32 =
+def main (a: []i32) (b: []i32) : []i32 =
   concat a b

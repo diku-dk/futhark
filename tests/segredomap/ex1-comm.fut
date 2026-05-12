@@ -8,8 +8,8 @@
 --   [6i64, 15i64]
 --   [[-1.000000f64, -2.000000f64, -3.000000f64], [-4.000000f64, -5.000000f64, -6.000000f64]]
 -- }
-def main [m][n] (xss : [m][n]f32): ([m]i64, [m][n]f64) =
-  unzip (map( \(xs : [n]f32) : (i64, [n]f64) ->
-         let (xs_int, xs_neg) = unzip (map(\x -> (i64.f32 x, f64.f32(-x))) xs)
-         in (reduce_comm (+) 0 xs_int, xs_neg)
-     ) xss)
+def main [m] [n] (xss: [m][n]f32) : ([m]i64, [m][n]f64) =
+  unzip (map (\(xs: [n]f32) : (i64, [n]f64) ->
+                let (xs_int, xs_neg) = unzip (map (\x -> (i64.f32 x, f64.f32 (-x))) xs)
+                in (reduce_comm (+) 0 xs_int, xs_neg))
+             xss)

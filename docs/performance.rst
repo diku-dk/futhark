@@ -191,7 +191,7 @@ Sum Types
 ~~~~~~~~~
 
 A sum type value is represented as a tuple containing all the payload
-components in order, prefixed with an `i8` tag to identify the
+components in order, prefixed with an ``i8`` tag to identify the
 constructor.  For example,
 
 .. code-block:: futhark
@@ -256,6 +256,12 @@ is represented as
 
 which is not great.  Take caution when you use sum types with large
 arrays in their payloads.
+
+Unary sum types
+!!!!!!!!!!!!!!!
+
+As an optimisation, the ``i8`` tag is elided when a sum type has only a single
+constructor. This means you can always use unary sum types with zero overhead.
 
 Functions
 ~~~~~~~~~

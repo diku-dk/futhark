@@ -107,14 +107,17 @@ def optional_specific_string(f, s):
         return False
 
 
-def sepBy(p, sep, *args):
+def sepEndBy(p, sep, *args):
     elems = []
     x = optional(p, *args)
     if x != None:
         elems += [x]
         while optional(sep, *args) != None:
-            x = p(*args)
-            elems += [x]
+            x = optional(p, *args)
+            if x == None:
+                break
+            else:
+                elems += [x]
     return elems
 
 
@@ -372,7 +375,7 @@ def read_str_array_elems(f, elem_reader, type_name, rank):
     except ValueError:
         return read_str_empty_array(f, type_name, rank)
     else:
-        xs = sepBy(elem_reader, read_str_comma, f)
+        xs = sepEndBy(elem_reader, read_str_comma, f)
         skip_spaces(f)
         parse_specific_char(f, b"]")
         return xs

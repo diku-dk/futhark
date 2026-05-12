@@ -8,6 +8,6 @@ type ints [n] = [n]i32
 
 type pairints [n] [m] = (ints [n], ints [m])
 
-def main [n][m] (a: ints [n]) (b: ints [m]) =
+def main [n] [m] (a: ints [n]) (b: ints [m]) =
   let b' = take n b
-  in (a,b') : pairints [n] [n]
+  in (a, b') : pairints [n] [n]

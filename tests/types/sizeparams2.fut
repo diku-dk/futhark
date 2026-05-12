@@ -6,4 +6,4 @@
 
 type ints [n] = [n]i32
 
-def main [n][m] (a: ints [n]) (b: ints [m]) = concat (a :> ints [n]) (b :> ints [n])
+def main [n] [m] (a: ints [n]) (b: ints [m]) = concat (a :> ints [n]) (b :> ints [n])

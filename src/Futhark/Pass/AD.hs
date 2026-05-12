@@ -36,20 +36,20 @@ bindLambda pat aux (Lambda params _ body) args = do
     certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 
 onStm :: Mode -> Scope SOACS -> Stm SOACS -> PassM (Stms SOACS)
-onStm mode scope (Let pat aux (Op (VJP lam args vec))) = do
+onStm mode scope (Let pat aux (Op (VJP args vec lam))) = do
   lam' <- onLambda mode scope lam
   if mode == All || lam == lam'
     then do
       lam'' <- (`runReaderT` scope) . simplifyLambda =<< revVJP scope lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
-    else pure $ oneStm $ Let pat aux $ Op $ VJP lam' args vec
-onStm mode scope (Let pat aux (Op (JVP lam args vec))) = do
+    else pure $ oneStm $ Let pat aux $ Op $ VJP args vec lam'
+onStm mode scope (Let pat aux (Op (JVP args vec lam))) = do
   lam' <- onLambda mode scope lam
   if mode == All || lam == lam'
     then do
       lam'' <- fwdJVP scope lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
-    else pure $ oneStm $ Let pat aux $ Op $ JVP lam' args vec
+    else pure $ oneStm $ Let pat aux $ Op $ JVP args vec lam'
 onStm mode scope (Let pat aux e) = oneStm . Let pat aux <$> mapExpM mapper e
   where
     mapper =

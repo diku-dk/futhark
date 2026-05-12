@@ -3,8 +3,8 @@ module type thing = {
   val f : i64 -> [n / 2]i64
 }
 
-module mk_m(G: thing) = {
-  def lex [m] (i : [m]i64) : [m][G.n / 2]i64 =
+module mk_m (G: thing) = {
+  def lex [m] (i: [m]i64) : [m][G.n / 2]i64 =
     map G.f i
 }
 

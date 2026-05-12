@@ -1,9 +1,8 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
--- | Futhark prettyprinter.  This module defines 'Pretty' instances
--- for the AST defined in "Futhark.IR.Syntax",
--- but also a number of convenience functions if you don't want to use
--- the interface from 'Pretty'.
+-- | Futhark prettyprinter. This module defines 'Pretty' instances for the AST
+-- defined in "Futhark.IR.Syntax", but also a number of convenience functions if
+-- you don't want to use the interface from 'Pretty'.
 module Futhark.IR.Pretty
   ( prettyTuple,
     prettyTupleLines,
@@ -43,7 +42,7 @@ instance Pretty Commutativity where
   pretty Commutative = "commutative"
   pretty Noncommutative = "noncommutative"
 
-instance Pretty Shape where
+instance (Pretty d) => Pretty (ShapeBase d) where
   pretty = mconcat . map (brackets . pretty) . shapeDims
 
 instance Pretty Rank where
@@ -52,9 +51,6 @@ instance Pretty Rank where
 instance (Pretty a) => Pretty (Ext a) where
   pretty (Free e) = pretty e
   pretty (Ext x) = "?" <> pretty (show x)
-
-instance Pretty ExtShape where
-  pretty = mconcat . map (brackets . pretty) . shapeDims
 
 instance Pretty Space where
   pretty DefaultSpace = mempty
@@ -152,6 +148,16 @@ stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 instance Pretty Attrs where
   pretty = hsep . attrAnnots
 
+prettyLoc :: Loc -> Doc a
+prettyLoc = pretty . locText
+
+instance Pretty Provenance where
+  pretty (Provenance locs loc) = mconcat $ punctuate "->" $ map prettyLoc $ locs ++ [loc]
+
+instance (Pretty dec) => Pretty (StmAux dec) where
+  pretty (StmAux cs attrs p dec) =
+    braces $ mconcat $ punctuate semi [pretty cs, pretty attrs, pretty p, pretty dec]
+
 instance (Pretty t) => Pretty (Pat t) where
   pretty (Pat xs) = braces $ commastack $ map pretty xs
 
@@ -164,13 +170,18 @@ instance (Pretty t) => Pretty (Param t) where
 
 instance (PrettyRep rep) => Pretty (Stm rep) where
   pretty stm@(Let pat aux e) =
-    align . hang 2 $
+    (locstr <>) . align . hang 2 $
       "let"
         <+> align (pretty pat)
         <+> case stmannot of
           [] -> equals </> pretty e
           _ -> equals </> (stack stmannot </> pretty e)
     where
+      locstr =
+        if stmAuxLoc aux == mempty
+          then mempty
+          else dquotes (pretty (stmAuxLoc aux)) <> line
+
       stmannot =
         concat
           [ maybeToList (ppExpDec (stmAuxDec aux) e),
@@ -187,6 +198,13 @@ instance (Pretty d) => Pretty (FlatDimIndex d) where
 instance (Pretty a) => Pretty (FlatSlice a) where
   pretty (FlatSlice offset xs) = brackets (pretty offset <> ";" <+> commasep (map pretty xs))
 
+instance (Pretty d) => Pretty (DimSplice d) where
+  pretty (DimSplice i k shape) = pretty i <> "::" <> pretty k <> "=>" <> pretty shape
+
+instance (Pretty d) => Pretty (NewShape d) where
+  pretty (NewShape ds shape) =
+    parens $ align $ commastack (map pretty ds) <> semi </> pretty shape
+
 instance Pretty BasicOp where
   pretty (SubExp se) = pretty se
   pretty (Opaque OpaqueNil e) = "opaque" <> apply [pretty e]
@@ -198,6 +216,11 @@ instance Pretty BasicOp where
       <+> colon
       <+> "[]"
       <> pretty rt
+  pretty (ArrayVal vs t) =
+    brackets (commasep $ map pretty vs)
+      <+> colon
+      <+> "[]"
+      <> pretty t
   pretty (BinOp bop x y) = pretty bop <> parens (pretty x <> comma <+> pretty y)
   pretty (CmpOp op x y) = pretty op <> parens (pretty x <> comma <+> pretty y)
   pretty (ConvOp conv x) =
@@ -223,17 +246,16 @@ instance Pretty BasicOp where
     "replicate" <> apply [pretty ne, align (pretty ve)]
   pretty (Scratch t shape) =
     "scratch" <> apply (pretty t : map pretty shape)
-  pretty (Reshape ReshapeArbitrary shape e) =
-    "reshape" <> apply [pretty shape, pretty e]
-  pretty (Reshape ReshapeCoerce shape e) =
-    "coerce" <> apply [pretty shape, pretty e]
-  pretty (Rearrange perm e) =
-    "rearrange" <> apply [apply (map pretty perm), pretty e]
+  pretty (Reshape reshape e) =
+    "reshape" <> parens (align $ commastack [pretty reshape, pretty e])
+  pretty (Rearrange v perm) =
+    "rearrange" <> apply [pretty v, apply (map pretty perm)]
   pretty (Concat i (x :| xs) w) =
     "concat" <> "@" <> pretty i <> apply (pretty w : pretty x : map pretty xs)
-  pretty (Manifest perm e) = "manifest" <> apply [apply (map pretty perm), pretty e]
-  pretty (Assert e msg (loc, _)) =
-    "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]
+  pretty (Manifest v perm) =
+    "manifest" <> apply [pretty v, apply (map pretty perm)]
+  pretty (Assert e msg) =
+    "assert" <> apply [pretty e, pretty msg]
   pretty (UpdateAcc safety acc is v) =
     update_acc_str
       <> apply
@@ -245,6 +267,8 @@ instance Pretty BasicOp where
       update_acc_str = case safety of
         Safe -> "update_acc"
         Unsafe -> "update_acc_unsafe"
+  pretty (UserParam name def) =
+    "user_param" <> apply [pretty name, pretty def]
 
 instance (Pretty a) => Pretty (ErrorMsg a) where
   pretty (ErrorMsg parts) = braces $ align $ commasep $ map p parts
@@ -255,7 +279,7 @@ instance (Pretty a) => Pretty (ErrorMsg a) where
 maybeNest :: (PrettyRep rep) => Body rep -> Doc a
 maybeNest b
   | null $ bodyStms b = pretty b
-  | otherwise = nestedBlock "{" "}" $ pretty b
+  | otherwise = nestedBlock $ pretty b
 
 instance (PrettyRep rep) => Pretty (Case (Body rep)) where
   pretty (Case vs b) =
@@ -301,12 +325,12 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
         MatchFallback -> " <fallback>"
         MatchEquiv -> " <equiv>"
   pretty (BasicOp op) = pretty op
-  pretty (Apply fname args ret (safety, _, _)) =
+  pretty (Apply fname args ret safety) =
     applykw
       <+> pretty (nameToString fname)
       <> apply (map (align . prettyArg) args)
         </> colon
-        <+> braces (commasep $ map prettyRet ret)
+        <+> braces (align $ commasep $ map prettyRet ret)
     where
       prettyArg (arg, Consume) = "*" <> pretty arg
       prettyArg (arg, _) = pretty arg
@@ -333,7 +357,7 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
                 "while" <+> pretty cond
           )
       <+> "do"
-      <+> nestedBlock "{" "}" (pretty loopbody)
+      <+> nestedBlock (pretty loopbody)
     where
       (params, args) = unzip merge
   pretty (WithAcc inputs lam) =
@@ -385,7 +409,7 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
         <+> parens (commastack $ map pretty fparams)
         </> indent 2 (colon <+> align (ppTupleLines' $ map prettyRet rettype))
         <+> equals
-        <+> nestedBlock "{" "}" (pretty body)
+        <+> nestedBlock (pretty body)
     where
       fun = case entry of
         Nothing -> "fun"
@@ -398,23 +422,32 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
                   <> comma
                     </> ppTupleLines' (map pretty p_entry)
                   <> comma
-                    </> ppTupleLines' (map pretty ret_entry)
+                    </> pretty ret_entry
               )
 
 instance Pretty OpaqueType where
   pretty (OpaqueType ts) =
-    "opaque" <+> nestedBlock "{" "}" (stack $ map pretty ts)
+    "opaque" <+> nestedBlock (stack $ map pretty ts)
   pretty (OpaqueRecord fs) =
-    "record" <+> nestedBlock "{" "}" (stack $ map p fs)
+    "record" <+> nestedBlock (stack $ map p fs)
     where
       p (f, et) = pretty f <> ":" <+> pretty et
   pretty (OpaqueSum ts cs) =
-    "sum" <+> nestedBlock "{" "}" (stack $ pretty ts : map p cs)
+    "sum" <+> nestedBlock (stack $ pretty ts : map p cs)
     where
       p (c, ets) = hsep $ "#" <> pretty c : map pretty ets
+  pretty (OpaqueArray r v ts) =
+    "array" <+> pretty r
+      <> "d"
+        <+> dquotes (pretty v)
+        <+> nestedBlock (stack $ map pretty ts)
+  pretty (OpaqueRecordArray r v fs) =
+    "record_array" <+> pretty r <> "d" <+> dquotes (pretty v) <+> nestedBlock (stack $ map p fs)
+    where
+      p (f, et) = pretty f <> ":" <+> pretty et
 
 instance Pretty OpaqueTypes where
-  pretty (OpaqueTypes ts) = "types" <+> nestedBlock "{" "}" (stack $ map p ts)
+  pretty (OpaqueTypes ts) = "types" <+> nestedBlock (stack $ map p ts)
     where
       p (name, t) = "type" <+> dquotes (pretty name) <+> equals <+> pretty t
 

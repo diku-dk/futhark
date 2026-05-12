@@ -2,10 +2,9 @@
 --
 -- ==
 -- entry: lt
--- input { [0i64, 1i64, -1i64, 1i64, -2i64 ] 
+-- input { [0i64, 1i64, -1i64, 1i64, -2i64 ]
 --         [0i64, 2i64, 1i64, -1i64, -1i64] }
 -- output { [false, true, true, false, true] }
-
 
 -- ==
 -- entry: eq
@@ -15,11 +14,10 @@
 
 -- ==
 -- entry: lte
--- input { [0i64, 1i64, -1i64, 1i64, -2i64 ] 
+-- input { [0i64, 1i64, -1i64, 1i64, -2i64 ]
 --         [0i64, 2i64, 1i64, -1i64, -1i64] }
 -- output { [true, true, true, false, true] }
 
-
-entry lt (x:[]i64) (y:[]i64)= map2 (<) x y
-entry eq (x:[]i64) (y:[]i64)= map2 (==) x y
-entry lte (x:[]i64) (y:[]i64)= map2 (<=) x y
+entry lt (x: []i64) (y: []i64) = map2 (<) x y
+entry eq (x: []i64) (y: []i64) = map2 (==) x y
+entry lte (x: []i64) (y: []i64) = map2 (<=) x y

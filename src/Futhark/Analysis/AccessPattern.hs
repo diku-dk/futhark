@@ -228,7 +228,7 @@ class Analyse rep where
   -- | Analyse the op for this representation.
   analyseOp :: Op rep -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 
--- | Analyse each `entry` and accumulate the results.
+-- | Analyse each entry and accumulate the results.
 analyseDimAccesses :: (Analyse rep) => Prog rep -> IndexTable rep
 analyseDimAccesses = foldMap' analyseFunction . progFuns
 
@@ -308,7 +308,6 @@ analyseStms ctx body_constructor pats body = do
               then result <> oneName a
               else -- Otherwise, recurse on its dependencies;
               -- 0. Add dependencies in ctx to result
-
                 let (deps_in_ctx, deps_not_in_ctx) =
                       L.partition (`M.member` local_assignments) $
                         namesToList (deps var_info)
@@ -463,48 +462,44 @@ analyseBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable 
 analyseBasicOp ctx expression pats =
   -- Construct a VariableInfo from the subexpressions
   let ctx_val = case expression of
-        SubExp se -> varInfoFromSubExpr se
-        Opaque _ se -> varInfoFromSubExpr se
+        SubExp se -> varInfoFromSubExp se
+        Opaque _ se -> varInfoFromSubExp se
+        ArrayVal _ _ -> (varInfoFromNames ctx mempty) {variableType = ConstType}
         ArrayLit ses _t -> concatVariableInfos mempty ses
-        UnOp _ se -> varInfoFromSubExpr se
+        UnOp _ se -> varInfoFromSubExp se
         BinOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
         CmpOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
-        ConvOp _ se -> varInfoFromSubExpr se
-        Assert se _ _ -> varInfoFromSubExpr se
+        ConvOp _ se -> varInfoFromSubExp se
+        Assert se _ -> varInfoFromSubExp se
         Index name _ ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         Update _ name _slice _subexp ->
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
-        Concat _ _ length_subexp -> varInfoFromSubExpr length_subexp
-        Manifest _dim name -> varInfoFromNames ctx $ oneName name
+        Concat _ _ length_subexp -> varInfoFromSubExp length_subexp
+        Manifest name _dim -> varInfoFromNames ctx $ oneName name
         Iota end start stride _ -> concatVariableInfos mempty [end, start, stride]
         Replicate (Shape shape) value' -> concatVariableInfos mempty (value' : shape)
         Scratch _ sers -> concatVariableInfos mempty sers
-        Reshape _ (Shape shape_subexp) name -> concatVariableInfos (oneName name) shape_subexp
-        Rearrange _ name -> varInfoFromNames ctx $ oneName name
+        Reshape name newshape ->
+          concatVariableInfos (oneName name) (shapeDims (newShape newshape))
+        Rearrange name _ -> varInfoFromNames ctx $ oneName name
         UpdateAcc _ name lsubexprs rsubexprs ->
           concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)
         FlatIndex name _ -> varInfoFromNames ctx $ oneName name
         FlatUpdate name _ source -> varInfoFromNames ctx $ namesFromList [name, source]
+        UserParam _name def -> varInfoFromSubExp def
       ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
    in (ctx', mempty)
   where
     concatVariableInfos ne nn =
-      varInfoFromNames ctx (ne <> mconcat (map (analyseSubExpr pats ctx) nn))
+      varInfoFromNames ctx (ne <> mconcat (map (analyseSubExp pats ctx) nn))
 
-    varInfoFromSubExpr (Constant _) = (varInfoFromNames ctx mempty) {variableType = ConstType}
-    varInfoFromSubExpr (Var v) =
+    varInfoFromSubExp (Constant _) = (varInfoFromNames ctx mempty) {variableType = ConstType}
+    varInfoFromSubExp (Var v) =
       case M.lookup v (assignments ctx) of
         Just _ -> (varInfoFromNames ctx $ oneName v) {variableType = Variable}
-        Nothing ->
-          error $
-            "Failed to lookup variable \""
-              ++ prettyString v
-              ++ "\npat: "
-              ++ prettyString pats
-              ++ "\n\nContext\n"
-              ++ show ctx
+        Nothing -> (varInfoFromNames ctx mempty) {variableType = Variable} -- Means a global.
 
 analyseMatch :: (Analyse rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
 analyseMatch ctx pats body parents =
@@ -560,7 +555,7 @@ analyseSegOp op ctx pats =
           . unSegSpace
           $ segSpace op
    in -- Analyse statements in the SegOp body
-      analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
+      analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . bodyStms $ segBody op
 
 analyseSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyseSizeOp op ctx pats =
@@ -578,7 +573,7 @@ analyseSizeOp op ctx pats =
   where
     subexprsToContext =
       contextFromNames ctx (varInfoZeroDeps ctx)
-        . concatMap (namesToList . analyseSubExpr pats ctx)
+        . concatMap (namesToList . analyseSubExp pats ctx)
 
 -- | Analyse statements in a rep body.
 analyseGPUBody :: (Analyse rep) => Body rep -> Context rep -> (Context rep, IndexTable rep)
@@ -590,23 +585,9 @@ analyseOtherOp ctx _ = (ctx, mempty)
 
 -- | Returns an intmap of names, to be used as dependencies in construction of
 -- VariableInfos.
--- Throws an error if SubExp contains a name not in context. This behaviour
--- might be thrown out in the future, as it is mostly just a very verbose way to
--- ensure that we capture all necessary variables in the context at the moment
--- of development.
-analyseSubExpr :: [VName] -> Context rep -> SubExp -> Names
-analyseSubExpr _ _ (Constant _) = mempty
-analyseSubExpr pp ctx (Var v) =
-  case M.lookup v (assignments ctx) of
-    (Just _) -> oneName v
-    Nothing ->
-      error $
-        "Failed to lookup variable \""
-          ++ prettyString v
-          ++ "\npat: "
-          ++ prettyString pp
-          ++ "\n\nContext\n"
-          ++ show ctx
+analyseSubExp :: [VName] -> Context rep -> SubExp -> Names
+analyseSubExp _ _ (Constant _) = mempty
+analyseSubExp _ _ (Var v) = oneName v
 
 -- | Reduce a DimFix into its set of dependencies
 consolidate :: Context rep -> SubExp -> DimAccess rep
@@ -617,7 +598,7 @@ consolidate ctx (Var v) = DimAccess (reduceDependencies ctx v) (Just v)
 reduceDependencies :: Context rep -> VName -> M.Map VName Dependency
 reduceDependencies ctx v =
   case M.lookup v (assignments ctx) of
-    Nothing -> error $ "Unable to find " ++ prettyString v
+    Nothing -> mempty -- Means a global.
     Just (VariableInfo deps lvl _parents t) ->
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
@@ -642,8 +623,8 @@ instance Analyse MC where
     | ParOp Nothing seq_segop <- mc_op = analyseSegOp seq_segop
     | ParOp (Just segop) seq_segop <- mc_op = \ctx name -> do
         let (ctx', res') = analyseSegOp segop ctx name
-        let (ctx'', res'') = analyseSegOp seq_segop ctx name
-        (ctx' <> ctx'', unionIndexTables res' res'')
+        let (ctx'', res'') = analyseSegOp seq_segop ctx' name
+        (ctx'', unionIndexTables res' res'')
     | Futhark.IR.MC.OtherOp _ <- mc_op = analyseOtherOp
 
 -- Unfortunately we need these instances, even though they may never appear.
@@ -708,7 +689,7 @@ instance Pretty (DimAccess rep) where
       Nothing -> True
       Just n ->
         length (dependencies dim_access) == 1 && n == head (map fst $ M.toList $ dependencies dim_access)
-        -- Only print the original name if it is different from the first (and single) dependency
+      -- Only print the original name if it is different from the first (and single) dependency
       then
         "dependencies"
           <+> equals

@@ -7,13 +7,13 @@ module type MT = {
   type i32matrix = [2](vector i32)
 }
 
-module M0: MT = {
+module M0 : MT = {
   type vector 'a = [2]a
   type i32matrix = [2](vector i32)
 }
 
 -- And now an inlined one.
-module M1: MT = {
+module M1 : MT = {
   type vector 'a = [2]a
   type i32matrix = [2][2]i32
 }

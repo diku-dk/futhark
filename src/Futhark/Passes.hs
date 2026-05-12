@@ -35,8 +35,9 @@ import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 -- import Futhark.Optimise.EffSeqIntra
 -- import Futhark.Optimise.IntraSeq
-import Futhark.Optimise.FuseIntraScatter
+-- import Futhark.Optimise.FuseIntraScatter
 import Futhark.Pass.AD
+import Futhark.Pass.AddGlobalParams
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
@@ -62,7 +63,7 @@ standardPipeline =
       simplifySOACS,
       performCSE True,
       simplifySOACS,
-      fuseSOACs,
+      fuseSOACs Nothing,
       performCSE True,
       simplifySOACS,
       removeDeadFunctions
@@ -77,7 +78,7 @@ adPipeline =
     [ applyAD,
       simplifySOACS,
       performCSE True,
-      fuseSOACs,
+      fuseSOACs Nothing,
       performCSE True,
       simplifySOACS
     ]
@@ -90,9 +91,12 @@ gpuPipeline =
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,
+{--
         fuseIntraScatter,
         -- effSeqIntra,
         -- intraSeq,
+--}
+        addGlobalParams,
         optimiseGenRed,
         simplifyGPU,
         tileLoops,

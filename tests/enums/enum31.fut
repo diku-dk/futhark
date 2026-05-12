@@ -6,6 +6,6 @@ type planet = #mercury | #venus | #earth | #mars
 
 def g : i32 =
   match (#venus : planet)
-    case #mercury -> 1
-    case #venus   -> 2
-    case #earth   -> 3
+  case #mercury -> 1
+  case #venus -> 2
+  case #earth -> 3

@@ -122,6 +122,10 @@ static bool lmad_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
 
   *num_arrays_out = num_arrays;
 
+  if (r==map_r) {
+    return false;
+  }
+
   if (memcmp(&rowmajor_strides[map_r],
              &dst_strides[map_r],
              sizeof(int64_t)*(r-map_r)) == 0) {
@@ -184,20 +188,22 @@ static bool lmad_memcpyable(int r,
 
 
 static void log_copy(struct futhark_context* ctx,
-                     const char *kind, int r,
+                     const char *kind, const char *provenance,
+                     int r,
                      int64_t dst_offset, int64_t dst_strides[r],
                      int64_t src_offset, int64_t src_strides[r],
                      int64_t shape[r]) {
   if (ctx->logging) {
     fprintf(ctx->log, "\n# Copy %s\n", kind);
+    if (provenance) { fprintf(ctx->log, "At: %s\n", provenance); }
     fprintf(ctx->log, "Shape: ");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, "[%ld]", (long int)shape[i]); }
     fprintf(ctx->log, "\n");
-    fprintf(ctx->log, "Dst offset: %ld\n", dst_offset);
+    fprintf(ctx->log, "Dst offset: %ld\n", (long int)dst_offset);
     fprintf(ctx->log, "Dst strides:");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, " %ld", (long int)dst_strides[i]); }
     fprintf(ctx->log, "\n");
-    fprintf(ctx->log, "Src offset: %ld\n", src_offset);
+    fprintf(ctx->log, "Src offset: %ld\n", (long int)src_offset);
     fprintf(ctx->log, "Src strides:");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, " %ld", (long int)src_strides[i]); }
     fprintf(ctx->log, "\n");
@@ -221,7 +227,7 @@ static void log_transpose(struct futhark_context* ctx,
    ELEM_TYPE* dst, int64_t dst_offset, int64_t dst_strides[r],          \
    ELEM_TYPE *src, int64_t src_offset, int64_t src_strides[r],          \
    int64_t shape[r]) {                                                  \
-    log_copy(ctx, "CPU to CPU", r, dst_offset, dst_strides,             \
+    log_copy(ctx, "CPU to CPU", NULL, r, dst_offset, dst_strides,       \
              src_offset, src_strides, shape);                           \
     int64_t size = 1;                                                   \
     for (int i = 0; i < r; i++) { size *= shape[i]; }                   \

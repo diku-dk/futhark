@@ -3,5 +3,5 @@
 type t = i32
 type ts [n] = [n]t
 
-def main(xs: ts []): [](ts []) =
-  map (\(x: t): [10]t  -> replicate 10 x) xs
+def main (xs: ts []) : [](ts []) =
+  map (\(x: t) : [10]t -> replicate 10 x) xs

@@ -8,9 +8,9 @@ import Data.Bifunctor (first)
 import Data.ByteString.Char8 qualified as SBS
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Either
-import Data.Function ((&))
+import Data.Function (on, (&))
 import Data.IORef
-import Data.List (sortBy)
+import Data.List (groupBy, intersect, sortBy)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Ord
@@ -57,7 +57,7 @@ data BenchOptions = BenchOptions
     optJSON :: Maybe FilePath,
     optTimeout :: Int,
     optSkipCompilation :: Bool,
-    optExcludeCase :: [String],
+    optExcludeCase :: [T.Text],
     optIgnoreFiles :: [Regex],
     optEntryPoint :: Maybe String,
     optTuning :: Maybe String,
@@ -95,6 +95,19 @@ initialBenchOptions =
       optVerbose = 0,
       optTestSpec = Nothing
     }
+
+combineDuplicates :: [BenchResult] -> [BenchResult]
+combineDuplicates =
+  mapMaybe f
+    . groupBy ((==) `on` benchResultProg)
+    . sortBy (comparing benchResultProg)
+  where
+    f [] = Nothing
+    f (x : xs) =
+      Just $
+        BenchResult (benchResultProg x) $
+          concatMap benchResultResults $
+            x : xs
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -134,7 +147,10 @@ runBenchmarks opts paths = do
   let results = concat $ catMaybes maybe_results
   case optJSON opts of
     Nothing -> pure ()
-    Just file -> LBS.writeFile file $ encodeBenchResults results
+    Just file ->
+      LBS.writeFile file $
+        encodeBenchResults $
+          combineDuplicates results
   when (any isNothing maybe_results || anyFailed results) exitFailure
   where
     ignored f = any (`match` f) $ optIgnoreFiles opts
@@ -171,8 +187,9 @@ compileBenchmark opts (program, program_spec) = do
   spec <- maybe (pure program_spec) testSpecFromFileOrDie $ optTestSpec opts
   case testAction spec of
     RunCases cases _ _
-      | "nobench" `notElem` testTags spec,
-        "disable" `notElem` testTags spec,
+      | null $
+          optExcludeCase opts
+            `intersect` (testTags spec <> testTags program_spec),
         any hasRuns cases ->
           if optSkipCompilation opts
             then do
@@ -533,7 +550,7 @@ commandLineOptions =
       ["exclude-case"]
       ( ReqArg
           ( \s -> Right $ \config ->
-              config {optExcludeCase = s : optExcludeCase config}
+              config {optExcludeCase = T.pack s : optExcludeCase config}
           )
           "TAG"
       )
@@ -636,7 +653,11 @@ commandLineOptions =
 
 excludeBackend :: BenchOptions -> BenchOptions
 excludeBackend config =
-  config {optExcludeCase = "no_" <> optBackend config : optExcludeCase config}
+  config
+    { optExcludeCase =
+        "no_" <> T.pack (optBackend config)
+          : optExcludeCase config
+    }
 
 -- | Run @futhark bench@.
 main :: String -> [String] -> IO ()

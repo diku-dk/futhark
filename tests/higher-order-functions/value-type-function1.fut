@@ -3,8 +3,8 @@
 -- ==
 -- error: functional
 
-def mkArray 'a (x : a) : []a = [x]
+def mkArray 'a (x: a) : []a = [x]
 
-def main (x : i32) =
-  let _ = mkArray (\(x:i32) -> x)
+def main (x: i32) =
+  let _ = mkArray (\(x: i32) -> x)
   in x

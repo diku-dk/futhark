@@ -252,7 +252,7 @@ constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
       pat = loopNestingPat first_nest
       rts = map (stripArray (length ispace)) $ patTypes pat
 
-  inner_body' <- fmap (uncurry (flip (KernelBody ()))) $
+  inner_body' <- fmap (uncurry (flip (Body ()))) $
     runBuilder . localScope ispace_scope $ do
       mapM_ readKernelInput $ filter inputIsUsed inps
       res <- bodyBind inner_body
@@ -280,7 +280,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, []) = do
   i <- newVName "gtid"
   let inps =
         [ KernelInput pname ptype arr [Var i]
-          | (Param _ pname ptype, arr) <- params_and_arrs
+        | (Param _ pname ptype, arr) <- params_and_arrs
         ]
   pure ([(i, nesting_w)], inps)
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
@@ -303,7 +303,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   where
     extra_inps i =
       [ KernelInput pname ptype arr [Var i]
-        | (Param _ pname ptype, arr) <- params_and_arrs
+      | (Param _ pname ptype, arr) <- params_and_arrs
       ]
 
 -- | Description of distribution to do.
@@ -405,7 +405,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
                 case M.lookup pname identity_map of
                   Nothing -> do
                     arr <-
-                      newIdent (baseString pname ++ "_r") $ arrayOfRow ptype w
+                      newIdent (baseName pname <> "_r") $ arrayOfRow ptype w
                     pure
                       ( Param mempty pname ptype,
                         arr,
@@ -513,8 +513,8 @@ removeIdentityMappingGeneral bound pat res =
         expandTarget
       )
   where
-    isIdentity (patElem, SubExpRes cs (Var v))
-      | v `notNameIn` bound = Left (patElem, (cs, v))
+    isIdentity (patElem, SubExpRes _ (Var v))
+      | v `notNameIn` bound = Left (patElem, (mempty, v))
     isIdentity x = Right x
 
 removeIdentityMappingFromNesting ::

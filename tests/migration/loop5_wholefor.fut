@@ -6,5 +6,6 @@
 -- }
 
 def main (A: [10]i64) : i64 =
-  loop x = 1 for i < A[0] do
-    x*x
+  loop x = 1
+  for i < A[0] do
+    x * x

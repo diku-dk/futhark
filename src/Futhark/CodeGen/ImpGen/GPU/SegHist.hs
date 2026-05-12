@@ -41,11 +41,13 @@ import Control.Monad
 import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.CodeGen.ImpGen.GPU.SegRed (compileSegRed')
 import Futhark.Construct (fullSliceNum)
+import Futhark.IR.Aliases (consumedInBody)
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Pass.ExplicitAllocations ()
@@ -103,14 +105,14 @@ computeHistoUsage space op = do
     dest_mem <- entryArrayLoc <$> lookupArray dest
 
     subhistos_mem <-
-      sDeclareMem (baseString dest ++ "_subhistos_mem") (Space "device")
+      sDeclareMem (baseName dest <> "_subhistos_mem") (Space "device")
 
     let subhistos_shape =
           Shape (map snd segment_dims ++ [tvSize num_subhistos])
             <> stripDims num_segments (arrayShape dest_t)
     subhistos <-
       sArray
-        (baseString dest ++ "_subhistos")
+        (baseName dest <> "_subhistos")
         (elemType dest_t)
         subhistos_shape
         subhistos_mem
@@ -197,7 +199,7 @@ data Passage = MustBeSinglePass | MayBeMultiPass deriving (Eq, Ord)
 
 bodyPassage :: KernelBody GPUMem -> Passage
 bodyPassage kbody
-  | mempty == consumedInKernelBody (aliasAnalyseKernelBody mempty kbody) =
+  | mempty == consumedInBody (Alias.analyseBody mempty kbody) =
       MayBeMultiPass
   | otherwise =
       MustBeSinglePass
@@ -242,9 +244,8 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
           t64 $
             r64 hist_T / hist_C_max
 
-  hist_L2 :: TV Int32 <- dPrim "L2_size"
   -- Equivalent to F_L2*L2 in paper.
-  sOp $ Imp.GetSizeMax (tvVar hist_L2) Imp.SizeCache
+  hist_L2 <- getSize "hist_L2" Imp.SizeCache
 
   let hist_L2_ln_sz = 16 * 4 -- L2 cache line size approximation
   hist_RACE_exp <-
@@ -419,8 +420,8 @@ histKernelGlobalPass map_pes num_tblocks tblock_size space slugs kbody histogram
       let input_in_bounds = offset .<. total_w_64
 
       sWhen input_in_bounds $
-        compileStms mempty (kernelBodyStms kbody) $ do
-          let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
+        compileStms mempty (bodyStms kbody) $ do
+          let (red_res, map_res) = splitFromEnd (length map_pes) $ bodyResult kbody
 
           sComment "save map-out results" $
             forM_ (zip map_pes map_res) $ \(pe, res) ->
@@ -536,7 +537,7 @@ prepareIntermediateArraysLocal num_subhistos_per_block blocks_per_segment =
             let lock_shape =
                   Shape [tvSize num_subhistos_per_block, hist_H_chk]
 
-            let dims = map pe64 $ shapeDims lock_shape
+            let dims = [sExt64 (tvExp num_subhistos_per_block), pe64 hist_H_chk]
 
             locks <- sAllocArray "locks" int32 lock_shape $ Space "shared"
 
@@ -721,11 +722,11 @@ histKernelLocalPass
           -- serially.  This also involves writing to the mapout arrays if
           -- this is the first chunk.
 
-          compileStms mempty (kernelBodyStms kbody) $ do
+          compileStms mempty (bodyStms kbody) $ do
             let (red_res, map_res) =
                   splitFromEnd (length map_pes) $
                     map kernelResultSubExp $
-                      kernelBodyResult kbody
+                      bodyResult kbody
 
             sWhen (chk_i .==. 0) $
               sComment "save map-out results" $
@@ -887,8 +888,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
       segment_dims = init space_sizes
       segmented = not $ null segment_dims
 
-  hist_L :: TV Int64 <- dPrim "hist_L"
-  sOp $ Imp.GetSizeMax (tvVar hist_L) Imp.SizeSharedMemory
+  hist_L <- getSize "hist_L" Imp.SizeSharedMemory
 
   max_tblock_size :: TV Int64 <- dPrim "max_tblock_size"
   sOp $ Imp.GetSizeMax (tvVar max_tblock_size) Imp.SizeThreadBlock

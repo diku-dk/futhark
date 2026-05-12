@@ -3,4 +3,4 @@
 -- ==
 -- error: also bound
 
-def main (x: i32) (x: i32): i32 = x
+def main (x: i32) (x: i32) : i32 = x

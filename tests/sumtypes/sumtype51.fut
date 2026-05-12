@@ -5,10 +5,10 @@
 type option 'a = #None | #Some a
 
 def gen () : ?[n].[n]i32 =
-  let (n,_) = (0,true)
+  let (n, _) = (0, true)
   in replicate n 0i32
 
-entry main b: option ([]i32) =
+entry main b : option ([]i32) =
   if b
   then #None
-  else #Some(gen ())
+  else #Some (gen ())

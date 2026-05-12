@@ -18,19 +18,20 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, tails, (\\))
+import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Futhark.Analysis.HORep.MapNest (MapNest)
 import Futhark.Analysis.HORep.MapNest qualified as MapNest
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.IR.SOACS qualified as Futhark
 import Futhark.Optimise.Fusion.Composing
+import Futhark.Optimise.Fusion.Screma
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
-import Futhark.Util (splitAt3)
 
 newtype TryFusion a
   = TryFusion
@@ -65,8 +66,6 @@ liftMaybe Nothing = fail "Nothing"
 liftMaybe (Just x) = pure x
 
 type SOAC = SOAC.SOAC SOACS
-
-type MapNest = MapNest.MapNest SOACS
 
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
 inputToOutput (SOAC.Input ts ia iat) =
@@ -188,11 +187,6 @@ attemptFusion mode unfus_nms outVars soac ker = do
   scope <- askScope
   tryFusion (applyFusionRules mode unfus_nms outVars soac ker) scope
 
--- | Check that the consumer does not use any scan or reduce results.
-scremaFusionOK :: ([VName], [VName]) -> FusedSOAC -> Bool
-scremaFusionOK (nonmap_outs, _map_outs) ker =
-  all (`notElem` nonmap_outs) $ mapMaybe SOAC.isVarishInput (inputs ker)
-
 -- | Check that the consumer uses all the outputs of the producer unmodified.
 mapWriteFusionOK :: [VName] -> FusedSOAC -> Bool
 mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
@@ -213,6 +207,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   let soac_c = fsSOAC ker
       inp_p_arr = SOAC.inputs soac_p
       inp_c_arr = SOAC.inputs soac_c
+      out_p = outVars
+      out_c = fsOutNames ker
       lam_p = SOAC.lambda soac_p
       lam_c = SOAC.lambda soac_c
       w = SOAC.width soac_p
@@ -239,7 +235,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   guard $ all inputOrUnfus outVars
 
   outPairs <- forM (zip outVars $ map rowType $ SOAC.typeOf soac_p) $ \(outVar, t) -> do
-    outVar' <- newVName $ baseString outVar ++ "_elem"
+    outVar' <- newVName $ baseName outVar <> "_elem"
     pure (outVar, Ident outVar' t)
 
   let mapLikeFusionCheck =
@@ -261,77 +257,39 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
     (_, _, Vertical)
       | unfus_set /= mempty,
         not (SOAC.nullTransforms $ fsOutputTransform ker) ->
-          fail "Cannot perform diagonal fusion in the presence of output transforms."
-    ( SOAC.Screma _ (ScremaForm scans_c reds_c _) _,
-      SOAC.Screma _ (ScremaForm scans_p reds_p _) _,
+          fail
+            "Cannot perform diagonal fusion in the presence of output transforms."
+    ( SOAC.Screma _ inp_c form_c,
+      SOAC.Screma _ inp_p form_p,
       _
-      )
-        | scremaFusionOK (splitAt (Futhark.scanResults scans_p + Futhark.redResults reds_p) outVars) ker -> do
-            let red_nes_p = concatMap redNeutral reds_p
-                red_nes_c = concatMap redNeutral reds_c
-                scan_nes_p = concatMap scanNeutral scans_p
-                scan_nes_c = concatMap scanNeutral scans_c
-                (res_lam', new_inp) =
-                  fuseRedomap
-                    unfus_set
-                    outVars
-                    lam_p
-                    scan_nes_p
-                    red_nes_p
-                    inp_p_arr
-                    outPairs
-                    lam_c
-                    scan_nes_c
-                    red_nes_c
-                    inp_c_arr
-                (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
-                  splitAt3 (length scan_nes_p) (length red_nes_p) outVars
-                (soac_c_scanout, soac_c_redout, soac_c_mapout) =
-                  splitAt3 (length scan_nes_c) (length red_nes_c) $ fsOutNames ker
-                unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
-            success
-              ( soac_p_scanout
-                  ++ soac_c_scanout
-                  ++ soac_p_redout
-                  ++ soac_c_redout
-                  ++ soac_c_mapout
-                  ++ unfus_arrs
-              )
-              $ SOAC.Screma
-                w
-                (ScremaForm (scans_p ++ scans_c) (reds_p ++ reds_c) res_lam')
-                new_inp
-
-    ------------------
-    -- Scatter fusion --
-    ------------------
-
-    -- Map-Scatter fusion.
-    --
-    -- The 'inplace' mechanism for kernels already takes care of
-    -- checking that the Scatter is not writing to any array used in
-    -- the Map.
-    ( SOAC.Scatter _len _lam _ivs dests,
-      SOAC.Screma _ form _,
-      _
-      )
-        | isJust $ isMapSOAC form,
-          -- 1. all arrays produced by the map are ONLY used (consumed)
-          --    by the scatter, i.e., not used elsewhere.
-          all (`notNameIn` unfus_set) outVars,
-          -- 2. all arrays produced by the map are input to the scatter.
-          mapWriteFusionOK outVars ker -> do
-            let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-            success (fsOutNames ker ++ extra_nms) $
-              SOAC.Scatter w res_lam' new_inp dests
+      ) ->
+        do
+          (inp, form, out) <- fuseScrema w inp_p form_p out_p inp_c form_c out_c
+          success out $ SOAC.Screma w inp form
+          <|> do
+            -- If these two scremas cannot be fused, then see what happens if we
+            -- turn the producer into a stream. The most common (only?) case of
+            -- this mattering is when the producer is a scan and the consumer is
+            -- a reduction.
+            Just _ <- pure $ Futhark.isScanomapSOAC form_p
+            (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
+            if soac_p' /= soac_p
+              then
+                fuseSOACwithKer
+                  mode
+                  (namesFromList (map identName newacc_ids) <> unfus_set)
+                  (map identName newacc_ids ++ outVars)
+                  soac_p'
+                  ker
+              else fail "SOAC could not be turned into stream."
 
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
     -- checking that the Hist is not writing to any array used in
     -- the Map.
-    ( SOAC.Hist _ ops _ _,
-      SOAC.Screma _ form _,
+    ( SOAC.Hist _ _ ops _,
+      SOAC.Screma _ _ form,
       _
       )
         | isJust $ isMapSOAC form,
@@ -342,11 +300,11 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
           mapWriteFusionOK outVars ker -> do
             let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
             success (fsOutNames ker ++ extra_nms) $
-              SOAC.Hist w ops res_lam' new_inp
+              SOAC.Hist w new_inp ops res_lam'
 
     -- Hist-Hist fusion
-    ( SOAC.Hist _ ops_c _ _,
-      SOAC.Hist _ ops_p _ _,
+    ( SOAC.Hist _ _ ops_c _,
+      SOAC.Hist _ _ ops_p _,
       Horizontal
       ) -> do
         let p_num_buckets = length ops_p
@@ -372,40 +330,11 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                       ++ drop p_num_buckets (lambdaReturnType lam_p)
                 }
         success (fsOutNames ker ++ returned_outvars) $
-          SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
-
-    -- Scatter-write fusion.
-    ( SOAC.Scatter _len_c _lam_c ivs_c as_c,
-      SOAC.Scatter
-        _len_p
-        _lam_p
-        ivs_p
-        as_p,
-      Horizontal
-      ) -> do
-        let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
-              where
-                (xs_indices, xs_vals) = splitScatterResults as_xs xs
-                (ys_indices, ys_vals) = splitScatterResults as_ys ys
-        let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
-        let body' =
-              Body
-                { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
-                  bodyStms = bodyStms body_p <> bodyStms body_c,
-                  bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
-                }
-        let lam' =
-              Lambda
-                { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
-                  lambdaBody = body',
-                  lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
-                }
-        success (fsOutNames ker ++ returned_outvars) $
-          SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
-    (SOAC.Scatter {}, _, _) ->
-      fail "Cannot fuse a scatter with anything else than a scatter or a map"
-    (_, SOAC.Scatter {}, _) ->
-      fail "Cannot fuse a scatter with anything else than a scatter or a map"
+          SOAC.Hist w (inp_c_arr <> inp_p_arr) (ops_c <> ops_p) lam'
+    (_, SOAC.Hist {}, _) ->
+      fail "Cannot fuse a Hist with anything else than a Hist or a Map"
+    (SOAC.Hist {}, _, _) ->
+      fail "Cannot fuse a Hist with anything else than a Hist or a Map"
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
@@ -434,20 +363,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
         (map identName newacc_ids ++ outVars)
         soac_p'
         ker
-    (_, SOAC.Screma _ form _, _) | Just _ <- Futhark.isScanomapSOAC form -> do
-      -- A Scan soac can be currently only fused as a (sequential) stream,
-      -- hence it is first translated to a (sequential) Stream and then
-      -- fusion with a kernel is attempted.
-      (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
-      if soac_p' /= soac_p
-        then
-          fuseSOACwithKer
-            mode
-            (namesFromList (map identName newacc_ids) <> unfus_set)
-            (map identName newacc_ids ++ outVars)
-            soac_p'
-            ker
-        else fail "SOAC could not be turned into stream."
     (_, SOAC.Stream {}, _) -> do
       -- If it reached this case then soac_c is NOT a Stream kernel,
       -- hence transform the kernel's soac to a stream and attempt
@@ -465,11 +380,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
             $ ker {fsSOAC = soac_c', fsOutNames = map identName newacc_ids ++ fsOutNames ker}
         else fail "SOAC could not be turned into stream."
 
-    ---------------------------------
-    --- DEFAULT, CANNOT FUSE CASE ---
-    ---------------------------------
-    _ -> fail "Cannot fuse"
-
 fuseStreamHelper ::
   [VName] ->
   Names ->
@@ -483,8 +393,8 @@ fuseStreamHelper
   unfus_set
   outVars
   outPairs
-  (SOAC.Stream w2 lam2 nes2 inp2_arr)
-  (SOAC.Stream _ lam1 nes1 inp1_arr) = do
+  (SOAC.Stream w2 inp2_arr nes2 lam2)
+  (SOAC.Stream _ inp1_arr nes1 lam1) = do
     -- very similar to redomap o redomap composition, but need
     -- to remove first the `chunk' parameters of streams'
     -- lambdas and put them in the resulting stream lambda.
@@ -512,7 +422,7 @@ fuseStreamHelper
         unfus_arrs = filter (`notElem` unfus_accs) $ filter (`nameIn` unfus_set) outVars
     pure
       ( unfus_accs ++ out_kernms ++ unfus_arrs,
-        SOAC.Stream w2 res_lam'' (nes1 ++ nes2) new_inp
+        SOAC.Stream w2 new_inp (nes1 ++ nes2) res_lam''
       )
 fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
 
@@ -554,9 +464,9 @@ iswim ::
   SOAC ->
   SOAC.ArrayTransforms ->
   TryFusion (SOAC, SOAC.ArrayTransforms)
-iswim _ (SOAC.Screma w form arrs) ots
+iswim _ (SOAC.Screma w arrs form) ots
   | Just [Futhark.Scan scan_fun nes] <- Futhark.isScanSOAC form,
-    Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun,
+    Just (map_pat, map_aux, map_w, map_fun) <- rwimPossible scan_fun,
     Just nes_names <- mapM subExpVar nes = do
       let nes_idents = zipWith Ident nes_names $ lambdaReturnType scan_fun
           map_nes = map SOAC.identInput nes_idents
@@ -580,9 +490,8 @@ iswim _ (SOAC.Screma w form arrs) ots
       let map_body =
             mkBody
               ( oneStm $
-                  Let (setPatOuterDimTo w map_pat) (defAux ()) $
-                    Op $
-                      Futhark.Screma w arrs' scan_form
+                  Let (setPatOuterDimTo w map_pat) (defAux ()) . Op $
+                    Futhark.Screma w arrs' scan_form
               )
               $ varsRes
               $ patNames map_pat
@@ -591,10 +500,9 @@ iswim _ (SOAC.Screma w form arrs) ots
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 
-      pure
-        ( SOAC.Screma map_w (ScremaForm [] [] map_fun') map_arrs',
-          ots SOAC.|> SOAC.Rearrange map_cs perm
-        )
+      (,ots SOAC.|> SOAC.Rearrange map_aux perm)
+        . SOAC.Screma map_w map_arrs'
+        <$> mapSOAC map_fun'
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
@@ -621,7 +529,7 @@ commonTransforms interesting inps = commonTransforms' inps'
   where
     inps' =
       [ (SOAC.inputArray inp `elem` interesting, inp)
-        | inp <- inps
+      | inp <- inps
       ]
 
 commonTransforms' :: [(Bool, SOAC.Input)] -> (SOAC.ArrayTransforms, [SOAC.Input])
@@ -673,7 +581,7 @@ pullIndex ::
   SOAC ->
   SOAC.ArrayTransforms ->
   TryFusion (SOAC, SOAC.ArrayTransforms)
-pullIndex (SOAC.Screma _ form inps) ots
+pullIndex (SOAC.Screma _ inps form) ots
   | SOAC.Index cs slice@(Slice (ds@(DimSlice _ w' _) : inner_ds))
       SOAC.:< ots' <-
       SOAC.viewf ots,
@@ -685,7 +593,7 @@ pullIndex (SOAC.Screma _ form inps) ots
           sliceRes (SubExpRes rcs (Var v)) =
             certifying rcs
               . fmap subExpRes
-              . letSubExp (baseString v <> "_sliced")
+              . letSubExp (baseName v <> "_sliced")
               $ BasicOp (Index v (Slice inner_ds))
           sliceRes r = pure r
           inner_changed =
@@ -698,7 +606,7 @@ pullIndex (SOAC.Screma _ form inps) ots
           else
             runLambdaBuilder (lambdaParams lam) $
               mapM sliceRes =<< bodyBind (lambdaBody lam)
-      pure (SOAC.Screma w' (mapSOAC lam') (map sliceInput inps), ots')
+      (,ots') . SOAC.Screma w' (map sliceInput inps) <$> mapSOAC lam'
 pullIndex _ _ = fail "Cannot pull index"
 
 pushRearrange ::
@@ -765,51 +673,19 @@ fixupInputs inpIds inps =
       | otherwise = Nothing
 
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
-pullReshape (SOAC.Screma _ form inps) ots
-  | Just maplam <- Futhark.isMapSOAC form,
-    SOAC.Reshape cs k shape SOAC.:< ots' <- SOAC.viewf ots,
-    all primType $ lambdaReturnType maplam = do
-      let mapw' = case reverse $ shapeDims shape of
-            [] -> intConst Int64 0
-            d : _ -> d
-          trInput inp
-            | arrayRank (SOAC.inputType inp) == 1 =
-                SOAC.addTransform (SOAC.Reshape cs k shape) inp
-            | otherwise =
-                SOAC.addTransform (SOAC.ReshapeOuter cs k shape) inp
-          inputs' = map trInput inps
-          inputTypes = map SOAC.inputType inputs'
-
-      let outersoac ::
-            ([SOAC.Input] -> SOAC) ->
-            (SubExp, [SubExp]) ->
-            TryFusion ([SOAC.Input] -> SOAC)
-          outersoac inner (w, outershape) = do
-            let addDims t = arrayOf t (Shape outershape) NoUniqueness
-                retTypes = map addDims $ lambdaReturnType maplam
-
-            ps <- forM inputTypes $ \inpt ->
-              newParam "pullReshape_param" $
-                stripArray (length shape - length outershape) inpt
-
-            inner_body <-
-              runBodyBuilder $
-                eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]
-            let inner_fun =
-                  Lambda
-                    { lambdaParams = ps,
-                      lambdaReturnType = retTypes,
-                      lambdaBody = inner_body
-                    }
-            pure $ SOAC.Screma w $ Futhark.mapSOAC inner_fun
-
-      op' <-
-        foldM outersoac (SOAC.Screma mapw' $ Futhark.mapSOAC maplam) $
-          zip (drop 1 $ reverse $ shapeDims shape) $
-            drop 1 . reverse . drop 1 . tails $
-              shapeDims shape
-      pure (op' inputs', ots')
-pullReshape _ _ = fail "Cannot pull reshape"
+pullReshape soac ots = do
+  Just mapnest <- MapNest.fromSOAC soac
+  SOAC.Reshape cs newshape SOAC.:< ots' <- pure $ SOAC.viewf ots
+  -- This handles only the easy case where the underlying lambda is
+  -- scalar. The more complicated cases could also be handled, but
+  -- requires more tricky checks.
+  guard $
+    all
+      ((== MapNest.depth mapnest) . arrayRank)
+      (MapNest.typeOf mapnest)
+  mapnest' <- MapNest.reshape cs (newShape newshape) mapnest
+  soac' <- MapNest.toSOAC mapnest'
+  pure (soac', ots')
 
 -- Tie it all together in exposeInputs (for making inputs to a
 -- consumer available) and pullOutputTransforms (for moving
@@ -822,6 +698,7 @@ exposeInputs ::
 exposeInputs inpIds ker =
   (exposeInputs' =<< pushRearrange')
     <|> (exposeInputs' =<< pullRearrange')
+    <|> (exposeInputs' =<< pullReshape')
     <|> (exposeInputs' =<< pullIndex')
     <|> exposeInputs' ker
   where
@@ -839,6 +716,16 @@ exposeInputs inpIds ker =
       (soac', ot') <- pullRearrange (fsSOAC ker) ot
       unless (SOAC.nullTransforms ot') $
         fail "pullRearrange was not enough"
+      pure
+        ker
+          { fsSOAC = soac',
+            fsOutputTransform = SOAC.noTransforms
+          }
+
+    pullReshape' = do
+      (soac', ot') <- pullReshape (fsSOAC ker) ot
+      unless (SOAC.nullTransforms ot') $
+        fail "pullReshape was not enough"
       pure
         ker
           { fsSOAC = soac',

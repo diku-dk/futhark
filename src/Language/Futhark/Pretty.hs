@@ -6,6 +6,7 @@ module Language.Futhark.Pretty
   ( prettyString,
     prettyTuple,
     leadingOperator,
+    symbolName,
     IsName (..),
     prettyNameString,
     Annot (..),
@@ -15,7 +16,6 @@ where
 import Control.Monad
 import Data.Char (chr)
 import Data.Functor
-import Data.List (intersperse)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -37,7 +37,7 @@ import Prelude
 -- with the tag.  To avoid erroneously using the 'Pretty' instance for
 -- VNames, we in fact only define it inside the modules for the core
 -- language (as an orphan instance).
-class IsName v where
+class (Eq v) => IsName v where
   prettyName :: v -> Doc a
   toName :: v -> Name
 
@@ -47,7 +47,7 @@ class IsName v where
 instance IsName VName where
   prettyName
     | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
-        \(VName vn i) -> pretty vn <> "_" <> pretty (show i)
+        \(VName vn i) -> pretty vn <> "_" <> pretty i
     | otherwise = pretty . baseName
   toName = baseName
 
@@ -173,7 +173,7 @@ instance (IsName vn, Pretty d) => Pretty (TypeExp d vn) where
   pretty (TETuple ts _) = parens $ commasep $ map pretty ts
   pretty (TERecord fs _) = braces $ commasep $ map ppField fs
     where
-      ppField (name, t) = pretty (nameToString name) <> colon <+> pretty t
+      ppField (L _ name, t) = prettyName name <> colon <+> pretty t
   pretty (TEVar name _) = pretty name
   pretty (TEParens te _) = parens $ pretty te
   pretty (TEApply t arg _) = pretty t <+> pretty arg
@@ -204,7 +204,7 @@ hasArrayLit ArrayLit {} = True
 hasArrayLit (TupLit es2 _) = any hasArrayLit es2
 hasArrayLit _ = False
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
+instance (IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
   pretty (DimFix e) = pretty e
   pretty (DimSlice i j (Just s)) =
     maybe mempty pretty i
@@ -223,12 +223,12 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
 instance (IsName vn) => Pretty (SizeBinder vn) where
   pretty (SizeBinder v _) = brackets $ prettyName v
 
-letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc a
+letBody :: (IsName vn, Annot f) => ExpBase f vn -> Doc a
 letBody body@(AppExp LetPat {} _) = pretty body
 letBody body@(AppExp LetFun {} _) = pretty body
 letBody body = "in" <+> align (pretty body)
 
-prettyAppExp :: (Eq vn, IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
+prettyAppExp :: (IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
 prettyAppExp p (BinOp (bop, _) _ (x, _) (y, _) _) = prettyBinOp p bop x y
 prettyAppExp _ (Match e cs _) = "match" <+> pretty e </> (stack . map pretty) (NE.toList cs)
 prettyAppExp _ (Loop sizeparams pat initexp form loopbody _) =
@@ -259,7 +259,7 @@ prettyAppExp p (LetPat sizes pat e body _) =
       ArrayLit {} -> False
       Lambda {} -> True
       _ -> hasArrayLit e
-prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
+prettyAppExp _ (LetFun (fname, _) (tparams, params, retdecl, rettype, e) body _) =
   "let"
     <+> hsep (prettyName fname : map pretty tparams ++ map pretty params)
     <> retdecl'
@@ -270,11 +270,11 @@ prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
     retdecl' = case (pretty <$> unAnnot rettype) `mplus` (pretty <$> retdecl) of
       Just rettype' -> colon <+> align rettype'
       Nothing -> mempty
-prettyAppExp _ (LetWith dest src idxs ve body _)
+prettyAppExp _ (LetWith dest src steps ve body _)
   | dest == src =
       "let"
         <+> pretty dest
-        <> list (map pretty idxs)
+        <> prettyLetLhsUpdate steps
           <+> equals
           <+> align (pretty ve)
           </> letBody body
@@ -284,7 +284,7 @@ prettyAppExp _ (LetWith dest src idxs ve body _)
         <+> equals
         <+> pretty src
         <+> "with"
-        <+> brackets (commasep (map pretty idxs))
+        <+> prettyUpdate steps
         <+> "="
         <+> align (pretty ve)
         </> letBody body
@@ -308,7 +308,13 @@ prettyAppExp p (Apply f args _) =
     prettyExp 0 f
       <+> hsep (map (prettyExp 10 . snd) $ NE.toList args)
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
+prettyLetLhsUpdate :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
+prettyLetLhsUpdate = mconcat . map pp
+  where
+    pp (UpdateStepSlice idxs) = brackets (commasep (map pretty idxs))
+    pp (UpdateStepField f) = "." <> pretty f
+
+instance (IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)
 
 prettyInst :: (Annot f, Pretty t) => f t -> Doc a
@@ -322,17 +328,18 @@ prettyInst t =
 prettyAttr :: (Pretty a) => a -> Doc ann
 prettyAttr attr = "#[" <> pretty attr <> "]"
 
-operatorName :: Name -> Bool
-operatorName = (`elem` opchars) . T.head . nameToText
+-- | Does this name correspond to a symbol rather than an identifier?
+symbolName :: Name -> Bool
+symbolName = (`elem` opchars) . T.head . nameToText
   where
     opchars :: String
     opchars = "+-*/%=!><|&^."
 
-prettyExp :: (Eq vn, IsName vn, Annot f) => Int -> ExpBase f vn -> Doc a
+prettyExp :: (IsName vn, Annot f) => Int -> ExpBase f vn -> Doc a
 prettyExp _ (Var name t _)
   -- The first case occurs only for programs that have been normalised
   -- by the compiler.
-  | operatorName (toName (qualLeaf name)) = parens $ pretty name <> prettyInst t
+  | symbolName (toName (qualLeaf name)) = parens $ pretty name <> prettyInst t
   | otherwise = pretty name <> prettyInst t
 prettyExp _ (Hole t _) = "???" <> prettyInst t
 prettyExp _ (Parens e _) = align $ parens $ pretty e
@@ -353,23 +360,19 @@ prettyExp _ (RecordLit fs _)
   where
     fieldArray (RecordFieldExplicit _ e _) = hasArrayLit e
     fieldArray RecordFieldImplicit {} = False
+prettyExp _ (ArrayVal vs _ _) =
+  brackets (commasep $ map pretty vs)
 prettyExp _ (ArrayLit es t _) =
   brackets (commasep $ map pretty es) <> prettyInst t
 prettyExp _ (StringLit s _) =
   pretty $ show $ map (chr . fromIntegral) s
-prettyExp _ (Project k e _ _) = pretty e <> "." <> pretty k
+prettyExp _ (Project k e _ _) = prettyExp 11 e <> "." <> pretty k
 prettyExp _ (Negate e _) = "-" <> pretty e
-prettyExp _ (Not e _) = "-" <> pretty e
-prettyExp _ (Update src idxs ve _) =
+prettyExp _ (Not e _) = "!" <> pretty e
+prettyExp _ (Update src steps ve _ _) =
   pretty src
     <+> "with"
-    <+> brackets (commasep (map pretty idxs))
-    <+> "="
-    <+> align (pretty ve)
-prettyExp _ (RecordUpdate src fs ve _ _) =
-  pretty src
-    <+> "with"
-    <+> mconcat (intersperse "." (map pretty fs))
+    <+> prettyUpdate steps
     <+> "="
     <+> align (pretty ve)
 prettyExp _ (Assert e1 e2 _ _) =
@@ -387,17 +390,17 @@ prettyExp _ (OpSectionLeft binop _ x _ _ _) =
   parens $ pretty x <+> ppBinOp binop
 prettyExp _ (OpSectionRight binop _ x _ _ _) =
   parens $ ppBinOp binop <+> pretty x
-prettyExp _ (ProjectSection fields _ _) =
-  parens $ mconcat $ map p fields
+prettyExp _ (UpdateSection steps _ _) =
+  parens $ mconcat $ zipWith p [(0 :: Int) ..] steps
   where
-    p name = "." <> pretty name
-prettyExp _ (IndexSection idxs _ _) =
-  parens $ "." <> brackets (commasep (map pretty idxs))
+    p _ (UpdateStepField name) = "." <> pretty name
+    p 0 (UpdateStepSlice idxs) = "." <> brackets (commasep (map pretty idxs))
+    p _ (UpdateStepSlice idxs) = brackets (commasep (map pretty idxs))
 prettyExp p (Constr n cs t _) =
   parensIf (p >= 10) $
     "#" <> pretty n <+> sep (map (prettyExp 10) cs) <> prettyInst t
-prettyExp _ (Attr attr e _) =
-  prettyAttr attr </> prettyExp (-1) e
+prettyExp p (Attr attr e _) =
+  parensIf (p >= 10) $ align $ prettyAttr attr </> prettyExp (-1) e
 prettyExp i (AppExp e res)
   | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2,
     Just (AppRes t ext) <- unAnnot res,
@@ -407,7 +410,17 @@ prettyExp i (AppExp e res)
         <> parens (pretty t <> "," <+> brackets (commasep $ map prettyName ext))
   | otherwise = prettyAppExp i e
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
+prettyUpdate :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
+prettyUpdate = mconcat . zipWith pp [0 :: Int ..]
+  where
+    pp _ (UpdateStepSlice idxs) =
+      brackets (commasep (map pretty idxs))
+    pp 0 (UpdateStepField f) =
+      pretty f
+    pp _ (UpdateStepField f) =
+      "." <> pretty f
+
+instance (IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pretty = prettyExp (-1)
 
 instance (IsName vn) => Pretty (AttrAtom vn) where
@@ -418,14 +431,18 @@ instance (IsName vn) => Pretty (AttrInfo vn) where
   pretty (AttrAtom attr _) = pretty attr
   pretty (AttrComp f attrs _) = pretty f <> parens (commasep $ map pretty attrs)
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
-  pretty (RecordFieldExplicit name e _) = pretty name <> equals <> pretty e
-  pretty (RecordFieldImplicit name _ _) = prettyName name
+instance (IsName vn, Annot f) => Pretty (FieldBase f vn) where
+  pretty (RecordFieldExplicit (L _ name) e _) = pretty name <> equals <> pretty e
+  pretty (RecordFieldImplicit (L _ name) _ _) = prettyName name
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (CaseBase f vn) where
+instance (IsName vn, Annot f) => Pretty (CaseBase f vn) where
   pretty (CasePat p e _) = "case" <+> pretty p <+> "->" </> indent 2 (pretty e)
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
+instance (IsName vn, Annot f) => Pretty (LoopInitBase f vn) where
+  pretty (LoopInitImplicit e) = maybe "_" pretty $ unAnnot e
+  pretty (LoopInitExplicit e) = pretty e
+
+instance (IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
   pretty (For i ubound) =
     "for" <+> pretty i <+> "<" <+> align (pretty ubound)
   pretty (ForIn x e) =
@@ -438,7 +455,7 @@ instance Pretty PatLit where
   pretty (PatLitFloat f) = pretty f
   pretty (PatLitPrim v) = pretty v
 
-instance (Eq vn, IsName vn, Annot f, Pretty t) => Pretty (PatBase f vn t) where
+instance (IsName vn, Annot f, Pretty t) => Pretty (PatBase f vn t) where
   pretty (PatAscription p t _) = pretty p <> colon <+> align (pretty t)
   pretty (PatParens p _) = parens $ pretty p
   pretty (Id v t _) = case unAnnot t of
@@ -447,7 +464,7 @@ instance (Eq vn, IsName vn, Annot f, Pretty t) => Pretty (PatBase f vn t) where
   pretty (TuplePat pats _) = parens $ commasep $ map pretty pats
   pretty (RecordPat fs _) = braces $ commasep $ map ppField fs
     where
-      ppField (name, t) = pretty (nameToString name) <> equals <> pretty t
+      ppField (L _ name, t) = prettyName name <> equals <> pretty t
   pretty (Wildcard t _) = case unAnnot t of
     Just t' -> parens $ "_" <> colon <+> pretty t'
     Nothing -> "_"
@@ -459,10 +476,10 @@ ppAscription :: (Pretty t) => Maybe t -> Doc a
 ppAscription Nothing = mempty
 ppAscription (Just t) = colon <> align (pretty t)
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (ProgBase f vn) where
+instance (IsName vn, Annot f) => Pretty (ProgBase f vn) where
   pretty = stack . punctuate line . map pretty . progDecs
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (DecBase f vn) where
+instance (IsName vn, Annot f) => Pretty (DecBase f vn) where
   pretty (ValDec dec) = pretty dec
   pretty (TypeDec dec) = pretty dec
   pretty (ModTypeDec sig) = pretty sig
@@ -471,7 +488,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (DecBase f vn) where
   pretty (LocalDec dec _) = "local" <+> pretty dec
   pretty (ImportDec x _ _) = "import" <+> pretty x
 
-prettyModExp :: (Eq vn, IsName vn, Annot f) => Int -> ModExpBase f vn -> Doc a
+prettyModExp :: (IsName vn, Annot f) => Int -> ModExpBase f vn -> Doc a
 prettyModExp _ (ModVar v _) =
   pretty v
 prettyModExp _ (ModParens e _) =
@@ -479,7 +496,7 @@ prettyModExp _ (ModParens e _) =
 prettyModExp _ (ModImport v _ _) =
   "import" <+> pretty (show v)
 prettyModExp _ (ModDecs ds _) =
-  nestedBlock "{" "}" $ stack $ punctuate line $ map pretty ds
+  nestedBlock $ stack $ punctuate line $ map pretty ds
 prettyModExp p (ModApply f a _ _ _) =
   parensIf (p >= 10) $ prettyModExp 0 f <+> prettyModExp 10 a
 prettyModExp p (ModAscript me se _ _) =
@@ -496,7 +513,7 @@ prettyModExp p (ModLambda param maybe_sig body _) =
       Nothing -> mempty
       Just (sig, _) -> colon <+> pretty sig
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (ModExpBase f vn) where
+instance (IsName vn, Annot f) => Pretty (ModExpBase f vn) where
   pretty = prettyModExp (-1)
 
 instance Pretty Liftedness where
@@ -504,7 +521,7 @@ instance Pretty Liftedness where
   pretty SizeLifted = "~"
   pretty Lifted = "^"
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
+instance (IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
   pretty (TypeBind name l params te rt _ _) =
     "type"
       <> pretty l
@@ -512,12 +529,12 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
         <+> equals
         <+> maybe (pretty te) pretty (unAnnot rt)
 
-instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
+instance (IsName vn) => Pretty (TypeParamBase vn) where
   pretty (TypeParamDim name _) = brackets $ prettyName name
   pretty (TypeParamType l name _) = "'" <> pretty l <> prettyName name
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
-  pretty (ValBind entry name retdecl rettype tparams args body _ attrs _) =
+instance (IsName vn, Annot f) => Pretty (ValBindBase f vn) where
+  pretty (ValBind entry name _ retdecl rettype tparams args body _ attrs _) =
     mconcat (map ((<> line) . prettyAttr) attrs)
       <> fun
         <+> align
@@ -538,21 +555,26 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
         Just rettype' -> [colon <+> align rettype']
         Nothing -> mempty
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
+instance (IsName vn, Annot f) => Pretty (SpecBase f vn) where
   pretty (TypeAbbrSpec tpsig) = pretty tpsig
   pretty (TypeSpec l name ps _ _) =
     "type" <> pretty l <+> hsep (prettyName name : map pretty ps)
   pretty (ValSpec name tparams vtype _ _ _) =
-    "val" <+> hsep (prettyName name : map pretty tparams) <> colon <+> pretty vtype
+    "val" <+> hsep (name' : map pretty tparams) <> colon <+> pretty vtype
+    where
+      name' =
+        if symbolName $ toName name
+          then parens $ prettyName name
+          else prettyName name
   pretty (ModSpec name sig _ _) =
     "module" <+> prettyName name <> colon <+> pretty sig
   pretty (IncludeSpec e _) =
     "include" <+> pretty e
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (ModTypeExpBase f vn) where
+instance (IsName vn, Annot f) => Pretty (ModTypeExpBase f vn) where
   pretty (ModTypeVar v _ _) = pretty v
   pretty (ModTypeParens e _) = parens $ pretty e
-  pretty (ModTypeSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ss)
+  pretty (ModTypeSpecs ss _) = nestedBlock (stack $ punctuate line $ map pretty ss)
   pretty (ModTypeWith s (TypeRef v ps td _) _) =
     pretty s <+> "with" <+> pretty v <+> hsep (map pretty ps) <> " =" <+> pretty td
   pretty (ModTypeArrow (Just v) e1 e2 _) =
@@ -560,15 +582,15 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ModTypeExpBase f vn) where
   pretty (ModTypeArrow Nothing e1 e2 _) =
     pretty e1 <+> "->" <+> pretty e2
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (ModTypeBindBase f vn) where
+instance (IsName vn, Annot f) => Pretty (ModTypeBindBase f vn) where
   pretty (ModTypeBind name e _ _) =
     "module type" <+> prettyName name <+> equals <+> pretty e
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (ModParamBase f vn) where
+instance (IsName vn, Annot f) => Pretty (ModParamBase f vn) where
   pretty (ModParam pname psig _ _) =
     parens (prettyName pname <> colon <+> pretty psig)
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (ModBindBase f vn) where
+instance (IsName vn, Annot f) => Pretty (ModBindBase f vn) where
   pretty (ModBind name ps sig e _ _) =
     "module" <+> hsep (prettyName name : map pretty ps) <> sig' <> " =" <+> pretty e
     where
@@ -585,7 +607,7 @@ ppBinOp bop =
     leading = leadingOperator $ toName $ qualLeaf bop
 
 prettyBinOp ::
-  (Eq vn, IsName vn, Annot f) =>
+  (IsName vn, Annot f) =>
   Int ->
   QualName vn ->
   ExpBase f vn ->
@@ -631,4 +653,5 @@ prettyBinOp p bop x y =
     precedence Backtick = 9
     rprecedence Minus = 10
     rprecedence Divide = 10
-    rprecedence op = precedence op
+    rprecedence PipeLeft = -1
+    rprecedence op = precedence op + 1

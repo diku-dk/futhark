@@ -1,1 +1,1 @@
-def whatever(x: i32) = x + 2
+def whatever (x: i32) = x + 2

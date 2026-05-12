@@ -7,6 +7,6 @@ def zero (xs: *[]i32) (i: i32) =
 
 def apply f x = f x
 
-def main (arr: *[]i32)=
+def main (arr: *[]i32) =
   let f = zero arr
   in apply f 0

@@ -16,7 +16,7 @@
 -- output { 12 55 }
 -- structure { Screma 1 }
 
-def main(i: i32) (a: []i32): (i32, i32) =
-  let b = map (+2) a
+def main (i: i32) (a: []i32) : (i32, i32) =
+  let b = map (+ 2) a
   let c = scan (+) 0 a
   in (b[i], c[i])

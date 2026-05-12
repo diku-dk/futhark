@@ -31,7 +31,7 @@ tileLoops =
     onStms scope stms =
       modifyNameSource $
         runState $
-          runReaderT (optimiseStms (M.empty, M.empty) stms) scope
+          runReaderT (optimiseStms (M.empty, initialIxFnEnv scope) stms) scope
 
 optimiseBody :: Env -> Body GPU -> TileM (Body GPU)
 optimiseBody env (Body () stms res) =
@@ -80,10 +80,10 @@ tileInKernelBody ::
   KernelBody GPU ->
   TileM (Stms GPU, (SegLevel, SegSpace, KernelBody GPU))
 tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
-  | Just kbody_res <- mapM isSimpleResult $ kernelBodyResult kbody = do
+  | Just kbody_res <- mapM isSimpleResult $ bodyResult kbody = do
       maybe_tiled <-
         tileInBody branch_variant initial_variance lvl initial_kspace ts $
-          Body () (kernelBodyStms kbody) kbody_res
+          Body () (bodyStms kbody) kbody_res
       case maybe_tiled of
         Just (host_stms, tiling, tiledBody) -> do
           (res', stms') <-
@@ -92,7 +92,7 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
             ( host_stms,
               ( tilingLevel tiling,
                 tilingSpace tiling,
-                KernelBody () stms' res'
+                Body () stms' res'
               )
             )
         Nothing ->
@@ -278,7 +278,7 @@ partitionPrelude variance prestms private used_after =
     invariantTo names stm =
       case patNames (stmPat stm) of
         [] -> True -- Does not matter.
-        v : _ -> all (`notNameIn` names) (namesToList $ M.findWithDefault mempty v variance)
+        v : _ -> allNames (`notNameIn` names) (M.findWithDefault mempty v variance)
 
     consumed_in_prestms =
       foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
@@ -394,7 +394,7 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
             doPrelude tiling privstms precomputed_variant_prestms live_set
 
         mergeparams' <- forM mergeparams $ \(Param attrs pname pt) ->
-          Param attrs <$> newVName (baseString pname ++ "_group") <*> pure (tileDim pt)
+          Param attrs <$> newVName (baseName pname <> "_group") <*> pure (tileDim pt)
 
         let merge_ts = map paramType mergeparams
 
@@ -429,7 +429,7 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
 
         loopbody' <-
           localScope (scopeOfFParams mergeparams') . runBodyBuilder $
-            resultBody . map Var <$> tiledBody private' privstms'
+            varsRes <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
             Loop merge' (ForLoop i it bound) loopbody'
@@ -577,7 +577,7 @@ data ResidualTileArgs = ResidualTileArgs
 -- the kernel.
 data Tiling = Tiling
   { tilingSegMap ::
-      String ->
+      Name ->
       ResultManifest ->
       (PrimExp VName -> [DimIndex SubExp] -> Builder GPU Result) ->
       Builder GPU [VName],
@@ -606,7 +606,7 @@ type DoTiling gtids kdims =
   gtids -> kdims -> SubExp -> Builder GPU Tiling
 
 protectOutOfBounds ::
-  String ->
+  Name ->
   PrimExp VName ->
   [Type] ->
   Builder GPU Result ->
@@ -694,7 +694,7 @@ tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res 
       merge <- forM (zip (lambdaParams red_lam) mergeinits) $ \(p, mergeinit) ->
         (,)
           <$> newParam
-            (baseString (paramName p) ++ "_merge")
+            (baseName (paramName p) <> "_merge")
             (paramType p `arrayOfShape` tile_shape `toDecl` Unique)
           <*> pure (Var mergeinit)
 
@@ -711,7 +711,7 @@ tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res 
                 map (paramName . fst) merge
               tile_args =
                 ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
-          resultBody . map Var <$> tilingProcessTile tiling tile_args
+          varsRes <$> tilingProcessTile tiling tile_args
 
       accs <- letTupExp "accs" $ Loop merge loopform loopbody
 
@@ -740,8 +740,8 @@ tileReturns dims_on_top dims arr = do
       then pure arr
       else do
         let new_shape = Shape $ unit_dims ++ arrayDims arr_t
-        letExp (baseString arr) . BasicOp $
-          Reshape ReshapeArbitrary new_shape arr
+        letExp (baseName arr) . BasicOp $
+          Reshape arr (reshapeAll (arrayShape arr_t) new_shape)
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
   pure $ TileReturns mempty tile_dims arr'
 
@@ -837,7 +837,7 @@ processTile1D gid gtid kdim tile_size (KernelGrid _num_tblocks tblock_size) tile
 
     tiles' <- mapM sliceTile tiles
 
-    let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
+    form' <- redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
     fmap varsRes $
       letTupExp "acc"
         =<< eIf
@@ -906,15 +906,14 @@ processResidualTile1D gid gtid kdim tile_size grid args = do
       -- updates its accumulator.
       let tile_args =
             ProcessTileArgs privstms red_comm red_lam map_lam tiles accs num_whole_tiles
-      resultBody . map Var
-        <$> processTile1D gid gtid kdim residual_input grid tile_args
+      varsRes <$> processTile1D gid gtid kdim residual_input grid tile_args
 
 tiling1d :: [(VName, SubExp)] -> DoTiling VName SubExp
 tiling1d dims_on_top gtid kdim w = do
   gid <- newVName "gid"
   gid_flat <- newVName "gid_flat"
 
-  tile_size_key <- nameFromString . prettyString <$> newVName "tile_size"
+  tile_size_key <- nameFromText . prettyText <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeThreadBlock
   let tblock_size = tile_size
 
@@ -1092,9 +1091,9 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size tile_ar
       -- point).
       thread_accs <- forM accs $ \acc ->
         letSubExp "acc" $ BasicOp $ Index acc $ Slice [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
-      let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
+      form' <- redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
 
-          sliceTile (InputUntiled arr) =
+      let sliceTile (InputUntiled arr) =
             sliceUntiled arr tile_id tile_size actual_tile_size
           sliceTile (InputTiled perm tile) = do
             tile_t <- lookupType tile
@@ -1109,8 +1108,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size tile_ar
       fmap varsRes $
         letTupExp "acc"
           =<< eIf
-            ( toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
-            )
+            (toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y)
             (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size tiles' form'])
             (resultBodyM thread_accs)
 
@@ -1172,20 +1170,14 @@ processResidualTile2D gids gtids kdims tile_size args = do
 
       -- Now each thread performs a traversal of the tile and
       -- updates its accumulator.
-      resultBody . map Var
-        <$> processTile2D
-          gids
-          gtids
-          kdims
-          tile_size
-          tile_args
+      varsRes <$> processTile2D gids gtids kdims tile_size tile_args
 
 tiling2d :: [(VName, SubExp)] -> DoTiling (VName, VName) (SubExp, SubExp)
 tiling2d dims_on_top (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
   gid_x <- newVName "gid_x"
   gid_y <- newVName "gid_y"
 
-  tile_size_key <- nameFromString . prettyString <$> newVName "tile_size"
+  tile_size_key <- nameFromText . prettyText <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
   tblock_size <- letSubExp "tblock_size" $ BasicOp $ BinOp (Mul Int64 OverflowUndef) tile_size tile_size
 

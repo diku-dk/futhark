@@ -48,7 +48,6 @@ compileProg version prog = do
     GC.compileProg
       "wasm_multicore"
       version
-      mempty
       MC.operations
       generateBoilerplate
       ""
@@ -59,20 +58,20 @@ compileProg version prog = do
   pure
     ( ws,
       ( prog'',
-        javascriptWrapper (fRepMyRep prog'),
-        "_futhark_context_config_set_num_threads" : emccExportNames (fRepMyRep prog')
+        javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')),
+        "_futhark_context_config_set_num_threads" : emccExportNames (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog'))
       )
     )
 
 fRepMyRep :: Imp.Definitions Imp.Multicore -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Functions fs = Imp.defFuns prog
-      function (Imp.Function entry _ _ _) = do
-        Imp.EntryPoint n res args <- entry
+      function fun = do
+        Imp.EntryPoint n res args <- Imp.functionEntry fun
         Just $
           JSEntryPoint
             { name = nameToString n,
               parameters = map (extToString . snd) args,
-              ret = map (extToString . snd) res
+              ret = extToString $ snd res
             }
    in mapMaybe (function . snd) fs

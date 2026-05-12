@@ -5,6 +5,6 @@
 
 def plus a b : i64 = a + b
 
-def plus_comm [a][b]'t : [plus a b][plus b a]bool = tabulate_2d (plus a b) (plus b a) (\_ _ -> true)
+def plus_comm [a] [b] 't : [plus a b][plus b a]bool = tabulate_2d (plus a b) (plus b a) (\_ _ -> true)
 
 def main a b = copy plus_comm : [plus a b][plus b a]bool

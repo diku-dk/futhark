@@ -11,7 +11,7 @@ import "intrinsics"
 
 -- This fails due to a memory allocation error.
 
-let v = [[1i64]]
+def v = [[1i64]]
 
 def main (A: *[5]i64) : *[5]i64 =
   let x = A[0]

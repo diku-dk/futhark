@@ -15,6 +15,8 @@ module Futhark.IR.Syntax.Core
     ShapeBase (..),
     Shape,
     stripDims,
+    dropDims,
+    takeDims,
     Ext (..),
     ExtSize,
     ExtShape,
@@ -71,6 +73,10 @@ module Futhark.IR.Syntax.Core
     FlatDimIndex (..),
     flatSliceDims,
     flatSliceStrides,
+
+    -- * Provenance
+    Provenance (..),
+    stackProvenance,
   )
 where
 
@@ -80,12 +86,14 @@ import Control.Monad.State
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
+import Data.Loc (locEnd, locStart)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.String
 import Data.Text qualified as T
 import Data.Traversable (fmapDefault, foldMapDefault)
+import Futhark.Util (splitFromEnd)
 import Language.Futhark.Core
 import Language.Futhark.Primitive
 import Prelude hiding (id, (.))
@@ -123,10 +131,19 @@ instance Semigroup (ShapeBase d) where
 instance Monoid (ShapeBase d) where
   mempty = Shape mempty
 
--- | @stripDims n shape@ strips the outer @n@ dimensions from
--- @shape@.
+-- | Alias for 'dropDims'
 stripDims :: Int -> ShapeBase d -> ShapeBase d
-stripDims n (Shape dims) = Shape $ drop n dims
+stripDims = dropDims
+
+-- | @dropDims n shape@ strips the outer @n@ dimensions from
+-- @shape@.
+dropDims :: Int -> ShapeBase d -> ShapeBase d
+dropDims n (Shape dims) = Shape $ drop n dims
+
+-- | @takeDims n shape@ takes the outer @n@ dimensions from @shape@, up to the
+-- number of dimensions in @shape@.
+takeDims :: Int -> ShapeBase d -> ShapeBase d
+takeDims n (Shape dims) = Shape $ take n dims
 
 -- | The size of an array as a list of subexpressions.  If a variable,
 -- that variable must be in scope where this array is used.
@@ -168,9 +185,13 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | Check whether one shape if a subset of another shape.
   subShapeOf :: a -> a -> Bool
 
+  -- | Prepend the dimensions of a 'Shape'.
+  prependShape :: Shape -> a -> a
+
 instance ArrayShape (ShapeBase SubExp) where
   shapeRank (Shape l) = length l
   subShapeOf = (==)
+  prependShape = (<>)
 
 instance ArrayShape (ShapeBase ExtSize) where
   shapeRank (Shape l) = length l
@@ -193,6 +214,8 @@ instance ArrayShape (ShapeBase ExtSize) where
             put $ M.insert y x extmap
             pure True
 
+  prependShape shape = (fmap Free shape <>)
+
 instance Semigroup Rank where
   Rank x <> Rank y = Rank $ x + y
 
@@ -202,6 +225,7 @@ instance Monoid Rank where
 instance ArrayShape Rank where
   shapeRank (Rank x) = x
   subShapeOf = (==)
+  prependShape shape (Rank x) = Rank $ shapeRank shape + x
 
 -- | The memory space of a block.  If 'DefaultSpace', this is the "default"
 -- space, whatever that is.  The exact meaning of the 'SpaceId'
@@ -498,6 +522,12 @@ newtype ErrorMsg a = ErrorMsg [ErrorMsgPart a]
 instance IsString (ErrorMsg a) where
   fromString = ErrorMsg . pure . fromString
 
+instance Monoid (ErrorMsg a) where
+  mempty = ErrorMsg mempty
+
+instance Semigroup (ErrorMsg a) where
+  ErrorMsg x <> ErrorMsg y = ErrorMsg $ x <> y
+
 -- | A part of an error message.
 data ErrorMsgPart a
   = -- | A literal string.
@@ -608,6 +638,11 @@ data OpaqueType
     -- represent that constructor payload. This is necessary because
     -- we deduplicate payloads across constructors.
     OpaqueSum [ValueType] [(Name, [(EntryPointType, [Int])])]
+  | -- | An array with this rank and named opaque element type.
+    OpaqueArray Int Name [ValueType]
+  | -- | An array with known rank and where the elements are this
+    -- record type.
+    OpaqueRecordArray Int Name [(Name, EntryPointType)]
   deriving (Eq, Ord, Show)
 
 -- | Names of opaque types and their representation.
@@ -620,3 +655,37 @@ instance Monoid OpaqueTypes where
 instance Semigroup OpaqueTypes where
   OpaqueTypes x <> OpaqueTypes y =
     OpaqueTypes $ x <> filter ((`notElem` map fst x) . fst) y
+
+-- | Information about what in the original program a given IR statement
+-- corresponds to. See Note [Tracking Source Locations].
+data Provenance = Provenance [Loc] Loc
+  deriving (Eq, Ord, Show)
+
+contains :: Loc -> Loc -> Bool
+contains l1 l2 = locStart l1 <= locStart l2 && locEnd l1 >= locEnd l2
+
+clean :: [Loc] -> [Loc]
+clean (l : ls) | l == mempty = clean ls
+clean (l1 : l2 : ls)
+  -- Remove locations that completely enclose a successive location. This is to
+  -- remove locations that correspond to lambdas that are immediately applied -
+  -- they are pretty boring and just add clutter.
+  | l1 `contains` l2 = clean $ l2 : ls
+  | otherwise = l1 : clean (l2 : ls)
+clean ls = ls
+
+stackProvenance :: Provenance -> Provenance -> Provenance
+stackProvenance (Provenance xs x) (Provenance ys y) =
+  case splitFromEnd 1 $ clean $ xs <> [x] <> ys <> [y] of
+    (zs', [z']) -> Provenance zs' z'
+    _ -> mempty -- Zero-information case.
+
+instance Monoid Provenance where
+  mempty = Provenance mempty mempty
+
+instance Semigroup Provenance where
+  Provenance xs x <> Provenance ys y
+    | y == mempty = Provenance xs x
+    | x == mempty = Provenance ys y
+    | xs == ys = Provenance xs (x <> y)
+    | otherwise = Provenance ys y

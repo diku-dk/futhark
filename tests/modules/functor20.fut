@@ -4,7 +4,7 @@
 
 module type integral = {
   type t
-  val frob: t -> t
+  val frob : t -> t
 }
 
 module quux = {
@@ -16,7 +16,7 @@ module type has_int = {
   module int: integral
 }
 
-module mk_has_int (T: integral): has_int with int.t = T.t = {
+module mk_has_int (T: integral) : has_int with int.t = T.t = {
   module int = T
 }
 

@@ -6,5 +6,6 @@
 -- }
 
 def main [n] (A: [n]i64) : (i64, i64) =
-  loop (x, y) = (0, 0) while x < 1000 do
-    (x + A[x%n], y+1)
+  loop (x, y) = (0, 0)
+  while x < 1000 do
+    (x + A[x % n], y + 1)

@@ -5,4 +5,4 @@
 -- To avoid enormous output, we just sample the result.
 def main n =
   let res = scan (+) 0 (map i8.i64 (iota n))
-  in (res[0], res[n/2], res[n-1])
+  in (res[0], res[n / 2], res[n - 1])

@@ -4,8 +4,9 @@
 
 def main =
   let n = 10
-  let a = iota(n)
-  let b = iota(n)
+  let a = iota (n)
+  let b = iota (n)
   in loop b for i < n do
-     let a[i] = i -- Error, because a is free and should not be consumed.
-     in b
+       let a[i] = i
+       -- Error, because a is free and should not be consumed.
+       in b

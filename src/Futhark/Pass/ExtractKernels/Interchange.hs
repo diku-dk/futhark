@@ -75,11 +75,10 @@ interchangeLoop
           unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
     let lam = Lambda (params' <> new_params) rettype body
-        map_stm =
-          Let loop_pat_expanded aux $
-            Op $
-              Screma w (arrs' <> new_arrs) (mapSOAC lam)
-        res = varsRes $ patNames loop_pat_expanded
+    map_stm <-
+      Let loop_pat_expanded aux . Op . Screma w (arrs' <> new_arrs)
+        <$> mapSOAC lam
+    let res = varsRes $ patNames loop_pat_expanded
         pat' = Pat $ rearrangeShape perm $ patElems pat
 
     pure $
@@ -112,7 +111,7 @@ interchangeLoop
         expanded_init <- expandedInit param_name merge_init
         pure (expanded_param, expanded_init)
         where
-          param_name = baseString $ paramName merge_param
+          param_name = baseName $ paramName merge_param
 
       expandPatElem (PatElem name t) =
         PatElem name $ arrayOfRow t w
@@ -133,27 +132,34 @@ maybeCopyInitial isMapInput (SeqLoop perm loop_pat merge form body) =
         Array {} <- paramType p =
           (p,)
             <$> letSubExp
-              (baseString (paramName p) <> "_inter_copy")
+              (baseName (paramName p) <> "_inter_copy")
               (BasicOp $ Replicate mempty $ Var arg)
     f (p, arg) =
       pure (p, arg)
 
-manifestMaps :: [LoopNesting] -> [VName] -> Stms SOACS -> ([VName], Stms SOACS)
-manifestMaps [] res stms = (res, stms)
-manifestMaps (n : ns) res stms =
-  let (res', stms') = manifestMaps ns res stms
-      (params, arrs) = unzip $ loopNestingParamsAndArrs n
+manifestMaps ::
+  (MonadFreshNames m) =>
+  [LoopNesting] ->
+  [VName] ->
+  Stms SOACS ->
+  m ([VName], Stms SOACS)
+manifestMaps [] res stms = pure (res, stms)
+manifestMaps (n : ns) res stms = do
+  (res', stms') <- manifestMaps ns res stms
+  let (params, arrs) = unzip $ loopNestingParamsAndArrs n
       lam =
         Lambda
           params
           (map rowType $ patTypes (loopNestingPat n))
           (mkBody stms' $ varsRes res')
-   in ( patNames $ loopNestingPat n,
-        oneStm $
-          Let (loopNestingPat n) (loopNestingAux n) $
-            Op $
-              Screma (loopNestingWidth n) arrs (mapSOAC lam)
-      )
+  st <-
+    oneStm
+      . Let (loopNestingPat n) (loopNestingAux n)
+      . Op
+      . Screma (loopNestingWidth n) arrs
+      <$> mapSOAC lam
+  pure
+    (patNames $ loopNestingPat n, st)
 
 -- | Given a (parallel) map nesting and an inner sequential loop, move
 -- the maps inside the sequential loop.  The result is several
@@ -185,7 +191,7 @@ interchangeLoops full_nest = recurse (kernelNestLoops full_nest)
             else
               let loop_stm = seqLoopStm loop'
                   names = rearrangeShape (loopPerm loop') (patNames (stmPat loop_stm))
-               in pure $ snd $ manifestMaps ns names $ stms <> oneStm loop_stm
+               in snd <$> manifestMaps ns names (stms <> oneStm loop_stm)
       | otherwise = pure $ oneStm $ seqLoopStm loop
 
 -- | An encoding of a branch with alongside its result pattern.
@@ -213,14 +219,13 @@ interchangeBranch1
         branch_pat' =
           Pat $ map (fmap (`arrayOfRow` w)) $ patElems branch_pat
 
-        mkBranch branch = (renameBody =<<) $ do
+        mkBranch branch = (renameBody =<<) $ runBodyBuilder $ do
           let lam = Lambda params lam_ret branch
-              res = varsRes $ patNames branch_pat'
-              map_stm = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
-          pure $ mkBody (oneStm map_stm) res
+          addStm . Let branch_pat' aux . Op . Screma w arrs =<< mapSOAC lam
+          pure $ varsRes $ patNames branch_pat'
 
-    cases' <- mapM (traverse $ runBodyBuilder . mkBranch) cases
-    defbody' <- runBodyBuilder $ mkBranch defbody
+    cases' <- mapM (traverse mkBranch) cases
+    defbody' <- mkBranch defbody
     pure . Branch [0 .. patSize pat - 1] pat' cond cases' defbody' $
       MatchDec ret' if_sort
 
@@ -263,9 +268,12 @@ interchangeWithAcc1
       let (params, arrs) = unzip params_and_arrs
           maplam_ret = lambdaReturnType acc_lam
           maplam = Lambda (iota_p : orig_acc_params ++ params) maplam_ret (lambdaBody acc_lam)
-      auxing map_aux . fmap subExpsRes . letTupExp' "withacc_inter" $
-        Op $
-          Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
+      auxing map_aux
+        . fmap subExpsRes
+        . letTupExp' "withacc_inter"
+        . Op
+        . Screma w (iota_w : map paramName acc_params ++ arrs)
+        =<< mapSOAC maplam
     let pat = Pat $ rearrangeShape perm $ patElems map_pat
     pure $ WithAccStm perm pat inputs' acc_lam'
     where
@@ -273,7 +281,7 @@ interchangeWithAcc1
         let (cert_ps, acc_ps) = splitAt (length ps `div` 2) ps
         -- Should not rename the certificates.
         acc_ps' <- forM acc_ps $ \(Param attrs v t) ->
-          Param attrs <$> newVName (baseString v) <*> pure t
+          Param attrs <$> newName v <*> pure t
         pure $ cert_ps <> acc_ps'
 
       num_accs = length inputs

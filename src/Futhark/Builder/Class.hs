@@ -11,6 +11,7 @@ module Futhark.Builder.Class
     MonadBuilder (..),
     insertStms,
     insertStm,
+    censorStms,
     letBind,
     letBindNames,
     collectStms_,
@@ -42,7 +43,7 @@ class
   where
   mkExpPat :: [Ident] -> Exp rep -> Pat (LetDec rep)
   mkExpDec :: Pat (LetDec rep) -> Exp rep -> ExpDec rep
-  mkBody :: Stms rep -> Result -> Body rep
+  mkBody :: (IsResult res) => Stms rep -> [res] -> GBody rep res
   mkLetNames ::
     (MonadFreshNames m, HasScope rep m) =>
     [VName] ->
@@ -71,7 +72,7 @@ class
   where
   type Rep m :: Data.Kind.Type
   mkExpDecM :: Pat (LetDec (Rep m)) -> Exp (Rep m) -> m (ExpDec (Rep m))
-  mkBodyM :: Stms (Rep m) -> Result -> m (Body (Rep m))
+  mkBodyM :: (IsResult res) => Stms (Rep m) -> [res] -> m (GBody (Rep m) res)
   mkLetNamesM :: [VName] -> Exp (Rep m) -> m (Stm (Rep m))
 
   -- | Add a statement to the 'Stms' under construction.
@@ -103,23 +104,29 @@ censorStms f m = do
 
 -- | Add the given attributes to any statements added by this action.
 attributing :: (MonadBuilder m) => Attrs -> m a -> m a
-attributing attrs = censorStms $ fmap onStm
-  where
-    onStm (Let pat aux e) =
-      Let pat aux {stmAuxAttrs = attrs <> stmAuxAttrs aux} e
+attributing attrs = censorStms $ fmap $ attribute attrs
 
 -- | Add the certificates and attributes to any statements added by
 -- this action.
 auxing :: (MonadBuilder m) => StmAux anyrep -> m a -> m a
-auxing (StmAux cs attrs _) = censorStms $ fmap onStm
+auxing outer
+  | stmAuxCerts outer == mempty,
+    stmAuxAttrs outer == mempty,
+    stmAuxLoc outer == mempty =
+      id
+  | otherwise = censorStms $ fmap onStm
   where
     onStm (Let pat aux e) =
       Let pat aux' e
       where
         aux' =
           aux
-            { stmAuxAttrs = attrs <> stmAuxAttrs aux,
-              stmAuxCerts = cs <> stmAuxCerts aux
+            { stmAuxAttrs = stmAuxAttrs outer <> stmAuxAttrs aux,
+              stmAuxCerts = stmAuxCerts outer <> stmAuxCerts aux,
+              stmAuxLoc =
+                if stmAuxLoc aux == mempty
+                  then stmAuxLoc outer
+                  else stmAuxLoc aux
             }
 
 -- | Add a statement with the given pattern and expression.
@@ -142,10 +149,10 @@ mkLet ids e =
 -- | Like mkLet, but also take attributes and certificates from the
 -- given 'StmAux'.
 mkLet' :: (Buildable rep) => [Ident] -> StmAux a -> Exp rep -> Stm rep
-mkLet' ids (StmAux cs attrs _) e =
+mkLet' ids (StmAux cs attrs loc _) e =
   let pat = mkExpPat ids e
       dec = mkExpDec pat e
-   in Let pat (StmAux cs attrs dec) e
+   in Let pat (StmAux cs attrs loc dec) e
 
 -- | Add a statement with the given pattern element names and
 -- expression.
@@ -163,9 +170,9 @@ bodyBind (Body _ stms res) = do
   pure res
 
 -- | Add several bindings at the outermost level of a t'Body'.
-insertStms :: (Buildable rep) => Stms rep -> Body rep -> Body rep
+insertStms :: (Buildable rep, IsResult res) => Stms rep -> GBody rep res -> GBody rep res
 insertStms stms1 (Body _ stms2 res) = mkBody (stms1 <> stms2) res
 
 -- | Add a single binding at the outermost level of a t'Body'.
-insertStm :: (Buildable rep) => Stm rep -> Body rep -> Body rep
+insertStm :: (Buildable rep, IsResult res) => Stm rep -> GBody rep res -> GBody rep res
 insertStm = insertStms . oneStm

@@ -17,48 +17,54 @@
 --    -3.632712f32, -6.881909f32, -15.388417f32]
 -- }
 
-
-def pi: f32 = f32.acos 0.0 * 2.0
+def pi : f32 = f32.acos 0.0 * 2.0
 
 type complex = (f32, f32)
 
-def complexAdd ((a, b): complex) ((c, d): complex): complex =
-  (a+c, b+d)
+def complexAdd ((a, b): complex) ((c, d): complex) : complex =
+  (a + c, b + d)
 
-def complexMult ((a,b): complex) ((c,d): complex): complex =
-  (a*c - b*d,
-   a*d + b*c)
+def complexMult ((a, b): complex) ((c, d): complex) : complex =
+  ( a * c - b * d
+  , a * d + b * c
+  )
 
-def toComplex (a: f32): complex = (a, 0f32)
+def toComplex (a: f32) : complex = (a, 0f32)
 
-def complexExp ((a,b): complex): complex =
+def complexExp ((a, b): complex) : complex =
   complexMult (toComplex (f32.exp a)) (f32.cos b, f32.sin b)
 
-def toPolar ((a,b): complex): (f32, f32) =
-  (f32.sqrt (a*a + b*b),
-   f32.atan (b/a))
+def toPolar ((a, b): complex) : (f32, f32) =
+  ( f32.sqrt (a * a + b * b)
+  , f32.atan (b / a)
+  )
 
-def fromPolar (r: f32, angle: f32): complex =
-  (r * f32.cos angle,
-   r * f32.sin angle)
+def fromPolar (r: f32, angle: f32) : complex =
+  ( r * f32.cos angle
+  , r * f32.sin angle
+  )
 
-def complexPow (c: complex) (n: i32): complex =
+def complexPow (c: complex) (n: i32) : complex =
   let (r, angle) = toPolar c
-  let (r', angle') = (r ** f32.i32 n,
-                      f32.i32 n * angle)
+  let (r', angle') =
+    ( r ** f32.i32 n
+    , f32.i32 n * angle
+    )
   in fromPolar (r', angle')
 
-def f [n] (a: [n]f32) (j: i32): complex =
-  let x = complexExp (complexMult (-2.0,0.0)
-                      (complexMult (toComplex pi)
-                       (complexMult (0.0, 1.0)
-                        (toComplex (1.0/f32.i64 n)))))
-  in reduce complexAdd (0.0, 0.0)
-  (map2 complexMult
-   (map toComplex a)
-   (map (complexPow x) (map (j*) (map i32.i64 (iota n)))))
+def f [n] (a: [n]f32) (j: i32) : complex =
+  let x =
+    complexExp (complexMult (-2.0, 0.0)
+                            (complexMult (toComplex pi)
+                                         (complexMult (0.0, 1.0)
+                                                      (toComplex (1.0 / f32.i64 n)))))
+  in reduce complexAdd
+            (0.0, 0.0)
+            (map2 complexMult
+                  (map toComplex a)
+                  (map (complexPow x) (map (j *) (map i32.i64 (iota n)))))
 
-def sft [n] (a: [n]f32): [n]complex =
+def sft [n] (a: [n]f32) : [n]complex =
   map (f a) (map i32.i64 (iota n))
 
-def main [n] (a: [n]f32): ([n]f32, [n]f32) = unzip (sft a)
+def main [n] (a: [n]f32) : ([n]f32, [n]f32) = unzip (sft a)

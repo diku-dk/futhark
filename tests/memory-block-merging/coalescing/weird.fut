@@ -4,15 +4,14 @@
 -- structure gpu-mem { Alloc 2 }
 -- structure seq-mem { Alloc 2 }
 
-let main [n] (xss: [n][n]i64) (i: i64) =
+def main [n] (xss: [n][n]i64) (i: i64) =
   -- The basis array
   let xss = map (map (+ 1)) xss
-
   -- There's also an allocation here
   let xs = replicate n i
-
   -- This loop and the result inside should be short-circuited
-  let xss = loop xss for j < i do
-              xss with [j] = xs
+  let xss =
+    loop xss for j < i do
+      xss with [j] = xs
   let xss = copy xss
   in xss

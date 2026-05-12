@@ -3,7 +3,7 @@
 
 module type has_t = {
   type t
-  val f: i32 -> t
+  val f : i32 -> t
 }
 
 module pm (num: has_t) = {

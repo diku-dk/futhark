@@ -3,8 +3,8 @@
 -- ==
 -- input { } output { [0,0,0] }
 
-def n: i64 = 3
+def n : i64 = 3
 
-def x: [n]i32 = replicate n 0
+def x : [n]i32 = replicate n 0
 
-def main: []i32 = copy x
+def main : []i32 = copy x

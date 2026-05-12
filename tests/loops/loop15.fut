@@ -4,6 +4,8 @@
 -- structure { Loop 0 }
 
 def main (n: i32) (a: i32) =
-  loop x = a for _i < n do
-    loop _y = x for _j < n do
+  loop x = a
+  for _i < n do
+    loop _y = x
+    for _j < n do
       a

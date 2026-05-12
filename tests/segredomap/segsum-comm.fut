@@ -6,5 +6,5 @@
 -- output {
 --   [6.0f32, 15.0f32]
 -- }
-def main [m][n] (xss : [m][n]f32): [m]f32 =
+def main [m] [n] (xss: [m][n]f32) : [m]f32 =
   map (\xs -> reduce_comm (+) 0.0f32 xs) xss

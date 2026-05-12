@@ -5,5 +5,5 @@
 -- structure gpu-mem { Alloc 1 }
 -- structure seq-mem { Alloc 1 }
 
-entry concat_iotas (i: i64) (j: i64): []i64 =
+entry concat_iotas (i: i64) (j: i64) : []i64 =
   concat (iota i) (iota j)

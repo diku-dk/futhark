@@ -1,6 +1,8 @@
+
 -- ==
+-- tags { autodiff }
 -- entry: rev fwd
--- compiled input { true [1.0,2.0,3.0] }
+-- input { true [1.0,2.0,3.0] }
 -- output { [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }
 
 def f b (xs: []f64) =

@@ -5,6 +5,7 @@
 
 entry main [n] (xs: [n]i64) =
   tabulate n
-  (\_ -> let xs = scatter (copy xs) xs xs
-	 let xs = xs with [opaque 0] = opaque n
-	 in spread xs[0] 0 xs xs :> [n]i64)
+           (\_ ->
+              let xs = scatter (copy xs) xs xs
+              let xs = xs with [opaque 0] = opaque n
+              in spread xs[0] 0 xs xs :> [n]i64)

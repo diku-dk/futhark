@@ -6,11 +6,11 @@
 type ints [n] = [n]i64
 
 module type MT = {
-  val k: i64
+  val k : i64
   type k_ints = ints [k]
 }
 
-module M_k2: MT = {
+module M_k2 : MT = {
   def k = 2i64
   type k_ints = ints [k]
 }

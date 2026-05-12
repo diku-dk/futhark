@@ -245,6 +245,8 @@ resolveExp (Attr attr e loc) =
   Attr <$> resolveAttrInfo attr <*> resolveExp e <*> pure loc
 resolveExp (TupLit es loc) =
   TupLit <$> mapM resolveExp es <*> pure loc
+resolveExp (ArrayVal vs t loc) =
+  pure $ ArrayVal vs t loc
 resolveExp (ArrayLit es NoInfo loc) =
   ArrayLit <$> mapM resolveExp es <*> pure NoInfo <*> pure loc
 resolveExp (Negate e loc) =
@@ -258,16 +260,20 @@ resolveExp (RecordLit fs loc) =
   where
     resolveField (RecordFieldExplicit k e floc) =
       RecordFieldExplicit k <$> resolveExp e <*> pure floc
-    resolveField (RecordFieldImplicit vn NoInfo floc) =
-      RecordFieldImplicit <$> resolveName vn floc <*> pure NoInfo <*> pure floc
+    resolveField (RecordFieldImplicit (L vnloc vn) NoInfo floc) =
+      RecordFieldImplicit
+        <$> (L vnloc <$> resolveName vn floc)
+        <*> pure NoInfo
+        <*> pure floc
 resolveExp (Project k e NoInfo loc) =
   Project k <$> resolveExp e <*> pure NoInfo <*> pure loc
 resolveExp (Constr k es NoInfo loc) =
   Constr k <$> mapM resolveExp es <*> pure NoInfo <*> pure loc
-resolveExp (Update e1 slice e2 loc) =
-  Update <$> resolveExp e1 <*> resolveSlice slice <*> resolveExp e2 <*> pure loc
-resolveExp (RecordUpdate e1 fs e2 NoInfo loc) =
-  RecordUpdate <$> resolveExp e1 <*> pure fs <*> resolveExp e2 <*> pure NoInfo <*> pure loc
+resolveExp (Update e1 steps e2 NoInfo loc) =
+  Update <$> resolveExp e1 <*> mapM resolveStep steps <*> resolveExp e2 <*> pure NoInfo <*> pure loc
+  where
+    resolveStep (UpdateStepSlice slice) = UpdateStepSlice <$> resolveSlice slice
+    resolveStep (UpdateStepField f) = pure $ UpdateStepField f
 resolveExp (OpSection v NoInfo loc) =
   OpSection <$> resolveQualName v loc <*> pure NoInfo <*> pure loc
 resolveExp (OpSectionLeft v info1 e info2 info3 loc) =
@@ -286,10 +292,11 @@ resolveExp (OpSectionRight v info1 e info2 info3 loc) =
     <*> pure info2
     <*> pure info3
     <*> pure loc
-resolveExp (ProjectSection ks info loc) =
-  pure $ ProjectSection ks info loc
-resolveExp (IndexSection slice info loc) =
-  IndexSection <$> resolveSlice slice <*> pure info <*> pure loc
+resolveExp (UpdateSection steps info loc) =
+  UpdateSection <$> mapM resolveStep steps <*> pure info <*> pure loc
+  where
+    resolveStep (UpdateStepField f) = pure $ UpdateStepField f
+    resolveStep (UpdateStepSlice slice) = UpdateStepSlice <$> resolveSlice slice
 resolveExp (Ascript e te loc) =
   Ascript <$> resolveExp e <*> resolveTypeExp te <*> pure loc
 resolveExp (Coerce e te info loc) =
@@ -299,6 +306,21 @@ resolveExp (AppExp e NoInfo) =
 
 sizeBinderToParam :: SizeBinder Name -> UncheckedTypeParam
 sizeBinderToParam (SizeBinder v loc) = TypeParamDim v loc
+
+patternExp :: UncheckedPat t -> TypeM (ExpBase NoInfo VName)
+patternExp (Id v _ loc) =
+  Var <$> resolveQualName (qualName v) loc <*> pure NoInfo <*> pure loc
+patternExp (TuplePat pats loc) = TupLit <$> mapM patternExp pats <*> pure loc
+patternExp (Wildcard _ loc) = typeError loc mempty "Cannot have wildcard here."
+patternExp (PatLit _ _ loc) = typeError loc mempty "Cannot have literal here."
+patternExp (PatConstr _ _ _ loc) = typeError loc mempty "Cannot have constructor here."
+patternExp (PatAttr _ p _) = patternExp p
+patternExp (PatAscription pat _ _) = patternExp pat
+patternExp (PatParens pat _) = patternExp pat
+patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
+  where
+    field (L nameloc name, pat) =
+      RecordFieldExplicit (L nameloc name) <$> patternExp pat <*> pure (srclocOf loc)
 
 resolveAppExp :: AppExpBase NoInfo Name -> TypeM (AppExpBase NoInfo VName)
 resolveAppExp (Apply f args loc) =
@@ -318,12 +340,12 @@ resolveAppExp (Match e cases loc) =
       resolvePat p $ \p' -> CasePat p' <$> resolveExp body <*> pure cloc
 resolveAppExp (LetPat sizes p e1 e2 loc) = do
   checkForDuplicateNames (map sizeBinderToParam sizes) [p]
+  e1' <- resolveExp e1
   resolveSizes sizes $ \sizes' -> do
-    e1' <- resolveExp e1
     resolvePat p $ \p' -> do
       e2' <- resolveExp e2
       pure $ LetPat sizes' p' e1' e2' loc
-resolveAppExp (LetFun fname (tparams, params, ret, NoInfo, fbody) body loc) = do
+resolveAppExp (LetFun (fname, fnameloc) (tparams, params, ret, NoInfo, fbody) body loc) = do
   checkForDuplicateNames tparams params
   checkDoNotShadow loc fname
   (tparams', params', ret', fbody') <-
@@ -331,17 +353,17 @@ resolveAppExp (LetFun fname (tparams, params, ret, NoInfo, fbody) body loc) = do
       resolveParams params $ \params' -> do
         ret' <- traverse resolveTypeExp ret
         (tparams',params',ret',) <$> resolveExp fbody
-  bindSpaced1 Term fname loc $ \fname' -> do
+  bindSpaced1 Term fname fnameloc $ \fname' -> do
     body' <- resolveExp body
-    pure $ LetFun fname' (tparams', params', ret', NoInfo, fbody') body' loc
-resolveAppExp (LetWith (Ident dst _ dstloc) (Ident src _ srcloc) slice e1 e2 loc) = do
+    pure $ LetFun (fname', fnameloc) (tparams', params', ret', NoInfo, fbody') body' loc
+resolveAppExp (LetWith (Ident dst _ dstloc) (Ident src _ srcloc) steps e1 e2 loc) = do
   src' <- Ident <$> resolveName src srcloc <*> pure NoInfo <*> pure srcloc
   e1' <- resolveExp e1
-  slice' <- resolveSlice slice
+  steps' <- mapM resolveUpdateStep steps
   bindSpaced1 Term dst loc $ \dstv -> do
     let dst' = Ident dstv NoInfo dstloc
     e2' <- resolveExp e2
-    pure $ LetWith dst' src' slice' e1' e2' loc
+    pure $ LetWith dst' src' steps' e1' e2' loc
 resolveAppExp (BinOp (f, floc) finfo (e1, info1) (e2, info2) loc) = do
   f' <- resolveQualName f floc
   e1' <- resolveExp e1
@@ -349,8 +371,10 @@ resolveAppExp (BinOp (f, floc) finfo (e1, info1) (e2, info2) loc) = do
   pure $ BinOp (f', floc) finfo (e1', info1) (e2', info2) loc
 resolveAppExp (Index e1 slice loc) =
   Index <$> resolveExp e1 <*> resolveSlice slice <*> pure loc
-resolveAppExp (Loop sizes pat e form body loc) = do
-  e' <- resolveExp e
+resolveAppExp (Loop sizes pat loopinit form body loc) = do
+  e' <- case loopinit of
+    LoopInitExplicit e -> LoopInitExplicit <$> resolveExp e
+    LoopInitImplicit NoInfo -> LoopInitExplicit <$> patternExp pat
   case form of
     For (Ident i _ iloc) bound -> do
       bound' <- resolveExp bound
@@ -368,6 +392,14 @@ resolveAppExp (Loop sizes pat e form body loc) = do
       cond' <- resolveExp cond
       body' <- resolveExp body
       pure $ Loop sizes pat' e' (While cond') body' loc
+
+resolveUpdateStep ::
+  UpdateStep NoInfo Name ->
+  TypeM (UpdateStep NoInfo VName)
+resolveUpdateStep (UpdateStepSlice slice) =
+  UpdateStepSlice <$> resolveSlice slice
+resolveUpdateStep (UpdateStepField f) =
+  pure $ UpdateStepField f
 
 resolveSlice :: SliceBase NoInfo Name -> TypeM (SliceBase NoInfo VName)
 resolveSlice = mapM onDimIndex
@@ -462,7 +494,7 @@ resolveSizes sizes m = do
 -- | Resolve names in a value binding. If this succeeds, then it is
 -- guaranteed that all names references things that are in scope.
 resolveValBind :: ValBindBase NoInfo Name -> TypeM (ValBindBase NoInfo VName)
-resolveValBind (ValBind entry fname ret NoInfo tparams params body doc attrs loc) = do
+resolveValBind (ValBind entry fname fname_loc ret NoInfo tparams params body doc attrs loc) = do
   attrs' <- mapM resolveAttrInfo attrs
   checkForDuplicateNames tparams params
   checkDoNotShadow loc fname
@@ -472,4 +504,4 @@ resolveValBind (ValBind entry fname ret NoInfo tparams params body doc attrs loc
       body' <- resolveExp body
       bindSpaced1 Term fname loc $ \fname' -> do
         usedName fname'
-        pure $ ValBind entry fname' ret' NoInfo tparams' params' body' doc attrs' loc
+        pure $ ValBind entry fname' fname_loc ret' NoInfo tparams' params' body' doc attrs' loc

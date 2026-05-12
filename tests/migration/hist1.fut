@@ -10,11 +10,12 @@ def main (A: *[10]i64) : *[10]i64 =
   let A = A with [0] = 0
   let A = A with [1] = 1
   let B = opaque A
+  let x = B[0]
+  -- This read can be delayed into op
+  let y = B[1]
+  -- This read can be delayed into the kernel body
 
-  let x = B[0] -- This read can be delayed into op
-  let y = B[1] -- This read can be delayed into the kernel body
-
-  let op = \a b -> a+b+x
+  let op = \a b -> a + b + x
   let is = [4, 2]
-  let as = map (+y) is
-   in reduce_by_index B op 0 is as
+  let as = map (+ y) is
+  in reduce_by_index B op 0 is as

@@ -35,7 +35,7 @@ interpret config fp = do
   pr <- newFutharkiState config fp
   (tenv, ienv) <- case pr of
     Left err -> do
-      hPutDoc stderr err
+      hPutDocLn stderr err
       exitFailure
     Right env -> pure env
 
@@ -123,9 +123,11 @@ newFutharkiState cfg file = runExceptT $ do
       hPutDoc stderr $
         prettyWarnings ws
 
-  ictx <-
-    foldM (\ctx -> badOnLeft I.prettyInterpreterError <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
-      map (fmap fileProg) imports
+  let loadImport ctx =
+        badOnLeft I.prettyInterpreterError
+          <=< runInterpreter' . I.interpretImport ctx
+
+  ictx <- foldM loadImport I.initialCtx $ map (fmap fileProg) imports
   let (tenv, ienv) =
         let (iname, fm) = last imports
          in ( fileScope fm,

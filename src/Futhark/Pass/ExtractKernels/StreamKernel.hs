@@ -39,12 +39,12 @@ data KernelSize = KernelSize
 
 numberOfBlocks ::
   (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
-  String ->
+  Name ->
   SubExp ->
   SubExp ->
   m (SubExp, SubExp)
 numberOfBlocks desc w tblock_size = do
-  max_num_tblocks_key <- nameFromString . prettyString <$> newVName (desc ++ "_num_tblocks")
+  max_num_tblocks_key <- nameFromText . prettyText <$> newVName (desc <> "_num_tblocks")
   num_tblocks <-
     letSubExp "num_tblocks" $
       Op $
@@ -64,7 +64,7 @@ segThreadCapped ws desc r = do
   w <-
     letSubExp "nest_size"
       =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ws
-  tblock_size <- getSize (desc ++ "_tblock_size") SizeThreadBlock
+  tblock_size <- getSize (desc <> "_tblock_size") SizeThreadBlock
 
   case r of
     ManyThreads -> do

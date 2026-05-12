@@ -6,7 +6,7 @@ module Futhark.CodeGen.Backends.GenericC.CLI
   )
 where
 
-import Data.List (unzip5)
+import Data.List (intersperse, unzip5)
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -20,6 +20,7 @@ import Futhark.CodeGen.Backends.SimpleRep
   )
 import Futhark.CodeGen.RTS.C (tuningH, valuesH)
 import Futhark.Manifest
+import Futhark.Util (showText)
 import Futhark.Util.Pretty (prettyString)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -125,10 +126,10 @@ genericOptions =
                 if (equals != NULL) {
                   *equals = 0;
                   if (futhark_context_config_set_tuning_param(cfg, name, (size_t)value) != 0) {
-                    futhark_panic(1, "Unknown size: %s\n", name);
+                    futhark_panic(1, "Unknown tuning parameter: %s\n", name);
                   }
                 } else {
-                  futhark_panic(1, "Invalid argument for size option: %s\n", optarg);
+                  futhark_panic(1, "Invalid argument for --parameter option: %s\n", optarg);
                 }}|]
       },
     Option
@@ -141,7 +142,7 @@ genericOptions =
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
                                                           futhark_context_config_set_tuning_param);
                 if (ret != NULL) {
-                  futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                  futhark_panic(1, "When loading tuning file '%s': %s\n", optarg, ret);
                 }}|]
       },
     Option
@@ -190,7 +191,7 @@ readInput manifest i tname =
             [C.cstm|;|],
             [C.cexp|$id:dest|]
           )
-    Just (TypeOpaque desc _ _ _) ->
+    Just (TypeOpaque desc _ _) ->
       ( [C.citems|futhark_panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:(T.unpack desc));|],
         [C.cstm|;|],
         [C.cstm|;|],
@@ -256,11 +257,20 @@ prepareOutputs manifest = zipWith prepareResult [(0 :: Int) ..]
             [C.cexp|$id:result|],
             [C.cstm|assert($id:(arrayFree ops)(ctx, $id:result) == 0);|]
           )
-        Just (TypeOpaque t ops _ _) ->
+        Just (TypeOpaque t ops _) ->
           ( [C.citem|typename $id:t $id:result;|],
             [C.cexp|$id:result|],
             [C.cstm|assert($id:(opaqueFree ops)(ctx, $id:result) == 0);|]
           )
+
+recordFieldCType :: Manifest -> RecordField -> C.Type
+recordFieldCType manifest field =
+  case M.lookup t $ manifestTypes manifest of
+    Nothing -> uncurry primAPIType $ scalarToPrim t
+    Just (TypeArray tname _ _ _) -> [C.cty|typename $id:tname|]
+    Just (TypeOpaque tname _ _) -> [C.cty|typename $id:tname|]
+  where
+    t = recordFieldType field
 
 -- | Return a statement printing the given external value.
 printStm :: Manifest -> T.Text -> C.Exp -> C.Stm
@@ -269,7 +279,23 @@ printStm manifest tname e =
     Nothing ->
       let info = tname <> "_info"
        in [C.cstm|write_scalar(stdout, binary_output, &$id:info, &$exp:e);|]
-    Just (TypeOpaque desc _ _ _) ->
+    Just (TypeOpaque _ _ (Just (OpaqueRecord record)))
+      | map recordFieldName fields == take (length fields) (map showText [0 :: Int ..]) ->
+          [C.cstm|{$stms:(intersperse newline (map getField fields))}|]
+      where
+        fields = recordFields record
+        printField field =
+          printStm manifest (recordFieldType field) [C.cexp|field|]
+        newline = [C.cstm|puts("");|]
+        getField field =
+          [C.cstm|{$ty:(recordFieldCType manifest field) field;
+                   if ($id:(recordFieldProject field)(ctx, &field, $exp:e) != FUTHARK_SUCCESS) {
+                     futhark_panic(1, "Failed to project field %s from result\n", $string:(T.unpack (recordFieldName field)));
+                   } else {
+                     $stm:(printField field)
+                   }
+                   }|]
+    Just (TypeOpaque desc _ _) ->
       [C.cstm|{
          fprintf(stderr, "Values of type \"%s\" have no external representation.\n", $string:(T.unpack desc));
          retval = 1;
@@ -295,19 +321,19 @@ printStm manifest tname e =
 printResult :: Manifest -> [(T.Text, C.Exp)] -> [C.Stm]
 printResult manifest = concatMap f
   where
-    f (v, e) = [printStm manifest v e, [C.cstm|printf("\n");|]]
+    f (v, e) = [printStm manifest v e, [C.cstm|puts("");|]]
 
 cliEntryPoint ::
   Manifest -> T.Text -> EntryPoint -> (C.Definition, C.Initializer)
-cliEntryPoint manifest entry_point_name (EntryPoint cfun _tuning_params outputs inputs) =
+cliEntryPoint manifest entry_point_name (EntryPoint cfun _tuning_params output inputs _attrs) =
   let (input_items, pack_input, free_input, free_parsed, input_args) =
         unzip5 $ readInputs manifest $ map inputType inputs
 
       (output_decls, output_vals, free_outputs) =
-        unzip3 $ prepareOutputs manifest $ map outputType outputs
+        unzip3 $ prepareOutputs manifest [outputType output]
 
       printstms =
-        printResult manifest $ zip (map outputType outputs) output_vals
+        printResult manifest $ zip [outputType output] output_vals
 
       cli_entry_point_function_name =
         "futrts_cli_entry_" <> T.unpack (escapeName entry_point_name)

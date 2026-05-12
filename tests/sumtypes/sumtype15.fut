@@ -7,9 +7,9 @@
 
 type maybe 'a = #none | #some a
 
-def f (x : maybe ([]i32)) : i32 =
+def f (x: maybe ([]i32)) : i32 =
   match x
-  case #none      -> 1
+  case #none -> 1
   case (#some xs) -> foldl (+) 0 xs
 
-def main : []i32 = map f [#none, #some [1,2,3]]
+def main : []i32 = map f [#none, #some [1, 2, 3]]

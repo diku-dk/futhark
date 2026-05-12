@@ -17,7 +17,7 @@ module Language.Futhark.Parser.Monad
     mustBe,
     primNegate,
     applyExp,
-    patternExp,
+    arrayLitExp,
     addDocSpec,
     addAttrSpec,
     addDoc,
@@ -59,6 +59,7 @@ addDoc doc (ValDec val) = ValDec (val {valBindDoc = Just doc})
 addDoc doc (TypeDec tp) = TypeDec (tp {typeDoc = Just doc})
 addDoc doc (ModTypeDec sig) = ModTypeDec (sig {modTypeDoc = Just doc})
 addDoc doc (ModDec mod) = ModDec (mod {modDoc = Just doc})
+addDoc doc (LocalDec dec loc) = LocalDec (addDoc doc dec) loc
 addDoc _ dec = dec
 
 addDocSpec :: DocComment -> SpecBase NoInfo Name -> SpecBase NoInfo Name
@@ -66,7 +67,7 @@ addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig {typeDoc = Just doc})
 addDocSpec doc (ValSpec name ps t NoInfo _ loc) = ValSpec name ps t NoInfo (Just doc) loc
 addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
-addDocSpec _ spec = spec
+addDocSpec _ spec@IncludeSpec {} = spec
 
 addAttr :: AttrInfo Name -> UncheckedDec -> UncheckedDec
 addAttr attr (ValDec val) =
@@ -111,6 +112,17 @@ type ParserMonad = ExceptT SyntaxError (State ParserState)
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l - 1) l
 
+arrayLitExp :: [UncheckedExp] -> SrcLoc -> UncheckedExp
+arrayLitExp es loc
+  | Just (v : vs) <- mapM isLiteral es,
+    all ((primValueType v ==) . primValueType) vs =
+      ArrayVal (v : vs) (primValueType v) loc
+  | otherwise =
+      ArrayLit es NoInfo loc
+  where
+    isLiteral (Literal v _) = Just v
+    isLiteral _ = Nothing
+
 applyExp :: NE.NonEmpty UncheckedExp -> ParserMonad UncheckedExp
 applyExp all_es@((Constr n [] _ loc1) NE.:| es) =
   pure $ Constr n es NoInfo (srcspan loc1 (NE.last all_es))
@@ -125,19 +137,6 @@ applyExp es =
       where
         index = AppExp (Index e (is ++ map DimFix xs) xloc) NoInfo
     op f x = pure $ mkApplyUT f x
-
-patternExp :: UncheckedPat t -> ParserMonad UncheckedExp
-patternExp (Id v _ loc) = pure $ Var (qualName v) NoInfo loc
-patternExp (TuplePat pats loc) = TupLit <$> mapM patternExp pats <*> pure loc
-patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
-patternExp (PatLit _ _ loc) = parseErrorAt loc $ Just "cannot have literal here."
-patternExp (PatConstr _ _ _ loc) = parseErrorAt loc $ Just "cannot have constructor here."
-patternExp (PatAttr _ p _) = patternExp p
-patternExp (PatAscription pat _ _) = patternExp pat
-patternExp (PatParens pat _) = patternExp pat
-patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
-  where
-    field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
 
 binOpName :: L Token -> (QualName Name, Loc)
 binOpName (L loc (SYMBOL _ qs op)) = (QualName qs op, loc)

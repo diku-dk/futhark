@@ -44,11 +44,11 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
 
     which' = case which of
       LockstepWidth -> [C.cexp|ctx->lockstep_width|]
-      NumBlocks -> [C.cexp|ctx->cfg->default_num_groups|]
-      BlockSize -> [C.cexp|ctx->cfg->default_group_size|]
-      TileSize -> [C.cexp|ctx->cfg->default_tile_size|]
-      RegTileSize -> [C.cexp|ctx->cfg->default_reg_tile_size|]
-      Threshold -> [C.cexp|ctx->cfg->default_threshold|]
+      NumBlocks -> [C.cexp|ctx->cfg->gpu.default_grid_size|]
+      BlockSize -> [C.cexp|ctx->cfg->gpu.default_block_size|]
+      TileSize -> [C.cexp|ctx->cfg->gpu.default_tile_size|]
+      RegTileSize -> [C.cexp|ctx->cfg->gpu.default_reg_tile_size|]
+      Threshold -> [C.cexp|ctx->cfg->gpu.default_threshold|]
 
     get_size =
       let (e, m) = runState (GC.compilePrimExp onLeaf what) mempty
@@ -184,14 +184,13 @@ openclMemoryType space = error $ "GPU backend does not support '" ++ space ++ "'
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program opencl_code opencl_prelude macros kernels types params failures prog'
+    Program opencl_code opencl_prelude macros kernels types failures prog'
     ) <-
     ImpGen.compileProg prog
   (ws,)
     <$> GC.compileProg
       "opencl"
       version
-      params
       operations
       (mkBoilerplate (opencl_prelude <> opencl_code) macros kernels types failures)
       opencl_includes

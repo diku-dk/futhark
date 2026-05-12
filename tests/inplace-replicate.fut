@@ -3,4 +3,4 @@
 -- structure { Replicate 0 Assert 1 }
 
 def main (xs: *[]i32) (i: i64) (v: i32) =
-  xs with [i:i+1] = replicate 1 v
+  xs with [i:i + 1] = replicate 1 v

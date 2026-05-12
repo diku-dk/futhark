@@ -9,5 +9,5 @@
 --   true
 -- }
 
-def main (x: i32) (y: i32): (bool,bool) =
+def main (x: i32) (y: i32) : (bool, bool) =
   (x > y, x >= y)

@@ -54,7 +54,7 @@ subExpResType = subExpType . resSubExp
 mapType :: SubExp -> Lambda rep -> [Type]
 mapType outersize f =
   [ arrayOf t (Shape [outersize]) NoUniqueness
-    | t <- lambdaReturnType f
+  | t <- lambdaReturnType f
   ]
 
 -- | The type of a primitive operation.
@@ -63,6 +63,10 @@ basicOpType (SubExp se) =
   pure <$> subExpType se
 basicOpType (Opaque _ se) =
   pure <$> subExpType se
+basicOpType (ArrayVal vs t) =
+  pure [arrayOf (Prim t) (Shape [n]) NoUniqueness]
+  where
+    n = intConst Int64 $ toInteger $ length vs
 basicOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
   where
@@ -78,14 +82,14 @@ basicOpType (ConvOp conv _) =
 basicOpType (Index ident slice) =
   result <$> lookupType ident
   where
-    result t = [Prim (elemType t) `arrayOfShape` shape]
+    result t = [t `setArrayShape` shape]
     shape = Shape $ sliceDims slice
 basicOpType (Update _ src _ _) =
   pure <$> lookupType src
 basicOpType (FlatIndex ident slice) =
   result <$> lookupType ident
   where
-    result t = [Prim (elemType t) `arrayOfShape` shape]
+    result t = [t `setArrayShape` shape]
     shape = Shape $ flatSliceDims slice
 basicOpType (FlatUpdate src _ _) =
   pure <$> lookupType src
@@ -97,28 +101,25 @@ basicOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
 basicOpType (Scratch t shape) =
   pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
-basicOpType (Reshape _ (Shape []) e) =
+basicOpType (Reshape e shape) =
   result <$> lookupType e
   where
-    result t = [Prim $ elemType t]
-basicOpType (Reshape _ shape e) =
-  result <$> lookupType e
-  where
-    result t = [t `setArrayShape` shape]
-basicOpType (Rearrange perm e) =
-  result <$> lookupType e
+    result t = [t `setArrayShape` newShape shape]
+basicOpType (Rearrange v perm) =
+  result <$> lookupType v
   where
     result t = [rearrangeType perm t]
 basicOpType (Concat i (x :| _) ressize) =
   result <$> lookupType x
   where
     result xt = [setDimSize i xt ressize]
-basicOpType (Manifest _ v) =
+basicOpType (Manifest v _) =
   pure <$> lookupType v
 basicOpType Assert {} =
   pure [Prim Unit]
 basicOpType (UpdateAcc _ v _ _) =
   pure <$> lookupType v
+basicOpType UserParam {} = pure [Prim int64]
 
 -- | The type of an expression.
 expExtType ::

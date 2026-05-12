@@ -1,19 +1,52 @@
-{ mkDerivation, base, binary, bytestring, bytestring-to-vector
-, containers, half, lib, megaparsec, mtl, QuickCheck, scientific
-, tasty, tasty-hunit, tasty-quickcheck, text, vector
-, vector-binary-instances
+{
+  mkDerivation,
+  base,
+  binary,
+  bytestring,
+  bytestring-to-vector,
+  containers,
+  half,
+  lib,
+  megaparsec,
+  mtl,
+  QuickCheck,
+  scientific,
+  tasty,
+  tasty-hunit,
+  tasty-quickcheck,
+  text,
+  vector,
+  vector-binary-instances,
 }:
 mkDerivation {
   pname = "futhark-data";
-  version = "1.1.0.1";
-  sha256 = "c396542118f2532e59d03e423d9f51087a838e4c0dfbb50b7b99091963bf36c4";
+  version = "1.1.3.0";
+  sha256 = "a3a274bfa9f2bf9df30e8f5a23a9243726c1c82502bcaee53e2a347e0697c9be";
   libraryHaskellDepends = [
-    base binary bytestring bytestring-to-vector containers half
-    megaparsec mtl scientific text vector vector-binary-instances
+    base
+    binary
+    bytestring
+    bytestring-to-vector
+    containers
+    half
+    megaparsec
+    mtl
+    scientific
+    text
+    vector
+    vector-binary-instances
   ];
   testHaskellDepends = [
-    base binary bytestring megaparsec QuickCheck tasty tasty-hunit
-    tasty-quickcheck text vector
+    base
+    binary
+    bytestring
+    megaparsec
+    QuickCheck
+    tasty
+    tasty-hunit
+    tasty-quickcheck
+    text
+    vector
   ];
   description = "An implementation of the Futhark data format";
   license = lib.licenses.isc;

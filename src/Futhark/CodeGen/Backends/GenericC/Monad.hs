@@ -36,6 +36,7 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     items,
     stm,
     stms,
+    comment,
     decl,
     headerDecl,
     publicDef,
@@ -60,6 +61,9 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     collect',
     contextType,
     configType,
+    localProvenance,
+    askProvenance,
+    provenanceExp,
 
     -- * Building Blocks
     copyMemoryDefaultSpace,
@@ -236,7 +240,9 @@ data Operations op s = Operations
     -- pointers.
     opsFatMemory :: Bool,
     -- | Code to bracket critical sections.
-    opsCritical :: ([C.BlockItem], [C.BlockItem])
+    opsCritical :: ([C.BlockItem], [C.BlockItem]),
+    -- | An expression for the param value and one for whether it is set.
+    opsGetParam :: Name -> (C.Exp, C.Exp)
   }
 
 freeAllocatedMem :: CompilerM op s [C.BlockItem]
@@ -258,7 +264,9 @@ data CompilerEnv op s = CompilerEnv
     -- pressure, we keep these allocations around for a long time, and
     -- record their sizes so we can reuse them if possible (and
     -- realloc() when needed).
-    envCachedMem :: M.Map C.Exp VName
+    envCachedMem :: M.Map C.Exp VName,
+    -- | The provenance of an enclosing 'Imp.MetaProvenance', if any.
+    envProvenance :: Provenance
   }
 
 contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm], [C.Stm])
@@ -267,11 +275,11 @@ contextContents = do
     gets $ unzip4 . DL.toList . compCtxFields
   let fields =
         [ [C.csdecl|$ty:ty $id:name;|]
-          | (name, ty) <- zip field_names field_types
+        | (name, ty) <- zip field_names field_types
         ]
       init_fields =
         [ [C.cstm|ctx->program->$id:name = $exp:e;|]
-          | (name, Just e) <- zip field_names field_values
+        | (name, Just e) <- zip field_names field_values
         ]
       (setup, free) = unzip $ catMaybes field_frees
   pure (fields, init_fields <> setup, free)
@@ -282,6 +290,7 @@ generateProgramStruct = do
   mapM_
     earlyDecl
     [C.cunit|struct program {
+               int dummy;
                $sdecls:fields
              };
              static void setup_program(struct futhark_context* ctx) {
@@ -321,7 +330,7 @@ runCompilerM ::
   (a, CompilerState s)
 runCompilerM ops src userstate (CompilerM m) =
   runState
-    (runReaderT m (CompilerEnv ops mempty))
+    (runReaderT m (CompilerEnv ops mempty mempty))
     (newCompilerState src userstate)
 
 getUserState :: CompilerM op s s
@@ -343,6 +352,23 @@ collect' m = do
   modify $ \s -> s {compItems = old}
   pure (x, DL.toList new)
 
+-- | Locally replace (not extend!) the provenance.
+localProvenance :: Provenance -> CompilerM op s a -> CompilerM op s a
+localProvenance p = local $ \env -> env {envProvenance = p}
+
+-- | The provenance of the closest enclosing 'Imp.MetaProvenance'.
+askProvenance :: CompilerM op s Provenance
+askProvenance = asks envProvenance
+
+-- | A C expression corresponding to the current provenance.
+provenanceExp :: CompilerM op s C.Exp
+provenanceExp = do
+  p <- askProvenance
+  pure $
+    if p == mempty
+      then [C.cexp|NULL|]
+      else [C.cexp|$string:(prettyString p)|]
+
 -- | Used when we, inside an existing 'CompilerM' action, want to
 -- generate code for a new function.  Use this so that the compiler
 -- understands that previously declared memory doesn't need to be
@@ -357,11 +383,19 @@ inNewFunction m = do
   where
     noCached env = env {envCachedMem = mempty}
 
+-- | Insert a block item in the generated code at this point.
 item :: C.BlockItem -> CompilerM op s ()
 item x = modify $ \s -> s {compItems = DL.snoc (compItems s) x}
 
 items :: [C.BlockItem] -> CompilerM op s ()
 items xs = modify $ \s -> s {compItems = DL.append (compItems s) (DL.fromList xs)}
+
+-- | Insert a comment in the generated code at this point. The comment may
+-- contain linebreaks, and must not contain any comment markers.
+comment :: T.Text -> CompilerM op s ()
+comment = mapM_ (f . ("// " <>)) . T.lines
+  where
+    f s = stm [C.cstm|$escstm:(T.unpack s)|]
 
 fatMemory :: Space -> CompilerM op s Bool
 fatMemory ScalarSpace {} = pure False
@@ -424,6 +458,7 @@ onClear :: C.BlockItem -> CompilerM op s ()
 onClear x = modify $ \s ->
   s {compClearItems = compClearItems s <> DL.singleton x}
 
+-- | Insert a statement in the generated code at this point.
 stm :: C.Stm -> CompilerM op s ()
 stm s = item [C.citem|$stm:s|]
 
@@ -450,8 +485,13 @@ rawMemCType DefaultSpace = pure defaultMemBlockType
 rawMemCType (Space sid) = join $ asks (opsMemoryType . envOperations) <*> pure sid
 rawMemCType (ScalarSpace [] t) =
   pure [C.cty|$ty:(primTypeToCType t)[1]|]
-rawMemCType (ScalarSpace ds t) =
-  pure [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
+rawMemCType (ScalarSpace ds t)
+  | null ds || Constant (IntValue (Int64Value 0)) `elem` ds =
+      -- The case where a 0 ends up here is pretty obscure, but it can occur for
+      -- some empty array literals.
+      pure [C.cty|$ty:(primTypeToCType t)[1]|]
+  | otherwise =
+      pure [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
   where
     ds' = map (`C.toExp` noLoc) ds
 
@@ -625,7 +665,7 @@ cachingMemory lexical f = do
   let cached = M.keys $ M.filter (== DefaultSpace) lexical
 
   cached' <- forM cached $ \mem -> do
-    size <- newVName $ prettyString mem <> "_cached_size"
+    size <- newVName $ nameFromText (prettyText mem) <> "_cached_size"
     pure (mem, size)
 
   let lexMem env =

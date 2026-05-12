@@ -37,5 +37,5 @@
 --   [1f32, f32.nan, 3f32, 4f32, 17f32]
 -- }
 
-def main [m][n] (hist : *[n]f32) (is: [m]i32) (image : [m]f32) : [n]f32 =
+def main [m] [n] (hist: *[n]f32) (is: [m]i32) (image: [m]f32) : [n]f32 =
   reduce_by_index hist (+) 0f32 (map i64.i32 is) image

@@ -50,7 +50,7 @@ actualMetrics (CountMetrics metrics) =
   where
     expand (ctx, k) =
       [ (T.intercalate "/" (ctx' ++ [k]), 1)
-        | ctx' <- tails $ "" : ctx
+      | ctx' <- tails $ "" : ctx
       ]
 
 -- | This monad is used for computing metrics.  It internally keeps
@@ -90,7 +90,7 @@ funDefMetrics :: (OpMetrics (Op rep)) => FunDef rep -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
 
 -- | Compute metrics for this body.
-bodyMetrics :: (OpMetrics (Op rep)) => Body rep -> MetricsM ()
+bodyMetrics :: (OpMetrics (Op rep)) => GBody rep res -> MetricsM ()
 bodyMetrics = mapM_ stmMetrics . bodyStms
 
 -- | Compute metrics for this statement.
@@ -123,6 +123,7 @@ expMetrics (Op op) =
 basicOpMetrics :: BasicOp -> MetricsM ()
 basicOpMetrics (SubExp _) = seen "SubExp"
 basicOpMetrics (Opaque _ _) = seen "Opaque"
+basicOpMetrics ArrayVal {} = seen "ArrayVal"
 basicOpMetrics ArrayLit {} = seen "ArrayLit"
 basicOpMetrics BinOp {} = seen "BinOp"
 basicOpMetrics UnOp {} = seen "UnOp"
@@ -141,6 +142,7 @@ basicOpMetrics Scratch {} = seen "Scratch"
 basicOpMetrics Reshape {} = seen "Reshape"
 basicOpMetrics Rearrange {} = seen "Rearrange"
 basicOpMetrics UpdateAcc {} = seen "UpdateAcc"
+basicOpMetrics UserParam {} = seen "UserParam"
 
 -- | Compute metrics for this lambda.
 lambdaMetrics :: (OpMetrics (Op rep)) => Lambda rep -> MetricsM ()

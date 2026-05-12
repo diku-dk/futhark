@@ -8,7 +8,7 @@
 -- structure {
 --   Screma 1
 -- }
-def main(a: []i32): []i32 =
-  let (_,b) = unzip(map (\(x: i32): (i32,i32)  -> (x+2,x-2)) a)
-  let c = scan (+) 0 b in
-  c
+def main (a: []i32) : []i32 =
+  let (_, b) = unzip (map (\(x: i32) : (i32, i32) -> (x + 2, x - 2)) a)
+  let c = scan (+) 0 b
+  in c

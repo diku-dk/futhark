@@ -6,7 +6,7 @@ import "intrinsics"
 
 def f (acc: *acc ([]i32)) i =
   loop acc for j < i do
-  write acc (j+i) 1
+    write acc (j + i) 1
 
 def main (xs: *[]i32) =
   scatter_stream xs f (iota 10)

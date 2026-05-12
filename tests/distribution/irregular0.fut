@@ -8,7 +8,8 @@
 --   SegMap 1
 -- }
 
-def main(a: []i32): []i32 =
+def main (a: []i32) : []i32 =
   #[incremental_flattening(only_inner)]
-  map (\(i: i32): i32  ->
-        reduce (+) 0 (map (+1) (0..<i))) a
+  map (\(i: i32) : i32 ->
+         reduce (+) 0 (map (+ 1) (0..<i)))
+      a

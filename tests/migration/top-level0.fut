@@ -10,10 +10,10 @@
 --   /CmpOp 1
 -- }
 
-let arr = opaque [4i32, 2i32]
-let a = arr[0]
-let b = arr[1]
-let c = a + b
+def arr = opaque [4i32, 2i32]
+def a = arr[0]
+def b = arr[1]
+def c = a + b
 
-def main (x : i32) : bool =
+def main (x: i32) : bool =
   c == x

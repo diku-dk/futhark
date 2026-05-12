@@ -11,15 +11,15 @@
 -- structure seq-mem { Alloc 0 }
 -- structure gpu-mem { Alloc 0 }
 
-let main [n] (xs: *[n][n]i64) (cond: bool) (i: i64): [n][n]i64 =
+def main [n] (xs: *[n][n]i64) (cond: bool) (i: i64) : [n][n]i64 =
   -- Both branches will use the memory of ys, which will use the memory of
   -- xs[i].
-  let ys = if cond
-           then let ys0 = iota n
-                in ys0
-           else let ys1 = map (+ 1) (iota n)
-                in ys1
-
+  let ys =
+    if cond
+    then let ys0 = iota n
+         in ys0
+    else let ys1 = map (+ 1) (iota n)
+         in ys1
   -- xs is not allocated in this body, so we end up with zero allocations.
   let xs[i] = ys
   in xs

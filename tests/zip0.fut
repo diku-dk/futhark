@@ -8,5 +8,5 @@
 --   [1, 2, 3]
 --   [4, 5, 6]
 -- }
-def main [n] (a: [n]i32) (b: [n]i32): ([]i32,[]i32) =
-  unzip(zip a b)
+def main [n] (a: [n]i32) (b: [n]i32) : ([]i32, []i32) =
+  unzip (zip a b)

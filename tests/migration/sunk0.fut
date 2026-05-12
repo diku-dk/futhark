@@ -11,11 +11,9 @@
 
 def main (A: [5]i32) (x: i32) : i32 =
   let y = A[0]
-   in if x == 7
-         then
-           let z = A[1]
-            in if A[2] == 42
-               then y
-               else z
-         else 14
-
+  in if x == 7
+     then let z = A[1]
+          in if A[2] == 42
+             then y
+             else z
+     else 14

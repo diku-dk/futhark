@@ -5,12 +5,12 @@
 
 import "intrinsics"
 
-def fst (x,_) = x
+def fst (x, _) = x
 
 def f (acc: *acc ([]i32)) i =
   let acc = fst (acc, acc)
-  let acc = write acc (i*2) (i32.i64 i)
-  let acc = write acc (i*2+1) (i32.i64 i)
+  let acc = write acc (i * 2) (i32.i64 i)
+  let acc = write acc (i * 2 + 1) (i32.i64 i)
   in acc
 
 def main (xs: *[]i32) =

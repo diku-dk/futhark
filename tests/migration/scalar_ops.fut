@@ -59,5 +59,3 @@ entry convOp (A: [2]i32) : i32 =
   in if hostonly x
      then join a b
      else 0
-
-

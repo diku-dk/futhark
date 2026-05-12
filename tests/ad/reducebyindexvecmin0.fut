@@ -1,6 +1,7 @@
 -- ==
+-- tags { autodiff }
 -- entry: vecmin
--- compiled input { [5i64, 3i64, 2i64, 4i64, 3i64, 3i64, 4i64, 2i64, 2i64, 3i64]
+-- input { [5i64, 3i64, 2i64, 4i64, 3i64, 3i64, 4i64, 2i64, 2i64, 3i64]
 --                  [[8i32, 5i32, -2i32, 4i32, 6i32],
 --                   [12i32, 8i32, 7i32, 2i32, 6i32],
 --                   [3i32, 9i32, -2i32, 11i32, 1i32],
@@ -28,5 +29,5 @@
 --           [0i32, 0i32, 0i32, 0i32, 0i32],
 --           [1i32, 0i32, 1i32, 0i32, 0i32]] }
 
-entry vecmin [n][d][bins] (is: [n]i64) (vs: [n][d]i32) (adj_out: [bins][d]i32) =
+entry vecmin [n] [d] [bins] (is: [n]i64) (vs: [n][d]i32) (adj_out: [bins][d]i32) =
   vjp (hist (map2 i32.min) (replicate d i32.highest) bins is) vs adj_out

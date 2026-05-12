@@ -93,6 +93,9 @@ getUseSumFromStm td_env coal_tab (Let _ _ (BasicOp (Index arr (Slice slc))))
     isFix _ = False
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Index {})) = Just ([], []) -- incomplete slices
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp FlatIndex {})) = Just ([], []) -- incomplete slices
+getUseSumFromStm td_env coal_tab (Let (Pat pes) _ (BasicOp ArrayVal {})) =
+  let wrts = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) pes
+   in Just (wrts, wrts)
 getUseSumFromStm td_env coal_tab (Let (Pat pes) _ (BasicOp (ArrayLit ses _))) =
   let rds = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ mapMaybe seName ses
       wrts = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) pes
@@ -124,7 +127,7 @@ getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i (a :| bs) _
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
       rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) (a : bs)
    in Just (ws, ws ++ rs)
-getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Manifest _perm x))) =
+getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Manifest x _perm))) =
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
       rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) [x]
    in Just (ws, ws ++ rs)
@@ -311,7 +314,7 @@ aggSummaryLoopTotal _ _ _ _ (Set l)
 aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
   | Set ls <- translateAccessSummary scope_loop scals_loop access,
     nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
-    all inBeforeScope $ namesToList nms = do
+    allNames inBeforeScope nms =
       pure $ Set ls
   where
     inBeforeScope v =

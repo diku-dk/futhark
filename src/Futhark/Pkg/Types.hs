@@ -261,7 +261,7 @@ pPkgManifest = do
   required <-
     ( lexstr "require"
         *> braces (many $ (Left <$> pComment) <|> (Right <$> pRequired))
-      )
+    )
       <|> pure []
   c3 <- pComments
   eof
@@ -282,7 +282,7 @@ pPkgManifest = do
 
     pPkgPath =
       T.pack
-        <$> some (alphaNumChar <|> oneOf ("@-/.:" :: String))
+        <$> some (alphaNumChar <|> oneOf ("@-/.:_~" :: String))
         <?> "package path"
 
     pRequired =

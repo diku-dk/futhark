@@ -367,6 +367,28 @@ also be due to size inference:
 Here the type rules force ``A`` to have size ``x``, leading to a
 problematic type.  It can be fixed using the techniques above.
 
+.. _aliases-previously-returned:
+
+"Return value for consuming loop parameter *x* aliases previously returned value"
+---------------------------------------------------------------------------------
+
+This error occurs when you have a loop with multiple loop parameters,
+at least one of which is consuming, and the values returned by the
+loop body alias each other. This would result in the consuming loop
+parameter aliasing another loop parameter, which is not allowed. It is
+essentially :ref:`unique-return-aliased` from a loop perspective.
+
+A (contrived) example of this error is the following:
+
+.. code-block:: futhark
+
+  loop (acc: []f64, arr: *[][]f64) for i < length arr-1 do
+    let arr[i] = acc
+    -- Error, because 'arr[i]' and 'arr' are aliased, yet the latter
+    -- is consumed.
+    in (arr[i+1], arr)
+
+
 Size errors
 -----------
 
@@ -566,69 +588,6 @@ Such an abbreviation is actually shorthand for
 which is erroneous, but with workarounds, as explained in
 :ref:`unused-existential`.
 
-.. _unify-param-existential:
-
-"Parameter *x* used as size would go out of scope."
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-This error tends to happen when higher-order functions are used in a
-way that causes a size requirement to become impossible to express.
-Real programs that encounter this issue tend to be complicated, but to
-illustrate the problem, consider the following contrived function:
-
-.. code-block:: futhark
-
-  def f (n: i64) (m: i64) (b: [n][m]bool) = b[0,0]
-
-We have the following type:
-
-.. code-block:: futhark
-
-  val f : (n: i64) -> (m: i64) -> (b: [n][m]bool) -> bool
-
-Now suppose we say:
-
-.. code-block:: futhark
-
-  def g = uncurry f
-
-What should be the type of ``g``?  Intuitively, something like this:
-
-.. code-block:: futhark
-
-  val g : (n: i64, m: i64) -> (b: [n][m]bool) -> bool
-
-But this is *not* expressible in the Futhark type system - and even if
-it were, it would not be easy to infer this in general, as it depends
-on exactly what ``uncurry`` does, which the type checker does not
-know.
-
-As a workaround, we can use explicit type annotation and size
-coercions to give ``g`` an acceptable type:
-
-.. code-block:: futhark
-
-  def g [a][b] (n,m) (b: [a][b]bool) = f n m (b :> [n][m]bool)
-
-Another workaround, which is often the right one in cases not as
-contrived as above, is to modify ``f`` itself to produce a *witness*
-of the constraint, in the form of an array of shape ``[n][m]``:
-
-.. code-block:: futhark
-
-  def f (n: i64) (m: i64) : ([n][m](), [n][m]bool -> bool) =
-    (replicate n (replicate m ()), \b -> b[0,0])
-
-Then ``uncurry f`` works just fine and has the following type:
-
-.. code-block:: futhark
-
-  (i64, i64) -> ?[n][m].([n][m](), [n][m]bool -> bool)
-
-Programming with such *explicit size witnesses* is a fairly advanced
-technique, but often necessary when writing advanced size-dependent
-code.
-
 .. _unify-consuming-param:
 
 "Parameter types *x* and *y* are incompatible regarding consuming their arguments
@@ -700,6 +659,37 @@ ascription to disambiguate:
 .. code-block:: futhark
 
    def main = f (\(xs:[1]i64) -> xs[0])
+
+.. _loop-variant-escape:
+
+"Loop-variant size has escaped"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This somewhat rare error occurs for ``loop`` expression where the size of some
+loop parameter changes for every iteration, yet type inference leads to that
+size also occurring in the type of some variable or expression bound outside the
+loop. As an example, consider this program:
+
+.. code-block:: futhark
+
+   def grow [d] (a: [d]f64) (b: [d + 1]f64) : [d + 1]f64 =
+     b
+
+   def f_pass [n] (a: [n]f64) (b: []f64) =
+     loop a' = a for i < 1 do
+       grow a' b
+
+The definition of ``grow`` does not matter; the important detail is that it
+forces a relationship between the sizes of its arguments. Now the loop parameter
+``a'`` is assigned a type ``[m]f64`` for some ``m`` that varies for every
+iteration of the loop. Due to the application of ``grow``, we force the type of
+``b`` to become ``[m+1]f64``. But this is meaningless (and not allowed), since
+``m`` does not exist at the point where ``b`` is found.
+
+It can be difficult to identify the specific point in the code that makes the
+undesirable inferance, but it usually helps to put explicit size annotations on
+all function parameters and other ambiguous cases. The error can occur only due
+to instantiation of an anonymous size.
 
 Module errors
 -------------

@@ -11,9 +11,12 @@ def vecadd [n] (xs: [n]i32) (ys: [n]i32) : [n]i32 =
   loop acc = replicate n 0 for i < n do acc with [i] = xs[i] + ys[i]
 
 def f (acc: *acc ([][]i32)) (i, x) =
-  let acc = write acc (i*2) x
+  let acc = write acc (i * 2) x
   in acc
 
 def main [n] (xs: *[][n]i32) =
-  reduce_by_index_stream xs (map2 (+)) (replicate n 0)
-                         f (zip (iota 10) (replicate 10 (replicate n 1)))
+  reduce_by_index_stream xs
+                         (map2 (+))
+                         (replicate n 0)
+                         f
+                         (zip (iota 10) (replicate 10 (replicate n 1)))

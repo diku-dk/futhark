@@ -13,6 +13,7 @@ module Futhark.Transform.FirstOrderTransform
     transformStmRecursively,
     transformLambda,
     transformSOAC,
+    transformScrema,
   )
 where
 
@@ -113,38 +114,32 @@ resultArray arrs ts = do
         letExp "result" =<< eBlank t
   mapM oneArray ts
 
--- | Transform a single 'SOAC' into a do-loop.  The body of the lambda
--- is untouched, and may or may not contain further 'SOAC's depending
--- on the given rep.
-transformSOAC ::
+-- | Sequentialise a single Screma.
+transformScrema ::
   (Transformer m) =>
-  Pat (LetDec (Rep m)) ->
-  SOAC (Rep m) ->
+  Pat dec ->
+  SubExp ->
+  [VName] ->
+  ScremaForm (Rep m) ->
   m ()
-transformSOAC _ JVP {} =
-  error "transformSOAC: unhandled JVP"
-transformSOAC _ VJP {} =
-  error "transformSOAC: unhandled VJP"
-transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
+transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
   -- See Note [Translation of Screma].
   --
   -- Start by combining all the reduction and scan parts into a single
   -- operator
   let Reduce _ red_lam red_nes = singleReduce reds
       Scan scan_lam scan_nes = singleScan scans
-      (scan_arr_ts, _red_ts, map_arr_ts) =
-        splitAt3 (length scan_nes) (length red_nes) $ scremaType w form
+      (_red_ts, post_ts) =
+        splitAt (length red_nes) $ scremaType w form
 
-  scan_arrs <- resultArray [] scan_arr_ts
-  map_arrs <- resultArray arrs map_arr_ts
+  post_arrs <- resultArray arrs post_ts
 
   scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) $ lambdaReturnType scan_lam
-  scanout_params <- mapM (newParam "scanout" . flip toDecl Unique) scan_arr_ts
   redout_params <- mapM (newParam "redout" . flip toDecl Nonunique) $ lambdaReturnType red_lam
-  mapout_params <- mapM (newParam "mapout" . flip toDecl Unique) map_arr_ts
+  out_params <- mapM (newParam "out" . flip toDecl Unique) post_ts
 
   arr_ts <- mapM lookupType arrs
-  let paramForAcc (Acc c _ _ _) = find (f . paramType) mapout_params
+  let paramForAcc (Acc c _ _ _) = find (f . paramType) out_params
         where
           f (Acc c2 _ _ _) = c == c2
           f _ = False
@@ -153,9 +148,8 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   let merge =
         concat
           [ zip scanacc_params scan_nes,
-            zip scanout_params $ map Var scan_arrs,
             zip redout_params red_nes,
-            zip mapout_params $ map Var map_arrs
+            zip out_params $ map Var post_arrs
           ]
   i <- newVName "i"
   let loopform = ForLoop i Int64 w
@@ -175,7 +169,7 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
           Nothing
             | paramName p `nameIn` lam_cons -> do
                 p' <-
-                  letExp (baseString (paramName p)) . BasicOp $
+                  letExp (baseName (paramName p)) . BasicOp $
                     Index arr $
                       fullSlice arr_t [DimFix $ Var i]
                 letBindNames [paramName p] $ BasicOp $ Replicate mempty $ Var p'
@@ -201,23 +195,25 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
           map (pure . BasicOp . SubExp) $
             map (Var . paramName) redout_params ++ map resSubExp red_res
 
-      -- Write the scan accumulator to the scan result arrays.
-      scan_outarrs <-
-        certifying (foldMap resCerts scan_res) $
-          letwith (map paramName scanout_params) (Var i) $
-            map resSubExp scan_res'
+      let res = scan_res' <> map_res
+          param_bind = resSubExp <$> res
+          certs = resCerts <$> res
+      forM_ (zip3 (paramName <$> lambdaParams post_lam) param_bind certs) $
+        \(par, v, cs) -> do
+          certifying cs $ letBindNames [par] $ BasicOp $ SubExp v
 
-      -- Write the map results to the map result arrays.
-      map_outarrs <-
-        certifying (foldMap resCerts map_res) $
-          letwith (map paramName mapout_params) (Var i) $
-            map resSubExp map_res
+      mapM_ addStm $ bodyStms $ lambdaBody post_lam
 
-      pure . mkBody mempty . concat $
+      let post_res = bodyResult $ lambdaBody post_lam
+      outarrs <-
+        certifying (foldMap resCerts post_res) $
+          letwith (map paramName out_params) (Var i) $
+            map resSubExp post_res
+
+      pure . concat $
         [ scan_res',
-          varsRes scan_outarrs,
           red_res',
-          varsRes map_outarrs
+          varsRes outarrs
         ]
 
   -- We need to discard the final scan accumulators, as they are not
@@ -226,20 +222,40 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
     (++ patNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ Loop merge loopform loop_body
+
+-- | Transform a single 'SOAC' into a do-loop.  The body of the lambda
+-- is untouched, and may or may not contain further 'SOAC's depending
+-- on the given rep.
+transformSOAC ::
+  (Transformer m) =>
+  Pat (LetDec (Rep m)) ->
+  SOAC (Rep m) ->
+  m ()
+transformSOAC _ JVP {} =
+  error "transformSOAC: unhandled JVP"
+transformSOAC _ VJP {} =
+  error "transformSOAC: unhandled VJP"
+transformSOAC pat (Screma w arrs form) =
+  transformScrema pat w arrs form
 transformSOAC pat (Stream w arrs nes lam) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
   -- being the only one, as all the innermost one can be simplified
-  -- array (as they will have one iteration each).
+  -- away (as they will have one iteration each).
   let (chunk_size_param, fold_params, chunk_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
+      mapout_ts = map (`setOuterSize` w) $ drop (length nes) $ lambdaReturnType lam
 
-  mapout_merge <- forM (drop (length nes) $ lambdaReturnType lam) $ \t ->
-    let t' = t `setOuterSize` w
-        scratch = BasicOp $ Scratch (elemType t') (arrayDims t')
-     in (,)
-          <$> newParam "stream_mapout" (toDecl t' Unique)
-          <*> letSubExp "stream_mapout_scratch" scratch
+  mapout_initial <- resultArray arrs mapout_ts
+  mapout_params <- forM mapout_ts $ \t ->
+    newParam "stream_mapout" $ toDecl t Unique
+  let mapout_merge = zip mapout_params $ map Var mapout_initial
+
+  let paramForAcc (Acc c _ _ _) = find (f . paramType) mapout_params
+        where
+          f (Acc c2 _ _ _) = c == c2
+          f _ = False
+      paramForAcc _ = Nothing
 
   -- We need to copy the neutral elements because they may be consumed
   -- in the body of the Stream.
@@ -247,14 +263,13 @@ transformSOAC pat (Stream w arrs nes lam) = do
         se_t <- subExpType se
         case (se_t, se) of
           (Array {}, Var v) ->
-            letSubExp (baseString v) $ BasicOp $ Replicate mempty se
+            letSubExp (baseName v) $ BasicOp $ Replicate mempty se
           _ -> pure se
   nes' <- mapM copyIfArray nes
 
   let onType t = t `toDecl` Unique
       merge = zip (map (fmap onType) fold_params) nes' ++ mapout_merge
       merge_params = map fst merge
-      mapout_params = map fst mapout_merge
 
   i <- newVName "i"
 
@@ -263,12 +278,18 @@ transformSOAC pat (Stream w arrs nes lam) = do
   letBindNames [paramName chunk_size_param] . BasicOp . SubExp $
     intConst Int64 1
 
+  arrs_ts <- mapM lookupType arrs
   loop_body <- runBodyBuilder $
     localScope (scopeOfLoopForm loop_form <> scopeOfFParams merge_params) $ do
       let slice = [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
-      forM_ (zip chunk_params arrs) $ \(p, arr) ->
-        letBindNames [paramName p] . BasicOp . Index arr $
-          fullSlice (paramType p) slice
+      forM_ (zip3 chunk_params arrs arrs_ts) $ \(p, arr, arr_t) ->
+        case paramForAcc arr_t of
+          Just acc_out_p ->
+            letBindNames [paramName p] . BasicOp . SubExp $
+              Var (paramName acc_out_p)
+          Nothing ->
+            letBindNames [paramName p] . BasicOp $
+              Index arr (fullSlice (paramType p) slice)
 
       (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
@@ -276,39 +297,13 @@ transformSOAC pat (Stream w arrs nes lam) = do
 
       mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, SubExpRes cs se) ->
         certifying cs . letSubExp "mapout_res" . BasicOp $
-          Update Unsafe (paramName p) (fullSlice (paramType p) slice) se
+          if isAcc (paramType p)
+            then SubExp se
+            else Update Unsafe (paramName p) (fullSlice (paramType p) slice) se
 
-      mkBodyM mempty $ subExpsRes $ res' ++ mapout_res'
+      pure $ subExpsRes $ res' ++ mapout_res'
 
   letBind pat $ Loop merge loop_form loop_body
-transformSOAC pat (Scatter len ivs lam as) = do
-  iter <- newVName "write_iter"
-
-  let (as_ws, as_ns, as_vs) = unzip3 as
-  ts <- mapM lookupType as_vs
-  asOuts <- mapM (newIdent "write_out") ts
-
-  -- Scatter is in-place, so we use the input array as the output array.
-  let merge = loopMerge asOuts $ map Var as_vs
-  loopBody <- runBodyBuilder $
-    localScope (M.insert iter (IndexName Int64) $ scopeOfFParams $ map fst merge) $ do
-      ivs' <- forM ivs $ \iv -> do
-        iv_t <- lookupType iv
-        letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
-      ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
-
-      let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
-
-      ress <- forM indexes $ \(_, arr, indexes') -> do
-        arr_t <- lookupType arr
-        let saveInArray arr' (indexCur, SubExpRes value_cs valueCur) =
-              certifying (foldMap resCerts indexCur <> value_cs) . letExp "write_out" $
-                BasicOp $
-                  Update Safe arr' (fullSlice arr_t $ map (DimFix . resSubExp) indexCur) valueCur
-
-        foldM saveInArray arr indexes'
-      pure $ resultBody (map Var ress)
-  letBind pat $ Loop merge (ForLoop iter Int64 len) loopBody
 transformSOAC pat (Hist len imgs ops bucket_fun) = do
   iter <- newVName "iter"
 
@@ -361,7 +356,7 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
 
           pure $ varsRes hist'
 
-    pure $ resultBody $ map Var $ concat hists_out''
+    pure $ varsRes $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
   letBind pat $ Loop merge (ForLoop iter Int64 len) loopBody
@@ -380,7 +375,7 @@ transformLambda ::
   m (AST.Lambda rep)
 transformLambda (Lambda params rettype body) = do
   body' <-
-    runBodyBuilder $
+    fmap fst . runBuilder $
       localScope (scopeOfLParams params) $
         transformBody body
   pure $ Lambda params rettype body'
@@ -414,7 +409,7 @@ loopMerge vars = loopMerge' $ map (,Unique) vars
 loopMerge' :: [(Ident, Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
 loopMerge' vars vals =
   [ (Param mempty pname $ toDecl ptype u, val)
-    | ((Ident pname ptype, u), val) <- zip vars vals
+  | ((Ident pname ptype, u), val) <- zip vars vals
   ]
 
 -- Note [Translation of Screma]
@@ -459,3 +454,5 @@ loopMerge' vars vals =
 --     let red_acc' = red_op(red_acc, b)
 --     let map_arr[i] = d
 --     in (scan_acc', scan_arr', red_acc', map_acc', map_arr)
+--
+-- A similar operation is done for Stream.

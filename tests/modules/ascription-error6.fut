@@ -2,9 +2,10 @@
 -- ==
 -- error: \*\[1\]f32
 
-module M : {
-  val f : [1]f32 -> bool
-} = {
+module M
+  : {
+      val f : [1]f32 -> bool
+    } = {
   def f (_: *[1]f32) = true
 }
 

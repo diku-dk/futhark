@@ -6,13 +6,14 @@
 --   /SegMap 0
 -- }
 
-def main (A: *[10]i64): [1]i64 =
+def main (A: *[10]i64) : [1]i64 =
   let A = A with [0] = 0
   let A = A with [1] = 0
   let B = opaque A
+  let x = B[0]
+  -- This read can be delayed into op
+  let y = B[1]
+  -- This read can be delayed into the kernel body
 
-  let x = B[0] -- This read can be delayed into op
-  let y = B[1] -- This read can be delayed into the kernel body
-
-  let op = \a b -> a+b+x
-   in [reduce_comm op 0 (map (+y) B)]
+  let op = \a b -> a + b + x
+  in [reduce_comm op 0 (map (+ y) B)]

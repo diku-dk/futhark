@@ -4,6 +4,7 @@
 module Futhark.Pass.ExplicitAllocations.SegOp
   ( allocInKernelBody,
     allocInBinOpLambda,
+    allocInPostOpLambda,
   )
 where
 
@@ -18,19 +19,8 @@ allocInKernelBody ::
   (Allocable fromrep torep inner) =>
   KernelBody fromrep ->
   AllocM fromrep torep (KernelBody torep)
-allocInKernelBody (KernelBody () stms res) =
-  uncurry (flip (KernelBody ()))
-    <$> collectStms (allocInStms stms (pure res))
-
-allocInLambda ::
-  (Allocable fromrep torep inner) =>
-  [LParam torep] ->
-  Body fromrep ->
-  AllocM fromrep torep (Lambda torep)
-allocInLambda params body =
-  mkLambda params . allocInStms (bodyStms body) $
-    pure $
-      bodyResult body
+allocInKernelBody (Body () stms res) =
+  uncurry (flip (Body ())) <$> collectStms (allocInStms stms (pure res))
 
 allocInBinOpParams ::
   (Allocable fromrep torep inner) =>
@@ -45,7 +35,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
     alloc x y =
       case paramType x of
         Array pt shape u -> do
-          let name = maybe "num_threads" baseString (subExpVar num_threads)
+          let name = maybe "num_threads" baseName (subExpVar num_threads)
           twice_num_threads <-
             letSubExp ("twice_" <> name) . BasicOp $
               BinOp (Mul Int64 OverflowUndef) num_threads (intConst Int64 2)
@@ -97,3 +87,16 @@ allocInBinOpLambda num_threads (SegSpace flat _) lam = do
     allocInBinOpParams num_threads index_x index_y acc_params arr_params
 
   allocInLambda (acc_params' ++ arr_params') (lambdaBody lam)
+
+allocInPostOpLambda ::
+  (Allocable fromrep torep inner) =>
+  SubExp ->
+  SegSpace ->
+  Lambda fromrep ->
+  AllocM fromrep torep (Lambda torep)
+allocInPostOpLambda num_threads (SegSpace flat _) lam = do
+  let arr_params = lambdaParams lam
+      index_x = TPrimExp $ LeafExp flat int64
+  arr_params' <- allocInLParams num_threads index_x arr_params
+
+  allocInLambda arr_params' (lambdaBody lam)

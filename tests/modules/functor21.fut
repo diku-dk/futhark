@@ -10,8 +10,9 @@ module mk_has_cell (V: has_cell) = {
 }
 
 module i8_cell = {
-  type cell = i8
-} : has_cell
+                   type cell = i8
+                 }:
+                 has_cell
 
 module m = mk_has_cell i8_cell
 

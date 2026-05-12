@@ -32,7 +32,7 @@ parallelCopy pt destloc srcloc = do
     free_params <- freeParams body
     emit $ Imp.Op $ Imp.ParLoop "copy" body free_params
   free_params <- freeParams seq_code
-  s <- prettyString <$> newVName "copy"
+  s <- nameFromText . prettyText <$> newVName "copy"
   iterations <- dPrimVE "iterations" $ product $ map pe64 srcshape
   let scheduling = Imp.SchedulerInfo (untyped iterations) Imp.Static
   emit . Imp.Op $
@@ -136,7 +136,7 @@ compileMCOp pat (ParOp par_op op) = do
   seq_code <- collect $ localOps inThreadOps $ do
     nsubtasks <- dPrim "nsubtasks"
     sOp $ Imp.GetNumTasks $ tvVar nsubtasks
-    emit =<< compileSegOp pat op nsubtasks
+    compileSegOp pat op nsubtasks
   retvals <- getReturnParams pat op
 
   let scheduling_info = Imp.SchedulerInfo (untyped iterations)
@@ -148,27 +148,30 @@ compileMCOp pat (ParOp par_op op) = do
       par_code <- collect $ do
         nsubtasks <- dPrim "nsubtasks"
         sOp $ Imp.GetNumTasks $ tvVar nsubtasks
-        emit =<< compileSegOp pat nested_op nsubtasks
+        compileSegOp pat nested_op nsubtasks
       pure $ Just $ Imp.ParallelTask par_code
     Nothing -> pure Nothing
 
-  s <- segOpString op
+  s <- segOpName op
   let seq_task = Imp.ParallelTask seq_code
   free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
-  emit . Imp.Op $
-    Imp.SegOp s free_params seq_task par_task retvals $
-      scheduling_info (decideScheduling' op seq_code)
+  let code =
+        Imp.Op $
+          Imp.SegOp s free_params seq_task par_task retvals $
+            scheduling_info (decideScheduling' op seq_code)
+  emit $ Imp.Meta $ Imp.MetaProvenance $ taskProvenance code
+  emit code
 
 compileSegOp ::
   Pat LetDecMem ->
   SegOp () MCMem ->
   TV Int32 ->
-  ImpM MCMem HostEnv Imp.Multicore Imp.MCCode
-compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
+  ImpM MCMem HostEnv Imp.Multicore ()
+compileSegOp pat (SegHist _ space _ kbody histops) ntasks =
   compileSegHist pat space histops kbody ntasks
-compileSegOp pat (SegScan _ space scans _ kbody) ntasks =
-  compileSegScan pat space scans kbody ntasks
-compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
+compileSegOp pat (SegScan _ space ts kbody scans post_op) ntasks =
+  compileSegScan pat space ts kbody scans post_op ntasks
+compileSegOp pat (SegRed _ space _ kbody reds) ntasks =
   compileSegRed pat space reds kbody ntasks
 compileSegOp pat (SegMap _ space _ kbody) _ =
   compileSegMap pat space kbody

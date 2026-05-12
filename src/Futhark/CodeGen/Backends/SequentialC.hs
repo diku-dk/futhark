@@ -26,7 +26,6 @@ compileProg version =
     ( GC.compileProg
         "c"
         version
-        mempty
         operations
         generateBoilerplate
         mempty

@@ -22,6 +22,7 @@ import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
+import Futhark.CodeGen.Backends.GenericC.Pretty (expText, idText, typeText)
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
@@ -55,21 +56,18 @@ compilePrimExp f (LeafExp v _) =
 compilePrimExp f (UnOpExp Complement {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|~$exp:x'|]
-compilePrimExp f (UnOpExp Not {} x) = do
-  x' <- compilePrimExp f x
-  pure [C.cexp|!$exp:x'|]
-compilePrimExp f (UnOpExp (FAbs Float32) x) = do
-  x' <- compilePrimExp f x
-  pure [C.cexp|(float)fabs($exp:x')|]
-compilePrimExp f (UnOpExp (FAbs Float64) x) = do
-  x' <- compilePrimExp f x
-  pure [C.cexp|fabs($exp:x')|]
 compilePrimExp f (UnOpExp SSignum {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0)|]
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0) != 0|]
+compilePrimExp f (UnOpExp (Neg Bool) x) = do
+  x' <- compilePrimExp f x
+  pure [C.cexp|!$exp:x'|]
+compilePrimExp f (UnOpExp Neg {} x) = do
+  x' <- compilePrimExp f x
+  pure [C.cexp|-$exp:x'|]
 compilePrimExp f (UnOpExp op x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|$id:(prettyString op)($exp:x')|]
@@ -110,7 +108,7 @@ compilePrimExp f (BinOpExp bop x y) = do
     _ -> [C.cexp|$id:(prettyString bop)($exp:x', $exp:y')|]
 compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
-  pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
+  pure [C.cexp|$id:(funName (nameFromText h))($args:args')|]
 
 -- | Compile prim expression to C expression.
 compileExp :: Exp -> CompilerM op s C.Exp
@@ -214,7 +212,7 @@ compileDest v = do
   wrap <- memNeedsWrapping v
   if wrap
     then do
-      v' <- newVName $ baseString v <> "_struct"
+      v' <- newVName $ baseName v <> "_struct"
       item [C.citem|$ty:(fatMemType DefaultSpace) $id:v' = {.references = NULL, .mem = $exp:v};|]
       pure (v', [C.cstms|$id:v = $id:v'.mem;|])
     else pure (v, mempty)
@@ -223,13 +221,10 @@ compileCode :: Code op -> CompilerM op s ()
 compileCode (Op op) =
   join $ asks (opsCompiler . envOperations) <*> pure op
 compileCode Skip = pure ()
-compileCode (Comment s code) = do
-  xs <- collect $ compileCode code
-  let comment = "// " ++ T.unpack s
-  stm
-    [C.cstm|$comment:comment
-              { $items:xs }
-             |]
+compileCode (Meta (MetaComment s)) = do
+  comment s
+compileCode (Meta (MetaProvenance (Provenance _ l))) =
+  unless (l == mempty) $ comment $ locText l
 compileCode (TracePrint msg) = do
   (formatstr, formatargs) <- errorMsgString msg
   stm [C.cstm|fprintf(ctx->log, $string:formatstr, $args:formatargs);|]
@@ -273,6 +268,9 @@ compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
           args' <- mapM compileArg args
           item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $id:(funName fname)($args:args');|]
           go code
+    go (x@(Meta (MetaProvenance p)) : xs) = do
+      compileCode x
+      localProvenance p $ go xs
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
 compileCode (Assert e msg (loc, locs)) = do
@@ -362,12 +360,23 @@ compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
 compileCode (DeclareArray name t vs) = do
-  name_realtype <- newVName $ baseString name ++ "_realtype"
+  name_realtype <- newVName $ baseName name <> "_realtype"
   let ct = primTypeToCType t
   case vs of
     ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- vs']
-      earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
+      -- To handle very large literal arrays (which are inefficient
+      -- with language-c-quote, see #2160), we do our own formatting and inject it as a string.
+      let array_decl =
+            "static "
+              <> typeText ct
+              <> " "
+              <> idText (C.toIdent name_realtype mempty)
+              <> "["
+              <> prettyText (length vs')
+              <> "] = { "
+              <> T.intercalate "," (map (expText . flip C.toExp mempty) vs')
+              <> "};"
+      earlyDecl [C.cedecl|$esc:(T.unpack array_decl)|]
     ArrayZeros n ->
       earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.
@@ -402,6 +411,9 @@ compileCode (Call dests fname args) = do
       <*> pure fname
       <*> mapM compileArg args
   stms $ mconcat unpack_dest
+compileCode (GetUserParam v name def) = do
+  (val, set) <- asks (opsGetParam . envOperations) <*> pure name
+  stm [C.cstm|$id:v = $exp:set ? $exp:val : $exp:def;|]
 
 -- | Compile an 'Copy' using sequential nested loops, but
 -- parameterised over how to do the reads and writes.

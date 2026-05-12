@@ -33,33 +33,33 @@
 --    2.726331, -1.618253, 1.472878]
 -- }
 
+def tridag ( nn: i32
+           , b: *[]f64
+           , d: *[]f64
+           , a: []f64
+           , c: []f64
+           ) : ([]f64, []f64) =
+  if (nn == 1)
+  then --then ( b, map(\f64 (f64 x, f64 y) -> x / y, d, b) )
+       (b, [d[0] / b[0]])
+  else let (b, d) =
+         loop ((b, d)) for i < (nn - 1) do
+           let xm = a[i + 1] / b[i]
+           let b[i + 1] = b[i + 1] - xm * c[i]
+           let d[i + 1] = d[i + 1] - xm * d[i]
+           in (b, d)
+       let d[nn - 1] = d[nn - 1] / b[nn - 1]
+       let d =
+         loop (d) for i < (nn - 1) do
+           let k = nn - 2 - i
+           let d[k] = (d[k] - c[k] * d[k + 1]) / b[k]
+           in d
+       in (b, d)
 
-def tridag(nn:   i32,
-                            b: *[]f64, d: *[]f64,
-                            a: []f64, c: []f64 ): ([]f64,[]f64) =
-    if (nn == 1)
-    --then ( b, map(\f64 (f64 x, f64 y) -> x / y, d, b) )
-    then (b, [d[0]/b[0]])
-    else
-        let (b,d) = loop((b, d)) for i < (nn-1) do
-            let xm     = a[i+1] / b[i]
-            let b[i+1] = b[i+1] - xm*c[i]
-            let d[i+1] = d[i+1] - xm*d[i] in
-            (b, d)
-
-        let d[nn-1] = d[nn-1] / b[nn-1]   in
-
-        let d = loop(d) for i < (nn-1) do
-            let k = nn - 2 - i
-            let d[k] = ( d[k] - c[k]*d[k+1] ) / b[k] in
-            d
-        in (b, d)
-
-
-def main: ([]f64,[]f64) =
-    let nn = reduce (+) 0 ([1,2,3,4])
-    let a = replicate nn 3.33
-    let b = map (\x -> f64.i64(x) + 1.0) (iota(nn))
-    let c = map (\x -> 1.11*f64.i64(x) + 0.5) (iota(nn))
-    let d = map (\x -> 1.01*f64.i64(x) + 0.25) (iota(nn))
-    in tridag(i32.i64 nn, b, d, a, c)
+def main : ([]f64, []f64) =
+  let nn = reduce (+) 0 ([1, 2, 3, 4])
+  let a = replicate nn 3.33
+  let b = map (\x -> f64.i64 (x) + 1.0) (iota (nn))
+  let c = map (\x -> 1.11 * f64.i64 (x) + 0.5) (iota (nn))
+  let d = map (\x -> 1.01 * f64.i64 (x) + 0.25) (iota (nn))
+  in tridag (i32.i64 nn, b, d, a, c)

@@ -5,4 +5,4 @@
 
 def main (x: i32) (y: i32) =
   let f v = v.0
-  in f (x,y)
+  in f (x, y)

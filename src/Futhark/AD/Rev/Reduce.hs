@@ -25,11 +25,11 @@ eReverse arr = do
       BinOp (Sub Int64 OverflowUndef) w (intConst Int64 1)
   let stride = intConst Int64 (-1)
       slice = fullSlice arr_t [DimSlice start w stride]
-  letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice
+  letExp (baseName arr <> "_rev") $ BasicOp $ Index arr slice
 
 scanExc ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  String ->
+  Name ->
   Scan SOACS ->
   [VName] ->
   m [VName]
@@ -57,7 +57,7 @@ scanExc desc scan arrs = do
         (resultBodyM $ scanNeutral scan)
         (eBody $ map (`eIndex` [prev]) res_incl)
 
-  letTupExp desc $ Op $ Screma w [iota] (mapSOAC lam)
+  letTupExp desc . Op . Screma w [iota] =<< mapSOAC lam
 
 mkF :: Lambda SOACS -> ADM ([VName], Lambda SOACS)
 mkF lam = do
@@ -78,7 +78,7 @@ diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isAdd op = do
       adj_rep <-
-        letExp (baseString adj <> "_rep") $
+        letExp (baseName adj <> "_rep") $
           BasicOp $
             Replicate (Shape [w]) $
               Var adj
@@ -117,7 +117,9 @@ diffReduce ops pat_adj w as red = do
 
   f_adj <- vjpLambda ops (map adjFromVar pat_adj) as_params f
 
-  as_adj <- letTupExp "adjs" $ Op $ Screma w (ls ++ as ++ rs) (mapSOAC f_adj)
+  as_adj <-
+    letTupExp "adjs" . Op . Screma w (ls ++ as ++ rs)
+      =<< mapSOAC f_adj
 
   zipWithM_ updateAdj as as_adj
   where
@@ -183,7 +185,7 @@ diffMinMaxReduce _ops x aux w minmax ne as m = do
       BasicOp $
         Iota w (intConst Int64 0) (intConst Int64 1) Int64
   form <- reduceSOAC [Reduce Commutative red_lam [ne, intConst Int64 (-1)]]
-  x_ind <- newVName (baseString x <> "_ind")
+  x_ind <- newVName (baseName x <> "_ind")
   auxing aux $ letBindNames [x, x_ind] $ Op $ Screma w [as, red_iota] form
 
   m
@@ -208,7 +210,7 @@ diffVecReduce ops x aux w iscomm lam ne as m = do
     rank <- arrayRank <$> lookupType as
     let rear = [1, 0] ++ drop 2 [0 .. rank - 1]
 
-    tran_as <- letExp "tran_as" $ BasicOp $ Rearrange rear as
+    tran_as <- letExp "tran_as" $ BasicOp $ Rearrange as rear
     ts <- lookupType tran_as
     t_ne <- lookupType ne
 
@@ -222,7 +224,8 @@ diffVecReduce ops x aux w iscomm lam ne as m = do
         fmap varsRes . letTupExp "idx_res" $
           Op $
             Screma w [paramName as_param] reduce_form
-    addStm $ Let x aux $ Op $ Screma (arraySize 0 ts) [tran_as, ne] $ mapSOAC map_lam
+    addStm . Let x aux . Op . Screma (arraySize 0 ts) [tran_as, ne]
+      =<< mapSOAC map_lam
 
   foldr (vjpStm ops) m stms
 
@@ -264,10 +267,8 @@ diffMulReduce _ops x aux w mul ne as m = do
   ps <- newVName "ps"
   zs <- newVName "zs"
   auxing aux $
-    letBindNames [ps, zs] $
-      Op $
-        Screma w [as] $
-          mapSOAC map_lam
+    letBindNames [ps, zs] . Op . Screma w [as]
+      =<< mapSOAC map_lam
 
   red_lam_mul <- binOpLambda mul t
   red_lam_add <- binOpLambda (Add Int64 OverflowUndef) int64
@@ -322,7 +323,9 @@ diffMulReduce _ops x aux w mul ne as m = do
                   (eBody $ pure const_zero)
           )
 
-  as_adjup <- letExp "adjs" $ Op $ Screma w [as] $ mapSOAC map_lam_rev
+  as_adjup <-
+    letExp "adjs" . Op . Screma w [as]
+      =<< mapSOAC map_lam_rev
 
   updateAdj as as_adjup
   where

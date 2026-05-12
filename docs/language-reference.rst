@@ -370,15 +370,21 @@ Entry Points
 ~~~~~~~~~~~~
 
 Apart from declaring a function with the keyword ``def``, it can also
-be declared with ``entry``.  When the Futhark program is compiled any
-top-level function declared with ``entry`` will be exposed as an entry
-point.  If the Futhark program has been compiled as a library, these
-are the functions that will be exposed.  If compiled as an executable,
-you can use the ``--entry-point`` command line option of the generated
-executable to select the entry point you wish to run.
+be declared with ``entry``. When the Futhark program is compiled any
+top-level function declared with ``entry`` *in the single file passed
+directly to the Futhark compiler* will be exposed as an entry point.
+This means that any functions defined with ``entry`` in a file that is
+accessed via ``import`` are not considered entry points, but they are
+still usable as normal functions.
 
-Any top-level function named ``main`` will always be considered an
-entry point, whether it is declared with ``entry`` or not.
+If the Futhark program has been compiled as a library, these entry
+points are the functions that will be exposed as the library
+interface. If compiled as an executable, you can use the
+``--entry-point`` command line option of the generated executable to
+select the entry point you wish to run.
+
+Any top-level function named ``main`` is treated as if it had been
+defined with ``entry``.
 
 The name of an entry point must not contain an apostrophe (``'``),
 even though that is normally permitted in Futhark identifiers.
@@ -476,7 +482,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` `qualsymbol` ")"
        : | "(" `qualsymbol` `exp` ")"
        : | "(" ( "." `field` )+ ")"
-       : | "(" "." `slice` ")"
+       : | "(" "." (`slice` | `fieldid`) (`slice` | "." `fieldid`) *  ")"
        : | "???"
    exp:   `atom`
       : | `exp` `qualsymbol` `exp`
@@ -491,15 +497,13 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
       : | "let" `size`* `pat` "=" `exp` "in" `exp`
-      : | "let" `name` `slice` "=" `exp` "in" `exp`
+      : | "let" `name` (`slice` | "." `fieldid`)+ "=" `exp` "in" `exp`
       : | "let" `name` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
-      : | "unsafe" `exp`
-      : | "assert" `atom` `atom`
-      : | `exp` "with" `slice` "=" `exp`
-      : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
+      : | "assert" `atom` `exp`
+      : | `exp` "with" (`slice` | `fieldid`) (`slice` | "." `fieldid`)*  "=" `exp`
       : | "match" `exp` ("case" `pat` "->" `exp`)+
    slice: "[" `index` ("," `index`)* [","] "]"
    field:   `fieldid` "=" `exp`
@@ -584,8 +588,8 @@ in natural text.
   ``t``.  To pass a single array-typed parameter, enclose it in
   parens.
 
-* The bodies of ``let``, ``if``, and ``loop`` extend as far to the
-  right as possible.
+* The bodies of ``let``, ``if``, and ``loop`` extend as far to the right as
+  possible, as does the expression guarded by an ``assert``.
 
 * The following table describes the precedence and associativity of
   infix operators in both expressions and type expressions.  All
@@ -743,6 +747,14 @@ This holds only if ``n`` is a variable or constant.
 Create an array containing the indicated elements.  Each element must
 have the same type and shape.
 
+**Large array optimisation**: as a special case, large one-dimensional
+array literal consisting *entirely* of monomorphic constants (i.e.,
+numbers must have a type suffix) are handled with specialised
+fast-path code by the compiler. To keep compile times manageable, make
+sure that all very large array literals (more than about ten thousand
+elements) are of this form. This is likely relevant only for generated
+code.
+
 .. _range:
 
 ``x..y...z``
@@ -750,17 +762,22 @@ have the same type and shape.
 
 Construct a signed integer array whose first element is ``x`` and
 which proceeds with a stride of ``y-x`` until reaching ``z``
-(inclusive).  The ``..y`` part can be elided in which case a stride of
-1 is used.  A run-time error occurs if ``z`` is less than ``x`` or
-``y``, or if ``x`` and ``y`` are the same value.
+(inclusive). The ``..y`` part can be elided in which case a stride of
+``1`` is used. All components must be of the same unsigned integer
+type.
+
+A run-time error occurs if ``z`` is less than ``x`` or ``y``, or if
+``x`` and ``y`` are the same value.
 
 In the general case, the size of the array produced by a range is
 unknown (see `Size types`_).  In a few cases, the size is known
 statically:
 
-  * ``1..2...n`` has size ``n``
+  * ``0..<n`` has size ``n``.
 
-This holds only if ``n`` is a variable or constant.
+  * ``0..1..<n`` has size ``n``.
+
+  * ``1..2...n`` has size ``n``
 
 .. _range_upto:
 
@@ -872,7 +889,7 @@ Apply the function ``f`` to the argument ``x``.
 ``#c x y z``
 ............
 
-Apply the sum type constructor ``#x`` to the payload ``x``, ``y``, and
+Apply the sum type constructor ``#c`` to the payload ``x``, ``y``, and
 ``z``.  A constructor application is always assumed to be saturated,
 i.e. its entire payload provided.  This means that constructors may
 not be partially applied.
@@ -914,18 +931,6 @@ Numerical negation of ``x``, which must be of numeric type.
 Apply the given attribute to the expression.  Attributes are an ad-hoc
 and optional mechanism for providing extra information, directives, or
 hints to the compiler.  See :ref:`attributes` for more information.
-
-``unsafe e``
-............
-
-Elide safety checks and assertions (such as bounds checking) that
-occur during execution of ``e``.  This is useful if the compiler is
-otherwise unable to avoid bounds checks (e.g. when using indirect
-indexes), but you really do not want them there.  Make very sure that
-the code is correct; eliding such checks can lead to memory
-corruption.
-
-This construct is deprecated.  Use the ``#[unsafe]`` attribute instead.
 
 .. _assert:
 
@@ -989,6 +994,13 @@ Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value
 of ``v`` must be an array of the proper size.  This notation is
 Syntactic sugar for ``let a = a with [i] = v in a``.
+
+``let r.f = v in body``
+.......................
+
+Write ``v`` to the field ``f`` of record ``r`` and evaluate ``body``.
+Nested field updates are written ``let r.f.g = v in body``.
+This notation is syntactic sugar for ``let r = r with f = v in body``.
 
 ``let f params... = e in body``
 ...............................
@@ -1454,7 +1466,8 @@ instead::
   def consumes_first_arg (a: *[]i32) (b: []i32) = ...
 
 For bulk in-place updates with multiple values, use the ``scatter``
-function in the basis library.
+function from the `prelude
+<https://futhark-lang.org/docs/prelude/doc/prelude/soacs.html>`_.
 
 Alias Analysis
 ~~~~~~~~~~~~~~
@@ -1581,6 +1594,10 @@ then returns a module that exposes only the functionality described by
 the module type.  This is how internal details of a module can be
 hidden.
 
+As a slightly ad-hoc limitation, ascription is forbidden when a type
+substitution of size-lifted types occurs in a size appearing at the
+top level.
+
 ``\(p: mt1): mt2 -> e``
 .......................
 
@@ -1621,6 +1638,7 @@ Module Type Expressions
 
 .. productionlist::
    spec:   "val" `name` `type_param`* ":" `type`
+       : | "val" "(" `symbol` ")" ":" `type`
        : | "val" `symbol` `type_param`* ":" `type`
        : | ("type" | "type^" | "type~") `name` `type_param`* "=" `type`
        : | ("type" | "type^" | "type~") `name` `type_param`*
@@ -1718,6 +1736,16 @@ unspecified which attributes take precedence.
 
 The following expression attributes are supported.
 
+``blank``
+.........
+
+Indicates that the value computed by the expression does not matter, and that
+the expression can be replaced with an arbitrary other expression of the same
+type. This is useful for constructing arrays that will eventually be filled with
+``scatter`` or similar operations. Note that this can subvert type-based
+invariants safety if the blank value is used, but it cannot subvert memory
+safety.
+
 ``trace``
 .........
 
@@ -1778,6 +1806,13 @@ Do not inline the attributed function application.  If used within a
 parallel construct (e.g. ``map``), this will likely prevent the GPU
 backends from generating working code.
 
+``scratch``
+...........
+
+Like ``blank``, but the resulting values (if arrays) will comprise uninitialised
+memory. Reading from such arrays is potentially dangerous, as the elements are
+completely undefined until they are updated with a ``scatter`` or similar.
+
 ``sequential``
 ..............
 
@@ -1819,6 +1854,15 @@ subexpressions) requires safety checks (such as bounds checking) at
 run-time.  This is used for performance-critical code where you want
 to be told when the compiler is unable to statically verify the safety
 of all operations.
+
+``param(name)``
+...............
+
+This attribute can only be attached to an expression of type ``i64``. It causes
+a tuning parameter to be defined with the given name. This tuning parameter can
+then be set at program startup to override value of the expression this
+attribute is applied to. It is currently unspecified whether setting the tuning
+parameter after context creation has any effect.
 
 Declaration attributes
 ~~~~~~~~~~~~~~~~~~~~~~

@@ -1,6 +1,6 @@
-module type number = { type t val i32: i32 -> t }
+module type number = {type t val i32 : i32 -> t}
 
-module has_number: number with t = i32 = { type t = i32 def i32 (x: i32) = x }
+module has_number : number with t = i32 = {type t = i32 def i32 (x: i32) = x}
 
 module type optimizable = {
   module loss: number

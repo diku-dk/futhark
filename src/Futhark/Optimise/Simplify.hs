@@ -51,13 +51,13 @@ simplifyProg simpl rules blockers prog = do
   let consts = progConsts prog
       funs = progFuns prog
   (consts_vtable, consts') <-
-    simplifyConsts (funDefUsages funs) (mempty, informStms consts)
+    simplifyConsts (funDefUsages funs) (ST.empty, informStms consts)
 
   -- We deepen the vtable so it will look like the constants are in an
   -- "outer loop"; this communicates useful information to some
   -- simplification rules (e.g. see issue #1302).
   funs' <- parPass (simplifyFun' (ST.deepen consts_vtable) . informFunDef) funs
-  (_, consts'') <- simplifyConsts (funDefUsages funs') (mempty, consts')
+  (_, consts'') <- simplifyConsts (funDefUsages funs') (ST.empty, consts')
 
   pure $
     prog
@@ -67,12 +67,12 @@ simplifyProg simpl rules blockers prog = do
   where
     simplifyFun' consts_vtable =
       simplifySomething
-        (Engine.localVtable (consts_vtable <>) . Engine.simplifyFun)
+        (Engine.localVtable (const consts_vtable) . Engine.simplifyFun)
         id
         simpl
         rules
         blockers
-        mempty
+        ST.empty
 
     simplifyConsts uses =
       simplifySomething
@@ -81,11 +81,11 @@ simplifyProg simpl rules blockers prog = do
         simpl
         rules
         blockers
-        mempty
+        ST.empty
 
     onConsts uses consts' = do
       consts'' <- Engine.simplifyStmsWithUsage uses consts'
-      pure (ST.insertStms consts'' mempty, consts'')
+      pure (ST.insertStms consts'' ST.empty, consts'')
 
 -- | Run a simplification operation to convergence.
 simplifySomething ::
@@ -99,7 +99,7 @@ simplifySomething ::
   a ->
   m a
 simplifySomething f g simpl rules blockers vtable x = do
-  let f' x' = Engine.localVtable (vtable <>) $ f x'
+  let f' x' = Engine.localVtable (const vtable) $ f x'
   loopUntilConvergence env simpl f' g x
   where
     env = Engine.emptyEnv rules blockers

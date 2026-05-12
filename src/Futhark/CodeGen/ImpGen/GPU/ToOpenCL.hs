@@ -58,10 +58,11 @@ translateGPU ::
 translateGPU target prog =
   let env = envFromProg prog
       ( prog',
-        ToOpenCL kernels device_funs used_types sizes failures constants
+        ToOpenCL kernels device_funs used_types failures constants
         ) =
           (`runState` initialOpenCL) . (`runReaderT` env) $ do
             let ImpGPU.Definitions
+                  params
                   types
                   (ImpGPU.Constants ps consts)
                   (ImpGPU.Functions funs) = prog
@@ -71,6 +72,7 @@ translateGPU target prog =
 
             pure $
               ImpOpenCL.Definitions
+                (findParamUsers env prog' (cleanParams params))
                 types
                 (ImpOpenCL.Constants ps consts')
                 (ImpOpenCL.Functions funs')
@@ -91,7 +93,6 @@ translateGPU target prog =
           openClMacroDefs = constants,
           openClKernelNames = kernels',
           openClUsedTypes = S.toList used_types,
-          openClParams = findParamUsers env prog' (cleanSizes sizes),
           openClFailures = failures,
           hostDefinitions = prog'
         }
@@ -103,18 +104,18 @@ translateGPU target prog =
 -- | Due to simplifications after kernel extraction, some threshold
 -- parameters may contain KernelPaths that reference threshold
 -- parameters that no longer exist.  We remove these here.
-cleanSizes :: M.Map Name SizeClass -> M.Map Name SizeClass
-cleanSizes m = M.map clean m
+cleanParams :: ParamMap -> ParamMap
+cleanParams m = M.map clean m
   where
     known = M.keys m
-    clean (SizeThreshold path def) =
-      SizeThreshold (filter ((`elem` known) . fst) path) def
+    clean (Just (SizeThreshold path def), users) =
+      (Just $ SizeThreshold (filter ((`elem` known) . fst) path) def, users)
     clean s = s
 
 findParamUsers ::
   Env ->
   Definitions ImpOpenCL.OpenCL ->
-  M.Map Name SizeClass ->
+  ParamMap ->
   ParamMap
 findParamUsers env defs = M.mapWithKey onParam
   where
@@ -134,7 +135,7 @@ findParamUsers env defs = M.mapWithKey onParam
       )
     indirect_uses = direct_uses <> map (indirectUseInFun . fst) direct_uses
 
-    onParam k c = (c, S.fromList $ map fst $ filter ((k `elem`) . snd) indirect_uses)
+    onParam k (c, _) = (c, S.fromList $ map fst $ filter ((k `elem`) . snd) indirect_uses)
 
 pointerQuals :: String -> [C.TypeQual]
 pointerQuals "global" = [C.ctyquals|__global|]
@@ -173,13 +174,12 @@ data ToOpenCL = ToOpenCL
   { clGPU :: M.Map KernelName (KernelSafety, T.Text),
     clDevFuns :: M.Map Name (C.Definition, T.Text),
     clUsedTypes :: S.Set PrimType,
-    clSizes :: M.Map Name SizeClass,
     clFailures :: [FailureMsg],
     clConstants :: [(Name, KernelConstExp)]
   }
 
 initialOpenCL :: ToOpenCL
-initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty mempty
+initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
 
 data Env = Env
   { envFuns :: ImpGPU.Functions ImpGPU.HostOp,
@@ -194,7 +194,6 @@ codeMayFail f (x :>>: y) = codeMayFail f x || codeMayFail f y
 codeMayFail f (For _ _ x) = codeMayFail f x
 codeMayFail f (While _ x) = codeMayFail f x
 codeMayFail f (If _ x y) = codeMayFail f x || codeMayFail f y
-codeMayFail f (Comment _ x) = codeMayFail f x
 codeMayFail _ _ = False
 
 hostOpMayFail :: ImpGPU.HostOp -> Bool
@@ -227,17 +226,11 @@ functionMayFail fname = S.member fname . envFunsMayFail
 
 type OnKernelM = ReaderT Env (State ToOpenCL)
 
-addSize :: Name -> SizeClass -> OnKernelM ()
-addSize key sclass =
-  modify $ \s -> s {clSizes = M.insert key sclass $ clSizes s}
-
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
-onHostOp _ (ImpGPU.GetSize v key size_class) = do
-  addSize key size_class
+onHostOp _ (ImpGPU.GetSize v key _) =
   pure $ ImpOpenCL.GetSize v key
-onHostOp _ (ImpGPU.CmpSizeLe v key size_class x) = do
-  addSize key size_class
+onHostOp _ (ImpGPU.CmpSizeLe v key _ x) =
   pure $ ImpOpenCL.CmpSizeLe v key x
 onHostOp _ (ImpGPU.GetSizeMax v size_class) =
   pure $ ImpOpenCL.GetSizeMax v size_class
@@ -333,7 +326,7 @@ ensureDeviceFuns code = do
 
 isConst :: BlockDim -> Maybe KernelConstExp
 isConst (Left (ValueExp (IntValue x))) =
-  Just $ ValueExp (IntValue x)
+  Just $ ValueExp $ IntValue x
 isConst (Right e) =
   Just e
 isConst _ = Nothing
@@ -382,7 +375,6 @@ onKernel target kernel = do
               then (SafetyNone, [])
               else -- No possible failures in this kernel, so if we make
               -- it past an initial check, then we are good to go.
-
                 ( SafetyCheap,
                   [C.citems|if (*global_failure >= 0) { return; }|]
                 )
@@ -614,7 +606,11 @@ inKernelOperations env mode body =
       GC.opsFatMemory = False,
       GC.opsError = errorInKernel,
       GC.opsCall = callInKernel,
-      GC.opsCritical = mempty
+      GC.opsCritical = mempty,
+      GC.opsGetParam = \name ->
+        let name_val = "val_" <> nameToString name
+            name_set = "set_" <> nameToString name
+         in ([C.cexp|$id:name_val|], [C.cexp|$id:name_set|])
     }
   where
     has_communication = hasCommunication body
@@ -639,7 +635,7 @@ inKernelOperations env mode body =
     kernelOps (MemFence FenceGlobal) =
       GC.stm [C.cstm|mem_fence_global();|]
     kernelOps (SharedAlloc name size) = do
-      name' <- newVName $ prettyString name ++ "_backing"
+      name' <- newVName $ nameFromText $ prettyText name <> "_backing"
       GC.modifyUserState $ \s ->
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
@@ -663,13 +659,14 @@ inKernelOperations env mode body =
       pure [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
     atomicSpace (Space sid) = sid
-    atomicSpace _ = "global"
+    atomicSpace ScalarSpace {} = error "atomicSpace: cannot do atomics on ScalarSpace"
+    atomicSpace DefaultSpace = "global"
 
     doAtomic s t old arr ind val op ty = do
       ind' <- GC.compileExp $ untyped $ unCount ind
       val' <- GC.compileExp val
       cast <- atomicCast s ty
-      GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+      GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
       where
         op' = op ++ "_" ++ prettyString t ++ "_" ++ atomicSpace s
 
@@ -688,7 +685,7 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
       where
         op = "atomic_chg_" ++ prettyString t ++ "_" ++ atomicSpace s
-    -- First the 64-bit operations.
+    -- 64-bit operations
     atomicOps s (AtomicAdd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_add" [C.cty|typename int64_t|]
     atomicOps s (AtomicFAdd Float64 old arr ind val) =
@@ -698,9 +695,9 @@ inKernelOperations env mode body =
     atomicOps s (AtomicSMin Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_smin" [C.cty|typename int64_t|]
     atomicOps s (AtomicUMax Int64 old arr ind val) =
-      doAtomic s Int64 old arr ind val "atomic_umax" [C.cty|unsigned int64_t|]
+      doAtomic s Int64 old arr ind val "atomic_umax" [C.cty|typename uint64_t|]
     atomicOps s (AtomicUMin Int64 old arr ind val) =
-      doAtomic s Int64 old arr ind val "atomic_umin" [C.cty|unsigned int64_t|]
+      doAtomic s Int64 old arr ind val "atomic_umin" [C.cty|typename uint64_t|]
     atomicOps s (AtomicAnd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_and" [C.cty|typename int64_t|]
     atomicOps s (AtomicOr Int64 old arr ind val) =
@@ -711,29 +708,74 @@ inKernelOperations env mode body =
       doAtomicCmpXchg s (IntType Int64) old arr ind cmp val [C.cty|typename int64_t|]
     atomicOps s (AtomicXchg (IntType Int64) old arr ind val) =
       doAtomicXchg s (IntType Int64) old arr ind val [C.cty|typename int64_t|]
-    --
-    atomicOps s (AtomicAdd t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
-    atomicOps s (AtomicFAdd t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
-    atomicOps s (AtomicSMax t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
-    atomicOps s (AtomicSMin t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_smin" [C.cty|int|]
-    atomicOps s (AtomicUMax t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_umax" [C.cty|unsigned int|]
-    atomicOps s (AtomicUMin t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_umin" [C.cty|unsigned int|]
-    atomicOps s (AtomicAnd t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_and" [C.cty|int|]
-    atomicOps s (AtomicOr t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_or" [C.cty|int|]
-    atomicOps s (AtomicXor t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_xor" [C.cty|int|]
-    atomicOps s (AtomicCmpXchg t old arr ind cmp val) =
-      doAtomicCmpXchg s t old arr ind cmp val [C.cty|int|]
-    atomicOps s (AtomicXchg t old arr ind val) =
-      doAtomicXchg s t old arr ind val [C.cty|int|]
+    -- 32 bit operations
+    atomicOps s (AtomicAdd Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_add" [C.cty|int|]
+    atomicOps s (AtomicFAdd Float32 old arr ind val) =
+      doAtomic s Float32 old arr ind val "atomic_fadd" [C.cty|float|]
+    atomicOps s (AtomicSMax Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_smax" [C.cty|int|]
+    atomicOps s (AtomicSMin Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_smin" [C.cty|int|]
+    atomicOps s (AtomicUMax Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_umax" [C.cty|unsigned int|]
+    atomicOps s (AtomicUMin Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_umin" [C.cty|unsigned int|]
+    atomicOps s (AtomicAnd Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_and" [C.cty|int|]
+    atomicOps s (AtomicOr Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_or" [C.cty|int|]
+    atomicOps s (AtomicXor Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_xor" [C.cty|int|]
+    atomicOps s (AtomicCmpXchg (IntType Int32) old arr ind cmp val) =
+      doAtomicCmpXchg s Int32 old arr ind cmp val [C.cty|int|]
+    atomicOps s (AtomicXchg (IntType Int32) old arr ind val) =
+      doAtomicXchg s Int32 old arr ind val [C.cty|int|]
+    -- 16 bit operations
+    atomicOps s (AtomicAdd Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_add" [C.cty|typename int16_t|]
+    atomicOps s (AtomicFAdd Float16 old arr ind val) =
+      doAtomic s Float16 old arr ind val "atomic_fadd" [C.cty|typename uint16_t|]
+    atomicOps s (AtomicSMax Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_smax" [C.cty|typename int16_t|]
+    atomicOps s (AtomicSMin Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_smin" [C.cty|typename int16_t|]
+    atomicOps s (AtomicUMax Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_umax" [C.cty|typename uint16_t|]
+    atomicOps s (AtomicUMin Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_umin" [C.cty|typename uint16_t|]
+    atomicOps s (AtomicAnd Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_and" [C.cty|typename int16_t|]
+    atomicOps s (AtomicOr Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_or" [C.cty|typename int16_t|]
+    atomicOps s (AtomicXor Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_xor" [C.cty|typename int16_t|]
+    atomicOps s (AtomicCmpXchg (IntType Int16) old arr ind cmp val) =
+      doAtomicCmpXchg s Int16 old arr ind cmp val [C.cty|typename int16_t|]
+    atomicOps s (AtomicXchg (IntType Int16) old arr ind val) =
+      doAtomicXchg s Int16 old arr ind val [C.cty|typename int16_t|]
+    -- 8 bit operations
+    atomicOps s (AtomicAdd Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_add" [C.cty|typename int8_t|]
+    atomicOps s (AtomicSMax Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_smax" [C.cty|typename int8_t|]
+    atomicOps s (AtomicSMin Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_smin" [C.cty|typename int8_t|]
+    atomicOps s (AtomicUMax Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_umax" [C.cty|typename uint8_t|]
+    atomicOps s (AtomicUMin Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_umin" [C.cty|typename uint8_t|]
+    atomicOps s (AtomicAnd Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_and" [C.cty|typename int8_t|]
+    atomicOps s (AtomicOr Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_or" [C.cty|typename int8_t|]
+    atomicOps s (AtomicXor Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_xor" [C.cty|typename int8_t|]
+    atomicOps s (AtomicCmpXchg (IntType Int8) old arr ind cmp val) =
+      doAtomicCmpXchg s Int8 old arr ind cmp val [C.cty|typename int8_t|]
+    atomicOps s (AtomicXchg (IntType Int8) old arr ind val) =
+      doAtomicXchg s Int8 old arr ind val [C.cty|typename int8_t|]
+    -- General
     atomicOps s (AtomicWrite t arr ind val) = do
       ind' <- GC.compileExp $ untyped $ unCount ind
       val' <- toStorage t <$> GC.compileExp val
@@ -745,6 +787,8 @@ inKernelOperations env mode body =
         case s of
           Space "shared" -> [C.cstm|mem_fence_local();|]
           _ -> [C.cstm|mem_fence_global();|]
+    atomicOps _ op =
+      error $ "atomicOp: unsupported " <> show op
 
     cannotAllocate :: GC.Allocate KernelOp KernelState
     cannotAllocate _ =
@@ -849,9 +893,10 @@ typesInCode (Call _ _ es) = mconcat $ map typesInArg es
 typesInCode (If (TPrimExp e) c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _ _) = typesInExp e
-typesInCode (Comment _ c) = typesInCode c
+typesInCode (Meta _) = mempty
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
 typesInCode (TracePrint msg) = foldMap typesInExp msg
+typesInCode (GetUserParam _ _ def) = typesInExp (untyped def)
 typesInCode Op {} = mempty
 
 typesInExp :: Exp -> S.Set PrimType

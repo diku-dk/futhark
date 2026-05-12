@@ -54,6 +54,3 @@ entry u64tou8 = map (u8.u64)
 entry u64tou16 = map (u16.u64)
 entry u64tou32 = map (u32.u64)
 entry u64tou64 = map (u64.u64)
-
-
-

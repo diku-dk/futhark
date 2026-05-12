@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | Code generation for public API types.
@@ -11,7 +12,7 @@ where
 import Control.Monad
 import Control.Monad.Reader (asks)
 import Control.Monad.State (gets, modify)
-import Data.Char (isDigit)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Text qualified as T
@@ -37,6 +38,26 @@ valueTypeToCType pub (ValueType signed (Rank rank) pt) = do
   modify $ \s -> s {compArrayTypes = add $ compArrayTypes s}
   pure [C.cty|struct $id:name|]
 
+prepareNewMem ::
+  (C.ToExp arr, C.ToExp dim) =>
+  arr ->
+  Space ->
+  [dim] ->
+  PrimType ->
+  CompilerM op s ()
+prepareNewMem arr space shape pt = do
+  let rank = length shape
+      arr_size =
+        cproduct [[C.cexp|$exp:arr->shape[$int:i]|] | i <- [0 .. length shape - 1]]
+  resetMem [C.cexp|$exp:arr->mem|] space
+  forM_ (zip [0 .. rank - 1] shape) $ \(i, dim_s) ->
+    stm [C.cstm|$exp:arr->shape[$int:i] = $exp:dim_s;|]
+  allocMem
+    [C.cexp|$exp:arr->mem|]
+    [C.cexp|$exp:arr_size * $int:(primByteSize pt::Int)|]
+    space
+    [C.cstm|err = 1;|]
+
 arrayLibraryFunctions ::
   Publicness ->
   Space ->
@@ -56,28 +77,22 @@ arrayLibraryFunctions pub space pt signed rank = do
   values_array <- publicName $ "values_" <> name
   values_raw_array <- publicName $ "values_raw_" <> name
   shape_array <- publicName $ "shape_" <> name
+  index_array <- publicName $ "index_" <> name
 
   let shape_names = ["dim" <> prettyText i | i <- [0 .. rank - 1]]
       shape_params = [[C.cparam|typename int64_t $id:k|] | k <- shape_names]
-      arr_size = cproduct [[C.cexp|$id:k|] | k <- shape_names]
+      shape = [[C.cexp|$id:k|] | k <- shape_names]
+      index_names = ["i" <> prettyText i | i <- [0 .. rank - 1]]
+      index_params = [[C.cparam|typename int64_t $id:k|] | k <- index_names]
+      arr_size = cproduct shape
       arr_size_array = cproduct [[C.cexp|arr->shape[$int:i]|] | i <- [0 .. rank - 1]]
+
   copy <- asks $ opsCopy . envOperations
 
   memty <- rawMemCType space
 
-  let prepare_new = do
-        resetMem [C.cexp|arr->mem|] space
-        allocMem
-          [C.cexp|arr->mem|]
-          [C.cexp|$exp:arr_size * $int:(primByteSize pt::Int)|]
-          space
-          [C.cstm|return NULL;|]
-        forM_ [0 .. rank - 1] $ \i ->
-          let dim_s = "dim" ++ show i
-           in stm [C.cstm|arr->shape[$int:i] = $id:dim_s;|]
-
   new_body <- collect $ do
-    prepare_new
+    prepareNewMem [C.cexp|arr|] space shape pt
     copy
       CopyNoBarrier
       [C.cexp|arr->mem.mem|]
@@ -109,6 +124,31 @@ arrayLibraryFunctions pub space pt signed rank = do
         space
         [C.cexp|((size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
 
+  let arr_strides = do
+        r <- [0 .. rank - 1]
+        pure $ cproduct [[C.cexp|arr->shape[$int:i]|] | i <- [r + 1 .. rank - 1]]
+      index_exp =
+        cproduct
+          [ [C.cexp|$int:(primByteSize pt::Int)|],
+            csum (zipWith (\x y -> [C.cexp|$id:x * $exp:y|]) index_names arr_strides)
+          ]
+      in_bounds =
+        allTrue
+          [ [C.cexp|$id:p >= 0 && $id:p < arr->shape[$int:i]|]
+          | (p, i) <- zip index_names [0 .. rank - 1]
+          ]
+  index_body <-
+    collect $
+      copy
+        CopyNoBarrier
+        [C.cexp|(unsigned char*)out|]
+        [C.cexp|0|]
+        DefaultSpace
+        [C.cexp|arr->mem.mem|]
+        index_exp
+        space
+        [C.cexp|$int:(primByteSize pt::Int)|]
+
   ctx_ty <- contextType
   ops <- asks envOperations
 
@@ -126,6 +166,9 @@ arrayLibraryFunctions pub space pt signed rank = do
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   proto
     [C.cedecl|int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data);|]
+  proto
+    [C.cedecl|int $id:index_array($ty:ctx_ty *ctx, $ty:pt' *out, $ty:array_type *arr,
+                                  $params:index_params);|]
   proto
     [C.cedecl|$ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   proto
@@ -172,6 +215,18 @@ arrayLibraryFunctions pub space pt signed rank = do
             return err;
           }
 
+          int $id:index_array($ty:ctx_ty *ctx, $ty:pt' *out, $ty:array_type *arr,
+                              $params:index_params) {
+            int err = 0;
+            if ($exp:in_bounds) {
+              $items:(criticalSection ops index_body)
+            } else {
+              err = 1;
+              set_error(ctx, strdup("Index out of bounds."));
+            }
+            return err;
+          }
+
           $ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
             (void)ctx;
             return arr->mem.mem;
@@ -190,7 +245,8 @@ arrayLibraryFunctions pub space pt signed rank = do
         Manifest.arrayValues = values_array,
         Manifest.arrayNew = new_array,
         Manifest.arrayNewRaw = new_raw_array,
-        Manifest.arrayValuesRaw = values_raw_array
+        Manifest.arrayValuesRaw = values_raw_array,
+        Manifest.arrayIndex = index_array
       }
 
 lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
@@ -202,7 +258,12 @@ lookupOpaqueType v (OpaqueTypes types) =
 opaquePayload :: OpaqueTypes -> OpaqueType -> [ValueType]
 opaquePayload _ (OpaqueType ts) = ts
 opaquePayload _ (OpaqueSum ts _) = ts
+opaquePayload _ (OpaqueArray _ _ ts) = ts
 opaquePayload types (OpaqueRecord fs) = concatMap f fs
+  where
+    f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
+    f (_, TypeTransparent v) = [v]
+opaquePayload types (OpaqueRecordArray _ _ fs) = concatMap f fs
   where
     f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
     f (_, TypeTransparent v) = [v]
@@ -253,7 +314,7 @@ projectField ops (TypeOpaque f_desc) components = do
           then [C.citems|v->$id:(tupleField j) = obj->$id:(tupleField i);|]
           else
             [C.citems|v->$id:(tupleField j) = malloc(sizeof(*v->$id:(tupleField j)));
-                      *v->$id:(tupleField j) = *obj->$id:(tupleField i);
+                      memcpy(v->$id:(tupleField j), obj->$id:(tupleField i), sizeof(*obj->$id:(tupleField i)));
                       (void)(*(v->$id:(tupleField j)->mem.references))++;|]
   pure
     ( [C.cty|$ty:ct *|],
@@ -301,9 +362,60 @@ setFieldField i e (ValueType _ (Rank r) _)
   | r == 0 =
       [C.cstm|v->$id:(tupleField i) = $exp:e;|]
   | otherwise =
+      -- We use a memcpy instead of a straight assignment because the types may
+      -- not actually be exactly the same - this is because we ignore array
+      -- signedness when representing the payload of opaque types. However, the
+      -- array types will have the same layout, so we can copy like this.
       [C.cstm|{v->$id:(tupleField i) = malloc(sizeof(*$exp:e));
-               *v->$id:(tupleField i) = *$exp:e;
+               memcpy(v->$id:(tupleField i), $exp:e, sizeof(*$exp:e));
                (void)(*(v->$id:(tupleField i)->mem.references))++;}|]
+
+recordNewSetFields ::
+  OpaqueTypes ->
+  [(Name, EntryPointType)] ->
+  [ValueType] ->
+  CompilerM op s ([C.Id], [C.Param], [C.BlockItem])
+recordNewSetFields types fs =
+  fmap (L.unzip3 . snd)
+    . mapAccumLM onField 0
+    . zip fs
+    . recordFieldPayloads types (map snd fs)
+  where
+    onField offset ((f, et), f_vts) = do
+      let param_name = C.toIdent ("f_" <> f) mempty
+      case et of
+        TypeTransparent (ValueType sign (Rank 0) pt) -> do
+          let ct = primAPIType sign pt
+          pure
+            ( offset + 1,
+              ( param_name,
+                [C.cparam|const $ty:ct $id:param_name|],
+                [C.citem|v->$id:(tupleField offset) = $id:param_name;|]
+              )
+            )
+        TypeTransparent vt -> do
+          ct <- valueTypeToCType Public vt
+          pure
+            ( offset + 1,
+              ( param_name,
+                [C.cparam|const $ty:ct* $id:param_name|],
+                [C.citem|{v->$id:(tupleField offset) = malloc(sizeof($ty:ct));
+                          memcpy(v->$id:(tupleField offset), $id:param_name, sizeof($ty:ct));
+                          (void)(*(v->$id:(tupleField offset)->mem.references))++;}|]
+              )
+            )
+        TypeOpaque f_desc -> do
+          ct <- opaqueToCType f_desc
+          let param_fields = do
+                i <- [0 ..]
+                pure [C.cexp|$id:param_name->$id:(tupleField i)|]
+          pure
+            ( offset + length f_vts,
+              ( param_name,
+                [C.cparam|const $ty:ct* $id:param_name|],
+                [C.citem|{$stms:(zipWith3 setFieldField [offset ..] param_fields f_vts)}|]
+              )
+            )
 
 recordNewFunctions ::
   OpaqueTypes ->
@@ -317,12 +429,7 @@ recordNewFunctions types desc fs vds = do
   ops <- asks envOperations
   new <- publicName $ "new_" <> opaqueName desc
 
-  (params, new_stms) <-
-    fmap (unzip . snd)
-      . mapAccumLM onField 0
-      . zip fs
-      . recordFieldPayloads types (map snd fs)
-      $ vds
+  (_, params, new_stms) <- recordNewSetFields types fs vds
 
   headerDecl
     (OpaqueDecl desc)
@@ -335,42 +442,401 @@ recordNewFunctions types desc fs vds = do
                 return FUTHARK_SUCCESS;
               }|]
   pure new
+
+-- Because records and arrays-of-records are very similar in their
+-- actual representation, we can reuse most of the code. Only indexing
+-- requires something special.
+
+recordArrayProjectFunctions ::
+  OpaqueTypes ->
+  Name ->
+  [(Name, EntryPointType)] ->
+  [ValueType] ->
+  CompilerM op s [Manifest.RecordField]
+recordArrayProjectFunctions = recordProjectFunctions
+
+recordArrayZipFunctions ::
+  OpaqueTypes ->
+  Name ->
+  [(Name, EntryPointType)] ->
+  [ValueType] ->
+  Int ->
+  CompilerM op s Manifest.CFuncName
+recordArrayZipFunctions types desc fs vds rank = do
+  opaque_type <- opaqueToCType desc
+  ctx_ty <- contextType
+  ops <- asks envOperations
+  new <- publicName $ "zip_" <> opaqueName desc
+
+  (param_names, params, new_stms) <- recordNewSetFields types fs vds
+
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|int $id:new($ty:ctx_ty *ctx, $ty:opaque_type** out, $params:params);|]
+  libDecl
+    [C.cedecl|int $id:new($ty:ctx_ty *ctx, $ty:opaque_type** out, $params:params) {
+                if (!$exp:(sameShape param_names)) {
+                  set_error(ctx, strdup("Cannot zip arrays with different shapes."));
+                  return 1;
+                }
+                $ty:opaque_type* v = malloc(sizeof($ty:opaque_type));
+                $items:(criticalSection ops new_stms)
+                *out = v;
+                return FUTHARK_SUCCESS;
+              }|]
+  pure new
   where
-    onField offset ((f, et), f_vts) = do
-      let param_name =
-            if T.all isDigit (nameToText f)
-              then C.toIdent ("v" <> f) mempty
-              else C.toIdent ("f_" <> f) mempty
-      case et of
-        TypeTransparent (ValueType sign (Rank 0) pt) -> do
-          let ct = primAPIType sign pt
-          pure
-            ( offset + 1,
-              ( [C.cparam|const $ty:ct $id:param_name|],
-                [C.citem|v->$id:(tupleField offset) = $id:param_name;|]
-              )
+    valueShape TypeTransparent {} p =
+      [[C.cexp|$id:p->shape[$int:i]|] | i <- [0 .. rank - 1]]
+    -- We know that the opaque value must contain arrays.
+    valueShape TypeOpaque {} p =
+      [[C.cexp|$id:p->$id:(tupleField 0)->shape[$int:i]|] | i <- [0 .. rank - 1]]
+    sameShape param_names =
+      allTrue $ map allEqual $ L.transpose $ zipWith valueShape (map snd fs) param_names
+
+indexingDefs ::
+  Int ->
+  ([C.Param], PrimType -> Int -> C.Exp -> C.Exp, C.Exp)
+indexingDefs rank =
+  (index_params, indexExp, in_bounds)
+  where
+    index_names = ["i" <> prettyText i | i <- [0 .. rank - 1]]
+    index_params = [[C.cparam|typename int64_t $id:k|] | k <- index_names]
+    indexExp pt r shape =
+      cproduct
+        [ [C.cexp|$int:(primByteSize pt::Int)|],
+          csum (zipWith (\x y -> [C.cexp|$id:x * $exp:y|]) index_names strides)
+        ]
+      where
+        strides = do
+          d <- [0 .. r - 1]
+          pure $ cproduct [[C.cexp|$exp:shape[$int:i]|] | i <- [d + 1 .. r - 1]]
+
+    in_bounds =
+      allTrue
+        [ [C.cexp|$id:p >= 0 && $id:p < arr->$id:(tupleField 0)->shape[$int:i]|]
+        | (p, i) <- zip index_names [0 .. rank - 1]
+        ]
+
+recordArrayIndexFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+recordArrayIndexFunction space _types desc rank elemtype vds = do
+  index_f <- publicName $ "index_" <> opaqueName desc
+  ctx_ty <- contextType
+  array_ct <- opaqueToCType desc
+  obj_ct <- opaqueToCType elemtype
+  copy <- asks $ opsCopy . envOperations
+
+  index_items <- collect $ zipWithM_ (setField copy) [0 ..] vds
+
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|int $id:index_f($ty:ctx_ty *ctx, $ty:obj_ct **out, $ty:array_ct *arr,
+                              $params:index_params);|]
+  libDecl
+    [C.cedecl|int $id:index_f($ty:ctx_ty *ctx, $ty:obj_ct **out, $ty:array_ct *arr,
+                              $params:index_params) {
+                int err = 0;
+                if ($exp:in_bounds) {
+                  $ty:obj_ct* v = malloc(sizeof($ty:obj_ct));
+                  $items:index_items
+                  if (err == 0) {
+                    *out = v;
+                  }
+                } else {
+                  err = 1;
+                  set_error(ctx, strdup("Index out of bounds."));
+                }
+                return err;
+              }|]
+
+  pure index_f
+  where
+    (index_params, indexExp, in_bounds) = indexingDefs rank
+
+    setField copy j (ValueType _ (Rank r) pt)
+      | r == rank =
+          -- Easy case: just copy the scalar from the array into the
+          -- variable.
+          copy
+            CopyBarrier
+            [C.cexp|(unsigned char*)&v->$id:(tupleField j)|]
+            [C.cexp|0|]
+            DefaultSpace
+            [C.cexp|arr->$id:(tupleField j)->mem.mem|]
+            (indexExp pt rank [C.cexp|arr->$id:(tupleField j)->shape|])
+            space
+            [C.cexp|$int:(primByteSize pt::Int)|]
+      | otherwise = do
+          -- Tricky case, where we first have to allocate memory.
+          let shape = do
+                i <- [rank .. r - 1]
+                pure [C.cexp|arr->$id:(tupleField j)->shape[$int:i]|]
+          stm [C.cstm|v->$id:(tupleField j) = malloc(sizeof(*v->$id:(tupleField j)));|]
+          prepareNewMem [C.cexp|v->$id:(tupleField j)|] space shape pt
+          -- Now we can copy into the freshly allocated memory.
+          copy
+            CopyNoBarrier
+            [C.cexp|v->$id:(tupleField j)->mem.mem|]
+            [C.cexp|0|]
+            space
+            [C.cexp|arr->$id:(tupleField j)->mem.mem|]
+            (indexExp pt r [C.cexp|arr->$id:(tupleField j)->shape|])
+            space
+            $ cproduct ([C.cexp|$int:(primByteSize pt::Int)|] : shape)
+
+recordArraySetFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+recordArraySetFunction space _types desc rank elemtype vds = do
+  index_f <- publicName $ "set_" <> opaqueName desc
+  ctx_ty <- contextType
+  array_ct <- opaqueToCType desc
+  obj_ct <- opaqueToCType elemtype
+  copy <- asks $ opsCopy . envOperations
+
+  set_items <- collect $ zipWithM_ (setField copy) [0 ..] vds
+
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|int $id:index_f($ty:ctx_ty *ctx,
+                              $ty:array_ct *arr,
+                              $ty:obj_ct *v,
+                              $params:index_params);|]
+  libDecl
+    [C.cedecl|int $id:index_f($ty:ctx_ty *ctx,
+                              $ty:array_ct *arr,
+                              $ty:obj_ct *v,
+                              $params:index_params) {
+                int err = 0;
+                if (!$exp:in_bounds) {
+                  err = 1;
+                  set_error(ctx, strdup("Index out of bounds."));
+                } else if (!$exp:same_shape) {
+                  err = 1;
+                  set_error(ctx, strdup("Element shape differs from array shape"));
+                } else {
+                  $items:set_items
+                }
+                return err;
+              }|]
+
+  pure index_f
+  where
+    (index_params, indexExp, in_bounds) = indexingDefs rank
+
+    same_shape = allTrue $ do
+      (j, ValueType _ (Rank r) _) <- zip [0 ..] vds
+      guard $ r > rank
+      pure
+        [C.cexp|memcmp(v->$id:(tupleField j)->shape,
+                       &arr->$id:(tupleField j)->shape[$int:rank],
+                       $int:(r-rank) * sizeof(int64_t)) == 0|]
+
+    setField copy j (ValueType _ (Rank r) pt)
+      | r == rank =
+          copy
+            CopyBarrier
+            [C.cexp|arr->$id:(tupleField j)->mem.mem|]
+            (indexExp pt rank [C.cexp|arr->$id:(tupleField j)->shape|])
+            space
+            [C.cexp|(unsigned char*)&v->$id:(tupleField j)|]
+            [C.cexp|0|]
+            DefaultSpace
+            [C.cexp|$int:(primByteSize pt::Int)|]
+      | otherwise = do
+          let shape = do
+                i <- [rank .. r - 1]
+                pure [C.cexp|arr->$id:(tupleField j)->shape[$int:i]|]
+          copy
+            CopyNoBarrier
+            [C.cexp|arr->$id:(tupleField j)->mem.mem|]
+            (indexExp pt r [C.cexp|arr->$id:(tupleField j)->shape|])
+            space
+            [C.cexp|v->$id:(tupleField j)->mem.mem|]
+            [C.cexp|0|]
+            space
+            $ cproduct ([C.cexp|$int:(primByteSize pt::Int)|] : shape)
+
+recordArrayShapeFunction :: Name -> CompilerM op s Manifest.CFuncName
+recordArrayShapeFunction desc = do
+  shape_f <- publicName $ "shape_" <> opaqueName desc
+  ctx_ty <- contextType
+  array_ct <- opaqueToCType desc
+
+  -- We know that the opaque value consists of arrays of at least the
+  -- expected rank, and which have the same outer shape, so we just
+  -- return the shape of the first one.
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|const typename int64_t* $id:shape_f($ty:ctx_ty *ctx, $ty:array_ct *arr);|]
+  libDecl
+    [C.cedecl|const typename int64_t* $id:shape_f($ty:ctx_ty *ctx, $ty:array_ct *arr) {
+                (void)ctx;
+                return arr->$id:(tupleField 0)->shape;
+              }|]
+
+  pure shape_f
+
+recordArrayNewFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+recordArrayNewFunction space types desc rank elemtype vds = do
+  new_f <- publicName $ "new_" <> opaqueName desc
+  ctx_ty <- contextType
+  array_ct <- opaqueToCType desc
+  obj_ct <- opaqueToCType elemtype
+  copy <- asks $ opsCopy . envOperations
+  ops <- asks envOperations
+
+  check_items <- collect checkElemShapes
+
+  alloc_items <- collect $ zipWithM_ allocateField [0 ..] vds
+
+  set_items <- collect $ zipWithM_ (handleField copy) [0 ..] vds
+
+  let end_items = [C.citems|end: *out = v;|]
+
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|int $id:new_f($ty:ctx_ty *ctx, $ty:array_ct **out,
+                            $ty:obj_ct **elems, $params:shape_params);|]
+  libDecl
+    [C.cedecl|int $id:new_f($ty:ctx_ty *ctx, $ty:array_ct **out,
+                            $ty:obj_ct **elems, $params:shape_params) {
+                int err = 0;
+                typename int64_t n = $exp:(cproduct outer_shape);
+                $items:check_items
+                if (err != 0) {
+                  set_error(ctx, strdup("Cannot construct arrays with elements of different shapes."));
+                  return 1;
+                }
+                $ty:array_ct* v = malloc(sizeof($ty:array_ct));
+                $items:(criticalSection ops (alloc_items<>set_items<>end_items))
+                return err;
+              }|]
+
+  pure new_f
+  where
+    elemtype' = lookupOpaqueType elemtype types
+    shape_names = ["dim" <> prettyText i | i <- [0 .. rank - 1]]
+    shape_params = [[C.cparam|typename int64_t $id:k|] | k <- shape_names]
+    outer_shape = [[C.cexp|$id:k|] | k <- shape_names]
+
+    allocateField i (ValueType _ (Rank r) pt) = do
+      let shape =
+            outer_shape
+              ++ [ [C.cexp|n==0?0:elems[0]->$id:(tupleField i)->shape[$int:j]|]
+                 | j <- [0 .. r - rank - 1]
+                 ]
+
+      stm [C.cstm|v->$id:(tupleField i) = malloc(sizeof(*v->$id:(tupleField i)));|]
+      prepareNewMem [C.cexp|v->$id:(tupleField i)|] space shape pt
+      stm
+        [C.cstm|if (err != 0) {
+                    free(v->$id:(tupleField i));
+                    free(v);
+                    v = NULL;
+                    goto end;
+                  }|]
+
+    handleField copy i (ValueType _ (Rank r) pt) = do
+      let elem_size =
+            cproduct $
+              [C.cexp|$int:(primByteSize pt::Int)|]
+                : [ [C.cexp|v->$id:(tupleField i)->shape[$int:rank+$int:j]|]
+                  | j <- [0 .. r - rank - 1]
+                  ]
+
+      copy_items <-
+        collect $
+          copy
+            CopyNoBarrier
+            [C.cexp|v->$id:(tupleField i)->mem.mem|]
+            [C.cexp|i*$exp:elem_size|]
+            space
+            ( if r == rank
+                then [C.cexp|(unsigned char*)&elems[i]->$id:(tupleField i)|]
+                else [C.cexp|elems[i]->$id:(tupleField i)->mem.mem|]
             )
-        TypeTransparent vt -> do
-          ct <- valueTypeToCType Public vt
-          pure
-            ( offset + 1,
-              ( [C.cparam|const $ty:ct* $id:param_name|],
-                [C.citem|{v->$id:(tupleField offset) = malloc(sizeof($ty:ct));
-                          *v->$id:(tupleField offset) = *$id:param_name;
-                          (void)(*(v->$id:(tupleField offset)->mem.references))++;}|]
-              )
-            )
-        TypeOpaque f_desc -> do
-          ct <- opaqueToCType f_desc
-          let param_fields = do
-                i <- [0 ..]
-                pure [C.cexp|$id:param_name->$id:(tupleField i)|]
-          pure
-            ( offset + length f_vts,
-              ( [C.cparam|const $ty:ct* $id:param_name|],
-                [C.citem|{$stms:(zipWith3 setFieldField [offset ..] param_fields f_vts)}|]
-              )
-            )
+            [C.cexp|0|]
+            (if r == rank then DefaultSpace else space)
+            elem_size
+
+      stm
+        [C.cstm|for (typename int64_t i = 0; i < n; i++) {
+                  $items:copy_items
+                  if (err != 0) {
+                    goto end;
+                  }
+                }|]
+
+    checkSameShape x y = do
+      forM_ (zip [0 ..] (opaquePayload types elemtype')) $ \case
+        (fi, ValueType _ (Rank r) _) -> do
+          let fi' = tupleField fi
+          forM_ [0 .. r - 1] $ \i ->
+            stm
+              [C.cstm|if ($exp:x->$id:fi'->shape[$int:i]
+                          !=
+                          $exp:y->$id:fi'->shape[$int:i]) {
+                          err = 1;
+                      }|]
+
+    checkElemShapes = do
+      check_one <- collect $ checkSameShape [C.cexp|elems[0]|] [C.cexp|elems[i]|]
+      stm
+        [C.cstm|for (typename int64_t i = 1; i < n; i++)
+                { $items:check_one }|]
+
+opaqueArrayIndexFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+opaqueArrayIndexFunction = recordArrayIndexFunction
+
+opaqueArrayShapeFunction :: Name -> CompilerM op s Manifest.CFuncName
+opaqueArrayShapeFunction = recordArrayShapeFunction
+
+opaqueArrayNewFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+opaqueArrayNewFunction = recordArrayNewFunction
+
+opaqueArraySetFunction ::
+  Space ->
+  OpaqueTypes ->
+  Name ->
+  Int ->
+  Name ->
+  [ValueType] ->
+  CompilerM op s Manifest.CFuncName
+opaqueArraySetFunction = recordArraySetFunction
 
 sumVariants ::
   Name ->
@@ -399,12 +865,17 @@ sumVariants desc variants vds = do
 
   zipWithM onVariant [0 :: Int ..] variants
   where
+    unary = length variants == 1
+
     constructFunction ops ctx_ty opaque_ty i fname payload = do
       (params, new_stms) <- unzip <$> zipWithM constructPayload [0 ..] payload
 
       let used = concatMap snd payload
       set_unused_stms <-
         mapM setUnused $ filter ((`notElem` used) . fst) (zip [0 ..] vds)
+
+      let set_variant =
+            [[C.cstm|v->$id:(tupleField 0) = $int:i;|] | not unary]
 
       headerDecl
         (OpaqueDecl desc)
@@ -418,7 +889,7 @@ sumVariants desc variants vds = do
                                 $params:params) {
                     (void)ctx;
                     $ty:opaque_ty* v = malloc(sizeof($ty:opaque_ty));
-                    v->$id:(tupleField 0) = $int:i;
+                    $stms:set_variant
                     { $items:(criticalSection ops new_stms) }
                     // Set other fields
                     { $items:set_unused_stms }
@@ -469,6 +940,8 @@ sumVariants desc variants vds = do
 
     destructFunction ops ctx_ty opaque_ty i fname payload = do
       (params, destruct_stms) <- unzip <$> zipWithM (destructPayload ops) [0 ..] payload
+      let check_stms =
+            [[C.cstm|assert(obj->$id:(tupleField 0) == $int:i);|] | not unary]
       headerDecl
         (OpaqueDecl desc)
         [C.cedecl|int $id:fname($ty:ctx_ty *ctx,
@@ -480,7 +953,7 @@ sumVariants desc variants vds = do
                                 $params:params,
                                 const $ty:opaque_ty *obj) {
                     (void)ctx;
-                    assert(obj->$id:(tupleField 0) == $int:i);
+                    $stms:check_stms
                     $stms:destruct_stms
                     return FUTHARK_SUCCESS;
                   }|]
@@ -496,50 +969,88 @@ sumVariants desc variants vds = do
                   }|]
         )
 
-sumVariantFunction :: Name -> CompilerM op s Manifest.CFuncName
-sumVariantFunction desc = do
+sumVariantFunction :: Int -> Name -> CompilerM op s Manifest.CFuncName
+sumVariantFunction num_cs desc = do
   opaque_ty <- opaqueToCType desc
   ctx_ty <- contextType
   variant <- publicName $ "variant_" <> opaqueName desc
   headerDecl
     (OpaqueDecl desc)
     [C.cedecl|int $id:variant($ty:ctx_ty *ctx, const $ty:opaque_ty* v);|]
-  -- This depends on the assumption that the first value always
-  -- encodes the variant.
+  -- This depends on the assumption that the first value always encodes the
+  -- variant, which means we need to treat the unary case specially.
+  let e =
+        if num_cs == 1
+          then [C.cexp|0|]
+          else
+            [C.cexp|v->$id:(tupleField 0)|]
   libDecl
     [C.cedecl|int $id:variant($ty:ctx_ty *ctx, const $ty:opaque_ty* v) {
-                (void)ctx;
-                return v->$id:(tupleField 0);
+                (void)ctx; (void)v;
+                return $exp:e;
               }|]
   pure variant
 
-processOpaqueRecord ::
+opaqueExtraOps ::
+  Space ->
   OpaqueTypes ->
   Name ->
   OpaqueType ->
   [ValueType] ->
-  CompilerM op s (Maybe Manifest.RecordOps, Maybe Manifest.SumOps)
-processOpaqueRecord _ _ (OpaqueType _) _ =
-  pure (Nothing, Nothing)
-processOpaqueRecord _types desc (OpaqueSum _ cs) vds =
-  (Nothing,) . Just
+  CompilerM op s (Maybe Manifest.OpaqueExtraOps)
+-- Special-case () as a 0-ary record. It isn't really in the IR, but otherwise
+-- we cannot construct them from the outside.
+opaqueExtraOps
+  _
+  types
+  "()"
+  (OpaqueType [ValueType Signed (Rank 0) Unit])
+  [ValueType Signed (Rank 0) Unit] =
+    Just . Manifest.OpaqueRecord
+      <$> ( Manifest.RecordOps
+              <$> recordProjectFunctions types "()" [] []
+              <*> recordNewFunctions types "()" [] []
+          )
+opaqueExtraOps _ _ _ (OpaqueType _) _ =
+  pure Nothing
+opaqueExtraOps _ _types desc (OpaqueSum _ cs) vds =
+  Just . Manifest.OpaqueSum
     <$> ( Manifest.SumOps
             <$> sumVariants desc cs vds
-            <*> sumVariantFunction desc
+            <*> sumVariantFunction (length cs) desc
         )
-processOpaqueRecord types desc (OpaqueRecord fs) vds =
-  (,Nothing) . Just
+opaqueExtraOps _ types desc (OpaqueRecord fs) vds =
+  Just . Manifest.OpaqueRecord
     <$> ( Manifest.RecordOps
             <$> recordProjectFunctions types desc fs vds
             <*> recordNewFunctions types desc fs vds
         )
+opaqueExtraOps space types desc (OpaqueRecordArray rank elemtype fs) vds =
+  Just . Manifest.OpaqueRecordArray
+    <$> ( Manifest.RecordArrayOps rank (nameToText elemtype)
+            <$> recordArrayProjectFunctions types desc fs vds
+            <*> recordArrayZipFunctions types desc fs vds rank
+            <*> recordArrayIndexFunction space types desc rank elemtype vds
+            <*> recordArrayShapeFunction desc
+            <*> recordArrayNewFunction space types desc rank elemtype vds
+            <*> recordArraySetFunction space types desc rank elemtype vds
+        )
+opaqueExtraOps space types desc (OpaqueArray rank elemtype _) vds =
+  Just . Manifest.OpaqueArray
+    <$> ( Manifest.OpaqueArrayOps rank (nameToText elemtype)
+            <$> opaqueArrayIndexFunction space types desc rank elemtype vds
+            <*> opaqueArrayShapeFunction desc
+            <*> opaqueArrayNewFunction space types desc rank elemtype vds
+            <*> opaqueArraySetFunction space types desc rank elemtype vds
+        )
 
 opaqueLibraryFunctions ::
+  Space ->
   OpaqueTypes ->
   Name ->
   OpaqueType ->
-  CompilerM op s (Manifest.OpaqueOps, Maybe Manifest.RecordOps, Maybe Manifest.SumOps)
-opaqueLibraryFunctions types desc ot = do
+  CompilerM op s (Manifest.OpaqueOps, Maybe Manifest.OpaqueExtraOps)
+opaqueLibraryFunctions space types desc ot = do
   name <- publicName $ opaqueName desc
   free_opaque <- publicName $ "free_" <> opaqueName desc
   store_opaque <- publicName $ "store_" <> opaqueName desc
@@ -637,7 +1148,7 @@ opaqueLibraryFunctions types desc ot = do
     (OpaqueDecl desc)
     [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
 
-  (record, sumops) <- processOpaqueRecord types desc ot vds
+  extra_ops <- opaqueExtraOps space types desc ot vds
 
   -- We do not need to enclose most bodies in a critical section,
   -- because when we operate on the components of the opaque, we are
@@ -685,8 +1196,7 @@ opaqueLibraryFunctions types desc ot = do
           Manifest.opaqueStore = store_opaque,
           Manifest.opaqueRestore = restore_opaque
         },
-      record,
-      sumops
+      extra_ops
     )
 
 generateArray ::
@@ -712,16 +1222,20 @@ generateArray space ((signed, pt, rank), pub) = do
       pure Nothing
 
 generateOpaque ::
+  Space ->
   OpaqueTypes ->
   (Name, OpaqueType) ->
   CompilerM op s (T.Text, Manifest.Type)
-generateOpaque types (desc, ot) = do
+generateOpaque space types (desc, ot) = do
   name <- publicName $ opaqueName desc
   members <- zipWithM field (opaquePayload types ot) [(0 :: Int) ..]
   libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
-  (ops, record, sumops) <- opaqueLibraryFunctions types desc ot
+  (ops, extra_ops) <- opaqueLibraryFunctions space types desc ot
   let opaque_type = [C.cty|struct $id:name*|]
-  pure (nameToText desc, Manifest.TypeOpaque (typeText opaque_type) ops record sumops)
+  pure
+    ( nameToText desc,
+      Manifest.TypeOpaque (typeText opaque_type) ops extra_ops
+    )
   where
     field vt@(ValueType _ (Rank r) _) i = do
       ct <- valueTypeToCType Private vt
@@ -730,11 +1244,14 @@ generateOpaque types (desc, ot) = do
           then [C.csdecl|$ty:ct $id:(tupleField i);|]
           else [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
-generateAPITypes :: Space -> OpaqueTypes -> CompilerM op s (M.Map T.Text Manifest.Type)
+generateAPITypes ::
+  Space ->
+  OpaqueTypes ->
+  CompilerM op s (M.Map T.Text Manifest.Type)
 generateAPITypes arr_space types@(OpaqueTypes opaques) = do
   mapM_ (findNecessaryArrays . snd) opaques
   array_ts <- mapM (generateArray arr_space) . M.toList =<< gets compArrayTypes
-  opaque_ts <- mapM (generateOpaque types) opaques
+  opaque_ts <- mapM (generateOpaque arr_space types) opaques
   pure $ M.fromList $ catMaybes array_ts <> opaque_ts
   where
     -- Ensure that array types will be generated before the opaque
@@ -743,6 +1260,10 @@ generateAPITypes arr_space types@(OpaqueTypes opaques) = do
     -- the innards to increment reference counts.
     findNecessaryArrays (OpaqueType _) =
       pure ()
+    findNecessaryArrays (OpaqueArray _ _ vts) =
+      mapM_ (valueTypeToCType Private) vts
+    findNecessaryArrays (OpaqueRecordArray _ _ fs) =
+      mapM_ (entryPointTypeToCType Public . snd) fs
     findNecessaryArrays (OpaqueSum _ variants) =
       mapM_ (mapM_ (entryPointTypeToCType Public . fst) . snd) variants
     findNecessaryArrays (OpaqueRecord fs) =

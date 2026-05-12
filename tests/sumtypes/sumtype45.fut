@@ -1,6 +1,6 @@
 -- From #1748
 
-def main (a: bool) (b: bool) (c: bool): () =
+def main (a: bool) (b: bool) (c: bool) : () =
   match (a, b, c)
   case (false, false, false) -> ()
   case (false, false, true) -> ()

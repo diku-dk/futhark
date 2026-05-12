@@ -8,4 +8,4 @@
 -- }
 
 def main [n] (A: [n]i64) (m: i64) : [m]i64 =
-  if A[0] == 0 then A[:m] else A[1:m+1] :> [m]i64
+  if A[0] == 0 then A[:m] else A[1:m + 1] :> [m]i64

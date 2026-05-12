@@ -3,6 +3,6 @@
 -- ==
 -- error: Module type
 
-module m = { def f 'a (x: a) = ([x])[0] } : { val f '^a : a -> a }
+module m = {def f 'a (x: a) = ([x])[0]}: {val f '^a : a -> a}
 
-let main = m.f id 0i32
+def main = m.f id 0i32

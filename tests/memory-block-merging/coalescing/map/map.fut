@@ -4,5 +4,5 @@
 -- structure gpu-mem { Alloc 0 }
 -- structure seq-mem { Alloc 1 }
 
-let main [n] (xs: *[n]i32): *[n]i32 =
-  map (+1) xs
+def main [n] (xs: *[n]i32) : *[n]i32 =
+  map (+ 1) xs

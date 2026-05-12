@@ -12,15 +12,15 @@ static char* get_failure_msg(int failure_idx, int64_t args[]);
 #define HIPRTC_SUCCEED_FATAL(x) hiprtc_api_succeed_fatal(x, #x, __FILE__, __LINE__)
 #define HIPRTC_SUCCEED_NONFATAL(x) hiprtc_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
 // Take care not to override an existing error.
-#define HIP_SUCCEED_OR_RETURN(e) {             \
-    char *serror = HIP_SUCCEED_NONFATAL(e);    \
+#define HIP_SUCCEED_OR_RETURN(e) {              \
+    char *serror = HIP_SUCCEED_NONFATAL(e);     \
     if (serror) {                               \
       if (!ctx->error) {                        \
         ctx->error = serror;                    \
-        return bad;                             \
       } else {                                  \
         free(serror);                           \
       }                                         \
+      return bad;                               \
     }                                           \
   }
 
@@ -53,7 +53,7 @@ static char* hip_api_succeed_nonfatal(hipError_t res, const char *call,
 }
 
 static inline void hiprtc_api_succeed_fatal(hiprtcResult res, const char *call,
-                                           const char *file, int line) {
+                                            const char *file, int line) {
   if (res != HIPRTC_SUCCESS) {
     const char *err_str = hiprtcGetErrorString(res);
     futhark_panic(-1, "%s:%d: HIPRTC call\n  %s\nfailed with error code %d (%s)\n",
@@ -62,7 +62,7 @@ static inline void hiprtc_api_succeed_fatal(hiprtcResult res, const char *call,
 }
 
 static char* hiprtc_api_succeed_nonfatal(hiprtcResult res, const char *call,
-                                        const char *file, int line) {
+                                         const char *file, int line) {
   if (res != HIPRTC_SUCCESS) {
     const char *err_str = hiprtcGetErrorString(res);
     return msgprintf("%s:%d: HIPRTC call\n  %s\nfailed with error code %d (%s)\n",
@@ -77,12 +77,8 @@ struct futhark_context_config {
   int debugging;
   int profiling;
   int logging;
-  char* cache_fname;
-  int num_tuning_params;
-  int64_t *tuning_params;
-  const char** tuning_param_names;
-  const char** tuning_param_vars;
-  const char** tuning_param_classes;
+  char *cache_fname;
+  struct tuning_param tuning_params[NUM_TUNING_PARAMS];
   // Uniform fields above.
 
   char* program;
@@ -94,15 +90,7 @@ struct futhark_context_config {
   char* preferred_device;
   int preferred_device_num;
 
-  size_t default_block_size;
-  size_t default_grid_size;
-  size_t default_tile_size;
-  size_t default_reg_tile_size;
-  size_t default_threshold;
-
-  int default_block_size_changed;
-  int default_grid_size_changed;
-  int default_tile_size_changed;
+  struct gpu_config gpu;
 };
 
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
@@ -115,15 +103,11 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
 
   cfg->unified_memory = 0;
 
-  cfg->default_block_size = 256;
-  cfg->default_grid_size = 0; // Set properly later.
-  cfg->default_tile_size = 32;
-  cfg->default_reg_tile_size = 2;
-  cfg->default_threshold = 32*1024;
-
-  cfg->default_block_size_changed = 0;
-  cfg->default_grid_size_changed = 0;
-  cfg->default_tile_size_changed = 0;
+  cfg->gpu = gpu_config_initial;
+  cfg->gpu.default_block_size = 256;
+  cfg->gpu.default_tile_size = 32;
+  cfg->gpu.default_reg_tile_size = 2;
+  cfg->gpu.default_threshold = 32*1024;
 }
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
@@ -174,72 +158,6 @@ void futhark_context_config_set_unified_memory(struct futhark_context_config* cf
   cfg->unified_memory = flag;
 }
 
-void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_block_size = size;
-  cfg->default_block_size_changed = 1;
-}
-
-void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
-  cfg->default_grid_size = num;
-  cfg->default_grid_size_changed = 1;
-}
-
-void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int num) {
-  futhark_context_config_set_default_thread_block_size(cfg, num);
-}
-
-
-void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
-  futhark_context_config_set_default_grid_size(cfg, num);
-}
-
-void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_tile_size = size;
-  cfg->default_tile_size_changed = 1;
-}
-
-void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_reg_tile_size = size;
-}
-
-void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size) {
-  cfg->default_threshold = size;
-}
-
-int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
-                                            const char *param_name,
-                                            size_t new_value) {
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
-      cfg->tuning_params[i] = new_value;
-      return 0;
-    }
-  }
-  if (strcmp(param_name, "default_thread_block_size") == 0 ||
-      strcmp(param_name, "default_group_size") == 0) {
-    cfg->default_block_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_grid_size") == 0 ||
-      strcmp(param_name, "default_num_groups") == 0) {
-    cfg->default_grid_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_threshold") == 0) {
-    cfg->default_threshold = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_tile_size") == 0) {
-    cfg->default_tile_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_reg_tile_size") == 0) {
-    cfg->default_reg_tile_size = new_value;
-    return 0;
-  }
-  return 1;
-}
-
 struct futhark_context {
   struct futhark_context_config* cfg;
   int detail_memory;
@@ -261,7 +179,6 @@ struct futhark_context {
 
   void* global_failure;
   void* global_failure_args;
-  struct tuning_params tuning_params;
   // True if a potentially failing kernel has been enqueued.
   int32_t failure_is_an_option;
   int total_runs;
@@ -362,50 +279,56 @@ static void hip_load_code_from_cache(struct futhark_context_config *cfg,
 
 static void hip_size_setup(struct futhark_context *ctx) {
   struct futhark_context_config *cfg = ctx->cfg;
-  if (cfg->default_block_size > ctx->max_thread_block_size) {
-    if (cfg->default_block_size_changed) {
+  if (cfg->gpu.default_block_size > ctx->max_thread_block_size) {
+    if (cfg->gpu.default_block_size_changed) {
       fprintf(stderr,
               "Note: Device limits default block size to %zu (down from %zu).\n",
-              ctx->max_thread_block_size, cfg->default_block_size);
+              ctx->max_thread_block_size, cfg->gpu.default_block_size);
     }
-    cfg->default_block_size = ctx->max_thread_block_size;
+    cfg->gpu.default_block_size = ctx->max_thread_block_size;
   }
-  if (cfg->default_grid_size > ctx->max_grid_size) {
-    if (cfg->default_grid_size_changed) {
+  if (cfg->gpu.default_grid_size > ctx->max_grid_size) {
+    if (cfg->gpu.default_grid_size_changed) {
       fprintf(stderr,
               "Note: Device limits default grid size to %zu (down from %zu).\n",
-              ctx->max_grid_size, cfg->default_grid_size);
+              ctx->max_grid_size, cfg->gpu.default_grid_size);
     }
-    cfg->default_grid_size = ctx->max_grid_size;
+    cfg->gpu.default_grid_size = ctx->max_grid_size;
   }
-  if (cfg->default_tile_size > ctx->max_tile_size) {
-    if (cfg->default_tile_size_changed) {
+  if (cfg->gpu.default_tile_size > ctx->max_tile_size) {
+    if (cfg->gpu.default_tile_size_changed) {
       fprintf(stderr,
               "Note: Device limits default tile size to %zu (down from %zu).\n",
-              ctx->max_tile_size, cfg->default_tile_size);
+              ctx->max_tile_size, cfg->gpu.default_tile_size);
     }
-    cfg->default_tile_size = ctx->max_tile_size;
+    cfg->gpu.default_tile_size = ctx->max_tile_size;
   }
 
-  if (!cfg->default_grid_size_changed) {
-    cfg->default_grid_size =
+  if (!cfg->gpu.default_grid_size_changed) {
+    cfg->gpu.default_grid_size =
       (device_query(ctx->dev, hipDeviceAttributePhysicalMultiProcessorCount) *
        device_query(ctx->dev, hipDeviceAttributeMaxThreadsPerMultiProcessor))
-      / cfg->default_block_size;
+      / cfg->gpu.default_block_size;
+
+    // XXX: this is a hack due to the inability of two-pass scan to handle a
+    // grid size that is larger than the maximum block size.
+    if (cfg->gpu.default_grid_size > ctx->max_thread_block_size) {
+      cfg->gpu.default_grid_size = ctx->max_thread_block_size;
+    }
   }
 
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    const char *size_class = cfg->tuning_param_classes[i];
-    int64_t *size_value = &cfg->tuning_params[i];
-    const char* size_name = cfg->tuning_param_names[i];
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+    const char *size_class = cfg->tuning_params[i].class;
+    int64_t *size_value = &cfg->tuning_params[i].val;
+    const char* size_name = cfg->tuning_params[i].name;
     int64_t max_value = 0, default_value = 0;
 
     if (strstr(size_class, "thread_block_size") == size_class) {
       max_value = ctx->max_thread_block_size;
-      default_value = cfg->default_block_size;
+      default_value = cfg->gpu.default_block_size;
     } else if (strstr(size_class, "grid_size") == size_class) {
       max_value = ctx->max_grid_size;
-      default_value = cfg->default_grid_size;
+      default_value = cfg->gpu.default_grid_size;
       // XXX: as a quick and dirty hack, use twice as many threads for
       // histograms by default.  We really should just be smarter
       // about sizes somehow.
@@ -414,13 +337,19 @@ static void hip_size_setup(struct futhark_context *ctx) {
       }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = ctx->max_tile_size;
-      default_value = cfg->default_tile_size;
+      default_value = cfg->gpu.default_tile_size;
     } else if (strstr(size_class, "reg_tile_size") == size_class) {
       max_value = 0; // No limit.
-      default_value = cfg->default_reg_tile_size;
+      default_value = cfg->gpu.default_reg_tile_size;
+    } else if (strstr(size_class, "shared_memory") == size_class) {
+      max_value = ctx->max_shared_memory;
+      default_value = ctx->max_shared_memory;
+    } else if (strstr(size_class, "cache") == size_class) {
+      max_value = ctx->max_cache;
+      default_value = ctx->max_cache;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
-      default_value = cfg->default_threshold;
+      default_value = cfg->gpu.default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
     }
@@ -485,7 +414,7 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
     }
   }
 
-  size_t i = 0, n_opts_alloc = 20 + num_macros + num_extra_opts + cfg->num_tuning_params;
+  size_t i = 0, n_opts_alloc = 20 + num_macros + num_extra_opts + 2*NUM_TUNING_PARAMS;
   char **opts = (char**) malloc(n_opts_alloc * sizeof(char *));
   if (!arch_set) {
     hipDeviceProp_t props;
@@ -510,9 +439,13 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
     opts[i++] = msgprintf("-D%s=%zu", macro_names[j], macro_vals[j]);
   }
 
-  for (int j = 0; j < cfg->num_tuning_params; j++) {
-    opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
-                          cfg->tuning_params[j]);
+  for (int j = 0; j < NUM_TUNING_PARAMS; j++) {
+    opts[i++] = msgprintf("-Dset_%s=%d",
+                          ctx->cfg->tuning_params[j].var,
+                          (int)ctx->cfg->tuning_params[j].set);
+    opts[i++] = msgprintf("-Dval_%s=%d",
+                          ctx->cfg->tuning_params[j].var,
+                          (int)ctx->cfg->tuning_params[j].val);
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
   opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_thread_block_size);
@@ -706,14 +639,25 @@ int backend_context_setup(struct futhark_context* ctx) {
     }
   }
 
-  ctx->max_shared_memory = device_query(ctx->dev, hipDeviceAttributeMaxSharedMemoryPerBlock);
   ctx->max_thread_block_size = device_query(ctx->dev, hipDeviceAttributeMaxThreadsPerBlock);
   ctx->max_grid_size = device_query(ctx->dev, hipDeviceAttributeMaxGridDimX);
   ctx->max_tile_size = sqrt(ctx->max_thread_block_size);
-  ctx->max_threshold = 0;
+  ctx->max_threshold = 1U<<31; // No limit.
   ctx->max_bespoke = 0;
   ctx->max_registers = device_query(ctx->dev, hipDeviceAttributeMaxRegistersPerBlock);
-  ctx->max_cache = device_query(ctx->dev, hipDeviceAttributeL2CacheSize);
+
+  if (ctx->cfg->gpu.default_shared_memory != 0) {
+    ctx->max_shared_memory = ctx->cfg->gpu.default_shared_memory;
+  } else {
+    ctx->max_shared_memory = device_query(ctx->dev, hipDeviceAttributeMaxSharedMemoryPerBlock);
+  }
+
+  if (ctx->cfg->gpu.default_cache != 0) {
+    ctx->max_cache = ctx->cfg->gpu.default_cache;
+  } else {
+      ctx->max_cache = device_query(ctx->dev, hipDeviceAttributeL2CacheSize);
+  }
+
   // FIXME: in principle we should query hipDeviceAttributeWarpSize
   // from the device, which will provide 64 on AMD GPUs.
   // Unfortunately, we currently do nasty implicit intra-warp
@@ -723,6 +667,9 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 32;
   HIP_SUCCEED_FATAL(hipStreamCreate(&ctx->stream));
   hip_size_setup(ctx);
+
+  gpu_init_log(ctx);
+
   ctx->error = hip_module_setup(ctx,
                                 ctx->cfg->program,
                                 (const char**)ctx->cfg->build_opts,
@@ -778,13 +725,15 @@ static void gpu_free_kernel(struct futhark_context *ctx,
 }
 
 static int gpu_scalar_to_device(struct futhark_context* ctx,
+                                const char *provenance,
                                 gpu_mem dst, size_t offset, size_t size,
                                 void *src) {
   struct hip_event *event = hip_event_new(ctx);
   if (event != NULL) {
     add_event(ctx,
               "copy_scalar_to_dev",
-              strdup(""),
+              provenance,
+              NULL,
               event,
               (event_report_fn)hip_event_report);
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
@@ -797,13 +746,15 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
 }
 
 static int gpu_scalar_from_device(struct futhark_context* ctx,
+                                  const char *provenance,
                                   void *dst,
                                   gpu_mem src, size_t offset, size_t size) {
   struct hip_event *event = hip_event_new(ctx);
   if (event != NULL) {
     add_event(ctx,
               "copy_scalar_from_dev",
-              strdup(""),
+              provenance,
+              NULL,
               event,
               (event_report_fn)hip_event_report);
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
@@ -816,6 +767,7 @@ static int gpu_scalar_from_device(struct futhark_context* ctx,
 }
 
 static int gpu_memcpy(struct futhark_context* ctx,
+                      const char *provenance,
                       gpu_mem dst, int64_t dst_offset,
                       gpu_mem src, int64_t src_offset,
                       int64_t nbytes) {
@@ -823,7 +775,8 @@ static int gpu_memcpy(struct futhark_context* ctx,
   if (event != NULL) {
     add_event(ctx,
               "copy_dev_to_dev",
-              strdup(""),
+              provenance,
+              NULL,
               event,
               (event_report_fn)hip_event_report);
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
@@ -836,7 +789,9 @@ static int gpu_memcpy(struct futhark_context* ctx,
   return FUTHARK_SUCCESS;
 }
 
-static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
+static int memcpy_host2gpu(struct futhark_context* ctx,
+                           const char *provenance,
+                           bool sync,
                            gpu_mem dst, int64_t dst_offset,
                            const unsigned char* src, int64_t src_offset,
                            int64_t nbytes) {
@@ -845,7 +800,8 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_host_to_dev",
-                strdup(""),
+                provenance,
+                NULL,
                 event,
                 (event_report_fn)hip_event_report);
       HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
@@ -867,7 +823,9 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
   return FUTHARK_SUCCESS;
 }
 
-static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
+static int memcpy_gpu2host(struct futhark_context* ctx,
+                           const char *provenance,
+                           bool sync,
                            unsigned char* dst, int64_t dst_offset,
                            gpu_mem src, int64_t src_offset,
                            int64_t nbytes) {
@@ -876,7 +834,8 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_dev_to_host",
-                strdup(""),
+                provenance,
+                NULL,
                 event,
                 (event_report_fn)hip_event_report);
       HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
@@ -905,7 +864,8 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
 }
 
 static int gpu_launch_kernel(struct futhark_context* ctx,
-                             gpu_kernel kernel, const char *name,
+                             gpu_kernel kernel,
+                             const char *name, const char *provenance,
                              const int32_t grid[3],
                              const int32_t block[3],
                              unsigned int shared_mem_bytes,
@@ -929,16 +889,17 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 
   if (event != NULL) {
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
+
+    struct kvs *kvs = kvs_new();
+    kvs_printf(kvs, "kernel", "\"%s\"", name);
+    kvs_printf(kvs, "grid", "[%d,%d,%d]", grid[0], grid[1], grid[2]);
+    kvs_printf(kvs, "block", "[%d,%d,%d]", block[0], block[1], block[2]);
+    kvs_printf(kvs, "shared memory", "%d", shared_mem_bytes);
+
     add_event(ctx,
               name,
-              msgprintf("Kernel %s with\n"
-                        "  grid=(%d,%d,%d)\n"
-                        "  block=(%d,%d,%d)\n"
-                        "  shared memory=%d",
-                        name,
-                        grid[0], grid[1], grid[2],
-                        block[0], block[1], block[2],
-                        shared_mem_bytes),
+              provenance,
+              kvs,
               event,
               (event_report_fn)hip_event_report);
   }

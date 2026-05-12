@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker.Match
   )
 where
 
+import Data.Bifunctor (first)
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -64,7 +65,7 @@ patternToMatch p@(RecordPat fs _) =
   MatchConstr (ConstrRecord fnames) (map patternToMatch ps) $
     patternStructType p
   where
-    (fnames, ps) = unzip $ sortFields $ M.fromList fs
+    (fnames, ps) = unzip $ sortFields $ M.fromList $ map (first unLoc) fs
 patternToMatch (PatConstr c (Info t) args _) =
   MatchConstr (Constr c) (map patternToMatch args) t
 

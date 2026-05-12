@@ -2,7 +2,8 @@
 -- useful).
 
 module M = {
-    type t = bool
-} : { type t }
+             type t = bool
+           }:
+           {type t}
 
-entry main (x: (M.t,M.t)) : (M.t,M.t) = x
+entry main (x: (M.t, M.t)) : (M.t, M.t) = x

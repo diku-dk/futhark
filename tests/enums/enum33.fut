@@ -6,4 +6,4 @@ type foobar = #foo | #bar
 
 def f : i32 =
   match #foo
-    case (#foo : foobar) -> 1
+  case (#foo: foobar) -> 1

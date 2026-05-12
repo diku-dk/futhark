@@ -21,13 +21,12 @@ module Futhark.IR.SegOp
     SegBinOp (..),
     segBinOpResults,
     segBinOpChunks,
-    KernelBody (..),
-    aliasAnalyseKernelBody,
-    consumedInKernelBody,
+    KernelBody,
     ResultManifest (..),
     KernelResult (..),
     kernelResultCerts,
     kernelResultSubExp,
+    SegPostOp (..),
 
     -- ** Generic traversal
     SegOpMapper (..),
@@ -55,7 +54,6 @@ import Data.Bifunctor (first)
 import Data.Bitraversable
 import Data.List
   ( elemIndex,
-    foldl',
     groupBy,
     intersperse,
     isPrefixOf,
@@ -63,9 +61,11 @@ import Data.List
     unzip4,
     zip4,
   )
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -148,6 +148,12 @@ data SegBinOp rep = SegBinOp
   }
   deriving (Eq, Ord, Show)
 
+newtype SegPostOp rep = SegPostOp
+  { -- | The function applied the the result of some SegBinOp.
+    segPostOpLambda :: Lambda rep
+  }
+  deriving (Eq, Ord, Show)
+
 -- | How many reduction results are produced by these 'SegBinOp's?
 segBinOpResults :: [SegBinOp rep] -> Int
 segBinOpResults = sum . map (length . segBinOpNeutral)
@@ -158,17 +164,7 @@ segBinOpChunks :: [SegBinOp rep] -> [a] -> [[a]]
 segBinOpChunks = chunks . map (length . segBinOpNeutral)
 
 -- | The body of a 'SegOp'.
-data KernelBody rep = KernelBody
-  { kernelBodyDec :: BodyDec rep,
-    kernelBodyStms :: Stms rep,
-    kernelBodyResult :: [KernelResult]
-  }
-
-deriving instance (RepTypes rep) => Ord (KernelBody rep)
-
-deriving instance (RepTypes rep) => Show (KernelBody rep)
-
-deriving instance (RepTypes rep) => Eq (KernelBody rep)
+type KernelBody rep = GBody rep KernelResult
 
 -- | Metadata about whether there is a subtle point to this
 -- 'KernelResult'.  This is used to protect things like tiling, which
@@ -193,10 +189,6 @@ data KernelResult
     -- Whether this is a result-per-thread or a
     -- result-per-block depends on where the 'SegOp' occurs.
     Returns ResultManifest Certs SubExp
-  | WriteReturns
-      Certs
-      VName -- Destination array
-      [(Slice SubExp, SubExp)]
   | TileReturns
       Certs
       [(SubExp, SubExp)] -- Total/tile for each dimension
@@ -214,49 +206,31 @@ data KernelResult
       VName -- Tile returned by this thread/block.
   deriving (Eq, Show, Ord)
 
+instance IsResult KernelResult where
+  resAliases = freeIn . kernelResultSubExp
+
 -- | Get the certs for this 'KernelResult'.
 kernelResultCerts :: KernelResult -> Certs
 kernelResultCerts (Returns _ cs _) = cs
-kernelResultCerts (WriteReturns cs _ _) = cs
 kernelResultCerts (TileReturns cs _ _) = cs
 kernelResultCerts (RegTileReturns cs _ _) = cs
 
 -- | Get the root t'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (Returns _ _ se) = se
-kernelResultSubExp (WriteReturns _ arr _) = Var arr
 kernelResultSubExp (TileReturns _ _ v) = Var v
 kernelResultSubExp (RegTileReturns _ _ v) = Var v
 
 instance FreeIn KernelResult where
   freeIn' (Returns _ cs what) = freeIn' cs <> freeIn' what
-  freeIn' (WriteReturns cs arr res) = freeIn' cs <> freeIn' arr <> freeIn' res
   freeIn' (TileReturns cs dims v) =
     freeIn' cs <> freeIn' dims <> freeIn' v
   freeIn' (RegTileReturns cs dims_n_tiles v) =
     freeIn' cs <> freeIn' dims_n_tiles <> freeIn' v
 
-instance (ASTRep rep) => FreeIn (KernelBody rep) where
-  freeIn' (KernelBody dec stms res) =
-    fvBind bound_in_stms $ freeIn' dec <> freeIn' stms <> freeIn' res
-    where
-      bound_in_stms = foldMap boundByStm stms
-
-instance (ASTRep rep) => Substitute (KernelBody rep) where
-  substituteNames subst (KernelBody dec stms res) =
-    KernelBody
-      (substituteNames subst dec)
-      (substituteNames subst stms)
-      (substituteNames subst res)
-
 instance Substitute KernelResult where
   substituteNames subst (Returns manifest cs se) =
     Returns manifest (substituteNames subst cs) (substituteNames subst se)
-  substituteNames subst (WriteReturns cs arr res) =
-    WriteReturns
-      (substituteNames subst cs)
-      (substituteNames subst arr)
-      (substituteNames subst res)
   substituteNames subst (TileReturns cs dims v) =
     TileReturns
       (substituteNames subst cs)
@@ -268,47 +242,52 @@ instance Substitute KernelResult where
       (substituteNames subst dims_n_tiles)
       (substituteNames subst v)
 
-instance (ASTRep rep) => Rename (KernelBody rep) where
-  rename (KernelBody dec stms res) = do
-    dec' <- rename dec
-    renamingStms stms $ \stms' ->
-      KernelBody dec' stms' <$> rename res
-
 instance Rename KernelResult where
   rename = substituteRename
 
--- | Perform alias analysis on a 'KernelBody'.
-aliasAnalyseKernelBody ::
-  (Alias.AliasableRep rep) =>
-  AliasTable ->
-  KernelBody rep ->
-  KernelBody (Aliases rep)
-aliasAnalyseKernelBody aliases (KernelBody dec stms res) =
-  let Body dec' stms' _ = Alias.analyseBody aliases $ Body dec stms []
-   in KernelBody dec' stms' res
+checkKernelResult ::
+  (TC.Checkable rep) =>
+  KernelResult ->
+  Type ->
+  TC.TypeM rep ()
+checkKernelResult (Returns _ cs what) t = do
+  TC.checkCerts cs
+  TC.require t what
+checkKernelResult (TileReturns cs dims v) t = do
+  TC.checkCerts cs
+  forM_ dims $ \(dim, tile) -> do
+    TC.require (Prim int64) dim
+    TC.require (Prim int64) tile
+  vt <- lookupType v
+  unless (vt == t `arrayOfShape` Shape (map snd dims)) $
+    TC.bad $
+      TC.TypeError $
+        "Invalid type for TileReturns " <> prettyText v
+checkKernelResult (RegTileReturns cs dims_n_tiles arr) t = do
+  TC.checkCerts cs
+  mapM_ (TC.require $ Prim int64) dims
+  mapM_ (TC.require $ Prim int64) blk_tiles
+  mapM_ (TC.require $ Prim int64) reg_tiles
 
--- | The variables consumed in the kernel body.
-consumedInKernelBody ::
-  (Aliased rep) =>
-  KernelBody rep ->
-  Names
-consumedInKernelBody (KernelBody dec stms res) =
-  consumedInBody (Body dec stms []) <> mconcat (map consumedByReturn res)
+  -- assert that arr is of element type t and shape (rev outer_tiles ++ reg_tiles)
+  arr_t <- lookupType arr
+  unless (arr_t == expected) $
+    TC.bad . TC.TypeError $
+      "Invalid type for TileReturns. Expected:\n  "
+        <> prettyText expected
+        <> ",\ngot:\n  "
+        <> prettyText arr_t
   where
-    consumedByReturn (WriteReturns _ a _) = oneName a
-    consumedByReturn _ = mempty
+    (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
+    expected = t `arrayOfShape` Shape (blk_tiles <> reg_tiles)
 
 checkKernelBody ::
   (TC.Checkable rep) =>
   [Type] ->
   KernelBody (Aliases rep) ->
   TC.TypeM rep ()
-checkKernelBody ts (KernelBody (_, dec) stms kres) = do
+checkKernelBody ts (Body (_, dec) stms kres) = do
   TC.checkBodyDec dec
-  -- We consume the kernel results (when applicable) before
-  -- type-checking the stms, so we will get an error if a statement
-  -- uses an array that is written to in a result.
-  mapM_ consumeKernelResult kres
   TC.checkStms stms $ do
     unless (length ts == length kres) $
       TC.bad . TC.TypeError $
@@ -318,62 +297,9 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
           <> prettyText (length kres)
           <> " values."
     zipWithM_ checkKernelResult kres ts
-  where
-    consumeKernelResult (WriteReturns _ arr _) =
-      TC.consume =<< TC.lookupAliases arr
-    consumeKernelResult _ =
-      pure ()
-
-    checkKernelResult (Returns _ cs what) t = do
-      TC.checkCerts cs
-      TC.require [t] what
-    checkKernelResult (WriteReturns cs arr res) t = do
-      TC.checkCerts cs
-      arr_t <- lookupType arr
-      unless (arr_t == t) $
-        TC.bad . TC.TypeError $
-          "WriteReturns result type annotation for "
-            <> prettyText arr
-            <> " is "
-            <> prettyText t
-            <> ", but inferred as"
-            <> prettyText arr_t
-      forM_ res $ \(slice, e) -> do
-        TC.checkSlice arr_t slice
-        TC.require [t `setArrayShape` sliceShape slice] e
-    checkKernelResult (TileReturns cs dims v) t = do
-      TC.checkCerts cs
-      forM_ dims $ \(dim, tile) -> do
-        TC.require [Prim int64] dim
-        TC.require [Prim int64] tile
-      vt <- lookupType v
-      unless (vt == t `arrayOfShape` Shape (map snd dims)) $
-        TC.bad $
-          TC.TypeError $
-            "Invalid type for TileReturns " <> prettyText v
-    checkKernelResult (RegTileReturns cs dims_n_tiles arr) t = do
-      TC.checkCerts cs
-      mapM_ (TC.require [Prim int64]) dims
-      mapM_ (TC.require [Prim int64]) blk_tiles
-      mapM_ (TC.require [Prim int64]) reg_tiles
-
-      -- assert that arr is of element type t and shape (rev outer_tiles ++ reg_tiles)
-      arr_t <- lookupType arr
-      unless (arr_t == expected) $
-        TC.bad . TC.TypeError $
-          "Invalid type for TileReturns. Expected:\n  "
-            <> prettyText expected
-            <> ",\ngot:\n  "
-            <> prettyText arr_t
-      where
-        (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
-        expected = t `arrayOfShape` Shape (blk_tiles <> reg_tiles)
-
-kernelBodyMetrics :: (OpMetrics (Op rep)) => KernelBody rep -> MetricsM ()
-kernelBodyMetrics = mapM_ stmMetrics . kernelBodyStms
 
 instance (PrettyRep rep) => Pretty (KernelBody rep) where
-  pretty (KernelBody _ stms res) =
+  pretty (Body _ stms res) =
     PP.stack (map pretty (stmsToList stms))
       </> "return"
       <+> PP.braces (PP.commastack $ map pretty res)
@@ -390,12 +316,6 @@ instance Pretty KernelResult where
     hsep $ certAnnots cs <> ["returns (private)" <+> pretty what]
   pretty (Returns ResultMaySimplify cs what) =
     hsep $ certAnnots cs <> ["returns" <+> pretty what]
-  pretty (WriteReturns cs arr res) =
-    hsep $
-      certAnnots cs
-        <> [pretty arr </> "with" <+> PP.apply (map ppRes res)]
-    where
-      ppRes (slice, e) = pretty slice <+> "=" <+> pretty e
   pretty (TileReturns cs dims v) =
     hsep $ certAnnots cs <> ["tile" <> apply (map onDim dims) <+> pretty v]
     where
@@ -428,7 +348,7 @@ scopeOfSegSpace (SegSpace phys space) =
 
 checkSegSpace :: (TC.Checkable rep) => SegSpace -> TC.TypeM rep ()
 checkSegSpace (SegSpace _ dims) =
-  mapM_ (TC.require [Prim int64] . snd) dims
+  mapM_ (TC.require (Prim int64) . snd) dims
 
 -- | A 'SegOp' is semantically a perfectly nested stack of maps, on
 -- top of some bottommost computation (scalar computation, reduction,
@@ -443,30 +363,28 @@ checkSegSpace (SegSpace _ dims) =
 --
 -- The type list is usually the type of the element returned by a
 -- single thread. The result of the SegOp is then an array of that
--- type, with the shape of the 'SegSpace' prepended. One exception is
--- for 'WriteReturns', where the type annotation is the /full/ type of
--- the result.
+-- type, with the shape of the 'SegSpace' prepended.
 data SegOp lvl rep
   = SegMap lvl SegSpace [Type] (KernelBody rep)
   | -- | The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
-    SegRed lvl SegSpace [SegBinOp rep] [Type] (KernelBody rep)
-  | SegScan lvl SegSpace [SegBinOp rep] [Type] (KernelBody rep)
-  | SegHist lvl SegSpace [HistOp rep] [Type] (KernelBody rep)
+    SegRed lvl SegSpace [Type] (KernelBody rep) [SegBinOp rep]
+  | SegScan lvl SegSpace [Type] (KernelBody rep) [SegBinOp rep] (SegPostOp rep)
+  | SegHist lvl SegSpace [Type] (KernelBody rep) [HistOp rep]
   deriving (Eq, Ord, Show)
 
 -- | The level of a 'SegOp'.
 segLevel :: SegOp lvl rep -> lvl
 segLevel (SegMap lvl _ _ _) = lvl
 segLevel (SegRed lvl _ _ _ _) = lvl
-segLevel (SegScan lvl _ _ _ _) = lvl
+segLevel (SegScan lvl _ _ _ _ _) = lvl
 segLevel (SegHist lvl _ _ _ _) = lvl
 
 -- | The space of a 'SegOp'.
 segSpace :: SegOp lvl rep -> SegSpace
 segSpace (SegMap _ lvl _ _) = lvl
 segSpace (SegRed _ lvl _ _ _) = lvl
-segSpace (SegScan _ lvl _ _ _) = lvl
+segSpace (SegScan _ lvl _ _ _ _) = lvl
 segSpace (SegHist _ lvl _ _ _) = lvl
 
 -- | The body of a 'SegOp'.
@@ -474,13 +392,11 @@ segBody :: SegOp lvl rep -> KernelBody rep
 segBody segop =
   case segop of
     SegMap _ _ _ body -> body
-    SegRed _ _ _ _ body -> body
-    SegScan _ _ _ _ body -> body
-    SegHist _ _ _ _ body -> body
+    SegRed _ _ _ body _ -> body
+    SegScan _ _ _ body _ _ -> body
+    SegHist _ _ _ body _ -> body
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
-segResultShape _ t (WriteReturns {}) =
-  t
 segResultShape space t Returns {} =
   foldr (flip arrayOfRow) t $ segSpaceDims space
 segResultShape _ t (TileReturns _ dims _) =
@@ -491,13 +407,13 @@ segResultShape _ t (RegTileReturns _ dims_n_tiles _) =
 -- | The return type of a 'SegOp'.
 segOpType :: SegOp lvl rep -> [Type]
 segOpType (SegMap _ space ts kbody) =
-  zipWith (segResultShape space) ts $ kernelBodyResult kbody
-segOpType (SegRed _ space reds ts kbody) =
+  zipWith (segResultShape space) ts $ bodyResult kbody
+segOpType (SegRed _ space ts kbody reds) =
   red_ts
     ++ zipWith
       (segResultShape space)
       map_ts
-      (drop (length red_ts) $ kernelBodyResult kbody)
+      (drop (length red_ts) $ bodyResult kbody)
   where
     map_ts = drop (length red_ts) ts
     segment_dims = init $ segSpaceDims space
@@ -505,19 +421,12 @@ segOpType (SegRed _ space reds ts kbody) =
       op <- reds
       let shape = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
-segOpType (SegScan _ space scans ts kbody) =
-  scan_ts
-    ++ zipWith
-      (segResultShape space)
-      map_ts
-      (drop (length scan_ts) $ kernelBodyResult kbody)
+segOpType (SegScan _ space _ts _kbody _scans post_op) =
+  flip (foldr (flip arrayOfRow)) segment_dims <$> lam_ts
   where
-    map_ts = drop (length scan_ts) ts
-    scan_ts = do
-      op <- scans
-      let shape = Shape (segSpaceDims space) <> segBinOpShape op
-      map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
-segOpType (SegHist _ space ops _ _) = do
+    lam_ts = lambdaReturnType $ segPostOpLambda post_op
+    segment_dims = segSpaceDims space
+segOpType (SegHist _ space _ _ ops) = do
   op <- ops
   let shape = Shape segment_dims <> histShape op <> histOpShape op
   map (`arrayOfShape` shape) (lambdaReturnType $ histOp op)
@@ -532,13 +441,15 @@ instance (ASTConstraints lvl) => AliasedOp (SegOp lvl) where
   opAliases = map (const mempty) . segOpType
 
   consumedInOp (SegMap _ _ _ kbody) =
-    consumedInKernelBody kbody
-  consumedInOp (SegRed _ _ _ _ kbody) =
-    consumedInKernelBody kbody
-  consumedInOp (SegScan _ _ _ _ kbody) =
-    consumedInKernelBody kbody
-  consumedInOp (SegHist _ _ ops _ kbody) =
-    namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
+    consumedInBody kbody
+  consumedInOp (SegRed _ _ _ kbody _) =
+    consumedInBody kbody
+  consumedInOp (SegScan _ _ _ kbody _ post_op) =
+    consumed_lam <> consumedInBody kbody
+    where
+      consumed_lam = consumedByLambda $ segPostOpLambda post_op
+  consumedInOp (SegHist _ _ _ kbody ops) =
+    namesFromList (concatMap histDest ops) <> consumedInBody kbody
 
 -- | Type check a 'SegOp', given a checker for its level.
 typeCheckSegOp ::
@@ -548,36 +459,41 @@ typeCheckSegOp ::
   TC.TypeM rep ()
 typeCheckSegOp checkLvl (SegMap lvl space ts kbody) = do
   checkLvl lvl
-  checkScanRed space [] ts kbody
-typeCheckSegOp checkLvl (SegRed lvl space reds ts body) = do
+  checkSegSpace space
+  TC.binding (scopeOfSegSpace space) $ checkScanRed [] ts kbody
+typeCheckSegOp checkLvl (SegRed lvl space ts body reds) = do
   checkLvl lvl
-  checkScanRed space reds' ts body
+  checkSegSpace space
+  TC.binding (scopeOfSegSpace space) $ checkScanRed reds' ts body
   where
     reds' =
       zip3
         (map segBinOpLambda reds)
         (map segBinOpNeutral reds)
         (map segBinOpShape reds)
-typeCheckSegOp checkLvl (SegScan lvl space scans ts body) = do
+typeCheckSegOp checkLvl (SegScan lvl space ts body scans post_op) = do
   checkLvl lvl
-  checkScanRed space scans' ts body
+  checkSegSpace space
+  TC.binding (scopeOfSegSpace space) $ do
+    checkScanRed scans' ts body
+    checkSegPostOp post_op scans' ts
   where
     scans' =
       zip3
         (map segBinOpLambda scans)
         (map segBinOpNeutral scans)
         (map segBinOpShape scans)
-typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
+typeCheckSegOp checkLvl (SegHist lvl space ts kbody ops) = do
   checkLvl lvl
   checkSegSpace space
   mapM_ TC.checkType ts
 
   TC.binding (scopeOfSegSpace space) $ do
     nes_ts <- forM ops $ \(HistOp dest_shape rf dests nes shape op) -> do
-      mapM_ (TC.require [Prim int64]) dest_shape
-      TC.require [Prim int64] rf
+      mapM_ (TC.require (Prim int64)) dest_shape
+      TC.require (Prim int64) rf
       nes' <- mapM TC.checkArg nes
-      mapM_ (TC.require [Prim int64]) $ shapeDims shape
+      mapM_ (TC.require (Prim int64)) $ shapeDims shape
 
       -- Operator type must match the type of neutral elements.
       let stripVecDims = stripArray $ shapeRank shape
@@ -594,7 +510,7 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
       -- Arrays must have proper type.
       let dest_shape' = Shape segment_dims <> dest_shape <> shape
       forM_ (zip nes_t dests) $ \(t, dest) -> do
-        TC.requireI [t `arrayOfShape` dest_shape'] dest
+        TC.requireI (t `arrayOfShape` dest_shape') dest
         TC.consume =<< TC.lookupAliases dest
 
       pure $ map (`arrayOfShape` shape) nes_t
@@ -616,49 +532,62 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
   where
     segment_dims = init $ segSpaceDims space
 
+checkSegPostOp ::
+  (TC.Checkable rep) =>
+  SegPostOp (Aliases rep) ->
+  [(Lambda (Aliases rep), [SubExp], Shape)] ->
+  [Type] ->
+  TC.TypeM rep ()
+checkSegPostOp (SegPostOp lam) ops ts = do
+  let (shps, nes) = unzip $ concatMap (\(_, a, shp) -> (shp,) <$> a) ops
+  nes' <- mapM TC.checkArg nes
+  let kbody' = (,mempty) <$> drop (length nes') ts
+
+  TC.checkLambda lam $
+    map TC.noArgAliases $
+      zipWith (\shp (t, e) -> (arrayOfShape t shp, e)) shps nes' <> kbody'
+
 checkScanRed ::
   (TC.Checkable rep) =>
-  SegSpace ->
   [(Lambda (Aliases rep), [SubExp], Shape)] ->
   [Type] ->
   KernelBody (Aliases rep) ->
   TC.TypeM rep ()
-checkScanRed space ops ts kbody = do
-  checkSegSpace space
+checkScanRed ops ts kbody = do
   mapM_ TC.checkType ts
 
-  TC.binding (scopeOfSegSpace space) $ do
-    ne_ts <- forM ops $ \(lam, nes, shape) -> do
-      mapM_ (TC.require [Prim int64]) $ shapeDims shape
-      nes' <- mapM TC.checkArg nes
+  ne_ts <- forM ops $ \(lam, nes, shape) -> do
+    mapM_ (TC.require (Prim int64)) $ shapeDims shape
+    nes' <- mapM TC.checkArg nes
 
-      -- Operator type must match the type of neutral elements.
-      TC.checkLambda lam $ map TC.noArgAliases $ nes' ++ nes'
-      let nes_t = map TC.argType nes'
+    -- Operator type must match the type of neutral elements.
+    TC.checkLambda lam $ map TC.noArgAliases $ nes' ++ nes'
+    let nes_t = map TC.argType nes'
 
-      unless (lambdaReturnType lam == nes_t) $
-        TC.bad $
-          TC.TypeError "wrong type for operator or neutral elements."
-
-      pure $ map (`arrayOfShape` shape) nes_t
-
-    let expecting = concat ne_ts
-        got = take (length expecting) ts
-    unless (expecting == got) $
+    unless (lambdaReturnType lam == nes_t) $
       TC.bad $
-        TC.TypeError $
-          "Wrong return for body (does not match neutral elements; expected "
-            <> prettyText expecting
-            <> "; found "
-            <> prettyText got
-            <> ")"
+        TC.TypeError "wrong type for operator or neutral elements."
 
-    checkKernelBody ts kbody
+    pure $ map (`arrayOfShape` shape) nes_t
+
+  let expecting = concat ne_ts
+      got = take (length expecting) ts
+  unless (expecting == got) $
+    TC.bad $
+      TC.TypeError $
+        "Wrong return for body (does not match neutral elements; expected "
+          <> prettyText expecting
+          <> "; found "
+          <> prettyText got
+          <> ")"
+
+  checkKernelBody ts kbody
 
 -- | Like 'Mapper', but just for 'SegOp's.
 data SegOpMapper lvl frep trep m = SegOpMapper
   { mapOnSegOpSubExp :: SubExp -> m SubExp,
-    mapOnSegOpLambda :: Lambda frep -> m (Lambda trep),
+    mapOnSegBinOpLambda :: Lambda frep -> m (Lambda trep),
+    mapOnSegPostOpLambda :: Lambda frep -> m (Lambda trep),
     mapOnSegOpBody :: KernelBody frep -> m (KernelBody trep),
     mapOnSegOpVName :: VName -> m VName,
     mapOnSegOpLevel :: lvl -> m lvl
@@ -669,7 +598,8 @@ identitySegOpMapper :: (Monad m) => SegOpMapper lvl rep rep m
 identitySegOpMapper =
   SegOpMapper
     { mapOnSegOpSubExp = pure,
-      mapOnSegOpLambda = pure,
+      mapOnSegBinOpLambda = pure,
+      mapOnSegPostOpLambda = pure,
       mapOnSegOpBody = pure,
       mapOnSegOpVName = pure,
       mapOnSegOpLevel = pure
@@ -689,9 +619,17 @@ mapSegBinOp ::
   m (SegBinOp trep)
 mapSegBinOp tv (SegBinOp comm red_op nes shape) =
   SegBinOp comm
-    <$> mapOnSegOpLambda tv red_op
+    <$> mapOnSegBinOpLambda tv red_op
     <*> mapM (mapOnSegOpSubExp tv) nes
     <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
+
+mapSegPostOp ::
+  (Monad m) =>
+  SegOpMapper lvl frep trep m ->
+  SegPostOp frep ->
+  m (SegPostOp trep)
+mapSegPostOp tv (SegPostOp lam) =
+  SegPostOp <$> mapOnSegPostOpLambda tv lam
 
 -- | Apply a 'SegOpMapper' to the given 'SegOp'.
 mapSegOpM ::
@@ -705,27 +643,28 @@ mapSegOpM tv (SegMap lvl space ts body) =
     <*> mapOnSegSpace tv space
     <*> mapM (mapOnSegOpType tv) ts
     <*> mapOnSegOpBody tv body
-mapSegOpM tv (SegRed lvl space reds ts lam) =
+mapSegOpM tv (SegRed lvl space ts body reds) =
   SegRed
     <$> mapOnSegOpLevel tv lvl
     <*> mapOnSegSpace tv space
-    <*> mapM (mapSegBinOp tv) reds
     <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
-    <*> mapOnSegOpBody tv lam
-mapSegOpM tv (SegScan lvl space scans ts body) =
+    <*> mapOnSegOpBody tv body
+    <*> mapM (mapSegBinOp tv) reds
+mapSegOpM tv (SegScan lvl space ts body scans post_op) =
   SegScan
     <$> mapOnSegOpLevel tv lvl
     <*> mapOnSegSpace tv space
-    <*> mapM (mapSegBinOp tv) scans
     <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
     <*> mapOnSegOpBody tv body
-mapSegOpM tv (SegHist lvl space ops ts body) =
+    <*> mapM (mapSegBinOp tv) scans
+    <*> mapSegPostOp tv post_op
+mapSegOpM tv (SegHist lvl space ts body ops) =
   SegHist
     <$> mapOnSegOpLevel tv lvl
     <*> mapOnSegSpace tv space
-    <*> mapM onHistOp ops
     <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
     <*> mapOnSegOpBody tv body
+    <*> mapM onHistOp ops
   where
     onHistOp (HistOp w rf arrs nes shape op) =
       HistOp
@@ -734,7 +673,7 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
         <*> mapM (mapOnSegOpVName tv) arrs
         <*> mapM (mapOnSegOpSubExp tv) nes
         <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
-        <*> mapOnSegOpLambda tv op
+        <*> mapOnSegBinOpLambda tv op
 
 mapOnSegOpType ::
   (Monad m) =>
@@ -760,32 +699,30 @@ rephraseBinOp ::
 rephraseBinOp r (SegBinOp comm lam nes shape) =
   SegBinOp comm <$> rephraseLambda r lam <*> pure nes <*> pure shape
 
-rephraseKernelBody ::
+rephrasePostOp ::
   (Monad f) =>
   Rephraser f from rep ->
-  KernelBody from ->
-  f (KernelBody rep)
-rephraseKernelBody r (KernelBody dec stms res) =
-  KernelBody <$> rephraseBodyDec r dec <*> traverse (rephraseStm r) stms <*> pure res
+  SegPostOp from ->
+  f (SegPostOp rep)
+rephrasePostOp r (SegPostOp lam) =
+  SegPostOp <$> rephraseLambda r lam
 
 instance RephraseOp (SegOp lvl) where
   rephraseInOp r (SegMap lvl space ts body) =
-    SegMap lvl space ts <$> rephraseKernelBody r body
-  rephraseInOp r (SegRed lvl space reds ts body) =
-    SegRed lvl space
-      <$> mapM (rephraseBinOp r) reds
-      <*> pure ts
-      <*> rephraseKernelBody r body
-  rephraseInOp r (SegScan lvl space scans ts body) =
-    SegScan lvl space
-      <$> mapM (rephraseBinOp r) scans
-      <*> pure ts
-      <*> rephraseKernelBody r body
-  rephraseInOp r (SegHist lvl space hists ts body) =
-    SegHist lvl space
-      <$> mapM onOp hists
-      <*> pure ts
-      <*> rephraseKernelBody r body
+    SegMap lvl space ts <$> rephraseBody r body
+  rephraseInOp r (SegRed lvl space ts body reds) =
+    SegRed lvl space ts
+      <$> rephraseBody r body
+      <*> mapM (rephraseBinOp r) reds
+  rephraseInOp r (SegScan lvl space ts body scans post_op) =
+    SegScan lvl space ts
+      <$> rephraseBody r body
+      <*> mapM (rephraseBinOp r) scans
+      <*> rephrasePostOp r post_op
+  rephraseInOp r (SegHist lvl space ts body hists) =
+    SegHist lvl space ts
+      <$> rephraseBody r body
+      <*> mapM onOp hists
     where
       onOp (HistOp w rf arrs nes shape op) =
         HistOp w rf arrs nes shape <$> rephraseLambda r op
@@ -798,11 +735,11 @@ traverseSegOpStms f segop = mapSegOpM mapper segop
     f' scope = f (seg_scope <> scope)
     mapper =
       identitySegOpMapper
-        { mapOnSegOpLambda = traverseLambdaStms f',
+        { mapOnSegBinOpLambda = traverseLambdaStms f',
           mapOnSegOpBody = onBody
         }
-    onBody (KernelBody dec stms res) =
-      KernelBody dec <$> f seg_scope stms <*> pure res
+    onBody (Body dec stms res) =
+      Body dec <$> f seg_scope stms <*> pure res
 
 instance
   (ASTRep rep, Substitute lvl) =>
@@ -813,7 +750,8 @@ instance
       substitute =
         SegOpMapper
           { mapOnSegOpSubExp = pure . substituteNames subst,
-            mapOnSegOpLambda = pure . substituteNames subst,
+            mapOnSegBinOpLambda = pure . substituteNames subst,
+            mapOnSegPostOpLambda = pure . substituteNames subst,
             mapOnSegOpBody = pure . substituteNames subst,
             mapOnSegOpVName = pure . substituteNames subst,
             mapOnSegOpLevel = pure . substituteNames subst
@@ -823,7 +761,7 @@ instance (ASTRep rep, ASTConstraints lvl) => Rename (SegOp lvl rep) where
   rename op =
     renameBound (M.keys (scopeOfSegSpace (segSpace op))) $ mapSegOpM renamer op
     where
-      renamer = SegOpMapper rename rename rename rename rename
+      renamer = SegOpMapper rename rename rename rename rename rename
 
 instance (ASTRep rep, FreeIn lvl) => FreeIn (SegOp lvl rep) where
   freeIn' e =
@@ -835,7 +773,8 @@ instance (ASTRep rep, FreeIn lvl) => FreeIn (SegOp lvl rep) where
       free =
         SegOpMapper
           { mapOnSegOpSubExp = walk freeIn',
-            mapOnSegOpLambda = walk freeIn',
+            mapOnSegBinOpLambda = walk freeIn',
+            mapOnSegPostOpLambda = walk freeIn',
             mapOnSegOpBody = walk freeIn',
             mapOnSegOpVName = walk freeIn',
             mapOnSegOpLevel = walk freeIn'
@@ -843,19 +782,20 @@ instance (ASTRep rep, FreeIn lvl) => FreeIn (SegOp lvl rep) where
 
 instance (OpMetrics (Op rep)) => OpMetrics (SegOp lvl rep) where
   opMetrics (SegMap _ _ _ body) =
-    inside "SegMap" $ kernelBodyMetrics body
-  opMetrics (SegRed _ _ reds _ body) =
+    inside "SegMap" $ bodyMetrics body
+  opMetrics (SegRed _ _ _ body reds) =
     inside "SegRed" $ do
       mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) reds
-      kernelBodyMetrics body
-  opMetrics (SegScan _ _ scans _ body) =
+      bodyMetrics body
+  opMetrics (SegScan _ _ _ body scans post_op) =
     inside "SegScan" $ do
       mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) scans
-      kernelBodyMetrics body
-  opMetrics (SegHist _ _ ops _ body) =
+      inside "SegBinOp" $ lambdaMetrics $ segPostOpLambda post_op
+      bodyMetrics body
+  opMetrics (SegHist _ _ _ body ops) =
     inside "SegHist" $ do
       mapM_ (lambdaMetrics . histOp) ops
-      kernelBodyMetrics body
+      bodyMetrics body
 
 instance Pretty SegSpace where
   pretty (SegSpace phys dims) =
@@ -879,6 +819,10 @@ instance (PrettyRep rep) => Pretty (SegBinOp rep) where
         Commutative -> "commutative "
         Noncommutative -> mempty
 
+instance (PrettyRep rep) => Pretty (SegPostOp rep) where
+  pretty (SegPostOp lam) =
+    pretty lam
+
 instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
   pretty (SegMap lvl space ts body) =
     "segmap"
@@ -886,31 +830,32 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
         </> PP.align (pretty space)
         <+> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
-  pretty (SegRed lvl space reds ts body) =
+        <+> PP.nestedBlock (pretty body)
+  pretty (SegRed lvl space ts body reds) =
     "segred"
       <> pretty lvl
         </> PP.align (pretty space)
-        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
-  pretty (SegScan lvl space scans ts body) =
+        <+> PP.nestedBlock (pretty body)
+        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
+  pretty (SegScan lvl space ts body scans post_op) =
     "segscan"
       <> pretty lvl
         </> PP.align (pretty space)
-        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
-  pretty (SegHist lvl space ops ts body) =
+        <+> PP.nestedBlock (pretty body)
+        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
+        </> pretty post_op
+  pretty (SegHist lvl space ts body ops) =
     "seghist"
       <> pretty lvl
         </> PP.align (pretty space)
-        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
-        <+> PP.nestedBlock "{" "}" (pretty body)
+        <+> PP.nestedBlock (pretty body)
+        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
     where
       ppOp (HistOp w rf dests nes shape op) =
         pretty w
@@ -932,31 +877,23 @@ instance CanBeAliased (SegOp lvl) where
         SegOpMapper
           pure
           (pure . Alias.analyseLambda aliases)
-          (pure . aliasAnalyseKernelBody aliases)
+          (pure . Alias.analyseLambda aliases)
+          (pure . Alias.analyseBody aliases)
           pure
           pure
-
-informKernelBody :: (Informing rep) => KernelBody rep -> KernelBody (Wise rep)
-informKernelBody (KernelBody dec stms res) =
-  mkWiseKernelBody dec (informStms stms) res
 
 instance CanBeWise (SegOp lvl) where
   addOpWisdom = runIdentity . mapSegOpM add
     where
       add =
-        SegOpMapper
-          pure
-          (pure . informLambda)
-          (pure . informKernelBody)
-          pure
-          pure
+        SegOpMapper pure (pure . informLambda) (pure . informLambda) (pure . informBody) pure pure
 
 instance (ASTRep rep) => ST.IndexOp (SegOp lvl rep) where
   indexOp vtable k (SegMap _ space _ kbody) is = do
-    Returns ResultMaySimplify _ se <- maybeNth k $ kernelBodyResult kbody
+    Returns ResultMaySimplify _ se <- maybeNth k $ bodyResult kbody
     guard $ length gtids <= length is
     let idx_table = M.fromList $ zip gtids $ map (ST.Indexed mempty . untyped) is
-        idx_table' = foldl' expandIndexedTable idx_table $ kernelBodyStms kbody
+        idx_table' = foldl' expandIndexedTable idx_table $ bodyStms kbody
     case se of
       Var v -> M.lookup v idx_table'
       _ -> Nothing
@@ -1009,11 +946,6 @@ instance Engine.Simplifiable SegSpace where
 instance Engine.Simplifiable KernelResult where
   simplify (Returns manifest cs what) =
     Returns manifest <$> Engine.simplify cs <*> Engine.simplify what
-  simplify (WriteReturns cs a res) =
-    WriteReturns
-      <$> Engine.simplify cs
-      <*> Engine.simplify a
-      <*> Engine.simplify res
   simplify (TileReturns cs dims what) =
     TileReturns <$> Engine.simplify cs <*> Engine.simplify dims <*> Engine.simplify what
   simplify (RegTileReturns cs dims_n_tiles what) =
@@ -1022,49 +954,32 @@ instance Engine.Simplifiable KernelResult where
       <*> Engine.simplify dims_n_tiles
       <*> Engine.simplify what
 
-mkWiseKernelBody ::
-  (Informing rep) =>
-  BodyDec rep ->
-  Stms (Wise rep) ->
-  [KernelResult] ->
-  KernelBody (Wise rep)
-mkWiseKernelBody dec stms res =
-  let Body dec' _ _ = mkWiseBody dec stms $ subExpsRes res_vs
-   in KernelBody dec' stms res
+segOpBlocker ::
+  (Engine.SimplifiableRep rep) =>
+  SegSpace -> Engine.SimpleM rep (Engine.BlockPred (Wise rep))
+segOpBlocker space = do
+  par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
+  pure $
+    Engine.hasFree bound_here
+      `Engine.orIf` Engine.isOp
+      `Engine.orIf` par_blocker
+      `Engine.orIf` Engine.isConsumed
+      `Engine.orIf` Engine.isConsuming
+      `Engine.orIf` Engine.isDeviceMigrated
   where
-    res_vs = map kernelResultSubExp res
-
-mkKernelBodyM ::
-  (MonadBuilder m) =>
-  Stms (Rep m) ->
-  [KernelResult] ->
-  m (KernelBody (Rep m))
-mkKernelBodyM stms kres = do
-  Body dec' _ _ <- mkBodyM stms $ subExpsRes res_ses
-  pure $ KernelBody dec' stms kres
-  where
-    res_ses = map kernelResultSubExp kres
+    bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
 simplifyKernelBody ::
   (Engine.SimplifiableRep rep, BodyDec rep ~ ()) =>
   SegSpace ->
   KernelBody (Wise rep) ->
   Engine.SimpleM rep (KernelBody (Wise rep), Stms (Wise rep))
-simplifyKernelBody space (KernelBody _ stms res) = do
-  par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
-
-  let blocker =
-        Engine.hasFree bound_here
-          `Engine.orIf` Engine.isOp
-          `Engine.orIf` par_blocker
-          `Engine.orIf` Engine.isConsumed
-          `Engine.orIf` Engine.isConsuming
-          `Engine.orIf` Engine.isDeviceMigrated
+simplifyKernelBody space (Body _ stms res) = do
+  blocker <- segOpBlocker space
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
-    Engine.localVtable (flip (foldl' (flip ST.consume)) (foldMap consumedInResult res))
-      . Engine.localVtable (<> scope_vtable)
+    Engine.localVtable (segSpaceSymbolTable space)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
       . Engine.enterLoop
       $ Engine.blockIf blocker stms
@@ -1074,15 +989,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
             mapM Engine.simplify res
         pure (res', UT.usages $ freeIn res')
 
-  pure (mkWiseKernelBody () body_stms body_res, hoisted)
-  where
-    scope_vtable = segSpaceSymbolTable space
-    bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
-
-    consumedInResult (WriteReturns _ arr _) =
-      [arr]
-    consumedInResult _ =
-      []
+  pure (mkWiseBody () body_stms body_res, hoisted)
 
 simplifyLambda ::
   (Engine.SimplifiableRep rep) =>
@@ -1091,9 +998,9 @@ simplifyLambda ::
   Engine.SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
 simplifyLambda bound = Engine.blockMigrated . Engine.simplifyLambda bound
 
-segSpaceSymbolTable :: (ASTRep rep) => SegSpace -> ST.SymbolTable rep
-segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
-  foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int64) gtids_and_dims
+segSpaceSymbolTable :: (ASTRep rep) => SegSpace -> ST.SymbolTable rep -> ST.SymbolTable rep
+segSpaceSymbolTable (SegSpace flat gtids_and_dims) st =
+  foldl' f (ST.insertFreeVar flat (IndexName Int64) st) gtids_and_dims
   where
     f vtable (gtid, dim) = ST.insertLoopVar gtid Int64 dim vtable
 
@@ -1110,6 +1017,19 @@ simplifySegBinOp phys_id (SegBinOp comm lam nes shape) = do
   nes' <- mapM Engine.simplify nes
   pure (SegBinOp comm lam' nes' shape', hoisted)
 
+simplifySegPostOp ::
+  (Engine.SimplifiableRep rep) =>
+  SegSpace ->
+  SegPostOp (Wise rep) ->
+  Engine.SimpleM rep (SegPostOp (Wise rep), Stms (Wise rep))
+simplifySegPostOp space (SegPostOp lam) = do
+  (lam', hoisted) <-
+    Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
+      simplifyLambda bound_here lam
+  pure (SegPostOp lam', hoisted)
+  where
+    bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
+
 -- | Simplify the given 'SegOp'.
 simplifySegOp ::
   ( Engine.SimplifiableRep rep,
@@ -1125,35 +1045,36 @@ simplifySegOp (SegMap lvl space ts kbody) = do
     ( SegMap lvl' space' ts' kbody',
       body_hoisted
     )
-simplifySegOp (SegRed lvl space reds ts kbody) = do
+simplifySegOp (SegRed lvl space ts kbody reds) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (reds', reds_hoisted) <-
-    Engine.localVtable (<> scope_vtable) $
+    Engine.localVtable (ST.insertScope scope) $
       mapAndUnzipM (simplifySegBinOp (segFlat space)) reds
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
   pure
-    ( SegRed lvl' space' reds' ts' kbody',
+    ( SegRed lvl' space' ts' kbody' reds',
       mconcat reds_hoisted <> body_hoisted
     )
   where
     scope = scopeOfSegSpace space
-    scope_vtable = ST.fromScope scope
-simplifySegOp (SegScan lvl space scans ts kbody) = do
+simplifySegOp (SegScan lvl space ts kbody scans post_op) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (scans', scans_hoisted) <-
-    Engine.localVtable (<> scope_vtable) $
+    Engine.localVtable (ST.insertScope scope) $
       mapAndUnzipM (simplifySegBinOp (segFlat space)) scans
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
+  (post_op', post_op_hoisted) <-
+    Engine.localVtable (ST.insertScope scope) $
+      simplifySegPostOp space post_op
 
   pure
-    ( SegScan lvl' space' scans' ts' kbody',
-      mconcat scans_hoisted <> body_hoisted
+    ( SegScan lvl' space' ts' kbody' scans' post_op',
+      mconcat scans_hoisted <> body_hoisted <> post_op_hoisted
     )
   where
     scope = scopeOfSegSpace space
-    scope_vtable = ST.fromScope scope
-simplifySegOp (SegHist lvl space ops ts kbody) = do
+simplifySegOp (SegHist lvl space ts kbody ops) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
 
   Engine.localVtable (flip (foldr ST.consume) $ concatMap histDest ops) $ do
@@ -1165,7 +1086,7 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
         nes' <- Engine.simplify nes
         dims' <- Engine.simplify dims
         (lam', op_hoisted) <-
-          Engine.localVtable (<> scope_vtable) $
+          Engine.localVtable (ST.insertScope scope) $
             Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
               simplifyLambda (oneName (segFlat space)) lam
         pure
@@ -1176,12 +1097,11 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
     (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
     pure
-      ( SegHist lvl' space' ops' ts' kbody',
+      ( SegHist lvl' space' ts' kbody' ops',
         mconcat ops_hoisted <> body_hoisted
       )
   where
     scope = scopeOfSegSpace space
-    scope_vtable = ST.fromScope scope
 
 -- | Does this rep contain 'SegOp's in its t'Op's?  A rep must be an
 -- instance of this class for the simplification rules to work.
@@ -1215,6 +1135,19 @@ segOpRuleBottomUp vtable pat dec op
   | otherwise =
       Skip
 
+-- | Only handle Returns cases.
+depsOfRes :: Dependencies -> KernelResult -> Names
+depsOfRes deps (Returns _ cs se) = depsOf deps se <> depsOfNames deps (freeIn cs)
+depsOfRes _ _ = mempty
+
+kernelBodyDependencies :: (ASTRep rep) => Dependencies -> KernelBody rep -> [Names]
+kernelBodyDependencies deps kbody =
+  let names_in_scope = freeIn kbody
+      deps' = dataDependencies' deps kbody
+   in map
+        (flip namesSubtract names_in_scope . depsOfRes deps')
+        (bodyResult kbody)
+
 topDownSegOp ::
   (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   ST.SymbolTable rep ->
@@ -1224,14 +1157,14 @@ topDownSegOp ::
   Rule rep
 -- If a SegOp produces something invariant to the SegOp, turn it
 -- into a replicate.
-topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres)) = Simplify $ do
+topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (Body _ kstms kres)) = Simplify $ do
   (ts', kpes', kres') <-
     unzip3 <$> filterM checkForInvarianceResult (zip3 ts kpes kres)
 
   -- Check if we did anything at all.
   when (kres == kres') cannotSimplify
 
-  kbody <- mkKernelBodyM kstms kres'
+  kbody <- mkBodyM kstms kres'
   addStm $ Let (Pat kpes') dec $ Op $ segOp $ SegMap lvl space ts' kbody
   where
     isInvariant Constant {} = True
@@ -1251,7 +1184,7 @@ topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres
 -- If a SegRed contains two reduction operations that have the same
 -- vector shape, merge them together.  This saves on communication
 -- overhead, but can in principle lead to more shared memory usage.
-topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
+topDownSegOp _ (Pat pes) _ (SegRed lvl space ts kbody ops)
   | length ops > 1,
     op_groupings <-
       groupBy sameShape $
@@ -1263,12 +1196,12 @@ topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
           (red_pes', red_ts', red_res') = unzip3 $ concat aux
           pes' = red_pes' ++ map_pes
           ts' = red_ts' ++ map_ts
-          kbody' = kbody {kernelBodyResult = red_res' ++ map_res}
-      letBind (Pat pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
+          kbody' = kbody {bodyResult = red_res' ++ map_res}
+      letBind (Pat pes') $ Op $ segOp $ SegRed lvl space ts' kbody' ops'
   where
     (red_pes, map_pes) = splitAt (segBinOpResults ops) pes
     (red_ts, map_ts) = splitAt (segBinOpResults ops) ts
-    (red_res, map_res) = splitAt (segBinOpResults ops) $ kernelBodyResult kbody
+    (red_res, map_res) = splitAt (segBinOpResults ops) $ bodyResult kbody
 
     sameShape (op1, _) (op2, _) =
       segBinOpShape op1 == segBinOpShape op2
@@ -1304,6 +1237,71 @@ topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
               },
             op1_aux ++ op2_aux
           )
+
+-- Remove unused kernelBody result in SegScan.
+topDownSegOp _ pat aux op
+  | SegScan lvl space ts kbody seg_op post_op <- op,
+    -- Figure out which of the names in 'pat' are used...
+    Just (new_kbody, new_ts, m_new_post_op) <-
+      newKbodyPostOp kbody ts seg_op post_op = Simplify $ do
+      new_post_op <- m_new_post_op
+      auxing aux
+        . letBind pat
+        . Op
+        . segOp
+        $ SegScan lvl space new_ts new_kbody seg_op new_post_op
+  where
+    newKbodyPostOp kbody ts seg_op post_op =
+      if null sub_map_res_ts_pars
+        then Nothing
+        else Just (new_kbody, new_ts, new_post_op)
+      where
+        res = bodyResult kbody
+        post_lam = segPostOpLambda post_op
+        pars = lambdaParams post_lam
+
+        mkBind t p r =
+          mkLet
+            [Ident (paramName p) t]
+            (BasicOp $ SubExp $ kernelResultSubExp r)
+
+        new_kbody = kbody {bodyResult = new_res}
+        new_post_op = do
+          let sub_res = map (\(r, _, _, _) -> r) sub_map_res_ts_pars
+          temp_body <- renameBody $ kbody {bodyResult = sub_res}
+          let new_binds =
+                stmsFromList
+                  $ zipWith
+                    (\(_, t, p, _) r -> mkBind t p r)
+                    sub_map_res_ts_pars
+                  $ bodyResult temp_body
+          pure $
+            SegPostOp $
+              Lambda
+                { lambdaParams = new_pars,
+                  lambdaBody =
+                    mkBody
+                      (bodyStms temp_body <> new_binds <> bodyStms (lambdaBody post_lam))
+                      (bodyResult (lambdaBody post_lam)),
+                  lambdaReturnType = lambdaReturnType post_lam
+                }
+
+        scan_deps = mconcat $ (\(_, _, _, d) -> d) <$> scan_res_ts_pars
+        deps = kernelBodyDependencies mempty kbody
+
+        isNotReturns (Returns {}) = False
+        isNotReturns _ = True
+
+        (new_res, new_ts, new_pars, _) =
+          L.unzip4 $ scan_res_ts_pars <> new_map_res_ts_pars
+        (new_map_res_ts_pars, sub_map_res_ts_pars) =
+          L.partition
+            ( \(r, t, _, d) ->
+                isNotReturns r || d `namesIntersect` scan_deps || isAcc t
+            )
+            map_res_ts_pars
+        (scan_res_ts_pars, map_res_ts_pars) =
+          splitAt (segBinOpResults seg_op) $ L.zip4 res ts pars deps
 topDownSegOp _ _ _ _ = Skip
 
 -- A convenient way of operating on the type and body of a SegOp,
@@ -1317,12 +1315,12 @@ segOpGuts ::
   )
 segOpGuts (SegMap lvl space kts body) =
   (kts, body, 0, SegMap lvl space)
-segOpGuts (SegScan lvl space ops kts body) =
-  (kts, body, segBinOpResults ops, SegScan lvl space ops)
-segOpGuts (SegRed lvl space ops kts body) =
-  (kts, body, segBinOpResults ops, SegRed lvl space ops)
-segOpGuts (SegHist lvl space ops kts body) =
-  (kts, body, sum $ map (length . histDest) ops, SegHist lvl space ops)
+segOpGuts (SegScan lvl space kts body ops post_op) =
+  (kts, body, 0, \t b -> SegScan lvl space t b ops post_op)
+segOpGuts (SegRed lvl space kts body ops) =
+  (kts, body, segBinOpResults ops, \t b -> SegRed lvl space t b ops)
+segOpGuts (SegHist lvl space kts body ops) =
+  (kts, body, sum $ map (length . histDest) ops, \t b -> SegHist lvl space t b ops)
 
 bottomUpSegOp ::
   (Aliased rep, HasSegOp rep, BuilderOps rep) =>
@@ -1331,18 +1329,29 @@ bottomUpSegOp ::
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep
--- Some SegOp results can be moved outside the SegOp, which can
--- simplify further analysis.
+-- Because of the postop we have to handle SegScan specially.
+bottomUpSegOp (_vtable, used) (Pat kpes) aux (SegScan lvl space kts body ops (SegPostOp postlam))
+  | -- Remove dead results from the postlam.
+    (kpes', res') <-
+      unzip $ filter keep $ zip kpes (bodyResult (lambdaBody postlam)),
+    kpes /= kpes' = Simplify $ do
+      postlam' <- mkLambda (lambdaParams postlam) $ do
+        addStms $ bodyStms $ lambdaBody postlam
+        pure res'
+      addStm $ Let (Pat kpes') aux $ Op $ segOp $ SegScan lvl space kts body ops (SegPostOp postlam')
+  | otherwise = Skip
+  where
+    keep (pe, _) = patElemName pe `UT.used` used
 bottomUpSegOp (_vtable, used) (Pat kpes) dec segop
-  -- Remove dead results. This is a bit tricky to do with scan/red
-  -- results, so we only deal with map results for now.
+  -- Remove dead results. This is a bit tricky to do with reduction results, so
+  -- we only deal with map results for now.
   | (_, kpes', kts', kres') <- unzip4 $ filter keep $ zip4 [0 ..] kpes kts kres,
     kpes' /= kpes = Simplify $ do
-      kbody' <- localScope (scopeOfSegSpace space) $ mkKernelBodyM kstms kres'
+      kbody' <- localScope (scopeOfSegSpace space) $ mkBodyM kstms kres'
       addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody'
   where
     space = segSpace segop
-    (kts, KernelBody _ kstms kres, num_nonmap_results, mk_segop) =
+    (kts, Body _ kstms kres, num_nonmap_results, mk_segop) =
       segOpGuts segop
 
     keep (i, pe, _, _) =
@@ -1361,11 +1370,11 @@ bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
   when (kpes' == kpes) cannotSimplify
 
   kbody' <-
-    localScope (scopeOfSegSpace space) $ mkKernelBodyM kstms' kres'
+    localScope (scopeOfSegSpace space) $ mkBodyM kstms' kres'
 
   addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody'
   where
-    (kts, KernelBody _ kstms kres, num_nonmap_results, mk_segop) =
+    (kts, Body _ kstms kres, num_nonmap_results, mk_segop) =
       segOpGuts segop
     free_in_kstms = foldMap freeIn kstms
     space = segSpace segop
@@ -1375,9 +1384,8 @@ bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
         space_slice <- map (DimFix . Var . fst) $ unSegSpace space,
         space_slice `isPrefixOf` unSlice slice,
         remaining_slice <- Slice $ drop (length space_slice) (unSlice slice),
-        all (isJust . flip ST.lookup vtable) $
-          namesToList $
-            freeIn arr <> freeIn remaining_slice <> freeIn (stmAuxCerts aux) =
+        allNames (isJust . flip ST.lookup vtable) $
+          freeIn arr <> freeIn remaining_slice <> freeIn (stmAuxCerts aux) =
           Just (remaining_slice, arr)
       | otherwise =
           Nothing
@@ -1396,7 +1404,7 @@ bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
                 letBindNames [patElemName kpe'] . BasicOp . Index arr $
                   Slice $
                     outer_slice <> remaining_slice
-          precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
+          precopy <- newVName $ baseName (patElemName kpe) <> "_precopy"
           index kpe {patElemName = precopy}
           letBindNames [patElemName kpe] $ BasicOp $ Replicate mempty $ Var precopy
           pure
@@ -1424,26 +1432,16 @@ bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
 
 --- Memory
 
-kernelBodyReturns ::
-  (Mem rep inner, HasScope rep m, Monad m) =>
-  KernelBody somerep ->
-  [ExpReturns] ->
-  m [ExpReturns]
-kernelBodyReturns = zipWithM correct . kernelBodyResult
-  where
-    correct (WriteReturns _ arr _) _ = varReturns arr
-    correct _ ret = pure ret
-
 -- | Like 'segOpType', but for memory representations.
 segOpReturns ::
   (Mem rep inner, Monad m, HasScope rep m) =>
   SegOp lvl rep ->
   m [ExpReturns]
-segOpReturns k@(SegMap _ _ _ kbody) =
-  kernelBodyReturns kbody . extReturns =<< opType k
-segOpReturns k@(SegRed _ _ _ _ kbody) =
-  kernelBodyReturns kbody . extReturns =<< opType k
-segOpReturns k@(SegScan _ _ _ _ kbody) =
-  kernelBodyReturns kbody . extReturns =<< opType k
-segOpReturns (SegHist _ _ ops _ _) =
+segOpReturns k@(SegMap {}) =
+  extReturns <$> opType k
+segOpReturns k@(SegRed {}) =
+  extReturns <$> opType k
+segOpReturns k@(SegScan {}) =
+  extReturns <$> opType k
+segOpReturns (SegHist _ _ _ _ ops) =
   concat <$> mapM (mapM varReturns . histDest) ops

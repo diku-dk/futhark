@@ -3,4 +3,4 @@
 -- ==
 -- error: size-polymorphic value binding
 
-def foo [n] = (iota n, filter (>5) (iota n))
+def foo [n] = (iota n, filter (> 5) (iota n))

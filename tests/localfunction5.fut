@@ -1,7 +1,7 @@
 -- Shape-bound variables used inside a local function, but where the
 -- array itself is not used.
 
-def f(n: i64) = replicate n 0
+def f (n: i64) = replicate n 0
 
 def main [n] (lower_bounds: [n]f64) =
   let rs = f n

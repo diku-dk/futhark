@@ -6,6 +6,6 @@
 type two 't = [2]t
 
 def main (a: [][][]f32) : [][][]f32 =
-  let a = map (map (map (*2))) a
-  let a = map (map (map (*2))) <| transpose <| map transpose a in
-  transpose a
+  let a = map (map (map (* 2))) a
+  let a = map (map (map (* 2))) <| transpose <| map transpose a
+  in transpose a

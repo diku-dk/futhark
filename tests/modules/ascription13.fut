@@ -1,14 +1,16 @@
 module type sparse = {
   type csr
-  module csr : {
+
+  module csr: {
     type mat = csr
   }
 }
 
-module sparse (T : {}) : sparse = {
+module sparse (T: {}) : sparse = {
   module csr = {
     type mat = bool
   }
+
   type csr = csr.mat
 }
 

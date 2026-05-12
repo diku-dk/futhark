@@ -4,10 +4,10 @@
 -- input { 20i64 } output { 3810 }
 -- compiled no_python no_wasm input { 2000i64 } output { -296967286i32 }
 -- structure gpu { Replicate 1 }
-def main(n: i64): i32 =
-  let x  = iota n
-  let y  = replicate n x
+def main (n: i64) : i32 =
+  let x = iota n
+  let y = replicate n x
   -- Hack to force manifestation.
-  let y[0,0] = 10
+  let y[0, 0] = 10
   -- Conversion added to satisfy old test results that result from overflow
   in reduce (+) 0 (flatten y |> map i32.i64)

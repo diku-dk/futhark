@@ -59,6 +59,7 @@ module Futhark.Analysis.PrimExp
     fMax16,
     fMax32,
     fMax64,
+    condExp,
 
     -- * Untyped construction
     (~*~),
@@ -73,6 +74,7 @@ import Control.Category
 import Control.Monad
 import Data.Map qualified as M
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Traversable
 import Futhark.IR.Prop.Names
 import Futhark.Util.IntegralExp
@@ -93,7 +95,7 @@ data PrimExp v
   | CmpOpExp CmpOp (PrimExp v) (PrimExp v)
   | UnOpExp UnOp (PrimExp v)
   | ConvOpExp ConvOp (PrimExp v)
-  | FunExp String [PrimExp v] PrimType
+  | FunExp T.Text [PrimExp v] PrimType
   deriving (Eq, Ord, Show)
 
 instance Functor PrimExp where
@@ -230,7 +232,7 @@ constFoldPrimExp (BinOpExp LogOr x y)
   | zeroIshExp y = x
 constFoldPrimExp (UnOpExp Abs {} x)
   | not $ negativeIshExp x = x
-constFoldPrimExp (UnOpExp Not {} (ValueExp (BoolValue x))) =
+constFoldPrimExp (UnOpExp (Neg _) (ValueExp (BoolValue x))) =
   ValueExp $ BoolValue $ not x
 constFoldPrimExp (BinOpExp UMod {} x y)
   | sameIshExp x y,
@@ -642,7 +644,7 @@ fromBool b = if b then true else false
 
 -- | Boolean negation smart constructor.
 bNot :: TPrimExp Bool v -> TPrimExp Bool v
-bNot = TPrimExp . UnOpExp Not . untyped
+bNot = TPrimExp . UnOpExp (Neg Bool) . untyped
 
 -- | SMax on 32-bit integers.
 sMax32 :: TPrimExp Int32 v -> TPrimExp Int32 v -> TPrimExp Int32 v
@@ -699,6 +701,17 @@ fMax32 x y = isF32 $ BinOpExp (FMax Float32) (untyped x) (untyped y)
 -- | 64-bit float maximum.
 fMax64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
 fMax64 x y = isF64 $ BinOpExp (FMax Float64) (untyped x) (untyped y)
+
+-- | Conditional expression.
+condExp :: TPrimExp Bool v -> TPrimExp t v -> TPrimExp t v -> TPrimExp t v
+condExp x y z =
+  TPrimExp $
+    FunExp
+      (condFun t)
+      [untyped x, untyped y, untyped z]
+      t
+  where
+    t = primExpType $ untyped y
 
 -- | Convert result of some integer expression to have the same type
 -- as another, using sign extension.
