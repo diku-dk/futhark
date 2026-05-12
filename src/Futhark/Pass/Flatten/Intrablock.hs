@@ -29,7 +29,8 @@ import Futhark.Transform.Rename
 import Futhark.Util.Log
 import Prelude hiding (log)
 -- TODO: To Change
-import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace,segScan,segHist,segRed)
+import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace,segHist)
+import Futhark.Pass.Flatten.Builtins (genUniformSegScanomapWithPost,genUniformSegRed)
 
 
 -- | The minimum amount of inner parallelism we require (by default)
@@ -469,18 +470,36 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
         Scan scanfun nes <- singleScan scans -> do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
-              post_op = SegPostOp $ soacsLambdaToGPU post_lam
-          certifying (stmAuxCerts aux) $
-            addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' post_op arrs [] []
+              post_op = soacsLambdaToGPU post_lam           
+          (scan_res,stms) <- runBuilder (genUniformSegScanomapWithPost lvl (pure w) "intra_maposcanomap" scanfun' nes post_op mapfun' arrs (const $ pure ()))
+          certifying (stmAuxCerts aux) $ do 
+            addStms stms
+            zipWithM_
+              (\pe v ->
+                letBindNames [patElemName pe] $
+                  BasicOp $ SubExp $ Var v)
+              (patElems pat)
+              scan_res
           parallelMin [w]
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form -> do
-          let onReduce (Reduce comm red_lam nes) =
-                SegBinOp comm (soacsLambdaToGPU red_lam) nes mempty
-              reds' = map onReduce reds
+          let sing_red = singleReduce reds
+              red_lam = redLambda sing_red
+              nes = redNeutral sing_red
+              comm 
+                | commutativeLambda red_lam = Commutative
+                | otherwise = redComm sing_red
+              sing_red_gpu = Reduce comm  (soacsLambdaToGPU red_lam) nes 
               map_lam' = soacsLambdaToGPU map_lam
-          certifying (stmAuxCerts aux) $
-            addStms =<< segRed lvl pat mempty w reds' map_lam' arrs [] []
+          (red_res,stms) <- runBuilder (genUniformSegRed lvl "intra_redomap" (pure w)  sing_red_gpu map_lam' arrs (const $ pure ()))
+          certifying (stmAuxCerts aux) $ do 
+            addStms stms
+            zipWithM_
+              (\pe v ->
+                letBindNames [patElemName pe] $
+                  BasicOp $ SubExp $ Var v)
+              (patElems pat)
+              red_res
           parallelMin [w]
     Op (Screma w arrs form) ->
       -- This screma is too complicated for us to immediately do
