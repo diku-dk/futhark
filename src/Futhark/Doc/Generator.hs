@@ -11,7 +11,6 @@ import Data.Char (isAlpha, isSpace, toUpper)
 import Data.List (find, groupBy, inits, intersperse, isPrefixOf, partition, sort, sortOn, tails)
 import Data.Map qualified as M
 import Data.Maybe
-import Data.Ord
 import Data.Set qualified as S
 import Data.String (fromString)
 import Data.Text qualified as T
@@ -635,15 +634,15 @@ typeExpHtml e = case e of
     pure $ "?" <> mconcat (map (brackets . renderName . baseName) dims) <> "." <> t'
 
 qualNameHtml :: QualName VName -> DocM Html
-qualNameHtml (QualName names vname@(VName name tag)) =
-  if tag <= maxIntrinsicTag
-    then pure $ renderName name
+qualNameHtml (QualName names vname) =
+  if isIntrinsic vname
+    then pure $ renderName $ baseName vname
     else f <$> ref
   where
     prefix :: Html
     prefix = mapM_ ((<> ".") . renderName . baseName) names
-    f (Just s) = H.a ! A.href (fromString s) $ prefix <> renderName name
-    f Nothing = prefix <> renderName name
+    f (Just s) = H.a ! A.href (fromString s) $ prefix <> renderName (baseName vname)
+    f Nothing = prefix <> renderName (baseName vname)
 
     ref = do
       boring <- asks $ S.member vname . ctxNoLink

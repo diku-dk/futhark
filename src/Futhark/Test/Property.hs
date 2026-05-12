@@ -19,11 +19,10 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except
 import Data.Char (chr)
 import Data.IORef
-import Data.Int (Int16, Int32, Int64, Int8)
+import Data.Int
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Vector.Storable qualified as SV
-import Data.Word (Word16, Word32, Word64, Word8)
 import Futhark.Data
 import Futhark.Server
 import Futhark.Server.Values qualified as FSV
@@ -171,7 +170,7 @@ haskellFutGenerator srv candidate genTy size seed = do
 
       -- Generate each field recursively
       results <- forM (zip3 [0 ..] fieldVarNames fields) $ \(i, fVarName, fld) -> do
-        let branchGen = mkStdGen (fromIntegral seed + fromIntegral i)
+        let branchGen = mkStdGen (fromIntegral seed + i)
         let (pseudoRandom, _) = random branchGen
         haskellFutGenerator srv fVarName (fieldType fld) size pseudoRandom
 
@@ -196,7 +195,7 @@ haskellFutGenerator srv candidate genTy size seed = do
           putRes <- FSV.putValue srv candidate val
           case putRes of
             Nothing -> pure Nothing
-            Just err -> pure $ Just $ T.pack $ show err
+            Just err -> pure $ Just $ showText err
 
 getFutBaseType :: T.Text -> ([Int64], T.Text)
 getFutBaseType t
@@ -284,14 +283,12 @@ validateShrinkTypes srv propName shrinkName = fmap (either Just (const Nothing))
   case shrinkIns of
     [xTy, randTy] -> do
       let errors =
-            concat
-              [ [ "Property " <> propName <> " expects " <> propTy <> " but shrinker " <> shrinkName <> " takes " <> xTy
-                | xTy /= propTy
-                ],
-                [ "Shrinker " <> shrinkName <> " takes random value " <> randTy <> " but expected i32"
-                | randTy /= "i32"
-                ]
-              ]
+            [ "Property " <> propName <> " expects " <> propTy <> " but shrinker " <> shrinkName <> " takes " <> xTy
+            | xTy /= propTy
+            ]
+              <> [ "Shrinker " <> shrinkName <> " takes random value " <> randTy <> " but expected i32"
+                 | randTy /= "i32"
+                 ]
 
       unless (null errors) $
         throwE $
