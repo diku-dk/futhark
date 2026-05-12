@@ -53,8 +53,6 @@ entry prop_bad (x: i32) : bool =
 -- property crash
 -- prop divides by zero, causing crash.
 #[prop(gen(gen_ok), size(10))]
-entry prop_div_zero (x: i32) : bool =
-  if 7/0 == 7
-    then true
-    else false
+entry prop_div_zero (_x: i32) : bool =
+  7/0 == 7
 

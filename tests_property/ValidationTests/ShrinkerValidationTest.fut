@@ -14,7 +14,7 @@
 -- ==
 -- property: prop_bad_arity2
 
--- n==
+-- ==
 -- property: prop_div_zero
 
 
@@ -77,9 +77,9 @@ entry shrink_bad_arity2 : i32 =
 
 -- SHRINKER crash
 -- shrink divides by zero, causing crash.
-#[nprop(gen(gen_ok), shrink(shrink_div_zero), size(10))]
+#[prop(gen(gen_ok), shrink(shrink_div_zero), size(10))]
 entry prop_div_zero (x: i32) : bool =
-  x != x
+  x/0 == x
 
 entry shrink_div_zero (x: i32) (y: i32) : i32 =
     x/0

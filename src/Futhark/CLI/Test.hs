@@ -397,7 +397,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                   if null diagnostics
                     then do
                       let verifiedProps = selectRequestedPropSpecs properties propSpecs
-                      propResultsE <- runPBT pbtConfig server verifiedProps phaseRef
+                      propResultsE <- runPBT pbtConfig server verifiedProps phaseRef program
 
                       let allResults = flip map propResultsE $ \case
                             Left err -> Failure [err]

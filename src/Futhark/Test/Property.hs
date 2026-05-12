@@ -29,6 +29,7 @@ import Futhark.Server
 import Futhark.Server.Values qualified as FSV
 import Futhark.Util (showText)
 import Numeric.Half (Half)
+import System.FilePath (dropExtension)
 import System.Random (mkStdGen, random, randomIO, randoms)
 
 data PBTConfig = PBTConfig
@@ -84,12 +85,12 @@ readMaybeText t =
     [(x, "")] -> Just x
     _ -> Nothing
 
-runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> IO [Either PBTFailure PBTOutput]
-runPBT config srv specs entryNameRef = do
+runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> FilePath -> IO [Either PBTFailure PBTOutput]
+runPBT config srv specs entryNameRef program = do
   eps <- cmdErrorHandlerE "Failed to get entry points: " $ cmdEntryPoints srv -- error should not be reached by the user
   forM specs $ \spec -> do
     validation <- validateOneSpec srv eps spec
-    maybe (runOne spec config srv entryNameRef) (pure . Left) validation
+    maybe (runOne spec config srv entryNameRef program) (pure . Left) validation
 
 validateOneSpec :: Server -> [EntryName] -> PropSpec -> IO (Maybe PBTFailure)
 validateOneSpec srv eps spec = do
@@ -365,148 +366,159 @@ validatePPrintTypes srv propName ppName = fmap (either Just (const Nothing)) . r
         <> ppOut
         <> "\nExpected pretty-printer output to be []u8."
 
-runOne :: PropSpec -> PBTConfig -> Server -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
-runOne s config srv entryNameRef = do
-  let propName = psProp s
-      -- genName = fromMaybe (error "missing generator") (psGen s)
-      genName = fromMaybe "$no_gen$" (psGen s) -- placeholder to allow attribute to not specify a generator.
-      size = fromMaybe (configMaxSize config) (psSize s)
-      numTests = configNumTests config
-      serverSize = "runPBT_size"
-      serverSeed = "runPBT_seed"
-      serverIn = "runPBT_input"
-      serverOk = "runPBT_ok"
+runOne :: PropSpec -> PBTConfig -> Server -> IORef PBTPhase -> FilePath -> IO (Either PBTFailure PBTOutput)
+runOne s config srv entryNameRef program = runExceptT $ do
+  let loop i
+        | i >= numTests = pure Nothing
+        | otherwise = do
+            randomValue <- liftIO (randomIO :: IO Int32)
+            let seed = fromMaybe randomValue (configSeed config)
+            let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
 
-  runExceptT $ do
-    let loop i
-          | i >= numTests = pure Nothing
-          | otherwise = do
-              randomValue <- liftIO (randomIO :: IO Int32)
-              let seed = fromMaybe randomValue (configSeed config)
-              let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
+            runUpdate genName
+            generatorCandidateE <-
+              if genName == "$no_gen$"
+                then do
+                  liftIO $ freeVars srv [serverIn]
+                  propType <-
+                    liftIO (getSingleInputType srv propName) >>= \case
+                      Left err -> throwE $ showText err
+                      Right ty -> pure ty
 
-              runUpdate genName
-              generatorCandidateE <-
-                if genName == "$no_gen$"
-                  then do
-                    liftIO $ freeVars srv [serverIn]
-                    propType <-
-                      liftIO (getSingleInputType srv propName) >>= \case
-                        Left err -> throwE $ showText err
-                        Right ty -> pure ty
+                  errM <- liftIO $ haskellFutGenerator srv serverIn propType size seed
+                  maybe (pure $ Right ()) (throwE . ("Haskell generator failed: " <>)) errM
+                else do liftIO $ generatorPhase seed
+            either throwE pure generatorCandidateE
 
-                    errM <- liftIO $ haskellFutGenerator srv serverIn propType size seed
-                    maybe (pure $ Right ()) (throwE . ("Haskell generator failed: " <>)) errM
-                  else do liftIO $ generatorPhase genName serverSize serverSeed serverIn size seed
-              either throwE pure generatorCandidateE
+            runUpdate propName
 
-              runUpdate propName
+            okE <- liftIO $
+              withCallKeepIns srv propName serverOk [serverIn] $
+                \vOk -> getVal srv vOk
+            ok <- case okE of
+              Right b -> pure b
+              Left err -> do
+                liftIO $
+                  cmdErrorHandlerM "cmdStore failed to store when property crashed" $
+                    cmdStore srv propertyFileName [serverIn]
+                valuePPrint <- liftIO $ pPrintPhase seed
+                throwE $
+                  "Property "
+                    <> propName
+                    <> " failed with candidate="
+                    <> valuePPrint
+                    <> " with error: "
+                    <> err
 
-              okE <- liftIO $
-                withCallKeepIns srv propName serverOk [serverIn] $
-                  \vOk -> getVal srv vOk
-              ok <- case okE of
-                Right b -> pure b
-                Left err -> do
-                  valuePPrint <- liftIO $ pPrintPhase propName serverIn size seed
-                  throwE $
-                    "Property "
-                      <> propName
-                      <> " failed with candidate="
-                      <> valuePPrint
-                      <> " with error: "
-                      <> err
+            if ok
+              then loop (i + 1)
+              else do
+                let failmsg =
+                      "PBT FAIL: "
+                        <> propName
+                        <> " size="
+                        <> showText size
+                        <> " seed="
+                        <> showText seed
+                        <> " after "
+                        <> showText i
+                        <> " tests\n"
 
-              if ok
-                then loop (i + 1)
-                else do
-                  let failmsg =
-                        "PBT FAIL: "
-                          <> propName
-                          <> " size="
-                          <> showText size
-                          <> " seed="
-                          <> showText seed
-                          <> " after "
-                          <> showText i
-                          <> " tests\n"
+                shrinkRes <- case psShrink s of
+                  Just "auto" ->
+                    liftIO $ autoShrinkLoop srv propName genName serverIn size seed entryNameRef
+                  Just sh -> do
+                    userShrinkRes <-
+                      liftIO $
+                        shrinkLoop srv propName serverIn sh seed (configShrinkTries config) entryNameRef
 
-                  shrinkRes <- case psShrink s of
-                    Just "auto" ->
-                      liftIO $ autoShrinkLoop srv propName genName serverIn size seed entryNameRef
-                    Just sh -> do
-                      userShrinkRes <-
-                        liftIO $
-                          shrinkLoop srv propName serverIn sh seed (configShrinkTries config) entryNameRef
+                    case userShrinkRes of
+                      Right Nothing ->
+                        pure (Right Nothing)
+                      Right (Just err) -> do
+                        autoRes <-
+                          liftIO $
+                            autoShrinkLoop srv propName genName serverIn size seed entryNameRef
 
-                      case userShrinkRes of
-                        Right Nothing ->
-                          pure (Right Nothing)
-                        Right (Just err) -> do
-                          autoRes <-
-                            liftIO $
-                              autoShrinkLoop srv propName genName serverIn size seed entryNameRef
+                        pure $
+                          Right $
+                            Just $
+                              "User shrinker failed: "
+                                <> err
+                                <> "\nAttempted auto-shrinker fallback."
+                                <> formatAutoShrinkResult autoRes
+                      Left err -> do
+                        autoRes <-
+                          liftIO $
+                            autoShrinkLoop srv propName genName serverIn size seed entryNameRef
 
-                          pure $
-                            Right $
-                              Just $
-                                "User shrinker failed: "
-                                  <> err
-                                  <> "\nAttempted auto-shrinker fallback."
-                                  <> formatAutoShrinkResult autoRes
-                        Left err -> do
-                          autoRes <-
-                            liftIO $
-                              autoShrinkLoop srv propName genName serverIn size seed entryNameRef
+                        pure $
+                          Right $
+                            Just $
+                              "User shrinker failed: "
+                                <> err
+                                <> "\nAttempted auto-shrinker fallback."
+                                <> formatAutoShrinkResult autoRes
+                  Nothing ->
+                    pure (Right Nothing)
 
-                          pure $
-                            Right $
-                              Just $
-                                "User shrinker failed: "
-                                  <> err
-                                  <> "\nAttempted auto-shrinker fallback."
-                                  <> formatAutoShrinkResult autoRes
-                    Nothing ->
-                      pure (Right Nothing)
-
-                  case shrinkRes of
-                    Left err -> do
-                      runUpdate "prettyPrint"
-                      counterLog <- liftIO $ pPrintPhase propName serverIn size seed
-                      pure $
-                        Just $
-                          failmsg
-                            <> "Shrinking failed: "
-                            <> err
-                            <> "\nCounterexample: "
-                            <> counterLog
-                    Right (Just note) -> do
-                      runUpdate "prettyPrint"
-                      counterLog <- liftIO $ pPrintPhase propName serverIn size seed
-                      pure $
-                        Just $
-                          failmsg
-                            <> "Shrinking note: "
-                            <> note
-                            <> "\nCounterexample: "
-                            <> counterLog
-                    Right Nothing -> do
-                      runUpdate "prettyPrint"
-                      counterLog <- liftIO $ pPrintPhase propName serverIn size seed
-                      pure $ Just (failmsg <> "Counterexample: " <> counterLog)
-    loop 0
+                case shrinkRes of
+                  Left err -> do
+                    runUpdate "prettyPrint"
+                    counterLog <- liftIO $ pPrintPhase seed
+                    liftIO $ cmdErrorHandlerM "cmdStore failed to store when shrinker crashed" $ cmdStore srv propertyFileName [serverIn]
+                    pure $
+                      Just $
+                        failmsg
+                          <> "Shrinking failed: "
+                          <> err
+                          <> "\nCounterexample: "
+                          <> counterLog
+                  Right (Just note) -> do
+                    runUpdate "prettyPrint"
+                    counterLog <- liftIO $ pPrintPhase seed
+                    pure $
+                      Just $
+                        failmsg
+                          <> "Shrinking note: "
+                          <> note
+                          <> "\nCounterexample: "
+                          <> counterLog
+                  Right Nothing -> do
+                    runUpdate "prettyPrint"
+                    counterLog <- liftIO $ pPrintPhase seed
+                    liftIO $
+                      cmdErrorHandlerM "cmdStore failed to store shrinker result" $
+                        cmdStore srv propertyFileName [serverIn]
+                    pure $ Just $ failmsg <> "Counterexample: " <> counterLog
+  loop 0
   where
-    generatorPhase genName serverSize serverSeed serverIn size seed = do
+    propName = psProp s
+    genName = fromMaybe "$no_gen$" (psGen s) -- placeholder to allow attribute to not specify a generator.
+    size = fromMaybe (configMaxSize config) (psSize s)
+    numTests = configNumTests config
+    serverSize = "runPBT_size"
+    serverSeed = "runPBT_seed"
+    serverIn = "runPBT_input"
+    serverOk = "runPBT_ok"
+    propertyFileName = (dropExtension program) <> "_" <> T.unpack propName <> ".counterexample"
+
+    generatorPhase seed = do
       insE <- cmdInputs srv genName
-      either
-        (fail . show)
-        (\_ -> putVal srv serverSize size >> putVal srv serverSeed seed)
-        insE
+      case insE of
+        Left err -> fail $ show err
+        Right _ -> putVal srv serverSize size >> putVal srv serverSeed seed
+
       let genOut = outName genName
       withFreedVars srv [genOut] $ runExceptT $ do
         liftIO (callFreeIns srv genName genOut [serverSize, serverSeed]) >>= \case
           Nothing -> pure ()
-          Just err ->
+          Just err -> do
+            liftIO $ putVal srv serverSize size >> putVal srv serverSeed seed
+            liftIO $
+              cmdErrorHandlerM "cmdStore failed to store generator error: " $
+                cmdStore srv propertyFileName [serverSize, serverSeed]
+            liftIO $ freeVars srv [serverSize, serverSeed]
             throwE $
               "Generator "
                 <> genName
@@ -518,8 +530,70 @@ runOne s config srv entryNameRef = do
                 <> err
         liftIO $ renameVar srv serverIn genOut
 
-    pPrintPhase propName serverIn size seed = do
-      pPrintWithFallback srv s propName serverIn size seed
+    pPrintPhase seed = do
+      inputTypes <- getInputTypes srv propName
+      case inputTypes of
+        [] ->
+          pure "Could not retrieve input type for counterexample."
+        ty0 : _ -> do
+          case psPPrint s of
+            Nothing ->
+              prettyVar srv serverIn ty0
+            Just futPPrint -> do
+              let prettyOuts = outName futPPrint
+
+              userPrinterE <- withFreedVars srv [prettyOuts] $ runExceptT $ do
+                errM <- liftIO $ callKeepIns srv futPPrint prettyOuts [serverIn]
+                case errM of
+                  Nothing -> pure ()
+                  Just err -> do
+                    liftIO $
+                      cmdErrorHandlerM "cmdStore failed to store pretty-printer error: " $
+                        cmdStore srv propertyFileName [serverIn]
+                    throwE $
+                      "Pretty printer "
+                        <> futPPrint
+                        <> " failed with size="
+                        <> showText size
+                        <> " and seed="
+                        <> showText seed
+                        <> " with error: "
+                        <> err
+
+                valE <- liftIO $ FSV.getValue srv prettyOuts
+                case valE of
+                  Left err -> do
+                    liftIO $ cmdErrorHandlerM "cmdGetValue failed for pretty-printer output: " $ cmdStore srv propertyFileName [serverIn]
+                    throwE $ "getValue failed for pretty-printer output: " <> err
+                  Right (U8Value _ bytes) ->
+                    pure $ T.pack [chr (fromIntegral b) | b <- SV.toList bytes]
+                  Right v ->
+                    throwE $
+                      "Pretty printer "
+                        <> futPPrint
+                        <> " returned non-u8 value: "
+                        <> valueText v
+
+              case userPrinterE of
+                Right rendered ->
+                  pure rendered
+                Left ppErr -> do
+                  runnerPrinterE <- try (prettyVar srv serverIn ty0) :: IO (Either SomeException T.Text)
+                  case runnerPrinterE of
+                    Right fallbackRendered ->
+                      pure $
+                        "Pretty-printer failed: "
+                          <> ppErr
+                          <> "\nFallback counterexample: "
+                          <> fallbackRendered
+                    Left runnerErr -> do
+                      liftIO $ cmdErrorHandlerM "cmdStore failed to store pretty-printer error: " $ cmdStore srv propertyFileName [serverIn]
+                      pure $
+                        "Counterexample found, but printing failed.\n"
+                          <> "Pretty-printer error: "
+                          <> ppErr
+                          <> "\nRunner-printer error: "
+                          <> showText (show runnerErr)
 
 formatAutoShrinkResult :: Either PBTFailure PBTOutput -> T.Text
 formatAutoShrinkResult autoRes =
@@ -682,70 +756,6 @@ shrinkLoop srv propName counterExample shrinkName seed numTries phaseRef = runEx
           False -> do
             liftIO $ renameVar srv counterExample shrinkerCandidate
             pure AcceptedShrink
-
-pPrintWithFallback :: Server -> PropSpec -> EntryName -> VarName -> Int64 -> Int32 -> IO T.Text
-pPrintWithFallback srv spec propName serverIn size seed = do
-  inputTypes <- getInputTypes srv propName
-  case inputTypes of
-    [] ->
-      pure "Could not retrieve input type for counterexample."
-    ty0 : _ -> do
-      case psPPrint spec of
-        Nothing ->
-          prettyVar srv serverIn ty0
-        Just futPPrint -> do
-          let prettyOuts = outName futPPrint
-
-          userPrinterE <- withFreedVars srv [prettyOuts] $ runExceptT $ do
-            errM <- liftIO $ callKeepIns srv futPPrint prettyOuts [serverIn]
-            maybe
-              (pure ())
-              ( throwE
-                  . ( ( "Pretty printer "
-                          <> futPPrint
-                          <> " failed with size="
-                          <> showText size
-                          <> " and seed="
-                          <> showText seed
-                          <> " with error: "
-                      )
-                        <>
-                    )
-              )
-              errM
-
-            valE <- liftIO $ FSV.getValue srv prettyOuts
-            case valE of
-              Left err ->
-                throwE $ "getValue failed for pretty-printer output: " <> err
-              Right (U8Value _ bytes) ->
-                pure $ T.pack [chr (fromIntegral b) | b <- SV.toList bytes]
-              Right v ->
-                throwE $
-                  "Pretty printer "
-                    <> futPPrint
-                    <> " returned non-u8 value: "
-                    <> valueText v
-
-          case userPrinterE of
-            Right rendered ->
-              pure rendered
-            Left ppErr -> do
-              runnerPrinterE <- try (prettyVar srv serverIn ty0) :: IO (Either SomeException T.Text)
-              case runnerPrinterE of
-                Right fallbackRendered ->
-                  pure $
-                    "Pretty-printer failed: "
-                      <> ppErr
-                      <> "\nFallback counterexample: "
-                      <> fallbackRendered
-                Left runnerErr ->
-                  pure $
-                    "Counterexample found, but printing failed.\n"
-                      <> "Pretty-printer error: "
-                      <> ppErr
-                      <> "\nRunner-printer error: "
-                      <> showText (show runnerErr)
 
 -- | Name of out-variable for this entry point.
 outName :: EntryName -> VarName
