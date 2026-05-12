@@ -97,7 +97,6 @@ genUniformSegRed lvl desc segments red_op map_lam arrs readFree = do
   let red_lam = redLambda red_op
       nes = redNeutral red_op
       comm = redComm red_op
-  -- todo: check reasoning of neutral elemtn both here and in scan
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
