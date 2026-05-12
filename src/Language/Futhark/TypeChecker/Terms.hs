@@ -1241,7 +1241,7 @@ localChecks = void . check
     check e@(AppExp (BinOp (QualName [] v, _) _ (x, _) _ loc) _)
       | baseName v == "==",
         Array {} <- typeOf x,
-        baseTag v <= maxIntrinsicTag = do
+        isIntrinsic v = do
           warn loc $
             textwrap
               "Comparing arrays with \"==\" is deprecated and will stop working in a future revision of the language."

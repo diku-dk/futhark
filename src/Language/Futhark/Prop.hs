@@ -8,6 +8,7 @@ module Language.Futhark.Prop
     intrinsics,
     intrinsicVar,
     maxIntrinsicTag,
+    isIntrinsic,
     namesToPrimTypes,
     qualName,
     qualify,
@@ -1214,6 +1215,10 @@ intrinsics =
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
 maxIntrinsicTag :: Int
 maxIntrinsicTag = maxinum $ map baseTag $ M.keys intrinsics
+
+-- | Is this the name of an intrinsic?
+isIntrinsic :: VName -> Bool
+isIntrinsic = (<= maxIntrinsicTag) . baseTag
 
 -- | Create a name with no qualifiers from a name.
 qualName :: v -> QualName v

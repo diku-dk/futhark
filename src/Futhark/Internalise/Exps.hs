@@ -365,14 +365,14 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       case () of
         ()
           -- Short-circuiting operators are magical.
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          | isIntrinsic (qualLeaf qfname),
             baseName (qualLeaf qfname) == "&&",
             [(x, _), (y, _)] <- args ->
               internaliseExp desc $
                 E.AppExp
                   (E.If x y (E.Literal (E.BoolValue False) mempty) mempty)
                   (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          | isIntrinsic (qualLeaf qfname),
             baseName (qualLeaf qfname) == "||",
             [(x, _), (y, _)] <- args ->
               internaliseExp desc $
@@ -389,7 +389,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
               internalise =<< mapM prepareArg args
           | Just internalise <- isIntrinsicFunction qfname (map fst args) ->
               internalise desc
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          | isIntrinsic (qualLeaf qfname),
             Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
               let tag ses = [(se, I.Observe) | se <- ses]
               args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
@@ -1672,7 +1672,7 @@ isOverloadedFunction ::
   Name ->
   Maybe ([(E.StructType, [SubExp])] -> InternaliseM [SubExp])
 isOverloadedFunction qname desc = do
-  guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
+  guard $ isIntrinsic $ qualLeaf qname
   handle $ baseName $ qualLeaf qname
   where
     -- Handle equality and inequality specially, to treat the case of
@@ -1757,7 +1757,7 @@ isIntrinsicFunction ::
   [E.Exp] ->
   Maybe (Name -> InternaliseM [SubExp])
 isIntrinsicFunction qname args = do
-  guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
+  guard $ isIntrinsic $ qualLeaf qname
   let handlers =
         [ handleSign,
           handleOps,
