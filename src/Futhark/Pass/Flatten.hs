@@ -1932,8 +1932,12 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
               new_segment = segments <> pure w
           nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
           outer_scope <- askScope
-          let sing_red' = sing_red {redNeutral = nes'}
-          let sing_red_gpu = sing_red' {redLambda = soacsLambdaToGPU $ redLambda sing_red'}
+          let red_lam = redLambda sing_red
+          let comm 
+                | commutativeLambda red_lam = Commutative
+                | otherwise = redComm sing_red
+          let sing_red_gpu = Reduce comm  (soacsLambdaToGPU red_lam) nes' 
+
           let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
           free_sizes <-
             localScope input_scope $
