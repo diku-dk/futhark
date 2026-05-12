@@ -90,15 +90,13 @@ canCalculate :: S.Set VName -> ExpReplacements -> ExpReplacements
 canCalculate scope mapping = do
   filter
     ( (`S.isSubsetOf` scope)
-        . S.filter notIntrisic
+        . S.filter (not . isIntrinsic)
         . fvVars
         . freeInExp
         . unReplaced
         . fst
     )
     mapping
-  where
-    notIntrisic vn = baseTag vn > maxIntrinsicTag
 
 -- Replace some expressions by a parameter.
 expReplace :: ExpReplacements -> Exp -> Exp
@@ -250,9 +248,7 @@ lookupLifted fname t = M.lookup (fname, t) <$> getLifts
 -- that is arguments not currently in scope.
 askIntros :: S.Set VName -> MonoM (S.Set VName)
 askIntros argset =
-  (S.filter notIntrisic argset `S.difference`) <$> askScope
-  where
-    notIntrisic vn = baseTag vn > maxIntrinsicTag
+  (S.filter (not . isIntrinsic) argset `S.difference`) <$> askScope
 
 -- | Gets and removes expressions that could not be calculated when
 -- the arguments set will be unscoped.
@@ -394,7 +390,7 @@ transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
 transformFName loc fname ft = do
   t' <- transformType ft
   let mono_t = monoType ft
-  if baseTag (qualLeaf fname) <= maxIntrinsicTag
+  if isIntrinsic (qualLeaf fname)
     then pure $ var fname t'
     else do
       maybe_fname <- lookupLifted (qualLeaf fname) mono_t
@@ -948,11 +944,10 @@ arrowArg scope argset args_params rety =
       Sum <$> (traverse . traverse) (arrowArgType env) cs
     arrowArgScalar (scope', dimsToPush) (Arrow as argName d argT retT) =
       pass $ do
-        let intros = S.filter notIntrisic argset' `S.difference` scope'
+        let intros = S.filter (not . isIntrinsic) argset' `S.difference` scope'
         retT' <- arrowArgRetType (scope', filter (`S.notMember` intros) dimsToPush) fullArgset retT
         pure (Arrow as argName d argT retT', bimap (intros `S.union`) (const mempty))
       where
-        notIntrisic vn = baseTag vn > maxIntrinsicTag
         argset' = fvVars $ freeInType argT
         fullArgset =
           case argName of
@@ -1131,7 +1126,7 @@ typeSubstsM loc orig_t1 orig_t2 =
   runWriterT $ fst <$> execStateT (sub orig_t1 orig_t2) (mempty, mempty)
   where
     subRet (Scalar (TypeVar _ v _)) rt =
-      unless (baseTag (qualLeaf v) <= maxIntrinsicTag) $
+      unless (isIntrinsic (qualLeaf v)) $
         addSubst v rt
     subRet t1 (RetType _ t2) =
       sub t1 t2
@@ -1144,7 +1139,7 @@ typeSubstsM loc orig_t1 orig_t2 =
         _ -> pure ()
       sub (stripArray 1 t1) (stripArray 1 t2)
     sub (Scalar (TypeVar _ v _)) t =
-      unless (baseTag (qualLeaf v) <= maxIntrinsicTag) $
+      unless (isIntrinsic (qualLeaf v)) $
         addSubst v $
           RetType [] t
     sub (Scalar (Record fields1)) (Scalar (Record fields2)) =

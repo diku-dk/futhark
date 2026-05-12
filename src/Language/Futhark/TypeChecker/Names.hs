@@ -119,7 +119,7 @@ resolveQualName v loc = do
   v' <- checkValName v loc
   case v' of
     QualName (q : _) _
-      | baseTag q <= maxIntrinsicTag -> do
+      | isIntrinsic q -> do
           me <- askImportName
           unless (isBuiltin (includeToFilePath me)) $
             warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
