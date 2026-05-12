@@ -178,7 +178,7 @@ compileSegRed' pat grid space segbinops map_body_cont
           compileReduction (chunk_v, chunk_const) nonsegmentedReduction
         _ -> do
           let segment_size = pe64 $ last $ segSpaceDims space
-              use_small_segments = segment_size * 2 .<. pe64 (unCount tblock_size) * tvExp chunk_v
+              use_small_segments = segment_size * 2 .<. pe64 (unCount tblock_size)
           sIf
             use_small_segments
             (compileReduction (chunk_v, chunk_const) smallSegmentsReduction)
