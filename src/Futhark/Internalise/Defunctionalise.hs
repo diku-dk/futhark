@@ -245,7 +245,7 @@ lookupVar t x = do
       pure sv
     Nothing -- If the variable is unknown, it may refer to the 'intrinsics'
     -- module, which we will have to treat specially.
-      | baseTag x <= maxIntrinsicTag -> pure IntrinsicSV
+      | isIntrinsic x -> pure IntrinsicSV
       | otherwise ->
           -- Anything not in scope is going to be an existential size.
           pure $ Dynamic $ Scalar $ Prim $ Signed Int64
