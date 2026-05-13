@@ -29,12 +29,12 @@ import Futhark.Server.Values qualified as FSV
 import Futhark.Util (showText)
 import Numeric.Half (Half)
 import System.FilePath (dropExtension)
-import System.Random (mkStdGen, random, randomIO, randoms)
+import System.Random (mkStdGen, random, randoms)
 
 data PBTConfig = PBTConfig
   { configNumTests :: Int32,
     configMaxSize :: Int64,
-    configSeed :: Maybe Int32,
+    configSeed :: Int32,
     configShrinkTries :: Int
   }
   deriving (Show, Eq)
@@ -368,8 +368,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
   let loop i
         | i >= numTests = pure Nothing
         | otherwise = do
-            randomValue <- liftIO (randomIO :: IO Int32)
-            let seed = fromMaybe randomValue (configSeed config)
+            let seed = configSeed config
             let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
 
             runUpdate genName

@@ -812,7 +812,7 @@ defaultConfig =
         PBTConfig
           { configNumTests = 100,
             configMaxSize = 50,
-            configSeed = Nothing,
+            configSeed = 123,
             configShrinkTries = 5
           }
     }
@@ -1011,7 +1011,7 @@ commandLineOptions =
           ( \n ->
               case (reads n :: [(Int32, String)]) of
                 [(n', "")] ->
-                  Right $ changePBTConfig $ \pbt -> pbt {configSeed = Just n'}
+                  Right $ changePBTConfig $ \pbt -> pbt {configSeed = n'}
                 _ ->
                   Left . optionsError $ "'" ++ n ++ "' is not a valid integer."
           )
