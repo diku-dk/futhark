@@ -16,7 +16,7 @@ import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Monad
 import Futhark.Tools
-
+import Data.Containers.ListUtils (nubOrd)
 -- Take the elements at index `is` from an input `v`.
 splitInput ::
   SegLevel ->
@@ -91,13 +91,19 @@ distributeBranch ::
   Builder GPU (DistInputs, DistEnv, [DistStm])
 distributeBranch lvl segments env inps is body acc_reps = do
   let free_in_body = filter (isVariant inps env . Var) (namesToList $ freeIn body)
+  scope <- askScope
+  let input_scope = scopeOfDistInputs inps `M.difference` scope
+  free_sizes <-
+    localScope input_scope $
+      foldMap freeIn <$> mapM lookupType free_in_body
+  let free_variant_sizes = filter (isVariant inps env . Var) (namesToList free_sizes)
+      free_size_vars = nubOrd (free_variant_sizes <> free_in_body) 
   (ts, vs, reps) <-
-    unzip3 <$> mapM (splitInput lvl segments env inps is acc_reps) free_in_body
+    unzip3 <$> mapM (splitInput lvl segments env inps is acc_reps) free_size_vars
   let inputs = do
         (v, t, i) <- zip3 vs ts [0 ..]
         pure (v, DistInput (ResTag i) t)
   let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-  scope <- askScope
   let (inputs', dstms) = distributeBody scope segments inputs body
   pure (inputs', env', dstms)
 
