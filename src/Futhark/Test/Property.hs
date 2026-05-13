@@ -761,7 +761,6 @@ outName = (<> "_out")
 putVal :: (PutValue1 a) => Server -> T.Text -> a -> IO ()
 putVal s name x = do
   let v = putValue1 x
-  -- freeVars s [name]
   cmdErrorHandlerM ("putValue failed for " <> name <> ": ") $ FSV.putValue s name v
 
 freeVars :: Server -> [VarName] -> IO ()
