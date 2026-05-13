@@ -6,6 +6,7 @@ where
 
 import Control.Monad
 import Data.List qualified as L
+import Data.Maybe
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Tuple.Solo
@@ -23,21 +24,26 @@ splitInput ::
   DistEnv ->
   DistInputs ->
   VName ->
+  M.Map VName ResRep ->
   VName ->
   Builder GPU (Type, VName, ResRep)
-splitInput lvl segments env inps is v = do
-  (t, rep) <- liftSubExpPreserveRep segments inps env (Var v)
+splitInput lvl segments env inps is acc_reps v = do
+  (t, rep0) <- liftSubExpPreserveRep segments inps env (Var v)
+  let rep = M.findWithDefault rep0 v acc_reps
   (t,v,) <$> case rep of
     Regular arr -> do
+      if isAcc t then 
+        pure $ Regular arr
+      else do
       -- In the regular case we just take the elements
       -- of the array given by `is`
-      n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-      arr' <- letExp "split_arr" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
-        idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
-        -- unflatten index
-        let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
-        subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
-      pure $ Regular arr'
+        n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+        arr' <- letExp "split_arr" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
+          idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
+          -- unflatten index
+          let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
+          subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
+        pure $ Regular arr'
     Irregular (IrregularRep segs flags offsets elems _) -> do
       -- In the irregular case we take the elements
       -- of the `segs` array given by `is` like in the regular case
@@ -81,11 +87,12 @@ distributeBranch ::
   DistInputs ->
   VName ->
   Body SOACS ->
+  M.Map VName ResRep ->
   Builder GPU (DistInputs, DistEnv, [DistStm])
-distributeBranch lvl segments env inps is body = do
+distributeBranch lvl segments env inps is body acc_reps = do
   let free_in_body = filter (isVariant inps env . Var) (namesToList $ freeIn body)
   (ts, vs, reps) <-
-    unzip3 <$> mapM (splitInput lvl segments env inps is) free_in_body
+    unzip3 <$> mapM (splitInput lvl segments env inps is acc_reps) free_in_body
   let inputs = do
         (v, t, i) <- zip3 vs ts [0 ..]
         pure (v, DistInput (ResTag i) t)
@@ -108,18 +115,21 @@ mergeResult lvl segments w iss branchesRep dist_res
   -- Regular case
   | isRegularDistResult dist_res = do
       let (DistType _ _ resType) = distResType dist_res
-          resultType =
-            Array (elemType resType) (Shape [w] <> arrayShape resType) NoUniqueness
-      xs <- mapM regularBranch branchesRep
-      -- Create the blank space for the result
-      resultSpace <- letExp "blank_res" =<< eBlank resultType
-      -- Write back the values of each branch to the blank space
-      result <- foldM (scatterRegular lvl) resultSpace $ zip iss xs
-      result_t <- arrayShape <$> lookupType result
-      result' <-
-        letExp "match_res_reg" . BasicOp $
-          Reshape result (reshapeAll result_t (segmentsShape segments <> arrayShape resType))
-      pure $ Regular result'
+      if isAcc resType then do 
+        xs <- mapM regularBranch branchesRep
+        pure $ Regular $ last xs
+      else do 
+        let resultType = Array (elemType resType) (Shape [w] <> arrayShape resType) NoUniqueness
+        xs <- mapM regularBranch branchesRep
+        -- Create the blank space for the result
+        resultSpace <- letExp "blank_res" =<< eBlank resultType
+        -- Write back the values of each branch to the blank space
+        result <- foldM (scatterRegular lvl) resultSpace $ zip iss xs
+        result_t <- arrayShape <$> lookupType result
+        result' <-
+          letExp "match_res_reg" . BasicOp $
+            Reshape result (reshapeAll result_t (segmentsShape segments <> arrayShape resType))
+        pure $ Regular result'
   -- Irregular case
   | DistType _ _ (Array pt _ _) <- distResType dist_res = do
       branchesIrregRep <- mapM irregularBranch branchesRep
@@ -211,19 +221,47 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
   -- We put the default case at the start as it's the 0'th equivalence class
   -- and is therefore the first segment after the partition.
   let branch_bodies = defaultCase : map (\(Case _ body) -> body) cases
-  (branch_inputs, branch_envs, branch_dstms) <-
-    unzip3 <$> zipWithM (distributeBranch lvl segments env inps) inds branch_bodies
-
   let branch_results = map bodyResult branch_bodies
-  branch_reps <- forM [0 .. num_cases - 1] $ \i -> do
-    let inputs = branch_inputs !! fromIntegral i
-    let env' = branch_envs !! fromIntegral i
-    let dstms = branch_dstms !! fromIntegral i
-    let result = branch_results !! fromIntegral i
-        branch_segments = NE.singleton $ branch_sizes !! fromIntegral i
-    env'' <- foldM (flattenDistStm ops branch_segments) env' dstms
-    zipWithM (liftDistResultRep lvl branch_segments inputs env'') res result
-
-  -- Merge the results of the branches and insert the resulting res reps
+   -- acc inputs are handled differently, each breanch use the result of the previous branch 
+  (branch_reps, _) <-
+    foldM
+      ( \(branch_reps_acc, acc_reps) (branch_size, branch_inds, body, result) -> do
+          let branch_segments = NE.singleton branch_size
+          (inputs, env', dstms) <-
+            distributeBranch lvl segments env inps branch_inds body acc_reps
+          env'' <- foldM (flattenDistStm ops branch_segments) env' dstms
+          reps <- zipWithM (liftDistResultRep lvl branch_segments inputs env'') res result
+          let acc_reps' = replaceAccReps acc_reps reps
+          pure (branch_reps_acc <> [reps], acc_reps')
+      )
+      ([], M.empty)
+      (L.zip4 branch_sizes inds branch_bodies branch_results)
+  -- Merging acc results is done by using the last branch result
   reps <- zipWithM (mergeResult lvl segments w inds) (L.transpose branch_reps) res
   pure $ insertReps (zip (map distResTag res) reps) env
+
+
+  where
+    findAccCert :: VName -> (VName, DistInput) -> Maybe VName
+    findAccCert cert v_inp =
+      let (v,inp) = v_inp in
+      if isAcc (distInputType inp) then
+        case distInputType inp of
+          Acc cert' _ _ _ | cert == cert' -> Just v
+          _ -> Nothing
+      else Nothing
+    
+    -- Idealy this should be a singleton
+    findAccCerts:: VName -> [VName]
+    findAccCerts cert = mapMaybe (findAccCert cert) inps
+
+    replaceAccRep acc_reps (dist_res, rep) = 
+      let (DistType _ _ t) = distResType dist_res in
+      if not $ isAcc t 
+        then 
+          acc_reps
+      else  
+        let (Acc cert _ _ _) = t 
+            accVars = findAccCerts cert in
+        foldl (\m v -> M.insert v rep m) acc_reps accVars   
+    replaceAccReps acc_reps reps = foldl replaceAccRep acc_reps $ zip res reps
