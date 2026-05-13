@@ -497,7 +497,8 @@ runOne s config srv entryNameRef program = runExceptT $ do
     serverSeed = "runPBT_seed"
     serverIn = "runPBT_input"
     serverOk = "runPBT_ok"
-    propertyFileName = (dropExtension program) <> "_" <> T.unpack propName <> ".counterexample"
+    propertyFileName =
+      dropExtension program <> "_" <> T.unpack propName <> ".counterexample"
 
     generatorPhase seed = do
       insE <- cmdInputs srv genName
