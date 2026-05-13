@@ -104,13 +104,12 @@ validateOneSpec srv eps spec = do
 
     genName <- case psGen spec of
       Nothing ->
-        pure "$no_gen$" -- placeholder name for entrypoint that user cannot write.
-        -- not the most elegant solution but allows us to reuse most of the logic.
+        pure Nothing
       Just g
         | g `notElem` eps ->
             throwE $ "Generator is not a server entry point: " <> g
       Just g ->
-        pure g
+        pure $ Just g
 
     liftIO (validateGenTypes srv prop genName) >>= maybe (pure ()) throwE
 
@@ -221,9 +220,9 @@ makeFutPrimitiveValue ty shapeList seed =
         "bool" -> Right $ BoolValue shape $ SV.fromList $ take totalElems (randoms gen)
         _ -> Left ("Batch generation not implemented for: " <> ty)
 
-validateGenTypes :: Server -> EntryName -> EntryName -> IO (Maybe PBTFailure)
-validateGenTypes _ _ "$no_gen$" = pure Nothing -- should have more logic to see if we can actually generate anything
-validateGenTypes srv propName genName = fmap (either Just (const Nothing)) . runExceptT $ do
+validateGenTypes :: Server -> EntryName -> Maybe EntryName -> IO (Maybe PBTFailure)
+validateGenTypes _srv _propName Nothing = pure Nothing -- TODO: should have more logic to see if we can actually generate anything
+validateGenTypes srv propName (Just genName) = fmap (either Just (const Nothing)) . runExceptT $ do
   -- find expected input types for generator
   genIns <- liftIO $ getInputTypes srv genName
   case genIns of
@@ -370,19 +369,20 @@ runOne s config srv entryNameRef program = runExceptT $ do
             let seed = configSeed config
             let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
 
-            runUpdate genName
-            generatorCandidateE <-
-              if genName == "$no_gen$"
-                then do
-                  liftIO $ freeVars srv [serverIn]
-                  propType <-
-                    liftIO (getSingleInputType srv propName) >>= \case
-                      Left err -> throwE $ showText err
-                      Right ty -> pure ty
+            generatorCandidateE <- case genName of
+              Nothing -> do
+                runUpdate "Auto Generator"
+                liftIO $ freeVars srv [serverIn]
+                propType <-
+                  liftIO (getSingleInputType srv propName) >>= \case
+                    Left err -> throwE $ showText err
+                    Right ty -> pure ty
 
-                  errM <- liftIO $ haskellFutGenerator srv serverIn propType size seed
-                  maybe (pure $ Right ()) (throwE . ("Haskell generator failed: " <>)) errM
-                else do liftIO $ generatorPhase seed
+                errM <- liftIO $ haskellFutGenerator srv serverIn propType size seed
+                maybe (pure $ Right ()) (throwE . ("Haskell generator failed: " <>)) errM
+              Just gn -> do
+                runUpdate gn
+                liftIO $ generatorPhase seed
             either throwE pure generatorCandidateE
 
             runUpdate propName
@@ -487,7 +487,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
   loop 0
   where
     propName = psProp s
-    genName = fromMaybe "$no_gen$" (psGen s) -- placeholder to allow attribute to not specify a generator.
+    genName = psGen s
     size = fromMaybe (configMaxSize config) (psSize s)
     numTests = configNumTests config
     serverSize = "runPBT_size"
@@ -501,26 +501,29 @@ runOne s config srv entryNameRef program = runExceptT $ do
       putVal srv serverSize size
       putVal srv serverSeed seed
 
-      let genOut = outName genName
-      withFreedVars srv [genOut] $ runExceptT $ do
-        liftIO (callFreeIns srv genName genOut [serverSize, serverSeed]) >>= \case
-          Nothing -> pure ()
-          Just err -> do
-            liftIO $ putVal srv serverSize size >> putVal srv serverSeed seed
-            liftIO $
-              cmdErrorHandlerM "cmdStore failed to store generator error: " $
-                cmdStore srv propertyFileName [serverSize, serverSeed]
-            liftIO $ freeVars srv [serverSize, serverSeed]
-            throwE $
-              "Generator "
-                <> genName
-                <> " failed with size="
-                <> showText size
-                <> " and seed="
-                <> showText seed
-                <> " with error: "
-                <> err
-        liftIO $ renameVar srv serverIn genOut
+      case genName of
+        Nothing -> fail "Internal error: generatorPhase called with Nothing genName"
+        Just gn -> do
+          let genOut = outName gn
+          withFreedVars srv [genOut] $ runExceptT $ do
+            liftIO (callFreeIns srv gn genOut [serverSize, serverSeed]) >>= \case
+              Nothing -> pure ()
+              Just err -> do
+                liftIO $ putVal srv serverSize size >> putVal srv serverSeed seed
+                liftIO $
+                  cmdErrorHandlerM "cmdStore failed to store generator error: " $
+                    cmdStore srv propertyFileName [serverSize, serverSeed]
+                liftIO $ freeVars srv [serverSize, serverSeed]
+                throwE $
+                  "Generator "
+                    <> gn
+                    <> " failed with size="
+                    <> showText size
+                    <> " and seed="
+                    <> showText seed
+                    <> " with error: "
+                    <> err
+            liftIO $ renameVar srv serverIn genOut
 
     pPrintPhase seed = do
       inputTypes <- getInputTypes srv propName
@@ -555,7 +558,9 @@ runOne s config srv entryNameRef program = runExceptT $ do
                 valE <- liftIO $ FSV.getValue srv prettyOuts
                 case valE of
                   Left err -> do
-                    liftIO $ cmdErrorHandlerM "cmdGetValue failed for pretty-printer output: " $ cmdStore srv propertyFileName [serverIn]
+                    liftIO $
+                      cmdErrorHandlerM "cmdGetValue failed for pretty-printer output: " $
+                        cmdStore srv propertyFileName [serverIn]
                     throwE $ "getValue failed for pretty-printer output: " <> err
                   Right (U8Value _ bytes) ->
                     pure $ T.pack [chr (fromIntegral b) | b <- SV.toList bytes]
@@ -579,7 +584,9 @@ runOne s config srv entryNameRef program = runExceptT $ do
                           <> "\nFallback counterexample: "
                           <> fallbackRendered
                     Left runnerErr -> do
-                      liftIO $ cmdErrorHandlerM "cmdStore failed to store pretty-printer error: " $ cmdStore srv propertyFileName [serverIn]
+                      liftIO $
+                        cmdErrorHandlerM "cmdStore failed to store pretty-printer error: " $
+                          cmdStore srv propertyFileName [serverIn]
                       pure $
                         "Counterexample found, but printing failed.\n"
                           <> "Pretty-printer error: "
@@ -609,10 +616,12 @@ updatePhase propName phase activeTest size seed randomValue phaseRef =
         phaseRandom = randomValue
       }
 
-autoShrinkLoop :: Server -> EntryName -> EntryName -> VarName -> Int64 -> Int32 -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
+autoShrinkLoop :: Server -> EntryName -> Maybe EntryName -> VarName -> Int64 -> Int32 -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
 autoShrinkLoop srv propName genName vCounterExample size seed phaseRef = runExceptT $ do
-  let autoShrinkUpdatePhase activeTest =
+  let autoShrinkUpdatePhase (Right activeTest) =
         liftIO $ updatePhase (Just propName) (Just "autoShrinkLoop") activeTest (Just size) (Just seed) Nothing phaseRef
+      autoShrinkUpdatePhase (Left _activeTest) =
+        liftIO $ updatePhase (Just propName) (Just "autoShrinkLoop") (Just "Auto Generator") (Just size) (Just seed) Nothing phaseRef
 
       vCandidate = "qc_try"
       vOk = "qc_ok"
@@ -636,27 +645,27 @@ autoShrinkLoop srv propName genName vCounterExample size seed phaseRef = runExce
             -- Note: Since withFreedVars manages server-side resources,
             -- we lift the whole block into IO then handle the result.
             res <- liftIO $ withFreedVars srv [vCandidate] $ runExceptT $ do
-              liftIO $ autoShrinkUpdatePhase (Just genName)
-              errM <-
-                if genName == "$no_gen$"
-                  then do
-                    propertyType <-
-                      liftIO (getSingleInputType srv propName) >>= \case
-                        Left err -> throwE $ showText err
-                        Right ty -> pure ty
-                    liftIO $ freeVars srv [serverSize, serverSeed]
-                    errM <- liftIO $ haskellFutGenerator srv vCandidate propertyType newSize seed
-                    maybe (pure Nothing) (throwE . ("Haskell generator failed for auto shrinking: " <>)) errM
-                  else liftIO $ callFreeIns srv genName vCandidate [serverSize, serverSeed]
-              maybe (pure ()) (throwE . (("Generator failed: " <> genName <> " has ") <>)) errM
+              liftIO $ autoShrinkUpdatePhase (Right genName)
+              case genName of
+                Nothing -> do
+                  propertyType <-
+                    liftIO (getSingleInputType srv propName) >>= \case
+                      Left err -> throwE $ showText err
+                      Right ty -> pure ty
+                  liftIO $ freeVars srv [serverSize, serverSeed]
+                  errM <- liftIO $ haskellFutGenerator srv vCandidate propertyType newSize seed
+                  maybe (pure ()) (throwE . ("Haskell auto generator failed: " <>)) errM
+                Just gn -> do
+                  errM <- liftIO $ callFreeIns srv gn vCandidate [serverSize, serverSeed]
+                  maybe (pure ()) (throwE . (("Generator failed: " <> gn <> " has ") <>)) errM
 
-              liftIO $ autoShrinkUpdatePhase (Just propName)
+              liftIO $ autoShrinkUpdatePhase (Right $ Just propName)
               okE <- liftIO $
                 withCallKeepIns srv propName vOk [vCandidate] $
                   \vOk' -> getVal srv vOk'
               ok <- either (throwE . ("Property " <>)) pure okE
 
-              liftIO $ autoShrinkUpdatePhase Nothing
+              liftIO $ autoShrinkUpdatePhase (Left Nothing)
 
               if ok
                 then pure Nothing -- Shrink didn't find a smaller failure
