@@ -116,7 +116,6 @@ validateOneSpec srv eps spec = do
 
     case psShrink spec of
       Nothing -> pure ()
-      Just "auto" -> pure ()
       Just sh -> do
         unless (sh `elem` eps) $
           throwE $
@@ -421,7 +420,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                         <> " tests\n"
 
                 shrinkRes <- case psShrink s of
-                  Just "auto" ->
+                  Nothing ->
                     liftIO $ autoShrinkLoop srv propName genName serverIn size seed entryNameRef
                   Just sh -> do
                     userShrinkRes <-
@@ -455,8 +454,6 @@ runOne s config srv entryNameRef program = runExceptT $ do
                                 <> err
                                 <> "\nAttempted auto-shrinker fallback."
                                 <> formatAutoShrinkResult autoRes
-                  Nothing ->
-                    pure (Right Nothing)
 
                 case shrinkRes of
                   Left err -> do
@@ -501,10 +498,8 @@ runOne s config srv entryNameRef program = runExceptT $ do
       dropExtension program <> "_" <> T.unpack propName <> ".counterexample"
 
     generatorPhase seed = do
-      insE <- cmdInputs srv genName
-      case insE of
-        Left err -> fail $ show err
-        Right _ -> putVal srv serverSize size >> putVal srv serverSeed seed
+      putVal srv serverSize size
+      putVal srv serverSeed seed
 
       let genOut = outName genName
       withFreedVars srv [genOut] $ runExceptT $ do

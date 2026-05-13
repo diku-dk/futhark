@@ -20,7 +20,7 @@ let simple_succ (x: i8) : i8 =
 -- ==
 -- property: prop_simple_fail
 
-#[prop(gen(gen_simple), shrink(shrink_simple), size(10))]
+#[prop(gen(gen_simple), shrink(shrink_simple), size(15))]
 entry prop_simple_succ (x: i8) : bool =
     simple_succ x == i8.abs x
 
@@ -28,9 +28,9 @@ let simple_fail (x: i8) : i8 =
   i8.abs x
 
 -- sometimes fails
-#[prop(gen(gen_simple), shrink(shrink_simple), size(10))]
+#[prop(gen(gen_simple), shrink(shrink_simple), size(15))]
 entry prop_simple_fail (x: i8) : bool =
-    simple_fail x ==  x
+    simple_fail x == x
 
 entry shrink_simple (x: i8) (random: i32) : i8 =
   shrink_i8.shrinker x random

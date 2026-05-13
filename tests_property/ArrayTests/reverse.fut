@@ -29,7 +29,7 @@ entry prop_reverse_involution (xs: []i32) : bool =
 entry prop_reverse_involution_bad (xs: []i32) : bool =
   and (map2 (==) (reverse_bad (reverse xs)) xs)
 
-#[prop(gen(gen_i32_array), shrink(auto))]
+#[prop(gen(gen_i32_array))]
 entry prop_reverse_involution_bad2 (xs: []i32) : bool =
   and (map2 (==) (reverse_bad (reverse xs)) xs)
 

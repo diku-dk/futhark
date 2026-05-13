@@ -41,6 +41,6 @@ entry gen_record_sums_fail (size: i64) (_: i32) : arr =
   let idx = iota n |> map (\i -> i32.i64 i)
   in map (\i -> if i == 0i32 then 1i32 else 0i32) idx
 
-#[prop(gen(gen_record_sums_fail), shrink(auto))]
+#[prop(gen(gen_record_sums_fail))]
 entry prop_record_sums_fail (input: arr) : bool =
   prop_all_ones input

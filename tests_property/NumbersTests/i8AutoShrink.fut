@@ -20,7 +20,7 @@ let simple_succ (x: i8) : i8 =
 -- property: prop_simple_fail
 
 -- suceeds
-#[prop(gen(gen_simple), shrink(auto))]
+#[prop(gen(gen_simple))]
 entry prop_simple_succ (x: i8) : bool =
     simple_succ x == i8.abs x
 
@@ -28,6 +28,6 @@ let simple_fail (x: i8) : i8 =
   i8.abs x
 
 -- sometimes fails
-#[prop(gen(gen_simple), shrink(auto))]
+#[prop(gen(gen_simple))]
 entry prop_simple_fail (x: i8) : bool =
     simple_fail x == x

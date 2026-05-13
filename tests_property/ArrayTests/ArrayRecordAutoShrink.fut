@@ -47,7 +47,7 @@ let update_at_n [n] (kk: i64) (xs: [n]record) : ([n]record, bool) =
   let xs' = tabulate n (\i -> if i == kk then r' else xs[i])
   in (xs', changed)
 
-#[prop(gen(gen_record_sums_fail), shrink(auto), pprint(pp_arrRecord))]
+#[prop(gen(gen_record_sums_fail), pprint(pp_arrRecord))]
 entry prop_record_sums_fail (input: arr) : bool =
   prop_all_equal input
 
