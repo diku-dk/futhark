@@ -26,17 +26,64 @@
 --        introduced in the code, it is more important that
 --        they can be transformed by various optimizations passes.
 module Futhark.Optimise.Fusion.RulesWithAccs
-  ( tryFuseWithAccs,
-  )
+  ( flat2MapNest, tryFuseWithAccs )
 where
 
 import Control.Monad
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Futhark.Construct
+import Futhark.Analysis.HORep.SOAC qualified as H
+import Futhark.IR.SOACS qualified as Futhark
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+
+---------------------------------------------------
+--- I. Map-Flatten-Scatter
+---------------------------------------------------
+
+-- | This is unflattening an outer map into a map nest
+--     whose sizes are given by the first argument.
+--   Assumption verified at the call site are:
+--     all SOAC inputs are either accumulators or results
+--     from the producer SOAC, whose outer dimensions are
+--     flattened in the same way
+flat2MapNest :: (HasScope SOACS m, MonadFreshNames m) =>
+    [SubExp] -> H.SOAC SOACS -> m (H.SOAC SOACS)
+flat2MapNest (n:ns) (H.Screma _n_flat inps (ScremaForm lam [] [] plam)) = do
+  lam' <- mkNestedLam ns $ map getInpType inps
+  pure $ H.Screma n (map clearInput inps) $ ScremaForm lam' [] [] plam
+  where
+    getInpType (H.Input _ _ tp) = tp
+    clearInput inp@(H.Input _ _ Acc{}) = inp
+    clearInput (H.Input _ nm tp) = H.Input mempty nm tp
+    mkArgType acctp@(Acc{}) = acctp
+    -- mkArgType arrtp@(Array ptp (Shape [_]) _) = Prim ptp
+    mkArgType (Array ptp (Shape (_d:dims)) u) =
+      Array ptp (Shape dims) u
+    mkArgType arrtp =
+      error ("Illegal array type: " ++ prettyString arrtp)
+    mkNestedLam ::  (HasScope SOACS mm, MonadFreshNames mm) =>
+        [SubExp] -> [Type] -> mm (Lambda SOACS)
+    mkNestedLam [] _ =
+      pure lam
+    mkNestedLam (n':ns') inp_tps = do
+      let tps_args = map mkArgType inp_tps
+      new_ps <- mapM (newParam (nameFromString "nest_arg")) tps_args
+      runLambdaBuilder new_ps $ do
+        lam_inner <- mkNestedLam ns' tps_args
+        lam_ident <- mkIdentLam (lambdaReturnType lam)
+        let arr_nms = map paramName new_ps
+            map_soac = Futhark.Screma n' arr_nms $ ScremaForm lam_inner [] [] lam_ident
+        res_nms <- letTupExp "acc_res" $ Op map_soac
+        pure $ map (subExpRes . Var) res_nms
+    mkIdentLam rtps = do
+      new_ps <- mapM (newParam (nameFromString "id_arg")) rtps
+      runLambdaBuilder new_ps $ pure $ map (subExpRes . Var . paramName) new_ps
+--
+flat2MapNest _ screma =
+  error ("Call site invariant broken, argument not a proper screma: " ++ prettyString screma)
 
 ---------------------------------------------------
 --- II. WithAcc-WithAcc Fusion

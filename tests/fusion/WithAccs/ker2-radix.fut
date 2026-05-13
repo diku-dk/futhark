@@ -109,7 +109,8 @@ entry radixIt (m: i64)
   let hist64T =
     unflatten hist64
     |> transpose
+  let scat_dst = #[scratch] replicate (m * bq) 0u32
   let (xs', inds') =
     unzip
     <| map3Intra (ker2Blk bit_beg lgH) hist16 hist64T (unflatten xs)
-  in scatter (replicate (m * bq) 0u32) (flatten inds') (flatten xs')
+  in scatter scat_dst (flatten inds') (flatten xs')

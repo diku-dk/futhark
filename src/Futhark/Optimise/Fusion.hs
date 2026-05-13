@@ -12,7 +12,6 @@ import Control.Monad.State
 import Data.Graph.Inductive.Graph qualified as G
 import Data.Graph.Inductive.Query.DFS qualified as Q
 import Data.List qualified as L
--- import qualified Data.Set as S
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
@@ -25,12 +24,9 @@ import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Optimise.Fusion.RulesWithAccs qualified as SF
 import Futhark.Optimise.Fusion.TryFusion qualified as TF
--- import Futhark.Optimise.Fusion.SpecRules qualified as SF
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-
--- import Debug.Trace
 
 data FusionEnv = FusionEnv
   { vNameSource :: VNameSource,
@@ -271,6 +267,56 @@ vFuseNodeT _ infusible (TransNode stm1_out tr stm1_in, _, _) (SoacNode ots2 pats
                 inp
           soac2' = map onInput (H.inputs soac2) `H.setInputs` soac2
       pure $ Just $ SoacNode ots2 pats2 soac2' aux2
+--
+-- Special rule for fusing a map whose results are flattened
+--     into a map whose other arguments and results consists
+--     only of accumulators.
+vFuseNodeT
+  edges
+  infusible
+  arg1@(SoacNode ots1 pats1 soac1 _aux1, _i1s, _e1s)
+  (SoacNode ots2 pats2 soac2 aux2, e2s)
+  | H.Screma _n1 _inps1 (ScremaForm _lam1 [] [] _postlam1) <- soac1,
+    H.Screma _n2 inps2 (ScremaForm lam2 [] [] _postlam2) <- soac2,
+    ots1 == mempty,
+    -- all inputs of consumer (soac2) are either accumulators or
+    --   results from the producer (soac1), whose outer dimensions
+    --   are flattened in the same way and the flattened ones have
+    --   same sizes
+    pat1_nms <- map patElemName (patElems pats1),
+    inps2_flat <- filter ((`elem` pat1_nms) . getInpName) inps2,
+    (inp1_auxs, inp1_flat_splice) <-
+        unzip $ mapMaybe getFlatSplice inps2_flat,
+    length inp1_flat_splice == length inps2_flat,
+    not (null inp1_flat_splice),
+    flat_ndims_shp <- head inp1_flat_splice,
+    all (== flat_ndims_shp) inp1_flat_splice,
+    -- soac2's inputs that do not come from soac1 are all accumulators
+    inps2_acc <- filter ((`notElem` pat1_nms) . getInpName) inps2,
+    all (isAccType . getInpType) inps2_acc,
+    -- all results of soac2 are accumulators
+    all isAccType (lambdaReturnType lam2) = do
+      let out_dims = fst flat_ndims_shp
+      -- step 1: get rid of the flatten transforms by unflattening
+      --         the consumer map into a corresponding map nest
+      soac2' <- SF.flat2MapNest out_dims soac2
+      let node2' = SoacNode ots2 pats2 soac2' $ foldl (<>) aux2 inp1_auxs
+      -- step 2: try to see if now it can fuse the two maps:
+      vFuseNodeT edges infusible arg1 (node2', e2s)
+  where
+    isAccType (Acc _nm _shp _tps _u) = True
+    isAccType _ = False
+    getInpName (H.Input _ nm _) = nm
+    getInpType (H.Input _ _ tp) = tp
+    getFlatSplice (H.Input trsfs _ (Array _ptp (Shape dims) _))
+      | rshp_trsf H.:< others <- H.viewf trsfs,
+        others == mempty,
+        H.Reshape aux (NewShape [DimSplice ii kk ss] _new_shp11) <- rshp_trsf,
+        ii == 0 && kk > 1 && length ss == 1 =
+          Just (aux, (take kk dims, ss))
+    getFlatSplice _ = Nothing
+--
+-- General rule for fusing two SOACS in a producer-consumer relation
 vFuseNodeT
   _
   _
@@ -334,40 +380,6 @@ vFuseNodeT
         H.addTransform
           (H.Index cs (fullSlice (H.inputType inp) [ds]))
           inp
-{-- OLD
-vFuseNodeT
-  edges 
-  infusible 
-  (SoacNode ots1 pat1 soac@(H.Screma w form s_inps) aux1, is1, os1)
-  (StmNode (Let pat2 aux2 wae@(WithAcc w_inps lam)), os2)
-    | null infusible,
-      ots1 == mempty = do
-    let wacc_cons_nms = S.fromList $ concatMap (\(_,nms,_)->nms) w_inps
-        soac_prod_nms = map patElemName $ patElems pat2
-        soac_indep_nms= map getName is1
-        safe = all (\ soac_res -> not (S.member soac_res wacc_cons_nms)) $
-                soac_indep_nms ++ soac_prod_nms
-    scope <- askScope
-    bdy' <-
-      runBodyBuilder $ do
-        buildBody_ . localScope (scope <> scopeOfLParams (lambdaParams lam)) $ do
-          soac' <- H.toExp soac
-          addStm $ Let pat1 aux1 soac'
-          mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam
-          pure $ bodyResult $ lambdaBody lam
-    let lam' = lam { lambdaBody = bdy' }
-    if safe
-    then {--
-          trace ("WAcc is1: " ++ show is1 ++ " os1: " ++ show os1 ++ 
-           " os2: " ++ show os2 ++ "\n\tpat1: " ++ prettyString pat1 ++
-           "\n\twacc_pat: " ++ prettyString pat2 ++
-           "\n\tedges: " ++ show edges ++ 
-           "\n\tinfusible: " ++ show infusible) $
-          --}
-          fusedSomething $
-            StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'
-    else pure $ Nothing
---}
 
 -- Case of fusing a screma with an WithAcc such as to (hopefully) perform
 --   more fusion within the WithAcc. This would allow the withAcc to move in
@@ -405,10 +417,9 @@ vFuseNodeT
         (lam'', success) <- doFusionInLambda lam'
         if not success
           then pure Nothing
-          else do
-            -- `aux1` already appear in the moved SOAC stm; is there
-            -- any need to add it to the enclosing withAcc stm as well?
-            fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
+          else fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
+          -- ^ `aux1` already appear in the moved SOAC stm; is there
+          --   any need to add it to the enclosing withAcc stm as well?
 
 --
 -- The reverse of the case above, i.e., fusing a screma at the back of an
@@ -479,6 +490,38 @@ vFuseNodeT
             let new_stm = Let pat aux (WithAcc w_inps wlam')
             if success then fusedSomething (StmNode new_stm) else pure Nothing
           Just _ -> error "Illegal result of tryFuseWithAccs called from vFuseNodeT."
+--
+-- we fuse flatten (reshape) statements inside an WithAcc to generate
+-- more opportunities for later fusion
+vFuseNodeT
+  edges
+  infusible
+  (TransNode arr_1d arr_transfs arr_nd, _is1, _os1)
+  (StmNode (Let pat2 aux2 (WithAcc w_inps2 lam2)), _os2)
+    | not $ any isFake edges,
+      H.Reshape aux1 new_shp <- arr_transfs,
+      -- check that the reshape was a flattening of outer dimensions:
+      [DimSplice start_dim num_affected_dims slc_shp] <- dimSplices new_shp,
+      start_dim == 0 && num_affected_dims > 1 && length slc_shp == 1,
+      -- check the n-d or flat array is not infusible or an withAcc input:
+      all_wacc_inps <- concat $ map (\(_,nms,_) -> nms) w_inps2,
+      all (`notElem` infusible) [arr_nd, arr_1d],
+      all (`notElem` all_wacc_inps) [arr_nd, arr_1d] = do
+        scope <- askScope
+        case M.lookup arr_1d scope of
+          Just (LetName tp1d) -> do
+            let pat1 = Pat [PatElem arr_1d tp1d]
+                stm1 = Let pat1 aux1 (BasicOp (Reshape arr_nd new_shp))
+            res_lam <-
+              runLambdaBuilder (lambdaParams lam2) $ do
+                -- add the reshape statement and the with-acc lambda stms
+                addStm stm1
+                mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam2
+                pure $ bodyResult $ lambdaBody lam2
+            res_lam' <- renameLambda res_lam 
+            let new_stm = Let pat2 (aux1 <> aux2) $ WithAcc w_inps2 res_lam'
+            fusedSomething (StmNode new_stm)
+          _ -> error ("Flattened array " ++ prettyString arr_1d ++ "not found in scope!")
 --
 vFuseNodeT _ _ _ _ = pure Nothing
 
@@ -622,23 +665,6 @@ removeUnusedOutputs = mapAcross $ \(incoming, n1, nodeT, outgoing) -> do
   let toKeep = map (vNameFromAdj n1) incoming
   nodeT' <- removeOutputsExcept toKeep nodeT
   pure (incoming, n1, nodeT', outgoing)
-
-{-- OLD
-tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
-tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g}
-  | not (G.gelem (nodeFromLNode node_to_fuse) g) = pure dg
-  -- ^ Node might have been fused away since.
-tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
-  spec_rule_res <- SF.ruleMFScat node_to_fuse dg
-  -- ^ specialized fusion rules such as the one
-  --   enabling map-flatten-scatter fusion
-  case spec_rule_res of
-    Just dg'-> pure dg'
-    Nothing -> applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
-  where
-    node_to_fuse_id = nodeFromLNode node_to_fuse
-    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g node_to_fuse_id
---}
 
 tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
 tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g}
