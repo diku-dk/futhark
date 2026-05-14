@@ -164,11 +164,12 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 for (int i = 0; i < $int:rank; ++i) {
                   n_values *= shape[i];
                 }
-                $ty:element_c_type *values = alloca(n_values * sizeof($ty:element_c_type));
+                $ty:element_c_type *values = malloc(n_values * sizeof($ty:element_c_type));
                 for (typename int64_t i = 0; i < n_values; ++i) {
                   values[i] = *ps[i];
                 }
                 *outp = $id:(arrayNew ops)(ctx, values, $args:shape_args);
+                free(values);
                 return 0;
               }
               int $id:array_set(struct futhark_context *ctx,
