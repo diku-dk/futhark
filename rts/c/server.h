@@ -1548,7 +1548,16 @@ int restore_array(const struct array *a, FILE *f,
     n_values *= shape[i];
   }
 
-  const void **values = alloca(n_values * sizeof(void*));
+  if (n_values < 0 || (uint64_t)n_values > SIZE_MAX / sizeof(void*)) {
+    free(data);
+    return 1;
+  }
+
+  const void **values = malloc((size_t)n_values * sizeof(void*));
+  if (values == NULL) {
+    free(data);
+    return 1;
+  }
   char *data_bytes = data;
   for (int64_t i = 0; i < n_values; i++) {
     values[i] = data_bytes + i * a->info->size;
@@ -1556,6 +1565,7 @@ int restore_array(const struct array *a, FILE *f,
 
   int err = a->new(ctx, p, values, shape);
   err |= futhark_context_sync(ctx);
+  free(values);
   free(data);
   return err;
 }
