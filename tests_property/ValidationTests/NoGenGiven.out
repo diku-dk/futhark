@@ -1,3 +1,5 @@
+PBT FAIL: i8_val size=50 seed=REDACTED after N tests
+Counterexample: -78i8
 PBT FAIL: i8_arr size=50 seed=REDACTED after N tests
 Counterexample: [16i8, 54i8]
 PBT FAIL: u64_arr size=50 seed=REDACTED after N tests

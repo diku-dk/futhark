@@ -399,10 +399,9 @@ validatePPrintTypes srv propName ppName = fmap (either Just (const Nothing)) . r
 
 runOne :: PropSpec -> PBTConfig -> Server -> IORef PBTPhase -> FilePath -> IO (Either PBTFailure PBTOutput)
 runOne s config srv entryNameRef program = runExceptT $ do
-  let loop i
+  let loop i seed
         | i >= numTests = pure Nothing
         | otherwise = do
-            let seed = configSeed config
             let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
 
             generatorCandidateE <- case genName of
@@ -442,7 +441,11 @@ runOne s config srv entryNameRef program = runExceptT $ do
                     <> err
 
             if ok
-              then loop (i + 1)
+              then do
+                -- pseudorandomly update the seed for the next test case to get more variety in generated cases, but in a deterministic way
+                let branchGen = mkStdGen (fromIntegral seed)
+                let (newSeed, _) = random branchGen
+                loop (i + 1) newSeed
               else do
                 let failmsg =
                       "PBT FAIL: "
@@ -520,7 +523,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                       cmdErrorHandlerM "cmdStore failed to store shrinker result" $
                         cmdStore srv propertyFileName [serverIn]
                     pure $ Just $ failmsg <> "Counterexample: " <> counterLog
-  loop 0
+  loop 0 (fromIntegral $ configSeed config)
   where
     propName = psProp s
     genName = psGen s
