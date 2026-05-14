@@ -124,14 +124,12 @@ withProgramServer program runner extra_options phaseRef f = do
                 let phaseInfo = maybe mempty (" during phase " <>) (phase st)
                     shrinkInfo = maybe mempty (" while shrinking with " <>) (shrinkWith st)
                     sizeInfo = maybe mempty ((" at size " <>) . showText) (phaseSize st)
-                    seedInfo = maybe mempty ((" with seed " <>) . showText) (phaseSeed st)
                     tacticInfo = maybe mempty ((" with tactic " <>) . showText) (phaseRandom st)
                 ". Was evaluating property:\n"
                   <> activeTestName
                   <> phaseInfo
                   <> shrinkInfo
                   <> sizeInfo
-                  <> seedInfo
                   <> tacticInfo
         Right r -> pure r
 
@@ -322,7 +320,6 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
               phase = Nothing,
               shrinkWith = Nothing,
               phaseSize = Nothing,
-              phaseSeed = Nothing,
               phaseRandom = Nothing
             }
 
