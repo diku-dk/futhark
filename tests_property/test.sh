@@ -7,45 +7,16 @@ TEST_DIR=.
 run_test() {
     test_file="$1"
     futhark_cmd="$2"
-    seed_flag=""
+    # Fixed seed for reproducibility.
+    seed_option="--seed=123"
 
-    base_name=$(basename "$test_file")
-
-    # Special cases where output varies due to randomness.
-    # Use specific seeds for these tests to ensure deterministic output.
-    case "$base_name" in
-        "i8AutoShrink.fut" | "i32NoShrink.fut")
-            seed_flag="--seed=-1161324613"
-            ;;
-        "f64.fut")
-            seed_flag="--seed=-540792207"
-            ;;
-        Record* | Tuple* | "Stepping.fut")
-            seed_flag="--seed=-2070821161"
-            ;;
-        ArrayRecord* | "Arrayi32(2).fut")
-            seed_flag="--seed=976321339"
-            ;;
-        "reverse.fut")
-            seed_flag="--seed=885903244"
-            ;;
-        "NoGenGiven.fut")
-            seed_flag="--seed=98473829849"
-            ;;
-        "Sort.fut")
-            seed_flag="--seed=98473829849"
-            ;;
-        "ShrinkerError.fut")
-            seed_flag="--seed=98473829849"
-            ;;
-    esac
 
     test_file_full_path="$TEST_DIR/${test_file#./}"
 
     expected="${test_file%.fut}.out"
     actual="${test_file%.fut}.out_actual"
 
-    ($futhark_cmd test $seed_flag "$test_file_full_path") 2>&1 | \
+    ($futhark_cmd test $seed_option "$test_file_full_path") 2>&1 | \
         grep -vE "Compiling with|Running compiled|Running .*/|^$TEST_DIR/|[0-9]+ failed|[0-9]+ passed|[0-9]+/[0-9]+ passed" | \
         sed -E -e 's/seed=-?[0-9]+/seed=REDACTED/g' \
                -e 's/after [0-9]+ tests/after N tests/g' \

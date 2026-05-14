@@ -1,5 +1,5 @@
 PBT FAIL: prop_shrinker_error size=50 seed=REDACTED after N tests
-Shrinking note: User shrinker failed: Error in shrinker shrink_crash with random=-310417959: shrink_crash has Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./FutharkErrorTests/ShrinkerError.fut:8:8-14",""]
+Shrinking note: User shrinker failed: Error in shrinker shrink_crash with random=123: shrink_crash has Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./FutharkErrorTests/ShrinkerError.fut:8:8-14",""]
 Attempted auto-shrinker fallback.
 Auto-shrinker fallback completed.
 Counterexample: 1i32
