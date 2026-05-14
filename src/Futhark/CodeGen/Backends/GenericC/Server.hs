@@ -319,8 +319,26 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
             [C.cinit|&$id:sum_name|],
             Sum
           )
-    transparentDefs type_name (Just (OpaqueArray ops')) = opaqueArrayDefs type_name (opaqueArrayRank ops') (opaqueArrayElemType ops') (opaqueArrayNew ops') (opaqueArraySet ops') (opaqueArrayShape ops') (opaqueArrayIndex ops') Nothing
-    transparentDefs type_name (Just (OpaqueRecordArray ops')) = opaqueArrayDefs type_name (recordArrayRank ops') (recordArrayElemType ops') (recordArrayNew ops') (recordArraySet ops') (recordArrayShape ops') (recordArrayIndex ops') $ Just (recordArrayFields ops', recordArrayZip ops')
+    transparentDefs type_name (Just (OpaqueArray ops')) =
+      opaqueArrayDefs
+        type_name
+        (opaqueArrayRank ops')
+        (opaqueArrayElemType ops')
+        (opaqueArrayNew ops')
+        (opaqueArraySet ops')
+        (opaqueArrayShape ops')
+        (opaqueArrayIndex ops')
+        Nothing
+    transparentDefs type_name (Just (OpaqueRecordArray ops')) =
+      opaqueArrayDefs
+        type_name
+        (recordArrayRank ops')
+        (recordArrayElemType ops')
+        (recordArrayNew ops')
+        (recordArraySet ops')
+        (recordArrayShape ops')
+        (recordArrayIndex ops')
+        $ Just (recordArrayFields ops', recordArrayZip ops')
     transparentDefs _ _ = ([], [C.cinit|NULL|], Opaque)
 
     opaqueArrayDefs ::
