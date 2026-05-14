@@ -6,7 +6,7 @@ struct futhark_context_config {
   int profiling;
   int logging;
   char *cache_fname;
-  struct tuning_param tuning_params[NUM_TUNING_PARAMS];
+  struct tuning_param tuning_params[NUM_TUNING_PARAMS+1];
 };
 
 static void backend_context_config_setup(struct futhark_context_config* cfg) {
