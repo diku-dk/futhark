@@ -156,20 +156,12 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
    in ( [C.cedecl|const struct type $id:type_name;|],
         [C.cinit|&$id:type_name|],
         [C.cunit|
-              int $id:array_new_wrap(struct futhark_context* ctx,
-                                     typename $id:c_type_name* outp,
-                                     $ty:element_c_type *ps[],
+               int $id:array_new_wrap(struct futhark_context* ctx,
+                                     void** outp,
+                                     const void* p,
                                      const typename int64_t* shape) {
-                typename int64_t n_values = 1;
-                for (int i = 0; i < $int:rank; ++i) {
-                  n_values *= shape[i];
-                }
-                $ty:element_c_type *values = malloc(n_values * sizeof($ty:element_c_type));
-                for (typename int64_t i = 0; i < n_values; ++i) {
-                  values[i] = *ps[i];
-                }
-                *outp = $id:(arrayNew ops)(ctx, values, $args:shape_args);
-                free(values);
+                typename $id:c_type_name *out = (typename $id:c_type_name*) outp;
+                *out = $id:(arrayNew ops)(ctx, p, $args:shape_args);
                 return 0;
               }
               int $id:array_set(struct futhark_context *ctx,

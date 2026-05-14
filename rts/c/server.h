@@ -798,7 +798,25 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     return;
   }
 
-  const void** value_ptrs = alloca(n_values * sizeof(void*));
+  char *values = NULL;
+  const void **value_ptrs = NULL;
+
+  if (a->info != NULL) {
+    if (n_values < 0 || (uint64_t)n_values > SIZE_MAX / a->info->size) {
+      failure();
+      printf("Invalid array size.\n");
+      return;
+    }
+    size_t values_size = (size_t)n_values * a->info->size;
+    values = malloc(values_size);
+    if (values == NULL) {
+      failure();
+      printf("Out of memory.\n");
+      return;
+    }
+  } else {
+    value_ptrs = alloca(n_values * sizeof(void*));
+  }
 
   for (int64_t i = 0; i < n_values; i++) {
     struct variable* v = get_variable(s, args[2+a->rank+i]);
@@ -806,6 +824,7 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     if (v == NULL) {
       failure();
       printf("Unknown variable: %s\n", args[2+a->rank+i]);
+      free(values);
       return;
     }
 
@@ -813,13 +832,19 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
       failure();
       printf("Value %d mismatch: expected type %s, got %s\n",
              (int)i, a->element_type->name, v->value.type->name);
+      free(values);
       return;
     }
 
-    value_ptrs[i] = value_ptr(&v->value);
+    if (a->info != NULL) {
+      memcpy(values + i * a->info->size, value_ptr(&v->value), a->info->size);
+    } else {
+      value_ptrs[i] = value_ptr(&v->value);
+    }
   }
 
-  a->new(s->ctx, value_ptr(&to->value), value_ptrs, dims);
+  a->new(s->ctx, value_ptr(&to->value), a->info != NULL ? (void*)values : value_ptrs, dims);
+  free(values);
 }
 
 void cmd_set(struct server_state *s, const char *args[]) {
@@ -1543,29 +1568,8 @@ int restore_array(const struct array *a, FILE *f,
     return 1;
   }
 
-  int64_t n_values = 1;
-  for (int i = 0; i < a->rank; i++) {
-    n_values *= shape[i];
-  }
-
-  if (n_values < 0 || (uint64_t)n_values > SIZE_MAX / sizeof(void*)) {
-    free(data);
-    return 1;
-  }
-
-  const void **values = malloc((size_t)n_values * sizeof(void*));
-  if (values == NULL) {
-    free(data);
-    return 1;
-  }
-  char *data_bytes = data;
-  for (int64_t i = 0; i < n_values; i++) {
-    values[i] = data_bytes + i * a->info->size;
-  }
-
-  int err = a->new(ctx, p, values, shape);
+  int err = a->new(ctx, p, data, shape);
   err |= futhark_context_sync(ctx);
-  free(values);
   free(data);
   return err;
 }
