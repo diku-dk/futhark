@@ -84,5 +84,8 @@ test-structure:
 test-literate:
 	cd tests_literate && sh test.sh
 
+test-server:
+	cd tests_server && sh test.sh
+
 clean:
 	cabal clean

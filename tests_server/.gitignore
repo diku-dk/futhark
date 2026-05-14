@@ -1,0 +1,5 @@
+*/*
+!input.data
+!input.txt
+!output.data.expected
+!output.txt.expected

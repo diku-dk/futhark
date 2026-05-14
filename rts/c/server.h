@@ -34,19 +34,40 @@ enum kind {
   OPAQUE
 };
 
-struct array {
-  int rank;
-  const struct type *element_type;
-  array_new_fn new;
-  array_set_fn set;
-  array_shape_fn shape;
-  array_index_fn index;
-};
+typedef void* (*aux_array_new_fn)(struct futhark_context*, const void**, const int64_t*);
+typedef const int64_t* (*aux_array_shape_fn)(struct futhark_context*, void*);
+typedef int (*aux_array_index_fn)(struct futhark_context*, void*, const void*, const int64_t*);
+typedef int (*aux_array_values_fn)(struct futhark_context*, void*, void*);
+typedef int (*aux_array_free_fn)(struct futhark_context*, void*);
+typedef int (*aux_array_zip_fn)(struct futhark_context*, void*, const void*[]);
 
 struct field {
   const char *name;
   const struct type *type;
   project_fn project;
+};
+
+struct array_aux {
+  int rank;
+  const struct primtype_info_t* info;
+  const char *name;
+  int num_fields;
+  const struct field *fields;
+  aux_array_new_fn new;
+  aux_array_zip_fn zip;
+  aux_array_shape_fn shape;
+  aux_array_values_fn values;
+  aux_array_free_fn free;
+};
+
+struct array {
+  int rank;
+  const struct type *element_type;
+  const struct array_aux *aux;
+  array_new_fn new;
+  array_set_fn set;
+  array_shape_fn shape;
+  array_index_fn index;
 };
 
 struct record {
@@ -935,6 +956,138 @@ void cmd_index(struct server_state *s, const char *args[]) {
   a->index(s->ctx, value_ptr(&to->value), from->value.value.v_ptr, indices);
 }
 
+void cmd_zip(struct server_state *s, const char *args[]) {
+  const char *to_name = get_arg(args, 0);
+  const char *type_name = get_arg(args, 1);
+  const struct type *type = get_type(s, type_name);
+
+  if (type->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = type->info;
+  const struct array_aux *aux = a->aux;
+
+  if (aux == NULL || aux->zip == NULL || aux->fields == NULL) {
+    failure();
+    printf("Cannot zip this array type\n");
+    return;
+  }
+
+  int num_args = 0;
+  for (int i = 2; arg_exists(args, i); i++) {
+    num_args++;
+  }
+
+  if (num_args != aux->num_fields) {
+    failure();
+    printf("%d arrays expected but %d values provided.\n", aux->num_fields, num_args);
+    return;
+  }
+
+  const void** value_ptrs = alloca(num_args * sizeof(void*));
+
+  for (int i = 0; i < num_args; i++) {
+    struct variable* v = get_variable(s, args[2+i]);
+
+    if (v == NULL) {
+      failure();
+      printf("Unknown variable: %s\n", args[2+i]);
+      return;
+    }
+
+    if (strcmp(v->value.type->name, aux->fields[i].type->name) != 0) {
+      failure();
+      printf("Field %s mismatch: expected type %s, got %s\n",
+             aux->fields[i].name, aux->fields[i].type->name, v->value.type->name);
+      return;
+    }
+
+    value_ptrs[i] = v->value.value.v_ptr;
+  }
+
+  struct variable *to = create_variable(s, to_name, type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  int err = aux->zip(s->ctx, value_ptr(&to->value), value_ptrs);
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
+  if (err != 0) {
+    drop_variable(to);
+  }
+}
+
+void cmd_unzip(struct server_state *s, const char *args[]) {
+  const char *from_name = get_arg(args, 0);
+  struct variable* from = get_variable(s, from_name);
+
+  if (from == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", from_name);
+    return;
+  }
+
+  if (from->value.type->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = from->value.type->info;
+  const struct array_aux *aux = a->aux;
+
+  if (aux == NULL || aux->fields == NULL) {
+    failure();
+    printf("Cannot unzip this array type\n");
+    return;
+  }
+
+  int num_args = 0;
+  for (int i = 1; arg_exists(args, i); i++) {
+    num_args++;
+  }
+
+  if (num_args != aux->num_fields) {
+    failure();
+    printf("%d arrays expected but %d values provided.\n", aux->num_fields, num_args);
+    return;
+  }
+
+  struct variable **outs = alloca(num_args * sizeof(struct variable*));
+  for (int i = 0; i < num_args; i++) {
+    const char *to_name = get_arg(args, i+1);
+    struct variable *to = create_variable(s, to_name, aux->fields[i].type);
+    if (to == NULL) {
+      failure();
+      printf("Variable already exists: %s\n", to_name);
+      for (int j = 0; j < i; j++) {
+        drop_variable(outs[j]);
+      }
+      return;
+    }
+    outs[i] = to;
+  }
+
+  int err = 0;
+  for (int i = 0; i < num_args; i++) {
+    err |= aux->fields[i].project(s->ctx, value_ptr(&outs[i]->value), from->value.value.v_ptr);
+  }
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
+  if (err != 0) {
+    for (int i = 0; i < num_args; i++) {
+      drop_variable(outs[i]);
+    }
+  }
+}
+
 void cmd_fields(struct server_state *s, const char *args[]) {
   const char *type = get_arg(args, 0);
   const struct type *t = get_type(s, type);
@@ -1335,6 +1488,10 @@ void process_line(struct server_state *s, char *line) {
     cmd_set(s, tokens+1);
   } else if (strcmp(command, "index") == 0) {
     cmd_index(s, tokens+1);
+  } else if (strcmp(command, "zip") == 0) {
+    cmd_zip(s, tokens+1);
+  } else if (strcmp(command, "unzip") == 0) {
+    cmd_unzip(s, tokens+1);
   } else if (strcmp(command, "fields") == 0) {
     cmd_fields(s, tokens+1);
   } else if (strcmp(command, "variants") == 0) {
@@ -1392,22 +1549,6 @@ void run_server(struct futhark_prog *prog,
 
 // The aux struct lets us write generic method implementations without
 // code duplication.
-
-typedef void* (*aux_array_new_fn)(struct futhark_context*, const void**, const int64_t*);
-typedef const int64_t* (*aux_array_shape_fn)(struct futhark_context*, void*);
-typedef int (*aux_array_index_fn)(struct futhark_context*, void*, const void*, const int64_t*);
-typedef int (*aux_array_values_fn)(struct futhark_context*, void*, void*);
-typedef int (*aux_array_free_fn)(struct futhark_context*, void*);
-
-struct array_aux {
-  int rank;
-  const struct primtype_info_t* info;
-  const char *name;
-  aux_array_new_fn new;
-  aux_array_shape_fn shape;
-  aux_array_values_fn values;
-  aux_array_free_fn free;
-};
 
 int restore_array(const struct array_aux *aux, FILE *f,
                   struct futhark_context *ctx, void *p) {
