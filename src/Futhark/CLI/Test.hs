@@ -316,16 +316,15 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
           extra_compiler_options = configExtraCompilerOptions progs
 
       phaseRef <-
-        liftIO $
-          newIORef $
-            PBTPhase
-              { activeTest = Nothing,
-                phase = Nothing,
-                shrinkWith = Nothing,
-                phaseSize = Nothing,
-                phaseSeed = Nothing,
-                phaseRandom = Nothing
-              }
+        liftIO . newIORef $
+          PBTPhase
+            { activeTest = Nothing,
+              phase = Nothing,
+              shrinkWith = Nothing,
+              phaseSize = Nothing,
+              phaseSeed = Nothing,
+              phaseRandom = Nothing
+            }
 
       when (mode `elem` [Compiled, Interpreted]) $
         context "Generating reference outputs" $
@@ -358,13 +357,13 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                 let requestedNames = [propName | PropertyCase propName <- properties]
                 let diagnostics = propertyDiagnostics requestedNames propSpecs
 
-                propResults <-
+                pbt_result <-
                   if null diagnostics
                     then do
                       let verifiedProps = selectRequestedPropSpecs properties propSpecs
-                      propResultsE <- runPBT pbtConfig server verifiedProps phaseRef program
+                      pbt_resultE <- runPBT pbtConfig server verifiedProps phaseRef program
 
-                      let allResults = flip map propResultsE $ \case
+                      let allResults = flip map pbt_resultE $ \case
                             Left err -> Failure [err]
                             Right (Just e) -> Failure [e]
                             Right Nothing -> Success
@@ -378,7 +377,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                       pure allResults
                     else pure []
 
-                pure $ normal_test_result ++ diagnostics ++ propResults
+                pure $ normal_test_result ++ diagnostics ++ pbt_result
 
       when (mode == Interpreted) $
         context "Interpreting" $
@@ -524,15 +523,7 @@ doTest = catching . runTestM . runTestCase
 
 makeTestCase :: TestConfig -> TestMode -> (FilePath, ProgramTest) -> TestCase
 makeTestCase config mode (file, spec) =
-  excludeCases config $ TestCase mode file spec (configPrograms config) pbtcfg
-  where
-    pbtcfg =
-      PBTConfig
-        { configNumTests = configNumTests $ configPBTConfig config,
-          configMaxSize = configMaxSize $ configPBTConfig config,
-          configSeed = configSeed $ configPBTConfig config,
-          configShrinkTries = configShrinkTries $ configPBTConfig config
-        }
+  excludeCases config $ TestCase mode file spec (configPrograms config) (configPBTConfig config)
 
 data ReportMsg
   = TestStarted TestCase
@@ -1008,14 +999,11 @@ excludeBackend config =
           : configExclude config
     }
 
-declaredPropertyNames :: [PropSpec] -> [T.Text]
-declaredPropertyNames = map psProp
-
 propertyDiagnostics :: [T.Text] -> [PropSpec] -> [TestResult]
 propertyDiagnostics requested specs =
   missingRequested ++ missingDeclarations
   where
-    declared = declaredPropertyNames specs
+    declared = map psProp specs
 
     requestedWithoutAttr =
       [name | name <- requested, name `notElem` declared]
