@@ -41,10 +41,12 @@ processExps = foldMap processExp
 instance Expression Exp where
   moduloIsh (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
     | E.baseTag (E.qualLeaf op) <= maxIntrinsicTag,
-      name <- E.baseString $ E.qualLeaf op,
+      name <- baseString $ E.qualLeaf op,
       Just bop <- find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp],
       E.Mod <- bop =
         Just (e_x, e_y)
+    where
+      baseString = E.nameToString . E.baseName
   moduloIsh _ = Nothing
 
 instance (Ord u) => Expression (PrimExp u) where

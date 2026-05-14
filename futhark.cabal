@@ -403,7 +403,6 @@ library
       Futhark.Script
       Futhark.SoP.Convert
       Futhark.SoP.Expression
-      Futhark.SoP.Extended
       Futhark.SoP.FourierMotzkin
       Futhark.SoP.Monad
       Futhark.SoP.RefineEquivs

@@ -172,7 +172,7 @@ instance ToSoP VName Exp where
   toSoPNum (E.Var (E.QualName [] v) _ _) = pure (1, sym2SoP v)
   toSoPNum e@(E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
     | E.baseTag (E.qualLeaf op) <= maxIntrinsicTag,
-      name <- E.baseString $ E.qualLeaf op,
+      name <- E.nameToString $ E.baseName $ E.qualLeaf op,
       Just bop <- find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
         (_, x) <- toSoPNum e_x
         (_, y) <- toSoPNum e_y
