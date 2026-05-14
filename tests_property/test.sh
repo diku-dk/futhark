@@ -21,6 +21,7 @@ run_test() {
         sed -E -e 's/seed=-?[0-9]+/seed=REDACTED/g' \
                -e 's/after [0-9]+ tests/after N tests/g' \
                -e 's/candidate=-?[0-9]+/candidate=REDACTED/g' \
+               -e 's/random=-?[0-9]+/random=REDACTED/g' \
         > "$actual"
 
     if diff -u "$expected" "$actual" > /dev/null; then
