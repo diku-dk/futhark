@@ -44,7 +44,7 @@ static void cache_hash(struct cache_hash *out, const char *in, size_t n) {
 }
 
 #define CACHE_HEADER_SIZE 8
-static const char cache_header[CACHE_HEADER_SIZE] = "FUTHARK\0";
+static const char cache_header[CACHE_HEADER_SIZE] = "FUTHARK";
 
 static int cache_restore(const char *fname, const struct cache_hash *hash,
                          unsigned char **buf, size_t *buflen) {
