@@ -49,9 +49,12 @@ data PropSpec = PropSpec
   deriving (Show, Eq)
 
 data PBTPhase = PBTPhase
-  { activeTest :: Maybe EntryName, -- property being tested (same for generator and shrinker phases)
-    phase :: Maybe EntryName, -- current entrypoint being called (property, generator, or shrinker)
-    shrinkWith :: Maybe EntryName, -- property or generator (only for auto)
+  { -- | property being tested (same for generator and shrinker phases)
+    activeTest :: Maybe EntryName,
+    -- | current entrypoint being called (property, generator, or shrinker)
+    phase :: Maybe EntryName,
+    -- | property or generator (only for auto)
+    shrinkWith :: Maybe EntryName,
     phaseSize :: Maybe Int64,
     phaseSeed :: Maybe Int32,
     phaseRandom :: Maybe Int32
@@ -682,9 +685,12 @@ autoShrinkLoop srv propName genName vCounterExample size seed phaseRef = runExce
   loop size
 
 data Step
-  = AcceptedShrink -- Property still failed with the new candidate
-  | NotAcceptedShrink -- Property passed with the new candidate
-  | ErrorInShrink T.Text -- shrinker error (including property failure in shrinker)
+  = -- | Property still failed with the new candidate
+    AcceptedShrink
+  | -- | Property passed with the new candidate
+    NotAcceptedShrink
+  | -- | Shrinker error (including property failure in shrinker)
+    ErrorInShrink T.Text
   deriving (Eq, Show)
 
 shrinkLoop :: Server -> EntryName -> VarName -> EntryName -> Int32 -> Int -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
