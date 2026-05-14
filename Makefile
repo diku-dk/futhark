@@ -87,5 +87,8 @@ test-literate:
 test-property:
 	cd tests_property && sh test.sh
 
+test-server:
+	cd tests_server && sh test.sh
+
 clean:
 	cabal clean
