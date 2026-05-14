@@ -1,4 +1,5 @@
 */*
+!test.fut
 !input.data
 !input.txt
 !output.data.expected
