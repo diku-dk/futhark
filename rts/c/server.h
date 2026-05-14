@@ -773,7 +773,18 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     return;
   }
 
-  int64_t* dims = alloca(a->rank * sizeof(int64_t));
+  if ((uint64_t)a->rank > SIZE_MAX / sizeof(int64_t)) {
+    failure();
+    printf("Invalid array rank.\n");
+    return;
+  }
+
+  int64_t* dims = malloc((size_t)a->rank * sizeof(int64_t));
+  if (dims == NULL) {
+    failure();
+    printf("Out of memory.\n");
+    return;
+  }
   int64_t n_values = 1;
 
   for (int i = 0; i < a->rank; ++i) {
@@ -785,6 +796,7 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     if (errno == ERANGE || *end != '\0' || size < 0) {
       failure();
       printf("Invalid size `%s` of dimension %d.\n", size_arg, i+1);
+      free(dims);
       return;
     }
 
@@ -795,6 +807,7 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
   if (num_args - a->rank != n_values) {
     failure();
     printf("Expected %d values, but got %d.\n", (int)n_values, num_args - a->rank);
+    free(dims);
     return;
   }
 
@@ -805,6 +818,7 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     if (n_values < 0 || (uint64_t)n_values > SIZE_MAX / a->info->size) {
       failure();
       printf("Invalid array size.\n");
+      free(dims);
       return;
     }
     size_t values_size = (size_t)n_values * a->info->size;
@@ -812,10 +826,23 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     if (values == NULL) {
       failure();
       printf("Out of memory.\n");
+      free(dims);
       return;
     }
   } else {
-    value_ptrs = alloca(n_values * sizeof(void*));
+    if (n_values < 0 || (uint64_t)n_values > SIZE_MAX / sizeof(void*)) {
+      failure();
+      printf("Invalid array size.\n");
+      free(dims);
+      return;
+    }
+    value_ptrs = malloc((size_t)n_values * sizeof(void*));
+    if (value_ptrs == NULL) {
+      failure();
+      printf("Out of memory.\n");
+      free(dims);
+      return;
+    }
   }
 
   for (int64_t i = 0; i < n_values; i++) {
@@ -824,7 +851,9 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     if (v == NULL) {
       failure();
       printf("Unknown variable: %s\n", args[2+a->rank+i]);
+      free(value_ptrs);
       free(values);
+      free(dims);
       return;
     }
 
@@ -832,7 +861,9 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
       failure();
       printf("Value %d mismatch: expected type %s, got %s\n",
              (int)i, a->element_type->name, v->value.type->name);
+      free(value_ptrs);
       free(values);
+      free(dims);
       return;
     }
 
@@ -844,7 +875,9 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
   }
 
   a->new(s->ctx, value_ptr(&to->value), a->info != NULL ? (void*)values : value_ptrs, dims);
+  free(value_ptrs);
   free(values);
+  free(dims);
 }
 
 void cmd_set(struct server_state *s, const char *args[]) {
