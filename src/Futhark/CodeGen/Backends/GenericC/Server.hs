@@ -386,7 +386,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
                       length fields,
                       [C.cexp|(typename array_zip_fn)$id:zip_wrap|]
                     )
-        in ( zip_defs
+       in ( zip_defs
               ++ [C.cunit|
                int $id:new_wrap(struct futhark_context *ctx,
                                 typename $id:c_type_name *outp,
