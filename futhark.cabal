@@ -401,6 +401,16 @@ library
       Futhark.Profile.Html
       Futhark.Profile.SourceRange
       Futhark.Script
+      Futhark.SoP.Convert
+      Futhark.SoP.Expression
+      Futhark.SoP.Extended
+      Futhark.SoP.FourierMotzkin
+      Futhark.SoP.Monad
+      Futhark.SoP.RefineEquivs
+      Futhark.SoP.Refine
+      Futhark.SoP.RefineRanges
+      Futhark.SoP.SoP
+      Futhark.SoP.Util
       Futhark.Test
       Futhark.Test.Spec
       Futhark.Test.Values
