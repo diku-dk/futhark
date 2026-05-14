@@ -5,11 +5,9 @@ module Futhark.Test.Property
     PBTConfig (..),
     PBTPhase (..),
     PropSpec (..),
-    lookupArgRead,
-    lookupArgText,
-    stripCall,
     PBTOutput,
     PBTFailure,
+    extractPropSpecsFromServer,
   )
 where
 
@@ -20,7 +18,7 @@ import Control.Monad.Trans.Except
 import Data.Char (chr)
 import Data.IORef
 import Data.Int
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text qualified as T
 import Data.Vector.Storable qualified as SV
 import Futhark.Data
@@ -86,6 +84,41 @@ readMaybeText t =
   case reads (T.unpack t) of
     [(x, "")] -> Just x
     _ -> Nothing
+
+parsePropSpec :: T.Text -> T.Text -> Maybe PropSpec
+parsePropSpec entry attr = do
+  argsText <- stripCall "prop" attr
+  let args = map T.strip $ T.splitOn "," argsText
+  pure
+    PropSpec
+      { psProp = entry,
+        psGen = lookupArgText "gen" args,
+        psShrink = lookupArgText "shrink" args,
+        psSize = fromInteger <$> lookupArgRead "size" args,
+        psPPrint = lookupArgText "pprint" args
+      }
+
+atMostOnePropAttr :: (MonadFail m) => T.Text -> [T.Text] -> m [PropSpec]
+atMostOnePropAttr entry attrs =
+  case mapMaybe (parsePropSpec entry) attrs of
+    [] -> pure []
+    [spec] -> pure [spec]
+    _ ->
+      fail $
+        "Entry point '"
+          <> T.unpack entry
+          <> "' has more than one #[prop(...)] attribute."
+
+extractPropSpecsFromServer :: Server -> IO [PropSpec]
+extractPropSpecsFromServer srv = do
+  epsE <- cmdEntryPoints srv
+  eps <- either (error . show) pure epsE
+  concat <$> mapM getOne eps
+  where
+    getOne entry = do
+      attrsE <- cmdAttributes srv entry
+      attrs <- either (fail . show) pure attrsE
+      atMostOnePropAttr entry attrs
 
 runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> FilePath -> IO [Either PBTFailure PBTOutput]
 runPBT config srv specs entryNameRef program = do

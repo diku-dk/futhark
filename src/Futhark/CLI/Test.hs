@@ -47,41 +47,6 @@ import Text.Regex.TDFA
 -- the monadic level - a test failing should be handled explicitly.
 type TestM = ExceptT [T.Text] IO
 
-extractPropSpecsFromServer :: Server -> IO [PropSpec]
-extractPropSpecsFromServer srv = do
-  epsE <- cmdEntryPoints srv
-  eps <- either (error . show) pure epsE
-  concat <$> mapM getOne eps
-  where
-    getOne entry = do
-      attrsE <- cmdAttributes srv entry
-      attrs <- either (fail . show) pure attrsE
-      atMostOnePropAttr entry attrs
-
-atMostOnePropAttr :: T.Text -> [T.Text] -> IO [PropSpec]
-atMostOnePropAttr entry attrs =
-  case mapMaybe (parsePropSpec entry) attrs of
-    [] -> pure []
-    [spec] -> pure [spec]
-    _ ->
-      fail $
-        "Entry point '"
-          <> T.unpack entry
-          <> "' has more than one #[prop(...)] attribute."
-
-parsePropSpec :: T.Text -> T.Text -> Maybe PropSpec
-parsePropSpec entry attr = do
-  argsText <- stripCall "prop" attr
-  let args = map T.strip $ T.splitOn "," argsText
-  pure
-    PropSpec
-      { psProp = entry,
-        psGen = lookupArgText "gen" args,
-        psShrink = lookupArgText "shrink" args,
-        psSize = fromInteger <$> lookupArgRead "size" args,
-        psPPrint = lookupArgText "pprint" args
-      }
-
 -- Taken from transformers-0.5.5.0.
 eitherToErrors :: Either e a -> Errors e a
 eitherToErrors = either failure Pure
