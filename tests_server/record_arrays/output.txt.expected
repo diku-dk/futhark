@@ -1,0 +1,11 @@
+%%% OK
+%%% OK
+{bool: bool, i32: i32}
+%%% OK
+bool bool
+i32 i32
+%%% OK
+%%% OK
+%%% OK
+%%% OK
+%%% OK
