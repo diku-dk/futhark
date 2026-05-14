@@ -31,6 +31,7 @@ module Futhark.Util
     showText,
     unixEnvironment,
     isEnvVarAtLeast,
+    randomSeed,
     startupTime,
     fancyTerminal,
     hFancyTerminal,
@@ -69,6 +70,7 @@ import Data.Char
 import Data.Either
 import Data.Foldable (fold, toList)
 import Data.Function ((&))
+import Data.Int (Int32)
 import Data.IntMap qualified as IM
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -94,6 +96,7 @@ import System.IO (Handle, hIsTerminalDevice, stdout)
 import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import System.IO.Unsafe
 import System.Process.ByteString
+import System.Random (randomIO)
 import Text.Read (readMaybe)
 
 -- | Like @nub@, but without the quadratic runtime.
@@ -249,6 +252,13 @@ isEnvVarAtLeast s x =
   case readMaybe =<< lookup s unixEnvironment of
     Just y -> y >= x
     _ -> False
+
+{-# NOINLINE randomSeed #-}
+
+-- | A random number generated at startup. Can be used to produce different
+-- behaviour whenever the program is run.
+randomSeed :: Int32
+randomSeed = unsafePerformIO randomIO
 
 {-# NOINLINE startupTime #-}
 

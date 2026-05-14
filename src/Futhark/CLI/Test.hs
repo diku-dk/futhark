@@ -26,7 +26,7 @@ import Data.Time.Clock.System (SystemTime (..), getSystemTime)
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (atMostChars, fancyTerminal, showText)
+import Futhark.Util (atMostChars, fancyTerminal, randomSeed, showText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (annotate, bgColor, bold, hardline, pretty, putDoc, vsep)
 import Futhark.Util.Table
@@ -812,7 +812,7 @@ defaultConfig =
         PBTConfig
           { configNumTests = 100,
             configMaxSize = 50,
-            configSeed = 123,
+            configSeed = randomSeed,
             configShrinkTries = 5
           }
     }
@@ -1109,7 +1109,8 @@ propToFile testFile results = do
 
 -- | Run @futhark test@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
-  case progs of
-    [] -> Nothing
-    _ -> Just $ runTests (excludeBackend config) progs
+main =
+  mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
+    case progs of
+      [] -> Nothing
+      _ -> Just $ runTests (excludeBackend config) progs
