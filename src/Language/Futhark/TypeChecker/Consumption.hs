@@ -90,7 +90,7 @@ insertSelfAliases v = onPath []
     onPath' fs (TypeVar als tn args) = TypeVar (S.insert (AliasBound v fs) als) tn args
     onPath' fs (Record ts) = Record $ M.mapWithKey (\f -> onPath (fs ++ [f])) ts
     onPath' fs (Sum cs) = Sum $ fmap (map (onPath fs)) cs
-    onPath' _ et@Arrow {} = et
+    onPath' fs (Arrow als mn d ps rt) = Arrow (S.insert (AliasBound v fs) als) mn d ps rt
     onPath' _ et@Prim {} = et
 
 updateAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
