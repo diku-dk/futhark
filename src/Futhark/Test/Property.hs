@@ -21,13 +21,18 @@ import Data.Int
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text qualified as T
 import Data.Vector.Storable qualified as SV
+import Data.Word (Word64)
 import Futhark.Data
 import Futhark.Server
 import Futhark.Server.Values qualified as FSV
+import Futhark.Test.Values
+  ( RandomConfiguration (..),
+    initialRandomConfiguration,
+    randomValue,
+  )
 import Futhark.Util (showText)
-import Numeric.Half (Half)
 import System.FilePath (dropExtension)
-import System.Random (StdGen, mkStdGen, random, randoms)
+import System.Random (StdGen, mkStdGen, random)
 import System.Random.Stateful (IOGenM, applyIOGen, newIOGenM)
 
 data PBTConfig = PBTConfig
@@ -70,6 +75,9 @@ type PBTGen = IOGenM StdGen
 -- | Generate a seed that can be passed to Futhark.
 genSeed :: (MonadIO m) => PBTGen -> m Int32
 genSeed = applyIOGen random
+
+genWord64 :: (MonadIO m) => PBTGen -> m Word64
+genWord64 = applyIOGen random
 
 lookupArgText :: T.Text -> [T.Text] -> Maybe T.Text
 lookupArgText name = lookupArgWith name Just
@@ -228,7 +236,7 @@ haskellFutGenerator srv candidate genTy size rng = do
     _ -> do
       let (dims, baseTy) = getFutBaseType genTy
       let shapeList = replicate (length dims) size
-      seed <- genSeed rng
+      seed <- genWord64 rng
       case makeFutPrimitiveValue baseTy shapeList seed of
         Left err -> pure $ Just err
         Right val -> do
@@ -243,25 +251,25 @@ getFutBaseType t
   | "[]" `T.isPrefixOf` t = let (ds, base) = getFutBaseType (T.drop 2 t) in (0 : ds, base)
   | otherwise = ([], t)
 
-makeFutPrimitiveValue :: TypeName -> [Int64] -> Int32 -> Either PBTFailure Value
-makeFutPrimitiveValue ty shapeList seed =
-  let gen = mkStdGen (fromIntegral seed)
-      shape = SV.fromList $ map fromIntegral shapeList
-      totalElems = fromIntegral $ product shapeList
-   in case ty of
-        "i8" -> Right $ I8Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "i16" -> Right $ I16Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "i32" -> Right $ I32Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "i64" -> Right $ I64Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "u8" -> Right $ U8Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "u16" -> Right $ U16Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "u32" -> Right $ U32Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "u64" -> Right $ U64Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "f16" -> Right $ F16Value shape $ SV.fromList $ take totalElems $ map (realToFrac :: Float -> Half) (randoms gen)
-        "f32" -> Right $ F32Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "f64" -> Right $ F64Value shape $ SV.fromList $ take totalElems (randoms gen)
-        "bool" -> Right $ BoolValue shape $ SV.fromList $ take totalElems (randoms gen)
-        _ -> Left ("Batch generation not implemented for: " <> ty)
+makeFutPrimitiveValue :: TypeName -> [Int64] -> Word64 -> Either PBTFailure Value
+makeFutPrimitiveValue ty shape seed =
+  case ty of
+    "i8" -> Right $ randomValue cfg (ValueType shape' I8) seed
+    "i16" -> Right $ randomValue cfg (ValueType shape' I16) seed
+    "i32" -> Right $ randomValue cfg (ValueType shape' I32) seed
+    "i64" -> Right $ randomValue cfg (ValueType shape' I64) seed
+    "u8" -> Right $ randomValue cfg (ValueType shape' U8) seed
+    "u16" -> Right $ randomValue cfg (ValueType shape' U16) seed
+    "u32" -> Right $ randomValue cfg (ValueType shape' U32) seed
+    "u64" -> Right $ randomValue cfg (ValueType shape' U64) seed
+    "f16" -> Right $ randomValue cfg (ValueType shape' F16) seed
+    "f32" -> Right $ randomValue cfg (ValueType shape' F32) seed
+    "f64" -> Right $ randomValue cfg (ValueType shape' F64) seed
+    "bool" -> Right $ randomValue cfg (ValueType shape' Bool) seed
+    _ -> Left ("Batch generation not implemented for: " <> ty)
+  where
+    shape' = map fromIntegral shape
+    cfg = initialRandomConfiguration {f32Range = (-1, 1)}
 
 validateGenTypes :: Server -> EntryName -> Maybe EntryName -> IO (Maybe PBTFailure)
 validateGenTypes _srv _propName Nothing = pure Nothing -- TODO: should have more logic to see if we can actually generate anything
@@ -649,14 +657,14 @@ formatAutoShrinkResult autoRes =
       "\nAuto-shrinker fallback also failed: " <> autoErr
 
 updatePhase :: Maybe EntryName -> Maybe EntryName -> Maybe EntryName -> Maybe Int64 -> Maybe Int32 -> IORef PBTPhase -> IO ()
-updatePhase propName phase activeTest size randomValue phaseRef =
+updatePhase propName phase activeTest size val phaseRef =
   writeIORef phaseRef $
     PBTPhase
       { activeTest = propName,
         phase = phase,
         shrinkWith = activeTest,
         phaseSize = size,
-        phaseRandom = randomValue
+        phaseRandom = val
       }
 
 autoShrinkLoop :: Server -> EntryName -> Maybe EntryName -> VarName -> Int64 -> PBTGen -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
@@ -770,31 +778,31 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
                 throwE $ "Error in shrinker: " <> err
   loop 0 0
   where
-    oneStep size randomValue = do
+    oneStep size val = do
       let vOk = "qc_ok"
           vRandomValue = "qc_random"
 
       let shrinkUpdatePhase activeTest randomNum = updatePhase (Just propName) (Just shrinkName) activeTest (Just size) randomNum phaseRef
 
       freeVars srv [vRandomValue]
-      putVal srv vRandomValue randomValue
+      putVal srv vRandomValue val
 
       let shrinkerCandidate = outName shrinkName
-      shrinkUpdatePhase Nothing $ Just randomValue
+      shrinkUpdatePhase Nothing $ Just val
 
       withFreedVar srv shrinkerCandidate $ runExceptT $ do
         errE <- liftIO $ callKeepIns srv shrinkName shrinkerCandidate [counterExample, vRandomValue]
         liftIO $ freeVars srv [vRandomValue]
         maybe (pure ()) (throwE . ((shrinkName <> " has ") <>)) errE
 
-        liftIO $ shrinkUpdatePhase Nothing $ Just randomValue
+        liftIO $ shrinkUpdatePhase Nothing $ Just val
 
         okE <- liftIO $
           withCallKeepIns srv propName vOk [shrinkerCandidate] $
             \vOk' -> getVal srv vOk'
         ok <- either (throwE . ("Property " <>)) pure okE
 
-        liftIO $ shrinkUpdatePhase Nothing $ Just randomValue
+        liftIO $ shrinkUpdatePhase Nothing $ Just val
 
         case ok of
           True -> pure NotAcceptedShrink
