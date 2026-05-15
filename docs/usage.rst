@@ -391,9 +391,8 @@ essentially the same as in the language itself:
    Further, any *aliases* of that value are also considered consumed
    and may not be used.
 
-2. Each entry point output is either *unique* or *nonunique*.  A
-   unique output has no aliases.  A nonunique output aliases *every*
-   nonconsuming input parameter.
+2. The entry point output iseither *unique* or *nonunique*. A unique output has
+   no aliases. A nonunique output aliases *every* nonconsuming input parameter.
 
 Note that these distinctions are currently usually not visible in the
 generated API, and so correct usage requires knowledge of the original
