@@ -2720,8 +2720,11 @@ liftLoopParam lvl segments num_segments inps env loopParamNames (fparam, initSE)
               (arrayOf (Prim pt) pShape u)
           initV <- liftSubExpRegular lvl segments inps env pShape initSE
           pure ([p], Regular $ paramName p, [Var initV])
-    Acc {} ->
-      error "liftLoopParam: Acc"
+    Acc {} -> do
+      initV <- liftSubExpRegular lvl segments inps env mempty initSE
+      let Param attrs v acc_t = fparam
+      param <- Param attrs <$> newName v <*> pure acc_t
+      pure ([param], Regular $ paramName param, [Var initV])
     Mem {} ->
       error "liftLoopParam: Mem"
 
