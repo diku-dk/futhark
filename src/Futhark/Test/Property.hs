@@ -223,39 +223,88 @@ getOutputType s entry = do
 
 haskellFutGenerator :: Server -> EntryName -> TypeName -> Int64 -> PBTGen -> IO (Maybe PBTFailure)
 haskellFutGenerator srv candidate genTy size rng = do
-  resFields <- cmdFields srv genTy
-  case resFields of
-    -- Composite type
-    Right fields | not (null fields) -> do
-      let fieldVarNames = [candidate <> "_$compositeVal" <> fieldName fld | fld <- fields]
+  kRes <- cmdErrorHandlerE "haskellFutGenerator cmdKind failed: " $ cmdKind srv genTy
+  case kRes of
+    Record -> do
+      resFields <- cmdFields srv genTy
+      case resFields of
+        Right fields -> do
+          let fieldVarNames = [candidate <> "_$compositeVal" <> fieldName fld | fld <- fields]
 
-      -- Generate each field recursively
-      results <- forM (zip fieldVarNames fields) $ \(fVarName, fld) ->
-        haskellFutGenerator srv fVarName (fieldType fld) size rng
+          results <- forM (zip fieldVarNames fields) $ \(fVarName, fld) ->
+            haskellFutGenerator srv fVarName (fieldType fld) size rng
 
-      case sequence results of
-        Just err -> pure $ Just $ T.unlines err
-        Nothing -> do
-          freeVars srv [candidate]
-          cmdErrorHandlerM ("Failed to pack record " <> candidate <> ": ") $
-            cmdNew srv candidate genTy fieldVarNames
+          case sequence results of
+            Just err -> pure $ Just $ T.unlines err
+            Nothing -> do
+              freeVars srv [candidate]
+              cmdErrorHandlerM ("Failed to pack record " <> candidate <> ": ") $
+                cmdNew srv candidate genTy fieldVarNames
 
-          freeVars srv fieldVarNames
-          pure Nothing
+              freeVars srv fieldVarNames
+              pure Nothing
+        Left err -> pure $ Just $ showText err
 
-    -- Primitive or Array
-    _ -> do
+    Array -> do
       let (dims, baseTy) = getFutBaseType genTy
-      let shapeList = replicate (length dims) size
+      baseKind <- cmdErrorHandlerE "haskellFutGenerator base cmdKind failed: " $ cmdKind srv baseTy
+      case baseKind of
+        Record -> do
+          resFields <- cmdFields srv baseTy
+          case resFields of
+            Right fields -> do
+              let fieldVarNames = [candidate <> "_$compositeArr_" <> fieldName fld | fld <- fields]
+
+              results <- forM (zip fieldVarNames fields) $ \(fVarName, fld) -> do
+                let (innerDims, innerBaseTy) = getFutBaseType (fieldType fld)
+                    totalDimCount = length dims + length innerDims
+                    fArrTy = T.replicate totalDimCount "[]" <> innerBaseTy
+                haskellFutGenerator srv fVarName fArrTy size rng
+
+              case sequence results of
+                Just err -> pure $ Just $ T.unlines err
+                Nothing -> do
+                  freeVars srv [candidate]
+                  cmdErrorHandlerM ("Failed to zip array of records " <> candidate <> ": ") $
+                    cmdZip srv candidate genTy fieldVarNames
+
+                  freeVars srv fieldVarNames
+                  pure Nothing
+            Left err -> pure $ Just $ showText err
+
+        _ -> do
+          let shapeList = replicate (length dims) size
+          seed <- genWord64 rng
+          case makeFutPrimitiveValue baseTy shapeList seed of
+            Right val -> do
+              freeVars srv [candidate]
+              putRes <- FSV.putValue srv candidate val
+              case putRes of
+                Nothing -> pure Nothing
+                Just err -> pure $ Just $ showText err
+            Left err -> pure $ Just err
+
+    _ -> do
       seed <- genWord64 rng
-      case makeFutPrimitiveValue baseTy shapeList seed of
-        Left err -> pure $ Just err
+      case makeFutPrimitiveValue genTy [] seed of
         Right val -> do
           freeVars srv [candidate]
           putRes <- FSV.putValue srv candidate val
           case putRes of
             Nothing -> pure Nothing
             Just err -> pure $ Just $ showText err
+
+        Left _ -> do
+          let cleanTy = T.dropWhile (== '#') genTy
+              genName = "gen_" <> cleanTy
+              szVar = candidate <> "_$size"
+              sdVar = candidate <> "_$seed"
+          
+          putVal srv szVar size
+          s32 <- genSeed rng
+          putVal srv sdVar s32
+          
+          callFreeIns srv genName candidate [szVar, sdVar]
 
 getFutBaseType :: T.Text -> ([Int64], T.Text)
 getFutBaseType t
