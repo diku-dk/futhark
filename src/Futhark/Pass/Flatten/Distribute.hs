@@ -202,15 +202,23 @@ patInput :: ResTag -> PatElem Type -> (VName, DistInput)
 patInput tag pe =
   (patElemName pe, DistInput tag $ patElemType pe)
 
+nextResTag :: DistInputs -> ResTag
+nextResTag = foldl' step (ResTag 0)
+  where
+    step next (_, DistInputFree _ _) =
+      next
+    step next (_, DistInput (ResTag i) _) =
+      max next (ResTag (i + 1))
+
 distributeBody ::
   Scope rep ->
   Segments ->
   DistInputs ->
   Body SOACS ->
   (DistInputs, [DistStm])
-distributeBody outer_scope w param_inputs body =
+distributeBody outer_scope w param_inputs body = do
   let ((_, avail_inputs), stms) =
-        L.mapAccumL distributeStm (ResTag (length param_inputs), param_inputs) $
+        L.mapAccumL distributeStm (nextResTag param_inputs, param_inputs) $
           stmsToList $
             bodyStms body
    in (avail_inputs, classifyStms (bodyResult body) stms)
