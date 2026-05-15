@@ -150,7 +150,7 @@ genScanWithKernelBodyAndPost lvl desc segments mkScanLam nes mkPostLam m = do
   post_lam' <- renameLambda post_lam
 
   kbody <- renameBody $ Body () stms res
-  let op = SegBinOp Commutative scan_lam' nes mempty
+  let op = SegBinOp Noncommutative scan_lam' nes mempty
 
   letTupExp desc $ Op $ SegOp $ SegScan lvl space res_t kbody [op] (SegPostOp post_lam')
   where
