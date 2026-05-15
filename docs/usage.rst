@@ -360,14 +360,6 @@ are as follows:
   with a type abbreviation to give it a specific name, otherwise one
   will be generated.
 
-Return types follow these rules, with one addition:
-
-* If the return type is an *m*-element tuple, then the function
-  returns *m* values, mapped according to the rules above (but not
-  including this one - nested tuples are not mapped directly).  This
-  rule does not apply when the entry point has been given a return
-  type ascription that is not syntactically a tuple type.
-
 .. _api-consumption:
 
 Consumption and Aliasing
