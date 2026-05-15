@@ -36,13 +36,16 @@ type Names = S.Set VName
 -- an equivalence class.  See uniqueness-error18.fut for an example of
 -- why this is necessary.
 data Alias
-  = AliasBound {aliasVar :: VName}
-  | AliasFree {aliasVar :: VName}
+  = AliasBound {aliasVar :: VName, aliasFields :: [Name]}
+  | AliasFree {aliasVar :: VName, aliasFields :: [Name]}
   deriving (Eq, Ord, Show)
 
 instance Pretty Alias where
-  pretty (AliasBound v) = prettyName v
-  pretty (AliasFree v) = "~" <> prettyName v
+  pretty (AliasBound v fs) = prettyAlias v fs
+  pretty (AliasFree v fs) = "~" <> prettyAlias v fs
+
+prettyAlias :: VName -> [Name] -> Doc ann
+prettyAlias v fs = prettyName v <> mconcat (map (("." <>) . prettyName) fs)
 
 instance Pretty (S.Set Alias) where
   pretty = braces . commasep . map pretty . S.toList
@@ -75,6 +78,20 @@ addAliases = flip second
 
 aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
+
+selfAliasType :: VName -> TypeBase Size asf -> TypeAliases
+selfAliasType v = insertSelfAliases v . second (const mempty)
+
+insertSelfAliases :: VName -> TypeAliases -> TypeAliases
+insertSelfAliases v = onPath []
+  where
+    onPath fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
+    onPath fs (Scalar st) = Scalar $ onPath' fs st
+    onPath' fs (TypeVar als tn args) = TypeVar (S.insert (AliasBound v fs) als) tn args
+    onPath' fs (Record ts) = Record $ M.mapWithKey (\f -> onPath (fs ++ [f])) ts
+    onPath' fs (Sum cs) = Sum $ fmap (map (onPath fs)) cs
+    onPath' fs (Arrow als mn d ps rt) = Arrow (S.insert (AliasBound v fs) als) mn d ps rt
+    onPath' _ et@Prim {} = et
 
 updateAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
 updateAliases _ [] ve_als =
@@ -196,7 +213,7 @@ checkReturnAlias loc params rettp =
     checkReturnAlias' params' seen (Unique, names) = do
       when (any (`S.member` S.map snd seen) $ S.toList names) $
         uniqueReturnAliased loc
-      notAliasesParam params' names
+      notAliasesParam params' $ S.map aliasVar names
       pure $ seen `S.union` tag Unique names
     checkReturnAlias' _ seen (Nonunique, names) = do
       when (any (`S.member` seen) $ S.toList $ tag Unique names) $
@@ -218,7 +235,7 @@ checkReturnAlias loc params rettp =
     returnAliases (Scalar (Record ets1)) (Scalar (Record ets2)) =
       concat $ M.elems $ M.intersectionWith returnAliases ets1 ets2
     returnAliases expected got =
-      [(uniqueness expected, S.map aliasVar $ aliases got)]
+      [(uniqueness expected, aliases got)]
 
     consumableParamType (Array u _ _) = u == Consume
     consumableParamType (Scalar Prim {}) = True
@@ -230,8 +247,8 @@ checkReturnAlias loc params rettp =
 unscope :: [VName] -> Aliases -> Aliases
 unscope bound = S.map f
   where
-    f (AliasFree v) = AliasFree v
-    f (AliasBound v) = if v `elem` bound then AliasFree v else AliasBound v
+    f (AliasFree v fs) = AliasFree v fs
+    f (AliasBound v fs) = if v `elem` bound then AliasFree v fs else AliasBound v fs
 
 -- | Figure out the aliases of each bound name in a pattern.
 matchPat :: Pat t -> TypeAliases -> DL.DList (VName, (t, TypeAliases))
@@ -268,7 +285,7 @@ bindingPat p t = fmap (second (second (unscope (patNames p)))) . local bind
             foldr (uncurry M.insert . f) (envVtable env) (matchPat p t)
         }
       where
-        f (v, (_, als)) = (v, Consumable $ second (S.insert (AliasBound v)) als)
+        f (v, (_, als)) = (v, Consumable $ insertSelfAliases v als)
 
 bindingParam :: Pat ParamType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingParam p m = do
@@ -281,8 +298,8 @@ bindingParam p m = do
             foldr (uncurry M.insert . f) (envVtable env) (patternMap p)
         }
     f (v, t)
-      | diet t == Consume = (v, Consumable $ t `setAliases` S.singleton (AliasBound v))
-      | otherwise = (v, Nonconsumable $ t `setAliases` S.singleton (AliasBound v))
+      | diet t == Consume = (v, Consumable $ selfAliasType v t)
+      | otherwise = (v, Nonconsumable $ selfAliasType v t)
 
 bindingIdent :: Diet -> Ident StructType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingIdent d (Ident v (Info t) _) =
@@ -292,7 +309,7 @@ bindingIdent d (Ident v (Info t) _) =
     d' = case d of
       Consume -> Consumable
       Observe -> Nonconsumable
-    t' = d' $ t `setAliases` S.singleton (AliasBound v)
+    t' = d' $ selfAliasType v t
 
 bindingParams :: [Pat ParamType] -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingParams params m =
@@ -335,7 +352,7 @@ consumeAliases loc als = do
           Just (Nonconsumable {}) -> True
           Just _ -> False
           Nothing -> True
-      checkIfConsumable (AliasBound v)
+      checkIfConsumable (AliasBound v _)
         | isBad v = do
             v' <- describeVar v
             addError loc mempty . withIndexLink "not-consumable" $
@@ -374,13 +391,15 @@ observeVar loc v t = do
     isInstantiation vtable =
       any (`M.member` vtable) . fvVars . freeInType
 
-    selfAlias (Array als shape et) = Array (S.insert (AliasBound v) als) shape et
-    selfAlias (Scalar st) = Scalar $ selfAlias' st
-    selfAlias' (TypeVar als tn args) = TypeVar als tn args -- #1675 FIXME
-    selfAlias' (Record fs) = Record $ fmap selfAlias fs
-    selfAlias' (Sum fs) = Sum $ fmap (map selfAlias) fs
-    selfAlias' et@Arrow {} = et
-    selfAlias' et@Prim {} = et
+    selfAlias = onPath []
+      where
+        onPath fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
+        onPath fs (Scalar st) = Scalar $ onPath' fs st
+        onPath' _ (TypeVar als tn args) = TypeVar als tn args -- #1675 FIXME
+        onPath' fs (Record ts) = Record $ M.mapWithKey (\f -> onPath (fs ++ [f])) ts
+        onPath' fs (Sum cs) = Sum $ fmap (map (onPath fs)) cs
+        onPath' _ et@Arrow {} = et
+        onPath' _ et@Prim {} = et
 
 -- Capture any newly consumed variables that occur during the provided action.
 contain :: CheckM a -> CheckM (a, Consumed)
@@ -494,10 +513,13 @@ noSelfAliases loc = foldM_ check mempty . aliasParts
       pure $ als <> seen
 
 consumeAsNeeded :: Loc -> ParamType -> TypeAliases -> CheckM ()
-consumeAsNeeded loc (Scalar (Record fs1)) (Scalar (Record fs2)) =
-  sequence_ $ M.elems $ M.intersectionWith (consumeAsNeeded loc) fs1 fs2
-consumeAsNeeded loc pt t =
-  when (diet pt == Consume) $ consumeAliases loc $ aliases t
+consumeAsNeeded loc pt t = consumeAliases loc $ consumeAliasesOf pt t
+  where
+    consumeAliasesOf (Scalar (Record fs1)) (Scalar (Record fs2)) =
+      mconcat $ M.elems $ M.intersectionWith consumeAliasesOf fs1 fs2
+    consumeAliasesOf p_t t_als
+      | diet p_t == Consume = aliases t_als
+      | otherwise = mempty
 
 checkArg :: [(Exp, TypeAliases)] -> ParamType -> Exp -> CheckM (Exp, TypeAliases)
 checkArg prev p_t e = do
@@ -712,7 +734,7 @@ checkLoop loop_loc (param, arg, form, body) = do
 
   let loopt =
         funType [param'] (RetType [] $ paramToRes param_t)
-          `setAliases` S.singleton (AliasFree v)
+          `setAliases` S.singleton (AliasFree v [])
   pure
     ( (param', arg', form', body'),
       applyArg loopt arg_als `combineAliases` body_als
@@ -728,7 +750,7 @@ checkFuncall ::
 checkFuncall loc fname f_als arg_als = do
   v <- VName "internal_app_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameAppRes fname loc) $ stateNames s}
-  pure $ foldl applyArg (second (S.insert (AliasFree v)) f_als) arg_als
+  pure $ foldl applyArg (second (S.insert (AliasFree v [])) f_als) arg_als
 
 checkExp :: Exp -> CheckM (Exp, TypeAliases)
 -- First we have the complicated cases.
