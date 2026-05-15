@@ -4,19 +4,19 @@ import "romu"
 
 module util = import "random_tests"
 
-module test_romu_quad_m = util.mktest (uniform_int_distribution i32 u64 romu_quad)
+module test_romu_quad_m = util.mktest (uniform_int_distribution i32 romu_quad)
 
-module test_romu_trio_m = util.mktest (uniform_int_distribution i32 u64 romu_trio)
+module test_romu_trio_m = util.mktest (uniform_int_distribution i32 romu_trio)
 
-module test_romu_duo_m = util.mktest (uniform_int_distribution i32 u64 romu_duo)
+module test_romu_duo_m = util.mktest (uniform_int_distribution i32 romu_duo)
 
-module test_romu_duo_jr_m = util.mktest (uniform_int_distribution i32 u64 romu_duo_jr)
+module test_romu_duo_jr_m = util.mktest (uniform_int_distribution i32 romu_duo_jr)
 
-module test_romu_quad32_m = util.mktest (uniform_int_distribution i32 u32 romu_quad32)
+module test_romu_quad32_m = util.mktest (uniform_int_distribution i32 romu_quad32)
 
-module test_romu_trio32_m = util.mktest (uniform_int_distribution i32 u32 romu_trio32)
+module test_romu_trio32_m = util.mktest (uniform_int_distribution i32 romu_trio32)
 
-module test_romu_mono32_m = util.mktest (uniform_int_distribution i32 u16 romu_mono32)
+module test_romu_mono32_m = util.mktest (uniform_int_distribution i32 romu_mono32)
 
 entry test_romu_quad (x: i32) (n: i64) = test_romu_quad_m.test x n (1, 100)
 entry test_romu_trio (x: i32) (n: i64) = test_romu_trio_m.test x n (1, 100)

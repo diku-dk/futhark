@@ -20,10 +20,10 @@
 
 type~ arr = []i32
 
-let all_equal_1 (x: i32) : bool =
+def all_equal_1 (x: i32) : bool =
   x == 1i32
 
-let prop_all_ones (xs: arr) : bool =
+def prop_all_ones (xs: arr) : bool =
   map all_equal_1 xs |> reduce (&&) true
 
 -- Succeeding generator: all 1s

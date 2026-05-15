@@ -10,4 +10,4 @@ Expected exactly 2 inputs: (i32, i32).
 Shrinker input arity mismatch.
  shrinker shrink_bad_arity2 inputs: []
 Expected exactly 2 inputs: (i32, i32).
-Property prop_div_zero failed with candidate=REDACTEDi32 with error: prop_div_zero has Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./ValidationTests/ShrinkerValidationTest.fut:82:4-6",""]
+Property prop_div_zero failed with candidate=REDACTEDi32 with error: prop_div_zero has Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./ValidationTests/ShrinkerValidationTest.fut:67:5-8",""]

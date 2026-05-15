@@ -1,9 +1,10 @@
 import "../libraries/shrinkers/integerShrinker"
 import "../lib/github.com/diku-dk/cpprandom/random"
+
 --------------------- i8 tests ------------------
 -- Uniform i8 distribution using minstd_rand (u32 engine) underneath.
 module rng_engine = minstd_rand
-module rand_i8 = uniform_int_distribution i8 u32 rng_engine
+module rand_i8 = uniform_int_distribution i8 rng_engine
 module shrink_i8 = integerlShrinkers i8
 
 entry gen_simple (size: i64) (seed: i32) : i8 =
@@ -12,11 +13,11 @@ entry gen_simple (size: i64) (seed: i32) : i8 =
   let (_, x) = rand_i8.rand (-i8.i64 size, i8.i64 size) rng0
   in x
 
-let simple_succ (x: i8) : i8 =
+def simple_succ (x: i8) : i8 =
   i8.abs x
 
 -- Regular test case for the shrinking to fail on.
--- == 
+-- ==
 -- entry: prop_simple_succ
 -- input {-10i8}
 -- output {true}
@@ -25,15 +26,16 @@ let simple_succ (x: i8) : i8 =
 
 -- ==
 -- property: prop_simple_succ
-#[prop(gen(gen_simple), shrink(shrink_simple))]
-entry prop_simple_succ (x: i8) : bool =
-    simple_succ x == i8.abs x
 
-let simple_fail (x: i8) : i8 =
+#[prop(gen(gen_simple),shrink(shrink_simple))]
+entry prop_simple_succ (x: i8) : bool =
+  simple_succ x == i8.abs x
+
+def simple_fail (x: i8) : i8 =
   i8.abs x
 
 -- Regular test case for the shrinking to fail on.
--- == 
+-- ==
 -- entry: prop_simple_fail
 -- input {10i8}
 -- output {true}
@@ -49,10 +51,10 @@ let simple_fail (x: i8) : i8 =
 -- property: prop_simple_fail
 
 -- sometimes fails
-#[prop(gen(gen_simple), shrink(shrink_simple))]
+
+#[prop(gen(gen_simple),shrink(shrink_simple))]
 entry prop_simple_fail (x: i8) : bool =
-    simple_fail x == x
+  simple_fail x == x
 
 entry shrink_simple (x: i8) (random: i32) : i8 =
   shrink_i8.shrinker x random
-

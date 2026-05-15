@@ -1,4 +1,4 @@
 require {
-  github.com/diku-dk/cpprandom 1.4.1 #c95459a4f362a56293cbefe71ef8dcb78b7a333e
-  github.com/diku-dk/sorts 0.7.1 #b42cfcb2d927d4192a1083f7d9efcdbfd1e5aa4d
+  github.com/diku-dk/cpprandom 1.5.0 #ec96adc06f7a91040b2c1f7f9fdc56b9b2e9f3a3
+  github.com/diku-dk/sorts 0.7.2 #4dbe5a2e489fa11b397e2eaf167059376f0d628a
 }

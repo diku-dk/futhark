@@ -1,2 +1,2 @@
 Property prop_property_error failed with candidate=REDACTEDi32 with error: prop_property_error has Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./FutharkErrorTests/PropertyError.fut:9:16-19",""]
-Property prop_head_is_zero failed with candidate=empty([0]i32) with error: prop_head_is_zero has Runtime error: ["Error: Index [0] out of bounds for array of shape [0].","","Backtrace:","-> #0  ./FutharkErrorTests/PropertyError.fut:24:3-8",""]
+Property prop_head_is_zero failed with candidate=empty([0]i32) with error: prop_head_is_zero has Runtime error: ["Error: Index [0] out of bounds for array of shape [0].","","Backtrace:","-> #0  ./FutharkErrorTests/PropertyError.fut:23:3-8",""]

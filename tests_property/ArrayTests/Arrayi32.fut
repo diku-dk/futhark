@@ -20,10 +20,10 @@
 
 type~ arr = []i32
 
-let all_equal_1 (x: i32) : bool =
+def all_equal_1 (x: i32) : bool =
   x == 1i32
 
-let prop_all_ones (xs: arr) : bool =
+def prop_all_ones (xs: arr) : bool =
   map all_equal_1 xs |> reduce (&&) true
 
 -- Succeeding generator: all 1s
@@ -44,41 +44,33 @@ entry gen_record_sums_fail (size: i64) (_: i32) : arr =
 -- New-protocol shrinker for []i32
 entry shrink_arr (xs: arr) (random: i32) : arr =
   let tactic = random % 4
-
-  let n64 : i64 = length xs
-  let n  : i32 = i32.i64 n64
-  let t  : i32 = if tactic < 0i32 then 0i32 else tactic
-
+  let n64: i64 = length xs
+  let n: i32 = i32.i64 n64
+  let t: i32 = if tactic < 0i32 then 0i32 else tactic
   -- ----- Phase 1: remove one element (t in [0..n-1]) -----
-  in if t < n then
-       if n64 <= 0 then
-         xs
-       else if n64 == 1 then
-         -- removing would make it empty; allow it (often helps)
-         []
-       else
-         let i : i64 = i64.i32 t
-         let pre  = take i xs
-         let post = drop (i+1) xs
-         in pre ++ post
+  in if t < n
+     then if n64 <= 0
+          then xs
+          else if n64 == 1
+          then -- removing would make it empty; allow it (often helps)
+               []
+          else let i: i64 = i64.i32 t
+               let pre = take i xs
+               let post = drop (i + 1) xs
+               in pre ++ post
+     else -- ----- Phase 2: shrink scalars toward 1 (t in [n..2n-1]) -----
+     if t < 2i32 * n
+     then if n64 == 0
+          then xs
+          else let k: i32 = t - n
+               let ki: i64 = i64.i32 k
+               -- set xs[k] to 1 if it isn't already
+               let old = xs[ki]
+               in if old == 1i32
+                  then xs
+                  else tabulate n64 (\i -> if i == ki then 1i32 else xs[i])
+     else xs
 
-     -- ----- Phase 2: shrink scalars toward 1 (t in [n..2n-1]) -----
-     else if t < 2i32 * n then
-       if n64 == 0 then
-         xs
-       else
-         let k  : i32 = t - n
-         let ki : i64 = i64.i32 k
-         -- set xs[k] to 1 if it isn't already
-         let old = xs[ki]
-         in if old == 1i32 then
-              xs
-            else
-              tabulate n64 (\i -> if i == ki then 1i32 else xs[i])
-
-     else
-       xs
-
-#[prop(gen(gen_record_sums_fail), shrink(shrink_arr))]
+#[prop(gen(gen_record_sums_fail),shrink(shrink_arr))]
 entry prop_record_sums_fail (input: arr) : bool =
   prop_all_ones input

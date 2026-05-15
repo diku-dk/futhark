@@ -13,6 +13,6 @@ entry gen_array (size: i64) (seed: i32) : []i32 =
   let n = if size < 0 then 0 else size
   in replicate n seed
 
-#[prop(gen(gen_array), , size(10))]
+#[prop(gen(gen_array),size(10))]
 entry prop_auto_shrink_reuses_putval_names (_xs: []i32) : bool =
   false

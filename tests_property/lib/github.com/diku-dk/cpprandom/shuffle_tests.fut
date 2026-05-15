@@ -2,7 +2,7 @@
 
 import "shuffle"
 
-module shuffle = mk_shuffle u32 pcg32
+module shuffle = mk_shuffle pcg32
 
 -- ==
 -- entry: test_shuffle

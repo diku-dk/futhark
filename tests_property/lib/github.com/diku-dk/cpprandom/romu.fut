@@ -29,7 +29,8 @@ def ROTL32 (x: u32, n: u32) =
 --
 -- * Est. capacity: 2⁹⁰ bytes
 -- * State size: 256 bits
-module romu_quad : rng_engine with t = u64 = {
+module romu_quad : rng_engine with int.t = u64 = {
+  module int = u64
   type t = u64
   type rng = {w: u64, x: u64, y: u64, z: u64}
 
@@ -74,7 +75,8 @@ module romu_quad : rng_engine with t = u64 = {
 --
 -- * Est. capacity: 2⁷⁵ bytes
 -- * State size: 192 bits
-module romu_trio : rng_engine with t = u64 = {
+module romu_trio : rng_engine with int.t = u64 = {
+  module int = u64
   type t = u64
   type rng = {x: u64, y: u64, z: u64}
 
@@ -117,7 +119,8 @@ module romu_trio : rng_engine with t = u64 = {
 --
 -- * Est. capacity: 2⁶¹ bytes
 -- * State size: 128 bits
-module romu_duo : rng_engine with t = u64 = {
+module romu_duo : rng_engine with int.t = u64 = {
+  module int = u64
   type t = u64
   type rng = {x: u64, y: u64}
 
@@ -154,7 +157,8 @@ module romu_duo : rng_engine with t = u64 = {
 --
 -- * Est. capacity: 2⁵¹ bytes
 -- * State size: 128 bits
-module romu_duo_jr : rng_engine with t = u64 = {
+module romu_duo_jr : rng_engine with int.t = u64 = {
+  module int = u64
   type t = u64
   type rng = {x: u64, y: u64}
 
@@ -191,7 +195,8 @@ module romu_duo_jr : rng_engine with t = u64 = {
 --
 -- * Est. capacity: 2⁶¹ bytes
 -- * State size: 128
-module romu_quad32 : rng_engine with t = u32 = {
+module romu_quad32 : rng_engine with int.t = u32 = {
+  module int = u32
   type t = u32
   type rng = {w: u32, x: u32, y: u32, z: u32}
 
@@ -236,7 +241,8 @@ module romu_quad32 : rng_engine with t = u32 = {
 --
 -- * Est. capacity: 2⁵³ bytes
 -- * State size = 96 bits.
-module romu_trio32 : rng_engine with t = u32 = {
+module romu_trio32 : rng_engine with int.t = u32 = {
+  module int = u32
   type t = u32
   type rng = {x: u32, y: u32, z: u32}
 
@@ -280,7 +286,8 @@ module romu_trio32 : rng_engine with t = u32 = {
 --
 -- * Capacity: 2²⁷ bytes
 -- * State size; 32 bits
-module romu_mono32 : rng_engine with t = u16 = {
+module romu_mono32 : rng_engine with int.t = u16 = {
+  module int = u16
   type rng = u32
   type t = u16
 

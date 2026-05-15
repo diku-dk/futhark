@@ -13,7 +13,7 @@ module type shuffle = {
   val shuffle' [n] 't : [n]rng -> [n]t -> ([n]rng, [n]t)
 }
 
-module mk_shuffle (I: integral) (E: rng_engine with t = I.t) : shuffle with rng = E.rng = {
+module mk_shuffle (E: rng_engine) : shuffle with rng = E.rng = {
   type rng = E.rng
 
   def radix_sort_step [n] 't
@@ -38,7 +38,7 @@ module mk_shuffle (I: integral) (E: rng_engine with t = I.t) : shuffle with rng 
                  (xs: [n]t) : [n]t =
     loop xs for i < num_bits do radix_sort_step xs get_bit i
 
-  module dist = uniform_int_distribution i64 I E
+  module dist = uniform_int_distribution i64 E
 
   def shuffle' [n] 't rngs (xs: [n]t) =
     let (rngs', keys) = map (dist.rand (0, n - 1)) rngs |> unzip
