@@ -1701,9 +1701,8 @@ distributeAndTransformInnerMap lvl mode ws_triple new_segment inps pat arrs' onF
 -- worth it, as such operators are extremely rare - and we can just fall back on
 suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
 suitableOperator env inps lam _nes =
-  -- allNames notVariant (freeIn lam)
-    -- && not (any (isVariant inps env) nes) -- TODO: maybe not needed
-    all primType (lambdaReturnType lam) -- TODO
+  allNames notVariant (freeIn lam)
+    && all primType (lambdaReturnType lam) -- TODO
   where
     notVariant v = isNothing $ M.lookup v $ inputReps inps env
 
@@ -1711,8 +1710,6 @@ suitableSegOpMap :: DistEnv -> DistInputs -> Lambda SOACS -> Bool
 suitableSegOpMap _env _inps map_lam =
   not (any isParallelStm (bodyStms $ lambdaBody map_lam))
 
--- TODO: do we want to add variants as inputs?
--- && allNames (not . isVariant inps env . Var) (freeIn map_lam)
 
 doSegMaposcanomap ::
   SegLevel ->
@@ -1922,7 +1919,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
           traceM "Unfirm Redomap"
           let sing_red = singleReduce reds
               zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-              free = freeIn sing_red <> freeIn map_lam
+              free = freeIn map_lam
               new_segment = segments <> pure w
           nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
           outer_scope <- askScope
@@ -1973,7 +1970,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
             prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
           nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
           let sing_red' = sing_red {redNeutral = nes'}
-          let free = freeIn map_lam <> freeIn sing_red
+          let free = freeIn map_lam
           outer_scope <- askScope
           let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
           free_and_sizes <- freeWithTypeDeps input_scope free
@@ -2016,7 +2013,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
       -- TODO: DO we still need this tho?
       all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
         traceM "Unfirm MAPOSCANOMAP"
-        let free = freeIn map_lam <> freeIn post_lam <> foldMap freeIn scans
+        let free = freeIn map_lam <> freeIn post_lam
             new_segment = segments <> pure w
         outer_scope <- askScope
         let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
@@ -2054,7 +2051,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
           let hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn post_lam <> freeIn map_lam <> foldMap freeIn scans)
           (ws_F, ws_O, ws_S, elems, elems_kind) <-
             prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
-          let free = freeIn map_lam <> freeIn post_lam <> foldMap freeIn scans
+          let free = freeIn map_lam <> freeIn post_lam 
           outer_scope <- askScope
           let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
           free_and_sizes <- freeWithTypeDeps input_scope free
