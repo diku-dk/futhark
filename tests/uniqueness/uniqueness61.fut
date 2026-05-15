@@ -1,7 +1,7 @@
 -- From #2849
 -- ==
 
-def f [n] (x: *([n]i32, [n]i32)) = x with 0[0] = 0
+def f [n] (x: *([n]i32, [n]i32)) = (x with 0[0] = 0) with 1[0] = 0
 
 def g [n] (x: *([n]i32, [n]i32)) = f x
 
