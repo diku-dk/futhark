@@ -65,7 +65,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
   let iota_w_t = Prim int64
   let iota_se = Var (paramName iota_p)
 
-  -- Potentially change to distrest option.
+  -- Potentially change to distres option.
   nonuniform <-
     localScope (scopeOfDistInputs inps) $
       any (any (any (isVariant inps env) . arrayDims))
@@ -183,8 +183,11 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
         <$> mapM onArr arrs
         <*> traverse (onOpWithIndexRank (segmentsRank segments)) op
       where
-        onArr arr =
-          liftSubExpRegular (flattenSegLevel ops) segments inps env (segmentsShape segments <> shape) (Var arr)
+        onArr arr = do 
+          arr_t <- localScope (scopeOfDistInputs inps) $  lookupType arr
+          let arr_shape = arrayShape arr_t
+              expected_shape = segmentsShape segments <> arr_shape
+          liftSubExpRegular (flattenSegLevel ops) segments inps env expected_shape (Var arr)
 
     onNonuniformInput (_shape, arrs, op) = do
       reps <- mapM (getIrregRep (flattenSegLevel ops) segments env inps) arrs
