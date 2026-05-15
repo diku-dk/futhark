@@ -36,18 +36,27 @@ import System.Random (StdGen, mkStdGen, random)
 import System.Random.Stateful (IOGenM, applyIOGen, newIOGenM)
 
 data PBTConfig = PBTConfig
-  { configNumTests :: Int32,
+  { -- | number of test cases to run for each property
+    configNumTests :: Int32,
+    -- | maximum size argument to pass to generators and shrinkers (unless overridden by PropSpec)
     configMaxSize :: Int64,
+    -- | seed to use for the random number generator (can be overridden by environment variable or PropSpec)
     configSeed :: Int32,
+    -- | number of shrinking attempts to make on userdefined shrinker before giving up and reporting the current candidate as the final counterexample
     configShrinkTries :: Int
   }
   deriving (Show, Eq)
 
 data PropSpec = PropSpec
-  { psProp :: T.Text,
+  { -- | the property entry point to test
+    psProp :: T.Text,
+    -- | optional generator entry point to use instead of the default auto-generator
     psGen :: Maybe T.Text,
+    -- | optional shrinker entry point to use instead of the default auto-shrinker
     psShrink :: Maybe T.Text,
+    -- | optional size argument to pass to the generator and shrinker phases (overrides configMaxSize)
     psSize :: Maybe Int64,
+    -- | optional pretty-printer entry point to use for rendering counterexamples instead of the default runner pretty-printer
     psPPrint :: Maybe T.Text
   }
   deriving (Show, Eq)
@@ -59,7 +68,9 @@ data PBTPhase = PBTPhase
     phase :: Maybe EntryName,
     -- | property or generator (only for auto)
     shrinkWith :: Maybe EntryName,
+    -- | size argument for generator and shrinker phases
     phaseSize :: Maybe Int64,
+    -- | seed argument for generator and shrinker phases
     phaseRandom :: Maybe Int32
   }
   deriving (Show, Eq)
@@ -906,43 +917,70 @@ getDataVal s name = do
 
 prettyVar :: Server -> VarName -> TypeName -> IO T.Text
 prettyVar srv v ty = do
-  fieldsRes <- cmdFields srv ty
-  case fieldsRes of
-    Right fieldLines -> do
-      -- convert from Field to text and type pairs
+  kRes <- cmdErrorHandlerE "cmdKind failed: " $ cmdKind srv ty
+  case kRes of
+    Record -> do
+      fieldsRes <- cmdFields srv ty
+      case fieldsRes of
+        Right fieldLines -> do
+          let fnames = map fieldName fieldLines
+              ftypes = map fieldType fieldLines
+              isTuple = all (\(n, (i :: Int)) -> n == showText i) (zip fnames [0 ..])
 
-      let fnames = map fieldName fieldLines
-          ftypes = map fieldType fieldLines
-          isTuple =
-            and
-              [ fname == showText i
-              | (fname, i) <- zip fnames [0 .. (length fnames - 1)]
-              ]
+          rendered <- forM (zip fnames ftypes) $ \(fname, fty) -> do
+            let tmp = v <> "_proj_" <> fname
+            sField <- withFreedVar srv tmp $ do
+              cmdErrorHandlerM "project failed: " $ cmdProject srv tmp v fname
+              prettyVar srv tmp fty
+            pure $ if isTuple then sField else fname <> " = " <> sField
 
-      rendered <- forM (zip fnames ftypes) $ \(fname, fty) -> do
-        let tmp =
-              if isTuple
-                then v <> "_tup_" <> fname
-                else v <> "_rec_" <> fname
-
-        sField <- withFreedVar srv tmp $ do
-          cmdErrorHandlerM ("cmdProject failed for field " <> fname <> ": ") $ cmdProject srv tmp v fname
-
-          prettyVar srv tmp fty
-
-        if isTuple
-          then pure sField
-          else pure (fname <> " = " <> sField)
-
-      if isTuple
-        then pure $ "(" <> T.intercalate ", " rendered <> ")"
-        else do
-          pure $ "{" <> T.intercalate ", " rendered <> "}"
-    Left _notARecord -> do
+          pure $
+            if isTuple
+              then "(" <> T.intercalate ", " rendered <> ")"
+              else "{" <> T.intercalate ", " rendered <> "}"
+        Left _ -> pure "<error: record fields missing>"
+    Array -> do
       valRes <- FSV.getValue srv v
       case valRes of
         Right val -> pure (valueText val)
-        Left _opaqueOrFailed -> pure ("<opaque:" <> ty <> ">")
+        Left _ -> do
+          dims <- cmdErrorHandlerE "cmdShape failed: " $ cmdShape srv v
+          baseTy <- getBaseType ty
+          buildNested v baseTy dims []
+    _ -> fallbackValue
+  where
+    fallbackValue = do
+      valRes <- FSV.getValue srv v
+      case valRes of
+        Right val -> pure (valueText val)
+        Left _ -> pure ("<opaque:" <> ty <> ">")
+
+    getBaseType :: TypeName -> IO TypeName
+    getBaseType t = do
+      k <- cmdErrorHandlerE "cmdKind failed: " $ cmdKind srv t
+      case k of
+        Array -> do
+          et <- cmdErrorHandlerE "cmdElemtype failed: " $ cmdElemtype srv t
+          getBaseType et
+        _ -> pure t
+
+    buildNested :: VarName -> TypeName -> [Int] -> [Int] -> IO T.Text
+    buildNested varName baseType dims currentPath =
+      case dims of
+        [] -> do
+          let pathStr = T.intercalate "_" (map showText currentPath)
+              tmpElem = varName <> "_elem_" <> pathStr
+
+          sField <- withFreedVar srv tmpElem $ do
+            cmdErrorHandlerM "index failed: " $ cmdIndex srv tmpElem varName currentPath
+            prettyVar srv tmpElem baseType
+
+          pure sField
+        (d : restDims) -> do
+          elements <- forM [0 .. d - 1] $ \idx -> do
+            buildNested varName baseType restDims (currentPath ++ [idx])
+
+          pure $ "[" <> T.intercalate ", " elements <> "]"
 
 getSingleInputType :: Server -> EntryName -> IO (Either PBTFailure TypeName)
 getSingleInputType srv ep = do
