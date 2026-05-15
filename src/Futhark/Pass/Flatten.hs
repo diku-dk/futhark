@@ -2353,8 +2353,12 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
                       res
                       (bodyResult body)
 
-                  let mergeOneLifted t rep0 rep1 =
-                        case (rep0, rep1) of
+                  let mergeOneLifted t rep0 rep1    
+                        | isAcc t = do
+                          let (Regular acc_res) = rep1
+                          pure [SubExpRes mempty (Var acc_res)]
+                        | otherwise = 
+                          case (rep0, rep1) of
                           (Regular x0, Regular x1) -> do
                             let initial_shape = Shape [w] <> arrayShape t
                             let final_shape = segmentsShape segments <> arrayShape t
@@ -3274,14 +3278,17 @@ splitInput ::
 splitInput lvl segments inps env is v = do
   (t, rep) <- liftSubExpPreserveRep segments inps env (Var v)
   (t,v,) <$> case rep of
-    Regular arr -> do
-      n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-      -- isnt' it better to do the segmap over all dims?
-      arr' <- letExp "split_arr" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
-        idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
-        let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
-        subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
-      pure $ Regular arr'
+    Regular arr ->
+      if isAcc t then 
+        pure $ Regular arr
+      else do
+        n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+        -- isnt' it better to do the segmap over all dims?
+        arr' <- letExp "split_arr" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
+          idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
+          let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
+          subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
+        pure $ Regular arr'
     Irregular (IrregularRep segs flags offsets elems _) -> do
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
       segs' <- letExp "split_segs" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
