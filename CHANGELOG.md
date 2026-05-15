@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New server commands: `zip` and `unzip`, matching the corresponding C APIs.
 
+* The restrictions for passing tuples as consumed function parameters have been
+  loosened.
+
 ### Removed
 
 ### Changed
