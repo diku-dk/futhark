@@ -845,17 +845,13 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
     checkReturnAlias loc params ret funbody_als
     checkGlobalAliases loc params funbody_als
     free_bound <- boundFreeInExp funbody
-    ret' <- case retdecl of
-      Just _ ->
-        pure $ RetType ext ret
-      Nothing ->
-        pure . RetType ext $ inferReturnUniqueness params ret funbody_als
-    let als = foldMap aliases (M.elems free_bound)
-        ftype = funType params ret' `setAliases` als
+    let ret' = maybe (inferReturnUniqueness params ret funbody_als) (const ret) retdecl
+        als = foldMap aliases (M.elems free_bound)
+        ftype = funType params (RetType ext ret') `setAliases` als
     pure ((ret', funbody'), ftype)
   (letbody', letbody_als) <- bindingFun (fst fname) ftype $ checkExp letbody
   pure
-    ( AppExp (LetFun fname (typarams, params, retdecl, Info ret', funbody') letbody' loc) appres,
+    ( AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret'), funbody') letbody' loc) appres,
       letbody_als
     )
 
@@ -880,7 +876,7 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
     checkReturnAlias loc params ret body_als
     checkGlobalAliases loc params body_als
     free_bound <- boundFreeInExp e
-    let ret' = inferReturnUniqueness params ret body_als
+    let ret' = maybe (inferReturnUniqueness params ret body_als) (const ret) te
         als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure
