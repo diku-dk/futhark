@@ -132,7 +132,12 @@ emccExportNames jses opaqueTypes =
          "_futhark_context_config_free",
          "_futhark_context_new",
          "_futhark_context_free",
-         "_futhark_context_get_error"
+         "_futhark_context_get_error",
+         "_futhark_context_sync",
+         "_futhark_context_clear_caches",
+         "_futhark_context_report",
+         "_futhark_context_pause_profiling",
+         "_futhark_context_unpause_profiling"
        ]
   where
     -- Include array types from both entry points and record fields.
@@ -165,6 +170,7 @@ classFutharkContext entryPoints opaqueTypes =
       getEntryPointsFun,
       getTypesFun,
       getErrorFun,
+      getUtilityFuns,
       T.unlines $ map toFutharkArray arrays,
       T.unlines $ concatMap (generateProjectMethods . snd) opaqueTypes,
       T.unlines $ map jsWrapEntryPoint entryPoints,
@@ -296,6 +302,35 @@ getErrorFun =
     var str = String.fromCharCode(...this.wasm.HEAP8.subarray(ptr, ptr + len));
     this.wasm._free(ptr);
     return str;
+  }
+  |]
+
+getUtilityFuns :: T.Text
+getUtilityFuns =
+  [text|
+  async context_sync() {
+    return this.wasm._futhark_context_sync(this.ctx);
+  }
+
+  async clear_caches() {
+    return this.wasm._futhark_context_clear_caches(this.ctx);
+  }
+
+  async report() {
+    var ptr = this.wasm._futhark_context_report(this.ctx);
+    var len = this.wasm.HEAP8.subarray(ptr).indexOf(0);
+    var bytes = this.wasm.HEAPU8.subarray(ptr, ptr + len);
+    var str = new TextDecoder().decode(bytes);
+    this.wasm._free(ptr);
+    return str;
+  }
+
+  async pause_profiling() {
+    return this.wasm._futhark_context_pause_profiling(this.ctx);
+  }
+
+  async unpause_profiling() {
+    return this.wasm._futhark_context_unpause_profiling(this.ctx);
   }
   |]
 

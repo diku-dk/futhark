@@ -1,9 +1,10 @@
 // Tests for inc.fut.
 //
-// The goal is to check:
-//   1. the backwards-compatible WASM API: newFutharkContext() + fc.inc(...)
-//   2. the shared entry API: fc.entry.inc(...)
-//   3. the preferred FutharkModule API: new FutharkModule() + await fut.init()
+// This checks:
+//   1. the backwards-compatible WASM API: newFutharkContext() + direct methods
+//   2. the shared entry API on FutharkContext
+//   3. the preferred FutharkModule API
+//   4. the shared utility methods on FutharkModule
 
 import assert from "assert/strict";
 
@@ -17,26 +18,44 @@ globalThis.__dirname = dirname(import.meta.url).substring(7);
 globalThis.require = createRequire(import.meta.url);
 
 // Imports from the generated ES6 module.
-import { newFutharkContext, FutharkContext, FutharkModule } from "./build/inc/inc.mjs";
+import {
+  newFutharkContext,
+  FutharkContext,
+  FutharkModule,
+} from "./build/inc/inc.mjs";
+
+function section(title) {
+  console.log();
+  console.log(`== ${title} ==`);
+}
+
+function ok(message) {
+  console.log(`  ✓ ${message}`);
+}
 
 async function main() {
   console.log();
   console.log("Testing inc.fut");
-  console.log();
 
-  console.log("Testing backwards-compatible WASM API: newFutharkContext + fc.inc");
+  section("Backwards-compatible WASM API");
 
   const fc = await newFutharkContext();
 
-  assert.ok(fc instanceof FutharkContext, "newFutharkContext should return a FutharkContext");
-  assert.ok(fc instanceof FutharkModule, "FutharkContext should extend FutharkModule");
+  assert.ok(
+    fc instanceof FutharkContext,
+    "newFutharkContext should return a FutharkContext"
+  );
+  assert.ok(
+    fc instanceof FutharkModule,
+    "FutharkContext should extend FutharkModule"
+  );
 
   const old_api_res = fc.inc(9);
   assert.equal(old_api_res, 10);
 
-  console.log("backwards-compatible direct API ok");
+  ok("newFutharkContext, FutharkContext, and direct entry calls still work");
 
-  console.log("Testing shared entry API on FutharkContext: fc.entry.inc");
+  section("Shared entry API on FutharkContext");
 
   assert.ok(fc.entry, "fc.entry should exist");
   assert.equal(typeof fc.entry.inc, "function");
@@ -44,11 +63,9 @@ async function main() {
   const entry_api_res = await fc.entry.inc(9);
   assert.equal(entry_api_res, 10);
 
-  console.log("FutharkContext entry API ok");
+  ok("FutharkContext exposes entry aliases");
 
-  fc.free();
-
-  console.log("Testing preferred FutharkModule API");
+  section("Preferred FutharkModule API");
 
   const fut = new FutharkModule();
 
@@ -62,9 +79,33 @@ async function main() {
   const module_api_res = await fut.entry.inc(9);
   assert.equal(module_api_res, 10);
 
-  console.log("FutharkModule entry API ok");
+  ok("FutharkModule supports init() and entry aliases");
 
+  section("Shared utility methods");
+
+  assert.equal(typeof fut.context_sync, "function");
+  assert.equal(typeof fut.clear_caches, "function");
+  assert.equal(typeof fut.report, "function");
+  assert.equal(typeof fut.pause_profiling, "function");
+  assert.equal(typeof fut.unpause_profiling, "function");
+
+  await fut.context_sync();
+  await fut.clear_caches();
+
+  const report = await fut.report();
+  assert.equal(typeof report, "string");
+
+  await fut.pause_profiling();
+  await fut.unpause_profiling();
+
+  ok("context_sync(), clear_caches(), report(), pause_profiling(), and unpause_profiling() work");
+
+  section("Cleanup");
+
+  fc.free();
   fut.free();
+
+  ok("all contexts freed");
 
   console.log();
   console.log("inc tests complete");
