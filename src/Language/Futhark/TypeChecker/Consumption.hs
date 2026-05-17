@@ -837,7 +837,7 @@ checkExp (AppExp (Match cond cs loc) appres) = do
         pure (CasePat p body' caseloc, body_als)
 
 --
-checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), funbody) letbody loc) appres) = do
+checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret), funbody) letbody loc) appres) = do
   ((ret', funbody'), ftype) <- bindingParams params $ do
     -- Throw away the consumption - it can refer only to the parameters
     -- anyway.
@@ -845,13 +845,17 @@ checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), fu
     checkReturnAlias loc params ret funbody_als
     checkGlobalAliases loc params funbody_als
     free_bound <- boundFreeInExp funbody
-    let ret' = inferReturnUniqueness params ret funbody_als
-        als = foldMap aliases (M.elems free_bound)
-        ftype = funType params (RetType ext ret') `setAliases` als
+    ret' <- case retdecl of
+      Just _ ->
+        pure $ RetType ext ret
+      Nothing ->
+        pure . RetType ext $ inferReturnUniqueness params ret funbody_als
+    let als = foldMap aliases (M.elems free_bound)
+        ftype = funType params ret' `setAliases` als
     pure ((ret', funbody'), ftype)
   (letbody', letbody_als) <- bindingFun (fst fname) ftype $ checkExp letbody
   pure
-    ( AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret'), funbody') letbody' loc) appres,
+    ( AppExp (LetFun fname (typarams, params, retdecl, Info ret', funbody') letbody' loc) appres,
       letbody_als
     )
 
