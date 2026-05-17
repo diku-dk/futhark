@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The type checker would disregard uniqueness annotations on local functions.
   (#2459)
 
+* Some loops would have aliases inferred incorrectly. (#2461)
+
 ## [0.26.1]
 
 ### Changed
