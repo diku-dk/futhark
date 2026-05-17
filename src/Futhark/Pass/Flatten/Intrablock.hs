@@ -30,7 +30,7 @@ import Futhark.Util.Log
 import Prelude hiding (log)
 -- TODO: To Change
 import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace,segHist)
-import Futhark.Pass.Flatten.Builtins (genUniformSegScanomapWithPost,genUniformSegRed)
+import Futhark.Pass.Flatten.Builtins (genUniformSegScanomapWithPost,genUniformSegRed,determineReduceOp)
 
 
 -- | The minimum amount of inner parallelism we require (by default)
@@ -345,41 +345,6 @@ recordInBlockParallelism =
     recordStm _ =
       pure ()
 
-determineReduceOp ::
-  (MonadBuilder m) =>
-  Lambda SOACS ->
-  [SubExp] ->
-  m (Lambda SOACS, [SubExp], Shape)
-determineReduceOp lam nes =
-  -- FIXME? We are assuming that the accumulator is a replicate, and
-  -- we fish out its value in a gross way.
-  case mapM subExpVar nes of
-    Just ne_vs' -> do
-      let (shape, lam') = isVectorMap lam
-      nes' <- forM ne_vs' $ \ne_v -> do
-        ne_v_t <- lookupType ne_v
-        letSubExp "hist_ne" $
-          BasicOp $
-            Index ne_v $
-              fullSlice ne_v_t $
-                replicate (shapeRank shape) $
-                  DimFix $
-                    intConst Int64 0
-      pure (lam', nes', shape)
-    Nothing ->
-      pure (lam, nes, mempty)
-
-isVectorMap :: Lambda SOACS -> (Shape, Lambda SOACS)
-isVectorMap lam
-  | [Let (Pat pes) _ (Op (Screma w arrs form))] <-
-      stmsToList $ bodyStms $ lambdaBody lam,
-    map resSubExp (bodyResult (lambdaBody lam)) == map (Var . patElemName) pes,
-    Just map_lam <- isMapSOAC form,
-    arrs == map paramName (lambdaParams lam) =
-      let (shape, lam') = isVectorMap map_lam
-       in (Shape [w] <> shape, lam')
-  | otherwise = (mempty, lam)
-
 data IntraAcc = IntraAcc
   { accMinPar :: S.Set [SubExp],
     accAvailPar :: S.Set [SubExp],
@@ -471,7 +436,7 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
               post_op = soacsLambdaToGPU post_lam           
-          (scan_res,stms) <- runBuilder (genUniformSegScanomapWithPost lvl (pure w) "intra_maposcanomap" scanfun' nes post_op mapfun' arrs (const $ pure ()))
+          (scan_res,stms) <- runBuilder (genUniformSegScanomapWithPost lvl (pure w) "intra_maposcanomap" scanfun' mempty nes post_op mapfun' arrs (const $ pure ()))
           certifying (stmAuxCerts aux) $ do 
             addStms stms
             zipWithM_
@@ -491,7 +456,7 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
                 | otherwise = redComm sing_red
               sing_red_gpu = Reduce comm  (soacsLambdaToGPU red_lam) nes 
               map_lam' = soacsLambdaToGPU map_lam
-          (red_res,stms) <- runBuilder (genUniformSegRed lvl "intra_redomap" (pure w)  sing_red_gpu map_lam' arrs (const $ pure ()))
+          (red_res,stms) <- runBuilder (genUniformSegRed lvl "intra_redomap" (pure w)  sing_red_gpu mempty map_lam' arrs (const $ pure ()))
           certifying (stmAuxCerts aux) $ do 
             addStms stms
             zipWithM_

@@ -1704,6 +1704,11 @@ suitableOperator env inps lam _nes =
   where
     notVariant v = isNothing $ M.lookup v $ inputReps inps env
 
+suitableUniformOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
+suitableUniformOperator env inps lam _nes =
+  allNames notVariant (freeIn lam)
+  where
+    notVariant v = isNothing $ M.lookup v $ inputReps inps env
 suitableSegOpMap :: DistEnv -> DistInputs -> Lambda SOACS -> Bool
 suitableSegOpMap _env _inps map_lam =
   not (any isParallelStm (bodyStms $ lambdaBody map_lam))
@@ -1752,13 +1757,14 @@ doUniformSegMaposcanomap lvl scans arrs post_lam map_lam old_segments new_segmen
   -- TODO: different segemnts fix
   let scan = singleScan scans
   let zeros = replicate (segmentsRank old_segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-  let nes = scanNeutral scan
-  nes' <- mapM (readInput old_segments env zeros inps) nes
+  nes <- mapM (readInput old_segments env zeros inps) (scanNeutral scan)
+  (scan_lam, nes', shape) <- determineReduceOp (scanLambda scan) nes
   genUniformSegScanomapWithPost
     lvl
     (NE.toList new_segment)
     "uniformmaposcanomap"
-    (soacsLambdaToGPU $ scanLambda scan)
+    (soacsLambdaToGPU scan_lam)
+    shape
     nes'
     (soacsLambdaToGPU post_lam)
     (soacsLambdaToGPU map_lam)
@@ -1912,15 +1918,15 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
       | Just (reds, map_lam) <- isRedomapSOAC form,
         not $ isVariant inps env w,
         all isRegularDistResult res,
-        all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
+        all (\red -> suitableUniformOperator env inps (redLambda red) (redNeutral red)) reds -> do
           traceM "Unfirm Redomap"
           let sing_red = singleReduce reds
               zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
               free = freeIn map_lam
               new_segment = segments <> pure w
-          nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
+          nes <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
+          (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) nes
           outer_scope <- askScope
-          let red_lam = redLambda sing_red
           let comm
                 | commutativeLambda red_lam = Commutative
                 | otherwise = redComm sing_red
@@ -1951,7 +1957,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
           let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
           let readFree is = readInputs new_segment free_env is free_inputs
           elems' <-
-            genUniformSegRed lvl "uniformSegRed" (NE.toList new_segment) sing_red_gpu (soacsLambdaToGPU map_lam) arrs' readFree
+            genUniformSegRed lvl "uniformSegRed" (NE.toList new_segment) sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs' readFree
           traceM "Status: redomap done"
           pure $ insertRegulars (map distResTag res) elems' env
       | Just (reds, map_lam) <- isRedomapSOAC form,
@@ -2005,8 +2011,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
       | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
         not $ isVariant inps env w,
         all isRegularDistResult res,
-        -- TODO: DO we still need this tho?
-        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
+        all (\scan -> suitableUniformOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
           traceM "Unfirm MAPOSCANOMAP"
           let free = freeIn map_lam <> freeIn post_lam
               new_segment = segments <> pure w

@@ -2,6 +2,7 @@
 
 module Futhark.Pass.Flatten.Builtins
   ( flatteningBuiltins,
+    determineReduceOp,
     segMap,
     genFlags,
     genScan,
@@ -53,6 +54,41 @@ inlineBuiltinAtLevel _ = False
 regularSegLevel :: SegLevel
 regularSegLevel = SegThread SegVirt Nothing
 
+determineReduceOp ::
+  (MonadBuilder m) =>
+  Lambda SOACS ->
+  [SubExp] ->
+  m (Lambda SOACS, [SubExp], Shape)
+determineReduceOp lam nes =
+  -- FIXME? We are assuming that the accumulator is a replicate, and
+  -- we fish out its value in a gross way.
+  case mapM subExpVar nes of
+    Just ne_vs' -> do
+      let (shape, lam') = isVectorMap lam
+      nes' <- forM ne_vs' $ \ne_v -> do
+        ne_v_t <- lookupType ne_v
+        letSubExp "hist_ne" $
+          BasicOp $
+            Index ne_v $
+              fullSlice ne_v_t $
+                replicate (shapeRank shape) $
+                  DimFix $
+                    intConst Int64 0
+      pure (lam', nes', shape)
+    Nothing ->
+      pure (lam, nes, mempty)
+
+isVectorMap :: Lambda SOACS -> (Shape, Lambda SOACS)
+isVectorMap lam
+  | [Let (Pat pes) _ (Op (Screma w arrs form))] <-
+      stmsToList $ bodyStms $ lambdaBody lam,
+    map resSubExp (bodyResult (lambdaBody lam)) == map (Var . patElemName) pes,
+    Just map_lam <- isMapSOAC form,
+    arrs == map paramName (lambdaParams lam) =
+      let (shape, lam') = isVectorMap map_lam
+       in (Shape [w] <> shape, lam')
+  | otherwise = (mempty, lam)
+
 segMap :: (Traversable f) => SegLevel -> f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
 segMap lvl segments f = do
   gtids <- traverse (const $ newVName "gtid") segments
@@ -81,6 +117,7 @@ genScanWithKernelBody lvl desc segments lam nes =
     desc
     segments
     (\_ -> pure lam)
+    mempty
     nes
     (\_ res_t -> mkIdentityLambda res_t)
 
@@ -89,11 +126,12 @@ genUniformSegRed ::
   Name ->
   [SubExp] ->
   Reduce GPU ->
+  Shape ->
   Lambda GPU ->
   [VName] ->
   ([SubExp] -> Builder GPU ()) ->
   Builder GPU [VName]
-genUniformSegRed lvl desc segments red_op map_lam arrs readFree = do
+genUniformSegRed lvl desc segments red_op shape map_lam arrs readFree = do
   let red_lam = redLambda red_op
       nes = redNeutral red_op
       comm = redComm red_op
@@ -114,7 +152,7 @@ genUniformSegRed lvl desc segments red_op map_lam arrs readFree = do
   red_lam'' <- renameLambda red_lam'
 
   kbody <- renameBody $ Body () stms res
-  let op = SegBinOp comm red_lam'' nes mempty
+  let op = SegBinOp comm red_lam'' nes shape
 
   letTupExp desc $ Op $ SegOp $ SegRed lvl space res_t kbody [op]
   where
@@ -126,11 +164,12 @@ genScanWithKernelBodyAndPost ::
   Name ->
   f SubExp ->
   (f SubExp -> Builder GPU (Lambda GPU)) ->
+  Shape ->
   [SubExp] ->
   (f SubExp -> [Type] -> Builder GPU (Lambda GPU)) ->
   (f SubExp -> Builder GPU Result) ->
   Builder GPU [VName]
-genScanWithKernelBodyAndPost lvl desc segments mkScanLam nes mkPostLam m = do
+genScanWithKernelBodyAndPost lvl desc segments mkScanLam shape nes mkPostLam m = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
@@ -150,7 +189,7 @@ genScanWithKernelBodyAndPost lvl desc segments mkScanLam nes mkPostLam m = do
   post_lam' <- renameLambda post_lam
 
   kbody <- renameBody $ Body () stms res
-  let op = SegBinOp Noncommutative scan_lam' nes mempty
+  let op = SegBinOp Noncommutative scan_lam' nes shape
 
   letTupExp desc $ Op $ SegOp $ SegScan lvl space res_t kbody [op] (SegPostOp post_lam')
   where
@@ -268,6 +307,7 @@ genSegScanomapWithPost lvl desc scan_lam nes flags post_lam map_lam arrs readFre
     desc
     [w]
     (segScanLambda scan_lam readFree)
+    mempty
     (constant False : nes)
     ( \gtids _res_t ->
         segScanomapPostLambda post_lam readFree gtids
@@ -296,18 +336,20 @@ genUniformSegScanomapWithPost ::
   [SubExp] ->
   Name ->
   Lambda GPU ->
+  Shape ->
   [SubExp] ->
   Lambda GPU ->
   Lambda GPU ->
   [VName] ->
   ([SubExp] -> Builder GPU ()) ->
   Builder GPU [VName]
-genUniformSegScanomapWithPost lvl segments desc scan_lam nes post_lam map_lam arrs readFree = do
+genUniformSegScanomapWithPost lvl segments desc scan_lam shape nes post_lam map_lam arrs readFree = do
   genScanWithKernelBodyAndPost
     lvl
     desc
     segments
     (withReadFree scan_lam readFree)
+    shape
     nes
     (\gtids _res_t -> withReadFree post_lam readFree gtids)
     ( \gtids -> do
