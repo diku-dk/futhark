@@ -584,13 +584,10 @@ applyArg t _ = error $ "applyArg: " <> show t
 
 applyLoopArg :: Aliases -> ParamType -> TypeAliases -> ResType -> TypeAliases
 applyLoopArg appres (Scalar (Record pfs)) (Scalar (Record afs)) (Scalar (Record rfs))
-  | M.keysSet pfs == M.keysSet afs,
-    M.keysSet pfs == M.keysSet rfs =
-      Scalar $
-        Record $
-          M.mapWithKey
-            (\k p_t -> applyLoopArg appres p_t (afs M.! k) (rfs M.! k))
-            pfs
+  = Scalar . Record $
+      M.mapWithKey
+        (\k p_t -> applyLoopArg appres p_t (afs M.! k) (rfs M.! k))
+        pfs
 applyLoopArg appres p_t arg_als rettype =
   returnType appres rettype (diet p_t) arg_als
 
