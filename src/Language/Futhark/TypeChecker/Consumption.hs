@@ -845,7 +845,7 @@ checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), fu
     checkReturnAlias loc params ret funbody_als
     checkGlobalAliases loc params funbody_als
     free_bound <- boundFreeInExp funbody
-    let ret' = inferReturnUniqueness params ret funbody_als
+    let ret' = maybe (inferReturnUniqueness params ret funbody_als) (const ret) te
         als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure ((ret', funbody'), ftype)
@@ -876,7 +876,7 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
     checkReturnAlias loc params ret body_als
     checkGlobalAliases loc params body_als
     free_bound <- boundFreeInExp e
-    let ret' = inferReturnUniqueness params ret body_als
+    let ret' = maybe (inferReturnUniqueness params ret body_als) (const ret) te
         als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure
