@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A potential compiler crash in register tiling (#2441).
 
+* The type checker would disregard uniqueness annotations on local functions.
+  (#2459)
+
 ## [0.26.1]
 
 ### Changed
