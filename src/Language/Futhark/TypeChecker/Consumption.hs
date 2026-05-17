@@ -582,6 +582,18 @@ applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
   returnType closure_als rettype d arg_als
 applyArg t _ = error $ "applyArg: " <> show t
 
+applyLoopArg :: Aliases -> ParamType -> TypeAliases -> ResType -> TypeAliases
+applyLoopArg appres (Scalar (Record pfs)) (Scalar (Record afs)) (Scalar (Record rfs))
+  | M.keysSet pfs == M.keysSet afs,
+    M.keysSet pfs == M.keysSet rfs =
+      Scalar $
+        Record $
+          M.mapWithKey
+            (\k p_t -> applyLoopArg appres p_t (afs M.! k) (rfs M.! k))
+            pfs
+applyLoopArg appres p_t arg_als rettype =
+  returnType appres rettype (diet p_t) arg_als
+
 boundFreeInExp :: Exp -> CheckM (M.Map VName TypeAliases)
 boundFreeInExp e = do
   vtable <- asks envVtable
@@ -732,12 +744,15 @@ checkLoop loop_loc (param, arg, form, body) = do
   v <- VName "internal_loop_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameLoopRes (srclocOf loop_loc)) $ stateNames s}
 
-  let loopt =
-        funType [param'] (RetType [] $ paramToRes param_t)
-          `setAliases` S.singleton (AliasFree v [])
+  let loop_als =
+        applyLoopArg
+          (S.singleton (AliasFree v []))
+          param_t
+          arg_als
+          (paramToRes param_t)
   pure
     ( (param', arg', form', body'),
-      applyArg loopt arg_als `combineAliases` body_als
+      loop_als `combineAliases` body_als
     )
 
 checkFuncall ::
