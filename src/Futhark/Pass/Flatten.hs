@@ -784,15 +784,12 @@ versionedRegularMap ::
   Lambda SOACS ->
   Builder GPU DistEnv
 versionedRegularMap segments env inps ress pat aux w arrs map_lam = do
-  (outer_suff, _) <-
-    sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
-  intra <- Intrablock.intrablockParallelise transformMapForInBlock segments env inps ress pat aux w arrs map_lam
 
   let only_intra = onlyExploitIntra (stmAuxAttrs aux)
       may_intra = worthIntrablock map_lam && mayExploitIntra (stmAuxAttrs aux)
 
   intra' <- if only_intra || may_intra
-    then pure intra
+    then Intrablock.intrablockParallelise transformMapForInBlock segments env inps ress pat aux w arrs map_lam
     else pure Nothing
 
   let fullFlatten =
@@ -816,7 +813,8 @@ versionedRegularMap segments env inps ress pat aux w arrs map_lam = do
         Nothing
           | not only_intra ,
            worthSequentialising map_lam,
-           mayExploitOuter $ stmAuxAttrs aux ->
+           mayExploitOuter $ stmAuxAttrs aux -> do 
+              (outer_suff, _) <- sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
               kernelAlternatives "match_res" result_ts full_body
                 [(outer_suff, outer_body)]
           | otherwise ->
@@ -829,6 +827,7 @@ versionedRegularMap segments env inps ress pat aux w arrs map_lam = do
           
           | worthSequentialising map_lam,
             mayExploitOuter $ stmAuxAttrs aux -> do 
+              (outer_suff, _) <- sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
               intra_alts <- intraBlockAlternative intra_res
               kernelAlternatives "match_res" result_ts full_body
                 ((outer_suff, outer_body) : [intra_alts])
@@ -2245,20 +2244,18 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
       let maybe_cond = lookup cond (zip (map paramName old_loop_params) (zip lifted_loop_reps lifted_init))
       scope <- askScope
       case maybe_cond of
-        -- infinite loop . later can be uniform case as well.
-        -- !!! TODO: !!!! update this as well.
+        -- infinite loop
         Nothing -> do
           let build_scope = scopeOfFParams lifted_loop_params'
           let (loop_new_inputs', loop_dstms) = distributeBody scope segments loop_new_inputs body
           (loop_body_res, loop_body_stms) <-
             runReaderT
-              (runBuilder $ liftBody lvl w loop_new_inputs' loop_env_local loop_dstms (bodyResult body))
+              (runBuilder $  liftLoopBody lvl segments w loop_new_inputs' loop_env_local loop_dstms res (bodyResult body))
               (scope <> build_scope)
           let loop_body_gpu = Body () loop_body_stms loop_body_res
               loop_exp_gpu = Loop (zip lifted_loop_params' lifted_init') (WhileLoop cond) loop_body_gpu
           loop_out_vs <- certifying (distCerts inps aux env) $ letTupExp "loop_res_out" loop_exp_gpu
-          let result_types = map ((\(DistType _ _ t) -> t) . distResType) res
-              out_reps = resultToResReps result_types loop_out_vs
+          let out_reps = loopResultToResReps res loop_out_vs
           pure $ insertReps (zip (map distResTag res) out_reps) env
         Just (cond_lifted_rep, cond_init) -> do
           let [cond_init_se] = cond_init
@@ -3044,24 +3041,22 @@ transformStm scope (Let pat aux (Op (Screma w arrs form)))
       outerOnlyBody <- renameBody outerOnlyBody0
       runReaderT
         ( runBuilder_ $ do
-            intra <-
-              Intrablock.intrablockParalleliseTopLevelMap
-                transformMapForInBlock
-                pat
-                aux
-                w
-                arrs
-                lam
-            (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
 
             let only_intra = onlyExploitIntra (stmAuxAttrs aux)
                 may_intra = worthIntrablock lam && mayExploitIntra (stmAuxAttrs aux)
-                intra' =
-                  if only_intra || may_intra
-                    then intra
-                    else Nothing
                 result_ts = patTypes pat
-
+            intra' <-
+              if only_intra || may_intra
+                then
+                  Intrablock.intrablockParalleliseTopLevelMap
+                    transformMapForInBlock
+                    pat
+                    aux
+                    w
+                    arrs
+                    lam
+                else
+                  pure Nothing
             alt_vs <- case intra' of
               _ | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
                 kernelAlternatives "top_level_map_alt" result_ts outerOnlyBody []
@@ -3069,7 +3064,8 @@ transformStm scope (Let pat aux (Op (Screma w arrs form)))
               Nothing
                 | not only_intra,
                   worthSequentialising lam,
-                  mayExploitOuter (stmAuxAttrs aux) ->
+                  mayExploitOuter (stmAuxAttrs aux) -> do 
+                    (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
                     kernelAlternatives
                       "top_level_map_alt"
                       result_ts
@@ -3086,6 +3082,7 @@ transformStm scope (Let pat aux (Op (Screma w arrs form)))
                 | worthSequentialising lam,
                   mayExploitOuter (stmAuxAttrs aux) -> do
                     intra_alt <- intraBlockAlternative intra_res
+                    (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
                     kernelAlternatives
                       "top_level_map_alt"
                       result_ts
