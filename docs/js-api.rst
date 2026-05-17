@@ -110,29 +110,7 @@ arrays, call entry points, and free resources.
    Object containing generated type information and array constructor
    objects for the array types used by the program.
 
-WASM compatibility interface
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The WASM-style backends also keep the older ``FutharkContext`` interface
-for backwards compatibility.
-
-.. js:function:: newFutharkContext()
-
-   Asynchronously create a new ``FutharkContext`` object.
-
-.. js:class:: FutharkContext()
-
-   Backwards-compatible wrapper class for WASM-style backends.
-   ``FutharkContext`` supports the same main interface as
-   ``FutharkModule``, including ``entry``, ``types``, array constructors,
-   and ``free``.
-
-New code should prefer ``FutharkModule``.
-
-WebGPU-specific utility methods
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The WebGPU backend also provides utility methods for synchronisation,
+The backends also provides utility methods for synchronisation,
 cache management, and profiling.
 
 .. js:function:: FutharkModule.context_sync()
@@ -154,6 +132,25 @@ cache management, and profiling.
 .. js:function:: FutharkModule.unpause_profiling()
 
    Resume profiling.
+
+WASM compatibility interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The WASM-style backends also keep the older ``FutharkContext`` interface
+for backwards compatibility.
+
+.. js:function:: newFutharkContext()
+
+   Asynchronously create a new ``FutharkContext`` object.
+
+.. js:class:: FutharkContext()
+
+   Backwards-compatible wrapper class for WASM-style backends.
+   ``FutharkContext`` supports the same main interface as
+   ``FutharkModule``, including ``entry``, ``types``, array constructors,
+   and ``free``.
+
+New code should prefer ``FutharkModule``.
 
 Values
 ------
