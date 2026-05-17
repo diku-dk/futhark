@@ -215,19 +215,6 @@ provides a convenience method for nested JavaScript arrays.
    a JavaScript array.  For higher-dimensional arrays, the JavaScript
    array is expected to be nested according to the array rank.
 
-The WASM backend also keeps the older constructor methods on
-``FutharkContext`` for backwards compatibility.
-
-.. js:function:: FutharkContext.new_i32_1d_from_jsarray(jsarray)
-
-   Creates and returns a one-dimensional ``i32`` ``FutharkArray``
-   representing the JavaScript array ``jsarray``.
-
-.. js:function:: FutharkContext.new_i32_1d(array, dim0)
-
-   Creates and returns a one-dimensional ``i32`` ``FutharkArray``
-   representing the typed array ``array``, with shape ``dim0``.
-
 FutharkOpaque
 -------------
 
