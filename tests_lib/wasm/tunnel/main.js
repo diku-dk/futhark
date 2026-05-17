@@ -1,4 +1,4 @@
-import { FutharkModule } from "./build/tunnel.mjs";
+import Module, { FutharkModule } from "./build/tunnel.mjs";
 
 async function run() {
   const statusEl = document.getElementById("status");
@@ -36,8 +36,9 @@ async function run() {
   }
 
   log("Creating Futhark module...");
+  const module = await Module();
   const fut = new FutharkModule();
-  await fut.init();
+  await fut.init(module);
   log("Futhark module ready.");
 
   const width = canvas.width;

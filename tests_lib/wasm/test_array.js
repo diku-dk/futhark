@@ -13,7 +13,7 @@ import { createRequire } from "module";
 globalThis.__dirname = dirname(import.meta.url).substring(7);
 globalThis.require = createRequire(import.meta.url);
 
-import {
+import Module, {
   newFutharkContext,
   FutharkContext,
   FutharkModule,
@@ -160,8 +160,9 @@ async function main() {
 
   section("Preferred FutharkModule API");
 
+  const module = await Module();
   const fut = new FutharkModule();
-  await fut.init();
+  await fut.init(module);
 
   assert.ok(fut instanceof FutharkModule, "fut should be a FutharkModule");
   assert.ok(fut.entry, "fut.entry should exist");

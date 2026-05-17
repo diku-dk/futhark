@@ -3,8 +3,9 @@
 // This checks:
 //   1. the backwards-compatible WASM API: newFutharkContext() + direct methods
 //   2. the shared entry API on FutharkContext
-//   3. the preferred FutharkModule API
-//   4. the shared utility methods on FutharkModule
+//   3. the preferred FutharkModule API with explicit module initialisation
+//   4. that FutharkModule.init() requires a module argument
+//   5. the shared utility methods on FutharkModule
 
 import assert from "assert/strict";
 
@@ -18,7 +19,7 @@ globalThis.__dirname = dirname(import.meta.url).substring(7);
 globalThis.require = createRequire(import.meta.url);
 
 // Imports from the generated ES6 module.
-import {
+import Module, {
   newFutharkContext,
   FutharkContext,
   FutharkModule,
@@ -67,11 +68,21 @@ async function main() {
 
   section("Preferred FutharkModule API");
 
+  const fut_without_module = new FutharkModule();
+
+  await assert.rejects(
+    () => fut_without_module.init(),
+    /requires the generated backend runtime module/
+  );
+
+  ok("FutharkModule.init() requires an explicit module argument");
+
+  const module = await Module();
   const fut = new FutharkModule();
 
   assert.ok(fut instanceof FutharkModule, "fut should be a FutharkModule");
 
-  await fut.init();
+  await fut.init(module);
 
   assert.ok(fut.entry, "fut.entry should exist");
   assert.equal(typeof fut.entry.inc, "function");
@@ -79,7 +90,7 @@ async function main() {
   const module_api_res = await fut.entry.inc(9);
   assert.equal(module_api_res, 10);
 
-  ok("FutharkModule supports init() and entry aliases");
+  ok("FutharkModule supports explicit init(module) and entry aliases");
 
   section("Shared utility methods");
 

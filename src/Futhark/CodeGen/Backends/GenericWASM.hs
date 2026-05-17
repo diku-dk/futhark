@@ -240,7 +240,7 @@ moduleInit =
   [text|
   async init(wasm, num_threads) {
     if (wasm === undefined) {
-      wasm = await loadWASM();
+      throw new Error("FutharkModule.init() requires the generated backend runtime module");
     }
 
     this._init_from_wasm(wasm, num_threads);

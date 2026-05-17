@@ -42,26 +42,30 @@ The exact file set is backend-dependent and may change over time.
 
 The generated JavaScript wrapper exposes a ``FutharkModule`` class,
 which is the preferred top-level interface for using a compiled Futhark
-program from JavaScript. A simple usage example:
+program from JavaScript.  The module is initialised with the generated
+backend runtime module.
+
+The initialisation pattern is the same for the WASM-style backend and
+the WebGPU backend. The only difference is how ``Module`` is made available.
+For the WASM-style backend, the generated ``.mjs`` file exports it as the
+default export, so it is imported together with ``FutharkModule``:
 
 .. code-block:: javascript
 
-   import { FutharkModule } from './futlib.mjs';
-
-   const fut = new FutharkModule();
-   await fut.init();
-
-   const res = await fut.entry.main(in1, ..., inN);
-
-For the WebGPU backend, ``init`` must be passed the generated backend
-runtime module:
-
-.. code-block:: javascript
+   import Module, { FutharkModule } from './futlib.mjs';
 
    const module = await Module();
 
    const fut = new FutharkModule();
    await fut.init(module);
+
+For the WebGPU backend, the generated runtime module is usually loaded
+before the application code, for example:
+
+.. code-block:: html
+
+   <script src="futlib.js"></script>
+   <script src="main.js"></script>
 
 General concerns
 ----------------
@@ -88,7 +92,7 @@ arrays, call entry points, and free resources.
 
    Asynchronously initialise the ``FutharkModule`` object.
 
-   For the WASM-style backends, the ``module`` argument is optional. If
+   For the WASM-style backend, the ``module`` argument is optional. If
    omitted, the generated wrapper loads the WebAssembly module itself.
 
    For the WebGPU backend, ``module`` must be the generated backend
@@ -136,7 +140,7 @@ cache management, and profiling.
 WASM compatibility interface
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The WASM-style backends also keep the older ``FutharkContext`` interface
+The WASM-style backend also keep the older ``FutharkContext`` interface
 for backwards compatibility.
 
 .. js:function:: newFutharkContext()
@@ -145,7 +149,7 @@ for backwards compatibility.
 
 .. js:class:: FutharkContext()
 
-   Backwards-compatible wrapper class for WASM-style backends.
+   Backwards-compatible wrapper class for WASM-style backend.
    ``FutharkContext`` supports the same main interface as
    ``FutharkModule``, including ``entry``, ``types``, array constructors,
    and ``free``.
