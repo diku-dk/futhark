@@ -40,6 +40,7 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, quot, rem)
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 
 data InnerMapMode
   = MultiDim
@@ -3024,6 +3025,12 @@ transformLambda scope (Lambda params ret body) = do
   pure $ Lambda params ret body'
 
 transformStm :: Scope SOACS -> Stm SOACS -> PassM (Stms GPU)
+transformStm scope (Let pat aux (Op soac))
+  | "sequential_outer" `inAttrs` stmAuxAttrs aux = do
+      stms <- runBuilderT_ (FOT.transformSOAC pat soac) scope
+      transformStms scope $ fmap (certify (stmAuxCerts aux)) stms
+transformStm _ stm 
+  | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm $ soacsStmToGPU stm
 transformStm scope (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
       let gpu = soacsStmToGPU (Let pat aux (Op (Screma w arrs form)))
