@@ -684,6 +684,28 @@ runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
       BasicOp $
         Replicate mempty (Var v)
 
+runInnerSeqMap ::
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  Pat Type ->
+  [DistResult] ->
+  Builder GPU [VName]
+runInnerSeqMap w arrs map_lam _pat _ress = do
+  map_lam' <- renameLambda $ soacsLambdaToGPU map_lam
+  let new_segments = pure w
+  letTupExp "outer_map" <=< renameExp <=< segMap defaultSegLevel new_segments $ \is -> do
+    forM_ (zip (lambdaParams map_lam') arrs) $ \(p, arr) -> do
+      let [gtid] = is
+      letBindNames [paramName p]
+        =<< case paramType p of
+          Acc {} ->
+            eSubExp $ Var arr
+          _ ->
+            eIndex arr [eSubExp gtid]
+    addStms $ bodyStms $ lambdaBody map_lam'
+    pure $ bodyResult $ lambdaBody map_lam'
+
 regularRepVars :: [ResRep] -> [VName]
 regularRepVars =
   map onRep
@@ -3073,8 +3095,7 @@ transformStm scope (Let pat aux (Op (Screma w arrs form)))
         scope
 transformStm scope (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
-      let gpu = soacsStmToGPU (Let pat aux (Op (Screma w arrs form)))
-      let gpu_stms = oneStm gpu
+      (outer_only_res,outer_only_stms) <- runReaderT (runBuilder $ runInnerSeqMap w arrs lam pat []) scope
       let arrs' =
             zipWith MapArray arrs $
               map paramType (lambdaParams (scremaLambda form))
@@ -3083,7 +3104,7 @@ transformStm scope (Let pat aux (Op (Screma w arrs form)))
       traceM $ prettyString distributed
       stms <- runReaderT (runBuilder_ m) scope
       let fullFlattenBody0 = mkBody stms $ varsRes $ patNames pat
-          outerOnlyBody0 = mkBody gpu_stms $ varsRes $ patNames $ stmPat gpu
+          outerOnlyBody0 = mkBody outer_only_stms $ varsRes outer_only_res
       fullFlattenBody <- renameBody fullFlattenBody0
       outerOnlyBody <- renameBody outerOnlyBody0
       runReaderT
