@@ -10,6 +10,7 @@ module Futhark.Pass.Flatten.Builtins
     genSegScan,
     genSegScanomap,
     genSegScanomapWithPost,
+    genNonSegRed,
     genUniformSegScanomapWithPost,
     genUniformSegRed,
     genSegRed,
@@ -133,6 +134,48 @@ genScanWithKernelBody lvl desc segments lam nes =
     mempty
     nes
     (\_ res_t -> mkIdentityLambda res_t)
+
+
+-- FIXME?: I don't know why we need the readdummy
+genNonSegRed ::
+  SegLevel ->
+  Name ->
+  [SubExp] ->
+  Reduce GPU ->
+  Shape ->
+  Lambda GPU ->
+  [VName] ->
+  Builder GPU [VName]
+genNonSegRed lvl desc segments red_op shape map_lam arrs = do
+  let red_lam = redLambda red_op
+      nes = redNeutral red_op
+      comm = redComm red_op
+  let dummy = intConst Int64 1 
+  gtids_dummy <- newVName "dummy"
+  gtids_original <- traverse (const $ newVName "gtid") segments
+  let gtids = gtids_dummy : gtids_original
+  let new_segment = dummy : segments 
+  space <- mkSegSpace $ zip (toList gtids) (toList new_segment)
+  let gtids' = fmap Var gtids
+  ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
+    bindLambdaInputArrays (drop 1 gtids') map_lam arrs
+    res <- bodyBind (lambdaBody map_lam)
+    res_t <- mapM (subExpType . resSubExp) res
+    pure (map mkResult res, res_t)
+  red_lam' <- renameLambda red_lam
+  kbody <- renameBody $ Body () stms res
+  let op = SegBinOp comm red_lam' nes shape
+  lvl' <- capThreadSegLevel new_segment "uniform_segred" lvl $ NoRecommendation SegVirt
+  ress <- letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody [op]
+  forM ress $ \ res_d -> do
+    res_dt <- lookupType res_d
+    letExp desc $
+      BasicOp $
+        case res_dt of
+          Acc {} -> SubExp $ Var res_d
+          _ -> Index res_d $ fullSlice res_dt [DimFix $ intConst Int64 0]
+  where
+    mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 genUniformSegRed ::
   SegLevel ->

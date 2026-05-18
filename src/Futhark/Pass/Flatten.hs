@@ -3032,6 +3032,46 @@ transformStm scope (Let pat aux (Op soac))
 transformStm _ stm 
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm $ soacsStmToGPU stm
 transformStm scope (Let pat aux (Op (Screma w arrs form)))
+  | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
+    Scan scan_lam nes <- singleScan scans =
+      runReaderT
+        ( runBuilder_ $
+            certifying (stmAuxCerts aux) $ do
+              (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
+              res <-
+                genUniformSegScanomapWithPost
+                  defaultSegLevel
+                  [w]
+                  "topLevelSegScan"
+                  (soacsLambdaToGPU scan_lam')
+                  shape
+                  nes'
+                  (soacsLambdaToGPU post_lam)
+                  (soacsLambdaToGPU map_lam)
+                  arrs
+                  (const $ pure ())
+              forM_ (zip (patNames pat) res) $ \(v, v') ->
+                letBindNames [v] $ BasicOp $ SubExp $ Var v'
+        )
+        scope
+
+transformStm scope (Let pat aux (Op (Screma w arrs form)))
+  | Just (reds, map_lam) <- isRedomapSOAC form = do
+      runReaderT
+        ( runBuilder_ $
+            certifying (stmAuxCerts aux) $ do
+              let sing_red = singleReduce reds 
+              (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) (redNeutral sing_red)
+              let comm
+                    | commutativeLambda red_lam = Commutative
+                    | otherwise = redComm sing_red
+              let sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes'
+              res <- genNonSegRed defaultSegLevel "topLevelSegRed" [w] sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs
+              forM_ (zip (patNames pat) res) $ \(v, v') ->
+                letBindNames [v] $ BasicOp $ SubExp $ Var v'
+        )
+        scope
+transformStm scope (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
       let gpu = soacsStmToGPU (Let pat aux (Op (Screma w arrs form)))
       let gpu_stms = oneStm gpu
