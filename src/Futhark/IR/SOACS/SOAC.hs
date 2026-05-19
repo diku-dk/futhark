@@ -513,8 +513,8 @@ soacType (JVP _ _ lam) =
   lambdaReturnType lam ++ lambdaReturnType lam
 soacType (VJP _ _ lam) =
   lambdaReturnType lam ++ map paramType (lambdaParams lam)
-soacType (VJPBy _ _ lam_adj) =
-  lambdaReturnType lam_adj
+soacType (VJPBy _ lam _) =
+  lambdaReturnType lam
 soacType (Stream outersize _ accs lam) =
   map (substNamesInType substs) rtp
   where
@@ -731,7 +731,8 @@ typeCheckSOAC (JVP args vec lam) = do
 typeCheckSOAC (VJPBy args lam lam_adj) = do
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'
-  TC.checkLambda lam_adj $ map (,mempty) $ lambdaReturnType lam
+  TC.checkLambda lam_adj $
+    map (,mempty) (lambdaReturnType lam <> lambdaReturnType lam)
   unless (lambdaReturnType lam_adj == map TC.argType args') $
     TC.bad . TC.TypeError . docText $
       "Adjoint lambda return type"

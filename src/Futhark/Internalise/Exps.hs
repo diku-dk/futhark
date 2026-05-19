@@ -1861,11 +1861,10 @@ isIntrinsicFunction qname args = do
     handleAD [f, f_adj, x] "vjp_by" = Just $ \desc -> do
       x' <- internaliseExp "ad_x" x
       lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
-      lam_adj <- internaliseLambdaCoerce f_adj $ lambdaReturnType lam
-      real <- fmap (map I.Var) . letTupExp desc . Op $ VJPBy x' lam lam_adj
-      let cache_ts = drop (length real) $ lambdaReturnType lam
-      dummy <- mapM (letSubExp "dummy" <=< eBlank) cache_ts
-      pure $ real <> dummy
+      lam_adj <-
+        internaliseLambdaCoerce f_adj $
+          lambdaReturnType lam ++ lambdaReturnType lam
+      fmap (map I.Var) . letTupExp desc . Op $ VJPBy x' lam lam_adj
     handleAD _ _ = Nothing
 
     handleRest [a, si, v] "scatter" = Just $ scatterF 1 a si v

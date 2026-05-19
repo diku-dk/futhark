@@ -120,16 +120,16 @@ def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
 -- useful when the adjoint synthesised by AD is as good as one that is known
 -- analytically.
 --
--- The function `f` must return a primal result of type `b`, as well as a
--- "cache" of type `c`. In the return sweep, the function `f'` is invoked with
--- the cotangents of the result as well as the cache originally produced by `b`,
--- and must return the sensitivity with respect to the input.
+-- The function `f` returns a result of type `b`. In the return sweep, the
+-- function `f'` is invoked first with the result of `f` and second with the
+-- cotangents of the result (be careful not to mix up the order), and must
+-- return the sensitivity with respect to the input.
 --
--- The primal result, including when this function is used outside of AD, is
--- simply the `b` returned by `f`.
+-- A common pattern is that `b` is a tuple where some part is the intended
+-- primal result of `vjp_by`, and some part is only used in `f'`.
 --
 -- **Beware:** if `f` uses any free variables, these will not be taken into
 -- **account when computing the adjoint. Make these part of the argument
 -- **instead.
-def vjp_by 'a 'b 'c (f: a -> (b, c)) (f': (b, c) -> a) (x: a) : b =
-  (intrinsics.vjp_by f f' x).0
+def vjp_by 'a 'b 'c (f: a -> b) (f': (res: b) -> (b_adj: b) -> a) (x: a) : b =
+  intrinsics.vjp_by f f' x
