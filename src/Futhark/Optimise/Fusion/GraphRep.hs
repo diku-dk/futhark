@@ -394,6 +394,7 @@ expInputs (Op soac) = case soac of
   Futhark.Stream w is nes lam -> inputs is <> freeClassifications (w, nes, lam)
   Futhark.JVP {} -> freeClassifications soac
   Futhark.VJP {} -> freeClassifications soac
+  Futhark.VJPBy {} -> freeClassifications soac
   where
     inputs = S.fromList . (`zip` repeat SOACInput)
 expInputs e

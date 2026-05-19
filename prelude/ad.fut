@@ -115,3 +115,21 @@ def jvp 'a 'b (f: a -> b) (x: a) (x': a) : b =
 -- | Vector-Jacobian Product ("reverse mode").
 def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
   (vjp2 f x y').1
+
+-- | Provide custom reverse-mode adjoint code for a given function. This is
+-- useful when the adjoint synthesised by AD is as good as one that is known
+-- analytically.
+--
+-- The function `f` must return a primal result of type `b`, as well as a
+-- "cache" of type `c`. In the return sweep, the function `f'` is invoked with
+-- the cotangents of the result as well as the cache originally produced by `b`,
+-- and must return the sensitivity with respect to the input.
+--
+-- The primal result, including when this function is used outside of AD, is
+-- simply the `b` returned by `f`.
+--
+-- **Beware:** if `f` uses any free variables, these will not be taken into
+-- **account when computing the adjoint. Make these part of the argument
+-- **instead.
+def vjp_by 'a 'b 'c (f: a -> (b, c)) (f': (b, c) -> a) (x: a) : b =
+  (intrinsics.vjp_by f f' x).0

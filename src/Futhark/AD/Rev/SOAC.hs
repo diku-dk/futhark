@@ -189,6 +189,21 @@ vjpSOAC ops pat _aux (Hist n as histops f) m
 vjpSOAC ops pat aux (Stream w as accs lam) m = do
   stms <- collectStms_ $ auxing aux $ sequentialStreamWholeArray pat w accs lam as
   foldr (vjpStm ops) m stms
+vjpSOAC _ops pat aux (VJPBy args lam lam_adj) m = do
+  let num_prim_ts = patSize pat
+  (lam_primal_res, lam_tape_res) <-
+    splitAt num_prim_ts . map resSubExp
+      <$> auxing aux (eLambda lam (map eSubExp args))
+  forM_ (zip (patNames pat) lam_primal_res) $ \(v, se) ->
+    letBindNames [v] $ BasicOp $ SubExp se
+  m
+  pat_adj <- mapM lookupAdjVal $ patNames pat
+  contribs <-
+    eLambda lam_adj (map (eSubExp . Var) pat_adj ++ map eSubExp lam_tape_res)
+  forM_ (zip args contribs) $ \(arg, contrib) ->
+    (updateSubExpAdj arg <=< letExp "contrib") $
+      BasicOp . SubExp . resSubExp $
+        contrib
 vjpSOAC _ _ _ soac _ =
   error $ "vjpSOAC unhandled:\n" ++ prettyString soac
 

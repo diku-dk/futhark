@@ -213,6 +213,8 @@ transformSOAC _ _ JVP {} =
   error "transformSOAC: unhandled JVP"
 transformSOAC _ _ VJP {} =
   error "transformSOAC: unhandled VJP"
+transformSOAC _ _ VJPBy {} =
+  error "transformSOAC: unhandled VJPBy"
 transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
       seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs

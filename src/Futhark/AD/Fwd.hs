@@ -331,6 +331,12 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
+fwdSOAC pat aux (VJPBy args lam _) = do
+  -- You have a custom adjoint? Too bad we are in tangent land.
+  (mapM_ fwdStm <=< runBuilder_) $ do
+    lam_res <- auxing aux $ eLambda lam $ map eSubExp args
+    forM (zip (patNames pat) lam_res) $ \(v, res) ->
+      letBindNames [v] $ BasicOp $ SubExp $ resSubExp res
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =
