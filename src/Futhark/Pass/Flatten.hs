@@ -781,14 +781,15 @@ transformMapForInBlock ::
   [VName] ->
   Lambda SOACS ->
   Builder GPU (Stms GPU)
-transformMapForInBlock pat w arrs map_lam =
+transformMapForInBlock pat w arrs map_lam = do
+  scope <- castScope <$> askScope
+  lam <- preprocessLambda scope map_lam
   collectStms_ $ do
-    scope <- askScope
     let arrs' =
           zipWith MapArray arrs $
-            map paramType (lambdaParams map_lam)
+            map paramType (lambdaParams lam)
         (distributed, _) =
-          distributeMap scope pat (NE.singleton w) arrs' map_lam
+          distributeMap scope pat (NE.singleton w) arrs' lam
     transformDistributed inBlockSegLevel mempty (NE.singleton w) distributed
 
 versionedRegularMap ::
@@ -1392,13 +1393,17 @@ transformInnerMap ::
   [VName] ->
   Lambda SOACS ->
   Builder GPU [ResRep]
-transformInnerMap lvl segments env inps pat w arrs map_lam
-  | not (isVariant inps env w) = do
+transformInnerMap lvl segments env inps pat w arrs map_lam = do
+  gpu_scope <- askScope
+  let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
+  lam <- preprocessLambda pp_scope map_lam
+  if not (isVariant inps env w)
+    then do
       traceM "transformInnerMap: w is invariant, treating as multi-dim map"
-      transformInnerMapMultiDim lvl segments env inps pat w arrs map_lam
-  | otherwise = do
+      transformInnerMapMultiDim lvl segments env inps pat w arrs lam
+    else do
       traceM "transformInnerMap: w is variant, treating as single-dim map"
-      transformInnerMapSingleDim lvl segments env inps pat w arrs map_lam
+      transformInnerMapSingleDim lvl segments env inps pat w arrs lam
 
 transformInnerMapSingleDim ::
   SegLevel ->
@@ -3096,10 +3101,11 @@ transformStm scope (Let pat aux (Op (Screma w arrs form)))
 transformStm scope (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
       (outer_only_res,outer_only_stms) <- runReaderT (runBuilder $ runInnerSeqMap w arrs lam pat []) scope
+      lamFullFlatten <- renameLambda =<< preprocessLambda scope lam
       let arrs' =
             zipWith MapArray arrs $
               map paramType (lambdaParams (scremaLambda form))
-          (distributed, _) = distributeMap scope pat (NE.singleton w) arrs' lam
+          (distributed, _) = distributeMap scope pat (NE.singleton w) arrs' lamFullFlatten
           m = transformDistributed defaultSegLevel mempty (NE.singleton w) distributed
       traceM $ prettyString distributed
       stms <- runReaderT (runBuilder_ m) scope

@@ -31,6 +31,7 @@ import Prelude hiding (log)
 -- TODO: To Change
 import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace,segHist)
 import Futhark.Pass.Flatten.Builtins (genUniformSegScanomapWithPost,genUniformSegRed,determineReduceOp)
+import Futhark.Pass.Flatten.PreProcess (preprocessLambda)
 
 
 -- | The minimum amount of inner parallelism we require (by default)
@@ -71,7 +72,10 @@ intrablockParallelise ::
 intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs lam0 = runMaybeT $ do
   -- TODO : This should not be necessary.
   unless (all (regularMapInput env inps) arrs) mzero
-  lam <- lift $ renameLambda lam0
+  gpu_scope <- lift askScope
+  let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
+  lam <- renameLambda =<< preprocessLambda pp_scope lam0
+
   let result_ts =
         [ t `arrayOfShape` segmentsShape segments
         | DistResult _ (DistType _ _ t) _ <- dist_res
@@ -178,7 +182,8 @@ intrablockParalleliseTopLevelMap ::
   Lambda SOACS ->
   Builder GPU (Maybe IntrablockResult)
 intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = runMaybeT $ do
-  lam <- lift $ renameLambda lam0
+  scope <- lift $ castScope <$> askScope
+  lam <- renameLambda =<< preprocessLambda scope lam0 
   let result_ts = patTypes pat
       body = lambdaBody lam
 
