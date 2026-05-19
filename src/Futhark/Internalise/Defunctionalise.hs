@@ -5,6 +5,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
+import Control.Monad.Writer.Strict
 import Data.Bifoldable (bifoldMap)
 import Data.Bifunctor
 import Data.Bitraversable
@@ -425,7 +426,9 @@ defuncFun tparams pats e0 ret loc = do
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
   let used =
-        freeInExp (Lambda pats e0 Nothing (Info ret) loc)
+        ( freeInExp (Lambda pats e0 Nothing (Info ret) loc)
+            <> intrinsicTypeFVs e0
+        )
           `freeWithout` S.fromList tparams
   used_env <- restrictEnvTo used
 
@@ -460,7 +463,19 @@ defuncFun tparams pats e0 ret loc = do
               (Var (qualName vn) (Info tp') mempty)
               mempty,
             (vn, Binding Nothing sv)
-          )
+           )
+
+intrinsicTypeFVs :: Exp -> FV
+intrinsicTypeFVs = execWriter . onExp
+  where
+    onExp e = do
+      remember e
+      void $ astMap (identityMapper {mapOnExp = onExp}) e
+
+    remember (Var qn (Info t) _)
+      | isIntrinsic $ qualLeaf qn =
+          tell $ freeInType t
+    remember _ = pure ()
 
 -- | Defunctionalization of an expression. Returns the residual expression and
 -- the associated static value in the defunctionalization monad.
