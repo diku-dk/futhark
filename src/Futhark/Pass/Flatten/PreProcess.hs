@@ -26,7 +26,7 @@ shouldDissectForm form =
 
 soacMapper :: Scope SOACS -> SOACMapper SOACS SOACS PassM
 soacMapper scope =
-  identitySOACMapper {mapOnSOACLambda = onLambda scope}
+  identitySOACMapper {mapOnSOACLambda = preprocessLambda scope}
 
 runSimplifiedBuilder ::
   Scope SOACS ->
@@ -36,11 +36,11 @@ runSimplifiedBuilder scope m =
   fst <$> runBuilderT (simplifyStms =<< collectStms_ m) scope
 
 -- TODO: maybe it is better to seperate these as they are doing different things.
-onStm :: Scope SOACS -> Stm SOACS -> PassM (Stms SOACS)
-onStm scope (Let pat aux (Op (Stream w arrs nes lam))) = do
-  lam' <- onLambda scope lam
+preprocessStm :: Scope SOACS -> Stm SOACS -> PassM (Stms SOACS)
+preprocessStm scope (Let pat aux (Op (Stream w arrs nes lam))) = do
+  lam' <- preprocessLambda scope lam
   runBuilderT_ (auxing aux $ sequentialStreamWholeArray pat w nes lam' arrs) scope
-onStm scope (Let pat aux (Op (Screma w arrs form))) = do
+preprocessStm scope (Let pat aux (Op (Screma w arrs form))) = do
   soac' <- mapSOACM (soacMapper scope) (Screma w arrs form)
   case soac' of
     Screma w' arrs' form'
@@ -63,14 +63,14 @@ onStm scope (Let pat aux (Op (Screma w arrs form))) = do
             maposcanomapToMapScanAndMap
               pat
               (w', post_lam, scans, map_lam, arrs')
-          onStms scope $ stmsFromList [mapstm, scanstm, poststm]
+          preprocessStms scope $ stmsFromList [mapstm, scanstm, poststm]
       | Just (post_lam, _, _) <- isMaposcanomapSOAC form',
         any isParallelStm (bodyStms $ lambdaBody post_lam) -> do
           stms <-
             runSimplifiedBuilder scope $
               auxing aux $
                 extractPostLambda pat w' arrs' form'
-          onStms scope stms
+          preprocessStms scope stms
 
       | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form',
         any isParallelStm (bodyStms $ lambdaBody map_lam) -> do
@@ -78,52 +78,52 @@ onStm scope (Let pat aux (Op (Screma w arrs form))) = do
             maposcanomapToMaposcanAndMap
               pat
               (w', post_lam, scans, map_lam, arrs')
-          onStms scope $ stmsFromList [mapstm, scanstm]   
+          preprocessStms scope $ stmsFromList [mapstm, scanstm]   
       | Just (reds, map_lam) <- isRedomapSOAC form',
         any isParallelStm (bodyStms $ lambdaBody map_lam) -> do
           (mapstm, redstm) <-
             redomapToMapAndReduce
               pat
               (w', reds, map_lam, arrs')
-          onStms scope $ stmsFromList [mapstm, redstm]
+          preprocessStms scope $ stmsFromList [mapstm, redstm]
       | otherwise ->
           pure $ oneStm $ Let pat aux $ Op $ Screma w' arrs' form'
     _ ->
-      error "onStm: impossible non-Screma"
-onStm scope (Let pat aux e) =
+      error "preprocessStm: impossible non-Screma"
+preprocessStm scope (Let pat aux e) =
   oneStm . Let pat aux <$> mapExpM mapper e
   where
     mapper =
       (identityMapper @SOACS)
-        { mapOnBody = \bscope -> onBody (bscope <> scope),
+        { mapOnBody = \bscope -> preprocessBody (bscope <> scope),
           mapOnOp = mapSOACM (soacMapper scope)
         }
 
-onStms :: Scope SOACS -> Stms SOACS -> PassM (Stms SOACS)
-onStms scope stms = mconcat <$> mapM (onStm scope') (stmsToList stms)
+preprocessStms :: Scope SOACS -> Stms SOACS -> PassM (Stms SOACS)
+preprocessStms scope stms = mconcat <$> mapM (preprocessStm scope') (stmsToList stms)
   where
     scope' = scopeOf stms <> scope
 
-onBody :: Scope SOACS -> Body SOACS -> PassM (Body SOACS)
-onBody scope body = do
-  stms <- onStms scope $ bodyStms body
+preprocessBody :: Scope SOACS -> Body SOACS -> PassM (Body SOACS)
+preprocessBody scope body = do
+  stms <- preprocessStms scope $ bodyStms body
   pure $ body {bodyStms = stms}
 
-onLambda :: Scope SOACS -> Lambda SOACS -> PassM (Lambda SOACS)
-onLambda scope lam = do
-  body <- onBody (scopeOfLParams (lambdaParams lam) <> scope) $ lambdaBody lam
+preprocessLambda :: Scope SOACS -> Lambda SOACS -> PassM (Lambda SOACS)
+preprocessLambda scope lam = do
+  body <- preprocessBody (scopeOfLParams (lambdaParams lam) <> scope) $ lambdaBody lam
   pure $ lam {lambdaBody = body}
 
-onFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
-onFun consts fd = do
-  body <- onBody (scopeOf consts <> scopeOf fd) $ funDefBody fd
+preprocessFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
+preprocessFun consts fd = do
+  body <- preprocessBody (scopeOf consts <> scopeOf fd) $ funDefBody fd
   pure $ fd {funDefBody = body}
 
 preprocessProg :: Prog SOACS -> PassM (Prog SOACS)
 preprocessProg prog = do
   prog' <-
     intraproceduralTransformationWithConsts
-      (onStms mempty)
-      onFun
+      (preprocessStms mempty)
+      preprocessFun
       prog
   SOACS.simplifySOACS prog' -- Is this a good idea?
