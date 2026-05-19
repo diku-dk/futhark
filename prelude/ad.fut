@@ -117,7 +117,7 @@ def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
   (vjp2 f x y').1
 
 -- | Provide custom reverse-mode adjoint code for a given function. This is
--- useful when the adjoint synthesised by AD is as good as one that is known
+-- useful when the adjoint synthesised by AD is not as good as one that is known
 -- analytically.
 --
 -- The function `f` returns a result of type `b`. In the return sweep, the
