@@ -466,11 +466,11 @@ defuncFun tparams pats e0 ret loc = do
            )
 
 intrinsicTypeFVs :: Exp -> FV
-intrinsicTypeFVs = execWriter . onExp
+intrinsicTypeFVs = execWriter . void . onExp
   where
     onExp e = do
       remember e
-      void $ astMap (identityMapper {mapOnExp = onExp}) e
+      astMap (identityMapper {mapOnExp = onExp}) e
 
     remember (Var qn (Info t) _)
       | isIntrinsic $ qualLeaf qn =
