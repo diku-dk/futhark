@@ -132,4 +132,4 @@ def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
 -- **account when computing the adjoint. Make these part of the argument
 -- **instead.
 def vjp_by 'a 'b 'c (f: a -> (b, c)) (f': (b, c) -> a) (x: a) : b =
-  (intrinsics.vjp_by f f' x).0
+  intrinsics.vjp_by f f' x

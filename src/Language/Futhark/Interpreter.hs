@@ -2159,7 +2159,7 @@ initialCtx =
     def "vjp_by" = Just $ fun3 $ \f _ arg ->
       -- XXX? We simply ignore the custom derivative. This is correct, but makes
       -- it more of a hassle to test them.
-      apply noLoc mempty f arg
+      project "0" <$> apply noLoc mempty f arg
     def "acc" = Nothing
     def s | nameFromText s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ T.unpack s

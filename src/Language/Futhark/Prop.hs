@@ -988,11 +988,7 @@ intrinsics =
                     Scalar (t_a Observe)
                   ]
                   $ RetType []
-                  $ Scalar
-                  $ tupleRecord
-                    [ Scalar (t_b Nonunique),
-                      Scalar (t_c Nonunique)
-                    ]
+                  $ Scalar (t_b Nonunique)
               )
             ]
               ++
