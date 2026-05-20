@@ -36,6 +36,7 @@ import Futhark.Optimise.Unstream
 -- import Futhark.Optimise.EffSeqIntra
 -- import Futhark.Optimise.IntraSeq
 -- import Futhark.Optimise.FuseIntraScatter
+import Futhark.Optimise.IntraShm2Reg
 import Futhark.Pass.AD
 import Futhark.Pass.AddGlobalParams
 import Futhark.Pass.ExpandAllocations
@@ -96,6 +97,7 @@ gpuPipeline =
         -- effSeqIntra,
         -- intraSeq,
 --}
+        applyShm2Reg,
         addGlobalParams,
         optimiseGenRed,
         simplifyGPU,
