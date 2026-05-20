@@ -41,7 +41,7 @@ data PBTConfig = PBTConfig
     -- | maximum size argument to pass to generators and shrinkers (unless overridden by PropSpec)
     configMaxSize :: Int64,
     -- | seed to use for the random number generator (can be overridden by environment variable or PropSpec)
-    configSeed :: Int32,
+    configSeed :: Word64,
     -- | number of shrinking attempts to make on userdefined shrinker before giving up and reporting the current candidate as the final counterexample
     configShrinkTries :: Int
   }
@@ -71,6 +71,8 @@ data PBTPhase = PBTPhase
     -- | size argument for generator and shrinker phases
     phaseSize :: Maybe Int64,
     -- | seed argument for generator and shrinker phases
+    phaseSeed :: Maybe Word64,
+    -- | random value argument for shrinker phase (used for user-defined shrinker, otherwise Nothing)
     phaseRandom :: Maybe Int32
   }
   deriving (Show, Eq)
@@ -244,7 +246,6 @@ haskellFutGenerator srv candidate genTy size rng = do
               freeVars srv fieldVarNames
               pure Nothing
         Left err -> pure $ Just $ showText err
-
     Array -> do
       let (dims, baseTy) = getFutBaseType genTy
       baseKind <- cmdErrorHandlerE "haskellFutGenerator base cmdKind failed: " $ cmdKind srv baseTy
@@ -271,7 +272,6 @@ haskellFutGenerator srv candidate genTy size rng = do
                   freeVars srv fieldVarNames
                   pure Nothing
             Left err -> pure $ Just $ showText err
-
         _ -> do
           let shapeList = replicate (length dims) size
           seed <- genWord64 rng
@@ -283,7 +283,6 @@ haskellFutGenerator srv candidate genTy size rng = do
                 Nothing -> pure Nothing
                 Just err -> pure $ Just $ showText err
             Left err -> pure $ Just err
-
     _ -> do
       seed <- genWord64 rng
       case makeFutPrimitiveValue genTy [] seed of
@@ -293,17 +292,14 @@ haskellFutGenerator srv candidate genTy size rng = do
           case putRes of
             Nothing -> pure Nothing
             Just err -> pure $ Just $ showText err
-
         Left _ -> do
-          let cleanTy = T.dropWhile (== '#') genTy
-              genName = "gen_" <> cleanTy
+          let genName = "gen_" <> genTy
               szVar = candidate <> "_$size"
               sdVar = candidate <> "_$seed"
-          
+
           putVal srv szVar size
-          s32 <- genSeed rng
-          putVal srv sdVar s32
-          
+          putVal srv sdVar seed
+
           callFreeIns srv genName candidate [szVar, sdVar]
 
 getFutBaseType :: T.Text -> ([Int64], T.Text)
@@ -338,7 +334,7 @@ validateGenTypes srv propName (Just genName) = fmap (either Just (const Nothing)
   genIns <- liftIO $ getInputTypes srv genName
   case genIns of
     [sizeTy, seedTy] -> do
-      unless (sizeTy == "i64" && seedTy == "i32") $
+      unless (sizeTy == "i64" && seedTy == "u64") $
         throwE $
           "Generator input type mismatch.\nGenerator "
             <> genName
@@ -346,7 +342,7 @@ validateGenTypes srv propName (Just genName) = fmap (either Just (const Nothing)
             <> sizeTy
             <> " and seed: "
             <> seedTy
-            <> "\nExpected size and seed to be i64 and i32, got: size type="
+            <> "\nExpected size and seed to be i64 and u64, got: size type="
             <> sizeTy
             <> " and seed type="
             <> seedTy
@@ -478,8 +474,8 @@ runOne s config srv entryNameRef program = runExceptT $ do
   let loop i
         | i >= numTests = pure Nothing
         | otherwise = do
-            seed <- genSeed rng
-            let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) Nothing entryNameRef
+            seed <- genWord64 rng
+            let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
 
             generatorCandidateE <- case genName of
               Nothing -> do
@@ -716,23 +712,24 @@ formatAutoShrinkResult autoRes =
     Left autoErr ->
       "\nAuto-shrinker fallback also failed: " <> autoErr
 
-updatePhase :: Maybe EntryName -> Maybe EntryName -> Maybe EntryName -> Maybe Int64 -> Maybe Int32 -> IORef PBTPhase -> IO ()
-updatePhase propName phase activeTest size val phaseRef =
+updatePhase :: Maybe EntryName -> Maybe EntryName -> Maybe EntryName -> Maybe Int64 -> Maybe Word64 -> Maybe Int32 -> IORef PBTPhase -> IO ()
+updatePhase propName phase activeTest size seed rand phaseRef =
   writeIORef phaseRef $
     PBTPhase
       { activeTest = propName,
         phase = phase,
         shrinkWith = activeTest,
         phaseSize = size,
-        phaseRandom = val
+        phaseSeed = seed,
+        phaseRandom = rand
       }
 
 autoShrinkLoop :: Server -> EntryName -> Maybe EntryName -> VarName -> Int64 -> PBTGen -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
 autoShrinkLoop srv propName genName vCounterExample size rng phaseRef = runExceptT $ do
-  let autoShrinkUpdatePhase (Right activeTest) =
-        liftIO $ updatePhase (Just propName) (Just "autoShrinkLoop") activeTest (Just size) Nothing phaseRef
-      autoShrinkUpdatePhase (Left _activeTest) =
-        liftIO $ updatePhase (Just propName) (Just "autoShrinkLoop") (Just "Auto Generator") (Just size) Nothing phaseRef
+  let autoShrinkUpdatePhase (Right activeTest) seed =
+        liftIO $ updatePhase (Just propName) (Just "autoShrinkLoop") activeTest (Just size) (Just seed) Nothing phaseRef
+      autoShrinkUpdatePhase (Left _activeTest) seed =
+        liftIO $ updatePhase (Just propName) (Just "autoShrinkLoop") (Just "Auto Generator") (Just size) (Just seed) Nothing phaseRef
 
       vCandidate = "qc_try"
       vOk = "qc_ok"
@@ -750,13 +747,13 @@ autoShrinkLoop srv propName genName vCounterExample size rng phaseRef = runExcep
         | i <= 1 = pure Nothing
         | otherwise = do
             let newSize = i - 1
-            seed <- genSeed rng
+            seed <- genWord64 rng
             liftIO $ putVal srv serverSize newSize >> putVal srv serverSeed seed
 
             -- Note: Since withFreedVars manages server-side resources,
             -- we lift the whole block into IO then handle the result.
             res <- liftIO $ withFreedVars srv [vCandidate] $ runExceptT $ do
-              liftIO $ autoShrinkUpdatePhase (Right genName)
+              liftIO $ autoShrinkUpdatePhase (Right genName) seed
               case genName of
                 Nothing -> do
                   propertyType <-
@@ -770,13 +767,13 @@ autoShrinkLoop srv propName genName vCounterExample size rng phaseRef = runExcep
                   errM <- liftIO $ callFreeIns srv gn vCandidate [serverSize, serverSeed]
                   maybe (pure ()) (throwE . (("Generator failed: " <> gn <> " has ") <>)) errM
 
-              liftIO $ autoShrinkUpdatePhase (Right $ Just propName)
+              liftIO $ autoShrinkUpdatePhase (Right $ Just propName) seed
               okE <- liftIO $
                 withCallKeepIns srv propName vOk [vCandidate] $
                   \vOk' -> getVal srv vOk'
               ok <- either (throwE . ("Property " <>)) pure okE
 
-              liftIO $ autoShrinkUpdatePhase (Left Nothing)
+              liftIO $ autoShrinkUpdatePhase (Left Nothing) seed
 
               if ok
                 then pure Nothing -- Shrink didn't find a smaller failure
@@ -806,7 +803,7 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
   -- 1. Setup Phase
   oldRef <- liftIO $ readIORef phaseRef
   let size = fromMaybe 0 (phaseSize oldRef)
-      shrinkUpdatePhase activeTest = liftIO $ updatePhase (Just propName) (Just shrinkName) activeTest (Just size) Nothing phaseRef
+      shrinkUpdatePhase activeTest = liftIO $ updatePhase (Just propName) (Just shrinkName) activeTest (Just size) Nothing Nothing phaseRef
 
   shrinkUpdatePhase Nothing
 
@@ -838,31 +835,31 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
                 throwE $ "Error in shrinker: " <> err
   loop 0 0
   where
-    oneStep size val = do
+    oneStep size (val :: Int32) = do
       let vOk = "qc_ok"
           vRandomValue = "qc_random"
 
-      let shrinkUpdatePhase activeTest randomNum = updatePhase (Just propName) (Just shrinkName) activeTest (Just size) randomNum phaseRef
+      let shrinkUpdatePhase activeTest randomNum = updatePhase (Just propName) (Just shrinkName) activeTest (Just size) Nothing randomNum phaseRef
 
       freeVars srv [vRandomValue]
       putVal srv vRandomValue val
 
       let shrinkerCandidate = outName shrinkName
-      shrinkUpdatePhase Nothing $ Just val
+      shrinkUpdatePhase Nothing $ Just (fromIntegral val)
 
       withFreedVar srv shrinkerCandidate $ runExceptT $ do
         errE <- liftIO $ callKeepIns srv shrinkName shrinkerCandidate [counterExample, vRandomValue]
         liftIO $ freeVars srv [vRandomValue]
         maybe (pure ()) (throwE . ((shrinkName <> " has ") <>)) errE
 
-        liftIO $ shrinkUpdatePhase Nothing $ Just val
+        liftIO $ shrinkUpdatePhase Nothing $ Just $ fromIntegral val
 
         okE <- liftIO $
           withCallKeepIns srv propName vOk [shrinkerCandidate] $
             \vOk' -> getVal srv vOk'
         ok <- either (throwE . ("Property " <>)) pure okE
 
-        liftIO $ shrinkUpdatePhase Nothing $ Just val
+        liftIO $ shrinkUpdatePhase Nothing $ Just $ fromIntegral val
 
         case ok of
           True -> pure NotAcceptedShrink

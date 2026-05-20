@@ -5,9 +5,9 @@ module rnge = minstd_rand
 module rand_i32 = uniform_int_distribution i32 rnge
 module shrink_i32 = integerlShrinkers i32
 
-entry gen_i32_array (size: i64) (seed: i32) : []i32 =
+entry gen_i32_array (size: i64) (seed: u64) : []i32 =
   tabulate size (\i ->
-                   let state = seed + (i32.i64 i)
+                   let state = i32.u64 (seed + u64.i64 i)
                    let rng0 = rnge.rng_from_seed [state]
                    let (_, x) = rand_i32.rand (-i32.i64 size, i32.i64 size) rng0 in x)
 

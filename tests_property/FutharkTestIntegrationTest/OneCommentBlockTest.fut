@@ -14,10 +14,10 @@
 -- property: prop_i32_fail
 -- property: prop_i32_succ
 
-entry gen_zero (_size: i64) (_seed: i32) : i32 =
+entry gen_zero (_size: i64) (_seed: u64) : i32 =
   0i32
 
-entry gen_one (_size: i64) (_seed: i32) : i32 =
+entry gen_one (_size: i64) (_seed: u64) : i32 =
   1i32
 
 #[prop(gen(gen_zero))]

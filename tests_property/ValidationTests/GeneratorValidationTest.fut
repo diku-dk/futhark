@@ -28,8 +28,8 @@
 entry prop_ok (x: i32) : bool =
   x == x
 
-entry gen_ok (size: i64) (seed: i32) : i32 =
-  i32.i64 size + seed
+entry gen_ok (size: i64) (seed: u64) : i32 =
+  (size + i64.u64 seed) |> i32.i64
 
 -- MISSING GENERATOR
 -- Should fail validation with "No generator specified ..."
@@ -41,8 +41,8 @@ entry prop_missing_gen (x: i32) : bool =
 -- GENERATOR NAME EXISTS IN SOURCE BUT IS NOT AN ENTRY POINT
 -- Should fail validation with "Generator is not a server entry point ..."
 
-def helper_not_entry (size: i64) (seed: i32) : i32 =
-  i32.i64 size + seed
+def helper_not_entry (size: i64) (seed: u64) : i32 =
+  (size + i64.u64 seed) |> i32.i64
 
 #[prop(gen(helper_not_entry),size(10))]
 entry prop_nonentry_gen (x: i32) : bool =
@@ -56,7 +56,7 @@ entry prop_nonentry_gen (x: i32) : bool =
 entry prop_bad_output (x: i32) : bool =
   x == x
 
-entry gen_bad_output (size: i64) (seed: i32) : bool =
+entry gen_bad_output (size: i64) (_seed: u64) : bool =
   size > 0
 
 -- BAD GENERATOR ARITY
@@ -67,7 +67,7 @@ entry gen_bad_output (size: i64) (seed: i32) : bool =
 entry prop_bad_arity (x: i32) : bool =
   x == x
 
-entry gen_bad_arity (seed: i32) : i32 =
+entry gen_bad_arity (seed: u64) : u64 =
   seed
 
 -- BAD GENERATOR INPUT TYPES
@@ -88,7 +88,7 @@ entry gen_bad_input_types (size: i32) (seed: i64) : i32 =
 entry prop_div_zero (x: i32) : bool =
   x == x
 
-entry gen_div_zero (size: i64) (seed: i32) : i32 =
+entry gen_div_zero (_size: i64) (_seed: u64) : i32 =
   10 / 0
 
 -- VALID COMPOSITE / TUPLE MATCH
@@ -100,5 +100,5 @@ entry prop_tuple_ok (p: (i32, i32)) : bool =
   let (x, y) = p
   in x == x && y == y
 
-entry gen_tuple_ok (size: i64) (seed: i32) : (i32, i32) =
-  (i32.i64 size, seed)
+entry gen_tuple_ok (size: i64) (seed: u64) : (i32, i32) =
+  (i32.i64 size, i32.u64 seed)

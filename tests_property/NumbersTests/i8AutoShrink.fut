@@ -5,8 +5,8 @@ import "../lib/github.com/diku-dk/cpprandom/random"
 module rng_engine = minstd_rand
 module rand_i8 = uniform_int_distribution i8 rng_engine
 
-entry gen_simple (size: i64) (seed: i32) : i8 =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple (size: i64) (seed: u64) : i8 =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (_, x) = rand_i8.rand (-i8.i64 size, i8.i64 size) rng0
   in x
 

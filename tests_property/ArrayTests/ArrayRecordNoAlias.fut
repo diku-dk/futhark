@@ -13,7 +13,7 @@ def all_equal (r: {s: i32, a: i32}) : bool =
 def prop_all_equal (xs: []{s: i32, a: i32}) : bool =
   map all_equal xs |> reduce (&&) true
 
-entry gen_record_sums (size: i64) (_: i32) : []{s: i32, a: i32} =
+entry gen_record_sums (size: i64) (_: u64) : []{s: i32, a: i32} =
   let n = if size < 0 then 0 else size
   in replicate n {s = 1i32, a = 1i32}
 
@@ -21,7 +21,7 @@ entry gen_record_sums (size: i64) (_: i32) : []{s: i32, a: i32} =
 entry prop_record_sums_succ (input: []{s: i32, a: i32}) : bool =
   prop_all_equal input
 
-entry gen_record_sums_fail (size: i64) (_: i32) : []{s: i32, a: i32} =
+entry gen_record_sums_fail (size: i64) (_: u64) : []{s: i32, a: i32} =
   let n = if size < 0 then 0 else size
   in tabulate n (\i ->
                    if i == 0i64

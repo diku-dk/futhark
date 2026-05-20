@@ -7,8 +7,8 @@ module rng_engine_u64 = minstd_rand
 module rand_u64 = uniform_int_distribution u64 rng_engine_u64
 module shrink_u64 = integerlShrinkers u64
 
-entry gen_simple (size: i64) (seed: i32) : u64 =
-  let rng0 = rng_engine_u64.rng_from_seed [seed]
+entry gen_simple (size: i64) (seed: u64) : u64 =
+  let rng0 = rng_engine_u64.rng_from_seed [i32.u64 seed]
   --   let (_, x) = rand_u64.rand (u64.lowest, u64.highest) rng0
   let (_, x) = rand_u64.rand (0, u64.i64 size) rng0
   in x

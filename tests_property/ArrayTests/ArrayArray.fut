@@ -19,7 +19,7 @@ def nondecreasing (xs: []i32) : bool =
           |> reduce (&&) true
 
 -- Succeeding generator: same row length everywhere, and row sums increase with row index.
-entry gen_matrix_sums (size: i64) (seed: i32) : [][]i32 =
+entry gen_matrix_sums (size: i64) (seed: u64) : [][]i32 =
   let s = if size < 0 then 0 else size
   let r_i32 = if s == 0 then 0 else 1 + (i32.abs seed) % i32.i64 (s + 1)
   let c_i32 = if s == 0 then 0 else 1 + (i32.abs (seed * 17 + 3)) % i32.i64 (s + 1)
@@ -60,7 +60,7 @@ entry shrink_matrix_sums (xss: [][]i32) (random: i32) : [][]i32 =
           let xss' = drop 1 xss
           in xss'
 
-entry gen_matrix_sums_bad (size: i64) (seed: i32) : [][]i32 =
+entry gen_matrix_sums_bad (size: i64) (seed: u64) : [][]i32 =
   let xss = gen_matrix_sums size seed
   let r = length xss
   in if r < 2

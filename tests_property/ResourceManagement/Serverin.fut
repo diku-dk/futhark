@@ -9,7 +9,7 @@
 -- If putVal does not correctly handle reused server variable names, this test
 -- may fail with a variable/name-collision error.
 
-entry gen_array (size: i64) (seed: i32) : []i32 =
+entry gen_array (size: i64) (seed: u64) : []i32 =
   let n = if size < 0 then 0 else size
   in replicate n seed
 

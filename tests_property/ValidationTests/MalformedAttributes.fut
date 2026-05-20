@@ -7,7 +7,7 @@
 -- Shared helper entry points
 -- ------------------------------------------------------------
 
-entry gen_i32 (_size: i64) (_seed: i32) : i32 =
+entry gen_i32 (_size: i64) (_seed: u64) : i32 =
   1i32
 
 entry shrink_i32 (x: i32) (_random: i32) : i32 =

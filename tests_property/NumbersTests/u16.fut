@@ -7,8 +7,8 @@ module rng_engine = minstd_rand
 module rand_u16 = uniform_int_distribution u16 rng_engine
 module shrink_u16 = integerlShrinkers u16
 
-entry gen_simple (size: i64) (seed: i32) : u16 =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple (size: i64) (seed: u64) : u16 =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   --   let (_, x) = rand_u16.rand (u16.lowest, u16.highest) rng0
   let (_, x) = rand_u16.rand (0, u16.i64 (size / 2)) rng0
   in x

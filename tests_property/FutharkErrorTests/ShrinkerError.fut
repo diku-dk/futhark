@@ -1,7 +1,7 @@
 -- ==
 -- property: prop_shrinker_error
 
-entry gen_bad (_size: i64) (_seed: i32) : i32 =
+entry gen_bad (_size: i64) (_seed: u64) : i32 =
   1i32
 
 entry shrink_crash (_x: i32) (_random: i32) : i32 =

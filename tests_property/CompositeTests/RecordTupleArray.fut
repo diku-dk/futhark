@@ -23,8 +23,8 @@ def step0 (v: i32) : i32 =
 def mk (ok: bool) (v: rec) : []rec =
   map (\t -> t.1) (filter (\t -> t.0) [(ok, v)])
 
-entry gen_simple (size: i64) (seed: i32) : rec =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple (size: i64) (seed: u64) : rec =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (rng1, a0) = rand_i32.rand (-100i32, 100i32) rng0
   let (rng2, a1) = rand_i32.rand (-100i32, 100i32) rng1
   let (rng3, a2) = rand_i32.rand (-100i32, 100i32) rng2
@@ -106,7 +106,7 @@ entry shrink_rec (r: rec) : []rec =
      ++ mk (c00' != c00) r3
      ++ mk (c10' != c10) r4
 
-entry gen_simple_fail (size: i64) (seed: i32) : rec =
+entry gen_simple_fail (size: i64) (seed: u64) : rec =
   gen_simple size seed
 
 def simple_fail (r: rec) : i32 =

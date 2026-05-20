@@ -27,7 +27,7 @@ def prop_all_ones (xs: arr) : bool =
   map all_equal_1 xs |> reduce (&&) true
 
 -- Succeeding generator: all 1s
-entry gen_record_sums (size: i64) (_: i32) : arr =
+entry gen_record_sums (size: i64) (_: u64) : arr =
   let n = if size < 0 then 0 else size
   in replicate n 1i32
 
@@ -36,7 +36,7 @@ entry prop_record_sums_succ (input: arr) : bool =
   prop_all_ones input
 
 -- Failing generator: first element 1, rest 0 (if size>1)
-entry gen_record_sums_fail (size: i64) (_: i32) : arr =
+entry gen_record_sums_fail (size: i64) (_: u64) : arr =
   let n = if size < 0 then 0 else size
   let idx = iota n |> map (\i -> i32.i64 i)
   in map (\i -> if i == 0i32 then 1i32 else 0i32) idx

@@ -5,8 +5,8 @@ type pair = (i32, i32)
 module rng_engine = minstd_rand
 module rand_i32 = uniform_int_distribution i32 rng_engine
 
-entry gen_pair (size: i64) (seed: i32) : pair =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_pair (size: i64) (seed: u64) : pair =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (rng1, x) = rand_i32.rand (i32.lowest, i32.highest) rng0
   let (_, y) = rand_i32.rand (-i32.i64 size, i32.i64 size) rng1
   in if x > y then (x, y) else (y + 1i32, y)

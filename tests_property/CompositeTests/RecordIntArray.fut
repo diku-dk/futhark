@@ -11,8 +11,8 @@ type record = {x: i32, xs: [3]i32}
 module rng_engine = minstd_rand
 module rand_i32 = uniform_int_distribution i32 rng_engine
 
-entry gen_simple (size: i64) (seed: i32) : record =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple (size: i64) (seed: u64) : record =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (_, x) = rand_i32.rand (-100i32, 100i32) rng0
   in {x = x, xs = [x, x + 1, x + 2]}
 

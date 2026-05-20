@@ -12,8 +12,8 @@ module rand_i32 = uniform_int_distribution i32 rng_engine
 def inner_eq (r1: (i32, i32)) (r2: (i32, i32)) : bool =
   r1.0 == r2.0 && r1.1 == r2.1
 
-entry gen_simple (size: i64) (seed: i32) : {x: (i32, i32), y: (i32, i32)} =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple (size: i64) (seed: u64) : {x: (i32, i32), y: (i32, i32)} =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (_, v) = rand_i32.rand (-100i32, 100i32) rng0
   in { x = (v, v + 1)
      , y = (v, v + 1)
@@ -23,8 +23,8 @@ entry gen_simple (size: i64) (seed: i32) : {x: (i32, i32), y: (i32, i32)} =
 entry prop_simple_succ (r: {x: (i32, i32), y: (i32, i32)}) : bool =
   inner_eq r.x r.y
 
-entry gen_simple_fail (size: i64) (seed: i32) : {x: (i32, i32), y: (i32, i32)} =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple_fail (size: i64) (seed: u64) : {x: (i32, i32), y: (i32, i32)} =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (_, v) = rand_i32.rand (-100i32, 100i32) rng0
   in { x = (v, v + 1)
      , y = (v + 1, v + 1)

@@ -5,8 +5,8 @@ import "../lib/github.com/diku-dk/cpprandom/random"
 module rng_engine = minstd_rand
 module rand = uniform_real_distribution f64 rng_engine
 
-entry gen_simple (size: i64) (seed: i32) : f64 =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple (size: i64) (seed: u64) : f64 =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   --   let (_, x) = rand_i32.rand (i32.lowest, i32.highest) rng0
   let (_, x) = rand.rand (-f64.i64 size, f64.i64 size) rng0
   in x

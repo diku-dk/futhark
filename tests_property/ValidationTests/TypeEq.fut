@@ -3,7 +3,7 @@ type wrapper = {x: i32}
 -- ==
 -- property: prop_wrapper
 
-entry gen_i32 (_size: i64) (_seed: i32) : i32 =
+entry gen_i32 (_size: i64) (_seed: u64) : i32 =
   0i32
 
 #[prop(gen(gen_i32))]

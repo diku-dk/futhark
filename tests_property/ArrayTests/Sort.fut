@@ -17,7 +17,7 @@ def flaky_sort (xs: []i32) : []i32 =
      then ys
      else [ys[1]] ++ [ys[0]] ++ drop 2 ys
 
-entry gen_simple_param (m: i64) (with_negatives: bool) (kind: i32) : []i32 =
+entry gen_simple_param (m: i64) (with_negatives: bool) (kind: u64) : []i32 =
   let n = i32.i64 m
   let base = iota m |> map (\i -> i32.i64 i)
   let index = iota m |> map (\i -> i32.i64 i)
@@ -34,10 +34,10 @@ entry gen_simple_param (m: i64) (with_negatives: bool) (kind: i32) : []i32 =
      then map2 (\i x -> if i == n - 1 then -x else x) index xs
      else xs
 
-entry gen_simple (size: i64) (seed: i32) : []i32 =
+entry gen_simple (size: i64) (seed: u64) : []i32 =
   let n = if size < 0 then 0 else size
   let with_negatives = (seed % 2) == 0
-  let kind = (i32.abs seed) % 3
+  let kind = seed % 3
   in gen_simple_param n with_negatives kind
 
 def nondecreasing (xs: []i32) : bool =

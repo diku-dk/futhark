@@ -1,4 +1,4 @@
-entry gen (size: i64) (_seed: i32) : i64 = size
+entry gen (size: i64) (_seed: u64) : i64 = size
 
 -- ==
 -- property: prop

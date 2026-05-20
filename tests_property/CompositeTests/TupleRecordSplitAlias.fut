@@ -16,8 +16,8 @@ module rand_i32 = uniform_int_distribution i32 rng_engine
 def inner_eq (r1: left) (r2: right) : bool =
   r1.a == r2.o && r1.b == r2.p
 
-entry gen_simple (size: i64) (seed: i32) : pair =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple (size: i64) (seed: u64) : pair =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (_, v) = rand_i32.rand (-100i32, 100i32) rng0
   in ( {a = v, b = v + 1}
      , {o = v, p = v + 1}
@@ -27,8 +27,8 @@ entry gen_simple (size: i64) (seed: i32) : pair =
 entry prop_simple_succ (r: pair) : bool =
   inner_eq r.0 r.1
 
-entry gen_simple_fail (size: i64) (seed: i32) : pair =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple_fail (size: i64) (seed: u64) : pair =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (_, v) = rand_i32.rand (-100i32, 100i32) rng0
   in ( {a = v, b = v + 1}
      , {o = v + 1, p = v + 1}

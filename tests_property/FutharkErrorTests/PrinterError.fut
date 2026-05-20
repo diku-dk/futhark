@@ -1,7 +1,7 @@
 -- ==
 -- property: prop_printer_error
 
-entry gen_bad (_size: i64) (_seed: i32) : i32 =
+entry gen_bad (_size: i64) (_seed: u64) : i32 =
   1i32
 
 entry pp_crash (x: i32) : []u8 =

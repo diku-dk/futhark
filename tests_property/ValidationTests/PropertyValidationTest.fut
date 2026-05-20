@@ -22,8 +22,8 @@
 entry prop_ok (x: i32) : bool =
   x == x
 
-entry gen_ok (size: i64) (seed: i32) : i32 =
-  i32.i64 size + seed
+entry gen_ok (size: i64) (seed: u64) : i32 =
+  (i64.u64 seed + size) |> i32.i64
 
 -- BAD PROPERTY OUTPUT TYPE
 -- Property expects i32 returns i32

@@ -1,4 +1,4 @@
-entry gen_i32_array (size: i64) (seed: i32) : []i32 =
+entry gen_i32_array (size: i64) (seed: u64) : []i32 =
   let n = i64.max 0 size
   in tabulate n (\i ->
                    let x = seed + i32.i64 i

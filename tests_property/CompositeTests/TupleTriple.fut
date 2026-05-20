@@ -12,8 +12,8 @@ module rand_i32 = uniform_int_distribution i32 rng_engine
 def triple_eq (t: (i32, i32, i32)) : bool =
   t.0 == t.1 && t.1 == t.2
 
-entry gen_simple (size: i64) (seed: i32) : (i32, i32, i32) =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple (size: i64) (seed: u64) : (i32, i32, i32) =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (_, v) = rand_i32.rand (-100i32, 100i32) rng0
   in (v, v, v)
 
@@ -21,8 +21,8 @@ entry gen_simple (size: i64) (seed: i32) : (i32, i32, i32) =
 entry prop_simple_succ (t: (i32, i32, i32)) : bool =
   triple_eq t
 
-entry gen_simple_fail (size: i64) (seed: i32) : (i32, i32, i32) =
-  let rng0 = rng_engine.rng_from_seed [seed]
+entry gen_simple_fail (size: i64) (seed: u64) : (i32, i32, i32) =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
   let (_, v) = rand_i32.rand (-100i32, 100i32) rng0
   in (v, v + 1, v)
 

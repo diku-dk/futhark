@@ -70,7 +70,6 @@ import Data.Char
 import Data.Either
 import Data.Foldable (fold, toList)
 import Data.Function ((&))
-import Data.Int (Int32)
 import Data.IntMap qualified as IM
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -83,6 +82,7 @@ import Data.Text.Encoding.Error qualified as T
 import Data.Text.IO qualified as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
+import Data.Word (Word64)
 import Debug.Trace
 import Numeric
 import System.Directory (createDirectoryIfMissing, listDirectory)
@@ -257,7 +257,7 @@ isEnvVarAtLeast s x =
 
 -- | A random number generated at startup. Can be used to produce different
 -- behaviour whenever the program is run.
-randomSeed :: Int32
+randomSeed :: Word64
 randomSeed = unsafePerformIO randomIO
 
 {-# NOINLINE startupTime #-}

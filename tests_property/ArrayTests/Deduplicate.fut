@@ -50,7 +50,7 @@ def deduplicate_fail (xs: []i32) : []i32 =
 
 -- Passing generator: already “safe” for the postcondition after succ dedup.
 -- (Doesn't matter much; just keeps the demo complete.)
-entry gen_deduplicate_ok (size: i64) (_seed: i32) : []i32 =
+entry gen_deduplicate_ok (size: i64) (_seed: u64) : []i32 =
   let n = if size < 0 then 0 else size
   in tabulate n (\i -> i32.i64 i)
 
@@ -62,7 +62,7 @@ entry prop_deduplicate_succ (input: []i32) : bool =
 
 -- Failing generator: ALWAYS returns [0,1] when size>=2, else [0].
 -- So prop_deduplicate_fail will always fail when size>=2.
-entry gen_deduplicate_bad (size: i64) (_seed: i32) : []i32 =
+entry gen_deduplicate_bad (size: i64) (_seed: u64) : []i32 =
   let n = if size < 0 then 0 else size
   in if n < 2
      then [0i32]

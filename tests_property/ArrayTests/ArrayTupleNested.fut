@@ -6,7 +6,7 @@ let prop_all_equal (xs: []([](i8, i16), i32)) : bool =
   map all_equal xs |> reduce (&&) true
 
 -- | Generator needs to return the specific nested structure expected by the property
-entry gen_record_sums_fail (size: i64) (_seed: i32) : []([](i8, i16), i32) =
+entry gen_record_sums_fail (size: i64) (_seed: u64) : []([](i8, i16), i32) =
   let n = if size < 0 then 0 else size
   in tabulate n (\i ->([(1i8, 10i16)], 100i32))
 

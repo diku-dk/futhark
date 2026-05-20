@@ -15,7 +15,6 @@ import Control.Monad.Trans.Class (lift)
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as LBS
 import Data.IORef
-import Data.Int (Int32)
 import Data.List (delete, partition)
 import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
@@ -23,6 +22,7 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
 import Data.Time.Clock.System (SystemTime (..), getSystemTime)
+import Data.Word (Word64)
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
@@ -962,7 +962,7 @@ commandLineOptions =
       ["seed"]
       ( ReqArg
           ( \n ->
-              case (reads n :: [(Int32, String)]) of
+              case (reads n :: [(Word64, String)]) of
                 [(n', "")] ->
                   Right $ changePBTConfig $ \pbt -> pbt {configSeed = n'}
                 _ ->

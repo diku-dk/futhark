@@ -15,7 +15,7 @@ def all_equal (r: record) : bool =
 def prop_all_equal (xs: []record) : bool =
   map all_equal xs |> reduce (&&) true
 
-entry gen_record_sums (size: i64) (_: i32) : []record =
+entry gen_record_sums (size: i64) (_: u64) : []record =
   let n = if size < 0 then 0 else size
   in replicate n {s = 1i32, a = 1i32}
 
@@ -23,7 +23,7 @@ entry gen_record_sums (size: i64) (_: i32) : []record =
 entry prop_record_sums_succ (input: []record) : bool =
   prop_all_equal input
 
-entry gen_record_sums_fail (size: i64) (_: i32) : []record =
+entry gen_record_sums_fail (size: i64) (_: u64) : []record =
   let n = if size < 0 then 0 else size
   in tabulate n (\i ->
                    if i == 0i64
