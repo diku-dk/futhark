@@ -131,5 +131,5 @@ def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
 -- **Beware:** if `f` uses any free variables, these will not be taken into
 -- **account when computing the adjoint. Make these part of the argument
 -- **instead.
-def vjp_by 'a 'b 'c (f: a -> b) (f': (res: b) -> (b_adj: b) -> a) (x: a) : b =
+def vjp_by 'a 'b (f: a -> b) (f': (res: b) -> (b_adj: b) -> a) (x: a) : b =
   intrinsics.vjp_by f f' x
