@@ -93,9 +93,8 @@ type PBTFailure = T.Text
 -- passed to generators.
 type PBTGen = IOGenM StdGen
 
--- | Generate a seed that can be passed to Futhark.
-genSeed :: (MonadIO m) => PBTGen -> m Int32
-genSeed = applyIOGen random
+genInt32 :: (MonadIO m) => PBTGen -> m Int32
+genInt32 = applyIOGen random
 
 genWord64 :: (MonadIO m) => PBTGen -> m Word64
 genWord64 = applyIOGen random
@@ -818,7 +817,7 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
   let loop (acc :: Int) (totalCounter :: Int)
         | acc >= numTries = pure Nothing
         | otherwise = do
-            random_value <- genSeed rng
+            random_value <- genInt32 rng
             stepResultE <- liftIO $ oneStep size random_value
             stepResult <-
               either
@@ -853,7 +852,7 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
       putVal srv vRandomValue val
 
       let shrinkerCandidate = outName shrinkName
-      shrinkUpdatePhase Nothing $ Just (fromIntegral val)
+      shrinkUpdatePhase Nothing $ Just val
 
       withFreedVar srv shrinkerCandidate $ runExceptT $ do
         errE <- liftIO $ callKeepIns srv shrinkName shrinkerCandidate [counterExample, vRandomValue]
