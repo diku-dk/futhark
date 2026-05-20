@@ -12,6 +12,21 @@
 -- purpose where you might need derivatives, such as for example
 -- computing surface normals for signed distance functions.
 --
+-- Futhark's AD support includes the following:
+--
+--   * Differentiation operators for forward-mode (`jvp`) and reverse-mode
+--     (`vjp`).
+--
+--   * Arbitrary control flow in differentiable code.
+--
+--   * Higher order derivatives by nesting differentiation operators, including
+--     arbitrary mixing of forward- and reverse mode (although using multiple
+--     rounds of reverse mode is rarely useful and often slow).
+--
+--   * Custom derivatives (`vjp_by`).
+--
+--   * Checkpointing of sequential loops.
+--
 -- ## Jacobians
 --
 -- For a differentiable function *f* whose input comprise *n* scalars
