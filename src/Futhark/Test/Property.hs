@@ -36,43 +36,51 @@ import System.Random (StdGen, mkStdGen, random)
 import System.Random.Stateful (IOGenM, applyIOGen, newIOGenM)
 
 data PBTConfig = PBTConfig
-  { -- | number of test cases to run for each property
+  { -- | Number of test cases to run for each property.
     configNumTests :: Int32,
-    -- | maximum size argument to pass to generators and shrinkers (unless overridden by PropSpec)
+    -- | Maximum size argument to pass to generators and shrinkers (unless
+    -- overridden by PropSpec).
     configMaxSize :: Int64,
-    -- | seed to use for the random number generator (can be overridden by environment variable or PropSpec)
+    -- | Seed to use for the random number generator (can be overridden by PropSpec).
     configSeed :: Word64,
-    -- | number of shrinking attempts to make on userdefined shrinker before giving up and reporting the current candidate as the final counterexample
+    -- | Number of shrinking attempts to make on userdefined shrinker before
+    -- giving up and reporting the current candidate as the final
+    -- counterexample.
     configShrinkTries :: Int
   }
   deriving (Show, Eq)
 
 data PropSpec = PropSpec
-  { -- | the property entry point to test
+  { -- | The property entry point to test.
     psProp :: T.Text,
-    -- | optional generator entry point to use instead of the default auto-generator
+    -- | Optional generator entry point to use instead of the default
+    -- auto-generator.
     psGen :: Maybe T.Text,
-    -- | optional shrinker entry point to use instead of the default auto-shrinker
+    -- | Optional shrinker entry point to use instead of the default
+    -- auto-shrinker.
     psShrink :: Maybe T.Text,
-    -- | optional size argument to pass to the generator and shrinker phases (overrides configMaxSize)
+    -- | Optional size argument to pass to the generator and shrinker phases
+    -- (overrides 'configMaxSize').
     psSize :: Maybe Int64,
-    -- | optional pretty-printer entry point to use for rendering counterexamples instead of the default runner pretty-printer
+    -- | Optional pretty-printer entry point to use for rendering
+    -- counterexamples instead of the default runner pretty-printer.
     psPPrint :: Maybe T.Text
   }
   deriving (Show, Eq)
 
 data PBTPhase = PBTPhase
-  { -- | property being tested (same for generator and shrinker phases)
+  { -- | Property being tested (same for generator and shrinker phases).
     activeTest :: Maybe EntryName,
-    -- | current entrypoint being called (property, generator, or shrinker)
+    -- | Current entrypoint being called (property, generator, or shrinker).
     phase :: Maybe EntryName,
-    -- | property or generator (only for auto)
+    -- | Property or generator (only for auto).
     shrinkWith :: Maybe EntryName,
-    -- | size argument for generator and shrinker phases
+    -- | Size argument for generator and shrinker phases.
     phaseSize :: Maybe Int64,
-    -- | seed argument for generator and shrinker phases
+    -- | Seed argument for generator and shrinker phases.
     phaseSeed :: Maybe Word64,
-    -- | random value argument for shrinker phase (used for user-defined shrinker, otherwise Nothing)
+    -- | Random value argument for shrinker phase (used for user-defined
+    -- shrinker, otherwise 'Nothing').
     phaseRandom :: Maybe Int32
   }
   deriving (Show, Eq)
