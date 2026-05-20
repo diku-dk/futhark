@@ -482,7 +482,16 @@ runOne s config srv entryNameRef program = runExceptT $ do
         | i >= numTests = pure Nothing
         | otherwise = do
             seed <- genWord64 rng
-            let runUpdate ph = liftIO $ updatePhase (Just propName) (Just ph) Nothing (Just size) (Just seed) Nothing entryNameRef
+            let runUpdate ph =
+                  liftIO $
+                    updatePhase
+                      (Just propName)
+                      (Just ph)
+                      Nothing
+                      (Just size)
+                      (Just seed)
+                      Nothing
+                      entryNameRef
 
             generatorCandidateE <- case genName of
               Nothing -> do
@@ -719,7 +728,15 @@ formatAutoShrinkResult autoRes =
     Left autoErr ->
       "\nAuto-shrinker fallback also failed: " <> autoErr
 
-updatePhase :: Maybe EntryName -> Maybe EntryName -> Maybe EntryName -> Maybe Int64 -> Maybe Word64 -> Maybe Int32 -> IORef PBTPhase -> IO ()
+updatePhase ::
+  Maybe EntryName ->
+  Maybe EntryName ->
+  Maybe EntryName ->
+  Maybe Int64 ->
+  Maybe Word64 ->
+  Maybe Int32 ->
+  IORef PBTPhase ->
+  IO ()
 updatePhase propName phase activeTest size seed rand phaseRef =
   writeIORef phaseRef $
     PBTPhase
@@ -731,12 +748,36 @@ updatePhase propName phase activeTest size seed rand phaseRef =
         phaseRandom = rand
       }
 
-autoShrinkLoop :: Server -> EntryName -> Maybe EntryName -> VarName -> Int64 -> PBTGen -> IORef PBTPhase -> IO (Either PBTFailure PBTOutput)
+autoShrinkLoop ::
+  Server ->
+  EntryName ->
+  Maybe EntryName ->
+  VarName ->
+  Int64 ->
+  PBTGen ->
+  IORef PBTPhase ->
+  IO (Either PBTFailure PBTOutput)
 autoShrinkLoop srv propName genName vCounterExample size rng phaseRef = runExceptT $ do
   let autoShrinkUpdatePhase (Right activeTest) seed =
-        liftIO $ updatePhase (Just propName) (Just "autoShrinkLoop") activeTest (Just size) (Just seed) Nothing phaseRef
+        liftIO $
+          updatePhase
+            (Just propName)
+            (Just "autoShrinkLoop")
+            activeTest
+            (Just size)
+            (Just seed)
+            Nothing
+            phaseRef
       autoShrinkUpdatePhase (Left _activeTest) seed =
-        liftIO $ updatePhase (Just propName) (Just "autoShrinkLoop") (Just "Auto Generator") (Just size) (Just seed) Nothing phaseRef
+        liftIO $
+          updatePhase
+            (Just propName)
+            (Just "autoShrinkLoop")
+            (Just "Auto Generator")
+            (Just size)
+            (Just seed)
+            Nothing
+            phaseRef
 
       vCandidate = "qc_try"
       vOk = "qc_ok"
@@ -810,7 +851,16 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
   -- 1. Setup Phase
   oldRef <- liftIO $ readIORef phaseRef
   let size = fromMaybe 0 (phaseSize oldRef)
-      shrinkUpdatePhase activeTest = liftIO $ updatePhase (Just propName) (Just shrinkName) activeTest (Just size) Nothing Nothing phaseRef
+      shrinkUpdatePhase activeTest =
+        liftIO $
+          updatePhase
+            (Just propName)
+            (Just shrinkName)
+            activeTest
+            (Just size)
+            Nothing
+            Nothing
+            phaseRef
 
   shrinkUpdatePhase Nothing
 
@@ -846,7 +896,15 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
       let vOk = "qc_ok"
           vRandomValue = "qc_random"
 
-      let shrinkUpdatePhase activeTest randomNum = updatePhase (Just propName) (Just shrinkName) activeTest (Just size) Nothing randomNum phaseRef
+      let shrinkUpdatePhase activeTest randomNum =
+            updatePhase
+              (Just propName)
+              (Just shrinkName)
+              activeTest
+              (Just size)
+              Nothing
+              randomNum
+              phaseRef
 
       freeVars srv [vRandomValue]
       putVal srv vRandomValue val
