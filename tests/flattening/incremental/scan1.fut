@@ -1,5 +1,5 @@
 -- ==
--- input { 3i64 [[1i64, 2i64, 3i64], [4i64, 5i64, 6i64]] }
+-- input { 2i64 [[10i64, 2i64, 3i64], [4i64, 5i64, 6i64]] }
 -- auto output
 
 entry main [n] [m] (k: i64) (xss: [n][m]i64) =
