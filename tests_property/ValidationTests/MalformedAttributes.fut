@@ -70,3 +70,16 @@ entry prop_misspelled_pprint_field (x: i32) : bool =
 #[prop(gen(gen_i32),sze(10))]
 entry prop_misspelled_size_field (x: i32) : bool =
   x == x
+
+
+-- ------------------------------------------------------------
+-- 6. multiple attributes on the same property
+-- ------------------------------------------------------------
+
+-- ==
+-- property: prop_mul_att
+
+#[pro(gen(gen_i32), sze(12))]
+#[prop(gen(gen_i32), sze(10))]
+entry prop_mul_att (x: i32) : bool =
+  x == x
