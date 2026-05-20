@@ -111,7 +111,7 @@ segMap lvl segments f = do
     pure (map mkResult res, ts)
   let kbody = Body () stms res
   let tr = if all primType ts then ManyThreads else NoRecommendation SegVirt
-  lvl' <- capThreadSegLevel segments "uniform_segred" lvl tr
+  lvl' <- capThreadSegLevel segments "segmap" lvl tr
   pure $ Op $ SegOp $ SegMap lvl' space ts kbody
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
@@ -165,7 +165,7 @@ genNonSegRed lvl desc segments red_op shape map_lam arrs = do
   red_lam' <- renameLambda red_lam
   kbody <- renameBody $ Body () stms res
   let op = SegBinOp comm red_lam' nes shape
-  lvl' <- capThreadSegLevel new_segment "uniform_segred" lvl $ NoRecommendation SegVirt
+  lvl' <- capThreadSegLevel new_segment "uniform_nonsegred" lvl $ NoRecommendation SegVirt
   ress <- letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody [op]
   forM ress $ \ res_d -> do
     res_dt <- lookupType res_d
@@ -246,7 +246,7 @@ genScanWithKernelBodyAndPost lvl desc segments mkScanLam shape nes mkPostLam m =
 
   kbody <- renameBody $ Body () stms res
   let op = SegBinOp Noncommutative scan_lam' nes shape
-  lvl' <- capThreadSegLevel segments "segscan" lvl $ NoRecommendation SegVirt
+  lvl' <- capThreadSegLevel segments "uniform_segscan" lvl $ NoRecommendation SegVirt
   letTupExp desc $ Op $ SegOp $ SegScan lvl' space res_t kbody [op] (SegPostOp post_lam')
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
