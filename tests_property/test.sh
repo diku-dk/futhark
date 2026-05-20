@@ -43,6 +43,12 @@ fi
 
 echo "Starting Property Tests..."
 
+# Get libraries if necessary.
+if [ futhark.pkg -nt lib ]; then
+    rm -rf lib
+    futhark pkg sync
+fi
+
 # 1. Find all .fut files
 ALL_TESTS=$(find "." -type d \( -name "lib" -o -name "libraries" \) -prune -o -name "*.fut" -print)
 
