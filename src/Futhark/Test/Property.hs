@@ -979,7 +979,7 @@ prettyVar srv v ty = do
         Right fieldLines -> do
           let fnames = map fieldName fieldLines
               ftypes = map fieldType fieldLines
-              isTuple = all (\(n, (i :: Int)) -> n == showText i) (zip fnames [0 ..])
+              isTuple = all (\(n, i :: Int) -> n == showText i) (zip fnames [0 ..])
 
           rendered <- forM (zip fnames ftypes) $ \(fname, fty) -> do
             let tmp = v <> "_proj_" <> fname
@@ -1025,11 +1025,9 @@ prettyVar srv v ty = do
           let pathStr = T.intercalate "_" (map showText currentPath)
               tmpElem = varName <> "_elem_" <> pathStr
 
-          sField <- withFreedVar srv tmpElem $ do
+          withFreedVar srv tmpElem $ do
             cmdErrorHandlerM "index failed: " $ cmdIndex srv tmpElem varName currentPath
             prettyVar srv tmpElem baseType
-
-          pure sField
         (d : restDims) -> do
           elements <- forM [0 .. d - 1] $ \idx -> do
             buildNested varName baseType restDims (currentPath ++ [idx])
