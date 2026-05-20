@@ -1638,12 +1638,8 @@ transformInnerMap lvl segments env inps pat w arrs map_lam = do
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
   lam <- preprocessLambda pp_scope map_lam
   if not (isVariant inps env w)
-    then do
-      traceM "transformInnerMap: w is invariant, treating as multi-dim map"
-      transformInnerMapMultiDim lvl segments env inps pat w arrs lam
-    else do
-      traceM "transformInnerMap: w is variant, treating as single-dim map"
-      transformInnerMapSingleDim lvl segments env inps pat w arrs lam
+    then transformInnerMapMultiDim lvl segments env inps pat w arrs lam
+    else transformInnerMapSingleDim lvl segments env inps pat w arrs lam
 
 transformInnerMapSingleDim ::
   SegLevel ->
@@ -1923,14 +1919,6 @@ distributeAndTransformInnerMap lvl mode ws_triple new_segment inps pat arrs' onF
   outer_scope <- askScope
   let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
   free_and_sizes <- freeWithTypeDeps input_scope free
-  traceM "distributing inner map with free variables\n"
-  traceM $
-    unlines
-      [ "inputs: ",
-        prettyString inps,
-        "free variables:",
-        prettyString free_and_sizes
-      ]
   (free_replicated, replicated) <-
     fmap unzip . sequence $
       mapMaybe
@@ -1954,7 +1942,6 @@ distributeAndTransformInnerMap lvl mode ws_triple new_segment inps pat arrs' onF
         distributeMap scope pat new_segment (replicated <> arrs') map_lam'
       m =
         transformDistributedInnerMap lvl mode ws_triple arrmap new_segment distributed
-  traceM $ unlines ["inner map distributed", prettyString distributed]
   (res, stms) <- runReaderT (runBuilder m) scope
   addStms stms
   -- order the result representations in the same order as the pattern
@@ -2188,7 +2175,6 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
         not $ isVariant inps env w,
         all isRegularDistResult res,
         all (\red -> suitableUniformOperator env inps (redLambda red) (redNeutral red)) reds -> do
-          traceM "Uniform Redomap"
           let outer_only = transformUniformRedomap lvl segments env inps w arrs reds map_lam
           gpu_scope <- askScope
           let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
@@ -2202,7 +2188,6 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
       | Just (reds, map_lam) <- isRedomapSOAC form,
         not $ lambdaHasParallelism map_lam,
         all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
-          traceM "HELLO Fast REDOMAP"
           reps <- mapM (segOpInputRep lvl segments env inps) arrs
           let sing_red = singleReduce reds
               zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
@@ -2227,7 +2212,6 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
 
           new_segment <- arraySize 0 <$> lookupType ws_F
           let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
-          traceM "Status: about to gen redomap"
           (red_elems, mapout_elems) <-
             genSegRedomap lvl ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam) readFree
           red_elems' <- forM red_elems $ \v -> do
@@ -2245,13 +2229,11 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
               elems_kind
               (zip map_res mapout_elems)
               env
-          traceM "Status: redomap done"
           pure $ insertRegulars (map distResTag red_res) red_elems' env'
       | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
         not $ isVariant inps env w,
         all isRegularDistResult res,
         all (\scan -> suitableUniformOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
-          traceM "Uniform MAPOSCANOMAP"
           let outer_only =
                 transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam
           gpu_scope <- askScope
@@ -2267,7 +2249,6 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
         not $ lambdaHasParallelism map_lam,
         not $ lambdaHasParallelism post_lam,
         all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
-          traceM "Status: everything integetrated"
           reps <- mapM (segOpInputRep lvl segments env inps) arrs
           let hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn post_lam <> freeIn map_lam <> foldMap freeIn scans)
           (ws_F, ws_O, ws_S, elems, elems_kind) <-
@@ -2320,7 +2301,6 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
     -- transformScalarStm segments env inps res $
     --   Let { stmPat = pat, stmAux = aux, stmExp = Op (Screma w arrs form) }
     Let _ aux (Match scrutinees cases defaultCase rt) -> do
-      traceM ("transforming match: " <> prettyString stm)
       if any (isVariant inps env) scrutinees
         then
           transformMatch (flattenOpsFor lvl) segments env inps res scrutinees cases defaultCase
@@ -2361,7 +2341,6 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
 
           rets <- expExtType match_e
           -- get rid of the existential context
-          traceM $ unlines ["match res type:", prettyString rets]
           let payload_res = drop (S.size (shapeContext rets)) match_res
           let reps = distResultsToResReps res payload_res
           pure $ insertReps (zip (map distResTag res) reps) env
@@ -2395,7 +2374,6 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
           let lifted_loop_params' = concat lifted_loop_params
               lifted_init' = concat lifted_init
 
-          traceM $ unlines ["lifted_loop_params:", prettyString lifted_loop_params', "lifted_init:", prettyString lifted_init']
 
           let (inps_local, env_local0, next0) = localiseInputs env inps
               loop_param_inputs_local =
@@ -3425,7 +3403,6 @@ transformFunDef consts_scope fd = do
 transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do
   progAfterPreProcessing <- preprocessProg prog
-  traceM $ "After preprocessProg:" <> prettyString progAfterPreProcessing
   consts' <- transformStms mempty $ progConsts progAfterPreProcessing
   funs' <- mapM (transformFunDef $ scopeOf (progConsts progAfterPreProcessing)) $ progFuns progAfterPreProcessing
   lifted_funs <-
