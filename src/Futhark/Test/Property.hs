@@ -160,7 +160,7 @@ validateOneSpec :: Server -> [EntryName] -> PropSpec -> IO (Maybe PBTFailure)
 validateOneSpec srv eps spec = do
   let prop = psProp spec
 
-  result <- runExceptT $ do
+  fmap (either Just (const Nothing)) . runExceptT $ do
     unless (prop `elem` eps) $
       throwE $
         "Property entry point not found: " <> prop
@@ -194,8 +194,6 @@ validateOneSpec srv eps spec = do
             "Pretty-printer is not a server entry point: " <> pp
         liftIO (validatePPrintTypes srv prop pp) >>= maybe (pure ()) throwE
 
-  pure $ either Just (const Nothing) result
-
 validatePropTypes :: Server -> EntryName -> IO (Maybe PBTFailure)
 validatePropTypes srv propName = fmap (either Just (const Nothing)) . runExceptT $ do
   ins <- liftIO $ getInputTypes srv propName
@@ -223,9 +221,10 @@ getOutputType s entry = do
       cmdOutput s entry
   pure $ outputType out
 
-haskellFutGenerator :: Server -> EntryName -> TypeName -> Int64 -> PBTGen -> IO (Maybe PBTFailure)
-haskellFutGenerator srv candidate genTy size rng = do
-  kRes <- cmdErrorHandlerE "haskellFutGenerator cmdKind failed: " $ cmdKind srv genTy
+-- | Generate a candidate automatically.
+automaticGenerator :: Server -> EntryName -> TypeName -> Int64 -> PBTGen -> IO (Maybe PBTFailure)
+automaticGenerator srv candidate genTy size rng = do
+  kRes <- cmdErrorHandlerE "automaticGenerator cmdKind failed: " $ cmdKind srv genTy
   case kRes of
     Record -> do
       resFields <- cmdFields srv genTy
@@ -234,7 +233,7 @@ haskellFutGenerator srv candidate genTy size rng = do
           let fieldVarNames = [candidate <> "_$compositeVal" <> fieldName fld | fld <- fields]
 
           results <- forM (zip fieldVarNames fields) $ \(fVarName, fld) ->
-            haskellFutGenerator srv fVarName (fieldType fld) size rng
+            automaticGenerator srv fVarName (fieldType fld) size rng
 
           case sequence results of
             Just err -> pure $ Just $ T.unlines err
@@ -248,7 +247,7 @@ haskellFutGenerator srv candidate genTy size rng = do
         Left err -> pure $ Just $ showText err
     Array -> do
       let (dims, baseTy) = getFutBaseType genTy
-      baseKind <- cmdErrorHandlerE "haskellFutGenerator base cmdKind failed: " $ cmdKind srv baseTy
+      baseKind <- cmdErrorHandlerE "automaticGenerator base cmdKind failed: " $ cmdKind srv baseTy
       case baseKind of
         Record -> do
           resFields <- cmdFields srv baseTy
@@ -260,7 +259,7 @@ haskellFutGenerator srv candidate genTy size rng = do
                 let (innerDims, innerBaseTy) = getFutBaseType (fieldType fld)
                     totalDimCount = length dims + length innerDims
                     fArrTy = T.replicate totalDimCount "[]" <> innerBaseTy
-                haskellFutGenerator srv fVarName fArrTy size rng
+                automaticGenerator srv fVarName fArrTy size rng
 
               case sequence results of
                 Just err -> pure $ Just $ T.unlines err
@@ -322,7 +321,7 @@ makeFutPrimitiveValue ty shape seed =
     "f32" -> Right $ randomValue cfg (ValueType shape' F32) seed
     "f64" -> Right $ randomValue cfg (ValueType shape' F64) seed
     "bool" -> Right $ randomValue cfg (ValueType shape' Bool) seed
-    _ -> Left ("Batch generation not implemented for: " <> ty)
+    _ -> Left ("Automatic generation not implemented for: " <> ty)
   where
     shape' = map fromIntegral shape
     cfg = initialRandomConfiguration {f32Range = (-1, 1)}
@@ -495,7 +494,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                     Left err -> throwE $ showText err
                     Right ty -> pure ty
 
-                errM <- liftIO $ haskellFutGenerator srv serverIn propType size rng
+                errM <- liftIO $ automaticGenerator srv serverIn propType size rng
                 maybe (pure $ Right ()) (throwE . ("Haskell generator failed: " <>)) errM
               Just gn -> do
                 runUpdate gn
@@ -802,7 +801,7 @@ autoShrinkLoop srv propName genName vCounterExample size rng phaseRef = runExcep
                       Left err -> throwE $ showText err
                       Right ty -> pure ty
                   liftIO $ freeVars srv [serverSize, serverSeed]
-                  errM <- liftIO $ haskellFutGenerator srv vCandidate propertyType newSize rng
+                  errM <- liftIO $ automaticGenerator srv vCandidate propertyType newSize rng
                   maybe (pure ()) (throwE . ("Haskell auto generator failed: " <>)) errM
                 Just gn -> do
                   errM <- liftIO $ callFreeIns srv gn vCandidate [serverSize, serverSeed]
