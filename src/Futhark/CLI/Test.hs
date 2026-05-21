@@ -322,6 +322,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
               phase = Nothing,
               shrinkWith = Nothing,
               phaseSize = Nothing,
+              phaseSeed = Nothing,
               phaseRandom = Nothing
             }
 
