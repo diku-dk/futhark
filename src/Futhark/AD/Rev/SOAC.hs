@@ -190,13 +190,13 @@ vjpSOAC ops pat aux (Stream w as accs lam) m = do
   stms <- collectStms_ $ auxing aux $ sequentialStreamWholeArray pat w accs lam as
   foldr (vjpStm ops) m stms
 vjpSOAC _ops pat aux (WithVJP args lam lam_adj) m = do
-  lam_res <- map resSubExp <$> auxing aux (eLambda lam (map eSubExp args))
-  forM_ (zip (patNames pat) lam_res) $ \(v, se) ->
-    letBindNames [v] $ BasicOp $ SubExp se
+  lam_res <- auxing aux (eLambda lam (map eSubExp args))
+  forM_ (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
+    certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
   m
   pat_adj <- mapM lookupAdjVal $ patNames pat
   contribs <-
-    eLambda lam_adj (map eSubExp lam_res ++ map (eSubExp . Var) pat_adj)
+    eLambda lam_adj (map (eSubExp . resSubExp) lam_res ++ map (eSubExp . Var) pat_adj)
   forM_ (zip args contribs) $ \(arg, contrib) ->
     (updateSubExpAdj arg <=< letExp "contrib") $
       BasicOp . SubExp . resSubExp $
