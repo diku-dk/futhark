@@ -528,7 +528,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
 
                 shrinkRes <- case psShrink s of
                   Nothing ->
-                    liftIO $ autoShrinkLoop srv propName genName serverIn size rng entryNameRef
+                    liftIO $ autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
                   Just sh -> do
                     userShrinkRes <-
                       liftIO $
@@ -540,7 +540,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                       Right (Just err) -> do
                         autoRes <-
                           liftIO $
-                            autoShrinkLoop srv propName genName serverIn size rng entryNameRef
+                            autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
 
                         pure $
                           Right $
@@ -552,7 +552,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                       Left err -> do
                         autoRes <-
                           liftIO $
-                            autoShrinkLoop srv propName genName serverIn size rng entryNameRef
+                            autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
 
                         pure $
                           Right $
@@ -762,9 +762,11 @@ autoShrinkLoop ::
   VarName ->
   Int64 ->
   PBTGen ->
+  VarName ->
+  VarName ->
   IORef PBTPhase ->
   IO (Either PBTFailure PBTOutput)
-autoShrinkLoop srv propName genName vCounterExample size rng phaseRef = runExceptT $ do
+autoShrinkLoop srv propName genName vCounterExample size rng serverSize serverSeed phaseRef = runExceptT $ do
   let autoShrinkUpdatePhase (Right activeTest) seed =
         liftIO $
           updatePhase
@@ -788,8 +790,6 @@ autoShrinkLoop srv propName genName vCounterExample size rng phaseRef = runExcep
 
       vCandidate = "auto_shrink_candidate"
       vOk = "auto_shrink_ok"
-      serverSize = "auto_shrink_size"
-      serverSeed = "auto_shrink_seed"
 
   -- 1. Validate property input arity using our Either-to-ExceptT logic
   liftIO (getInputTypes srv propName) >>= \case
