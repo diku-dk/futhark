@@ -170,7 +170,7 @@ instance Pretty Distributed where
         "let" <+> pretty v <+> "=" <+> "rep" <> parens (pretty tag)
 
 resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat Type -> Result -> ResMap
-resultMap avail_inputs stms pat res = foldMap f $ concatMap distStmResult stms
+resultMap avail_inputs stms pat res = foldMap (foldMap f . distStmResult) stms
   where
     pes = M.fromList [(patElemName pe, pe) | stm <- stms, pe <- concatMap (patElems . stmPat) (distStmStms stm)]
     f (DistResult rt _ v) =
@@ -303,12 +303,10 @@ mergeGroup bodyRes ds rest =
       isInternal _ = False
       externalInputs =
         nubInputs $
-          filter (not . isInternal) $
-            concatMap distStmInputs ds
+          concatMap (filter (not . isInternal) . distStmInputs) ds
       externalResults =
         nubOrd $
-          filter (isExternal bodyRes rest) $
-            concatMap distStmResult ds
+          concatMap (filter (isExternal bodyRes rest) . distStmResult) ds
       allStms = concatMap distStmStms ds
    in DistStm externalInputs externalResults (ScalarStm allStms)
 
