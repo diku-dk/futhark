@@ -335,10 +335,8 @@ fwdSOAC pat aux (WithVJP args lam _) = do
   -- You have a custom adjoint? Too bad we are in tangent land.
   (mapM_ fwdStm <=< runBuilder_) $ do
     lam_res <- auxing aux $ eLambda lam $ map eSubExp args
-    forM (zip (patNames pat) lam_res) $ \(v, res) ->
-      letBindNames [v] $
-        certifying (resCerts res) $
-          BasicOp $ SubExp $ resSubExp res
+    forM (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
+      certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =
