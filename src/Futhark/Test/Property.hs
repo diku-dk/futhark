@@ -93,9 +93,6 @@ type PBTFailure = T.Text
 -- passed to generators.
 type PBTGen = IOGenM StdGen
 
-genInt32 :: (MonadIO m) => PBTGen -> m Int32
-genInt32 = applyIOGen random
-
 genWord64 :: (MonadIO m) => PBTGen -> m Word64
 genWord64 = applyIOGen random
 
