@@ -145,186 +145,17 @@ atMostOnePropAttr entry attrs =
           <> T.unpack entry
           <> "' has more than one #[prop(...)] attribute."
 
-extractPropSpecsFromServer :: Server -> IO [PropSpec]
-extractPropSpecsFromServer srv = do
-  epsE <- cmdEntryPoints srv
-  eps <- either (error . show) pure epsE
-  concat <$> mapM getOne eps
-  where
-    getOne entry = do
-      attrsE <- cmdAttributes srv entry
-      attrs <- either (fail . show) pure attrsE
-      atMostOnePropAttr entry attrs
-
-validateOneSpec :: Server -> [EntryName] -> PropSpec -> IO (Maybe PBTFailure)
-validateOneSpec srv eps spec = do
-  let prop = psProp spec
-
-  fmap (either Just (const Nothing)) . runExceptT $ do
-    unless (prop `elem` eps) $
-      throwE $
-        "Property entry point not found: " <> prop
-
-    liftIO (validatePropTypes srv prop) >>= maybe (pure ()) throwE
-
-    genName <- case psGen spec of
-      Nothing ->
-        pure Nothing
-      Just g
-        | g `notElem` eps ->
-            throwE $ "Generator is not a server entry point: " <> g
-      Just g ->
-        pure $ Just g
-
-    liftIO (validateGenTypes srv prop genName) >>= maybe (pure ()) throwE
-
-    case psShrink spec of
-      Nothing -> pure ()
-      Just sh -> do
-        unless (sh `elem` eps) $
-          throwE $
-            "Shrinker is not a server entry point: " <> sh
-        liftIO (validateShrinkTypes srv prop sh) >>= maybe (pure ()) throwE
-
-    case psPPrint spec of
-      Nothing -> pure ()
-      Just pp -> do
-        unless (pp `elem` eps) $
-          throwE $
-            "Pretty-printer is not a server entry point: " <> pp
-        liftIO (validatePPrintTypes srv prop pp) >>= maybe (pure ()) throwE
-
-validatePropTypes :: Server -> EntryName -> IO (Maybe PBTFailure)
-validatePropTypes srv propName = fmap (either Just (const Nothing)) . runExceptT $ do
-  ins <- liftIO $ getInputTypes srv propName
-  case ins of
-    [_] -> pure ()
-    [] -> throwE $ "Property " <> propName <> " has no inputs? Expected 1."
-    _ -> throwE $ "Property " <> propName <> " has " <> showText (length ins) <> " inputs; expected 1."
-
-  out <- liftIO $ getOutputType srv propName
-  case out of
-    "bool" -> pure ()
-    ty -> throwE $ "Property " <> propName <> " output must be bool, got: " <> ty
-
 getInputTypes :: Server -> EntryName -> IO [TypeName]
-getInputTypes srv entry = do
-  ins <-
+getInputTypes srv entry =
+  fmap (map inputType) $
     cmdErrorHandlerE ("Failed to get input types for " <> entry <> ": ") $
       cmdInputs srv entry
-  pure $ map inputType ins
 
 getOutputType :: Server -> EntryName -> IO TypeName
-getOutputType s entry = do
-  out <-
+getOutputType s entry =
+  fmap outputType $
     cmdErrorHandlerE ("Failed to get output types for " <> entry <> ": ") $
       cmdOutput s entry
-  pure $ outputType out
-
--- | Generate a candidate automatically.
-automaticGenerator :: Server -> EntryName -> TypeName -> Int64 -> PBTGen -> IO (Maybe PBTFailure)
-automaticGenerator srv candidate genTy size rng = do
-  kRes <- cmdErrorHandlerE "automaticGenerator cmdKind failed: " $ cmdKind srv genTy
-  case kRes of
-    Record -> do
-      resFields <- cmdFields srv genTy
-      case resFields of
-        Right fields -> do
-          let fieldVarNames = [candidate <> "_$compositeVal" <> fieldName fld | fld <- fields]
-
-          results <- forM (zip fieldVarNames fields) $ \(fVarName, fld) ->
-            automaticGenerator srv fVarName (fieldType fld) size rng
-
-          case sequence results of
-            Just err -> pure $ Just $ T.unlines err
-            Nothing -> do
-              freeVars srv [candidate]
-              cmdErrorHandlerM ("Failed to pack record " <> candidate <> ": ") $
-                cmdNew srv candidate genTy fieldVarNames
-
-              freeVars srv fieldVarNames
-              pure Nothing
-        Left err -> pure $ Just $ showText err
-    Array -> do
-      let (dims, baseTy) = getFutBaseType genTy
-      baseKind <- cmdErrorHandlerE "automaticGenerator base cmdKind failed: " $ cmdKind srv baseTy
-      case baseKind of
-        Record -> do
-          resFields <- cmdFields srv baseTy
-          case resFields of
-            Right fields -> do
-              let fieldVarNames = [candidate <> "_$compositeArr_" <> fieldName fld | fld <- fields]
-
-              results <- forM (zip fieldVarNames fields) $ \(fVarName, fld) -> do
-                let (innerDims, innerBaseTy) = getFutBaseType (fieldType fld)
-                    totalDimCount = length dims + length innerDims
-                    fArrTy = T.replicate totalDimCount "[]" <> innerBaseTy
-                automaticGenerator srv fVarName fArrTy size rng
-
-              case sequence results of
-                Just err -> pure $ Just $ T.unlines err
-                Nothing -> do
-                  freeVars srv [candidate]
-                  cmdErrorHandlerM ("Failed to zip array of records " <> candidate <> ": ") $
-                    cmdZip srv candidate genTy fieldVarNames
-
-                  freeVars srv fieldVarNames
-                  pure Nothing
-            Left err -> pure $ Just $ showText err
-        _ -> do
-          let shapeList = replicate (length dims) size
-          seed <- genWord64 rng
-          case makeFutPrimitiveValue baseTy shapeList seed of
-            Right val -> do
-              freeVars srv [candidate]
-              putRes <- FSV.putValue srv candidate val
-              case putRes of
-                Nothing -> pure Nothing
-                Just err -> pure $ Just $ showText err
-            Left err -> pure $ Just err
-    _ -> do
-      seed <- genWord64 rng
-      case makeFutPrimitiveValue genTy [] seed of
-        Right val -> do
-          freeVars srv [candidate]
-          putRes <- FSV.putValue srv candidate val
-          case putRes of
-            Nothing -> pure Nothing
-            Just err -> pure $ Just $ showText err
-        Left _ -> do
-          let genName = "gen_" <> genTy
-              szVar = candidate <> "_$size"
-              sdVar = candidate <> "_$seed"
-
-          putVal srv szVar size
-          putVal srv sdVar seed
-
-          callFreeIns srv genName candidate [szVar, sdVar]
-
-getFutBaseType :: T.Text -> ([Int64], T.Text)
-getFutBaseType t
-  | "[]" `T.isPrefixOf` t = let (ds, base) = getFutBaseType (T.drop 2 t) in (0 : ds, base)
-  | otherwise = ([], t)
-
-makeFutPrimitiveValue :: TypeName -> [Int64] -> Word64 -> Either PBTFailure Value
-makeFutPrimitiveValue ty shape seed =
-  case ty of
-    "i8" -> Right $ randomValue cfg (ValueType shape' I8) seed
-    "i16" -> Right $ randomValue cfg (ValueType shape' I16) seed
-    "i32" -> Right $ randomValue cfg (ValueType shape' I32) seed
-    "i64" -> Right $ randomValue cfg (ValueType shape' I64) seed
-    "u8" -> Right $ randomValue cfg (ValueType shape' U8) seed
-    "u16" -> Right $ randomValue cfg (ValueType shape' U16) seed
-    "u32" -> Right $ randomValue cfg (ValueType shape' U32) seed
-    "u64" -> Right $ randomValue cfg (ValueType shape' U64) seed
-    "f16" -> Right $ randomValue cfg (ValueType shape' F16) seed
-    "f32" -> Right $ randomValue cfg (ValueType shape' F32) seed
-    "f64" -> Right $ randomValue cfg (ValueType shape' F64) seed
-    "bool" -> Right $ randomValue cfg (ValueType shape' Bool) seed
-    _ -> Left ("Automatic generation not implemented for: " <> ty)
-  where
-    shape' = map fromIntegral shape
-    cfg = initialRandomConfiguration {f32Range = (-1, 1)}
 
 validateGenTypes :: Server -> EntryName -> Maybe EntryName -> IO (Maybe PBTFailure)
 validateGenTypes _srv _propName Nothing = pure Nothing -- TODO: should have more logic to see if we can actually generate anything
@@ -466,6 +297,173 @@ validatePPrintTypes srv propName ppName = fmap (either Just (const Nothing)) . r
         <> " returns: "
         <> ppOut
         <> "\nExpected pretty-printer output to be []u8."
+
+validatePropTypes :: Server -> EntryName -> IO (Maybe PBTFailure)
+validatePropTypes srv propName = fmap (either Just (const Nothing)) . runExceptT $ do
+  ins <- liftIO $ getInputTypes srv propName
+  case ins of
+    [_] -> pure ()
+    [] -> throwE $ "Property " <> propName <> " has no inputs? Expected 1."
+    _ -> throwE $ "Property " <> propName <> " has " <> showText (length ins) <> " inputs; expected 1."
+
+  out <- liftIO $ getOutputType srv propName
+  case out of
+    "bool" -> pure ()
+    ty -> throwE $ "Property " <> propName <> " output must be bool, got: " <> ty
+
+validateOneSpec :: Server -> [EntryName] -> PropSpec -> IO (Maybe PBTFailure)
+validateOneSpec srv eps spec = do
+  let prop = psProp spec
+
+  fmap (either Just (const Nothing)) . runExceptT $ do
+    unless (prop `elem` eps) $
+      throwE $
+        "Property entry point not found: " <> prop
+
+    liftIO (validatePropTypes srv prop) >>= maybe (pure ()) throwE
+
+    genName <- case psGen spec of
+      Nothing ->
+        pure Nothing
+      Just g
+        | g `notElem` eps ->
+            throwE $ "Generator is not a server entry point: " <> g
+      Just g ->
+        pure $ Just g
+
+    liftIO (validateGenTypes srv prop genName) >>= maybe (pure ()) throwE
+
+    case psShrink spec of
+      Nothing -> pure ()
+      Just sh -> do
+        unless (sh `elem` eps) $
+          throwE $
+            "Shrinker is not a server entry point: " <> sh
+        liftIO (validateShrinkTypes srv prop sh) >>= maybe (pure ()) throwE
+
+    case psPPrint spec of
+      Nothing -> pure ()
+      Just pp -> do
+        unless (pp `elem` eps) $
+          throwE $
+            "Pretty-printer is not a server entry point: " <> pp
+        liftIO (validatePPrintTypes srv prop pp) >>= maybe (pure ()) throwE
+
+extractPropSpecsFromServer :: Server -> IO [PropSpec]
+extractPropSpecsFromServer srv = do
+  epsE <- cmdEntryPoints srv
+  eps <- either (error . show) pure epsE
+  concat <$> mapM getOne eps
+  where
+    getOne entry = do
+      attrsE <- cmdAttributes srv entry
+      attrs <- either (fail . show) pure attrsE
+      atMostOnePropAttr entry attrs
+
+-- | Generate a candidate automatically.
+automaticGenerator :: Server -> EntryName -> TypeName -> Int64 -> PBTGen -> IO (Maybe PBTFailure)
+automaticGenerator srv candidate genTy size rng = do
+  kRes <- cmdErrorHandlerE "automaticGenerator cmdKind failed: " $ cmdKind srv genTy
+  case kRes of
+    Record -> do
+      resFields <- cmdFields srv genTy
+      case resFields of
+        Right fields -> do
+          let fieldVarNames = [candidate <> "_$compositeVal" <> fieldName fld | fld <- fields]
+
+          results <- forM (zip fieldVarNames fields) $ \(fVarName, fld) ->
+            automaticGenerator srv fVarName (fieldType fld) size rng
+
+          case sequence results of
+            Just err -> pure $ Just $ T.unlines err
+            Nothing -> do
+              freeVars srv [candidate]
+              cmdErrorHandlerM ("Failed to pack record " <> candidate <> ": ") $
+                cmdNew srv candidate genTy fieldVarNames
+
+              freeVars srv fieldVarNames
+              pure Nothing
+        Left err -> pure $ Just $ showText err
+    Array -> do
+      let (dims, baseTy) = getFutBaseType genTy
+      baseKind <- cmdErrorHandlerE "automaticGenerator base cmdKind failed: " $ cmdKind srv baseTy
+      case baseKind of
+        Record -> do
+          resFields <- cmdFields srv baseTy
+          case resFields of
+            Right fields -> do
+              let fieldVarNames = [candidate <> "_$compositeArr_" <> fieldName fld | fld <- fields]
+
+              results <- forM (zip fieldVarNames fields) $ \(fVarName, fld) -> do
+                let (innerDims, innerBaseTy) = getFutBaseType (fieldType fld)
+                    totalDimCount = length dims + length innerDims
+                    fArrTy = T.replicate totalDimCount "[]" <> innerBaseTy
+                automaticGenerator srv fVarName fArrTy size rng
+
+              case sequence results of
+                Just err -> pure $ Just $ T.unlines err
+                Nothing -> do
+                  freeVars srv [candidate]
+                  cmdErrorHandlerM ("Failed to zip array of records " <> candidate <> ": ") $
+                    cmdZip srv candidate genTy fieldVarNames
+
+                  freeVars srv fieldVarNames
+                  pure Nothing
+            Left err -> pure $ Just $ showText err
+        _ -> do
+          let shapeList = replicate (length dims) size
+          seed <- genWord64 rng
+          case makeFutPrimitiveValue baseTy shapeList seed of
+            Right val -> do
+              freeVars srv [candidate]
+              putRes <- FSV.putValue srv candidate val
+              case putRes of
+                Nothing -> pure Nothing
+                Just err -> pure $ Just $ showText err
+            Left err -> pure $ Just err
+    _ -> do
+      seed <- genWord64 rng
+      case makeFutPrimitiveValue genTy [] seed of
+        Right val -> do
+          freeVars srv [candidate]
+          putRes <- FSV.putValue srv candidate val
+          case putRes of
+            Nothing -> pure Nothing
+            Just err -> pure $ Just $ showText err
+        Left _ -> do
+          let genName = "gen_" <> genTy
+              szVar = candidate <> "_$size"
+              sdVar = candidate <> "_$seed"
+
+          putVal srv szVar size
+          putVal srv sdVar seed
+
+          callFreeIns srv genName candidate [szVar, sdVar]
+
+getFutBaseType :: T.Text -> ([Int64], T.Text)
+getFutBaseType t
+  | "[]" `T.isPrefixOf` t = let (ds, base) = getFutBaseType (T.drop 2 t) in (0 : ds, base)
+  | otherwise = ([], t)
+
+makeFutPrimitiveValue :: TypeName -> [Int64] -> Word64 -> Either PBTFailure Value
+makeFutPrimitiveValue ty shape seed =
+  case ty of
+    "i8" -> Right $ randomValue cfg (ValueType shape' I8) seed
+    "i16" -> Right $ randomValue cfg (ValueType shape' I16) seed
+    "i32" -> Right $ randomValue cfg (ValueType shape' I32) seed
+    "i64" -> Right $ randomValue cfg (ValueType shape' I64) seed
+    "u8" -> Right $ randomValue cfg (ValueType shape' U8) seed
+    "u16" -> Right $ randomValue cfg (ValueType shape' U16) seed
+    "u32" -> Right $ randomValue cfg (ValueType shape' U32) seed
+    "u64" -> Right $ randomValue cfg (ValueType shape' U64) seed
+    "f16" -> Right $ randomValue cfg (ValueType shape' F16) seed
+    "f32" -> Right $ randomValue cfg (ValueType shape' F32) seed
+    "f64" -> Right $ randomValue cfg (ValueType shape' F64) seed
+    "bool" -> Right $ randomValue cfg (ValueType shape' Bool) seed
+    _ -> Left ("Automatic generation not implemented for: " <> ty)
+  where
+    shape' = map fromIntegral shape
+    cfg = initialRandomConfiguration {f32Range = (-1, 1)}
 
 runOne :: PropSpec -> PBTConfig -> Server -> IORef PBTPhase -> FilePath -> IO (Either PBTFailure PBTOutput)
 runOne s config srv entryNameRef program = runExceptT $ do
