@@ -156,13 +156,6 @@ extractPropSpecsFromServer srv = do
       attrs <- either (fail . show) pure attrsE
       atMostOnePropAttr entry attrs
 
-runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> FilePath -> IO [Either PBTFailure PBTOutput]
-runPBT config srv specs entryNameRef program = do
-  eps <- cmdErrorHandlerE "Failed to get entry points: " $ cmdEntryPoints srv -- error should not be reached by the user
-  forM specs $ \spec -> do
-    validation <- validateOneSpec srv eps spec
-    maybe (runOne spec config srv entryNameRef program) (pure . Left) validation
-
 validateOneSpec :: Server -> [EntryName] -> PropSpec -> IO (Maybe PBTFailure)
 validateOneSpec srv eps spec = do
   let prop = psProp spec
@@ -1102,3 +1095,10 @@ getSingleInputType srv ep = do
 outsMatchType :: Server -> TypeName -> TypeName -> IO Bool
 outsMatchType _ propTy out =
   pure (out == propTy)
+
+runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> FilePath -> IO [Either PBTFailure PBTOutput]
+runPBT config srv specs entryNameRef program = do
+  eps <- cmdErrorHandlerE "Failed to get entry points: " $ cmdEntryPoints srv -- error should not be reached by the user
+  forM specs $ \spec -> do
+    validation <- validateOneSpec srv eps spec
+    maybe (runOne spec config srv entryNameRef program) (pure . Left) validation
