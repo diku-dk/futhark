@@ -331,7 +331,7 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
-fwdSOAC pat aux (VJPBy args lam _) = do
+fwdSOAC pat aux (WithVJP args lam _) = do
   -- You have a custom adjoint? Too bad we are in tangent land.
   (mapM_ fwdStm <=< runBuilder_) $ do
     lam_res <- auxing aux $ eLambda lam $ map eSubExp args

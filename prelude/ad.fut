@@ -23,7 +23,7 @@
 --     arbitrary mixing of forward- and reverse mode (although using multiple
 --     rounds of reverse mode is rarely useful and often slow).
 --
---   * Custom derivatives (`vjp_by`).
+--   * Custom derivatives (`with_vjp`).
 --
 --   * Checkpointing of sequential loops.
 --
@@ -141,10 +141,15 @@ def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
 -- return the sensitivity with respect to the input.
 --
 -- A common pattern is that `b` is a tuple where some part is the intended
--- primal result of `vjp_by`, and some part is only used in `f'`.
+-- primal result of `with_vjp`, and some part is only used in `f'`.
 --
 -- **Beware:** if `f` uses any free variables, these will not be taken into
 -- **account when computing the adjoint. Make these part of the argument
 -- **instead.
-def vjp_by 'a 'b (f: a -> b) (f': (res: b) -> (b_adj: b) -> a) (x: a) : b =
-  intrinsics.vjp_by f f' x
+def with_vjp 'a 'b (f: a -> b) (f': (res: b) -> (b_adj: b) -> a) (x: a) : b =
+  intrinsics.with_vjp f f' x
+
+-- | A variant of `with_vjp` where the intermediate result necessary for the
+-- adjoint (`c`) is explicitly separated from the primal result (`b`).
+def with_vjp_tape 'a 'b 'c (f: a -> (c, b)) (f': (c, b) -> a) (x: a) : b =
+  (with_vjp f (\(tape, _) (_, adj) -> f' (tape, adj)) x).1

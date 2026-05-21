@@ -189,7 +189,7 @@ vjpSOAC ops pat _aux (Hist n as histops f) m
 vjpSOAC ops pat aux (Stream w as accs lam) m = do
   stms <- collectStms_ $ auxing aux $ sequentialStreamWholeArray pat w accs lam as
   foldr (vjpStm ops) m stms
-vjpSOAC _ops pat aux (VJPBy args lam lam_adj) m = do
+vjpSOAC _ops pat aux (WithVJP args lam lam_adj) m = do
   lam_res <- map resSubExp <$> auxing aux (eLambda lam (map eSubExp args))
   forM_ (zip (patNames pat) lam_res) $ \(v, se) ->
     letBindNames [v] $ BasicOp $ SubExp se

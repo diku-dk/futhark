@@ -2156,7 +2156,7 @@ initialCtx =
     def "manifest" = Just $ fun1 pure
     def "jvp2" = Just $ fun3 doJVP2
     def "vjp2" = Just $ fun3 doVJP2
-    def "vjp_by" = Just $ fun3 $ \f _ arg ->
+    def "with_vjp" = Just $ fun3 $ \f _ arg ->
       -- XXX? We simply ignore the custom derivative. This is correct, but makes
       -- it more of a hassle to test them.
       apply noLoc mempty f arg

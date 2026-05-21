@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   loosened. (#2456)
 
 * The reverse-mode AD transformation now supports custom adjoints through a new
-  prelude function, `vjp_by`.
+  prelude function, `with_vjp`.
 
 ### Removed
 

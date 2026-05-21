@@ -1858,13 +1858,13 @@ isIntrinsicFunction qname args = do
             case fname of
               "jvp2" -> JVP x' v' lam
               _ -> VJP x' v' lam
-    handleAD [f, f_adj, x] "vjp_by" = Just $ \desc -> do
+    handleAD [f, f_adj, x] "with_vjp" = Just $ \desc -> do
       x' <- internaliseExp "ad_x" x
       lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
       lam_adj <-
         internaliseLambdaCoerce f_adj $
           lambdaReturnType lam ++ lambdaReturnType lam
-      fmap (map I.Var) . letTupExp desc . Op $ VJPBy x' lam lam_adj
+      fmap (map I.Var) . letTupExp desc . Op $ WithVJP x' lam lam_adj
     handleAD _ _ = Nothing
 
     handleRest [a, si, v] "scatter" = Just $ scatterF 1 a si v

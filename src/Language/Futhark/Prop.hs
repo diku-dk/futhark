@@ -968,7 +968,7 @@ intrinsics =
                   $ Scalar
                   $ tupleRecord [Scalar $ t_b Nonunique, Scalar $ t_a Nonunique]
               ),
-              ( "vjp_by",
+              ( "with_vjp",
                 IntrinsicPolyFun
                   [tp_a, tp_b]
                   [ Scalar (t_a NoUniqueness) `arr` Scalar (t_b Nonunique),

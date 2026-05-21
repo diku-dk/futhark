@@ -101,11 +101,11 @@ simplifySOAC (JVP arr vec lam) = do
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
   pure (JVP arr' vec' lam', hoisted)
-simplifySOAC (VJPBy args lam lam_adj) = do
+simplifySOAC (WithVJP args lam lam_adj) = do
   args' <- mapM Engine.simplify args
   (lam', hoisted) <- Engine.simplifyLambda mempty lam
   (lam_adj', hoisted_adj) <- Engine.simplifyLambda mempty lam_adj
-  pure (VJPBy args' lam' lam_adj', hoisted <> hoisted_adj)
+  pure (WithVJP args' lam' lam_adj', hoisted <> hoisted_adj)
 simplifySOAC (Stream outerdim arr nes lam) = do
   outerdim' <- Engine.simplify outerdim
   nes' <- mapM Engine.simplify nes

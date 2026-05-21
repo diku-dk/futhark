@@ -19,7 +19,7 @@ def radix_sort [n] 't (f: t -> u32) (xs: [n]t) : [n]t =
   loop xs for i < 32 do radix_sort_step f xs i
 
 def differentiable_radix_sort [n] 't (f: t -> u32) (xs: [n]t) =
-  (vjp_by (\xs ->
+  (with_vjp (\xs ->
              unzip (radix_sort (f <-< (.0)) (zip xs (iota n))))
           (\(_, perm) (xs_adj, _) ->
              scatter (copy xs_adj) perm xs_adj)

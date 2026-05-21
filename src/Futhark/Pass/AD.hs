@@ -51,9 +51,9 @@ onStm _ mode scope (Let pat aux (Op (JVP args vec lam))) = do
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
     else pure $ oneStm $ Let pat aux $ Op $ JVP args vec lam'
 --
--- This corresponds to a VJPBy that is not inside of a differential operator.
+-- This corresponds to a WithVJP that is not inside of a differential operator.
 -- FIXME: this assumption will go bad when we don't inline so much.
-onStm False _ scope (Let pat aux (Op (VJPBy args lam _))) =
+onStm False _ scope (Let pat aux (Op (WithVJP args lam _))) =
   runBuilderT_ (bindLambda pat aux lam args) scope
 onStm ad mode scope (Let pat aux e) = oneStm . Let pat aux <$> mapExpM mapper e
   where
