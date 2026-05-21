@@ -1,32 +1,26 @@
 PBT FAIL: i8_val size=50 seed=REDACTED after N tests
-Counterexample: -36i8
+Counterexample: -8i8
 PBT FAIL: i8_arr size=50 seed=REDACTED after N tests
-Counterexample: [-91i8, 21i8]
+Counterexample: [58i8, -9i8]
 PBT FAIL: u64_arr size=50 seed=REDACTED after N tests
-Counterexample: [11868322893793883228u64]
+Counterexample: [10304021328969671917u64]
 PBT FAIL: bool_arr size=50 seed=REDACTED after N tests
-Counterexample: [false]
+Counterexample: [false, true]
 PBT FAIL: u8_arr_arr size=50 seed=REDACTED after N tests
-Counterexample: [[116u8]]
+Counterexample: [[125u8, 188u8],
+[149u8, 199u8]]
 PBT FAIL: i16_arr_arr_arr size=50 seed=REDACTED after N tests
-Counterexample: [[[29477i16, -12651i16],
-[5056i16, 4237i16]],
-[[-31844i16, -602i16],
-[10714i16, -26162i16]]]
+Counterexample: [[[9146i16, -23945i16],
+[-26839i16, 21963i16]],
+[[15158i16, -6049i16],
+[22617i16, 21971i16]]]
 PBT FAIL: i8_arr_arr_arr_arr size=50 seed=REDACTED after N tests
-Counterexample: [[[[-91i8, 21i8],
-[64i8, 13i8]],
-[[28i8, 38i8],
-[90i8, 78i8]]],
-[[[100i8, 3i8],
-[-24i8, 48i8]],
-[[84i8, -100i8],
-[125i8, 117i8]]]]
+Counterexample: [[[[109i8]]]]
 PBT FAIL: tuple_val size=50 seed=REDACTED after N tests
-Counterexample: (21i8, 75u8)
+Counterexample: (73i8, 185u8)
 PBT FAIL: record_val size=50 seed=REDACTED after N tests
-Counterexample: {x = 21i8, y = 75u8}
+Counterexample: {x = 73i8, y = 185u8}
 PBT FAIL: tuple_with_arrs size=50 seed=REDACTED after N tests
-Counterexample: ([17i8], [49u8])
+Counterexample: ([73i8], [185u8])
 PBT FAIL: record_with_arrs size=50 seed=REDACTED after N tests
-Counterexample: {xs = [17i8], ys = [49u8]}
+Counterexample: {xs = [73i8], ys = [185u8]}

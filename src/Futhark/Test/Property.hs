@@ -33,7 +33,7 @@ import Futhark.Test.Values
 import Futhark.Util (showText)
 import System.FilePath (dropExtension)
 import System.Random (StdGen, mkStdGen, random)
-import System.Random.Stateful (IOGenM, applyIOGen, newIOGenM)
+import System.Random.Stateful (IOGenM (..), applyIOGen, newIOGenM)
 
 data PBTConfig = PBTConfig
   { -- | Number of test cases to run for each property.
@@ -98,6 +98,12 @@ genInt32 = applyIOGen random
 
 genWord64 :: (MonadIO m) => PBTGen -> m Word64
 genWord64 = applyIOGen random
+
+peekWord64 :: (MonadIO m) => PBTGen -> m Word64
+peekWord64 (IOGenM ref) = liftIO $ do
+  pureGen <- readIORef ref
+  let (value, _nextGen) = random pureGen
+  pure value
 
 lookupArgText :: T.Text -> [T.Text] -> Maybe T.Text
 lookupArgText name = lookupArgWith name Just
@@ -471,7 +477,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
   let loop i
         | i >= numTests = pure Nothing
         | otherwise = do
-            seed <- genWord64 rng
+            seed <- peekWord64 rng
             let runUpdate ph =
                   liftIO $
                     updatePhase
@@ -483,21 +489,8 @@ runOne s config srv entryNameRef program = runExceptT $ do
                       Nothing
                       entryNameRef
 
-            generatorCandidateE <- case genName of
-              Nothing -> do
-                runUpdate "Auto Generator"
-                liftIO $ freeVars srv [serverIn]
-                propType <-
-                  liftIO (getSingleInputType srv propName) >>= \case
-                    Left err -> throwE $ showText err
-                    Right ty -> pure ty
-
-                errM <- liftIO $ automaticGenerator srv serverIn propType size rng
-                maybe (pure $ Right ()) (throwE . ("Haskell generator failed: " <>)) errM
-              Just gn -> do
-                runUpdate gn
-                liftIO $ generatorPhase seed
-            either throwE pure generatorCandidateE
+            generatorCandidateM <- liftIO $ generatorPhase rng
+            maybe (pure ()) throwE generatorCandidateM
 
             runUpdate propName
 
@@ -611,15 +604,38 @@ runOne s config srv entryNameRef program = runExceptT $ do
     propertyFileName =
       dropExtension program <> "_" <> T.unpack propName <> ".counterexample"
 
-    generatorPhase seed = do
-      putVal srv serverSize size
-      putVal srv serverSeed seed
-
+    generatorPhase rng = do
+      let runUpdate ph seed =
+            liftIO $
+              updatePhase
+                (Just propName)
+                (Just ph)
+                Nothing
+                (Just size)
+                (Just seed)
+                Nothing
+                entryNameRef
       case genName of
-        Nothing -> fail "Internal error: generatorPhase called with Nothing genName"
-        Just gn -> do
+        Nothing -> fmap (either Just (const Nothing)) . runExceptT $ do
+          seed <- peekWord64 rng
+          runUpdate "Auto Generator" seed
+          liftIO $ freeVars srv [serverIn]
+          propType <-
+            liftIO (getSingleInputType srv propName) >>= \case
+              Left err -> throwE $ showText err
+              Right ty -> pure ty
+
+          errM <- liftIO $ automaticGenerator srv serverIn propType size rng
+          maybe (pure ()) (throwE . ("Haskell generator failed: " <>)) errM
+        Just gn -> fmap (either Just (const Nothing)) . runExceptT $ do
+          seed <- genWord64 rng
+          runUpdate "User Generator" seed
+          liftIO $ putVal srv serverSize size
+          liftIO $ putVal srv serverSeed seed
+
           let genOut = outName gn
-          withFreedVars srv [genOut] $ runExceptT $ do
+
+          ExceptT $ withFreedVars srv [genOut] $ runExceptT $ do
             liftIO (callFreeIns srv gn genOut [serverSize, serverSeed]) >>= \case
               Nothing -> pure ()
               Just err -> do
@@ -629,7 +645,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                     cmdStore srv propertyFileName [serverSize, serverSeed]
                 liftIO $ freeVars srv [serverSize, serverSeed]
                 throwE $
-                  "Generator "
+                  "User Generator "
                     <> gn
                     <> " failed with size="
                     <> showText size
@@ -637,6 +653,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                     <> showText seed
                     <> " with error: "
                     <> err
+
             liftIO $ renameVar srv serverIn genOut
 
     pPrintPhase seed = do
@@ -883,7 +900,8 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
   loop 0 0
   where
     oneStep size (val :: Int32) = do
-      let vOk = "shrink_ok"
+      let vCandidate = "shrink_candidate"
+          vOk = "shrink_ok"
           vRandomValue = "shrink_random"
 
       let shrinkUpdatePhase activeTest randomNum =
@@ -899,18 +917,17 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
       freeVars srv [vRandomValue]
       putVal srv vRandomValue val
 
-      let shrinkerCandidate = outName shrinkName
       shrinkUpdatePhase Nothing $ Just val
 
-      withFreedVar srv shrinkerCandidate $ runExceptT $ do
-        errE <- liftIO $ callKeepIns srv shrinkName shrinkerCandidate [counterExample, vRandomValue]
+      withFreedVar srv vCandidate $ runExceptT $ do
+        errE <- liftIO $ callKeepIns srv shrinkName vCandidate [counterExample, vRandomValue]
         liftIO $ freeVars srv [vRandomValue]
         maybe (pure ()) (throwE . ((shrinkName <> " has ") <>)) errE
 
         liftIO $ shrinkUpdatePhase Nothing $ Just $ fromIntegral val
 
         okE <- liftIO $
-          withCallKeepIns srv propName vOk [shrinkerCandidate] $
+          withCallKeepIns srv propName vOk [vCandidate] $
             \vOk' -> getVal srv vOk'
         ok <- either (throwE . ("Property " <>)) pure okE
 
@@ -919,7 +936,7 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
         case ok of
           True -> pure NotAcceptedShrink
           False -> do
-            liftIO $ renameVar srv counterExample shrinkerCandidate
+            liftIO $ renameVar srv counterExample vCandidate
             pure AcceptedShrink
 
 -- | Name of out-variable for this entry point.

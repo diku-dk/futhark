@@ -1,1 +1,1 @@
-Generator gen_simple failed with size=50 and seed=REDACTED with error: Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./ValidationTests/GeneratorCrash.fut:12:8-11",""]
+User Generator gen_simple failed with size=50 and seed=REDACTED with error: Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./ValidationTests/GeneratorCrash.fut:12:8-11",""]
