@@ -82,6 +82,8 @@ data SOAC rep
     JVP [SubExp] [SubExp] (Lambda rep)
   | -- FIXME: this should not be here
     VJP [SubExp] [SubExp] (Lambda rep)
+  | -- FIXME: this should not be here
+    WithVJP [SubExp] (Lambda rep) (Lambda rep)
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
@@ -409,6 +411,11 @@ mapSOACM tv (VJP args vec lam) =
     <$> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
     <*> mapOnSOACLambda tv lam
+mapSOACM tv (WithVJP args lam0 lam1) =
+  WithVJP
+    <$> mapM (mapOnSOACSubExp tv) args
+    <*> mapOnSOACLambda tv lam0
+    <*> mapOnSOACLambda tv lam1
 mapSOACM tv (Stream size arrs accs lam) =
   Stream
     <$> mapOnSOACSubExp tv size
@@ -506,6 +513,8 @@ soacType (JVP _ _ lam) =
   lambdaReturnType lam ++ lambdaReturnType lam
 soacType (VJP _ _ lam) =
   lambdaReturnType lam ++ map paramType (lambdaParams lam)
+soacType (WithVJP _ lam _) =
+  lambdaReturnType lam
 soacType (Stream outersize _ accs lam) =
   map (substNamesInType substs) rtp
   where
@@ -526,6 +535,7 @@ instance AliasedOp SOAC where
 
   consumedInOp JVP {} = mempty
   consumedInOp VJP {} = mempty
+  consumedInOp WithVJP {} = mempty
   -- Only map functions can consume anything.  The operands to scan
   -- and reduce functions are always considered "fresh".
   consumedInOp (Screma _ arrs (ScremaForm map_lam _ _ _)) =
@@ -555,6 +565,11 @@ instance CanBeAliased SOAC where
     JVP args vec (Alias.analyseLambda aliases lam)
   addOpAliases aliases (VJP args vec lam) =
     VJP args vec (Alias.analyseLambda aliases lam)
+  addOpAliases aliases (WithVJP args lam lam_adj) =
+    WithVJP
+      args
+      (Alias.analyseLambda aliases lam)
+      (Alias.analyseLambda aliases lam_adj)
   addOpAliases aliases (Stream size arr accs lam) =
     Stream size arr accs $ Alias.analyseLambda aliases lam
   addOpAliases aliases (Hist w arrs ops bucket_fun) =
@@ -613,6 +628,12 @@ instance IsOp SOAC where
       mempty
       lam
       (zipWith (<>) (map depsOf' args) (map depsOf' vec))
+      <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
+  opDependencies (WithVJP args lam _lam_adj) =
+    lambdaDependencies
+      mempty
+      lam
+      (map depsOf' args)
       <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
   opDependencies (Screma w arrs (ScremaForm map_lam scans reds post_lam)) =
     let (scans_in, reds_in, map_deps) =
@@ -707,6 +728,17 @@ typeCheckSOAC (JVP args vec lam) = do
         </> PP.indent 2 (pretty $ map TC.argType args')
         </> "does not match type of seed vector"
         </> PP.indent 2 (pretty vec_ts)
+typeCheckSOAC (WithVJP args lam lam_adj) = do
+  args' <- mapM TC.checkArg args
+  TC.checkLambda lam $ map TC.noArgAliases args'
+  TC.checkLambda lam_adj $
+    map (,mempty) (lambdaReturnType lam <> lambdaReturnType lam)
+  unless (lambdaReturnType lam_adj == map TC.argType args') $
+    TC.bad . TC.TypeError . docText $
+      "Adjoint lambda return type"
+        </> PP.indent 2 (pretty $ lambdaReturnType lam_adj)
+        </> "does not match type of arguments"
+        </> PP.indent 2 (pretty $ map TC.argType args')
 typeCheckSOAC (Stream size arrexps accexps lam) = do
   TC.require (Prim int64) size
   accargs <- mapM TC.checkArg accexps
@@ -823,6 +855,8 @@ instance RephraseOp SOAC where
     VJP args vec <$> rephraseLambda r lam
   rephraseInOp r (JVP args vec lam) =
     JVP args vec <$> rephraseLambda r lam
+  rephraseInOp r (WithVJP args lam lam_adj) =
+    WithVJP args <$> rephraseLambda r lam <*> rephraseLambda r lam_adj
   rephraseInOp r (Stream w arrs acc lam) =
     Stream w arrs acc <$> rephraseLambda r lam
   rephraseInOp r (Hist w arrs ops lam) =
@@ -852,6 +886,9 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
     inside "VJP" $ lambdaMetrics lam
   opMetrics (JVP _ _ lam) =
     inside "JVP" $ lambdaMetrics lam
+  opMetrics (WithVJP _ lam lam_adj) = do
+    inside "WithVJP" $ lambdaMetrics lam
+    inside "WithVJP" $ lambdaMetrics lam_adj
   opMetrics (Stream _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Hist _ _ ops bucket_fun) =
@@ -879,6 +916,14 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
             PP.braces (commasep $ map pretty args)
               <> comma </> PP.braces (commasep $ map pretty vec)
               <> comma </> pretty lam
+        )
+  pretty (WithVJP args lam lam_adj) =
+    "with_vjp"
+      <> parens
+        ( PP.align $
+            PP.braces (commasep $ map pretty args)
+              <> comma </> pretty lam
+              <> comma </> pretty lam_adj
         )
   pretty (Stream size arrs acc lam) =
     ppStream size arrs acc lam
