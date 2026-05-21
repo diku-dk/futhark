@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The restrictions for passing tuples as consumed function parameters have been
   loosened. (#2456)
 
+* The reverse-mode AD transformation now supports custom adjoints through a new
+  prelude function, `with_vjp`.
+
 ### Removed
 
 ### Changed
