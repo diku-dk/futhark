@@ -28,12 +28,11 @@ of commented-out text with the following overall format::
   ==
   cases...
 
-The ``description`` is an arbitrary (and possibly multiline)
-human-readable explanation of the test program.  It is separated from
-the test cases by a line containing just ``==``.  Any comment starting
-at the beginning of the line, and containing a line consisting of just
-``==``, will be considered a test block.  The format of a test case is
-as follows::
+The ``description`` is an arbitrary (and possibly multiline) human-readable
+explanation of the test program. It is separated from the test cases by a line
+containing just ``==``. Any comment starting at the beginning of the line, and
+containing a line consisting of just ``==``, will be considered a test block.
+The format of a unit test case is as follows::
 
   [tags { tags... }]
   [entry: names...]
@@ -135,6 +134,56 @@ The element type of an array value is determined by the first primitive element
 of the array. You therefore only need to provide a type suffix on the first
 element. If no suffix is provided, integer arrays have element type ``i32`` and
 decimal arrays have type ``f64``.
+
+PROPERTY-BASED TESTING
+----------------------
+
+Apart from containing input/output tests as described above, a test block may
+also have the following form::
+
+  property: names...
+
+In this case, the names indicate *properties*. A property is an entry point
+with this type::
+
+  t -> bool
+
+for some ``t``, which has been given a ``#[prop]`` pragma. To test a property is
+being tested, ``futhark test`` will randomly generate values of type ``t``,
+called *candicates*, looking for a candiate that makes the property return
+``false``, called a *counterexample*. When a counterexample has been found,
+``futhark test`` will try to shrink it and finally report the smallest
+counterexample that it was able construct.
+
+The ``#[prop]`` attribute supports various optional arguments that grant more
+control over the testing process. They are passed as arguments, e.g.,
+``#[prop(gen(foo),shrink(bar))]``. The following are supported:
+
+* ``gen(f)``, where ``f`` is an entry point function with this type::
+
+    (size: i64) -> (seed: i64) -> t
+
+  Instead of automatically generating candidates for the property, ``futhark
+  test`` will invoke ``f`` with a size and a randomly generated seed. This can
+  be used to generate more complicated types.
+
+* ``shrink(f)``, where ``f`` is an entry point function with this type::
+
+    t -> i32 -> t
+
+  When shrinking a counterexample, ``futhark test`` will call ``f`` with the
+  candidate so far along with a random number, which is then expected to return
+  a smaller value.
+
+* ``size(N)``, where ``N`` is an integer. This sets the size of generated candidates
+  (or the size argument passed to generators).
+
+* ``pprint(f)``, where ``f`` is an entry point function with this type::
+
+    t -> []u8
+
+  Specifies a function to be used when printing a counterexample for human
+  consumption.
 
 OPTIONS
 =======
@@ -278,8 +327,16 @@ randomly generated data::
   -- random input { [100]i32 [100]i32 } auto output
   -- random input { [1000]i32 [1000]i32 } auto output
 
-  let main xs ys = i32.product (map2 (*) xs ys)
+  entry main xs ys = i32.product (map2 (*) xs ys)
 
+The following tests that reverse is an involution::
+
+  -- ==
+  -- property: reverse_involution
+
+  #[prop]
+  entry reverse_involution (xs: []i32) =
+    and (map2 (==) (reverse (reverse xs)) xs)
 
 SEE ALSO
 ========
