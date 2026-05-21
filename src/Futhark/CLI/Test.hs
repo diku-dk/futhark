@@ -944,7 +944,9 @@ commandLineOptions =
           )
           "NUM"
       )
-      $ "Number of tests to run per property (default: " <> show (configNumTests . configPBTConfig $ defaultConfig) <> ").",
+      $ "Number of tests to run per property (default: "
+        <> show (configNumTests . configPBTConfig $ defaultConfig)
+        <> ").",
     Option
       "m"
       ["max-size"]
@@ -959,7 +961,9 @@ commandLineOptions =
           )
           "NUM"
       )
-      $ "Maximum size parameter to use for generators (default: " <> show (configMaxSize . configPBTConfig $ defaultConfig) <> ").",
+      $ "Maximum size parameter to use for generators (default: "
+        <> show (configMaxSize . configPBTConfig $ defaultConfig)
+        <> ").",
     Option
       []
       ["seed"]
@@ -988,7 +992,9 @@ commandLineOptions =
           )
           "NUM"
       )
-      $ "The number of tries the shrinker will perform before giving up (default: " <> show (configShrinkTries . configPBTConfig $ defaultConfig) <> ")."
+      $ "The number of tries the shrinker will perform before giving up (default: "
+        <> show (configShrinkTries . configPBTConfig $ defaultConfig)
+        <> ")."
   ]
 
 excludeBackend :: TestConfig -> TestConfig
