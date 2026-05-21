@@ -172,7 +172,7 @@ FutharkArray
 Arrays are represented by ``FutharkArray`` objects.  The common array API is
 shared by the WASM backend and the WebGPU backend.
 
-.. js:function:: FutharkArray.get_shape()
+.. js:function:: FutharkArray.shape()
 
    Returns the shape of the array as a ``BigInt64Array``.
 

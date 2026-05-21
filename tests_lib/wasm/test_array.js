@@ -119,10 +119,10 @@ async function main() {
   const fut_values_arr = await fc.entry.replicate_f32_1d(3n, 4.5);
 
   assert.equal(typeof fut_values_arr.values, "function");
-  assert.equal(typeof fut_values_arr.get_shape, "function");
+  assert.equal(typeof fut_values_arr.shape, "function");
 
   const values = await fut_values_arr.values();
-  const shape = fut_values_arr.get_shape();
+  const shape = fut_values_arr.shape();
 
   assert.ok(values instanceof Float32Array);
   assert.ok(shape instanceof BigInt64Array);
@@ -135,7 +135,7 @@ async function main() {
     assert.ok(Math.abs(values[i] - 4.5) < 0.0001);
   }
 
-  ok("shared returned-array helpers values() and get_shape() work");
+  ok("shared returned-array helpers values() and shape() work");
 
   section("Shared API only");
 
@@ -146,7 +146,7 @@ async function main() {
 
   const shared_arr = await fc.entry.replicate_f32_1d(2n, 7.5);
   const shared_values = await shared_arr.values();
-  const shared_shape = shared_arr.get_shape();
+  const shared_shape = shared_arr.shape();
 
   assert.ok(shared_values instanceof Float32Array);
   assert.ok(shared_shape instanceof BigInt64Array);
@@ -178,7 +178,7 @@ async function main() {
 
   const module_arr = await fut.entry.replicate_f32_1d(2n, 8.5);
   const module_values = await module_arr.values();
-  const module_shape = module_arr.get_shape();
+  const module_shape = module_arr.shape();
 
   assert.ok(module_values instanceof Float32Array);
   assert.ok(module_shape instanceof BigInt64Array);
@@ -187,7 +187,7 @@ async function main() {
   assert.ok(Math.abs(module_values[0] - 8.5) < 0.0001);
   assert.ok(Math.abs(module_values[1] - 8.5) < 0.0001);
 
-  ok("FutharkModule supports entry, types, array constructors, values(), and get_shape()");
+  ok("FutharkModule supports entry, types, array constructors, values(), and shape()");
 
   section("Cleanup");
 
