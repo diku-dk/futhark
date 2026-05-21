@@ -256,7 +256,7 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
     isParallelOp JVP {} = error "isParallelStm: JVP"
     isParallelOp VJP {} = error "isParallelStm: VJP"
     isParallelOp _ = True
-    
+
     -- TODO: Check other operations
     isParallelBasicOp Update {} = True
     isParallelBasicOp Concat {} = True
@@ -264,8 +264,8 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
     isParallelBasicOp Replicate {} = True
     isParallelBasicOp ArrayLit {} = True
     isParallelBasicOp ArrayVal {} = True
-    isParallelBasicOp FlatUpdate {} = error "isParallelStm: flatUpdate"
-    isParallelBasicOp FlatIndex {} = error "isParallelStm: flatIndex"
+    isParallelBasicOp FlatUpdate {} = True
+    isParallelBasicOp FlatIndex {} = False
     isParallelBasicOp _ = False
 
     isMap (BasicOp op) = isParallelBasicOp op
