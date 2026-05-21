@@ -336,7 +336,9 @@ fwdSOAC pat aux (WithVJP args lam _) = do
   (mapM_ fwdStm <=< runBuilder_) $ do
     lam_res <- auxing aux $ eLambda lam $ map eSubExp args
     forM (zip (patNames pat) lam_res) $ \(v, res) ->
-      letBindNames [v] $ BasicOp $ SubExp $ resSubExp res
+      letBindNames [v] $
+        certifying (resCerts res) $
+          BasicOp $ SubExp $ resSubExp res
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =
