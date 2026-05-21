@@ -2656,6 +2656,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
     Let _ _ (Op (Hist {})) -> error "Unhandled Hist"
     Let _ _ (Op (JVP {})) -> error "Unhandled JVP"
     Let _ _ (Op (VJP {})) -> error "Unhandled VJP"
+    Let _ _ (Op (WithVJP {})) -> error "Unhandled WithVJP"
 
 -- helper to not mess up the tags when generating new ones for the loop parameters
 -- probably won't be used in future
