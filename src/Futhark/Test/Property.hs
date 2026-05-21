@@ -779,10 +779,10 @@ autoShrinkLoop srv propName genName vCounterExample size rng phaseRef = runExcep
             Nothing
             phaseRef
 
-      vCandidate = "qc_try"
-      vOk = "qc_ok"
-      serverSize = "qc_size"
-      serverSeed = "qc_seed"
+      vCandidate = "auto_shrink_candidate"
+      vOk = "auto_shrink_ok"
+      serverSize = "auto_shrink_size"
+      serverSeed = "auto_shrink_seed"
 
   -- 1. Validate property input arity using our Either-to-ExceptT logic
   liftIO (getInputTypes srv propName) >>= \case
@@ -893,8 +893,8 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
   loop 0 0
   where
     oneStep size (val :: Int32) = do
-      let vOk = "qc_ok"
-          vRandomValue = "qc_random"
+      let vOk = "shrink_ok"
+          vRandomValue = "shrink_random"
 
       let shrinkUpdatePhase activeTest randomNum =
             updatePhase
