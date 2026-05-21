@@ -4,7 +4,7 @@ entry gen_i32_array (size: i64) (seed: u64) : []i32 =
                    let x = seed + i32.i64 i
                    in (x * 1103515245i32 + 12345i32) % (i32.i64 (size + 1)))
 
-entry shrink_i32_array (xs: []i32) (random: i32) : []i32 =
+entry shrink_i32_array (xs: []i32) (random: u64) : []i32 =
   let n = length xs
   in if n == 0
      then xs

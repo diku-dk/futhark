@@ -36,5 +36,5 @@ entry prop_simple_fail (x: i64) : bool =
 
 module shrink_i64 = integerlShrinkers i64
 
-entry shrink_simple (x: i64) (random: i32) : i64 =
+entry shrink_simple (x: i64) (random: u64) : i64 =
   shrink_i64.shrinker x random

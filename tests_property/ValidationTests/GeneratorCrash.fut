@@ -47,7 +47,7 @@ entry prop_simple_succ (x: i8) : bool =
 entry prop_simple_succ3 (x: i8) : bool =
   simple_succ x == i8.abs x
 
-entry shrink_simple (x: i8) (_random: i32) : i8 =
+entry shrink_simple (x: i8) (_random: u64) : i8 =
   if x > 0
   then x - 2
   else x + 2

@@ -39,7 +39,7 @@ def step (v: i32) : i32 =
   then v + 1
   else 0
 
-entry shrink_simple ((x: i32, y: i32)) (random: i32) : (i32, i32) =
+entry shrink_simple ((x: i32, y: i32)) (random: u64) : (i32, i32) =
   let tactic = random % 2
   in if tactic == 0
      then let x' = step x

@@ -30,7 +30,7 @@ def step_towards_zero (v: i32) : i32 =
   then v + 1
   else 0
 
-entry shrink_pair ((x, y): pair) (random: i32) : pair =
+entry shrink_pair ((x, y): pair) (random: u64) : pair =
   let tactic = random % 2
   in if tactic == 0
      then let x' = step_towards_zero x

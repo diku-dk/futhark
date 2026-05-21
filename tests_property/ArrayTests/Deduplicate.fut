@@ -81,7 +81,7 @@ entry gen_deduplicate_bad (size: i64) (_seed: u64) : []i32 =
 --
 -- This tends to shrink toward the minimal witness [0,1].
 
-entry shrink_deduplicate (xs: []i32) (random: i32) : []i32 =
+entry shrink_deduplicate (xs: []i32) (random: u64) : []i32 =
   let n64: i64 = length xs
   in if n64 == 0
      then xs

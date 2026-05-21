@@ -81,7 +81,7 @@ data PBTPhase = PBTPhase
     phaseSeed :: Maybe Word64,
     -- | Random value argument for shrinker phase (used for user-defined
     -- shrinker, otherwise 'Nothing').
-    phaseRandom :: Maybe Int32
+    phaseRandom :: Maybe Word64
   }
   deriving (Show, Eq)
 
@@ -227,8 +227,8 @@ validateShrinkTypes srv propName shrinkName = fmap (either Just (const Nothing))
             [ "Property " <> propName <> " expects " <> propTy <> " but shrinker " <> shrinkName <> " takes " <> xTy
             | xTy /= propTy
             ]
-              <> [ "Shrinker " <> shrinkName <> " takes random value " <> randTy <> " but expected i32"
-                 | randTy /= "i32"
+              <> [ "Shrinker " <> shrinkName <> " takes random value " <> randTy <> " but expected u64"
+                 | randTy /= "u64"
                  ]
 
       unless (null errors) $
@@ -242,7 +242,7 @@ validateShrinkTypes srv propName shrinkName = fmap (either Just (const Nothing))
           <> showText tys
           <> "\nExpected exactly 2 inputs: ("
           <> propTy
-          <> ", i32)."
+          <> ", u64)."
 
   -- validate output
   shrinkOut <- liftIO $ getOutputType srv shrinkName
@@ -741,7 +741,7 @@ updatePhase ::
   Maybe EntryName ->
   Maybe Int64 ->
   Maybe Word64 ->
-  Maybe Int32 ->
+  Maybe Word64 ->
   IORef PBTPhase ->
   IO ()
 updatePhase propName phase activeTest size seed rand phaseRef =
@@ -836,7 +836,7 @@ autoShrinkLoop srv propName genName vCounterExample size rng serverSize serverSe
               errM <- liftIO $ automaticGenerator srv vCandidate propertyType size' rng
               maybe (pure ()) (throwE . ("Haskell auto generator failed: " <>)) errM
           Just gn -> do
-            seed <- genWord64 rng
+            seed <- peekWord64 rng
             liftIO $ putVal srv serverSize size' >> putVal srv serverSeed seed
             runExceptT $ do
               errM <- liftIO $ callFreeIns srv gn vCandidate [serverSize, serverSeed]
@@ -872,7 +872,7 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
   let loop (acc :: Int) (totalCounter :: Int)
         | acc >= numTries = pure Nothing
         | otherwise = do
-            random_value <- genInt32 rng
+            random_value <- genWord64 rng
             stepResultE <- liftIO $ oneStep size random_value
             stepResult <-
               either
@@ -897,7 +897,7 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
                 throwE $ "Error in shrinker: " <> err
   loop 0 0
   where
-    oneStep size (val :: Int32) = do
+    oneStep size (val :: Word64) = do
       let vCandidate = "shrink_candidate"
           vOk = "shrink_ok"
           vRandomValue = "shrink_random"

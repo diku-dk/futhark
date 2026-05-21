@@ -47,7 +47,7 @@ entry prop_matrix_sums_succ (input: [][]i32) : bool =
 --   0 = produced candidate (normal)
 --   1 = produced candidate but "advance tactic" hint (runner rule: if FAIL and status=1 then tactic=0 anyway, but we keep the channel)
 --   2 = stop
-entry shrink_matrix_sums (xss: [][]i32) (random: i32) : [][]i32 =
+entry shrink_matrix_sums (xss: [][]i32) (random: u64) : [][]i32 =
   let tactic = random % 2
   let r = length xss
   in if r <= 1
@@ -142,7 +142,7 @@ def update_cell_rc [r] [c] (ri: i64) (ci: i64) (xss: [r][c]i32) : [r][c]i32 =
                                 tabulate c (\j ->
                                               if i == ri && j == ci then new else xss[i][j]))
 
-entry shrink_matrix (xss: [][]i32) (random: i32) : [][]i32 =
+entry shrink_matrix (xss: [][]i32) (random: u64) : [][]i32 =
   let tactic = random % 3
   let r: i64 = length xss
   let c: i64 = if r == 0 then 0 else length xss[0]

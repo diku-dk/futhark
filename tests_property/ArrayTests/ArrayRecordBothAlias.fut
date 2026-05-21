@@ -37,8 +37,8 @@ def shrink_i32 (x: i32) : i32 =
   then 0i32
   else x / 2i32
 
-def shrink_record_field (r: record) (field: i32) : (record, bool) =
-  if field == 0i32
+def shrink_record_field (r: record) (field: u64) : (record, bool) =
+  if field == 0
   then let s' = shrink_i32 r.s
        let r' = {s = s', a = r.a}
        in (r', r' != r)
@@ -49,26 +49,26 @@ def shrink_record_field (r: record) (field: i32) : (record, bool) =
 def replace_at [n] (xs: [n]record) (idx: i64) (v: record) : [n]record =
   tabulate n (\i -> if i == idx then v else xs[i])
 
-entry shrink_arr_record (xs: arr) (random: i32) : arr =
+entry shrink_arr_record (xs: arr) (random: u64) : arr =
   let n: i64 = length xs
-  let tactic = random % i32.i64 n
+  let tactic = random % u64.i64 n
   let field_tactics: i32 = 2i32 * i32.i64 n
   let total_tactics: i32 =
     if n <= 1
     then field_tactics
     else 2i32 + field_tactics
-  let t: i32 = if tactic < 0i32 then 0i32 else tactic
-  in if t >= total_tactics
+  let t = if tactic < 0 then 0 else tactic
+  in if t >= u64.i32 total_tactics
      then xs
-     else if n > 1 && t == 0i32
+     else if n > 1 && t == 0
      then let xs' = take (n - 1) xs
           in xs'
-     else if n > 1 && t == 1i32
+     else if n > 1 && t == 1
      then let xs' = drop 1 xs
           in xs'
-     else let loc: i32 = if n > 1 then t - 2i32 else t
-          let idx: i64 = i64.i32 (loc / 2i32)
-          let field: i32 = loc % 2i32
+     else let loc = if n > 1 then t - 2 else t
+          let idx: i64 = i64.u64 (loc / 2)
+          let field = loc % 2
           let xsn: [n]record = xs :> [n]record
           let old = xsn[idx]
           let (new, changed) = shrink_record_field old field

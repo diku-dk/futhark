@@ -19,5 +19,5 @@ entry prop_record_sums_fail (input: []([](i8, i16), i32)) : bool =
   else
     true
 
-entry shrinker (xs: []([](i8, i16), i32)) (_random: i32) : []([](i8, i16), i32) =
+entry shrinker (xs: []([](i8, i16), i32)) (_random: u64) : []([](i8, i16), i32) =
   [([(10i8, 10i16)], 0i32)]

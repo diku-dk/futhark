@@ -51,11 +51,11 @@ def update_at_n [n] (kk: i64) (xs: [n]record) : ([n]record, bool) =
   let xs' = tabulate n (\i -> if i == kk then r' else xs[i])
   in (xs', changed)
 
-entry shrink_arr_record (xs: []record) (random: i32) : []record =
+entry shrink_arr_record (xs: []record) (random: u64) : []record =
   let n: i64 = length xs
   in if n == 0
      then xs
-     else let r0 = i64.i32 random
+     else let r0 = i64.u64 random
           let r = if r0 < 0 then -r0 else r0
           let t = r % (2 * n)
           -- Phase 1: try to shrink one record field.

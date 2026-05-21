@@ -41,6 +41,6 @@ def step (v: i32) : i32 =
   then v + 1
   else 0
 
-entry shrink_simple (r: record) (_random: i32) : record =
+entry shrink_simple (r: record) (_random: u64) : record =
   let x' = step r.x
   in {x = x'}

@@ -56,5 +56,5 @@ def simple_fail (x: i8) : i8 =
 entry prop_simple_fail (x: i8) : bool =
   simple_fail x == x
 
-entry shrink_simple (x: i8) (random: i32) : i8 =
+entry shrink_simple (x: i8) (random: u64) : i8 =
   shrink_i8.shrinker x random

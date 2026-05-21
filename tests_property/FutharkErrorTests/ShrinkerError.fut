@@ -4,7 +4,7 @@
 entry gen_bad (_size: i64) (_seed: u64) : i32 =
   1i32
 
-entry shrink_crash (_x: i32) (_random: i32) : i32 =
+entry shrink_crash (_x: i32) (_random: u64) : i32 =
   1i32 / 0i32
 
 #[prop(gen(gen_bad),shrink(shrink_crash))]

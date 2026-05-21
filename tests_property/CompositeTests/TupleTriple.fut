@@ -37,7 +37,7 @@ def step0 (v: i32) : i32 =
   then v + 1
   else 0
 
-entry shrink_simple (t: (i32, i32, i32)) (random: i32) : (i32, i32, i32) =
+entry shrink_simple (t: (i32, i32, i32)) (random: u64) : (i32, i32, i32) =
   let tactic = random % 3
   let (a, b, c) = t
   in if tactic == 0

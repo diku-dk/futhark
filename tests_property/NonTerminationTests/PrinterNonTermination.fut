@@ -9,7 +9,7 @@ def diverge_u64 (start: u64) : u64 =
 entry gen_failing (size: i64) (seed: u64) : i32 =
   1i32
 
-entry shrink_to_passing (x: i32) (random: i32) : i32 =
+entry shrink_to_passing (x: i32) (random: u64) : i32 =
   0i32
 
 entry pprint_nonterminates (x: i32) : []u8 =

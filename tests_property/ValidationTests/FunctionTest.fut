@@ -10,7 +10,7 @@ entry gen_i32 (size: i64) (seed: u64) : i32 =
   let (_, x) = rand_i32.rand (-i32.i64 size, i32.i64 size) rng0
   in x
 
-entry shrink_i32 (x: i32) (_random: i32) : i32 =
+entry shrink_i32 (x: i32) (_random: u64) : i32 =
   if x == 0i32
   then x
   else x / 2i32

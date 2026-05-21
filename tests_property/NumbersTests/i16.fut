@@ -33,7 +33,7 @@ def simple_fail (x: i16) : i16 =
 entry prop_simple_fail (x: i16) : bool =
   simple_fail x == x
 
-entry shrink_simple (x: i16) (random: i32) : i16 =
+entry shrink_simple (x: i16) (random: u64) : i16 =
   let tactic = random % 2
   in if tactic == 0
      then x // 2

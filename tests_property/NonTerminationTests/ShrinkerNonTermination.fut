@@ -9,7 +9,7 @@ def diverge_u64 (start: u64) : u64 =
 entry gen_failing (size: i64) (seed: u64) : i32 =
   -1i32
 
-entry shrink_nonterminates (x: i32) (random: i32) : i32 =
+entry shrink_nonterminates (x: i32) (random: u64) : i32 =
   x + i32.u64 (diverge_u64 (u64.i32 random))
 
 #[prop(gen(gen_failing), shrink(shrink_nonterminates))]

@@ -35,5 +35,5 @@ def simple_fail (x: u16) : u16 =
 entry prop_simple_fail (x: u16) : bool =
   simple_fail x < x
 
-entry shrink_simple (x: u16) (random: i32) : u16 =
+entry shrink_simple (x: u16) (random: u64) : u16 =
   shrink_u16.shrinker x random

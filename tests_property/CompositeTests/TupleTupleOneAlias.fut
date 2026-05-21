@@ -38,7 +38,7 @@ def step0 (v: i32) : i32 =
   then v + 1
   else 0
 
-entry shrink_simple (r: tuple) (random: i32) : tuple =
+entry shrink_simple (r: tuple) (random: u64) : tuple =
   let tactic = random % 6
   in if tactic == 0
      then let x0' = step0 r.0.0

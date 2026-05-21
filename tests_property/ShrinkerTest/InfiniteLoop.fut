@@ -30,7 +30,7 @@ def step (v: i32) : i32 =
   then v + 1
   else 0
 
-entry shrink_simple (r: tuple) (random: i32) : tuple =
+entry shrink_simple (r: tuple) (random: u64) : tuple =
   let tactic: i32 = random % 2
   in if tactic == 0
      then {0 = step r.0, 1 = r.1}

@@ -62,29 +62,26 @@ def shrink_i32_to_witness (v: i32) : i32 =
   then 1i32
   else -1i32
 
-entry shrink_simple (xs: []i32) (random: i32) : []i32 =
-  let n64: i64 = length xs
-  in if n64 == 0
+entry shrink_simple (xs: []i32) (random: u64) : []i32 =
+  let n = length xs
+  in if n == 0
      then xs
-     else let n: i32 = i32.i64 n64
-          let r = i32.abs random
-          let t: i32 = r % (2i32 * n)
+     else let r = random
+          let t = i64.u64 r % (2 * n)
           -- Phase 1: shrink one element into {-1,0,1}.
           in if t < n
-             then let i: i64 = i64.i32 t
+             then let i = t
                   let old = xs[i]
                   let new = shrink_i32_to_witness old
                   in if new == old
                      then -- Avoid returning the same failing candidate.
                           -- Drop an element instead.
-                          if n64 == 1
+                          if n == 1
                           then []
                           else take i xs ++ drop (i + 1) xs
-                     else tabulate n64 (\j -> if j == i then new else xs[j])
+                     else tabulate n (\j -> if j == i then new else xs[j])
              else -- Phase 2: drop one element.
-
-                  let k: i32 = t - n
-                  let i: i64 = i64.i32 k
-                  in if n64 == 1
+                  let i = t - n
+                  in if n == 1
                      then []
                      else take i xs ++ drop (i + 1) xs

@@ -42,7 +42,7 @@ def step0 (v: i32) : i32 =
   else 0
 
 entry shrink_simple (r: {x: (i32, i32), y: (i32, i32)})
-                    (random: i32) : {x: (i32, i32), y: (i32, i32)} =
+                    (random: u64) : {x: (i32, i32), y: (i32, i32)} =
   let tactic = random % 6
   in if tactic == 0
      then let x0' = step0 r.x.0
