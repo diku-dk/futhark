@@ -235,6 +235,8 @@ transformSOAC _ JVP {} =
   error "transformSOAC: unhandled JVP"
 transformSOAC _ VJP {} =
   error "transformSOAC: unhandled VJP"
+transformSOAC _ WithVJP {} =
+  error "transformSOAC: unhandled WithVJP"
 transformSOAC pat (Screma w arrs form) =
   transformScrema pat w arrs form
 transformSOAC pat (Stream w arrs nes lam) = do
