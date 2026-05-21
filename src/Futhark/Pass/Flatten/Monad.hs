@@ -217,8 +217,33 @@ inputReps inputs env = M.fromList $ map (second getRep) inputs
       DistInput rt t -> (t, resVar rt env)
       DistInputFree v' t -> (t, Regular v')
 
+readIrregularInput ::
+  Segments ->
+  [SubExp] ->
+  VName ->
+  Type ->
+  IrregularRep ->
+  Builder GPU VName
+readIrregularInput segments is v t (IrregularRep _ _ v_O v_D _) = do
+  offset <- letSubExp "offset" =<< eIndex v_O [toExp $ flatSegmentIndex segments is]
+  case arrayDims t of
+    [] -> do 
+      letExp (baseName v <> "_inp") =<< eIndex v_D [eSubExp offset]
+    [num_elems] -> do
+      let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
+      letExp (baseName v <> "_inp") $ BasicOp $ Index v_D slice
+    _ -> do
+      num_elems <-
+        letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
+      let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
+      v_flat <-
+        letExp (baseName v <> "_flat") $ BasicOp $ Index v_D slice
+      v_flat_t <- lookupType v_flat
+      letExp (baseName v <> "_inp") . BasicOp $
+        Reshape v_flat (reshapeAll (arrayShape v_flat_t) (arrayShape t))
+
 readInputVar :: Segments -> DistEnv -> [SubExp] -> DistInputs -> VName -> Builder GPU VName
-readInputVar _segments env is inputs v =
+readInputVar segments env is inputs v =
   case lookup v inputs of
     Nothing -> pure v
     Just (DistInputFree arr t)
@@ -229,8 +254,7 @@ readInputVar _segments env is inputs v =
         Regular arr
           | isAcc t -> pure arr
           | otherwise -> letExp (baseName v) =<< eIndex arr (map eSubExp is)
-        Irregular (IrregularRep _ _flags _offsets _elems _) ->
-          undefined
+        Irregular irreg -> readIrregularInput segments is v t irreg
 
 readInput :: Segments -> DistEnv -> [SubExp] -> DistInputs -> SubExp -> Builder GPU SubExp
 readInput _ _ _ _ (Constant x) =
@@ -275,27 +299,8 @@ readInputs segments env is = mapM_ onInput
             =<< if isAcc t
               then eSubExp $ Var arr
               else eIndex arr (map eSubExp is)
-        Irregular (IrregularRep _ _ v_O v_D _) -> do
-          offset <- letSubExp "offset" =<< eIndex v_O [toExp $ flatSegmentIndex segments is]
-          case arrayDims t of
-            -- We can have scalar irreugalrs because of replication rep
-            [] -> do 
-              res <- letSubExp "segment" =<< eIndex v_D [eSubExp offset]
-              bindInputName v $ BasicOp $ SubExp res
-            [num_elems] -> do
-              let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
-              bindInputName v $ BasicOp $ Index v_D slice
-            _ -> do
-              num_elems <-
-                letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
-              let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
-              v_flat <-
-                letExp (baseName v <> "_flat") $ BasicOp $ Index v_D slice
-              v_flat_t <- lookupType v_flat
-              v' <-
-                letExp (baseName v <> "_inp") . BasicOp $
-                  Reshape v_flat (reshapeAll (arrayShape v_flat_t) (arrayShape t))
-              letBindNames [v] $ BasicOp $ SubExp $ Var v'
+        Irregular irreg -> 
+          readIrregularInput segments is v t irreg >>= eSubExp . Var >>= bindInputName v
 
 scopeOfDistInputs :: DistInputs -> Scope GPU
 scopeOfDistInputs = scopeOfLParams . map f
