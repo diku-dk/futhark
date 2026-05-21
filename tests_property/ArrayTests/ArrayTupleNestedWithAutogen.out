@@ -1,2 +1,2 @@
 PBT FAIL: prop_record_sums_fail size=5 seed=REDACTED after N tests
-Counterexample: [([(43i8, 8269i16)], 466321707i32)]
+Counterexample: [([(-60i8, 27665i16)], 845840696i32)]

@@ -767,82 +767,80 @@ autoShrinkLoop ::
   IORef PBTPhase ->
   IO (Either PBTFailure PBTOutput)
 autoShrinkLoop srv propName genName vCounterExample size rng serverSize serverSeed phaseRef = runExceptT $ do
-  let autoShrinkUpdatePhase (Right activeTest) seed =
-        liftIO $
-          updatePhase
-            (Just propName)
-            (Just "autoShrinkLoop")
-            activeTest
-            (Just size)
-            (Just seed)
-            Nothing
-            phaseRef
-      autoShrinkUpdatePhase (Left _activeTest) seed =
-        liftIO $
-          updatePhase
-            (Just propName)
-            (Just "autoShrinkLoop")
-            (Just "Auto Generator")
-            (Just size)
-            (Just seed)
-            Nothing
-            phaseRef
-
-      vCandidate = "auto_shrink_candidate"
-      vOk = "auto_shrink_ok"
-
-  -- 1. Validate property input arity using our Either-to-ExceptT logic
   liftIO (getInputTypes srv propName) >>= \case
     [_] -> pure ()
     [] -> throwE $ "Property " <> propName <> " has no inputs?"
     tys -> throwE $ "Property " <> propName <> " has >1 input: " <> showText tys
 
-  -- 2. The Loop
   let loop i
         | i <= 1 = pure Nothing
         | otherwise = do
             let newSize = i - 1
-            seed <- genWord64 rng
-            liftIO $ putVal srv serverSize newSize >> putVal srv serverSeed seed
+            seed <- peekWord64 rng
 
-            -- Note: Since withFreedVars manages server-side resources,
-            -- we lift the whole block into IO then handle the result.
-            res <- liftIO $ withFreedVars srv [vCandidate] $ runExceptT $ do
-              liftIO $ autoShrinkUpdatePhase (Right genName) seed
-              case genName of
-                Nothing -> do
-                  propertyType <-
-                    liftIO (getSingleInputType srv propName) >>= \case
-                      Left err -> throwE $ showText err
-                      Right ty -> pure ty
-                  liftIO $ freeVars srv [serverSize, serverSeed]
-                  errM <- liftIO $ automaticGenerator srv vCandidate propertyType newSize rng
-                  maybe (pure ()) (throwE . ("Haskell auto generator failed: " <>)) errM
-                Just gn -> do
-                  errM <- liftIO $ callFreeIns srv gn vCandidate [serverSize, serverSeed]
-                  maybe (pure ()) (throwE . (("Generator failed: " <> gn <> " has ") <>)) errM
+            errM <- liftIO $ generatorPhase newSize
+            maybe (pure ()) (throwE . ("Auto-shrinker generator failed: " <>)) errM
 
-              liftIO $ autoShrinkUpdatePhase (Right $ Just propName) seed
-              okE <- liftIO $
-                withCallKeepIns srv propName vOk [vCandidate] $
-                  \vOk' -> getVal srv vOk'
-              ok <- either (throwE . ("Property " <>)) pure okE
+            liftIO $ autoShrinkUpdatePhase (Right $ Just propName) seed
 
-              liftIO $ autoShrinkUpdatePhase (Left Nothing) seed
+            okE <- liftIO $
+              withCallKeepIns srv propName vOk [vCandidate] $
+                \vOk' -> getVal srv vOk'
+            ok <- either (throwE . ("Property " <>)) pure okE
 
-              if ok
-                then pure Nothing -- Shrink didn't find a smaller failure
-                else do
-                  _ <-
-                    liftIO $
-                      freeOnException srv [vCounterExample] $
-                        renameVar srv vCounterExample vCandidate
-                  pure (Just newSize) -- Found a smaller failing size!
-            case res of
-              Left err -> throwE err
-              Right Nothing -> loop (i - 1)
-              Right (Just s) -> loop s
+            liftIO $ autoShrinkUpdatePhase (Left Nothing) seed
+
+            case ok of
+              True -> do
+                liftIO $ freeVars srv [vCandidate]
+                loop newSize
+              False -> do
+                liftIO $
+                  freeOnException srv [vCounterExample] $
+                    renameVar srv vCounterExample vCandidate
+                loop newSize
   loop size
+  where
+    vCandidate = "auto_shrink_candidate"
+    vOk = "auto_shrink_ok"
+    autoShrinkUpdatePhase (Right activeTest) seed =
+      liftIO $
+        updatePhase
+          (Just propName)
+          (Just "autoShrinkLoop")
+          activeTest
+          (Just size)
+          (Just seed)
+          Nothing
+          phaseRef
+    autoShrinkUpdatePhase (Left _activeTest) seed =
+      liftIO $
+        updatePhase
+          (Just propName)
+          (Just "autoShrinkLoop")
+          (Just "Auto Generator")
+          (Just size)
+          (Just seed)
+          Nothing
+          phaseRef
+    generatorPhase size' = do
+      fmap (either Just (const Nothing)) . runExceptT $
+        case genName of
+          Nothing -> do
+            propertyType <- do
+              liftIO (getSingleInputType srv propName) >>= \case
+                Left err -> throwE $ showText err
+                Right ty -> pure ty
+            liftIO $ freeVars srv [serverSize, serverSeed]
+            runExceptT $ do
+              errM <- liftIO $ automaticGenerator srv vCandidate propertyType size' rng
+              maybe (pure ()) (throwE . ("Haskell auto generator failed: " <>)) errM
+          Just gn -> do
+            seed <- genWord64 rng
+            liftIO $ putVal srv serverSize size' >> putVal srv serverSeed seed
+            runExceptT $ do
+              errM <- liftIO $ callFreeIns srv gn vCandidate [serverSize, serverSeed]
+              maybe (pure ()) (\err -> throwE $ "User Generator " <> gn <> " failed: " <> err) errM
 
 data Step
   = -- | Property still failed with the new candidate

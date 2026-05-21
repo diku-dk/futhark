@@ -9,7 +9,7 @@ let prop_all_equal (xs: []([](i8, i16), i32)) : bool =
 -- property: prop_record_sums_fail
 #[prop(size(5))]
 entry prop_record_sums_fail (input: []([](i8, i16), i32)) : bool =
-  if input[0].0[0].0 >= 0i8 && input[0].0[0].1 >= 0i16 && input[0].1 >= 0i32 then
+  if input[0].0[0].0 <= 0i8 && input[0].0[0].1 >= 0i16 && input[0].1 >= 0i32 then
     false
   else
     true
