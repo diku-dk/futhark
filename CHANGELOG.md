@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark bench`: entry points that consumed their input produced misleading
+  profiling information. (#2464)
+
 ## [0.26.2]
 
 ### Added
