@@ -50,18 +50,7 @@ entry prop_misspelled_shrink_field (x: i32) : bool =
   x == 0i32
 
 -- ------------------------------------------------------------
--- 4. Misspelled pretty-printer field: ppprint instead of pprint
--- ------------------------------------------------------------
-
--- ==
--- property: prop_misspelled_pprint_field
-
-#[prop(gen(gen_i32),ppprint(print_i32))]
-entry prop_misspelled_pprint_field (x: i32) : bool =
-  x == 0i32
-
--- ------------------------------------------------------------
--- 5. Misspelled size field: sze instead of size
+-- 4. Misspelled size field: sze instead of size
 -- ------------------------------------------------------------
 
 -- ==
@@ -71,15 +60,13 @@ entry prop_misspelled_pprint_field (x: i32) : bool =
 entry prop_misspelled_size_field (x: i32) : bool =
   x == x
 
-
 -- ------------------------------------------------------------
--- 6. multiple attributes on the same property
+-- 5. multiple attributes on the same property
 -- ------------------------------------------------------------
 
 -- ==
 -- property: prop_mul_att
 
-#[pro(gen(gen_i32), sze(12))]
-#[prop(gen(gen_i32), sze(10))]
+#[pro(gen(gen_i32),sze(12))] #[prop(gen(gen_i32),sze(10))]
 entry prop_mul_att (x: i32) : bool =
   x == x

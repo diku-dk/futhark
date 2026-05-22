@@ -76,25 +76,6 @@ entry shrink_arr_record (xs: []record) (random: u64) : []record =
                      then []
                      else take i xs ++ drop (i + 1) xs
 
---#[prop(gen(gen_record_sums_fail), shrink(shrink_arr_record), pprint(pp_arrRecord))]
-
 #[prop(gen(gen_record_sums_fail),shrink(shrink_arr_record))]
 entry prop_record_sums_fail (input: []record) : bool =
   prop_all_equal input
-
-def pp_record (r: record) : []u8 =
-  "{"
-  ++ "s: "
-  ++ i32_to_string r.s
-  ++ ", a: "
-  ++ i32_to_string r.a
-  ++ "}"
-
-entry pp_arrRecord (input: []record) : []u8 =
-  let n = length input
-  let body =
-    loop acc = ""
-    for i < n do
-      let sep = if i == 0 then "" else ", "
-      in acc ++ sep ++ pp_record input[i]
-  in "[" ++ body ++ "]"

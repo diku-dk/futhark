@@ -1,3 +1,0 @@
-PBT FAIL: prop_printer_error size=50 seed=REDACTED after N tests
-Counterexample: Pretty-printer failed: Pretty printer pp_crash failed with size=50 and seed=REDACTED with error: Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./FutharkErrorTests/PrinterError.fut:9:16-19",""]
-Fallback counterexample: 1i32

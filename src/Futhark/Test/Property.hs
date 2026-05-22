@@ -15,12 +15,10 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Except
-import Data.Char (chr)
 import Data.IORef
 import Data.Int
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text qualified as T
-import Data.Vector.Storable qualified as SV
 import Data.Word (Word64)
 import Futhark.Data
 import Futhark.Server
@@ -61,10 +59,7 @@ data PropSpec = PropSpec
     psShrink :: Maybe T.Text,
     -- | Optional size argument to pass to the generator and shrinker phases
     -- (overrides 'configMaxSize').
-    psSize :: Maybe Int64,
-    -- | Optional pretty-printer entry point to use for rendering
-    -- counterexamples instead of the default runner pretty-printer.
-    psPPrint :: Maybe T.Text
+    psSize :: Maybe Int64
   }
   deriving (Show, Eq)
 
@@ -133,8 +128,7 @@ parsePropSpec entry attr = do
       { psProp = entry,
         psGen = lookupArgText "gen" args,
         psShrink = lookupArgText "shrink" args,
-        psSize = fromInteger <$> lookupArgRead "size" args,
-        psPPrint = lookupArgText "pprint" args
+        psSize = fromInteger <$> lookupArgRead "size" args
       }
 
 atMostOnePropAttr :: (MonadFail m) => T.Text -> [T.Text] -> m [PropSpec]
@@ -257,50 +251,6 @@ validateShrinkTypes srv propName shrinkName = fmap (either Just (const Nothing))
         <> showText shrinkOut
         <> "\nExpected shrinker output to equal the property input type."
 
-validatePPrintTypes :: Server -> EntryName -> EntryName -> IO (Maybe PBTFailure)
-validatePPrintTypes srv propName ppName = fmap (either Just (const Nothing)) . runExceptT $ do
-  propTy <-
-    liftIO (getSingleInputType srv propName) >>= \case
-      Left err -> throwE $ showText err
-      Right ty -> pure ty
-
-  ppIns <- liftIO $ getInputTypes srv ppName
-
-  case ppIns of
-    [xTy] -> do
-      unless (xTy == propTy) $
-        throwE $
-          "Pretty-printer input type mismatch.\nProperty "
-            <> propName
-            <> " expects: "
-            <> propTy
-            <> "\nPretty-printer "
-            <> ppName
-            <> " takes: "
-            <> xTy
-            <> "\nExpected pretty-printer input to be exactly the property input type."
-    tys ->
-      throwE $
-        "Pretty-printer input arity mismatch.\nProperty "
-          <> propName
-          <> " expects: "
-          <> propTy
-          <> "\nPretty-printer "
-          <> ppName
-          <> " takes: "
-          <> showText tys
-          <> "\nExpected exactly 1 input with property input type."
-
-  ppOut <- liftIO $ getOutputType srv ppName
-
-  unless (ppOut == "[]u8") $
-    throwE $
-      "Pretty-printer output mismatch.\nPretty-printer "
-        <> ppName
-        <> " returns: "
-        <> ppOut
-        <> "\nExpected pretty-printer output to be []u8."
-
 validatePropTypes :: Server -> EntryName -> IO (Maybe PBTFailure)
 validatePropTypes srv propName = fmap (either Just (const Nothing)) . runExceptT $ do
   ins <- liftIO $ getInputTypes srv propName
@@ -343,14 +293,6 @@ validateOneSpec srv eps spec = do
           throwE $
             "Shrinker is not a server entry point: " <> sh
         liftIO (validateShrinkTypes srv prop sh) >>= maybe (pure ()) throwE
-
-    case psPPrint spec of
-      Nothing -> pure ()
-      Just pp -> do
-        unless (pp `elem` eps) $
-          throwE $
-            "Pretty-printer is not a server entry point: " <> pp
-        liftIO (validatePPrintTypes srv prop pp) >>= maybe (pure ()) throwE
 
 extractPropSpecsFromServer :: Server -> IO [PropSpec]
 extractPropSpecsFromServer srv = do
@@ -500,7 +442,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                 liftIO $
                   cmdErrorHandlerM "cmdStore failed to store when property crashed" $
                     cmdStore srv propertyFileName [serverIn]
-                valuePPrint <- liftIO $ pPrintPhase seed
+                valuePPrint <- liftIO pPrintPhase
                 throwE $
                   "Property "
                     <> propName
@@ -561,7 +503,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                 case shrinkRes of
                   Left err -> do
                     runUpdate "prettyPrint"
-                    counterLog <- liftIO $ pPrintPhase seed
+                    counterLog <- liftIO pPrintPhase
                     liftIO $ cmdErrorHandlerM "cmdStore failed to store when shrinker crashed" $ cmdStore srv propertyFileName [serverIn]
                     pure $
                       Just $
@@ -572,7 +514,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                           <> counterLog
                   Right (Just note) -> do
                     runUpdate "prettyPrint"
-                    counterLog <- liftIO $ pPrintPhase seed
+                    counterLog <- liftIO pPrintPhase
                     pure $
                       Just $
                         failmsg
@@ -582,7 +524,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                           <> counterLog
                   Right Nothing -> do
                     runUpdate "prettyPrint"
-                    counterLog <- liftIO $ pPrintPhase seed
+                    counterLog <- liftIO pPrintPhase
                     liftIO $
                       cmdErrorHandlerM "cmdStore failed to store shrinker result" $
                         cmdStore srv propertyFileName [serverIn]
@@ -652,74 +594,11 @@ runOne s config srv entryNameRef program = runExceptT $ do
 
             liftIO $ renameVar srv serverIn genOut
 
-    pPrintPhase seed = do
+    pPrintPhase = do
       inputTypes <- getInputTypes srv propName
       case inputTypes of
-        [] ->
-          pure "Could not retrieve input type for counterexample."
-        ty0 : _ -> do
-          case psPPrint s of
-            Nothing ->
-              prettyVar srv serverIn ty0
-            Just futPPrint -> do
-              let prettyOuts = outName futPPrint
-
-              userPrinterE <- withFreedVars srv [prettyOuts] $ runExceptT $ do
-                errM <- liftIO $ callKeepIns srv futPPrint prettyOuts [serverIn]
-                case errM of
-                  Nothing -> pure ()
-                  Just err -> do
-                    liftIO $
-                      cmdErrorHandlerM "cmdStore failed to store pretty-printer error: " $
-                        cmdStore srv propertyFileName [serverIn]
-                    throwE $
-                      "Pretty printer "
-                        <> futPPrint
-                        <> " failed with size="
-                        <> showText size
-                        <> " and seed="
-                        <> showText seed
-                        <> " with error: "
-                        <> err
-
-                valE <- liftIO $ FSV.getValue srv prettyOuts
-                case valE of
-                  Left err -> do
-                    liftIO $
-                      cmdErrorHandlerM "cmdGetValue failed for pretty-printer output: " $
-                        cmdStore srv propertyFileName [serverIn]
-                    throwE $ "getValue failed for pretty-printer output: " <> err
-                  Right (U8Value _ bytes) ->
-                    pure $ T.pack [chr (fromIntegral b) | b <- SV.toList bytes]
-                  Right v ->
-                    throwE $
-                      "Pretty printer "
-                        <> futPPrint
-                        <> " returned non-u8 value: "
-                        <> valueText v
-
-              case userPrinterE of
-                Right rendered ->
-                  pure rendered
-                Left ppErr -> do
-                  runnerPrinterE <- try (prettyVar srv serverIn ty0) :: IO (Either SomeException T.Text)
-                  case runnerPrinterE of
-                    Right fallbackRendered ->
-                      pure $
-                        "Pretty-printer failed: "
-                          <> ppErr
-                          <> "\nFallback counterexample: "
-                          <> fallbackRendered
-                    Left runnerErr -> do
-                      liftIO $
-                        cmdErrorHandlerM "cmdStore failed to store pretty-printer error: " $
-                          cmdStore srv propertyFileName [serverIn]
-                      pure $
-                        "Counterexample found, but printing failed.\n"
-                          <> "Pretty-printer error: "
-                          <> ppErr
-                          <> "\nRunner-printer error: "
-                          <> showText (show runnerErr)
+        [] -> pure "Could not retrieve input type for counterexample."
+        ty0 : _ -> prettyVar srv serverIn ty0
 
 formatAutoShrinkResult :: Either PBTFailure PBTOutput -> T.Text
 formatAutoShrinkResult autoRes =

@@ -178,13 +178,6 @@ control over the testing process. They are passed as arguments, e.g.,
 * ``size(N)``, where ``N`` is an integer. This sets the size of generated candidates
   (or the size argument passed to generators).
 
-* ``pprint(f)``, where ``f`` is an entry point function with this type::
-
-    t -> []u8
-
-  Specifies a function to be used when printing a counterexample for human
-  consumption.
-
 OPTIONS
 =======
 
