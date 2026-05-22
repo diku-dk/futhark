@@ -115,6 +115,8 @@ opCompiler ::
   CallKernelGen ()
 opCompiler dest (Alloc e space) =
   compileAlloc dest e space
+opCompiler dest (EnsureRowMajor v) =
+  compileEnsureRowMajor dest v
 opCompiler (Pat [pe]) (Inner (SizeOp (GetSize key size_class))) = do
   fname <- askFunction
   let key' = keyWithEntryPoint fname key

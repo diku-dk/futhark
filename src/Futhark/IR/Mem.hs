@@ -184,6 +184,7 @@ instance IsBodyType BodyReturns where
 data MemOp (inner :: Data.Kind.Type -> Data.Kind.Type) (rep :: Data.Kind.Type)
   = -- | Allocate a memory block.
     Alloc SubExp Space
+  | EnsureRowMajor VName
   | Inner (inner rep)
   deriving (Eq, Ord, Show)
 
@@ -193,59 +194,79 @@ traverseMemOpStms ::
   OpStmsTraverser m (inner rep) rep ->
   OpStmsTraverser m (MemOp inner rep) rep
 traverseMemOpStms _ _ op@Alloc {} = pure op
+traverseMemOpStms _ _ op@EnsureRowMajor {} = pure op
 traverseMemOpStms onInner f (Inner inner) = Inner <$> onInner f inner
 
 instance (RephraseOp inner) => RephraseOp (MemOp inner) where
   rephraseInOp _ (Alloc e space) = pure (Alloc e space)
+  rephraseInOp _ (EnsureRowMajor v) = pure (EnsureRowMajor v)
   rephraseInOp r (Inner x) = Inner <$> rephraseInOp r x
 
 instance (FreeIn (inner rep)) => FreeIn (MemOp inner rep) where
   freeIn' (Alloc size _) = freeIn' size
+  freeIn' (EnsureRowMajor v) = freeIn' v
   freeIn' (Inner k) = freeIn' k
 
 instance (TypedOp inner) => TypedOp (MemOp inner) where
   opType (Alloc _ space) = pure [Mem space]
+  opType (EnsureRowMajor v) = do
+    t <- lookupType v
+    case t of
+      Array pt shape _ ->
+        pure [Mem DefaultSpace, Array pt (fmap Free shape) NoUniqueness]
+      _ -> error $ "EnsureRowMajor applied to non-array: " ++ show v
   opType (Inner k) = opType k
 
 instance (AliasedOp inner) => AliasedOp (MemOp inner) where
   opAliases Alloc {} = [mempty]
+  opAliases EnsureRowMajor {} = [mempty, mempty]
   opAliases (Inner k) = opAliases k
 
   consumedInOp Alloc {} = mempty
+  consumedInOp EnsureRowMajor {} = mempty
   consumedInOp (Inner k) = consumedInOp k
 
 instance (CanBeAliased inner) => CanBeAliased (MemOp inner) where
   addOpAliases _ (Alloc se space) = Alloc se space
+  addOpAliases _ (EnsureRowMajor v) = EnsureRowMajor v
   addOpAliases aliases (Inner k) = Inner $ addOpAliases aliases k
 
 instance (Rename (inner rep)) => Rename (MemOp inner rep) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
+  rename (EnsureRowMajor v) = EnsureRowMajor <$> rename v
   rename (Inner k) = Inner <$> rename k
 
 instance (Substitute (inner rep)) => Substitute (MemOp inner rep) where
   substituteNames subst (Alloc size space) = Alloc (substituteNames subst size) space
+  substituteNames subst (EnsureRowMajor v) = EnsureRowMajor (substituteNames subst v)
   substituteNames subst (Inner k) = Inner $ substituteNames subst k
 
 instance (PP.Pretty (inner rep)) => PP.Pretty (MemOp inner rep) where
   pretty (Alloc e DefaultSpace) = "alloc" <> PP.apply [PP.pretty e]
   pretty (Alloc e s) = "alloc" <> PP.apply [PP.pretty e, PP.pretty s]
+  pretty (EnsureRowMajor v) = "ensure_row_major" <> PP.apply [PP.pretty v]
   pretty (Inner k) = PP.pretty k
 
 instance (OpMetrics (inner rep)) => OpMetrics (MemOp inner rep) where
   opMetrics Alloc {} = seen "Alloc"
+  opMetrics EnsureRowMajor {} = seen "EnsureRowMajor"
   opMetrics (Inner k) = opMetrics k
 
 instance (IsOp inner) => IsOp (MemOp inner) where
   safeOp (Alloc (Constant (IntValue (Int64Value k))) _) = k >= 0
   safeOp Alloc {} = False
+  safeOp EnsureRowMajor {} = True
   safeOp (Inner k) = safeOp k
   cheapOp (Inner k) = cheapOp k
   cheapOp Alloc {} = True
+  cheapOp EnsureRowMajor {} = False
   opDependencies (Alloc _ e) = [freeIn e]
+  opDependencies (EnsureRowMajor v) = [freeIn v]
   opDependencies (Inner op) = opDependencies op
 
 instance (CanBeWise inner) => CanBeWise (MemOp inner) where
   addOpWisdom (Alloc size space) = Alloc size space
+  addOpWisdom (EnsureRowMajor v) = EnsureRowMajor v
   addOpWisdom (Inner k) = Inner $ addOpWisdom k
 
 instance (ST.IndexOp (inner rep)) => ST.IndexOp (MemOp inner rep) where
@@ -1159,6 +1180,20 @@ class (IsOp op) => OpReturns op where
 
 instance (OpReturns inner) => OpReturns (MemOp inner) where
   opReturns (Alloc _ space) = pure [MemMem space]
+  opReturns (EnsureRowMajor v) = do
+    (mem, lmad) <- lookupArraySummary v
+    space <- lookupMemSpace mem
+    summary <- lookupMemInfo v
+    case summary of
+      MemArray et shape _ _ ->
+        pure
+          [ MemMem space,
+            MemArray et (fmap Free shape) NoUniqueness $
+              Just $
+                ReturnsInBlock mem $
+                  existentialiseLMAD [] lmad
+          ]
+      _ -> error "EnsureRowMajor applied to non-array"
   opReturns (Inner op) = opReturns op
 
 instance OpReturns NoOp where

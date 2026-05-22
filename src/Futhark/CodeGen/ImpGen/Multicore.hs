@@ -23,6 +23,7 @@ import Prelude hiding (quot, rem)
 
 opCompiler :: OpCompiler MCMem HostEnv Imp.Multicore
 opCompiler dest (Alloc e space) = compileAlloc dest e space
+opCompiler dest (EnsureRowMajor v) = compileEnsureRowMajor dest v
 opCompiler dest (Inner op) = compileMCOp dest op
 
 parallelCopy :: CopyCompiler MCMem HostEnv Imp.Multicore

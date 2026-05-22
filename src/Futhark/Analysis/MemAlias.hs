@@ -85,6 +85,9 @@ analyzeStm ::
   MemAliasesM (inner rep) MemAliases
 analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =
   pure $ m <> singleton vname mempty
+analyzeStm m (Let (Pat (PatElem mem_name _ : _)) _ (Op (EnsureRowMajor _))) =
+  pure $ m <> singleton mem_name mempty
+analyzeStm m (Let _ _ (Op (EnsureRowMajor _))) = pure m
 analyzeStm m (Let _ _ (Op (Inner inner))) = do
   on_inner <- asks onInner
   on_inner m inner

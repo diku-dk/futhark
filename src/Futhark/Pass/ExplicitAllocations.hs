@@ -1080,6 +1080,8 @@ simplifyMemOp ::
   Engine.SimpleM rep (MemOp inner (Engine.Wise rep), Stms (Engine.Wise rep))
 simplifyMemOp _ (Alloc size space) =
   (,) <$> (Alloc <$> Engine.simplify size <*> pure space) <*> pure mempty
+simplifyMemOp _ (EnsureRowMajor v) =
+  (,) <$> (EnsureRowMajor <$> Engine.simplify v) <*> pure mempty
 simplifyMemOp onInner (Inner k) = do
   (k', hoisted) <- onInner k
   pure (Inner k', hoisted)
@@ -1123,6 +1125,8 @@ simplifiable innerUsage simplifyInnerOp =
     opUsage (Alloc (Var size) _) =
       UT.sizeUsage size
     opUsage (Alloc _ _) =
+      mempty
+    opUsage (EnsureRowMajor _) =
       mempty
     opUsage (Inner inner) =
       innerUsage inner

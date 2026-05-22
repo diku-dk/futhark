@@ -59,6 +59,7 @@ module Futhark.CodeGen.ImpGen
     tvVar,
     ToExp (..),
     compileAlloc,
+    compileEnsureRowMajor,
     everythingVolatile,
     compileBody,
     compileBody',
@@ -1741,6 +1742,45 @@ compileAlloc (Pat [mem]) e space = do
     Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
   error $ "compileAlloc: Invalid pattern: " ++ prettyString pat
+
+-- | Compile an 'EnsureRowMajor' operation. The pattern must contain
+-- two elements: a memory block and an array. If the input array is
+-- already row-major with zero offset, no copy is made. Otherwise,
+-- memory is allocated and the array is copied into it.
+compileEnsureRowMajor ::
+  (Mem rep inner) => Pat (LetDec rep) -> VName -> ImpM rep r op ()
+compileEnsureRowMajor (Pat [mem_pe, arr_pe]) src = do
+  src_entry <- lookupArray src
+  let src_loc@(MemLoc src_mem src_shape src_lmad) = entryArrayLoc src_entry
+      pt = entryArrayElemType src_entry
+      row_major_lmad = LMAD.iota 0 (map pe64 src_shape)
+      is_row_major = LMAD.dynamicEqualsLMAD src_lmad row_major_lmad
+  src_space <- entryMemSpace <$> lookupMemory src_mem
+  let dest_mem = patElemName mem_pe
+      dest_arr = patElemName arr_pe
+  sIf
+    is_row_major
+    ( do
+        emit $ Imp.SetMem dest_mem src_mem src_space
+        let dest_loc = MemLoc dest_mem src_shape row_major_lmad
+        addVar dest_arr $
+          ArrayVar Nothing $
+            ArrayEntry dest_loc pt
+    )
+    ( do
+        let size = Imp.bytes $ primByteSize pt * product (map pe64 src_shape)
+        allocator <- asks $ M.lookup src_space . envAllocCompilers
+        case allocator of
+          Nothing -> emit $ Imp.Allocate dest_mem size src_space
+          Just allocator' -> allocator' dest_mem size
+        let dest_loc = MemLoc dest_mem src_shape row_major_lmad
+        addVar dest_arr $
+          ArrayVar Nothing $
+            ArrayEntry dest_loc pt
+        lmadCopy pt dest_loc src_loc
+    )
+compileEnsureRowMajor pat _ =
+  error $ "compileEnsureRowMajor: Invalid pattern: " ++ prettyString pat
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format, as an t'Int64' expression.
