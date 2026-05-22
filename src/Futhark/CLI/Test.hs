@@ -1057,7 +1057,7 @@ selectRequestedPropSpecs properties specs =
 -- Save to file helper functions
 propToFile :: FilePath -> [TestResult] -> IO ()
 propToFile testFile results = do
-  let fileName = testFile <> ".prop_result"
+  let fileName = dropExtension testFile <> ".prop_result"
       textResults = T.unlines $ concatMap resultLines results
   withFile fileName WriteMode $ \h ->
     T.hPutStr h textResults

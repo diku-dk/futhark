@@ -12,6 +12,8 @@ run_test() {
 
 
     test_file_full_path="$TEST_DIR/${test_file#./}"
+    test_file_full_path_including_testdir="tests_property/${test_file#./}"
+
 
     expected="${test_file%.fut}.out"
     actual="${test_file%.fut}.out_actual"
@@ -25,11 +27,11 @@ run_test() {
         > "$actual"
 
     if diff -u "$expected" "$actual" > /dev/null; then
-        echo "✅ PASS: $test_file_full_path"
+        echo "✅ PASS: $test_file_full_path_including_testdir"
         rm -f "$actual"
         return 0
     else
-        echo "❌ FAIL: $test_file_full_path"
+        echo "❌ FAIL: $test_file_full_path_including_testdir"
         echo "--- Difference (-expected, +actual) ---"
         diff -u "$expected" "$actual"
         return 1
