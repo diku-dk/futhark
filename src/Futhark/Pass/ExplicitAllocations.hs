@@ -182,7 +182,7 @@ repairExpression ::
 repairExpression (BasicOp (Reshape v shape)) = do
   v_mem <- fst <$> lookupArraySummary v
   space <- lookupMemSpace v_mem
-  v' <- snd <$> ensureDirectArray (Just space) v
+  v' <- snd <$> allocLinearArray space (baseName v) v
   pure $ BasicOp $ Reshape v' shape
 repairExpression e =
   error $ "repairExpression:\n" <> prettyString e
