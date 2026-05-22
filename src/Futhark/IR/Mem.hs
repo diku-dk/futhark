@@ -1180,17 +1180,16 @@ class (IsOp op) => OpReturns op where
 instance (OpReturns inner) => OpReturns (MemOp inner) where
   opReturns (Alloc _ space) = pure [MemMem space]
   opReturns (EnsureRowMajor v) = do
-    (mem, lmad) <- lookupArraySummary v
+    (mem, _) <- lookupArraySummary v
     space <- lookupMemSpace mem
     summary <- lookupMemInfo v
     case summary of
       MemArray et shape _ _ ->
         pure
           [ MemMem space,
-            MemArray et (fmap Free shape) NoUniqueness $
-              Just $
-                ReturnsInBlock mem $
-                  existentialiseLMAD [] lmad
+            MemArray et (fmap Free shape) NoUniqueness . Just $
+              ReturnsInBlock mem . LMAD.iota 0 $
+                fmap (fmap Free . pe64) (shapeDims shape)
           ]
       _ -> error "EnsureRowMajor applied to non-array"
   opReturns (Inner op) = opReturns op

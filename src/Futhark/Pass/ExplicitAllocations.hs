@@ -513,7 +513,14 @@ ensureDirectArray space_ok v = do
   default_space <- askDefaultSpace
   if LMAD.isDirect lmad && maybe True (== mem_space) space_ok
     then pure (mem, v)
-    else needCopy (fromMaybe default_space space_ok)
+    else
+      if maybe True (== mem_space) space_ok
+        then do
+          mem' <- newVName $ baseName mem <> "_direct"
+          v' <- newVName $ baseName v <> "_v"
+          letBindNames [mem', v'] $ Op $ EnsureRowMajor v
+          pure (mem', v')
+        else needCopy (fromMaybe default_space space_ok)
   where
     needCopy space =
       -- We need to do a new allocation, copy 'v', and make a new

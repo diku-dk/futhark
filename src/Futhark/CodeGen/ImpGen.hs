@@ -1763,9 +1763,7 @@ compileEnsureRowMajor (Pat [mem_pe, arr_pe]) src = do
     ( do
         emit $ Imp.SetMem dest_mem src_mem src_space
         let dest_loc = MemLoc dest_mem src_shape row_major_lmad
-        addVar dest_arr $
-          ArrayVar Nothing $
-            ArrayEntry dest_loc pt
+        addVar dest_arr $ ArrayVar Nothing $ ArrayEntry dest_loc pt
     )
     ( do
         let size = Imp.bytes $ primByteSize pt * product (map pe64 src_shape)
@@ -1774,9 +1772,7 @@ compileEnsureRowMajor (Pat [mem_pe, arr_pe]) src = do
           Nothing -> emit $ Imp.Allocate dest_mem size src_space
           Just allocator' -> allocator' dest_mem size
         let dest_loc = MemLoc dest_mem src_shape row_major_lmad
-        addVar dest_arr $
-          ArrayVar Nothing $
-            ArrayEntry dest_loc pt
+        addVar dest_arr $ ArrayVar Nothing $ ArrayEntry dest_loc pt
         lmadCopy pt dest_loc src_loc
     )
 compileEnsureRowMajor pat _ =
