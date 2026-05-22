@@ -330,7 +330,7 @@ automaticGenerator srv candidate genTy size rng = do
               pure Nothing
         Left err -> pure $ Just $ showText err
     Array -> do
-      let (dims, baseTy) = getFutBaseType genTy
+      (dimCount, baseTy) <- getArrayDimsAndBase srv genTy
       baseKind <- cmdErrorHandlerE "automaticGenerator base cmdKind failed: " $ cmdKind srv baseTy
       case baseKind of
         Record -> do
@@ -340,8 +340,8 @@ automaticGenerator srv candidate genTy size rng = do
               let fieldVarNames = [candidate <> "_$compositeArr_" <> fieldName fld | fld <- fields]
 
               results <- forM (zip fieldVarNames fields) $ \(fVarName, fld) -> do
-                let (innerDims, innerBaseTy) = getFutBaseType (fieldType fld)
-                    totalDimCount = length dims + length innerDims
+                (innerDimCount, innerBaseTy) <- getArrayDimsAndBase srv (fieldType fld)
+                let totalDimCount = dimCount + innerDimCount
                     fArrTy = T.replicate totalDimCount "[]" <> innerBaseTy
                 automaticGenerator srv fVarName fArrTy size rng
 
@@ -356,7 +356,7 @@ automaticGenerator srv candidate genTy size rng = do
                   pure Nothing
             Left err -> pure $ Just $ showText err
         _ -> do
-          let shapeList = replicate (length dims) size
+          let shapeList = replicate dimCount size
           seed <- genWord64 rng
           case makeFutPrimitiveValue baseTy shapeList seed of
             Right val -> do
@@ -385,10 +385,23 @@ automaticGenerator srv candidate genTy size rng = do
 
           callFreeIns srv genName candidate [szVar, sdVar]
 
-getFutBaseType :: T.Text -> ([Int64], T.Text)
-getFutBaseType t
-  | "[]" `T.isPrefixOf` t = let (ds, base) = getFutBaseType (T.drop 2 t) in (0 : ds, base)
-  | otherwise = ([], t)
+-- | Recursively unwrap arrays using the Futhark server to handle type aliases dynamically.
+getArrayDimsAndBase :: Server -> TypeName -> IO (Int, TypeName)
+getArrayDimsAndBase srv t
+  | "[]" `T.isPrefixOf` t = do
+      (d, base) <- getArrayDimsAndBase srv (T.drop 2 t)
+      pure (d + 1, base)
+  | otherwise = do
+      kRes <- cmdKind srv t
+      case kRes of
+        Right Array -> do
+          etRes <- cmdElemtype srv t
+          case etRes of
+            Right et -> do
+              (d, base) <- getArrayDimsAndBase srv et
+              pure (d + 1, base)
+            Left _ -> pure (0, t) -- Fallback if server fails to resolve elemtype
+        _ -> pure (0, t)
 
 makeFutPrimitiveValue :: TypeName -> [Int64] -> Word64 -> Either PBTFailure Value
 makeFutPrimitiveValue ty shape seed =
