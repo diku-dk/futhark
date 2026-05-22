@@ -9,7 +9,7 @@ when used with ``--library``.  This chapter describes the API exposed by
 those wrappers.
 
 The exact generated files and the top-level JavaScript interface differ
-somewhat between the WASM-style backends and the WebGPU backend, so the
+somewhat between the WASM backend and the WebGPU backend, so the
 relevant differences are described below.
 
 First a warning: **the JavaScript API is experimental**.  It may
@@ -40,15 +40,32 @@ For the WebGPU backend, a build typically produces:
 
 The exact file set is backend-dependent and may change over time.
 
-The module exports a function, ``newFutharkContext``, which is a factory
-function that returns a Promise producing a ``FutharkContext``
-instance (see below).  A simple usage example:
+The generated JavaScript wrapper exposes a ``FutharkModule`` class,
+which is the preferred top-level interface for using a compiled Futhark
+program from JavaScript.  The module is initialised with the generated
+backend runtime module.
+
+The initialisation pattern is the same for the WASM-style backend and
+the WebGPU backend. The only difference is how ``Module`` is made available.
+For the WASM-style backend, the generated ``.mjs`` file exports it as the
+default export, so it is imported together with ``FutharkModule``:
 
 .. code-block:: javascript
 
-   import { newFutharkContext } from './futlib.mjs';
-   var fc;
-   newFutharkContext().then(x => fc = x);
+   import Module, { FutharkModule } from './futlib.mjs';
+
+   const module = await Module();
+
+   const fut = new FutharkModule();
+   await fut.init(module);
+
+For the WebGPU backend, the generated runtime module is usually loaded
+before the application code, for example:
+
+.. code-block:: html
+
+   <script src="futlib.js"></script>
+   <script src="main.js"></script>
 
 General concerns
 ----------------
@@ -61,34 +78,10 @@ API, using the appropriate methods.
 Top-level wrapper objects
 -------------------------
 
-The top-level JavaScript interface differs between backends.
-
-WASM wrapper
-~~~~~~~~~~~~
-
-The WASM backend exports a ``newFutharkContext()`` factory function that
-asynchronously constructs a ``FutharkContext``.
-
-.. js:function:: newFutharkContext()
-
-   Asynchronously create a new ``FutharkContext`` object.
-
-.. js:class:: FutharkContext()
-
-   A bookkeeping class representing an instance of a compiled Futhark
-   program.
-
-.. js:function:: FutharkContext.free()
-
-   Frees all memory created by the ``FutharkContext`` object.  It is an
-   error to use a ``FutharkArray`` or ``FutharkOpaque`` after the
-   ``FutharkContext`` on which they were defined has been freed.
-
-WebGPU wrapper
-~~~~~~~~~~~~~~
-
-The WebGPU backend generates a ``FutharkModule`` wrapper class.  This
-wrapper is initialised with the generated backend runtime module.
+The preferred top-level JavaScript interface is ``FutharkModule``.  A
+``FutharkModule`` object represents an instance of a compiled Futhark
+program. It owns the underlying Futhark context and is used to construct
+arrays, call entry points, and free resources.
 
 .. js:class:: FutharkModule()
 
@@ -97,13 +90,32 @@ wrapper is initialised with the generated backend runtime module.
 
 .. js:function:: FutharkModule.init(module)
 
-   Asynchronously initialise the ``FutharkModule`` object with the
-   generated backend runtime module.
+   Asynchronously initialise the ``FutharkModule`` object.
+
+   For the WASM-style backend, the ``module`` argument is optional. If
+   omitted, the generated wrapper loads the WebAssembly module itself.
+
+   For the WebGPU backend, ``module`` must be the generated backend
+   runtime module.
 
 .. js:function:: FutharkModule.free()
 
    Frees the Futhark context and configuration associated with the
-   module.
+   module. It is an error to use a ``FutharkArray`` or ``FutharkOpaque``
+   after the ``FutharkModule`` on which it was created has been freed.
+
+.. js:attribute:: FutharkModule.entry
+
+   Object containing the generated entry point functions. For example,
+   an entry point named ``main`` is available as ``fut.entry.main``.
+
+.. js:attribute:: FutharkModule.types
+
+   Object containing generated type information and array constructor
+   objects for the array types used by the program.
+
+The backends also provides utility methods for synchronisation,
+cache management, and profiling.
 
 .. js:function:: FutharkModule.context_sync()
 
@@ -125,6 +137,25 @@ wrapper is initialised with the generated backend runtime module.
 
    Resume profiling.
 
+WASM compatibility interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The WASM-style backend also keep the older ``FutharkContext`` interface
+for backwards compatibility.
+
+.. js:function:: newFutharkContext()
+
+   Asynchronously create a new ``FutharkContext`` object.
+
+.. js:class:: FutharkContext()
+
+   Backwards-compatible wrapper class for WASM-style backend.
+   ``FutharkContext`` supports the same main interface as
+   ``FutharkModule``, including ``entry``, ``types``, array constructors,
+   and ``free``.
+
+New code should prefer ``FutharkModule``.
+
 Values
 ------
 
@@ -138,10 +169,22 @@ are represented by ``FutharkOpaque`` objects.
 FutharkArray
 ------------
 
-The exact ``FutharkArray`` API differs slightly between backends.
+Arrays are represented by ``FutharkArray`` objects.  The common array API is
+shared by the WASM backend and the WebGPU backend.
 
-WASM wrapper
-~~~~~~~~~~~~
+.. js:function:: FutharkArray.shape()
+
+   Returns the shape of the array as a ``BigInt64Array``.
+
+.. js:function:: FutharkArray.values()
+
+   Asynchronously returns a flat typed array containing the array data.
+
+.. js:function:: FutharkArray.free()
+
+   Frees the memory used by the ``FutharkArray``.
+
+The WASM backend also provides a few older convenience methods.
 
 .. js:function:: FutharkArray.toArray()
 
@@ -155,45 +198,11 @@ WASM wrapper
 
    Returns the shape of the ``FutharkArray`` as an array of ``BigInt`` values.
 
-.. js:function:: FutharkArray.free()
+Array construction
+~~~~~~~~~~~~~~~~~~
 
-   Frees the memory used by the ``FutharkArray``.
-
-WebGPU wrapper
-~~~~~~~~~~~~~~
-
-The WebGPU backend generates per-type subclasses of ``FutharkArray``.
-
-.. js:function:: FutharkArray.get_shape()
-
-   Returns the shape of the array as a ``BigInt64Array``.
-
-.. js:function:: FutharkArray.values()
-
-   Asynchronously returns a flat typed array containing the array data.
-
-.. js:function:: FutharkArray.free()
-
-   Frees the memory used by the ``FutharkArray``.
-
-Array construction also differs a bit between backends.
-
-For the WASM wrapper, ``FutharkContext`` contains constructor methods for
-each array type that appears in an entry point.  For example, for the
-type ``[]i32``:
-
-.. js:function:: FutharkContext.new_i32_1d_from_jsarray(jsarray)
-
-   Creates and returns a one-dimensional ``i32`` ``FutharkArray``
-   representing the JavaScript array ``jsarray``.
-
-.. js:function:: FutharkContext.new_i32_1d(array, dim0)
-
-   Creates and returns a one-dimensional ``i32`` ``FutharkArray``
-   representing the typed array ``array``, with shape ``dim0``.
-
-For the WebGPU wrapper, each generated array type is represented by its
-own generated class, available through the ``FutharkModule`` object.
+Each array type used by an entry point is exposed through a generated
+constructor object.  For example, for the type ``[]i32``:
 
 .. js:function:: fut.i32_1d.from_data(data, dim0)
 
@@ -201,6 +210,14 @@ own generated class, available through the ``FutharkModule`` object.
    a JavaScript ``Array`` or the corresponding typed array, with the
    given shape.
 
+For the WASM backend, the generated constructor object also
+provides a convenience method for nested JavaScript arrays.
+
+.. js:function:: fut.i32_1d.from_jsarray(jsarray)
+
+   Creates and returns a one-dimensional ``i32`` ``FutharkArray`` from
+   a JavaScript array.  For higher-dimensional arrays, the JavaScript
+   array is expected to be nested according to the array rank.
 
 FutharkOpaque
 -------------
@@ -219,11 +236,18 @@ longer used.
 Entry Points
 ------------
 
-Each entry point in the compiled futhark program for the WASM wrapper has an entry point method on
-the ``FutharkContext``, and for the WebGPU wrapper, each entry point is exposed through the ``entry`` field of the ``FutharkModule`` object:
+Each entry point in the compiled Futhark program is exposed through the
+``entry`` field of the top-level wrapper object. For example, an entry
+point named ``main`` can be called as:
 
-.. js:function:: FutharkContext.<entry_point_name>(in1, ..., inN)
+.. code-block:: javascript
 
-  The entry point function taking the N arguments of the Futhark entry point
-  function, and returns the result. For the WASM wrapper, if the result is a tuple the return value
-  is an array. For the WebGPU wrapper, if there are multiple outputs, the return value is an array of outputs in order.
+   const res = await fut.entry.main(in1, ..., inN);
+
+.. js:function:: fut.entry.<entry_point_name>(in1, ..., inN)
+
+   The entry point function takes the JavaScript representations of the
+   Futhark entry point arguments and returns the result.
+
+   If the entry point has multiple outputs, the return value is an array
+   containing the outputs in order.
