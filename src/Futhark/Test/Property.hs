@@ -508,7 +508,6 @@ runOne s config srv entryNameRef program = runExceptT $ do
                     <> valuePPrint
                     <> " with error: "
                     <> err
-
             if ok
               then loop (i + 1)
               else do
@@ -520,7 +519,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                         <> " seed="
                         <> showText seed
                         <> " after "
-                        <> showText i
+                        <> showText (i + 1)
                         <> " tests\n"
 
                 shrinkRes <- case psShrink s of
