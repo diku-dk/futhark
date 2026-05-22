@@ -325,9 +325,11 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
         | otherwise =
             Nothing
 
+      maybeReload =
+        when (any inputConsumed input_types) reloadInput
+
       doRun = do
         call_lines <- cmdEither (cmdCall server entry out ins)
-        when (any inputConsumed input_types) reloadInput
         case mapMaybe runtime call_lines of
           [call_runtime] -> pure (RunResult call_runtime, call_lines)
           [] -> throwError "Could not find runtime in output."
@@ -337,9 +339,9 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
     -- First one uncounted warmup run.
     void $ cmdEither $ cmdCall server entry out ins
 
-    ys <- runMinimum (freeOut *> doRun) opts 0 0 mempty
+    ys <- runMinimum (freeOut *> doRun <* maybeReload) opts 0 0 mempty
 
-    xs <- runConvergence (freeOut *> doRun) opts ys
+    xs <- runConvergence (freeOut *> doRun <* maybeReload) opts ys
 
     -- Possibly a profiled run at the end.
     profile_log <-
@@ -347,6 +349,8 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
         then pure Nothing
         else do
           cmdMaybe . liftIO $ cmdUnpauseProfiling server
+          -- No need to reload the input here, and it would indeed be misleading
+          -- in the profiling results.
           profile_log <- freeOut *> doRun
           cmdMaybe . liftIO $ cmdPauseProfiling server
           pure $ Just profile_log
