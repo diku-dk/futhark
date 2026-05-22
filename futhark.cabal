@@ -320,7 +320,6 @@ library
       Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE
       Futhark.Optimise.DoubleBuffer
-      Futhark.Optimise.EntryPointMem
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.GraphRep

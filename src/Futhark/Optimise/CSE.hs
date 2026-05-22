@@ -324,6 +324,7 @@ cseInKernelBody (GPU.Body bodydec stms res) = do
 
 instance (CSEInOp (op rep)) => CSEInOp (Memory.MemOp op rep) where
   cseInOp o@Memory.Alloc {} = pure o
+  cseInOp o@Memory.EnsureDirect {} = pure o
   cseInOp (Memory.Inner k) = Memory.Inner <$> subCSE (cseInOp k)
 
 instance

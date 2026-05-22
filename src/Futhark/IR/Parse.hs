@@ -1132,6 +1132,8 @@ pMemOp pInner =
     [ keyword "alloc"
         *> parens
           (Alloc <$> pSubExp <*> choice [pComma *> pSpace, pure DefaultSpace]),
+      keyword "ensure_direct"
+        *> parens (EnsureDirect <$> pVName),
       Inner <$> pInner
     ]
 
