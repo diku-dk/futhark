@@ -194,7 +194,7 @@ validateGenTypes srv propName (Just genName) = fmap (either Just (const Nothing)
 
   genOut <- liftIO $ getOutputType srv genName
 
-  isMatch <- liftIO $ outsMatchType srv propTy genOut
+  let isMatch = propTy == genOut
 
   unless isMatch $
     throwE $
@@ -243,7 +243,7 @@ validateShrinkTypes srv propName shrinkName = fmap (either Just (const Nothing))
 
   -- validate output
   shrinkOut <- liftIO $ getOutputType srv shrinkName
-  isMatch <- liftIO $ outsMatchType srv propTy shrinkOut
+  let isMatch = propTy == shrinkOut
 
   unless isMatch $
     throwE $
@@ -1099,10 +1099,6 @@ getSingleInputType srv ep = do
     [ty] -> pure $ Right ty
     [] -> pure $ Left $ T.pack $ "Entrypoint " <> T.unpack ep <> " has no inputs (expected 1)."
     _ -> pure $ Left $ T.pack $ "Entrypoint " <> T.unpack ep <> " has >1 input (expected 1): " <> show tys
-
-outsMatchType :: Server -> TypeName -> TypeName -> IO Bool
-outsMatchType _ propTy out =
-  pure (out == propTy)
 
 runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> FilePath -> IO [Either PBTFailure PBTOutput]
 runPBT config srv specs entryNameRef program = do
