@@ -209,12 +209,11 @@ instance (FreeIn (inner rep)) => FreeIn (MemOp inner rep) where
 
 instance (TypedOp inner) => TypedOp (MemOp inner) where
   opType (Alloc _ space) = pure [Mem space]
-  opType (EnsureRowMajor v) = do
-    t <- lookupType v
-    case t of
-      Array pt shape _ ->
-        pure [Mem DefaultSpace, Array pt (fmap Free shape) NoUniqueness]
-      _ -> error $ "EnsureRowMajor applied to non-array: " ++ show v
+  opType (EnsureRowMajor v) = f <$> lookupType v
+    where
+      f (Array pt shape _) =
+        [Mem DefaultSpace, Array pt (fmap Free shape) NoUniqueness]
+      f _ = error $ "EnsureRowMajor applied to non-array: " ++ show v
   opType (Inner k) = opType k
 
 instance (AliasedOp inner) => AliasedOp (MemOp inner) where
