@@ -218,7 +218,8 @@ instance (TypedOp inner) => TypedOp (MemOp inner) where
 
 instance (AliasedOp inner) => AliasedOp (MemOp inner) where
   opAliases Alloc {} = [mempty]
-  opAliases EnsureRowMajor {} = [mempty, mempty]
+  -- XXX - why not mem aliases for EnsureRowMajor?
+  opAliases (EnsureRowMajor v) = [mempty, oneName v]
   opAliases (Inner k) = opAliases k
 
   consumedInOp Alloc {} = mempty
