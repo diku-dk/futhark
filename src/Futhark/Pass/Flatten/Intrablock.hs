@@ -28,9 +28,7 @@ import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Util.Log
 import Prelude hiding (log)
--- TODO: To Change
-import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace,segHist)
-import Futhark.Pass.Flatten.Builtins (genUniformSegScanomapWithPost,genUniformSegRed,determineReduceOp)
+import Futhark.Pass.Flatten.Builtins (genUniformSegScanomapWithPost,genUniformSegRed,determineReduceOp,genUniformSegHist,mkSegSpace)
 import Futhark.Pass.Flatten.PreProcess (preprocessLambda)
 
 
@@ -153,8 +151,8 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
     let SegSpace _ gtids_and_dims = kspace
         full_is = map (Var . fst) gtids_and_dims
         outer_is = take (segmentsRank segments) full_is
-    readInputs segments env outer_is free_inputs
-    readInputs new_segments param_env full_is param_inputs
+    readInBlockInputs segments env outer_is free_inputs
+    readInBlockInputs new_segments param_env full_is param_inputs
 
   let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
       rts = map (length (NE.toList new_segments) `stripArray`) result_ts
@@ -234,12 +232,15 @@ intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = runMaybeT $ 
     let SegSpace _ gtids_and_dims = kspace
         [gtid] = map (Var . fst) gtids_and_dims
     forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) ->
-      letBindNames [paramName p]
-        =<< case paramType p of
-          Acc {} ->
-            eSubExp $ Var arr
-          _ ->
-            eIndex arr [eSubExp gtid]
+      case paramType p of
+        Acc {} ->
+          letBindNames [paramName p] =<< eSubExp (Var arr)
+        t | arrayRank t > 0 -> do
+          v <- letExp (baseName (paramName p) <> "_global") =<< eIndex arr [eSubExp gtid]
+          letBindNames [paramName p] $
+            BasicOp $ Replicate mempty $ Var v
+        _ ->
+          letBindNames [paramName p] =<< eIndex arr [eSubExp gtid]
 
   let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
       rts = map (1 `stripArray`) result_ts
@@ -258,6 +259,19 @@ intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = runMaybeT $ 
         intraResultNames = patNames nested_pat
       }
 
+readInBlockInputs :: Segments -> DistEnv -> [SubExp] -> DistInputs -> Builder GPU ()
+readInBlockInputs segments env is inputs =
+  mapM_ onInput inputs
+  where
+    onInput (v, inp) = do
+      v' <- readInputVar segments env is inputs v
+      let t = distInputType inp
+      if isAcc t then
+        letBindNames [v] $ BasicOp $ SubExp $ Var v'
+      else if arrayRank t > 0 then
+        letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+      else
+        letBindNames [v] $ BasicOp $ SubExp $ Var v'
 regularMapInput :: DistEnv -> DistInputs -> VName -> Bool
 regularMapInput env inps arr =
   case lookup arr inps of
@@ -477,14 +491,17 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
       mapM_ (intrablockStm map_in_block) . fmap (certify (stmAuxCerts aux)) . snd
         =<< runBuilderT (dissectScrema pat w form arrs) (scopeForSOACs scope)
     Op (Hist w arrs ops bucket_fun) -> do
-      ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do
-        (op', nes', shape) <- determineReduceOp op nes
-        let op'' = soacsLambdaToGPU op'
-        pure $ GPU.HistOp num_bins rf dests nes' shape op''
-
       let bucket_fun' = soacsLambdaToGPU bucket_fun
-      certifying (stmAuxCerts aux) $
-        addStms =<< segHist lvl pat w [] [] ops' bucket_fun' arrs
+     
+      (hist_res,stms) <- runBuilder (genUniformSegHist lvl "Uniform_segHist" (pure w) ops bucket_fun' arrs (const $ pure ()))
+      certifying (stmAuxCerts aux) $ do 
+        addStms stms
+        zipWithM_
+          (\pe v ->
+            letBindNames [patElemName pe] $
+              BasicOp $ SubExp $ Var v)
+          (patElems pat)
+          hist_res
       parallelMin [w]
     Op (Stream w arrs accs lam)
       | chunk_size_param : _ <- lambdaParams lam -> do
