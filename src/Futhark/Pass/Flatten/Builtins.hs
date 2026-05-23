@@ -3,6 +3,8 @@
 module Futhark.Pass.Flatten.Builtins
   ( flatteningBuiltins,
     determineReduceOp,
+    genUniformSegHist,
+    mkSegSpace,
     segMap,
     genFlags,
     genScan,
@@ -31,7 +33,7 @@ import Data.Foldable (toList)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Futhark.IR.GPU
-import Futhark.IR.SOACS
+import Futhark.IR.SOACS as SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU)
 import Futhark.Pass.Flatten.StreamKernel
@@ -177,6 +179,35 @@ genNonSegRed lvl desc segments red_op shape map_lam arrs = do
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
+genUniformSegHist ::
+  SegLevel ->
+  Name ->
+  [SubExp] ->
+  [SOACS.HistOp SOACS] ->
+  Lambda GPU ->
+  [VName] ->
+  ([SubExp] -> Builder GPU ()) ->
+  Builder GPU [VName]
+genUniformSegHist lvl desc segments ops bucket_fun arrs readFree = do
+  
+    ops' <- forM ops $ \(SOACS.HistOp dest_shape rf dests nes op) -> do
+      (op', nes', shape) <- determineReduceOp op nes
+      let op'' = soacsLambdaToGPU op'
+      pure $ Futhark.IR.GPU.HistOp dest_shape rf dests nes' shape op''
+    gtids <- traverse (const $ newVName "gtid") segments
+    space <- mkSegSpace $ zip (toList gtids) (toList segments)
+    let gtids' = fmap Var gtids
+    ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
+      readFree gtids'
+      bindLambdaInputArrays gtids' bucket_fun arrs
+      res <- bodyBind (lambdaBody bucket_fun)
+      res_t <- mapM (subExpType . resSubExp) res
+      pure (map mkResult res, res_t)
+    kbody <- renameBody $ Body () stms res
+    lvl' <- capThreadSegLevel segments "uniform_seghist" lvl $ NoRecommendation SegVirt
+    letTupExp desc $ Op $ SegOp $ SegHist lvl' space res_t kbody ops'
+    where
+      mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 genUniformSegRed ::
   SegLevel ->
   Name ->

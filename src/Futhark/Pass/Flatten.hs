@@ -2652,8 +2652,52 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
           pure $ insertReps (zip (map distResTag res) out_reps) env
     Let pat aux (WithAcc inputs lam) ->
       transformWithAcc (flattenOpsFor lvl) segments env inps res pat aux inputs lam
+    (Let _pat aux (Op (Hist w hist_inputs ops bucket_fun))) -> do 
+      -- todo: add this suitableUniformOperator
+      nonuniform_inps <-
+        localScope (scopeOfDistInputs inps) $
+          any (any (isVariant inps env) . arrayDims)
+            <$> mapM lookupType hist_inputs
+      let nonuniform =
+            nonuniform_inps
+              || isVariant inps env w
+              || not (all isRegularDistResult res)
+      if nonuniform 
+        then error "TODO : transformDistStm: Unhandled nonuniform hist"
+        else 
+          do 
+            let new_segment = segments <> pure w
+            lifted_inps <- forM hist_inputs $ \hist_inp -> do
+              t <- localScope (scopeOfDistInputs inps) $ lookupType hist_inp
+              let expectedShape = segmentsShape segments <> arrayShape t 
+              liftSubExpRegular lvl segments inps env expectedShape (Var hist_inp) 
+            let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+            ops' <- forM ops $ \(Futhark.IR.SOACS.HistOp num_bins rf dests nes op) -> do
+                nes' <- mapM (readInput segments env zeros inps) nes
+                let 
+                let rr (DistType _ _ t) = t
+                let ts = map (rr . distResType) res
+                let expectedShapes = map (\t -> segmentsShape segments <> arrayShape t) ts
+                dests' <- mapM ( \(shape,var) -> liftSubExpRegular lvl segments inps env shape (Var var)) (zip expectedShapes dests)
+                pure $ Futhark.IR.SOACS.HistOp num_bins rf dests' nes' op
+            let free = freeIn bucket_fun
+            let isDest = flip elem $ concatMap Futhark.IR.SOACS.histDest ops'
+                free_notDest = filter (not . isDest) (namesToList free)
+            outer_scope <- askScope
+            let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
+            free_and_sizes <- freeWithTypeDeps input_scope (namesFromList free_notDest)
+            (free_replicated, replicated) <-
+              fmap unzip . sequence $
+                mapMaybe
+                  (onMapFreeVarMultiDim lvl segments w env inps)
+                  free_and_sizes
+            let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+                readFree is = readInputs new_segment free_env is free_inputs
+            hist_res <-
+              certifying (distCerts inps aux env) $
+                genUniformSegHist lvl "Uniform_segHist" (NE.toList new_segment) ops' (soacsLambdaToGPU bucket_fun) lifted_inps readFree
+            pure $ insertRegulars (map distResTag res) hist_res env
     Let _ _ (Op (Stream {})) -> error "transformDistStm: Stream should have been removed"
-    Let _ _ (Op (Hist {})) -> error "Unhandled Hist"
     Let _ _ (Op (JVP {})) -> error "Unhandled JVP"
     Let _ _ (Op (VJP {})) -> error "Unhandled VJP"
     Let _ _ (Op (WithVJP {})) -> error "Unhandled WithVJP"
