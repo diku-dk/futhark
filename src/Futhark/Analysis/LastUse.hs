@@ -301,6 +301,10 @@ lastUseMemOp _ (Alloc se sp) used_nms = do
   let free_in_e = freeIn se <> freeIn sp
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
   pure (M.empty, lu_vars, used_nms')
+lastUseMemOp _ (EnsureDirect v) used_nms = do
+  let free_in_e = freeIn v
+  (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
+  pure (M.empty, lu_vars, used_nms')
 lastUseMemOp onInner (Inner op) used_nms = onInner op used_nms
 
 lastUseSegOp ::
@@ -399,6 +403,10 @@ lastUseSegPostOp (SegPostOp l@(Lambda _ _ body)) used_nms =
 lastUseSeqOp :: Op (Aliases SeqMem) -> Names -> LastUseM SeqMem (LUTabFun, Names, Names)
 lastUseSeqOp (Alloc se sp) used_nms = do
   let free_in_e = freeIn se <> freeIn sp
+  (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
+  pure (mempty, lu_vars, used_nms')
+lastUseSeqOp (EnsureDirect v) used_nms = do
+  let free_in_e = freeIn v
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
   pure (mempty, lu_vars, used_nms')
 lastUseSeqOp (Inner NoOp) used_nms = do
