@@ -7,7 +7,7 @@
 --           [2i64, 10i64, 20i64]] }
 -- compiled random input { [1024]i64 }
 -- auto output
--- structure gpu-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 1 }
 -- structure seq-mem { Alloc 1 }
 
 def main [n] (xs: [n]i64) : [n][n]i64 =

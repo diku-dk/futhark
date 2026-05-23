@@ -274,6 +274,7 @@ shortCircuitGPUMem ::
   BotUpEnv ->
   ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMem _ _ _ (Alloc _ _) _ bu_env = pure bu_env
+shortCircuitGPUMem _ _ _ (EnsureDirect _) _ bu_env = pure bu_env
 shortCircuitGPUMem lutab pat certs (Inner (GPU.SegOp op)) td_env bu_env =
   shortCircuitSegOp isSegThread lutab pat certs op td_env bu_env
 shortCircuitGPUMem lutab pat certs (Inner (GPU.GPUBody _ body)) td_env bu_env = do
@@ -308,6 +309,7 @@ shortCircuitMCMem ::
   BotUpEnv ->
   ShortCircuitM MCMem BotUpEnv
 shortCircuitMCMem _ _ _ (Alloc _ _) _ bu_env = pure bu_env
+shortCircuitMCMem _ _ _ (EnsureDirect _) _ bu_env = pure bu_env
 shortCircuitMCMem _ _ _ (Inner (MC.OtherOp NoOp)) _ bu_env = pure bu_env
 shortCircuitMCMem lutab pat certs (Inner (MC.ParOp (Just par_op) op)) td_env bu_env =
   shortCircuitSegOp (const True) lutab pat certs par_op td_env bu_env
@@ -1738,6 +1740,7 @@ computeScalarTable _ _ = pure mempty
 computeScalarTableMemOp ::
   ComputeScalarTable rep (inner (Aliases rep)) -> ComputeScalarTable rep (MemOp inner (Aliases rep))
 computeScalarTableMemOp _ _ (Alloc _ _) = pure mempty
+computeScalarTableMemOp _ _ (EnsureDirect _) = pure mempty
 computeScalarTableMemOp onInner scope_table (Inner op) = onInner scope_table op
 
 computeScalarTableSegOp ::

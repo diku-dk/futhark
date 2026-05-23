@@ -13,6 +13,7 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR.Mem
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop.Aliases (AliasedOp)
 import Futhark.Optimise.Simplify qualified as Simplify
 import Futhark.Optimise.Simplify.Engine qualified as Engine
@@ -112,6 +113,18 @@ decertifySafeAlloc _ pat (StmAux cs attrs _ _) op
       Simplify $ attributing attrs $ letBind pat $ Op op
 decertifySafeAlloc _ _ _ _ = Skip
 
+-- If we know by now that this array is direct, then there is no need for
+-- EnsureDirect and we just remove it.
+knownDirect :: (SimplifyMemory rep inner) => TopDownRuleOp (Wise rep)
+knownDirect _ (Pat [PatElem mem' _, PatElem v' _]) _ (EnsureDirect v) = Simplify $ do
+  ~(MemArray _ _ _ (ArrayIn mem v_lmad)) <- lookupMemInfo v
+  if LMAD.isDirect v_lmad
+    then do
+      letBindNames [mem'] $ BasicOp $ SubExp $ Var mem
+      letBindNames [v'] $ BasicOp $ SubExp $ Var v
+    else cannotSimplify
+knownDirect _ _ _ _ = Skip
+
 --
 -- copy(reshape(manifest(v0),s)) can be rewritten to just reshape(manifest(v0),s).
 --
@@ -141,6 +154,7 @@ memRuleBook =
   standardRules
     <> ruleBook
       [ RuleOp decertifySafeAlloc,
-        RuleBasicOp copyManifest
+        RuleBasicOp copyManifest,
+        RuleOp knownDirect
       ]
       []

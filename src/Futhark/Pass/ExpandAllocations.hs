@@ -896,6 +896,7 @@ unAllocGPUStms = unAllocStms False
       Pat <$> mapM (rephrasePatElem (Right . unMem)) pes
 
     unAllocOp Alloc {} = Left "unAllocOp: unhandled Alloc"
+    unAllocOp EnsureDirect {} = Left "unAllocOp: unhandled EnsureDirect"
     unAllocOp (Inner OtherOp {}) = Left "unAllocOp: unhandled OtherOp"
     unAllocOp (Inner GPUBody {}) = Left "unAllocOp: unhandled GPUBody"
     unAllocOp (Inner (SizeOp op)) = pure $ SizeOp op
