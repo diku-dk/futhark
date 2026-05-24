@@ -331,7 +331,13 @@ addLocations attrs caller_safety p = fmap onStm
         onLambda lam =
           lam {lambdaBody = onBody for_assert $ lambdaBody lam}
     onStm (Let pat aux e) =
-      Let pat (traceLocs p aux) $ onExp e
+      Let pat aux' $ onExp e
+      where
+        -- To cut down on clutter, we only propagate attributes to certain
+        -- expressions.
+        aux' = traceLocs p $ case e of
+          BasicOp Manifest {} -> aux {stmAuxAttrs = attrs <> stmAuxAttrs aux}
+          _ -> aux
 
     onExp =
       mapExp
