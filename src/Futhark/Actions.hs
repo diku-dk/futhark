@@ -316,10 +316,10 @@ compileCAction fcfg mode outpath =
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ SequentialC.asExecutable cprog
-          runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
+          runCC cpath outpath ["-O3", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ["-lm"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ SequentialC.asServer cprog
-          runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
+          runCC cpath outpath ["-O3", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ["-lm"]
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
@@ -351,10 +351,10 @@ compileOpenCLAction fcfg mode outpath =
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ COpenCL.asExecutable cprog
-          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+          runCC cpath outpath ["-O", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ("-lm" : extra_options)
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ COpenCL.asServer cprog
-          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+          runCC cpath outpath ["-O", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ("-lm" : extra_options)
 
 -- | The @futhark cuda@ action.
 compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
@@ -383,10 +383,10 @@ compileCUDAAction fcfg mode outpath =
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CCUDA.asExecutable cprog
-          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+          runCC cpath outpath ["-O", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ("-lm" : extra_options)
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CCUDA.asServer cprog
-          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+          runCC cpath outpath ["-O", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ("-lm" : extra_options)
 
 -- | The @futhark hip@ action.
 compileHIPAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
@@ -414,10 +414,10 @@ compileHIPAction fcfg mode outpath =
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ HIP.asExecutable cprog
-          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+          runCC cpath outpath ["-O", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ("-lm" : extra_options)
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ HIP.asServer cprog
-          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+          runCC cpath outpath ["-O", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ("-lm" : extra_options)
 
 -- | The @futhark multicore@ action.
 compileMulticoreAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
@@ -442,10 +442,10 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
-          runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runCC cpath outpath ["-O3", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
-          runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runCC cpath outpath ["-O3", "-std=c99", "-D_FILE_OFFSET_BITS=64"] ["-lm", "-pthread"]
 
 -- | The @futhark ispc@ action.
 compileMulticoreToISPCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem

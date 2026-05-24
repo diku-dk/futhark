@@ -67,8 +67,8 @@ static int cache_restore(const char *fname, const struct cache_hash *hash,
   if (fseek(f, 0, SEEK_END) != 0) {
     goto error;
   }
-  int64_t f_size = (int64_t)ftell(f);
-  if (fseek(f, CACHE_HEADER_SIZE, SEEK_SET) != 0) {
+  int64_t f_size = (int64_t)ftello(f);
+  if (fseeko(f, CACHE_HEADER_SIZE, SEEK_SET) != 0) {
     goto error;
   }
 
