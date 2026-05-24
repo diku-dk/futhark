@@ -113,6 +113,7 @@
                   futhark-data = new.callPackage ./nix/futhark-data.nix { };
                   futhark-server = new.callPackage ./nix/futhark-server.nix { };
                   futhark-manifest = new.callPackage ./nix/futhark-manifest.nix { };
+                  language-wgsl = new.callCabal2nix "language-wgsl" ./language-wgsl { };
 
                   # This derivation builds a statically linked 'futhark'
                   # executable on Linux; on other platforms it uses the default
