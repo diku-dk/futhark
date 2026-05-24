@@ -399,8 +399,8 @@ prettyExp _ (UpdateSection steps _ _) =
 prettyExp p (Constr n cs t _) =
   parensIf (p >= 10) $
     "#" <> pretty n <+> sep (map (prettyExp 10) cs) <> prettyInst t
-prettyExp _ (Attr attr e _) =
-  prettyAttr attr </> prettyExp (-1) e
+prettyExp p (Attr attr e _) =
+  parensIf (p >= 10) $ align $ prettyAttr attr </> prettyExp (-1) e
 prettyExp i (AppExp e res)
   | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2,
     Just (AppRes t ext) <- unAnnot res,

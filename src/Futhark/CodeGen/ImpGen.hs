@@ -59,6 +59,7 @@ module Futhark.CodeGen.ImpGen
     tvVar,
     ToExp (..),
     compileAlloc,
+    compileEnsureDirect,
     everythingVolatile,
     compileBody,
     compileBody',
@@ -624,13 +625,13 @@ compileExternalValues ::
   (Mem rep inner) =>
   OpaqueTypes ->
   [RetType rep] ->
-  [EntryResult] ->
+  EntryResult ->
   [Maybe Imp.Param] ->
-  ImpM rep r op [(Uniqueness, Imp.ExternalValue)]
+  ImpM rep r op (Uniqueness, Imp.ExternalValue)
 compileExternalValues types orig_rts orig_epts maybe_params = do
   let (ctx_rts, val_rts) =
         splitAt
-          (length orig_rts - sum (map (entryPointSize types . entryResultType) orig_epts))
+          (length orig_rts - entryPointSize types (entryResultType orig_epts))
           orig_rts
 
   let nthOut i = case maybeNth i maybe_params of
@@ -657,25 +658,24 @@ compileExternalValues types orig_rts orig_epts maybe_params = do
       mkValueDesc _ _ MemMem {} =
         error "mkValueDesc: unexpected MemMem output."
 
-      mkExts i (EntryResult u et@(TypeOpaque desc) : epts) rets = do
-        let signs = entryPointSignedness types et
-            n = entryPointSize types et
-            (rets', rest) = splitAt n rets
-        vds <- forM (zip3 [i ..] signs rets') $ \(j, s, r) -> mkValueDesc j s r
-        ((u, Imp.OpaqueValue desc vds) :) <$> mkExts (i + n) epts rest
-      mkExts i (EntryResult u (TypeTransparent (ValueType s _ _)) : epts) (ret : rets) = do
-        vd <- mkValueDesc i s ret
-        ((u, Imp.TransparentValue vd) :) <$> mkExts (i + 1) epts rets
-      mkExts _ _ _ = pure []
+      num_ctx = length ctx_rts
 
-  mkExts (length ctx_rts) orig_epts val_rts
+  case (orig_epts, val_rts) of
+    (EntryResult u et@(TypeOpaque desc), rets) -> do
+      let signs = entryPointSignedness types et
+      vds <- forM (zip3 [num_ctx ..] signs rets) $ \(j, s, r) -> mkValueDesc j s r
+      pure (u, Imp.OpaqueValue desc vds)
+    (EntryResult u (TypeTransparent (ValueType s _ _)), [ret]) -> do
+      vd <- mkValueDesc num_ctx s ret
+      pure (u, Imp.TransparentValue vd)
+    _ -> error "compileExternalValues: invalid inputs."
 
 compileOutParams ::
   (Mem rep inner) =>
   OpaqueTypes ->
   [RetType rep] ->
-  Maybe [EntryResult] ->
-  ImpM rep r op (Maybe [(Uniqueness, Imp.ExternalValue)], [Imp.Param], [ValueDestination])
+  Maybe EntryResult ->
+  ImpM rep r op (Maybe (Uniqueness, Imp.ExternalValue), [Imp.Param], [ValueDestination])
 compileOutParams types orig_rts maybe_orig_epts = do
   (maybe_params, dests) <- mapAndUnzipM compileOutParam orig_rts
   evs <- case maybe_orig_epts of
@@ -1742,6 +1742,32 @@ compileAlloc (Pat [mem]) e space = do
     Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
   error $ "compileAlloc: Invalid pattern: " ++ prettyString pat
+
+-- | Compile an 'EnsureDirect' operation. The pattern must contain
+-- two elements: a memory block and an array. If the input array is
+-- already row-major with zero offset, no copy is made. Otherwise,
+-- memory is allocated and the array is copied into it.
+compileEnsureDirect ::
+  (Mem rep inner) => Pat (LetDec rep) -> VName -> ImpM rep r op ()
+compileEnsureDirect (Pat [mem_pe, _]) src = do
+  src_entry <- lookupArray src
+  let src_loc@(MemLoc src_mem src_shape src_lmad) = entryArrayLoc src_entry
+      pt = entryArrayElemType src_entry
+      row_major_lmad = LMAD.iota 0 (map pe64 src_shape)
+      is_row_major = LMAD.dynamicEqualsLMAD src_lmad row_major_lmad
+  src_space <- entryMemSpace <$> lookupMemory src_mem
+  let dest_mem = patElemName mem_pe
+      dest_loc = MemLoc dest_mem src_shape row_major_lmad
+  sIf
+    is_row_major
+    (emit $ Imp.SetMem dest_mem src_mem src_space)
+    ( do
+        let size = Imp.bytes $ primByteSize pt * product (map pe64 src_shape)
+        sAlloc_ dest_mem size src_space
+        lmadCopy pt dest_loc src_loc
+    )
+compileEnsureDirect pat _ =
+  error $ "compileEnsureDirect: Invalid pattern: " ++ prettyString pat
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format, as an t'Int64' expression.

@@ -385,7 +385,7 @@ instantiateTypeParam qn loc tparam = do
 
 lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
 lookupQualNameEnv (QualName [q] _)
-  | baseTag q <= maxIntrinsicTag = asks termScope -- Magical intrinsic module.
+  | isIntrinsic q = asks termScope -- Magical intrinsic module.
 lookupQualNameEnv qn@(QualName quals _) = do
   scope <- asks termScope
   descend scope quals

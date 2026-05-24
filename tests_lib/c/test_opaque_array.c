@@ -34,9 +34,14 @@ void test1(struct futhark_context *ctx) {
   {
     struct futhark_opaque_t* out;
     assert(futhark_index_opaque_arr1d_t(ctx, &out, arr_t, 1) == 0);
+    struct futhark_opaque_tup2_i32_arr1d_f32 *unmk_out;
     int32_t out0;
     struct futhark_f32_1d *out1;
-    assert(futhark_entry_unmk(ctx, &out0, &out1, out) == 0);
+    assert(futhark_entry_unmk(ctx, &unmk_out, out) == 0);
+
+    assert(futhark_project_opaque_tup2_i32_arr1d_f32_0(ctx, &out0, unmk_out) == 0);
+    assert(futhark_project_opaque_tup2_i32_arr1d_f32_1(ctx, &out1, unmk_out) == 0);
+    assert(futhark_free_opaque_tup2_i32_arr1d_f32(ctx, unmk_out) == 0);
 
     assert(out0 == a);
 
@@ -80,9 +85,15 @@ void test2(struct futhark_context *ctx) {
     for (int j = 0; j < 3; j++) {
       struct futhark_opaque_t* out;
       assert(futhark_index_opaque_arr2d_t(ctx, &out, arr2_t, i, j) == 0);
+
+      struct futhark_opaque_tup2_i32_arr1d_f32 *unmk_out;
       int32_t out0;
       struct futhark_f32_1d *out1;
-      assert(futhark_entry_unmk(ctx, &out0, &out1, out) == 0);
+      assert(futhark_entry_unmk(ctx, &unmk_out, out) == 0);
+
+      assert(futhark_project_opaque_tup2_i32_arr1d_f32_0(ctx, &out0, unmk_out) == 0);
+      assert(futhark_project_opaque_tup2_i32_arr1d_f32_1(ctx, &out1, unmk_out) == 0);
+      assert(futhark_free_opaque_tup2_i32_arr1d_f32(ctx, unmk_out) == 0);
 
       assert(out0 == i*3+j);
 
@@ -109,9 +120,14 @@ void test2(struct futhark_context *ctx) {
     // Now let us see if anything changed.
     struct futhark_opaque_t* out;
     assert(futhark_index_opaque_arr2d_t(ctx, &out, arr2_t, 1, 2) == 0);
+    struct futhark_opaque_tup2_i32_arr1d_f32 *unmk_out;
     int32_t out0;
     struct futhark_f32_1d *out1;
-    assert(futhark_entry_unmk(ctx, &out0, &out1, out) == 0);
+    assert(futhark_entry_unmk(ctx, &unmk_out, out) == 0);
+
+    assert(futhark_project_opaque_tup2_i32_arr1d_f32_0(ctx, &out0, unmk_out) == 0);
+    assert(futhark_project_opaque_tup2_i32_arr1d_f32_1(ctx, &out1, unmk_out) == 0);
+    assert(futhark_free_opaque_tup2_i32_arr1d_f32(ctx, unmk_out) == 0);
 
     assert(out0 == 0);
 

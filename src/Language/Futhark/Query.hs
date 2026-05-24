@@ -18,7 +18,6 @@ module Language.Futhark.Query
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Monad
 import Control.Monad.State
 import Data.List (find, unsnoc)
@@ -38,6 +37,8 @@ data TermBindSrc
     TermBindLet
   | -- | term was bound where only an identifier is allowed
     TermBindId
+  | -- | term was bound inside another pattern
+    TermBindNested
   deriving (Eq, Show)
 
 data TermFunData
@@ -47,6 +48,7 @@ data TermFunData
     termFunAscription :: Maybe TypeAscription,
     -- I wanted to remove the @Maybe@ but @Loc@ always includes a @NoLoc@ case
     termFunArgEnd :: Maybe Pos,
+    termFunTypeArgEnd :: Maybe Pos,
     termFunNameEnd :: Maybe Pos,
     termFunTypeParams :: [TypeParamBase VName]
   }
@@ -98,29 +100,29 @@ sizeDefs (SizeBinder v loc) =
   M.singleton v $ DefBound $ BoundTerm TermSize (locOf loc)
 
 patternDefs ::
-  (TypeBase Size NoUniqueness -> Maybe TypeAscription -> TermBinding) ->
+  TermBindSrc ->
   Pat (TypeBase Size u) ->
   Defs
-patternDefs mkDef (Id vn (Info t) loc) =
+patternDefs bindSrc (Id vn (Info t) loc) =
   M.singleton vn $ DefBound $ BoundTerm tvar (locOf loc)
   where
-    tvar = mkDef (toStruct t) Nothing
-patternDefs mkDef (TuplePat pats _) =
-  mconcat $ map (patternDefs mkDef) pats
-patternDefs mkDef (RecordPat fields _) =
-  mconcat $ map (patternDefs mkDef . snd) fields
-patternDefs mkDef (PatParens pat _) = patternDefs mkDef pat
-patternDefs mkDef (PatAttr _ pat _) = patternDefs mkDef pat
+    tvar = TermVar bindSrc (toStruct t) Nothing
+patternDefs _ (TuplePat pats _) =
+  mconcat $ map (patternDefs TermBindNested) pats
+patternDefs _ (RecordPat fields _) =
+  mconcat $ map (patternDefs TermBindNested . snd) fields
+patternDefs bindSrc (PatParens pat _) = patternDefs bindSrc pat
+patternDefs bindSrc (PatAttr _ pat _) = patternDefs bindSrc pat
 patternDefs _ Wildcard {} = mempty
 patternDefs _ PatLit {} = mempty
-patternDefs mkDef (PatAscription (Id vn (Info t) idLoc) texp _) =
+patternDefs bindSrc (PatAscription (Id vn (Info t) idLoc) texp _) =
   M.singleton vn $ DefBound $ BoundTerm tvar (locOf idLoc)
   where
-    tvar = mkDef (toStruct t) (Just texp)
-patternDefs mkDef (PatAscription pat _ _) =
-  patternDefs mkDef pat
-patternDefs mkDef (PatConstr _ _ pats _) =
-  mconcat $ map (patternDefs mkDef) pats
+    tvar = TermVar bindSrc (toStruct t) (Just texp)
+patternDefs bindSrc (PatAscription pat _ _) =
+  patternDefs bindSrc pat
+patternDefs bindSrc (PatConstr _ _ pats _) =
+  mconcat $ map (patternDefs bindSrc) pats
 
 typeParamDefs :: TypeParamBase VName -> Defs
 typeParamDefs (TypeParamDim vn loc) =
@@ -147,9 +149,9 @@ expDefs e =
     extra =
       case e of
         AppExp (LetPat sizes pat _ _ _) _ ->
-          foldMap sizeDefs sizes <> patternDefs (TermVar TermBindLet) pat
+          foldMap sizeDefs sizes <> patternDefs TermBindLet pat
         Lambda params _ _ _ _ ->
-          mconcat $ map (patternDefs $ TermVar TermBindPat) params
+          mconcat $ map (patternDefs TermBindPat) params
         AppExp (LetFun (name, name_loc) (tparams, params, tasc, Info ret, _) _ loc) _ ->
           let name_t = funType params ret
               tfun =
@@ -160,7 +162,12 @@ expDefs e =
                       termFunAscription = tasc,
                       termFunArgEnd = start_pos,
                       termFunNameEnd = name_end,
-                      termFunTypeParams = tparams
+                      termFunTypeParams = tparams,
+                      termFunTypeArgEnd = do
+                        (_, last_type_arg) <- unsnoc tparams
+                        case locOf last_type_arg of
+                          NoLoc -> Nothing
+                          Loc _ end -> Just end
                     }
               name_end = case locOf name_loc of
                 NoLoc -> Nothing
@@ -172,14 +179,14 @@ expDefs e =
                   Loc _ end -> Just end
            in M.singleton name (DefBound $ BoundTerm tfun (locOf loc))
                 <> mconcat (map typeParamDefs tparams)
-                <> mconcat (map (patternDefs $ TermVar TermBindPat) params)
+                <> mconcat (map (patternDefs TermBindPat) params)
         AppExp (LetWith v _ _ _ _ _) _ ->
           identDefs v
         AppExp (Loop _ merge _ form _ _) _ ->
-          patternDefs (TermVar TermBindPat) merge
+          patternDefs TermBindPat merge
             <> case form of
               For i _ -> identDefs i
-              ForIn pat _ -> patternDefs (TermVar TermBindLet) pat
+              ForIn pat _ -> patternDefs TermBindLet pat
               While {} -> mempty
         _ ->
           mempty
@@ -188,7 +195,7 @@ valBindDefs :: ValBind -> Defs
 valBindDefs vbind =
   M.insert (valBindName vbind) (DefBound $ BoundTerm term_fun (locOf vbind)) $
     mconcat (map typeParamDefs (valBindTypeParams vbind))
-      <> mconcat (map (patternDefs (TermVar TermBindPat)) (valBindParams vbind))
+      <> mconcat (map (patternDefs TermBindPat) (valBindParams vbind))
       <> expDefs (valBindBody vbind)
   where
     term_fun =
@@ -200,11 +207,12 @@ valBindDefs vbind =
             termFunAscription = valBindRetDecl vbind,
             termFunArgEnd = args_end,
             termFunNameEnd = name_end_pos,
-            termFunTypeParams = valBindTypeParams vbind
+            termFunTypeParams = valBindTypeParams vbind,
+            termFunTypeArgEnd = do
+              (_, last_type_arg) <- unsnoc $ valBindTypeParams vbind
+              locPos $ locOf last_type_arg
           }
-    args_end =
-      (locPos . locOf . snd =<< unsnoc (valBindParams vbind))
-        <|> name_end_pos
+    args_end = locPos . locOf . snd =<< unsnoc (valBindParams vbind)
     name_end_pos = locPos . locOf . valBindNameLoc $ vbind
     locPos NoLoc = Nothing
     locPos (Loc _ e) = Just e

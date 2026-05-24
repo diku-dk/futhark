@@ -74,6 +74,9 @@ test-ispc:
 test-multicore:
 	cabal run -- futhark test tests -c --backend=multicore
 
+test-python:
+	cabal run -- futhark test tests -c --backend=python --exclude=no_python --exclude=compiled
+
 test-interpreter:
 	cabal run -- futhark test tests -i
 
@@ -83,6 +86,9 @@ test-structure:
 # Note: does not do cabal run.
 test-literate:
 	cd tests_literate && sh test.sh
+
+test-server:
+	cd tests_server && sh test.sh
 
 clean:
 	cabal clean

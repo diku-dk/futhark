@@ -5,7 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.26.0]
+## [0.27.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `futhark bench`: entry points that consumed their input produced misleading
+  profiling information. (#2464)
+
+* Sometimes arrays returned from entry points would be unnecessarily copied if
+  the compiler could not be sure statically that they were in row-major layout.
+
+## [0.26.2]
+
+### Added
+
+* New server commands: `zip` and `unzip`, matching the corresponding C APIs.
+
+* The restrictions for passing tuples as consumed function parameters have been
+  loosened. (#2456)
+
+* The reverse-mode AD transformation now supports custom adjoints through a new
+  prelude function, `with_vjp`.
+
+### Fixed
+
+* A regression in fusion (#2444).
+
+* A potential compiler crash in register tiling (#2441).
+
+* The type checker would disregard uniqueness annotations on local functions.
+  (#2459)
+
+* Some loops would have aliases inferred incorrectly. (#2461)
+
+## [0.26.1]
+
+### Changed
+
+* In the C and Python APIs, entry points returning tuples no longer implicitly
+  unpack them.
+
+### Fixed
+
+* The C-based backends no longer emit constants `-9223372036854775808`, as these
+  cause C compilers to issue warnings.
+
+* A case where user-defined assertions could be removed when used in conjunction
+  with `#[scratch]`. (#2417)
+
+* Various miscompilations and compiler crashes in fusion of `scatter`
+  operations.
+
+* Multi-dimensional histograms (`reduce_by_index_2d`) were not handled correctly
+  by the intrablock code generator in the GPU backends.
+
+* The interpreter implementation of AD handled some integer/floating-point
+  conversions incorrectly. (#2425)
+
+* Compiler crash when inserting memory information. (#2432)
+
+* Out-of-bounds indexing in generated code for reverse-mode AD of `scatter`.
+
+## [0.25.37]
 
 ### Added
 
@@ -16,13 +83,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark lsp` provides inlay hints, they show type ascriptions for
     inferred types of bindings, by VegOwOtenks. (#2398)
 
-### Removed
+* Scan chunk size is now exposed as tuning parameter in `cuda` and `hip`
+  backends.
 
-### Changed
+* `futhark lsp` offers code actions, they insert type ascriptions for
+  inferred types. Every named binding has an action.
+
+* `futhark bench` and `futhark test` can now handle entry points that return
+  opaque values, as long as there is no expected result.
+
+* Better fusion for `scan` SOACs.
+
+* New prelude function: `exscan`, an exclusive scan.
 
 ### Fixed
 
 * `i64.set_bit`/`u64.set_bit` would produce wrong results in C-based backends. (#2396)
+
+* Some uses of higher order modules could cause infinite loops. (#2407)
 
 ## [0.25.36]
 

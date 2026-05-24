@@ -632,6 +632,9 @@ runEMCC cpath outpath cflags_def ldflags extra_flags = do
         "emcc"
         ( [cpath, "-o", outpath]
             ++ extra_flags
+            ++ [ "-s",
+                 "EXPORTED_RUNTIME_METHODS=['HEAP8','HEAP16','HEAP32','HEAP64','HEAPU8','HEAPU16','HEAPU32','HEAPF32','HEAPF64']"
+               ]
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
             -- The default LDFLAGS are always added.

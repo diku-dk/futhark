@@ -264,13 +264,14 @@ zeroFromSubExp (Var v) = do
   letExp "zero" $ zeroExp t
 
 fwdSOAC :: Pat Type -> StmAux () -> SOAC SOACS -> ADM ()
-fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds)) = do
+fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds post_lam)) = do
   pat' <- bundleNewPat pat
   xs' <- bundleTangents xs
   f' <- fwdLambda f
   scs' <- mapM fwdScan scs
   reds' <- mapM fwdRed reds
-  addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm f' scs' reds'
+  post_lam' <- fwdLambda post_lam
+  addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm f' scs' reds' post_lam'
   where
     fwdScan :: Scan SOACS -> ADM (Scan SOACS)
     fwdScan sc = do
@@ -330,6 +331,12 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
+fwdSOAC pat aux (WithVJP args lam _) = do
+  -- You have a custom adjoint? Too bad we are in tangent land.
+  (mapM_ fwdStm <=< runBuilder_) $ do
+    lam_res <- auxing aux $ eLambda lam $ map eSubExp args
+    forM (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
+      certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =

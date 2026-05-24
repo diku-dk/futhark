@@ -365,14 +365,14 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       case () of
         ()
           -- Short-circuiting operators are magical.
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          | isIntrinsic (qualLeaf qfname),
             baseName (qualLeaf qfname) == "&&",
             [(x, _), (y, _)] <- args ->
               internaliseExp desc $
                 E.AppExp
                   (E.If x y (E.Literal (E.BoolValue False) mempty) mempty)
                   (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          | isIntrinsic (qualLeaf qfname),
             baseName (qualLeaf qfname) == "||",
             [(x, _), (y, _)] <- args ->
               internaliseExp desc $
@@ -389,7 +389,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
               internalise =<< mapM prepareArg args
           | Just internalise <- isIntrinsicFunction qfname (map fst args) ->
               internalise desc
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          | isIntrinsic (qualLeaf qfname),
             Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
               let tag ses = [(se, I.Observe) | se <- ses]
               args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
@@ -1389,9 +1389,11 @@ internaliseStreamAcc desc dest op lam bs = do
     bs_ts <- mapM lookupType bs'
     lam' <- internaliseLambdaCoerce lam $ map rowType $ paramType acc_p : bs_ts
     let w = arraysSize 0 bs_ts
-    fmap subExpsRes . letValExp' "acc_res" $
-      I.Op $
-        I.Screma w (I.paramName acc_p : bs') (I.mapSOAC lam')
+    fmap subExpsRes
+      . letValExp' "acc_res"
+      . I.Op
+      . I.Screma w (I.paramName acc_p : bs')
+      =<< I.mapSOAC lam'
 
   op' <-
     case op of
@@ -1670,7 +1672,7 @@ isOverloadedFunction ::
   Name ->
   Maybe ([(E.StructType, [SubExp])] -> InternaliseM [SubExp])
 isOverloadedFunction qname desc = do
-  guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
+  guard $ isIntrinsic $ qualLeaf qname
   handle $ baseName $ qualLeaf qname
   where
     -- Handle equality and inequality specially, to treat the case of
@@ -1714,9 +1716,10 @@ isOverloadedFunction qname desc = do
                     -- Compare the elements.
                     cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
                     cmps <-
-                      letExp "cmps" $
-                        I.Op $
-                          I.Screma x_num_elems [x_flat, y_flat] (I.mapSOAC cmp_lam)
+                      letExp "cmps"
+                        . I.Op
+                        . I.Screma x_num_elems [x_flat, y_flat]
+                        =<< I.mapSOAC cmp_lam
 
                     -- Check that all were equal.
                     and_lam <- binOpLambda I.LogAnd I.Bool
@@ -1754,7 +1757,7 @@ isIntrinsicFunction ::
   [E.Exp] ->
   Maybe (Name -> InternaliseM [SubExp])
 isIntrinsicFunction qname args = do
-  guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
+  guard $ isIntrinsic $ qualLeaf qname
   let handlers =
         [ handleSign,
           handleOps,
@@ -1799,7 +1802,7 @@ isIntrinsicFunction qname args = do
       arr_ts <- mapM lookupType arr'
       lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
       let w = arraysSize 0 arr_ts
-      letTupExp' desc $ I.Op $ I.Screma w arr' (I.mapSOAC lam')
+      letTupExp' desc . I.Op . I.Screma w arr' =<< I.mapSOAC lam'
     handleSOACs [k, lam, arr] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
@@ -1855,6 +1858,13 @@ isIntrinsicFunction qname args = do
             case fname of
               "jvp2" -> JVP x' v' lam
               _ -> VJP x' v' lam
+    handleAD [f, f_adj, x] "with_vjp" = Just $ \desc -> do
+      x' <- internaliseExp "ad_x" x
+      lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
+      lam_adj <-
+        internaliseLambdaCoerce f_adj $
+          lambdaReturnType lam ++ lambdaReturnType lam
+      fmap (map I.Var) . letTupExp desc . Op $ WithVJP x' lam lam_adj
     handleAD _ _ = Nothing
 
     handleRest [a, si, v] "scatter" = Just $ scatterF 1 a si v
@@ -2157,7 +2167,11 @@ partitionWithSOACS :: Int -> I.Lambda SOACS -> [I.VName] -> InternaliseM ([I.Sub
 partitionWithSOACS k lam arrs = do
   arr_ts <- mapM lookupType arrs
   let w = arraysSize 0 arr_ts
-  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Screma w arrs (mapSOAC lam)
+  classes_and_increments <-
+    letTupExp "increments"
+      . I.Op
+      . I.Screma w arrs
+      =<< mapSOAC lam
   (classes, increments) <- case classes_and_increments of
     classes : increments -> pure (classes, take k increments)
     _ -> error "partitionWithSOACS"

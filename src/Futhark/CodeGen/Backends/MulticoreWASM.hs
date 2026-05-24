@@ -58,8 +58,8 @@ compileProg version prog = do
   pure
     ( ws,
       ( prog'',
-        javascriptWrapper (fRepMyRep prog'),
-        "_futhark_context_config_set_num_threads" : emccExportNames (fRepMyRep prog')
+        javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')),
+        "_futhark_context_config_set_num_threads" : emccExportNames (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog'))
       )
     )
 
@@ -72,6 +72,6 @@ fRepMyRep prog =
           JSEntryPoint
             { name = nameToString n,
               parameters = map (extToString . snd) args,
-              ret = map (extToString . snd) res
+              ret = extToString $ snd res
             }
    in mapMaybe (function . snd) fs

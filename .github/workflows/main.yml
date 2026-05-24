@@ -5,7 +5,6 @@ on:
 
   push:
     branches: [ master ]
-
 jobs:
   build-linux-nix:
     runs-on: ubuntu-24.04
@@ -16,13 +15,14 @@ jobs:
     - name: Install Nix
       uses: cachix/install-nix-action@v27
 
-    - uses: cachix/cachix-action@v15
+    - uses: cachix/cachix-action@v17
       with:
         name: futhark
+        authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
     - name: Build Futhark
-      run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
+      run: nix build .#tarball-nightly
 
     - uses: actions/upload-artifact@v4
       with:
@@ -162,7 +162,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-style.nix
+        devShell: .#style
 
     - name: Style check
       run: make check
@@ -179,7 +179,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-style.nix
+        devShell: .#style
 
     - name: Style check
       run: black --check rts docs
@@ -207,7 +207,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell.nix
+        devShell: .#default
 
     - name: Run haddock
       run: |
@@ -264,7 +264,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -292,7 +292,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -320,7 +320,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -349,7 +349,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -376,7 +376,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -402,7 +402,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -415,11 +415,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        set -e
-        python -m venv virtualenv
-        source virtualenv/bin/activate
-        pip install 'numpy<2.0.0' pyopencl jsonschema
-        futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh --tuning=tuning_gpu
+        futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/pyoclgrindrunner.sh --tuning=tuning_gpu
 
   test-opencl:
     runs-on: hendrix
@@ -542,13 +538,13 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
-        version: 2.0.18
+        version: 4.0.23
         actions-cache-folder: 'emsdk-cache'
         cache-key: emsdk-wasm
 
-    - uses: actions/setup-node@v3.5.1
+    - uses: actions/setup-node@v4
       with:
-        node-version: '16.x'
+        node-version: '22.x'
 
     - uses: actions/download-artifact@v4
       with:
@@ -579,13 +575,13 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
-        version: 2.0.18
+        version: 4.0.23
         actions-cache-folder: 'emsdk-mc-cache'
         cache-key: emsdk-wasm-multicore
 
-    - uses: actions/setup-node@v3.5.1
+    - uses: actions/setup-node@v4
       with:
-        node-version: '16.x'
+        node-version: '22.x'
 
     - uses: actions/download-artifact@v4
       with:
@@ -600,7 +596,7 @@ jobs:
     - name: Run tests
       run: |
         node --version
-        export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1 -s PTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
+        export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1 -sPTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --exclude=no_wasm tests
 
   test-wasm-lib:
@@ -612,13 +608,13 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
-        version: 2.0.18
+        version: 4.0.23
         actions-cache-folder: 'emsdk-cache'
         cache-key: emsdk-wasm-lib
 
-    - uses: actions/setup-node@v3.5.1
+    - uses: actions/setup-node@v4
       with:
-        node-version: '16.x'
+        node-version: '22.x'
 
     - uses: actions/download-artifact@v4
       with:
@@ -686,7 +682,7 @@ jobs:
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
-        file: shell-test.nix
+        devShell: .#test
 
     - uses: actions/download-artifact@v4
       with:
@@ -715,6 +711,9 @@ jobs:
 
     - run: |
         cd tests_fmt && sh test.sh
+
+    - run: |
+        cd tests_server && sh test.sh
 
     - run: |
         futhark doc -o prelude-docs /dev/null

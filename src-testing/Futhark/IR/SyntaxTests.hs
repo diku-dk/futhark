@@ -31,3 +31,6 @@ instance IsString SubExp where
 
 instance IsString SubExpRes where
   fromString = parseString "SubExpRes" parseSubExpRes
+
+instance IsString Ident where
+  fromString = parseString "Ident" parseIdent

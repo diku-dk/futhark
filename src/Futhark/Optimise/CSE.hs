@@ -312,7 +312,7 @@ instance
   cseInOp =
     subCSE
       . GPU.mapSegOpM
-        (GPU.SegOpMapper pure cseInLambda cseInKernelBody pure pure)
+        (GPU.SegOpMapper pure cseInLambda cseInLambda cseInKernelBody pure pure)
 
 cseInKernelBody ::
   (Aliased rep, CSEInOp (Op rep)) =>
@@ -324,6 +324,7 @@ cseInKernelBody (GPU.Body bodydec stms res) = do
 
 instance (CSEInOp (op rep)) => CSEInOp (Memory.MemOp op rep) where
   cseInOp o@Memory.Alloc {} = pure o
+  cseInOp o@Memory.EnsureDirect {} = pure o
   cseInOp (Memory.Inner k) = Memory.Inner <$> subCSE (cseInOp k)
 
 instance

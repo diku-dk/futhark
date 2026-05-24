@@ -36,7 +36,7 @@ type KernelCode = Code KernelOp
 data KernelConst
   = SizeConst Name SizeClass
   | SizeMaxConst SizeClass
-  | SizeUserParam Name VName
+  | SizeUserParam Name KernelConstExp
   deriving (Eq, Ord, Show)
 
 -- | An expression whose variables are kernel constants.

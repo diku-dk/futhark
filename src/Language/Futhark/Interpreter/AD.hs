@@ -350,11 +350,11 @@ deriveTape tp s uid = case runState (runExceptT $ deriveTape' tp s) uid of
 deriveTape' :: Tape -> ADValue -> ADMonad (M.Map Counter ADValue)
 deriveTape' (TapeID i _) s = pure $ M.singleton i s
 deriveTape' (TapeConst _) _ = pure M.empty
-deriveTape' tp@(TapeOp op p uid _) s =
+deriveTape' tp@(TapeOp _ p uid _) s =
   fst <$> derive tp s M.empty (countReferences p $ M.singleton (-uid - 1) 1)
   where
-    add x y = doOp' (OpBin $ addFor $ opReturnType op) [x, y]
-    mul x y = doOp' (OpBin $ mulFor $ opReturnType op) [x, y]
+    add x y = doOp' (OpBin $ addFor $ primValueType $ primitive x) [x, y]
+    mul x y = doOp' (OpBin $ mulFor $ primValueType $ primitive x) [x, y]
     madd :: Counter -> ADValue -> M.Map Counter ADValue -> ADMonad (M.Map Counter ADValue)
     madd i a m = case M.lookup i m of
       Just b -> add a b <&> (\x -> M.insert i x m)
@@ -389,7 +389,10 @@ deriveTape' tp@(TapeOp op p uid _) s =
                 _ -> calculatePDs op' (map tapePrimal p') >>= mapM (mul s'')
 
               -- Propagate the new sensitivities
-              foldlM (\(ss'', rs'') (p'', s'''') -> derive p'' s'''' ss'' rs'') (ss', rs') $ zip p' s'''
+              foldlM
+                (\(ss'', rs'') (p'', s'''') -> derive p'' s'''' ss'' rs'')
+                (ss', rs')
+                $ zip p' s'''
             else error "TODO: This branch is unreachable unless `countReferences` undercounts"
     countReferences :: [Tape] -> M.Map Counter Int -> M.Map Counter Int
     countReferences p' d' = foldl f d' p'

@@ -45,13 +45,13 @@ passed to other entry points, but cannot be directly inspected.
 Types
 -----
 
-All variables have types, and all entry points accept inputs and produce outputs
-of defined types.  The notion of transparent and opaque types are the same as in
-the C API: primitives and array of primitives are directly supported, and
-everything else is treated as opaque.  See also :ref:`valuemapping`. When
+All variables have types, and all entry points accept inputs and produce an
+output of defined types. The notion of transparent and opaque types are the same
+as in the C API: primitives and array of primitives are directly supported, and
+everything else is treated as opaque. See also :ref:`valuemapping`. When
 printed, types follow basic Futhark type syntax *without* sizes (e.g.
 ``[][]i32``). Uniqueness is not part of the types, but is indicated with an
-asterisk in the ``inputs`` and ``outputs`` commands (see below).
+asterisk in the ``inputs`` and ``output`` commands (see below).
 
 Consumption and aliasing
 ------------------------
@@ -79,11 +79,11 @@ Print the names of available types, one per line.
 
 Print the names of available entry points.
 
-``call`` *entry* *o1* ... *oN* *i1* ... *iM*
-............................................
+``call`` *entry* *o* *i1* ... *iM*
+..................................
 
 Call the given entry point with input from the variables *i1* to *iM*. The
-results are stored in *o1* to *oN*, which must not already exist.
+results are stored in *o*, which must not already exist.
 
 ``restore`` *file* *v1* *t1* ... *vN* *tN*
 ..........................................
@@ -112,11 +112,11 @@ Rename the variable *oldname* to *newname*, which must not already exist.
 Print the types of inputs accepted by the given entry point, one per line.  If
 the given input is consumed, the type is prefixed by `*`.
 
-``outputs`` *entry*
-...................
+``output`` *entry*
+..................
 
-Print the types of outputs produced by the given entry point, one per line.  If
-the given output is guaranteed to be unique (does not alias any inputs), the
+Print the type of the output produced by the given entry point, on a single
+line. If the output is guaranteed to be unique (does not alias any inputs), the
 type is prefixed by `*`.
 
 ``clear``
@@ -221,6 +221,22 @@ Print the shape of array-typed variable *v*, with one integer per line.
 Create a new variable *v0* whose value is the result of indexing the variable
 *v1*, which must be an array of rank *N*, at position *[i0]...[iN-1]*, where
 each *i* is an integer. Fails if the index is out of bounds.
+
+``zip`` *v0* *type* *v1* ... *vN*
+.................................
+
+Create a new variable *v0* of type *type*, which must be an array of records
+where the elements have *N* fields, where *v1* to *vN* are variables that are
+arrays of the corresponding field types. The order in which the arrays must be
+passed are given by the ``fields`` command on *type*.
+
+``unzip`` *v0* *v1* ... *vN*
+............................
+
+Unzip an array of records into new variables. The variable *v0* must be an
+array whose element type is a record with *N* fields. The order of constructed
+arrays corresponds to the field order given by the ``fields`` command on the
+type of *v0*.
 
 Record Commands
 ~~~~~~~~~~~~~~~

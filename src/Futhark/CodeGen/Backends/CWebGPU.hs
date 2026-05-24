@@ -13,6 +13,7 @@ where
 
 import Data.Map qualified as M
 import Data.Maybe (mapMaybe)
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
@@ -25,7 +26,7 @@ import Futhark.CodeGen.RTS.WGSL qualified as RTS
 import Futhark.CodeGen.RTS.WebGPU (serverWsJs, utilJs, valuesJs, wrappersJs)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
-import Futhark.Util (chunk, nubOrd)
+import Futhark.Util (chunk)
 import Language.C.Quote.C qualified as C
 import NeatInterpolation (text, untrimming)
 
@@ -360,17 +361,14 @@ mkJsValueClasses :: [EntryPoint] -> (T.Text, [T.Text])
 mkJsValueClasses entries =
   -- TODO: Only supports transparent arrays right now.
   let extVals =
-        concatMap (map snd . entryPointResults) entries
+        map (snd . entryPointResults) entries
           ++ concatMap (map snd . entryPointArgs) entries
       transpVals = [v | TransparentValue v <- extVals]
       arrVals =
-        nubOrd [(typ, sgn, shp) | ArrayValue _ _ typ sgn shp <- transpVals]
-      opaqueVals =
-        nubOrd [name | OpaqueValue name _ <- extVals]
-      (cls, exports) =
-        unzip $
-          map mkJsArrayClass arrVals
-            ++ map mkJsOpaqueClass opaqueVals
+        S.toList $
+          S.fromList
+            [(typ, sgn, shp) | ArrayValue _ _ typ sgn shp <- transpVals]
+      (cls, exports) = unzip $ map mkJsArrayClass arrVals
    in (T.intercalate "\n" cls, concat exports)
 
 mkJsArrayClass :: (PrimType, Signedness, [DimSize]) -> (T.Text, [T.Text])
@@ -391,20 +389,6 @@ mkJsArrayClass (typ, sign, shp) =
         "futhark_free_" <> name,
         "futhark_values_" <> name,
         "futhark_shape_" <> name
-      ]
-
-mkJsOpaqueClass :: Name -> (T.Text, [T.Text])
-mkJsOpaqueClass name =
-  ( [text|
-    this.types['${name'}'] = make_opaque_class(this, '${name'}');
-  |],
-    exports
-  )
-  where
-    name' = nameToText name
-    exports =
-      [ "futhark_new_opaque_" <> name',
-        "futhark_free_opaque_" <> name'
       ]
 
 -- | Compile the program to C with calls to WebGPU, along with a JS wrapper

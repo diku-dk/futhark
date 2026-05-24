@@ -57,7 +57,7 @@ scanExc desc scan arrs = do
         (resultBodyM $ scanNeutral scan)
         (eBody $ map (`eIndex` [prev]) res_incl)
 
-  letTupExp desc $ Op $ Screma w [iota] (mapSOAC lam)
+  letTupExp desc . Op . Screma w [iota] =<< mapSOAC lam
 
 mkF :: Lambda SOACS -> ADM ([VName], Lambda SOACS)
 mkF lam = do
@@ -117,7 +117,9 @@ diffReduce ops pat_adj w as red = do
 
   f_adj <- vjpLambda ops (map adjFromVar pat_adj) as_params f
 
-  as_adj <- letTupExp "adjs" $ Op $ Screma w (ls ++ as ++ rs) (mapSOAC f_adj)
+  as_adj <-
+    letTupExp "adjs" . Op . Screma w (ls ++ as ++ rs)
+      =<< mapSOAC f_adj
 
   zipWithM_ updateAdj as as_adj
   where
@@ -222,7 +224,8 @@ diffVecReduce ops x aux w iscomm lam ne as m = do
         fmap varsRes . letTupExp "idx_res" $
           Op $
             Screma w [paramName as_param] reduce_form
-    addStm $ Let x aux $ Op $ Screma (arraySize 0 ts) [tran_as, ne] $ mapSOAC map_lam
+    addStm . Let x aux . Op . Screma (arraySize 0 ts) [tran_as, ne]
+      =<< mapSOAC map_lam
 
   foldr (vjpStm ops) m stms
 
@@ -264,10 +267,8 @@ diffMulReduce _ops x aux w mul ne as m = do
   ps <- newVName "ps"
   zs <- newVName "zs"
   auxing aux $
-    letBindNames [ps, zs] $
-      Op $
-        Screma w [as] $
-          mapSOAC map_lam
+    letBindNames [ps, zs] . Op . Screma w [as]
+      =<< mapSOAC map_lam
 
   red_lam_mul <- binOpLambda mul t
   red_lam_add <- binOpLambda (Add Int64 OverflowUndef) int64
@@ -322,7 +323,9 @@ diffMulReduce _ops x aux w mul ne as m = do
                   (eBody $ pure const_zero)
           )
 
-  as_adjup <- letExp "adjs" $ Op $ Screma w [as] $ mapSOAC map_lam_rev
+  as_adjup <-
+    letExp "adjs" . Op . Screma w [as]
+      =<< mapSOAC map_lam_rev
 
   updateAdj as as_adjup
   where

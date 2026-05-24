@@ -529,7 +529,7 @@ static int read_byte(FILE *f, void* dest) {
 //// Types
 
 struct primtype_info_t {
-  const char binname[4]; // Used for parsing binary data.
+  const char binname[5]; // Used for parsing binary data.
   const char* type_name; // Same name as in Futhark.
   const int64_t size; // in bytes
   const writer write_str; // Write in text format.
