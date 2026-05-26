@@ -102,12 +102,6 @@ type PBTGen = IOGenM StdGen
 genWord64 :: (MonadIO m) => PBTGen -> m Word64
 genWord64 = applyIOGen random
 
-peekWord64 :: (MonadIO m) => PBTGen -> m Word64
-peekWord64 (IOGenM ref) = liftIO $ do
-  pureGen <- readIORef ref
-  let (value, _nextGen) = random pureGen
-  pure value
-
 -- | For unexcpected critical errors
 unexpectedFailure :: (MonadFail m) => T.Text -> m a
 unexpectedFailure msg =
@@ -424,7 +418,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
         | i >= numTests = pure Nothing
         | otherwise = check (i + 1)
       check i = do
-        seed <- peekWord64 rng
+        seed <- genWord64 rng
         let runUpdate ph =
               liftIO $
                 updatePhase
@@ -432,11 +426,11 @@ runOne s config srv entryNameRef program = runExceptT $ do
                   (Just ph)
                   Nothing
                   (Just size)
-                  (Just seed)
+                  Nothing
                   Nothing
                   entryNameRef
 
-        generatorCandidateM <- liftIO $ generatorPhase rng
+        generatorCandidateM <- liftIO $ generatorPhase seed
         maybe (pure ()) throwE generatorCandidateM
 
         runUpdate propName
@@ -466,7 +460,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                     <> " size="
                     <> showText size
                     <> " seed="
-                    <> showText seed
+                    <> showText (configSeed config)
                     <> " after "
                     <> showText i
                     <> " tests\n"
@@ -481,7 +475,6 @@ runOne s config srv entryNameRef program = runExceptT $ do
                     serverIn
                     size
                     seed
-                    rng
                     serverSize
                     serverSeed
                     entryNameRef
@@ -510,7 +503,6 @@ runOne s config srv entryNameRef program = runExceptT $ do
                           serverIn
                           size
                           seed
-                          rng
                           serverSize
                           serverSeed
                           entryNameRef
@@ -532,7 +524,6 @@ runOne s config srv entryNameRef program = runExceptT $ do
                           serverIn
                           size
                           seed
-                          rng
                           serverSize
                           serverSeed
                           entryNameRef
@@ -587,8 +578,8 @@ runOne s config srv entryNameRef program = runExceptT $ do
     propertyFileName =
       dropExtension program <> "_" <> T.unpack propName <> ".counterexample"
 
-    generatorPhase rng = do
-      let runUpdate ph seed =
+    generatorPhase seed = do
+      let runUpdate ph =
             liftIO $
               updatePhase
                 (Just propName)
@@ -600,19 +591,17 @@ runOne s config srv entryNameRef program = runExceptT $ do
                 entryNameRef
       case genName of
         Nothing -> fmap (either Just (const Nothing)) . runExceptT $ do
-          seed <- peekWord64 rng
-          runUpdate "Auto Generator" seed
           liftIO $ freeVars srv [serverIn]
           propType <-
             liftIO (getSingleInputType srv propName) >>= \case
               Left err -> throwE $ showText err
               Right ty -> pure ty
 
+          rng <- newIOGenM $ mkStdGen $ fromIntegral seed
           errM <- liftIO $ automaticGenerator srv serverIn propType size rng
           maybe (pure ()) (throwE . ("Haskell generator failed: " <>)) errM
         Just gn -> fmap (either Just (const Nothing)) . runExceptT $ do
-          seed <- genWord64 rng
-          runUpdate "User Generator" seed
+          runUpdate "User Generator"
           liftIO $ putVal srv serverSize size
           liftIO $ putVal srv serverSeed seed
 
@@ -679,8 +668,8 @@ updatePhase propName phase activeTest size seed rand phaseRef =
 -- try to find a smaller counterexample by decreasing the size (but using the
 -- same seed) until the generated value stops being a counterexample.
 --
--- XXX: currently the automatic generator does not reuse the seed, but draws new
--- numbers from the PBTGen.
+-- XXX: currently the automatic generator does not reuse the seed, but creates a
+-- new PBTGen from it.
 autoShrinkLoop ::
   Server ->
   EntryName ->
@@ -688,12 +677,11 @@ autoShrinkLoop ::
   VarName ->
   Int64 ->
   Word64 ->
-  PBTGen ->
   VarName ->
   VarName ->
   IORef PBTPhase ->
   IO (Either PBTFailure PBTOutput)
-autoShrinkLoop srv propName genName vCounterExample size seed rng serverSize serverSeed phaseRef = runExceptT $ do
+autoShrinkLoop srv propName genName vCounterExample size seed serverSize serverSeed phaseRef = runExceptT $ do
   let loop i
         | i <= 1 = pure Nothing
         | otherwise = do
@@ -744,6 +732,7 @@ autoShrinkLoop srv propName genName vCounterExample size seed rng serverSize ser
                 Right ty -> pure ty
             liftIO $ freeVars srv [serverSize, serverSeed]
             runExceptT $ do
+              rng <- newIOGenM $ mkStdGen $ fromIntegral seed
               errM <- liftIO $ automaticGenerator srv vCandidate propertyType size' rng
               maybe (pure ()) (throwE . ("Haskell auto generator failed: " <>)) errM
           Just gn -> do
