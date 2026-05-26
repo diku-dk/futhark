@@ -633,6 +633,28 @@ entryPoint params orig_ret_te (RetType _ret orig_ret) =
     onRetType te t =
       ([], EntryType t te)
 
+-- | Check that a type is non-functional, looking up the liftedness of abstract
+-- types in the environment. This works because entry points cannot be polymorphic, so any remaining type names must be abstract.
+orderZeroM :: TypeBase dim u -> TypeM Bool
+orderZeroM t = do
+  env <- askEnv
+  pure $ orderZero t && all (isUnlifted env) (typeQualVars t)
+  where
+    isUnlifted env (QualName [] v) =
+      case M.lookup v $ envTypeTable env of
+        Just (TypeAbbr l _ _) -> l < Lifted
+        Nothing -> True
+    isUnlifted env (QualName (q : qs) v) =
+      case M.lookup q $ envModTable env of
+        Just (ModEnv q_scope) ->
+          isUnlifted q_scope (QualName qs v)
+        _ -> True -- The great sin! I don't like this, because it duplicates
+        -- functionality from lookupTypeM. The problem is that we keep
+        -- information about abstract types nested inside modules, and
+        -- we're not quite judicious about ensuring that their names
+        -- are always correctly qualified in the inferred types.
+        -- Ideally we could just use `lookupType` here.
+
 checkEntryPoint ::
   SrcLoc ->
   [TypeParam] ->
@@ -645,12 +667,6 @@ checkEntryPoint loc tparams params rettype
         withIndexLink
           "polymorphic-entry"
           "Entry point functions may not be polymorphic."
-  | not (all orderZero param_ts)
-      || not (orderZero rettype') =
-      typeError loc mempty $
-        withIndexLink
-          "higher-order-entry"
-          "Entry point functions may not be higher-order."
   | sizes_only_in_ret <-
       S.fromList (map typeParamName tparams)
         `S.intersection` fvVars (freeInType rettype')
@@ -666,8 +682,14 @@ checkEntryPoint loc tparams params rettype
         "Entry point size parameter "
           <> pretty p
           <> " only used non-constructively."
-  | otherwise =
-      pure ()
+  | otherwise = do
+      param_ts_order_zero <- mapM orderZeroM param_ts
+      ret_order_zero <- orderZeroM rettype'
+      when (not (and param_ts_order_zero) || not ret_order_zero) $
+        typeError loc mempty $
+          withIndexLink
+            "higher-order-entry"
+            "Entry point functions may not be higher-order."
   where
     (RetType _ rettype_t) = rettype
     (rettype_params, rettype') = unfoldFunType rettype_t
