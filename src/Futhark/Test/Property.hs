@@ -599,7 +599,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
 
           rng <- newIOGenM $ mkStdGen $ fromIntegral seed
           errM <- liftIO $ automaticGenerator srv serverIn propType size rng
-          maybe (pure ()) (throwE . ("Haskell generator failed: " <>)) errM
+          maybe (pure ()) (throwE . ("Automatic generator failed: " <>)) errM
         Just gn -> fmap (either Just (const Nothing)) . runExceptT $ do
           runUpdate "User Generator"
           liftIO $ putVal srv serverSize size
