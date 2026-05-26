@@ -370,11 +370,15 @@ data TypeBinding
 
 data Module
   = Module Env
-  | ModuleFun (Module -> EvalM Module)
+  | -- | A module function (functor). Carries the closure environment,
+    -- the pending substitutions (to be applied to the closure at
+    -- application time), the module parameter, and the body expression.
+    -- The 'Maybe' carries the return ascription if present.
+    ModuleFun Env (M.Map VName VName) ModParam ModExp
 
 instance Show Module where
   show (Module env) = "(" <> unwords ["Module", show env] <> ")"
-  show (ModuleFun _) = "(ModuleFun _)"
+  show (ModuleFun {}) = "(ModuleFun _)"
 
 -- | The actual type- and value environment.
 data Env = Env
@@ -1150,6 +1154,22 @@ reverseSubstitutions :: M.Map VName VName -> M.Map VName [VName]
 reverseSubstitutions =
   M.fromListWith (<>) . map (second pure . uncurry (flip (,))) . M.toList
 
+-- | Follow substitution chains: look up a name in an existing
+-- substitution map and use the result if found.  This mirrors
+-- 'lookupSubst' in Defunctorise.
+lookupSubst :: VName -> M.Map VName VName -> VName
+lookupSubst v substs = case M.lookup v substs of
+  Just v' | v' /= v -> lookupSubst v' substs
+  _ -> v
+
+-- | Compose new substitutions with pending ones by forwarding through
+-- the existing map.  This ensures that when we apply substitutions to
+-- a functor closure, any previously pending substitutions are updated
+-- to point to their final targets.
+forwardSubsts :: M.Map VName VName -> M.Map VName VName -> M.Map VName VName
+forwardSubsts new old =
+  M.map (`lookupSubst` old) new <> old
+
 substituteInModule :: M.Map VName VName -> Module -> Module
 substituteInModule substs = onModule
   where
@@ -1163,11 +1183,24 @@ substituteInModule substs = onModule
       Env (replaceM onTerm terms) (replaceM id types)
     onModule (Module env) =
       Module $ onEnv env
-    onModule (ModuleFun f) =
-      ModuleFun $ \m -> onModule <$> f (substituteInModule substs m)
+    onModule (ModuleFun clo_env pending p body) =
+      -- Forward substitutions into the pending substitution map,
+      -- mirroring how Defunctorise propagates substitutions into
+      -- the functor closure's scope.
+      ModuleFun (onEnv clo_env) (forwardSubsts substs pending) p body
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
+
+-- | Apply pending substitutions to an environment. This renames
+-- bindings in the environment according to the accumulated
+-- substitution map, which represents deferred name rewriting from
+-- module ascriptions applied to functors.
+applyPendingSubsts :: M.Map VName VName -> Env -> Env
+applyPendingSubsts pending
+  | M.null pending = id
+  | otherwise = \env ->
+      let Module env' = substituteInModule pending (Module env) in env'
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1208,9 +1241,8 @@ evalModExp env (ModParens me _) =
 evalModExp env (ModLambda p ret e loc) =
   pure
     ( mempty,
-      ModuleFun $ \am -> do
-        let env' = env {envTerm = M.insert (modParamName p) (TermModule am) $ envTerm env}
-        fmap snd . evalModExp env' $ case ret of
+      ModuleFun env mempty p $
+        case ret of
           Nothing -> e
           Just (se, rsubsts) -> ModAscript e se rsubsts loc
     )
@@ -1218,8 +1250,13 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
   (f_env, f') <- evalModExp env f
   (e_env, e') <- evalModExp env e
   case f' of
-    ModuleFun f'' -> do
-      res_mod <- substituteInModule rsubst <$> f'' (substituteInModule psubst e')
+    ModuleFun clo_env pending p body -> do
+      let arg = substituteInModule psubst e'
+          -- Apply any pending substitutions accumulated from prior
+          -- substituteInModule calls to the closure environment.
+          clo_env' = applyPendingSubsts pending clo_env
+          env' = clo_env' {envTerm = M.insert (modParamName p) (TermModule arg) $ envTerm clo_env'}
+      res_mod <- substituteInModule rsubst . snd <$> evalModExp env' body
       let res_env = case res_mod of
             Module x -> x
             _ -> mempty
