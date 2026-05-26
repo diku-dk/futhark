@@ -34,6 +34,8 @@ import System.FilePath (dropExtension)
 import System.Random (StdGen, mkStdGen, random)
 import System.Random.Stateful (IOGenM (..), applyIOGen, newIOGenM)
 
+-- | Configuration for property-based testing.
+-- Includes parameters for test case generation, shrinking, and random seed management.
 data PBTConfig = PBTConfig
   { -- | Number of test cases to run for each property.
     configNumTests :: Int32,
@@ -49,6 +51,8 @@ data PBTConfig = PBTConfig
   }
   deriving (Show, Eq)
 
+-- | Specification for a property to be tested, including the property entry point and
+-- optional generator and shrinker entry points, as well as an optional size parameter.
 data PropSpec = PropSpec
   { -- | The property entry point to test.
     psProp :: T.Text,
@@ -64,6 +68,8 @@ data PropSpec = PropSpec
   }
   deriving (Show, Eq)
 
+-- | Information about the current phase of property-based testing,
+-- used for logging and debugging.
 data PBTPhase = PBTPhase
   { -- | Property being tested (same for generator and shrinker phases).
     activeTest :: Maybe EntryName,
@@ -81,8 +87,12 @@ data PBTPhase = PBTPhase
   }
   deriving (Show, Eq)
 
+-- | Output of a property-based test run, which is either a failure with
+-- an error message or a success.
 type PBTOutput = Maybe T.Text
 
+-- | Failure in property-based testing, represented as an error message.
+-- For example a division by zero runtime error.
 type PBTFailure = T.Text
 
 -- | The Haskell-level random number generator that we use for generating seeds
@@ -303,6 +313,8 @@ validateOneSpec srv eps spec = do
             "Shrinker is not a server entry point: " <> sh
         liftIO (validateShrinkTypes srv prop sh) >>= maybe (pure ()) throwE
 
+-- | Extract property specifications from the server by looking for entry
+-- points with #[prop(...)] attributes. 
 extractPropSpecsFromServer :: Server -> IO [PropSpec]
 extractPropSpecsFromServer srv = do
   epsE <- cmdEntryPoints srv
@@ -1043,6 +1055,8 @@ getSingleInputType srv ep = do
     [] -> pure $ Left $ T.pack $ "Entrypoint " <> T.unpack ep <> " has no inputs (expected 1)."
     _ -> pure $ Left $ T.pack $ "Entrypoint " <> T.unpack ep <> " has >1 input (expected 1): " <> show tys
 
+-- | Run a list of property specifications, returning a list of results.
+-- Each result is either a failure with an error message or a success.
 runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> FilePath -> IO [Either PBTFailure PBTOutput]
 runPBT config srv specs entryNameRef program = do
   eps <- cmdErrorHandlerE "Failed to get entry points: " $ cmdEntryPoints srv -- error should not be reached by the user
