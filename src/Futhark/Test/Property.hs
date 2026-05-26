@@ -428,120 +428,121 @@ runOne s config srv entryNameRef program = runExceptT $ do
   rng <- newIOGenM $ mkStdGen $ fromIntegral $ configSeed config
   let loop i
         | i >= numTests = pure Nothing
-        | otherwise = do
-            seed <- peekWord64 rng
-            let runUpdate ph =
-                  liftIO $
-                    updatePhase
-                      (Just propName)
-                      (Just ph)
-                      Nothing
-                      (Just size)
-                      (Just seed)
-                      Nothing
-                      entryNameRef
+        | otherwise = check (i + 1)
+      check i = do
+        seed <- peekWord64 rng
+        let runUpdate ph =
+              liftIO $
+                updatePhase
+                  (Just propName)
+                  (Just ph)
+                  Nothing
+                  (Just size)
+                  (Just seed)
+                  Nothing
+                  entryNameRef
 
-            generatorCandidateM <- liftIO $ generatorPhase rng
-            maybe (pure ()) throwE generatorCandidateM
+        generatorCandidateM <- liftIO $ generatorPhase rng
+        maybe (pure ()) throwE generatorCandidateM
 
-            runUpdate propName
+        runUpdate propName
 
-            okE <- liftIO $
-              withCallKeepIns srv propName serverOk [serverIn] $
-                \vOk -> getVal srv vOk
-            ok <- case okE of
-              Right b -> pure b
-              Left err -> do
-                liftIO $
-                  cmdErrorHandlerM "cmdStore failed to store when property crashed" $
-                    cmdStore srv propertyFileName [serverIn]
-                valuePPrint <- liftIO pPrintPhase
-                throwE $
-                  "Property "
+        okE <- liftIO $
+          withCallKeepIns srv propName serverOk [serverIn] $
+            \vOk -> getVal srv vOk
+        ok <- case okE of
+          Right b -> pure b
+          Left err -> do
+            liftIO $
+              cmdErrorHandlerM "cmdStore failed to store when property crashed" $
+                cmdStore srv propertyFileName [serverIn]
+            valuePPrint <- liftIO pPrintPhase
+            throwE $
+              "Property "
+                <> propName
+                <> " failed with candidate="
+                <> valuePPrint
+                <> " with error: "
+                <> err
+        if ok
+          then loop i
+          else do
+            let failmsg =
+                  "PBT FAIL: "
                     <> propName
-                    <> " failed with candidate="
-                    <> valuePPrint
-                    <> " with error: "
-                    <> err
-            if ok
-              then loop (i + 1)
-              else do
-                let failmsg =
-                      "PBT FAIL: "
-                        <> propName
-                        <> " size="
-                        <> showText size
-                        <> " seed="
-                        <> showText seed
-                        <> " after "
-                        <> showText (i + 1)
-                        <> " tests\n"
+                    <> " size="
+                    <> showText size
+                    <> " seed="
+                    <> showText seed
+                    <> " after "
+                    <> showText i
+                    <> " tests\n"
 
-                shrinkRes <- case psShrink s of
-                  Nothing ->
-                    liftIO $ autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
-                  Just sh -> do
-                    userShrinkRes <-
+            shrinkRes <- case psShrink s of
+              Nothing ->
+                liftIO $ autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
+              Just sh -> do
+                userShrinkRes <-
+                  liftIO $
+                    shrinkLoop srv propName serverIn sh rng (configShrinkTries config) entryNameRef
+
+                case userShrinkRes of
+                  Right Nothing ->
+                    pure (Right Nothing)
+                  Right (Just err) -> do
+                    autoRes <-
                       liftIO $
-                        shrinkLoop srv propName serverIn sh rng (configShrinkTries config) entryNameRef
+                        autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
 
-                    case userShrinkRes of
-                      Right Nothing ->
-                        pure (Right Nothing)
-                      Right (Just err) -> do
-                        autoRes <-
-                          liftIO $
-                            autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
-
-                        pure $
-                          Right $
-                            Just $
-                              "User shrinker failed: "
-                                <> err
-                                <> "\nAttempted auto-shrinker fallback."
-                                <> formatAutoShrinkResult autoRes
-                      Left err -> do
-                        autoRes <-
-                          liftIO $
-                            autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
-
-                        pure $
-                          Right $
-                            Just $
-                              "User shrinker failed: "
-                                <> err
-                                <> "\nAttempted auto-shrinker fallback."
-                                <> formatAutoShrinkResult autoRes
-
-                case shrinkRes of
+                    pure $
+                      Right $
+                        Just $
+                          "User shrinker failed: "
+                            <> err
+                            <> "\nAttempted auto-shrinker fallback."
+                            <> formatAutoShrinkResult autoRes
                   Left err -> do
-                    runUpdate "prettyPrint"
-                    counterLog <- liftIO pPrintPhase
-                    liftIO $ cmdErrorHandlerM "cmdStore failed to store when shrinker crashed" $ cmdStore srv propertyFileName [serverIn]
+                    autoRes <-
+                      liftIO $
+                        autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
+
                     pure $
-                      Just $
-                        failmsg
-                          <> "Shrinking failed: "
-                          <> err
-                          <> "\nCounterexample: "
-                          <> counterLog
-                  Right (Just note) -> do
-                    runUpdate "prettyPrint"
-                    counterLog <- liftIO pPrintPhase
-                    pure $
-                      Just $
-                        failmsg
-                          <> "Shrinking note: "
-                          <> note
-                          <> "\nCounterexample: "
-                          <> counterLog
-                  Right Nothing -> do
-                    runUpdate "prettyPrint"
-                    counterLog <- liftIO pPrintPhase
-                    liftIO $
-                      cmdErrorHandlerM "cmdStore failed to store shrinker result" $
-                        cmdStore srv propertyFileName [serverIn]
-                    pure $ Just $ failmsg <> "Counterexample: " <> counterLog
+                      Right $
+                        Just $
+                          "User shrinker failed: "
+                            <> err
+                            <> "\nAttempted auto-shrinker fallback."
+                            <> formatAutoShrinkResult autoRes
+
+            case shrinkRes of
+              Left err -> do
+                runUpdate "prettyPrint"
+                counterLog <- liftIO pPrintPhase
+                liftIO $ cmdErrorHandlerM "cmdStore failed to store when shrinker crashed" $ cmdStore srv propertyFileName [serverIn]
+                pure $
+                  Just $
+                    failmsg
+                      <> "Shrinking failed: "
+                      <> err
+                      <> "\nCounterexample: "
+                      <> counterLog
+              Right (Just note) -> do
+                runUpdate "prettyPrint"
+                counterLog <- liftIO pPrintPhase
+                pure $
+                  Just $
+                    failmsg
+                      <> "Shrinking note: "
+                      <> note
+                      <> "\nCounterexample: "
+                      <> counterLog
+              Right Nothing -> do
+                runUpdate "prettyPrint"
+                counterLog <- liftIO pPrintPhase
+                liftIO $
+                  cmdErrorHandlerM "cmdStore failed to store shrinker result" $
+                    cmdStore srv propertyFileName [serverIn]
+                pure $ Just $ failmsg <> "Counterexample: " <> counterLog
   loop 0
   where
     propName = psProp s
