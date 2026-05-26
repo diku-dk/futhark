@@ -717,7 +717,7 @@ autoShrinkLoop srv propName genName vCounterExample size seed serverSize serverS
         updatePhase
           (Just propName)
           (Just "autoShrinkLoop")
-          (fromRight (Just "Auto Generator") active)
+          (fromRight (Just "Automatic generator") active)
           (Just size)
           (Just seed)
           Nothing
@@ -734,7 +734,7 @@ autoShrinkLoop srv propName genName vCounterExample size seed serverSize serverS
             runExceptT $ do
               rng <- newIOGenM $ mkStdGen $ fromIntegral seed
               errM <- liftIO $ automaticGenerator srv vCandidate propertyType size' rng
-              maybe (pure ()) (throwE . ("Haskell auto generator failed: " <>)) errM
+              maybe (pure ()) (throwE . ("Automatic generator failed: " <>)) errM
           Just gn -> do
             liftIO $ putVal srv serverSize size' >> putVal srv serverSeed seed
             runExceptT $ do
