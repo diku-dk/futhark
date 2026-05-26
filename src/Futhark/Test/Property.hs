@@ -479,7 +479,18 @@ runOne s config srv entryNameRef program = runExceptT $ do
 
             shrinkRes <- case psShrink s of
               Nothing ->
-                liftIO $ autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
+                liftIO $
+                  autoShrinkLoop
+                    srv
+                    propName
+                    genName
+                    serverIn
+                    size
+                    seed
+                    rng
+                    serverSize
+                    serverSeed
+                    entryNameRef
               Just sh -> do
                 userShrinkRes <-
                   liftIO $
@@ -504,6 +515,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                           genName
                           serverIn
                           size
+                          seed
                           rng
                           serverSize
                           serverSeed
@@ -525,6 +537,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                           genName
                           serverIn
                           size
+                          seed
                           rng
                           serverSize
                           serverSeed
@@ -674,29 +687,29 @@ autoShrinkLoop ::
   Maybe EntryName ->
   VarName ->
   Int64 ->
+  Word64 ->
   PBTGen ->
   VarName ->
   VarName ->
   IORef PBTPhase ->
   IO (Either PBTFailure PBTOutput)
-autoShrinkLoop srv propName genName vCounterExample size rng serverSize serverSeed phaseRef = runExceptT $ do
+autoShrinkLoop srv propName genName vCounterExample size seed rng serverSize serverSeed phaseRef = runExceptT $ do
   let loop i
         | i <= 1 = pure Nothing
         | otherwise = do
             let newSize = i - 1
-            seed <- peekWord64 rng
 
             errM <- liftIO $ generatorPhase newSize
             maybe (pure ()) (throwE . ("Auto-shrinker generator failed: " <>)) errM
 
-            liftIO $ autoShrinkUpdatePhase (Right $ Just propName) seed
+            liftIO $ autoShrinkUpdatePhase (Right $ Just propName)
 
             ok <-
               either (throwE . ("Property " <>)) pure <=< liftIO $
                 withCallKeepIns srv propName vOk [vCandidate] $
                   getVal srv
 
-            liftIO $ autoShrinkUpdatePhase (Left Nothing) seed
+            liftIO $ autoShrinkUpdatePhase (Left Nothing)
 
             case ok of
               True -> do
@@ -711,7 +724,7 @@ autoShrinkLoop srv propName genName vCounterExample size rng serverSize serverSe
   where
     vCandidate = "auto_shrink_candidate"
     vOk = "auto_shrink_ok"
-    autoShrinkUpdatePhase (Right activeTest) seed =
+    autoShrinkUpdatePhase (Right activeTest) =
       liftIO $
         updatePhase
           (Just propName)
@@ -721,7 +734,7 @@ autoShrinkLoop srv propName genName vCounterExample size rng serverSize serverSe
           (Just seed)
           Nothing
           phaseRef
-    autoShrinkUpdatePhase (Left _activeTest) seed =
+    autoShrinkUpdatePhase (Left _activeTest) =
       liftIO $
         updatePhase
           (Just propName)
@@ -744,7 +757,6 @@ autoShrinkLoop srv propName genName vCounterExample size rng serverSize serverSe
               errM <- liftIO $ automaticGenerator srv vCandidate propertyType size' rng
               maybe (pure ()) (throwE . ("Haskell auto generator failed: " <>)) errM
           Just gn -> do
-            seed <- peekWord64 rng
             liftIO $ putVal srv serverSize size' >> putVal srv serverSeed seed
             runExceptT $ do
               errM <- liftIO $ callFreeIns srv gn vCandidate [serverSize, serverSeed]
