@@ -680,11 +680,6 @@ autoShrinkLoop ::
   IORef PBTPhase ->
   IO (Either PBTFailure PBTOutput)
 autoShrinkLoop srv propName genName vCounterExample size rng serverSize serverSeed phaseRef = runExceptT $ do
-  liftIO (getInputTypes srv propName) >>= \case
-    [_] -> pure ()
-    [] -> throwE $ "Property " <> propName <> " has no inputs?"
-    tys -> throwE $ "Property " <> propName <> " has >1 input: " <> showText tys
-
   let loop i
         | i <= 1 = pure Nothing
         | otherwise = do
