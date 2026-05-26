@@ -28,6 +28,7 @@ module Language.Futhark.Interpreter
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Monad
 import Control.Monad.Free.Church
 import Control.Monad.Identity
@@ -333,10 +334,11 @@ lookupInEnv ::
 lookupInEnv onEnv qv env = f env $ qualQuals qv
   where
     f m (q : qs) =
-      case (M.lookup (qualLeaf qv) $ onEnv m, M.lookup q $ envTerm m) of
-        (Just x, _) -> Just x
-        (Nothing, Just (TermModule (Module mod))) -> f mod qs
-        _ -> Nothing
+      case M.lookup q $ envTerm m of
+        Just (TermModule (Module mod)) ->
+          f mod qs <|> M.lookup (qualLeaf qv) (onEnv m)
+        _ ->
+          M.lookup (qualLeaf qv) (onEnv m)
     f m [] = M.lookup (qualLeaf qv) $ onEnv m
 
 lookupVar :: QualName VName -> Env -> Maybe TermBinding
