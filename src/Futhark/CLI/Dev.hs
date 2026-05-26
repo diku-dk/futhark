@@ -675,6 +675,11 @@ commandLineOptions =
       "Ignore 'unsafe'.",
     Option
       []
+      ["strip-provenance"]
+      (NoArg $ Right $ changeFutharkConfig $ \opts -> opts {futharkStripProvenance = True})
+      "Strip provenance (location information).",
+    Option
+      []
       ["entry-points"]
       ( ReqArg
           ( \arg -> Right $

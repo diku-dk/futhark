@@ -390,7 +390,7 @@ checkOneModExp (ModVar v loc) = do
   (v', env) <- lookupMod loc v
   when
     ( baseName (qualLeaf v') == nameFromString "intrinsics"
-        && baseTag (qualLeaf v') <= maxIntrinsicTag
+        && isIntrinsic (qualLeaf v')
     )
     $ typeError loc mempty "The 'intrinsics' module may not be used in module expressions."
   pure (mempty, MTy mempty env, ModVar v' loc)

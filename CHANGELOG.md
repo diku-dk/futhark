@@ -15,9 +15,34 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark bench`: entry points that consumed their input produced misleading
+  profiling information. (#2464)
+
+* Sometimes arrays returned from entry points would be unnecessarily copied if
+  the compiler could not be sure statically that they were in row-major layout.
+
+## [0.26.2]
+
+### Added
+
+* New server commands: `zip` and `unzip`, matching the corresponding C APIs.
+
+* The restrictions for passing tuples as consumed function parameters have been
+  loosened. (#2456)
+
+* The reverse-mode AD transformation now supports custom adjoints through a new
+  prelude function, `with_vjp`.
+
+### Fixed
+
 * A regression in fusion (#2444).
 
 * A potential compiler crash in register tiling (#2441).
+
+* The type checker would disregard uniqueness annotations on local functions.
+  (#2459)
+
+* Some loops would have aliases inferred incorrectly. (#2461)
 
 ## [0.26.1]
 

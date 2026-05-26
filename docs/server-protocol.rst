@@ -222,6 +222,22 @@ Create a new variable *v0* whose value is the result of indexing the variable
 *v1*, which must be an array of rank *N*, at position *[i0]...[iN-1]*, where
 each *i* is an integer. Fails if the index is out of bounds.
 
+``zip`` *v0* *type* *v1* ... *vN*
+.................................
+
+Create a new variable *v0* of type *type*, which must be an array of records
+where the elements have *N* fields, where *v1* to *vN* are variables that are
+arrays of the corresponding field types. The order in which the arrays must be
+passed are given by the ``fields`` command on *type*.
+
+``unzip`` *v0* *v1* ... *vN*
+............................
+
+Unzip an array of records into new variables. The variable *v0* must be an
+array whose element type is a record with *N* fields. The order of constructed
+arrays corresponds to the field order given by the ``fields`` command on the
+type of *v0*.
+
 Record Commands
 ~~~~~~~~~~~~~~~
 

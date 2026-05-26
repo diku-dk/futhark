@@ -8,6 +8,7 @@ module Language.Futhark.Prop
     intrinsics,
     intrinsicVar,
     maxIntrinsicTag,
+    isIntrinsic,
     namesToPrimTypes,
     qualName,
     qualify,
@@ -966,6 +967,19 @@ intrinsics =
                   $ RetType []
                   $ Scalar
                   $ tupleRecord [Scalar $ t_b Nonunique, Scalar $ t_a Nonunique]
+              ),
+              ( "with_vjp",
+                IntrinsicPolyFun
+                  [tp_a, tp_b]
+                  [ Scalar (t_a NoUniqueness) `arr` Scalar (t_b Nonunique),
+                    Scalar (t_b NoUniqueness)
+                      `arr` ( Scalar (t_b NoUniqueness)
+                                `arr` Scalar (t_a Nonunique)
+                            ),
+                    Scalar (t_a Observe)
+                  ]
+                  $ RetType []
+                  $ Scalar (t_b Nonunique)
               )
             ]
               ++
@@ -1214,6 +1228,10 @@ intrinsics =
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
 maxIntrinsicTag :: Int
 maxIntrinsicTag = maxinum $ map baseTag $ M.keys intrinsics
+
+-- | Is this the name of an intrinsic?
+isIntrinsic :: VName -> Bool
+isIntrinsic = (<= maxIntrinsicTag) . baseTag
 
 -- | Create a name with no qualifiers from a name.
 qualName :: v -> QualName v

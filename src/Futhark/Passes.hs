@@ -22,7 +22,6 @@ import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
-import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
@@ -140,7 +139,6 @@ seqmemPipeline =
     >>> passes
       [ performCSE False,
         simplifySeqMem,
-        entryPointMemSeq,
         simplifySeqMem,
         LiftAllocations.liftAllocationsSeqMem,
         simplifySeqMem,
@@ -162,7 +160,6 @@ gpumemPipeline =
       [ simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,
-        entryPointMemGPU,
         doubleBufferGPU,
         simplifyGPUMem,
         performCSE False,
@@ -207,7 +204,6 @@ mcmemPipeline =
       [ simplifyMCMem,
         performCSE False,
         simplifyMCMem,
-        entryPointMemMC,
         doubleBufferMC,
         simplifyMCMem,
         performCSE False,

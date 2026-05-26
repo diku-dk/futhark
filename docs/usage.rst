@@ -360,14 +360,6 @@ are as follows:
   with a type abbreviation to give it a specific name, otherwise one
   will be generated.
 
-Return types follow these rules, with one addition:
-
-* If the return type is an *m*-element tuple, then the function
-  returns *m* values, mapped according to the rules above (but not
-  including this one - nested tuples are not mapped directly).  This
-  rule does not apply when the entry point has been given a return
-  type ascription that is not syntactically a tuple type.
-
 .. _api-consumption:
 
 Consumption and Aliasing
@@ -391,9 +383,8 @@ essentially the same as in the language itself:
    Further, any *aliases* of that value are also considered consumed
    and may not be used.
 
-2. Each entry point output is either *unique* or *nonunique*.  A
-   unique output has no aliases.  A nonunique output aliases *every*
-   nonconsuming input parameter.
+2. The entry point output iseither *unique* or *nonunique*. A unique output has
+   no aliases. A nonunique output aliases *every* nonconsuming input parameter.
 
 Note that these distinctions are currently usually not visible in the
 generated API, and so correct usage requires knowledge of the original

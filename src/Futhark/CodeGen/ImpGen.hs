@@ -59,6 +59,7 @@ module Futhark.CodeGen.ImpGen
     tvVar,
     ToExp (..),
     compileAlloc,
+    compileEnsureDirect,
     everythingVolatile,
     compileBody,
     compileBody',
@@ -1741,6 +1742,32 @@ compileAlloc (Pat [mem]) e space = do
     Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
   error $ "compileAlloc: Invalid pattern: " ++ prettyString pat
+
+-- | Compile an 'EnsureDirect' operation. The pattern must contain
+-- two elements: a memory block and an array. If the input array is
+-- already row-major with zero offset, no copy is made. Otherwise,
+-- memory is allocated and the array is copied into it.
+compileEnsureDirect ::
+  (Mem rep inner) => Pat (LetDec rep) -> VName -> ImpM rep r op ()
+compileEnsureDirect (Pat [mem_pe, _]) src = do
+  src_entry <- lookupArray src
+  let src_loc@(MemLoc src_mem src_shape src_lmad) = entryArrayLoc src_entry
+      pt = entryArrayElemType src_entry
+      row_major_lmad = LMAD.iota 0 (map pe64 src_shape)
+      is_row_major = LMAD.dynamicEqualsLMAD src_lmad row_major_lmad
+  src_space <- entryMemSpace <$> lookupMemory src_mem
+  let dest_mem = patElemName mem_pe
+      dest_loc = MemLoc dest_mem src_shape row_major_lmad
+  sIf
+    is_row_major
+    (emit $ Imp.SetMem dest_mem src_mem src_space)
+    ( do
+        let size = Imp.bytes $ primByteSize pt * product (map pe64 src_shape)
+        sAlloc_ dest_mem size src_space
+        lmadCopy pt dest_loc src_loc
+    )
+compileEnsureDirect pat _ =
+  error $ "compileEnsureDirect: Invalid pattern: " ++ prettyString pat
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format, as an t'Int64' expression.

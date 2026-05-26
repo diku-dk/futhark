@@ -31,10 +31,17 @@ import Language.Futhark.TypeChecker.Types qualified as E
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
-transformProg :: (MonadFreshNames m) => Bool -> VisibleTypes -> [E.ValBind] -> m (I.Prog SOACS)
-transformProg always_safe types vbinds = do
+transformProg ::
+  (MonadFreshNames m) =>
+  Bool ->
+  Bool ->
+  VisibleTypes ->
+  [E.ValBind] ->
+  m (I.Prog SOACS)
+transformProg always_safe strip_provenance types vbinds = do
   (opaques, consts, funs) <-
-    runInternaliseM always_safe (internaliseValBinds types vbinds)
+    runInternaliseM always_safe strip_provenance $
+      internaliseValBinds types vbinds
   I.renameProg $ I.Prog opaques consts funs
 
 internaliseValBinds :: VisibleTypes -> [E.ValBind] -> InternaliseM ()
@@ -365,14 +372,14 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       case () of
         ()
           -- Short-circuiting operators are magical.
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          | isIntrinsic (qualLeaf qfname),
             baseName (qualLeaf qfname) == "&&",
             [(x, _), (y, _)] <- args ->
               internaliseExp desc $
                 E.AppExp
                   (E.If x y (E.Literal (E.BoolValue False) mempty) mempty)
                   (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          | isIntrinsic (qualLeaf qfname),
             baseName (qualLeaf qfname) == "||",
             [(x, _), (y, _)] <- args ->
               internaliseExp desc $
@@ -389,7 +396,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
               internalise =<< mapM prepareArg args
           | Just internalise <- isIntrinsicFunction qfname (map fst args) ->
               internalise desc
-          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          | isIntrinsic (qualLeaf qfname),
             Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
               let tag ses = [(se, I.Observe) | se <- ses]
               args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
@@ -1672,7 +1679,7 @@ isOverloadedFunction ::
   Name ->
   Maybe ([(E.StructType, [SubExp])] -> InternaliseM [SubExp])
 isOverloadedFunction qname desc = do
-  guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
+  guard $ isIntrinsic $ qualLeaf qname
   handle $ baseName $ qualLeaf qname
   where
     -- Handle equality and inequality specially, to treat the case of
@@ -1757,7 +1764,7 @@ isIntrinsicFunction ::
   [E.Exp] ->
   Maybe (Name -> InternaliseM [SubExp])
 isIntrinsicFunction qname args = do
-  guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
+  guard $ isIntrinsic $ qualLeaf qname
   let handlers =
         [ handleSign,
           handleOps,
@@ -1858,6 +1865,13 @@ isIntrinsicFunction qname args = do
             case fname of
               "jvp2" -> JVP x' v' lam
               _ -> VJP x' v' lam
+    handleAD [f, f_adj, x] "with_vjp" = Just $ \desc -> do
+      x' <- internaliseExp "ad_x" x
+      lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
+      lam_adj <-
+        internaliseLambdaCoerce f_adj $
+          lambdaReturnType lam ++ lambdaReturnType lam
+      fmap (map I.Var) . letTupExp desc . Op $ WithVJP x' lam lam_adj
     handleAD _ _ = Nothing
 
     handleRest [a, si, v] "scatter" = Just $ scatterF 1 a si v

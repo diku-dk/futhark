@@ -29,7 +29,7 @@ tests =
               [Id "x_1" (Info "[2]i32") mempty]
               "[2]i32"
               ( second
-                  (const (S.singleton (AliasBound "x_1")))
+                  (const (S.singleton (AliasBound "x_1" [])))
                   ("[2]i32" :: StructType)
               )
               @?= "[2]i32",
@@ -39,7 +39,7 @@ tests =
               [Id "x_1" (Info "[2]i32") mempty]
               "([2]i32, [2]i32)"
               ( second
-                  (const (S.singleton (AliasFree "y_2")))
+                  (const (S.singleton (AliasFree "y_2" [])))
                   ("([2]i32,[2]i32)" :: StructType)
               )
               @?= "([2]i32, [2]i32)",
@@ -49,7 +49,7 @@ tests =
              in inferReturnUniqueness
                   [Id "n_1" (Info "i64") mempty]
                   t
-                  (second (const (S.singleton (AliasFree "y_3"))) t)
+                  (second (const (S.singleton (AliasFree "y_3" []))) t)
                   @?= (t `setUniqueness` Nonunique),
           --
           testCase "*opaque" $
