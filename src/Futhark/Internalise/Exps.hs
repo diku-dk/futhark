@@ -31,10 +31,17 @@ import Language.Futhark.TypeChecker.Types qualified as E
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
-transformProg :: (MonadFreshNames m) => Bool -> VisibleTypes -> [E.ValBind] -> m (I.Prog SOACS)
-transformProg always_safe types vbinds = do
+transformProg ::
+  (MonadFreshNames m) =>
+  Bool ->
+  Bool ->
+  VisibleTypes ->
+  [E.ValBind] ->
+  m (I.Prog SOACS)
+transformProg always_safe strip_provenance types vbinds = do
   (opaques, consts, funs) <-
-    runInternaliseM always_safe (internaliseValBinds types vbinds)
+    runInternaliseM always_safe strip_provenance $
+      internaliseValBinds types vbinds
   I.renameProg $ I.Prog opaques consts funs
 
 internaliseValBinds :: VisibleTypes -> [E.ValBind] -> InternaliseM ()
