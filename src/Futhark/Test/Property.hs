@@ -15,6 +15,7 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Except
+import Data.Either (fromRight)
 import Data.IORef
 import Data.Int
 import Data.Maybe (fromMaybe, mapMaybe)
@@ -724,22 +725,12 @@ autoShrinkLoop srv propName genName vCounterExample size seed rng serverSize ser
   where
     vCandidate = "auto_shrink_candidate"
     vOk = "auto_shrink_ok"
-    autoShrinkUpdatePhase (Right activeTest) =
+    autoShrinkUpdatePhase active =
       liftIO $
         updatePhase
           (Just propName)
           (Just "autoShrinkLoop")
-          activeTest
-          (Just size)
-          (Just seed)
-          Nothing
-          phaseRef
-    autoShrinkUpdatePhase (Left _activeTest) =
-      liftIO $
-        updatePhase
-          (Just propName)
-          (Just "autoShrinkLoop")
-          (Just "Auto Generator")
+          (fromRight (Just "Auto Generator") active)
           (Just size)
           (Just seed)
           Nothing
