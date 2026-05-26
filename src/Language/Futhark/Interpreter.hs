@@ -370,15 +370,11 @@ data TypeBinding
 
 data Module
   = Module Env
-  | -- | A module function (functor). Carries the closure environment,
-    -- the pending substitutions (to be applied to the closure at
-    -- application time), the module parameter, and the body expression.
-    -- The 'Maybe' carries the return ascription if present.
-    ModuleFun Env (M.Map VName VName) ModParam ModExp
+  | ModuleFun (Module -> EvalM Module)
 
 instance Show Module where
   show (Module env) = "(" <> unwords ["Module", show env] <> ")"
-  show (ModuleFun {}) = "(ModuleFun _)"
+  show (ModuleFun _) = "(ModuleFun _)"
 
 -- | The actual type- and value environment.
 data Env = Env
@@ -1154,22 +1150,6 @@ reverseSubstitutions :: M.Map VName VName -> M.Map VName [VName]
 reverseSubstitutions =
   M.fromListWith (<>) . map (second pure . uncurry (flip (,))) . M.toList
 
--- | Follow substitution chains: look up a name in an existing
--- substitution map and use the result if found.  This mirrors
--- 'lookupSubst' in Defunctorise.
-lookupSubst :: VName -> M.Map VName VName -> VName
-lookupSubst v substs = case M.lookup v substs of
-  Just v' | v' /= v -> lookupSubst v' substs
-  _ -> v
-
--- | Compose new substitutions with pending ones by forwarding through
--- the existing map.  This ensures that when we apply substitutions to
--- a functor closure, any previously pending substitutions are updated
--- to point to their final targets.
-forwardSubsts :: M.Map VName VName -> M.Map VName VName -> M.Map VName VName
-forwardSubsts new old =
-  M.map (`lookupSubst` old) new <> old
-
 substituteInModule :: M.Map VName VName -> Module -> Module
 substituteInModule substs = onModule
   where
@@ -1183,17 +1163,11 @@ substituteInModule substs = onModule
       Env (replaceM onTerm terms) (replaceM id types)
     onModule (Module env) =
       Module $ onEnv env
-    onModule (ModuleFun clo_env pending p body) =
-      -- Only forward substitutions into the pending substitution map.
-      -- Do NOT apply onEnv to the closure—the closure uses internal
-      -- names that shouldn't be rewritten.  The pending map records
-      -- that at application time we must rename those internal names.
-      -- This mirrors Defunctorise.substituteInMod for ModFun.
-      ModuleFun clo_env (forwardSubsts substs pending) p body
+    onModule (ModuleFun f) =
+      ModuleFun $ \m -> onModule <$> f (substituteInModule substs m)
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
-
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1234,8 +1208,9 @@ evalModExp env (ModParens me _) =
 evalModExp env (ModLambda p ret e loc) =
   pure
     ( mempty,
-      ModuleFun env mempty p $
-        case ret of
+      ModuleFun $ \am -> do
+        let env' = env {envTerm = M.insert (modParamName p) (TermModule am) $ envTerm env}
+        fmap snd . evalModExp env' $ case ret of
           Nothing -> e
           Just (se, rsubsts) -> ModAscript e se rsubsts loc
     )
@@ -1243,11 +1218,8 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
   (f_env, f') <- evalModExp env f
   (e_env, e') <- evalModExp env e
   case f' of
-    ModuleFun clo_env pending p body -> do
-      let arg = substituteInModule pending $ substituteInModule psubst e'
-          env' = clo_env {envTerm = M.insert (modParamName p) (TermModule arg) $ envTerm clo_env}
-      raw_res <- snd <$> evalModExp env' body
-      let res_mod = substituteInModule rsubst $ substituteInModule pending raw_res
+    ModuleFun f'' -> do
+      res_mod <- substituteInModule rsubst <$> f'' (substituteInModule psubst e')
       let res_env = case res_mod of
             Module x -> x
             _ -> mempty
