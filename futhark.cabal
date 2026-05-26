@@ -324,6 +324,7 @@ library
 --      Futhark.Optimise.EffSeqIntra.Helper
 --      Futhark.Optimise.IntraSeq
       Futhark.Optimise.IntraShm2Reg.SymTabs
+      Futhark.Optimise.IntraShm2Reg.CodeGen
       Futhark.Optimise.IntraShm2Reg.IntraBndAn
       Futhark.Optimise.IntraShm2Reg
       Futhark.Optimise.BlkRegTiling

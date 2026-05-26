@@ -10,6 +10,7 @@ import Futhark.IR.GPU
 import Futhark.Pass
 import Futhark.Optimise.IntraShm2Reg.SymTabs
 import Futhark.Optimise.IntraShm2Reg.IntraBndAn
+import Futhark.Optimise.IntraShm2Reg.CodeGen(fixRegKerResults)
 
 {--
 --import Control.Monad
@@ -63,7 +64,7 @@ applyShm2Reg =
     { passName = "Enabling Register Mapping of Arrays in IntraGroup Kernels"
     , passDescription = "Attempts to change the default allocation of fast arrays in intra-group kernels from shared memory to registers."
     , passFunction = \ prog -> do
-        -- trace ("\nProg before pass: "++prettyString prog++"\n") $
+        trace ("\nProg before pass: "++prettyString prog++"\n") $
           intraproceduralTransformationWithConsts pure applyShm2RegOnFun prog
     }
 
@@ -104,7 +105,7 @@ onOutStm :: TopEnv -> Stm GPU -> Shm2RegM (TopEnv, Stm GPU)
 --         possibly for efficient sequentialization.
 onOutStm env stm@( Let pat aux ( Op ( SegOp ( SegMap lvl space ts kbody ) ) ) )
   | (par_idxs, par_dims) <- unzip (unSegSpace space),
-    length par_idxs == 1,
+    -- length par_idxs == 1,
     SegBlock _virt (Just _grid) <- lvl,
     Body yyy stms kres <- kbody = do
     -- shouldSequentialize (stmAuxAttrs aux) = do
@@ -113,16 +114,22 @@ onOutStm env stm@( Let pat aux ( Op ( SegOp ( SegMap lvl space ts kbody ) ) ) )
       fvs_block = freeIn stm
       bu_env = freshBotEnv (zip3 par_idxs par_dims par_dims_pe) fvs_block
   let env_intra = (env, bu_env)
-  stms' <- trace ("Attributes Intragroup Ker: " ++ prettyString attrs) $
-             shm2RegOnIntraStms env_intra stms
-  let kbody' = Body yyy stms' kres
+      ker_idxs_params = map (\nm -> Param mempty nm (Prim (IntType Int64))) par_idxs
+  scope <- askScope
+  kbody' <-
+    localScope (scope <> scopeOfLParams ker_idxs_params <> scopeOf (bodyStms kbody)) $ do
+      (bu_env', stms') <-
+        trace ("Attributes Intragroup Ker: " ++ prettyString attrs) $
+          shm2RegOnIntraStms env_intra stms
+      (kres_fix_stms, kres') <- fixRegKerResults bu_env' kres
+      pure $ Body yyy (stms' <> kres_fix_stms) kres'
   pure (env, Let pat aux ( Op ( SegOp ( SegMap lvl space ts kbody' ) ) ) )
 -- Loop
 onOutStm env (Let pat aux e)
   | Loop fpar_ses loop_form loop_body <- e,
     (fpars, _init_ses) <- unzip fpar_ses = do
     scope <- askScope
-    bdy' <- localScope (scope <> scopeOfFParams fpars) $
+    bdy'  <- localScope (scope <> scopeOfFParams fpars) $
               shm2RegOnOutBody env loop_body
     let e' = Loop fpar_ses loop_form bdy'
     pure (env, Let pat aux e')

@@ -5,6 +5,7 @@ module Futhark.Optimise.IntraShm2Reg.SymTabs
     BotEnv(..),
     RegEntry(..),
     AccessKind(..),
+    unifyAccK,
     freshBotEnv,
     initEntry1,
     initEntry2,
@@ -13,6 +14,7 @@ module Futhark.Optimise.IntraShm2Reg.SymTabs
     addIota2Env,
     addBinOp2Env,
     peFromSe,
+    removeTpConv,
     updateTopdownEnv,
     Env,
   ) where
@@ -26,6 +28,7 @@ import Data.Maybe
 import Futhark.IR.GPU
 import Futhark.Tools
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
+import Futhark.Util.Pretty
 
 -------------------------
 --- Monads for SoP
@@ -67,12 +70,27 @@ runShm2RegM scope env (Shm2RegM a) = modifyNameSource $ \src ->
 -------------------------
 
 data AccessKind = None | Irreg | Compat
+  deriving Eq
+
+instance Pretty AccessKind where
+  pretty None  = "None"
+  pretty Irreg = "Irreg"
+  pretty Compat= "Compat"
+
+-- | conservatively unifies access kinds
+unifyAccK :: AccessKind -> AccessKind -> AccessKind
+unifyAccK None kind = kind
+unifyAccK kind None = kind
+unifyAccK Irreg _   = Irreg
+unifyAccK _ Irreg   = Irreg
+unifyAccK _ _ = Compat      
+
 
 data RegEntry = RegEntry
   {
     shpdims :: [(SubExp, PrimExp VName)],
     -- ^ the shape of the array as SubExps and PrimExps as well.
-    pardims :: [(SubExp, PrimExp VName)],
+    pardims :: [PrimExp VName],
     -- ^ the parallel dimensions of a successful inner kernel;
     --   these should match the outer dimensions of @shape@
     bindings :: [(VName, AccessKind)]
@@ -80,11 +98,19 @@ data RegEntry = RegEntry
     --   its first bound name
   }
 
+instance Pretty RegEntry where
+  pretty reg_entry =
+    "\nRegEntry{\n\tShpDims: " <+> pretty (shpdims  reg_entry) <>
+     "\n\tParDims: " <+> pretty (pardims  reg_entry) <>
+     "\n\tBindings: "<+> pretty (bindings reg_entry) <>
+     "   }"
+
+
 initEntry1 :: [(SubExp, PrimExp VName)] -> RegEntry
 initEntry1 shpdims = RegEntry shpdims [] mempty
 
 initEntry2 :: [(SubExp, PrimExp VName)] ->
-              [(SubExp, PrimExp VName)] ->
+              [PrimExp VName] ->
               RegEntry
 initEntry2 shp pardims = RegEntry shp pardims mempty
 
@@ -101,8 +127,17 @@ data BotEnv = BotEnv
 --  , optstms :: Stms GPU
   }
 
+instance Pretty BotEnv where
+  pretty benv =
+    "BotEnv {\n\tParSpace: " <+> pretty (parSpace benv) <>
+     "\n\tFreeVars: " <+> pretty (freeVars benv) <>
+     "\n\tregArrays: "<+> (foldl (<>) ("") (map printBnd (M.toList (regArrays benv)))) <>
+     "   }"
+    where
+      printBnd (nm, etry) = ("\n\t" <+> pretty nm) <> pretty etry
+
 freshBotEnv :: [(VName, SubExp, PrimExp VName)] -> Names -> BotEnv
-freshBotEnv space fvs = BotEnv space fvs mempty
+freshBotEnv sp fvs = BotEnv sp fvs mempty
 
 ---------------------------
 --- TopDown Context
@@ -147,6 +182,10 @@ peFromSe env ptp (Var vnm) =
     Just pe -> pe
     Nothing -> LeafExp vnm ptp
 
+removeTpConv :: PrimExp VName -> PrimExp VName
+removeTpConv (ConvOpExp _convop pe) = removeTpConv pe
+removeTpConv pe = pe
+
 type Env = (TopEnv, BotEnv)
 
 -----------------------------------------
@@ -172,6 +211,10 @@ updateTopdownEnv env (Let (Pat [PatElem pat_nm pat_tp]) _aux e)
     Prim ptp <- pat_tp,
     pe <- peFromSe env ptp se =
     env { scalars = M.insert pat_nm (UnOpExp unop pe) (scalars env) }
+  | BasicOp (ConvOp convop se) <- e,
+    Prim ptp <- pat_tp,
+    pe <- peFromSe env ptp se =
+    env { scalars = M.insert pat_nm (ConvOpExp convop pe) (scalars env) }
   | otherwise = env
   where
     se0 = Constant $ IntValue $ Int64Value 0
