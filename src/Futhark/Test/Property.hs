@@ -174,52 +174,25 @@ getOutputType s entry =
       cmdOutput s entry
 
 validateGenTypes :: Server -> EntryName -> Maybe EntryName -> IO (Maybe PBTFailure)
-validateGenTypes _srv _propName Nothing = pure Nothing -- TODO: should have more logic to see if we can actually generate anything
-validateGenTypes srv propName (Just genName) = fmap (either Just (const Nothing)) . runExceptT $ do
-  -- find expected input types for generator
-  genIns <- liftIO $ getInputTypes srv genName
-  case genIns of
-    [sizeTy, seedTy] -> do
-      unless (sizeTy == "i64" && seedTy == "u64") $
-        throwE $
-          "Generator input type mismatch.\nGenerator "
-            <> genName
-            <> " takes size: "
-            <> sizeTy
-            <> " and seed: "
-            <> seedTy
-            <> "\nExpected size and seed to be i64 and u64, got: size type="
-            <> sizeTy
-            <> " and seed type="
-            <> seedTy
-    [] ->
-      throwE $
-        "Generator " <> genName <> " has no inputs? Expected 2 (size and seed)."
-    tys ->
-      throwE $
-        "Generator " <> genName <> " has " <> showText (length tys) <> " inputs; expected 2 (size and seed)."
+validateGenTypes _srv _prop_name Nothing = pure Nothing
+validateGenTypes srv prop_name (Just gen_name) = fmap (either Just (const Nothing)) . runExceptT $ do
+  gen_ins <- liftIO $ getInputTypes srv gen_name
+  gen_out <- liftIO $ getOutputType srv gen_name
 
   -- check expected output type for generator matches property input type
-  propTy <-
-    liftIO (getSingleInputType srv propName) >>= \case
+  test_ty <-
+    liftIO (getSingleInputType srv prop_name) >>= \case
       Left err -> throwE $ showText err
       Right ty -> pure ty
 
-  genOut <- liftIO $ getOutputType srv genName
+  let actual_tys = gen_ins ++ [gen_out]
+      expected_tys = ["i64", "u64", test_ty]
 
-  let isMatch = propTy == genOut
-
-  unless isMatch $
+  unless (actual_tys == expected_tys) $
     throwE $
-      "Generator output type mismatch.\nProperty "
-        <> propName
-        <> " expects: "
-        <> propTy
-        <> "\nGenerator "
-        <> genName
-        <> " produces: "
-        <> showText genOut
-        <> "\nExpected generator output type to equal the property input type."
+      ("Generator \"" <> gen_name <> "\" for property \"" <> prop_name <> "\" has invalid type.\n")
+        <> ("Expected: " <> T.intercalate " -> " expected_tys <> "\n")
+        <> ("Actual:   " <> T.intercalate " -> " actual_tys)
 
 validateShrinkTypes :: Server -> EntryName -> EntryName -> IO (Maybe PBTFailure)
 validateShrinkTypes srv propName shrinkName = fmap (either Just (const Nothing)) . runExceptT $ do
@@ -314,7 +287,7 @@ validateOneSpec srv eps spec = do
         liftIO (validateShrinkTypes srv prop sh) >>= maybe (pure ()) throwE
 
 -- | Extract property specifications from the server by looking for entry
--- points with #[prop(...)] attributes. 
+-- points with #[prop(...)] attributes.
 extractPropSpecsFromServer :: Server -> IO [PropSpec]
 extractPropSpecsFromServer srv = do
   epsE <- cmdEntryPoints srv
@@ -968,7 +941,7 @@ getVal srv name = do
         "Expected "
           <> name
           <> " to decode, got: "
-          <> (valueText v)
+          <> valueText v
 
 getDataVal :: Server -> VarName -> IO Value
 getDataVal s name = do

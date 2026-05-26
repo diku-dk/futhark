@@ -1,3 +1,3 @@
-Generator input type mismatch.
-Generator gen takes size: i32 and seed: i32
-Expected size and seed to be i64 and u64, got: size type=i32 and seed type=i32
+Generator "gen" for property "prop" has invalid type.
+Expected: i64 -> u64 -> i8
+Actual:   i32 -> i32 -> i8
