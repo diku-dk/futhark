@@ -13,7 +13,7 @@ module rand_i32 = uniform_int_distribution i32 rng_engine
 
 entry gen_simple (size: i64) (seed: u64) : record =
   let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
-  let (_, x) = rand_i32.rand (-100i32, 100i32) rng0
+  let (_, x) = rand_i32.rand (-i32.i64 size, i32.i64 size) rng0
   in {x = x, xs = [x, x + 1, x + 2]}
 
 def add_to_all (x: i32) (xs: [3]i32) : [3]i32 =
@@ -41,7 +41,5 @@ def step0 (v: i32) : i32 =
 entry shrink_simple (r: record) (random: u64) : record =
   let tactic = random % 2
   in if tactic == 0
-     then let x' = step0 r.x
-          in {x = x', xs = r.xs}
-     else let xs' = map step0 r.xs
-          in {x = r.x, xs = xs'}
+     then {x = step0 r.x, xs = r.xs}
+     else {x = r.x, xs = map step0 r.xs}

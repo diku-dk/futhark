@@ -14,7 +14,7 @@ module rand_i32 = uniform_int_distribution i32 rng_engine
 
 entry gen_simple (size: i64) (seed: u64) : {x: i32, y: i32} =
   let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
-  let (_, x) = rand_i32.rand (-100i32, 100i32) rng0
+  let (_, x) = rand_i32.rand (-i32.i64 size, i32.i64 size) rng0
   in {x = x, y = x - 1}
 
 def simple (r: {x: i32, y: i32}) : (i32, i32) =
@@ -42,7 +42,5 @@ def step (v: i32) : i32 =
 entry shrink_simple (r: {x: i32, y: i32}) (random: u64) : {x: i32, y: i32} =
   let tactic = random % 2
   in if tactic == 0
-     then let x' = step r.x
-          in {x = step r.x, y = r.y}
-     else let y' = step r.y
-          in {x = r.x, y = step r.y}
+     then {x = step r.x, y = r.y}
+     else {x = r.x, y = step r.y}

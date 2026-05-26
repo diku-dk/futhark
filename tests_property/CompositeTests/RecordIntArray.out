@@ -1,2 +1,2 @@
 PBT FAIL: prop_simple_fail size=50 seed=REDACTED after N tests
-Counterexample: {x = -1i32, xs = [0i32, 0i32, 0i32]}
+Counterexample: {x = 1i32, xs = [0i32, 0i32, 0i32]}

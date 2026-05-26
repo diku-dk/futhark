@@ -15,7 +15,7 @@ module rand_i32 = uniform_int_distribution i32 rng_engine
 
 entry gen_simple (size: i64) (seed: u64) : tuple =
   let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
-  let (_, x) = rand_i32.rand (-100i32, 100i32) rng0
+  let (_, x) = rand_i32.rand (-i32.i64 size, i32.i64 size) rng0
   in (x, x - 1)
 
 def simple (r: tuple) : (i32, i32) =

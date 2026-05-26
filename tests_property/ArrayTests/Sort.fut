@@ -47,41 +47,10 @@ def nondecreasing (xs: []i32) : bool =
      else map2 (<=) (take (n - 1) xs :> [n - 1]i32) (drop 1 xs :> [n - 1]i32)
           |> reduce (&&) true
 
-#[prop(gen(gen_simple),shrink(shrink_simple))]
+#[prop(gen(gen_simple))]
 entry prop_simple_fail (input: []i32) : bool =
   nondecreasing (flaky_sort input)
 
-#[prop(gen(gen_simple),shrink(shrink_simple))]
+#[prop(gen(gen_simple))]
 entry prop_simple_succ (input: []i32) : bool =
   nondecreasing (real_sort input)
-
-def shrink_i32_to_witness (v: i32) : i32 =
-  if v == 0i32
-  then 0i32
-  else if v > 0i32
-  then 1i32
-  else -1i32
-
-entry shrink_simple (xs: []i32) (random: u64) : []i32 =
-  let n = length xs
-  in if n == 0
-     then xs
-     else let r = random
-          let t = i64.u64 r % (2 * n)
-          -- Phase 1: shrink one element into {-1,0,1}.
-          in if t < n
-             then let i = t
-                  let old = xs[i]
-                  let new = shrink_i32_to_witness old
-                  in if new == old
-                     then -- Avoid returning the same failing candidate.
-                          -- Drop an element instead.
-                          if n == 1
-                          then []
-                          else take i xs ++ drop (i + 1) xs
-                     else tabulate n (\j -> if j == i then new else xs[j])
-             else -- Phase 2: drop one element.
-                  let i = t - n
-                  in if n == 1
-                     then []
-                     else take i xs ++ drop (i + 1) xs

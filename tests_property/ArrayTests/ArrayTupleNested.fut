@@ -8,7 +8,7 @@ let prop_all_equal (xs: []([](i8, i16), i32)) : bool =
 -- | Generator needs to return the specific nested structure expected by the property
 entry gen_record_sums_fail (size: i64) (_seed: u64) : []([](i8, i16), i32) =
   let n = if size < 0 then 0 else size
-  in tabulate n (\i ->([(1i8, 10i16)], 100i32))
+  in tabulate n (\_ ->([(1i8, 10i16)], 100i32))
 
 -- ==
 -- property: prop_record_sums_fail
@@ -18,6 +18,3 @@ entry prop_record_sums_fail (input: []([](i8, i16), i32)) : bool =
     false
   else
     true
-
-entry shrinker (xs: []([](i8, i16), i32)) (_random: u64) : []([](i8, i16), i32) =
-  [([(10i8, 10i16)], 0i32)]

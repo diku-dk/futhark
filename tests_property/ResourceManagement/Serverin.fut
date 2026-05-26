@@ -10,8 +10,9 @@
 -- may fail with a variable/name-collision error.
 
 entry gen_array (size: i64) (seed: u64) : []i32 =
-  let n = if size < 0 then 0 else size
-  in replicate n seed
+  if size < 0 
+    then [] 
+    else replicate size (i32.u64 seed)
 
 #[prop(gen(gen_array),size(10))]
 entry prop_auto_shrink_reuses_putval_names (_xs: []i32) : bool =

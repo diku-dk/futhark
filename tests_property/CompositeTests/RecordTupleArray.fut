@@ -1,7 +1,5 @@
 -- ==
 -- property: prop_simple_succ
-
--- ==
 -- property: prop_simple_fail
 
 import "../lib/github.com/diku-dk/cpprandom/random"
@@ -51,60 +49,11 @@ entry gen_simple (size: i64) (seed: u64) : rec =
 def simple_succ (r: rec) : i32 =
   i32.abs r.a.xs[0] + i32.abs r.b.0.t.0 + i32.abs r.c[0].xs[0]
 
-#[noprop(gen(gen_simple),shrink(shrink_simple))]
+#[prop(gen(gen_simple))]
 entry prop_simple_succ (r: rec) : bool =
   simple_succ r
   == (i32.abs r.a.xs[0] + i32.abs r.b.0.t.0 + i32.abs r.c[0].xs[0])
 
-entry shrink_rec (r: rec) : []rec =
-  let a0 = r.a.xs[0]
-  let a1 = r.a.xs[1]
-  let a2 = r.a.xs[2]
-  let a3 = r.a.xs[3]
-  let b0 = r.b.0.xs[0]
-  let b1 = r.b.0.xs[1]
-  let b2 = r.b.0.xs[2]
-  let b3 = r.b.0.xs[3]
-  let c00 = r.c[0].xs[0]
-  let c10 = r.c[1].xs[0]
-  let a0' = step0 a0
-  let b0' = step0 b0
-  let c00' = step0 c00
-  let c10' = step0 c10
-  let r1: rec =
-    { a = {xs = [a0', a1, a2, a3], t = r.a.t}
-    , b = r.b
-    , c = r.c
-    }
-  let r2: rec =
-    { a = r.a
-    , b = ({xs = [b0', b1, b2, b3], t = r.b.0.t}, r.b.1)
-    , c = r.c
-    }
-  let r3: rec =
-    { a = r.a
-    , b = r.b
-    , c =
-        [ {xs = [c00', r.c[0].xs[1], r.c[0].xs[2], r.c[0].xs[3]], t = r.c[0].t}
-        , r.c[1]
-        , r.c[2]
-        , r.c[3]
-        ]
-    }
-  let r4: rec =
-    { a = r.a
-    , b = r.b
-    , c =
-        [ r.c[0]
-        , {xs = [c10', r.c[1].xs[1], r.c[1].xs[2], r.c[1].xs[3]], t = r.c[1].t}
-        , r.c[2]
-        , r.c[3]
-        ]
-    }
-  in mk (a0' != a0) r1
-     ++ mk (b0' != b0) r2
-     ++ mk (c00' != c00) r3
-     ++ mk (c10' != c10) r4
 
 entry gen_simple_fail (size: i64) (seed: u64) : rec =
   gen_simple size seed
@@ -112,10 +61,7 @@ entry gen_simple_fail (size: i64) (seed: u64) : rec =
 def simple_fail (r: rec) : i32 =
   i32.abs r.a.xs[0] + i32.abs r.b.0.t.0 + i32.abs r.c[0].xs[0] + 1
 
-#[noprop(gen(gen_simple_fail),shrink(shrink_simple))]
+#[prop(gen(gen_simple_fail))]
 entry prop_simple_fail (r: rec) : bool =
   simple_fail r
   == (i32.abs r.a.xs[0] + i32.abs r.b.0.t.0 + i32.abs r.c[0].xs[0])
-
-entry shrink_simple (r: rec) : []rec =
-  shrink_rec r

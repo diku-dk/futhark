@@ -14,7 +14,7 @@ def inner_eq (r1: {a: i32, b: i32}) (r2: {o: i32, p: i32}) : bool =
 
 entry gen_simple (size: i64) (seed: u64) : ({a: i32, b: i32}, {o: i32, p: i32}) =
   let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
-  let (_, v) = rand_i32.rand (-100i32, 100i32) rng0
+  let (_, v) = rand_i32.rand (- i32.i64 size, i32.i64 size) rng0
   in ( {a = v, b = v + 1}
      , {o = v, p = v + 1}
      )
@@ -25,7 +25,7 @@ entry prop_simple_succ (r: ({a: i32, b: i32}, {o: i32, p: i32})) : bool =
 
 entry gen_simple_fail (size: i64) (seed: u64) : ({a: i32, b: i32}, {o: i32, p: i32}) =
   let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
-  let (_, v) = rand_i32.rand (-100i32, 100i32) rng0
+  let (_, v) = rand_i32.rand (- i32.i64 size, i32.i64 size) rng0
   in ( {a = v, b = v + 1}
      , {o = v + 1, p = v + 1}
      )

@@ -1,22 +1,6 @@
 -- ==
 -- property: prop_record_sums_succ
-
--- ==
 -- property: prop_record_sums_fail
-
--- Simple array shrinking demo (new protocol: (x,tactic)->(x',status:i8))
---
--- We test: "all elements are 1".
--- One generator always succeeds, one generator introduces a 0 so it fails.
---
--- Shrinker order (SWAPPED):
---   1) shrink scalars toward 1 (set one element to 1 by index = tactic)
---   2) remove values (drop one element by index = tactic - n)
---
--- status i8:
---   0 = produced candidate (use it; runner restarts tactic from 0 on FAIL)
---   1 = no-op candidate (runner should advance tactic)
---   2 = stop (no more tactics)
 
 def all_equal_1 (x: i32) : bool =
   x == 1i32

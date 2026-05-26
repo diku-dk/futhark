@@ -52,13 +52,13 @@ def replace_at [n] (xs: [n]record) (idx: i64) (v: record) : [n]record =
 entry shrink_arr_record (xs: arr) (random: u64) : arr =
   let n: i64 = length xs
   let tactic = random % u64.i64 n
-  let field_tactics: i32 = 2i32 * i32.i64 n
-  let total_tactics: i32 =
+  let field_tactics = 2 * n
+  let total_tactics =
     if n <= 1
     then field_tactics
-    else 2i32 + field_tactics
+    else 2 + field_tactics
   let t = if tactic < 0 then 0 else tactic
-  in if t >= u64.i32 total_tactics
+  in if i64.u64 t >= total_tactics
      then xs
      else if n > 1 && t == 0
      then let xs' = take (n - 1) xs

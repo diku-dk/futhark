@@ -44,37 +44,31 @@ def update_at_n [n] (kk: i64) (xs: [n]record) : ([n]record, bool) =
   let r' =
     if s' != r.s
     then {s = s', a = r.a}
-    else if a' != r.a
-    then {s = r.s, a = a'}
-    else r
+    else {s = r.s, a = a'}
   let changed = r' != r
   let xs' = tabulate n (\i -> if i == kk then r' else xs[i])
   in (xs', changed)
 
 entry shrink_arr_record (xs: []record) (random: u64) : []record =
-  let n: i64 = length xs
-  in if n == 0
-     then xs
-     else let r0 = i64.u64 random
-          let r = if r0 < 0 then -r0 else r0
-          let t = r % (2 * n)
-          -- Phase 1: try to shrink one record field.
-          in if t < n
-             then let xsN: [n]record = xs :> [n]record
-                  let (xsN', changed) = update_at_n t xsN
-                  let out: []record = xsN' :> []record
-                  in if changed
-                     then out
-                     else -- Avoid returning the same failing candidate.
-                     if n == 1
-                     then []
-                     else take t xs ++ drop (t + 1) xs
-             else -- Phase 2: drop one record.
 
-                  let i = t - n
-                  in if n == 1
-                     then []
-                     else take i xs ++ drop (i + 1) xs
+  let n = length xs
+  let r = i64.abs (i64.u64 random)
+  let t = r % (2 * n)
+  in if t < n
+      then let xsN: [n]record = xs :> [n]record
+          let (xsN', changed) = update_at_n t xsN
+          let out: []record = xsN' :> []record
+          in if changed
+              then out
+              else
+              if n == 1
+              then []
+              else take t xs ++ drop (t + 1) xs
+      else
+          let i = t - n
+          in if n == 1
+              then []
+              else take i xs ++ drop (i + 1) xs
 
 #[prop(gen(gen_record_sums_fail),shrink(shrink_arr_record))]
 entry prop_record_sums_fail (input: []record) : bool =
