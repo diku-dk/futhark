@@ -7,8 +7,8 @@ module Futhark.Optimise.IntraShm2Reg.SymTabs
     AccessKind(..),
     unifyAccK,
     freshBotEnv,
+    initEntry,
     initEntry1,
-    initEntry2,
     TopEnv(..),
     freshTopEnv,
     addIota2Env,
@@ -17,13 +17,17 @@ module Futhark.Optimise.IntraShm2Reg.SymTabs
     removeTpConv,
     updateTopdownEnv,
     Env,
+    intOfAttr2RegMem,
+    removeAttr2RegMem,
+    intOfAttrGlb2RegOnly,
+    removeAttrGlb2RegOnly,
   ) where
 
 import Control.Monad.Reader
 import Control.Monad.State hiding (state)
---import Control.Monad (forM)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
---import Data.Set qualified as S
+import Data.Set qualified as S
 import Data.Maybe
 import Futhark.IR.GPU
 import Futhark.Tools
@@ -109,10 +113,10 @@ instance Pretty RegEntry where
 initEntry1 :: [(SubExp, PrimExp VName)] -> RegEntry
 initEntry1 shpdims = RegEntry shpdims [] mempty
 
-initEntry2 :: [(SubExp, PrimExp VName)] ->
+initEntry :: [(SubExp, PrimExp VName)] ->
               [PrimExp VName] ->
               RegEntry
-initEntry2 shp pardims = RegEntry shp pardims mempty
+initEntry shp pardims = RegEntry shp pardims mempty
 
 data BotEnv = BotEnv
   {
@@ -151,15 +155,14 @@ data TopEnv = TopEnv
     -- ^ binds the name of an iota array to its size
   , inv_iotas   :: M.Map (PrimExp VName) (VName, SubExp)
     -- ^ binds a size pexp to the name of a iota and its SubExp size
-  , arrTransf   :: M.Map VName (VName, [Int])
-    -- ^ This needs to change!
-    --   Models a chain of rearrange transformations:
-    --   binds the name of an array to (1) the name of its base array,
-    --   and (2) the complete permutation
+  , rootSlcArr  :: M.Map VName VName
+    -- ^ binds the name of a sliced array to the parent
+  , userParams  :: Names
+    -- ^ the set of user-defined parameters
   } deriving Show
 
 freshTopEnv :: TopEnv
-freshTopEnv = TopEnv [] mempty mempty mempty mempty
+freshTopEnv = TopEnv [] mempty mempty mempty mempty mempty
 
 addIota2Env :: TopEnv -> (VName, SubExp, PrimExp VName) -> TopEnv
 addIota2Env env (iotnm, w_se, w_pe) =
@@ -195,10 +198,14 @@ type Env = (TopEnv, BotEnv)
 -- | The top-down pass records the scalar expansion, iotas,
 --     tiling calls and the like.
 --   ToDos:
---     1. maybe record also the change-of-layout transformations
---        into an LMAD, i.e., in the @arrTransf@ filed of @TopEnv@
+--     1. treat @rootSlcArr@
 updateTopdownEnv :: TopEnv -> Stm GPU -> TopEnv
 updateTopdownEnv env (Let (Pat [PatElem pat_nm pat_tp]) _aux e)
+  | BasicOp (Index arrnm _slice) <- e,
+    root_nm <- fromMaybe arrnm $ M.lookup arrnm (rootSlcArr env) =
+    env { rootSlcArr = M.insert pat_nm root_nm (rootSlcArr env) }
+  | BasicOp (UserParam _nm _default_se) <- e =
+    env { userParams = oneName pat_nm <> userParams env }
   | BasicOp (Iota w start stride Int64) <- e,
     start == se0 && stride == se1,
     pe_w <- peFromSe env i64ptp w =
@@ -221,6 +228,43 @@ updateTopdownEnv env (Let (Pat [PatElem pat_nm pat_tp]) _aux e)
     se1 = Constant $ IntValue $ Int64Value 1
     i64ptp = IntType Int64
 updateTopdownEnv env _ = env
+
+
+----------------------------------------------------
+--- Utility Functions, e.g., parsing attributes
+----------------------------------------------------
+
+hasCompIntAttr :: String -> Attr -> Bool
+hasCompIntAttr str (AttrComp attr_nm [AttrInt _]) =
+  attr_nm == nameFromString str
+hasCompIntAttr _ _ = False
+
+getIntFromAttr :: String -> Attrs -> Maybe Int
+getIntFromAttr str (Attrs attrs) =
+  let attrs' = S.toList attrs
+   in case L.findIndex (hasCompIntAttr str) attrs' of
+        Just ind ->
+          case attrs' !! ind of
+            AttrComp _ [AttrInt kk] ->
+              Just $ fromIntegral kk
+            _ -> Nothing
+        Nothing -> Nothing
+
+removeAttr :: String -> Attrs -> Attrs
+removeAttr str (Attrs attrs) =
+  Attrs $ S.filter (not . hasCompIntAttr str) attrs
+
+intOfAttr2RegMem :: Attrs -> Maybe Int
+intOfAttr2RegMem = getIntFromAttr "toregmem"
+
+removeAttr2RegMem :: Attrs -> Attrs
+removeAttr2RegMem = removeAttr "toregmem"
+
+intOfAttrGlb2RegOnly :: Attrs -> Maybe Int
+intOfAttrGlb2RegOnly = getIntFromAttr "glb2reg_only"
+
+removeAttrGlb2RegOnly :: Attrs -> Attrs
+removeAttrGlb2RegOnly = removeAttr "glb2reg_only"
 
 -----------------------------------------
 --- Email Nikolaj

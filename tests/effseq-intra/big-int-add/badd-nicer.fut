@@ -85,11 +85,21 @@ let badd0 [ipb][n] (areg : [ipb*n][4]u64) (breg : [ipb*n][4]u64) : [ipb*n][4]u64
   in  rs
 
 let badd [ipb][n] (as : [(ipb*n)][4]u64) (bs : [(ipb*n)][4]u64) : [(ipb*n)*4]u64 =
-  let ash = opaque (#[toregmem(1)] as)
-  let bsh = opaque (#[toregmem(1)] bs) 
---  let ash = #[toregmem(1)] manifest as
---  let bsh = #[toregmem(1)] manifest bs
+  let ash = #[glb2reg_only(1)] manifest as
+  let bsh = #[glb2reg_only(1)] manifest bs
+
+  --let ash = opaque (#[toregmem(1)] as)
+  --let bsh = opaque (#[toregmem(1)] bs) 
   in  flatten (badd0 ash bsh)
+
+---- ==
+---- entry: oneAddition1024
+---- compiled random input { [32768][512][4]u64  [32768][512][4]u64 } auto output
+--entry oneAddition1024 [m] (ass0: [m][512][4]u64) (bss0: [m][512][4]u64) : [m][2*256][4]u64 = #[unsafe]
+--   let ass = ass0 :> [m][(2*256)][4]u64
+--   let bss = bss0 :> [m][(2*256)][4]u64
+--   let rss = imap2Intra ass bss badd |> map unflatten
+--   in  rss
 
 -- ==
 -- entry: oneAddition1024

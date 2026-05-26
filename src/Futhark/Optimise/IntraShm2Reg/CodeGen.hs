@@ -7,6 +7,7 @@ module Futhark.Optimise.IntraShm2Reg.CodeGen
   ( updateStm, genKerReg2Shm, genKerShm2Reg, fixRegKerResults )
   where
 
+import Data.Maybe
 import Data.Map.Strict qualified as M
 import Data.Sequence qualified as Sq
 import Futhark.IR.GPU
@@ -57,7 +58,8 @@ updateStm (_td_env, bu_env) (Let (Pat patels) aux e)
   let bdyres'= map fff $ zip3 patels bdyres ts
       kbody' = kbody { bodyResult = bdyres' }
       e' = Op $ SegOp $ SegMap (SegThreadInBlock vrt) inner_space ts kbody'
-  pure $ Sq.singleton $ Let (Pat patels) aux e'
+      aux' = aux { stmAuxAttrs = removeAttr2RegMem (stmAuxAttrs aux) }
+  pure $ Sq.singleton $ Let (Pat patels) aux' e'
   where
     fff (_, res, Acc{}) = res
     fff (pel, Returns ResultMaySimplify certs se, _)
@@ -72,6 +74,46 @@ updateStm (_td_env, bu_env) (Let (Pat [patel]) aux e)
   -- ^ the access kinds were merged into @orig_nm@ by @onBotUpStm@,
   --   hence we simply verify the original name subjecto to @opaque@ 
   pure $ Sq.singleton $ Let (Pat [patel]) aux $ BasicOp $ SubExp $ Var orig_nm
+--
+-- a successful Manifest target to "glb2reg_only" whose root
+--   array is indeed in global memory is translated to a
+--   copying segmap:
+updateStm (td_env, bu_env) (Let (Pat [pel]) aux e)
+  | BasicOp (Manifest arrnm _) <- e,
+    regMapSucceeds bu_env (patElemName pel),
+    Just _ <- intOfAttrGlb2RegOnly (stmAuxAttrs aux),
+    -- check that the root of @arrnm@ is in global memory:
+    glbnm <- fromMaybe arrnm (M.lookup arrnm (rootSlcArr td_env)),
+    nameIn glbnm (freeVars bu_env),
+    -- get its entry
+    Just etry <- M.lookup (patElemName pel) (regArrays bu_env),
+    n_tot <- length (shpdims etry),
+    n_par <- length (pardims etry),
+    n_par > 0 && n_par < n_tot = do
+  let par_size_ses = map fst $ take n_par $ shpdims etry
+  scope <- askScope
+  (shm_nm, stms_manifest) <-
+    runBuilder $ localScope scope $ do
+      letExp (nameFromString "arr_shm") e
+  e_sgmap <- genKerShm2Reg par_size_ses (patElemDec pel) shm_nm
+  let aux' = aux { stmAuxAttrs = removeAttrGlb2RegOnly (stmAuxAttrs aux) }
+  pure $ stms_manifest Sq.|> Let (Pat [pel]) aux' e_sgmap
+--
+-- A Manifest that was target to "glb2reg_only" BUT
+--   whose root array is NOT in global memory gets
+--   transformed into a trivial copy statement
+updateStm (td_env, bu_env) (Let (Pat [pel]) aux e)
+  | BasicOp (Manifest arrnm perm) <- e,
+    isIdentityPerm perm,
+    regMapSucceeds bu_env (patElemName pel),
+    Just _ <- intOfAttrGlb2RegOnly (stmAuxAttrs aux),
+    -- check that the root of @arrnm@ is in global memory:
+    glbnm <- fromMaybe arrnm (M.lookup arrnm (rootSlcArr td_env)),
+    not (nameIn glbnm (freeVars bu_env)) = do
+  let aux' = aux { stmAuxAttrs = removeAttrGlb2RegOnly (stmAuxAttrs aux) }
+  pure $ Sq.singleton $ Let (Pat [pel]) aux' $ BasicOp $ SubExp $ Var arrnm
+{--
+-- This is not needed any more since we decided to use MANIFEST!!!
 --
 -- slicing a global memory array: we assume the parallel space
 --   can be found as part of the corresponding entry in @bu_env@
@@ -96,6 +138,7 @@ updateStm (_td_env, bu_env) (Let (Pat [pel]) aux e)
   let par_size_ses = map fst $ take n_par $ shpdims etry
   e_sgmap <- genKerShm2Reg par_size_ses (patElemDec pel) slc_shm_nm
   pure $ stms_manifest Sq.|> Let (Pat [pel]) aux e_sgmap
+--}
 --
 -- default case: don't change a thing!
 updateStm _ stm =

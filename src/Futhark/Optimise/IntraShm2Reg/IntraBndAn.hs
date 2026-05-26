@@ -5,8 +5,7 @@ module Futhark.Optimise.IntraShm2Reg.IntraBndAn
 --import Control.Monad.Reader
 --import Control.Monad.State hiding (state)
 --import Control.Monad (forM)
-import Data.List qualified as L
-import Data.Set qualified as S
+-- import Data.Set qualified as S
 import Data.Map.Strict qualified as M
 import Data.Sequence qualified as Sq
 import Data.Maybe
@@ -93,8 +92,61 @@ applySchedOnLambda env lam = do
 -----------------------------------
 --- Adding a target for analysis:
 -----------------------------------
-
+-- | Arguments:
+--     1. the top-down and bottom-up environments
+--     2. the target statement
+--   Result:
+--     A new bottom up environment, which potentially
+--     contains a new entry corresponding to the result
+--     of the current statement being mapped to register
+--     memory (if safe and if so indicated by user, or if
+--     we are in cases such as loop/if where we deemed
+--     to be always beneficial to use register mapping)
+--     
+-- To DO:
+--   (1) check that the sizes of the register-allocated slice
+--       only contains constants or user-defined params
 addTargetForAn :: (TopEnv, BotEnv) -> Stm GPU -> BotEnv
+-- the case of a manifest having the attribute "glb2reg_only":
+addTargetForAn (td_env, bu_env) (Let pat aux e)
+  | BasicOp (Manifest arrnm perm) <- e,
+    isIdentityPerm perm,
+    -- check that the root of @arrnm@ is in global memory:
+    glbnm <- fromMaybe arrnm (M.lookup arrnm (rootSlcArr td_env)),
+    nameIn glbnm (freeVars bu_env),
+    -- check it has a "glbtoreg_only" attribute; get its int field:    
+    attrs <- stmAuxAttrs aux,
+    Just num_par_dims <- intOfAttrGlb2RegOnly attrs,
+    [pel] <- patElems pat,
+    Array _ptp shp_res _u <- patElemDec pel,
+    num_par_dims < length (shapeDims shp_res) =
+  let shp_res_ses = shapeDims shp_res
+      shp_res_pes = map (peFromSe td_env i64ptp) shp_res_ses
+      par_dim_pes = take num_par_dims shp_res_pes
+      entry = initEntry (zip shp_res_ses shp_res_pes) par_dim_pes
+      patel_nm = patElemName pel
+  in  trace ("Target: Manifest, pat-el: "++prettyString patel_nm ++
+             " shape_ses: "++prettyString shp_res_ses ++
+             " shape_pes: " ++ prettyString shp_res_pes ) $
+        bu_env { regArrays = M.insert patel_nm entry (regArrays bu_env) }
+--
+-- the case of an inner-map kernel that can be changed to private result!
+addTargetForAn (td_env, bu_env) (Let pat aux (Op (SegOp sgmap)))
+  | SegMap (SegThreadInBlock {}) inner_space _ts kbody <- sgmap,
+    (_idxs, ker_dim_ses) <- unzip (unSegSpace inner_space),
+    ker_dim_pes <- map (peFromSe td_env i64ptp) ker_dim_ses,
+    attrs <- stmAuxAttrs aux,
+    Just _ <- intOfAttr2RegMem attrs,
+    bdyres <- bodyResult kbody,
+    length bdyres == length (patElems pat) =
+  let entry_space = ker_dim_pes -- zip ker_dim_ses ker_dim_pes
+      nm_entries = mapMaybe (mkEntry entry_space) $ zip (patElems pat) bdyres
+      regArrays' = foldl addEntry (regArrays bu_env) nm_entries
+  in  trace ("TARGET: Annotated Map, pat_els " ++ prettyString pat ++
+             " par-space: " ++ prettyString entry_space) $
+        bu_env { regArrays = regArrays' }
+{--
+-- We switched to supporting manifest, hence the hack below is NOT NEEDED
 -- The case of taking the slice of an array declared outside the scope
 --   of the intra-group kernel, i.e., an array allocated in global memory
 -- ToDo: we should also check a corresponding annotation.
@@ -112,22 +164,8 @@ addTargetForAn (td_env, bu_env) (Let pat _aux e)
              " shape_ses: "++prettyString shp_res_ses ++
              " shape_pes: " ++ prettyString shp_res_pes ) $
         bu_env { regArrays = M.insert patel_nm entry (regArrays bu_env) }
---
--- the case of an inner-map kernel that can be changed to private result!
-addTargetForAn (td_env, bu_env) (Let pat aux (Op (SegOp sgmap)))
-  | SegMap (SegThreadInBlock {}) inner_space _ts kbody <- sgmap,
-    (_idxs, ker_dim_ses) <- unzip (unSegSpace inner_space),
-    ker_dim_pes <- map (peFromSe td_env i64ptp) ker_dim_ses,
-    attrs <- stmAuxAttrs aux,
-    Just _ <- hasAttr2RegMem attrs,
-    bdyres <- bodyResult kbody,
-    length bdyres == length (patElems pat) =
-  let entry_space = ker_dim_pes -- zip ker_dim_ses ker_dim_pes
-      nm_entries = mapMaybe (mkEntry entry_space) $ zip (patElems pat) bdyres
-      regArrays' = foldl addEntry (regArrays bu_env) nm_entries
-  in  trace ("TARGET: Annotated Map, pat_els " ++ prettyString pat ++
-             " par-space: " ++ prettyString entry_space) $
-        bu_env { regArrays = regArrays' }
+
+--}
   where
     addEntry tab (nm, entry) = M.insert nm entry tab
     eql (x, y) = x == y
@@ -141,7 +179,7 @@ addTargetForAn (td_env, bu_env) (Let pat aux (Op (SegOp sgmap)))
         --   the kernel dimensions:
         length entry_space <= length shp_dims,
         all eql $ zip entry_space (map snd shp_dims) =
-      let entry = initEntry2 (zip shp_res_ses shp_res_pes) entry_space
+      let entry = initEntry (zip shp_res_ses shp_res_pes) entry_space
       in  Just (patElemName patel, entry) 
     --
     mkEntry _ _ = Nothing
@@ -150,6 +188,25 @@ addTargetForAn (_td_env, bu_env) (Let pat _aux e)
   | BasicOp (Opaque OpaqueNil (Var orig_nm)) <- e,
     Just orig_entry <- M.lookup orig_nm (regArrays bu_env), 
     [pel] <- patElems pat,
+    Array{} <- patElemDec pel =
+  let new_entry = orig_entry { bindings = mempty }
+      regArrays'= M.insert (patElemName pel) new_entry $ regArrays bu_env
+  in bu_env { regArrays = regArrays' }
+--
+-- the case of a manifest having the attribute "glb2reg_only",
+--   but which is not applied to a global-memory array: behaves
+--   just as a copy statement (as in Opaque above)
+addTargetForAn (td_env, bu_env) (Let pat aux e)
+  | BasicOp (Manifest arrnm perm) <- e,
+    isIdentityPerm perm,
+    -- check that the root of @arrnm@ is NOT in global memory:
+    glbnm <- fromMaybe arrnm (M.lookup arrnm (rootSlcArr td_env)),
+    not (nameIn glbnm (freeVars bu_env)),
+    -- check it has a "glbtoreg_only" attribute; get its int field:    
+    attrs <- stmAuxAttrs aux,
+    Just _ <- intOfAttrGlb2RegOnly attrs,
+    [pel] <- patElems pat,
+    Just orig_entry <- M.lookup arrnm (regArrays bu_env),
     Array{} <- patElemDec pel =
   let new_entry = orig_entry { bindings = mempty }
       regArrays'= M.insert (patElemName pel) new_entry $ regArrays bu_env
@@ -201,7 +258,7 @@ freshInnerEnv thids par_dims fvs =
 
 
 onBotUpStm :: Env -> Stm GPU -> Shm2RegM BotEnv
-onBotUpStm (top_env, bu_env) stm@(Let (Pat (pel:_)) _aux e)
+onBotUpStm (top_env, bu_env) stm@(Let (Pat (pel:_)) aux e)
   -- the target case: a segmented-map operation:
   | Op (SegOp sgmap) <- e,
     SegMap (SegThreadInBlock {}) inner_space _ts kbody <- sgmap,
@@ -217,9 +274,23 @@ onBotUpStm (top_env, bu_env) stm@(Let (Pat (pel:_)) _aux e)
   | BasicOp (Opaque OpaqueNil (Var orig_nm)) <- e,
     Just curr_entry <- M.lookup (patElemName pel) (regArrays bu_env),
     Just orig_entry <- M.lookup orig_nm (regArrays bu_env),
-    Array _ptp _shp _u <- patElemDec pel = do
+    Array{} <- patElemDec pel = do
   let new_entry = mergeBindings orig_entry curr_entry
       regArrays'= M.insert orig_nm new_entry $ regArrays bu_env
+  pure $ bu_env { regArrays = regArrays' }
+  -- the case of a Manifest with "glb2reg_only" attribute who is
+  --   not from global memory; just trasfer the entry to the parrent 
+  | BasicOp (Manifest arrnm perm) <- e,
+    -- check that the root of @arrnm@ is in not global memory:
+    glbnm <- fromMaybe arrnm (M.lookup arrnm (rootSlcArr top_env)),
+    isIdentityPerm perm && not (nameIn glbnm (freeVars bu_env)),
+    -- check it has a "glbtoreg_only" attribute; get its int field:    
+    Just _ <- intOfAttrGlb2RegOnly (stmAuxAttrs aux),
+    Just curr_entry <- M.lookup (patElemName pel) (regArrays bu_env),
+    Just orig_entry <- M.lookup arrnm (regArrays bu_env),
+    Array{} <- patElemDec pel = do
+  let new_entry = mergeBindings orig_entry curr_entry
+      regArrays'= M.insert arrnm new_entry $ regArrays bu_env
   pure $ bu_env { regArrays = regArrays' }
   -- conservative case: mark irregular all accesses of free vars in this stm
   | True = do
@@ -373,45 +444,3 @@ disqualify fvs inn_env =
     fkey fvnms nm kind =
       if nameIn nm fvnms then Irreg else kind
 
-----------------------------------------------------
---- Utility Functions, e.g., parsing attributes
-----------------------------------------------------
-
-hasAttr2RegMem :: Attrs -> Maybe Attr
-hasAttr2RegMem (Attrs attrs) =
-  let attrs' = S.toList attrs
-   in case L.findIndex isFromGlb2Fast attrs' of
-        Just i -> Just $ attrs' !! i
-        Nothing -> Nothing
-  where
-    isFromGlb2Fast :: Attr -> Bool
-    isFromGlb2Fast (AttrComp "toregmem" [AttrInt 1]) = True
-    isFromGlb2Fast _ = False
-
-{--
-findSeqAttr :: Attrs -> Maybe Attr
-findSeqAttr (Attrs attrs) =
-  let attrs' = S.toList attrs
-   in case L.findIndex isSeqFactor attrs' of
-        Just i -> Just $ attrs' !! i
-        Nothing -> Nothing
-  where
-    isSeqFactor :: Attr -> Bool
-    isSeqFactor (AttrComp "seq_factor" [AttrInt _]) = True
-    isSeqFactor _ = False
-
-getSeqFactor :: Attrs -> SubExp
-getSeqFactor attrs =
-  case findSeqAttr attrs of
-    Just i' ->
-      let (AttrComp _ [AttrInt x]) = i'
-       in intConst Int64 x
-    Nothing -> intConst Int64 4
-
-shouldSequentialize :: Attrs -> Bool
-shouldSequentialize attrs =
-  case findSeqAttr attrs of
-    Just _ -> True
-    Nothing -> False
-
---}
