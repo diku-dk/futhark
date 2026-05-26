@@ -447,9 +447,8 @@ runOne s config srv entryNameRef program = runExceptT $ do
 
         runUpdate propName
 
-        okE <- liftIO $
-          withCallKeepIns srv propName serverOk [serverIn] $
-            \vOk -> getVal srv vOk
+        okE <-
+          liftIO $ withCallKeepIns srv propName serverOk [serverIn] $ getVal srv
         ok <- case okE of
           Right b -> pure b
           Left err -> do
@@ -697,10 +696,10 @@ autoShrinkLoop srv propName genName vCounterExample size rng serverSize serverSe
 
             liftIO $ autoShrinkUpdatePhase (Right $ Just propName) seed
 
-            okE <- liftIO $
-              withCallKeepIns srv propName vOk [vCandidate] $
-                \vOk' -> getVal srv vOk'
-            ok <- either (throwE . ("Property " <>)) pure okE
+            ok <-
+              either (throwE . ("Property " <>)) pure <=< liftIO $
+                withCallKeepIns srv propName vOk [vCandidate] $
+                  getVal srv
 
             liftIO $ autoShrinkUpdatePhase (Left Nothing) seed
 
