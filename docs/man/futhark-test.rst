@@ -228,6 +228,11 @@ OPTIONS
   Run ``structure`` tests. These are not run by default. When this
   option is passed, no other testing is done.
 
+--seed=INT
+
+  Set random seed used to generate values for property-based tests. If unset, a
+  seed is randomly generated.
+
 --futhark=program
 
   The program used to perform operations (eg. compilation).  Defaults
