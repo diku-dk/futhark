@@ -98,6 +98,14 @@ peekWord64 (IOGenM ref) = liftIO $ do
   let (value, _nextGen) = random pureGen
   pure value
 
+-- | For unexcpected critical errors
+unexpectedFailure :: (MonadFail m) => T.Text -> m a
+unexpectedFailure msg =
+  fail $
+    "Unexpected critical error: "
+      <> T.unpack msg
+      <> "\nProbably a bug please report as issue on the GitHub repository."
+
 lookupArgText :: T.Text -> [T.Text] -> Maybe T.Text
 lookupArgText name = lookupArgWith name Just
 
@@ -138,9 +146,9 @@ atMostOnePropAttr entry attrs =
     [] -> pure []
     [spec] -> pure [spec]
     _ ->
-      fail $
+      unexpectedFailure $
         "Entry point '"
-          <> T.unpack entry
+          <> entry
           <> "' has more than one #[prop(...)] attribute."
 
 getInputTypes :: Server -> EntryName -> IO [TypeName]
@@ -303,7 +311,7 @@ extractPropSpecsFromServer srv = do
   where
     getOne entry = do
       attrsE <- cmdAttributes srv entry
-      attrs <- either (fail . show) pure attrsE
+      attrs <- either (unexpectedFailure . showText) pure attrsE
       atMostOnePropAttr entry attrs
 
 -- | Generate a candidate automatically.
@@ -871,7 +879,11 @@ freeVars s vs = do
     Just err
       | any (T.isPrefixOf "Unknown variable:") (failureMsg err) -> pure ()
       | otherwise ->
-          fail $ "cmdFree failed for " <> show vs <> ": " <> show (failureMsg err)
+          unexpectedFailure $
+            "cmdFree failed for "
+              <> showText vs
+              <> ": "
+              <> showText (failureMsg err)
 
 callFreeIns :: Server -> EntryName -> VarName -> [VarName] -> IO (Maybe PBTFailure)
 callFreeIns s entry out ins = do
@@ -887,7 +899,7 @@ handleRuntimeError :: EntryName -> CmdFailure -> Maybe PBTFailure
 handleRuntimeError entry err
   | isRuntimeError err = Just $ "Runtime error: " <> showText (failureMsg err)
   | otherwise =
-      fail . T.unpack $
+      unexpectedFailure $
         "Fatal Error on "
           <> entry
           <> ": "
@@ -925,27 +937,37 @@ renameVar srv new old = do
   cmdErrorHandlerM "cmdRename failed: " $ cmdRename srv old new
 
 cmdErrorHandlerM :: T.Text -> IO (Maybe CmdFailure) -> IO ()
-cmdErrorHandlerM msg action = action >>= maybe (pure ()) (fail . format)
+cmdErrorHandlerM msg action = action >>= maybe (pure ()) (unexpectedFailure . format)
   where
-    format err = T.unpack msg <> show err
+    format err = msg <> showText err
 
 cmdErrorHandlerE :: T.Text -> IO (Either CmdFailure a) -> IO a
-cmdErrorHandlerE msg action = action >>= either (fail . format) pure
+cmdErrorHandlerE msg action = action >>= either (unexpectedFailure . format) pure
   where
-    format err = T.unpack msg <> show err
+    format err = msg <> showText err
 
 getVal :: (GetValue a) => Server -> VarName -> IO a
 getVal srv name = do
   v <- getDataVal srv name
   case getValue v of
     Just b -> pure b
-    Nothing -> fail $ "Expected " <> T.unpack name <> " to decode, got: " <> T.unpack (valueText v)
+    Nothing ->
+      unexpectedFailure $
+        "Expected "
+          <> name
+          <> " to decode, got: "
+          <> (valueText v)
 
 getDataVal :: Server -> VarName -> IO Value
 getDataVal s name = do
   r <- FSV.getValue s name
   case r of
-    Left msg -> fail $ "getValue failed for " <> T.unpack name <> ": " <> T.unpack msg
+    Left msg ->
+      unexpectedFailure $
+        "getValue failed for "
+          <> name
+          <> ": "
+          <> msg
     Right v -> pure v
 
 prettyVar :: Server -> VarName -> TypeName -> IO T.Text
