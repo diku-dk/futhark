@@ -682,6 +682,12 @@ updatePhase propName phase activeTest size seed rand phaseRef =
         phaseRandom = rand
       }
 
+-- Given a known counterexample (generated with provided size and seed), here we
+-- try to find a smaller counterexample by decreasing the size (but using the
+-- same seed) until the generated value stops being a counterexample.
+--
+-- XXX: currently the automatic generator does not reuse the seed, but draws new
+-- numbers from the PBTGen.
 autoShrinkLoop ::
   Server ->
   EntryName ->
