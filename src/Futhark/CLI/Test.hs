@@ -350,34 +350,26 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
             context "Running compiled program" $
               withProgramServer program runner extra_options phaseRef $ \server -> do
                 let run = runCompiledEntry (FutharkExe futhark) server program
-                propSpecs <- extractPropSpecsFromServer server
+                liftIO (extractPropSpecs server (map propertyEntryPoint properties)) >>= \case
+                  Left err -> pure [Failure [err]]
+                  Right propSpecs -> liftIO $ do
+                    normal_test_result <- concat <$> mapM run ios
 
-                normal_test_result <- concat <$> mapM run ios
+                    let verifiedProps = selectRequestedPropSpecs properties propSpecs
+                    pbt_resultE <- runPBT pbtConfig server verifiedProps phaseRef program
 
-                let requestedNames = [propName | PropertyCase propName <- properties]
-                let diagnostics = propertyDiagnostics requestedNames propSpecs
+                    let allResults = flip map pbt_resultE $ \case
+                          Left err -> Failure [err]
+                          Right (Just e) -> Failure [e]
+                          Right Nothing -> Success
 
-                pbt_result <-
-                  if null diagnostics
-                    then do
-                      let verifiedProps = selectRequestedPropSpecs properties propSpecs
-                      pbt_resultE <- runPBT pbtConfig server verifiedProps phaseRef program
+                    let hasFailures = any (\case Failure _ -> True; _ -> False) allResults
 
-                      let allResults = flip map pbt_resultE $ \case
-                            Left err -> Failure [err]
-                            Right (Just e) -> Failure [e]
-                            Right Nothing -> Success
+                    when hasFailures $
+                      liftIO $
+                        propToFile program allResults
 
-                      let hasFailures = any (\case Failure _ -> True; _ -> False) allResults
-
-                      when hasFailures $
-                        liftIO $
-                          propToFile program allResults
-
-                      pure allResults
-                    else pure []
-
-                pure $ normal_test_result ++ diagnostics ++ pbt_result
+                    pure $ normal_test_result ++ allResults
 
       when (mode == Interpreted) $
         context "Interpreting" $
@@ -1004,42 +996,6 @@ excludeBackend config =
         "no_" <> T.pack (configBackend (configPrograms config))
           : configExclude config
     }
-
-propertyDiagnostics :: [T.Text] -> [PropSpec] -> [TestResult]
-propertyDiagnostics requested specs =
-  missingRequested ++ missingDeclarations
-  where
-    declared = map psProp specs
-
-    requestedWithoutAttr =
-      [name | name <- requested, name `notElem` declared]
-
-    declaredWithoutRequest =
-      [name | name <- declared, name `notElem` requested]
-
-    missingRequested =
-      [ Failure
-          [ "Unknown property in test specification: "
-              <> name
-              <> "\nThere is a '-- property: "
-              <> name
-              <> "' block, but no matching #[prop(...)] attribute on that entry point."
-          ]
-      | name <- requestedWithoutAttr
-      ]
-
-    missingDeclarations =
-      [ Failure
-          [ "Undeclared property test block for attribute-backed property: "
-              <> name
-              <> "\nThere is a #[prop(...)] attribute on entry point '"
-              <> name
-              <> "', but no matching '-- property: "
-              <> name
-              <> "' block in the test specification."
-          ]
-      | name <- declaredWithoutRequest
-      ]
 
 selectRequestedPropSpecs :: [PropertyCase] -> [PropSpec] -> [PropSpec]
 selectRequestedPropSpecs properties specs =

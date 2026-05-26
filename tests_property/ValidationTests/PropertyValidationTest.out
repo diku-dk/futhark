@@ -1,4 +1,3 @@
-Property prop_bad_output output must be bool, got: i32
 Property prop_bad_arity has 2 inputs; expected 1.
-Property prop_div_zero failed with candidate=REDACTEDi32 with error: prop_div_zero has Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./ValidationTests/PropertyValidationTest.fut:54:5-8",""]
-Property prop_bad_arity2 has no inputs? Expected 1.
+Property prop_bad_arity2 has no inputs: expected 1.
+Property prop_bad_output output must be bool, got: i32

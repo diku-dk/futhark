@@ -1,13 +1,12 @@
-Shrinker output mismatch.
-Property prop_bad_output expects: i32
-Shrinker shrink_bad_output returns: "i64"
-Expected shrinker output to equal the property input type.
-Shrinker Mismatch:
-Shrinker shrink_bad_input takes random value i64 but expected u64
 Shrinker input arity mismatch.
  shrinker shrink_bad_arity inputs: ["i32","u64","i32"]
 Expected exactly 2 inputs: (i32, u64).
 Shrinker input arity mismatch.
  shrinker shrink_bad_arity2 inputs: []
 Expected exactly 2 inputs: (i32, u64).
-Property prop_div_zero failed with candidate=REDACTEDi32 with error: prop_div_zero has Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./ValidationTests/ShrinkerValidationTest.fut:67:5-8",""]
+Shrinker Mismatch:
+Shrinker shrink_bad_input takes random value i64 but expected u64
+Shrinker output mismatch.
+Property prop_bad_output expects: i32
+Shrinker shrink_bad_output returns: "i64"
+Expected shrinker output to equal the property input type.

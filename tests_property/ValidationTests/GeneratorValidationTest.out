@@ -1,10 +1,10 @@
-Generator is not a server entry point: helper_not_entry
-Generator "gen_bad_output" for property "prop_bad_output" has invalid type.
-Expected: i64 -> u64 -> i32
-Actual:   i64 -> u64 -> bool
 Generator "gen_bad_arity" for property "prop_bad_arity" has invalid type.
 Expected: i64 -> u64 -> i32
 Actual:   u64 -> u64
 Generator "gen_bad_input_types" for property "prop_bad_input_types" has invalid type.
 Expected: i64 -> u64 -> i32
 Actual:   i32 -> i64 -> i32
+Generator "gen_bad_output" for property "prop_bad_output" has invalid type.
+Expected: i64 -> u64 -> i32
+Actual:   i64 -> u64 -> bool
+Generator is not a server entry point: helper_not_entry

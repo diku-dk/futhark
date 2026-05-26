@@ -7,7 +7,7 @@ module Futhark.Test.Property
     PropSpec (..),
     PBTOutput,
     PBTFailure,
-    extractPropSpecsFromServer,
+    extractPropSpecs,
   )
 where
 
@@ -15,10 +15,10 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Except
-import Data.Either (fromRight)
+import Data.Either (fromRight, partitionEithers)
 import Data.IORef
 import Data.Int
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Text qualified as T
 import Data.Word (Word64)
 import Futhark.Data
@@ -144,16 +144,8 @@ parsePropSpec entry attr = do
         psSize = fromInteger <$> lookupArgRead "size" args
       }
 
-atMostOnePropAttr :: (MonadFail m) => T.Text -> [T.Text] -> m [PropSpec]
-atMostOnePropAttr entry attrs =
-  case mapMaybe (parsePropSpec entry) attrs of
-    [] -> pure []
-    [spec] -> pure [spec]
-    _ ->
-      unexpectedFailure $
-        "Entry point '"
-          <> entry
-          <> "' has more than one #[prop(...)] attribute."
+getPropAttrs :: T.Text -> [T.Text] -> [PropSpec]
+getPropAttrs entry = mapMaybe $ parsePropSpec entry
 
 getInputTypes :: Server -> EntryName -> IO [TypeName]
 getInputTypes srv entry =
@@ -242,7 +234,7 @@ validatePropTypes srv propName = fmap (either Just (const Nothing)) . runExceptT
   ins <- liftIO $ getInputTypes srv propName
   case ins of
     [_] -> pure ()
-    [] -> throwE $ "Property " <> propName <> " has no inputs? Expected 1."
+    [] -> throwE $ "Property " <> propName <> " has no inputs: expected 1."
     _ -> throwE $ "Property " <> propName <> " has " <> showText (length ins) <> " inputs; expected 1."
 
   out <- liftIO $ getOutputType srv propName
@@ -250,48 +242,74 @@ validatePropTypes srv propName = fmap (either Just (const Nothing)) . runExceptT
     "bool" -> pure ()
     ty -> throwE $ "Property " <> propName <> " output must be bool, got: " <> ty
 
-validateOneSpec :: Server -> [EntryName] -> PropSpec -> IO (Maybe PBTFailure)
+validateOneSpec :: Server -> [EntryName] -> PropSpec -> ExceptT PBTFailure IO ()
 validateOneSpec srv eps spec = do
   let prop = psProp spec
 
-  fmap (either Just (const Nothing)) . runExceptT $ do
-    unless (prop `elem` eps) $
-      throwE $
-        "Property entry point not found: " <> prop
+  unless (prop `elem` eps) $
+    throwE $
+      "Property entry point not found: " <> prop
 
-    liftIO (validatePropTypes srv prop) >>= maybe (pure ()) throwE
+  liftIO (validatePropTypes srv prop) >>= maybe (pure ()) throwE
 
-    genName <- case psGen spec of
-      Nothing ->
-        pure Nothing
-      Just g
-        | g `notElem` eps ->
-            throwE $ "Generator is not a server entry point: " <> g
-      Just g ->
-        pure $ Just g
+  genName <- case psGen spec of
+    Nothing ->
+      pure Nothing
+    Just g
+      | g `notElem` eps ->
+          throwE $ "Generator is not a server entry point: " <> g
+    Just g ->
+      pure $ Just g
 
-    liftIO (validateGenTypes srv prop genName) >>= maybe (pure ()) throwE
+  liftIO (validateGenTypes srv prop genName) >>= maybe (pure ()) throwE
 
-    case psShrink spec of
-      Nothing -> pure ()
-      Just sh -> do
-        unless (sh `elem` eps) $
-          throwE $
-            "Shrinker is not a server entry point: " <> sh
-        liftIO (validateShrinkTypes srv prop sh) >>= maybe (pure ()) throwE
+  case psShrink spec of
+    Nothing -> pure ()
+    Just sh -> do
+      unless (sh `elem` eps) $
+        throwE $
+          "Shrinker is not a server entry point: " <> sh
+      liftIO (validateShrinkTypes srv prop sh) >>= maybe (pure ()) throwE
 
 -- | Extract property specifications from the server by looking for entry
--- points with #[prop(...)] attributes.
-extractPropSpecsFromServer :: Server -> IO [PropSpec]
-extractPropSpecsFromServer srv = do
-  epsE <- cmdEntryPoints srv
-  eps <- either (error . show) pure epsE
-  concat <$> mapM getOne eps
+-- points with #[prop(...)] attributes, comparing with the declared list of properties.
+extractPropSpecs :: Server -> [EntryName] -> IO (Either PBTFailure [PropSpec])
+extractPropSpecs srv properties = do
+  eps <- either (error . show) pure <=< liftIO $ cmdEntryPoints srv
+  checks <- mapM (runExceptT . getOne eps) eps
+  case partitionEithers checks of
+    ([], specs) -> pure $ Right $ catMaybes specs
+    (errors, _) -> pure $ Left $ T.intercalate "\n" errors
   where
-    getOne entry = do
-      attrsE <- cmdAttributes srv entry
-      attrs <- either (unexpectedFailure . showText) pure attrsE
-      atMostOnePropAttr entry attrs
+    getOne eps entry = do
+      attrs <-
+        either (unexpectedFailure . showText) pure <=< liftIO $
+          cmdAttributes srv entry
+      let specs = getPropAttrs entry attrs
+          is_prop = entry `elem` properties
+      case specs of
+        [spec] | is_prop -> do
+          validateOneSpec srv eps spec
+          pure $ Just spec
+        []
+          | is_prop ->
+              throwE $
+                "Entry point '"
+                  <> entry
+                  <> "' declared as property, but has no #[prop(...)] attribute."
+          | otherwise ->
+              pure Nothing
+        _
+          | is_prop ->
+              throwE $
+                "Entry point '"
+                  <> entry
+                  <> "' has more than one #[prop(...)] attribute."
+          | otherwise ->
+              throwE $
+                "Entry point '"
+                  <> entry
+                  <> "' not declared as property, but has #[prop(...)] attribute."
 
 -- | Generate a candidate automatically.
 automaticGenerator :: Server -> EntryName -> TypeName -> Int64 -> PBTGen -> IO (Maybe PBTFailure)
@@ -1020,8 +1038,6 @@ getSingleInputType srv ep = do
 -- | Run a list of property specifications, returning a list of results.
 -- Each result is either a failure with an error message or a success.
 runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> FilePath -> IO [Either PBTFailure PBTOutput]
-runPBT config srv specs entryNameRef program = do
-  eps <- cmdErrorHandlerE "Failed to get entry points: " $ cmdEntryPoints srv -- error should not be reached by the user
-  forM specs $ \spec -> do
-    validation <- validateOneSpec srv eps spec
-    maybe (runOne spec config srv entryNameRef program) (pure . Left) validation
+runPBT config srv specs entryNameRef program =
+  forM specs $ \spec ->
+    runOne spec config srv entryNameRef program
