@@ -666,12 +666,41 @@ checkEntryPoint loc tparams params rettype
         "Entry point size parameter "
           <> pretty p
           <> " only used non-constructively."
-  | otherwise =
-      pure ()
+  | otherwise = do
+      env <- askEnv
+      let tvars = qualTypeVars rettype' <> foldMap qualTypeVars param_ts
+          safeLookupType e (QualName [] v) =
+            case M.lookup v (envTypeTable e) of
+              Just (TypeAbbr _ _ (RetType _ t)) -> Just t
+              _ -> Nothing
+          safeLookupType e (QualName (q : qs) v) =
+            case M.lookup q (envModTable e) of
+              Just (ModEnv me) -> safeLookupType me (QualName qs v)
+              _ -> Nothing
+          isLiftedType qn = case safeLookupType env qn of
+            Just t -> not (orderZero t)
+            Nothing -> False
+      when (any isLiftedType tvars) $
+        typeError loc mempty $
+          withIndexLink
+            "higher-order-entry"
+            "Entry point functions may not be higher-order."
   where
     (RetType _ rettype_t) = rettype
     (rettype_params, rettype') = unfoldFunType rettype_t
     param_ts = map patternType params ++ rettype_params
+    qualTypeVars :: TypeBase dim as -> [QualName VName]
+    qualTypeVars t =
+      case t of
+        Scalar Prim {} -> []
+        Scalar (TypeVar _ tn targs) -> tn : concatMap typeArgQualVars targs
+        Scalar (Arrow _ _ _ t1 (RetType _ t2)) -> qualTypeVars t1 <> qualTypeVars t2
+        Scalar (Record fields) -> foldMap qualTypeVars fields
+        Scalar (Sum cs) -> concat $ (foldMap . fmap) qualTypeVars cs
+        Array _ _ rt -> qualTypeVars $ Scalar rt
+      where
+        typeArgQualVars (TypeArgType ta) = qualTypeVars ta
+        typeArgQualVars TypeArgDim {} = []
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind vb = do
