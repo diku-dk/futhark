@@ -1194,15 +1194,6 @@ substituteInModule substs = onModule
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
 
--- | Apply pending substitutions to an environment. This renames
--- bindings in the environment according to the accumulated
--- substitution map, which represents deferred name rewriting from
--- module ascriptions applied to functors.
-applyPendingSubsts :: M.Map VName VName -> Env -> Env
-applyPendingSubsts pending
-  | M.null pending = id
-  | otherwise = \env ->
-      let Module env' = substituteInModule pending (Module env) in env'
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
