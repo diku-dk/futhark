@@ -813,10 +813,10 @@ shrinkLoop srv propName counterExample shrinkName rng numTries phaseRef = runExc
 
         liftIO $ shrinkUpdatePhase Nothing $ Just $ fromIntegral val
 
-        okE <- liftIO $
-          withCallKeepIns srv propName vOk [vCandidate] $
-            \vOk' -> getVal srv vOk'
-        ok <- either (throwE . ("Property " <>)) pure okE
+        ok <-
+          either (throwE . ("Property " <>)) pure <=< liftIO $
+            withCallKeepIns srv propName vOk [vCandidate] $
+              getVal srv
 
         liftIO $ shrinkUpdatePhase Nothing $ Just $ fromIntegral val
 
