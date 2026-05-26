@@ -484,7 +484,14 @@ runOne s config srv entryNameRef program = runExceptT $ do
               Just sh -> do
                 userShrinkRes <-
                   liftIO $
-                    shrinkLoop srv propName serverIn sh rng (configShrinkTries config) entryNameRef
+                    shrinkLoop
+                      srv
+                      propName
+                      serverIn
+                      sh
+                      rng
+                      (configShrinkTries config)
+                      entryNameRef
 
                 case userShrinkRes of
                   Right Nothing ->
@@ -492,7 +499,16 @@ runOne s config srv entryNameRef program = runExceptT $ do
                   Right (Just err) -> do
                     autoRes <-
                       liftIO $
-                        autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
+                        autoShrinkLoop
+                          srv
+                          propName
+                          genName
+                          serverIn
+                          size
+                          rng
+                          serverSize
+                          serverSeed
+                          entryNameRef
 
                     pure $
                       Right $
@@ -504,7 +520,16 @@ runOne s config srv entryNameRef program = runExceptT $ do
                   Left err -> do
                     autoRes <-
                       liftIO $
-                        autoShrinkLoop srv propName genName serverIn size rng serverSize serverSeed entryNameRef
+                        autoShrinkLoop
+                          srv
+                          propName
+                          genName
+                          serverIn
+                          size
+                          rng
+                          serverSize
+                          serverSeed
+                          entryNameRef
 
                     pure $
                       Right $
