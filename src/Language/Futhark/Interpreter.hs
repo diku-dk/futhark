@@ -370,11 +370,11 @@ data TypeBinding
 
 data Module
   = Module Env
-  | ModuleFun Env ModParam ModExp
+  | ModuleFun (Module -> EvalM Module)
 
 instance Show Module where
   show (Module env) = "(" <> unwords ["Module", show env] <> ")"
-  show (ModuleFun _ _ _) = "(ModuleFun _)"
+  show (ModuleFun _) = "(ModuleFun _)"
 
 -- | The actual type- and value environment.
 data Env = Env
@@ -1163,8 +1163,8 @@ substituteInModule substs = onModule
       Env (replaceM onTerm terms) (replaceM id types)
     onModule (Module env) =
       Module $ onEnv env
-    onModule (ModuleFun env p body) =
-      ModuleFun (onEnv env) p body
+    onModule (ModuleFun f) =
+      ModuleFun $ \m -> onModule <$> f (substituteInModule substs m)
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
@@ -1208,8 +1208,9 @@ evalModExp env (ModParens me _) =
 evalModExp env (ModLambda p ret e loc) =
   pure
     ( mempty,
-      ModuleFun env p $
-        case ret of
+      ModuleFun $ \am -> do
+        let env' = env {envTerm = M.insert (modParamName p) (TermModule am) $ envTerm env}
+        fmap snd . evalModExp env' $ case ret of
           Nothing -> e
           Just (se, rsubsts) -> ModAscript e se rsubsts loc
     )
@@ -1217,15 +1218,8 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
   (f_env, f') <- evalModExp env f
   (e_env, e') <- evalModExp env e
   case f' of
-    ModuleFun f_env' p body -> do
-      let arg = substituteInModule psubst e'
-          env' =
-            f_env'
-              { envTerm =
-                  M.insert (modParamName p) (TermModule arg) $
-                    envTerm f_env'
-              }
-      res_mod <- substituteInModule rsubst . snd <$> evalModExp env' body
+    ModuleFun f'' -> do
+      res_mod <- substituteInModule rsubst <$> f'' (substituteInModule psubst e')
       let res_env = case res_mod of
             Module x -> x
             _ -> mempty
