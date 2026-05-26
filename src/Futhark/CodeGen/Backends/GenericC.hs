@@ -314,6 +314,7 @@ gnuSource =
 #ifndef _GNU_SOURCE // Avoid possible double-definition warning.
 #define _GNU_SOURCE
 #endif
+#define _FILE_OFFSET_BITS 64
 |]
 
 -- We may generate variables that are never used (e.g. for

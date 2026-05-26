@@ -1624,7 +1624,7 @@ int restore_opaque(const struct opaque_aux *aux, FILE *f,
   // (which doesn't care if there's extra at the end), then we compute
   // how much space the the object actually takes in serialised form
   // and rewind the file to that position.  The only downside is more IO.
-  size_t start = ftell(f);
+  size_t start = (size_t)ftello(f);
   size_t size;
   char *bytes = fslurp_file(f, &size);
   void *obj = aux->restore(ctx, bytes);
@@ -1633,10 +1633,10 @@ int restore_opaque(const struct opaque_aux *aux, FILE *f,
     *(void**)p = obj;
     size_t obj_size;
     (void)aux->store(ctx, obj, NULL, &obj_size);
-    fseek(f, start+obj_size, SEEK_SET);
+    fseeko(f, start+obj_size, SEEK_SET);
     return 0;
   } else {
-    fseek(f, start, SEEK_SET);
+    fseeko(f, start, SEEK_SET);
     return 1;
   }
 }
