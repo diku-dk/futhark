@@ -1184,10 +1184,12 @@ substituteInModule substs = onModule
     onModule (Module env) =
       Module $ onEnv env
     onModule (ModuleFun clo_env pending p body) =
-      -- Forward substitutions into the pending substitution map,
-      -- mirroring how Defunctorise propagates substitutions into
-      -- the functor closure's scope.
-      ModuleFun (onEnv clo_env) (forwardSubsts substs pending) p body
+      -- Only forward substitutions into the pending substitution map.
+      -- Do NOT apply onEnv to the closure—the closure uses internal
+      -- names that shouldn't be rewritten.  The pending map records
+      -- that at application time we must rename those internal names.
+      -- This mirrors Defunctorise.substituteInMod for ModFun.
+      ModuleFun clo_env (forwardSubsts substs pending) p body
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
@@ -1251,12 +1253,10 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
   (e_env, e') <- evalModExp env e
   case f' of
     ModuleFun clo_env pending p body -> do
-      let arg = substituteInModule psubst e'
-          -- Apply any pending substitutions accumulated from prior
-          -- substituteInModule calls to the closure environment.
-          clo_env' = applyPendingSubsts pending clo_env
-          env' = clo_env' {envTerm = M.insert (modParamName p) (TermModule arg) $ envTerm clo_env'}
-      res_mod <- substituteInModule rsubst . snd <$> evalModExp env' body
+      let arg = substituteInModule pending $ substituteInModule psubst e'
+          env' = clo_env {envTerm = M.insert (modParamName p) (TermModule arg) $ envTerm clo_env}
+      raw_res <- snd <$> evalModExp env' body
+      let res_mod = substituteInModule rsubst $ substituteInModule pending raw_res
       let res_env = case res_mod of
             Module x -> x
             _ -> mempty
