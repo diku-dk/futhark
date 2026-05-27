@@ -989,7 +989,7 @@ eval env (QualParens (qv, _) e loc) = do
   m <- evalModuleVar env qv
   case m of
     ModuleFun {} -> error $ "Local open of module function at " ++ locStr loc
-    Module m' -> eval (m' <> env) e
+    Module {} -> eval env e
 eval env (TupLit vs _) = toTuple <$> mapM (eval env) vs
 eval env (RecordLit fields _) =
   ValueRecord . M.fromList <$> mapM evalField fields
