@@ -148,12 +148,12 @@ with this type::
 
   t -> bool
 
-for some ``t``, which has been given a ``#[prop]`` pragma. To test a property is
-being tested, ``futhark test`` will randomly generate values of type ``t``,
-called *candidates*, looking for a candidate that makes the property return
-``false``, called a *counterexample*. When a counterexample has been found,
-``futhark test`` will try to shrink it and finally report the smallest
-counterexample that it was able construct.
+for some ``t``, which has been given a ``#[prop]`` pragma. To test a property,
+``futhark test`` will randomly generate values of type ``t``, called
+*candidates*, looking for a candidate that makes the property return ``false``,
+called a *counterexample*. When a counterexample has been found, ``futhark
+test`` will try to shrink it and finally report the smallest counterexample that
+it was able construct.
 
 The ``#[prop]`` attribute supports various optional arguments that grant more
 control over the testing process. They are passed as arguments, e.g.,
