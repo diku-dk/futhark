@@ -161,7 +161,7 @@ control over the testing process. They are passed as arguments, e.g.,
 
 * ``gen(f)``, where ``f`` is an entry point function with this type::
 
-    (size: i64) -> (seed: i64) -> t
+    (size: i64) -> (seed: u64) -> t
 
   Instead of automatically generating candidates for the property, ``futhark
   test`` will invoke ``f`` with a size and a randomly generated seed. This can
@@ -169,7 +169,7 @@ control over the testing process. They are passed as arguments, e.g.,
 
 * ``shrink(f)``, where ``f`` is an entry point function with this type::
 
-    t -> i32 -> t
+    t -> u64 -> t
 
   When shrinking a counterexample, ``futhark test`` will call ``f`` with the
   candidate so far along with a random number, which is then expected to return
