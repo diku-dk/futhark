@@ -37,6 +37,9 @@ import Language.Futhark.TypeChecker.Terms
 import Language.Futhark.TypeChecker.Types
 import Prelude hiding (abs, mod)
 
+importTable :: Imports -> ImportTable
+importTable = M.map (\f -> (fileAbs f, fileEnv f)) . M.fromList
+
 --- The main checker
 
 -- | Type check a program containing no type information, yielding
@@ -53,7 +56,7 @@ checkProg ::
 checkProg files src name prog =
   runTypeM initialEnv files' name src $ checkProgM prog
   where
-    files' = M.map fileEnv $ M.fromList files
+    files' = importTable files
 
 -- | Type check a single expression containing no type information,
 -- yielding either a type error or the same expression annotated with
@@ -75,7 +78,7 @@ checkExp files src env e =
       src
       (checkOneExp =<< resolveExp e)
   where
-    files' = M.map fileEnv $ M.fromList files
+    files' = importTable files
 
 -- | Type check a single declaration containing no type information,
 -- yielding either a type error or the same declaration annotated with
@@ -96,7 +99,7 @@ checkDec files src env name d =
   where
     massage ((env', d'), src') =
       (env', d', src')
-    files' = M.map fileEnv $ M.fromList files
+    files' = importTable files
 
 -- | Type check a single module expression containing no type information,
 -- yielding either a type error or the same expression annotated with
@@ -112,7 +115,7 @@ checkModExp files src env me =
   second (fmap fst) . runTypeM env files' (mkInitialImport "") src $
     checkOneModExp me
   where
-    files' = M.map fileEnv $ M.fromList files
+    files' = importTable files
 
 -- | An initial environment for the type checker, containing
 -- intrinsics and such.
@@ -358,12 +361,13 @@ checkModTypeExpToEnv e = do
 
 checkModTypeBind :: ModTypeBindBase NoInfo Name -> TypeM (Env, ModTypeBindBase Info VName)
 checkModTypeBind (ModTypeBind name e doc loc) = do
-  (env, e') <- checkModTypeExp e
+  (mty, e') <- checkModTypeExp e
+  addTySet $ mtyAbs mty
   bindSpaced1 Signature name loc $ \name' -> do
     usedName name'
     pure
       ( mempty
-          { envModTypeTable = M.singleton name' env,
+          { envModTypeTable = M.singleton name' mty,
             envNameMap = M.singleton (Signature, name) (qualName name')
           },
         ModTypeBind name' e' doc loc
