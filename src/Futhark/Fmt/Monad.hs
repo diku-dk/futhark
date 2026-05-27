@@ -35,6 +35,7 @@ module Futhark.Fmt.Monad
     sepComments,
     sepLineComments,
     sepLine,
+    consecutive,
 
     -- * Formatting styles
     commentStyle,

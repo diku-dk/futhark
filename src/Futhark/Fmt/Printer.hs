@@ -637,13 +637,23 @@ instance Format UncheckedDec where
   fmt (ImportDec path _tb loc) =
     addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
 
+groupByConsecutive :: (Located a) => (a -> Bool) -> [a] -> [[a]]
+groupByConsecutive _ [] = []
+groupByConsecutive p (x : xs) = go [x] x xs
+  where
+    go grp _ [] = [grp]
+    go grp prev (y : ys)
+      | p prev == p y && consecutive (locOf prev) (locOf y) =
+          go (grp ++ [y]) y ys
+      | otherwise = grp : go [y] y ys
+
 sortDecs :: [UncheckedDec] -> [UncheckedDec]
-sortDecs decs =
-  concatMap sortGroup $ L.groupBy sameKind decs
+sortDecs =
+  concatMap sortGroup . groupByConsecutive isImport
   where
     isImport (ImportDec {}) = True
     isImport _ = False
-    sameKind a b = isImport a == isImport b
+
     sortGroup grp@(ImportDec {} : _) =
       let sorted = L.sortOn getPath grp
           locs = [loc | ImportDec _ _ loc <- grp]
