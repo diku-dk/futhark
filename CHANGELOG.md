@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark test` now suppports property-based testing (like QuickCheck). Work by
+  Matin Nafar and Simon August Mørk.
+
 ### Removed
 
 ### Changed

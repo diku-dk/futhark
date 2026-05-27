@@ -1,0 +1,8 @@
+PBT FAIL: primitive_alias size=50 seed=REDACTED after N tests
+Counterexample: false
+PBT FAIL: tuple_alias size=50 seed=REDACTED after N tests
+Counterexample: (true, false)
+PBT FAIL: array_alias size=50 seed=REDACTED after N tests
+Counterexample: [(true, false)]
+PBT FAIL: nested_tuple_array_alias size=50 seed=REDACTED after N tests
+Counterexample: ([(true, false)], [(true, false)])

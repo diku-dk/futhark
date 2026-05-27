@@ -130,7 +130,7 @@ prepare opts futhark prog = do
 
   truns <-
     case testAction spec of
-      RunCases ios _ _ | not $ null ios -> do
+      RunCases ios _ _ _ | not $ null ios -> do
         when (optVerbose opts > 1) $
           putStrLn $
             unwords ("Entry points:" : map (T.unpack . iosEntryPoint) ios)
