@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Sometimes arrays returned from entry points would be unnecessarily copied if
   the compiler could not be sure statically that they were in row-major layout.
 
+* The type checker would fail to reject entry points that accepted lifted
+  abstract types. (#2467)
+
+* An issue in the interpreter's handling of local opens.
+
 ## [0.26.2]
 
 ### Added

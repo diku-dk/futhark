@@ -91,7 +91,7 @@ checkDec ::
 checkDec files src env name d =
   second (fmap massage) $
     runTypeM env files' name src $ do
-      (_, env', d') <- checkOneDec d
+      (env', d') <- checkOneDec d
       pure (env' <> env, d')
   where
     massage ((env', d'), src') =
@@ -109,9 +109,8 @@ checkModExp ::
   ModExpBase NoInfo Name ->
   (Warnings, Either TypeError (MTy, ModExpBase Info VName))
 checkModExp files src env me =
-  second (fmap fst) . runTypeM env files' (mkInitialImport "") src $ do
-    (_abs, mty, me') <- checkOneModExp me
-    pure (mty, me')
+  second (fmap fst) . runTypeM env files' (mkInitialImport "") src $
+    checkOneModExp me
   where
     files' = M.map fileEnv $ M.fromList files
 
@@ -150,7 +149,7 @@ envWithImports imports env =
 checkProgM :: UncheckedProg -> TypeM FileModule
 checkProgM (Prog doc decs) = do
   checkForDuplicateDecs decs
-  (abs, env, decs', full_env) <- checkDecs decs
+  ((env, decs', full_env), abs) <- collectTySet $ checkDecs decs
   pure (FileModule abs env (Prog doc decs') full_env)
 
 dupDefinitionError ::
@@ -283,7 +282,7 @@ checkSpecs (TypeSpec l name ps doc loc : specs) = do
         TypeSpec l name' ps' doc loc : specs'
       )
 checkSpecs (ModSpec name sig doc loc : specs) = do
-  (_sig_abs, mty, sig') <- checkModTypeExp sig
+  (mty, sig') <- checkModTypeExp sig
   bindSpaced1 Term name loc $ \name' -> do
     usedName name'
     let senv =
@@ -298,13 +297,13 @@ checkSpecs (ModSpec name sig doc loc : specs) = do
         ModSpec name' sig' doc loc : specs'
       )
 checkSpecs (IncludeSpec e loc : specs) = do
-  (e_abs, env_abs, e_env, e') <- checkModTypeExpToEnv e
+  (env_abs, e_env, e') <- checkModTypeExpToEnv e
 
   mapM_ warnIfShadowing $ M.keys env_abs
 
   (abstypes, env, specs') <- localEnv e_env $ checkSpecs specs
   pure
-    ( e_abs <> env_abs <> abstypes,
+    ( env_abs <> abstypes,
       env <> e_env,
       IncludeSpec e' loc : specs'
     )
@@ -315,28 +314,28 @@ checkSpecs (IncludeSpec e loc : specs) = do
     warnAbout qn =
       warn loc $ "Inclusion shadows type" <+> dquotes (pretty qn) <> "."
 
-checkModTypeExp :: ModTypeExpBase NoInfo Name -> TypeM (TySet, MTy, ModTypeExpBase Info VName)
+checkModTypeExp :: ModTypeExpBase NoInfo Name -> TypeM (MTy, ModTypeExpBase Info VName)
 checkModTypeExp (ModTypeParens e loc) = do
-  (abs, mty, e') <- checkModTypeExp e
-  pure (abs, mty, ModTypeParens e' loc)
+  (mty, e') <- checkModTypeExp e
+  pure (mty, ModTypeParens e' loc)
 checkModTypeExp (ModTypeVar name NoInfo loc) = do
   (name', mty) <- lookupMTy loc name
   (mty', substs) <- newNamesForMTy mty
-  pure (mtyAbs mty', mty', ModTypeVar name' (Info substs) loc)
+  pure (mty', ModTypeVar name' (Info substs) loc)
 checkModTypeExp (ModTypeSpecs specs loc) = do
   checkForDuplicateSpecs specs
-  (abstypes, env, specs') <- checkSpecs specs
-  pure (abstypes, MTy abstypes $ ModEnv env, ModTypeSpecs specs' loc)
+  (abs, env, specs') <- checkSpecs specs
+  pure (MTy abs $ ModEnv env, ModTypeSpecs specs' loc)
 checkModTypeExp (ModTypeWith s (TypeRef tname ps te trloc) loc) = do
-  (abs, s_abs, s_env, s') <- checkModTypeExpToEnv s
+  (s_abs, s_env, s') <- checkModTypeExpToEnv s
   resolveTypeParams ps $ \ps' -> do
     (ext, te', te_t, _) <- bindingTypeParams ps' $ checkTypeDecl te
     (tname', s_abs', s_env') <-
       refineEnv loc s_abs s_env tname ps' $ RetType ext te_t
-    pure (abs, MTy s_abs' $ ModEnv s_env', ModTypeWith s' (TypeRef tname' ps' te' trloc) loc)
+    pure (MTy s_abs' $ ModEnv s_env', ModTypeWith s' (TypeRef tname' ps' te' trloc) loc)
 checkModTypeExp (ModTypeArrow maybe_pname e1 e2 loc) = do
-  (e1_abs, MTy s_abs e1_mod, e1') <- checkModTypeExp e1
-  (maybe_pname', (e2_abs, e2_mod, e2')) <-
+  (MTy s_abs e1_mod, e1') <- checkModTypeExp e1
+  (maybe_pname', (e2_mod, e2')) <-
     case maybe_pname of
       Just pname -> bindSpaced1 Term pname loc $ \pname' ->
         localEnv (mempty {envModTable = M.singleton pname' e1_mod}) $
@@ -344,28 +343,26 @@ checkModTypeExp (ModTypeArrow maybe_pname e1 e2 loc) = do
       Nothing ->
         (Nothing,) <$> checkModTypeExp e2
   pure
-    ( e1_abs <> e2_abs,
-      MTy mempty $ ModFun $ FunModType s_abs e1_mod e2_mod,
+    ( MTy mempty $ ModFun $ FunModType s_abs e1_mod e2_mod,
       ModTypeArrow maybe_pname' e1' e2' loc
     )
 
 checkModTypeExpToEnv ::
   ModTypeExpBase NoInfo Name ->
-  TypeM (TySet, TySet, Env, ModTypeExpBase Info VName)
+  TypeM (TySet, Env, ModTypeExpBase Info VName)
 checkModTypeExpToEnv e = do
-  (abs, MTy mod_abs mod, e') <- checkModTypeExp e
+  (MTy mod_abs mod, e') <- checkModTypeExp e
   case mod of
-    ModEnv env -> pure (abs, mod_abs, env, e')
+    ModEnv env -> pure (mod_abs, env, e')
     ModFun {} -> unappliedFunctor $ srclocOf e
 
-checkModTypeBind :: ModTypeBindBase NoInfo Name -> TypeM (TySet, Env, ModTypeBindBase Info VName)
+checkModTypeBind :: ModTypeBindBase NoInfo Name -> TypeM (Env, ModTypeBindBase Info VName)
 checkModTypeBind (ModTypeBind name e doc loc) = do
-  (abs, env, e') <- checkModTypeExp e
+  (env, e') <- checkModTypeExp e
   bindSpaced1 Signature name loc $ \name' -> do
     usedName name'
     pure
-      ( abs,
-        mempty
+      ( mempty
           { envModTypeTable = M.singleton name' env,
             envNameMap = M.singleton (Signature, name) (qualName name')
           },
@@ -374,16 +371,15 @@ checkModTypeBind (ModTypeBind name e doc loc) = do
 
 checkOneModExp ::
   ModExpBase NoInfo Name ->
-  TypeM (TySet, MTy, ModExpBase Info VName)
+  TypeM (MTy, ModExpBase Info VName)
 checkOneModExp (ModParens e loc) = do
-  (abs, mty, e') <- checkOneModExp e
-  pure (abs, mty, ModParens e' loc)
+  (mty, e') <- checkOneModExp e
+  pure (mty, ModParens e' loc)
 checkOneModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
-  (abstypes, env, decs', _) <- checkDecs decs
+  ((env, decs', _), abstypes) <- collectTySet $ checkDecs decs
   pure
-    ( abstypes,
-      MTy abstypes $ ModEnv env,
+    ( MTy abstypes $ ModEnv env,
       ModDecs decs' loc
     )
 checkOneModExp (ModVar v loc) = do
@@ -393,47 +389,46 @@ checkOneModExp (ModVar v loc) = do
         && isIntrinsic (qualLeaf v')
     )
     $ typeError loc mempty "The 'intrinsics' module may not be used in module expressions."
-  pure (mempty, MTy mempty env, ModVar v' loc)
+  pure (MTy mempty env, ModVar v' loc)
 checkOneModExp (ModImport name NoInfo loc) = do
   (name', env) <- lookupImport loc name
   pure
-    ( mempty,
-      MTy mempty $ ModEnv env,
+    ( MTy mempty $ ModEnv env,
       ModImport name (Info name') loc
     )
 checkOneModExp (ModApply f e NoInfo NoInfo loc) = do
-  (f_abs, f_mty, f') <- checkOneModExp f
+  (f_mty, f') <- checkOneModExp f
   case mtyMod f_mty of
     ModFun functor -> do
-      (e_abs, e_mty, e') <- checkOneModExp e
+      (e_mty, e') <- checkOneModExp e
       (mty, psubsts, rsubsts) <- applyFunctor (locOf loc) functor e_mty
       pure
-        ( mtyAbs mty <> f_abs <> e_abs,
-          mty,
+        ( mty,
           ModApply f' e' (Info psubsts) (Info rsubsts) loc
         )
     _ ->
       typeError loc mempty "Cannot apply non-parametric module."
 checkOneModExp (ModAscript me se NoInfo loc) = do
-  (me_abs, me_mod, me') <- checkOneModExp me
-  (se_abs, se_mty, se') <- checkModTypeExp se
+  (me_mod, me') <- checkOneModExp me
+  (se_mty, se') <- checkModTypeExp se
+  addTySet $ mtyAbs se_mty
   match_subst <- badOnLeft $ matchMTys me_mod se_mty (locOf loc)
-  pure (se_abs <> me_abs, se_mty, ModAscript me' se' (Info match_subst) loc)
+  pure (se_mty, ModAscript me' se' (Info match_subst) loc)
 checkOneModExp (ModLambda param maybe_fsig_e body_e loc) =
   withModParam param $ \param' param_abs param_mod -> do
-    (abs, maybe_fsig_e', body_e', mty) <-
+    (maybe_fsig_e', body_e', mty) <-
       checkModBody (fst <$> maybe_fsig_e) body_e loc
     pure
-      ( abs,
-        MTy mempty $ ModFun $ FunModType param_abs param_mod mty,
+      ( MTy mempty $ ModFun $ FunModType param_abs param_mod mty,
         ModLambda param' maybe_fsig_e' body_e' loc
       )
 
-checkOneModExpToEnv :: ModExpBase NoInfo Name -> TypeM (TySet, Env, ModExpBase Info VName)
+checkOneModExpToEnv :: ModExpBase NoInfo Name -> TypeM (Env, ModExpBase Info VName)
 checkOneModExpToEnv e = do
-  (e_abs, MTy abs mod, e') <- checkOneModExp e
+  (MTy abs mod, e') <- checkOneModExp e
+  addTySet abs
   case mod of
-    ModEnv env -> pure (e_abs <> abs, env, e')
+    ModEnv env -> pure (env, e')
     ModFun {} -> unappliedFunctor $ srclocOf e
 
 withModParam ::
@@ -441,7 +436,7 @@ withModParam ::
   (ModParamBase Info VName -> TySet -> Mod -> TypeM a) ->
   TypeM a
 withModParam (ModParam pname psig_e NoInfo loc) m = do
-  (_abs, MTy p_abs p_mod, psig_e') <- checkModTypeExp psig_e
+  (MTy p_abs p_mod, psig_e') <- checkModTypeExp psig_e
   bindSpaced1 Term pname loc $ \pname' -> do
     let in_body_env = mempty {envModTable = M.singleton pname' p_mod}
     localEnv in_body_env $
@@ -461,54 +456,50 @@ checkModBody ::
   ModExpBase NoInfo Name ->
   SrcLoc ->
   TypeM
-    ( TySet,
-      Maybe (ModTypeExp, Info (M.Map VName VName)),
+    ( Maybe (ModTypeExp, Info (M.Map VName VName)),
       ModExp,
       MTy
     )
 checkModBody maybe_fsig_e body_e loc = enteringModule $ do
-  (body_e_abs, body_mty, body_e') <- checkOneModExp body_e
+  (body_mty, body_e') <- checkOneModExp body_e
   case maybe_fsig_e of
     Nothing ->
       pure
-        ( mtyAbs body_mty <> body_e_abs,
-          Nothing,
+        ( Nothing,
           body_e',
           body_mty
         )
     Just fsig_e -> do
-      (fsig_abs, fsig_mty, fsig_e') <- checkModTypeExp fsig_e
+      (fsig_mty, fsig_e') <- checkModTypeExp fsig_e
+      addTySet $ mtyAbs fsig_mty
       fsig_subst <- badOnLeft $ matchMTys body_mty fsig_mty (locOf loc)
       pure
-        ( fsig_abs <> body_e_abs,
-          Just (fsig_e', Info fsig_subst),
+        ( Just (fsig_e', Info fsig_subst),
           body_e',
           fsig_mty
         )
 
-checkModBind :: ModBindBase NoInfo Name -> TypeM (TySet, Env, ModBindBase Info VName)
+checkModBind :: ModBindBase NoInfo Name -> TypeM (Env, ModBindBase Info VName)
 checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
-  (e_abs, maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
+  (maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
   bindSpaced1 Term name loc $ \name' -> do
     usedName name'
     pure
-      ( e_abs,
-        mempty
+      ( mempty
           { envModTable = M.singleton name' $ mtyMod mty,
             envNameMap = M.singleton (Term, name) $ qualName name'
           },
         ModBind name' [] maybe_fsig_e' e' doc loc
       )
 checkModBind (ModBind name (p : ps) maybe_fsig_e body_e doc loc) = do
-  (abs, params', maybe_fsig_e', body_e', funsig) <-
+  (params', maybe_fsig_e', body_e', funsig) <-
     withModParam p $ \p' p_abs p_mod ->
       withModParams ps $ \params_stuff -> do
         let (ps', ps_abs, ps_mod) = unzip3 params_stuff
-        (abs, maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
+        (maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
         let addParam (x, y) mty' = MTy mempty $ ModFun $ FunModType x y mty'
         pure
-          ( abs,
-            p' : ps',
+          ( p' : ps',
             maybe_fsig_e',
             body_e',
             FunModType p_abs p_mod $ foldr addParam mty $ zip ps_abs ps_mod
@@ -516,8 +507,7 @@ checkModBind (ModBind name (p : ps) maybe_fsig_e body_e doc loc) = do
   bindSpaced1 Term name loc $ \name' -> do
     usedName name'
     pure
-      ( abs,
-        mempty
+      ( mempty
           { envModTable =
               M.singleton name' $ ModFun funsig,
             envNameMap =
@@ -633,6 +623,14 @@ entryPoint params orig_ret_te (RetType _ret orig_ret) =
     onRetType te t =
       ([], EntryType t te)
 
+-- | Check that a type is non-functional, looking up the liftedness of abstract
+-- types in the environment. This works because entry points cannot be polymorphic, so any remaining type names must be abstract.
+orderZeroM :: TypeBase dim u -> TypeM Bool
+orderZeroM t = do
+  (orderZero t &&) . and <$> mapM isUnlifted (typeQualVars t)
+  where
+    isUnlifted qv = (< Lifted) <$> lookupAbsTy qv
+
 checkEntryPoint ::
   SrcLoc ->
   [TypeParam] ->
@@ -645,12 +643,6 @@ checkEntryPoint loc tparams params rettype
         withIndexLink
           "polymorphic-entry"
           "Entry point functions may not be polymorphic."
-  | not (all orderZero param_ts)
-      || not (orderZero rettype') =
-      typeError loc mempty $
-        withIndexLink
-          "higher-order-entry"
-          "Entry point functions may not be higher-order."
   | sizes_only_in_ret <-
       S.fromList (map typeParamName tparams)
         `S.intersection` fvVars (freeInType rettype')
@@ -666,8 +658,14 @@ checkEntryPoint loc tparams params rettype
         "Entry point size parameter "
           <> pretty p
           <> " only used non-constructively."
-  | otherwise =
-      pure ()
+  | otherwise = do
+      param_ts_order_zero <- mapM orderZeroM param_ts
+      ret_order_zero <- orderZeroM rettype'
+      when (not (and param_ts_order_zero) || not ret_order_zero) $
+        typeError loc mempty $
+          withIndexLink
+            "higher-order-entry"
+            "Entry point functions may not be higher-order."
   where
     (RetType _ rettype_t) = rettype
     (rettype_params, rettype') = unfoldFunType rettype_t
@@ -704,39 +702,38 @@ checkValBind vb = do
       vb'
     )
 
-checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
+checkOneDec :: DecBase NoInfo Name -> TypeM (Env, DecBase Info VName)
 checkOneDec (ModDec struct) = do
-  (abs, modenv, struct') <- checkModBind struct
-  pure (abs, modenv, ModDec struct')
+  (modenv, struct') <- checkModBind struct
+  pure (modenv, ModDec struct')
 checkOneDec (ModTypeDec sig) = do
-  (abs, sigenv, sig') <- checkModTypeBind sig
-  pure (abs, sigenv, ModTypeDec sig')
+  (sigenv, sig') <- checkModTypeBind sig
+  pure (sigenv, ModTypeDec sig')
 checkOneDec (TypeDec tdec) = do
   (tenv, tdec') <- checkTypeBind tdec
-  pure (mempty, tenv, TypeDec tdec')
+  pure (tenv, TypeDec tdec')
 checkOneDec (OpenDec x loc) = do
-  (x_abs, x_env, x') <- checkOneModExpToEnv x
-  pure (x_abs, x_env, OpenDec x' loc)
+  (x_env, x') <- checkOneModExpToEnv x
+  pure (x_env, OpenDec x' loc)
 checkOneDec (LocalDec d loc) = do
-  (abstypes, env, d') <- checkOneDec d
-  pure (abstypes, env, LocalDec d' loc)
+  (env, d') <- checkOneDec d
+  pure (env, LocalDec d' loc)
 checkOneDec (ImportDec name NoInfo loc) = do
   (name', env) <- lookupImport loc name
   when (isBuiltin name) $
     typeError loc mempty $
       pretty name <+> "may not be explicitly imported."
-  pure (mempty, env, ImportDec name (Info name') loc)
+  pure (env, ImportDec name (Info name') loc)
 checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb
-  pure (mempty, env, ValDec vb')
+  pure (env, ValDec vb')
 
-checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName], Env)
+checkDecs :: [DecBase NoInfo Name] -> TypeM (Env, [DecBase Info VName], Env)
 checkDecs (d : ds) = do
-  (d_abstypes, d_env, d') <- checkOneDec d
-  (ds_abstypes, ds_env, ds', full_env) <- localEnv d_env $ checkDecs ds
+  (d_env, d') <- checkOneDec d
+  (ds_env, ds', full_env) <- localEnv d_env $ checkDecs ds
   pure
-    ( d_abstypes <> ds_abstypes,
-      case d' of
+    ( case d' of
         LocalDec {} -> ds_env
         ImportDec {} -> ds_env
         _ -> ds_env <> d_env,
@@ -745,4 +742,4 @@ checkDecs (d : ds) = do
     )
 checkDecs [] = do
   full_env <- askEnv
-  pure (mempty, mempty, [], full_env)
+  pure (mempty, [], full_env)

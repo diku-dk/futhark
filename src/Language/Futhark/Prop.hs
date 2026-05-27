@@ -54,6 +54,7 @@ module Language.Futhark.Prop
     orderZero,
     unfoldFunType,
     foldFunType,
+    typeQualVars,
     typeVars,
     isAccType,
 
@@ -553,20 +554,24 @@ valBindBound vb =
       [] -> retDims (unInfo (valBindRetType vb))
       _ -> []
 
--- | The type names mentioned in a type.
-typeVars :: TypeBase dim as -> S.Set VName
-typeVars t =
+-- | The qualified type names mentioned in a type.
+typeQualVars :: TypeBase dim as -> [QualName VName]
+typeQualVars t =
   case t of
     Scalar Prim {} -> mempty
     Scalar (TypeVar _ tn targs) ->
-      mconcat $ S.singleton (qualLeaf tn) : map typeArgFree targs
-    Scalar (Arrow _ _ _ t1 (RetType _ t2)) -> typeVars t1 <> typeVars t2
-    Scalar (Record fields) -> foldMap typeVars fields
-    Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
-    Array _ _ rt -> typeVars $ Scalar rt
+      tn : concatMap typeArgFree targs
+    Scalar (Arrow _ _ _ t1 (RetType _ t2)) -> typeQualVars t1 <> typeQualVars t2
+    Scalar (Record fields) -> foldMap typeQualVars fields
+    Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeQualVars cs
+    Array _ _ rt -> typeQualVars $ Scalar rt
   where
-    typeArgFree (TypeArgType ta) = typeVars ta
+    typeArgFree (TypeArgType ta) = typeQualVars ta
     typeArgFree TypeArgDim {} = mempty
+
+-- | The type names mentioned in a type.
+typeVars :: TypeBase dim as -> S.Set VName
+typeVars = S.fromList . map qualLeaf . typeQualVars
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
 -- a function type, does not contain a function type as a subcomponent, and may
