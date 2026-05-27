@@ -123,9 +123,9 @@ withProgramServer program runner extra_options phaseRef f = do
                 -- use annotate to make the phase name stand out in the error message, since it is the most likely place to find out what went wrong
                 let phaseInfo = maybe mempty (" during phase " <>) (phase st)
                     shrinkInfo = maybe mempty (" while shrinking with " <>) (shrinkWith st)
-                    sizeInfo = maybe mempty ((" at size " <>) . showText) (phaseSize st)
-                    seedInfo = maybe mempty ((" and seed " <>) . showText) (phaseRandom st)
-                    tacticInfo = maybe mempty ((" with tactic " <>) . showText) (phaseRandom st)
+                    sizeInfo = maybe mempty ((" at size=" <>) . showText) (phaseSize st)
+                    seedInfo = maybe mempty ((" and seed=" <>) . showText) (phaseSeed st)
+                    tacticInfo = maybe mempty ((" with tactic=" <>) . showText) (phaseRandom st)
                 ". Was evaluating property:\n"
                   <> activeTestName
                   <> phaseInfo

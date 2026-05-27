@@ -5,8 +5,6 @@
 -- property: prop_record_sums_fail
 
 -- File 2: ONLY record is a type alias (array is []record)
-import "../libraries/toString/to_string"
-
 type record = {s: i32, a: i32}
 
 def all_equal (r: record) : bool =
