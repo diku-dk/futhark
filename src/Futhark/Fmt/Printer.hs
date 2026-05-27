@@ -7,6 +7,7 @@ where
 
 import Data.Bifunctor (second)
 import Data.Foldable
+import Data.List qualified as L
 import Data.Loc (locStart)
 import Data.Text qualified as T
 import Futhark.Fmt.Monad
@@ -636,10 +637,25 @@ instance Format UncheckedDec where
   fmt (ImportDec path _tb loc) =
     addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
 
+sortDecs :: [UncheckedDec] -> [UncheckedDec]
+sortDecs decs =
+  concatMap sortGroup $ L.groupBy sameKind decs
+  where
+    isImport (ImportDec {}) = True
+    isImport _ = False
+    sameKind a b = isImport a == isImport b
+    sortGroup grp@(ImportDec {} : _) =
+      let sorted = L.sortOn getPath grp
+          locs = [loc | ImportDec _ _ loc <- grp]
+       in zipWith (\(ImportDec path tb _) loc -> ImportDec path tb loc) sorted locs
+    sortGroup grp = grp
+    getPath (ImportDec path _ _) = prettyText path
+    getPath _ = ""
+
 instance Format UncheckedProg where
   fmt (Prog Nothing []) = popComments
-  fmt (Prog Nothing decs) = sepDecs fmt decs </> popComments
-  fmt (Prog (Just dc) decs) = fmt dc </> sepDecs fmt decs </> popComments
+  fmt (Prog Nothing decs) = sepDecs fmt (sortDecs decs) </> popComments
+  fmt (Prog (Just dc) decs) = fmt dc </> sepDecs fmt (sortDecs decs) </> popComments
 
 -- | Given a filename and a futhark program, formats the program.
 fmtToDoc :: String -> T.Text -> Either SyntaxError (Doc AnsiStyle)
