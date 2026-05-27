@@ -150,7 +150,7 @@ with this type::
 
 for some ``t``, which has been given a ``#[prop]`` pragma. To test a property is
 being tested, ``futhark test`` will randomly generate values of type ``t``,
-called *candicates*, looking for a candiate that makes the property return
+called *candidates*, looking for a candidate that makes the property return
 ``false``, called a *counterexample*. When a counterexample has been found,
 ``futhark test`` will try to shrink it and finally report the smallest
 counterexample that it was able construct.
