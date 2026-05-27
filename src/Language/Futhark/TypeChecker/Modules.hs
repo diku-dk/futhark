@@ -89,8 +89,9 @@ newNamesForMTy orig_mty = do
     pure (v, v')
   let substs = M.fromList pairs
       rev_substs = M.fromList $ map (uncurry $ flip (,)) pairs
-
-  pure (substituteInMTy substs orig_mty, rev_substs)
+      new_mty = substituteInMTy substs orig_mty
+  addTySet $ mtyAbs new_mty
+  pure (new_mty, rev_substs)
   where
     substituteInMTy :: M.Map VName VName -> MTy -> MTy
     substituteInMTy substs (MTy mty_abs mty_mod) =
