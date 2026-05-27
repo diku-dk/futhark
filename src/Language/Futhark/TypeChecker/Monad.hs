@@ -162,7 +162,7 @@ underscoreUse loc name =
 
 -- | A mapping from import import names to 'Env's.  This is used to
 -- resolve @import@ declarations.
-type ImportTable = M.Map ImportName Env
+type ImportTable = M.Map ImportName (TySet, Env)
 
 data Context = Context
   { contextEnv :: Env,
@@ -291,7 +291,9 @@ lookupImport loc file = do
           <+> dquotes (pretty (includeToText canonical_import))
           </> "Known:"
           <+> commasep (map (pretty . includeToText) (M.keys imports))
-    Just scope -> pure (canonical_import, scope)
+    Just (abs, scope) -> do
+      addTySet abs
+      pure (canonical_import, scope)
 
 -- | Evaluate a 'TypeM' computation within an extended (/not/
 -- replaced) environment.
