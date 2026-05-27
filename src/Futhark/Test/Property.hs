@@ -294,22 +294,22 @@ extractPropSpecs srv properties = do
         []
           | is_prop ->
               throwE $
-                "Entry point '"
+                "Entry point \""
                   <> entry
-                  <> "' declared as property, but has no #[prop(...)] attribute."
+                  <> "\" declared as property, but has no #[prop(...)] attribute."
           | otherwise ->
               pure Nothing
         _
           | is_prop ->
               throwE $
-                "Entry point '"
+                "Entry point \""
                   <> entry
-                  <> "' has more than one #[prop(...)] attribute."
+                  <> "\" has more than one #[prop(...)] attribute."
           | otherwise ->
               throwE $
-                "Entry point '"
+                "Entry point \""
                   <> entry
-                  <> "' not declared as property, but has #[prop(...)] attribute."
+                  <> "\" not declared as property, but has #[prop(...)] attribute."
 
 -- | Generate a candidate automatically.
 automaticGenerator :: Server -> EntryName -> TypeName -> Int64 -> PBTGen -> IO (Maybe PBTFailure)
