@@ -1,0 +1,2 @@
+PBT FAIL: prop_misspelled_shrink_field size=50 seed=REDACTED after N tests
+Counterexample: 1i32

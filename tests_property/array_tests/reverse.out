@@ -1,0 +1,4 @@
+PBT FAIL: prop_reverse_involution_bad size=50 seed=REDACTED after N tests
+Counterexample: [0i32, -5i32]
+PBT FAIL: prop_reverse_involution_bad2 size=50 seed=REDACTED after N tests
+Counterexample: [-1i32, 1i32]
