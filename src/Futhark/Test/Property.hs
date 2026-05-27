@@ -18,6 +18,7 @@ import Control.Monad.Trans.Except
 import Data.Either (fromRight, partitionEithers)
 import Data.IORef
 import Data.Int
+import Data.List qualified as L
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Text qualified as T
 import Data.Word (Word64)
@@ -277,7 +278,11 @@ extractPropSpecs :: Server -> [EntryName] -> IO (Either PBTFailure [PropSpec])
 extractPropSpecs srv properties = do
   eps <- either (error . show) pure <=< liftIO $ cmdEntryPoints srv
   checks <- mapM (runExceptT . getOne eps) eps
-  case partitionEithers checks of
+  let missing = do
+        f <- properties
+        guard $ f `L.notElem` eps
+        pure $ Left $ "Declared as property, but is not an entry point: \"" <> f <> "\"."
+  case partitionEithers $ checks ++ missing of
     ([], specs) -> pure $ Right $ catMaybes specs
     (errors, _) -> pure $ Left $ T.intercalate "\n" errors
   where
