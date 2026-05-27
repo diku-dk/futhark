@@ -5,7 +5,7 @@
 -- property: prop_record_sums_fail
 
 -- File 3: ONLY array is a type alias (record is INLINE, arr = []{...})
-import "../libraries/toString/toString"
+import "../libraries/toString/to_string"
 
 type~ arr = []{s: i32, a: i32}
 

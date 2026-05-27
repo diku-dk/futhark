@@ -5,7 +5,7 @@
 -- property: prop_record_sums_fail
 
 -- File 4: NO type aliases (record inline, array is []{...})
-import "../libraries/toString/toString"
+import "../libraries/toString/to_string"
 
 def all_equal (r: {s: i32, a: i32}) : bool =
   r.s == r.a

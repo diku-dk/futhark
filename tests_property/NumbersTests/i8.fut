@@ -1,4 +1,4 @@
-import "../libraries/shrinkers/integerShrinker"
+import "../libraries/shrinkers/integer_shrinker"
 import "../lib/github.com/diku-dk/cpprandom/random"
 
 --------------------- i8 tests ------------------

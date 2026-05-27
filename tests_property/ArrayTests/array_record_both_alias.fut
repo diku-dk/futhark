@@ -4,7 +4,7 @@
 -- ==
 -- property: prop_record_sums_fail
 
-import "../libraries/toString/toString"
+import "../libraries/toString/to_string"
 
 type record = {s: i32, a: i32}
 type~ arr = []record
