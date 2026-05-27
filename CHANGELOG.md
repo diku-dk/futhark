@@ -5,16 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.27.0]
+## [0.26.3]
 
 ### Added
 
 * `futhark test` now suppports property-based testing (like QuickCheck). Work by
   Matin Nafar and Simon August Mørk.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
