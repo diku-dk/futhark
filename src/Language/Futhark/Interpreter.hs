@@ -985,11 +985,9 @@ eval _ (Literal v _) = pure $ ValuePrim v
 eval env (Hole (Info t) loc) =
   bad loc env $ "Hole of type: " <> prettyTextOneLine t
 eval env (Parens e _) = eval env e
-eval env (QualParens (qv, _) e loc) = do
-  m <- evalModuleVar env qv
-  case m of
-    ModuleFun {} -> error $ "Local open of module function at " ++ locStr loc
-    Module m' -> eval (m' <> env) e
+eval env (QualParens _ e _) =
+  -- Already handled by the names added by the type checker.
+  eval env e
 eval env (TupLit vs _) = toTuple <$> mapM (eval env) vs
 eval env (RecordLit fields _) =
   ValueRecord . M.fromList <$> mapM evalField fields
