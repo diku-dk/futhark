@@ -478,15 +478,15 @@ runOne s config srv entryNameRef program = runExceptT $ do
           then loop i
           else do
             let failmsg =
-                  "PBT FAIL: "
+                  "Property "
                     <> propName
-                    <> " size="
+                    <> " (size="
                     <> showText size
-                    <> " seed="
+                    <> ", seed="
                     <> showText (configSeed config)
-                    <> " after "
+                    <> ") failed after "
                     <> showText i
-                    <> " tests\n"
+                    <> " tests:\n"
 
             shrinkRes <- case psShrink s of
               Nothing ->

@@ -1,2 +1,2 @@
-PBT FAIL: prop_record_sums_fail size=5 seed=REDACTED after N tests
+Property prop_record_sums_fail (size=5, seed=REDACTED) failed after N tests:
 Counterexample: [([(-119i8, 3418i16)], 814619519i32)]

@@ -1,4 +1,4 @@
-PBT FAIL: prop_shrinker_error size=50 seed=REDACTED after N tests
+Property prop_shrinker_error (size=50, seed=REDACTED) failed after N tests:
 Shrinking note: User shrinker failed: Error in shrinker shrink_crash with random=REDACTED: shrink_crash has Runtime error: ["Error: division by zero","","Backtrace:","-> #0  ./futhark_error_tests/shrinker_error.fut:8:8-14",""]
 Attempted auto-shrinker fallback.
 Auto-shrinker fallback completed.
