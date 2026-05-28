@@ -18,23 +18,6 @@ i64ptp :: PrimType
 i64ptp = IntType Int64
 
 -- | Arguments:
---     @bu_env@ the bottom-up environment that keeps
---              track of the register-mapping safety
---     @nm@ a program variable name
---   Returns a boolean denoting whether the input variable
---           can be safely mapped to register memory.
---   The safety of register mapping comes down to verifying
---     that said variable is either not used in any of the
---     remaining kernel statements or it is used in a
---     compatible (@Compat@) way with the register mapping.
-regMapSucceeds :: BotEnv -> VName -> Bool
-regMapSucceeds bu_env nm
-  | Just etry <- M.lookup nm $ regArrays bu_env,
-    kind <- foldl unifyAccK None $ map snd (bindings etry) =
-    kind == None || kind == Compat
-regMapSucceeds _ _ = False
-
--- | Arguments:
 --    @(td_env, bu_env)@ the top-down and bottom-up environments
 --    @stm@ a program statement
 --   The result is a sequence of statements:
@@ -67,12 +50,20 @@ updateStm (_td_env, bu_env) (Let (Pat patels) aux e)
       Returns ResultPrivate certs se
     fff (_, res, _) = res
 --
--- a successful opaque is translated to a copy stmt:
+-- a successful opaque is translated to a shallow-copy stmt:
 updateStm (_td_env, bu_env) (Let (Pat [patel]) aux e)
   | BasicOp (Opaque OpaqueNil (Var orig_nm)) <- e,
     regMapSucceeds bu_env orig_nm =
   -- ^ the access kinds were merged into @orig_nm@ by @onBotUpStm@,
   --   hence we simply verify the original name subjecto to @opaque@ 
+  pure $ Sq.singleton $ Let (Pat [patel]) aux $ BasicOp $ SubExp $ Var orig_nm
+--
+-- a successfull Manifest target to "inform_pardim_only" is
+-- translated to a shallow-copy statement
+  | BasicOp (Manifest orig_nm perm) <- e,
+    isIdentityPerm perm,
+    -- check it has a "inform_pardim_only" attribute; get its int field:    
+    Just _ <- intOfAttrParDimOnly (stmAuxAttrs aux) =
   pure $ Sq.singleton $ Let (Pat [patel]) aux $ BasicOp $ SubExp $ Var orig_nm
 --
 -- a successful Manifest target to "glb2reg_only" whose root
@@ -98,6 +89,8 @@ updateStm (td_env, bu_env) (Let (Pat [pel]) aux e)
   e_sgmap <- genKerShm2Reg par_size_ses (patElemDec pel) shm_nm
   let aux' = aux { stmAuxAttrs = removeAttrGlb2RegOnly (stmAuxAttrs aux) }
   pure $ stms_manifest Sq.|> Let (Pat [pel]) aux' e_sgmap
+{-- 
+-- This is now handled earlier as pre-processing stage
 --
 -- A Manifest that was target to "glb2reg_only" BUT
 --   whose root array is NOT in global memory gets
@@ -112,6 +105,7 @@ updateStm (td_env, bu_env) (Let (Pat [pel]) aux e)
     not (nameIn glbnm (freeVars bu_env)) = do
   let aux' = aux { stmAuxAttrs = removeAttrGlb2RegOnly (stmAuxAttrs aux) }
   pure $ Sq.singleton $ Let (Pat [pel]) aux' $ BasicOp $ SubExp $ Var arrnm
+--}
 {--
 -- This is not needed any more since we decided to use MANIFEST!!!
 --
@@ -258,7 +252,6 @@ fixOneResult bu_env (Returns mnfs certs (Var reg_nm))
   (shm_nm, stms) <-
     runBuilder $ localScope scope $ do
       let shm_str = nameToString (baseName reg_nm) ++ "_to_shm"
-      
       letExp (nameFromString shm_str) e_sgmap
   pure (stms, Returns mnfs certs (Var shm_nm))
 -- otherwise do nothing

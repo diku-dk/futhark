@@ -13,7 +13,6 @@ import Data.Maybe
 import Futhark.IR.GPU
 --import Futhark.IR.GPU.Simplify (simplifyGPU)
 -- import Futhark.Optimise.TileLoops.Shared
---import Futhark.Pass
 import Futhark.Tools
 --import Futhark.Transform.Rename
 --import Futhark.Analysis.PrimExp.Convert
@@ -22,6 +21,7 @@ import Futhark.Tools
 --import Futhark.Optimise.IntraShm2Reg.OutBndAn
 import Futhark.Optimise.IntraShm2Reg.SymTabs
 import Futhark.Optimise.IntraShm2Reg.CodeGen(updateStm)
+import Futhark.Optimise.IntraShm2Reg.IntraRecBodyAn
 import Futhark.Util.Pretty
 import Debug.Trace
 
@@ -51,23 +51,48 @@ i64ptp = IntType Int64
 shm2RegOnIntraStms :: Env -> Stms GPU -> Shm2RegM (BotEnv, Stms GPU)
 shm2RegOnIntraStms env0 stmts = do
   ( (_, bu_env), stms') <- traverseStms env0 stmts
-  -- trace (prettyString bu_env ++ "\nKernel Stms:\n" ++ prettyString stms') $
-  pure (bu_env, stms')
-  where
-    traverseStms env Sq.Empty = pure (env, Sq.Empty)
-    traverseStms (td_env, bu_env) (stm Sq.:<| stms) = do
-      -- Compute @td_env@ top down
-      let td_env' = updateTopdownEnv td_env stm
-      -- Add potential target for bottom-up analysis (verification)
-      let bu_env' = addTargetForAn (td_env, bu_env) stm
-      -- Compute @bu_env@ bottom up
-      ((_, bu_env''), stms') <- traverseStms (td_env', bu_env') stms
-      -- let bu_env'' = updateBotmupEnv td_env' bu_env' stm
-      -- stm' <- shm2RegOnStm (td_env', bu_env'') stm
-      bu_env''' <- onBotUpStm (td_env', bu_env'') stm
-      let env' = (td_env', bu_env''')
-      curr_stms <- updateStm env' stm
-      pure ( env', curr_stms <> stms' )
+  trace (prettyString bu_env ++ "\nKernel Stms:\n" ++ prettyString stms') $
+    pure (bu_env, stms')
+
+traverseStms :: Env -> Stms GPU -> Shm2RegM (Env, Stms GPU)
+-- base case:
+traverseStms env Sq.Empty = pure (env, Sq.Empty)
+-- Special cases amenable to simple preprocessing:
+-- A @manifest@ with attribute @glb2reg_only@ which
+--   does not have its base array in global memory
+--   is translated to a simple copy statement.
+traverseStms (td_env, bu_env) (stm Sq.:<| stms)
+  | Let pat aux (BasicOp (Manifest arrnm perm)) <- stm,
+    isIdentityPerm perm,
+    Just _ <- intOfAttrGlb2RegOnly (stmAuxAttrs aux),
+    glbnm <- fromMaybe arrnm (M.lookup arrnm (rootSlcArr td_env)),
+    not (nameIn glbnm (freeVars bu_env)) = do
+  let aux' = aux { stmAuxAttrs = removeAttrGlb2RegOnly (stmAuxAttrs aux) }
+      stm' = Let pat aux' $ BasicOp $ SubExp $ Var arrnm
+  traverseStms (td_env,bu_env) $ stm' Sq.<| stms
+--
+-- Loop Case is handled separately by function @traverseLoop@
+  | Let _ _ Loop{} <- stm =
+    traverseLoop traverseStms (td_env, bu_env) $ stm Sq.<| stms
+--
+-- Match Case is handled separately by function @traverseIf@
+  | Let _ _ Match{} <- stm =
+    traverseIf traverseStms (td_env, bu_env) $ stm Sq.<| stms
+--
+-- General Traversal Structure:
+traverseStms (td_env, bu_env) (stm Sq.:<| stms) = do
+  -- Compute @td_env@ top down
+  let td_env' = updateTopdownEnv td_env stm
+  -- Add potential target for bottom-up analysis (verification)
+  let bu_env' = addTargetForAn (td_env, bu_env) stm
+  -- Compute @bu_env@ bottom up
+  ((_, bu_env''), stms') <- traverseStms (td_env', bu_env') stms
+  -- let bu_env'' = updateBotmupEnv td_env' bu_env' stm
+  -- stm' <- shm2RegOnStm (td_env', bu_env'') stm
+  bu_env''' <- onBotUpStm (td_env', bu_env'') stm
+  let env' = (td_env', bu_env''')
+  curr_stms <- updateStm env' stm
+  pure ( env', curr_stms <> stms' )
 
 -- | Applies the analysis in a body of statements:
 --   1. sets the body result in the top-down env and
@@ -105,10 +130,35 @@ applySchedOnLambda env lam = do
 --     
 -- To DO:
 --   (1) check that the sizes of the register-allocated slice
---       only contains constants or user-defined params
+--       only contains constants or user-defined params; the
+--       top-down environment has already been extended in
+--       this sense the field @userParams@.
 addTargetForAn :: (TopEnv, BotEnv) -> Stm GPU -> BotEnv
--- the case of a manifest having the attribute "glb2reg_only":
+-- the case of a manifest having the attribute "inform_pardim_only":
 addTargetForAn (td_env, bu_env) (Let pat aux e)
+  | BasicOp (Manifest arrnm perm) <- e,
+    isIdentityPerm perm,
+    -- check it has a "inform_pardim_only" attribute; get its int field:    
+    Just num_par_dims <- intOfAttrParDimOnly (stmAuxAttrs aux),
+    [pel] <- patElems pat,
+    Array _ptp shp_res _u <- patElemDec pel,
+    num_par_dims < length (shapeDims shp_res) =
+  let bu_env' = mkManifestEntry bu_env arrnm num_par_dims shp_res
+  in  mkManifestEntry bu_env' (patElemName pel) num_par_dims shp_res
+{--
+  let shp_res_ses = shapeDims shp_res
+      shp_res_pes = map (peFromSe td_env i64ptp) shp_res_ses
+      par_dim_pes = take num_par_dims shp_res_pes
+      entry = initEntry (zip shp_res_ses shp_res_pes) par_dim_pes
+      patel_nm = patElemName pel
+      entry' = validEntryForBotEnv patel_nm bu_env entry
+  in  trace ("Target: Manifest-Inform-ParDim-Only, pat-el: "++prettyString patel_nm ++
+             " shape_ses: "++prettyString shp_res_ses ++
+             " shape_pes: " ++ prettyString shp_res_pes ) $
+        bu_env { regArrays = M.insert patel_nm entry' (regArrays bu_env) }
+--}
+--
+-- the case of a manifest having the attribute "glb2reg_only":
   | BasicOp (Manifest arrnm perm) <- e,
     isIdentityPerm perm,
     -- check that the root of @arrnm@ is in global memory:
@@ -120,15 +170,26 @@ addTargetForAn (td_env, bu_env) (Let pat aux e)
     [pel] <- patElems pat,
     Array _ptp shp_res _u <- patElemDec pel,
     num_par_dims < length (shapeDims shp_res) =
-  let shp_res_ses = shapeDims shp_res
+  mkManifestEntry bu_env (patElemName pel) num_par_dims shp_res
+{--
+      shp_res_ses = shapeDims shp_res
       shp_res_pes = map (peFromSe td_env i64ptp) shp_res_ses
       par_dim_pes = take num_par_dims shp_res_pes
       entry = initEntry (zip shp_res_ses shp_res_pes) par_dim_pes
       patel_nm = patElemName pel
-  in  trace ("Target: Manifest, pat-el: "++prettyString patel_nm ++
-             " shape_ses: "++prettyString shp_res_ses ++
-             " shape_pes: " ++ prettyString shp_res_pes ) $
-        bu_env { regArrays = M.insert patel_nm entry (regArrays bu_env) }
+      entry' = validEntryForBotEnv patel_nm bu_env entry
+--}
+  where
+    mkManifestEntry bot_env nm num_par_dims shp_res =
+      let shp_res_ses = shapeDims shp_res
+          shp_res_pes = map (peFromSe td_env i64ptp) shp_res_ses
+          par_dim_pes = take num_par_dims shp_res_pes
+          entry = initEntry (zip shp_res_ses shp_res_pes) par_dim_pes
+          entry'= validEntryForBotEnv nm bot_env entry
+      in  trace ("Target: Manifest annotated, pat-el: " ++ prettyString nm ++
+                 " shape_ses: "++prettyString shp_res_ses ++
+                 " shape_pes: " ++ prettyString shp_res_pes ) $
+            bot_env { regArrays = M.insert nm entry' (regArrays bot_env) }
 --
 -- the case of an inner-map kernel that can be changed to private result!
 addTargetForAn (td_env, bu_env) (Let pat aux (Op (SegOp sgmap)))
@@ -167,7 +228,8 @@ addTargetForAn (td_env, bu_env) (Let pat _aux e)
 
 --}
   where
-    addEntry tab (nm, entry) = M.insert nm entry tab
+    addEntry tab (nm, entry) =
+      M.insert nm (validEntryForBotEnv nm bu_env entry) tab
     eql (x, y) = x == y
     mkEntry entry_space (patel, bdyres)
       | Returns ResultMaySimplify _cert _se <- bdyres,
@@ -184,14 +246,31 @@ addTargetForAn (td_env, bu_env) (Let pat _aux e)
     --
     mkEntry _ _ = Nothing
 --
+-- a copy statement creates a new entry which is merged
+-- in the base-array entry by the bottom-up processing
+addTargetForAn (_td_env, bu_env) (Let pat _aux e)
+  | BasicOp (SubExp (Var orig_nm)) <- e,
+    Just orig_entry <- M.lookup orig_nm (regArrays bu_env), 
+    [pel] <- patElems pat,
+    pel_nm<- patElemName pel,
+    Array{} <- patElemDec pel =
+  let new_entry = orig_entry { bindings = mempty }
+      new_entry'= validEntryForBotEnv pel_nm bu_env new_entry
+      regArrays'= M.insert pel_nm new_entry' $ regArrays bu_env
+  in bu_env { regArrays = regArrays' }
+--
+-- opaque is treated similarly to a copy statement
 addTargetForAn (_td_env, bu_env) (Let pat _aux e)
   | BasicOp (Opaque OpaqueNil (Var orig_nm)) <- e,
     Just orig_entry <- M.lookup orig_nm (regArrays bu_env), 
     [pel] <- patElems pat,
+    pel_nm<- patElemName pel,
     Array{} <- patElemDec pel =
   let new_entry = orig_entry { bindings = mempty }
-      regArrays'= M.insert (patElemName pel) new_entry $ regArrays bu_env
+      new_entry'= validEntryForBotEnv pel_nm bu_env new_entry
+      regArrays'= M.insert pel_nm new_entry' $ regArrays bu_env
   in bu_env { regArrays = regArrays' }
+{--
 --
 -- the case of a manifest having the attribute "glb2reg_only",
 --   but which is not applied to a global-memory array: behaves
@@ -211,6 +290,7 @@ addTargetForAn (td_env, bu_env) (Let pat aux e)
   let new_entry = orig_entry { bindings = mempty }
       regArrays'= M.insert (patElemName pel) new_entry $ regArrays bu_env
   in bu_env { regArrays = regArrays' }
+--}
 --
 addTargetForAn (_, bu_env) _ = bu_env
 
@@ -249,13 +329,11 @@ instance Pretty InnerEnv where
      "\n\tIndKind: "<+> pretty (M.toList (ind_kind inn_env)) <>
      "   }"
 
-
 freshInnerEnv :: [VName] -> [PrimExp VName] -> Names -> InnerEnv
 freshInnerEnv thids par_dims fvs =
   InnerEnv thids par_dims fvs ind_kind mempty
   where
     ind_kind = M.fromList $ map (\nm -> (nm,Compat)) $ namesToList fvs
-
 
 onBotUpStm :: Env -> Stm GPU -> Shm2RegM BotEnv
 onBotUpStm (top_env, bu_env) stm@(Let (Pat (pel:_)) aux e)
@@ -270,7 +348,16 @@ onBotUpStm (top_env, bu_env) stm@(Let (Pat (pel:_)) aux e)
       (_, inn_env) = onBotUpInnerStms (top_env, inn_env0) $ bodyStms kbody
   pure $ updateBotEnv (patElemName pel) inn_env bu_env
   --
-  -- The case of Opaque: just transfer the entries to parrent
+  -- The case of a shallow-copy: just transfer the entry to the pattent
+  | BasicOp (SubExp (Var orig_nm)) <- e,
+    Just curr_entry <- M.lookup (patElemName pel) (regArrays bu_env),
+    Just orig_entry <- M.lookup orig_nm (regArrays bu_env),
+    Array{} <- patElemDec pel = do
+  let new_entry = mergeBindings orig_entry curr_entry
+      regArrays'= M.insert orig_nm new_entry $ regArrays bu_env
+  pure $ bu_env { regArrays = regArrays' }
+  --
+  -- The case of Opaque: similar to shallow-copy statement
   | BasicOp (Opaque OpaqueNil (Var orig_nm)) <- e,
     Just curr_entry <- M.lookup (patElemName pel) (regArrays bu_env),
     Just orig_entry <- M.lookup orig_nm (regArrays bu_env),
@@ -278,6 +365,20 @@ onBotUpStm (top_env, bu_env) stm@(Let (Pat (pel:_)) aux e)
   let new_entry = mergeBindings orig_entry curr_entry
       regArrays'= M.insert orig_nm new_entry $ regArrays bu_env
   pure $ bu_env { regArrays = regArrays' }
+  --
+  -- The case of Manifest with "inform_pardim_only" attribute:
+  --   is equivalent with a shallow copy
+  | BasicOp (Manifest orig_nm perm) <- e,
+    isIdentityPerm perm,
+    -- check it has a "inform_pardim_only" attribute; get its int field:    
+    Just _ <- intOfAttrParDimOnly (stmAuxAttrs aux),
+    Just curr_entry <- M.lookup (patElemName pel) (regArrays bu_env),
+    Just orig_entry <- M.lookup orig_nm (regArrays bu_env),
+    Array{} <- patElemDec pel = do
+  let new_entry = mergeBindings orig_entry curr_entry
+      regArrays'= M.insert orig_nm new_entry $ regArrays bu_env
+  pure $ bu_env { regArrays = regArrays' }
+{--
   -- the case of a Manifest with "glb2reg_only" attribute who is
   --   not from global memory; just trasfer the entry to the parrent 
   | BasicOp (Manifest arrnm perm) <- e,
@@ -292,6 +393,7 @@ onBotUpStm (top_env, bu_env) stm@(Let (Pat (pel:_)) aux e)
   let new_entry = mergeBindings orig_entry curr_entry
       regArrays'= M.insert arrnm new_entry $ regArrays bu_env
   pure $ bu_env { regArrays = regArrays' }
+--}
   -- conservative case: mark irregular all accesses of free vars in this stm
   | True = do
   let ind_kind= M.fromList $ map (\nm -> (nm,Irreg)) $ namesToList $ freeIn stm
@@ -346,6 +448,28 @@ onBotUpInnerStm (_,inn_env) (Let _ _ (BasicOp (Index nm _)))
            M.lookup nm (indirect inn_env),
     Just kind <- M.lookup nm' (ind_kind inn_env),
     kind == Irreg = inn_env
+--
+-- A screma in which all inputs are already known to be
+-- compatible and no free-vars exist in the form then OK!
+onBotUpInnerStm (_top_env, inn_env) (Let _pat _aux e)
+  | Op (OtherOp (Screma _w arrs form)) <- e,
+    all alreadyCompat arrs && noFreeVarsInForm form =
+  inn_env
+  where
+    alreadyCompat arrnm =
+      let k = length $ ker_idxs inn_env
+          (arrnm', dims) = fromMaybe (arrnm,replicate k 0) $ M.lookup arrnm $ indirect inn_env
+          kind = fromMaybe Irreg $ M.lookup arrnm' $ ind_kind inn_env
+      in  all (==1) dims || kind == Compat --   || not (nameIn arrnm' (fvs inn_env))
+      --  ^ is the last term of the disjunction safe???
+    noFreeVarsInForm (ScremaForm lam1 scans reds lam2) =
+      mempty == freeIn lam1 && mempty == freeIn lam2 &&
+      mempty == map fvsScan scans && mempty == map fvsRed reds
+    fvsScan :: Scan GPU -> Names
+    fvsScan (Scan lam nes) = foldl (<>) (freeIn lam) $ map freeIn nes
+    fvsRed  :: Reduce GPU -> Names
+    fvsRed  (Reduce _ lam nes) = foldl (<>) (freeIn lam) $ map freeIn nes
+--
 -- The index corrresponds to a partially-indexed global array that
 --   was not already proven to be incompatible with register mapping;
 -- This is the case on which we can find regular accesses that allow
