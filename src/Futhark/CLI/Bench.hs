@@ -186,7 +186,7 @@ compileBenchmark ::
 compileBenchmark opts (program, program_spec) = do
   spec <- maybe (pure program_spec) testSpecFromFileOrDie $ optTestSpec opts
   case testAction spec of
-    RunCases cases _ _
+    RunCases cases _ _ _
       | null $
           optExcludeCase opts
             `intersect` (testTags spec <> testTags program_spec),

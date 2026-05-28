@@ -1,0 +1,6 @@
+Property prop_i32_fail (size=50, seed=REDACTED) failed after N tests:
+Counterexample: 1i32
+Property prop_i32_fail (size=50, seed=REDACTED) failed after N tests:
+Counterexample: 1i32
+Property prop_i32_fail (size=50, seed=REDACTED) failed after N tests:
+Counterexample: 1i32

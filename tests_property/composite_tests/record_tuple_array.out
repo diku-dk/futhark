@@ -1,0 +1,2 @@
+Property prop_simple_fail (size=50, seed=REDACTED) failed after N tests:
+Counterexample: {a = {t = (-82i32, 61i32), xs = [-82i32, 61i32, 89i32, 20i32]}, b = ({t = (-61i32, 78i32), xs = [-61i32, 78i32, -8i32, -82i32]}, [20i32, 89i32, 61i32, -82i32]), c = [{t = (89i32, 20i32), xs = [-82i32, 61i32, 89i32, 20i32]}, {t = (61i32, 89i32), xs = [61i32, 89i32, 20i32, -82i32]}, {t = (-8i32, -82i32), xs = [-61i32, 78i32, -8i32, -82i32]}, {t = (78i32, -8i32), xs = [78i32, -8i32, -82i32, -61i32]}]}

@@ -132,7 +132,12 @@ emccExportNames jses opaqueTypes =
          "_futhark_context_config_free",
          "_futhark_context_new",
          "_futhark_context_free",
-         "_futhark_context_get_error"
+         "_futhark_context_get_error",
+         "_futhark_context_sync",
+         "_futhark_context_clear_caches",
+         "_futhark_context_report",
+         "_futhark_context_pause_profiling",
+         "_futhark_context_unpause_profiling"
        ]
   where
     -- Include array types from both entry points and record fields.
@@ -153,23 +158,28 @@ javascriptWrapper entryPoints opaqueTypes =
       classFutharkContext entryPoints opaqueTypes
     ]
 
+-- Make FutharkModule the generated primary class, but keeps FutharkContext around for backwards compatibility.
 classFutharkContext :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
 classFutharkContext entryPoints opaqueTypes =
   T.unlines
-    [ "class FutharkContext {",
-      constructor entryPoints opaqueTypes,
+    [ "class FutharkModule {",
+      moduleConstructor,
+      moduleInitFromWasm entryPoints opaqueTypes,
+      moduleInit,
       getFreeFun,
       getEntryPointsFun,
       getTypesFun,
       getErrorFun,
+      getUtilityFuns,
       T.unlines $ map toFutharkArray arrays,
       T.unlines $ concatMap (generateProjectMethods . snd) opaqueTypes,
       T.unlines $ map jsWrapEntryPoint entryPoints,
       "}",
+      classFutharkContextCompat,
       [text|
-      async function newFutharkContext() {
+      async function newFutharkContext(num_threads) {
         var wasm = await loadWASM();
-        return new FutharkContext(wasm);
+        return new FutharkContext(wasm, num_threads);
       }
       |]
     ]
@@ -180,32 +190,90 @@ classFutharkContext entryPoints opaqueTypes =
     entryPointTypes = concatMap (\jse -> parameters jse ++ [ret jse]) entryPoints
     recordFieldTypes = [jsrfType rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
 
-constructor :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
-constructor jses opaqueTypes =
+moduleConstructor :: T.Text
+moduleConstructor =
   [text|
-  constructor(wasm, num_threads) {
+  constructor() {
+    this.wasm = undefined;
+    this.cfg = undefined;
+    this.ctx = undefined;
+    this.entry_points = {};
+    this.types = {};
+    this.entry = {};
+  }
+  |]
+
+moduleInitFromWasm :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
+moduleInitFromWasm jses opaqueTypes =
+  [text|
+  _init_from_wasm(wasm, num_threads) {
     this.wasm = wasm;
     this.cfg = this.wasm._futhark_context_config_new();
     if (num_threads) this.wasm._futhark_context_config_set_num_threads(this.cfg, num_threads);
     this.ctx = this.wasm._futhark_context_new(this.cfg);
+
     this.entry_points = {
       ${entries}
     };
     this.types = {
       ${type_entries}
     };
+    this.entry = {};
+    ${entry_aliases}
+    ${array_aliases}
+    ${array_type_aliases}
   }
   |]
   where
     entries = T.intercalate "," $ map dicEntry jses
     type_entries = T.intercalate "," $ map dicTypeEntry opaqueTypes
+    entry_aliases = T.unlines $ map entryAlias jses
+    array_aliases = T.unlines $ map arrayAlias arrays
+    array_type_aliases = T.unlines $ map arrayTypeAlias arrays
+
+    arrays = nubOrd $ filter isArray (entryPointTypes ++ recordFieldTypes)
+    entryPointTypes = concatMap (\jse -> parameters jse ++ [ret jse]) jses
+    recordFieldTypes = [jsrfType rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
+
+moduleInit :: T.Text
+moduleInit =
+  [text|
+  async init(wasm, num_threads) {
+    if (wasm === undefined) {
+      throw new Error("FutharkModule.init() requires the generated backend runtime module");
+    }
+
+    this._init_from_wasm(wasm, num_threads);
+  }
+  |]
+
+classFutharkContextCompat :: T.Text
+classFutharkContextCompat =
+  [text|
+  class FutharkContext extends FutharkModule {
+    constructor(wasm, num_threads) {
+      super();
+
+      if (wasm !== undefined) {
+        this._init_from_wasm(wasm, num_threads);
+      }
+    }
+  }
+  |]
 
 getFreeFun :: T.Text
 getFreeFun =
   [text|
   free() {
-    this.wasm._futhark_context_free(this.ctx);
-    this.wasm._futhark_context_config_free(this.cfg);
+    if (this.ctx !== undefined) {
+      this.wasm._futhark_context_free(this.ctx);
+      this.ctx = undefined;
+    }
+
+    if (this.cfg !== undefined) {
+      this.wasm._futhark_context_config_free(this.cfg);
+      this.cfg = undefined;
+    }
   }
   |]
 
@@ -236,6 +304,65 @@ getErrorFun =
     return str;
   }
   |]
+
+getUtilityFuns :: T.Text
+getUtilityFuns =
+  [text|
+  async context_sync() {
+    return this.wasm._futhark_context_sync(this.ctx);
+  }
+
+  async clear_caches() {
+    return this.wasm._futhark_context_clear_caches(this.ctx);
+  }
+
+  async report() {
+    var ptr = this.wasm._futhark_context_report(this.ctx);
+    var len = this.wasm.HEAP8.subarray(ptr).indexOf(0);
+    var bytes = this.wasm.HEAPU8.subarray(ptr, ptr + len);
+    var str = new TextDecoder().decode(bytes);
+    this.wasm._free(ptr);
+    return str;
+  }
+
+  async pause_profiling() {
+    return this.wasm._futhark_context_pause_profiling(this.ctx);
+  }
+
+  async unpause_profiling() {
+    return this.wasm._futhark_context_unpause_profiling(this.ctx);
+  }
+  |]
+
+entryAlias :: JSEntryPoint -> T.Text
+entryAlias jse =
+  [text|this.entry["${ename}"] = this.${fname}.bind(this);|]
+  where
+    fname = GC.escapeName $ T.pack $ name jse
+    ename = T.pack $ name jse
+
+arrayAlias :: String -> T.Text
+arrayAlias typ =
+  [text|
+  this.${signature} = {
+    from_data: (data, ${dims}) => this.new_${signature}(data, ${dims}),
+    from_jsarray: (data) => this.new_${signature}_from_jsarray(data)
+  };
+  |]
+  where
+    d = dim typ
+    ftype = baseType typ
+    signature = T.pack $ ftype ++ "_" ++ show d ++ "d"
+    dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d - 1]]
+
+arrayTypeAlias :: String -> T.Text
+arrayTypeAlias typ =
+  [text|this.types["${typ_text}"] = this.${signature};|]
+  where
+    d = dim typ
+    ftype = baseType typ
+    signature = T.pack $ ftype ++ "_" ++ show d ++ "d"
+    typ_text = T.pack typ
 
 dicEntry :: JSEntryPoint -> T.Text
 dicEntry jse =
@@ -476,4 +603,4 @@ runServer =
 
 -- | The names exported by the generated module.
 libraryExports :: T.Text
-libraryExports = "export {newFutharkContext, FutharkContext, FutharkArray, FutharkOpaque};"
+libraryExports = "export {newFutharkContext, FutharkContext, FutharkModule, FutharkArray, FutharkOpaque};"

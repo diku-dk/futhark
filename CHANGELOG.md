@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.26.3]
+
+### Added
+
+* `futhark test` now suppports property-based testing (like QuickCheck). Work by
+  Matin Nafar and Simon August Mørk.
+
+### Fixed
+
+* `futhark bench`: entry points that consumed their input produced misleading
+  profiling information. (#2464)
+
+* Sometimes arrays returned from entry points would be unnecessarily copied if
+  the compiler could not be sure statically that they were in row-major layout.
+
+* The type checker would fail to reject entry points that accepted lifted
+  abstract types. (#2467)
+
+* An issue in the interpreter's handling of local opens.
+
+## [0.26.2]
+
+### Added
+
 * New server commands: `zip` and `unzip`, matching the corresponding C APIs.
 
 * The restrictions for passing tuples as consumed function parameters have been
@@ -16,10 +46,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The reverse-mode AD transformation now supports custom adjoints through a new
   prelude function, `with_vjp`.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
