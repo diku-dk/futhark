@@ -12,6 +12,7 @@ where
 import Control.Monad
 import Data.Foldable
 import Data.List qualified as L
+import Data.Map qualified as M
 import Debug.Trace
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
@@ -22,7 +23,6 @@ import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Monad
 import Futhark.Tools
 import Prelude hiding (div, rem)
-import Data.Map qualified as M
 
 indexIrreg ::
   (MonadBuilder m) =>
@@ -110,8 +110,8 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
       interchanged_inps =
         (paramName iota_p, DistInputFree iota_w iota_w_t)
           : [ (paramName p, DistInputFree (paramName acc) (paramType acc))
-              -- This could potentially be wrong but since it's acc type it should be fine.
-            | (p, acc) <- zip orig_acc_params acc_params_tr
+            | -- This could potentially be wrong but since it's acc type it should be fine.
+              (p, acc) <- zip orig_acc_params acc_params_tr
             ]
           ++ inps
 
@@ -123,7 +123,6 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
         prettyString acc_lam_body
       ]
 
-  -- FIXME: we are not using withacc_new_inputs, which has got to be wrong.
   let (withacc_new_inputs, withacc_dstms) =
         distributeBody
           scope
@@ -131,31 +130,32 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
           interchanged_inps
           acc_lam_body
 
-  withacc_lam' <- mkLambda (map (trParam sf) lam_params') $ do
-    env' <- foldM (flattenDistStm ops segments) env withacc_dstms
-    reps <-
-      mapM
-        (liftWithAccResult (flattenSegLevel ops) segments withacc_new_inputs env')
-        (zip distres (bodyResult $ lambdaBody acc_lam))
-    concat <$> mapM repToResults reps
+  withacc_lam' <- localScope (scopeOfDistInputs inps)
+    . mkLambda (map (trParam sf) lam_params')
+    $ do
+      env' <- foldM (flattenDistStm ops segments) env withacc_dstms
+      reps <-
+        mapM
+          (liftWithAccResult (flattenSegLevel ops) segments withacc_new_inputs env')
+          (zip distres (bodyResult $ lambdaBody acc_lam))
+      concat <$> mapM repToResults reps
 
   withacc_out_vs <-
     certifying (distCerts inps withacc_aux env) $
       letTupExp "withacc_flatten_out" (WithAcc withacc_inputs' withacc_lam')
 
-  -- The accumulator results are handled differently in nonuniform casesince we don not have metadata 
+  -- The accumulator results are handled differently in nonuniform casesince we do not have metadata
   -- for them and since all of them are turned flat even when they might be actually regular.
   -- we can still here turn the actul disrest that are regular to regualars.
   let (withacc_out_vs_wo, withacc_out_vs_no) = splitAt num_accs withacc_out_vs
       (distres_withacc, distres_normal) = splitAt num_accs distres
-  
+
   let out_reps_normal = mkNormalResReps distres_normal withacc_out_vs_no
   out_reps_withacc <-
     if nonuniform
       then mapM mkNonuniformWithAccRep (zip3 withacc_out_vs_wo non_uniform_reps distres_withacc)
-      else pure $ map Regular withacc_out_vs_wo 
+      else pure $ map Regular withacc_out_vs_wo
   pure $ insertReps (zip (map distResTag $ distres_withacc ++ distres_normal) (out_reps_withacc ++ out_reps_normal)) env
-
   where
     newAccLamParams ps = do
       let (cert_ps, acc_ps) = splitAt num_accs ps
@@ -183,8 +183,8 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
         <$> mapM onArr arrs
         <*> traverse (onOpWithIndexRank (segmentsRank segments)) op
       where
-        onArr arr = do 
-          arr_t <- localScope (scopeOfDistInputs inps) $  lookupType arr
+        onArr arr = do
+          arr_t <- localScope (scopeOfDistInputs inps) $ lookupType arr
           let arr_shape = arrayShape arr_t
               expected_shape = segmentsShape segments <> arr_shape
           liftSubExpRegular (flattenSegLevel ops) segments inps env expected_shape (Var arr)
@@ -197,14 +197,15 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
       w <- fmap (arraySize 0) . lookupType $ head arrs'
       (,reps_dense) . (Shape [w],arrs',) <$> traverse (onOpWithIndexRank 1) op
 
-    liftWithAccResult lvl segs inputs env' (dist_res, res) = 
+    liftWithAccResult lvl segs inputs env' (dist_res, res) =
       case resSubExp res of
         Var v -> do
-          let (Just (t,rep)) = M.lookup v $ inputReps inputs env'
-          if isAcc t then
+          let (Just (t, rep)) = M.lookup v $ inputReps inputs env'
+          if isAcc t
+            then
               pure rep
             else
-              liftDistResultRep lvl segs inputs env' dist_res res         
+              liftDistResultRep lvl segs inputs env' dist_res res
         Constant _ -> liftDistResultRep lvl segs inputs env' dist_res res
 
     repToResults (Regular v) =
@@ -230,16 +231,16 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
 
     mkNonuniformWithAccRep (v, rep, dist_res)
       | isRegularDistResult dist_res = do
-        let DistType _ _ t = distResType dist_res
-            expectedShape = segmentsShape segments <> arrayShape t
-        v_t <- lookupType v
-        v_reshaped <-
-          letExp "actual_regular_with_acc_res" . BasicOp $
-            Reshape v (reshapeAll (arrayShape v_t) expectedShape)
-        pure $ Regular v_reshaped
+          let DistType _ _ t = distResType dist_res
+              expectedShape = segmentsShape segments <> arrayShape t
+          v_t <- lookupType v
+          v_reshaped <-
+            letExp "actual_regular_with_acc_res" . BasicOp $
+              Reshape v (reshapeAll (arrayShape v_t) expectedShape)
+          pure $ Regular v_reshaped
       | otherwise =
           pure $ Irregular $ rep {irregularD = v}
-    
+
     mkNormalResReps :: [DistResult] -> [VName] -> [ResRep]
     mkNormalResReps dist_res results =
       snd $
@@ -248,14 +249,14 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
               if isRegularDistResult dist_res'
                 then
                   let (v : rs') = rs
-                  in (rs', Regular v)
+                   in (rs', Regular v)
                 else
                   let (_ : segs : flags : offsets : elems : rs') = rs
-                  in (rs', Irregular $ IrregularRep segs flags offsets elems Dense)
+                   in (rs', Irregular $ IrregularRep segs flags offsets elems Dense)
           )
           results
           dist_res
-    
+
     trType ::
       (VName -> Maybe Shape, VName -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
       TypeBase shape u ->
