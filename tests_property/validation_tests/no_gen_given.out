@@ -1,19 +1,19 @@
-PBT FAIL: i8_val size=50 seed=REDACTED after N tests
+Property i8_val (size=50, seed=REDACTED) failed after N tests:
 Counterexample: -119i8
-PBT FAIL: i8_arr size=50 seed=REDACTED after N tests
+Property i8_arr (size=50, seed=REDACTED) failed after N tests:
 Counterexample: [-119i8, -43i8]
-PBT FAIL: u64_arr size=50 seed=REDACTED after N tests
+Property u64_arr (size=50, seed=REDACTED) failed after N tests:
 Counterexample: [10612112620025966601u64]
-PBT FAIL: bool_arr size=50 seed=REDACTED after N tests
+Property bool_arr (size=50, seed=REDACTED) failed after N tests:
 Counterexample: [true, true, false]
-PBT FAIL: u8_arr_arr size=50 seed=REDACTED after N tests
+Property u8_arr_arr (size=50, seed=REDACTED) failed after N tests:
 Counterexample: [[217u8]]
-PBT FAIL: i16_arr_arr_arr size=50 seed=REDACTED after N tests
+Property i16_arr_arr_arr (size=50, seed=REDACTED) failed after N tests:
 Counterexample: [[[-4087i16, -17067i16],
 [-4772i16, 30847i16]],
 [[-3928i16, 27098i16],
 [67i16, -5144i16]]]
-PBT FAIL: i8_arr_arr_arr_arr size=50 seed=REDACTED after N tests
+Property i8_arr_arr_arr_arr (size=50, seed=REDACTED) failed after N tests:
 Counterexample: [[[[-119i8, -43i8],
 [-36i8, -1i8]],
 [[40i8, 90i8],
@@ -22,11 +22,11 @@ Counterexample: [[[[-119i8, -43i8],
 [78i8, -89i8]],
 [[52i8, 52i8],
 [24i8, -10i8]]]]
-PBT FAIL: tuple_val size=50 seed=REDACTED after N tests
+Property tuple_val (size=50, seed=REDACTED) failed after N tests:
 Counterexample: (-119i8, 152u8)
-PBT FAIL: record_val size=50 seed=REDACTED after N tests
+Property record_val (size=50, seed=REDACTED) failed after N tests:
 Counterexample: {x = -119i8, y = 152u8}
-PBT FAIL: tuple_with_arrs size=50 seed=REDACTED after N tests
+Property tuple_with_arrs (size=50, seed=REDACTED) failed after N tests:
 Counterexample: ([-119i8], [152u8])
-PBT FAIL: record_with_arrs size=50 seed=REDACTED after N tests
+Property record_with_arrs (size=50, seed=REDACTED) failed after N tests:
 Counterexample: {xs = [-119i8], ys = [152u8]}
