@@ -9,7 +9,10 @@
 // under emulation, so the compiler will have to be careful when
 // generating reads or writes.
 
-#if !defined(cl_khr_fp16) && !(defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600) && !(defined(ISPC))
+#if !defined(cl_khr_fp16) && \
+     !(defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600) && \
+     !(defined(__HIP_DEVICE_COMPILE__)) && \
+     !(defined(ISPC))
 #define EMULATE_F16
 #endif
 
@@ -30,6 +33,8 @@ typedef float16 f16;
 
 #ifdef __CUDA_ARCH__
 #include <cuda_fp16.h>
+#elif defined(__HIP_DEVICE_COMPILE__)
+#include <hip/hip_fp16.h>
 #endif
 
 typedef half f16;
@@ -41,8 +46,6 @@ typedef half f16;
 SCALAR_FUN_ATTR f16 fadd16(f16 x, f16 y) { return x + y; }
 SCALAR_FUN_ATTR f16 fsub16(f16 x, f16 y) { return x - y; }
 SCALAR_FUN_ATTR f16 fmul16(f16 x, f16 y) { return x * y; }
-SCALAR_FUN_ATTR bool cmplt16(f16 x, f16 y) { return x < y; }
-SCALAR_FUN_ATTR bool cmple16(f16 x, f16 y) { return x <= y; }
 SCALAR_FUN_ATTR f16 sitofp_i8_f16(int8_t x) { return (f16) x; }
 SCALAR_FUN_ATTR f16 sitofp_i16_f16(int16_t x) { return (f16) x; }
 SCALAR_FUN_ATTR f16 sitofp_i32_f16(int32_t x) { return (f16) x; }
@@ -66,6 +69,20 @@ SCALAR_FUN_ATTR f16 btof_bool_f16(bool x) { return x ? 1 : 0; }
 
 SCALAR_FUN_ATTR bool futrts_isnan16(f16 x) { return isnan((float)x); }
 
+// compare needs a custom implementation for HIP because of
+// https://github.com/ROCm/clr/issues/274
+#if defined(__HIP_DEVICE_COMPILE__)
+
+SCALAR_FUN_ATTR bool cmplt16(f16 x, f16 y) { return __hlt(x, y); }
+SCALAR_FUN_ATTR bool cmple16(f16 x, f16 y) { return __hle(x, y); }
+
+#else
+
+SCALAR_FUN_ATTR bool cmplt16(f16 x, f16 y) { return x < y; }
+SCALAR_FUN_ATTR bool cmple16(f16 x, f16 y) { return x <= y; }
+
+#endif
+
 #ifdef __OPENCL_VERSION__
 
 SCALAR_FUN_ATTR f16 fabs16(f16 x) { return fabs(x); }
@@ -80,7 +97,7 @@ SCALAR_FUN_ATTR f16 fmax16(f16 x, f16 y) { return futrts_isnan16(x) ? y : futrts
 SCALAR_FUN_ATTR f16 fmin16(f16 x, f16 y) { return futrts_isnan16(x) ? y : futrts_isnan16(y) ? x : min(x, y); }
 SCALAR_FUN_ATTR f16 fpow16(f16 x, f16 y) { return pow(x, y); }
 
-#else // Assuming CUDA.
+#else // Assuming CUDA or HIP.
 
 SCALAR_FUN_ATTR f16 fabs16(f16 x) { return fabsf(x); }
 SCALAR_FUN_ATTR f16 fmax16(f16 x, f16 y) { return fmaxf(x, y); }
