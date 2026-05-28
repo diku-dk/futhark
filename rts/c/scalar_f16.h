@@ -320,6 +320,8 @@ SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) {
 
 #else // No native f16 - emulate.
 
+SCALAR_FUN_ATTR bool cmplt16(f16 x, f16 y) { return x < y; }
+SCALAR_FUN_ATTR bool cmple16(f16 x, f16 y) { return x <= y; }
 SCALAR_FUN_ATTR f16 fabs16(f16 x) { return fabs32(x); }
 SCALAR_FUN_ATTR f16 fmax16(f16 x, f16 y) { return fmax32(x, y); }
 SCALAR_FUN_ATTR f16 fmin16(f16 x, f16 y) { return fmin32(x, y); }
