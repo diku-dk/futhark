@@ -438,11 +438,11 @@ updateAdjIndex v (check, i) se = do
       v_adj <- adjVal adj
       v_adj_t <- lookupType v_adj
       se_v <- letExp "se_v" $ BasicOp $ SubExp se
+      vec_shape <- askShape
       insAdj v
         =<< case v_adj_t of
           Acc {} -> do
             let stms s = do
-                  vec_shape <- askShape
                   attrs <- asks envAttrs
                   dims <- arrayDims <$> lookupType se_v
                   ~[v_adj'] <-
@@ -458,13 +458,15 @@ updateAdjIndex v (check, i) se = do
               OutOfBounds -> pure v_adj
           _ -> do
             let stms s = do
+                  let slice =
+                        fullSlice v_adj_t $
+                          map sliceDim (shapeDims vec_shape) ++ [DimFix i]
                   v_adj_i <-
                     letExp (baseName v_adj <> "_i") . BasicOp $
-                      Index v_adj $
-                        fullSlice v_adj_t [DimFix i]
+                      Index v_adj slice
                   se_update <- letSubExp "updated_adj_i" =<< addExp se_v v_adj_i
                   letExp (baseName v_adj) . BasicOp $
-                    Update s v_adj (fullSlice v_adj_t [DimFix i]) se_update
+                    Update s v_adj slice se_update
             case check of
               CheckBounds _ -> stms Safe
               AssumeBounds -> stms Unsafe
