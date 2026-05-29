@@ -55,6 +55,7 @@ module Futhark.AD.Rev.Monad
     renameLoopTape,
     --
     locallyNonvectorised,
+    vecToInner,
   )
 where
 
@@ -624,6 +625,19 @@ locallyNonvectorised e m = do
       pure $ case v_adj of
         AdjZero {} -> False
         _ -> True
+
+-- | If we are doing vectorised AD, then transpose the array to bring the vector
+-- shape outermost.
+--
+-- That, convers @[vec...][shape...][elem...]@ to @[shape...][vec...][elem...]@.
+vecToInner :: VName -> ADM VName
+vecToInner v = do
+  adj_shape <- askShape
+  if adj_shape == mempty
+    then pure v
+    else do
+      v_t <- lookupType v
+      letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v (auxPerm adj_shape v_t)
 
 -- Note [Consumption]
 --

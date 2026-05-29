@@ -375,27 +375,14 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
       | otherwise = do
           let n_arrs = sum lengths
               (acc_adjs, other_adjs) = splitAt n_arrs adjs
-              shapes = concatMap (\(s, as, _) -> replicate (length as) s) inputs
-          acc_adjs' <- zipWithM (transposeAdj adj_sh) shapes acc_adjs
+          acc_adjs' <- mapM transposeAdj acc_adjs
           pure $ acc_adjs' ++ other_adjs
 
-    transposeAdj :: Shape -> Shape -> Adj -> ADM Adj
-    transposeAdj adj_sh shape adj = do
+    transposeAdj :: Adj -> ADM Adj
+    transposeAdj adj = do
       v <- adjVal adj
-      v' <- vecToInner adj_sh shape v
-      pure $ AdjVal (Var v')
-
-    -- Transpose [vec...][shape...][elem...] to [shape...][vec...][elem...]
-    vecToInner :: Shape -> Shape -> VName -> ADM VName
-    vecToInner adj_sh shape v
-      | adj_sh == mempty = pure v
-      | otherwise = do
-          v_t <- lookupType v
-          let r = shapeRank adj_sh
-              s = shapeRank shape
-              total = arrayRank v_t
-              perm = [r .. r + s - 1] ++ [0 .. r - 1] ++ [r + s .. total - 1]
-          letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
+      v' <- vecToInner v
+      pure $ AdjVal $ Var v'
 
     -- Transpose [shape...][vec...][elem...] to [vec...][shape...][elem...]
     transposeAccResult :: Shape -> Shape -> VName -> ADM VName
@@ -417,7 +404,7 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
       -- Transpose adjoints from [vec...][shape...]elem to [shape...][vec...]elem
       -- so they match the accumulator layout.
       as' <- mapM adjVal as_adj
-      as'' <- mapM (vecToInner adj_sh shape) as'
+      as'' <- mapM vecToInner as'
       pure (map Var zeroes, (shape, as'', Nothing))
 
     -- Update accumulator parameter types in the lambda to include vectorised
@@ -434,7 +421,8 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
               cert_names = map paramName cert_ps
               body' = updateBody adj_sh cert_names (lambdaBody l)
               ret' = map (updateAccType adj_sh cert_names) (lambdaReturnType l)
-           in l { lambdaParams = cert_ps ++ acc_ps' ++ other_ps,
+           in l
+                { lambdaParams = cert_ps ++ acc_ps' ++ other_ps,
                   lambdaReturnType = ret',
                   lambdaBody = body'
                 }
