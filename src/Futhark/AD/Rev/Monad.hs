@@ -111,14 +111,16 @@ data InBounds
 -- | A symbolic representation of an array that is all zeroes, except
 -- at certain indexes.
 data Sparse = Sparse
-  { -- | The full shape of the array (including any vector dimensions).
+  { -- | The full shape of the array (including any vector dimensions, which are
+    -- stored in sparseVecDims).
     sparseShape :: Shape,
     -- | Element type of the array.
     sparseType :: PrimType,
-    -- | Number of leading dimensions that are \"vector\" dimensions,
-    -- due to vectorised AD.  These are not indexed by the sparse
-    -- index, but are present in the values.  When zero, this is the
-    -- ordinary non-vectorised case.
+    -- | Number of leading dimensions that are \"vector\" dimensions, due to
+    -- vectorised AD. These are not indexed by the sparse index, but are present
+    -- in the values. When zero, this is the ordinary non-vectorised case. This
+    -- is equivalent to the rank of `askShape`, but it is convenient to store it
+    -- here as well.
     sparseVecDims :: Int,
     -- | Locations and values of nonzero values.  Indexes may be
     -- negative, in which case the value is ignored (unless
