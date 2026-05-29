@@ -609,10 +609,11 @@ locallyNonvectorised e m = do
   where
     e_free = namesToList $ freeIn e
     knownAdjoint v = do
-      v_adj <- lookupAdj v
-      pure $ case v_adj of
-        AdjZero {} -> False
-        _ -> True
+      maybeAdj <- gets $ M.lookup v . stateAdjs
+      pure $ case maybeAdj of
+        Nothing -> False
+        Just (AdjZero {}) -> False
+        Just _ -> True
 
 -- Note [Consumption]
 --
