@@ -347,9 +347,17 @@ diffMulReduce _ops x aux w mul ne as m = do
 
   as_adjup <- letExp "prod_contrib" . Op . Screma w [as] =<< mapSOAC map_lam_rev
 
-  updateAdj as as_adjup
+  updateAdj as =<< transposeIfNeeded as_adjup
   where
     getDiv :: PrimType -> BinOp
     getDiv (IntType t) = SDiv t Unsafe
     getDiv (FloatType t) = FDiv t
     getDiv _ = error "In getDiv, Reduce.hs: input not supported"
+
+    transposeIfNeeded v = do
+      adj_shape <- askShape
+      if adj_shape == mempty
+        then pure v
+        else do
+          v_t <- lookupType v
+          letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v (auxPerm adj_shape v_t)
