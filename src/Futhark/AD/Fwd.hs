@@ -391,14 +391,6 @@ fwdStreamLambda (Lambda params _ body) = do
   params' <- (take 1 params ++) <$> bundleNewList (drop 1 params)
   mkLambda params' $ bodyBind =<< fwdBody body
 
-zeroFromSubExp :: SubExp -> ADM VName
-zeroFromSubExp (Constant c) =
-  letExp "zero" . BasicOp . SubExp . Constant $
-    blankPrimValue (primValueType c)
-zeroFromSubExp (Var v) = do
-  t <- lookupType v
-  letExp "zero" $ zeroExp t
-
 vecPerm :: Shape -> Type -> [Int]
 vecPerm = auxPerm
 
@@ -473,7 +465,7 @@ fwdSOAC pat aux (Stream size xs nes lam) = do
   pat' <- bundleNewPat pat
   lam' <- fwdStreamLambda lam
   xs' <- soacInputsWithTangents xs
-  nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
+  nes_tan <- mapM (letSubExp "zero" . zeroExp <=< tanType <=< subExpType) nes
   let nes' = interleave nes nes_tan
   addStm $ Let pat' aux $ Op $ Stream size xs' nes' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
