@@ -33,8 +33,8 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     genZeroes,
     isPrimParam,
     kernelConstToExp,
-    getChunkSize,
     getSize,
+    isConstExp,
 
     -- * Host-level bulk operations
     sReplicate,
@@ -290,31 +290,14 @@ kernelConstToExp = traverse f
       pure v
     f (Imp.SizeConst k c) = do
       v <- dPrimS (nameFromText $ prettyText k) int64
+      addTuningParam k $ Just c
       sOp $ Imp.GetSize v k c
       pure v
-
--- | Given available register and a list of parameter types, compute
--- the largest available chunk size given the parameters for which we
--- want chunking and the available resources. Used in
--- 'SegScan.SinglePass.compileSegScan', and 'SegRed.compileSegRed'
--- (with primitive non-commutative operators only).
-getChunkSize :: [Type] -> Imp.KernelConstExp
-getChunkSize types = do
-  let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
-      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
-      max_block_reg = Imp.SizeMaxConst SizeRegisters
-      k_mem = le64 max_block_mem `quot` le64 max_tblock_size
-      k_reg = le64 max_block_reg `quot` le64 max_tblock_size
-      types' = map elemType $ filter primType types
-      sizes = map primByteSize types'
-
-      sum_sizes = sum sizes
-      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
-      max_size = maximum sizes
-
-      mem_constraint = max k_mem sum_sizes `quot` max_size
-      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
-  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+    f (Imp.SizeUserParam name def) = do
+      v <- dPrimS (nameFromText $ prettyText name) int64
+      def' <- kernelConstToExp def
+      emit $ Imp.GetUserParam v name $ isInt64 def'
+      pure v
 
 inChunkScan ::
   KernelConstants ->
@@ -907,10 +890,12 @@ atomicUpdateCAS space t arr old bucket x do_op = do
             )
           _ -> (id, id)
 
-      int
-        | primBitSize t == 16 = int16
-        | primBitSize t == 32 = int32
-        | otherwise = int64
+      int = case primBitSize t of
+        8 -> int8
+        16 -> int16
+        32 -> int32
+        64 -> int64
+        _ -> error "impossible integer bit size"
 
   sWhile (tvExp run_loop) $ do
     assumed <~~ Imp.var old t
@@ -1050,7 +1035,8 @@ simpleKernelBlocks ::
 simpleKernelBlocks max_num_tblocks kernel_size = do
   tblock_size <- dPrim "tblock_size"
   fname <- askFunction
-  let tblock_size_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar tblock_size
+  let tblock_size_key = keyWithEntryPoint fname $ nameFromText $ prettyText $ tvVar tblock_size
+  addTuningParam tblock_size_key $ Just Imp.SizeThreadBlock
   sOp $ Imp.GetSize (tvVar tblock_size) tblock_size_key Imp.SizeThreadBlock
   virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `divUp` tvExp tblock_size
   num_tblocks <- dPrimV "num_tblocks" $ virt_num_tblocks `sMin64` max_num_tblocks
@@ -1180,6 +1166,7 @@ getSize desc size_class = do
   v <- dPrim desc
   fname <- askFunction
   let v_key = keyWithEntryPoint fname $ nameFromText $ prettyText $ tvVar v
+  addTuningParam v_key $ Just size_class
   sOp $ Imp.GetSize (tvVar v) v_key size_class
   pure v
 

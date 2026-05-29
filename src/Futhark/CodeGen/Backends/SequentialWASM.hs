@@ -43,14 +43,13 @@ compileProg version prog = do
     GC.compileProg
       "wasm"
       version
-      mempty
       operations
       generateBoilerplate
       ""
       (DefaultSpace, [DefaultSpace])
       []
       prog'
-  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog'), emccExportNames (fRepMyRep prog')))
+  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')), emccExportNames (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog'))))
   where
     operations :: GC.Operations Imp.Sequential ()
     operations =
@@ -61,12 +60,12 @@ compileProg version prog = do
 fRepMyRep :: Imp.Program -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Functions fs = Imp.defFuns prog
-      function (Imp.Function entry _ _ _) = do
+      function (Imp.Function entry _ _ _ _) = do
         Imp.EntryPoint n res args <- entry
         Just $
           JSEntryPoint
             { name = nameToString n,
               parameters = map (extToString . snd) args,
-              ret = map (extToString . snd) res
+              ret = extToString $ snd res
             }
    in mapMaybe (function . snd) fs

@@ -51,7 +51,8 @@ instance TC.Checkable GPUMem where
         MemOp (HostOp NoOp) (Aliases GPUMem) ->
         TC.TypeM GPUMem ()
       typeCheckMemoryOp _ (Alloc size _) =
-        TC.require [Prim int64] size
+        TC.require (Prim int64) size
+      typeCheckMemoryOp _ (EnsureDirect _) = pure ()
       typeCheckMemoryOp lvl (Inner op) =
         typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ pure ()) op
   checkFParamDec = checkMemInfo

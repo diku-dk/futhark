@@ -4,7 +4,7 @@
 
 typedef int (*writer)(FILE*, const void*);
 typedef int (*bin_reader)(void*);
-typedef int (*str_reader)(const char *, void*);
+typedef int (*str_reader)(char *, void*);
 
 struct array_reader {
   char* elems;
@@ -259,7 +259,7 @@ static int read_str_array(FILE *f,
     return 1;                                                           \
   }
 
-static int read_str_i8(const char *buf, void* dest) {
+static int read_str_i8(char *buf, void* dest) {
   // Some platforms (WINDOWS) does not support scanf %hhd or its
   // cousin, %SCNi8.  Read into int first to avoid corrupting
   // memory.
@@ -275,7 +275,7 @@ static int read_str_i8(const char *buf, void* dest) {
   }
 }
 
-static int read_str_u8(const char *buf, void* dest) {
+static int read_str_u8(char *buf, void* dest) {
   // Some platforms (WINDOWS) does not support scanf %hhd or its
   // cousin, %SCNu8.  Read into int first to avoid corrupting
   // memory.
@@ -291,34 +291,34 @@ static int read_str_u8(const char *buf, void* dest) {
   }
 }
 
-static int read_str_i16(const char *buf, void* dest) {
+static int read_str_i16(char *buf, void* dest) {
   READ_STR(SCNi16, int16_t, "i16");
 }
 
-static int read_str_u16(const char *buf, void* dest) {
+static int read_str_u16(char *buf, void* dest) {
   READ_STR(SCNi16, int16_t, "u16");
 }
 
-static int read_str_i32(const char *buf, void* dest) {
+static int read_str_i32(char *buf, void* dest) {
   READ_STR(SCNi32, int32_t, "i32");
 }
 
-static int read_str_u32(const char *buf, void* dest) {
+static int read_str_u32(char *buf, void* dest) {
   READ_STR(SCNi32, int32_t, "u32");
 }
 
-static int read_str_i64(const char *buf, void* dest) {
+static int read_str_i64(char *buf, void* dest) {
   READ_STR(SCNi64, int64_t, "i64");
 }
 
-static int read_str_u64(const char *buf, void* dest) {
+static int read_str_u64(char *buf, void* dest) {
   // FIXME: This is not correct, as SCNu64 only permits decimal
   // literals.  However, SCNi64 does not handle very large numbers
   // correctly (it's really for signed numbers, so that's fair).
   READ_STR(SCNu64, uint64_t, "u64");
 }
 
-static int read_str_f16(const char *buf, void* dest) {
+static int read_str_f16(char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f16.nan") == 0) {
     *(uint16_t*)dest = float2halfbits(NAN);
@@ -342,7 +342,7 @@ static int read_str_f16(const char *buf, void* dest) {
   }
 }
 
-static int read_str_f32(const char *buf, void* dest) {
+static int read_str_f32(char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f32.nan") == 0) {
     *(float*)dest = (float)NAN;
@@ -358,7 +358,7 @@ static int read_str_f32(const char *buf, void* dest) {
   }
 }
 
-static int read_str_f64(const char *buf, void* dest) {
+static int read_str_f64(char *buf, void* dest) {
   remove_underscores(buf);
   if (strcmp(buf, "f64.nan") == 0) {
     *(double*)dest = (double)NAN;
@@ -374,12 +374,21 @@ static int read_str_f64(const char *buf, void* dest) {
   }
 }
 
-static int read_str_bool(const char *buf, void* dest) {
+static int read_str_bool(char *buf, void* dest) {
   if (strcmp(buf, "true") == 0) {
     *(char*)dest = 1;
     return 0;
   } else if (strcmp(buf, "false") == 0) {
     *(char*)dest = 0;
+    return 0;
+  } else {
+    return 1;
+  }
+}
+
+static int read_str_unit(char *buf, void* dest) {
+  (void)dest;
+  if (strcmp(buf, "()") == 0) {
     return 0;
   } else {
     return 1;
@@ -418,6 +427,24 @@ static int write_str_u64(FILE *out, const uint64_t *src) {
   return fprintf(out, "%"PRIu64"u64", *src);
 }
 
+// FLT_DECIMAL_DIG and DBL_DECIMAL_DIG are defined in C11.
+// If we want C99 compatibility, we must define them ourselves.
+// We choose the standard values on platforms that use the IEEE754 defaults, with fallback to an overestimate.
+#ifndef FLT_DECIMAL_DIG
+  #if FLT_RADIX == 2 && FLT_MANT_DIG <= 24 && 9 < DECIMAL_DIG
+    #define FLT_DECIMAL_DIG 9
+  #else
+    #define FLT_DECIMAL_DIG DECIMAL_DIG
+  #endif
+#endif
+#ifndef DBL_DECIMAL_DIG
+  #if FLT_RADIX == 2 && DBL_MANT_DIG <= 53 && 17 < DECIMAL_DIG
+    #define DBL_DECIMAL_DIG 17
+  #else
+    #define DBL_DECIMAL_DIG DECIMAL_DIG
+  #endif
+#endif
+
 static int write_str_f16(FILE *out, const uint16_t *src) {
   float x = halfbits2float(*src);
   if (isnan(x)) {
@@ -427,7 +454,7 @@ static int write_str_f16(FILE *out, const uint16_t *src) {
   } else if (isinf(x)) {
     return fprintf(out, "-f16.inf");
   } else {
-    return fprintf(out, "%.*ff16", FLT_DIG, x);
+    return fprintf(out, "%.*gf16", FLT_DECIMAL_DIG, x);
   }
 }
 
@@ -440,7 +467,7 @@ static int write_str_f32(FILE *out, const float *src) {
   } else if (isinf(x)) {
     return fprintf(out, "-f32.inf");
   } else {
-    return fprintf(out, "%.*ff32", FLT_DIG, x);
+    return fprintf(out, "%.*gf32", FLT_DECIMAL_DIG, x);
   }
 }
 
@@ -453,12 +480,17 @@ static int write_str_f64(FILE *out, const double *src) {
   } else if (isinf(x)) {
     return fprintf(out, "-f64.inf");
   } else {
-    return fprintf(out, "%.*ff64", DBL_DIG, x);
+    return fprintf(out, "%.*gf64", DBL_DECIMAL_DIG, x);
   }
 }
 
 static int write_str_bool(FILE *out, const void *src) {
   return fprintf(out, *(char*)src ? "true" : "false");
+}
+
+static int write_str_unit(FILE *out, const void *src) {
+  (void)src;
+  return fprintf(out, "()");
 }
 
 //// Binary I/O
@@ -497,7 +529,7 @@ static int read_byte(FILE *f, void* dest) {
 //// Types
 
 struct primtype_info_t {
-  const char binname[4]; // Used for parsing binary data.
+  const char binname[5]; // Used for parsing binary data.
   const char* type_name; // Same name as in Futhark.
   const int64_t size; // in bytes
   const writer write_str; // Write in text format.
@@ -540,6 +572,9 @@ static const struct primtype_info_t f64_info =
 static const struct primtype_info_t bool_info =
   {.binname = "bool", .type_name = "bool", .size = 1,
    .write_str = (writer)write_str_bool, .read_str = (str_reader)read_str_bool};
+static const struct primtype_info_t unit_info =
+  {.binname = "bool", .type_name = "unit",   .size = 1,
+   .write_str = (writer)write_str_unit, .read_str = (str_reader)read_str_unit};
 
 static const struct primtype_info_t* primtypes[] = {
   &i8_info, &i16_info, &i32_info, &i64_info,

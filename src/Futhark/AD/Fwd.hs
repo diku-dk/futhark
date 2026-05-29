@@ -226,7 +226,7 @@ withTansI x ys f = do
             (paramName x_tan_p)
             (map (Var . paramName) ys_tan_ps)
       iota_v <- letExp "iota" $ iota64 w
-      pure $ Op $ Screma w (iota_v : x_tan : ys_tan_vs) (mapSOAC lam)
+      Op . Screma w (iota_v : x_tan : ys_tan_vs) <$> mapSOAC lam
 
 withTans ::
   PrimType ->
@@ -433,13 +433,14 @@ soacResPat scan_res red_res (Pat pes) = do
           pure (PatElem v' $ rearrangeType perm v_t, [(Pat [pe], v')])
 
 fwdSOAC :: Pat Type -> StmAux () -> SOAC SOACS -> ADM ()
-fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds)) = do
+fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds post_lam)) = do
   (pat', to_transpose) <- soacResPat (scanResults scs) (redResults reds) pat
   xs' <- soacInputsWithTangents xs
   f' <- fwdLambda f
   scs' <- mapM fwdScan scs
   reds' <- mapM fwdRed reds
-  addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm f' scs' reds'
+  post_lam' <- fwdLambda post_lam
+  addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm f' scs' reds' post_lam'
   tan_shape <- askShape
   forM_ to_transpose $ \(rpat, v) -> do
     v_t <- lookupType v
@@ -514,6 +515,12 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
+fwdSOAC pat aux (WithVJP args lam _) = do
+  -- You have a custom adjoint? Too bad we are in tangent land.
+  (mapM_ fwdStm <=< runBuilder_) $ do
+    lam_res <- auxing aux $ eLambda lam $ map eSubExp args
+    forM (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
+      certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =

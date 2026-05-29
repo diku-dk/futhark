@@ -38,7 +38,7 @@ mapNest shape x f = do
       lam <- mkLambda (toList x_p) $ do
         fmap (subExpsRes . pure) . letSubExp "mapnest_res"
           =<< f (fmap (Var . paramName) x_p)
-      pure $ Op $ Screma w (toList x_v) (mapSOAC lam)
+      Op . Screma w (toList x_v) <$> mapSOAC lam
 
 mkMap ::
   (MonadBuilder m, Rep m ~ SOACS, Traversable f) =>
@@ -52,4 +52,4 @@ mkMap desc arrs f
       w <- arraySize 0 <$> lookupType (head $ toList arrs)
       x_p <- traverse (newParam "xp" . rowType <=< lookupType) arrs
       lam <- mkLambda (toList x_p) $ varsRes <$> f (fmap paramName x_p)
-      letTupExp desc $ Op $ Screma w (toList arrs) (mapSOAC lam)
+      letTupExp desc . Op . Screma w (toList arrs) =<< mapSOAC lam

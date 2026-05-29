@@ -72,9 +72,13 @@ handleSegOp outer_lvl op = do
       identitySegOpMapper
         { mapOnSegOpBody =
             localScope scope . local f . allocInKernelBody,
-          mapOnSegOpLambda =
+          mapOnSegBinOpLambda =
             local inThread
-              . allocInBinOpLambda num_threads (segSpace op)
+              . allocInBinOpLambda num_threads (segSpace op),
+          mapOnSegPostOpLambda =
+            localScope scope
+              . local inThread
+              . allocInPostOpLambda num_threads (segSpace op)
         }
     f = case segLevel op of
       SegThread {} -> inThread

@@ -46,3 +46,15 @@ module type mt4 = {
 module pm1 (P: {}) : {} = {
 
 }
+
+module type mt1 =
+  (A: {}) -> (B: {}) -> (C: {}) -> {val x : i32}
+
+module type mt2 =
+  (A: {})
+  -> (B: {})
+  -> (C: {})
+  -> {
+    val x : i32
+    val y : bool
+  }

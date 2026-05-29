@@ -62,7 +62,6 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
-import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.AD.Shared
@@ -354,7 +353,7 @@ tabNest = tabNest' []
         ret <- mapM lookupType res
         pure (ret, varsRes res)
       let lam = Lambda (iparam : params) ret (Body () stms res)
-      letTupExp "tab" $ Op $ Screma w (iota : vs) (mapSOAC lam)
+      letTupExp "tab" . Op . Screma w (iota : vs) =<< mapSOAC lam
 
 -- | Construct a lambda for binop'ing two values of the given type,
 -- which may be arrays.
@@ -366,8 +365,10 @@ vecOpLambda bop t@Array {} = do
   lam <- vecOpLambda bop $ rowType t
   body <- insertStmsM $ do
     res <-
-      letSubExp "lam_map" . Op $
-        Screma (arraySize 0 t) [paramName xs_p, paramName ys_p] (mapSOAC lam)
+      letSubExp "lam_map"
+        . Op
+        . Screma (arraySize 0 t) [paramName xs_p, paramName ys_p]
+        =<< mapSOAC lam
     pure $ resultBody [res]
   pure
     Lambda
@@ -387,7 +388,7 @@ addExp x y = do
       pure $ BasicOp $ BinOp (addBinOp pt) (Var x) (Var y)
     Array {} -> do
       lam <- addLambda $ rowType x_t
-      pure $ Op $ Screma (arraySize 0 x_t) [x, y] (mapSOAC lam)
+      Op . Screma (arraySize 0 x_t) [x, y] <$> mapSOAC lam
     _ ->
       error $ "addExp: unexpected type: " ++ prettyString x_t
 
@@ -400,7 +401,7 @@ vecOpExp bop x y = do
       pure $ BasicOp $ BinOp (bop pt) (Var x) (Var y)
     Array {} -> do
       lam <- vecOpLambda bop $ rowType x_t
-      pure $ Op $ Screma (arraySize 0 x_t) [x, y] (mapSOAC lam)
+      Op . Screma (arraySize 0 x_t) [x, y] <$> mapSOAC lam
     _ ->
       error $ "vecOpExp: unexpected type: " ++ prettyString x_t
 

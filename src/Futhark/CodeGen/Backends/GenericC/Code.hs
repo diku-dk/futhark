@@ -411,6 +411,9 @@ compileCode (Call dests fname args) = do
       <*> pure fname
       <*> mapM compileArg args
   stms $ mconcat unpack_dest
+compileCode (GetUserParam v name def) = do
+  (val, set) <- asks (opsGetParam . envOperations) <*> pure name
+  stm [C.cstm|$id:v = $exp:set ? $exp:val : $exp:def;|]
 
 -- | Compile an 'Copy' using sequential nested loops, but
 -- parameterised over how to do the reads and writes.

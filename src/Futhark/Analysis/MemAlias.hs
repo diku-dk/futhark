@@ -70,7 +70,7 @@ analyzeHostOp m (SegOp (SegMap _ _ _ kbody)) =
   analyzeStms (bodyStms kbody) m
 analyzeHostOp m (SegOp (SegRed _ _ _ kbody _)) =
   analyzeStms (bodyStms kbody) m
-analyzeHostOp m (SegOp (SegScan _ _ _ kbody _)) =
+analyzeHostOp m (SegOp (SegScan _ _ _ kbody _ _)) =
   analyzeStms (bodyStms kbody) m
 analyzeHostOp m (SegOp (SegHist _ _ _ kbody _)) =
   analyzeStms (bodyStms kbody) m
@@ -85,6 +85,9 @@ analyzeStm ::
   MemAliasesM (inner rep) MemAliases
 analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =
   pure $ m <> singleton vname mempty
+analyzeStm m (Let (Pat (PatElem mem_name _ : _)) _ (Op (EnsureDirect _))) =
+  pure $ m <> singleton mem_name mempty
+analyzeStm m (Let _ _ (Op (EnsureDirect _))) = pure m
 analyzeStm m (Let _ _ (Op (Inner inner))) = do
   on_inner <- asks onInner
   on_inner m inner

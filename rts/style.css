@@ -1,0 +1,242 @@
+body {
+    background-color: #fff9e5;
+    font-family: sans-serif;
+    padding: 0px;
+    margin: 0px;
+    margin-top: 0em;
+    margin-left: 0em;
+    margin-right: 0em;
+    overflow-y: scroll;
+    line-height: 1.4;
+}
+
+h1 {
+    margin-top: 0;
+    display: inline;
+}
+
+h2 {
+    margin-bottom: 1ex;
+    font-size: 2em;
+    color: #5f021f;
+}
+
+h3 {
+    font-size: 1em;
+    color: #5f021f;
+}
+
+p {
+    max-width: 65em;
+}
+
+td {
+    vertical-align: top;
+}
+
+#header {
+    color: #fff9e5;
+    background: #5f0220;
+    padding-left: 1em;
+}
+
+#navigation {
+    float: right;
+    vertical-align: center;
+}
+
+#navigation ol {
+    display: block;
+}
+
+#navigation li {
+  display: inline;
+  list-style-type: none;
+  border-left: 1px solid #fff9e5;
+  padding-left: 1em;
+  padding-right: 1em;
+}
+
+#navigation a, #navigation a:visited {
+    color: #fff9e5;
+    text-decoration: none;
+}
+
+#content {
+    display: flex;
+}
+
+main {
+    padding-left: 1em;
+    padding-right: 1em;
+    width: 100%;
+}
+
+#abstract {
+    margin-bottom: 2ex;
+}
+
+#footer {
+    color: #fff9e5;
+    background: #5f0220;
+    padding-left: 1em;
+    padding-right: 1em;
+}
+
+#footer a, #footer a:visited {
+    color: #fff9e5;
+}
+
+@media (max-width:950px) {
+    #filenav {
+        display: none;
+    }
+}
+
+#filenav {
+    color: #fff9e5;
+    background: #5f0220;
+    padding-left: 1em;
+    padding-right: 1em;
+}
+
+#filenav a:hover {
+    background: #fff9e5;
+    display: block;
+    color: #5f0220;
+}
+
+#filenav a, #footer a:visited {
+    color: #fff9e5;
+    text-decoration: none;
+}
+
+#filenav > ul {
+    list-style: none;
+    padding: 0;
+    font-family: monospace;
+    font-weight: bold;
+}
+
+.file_desc {
+    /* Hack to avoid breaking a file description across multiple columns
+       on the contents page. */
+    display: table;
+    width: 100%;
+}
+
+@media (min-width:950px) {
+    .file_list {
+        columns: 3;
+    }
+
+    .file_list > dd {
+        break-before: avoid;
+    }
+}
+
+.keyword {
+    font-weight: bold;
+}
+
+.specs {
+    margin-left: 2ex;
+    border-collapse: collapse;
+}
+
+.specs tr:hover td {
+    background: #ccc;
+}
+
+.spec_eql {
+    text-align: right;
+}
+
+.decl_description {
+    margin-bottom: 2ex;
+}
+
+.decl_name {
+    font-weight: bold;
+}
+
+.desc_header {
+    background: #ffcc7a;
+    font-family: monospace;
+    border-top: 1px solid #5f021f;
+}
+
+.desc_doc {
+    margin-left: 2ex;
+}
+
+.synopsis_link {
+    font-weight: bold;
+    text-decoration: none;
+    font-size: 1.3em;
+    width: 2ex;
+    display: inline-block;
+}
+
+.self_link {
+    text-decoration: none;
+}
+
+#module {
+    font-family: monospace;
+    white-space: pre;
+    display: block;
+    unicode-bidi: embed;
+}
+
+#doc_index thead {
+    font-weight: bold;
+}
+
+#doc_index td {
+    padding-right: 1em;
+}
+
+.doc_index_name {
+    font-family: monospace;
+}
+
+.doc_index_namespace {
+    font-style: italic;
+}
+
+.doc_index_initial {
+    font-size: 2em;
+    font-weight: bold;
+}
+
+.doc_index_initial a, .doc_index_initial a:visited {
+    color: #5f0220;
+}
+
+#doc_index_list li {
+  display: inline;
+  list-style-type: none;
+  padding-right: 1em;
+}
+
+#doc_index_list a, #doc_index_list a:visited {
+    color: #5f0220;
+    text-decoration: none;
+}
+
+a.silent-anchor {
+  text-decoration: inherit;
+  color: inherit;
+}
+
+.cctable table, .cctable th, .cctable td {
+  border: 1px solid black;
+  border-collapse: collapse;
+}
+
+.cctable th, .cctable td {
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+  text-align: center;
+}

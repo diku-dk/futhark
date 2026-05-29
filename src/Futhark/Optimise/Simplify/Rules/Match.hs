@@ -90,7 +90,7 @@ ruleMatch _ pat _ (_, [Case _ tbranch], _, MatchDec _ MatchFallback)
       addStms $ bodyStms tbranch
       sequence_
         [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-          | (p, SubExpRes cs se) <- zip (patElems pat) ses
+        | (p, SubExpRes cs se) <- zip (patElems pat) ses
         ]
 ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, _)
   | Body _ _ [SubExpRes tcs (Constant (IntValue t))] <- tb,

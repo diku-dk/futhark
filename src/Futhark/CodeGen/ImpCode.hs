@@ -109,11 +109,12 @@ import Data.Text qualified as T
 import Data.Traversable
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.GPU.Sizes (Count (..), SizeClass (..))
+import Futhark.IR.GPU.Sizes (Count (..), SizeClass (..), sizeDefault)
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax.Core
-  ( EntryPointType (..),
+  ( Attrs (..),
+    EntryPointType (..),
     ErrorMsg (..),
     ErrorMsgPart (..),
     OpaqueType (..),
@@ -151,15 +152,16 @@ paramName (ScalarParam name _) = name
 
 -- | A collection of imperative functions and constants.
 data Definitions a = Definitions
-  { defTypes :: OpaqueTypes,
+  { defParams :: ParamMap,
+    defTypes :: OpaqueTypes,
     defConsts :: Constants a,
     defFuns :: Functions a
   }
   deriving (Show)
 
 instance Functor Definitions where
-  fmap f (Definitions types consts funs) =
-    Definitions types (fmap f consts) (fmap f funs)
+  fmap f (Definitions params types consts funs) =
+    Definitions params types (fmap f consts) (fmap f funs)
 
 -- | A collection of imperative functions.
 newtype Functions a = Functions {unFunctions :: [(Name, Function a)]}
@@ -214,7 +216,7 @@ data ExternalValue
 -- | Information about how this function can be called from the outside world.
 data EntryPoint = EntryPoint
   { entryPointName :: Name,
-    entryPointResults :: [(Uniqueness, ExternalValue)],
+    entryPointResults :: (Uniqueness, ExternalValue),
     entryPointArgs :: [((Name, Uniqueness), ExternalValue)]
   }
   deriving (Show)
@@ -227,6 +229,7 @@ data FunctionT a = Function
   { functionEntry :: Maybe EntryPoint,
     functionOutput :: [Param],
     functionInput :: [Param],
+    functionAttrs :: Attrs,
     functionBody :: Code a
   }
   deriving (Show)
@@ -339,6 +342,8 @@ data Code a
   | -- | Log the given message, *without* a trailing linebreak (unless
     -- part of the message).
     TracePrint (ErrorMsg Exp)
+  | -- | Retrieve user-provided parameter and put it in the given variable.
+    GetUserParam VName Name (TExp Int64)
   | -- | Perform an extensible operation.
     Op a
   deriving (Show)
@@ -442,9 +447,11 @@ foldProvenances f (If _ x y) = foldProvenances f x <> foldProvenances f y
 foldProvenances f (Op x) = f x
 foldProvenances _ _ = mempty
 
--- | A mapping from names of tuning parameters to their class, as well
--- as which functions make use of them (including transitively).
-type ParamMap = M.Map Name (SizeClass, S.Set Name)
+-- | A mapping from names of tuning parameters to their class, as well as which
+-- functions make use of them. These uses may or may not be transitive - early
+-- on in code generation they will not be, but then later they will be extended
+-- using call graph information.
+type ParamMap = M.Map Name (Maybe SizeClass, S.Set Name)
 
 -- | A side-effect free expression whose execution will produce a
 -- single primitive value.
@@ -485,45 +492,48 @@ var = LeafExp
 -- Prettyprinting definitions.
 
 instance (Pretty op) => Pretty (Definitions op) where
-  pretty (Definitions types consts funs) =
-    pretty types </> pretty consts </> pretty funs
+  pretty (Definitions params types consts funs) =
+    params' </> pretty types </> pretty consts </> pretty funs
+    where
+      params' =
+        "tuning params" <+> nestedBlock (stack $ map ppParam $ M.toList params)
+      ppParam (k, (c, users)) =
+        maybe "user" pretty c <+> pretty k <+> parens (commasep $ map pretty $ S.toList users)
 
 instance (Pretty op) => Pretty (Functions op) where
   pretty (Functions funs) = stack $ intersperse mempty $ map ppFun funs
     where
       ppFun (name, fun) =
-        "Function " <> pretty name <> colon </> indent 2 (pretty fun)
+        "function" <+> pretty name <+> nestedBlock (pretty fun)
 
 instance (Pretty op) => Pretty (Constants op) where
   pretty (Constants decls code) =
-    "Constants:"
-      </> indent 2 (stack $ map pretty decls)
+    "constants"
+      <+> nestedBlock (stack $ map pretty decls)
       </> mempty
-      </> "Initialisation:"
-      </> indent 2 (pretty code)
+      </> "initialisation"
+      <+> nestedBlock (pretty code)
 
 instance Pretty EntryPoint where
-  pretty (EntryPoint name results args) =
-    "Name:"
-      </> indent 2 (dquotes (pretty name))
-      </> "Arguments:"
-      </> indent 2 (stack $ map ppArg args)
-      </> "Results:"
-      </> indent 2 (stack $ map ppRes results)
+  pretty (EntryPoint name result args) =
+    stack
+      [ "name" <+> nestedBlock (dquotes (pretty name)),
+        "arguments" <+> nestedBlock (stack $ map ppArg args),
+        "results" <+> nestedBlock (ppRes result)
+      ]
     where
       ppArg ((p, u), t) = pretty p <+> ":" <+> ppRes (u, t)
       ppRes (u, t) = pretty u <> pretty t
 
 instance (Pretty op) => Pretty (FunctionT op) where
-  pretty (Function entry outs ins body) =
-    "Inputs:"
-      </> indent 2 (stack $ map pretty ins)
-      </> "Outputs:"
-      </> indent 2 (stack $ map pretty outs)
-      </> "Entry:"
-      </> indent 2 (pretty entry)
-      </> "Body:"
-      </> indent 2 (pretty body)
+  pretty (Function entry outs ins attrs body) =
+    stack
+      [ "inputs" <+> nestedBlock (stack $ map pretty ins),
+        "outputs" <+> nestedBlock (stack $ map pretty outs),
+        "entry" <+> nestedBlock (pretty entry),
+        "attributes" <+> nestedBlock (pretty attrs),
+        "body" <+> nestedBlock (pretty body)
+      ]
 
 instance Pretty Param where
   pretty (ScalarParam name ptype) = pretty ptype <+> pretty name
@@ -549,7 +559,7 @@ instance Pretty ExternalValue where
   pretty (OpaqueValue desc vs) =
     "opaque"
       <+> dquotes (pretty desc)
-      <+> nestedBlock "{" "}" (stack $ map pretty vs)
+      <+> nestedBlock (stack $ map pretty vs)
 
 instance Pretty ArrayContents where
   pretty (ArrayValues vs) = braces (commasep $ map pretty vs)
@@ -672,6 +682,9 @@ instance (Pretty op) => Pretty (Code op) where
     "debug" <+> parens (pretty (show desc))
   pretty (TracePrint msg) =
     "trace" <+> parens (pretty msg)
+  pretty (GetUserParam v name def) =
+    "get_user_param" <+> pretty v <+> "<-" <+> pretty name
+      <> parens (pretty def)
 
 instance Pretty Arg where
   pretty (MemArg m) = pretty m
@@ -696,8 +709,8 @@ instance Foldable FunctionT where
   foldMap = foldMapDefault
 
 instance Traversable FunctionT where
-  traverse f (Function entry outs ins body) =
-    Function entry outs ins <$> traverse f body
+  traverse f (Function entry outs ins attrs body) =
+    Function entry outs ins attrs <$> traverse f body
 
 instance Functor Code where
   fmap = fmapDefault
@@ -748,6 +761,8 @@ instance Traversable Code where
     pure $ DebugPrint s v
   traverse _ (TracePrint msg) =
     pure $ TracePrint msg
+  traverse _ (GetUserParam v name def) =
+    pure $ GetUserParam v name def
 
 -- | The names declared with 'DeclareMem', 'DeclareScalar', and
 -- 'DeclareArray' in the given code.
@@ -763,7 +778,7 @@ declaredIn _ = mempty
 
 instance FreeIn EntryPoint where
   freeIn' (EntryPoint _ res args) =
-    freeIn' (map snd res) <> freeIn' (map snd args)
+    freeIn' (snd res) <> freeIn' (map snd args)
 
 instance (FreeIn a) => FreeIn (Functions a) where
   freeIn' (Functions fs) = foldMap (onFun . snd) fs
@@ -825,6 +840,8 @@ instance (FreeIn a) => FreeIn (Code a) where
     maybe mempty freeIn' v
   freeIn' (TracePrint msg) =
     foldMap freeIn' msg
+  freeIn' (GetUserParam v _ def) =
+    freeIn' v <> freeIn' def
 
 instance FreeIn Arg where
   freeIn' (MemArg m) = freeIn' m

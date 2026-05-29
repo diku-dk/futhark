@@ -12,6 +12,21 @@
 -- purpose where you might need derivatives, such as for example
 -- computing surface normals for signed distance functions.
 --
+-- Futhark's AD support includes the following:
+--
+--   * Differentiation operators for forward-mode (`jvp`) and reverse-mode
+--     (`vjp`).
+--
+--   * Arbitrary control flow in differentiable code.
+--
+--   * Higher order derivatives by nesting differentiation operators, including
+--     arbitrary mixing of forward- and reverse mode (although using multiple
+--     rounds of reverse mode is rarely useful and often slow).
+--
+--   * Custom derivatives (`with_vjp`).
+--
+--   * Checkpointing of sequential loops.
+--
 -- ## Jacobians
 --
 -- For a differentiable function *f* whose input comprise *n* scalars
@@ -137,3 +152,26 @@ def jvp_vec 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : [n]b =
 -- equivalent to mapping, but may be more efficient.
 def vjp_vec 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : [n]a =
   (vjp2_vec f x y').1
+
+-- | Provide custom reverse-mode adjoint code for a given function. This is
+-- useful when the adjoint synthesised by AD is not as good as one that is known
+-- analytically.
+--
+-- The function `f` returns a result of type `b`. In the return sweep, the
+-- function `f'` is invoked first with the result of `f` and second with the
+-- cotangents of the result (be careful not to mix up the order), and must
+-- return the sensitivity with respect to the input.
+--
+-- A common pattern is that `b` is a tuple where some part is the intended
+-- primal result of `with_vjp`, and some part is only used in `f'`.
+--
+-- **Beware:** if `f` uses any free variables, these will not be taken into
+-- **account when computing the adjoint. Make these part of the argument
+-- **instead.
+def with_vjp 'a 'b (f: a -> b) (f': (res: b) -> (b_adj: b) -> a) (x: a) : b =
+  intrinsics.with_vjp f f' x
+
+-- | A variant of `with_vjp` where the intermediate result necessary for the
+-- adjoint (`c`) is explicitly separated from the primal result (`b`).
+def with_vjp_tape 'a 'b 'c (f: a -> (c, b)) (f': (c, b) -> a) (x: a) : b =
+  (with_vjp f (\(tape, _) (_, adj) -> f' (tape, adj)) x).1

@@ -1,3 +1,5 @@
+{-# LANGUAGE Strict #-}
+
 -- | An interpreter operating on type-checked source Futhark terms.
 -- Relatively slow.
 module Language.Futhark.Interpreter
@@ -38,14 +40,13 @@ import Data.Bitraversable
 import Data.Functor (($>), (<&>))
 import Data.List
   ( find,
-    foldl',
     genericLength,
     genericTake,
     transpose,
   )
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
-import Data.Map qualified as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
 import Data.Ord
@@ -745,13 +746,13 @@ linkMissingSizes missing_sizes p v env =
   where
     p_t = evalToStruct $ expandType env $ patternStructType p
 
-evalFunction :: Env -> [VName] -> [Pat ParamType] -> Exp -> ResType -> EvalM Value
+evalBinding :: Env -> [VName] -> [Pat ParamType] -> Exp -> ResType -> EvalM Value
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
-evalFunction env missing_sizes [] body rettype =
+evalBinding env missing_sizes [] body rettype =
   -- Eta-expand the rest to make any sizes visible.
   etaExpand [] env rettype
   where
@@ -763,20 +764,20 @@ evalFunction env missing_sizes [] body rettype =
     etaExpand vs env' _ = do
       f <- eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
-evalFunction env missing_sizes (p : ps) body rettype =
+evalBinding env missing_sizes (p : ps) body rettype =
   pure . ValueFun $ \v -> do
     env' <- linkMissingSizes missing_sizes p v <$> matchPat env p v
-    evalFunction env' missing_sizes ps body rettype
+    evalBinding env' missing_sizes ps body rettype
 
-evalFunctionBinding ::
+evalValBinding ::
   Env ->
   [TypeParam] ->
   [Pat ParamType] ->
   ResRetType ->
   Exp ->
   EvalM TermBinding
-evalFunctionBinding env tparams ps ret fbody = do
-  let ftype = funType ps ret
+evalValBinding env tparams ps ret fbody = do
+  let ftype = evalToStruct $ expandType env $ funType ps ret
       retext = case ps of
         [] -> retDims ret
         _ -> []
@@ -786,9 +787,10 @@ evalFunctionBinding env tparams ps ret fbody = do
     then
       fmap (TermValue (Just $ T.BoundV [] ftype))
         . returned env (retType ret) retext
-        =<< evalFunction env [] ps fbody (retType ret)
+        =<< evalBinding env [] ps fbody (retType ret)
     else pure . TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
-      let resolved = resolveTypeParams (map typeParamName tparams) ftype ftype'
+      let resolved =
+            resolveTypeParams (map typeParamName tparams) ftype ftype'
       tparam_env <- evalResolved resolved
       let env' = tparam_env <> env
           -- In some cases (abstract lifted types) there may be
@@ -799,7 +801,7 @@ evalFunctionBinding env tparams ps ret fbody = do
             filter (`M.notMember` envTerm env') $
               map typeParamName (filter isSizeParam tparams)
       returned env (retType ret) retext
-        =<< evalFunction env' missing_sizes ps fbody (retType ret)
+        =<< evalBinding env' missing_sizes ps fbody (retType ret)
 
 evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
@@ -875,7 +877,7 @@ evalAppExp env (LetPat sizes p e body _) = do
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
 evalAppExp env (LetFun (f, _) (tparams, ps, _, Info ret, fbody) body _) = do
-  binding <- evalFunctionBinding env tparams ps ret fbody
+  binding <- evalValBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
 evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
   | baseName (qualLeaf op) == "&&" = do
@@ -909,14 +911,11 @@ evalAppExp env (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
   evalIndex loc env is' arr
-evalAppExp env (LetWith dest src is v body loc) = do
+evalAppExp env (LetWith dest src steps v body loc) = do
   let Ident src_vn (Info src_t) _ = src
-  dest' <-
-    maybe oob pure
-      =<< writeArray
-        <$> mapM (evalDimIndex env) is
-        <*> evalTermVar env (qualName src_vn) (toStruct src_t)
-        <*> eval env v
+  src_v <- evalTermVar env (qualName src_vn) (toStruct src_t)
+  v' <- eval env v
+  dest' <- maybe oob pure =<< evalUpdateSteps env steps src_v v'
   let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
@@ -986,11 +985,9 @@ eval _ (Literal v _) = pure $ ValuePrim v
 eval env (Hole (Info t) loc) =
   bad loc env $ "Hole of type: " <> prettyTextOneLine t
 eval env (Parens e _) = eval env e
-eval env (QualParens (qv, _) e loc) = do
-  m <- evalModuleVar env qv
-  case m of
-    ModuleFun {} -> error $ "Local open of module function at " ++ locStr loc
-    Module m' -> eval (m' <> env) e
+eval env (QualParens _ e _) =
+  -- Already handled by the names added by the type checker.
+  eval env e
 eval env (TupLit vs _) = toTuple <$> mapM (eval env) vs
 eval env (RecordLit fields _) =
   ValueRecord . M.fromList <$> mapM evalField fields
@@ -1053,26 +1050,20 @@ eval env (Negate e loc) = do
   apply loc env intrinsicsNeg ev
 eval env (Not e loc) =
   apply loc env intrinsicsNot =<< eval env e
-eval env (Update src is v loc) =
-  maybe oob pure
-    =<< writeArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
+eval env (Update src steps v _ loc) = do
+  src' <- eval env src
+  v' <- eval env v
+  res <- evalUpdateSteps env steps src' v'
+  maybe oob pure res
   where
     oob = bad loc env "Bad update"
-eval env (RecordUpdate src all_fs v _ _) =
-  update <$> eval env src <*> pure all_fs <*> eval env v
-  where
-    update _ [] v' = v'
-    update (ValueRecord src') (f : fs) v'
-      | Just f_v <- M.lookup f src' =
-          ValueRecord $ M.insert f (update f_v fs v') src'
-    update _ _ _ = error "eval RecordUpdate: invalid value."
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
 eval env (Lambda ps body _ (Info (RetType _ rt)) _) =
-  evalFunction env [] ps body rt
+  evalBinding env [] ps body rt
 eval env (OpSection qv (Info t) _) =
   evalTermVar env qv $ toStruct t
 eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info (RetType _ t), _) loc) = do
@@ -1085,15 +1076,18 @@ eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info (RetType _ t
     ValueFun $ \x -> do
       f <- evalTermVar env qv $ toStruct t
       apply2 loc env f x y
-eval env (IndexSection is _ loc) = do
-  is' <- mapM (evalDimIndex env) is
-  pure $ ValueFun $ evalIndex loc env is'
-eval _ (ProjectSection ks _ _) =
-  pure $ ValueFun $ flip (foldM walk) ks
+eval env (UpdateSection steps _ loc) =
+  pure $ ValueFun $ evalSection steps
   where
-    walk (ValueRecord fs) f
-      | Just v' <- M.lookup f fs = pure v'
-    walk _ _ = error "Value does not have expected field."
+    evalSection [] v = pure v
+    evalSection (UpdateStepField f : rest) (ValueRecord fs)
+      | Just v' <- M.lookup f fs =
+          evalSection rest v'
+    evalSection (UpdateStepField _ : _) _ =
+      error "Value does not have expected field."
+    evalSection (UpdateStepSlice is : rest) arr = do
+      is' <- mapM (evalDimIndex env) is
+      evalIndex loc env is' arr >>= evalSection rest
 eval env (Project f e _ _) = do
   project f <$> eval env e
 eval env (Assert what e (Info s) loc) = do
@@ -1117,6 +1111,26 @@ eval env (Attr (AttrComp "trace" [AttrAtom (AtomName tag) _] _) e _) = do
   pure v
 eval env (Attr _ e _) =
   eval env e
+
+evalUpdateSteps :: Env -> [UpdateStep Info VName] -> Value -> Value -> EvalM (Maybe Value)
+evalUpdateSteps env = go
+  where
+    go [] _ newv = pure $ Just newv
+    go (UpdateStepField f : rest) (ValueRecord fs) newv
+      | Just old <- M.lookup f fs = do
+          newf <- go rest old newv
+          pure $ fmap (\v' -> ValueRecord $ M.insert f v' fs) newf
+    go (UpdateStepField _ : _) _ _ =
+      error "eval update: invalid field update."
+    go (UpdateStepSlice is : rest) arr newv = do
+      is' <- mapM (evalDimIndex env) is
+      case indexArray is' arr of
+        Nothing -> pure Nothing
+        Just old -> do
+          newsub <- go rest old newv
+          case newsub of
+            Nothing -> pure Nothing
+            Just vsub -> pure $ writeArray is' arr vsub
 
 evalCase ::
   Value ->
@@ -1218,8 +1232,8 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
     _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
-evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
-  binding <- evalFunctionBinding env tparams ps ret fbody
+evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
+  binding <- evalValBinding env tparams ps ret fbody
   sizes <- extEnv
   pure $ mempty {envTerm = M.singleton v binding} <> sizes
 evalDec env (OpenDec me _) = do
@@ -2152,6 +2166,10 @@ initialCtx =
         toArray' (valueShape x) . map (project "1")
           <$> mapM (doVJP2 f x) (snd (fromArray seeds))
       pure $ toTuple [v, dvs]
+    def "with_vjp" = Just $ fun3 $ \f _ arg ->
+      -- XXX? We simply ignore the custom derivative. This is correct, but makes
+      -- it more of a hassle to test them.
+      apply noLoc mempty f arg
     def "acc" = Nothing
     def s | nameFromText s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ T.unpack s

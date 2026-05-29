@@ -8,7 +8,7 @@ module Futhark.Optimise.Simplify.Rules.BasicOp
 where
 
 import Control.Monad
-import Data.List (find, foldl', isSuffixOf, sort)
+import Data.List (find, isSuffixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (isNothing)
 import Futhark.Analysis.PrimExp.Convert

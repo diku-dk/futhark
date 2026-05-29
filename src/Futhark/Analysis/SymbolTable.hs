@@ -56,7 +56,7 @@ where
 
 import Control.Arrow ((&&&))
 import Control.Monad
-import Data.List (elemIndex, foldl')
+import Data.List (elemIndex)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord

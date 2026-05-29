@@ -14,16 +14,49 @@ int futhark_get_tuning_param_count(void);
 const char* futhark_get_tuning_param_name(int i);
 const char* futhark_get_tuning_param_class(int i);
 
-typedef int (*restore_fn)(const void*, FILE *, struct futhark_context*, void*);
-typedef void (*store_fn)(const void*, FILE *, struct futhark_context*, void*);
+typedef int (*restore_fn)(const void*, FILE*, struct futhark_context*, void*);
+typedef void (*store_fn)(const void*, FILE*, struct futhark_context*, void*);
 typedef int (*free_fn)(const void*, struct futhark_context*, void*);
+typedef int (*array_new_fn)(struct futhark_context *, void**, const void*, const int64_t*);
+typedef int (*array_set_fn)(struct futhark_context *, const void*, const void*, const int64_t*);
+typedef const int64_t* (*array_shape_fn)(struct futhark_context*, const void*);
+typedef int (*array_index_fn)(struct futhark_context*, void*, const void*, const int64_t*);
+typedef int (*array_values_fn)(struct futhark_context*, const void*, void*);
+typedef int (*array_free_data_fn)(struct futhark_context*, void*);
+typedef int (*array_zip_fn)(struct futhark_context*, void*, const void*[]);
 typedef int (*project_fn)(struct futhark_context*, void*, const void*);
+typedef int (*variant_fn)(struct futhark_context*, const void*);
 typedef int (*new_fn)(struct futhark_context*, void**, const void*[]);
+typedef int (*destruct_fn)(struct futhark_context*, const void*[], const void*);
+
+enum kind {
+  PRIMITIVE,
+  ARRAY,
+  RECORD,
+  SUM,
+  OPAQUE
+};
 
 struct field {
   const char *name;
   const struct type *type;
   project_fn project;
+};
+
+struct array {
+  int rank;
+  const struct type *element_type;
+  const struct primtype_info_t* info;
+  const char *name;
+  int num_fields;
+  const struct field *fields;
+  array_new_fn new;
+  array_set_fn set;
+  array_shape_fn shape;
+  array_index_fn index;
+  array_values_fn values;
+  array_free_data_fn free;
+  array_zip_fn zip;
 };
 
 struct record {
@@ -32,13 +65,28 @@ struct record {
   new_fn new;
 };
 
+struct variant {
+  const char *name;
+  int num_types;
+  const struct type **types;
+  new_fn new;
+  destruct_fn destruct;
+};
+
+struct sum {
+  int num_variants;
+  const struct variant *variants;
+  variant_fn variant;
+};
+
 struct type {
   const char *name;
   restore_fn restore;
   store_fn store;
   free_fn free;
   const void *aux;
-  const struct record *record;
+  const enum kind kind;
+  const void *info;
 };
 
 int free_scalar(const void *aux, struct futhark_context *ctx, void *p) {
@@ -152,14 +200,15 @@ struct variable {
   struct value value;
 };
 
-typedef int (*entry_point_fn)(struct futhark_context*, void**, void**);
+typedef int (*entry_point_fn)(struct futhark_context*, void*, void**);
 
 struct entry_point {
   const char *name;
   entry_point_fn f;
   const char** tuning_params;
-  const struct type **out_types;
-  bool *out_unique;
+  const char** attrs;
+  const struct type *out_type;
+  bool out_unique;
   const struct type **in_types;
   bool *in_unique;
 };
@@ -167,14 +216,6 @@ struct entry_point {
 int entry_num_ins(struct entry_point *e) {
   int count = 0;
   while (e->in_types[count]) {
-    count++;
-  }
-  return count;
-}
-
-int entry_num_outs(struct entry_point *e) {
-  int count = 0;
-  while (e->out_types[count]) {
     count++;
   }
   return count;
@@ -315,14 +356,13 @@ void cmd_call(struct server_state *s, const char *args[]) {
     return;
   }
 
-  int num_outs = entry_num_outs(e);
   int num_ins = entry_num_ins(e);
   // +1 to avoid zero-size arrays, which is UB.
-  void* outs[num_outs+1];
+  void* out;
   void* ins[num_ins+1];
 
   for (int i = 0; i < num_ins; i++) {
-    const char *in_name = get_arg(args, 1+num_outs+i);
+    const char *in_name = get_arg(args, 2+i);
     struct variable *v = get_variable(s, in_name);
     if (v == NULL) {
       failure();
@@ -338,19 +378,17 @@ void cmd_call(struct server_state *s, const char *args[]) {
     ins[i] = value_ptr(&v->value);
   }
 
-  for (int i = 0; i < num_outs; i++) {
-    const char *out_name = get_arg(args, 1+i);
-    struct variable *v = create_variable(s, out_name, e->out_types[i]);
-    if (v == NULL) {
-      failure();
-      printf("Variable already exists: %s\n", out_name);
-      return;
-    }
-    outs[i] = value_ptr(&v->value);
+  const char *out_name = get_arg(args, 1);
+  struct variable *v = create_variable(s, out_name, e->out_type);
+  if (v == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", out_name);
+    return;
   }
+  out = value_ptr(&v->value);
 
   int64_t t_start = get_wall_time();
-  int err = e->f(s->ctx, outs, ins);
+  int err = e->f(s->ctx, out, ins);
   err |= futhark_context_sync(s->ctx);
   int64_t t_end = get_wall_time();
   long long int elapsed_usec = t_end - t_start;
@@ -358,14 +396,12 @@ void cmd_call(struct server_state *s, const char *args[]) {
 
   error_check(s, err);
   if (err != 0) {
-    // Need to uncreate the output variables, which would otherwise be left
+    // Need to uncreate the output variable, which would otherwise be left
     // in an uninitialised state.
-    for (int i = 0; i < num_outs; i++) {
-      const char *out_name = get_arg(args, 1+i);
-      struct variable *v = get_variable(s, out_name);
-      if (v) {
-        drop_variable(v);
-      }
+    const char *out_name = get_arg(args, 1);
+    struct variable *v = get_variable(s, out_name);
+    if (v) {
+      drop_variable(v);
     }
   }
 }
@@ -507,7 +543,7 @@ void cmd_inputs(struct server_state *s, const char *args[]) {
   }
 }
 
-void cmd_outputs(struct server_state *s, const char *args[]) {
+void cmd_output(struct server_state *s, const char *args[]) {
   const char *name = get_arg(args, 0);
   struct entry_point *e = get_entry_point(s, name);
 
@@ -517,13 +553,10 @@ void cmd_outputs(struct server_state *s, const char *args[]) {
     return;
   }
 
-  int num_outs = entry_num_outs(e);
-  for (int i = 0; i < num_outs; i++) {
-    if (e->out_unique[i]) {
-      putchar('*');
-    }
-    puts(e->out_types[i]->name);
+  if (e->out_unique) {
+    putchar('*');
   }
+  puts(e->out_type->name);
 }
 
 void cmd_clear(struct server_state *s, const char *args[]) {
@@ -613,21 +646,531 @@ void cmd_tuning_param_class(struct server_state *s, const char *args[]) {
   printf("Unknown tuning parameter: %s\n", param);
 }
 
+void cmd_attributes(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+  struct entry_point *e = get_entry_point(s, name);
+
+  if (e == NULL) {
+    failure();
+    printf("Unknown entry point: %s\n", name);
+    return;
+  }
+
+  const char **params = e->attrs;
+  for (int i = 0; params[i] != NULL; i++) {
+    printf("%s\n", params[i]);
+  }
+}
+
+void cmd_kind(struct server_state *s, const char *args[]) {
+  const char *type = get_arg(args, 0);
+  const struct type *t = get_type(s, type);
+
+  switch (t->kind) {
+    case PRIMITIVE: printf("primitive\n"); return;
+    case ARRAY:     printf("array\n");     return;
+    case RECORD:    printf("record\n");    return;
+    case SUM:       printf("sum\n");       return;
+    case OPAQUE:    printf("opaque\n");    return;
+  }
+  futhark_panic(1, "Invalid kind detected on type \"%s\".\n", t->name);
+}
+
+void cmd_type(struct server_state *s, const char *args[]) {
+  const char *from_name = get_arg(args, 0);
+  struct variable *v = get_variable(s, from_name);
+
+  if (v == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", from_name);
+    return;
+  }
+
+  printf("%s\n", v->value.type->name);
+}
+
+void cmd_shape(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+  struct variable* v = get_variable(s, name);
+
+  if (v == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", name);
+    return;
+  }
+
+  if (v->value.type->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = v->value.type->info;
+
+  const int64_t *shape = a->shape(s->ctx, v->value.value.v_ptr);
+  for (int i = 0; i < a->rank; ++i) {
+    printf("%lld\n", (long long)shape[i]);
+  }
+}
+
+void cmd_elemtype(struct server_state *s, const char *args[]) {
+  const char *type = get_arg(args, 0);
+  const struct type *t = get_type(s, type);
+
+  if (t->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = t->info;
+
+  printf("%s\n", a->element_type->name);
+}
+
+void cmd_rank(struct server_state *s, const char *args[]) {
+  const char *type = get_arg(args, 0);
+  const struct type *t = get_type(s, type);
+
+  if (t->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = t->info;
+  printf("%d\n", a->rank);
+}
+
+void cmd_new_array(struct server_state *s, const char *args[]) {
+  const char *to_name = get_arg(args, 0);
+  const char *type_name = get_arg(args, 1);
+  const struct type *type = get_type(s, type_name);
+  struct variable *to = create_variable(s, to_name, type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  if (type->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = type->info;
+
+  int num_args = 0;
+  for (int i = 2; arg_exists(args, i); i++) {
+    num_args++;
+  }
+
+  if (num_args < a->rank) {
+    failure();
+    printf("Expected %d dimensions, but got %d.\n", a->rank, num_args);
+    return;
+  }
+
+  int64_t* dims = alloca((size_t)a->rank * sizeof(int64_t));
+
+  int64_t n_values = 1;
+
+  for (int i = 0; i < a->rank; ++i) {
+    const char *size_arg = get_arg(args, 2+i);
+    char* end;
+    errno = 0;
+    int64_t size = strtoll(size_arg, &end, 10);
+
+    if (errno == ERANGE || *end != '\0' || size < 0) {
+      failure();
+      printf("Invalid size `%s` of dimension %d.\n", size_arg, i+1);
+      return;
+    }
+
+    dims[i] = size;
+    n_values *= size;
+  }
+
+  if (num_args - a->rank != n_values) {
+    failure();
+    printf("Expected %d values, but got %d.\n", (int)n_values, num_args - a->rank);
+    return;
+  }
+
+  char *values = NULL;
+  const void **value_ptrs = NULL;
+
+  if (n_values < 0) {
+    failure();
+    printf("Invalid array size.\n");
+    return;
+  }
+
+  if (a->info != NULL) {
+    size_t values_size = (size_t)n_values * a->info->size;
+    values = malloc(values_size);
+    if (values == NULL) {
+      failure();
+      printf("Out of memory.\n");
+      return;
+    }
+  } else {
+    value_ptrs = malloc((size_t)n_values * sizeof(void*));
+    if (value_ptrs == NULL) {
+      failure();
+      printf("Out of memory.\n");
+      return;
+    }
+  }
+
+  for (int64_t i = 0; i < n_values; i++) {
+    struct variable* v = get_variable(s, args[2+a->rank+i]);
+
+    if (v == NULL) {
+      failure();
+      printf("Unknown variable: %s\n", args[2+a->rank+i]);
+      free(value_ptrs);
+      free(values);
+      return;
+    }
+
+    if (strcmp(v->value.type->name, a->element_type->name) != 0) {
+      failure();
+      printf("Value %d mismatch: expected type %s, got %s\n",
+             (int)i, a->element_type->name, v->value.type->name);
+      free(value_ptrs);
+      free(values);
+      return;
+    }
+
+    if (a->info != NULL) {
+      memcpy(values + i * a->info->size, value_ptr(&v->value), a->info->size);
+    } else {
+      value_ptrs[i] = value_ptr(&v->value);
+    }
+  }
+
+  a->new(s->ctx, value_ptr(&to->value), a->info != NULL ? (void*)values : value_ptrs, dims);
+  free(value_ptrs);
+  free(values);
+}
+
+void cmd_set(struct server_state *s, const char *args[]) {
+  const char *arr_name = get_arg(args, 0);
+  const char *val_name = get_arg(args, 1);
+  struct variable* arr = get_variable(s, arr_name);
+  struct variable* val = get_variable(s, val_name);
+
+  if (arr == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", arr_name);
+    return;
+  }
+  if (val == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", val_name);
+    return;
+  }
+
+  if (arr->value.type->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = arr->value.type->info;
+
+  if (strcmp(val->value.type->name, a->element_type->name) != 0) {
+    failure();
+    printf("Type mismatch: expected element of type %s, got %s\n",
+            a->element_type->name, val->value.type->name);
+    return;
+  }
+
+  for (int i = 0; ; ++i) {
+    if (!arg_exists(args, 2+i)) {
+      if (i != a->rank) {
+        failure();
+        printf("%d indices expected but %d values provided.\n", a->rank, i);
+        return;
+      }
+      break;
+    }
+  }
+
+  const int64_t *shape = a->shape(s->ctx, arr->value.value.v_ptr);
+  int64_t* indices = alloca(a->rank * sizeof(int64_t));
+
+  for (int i = 0; i < a->rank; ++i) {
+    const char *idx_arg = get_arg(args, 2+i);
+    char* end;
+    errno = 0;
+    int64_t idx = strtoll(idx_arg, &end, 10);
+
+    if (errno == ERANGE || *end != '\0' || idx < 0 || idx >= shape[i]) {
+      failure();
+      printf("Invalid index `%s` on dimension %d.\n", idx_arg, i+1);
+      return;
+    }
+
+    indices[i] = idx;
+  }
+
+  a->set(s->ctx, arr->value.value.v_ptr, value_ptr(&val->value), indices);
+}
+
+void cmd_index(struct server_state *s, const char *args[]) {
+  const char *to_name = get_arg(args, 0);
+  const char *from_name = get_arg(args, 1);
+  struct variable* from = get_variable(s, from_name);
+
+  if (from == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", from_name);
+    return;
+  }
+
+  if (from->value.type->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = from->value.type->info;
+
+  for (int i = 0; ; ++i) {
+    if (!arg_exists(args, 2+i)) {
+      if (i != a->rank) {
+        failure();
+        printf("%d indices expected but %d values provided.\n", a->rank, i);
+        return;
+      }
+      break;
+    }
+  }
+
+  const int64_t *shape = a->shape(s->ctx, from->value.value.v_ptr);
+  int64_t* indices = alloca(a->rank * sizeof(int64_t));
+
+  for (int i = 0; i < a->rank; ++i) {
+    const char *idx_arg = get_arg(args, 2+i);
+    char* end;
+    errno = 0;
+    int64_t idx = strtoll(idx_arg, &end, 10);
+
+    if (errno == ERANGE || *end != '\0' || idx < 0 || idx >= shape[i]) {
+      failure();
+      printf("Invalid index `%s` on dimension %d.\n", idx_arg, i+1);
+      return;
+    }
+
+    indices[i] = idx;
+  }
+
+  struct variable* to = create_variable(s, to_name, a->element_type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  a->index(s->ctx, value_ptr(&to->value), from->value.value.v_ptr, indices);
+}
+
+void cmd_zip(struct server_state *s, const char *args[]) {
+  const char *to_name = get_arg(args, 0);
+  const char *type_name = get_arg(args, 1);
+  const struct type *type = get_type(s, type_name);
+
+  if (type->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = type->info;
+  if (a->zip == NULL || a->fields == NULL) {
+    failure();
+    printf("Cannot zip this array type\n");
+    return;
+  }
+
+  int num_args = 0;
+  for (int i = 2; arg_exists(args, i); i++) {
+    num_args++;
+  }
+
+  if (num_args != a->num_fields) {
+    failure();
+    printf("%d arrays expected but %d values provided.\n", a->num_fields, num_args);
+    return;
+  }
+
+  const void** value_ptrs = alloca(num_args * sizeof(void*));
+
+  for (int i = 0; i < num_args; i++) {
+    struct variable* v = get_variable(s, args[2+i]);
+
+    if (v == NULL) {
+      failure();
+      printf("Unknown variable: %s\n", args[2+i]);
+      return;
+    }
+
+    if (strcmp(v->value.type->name, a->fields[i].type->name) != 0) {
+      failure();
+      printf("Field %s mismatch: expected type %s, got %s\n",
+             a->fields[i].name, a->fields[i].type->name, v->value.type->name);
+      return;
+    }
+
+    value_ptrs[i] = v->value.value.v_ptr;
+  }
+
+  struct variable *to = create_variable(s, to_name, type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  int err = a->zip(s->ctx, value_ptr(&to->value), value_ptrs);
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
+  if (err != 0) {
+    drop_variable(to);
+  }
+}
+
+void cmd_unzip(struct server_state *s, const char *args[]) {
+  const char *from_name = get_arg(args, 0);
+  struct variable* from = get_variable(s, from_name);
+
+  if (from == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", from_name);
+    return;
+  }
+
+  if (from->value.type->kind != ARRAY) {
+    failure();
+    printf("Not an array type\n");
+    return;
+  }
+
+  const struct array *a = from->value.type->info;
+  if (a->fields == NULL) {
+    failure();
+    printf("Cannot unzip this array type\n");
+    return;
+  }
+
+  int num_args = 0;
+  for (int i = 1; arg_exists(args, i); i++) {
+    num_args++;
+  }
+
+  if (num_args != a->num_fields) {
+    failure();
+    printf("%d arrays expected but %d values provided.\n", a->num_fields, num_args);
+    return;
+  }
+
+  struct variable **outs = alloca(num_args * sizeof(struct variable*));
+  for (int i = 0; i < num_args; i++) {
+    const char *to_name = get_arg(args, i+1);
+    struct variable *to = create_variable(s, to_name, a->fields[i].type);
+    if (to == NULL) {
+      failure();
+      printf("Variable already exists: %s\n", to_name);
+      for (int j = 0; j < i; j++) {
+        drop_variable(outs[j]);
+      }
+      return;
+    }
+    outs[i] = to;
+  }
+
+  int err = 0;
+  for (int i = 0; i < num_args; i++) {
+    err |= a->fields[i].project(s->ctx, value_ptr(&outs[i]->value), from->value.value.v_ptr);
+  }
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
+  if (err != 0) {
+    for (int i = 0; i < num_args; i++) {
+      drop_variable(outs[i]);
+    }
+  }
+}
+
 void cmd_fields(struct server_state *s, const char *args[]) {
   const char *type = get_arg(args, 0);
   const struct type *t = get_type(s, type);
-  const struct record *r = t->record;
 
-  if (r == NULL) {
+  if (t->kind != RECORD) {
     failure();
     printf("Not a record type\n");
     return;
   }
 
+  const struct record *r = t->info;
+
   for (int i = 0; i < r->num_fields; i++) {
     const struct field f = r->fields[i];
     printf("%s %s\n", f.name, f.type->name);
   }
+}
+
+void cmd_variants(struct server_state *s, const char *args[]) {
+  const char *type = get_arg(args, 0);
+  const struct type *t = get_type(s, type);
+
+  if (t->kind != SUM) {
+    failure();
+    printf("Not a sum type\n");
+    return;
+  }
+
+  const struct sum *st = t->info;
+
+  for (int i = 0; i < st->num_variants; i++) {
+    const struct variant *v = &st->variants[i];
+    printf("%s\n", v->name);
+    for (int i = 0; i < v->num_types; i++) {
+      const struct type *f = v->types[i];
+      printf("- %s\n", f->name);
+    }
+  }
+}
+
+void cmd_variant(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+  struct variable* v = get_variable(s, name);
+
+  if (v == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", name);
+    return;
+  }
+
+  const struct type *t = get_type(s, v->value.type->name);
+
+  if (t->kind != SUM) {
+    failure();
+    printf("Not a sum type\n");
+    return;
+  }
+
+  const struct sum *st = t->info;
+
+  int i = st->variant(s->ctx, v->value.value.v_ptr);
+  const struct variant *var = &st->variants[i];
+  printf("%s\n", var->name);
 }
 
 void cmd_project(struct server_state *s, const char *args[]) {
@@ -644,13 +1187,14 @@ void cmd_project(struct server_state *s, const char *args[]) {
   }
 
   const struct type *from_type = from->value.type;
-  const struct record *r = from_type->record;
 
-  if (r == NULL) {
+  if (from_type->kind != RECORD) {
     failure();
     printf("Not a record type\n");
     return;
   }
+
+  const struct record *r = from_type->info;
 
   const struct field *field = NULL;
   for (int i = 0; i < r->num_fields; i++) {
@@ -688,13 +1232,13 @@ void cmd_new(struct server_state *s, const char *args[]) {
     return;
   }
 
-  const struct record* r = type->record;
-
-  if (r == NULL) {
+  if (type->kind != RECORD) {
     failure();
     printf("Not a record type\n");
     return;
   }
+
+  const struct record *r = type->info;
 
   int num_args = 0;
   for (int i = 2; arg_exists(args, i); i++) {
@@ -729,6 +1273,119 @@ void cmd_new(struct server_state *s, const char *args[]) {
   }
 
   r->new(s->ctx, value_ptr(&to->value), value_ptrs);
+}
+
+void cmd_construct(struct server_state *s, const char *args[]) {
+  const char *to_name = get_arg(args, 0);
+  const char *type_name = get_arg(args, 1);
+  const char *variant_name = get_arg(args, 2);
+  const struct type *type = get_type(s, type_name);
+  struct variable *to = create_variable(s, to_name, type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  if (type->kind != SUM) {
+    failure();
+    printf("Not a sum type\n");
+    return;
+  }
+
+  const struct sum *st = type->info;
+
+  for (int i = 0; i < st->num_variants; i++) {
+    const struct variant *var = &st->variants[i];
+    if (strcmp(var->name, variant_name) == 0) {
+      int num_args = 0;
+      for (int i = 3; arg_exists(args, i); i++) {
+        num_args++;
+      }
+
+      if (num_args != var->num_types) {
+        failure();
+        printf("%d values expected but %d values provided.\n", var->num_types, num_args);
+        return;
+      }
+
+      const void** value_ptrs = alloca(num_args * sizeof(void*));
+
+      for (int i = 0; i < num_args; i++) {
+        const char *vname = get_arg(args, 3+i);
+        struct variable* v = get_variable(s, vname);
+
+        if (v == NULL) {
+          failure();
+          printf("Unknown variable: %s\n", vname);
+          return;
+        }
+
+        if (strcmp(v->value.type->name, var->types[i]->name) != 0) {
+          failure();
+          printf("Value %d mismatch: expected type %s, got %s\n",
+                i, var->types[i]->name, v->value.type->name);
+          return;
+        }
+
+        value_ptrs[i] = value_ptr(&v->value);
+      }
+
+      var->new(s->ctx, value_ptr(&to->value), value_ptrs);
+      return;
+    }
+  }
+
+  failure();
+  printf("No such variant\n");
+}
+
+void cmd_destruct(struct server_state *s, const char *args[]) {
+  const char *from_name = get_arg(args, 0);
+  struct variable *v = get_variable(s, from_name);
+
+  if (v == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", from_name);
+    return;
+  }
+
+  if (v->value.type->kind != SUM) {
+    failure();
+    printf("Not a sum type\n");
+    return;
+  }
+
+  const struct sum *sum = v->value.type->info;
+  const struct variant *var = &sum->variants[sum->variant(s->ctx, v->value.value.v_ptr)];
+
+  int num_args = 0;
+  for (int i = 1; arg_exists(args, i); i++) {
+    num_args++;
+  }
+
+  if (num_args != var->num_types) {
+    failure();
+    printf("%d variables expected but %d variables provided.  %s\n", var->num_types, num_args, var->name);
+    return;
+  }
+
+  const void **value_ptrs = alloca(num_args * sizeof(struct variable*));
+
+  for (int i = 0; i < num_args; i++) {
+    const char *vname = get_arg(args, i+1);
+    struct variable *vn = create_variable(s, vname, var->types[i]);
+    if (vn == NULL) {
+      failure();
+      printf("Variable already exists: %s\n", vname);
+      return;
+    }
+    value_ptrs[i] = value_ptr(&vn->value);
+  }
+
+  var->destruct(s->ctx, value_ptrs, v->value.value.v_ptr);
+  return;
 }
 
 void cmd_entry_points(struct server_state *s, const char *args[]) {
@@ -819,8 +1476,8 @@ void process_line(struct server_state *s, char *line) {
     cmd_rename(s, tokens+1);
   } else if (strcmp(command, "inputs") == 0) {
     cmd_inputs(s, tokens+1);
-  } else if (strcmp(command, "outputs") == 0) {
-    cmd_outputs(s, tokens+1);
+  } else if (strcmp(command, "output") == 0) {
+    cmd_output(s, tokens+1);
   } else if (strcmp(command, "clear") == 0) {
     cmd_clear(s, tokens+1);
   } else if (strcmp(command, "pause_profiling") == 0) {
@@ -835,14 +1492,44 @@ void process_line(struct server_state *s, char *line) {
     cmd_tuning_params(s, tokens+1);
   } else if (strcmp(command, "tuning_param_class") == 0) {
     cmd_tuning_param_class(s, tokens+1);
+  } else if (strcmp(command, "kind") == 0) {
+    cmd_kind(s, tokens+1);
+  } else if (strcmp(command, "type") == 0) {
+    cmd_type(s, tokens+1);
+  } else if (strcmp(command, "shape") == 0) {
+    cmd_shape(s, tokens+1);
+  } else if (strcmp(command, "elemtype") == 0) {
+    cmd_elemtype(s, tokens+1);
+  } else if (strcmp(command, "rank") == 0) {
+    cmd_rank(s, tokens+1);
+  } else if (strcmp(command, "new_array") == 0) {
+    cmd_new_array(s, tokens+1);
+  } else if (strcmp(command, "set") == 0) {
+    cmd_set(s, tokens+1);
+  } else if (strcmp(command, "index") == 0) {
+    cmd_index(s, tokens+1);
+  } else if (strcmp(command, "zip") == 0) {
+    cmd_zip(s, tokens+1);
+  } else if (strcmp(command, "unzip") == 0) {
+    cmd_unzip(s, tokens+1);
   } else if (strcmp(command, "fields") == 0) {
     cmd_fields(s, tokens+1);
+  } else if (strcmp(command, "variants") == 0) {
+    cmd_variants(s, tokens+1);
+  } else if (strcmp(command, "variant") == 0) {
+    cmd_variant(s, tokens+1);
   } else if (strcmp(command, "new") == 0) {
     cmd_new(s, tokens+1);
+  } else if (strcmp(command, "construct") == 0) {
+    cmd_construct(s, tokens+1);
+  } else if (strcmp(command, "destruct") == 0) {
+    cmd_destruct(s, tokens+1);
   } else if (strcmp(command, "project") == 0) {
     cmd_project(s, tokens+1);
   } else if (strcmp(command, "entry_points") == 0) {
     cmd_entry_points(s, tokens+1);
+  } else if (strcmp(command, "attributes") == 0) {
+    cmd_attributes(s, tokens+1);
   } else if (strcmp(command, "types") == 0) {
     cmd_types(s, tokens+1);
   } else {
@@ -883,58 +1570,39 @@ void run_server(struct futhark_prog *prog,
 // The aux struct lets us write generic method implementations without
 // code duplication.
 
-typedef void* (*array_new_fn)(struct futhark_context *, const void*, const int64_t*);
-typedef const int64_t* (*array_shape_fn)(struct futhark_context*, void*);
-typedef int (*array_values_fn)(struct futhark_context*, void*, void*);
-typedef int (*array_free_fn)(struct futhark_context*, void*);
-
-struct array_aux {
-  int rank;
-  const struct primtype_info_t* info;
-  const char *name;
-  array_new_fn new;
-  array_shape_fn shape;
-  array_values_fn values;
-  array_free_fn free;
-};
-
-int restore_array(const struct array_aux *aux, FILE *f,
+int restore_array(const struct array *a, FILE *f,
                   struct futhark_context *ctx, void *p) {
   void *data = NULL;
-  int64_t shape[aux->rank];
-  if (read_array(f, aux->info, &data, shape, aux->rank) != 0) {
+  int64_t shape[a->rank];
+  if (read_array(f, a->info, &data, shape, a->rank) != 0) {
     return 1;
   }
 
-  void *arr = aux->new(ctx, data, shape);
-  if (arr == NULL) {
-    return 1;
-  }
-  int err = futhark_context_sync(ctx);
-  *(void**)p = arr;
+  int err = a->new(ctx, p, data, shape);
+  err |= futhark_context_sync(ctx);
   free(data);
   return err;
 }
 
-void store_array(const struct array_aux *aux, FILE *f,
+void store_array(const struct array *a, FILE *f,
                  struct futhark_context *ctx, void *p) {
   void *arr = *(void**)p;
-  const int64_t *shape = aux->shape(ctx, arr);
-  int64_t size = sizeof(aux->info->size);
-  for (int i = 0; i < aux->rank; i++) {
+  const int64_t *shape = a->shape(ctx, arr);
+  int64_t size = a->info->size;
+  for (int i = 0; i < a->rank; i++) {
     size *= shape[i];
   }
   int32_t *data = malloc(size);
-  assert(aux->values(ctx, arr, data) == 0);
+  assert(a->values(ctx, arr, data) == 0);
   assert(futhark_context_sync(ctx) == 0);
-  assert(write_array(f, 1, aux->info, data, shape, aux->rank) == 0);
+  assert(write_array(f, 1, a->info, data, shape, a->rank) == 0);
   free(data);
 }
 
-int free_array(const struct array_aux *aux,
+int free_array(const struct array *a,
                struct futhark_context *ctx, void *p) {
   void *arr = *(void**)p;
-  return aux->free(ctx, arr);
+  return a->free(ctx, arr);
 }
 
 typedef void* (*opaque_restore_fn)(struct futhark_context*, void*);
@@ -956,7 +1624,7 @@ int restore_opaque(const struct opaque_aux *aux, FILE *f,
   // (which doesn't care if there's extra at the end), then we compute
   // how much space the the object actually takes in serialised form
   // and rewind the file to that position.  The only downside is more IO.
-  size_t start = ftell(f);
+  size_t start = (size_t)ftello(f);
   size_t size;
   char *bytes = fslurp_file(f, &size);
   void *obj = aux->restore(ctx, bytes);
@@ -965,10 +1633,10 @@ int restore_opaque(const struct opaque_aux *aux, FILE *f,
     *(void**)p = obj;
     size_t obj_size;
     (void)aux->store(ctx, obj, NULL, &obj_size);
-    fseek(f, start+obj_size, SEEK_SET);
+    fseeko(f, start+obj_size, SEEK_SET);
     return 0;
   } else {
-    fseek(f, start, SEEK_SET);
+    fseeko(f, start, SEEK_SET);
     return 1;
   }
 }

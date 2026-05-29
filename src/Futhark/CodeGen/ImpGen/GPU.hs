@@ -115,24 +115,28 @@ opCompiler ::
   CallKernelGen ()
 opCompiler dest (Alloc e space) =
   compileAlloc dest e space
+opCompiler dest (EnsureDirect v) =
+  compileEnsureDirect dest v
 opCompiler (Pat [pe]) (Inner (SizeOp (GetSize key size_class))) = do
   fname <- askFunction
-  sOp $
-    Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
-      sizeClassWithEntryPoint fname size_class
+  let key' = keyWithEntryPoint fname key
+  addTuningParam key' $ Just size_class
+  sOp $ Imp.GetSize (patElemName pe) key' $ sizeClassWithEntryPoint fname size_class
 opCompiler (Pat [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
   fname <- askFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
-  sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
-    =<< toExp x
+      key' = keyWithEntryPoint fname key
+  addTuningParam key' $ Just size_class
+  sOp . Imp.CmpSizeLe (patElemName pe) key' size_class' =<< toExp x
 opCompiler (Pat [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblock_size))) = do
   fname <- askFunction
   max_num_tblocks :: TV Int64 <- dPrim "max_num_tblocks"
-  sOp $
-    Imp.GetSize (tvVar max_num_tblocks) (keyWithEntryPoint fname max_num_tblocks_key) $
-      sizeClassWithEntryPoint fname SizeGrid
+  let key = keyWithEntryPoint fname max_num_tblocks_key
+      class_ = sizeClassWithEntryPoint fname SizeGrid
+  addTuningParam key $ Just class_
+  sOp $ Imp.GetSize (tvVar max_num_tblocks) key class_
 
   -- If 'w' is small, we launch fewer blocks than we normally would.
   -- We don't want any idle blocks.
@@ -176,8 +180,8 @@ segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
 segOpCompiler pat (SegRed lvl@(SegThread _ _) space _ kbody reds) =
   compileSegRed pat lvl space reds kbody
-segOpCompiler pat (SegScan lvl@(SegThread _ _) space _ kbody scans) =
-  compileSegScan pat lvl space scans kbody
+segOpCompiler pat (SegScan lvl@(SegThread _ _) space ts kbody scans post_op) =
+  compileSegScan pat lvl space ts kbody scans post_op
 segOpCompiler pat (SegHist lvl@(SegThread _ _) space _ kbody ops) =
   compileSegHist pat lvl space ops kbody
 segOpCompiler pat segop =
@@ -195,7 +199,7 @@ checkSharedMemoryReqs in_scope code = do
 
   -- If any of the sizes involve a variable that is not known at this
   -- point, then we cannot check the requirements.
-  if not $ all in_scope $ namesToList $ freeIn alloc_sizes
+  if not $ allNames in_scope $ freeIn alloc_sizes
     then pure Nothing
     else do
       shared_memory_capacity :: TV Int64 <- dPrim "shared_memory_capacity"

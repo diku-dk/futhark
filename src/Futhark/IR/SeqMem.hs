@@ -36,7 +36,8 @@ instance ASTRep SeqMem where
 instance PrettyRep SeqMem
 
 instance TC.Checkable SeqMem where
-  checkOp (Alloc size _) = TC.require [Prim int64] size
+  checkOp (Alloc size _) = TC.require (Prim int64) size
+  checkOp (EnsureDirect _) = pure ()
   checkOp (Inner NoOp) = pure ()
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo

@@ -14,6 +14,7 @@ module Language.Futhark.TypeChecker.Monad
     lookupMTy,
     lookupImport,
     lookupMod,
+    lookupAbsTy,
     localEnv,
     TypeError (..),
     prettyTypeError,
@@ -26,6 +27,8 @@ module Language.Futhark.TypeChecker.Monad
     aNote,
     MonadTypeChecker (..),
     TypeState (stateNameSource),
+    addTySet,
+    collectTySet,
     usedName,
     checkName,
     checkAttr,
@@ -76,7 +79,7 @@ import Language.Futhark.Semantic
 import Language.Futhark.Traversals
 import Language.Futhark.Warnings
 import Paths_futhark qualified
-import Prelude hiding (mapM, mod)
+import Prelude hiding (abs, mapM, mod)
 
 newtype Note = Note (Doc ())
 
@@ -159,7 +162,7 @@ underscoreUse loc name =
 
 -- | A mapping from import import names to 'Env's.  This is used to
 -- resolve @import@ declarations.
-type ImportTable = M.Map ImportName Env
+type ImportTable = M.Map ImportName (TySet, Env)
 
 data Context = Context
   { contextEnv :: Env,
@@ -175,6 +178,8 @@ data TypeState = TypeState
     stateWarnings :: Warnings,
     -- | Which names have been used.
     stateUsed :: S.Set VName,
+    -- | Known abstract type names.
+    stateTySet :: TySet,
     stateCounter :: Int
   }
 
@@ -216,7 +221,7 @@ runTypeM ::
   (Warnings, Either TypeError (a, VNameSource))
 runTypeM env imports fpath src (TypeM m) = do
   let ctx = Context env imports fpath True
-      s = TypeState src mempty mempty 0
+      s = TypeState src mempty mempty mempty 0
   case runExcept $ runStateT (runReaderT m ctx) s of
     Left (ws, e) -> (ws, Left e)
     Right (x, s') -> (stateWarnings s', Right (x, stateNameSource s'))
@@ -246,6 +251,33 @@ lookupMTy loc qn = do
   where
     explode = unknownVariable Signature qn loc
 
+-- | Add set of abstract types.
+addTySet :: TySet -> TypeM ()
+addTySet tys = modify $ \s -> s {stateTySet = tys <> stateTySet s}
+
+-- | Run type checking command while accumulating (and returning) all new
+-- abstract types, then reset to known abstract types afterwards.
+collectTySet :: TypeM a -> TypeM (a, TySet)
+collectTySet m = do
+  old <- gets stateTySet
+  x <- m
+  new <- gets stateTySet
+  modify $ \s -> s {stateTySet = old}
+  pure (x, new `M.difference` old)
+
+-- | Look up the liftedness of an abstract type.
+lookupAbsTy :: QualName VName -> TypeM Liftedness
+lookupAbsTy v = do
+  abs <- gets stateTySet
+  case M.lookup v abs of
+    Just l -> pure l
+    Nothing ->
+      error $
+        unlines
+          [ "lookupAbsTy: " <> prettyString v,
+            "known: " <> show abs
+          ]
+
 -- | Look up an import.
 lookupImport :: SrcLoc -> FilePath -> TypeM (ImportName, Env)
 lookupImport loc file = do
@@ -259,7 +291,9 @@ lookupImport loc file = do
           <+> dquotes (pretty (includeToText canonical_import))
           </> "Known:"
           <+> commasep (map (pretty . includeToText) (M.keys imports))
-    Just scope -> pure (canonical_import, scope)
+    Just (abs, scope) -> do
+      addTySet abs
+      pure (canonical_import, scope)
 
 -- | Evaluate a 'TypeM' computation within an extended (/not/
 -- replaced) environment.

@@ -29,10 +29,41 @@ def writeScalarArray(x, offset, v):
 
 
 # An opaque Futhark value.
+#
+# Behaves like a tuple, even for opaques that are not really tuple-like.
+# Beware...
 class opaque(object):
-    def __init__(self, desc, *payload):
+    def __init__(self, desc, opaques, *payload):
         self.data = payload
+        self.opaques = opaques
         self.desc = desc
+
+    def __len__(self):
+        return len(self.opaques[self.desc][1])
+
+    # Return number of Python values used to represent Futhark value of given
+    # type.
+    def __num_elems(self, t):
+        if t in self.opaques:
+            return sum(map(self.__num_elems, self.opaques[t][0]))
+        else:
+            return 1
+
+    def __getitem__(self, i):
+        layout = self.opaques[self.desc][1]
+        if layout is not None:
+            if i < 0 or i >= len(layout):
+                raise IndexError
+            ks = list(map(self.__num_elems, layout))
+            t = layout[i]
+            if t in self.opaques:
+                return opaque(
+                    layout[i], self.opaques, *self.data[sum(ks[0:i]) : ks[i]]
+                )
+            else:
+                return self.data[sum(ks[0:i])]
+        else:
+            raise TypeError
 
     def __repr__(self):
         return "<opaque Futhark value of type {}>".format(self.desc)

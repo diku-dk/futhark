@@ -35,9 +35,9 @@ bindLambda pat aux (Lambda params _ body) args = do
   forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
     certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 
-onStm :: Mode -> Scope SOACS -> Stm SOACS -> PassM (Stms SOACS)
-onStm mode scope (Let pat aux (Op (VJP shape args vec lam))) = do
-  lam' <- onLambda mode scope lam
+onStm :: Bool -> Mode -> Scope SOACS -> Stm SOACS -> PassM (Stms SOACS)
+onStm _ mode scope (Let pat aux (Op (VJP shape args vec lam))) = do
+  lam' <- onLambda True mode scope lam
   if mode == All || lam == lam'
     then do
       lam'' <-
@@ -45,40 +45,45 @@ onStm mode scope (Let pat aux (Op (VJP shape args vec lam))) = do
           =<< revVJP scope shape (stmAuxAttrs aux) lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
     else pure $ oneStm $ Let pat aux $ Op $ VJP shape args vec lam'
-onStm mode scope (Let pat aux (Op (JVP shape args vec lam))) = do
-  lam' <- onLambda mode scope lam
+onStm _ mode scope (Let pat aux (Op (JVP shape args vec lam))) = do
+  lam' <- onLambda True mode scope lam
   if mode == All || lam == lam'
     then do
       lam'' <- fwdJVP scope shape (stmAuxAttrs aux) lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
     else pure $ oneStm $ Let pat aux $ Op $ JVP shape args vec lam'
-onStm mode scope (Let pat aux e) = oneStm . Let pat aux <$> mapExpM mapper e
+--
+-- This corresponds to a WithVJP that is not inside of a differential operator.
+-- FIXME: this assumption will go bad when we don't inline so much.
+onStm False _ scope (Let pat aux (Op (WithVJP args lam _))) =
+  runBuilderT_ (bindLambda pat aux lam args) scope
+onStm ad mode scope (Let pat aux e) = oneStm . Let pat aux <$> mapExpM mapper e
   where
     mapper =
       (identityMapper @SOACS)
-        { mapOnBody = \bscope -> onBody mode (bscope <> scope),
+        { mapOnBody = \bscope -> onBody ad mode (bscope <> scope),
           mapOnOp = mapSOACM soac_mapper
         }
-    soac_mapper = identitySOACMapper {mapOnSOACLambda = onLambda mode scope}
+    soac_mapper = identitySOACMapper {mapOnSOACLambda = onLambda ad mode scope}
 
-onStms :: Mode -> Scope SOACS -> Stms SOACS -> PassM (Stms SOACS)
-onStms mode scope stms = mconcat <$> mapM (onStm mode scope') (stmsToList stms)
+onStms :: Bool -> Mode -> Scope SOACS -> Stms SOACS -> PassM (Stms SOACS)
+onStms ad mode scope stms = mconcat <$> mapM (onStm ad mode scope') (stmsToList stms)
   where
     scope' = scopeOf stms <> scope
 
-onBody :: Mode -> Scope SOACS -> Body SOACS -> PassM (Body SOACS)
-onBody mode scope body = do
-  stms <- onStms mode scope $ bodyStms body
+onBody :: Bool -> Mode -> Scope SOACS -> Body SOACS -> PassM (Body SOACS)
+onBody ad mode scope body = do
+  stms <- onStms ad mode scope $ bodyStms body
   pure $ body {bodyStms = stms}
 
-onLambda :: Mode -> Scope SOACS -> Lambda SOACS -> PassM (Lambda SOACS)
-onLambda mode scope lam = do
-  body <- onBody mode (scopeOfLParams (lambdaParams lam) <> scope) $ lambdaBody lam
+onLambda :: Bool -> Mode -> Scope SOACS -> Lambda SOACS -> PassM (Lambda SOACS)
+onLambda ad mode scope lam = do
+  body <- onBody ad mode (scopeOfLParams (lambdaParams lam) <> scope) $ lambdaBody lam
   pure $ lam {lambdaBody = body}
 
 onFun :: Mode -> Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 onFun mode consts fd = do
-  body <- onBody mode (scopeOf consts <> scopeOf fd) $ funDefBody fd
+  body <- onBody False mode (scopeOf consts <> scopeOf fd) $ funDefBody fd
   pure $ fd {funDefBody = body}
 
 applyAD :: Pass SOACS SOACS
@@ -88,7 +93,7 @@ applyAD =
       passDescription = "Apply AD operators",
       passFunction =
         intraproceduralTransformationWithConsts
-          (onStms All mempty)
+          (onStms False All mempty)
           (onFun All)
     }
 
@@ -99,6 +104,6 @@ applyADInnermost =
       passDescription = "Apply innermost AD operators",
       passFunction =
         intraproceduralTransformationWithConsts
-          (onStms Innermost mempty)
+          (onStms False Innermost mempty)
           (onFun Innermost)
     }

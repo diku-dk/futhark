@@ -1,9 +1,11 @@
 -- | @futhark autotune@
 module Futhark.CLI.Autotune (main) where
 
+import Control.Exception
 import Control.Monad
 import Data.ByteString.Char8 qualified as SBS
 import Data.Function (on)
+import Data.IORef
 import Data.List (elemIndex, intersect, minimumBy, sort, sortOn)
 import Data.Map qualified as M
 import Data.Maybe
@@ -14,12 +16,14 @@ import Data.Tree
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (maxinum, showText)
+import Futhark.Util (fancyTerminal, maxinum, showText)
 import Futhark.Util.Options
+import Futhark.Util.ProgressBar
 import System.Directory
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
+import System.IO
 import Text.Read (readMaybe)
 import Text.Regex.TDFA
 
@@ -107,7 +111,7 @@ checkCmd = either (error . T.unpack . T.unlines . failureMsg) pure
 
 setTuningParam :: Server -> T.Text -> Int -> IO ()
 setTuningParam server name val =
-  void $ checkCmd =<< cmdSetTuningParam server name (showText val)
+  void $ checkCmd . maybe (Right ()) Left =<< cmdSetTuningParam server name val
 
 setTuningParams :: Server -> Path -> IO ()
 setTuningParams server = mapM_ (uncurry $ setTuningParam server)
@@ -126,7 +130,7 @@ prepare opts futhark prog = do
 
   truns <-
     case testAction spec of
-      RunCases ios _ _ | not $ null ios -> do
+      RunCases ios _ _ _ | not $ null ios -> do
         when (optVerbose opts > 1) $
           putStrLn $
             unwords ("Entry points:" : map (T.unpack . iosEntryPoint) ios)
@@ -306,16 +310,6 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
               T.unwords [v, "is irrelevant for", entry_point]
           pure (thresholds, best_runtimes)
         else do
-          T.putStrLn $
-            T.unwords
-              [ "Tuning",
-                v,
-                "on entry point",
-                entry_point,
-                "and dataset",
-                dataset_name
-              ]
-
           sample_run <-
             run
               server
@@ -363,7 +357,8 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
                     | fromIntegral rt * epsilon < fromIntegral best_t -> do
                         T.putStrLn $
                           T.unwords
-                            [ "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
+                            [ (if fancyTerminal then "\r\ESC[K" else "")
+                                <> "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
                               dataset_name,
                               " was",
                               showText rt,
@@ -395,7 +390,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
           when (optVerbose opts > 0) $
             putStrLn $
               unwords
-                [ "Trying e_par",
+                [ (if fancyTerminal then "\r\ESC[K" else "") ++ "Trying e_par",
                   show middle,
                   "and",
                   show middle'
@@ -428,7 +423,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
         (_, _) -> do
           when (optVerbose opts > 0) $
             putStrLn $
-              unwords ["Trying e_pars", show xs]
+              unwords [(if fancyTerminal then "\r\ESC[K" else "") ++ "Trying e_pars", show xs]
           candidates <-
             catMaybes . zipWith (fmap . flip (,)) xs
               <$> mapM (runner $ timeout best_t) xs
@@ -447,29 +442,74 @@ tune opts prog = do
   let progbin = "." </> dropExtension prog
   withServer (futharkServerCfg progbin (serverOptions opts)) $ \server -> do
     forest <- thresholdForest server
+    let paths = tuningPaths forest
+    let total = length paths
     when (optVerbose opts > 0) $
       putStrLn $
         ("Threshold forest:\n" <>) $
           drawForest (map (fmap show) forest)
 
-    fmap fst . foldM (tuneThreshold opts server datasets) ([], mempty) $
-      tuningPaths forest
+    counter <- newIORef (0 :: Int)
+    let dataset_names =
+          T.intercalate "," $ map (\(name, _, ep) -> ep <> ":" <> name) datasets
+    result <-
+      foldM
+        ( \acc tp@(v, _) -> do
+            modifyIORef' counter (+ 1)
+            n <- readIORef counter
+            let bar =
+                  "\rTuning: "
+                    ++ show n
+                    ++ "/"
+                    ++ show total
+                    ++ " "
+                    ++ T.unpack
+                      ( progressBar
+                          ProgressBar
+                            { progressBarSteps = 10,
+                              progressBarBound = 1,
+                              progressBarElapsed = fromIntegral n / fromIntegral total
+                            }
+                      )
+                    ++ T.unpack v
+                    ++ " on "
+                    ++ T.unpack dataset_names
+            when fancyTerminal $ putStr bar
+            hFlush stdout
+            r <- tuneThreshold opts server datasets acc tp
+            when fancyTerminal $ putStr bar
+            hFlush stdout
+            pure r
+        )
+        ([], mempty)
+        paths
+    when fancyTerminal $ do
+      putStr "\r\ESC[K"
+      hFlush stdout
+    pure (fst result)
+
+onServerException :: ServerException -> IO a
+onServerException (ServerException s) = do
+  T.hPutStrLn stderr s
+  exitFailure
 
 runAutotuner :: AutotuneOptions -> FilePath -> IO ()
-runAutotuner opts prog = do
-  best <- tune opts prog
+runAutotuner opts prog =
+  do
+    best <- tune opts prog
 
-  let tuning = T.unlines $ do
-        (s, n) <- sortOn fst best
-        pure $ s <> "=" <> showText n
+    let tuning = T.unlines $ do
+          (s, n) <- sortOn fst best
+          pure $ s <> "=" <> showText n
 
-  case optTuning opts of
-    Nothing -> pure ()
-    Just suffix -> do
-      T.writeFile (prog <.> suffix) tuning
-      putStrLn $ "Wrote " ++ prog <.> suffix
+    case optTuning opts of
+      Nothing -> pure ()
+      Just suffix -> do
+        T.writeFile (prog <.> suffix) tuning
+        putStrLn $ "Wrote " ++ prog <.> suffix
 
-  T.putStrLn $ "Result of autotuning:\n" <> tuning
+    T.putStrLn $ "Result of autotuning:\n" <> tuning
+    `catch` onServerException
 
 supportedBackends :: [String]
 supportedBackends = ["opencl", "cuda", "hip"]

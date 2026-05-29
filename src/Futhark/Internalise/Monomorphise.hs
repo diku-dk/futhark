@@ -90,15 +90,13 @@ canCalculate :: S.Set VName -> ExpReplacements -> ExpReplacements
 canCalculate scope mapping = do
   filter
     ( (`S.isSubsetOf` scope)
-        . S.filter notIntrisic
+        . S.filter (not . isIntrinsic)
         . fvVars
         . freeInExp
         . unReplaced
         . fst
     )
     mapping
-  where
-    notIntrisic vn = baseTag vn > maxIntrinsicTag
 
 -- Replace some expressions by a parameter.
 expReplace :: ExpReplacements -> Exp -> Exp
@@ -250,9 +248,7 @@ lookupLifted fname t = M.lookup (fname, t) <$> getLifts
 -- that is arguments not currently in scope.
 askIntros :: S.Set VName -> MonoM (S.Set VName)
 askIntros argset =
-  (S.filter notIntrisic argset `S.difference`) <$> askScope
-  where
-    notIntrisic vn = baseTag vn > maxIntrinsicTag
+  (S.filter (not . isIntrinsic) argset `S.difference`) <$> askScope
 
 -- | Gets and removes expressions that could not be calculated when
 -- the arguments set will be unscoped.
@@ -394,7 +390,7 @@ transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
 transformFName loc fname ft = do
   t' <- transformType ft
   let mono_t = monoType ft
-  if baseTag (qualLeaf fname) <= maxIntrinsicTag
+  if isIntrinsic (qualLeaf fname)
     then pure $ var fname t'
     else do
       maybe_fname <- lookupLifted (qualLeaf fname) mono_t
@@ -423,7 +419,7 @@ transformFName loc fname ft = do
       )
 
     applySizeArgs fname' t size_args =
-      snd $
+      setApplyLoc loc . snd $
         foldl'
           (applySizeArg t)
           ( length size_args - 1,
@@ -519,11 +515,9 @@ transformAppExp LetFun {} _ =
   error "transformAppExp: LetFun is not supposed to occur"
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> (Info <$> transformAppRes res)
-transformAppExp (Apply fe args _) res =
-  mkApply
-    <$> transformExp fe
-    <*> mapM onArg (NE.toList args)
-    <*> transformAppRes res
+transformAppExp (Apply fe args loc) res =
+  setApplyLoc loc
+    <$> (mkApply <$> transformExp fe <*> mapM onArg (NE.toList args) <*> transformAppRes res)
   where
     onArg (Info ext, e) = (ext,) <$> transformExp e
 transformAppExp (Loop sparams pat loopinit form body loc) res = do
@@ -699,29 +693,31 @@ transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
     (yp, ytype, yargext)
     (rettype, [])
     loc
-transformExp (ProjectSection fields (Info t) loc) = do
+transformExp (UpdateSection steps (Info t) loc) = do
   t' <- transformType t
-  desugarProjectSection fields t' loc
-transformExp (IndexSection idxs (Info t) loc) = do
-  idxs' <- mapM transformDimIndex idxs
-  desugarIndexSection idxs' t loc
+  steps' <- mapM transformStep steps
+  desugarUpdateSection steps' t' loc
+  where
+    transformStep (UpdateStepSlice idxs) =
+      UpdateStepSlice <$> mapM transformDimIndex idxs
+    transformStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 transformExp (Project n e tp loc) = do
   tp' <- traverse transformType tp
   e' <- transformExp e
   pure $ Project n e' tp' loc
-transformExp (Update e1 idxs e2 loc) =
+transformExp (Update e1 steps e2 t loc) =
   Update
     <$> transformExp e1
-    <*> mapM transformDimIndex idxs
-    <*> transformExp e2
-    <*> pure loc
-transformExp (RecordUpdate e1 fs e2 t loc) =
-  RecordUpdate
-    <$> transformExp e1
-    <*> pure fs
+    <*> mapM transformStep steps
     <*> transformExp e2
     <*> traverse transformType t
     <*> pure loc
+  where
+    transformStep (UpdateStepSlice idxs) =
+      UpdateStepSlice <$> mapM transformDimIndex idxs
+    transformStep (UpdateStepField f) =
+      pure $ UpdateStepField f
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 transformExp (Constr name all_es t loc) =
@@ -792,10 +788,10 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
       (v, pat, var_e) <- patAndVar argtype
       pure (v, id, var_e, [pat])
 
-desugarProjectSection :: [Name] -> StructType -> SrcLoc -> MonoM Exp
-desugarProjectSection fields (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
-  p <- newVName "project_p"
-  let body = foldl project (Var (qualName p) (Info t1) mempty) fields
+desugarUpdateSection :: [UpdateStep Info VName] -> StructType -> SrcLoc -> MonoM Exp
+desugarUpdateSection steps (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
+  p <- newVName "section_p"
+  let body = fst $ foldl applyStep (Var (qualName p) (Info t1) mempty, t1) steps
   pure $
     Lambda
       [Id p (Info $ toParam Observe t1) mempty]
@@ -804,33 +800,26 @@ desugarProjectSection fields (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = d
       (Info (RetType dims t2))
       loc
   where
-    project e field =
-      case typeOf e of
+    applyStep (e, t) (UpdateStepField field) =
+      case t of
         Scalar (Record fs)
-          | Just t <- M.lookup field fs ->
-              Project field e (Info t) mempty
-        t ->
+          | Just t' <- M.lookup field fs ->
+              (Project field e (Info t') mempty, t')
+        _ ->
           error $
-            "desugarOpSection: type "
+            "desugarUpdateSection: type "
               ++ prettyString t
               ++ " does not have field "
               ++ prettyString field
-desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " ++ prettyString t
+    applyStep (e, t) (UpdateStepSlice idxs) =
+      let t' = stripArray (fixedDims idxs) t
+          e' = AppExp (Index e idxs loc) (Info (AppRes t' []))
+       in (e', t')
 
-desugarIndexSection :: [DimIndex] -> StructType -> SrcLoc -> MonoM Exp
-desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
-  p <- newVName "index_i"
-  t1' <- transformType t1
-  t2' <- transformType t2
-  let body = AppExp (Index (Var (qualName p) (Info t1') loc) idxs loc) (Info (AppRes (toStruct t2') []))
-  pure $
-    Lambda
-      [Id p (Info $ toParam Observe t1') mempty]
-      body
-      Nothing
-      (Info (RetType dims t2'))
-      loc
-desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
+    fixedDims = length . filter isFix
+    isFix DimFix {} = True
+    isFix _ = False
+desugarUpdateSection _ t _ = error $ "desugarUpdateSection: not a function type: " ++ prettyString t
 
 transformPat :: Pat (TypeBase Size u) -> MonoM (Pat (TypeBase Size u))
 transformPat = traverse transformType
@@ -955,11 +944,10 @@ arrowArg scope argset args_params rety =
       Sum <$> (traverse . traverse) (arrowArgType env) cs
     arrowArgScalar (scope', dimsToPush) (Arrow as argName d argT retT) =
       pass $ do
-        let intros = S.filter notIntrisic argset' `S.difference` scope'
+        let intros = S.filter (not . isIntrinsic) argset' `S.difference` scope'
         retT' <- arrowArgRetType (scope', filter (`S.notMember` intros) dimsToPush) fullArgset retT
         pure (Arrow as argName d argT retT', bimap (intros `S.union`) (const mempty))
       where
-        notIntrisic vn = baseTag vn > maxIntrinsicTag
         argset' = fvVars $ freeInType argT
         fullArgset =
           case argName of
@@ -1008,6 +996,10 @@ arrowArg scope argset args_params rety =
       Array u shape $ arrowCleanScalar paramed scalar
     arrowCleanType paramed (Scalar ty) =
       Scalar $ arrowCleanScalar paramed ty
+
+removeEntryPoint :: PolyBinding -> PolyBinding
+removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, loc)) =
+  PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
 
 -- Monomorphise a polymorphic function at the types given in the instance
 -- list. Monomorphises the body of the function as well. Returns the fresh name
@@ -1113,6 +1105,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
       ValBind
         { valBindEntryPoint = Info <$> entry,
           valBindName = name',
+          valBindNameLoc = mempty,
           valBindRetType = Info rettype',
           valBindRetDecl = Nothing,
           valBindTypeParams = tparams',
@@ -1133,7 +1126,7 @@ typeSubstsM loc orig_t1 orig_t2 =
   runWriterT $ fst <$> execStateT (sub orig_t1 orig_t2) (mempty, mempty)
   where
     subRet (Scalar (TypeVar _ v _)) rt =
-      unless (baseTag (qualLeaf v) <= maxIntrinsicTag) $
+      unless (isIntrinsic (qualLeaf v)) $
         addSubst v rt
     subRet t1 (RetType _ t2) =
       sub t1 t2
@@ -1146,7 +1139,7 @@ typeSubstsM loc orig_t1 orig_t2 =
         _ -> pure ()
       sub (stripArray 1 t1) (stripArray 1 t2)
     sub (Scalar (TypeVar _ v _)) t =
-      unless (baseTag (qualLeaf v) <= maxIntrinsicTag) $
+      unless (isIntrinsic (qualLeaf v)) $
         addSubst v $
           RetType [] t
     sub (Scalar (Record fields1)) (Scalar (Record fields2)) =
@@ -1203,7 +1196,7 @@ substPat f pat = case pat of
   PatConstr n (Info tp) ps loc -> PatConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
-toPolyBinding (ValBind entry name _ (Info rettype) tparams params body _ attrs loc) =
+toPolyBinding (ValBind entry name _ _ (Info rettype) tparams params body _ attrs loc) =
   PolyBinding (unInfo <$> entry, name, tparams, params, rettype, body, attrs, loc)
 
 transformValBind :: ValBind -> MonoM Env
@@ -1228,7 +1221,9 @@ transformValBind valbind = do
 
   pure
     env
-      { envPolyBindings = M.insert (valBindName valbind) valbind' $ envPolyBindings env,
+      { envPolyBindings =
+          M.insert (valBindName valbind) (removeEntryPoint valbind') $
+            envPolyBindings env,
         envGlobalScope = global <> envGlobalScope env,
         envScope =
           S.insert (valBindName valbind) global
