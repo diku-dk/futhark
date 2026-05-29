@@ -1,7 +1,7 @@
 -- Map with free variable.
 -- ==
 -- tags { autodiff }
--- entry: fwd_J rev_J
+-- entry: fwd_J rev_J rev_vec_J
 -- input { 2.0 [1.0,2.0,3.0] }
 -- output { [1.0,2.0,3.0] }
 
@@ -13,3 +13,7 @@ entry fwd_J [n] (c: f64) (xs: [n]f64) =
 
 entry rev_J [n] (c: f64) (xs: [n]f64) =
   tabulate n (\i -> vjp (\c' -> map (* c') xs) c (onehot n i))
+
+entry rev_vec_J [n] (c: f64) (xs: [n]f64) =
+  let seeds = tabulate n (\i -> onehot n i)
+  in vjp_vec (\c' -> map (* c') xs) c seeds

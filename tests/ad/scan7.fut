@@ -5,7 +5,7 @@
 -- tags { autodiff }
 
 -- ==
--- entry: fwd_J rev_J
+-- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input { [[[1f32,2f32], [2f32,3f32]], [[4f32,5f32], [3f32,4f32]],
 --                   [[3f32,4f32], [4f32,5f32]], [[4f32,5f32], [2f32,3f32]]] }
 -- output {
@@ -104,6 +104,27 @@ entry rev_J [n] [m] [k] (input: [n][m][k]f32) =
 -- }
 entry test [n] [m] [k] (input: [n][m][k]f32) bar =
   let res = map (map (map (vjp primal input))) bar
+  let a = res |> map (map transpose) |> map (map (map transpose)) |> map (map (map (map transpose)))
+  let a2 = a |> map transpose |> map (map transpose) |> map (map (map transpose))
+  in a2 |> transpose |> map transpose |> (map (map transpose))
+
+entry fwd_vec_J [n] [m] [k] (input: [n][m][k]f32) =
+  let seeds = tabulate (n * m * k) (\p ->
+                let i = p / (m * k)
+                let j = (p % (m * k)) / k
+                let q = p % k
+                in replicate n (replicate m (replicate k 0)) with [i] = (replicate m (replicate k 0) with [j] = (replicate k 0 with [q] = 1)))
+  let res = jvp_vec primal input seeds
+  in unflatten (sized (n * (m * k)) res) |> map unflatten
+
+entry rev_vec_J [n] [m] [k] (input: [n][m][k]f32) =
+  let seeds = tabulate (n * m * k) (\p ->
+                let i = p / (m * k)
+                let j = (p % (m * k)) / k
+                let q = p % k
+                in replicate n (replicate m (replicate k 0)) with [i] = (replicate m (replicate k 0) with [j] = (replicate k 0 with [q] = 1)))
+  let res = vjp_vec primal input seeds
+            |> (\x -> unflatten (sized (n * (m * k)) x)) |> map unflatten
   let a = res |> map (map transpose) |> map (map (map transpose)) |> map (map (map (map transpose)))
   let a2 = a |> map transpose |> map (map transpose) |> map (map (map transpose))
   in a2 |> transpose |> map transpose |> (map (map transpose))

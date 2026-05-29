@@ -1,6 +1,6 @@
 -- ==
 -- tags { autodiff }
--- entry: f_jvp
+-- entry: f_jvp f_jvp_vec
 -- input { [0i64,1i64,2i64,3i64] [1f64,2f64,3f64,4f64] }
 -- output { [[1f64,0f64,0f64,0f64],[0f64,1f64,0f64,0f64],[0f64,0f64,1f64,0f64],[0f64,0f64,0f64,1f64]] }
 def f [n] (is: [n]i64) (vs: [n]f64) =
@@ -8,4 +8,9 @@ def f [n] (is: [n]i64) (vs: [n]f64) =
 
 entry f_jvp [n] (is: [n]i64) (vs: [n]f64) =
   tabulate n (\i -> jvp (f is) vs (replicate n 0 with [i] = 1))
+  |> transpose
+
+entry f_jvp_vec [n] (is: [n]i64) (vs: [n]f64) =
+  let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
+  in jvp_vec (f is) vs seeds
   |> transpose

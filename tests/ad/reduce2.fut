@@ -1,7 +1,7 @@
 -- Result of one reduction is used free in a map.
 -- ==
 -- tags { no_ispc autodiff }
--- entry: fwd rev
+-- entry: fwd rev fwd_vec
 -- input { [3f64, 1f64, 5f64] } output { [-1.000000f64, -1.000000f64, -1.000000f64] }
 
 def sumBy 'a (f: a -> f64) (xs: []a) : f64 = map f xs |> f64.sum
@@ -14,3 +14,6 @@ def f (arr: []f64) =
 entry fwd x = map (jvp f x) [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 entry rev x = vjp f x 1f64
+
+entry fwd_vec x =
+  jvp_vec f x [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
