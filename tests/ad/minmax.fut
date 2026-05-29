@@ -5,7 +5,7 @@
 -- output { [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 --          [0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0]
 --        }
--- structure { /Screma 2 }
+-- structure { /Screma 3 }
 
 def f xs =
   let ys = map f64.abs xs

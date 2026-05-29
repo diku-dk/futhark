@@ -5,7 +5,7 @@
 -- output { [0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0] }
 -- input { [1.0, 1.0] }
 -- output { [1.0, 0.0] }
--- structure { /Screma 2 }
+-- structure { /Screma 3 }
 
 def f = map f64.abs >-> f64.maximum
 
