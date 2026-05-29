@@ -791,10 +791,10 @@ simplifyKnownIterationSOAC _ pat aux op
   | Just (Screma w arrs form) <- asSOAC op,
     Constant (IntValue (Int64Value k)) <- w,
     "unroll" `inAttrs` stmAuxAttrs aux =
-      -- We unroll maps in a more direct way, and pass everything else on to
-      -- general sequentialisation.
+      -- We unroll maps over non-accumulators in a more direct way, and pass
+      -- everything else on to general sequentialisation.
       case isMapSOAC form of
-        Just map_lam -> Simplify $ do
+        Just map_lam | not $ any isAcc $ lambdaReturnType map_lam -> Simplify $ do
           arrs_elems <- fmap transpose . forM [0 .. k - 1] $ \i -> do
             map_lam' <- renameLambda map_lam
             eLambda map_lam' $ map (`eIndex` [eSubExp (constant i)]) arrs
