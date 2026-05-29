@@ -641,6 +641,39 @@ revVJP scope shape attrs (Lambda params ts body) = do
 -- accumulator-inputs in the primal code as we do free variables, and
 -- create accumulators for them in the return sweep.
 --
+-- # Vectorised WithAcc
+--
+-- When WithAcc occurs inside a Map (or any vectorised context), the
+-- accumulator element types gain extra leading "vectorised" dimensions
+-- corresponding to the enclosing map widths.  For example, if the
+-- primal type inside a map of width @w@ is @acc(c, [n], {f64})@,
+-- the adjoint is @[w][n]f64@ -- but the internal accumulator layout
+-- expects shape @[n][w]f64@ (the accumulator shape comes first,
+-- then the vectorised dimensions, then element dimensions).
+--
+-- This means we must transpose accumulator adjoints when entering and
+-- leaving the return-sweep WithAcc:
+--
+-- * On entry: transpose result adjoints from @[vec...][shape...]elem@
+--   to @[shape...][vec...]elem@ so they can serve as initial values
+--   for the accumulators.
+--
+-- * On exit: transpose the produced arrays back from
+--   @[shape...][vec...]elem@ to @[vec...][shape...]elem@ to match
+--   the expected adjoint layout.
+--
+-- Additionally, the accumulator parameter types in the lambda (and
+-- any Acc-typed pattern elements or inner lambda parameters referring
+-- to the same certificates) must be updated to reflect the vectorised
+-- element types *before* differentiation.  This ensures that
+-- @lookupAdj@ on accumulator variables inside the lambda produces
+-- adjoints with the correct vectorised type.
+--
+-- The UpdateAcc case is simpler under vectorisation: because the
+-- accumulator adjoint already has the vectorised dimensions folded
+-- into its element type, a plain index into the adjoint at the
+-- update indices directly yields the correctly-shaped contribution.
+--
 -- # Consumption
 --
 -- A minor problem is that our usual way of handling consumption (Note
