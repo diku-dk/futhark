@@ -206,13 +206,16 @@ diffBasicOp pat aux e m =
     Update safety arr slice v -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
-        v_adj <- letExp "update_val_adj" $ BasicOp $ Index pat_adj slice
+        adj_shape <- askShape
+        let adj_slice = Slice $ map sliceDim (shapeDims adj_shape) ++ unSlice slice
+        v_adj <- letExp "update_val_adj" $ BasicOp $ Index pat_adj adj_slice
         v_adj_copy <- copyIfArray v_adj
         updateSubExpAdj v v_adj_copy
-        zeroes <- letSubExp "update_zero" . zeroExp =<< subExpType v
+        v_adj_t <- lookupType v_adj
+        zeroes <- letSubExp "update_zero" $ zeroExp v_adj_t
         void $
           updateAdj arr
-            =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj slice zeroes)
+            =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj adj_slice zeroes)
     -- See Note [Adjoints of accumulators]
     UpdateAcc safety _ is vs -> do
       addStm $ Let pat aux $ BasicOp e
