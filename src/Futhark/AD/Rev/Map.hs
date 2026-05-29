@@ -176,8 +176,8 @@ vjpMap ops res_adjs _ w map_lam as
 
       zipWithM_ forRes [0 ..] res_ivs
   where
-    isSparse (AdjSparse (Sparse shape _ ivs)) = do
-      guard $ shapeDims shape == [w]
+    isSparse (AdjSparse (Sparse shape _ vd ivs)) = do
+      guard $ drop vd (shapeDims shape) == [w]
       Just ivs
     isSparse _ =
       Nothing
