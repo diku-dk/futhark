@@ -222,18 +222,9 @@ diffBasicOp pat aux e m =
       m
       pat_adjs <- mapM lookupAdjVal (patNames pat)
       returnSweepCode $ do
-        adj_shape <- askShape
         forM_ (zip pat_adjs vs) $ \(adj, v) -> do
           adj_t <- lookupType adj
-          let adj_slice =
-                fullSlice adj_t $ map sliceDim (shapeDims adj_shape) ++ map DimFix is
-              index_adj = pure $ BasicOp $ Index adj adj_slice
-              -- The shape to check bounds against is the non-vectorised part.
-              primal_shape = Shape $ drop (shapeRank adj_shape) $ shapeDims $ arrayShape adj_t
-              -- Zero type: vectorised dims + remaining dims after indexing.
-              zero_t =
-                stripArray (shapeRank adj_shape + length is) adj_t
-                  `arrayOfShape` adj_shape
+          let index_adj = pure $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
           adj_i <-
             letExp "updateacc_val_adj" =<< case safety of
               Unsafe ->
@@ -242,9 +233,9 @@ diffBasicOp pat aux e m =
                 -- The primal UpdateAcc may be out-of-bounds, in which case
                 -- indexing the adjoint is dangerous.
                 eIf
-                  (eShapeInBounds primal_shape (map eSubExp is))
+                  (eShapeInBounds (arrayShape adj_t) (map eSubExp is))
                   (eBody [index_adj])
-                  (eBody [pure $ zeroExp zero_t])
+                  (eBody [pure $ zeroExp $ stripArray (length is) adj_t])
           updateSubExpAdj v adj_i
     --
     UserParam {} ->
@@ -346,26 +337,155 @@ diffStm (Let pat aux loop@Loop {}) m =
 diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
   addStm stm
   m
-  returnSweepCode $ locallyNonvectorised (stm, patNames pat) $ do
+  returnSweepCode $ do
+    adj_shape <- askShape
     adjs <- mapM lookupAdj $ patNames pat
+    -- Transpose the accumulator result adjoints from [vec...][shape...]elem
+    -- to [shape...][vec...]elem, matching the internal accumulator layout.
+    adjs' <- transposeAdjs adj_shape adjs
     lam' <- renameLambda lam
-    free_vars <- filterM isActive $ namesToList $ freeIn lam'
+    -- Update the lambda's accumulator parameter types to reflect vectorised
+    -- element types BEFORE differentiation, so that lookupAdj on Acc variables
+    -- inside the lambda gives the correct vectorised adjoint type.
+    let lam'_vec = updateAccParamTypes adj_shape lam'
+    free_vars <- filterM isActive $ namesToList $ freeIn lam'_vec
     free_accs <- filterM (fmap isAcc . lookupType) free_vars
     let free_vars' = free_vars \\ free_accs
-    lam'' <- diffLambda' adjs free_vars' lam'
+    lam'' <- diffLambda' adjs' free_vars' lam'_vec
     (inputs_zeroes, inputs') <-
-      unzip <$> zipWithM renameInputLambda (chunks lengths adjs) inputs
+      unzip <$> zipWithM (renameInputLambda adj_shape) (chunks lengths adjs) inputs
     let certs = map paramName $ take (length inputs) $ lambdaParams lam''
-    free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' $ zeroOutUpdates (zip certs inputs_zeroes) lam''
-    zipWithM_ insAdj (arrs <> free_vars') free_adjs
+    raw_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' $ zeroOutUpdates (zip certs inputs_zeroes) lam''
+    -- The accumulator results have shape [shape...][vec...]elem. Transpose
+    -- back to [vec...][shape...]elem for the adjoint.
+    let n_arrs = sum lengths
+        (arr_adjs, free_adjs) = splitAt n_arrs raw_adjs
+    arr_adjs' <- zipWithM (transposeAccResult adj_shape) (map (\(s, _, _) -> s) inputs) arr_adjs
+    zipWithM_ insAdj arrs arr_adjs'
+    zipWithM_ insAdj free_vars' free_adjs
   where
     lengths = map (\(_, as, _) -> length as) inputs
     arrs = concatMap (\(_, as, _) -> as) inputs
-    renameInputLambda as_adj (shape, as, _) = do
-      nes_ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) as
-      zeroes <- mapM (zeroArray mempty) nes_ts
+
+    -- Transpose the accumulator-related adjoints from [vec...][shape...]elem
+    -- to [shape...][vec...]elem. Non-accumulator adjs are left unchanged.
+    transposeAdjs :: Shape -> [Adj] -> ADM [Adj]
+    transposeAdjs adj_sh adjs
+      | adj_sh == mempty = pure adjs
+      | otherwise = do
+          let n_arrs = sum lengths
+              (acc_adjs, other_adjs) = splitAt n_arrs adjs
+              shapes = concatMap (\(s, as, _) -> replicate (length as) s) inputs
+          acc_adjs' <- zipWithM (transposeAdj adj_sh) shapes acc_adjs
+          pure $ acc_adjs' ++ other_adjs
+
+    transposeAdj :: Shape -> Shape -> Adj -> ADM Adj
+    transposeAdj adj_sh shape adj = do
+      v <- adjVal adj
+      v' <- vecToInner adj_sh shape v
+      pure $ AdjVal (Var v')
+
+    -- Transpose [vec...][shape...][elem...] to [shape...][vec...][elem...]
+    vecToInner :: Shape -> Shape -> VName -> ADM VName
+    vecToInner adj_sh shape v
+      | adj_sh == mempty = pure v
+      | otherwise = do
+          v_t <- lookupType v
+          let r = shapeRank adj_sh
+              s = shapeRank shape
+              total = arrayRank v_t
+              perm = [r .. r + s - 1] ++ [0 .. r - 1] ++ [r + s .. total - 1]
+          letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
+
+    -- Transpose [shape...][vec...][elem...] to [vec...][shape...][elem...]
+    transposeAccResult :: Shape -> Shape -> VName -> ADM VName
+    transposeAccResult adj_sh shape v
+      | adj_sh == mempty = pure v
+      | otherwise = do
+          v_t <- lookupType v
+          let r = shapeRank adj_sh
+              s = shapeRank shape
+              total = arrayRank v_t
+              perm = [s .. s + r - 1] ++ [0 .. s - 1] ++ [s + r .. total - 1]
+          letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
+
+    renameInputLambda adj_sh as_adj (shape, as, _) = do
+      -- Compute element types with vectorised dimensions included.
+      orig_nes_ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) as
+      let vec_nes_ts = map (`arrayOfShape` adj_sh) orig_nes_ts
+      zeroes <- mapM (zeroArray mempty) vec_nes_ts
+      -- Transpose adjoints from [vec...][shape...]elem to [shape...][vec...]elem
+      -- so they match the accumulator layout.
       as' <- mapM adjVal as_adj
-      pure (map Var zeroes, (shape, as', Nothing))
+      as'' <- mapM (vecToInner adj_sh shape) as'
+      pure (map Var zeroes, (shape, as'', Nothing))
+
+    -- Update accumulator parameter types in the lambda to include vectorised
+    -- element types. Also updates all Acc-typed pattern elements and inner
+    -- lambda parameters that reference the same accumulator certs.
+    updateAccParamTypes :: Shape -> Lambda SOACS -> Lambda SOACS
+    updateAccParamTypes adj_sh l
+      | adj_sh == mempty = l
+      | otherwise =
+          let n_cert = length inputs
+              (cert_ps, rest_ps) = splitAt n_cert (lambdaParams l)
+              (acc_ps, other_ps) = splitAt n_cert rest_ps
+              acc_ps' = map (updateParam adj_sh cert_names) acc_ps
+              cert_names = map paramName cert_ps
+              body' = updateBody adj_sh cert_names (lambdaBody l)
+              ret' = map (updateAccType adj_sh cert_names) (lambdaReturnType l)
+           in l { lambdaParams = cert_ps ++ acc_ps' ++ other_ps,
+                  lambdaReturnType = ret',
+                  lambdaBody = body'
+                }
+
+    updateParam :: Shape -> [VName] -> Param Type -> Param Type
+    updateParam adj_sh certs p =
+      p {paramDec = updateAccType adj_sh certs (paramDec p)}
+
+    updateAccType :: Shape -> [VName] -> Type -> Type
+    updateAccType adj_sh certs (Acc cert acc_shape ts u)
+      | cert `elem` certs =
+          Acc cert acc_shape (map (`arrayOfShape` adj_sh) ts) u
+    updateAccType _ _ t = t
+
+    updateBody :: Shape -> [VName] -> Body SOACS -> Body SOACS
+    updateBody adj_sh certs body =
+      body {bodyStms = fmap (updateStm adj_sh certs) (bodyStms body)}
+
+    updateStm :: Shape -> [VName] -> Stm SOACS -> Stm SOACS
+    updateStm adj_sh certs (Let pat aux e) =
+      Let (updatePat adj_sh certs pat) aux (updateExp adj_sh certs e)
+
+    updatePat :: Shape -> [VName] -> Pat Type -> Pat Type
+    updatePat adj_sh certs (Pat pes) =
+      Pat $ map (\pe -> pe {patElemDec = updateAccType adj_sh certs (patElemDec pe)}) pes
+
+    updateExp :: Shape -> [VName] -> Exp SOACS -> Exp SOACS
+    updateExp adj_sh certs = runIdentity . mapExpM mapper
+      where
+        mapper =
+          (identityMapper :: (Monad m) => Mapper SOACS SOACS m)
+            { mapOnBody = \_ b -> pure $ updateBody adj_sh certs b,
+              mapOnOp = pure . updateSOAC adj_sh certs
+            }
+
+    updateSOAC :: Shape -> [VName] -> SOAC SOACS -> SOAC SOACS
+    updateSOAC adj_sh certs = runIdentity . mapSOACM mapper
+      where
+        mapper =
+          identitySOACMapper
+            { mapOnSOACLambda = pure . updateLambda adj_sh certs
+            }
+
+    updateLambda :: Shape -> [VName] -> Lambda SOACS -> Lambda SOACS
+    updateLambda adj_sh certs l =
+      l
+        { lambdaParams = map (updateParam adj_sh certs) (lambdaParams l),
+          lambdaReturnType = map (updateAccType adj_sh certs) (lambdaReturnType l),
+          lambdaBody = updateBody adj_sh certs (lambdaBody l)
+        }
+
     diffLambda' res_adjs get_adjs_for (Lambda params ts body) = do
       localScope (scopeOfLParams params) $ do
         Body () stms res <- diffBody res_adjs get_adjs_for body
