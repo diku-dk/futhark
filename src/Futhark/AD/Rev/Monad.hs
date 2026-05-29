@@ -426,12 +426,25 @@ updateAdjIndex :: VName -> (InBounds, SubExp) -> SubExp -> ADM ()
 updateAdjIndex v (check, i) se = do
   maybeAdj <- gets $ M.lookup v . stateAdjs
   t <- lookupType v
+  adj_shape <- askShape
   let iv = (check, i, se)
   case maybeAdj of
-    Nothing -> do
-      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
-    Just AdjZero {} ->
-      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
+    Nothing
+      | adj_shape == mempty ->
+          setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
+      | otherwise -> do
+          -- When vectorised, we cannot use the sparse representation
+          -- because the value has extra vector dimensions.
+          adj <- adjVal $ AdjZero (adj_shape <> arrayShape t) (elemType t)
+          setAdj v $ AdjVal (Var adj)
+          updateAdjIndex v (check, i) se
+    Just (AdjZero {})
+      | adj_shape == mempty ->
+          setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
+      | otherwise -> do
+          adj <- adjVal $ AdjZero (adj_shape <> arrayShape t) (elemType t)
+          setAdj v $ AdjVal (Var adj)
+          updateAdjIndex v (check, i) se
     Just (AdjSparse (Sparse shape pt ivs)) ->
       setAdj v $ AdjSparse $ Sparse shape pt $ iv : ivs
     Just adj@AdjVal {} -> do
@@ -609,11 +622,10 @@ locallyNonvectorised e m = do
   where
     e_free = namesToList $ freeIn e
     knownAdjoint v = do
-      maybeAdj <- gets $ M.lookup v . stateAdjs
-      pure $ case maybeAdj of
-        Nothing -> False
-        Just (AdjZero {}) -> False
-        Just _ -> True
+      v_adj <- lookupAdj v
+      pure $ case v_adj of
+        AdjZero {} -> False
+        _ -> True
 
 -- Note [Consumption]
 --
