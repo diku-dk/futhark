@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The `hip` backend previously simulated `f16` operations with `f32`, but now it
+  uses the hardware support for `f16`, similarly to the CUDA backend.
+  Implemented by Jérôme Wagner. (#2470)
+
 ### Removed
 
 ### Changed
