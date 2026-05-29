@@ -111,10 +111,15 @@ data InBounds
 -- | A symbolic representation of an array that is all zeroes, except
 -- at certain indexes.
 data Sparse = Sparse
-  { -- | The shape of the array.
+  { -- | The full shape of the array (including any vector dimensions).
     sparseShape :: Shape,
     -- | Element type of the array.
     sparseType :: PrimType,
+    -- | Number of leading dimensions that are \"vector\" dimensions,
+    -- due to vectorised AD.  These are not indexed by the sparse
+    -- index, but are present in the values.  When zero, this is the
+    -- ordinary non-vectorised case.
+    sparseVecDims :: Int,
     -- | Locations and values of nonzero values.  Indexes may be
     -- negative, in which case the value is ignored (unless
     -- 'AssumeBounds' is used).
@@ -147,14 +152,15 @@ zeroArray shape t
           Replicate shape zero
 
 sparseArray :: (MonadBuilder m, Rep m ~ SOACS) => Sparse -> m VName
-sparseArray (Sparse shape t ivs) = do
+sparseArray (Sparse shape t vec_dims ivs) = do
   flip (foldM f) ivs =<< zeroArray shape (Prim t)
   where
     arr_t = Prim t `arrayOfShape` shape
+    vec_slice = map sliceDim $ take vec_dims $ shapeDims shape
     f arr (check, i, se) = do
       let stm s =
             letExp "sparse" . BasicOp $
-              Update s arr (fullSlice arr_t [DimFix i]) se
+              Update s arr (fullSlice arr_t (vec_slice ++ [DimFix i])) se
       case check of
         AssumeBounds -> stm Unsafe
         CheckBounds _ -> stm Safe
@@ -177,8 +183,8 @@ unitAdjOfType t = AdjVal <$> letSubExp "adj_unit" (oneExp t)
 adjRep :: Adj -> ([SubExp], [SubExp] -> Adj)
 adjRep (AdjVal se) = ([se], \[se'] -> AdjVal se')
 adjRep (AdjZero shape pt) = ([], \[] -> AdjZero shape pt)
-adjRep (AdjSparse (Sparse shape pt ivs)) =
-  (concatMap ivRep ivs, AdjSparse . Sparse shape pt . repIvs ivs)
+adjRep (AdjSparse (Sparse shape pt vd ivs)) =
+  (concatMap ivRep ivs, AdjSparse . Sparse shape pt vd . repIvs ivs)
   where
     ivRep (_, i, v) = [i, v]
     repIvs ((check, _, _) : ivs') (i : v : ses) =
@@ -428,25 +434,15 @@ updateAdjIndex v (check, i) se = do
   t <- lookupType v
   adj_shape <- askShape
   let iv = (check, i, se)
+      vec_dims = shapeRank adj_shape
+      full_shape = adj_shape <> arrayShape t
   case maybeAdj of
-    Nothing
-      | adj_shape == mempty ->
-          setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
-      | otherwise -> do
-          -- When vectorised, we cannot use the sparse representation
-          -- because the value has extra vector dimensions.
-          adj <- adjVal $ AdjZero (adj_shape <> arrayShape t) (elemType t)
-          setAdj v $ AdjVal (Var adj)
-          updateAdjIndex v (check, i) se
-    Just (AdjZero {})
-      | adj_shape == mempty ->
-          setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
-      | otherwise -> do
-          adj <- adjVal $ AdjZero (adj_shape <> arrayShape t) (elemType t)
-          setAdj v $ AdjVal (Var adj)
-          updateAdjIndex v (check, i) se
-    Just (AdjSparse (Sparse shape pt ivs)) ->
-      setAdj v $ AdjSparse $ Sparse shape pt $ iv : ivs
+    Nothing ->
+      setAdj v $ AdjSparse $ Sparse full_shape (elemType t) vec_dims [iv]
+    Just (AdjZero {}) ->
+      setAdj v $ AdjSparse $ Sparse full_shape (elemType t) vec_dims [iv]
+    Just (AdjSparse (Sparse shape pt vd ivs)) ->
+      setAdj v $ AdjSparse $ Sparse shape pt vd $ iv : ivs
     Just adj@AdjVal {} -> do
       v_adj <- adjVal adj
       v_adj_t <- lookupType v_adj
