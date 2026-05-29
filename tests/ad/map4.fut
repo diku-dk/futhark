@@ -1,7 +1,7 @@
 -- An array is both a 'map' input and a free variable in the lambda.
 -- ==
 -- tags { autodiff }
--- entry: fwd_J rev_J
+-- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input { [1,2,3] }
 -- output {
 -- [[[2, 0, 0], [1, 1, 0], [1, 0, 1]], [[1, 1, 0], [0, 2, 0], [0, 1, 1]], [[1, 0, 1], [0, 1, 1], [0, 0, 2]]]
@@ -24,3 +24,15 @@ entry fwd_J [n] (xs: [n]i32) =
 
 entry rev_J [n] (xs: [n]i32) =
   tabulate_2d n n (\i j -> vjp f xs (onehot_2d n n (i, j)))
+
+entry fwd_vec_J [n] (xs: [n]i32) =
+  let seeds = tabulate n (\i -> onehot n i)
+  in jvp_vec f xs seeds
+  |> map transpose
+  |> transpose
+  |> map transpose
+
+entry rev_vec_J [n] (xs: [n]i32) =
+  let seeds = tabulate (n * n) (\k -> onehot_2d n n (k / n, k % n))
+  in vjp_vec f xs seeds
+  |> unflatten

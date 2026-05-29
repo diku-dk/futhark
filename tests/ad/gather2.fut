@@ -1,6 +1,6 @@
 -- ==
 -- tags { autodiff }
--- entry: fwd_J rev_J
+-- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input
 -- {
 --   [1.0,2.0,3.0,4.0]
@@ -32,3 +32,14 @@ def onehot_2d n m p : [n][m]f64 =
 
 entry rev_J [k] [n] [m] (xs: [k]f64) (iss: [n][m]i64) =
   tabulate_2d n m (\i j -> vjp (`mapgather` iss) xs (onehot_2d n m (i, j)))
+
+entry fwd_vec_J [k] [n] [m] (xs: [k]f64) (iss: [n][m]i64) =
+  let seeds = tabulate k (\i -> onehot k i)
+  in jvp_vec (`mapgather` iss) xs seeds
+  |> transpose
+  |> map transpose
+
+entry rev_vec_J [k] [n] [m] (xs: [k]f64) (iss: [n][m]i64) =
+  let seeds = tabulate (n * m) (\p -> onehot_2d n m (p / m, p % m))
+  in vjp_vec (`mapgather` iss) xs seeds
+  |> unflatten

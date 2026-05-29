@@ -1,6 +1,6 @@
 -- ==
 -- tags { autodiff }
--- entry: fwd rev
+-- entry: fwd rev fwd_vec rev_vec
 -- input { [1f32, 2f32, 3f32, 4f32] } output { [[48f32, 12f32, 8f32, 6f32], [48f32, 48f32, 16f32, 12f32], [72f32, 36f32, 48f32, 18f32], [96f32, 48f32, 32f32, 48f32]] }
 
 def fun [n] (as: [n]f32) =
@@ -13,3 +13,11 @@ entry fwd [n] (as: [n]f32) =
 
 entry rev [n] (as: [n]f32) =
   tabulate n (\i -> vjp fun as (replicate n 0 with [i] = 1))
+
+entry fwd_vec [n] (as: [n]f32) =
+  let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
+  in jvp_vec fun as seeds |> transpose
+
+entry rev_vec [n] (as: [n]f32) =
+  let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
+  in vjp_vec fun as seeds

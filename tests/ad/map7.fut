@@ -2,7 +2,7 @@
 -- has active free variables.
 -- ==
 -- tags { autodiff }
--- entry: fwd_J rev_J
+-- entry: fwd_J rev_J fwd_vec_J
 -- input { [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0] }
 -- output { [0.0, 0.0, 0.0, 0.0, -4.0, 0.0, 0.0, 0.0] }
 
@@ -22,3 +22,7 @@ entry fwd_J (x: [8]f64) =
 
 entry rev_J (x: [8]f64) =
   vjp obj x 1
+
+entry fwd_vec_J (x: [8]f64) =
+  let seeds = tabulate 8 (\i -> replicate 8 0 with [i] = 1)
+  in jvp_vec obj x seeds
