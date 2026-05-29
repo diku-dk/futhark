@@ -75,6 +75,17 @@ mkF lam = do
     bodyBind $ lambdaBody lam_r
   pure (map paramName aps, lam')
 
+-- | If we are doing vectorised AD, then transpose the array to bring the vector
+-- shape outermost.
+transposeIfNeeded :: VName -> ADM VName
+transposeIfNeeded v = do
+  adj_shape <- askShape
+  if adj_shape == mempty
+    then pure v
+    else do
+      v_t <- lookupType v
+      letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v (auxPerm adj_shape v_t)
+
 diffReduce :: VjpOps -> [VName] -> SubExp -> [VName] -> Reduce SOACS -> ADM ()
 diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
@@ -84,15 +95,6 @@ diffReduce _ops [adj] w [a] red
           BasicOp (Replicate (Shape [w]) (Var adj))
       void $ updateAdj a adj_rep
   where
-    transposeIfNeeded v = do
-      adj_shape <- askShape
-      if adj_shape == mempty
-        then pure v
-        else do
-          v_t <- lookupType v
-          let perm = [1 .. shapeRank adj_shape] ++ [0] ++ [shapeRank adj_shape + 1 .. arrayRank v_t - 1]
-          letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
-
     isAdd FAdd {} = True
     isAdd Add {} = True
     isAdd _ = False
@@ -131,14 +133,6 @@ diffReduce ops pat_adj w as red = do
 
   zipWithM_ updateAdj as =<< mapM transposeIfNeeded as_adj
   where
-    transposeIfNeeded v = do
-      adj_shape <- askShape
-      if adj_shape == mempty
-        then pure v
-        else do
-          v_t <- lookupType v
-          letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v (auxPerm adj_shape v_t)
-
     renameRed (Reduce comm lam nes) =
       Reduce comm <$> renameLambda lam <*> pure nes
 
@@ -353,11 +347,3 @@ diffMulReduce _ops x aux w mul ne as m = do
     getDiv (IntType t) = SDiv t Unsafe
     getDiv (FloatType t) = FDiv t
     getDiv _ = error "In getDiv, Reduce.hs: input not supported"
-
-    transposeIfNeeded v = do
-      adj_shape <- askShape
-      if adj_shape == mempty
-        then pure v
-        else do
-          v_t <- lookupType v
-          letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v (auxPerm adj_shape v_t)
