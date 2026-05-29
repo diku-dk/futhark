@@ -222,9 +222,18 @@ diffBasicOp pat aux e m =
       m
       pat_adjs <- mapM lookupAdjVal (patNames pat)
       returnSweepCode $ do
+        adj_shape <- askShape
         forM_ (zip pat_adjs vs) $ \(adj, v) -> do
           adj_t <- lookupType adj
-          let index_adj = pure $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
+          let adj_slice =
+                fullSlice adj_t $ map sliceDim (shapeDims adj_shape) ++ map DimFix is
+              index_adj = pure $ BasicOp $ Index adj adj_slice
+              -- The shape to check bounds against is the non-vectorised part.
+              primal_shape = Shape $ drop (shapeRank adj_shape) $ shapeDims $ arrayShape adj_t
+              -- Zero type: vectorised dims + remaining dims after indexing.
+              zero_t =
+                stripArray (shapeRank adj_shape + length is) adj_t
+                  `arrayOfShape` adj_shape
           adj_i <-
             letExp "updateacc_val_adj" =<< case safety of
               Unsafe ->
@@ -233,9 +242,9 @@ diffBasicOp pat aux e m =
                 -- The primal UpdateAcc may be out-of-bounds, in which case
                 -- indexing the adjoint is dangerous.
                 eIf
-                  (eShapeInBounds (arrayShape adj_t) (map eSubExp is))
+                  (eShapeInBounds primal_shape (map eSubExp is))
                   (eBody [index_adj])
-                  (eBody [pure $ zeroExp $ stripArray (length is) adj_t])
+                  (eBody [pure $ zeroExp zero_t])
           updateSubExpAdj v adj_i
     --
     UserParam {} ->
@@ -337,7 +346,7 @@ diffStm (Let pat aux loop@Loop {}) m =
 diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
   addStm stm
   m
-  returnSweepCode $ do
+  returnSweepCode $ locallyNonvectorised (stm, patNames pat) $ do
     adjs <- mapM lookupAdj $ patNames pat
     lam' <- renameLambda lam
     free_vars <- filterM isActive $ namesToList $ freeIn lam'
