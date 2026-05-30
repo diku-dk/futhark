@@ -149,6 +149,9 @@ fusible inp_p form_p out_p inp_c form_c out_c = do
       is_fusible =
         fuseIsVarish inp_c out_p
           && not (forbidden_c `namesIntersect` forbidden_p)
+          && all
+            (`notElem` mapMaybe SOAC.isVarishInput inp_c)
+            (take num_red_p out_p)
   unless is_fusible (fail "Scremas are not fusible.")
   where
     pre_pars_c = oneName . paramName <$> lambdaParams pre_c
@@ -165,6 +168,7 @@ fusible inp_p form_p out_p inp_c form_c out_c = do
     post_scan_pars_p = take num_scan_p $ paramName <$> lambdaParams post_p
     num_scan_c = scanResults $ scremaScans form_c
     num_red_c = redResults $ scremaReduces form_c
+    num_red_p = redResults $ scremaReduces form_p
     num_scan_p = scanResults $ scremaScans form_p
 
 -- | Given two scremas that are fusible, fuse them into a super
