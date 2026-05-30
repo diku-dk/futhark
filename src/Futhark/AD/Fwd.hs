@@ -18,7 +18,7 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Tools
-import Futhark.Util (interleave)
+import Futhark.Util (interleave, splitAt3, unterleave)
 
 zeroExp :: Type -> Exp SOACS
 zeroExp (Prim pt) =
@@ -34,8 +34,7 @@ tanType (Acc acc ispace ts u) = do
   pure $ Acc acc_tan (tan_shape <> ispace) ts u
 tanType t = do
   shape <- askShape
-  pure $
-    arrayOf (Prim (elemType t)) (shape `prependShape` arrayShape t) u
+  pure $ arrayOf (Prim (elemType t)) (shape `prependShape` arrayShape t) u
   where
     u = case t of
       Array _ _ u' -> u'
@@ -386,10 +385,42 @@ fwdWithAccLambda inputs (Lambda params _ body) = do
       ts <- map (stripArray (shapeRank shape)) <$> mapM lookupType arrs
       newParam "acc_p_tan" $ Acc c (tan_shape <> shape) ts NoUniqueness
 
-fwdStreamLambda :: Lambda SOACS -> ADM (Lambda SOACS)
-fwdStreamLambda (Lambda params _ body) = do
-  params' <- (take 1 params ++) <$> bundleNewList (drop 1 params)
-  mkLambda params' $ bodyBind =<< fwdBody body
+fwdStreamLambda :: Int -> Lambda SOACS -> ADM (Lambda SOACS)
+fwdStreamLambda num_accs (Lambda params _ body) = do
+  tan_shape <- askShape
+  let (chunk_params, acc_params, arr_params) = splitAt3 1 num_accs params
+  acc_params' <- bundleNewList acc_params
+  (arr_params', arr_params'_tan) <- mapAndUnzipM onArrParam arr_params
+  let params' =
+        chunk_params <> acc_params' <> interleave arr_params' arr_params'_tan
+  mkLambda params' $ do
+    zipWithM_ (trArrParamTan tan_shape) arr_params' arr_params'_tan
+    (acc_res, map_res) <- fmap (splitAt (num_accs * 2)) . bodyBind =<< fwdBody body
+    let (map_res_primal, map_res_tan) = unterleave map_res
+    map_res_tan' <- mapM (trMapResTan tan_shape) map_res_tan
+    pure $ acc_res <> interleave map_res_primal map_res_tan'
+  where
+    -- Array parameters need to be treated specially as the chunk parameter
+    -- must always be outermost.
+    onArrParam p = do
+      shape <- askShape
+      (p', p_tan) <- bundleNew p
+      let perm = auxPerm shape $ paramType p_tan
+      pure (p', p_tan {paramDec = rearrangeType perm (paramType p_tan)})
+
+    -- Put the tangent shape back in the outermost position.
+    trArrParamTan tan_shape p p_tan = do
+      let perm = rearrangeInverse $ auxPerm tan_shape $ paramType p_tan
+      v <-
+        letExp (baseName (paramName p_tan)) . BasicOp $
+          Rearrange (paramName p_tan) perm
+      insertTan (paramName p) v
+
+    -- Put the chunk size back in the outermost position.
+    trMapResTan tan_shape (SubExpRes cs ~(Var v)) = do
+      v_t <- lookupType v
+      let perm = auxPerm tan_shape v_t
+      fmap varRes . certifying cs $ letExp (baseName v) . BasicOp $ Rearrange v perm
 
 vecPerm :: Shape -> Type -> [Int]
 vecPerm = auxPerm
@@ -461,13 +492,13 @@ fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds post_lam)) = do
             redLambda = op',
             redNeutral = redNeutral red `interleave` neutral_tans
           }
-fwdSOAC pat aux (Stream size xs nes lam) = do
+fwdSOAC pat aux (Stream size xs accs lam) = do
   pat' <- bundleNewPat pat
-  lam' <- fwdStreamLambda lam
+  lam' <- fwdStreamLambda (length accs) lam
   xs' <- soacInputsWithTangents xs
-  nes_tan <- mapM (letSubExp "zero" . zeroExp <=< tanType <=< subExpType) nes
-  let nes' = interleave nes nes_tan
-  addStm $ Let pat' aux $ Op $ Stream size xs' nes' lam'
+  accs_tan <- mapM (letSubExp "zero" . zeroExp <=< tanType <=< subExpType) accs
+  let accs' = interleave accs accs_tan
+  addStm $ Let pat' aux $ Op $ Stream size xs' accs' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
   -- TODO: this is probably not very efficient in the vectorised case as we end
   -- up with a dreadful update operator that involves arrays.
@@ -617,3 +648,11 @@ fwdJVP scope shape attrs (Lambda params _ body) =
     params_tan <- mapM newTan params
     mkLambda (params <> params_tan) $
       bodyBind =<< fwdBodyTansLast body
+
+-- Note [Forward-Mode vectorised AD]
+--
+-- An primal variable of type 't' has a tangent of type '[tan_shape]t', where
+-- 'tan_shape' is the vector shape (which may be empty in the non-vectorised
+-- case). This requires some care for SOACs, which always map across the
+-- outermost dimension: basically we have to transpose the inputs and the
+-- outputs.
