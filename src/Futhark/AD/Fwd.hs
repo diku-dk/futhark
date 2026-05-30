@@ -518,12 +518,9 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
       mapM_ fwdStm stms
       let (res_is, res_vs) = splitAt n_indices res
       (res_is ++) <$> bundleTangents res_vs
-    fwdHistBucket l@(Lambda params ret body) =
-      let (r_is, r_vs) = splitAt n_indices ret
-       in Lambda
-            <$> bundleNewList params
-            <*> ((r_is ++) <$> bundleTangents r_vs)
-            <*> inScopeOf l (fwdBodyHist body)
+    fwdHistBucket (Lambda params _ body) = do
+      params' <- bundleNewList params
+      mkLambda params' $ bodyBind =<< fwdBodyHist body
 
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
     fwdHist (HistOp shape rf dest nes op) = do
