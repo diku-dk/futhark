@@ -435,7 +435,7 @@ diffScanVec ::
   [VName] ->
   ADM () ->
   ADM ()
-diffScanVec ops ys aux w lam ne as m = locallyNonvectorised (ys, lam, as) $ do
+diffScanVec ops ys aux w lam ne as m = do
   stmts <- collectStms_ $ do
     rank <- arrayRank <$> lookupType (head as)
     let rear = [1, 0] ++ drop 2 [0 .. rank - 1]
