@@ -1033,13 +1033,12 @@ checkExp (Apply fname args rettype_annot _) = do
         </> indent 2 (pretty $ map fst rettype_annot)
   consumeArgs paramtypes argflows
 checkExp (Loop merge form loopbody) = do
-  let (mergepat, mergeexps) = unzip merge
-  mergeargs <- mapM checkArg mergeexps
+  let mergepat = map fst merge
 
   checkLoopArgs
 
   binding (scopeOfLoopForm form) $ do
-    form_consumable <- checkForm mergeargs form
+    checkForm form
 
     let rettype = map paramDeclType mergepat
         consumable =
@@ -1047,7 +1046,6 @@ checkExp (Loop merge form loopbody) = do
           | param <- mergepat,
             unique $ paramDeclType param
           ]
-            ++ form_consumable
 
     context "Inside the loop body"
       $ checkFun'
@@ -1074,16 +1072,9 @@ checkExp (Loop merge form loopbody) = do
           map (`namesSubtract` bound_here)
             <$> mapM (subExpAliasesM . resSubExp) (bodyResult loopbody)
   where
-    checkForm mergeargs (ForLoop loopvar it boundexp) = do
-      iparam <- primFParam loopvar $ IntType it
-      let mergepat = map fst merge
-          funparams = iparam : mergepat
-          paramts = map paramDeclType funparams
-
-      boundarg <- checkArg boundexp
-      checkFuncall Nothing paramts $ boundarg : mergeargs
-      pure mempty
-    checkForm mergeargs (WhileLoop cond) = do
+    checkForm (ForLoop _ _ boundexp) =
+      void $ checkArg boundexp
+    checkForm (WhileLoop cond) = do
       case find ((== cond) . paramName . fst) merge of
         Just (condparam, _) ->
           unless (paramType condparam == Prim Bool) $
@@ -1096,11 +1087,6 @@ checkExp (Loop merge form loopbody) = do
         Nothing ->
           -- Implies infinite loop, but that's OK.
           pure ()
-      let mergepat = map fst merge
-          funparams = mergepat
-          paramts = map paramDeclType funparams
-      checkFuncall Nothing paramts mergeargs
-      pure mempty
 
     checkLoopArgs = do
       let (params, args) = unzip merge
@@ -1320,20 +1306,6 @@ matchExtReturns rettype res ts = do
 
   unless (rettype' == ts) problem
 
-validApply ::
-  (ArrayShape shape) =>
-  [TypeBase shape Uniqueness] ->
-  [TypeBase shape NoUniqueness] ->
-  Bool
-validApply expected got =
-  length got == length expected
-    && and
-      ( zipWith
-          subtypeOf
-          (map rankShaped got)
-          (map (fromDecl . rankShaped) expected)
-      )
-
 type Arg = (Type, Names)
 
 argType :: Arg -> Type
@@ -1362,7 +1334,7 @@ checkFuncall ::
   TypeM rep ()
 checkFuncall fname paramts args = do
   let argts = map argType args
-  unless (validApply paramts argts) $
+  unless (map fromDecl paramts == argts) $
     bad $
       ParameterMismatch fname (map fromDecl paramts) $
         map argType args
