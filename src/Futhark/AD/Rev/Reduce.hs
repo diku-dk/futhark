@@ -75,23 +75,12 @@ mkF lam = do
     bodyBind $ lambdaBody lam_r
   pure (map paramName aps, lam')
 
--- | If we are doing vectorised AD, then transpose the array to bring the vector
--- shape outermost.
-transposeIfNeeded :: VName -> ADM VName
-transposeIfNeeded v = do
-  adj_shape <- askShape
-  if adj_shape == mempty
-    then pure v
-    else do
-      v_t <- lookupType v
-      letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v (auxPerm adj_shape v_t)
-
 diffReduce :: VjpOps -> [VName] -> SubExp -> [VName] -> Reduce SOACS -> ADM ()
 diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isAdd op = do
       adj_rep <-
-        transposeIfNeeded <=< letExp (baseName adj <> "_rep") $
+        vecToInner <=< letExp (baseName adj <> "_rep") $
           BasicOp (Replicate (Shape [w]) (Var adj))
       void $ updateAdj a adj_rep
   where
@@ -131,7 +120,7 @@ diffReduce ops pat_adj w as red = do
   as_adj <-
     letTupExp "red_contribs" . Op . Screma w (ls ++ as ++ rs) =<< mapSOAC f_adj
 
-  zipWithM_ updateAdj as =<< mapM transposeIfNeeded as_adj
+  zipWithM_ updateAdj as =<< mapM vecToInner as_adj
   where
     renameRed (Reduce comm lam nes) =
       Reduce comm <$> renameLambda lam <*> pure nes
@@ -341,7 +330,7 @@ diffMulReduce _ops x aux w mul ne as m = do
 
   as_adjup <- letExp "prod_contrib" . Op . Screma w [as] =<< mapSOAC map_lam_rev
 
-  updateAdj as =<< transposeIfNeeded as_adjup
+  updateAdj as =<< vecToInner as_adjup
   where
     getDiv :: PrimType -> BinOp
     getDiv (IntType t) = SDiv t Unsafe

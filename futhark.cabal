@@ -118,6 +118,7 @@ library
       Futhark.AD.Fwd
       Futhark.AD.Shared
       Futhark.AD.Rev
+      Futhark.AD.Rev.Acc
       Futhark.AD.Rev.Loop
       Futhark.AD.Rev.Hist
       Futhark.AD.Rev.Map
