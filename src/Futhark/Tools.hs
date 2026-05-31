@@ -29,7 +29,7 @@ import Futhark.IR.SOACS.SOAC
 import Futhark.Util (mapAccumLM)
 
 splitScanOrRedomap ::
-  (Buildable rep, MonadFreshNames m) =>
+  (MonadFreshNames m) =>
   [PatElem Type] ->
   SubExp ->
   Lambda rep ->
