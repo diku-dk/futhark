@@ -11,7 +11,22 @@ class FutharkArray {
     // 'FutharkArrayImpl' as type for all array types.
     this.type_name = name;
     this.arr = arr;
-    this.shape = shape;
+    this.shape_data = shape;
+  }
+
+  validCheck() {
+    if (this.arr === undefined) {
+      throw new Error("Using freed memory");
+    }
+  }
+
+  futharkType() {
+    return this.type_name;
+  }
+
+  shape() {
+    this.validCheck();
+    return this.shape_data;
   }
 }
 
@@ -63,12 +78,33 @@ function make_array_class(fut, name) {
       return new FutharkArrayImpl(arr, shape);
     }
 
-    get_shape() { return this.shape; }
+    // get_shape() { return this.shape; }
+
+    async toTypedArray() {
+      return await this.values();
+    }
+
+    async toArray() {
+      const dims = this.shape();
+      const ta = await this.values();
+
+      return (function nest(offs, ds) {
+        const d0 = Number(ds[0]);
+
+        if (ds.length === 1) {
+          return Array.from(ta.subarray(offs, offs + d0));
+        } else {
+          const stride = Number(ds.slice(1).reduce((a, b) => a * b, 1n));
+          return Array.from(Array(d0), (_, i) => nest(offs + i * stride, ds.slice(1)));
+        }
+      })(0, dims);
+    }
 
     async values() {
-      futhark_assert(this.arr != undefined, "array already freed");
+      this.validCheck();
 
-      const flat_len = Number(this.shape.reduce((a, b) => a * b));
+      const shape = this.shape();
+      const flat_len = Number(shape.reduce((a, b) => a * b));
       const flat_size = flat_len * prim_info.size;
       const wasm_data = fut.malloc(flat_size);
 
@@ -89,6 +125,8 @@ function make_array_class(fut, name) {
     };
 
     free() {
+      this.validCheck();
+
       const free_fun = wasm_fun(type_info.ops.free);
       free_fun(fut.ctx, this.arr);
       this.arr = undefined;
@@ -129,6 +167,10 @@ function make_opaque_class(fut, name) {
 
 function make_entry_function(fut, name) {
   const entry_info = fut.manifest.entry_points[name];
+  const output_infos =
+    entry_info.outputs !== undefined
+      ? entry_info.outputs
+      : [entry_info.output];
 
   return async function(...inputs) {
     futhark_assert(inputs.length == entry_info.inputs.length,
@@ -160,7 +202,7 @@ function make_entry_function(fut, name) {
     }
 
     let out_ptrs = [];
-    for (let i = 0; i < entry_info.outputs.length; i++) {
+    for (let i = 0; i < output_infos.length; i++) {
       out_ptrs.push(fut.malloc(4));
     }
 
@@ -168,24 +210,24 @@ function make_entry_function(fut, name) {
       Array(1 + out_ptrs.length + real_inputs.length).fill('number'),
       [fut.ctx].concat(out_ptrs).concat(real_inputs), {async: true});
 
-    let outputs = [];
+    let results = [];
     for (let i = 0; i < out_ptrs.length; i++) {
-      const out_info = entry_info.outputs[i];
+      const out_info = output_infos[i];
       if (out_info.type in primInfos) {
         const prim_info = primInfos[out_info.type];
         const val = prim_info.get_heap(fut.m)[out_ptrs[i] / prim_info.size];
-        outputs.push(val);
+        results.push(val);
       }
       else if (out_info.type in fut.manifest.types) {
         const type_info = fut.manifest.types[out_info.type];
         if (type_info.kind == "array") {
           const array_type = fut.types[out_info.type];
           const val = array_type.from_native(fut.m.HEAP32[out_ptrs[i] / 4]);
-          outputs.push(val);
+          results.push(val);
         } else {
           const opaque_type = fut.types[out_info.type];
           const val = opaque_type.from_native(fut.m.HEAP32[out_ptrs[i] / 4]);
-          outputs.push(val);
+          results.push(val);
         }
       }
       else {
@@ -197,7 +239,7 @@ function make_entry_function(fut, name) {
       fut.free(ptr);
     }
 
-    return outputs;
+    return results.length === 1 ? results[0] : results;
   };
 }
 
