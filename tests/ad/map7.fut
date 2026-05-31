@@ -29,7 +29,6 @@ entry fwd_map (x: [8]f64) =
   tabulate 8 (\i -> jvp obj x (replicate 8 0 with [i] = 1))
 
 entry fwd_vec (x: [8]f64) =
-  #[unroll]
   jvp_vec obj x (tabulate 8 (\i -> replicate 8 0 with [i] = 1))
 
 entry rev_map (x: [8]f64) =
