@@ -32,19 +32,13 @@ inc:
 	$(MAKE) run-headless TEST=inc
 
 array:
-	$(MAKE) run-headless TEST=array
+	$(MAKE) run-browser TEST=array
 
 inc-headless:
 	$(MAKE) run-headless TEST=inc
 
-array-headless:
-	$(MAKE) run-headless TEST=array
-
 inc-browser:
 	$(MAKE) run-browser TEST=inc
-
-array-browser:
-	$(MAKE) run-browser TEST=array
 
 check-test:
 	@if [ -z "$(TEST)" ]; then \
