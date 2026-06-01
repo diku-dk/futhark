@@ -18,6 +18,7 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Tools
+import Futhark.Transform.Rename (renameLambda)
 import Futhark.Util (interleave, splitAt3, unterleave)
 
 zeroExp :: Type -> Exp SOACS
@@ -500,108 +501,202 @@ fwdSOAC pat aux (Stream size xs accs lam) = do
   let accs' = interleave accs accs_tan
   addStm $ Let pat' aux $ Op $ Stream size xs' accs' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
-  -- Generate two HistOps per original: one for the primal result (unchanged),
-  -- and one for the tangent result (which uses fwdLambda and may involve a Map
-  -- in the vectorised case, but leaves the primal HistOp with a simple scalar
-  -- operator).
+  -- Forward-mode differentiation of Hist:
+  --   1. Compute bucket_fun and its tangents with a Map SOAC.
+  --   2. Emit the primal Hist (unchanged).
+  --   3. For tangents:
+  --      - Non-vectorised: a Hist with the same indices but tangent values.
+  --      - Vectorised: map over the tangent vector shape, each iteration
+  --        performing a Hist on a slice of the tangent values.
   tan_shape <- askShape
-  (ops_primal, ops_tan, pat', to_transpose) <- buildHistParts tan_shape
-  bucket_fun' <- fwdHistBucket bucket_fun
   arrs' <- soacInputsWithTangents arrs
-  addStm $ Let pat' aux $ Op $ Hist w arrs' (interleave ops_primal ops_tan) bucket_fun'
-  forM_ to_transpose $ \(rpat, v) -> do
-    v_t <- lookupType v
-    let perm = rearrangeInverse $ vecPerm tan_shape v_t
-    letBind rpat $ BasicOp $ Rearrange v perm
+
+  -- Step 1: Map the forward-differentiated bucket_fun over the inputs.
+  -- The lambda returns: [indices..., primal_values..., tangent_values...]
+  -- In the non-vectorised case tangent_values are scalars; in the vectorised
+  -- case they are arrays of shape tan_shape.
+  bucket_fun' <- fwdHistBucketTansLast bucket_fun
+  map_res <- letTupExp "hist_map" . Op . Screma w arrs' =<< mapSOAC bucket_fun'
+
+  -- Split the map results into indices, primal values, and tangent values.
+  let (idx_arrs, rest) = splitAt n_indices map_res
+      (val_arrs, tan_val_arrs) = splitAt n_vals rest
+
+  -- Step 2: Emit the primal Hist.
+  let Pat pes = pat
+      primal_map_lam_ts = map Prim (replicate n_indices $ IntType Int64) ++ concatMap (lambdaReturnType . histOp) ops
+  primal_map_lam <- mkIdentityLambda primal_map_lam_ts
+  addStm $ Let (Pat pes) aux $ Op $ Hist w (idx_arrs ++ val_arrs) ops primal_map_lam
+
+  -- Step 3: Emit the tangent Hist.
+  -- The tangent Hist uses fwdLambda on the operator, which needs interleaved
+  -- (primal, tangent) values. Its output is interleaved (primal_aux, tangent).
+  if tan_shape == mempty
+    then do
+      -- Non-vectorised: a single Hist with fwd-differentiated ops.
+      tan_hist_ops <- mapM (mkFwdTanHistOp False) ops
+      -- Input to the tangent Hist: indices ++ interleaved(primal_vals, tangent_vals)
+      let interleaved_vals = interleave val_arrs tan_val_arrs
+          tan_hist_input_ts =
+            map Prim (replicate n_indices $ IntType Int64)
+              ++ concatMap (\op -> interleave (lambdaReturnType (histOp op)) (lambdaReturnType (histOp op))) ops
+      tan_hist_lam <- mkIdentityLambda tan_hist_input_ts
+      -- Output pat: for each op, interleaved (aux_primal_pe, tangent_pe)
+      (tan_pes, aux_pes) <- fmap unzip $
+        forM pes $ \(PatElem p t) -> do
+          p_tan <- tanVName p
+          insertTan p p_tan
+          t_tan <- tanType t
+          p_aux <- newVName (baseName p <> "_hist_aux")
+          pure (PatElem p_tan t_tan, PatElem p_aux t)
+      let out_pes = concatMap (\(a, t) -> [a, t]) $ zip aux_pes tan_pes
+      letBind (Pat out_pes) . Op $
+        Hist w (idx_arrs ++ interleaved_vals) tan_hist_ops tan_hist_lam
+    else do
+      -- Vectorised: map over tan_shape, each iteration performing a Hist on
+      -- the corresponding slice of the tangent values.
+      -- tan_val_arrs have type [w][tan_shape...]elem_type (from the map output).
+      -- We need [tan_shape...][w]elem_type, so transpose first.
+      tan_val_arrs_tr <- forM tan_val_arrs $ \v -> do
+        v_t <- lookupType v
+        let perm = vecPerm tan_shape v_t
+        letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
+      -- Now tan_val_arrs_tr have shape [tan_shape...][w]elem_type.
+      tan_pes <- forM pes $ \(PatElem p t) -> do
+        p_tan <- tanVName p
+        insertTan p p_tan
+        t_tan <- tanType t
+        pure $ PatElem p_tan t_tan
+      mapOverTanShape tan_shape idx_arrs val_arrs tan_val_arrs_tr ops (Pat tan_pes)
   where
     op_ranks = map (shapeRank . histShape) ops
     op_n_vals = map (length . lambdaReturnType . histOp) ops
     n_indices = sum op_ranks
+    n_vals = sum op_n_vals
 
     splitInto :: [Int] -> [a] -> [[a]]
     splitInto [] _ = []
     splitInto (n : ns) xs = take n xs : splitInto ns (drop n xs)
 
-    -- Build all primal HistOps, tangent HistOps, result pattern, and
-    -- transposition list for the vectorised case.
-    buildHistParts ::
-      Shape ->
-      ADM ([HistOp SOACS], [HistOp SOACS], Pat Type, [(Pat Type, VName)])
-    buildHistParts ts = do
-      let Pat pes = pat
-          pe_groups = splitInto op_n_vals pes
-      results <- zipWithM (buildOneHistPair ts) ops pe_groups
-      let primal_ops = map (\(a, _, _, _) -> a) results
-          tan_ops = map (\(_, b, _, _) -> b) results
-          new_pes = concatMap (\(_, _, c, _) -> c) results
-          to_trans = concatMap (\(_, _, _, d) -> d) results
-      pure (primal_ops, tan_ops, Pat new_pes, to_trans)
-
-    -- For one original HistOp, produce:
-    --   primal HistOp (unchanged),
-    --   tangent HistOp (using fwdLambda, carrying auxiliary primal state),
-    --   combined pattern elements [primal_pes, aux_pe1, tan_pe1, aux_pe2, tan_pe2, ...],
-    --   transposition list for vectorised tangent pat elems.
-    buildOneHistPair ::
-      Shape ->
-      HistOp SOACS ->
-      [PatElem Type] ->
-      ADM (HistOp SOACS, HistOp SOACS, [PatElem Type], [(Pat Type, VName)])
-    buildOneHistPair ts (HistOp shape rf dest nes op) pes = do
-      let primal_op = HistOp shape rf dest nes op
-      -- Auxiliary primal dest arrays for the tangent HistOp (copies of dest).
-      dest_aux <-
-        mapM
-          (\d -> letExp (baseName d <> "_hist_primal_aux") $ BasicOp $ Replicate mempty (Var d))
-          dest
-      dest_tan <- mapM (pushTanShape <=< tangent) dest
-      nes_tan <- mapM (letSubExp "zero" . zeroExp <=< tanType) $ lambdaReturnType op
-      op' <- fwdLambda op
-      let tan_op =
-            HistOp
-              shape
-              rf
-              (interleave dest_aux dest_tan)
-              (interleave nes nes_tan)
-              op'
-      -- Build pattern elements for the tangent HistOp results: for each
-      -- original result pe, add an unused auxiliary primal pe and a tangent pe.
-      (tan_pes, to_trans) <-
-        fmap (bimap concat concat . unzip) $
-          forM pes $ \(PatElem p t) -> do
-            p_aux <- newVName (baseName p <> "_hist_aux")
-            let pe_aux = PatElem p_aux t
-            p_tan <- tanVName p
-            insertTan p p_tan
-            t_tan <- tanType t
-            if ts == mempty || arrayShape t == ts || isAcc t
-              then pure ([pe_aux, PatElem p_tan t_tan], [])
-              else do
-                let perm = vecPerm ts t_tan
-                p_tan' <- newName p_tan
-                pure
-                  ( [pe_aux, PatElem p_tan' (rearrangeType perm t_tan)],
-                    [(Pat [PatElem p_tan t_tan], p_tan')]
-                  )
-      pure (primal_op, tan_op, pes ++ tan_pes, to_trans)
-
-    -- Produce bucket function outputs for all interleaved (primal, tangent)
-    -- HistOps.  For each original op, the output is:
-    --   primal: [op_is, op_vs]
-    --   tangent: [op_is, interleaved(op_vs, tan_vs)]
-    fwdBodyHist (Body _ stms res) = buildBody_ $ do
+    -- Forward-differentiate the bucket function body, returning:
+    -- [indices, primal_values, tangent_values] (tangents last, not interleaved).
+    fwdBodyHistTansLast (Body _ stms res) = buildBody_ $ do
       mapM_ fwdStm stms
-      let (res_is_flat, res_vs_flat) = splitAt n_indices res
-          res_is_per_op = splitInto op_ranks res_is_flat
-          res_vs_per_op = splitInto op_n_vals res_vs_flat
-      fmap concat $
-        forM (zip res_is_per_op res_vs_per_op) $ \(op_is, op_vs) -> do
-          tan_vs <- bundleTangents op_vs
-          pure $ op_is ++ op_vs ++ op_is ++ tan_vs
+      let (res_is, res_vs) = splitAt n_indices res
+      res_vs_tan <- mapM tangent res_vs
+      pure $ res_is ++ res_vs ++ res_vs_tan
 
-    fwdHistBucket (Lambda params _ body) = do
+    fwdHistBucketTansLast (Lambda params _ body) = do
       params' <- bundleNewList params
-      mkLambda params' $ bodyBind =<< fwdBodyHist body
+      mkLambda params' $ bodyBind =<< fwdBodyHistTansLast body
+
+    -- Create a forward-differentiated tangent HistOp.
+    -- The operator is fwdLambda(op) run in non-vectorised mode (scalar tangents),
+    -- taking interleaved (primal, tangent) scalar params and producing interleaved
+    -- (primal, tangent) scalar results.
+    mkFwdTanHistOp :: Bool -> HistOp SOACS -> ADM (HistOp SOACS)
+    mkFwdTanHistOp _inMap (HistOp shape rf dest nes op) = do
+      -- Auxiliary primal dest arrays (copies of original dest).
+      dest_aux <- mapM
+        (\d -> letExp (baseName d <> "_hist_aux") $ BasicOp $ Replicate mempty (Var d))
+        dest
+      -- Tangent dest arrays (zeros).
+      dest_tan <- forM (lambdaReturnType op) $ \t ->
+        letExp "hist_tan_dest" $ BasicOp $ Replicate shape $ Constant $ blankPrimValue $ elemType t
+      -- Zero tangent neutral elements.
+      nes_tan <- mapM (letSubExp "zero" . zeroExp) $ lambdaReturnType op
+      -- Forward-differentiated operator (in non-vectorised mode since op is scalar).
+      op' <- local (\env -> env {envTanShape = mempty}) $ fwdLambda op
+      pure $
+        HistOp
+          shape
+          rf
+          (interleave dest_aux dest_tan)
+          (interleave nes nes_tan)
+          op'
+
+    -- Map over the tangent vector shape. Inside the map, each iteration extracts
+    -- a scalar slice from the tangent arrays and runs a Hist with fwdLambda ops.
+    -- val_as: primal value arrays [w]elem_type (same for all tangent positions).
+    -- tan_as: tangent arrays [tan_shape...][w]elem_type (after transpose).
+    mapOverTanShape :: Shape -> [VName] -> [VName] -> [VName] -> [HistOp SOACS] -> Pat Type -> ADM ()
+    mapOverTanShape ts idx_as val_as tan_as hist_ops tan_pat = do
+      let outer_dim = shapeSize 0 ts
+          inner_shape = Shape $ drop 1 $ shapeDims ts
+
+      -- Parameters for the outer map: one param per tangent array.
+      tan_params <- forM tan_as $ \v -> do
+        v_t <- lookupType v
+        newParam "tan_slice" $ rowType v_t
+
+      map_lam <- mkLambda tan_params $ do
+        let tan_param_vs = map paramName tan_params
+        if inner_shape == mempty
+          then do
+            -- Base case: tangent values are [w]elem_type.
+            -- Build a Hist with fwdLambda ops, interleaving primal + tangent values.
+            tan_hist_ops <- mapM (mkScalarFwdTanHistOp val_as) hist_ops
+            let interleaved_vals = interleave val_as tan_param_vs
+                lam_ts =
+                  map Prim (replicate n_indices $ IntType Int64)
+                    ++ concatMap (\op -> interleave (lambdaReturnType (histOp op)) (lambdaReturnType (histOp op))) hist_ops
+            id_lam <- mkIdentityLambda lam_ts
+            -- The Hist output is interleaved (aux, tan) for each op.
+            all_res <- letTupExp "hist_tan_res" (Op $ Hist w (idx_as ++ interleaved_vals) tan_hist_ops id_lam)
+            -- Extract only tangent results (every other output starting at index 1).
+            let n_per_op = map (\op -> length (lambdaReturnType (histOp op)) * 2) hist_ops
+                res_groups = splitInto n_per_op all_res
+                tan_results = concatMap (map snd . filter (odd . fst) . zip [0..]) res_groups
+            pure $ varsRes tan_results
+          else do
+            -- Multi-dimensional tangent shape: recurse with nested map.
+            let next_dim = shapeSize 0 inner_shape
+                remaining = Shape $ drop 1 $ shapeDims inner_shape
+            inner_params <- forM tan_param_vs $ \v -> do
+              v_t <- lookupType v
+              newParam "tan_inner" $ rowType v_t
+            inner_lam <- mkLambda inner_params $ do
+              let inner_vs = map paramName inner_params
+              if remaining == mempty
+                then do
+                  tan_hist_ops <- mapM (mkScalarFwdTanHistOp val_as) hist_ops
+                  let interleaved_vals = interleave val_as inner_vs
+                      lam_ts =
+                        map Prim (replicate n_indices $ IntType Int64)
+                          ++ concatMap (\op -> interleave (lambdaReturnType (histOp op)) (lambdaReturnType (histOp op))) hist_ops
+                  id_lam <- mkIdentityLambda lam_ts
+                  all_res <- letTupExp "hist_tan_res" (Op $ Hist w (idx_as ++ interleaved_vals) tan_hist_ops id_lam)
+                  let n_per_op = map (\op -> length (lambdaReturnType (histOp op)) * 2) hist_ops
+                      res_groups = splitInto n_per_op all_res
+                      tan_results = concatMap (map snd . filter (odd . fst) . zip [0..]) res_groups
+                  pure $ varsRes tan_results
+                else
+                  error "fwdSOAC Hist: tangent shapes deeper than 2D not supported"
+            inner_res <- letTupExp "hist_tan_inner" . Op . Screma next_dim tan_param_vs =<< mapSOAC inner_lam
+            pure $ varsRes inner_res
+
+      res <- letTupExp "hist_tan_vec" . Op . Screma outer_dim tan_as =<< mapSOAC map_lam
+      forM_ (zip (patElems tan_pat) res) $ \(pe, v) ->
+        letBind (Pat [pe]) $ BasicOp $ SubExp $ Var v
+
+    -- Create a fwd-differentiated tangent HistOp for use inside the map
+    -- (scalar tangent values, primal values accessed as free variables).
+    mkScalarFwdTanHistOp :: [VName] -> HistOp SOACS -> ADM (HistOp SOACS)
+    mkScalarFwdTanHistOp _primal_val_as (HistOp shape rf _dest nes op) = do
+      -- Auxiliary primal dest and tangent dest: zero-filled arrays.
+      dest_aux <- forM (lambdaReturnType op) $ \t ->
+        letExp "hist_aux_dest" $ BasicOp $ Replicate shape $ Constant $ blankPrimValue $ elemType t
+      dest_tan <- forM (lambdaReturnType op) $ \t ->
+        letExp "hist_tan_dest" $ BasicOp $ Replicate shape $ Constant $ blankPrimValue $ elemType t
+      nes_tan <- mapM (letSubExp "zero" . zeroExp) $ lambdaReturnType op
+      op' <- local (\env -> env {envTanShape = mempty}) $ fwdLambda op
+      pure $
+        HistOp
+          shape
+          rf
+          (interleave dest_aux dest_tan)
+          (interleave nes nes_tan)
+          op'
 fwdSOAC pat aux (WithVJP args lam _) = do
   -- You have a custom adjoint? Too bad we are in tangent land.
   (mapM_ fwdStm <=< runBuilder_) $ do
