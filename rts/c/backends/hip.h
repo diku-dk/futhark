@@ -444,6 +444,10 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
   opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_thread_block_size);
 
+  if (getenv("HIP_PATH") != NULL) {
+    opts[i++] = msgprintf("-I%s/include", getenv("HIP_PATH"));
+  }
+
   for (int j = 0; extra_opts[j] != NULL; j++) {
     opts[i++] = strdup(extra_opts[j]);
   }
