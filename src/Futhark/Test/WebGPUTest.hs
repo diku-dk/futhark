@@ -81,7 +81,7 @@ kernelInfoLiteral prog = "window.kernels = " <> docText fmtInfos <> ";"
 --   },
 -- ];
 testCasesLiteral :: ProgramTest -> T.Text
-testCasesLiteral (ProgramTest _ _ (RunCases ios _ _)) =
+testCasesLiteral (ProgramTest _ _ (RunCases ios _ _ _)) =
   let specs = map ((<> ",\n") . prettyText . mkTestSpec) ios
    in "window.tests = [\n" <> foldl' (<>) "" specs <> "];"
 testCasesLiteral t = "// Unsupported test: " <> testDescription t

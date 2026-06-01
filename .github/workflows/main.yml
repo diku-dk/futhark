@@ -713,6 +713,9 @@ jobs:
         cd tests_fmt && sh test.sh
 
     - run: |
+        cd tests_property && sh test.sh
+
+    - run: |
         cd tests_server && sh test.sh
 
     - run: |

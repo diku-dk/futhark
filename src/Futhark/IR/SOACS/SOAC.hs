@@ -748,7 +748,6 @@ typeCheckSOAC (Stream size arrexps accexps lam) = do
     chunk : _ -> pure chunk
     [] -> TC.bad $ TC.TypeError "Stream lambda without parameters."
   let asArg t = (t, mempty)
-      inttp = Prim int64
       lamarrs' = map (`setOuterSize` Var (paramName chunk)) arrargs
       acc_len = length accexps
       lamrtp = take acc_len $ lambdaReturnType lam
@@ -758,7 +757,7 @@ typeCheckSOAC (Stream size arrexps accexps lam) = do
   -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
-  TC.checkLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
+  TC.checkLambda lam $ asArg (Prim int64) : accargs ++ fake_lamarrs'
 typeCheckSOAC (Hist w arrs ops bucket_fun) = do
   TC.require (Prim int64) w
 

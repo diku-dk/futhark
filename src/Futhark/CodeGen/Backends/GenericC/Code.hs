@@ -78,6 +78,8 @@ compilePrimExp f (CmpOpExp cmp x y) = do
   y' <- compilePrimExp f y
   pure $ case cmp of
     CmpEq {} -> [C.cexp|$exp:x' == $exp:y'|]
+    FCmpLt Float16 -> [C.cexp|cmplt16($exp:x', $exp:y')|]
+    FCmpLe Float16 -> [C.cexp|cmple16($exp:x', $exp:y')|]
     FCmpLt {} -> [C.cexp|$exp:x' < $exp:y'|]
     FCmpLe {} -> [C.cexp|$exp:x' <= $exp:y'|]
     CmpLlt {} -> [C.cexp|$exp:x' < $exp:y'|]

@@ -9,9 +9,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The `hip` backend previously simulated `f16` operations with `f32`, but now it
+  uses the hardware support for `f16`, similarly to the CUDA backend.
+  Implemented by Jérôme Wagner. (#2470)
+
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* Invalid fusion that could cause compiler crash. (#2474)
+
+## [0.26.3]
+
+### Added
+
+* `futhark test` now suppports property-based testing (like QuickCheck). Work by
+  Matin Nafar and Simon August Mørk.
 
 ### Fixed
 
@@ -20,6 +35,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Sometimes arrays returned from entry points would be unnecessarily copied if
   the compiler could not be sure statically that they were in row-major layout.
+
+* The type checker would fail to reject entry points that accepted lifted
+  abstract types. (#2467)
+
+* An issue in the interpreter's handling of local opens.
 
 ## [0.26.2]
 
