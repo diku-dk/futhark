@@ -570,8 +570,7 @@ compileWebGPUAction fcfg mode tgtpath =
               "-sWASM_BIGINT",
               "-sASSERTIONS",
               "-sALLOW_MEMORY_GROWTH",
-              -- "-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify,HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAP64,HEAPU64,HEAPF32,HEAPF64",
-              -- Had to move these to the runEmcc because emcc would not find the functions to export.
+              "-sEXPORTED_RUNTIME_METHODS=['Asyncify']",
               "--extern-post-js",
               jslibpath
             ]
@@ -634,7 +633,7 @@ runEMCC cpath outpath cflags_def ldflags extra_flags = do
         ( [cpath, "-o", outpath]
             ++ extra_flags
             ++ [ "-s",
-                 "EXPORTED_RUNTIME_METHODS=['ccall','cwrap','Asyncify','HEAP8','HEAP16','HEAP32','HEAP64','HEAPU8','HEAPU16','HEAPU32','HEAPU64','HEAPF32','HEAPF64']"
+                 "EXPORTED_RUNTIME_METHODS=['HEAP8','HEAP16','HEAP32','HEAP64','HEAPU8','HEAPU16','HEAPU32','HEAPU64','HEAPF32','HEAPF64']"
                ]
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
