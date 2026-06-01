@@ -570,7 +570,7 @@ compileWebGPUAction fcfg mode tgtpath =
               "-sWASM_BIGINT",
               "-sASSERTIONS",
               "-sALLOW_MEMORY_GROWTH",
-              --"-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify,HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAP64,HEAPU64,HEAPF32,HEAPF64",
+              -- "-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify,HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAP64,HEAPU64,HEAPF32,HEAPF64",
               -- Had to move these to the runEmcc because emcc would not find the functions to export.
               "--extern-post-js",
               jslibpath
