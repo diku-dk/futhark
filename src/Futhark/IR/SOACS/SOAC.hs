@@ -1016,7 +1016,7 @@ ppHist ::
   Doc ann
 ppHist w arrs ops bucket_fun =
   "hist"
-    <> parens
+    <> (parens . align)
       ( pretty w
           <> comma
             </> ppTuple' (map pretty arrs)
