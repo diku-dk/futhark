@@ -3,8 +3,10 @@
 --
 -- ==
 -- input { [[1.0,2.0],[2.0,3.0],[4.0,5.0]] }
+-- structure gpu { /SegRed 1 }
 
 entry main [n] (input: [n][2]f64) : [2][2]f64 =
+  #[incremental_flattening(only_inner)]
   map (\i ->
          let t = map2 (\_ b -> [b[0], 0]) [0, 0] (input[i:i + 2] :> [2][2]f64)
          in reduce (\_ _ -> [0, 0]) [0, 0] t)
