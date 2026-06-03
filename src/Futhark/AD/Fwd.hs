@@ -18,8 +18,7 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Tools
-import Futhark.Transform.Rename
-import Futhark.Util (chunks, interleave, splitAt3, unterleave)
+import Futhark.Util (interleave, splitAt3, unterleave)
 
 zeroExp :: Type -> Exp SOACS
 zeroExp (Prim pt) =
@@ -501,59 +500,18 @@ fwdSOAC pat aux (Stream size xs accs lam) = do
   let accs' = interleave accs accs_tan
   addStm $ Let pat' aux $ Op $ Stream size xs' accs' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
+  -- TODO: this is probably not very efficient in the vectorised case as we end
+  -- up with a dreadful update operator that involves arrays.
+  (pat', to_transpose) <- soacResPat 0 0 pat
+  ops' <- mapM fwdHist ops
+  bucket_fun' <- fwdHistBucket bucket_fun
+  arrs' <- soacInputsWithTangents arrs
+  addStm $ Let pat' aux $ Op $ Hist w arrs' ops' bucket_fun'
   tan_shape <- askShape
-  -- See Note [Vector tangent of Hist]
-  if tan_shape /= mempty
-    then do
-      tmp_pat <-
-        fmap Pat $ forM (lambdaReturnType bucket_fun) $ \t ->
-          PatElem <$> newVName "hist_tmp" <*> pure (t `arrayOfRow` w)
-
-      fwdSOAC tmp_pat aux . Screma w arrs =<< mapSOAC bucket_fun
-
-      let num_is = sum $ map (shapeRank . histShape) ops
-          (tmp_pat_is, tmp_pat_vals) = splitAt num_is (patNames tmp_pat)
-      tmp_pat_tans <- mapM tangent tmp_pat_vals
-
-      let dests = concatMap histDest ops
-      dests_tans <- mapM tangent dests
-      dests_copies <- forM dests $ \arr ->
-        letExp (baseName arr <> "_copy") =<< eCopy (eVar arr)
-
-      letBind pat . Op . Hist w (patNames tmp_pat) ops
-        =<< mkIdentityLambda (lambdaReturnType bucket_fun)
-
-      prims_and_tans <- local (\env -> env {envTanShape = mempty})
-        $ letTupExp "hist_prims_and_tans"
-          <=< mapNest tan_shape (Pair (map Var tmp_pat_tans) (map Var dests_tans))
-        $ \(Pair tmp_pat_tans' dests_tans') -> do
-          tmp_pat_tans'' <- mapM asVName tmp_pat_tans'
-          dests_tans'' <- mapM asVName dests_tans'
-          let ops_dests_tans = chunks (map (length . histDest) ops) dests_tans''
-              ops_dests_copies = chunks (map (length . histDest) ops) dests_copies
-          ops' <- forM (zip3 ops ops_dests_tans ops_dests_copies) $
-            \(op, op_dests_tans, op_dests_copies) -> do
-              op_lam <- renameLambda $ histOp op
-              zipWithM_ insertTan (histDest op) op_dests_tans
-              dest_copies <- forM op_dests_copies $ \arr ->
-                letExp (baseName arr <> "_copy") =<< eCopy (eVar arr)
-              fwdHist $ op {histOp = op_lam, histDest = dest_copies}
-          bucket_fun' <- mkIdentityLambda $ Prim int64 : concatMap (lambdaReturnType . histOp) ops'
-          let hist_arrs = tmp_pat_is ++ interleave tmp_pat_vals tmp_pat_tans''
-          pure . Op $ Hist w hist_arrs ops' bucket_fun'
-
-      let (_prims, tans) = unterleave prims_and_tans
-      zipWithM_ insertTan (patNames pat) tans
-    else do
-      (pat', to_transpose) <- soacResPat 0 0 pat
-      ops' <- mapM fwdHist ops
-      bucket_fun' <- fwdHistBucket bucket_fun
-      arrs' <- soacInputsWithTangents arrs
-      addStm $ Let pat' aux $ Op $ Hist w arrs' ops' bucket_fun'
-      forM_ to_transpose $ \(rpat, v) -> do
-        v_t <- lookupType v
-        let perm = rearrangeInverse $ vecPerm tan_shape v_t
-        letBind rpat $ BasicOp $ Rearrange v perm
+  forM_ to_transpose $ \(rpat, v) -> do
+    v_t <- lookupType v
+    let perm = rearrangeInverse $ vecPerm tan_shape v_t
+    letBind rpat $ BasicOp $ Rearrange v perm
   where
     n_indices = sum $ map (shapeRank . histShape) ops
     fwdBodyHist (Body _ stms res) = buildBody_ $ do
@@ -567,8 +525,7 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
     fwdHist (HistOp shape rf dest nes op) = do
       dest' <- soacInputsWithTangents dest
-      nes_tan <-
-        mapM (letSubExp "zero" . zeroExp <=< tanType) $ lambdaReturnType op
+      nes_tan <- mapM (letSubExp "zero" . zeroExp <=< tanType) $ lambdaReturnType op
       op' <- fwdLambda op
       pure $
         HistOp
@@ -696,17 +653,3 @@ fwdJVP scope shape attrs (Lambda params _ body) =
 -- case). This requires some care for SOACs, which always map across the
 -- outermost dimension: basically we have to transpose the inputs and the
 -- outputs.
-
--- Note [Vector tangent of Hist]
---
--- Naive vectorised tangents for Hist results in an operator that mixes arrays
--- and scalar code. Our code generation for this (particularly for GPU backends)
--- is terrible (partly by necessity; it's just a bad pattern). Hence, we handle
--- it by essentially locally non-vectorising. The idea is to first split apart
--- the map function, in case it does something interesting. Then we compute the
--- primal result using a normal histogram (necessary in case the tangent shape
--- is mempty), and then we map over the tangent vector of each destination and
--- input, computing scalar tangents. This requires us to copy the (primal)
--- destination, because it is repeatedly consumed - in principle this might
--- wrecks the cost model, however, vectorised AD already implicitly copies the
--- tangent, so I think we get away with it.
