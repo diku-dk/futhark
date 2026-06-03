@@ -1864,6 +1864,17 @@ sAlloc name size space = do
 sArray :: Name -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
 sArray name bt shape mem lmad = do
   name' <- newVName name
+  when (LMAD.rank lmad /= shapeRank shape) $
+    error $
+      unlines
+        [ "sArray: array "
+            <> prettyString name'
+            <> " of rank "
+            <> show (shapeRank shape)
+            <> " with LMAD of rank "
+            <> show (LMAD.rank lmad)
+            <> "."
+        ]
   dArray name' bt shape mem lmad
   pure name'
 
