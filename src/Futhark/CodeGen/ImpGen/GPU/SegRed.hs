@@ -218,7 +218,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     all isPrimSegBinOp segbinops =
       noncommPrimSegRedInterms
   | otherwise =
-      generalSegRedInterms False tblock_id tblock_size segbinops
+      generalSegRedInterms tblock_id tblock_size segbinops
   where
     params = map paramOf segbinops
 
@@ -272,24 +272,18 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
 
 generalSegRedInterms ::
-  Bool ->
   Imp.TExp Int64 ->
   SubExp ->
   [SegBinOp GPUMem] ->
   InKernelGen [SegRedIntermediateArrays]
-generalSegRedInterms segmented tblock_id tblock_size segbinops =
+generalSegRedInterms tblock_id tblock_size segbinops =
   fmap (map GeneralSegRedInterms) . forM (map paramOf segbinops) . mapM $ \p ->
     case paramDec p of
-      MemArray pt shape _ (ArrayIn mem ixfun) -> do
+      MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [tblock_size] <> shape
         let shape_E = map pe64 $ shapeDims shape'
         sArray ("red_arr_" <> nameFromText (prettyText pt)) pt shape' mem $
-          -- This 'segmented' thing here is a hack, related to #2227.
-          -- There absolutely must be some unifying principle we are
-          -- missing.
-          if segmented
-            then ixfun
-            else LMAD.iota (tblock_id * product shape_E) shape_E
+          LMAD.iota (tblock_id * product shape_E) shape_E
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [tblock_size]
@@ -426,10 +420,10 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
 
   sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_tblocks tblock_size) $ do
     constants <- kernelConstants <$> askEnv
-    let tblock_id = kernelBlockSize constants
+    let tblock_id = kernelBlockId constants
         ltid = sExt64 $ kernelLocalThreadId constants
 
-    interms <- generalSegRedInterms True tblock_id tblock_size_se segbinops
+    interms <- generalSegRedInterms (sExt64 tblock_id) tblock_size_se segbinops
     let reds_arrs = map blockRedArrs interms
 
     -- We probably do not have enough actual threadblocks to cover the
@@ -449,10 +443,9 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
 
       let in_bounds =
             map_body_cont $ \red_res ->
-              sComment "save results to be reduced" $ do
-                let red_dests = map (,[ltid]) (concat reds_arrs)
-                forM2_ red_dests red_res $ \(d, d_is) (res, res_is) ->
-                  copyDWIMFix d d_is res res_is
+              sComment "save results to be reduced" $
+                forM2_ (concat reds_arrs) red_res $ \d (res, res_is) ->
+                  copyDWIMFix d [ltid] res res_is
           out_of_bounds =
             forM2_ segbinops reds_arrs $ \(SegBinOp _ _ nes _) red_arrs ->
               forM2_ red_arrs nes $ \arr ne ->
