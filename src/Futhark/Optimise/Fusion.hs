@@ -688,7 +688,7 @@ doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relev
 -- | For each pair of SOAC nodes that share an input, or any WithAcc nodes,
 -- attempt to fuse them horizontally.
 doHorizontalFusion :: DepGraphAug FusionM
-doHorizontalFusion dg = applyAugs (soac_pairs <> withacc_pairs) dg
+doHorizontalFusion dg = pure dg -- applyAugs (soac_pairs <> withacc_pairs) dg
   where
     soac_pairs, withacc_pairs :: [DepGraphAug FusionM]
     soac_pairs = do

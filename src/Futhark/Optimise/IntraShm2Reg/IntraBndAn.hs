@@ -51,8 +51,8 @@ i64ptp = IntType Int64
 shm2RegOnIntraStms :: Env -> Stms GPU -> Shm2RegM (BotEnv, Stms GPU)
 shm2RegOnIntraStms env0 stmts = do
   ( (_, bu_env), stms') <- traverseStms env0 stmts
-  trace (prettyString bu_env ++ "\nKernel Stms:\n" ++ prettyString stms') $
-    pure (bu_env, stms')
+  -- trace (prettyString bu_env ++ "\nKernel Stms:\n" ++ prettyString stms') $
+  pure (bu_env, stms')
 
 traverseStms :: Env -> Stms GPU -> Shm2RegM (Env, Stms GPU)
 -- base case:
@@ -71,6 +71,14 @@ traverseStms (td_env, bu_env) (stm Sq.:<| stms)
       stm' = Let pat aux' $ BasicOp $ SubExp $ Var arrnm
   traverseStms (td_env,bu_env) $ stm' Sq.<| stms
 --
+--traverseStms (td_env, bu_env) (stm Sq.:<| stms)
+--  | Let pat aux (BasicOp (Manifest arrnm perm)) <- stm,
+--    isIdentityPerm perm,
+--    Just _ <- intOfAttrIgnore (stmAuxAttrs aux) = do
+--  let aux' = aux { stmAuxAttrs = removeAttrIgnore (stmAuxAttrs aux) }
+--      stm' = Let pat aux' $ BasicOp $ SubExp $ Var arrnm
+--  traverseStms (td_env,bu_env) $ stm' Sq.<| stms
+--
 -- Loop Case is handled separately by function @traverseLoop@
   | Let _ _ Loop{} <- stm =
     traverseLoop traverseStms (td_env, bu_env) $ stm Sq.<| stms
@@ -78,6 +86,10 @@ traverseStms (td_env, bu_env) (stm Sq.:<| stms)
 -- Match Case is handled separately by function @traverseIf@
   | Let _ _ Match{} <- stm =
     traverseIf traverseStms (td_env, bu_env) $ stm Sq.<| stms
+--
+-- WithAcc Case is handled separately by function @traverseWithAcc@
+  | Let _ _ WithAcc{} <- stm =
+    traverseWithAcc traverseStms (td_env, bu_env) $ stm Sq.<| stms
 --
 -- General Traversal Structure:
 traverseStms (td_env, bu_env) (stm Sq.:<| stms) = do
@@ -145,18 +157,6 @@ addTargetForAn (td_env, bu_env) (Let pat aux e)
     num_par_dims < length (shapeDims shp_res) =
   let bu_env' = mkManifestEntry bu_env arrnm num_par_dims shp_res
   in  mkManifestEntry bu_env' (patElemName pel) num_par_dims shp_res
-{--
-  let shp_res_ses = shapeDims shp_res
-      shp_res_pes = map (peFromSe td_env i64ptp) shp_res_ses
-      par_dim_pes = take num_par_dims shp_res_pes
-      entry = initEntry (zip shp_res_ses shp_res_pes) par_dim_pes
-      patel_nm = patElemName pel
-      entry' = validEntryForBotEnv patel_nm bu_env entry
-  in  trace ("Target: Manifest-Inform-ParDim-Only, pat-el: "++prettyString patel_nm ++
-             " shape_ses: "++prettyString shp_res_ses ++
-             " shape_pes: " ++ prettyString shp_res_pes ) $
-        bu_env { regArrays = M.insert patel_nm entry' (regArrays bu_env) }
---}
 --
 -- the case of a manifest having the attribute "glb2reg_only":
   | BasicOp (Manifest arrnm perm) <- e,
@@ -171,14 +171,6 @@ addTargetForAn (td_env, bu_env) (Let pat aux e)
     Array _ptp shp_res _u <- patElemDec pel,
     num_par_dims < length (shapeDims shp_res) =
   mkManifestEntry bu_env (patElemName pel) num_par_dims shp_res
-{--
-      shp_res_ses = shapeDims shp_res
-      shp_res_pes = map (peFromSe td_env i64ptp) shp_res_ses
-      par_dim_pes = take num_par_dims shp_res_pes
-      entry = initEntry (zip shp_res_ses shp_res_pes) par_dim_pes
-      patel_nm = patElemName pel
-      entry' = validEntryForBotEnv patel_nm bu_env entry
---}
   where
     mkManifestEntry bot_env nm num_par_dims shp_res =
       let shp_res_ses = shapeDims shp_res
@@ -186,10 +178,10 @@ addTargetForAn (td_env, bu_env) (Let pat aux e)
           par_dim_pes = take num_par_dims shp_res_pes
           entry = initEntry (zip shp_res_ses shp_res_pes) par_dim_pes
           entry'= validEntryForBotEnv nm bot_env entry
-      in  trace ("Target: Manifest annotated, pat-el: " ++ prettyString nm ++
-                 " shape_ses: "++prettyString shp_res_ses ++
-                 " shape_pes: " ++ prettyString shp_res_pes ) $
-            bot_env { regArrays = M.insert nm entry' (regArrays bot_env) }
+      in  --trace ("Target: Manifest annotated, pat-el: " ++ prettyString nm ++
+          --       " shape_ses: "++prettyString shp_res_ses ++
+          --       " shape_pes: " ++ prettyString shp_res_pes ) $
+          bot_env { regArrays = M.insert nm entry' (regArrays bot_env) }
 --
 -- the case of an inner-map kernel that can be changed to private result!
 addTargetForAn (td_env, bu_env) (Let pat aux (Op (SegOp sgmap)))
@@ -203,9 +195,9 @@ addTargetForAn (td_env, bu_env) (Let pat aux (Op (SegOp sgmap)))
   let entry_space = ker_dim_pes -- zip ker_dim_ses ker_dim_pes
       nm_entries = mapMaybe (mkEntry entry_space) $ zip (patElems pat) bdyres
       regArrays' = foldl addEntry (regArrays bu_env) nm_entries
-  in  trace ("TARGET: Annotated Map, pat_els " ++ prettyString pat ++
-             " par-space: " ++ prettyString entry_space) $
-        bu_env { regArrays = regArrays' }
+  in  --trace ("TARGET: Annotated Map, pat_els " ++ prettyString pat ++
+      --       " par-space: " ++ prettyString entry_space) $
+      bu_env { regArrays = regArrays' }
 {--
 -- We switched to supporting manifest, hence the hack below is NOT NEEDED
 -- The case of taking the slice of an array declared outside the scope
@@ -335,6 +327,15 @@ freshInnerEnv thids par_dims fvs =
   where
     ind_kind = M.fromList $ map (\nm -> (nm,Compat)) $ namesToList fvs
 
+-- | Summarize the uses of the variables intended to be mapped to
+--     register memory in each statement into Campatible, Irregular,
+--     or None. These uses are recorded in the @bindings@ field of
+--     @RegEntry@. We treat several cases of high interest below
+--     (namely an inner-kernels, manifest, opaque, shallow copy stmts)
+--     and for the rest we apply a very conservative treatment that
+--     disqualifies all free names in the target statement. 
+--   Please note that "Loops" and "Ifs" have specialized treatment
+--     implemented in IntraRecBodyAn.
 onBotUpStm :: Env -> Stm GPU -> Shm2RegM BotEnv
 onBotUpStm (top_env, bu_env) stm@(Let (Pat (pel:_)) aux e)
   -- the target case: a segmented-map operation:
@@ -518,7 +519,7 @@ onBotUpInnerStm (top_env, inn_env) (Let pat _aux e)
     se1 = Constant $ IntValue $ Int64Value 1
 --
 -- Case If-Then-Else: simply recurse on branches
-
+-- ^ ToDo: implement me!
 -- Case loops: simply recruse on loop body
 onBotUpInnerStm env (Let _pat _aux e)
   | Loop fpar_ses _form loop_body <- e,

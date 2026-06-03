@@ -63,8 +63,9 @@ updateStm (_td_env, bu_env) (Let (Pat [patel]) aux e)
   | BasicOp (Manifest orig_nm perm) <- e,
     isIdentityPerm perm,
     -- check it has a "inform_pardim_only" attribute; get its int field:    
-    Just _ <- intOfAttrParDimOnly (stmAuxAttrs aux) =
-  pure $ Sq.singleton $ Let (Pat [patel]) aux $ BasicOp $ SubExp $ Var orig_nm
+    Just _ <- intOfAttrParDimOnly (stmAuxAttrs aux) = do
+  let aux' = aux { stmAuxAttrs = removeAttrParDimOnly (stmAuxAttrs aux) }
+  pure $ Sq.singleton $ Let (Pat [patel]) aux' $ BasicOp $ SubExp $ Var orig_nm
 --
 -- a successful Manifest target to "glb2reg_only" whose root
 --   array is indeed in global memory is translated to a

@@ -26,6 +26,8 @@ module Futhark.Optimise.IntraShm2Reg.SymTabs
     removeAttrGlb2RegOnly,
     intOfAttrParDimOnly,
     removeAttrParDimOnly,
+    intOfAttrIgnore,
+    removeAttrIgnore,
   ) where
 
 import Control.Monad.Reader
@@ -325,6 +327,12 @@ intOfAttrParDimOnly = getIntFromAttr "inform_pardim_only"
 
 removeAttrParDimOnly :: Attrs -> Attrs
 removeAttrParDimOnly = removeAttr "inform_pardim_only"
+
+intOfAttrIgnore :: Attrs -> Maybe Int
+intOfAttrIgnore = getIntFromAttr "ignore"
+
+removeAttrIgnore :: Attrs -> Attrs
+removeAttrIgnore = removeAttr "ignore"
 
 -----------------------------------------
 --- Email Nikolaj

@@ -18,15 +18,15 @@ let badd [ipb][n] (q:i32) (as : [(ipb*n)][4]u64) (bs : [(ipb*n)][4]u64) : [(ipb*
   let rsh =
     loop rsh = ash for i < q do
       let tmp =
-          if (i % 2 == 0)
-          then map2 pairAddMap rsh ash
-          else #[toregmem(1)] map2 pairAddMap rsh bsh
+          match i % 2
+          case 0 -> map2 pairAddMap rsh ash
+          case _ -> map2 pairAddMap rsh bsh
           -- BUG: when removing the #[toregmem(1)] it does not validate anymore! 
       let tmp'= #[inform_pardim_only(1)] manifest tmp
       let res =
           if (i % 3 == 0)
-          then #[toregmem(1)] map2 pairAddMap tmp' bsh
-          else #[toregmem(1)] map2 pairAddMap tmp' ash
+          then map2 pairAddMap tmp' bsh
+          else map2 pairAddMap tmp' ash  -- #[toregmem(1)] 
       in  #[inform_pardim_only(1)] manifest res
 
   in  flatten rsh

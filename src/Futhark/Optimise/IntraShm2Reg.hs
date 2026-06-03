@@ -64,8 +64,8 @@ applyShm2Reg =
     { passName = "Enabling Register Mapping of Arrays in IntraGroup Kernels"
     , passDescription = "Attempts to change the default allocation of fast arrays in intra-group kernels from shared memory to registers."
     , passFunction = \ prog -> do
-        trace ("\nProg before pass: "++prettyString prog++"\n") $
-          intraproceduralTransformationWithConsts pure applyShm2RegOnFun prog
+        -- trace ("\nProg before pass: "++prettyString prog++"\n") $
+        intraproceduralTransformationWithConsts pure applyShm2RegOnFun prog
     }
 
 --------------------------
@@ -119,7 +119,7 @@ onOutStm env stm@( Let pat aux ( Op ( SegOp ( SegMap lvl space ts kbody ) ) ) )
   kbody' <-
     localScope (scope <> scopeOfLParams ker_idxs_params <> scopeOf (bodyStms kbody)) $ do
       (bu_env', stms') <-
-        trace ("Attributes Intragroup Ker: " ++ prettyString attrs) $
+        --trace ("Attributes Intragroup Ker: " ++ prettyString attrs) $
           shm2RegOnIntraStms env_intra stms
       (kres_fix_stms, kres') <- fixRegKerResults bu_env' kres
       pure $ Body yyy (stms' <> kres_fix_stms) kres'

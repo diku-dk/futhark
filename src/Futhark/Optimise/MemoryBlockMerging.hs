@@ -185,6 +185,11 @@ onKernels f orig_stms = inScopeOf orig_stms $ mapM helper orig_stms
     helper stm@Let {stmExp = Loop merge form body} = do
       body_stms <- f `onKernels` bodyStms body
       pure $ stm {stmExp = Loop merge form (body {bodyStms = body_stms})}
+    helper stm@Let { stmExp = WithAcc inps lam } = do
+      body_stms <- f `onKernels` (bodyStms (lambdaBody lam))
+      let body'= (lambdaBody lam) { bodyStms = body_stms }
+          lam' = lam { lambdaBody = body' }
+      pure $ stm { stmExp = WithAcc inps lam' }
     helper stm = pure stm
 
 -- | Perform the reuse-allocations optimization.

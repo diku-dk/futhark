@@ -1,7 +1,7 @@
 -- | This modules handles the analysis of intra statement
 --   with recursive bodies, such as Loop and Match
 module Futhark.Optimise.IntraShm2Reg.IntraRecBodyAn
-  ( traverseIf, traverseLoop ) where
+  ( traverseWithAcc, traverseIf, traverseLoop ) where
 
 import Data.Map.Strict qualified as M
 import Data.Sequence qualified as Sq
@@ -11,10 +11,46 @@ import Futhark.Tools
 import Futhark.Optimise.IntraShm2Reg.SymTabs
 import Futhark.Optimise.IntraShm2Reg.CodeGen(genKerReg2Shm,genKerShm2Reg)
 
--- | ToDo: the implementation assumes that manifests were placed
---         on the result of Match with user annotations that specify
---         the parallel dimension of the register-allocated kernels.
---    Please implement said annotated manifests on the bottom-up pass.
+--import Debug.Trace
+
+---------------------------------------------------------------
+--- HUGE ToDo:
+---   the current implementation is unsafe in the case
+---   in which body results were allocated in registers,
+---   but this is not possible across the entire Loop
+---   or Match statement, e.g., the sizes of the target
+---   arrays are variant through the loop or through the
+---   Match cases. We need to detect such cases and to
+---   conservatively map the body result back to shared
+---   memory! Note that the parallel dimensions of the
+---   array may be variant, hence this is still not solved
+---   by ensuring that the register slice is statically known.
+-----------------------------------------------------------------
+
+traverseWithAcc :: (Env -> Stms GPU -> Shm2RegM (Env, Stms GPU)) ->
+                   Env -> Stms GPU -> Shm2RegM (Env, Stms GPU)
+traverseWithAcc _ _ Sq.Empty =
+  error ("traverseWithAcc applied to empty stms!")
+traverseWithAcc traverseStms (td_env, bu_env) (stm Sq.:<| stms)
+  | Let (Pat pels) aux (WithAcc inps lam) <- stm,
+    pel : _ <- pels = do
+  ((_, bu_env'), stms') <- traverseStms (td_env, bu_env) stms
+  scope <- askScope
+  let empty_entries = M.map (\etry -> etry {bindings = []}) (regArrays bu_env')
+      inner_bu_env= bu_env' { regArrays = empty_entries }
+  ((_, inner_bu_env'), inner_stms) <-
+    localScope (scope <> scopeOf lam) $
+      traverseStms (td_env, inner_bu_env) $ bodyStms $ lambdaBody lam
+  -- we merge the results from @bu_env''@ and @inner_bu_env'@
+  let bu_env'' = mergeInFstBotEnv (patElemName pel) bu_env' inner_bu_env'
+      lam_bdy  = (lambdaBody lam) { bodyStms = inner_stms }
+      lam'     = lam { lambdaBody = lam_bdy}
+      stm'     = Let (Pat pels) aux $ WithAcc inps lam'
+  pure ((td_env, bu_env''), Sq.singleton stm' <> stms')
+--
+traverseWithAcc _ _ (stm Sq.:<| _) =
+  error ("In traverseWithAcc, current statement is not a WithAcc stm: " ++ prettyString stm)
+
 traverseIf :: (Env -> Stms GPU -> Shm2RegM (Env, Stms GPU)) ->
               Env -> Stms GPU -> Shm2RegM (Env, Stms GPU)
 traverseIf _ _ Sq.Empty =
@@ -24,11 +60,14 @@ traverseIf traverseStms (td_env, bu_env) (stm Sq.:<| stms)
     pel : _ <- pels = do
   let pat_nms = namesFromList $ map patElemName pels
       pat_tps = map patElemType pels
-      mentries = map (mkIfEntries pat_nms) pels
-      aft_entries = M.fromList $ mkEntries mentries $ map (Var . patElemName) pels
-      bu_env' = bu_env { regArrays = M.union (regArrays bu_env) aft_entries }
+      --mentries = map (mkIfEntries pat_nms) pels
+      --aft_entries = M.fromList $ mkEntries mentries $ map (Var . patElemName) pels
+      --bu_env' = bu_env { regArrays = M.union (regArrays bu_env) aft_entries }
+  -- the entries for the Match are generated through manifest stms
+  --   having attribute "inform_pardim_only"; hence no need to add
+  --   RegEntries here.
   -- travers the remaining statements in the outer scope of the Match
-  ((_, bu_env''), stms') <- traverseStms (td_env, bu_env') stms
+  ((_, bu_env''), stms') <- traverseStms (td_env, bu_env) stms
   -- fix the results of the whole Match: if unsafe in register,
   -- then map them to shared memory just after the Match:
   --   @pels'@ are the new pattern elements of the Match
@@ -39,7 +78,8 @@ traverseIf traverseStms (td_env, bu_env) (stm Sq.:<| stms)
   let pels' = zipWith updPatElemName pels $ map fst fix_out_res
       fix_aft_stms = foldl (<>) mempty $ map snd fix_out_res
   -- Now, we recursively analyze each of the Match bodies:
-  let bodies = map caseBody cases ++ [def_bdy]
+  let mentries = map (mkIfEntries bu_env'' pat_nms) pels
+      bodies = map caseBody cases ++ [def_bdy]
   bodies_buenvs <- mapM (analyzeBody scope bu_env'' pat_tps mentries) bodies
   let (bodies', bot_envs) = unzip bodies_buenvs
       bu_env''' = foldl (mergeInFstBotEnv (patElemName pel)) bu_env'' bot_envs
@@ -49,8 +89,8 @@ traverseIf traverseStms (td_env, bu_env) (stm Sq.:<| stms)
   pure ((td_env, bu_env'''), all_stms)
   -- 
   where
-    mkIfEntries pat_nms pel
-      | Just entry <- M.lookup (patElemName pel) (regArrays bu_env),
+    mkIfEntries bot_env pat_nms pel
+      | Just entry <- M.lookup (patElemName pel) (regArrays bot_env),
         Array _ptp shape _u <- patElemType pel,
         fvs_shp <- namesToList (freeIn shape),
         all (\x -> not (nameIn x pat_nms)) fvs_shp,
@@ -59,7 +99,7 @@ traverseIf traverseStms (td_env, bu_env) (stm Sq.:<| stms)
         -- sanity check:
         shpdims entry == zip shp_res_ses shp_res_pes =
       Just $ entry { bindings = [] }
-    mkIfEntries _ _ = Nothing
+    mkIfEntries _ _ _ = Nothing
     --
     analyzeBody scope bot_env pat_tps mentries body = do
       let bdy_res_ses = map resSubExp $ bodyResult body 
@@ -108,13 +148,13 @@ traverseLoop traverseStms (td_env, bu_env) (stm Sq.:<| stms)
   -- travers the remaining statements in the outer scope of the loop
   ((_, bu_env''), stms') <- traverseStms (td_env, bu_env') stms
   -- Now, we recursively analyze the loop body:
-  let old_entries = M.map (\etry -> etry {bindings = []}) (regArrays bu_env)
+  let old_entries = M.map (\etry -> etry {bindings = []}) (regArrays bu_env'')
       inn_entries_p = mkEntries mentries $ map (Var . paramName) fpars
       inn_entries_r = mkEntries mentries res_ses
       new_inn_entries = M.fromList $ inn_entries_p ++ inn_entries_r
       inner_entries = M.union old_entries new_inn_entries
       -- processing the loop body
-      inner_bu_env= bu_env { regArrays = inner_entries }
+      inner_bu_env= bu_env'' { regArrays = inner_entries }
       inner_scope = scope <> scopeOfFParams fpars <> scopeOf (bodyStms lbody)
   ((_, inner_bu_env'), inner_stms) <- localScope inner_scope $
     traverseStms (td_env, inner_bu_env) $ bodyStms lbody
