@@ -1,4 +1,4 @@
--- Based on #2226. A segmented reduction (with a somewhat contrived
+-- Based on #2227. A segmented reduction (with a somewhat contrived
 -- operator), where the operands are arrays.
 --
 -- ==
