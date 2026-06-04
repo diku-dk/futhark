@@ -412,6 +412,10 @@ removeUnusedSOACInput _ pat aux op
     Just (used_arrs, map_lam') <- remove map_lam arrs =
       Simplify . auxing aux . letBind pat . Op $
         soacOp (Screma w used_arrs (ScremaForm map_lam' scan reduce post_lam))
+  | Just (Hist w arrs ops map_lam :: SOAC rep) <- asSOAC op,
+    Just (used_arrs, map_lam') <- remove map_lam arrs =
+      Simplify . auxing aux . letBind pat . Op $
+        soacOp (Hist w used_arrs ops map_lam')
   where
     used_in_body map_lam = freeIn $ lambdaBody map_lam
     usedInput map_lam (param, _) = paramName param `nameIn` used_in_body map_lam
