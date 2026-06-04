@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The `hip` backend previously simulated `f16` operations with `f32`, but now it
+  uses the hardware support for `f16`, similarly to the CUDA backend.
+  Implemented by Jérôme Wagner. (#2470)
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* Invalid fusion that could cause compiler crash. (#2474)
+
+* GPU code generation of segmented reductions with array operands. (#2227,
+  properly this time.)
 
 ## [0.26.3]
 

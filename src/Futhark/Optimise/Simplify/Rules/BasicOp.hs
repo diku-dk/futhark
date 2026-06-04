@@ -304,6 +304,15 @@ ruleBasicOp vtable pat aux (Rearrange v1 perm)
                 Rearrange v2 (map (subtract num_dims) rest_perm)
             letBind pat $ BasicOp $ Replicate dims v
 
+-- Rearranging a replicate of primitives is the same as just reshaping it.
+ruleBasicOp vtable pat aux (Rearrange v1 perm)
+  | Just (BasicOp (Replicate _ se), v1_cs) <- ST.lookupExp v1 vtable,
+    Just old_shape <- arrayShape <$> ST.lookupType v1 vtable,
+    Just (Prim _) <- ST.lookupSubExpType se vtable =
+      Simplify . certifying v1_cs . auxing aux $ do
+        let new_shape = Shape $ rearrangeShape perm $ shapeDims old_shape
+        letBind pat $ BasicOp $ Reshape v1 $ reshapeAll old_shape new_shape
+
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
 ruleBasicOp vtable pat aux (CmpOp CmpSle {} x y)
   | Constant (IntValue (Int64Value 0)) <- x,

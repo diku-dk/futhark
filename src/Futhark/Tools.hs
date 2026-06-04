@@ -21,10 +21,57 @@ module Futhark.Tools
 where
 
 import Control.Monad
+import Data.List qualified as L
+import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.SOACS.SOAC
+import Futhark.Util (mapAccumLM)
+
+splitScanOrRedomap ::
+  (MonadFreshNames m) =>
+  [PatElem Type] ->
+  SubExp ->
+  Lambda rep ->
+  [[SubExp]] ->
+  m (Pat Type, Pat Type, [VName], Lambda rep)
+splitScanOrRedomap pes w map_lam nes = do
+  let (nonmap_pes, map_pes) =
+        splitAt (length $ concat nes) pes
+      (nonmap_ts, map_ts) =
+        splitAt (length (concat nes)) $ lambdaReturnType map_lam
+      (nonmap_res, map_res) =
+        splitAt (length (concat nes)) $ bodyResult $ lambdaBody map_lam
+
+  -- Put some care into not having duplicate results from the map function.
+  (red_arrs, acc_info) <-
+    unzip . snd
+      <$> mapAccumLM
+        accMapPatElem
+        (zip map_res map_pes)
+        (zip3 nonmap_pes nonmap_ts nonmap_res)
+
+  let (nonmap_tmppes, nonmap_ts', nonmap_res') =
+        L.unzip3 $ catMaybes acc_info
+      map_lam' =
+        map_lam
+          { lambdaBody = (lambdaBody map_lam) {bodyResult = nonmap_res' <> map_res},
+            lambdaReturnType = nonmap_ts' <> map_ts
+          }
+      map_pat = nonmap_tmppes <> map_pes
+
+  pure (Pat map_pat, Pat nonmap_pes, red_arrs, map_lam')
+  where
+    accMapPatElem res_to_pe (pe, nonmap_t, res) =
+      case res `L.lookup` res_to_pe of
+        Just pe' -> pure (res_to_pe, (patElemName pe', Nothing))
+        Nothing -> do
+          pe' <-
+            PatElem
+              <$> newVName (baseName (patElemName pe) <> "_map_acc")
+              <*> pure (nonmap_t `arrayOfRow` w)
+          pure ((res, pe') : res_to_pe, (patElemName pe', Just (pe', nonmap_t, res)))
 
 -- | Turns a binding of a @redomap@ into two seperate bindings, a
 -- @map@ binding and a @reduce@ binding (returned in that order).
@@ -33,6 +80,7 @@ import Futhark.IR.SOACS.SOAC
 -- pattern with new 'Ident's for the result of the @map@.
 redomapToMapAndReduce ::
   ( MonadFreshNames m,
+    LetDec rep ~ Type,
     Buildable rep,
     ExpDec rep ~ (),
     Op rep ~ SOAC rep
@@ -45,9 +93,10 @@ redomapToMapAndReduce ::
   ) ->
   m (Stm rep, Stm rep)
 redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
-  (map_pat, red_pat, red_arrs) <-
+  (map_pat, red_pat, red_arrs, map_lam') <-
     splitScanOrRedomap pes w map_lam $ map redNeutral reds
-  map_stm <- mkLet map_pat . Op . Screma w arrs <$> mapSOAC map_lam
+
+  map_stm <- Let map_pat (defAux ()) . Op . Screma w arrs <$> mapSOAC map_lam'
   red_stm <-
     Let red_pat (defAux ()) . Op
       <$> (Screma w red_arrs <$> reduceSOAC reds)
@@ -56,6 +105,7 @@ redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
 scanomapToMapAndScan ::
   ( MonadFreshNames m,
     Buildable rep,
+    LetDec rep ~ Type,
     ExpDec rep ~ (),
     Op rep ~ SOAC rep
   ) =>
@@ -67,9 +117,9 @@ scanomapToMapAndScan ::
   ) ->
   m (Stm rep, Stm rep)
 scanomapToMapAndScan (Pat pes) (w, scans, map_lam, arrs) = do
-  (map_pat, scan_pat, scan_arrs) <-
+  (map_pat, scan_pat, scan_arrs, map_lam') <-
     splitScanOrRedomap pes w map_lam $ map scanNeutral scans
-  map_stm <- mkLet map_pat . Op . Screma w arrs <$> mapSOAC map_lam
+  map_stm <- Let map_pat (defAux ()) . Op . Screma w arrs <$> mapSOAC map_lam'
   scan_stm <-
     Let scan_pat (defAux ()) . Op
       <$> (Screma w scan_arrs <$> scanSOAC scans)
@@ -124,27 +174,6 @@ maposcanomapToMaposcanAndMap (Pat pes) (w, post_lam, scans, map_lam, arrs) = do
   pure (map_stm, post_stm)
   where
     tempRes res = newIdent "temp_res" $ res `arrayOfRow` w
-
-splitScanOrRedomap ::
-  (Typed dec, MonadFreshNames m) =>
-  [PatElem dec] ->
-  SubExp ->
-  Lambda rep ->
-  [[SubExp]] ->
-  m ([Ident], Pat dec, [VName])
-splitScanOrRedomap pes w map_lam nes = do
-  let (acc_pes, arr_pes) =
-        splitAt (length $ concat nes) pes
-      (acc_ts, _arr_ts) =
-        splitAt (length (concat nes)) $ lambdaReturnType map_lam
-  map_accpat <- zipWithM accMapPatElem acc_pes acc_ts
-  map_arrpat <- mapM arrMapPatElem arr_pes
-  let map_pat = map_accpat ++ map_arrpat
-  pure (map_pat, Pat acc_pes, map identName map_accpat)
-  where
-    accMapPatElem pe acc_t =
-      newIdent (baseName (patElemName pe) <> "_map_acc") $ acc_t `arrayOfRow` w
-    arrMapPatElem = pure . patElemIdent
 
 -- | Turn a Screma into a maposcanomap (possibly with mapout parts) and a
 -- Redomap.  This is used to handle Scremas that are so complicated

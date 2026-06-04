@@ -99,6 +99,10 @@ If run without ``--library``, ``futhark hip`` will invoke a C
 compiler to compile the generated C program into a binary.  This only
 works if the C compiler can find the necessary HIP libraries.
 
+At runtime (not just compile-time!), the ``HIP_PATH`` environment variable (if
+set) must point to the HIP installation directory, which most importantly must
+contain an ``include`` subdirectory with the HIP header files.
+
 SEE ALSO
 ========
 
