@@ -20,7 +20,6 @@ import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Entry
-import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
@@ -1304,6 +1303,26 @@ internaliseDimIndex w (E.DimSlice i j s) = do
     negone = constant (-1 :: Int64)
     one = constant (1 :: Int64)
 
+internaliseFoldLambda ::
+  E.Exp ->
+  [I.Type] ->
+  [I.Type] ->
+  InternaliseM (I.Lambda SOACS)
+internaliseFoldLambda lam acctypes arrtypes = do
+  let rowtypes = map I.rowType arrtypes
+  (params, body, rettype) <- internaliseLambda lam $ acctypes ++ rowtypes
+  let rettype' =
+        [ t `I.setArrayShape` I.arrayShape shape
+        | (t, shape) <- zip rettype acctypes
+        ]
+  -- The result of the body must have the exact same shape as the
+  -- initial accumulator.
+  mkLambda params $
+    ensureResultShape
+      (ErrorMsg [ErrorString "shape of result does not match shape of initial value"])
+      rettype'
+      =<< bodyBind body
+
 internaliseScanOrReduce ::
   Name ->
   Name ->
@@ -1322,7 +1341,7 @@ internaliseScanOrReduce desc what f (lam, ne, arr) = do
       ne'
   nests <- mapM I.subExpType nes'
   arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
+  lam' <- internaliseFoldLambda lam nests arrts
   w <- arraysSize 0 <$> mapM lookupType arrs
   letValExp' desc . I.Op =<< f w lam' nes' arrs
 
@@ -1353,7 +1372,7 @@ internaliseHist dim desc rf hist op ne buckets img = do
       n
   ne_ts <- mapM I.subExpType ne_shp
   his_ts <- mapM (fmap (I.stripArray (dim - 1)) . lookupType) hist'
-  op' <- internaliseFoldLambda internaliseLambda op ne_ts his_ts
+  op' <- internaliseFoldLambda op ne_ts his_ts
 
   -- reshape return type of bucket function to have same size as neutral element
   -- (modulo the index)
@@ -1654,7 +1673,10 @@ bodyExtType (Body _ stms res) =
   where
     stmsscope = scopeOf stms
 
-internaliseLambda :: InternaliseLambda
+internaliseLambda ::
+  E.Exp ->
+  [I.Type] ->
+  InternaliseM ([I.LParam SOACS], I.Body SOACS, [I.Type])
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
 internaliseLambda (E.Lambda params body _ (Info (RetType _ rettype)) _) rowtypes =
@@ -1810,16 +1832,6 @@ isIntrinsicFunction qname args = do
       lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
       let w = arraysSize 0 arr_ts
       letTupExp' desc . I.Op . I.Screma w arr' =<< I.mapSOAC lam'
-    handleSOACs [k, lam, arr] "partition" = do
-      k' <- fromIntegral <$> fromInt32 k
-      Just $ \_desc -> do
-        arrs <- internaliseExpToVars "partition_input" arr
-        lam' <- internalisePartitionLambda internaliseLambda k' lam $ map I.Var arrs
-        uncurry (++) <$> partitionWithSOACS (fromIntegral k') lam' arrs
-      where
-        fromInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
-        fromInt32 (IntLit k' (Info (E.Scalar (E.Prim (E.Signed Int32)))) _) = Just $ fromInteger k'
-        fromInt32 _ = Nothing
     handleSOACs [lam, ne, arr] "reduce" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr)
       where
@@ -2178,114 +2190,6 @@ askSafety :: InternaliseM Safety
 askSafety = do
   check <- asks envDoBoundsChecks
   pure $ if check then I.Safe else I.Unsafe
-
--- Implement partitioning using maps, scans and writes.
-partitionWithSOACS :: Int -> I.Lambda SOACS -> [I.VName] -> InternaliseM ([I.SubExp], [I.SubExp])
-partitionWithSOACS k lam arrs = do
-  arr_ts <- mapM lookupType arrs
-  let w = arraysSize 0 arr_ts
-  classes_and_increments <-
-    letTupExp "increments"
-      . I.Op
-      . I.Screma w arrs
-      =<< mapSOAC lam
-  (classes, increments) <- case classes_and_increments of
-    classes : increments -> pure (classes, take k increments)
-    _ -> error "partitionWithSOACS"
-
-  add_lam_x_params <-
-    replicateM k $ newParam "x" (I.Prim int64)
-  add_lam_y_params <-
-    replicateM k $ newParam "y" (I.Prim int64)
-  add_lam_body <- runBodyBuilder $
-    localScope (scopeOfLParams $ add_lam_x_params ++ add_lam_y_params) $
-      fmap subExpsRes $
-        forM (zip add_lam_x_params add_lam_y_params) $ \(x, y) ->
-          letSubExp "z" $
-            I.BasicOp $
-              I.BinOp
-                (I.Add Int64 I.OverflowUndef)
-                (I.Var $ I.paramName x)
-                (I.Var $ I.paramName y)
-  let add_lam =
-        I.Lambda
-          { I.lambdaBody = add_lam_body,
-            I.lambdaParams = add_lam_x_params ++ add_lam_y_params,
-            I.lambdaReturnType = replicate k $ I.Prim int64
-          }
-      nes = replicate (length increments) $ intConst Int64 0
-
-  scan <- I.scanSOAC [I.Scan add_lam nes]
-  all_offsets <- letTupExp "offsets" $ I.Op $ I.Screma w increments scan
-
-  -- We have the offsets for each of the partitions, but we also need
-  -- the total sizes, which are the last elements in the offests.  We
-  -- just have to be careful in case the array is empty.
-  last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int64 OverflowUndef) w $ constant (1 :: Int64)
-  let nonempty_body = runBodyBuilder $
-        fmap subExpsRes $
-          forM all_offsets $ \offset_array ->
-            letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
-      empty_body = resultBodyM $ replicate k $ constant (0 :: Int64)
-  is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int64) w $ constant (0 :: Int64)
-  sizes <-
-    letTupExp "partition_size" =<< eIf (eSubExp is_empty) empty_body nonempty_body
-
-  -- The total size of all partitions must necessarily be equal to the
-  -- size of the input array.
-
-  -- Create scratch arrays for the result.
-  blanks <- forM arr_ts $ \arr_t ->
-    letExp "partition_dest" $
-      I.BasicOp $
-        Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
-
-  -- Now write into the result.
-  results <-
-    doScatter "partition_res" 1 blanks (classes : all_offsets ++ arrs) $ \params -> do
-      let ([c_param], offset_params, value_params) =
-            splitAt3 1 (length all_offsets) params
-      offset <-
-        mkOffsetLambdaBody
-          (map I.Var sizes)
-          (I.Var $ I.paramName c_param)
-          0
-          offset_params
-      pure $ offset : map (I.Var . I.paramName) value_params
-  sizes' <-
-    letSubExp "partition_sizes" $
-      I.BasicOp $
-        I.ArrayLit (map I.Var sizes) $
-          I.Prim int64
-  pure (map I.Var results, [sizes'])
-  where
-    mkOffsetLambdaBody ::
-      [SubExp] ->
-      SubExp ->
-      Int ->
-      [I.LParam SOACS] ->
-      InternaliseM SubExp
-    mkOffsetLambdaBody _ _ _ [] =
-      pure $ constant (-1 :: Int64)
-    mkOffsetLambdaBody sizes c i (p : ps) = do
-      is_this_one <-
-        letSubExp "is_this_one" $
-          I.BasicOp $
-            I.CmpOp (CmpEq int64) c $
-              intConst Int64 $
-                toInteger i
-      next_one <- mkOffsetLambdaBody sizes c (i + 1) ps
-      this_one <-
-        letSubExp "this_offset"
-          =<< foldBinOp
-            (Add Int64 OverflowUndef)
-            (constant (-1 :: Int64))
-            (I.Var (I.paramName p) : take i sizes)
-      letSubExp "total_res"
-        =<< eIf
-          (eSubExp is_this_one)
-          (resultBodyM [this_one])
-          (resultBodyM [next_one])
 
 sizeExpForError :: E.Size -> InternaliseM [ErrorMsgPart SubExp]
 sizeExpForError e
