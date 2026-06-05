@@ -2726,7 +2726,7 @@ distResCerts env = Certs . map f
     f (DistInputFree v _) = v
     f (DistInput rt _) = case resVar rt env of
       Regular v -> v
-      Irregular {} -> error "resCerts: irregular"
+      Irregular r -> irregularD r
 
 reshapeAndBind :: VName -> VName -> Shape -> Builder GPU ()
 reshapeAndBind v src shape = do
