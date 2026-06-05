@@ -14,8 +14,8 @@
 --
 -- Futhark's AD support includes the following:
 --
---   * Differentiation operators for forward-mode (`jvp`) and reverse-mode
---     (`vjp`).
+--   * Differentiation operators for forward-mode (`jvp`@term) and reverse-mode
+--     (`vjp`@term).
 --
 --   * Arbitrary control flow in differentiable code.
 --
@@ -23,7 +23,9 @@
 --     arbitrary mixing of forward- and reverse mode (although using multiple
 --     rounds of reverse mode is rarely useful and often slow).
 --
---   * Custom derivatives (`with_vjp`).
+--   * Custom derivatives (`with_vjp`@term).
+--
+--   * Vectorised AD (`vjp_vec`@term, `vjp_vec`@term).
 --
 --   * Checkpointing of sequential loops.
 --
@@ -62,8 +64,7 @@
 -- given situation depends on whether the function has more inputs or
 -- outputs.
 --
--- You can freely nest `vjp` and `jvp` to compute higher-order
--- derivatives.
+-- We can freely nest `vjp` and `jvp` to compute higher-order derivatives.
 --
 -- ## Efficiency
 --
@@ -91,27 +92,34 @@
 -- but it can still be substantial for programs with deep sequential
 -- loops.
 --
+-- It varies on a case-by-case basis whether vectorised AD is faster or not. It
+-- essentially converts propagation of (co-)tangents from scalar to array
+-- operations, which can have a significant impact on memory accesses, depending
+-- on how the compiler manages to optimise the resulting code. It is hard to
+-- predict whether this offsets the reduction in primal work. If the vector size
+-- is a constant, and the `#[unroll]` attribute is put on the AD operator, then
+-- the vectors become unrolled (turned into tuples, essentially), although this
+-- should only be done when the vector size is quite small, as the increase in
+-- code size is substantial.
+--
 -- ## Differentiable functions
 --
--- AD only gives meaningful results for differentiable functions. The
--- Futhark type system does not distinguish differentiable or
--- non-differentiable operations. As a rule of thumb, a function is
--- differentiable if its results are computed using a composition of
--- primitive floating-point operations, without ever converting to or
--- from integers.
+-- AD only gives meaningful results for differentiable functions. The Futhark
+-- type system does not distinguish differentiable from non-differentiable
+-- operations. As a rule of thumb, a function is differentiable if its results
+-- are computed using a composition of primitive floating-point operations,
+-- without ever converting to or from integers.
 --
--- Note that a function whose input or output is a sum type with more
--- than one constructor is *not* differentiable (or at least the
--- sum-typed part is not). This is because the choice of constructor
--- is not a continuous quantity.
+-- Note that a function whose input or output is a sum type with more than one
+-- constructor is *not* differentiable (or at least the sum-typed part is not).
+-- This is because the choice of constructor is not a continuous quantity.
 --
 -- ## Limitations
 --
--- `jvp` is expected to work in all cases. `vjp` has limitations when
--- using the GPU backends similar to those for irregular flattening.
--- Specifically, you should avoid structures with variant sizes, such
--- as loops that carry an array that changes size through the
--- execution of the loop.
+-- `jvp` is expected to work in all cases. `vjp` has limitations when using the
+-- GPU backends similar to those for irregular flattening. Specifically, you
+-- should avoid structures with variant sizes, such as loops that carry an array
+-- that changes size through the execution of the loop.
 
 -- | Jacobian-Vector Product ("forward mode"), producing also the
 -- primal result as the first element of the result tuple.
