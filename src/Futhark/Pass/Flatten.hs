@@ -2295,11 +2295,11 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
               pure $ insertReps (zip (map distResTag res) reps) env
             Nothing ->
               -- XXX: here we silently sequentialise any SOAC that is not handled
-              -- above. We need to make sure that we actually handle everything we
+              -- above if it is possible to do so. We need to make sure that we actually handle everything we
               -- care about!
-              error "unhandled SOAC"
-    -- transformScalarStm segments env inps res $
-    --   Let { stmPat = pat, stmAux = aux, stmExp = Op (Screma w arrs form) }
+              if all isRegularDistResult res 
+                then transformScalarStm lvl segments env inps res $ Let pat aux (Op (Screma w arrs form))
+                else error "Unhandled SOAC"
     Let _ aux (Match scrutinees cases defaultCase rt) -> do
       if any (isVariant inps env) scrutinees
         then
@@ -2344,21 +2344,29 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
           let payload_res = drop (S.size (shapeContext rets)) match_res
           let reps = distResultsToResReps res payload_res
           pure $ insertReps (zip (map distResTag res) reps) env
-    Let _ _ (Apply name args rettype s) -> do
-      let name' = liftFunName name
-      w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
-      args' <- ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
-      args_ts <- mapM (subExpType . fst) args'
-      let dietToUnique Consume = Unique
-          dietToUnique Observe = Nonunique
-          dietToUnique ObservePrim = Nonunique
-          param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
-          rettype' = addRetAls param_ts $ liftRetType w $ map fst rettype
-      result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
-      reps <-
-        zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) $
-          resultToResReps (map fst rettype) result
-      pure $ insertReps (zip (map distResTag res) reps) env
+    Let pat aux (Apply name args rettype s) ->
+      case lvl of 
+        SegThread {} -> do 
+            let name' = liftFunName name
+            w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+            args' <- ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
+            args_ts <- mapM (subExpType . fst) args'
+            let dietToUnique Consume = Unique
+                dietToUnique Observe = Nonunique
+                dietToUnique ObservePrim = Nonunique
+                param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
+                rettype' = addRetAls param_ts $ liftRetType w $ map fst rettype
+            result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
+            reps <-
+              zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) $
+                resultToResReps (map fst rettype) result
+            pure $ insertReps (zip (map distResTag res) reps) env
+        -- TODO: Do something about intra functions
+        _ -> if all isRegularDistResult res 
+            then transformScalarStm lvl segments env inps res $  Let pat aux (Apply name args rettype s)
+            else error "Unhandled Apply in non SegThread Seglevel"
+           
+    
     Let _ aux (Loop merge (ForLoop i it n) body) -> do
       if isVariant inps env n
         then transformFortoWhile lvl segments env inps res aux merge i it n body
