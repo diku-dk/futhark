@@ -1301,23 +1301,45 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
             ~+~ sExt it (untyped (pe64 v'))
             ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns res_F res_O (distResTag res) res_D' Dense env
-    Concat 0 arr shp -> do
-      ns <- dataArr lvl segments env inps shp
-      reparr <- mapM (getIrregRep lvl segments env inps) (NE.toList arr)
-      rep' <- concatIrreg lvl segments env ns reparr
-      pure $ insertRep (distResTag res) (Irregular rep') env
     -- TODO: add invariant special handling
     Concat d arr shp -> do
-      ns <- dataArr lvl segments env inps shp
-      reparr <- mapM (getIrregRep lvl segments env inps) (NE.toList arr)
-      -- typearr <- mapM lookupType arr
-      typearr <-
-        forM arr $ \v ->
-          case lookup v inps of
-            Just inp -> pure $ distInputType inp
-            Nothing -> lookupType v
-      rep' <- concatIrregAlongDim lvl segments env ns reparr (NE.toList typearr) inps d
-      pure $ insertRep (distResTag res) (Irregular rep') env
+      let lookupInputType v =
+            case lookup v inps of
+              Just inp -> pure $ distInputType inp
+              Nothing -> lookupType v
+      arr_ts <- mapM lookupInputType (NE.toList arr)
+      let inputShapeUniform t =
+            not $ any (isVariant inps env) (arrayDims t)
+      if isRegularDistResult res
+          && not (isVariant inps env shp)
+          && all inputShapeUniform arr_ts
+        then do
+          --  Unifrom Concat
+          traceM "unform concat"
+          arrs_lifted <-
+            forM (zip (NE.toList arr) arr_ts) $ \(v, t) -> do
+              let expectedShape = segmentsShape segments <> arrayShape t
+              liftSubExpRegular lvl segments inps env expectedShape (Var v)
+          v' <-
+            letExp "concat_reg" $
+              BasicOp $
+                Concat
+                  (segmentsRank segments + d)
+                  (NE.fromList arrs_lifted)
+                  shp
+
+          pure $ insertRegulars [distResTag res] [v'] env
+        else do 
+          traceM "!!!NON unform concat" 
+          ns <- dataArr lvl segments env inps shp
+          reparr <- mapM (getIrregRep lvl segments env inps) (NE.toList arr)
+          traceM "lets enter"
+          rep' <- case d of 
+            0 -> concatIrreg lvl segments env ns reparr
+            d' -> do
+              concatIrregAlongDim lvl segments env ns reparr arr_ts inps d'
+          traceM "Job Done"
+          pure $ insertRep (distResTag res) (Irregular rep') env
 
   --  Unifrom Replicate
     Replicate (Shape dims) se
