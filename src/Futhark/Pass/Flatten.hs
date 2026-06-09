@@ -1399,7 +1399,32 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
       rep <- getIrregRep lvl segments env inps v
       rep' <- replicateIrreg lvl segments env mul_dims (baseName v) rep
       pure $ insertRep (distResTag res) (Irregular rep') env
-    Update _ as slice se
+    Update safety as slice se
+      -- Uniform Update
+      | Just as_t <- distInputType <$> lookup as inps,
+        isRegularDistResult res,
+        not (any (isVariant inps env) slice) -> do
+        as' <-
+          liftSubExpRegular
+            lvl
+            segments
+            inps
+            env
+            (segmentsShape segments <> arrayShape as_t)
+            (Var as)
+        se' <-
+          liftSubExpRegular
+            lvl
+            segments
+            inps
+            env
+            (segmentsShape segments <> sliceShape slice)
+            se
+        let segmentSlice = map sliceDim . shapeDims . segmentsShape
+        v <-
+          certifying (distCerts inps aux env) . letExp "update_reg" . BasicOp $
+            Update safety as' (Slice $ segmentSlice segments <> unSlice slice) (Var se')
+        pure $ insertRegulars [distResTag res] [v] env
       | Just as_t <- distInputType <$> lookup as inps -> do
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
           ns <- letExp "slice_sizes"
