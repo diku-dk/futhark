@@ -1319,7 +1319,14 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
       rep' <- concatIrregAlongDim lvl segments env ns reparr (NE.toList typearr) inps d
       pure $ insertRep (distResTag res) (Irregular rep') env
 
-    --  TODO: add invaraint special handling
+  --  Unifrom Replicate
+    Replicate (Shape dims) se
+      | isRegularDistResult res -> do
+          t <- localScope (scopeOfDistInputs inps) $ subExpType se
+          let expectedShape = segmentsShape segments <> arrayShape t 
+          lifted <-  liftSubExpRegular lvl segments inps env expectedShape se
+          v_rep <- replicateForDims segments (Shape dims) lifted
+          pure $ insertRegulars [distResTag res] [v_rep] env
     Replicate (Shape [n]) (Var v) -> do
       ns <- dataArr lvl segments env inps n
       rep <- getIrregRep lvl segments env inps v
@@ -1701,6 +1708,7 @@ onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod =
         Dense -> do
           v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape (irregularD rep) $ reshapeAll old_shape new_shape
           pure $ MapArray v_reshaped (stripArray 1 rep_t)
+        -- TODO: What if we don't do this here? we can still just read from our replicated view 
         Replicated -> do
           new_flat <-
             letExp (baseName arr <> "_flat_expand")
@@ -1871,6 +1879,19 @@ replicateForW segments w v = do
   v_rep <-
     letExp (baseName v <> "_free_rep") . BasicOp $
       Replicate (Shape [w]) (Var v)
+  letExp (baseName v <> "_free_rep_tr") . BasicOp $
+    Rearrange v_rep perm
+
+replicateForDims :: Segments -> Shape -> VName -> Builder GPU VName
+replicateForDims segments dims v = do
+  v_t <- lookupType v
+  let seg_rank = length (NE.toList segments)
+      v_rank = arrayRank v_t
+      dims_rank = shapeRank dims
+      perm = [dims_rank .. dims_rank + seg_rank - 1] ++ [0 .. dims_rank - 1] ++ [seg_rank + dims_rank .. dims_rank + v_rank - 1]
+  v_rep <-
+    letExp (baseName v <> "_free_rep") . BasicOp $
+      Replicate dims (Var v)
   letExp (baseName v <> "_free_rep_tr") . BasicOp $
     Rearrange v_rep perm
 
