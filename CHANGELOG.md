@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Invalid fusion that could cause compiler crash. (#2474)
 
 * GPU code generation of segmented reductions with array operands. (#2227,
-  properly this time.)
+  properly this time, and #2482)
 
 ## [0.26.3]
 
