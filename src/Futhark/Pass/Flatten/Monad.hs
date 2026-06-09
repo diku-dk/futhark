@@ -41,6 +41,8 @@ module Futhark.Pass.Flatten.Monad
     inputReps,
     resVar,
     scopeOfDistInputs,
+    lookupInputType,
+    subExpInputType,
     resultToResReps,
     isVariant,
     flattenDistStms,
@@ -306,6 +308,18 @@ scopeOfDistInputs :: DistInputs -> Scope GPU
 scopeOfDistInputs = scopeOfLParams . map f
   where
     f (v, inp) = Param mempty v (distInputType inp)
+
+lookupInputType :: DistInputs -> VName -> Builder GPU Type
+lookupInputType inps v =
+  case lookup v inps of
+    Just inp -> pure $ distInputType inp
+    Nothing -> lookupType v
+
+subExpInputType :: DistInputs -> SubExp -> Builder GPU Type
+subExpInputType _ (Constant val) =
+  pure $ Prim $ primValueType val
+subExpInputType inps (Var v) =
+  lookupInputType inps v
 
 isVariant :: DistInputs -> DistEnv -> SubExp -> Bool
 isVariant inps env se = case se of

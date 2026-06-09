@@ -263,13 +263,11 @@ transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
   let red_lam = redLambda sing_red
       nes' = nes
       shape = mempty
-  outer_scope <- askScope
   let comm
         | commutativeLambda red_lam = Commutative
         | otherwise = redComm sing_red
       sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes'
-      input_scope = scopeOfDistInputs inps `M.difference` outer_scope
-  free_and_sizes <- freeWithTypeDeps input_scope free
+  free_and_sizes <- freeWithTypeDeps inps free
   (free_replicated, replicated) <-
     fmap unzip . sequence $
       mapMaybe
@@ -307,9 +305,7 @@ transformUniformMaposcanomap ::
 transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam = do
   let free = freeIn map_lam <> freeIn post_lam
       new_segment = segments <> pure w
-  outer_scope <- askScope
-  let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
-  free_and_sizes <- freeWithTypeDeps input_scope free
+  free_and_sizes <- freeWithTypeDeps inps free
   (free_replicated, replicated) <-
     fmap unzip . sequence $
       mapMaybe
@@ -889,8 +885,6 @@ runMapLambdaBody ::
   [DistResult] ->
   Builder GPU [VName]
 runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
-  outer_scope <- askScope
-  let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
   map_lam' <- renameLambda $ soacsLambdaToGPU map_lam
   ws <- dataArr defaultSegLevel segments env inps w
   (_ws_F, ws_O, ws_data) <- doRepIota defaultSegLevel ws
@@ -900,7 +894,7 @@ runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
       (lambdaParams map_lam')
       arrs
 
-  free_and_sizes <- freeWithTypeDeps input_scope (freeIn map_lam')
+  free_and_sizes <- freeWithTypeDeps inps (freeIn map_lam')
   let new_segments = segments <> pure w
       (param_env, param_inputs) =
         mapArraysToInputs (lambdaParams map_lam') arrs'
@@ -1303,11 +1297,7 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
       pure $ insertIrregular ns res_F res_O (distResTag res) res_D' Dense env
     -- TODO: add invariant special handling
     Concat d arr shp -> do
-      let lookupInputType v =
-            case lookup v inps of
-              Just inp -> pure $ distInputType inp
-              Nothing -> lookupType v
-      arr_ts <- mapM lookupInputType (NE.toList arr)
+      arr_ts <- mapM (lookupInputType inps) (NE.toList arr) 
       let inputShapeUniform t =
             not $ any (isVariant inps env) (arrayDims t)
       if isRegularDistResult res
@@ -1344,7 +1334,7 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
   --  Unifrom Replicate
     Replicate (Shape dims) se
       | isRegularDistResult res -> do
-          t <- localScope (scopeOfDistInputs inps) $ subExpType se
+          t <- subExpInputType inps se
           let expectedShape = segmentsShape segments <> arrayShape t 
           lifted <-  liftSubExpRegular lvl segments inps env expectedShape se
           v_rep <- replicateForDims segments (Shape dims) lifted
@@ -1959,9 +1949,7 @@ distributeAndTransformInnerMap ::
   Builder GPU [ResRep]
 distributeAndTransformInnerMap lvl mode ws_triple new_segment inps pat arrs' onFreeVar map_lam = do
   let free = freeIn map_lam
-  outer_scope <- askScope
-  let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
-  free_and_sizes <- freeWithTypeDeps input_scope free
+  free_and_sizes <- freeWithTypeDeps inps free
   (free_replicated, replicated) <-
     fmap unzip . sequence $
       mapMaybe
@@ -2240,9 +2228,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
           nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
           let sing_red' = sing_red {redNeutral = nes'}
           let free = freeIn map_lam
-          outer_scope <- askScope
-          let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
-          free_and_sizes <- freeWithTypeDeps input_scope free
+          free_and_sizes <- freeWithTypeDeps inps free
           ws <- dataArr lvl segments env inps w
           (_, _, ws_data) <- doRepIota lvl ws_S
           -- TODO: this will break in certain cases where the free variable is an irregular that needs to be replicated
@@ -2297,9 +2283,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
           (ws_F, ws_O, ws_S, elems, elems_kind) <-
             prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
           let free = freeIn map_lam <> freeIn post_lam
-          outer_scope <- askScope
-          let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
-          free_and_sizes <- freeWithTypeDeps input_scope free
+          free_and_sizes <- freeWithTypeDeps inps free
           ws <- dataArr lvl segments env inps w
           (_, _, ws_data) <- doRepIota lvl ws_S
           -- TODO: this will break in certain cases where the free variable is an irregular that needs to be replicated
@@ -2589,10 +2573,8 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
                         filter
                           (isVariant loop_new_inputs loop_env_local . Var)
                           (namesToList $ freeIn body)
-                      input_scope = scopeOfDistInputs loop_new_inputs `M.difference` scope
                   free_sizes <-
-                    localScope input_scope $
-                      foldMap freeIn <$> mapM lookupType free_in_body
+                    foldMap freeIn <$> mapM (lookupInputType loop_new_inputs) free_in_body
                   let free_variant_sizes = filter (isVariant loop_new_inputs loop_env_local . Var) (namesToList free_sizes)
                       free_size_vars = nubOrd (free_variant_sizes <> free_in_body)
                   (ts, vs, reps) <- unzip3 <$> mapM (splitInput lvl segments loop_new_inputs loop_env_local active_inds) free_size_vars
@@ -2706,9 +2688,8 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
     (Let _pat aux (Op (Hist w hist_inputs ops bucket_fun))) -> do 
       -- todo: add this suitableUniformOperator
       nonuniform_inps <-
-        localScope (scopeOfDistInputs inps) $
-          any (any (isVariant inps env) . arrayDims)
-            <$> mapM lookupType hist_inputs
+        any (any (isVariant inps env) . arrayDims)
+          <$> mapM (lookupInputType inps) hist_inputs
       let nonuniform =
             nonuniform_inps
               || isVariant inps env w
@@ -2719,7 +2700,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
           do 
             let new_segment = segments <> pure w
             lifted_inps <- forM hist_inputs $ \hist_inp -> do
-              t <- localScope (scopeOfDistInputs inps) $ lookupType hist_inp
+              t <- lookupInputType inps hist_inp
               let expectedShape = segmentsShape segments <> arrayShape t 
               liftSubExpRegular lvl segments inps env expectedShape (Var hist_inp) 
             let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
@@ -2734,9 +2715,7 @@ transformDistStm lvl segments env (DistStm inps res (ParallelStm stm)) = do
             let free = freeIn bucket_fun
             let isDest = flip elem $ concatMap Futhark.IR.SOACS.histDest ops'
                 free_notDest = filter (not . isDest) (namesToList free)
-            outer_scope <- askScope
-            let input_scope = scopeOfDistInputs inps `M.difference` outer_scope
-            free_and_sizes <- freeWithTypeDeps input_scope (namesFromList free_notDest)
+            free_and_sizes <- freeWithTypeDeps inps (namesFromList free_notDest)
             (free_replicated, replicated) <-
               fmap unzip . sequence $
                 mapMaybe
@@ -2973,12 +2952,10 @@ transformDistributed lvl irregs segments dist = do
 -- we need the irregular representation when any of its dimensions are either:
 -- a loop parameter name or variant in the outer map context
 
-freeWithTypeDeps :: Scope GPU -> Names -> Builder GPU [VName]
-freeWithTypeDeps input_scope free = do
+freeWithTypeDeps :: DistInputs -> Names -> Builder GPU [VName]
+freeWithTypeDeps inps free = do
   let free_names = namesToList free
-  free_sizes <-
-    localScope input_scope $
-      foldMap freeIn <$> mapM lookupType free_names
+  free_sizes <- foldMap freeIn <$> mapM (lookupInputType inps) free_names
   pure $ nubOrd $ namesToList free_sizes <> free_names
 
 needsIrregular :: DistInputs -> DistEnv -> S.Set VName -> DeclType -> Bool

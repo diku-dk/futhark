@@ -333,12 +333,9 @@ mapArraysToInputs params arrs =
 freeInputsFor :: DistInputs -> Lambda SOACS -> Builder GPU DistInputs
 freeInputsFor inps lam =
   do
-    outer_scope <- askScope
     let free = freeIn lam
-        input_scope = scopeOfDistInputs inps `M.difference` outer_scope
     free_sizes <-
-      localScope input_scope $
-        foldMap freeIn <$> mapM lookupType (namesToList free)
+        foldMap freeIn <$> mapM (lookupInputType inps)  (namesToList free)
     pure
       [ (v, inp)
       | v <- namesToList $ free <> free_sizes,

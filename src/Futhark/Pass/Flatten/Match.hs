@@ -92,10 +92,8 @@ distributeBranch ::
 distributeBranch lvl segments env inps is body acc_reps = do
   let free_in_body = filter (isVariant inps env . Var) (namesToList $ freeIn body)
   scope <- askScope
-  let input_scope = scopeOfDistInputs inps `M.difference` scope
   free_sizes <-
-    localScope input_scope $
-      foldMap freeIn <$> mapM lookupType free_in_body
+    foldMap freeIn <$> mapM (lookupInputType inps) free_in_body
   let free_variant_sizes = filter (isVariant inps env . Var) (namesToList free_sizes)
       free_size_vars = nubOrd (free_variant_sizes <> free_in_body) 
   (ts, vs, reps) <-

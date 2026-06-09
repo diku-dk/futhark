@@ -54,7 +54,7 @@ transformWithAcc ::
   Lambda SOACS ->
   Builder GPU DistEnv
 transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_inputs acc_lam = do
-  let inputTypes (_, arrs, _) = mapM lookupType arrs
+  let inputTypes (_, arrs, _) = mapM (lookupInputType inps) arrs
 
   lam_params' <- newAccLamParams $ lambdaParams acc_lam
 
@@ -67,7 +67,6 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
 
   -- Potentially change to distres option.
   nonuniform <-
-    localScope (scopeOfDistInputs inps) $
       any (any (any (isVariant inps env) . arrayDims))
         <$> mapM inputTypes withacc_inputs
 
@@ -184,7 +183,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
         <*> traverse (onOpWithIndexRank (segmentsRank segments)) op
       where
         onArr arr = do
-          arr_t <- localScope (scopeOfDistInputs inps) $ lookupType arr
+          arr_t <- lookupInputType inps arr
           let arr_shape = arrayShape arr_t
               expected_shape = segmentsShape segments <> arr_shape
           liftSubExpRegular (flattenSegLevel ops) segments inps env expected_shape (Var arr)
