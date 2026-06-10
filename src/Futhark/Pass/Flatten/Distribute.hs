@@ -266,6 +266,7 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
     isParallelBasicOp ArrayVal {} = True
     isParallelBasicOp FlatUpdate {} = True
     isParallelBasicOp FlatIndex {} = False
+    isParallelBasicOp Manifest {} = True
     isParallelBasicOp _ = False
 
     isMap (BasicOp op) = isParallelBasicOp op

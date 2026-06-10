@@ -1414,6 +1414,31 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
             letExp (baseName v <> "_copy_free") . BasicOp $
               Replicate (segmentsShape segments) (Var v)
           pure $ insertRegulars [distResTag res] [v'] env
+    Manifest v perm
+      | isRegularDistResult res -> do
+          t <- lookupInputType inps v
+          v_lifted <-
+            liftSubExpRegular
+              lvl
+              segments
+              inps
+              env
+              (segmentsShape segments <> arrayShape t)
+              (Var v)
+          let segment_rank = segmentsRank segments
+          v_manifest <- letExp (baseName v <> "_manifest") . BasicOp $ Manifest v_lifted ([0 .. segment_rank - 1] ++ map (+ segment_rank) perm) 
+          pure $ insertRegulars [distResTag res] [v_manifest] env
+      | otherwise -> do
+          irreg <- getIrregRep lvl segments env inps v
+          irreg_dense <- ensureDenseIrregular lvl (baseName v <> "_manifest") irreg
+          elems_copy <-
+            letExp (baseName (irregularD irreg_dense) <> "_manifest") . BasicOp $
+              Replicate mempty (Var $ irregularD irreg_dense)
+          pure $
+            insertRep
+              (distResTag res)
+              (Irregular $ irreg_dense {irregularD = elems_copy})
+              env
     Replicate (Shape dims) (Var v) -> do
       dim_arrs <- mapM (dataArr lvl segments env inps) dims
       seg_number <- arraySize 0 <$> lookupType (head dim_arrs)
