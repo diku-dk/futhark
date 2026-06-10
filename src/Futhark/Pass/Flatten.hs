@@ -1503,7 +1503,7 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
       | otherwise ->
           error "Flattening update: destination is not input."
     FlatUpdate as flat_slice v
-      -- Uniform Update
+      -- Uniform Flat Update
       | Just as_t <- distInputType <$> lookup as inps,
         isRegularDistResult res,
         not (any (isVariant inps env) flat_slice) -> do
@@ -1575,8 +1575,6 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
             readInputs segments env seg_is $ filter ((/= as) . fst) inps
             let slice_dims = flatSliceDims flat_slice
                 flat_stride = flatSliceStrides flat_slice
-            -- slice_dims <- mapM (readInput segments env seg_is inps) $ flatSliceDims flat_slice
-            -- flat_stride <- mapM (readInput segments env seg_is inps) $ flatSliceStrides flat_slice
                 (FlatSlice flat_offset _) = fmap pe64 flat_slice
                 in_seg_is =
                   unflattenIndex (map pe64 slice_dims) (pe64 in_seg_i)
