@@ -81,6 +81,7 @@ splitInput lvl segments env inps is acc_reps v = do
 -- Given the indices for which a branch is taken and its body,
 -- distribute the statements of the body of that branch.
 distributeBranch ::
+  FunHasParallelism ->
   SegLevel ->
   Segments ->
   DistEnv ->
@@ -89,7 +90,7 @@ distributeBranch ::
   Body SOACS ->
   M.Map VName ResRep ->
   Builder GPU (DistInputs, DistEnv, [DistStm])
-distributeBranch lvl segments env inps is body acc_reps = do
+distributeBranch funHasParallelism lvl segments env inps is body acc_reps = do
   let free_in_body = filter (isVariant inps env . Var) (namesToList $ freeIn body)
   scope <- askScope
   free_sizes <-
@@ -102,7 +103,7 @@ distributeBranch lvl segments env inps is body acc_reps = do
         (v, t, i) <- zip3 vs ts [0 ..]
         pure (v, DistInput (ResTag i) t)
   let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-  let (inputs', dstms) = distributeBody scope segments inputs body
+  let (inputs', dstms) = distributeBody funHasParallelism scope segments inputs body
   pure (inputs', env', dstms)
 
 -- Given a single result from each branch as well the *unlifted*
@@ -232,7 +233,7 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
       ( \(branch_reps_acc, acc_reps) (branch_size, branch_inds, body, result) -> do
           let branch_segments = NE.singleton branch_size
           (inputs, env', dstms) <-
-            distributeBranch lvl segments env inps branch_inds body acc_reps
+            distributeBranch (flattenFunHasParallelism ops) lvl segments env inps branch_inds body acc_reps
           env'' <- foldM (flattenDistStm ops branch_segments) env' dstms
           reps <- zipWithM (liftDistResultRep lvl branch_segments inputs env'') res result
           let acc_reps' = replaceAccReps acc_reps reps

@@ -124,6 +124,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
 
   let (withacc_new_inputs, withacc_dstms) =
         distributeBody
+          (flattenFunHasParallelism ops)
           scope
           segments
           interchanged_inps

@@ -15,6 +15,7 @@ module Futhark.Pass.Flatten.Distribute
     distInputType,
     DistResult (..),
     ResTag (..),
+    FunHasParallelism,
     isRegularDistResult,
     isParallelStm,
 
@@ -36,6 +37,8 @@ import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
 
 type Segments = NE.NonEmpty SubExp
+
+type FunHasParallelism = Name -> Bool
 
 segmentsShape :: Segments -> Shape
 segmentsShape = Shape . NE.toList
@@ -211,17 +214,18 @@ nextResTag = foldl' step (ResTag 0)
       max next (ResTag (i + 1))
 
 distributeBody ::
+  FunHasParallelism ->
   Scope rep ->
   Segments ->
   DistInputs ->
   Body SOACS ->
   (DistInputs, [DistStm])
-distributeBody outer_scope w param_inputs body = do
+distributeBody funHasParallelism outer_scope w param_inputs body = do
   let ((_, avail_inputs), stms) =
         L.mapAccumL distributeStm (nextResTag param_inputs, param_inputs) $
           stmsToList $
             bodyStms body
-   in (avail_inputs, classifyStms (bodyResult body) stms)
+   in (avail_inputs, classifyStms funHasParallelism (bodyResult body) stms)
   where
     bound_outside = namesFromList $ M.keys outer_scope
     distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
@@ -244,13 +248,14 @@ distributeBody outer_scope w param_inputs body = do
               (ParallelStm stm)
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
 
-isParallelDistStm :: DistStm -> Bool
-isParallelDistStm (DistStm _ res (ParallelStm stm)) =
-  isParallelStm stm || not (all isRegularDistResult res)
-isParallelDistStm _ = False
+isParallelDistStm :: FunHasParallelism -> DistStm -> Bool
+isParallelDistStm funHasParallelism (DistStm _ res (ParallelStm stm)) =
+  isParallelStm funHasParallelism stm || not (all isRegularDistResult res)
+isParallelDistStm _ _ = False
 
-isParallelStm :: Stm SOACS -> Bool
-isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
+isParallelStm :: FunHasParallelism -> Stm SOACS -> Bool
+isParallelStm funHasParallelism stm =
+  isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
   where
     isParallelOp Stream {} = error "isParallelStm: Stream"
     isParallelOp JVP {} = error "isParallelStm: JVP"
@@ -270,13 +275,13 @@ isParallelStm stm = isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttr
     isParallelBasicOp _ = False
 
     isMap (BasicOp op) = isParallelBasicOp op
-    isMap (Apply fname _ _ _) = not $ isBuiltInFunction fname -- TODO: do better
+    isMap (Apply fname _ _ _) = funHasParallelism fname
     isMap (Match _ cases def_case _) =
-      any isParallelStm $
+      any (isParallelStm funHasParallelism) $
         bodyStms def_case
           <> mconcat (map (bodyStms . caseBody) cases)
-    isMap (Loop _ _ body) = (any isParallelStm . bodyStms) body
-    isMap (WithAcc _ lam) = (any isParallelStm . bodyStms) $ lambdaBody lam
+    isMap (Loop _ _ body) = (any (isParallelStm funHasParallelism) . bodyStms) body
+    isMap (WithAcc _ lam) = (any (isParallelStm funHasParallelism) . bodyStms) $ lambdaBody lam
     isMap (Op op) = isParallelOp op
 
 isRegularDistResult :: DistResult -> Bool
@@ -284,16 +289,16 @@ isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 
 --  we should probably sort the DistStms first and we should assume they are sorted
 -- and then given to this function.
-classifyStms :: Result -> [DistStm] -> [DistStm]
-classifyStms _ [] = []
-classifyStms bodyRes ds =
-  let (scalars, rest) = break isParallelDistStm ds
+classifyStms :: FunHasParallelism -> Result -> [DistStm] -> [DistStm]
+classifyStms _ _ [] = []
+classifyStms funHasParallelism bodyRes ds =
+  let (scalars, rest) = break (isParallelDistStm funHasParallelism) ds
       scalar_grouped =
         [mergeGroup bodyRes scalars rest | not (null scalars)]
    in case rest of
         [] -> scalar_grouped
         p : ps ->
-          scalar_grouped ++ (p : classifyStms bodyRes ps)
+          scalar_grouped ++ (p : classifyStms funHasParallelism bodyRes ps)
 
 -- | Merge a group of scalar 'DistStm's into a single one.
 mergeGroup :: Result -> [DistStm] -> [DistStm] -> DistStm
@@ -364,18 +369,19 @@ findReps avail_inputs map_pat lam =
       Just (patElemName pe, Left $ Constant v)
 
 distributeMap ::
+  FunHasParallelism ->
   Scope rep ->
   Pat Type ->
   Segments ->
   [MapArray t] ->
   Lambda SOACS ->
   (Distributed, M.Map ResTag t)
-distributeMap outer_scope map_pat w arrs lam =
+distributeMap funHasParallelism outer_scope map_pat w arrs lam =
   let ((_, arrmap), param_inputs) =
         L.mapAccumL paramInput (ResTag 0, mempty) $
           zip (lambdaParams lam) arrs
       (avail_inputs, stms) =
-        distributeBody outer_scope w param_inputs $ lambdaBody lam
+        distributeBody funHasParallelism outer_scope w param_inputs $ lambdaBody lam
       resmap =
         resultMap avail_inputs stms map_pat $
           bodyResult (lambdaBody lam)

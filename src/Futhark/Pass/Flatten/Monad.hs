@@ -613,6 +613,7 @@ scatterRegular lvl space (is, xs) = do
 -- recursive modules.
 data FlattenOps = FlattenOps
   { flattenSegLevel :: SegLevel,
+    flattenFunHasParallelism :: FunHasParallelism,
     flattenDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
   }
 
