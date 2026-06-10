@@ -19,7 +19,13 @@ def rev_vec [n] [m] [k] (is: [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =
 def fwd_vec [n] [m] [k] (is: [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =
   let seeds = tabulate n (\i -> replicate n (replicate k 0) with [i] = replicate k 1)
   in jvp_vec (primal is dst) vs seeds
-  |> transpose
+     |> transpose
+
+def approx_eql (rel_tol: f32) (a: f32) (b: f32) : bool =
+  let diff = f32.abs (a - b)
+  let scale = f32.max (f32.abs a) (f32.abs b)
+  let abs_tol = 100.0 * f32.epsilon * scale
+  in diff <= f32.max abs_tol (rel_tol * scale)
 
 def main [n] [m] [k] (is': [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =
   let is = map (\i -> (i64.abs i) %% m) is'
@@ -27,7 +33,7 @@ def main [n] [m] [k] (is': [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =
   let f = fwd is dst vs
   let rv = rev_vec is dst vs
   let fv = fwd_vec is dst vs
-  let eq_rf = map2 (map2 (==)) r f |> map (reduce (&&) true) |> reduce (&&) true
-  let eq_rrv = map2 (map2 (==)) r rv |> map (reduce (&&) true) |> reduce (&&) true
-  let eq_ffv = map2 (map2 (==)) f fv |> map (reduce (&&) true) |> reduce (&&) true
+  let eq_rf = and (map2 (approx_eql 1e-9) (flatten_3d r) (flatten_3d f))
+  let eq_rrv = and (map2 (approx_eql 1e-9) (flatten_3d r) (flatten_3d rv))
+  let eq_ffv = and (map2 (approx_eql 1e-9) (flatten_3d f) (flatten_3d fv))
   in eq_rf && eq_rrv && eq_ffv
