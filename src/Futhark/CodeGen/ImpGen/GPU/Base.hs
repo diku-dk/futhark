@@ -382,11 +382,8 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
     ltid = sExt64 ltid32
     array_scan = not $ all primType $ lambdaReturnType scan_lam
 
-    readInitial p arr
-      | isPrimParam p =
-          copyDWIMFix (paramName p) [] (Var arr) [ltid]
-      | otherwise =
-          copyDWIMFix (paramName p) [] (Var arr) [ltid]
+    readInitial p arr =
+      copyDWIMFix (paramName p) [] (Var arr) [ltid]
 
     readParam behind p arr
       | isPrimParam p =
@@ -456,17 +453,11 @@ blockScan seg_flag arrs_full_size w lam arrs = do
         | otherwise =
             sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      writeBlockResult p arr
-        | isPrimParam p =
-            copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
-        | otherwise =
-            copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
+      writeBlockResult p arr =
+        copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
 
-      readPrevBlockResult p arr
-        | isPrimParam p =
-            copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
-        | otherwise =
-            copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
+      readPrevBlockResult p arr =
+        copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
 
   doInChunkScan seg_flag ltid_in_bounds lam
   barrier
