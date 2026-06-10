@@ -380,20 +380,16 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
     in_block_id = ltid32 - block_id * block_size
     ltid32 = kernelLocalThreadId constants
     ltid = sExt64 ltid32
-    gtid = sExt64 $ kernelGlobalThreadId constants
     array_scan = not $ all primType $ lambdaReturnType scan_lam
 
-    readInitial p arr
-      | isPrimParam p =
-          copyDWIMFix (paramName p) [] (Var arr) [ltid]
-      | otherwise =
-          copyDWIMFix (paramName p) [] (Var arr) [gtid]
+    readInitial p arr =
+      copyDWIMFix (paramName p) [] (Var arr) [ltid]
 
     readParam behind p arr
       | isPrimParam p =
           copyDWIMFix (paramName p) [] (Var arr) [ltid - behind]
       | otherwise =
-          copyDWIMFix (paramName p) [] (Var arr) [gtid - behind + arrs_full_size]
+          copyDWIMFix (paramName p) [] (Var arr) [ltid - behind + arrs_full_size]
 
     writeResult x y arr = do
       when (isPrimParam x) $
@@ -457,19 +453,11 @@ blockScan seg_flag arrs_full_size w lam arrs = do
         | otherwise =
             sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      block_offset = sExt64 (kernelBlockId constants) * kernelBlockSize constants
+      writeBlockResult p arr =
+        copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
 
-      writeBlockResult p arr
-        | isPrimParam p =
-            copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
-        | otherwise =
-            copyDWIMFix arr [block_offset + sExt64 chunk_id] (Var $ paramName p) []
-
-      readPrevBlockResult p arr
-        | isPrimParam p =
-            copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
-        | otherwise =
-            copyDWIMFix (paramName p) [] (Var arr) [block_offset + sExt64 chunk_id - 1]
+      readPrevBlockResult p arr =
+        copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
 
   doInChunkScan seg_flag ltid_in_bounds lam
   barrier
@@ -480,7 +468,7 @@ blockScan seg_flag arrs_full_size w lam arrs = do
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
           unless (isPrimParam x) $
-            copyDWIMFix arr [arrs_full_size + block_offset + sExt64 chunk_size + ltid] (Var $ paramName x) []
+            copyDWIMFix arr [arrs_full_size + sExt64 chunk_size + ltid] (Var $ paramName x) []
 
     barrier
 
@@ -509,9 +497,9 @@ blockScan seg_flag arrs_full_size w lam arrs = do
           unless (isPrimParam x) $
             copyDWIMFix
               arr
-              [arrs_full_size + block_offset + ltid]
+              [arrs_full_size + ltid]
               (Var arr)
-              [arrs_full_size + block_offset + sExt64 chunk_size + ltid]
+              [arrs_full_size + sExt64 chunk_size + ltid]
 
     barrier
 
@@ -553,7 +541,7 @@ blockScan seg_flag arrs_full_size w lam arrs = do
       forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
         if isPrimParam y
           then copyDWIMFix arr [ltid] (Var $ paramName y) []
-          else copyDWIMFix (paramName x) [] (Var arr) [arrs_full_size + block_offset + ltid]
+          else copyDWIMFix (paramName x) [] (Var arr) [arrs_full_size + ltid]
 
   barrier
 
