@@ -272,6 +272,7 @@ isParallelStm funHasParallelism stm =
     isParallelBasicOp FlatUpdate {} = True
     isParallelBasicOp FlatIndex {} = False
     isParallelBasicOp Manifest {} = True
+    isParallelBasicOp Rearrange {} = True
     isParallelBasicOp _ = False
 
     isMap (BasicOp op) = isParallelBasicOp op
