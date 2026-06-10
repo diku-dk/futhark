@@ -1272,6 +1272,32 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
               fmap (subExpsRes . pure) . letSubExp "v"
                 =<< eIndex arr (map toExp slice')
           pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
+    FlatIndex arr flat_slice
+      | null $ flatSliceDims flat_slice ->
+          scalarCase
+      | otherwise -> do
+          -- Maximally irregular case.
+          num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+          ns <- letExp "slice_sizes" <=< renameExp <=< segMap lvl (MkSolo num_segments) $ \(MkSolo segment) -> do
+            segment_is <- segmentCoordsFromFlat segments segment
+            slice_ns <- mapM (readInput segments env segment_is inps) $ flatSliceDims flat_slice
+            fmap varsRes . letTupExp "n" <=< toExp $ product $ map pe64 slice_ns
+          (_n, offsets, m) <- exScanAndSum lvl ns
+          (_, _, repiota_D) <- doRepIota lvl ns
+          flags <- genFlags lvl m offsets
+          elems <- letExp "elems" <=< renameExp <=< segMap lvl (NE.singleton m) $ \is -> do
+            segment <- letSubExp "segment" =<< eIndex repiota_D (toList $ fmap eSubExp is)
+            segment_start <- letSubExp "segment_start" =<< eIndex offsets [eSubExp segment]
+            segment_is <- segmentCoordsFromFlat segments segment
+            readInputs segments env segment_is inps
+            let flat_slice'@(FlatSlice flat_offset _) = fmap pe64 flat_slice
+                local_flat = pe64 (NE.head is) - pe64 segment_start
+                local_is = unflattenIndex (flatSliceDims flat_slice') local_flat
+                flat_i = flat_offset + sum (zipWith (*) local_is (flatSliceStrides flat_slice'))
+            auxing aux $
+              fmap (subExpsRes . pure) . letSubExp "v"
+                =<< eIndex arr [toExp flat_i]
+          pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
     Iota n (Constant x) (Constant s) Int64
       | zeroIsh x,
         oneIsh s -> do
@@ -1295,7 +1321,6 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
             ~+~ sExt it (untyped (pe64 v'))
             ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns res_F res_O (distResTag res) res_D' Dense env
-    -- TODO: add invariant special handling
     Concat d arr shp -> do
       arr_ts <- mapM (lookupInputType inps) (NE.toList arr) 
       let inputShapeUniform t =
@@ -1477,6 +1502,95 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
           pure $ insertIrregular shape flags offsets (distResTag res) elems' Dense env
       | otherwise ->
           error "Flattening update: destination is not input."
+    FlatUpdate as flat_slice v
+      -- Uniform Update
+      | Just as_t <- distInputType <$> lookup as inps,
+        isRegularDistResult res,
+        not (any (isVariant inps env) flat_slice) -> do
+        -- as should be 1D
+        let [n] = arrayDims as_t
+        num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+        as_flat_size <- letSubExp "as_flat_size" =<< toExp (pe64 num_segments * pe64 n)
+
+        let se_shape = Shape $ flatSliceDims flat_slice
+            as_lift_shape = segmentsShape segments <> arrayShape as_t
+            se_lift_shape = segmentsShape segments <> se_shape
+            se_flat_shape = Shape [num_segments] <> se_shape
+            as_flat_shape = Shape [as_flat_size]
+        as' <-
+          liftSubExpRegular
+            lvl
+            segments
+            inps
+            env
+            as_lift_shape
+            (Var as)
+        v' <-
+          liftSubExpRegular
+            lvl
+            segments
+            inps
+            env
+            se_lift_shape
+            (Var v)
+        as_flat <-
+          letExp (baseName as <> "_reshaped") $ BasicOp $ Reshape as' $ reshapeAll as_lift_shape as_flat_shape
+        v_flat <-
+          letExp (baseName v <> "_reshaped") $ BasicOp $ Reshape v' $ reshapeAll se_lift_shape se_flat_shape
+        let FlatSlice off dims = flat_slice
+            flat_slice' = FlatSlice off (FlatDimIndex num_segments n : dims)
+        out_flat_updated <-
+          certifying (distCerts inps aux env) . letExp "flat_update_reg" . BasicOp $
+            FlatUpdate as_flat flat_slice' v_flat
+        out_updated <-
+          letExp "flat_update_reg_reshaped" $
+            BasicOp $ Reshape out_flat_updated $ reshapeAll as_flat_shape as_lift_shape
+        pure $ insertRegulars [distResTag res] [out_updated] env
+      
+      | Just _ <- distInputType <$> lookup as inps -> do
+          num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+          ns <- letExp "slice_sizes"
+            <=< renameExp
+            <=< segMap lvl (MkSolo num_segments)
+            $ \(MkSolo seg_i) -> do
+              seg_is <- segmentCoordsFromFlat segments seg_i
+              readInputs segments env seg_is $
+                filter ((`elem` flatSliceDims flat_slice) . Var . fst) inps
+              slice_dims <- mapM (readInput segments env seg_is inps) $ flatSliceDims flat_slice
+              n <- letSubExp "n" <=< toExp $ product $ map pe64 slice_dims
+              pure [subExpRes n]
+          -- Irregular representation of `as`
+          as_rep <- getIrregRep lvl segments env inps as
+          IrregularRep shape flags offsets elems _ <-
+            ensureDenseIrregular lvl (baseName as <> "_update") as_rep
+          -- Inner indices (1 and 2) of `ns`
+          (_, _, ii1_vss) <- doRepIota lvl ns
+          (_, _, ii2_vss) <- certifying (distCerts inps aux env) $ doSegIota lvl ns
+          -- Number of updates to perform
+          m <- arraySize 0 <$> lookupType ii2_vss
+          elems' <- letExp "elems_scatter" <=< renameExp <=< genScatter lvl elems m $ \gid -> do
+            seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp gid]
+            in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp gid]
+            seg_is <- segmentCoordsFromFlat segments seg_i
+            readInputs segments env seg_is $ filter ((/= as) . fst) inps
+            let slice_dims = flatSliceDims flat_slice
+                flat_stride = flatSliceStrides flat_slice
+            -- slice_dims <- mapM (readInput segments env seg_is inps) $ flatSliceDims flat_slice
+            -- flat_stride <- mapM (readInput segments env seg_is inps) $ flatSliceStrides flat_slice
+                (FlatSlice flat_offset _) = fmap pe64 flat_slice
+                in_seg_is =
+                  unflattenIndex (map pe64 slice_dims) (pe64 in_seg_i)
+                flat_i = flat_offset + sum (zipWith (*) in_seg_is (map pe64 flat_stride))           
+            -- Value to write
+            v' <- letSubExp "v" =<< eIndex v (map toExp in_seg_is)
+            o' <- letSubExp "o" =<< eIndex offsets [eSubExp seg_i]
+            -- Index to write `v'` at
+            i <- letExp "i" =<< toExp (pe64 o' + flat_i)
+            pure (i, v')
+          pure $ insertIrregular shape flags offsets (distResTag res) elems' Dense env
+      | otherwise ->
+          error "Flattening update: destination is not input."
+
     Rearrange v perm -> do
       case lookup v inps of
         Just (DistInputFree v' _) -> do
