@@ -765,11 +765,11 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
             then 0
             else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
 
--- TODO: Consider updating this or just always consider Sequentialising 
+-- TODO: maybe update this or just always consider Sequentialising 
 -- | A lambda is worth sequentialising if it contains enough nested
 -- parallelism of an interesting kind.
-worthSequentialising :: Lambda SOACS -> Bool
-worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
+worthSequentialising :: FunHasParallelism -> Lambda SOACS -> Bool
+worthSequentialising funHasParallelism lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
   where
     bodyInterest depth body =
       sum $ interest depth <$> bodyStms body
@@ -786,9 +786,8 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
       | Match _ cases defbody _ <- stmExp stm =
         foldl
           max
-          (bodyInterest (depth + 1) defbody * 10)
-          (map ((*10) . bodyInterest (depth + 1) . caseBody) cases)
-
+          (bodyInterest (depth + 1) defbody)
+          (map (bodyInterest (depth + 1) . caseBody) cases)
       | WithAcc _ withacc_lam <- stmExp stm =
           bodyInterest (depth + 1) (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm =
@@ -801,8 +800,10 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
             case (isRedomapSOAC form, depth) of
               (Just _, 0) -> 1
               _ -> 0
-      | otherwise =
-          0
+      | Op (Stream _ _ _ lam') <- stmExp stm = 
+        bodyInterest (depth + 1) (lambdaBody lam')
+      | otherwise = 
+        if isParallelStm funHasParallelism stm then 1 else 0
       where
         attrs = stmAuxAttrs $ stmAux stm
         sequential_inner = "sequential_inner" `inAttrs` attrs
@@ -1080,7 +1081,7 @@ versionedRegularMap funHasParallelism segments env inps ress pat aux w arrs map_
               kernelAlternatives "match_res" result_ts outer_body []
         Nothing
           | not only_intra,
-            worthSequentialising map_lam,
+            worthSequentialising funHasParallelism map_lam,
             mayExploitOuter $ stmAuxAttrs aux -> do
               (outer_suff, _) <- sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
               kernelAlternatives
@@ -1094,7 +1095,7 @@ versionedRegularMap funHasParallelism segments env inps ress pat aux w arrs map_
           | only_intra -> do
               (_, intra_body) <- intraBlockAlternative intra_res
               kernelAlternatives "match_res" result_ts intra_body []
-          | worthSequentialising map_lam,
+          | worthSequentialising funHasParallelism map_lam,
             mayExploitOuter $ stmAuxAttrs aux -> do
               (outer_suff, _) <- sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
               intra_alts <- intraBlockAlternative intra_res
@@ -3597,7 +3598,7 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
                     kernelAlternatives "top_level_map_alt" result_ts outerOnlyBody []
               Nothing
                 | not only_intra,
-                  worthSequentialising lam,
+                  worthSequentialising funHasParallelism lam,
                   mayExploitOuter (stmAuxAttrs aux) -> do
                     (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
                     kernelAlternatives
@@ -3611,7 +3612,7 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
                 | only_intra -> do
                     (_, intra_body) <- intraBlockAlternative intra_res
                     kernelAlternatives "top_level_map_alt" result_ts intra_body []
-                | worthSequentialising lam,
+                | worthSequentialising funHasParallelism lam,
                   mayExploitOuter (stmAuxAttrs aux) -> do
                     intra_alt <- intraBlockAlternative intra_res
                     (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
