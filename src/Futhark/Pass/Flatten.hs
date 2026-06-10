@@ -780,8 +780,14 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
           if sequential_inner
             then 0
             else bodyInterest (depth + 1) (lambdaBody lam')
-      | Loop _ ForLoop {} body <- stmExp stm =
+      | Loop _ _  body <- stmExp stm =
           bodyInterest (depth + 1) body * 10
+      | Match _ cases defbody _ <- stmExp stm =
+        foldl
+          max
+          (bodyInterest (depth + 1) defbody * 10)
+          (map ((*10) . bodyInterest (depth + 1) . caseBody) cases)
+
       | WithAcc _ withacc_lam <- stmExp stm =
           bodyInterest (depth + 1) (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm =
