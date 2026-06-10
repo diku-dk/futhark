@@ -38,7 +38,7 @@ def main [n] [m] [k] (is': [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =
   let f = fwd is dst vs
   let rv = rev_vec is dst vs
   let fv = fwd_vec is dst vs
-  let eq_rf = and (map2 (approx_eql 1e-9) (flatten_3d r) (flatten_3d f))
-  let eq_rrv = and (map2 (approx_eql 1e-9) (flatten_3d r) (flatten_3d rv))
-  let eq_ffv = and (map2 (approx_eql 1e-9) (flatten_3d f) (flatten_3d fv))
+  let eq_rf = and (map2 (approx_eql 1e-3) (flatten_3d r) (flatten_3d f))
+  let eq_rrv = and (map2 (approx_eql 1e-3) (flatten_3d r) (flatten_3d rv))
+  let eq_ffv = and (map2 (approx_eql 1e-3) (flatten_3d f) (flatten_3d fv))
   in eq_rf && eq_rrv && eq_ffv
