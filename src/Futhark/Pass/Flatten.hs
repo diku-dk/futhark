@@ -765,6 +765,7 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
             then 0
             else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
 
+-- TODO: Consider updating this or just always consider Sequentialising 
 -- | A lambda is worth sequentialising if it contains enough nested
 -- parallelism of an interesting kind.
 worthSequentialising :: Lambda SOACS -> Bool
