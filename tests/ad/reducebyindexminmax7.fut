@@ -21,9 +21,3 @@ entry fwd_vec [n] [m] [k] (is: [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =
   let seeds = tabulate n (\i -> replicate n (replicate k 0) with [i] = replicate k 1)
   in jvp_vec (primal is dst) vs seeds
      |> transpose
-
-def approx_eql (rel_tol: f32) (a: f32) (b: f32) : bool =
-  let diff = f32.abs (a - b)
-  let scale = f32.max (f32.abs a) (f32.abs b)
-  let abs_tol = 100.0 * f32.epsilon * scale
-  in diff <= f32.max abs_tol (rel_tol * scale)
