@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_ispc }
 -- entry: rev fwd rev_vec fwd_vec
 -- compiled input @ reducebyindexminmax7.in output @ reducebyindexminmax7.out.gz
 
