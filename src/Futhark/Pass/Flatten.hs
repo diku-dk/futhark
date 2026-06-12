@@ -1628,33 +1628,30 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
           pure $ insertIrregular shape flags offsets (distResTag res) elems' Dense env
       | otherwise ->
           error "Flattening update: destination is not input."
-
-    Rearrange v perm -> do
-      case lookup v inps of
-        Just (DistInputFree v' _) -> do
-          v'' <-
-            letExp (baseName v' <> "_tr") . BasicOp $
-              Rearrange v' perm
-          pure $ insertRegulars [distResTag res] [v''] env
-        Just (DistInput rt v_t) -> do
-          case resVar rt env of
-            Irregular rep -> do
-              rep' <-
-                certifying (distCerts inps aux env) $
-                  rearrangeIrreg lvl segments env inps v_t perm rep
-              pure $ insertRep (distResTag res) (Irregular rep') env
-            Regular v' -> do
-              let r = segmentsRank segments
-              v'' <-
-                letExp (baseName v' <> "_tr") . BasicOp $
-                  Rearrange v' ([0 .. r - 1] ++ map (+ r) perm)
-              pure $ insertRegulars [distResTag res] [v''] env
-        Nothing -> do
-          let r = segmentsRank segments
-          v' <-
-            letExp (baseName v <> "_tr") . BasicOp $
-              Rearrange v ([0 .. r - 1] ++ map (+ r) perm)
-          pure $ insertRegulars [distResTag res] [v'] env
+          
+    Rearrange v perm
+      | isRegularDistResult res -> do
+          t <- lookupInputType inps v
+          v_lifted <-
+            liftSubExpRegular
+              lvl
+              segments
+              inps
+              env
+              (segmentsShape segments <> arrayShape t)
+              (Var v)
+          let segment_rank = segmentsRank segments
+          v_rearrange <- letExp (baseName v <> "_tr") . BasicOp $ Rearrange v_lifted ([0 .. segment_rank - 1] ++ map (+ segment_rank) perm) 
+          pure $ insertRegulars [distResTag res] [v_rearrange] env
+      | otherwise -> do
+          irreg <- getIrregRep lvl segments env inps v
+          -- TODO: Maybe we can avoid this?
+          irreg_dense <- ensureDenseIrregular lvl (baseName v <> "_rearrange_dense") irreg
+          t <- lookupInputType inps v
+          rep' <-
+            certifying (distCerts inps aux env) $
+              rearrangeIrreg lvl segments env inps t perm irreg_dense
+          pure $ insertRep (distResTag res) (Irregular rep') env
     Scratch pt dims
       | not $ any (isVariant inps env) dims -> do
           -- All dims are invariant result is regular across segments.
