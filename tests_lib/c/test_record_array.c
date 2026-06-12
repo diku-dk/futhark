@@ -110,6 +110,41 @@ void test2(struct futhark_context *ctx) {
   assert(futhark_free_opaque_tup2_arr1d_i32_f32(ctx, a_b_elem_fut) == 0);
 }
 
+// Test that array elements are given right type.
+void test3(struct futhark_context *ctx) {
+  struct futhark_opaque_arr1d_tup2_v3_v3 *arr_tup;
+  assert(futhark_entry_mk_array(ctx, &arr_tup) == 0);
+
+  struct futhark_opaque_arr1d_v3 *arr0, *arr1;
+
+  assert(futhark_project_opaque_arr1d_tup2_v3_v3_0(ctx, &arr0, arr_tup) == 0);
+  assert(futhark_project_opaque_arr1d_tup2_v3_v3_1(ctx, &arr1, arr_tup) == 0);
+  assert(futhark_free_opaque_arr1d_tup2_v3_v3(ctx, arr_tup) == 0);
+
+  struct futhark_opaque_v3 *tup0, *tup1;
+  assert(futhark_index_opaque_arr1d_v3(ctx, &tup0, arr0, 0) == 0);
+  assert(futhark_index_opaque_arr1d_v3(ctx, &tup1, arr1, 0) == 0);
+  assert(futhark_free_opaque_arr1d_v3(ctx, arr0) == 0);
+  assert(futhark_free_opaque_arr1d_v3(ctx, arr1) == 0);
+
+  double x;
+  assert(futhark_project_opaque_v3_0(ctx, &x, tup0) == 0);
+  assert(x == 1);
+  assert(futhark_project_opaque_v3_1(ctx, &x, tup0) == 0);
+  assert(x == 2);
+  assert(futhark_project_opaque_v3_2(ctx, &x, tup0) == 0);
+  assert(x == 3);
+  assert(futhark_project_opaque_v3_0(ctx, &x, tup1) == 0);
+  assert(x == 4);
+  assert(futhark_project_opaque_v3_1(ctx, &x, tup1) == 0);
+  assert(x == 5);
+  assert(futhark_project_opaque_v3_2(ctx, &x, tup1) == 0);
+  assert(x == 6);
+
+  assert(futhark_free_opaque_v3(ctx, tup0) == 0);
+  assert(futhark_free_opaque_v3(ctx, tup1) == 0);
+}
+
 int main() {
   struct futhark_context_config *cfg = futhark_context_config_new();
   struct futhark_context *ctx = futhark_context_new(cfg);
@@ -117,6 +152,7 @@ int main() {
 
   test1(ctx);
   test2(ctx);
+  test3(ctx);
 
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
