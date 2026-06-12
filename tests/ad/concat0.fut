@@ -1,18 +1,19 @@
 -- ==
 -- tags { autodiff }
+-- entry: fwd_vec fwd_map
+-- input { [1.0, 2.0, 3.0] }
+-- output { [[1.0, 0.0, 0.0, 1.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 1.0, 0.0, 0.0, 1.0]] }
 
--- ==
--- entry: f_jvp
--- input { [1,2,3] [4,5,6] }
--- output { [1,2,3,4,5,6] }
+def f (xs: []f64) = xs ++ xs
 
-entry f_jvp xs ys : []i32 =
-  jvp (uncurry concat) (xs, ys) (xs, ys)
+entry fwd_vec (xs: []f64) =
+  let seeds =
+    map (\i -> map (\j -> f64.bool (i == j)) (indices xs)) (indices xs)
+  in (jvp2_vec f xs seeds).1
 
--- ==
--- entry: f_vjp
--- input { [1,2,3] [4,5,6] }
--- output { [1,2,3] [4,5,6] }
+entry fwd_map (xs: []f64) =
+  map (\i -> jvp f xs (map (\j -> f64.bool (i == j)) (indices xs)))
+      (indices xs)
 
-entry f_vjp xs ys : ([]i32, []i32) =
+entry rev xs ys : ([]i32, []i32) =
   vjp (uncurry concat) (xs, ys) (concat xs ys)

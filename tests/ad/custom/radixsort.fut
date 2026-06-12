@@ -1,5 +1,6 @@
 -- Custom derivative for radix sort.
 -- ==
+-- tags { autodiff }
 -- entry: main_standard main_custom
 -- input { [4f32,3f32,2f32,1f32] [0.1f32,0.2f32,0.3f32,0.4f32] }
 -- output { [0.4f32, 0.3f32, 0.2f32, 0.1f32 ] }
@@ -20,10 +21,10 @@ def radix_sort [n] 't (f: t -> u32) (xs: [n]t) : [n]t =
 
 def differentiable_radix_sort [n] 't (f: t -> u32) (xs: [n]t) =
   (with_vjp (\xs ->
-             unzip (radix_sort (f <-< (.0)) (zip xs (iota n))))
-          (\(_, perm) (xs_adj, _) ->
-             scatter (copy xs_adj) perm xs_adj)
-          xs).0
+               unzip (radix_sort (f <-< (.0)) (zip xs (iota n))))
+            (\(_, perm) (xs_adj, _) ->
+               scatter (copy xs_adj) perm xs_adj)
+            xs).0
 
 entry main_standard = vjp (radix_sort f32.to_bits)
 entry main_custom = vjp (differentiable_radix_sort f32.to_bits)

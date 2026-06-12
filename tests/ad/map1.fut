@@ -1,9 +1,18 @@
---
+-- Like map0, but we do not compute the full Jacobian, so the vector size is not
+-- the same as the input size.
 -- ==
 -- tags { autodiff }
--- entry: rev
--- input { [[1.0,2.0,3.0,4.0],[1.0,2.0,3.0,4.0]] [1.0,2.0] }
--- output {[[24.0, 12.0, 8.0, 6.0],
---          [48.0, 24.0, 16.0, 12.0]] }
+-- entry: fwd fwd_vec
+-- input { [1.0f32, 2.0, 3.0] [4f32, 5, 6] }
+-- output { [[5.0f32, 0.0, 0.0], [0.0f32, 7.0, 0.0]] }
 
-entry rev = vjp (map f64.product)
+def prim = map2 (f32.*)
+
+def k = 2i64
+
+entry fwd [n] (xs: [n]f32) (ys: [n]f32) =
+  tabulate k (\i -> jvp (uncurry prim) (xs, ys) (replicate n 0 with [i] = 1, replicate n 0 with [i] = 1))
+
+entry fwd_vec [n] (xs: [n]f32) (ys: [n]f32) =
+  let seeds = tabulate k (\i -> (replicate n 0 with [i] = 1, replicate n 0 with [i] = 1))
+  in jvp_vec (uncurry prim) (xs, ys) seeds
