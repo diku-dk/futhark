@@ -500,8 +500,8 @@ fwdSOAC pat aux (Stream size xs accs lam) = do
   let accs' = interleave accs accs_tan
   addStm $ Let pat' aux $ Op $ Stream size xs' accs' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
-  -- TODO: this is probably not very efficient in the vectorised case as we end
-  -- up with a dreadful update operator that involves arrays.
+  -- TODO: this is probably not very efficient in the vector case as we end up
+  -- with a dreadful update operator that involves arrays.
   (pat', to_transpose) <- soacResPat 0 0 pat
   ops' <- mapM fwdHist ops
   bucket_fun' <- fwdHistBucket bucket_fun

@@ -118,9 +118,9 @@ data Sparse = Sparse
     -- | Element type of the array.
     sparseType :: PrimType,
     -- | Number of leading dimensions that are \"vector\" dimensions, due to
-    -- vectorised AD. These are not indexed by the sparse index, but are present
-    -- in the values. When zero, this is the ordinary non-vectorised case. This
-    -- is equivalent to the rank of `askShape`, but it is convenient to store it
+    -- vector AD. These are not indexed by the sparse index, but are present in
+    -- the values. When zero, this is the ordinary non-vector case. This is
+    -- equivalent to the rank of `askShape`, but it is convenient to store it
     -- here as well.
     sparseVecDims :: Int,
     -- | Locations and values of nonzero values.  Indexes may be
@@ -594,9 +594,9 @@ substLoopTape v v' = mapM_ (setLoopTape v') =<< lookupLoopTape v
 renameLoopTape :: Substitutions -> ADM ()
 renameLoopTape = mapM_ (uncurry substLoopTape) . M.toList
 
--- | Disable vectorised AD within the provided action. This results in a map
--- that computes each adjoint explicitly, then assembles the resulting adjoint
--- vectors. This is useful for constructs (such as scans) where vectorised AD is
+-- | Disable vector AD within the provided action. This results in a map that
+-- computes each adjoint explicitly, then assembles the resulting adjoint
+-- vectors. This is useful for constructs (such as scans) where vector AD is
 -- impractical or inefficient.
 locallyNonvector ::
   (FreeIn e) =>
@@ -627,7 +627,7 @@ locallyNonvector e m = do
         AdjZero {} -> False
         _ -> True
 
--- | If we are doing vectorised AD, then transpose the array to bring the vector
+-- | If we are doing vector AD, then transpose the array to bring the vector
 -- shape outermost.
 --
 -- That is, convers @[vec...][shape...][elem...]@ to @[shape...][vec...][elem...]@.
