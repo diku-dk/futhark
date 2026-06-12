@@ -14,10 +14,11 @@
 --
 -- Futhark's AD support includes the following:
 --
---   * Differentiation operators for forward-mode (`jvp`@term) and reverse-mode
+--   * Differential operators for forward-mode (`jvp`@term) and reverse-mode
 --     (`vjp`@term).
 --
---   * Arbitrary control flow in differentiable code.
+--   * Almost arbitrary control flow in differentiable code (some limitations
+--     apply when using GPU backends, see below).
 --
 --   * Higher order derivatives by nesting differentiation operators, including
 --     arbitrary mixing of forward- and reverse mode (although using multiple
@@ -134,16 +135,16 @@ def vjp2 'a 'b (f: a -> b) (x: a) (y': b) : (b, a) =
   intrinsics.vjp2 f x y'
 
 -- | Jacobian-Matrix Product, returning also the primal result. As `jvp2`, but
--- accepts a vector of seed values. Semantically equivalent to mapping, but may
--- be more efficient. If used with `#[unroll]`, tangent calculations are
--- unrolled when possible.
+-- accepts an array of seed vectors (hence "matrix"). Semantically equivalent to
+-- mapping, but may be more efficient. If used with `#[unroll]`, tangent
+-- calculations are unrolled when possible.
 def jmp2 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : (b, [n]b) =
   intrinsics.jmp2 f x x'
 
 -- | Matrix-Jacobian Product, returning also the primal result. As `vjp2`, but
--- accepts a vector of seed values. Semantically equivalent to mapping, but may
--- be more efficient. If used with `#[unroll]`, adjoint calculations are
--- unrolled when possible.
+-- accepts an array of seed vectors (hence "matrix"). Semantically equivalent to
+-- mapping, but may be more efficient. If used with `#[unroll]`, adjoint
+-- calculations are unrolled when possible.
 def mjp2 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : (b, [n]a) =
   intrinsics.mjp2 f x y'
 
