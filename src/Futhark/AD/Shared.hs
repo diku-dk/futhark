@@ -40,16 +40,20 @@ mapNest shape x f = do
           =<< f (fmap (Var . paramName) x_p)
       Op . Screma w (toList x_v) <$> mapSOAC lam
 
+-- | Construct a map over the given arrays, which must have the provided outer
+-- shape. The purpose of the 'Shape' argument is to handle the case where no
+-- arrays are provided.
 mkMap ::
   (MonadBuilder m, Rep m ~ SOACS, Traversable f) =>
   Name ->
+  Shape ->
   f VName ->
+  -- | Action for building the body, passed names
+  -- corresponding to elements of the arrays.
   (f VName -> m [VName]) ->
   m [VName]
-mkMap desc arrs f
-  | null arrs = pure []
-  | otherwise = do
-      w <- arraySize 0 <$> lookupType (head $ toList arrs)
-      x_p <- traverse (newParam "xp" . rowType <=< lookupType) arrs
-      lam <- mkLambda (toList x_p) $ varsRes <$> f (fmap paramName x_p)
-      letTupExp desc . Op . Screma w (toList arrs) =<< mapSOAC lam
+mkMap desc shape arrs f = do
+  let w = shapeSize 0 shape
+  x_p <- traverse (newParam "xp" . rowType <=< lookupType) arrs
+  lam <- mkLambda (toList x_p) $ varsRes <$> f (fmap paramName x_p)
+  letTupExp desc . Op . Screma w (toList arrs) =<< mapSOAC lam

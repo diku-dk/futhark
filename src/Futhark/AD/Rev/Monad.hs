@@ -614,7 +614,7 @@ locallyNonvector e m = do
       -- only consider those that actually have known nonzero adjoints.
       e_adjs <- filterM knownAdjoint e_free
       e_adjs_vals <- mapM lookupAdjVal e_adjs
-      e_free_adjs <- mkMap "nonvec_adj" e_adjs_vals $ \e_adjs_vals' -> do
+      e_free_adjs <- mkMap "nonvec_adj" adj_shape e_adjs_vals $ \e_adjs_vals' -> do
         zipWithM_ insAdj e_adjs e_adjs_vals'
         local (\env -> env {envAdjShape = mempty}) m
         mapM lookupAdjVal e_free
