@@ -630,7 +630,7 @@ locallyNonvector e m = do
 -- | If we are doing vectorised AD, then transpose the array to bring the vector
 -- shape outermost.
 --
--- That, convers @[vec...][shape...][elem...]@ to @[shape...][vec...][elem...]@.
+-- That is, convers @[vec...][shape...][elem...]@ to @[shape...][vec...][elem...]@.
 vecToInner :: VName -> ADM VName
 vecToInner v = do
   adj_shape <- askShape
