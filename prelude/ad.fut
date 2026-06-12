@@ -94,16 +94,19 @@
 -- but it can still be substantial for programs with deep sequential
 -- loops.
 --
--- It varies on a case-by-case basis whether vector AD (`mjp`@term/`jmp`@term)
--- is faster than using `map` on top of `vjp`@term/`jvp`@term. Vector AD
--- essentially converts propagation of (co-)tangents from scalar to array
--- operations, which can have a significant impact on memory accesses, depending
--- on how the compiler manages to optimise the resulting code. It is hard to
--- predict whether this offsets the reduction in primal work. If the vector size
--- is a constant, and the `#[unroll]` attribute is put on the AD operator, then
--- the vectors become unrolled (turned into tuples, essentially), although this
--- should only be done when the vector size is quite small, as the increase in
--- code size is substantial.
+-- When using vector AD (`mjp`@term/`jmp`@term), each scalar is associated with
+-- a vector of tangents or cotangents, and the space overhead for storing these
+-- is therefore multiplied with the vector size. However, in the case of `vjp`,
+-- the intermediate results are only stored once. It varies on a case-by-case
+-- basis whether vector AD is faster than using `map` on top of
+-- `vjp`@term/`jvp`@term. Vector AD essentially converts propagation of
+-- (co-)tangents from scalar to array operations, which can have a significant
+-- impact on memory accesses, depending on how the compiler manages to optimise
+-- the resulting code. It is hard to predict whether this offsets the reduction
+-- in primal work. If the vector size is a constant, and the `#[unroll]`
+-- attribute is put on the AD operator, then the vectors become unrolled (turned
+-- into tuples, essentially), although this should only be done when the vector
+-- size is quite small, as the increase in code size is substantial.
 --
 -- ## Differentiable functions
 --
