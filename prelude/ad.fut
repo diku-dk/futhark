@@ -138,9 +138,9 @@ def vjp2 'a 'b (f: a -> b) (x: a) (y': b) : (b, a) =
   intrinsics.vjp2 f x y'
 
 -- | Jacobian-Matrix Product, returning also the primal result. As `jvp2`, but
--- accepts an array of seed vectors (hence "matrix"). Semantically equivalent to
--- mapping, but may be more efficient. If used with `#[unroll]`, tangent
--- calculations are unrolled when possible.
+-- accepts an array of seed vectors (hence "matrix", although transposed).
+-- Semantically equivalent to mapping, but may be more efficient. If used with
+-- `#[unroll]`, tangent calculations are unrolled when possible.
 def jmp2 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : (b, [n]b) =
   intrinsics.jmp2 f x x'
 
