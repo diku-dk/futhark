@@ -93,8 +93,9 @@
 -- but it can still be substantial for programs with deep sequential
 -- loops.
 --
--- It varies on a case-by-case basis whether vector AD is faster or not. Vector
--- AD essentially converts propagation of (co-)tangents from scalar to array
+-- It varies on a case-by-case basis whether vector AD (`mjp`@term/`jmp`@term)
+-- is faster than using `map` on top of `vjp`@term/`jvp`@term. Vector AD
+-- essentially converts propagation of (co-)tangents from scalar to array
 -- operations, which can have a significant impact on memory accesses, depending
 -- on how the compiler manages to optimise the resulting code. It is hard to
 -- predict whether this offsets the reduction in primal work. If the vector size
