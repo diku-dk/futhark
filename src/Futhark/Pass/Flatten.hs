@@ -128,6 +128,8 @@ topLevelversionScanRed funHasParallelism desc scope pat w arrs form aux outer_on
                     Nothing
                 kernelAlternatives desc result_ts fullFlattenBody [(outer_suff, outerOnlyBody)]
               alternatives
+                | isParallelFunInside funHasParallelism $ lambdaBody . scremaLambda $ form =
+                    fullAlternative
                 | "sequential_inner" `inAttrs` attrs =
                     outerAlternative
                 | mayExploitOuter attrs =
@@ -237,6 +239,8 @@ versionScanRed funHasParallelism desc lvl segments env inps res aux w factored_b
             Nothing
         kernelAlternatives desc result_ts full_body [(outer_suff, outer_body)]
       alternatives
+        | isParallelFunInside funHasParallelism factored_body =
+            fullAlternative
         | "sequential_inner" `inAttrs` attrs =
             outerAlternative
         | mayExploitOuter attrs && allowVersioning lvl =
@@ -961,8 +965,38 @@ regularRepVars =
     onRep Irregular {} =
       error "regularRepVars: expected regular result"
 
-isVersionableMap :: DistInputs -> DistEnv -> SubExp -> [DistResult] -> Lambda SOACS -> Bool
-isVersionableMap inps env w dist_res _map_lam = all isRegularDistResult dist_res && not (isVariant inps env w)
+-- Check if the in the body there is a call to a parallel function.
+-- XXX: we use this function to even reject the intra version of
+-- maps that call parallel function. We should do better there.
+-- One other things to note is that maybe we should create a sequential 
+-- version of function and replace them in these cases.  
+isParallelFunInside :: FunHasParallelism -> Body SOACS -> Bool
+isParallelFunInside funHasParallelism = inBody
+  where
+    inLambda = any (callParallelFunction . stmExp) . bodyStms . lambdaBody
+    inBody = any (callParallelFunction . stmExp) . bodyStms
+    callParallelFunction (Apply fname _ _ _) = funHasParallelism fname
+    callParallelFunction (BasicOp _) = False
+    callParallelFunction (Match _ cases def_case _) =
+      inBody def_case
+        || any (inBody . caseBody) cases
+    callParallelFunction (Loop _ _ body) = inBody body
+    callParallelFunction (WithAcc _ lam) = inLambda lam
+    callParallelFunction (Op (Stream _ _ _ lam)) = inLambda lam
+    callParallelFunction (Op (Screma _ _ (ScremaForm lam _ _ _))) = inLambda lam
+    callParallelFunction (Op (Hist _ _ ops lam)) =
+      inLambda lam || any (inLambda . histLambda) ops
+      where
+        histLambda (Futhark.IR.SOACS.HistOp _ _ _ _ op) = op
+    callParallelFunction (Op JVP {}) = error "isParallelFunInside: unexpected JVP"
+    callParallelFunction (Op VJP {}) = error "isParallelFunInside: unexpected VJP"
+    callParallelFunction (Op WithVJP {}) = error "isParallelFunInside: unexpected WithVJP"
+
+isVersionableMap :: FunHasParallelism -> DistInputs -> DistEnv -> SubExp -> [DistResult] -> Lambda SOACS -> Bool
+isVersionableMap funHasParallelism inps env w dist_res map_lam =
+  all isRegularDistResult dist_res && 
+  not (isVariant inps env w) && 
+  not (isParallelFunInside funHasParallelism (lambdaBody map_lam))
 
 regularBranchBody ::
   Builder GPU [VName] ->
@@ -2486,7 +2520,7 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
             env
       | Just map_lam <- isMapSOAC form,
         allowVersioning lvl,
-        isVersionableMap inps env w res map_lam ->
+        isVersionableMap funHasParallelism inps env w res map_lam ->
           versionedRegularMap funHasParallelism segments env inps res pat aux w arrs map_lam
       | Just map_lam <- isMapSOAC form -> do
           map_res <-
@@ -3591,6 +3625,9 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
                   pure Nothing
             alt_vs <- case intra' of
               _
+                -- We have non-inlined parallel function call we have to fully flatten the body
+                | isParallelFunInside funHasParallelism (lambdaBody lam)->
+                  kernelAlternatives "top_level_map_alt" result_ts fullFlattenBody []
                 | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
                     kernelAlternatives "top_level_map_alt" result_ts outerOnlyBody []
               Nothing
