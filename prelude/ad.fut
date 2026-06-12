@@ -177,8 +177,7 @@ def mjp 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : [n]a =
 -- primal result of `with_vjp`, and some part is only used in `f'`.
 --
 -- **Beware:** if `f` uses any free variables, these will not be taken into
--- **account when computing the adjoint. Make these part of the argument
--- **instead.
+-- account when computing the adjoint. Make these part of the argument instead.
 def with_vjp 'a 'b (f: a -> b) (f': (res: b) -> (b_adj: b) -> a) (x: a) : b =
   intrinsics.with_vjp f f' x
 
