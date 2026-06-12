@@ -11,7 +11,7 @@ def f (n: i64) (xs: []f64) = replicate n xs
 entry fwd_vec n (xs: []f64) =
   let seeds =
     map (\i -> map (\j -> f64.bool (i == j)) (indices xs)) (indices xs)
-  in (jvp2_vec (f n) xs seeds).1
+  in (jmp2 (f n) xs seeds).1
 
 entry fwd_map n (xs: []f64) =
   map (\i -> jvp (f n) xs (map (\j -> f64.bool (i == j)) (indices xs)))

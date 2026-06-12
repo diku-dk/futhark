@@ -12,4 +12,4 @@ entry fwd x y =
   ]
 
 entry fwd_vec x y =
-  jvp_vec primal (x, y) [(1, 0), (0, 1)]
+  jmp primal (x, y) [(1, 0), (0, 1)]

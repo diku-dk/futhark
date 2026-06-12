@@ -20,7 +20,7 @@ entry rev [n] (is: [n]i64) (vs: [n]f64) =
 
 entry rev_vec [n] (is: [n]i64) (vs: [n]f64) =
   let seeds = tabulate 4 (\i -> replicate 4 0 with [i] = 1)
-  in vjp_vec (f is) vs seeds
+  in mjp (f is) vs seeds
 
 -- entry fwd [n] (is: [n]i64) (vs: [n]f64) =
 --   tabulate n (\i -> jvp (f is) vs (replicate n 0 with [i] = 1))

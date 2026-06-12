@@ -15,4 +15,4 @@ entry rev_map [n] (x: i32) (xs: [n]i32) =
 
 entry rev_vec [n] (x: i32) (xs: [n]i32) =
   let seeds = tabulate n (\i -> (replicate n 0 with [i] = 1))
-  in vjp_vec (primal xs) x seeds
+  in mjp (primal xs) x seeds

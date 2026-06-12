@@ -478,7 +478,7 @@ entry rev [n] (input: [n][16]f32) : [n][16][n][16]f32 =
 entry fwd_vec [n] (input: [n][16]f32) : [n][16][n][16]f32 =
   let input = fromarrs2 input
   let seeds = tabulate (n * 16) (\i -> fromarrs2 (onehot_2d n 16 (i / 16) (i % 16)))
-  in jvp_vec primal2 input seeds
+  in jmp primal2 input seeds
      |> map toarrs2
      |> transpose
      |> map transpose
@@ -487,6 +487,6 @@ entry fwd_vec [n] (input: [n][16]f32) : [n][16][n][16]f32 =
 entry rev_vec [n] (input: [n][16]f32) : [n][16][n][16]f32 =
   let input = fromarrs2 input
   let seeds = tabulate (n * 16) (\i -> fromarrs2 (onehot_2d n 16 (i / 16) (i % 16)))
-  in vjp_vec primal2 input seeds
+  in mjp primal2 input seeds
      |> unflatten
      |> map (map toarrs2)

@@ -15,4 +15,4 @@ entry fwd [n] (xs: [n]f32) (ys: [n]f32) =
 
 entry fwd_vec [n] (xs: [n]f32) (ys: [n]f32) =
   let seeds = tabulate k (\i -> (replicate n 0 with [i] = 1, replicate n 0 with [i] = 1))
-  in jvp_vec (uncurry prim) (xs, ys) seeds
+  in jmp (uncurry prim) (xs, ys) seeds

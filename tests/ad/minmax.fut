@@ -21,4 +21,4 @@ entry fwd [n] (xs: [n]f64) =
 
 entry fwd_vec [n] (xs: [n]f64) =
   let seeds = tabulate n (\i -> tabulate n ((== i) >-> f64.bool))
-  in unzip (jvp_vec f xs seeds)
+  in unzip (jmp f xs seeds)

@@ -54,7 +54,7 @@ entry fwd_map [n] (input: [n][4]f32) : [4][n][4]f32 =
 entry fwd_vec [n] (input: [n][4]f32) : [4][n][4]f32 =
   let input = fromarrs input
   let seeds = tabulate (n * 4) (\i -> (fromarrs (onehot_2d n 4 (i / 4) (i % 4))))
-  in jvp_vec primal input seeds
+  in jmp primal input seeds
      |> toarrs
      |> transpose
      |> map unflatten
@@ -67,5 +67,5 @@ entry rev_map [n] (input: [n][4]f32) : [4][n][4]f32 =
 entry rev_vec [n] (input: [n][4]f32) : [4][n][4]f32 =
   let input = fromarrs input
   let seeds = tabulate 4 (\i -> fromarr (onehot_1d 4 i))
-  in vjp_vec primal input seeds
+  in mjp primal input seeds
      |> map toarrs

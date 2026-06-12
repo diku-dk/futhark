@@ -973,7 +973,7 @@ intrinsics =
                   $ Scalar
                   $ tupleRecord [Scalar $ t_b Nonunique, Scalar $ t_a Nonunique]
               ),
-              ( "jvp2_vec",
+              ( "jmp2",
                 IntrinsicPolyFun
                   [tp_a, tp_b, sp_n]
                   [ Scalar (t_a mempty) `arr` Scalar (t_b Nonunique),
@@ -987,7 +987,7 @@ intrinsics =
                       array_b Unique $ shape [n]
                     ]
               ),
-              ( "vjp2_vec",
+              ( "mjp2",
                 IntrinsicPolyFun
                   [tp_a, tp_b, sp_n]
                   [ Scalar (t_a mempty) `arr` Scalar (t_b Nonunique),

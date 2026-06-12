@@ -19,9 +19,9 @@ entry rev [n] (xs: *[n]f64) =
 entry fwd_vec [n] (xs: *[n]f64) =
   #[unsafe]
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in jvp_vec f xs seeds
+  in jmp f xs seeds
 
 entry rev_vec [n] (xs: *[n]f64) =
   #[unsafe]
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in vjp_vec f xs seeds
+  in mjp f xs seeds

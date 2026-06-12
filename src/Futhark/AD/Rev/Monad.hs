@@ -54,7 +54,7 @@ module Futhark.AD.Rev.Monad
     substLoopTape,
     renameLoopTape,
     --
-    locallyNonvectorised,
+    locallyNonvector,
     vecToInner,
   )
 where
@@ -598,14 +598,14 @@ renameLoopTape = mapM_ (uncurry substLoopTape) . M.toList
 -- that computes each adjoint explicitly, then assembles the resulting adjoint
 -- vectors. This is useful for constructs (such as scans) where vectorised AD is
 -- impractical or inefficient.
-locallyNonvectorised ::
+locallyNonvector ::
   (FreeIn e) =>
   -- | Something that represents all the free variables used in the action.
   -- Usually just an expression or statement.
   e ->
   ADM () ->
   ADM ()
-locallyNonvectorised e m = do
+locallyNonvector e m = do
   adj_shape <- askShape
   if adj_shape == mempty
     then m

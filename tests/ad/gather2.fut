@@ -35,11 +35,11 @@ entry rev_J [k] [n] [m] (xs: [k]f64) (iss: [n][m]i64) =
 
 entry fwd_vec_J [k] [n] [m] (xs: [k]f64) (iss: [n][m]i64) =
   let seeds = tabulate k (\i -> onehot k i)
-  in jvp_vec (`mapgather` iss) xs seeds
+  in jmp (`mapgather` iss) xs seeds
   |> transpose
   |> map transpose
 
 entry rev_vec_J [k] [n] [m] (xs: [k]f64) (iss: [n][m]i64) =
   let seeds = tabulate (n * m) (\p -> onehot_2d n m (p / m, p % m))
-  in vjp_vec (`mapgather` iss) xs seeds
+  in mjp (`mapgather` iss) xs seeds
   |> unflatten

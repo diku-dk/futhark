@@ -36,5 +36,5 @@ entry rev_map [n] [m] (is: [n]i64) (vs: [n]f32) (c: [m]f32) =
 
 entry rev_vec [n] [m] (is: [n]i64) (vs: [n]f32) (c: [m]f32) =
   let seeds = tabulate m (\i -> replicate m 0 with [i] = 1)
-  in vjp_vec (f is) (vs, c) seeds
+  in mjp (f is) (vs, c) seeds
      |> unzip

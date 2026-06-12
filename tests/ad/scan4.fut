@@ -35,12 +35,12 @@ entry rev_J [n] (input: [n][3]f32) =
 entry fwd_vec_J [n] (input: [n][3]f32) =
   let input = fromarrs input
   let seeds = tabulate n (\i -> replicate n (0, 0, 0) with [i] = (1, 1, 1))
-  in jvp_vec primal input seeds
+  in jmp primal input seeds
      |> map toarrs
      |> transpose
 
 entry rev_vec_J [n] (input: [n][3]f32) =
   let input = fromarrs input
   let seeds = tabulate n (\i -> replicate n (0, 0, 0) with [i] = (1, 1, 1))
-  in vjp_vec primal input seeds
+  in mjp primal input seeds
      |> map toarrs

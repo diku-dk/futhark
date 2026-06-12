@@ -30,8 +30,8 @@ entry rev [n] [k] (xs: [k]f64) (is: [n]i64) (vs: [n]f64) =
 
 entry fwd_vec [n] [k] (xs: [k]f64) (is: [n]i64) (vs: [n]f64) =
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in jvp_vec (\vs -> f xs is vs) vs seeds
+  in jmp (\vs -> f xs is vs) vs seeds
 
 entry rev_vec [n] [k] (xs: [k]f64) (is: [n]i64) (vs: [n]f64) =
   let seeds = tabulate n (\i -> replicate k 0 with [i] = 1)
-  in vjp_vec (\vs -> f xs is vs) vs seeds
+  in mjp (\vs -> f xs is vs) vs seeds

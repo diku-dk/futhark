@@ -24,7 +24,7 @@ entry fwd_map [n] (xs: [n]i32) =
 
 entry fwd_vec [n] (xs: [n]i32) =
   let seeds = tabulate n (\i -> onehot n i)
-  in jvp_vec primal xs seeds
+  in jmp primal xs seeds
      |> map transpose
      |> transpose
      |> map transpose
@@ -34,4 +34,4 @@ entry rev_map [n] (xs: [n]i32) =
 
 entry rev_vec [n] (xs: [n]i32) =
   let seeds = tabulate_2d n n (\i j -> onehot_2d n n (i, j))
-  in unflatten (vjp_vec primal xs (flatten seeds))
+  in unflatten (mjp primal xs (flatten seeds))

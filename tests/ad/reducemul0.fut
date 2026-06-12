@@ -14,4 +14,4 @@ entry fwd [n] (xs: [n]f32) =
 
 entry fwd_vec [n] (xs: [n]f32) =
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in jvp_vec red_mult xs seeds
+  in jmp red_mult xs seeds

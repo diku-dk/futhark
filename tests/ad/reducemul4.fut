@@ -16,8 +16,8 @@ entry rev [n] (as: [n]f32) =
 
 entry fwd_vec [n] (as: [n]f32) =
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in jvp_vec fun as seeds |> transpose
+  in jmp fun as seeds |> transpose
 
 entry rev_vec [n] (as: [n]f32) =
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in vjp_vec fun as seeds
+  in mjp fun as seeds

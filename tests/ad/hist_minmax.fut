@@ -24,7 +24,7 @@ entry fwd_map [n] (k: i64) (is: [n]i64) (vs: [n]f32) =
 
 entry fwd_vec [n] (k: i64) (is: [n]i64) (vs: [n]f32) =
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in jvp_vec (primal k is) vs seeds
+  in jmp (primal k is) vs seeds
      |> transpose
 
 entry rev_map [n] (k: i64) (is: [n]i64) (vs: [n]f32) =
@@ -32,4 +32,4 @@ entry rev_map [n] (k: i64) (is: [n]i64) (vs: [n]f32) =
 
 entry rev_vec [n] (k: i64) (is: [n]i64) (vs: [n]f32) =
   let seeds = tabulate k (\i -> replicate k 0 with [i] = 1)
-  in vjp_vec (primal k is) vs seeds
+  in mjp (primal k is) vs seeds

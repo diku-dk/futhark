@@ -24,7 +24,7 @@ entry fwd_vec [n] [m] [k] (xs: [n][m][k]f32) : [m][k][n][m][k]f32 =
                 let j = (p % (m * k)) / k
                 let l = p % k
                 in replicate n (replicate m (replicate k 0)) with [i] = (replicate m (replicate k 0) with [j] = (replicate k 0 with [l] = 1)))
-  let res = jvp_vec f xs seeds
+  let res = jmp f xs seeds
   in unflatten (sized (n * (m * k)) res) |> map unflatten
   |> transpose
   |> map transpose
@@ -34,4 +34,4 @@ entry rev_vec [n] [m] [k] (xs: [n][m][k]f32) : [m][k][n][m][k]f32 =
                 let i = p / k
                 let j = p % k
                 in replicate m (replicate k 0) with [i] = (replicate k 0 with [j] = 1))
-  in unflatten (vjp_vec f xs seeds)
+  in unflatten (mjp f xs seeds)

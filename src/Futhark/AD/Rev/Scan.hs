@@ -379,7 +379,7 @@ finalMapPPAD ops as scan = do
     eLambda op_bar_2 $ toExp . Var . paramName <$> par_y_right ++ par_a
 
 diffScan :: VjpOps -> [VName] -> SubExp -> [VName] -> Scan SOACS -> ADM ()
-diffScan ops ys w as scan = locallyNonvectorised (ys, scan, as) $ do
+diffScan ops ys w as scan = locallyNonvector (ys, scan, as) $ do
   -- ys ~ results of scan, w ~ size of input array, as ~ (unzipped)
   -- arrays, scan ~ scan: operator with ne
   scan_case <- identifyCase ops $ scanLambda scan
@@ -466,7 +466,7 @@ diffScanVec ops ys aux w lam ne as m = do
   foldr (vjpStm ops) m stmts
 
 diffScanAdd :: VjpOps -> VName -> SubExp -> Lambda SOACS -> SubExp -> VName -> ADM ()
-diffScanAdd _ops ys n lam' ne as = locallyNonvectorised (ys, lam', as) $ do
+diffScanAdd _ops ys n lam' ne as = locallyNonvector (ys, lam', as) $ do
   lam <- renameLambda lam'
   ys_bar <- lookupAdjVal ys
 

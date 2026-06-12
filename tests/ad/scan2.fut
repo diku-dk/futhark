@@ -18,8 +18,8 @@ entry rev_J [n] [k] (a: [n][k]f32) =
 
 entry fwd_vec_J [n] [k] (a: [n][k]f32) =
   let seeds = tabulate n (\i -> replicate n (replicate k 0) with [i] = replicate k 1)
-  in jvp_vec primal a seeds |> transpose
+  in jmp primal a seeds |> transpose
 
 entry rev_vec_J [n] [k] (a: [n][k]f32) =
   let seeds = tabulate n (\i -> replicate n (replicate k 0) with [i] = replicate k 1)
-  in vjp_vec primal a seeds
+  in mjp primal a seeds

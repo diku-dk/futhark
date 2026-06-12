@@ -241,7 +241,7 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
 
   m
 
-  locallyNonvectorised (x, dst, vs) $ do
+  locallyNonvector (x, dst, vs) $ do
     x_bar <- lookupAdjVal x
 
     x_ind_dst <- newParam (baseName x <> "_ind_param") $ Prim int64
@@ -419,7 +419,7 @@ diffMulHist _ops x aux n mul ne is vs w rf dst m = do
 
   m
 
-  locallyNonvectorised (x, dst, vs) $ do
+  locallyNonvector (x, dst, vs) $ do
     x_bar <- lookupAdjVal x
 
     lam_mul'' <- renameLambda lam_mul'
@@ -504,7 +504,7 @@ diffAddHist _ops x aux n add ne is vs w rf dst m = do
 
   m
 
-  locallyNonvectorised (x, dst, vs) $ do
+  locallyNonvector (x, dst, vs) $ do
     x_bar <- lookupAdjVal x
 
     updateAdj dst x_bar
@@ -798,7 +798,7 @@ diffHist ops xs aux n lam0 ne as w rf dst m = do
 
   m
 
-  locallyNonvectorised (xs, dst, lam0, as) $ do
+  locallyNonvector (xs, dst, lam0, as) $ do
     xs_bar <- traverse lookupAdjVal xs
 
     (dst_params, hp_params, f') <- mkF' lam0 dst_type $ head w

@@ -1869,7 +1869,7 @@ isIntrinsicFunction qname args = do
     handleAccs _ _ = Nothing
 
     handleAD [f, x, v] fname
-      | fname `elem` ["jvp2", "vjp2", "jvp2_vec", "vjp2_vec"] = Just $ \desc -> do
+      | fname `elem` ["jvp2", "vjp2", "jmp2", "mjp2"] = Just $ \desc -> do
           x' <- internaliseExp "ad_x" x
           v' <- internaliseExp "ad_v" v
           x_t <- subExpType $ head x'
@@ -1879,9 +1879,9 @@ isIntrinsicFunction qname args = do
             case fname of
               "jvp2" -> JVP mempty x' v' lam
               "vjp2" -> VJP mempty x' v' lam
-              "jvp2_vec" ->
+              "jmp2" ->
                 JVP (vecShape x_t v_t) x' v' lam
-              "vjp2_vec" ->
+              "mjp2" ->
                 VJP (vecShape (head (lambdaReturnType lam)) v_t) x' v' lam
               _ -> error "handleAD: not supposed to happen."
       where

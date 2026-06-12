@@ -25,7 +25,8 @@
 --
 --   * Custom derivatives (`with_vjp`@term).
 --
---   * Vectorised AD (`vjp_vec`@term, `vjp_vec`@term).
+--   * Vector AD (`mjp`@term, `jmp`@term), sometimes also known as "batched" or
+--    "multi-directional" AD.
 --
 --   * Checkpointing of sequential loops.
 --
@@ -92,8 +93,8 @@
 -- but it can still be substantial for programs with deep sequential
 -- loops.
 --
--- It varies on a case-by-case basis whether vectorised AD is faster or not. It
--- essentially converts propagation of (co-)tangents from scalar to array
+-- It varies on a case-by-case basis whether vector AD is faster or not. Vector
+-- AD essentially converts propagation of (co-)tangents from scalar to array
 -- operations, which can have a significant impact on memory accesses, depending
 -- on how the compiler manages to optimise the resulting code. It is hard to
 -- predict whether this offsets the reduction in primal work. If the vector size
@@ -131,17 +132,19 @@ def jvp2 'a 'b (f: a -> b) (x: a) (x': a) : (b, b) =
 def vjp2 'a 'b (f: a -> b) (x: a) (y': b) : (b, a) =
   intrinsics.vjp2 f x y'
 
--- | As `jvp2`, but accepts a vector of seed values. Semantically equivalent to
--- mapping, but may be more efficient. If used with `#[unroll]`, tangent
--- calculations are unrolled when possible.
-def jvp2_vec 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : (b, [n]b) =
-  intrinsics.jvp2_vec f x x'
+-- | Jacobian-Matrix Product, returning also the primal result. As `jvp2`, but
+-- accepts a vector of seed values. Semantically equivalent to mapping, but may
+-- be more efficient. If used with `#[unroll]`, tangent calculations are
+-- unrolled when possible.
+def jmp2 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : (b, [n]b) =
+  intrinsics.jmp2 f x x'
 
--- | As `vjp2`, but accepts a vector of seed values. Semantically equivalent to
--- mapping, but may be more efficient. If used with `#[unroll]`, adjoint
--- calculations are unrolled when possible.
-def vjp2_vec 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : (b, [n]a) =
-  intrinsics.vjp2_vec f x y'
+-- | Matrix-Jacobian Product, returning also the primal result. As `vjp2`, but
+-- accepts a vector of seed values. Semantically equivalent to mapping, but may
+-- be more efficient. If used with `#[unroll]`, adjoint calculations are
+-- unrolled when possible.
+def mjp2 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : (b, [n]a) =
+  intrinsics.mjp2 f x y'
 
 -- | Jacobian-Vector Product ("forward mode").
 def jvp 'a 'b (f: a -> b) (x: a) (x': a) : b =
@@ -151,15 +154,15 @@ def jvp 'a 'b (f: a -> b) (x: a) (x': a) : b =
 def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
   (vjp2 f x y').1
 
--- | As `jvp`, but accepts a vector of seed values. Semantically
--- equivalent to mapping, but may be more efficient.
-def jvp_vec 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : [n]b =
-  (jvp2_vec f x x').1
+-- | Jacobian-Matrix Product. As `jvp`, but accepts a vector of seed values.
+-- Semantically equivalent to mapping, but may be more efficient.
+def jmp 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : [n]b =
+  (jmp2 f x x').1
 
--- | As `vjp`, but accepts a vector of seed values. Semantically
--- equivalent to mapping, but may be more efficient.
-def vjp_vec 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : [n]a =
-  (vjp2_vec f x y').1
+-- | Matrix-Jacobian product. As `vjp`, but accepts a vector of seed values.
+-- Semantically equivalent to mapping, but may be more efficient.
+def mjp 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : [n]a =
+  (mjp2 f x y').1
 
 -- | Provide custom reverse-mode adjoint code for a given function. This is
 -- useful when the adjoint synthesised by AD is not as good as one that is known

@@ -114,7 +114,7 @@ entry fwd_vec_J [n] [m] [k] (input: [n][m][k]f32) =
                 let j = (p % (m * k)) / k
                 let q = p % k
                 in replicate n (replicate m (replicate k 0)) with [i] = (replicate m (replicate k 0) with [j] = (replicate k 0 with [q] = 1)))
-  let res = jvp_vec primal input seeds
+  let res = jmp primal input seeds
   in unflatten (sized (n * (m * k)) res) |> map unflatten
 
 entry rev_vec_J [n] [m] [k] (input: [n][m][k]f32) =
@@ -123,7 +123,7 @@ entry rev_vec_J [n] [m] [k] (input: [n][m][k]f32) =
                 let j = (p % (m * k)) / k
                 let q = p % k
                 in replicate n (replicate m (replicate k 0)) with [i] = (replicate m (replicate k 0) with [j] = (replicate k 0 with [q] = 1)))
-  let res = vjp_vec primal input seeds
+  let res = mjp primal input seeds
             |> (\x -> unflatten (sized (n * (m * k)) x)) |> map unflatten
   let a = res |> map (map transpose) |> map (map (map transpose)) |> map (map (map (map transpose)))
   let a2 = a |> map transpose |> map (map transpose) |> map (map (map transpose))

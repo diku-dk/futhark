@@ -9,7 +9,7 @@ def f (i: i32) (xs: []f32) = xs[i]
 entry fwd_vec l (xs: []f32) : []f32 =
   let seeds =
     map (\i -> map (\j -> f32.bool (i == j)) (indices xs)) (indices xs)
-  in (jvp2_vec (f l) xs seeds).1
+  in (jmp2 (f l) xs seeds).1
 
 entry fwd_map l (xs: []f32) : []f32 =
   map (\i -> jvp (f l) xs (map (\j -> f32.bool (i == j)) (indices xs)))

@@ -19,13 +19,13 @@ def forward_vec [n] [m] (arr: [m][n]f32) : [n][m][n]f32 =
                 let i = p / n
                 let j = p % n
                 in replicate m (replicate n 0) with [i] = (replicate n 0 with [j] = 1))
-  in jvp_vec redmap arr seeds
+  in jmp redmap arr seeds
   |> unflatten
   |> transpose
 
 def reverse_vec [n] [m] (arr: [m][n]f32) : [n][m][n]f32 =
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in vjp_vec redmap arr seeds
+  in mjp redmap arr seeds
 
 def main [n] [m] (arr: [m][n]f32) : bool =
   let l = n * m * n

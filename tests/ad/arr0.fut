@@ -14,7 +14,7 @@ entry fwd xs =
   ]
 
 entry fwd_vec xs =
-  jvp_vec primal xs [[1, 0], [0, 1]]
+  jmp primal xs [[1, 0], [0, 1]]
 
 -- ==
 -- entry: rev

@@ -24,8 +24,8 @@ entry rev_J [n] [m] (xs: [n]f64) (is: [m]i64) =
 
 entry fwd_vec_J [n] [m] (xs: [n]f64) (is: [m]i64) =
   let seeds = tabulate n (\j -> replicate n 0 with [j] = 1)
-  in transpose (jvp_vec (`gather` is) xs seeds)
+  in transpose (jmp (`gather` is) xs seeds)
 
 entry rev_vec_J [n] [m] (xs: [n]f64) (is: [m]i64) =
   let seeds = tabulate m (\j -> replicate m 0 with [j] = 1)
-  in vjp_vec (`gather` is) xs seeds
+  in mjp (`gather` is) xs seeds

@@ -40,7 +40,7 @@ entry fwd_vec [n] [m] (is: [n]i64) (vs: [n]f32) (c: [m]f32) =
                         ( tabulate n ((i ==) >-> f32.bool)
                         , tabulate m (((i - n) ==) >-> f32.bool)
                         ))
-  in jvp_vec (f is) (vs, c) seeds
+  in jmp (f is) (vs, c) seeds
      |> transpose
      |> map split
      |> unzip
@@ -51,5 +51,5 @@ entry rev_map [n] [m] (is: [n]i64) (vs: [n]f32) (c: [m]f32) =
 
 entry rev_vec [n] [m] (is: [n]i64) (vs: [n]f32) (c: [m]f32) =
   let seeds = tabulate m (\i -> replicate m 0 with [i] = 1)
-  in vjp_vec (f is) (vs, c) seeds
+  in mjp (f is) (vs, c) seeds
      |> unzip

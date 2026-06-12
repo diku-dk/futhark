@@ -11,7 +11,7 @@ entry fwd_map n m (xs: [n * m]i32) =
 
 entry fwd_vec n m (xs: [n * m]i32) =
   let seeds = tabulate 2 (\i -> replicate (n * m) 0 with [i] = 1)
-  in jvp_vec unflatten xs seeds
+  in jmp unflatten xs seeds
 
 -- ==
 -- entry: f_vjp

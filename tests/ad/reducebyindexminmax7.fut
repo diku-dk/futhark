@@ -16,9 +16,9 @@ entry fwd [n] [m] [k] (is: [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =
 
 entry rev_vec [n] [m] [k] (is: [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =
   let seeds = tabulate m (\i -> replicate m (replicate k 0) with [i] = replicate k 1)
-  in vjp_vec (primal is dst) vs seeds
+  in mjp (primal is dst) vs seeds
 
 entry fwd_vec [n] [m] [k] (is: [n]i64) (dst: [m][k]f32) (vs: [n][k]f32) =
   let seeds = tabulate n (\i -> replicate n (replicate k 0) with [i] = replicate k 1)
-  in jvp_vec (primal is dst) vs seeds
+  in jmp (primal is dst) vs seeds
      |> transpose

@@ -32,8 +32,8 @@ entry rev_J (x: [8]f64) =
 
 entry fwd_vec_J (x: [8]f64) =
   let seeds = tabulate 8 (\i -> replicate 8 0 with [i] = 1)
-  in jvp_vec obj x seeds
+  in jmp obj x seeds
 
 entry rev_vec_J (x: [8]f64) =
   let seeds = tabulate 4 (\i -> replicate 4 0 with [i] = 1)
-  in transpose (vjp_vec obj x seeds)
+  in transpose (mjp obj x seeds)

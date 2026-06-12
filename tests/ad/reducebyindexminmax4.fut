@@ -15,6 +15,6 @@ entry rev [n] [m] (dst: [m]f32) (is: [n]i64) (vs: [n]f32) (c: f32) =
   vjp (red_max vs is) (dst, c) (replicate m 0 with [0] = 1)
 
 entry rev_vec [n] [m] (dst: [m]f32) (is: [n]i64) (vs: [n]f32) (c: f32) =
-  (vjp_vec (red_max vs is) (dst, c) [replicate m 0 with [0] = 1])[0]
+  (mjp (red_max vs is) (dst, c) [replicate m 0 with [0] = 1])[0]
 
 --tabulate n (\i -> vjp (red_max dst is) (vs, c) (replicate n 0 with [i] = 1))

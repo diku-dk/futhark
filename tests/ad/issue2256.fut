@@ -16,4 +16,4 @@ entry fwd [m] (x: [m]f64) =
 
 entry fwd_vec [m] (x: [m]f64) =
   let seeds = tabulate m (\i -> replicate m 0 with [i] = 1)
-  in jvp_vec (\x' -> primal x') x seeds
+  in jmp (\x' -> primal x') x seeds

@@ -46,7 +46,7 @@ entry rev_J [n] [m] [k] (xs: [n][m]f64) (is: [k]i64) =
 
 entry fwd_vec_J [n] [m] [k] (xs: [n][m]f64) (is: [k]i64) =
   let seeds = tabulate (n * m) (\p -> onehot_2d n m (p / m, p % m))
-  in jvp_vec (`mapgather` is) xs seeds
+  in jmp (`mapgather` is) xs seeds
   |> unflatten
   |> map transpose
   |> map (map transpose)
@@ -54,5 +54,5 @@ entry fwd_vec_J [n] [m] [k] (xs: [n][m]f64) (is: [k]i64) =
 
 entry rev_vec_J [n] [m] [k] (xs: [n][m]f64) (is: [k]i64) =
   let seeds = tabulate (n * k) (\p -> onehot_2d n k (p / k, p % k))
-  in vjp_vec (`mapgather` is) xs seeds
+  in mjp (`mapgather` is) xs seeds
   |> unflatten

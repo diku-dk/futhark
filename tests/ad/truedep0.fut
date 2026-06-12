@@ -12,7 +12,7 @@ def test [n] (xs: [n]i32) =
 entry prim [n] (xs: [n]i32) = test xs
 
 -- ==
--- entry: f_jvp f_vjp f_jvp_vec f_vjp_vec
+-- entry: f_jvp f_vjp f_jmp f_mjp
 -- input { [1,2,3,4,5] }
 -- output { [[1,0,0,0,0],
 --           [2,0,0,0,0],
@@ -26,11 +26,11 @@ entry f_jvp [n] (xs: [n]i32) =
 entry f_vjp [n] (xs: [n]i32) =
   tabulate n (\i -> vjp test xs (replicate n 0 with [i] = 1))
 
-entry f_jvp_vec [n] (xs: [n]i32) =
+entry f_jmp [n] (xs: [n]i32) =
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in jvp_vec test xs seeds
+  in jmp test xs seeds
   |> transpose
 
-entry f_vjp_vec [n] (xs: [n]i32) =
+entry f_mjp [n] (xs: [n]i32) =
   let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
-  in vjp_vec test xs seeds
+  in mjp test xs seeds

@@ -19,8 +19,8 @@ entry rev_J [n] [m] (free: [n][m]i32) (is: [n]i32) =
 
 entry fwd_vec_J [n] [m] (free: [n][m]i32) (is: [n]i32) =
   let seeds = tabulate n (\i -> onehot n i)
-  in jvp_vec (f free) is seeds |> transpose
+  in jmp (f free) is seeds |> transpose
 
 entry rev_vec_J [n] [m] (free: [n][m]i32) (is: [n]i32) =
   let seeds = tabulate n (\i -> onehot n i)
-  in vjp_vec (f free) is seeds
+  in mjp (f free) is seeds

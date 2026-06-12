@@ -35,7 +35,7 @@ entry rev_J [n] [m] [p] (xss: [n][m]f64) (yss: [m][p]f64) =
 
 entry fwd_vec_J [n] [m] [p] (xss: [n][m]f64) (yss: [m][p]f64) =
   let seeds = tabulate (m * p) (\k -> onehot_2d m p (k / p, k % p))
-  in jvp_vec (matmul xss) yss seeds
+  in jmp (matmul xss) yss seeds
   |> unflatten
   |> transpose
   |> map transpose
@@ -43,5 +43,5 @@ entry fwd_vec_J [n] [m] [p] (xss: [n][m]f64) (yss: [m][p]f64) =
 
 entry rev_vec_J [n] [m] [p] (xss: [n][m]f64) (yss: [m][p]f64) =
   let seeds = tabulate (n * p) (\k -> onehot_2d n p (k / p, k % p))
-  in vjp_vec (matmul xss) yss seeds
+  in mjp (matmul xss) yss seeds
   |> unflatten

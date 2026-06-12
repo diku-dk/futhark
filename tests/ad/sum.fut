@@ -16,4 +16,4 @@ entry fwd [n] (xs: [n]f64) =
 
 entry fwd_vec [n] (xs: [n]f64) =
   let seeds = tabulate n (\i -> tabulate n ((== i) >-> f64.bool))
-  in jvp_vec sum xs seeds
+  in jmp sum xs seeds

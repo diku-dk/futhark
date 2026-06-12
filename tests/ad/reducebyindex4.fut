@@ -20,7 +20,7 @@ entry rev [n] (is: [n]i64) (vs0: [n]f32) (vs1: [n]f32) =
   |> unzip
 
 entry rev_vec [n] (is: [n]i64) (vs0: [n]f32) (vs1: [n]f32) =
-  (vjp_vec (f is) (zip vs0 vs1) [replicate 4 (1, 1)])[0]
+  (mjp (f is) (zip vs0 vs1) [replicate 4 (1, 1)])[0]
   |> unzip
 
 entry fwd [n] (is: [n]i64) (vs0: [n]f32) (vs1: [n]f32) =

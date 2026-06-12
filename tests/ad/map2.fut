@@ -18,4 +18,4 @@ entry rev_map [n] (c: f64) (xs: [n]f64) =
 
 entry rev_vec [n] (c: f64) (xs: [n]f64) =
   let seeds = tabulate n (\i -> onehot n i)
-  in vjp_vec (primal xs) c seeds
+  in mjp (primal xs) c seeds

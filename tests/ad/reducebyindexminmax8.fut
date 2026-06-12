@@ -14,11 +14,11 @@ def fwd2 [n] [m] [k] [l] (is: [n]i64) (dst: [m][k][l]f32) (vs: [n][k][l]f32) =
 
 def rev_vec2 [n] [m] [k] [l] (is: [n]i64) (dst: [m][k][l]f32) (vs: [n][k][l]f32) =
   let seeds = tabulate m (\i -> replicate m (replicate k (replicate l 0)) with [i] = replicate k (replicate l 1))
-  in vjp_vec (primal2 is dst) vs seeds
+  in mjp (primal2 is dst) vs seeds
 
 def fwd_vec2 [n] [m] [k] [l] (is: [n]i64) (dst: [m][k][l]f32) (vs: [n][k][l]f32) =
   let seeds = tabulate n (\i -> replicate n (replicate k (replicate l 0)) with [i] = replicate k (replicate l 1))
-  in jvp_vec (primal2 is dst) vs seeds
+  in jmp (primal2 is dst) vs seeds
   |> transpose
 
 def main [n] [m] [k] [l] (is': [n]i64) (dst: [m][k][l]f32) (vs: [n][k][l]f32) =

@@ -12,7 +12,7 @@ entry fwd_map [n] [k] (a: [n][k]f32) =
   tabulate n (\i -> jvp primal a (replicate n (replicate k 0) with [i] = replicate k 1))
 
 entry fwd_vec [n] [k] (a: [n][k]f32) =
-  jvp_vec primal a (tabulate n (\i -> (replicate n (replicate k 0) with [i] = replicate k 1)))
+  jmp primal a (tabulate n (\i -> (replicate n (replicate k 0) with [i] = replicate k 1)))
 
 entry rev_vec [n] [k] (a: [n][k]f32) =
-  head (vjp_vec primal a [replicate k 1])
+  head (mjp primal a [replicate k 1])

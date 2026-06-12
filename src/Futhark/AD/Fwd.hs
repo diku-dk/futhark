@@ -646,10 +646,9 @@ fwdJVP scope shape attrs (Lambda params _ body) =
     mkLambda (params <> params_tan) $
       bodyBind =<< fwdBodyTansLast body
 
--- Note [Forward-Mode vectorised AD]
+-- Note [Forward-Mode vector AD]
 --
 -- An primal variable of type 't' has a tangent of type '[tan_shape]t', where
--- 'tan_shape' is the vector shape (which may be empty in the non-vectorised
--- case). This requires some care for SOACs, which always map across the
--- outermost dimension: basically we have to transpose the inputs and the
--- outputs.
+-- 'tan_shape' is the vector shape (which may be empty in the non-vector case).
+-- This requires some care for SOACs, which always map across the outermost
+-- dimension: basically we have to transpose the inputs and the outputs.
