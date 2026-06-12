@@ -73,26 +73,32 @@
 -- Both `jvp` and `vjp` work by transforming the program to carry
 -- along extra information associated with each scalar value.
 --
--- In the case of `jvp`, this extra information takes the form of an
--- additional scalar representing the tangent, which is then
--- propagated in each scalar computation using essentially the [chain
--- rule](https://en.wikipedia.org/wiki/Chain_rule). Therefore, `jvp`
--- has a memory overhead of approximately *2x*, and a computational
--- overhead of slightly more, but usually less than *4x*.
+-- In the case of `jvp` ("forward mode", or "tangent mode"), this extra
+-- information takes the form of an additional scalar representing the tangent,
+-- which is then propagated in each scalar computation using essentially the
+-- [chain rule](https://en.wikipedia.org/wiki/Chain_rule). Therefore, `jvp` has
+-- a memory overhead of approximately *2x*, and a computational overhead of
+-- slightly more, but usually less than *4x*.
 --
--- In the case of `vjp`, since our starting point is a *cotangent*,
--- the function is essentially first run forward, then backwards (the
--- *return sweep*) to propagate the cotangent. During the return
--- sweep, all intermediate results computed during the forward sweep
--- must still be available, and must therefore be stored in memory
--- during the forward sweep. This means that the memory usage of `vjp`
--- is proportional to the number of sequential steps of the original
--- function (essentially turning *time* into *space*). The compiler
--- does a nontrivial amount of optimisation to ameliorate this
--- overhead (see [AD for an Array Language with Nested
--- Parallelism](https://futhark-lang.org/publications/sc22-ad.pdf)),
--- but it can still be substantial for programs with deep sequential
--- loops.
+-- In the case of `vjp` ("reverse mode" or "adjoint mode"), since our starting
+-- point is a *cotangent*, the function is essentially first run forward, then
+-- backwards (the *return sweep*) to propagate the cotangent. During the return
+-- sweep, all intermediate results computed during the forward sweep must still
+-- be available, and must therefore be stored in memory during the forward sweep
+-- - this is called "the tape". This means that the memory usage of `vjp` is
+-- proportional to the number of sequential steps of the original function
+-- (essentially turning *time* into *space*). The compiler does a nontrivial
+-- amount of optimisation to ameliorate this overhead (see [AD for an Array
+-- Language with Nested
+-- Parallelism](https://futhark-lang.org/publications/sc22-ad.pdf)), but it can
+-- still be substantial for programs with deep sequential loops.
+--
+-- Nesting `vjp`, understood as applying `vjp` to the result of `vjp`, is
+-- usually a bad idea, as the code structure produced by `vjp` is fairly
+-- complicated, due to the tape management. Passing the output of `jvp` to
+-- `vjp`, or the other way, is however fine. As a rule of thumb, whenever you
+-- stack multiple differential operators, make sure only one of them is `vjp` or
+-- related ones.
 --
 -- When using vector AD (`mjp`@term/`jmp`@term), each scalar is associated with
 -- a vector of tangents or cotangents, and the space overhead for storing these
