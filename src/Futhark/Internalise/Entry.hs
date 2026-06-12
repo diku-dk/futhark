@@ -129,6 +129,13 @@ opaqueRecord types ((f, t) : fs) ts = do
   where
     opaqueField e_t i_ts = snd <$> entryPointType types e_t i_ts
 
+teArrayOf :: Int -> E.TypeExp d vn -> E.TypeExp d vn
+teArrayOf rank t =
+  foldl
+    (\x _ -> E.TEArray (E.SizeExpAny mempty) x mempty)
+    t
+    [0 .. rank - 1]
+
 opaqueRecordArray ::
   VisibleTypes ->
   Int ->
@@ -141,10 +148,11 @@ opaqueRecordArray types rank ((f, t) : fs) ts = do
   f' <- opaqueField t f_ts
   ((f, f') :) <$> opaqueRecordArray types rank fs ts'
   where
-    opaqueField (E.EntryType e_t _) i_ts =
-      snd <$> entryPointType types (E.EntryType e_t' Nothing) i_ts
+    opaqueField (E.EntryType e_t ascribed) i_ts =
+      snd <$> entryPointType types (E.EntryType e_t' ascribed') i_ts
       where
         e_t' = E.arrayOf (E.Shape (replicate rank $ E.anySize 0)) e_t
+        ascribed' = teArrayOf rank <$> ascribed
 
 isSum ::
   VisibleTypes ->
@@ -231,8 +239,8 @@ entryPointType types t ts
             =<< opaqueSum types cs'' ts'
         E.Array _ shape (E.Record fs)
           | not $ null fs -> do
-              let fs' = recordFields types fs $ E.entryAscribed t
-                  rank = E.shapeRank shape
+              let rank = E.shapeRank shape
+                  fs' = recordFields types fs $ rowTypeExp rank =<< E.entryAscribed t
                   ts' = map (strip rank) ts
                   record_t = E.Scalar (E.Record fs)
                   record_te = rowTypeExp rank =<< E.entryAscribed t
