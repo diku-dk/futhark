@@ -1295,8 +1295,21 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
       irreg_v <- getIrregRep lvl segments env inps arr
       pure $ insertRep (distResTag res) (Irregular irreg_v) env
     Index arr slice
-      | null $ sliceDims slice ->
-          scalarCase
+      | isRegularDistResult res,
+        not (any (isVariant inps env) slice) -> do
+          arr_t <- lookupInputType inps arr
+          arr' <- liftSubExpRegular 
+            lvl
+            segments
+            inps
+            env
+            (segmentsShape segments <> arrayShape arr_t)
+            (Var arr)
+          let segmentSlice = map sliceDim . shapeDims . segmentsShape
+          v <-
+            certifying (distCerts inps aux env) . letExp "index_reg" . BasicOp $
+              Index arr' (Slice $ segmentSlice segments <> unSlice slice)
+          pure $ insertRegulars [distResTag res] [v] env
       | otherwise -> do
           -- Maximally irregular case.
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
@@ -1322,8 +1335,35 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
                 =<< eIndex arr (map toExp slice')
           pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
     FlatIndex arr flat_slice
-      | null $ flatSliceDims flat_slice ->
-          scalarCase
+      | isRegularDistResult res,
+        not (any (isVariant inps env) flat_slice) -> do
+        arr_t <- lookupInputType inps arr
+        -- arr should be 1D
+        let [n] = arrayDims arr_t
+        num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+        arr_flat_size <- letSubExp "arr_flat_size" =<< toExp (pe64 num_segments * pe64 n)
+        let arr_lift_shape = segmentsShape segments <> arrayShape arr_t
+            arr_flat_shape = Shape [arr_flat_size]
+        arr' <-
+          liftSubExpRegular
+            lvl
+            segments
+            inps
+            env
+            arr_lift_shape
+            (Var arr)
+        arr'_flat <-
+          letExp (baseName arr <> "_reshaped") $ BasicOp $ Reshape arr' $ reshapeAll arr_lift_shape arr_flat_shape
+        let FlatSlice off dims = flat_slice
+            flat_slice' = FlatSlice off (FlatDimIndex num_segments n : dims)
+        out_flat_updated <-
+          certifying (distCerts inps aux env) . letExp "flat_index_reg" . BasicOp $
+            FlatIndex arr'_flat flat_slice'
+        out_updated <-
+          letExp "flat_index_reg_reshaped" $
+            BasicOp $ Reshape out_flat_updated $ reshapeAll arr_flat_shape arr_lift_shape
+        pure $ insertRegulars [distResTag res] [out_updated] env
+
       | otherwise -> do
           -- Maximally irregular case.
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
