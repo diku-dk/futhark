@@ -1,6 +1,6 @@
 -- | Various definitions used for both forward and reverse mode.
 module Futhark.AD.Shared
-  ( auxPerm,
+  ( vecPerm,
     asVName,
     mapNest,
     mkMap,
@@ -12,11 +12,14 @@ import Data.Foldable
 import Futhark.Construct
 import Futhark.IR.SOACS
 
-auxPerm :: Shape -> Type -> [Int]
-auxPerm aux_shape t =
-  [shapeRank aux_shape]
-    ++ [0 .. shapeRank aux_shape - 1]
-    ++ [shapeRank aux_shape + 1 .. arrayRank t - 1]
+-- | A permutation for transposing the vector shape past the next dimension.
+--
+-- That is, converts @[vec...][d][elem...]@ to @[d][vec...][elem...]@.
+vecPerm :: Shape -> Type -> [Int]
+vecPerm vec_shape t =
+  [shapeRank vec_shape]
+    ++ [0 .. shapeRank vec_shape - 1]
+    ++ [shapeRank vec_shape + 1 .. arrayRank t - 1]
 
 asVName :: (MonadBuilder m) => SubExp -> m VName
 asVName (Var v) = pure v

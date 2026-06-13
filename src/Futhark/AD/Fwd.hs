@@ -405,12 +405,12 @@ fwdStreamLambda num_accs (Lambda params _ body) = do
     onArrParam p = do
       shape <- askShape
       (p', p_tan) <- bundleNew p
-      let perm = auxPerm shape $ paramType p_tan
+      let perm = vecPerm shape $ paramType p_tan
       pure (p', p_tan {paramDec = rearrangeType perm (paramType p_tan)})
 
     -- Put the tangent shape back in the outermost position.
     trArrParamTan tan_shape p p_tan = do
-      let perm = rearrangeInverse $ auxPerm tan_shape $ paramType p_tan
+      let perm = rearrangeInverse $ vecPerm tan_shape $ paramType p_tan
       v <-
         letExp (baseName (paramName p_tan)) . BasicOp $
           Rearrange (paramName p_tan) perm
@@ -419,11 +419,8 @@ fwdStreamLambda num_accs (Lambda params _ body) = do
     -- Put the chunk size back in the outermost position.
     trMapResTan tan_shape (SubExpRes cs ~(Var v)) = do
       v_t <- lookupType v
-      let perm = auxPerm tan_shape v_t
+      let perm = vecPerm tan_shape v_t
       fmap varRes . certifying cs $ letExp (baseName v) . BasicOp $ Rearrange v perm
-
-vecPerm :: Shape -> Type -> [Int]
-vecPerm = auxPerm
 
 pushTanShape :: VName -> ADM VName
 pushTanShape v = do
