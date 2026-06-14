@@ -45,26 +45,28 @@
 -- such as arrays, records, sums, and so on, simply by "flattening
 -- out" the values and considering only their constituent scalars.
 --
--- Computing the full Jacobian is usually costly and sometimes not
--- necessary, and it is not part of the AD facility provided by
--- Futhark. Instead it is possible to parts of the Jacobian.
+-- Computing the full Jacobian is usually costly and sometimes not necessary,
+-- and it is not part of the AD facility provided by Futhark. Instead it is
+-- possible to compute parts of the Jacobian, which semantically (but not
+-- operationally) can be seen as multiplying the Jacobian with a vector,
+-- producing a vector. However, it is important to understand that the full
+-- Jacobian is *not* constructed as an intermediate step.
 --
--- We can take the product of an an *m* by *n* Jacobian with an
--- *n*-element *tangent vector* to produce an *m*-element vector
--- (*Jacobian-vector product*). Such a product can be computed in a
--- single (augmented) execution of the function *f*, and by choosing
--- the tangent vector appropriately we can use this to compute the
--- full Jacobian. This is provided by the function `jvp`.
+-- We can take the product of an an *m* by *n* Jacobian with an *n*-element
+-- *tangent vector* to produce an *m*-element vector (*Jacobian-vector
+-- product*). Such a product can be computed in a single (augmented) execution
+-- of the function *f*. This is provided by the function `jvp`.
 --
 -- We can also take the product of an *m*-element vector *cotangent
 -- vector* with the *m* by *n* Jacobian to produce an *n*-element
 -- vector (*Vector-Jacobian product*). This too can be computed in a
 -- single execution of *f*, with `vjp`.
 --
--- We can use the `jvp` function to produce a *column* of the full
--- Jacobian, and `vjp` to produce a *row*. Which is superior for a
--- given situation depends on whether the function has more inputs or
--- outputs.
+-- Using an elementary vector, we can use the `jvp` function to produce a
+-- *column* of the full Jacobian, and `vjp` to produce a *row*, with the nonzero
+-- element of the vector identifying which column or row is extracted. Which is
+-- superior for a given situation depends on whether the function has more
+-- inputs or outputs.
 --
 -- We can freely nest `vjp` and `jvp` to compute higher-order derivatives.
 --
