@@ -1290,10 +1290,41 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
           pure $ insertRep (distResTag res) (resVar rt_in env) env
       | otherwise ->
           scalarCase
-    -- TODO: Probably have to change this.
-    Reshape arr _ -> do
-      irreg_v <- getIrregRep lvl segments env inps arr
-      pure $ insertRep (distResTag res) (Irregular irreg_v) env
+    Reshape arr reshape 
+      | isRegularDistResult res,
+        not (any (isVariant inps env) reshape) -> do 
+        let outer = segmentsShape segments
+            inner_target = newShape reshape
+            reshape' = reshapeCoerce outer <> newshapeInner outer reshape
+
+        arr_t <- lookupInputType inps arr  
+        let arr_shape = arrayShape arr_t
+        let unform_arr =  not (any (isVariant inps env) arr_shape )
+        if unform_arr 
+          then do
+            arr' <- liftSubExpRegular  
+              lvl
+              segments
+              inps
+              env
+              (outer <> arr_shape)
+              (Var arr)
+            v <- certifying (distCerts inps aux env) . letExp "reshape_reg" . BasicOp $ Reshape arr' reshape'
+            pure $ insertRegulars [distResTag res] [v] env
+          else do
+            arr' <- liftSubExpRegular 
+              lvl
+              segments
+              inps
+              env
+              (outer <> inner_target)
+              (Var arr)
+            pure $ insertRegulars [distResTag res] [arr'] env
+
+
+      | otherwise -> do
+        irreg_v <- getIrregRep lvl segments env inps arr
+        pure $ insertRep (distResTag res) (Irregular irreg_v) env
     Index arr slice
       | isRegularDistResult res,
         not (any (isVariant inps env) slice) -> do
@@ -2153,9 +2184,9 @@ replicateForDims segments dims v = do
       dims_rank = shapeRank dims
       perm = [dims_rank .. dims_rank + seg_rank - 1] ++ [0 .. dims_rank - 1] ++ [seg_rank + dims_rank .. dims_rank + v_rank - 1]
   v_rep <-
-    letExp (baseName v <> "_free_rep") . BasicOp $
+    letExp (baseName v <> "_reg_rep") . BasicOp $
       Replicate dims (Var v)
-  letExp (baseName v <> "_free_rep_tr") . BasicOp $
+  letExp (baseName v <> "_reg_rep_tr") . BasicOp $
     Rearrange v_rep perm
 
 transformInnerMapMultiDim ::
