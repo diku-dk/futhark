@@ -3615,6 +3615,23 @@ transformStm funHasParallelism scope (Let pat aux (Op soac))
       transformStms funHasParallelism scope $ fmap (certify (stmAuxCerts aux)) stms
 transformStm _ _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm $ soacsStmToGPU stm
+transformStm _ scope (Let pat aux (Op (Hist w arrs ops bucket_fun))) = do
+  runReaderT
+    ( runBuilder_ $
+        certifying (stmAuxCerts aux) $ do
+          res <-
+            genUniformSegHist
+              defaultSegLevel
+              "topLevelSegHist"
+              [w]
+              ops
+              (soacsLambdaToGPU bucket_fun)
+              arrs
+              (const $ pure ())
+          forM_ (zip (patNames pat) res) $ \(v, v') ->
+            letBindNames [v] $ BasicOp $ SubExp $ Var v'
+    )
+    scope
 transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     Scan scan_lam nes <- singleScan scans = do
