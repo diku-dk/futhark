@@ -22,6 +22,7 @@ module Language.Futhark.Interpreter
     Value,
     fromTuple,
     isEmptyArray,
+    asByteString,
     prettyEmptyArray,
     prettyValue,
     valueText,
@@ -37,6 +38,7 @@ import Control.Monad.Trans.Maybe
 import Data.Array
 import Data.Bifunctor
 import Data.Bitraversable
+import Data.ByteString qualified as BS
 import Data.Functor (($>), (<&>))
 import Data.List
   ( find,
@@ -297,6 +299,14 @@ checkShape _ shape2 =
   Just shape2
 
 type Value = Language.Futhark.Interpreter.Values.Value EvalM
+
+-- | If the value represents an array of type @[]i8@, then return those bytes.
+asByteString :: Value -> Maybe BS.ByteString
+asByteString (ValueArray _ vals) = BS.pack <$> mapM asU8 (elems vals)
+  where
+    asU8 (ValuePrim (UnsignedValue (Int8Value x))) = Just $ fromIntegral x
+    asU8 _ = Nothing
+asByteString _ = Nothing
 
 asInteger :: Value -> Integer
 asInteger (ValuePrim (SignedValue v)) = P.valueIntegral v
