@@ -33,17 +33,16 @@
 --
 -- ## Jacobians
 --
--- For a differentiable function *f* whose input comprise *n* scalars
--- and whose output comprises *m* scalars, the
--- [Jacobian](https://en.wikipedia.org/wiki/Jacobian_matrix_and_determinant)
--- for a given input point is an *m* by *n* matrix of scalars that
--- each represent a [partial
--- derivatives](https://en.wikipedia.org/wiki/Partial_derivative).
--- Intuitively, position *(i,j)* of the Jacobian describes how
--- sensitive output *i* is to input *j*. The notion of Jacobian
--- generalises to functions that accept or produce compound structures
--- such as arrays, records, sums, and so on, simply by "flattening
--- out" the values and considering only their constituent scalars.
+-- For a differentiable function *f* whose input comprise *n* scalars and whose
+-- output comprises *m* scalars, the
+-- [Jacobian](https://en.wikipedia.org/wiki/Jacobian_matrix_and_determinant) for
+-- a given input point is an *m* by *n* matrix of scalars that each represent a
+-- [partial derivative](https://en.wikipedia.org/wiki/Partial_derivative).
+-- Intuitively, position *(i,j)* of the Jacobian describes how sensitive output
+-- *i* is to input *j*. The notion of Jacobian generalises to functions that
+-- accept or produce compound structures such as arrays, records, sums, and so
+-- on, simply by "flattening out" the values and considering only their
+-- constituent scalars.
 --
 -- Computing the full Jacobian is usually costly and sometimes not necessary,
 -- and it is not part of the AD facility provided by Futhark. Instead it is
@@ -52,21 +51,25 @@
 -- producing a vector. However, it is important to understand that the full
 -- Jacobian is *not* constructed as an intermediate step.
 --
--- We can take the product of an an *m* by *n* Jacobian with an *n*-element
+-- We can take the product of an *m* by *n* Jacobian with an *n*-element
 -- *tangent vector* to produce an *m*-element vector (*Jacobian-vector
 -- product*). Such a product can be computed in a single (augmented) execution
 -- of the function *f*. This is provided by the function `jvp`.
 --
 -- We can also take the product of an *m*-element vector *cotangent
 -- vector* with the *m* by *n* Jacobian to produce an *n*-element
--- vector (*Vector-Jacobian product*). This too can be computed in a
+-- vector (*vector-Jacobian product*). This too can be computed in a
 -- single execution of *f*, with `vjp`.
 --
--- Using an elementary vector, we can use the `jvp` function to produce a
--- *column* of the full Jacobian, and `vjp` to produce a *row*, with the nonzero
--- element of the vector identifying which column or row is extracted. Which is
--- superior for a given situation depends on whether the function has more
--- inputs or outputs.
+-- A tangent has the same structure as the input and represents a direction in
+-- input space. A cotangent has the same structure as the output and represents
+-- sensitivities flowing backwards through the computation.
+--
+-- Using an elementary (co-)tangent vector, we can use the `jvp` function to
+-- produce a *column* of the full Jacobian, and `vjp` to produce a *row*, with
+-- the nonzero element of the vector identifying which column or row is
+-- extracted. Which is superior for a given situation depends on whether the
+-- function has more inputs or outputs.
 --
 -- We can freely nest `vjp` and `jvp` to compute higher-order derivatives.
 --
@@ -122,7 +125,8 @@
 -- type system does not distinguish differentiable from non-differentiable
 -- operations. As a rule of thumb, a function is differentiable if its results
 -- are computed using a composition of primitive floating-point operations,
--- without ever converting to or from integers.
+-- without ever converting to or from integers. Most functions will also have
+-- discontinuities around values that influence control flow.
 --
 -- Note that a function whose input or output is a sum type with more than one
 -- constructor is *not* differentiable (or at least the sum-typed part is not).
