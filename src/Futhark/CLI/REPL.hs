@@ -14,6 +14,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
 import Data.Version
 import Futhark.Compiler
@@ -436,10 +437,28 @@ formatCommand input = do
         Right parts' -> do
           parts'' <- mapM sequenceA <$> mapM (traverse onExp) parts'
           case parts'' of
-            Left err -> liftIO $ putDoc err
+            Left err -> liftIO $ putDocLn err
             Right parts''' ->
               liftIO . T.putStrLn . mconcat $
                 map (either id (docText . I.prettyValue)) parts'''
+
+stringCommand :: Command
+stringCommand input = do
+  prompt <- getPrompt
+  case parseExp prompt input of
+    Left (SyntaxError _ err) ->
+      liftIO $ T.putStr err
+    Right e -> do
+      e' <- onExp e
+      liftIO $ case e' of
+        Left err -> putDocLn err
+        Right v
+          | Just bytes <- I.asByteString v ->
+              T.putStrLn $ T.decodeUtf8 bytes
+          | otherwise ->
+              T.putStrLn $
+                "Cannot print this value as string:\n"
+                  <> docText (I.prettyValue v)
 
 unbreakCommand :: Command
 unbreakCommand _ = do
@@ -529,6 +548,15 @@ Use format strings to print arbitrary futhark expressions. Usage:
 
   > :format The value of foo: {foo}. The value of 2+2={2+2}
 |]
+      )
+    ),
+    ( "string",
+      ( stringCommand,
+        [text|
+Evaluate the given expression, which must have type []u8,
+and print the result as a string. It is assumes that the
+byte array contains valid UTF-8.
+           |]
       )
     ),
     ( "type",
