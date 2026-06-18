@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark repl` has a new command: `:string`.
+
 * The `hip` backend previously simulated `f16` operations with `f32`, but now it
   uses the hardware support for `f16`, similarly to the CUDA backend.
   Implemented by Jérôme Wagner. (#2470)
@@ -22,7 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Invalid fusion that could cause compiler crash. (#2474)
 
 * GPU code generation of segmented reductions with array operands. (#2227,
-  properly this time.)
+  properly this time, and #2482)
+
+* Use ascripted element type in API functions for arrays of records. (#2485)
 
 ## [0.26.3]
 
