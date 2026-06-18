@@ -42,6 +42,8 @@ module Futhark.Optimise.Simplify.Engine
     asksEngineEnv,
     askVtable,
     localVtable,
+    Protect,
+    protectIf,
 
     -- * Building blocks
     SimplifiableRep,
@@ -284,6 +286,8 @@ emptyOfType ctx_names (Array et shape _) = do
     zeroIfContext (Var v) | v `elem` ctx_names = intConst Int64 0
     zeroIfContext se = se
 
+-- | Protect a hoisted statement by enclosing it in a branch (or doing something
+-- smarter for certain statements).
 protectIf ::
   (MonadBuilder m) =>
   Protect m ->

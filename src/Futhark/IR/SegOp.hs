@@ -969,6 +969,31 @@ segOpBlocker space = do
   where
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
+-- | We are willing to hoist potentially unsafe statements out of segops, but
+-- they must be protected by adding a branch on top of them.
+protectSegOpHoisted ::
+  (Engine.SimplifiableRep rep) =>
+  SegSpace ->
+  Engine.SimpleM rep (a, b, Stms (Wise rep)) ->
+  Engine.SimpleM rep (a, b, Stms (Wise rep))
+protectSegOpHoisted space m = do
+  (x, y, stms) <- m
+  ops <- asks $ Engine.protectHoistedOpS . fst
+  stms' <- runBuilder_ $ do
+    if not $ all (safeExp . stmExp) stms
+      then do
+        is_nonempty <- checkIfNonEmpty
+        mapM_ (Engine.protectIf ops (not . safeExp) is_nonempty) stms
+      else addStms stms
+  pure (x, y, stms')
+  where
+    checkIfNonEmpty = do
+      segop_size <-
+        letSubExp "segop_size"
+          =<< foldBinOp (Mul Int64 OverflowWrap) (intConst Int64 1) (segSpaceDims space)
+      letSubExp "segop_nonempty" . BasicOp $
+        CmpOp (CmpSlt Int64) (intConst Int64 0) segop_size
+
 simplifyKernelBody ::
   (Engine.SimplifiableRep rep, BodyDec rep ~ ()) =>
   SegSpace ->
@@ -979,7 +1004,8 @@ simplifyKernelBody space (Body _ stms res) = do
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
-    Engine.localVtable (segSpaceSymbolTable space)
+    protectSegOpHoisted space
+      . Engine.localVtable (segSpaceSymbolTable space)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
       . Engine.enterLoop
       $ Engine.blockIf blocker stms

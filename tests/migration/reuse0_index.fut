@@ -3,7 +3,7 @@
 -- returned or if the memory source is migrated into the same kernel.
 -- ==
 -- structure gpu {
---   /GPUBody/If/True/Index 2
+--   /GPUBody/If/True/Index 1
 --   /GPUBody/Loop/Index 5
 -- }
 
