@@ -139,50 +139,10 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
       transformDistBasicOp ops segments env (inps, res', pe, aux, e)
     Let pat aux (Op (Screma w arrs form)) ->
       transformScrema (flattenOpsFor funHasParallelism lvl) segments env inps res (pat, aux) (w, arrs, form)
-    Let _ aux (Match scrutinees cases defaultCase rt) -> do
+    Let _ aux (Match scrutinees cases defaultCase rt) ->
       if any (isVariant inps env) scrutinees
-        then
-          transformMatch (flattenOpsFor funHasParallelism lvl) segments env inps res scrutinees cases defaultCase
-        -- else error $ unlines ["scrutinees: ", prettyString scrutinees, "cases:", prettyString cases, "defaultCase:", prettyString defaultCase]
-        else do
-          scope <- askScope
-          new_cases <- forM cases $ \(Case c body) -> do
-            let (case_body_inputs, case_dstms) = distributeBody funHasParallelism scope segments inps body
-
-            (case_body_res, case_body_stms) <-
-              runReaderT
-                ( runBuilder $
-                    liftBodyWithDistResults ops segments case_body_inputs env case_dstms res (bodyResult body)
-                )
-                scope
-            pure $ Case c $ Body () case_body_stms case_body_res
-          new_default_body <- do
-            let (new_default_body_inputs, new_default_dstms) = distributeBody funHasParallelism scope segments inps defaultCase
-            (new_default_body_res, new_default_body_stms) <-
-              runReaderT
-                ( runBuilder $
-                    liftBodyWithDistResults ops segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)
-                )
-                scope
-            pure $ Body () new_default_body_stms new_default_body_res
-
-          -- Maybe it is better to build MatchDec ourselves
-          match_e <-
-            eMatch'
-              scrutinees
-              [Case c (pure body) | Case c body <- new_cases]
-              (pure new_default_body)
-              (matchSort rt)
-
-          match_res <-
-            certifying (distCerts inps aux env) $
-              letTupExp "match_res" match_e
-
-          rets <- expExtType match_e
-          -- get rid of the existential context
-          let payload_res = drop (S.size (shapeContext rets)) match_res
-          let reps = distResultsToResReps res payload_res
-          pure $ insertReps (zip (map distResTag res) reps) env
+        then transformVariantMatch ops segments env inps res aux scrutinees cases defaultCase rt
+        else transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt
     Let pat aux (Apply name args rettype s) ->
       case lvl of
         SegThread {} -> do

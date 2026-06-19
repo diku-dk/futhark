@@ -1,15 +1,18 @@
 -- | Flattening of 'Match'.
 module Futhark.Pass.Flatten.Match
-  ( transformMatch,
+  ( transformVariantMatch,
+    transformUniformMatch,
   )
 where
 
 import Control.Monad
+import Control.Monad.Reader
 import Data.Containers.ListUtils (nubOrd)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Set qualified as S
 import Data.Tuple.Solo
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
@@ -170,17 +173,19 @@ mergeResult lvl segments w iss branchesRep dist_res
     irregularBranch (Irregular irreg) = pure irreg
     irregularBranch _ = error "mergeResult: mismatched reps"
 
-transformMatch ::
+transformVariantMatch ::
   FlattenOps ->
   Segments ->
   DistEnv ->
   DistInputs ->
   [DistResult] ->
+  StmAux () ->
   [SubExp] ->
   [Case (Body SOACS)] ->
   Body SOACS ->
+  MatchDec ExtType ->
   Builder GPU DistEnv
-transformMatch ops segments env inps res scrutinees cases defaultCase = do
+transformVariantMatch ops segments env inps res _aux scrutinees cases defaultCase _rt = do
   let lvl = flattenSegLevel ops
   w <- letSubExp "w" <=< toExp $ product $ segmentDims segments
   -- We need to partition the indices of the scrutinees by which case they match.
@@ -271,3 +276,51 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
                   accVars = findAccCerts cert
                in foldl (\m v -> M.insert v rep m) acc_reps accVars
     replaceAccReps acc_reps reps = foldl replaceAccRep acc_reps $ zip res reps
+
+transformUniformMatch ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  StmAux () ->
+  [SubExp] ->
+  [Case (Body SOACS)] ->
+  Body SOACS ->
+  MatchDec ExtType ->
+  Builder GPU DistEnv
+transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt = do
+  scope <- askScope
+  new_cases <- forM cases $ \(Case c body) -> do
+    let (case_body_inputs, case_dstms) =
+          distributeBody (flattenFunHasParallelism ops) scope segments inps body
+
+    (case_body_res, case_body_stms) <-
+      flip runReaderT scope . runBuilder $
+        liftBodyWithDistResults ops segments case_body_inputs env case_dstms res (bodyResult body)
+    pure $ Case c $ Body () case_body_stms case_body_res
+  new_default_body <- do
+    let (new_default_body_inputs, new_default_dstms) =
+          distributeBody (flattenFunHasParallelism ops) scope segments inps defaultCase
+    (new_default_body_res, new_default_body_stms) <-
+      flip runReaderT scope . runBuilder $
+        liftBodyWithDistResults ops segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)
+    pure $ Body () new_default_body_stms new_default_body_res
+
+  -- Maybe it is better to build MatchDec ourselves
+  match_e <-
+    eMatch'
+      scrutinees
+      [Case c (pure body) | Case c body <- new_cases]
+      (pure new_default_body)
+      (matchSort rt)
+
+  match_res <-
+    certifying (distCerts inps aux env) $
+      letTupExp "match_res" match_e
+
+  rets <- expExtType match_e
+  -- get rid of the existential context
+  let payload_res = drop (S.size (shapeContext rets)) match_res
+  let reps = distResultsToResReps res payload_res
+  pure $ insertReps (zip (map distResTag res) reps) env
