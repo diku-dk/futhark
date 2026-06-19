@@ -101,32 +101,29 @@ topLevelversionScanRed funHasParallelism desc scope pat w arrs form aux outer_on
       fullFlattenBody <- transformBody funHasParallelism scope =<< renameBody fullFlattenBody0
       let result_ts = patTypes pat
           attrs = stmAuxAttrs aux
-      runReaderT
-        ( runBuilder_ $ do
-            let fullAlternative = kernelAlternatives desc result_ts fullFlattenBody []
-                outerAlternative = kernelAlternatives desc result_ts outerOnlyBody []
-                fullWithOuterAlternative = do
-                  (outer_suff, _) <-
-                    sufficientParallelism
-                      (desc <> "_suff_outer")
-                      [w]
-                      mempty
-                      Nothing
-                  kernelAlternatives desc result_ts fullFlattenBody [(outer_suff, outerOnlyBody)]
-                alternatives
-                  | isParallelFunInside funHasParallelism $ lambdaBody . scremaLambda $ form =
-                      fullAlternative
-                  | "sequential_inner" `inAttrs` attrs =
-                      outerAlternative
-                  | mayExploitOuter attrs =
-                      fullWithOuterAlternative
-                  | otherwise =
-                      fullAlternative
-            alt_vs <- alternatives
-            forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
-              letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
-        )
-        scope
+      flip runReaderT scope . runBuilder_ $ do
+        let fullAlternative = kernelAlternatives desc result_ts fullFlattenBody []
+            outerAlternative = kernelAlternatives desc result_ts outerOnlyBody []
+            fullWithOuterAlternative = do
+              (outer_suff, _) <-
+                sufficientParallelism
+                  (desc <> "_suff_outer")
+                  [w]
+                  mempty
+                  Nothing
+              kernelAlternatives desc result_ts fullFlattenBody [(outer_suff, outerOnlyBody)]
+            alternatives
+              | isParallelFunInside funHasParallelism $ lambdaBody . scremaLambda $ form =
+                  fullAlternative
+              | "sequential_inner" `inAttrs` attrs =
+                  outerAlternative
+              | mayExploitOuter attrs =
+                  fullWithOuterAlternative
+              | otherwise =
+                  fullAlternative
+        alt_vs <- alternatives
+        forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
+          letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
 
 transformDistStm :: FunHasParallelism -> SegLevel -> Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm _ lvl segments env (DistStm inps res (ScalarStm stms)) =
@@ -337,9 +334,9 @@ liftFunDef funHasParallelism const_scope fd = do
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
   -- Lift the body of the function and get the results
   (result, stms) <-
-    runReaderT
-      (runBuilder $ liftBody funHasParallelism defaultSegLevel w inputs' env dstms $ bodyResult body)
-      (const_scope <> scopeOfFParams fparams'')
+    flip runReaderT (const_scope <> scopeOfFParams fparams'') . runBuilder $
+      liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
+        bodyResult body
   let name = liftFunName $ funDefName fd
   pure $
     fd
@@ -362,64 +359,53 @@ transformStm funHasParallelism scope (Let pat aux (Op soac))
 transformStm _ _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm $ soacsStmToGPU stm
 transformStm _ scope (Let pat aux (Op (Hist w arrs ops bucket_fun))) = do
-  runReaderT
-    ( runBuilder_ $
-        certifying (stmAuxCerts aux) $ do
-          res <-
-            genUniformSegHist
-              defaultSegLevel
-              "topLevelSegHist"
-              [w]
-              ops
-              (soacsLambdaToGPU bucket_fun)
-              arrs
-              (const $ pure ())
-          forM_ (zip (patNames pat) res) $ \(v, v') ->
-            letBindNames [v] $ BasicOp $ SubExp $ Var v'
-    )
-    scope
+  flip runReaderT scope . runBuilder_ $ certifying (stmAuxCerts aux) $ do
+    res <-
+      genUniformSegHist
+        defaultSegLevel
+        "topLevelSegHist"
+        [w]
+        ops
+        (soacsLambdaToGPU bucket_fun)
+        arrs
+        (const $ pure ())
+    forM_ (zip (patNames pat) res) $ \(v, v') ->
+      letBindNames [v] $ BasicOp $ SubExp $ Var v'
 transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     Scan scan_lam nes <- singleScan scans = do
       outer_only_stms <-
-        runReaderT
-          ( runBuilder_ $
-              certifying (stmAuxCerts aux) $ do
-                (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
-                res <-
-                  genUniformSegScanomapWithPost
-                    defaultSegLevel
-                    [w]
-                    "topLevelSegScan"
-                    (soacsLambdaToGPU scan_lam')
-                    shape
-                    nes'
-                    (soacsLambdaToGPU post_lam)
-                    (soacsLambdaToGPU map_lam)
-                    arrs
-                    (const $ pure ())
-                forM_ (zip (patNames pat) res) $ \(v, v') ->
-                  letBindNames [v] $ BasicOp $ SubExp $ Var v'
-          )
-          scope
+        flip runReaderT scope . runBuilder_ $ certifying (stmAuxCerts aux) $ do
+          (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
+          res <-
+            genUniformSegScanomapWithPost
+              defaultSegLevel
+              [w]
+              "topLevelSegScan"
+              (soacsLambdaToGPU scan_lam')
+              shape
+              nes'
+              (soacsLambdaToGPU post_lam)
+              (soacsLambdaToGPU map_lam)
+              arrs
+              (const $ pure ())
+          forM_ (zip (patNames pat) res) $ \(v, v') ->
+            letBindNames [v] $ BasicOp $ SubExp $ Var v'
       topLevelversionScanRed funHasParallelism "top_level_scan_alt" scope pat w arrs form aux outer_only_stms
 transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       outer_only_stms <-
-        runReaderT
-          ( runBuilder_ $
-              certifying (stmAuxCerts aux) $ do
-                let sing_red = singleReduce reds
-                (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) (redNeutral sing_red)
-                let comm
-                      | commutativeLambda red_lam = Commutative
-                      | otherwise = redComm sing_red
-                let sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes'
-                res <- genNonSegRed defaultSegLevel "topLevelSegRed" [w] sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs
-                forM_ (zip (patNames pat) res) $ \(v, v') ->
-                  letBindNames [v] $ BasicOp $ SubExp $ Var v'
-          )
-          scope
+        flip runReaderT scope . runBuilder_ $
+          certifying (stmAuxCerts aux) $ do
+            let sing_red = singleReduce reds
+            (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) (redNeutral sing_red)
+            let comm
+                  | commutativeLambda red_lam = Commutative
+                  | otherwise = redComm sing_red
+            let sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes'
+            res <- genNonSegRed defaultSegLevel "topLevelSegRed" [w] sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs
+            forM_ (zip (patNames pat) res) $ \(v, v') ->
+              letBindNames [v] $ BasicOp $ SubExp $ Var v'
       topLevelversionScanRed funHasParallelism "top_level_red_alt" scope pat w arrs form aux outer_only_stms
 transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
