@@ -6,10 +6,7 @@ module Futhark.Pass.Flatten.SOAC
     transformMapForInBlock,
 
     -- * Building blocks
-    localiseInputs,
-    liftDistResult,
     distResultsToResReps,
-    liftBodyWithDistResults,
     flattenIrregularRep,
   )
 where
@@ -550,60 +547,6 @@ regularRepVars =
   where
     onRep (Regular v) = v
     onRep Irregular {} = error "regularRepVars: expected regular result"
-
--- helper to not mess up the tags when generating new ones for the loop parameters
--- probably won't be used in future
-localiseInputs :: DistEnv -> DistInputs -> (DistInputs, DistEnv, Int)
-localiseInputs env_outer inps =
-  let step (i, env_acc) (v, inp) =
-        case inp of
-          DistInputFree arr t ->
-            ((i, env_acc), (v, DistInputFree arr t))
-          DistInput oldrt t ->
-            let newrt = ResTag i
-                rep = resVar oldrt env_outer
-                env_acc' = insertRep newrt rep env_acc
-             in ((i + 1, env_acc'), (v, DistInput newrt t))
-
-      ((next, env_local), inps_local) =
-        L.mapAccumL step (0, mempty) inps
-   in (inps_local, env_local, next)
-
-liftDistResult :: SegLevel -> Segments -> DistInputs -> DistEnv -> DistResult -> SubExpRes -> Builder GPU Result
-liftDistResult lvl segments inps env dist_res res =
-  if isRegularDistResult dist_res
-    then do
-      let (DistType _ _ t) = distResType dist_res
-      let expectedShape = segmentsShape segments <> arrayShape t
-      v <- liftSubExpRegular lvl segments inps env expectedShape (resSubExp res)
-      pure [SubExpRes mempty (Var v)]
-    else case resSubExp res of
-      Var v -> do
-        irreg <- getIrregRep lvl segments env inps v
-        pure $ map (SubExpRes mempty . Var) [irregularS irreg, irregularF irreg, irregularO irreg, irregularD irreg]
-      _ -> undefined
-
-liftBodyWithDistResults :: FlattenOps -> Segments -> DistInputs -> DistEnv -> [DistStm] -> [DistResult] -> Result -> Builder GPU Result
-liftBodyWithDistResults ops segments inputs env dstms dist_res result = do
-  env' <- foldM (flattenDistStm ops segments) env dstms
-  result' <- zipWithM (liftDistResult (flattenSegLevel ops) segments inputs env') dist_res result
-  pure $ concat result'
-
-distResultsToResReps :: [DistResult] -> [VName] -> [ResRep]
-distResultsToResReps dist_res results =
-  snd $
-    L.mapAccumL
-      ( \rs dist_res' ->
-          if isRegularDistResult dist_res'
-            then
-              let (v : rs') = rs
-               in (rs', Regular v)
-            else
-              let (segs : flags : offsets : elems : rs') = rs
-               in (rs', Irregular $ IrregularRep segs flags offsets elems Dense)
-      )
-      results
-      dist_res
 
 transformFactoredDistBody ::
   FlattenOps ->

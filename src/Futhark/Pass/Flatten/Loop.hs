@@ -1,6 +1,5 @@
 module Futhark.Pass.Flatten.Loop
   ( transformLoop,
-    liftParam,
   )
 where
 
@@ -19,7 +18,6 @@ import Futhark.MonadFreshNames
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Monad
-import Futhark.Pass.Flatten.SOAC (distResultsToResReps, liftBodyWithDistResults, localiseInputs)
 import Futhark.Tools
 import Prelude hiding (div, quot, rem)
 
@@ -31,48 +29,6 @@ needsIrregular inps env loopParamNames t =
   where
     dimIsVariant (Constant _) = False
     dimIsVariant (Var v) = v `S.member` loopParamNames || isVariant inps env (Var v)
-
-liftParam :: (MonadFreshNames m) => SubExp -> FParam SOACS -> m ([FParam GPU], ResRep)
-liftParam w fparam =
-  case declTypeOf fparam of
-    Prim pt -> do
-      p <-
-        newParam
-          (desc <> "_lifted")
-          (arrayOf (Prim pt) (Shape [w]) Nonunique)
-      pure ([p], Regular $ paramName p)
-    Array pt _ u -> do
-      num_data <-
-        newParam (desc <> "_num_data") $ Prim int64
-      segments <-
-        newParam (desc <> "_segments") $
-          arrayOf (Prim int64) (Shape [w]) Nonunique
-      flags <-
-        newParam (desc <> "_F") $
-          arrayOf (Prim Bool) (Shape [Var (paramName num_data)]) Nonunique
-      offsets <-
-        newParam (desc <> "_O") $
-          arrayOf (Prim int64) (Shape [w]) Nonunique
-      elems <-
-        newParam (desc <> "_data") $
-          arrayOf (Prim pt) (Shape [Var (paramName num_data)]) u
-      pure
-        ( [num_data, segments, flags, offsets, elems],
-          Irregular $
-            IrregularRep
-              { irregularS = paramName segments,
-                irregularF = paramName flags,
-                irregularO = paramName offsets,
-                irregularD = paramName elems,
-                irregularK = Dense
-              }
-        )
-    Acc {} ->
-      error "liftParam: Acc"
-    Mem {} ->
-      error "liftParam: Mem"
-  where
-    desc = baseName (paramName fparam)
 
 -- Lift a loop parameter and its initial value together.
 -- If the parameter is an array whose dimensions are all invariant,
