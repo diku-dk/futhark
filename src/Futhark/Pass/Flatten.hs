@@ -677,9 +677,8 @@ flattenIrregularRep lvl ir@(IrregularRep shape flags offsets elems kind) = do
 
 rearrangeFlat :: (IntegralExp num) => [Int] -> [num] -> num -> num
 rearrangeFlat perm dims i =
-  -- TODO?  Maybe we need to invert one of these permutations.
   flattenIndex dims $
-    rearrangeShape perm $
+    rearrangeShape (rearrangeInverse perm) $
       unflattenIndex (rearrangeShape perm dims) i
 
 segmentCoordsFromFlat :: Segments -> SubExp -> Builder GPU [SubExp]
