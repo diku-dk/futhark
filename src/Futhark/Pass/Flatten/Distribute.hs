@@ -23,6 +23,7 @@ module Futhark.Pass.Flatten.Distribute
     Segments,
     segmentsShape,
     segmentsRank,
+    segmentCount,
   )
 where
 
@@ -32,6 +33,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.SOACS
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
@@ -45,6 +47,9 @@ segmentsShape = Shape . NE.toList
 
 segmentsRank :: Segments -> Int
 segmentsRank = shapeRank . segmentsShape
+
+segmentCount :: Segments -> TPrimExp Int64 VName
+segmentCount = product . map pe64 . shapeDims . segmentsShape
 
 newtype ResTag = ResTag Int
   deriving (Eq, Ord, Show)

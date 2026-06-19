@@ -30,6 +30,7 @@ module Futhark.Pass.Flatten.Monad
     liftSubExpPreserveRep,
     liftSubExpRegular,
     mkIrregFromReg,
+    flattenIrregularRep,
     distCerts,
     dataArr,
     getIrregRep,
@@ -65,6 +66,7 @@ import Futhark.IR.SOACS (SOACS)
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Tools
+import Futhark.Transform.Rename
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, rem)
 
@@ -429,6 +431,42 @@ mkIrregFromReg lvl segments arr = do
         irregularD = arr_D,
         irregularK = Dense
       }
+
+-- | Flatten the arrays of an IrregularRep to be entirely one-dimensional.
+flattenIrregularRep :: SegLevel -> IrregularRep -> Builder GPU IrregularRep
+flattenIrregularRep lvl ir@(IrregularRep shape flags offsets elems kind) = do
+  elems_t <- lookupType elems
+  if arrayRank elems_t == 1
+    then pure ir
+    else do
+      n <- arraySize 0 <$> lookupType shape
+      m' <- letSubExp "flat_m" <=< toExp $ product $ map pe64 $ arrayDims elems_t
+      elems' <-
+        letExp (baseName elems <> "_flat") . BasicOp $
+          Reshape elems (reshapeAll (arrayShape elems_t) (Shape [m']))
+
+      shape' <- letExp (baseName shape <> "_flat") <=< renameExp <=< segMap lvl (MkSolo n) $
+        \(MkSolo i) -> do
+          old_shape <- letSubExp "old_shape" =<< eIndex shape [toExp i]
+          segment_shape <-
+            letSubExp "segment_shape" <=< toExp $
+              pe64 old_shape * product (map pe64 $ tail $ arrayDims elems_t)
+          pure [subExpRes segment_shape]
+
+      offsets' <- letExp (baseName offsets <> "_flat") <=< renameExp <=< segMap lvl (MkSolo n) $
+        \(MkSolo i) -> do
+          old_offsets <- letSubExp "old_offsets" =<< eIndex offsets [toExp i]
+          segment_offsets <-
+            letSubExp "segment_offsets" <=< toExp $
+              pe64 old_offsets * product (map pe64 $ tail $ arrayDims elems_t)
+          pure [subExpRes segment_offsets]
+
+      flags' <- letExp (baseName flags <> "_flat") <=< renameExp <=< segMap lvl (MkSolo m') $
+        \(MkSolo i) -> do
+          let head_i = head $ unflattenIndex (map pe64 $ arrayDims elems_t) (pe64 i)
+          flag <- letSubExp "flag" =<< eIndex flags [toExp head_i]
+          pure [subExpRes flag]
+      pure $ IrregularRep shape' flags' offsets' elems' kind
 
 -- If the sub-expression is a constant, replicate it to match the shape of `segments`
 -- If it's a variable, lookup the variable in the dist inputs and dist env,
