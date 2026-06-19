@@ -385,6 +385,7 @@ library
       Futhark.Pass.Flatten.Incremental
       Futhark.Pass.Flatten.Intrablock
       Futhark.Pass.Flatten.Distribute
+      Futhark.Pass.Flatten.Loop
       Futhark.Pass.Flatten.Match
       Futhark.Pass.Flatten.Monad
       Futhark.Pass.Flatten.SOAC
