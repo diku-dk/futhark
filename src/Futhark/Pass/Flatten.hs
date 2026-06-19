@@ -19,7 +19,7 @@ import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (isNothing)
 import Data.Set qualified as S
 import Data.Tuple.Solo
 import Debug.Trace
@@ -30,6 +30,7 @@ import Futhark.Pass
 import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU, soacsStmToGPU)
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
+import Futhark.Pass.Flatten.Incremental
 import Futhark.Pass.Flatten.Intrablock qualified as Intrablock
 import Futhark.Pass.Flatten.Match
 import Futhark.Pass.Flatten.Monad
@@ -41,12 +42,6 @@ import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, quot, rem)
-
-defaultSegLevel :: SegLevel
-defaultSegLevel = SegThread SegVirt Nothing
-
-inBlockSegLevel :: SegLevel
-inBlockSegLevel = SegThreadInBlock SegNoVirt
 
 flattenOpsFor :: FunHasParallelism -> SegLevel -> FlattenOps
 flattenOpsFor funHasParallelism lvl =
@@ -133,52 +128,6 @@ topLevelversionScanRed funHasParallelism desc scope pat w arrs form aux outer_on
               letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
         )
         scope
-
-factorScremaForParallelism ::
-  FunHasParallelism ->
-  Scope SOACS ->
-  Certs ->
-  Pat Type ->
-  SubExp ->
-  [VName] ->
-  ScremaForm SOACS ->
-  Builder GPU (Maybe (Body SOACS))
-factorScremaForParallelism funHasParallelism scope certs pat w arrs form
-  | Just (reds, map_lam) <- isRedomapSOAC form,
-    lambdaHasParallelism funHasParallelism map_lam = do
-      (map_stm, red_stm) <-
-        redomapToMapAndReduce
-          pat
-          (w, reds, map_lam, arrs)
-      Just <$> mkFactoredBody (stmsFromList [map_stm, red_stm])
-  | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-    lambdaHasParallelism funHasParallelism map_lam,
-    lambdaHasParallelism funHasParallelism post_lam = do
-      (map_stm, scan_stm, post_stm) <-
-        maposcanomapToMapScanAndMap
-          pat
-          (w, post_lam, scans, map_lam, arrs)
-      Just <$> mkFactoredBody (stmsFromList [map_stm, scan_stm, post_stm])
-  | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-    lambdaHasParallelism funHasParallelism map_lam = do
-      (map_stm, scanomap_stm) <-
-        maposcanomapToMaposcanAndMap
-          pat
-          (w, post_lam, scans, map_lam, arrs)
-      Just <$> mkFactoredBody (stmsFromList [map_stm, scanomap_stm])
-  | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-    lambdaHasParallelism funHasParallelism post_lam = do
-      (map_stm, scan_stm, post_stm) <-
-        maposcanomapToMapScanAndMap
-          pat
-          (w, post_lam, scans, map_lam, arrs)
-      Just <$> mkFactoredBody (stmsFromList [map_stm, scan_stm, post_stm])
-  | otherwise =
-      pure Nothing
-  where
-    mkFactoredBody stms = do
-      stms' <- fmap (certify certs) <$> preprocessStms scope stms
-      pure $ mkBody stms' $ varsRes $ patNames pat
 
 -- Do 'map2 (++) A B' where 'A' and 'B' are irregular arrays and have the same
 -- number of subarrays
@@ -482,42 +431,6 @@ replicateIrreg lvl _segments _env ns desc rep = do
         irregularK = Dense
       }
 
--- | Flatten the arrays of an IrregularRep to be entirely one-dimensional.
-flattenIrregularRep :: SegLevel -> IrregularRep -> Builder GPU IrregularRep
-flattenIrregularRep lvl ir@(IrregularRep shape flags offsets elems kind) = do
-  elems_t <- lookupType elems
-  if arrayRank elems_t == 1
-    then pure ir
-    else do
-      n <- arraySize 0 <$> lookupType shape
-      m' <- letSubExp "flat_m" <=< toExp $ product $ map pe64 $ arrayDims elems_t
-      elems' <-
-        letExp (baseName elems <> "_flat") . BasicOp $
-          Reshape elems (reshapeAll (arrayShape elems_t) (Shape [m']))
-
-      shape' <- letExp (baseName shape <> "_flat") <=< renameExp <=< segMap lvl (MkSolo n) $
-        \(MkSolo i) -> do
-          old_shape <- letSubExp "old_shape" =<< eIndex shape [toExp i]
-          segment_shape <-
-            letSubExp "segment_shape" <=< toExp $
-              pe64 old_shape * product (map pe64 $ tail $ arrayDims elems_t)
-          pure [subExpRes segment_shape]
-
-      offsets' <- letExp (baseName offsets <> "_flat") <=< renameExp <=< segMap lvl (MkSolo n) $
-        \(MkSolo i) -> do
-          old_offsets <- letSubExp "old_offsets" =<< eIndex offsets [toExp i]
-          segment_offsets <-
-            letSubExp "segment_offsets" <=< toExp $
-              pe64 old_offsets * product (map pe64 $ tail $ arrayDims elems_t)
-          pure [subExpRes segment_offsets]
-
-      flags' <- letExp (baseName flags <> "_flat") <=< renameExp <=< segMap lvl (MkSolo m') $
-        \(MkSolo i) -> do
-          let head_i = head $ unflattenIndex (map pe64 $ arrayDims elems_t) (pe64 i)
-          flag <- letSubExp "flag" =<< eIndex flags [toExp head_i]
-          pure [subExpRes flag]
-      pure $ IrregularRep shape' flags' offsets' elems' kind
-
 rearrangeFlat :: (IntegralExp num) => [Int] -> [num] -> num -> num
 rearrangeFlat perm dims i =
   flattenIndex dims $
@@ -569,137 +482,6 @@ rearrangeIrreg lvl segments env inps v_t perm ir = do
         irregularK = Dense
       }
 
--- | Intra-group parallelism is worthwhile if the lambda contains more
--- than one instance of non-map nested parallelism, or any nested
--- parallelism inside a loop.
-worthIntrablock :: Lambda SOACS -> Bool
-worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
-  where
-    bodyInterest body =
-      sum $ interest <$> bodyStms body
-    interest stm
-      | "sequential" `inAttrs` attrs =
-          0 :: Int
-      | Op (Screma w _ form) <- stmExp stm,
-        Just lam' <- isMapSOAC form =
-          mapLike w lam'
-      | Loop _ _ body <- stmExp stm =
-          bodyInterest body * 10
-      | Match _ cases defbody _ <- stmExp stm =
-          foldl
-            max
-            (bodyInterest defbody)
-            (map (bodyInterest . caseBody) cases)
-      | Op (Screma w _ (ScremaForm lam' _ _ _)) <- stmExp stm =
-          zeroIfTooSmall w + bodyInterest (lambdaBody lam')
-      | Op (Stream _ _ _ lam') <- stmExp stm =
-          bodyInterest $ lambdaBody lam'
-      | WithAcc _ lam' <- stmExp stm =
-          bodyInterest $ lambdaBody lam'
-      | otherwise =
-          0
-      where
-        attrs = stmAuxAttrs $ stmAux stm
-        sequential_inner = "sequential_inner" `inAttrs` attrs
-
-        zeroIfTooSmall (Constant (IntValue x))
-          | intToInt64 x < 32 = 0
-        zeroIfTooSmall _ = 1
-
-        mapLike w lam' =
-          if sequential_inner
-            then 0
-            else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
-
--- TODO: maybe update this or just always consider Sequentialising
-
--- | A lambda is worth sequentialising if it contains enough nested
--- parallelism of an interesting kind.
-worthSequentialising :: FunHasParallelism -> Lambda SOACS -> Bool
-worthSequentialising funHasParallelism lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
-  where
-    bodyInterest depth body =
-      sum $ interest depth <$> bodyStms body
-    interest depth stm
-      | "sequential" `inAttrs` attrs =
-          0 :: Int
-      | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm,
-        isJust $ isMapSOAC form =
-          if sequential_inner
-            then 0
-            else bodyInterest (depth + 1) (lambdaBody lam')
-      | Loop _ _ body <- stmExp stm =
-          bodyInterest (depth + 1) body * 10
-      | Match _ cases defbody _ <- stmExp stm =
-          foldl
-            max
-            (bodyInterest (depth + 1) defbody)
-            (map (bodyInterest (depth + 1) . caseBody) cases)
-      | WithAcc _ withacc_lam <- stmExp stm =
-          bodyInterest (depth + 1) (lambdaBody withacc_lam)
-      | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm =
-          1
-            + bodyInterest (depth + 1) (lambdaBody lam')
-            +
-            -- Give this a bigger score if it's a redomap just inside
-            -- the the outer lambda, as these are often tileable and
-            -- thus benefit more from sequentialisation.
-            case (isRedomapSOAC form, depth) of
-              (Just _, 0) -> 1
-              _ -> 0
-      | Op (Stream _ _ _ lam') <- stmExp stm =
-          bodyInterest (depth + 1) (lambdaBody lam')
-      | otherwise =
-          if isParallelStm funHasParallelism stm then 1 else 0
-      where
-        attrs = stmAuxAttrs $ stmAux stm
-        sequential_inner = "sequential_inner" `inAttrs` attrs
-
-sufficientParallelism ::
-  Name ->
-  [SubExp] ->
-  KernelPath ->
-  Maybe Int64 ->
-  Builder GPU (SubExp, Name)
-sufficientParallelism desc ws path def = do
-  size_key <- nameFromText . prettyText <$> newVName desc
-
-  amount <-
-    letSubExp "comparatee"
-      =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ws
-
-  cmp_res <-
-    letSubExp desc $
-      Op $
-        SizeOp $
-          CmpSizeLe size_key (SizeThreshold path def) amount
-
-  pure (cmp_res, size_key)
-
-kernelAlternatives ::
-  Name ->
-  [Type] ->
-  Body GPU ->
-  [(SubExp, Body GPU)] ->
-  Builder GPU [VName]
-kernelAlternatives desc _ default_body [] = do
-  ses <- bodyBind default_body
-  forM ses $ \(SubExpRes cs se) ->
-    certifying cs $
-      letExp desc $
-        BasicOp $
-          SubExp se
-kernelAlternatives desc result_ts default_body ((cond, alt) : alts) = do
-  fallback_body <- do
-    (fallback_vs, fallback_stms) <-
-      collectStms $
-        kernelAlternatives desc result_ts default_body alts
-    pure $ mkBody fallback_stms $ varsRes fallback_vs
-
-  letTupExp desc $
-    Match [cond] [Case [Just $ BoolValue True] alt] fallback_body $
-      MatchDec (staticShapes result_ts) MatchEquiv
-
 runInnerSeqMap ::
   SubExp ->
   [VName] ->
@@ -721,102 +503,6 @@ runInnerSeqMap w arrs map_lam _pat _ress = do
             eIndex arr [eSubExp gtid]
     addStms $ bodyStms $ lambdaBody map_lam'
     pure $ bodyResult $ lambdaBody map_lam'
-
--- Check if the in the body there is a call to a parallel function.
--- XXX: we use this function to even reject the intra version of
--- maps that call parallel function. We should do better there.
--- One other things to note is that maybe we should create a sequential
--- version of function and replace them in these cases.
-isParallelFunInside :: FunHasParallelism -> Body SOACS -> Bool
-isParallelFunInside funHasParallelism = inBody
-  where
-    inLambda = any (callParallelFunction . stmExp) . bodyStms . lambdaBody
-    inBody = any (callParallelFunction . stmExp) . bodyStms
-    callParallelFunction (Apply fname _ _ _) = funHasParallelism fname
-    callParallelFunction (BasicOp _) = False
-    callParallelFunction (Match _ cases def_case _) =
-      inBody def_case
-        || any (inBody . caseBody) cases
-    callParallelFunction (Loop _ _ body) = inBody body
-    callParallelFunction (WithAcc _ lam) = inLambda lam
-    callParallelFunction (Op (Stream _ _ _ lam)) = inLambda lam
-    callParallelFunction (Op (Screma _ _ (ScremaForm lam _ _ _))) = inLambda lam
-    callParallelFunction (Op (Hist _ _ ops lam)) =
-      inLambda lam || any (inLambda . histLambda) ops
-      where
-        histLambda (Futhark.IR.SOACS.HistOp _ _ _ _ op) = op
-    callParallelFunction (Op JVP {}) = error "isParallelFunInside: unexpected JVP"
-    callParallelFunction (Op VJP {}) = error "isParallelFunInside: unexpected VJP"
-    callParallelFunction (Op WithVJP {}) = error "isParallelFunInside: unexpected WithVJP"
-
-onlyExploitIntra :: Attrs -> Bool
-onlyExploitIntra attrs =
-  AttrComp "incremental_flattening" ["only_intra"] `inAttrs` attrs
-
-mayExploitOuter :: Attrs -> Bool
-mayExploitOuter attrs =
-  not $
-    AttrComp "incremental_flattening" ["no_outer"]
-      `inAttrs` attrs
-      || AttrComp "incremental_flattening" ["only_inner"]
-        `inAttrs` attrs
-
-mayExploitIntra :: Attrs -> Bool
-mayExploitIntra attrs =
-  not $
-    AttrComp "incremental_flattening" ["no_intra"]
-      `inAttrs` attrs
-      || AttrComp "incremental_flattening" ["only_inner"]
-        `inAttrs` attrs
-
-intraBlockAlternative ::
-  Intrablock.IntrablockResult ->
-  Builder GPU (SubExp, Body GPU)
-intraBlockAlternative intra = do
-  addStms $ Intrablock.intraPreludeStms intra
-  max_tblock_size <-
-    letSubExp "max_tblock_size" $ Op $ SizeOp $ GetSizeMax SizeThreadBlock
-  fits <-
-    letSubExp "fits" $
-      BasicOp $
-        CmpOp
-          (CmpSle Int64)
-          (Intrablock.intraThreadBlockSize intra)
-          max_tblock_size
-  (intra_suff, _) <-
-    sufficientParallelism
-      "suff_intra_map"
-      [Intrablock.intraAvailPar intra]
-      mempty
-      (Just Intrablock.intraMinInnerPar)
-  intra_ok <-
-    letSubExp "intra_suff_and_fits" $
-      BasicOp $
-        BinOp LogAnd fits intra_suff
-  intra_body <-
-    renameBody $
-      mkBody
-        (Intrablock.intraKernelStms intra)
-        (varsRes $ Intrablock.intraResultNames intra)
-  pure (intra_ok, intra_body)
-
-transformMapForInBlock ::
-  FunHasParallelism ->
-  Pat Type ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  Builder GPU (Stms GPU)
-transformMapForInBlock funHasParallelism pat w arrs map_lam = do
-  scope <- castScope <$> askScope
-  lam <- preprocessLambda scope map_lam
-  collectStms_ $ do
-    let arrs' =
-          zipWith MapArray arrs $
-            map paramType (lambdaParams lam)
-        (distributed, _) =
-          distributeMap funHasParallelism scope pat (NE.singleton w) arrs' lam
-    transformDistributed funHasParallelism inBlockSegLevel mempty (NE.singleton w) distributed
 
 transformDistBasicOp ::
   SegLevel ->
@@ -1478,10 +1164,6 @@ replicateForDims segments dims v = do
   letExp (baseName v <> "_reg_rep_tr") . BasicOp $
     Rearrange v_rep perm
 
-lambdaHasParallelism :: FunHasParallelism -> Lambda SOACS -> Bool
-lambdaHasParallelism funHasParallelism =
-  any (isParallelStm funHasParallelism) . bodyStms . lambdaBody
-
 transformDistStm :: FunHasParallelism -> SegLevel -> Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm _ lvl segments env (DistStm inps res (ScalarStm stms)) =
   transformScalarStms lvl segments env inps res (stmsFromList stms)
@@ -1506,7 +1188,7 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
             (case_body_res, case_body_stms) <-
               runReaderT
                 ( runBuilder $
-                    liftBodyWithDistResults funHasParallelism lvl segments case_body_inputs env case_dstms res (bodyResult body)
+                    liftBodyWithDistResults ops segments case_body_inputs env case_dstms res (bodyResult body)
                 )
                 scope
             pure $ Case c $ Body () case_body_stms case_body_res
@@ -1515,7 +1197,7 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
             (new_default_body_res, new_default_body_stms) <-
               runReaderT
                 ( runBuilder $
-                    liftBodyWithDistResults funHasParallelism lvl segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)
+                    liftBodyWithDistResults ops segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)
                 )
                 scope
             pure $ Body () new_default_body_stms new_default_body_res
@@ -1857,78 +1539,6 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
   where
     ops = flattenOpsFor funHasParallelism lvl
 
--- helper to not mess up the tags when generating new ones for the loop parameters
--- probably won't be used in future
-localiseInputs :: DistEnv -> DistInputs -> (DistInputs, DistEnv, Int)
-localiseInputs env_outer inps =
-  let step (i, env_acc) (v, inp) =
-        case inp of
-          DistInputFree arr t ->
-            ((i, env_acc), (v, DistInputFree arr t))
-          DistInput oldrt t ->
-            let newrt = ResTag i
-                rep = resVar oldrt env_outer
-                env_acc' = insertRep newrt rep env_acc
-             in ((i + 1, env_acc'), (v, DistInput newrt t))
-
-      ((next, env_local), inps_local) =
-        L.mapAccumL step (0, mempty) inps
-   in (inps_local, env_local, next)
-
-distResCerts :: DistEnv -> [DistInput] -> Certs
-distResCerts env = Certs . map f
-  where
-    f (DistInputFree v _) = v
-    f (DistInput rt _) = case resVar rt env of
-      Regular v -> v
-      Irregular r -> irregularD r
-
-reshapeAndBind :: VName -> VName -> Shape -> Builder GPU ()
-reshapeAndBind v src shape = do
-  v_copy <- letExp (baseName v) . BasicOp $ Replicate mempty (Var src)
-  v_copy_shape <- arrayShape <$> lookupType v_copy
-  letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
-
-transformDistributed ::
-  FunHasParallelism ->
-  SegLevel ->
-  M.Map ResTag IrregularRep ->
-  Segments ->
-  Distributed ->
-  Builder GPU ()
-transformDistributed funHasParallelism lvl irregs segments dist = do
-  let Distributed dstms (DistResults resmap reps) = dist
-  env <- foldM (transformDistStm funHasParallelism lvl segments) env_initial dstms
-  forM_ (M.toList resmap) $ \(rt, binds) ->
-    forM_ binds $ \(cs_inps, v, v_t) ->
-      certifying (distResCerts env cs_inps) $
-        -- FIXME: the copies are because we have too liberal aliases on
-        -- lifted functions.
-        case resVar rt env of
-          Regular v' -> letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-          Irregular irreg ->
-            -- It might have an irregular representation, but we know
-            -- that it is actually regular because it is a result.
-            do
-              irreg' <- ensureDenseIrregular lvl (baseName v <> "_dist_res") irreg
-              reshapeAndBind v (irregularD irreg') (segmentsShape segments <> arrayShape v_t)
-  forM_ reps $ \(v, r) ->
-    case r of
-      Left se ->
-        letBindNames [v] $ BasicOp $ Replicate (segmentsShape segments) se
-      Right (DistInputFree arr _) ->
-        letBindNames [v] $ BasicOp $ SubExp $ Var arr
-      -- This can happen. ask Troels
-      Right (DistInput rt t) ->
-        case resVar rt env of
-          Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
-          Irregular irreg ->
-            do
-              irreg' <- ensureDenseIrregular lvl (baseName v <> "_dist_rep") irreg
-              reshapeAndBind v (irregularD irreg') (segmentsShape segments <> arrayShape t)
-  where
-    env_initial = DistEnv {distResMap = M.map Irregular irregs}
-
 needsIrregular :: DistInputs -> DistEnv -> S.Set VName -> DeclType -> Bool
 needsIrregular inps env loopParamNames t =
   case t of
@@ -2177,42 +1787,6 @@ liftLoopBody funHasParallelism lvl segments num_segments inputs env dstms dist_r
   results <- zipWithM (liftLoopResult lvl segments num_segments inputs env') dist_res result
   pure $ concat results
 
-distResultsToResReps :: [DistResult] -> [VName] -> [ResRep]
-distResultsToResReps dist_res results =
-  snd $
-    L.mapAccumL
-      ( \rs dist_res' ->
-          if isRegularDistResult dist_res'
-            then
-              let (v : rs') = rs
-               in (rs', Regular v)
-            else
-              let (segs : flags : offsets : elems : rs') = rs
-               in (rs', Irregular $ IrregularRep segs flags offsets elems Dense)
-      )
-      results
-      dist_res
-
-liftDistResult :: SegLevel -> Segments -> DistInputs -> DistEnv -> DistResult -> SubExpRes -> Builder GPU Result
-liftDistResult lvl segments inps env dist_res res =
-  if isRegularDistResult dist_res
-    then do
-      let (DistType _ _ t) = distResType dist_res
-      let expectedShape = segmentsShape segments <> arrayShape t
-      v <- liftSubExpRegular lvl segments inps env expectedShape (resSubExp res)
-      pure [SubExpRes mempty (Var v)]
-    else case resSubExp res of
-      Var v -> do
-        irreg <- getIrregRep lvl segments env inps v
-        pure $ map (SubExpRes mempty . Var) [irregularS irreg, irregularF irreg, irregularO irreg, irregularD irreg]
-      _ -> undefined
-
-liftBodyWithDistResults :: FunHasParallelism -> SegLevel -> Segments -> DistInputs -> DistEnv -> [DistStm] -> [DistResult] -> Result -> Builder GPU Result
-liftBodyWithDistResults funHasParallelism lvl segments inputs env dstms dist_res result = do
-  env' <- foldM (transformDistStm funHasParallelism lvl segments) env dstms
-  result' <- zipWithM (liftDistResult lvl segments inputs env') dist_res result
-  pure $ concat result'
-
 liftBody :: FunHasParallelism -> SegLevel -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
 liftBody funHasParallelism lvl w inputs env dstms result = do
   let segments = NE.singleton w
@@ -2370,73 +1944,71 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
             zipWith MapArray arrs $
               map paramType (lambdaParams (scremaLambda form))
           (distributed, _) = distributeMap funHasParallelism scope pat (NE.singleton w) arrs' lamFullFlatten
-          m = transformDistributed funHasParallelism defaultSegLevel mempty (NE.singleton w) distributed
+          ops = flattenOpsFor funHasParallelism defaultSegLevel
+          m = transformDistributed ops mempty (NE.singleton w) distributed
       traceM $ prettyString distributed
       stms <- runReaderT (runBuilder_ $ certifying certs m) scope
       let fullFlattenBody0 = mkBody stms $ varsRes $ patNames pat
           outerOnlyBody0 = mkBody outer_only_stms $ varsRes outer_only_res
       fullFlattenBody <- renameBody fullFlattenBody0
       outerOnlyBody <- renameBody outerOnlyBody0
-      runReaderT
-        ( runBuilder_ $ do
-            let only_intra = onlyExploitIntra (stmAuxAttrs aux)
-                may_intra = worthIntrablock lam && mayExploitIntra (stmAuxAttrs aux)
-                result_ts = patTypes pat
-            intra' <-
-              if only_intra || may_intra
-                then
-                  Intrablock.intrablockParalleliseTopLevelMap
-                    (transformMapForInBlock funHasParallelism)
-                    pat
-                    aux
-                    w
-                    arrs
-                    lam
-                else
-                  pure Nothing
-            alt_vs <- case intra' of
-              _
-                -- We have non-inlined parallel function call we have to fully flatten the body
-                | isParallelFunInside funHasParallelism (lambdaBody lam) ->
-                    kernelAlternatives "top_level_map_alt" result_ts fullFlattenBody []
-                | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
-                    kernelAlternatives "top_level_map_alt" result_ts outerOnlyBody []
-              Nothing
-                | not only_intra,
-                  worthSequentialising funHasParallelism lam,
-                  mayExploitOuter (stmAuxAttrs aux) -> do
-                    (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
-                    kernelAlternatives
-                      "top_level_map_alt"
-                      result_ts
-                      fullFlattenBody
-                      [(outer_suff, outerOnlyBody)]
-                | otherwise ->
-                    kernelAlternatives "top_level_map_alt" result_ts fullFlattenBody []
-              Just intra_res
-                | only_intra -> do
-                    (_, intra_body) <- intraBlockAlternative intra_res
-                    kernelAlternatives "top_level_map_alt" result_ts intra_body []
-                | worthSequentialising funHasParallelism lam,
-                  mayExploitOuter (stmAuxAttrs aux) -> do
-                    intra_alt <- intraBlockAlternative intra_res
-                    (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
-                    kernelAlternatives
-                      "top_level_map_alt"
-                      result_ts
-                      fullFlattenBody
-                      [(outer_suff, outerOnlyBody), intra_alt]
-                | otherwise -> do
-                    intra_alt <- intraBlockAlternative intra_res
-                    kernelAlternatives
-                      "top_level_map_alt"
-                      result_ts
-                      fullFlattenBody
-                      [intra_alt]
-            forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
-              letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
-        )
-        scope
+      flip runReaderT scope . runBuilder_ $ do
+        let only_intra = onlyExploitIntra (stmAuxAttrs aux)
+            may_intra = worthIntrablock lam && mayExploitIntra (stmAuxAttrs aux)
+            result_ts = patTypes pat
+        intra' <-
+          if only_intra || may_intra
+            then
+              Intrablock.intrablockParalleliseTopLevelMap
+                (transformMapForInBlock ops)
+                pat
+                aux
+                w
+                arrs
+                lam
+            else
+              pure Nothing
+        alt_vs <- case intra' of
+          _
+            -- We have non-inlined parallel function call we have to fully flatten the body
+            | isParallelFunInside funHasParallelism (lambdaBody lam) ->
+                kernelAlternatives "top_level_map_alt" result_ts fullFlattenBody []
+            | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
+                kernelAlternatives "top_level_map_alt" result_ts outerOnlyBody []
+          Nothing
+            | not only_intra,
+              worthSequentialising funHasParallelism lam,
+              mayExploitOuter (stmAuxAttrs aux) -> do
+                (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
+                kernelAlternatives
+                  "top_level_map_alt"
+                  result_ts
+                  fullFlattenBody
+                  [(outer_suff, outerOnlyBody)]
+            | otherwise ->
+                kernelAlternatives "top_level_map_alt" result_ts fullFlattenBody []
+          Just intra_res
+            | only_intra -> do
+                (_, intra_body) <- intraBlockAlternative intra_res
+                kernelAlternatives "top_level_map_alt" result_ts intra_body []
+            | worthSequentialising funHasParallelism lam,
+              mayExploitOuter (stmAuxAttrs aux) -> do
+                intra_alt <- intraBlockAlternative intra_res
+                (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
+                kernelAlternatives
+                  "top_level_map_alt"
+                  result_ts
+                  fullFlattenBody
+                  [(outer_suff, outerOnlyBody), intra_alt]
+            | otherwise -> do
+                intra_alt <- intraBlockAlternative intra_res
+                kernelAlternatives
+                  "top_level_map_alt"
+                  result_ts
+                  fullFlattenBody
+                  [intra_alt]
+        forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
+          letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
 transformStm funHasParallelism scope (Let pat aux (Loop params form body)) =
   oneStm . Let pat aux . Loop params form <$> transformBody funHasParallelism scope' body
   where
@@ -2602,10 +2174,12 @@ transformFortoWhile funHasParallelism lvl segments env inps res aux merge i it n
   scope <- askScope
   let (inps_dist, dstms) = distributeBody funHasParallelism scope segments inps_local synthetic_body
 
-  lifted_res <- liftBodyWithDistResults funHasParallelism lvl segments inps_dist env_local dstms res (bodyResult synthetic_body)
+  lifted_res <- liftBodyWithDistResults ops segments inps_dist env_local dstms res (bodyResult synthetic_body)
   lifted_vs <- mapM (letExp "for_variant_res" <=< toExp . resSubExp) lifted_res
   let reps = distResultsToResReps res lifted_vs
   pure $ insertReps (zip (map distResTag res) reps) env
+  where
+    ops = flattenOpsFor funHasParallelism lvl
 
 splitInput ::
   SegLevel ->
