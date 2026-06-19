@@ -165,11 +165,6 @@ transposedArrays arrs = forM arrs $ \arr -> do
   let perm = [1, 0] ++ [2 .. arrayRank t - 1]
   letExp (baseName arr) $ BasicOp $ Rearrange arr perm
 
-removeParamOuterDim :: LParam SOACS -> LParam SOACS
-removeParamOuterDim param =
-  let t = rowType $ paramType param
-   in param {paramDec = t}
-
 setParamOuterDimTo :: SubExp -> LParam SOACS -> LParam SOACS
 setParamOuterDimTo w param =
   let t = setOuterDimTo w $ paramType param

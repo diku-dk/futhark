@@ -137,7 +137,6 @@ genScanWithKernelBody lvl desc segments lam nes =
     nes
     (\_ res_t -> mkIdentityLambda res_t)
 
-
 -- FIXME?: I don't know why we need the readdummy
 genNonSegRed ::
   SegLevel ->
@@ -152,11 +151,11 @@ genNonSegRed lvl desc segments red_op shape map_lam arrs = do
   let red_lam = redLambda red_op
       nes = redNeutral red_op
       comm = redComm red_op
-  let dummy = intConst Int64 1 
+  let dummy = intConst Int64 1
   gtids_dummy <- newVName "dummy"
   gtids_original <- traverse (const $ newVName "gtid") segments
   let gtids = gtids_dummy : gtids_original
-  let new_segment = dummy : segments 
+  let new_segment = dummy : segments
   space <- mkSegSpace $ zip (toList gtids) (toList new_segment)
   let gtids' = fmap Var gtids
   ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
@@ -169,7 +168,7 @@ genNonSegRed lvl desc segments red_op shape map_lam arrs = do
   let op = SegBinOp comm red_lam' nes shape
   lvl' <- capThreadSegLevel new_segment "uniform_nonsegred" lvl $ NoRecommendation SegVirt
   ress <- letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody [op]
-  forM ress $ \ res_d -> do
+  forM ress $ \res_d -> do
     res_dt <- lookupType res_d
     letExp desc $
       BasicOp $
@@ -189,25 +188,25 @@ genUniformSegHist ::
   ([SubExp] -> Builder GPU ()) ->
   Builder GPU [VName]
 genUniformSegHist lvl desc segments ops bucket_fun arrs readFree = do
-  
-    ops' <- forM ops $ \(SOACS.HistOp dest_shape rf dests nes op) -> do
-      (op', nes', shape) <- determineReduceOp op nes
-      let op'' = soacsLambdaToGPU op'
-      pure $ Futhark.IR.GPU.HistOp dest_shape rf dests nes' shape op''
-    gtids <- traverse (const $ newVName "gtid") segments
-    space <- mkSegSpace $ zip (toList gtids) (toList segments)
-    let gtids' = fmap Var gtids
-    ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
-      readFree gtids'
-      bindLambdaInputArrays gtids' bucket_fun arrs
-      res <- bodyBind (lambdaBody bucket_fun)
-      res_t <- mapM (subExpType . resSubExp) res
-      pure (map mkResult res, res_t)
-    kbody <- renameBody $ Body () stms res
-    lvl' <- capThreadSegLevel segments "uniform_seghist" lvl $ NoRecommendation SegVirt
-    letTupExp desc $ Op $ SegOp $ SegHist lvl' space res_t kbody ops'
-    where
-      mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
+  ops' <- forM ops $ \(SOACS.HistOp dest_shape rf dests nes op) -> do
+    (op', nes', shape) <- determineReduceOp op nes
+    let op'' = soacsLambdaToGPU op'
+    pure $ Futhark.IR.GPU.HistOp dest_shape rf dests nes' shape op''
+  gtids <- traverse (const $ newVName "gtid") segments
+  space <- mkSegSpace $ zip (toList gtids) (toList segments)
+  let gtids' = fmap Var gtids
+  ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
+    readFree gtids'
+    bindLambdaInputArrays gtids' bucket_fun arrs
+    res <- bodyBind (lambdaBody bucket_fun)
+    res_t <- mapM (subExpType . resSubExp) res
+    pure (map mkResult res, res_t)
+  kbody <- renameBody $ Body () stms res
+  lvl' <- capThreadSegLevel segments "uniform_seghist" lvl $ NoRecommendation SegVirt
+  letTupExp desc $ Op $ SegOp $ SegHist lvl' space res_t kbody ops'
+  where
+    mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
+
 genUniformSegRed ::
   SegLevel ->
   Name ->

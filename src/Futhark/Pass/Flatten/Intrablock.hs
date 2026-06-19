@@ -17,20 +17,18 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.GPU hiding (HistOp)
-import Futhark.IR.GPU.Op qualified as GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.ToGPU
+import Futhark.Pass.Flatten.Builtins (genUniformSegHist, genUniformSegRed, genUniformSegScanomapWithPost, mkSegSpace)
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Monad
+import Futhark.Pass.Flatten.PreProcess (preprocessLambda)
 import Futhark.Tools
 import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Util.Log
 import Prelude hiding (log)
-import Futhark.Pass.Flatten.Builtins (genUniformSegScanomapWithPost,genUniformSegRed,determineReduceOp,genUniformSegHist,mkSegSpace)
-import Futhark.Pass.Flatten.PreProcess (preprocessLambda)
-
 
 -- | The minimum amount of inner parallelism we require (by default)
 -- in intra-group versions.
@@ -53,7 +51,6 @@ type InBlockMapTransformer =
   [VName] ->
   Lambda SOACS ->
   Builder GPU (Stms GPU)
-
 
 intrablockParallelise ::
   InBlockMapTransformer ->
@@ -148,11 +145,11 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
 
   read_input_stms <-
     lift . collectStms_ . localScope (scopeOfSegSpace kspace <> scopeOf input_prelude_stms <> scopeOf prelude_stms) $ do
-    let SegSpace _ gtids_and_dims = kspace
-        full_is = map (Var . fst) gtids_and_dims
-        outer_is = take (segmentsRank segments) full_is
-    readInBlockInputs segments env outer_is free_inputs
-    readInBlockInputs new_segments param_env full_is param_inputs
+      let SegSpace _ gtids_and_dims = kspace
+          full_is = map (Var . fst) gtids_and_dims
+          outer_is = take (segmentsRank segments) full_is
+      readInBlockInputs segments env outer_is free_inputs
+      readInBlockInputs new_segments param_env full_is param_inputs
 
   let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
       rts = map (length (NE.toList new_segments) `stripArray`) result_ts
@@ -181,7 +178,7 @@ intrablockParalleliseTopLevelMap ::
   Builder GPU (Maybe IntrablockResult)
 intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = runMaybeT $ do
   scope <- lift $ castScope <$> askScope
-  lam <- renameLambda =<< preprocessLambda scope lam0 
+  lam <- renameLambda =<< preprocessLambda scope lam0
   let result_ts = patTypes pat
       body = lambdaBody lam
 
@@ -238,7 +235,9 @@ intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = runMaybeT $ 
         t | arrayRank t > 0 -> do
           v <- letExp (baseName (paramName p) <> "_global") =<< eIndex arr [eSubExp gtid]
           letBindNames [paramName p] $
-            BasicOp $ Replicate mempty $ Var v
+            BasicOp $
+              Replicate mempty $
+                Var v
         _ ->
           letBindNames [paramName p] =<< eIndex arr [eSubExp gtid]
 
@@ -266,12 +265,16 @@ readInBlockInputs segments env is inputs =
     onInput (v, inp) = do
       v' <- readInputVar segments env is inputs v
       let t = distInputType inp
-      if isAcc t then
-        letBindNames [v] $ BasicOp $ SubExp $ Var v'
-      else if arrayRank t > 0 then
-        letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-      else
-        letBindNames [v] $ BasicOp $ SubExp $ Var v'
+      if isAcc t
+        then
+          letBindNames [v] $ BasicOp $ SubExp $ Var v'
+        else
+          if arrayRank t > 0
+            then
+              letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+            else
+              letBindNames [v] $ BasicOp $ SubExp $ Var v'
+
 regularMapInput :: DistEnv -> DistInputs -> VName -> Bool
 regularMapInput env inps arr =
   case lookup arr inps of
@@ -308,7 +311,8 @@ prepareRegularMapInput segments env inps p arr =
                   then pure vs
                   else
                     letExp (baseName arr <> "_intra_reg_reshape") . BasicOp $
-                      Reshape vs $ reshapeAll (arrayShape vs_t) expected_shape
+                      Reshape vs $
+                        reshapeAll (arrayShape vs_t) expected_shape
               pure $ MapArray v t
         Irregular {} ->
           error "prepareRegularMapInput: unexpected irregular input"
@@ -335,7 +339,7 @@ freeInputsFor inps lam =
   do
     let free = freeIn lam
     free_sizes <-
-        foldMap freeIn <$> mapM (lookupInputType inps)  (namesToList free)
+      foldMap freeIn <$> mapM (lookupInputType inps) (namesToList free)
     pure
       [ (v, inp)
       | v <- namesToList $ free <> free_sizes,
@@ -451,14 +455,17 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
         Scan scanfun nes <- singleScan scans -> do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
-              post_op = soacsLambdaToGPU post_lam           
-          (scan_res,stms) <- runBuilder (genUniformSegScanomapWithPost lvl (pure w) "intra_maposcanomap" scanfun' mempty nes post_op mapfun' arrs (const $ pure ()))
-          certifying (stmAuxCerts aux) $ do 
+              post_op = soacsLambdaToGPU post_lam
+          (scan_res, stms) <- runBuilder (genUniformSegScanomapWithPost lvl (pure w) "intra_maposcanomap" scanfun' mempty nes post_op mapfun' arrs (const $ pure ()))
+          certifying (stmAuxCerts aux) $ do
             addStms stms
             zipWithM_
-              (\pe v ->
-                letBindNames [patElemName pe] $
-                  BasicOp $ SubExp $ Var v)
+              ( \pe v ->
+                  letBindNames [patElemName pe] $
+                    BasicOp $
+                      SubExp $
+                        Var v
+              )
               (patElems pat)
               scan_res
           parallelMin [w]
@@ -467,18 +474,21 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
           let sing_red = singleReduce reds
               red_lam = redLambda sing_red
               nes = redNeutral sing_red
-              comm 
+              comm
                 | commutativeLambda red_lam = Commutative
                 | otherwise = redComm sing_red
-              sing_red_gpu = Reduce comm  (soacsLambdaToGPU red_lam) nes 
+              sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes
               map_lam' = soacsLambdaToGPU map_lam
-          (red_res,stms) <- runBuilder (genUniformSegRed lvl "intra_redomap" (pure w)  sing_red_gpu mempty map_lam' arrs (const $ pure ()))
-          certifying (stmAuxCerts aux) $ do 
+          (red_res, stms) <- runBuilder (genUniformSegRed lvl "intra_redomap" (pure w) sing_red_gpu mempty map_lam' arrs (const $ pure ()))
+          certifying (stmAuxCerts aux) $ do
             addStms stms
             zipWithM_
-              (\pe v ->
-                letBindNames [patElemName pe] $
-                  BasicOp $ SubExp $ Var v)
+              ( \pe v ->
+                  letBindNames [patElemName pe] $
+                    BasicOp $
+                      SubExp $
+                        Var v
+              )
               (patElems pat)
               red_res
           parallelMin [w]
@@ -489,14 +499,17 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
         =<< runBuilderT (dissectScrema pat w form arrs) (scopeForSOACs scope)
     Op (Hist w arrs ops bucket_fun) -> do
       let bucket_fun' = soacsLambdaToGPU bucket_fun
-     
-      (hist_res,stms) <- runBuilder (genUniformSegHist lvl "Uniform_segHist" (pure w) ops bucket_fun' arrs (const $ pure ()))
-      certifying (stmAuxCerts aux) $ do 
+
+      (hist_res, stms) <- runBuilder (genUniformSegHist lvl "Uniform_segHist" (pure w) ops bucket_fun' arrs (const $ pure ()))
+      certifying (stmAuxCerts aux) $ do
         addStms stms
         zipWithM_
-          (\pe v ->
-            letBindNames [patElemName pe] $
-              BasicOp $ SubExp $ Var v)
+          ( \pe v ->
+              letBindNames [patElemName pe] $
+                BasicOp $
+                  SubExp $
+                    Var v
+          )
           (patElems pat)
           hist_res
       parallelMin [w]

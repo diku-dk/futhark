@@ -8,8 +8,7 @@ module Futhark.Pass.Flatten.PreProcess (preprocessProg, preprocessBody, preproce
 import Data.Maybe (isNothing)
 import Futhark.Builder
 import Futhark.IR.SOACS
-import Futhark.IR.SOACS.Simplify 
-import Futhark.IR.SOACS.Simplify qualified as SOACS
+import Futhark.IR.SOACS.Simplify
 import Futhark.Pass
 import Futhark.Pass.Flatten.ISRWIM (irwim, iswim)
 import Futhark.Tools
@@ -24,7 +23,7 @@ shouldDissectForm form =
     && isNothing (isMaposcanomapSOAC form)
 
 runSimplifiedBuilder ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Scope SOACS ->
   BuilderT SOACS m a ->
   m (Stms SOACS)
@@ -33,12 +32,12 @@ runSimplifiedBuilder scope m =
 
 -- TODO: maybe it is better to seperate these as they are doing different things.
 preprocessStm ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Scope SOACS ->
   Stm SOACS ->
   m (Stms SOACS)
-preprocessStm _ stm 
- | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm stm
+preprocessStm _ stm
+  | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm stm
 preprocessStm scope (Let pat aux (Op (Stream w arrs nes lam))) = do
   stms <- runSimplifiedBuilder scope (auxing aux $ sequentialStreamWholeArray pat w nes lam arrs)
   preprocessStms scope stms
@@ -61,7 +60,7 @@ preprocessStm scope (Let pat aux (Op (Screma w' arrs' form')))
 preprocessStm _ stm = pure $ oneStm stm
 
 preprocessStms ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Scope SOACS ->
   Stms SOACS ->
   m (Stms SOACS)
@@ -70,7 +69,7 @@ preprocessStms scope stms = mconcat <$> mapM (preprocessStm scope') (stmsToList 
     scope' = scopeOf stms <> scope
 
 preprocessBody ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Scope SOACS ->
   Body SOACS ->
   m (Body SOACS)
@@ -79,7 +78,7 @@ preprocessBody scope body = do
   pure $ body {bodyStms = stms}
 
 preprocessLambda ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Scope SOACS ->
   Lambda SOACS ->
   m (Lambda SOACS)
@@ -87,7 +86,6 @@ preprocessLambda scope lam = do
   body <- preprocessBody (scopeOfLParams (lambdaParams lam) <> scope) $ lambdaBody lam
   let lam' = lam {lambdaBody = body}
   fst <$> runBuilderT (simplifyLambda lam') scope
-
 
 preprocessFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 preprocessFun consts fd = do

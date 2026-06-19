@@ -385,6 +385,7 @@ library
       Futhark.Pass.Flatten.Distribute
       Futhark.Pass.Flatten.Match
       Futhark.Pass.Flatten.Monad
+      Futhark.Pass.Flatten.SOAC
       Futhark.Pass.Flatten.WithAcc
       Futhark.Pass.Flatten.StreamKernel
       Futhark.Pass.LiftAllocations

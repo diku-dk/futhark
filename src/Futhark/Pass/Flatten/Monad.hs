@@ -48,6 +48,7 @@ module Futhark.Pass.Flatten.Monad
     flattenDistStms,
     segmentDims,
     FlattenOps (..),
+    flattenDistStm,
   )
 where
 
@@ -60,6 +61,7 @@ import Data.Map qualified as M
 import Data.Maybe (fromMaybe, isJust)
 import Data.Tuple.Solo
 import Futhark.IR.GPU
+import Futhark.IR.SOACS (SOACS)
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Tools
@@ -170,13 +172,13 @@ insertIrregular ns flags offsets rt elems kind env =
 insertIrregulars :: VName -> VName -> VName -> [(ResTag, VName)] -> IrregularKind -> DistEnv -> DistEnv
 insertIrregulars ns flags offsets bnds kind env =
   let (tags, elems) = unzip bnds
-      mkRep elem =
+      mkRep elem_arr =
         Irregular $
           IrregularRep
             { irregularS = ns,
               irregularF = flags,
               irregularO = offsets,
-              irregularD = elem,
+              irregularD = elem_arr,
               irregularK = kind
             }
    in insertReps (zip tags $ map mkRep elems) env
@@ -229,7 +231,7 @@ readIrregularInput ::
 readIrregularInput segments is v t (IrregularRep _ _ v_O v_D _) = do
   offset <- letSubExp "offset" =<< eIndex v_O [toExp $ flatSegmentIndex segments is]
   case arrayDims t of
-    [] -> do 
+    [] -> do
       letExp (baseName v <> "_inp") =<< eIndex v_D [eSubExp offset]
     [num_elems] -> do
       let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
@@ -301,7 +303,7 @@ readInputs segments env is = mapM_ onInput
             =<< if isAcc t
               then eSubExp $ Var arr
               else eIndex arr (map eSubExp is)
-        Irregular irreg -> 
+        Irregular irreg ->
           readIrregularInput segments is v t irreg >>= eSubExp . Var >>= bindInputName v
 
 scopeOfDistInputs :: DistInputs -> Scope GPU
@@ -388,9 +390,9 @@ liftDistResultRep lvl segments inps env dist_res res
       Regular <$> liftSubExpRegular lvl segments inps env expectedShape (resSubExp res)
   | otherwise =
       case resSubExp res of
-        Var v -> do 
+        Var v -> do
           rep <- getIrregRep lvl segments env inps v
-          Irregular <$>  ensureDenseIrregular lvl "liftDistResultRep_dense" rep
+          Irregular <$> ensureDenseIrregular lvl "liftDistResultRep_dense" rep
         _ -> error "liftBranchResultRep: irregular result is not a variable"
 
 mkIrregFromReg ::
@@ -492,7 +494,7 @@ liftSubExpRegular lvl segments inps env expectedShape se = do
       letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
     Var x -> case M.lookup x $ inputReps inps env of
       Just (_, Regular v') -> pure v'
-      Just (_, Irregular irreg) -> do 
+      Just (_, Irregular irreg) -> do
         rep_dense <- ensureDenseIrregular lvl "lifted_irreg" irreg
         pure $ irregularD rep_dense
       Nothing ->
@@ -522,7 +524,7 @@ dataArr lvl segments env inps (Var v)
       case v_inp of
         DistInputFree vs _ -> irregularD <$> mkIrregFromReg lvl segments vs
         DistInput rt _ -> case resVar rt env of
-          Irregular r ->  do
+          Irregular r -> do
             rep_dense <- ensureDenseIrregular lvl "dataArr" r
             pure $ irregularD rep_dense
           Regular vs -> irregularD <$> mkIrregFromReg lvl segments vs
@@ -586,7 +588,7 @@ scatterIrregular ::
   Builder GPU VName
 scatterIrregular lvl offsets space (is, irregRep) = do
   dense_irreg <- ensureDenseIrregular lvl "scatter_irreg" irregRep
-  let IrregularRep {irregularS = segs, irregularD = elems, irregularK = kind} = dense_irreg
+  let IrregularRep {irregularS = segs, irregularD = elems, irregularK = _kind} = dense_irreg
   (_, _, ii1) <- doRepIota lvl segs
   (_, _, ii2) <- doSegIota lvl segs
   ~(Array _ (Shape [size]) _) <- lookupType elems
@@ -614,8 +616,12 @@ scatterRegular lvl space (is, xs) = do
 data FlattenOps = FlattenOps
   { flattenSegLevel :: SegLevel,
     flattenFunHasParallelism :: FunHasParallelism,
-    flattenDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
+    flattenDistStmAtLevel :: SegLevel -> Segments -> DistEnv -> DistStm -> Builder GPU DistEnv,
+    flattenScalarStm :: Segments -> DistEnv -> DistInputs -> [DistResult] -> Stm SOACS -> Builder GPU DistEnv
   }
+
+flattenDistStm :: FlattenOps -> Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
+flattenDistStm ops = flattenDistStmAtLevel ops (flattenSegLevel ops)
 
 flattenDistStms :: FlattenOps -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
 flattenDistStms ops w inputs env dstms result = do

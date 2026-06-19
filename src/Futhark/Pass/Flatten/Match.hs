@@ -5,10 +5,11 @@ module Futhark.Pass.Flatten.Match
 where
 
 import Control.Monad
+import Data.Containers.ListUtils (nubOrd)
 import Data.List qualified as L
-import Data.Maybe
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
+import Data.Maybe
 import Data.Tuple.Solo
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
@@ -16,7 +17,7 @@ import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Monad
 import Futhark.Tools
-import Data.Containers.ListUtils (nubOrd)
+
 -- Take the elements at index `is` from an input `v`.
 splitInput ::
   SegLevel ->
@@ -32,18 +33,19 @@ splitInput lvl segments env inps is acc_reps v = do
   let rep = M.findWithDefault rep0 v acc_reps
   (t,v,) <$> case rep of
     Regular arr -> do
-      if isAcc t then 
-        pure $ Regular arr
-      else do
-      -- In the regular case we just take the elements
-      -- of the array given by `is`
-        n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-        arr' <- letExp "split_arr" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
-          idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
-          -- unflatten index
-          let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
-          subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
-        pure $ Regular arr'
+      if isAcc t
+        then
+          pure $ Regular arr
+        else do
+          -- In the regular case we just take the elements
+          -- of the array given by `is`
+          n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+          arr' <- letExp "split_arr" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
+            idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
+            -- unflatten index
+            let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
+            subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
+          pure $ Regular arr'
     Irregular (IrregularRep segs flags offsets elems _) -> do
       -- In the irregular case we take the elements
       -- of the `segs` array given by `is` like in the regular case
@@ -96,7 +98,7 @@ distributeBranch funHasParallelism lvl segments env inps is body acc_reps = do
   free_sizes <-
     foldMap freeIn <$> mapM (lookupInputType inps) free_in_body
   let free_variant_sizes = filter (isVariant inps env . Var) (namesToList free_sizes)
-      free_size_vars = nubOrd (free_variant_sizes <> free_in_body) 
+      free_size_vars = nubOrd (free_variant_sizes <> free_in_body)
   (ts, vs, reps) <-
     unzip3 <$> mapM (splitInput lvl segments env inps is acc_reps) free_size_vars
   let inputs = do
@@ -120,21 +122,22 @@ mergeResult lvl segments w iss branchesRep dist_res
   -- Regular case
   | isRegularDistResult dist_res = do
       let (DistType _ _ resType) = distResType dist_res
-      if isAcc resType then do 
-        xs <- mapM regularBranch branchesRep
-        pure $ Regular $ last xs
-      else do 
-        let resultType = Array (elemType resType) (Shape [w] <> arrayShape resType) NoUniqueness
-        xs <- mapM regularBranch branchesRep
-        -- Create the blank space for the result
-        resultSpace <- letExp "blank_res" =<< eBlank resultType
-        -- Write back the values of each branch to the blank space
-        result <- foldM (scatterRegular lvl) resultSpace $ zip iss xs
-        result_t <- arrayShape <$> lookupType result
-        result' <-
-          letExp "match_res_reg" . BasicOp $
-            Reshape result (reshapeAll result_t (segmentsShape segments <> arrayShape resType))
-        pure $ Regular result'
+      if isAcc resType
+        then do
+          xs <- mapM regularBranch branchesRep
+          pure $ Regular $ last xs
+        else do
+          let resultType = Array (elemType resType) (Shape [w] <> arrayShape resType) NoUniqueness
+          xs <- mapM regularBranch branchesRep
+          -- Create the blank space for the result
+          resultSpace <- letExp "blank_res" =<< eBlank resultType
+          -- Write back the values of each branch to the blank space
+          result <- foldM (scatterRegular lvl) resultSpace $ zip iss xs
+          result_t <- arrayShape <$> lookupType result
+          result' <-
+            letExp "match_res_reg" . BasicOp $
+              Reshape result (reshapeAll result_t (segmentsShape segments <> arrayShape resType))
+          pure $ Regular result'
   -- Irregular case
   | DistType _ _ (Array pt _ _) <- distResType dist_res = do
       branchesIrregRep <- mapM irregularBranch branchesRep
@@ -227,7 +230,7 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
   -- and is therefore the first segment after the partition.
   let branch_bodies = defaultCase : map (\(Case _ body) -> body) cases
   let branch_results = map bodyResult branch_bodies
-   -- acc inputs are handled differently, each breanch use the result of the previous branch 
+  -- acc inputs are handled differently, each breanch use the result of the previous branch
   (branch_reps, _) <-
     foldM
       ( \(branch_reps_acc, acc_reps) (branch_size, branch_inds, body, result) -> do
@@ -244,29 +247,27 @@ transformMatch ops segments env inps res scrutinees cases defaultCase = do
   -- Merging acc results is done by using the last branch result
   reps <- zipWithM (mergeResult lvl segments w inds) (L.transpose branch_reps) res
   pure $ insertReps (zip (map distResTag res) reps) env
-
-
   where
     findAccCert :: VName -> (VName, DistInput) -> Maybe VName
     findAccCert cert v_inp =
-      let (v,inp) = v_inp in
-      if isAcc (distInputType inp) then
-        case distInputType inp of
-          Acc cert' _ _ _ | cert == cert' -> Just v
-          _ -> Nothing
-      else Nothing
-    
+      let (v, inp) = v_inp
+       in if isAcc (distInputType inp)
+            then case distInputType inp of
+              Acc cert' _ _ _ | cert == cert' -> Just v
+              _ -> Nothing
+            else Nothing
+
     -- Idealy this should be a singleton
-    findAccCerts:: VName -> [VName]
+    findAccCerts :: VName -> [VName]
     findAccCerts cert = mapMaybe (findAccCert cert) inps
 
-    replaceAccRep acc_reps (dist_res, rep) = 
-      let (DistType _ _ t) = distResType dist_res in
-      if not $ isAcc t 
-        then 
-          acc_reps
-      else  
-        let (Acc cert _ _ _) = t 
-            accVars = findAccCerts cert in
-        foldl (\m v -> M.insert v rep m) acc_reps accVars   
+    replaceAccRep acc_reps (dist_res, rep) =
+      let (DistType _ _ t) = distResType dist_res
+       in if not $ isAcc t
+            then
+              acc_reps
+            else
+              let (Acc cert _ _ _) = t
+                  accVars = findAccCerts cert
+               in foldl (\m v -> M.insert v rep m) acc_reps accVars
     replaceAccReps acc_reps reps = foldl replaceAccRep acc_reps $ zip res reps

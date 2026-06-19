@@ -19,7 +19,7 @@ import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (isJust, isNothing, mapMaybe)
+import Data.Maybe (isJust, isNothing)
 import Data.Set qualified as S
 import Data.Tuple.Solo
 import Debug.Trace
@@ -34,17 +34,13 @@ import Futhark.Pass.Flatten.Intrablock qualified as Intrablock
 import Futhark.Pass.Flatten.Match
 import Futhark.Pass.Flatten.Monad
 import Futhark.Pass.Flatten.PreProcess
+import Futhark.Pass.Flatten.SOAC
 import Futhark.Pass.Flatten.WithAcc
 import Futhark.Tools
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
-import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, quot, rem)
-import Futhark.Transform.FirstOrderTransform qualified as FOT
-
-data InnerMapMode
-  = MultiDim
-  | SingleDim
 
 defaultSegLevel :: SegLevel
 defaultSegLevel = SegThread SegVirt Nothing
@@ -52,16 +48,13 @@ defaultSegLevel = SegThread SegVirt Nothing
 inBlockSegLevel :: SegLevel
 inBlockSegLevel = SegThreadInBlock SegNoVirt
 
-allowVersioning :: SegLevel -> Bool
-allowVersioning SegThreadInBlock {} = False
-allowVersioning _ = True
-
 flattenOpsFor :: FunHasParallelism -> SegLevel -> FlattenOps
 flattenOpsFor funHasParallelism lvl =
   FlattenOps
     { flattenSegLevel = lvl,
       flattenFunHasParallelism = funHasParallelism,
-      flattenDistStm = transformDistStm funHasParallelism lvl
+      flattenDistStmAtLevel = transformDistStm funHasParallelism,
+      flattenScalarStm = transformScalarStm lvl
     }
 
 transformScalarStms ::
@@ -93,7 +86,6 @@ transformScalarStm ::
 transformScalarStm lvl segments env inps res stm =
   transformScalarStms lvl segments env inps res (oneStm stm)
 
-
 topLevelversionScanRed ::
   FunHasParallelism ->
   Name ->
@@ -104,41 +96,41 @@ topLevelversionScanRed ::
   ScremaForm SOACS ->
   StmAux dec ->
   Stms GPU ->
-  PassM (Stms GPU) 
+  PassM (Stms GPU)
 topLevelversionScanRed funHasParallelism desc scope pat w arrs form aux outer_only_stms = do
   let outerOnlyBody0 = mkBody outer_only_stms $ varsRes $ patNames pat
   (maybeFullFlattenBody, _) <- runReaderT (runBuilder (factorScremaForParallelism funHasParallelism scope (stmAuxCerts aux) pat w arrs form)) scope
-  case maybeFullFlattenBody of 
+  case maybeFullFlattenBody of
     Nothing -> pure outer_only_stms
     Just fullFlattenBody0 -> do
       outerOnlyBody <- renameBody outerOnlyBody0
       fullFlattenBody <- transformBody funHasParallelism scope =<< renameBody fullFlattenBody0
       let result_ts = patTypes pat
           attrs = stmAuxAttrs aux
-      runReaderT 
-        ( runBuilder_ $ do     
-          let fullAlternative = kernelAlternatives desc  result_ts fullFlattenBody []
-              outerAlternative = kernelAlternatives desc result_ts outerOnlyBody []
-              fullWithOuterAlternative = do
-                (outer_suff, _) <-
-                  sufficientParallelism
-                    (desc <> "_suff_outer")
-                    [w]
-                    mempty
-                    Nothing
-                kernelAlternatives desc result_ts fullFlattenBody [(outer_suff, outerOnlyBody)]
-              alternatives
-                | isParallelFunInside funHasParallelism $ lambdaBody . scremaLambda $ form =
-                    fullAlternative
-                | "sequential_inner" `inAttrs` attrs =
-                    outerAlternative
-                | mayExploitOuter attrs =
-                    fullWithOuterAlternative
-                | otherwise =
-                    fullAlternative
-          alt_vs <- alternatives
-          forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
-            letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
+      runReaderT
+        ( runBuilder_ $ do
+            let fullAlternative = kernelAlternatives desc result_ts fullFlattenBody []
+                outerAlternative = kernelAlternatives desc result_ts outerOnlyBody []
+                fullWithOuterAlternative = do
+                  (outer_suff, _) <-
+                    sufficientParallelism
+                      (desc <> "_suff_outer")
+                      [w]
+                      mempty
+                      Nothing
+                  kernelAlternatives desc result_ts fullFlattenBody [(outer_suff, outerOnlyBody)]
+                alternatives
+                  | isParallelFunInside funHasParallelism $ lambdaBody . scremaLambda $ form =
+                      fullAlternative
+                  | "sequential_inner" `inAttrs` attrs =
+                      outerAlternative
+                  | mayExploitOuter attrs =
+                      fullWithOuterAlternative
+                  | otherwise =
+                      fullAlternative
+            alt_vs <- alternatives
+            forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
+              letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
         )
         scope
 
@@ -183,159 +175,10 @@ factorScremaForParallelism funHasParallelism scope certs pat w arrs form
       Just <$> mkFactoredBody (stmsFromList [map_stm, scan_stm, post_stm])
   | otherwise =
       pure Nothing
-  where 
-  mkFactoredBody stms = do
-    stms' <- fmap (certify certs) <$> preprocessStms scope stms
-    pure $ mkBody stms' $ varsRes $ patNames pat
-
-transformFactoredDistBody ::
-  FunHasParallelism ->
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  [DistResult] ->
-  Body SOACS ->
-  Builder GPU [ResRep]
-transformFactoredDistBody funHasParallelism lvl segments env inps res body = do
-  scope <- askScope
-  let (inps_local, env_local, _) = localiseInputs env inps
-      (inps_dist, dstms) = distributeBody funHasParallelism scope segments inps_local body
-  lifted_res <- liftBodyWithDistResults funHasParallelism lvl segments inps_dist env_local dstms res (bodyResult body)
-  lifted_vs <- mapM (letExp "factored_res" <=< toExp . resSubExp) lifted_res
-  let reps = distResultsToResReps res lifted_vs
-  pure reps
-
-versionScanRed ::
-  FunHasParallelism ->
-  Name ->
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  [DistResult] ->
-  StmAux () ->
-  SubExp ->
-  Body SOACS ->
-  Builder GPU [VName] ->
-  Builder GPU DistEnv
-versionScanRed funHasParallelism desc lvl segments env inps res aux w factored_body outer_only = do
-  let result_ts =
-        [ t `arrayOfShape` segmentsShape segments
-        | DistResult _ (DistType _ _ t) _ <- res
-        ]
-  outer_body <- regularBranchBody outer_only
-  full_body <- regularBranchBody $ regularRepVars <$> transformFactoredDistBody funHasParallelism lvl segments env inps res factored_body
-
-  let attrs = stmAuxAttrs aux
-      fullAlternative = kernelAlternatives desc result_ts full_body []
-      outerAlternative = kernelAlternatives desc result_ts outer_body []
-      fullWithOuterAlternative = do
-        (outer_suff, _) <-
-          sufficientParallelism
-            (desc <> "_suff_outer")
-            (NE.toList $ segments <> pure w)
-            mempty
-            Nothing
-        kernelAlternatives desc result_ts full_body [(outer_suff, outer_body)]
-      alternatives
-        | isParallelFunInside funHasParallelism factored_body =
-            fullAlternative
-        | "sequential_inner" `inAttrs` attrs =
-            outerAlternative
-        | mayExploitOuter attrs && allowVersioning lvl =
-            fullWithOuterAlternative
-        | otherwise =
-            fullAlternative
-  match_res <-
-    certifying (distCerts inps aux env) alternatives
-  pure $ insertRegulars (map distResTag res) match_res env
-
-transformUniformRedomap ::
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  SubExp ->
-  [VName] ->
-  [Reduce SOACS] ->
-  Lambda SOACS ->
-  Builder GPU [VName]
-transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
-  let sing_red = singleReduce reds
-      zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-      free = freeIn map_lam
-      new_segment = segments <> pure w
-  nes <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
-  -- FIXME? I think a backend problem with vectorized reduce
-  -- (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) nes
-  let red_lam = redLambda sing_red
-      nes' = nes
-      shape = mempty
-  let comm
-        | commutativeLambda red_lam = Commutative
-        | otherwise = redComm sing_red
-      sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes'
-  free_and_sizes <- freeWithTypeDeps inps free
-  (free_replicated, replicated) <-
-    fmap unzip . sequence $
-      mapMaybe
-        (onMapFreeVarMultiDim lvl segments w env inps)
-        free_and_sizes
-  arrs' <-
-    zipWithM
-      ( \p arr ->
-          liftSubExpRegular
-            lvl
-            segments
-            inps
-            env
-            (segmentsShape new_segment <> arrayShape (paramType p))
-            (Var arr)
-      )
-      (lambdaParams map_lam)
-      arrs
-
-  let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
-      readFree is = readInputs new_segment free_env is free_inputs
-  genUniformSegRed lvl "uniformSegRed" (NE.toList new_segment) sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs' readFree
-
-transformUniformMaposcanomap ::
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  SubExp ->
-  [VName] ->
-  [Scan SOACS] ->
-  Lambda SOACS ->
-  Lambda SOACS ->
-  Builder GPU [VName]
-transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam = do
-  let free = freeIn map_lam <> freeIn post_lam
-      new_segment = segments <> pure w
-  free_and_sizes <- freeWithTypeDeps inps free
-  (free_replicated, replicated) <-
-    fmap unzip . sequence $
-      mapMaybe
-        (onMapFreeVarMultiDim lvl segments w env inps)
-        free_and_sizes
-  arrs' <-
-    zipWithM
-      ( \p arr ->
-          liftSubExpRegular
-            lvl
-            segments
-            inps
-            env
-            (segmentsShape new_segment <> arrayShape (paramType p))
-            (Var arr)
-      )
-      (lambdaParams map_lam)
-      arrs
-  let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
-      readFree is = readInputs new_segment free_env is free_inputs
-  doUniformSegMaposcanomap lvl scans arrs' post_lam map_lam segments new_segment inps env readFree
+  where
+    mkFactoredBody stms = do
+      stms' <- fmap (certify certs) <$> preprocessStms scope stms
+      pure $ mkBody stms' $ varsRes $ patNames pat
 
 -- Do 'map2 (++) A B' where 'A' and 'B' are irregular arrays and have the same
 -- number of subarrays
@@ -768,7 +611,8 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
             then 0
             else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
 
--- TODO: maybe update this or just always consider Sequentialising 
+-- TODO: maybe update this or just always consider Sequentialising
+
 -- | A lambda is worth sequentialising if it contains enough nested
 -- parallelism of an interesting kind.
 worthSequentialising :: FunHasParallelism -> Lambda SOACS -> Bool
@@ -784,13 +628,13 @@ worthSequentialising funHasParallelism lam = bodyInterest (0 :: Int) (lambdaBody
           if sequential_inner
             then 0
             else bodyInterest (depth + 1) (lambdaBody lam')
-      | Loop _ _  body <- stmExp stm =
+      | Loop _ _ body <- stmExp stm =
           bodyInterest (depth + 1) body * 10
       | Match _ cases defbody _ <- stmExp stm =
-        foldl
-          max
-          (bodyInterest (depth + 1) defbody)
-          (map (bodyInterest (depth + 1) . caseBody) cases)
+          foldl
+            max
+            (bodyInterest (depth + 1) defbody)
+            (map (bodyInterest (depth + 1) . caseBody) cases)
       | WithAcc _ withacc_lam <- stmExp stm =
           bodyInterest (depth + 1) (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm =
@@ -803,10 +647,10 @@ worthSequentialising funHasParallelism lam = bodyInterest (0 :: Int) (lambdaBody
             case (isRedomapSOAC form, depth) of
               (Just _, 0) -> 1
               _ -> 0
-      | Op (Stream _ _ _ lam') <- stmExp stm = 
-        bodyInterest (depth + 1) (lambdaBody lam')
-      | otherwise = 
-        if isParallelStm funHasParallelism stm then 1 else 0
+      | Op (Stream _ _ _ lam') <- stmExp stm =
+          bodyInterest (depth + 1) (lambdaBody lam')
+      | otherwise =
+          if isParallelStm funHasParallelism stm then 1 else 0
       where
         attrs = stmAuxAttrs $ stmAux stm
         sequential_inner = "sequential_inner" `inAttrs` attrs
@@ -856,84 +700,6 @@ kernelAlternatives desc result_ts default_body ((cond, alt) : alts) = do
     Match [cond] [Case [Just $ BoolValue True] alt] fallback_body $
       MatchDec (staticShapes result_ts) MatchEquiv
 
-mapArraysToInputs ::
-  [Param Type] ->
-  [MapArray IrregularRep] ->
-  (DistEnv, DistInputs)
-mapArraysToInputs params arrs =
-  let ((_, env), inputs) =
-        L.mapAccumL onInput (0, mempty) $ zip params arrs
-   in (env, inputs)
-  where
-    onInput (tag, env) (p, MapArray arr _) =
-      ((tag, env), (paramName p, DistInputFree arr (paramType p)))
-    onInput (tag, env) (p, MapOther rep _) =
-      let rt = ResTag tag
-       in ( (tag + 1, insertRep rt (Irregular rep) env),
-            (paramName p, DistInput rt (paramType p))
-          )
-
-mapArraysToInputs2 ::
-  [VName] ->
-  [MapArray IrregularRep] ->
-  (DistEnv, DistInputs)
-mapArraysToInputs2 param_names arrs =
-  let ((_, env), inputs) =
-        L.mapAccumL onInput (0, mempty) $ zip param_names arrs
-   in (env, inputs)
-  where
-    onInput (tag, env) (p, MapArray arr t) =
-      ((tag, env), (p, DistInputFree arr t))
-    onInput (tag, env) (p, MapOther rep t) =
-      let rt = ResTag tag
-       in ( (tag + 1, insertRep rt (Irregular rep) env),
-            (p, DistInput rt t)
-          )
-
-runMapLambdaBody ::
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  Pat Type ->
-  [DistResult] ->
-  Builder GPU [VName]
-runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
-  map_lam' <- renameLambda $ soacsLambdaToGPU map_lam
-  ws <- dataArr defaultSegLevel segments env inps w
-  (_ws_F, ws_O, ws_data) <- doRepIota defaultSegLevel ws
-  arrs' <-
-    zipWithM
-      (onMapInputArrMultiDim defaultSegLevel segments w env inps ws ws_O ws_data)
-      (lambdaParams map_lam')
-      arrs
-
-  free_and_sizes <- freeWithTypeDeps inps (freeIn map_lam')
-  let new_segments = segments <> pure w
-      (param_env, param_inputs) =
-        mapArraysToInputs (lambdaParams map_lam') arrs'
-      free_inputs =
-        [ (v, inp)
-        | v <- free_and_sizes,
-          Just inp <- [lookup v inps]
-        ]
-
-  vs <- letTupExp "outer_map" <=< renameExp <=< segMap defaultSegLevel new_segments $ \is -> do
-    let full_is = toList is
-        outer_is = take (segmentsRank segments) full_is
-
-    readInputs segments env outer_is free_inputs
-    readInputs new_segments param_env full_is param_inputs
-
-    addStms $ bodyStms $ lambdaBody map_lam'
-    pure $ bodyResult $ lambdaBody map_lam'
-  forM vs $ \v -> do
-    letExp (baseName v <> "_copy") $
-      BasicOp $
-        Replicate mempty (Var v)
-
 runInnerSeqMap ::
   SubExp ->
   [VName] ->
@@ -956,19 +722,11 @@ runInnerSeqMap w arrs map_lam _pat _ress = do
     addStms $ bodyStms $ lambdaBody map_lam'
     pure $ bodyResult $ lambdaBody map_lam'
 
-regularRepVars :: [ResRep] -> [VName]
-regularRepVars =
-  map onRep
-  where
-    onRep (Regular v) = v
-    onRep Irregular {} =
-      error "regularRepVars: expected regular result"
-
 -- Check if the in the body there is a call to a parallel function.
 -- XXX: we use this function to even reject the intra version of
 -- maps that call parallel function. We should do better there.
--- One other things to note is that maybe we should create a sequential 
--- version of function and replace them in these cases.  
+-- One other things to note is that maybe we should create a sequential
+-- version of function and replace them in these cases.
 isParallelFunInside :: FunHasParallelism -> Body SOACS -> Bool
 isParallelFunInside funHasParallelism = inBody
   where
@@ -990,19 +748,6 @@ isParallelFunInside funHasParallelism = inBody
     callParallelFunction (Op JVP {}) = error "isParallelFunInside: unexpected JVP"
     callParallelFunction (Op VJP {}) = error "isParallelFunInside: unexpected VJP"
     callParallelFunction (Op WithVJP {}) = error "isParallelFunInside: unexpected WithVJP"
-
-isVersionableMap :: FunHasParallelism -> DistInputs -> DistEnv -> SubExp -> [DistResult] -> Lambda SOACS -> Bool
-isVersionableMap funHasParallelism inps env w dist_res map_lam =
-  all isRegularDistResult dist_res && 
-  not (isVariant inps env w) && 
-  not (isParallelFunInside funHasParallelism (lambdaBody map_lam))
-
-regularBranchBody ::
-  Builder GPU [VName] ->
-  Builder GPU (Body GPU)
-regularBranchBody m = do
-  (vs, stms) <- collectStms m
-  renameBody $ mkBody stms $ varsRes vs
 
 onlyExploitIntra :: Attrs -> Bool
 onlyExploitIntra attrs =
@@ -1072,79 +817,6 @@ transformMapForInBlock funHasParallelism pat w arrs map_lam = do
         (distributed, _) =
           distributeMap funHasParallelism scope pat (NE.singleton w) arrs' lam
     transformDistributed funHasParallelism inBlockSegLevel mempty (NE.singleton w) distributed
-
-versionedRegularMap ::
-  FunHasParallelism ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  [DistResult] ->
-  Pat Type ->
-  StmAux () ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  Builder GPU DistEnv
-versionedRegularMap funHasParallelism segments env inps ress pat aux w arrs map_lam = do
-  let only_intra = onlyExploitIntra (stmAuxAttrs aux)
-      may_intra = worthIntrablock map_lam && mayExploitIntra (stmAuxAttrs aux)
-
-  intra' <-
-    if only_intra || may_intra
-      then Intrablock.intrablockParallelise (transformMapForInBlock funHasParallelism) segments env inps ress pat aux w arrs map_lam
-      else pure Nothing
-
-  let fullFlatten =
-        regularRepVars <$> transformInnerMap funHasParallelism defaultSegLevel segments env inps pat w arrs map_lam
-
-      outerOnly =
-        runMapLambdaBody segments env inps w arrs map_lam pat ress
-
-  full_body <- regularBranchBody fullFlatten
-  outer_body <- regularBranchBody outerOnly
-
-  let result_ts =
-        [ t `arrayOfShape` segmentsShape segments
-        | DistResult _ (DistType _ _ t) _ <- ress
-        ]
-
-  let alternatives = case intra' of
-        _
-          | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
-              kernelAlternatives "match_res" result_ts outer_body []
-        Nothing
-          | not only_intra,
-            worthSequentialising funHasParallelism map_lam,
-            mayExploitOuter $ stmAuxAttrs aux -> do
-              (outer_suff, _) <- sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
-              kernelAlternatives
-                "match_res"
-                result_ts
-                full_body
-                [(outer_suff, outer_body)]
-          | otherwise ->
-              kernelAlternatives "match_res" result_ts full_body []
-        Just intra_res
-          | only_intra -> do
-              (_, intra_body) <- intraBlockAlternative intra_res
-              kernelAlternatives "match_res" result_ts intra_body []
-          | worthSequentialising funHasParallelism map_lam,
-            mayExploitOuter $ stmAuxAttrs aux -> do
-              (outer_suff, _) <- sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
-              intra_alts <- intraBlockAlternative intra_res
-              kernelAlternatives
-                "match_res"
-                result_ts
-                full_body
-                ((outer_suff, outer_body) : [intra_alts])
-          | otherwise -> do
-              intra_alts <- intraBlockAlternative intra_res
-              kernelAlternatives "match_res" result_ts full_body [intra_alts]
-
-  match_res <-
-    certifying (distCerts inps aux env) alternatives
-
-  pure $ insertRegulars (map distResTag ress) match_res env
 
 transformDistBasicOp ::
   SegLevel ->
@@ -1289,52 +961,53 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
           pure $ insertRep (distResTag res) (resVar rt_in env) env
       | otherwise ->
           scalarCase
-    Reshape arr reshape 
+    Reshape arr reshape
       | isRegularDistResult res,
-        not (any (isVariant inps env) reshape) -> do 
-        let outer = segmentsShape segments
-            inner_target = newShape reshape
-            reshape' = reshapeCoerce outer <> newshapeInner outer reshape
+        not (any (isVariant inps env) reshape) -> do
+          let outer = segmentsShape segments
+              inner_target = newShape reshape
+              reshape' = reshapeCoerce outer <> newshapeInner outer reshape
 
-        arr_t <- lookupInputType inps arr  
-        let arr_shape = arrayShape arr_t
-        let unform_arr =  not (any (isVariant inps env) arr_shape )
-        if unform_arr 
-          then do
-            arr' <- liftSubExpRegular  
-              lvl
-              segments
-              inps
-              env
-              (outer <> arr_shape)
-              (Var arr)
-            v <- certifying (distCerts inps aux env) . letExp "reshape_reg" . BasicOp $ Reshape arr' reshape'
-            pure $ insertRegulars [distResTag res] [v] env
-          else do
-            arr' <- liftSubExpRegular 
-              lvl
-              segments
-              inps
-              env
-              (outer <> inner_target)
-              (Var arr)
-            pure $ insertRegulars [distResTag res] [arr'] env
-
-
+          arr_t <- lookupInputType inps arr
+          let arr_shape = arrayShape arr_t
+          let unform_arr = not (any (isVariant inps env) arr_shape)
+          if unform_arr
+            then do
+              arr' <-
+                liftSubExpRegular
+                  lvl
+                  segments
+                  inps
+                  env
+                  (outer <> arr_shape)
+                  (Var arr)
+              v <- certifying (distCerts inps aux env) . letExp "reshape_reg" . BasicOp $ Reshape arr' reshape'
+              pure $ insertRegulars [distResTag res] [v] env
+            else do
+              arr' <-
+                liftSubExpRegular
+                  lvl
+                  segments
+                  inps
+                  env
+                  (outer <> inner_target)
+                  (Var arr)
+              pure $ insertRegulars [distResTag res] [arr'] env
       | otherwise -> do
-        irreg_v <- getIrregRep lvl segments env inps arr
-        pure $ insertRep (distResTag res) (Irregular irreg_v) env
+          irreg_v <- getIrregRep lvl segments env inps arr
+          pure $ insertRep (distResTag res) (Irregular irreg_v) env
     Index arr slice
       | isRegularDistResult res,
         not (any (isVariant inps env) slice) -> do
           arr_t <- lookupInputType inps arr
-          arr' <- liftSubExpRegular 
-            lvl
-            segments
-            inps
-            env
-            (segmentsShape segments <> arrayShape arr_t)
-            (Var arr)
+          arr' <-
+            liftSubExpRegular
+              lvl
+              segments
+              inps
+              env
+              (segmentsShape segments <> arrayShape arr_t)
+              (Var arr)
           let segmentSlice = map sliceDim . shapeDims . segmentsShape
           v <-
             certifying (distCerts inps aux env) . letExp "index_reg" . BasicOp $
@@ -1367,33 +1040,34 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
     FlatIndex arr flat_slice
       | isRegularDistResult res,
         not (any (isVariant inps env) flat_slice) -> do
-        arr_t <- lookupInputType inps arr
-        -- arr should be 1D
-        let [n] = arrayDims arr_t
-        num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
-        arr_flat_size <- letSubExp "arr_flat_size" =<< toExp (pe64 num_segments * pe64 n)
-        let arr_lift_shape = segmentsShape segments <> arrayShape arr_t
-            arr_flat_shape = Shape [arr_flat_size]
-        arr' <-
-          liftSubExpRegular
-            lvl
-            segments
-            inps
-            env
-            arr_lift_shape
-            (Var arr)
-        arr'_flat <-
-          letExp (baseName arr <> "_reshaped") $ BasicOp $ Reshape arr' $ reshapeAll arr_lift_shape arr_flat_shape
-        let FlatSlice off dims = flat_slice
-            flat_slice' = FlatSlice off (FlatDimIndex num_segments n : dims)
-        out_flat_updated <-
-          certifying (distCerts inps aux env) . letExp "flat_index_reg" . BasicOp $
-            FlatIndex arr'_flat flat_slice'
-        out_updated <-
-          letExp "flat_index_reg_reshaped" $
-            BasicOp $ Reshape out_flat_updated $ reshapeAll arr_flat_shape arr_lift_shape
-        pure $ insertRegulars [distResTag res] [out_updated] env
-
+          arr_t <- lookupInputType inps arr
+          -- arr should be 1D
+          let [n] = arrayDims arr_t
+          num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+          arr_flat_size <- letSubExp "arr_flat_size" =<< toExp (pe64 num_segments * pe64 n)
+          let arr_lift_shape = segmentsShape segments <> arrayShape arr_t
+              arr_flat_shape = Shape [arr_flat_size]
+          arr' <-
+            liftSubExpRegular
+              lvl
+              segments
+              inps
+              env
+              arr_lift_shape
+              (Var arr)
+          arr'_flat <-
+            letExp (baseName arr <> "_reshaped") $ BasicOp $ Reshape arr' $ reshapeAll arr_lift_shape arr_flat_shape
+          let FlatSlice off dims = flat_slice
+              flat_slice' = FlatSlice off (FlatDimIndex num_segments n : dims)
+          out_flat_updated <-
+            certifying (distCerts inps aux env) . letExp "flat_index_reg" . BasicOp $
+              FlatIndex arr'_flat flat_slice'
+          out_updated <-
+            letExp "flat_index_reg_reshaped" $
+              BasicOp $
+                Reshape out_flat_updated $
+                  reshapeAll arr_flat_shape arr_lift_shape
+          pure $ insertRegulars [distResTag res] [out_updated] env
       | otherwise -> do
           -- Maximally irregular case.
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
@@ -1441,12 +1115,12 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
             ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns res_F res_O (distResTag res) res_D' Dense env
     Concat d arr shp -> do
-      arr_ts <- mapM (lookupInputType inps) (NE.toList arr) 
+      arr_ts <- mapM (lookupInputType inps) (NE.toList arr)
       let inputShapeUniform t =
             not $ any (isVariant inps env) (arrayDims t)
       if isRegularDistResult res
-          && not (isVariant inps env shp)
-          && all inputShapeUniform arr_ts
+        && not (isVariant inps env shp)
+        && all inputShapeUniform arr_ts
         then do
           --  Unifrom Concat
           traceM "unform concat"
@@ -1463,24 +1137,24 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
                   shp
 
           pure $ insertRegulars [distResTag res] [v'] env
-        else do 
-          traceM "!!!NON unform concat" 
+        else do
+          traceM "!!!NON unform concat"
           ns <- dataArr lvl segments env inps shp
           reparr <- mapM (getIrregRep lvl segments env inps) (NE.toList arr)
           traceM "lets enter"
-          rep' <- case d of 
+          rep' <- case d of
             0 -> concatIrreg lvl segments env ns reparr
             d' -> do
               concatIrregAlongDim lvl segments env ns reparr arr_ts inps d'
           traceM "Job Done"
           pure $ insertRep (distResTag res) (Irregular rep') env
 
-  --  Unifrom Replicate
+    --  Unifrom Replicate
     Replicate (Shape dims) se
       | isRegularDistResult res -> do
           t <- subExpInputType inps se
-          let expectedShape = segmentsShape segments <> arrayShape t 
-          lifted <-  liftSubExpRegular lvl segments inps env expectedShape se
+          let expectedShape = segmentsShape segments <> arrayShape t
+          lifted <- liftSubExpRegular lvl segments inps env expectedShape se
           v_rep <- replicateForDims segments (Shape dims) lifted
           pure $ insertRegulars [distResTag res] [v_rep] env
     Replicate (Shape [n]) (Var v) -> do
@@ -1545,7 +1219,7 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
               (segmentsShape segments <> arrayShape t)
               (Var v)
           let segment_rank = segmentsRank segments
-          v_manifest <- letExp (baseName v <> "_manifest") . BasicOp $ Manifest v_lifted ([0 .. segment_rank - 1] ++ map (+ segment_rank) perm) 
+          v_manifest <- letExp (baseName v <> "_manifest") . BasicOp $ Manifest v_lifted ([0 .. segment_rank - 1] ++ map (+ segment_rank) perm)
           pure $ insertRegulars [distResTag res] [v_manifest] env
       | otherwise -> do
           irreg <- getIrregRep lvl segments env inps v
@@ -1573,27 +1247,27 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
       | Just as_t <- distInputType <$> lookup as inps,
         isRegularDistResult res,
         not (any (isVariant inps env) slice) -> do
-        as' <-
-          liftSubExpRegular
-            lvl
-            segments
-            inps
-            env
-            (segmentsShape segments <> arrayShape as_t)
-            (Var as)
-        se' <-
-          liftSubExpRegular
-            lvl
-            segments
-            inps
-            env
-            (segmentsShape segments <> sliceShape slice)
-            se
-        let segmentSlice = map sliceDim . shapeDims . segmentsShape
-        v <-
-          certifying (distCerts inps aux env) . letExp "update_reg" . BasicOp $
-            Update safety as' (Slice $ segmentSlice segments <> unSlice slice) (Var se')
-        pure $ insertRegulars [distResTag res] [v] env
+          as' <-
+            liftSubExpRegular
+              lvl
+              segments
+              inps
+              env
+              (segmentsShape segments <> arrayShape as_t)
+              (Var as)
+          se' <-
+            liftSubExpRegular
+              lvl
+              segments
+              inps
+              env
+              (segmentsShape segments <> sliceShape slice)
+              se
+          let segmentSlice = map sliceDim . shapeDims . segmentsShape
+          v <-
+            certifying (distCerts inps aux env) . letExp "update_reg" . BasicOp $
+              Update safety as' (Slice $ segmentSlice segments <> unSlice slice) (Var se')
+          pure $ insertRegulars [distResTag res] [v] env
       | Just as_t <- distInputType <$> lookup as inps -> do
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
           ns <- letExp "slice_sizes"
@@ -1651,46 +1325,47 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
       | Just as_t <- distInputType <$> lookup as inps,
         isRegularDistResult res,
         not (any (isVariant inps env) flat_slice) -> do
-        -- as should be 1D
-        let [n] = arrayDims as_t
-        num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
-        as_flat_size <- letSubExp "as_flat_size" =<< toExp (pe64 num_segments * pe64 n)
+          -- as should be 1D
+          let [n] = arrayDims as_t
+          num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+          as_flat_size <- letSubExp "as_flat_size" =<< toExp (pe64 num_segments * pe64 n)
 
-        let se_shape = Shape $ flatSliceDims flat_slice
-            as_lift_shape = segmentsShape segments <> arrayShape as_t
-            se_lift_shape = segmentsShape segments <> se_shape
-            se_flat_shape = Shape [num_segments] <> se_shape
-            as_flat_shape = Shape [as_flat_size]
-        as' <-
-          liftSubExpRegular
-            lvl
-            segments
-            inps
-            env
-            as_lift_shape
-            (Var as)
-        v' <-
-          liftSubExpRegular
-            lvl
-            segments
-            inps
-            env
-            se_lift_shape
-            (Var v)
-        as_flat <-
-          letExp (baseName as <> "_reshaped") $ BasicOp $ Reshape as' $ reshapeAll as_lift_shape as_flat_shape
-        v_flat <-
-          letExp (baseName v <> "_reshaped") $ BasicOp $ Reshape v' $ reshapeAll se_lift_shape se_flat_shape
-        let FlatSlice off dims = flat_slice
-            flat_slice' = FlatSlice off (FlatDimIndex num_segments n : dims)
-        out_flat_updated <-
-          certifying (distCerts inps aux env) . letExp "flat_update_reg" . BasicOp $
-            FlatUpdate as_flat flat_slice' v_flat
-        out_updated <-
-          letExp "flat_update_reg_reshaped" $
-            BasicOp $ Reshape out_flat_updated $ reshapeAll as_flat_shape as_lift_shape
-        pure $ insertRegulars [distResTag res] [out_updated] env
-      
+          let se_shape = Shape $ flatSliceDims flat_slice
+              as_lift_shape = segmentsShape segments <> arrayShape as_t
+              se_lift_shape = segmentsShape segments <> se_shape
+              se_flat_shape = Shape [num_segments] <> se_shape
+              as_flat_shape = Shape [as_flat_size]
+          as' <-
+            liftSubExpRegular
+              lvl
+              segments
+              inps
+              env
+              as_lift_shape
+              (Var as)
+          v' <-
+            liftSubExpRegular
+              lvl
+              segments
+              inps
+              env
+              se_lift_shape
+              (Var v)
+          as_flat <-
+            letExp (baseName as <> "_reshaped") $ BasicOp $ Reshape as' $ reshapeAll as_lift_shape as_flat_shape
+          v_flat <-
+            letExp (baseName v <> "_reshaped") $ BasicOp $ Reshape v' $ reshapeAll se_lift_shape se_flat_shape
+          let FlatSlice off dims = flat_slice
+              flat_slice' = FlatSlice off (FlatDimIndex num_segments n : dims)
+          out_flat_updated <-
+            certifying (distCerts inps aux env) . letExp "flat_update_reg" . BasicOp $
+              FlatUpdate as_flat flat_slice' v_flat
+          out_updated <-
+            letExp "flat_update_reg_reshaped" $
+              BasicOp $
+                Reshape out_flat_updated $
+                  reshapeAll as_flat_shape as_lift_shape
+          pure $ insertRegulars [distResTag res] [out_updated] env
       | Just _ <- distInputType <$> lookup as inps -> do
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
           ns <- letExp "slice_sizes"
@@ -1722,7 +1397,7 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
                 (FlatSlice flat_offset _) = fmap pe64 flat_slice
                 in_seg_is =
                   unflattenIndex (map pe64 slice_dims) (pe64 in_seg_i)
-                flat_i = flat_offset + sum (zipWith (*) in_seg_is (map pe64 flat_stride))           
+                flat_i = flat_offset + sum (zipWith (*) in_seg_is (map pe64 flat_stride))
             -- Value to write
             v' <- letSubExp "v" =<< eIndex v (map toExp in_seg_is)
             o' <- letSubExp "o" =<< eIndex offsets [eSubExp seg_i]
@@ -1732,7 +1407,6 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
           pure $ insertIrregular shape flags offsets (distResTag res) elems' Dense env
       | otherwise ->
           error "Flattening update: destination is not input."
-          
     Rearrange v perm
       | isRegularDistResult res -> do
           t <- lookupInputType inps v
@@ -1745,7 +1419,7 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
               (segmentsShape segments <> arrayShape t)
               (Var v)
           let segment_rank = segmentsRank segments
-          v_rearrange <- letExp (baseName v <> "_tr") . BasicOp $ Rearrange v_lifted ([0 .. segment_rank - 1] ++ map (+ segment_rank) perm) 
+          v_rearrange <- letExp (baseName v <> "_tr") . BasicOp $ Rearrange v_lifted ([0 .. segment_rank - 1] ++ map (+ segment_rank) perm)
           pure $ insertRegulars [distResTag res] [v_rearrange] env
       | otherwise -> do
           irreg <- getIrregRep lvl segments env inps v
@@ -1791,390 +1465,6 @@ transformDistBasicOp lvl segments env (inps, res, pe, aux, e) =
       transformScalarStm lvl segments env inps [res] $
         Let (Pat [pe]) aux (BasicOp e)
 
-regularToReplicatedIrregularRep ::
-  SegLevel ->
-  Segments ->
-  VName ->
-  VName ->
-  Builder GPU IrregularRep
-regularToReplicatedIrregularRep lvl segments ws_data v' = do
-  ws_prod <- arraySize 0 <$> lookupType ws_data
-  arr_t <- lookupType v'
-  segment_size <-
-    letSubExp "reg_seg_size" <=< toExp . product . map pe64 $
-      drop (segmentsRank segments) (arrayDims arr_t)
-  num_elems <-
-    letSubExp "reg_num_elems" <=< toExp $ product $ map pe64 $ arrayDims arr_t
-  arr_D <-
-    letExp "reg_D" . BasicOp $
-      Reshape v' (reshapeAll (arrayShape arr_t) (Shape [num_elems]))
-  arr_F <- letExp "reg_F" <=< segMap lvl (MkSolo num_elems) $ \(MkSolo i) -> do
-    flag <- letSubExp "flag" <=< toExp $ (pe64 i `rem` pe64 segment_size) .==. 0
-    pure [subExpRes flag]
-
-  arr_S <-
-    letExp "reg_segments" . BasicOp $
-      Replicate (Shape [ws_prod]) segment_size
-  arr_O <- letExp "reg_O" <=< segMap lvl (MkSolo ws_prod) $ \(MkSolo i) -> do
-    segment <- letSubExp "segment" =<< eIndex ws_data [eSubExp i]
-    offset <- letSubExp "offset" <=< toExp $ pe64 segment * pe64 segment_size
-    pure [subExpRes offset]
-  let rep' =
-        IrregularRep
-          { irregularS = arr_S,
-            irregularF = arr_F,
-            irregularO = arr_O,
-            irregularD = arr_D,
-            irregularK = Replicated
-          }
-  pure rep'
-
--- Replicates inner dimension for inputs.
-onMapFreeVar ::
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  VName ->
-  (VName, VName, VName) ->
-  VName ->
-  Maybe (Builder GPU (VName, MapArray IrregularRep))
-onMapFreeVar lvl segments env inps _ws (_ws_F, _ws_O, ws_data) v = do
-  v_inp <- lookup v inps
-  pure $ do
-    ws_prod <- arraySize 0 <$> lookupType ws_data
-    fmap (v,) $ case v_inp of
-      DistInputFree v' t ->
-        --  I'm not totally sure if this will be better than previous approach
-        (`MapOther` t) <$> regularToReplicatedIrregularRep lvl segments ws_data v'
-      DistInput rt t -> case resVar rt env of
-        Irregular rep -> do
-          ~[new_S, offsets] <- letTupExp (baseName v <> "_rep_free_irreg")
-            <=< segMap lvl (MkSolo ws_prod)
-            $ \(MkSolo i) -> do
-              segment <- letSubExp "segment" =<< eIndex ws_data [eSubExp i]
-              s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp segment]
-              o <- letSubExp "o" =<< eIndex (irregularO rep) [eSubExp segment]
-              pure $ subExpsRes [s, o]
-          let rep' =
-                IrregularRep
-                  { irregularS = new_S,
-                    irregularF = irregularF rep,
-                    irregularO = offsets,
-                    irregularD = irregularD rep,
-                    irregularK = Replicated
-                  }
-          pure $ MapOther rep' t
-        Regular vs ->
-          (`MapOther` t) <$> regularToReplicatedIrregularRep lvl segments ws_data vs
-
-onMapInputArr ::
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  VName ->
-  VName ->
-  VName ->
-  Param Type ->
-  VName ->
-  Builder GPU (MapArray IrregularRep)
-onMapInputArr lvl segments env inps ws ws_O ws_data p arr = do
-  ws_prod <- arraySize 0 <$> lookupType ws_data
-  case lookup arr inps of
-    Just v_inp ->
-      case v_inp of
-        DistInputFree vs t -> do
-          let inner_shape = arrayShape $ paramType p
-          vs_t <- lookupType vs
-          v <-
-            if isAcc vs_t
-              then pure vs
-              else
-                letExp (baseName vs <> "_flat") . BasicOp . Reshape vs $
-                  reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
-          pure $ MapArray v t
-        DistInput rt t ->
-          case resVar rt env of
-            Irregular rep -> do
-              onMapIrregularInputArr lvl SingleDim segments ws ws_O ws_data p arr rep ws_prod
-            Regular vs -> do
-              let inner_shape = arrayShape $ paramType p
-              vs_t <- lookupType vs
-              if isAcc vs_t
-                then pure $ MapArray vs t
-                else do
-                  v <-
-                    letExp (baseName arr <> "_reg_flat") . BasicOp . Reshape vs $
-                      reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
-                  pure $ MapArray v (stripArray 1 vs_t)
-    -- undefined
-    Nothing -> do
-      arr_row_t <- rowType <$> lookupType arr
-      arr_rep <-
-        letExp (baseName arr <> "_inp_rep") . BasicOp $
-          Replicate (segmentsShape segments) (Var arr)
-      arr_rep_t <- lookupType arr_rep
-      v <-
-        letExp (baseName arr <> "_inp_rep_flat") . BasicOp . Reshape arr_rep $
-          reshapeAll (arrayShape arr_rep_t) (Shape [ws_prod] <> arrayShape arr_row_t)
-      pure $ MapArray v arr_row_t
-
-transformInnerMap ::
-  FunHasParallelism ->
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  Pat Type ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  Builder GPU [ResRep]
-transformInnerMap funHasParallelism lvl segments env inps pat w arrs map_lam = do
-  gpu_scope <- askScope
-  let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-  lam <- preprocessLambda pp_scope map_lam
-  if not (isVariant inps env w)
-    then transformInnerMapMultiDim funHasParallelism lvl segments env inps pat w arrs lam
-    else transformInnerMapSingleDim funHasParallelism lvl segments env inps pat w arrs lam
-
-transformInnerMapSingleDim ::
-  FunHasParallelism ->
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  Pat Type ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  Builder GPU [ResRep]
-transformInnerMapSingleDim funHasParallelism lvl segments env inps pat w arrs map_lam = do
-  ws <- dataArr lvl segments env inps w
-  (ws_F, ws_O, ws_data) <- doRepIota lvl ws
-  new_segment <- arraySize 0 <$> lookupType ws_data
-  arrs' <-
-    zipWithM
-      (onMapInputArr lvl segments env inps ws ws_O ws_data)
-      (lambdaParams map_lam)
-      arrs
-  distributeAndTransformInnerMap
-    funHasParallelism
-    lvl
-    SingleDim
-    (ws_F, ws_O, ws)
-    (NE.singleton new_segment)
-    inps
-    pat
-    arrs'
-    (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
-    map_lam
-
-onMapIrregularInputArr ::
-  SegLevel ->
-  InnerMapMode ->
-  Segments ->
-  VName ->
-  VName ->
-  VName ->
-  Param Type ->
-  VName ->
-  IrregularRep ->
-  SubExp ->
-  Builder GPU (MapArray IrregularRep)
-onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod = do
-  -- new_segments has already has the the new w inside unlike other functions
-  rep_t <- lookupType $ irregularD rep
-  when (arrayRank rep_t > 1) $
-    error $
-      error "onMapIrregularInputArr: irregularD is not 1D"
-  if null (arrayDims $ paramType p)
-    then do
-      -- assuimg the irregD is 1D size(irregularD rep) == ws_prod should hold and this should be fine
-      let old_shape = arrayShape rep_t
-          new_shape =
-            case mode of
-              SingleDim -> Shape [ws_prod]
-              MultiDim -> segmentsShape new_segments
-      case irregularK rep of
-        Dense -> do
-          v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape (irregularD rep) $ reshapeAll old_shape new_shape
-          pure $ MapArray v_reshaped (stripArray 1 rep_t)
-        -- TODO: What if we don't do this here? we can still just read from our replicated view 
-        Replicated -> do
-          new_flat <-
-            letExp (baseName arr <> "_flat_expand")
-              <=< segMap lvl (MkSolo ws_prod)
-              $ \(MkSolo i) -> do
-                j <- letSubExp "j" =<< eIndex ws_data [eSubExp i]
-                data_off <- letSubExp "data_off" =<< eIndex (irregularO rep) [eSubExp j]
-                seg_start <- letSubExp "seg_start" =<< eIndex ws_O [eSubExp j]
-                local_pos <- letSubExp "local_pos" <=< toExp $ pe64 i - pe64 seg_start
-                flat_idx <- letSubExp "flat_idx" <=< toExp $ pe64 data_off + pe64 local_pos
-                fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
-          v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape new_flat $ reshapeAll old_shape new_shape
-          pure $ MapArray v_reshaped (stripArray 1 rep_t)
-    else do
-      -- We need to split multi-dimensional irregular segments
-      -- into per-row segments. Compute per-row size by dividing
-      -- each segment's total size by the number of inner iterations.
-      -- Important TODO: I should ask troels about this.
-      -- we should make this consistent.
-      -- we can avoid getting per_row_size by division.
-      num_segments <- arraySize 0 <$> lookupType ws
-      -- per_row_size[s] = irregularS[s] / ws[s]
-      per_row_size <-
-        letExp (baseName (paramName p) <> "_per_row_size")
-          <=< segMap lvl (MkSolo num_segments)
-          $ \(MkSolo s) -> do
-            total_s <- letSubExp "total_s" =<< eIndex (irregularS rep) [eSubExp s]
-            num_rows_s <- letSubExp "num_rows_s" =<< eIndex ws [eSubExp s]
-            row_size <-
-              letSubExp "row_size"
-                =<< eIf
-                  (toExp $ pe64 num_rows_s .==. 0)
-                  (eBody [toExp $ intConst Int64 0])
-                  (eBody [toExp $ pe64 total_s `div` pe64 num_rows_s])
-            pure $ subExpsRes [row_size]
-      new_S <-
-        letExp (baseName (paramName p) <> "_new_S")
-          <=< segMap lvl (MkSolo ws_prod)
-          $ \(MkSolo i) -> do
-            seg_i <- letSubExp "seg_i" =<< eIndex ws_data [eSubExp i]
-            sz <- letSubExp "sz" =<< eIndex per_row_size [eSubExp seg_i]
-            pure $ subExpsRes [sz]
-      rep' <- case irregularK rep of
-        Dense -> do
-          (new_F, new_O, _new_elems) <- doSegIota lvl new_S
-          pure $
-            IrregularRep
-              { irregularD = irregularD rep,
-                irregularF = new_F,
-                irregularS = new_S,
-                irregularO = new_O,
-                irregularK = Dense
-              }
-        Replicated -> do
-          new_O <-
-            letExp (baseName (paramName p) <> "_new_O")
-              <=< segMap lvl (MkSolo ws_prod)
-              $ \(MkSolo i) -> do
-                seg_i <- letSubExp "seg_i" =<< eIndex ws_data [eSubExp i]
-                row_size <- letSubExp "row_size" =<< eIndex per_row_size [eSubExp seg_i]
-                seg_row_start <- letSubExp "seg_row_start" =<< eIndex ws_O [eSubExp seg_i]
-                row_in_seg <- letSubExp "row_in_seg" <=< toExp $ pe64 i - pe64 seg_row_start
-                base_off <- letSubExp "base_off" =<< eIndex (irregularO rep) [eSubExp seg_i]
-                off <- letSubExp "off" <=< toExp $ pe64 base_off + pe64 row_in_seg * pe64 row_size
-                pure $ subExpsRes [off]
-          m <- arraySize 0 <$> lookupType (irregularD rep)
-          -- we will have mutliple write but it is the same value so it should be fine.
-          new_F <- genFlags lvl m new_O
-          pure $
-            IrregularRep
-              { irregularD = irregularD rep,
-                irregularF = new_F,
-                irregularS = new_S,
-                irregularO = new_O,
-                irregularK = Replicated
-              }
-      pure $ MapOther rep' rep_t
-
-onMapInputArrMultiDim ::
-  SegLevel ->
-  Segments ->
-  SubExp ->
-  DistEnv ->
-  DistInputs ->
-  VName ->
-  VName ->
-  VName ->
-  Param Type ->
-  VName ->
-  Builder GPU (MapArray IrregularRep)
-onMapInputArrMultiDim lvl old_segments w env inps ws ws_O ws_data p arr = do
-  case lookup arr inps of
-    Just v_inp ->
-      case v_inp of
-        DistInputFree vs t -> pure $ MapArray vs t
-        DistInput rt t -> case resVar rt env of
-          Irregular rep -> do
-            ws_prod <- arraySize 0 <$> lookupType ws_data
-            onMapIrregularInputArr lvl MultiDim (old_segments <> pure w) ws ws_O ws_data p arr rep ws_prod
-          Regular vs -> do
-            vs_t <- lookupType vs
-            if isAcc vs_t
-              then pure $ MapArray vs t
-              else do
-                -- let's be cautious and make sure it has the correct shape
-                let expected_shape = segmentsShape old_segments <> arrayShape t
-                if arrayShape vs_t == expected_shape
-                  then pure $ MapArray vs t
-                  else do
-                    v <-
-                      letExp (baseName arr <> "_reg_reshape") . BasicOp . Reshape vs $
-                        reshapeAll (arrayShape vs_t) expected_shape
-                    pure $ MapArray v t
-    Nothing -> do
-      arr_row_t <- rowType <$> lookupType arr
-      arr_rep <-
-        letExp (baseName arr <> "_inp_rep") . BasicOp $
-          Replicate (segmentsShape old_segments) (Var arr)
-      pure $ MapArray arr_rep arr_row_t
-
-onMapFreeVarMultiDim ::
-  SegLevel ->
-  Segments ->
-  SubExp ->
-  DistEnv ->
-  DistInputs ->
-  VName ->
-  Maybe (Builder GPU (VName, MapArray IrregularRep))
-onMapFreeVarMultiDim lvl segments w env inps v = do
-  v_inp <- lookup v inps
-  pure $ fmap (v,) $ case v_inp of
-    DistInputFree v' t -> do
-      v_rep <- replicateForW segments w v'
-      pure $ MapArray v_rep t
-    DistInput rt t -> case resVar rt env of
-      Regular v' -> do
-        v_rep <- replicateForW segments w v'
-        pure $ MapArray v_rep t
-      Irregular rep -> do
-        -- Can replicate as well
-        old_nseg <- arraySize 0 <$> lookupType (irregularS rep)
-        new_nseg <- letSubExp "new_nseg" <=< toExp $ pe64 old_nseg * pe64 w
-        ~[new_S, offsets] <- letTupExp (baseName v <> "_rep_free_irreg")
-          <=< segMap lvl (MkSolo new_nseg)
-          $ \(MkSolo i) -> do
-            old_seg <- letSubExp "old_seg" <=< toExp $ pe64 i `quot` pe64 w
-            s <- letSubExp "s" =<< eIndex (irregularS rep) [eSubExp old_seg]
-            o <- letSubExp "o" =<< eIndex (irregularO rep) [eSubExp old_seg]
-            pure $ subExpsRes [s, o]
-        let rep' =
-              IrregularRep
-                { irregularS = new_S,
-                  irregularF = irregularF rep,
-                  irregularO = offsets,
-                  irregularD = irregularD rep,
-                  irregularK = Replicated
-                }
-        pure $ MapOther rep' t
-
--- | Replicate an array to insert a new inner dimension  after the
--- existing segment dimensions.
-replicateForW :: Segments -> SubExp -> VName -> Builder GPU VName
-replicateForW segments w v = do
-  v_t <- lookupType v
-  let seg_rank = length (NE.toList segments)
-      v_rank = arrayRank v_t
-      perm = [1 .. seg_rank] ++ [0] ++ [seg_rank + 1 .. v_rank]
-  v_rep <-
-    letExp (baseName v <> "_free_rep") . BasicOp $
-      Replicate (Shape [w]) (Var v)
-  letExp (baseName v <> "_free_rep_tr") . BasicOp $
-    Rearrange v_rep perm
-
 replicateForDims :: Segments -> Shape -> VName -> Builder GPU VName
 replicateForDims segments dims v = do
   v_t <- lookupType v
@@ -2188,293 +1478,9 @@ replicateForDims segments dims v = do
   letExp (baseName v <> "_reg_rep_tr") . BasicOp $
     Rearrange v_rep perm
 
-transformInnerMapMultiDim ::
-  FunHasParallelism ->
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  Pat Type ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  Builder GPU [ResRep]
-transformInnerMapMultiDim funHasParallelism lvl segments env inps pat w arrs map_lam = do
-  ws <- dataArr lvl segments env inps w
-  (ws_F, ws_O, ws_data) <- doRepIota lvl ws
-  arrs' <-
-    zipWithM
-      (onMapInputArrMultiDim lvl segments w env inps ws ws_O ws_data)
-      (lambdaParams map_lam)
-      arrs
-  distributeAndTransformInnerMap
-    funHasParallelism
-    lvl
-    MultiDim
-    (ws_F, ws_O, ws)
-    (segments <> pure w)
-    inps
-    pat
-    arrs'
-    (onMapFreeVarMultiDim lvl segments w env inps)
-    map_lam
-
-distributeAndTransformInnerMap ::
-  FunHasParallelism ->
-  SegLevel ->
-  InnerMapMode ->
-  (VName, VName, VName) ->
-  Segments ->
-  DistInputs ->
-  Pat Type ->
-  [MapArray IrregularRep] ->
-  (VName -> Maybe (Builder GPU (VName, MapArray IrregularRep))) ->
-  Lambda SOACS ->
-  Builder GPU [ResRep]
-distributeAndTransformInnerMap funHasParallelism lvl mode ws_triple new_segment inps pat arrs' onFreeVar map_lam = do
-  let free = freeIn map_lam
-  free_and_sizes <- freeWithTypeDeps inps free
-  (free_replicated, replicated) <-
-    fmap unzip . sequence $
-      mapMaybe
-        onFreeVar
-        free_and_sizes
-  free_ps <-
-    zipWithM
-      newParam
-      (map ((<> "_free") . baseName) free_replicated) -- this should free_replicated?
-      (map mapArrayRowType replicated)
-  scope <- askScope
-  let substs = M.fromList $ zip free_replicated $ map paramName free_ps
-      map_lam' =
-        substituteNames
-          substs
-          ( map_lam
-              { lambdaParams = free_ps <> lambdaParams map_lam
-              }
-          )
-      (distributed, arrmap) =
-        distributeMap funHasParallelism scope pat new_segment (replicated <> arrs') map_lam'
-      m =
-        transformDistributedInnerMap funHasParallelism lvl mode ws_triple arrmap new_segment distributed
-  (res, stms) <- runReaderT (runBuilder m) scope
-  addStms stms
-  -- order the result representations in the same order as the pattern
-  pure $ resRepsInPatOrder pat res
-
--- Reduction or scan operators may not have any free variables that are variant
--- to the nest (that is, are inputs to the distributed operation). This is
--- because we would be unable to express them as SegScan/SegReds. Fixing this
--- would require modifications to the SegOp representation, but it is likely not
--- worth it, as such operators are extremely rare - and we can just fall back on
-suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
-suitableOperator env inps lam _nes =
-  allNames notVariant (freeIn lam)
-    && all primType (lambdaReturnType lam) -- TODO
-  where
-    notVariant v = isNothing $ M.lookup v $ inputReps inps env
-
-suitableUniformOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
-suitableUniformOperator env inps lam _nes =
-  allNames notVariant (freeIn lam)
-  where
-    notVariant v = isNothing $ M.lookup v $ inputReps inps env
-
 lambdaHasParallelism :: FunHasParallelism -> Lambda SOACS -> Bool
 lambdaHasParallelism funHasParallelism =
   any (isParallelStm funHasParallelism) . bodyStms . lambdaBody
-
-doSegMaposcanomap ::
-  SegLevel ->
-  [Scan SOACS] ->
-  VName ->
-  [VName] ->
-  Lambda SOACS ->
-  Lambda SOACS ->
-  Segments ->
-  DistInputs ->
-  DistEnv ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU [VName]
-doSegMaposcanomap lvl scans flags elems post_lam map_lam segments inps env readFree = do
-  let scan = singleScan scans
-  let zeros = replicate (segmentsRank segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-  let nes = scanNeutral scan
-  nes' <- mapM (readInput segments env zeros inps) nes
-  genSegScanomapWithPost
-    lvl
-    "maposcanomap"
-    (soacsLambdaToGPU $ scanLambda scan)
-    nes'
-    flags
-    (soacsLambdaToGPU post_lam)
-    (soacsLambdaToGPU map_lam)
-    elems
-    readFree
-
-doUniformSegMaposcanomap ::
-  SegLevel ->
-  [Scan SOACS] ->
-  [VName] ->
-  Lambda SOACS ->
-  Lambda SOACS ->
-  Segments ->
-  Segments ->
-  DistInputs ->
-  DistEnv ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU [VName]
-doUniformSegMaposcanomap lvl scans arrs post_lam map_lam old_segments new_segment inps env readFree = do
-  -- TODO: different segemnts fix
-  let scan = singleScan scans
-  let zeros = replicate (segmentsRank old_segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-  nes <- mapM (readInput old_segments env zeros inps) (scanNeutral scan)
-  (scan_lam, nes', shape) <- determineReduceOp (scanLambda scan) nes
-  genUniformSegScanomapWithPost
-    lvl
-    (NE.toList new_segment)
-    "uniformmaposcanomap"
-    (soacsLambdaToGPU scan_lam)
-    shape
-    nes'
-    (soacsLambdaToGPU post_lam)
-    (soacsLambdaToGPU map_lam)
-    arrs
-    readFree
-
--- Hacky fix to get result representations in the same order as the pattern
-resRepsInPatOrder :: Pat Type -> [(VName, ResRep)] -> [ResRep]
-resRepsInPatOrder pat reps =
-  let rep_map = M.fromList reps
-      lookupRes v =
-        case M.lookup v rep_map of
-          Just rep -> rep
-          Nothing ->
-            error $
-              "resRepsInPatOrder: missing result for "
-                ++ prettyString v
-   in map lookupRes (patNames pat)
-
-segOpInputRep ::
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  VName ->
-  Builder GPU ResRep
-segOpInputRep lvl segments env inps arr =
-  case lookup arr inps of
-    Just (DistInput rt _) ->
-      pure $ resVar rt env
-    Just (DistInputFree arr' _) ->
-      pure $ Regular arr'
-    Nothing ->
-      Irregular <$> getIrregRep lvl segments env inps arr
-
--- Basically we need to make our arrays ready for our segscan/segred.
--- Regular arrays are flattened only across the outer segment dimensions and
--- the SOAC width; any row shape expected by the consumer is preserved.
--- we need to check the dense/replicated status of the input.
--- if all of scan inputs are replicated we are fine.
--- otherwise, we need to make the replicated inputs dense.
--- for regulars we can just use the segment descriptor and this should be also the same descriptor for dense irregulars.
-prepareSegOpInputs ::
-  SegLevel ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  SubExp ->
-  [ResRep] ->
-  [VName] ->
-  Bool ->
-  Builder GPU (VName, VName, VName, [VName], IrregularKind)
-prepareSegOpInputs lvl segments env inps w reps names hasNoFreeVariant
-  | all isRegular reps = do
-      ws <- dataArr lvl segments env inps w
-      (ws_F, ws_O, ws_data) <- doRepIota lvl ws
-      m <- arraySize 0 <$> lookupType ws_data
-      names' <- mapM (flattenRegularRep m) reps
-      pure (ws_F, ws_O, ws, names', Dense)
-  | all isReplicatedIrregular reps && hasNoFreeVariant = do
-      let Irregular rep0 = head reps
-      pure (irregularF rep0, irregularO rep0, irregularS rep0, map getData reps, Replicated)
-  | otherwise = do
-      desc_rep <- findOrMakeDense reps
-      m <- arraySize 0 <$> lookupType (irregularD desc_rep)
-      names' <- zipWithM (normalise m) reps names
-      pure (irregularF desc_rep, irregularO desc_rep, irregularS desc_rep, names', Dense)
-  where
-    isRegular (Regular _) = True
-    isRegular _ = False
-
-    isReplicatedIrregular (Irregular rep) = irregularK rep == Replicated
-    isReplicatedIrregular _ = False
-
-    flattenRegularRep m (Regular v) =
-      flattenRegularToRows segments m v
-    flattenRegularRep _ _ =
-      error "prepareSegOpInputs: impossible irregular regular input"
-    getData (Irregular rep) = irregularD rep
-    getData _ = error "prepareSegOpInputs: impossible"
-
-    findOrMakeDense rs =
-      case [rep | Irregular rep <- rs, irregularK rep == Dense] of
-        rep : _ -> pure rep
-        [] ->
-          case [rep | Irregular rep <- rs] of
-            rep : _ -> ensureDenseIrregular lvl "segop_desc" rep
-            [] -> error "prepareSegOpInputs: impossible"
-
-    normalise m rep v =
-      case rep of
-        Regular v' ->
-          flattenRegularToRows segments m v'
-        Irregular ir
-          | irregularK ir == Dense ->
-              pure $ irregularD ir
-          | otherwise ->
-              irregularD <$> ensureDenseIrregular lvl (baseName v <> "_dense") ir
-
-flattenRegularToRows :: Segments -> SubExp -> VName -> Builder GPU VName
-flattenRegularToRows segments m v = do
-  v_t <- lookupType v
-  if isAcc v_t
-    then pure v
-    else do
-      when (arrayRank v_t < segmentsRank segments + 1) $
-        error "prepareSegOpInputs: regular input rank too small"
-      let row_shape = arrayShape $ stripArray (segmentsRank segments + 1) v_t
-      letExp (baseName v <> "_flat") . BasicOp $
-        Reshape v $
-          reshapeAll (arrayShape v_t) (Shape [m] <> row_shape)
-
-insertSegOpMapResults ::
-  Segments ->
-  VName ->
-  VName ->
-  VName ->
-  IrregularKind ->
-  [(DistResult, VName)] ->
-  DistEnv ->
-  Builder GPU DistEnv
-insertSegOpMapResults segments segs flags offsets kind bnds env0 =
-  foldM insert env0 bnds
-  where
-    insert env (dist_res, v)
-      | isRegularDistResult dist_res = do
-          let DistType _ _ t = distResType dist_res
-          if isAcc t
-            then pure $ insertRegulars [distResTag dist_res] [v] env
-            else do
-              let expected_shape = segmentsShape segments <> arrayShape t
-              v_t <- lookupType v
-              v' <-
-                letExp (baseName v <> "_reshaped") . BasicOp $
-                  Reshape v $
-                    reshapeAll (arrayShape v_t) expected_shape
-              pure $ insertRegulars [distResTag dist_res] [v'] env
-      | otherwise =
-          pure $ insertIrregular segs flags offsets (distResTag dist_res) v kind env
 
 transformDistStm :: FunHasParallelism -> SegLevel -> Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm _ lvl segments env (DistStm inps res (ScalarStm stms)) =
@@ -2485,132 +1491,8 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
       let ~[res'] = res
           ~[pe] = patElems pat
       transformDistBasicOp lvl segments env (inps, res', pe, aux, e)
-    Let pat aux (Op (Screma w arrs form))
-      | Just (reds, map_lam) <- isRedomapSOAC form,
-        not $ isVariant inps env w,
-        all isRegularDistResult res,
-        all (\red -> suitableUniformOperator env inps (redLambda red) (redNeutral red)) reds -> do
-          let outer_only = transformUniformRedomap lvl segments env inps w arrs reds map_lam
-          gpu_scope <- askScope
-          let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-          factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
-          case factored of
-            Just body ->
-              versionScanRed funHasParallelism "uniform_redomap_alt" lvl segments env inps res aux w body outer_only
-            Nothing -> do
-              elems' <- outer_only
-              pure $ insertRegulars (map distResTag res) elems' env
-      | Just (reds, map_lam) <- isRedomapSOAC form,
-        not $ lambdaHasParallelism funHasParallelism map_lam,
-        all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds -> do
-          reps <- mapM (segOpInputRep lvl segments env inps) arrs
-          let sing_red = singleReduce reds
-              zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-              hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn sing_red <> freeIn map_lam)
-          (ws_F, ws_O, ws_S, elems, elems_kind) <-
-            prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
-          nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
-          let sing_red' = sing_red {redNeutral = nes'}
-          let free = freeIn map_lam
-          free_and_sizes <- freeWithTypeDeps inps free
-          ws <- dataArr lvl segments env inps w
-          (_, _, ws_data) <- doRepIota lvl ws_S
-          -- TODO: this will break in certain cases where the free variable is an irregular that needs to be replicated
-          (free_replicated, replicated) <-
-            fmap unzip . sequence $
-              mapMaybe
-                (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
-                free_and_sizes
-          let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
-
-          new_segment <- arraySize 0 <$> lookupType ws_F
-          let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
-          (red_elems, mapout_elems) <-
-            genSegRedomap lvl ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam) readFree
-          red_elems' <- forM red_elems $ \v -> do
-            v_t <- lookupType v
-            letExp (baseName v <> "_reshaped") . BasicOp $
-              Reshape v $
-                reshapeAll (arrayShape v_t) (segmentsShape segments)
-          let (red_res, map_res) = splitAt (redResults reds) res
-          env' <-
-            insertSegOpMapResults
-              segments
-              ws_S
-              ws_F
-              ws_O
-              elems_kind
-              (zip map_res mapout_elems)
-              env
-          pure $ insertRegulars (map distResTag red_res) red_elems' env'
-      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-        not $ isVariant inps env w,
-        all isRegularDistResult res,
-        all (\scan -> suitableUniformOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
-          let outer_only =
-                transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam
-          gpu_scope <- askScope
-          let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-          factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
-          case factored of
-            Just body ->
-              versionScanRed funHasParallelism "uniform_maposcanomap_alt" lvl segments env inps res aux w body outer_only
-            Nothing -> do
-              elems' <- outer_only
-              pure $ insertRegulars (map distResTag res) elems' env
-      | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-        not $ lambdaHasParallelism funHasParallelism map_lam,
-        not $ lambdaHasParallelism funHasParallelism post_lam,
-        all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans -> do
-          reps <- mapM (segOpInputRep lvl segments env inps) arrs
-          let hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn post_lam <> freeIn map_lam <> foldMap freeIn scans)
-          (ws_F, ws_O, ws_S, elems, elems_kind) <-
-            prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
-          let free = freeIn map_lam <> freeIn post_lam
-          free_and_sizes <- freeWithTypeDeps inps free
-          ws <- dataArr lvl segments env inps w
-          (_, _, ws_data) <- doRepIota lvl ws_S
-          -- TODO: this will break in certain cases where the free variable is an irregular that needs to be replicated
-          (free_replicated, replicated) <-
-            fmap unzip . sequence $
-              mapMaybe
-                (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
-                free_and_sizes
-          let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
-          new_segment <- arraySize 0 <$> lookupType ws_F
-          let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
-          elems' <- doSegMaposcanomap lvl scans ws_F elems post_lam map_lam segments inps env readFree
-          insertSegOpMapResults
-            segments
-            ws_S
-            ws_F
-            ws_O
-            elems_kind
-            (zip res elems')
-            env
-      | Just map_lam <- isMapSOAC form,
-        allowVersioning lvl,
-        isVersionableMap funHasParallelism inps env w res map_lam ->
-          versionedRegularMap funHasParallelism segments env inps res pat aux w arrs map_lam
-      | Just map_lam <- isMapSOAC form -> do
-          map_res <-
-            transformInnerMap funHasParallelism lvl segments env inps pat w arrs map_lam
-          pure $ insertReps (zip (map distResTag res) map_res) env
-      | otherwise -> do
-          gpu_scope <- askScope
-          let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-          factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
-          case factored of
-            Just body -> do
-              reps <- transformFactoredDistBody funHasParallelism lvl segments env inps res body
-              pure $ insertReps (zip (map distResTag res) reps) env
-            Nothing ->
-              -- XXX: here we silently sequentialise any SOAC that is not handled
-              -- above if it is possible to do so. We need to make sure that we actually handle everything we
-              -- care about!
-              if all isRegularDistResult res 
-                then transformScalarStm lvl segments env inps res $ Let pat aux (Op (Screma w arrs form))
-                else error "Unhandled SOAC"
+    Let pat aux (Op (Screma w arrs form)) ->
+      transformScrema (flattenOpsFor funHasParallelism lvl) segments env inps res (pat, aux) (w, arrs, form)
     Let _ aux (Match scrutinees cases defaultCase rt) -> do
       if any (isVariant inps env) scrutinees
         then
@@ -2656,28 +1538,27 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
           let reps = distResultsToResReps res payload_res
           pure $ insertReps (zip (map distResTag res) reps) env
     Let pat aux (Apply name args rettype s) ->
-      case lvl of 
-        SegThread {} -> do 
-            let name' = liftFunName name
-            w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
-            args' <- ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
-            args_ts <- mapM (subExpType . fst) args'
-            let dietToUnique Consume = Unique
-                dietToUnique Observe = Nonunique
-                dietToUnique ObservePrim = Nonunique
-                param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
-                rettype' = addRetAls param_ts $ liftRetType w $ map fst rettype
-            result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
-            reps <-
-              zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) $
-                resultToResReps (map fst rettype) result
-            pure $ insertReps (zip (map distResTag res) reps) env
+      case lvl of
+        SegThread {} -> do
+          let name' = liftFunName name
+          w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+          args' <- ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
+          args_ts <- mapM (subExpType . fst) args'
+          let dietToUnique Consume = Unique
+              dietToUnique Observe = Nonunique
+              dietToUnique ObservePrim = Nonunique
+              param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
+              rettype' = addRetAls param_ts $ liftRetType w $ map fst rettype
+          result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
+          reps <-
+            zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) $
+              resultToResReps (map fst rettype) result
+          pure $ insertReps (zip (map distResTag res) reps) env
         -- TODO: Do something about intra functions
-        _ -> if all isRegularDistResult res 
-            then transformScalarStm lvl segments env inps res $  Let pat aux (Apply name args rettype s)
+        _ ->
+          if all isRegularDistResult res
+            then transformScalarStm lvl segments env inps res $ Let pat aux (Apply name args rettype s)
             else error "Unhandled Apply in non SegThread Seglevel"
-           
-    
     Let _ aux (Loop merge (ForLoop i it n) body) -> do
       if isVariant inps env n
         then transformFortoWhile funHasParallelism lvl segments env inps res aux merge i it n body
@@ -2692,7 +1573,6 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
 
           let lifted_loop_params' = concat lifted_loop_params
               lifted_init' = concat lifted_init
-
 
           let (inps_local, env_local0, next0) = localiseInputs env inps
               loop_param_inputs_local =
@@ -2967,53 +1847,15 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
           let out_reps = loopResultToResReps res loop_out_vs'
           pure $ insertReps (zip (map distResTag res) out_reps) env
     Let pat aux (WithAcc inputs lam) ->
-      transformWithAcc (flattenOpsFor funHasParallelism lvl) segments env inps res pat aux inputs lam
-    (Let _pat aux (Op (Hist w hist_inputs ops bucket_fun))) -> do 
-      -- todo: add this suitableUniformOperator
-      nonuniform_inps <-
-        any (any (isVariant inps env) . arrayDims)
-          <$> mapM (lookupInputType inps) hist_inputs
-      let nonuniform =
-            nonuniform_inps
-              || isVariant inps env w
-              || not (all isRegularDistResult res)
-      if nonuniform 
-        then error "TODO : transformDistStm: Unhandled nonuniform hist"
-        else 
-          do 
-            let new_segment = segments <> pure w
-            lifted_inps <- forM hist_inputs $ \hist_inp -> do
-              t <- lookupInputType inps hist_inp
-              let expectedShape = segmentsShape segments <> arrayShape t 
-              liftSubExpRegular lvl segments inps env expectedShape (Var hist_inp) 
-            let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-            ops' <- forM ops $ \(Futhark.IR.SOACS.HistOp num_bins rf dests nes op) -> do
-                nes' <- mapM (readInput segments env zeros inps) nes
-                let 
-                let rr (DistType _ _ t) = t
-                let ts = map (rr . distResType) res
-                let expectedShapes = map (\t -> segmentsShape segments <> arrayShape t) ts
-                dests' <- mapM ( \(shape,var) -> liftSubExpRegular lvl segments inps env shape (Var var)) (zip expectedShapes dests)
-                pure $ Futhark.IR.SOACS.HistOp num_bins rf dests' nes' op
-            let free = freeIn bucket_fun
-            let isDest = flip elem $ concatMap Futhark.IR.SOACS.histDest ops'
-                free_notDest = filter (not . isDest) (namesToList free)
-            free_and_sizes <- freeWithTypeDeps inps (namesFromList free_notDest)
-            (free_replicated, replicated) <-
-              fmap unzip . sequence $
-                mapMaybe
-                  (onMapFreeVarMultiDim lvl segments w env inps)
-                  free_and_sizes
-            let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
-                readFree is = readInputs new_segment free_env is free_inputs
-            hist_res <-
-              certifying (distCerts inps aux env) $
-                genUniformSegHist lvl "Uniform_segHist" (NE.toList new_segment) ops' (soacsLambdaToGPU bucket_fun) lifted_inps readFree
-            pure $ insertRegulars (map distResTag res) hist_res env
+      transformWithAcc ops segments env inps res pat aux inputs lam
+    (Let pat aux (Op (Hist w hist_inputs hist_ops bucket_fun))) ->
+      transformHist ops segments env inps res (pat, aux) (w, hist_inputs, hist_ops, bucket_fun)
     Let _ _ (Op (Stream {})) -> error "transformDistStm: Stream should have been removed"
     Let _ _ (Op (JVP {})) -> error "Unhandled JVP"
     Let _ _ (Op (VJP {})) -> error "Unhandled VJP"
     Let _ _ (Op (WithVJP {})) -> error "Unhandled WithVJP"
+  where
+    ops = flattenOpsFor funHasParallelism lvl
 
 -- helper to not mess up the tags when generating new ones for the loop parameters
 -- probably won't be used in future
@@ -3046,152 +1888,6 @@ reshapeAndBind v src shape = do
   v_copy <- letExp (baseName v) . BasicOp $ Replicate mempty (Var src)
   v_copy_shape <- arrayShape <$> lookupType v_copy
   letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
-
-mapResultRep :: SegLevel -> InnerMapMode -> (VName, VName, VName) -> VName -> Builder GPU ResRep
-mapResultRep _ MultiDim _ v = pure $ Regular v
-mapResultRep lvl SingleDim (ws, ws_F, ws_O) v =
-  -- Forcing the irregular rep to be 1D because in some places that is my assumption
-  -- and also this will make the metadata consistent.
-  Irregular
-    <$> flattenIrregularRep
-      lvl
-      IrregularRep
-        { irregularS = ws,
-          irregularF = ws_F,
-          irregularO = ws_O,
-          irregularD = v,
-          irregularK = Dense
-        }
-
-resultMapMode :: InnerMapMode -> DistInputs -> Type -> InnerMapMode
-resultMapMode SingleDim _ _ = SingleDim
-resultMapMode MultiDim new_inps v_t
-  | any isTypeVariant (arrayDims v_t) = SingleDim
-  | otherwise = MultiDim
-  where
-    new_inp_var = S.fromList $ map fst new_inps
-    isTypeVariant se = case se of
-      Var v -> v `S.member` new_inp_var
-      _ -> False
-
-irregularMapResult ::
-  SegLevel ->
-  InnerMapMode ->
-  (VName, VName, VName) ->
-  Segments ->
-  IrregularRep ->
-  VName ->
-  Type ->
-  DistInputs ->
-  Builder GPU ResRep
-irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
-  do
-    if any (isTypeVariant new_inp_var) (arrayShape v_t)
-      then do
-        irreg_dense <- ensureDenseIrregular lvl (baseName v <> "_map_result") irreg
-        old_segment <- arraySize 0 <$> lookupType ws
-        new_shape <- letExp (baseName v <> "_outer_shape") <=< segMap lvl (MkSolo old_segment) $ \(MkSolo is) -> do
-          outer_ind <- letSubExp "outer_ind" =<< eIndex ws_O [eSubExp is]
-          outer_ws_i <- letSubExp "outer_ws" =<< eIndex ws [eSubExp is]
-          sz <-
-            letSubExp "sz"
-              =<< eIf
-                (toExp $ pe64 outer_ws_i .==. 0)
-                (eBody [toExp $ intConst Int64 0])
-                ( do
-                    last_row <- letSubExp "last_row" <=< toExp $ pe64 outer_ind + pe64 outer_ws_i - 1
-                    start <- letSubExp "start" =<< eIndex (irregularO irreg_dense) [eSubExp outer_ind]
-                    last_offset <- letSubExp "last_offset" =<< eIndex (irregularO irreg_dense) [eSubExp last_row]
-                    last_size <- letSubExp "last_size" =<< eIndex (irregularS irreg_dense) [eSubExp last_row]
-                    eBody [toExp $ pe64 last_offset - pe64 start + pe64 last_size]
-                )
-          pure [subExpRes sz]
-        (new_ws_F, new_ws_O, _) <- doRepIota lvl new_shape
-        letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg_dense
-        mapResultRep lvl SingleDim (new_shape, new_ws_F, new_ws_O) v
-      else case mode of
-        MultiDim -> do
-          reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
-          mapResultRep lvl MultiDim (ws, ws_F, ws_O) v
-        SingleDim -> do
-          -- TODO: have to do this even it seems very annoying should think something better
-          reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
-          mapResultRep lvl SingleDim (ws, ws_F, ws_O) v
-  where
-    isTypeVariant vin se = case se of
-      Var v' -> S.member v' vin
-      _ -> False
-    new_inp_var = S.fromList $ map fst new_inps
-
-transformDistributedInnerMap ::
-  FunHasParallelism ->
-  SegLevel ->
-  InnerMapMode ->
-  (VName, VName, VName) ->
-  M.Map ResTag IrregularRep ->
-  Segments ->
-  Distributed ->
-  Builder GPU [(VName, ResRep)]
-transformDistributedInnerMap funHasParallelism lvl mode (ws_F, ws_O, ws) irregs segments dist = do
-  let Distributed dstms (DistResults resmap reps) = dist
-  let new_inps = concatMap distStmInputs dstms
-  env <- foldM (transformDistStm funHasParallelism lvl segments) env_initial dstms
-  resmap_res <- fmap concat $ forM (M.toList resmap) $ \(rt, binds) ->
-    forM binds $ \(cs_inps, v, v_t) ->
-      certifying (distResCerts env cs_inps) $
-        -- FIXME: the copies are because we have too liberal aliases on
-        -- lifted functions.
-        case (resultMapMode mode new_inps v_t, resVar rt env) of
-          (MultiDim, Regular v') -> do
-            if isAcc v_t
-              then do
-                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-                pure (v, Regular v)
-              else do
-                reshapeAndBind v v' (segmentsShape segments <> arrayShape v_t)
-                pure (v, Regular v)
-          (SingleDim, Regular v') -> do
-            if isAcc v_t
-              then do
-                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-                pure (v, Regular v)
-              else do
-                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
-                rep <- mapResultRep lvl SingleDim (ws, ws_F, ws_O) v
-                pure (v, rep)
-          (result_mode, Irregular irreg) -> do
-            rep <- irregularMapResult lvl result_mode (ws, ws_F, ws_O) segments irreg v v_t new_inps
-            pure (v, rep)
-  reps_res <- forM reps $ \(v, r) -> do
-    case r of
-      Left se -> do
-        letBindNames [v] $ BasicOp $ Replicate (segmentsShape segments) se
-        -- the se is not part of input so this should be fine
-        rep <- mapResultRep lvl mode (ws, ws_F, ws_O) v
-        pure (v, rep)
-      Right (DistInputFree arr t) -> do
-        letBindNames [v] $ BasicOp $ SubExp $ Var arr
-        if isAcc t
-          then pure (v, Regular v)
-          else do
-            rep <- mapResultRep lvl (resultMapMode mode new_inps t) (ws, ws_F, ws_O) v
-            pure (v, rep)
-      Right (DistInput rt t) ->
-        let result_mode = resultMapMode mode new_inps t
-         in case resVar rt env of
-              Regular v' -> do
-                letBindNames [v] $ BasicOp $ SubExp $ Var v'
-                if isAcc t
-                  then pure (v, Regular v)
-                  else do
-                    rep <- mapResultRep lvl result_mode (ws, ws_F, ws_O) v
-                    pure (v, rep)
-              Irregular irreg -> do
-                rep <- irregularMapResult lvl result_mode (ws, ws_F, ws_O) segments irreg v t new_inps
-                pure (v, rep)
-  pure $ resmap_res <> reps_res
-  where
-    env_initial = DistEnv {distResMap = M.map Irregular irregs}
 
 transformDistributed ::
   FunHasParallelism ->
@@ -3232,16 +1928,6 @@ transformDistributed funHasParallelism lvl irregs segments dist = do
               reshapeAndBind v (irregularD irreg') (segmentsShape segments <> arrayShape t)
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
-
--- Check whether a loop parameter array needs irregular representation.
--- we need the irregular representation when any of its dimensions are either:
--- a loop parameter name or variant in the outer map context
-
-freeWithTypeDeps :: DistInputs -> Names -> Builder GPU [VName]
-freeWithTypeDeps inps free = do
-  let free_names = namesToList free
-  free_sizes <- foldMap freeIn <$> mapM (lookupInputType inps) free_names
-  pure $ nubOrd $ namesToList free_sizes <> free_names
 
 needsIrregular :: DistInputs -> DistEnv -> S.Set VName -> DeclType -> Bool
 needsIrregular inps env loopParamNames t =
@@ -3551,7 +2237,8 @@ analyseFunParallelism funs =
           False
       | Just fun <- M.lookup fname funsByName =
           any (isParallelStm (hasParallelFun (S.insert fname seen))) $
-            bodyStms $ funDefBody fun
+            bodyStms $
+              funDefBody fun
       | otherwise =
           error $ "analyseFunParallelism: unknown function " ++ prettyString fname
 
@@ -3634,7 +2321,7 @@ transformStm _ scope (Let pat aux (Op (Hist w arrs ops bucket_fun))) = do
 transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     Scan scan_lam nes <- singleScan scans = do
-      outer_only_stms <- 
+      outer_only_stms <-
         runReaderT
           ( runBuilder_ $
               certifying (stmAuxCerts aux) $ do
@@ -3656,14 +2343,13 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
           )
           scope
       topLevelversionScanRed funHasParallelism "top_level_scan_alt" scope pat w arrs form aux outer_only_stms
-    
 transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       outer_only_stms <-
-          runReaderT
+        runReaderT
           ( runBuilder_ $
               certifying (stmAuxCerts aux) $ do
-                let sing_red = singleReduce reds 
+                let sing_red = singleReduce reds
                 (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) (redNeutral sing_red)
                 let comm
                       | commutativeLambda red_lam = Commutative
@@ -3675,12 +2361,10 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
           )
           scope
       topLevelversionScanRed funHasParallelism "top_level_red_alt" scope pat w arrs form aux outer_only_stms
-
-
 transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
       let certs = stmAuxCerts aux
-      (outer_only_res,outer_only_stms) <- runReaderT (runBuilder $  certifying certs $ runInnerSeqMap w arrs lam pat []) scope
+      (outer_only_res, outer_only_stms) <- runReaderT (runBuilder $ certifying certs $ runInnerSeqMap w arrs lam pat []) scope
       lamFullFlatten <- renameLambda =<< preprocessLambda scope lam
       let arrs' =
             zipWith MapArray arrs $
@@ -3713,8 +2397,8 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
             alt_vs <- case intra' of
               _
                 -- We have non-inlined parallel function call we have to fully flatten the body
-                | isParallelFunInside funHasParallelism (lambdaBody lam)->
-                  kernelAlternatives "top_level_map_alt" result_ts fullFlattenBody []
+                | isParallelFunInside funHasParallelism (lambdaBody lam) ->
+                    kernelAlternatives "top_level_map_alt" result_ts fullFlattenBody []
                 | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
                     kernelAlternatives "top_level_map_alt" result_ts outerOnlyBody []
               Nothing

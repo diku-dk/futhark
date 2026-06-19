@@ -273,8 +273,8 @@ isParallelStm funHasParallelism stm =
     isParallelBasicOp Manifest {} = True
     isParallelBasicOp Rearrange {} = True
     isParallelBasicOp Reshape {} = True
-    isParallelBasicOp (FlatIndex _ flat_slice) =  not $ null $ flatSliceDims flat_slice 
-    isParallelBasicOp (Index _ slice) =  not $ null $ sliceDims slice
+    isParallelBasicOp (FlatIndex _ flat_slice) = not $ null $ flatSliceDims flat_slice
+    isParallelBasicOp (Index _ slice) = not $ null $ sliceDims slice
     isParallelBasicOp _ = False
 
     isMap (BasicOp op) = isParallelBasicOp op
