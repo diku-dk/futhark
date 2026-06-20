@@ -6,7 +6,6 @@ module Futhark.Pass.Flatten.Match
 where
 
 import Control.Monad
-import Control.Monad.Reader
 import Data.Containers.ListUtils (nubOrd)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -30,7 +29,7 @@ splitInput ::
   VName ->
   M.Map VName ResRep ->
   VName ->
-  Builder GPU (Type, VName, ResRep)
+  FlattenM (Type, VName, ResRep)
 splitInput lvl segments env inps is acc_reps v = do
   (t, rep0) <- liftSubExpPreserveRep segments inps env (Var v)
   let rep = M.findWithDefault rep0 v acc_reps
@@ -94,7 +93,7 @@ distributeBranch ::
   VName ->
   Body SOACS ->
   M.Map VName ResRep ->
-  Builder GPU (DistInputs, DistEnv, [DistStm])
+  FlattenM (DistInputs, DistEnv, [DistStm])
 distributeBranch funHasParallelism lvl segments env inps is body acc_reps = do
   let free_in_body = filter (isVariant inps env . Var) (namesToList $ freeIn body)
   scope <- askScope
@@ -120,7 +119,7 @@ mergeResult ::
   [VName] ->
   [ResRep] ->
   DistResult ->
-  Builder GPU ResRep
+  FlattenM ResRep
 mergeResult lvl segments w iss branchesRep dist_res
   -- Regular case
   | isRegularDistResult dist_res = do
@@ -184,7 +183,7 @@ transformVariantMatch ::
   [Case (Body SOACS)] ->
   Body SOACS ->
   MatchDec ExtType ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 transformVariantMatch ops segments env inps res _aux scrutinees cases defaultCase _rt = do
   let lvl = flattenSegLevel ops
   w <- letSubExp "w" <=< toExp $ product $ segmentDims segments
@@ -288,7 +287,7 @@ transformUniformMatch ::
   [Case (Body SOACS)] ->
   Body SOACS ->
   MatchDec ExtType ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt = do
   scope <- askScope
   new_cases <- forM cases $ \(Case c body) -> do
@@ -296,14 +295,14 @@ transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase
           distributeBody (flattenFunHasParallelism ops) scope segments inps body
 
     (case_body_res, case_body_stms) <-
-      flip runReaderT scope . runBuilder $
+      collectStms $
         liftBodyWithDistResults ops segments case_body_inputs env case_dstms res (bodyResult body)
     pure $ Case c $ Body () case_body_stms case_body_res
   new_default_body <- do
     let (new_default_body_inputs, new_default_dstms) =
           distributeBody (flattenFunHasParallelism ops) scope segments inps defaultCase
     (new_default_body_res, new_default_body_stms) <-
-      flip runReaderT scope . runBuilder $
+      collectStms $
         liftBodyWithDistResults ops segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)
     pure $ Body () new_default_body_stms new_default_body_res
 

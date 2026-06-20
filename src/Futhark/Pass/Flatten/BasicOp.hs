@@ -15,7 +15,7 @@ import Futhark.Transform.Rename
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, quot, rem)
 
-replicateForDims :: Segments -> Shape -> VName -> Builder GPU VName
+replicateForDims :: Segments -> Shape -> VName -> FlattenM VName
 replicateForDims segments dims v = do
   v_t <- lookupType v
   let seg_rank = length (NE.toList segments)
@@ -34,7 +34,7 @@ concatIrreg ::
   DistEnv ->
   VName ->
   [IrregularRep] ->
-  Builder GPU IrregularRep
+  FlattenM IrregularRep
 concatIrreg lvl _segments _env ns reparr = do
   -- Concatenation does not change the number of segments - it simply
   -- makes each of them larger.
@@ -148,7 +148,7 @@ concatIrregAlongDim ::
   [Type] ->
   DistInputs ->
   Int ->
-  Builder GPU IrregularRep
+  FlattenM IrregularRep
 concatIrregAlongDim lvl segments env ns reparr typearr inps d = do
   num_segments <- arraySize 0 <$> lookupType ns
 
@@ -275,7 +275,7 @@ replicateIrreg ::
   VName ->
   Name ->
   IrregularRep ->
-  Builder GPU IrregularRep
+  FlattenM IrregularRep
 replicateIrreg lvl _segments _env ns desc rep = do
   -- Replication does not change the number of segments - it simply
   -- makes each of them larger.
@@ -334,7 +334,7 @@ rearrangeFlat perm dims i =
     rearrangeShape (rearrangeInverse perm) $
       unflattenIndex (rearrangeShape perm dims) i
 
-segmentCoordsFromFlat :: Segments -> SubExp -> Builder GPU [SubExp]
+segmentCoordsFromFlat :: Segments -> SubExp -> FlattenM [SubExp]
 segmentCoordsFromFlat segments seg_i =
   mapM (letSubExp "seg_coord" <=< toExp) $
     unflattenIndex (map pe64 $ shapeDims $ segmentsShape segments) (pe64 seg_i)
@@ -348,7 +348,7 @@ rearrangeIrreg ::
   TypeBase Shape u ->
   [Int] ->
   IrregularRep ->
-  Builder GPU IrregularRep
+  FlattenM IrregularRep
 rearrangeIrreg lvl segments env inps v_t perm ir = do
   (IrregularRep shape _ offsets elems _) <- flattenIrregularRep lvl ir
   (new_F, new_O, ii1_vss) <- doRepIota lvl shape
@@ -386,7 +386,7 @@ transformDistBasicOp ::
     StmAux (),
     BasicOp
   ) ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
   case e of
     BinOp {} ->

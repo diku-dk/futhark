@@ -63,7 +63,7 @@ intrablockParallelise ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU (Maybe IntrablockResult)
+  FlattenM (Maybe IntrablockResult)
 intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs lam0 = runMaybeT $ do
   -- TODO : This should not be necessary.
   unless (all (regularMapInput env inps) arrs) mzero
@@ -175,7 +175,7 @@ intrablockParalleliseTopLevelMap ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU (Maybe IntrablockResult)
+  FlattenM (Maybe IntrablockResult)
 intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = runMaybeT $ do
   scope <- lift $ castScope <$> askScope
   lam <- renameLambda =<< preprocessLambda scope lam0
@@ -258,7 +258,7 @@ intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = runMaybeT $ 
         intraResultNames = patNames nested_pat
       }
 
-readInBlockInputs :: Segments -> DistEnv -> [SubExp] -> DistInputs -> Builder GPU ()
+readInBlockInputs :: Segments -> DistEnv -> [SubExp] -> DistInputs -> FlattenM ()
 readInBlockInputs segments env is inputs =
   mapM_ onInput inputs
   where
@@ -293,7 +293,7 @@ prepareRegularMapInput ::
   DistInputs ->
   Param Type ->
   VName ->
-  Builder GPU (MapArray ())
+  FlattenM (MapArray ())
 prepareRegularMapInput segments env inps p arr =
   case lookup arr inps of
     Just (DistInputFree vs t) ->
@@ -334,7 +334,7 @@ mapArraysToInputs params arrs =
     onInput _ MapOther {} =
       error "mapArraysToInputs: unexpected irregular input"
 
-freeInputsFor :: DistInputs -> Lambda SOACS -> Builder GPU DistInputs
+freeInputsFor :: DistInputs -> Lambda SOACS -> FlattenM DistInputs
 freeInputsFor inps lam =
   do
     let free = freeIn lam
@@ -346,9 +346,7 @@ freeInputsFor inps lam =
         Just inp <- [lookup v inps]
       ]
 
-liftBuilderStms ::
-  Builder GPU (Stms GPU) ->
-  IntrablockM (Stms GPU)
+liftBuilderStms :: Builder GPU (Stms GPU) -> IntrablockM (Stms GPU)
 liftBuilderStms m = do
   scope <- askScope
   src <- getNameSource

@@ -25,11 +25,11 @@ module Futhark.Pass.Flatten.Incremental
 where
 
 import Control.Monad
+import Control.Monad.State
 import Data.Foldable
 import Data.Maybe (isJust)
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
-import Futhark.MonadFreshNames
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Intrablock qualified as Intrablock
 import Futhark.Pass.Flatten.Monad
@@ -53,7 +53,7 @@ kernelAlternatives ::
   [Type] ->
   Body GPU ->
   [(SubExp, Body GPU)] ->
-  Builder GPU [VName]
+  FlattenM [VName]
 kernelAlternatives desc _ default_body [] = do
   ses <- bodyBind default_body
   forM ses $ \(SubExpRes cs se) ->
@@ -72,24 +72,29 @@ kernelAlternatives desc result_ts default_body ((cond, alt) : alts) = do
     Match [cond] [Case [Just $ BoolValue True] alt] fallback_body $
       MatchDec (staticShapes result_ts) MatchEquiv
 
+cmpSizeLe ::
+  Name ->
+  SizeClass ->
+  [SubExp] ->
+  FlattenM (SubExp, Name)
+cmpSizeLe desc size_class to_what = do
+  x <- gets stateThresholdCounter
+  modify $ \s -> s {stateThresholdCounter = x + 1}
+  let size_key = desc <> "_" <> nameFromString (show x)
+  to_what' <-
+    letSubExp "comparatee"
+      =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) to_what
+  cmp_res <- letSubExp desc $ Op $ SizeOp $ CmpSizeLe size_key size_class to_what'
+  pure (cmp_res, size_key)
+
 sufficientParallelism ::
   Name ->
   [SubExp] ->
   KernelPath ->
   Maybe Int64 ->
-  Builder GPU (SubExp, Name)
-sufficientParallelism desc ws path def = do
-  size_key <- nameFromText . prettyText <$> newVName desc
-
-  amount <-
-    letSubExp "comparatee"
-      =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ws
-
-  cmp_res <-
-    letSubExp desc . Op . SizeOp $
-      CmpSizeLe size_key (SizeThreshold path def) amount
-
-  pure (cmp_res, size_key)
+  FlattenM (SubExp, Name)
+sufficientParallelism desc ws path def =
+  cmpSizeLe desc (SizeThreshold path def) ws
 
 -- Check if the in the body there is a call to a parallel function.
 -- XXX: we use this function to even reject the intra version of
@@ -146,7 +151,7 @@ mayExploitIntra attrs =
 
 intraBlockAlternative ::
   Intrablock.IntrablockResult ->
-  Builder GPU (SubExp, Body GPU)
+  FlattenM (SubExp, Body GPU)
 intraBlockAlternative intra = do
   addStms $ Intrablock.intraPreludeStms intra
   max_tblock_size <-
@@ -266,6 +271,7 @@ lambdaHasParallelism funHasParallelism =
   any (isParallelStm funHasParallelism) . bodyStms . lambdaBody
 
 factorScremaForParallelism ::
+  (MonadBuilder m) =>
   FunHasParallelism ->
   Scope SOACS ->
   Certs ->
@@ -273,7 +279,7 @@ factorScremaForParallelism ::
   SubExp ->
   [VName] ->
   ScremaForm SOACS ->
-  Builder GPU (Maybe (Body SOACS))
+  m (Maybe (Body SOACS))
 factorScremaForParallelism funHasParallelism scope certs pat w arrs form
   | Just (reds, map_lam) <- isRedomapSOAC form,
     lambdaHasParallelism funHasParallelism map_lam = do

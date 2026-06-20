@@ -52,7 +52,7 @@ transformWithAcc ::
   StmAux () ->
   [WithAccInput SOACS] ->
   Lambda SOACS ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_inputs acc_lam = do
   let inputTypes (_, arrs, _) = mapM (lookupInputType inps) arrs
 

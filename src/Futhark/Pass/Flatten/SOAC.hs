@@ -12,7 +12,6 @@ module Futhark.Pass.Flatten.SOAC
 where
 
 import Control.Monad
-import Control.Monad.Reader
 import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable
 import Data.List qualified as L
@@ -44,7 +43,7 @@ data InnerMapMode
 -- Check whether a loop parameter array needs irregular representation.
 -- we need the irregular representation when any of its dimensions are either:
 -- a loop parameter name or variant in the outer map context
-freeWithTypeDeps :: DistInputs -> Names -> Builder GPU [VName]
+freeWithTypeDeps :: DistInputs -> Names -> FlattenM [VName]
 freeWithTypeDeps inps free = do
   let free_names = namesToList free
   free_sizes <- foldMap freeIn <$> mapM (lookupInputType inps) free_names
@@ -70,7 +69,7 @@ suitableUniformOperator env inps lam _nes =
 
 -- | Replicate an array to insert a new inner dimension  after the
 -- existing segment dimensions.
-replicateForW :: Segments -> SubExp -> VName -> Builder GPU VName
+replicateForW :: Segments -> SubExp -> VName -> FlattenM VName
 replicateForW segments w v = do
   v_t <- lookupType v
   let seg_rank = length (NE.toList segments)
@@ -87,7 +86,7 @@ regularToReplicatedIrregularRep ::
   Segments ->
   VName ->
   VName ->
-  Builder GPU IrregularRep
+  FlattenM IrregularRep
 regularToReplicatedIrregularRep lvl segments ws_data v' = do
   ws_prod <- arraySize 0 <$> lookupType ws_data
   arr_t <- lookupType v'
@@ -129,7 +128,7 @@ onMapFreeVar ::
   VName ->
   (VName, VName, VName) ->
   VName ->
-  Maybe (Builder GPU (VName, MapArray IrregularRep))
+  Maybe (FlattenM (VName, MapArray IrregularRep))
 onMapFreeVar lvl segments env inps _ws (_ws_F, _ws_O, ws_data) v = do
   v_inp <- lookup v inps
   pure $ do
@@ -166,7 +165,7 @@ onMapFreeVarMultiDim ::
   DistEnv ->
   DistInputs ->
   VName ->
-  Maybe (Builder GPU (VName, MapArray IrregularRep))
+  Maybe (FlattenM (VName, MapArray IrregularRep))
 onMapFreeVarMultiDim lvl segments w env inps v = do
   v_inp <- lookup v inps
   pure $ fmap (v,) $ case v_inp of
@@ -208,7 +207,7 @@ onMapInputArr ::
   VName ->
   Param Type ->
   VName ->
-  Builder GPU (MapArray IrregularRep)
+  FlattenM (MapArray IrregularRep)
 onMapInputArr lvl segments env inps ws ws_O ws_data p arr = do
   ws_prod <- arraySize 0 <$> lookupType ws_data
   case lookup arr inps of
@@ -293,7 +292,7 @@ transformUniformRedomap ::
   [VName] ->
   [Reduce SOACS] ->
   Lambda SOACS ->
-  Builder GPU [VName]
+  FlattenM [VName]
 transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
   let sing_red = singleReduce reds
       zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
@@ -343,8 +342,8 @@ doUniformSegMaposcanomap ::
   Segments ->
   DistInputs ->
   DistEnv ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU [VName]
+  ([SubExp] -> FlattenM ()) ->
+  FlattenM [VName]
 doUniformSegMaposcanomap lvl scans arrs post_lam map_lam old_segments new_segment inps env readFree = do
   -- TODO: different segemnts fix
   let scan = singleScan scans
@@ -373,7 +372,7 @@ transformUniformMaposcanomap ::
   [Scan SOACS] ->
   Lambda SOACS ->
   Lambda SOACS ->
-  Builder GPU [VName]
+  FlattenM [VName]
 transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam = do
   let free = freeIn map_lam <> freeIn post_lam
       new_segment = segments <> pure w
@@ -410,8 +409,8 @@ doSegMaposcanomap ::
   Segments ->
   DistInputs ->
   DistEnv ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU [VName]
+  ([SubExp] -> FlattenM ()) ->
+  FlattenM [VName]
 doSegMaposcanomap lvl scans flags elems post_lam map_lam segments inps env readFree = do
   let scan = singleScan scans
   let zeros = replicate (segmentsRank segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
@@ -447,7 +446,7 @@ segOpInputRep ::
   DistEnv ->
   DistInputs ->
   VName ->
-  Builder GPU ResRep
+  FlattenM ResRep
 segOpInputRep lvl segments env inps arr =
   case lookup arr inps of
     Just (DistInput rt _) ->
@@ -473,7 +472,7 @@ prepareSegOpInputs ::
   [ResRep] ->
   [VName] ->
   Bool ->
-  Builder GPU (VName, VName, VName, [VName], IrregularKind)
+  FlattenM (VName, VName, VName, [VName], IrregularKind)
 prepareSegOpInputs lvl segments env inps w reps names hasNoFreeVariant
   | all isRegular reps = do
       ws <- dataArr lvl segments env inps w
@@ -521,7 +520,7 @@ prepareSegOpInputs lvl segments env inps w reps names hasNoFreeVariant
           | otherwise ->
               irregularD <$> ensureDenseIrregular lvl (baseName v <> "_dense") ir
 
-flattenRegularToRows :: Segments -> SubExp -> VName -> Builder GPU VName
+flattenRegularToRows :: Segments -> SubExp -> VName -> FlattenM VName
 flattenRegularToRows segments m v = do
   v_t <- lookupType v
   if isAcc v_t
@@ -535,8 +534,8 @@ flattenRegularToRows segments m v = do
           reshapeAll (arrayShape v_t) (Shape [m] <> row_shape)
 
 regularBranchBody ::
-  Builder GPU [VName] ->
-  Builder GPU (Body GPU)
+  FlattenM [VName] ->
+  FlattenM (Body GPU)
 regularBranchBody m = do
   (vs, stms) <- collectStms m
   renameBody $ mkBody stms $ varsRes vs
@@ -555,7 +554,7 @@ transformFactoredDistBody ::
   DistInputs ->
   [DistResult] ->
   Body SOACS ->
-  Builder GPU [ResRep]
+  FlattenM [ResRep]
 transformFactoredDistBody ops segments env inps res body = do
   scope <- askScope
   let (inps_local, env_local, _) = localiseInputs env inps
@@ -575,8 +574,8 @@ versionScanRed ::
   StmAux () ->
   SubExp ->
   Body SOACS ->
-  Builder GPU [VName] ->
-  Builder GPU DistEnv
+  FlattenM [VName] ->
+  FlattenM DistEnv
 versionScanRed ops desc segments env inps res aux w factored_body outer_only = do
   let result_ts =
         [ t `arrayOfShape` segmentsShape segments
@@ -617,7 +616,7 @@ insertSegOpMapResults ::
   IrregularKind ->
   [(DistResult, VName)] ->
   DistEnv ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 insertSegOpMapResults segments segs flags offsets kind bnds env0 =
   foldM insert env0 bnds
   where
@@ -645,13 +644,13 @@ distResCerts env = Certs . map f
       Regular v -> v
       Irregular r -> irregularD r
 
-reshapeAndBind :: VName -> VName -> Shape -> Builder GPU ()
+reshapeAndBind :: VName -> VName -> Shape -> FlattenM ()
 reshapeAndBind v src shape = do
   v_copy <- letExp (baseName v) . BasicOp $ Replicate mempty (Var src)
   v_copy_shape <- arrayShape <$> lookupType v_copy
   letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
 
-mapResultRep :: SegLevel -> InnerMapMode -> (VName, VName, VName) -> VName -> Builder GPU ResRep
+mapResultRep :: SegLevel -> InnerMapMode -> (VName, VName, VName) -> VName -> FlattenM ResRep
 mapResultRep _ MultiDim _ v = pure $ Regular v
 mapResultRep lvl SingleDim (ws, ws_F, ws_O) v =
   -- Forcing the irregular rep to be 1D because in some places that is my assumption
@@ -672,7 +671,7 @@ transformDistributed ::
   M.Map ResTag IrregularRep ->
   Segments ->
   Distributed ->
-  Builder GPU ()
+  FlattenM ()
 transformDistributed ops irregs segments dist = do
   let Distributed dstms (DistResults resmap reps) = dist
   env <- foldM (flattenDistStm ops segments) env_initial dstms
@@ -717,7 +716,7 @@ onMapIrregularInputArr ::
   VName ->
   IrregularRep ->
   SubExp ->
-  Builder GPU (MapArray IrregularRep)
+  FlattenM (MapArray IrregularRep)
 onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod = do
   -- new_segments has already has the the new w inside unlike other functions
   rep_t <- lookupType $ irregularD rep
@@ -826,7 +825,7 @@ onMapInputArrMultiDim ::
   VName ->
   Param Type ->
   VName ->
-  Builder GPU (MapArray IrregularRep)
+  FlattenM (MapArray IrregularRep)
 onMapInputArrMultiDim lvl old_segments w env inps ws ws_O ws_data p arr = do
   case lookup arr inps of
     Just v_inp ->
@@ -865,9 +864,9 @@ transformMapForInBlock ::
   Lambda SOACS ->
   Builder GPU (Stms GPU)
 transformMapForInBlock ops pat w arrs map_lam = do
-  scope <- castScope <$> askScope
-  lam <- preprocessLambda scope map_lam
-  collectStms_ $ do
+  scope <- askScope
+  lam <- preprocessLambda (castScope scope) map_lam
+  runFlattenM scope $ collectStms_ $ do
     let arrs' =
           zipWith MapArray arrs $
             map paramType (lambdaParams lam)
@@ -897,7 +896,7 @@ irregularMapResult ::
   VName ->
   Type ->
   DistInputs ->
-  Builder GPU ResRep
+  FlattenM ResRep
 irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
   do
     if any (isTypeVariant new_inp_var) (arrayShape v_t)
@@ -944,7 +943,7 @@ transformDistributedInnerMap ::
   M.Map ResTag IrregularRep ->
   Segments ->
   Distributed ->
-  Builder GPU [(VName, ResRep)]
+  FlattenM [(VName, ResRep)]
 transformDistributedInnerMap ops mode (ws_F, ws_O, ws) irregs segments dist = do
   let Distributed dstms (DistResults resmap reps) = dist
   let new_inps = concatMap distStmInputs dstms
@@ -1015,9 +1014,9 @@ distributeAndTransformInnerMap ::
   DistInputs ->
   Pat Type ->
   [MapArray IrregularRep] ->
-  (VName -> Maybe (Builder GPU (VName, MapArray IrregularRep))) ->
+  (VName -> Maybe (FlattenM (VName, MapArray IrregularRep))) ->
   Lambda SOACS ->
-  Builder GPU [ResRep]
+  FlattenM [ResRep]
 distributeAndTransformInnerMap ops mode ws_triple new_segment inps pat arrs' onFreeVar map_lam = do
   let free = freeIn map_lam
   free_and_sizes <- freeWithTypeDeps inps free
@@ -1048,12 +1047,9 @@ distributeAndTransformInnerMap ops mode ws_triple new_segment inps pat arrs' onF
           new_segment
           (replicated <> arrs')
           map_lam'
-      m =
-        transformDistributedInnerMap ops mode ws_triple arrmap new_segment distributed
-  (res, stms) <- runReaderT (runBuilder m) scope
-  addStms stms
   -- order the result representations in the same order as the pattern
-  pure $ resRepsInPatOrder pat res
+  resRepsInPatOrder pat
+    <$> transformDistributedInnerMap ops mode ws_triple arrmap new_segment distributed
 
 transformInnerMapMultiDim ::
   FlattenOps ->
@@ -1064,7 +1060,7 @@ transformInnerMapMultiDim ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU [ResRep]
+  FlattenM [ResRep]
 transformInnerMapMultiDim ops segments env inps pat w arrs map_lam = do
   ws <- dataArr lvl segments env inps w
   (ws_F, ws_O, ws_data) <- doRepIota lvl ws
@@ -1095,7 +1091,7 @@ transformInnerMapSingleDim ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU [ResRep]
+  FlattenM [ResRep]
 transformInnerMapSingleDim ops segments env inps pat w arrs map_lam = do
   ws <- dataArr lvl segments env inps w
   (ws_F, ws_O, ws_data) <- doRepIota lvl ws
@@ -1127,7 +1123,7 @@ transformInnerMap ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU [ResRep]
+  FlattenM [ResRep]
 transformInnerMap ops segments env inps pat w arrs map_lam = do
   gpu_scope <- askScope
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
@@ -1145,7 +1141,7 @@ runMapLambdaBody ::
   Lambda SOACS ->
   Pat Type ->
   [DistResult] ->
-  Builder GPU [VName]
+  FlattenM [VName]
 runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
   map_lam' <- renameLambda $ soacsLambdaToGPU map_lam
   ws <- dataArr defaultSegLevel segments env inps w
@@ -1191,7 +1187,7 @@ versionedRegularMap ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
   let only_intra = onlyExploitIntra (stmAuxAttrs aux)
       may_intra = worthIntrablock map_lam && mayExploitIntra (stmAuxAttrs aux)
@@ -1223,7 +1219,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
           | not only_intra,
             worthSequentialising (flattenFunHasParallelism ops) map_lam,
             mayExploitOuter $ stmAuxAttrs aux -> do
-              (outer_suff, _) <- sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
+              (outer_suff, _) <- sufficientParallelism "suff_outer_par" (NE.toList $ segments <> pure w) mempty Nothing
               kernelAlternatives
                 "match_res"
                 result_ts
@@ -1237,7 +1233,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
               kernelAlternatives "match_res" result_ts intra_body []
           | worthSequentialising (flattenFunHasParallelism ops) map_lam,
             mayExploitOuter $ stmAuxAttrs aux -> do
-              (outer_suff, _) <- sufficientParallelism "suff_outer_map" (NE.toList $ segments <> pure w) mempty Nothing
+              (outer_suff, _) <- sufficientParallelism "suff_outer_par" (NE.toList $ segments <> pure w) mempty Nothing
               intra_alts <- intraBlockAlternative intra_res
               kernelAlternatives
                 "match_res"
@@ -1261,7 +1257,7 @@ transformScrema ::
   [DistResult] ->
   (Pat Type, StmAux ()) ->
   (SubExp, [VName], ScremaForm SOACS) ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
   | Just (reds, map_lam) <- isRedomapSOAC form,
     not $ isVariant inps env w,
@@ -1400,7 +1396,7 @@ transformHist ::
   [DistResult] ->
   (Pat Type, StmAux ()) ->
   (SubExp, [VName], [Futhark.IR.SOACS.HistOp SOACS], Lambda SOACS) ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops, bucket_fun) = do
   -- todo: add this suitableUniformOperator
   nonuniform_inps <-

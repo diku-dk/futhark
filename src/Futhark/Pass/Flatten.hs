@@ -12,7 +12,6 @@
 module Futhark.Pass.Flatten (flattenSOACs) where
 
 import Control.Monad
-import Control.Monad.Reader
 import Data.Bifunctor (first)
 import Data.Foldable
 import Data.List qualified as L
@@ -58,7 +57,7 @@ transformScalarStms ::
   DistInputs ->
   [DistResult] ->
   Stms SOACS ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 transformScalarStms lvl segments env inps distres stms = do
   let bound_in_batch = namesFromList $ concatMap (patNames . stmPat) $ stmsToList stms
       allCerts = foldMap (\stm -> distCerts inps (stmAux stm) env) (stmsToList stms)
@@ -76,32 +75,33 @@ transformScalarStm ::
   DistInputs ->
   [DistResult] ->
   Stm SOACS ->
-  Builder GPU DistEnv
+  FlattenM DistEnv
 transformScalarStm lvl segments env inps res stm =
   transformScalarStms lvl segments env inps res (oneStm stm)
 
 topLevelversionScanRed ::
   FunHasParallelism ->
   Name ->
-  Scope SOACS ->
   Pat Type ->
   SubExp ->
   [VName] ->
   ScremaForm SOACS ->
   StmAux dec ->
   Stms GPU ->
-  PassM (Stms GPU)
-topLevelversionScanRed funHasParallelism desc scope pat w arrs form aux outer_only_stms = do
+  FlattenM (Stms GPU)
+topLevelversionScanRed funHasParallelism desc pat w arrs form aux outer_only_stms = do
+  scope <- castScope <$> askScope
   let outerOnlyBody0 = mkBody outer_only_stms $ varsRes $ patNames pat
-  (maybeFullFlattenBody, _) <- runReaderT (runBuilder (factorScremaForParallelism funHasParallelism scope (stmAuxCerts aux) pat w arrs form)) scope
+  maybeFullFlattenBody <-
+    factorScremaForParallelism funHasParallelism scope (stmAuxCerts aux) pat w arrs form
   case maybeFullFlattenBody of
     Nothing -> pure outer_only_stms
     Just fullFlattenBody0 -> do
       outerOnlyBody <- renameBody outerOnlyBody0
-      fullFlattenBody <- transformBody funHasParallelism scope =<< renameBody fullFlattenBody0
+      fullFlattenBody <- transformBody funHasParallelism =<< renameBody fullFlattenBody0
       let result_ts = patTypes pat
           attrs = stmAuxAttrs aux
-      flip runReaderT scope . runBuilder_ $ do
+      collectStms_ $ do
         let fullAlternative = kernelAlternatives desc result_ts fullFlattenBody []
             outerAlternative = kernelAlternatives desc result_ts outerOnlyBody []
             fullWithOuterAlternative = do
@@ -125,7 +125,7 @@ topLevelversionScanRed funHasParallelism desc scope pat w arrs form aux outer_on
         forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
           letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
 
-transformDistStm :: FunHasParallelism -> SegLevel -> Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
+transformDistStm :: FunHasParallelism -> SegLevel -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
 transformDistStm _ lvl segments env (DistStm inps res (ScalarStm stms)) =
   transformScalarStms lvl segments env inps res (stmsFromList stms)
 transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelStm stm)) = do
@@ -177,7 +177,7 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
   where
     ops = flattenOpsFor funHasParallelism lvl
 
-liftArg :: SegLevel -> Segments -> SubExp -> DistInputs -> DistEnv -> (SubExp, Diet) -> Builder GPU [(SubExp, Diet)]
+liftArg :: SegLevel -> Segments -> SubExp -> DistInputs -> DistEnv -> (SubExp, Diet) -> FlattenM [(SubExp, Diet)]
 liftArg lvl segments w inps env (se, d) = do
   (_, rep) <- liftSubExp lvl segments inps env se
   case rep of
@@ -215,7 +215,7 @@ liftArg lvl segments w inps env (se, d) = do
         let diets = replicate 4 Observe ++ [d]
         pure $ zipWith (curry (first Var)) [num_data, segs', flags', offsets', elems'] diets
 
-reshapeLiftedApplyResult :: Segments -> RetType SOACS -> ResRep -> Builder GPU ResRep
+reshapeLiftedApplyResult :: Segments -> RetType SOACS -> ResRep -> FlattenM ResRep
 reshapeLiftedApplyResult segments Prim {} (Regular v) = do
   v_t <- lookupType v
   let expectedShape = segmentsShape segments
@@ -254,7 +254,7 @@ runInnerSeqMap ::
   Lambda SOACS ->
   Pat Type ->
   [DistResult] ->
-  Builder GPU [VName]
+  FlattenM [VName]
 runInnerSeqMap w arrs map_lam _pat _ress = do
   map_lam' <- renameLambda $ soacsLambdaToGPU map_lam
   let new_segments = pure w
@@ -270,7 +270,7 @@ runInnerSeqMap w arrs map_lam _pat _ress = do
     addStms $ bodyStms $ lambdaBody map_lam'
     pure $ bodyResult $ lambdaBody map_lam'
 
-liftBody :: FunHasParallelism -> SegLevel -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
+liftBody :: FunHasParallelism -> SegLevel -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> FlattenM Result
 liftBody funHasParallelism lvl w inputs env dstms result = do
   let segments = NE.singleton w
   env' <- foldM (transformDistStm funHasParallelism lvl segments) env dstms
@@ -334,8 +334,8 @@ liftFunDef funHasParallelism const_scope fd = do
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
   -- Lift the body of the function and get the results
   (result, stms) <-
-    flip runReaderT (const_scope <> scopeOfFParams fparams'') . runBuilder $
-      liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
+    runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
+      collectStms . liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
         bodyResult body
   let name = liftFunName $ funDefName fd
   pure $
@@ -346,20 +346,21 @@ liftFunDef funHasParallelism const_scope fd = do
         funDefRetType = rettype'
       }
 
-transformLambda :: FunHasParallelism -> Scope SOACS -> Lambda SOACS -> PassM (Lambda GPU)
-transformLambda funHasParallelism scope (Lambda params ret body) = do
-  body' <- transformBody funHasParallelism (scopeOfLParams params <> scope) body
+transformLambda :: FunHasParallelism -> Lambda SOACS -> FlattenM (Lambda GPU)
+transformLambda funHasParallelism (Lambda params ret body) = do
+  body' <- localScope (scopeOfLParams params) $ transformBody funHasParallelism body
   pure $ Lambda params ret body'
 
-transformStm :: FunHasParallelism -> Scope SOACS -> Stm SOACS -> PassM (Stms GPU)
-transformStm funHasParallelism scope (Let pat aux (Op soac))
+transformStm :: FunHasParallelism -> Stm SOACS -> FlattenM (Stms GPU)
+transformStm funHasParallelism (Let pat aux (Op soac))
   | "sequential_outer" `inAttrs` stmAuxAttrs aux = do
-      stms <- runBuilderT_ (FOT.transformSOAC pat soac) scope
-      transformStms funHasParallelism scope $ fmap (certify (stmAuxCerts aux)) stms
-transformStm _ _ stm
+      scope <- askScope
+      stms <- runBuilderT_ (FOT.transformSOAC pat soac) (castScope scope)
+      transformStms funHasParallelism $ fmap (certify (stmAuxCerts aux)) stms
+transformStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm $ soacsStmToGPU stm
-transformStm _ scope (Let pat aux (Op (Hist w arrs ops bucket_fun))) = do
-  flip runReaderT scope . runBuilder_ $ certifying (stmAuxCerts aux) $ do
+transformStm _ (Let pat aux (Op (Hist w arrs ops bucket_fun))) =
+  collectStms_ . certifying (stmAuxCerts aux) $ do
     res <-
       genUniformSegHist
         defaultSegLevel
@@ -371,11 +372,11 @@ transformStm _ scope (Let pat aux (Op (Hist w arrs ops bucket_fun))) = do
         (const $ pure ())
     forM_ (zip (patNames pat) res) $ \(v, v') ->
       letBindNames [v] $ BasicOp $ SubExp $ Var v'
-transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
+transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     Scan scan_lam nes <- singleScan scans = do
       outer_only_stms <-
-        flip runReaderT scope . runBuilder_ $ certifying (stmAuxCerts aux) $ do
+        collectStms_ . certifying (stmAuxCerts aux) $ do
           (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
           res <-
             genUniformSegScanomapWithPost
@@ -391,26 +392,27 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
               (const $ pure ())
           forM_ (zip (patNames pat) res) $ \(v, v') ->
             letBindNames [v] $ BasicOp $ SubExp $ Var v'
-      topLevelversionScanRed funHasParallelism "top_level_scan_alt" scope pat w arrs form aux outer_only_stms
-transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
+      topLevelversionScanRed funHasParallelism "top_level_scan_alt" pat w arrs form aux outer_only_stms
+transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       outer_only_stms <-
-        flip runReaderT scope . runBuilder_ $
-          certifying (stmAuxCerts aux) $ do
-            let sing_red = singleReduce reds
-            (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) (redNeutral sing_red)
-            let comm
-                  | commutativeLambda red_lam = Commutative
-                  | otherwise = redComm sing_red
-            let sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes'
-            res <- genNonSegRed defaultSegLevel "topLevelSegRed" [w] sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs
-            forM_ (zip (patNames pat) res) $ \(v, v') ->
-              letBindNames [v] $ BasicOp $ SubExp $ Var v'
-      topLevelversionScanRed funHasParallelism "top_level_red_alt" scope pat w arrs form aux outer_only_stms
-transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
+        collectStms_ . certifying (stmAuxCerts aux) $ do
+          let sing_red = singleReduce reds
+          (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) (redNeutral sing_red)
+          let comm
+                | commutativeLambda red_lam = Commutative
+                | otherwise = redComm sing_red
+          let sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes'
+          res <- genNonSegRed defaultSegLevel "topLevelSegRed" [w] sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs
+          forM_ (zip (patNames pat) res) $ \(v, v') ->
+            letBindNames [v] $ BasicOp $ SubExp $ Var v'
+      topLevelversionScanRed funHasParallelism "top_level_red_alt" pat w arrs form aux outer_only_stms
+transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
       let certs = stmAuxCerts aux
-      (outer_only_res, outer_only_stms) <- runReaderT (runBuilder $ certifying certs $ runInnerSeqMap w arrs lam pat []) scope
+      (outer_only_res, outer_only_stms) <-
+        collectStms $ certifying certs $ runInnerSeqMap w arrs lam pat []
+      scope <- castScope <$> askScope
       lamFullFlatten <- renameLambda =<< preprocessLambda scope lam
       let arrs' =
             zipWith MapArray arrs $
@@ -419,12 +421,12 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
           ops = flattenOpsFor funHasParallelism defaultSegLevel
           m = transformDistributed ops mempty (NE.singleton w) distributed
       traceM $ prettyString distributed
-      stms <- runReaderT (runBuilder_ $ certifying certs m) scope
+      stms <- collectStms_ $ certifying certs m
       let fullFlattenBody0 = mkBody stms $ varsRes $ patNames pat
           outerOnlyBody0 = mkBody outer_only_stms $ varsRes outer_only_res
       fullFlattenBody <- renameBody fullFlattenBody0
       outerOnlyBody <- renameBody outerOnlyBody0
-      flip runReaderT scope . runBuilder_ $ do
+      collectStms_ $ do
         let only_intra = onlyExploitIntra (stmAuxAttrs aux)
             may_intra = worthIntrablock lam && mayExploitIntra (stmAuxAttrs aux)
             result_ts = patTypes pat
@@ -481,32 +483,32 @@ transformStm funHasParallelism scope (Let pat aux (Op (Screma w arrs form)))
                   [intra_alt]
         forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
           letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
-transformStm funHasParallelism scope (Let pat aux (Loop params form body)) =
-  oneStm . Let pat aux . Loop params form <$> transformBody funHasParallelism scope' body
-  where
-    scope' = scopeOfLoopForm form <> scopeOfFParams (map fst params) <> scope
-transformStm funHasParallelism scope (Let pat aux (Match ses cases def_body ret)) =
+transformStm funHasParallelism (Let pat aux (Loop params form body)) =
+  localScope (scopeOfLoopForm form <> scopeOfFParams (map fst params)) $
+    oneStm . Let pat aux . Loop params form <$> transformBody funHasParallelism body
+transformStm funHasParallelism (Let pat aux (Match ses cases def_body ret)) =
   oneStm . Let pat aux
-    <$> (Match ses <$> mapM onCase cases <*> transformBody funHasParallelism scope def_body <*> pure ret)
+    <$> (Match ses <$> mapM onCase cases <*> transformBody funHasParallelism def_body <*> pure ret)
   where
-    onCase = traverse (transformBody funHasParallelism scope)
-transformStm funHasParallelism scope (Let pat aux (WithAcc inputs withacc_lam)) =
+    onCase = traverse (transformBody funHasParallelism)
+transformStm funHasParallelism (Let pat aux (WithAcc inputs withacc_lam)) = do
   oneStm . Let pat aux
-    <$> (WithAcc (map onInput inputs) <$> transformLambda funHasParallelism scope withacc_lam)
+    <$> (WithAcc (map onInput inputs) <$> transformLambda funHasParallelism withacc_lam)
   where
     onInput (shape, arrs, Nothing) =
       (shape, arrs, Nothing)
     onInput (shape, arrs, Just (lam, nes)) =
       (shape, arrs, Just (soacsLambdaToGPU lam, nes))
-transformStm _ _ stm = pure $ oneStm $ soacsStmToGPU stm
+transformStm _ stm = pure $ oneStm $ soacsStmToGPU stm
 
-transformStms :: FunHasParallelism -> Scope SOACS -> Stms SOACS -> PassM (Stms GPU)
-transformStms funHasParallelism scope stms =
-  fold <$> traverse (transformStm funHasParallelism (scope <> scopeOf stms)) stms
+transformStms :: FunHasParallelism -> Stms SOACS -> FlattenM (Stms GPU)
+transformStms funHasParallelism stms =
+  localScope (castScope $ scopeOf stms) $
+    fold <$> traverse (transformStm funHasParallelism) stms
 
-transformBody :: FunHasParallelism -> Scope SOACS -> Body SOACS -> PassM (Body GPU)
-transformBody funHasParallelism scope (Body () stms res) = do
-  stms' <- transformStms funHasParallelism scope stms
+transformBody :: FunHasParallelism -> Body SOACS -> FlattenM (Body GPU)
+transformBody funHasParallelism (Body () stms res) = do
+  stms' <- transformStms funHasParallelism stms
   pure $ Body () stms' res
 
 transformFunDef :: FunHasParallelism -> Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
@@ -516,7 +518,9 @@ transformFunDef funHasParallelism consts_scope fd = do
           funDefParams = fparams,
           funDefRetType = rettype
         } = fd
-  body' <- transformBody funHasParallelism (scopeOfFParams fparams <> consts_scope) body
+  body' <-
+    runFlattenM (scopeOfFParams fparams <> castScope consts_scope) $
+      transformBody funHasParallelism body
   pure $
     fd
       { funDefBody = body',
@@ -534,7 +538,7 @@ transformProg prog = do
       funHasParallelism fname =
         M.findWithDefault (not $ isBuiltInFunction fname) fname funParallelism
 
-  consts' <- transformStms funHasParallelism mempty consts
+  consts' <- runFlattenM mempty $ transformStms funHasParallelism consts
   funs' <- mapM (transformFunDef funHasParallelism consts_scope) funs
   lifted_funs <-
     mapM (liftFunDef funHasParallelism consts_scope) $

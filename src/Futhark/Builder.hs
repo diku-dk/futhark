@@ -18,6 +18,7 @@ module Futhark.Builder
     Builder,
     runBuilder,
     runBuilder_,
+    subBuilder,
     runBodyBuilder,
     runLambdaBuilder,
 
@@ -193,6 +194,17 @@ runBuilder_ ::
   Builder rep a ->
   m (Stms rep)
 runBuilder_ = fmap snd . runBuilder
+
+-- | Like 'runBuilder', but return just the results and add the statements to
+-- the enclosing builder.
+subBuilder ::
+  (MonadBuilder m) =>
+  Builder (Rep m) a ->
+  m a
+subBuilder m = do
+  (x, stms) <- runBuilder m
+  addStms stms
+  pure x
 
 -- | Run a builder that produces a 'Result' and construct a body that
 -- contains that result alongside the statements produced during the

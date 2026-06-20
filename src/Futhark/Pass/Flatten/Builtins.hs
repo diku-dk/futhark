@@ -62,10 +62,12 @@ regularSegLevel = SegThread SegVirt Nothing
 
 -- FIXME: We use segThreadCapped here because otherwise we may get
 -- out-of-bounds writes for SegOps with non-primitive return types.
-capThreadSegLevel :: (Foldable t) => t SubExp -> Name -> SegLevel -> ThreadRecommendation -> Builder GPU SegLevel
+capThreadSegLevel ::
+  (MonadBuilder m, Rep m ~ GPU, Foldable t) =>
+  t SubExp -> Name -> SegLevel -> ThreadRecommendation -> m SegLevel
 capThreadSegLevel segments desc lvl tr =
   case lvl of
-    SegThread {} -> segThreadCapped (toList segments) desc tr
+    SegThread {} -> subBuilder $ segThreadCapped (toList segments) desc tr
     _ -> pure lvl
 
 determineReduceOp ::
@@ -103,7 +105,9 @@ isVectorMap lam
        in (Shape [w] <> shape, lam')
   | otherwise = (mempty, lam)
 
-segMap :: (Traversable f) => SegLevel -> f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
+segMap ::
+  (MonadBuilder m, Rep m ~ GPU, Traversable f) =>
+  SegLevel -> f SubExp -> (f SubExp -> m Result) -> m (Exp GPU)
 segMap lvl segments f = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
@@ -119,14 +123,14 @@ segMap lvl segments f = do
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 genScanWithKernelBody ::
-  (Traversable f) =>
+  (MonadBuilder m, Rep m ~ GPU, Traversable f) =>
   SegLevel ->
   Name ->
   f SubExp ->
   Lambda GPU ->
   [SubExp] ->
-  (f SubExp -> Builder GPU Result) ->
-  Builder GPU [VName]
+  (f SubExp -> m Result) ->
+  m [VName]
 genScanWithKernelBody lvl desc segments lam nes =
   genScanWithKernelBodyAndPost
     lvl
@@ -139,6 +143,7 @@ genScanWithKernelBody lvl desc segments lam nes =
 
 -- FIXME?: I don't know why we need the readdummy
 genNonSegRed ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel ->
   Name ->
   [SubExp] ->
@@ -146,7 +151,7 @@ genNonSegRed ::
   Shape ->
   Lambda GPU ->
   [VName] ->
-  Builder GPU [VName]
+  m [VName]
 genNonSegRed lvl desc segments red_op shape map_lam arrs = do
   let red_lam = redLambda red_op
       nes = redNeutral red_op
@@ -179,14 +184,15 @@ genNonSegRed lvl desc segments red_op shape map_lam arrs = do
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 genUniformSegHist ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel ->
   Name ->
   [SubExp] ->
   [SOACS.HistOp SOACS] ->
   Lambda GPU ->
   [VName] ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU [VName]
+  ([SubExp] -> m ()) ->
+  m [VName]
 genUniformSegHist lvl desc segments ops bucket_fun arrs readFree = do
   ops' <- forM ops $ \(SOACS.HistOp dest_shape rf dests nes op) -> do
     (op', nes', shape) <- determineReduceOp op nes
@@ -195,7 +201,7 @@ genUniformSegHist lvl desc segments ops bucket_fun arrs readFree = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
-  ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
+  ((res, res_t), stms) <- collectStms . localScope (scopeOfSegSpace space) $ do
     readFree gtids'
     bindLambdaInputArrays gtids' bucket_fun arrs
     res <- bodyBind (lambdaBody bucket_fun)
@@ -208,6 +214,7 @@ genUniformSegHist lvl desc segments ops bucket_fun arrs readFree = do
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 genUniformSegRed ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel ->
   Name ->
   [SubExp] ->
@@ -215,8 +222,8 @@ genUniformSegRed ::
   Shape ->
   Lambda GPU ->
   [VName] ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU [VName]
+  ([SubExp] -> m ()) ->
+  m [VName]
 genUniformSegRed lvl desc segments red_op shape map_lam arrs readFree = do
   let red_lam = redLambda red_op
       nes = redNeutral red_op
@@ -224,7 +231,7 @@ genUniformSegRed lvl desc segments red_op shape map_lam arrs readFree = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
-  ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
+  ((res, res_t), stms) <- collectStms . localScope (scopeOfSegSpace space) $ do
     readFree gtids'
     bindLambdaInputArrays gtids' map_lam arrs
     res <- bodyBind (lambdaBody map_lam)
@@ -245,21 +252,21 @@ genUniformSegRed lvl desc segments red_op shape map_lam arrs readFree = do
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 genScanWithKernelBodyAndPost ::
-  (Traversable f) =>
+  (MonadBuilder m, Rep m ~ GPU, Traversable f) =>
   SegLevel ->
   Name ->
   f SubExp ->
-  (f SubExp -> Builder GPU (Lambda GPU)) ->
+  (f SubExp -> m (Lambda GPU)) ->
   Shape ->
   [SubExp] ->
-  (f SubExp -> [Type] -> Builder GPU (Lambda GPU)) ->
-  (f SubExp -> Builder GPU Result) ->
-  Builder GPU [VName]
+  (f SubExp -> [Type] -> m (Lambda GPU)) ->
+  (f SubExp -> m Result) ->
+  m [VName]
 genScanWithKernelBodyAndPost lvl desc segments mkScanLam shape nes mkPostLam m = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
-  ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
+  ((res, res_t), stms) <- collectStms . localScope (scopeOfSegSpace space) $ do
     res <- m gtids'
     res_t <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, res_t)
@@ -282,11 +289,11 @@ genScanWithKernelBodyAndPost lvl desc segments mkScanLam shape nes mkPostLam m =
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 bindLambdaInputArrays ::
-  (Traversable f) =>
+  (MonadBuilder m, Rep m ~ GPU, Traversable f) =>
   f SubExp ->
   Lambda GPU ->
   [VName] ->
-  Builder GPU ()
+  m ()
 bindLambdaInputArrays gtids lam arrs = do
   let idxs = toList gtids
   forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) ->
@@ -297,17 +304,17 @@ bindLambdaInputArrays gtids lam arrs = do
         _ ->
           eIndex arr $ map eSubExp idxs
 
-genScan :: (Traversable f) => SegLevel -> Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genScan ::
+  (Traversable f, MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> m [VName]
 genScan lvl desc segments lam nes arrs =
   genScanWithKernelBody lvl desc segments lam nes $ \gtids ->
-    subExpsRes
-      <$> forM
-        arrs
-        ( \arr ->
-            letSubExp (baseName arr <> "_elem") =<< eIndex arr (toList $ fmap eSubExp gtids)
-        )
+    fmap subExpsRes . forM arrs $ \arr ->
+      letSubExp (baseName arr <> "_elem") =<< eIndex arr (toList $ fmap eSubExp gtids)
 
-genExScan :: (Traversable f) => SegLevel -> Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genExScan ::
+  (MonadBuilder m, Rep m ~ GPU, Traversable f) =>
+  SegLevel -> Name -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> m [VName]
 genExScan lvl desc segments lam nes arrs =
   genScanWithKernelBody lvl desc segments lam nes $ \gtids ->
     let Just (outerDims, innerDim) = unsnoc $ toList gtids
@@ -321,10 +328,11 @@ genExScan lvl desc segments lam nes arrs =
           pure $ subExpsRes prescan
 
 segScanLambda ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   Lambda GPU ->
-  ([SubExp] -> Builder GPU ()) ->
+  ([SubExp] -> m ()) ->
   [SubExp] ->
-  Builder GPU (Lambda GPU)
+  m (Lambda GPU)
 segScanLambda lam readFree gtids = do
   x_flag_p <- newParam "x_flag" $ Prim Bool
   y_flag_p <- newParam "y_flag" $ Prim Bool
@@ -343,17 +351,20 @@ segScanLambda lam readFree gtids = do
             )
         ]
 
-genSegScan :: SegLevel -> Name -> Lambda GPU -> [SubExp] -> VName -> [VName] -> Builder GPU [VName]
+genSegScan ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> Name -> Lambda GPU -> [SubExp] -> VName -> [VName] -> m [VName]
 genSegScan lvl desc lam nes flags arrs = do
   w <- arraySize 0 <$> lookupType flags
   lam' <- segScanLambda lam (const $ pure ()) []
   drop 1 <$> genScan lvl desc [w] lam' (constant False : nes) (flags : arrs)
 
 segScanomapPostLambda ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   Lambda GPU ->
-  ([SubExp] -> Builder GPU ()) ->
+  ([SubExp] -> m ()) ->
   [SubExp] ->
-  Builder GPU (Lambda GPU)
+  m (Lambda GPU)
 segScanomapPostLambda lam readFree gtids = do
   flag_p <- newParam "seg_flag" $ Prim Bool
   mkLambda (flag_p : lambdaParams lam) $ do
@@ -361,6 +372,7 @@ segScanomapPostLambda lam readFree gtids = do
     bodyBind $ lambdaBody lam
 
 genSegScanomap ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel ->
   Name ->
   Lambda GPU ->
@@ -368,13 +380,14 @@ genSegScanomap ::
   VName ->
   Lambda GPU ->
   [VName] ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU [VName]
+  ([SubExp] -> m ()) ->
+  m [VName]
 genSegScanomap lvl desc scan_lam nes flags map_lam arrs readFree = do
   post_lam <- mkIdentityLambda $ lambdaReturnType map_lam
   genSegScanomapWithPost lvl desc scan_lam nes flags post_lam map_lam arrs readFree
 
 genSegScanomapWithPost ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel ->
   Name ->
   Lambda GPU ->
@@ -383,8 +396,8 @@ genSegScanomapWithPost ::
   Lambda GPU ->
   Lambda GPU ->
   [VName] ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU [VName]
+  ([SubExp] -> m ()) ->
+  m [VName]
 genSegScanomapWithPost lvl desc scan_lam nes flags post_lam map_lam arrs readFree = do
   w <- arraySize 0 <$> lookupType flags
 
@@ -408,16 +421,18 @@ genSegScanomapWithPost lvl desc scan_lam nes flags post_lam map_lam arrs readFre
     )
 
 withReadFree ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   Lambda GPU ->
-  ([SubExp] -> Builder GPU ()) ->
+  ([SubExp] -> m ()) ->
   [SubExp] ->
-  Builder GPU (Lambda GPU)
+  m (Lambda GPU)
 withReadFree lam readFree gtids =
   mkLambda (lambdaParams lam) $ do
     readFree gtids
     bodyBind $ lambdaBody lam
 
 genUniformSegScanomapWithPost ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel ->
   [SubExp] ->
   Name ->
@@ -427,8 +442,8 @@ genUniformSegScanomapWithPost ::
   Lambda GPU ->
   Lambda GPU ->
   [VName] ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU [VName]
+  ([SubExp] -> m ()) ->
+  m [VName]
 genUniformSegScanomapWithPost lvl segments desc scan_lam shape nes post_lam map_lam arrs readFree = do
   genScanWithKernelBodyAndPost
     lvl
@@ -444,24 +459,32 @@ genUniformSegScanomapWithPost lvl segments desc scan_lam shape nes post_lam map_
         bodyBind (lambdaBody map_lam)
     )
 
-genPrefixSum :: SegLevel -> Name -> VName -> Builder GPU VName
+genPrefixSum ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> Name -> VName -> m VName
 genPrefixSum lvl desc ns = do
   ws <- arrayDims <$> lookupType ns
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
   head <$> genScan lvl desc ws add_lam [intConst Int64 0] [ns]
 
-genExPrefixSum :: SegLevel -> Name -> VName -> Builder GPU VName
+genExPrefixSum ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> Name -> VName -> m VName
 genExPrefixSum lvl desc ns = do
   ws <- arrayDims <$> lookupType ns
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
   head <$> genExScan lvl desc ws add_lam [intConst Int64 0] [ns]
 
-genSegPrefixSum :: SegLevel -> Name -> VName -> VName -> Builder GPU VName
+genSegPrefixSum ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> Name -> VName -> VName -> m VName
 genSegPrefixSum lvl desc flags ns = do
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
   head <$> genSegScan lvl desc add_lam [intConst Int64 0] flags [ns]
 
-genScatter :: SegLevel -> VName -> SubExp -> (SubExp -> Builder GPU (VName, SubExp)) -> Builder GPU (Exp GPU)
+genScatter ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> SubExp -> (SubExp -> m (VName, SubExp)) -> m (Exp GPU)
 genScatter lvl dest n f = do
   gtid <- newVName "gtid"
   space <- mkSegSpace [(gtid, n)]
@@ -474,7 +497,9 @@ genScatter lvl dest n f = do
     lvl' <- capThreadSegLevel [n] "genScatter" lvl $ NoRecommendation SegVirt
     letTupExp' "scatter" $ Op $ SegOp $ SegMap lvl' space [acc_t] kbody
 
-genTabulate :: SegLevel -> SubExp -> (SubExp -> Builder GPU [SubExp]) -> Builder GPU (Exp GPU)
+genTabulate ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> SubExp -> (SubExp -> m [SubExp]) -> m (Exp GPU)
 genTabulate lvl w m = do
   gtid <- newVName "gtid"
   space <- mkSegSpace [(gtid, w)]
@@ -486,7 +511,9 @@ genTabulate lvl w m = do
   lvl' <- capThreadSegLevel [w] "genTabulate" lvl $ NoRecommendation SegVirt
   pure $ Op $ SegOp $ SegMap lvl' space ts kbody
 
-genFlags :: SegLevel -> SubExp -> VName -> Builder GPU VName
+genFlags ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> SubExp -> VName -> m VName
 genFlags lvl m offsets = do
   flags_allfalse <-
     letExp "flags_allfalse" . BasicOp $
@@ -496,7 +523,9 @@ genFlags lvl m offsets = do
     i <- letExp "i" =<< eIndex offsets [eSubExp gtid]
     pure (i, constant True)
 
-genSegRed :: SegLevel -> VName -> VName -> VName -> [VName] -> Reduce SOACS -> Builder GPU [VName]
+genSegRed ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> VName -> VName -> [VName] -> Reduce SOACS -> m [VName]
 genSegRed lvl segments flags offsets elems red = do
   scanned <-
     genSegScan
@@ -517,6 +546,7 @@ genSegRed lvl segments flags offsets elems red = do
     nes = redNeutral red
 
 genSegRedomap ::
+  (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel ->
   VName ->
   VName ->
@@ -524,8 +554,8 @@ genSegRedomap ::
   [VName] ->
   Reduce SOACS ->
   Lambda GPU ->
-  ([SubExp] -> Builder GPU ()) ->
-  Builder GPU ([VName], [VName])
+  ([SubExp] -> m ()) ->
+  m ([VName], [VName])
 genSegRedomap lvl segments flags offsets elems red map_lam readFree = do
   scanned_and_map <-
     genSegScanomap
@@ -550,7 +580,9 @@ genSegRedomap lvl segments flags offsets elems red map_lam readFree = do
     nes = redNeutral red
 
 -- | Produces a multidimensional iota for the given shape.
-genShapeIota :: SegLevel -> Shape -> Builder GPU VName
+genShapeIota ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> Shape -> m VName
 genShapeIota lvl shape = do
   let dims = shapeDims shape
   letExp "shape_iota" <=< segMap lvl dims $ \gtids -> do
@@ -563,7 +595,9 @@ genShapeIota lvl shape = do
 -- Note: If given a multi-dimensional array,
 -- `#segments` and `sum of segment sizes` will be arrays, not scalars.
 -- `segment start offsets` will always have the same shape as `ks`.
-exScanAndSum :: SegLevel -> VName -> Builder GPU (SubExp, VName, SubExp)
+exScanAndSum ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> m (SubExp, VName, SubExp)
 exScanAndSum lvl ks = do
   ns <- arrayDims <$> lookupType ks
   -- If `ks` only has a single dimension
@@ -595,7 +629,9 @@ exScanAndSum lvl ks = do
     pure [subExpRes m]
   pure (Var ns', offsets, Var ms)
 
-genSegIota :: SegLevel -> VName -> Builder GPU (VName, VName, VName)
+genSegIota ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> m (VName, VName, VName)
 genSegIota lvl ks = do
   (_n, offsets, m) <- exScanAndSum lvl ks
   flags <- genFlags lvl m offsets
@@ -608,7 +644,11 @@ genSegIota lvl ks = do
   where
     one = intConst Int64 1
 
-genRepIota :: SegLevel -> VName -> Builder GPU (VName, VName, VName)
+genRepIota ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel ->
+  VName ->
+  m (VName, VName, VName)
 genRepIota lvl ks = do
   (n, offsets, m) <- exScanAndSum lvl ks
   is <- letExp "is" <=< genTabulate lvl n $ \i -> do
@@ -633,7 +673,9 @@ genRepIota lvl ks = do
     zero = intConst Int64 0
     negone = intConst Int64 (-1)
 
-genPartition :: SegLevel -> VName -> VName -> VName -> Builder GPU (VName, VName, VName)
+genPartition ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> VName -> VName -> m (VName, VName, VName)
 genPartition lvl n k cls = do
   let n' = Var n
   let k' = Var k
@@ -681,7 +723,9 @@ genPartition lvl n k cls = do
     pure (ind, i)
   pure (counts, global_offs, res)
 
-genFilter :: SegLevel -> VName -> BuilderT GPU (State VNameSource) (SubExp, VName)
+genFilter ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> m (SubExp, VName)
 genFilter lvl flags = do
   w <- arraySize 0 <$> lookupType flags
   flags_int <- letExp "flags_int" <=< segMap lvl [w] $ \[i] -> do
@@ -833,7 +877,9 @@ flatteningBuiltins =
   ]
 
 -- | @[0,1,2,0,1,0,1,2,3,4,...]@.  Returns @(flags,offsets,elems)@.
-doSegIota :: SegLevel -> VName -> Builder GPU (VName, VName, VName)
+doSegIota ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> m (VName, VName, VName)
 doSegIota lvl ns
   | inlineBuiltinAtLevel lvl =
       genSegIota lvl ns
@@ -861,7 +907,9 @@ doSegIota lvl ns
 
 -- | Produces @[0,0,0,1,1,2,2,2,...]@.  Returns @(flags, offsets,
 -- elems)@.
-doRepIota :: SegLevel -> VName -> Builder GPU (VName, VName, VName)
+doRepIota ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> m (VName, VName, VName)
 doRepIota lvl ns
   | inlineBuiltinAtLevel lvl =
       genRepIota lvl ns
@@ -887,7 +935,9 @@ doRepIota lvl ns
           Safe
       pure (flags, offsets, elems)
 
-doPrefixSum :: SegLevel -> VName -> Builder GPU VName
+doPrefixSum ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> m VName
 doPrefixSum lvl ns
   | inlineBuiltinAtLevel lvl =
       genPrefixSum lvl "prefix_sum" ns
@@ -901,7 +951,9 @@ doPrefixSum lvl ns
           [(toDecl (staticShapes1 ns_t) Unique, mempty)]
           Safe
 
-doPartition :: SegLevel -> VName -> VName -> Builder GPU (VName, VName, VName)
+doPartition ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> VName -> m (VName, VName, VName)
 doPartition lvl k cs
   | inlineBuiltinAtLevel lvl = do
       cs_t <- lookupType cs
