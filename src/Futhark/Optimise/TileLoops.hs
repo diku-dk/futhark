@@ -122,6 +122,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- 2D tiling of redomap.
       | (gtids, kdims) <- unzip $ unSegSpace initial_space,
         Just (w, arrs, form) <- tileable stm_to_tile,
+        all (\gtid -> subExpInvariantTo gtid variance w) gtids,
         Just inputs <-
           mapM (invariantToOneOfTwoInnerDims branch_variant variance gtids) arrs,
         not $ null $ tiledInputs inputs,
@@ -145,6 +146,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- 1D tiling of redomap.
       | (gtid, kdim) : top_space_rev <- reverse $ unSegSpace initial_space,
         Just (w, arrs, form) <- tileable stm_to_tile,
+        subExpInvariantTo gtid variance w,
         inputs <- map (is1DTileable gtid variance) arrs,
         not $ null $ tiledInputs inputs,
         gtid `notNameIn` branch_variant,
@@ -745,9 +747,21 @@ tileReturns dims_on_top dims arr = do
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
   pure $ TileReturns mempty tile_dims arr'
 
-is1DTileable :: VName -> M.Map VName Names -> VName -> InputArray
+lookupVariance :: VName -> VarianceTable -> Names
+lookupVariance v variance = oneName v <> M.findWithDefault mempty v variance
+
+-- | Is the second name invariant to the first?
+varInvariantTo :: VName -> VarianceTable -> VName -> Bool
+varInvariantTo gtid variance v =
+  not $ nameIn gtid $ lookupVariance v variance
+
+subExpInvariantTo :: VName -> VarianceTable -> SubExp -> Bool
+subExpInvariantTo gtid variance (Var v) = varInvariantTo gtid variance v
+subExpInvariantTo _ _ Constant {} = True
+
+is1DTileable :: VName -> VarianceTable -> VName -> InputArray
 is1DTileable gtid variance arr
-  | not $ nameIn gtid $ M.findWithDefault mempty arr variance =
+  | varInvariantTo gtid variance arr =
       InputTile [0] arr
   | otherwise =
       InputDontTile arr
@@ -957,7 +971,7 @@ tiling1d dims_on_top gtid kdim w = do
 
 invariantToOneOfTwoInnerDims ::
   Names ->
-  M.Map VName Names ->
+  VarianceTable ->
   [VName] ->
   VName ->
   Maybe InputArray
