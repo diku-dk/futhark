@@ -337,9 +337,7 @@ compileSegScan ::
   CallKernelGen ()
 compileSegScan pat lvl space ts scan_op map_kbody post_op = do
   attrs <- lvlKernelAttrs lvl
-  let scanop_nes = segBinOpNeutral scan_op
-
-      n = product $ map pe64 $ segSpaceDims space
+  let n = product $ map pe64 $ segSpaceDims space
 
       scan_tys' = lambdaReturnType $ segBinOpLambda scan_op
       map_tys' = drop (length $ segBinOpNeutral scan_op) ts
@@ -545,11 +543,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                   forM_ (zip scan_private_chunks $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
                     copyDWIMFix dest [i] src []
 
-              out_of_bounds =
-                forM_ (zip scan_private_chunks scanop_nes) $ \(dest, ne) ->
-                  copyDWIMFix dest [i] ne []
-
-          sIf (virt_tid .<. n) in_bounds out_of_bounds
+          sWhen (virt_tid .<. n) in_bounds
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
       sComment "Transpose scan inputs" $ do
@@ -576,8 +570,11 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                 gidx <- dPrimVE "gidx" $ (ltid32 * chunk32) + 1
                 dPrimVE "new_sgm" $ (gidx + sExt32 i - boundary) `mod` segsize_compact .==. 0
               else pure false
-          -- skip scan of first element in segment
-          sUnless new_sgm $ do
+          -- skip scan of first element in segment, and skip when next element is out of bounds.
+          -- After the transpose, thread ltid holds consecutive elements starting at
+          -- block_offset + ltid*chunk, so the next element in the private chunk is at
+          -- block_offset + ltid*chunk + (i+1).
+          sWhen (bNot new_sgm .&&. block_offset + ltid * chunk + (i + 1) .<. n) $ do
             forM_ (zip4 scan_private_chunks xs ys scan_tys) $ \(src, x, y, ty) -> do
               dPrim_ x ty
               dPrim_ y ty
@@ -589,8 +586,18 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                 copyDWIMFix dest [i + 1] res []
 
       sComment "Publish results in shared memory" $ do
+        -- Publish the last valid element rather than chunk-1.  After the
+        -- transpose, thread ltid holds consecutive elements starting at
+        -- block_offset + ltid*chunk, so the last valid slot is at index
+        -- min(chunk-1, n - block_offset - ltid*chunk - 1).
+        last_valid_i <-
+          dPrimVE "last_valid_i" $
+            sMax64 0 $
+              sMin64 (chunk - 1) $
+                n - block_offset - ltid * chunk - 1
         forM_ (zip prefixArrays scan_private_chunks) $ \(dest, src) ->
-          copyDWIMFix dest [ltid] (Var src) [chunk - 1]
+          sWhen (block_offset + ltid * chunk .<. n) $
+            copyDWIMFix dest [ltid] (Var src) [last_valid_i]
         sOp local_barrier
 
       let crossesSegment = do
@@ -603,18 +610,25 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       scan_op1 <- renameLambda $ segBinOpLambda scan_op
 
       accs <- mapM (dPrimSV "acc") scan_tys
+      -- Number of threads with at least one in-bounds element.  After the
+      -- transpose each thread holds 'chunk' consecutive elements starting at
+      -- block_offset + ltid*chunk, so the active thread count is
+      -- ceil((n - block_offset) / chunk), clamped to tblock_size.
+      valid_threads_cnt <-
+        dPrimVE "valid_threads_cnt" $
+          sMin64 tblock_size_e $ (n - block_offset) `divUp` chunk
       sComment "Scan results (with warp scan)" $ do
         blockScan
           crossesSegment
           tblock_size_e
-          num_virt_threads
+          valid_threads_cnt
           scan_op1
           prefixArrays
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
         let firstThread acc prefixes =
-              copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 tblock_size_e - 1]
+              copyDWIMFix (tvVar acc) [] (Var prefixes) [valid_threads_cnt - 1]
             notFirstThread acc prefixes =
               copyDWIMFix (tvVar acc) [] (Var prefixes) [ltid - 1]
         sIf
@@ -634,8 +648,6 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           sOp global_fence
           everythingVolatile $
             copyDWIMFix statusFlags [tvExp dyn_id] (intConst Int8 statusP) []
-          forM_ (zip scanop_nes accs) $ \(ne, acc) ->
-            copyDWIMFix (tvVar acc) [] ne []
         -- end sWhen
 
         let warp_size = kernelWaveSize constants
@@ -775,8 +787,6 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
               everythingVolatile $ copyDWIMFix statusFlags [tvExp dyn_id] (intConst Int8 statusP) []
             forM_ (zip exchanges prefixes) $ \(exchange, prefix) ->
               copyDWIMFix exchange [0] (tvSize prefix) []
-            forM_ (zip3 accs scan_tys scanop_nes) $ \(acc, ty, ne) ->
-              tvVar acc <~~ toExp' ty ne
         -- end sWhen
         -- end sWhen
 
@@ -802,20 +812,36 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
             dPrimV_ x' $ tvExp prefix
             dPrimV_ y' $ tvExp acc
 
+        -- Thread 0 uses the global prefix directly as its carry-in, since
+        -- its acc holds the block aggregate rather than a previous-thread prefix.
+        -- For blockNewSgm blocks, thread 0 has no carry-in (skip prefix apply).
+        -- Other threads combine the global prefix with their previous-thread prefix.
         sIf
-          (ltid32 * chunk32 .<. boundary .&&. bNot blockNewSgm)
-          ( compileStms mempty (bodyStms $ lambdaBody scan_op4) $
-              forM_ (zip3 xs scan_tys $ map resSubExp $ bodyResult $ lambdaBody scan_op4) $
-                \(x, ty, res) -> x <~~ toExp' ty res
+          (ltid32 .==. 0)
+          ( sUnless blockNewSgm $
+              forM_ (zip xs xs') $ \(x, x') ->
+                copyDWIMFix x [] (Var x') []
           )
-          (forM_ (zip xs accs) $ \(x, acc) -> copyDWIMFix x [] (Var $ tvVar acc) [])
+          ( sIf
+              (ltid32 * chunk32 .<. boundary .&&. bNot blockNewSgm)
+              ( compileStms mempty (bodyStms $ lambdaBody scan_op4) $
+                  forM_ (zip3 xs scan_tys $ map resSubExp $ bodyResult $ lambdaBody scan_op4) $
+                    \(x, ty, res) -> x <~~ toExp' ty res
+              )
+              (forM_ (zip xs accs) $ \(x, acc) -> copyDWIMFix x [] (Var $ tvVar acc) [])
+          )
         -- calculate where previous thread stopped, to determine number of
         -- elements left before new segment.
         stop <-
           dPrimVE "stopping_point" $
             segsize_compact - (ltid32 * chunk32 - 1 + segsize_compact - boundary) `rem` segsize_compact
         sFor "i" chunk $ \i -> do
-          sWhen (sExt32 i .<. stop - 1) $ do
+          -- After the transpose, slot i of thread ltid holds the element at
+          -- global index block_offset + ltid*chunk + i.
+          let elem_idx = block_offset + ltid * chunk + i
+          -- Skip prefix application for thread 0 in a new-segment block,
+          -- and skip out-of-bounds slots (no neutral element to fall back on).
+          sWhen (sExt32 i .<. stop - 1 .&&. bNot (ltid32 .==. 0 .&&. blockNewSgm) .&&. elem_idx .<. n) $ do
             forM_ (zip scan_private_chunks ys) $ \(src, y) ->
               -- only include prefix for the first segment part per thread
               copyDWIMFix y [] (Var src) [i]
