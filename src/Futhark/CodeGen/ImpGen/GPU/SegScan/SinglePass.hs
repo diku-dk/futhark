@@ -133,11 +133,12 @@ statusP = 2
 inBlockScanLookback ::
   KernelConstants ->
   Imp.TExp Int64 ->
+  Imp.TExp Int32 ->
   VName ->
   [VName] ->
   Lambda GPUMem ->
   InKernelGen ()
-inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everythingVolatile $ do
+inBlockScanLookback constants arrs_full_size read_offset flag_arr arrs scan_lam = everythingVolatile $ do
   flg_x :: TV Int8 <- dPrim "flg_x"
   flg_y :: TV Int8 <- dPrim "flg_y"
   let flg_param_x = Param mempty (tvVar flg_x) (MemPrim p_int8)
@@ -151,6 +152,7 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
   skip_threads <- dPrim "skip_threads"
   let in_block_thread_active =
         tvExp skip_threads .<=. in_block_id
+          .&&. in_block_id - tvExp skip_threads + read_offset .>=. 0
       actual_params = lambdaParams scan_lam
       (x_params, y_params) =
         splitAt (length actual_params `div` 2) actual_params
@@ -622,8 +624,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
         sOp local_barrier
 
-      prefixes <- forM (zip scanop_nes scan_tys) $ \(ne, ty) ->
-        dPrimV "prefix" $ TPrimExp $ toExp' ty ne
+      prefixes <- forM scan_tys $ \ty -> dPrimSV "prefix" ty
       blockNewSgm <- dPrimVE "block_new_sgm" $ sgm_idx .==. 0
       sComment "Perform lookback" $ do
         sWhen (blockNewSgm .&&. ltid32 .==. 0) $ do
@@ -674,6 +675,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                     copyDWIMFix (tvVar prefix) [] (Var incprefixArray) [tvExp dyn_id - 1]
             )
             ( do
+                is_first_iter <- dPrimV "is_first_iter" $ fromBool True
                 readOffset <-
                   dPrimV "readOffset" $
                     sExt32 $
@@ -686,8 +688,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                       | otherwise = true
                 sWhile (tvExp readOffset .>. loopStop) $ do
                   readI <- dPrimV "read_i" $ tvExp readOffset + ltid32
-                  aggrs <- forM (zip scanop_nes scan_tys) $ \(ne, ty) ->
-                    dPrimV "aggr" $ TPrimExp $ toExp' ty ne
+                  aggrs <- forM scan_tys $ \ty -> dPrimSV "aggr" ty
                   flag <- dPrimV "flag" (statusX :: Imp.TExp Int8)
                   everythingVolatile . sWhen (tvExp readI .>=. 0) $ do
                     sIf
@@ -719,6 +720,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                     inBlockScanLookback
                       constants
                       num_virt_threads
+                      (tvExp readOffset)
                       warpscan
                       exchanges
                       lam'
@@ -735,15 +737,24 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                         readOffset <-- tvExp readOffset - zExt32 warp_size
                     )
 
-                  -- update prefix if flag different than STATUS_X:
+                  -- update prefix if flag different than STATUS_X, avoiding neutral element
                   sWhen (tvExp flag .>. statusX) $ do
-                    lam <- renameLambda scan_op1
-                    let (xs, ys) = splitAt (length scan_tys) $ map paramName $ lambdaParams lam
-                    forM_ (zip xs aggrs) $ \(x, aggr) -> dPrimV_ x (tvExp aggr)
-                    forM_ (zip ys prefixes) $ \(y, prefix) -> dPrimV_ y (tvExp prefix)
-                    compileStms mempty (bodyStms $ lambdaBody lam) $
-                      forM_ (zip3 prefixes scan_tys $ map resSubExp $ bodyResult $ lambdaBody lam) $
-                        \(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res)
+                    sIf
+                      (tvExp is_first_iter)
+                      ( do
+                          forM_ (zip prefixes aggrs) $ \(prefix, aggr) ->
+                            prefix <-- tvExp aggr
+                          is_first_iter <-- fromBool False
+                      )
+                      ( do
+                          lam <- renameLambda scan_op1
+                          let (xs, ys) = splitAt (length scan_tys) $ map paramName $ lambdaParams lam
+                          forM_ (zip xs aggrs) $ \(x, aggr) -> dPrimV_ x (tvExp aggr)
+                          forM_ (zip ys prefixes) $ \(y, prefix) -> dPrimV_ y (tvExp prefix)
+                          compileStms mempty (bodyStms $ lambdaBody lam) $
+                            forM_ (zip3 prefixes scan_tys $ map resSubExp $ bodyResult $ lambdaBody lam) $
+                              \(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res)
+                      )
                   sOp local_fence
             )
 
