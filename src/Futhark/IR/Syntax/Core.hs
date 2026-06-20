@@ -625,8 +625,7 @@ data EntryPointType
 
 -- | The representation of an opaque type.
 data OpaqueType
-  = OpaqueType [ValueType]
-  | -- | Note that the field ordering here denote the actual
+  = -- | Note that the field ordering here denote the actual
     -- representation - make sure it is preserved.
     OpaqueRecord [(Name, EntryPointType)]
   | -- | Constructor ordering also denotes representation, in that the

@@ -226,10 +226,9 @@ entryPointType types t ts
       pure (u, I.TypeTransparent $ I.ValueType I.Signed r ts0)
   | otherwise = do
       case E.entryType t of
-        E.Scalar (E.Record fs)
-          | not $ null fs -> do
-              let fs' = recordFields types fs $ E.entryAscribed t
-              addType desc . I.OpaqueRecord =<< opaqueRecord types fs' ts
+        E.Scalar (E.Record fs) -> do
+          let fs' = recordFields types fs $ E.entryAscribed t
+          addType desc . I.OpaqueRecord =<< opaqueRecord types fs' ts
         E.Scalar (E.Sum cs) -> do
           let (_, places) = internaliseSumTypeRep cs
               cs' = sumConstrs types cs $ E.entryAscribed t
@@ -237,16 +236,15 @@ entryPointType types t ts
               ts' = if length cs == 1 then ts else drop 1 ts
           addType desc . I.OpaqueSum (map valueType ts)
             =<< opaqueSum types cs'' ts'
-        E.Array _ shape (E.Record fs)
-          | not $ null fs -> do
-              let rank = E.shapeRank shape
-                  fs' = recordFields types fs $ rowTypeExp rank =<< E.entryAscribed t
-                  ts' = map (strip rank) ts
-                  record_t = E.Scalar (E.Record fs)
-                  record_te = rowTypeExp rank =<< E.entryAscribed t
-              ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
-              addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
-                =<< opaqueRecordArray types rank fs' ts
+        E.Array _ shape (E.Record fs) -> do
+          let rank = E.shapeRank shape
+              fs' = recordFields types fs $ rowTypeExp rank =<< E.entryAscribed t
+              ts' = map (strip rank) ts
+              record_t = E.Scalar (E.Record fs)
+              record_te = rowTypeExp rank =<< E.entryAscribed t
+          ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
+          addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
+            =<< opaqueRecordArray types rank fs' ts
         E.Array _ shape et -> do
           let ts' = map (strip (E.shapeRank shape)) ts
               rank = E.shapeRank shape
@@ -254,7 +252,7 @@ entryPointType types t ts
           ept <- snd <$> entryPointType types (E.EntryType (E.Scalar et) elem_te) ts'
           addType desc . I.OpaqueArray (E.shapeRank shape) (entryPointTypeName ept) $
             map valueType ts
-        _ -> addType desc $ I.OpaqueType $ map valueType ts
+        _ -> error $ "entryPointType: " <> E.prettyString (E.entryType t)
 
       pure (u, I.TypeOpaque desc)
   where
