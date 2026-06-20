@@ -377,20 +377,20 @@ instance Monoid IntraAcc where
   mempty = IntraAcc mempty mempty mempty
 
 type IntrablockM =
-  BuilderT GPU (MaybeT (RWS () IntraAcc VNameSource))
+  BuilderT GPU (RWS () IntraAcc VNameSource)
 
 instance MonadLogger IntrablockM where
-  addLog log = lift $ lift $ tell mempty {accLog = log}
+  addLog log = lift $ tell mempty {accLog = log}
 
 runIntrablockM ::
   (MonadFreshNames m, HasScope GPU m) =>
   IntrablockM () ->
-  m (Maybe (IntraAcc, Stms GPU))
+  m (IntraAcc, Stms GPU)
 runIntrablockM m = do
   scope <- castScope <$> askScope
   modifyNameSource $ \src ->
-    let (res, src', acc) = runRWS (runMaybeT (runBuilderT m scope)) () src
-     in (fmap (\((), kstms) -> (acc, kstms)) res, src')
+    let (((), kstms), src', acc) = runRWS (runBuilderT m scope) () src
+     in ((acc, kstms), src')
 
 parallelMin :: [SubExp] -> IntrablockM ()
 parallelMin ws =
@@ -533,15 +533,13 @@ intrablockParalleliseBody ::
   Body SOACS ->
   m (Maybe ([[SubExp]], [[SubExp]], Log, KernelBody GPU))
 intrablockParalleliseBody map_in_block body = do
-  res <-
+  (IntraAcc min_ws avail_ws log, kstms) <-
     runIntrablockM $ intrablockStms map_in_block $ bodyStms body
-  pure $ do
-    (IntraAcc min_ws avail_ws log, kstms) <- res
-    pure
-      ( S.toList min_ws,
-        S.toList avail_ws,
-        log,
-        Body () kstms $ map ret $ bodyResult body
-      )
+  pure . Just $
+    ( S.toList min_ws,
+      S.toList avail_ws,
+      log,
+      Body () kstms $ map ret $ bodyResult body
+    )
   where
     ret (SubExpRes cs se) = Returns ResultMaySimplify cs se
