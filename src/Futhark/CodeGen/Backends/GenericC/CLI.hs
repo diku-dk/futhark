@@ -285,13 +285,14 @@ printStm manifest tname e =
       where
         fields = recordFields record
         printField field =
-          printStm manifest (recordFieldType field) [C.cexp|field|]
+          printStm manifest (recordFieldType field) [C.cexp|field_val|]
         newline = [C.cstm|puts("");|]
         getField field =
           [C.cstm|{$ty:(recordFieldCType manifest field) field;
                    if ($id:(recordFieldProject field)(ctx, &field, $exp:e) != FUTHARK_SUCCESS) {
                      futhark_panic(1, "Failed to project field %s from result\n", $string:(T.unpack (recordFieldName field)));
                    } else {
+                     $ty:(recordFieldCType manifest field) field_val = field;
                      $stm:(printField field)
                    }
                    }|]

@@ -426,8 +426,6 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
               )
 
 instance Pretty OpaqueType where
-  pretty (OpaqueType ts) =
-    "opaque" <+> nestedBlock (stack $ map pretty ts)
   pretty (OpaqueRecord fs) =
     "record" <+> nestedBlock (stack $ map p fs)
     where
