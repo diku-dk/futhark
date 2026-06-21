@@ -513,6 +513,7 @@ entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueArray _ _ vts -> map valueTypeSign vts
     OpaqueRecordArray _ _ fs -> foldMap (entryPointSignedness types . snd) fs
+    OpaqueRecord [] -> [Signed]
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueSum vts _ -> map valueTypeSign vts
 
@@ -526,6 +527,7 @@ entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueArray _ _ vts -> length vts
     OpaqueRecordArray _ _ fs -> sum $ map (entryPointSize types . snd) fs
+    OpaqueRecord [] -> 1
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueSum vts _ -> length vts
 

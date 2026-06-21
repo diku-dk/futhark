@@ -236,7 +236,7 @@ entryPointType types t ts
               ts' = if length cs == 1 then ts else drop 1 ts
           addType desc . I.OpaqueSum (map valueType ts)
             =<< opaqueSum types cs'' ts'
-        E.Array _ shape (E.Record fs) -> do
+        E.Array _ shape (E.Record fs) | not $ null fs -> do
           let rank = E.shapeRank shape
               fs' = recordFields types fs $ rowTypeExp rank =<< E.entryAscribed t
               ts' = map (strip rank) ts

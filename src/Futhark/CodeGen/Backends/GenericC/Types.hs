@@ -456,36 +456,26 @@ recordArrayProjectFunctions ::
   CompilerM op s [Manifest.RecordField]
 recordArrayProjectFunctions = recordProjectFunctions
 
-recordArrayZipFunctions ::
+recordArrayZipFunction ::
   OpaqueTypes ->
   Name ->
   [(Name, EntryPointType)] ->
   [ValueType] ->
   Int ->
   CompilerM op s Manifest.CFuncName
-recordArrayZipFunctions types desc fs vds rank = do
+recordArrayZipFunction types desc fs vds rank = do
   opaque_type <- opaqueToCType desc
   ctx_ty <- contextType
   ops <- asks envOperations
   new <- publicName $ "zip_" <> opaqueName desc
 
-  (param_names, params, new_stms) <-
-    case vds of
-      [] ->
-        pure
-          ( [],
-            [],
-            [ [C.citem|v->shape[$int:i] = shape[$int:i];|]
-            | i <- [0 .. rank - 1]
-            ]
-          )
-      _ -> recordNewSetFields types fs vds
+  (param_names, params, new_stms) <- recordNewSetFields types fs vds
 
   headerDecl
     (OpaqueDecl desc)
-    [C.cedecl|int $id:new($ty:ctx_ty *ctx, $ty:opaque_type** out, typename int64_t[$int:rank], $params:params);|]
+    [C.cedecl|int $id:new($ty:ctx_ty *ctx, $ty:opaque_type** out, $params:params);|]
   libDecl
-    [C.cedecl|int $id:new($ty:ctx_ty *ctx, $ty:opaque_type** out, typename int64_t shape[$int:rank], $params:params) {
+    [C.cedecl|int $id:new($ty:ctx_ty *ctx, $ty:opaque_type** out, $params:params) {
                 if (!$exp:(sameShape param_names)) {
                   set_error(ctx, strdup("Cannot zip arrays with different shapes."));
                   return 1;
@@ -498,14 +488,12 @@ recordArrayZipFunctions types desc fs vds rank = do
   pure new
   where
     valueShape TypeTransparent {} p =
-      [C.cexp|$id:p->shape|]
+      [[C.cexp|$id:p->shape[$int:i]|] | i <- [0 .. rank - 1]]
     -- We know that the opaque value must contain arrays.
     valueShape TypeOpaque {} p =
-      [C.cexp|$id:p->$id:(tupleField 0)->shape|]
-    matches param_shape =
-      [[C.cexp|$exp:param_shape[$int:i] == shape[$int:i]|] | i <- [0 .. rank - 1]]
+      [[C.cexp|$id:p->$id:(tupleField 0)->shape[$int:i]|] | i <- [0 .. rank - 1]]
     sameShape param_names =
-      allTrue $ concatMap matches $ zipWith valueShape (map snd fs) param_names
+      allTrue $ map allEqual $ L.transpose $ zipWith valueShape (map snd fs) param_names
 
 indexingDefs ::
   Int ->
@@ -577,9 +565,10 @@ recordArrayIndexFunction space _types desc rank elemtype vds = do
       indexingDefs rank $
         if null vds
           then [C.cexp|arr->shape|]
-          else [C.cexp|arr->$id:(tupleField 0)|]
+          else [C.cexp|arr->$id:(tupleField 0)->shape|]
 
     setField copy j (ValueType _ (Rank r) pt)
+      | pt == Unit = pure ()
       | r == rank =
           -- Easy case: just copy the scalar from the array into the
           -- variable.
@@ -669,6 +658,7 @@ recordArraySetFunction space _types desc rank elemtype vds = do
                        $int:(r-rank) * sizeof(int64_t)) == 0|]
 
     setField copy j (ValueType _ (Rank r) pt)
+      | pt == Unit = pure ()
       | r == rank =
           copy
             CopyBarrier
@@ -790,6 +780,8 @@ recordArrayNewFunction space types desc rank elemtype vds = do
                     goto end;
                   }|]
 
+    handleField _ _ (ValueType _ _ Unit) =
+      pure ()
     handleField copy i (ValueType _ (Rank r) pt) = do
       let elem_size =
             cproduct $
@@ -838,39 +830,6 @@ recordArrayNewFunction space types desc rank elemtype vds = do
       stm
         [C.cstm|for (typename int64_t i = 1; i < n; i++)
                 { $items:check_one }|]
-
-opaqueArrayIndexFunction ::
-  Space ->
-  OpaqueTypes ->
-  Name ->
-  Int ->
-  Name ->
-  [ValueType] ->
-  CompilerM op s Manifest.CFuncName
-opaqueArrayIndexFunction = recordArrayIndexFunction
-
-opaqueArrayShapeFunction :: Name -> [ValueType] -> CompilerM op s Manifest.CFuncName
-opaqueArrayShapeFunction = recordArrayShapeFunction
-
-opaqueArrayNewFunction ::
-  Space ->
-  OpaqueTypes ->
-  Name ->
-  Int ->
-  Name ->
-  [ValueType] ->
-  CompilerM op s Manifest.CFuncName
-opaqueArrayNewFunction = recordArrayNewFunction
-
-opaqueArraySetFunction ::
-  Space ->
-  OpaqueTypes ->
-  Name ->
-  Int ->
-  Name ->
-  [ValueType] ->
-  CompilerM op s Manifest.CFuncName
-opaqueArraySetFunction = recordArraySetFunction
 
 sumVariants ::
   Name ->
@@ -1061,7 +1020,7 @@ opaqueExtraOps space types desc (OpaqueRecordArray rank elemtype fs) vds =
   Just . Manifest.OpaqueRecordArray
     <$> ( Manifest.RecordArrayOps rank (nameToText elemtype)
             <$> recordArrayProjectFunctions types desc fs vds
-            <*> recordArrayZipFunctions types desc fs vds rank
+            <*> recordArrayZipFunction types desc fs vds rank
             <*> recordArrayIndexFunction space types desc rank elemtype vds
             <*> recordArrayShapeFunction desc vds
             <*> recordArrayNewFunction space types desc rank elemtype vds
@@ -1070,10 +1029,10 @@ opaqueExtraOps space types desc (OpaqueRecordArray rank elemtype fs) vds =
 opaqueExtraOps space types desc (OpaqueArray rank elemtype _) vds =
   Just . Manifest.OpaqueArray
     <$> ( Manifest.OpaqueArrayOps rank (nameToText elemtype)
-            <$> opaqueArrayIndexFunction space types desc rank elemtype vds
-            <*> opaqueArrayShapeFunction desc vds
-            <*> opaqueArrayNewFunction space types desc rank elemtype vds
-            <*> opaqueArraySetFunction space types desc rank elemtype vds
+            <$> recordArrayIndexFunction space types desc rank elemtype vds
+            <*> recordArrayShapeFunction desc vds
+            <*> recordArrayNewFunction space types desc rank elemtype vds
+            <*> recordArraySetFunction space types desc rank elemtype vds
         )
 
 opaqueLibraryFunctions ::
