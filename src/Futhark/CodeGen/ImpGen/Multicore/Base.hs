@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     decideScheduling,
     decideScheduling',
     renameSegBinOp,
+    renameSegScanOp,
     freeParams,
     renameHistOpLambda,
     atomicUpdateLocking,
@@ -125,6 +126,12 @@ renameSegBinOp segbinops =
   forM segbinops $ \(SegBinOp comm lam ne shape) -> do
     lam' <- renameLambda lam
     pure $ SegBinOp comm lam' ne shape
+
+renameSegScanOp :: [SegScanOp MCMem] -> MulticoreGen [SegScanOp MCMem]
+renameSegScanOp scan_ops =
+  forM scan_ops $ \(SegScanOp lam shape) -> do
+    lam' <- renameLambda lam
+    pure $ SegScanOp lam' shape
 
 compileThreadResult ::
   SegSpace ->

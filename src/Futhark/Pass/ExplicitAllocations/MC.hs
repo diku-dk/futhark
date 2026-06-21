@@ -23,6 +23,8 @@ handleSegOp op = do
             localScope scope . allocInKernelBody,
           mapOnSegBinOpLambda =
             allocInBinOpLambda num_threads (segSpace op),
+          mapOnSegScanOpLambda =
+            allocInBinOpLambda num_threads (segSpace op),
           mapOnSegPostOpLambda =
             allocInPostOpLambda num_threads (segSpace op)
         }

@@ -962,9 +962,9 @@ segmentedScanomapKernel nest perm cs segment_size op_lam map_lam post_lam nes ar
   let onLambda' = fmap fst . runBuilder . onLambda
   isSegmentedOp nest perm (freeIn op_lam) (freeIn map_lam) nes [] $
     \pat ispace inps nes' _ -> do
-      (op_lam', nes'', shape) <- determineReduceOp op_lam nes'
+      (op_lam', _nes'', shape) <- determineReduceOp op_lam nes'
       op_lam'' <- onLambda' op_lam'
-      let scan_op = SegBinOp Noncommutative op_lam'' nes'' shape
+      let scan_op = SegScanOp op_lam'' shape
       post_lam' <- onLambda' post_lam
       let post_op = SegPostOp post_lam'
       lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt

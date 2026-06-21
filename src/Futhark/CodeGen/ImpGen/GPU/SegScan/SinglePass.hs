@@ -19,11 +19,11 @@ import Futhark.Util (mapAccumLM)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, nextMul, quot)
 import Prelude hiding (mod, quot, rem)
 
-xParams, yParams :: SegBinOp GPUMem -> [LParam GPUMem]
+xParams, yParams :: SegScanOp GPUMem -> [LParam GPUMem]
 xParams scan =
-  take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
+  take (length (lambdaReturnType (segScanOpLambda scan))) (lambdaParams (segScanOpLambda scan))
 yParams scan =
-  drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
+  drop (length (lambdaReturnType (segScanOpLambda scan))) (lambdaParams (segScanOpLambda scan))
 
 -- | Given available register, thread block size, scan parameter
 -- types, and map parameter types, compute the largest available chunk
@@ -151,8 +151,11 @@ inBlockScanLookback constants arrs_full_size read_offset flag_arr arrs scan_lam 
 
   skip_threads <- dPrim "skip_threads"
   let in_block_thread_active =
-        tvExp skip_threads .<=. in_block_id
-          .&&. in_block_id - tvExp skip_threads + read_offset .>=. 0
+        tvExp skip_threads
+          .<=. in_block_id
+          .&&. in_block_id
+          - tvExp skip_threads
+          + read_offset .>=. 0
       actual_params = lambdaParams scan_lam
       (x_params, y_params) =
         splitAt (length actual_params `div` 2) actual_params
@@ -305,13 +308,13 @@ shouldUseBitArray t = primType t && elemType t == Bool
 
 earlyReturn ::
   Pat LetDecMem ->
-  SegBinOp GPUMem ->
+  SegScanOp GPUMem ->
   SegPostOp GPUMem ->
   ([[PatElem LetDecMem]], [Bool])
 earlyReturn pat scan_op post_op = (early_write_pats, res_flags)
   where
     post_lam = segPostOpLambda post_op
-    num_scan_res = length $ segBinOpNeutral scan_op
+    num_scan_res = length $ lambdaReturnType $ segScanOpLambda scan_op
     earlyWrite i par =
       if num_scan_res < i && paramName par `notNameIn` free_in_post
         then
@@ -331,7 +334,7 @@ compileSegScan ::
   SegLevel ->
   SegSpace ->
   [Type] ->
-  SegBinOp GPUMem ->
+  SegScanOp GPUMem ->
   KernelBody GPUMem ->
   SegPostOp GPUMem ->
   CallKernelGen ()
@@ -339,8 +342,8 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
   attrs <- lvlKernelAttrs lvl
   let n = product $ map pe64 $ segSpaceDims space
 
-      scan_tys' = lambdaReturnType $ segBinOpLambda scan_op
-      map_tys' = drop (length $ segBinOpNeutral scan_op) ts
+      scan_tys' = lambdaReturnType $ segScanOpLambda scan_op
+      map_tys' = drop (length scan_tys') ts
 
       scan_tys = map elemType scan_tys'
 
@@ -520,7 +523,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           let in_bounds =
                 compileStms mempty (bodyStms map_kbody) $ do
                   let (all_scan_res, map_res) =
-                        splitAt (segBinOpResults [scan_op]) $ bodyResult map_kbody
+                        splitAt (segScanOpResults [scan_op]) $ bodyResult map_kbody
 
                   -- Write map results to memory.
                   forM_ (zip5 map_private_chunks map_global_chunks (map kernelResultSubExp map_res) map_tys' early_write_pats) $
@@ -581,8 +584,8 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
               copyDWIMFix x [] (Var src) [i]
               copyDWIMFix y [] (Var src) [i + 1]
 
-            compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
-              forM_ (zip scan_private_chunks $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(dest, res) ->
+            compileStms mempty (bodyStms $ lambdaBody $ segScanOpLambda scan_op) $
+              forM_ (zip scan_private_chunks $ map resSubExp $ bodyResult $ lambdaBody $ segScanOpLambda scan_op) $ \(dest, res) ->
                 copyDWIMFix dest [i + 1] res []
 
       sComment "Publish results in shared memory" $ do
@@ -607,7 +610,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                   to' = (to + 1) * chunk32 - 1
                in (to' - from') .>. (to' + segsize_compact - boundary) `mod` segsize_compact
 
-      scan_op1 <- renameLambda $ segBinOpLambda scan_op
+      scan_op1 <- renameLambda $ segScanOpLambda scan_op
 
       accs <- mapM (dPrimSV "acc") scan_tys
       -- Number of threads with at least one in-bounds element.  After the
@@ -616,7 +619,8 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
       -- ceil((n - block_offset) / chunk), clamped to tblock_size.
       valid_threads_cnt <-
         dPrimVE "valid_threads_cnt" $
-          sMin64 tblock_size_e $ (n - block_offset) `divUp` chunk
+          sMin64 tblock_size_e $
+            (n - block_offset) `divUp` chunk
       sComment "Scan results (with warp scan)" $ do
         blockScan
           crossesSegment
@@ -870,7 +874,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           sOp local_barrier
 
       let (scan_pars, map_pars) =
-            splitAt (length $ segBinOpNeutral scan_op) $
+            splitAt (length $ lambdaReturnType $ segScanOpLambda scan_op) $
               map paramName $
                 lambdaParams $
                   segPostOpLambda post_op

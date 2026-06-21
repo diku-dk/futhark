@@ -401,9 +401,9 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form = do
       let paralleliseOuter = runBuilder_ $ do
             scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
-              (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
+              (scan_lam', _nes', shape) <- determineReduceOp scan_lam nes
               let scan_lam'' = soacsLambdaToGPU scan_lam'
-              pure $ SegBinOp Noncommutative scan_lam'' nes' shape
+              pure $ SegScanOp scan_lam'' shape
             let map_lam_sequential = soacsLambdaToGPU map_lam
                 post_op = SegPostOp $ soacsLambdaToGPU post_lam
             lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
