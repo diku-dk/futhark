@@ -39,15 +39,6 @@ genBinOpParams scan_ops =
     scopeOfLParams $
       concatMap (lambdaParams . segBinOpLambda) scan_ops
 
-initialiseLocalPrefixes :: [SegBinOp MCMem] -> [[VName]] -> MulticoreGen ()
-initialiseLocalPrefixes scan_ops per_op_prefix_var = do
-  scan_ops_renamed <- renameSegBinOp scan_ops
-  genBinOpParams scan_ops_renamed
-  forM_ (zip scan_ops_renamed per_op_prefix_var) $ \(scan_op, prefix_vars) -> do
-    sLoopNest (segBinOpShape scan_op) $ \vec_is ->
-      forM_ (zip (segBinOpNeutral scan_op) prefix_vars) $ \(ne, prefix_var) -> do
-        copyDWIMFix prefix_var vec_is ne []
-
 updateLocalPrefixes :: [SegBinOp MCMem] -> [[VName]] -> [[VName]] -> [Imp.TExp Int64] -> MulticoreGen ()
 updateLocalPrefixes scan_ops per_op_prefix_var per_op_prefix_arr index = do
   forM_ (zip3 scan_ops per_op_prefix_var per_op_prefix_arr) $ \(scan_op, prefix_vars, prefix_arrs) -> do
@@ -176,8 +167,9 @@ seqScanFastPath ::
   [[VName]] ->
   TV Int64 ->
   TV Int64 ->
+  TV Bool ->
   MulticoreGen ()
-seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chunk_length per_op_prefix_arr block_idx task_id = do
+seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chunk_length per_op_prefix_arr block_idx task_id has_prefix = do
   kbody_renamed <- renameBody kbody
   scan_ops_renamed <- renameSegBinOp scan_ops
   genBinOpParams scan_ops_renamed
@@ -189,12 +181,16 @@ seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chun
 
   let per_scan_res = segBinOpChunks scan_ops_renamed all_scan_res
 
-  forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $ \(scan_op, prefix_vars, local_accums) ->
-    sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-      forM_ (zip local_accums prefix_vars) $ \(acc, prefix) -> do
-        copyDWIMFix acc vec_is (Var prefix) vec_is
+  -- Copy prefix into local accumulators only when we have a valid prefix.
+  sWhen (tvExp has_prefix) $
+    forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $ \(scan_op, prefix_vars, local_accums) ->
+      sLoopNest (segBinOpShape scan_op) $ \vec_is ->
+        forM_ (zip local_accums prefix_vars) $ \(acc, prefix) ->
+          copyDWIMFix acc vec_is (Var prefix) vec_is
 
   z <- dPrimV "z" (0 :: Imp.TExp Int64)
+  -- Track whether the accumulator holds a valid value yet.
+  accum_valid <- dPrimV "accum_valid" (tvExp has_prefix)
   sWhile (tvExp z .<. tvExp chunk_length) $ do
     dPrimV_ i (tvExp start + tvExp z)
     compileStms mempty (bodyStms kbody_renamed) $ do
@@ -203,15 +199,27 @@ seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chun
           forM_ marr $ \arr -> copyDWIMFix arr [tvExp task_id, tvExp z] res []
 
       forM_ (zip4 scan_out scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res, local_accums) ->
-        sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-          forM_ (zip (xParams scan_op) local_accums) $ \(p, acc) ->
-            copyDWIMFix (paramName p) [] (Var acc) vec_is
-          forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
-            copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
-          compileStms mempty (bodyStms $ lamBody scan_op) $
-            forM_ (zip3 local_accums (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(acc, se, pe) -> do
-              copyDWIMFix pe (tvExp task_id : tvExp z : vec_is) se []
-              copyDWIMFix acc vec_is se []
+        sLoopNest (segBinOpShape scan_op) $ \vec_is ->
+          sIf
+            (tvExp accum_valid)
+            ( do
+                forM_ (zip (xParams scan_op) local_accums) $ \(p, acc) ->
+                  copyDWIMFix (paramName p) [] (Var acc) vec_is
+                forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
+                  copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
+                compileStms mempty (bodyStms $ lamBody scan_op) $
+                  forM_ (zip3 local_accums (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(acc, se, pe) -> do
+                    copyDWIMFix pe (tvExp task_id : tvExp z : vec_is) se []
+                    copyDWIMFix acc vec_is se []
+            )
+            ( do
+                -- No valid prefix yet: write input directly as first element.
+                forM_ (zip local_accums scan_res) $ \(acc, kr) ->
+                  copyDWIMFix acc vec_is (kernelResultSubExp kr) vec_is
+                forM_ (zip pes scan_res) $ \(pe, kr) ->
+                  copyDWIMFix pe (tvExp task_id : tvExp z : vec_is) (kernelResultSubExp kr) vec_is
+            )
+    accum_valid <-- true
     z <-- tvExp z + 1
 
     -- write back local accumulators to prefix arrays
@@ -242,6 +250,8 @@ seqScanLB scan_out i scan_ops kbody per_op_prefixes_var start chunk_length task_
 
   let per_scan_res = segBinOpChunks scan_ops_renamed all_scan_res
 
+  -- The lookback prefix is always valid (we only call seqScanLB after a
+  -- successful lookback that produced per_op_prefixes_var).
   forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $ \(scan_op, prefix_vars, local_accums) ->
     sLoopNest (segBinOpShape scan_op) $ \vec_is ->
       forM_ (zip local_accums prefix_vars) $ \(acc, prefix) ->
@@ -484,17 +494,23 @@ nonsegmentedScan
 
         task_id <- getTaskId
 
+        has_prefix <- dPrimV "has_prefix" (false :: Imp.TExp Bool)
+
         sWhen
           (tvExp seq_flag .==. true)
           ( sIf
               (tvExp block_idx .==. 0)
-              (initialiseLocalPrefixes scan_ops prefix_seqs)
+              -- Block 0 has no predecessor, so there is no valid prefix.
+              (pure ())
               ( do
                   prev_flag <- dPrim "prev_flag" :: MulticoreGen (TV Int64)
                   load64 (tvVar prev_flag) flag_loc_name (Imp.elements $ block_idx_32 - 1)
                   sIf
                     (tvExp prev_flag .==. 2)
-                    (updateLocalPrefixes scan_ops prefix_seqs prefArrs [tvExp block_idx - 1])
+                    ( do
+                        updateLocalPrefixes scan_ops prefix_seqs prefArrs [tvExp block_idx - 1]
+                        has_prefix <-- true
+                    )
                     (seq_flag <-- false)
               )
           )
@@ -502,7 +518,7 @@ nonsegmentedScan
         sIf
           (tvExp seq_flag .==. true)
           ( do
-              seqScanFastPath scan_out map_out i scan_ops kbody prefix_seqs start chunk_length prefArrs block_idx task_id
+              seqScanFastPath scan_out map_out i scan_ops kbody prefix_seqs start chunk_length prefArrs block_idx task_id has_prefix
 
               store64 flag_loc_name (Imp.elements block_idx_32) 2
           )
