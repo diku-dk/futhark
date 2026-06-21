@@ -21,9 +21,13 @@ import Prelude hiding (mod, quot, rem)
 
 xParams, yParams :: SegScanOp GPUMem -> [LParam GPUMem]
 xParams scan =
-  take (length (lambdaReturnType (segScanOpLambda scan))) (lambdaParams (segScanOpLambda scan))
+  take
+    (length (lambdaReturnType (segScanOpLambda scan)))
+    (lambdaParams (segScanOpLambda scan))
 yParams scan =
-  drop (length (lambdaReturnType (segScanOpLambda scan))) (lambdaParams (segScanOpLambda scan))
+  drop
+    (length (lambdaReturnType (segScanOpLambda scan)))
+    (lambdaParams (segScanOpLambda scan))
 
 -- | Given available register, thread block size, scan parameter
 -- types, and map parameter types, compute the largest available chunk

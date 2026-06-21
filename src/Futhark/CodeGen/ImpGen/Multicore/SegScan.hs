@@ -26,9 +26,13 @@ cacheSize = 65536 -- 64 KB
 
 xParams, yParams :: SegScanOp MCMem -> [LParam MCMem]
 xParams scan =
-  take (length (lambdaReturnType (segScanOpLambda scan))) (lambdaParams (segScanOpLambda scan))
+  take
+    (length (lambdaReturnType (segScanOpLambda scan)))
+    (lambdaParams (segScanOpLambda scan))
 yParams scan =
-  drop (length (lambdaReturnType (segScanOpLambda scan))) (lambdaParams (segScanOpLambda scan))
+  drop
+    (length (lambdaReturnType (segScanOpLambda scan)))
+    (lambdaParams (segScanOpLambda scan))
 
 lamBody :: SegScanOp MCMem -> Body MCMem
 lamBody = lambdaBody . segScanOpLambda
@@ -39,7 +43,8 @@ genBinOpParams scan_ops =
     scopeOfLParams $
       concatMap (lambdaParams . segScanOpLambda) scan_ops
 
-updateLocalPrefixes :: [SegScanOp MCMem] -> [[VName]] -> [[VName]] -> [Imp.TExp Int64] -> MulticoreGen ()
+updateLocalPrefixes ::
+  [SegScanOp MCMem] -> [[VName]] -> [[VName]] -> [Imp.TExp Int64] -> MulticoreGen ()
 updateLocalPrefixes scan_ops per_op_prefix_var per_op_prefix_arr index = do
   forM_ (zip3 scan_ops per_op_prefix_var per_op_prefix_arr) $ \(scan_op, prefix_vars, prefix_arrs) -> do
     let shape = segScanOpShape scan_op
@@ -108,7 +113,8 @@ hasAssert = bodyHas isAssert
     isAssert (BasicOp Assert {}) = True
     isAssert _ = False
 
-copyFromDescToLocal :: [SegScanOp MCMem] -> [[VName]] -> [[VName]] -> TV Int64 -> MulticoreGen ()
+copyFromDescToLocal ::
+  [SegScanOp MCMem] -> [[VName]] -> [[VName]] -> TV Int64 -> MulticoreGen ()
 copyFromDescToLocal scan_ops per_op_local_vars per_op_description_arrays index = do
   forM_ (zip3 scan_ops per_op_local_vars per_op_description_arrays) $ \(scan_op, local_vars, desc_arrs) -> do
     sLoopNest (segScanOpShape scan_op) $ \vec_is -> do
@@ -169,7 +175,10 @@ seqScanFastPath ::
   TV Int64 ->
   TV Bool ->
   MulticoreGen ()
-seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chunk_length per_op_prefix_arr block_idx task_id has_prefix = do
+seqScanFastPath
+  scan_out map_out i scan_ops kbody
+  per_op_prefixes_var start chunk_length
+  per_op_prefix_arr block_idx task_id has_prefix = do
   kbody_renamed <- renameBody kbody
   scan_ops_renamed <- renameSegScanOp scan_ops
   genBinOpParams scan_ops_renamed
@@ -183,10 +192,11 @@ seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chun
 
   -- Copy prefix into local accumulators only when we have a valid prefix.
   sWhen (tvExp has_prefix) $
-    forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $ \(scan_op, prefix_vars, local_accums) ->
-      sLoopNest (segScanOpShape scan_op) $ \vec_is ->
-        forM_ (zip local_accums prefix_vars) $ \(acc, prefix) ->
-          copyDWIMFix acc vec_is (Var prefix) vec_is
+    forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $
+      \(scan_op, prefix_vars, local_accums) ->
+        sLoopNest (segScanOpShape scan_op) $ \vec_is ->
+          forM_ (zip local_accums prefix_vars) $ \(acc, prefix) ->
+            copyDWIMFix acc vec_is (Var prefix) vec_is
 
   z <- dPrimV "z" (0 :: Imp.TExp Int64)
   -- Track whether the accumulator holds a valid value yet.
@@ -198,20 +208,22 @@ seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chun
         forM_ (zip map_out (map kernelResultSubExp map_res)) $ \(marr, res) ->
           forM_ marr $ \arr -> copyDWIMFix arr [tvExp task_id, tvExp z] res []
 
-      forM_ (zip4 scan_out scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res, local_accums) ->
-        sLoopNest (segScanOpShape scan_op) $ \vec_is ->
-          sIf
-            (tvExp accum_valid)
-            ( do
-                forM_ (zip (xParams scan_op) local_accums) $ \(p, acc) ->
-                  copyDWIMFix (paramName p) [] (Var acc) vec_is
-                forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
-                  copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
-                compileStms mempty (bodyStms $ lamBody scan_op) $
-                  forM_ (zip3 local_accums (map resSubExp $ bodyResult $ lamBody scan_op) pes) $ \(acc, se, pe) -> do
-                    copyDWIMFix pe (tvExp task_id : tvExp z : vec_is) se []
-                    copyDWIMFix acc vec_is se []
-            )
+      forM_ (zip4 scan_out scan_ops_renamed per_scan_res per_op_local_accum) $
+        \(pes, scan_op, scan_res, local_accums) ->
+          sLoopNest (segScanOpShape scan_op) $ \vec_is ->
+            sIf
+              (tvExp accum_valid)
+              ( do
+                  forM_ (zip (xParams scan_op) local_accums) $ \(p, acc) ->
+                    copyDWIMFix (paramName p) [] (Var acc) vec_is
+                  forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
+                    copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
+                  compileStms mempty (bodyStms $ lamBody scan_op) $
+                    forM_ (zip3 local_accums (map resSubExp $ bodyResult $ lamBody scan_op) pes) $
+                      \(acc, se, pe) -> do
+                        copyDWIMFix pe (tvExp task_id : tvExp z : vec_is) se []
+                        copyDWIMFix acc vec_is se []
+              )
             ( do
                 -- No valid prefix yet: write input directly as first element.
                 forM_ (zip local_accums scan_res) $ \(acc, kr) ->
@@ -223,10 +235,11 @@ seqScanFastPath scan_out map_out i scan_ops kbody per_op_prefixes_var start chun
     z <-- tvExp z + 1
 
     -- write back local accumulators to prefix arrays
-    forM_ (zip3 scan_ops_renamed per_op_prefix_arr per_op_local_accum) $ \(scan_op, prefix_arrs, local_accums) ->
-      sLoopNest (segScanOpShape scan_op) $ \vec_is ->
-        forM_ (zip local_accums prefix_arrs) $ \(acc, prefix_arr) ->
-          copyDWIMFix prefix_arr (tvExp block_idx : vec_is) (Var acc) vec_is
+    forM_ (zip3 scan_ops_renamed per_op_prefix_arr per_op_local_accum) $
+      \(scan_op, prefix_arrs, local_accums) ->
+        sLoopNest (segScanOpShape scan_op) $ \vec_is ->
+          forM_ (zip local_accums prefix_arrs) $ \(acc, prefix_arr) ->
+            copyDWIMFix prefix_arr (tvExp block_idx : vec_is) (Var acc) vec_is
 
 seqScanLB ::
   [[VName]] ->
@@ -252,10 +265,11 @@ seqScanLB scan_out i scan_ops kbody per_op_prefixes_var start chunk_length task_
 
   -- The lookback prefix is always valid (we only call seqScanLB after a
   -- successful lookback that produced per_op_prefixes_var).
-  forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $ \(scan_op, prefix_vars, local_accums) ->
-    sLoopNest (segScanOpShape scan_op) $ \vec_is ->
-      forM_ (zip local_accums prefix_vars) $ \(acc, prefix) ->
-        copyDWIMFix acc vec_is (Var prefix) vec_is
+  forM_ (zip3 scan_ops_renamed per_op_prefixes_var per_op_local_accum) $
+    \(scan_op, prefix_vars, local_accums) ->
+      sLoopNest (segScanOpShape scan_op) $ \vec_is ->
+        forM_ (zip local_accums prefix_vars) $ \(acc, prefix) ->
+          copyDWIMFix acc vec_is (Var prefix) vec_is
 
   z <- dPrimV "z" (0 :: Imp.TExp Int64)
   sWhile (tvExp z .<. tvExp chunk_length) $ do
@@ -263,16 +277,18 @@ seqScanLB scan_out i scan_ops kbody per_op_prefixes_var start chunk_length task_
     if shouldRecompute kbody_renamed
       then do
         compileStms mempty (bodyStms kbody_renamed) $ do
-          forM_ (zip4 scan_out scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, scan_res, local_accums) ->
-            sLoopNest (segScanOpShape scan_op) $ \vec_is -> do
-              forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) ->
-                copyDWIMFix (paramName px) [] (Var acc) vec_is
-              forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
-                copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
-              compileStms mempty (bodyStms $ lamBody scan_op) $
-                forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) pes local_accums) $ \(se, pe, acc) -> do
-                  copyDWIMFix acc vec_is se []
-                  copyDWIMFix pe (tvExp task_id : tvExp z : vec_is) se []
+          forM_ (zip4 scan_out scan_ops_renamed per_scan_res per_op_local_accum) $
+            \(pes, scan_op, scan_res, local_accums) ->
+              sLoopNest (segScanOpShape scan_op) $ \vec_is -> do
+                forM_ (zip (xParams scan_op) local_accums) $ \(px, acc) ->
+                  copyDWIMFix (paramName px) [] (Var acc) vec_is
+                forM_ (zip (yParams scan_op) scan_res) $ \(py, kr) ->
+                  copyDWIMFix (paramName py) [] (kernelResultSubExp kr) vec_is
+                compileStms mempty (bodyStms $ lamBody scan_op) $
+                  forM_ (zip3 (map resSubExp $ bodyResult $ lamBody scan_op) pes local_accums) $
+                    \(se, pe, acc) -> do
+                      copyDWIMFix acc vec_is se []
+                      copyDWIMFix pe (tvExp task_id : tvExp z : vec_is) se []
         z <-- tvExp z + 1
       else do
         forM_ (zip4 scan_out scan_ops_renamed per_scan_res per_op_local_accum) $ \(pes, scan_op, _, local_accums) ->
