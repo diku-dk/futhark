@@ -511,9 +511,9 @@ entryPointSignedness :: OpaqueTypes -> EntryPointType -> [Signedness]
 entryPointSignedness _ (TypeTransparent vt) = [valueTypeSign vt]
 entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
-    OpaqueType vts -> map valueTypeSign vts
     OpaqueArray _ _ vts -> map valueTypeSign vts
     OpaqueRecordArray _ _ fs -> foldMap (entryPointSignedness types . snd) fs
+    OpaqueRecord [] -> [Signed]
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueSum vts _ -> map valueTypeSign vts
 
@@ -525,9 +525,9 @@ entryPointSize :: OpaqueTypes -> EntryPointType -> Int
 entryPointSize _ (TypeTransparent _) = 1
 entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
-    OpaqueType vts -> length vts
     OpaqueArray _ _ vts -> length vts
     OpaqueRecordArray _ _ fs -> sum $ map (entryPointSize types . snd) fs
+    OpaqueRecord [] -> 1
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueSum vts _ -> length vts
 
