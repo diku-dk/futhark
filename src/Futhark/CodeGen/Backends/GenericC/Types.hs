@@ -345,7 +345,7 @@ recordProjectFunctions types desc fs vds = do
           [C.cedecl|int $id:project($ty:ctx_ty *ctx, $ty:et_ty *out, const $ty:opaque_type *obj);|]
         libDecl
           [C.cedecl|int $id:project($ty:ctx_ty *ctx, $ty:et_ty *out, const $ty:opaque_type *obj) {
-                      (void)ctx;
+                      (void)ctx; (void)obj;
                       $ty:et_ty v;
                       $items:project_items
                       *out = v;
@@ -412,7 +412,9 @@ recordNewSetFields types fs =
             ( offset + length f_vts,
               ( param_name,
                 [C.cparam|const $ty:ct* $id:param_name|],
-                [C.citem|{$stms:(zipWith3 setFieldField [offset ..] param_fields f_vts)}|]
+                if null f_vts
+                  then [C.citem|(void)$id:param_name;|]
+                  else [C.citem|{$stms:(zipWith3 setFieldField [offset ..] param_fields f_vts)}|]
               )
             )
 
@@ -554,6 +556,7 @@ recordArrayIndexFunction space _types desc rank elemtype vds = do
   libDecl
     [C.cedecl|int $id:index_f($ty:ctx_ty *ctx, $ty:obj_ct **out, $ty:array_ct *arr,
                               $params:index_params) {
+                (void)arr;
                 int err = 0;
                 if ($exp:in_bounds) {
                   $ty:obj_ct* v = malloc(sizeof($ty:obj_ct));
@@ -635,6 +638,7 @@ recordArraySetFunction space _types desc rank elemtype vds = do
                               $ty:array_ct *arr,
                               $ty:obj_ct *v,
                               $params:index_params) {
+                (void)arr; (void)v;
                 int err = 0;
                 if (!$exp:in_bounds) {
                   err = 1;
@@ -749,6 +753,7 @@ recordArrayNewFunction space types desc rank elemtype vds = do
   libDecl
     [C.cedecl|int $id:new_f($ty:ctx_ty *ctx, $ty:array_ct **out,
                             $ty:obj_ct **elems, $params:shape_params) {
+                (void)elems;
                 int err = 0;
                 typename int64_t n = $exp:(cproduct outer_shape);
                 $items:check_items
@@ -1194,7 +1199,7 @@ opaqueLibraryFunctions space types desc ot = do
 
           int $id:store_opaque($ty:ctx_ty *ctx,
                                const $ty:opaque_type *obj, void **p, size_t *n) {
-            (void)ctx;
+            (void)ctx; (void)obj;
             int ret = 0;
             $items:store_body
             return ret;
@@ -1261,7 +1266,7 @@ generateOpaque space types (desc, ot) = do
     OpaqueRecordArray rank _ [] ->
       pure [[C.csdecl|typename int64_t shape[$int:rank];|]]
     _ ->
-      zipWithM field (opaquePayload types ot) [(0 :: Int) ..]
+      dummyIfNone <$> zipWithM field (opaquePayload types ot) [(0 :: Int) ..]
   libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
   (ops, extra_ops) <- opaqueLibraryFunctions space types desc ot
   let opaque_type = [C.cty|struct $id:name*|]
@@ -1276,6 +1281,11 @@ generateOpaque space types (desc, ot) = do
         if r == 0
           then [C.csdecl|$ty:ct $id:(tupleField i);|]
           else [C.csdecl|$ty:ct *$id:(tupleField i);|]
+
+    -- C compilers tend to warn about empty structs, so put in a dummy field if
+    -- we have no real fields.
+    dummyIfNone [] = [[C.csdecl|char dummy;|]]
+    dummyIfNone members = members
 
 generateAPITypes ::
   Space ->
