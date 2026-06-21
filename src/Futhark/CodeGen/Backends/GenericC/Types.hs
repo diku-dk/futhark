@@ -258,6 +258,7 @@ lookupOpaqueType v (OpaqueTypes types) =
 opaquePayload :: OpaqueTypes -> OpaqueType -> [ValueType]
 opaquePayload _ (OpaqueSum ts _) = ts
 opaquePayload _ (OpaqueArray _ _ ts) = ts
+opaquePayload _ (OpaqueRecord []) = [ValueType Signed (Rank 0) Unit]
 opaquePayload types (OpaqueRecord fs) = concatMap f fs
   where
     f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
