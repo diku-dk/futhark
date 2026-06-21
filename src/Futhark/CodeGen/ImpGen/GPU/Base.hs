@@ -460,6 +460,7 @@ blockScan seg_flag arrs_full_size w lam arrs = do
         copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
 
   doInChunkScan seg_flag ltid_in_bounds lam
+  errorsync
   barrier
 
   let is_first_block = chunk_id .==. 0
