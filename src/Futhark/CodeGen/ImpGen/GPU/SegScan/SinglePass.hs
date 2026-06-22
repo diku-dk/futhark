@@ -564,7 +564,22 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
             copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
           sOp local_barrier
 
+      let is_last_block = tvExp dyn_id .==. num_virt_blocks_e - 1
+
+      -- Scalar accumulators tracking the running aggregate during the per-thread
+      -- scan.  In the last (possibly partial) block, the border thread may not
+      -- reach slot chunk-1, so we track the last-written value here and copy it
+      -- into private[chunk-1] after the loop.  This avoids dynamic indexing into
+      -- the private array during publish, which would force the CUDA compiler to
+      -- keep all chunk slots live simultaneously and trigger register spilling.
+      last_results <- mapM (dPrimSV "last_result") scan_tys
+
       sComment "Per thread scan" $ do
+        -- Initialise last_results to private[0] (the first loaded element).
+        -- This is always valid: every thread that participates loads at least one element.
+        forM_ (zip last_results scan_private_chunks) $ \(lr, src) ->
+          copyDWIMFix (tvVar lr) [] (Var src) [0]
+
         -- We don't need to touch the first element, so only m-1
         -- iterations here.
         sFor "i" (chunk - 1) $ \i -> do
@@ -577,11 +592,9 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                 gidx <- dPrimVE "gidx" $ (ltid32 * chunk32) + 1
                 dPrimVE "new_sgm" $ (gidx + sExt32 i - boundary) `mod` segsize_compact .==. 0
               else pure false
-          -- skip scan of first element in segment, and skip when next element is out of bounds.
-          -- After the transpose, thread ltid holds consecutive elements starting at
-          -- block_offset + ltid*chunk, so the next element in the private chunk is at
-          -- block_offset + ltid*chunk + (i+1).
-          sWhen (bNot new_sgm .&&. block_offset + ltid * chunk + (i + 1) .<. n) $ do
+          -- skip scan of first element in segment, and skip when the next
+          -- element is out of bounds (only possible in the last virtual block).
+          sWhen (bNot new_sgm .&&. (bNot is_last_block .||. block_offset + ltid * chunk + (i + 1) .<. n)) $ do
             forM_ (zip4 scan_private_chunks xs ys scan_tys) $ \(src, x, y, ty) -> do
               dPrim_ x ty
               dPrim_ y ty
@@ -589,22 +602,29 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
               copyDWIMFix y [] (Var src) [i + 1]
 
             compileStms mempty (bodyStms $ lambdaBody $ segScanOpLambda scan_op) $
-              forM_ (zip scan_private_chunks $ map resSubExp $ bodyResult $ lambdaBody $ segScanOpLambda scan_op) $ \(dest, res) ->
+              forM_ (zip4 scan_private_chunks last_results scan_tys $ map resSubExp $ bodyResult $ lambdaBody $ segScanOpLambda scan_op) $ \(dest, lr, ty, res) -> do
                 copyDWIMFix dest [i + 1] res []
+                -- Track the running aggregate so we can later publish it via a
+                -- constant index (private[chunk-1]) without dynamic indexing.
+                sWhen is_last_block $ lr <-- TPrimExp (toExp' ty res)
+
+          -- In segmented scans: when a new segment starts at position i+1,
+          -- reset last_results to private[i+1] so we track the last segment's
+          -- aggregate rather than a stale value from the previous segment.
+          -- For non-segmented scans, new_sgm is always false so this is dead code.
+          sWhen (is_last_block .&&. new_sgm .&&. block_offset + ltid * chunk + (i + 1) .<. n) $
+            forM_ (zip last_results scan_private_chunks) $ \(lr, src) ->
+              copyDWIMFix (tvVar lr) [] (Var src) [i + 1]
+
+        -- In the last block, copy the tracked aggregate to private[chunk-1]
+        -- so the publish step can always use a constant index.
+        sWhen is_last_block $
+          forM_ (zip last_results scan_private_chunks) $ \(lr, dest) ->
+            copyDWIMFix dest [chunk - 1] (tvSize lr) []
 
       sComment "Publish results in shared memory" $ do
-        -- Publish the last valid element rather than chunk-1.  After the
-        -- transpose, thread ltid holds consecutive elements starting at
-        -- block_offset + ltid*chunk, so the last valid slot is at index
-        -- min(chunk-1, n - block_offset - ltid*chunk - 1).
-        last_valid_i <-
-          dPrimVE "last_valid_i" $
-            sMax64 0 $
-              sMin64 (chunk - 1) $
-                n - block_offset - ltid * chunk - 1
         forM_ (zip prefixArrays scan_private_chunks) $ \(dest, src) ->
-          sWhen (block_offset + ltid * chunk .<. n) $
-            copyDWIMFix dest [ltid] (Var src) [last_valid_i]
+          copyDWIMFix dest [ltid] (Var src) [chunk - 1]
         sOp local_barrier
 
       let crossesSegment = do
@@ -616,15 +636,16 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
       scan_op1 <- renameLambda $ segScanOpLambda scan_op
 
-      accs <- mapM (dPrimSV "acc") scan_tys
-      -- Number of threads with at least one in-bounds element.  After the
-      -- transpose each thread holds 'chunk' consecutive elements starting at
-      -- block_offset + ltid*chunk, so the active thread count is
-      -- ceil((n - block_offset) / chunk), clamped to tblock_size.
+      -- Number of threads with at least one valid element in this block.
+      -- For full blocks this equals tblock_size_e; for the partial last block
+      -- it may be smaller.  We pass it to blockScan so OOB threads are excluded,
+      -- and use it to identify the last active thread's prefix after the scan.
       valid_threads_cnt <-
         dPrimVE "valid_threads_cnt" $
           sMin64 tblock_size_e $
-            (n - block_offset) `divUp` chunk
+            (n - block_offset + chunk - 1) `quot` chunk
+
+      accs <- mapM (dPrimSV "acc") scan_tys
       sComment "Scan results (with warp scan)" $ do
         blockScan
           crossesSegment
