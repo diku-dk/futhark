@@ -1,0 +1,164 @@
+:root {
+  --bg0: #070b14;
+  --bg1: #0b1220;
+  --panel: rgba(255, 255, 255, 0.06);
+  --panel2: rgba(255, 255, 255, 0.08);
+  --text: rgba(255, 255, 255, 0.88);
+  --muted: rgba(255, 255, 255, 0.62);
+  --accent: #7aa2ff;
+  --border: rgba(255, 255, 255, 0.10);
+  --shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  background: radial-gradient(1200px 800px at 50% -10%, #162545 0%, transparent 55%),
+              linear-gradient(180deg, var(--bg1) 0%, var(--bg0) 100%);
+  min-height: 100vh;
+}
+
+.wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 18px 40px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: var(--accent);
+}
+
+.subtitle {
+  margin: 10px auto 0;
+  max-width: 820px;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+@media (min-width: 980px) {
+  .grid {
+    grid-template-columns: 360px 1fr;
+    align-items: start;
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.panel .head {
+  padding: 12px 14px;
+  background: var(--panel2);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.panel .body {
+  padding: 12px 14px;
+}
+
+/* Scrollable status box */
+.statusBox {
+  height: 220px;              /* fixed height */
+  overflow: auto;             /* scrolling inside */
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 12px;
+  background: rgba(0,0,0,0.25);
+  padding: 10px;
+}
+
+pre#status {
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.controls {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.value {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.canvasPanel .body {
+  padding: 14px;
+}
+
+.canvasWrap {
+  display: grid;
+  place-items: center;
+}
+
+canvas {
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: #000;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+}
+
+footer {
+  text-align: center;
+  margin-top: 16px;
+  color: rgba(255,255,255,0.45);
+  font-size: 12px;
+}
+
+a { color: rgba(122,162,255,0.95); text-decoration: none; }
+a:hover { text-decoration: underline; }

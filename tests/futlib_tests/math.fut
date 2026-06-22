@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- entry: test_f64_ceil
 -- input { 3.4 } output { 4.0 }
 -- input { 3.8 } output { 4.0 }

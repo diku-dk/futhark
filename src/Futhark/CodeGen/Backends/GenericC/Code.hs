@@ -65,7 +65,9 @@ compilePrimExp f (UnOpExp USignum {} x) = do
 compilePrimExp f (UnOpExp (Neg Bool) x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|!$exp:x'|]
-compilePrimExp f (UnOpExp Neg {} x) = do
+-- Negation of integers is handled by a function that does the operation using
+-- unsigned types, so we can avoid overflow.
+compilePrimExp f (UnOpExp (Neg (FloatType _)) x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|-$exp:x'|]
 compilePrimExp f (UnOpExp op x) = do

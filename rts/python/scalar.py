@@ -378,6 +378,13 @@ def usignum(x):
         return ssignum(x)
 
 
+def sitofp_T_f16(x):
+    return np.float16(x)
+
+
+sitofp_i8_f16 = sitofp_i16_f16 = sitofp_i32_f16 = sitofp_i64_f16 = sitofp_T_f16
+
+
 def sitofp_T_f32(x):
     return np.float32(x)
 
@@ -390,6 +397,13 @@ def sitofp_T_f64(x):
 
 
 sitofp_i8_f64 = sitofp_i16_f64 = sitofp_i32_f64 = sitofp_i64_f64 = sitofp_T_f64
+
+
+def uitofp_T_f16(x):
+    return np.float36(unsigned(x))
+
+
+uitofp_i8_f16 = uitofp_i16_f16 = uitofp_i32_f16 = uitofp_i64_f16 = uitofp_T_f16
 
 
 def uitofp_T_f32(x):
