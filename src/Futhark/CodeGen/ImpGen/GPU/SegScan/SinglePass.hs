@@ -695,7 +695,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                     copyDWIMFix (tvVar prefix) [] (Var incprefixArray) [tvExp dyn_id - 1]
             )
             ( do
-                is_first_iter <- dPrimV "is_first_iter" $ fromBool True
+                prev_flag <- dPrimV "prev_flag" (statusX :: Imp.TExp Int8)
                 readOffset <-
                   dPrimV "readOffset" $
                     sExt32 $
@@ -757,14 +757,13 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                         readOffset <-- tvExp readOffset - zExt32 warp_size
                     )
 
-                  -- update prefix if flag different than STATUS_X, avoiding neutral element
+                  -- update prefix, reusing prev_flag to detect first valid iteration
+                  -- and avoid a separate is_first_iter register
                   sWhen (tvExp flag .>. statusX) $ do
                     sIf
-                      (tvExp is_first_iter)
-                      ( do
-                          forM_ (zip prefixes aggrs) $ \(prefix, aggr) ->
-                            prefix <-- tvExp aggr
-                          is_first_iter <-- fromBool False
+                      (tvExp prev_flag .==. statusX)
+                      ( forM_ (zip prefixes aggrs) $ \(prefix, aggr) ->
+                          prefix <-- tvExp aggr
                       )
                       ( do
                           lam <- renameLambda scan_op1
@@ -775,6 +774,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                             forM_ (zip3 prefixes scan_tys $ map resSubExp $ bodyResult $ lambdaBody lam) $
                               \(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res)
                       )
+                    prev_flag <-- tvExp flag
                   sOp local_fence
             )
 
