@@ -31,7 +31,6 @@ concatIrreg lvl _segments _env ns reparr = do
   num_segments <- arraySize 0 <$> lookupType ns
 
   -- Constructs the full list size / shape that should hold the final results.
-  let zero = intConst Int64 0
   ns_full <- letExp (baseName ns <> "_full") <=< segMap lvl (MkSolo num_segments) $
     \(MkSolo i) -> do
       old_segments <-
@@ -39,7 +38,7 @@ concatIrreg lvl _segments _env ns reparr = do
           letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp i]
       new_segment <-
         letSubExp "new_segment"
-          =<< toExp (foldl (+) (pe64 zero) $ map pe64 old_segments)
+          =<< toExp (sum $ map pe64 old_segments)
       pure $ subExpsRes [new_segment]
 
   (ns_full_F, ns_full_O, _ns_II1) <- doRepIota lvl ns_full

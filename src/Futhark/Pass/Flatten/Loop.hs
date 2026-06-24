@@ -20,6 +20,9 @@ import Futhark.Pass.Flatten.Monad
 import Futhark.Tools
 import Prelude hiding (div, quot, rem)
 
+-- Check whether a loop parameter array needs irregular representation.
+-- we need the irregular representation when any of its dimensions are either:
+-- a loop parameter name or variant in the outer map context
 needsIrregular :: DistInputs -> DistEnv -> S.Set VName -> DeclType -> Bool
 needsIrregular inps env loopParamNames t =
   case t of
@@ -54,7 +57,13 @@ liftLoopParam lvl segments num_segments inps env loopParamNames (fparam, initSE)
     Array pt _ u
       | needsIrregular inps env loopParamNames t -> do
           (params, rep) <- liftParam num_segments fparam
-          initVals <- liftLoopInit lvl segments inps env initSE num_segments
+          -- initVals <- liftLoopInit lvl segments inps env initSE num_segments
+          (_, initRep) <- liftSubExp lvl segments inps env initSE
+          irreg <- case initRep of
+            -- This will not happen.
+            Regular v -> mkIrregFromReg lvl segments v
+            Irregular irreg -> pure irreg
+          initVals <- irregularRepToLoopValues num_segments irreg
           pure (params, rep, initVals)
       | otherwise -> do
           -- Regular case: all dims are invariant, just add w as outermost dim
@@ -73,32 +82,18 @@ liftLoopParam lvl segments num_segments inps env loopParamNames (fparam, initSE)
     Mem {} ->
       error "liftLoopParam: Mem"
 
-liftLoopInit :: SegLevel -> Segments -> DistInputs -> DistEnv -> SubExp -> SubExp -> FlattenM [SubExp]
-liftLoopInit lvl segments inps env se num_segments = do
-  (_, rep) <- liftSubExp lvl segments inps env se
-  case rep of
-    Regular v -> pure [Var v]
-    Irregular irreg -> mkIrrep irreg
-  where
-    mkIrrep
-      ( IrregularRep
-          { irregularS = segs,
-            irregularF = flags,
-            irregularO = offsets,
-            irregularD = elems
-          }
-        ) = do
-        t <- lookupType elems
-        t_o <- lookupType offsets
-        flags_t <- lookupType flags
-        num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
-        let shape = Shape [Var num_data]
-        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
-        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
-        -- I'm not sure why I need this reshapes
-        segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [num_segments])
-        offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
-        pure $ map Var [num_data, segs', flags', offsets', elems']
+irregularRepToLoopValues :: SubExp -> IrregularRep -> FlattenM [SubExp]
+irregularRepToLoopValues num_segments (IrregularRep segs flags offsets elems _) = do
+  t <- lookupType elems
+  t_o <- lookupType offsets
+  flags_t <- lookupType flags
+  num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
+  let shape = Shape [Var num_data]
+  flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
+  elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
+  segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [num_segments])
+  offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
+  pure $ map Var [num_data, segs', flags', offsets', elems']
 
 loopResultToResReps :: [DistResult] -> [VName] -> [ResRep]
 loopResultToResReps dist_res results =
@@ -127,27 +122,8 @@ liftLoopResult lvl segments num_segments inps env dist_res res =
     else case resSubExp res of
       Var v -> do
         irreg <- getIrregRep lvl segments env inps v
-        map (SubExpRes mempty . Var) <$> mkIrrep irreg
+        map (SubExpRes mempty) <$> irregularRepToLoopValues num_segments irreg
       _ -> undefined
-  where
-    mkIrrep
-      ( IrregularRep
-          { irregularS = segs,
-            irregularF = flags,
-            irregularO = offsets,
-            irregularD = elems
-          }
-        ) = do
-        flags_t <- lookupType flags
-        t <- lookupType elems
-        t_o <- lookupType offsets
-        num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
-        let shape = Shape [Var num_data]
-        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
-        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
-        segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [num_segments])
-        offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
-        pure [num_data, segs', flags', offsets', elems']
 
 liftLoopBody :: FlattenOps -> Segments -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> [DistResult] -> Result -> FlattenM Result
 liftLoopBody ops segments num_segments inputs env dstms dist_res result = do

@@ -40,9 +40,6 @@ data InnerMapMode
   = MultiDim
   | SingleDim
 
--- Check whether a loop parameter array needs irregular representation.
--- we need the irregular representation when any of its dimensions are either:
--- a loop parameter name or variant in the outer map context
 freeWithTypeDeps :: DistInputs -> Names -> FlattenM [VName]
 freeWithTypeDeps inps free = do
   let free_names = namesToList free
