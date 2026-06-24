@@ -388,11 +388,6 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           let resultType = Array (elemType row_type) (Shape [intConst Int64 0]) NoUniqueness
           elems <- letExp "arraylit_empty_elems" =<< eBlank resultType
           pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
-    -- TODO: not sure about this
-    ArrayVal vs row_type -> do
-      base_v <- letExp "arraylit_base" $ BasicOp $ ArrayVal vs row_type
-      res_v <- letExp "arraylit_reg" $ BasicOp $ Replicate (segmentsShape segments) (Var base_v)
-      pure $ insertRegulars [distResTag res] [res_v] env
     ArrayLit vs row_type
       | not $ any (isVariant inps env) (arrayDims row_type) -> do
           res_v <-
@@ -446,8 +441,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           (full_flags, full_offset, full_II1) <- doRepIota lvl full_size
 
           m <- arraySize 0 <$> lookupType full_II1
-          data_t <- lookupType (head vs_reparr)
-          let pt = elemType data_t
+          let pt = elemType row_type
           let resultType = Array pt (Shape [m]) NoUniqueness
           elems_blank <- letExp "blank_res" =<< eBlank resultType
 
@@ -485,6 +479,11 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
               $ zip [0 ..] vs_reparr
 
           pure $ insertIrregular full_size full_flags full_offset (distResTag res) elems Dense env
+    ArrayVal vs row_type -> do
+      base_v <- letExp "arraylit_base" $ BasicOp $ ArrayVal vs row_type
+      res_v <- letExp "arraylit_reg" $ BasicOp $ Replicate (segmentsShape segments) (Var base_v)
+      pure $ insertRegulars [distResTag res] [res_v] env
+
     Opaque _op se
       | Var v <- se,
         Just (DistInput rt_in _) <- lookup v inps ->
@@ -654,7 +653,6 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
         && all inputShapeUniform arr_ts
         then do
           --  Unifrom Concat
-          traceM "unform concat"
           arrs_lifted <-
             forM (zip (NE.toList arr) arr_ts) $ \(v, t) -> do
               let expectedShape = segmentsShape segments <> arrayShape t
@@ -735,6 +733,17 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
             letExp (baseName v <> "_copy_free") . BasicOp $
               Replicate (segmentsShape segments) (Var v)
           pure $ insertRegulars [distResTag res] [v'] env
+    Replicate (Shape dims) (Var v) -> do
+      dim_arrs <- mapM (dataArr lvl segments env inps) dims
+      seg_number <- arraySize 0 <$> lookupType (head dim_arrs)
+      mul_dims <- letExp "mul_dims" <=< segMap lvl (MkSolo seg_number) $ \(MkSolo i) -> do
+        vals <- mapM (\dim_arr -> letSubExp "dim_i" =<< eIndex dim_arr [eSubExp i]) dim_arrs
+        n <- letSubExp "n" <=< toExp $ product $ map pe64 vals
+        pure [subExpRes n]
+      rep <- getIrregRep lvl segments env inps v
+      rep' <- replicateIrreg lvl segments env mul_dims (baseName v) rep
+      pure $ insertRep (distResTag res) (Irregular rep') env
+    
     Manifest v perm
       | isRegularDistResult res -> do
           t <- lookupInputType inps v
@@ -760,16 +769,6 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
               (distResTag res)
               (Irregular $ irreg_dense {irregularD = elems_copy})
               env
-    Replicate (Shape dims) (Var v) -> do
-      dim_arrs <- mapM (dataArr lvl segments env inps) dims
-      seg_number <- arraySize 0 <$> lookupType (head dim_arrs)
-      mul_dims <- letExp "mul_dims" <=< segMap lvl (MkSolo seg_number) $ \(MkSolo i) -> do
-        vals <- mapM (\dim_arr -> letSubExp "dim_i" =<< eIndex dim_arr [eSubExp i]) dim_arrs
-        n <- letSubExp "n" <=< toExp $ product $ map pe64 vals
-        pure [subExpRes n]
-      rep <- getIrregRep lvl segments env inps v
-      rep' <- replicateIrreg lvl segments env mul_dims (baseName v) rep
-      pure $ insertRep (distResTag res) (Irregular rep') env
     Update safety as slice se
       -- Uniform Update
       | Just as_t <- distInputType <$> lookup as inps,
