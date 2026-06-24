@@ -24,6 +24,7 @@ module Futhark.Pass.ExtractKernels.DistributeNests
     addPostStms,
     postStm,
     inNesting,
+    isVectorMap,
   )
 where
 
@@ -498,7 +499,7 @@ maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Index arr slice))) acc
 -- sequentialised in the default case for this function.
 maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-    Scan op_lam nes <- singleScan scans =
+    Scan op_lam <- singleScan scans =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
           | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -508,7 +509,7 @@ maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
                 nest' <- expandKernelNest pat_unused nest
                 map_lam' <- soacsLambda map_lam
                 localScope (typeEnvFromDistAcc acc') $
-                  segmentedScanomapKernel nest' perm (stmAuxCerts aux) w op_lam map_lam' post_lam nes arrs
+                  segmentedScanomapKernel nest' perm (stmAuxCerts aux) w op_lam map_lam' post_lam arrs
                     >>= kernelOrNot mempty stm acc kernels acc'
         _ ->
           addStmToAcc stm acc
@@ -953,16 +954,15 @@ segmentedScanomapKernel ::
   Lambda SOACS ->
   Lambda rep ->
   Lambda SOACS ->
-  [SubExp] ->
   [VName] ->
   DistNestT rep m (Maybe (Stms rep))
-segmentedScanomapKernel nest perm cs segment_size op_lam map_lam post_lam nes arrs = do
+segmentedScanomapKernel nest perm cs segment_size op_lam map_lam post_lam arrs = do
   mk_lvl <- asks distSegLevel
   onLambda <- asks distOnSOACSLambda
   let onLambda' = fmap fst . runBuilder . onLambda
-  isSegmentedOp nest perm (freeIn op_lam) (freeIn map_lam) nes [] $
-    \pat ispace inps nes' _ -> do
-      (op_lam', _nes'', shape) <- determineReduceOp op_lam nes'
+  isSegmentedOp nest perm (freeIn op_lam) (freeIn map_lam) [] [] $
+    \pat ispace inps _nes' _ -> do
+      let (shape, op_lam') = isVectorMap op_lam
       op_lam'' <- onLambda' op_lam'
       let scan_op = SegScanOp op_lam'' shape
       post_lam' <- onLambda' post_lam

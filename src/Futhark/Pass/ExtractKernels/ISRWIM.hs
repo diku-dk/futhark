@@ -8,47 +8,36 @@ module Futhark.Pass.ExtractKernels.ISRWIM
   )
 where
 
-import Control.Arrow (first)
 import Control.Monad
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
 -- | Interchange Scan With Inner Map. Tries to turn a @scan(map)@ into a
--- @map(scan)
+-- @map(scan)@.  The neutral element is not needed: the inner scan is
+-- constructed neutral-free and FirstOrderTransform loop-peels it correctly.
 iswim ::
   (MonadBuilder m, Rep m ~ SOACS) =>
   Pat Type ->
   SubExp ->
   Lambda SOACS ->
-  [(SubExp, VName)] ->
+  [VName] ->
   Maybe (m ())
-iswim res_pat w scan_fun scan_input
+iswim res_pat w scan_fun arrs
   | Just (map_pat, map_aux, map_w, map_fun) <- rwimPossible scan_fun = Just $ do
-      let (accs, arrs) = unzip scan_input
       arrs' <- transposedArrays arrs
-      accs' <- mapM (letExp "acc" . BasicOp . SubExp) accs
 
-      let map_arrs' = accs' ++ arrs'
-          (scan_acc_params, scan_elem_params) =
-            splitAt (length arrs) $ lambdaParams scan_fun
-          map_params =
-            map removeParamOuterDim scan_acc_params
-              ++ map (setParamOuterDimTo w) scan_elem_params
+      let scan_elem_params = drop (length arrs) $ lambdaParams scan_fun
+          map_params = map (setParamOuterDimTo w) scan_elem_params
           map_rettype = map (setOuterDimTo w) $ lambdaReturnType scan_fun
 
           scan_params = lambdaParams map_fun
           scan_body = lambdaBody map_fun
           scan_rettype = lambdaReturnType map_fun
           scan_fun' = Lambda scan_params scan_rettype scan_body
-          scan_input' =
-            map (first Var) $
-              uncurry zip $
-                splitAt (length arrs') $
-                  map paramName map_params
-          (nes', scan_arrs) = unzip scan_input'
+          scan_arrs = map paramName map_params
 
-      scan_soac <- scanSOAC [Scan scan_fun' nes']
+      scan_soac <- scanSOAC [Scan scan_fun']
       let map_body =
             mkBody
               ( oneStm $
@@ -65,7 +54,7 @@ iswim res_pat w scan_fun scan_input
           mapM (newIdent' (<> "_transposed") . transposeIdentType) $
             patIdents res_pat
 
-      addStm . Let res_pat' map_aux . Op . Screma map_w map_arrs'
+      addStm . Let res_pat' map_aux . Op . Screma map_w arrs'
         =<< mapSOAC map_fun'
 
       forM_ (zip (patIdents res_pat) (patIdents res_pat')) $ \(to, from) -> do

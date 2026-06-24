@@ -30,10 +30,11 @@ eReverse arr = do
 scanExc ::
   (MonadBuilder m, Rep m ~ SOACS) =>
   Name ->
+  [SubExp] ->
   Scan SOACS ->
   [VName] ->
   m [VName]
-scanExc desc scan arrs = do
+scanExc desc nes scan arrs = do
   w <- arraysSize 0 <$> mapM lookupType arrs
   form <- scanSOAC [scan]
   res_incl <- letTupExp (desc <> "_incl") $ Op $ Screma w arrs form
@@ -54,7 +55,7 @@ scanExc desc scan arrs = do
     fmap subExpsRes . letTupExp' "scan_ex_res"
       =<< eIf
         first_elem
-        (resultBodyM $ scanNeutral scan)
+        (resultBodyM nes)
         (eBody $ map (`eIndex` [prev]) res_incl)
 
   letTupExp desc . Op . Screma w [iota] =<< mapSOAC lam
@@ -107,10 +108,11 @@ diffReduce _ops [adj] w [a] red
 diffReduce ops pat_adj w as red = do
   red' <- renameRed red
   flip_red <- renameRed =<< flipReduce red
-  ls <- scanExc "ls" (redToScan red') as
+  let nes = redNeutral red
+  ls <- scanExc "ls" nes (redToScan red') as
   rs <-
     mapM eReverse
-      =<< scanExc "ls" (redToScan flip_red)
+      =<< scanExc "ls" nes (redToScan flip_red)
       =<< mapM eReverse as
 
   (as_params, f) <- mkF $ redLambda red
@@ -127,7 +129,7 @@ diffReduce ops pat_adj w as red = do
       Reduce comm <$> renameLambda lam <*> pure nes
 
     redToScan :: Reduce SOACS -> Scan SOACS
-    redToScan (Reduce _ lam nes) = Scan lam nes
+    redToScan (Reduce _ lam _nes) = Scan lam
     flipReduce (Reduce comm lam nes) = do
       lam' <- renameLambda lam {lambdaParams = flipParams $ lambdaParams lam}
       pure $ Reduce comm lam' nes

@@ -254,7 +254,7 @@ intrablockStm stm@(Let pat aux e) = do
       | Just (post_lam, scans, mapfun) <- isMaposcanomapSOAC form,
         -- FIXME: Futhark.CodeGen.ImpGen.GPU.Block.compileGroupOp
         -- cannot handle multiple scan operators yet.
-        Scan scanfun _nes <- singleScan scans -> do
+        Scan scanfun <- singleScan scans -> do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
               post_op = SegPostOp $ soacsLambdaToGPU post_lam

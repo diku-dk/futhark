@@ -82,10 +82,10 @@ reduceToSegBinOp (Reduce comm lam nes) = do
   pure (stms, SegBinOp comm' lam'' nes' shape)
 
 scanToSegScanOp :: Scan SOACS -> ExtractM (Stms MC, SegScanOp MC)
-scanToSegScanOp (Scan lam nes) = do
-  ((lam', _nes', shape), stms) <- runBuilder $ determineReduceOp lam nes
+scanToSegScanOp (Scan lam) = do
+  let (shape, lam') = isVectorMap lam
   lam'' <- transformLambda lam'
-  pure (stms, SegScanOp lam'' shape)
+  pure (mempty, SegScanOp lam'' shape)
 
 histToSegBinOp :: SOACS.HistOp SOACS -> ExtractM (Stms MC, MC.HistOp MC)
 histToSegBinOp (SOACS.HistOp num_bins rf dests nes op) = do

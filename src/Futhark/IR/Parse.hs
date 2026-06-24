@@ -566,10 +566,7 @@ pReduce pr =
 
 pScan :: PR rep -> Parser (SOAC.Scan rep)
 pScan pr =
-  SOAC.Scan
-    <$> pLambda pr
-    <* pComma
-    <*> braces (pSubExp `sepBy` pComma)
+  SOAC.Scan <$> pLambda pr
 
 pWithAcc :: PR rep -> Parser (Exp rep)
 pWithAcc pr =
