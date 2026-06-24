@@ -205,7 +205,7 @@ onMapInputArr lvl segments env inps ws ws_O ws_data p arr = do
               else
                 letExp (baseName vs <> "_flat") . BasicOp . Reshape vs $
                   reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
-          pure $ MapArray v t
+          pure $ MapArray v (rowType t)
         DistInput rt t ->
           case resVar rt env of
             Irregular rep -> do
@@ -220,7 +220,6 @@ onMapInputArr lvl segments env inps ws ws_O ws_data p arr = do
                     letExp (baseName arr <> "_reg_flat") . BasicOp . Reshape vs $
                       reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
                   pure $ MapArray v (stripArray 1 vs_t)
-    -- undefined
     Nothing -> do
       arr_row_t <- rowType <$> lookupType arr
       arr_rep <-
@@ -232,28 +231,12 @@ onMapInputArr lvl segments env inps ws ws_O ws_data p arr = do
           reshapeAll (arrayShape arr_rep_t) (Shape [ws_prod] <> arrayShape arr_row_t)
       pure $ MapArray v arr_row_t
 
-mapArraysToInputs ::
-  [Param Type] ->
-  [MapArray IrregularRep] ->
-  (DistEnv, DistInputs)
-mapArraysToInputs params arrs =
-  let ((_, env), inputs) =
-        L.mapAccumL onInput (0, mempty) $ zip params arrs
-   in (env, inputs)
-  where
-    onInput (tag, env) (p, MapArray arr _) =
-      ((tag, env), (paramName p, DistInputFree arr (paramType p)))
-    onInput (tag, env) (p, MapOther rep _) =
-      let rt = ResTag tag
-       in ( (tag + 1, insertRep rt (Irregular rep) env),
-            (paramName p, DistInput rt (paramType p))
-          )
 
-mapArraysToInputs2 ::
+mapArraysToInputs ::
   [VName] ->
   [MapArray IrregularRep] ->
   (DistEnv, DistInputs)
-mapArraysToInputs2 param_names arrs =
+mapArraysToInputs param_names arrs =
   let ((_, env), inputs) =
         L.mapAccumL onInput (0, mempty) $ zip param_names arrs
    in (env, inputs)
@@ -311,7 +294,7 @@ transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
       (lambdaParams map_lam)
       arrs
 
-  let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+  let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
       readFree is = readInputs new_segment free_env is free_inputs
   genUniformSegRed lvl "uniformSegRed" (NE.toList new_segment) sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs' readFree
 
@@ -378,7 +361,7 @@ transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam
       )
       (lambdaParams map_lam)
       arrs
-  let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+  let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
       readFree is = readInputs new_segment free_env is free_inputs
   doUniformSegMaposcanomap lvl scans arrs' post_lam map_lam segments new_segment inps env readFree
 
@@ -703,10 +686,11 @@ onMapIrregularInputArr ::
 onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod = do
   -- new_segments has already has the the new w inside unlike other functions
   rep_t <- lookupType $ irregularD rep
+  let p_t = paramType p
   when (arrayRank rep_t > 1) $
     error $
       error "onMapIrregularInputArr: irregularD is not 1D"
-  if null (arrayDims $ paramType p)
+  if null (arrayDims p_t)
     then do
       -- assuimg the irregD is 1D size(irregularD rep) == ws_prod should hold and this should be fine
       let old_shape = arrayShape rep_t
@@ -717,7 +701,7 @@ onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod =
       case irregularK rep of
         Dense -> do
           v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape (irregularD rep) $ reshapeAll old_shape new_shape
-          pure $ MapArray v_reshaped (stripArray 1 rep_t)
+          pure $ MapArray v_reshaped p_t
         -- TODO: What if we don't do this here? we can still just read from our replicated view
         Replicated -> do
           new_flat <-
@@ -731,7 +715,7 @@ onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod =
                 flat_idx <- letSubExp "flat_idx" <=< toExp $ pe64 data_off + pe64 local_pos
                 fmap (subExpsRes . pure) $ letSubExp "elem" =<< eIndex (irregularD rep) [eSubExp flat_idx]
           v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape new_flat $ reshapeAll old_shape new_shape
-          pure $ MapArray v_reshaped (stripArray 1 rep_t)
+          pure $ MapArray v_reshaped p_t
     else do
       -- We need to split multi-dimensional irregular segments
       -- into per-row segments. Compute per-row size by dividing
@@ -795,7 +779,7 @@ onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod =
                 irregularO = new_O,
                 irregularK = Replicated
               }
-      pure $ MapOther rep' rep_t
+      pure $ MapOther rep' p_t
 
 onMapInputArrMultiDim ::
   SegLevel ->
@@ -821,7 +805,7 @@ onMapInputArrMultiDim lvl old_segments w env inps ws ws_O ws_data p arr = do
           Regular vs -> do
             vs_t <- lookupType vs
             if isAcc vs_t
-              then pure $ MapArray vs t
+              then pure $ MapArray vs (rowType t)
               else do
                 -- let's be cautious and make sure it has the correct shape
                 let expected_shape = segmentsShape old_segments <> arrayShape t
@@ -831,7 +815,7 @@ onMapInputArrMultiDim lvl old_segments w env inps ws ws_O ws_data p arr = do
                     v <-
                       letExp (baseName arr <> "_reg_reshape") . BasicOp . Reshape vs $
                         reshapeAll (arrayShape vs_t) expected_shape
-                    pure $ MapArray v t
+                    pure $ MapArray v (rowType t)
     Nothing -> do
       arr_row_t <- rowType <$> lookupType arr
       arr_rep <-
@@ -1138,7 +1122,7 @@ runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
   free_and_sizes <- freeWithTypeDeps inps (freeIn map_lam')
   let new_segments = segments <> pure w
       (param_env, param_inputs) =
-        mapArraysToInputs (lambdaParams map_lam') arrs'
+        mapArraysToInputs (map paramName (lambdaParams map_lam'))  arrs'
       free_inputs =
         [ (v, inp)
         | v <- free_and_sizes,
@@ -1277,7 +1261,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
           mapMaybe
             (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
             free_and_sizes
-      let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+      let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
 
       new_segment <- arraySize 0 <$> lookupType ws_F
       let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
@@ -1332,7 +1316,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
           mapMaybe
             (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
             free_and_sizes
-      let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+      let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
       new_segment <- arraySize 0 <$> lookupType ws_F
       let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
       elems' <- doSegMaposcanomap lvl scans ws_F elems post_lam map_lam segments inps env readFree
@@ -1415,7 +1399,7 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops, b
           mapMaybe
             (onMapFreeVarMultiDim lvl segments w env inps)
             free_and_sizes
-      let (free_env, free_inputs) = mapArraysToInputs2 free_replicated replicated
+      let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
           readFree is = readInputs new_segment free_env is free_inputs
       hist_res <-
         certifying (distCerts inps aux env) $
