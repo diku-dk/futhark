@@ -15,17 +15,6 @@ import Futhark.Transform.Rename
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, quot, rem)
 
-replicateForDims :: Segments -> Shape -> VName -> FlattenM VName
-replicateForDims segments dims v = do
-  v_t <- lookupType v
-  let seg_rank = length (NE.toList segments)
-      v_rank = arrayRank v_t
-      dims_rank = shapeRank dims
-      perm = [dims_rank .. dims_rank + seg_rank - 1] ++ [0 .. dims_rank - 1] ++ [seg_rank + dims_rank .. dims_rank + v_rank - 1]
-  v_rep <-
-    letExp (baseName v <> "_reg_rep") . BasicOp $ Replicate dims (Var v)
-  letExp (baseName v <> "_reg_rep_tr") . BasicOp $ Rearrange v_rep perm
-
 -- Do 'map2 (++) A B' where 'A' and 'B' are irregular arrays and have the same
 -- number of subarrays
 concatIrreg ::
@@ -696,15 +685,12 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
 
           pure $ insertRegulars [distResTag res] [v'] env
         else do
-          traceM "!!!NON unform concat"
           ns <- dataArr lvl segments env inps shp
           reparr <- mapM (getIrregRep lvl segments env inps) (NE.toList arr)
-          traceM "lets enter"
           rep' <- case d of
             0 -> concatIrreg lvl segments env ns reparr
             d' -> do
               concatIrregAlongDim lvl segments env ns reparr arr_ts inps d'
-          traceM "Job Done"
           pure $ insertRep (distResTag res) (Irregular rep') env
 
     --  Unifrom Replicate

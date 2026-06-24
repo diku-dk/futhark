@@ -67,20 +67,6 @@ suitableUniformOperator env inps lam _nes =
   where
     notVariant v = isNothing $ M.lookup v $ inputReps inps env
 
--- | Replicate an array to insert a new inner dimension  after the
--- existing segment dimensions.
-replicateForW :: Segments -> SubExp -> VName -> FlattenM VName
-replicateForW segments w v = do
-  v_t <- lookupType v
-  let seg_rank = length (NE.toList segments)
-      v_rank = arrayRank v_t
-      perm = [1 .. seg_rank] ++ [0] ++ [seg_rank + 1 .. v_rank]
-  v_rep <-
-    letExp (baseName v <> "_free_rep") . BasicOp $
-      Replicate (Shape [w]) (Var v)
-  letExp (baseName v <> "_free_rep_tr") . BasicOp $
-    Rearrange v_rep perm
-
 regularToReplicatedIrregularRep ::
   SegLevel ->
   Segments ->
@@ -170,11 +156,11 @@ onMapFreeVarMultiDim lvl segments w env inps v = do
   v_inp <- lookup v inps
   pure $ fmap (v,) $ case v_inp of
     DistInputFree v' t -> do
-      v_rep <- replicateForW segments w v'
+      v_rep <- replicateForDims segments (Shape [w]) v'
       pure $ MapArray v_rep t
     DistInput rt t -> case resVar rt env of
       Regular v' -> do
-        v_rep <- replicateForW segments w v'
+        v_rep <- replicateForDims segments (Shape [w]) v'
         pure $ MapArray v_rep t
       Irregular rep -> do
         -- Can replicate as well

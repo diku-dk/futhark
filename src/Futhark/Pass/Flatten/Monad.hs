@@ -53,6 +53,7 @@ module Futhark.Pass.Flatten.Monad
     lookupInputType,
     subExpInputType,
     localiseInputs,
+    replicateForDims,
     liftBodyWithDistResults,
     distResultsToResReps,
     resultToResReps,
@@ -753,6 +754,19 @@ localiseInputs env_outer inps =
       ((next, env_local), inps_local) =
         L.mapAccumL step (0, mempty) inps
    in (inps_local, env_local, next)
+
+-- | Replicate an array to insert new inner dimensions  after the
+-- existing segment dimensions.
+replicateForDims :: Segments -> Shape -> VName -> FlattenM VName
+replicateForDims segments dims v = do
+  v_t <- lookupType v
+  let seg_rank = length (NE.toList segments)
+      v_rank = arrayRank v_t
+      dims_rank = shapeRank dims
+      perm = [dims_rank .. dims_rank + seg_rank - 1] ++ [0 .. dims_rank - 1] ++ [seg_rank + dims_rank .. dims_rank + v_rank - 1]
+  v_rep <-
+    letExp (baseName v <> "_reg_rep") . BasicOp $ Replicate dims (Var v)
+  letExp (baseName v <> "_reg_rep_tr") . BasicOp $ Rearrange v_rep perm
 
 -- | Functions for tying together disparate modules - this is to avoid mutually
 -- recursive modules.
