@@ -52,6 +52,38 @@ type InBlockMapTransformer =
   Lambda SOACS ->
   Builder GPU (Stms GPU)
 
+foldBinOp' :: (MonadBuilder m) => BinOp -> [SubExp] -> m (Exp (Rep m))
+foldBinOp' _ [] = eSubExp $ intConst Int64 1
+foldBinOp' bop (x : xs) = foldBinOp bop x xs
+
+computeThreadBlockSize :: [[SubExp]] -> [[SubExp]] -> FlattenM (SubExp, SubExp)
+computeThreadBlockSize wss_min wss_avail = do
+  ws_min <-
+    mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
+      filter (not . null) wss_min
+  ws_avail <-
+    mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
+      filter (not . null) wss_avail
+
+  -- The amount of parallelism available *in the worst case* is
+  -- equal to the smallest parallel loop, or *at least* 1.
+  intra_avail_par <-
+    letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
+
+  tblock_size <- newVName "computed_tblock_size"
+  -- The group size is either the maximum of the minimum parallelism
+  -- exploited, or the desired parallelism (bounded by the max group
+  -- size) in case there is no minimum.
+  letBindNames [tblock_size]
+    =<< if null ws_min
+      then
+        eBinOp
+          (SMin Int64)
+          (eSubExp =<< letSubExp "max_tblock_size" (Op $ SizeOp $ GetSizeMax SizeThreadBlock))
+          (eSubExp intra_avail_par)
+      else foldBinOp' (SMax Int64) ws_min
+  pure (intra_avail_par, Var tblock_size)
+
 intrablockParallelise ::
   InBlockMapTransformer ->
   Segments ->
@@ -65,8 +97,6 @@ intrablockParallelise ::
   Lambda SOACS ->
   FlattenM (Maybe IntrablockResult)
 intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs lam0 = runMaybeT $ do
-  -- TODO : This should not be necessary.
-  unless (all (regularMapInput env inps) arrs) mzero
   gpu_scope <- lift askScope
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
   lam <- renameLambda =<< preprocessLambda pp_scope lam0
@@ -76,8 +106,8 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
         | DistResult _ (DistType _ _ t) _ <- dist_res
         ]
 
-  ((arrs', nested_pat), input_prelude_stms) <- lift . collectStms $ do
-    arrs' <-
+  ((param_inputs, nested_pat), input_prelude_stms) <- lift . collectStms $ do
+    param_inputs <-
       zipWithM
         (prepareRegularMapInput segments env inps)
         (lambdaParams lam)
@@ -88,12 +118,10 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
           (\res t -> PatElem <$> newName (distResName res) <*> pure t)
           dist_res
           result_ts
-    pure (arrs', nested_pat)
+    pure (param_inputs, nested_pat)
 
   let new_segments = segments <> pure w
       body = lambdaBody lam
-      (param_env, param_inputs) =
-        mapArraysToInputs (lambdaParams lam) arrs'
 
   free_inputs <- lift $ freeInputsFor inps lam
   (wss_min, wss_avail, log, kbody) <-
@@ -101,47 +129,19 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
       intrablockParalleliseBody map_in_block body
 
   outside_scope <- lift askScope
-  -- TODO: Double check this
+  -- Reject Irregular parallelism
   unless (allNames (`M.member` outside_scope) $ freeIn (wss_min ++ wss_avail)) mzero
 
+  let new_segments_list = NE.toList new_segments
   ((intra_avail_par, tblock_size, kspace, num_tblocks), prelude_stms) <-
     lift . collectStms $ do
-      let foldBinOp' _ [] = eSubExp $ intConst Int64 1
-          foldBinOp' bop (x : xs) = foldBinOp bop x xs
-
       num_tblocks <-
         letSubExp "intra_num_tblocks"
-          =<< foldBinOp' (Mul Int64 OverflowUndef) (NE.toList new_segments)
-
-      ws_min <-
-        mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
-          filter (not . null) wss_min
-      ws_avail <-
-        mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
-          filter (not . null) wss_avail
-
-      -- The amount of parallelism available *in the worst case* is
-      -- equal to the smallest parallel loop, or *at least* 1.
-      intra_avail_par <-
-        letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
-
-      tblock_size <- newVName "computed_tblock_size"
-      -- The group size is either the maximum of the minimum parallelism
-      -- exploited, or the desired parallelism (bounded by the max group
-      -- size) in case there is no minimum.
-      letBindNames [tblock_size]
-        =<< if null ws_min
-          then
-            eBinOp
-              (SMin Int64)
-              (eSubExp =<< letSubExp "max_tblock_size" (Op $ SizeOp $ GetSizeMax SizeThreadBlock))
-              (eSubExp intra_avail_par)
-          else foldBinOp' (SMax Int64) ws_min
-
-      gtids <- mapM (const $ newVName "gtid") $ NE.toList new_segments
-      kspace <- mkSegSpace $ zip gtids $ NE.toList new_segments
-
-      pure (intra_avail_par, Var tblock_size, kspace, num_tblocks)
+          =<< foldBinOp' (Mul Int64 OverflowUndef) new_segments_list
+      (intra_avail_par, tblock_size) <- computeThreadBlockSize wss_min wss_avail
+      gtids <- mapM (const $ newVName "gtid") new_segments_list
+      kspace <- mkSegSpace $ zip gtids new_segments_list
+      pure (intra_avail_par, tblock_size, kspace, num_tblocks)
 
   read_input_stms <-
     lift . collectStms_ . localScope (scopeOfSegSpace kspace <> scopeOf input_prelude_stms <> scopeOf prelude_stms) $ do
@@ -149,10 +149,10 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
           full_is = map (Var . fst) gtids_and_dims
           outer_is = take (segmentsRank segments) full_is
       readInBlockInputs segments env outer_is free_inputs
-      readInBlockInputs new_segments param_env full_is param_inputs
+      readInBlockInputs new_segments mempty full_is param_inputs
 
   let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
-      rts = map (length (NE.toList new_segments) `stripArray`) result_ts
+      rts = map (length new_segments_list `stripArray`) result_ts
       grid = KernelGrid (Count num_tblocks) (Count tblock_size)
       lvl = SegBlock SegNoVirt (Just grid)
       kstm = Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
@@ -198,32 +198,10 @@ intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = runMaybeT $ 
 
   ((intra_avail_par, tblock_size, kspace, num_tblocks), prelude_stms) <-
     lift . collectStms $ do
-      let foldBinOp' _ [] = eSubExp $ intConst Int64 1
-          foldBinOp' bop (x : xs) = foldBinOp bop x xs
-
-      ws_min <-
-        mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
-          filter (not . null) wss_min
-      ws_avail <-
-        mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
-          filter (not . null) wss_avail
-
-      intra_avail_par <-
-        letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
-
-      tblock_size <- newVName "computed_tblock_size"
-      letBindNames [tblock_size]
-        =<< if null ws_min
-          then
-            eBinOp
-              (SMin Int64)
-              (eSubExp =<< letSubExp "max_tblock_size" (Op $ SizeOp $ GetSizeMax SizeThreadBlock))
-              (eSubExp intra_avail_par)
-          else foldBinOp' (SMax Int64) ws_min
-
+      (intra_avail_par, tblock_size) <- computeThreadBlockSize wss_min wss_avail
       gtid <- newVName "gtid"
       kspace <- mkSegSpace [(gtid, w)]
-      pure (intra_avail_par, Var tblock_size, kspace, w)
+      pure (intra_avail_par, tblock_size, kspace, w)
 
   read_input_stms <- lift . collectStms_ . localScope (scopeOfSegSpace kspace) $ do
     let SegSpace _ gtids_and_dims = kspace
@@ -275,64 +253,16 @@ readInBlockInputs segments env is inputs =
             else
               letBindNames [v] $ BasicOp $ SubExp $ Var v'
 
-regularMapInput :: DistEnv -> DistInputs -> VName -> Bool
-regularMapInput env inps arr =
-  case lookup arr inps of
-    Just DistInputFree {} ->
-      True
-    Just (DistInput rt _) ->
-      case resVar rt env of
-        Regular {} -> True
-        Irregular {} -> False
-    Nothing ->
-      True
-
 prepareRegularMapInput ::
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  Param Type ->
-  VName ->
-  FlattenM (MapArray ())
-prepareRegularMapInput segments env inps p arr =
-  case lookup arr inps of
-    Just (DistInputFree vs t) ->
-      pure $ MapArray vs t
-    Just (DistInput rt t) ->
-      case resVar rt env of
-        Regular vs -> do
-          vs_t <- lookupType vs
-          if isAcc vs_t
-            then pure $ MapArray vs t
-            else do
-              let expected_shape = segmentsShape segments <> arrayShape t
-              v <-
-                if arrayShape vs_t == expected_shape
-                  then pure vs
-                  else
-                    letExp (baseName arr <> "_intra_reg_reshape") . BasicOp $
-                      Reshape vs $
-                        reshapeAll (arrayShape vs_t) expected_shape
-              pure $ MapArray v t
-        Irregular {} ->
-          error "prepareRegularMapInput: unexpected irregular input"
-    Nothing -> do
-      arr_rep <-
-        letExp (baseName arr <> "_intra_rep") . BasicOp $
-          Replicate (segmentsShape segments) (Var arr)
-      pure $ MapArray arr_rep $ paramType p
-
-mapArraysToInputs ::
-  [Param Type] ->
-  [MapArray ()] ->
-  (DistEnv, DistInputs)
-mapArraysToInputs params arrs =
-  (mempty, zipWith onInput params arrs)
-  where
-    onInput p (MapArray arr _) =
-      (paramName p, DistInputFree arr (paramType p))
-    onInput _ MapOther {} =
-      error "mapArraysToInputs: unexpected irregular input"
+  Segments -> DistEnv -> DistInputs ->
+  Param Type -> VName ->
+  FlattenM (VName, DistInput)
+prepareRegularMapInput segments env inps p arr = do
+  t <- lookupInputType inps arr
+  let expectedShape = segmentsShape segments <> arrayShape t
+      lvl = SegThread SegVirt Nothing
+  arr_rep <- liftVarRegular lvl segments inps env expectedShape arr
+  pure (paramName p, DistInputFree arr_rep (paramType p))
 
 freeInputsFor :: DistInputs -> Lambda SOACS -> FlattenM DistInputs
 freeInputsFor inps lam =

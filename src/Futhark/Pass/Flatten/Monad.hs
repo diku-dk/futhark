@@ -36,6 +36,7 @@ module Futhark.Pass.Flatten.Monad
     liftSubExp,
     liftSubExpPreserveRep,
     liftSubExpRegular,
+    liftVarRegular,
     liftParam,
     mkIrregFromReg,
     flattenIrregularRep,
@@ -573,16 +574,27 @@ liftSubExpRegular ::
   SubExp ->
   FlattenM VName
 liftSubExpRegular lvl segments inps env expectedShape se = do
-  v <- case se of
-    c@(Constant _) ->
+  case se of
+    c@(Constant _) -> 
       letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
-    Var x -> case M.lookup x $ inputReps inps env of
-      Just (_, Regular v') -> pure v'
-      Just (_, Irregular irreg) -> do
-        rep_dense <- ensureDenseIrregular lvl "lifted_irreg" irreg
-        pure $ irregularD rep_dense
-      Nothing ->
-        letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
+    Var v -> liftVarRegular lvl segments inps env expectedShape v
+
+liftVarRegular ::
+  SegLevel ->
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  Shape ->
+  VName ->
+  FlattenM VName
+liftVarRegular lvl segments inps env expectedShape x = do
+  v <- case M.lookup x $ inputReps inps env of
+    Just (_, Regular v') -> pure v'
+    Just (_, Irregular irreg) -> do
+      rep_dense <- ensureDenseIrregular lvl "lifted_irreg" irreg
+      pure $ irregularD rep_dense
+    Nothing ->
+      letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var x)
   v_t <- lookupType v
   if isAcc v_t || arrayShape v_t == expectedShape
     then pure v
