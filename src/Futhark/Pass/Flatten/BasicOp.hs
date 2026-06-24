@@ -31,7 +31,7 @@ concatIrreg lvl _segments _env ns reparr = do
   num_segments <- arraySize 0 <$> lookupType ns
 
   -- Constructs the full list size / shape that should hold the final results.
-  let zero = Constant $ IntValue $ intValue Int64 (0 :: Int)
+  let zero = intConst Int64 0
   ns_full <- letExp (baseName ns <> "_full") <=< segMap lvl (MkSolo num_segments) $
     \(MkSolo i) -> do
       old_segments <-
@@ -60,13 +60,8 @@ concatIrreg lvl _segments _env ns reparr = do
         segment_sizes <-
           forM shapes $ \shape ->
             letSubExp "segment_size" =<< eIndex shape [eSubExp i]
-        let prefixes = L.init $ L.inits segment_sizes
-        sumprefix <-
-          mapM
-            ( letSubExp "segment_prefix"
-                <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0)
-            )
-            prefixes
+        let scanned = scanl (+) 0 $ map pe64 segment_sizes   
+        sumprefix   <- mapM (letSubExp "segment_prefix" <=< toExp) (init scanned)
         pure $ subExpsRes sumprefix
 
   scatter_offsets_T <-
@@ -80,8 +75,8 @@ concatIrreg lvl _segments _env ns reparr = do
   m <- arraySize 0 <$> lookupType ns_full_F
   data_t <- lookupType (irregularD (head reparr))
   let pt = elemType data_t
-  let resultType = Array pt (Shape [m]) NoUniqueness
-  elems_blank <- letExp "blank_res" =<< eBlank resultType
+  let result_type = Array pt (Shape [m]) NoUniqueness
+  elems_blank <- letExp "blank_res" =<< eBlank result_type
 
   -- Scatter data into result array
   elems <-
@@ -138,24 +133,23 @@ concatIrregAlongDim ::
   DistInputs ->
   Int ->
   FlattenM IrregularRep
-concatIrregAlongDim lvl segments env ns reparr typearr inps d = do
+concatIrregAlongDim lvl segments env ns rep_arr type_arr inps d = do
   num_segments <- arraySize 0 <$> lookupType ns
 
-  let zero = Constant $ IntValue $ intValue Int64 (0 :: Int)
   ns_full <- letExp (baseName ns <> "_full") <=< segMap lvl (MkSolo num_segments) $
     \(MkSolo i) -> do
       old_segments <-
-        forM reparr $ \rep ->
+        forM rep_arr $ \rep ->
           letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp i]
       new_segment <-
         letSubExp "new_segment"
-          =<< toExp (foldl (+) (pe64 zero) $ map pe64 old_segments)
+          =<< toExp (sum $ map pe64 old_segments)
       pure $ subExpsRes [new_segment]
 
   (ns_full_F, ns_full_O, _ns_II1) <- doRepIota lvl ns_full
 
-  repIota <- mapM (doRepIota lvl . irregularS) reparr
-  segIota <- mapM (doSegIota lvl . irregularS) reparr
+  repIota <- mapM (doRepIota lvl . irregularS) rep_arr
+  segIota <- mapM (doSegIota lvl . irregularS) rep_arr
 
   let (_, _, rep_II1) = unzip3 repIota
   let (_, _, rep_II2) = unzip3 segIota
@@ -168,35 +162,25 @@ concatIrregAlongDim lvl segments env ns reparr typearr inps d = do
         seg_is <- segmentCoordsFromFlat segments i
 
         block_sizes <-
-          forM typearr $ \t -> do
+          forM type_arr $ \t -> do
             v_dims <- readTypeDims segments env seg_is inps t
             letSubExp "block_size" =<< toExp (product $ map pe64 $ drop d v_dims)
 
-        total_block <-
-          letSubExp "total_block"
-            <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0)
-            $ block_sizes
+        let scanned = scanl (+) 0 $ map pe64 block_sizes   
+        sum_prefix   <- mapM (letSubExp "segment_prefix" <=< toExp) (init scanned)
+        total_block <- letSubExp "total_block" =<< toExp (last scanned)
 
-        let prefixes = L.init $ L.inits block_sizes
+        pure $ subExpsRes (block_sizes <> sum_prefix <> [total_block])
 
-        sumprefix <-
-          mapM
-            ( letSubExp "segment_prefix"
-                <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0)
-            )
-            prefixes
-
-        pure $ subExpsRes (block_sizes <> sumprefix <> [total_block])
-
-  let k = length typearr
+  let k = length type_arr
       (scatter_blocks, rest) = splitAt k scatter_info
       (scatter_offsets, [total_block_size]) = splitAt k rest
 
   m <- arraySize 0 <$> lookupType ns_full_F
-  data_t <- lookupType (irregularD (head reparr))
+  data_t <- lookupType (irregularD (head rep_arr))
   let pt = elemType data_t
-  let resultType = Array pt (Shape [m]) NoUniqueness
-  elems_blank <- letExp "blank_res" =<< eBlank resultType
+  let result_type = Array pt (Shape [m]) NoUniqueness
+  elems_blank <- letExp "blank_res" =<< eBlank result_type
 
   -- Scatter data into result array
   elems <-
@@ -244,7 +228,7 @@ concatIrregAlongDim lvl segments env ns reparr typearr inps d = do
             pure (i, v')
       )
       elems_blank
-      $ L.zip6 reparr scatter_blocks scatter_offsets n_arr rep_II1 rep_II2
+      $ L.zip6 rep_arr scatter_blocks scatter_offsets n_arr rep_II1 rep_II2
 
   pure $
     IrregularRep
