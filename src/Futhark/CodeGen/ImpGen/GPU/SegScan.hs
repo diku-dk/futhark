@@ -14,16 +14,14 @@ import Futhark.IR.GPUMem
 
 -- The single-pass scan does not support multiple operators, so jam
 -- them together here.
-combineScanOps :: [SegBinOp GPUMem] -> SegBinOp GPUMem
+combineScanOps :: [SegScanOp GPUMem] -> SegScanOp GPUMem
 combineScanOps ops =
-  SegBinOp
-    { segBinOpComm = mconcat (map segBinOpComm ops),
-      segBinOpLambda = lam',
-      segBinOpNeutral = concatMap segBinOpNeutral ops,
-      segBinOpShape = mempty -- Assumed
+  SegScanOp
+    { segScanOpLambda = lam',
+      segScanOpShape = mempty -- Assumed
     }
   where
-    lams = map segBinOpLambda ops
+    lams = map segScanOpLambda ops
     xParams lam = take (length (lambdaReturnType lam)) (lambdaParams lam)
     yParams lam = drop (length (lambdaReturnType lam)) (lambdaParams lam)
     lam' =
@@ -48,16 +46,16 @@ bodyHas f = any (f' . stmExp) . bodyStms
         { walkOnBody = const $ guard . not . bodyHas f
         }
 
-canBeSinglePass :: [SegBinOp GPUMem] -> Maybe (SegBinOp GPUMem)
+canBeSinglePass :: [SegScanOp GPUMem] -> Maybe (SegScanOp GPUMem)
 canBeSinglePass scan_ops =
   if all ok scan_ops
     then Just $ combineScanOps scan_ops
     else Nothing
   where
     ok op =
-      segBinOpShape op == mempty
-        && all primType (lambdaReturnType (segBinOpLambda op))
-        && not (bodyHas isAssert (lambdaBody (segBinOpLambda op)))
+      segScanOpShape op == mempty
+        && all primType (lambdaReturnType (segScanOpLambda op))
+        && not (bodyHas isAssert (lambdaBody (segScanOpLambda op)))
     isAssert (BasicOp Assert {}) = True
     isAssert _ = False
 
@@ -69,7 +67,7 @@ compileSegScan ::
   SegSpace ->
   [Type] ->
   KernelBody GPUMem ->
-  [SegBinOp GPUMem] ->
+  [SegScanOp GPUMem] ->
   SegPostOp GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space ts map_kbody scan_ops post_op =

@@ -94,7 +94,7 @@ segScan ::
   Pat (LetDec rep) ->
   Certs ->
   SubExp -> -- segment size
-  [SegBinOp rep] ->
+  [SegScanOp rep] ->
   Lambda rep ->
   SegPostOp rep ->
   [VName] ->

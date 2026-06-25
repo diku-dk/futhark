@@ -96,11 +96,13 @@ isNotVarInput = filter (isNothing . H.isVarInput)
 finalizeNode :: (HasScope SOACS m, MonadFreshNames m) => NodeT -> m (Stms SOACS)
 finalizeNode nt = case nt of
   StmNode stm -> pure $ oneStm stm
-  SoacNode ots outputs soac aux -> runBuilder_ $ do
-    untransformed_outputs <- mapM newName $ patNames outputs
-    auxing aux $ letBindNames untransformed_outputs . Op =<< H.toSOAC soac
-    forM_ (zip (patNames outputs) untransformed_outputs) $ \(output, v) ->
-      letBindNames [output] . BasicOp . SubExp . Var =<< H.applyTransforms ots v
+  SoacNode ots outputs soac aux pre_stms -> do
+    soac_stms <- runBuilder_ $ do
+      untransformed_outputs <- mapM newName $ patNames outputs
+      auxing aux $ letBindNames untransformed_outputs . Op =<< H.toSOAC soac
+      forM_ (zip (patNames outputs) untransformed_outputs) $ \(output, v) ->
+        letBindNames [output] . BasicOp . SubExp . Var =<< H.applyTransforms ots v
+    pure $ pre_stms <> soac_stms
   ResNode _ -> pure mempty
   TransNode output tr ia -> do
     (aux, e) <- H.transformToExp tr ia
@@ -192,7 +194,7 @@ makeCopiesOfFusedExcept ::
   [VName] ->
   NodeT ->
   m NodeT
-makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
+makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux pre_stms) = do
   case soac of
     H.Screma w arrs (ScremaForm lam scans reduces postlam) -> do
       localScope (scopeOf lam <> scopeOf postlam) $ do
@@ -205,7 +207,7 @@ makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
         lam' <- makeCopiesInLambda (fused_in_main L.\\ noCopy) lam
         postlam' <- makeCopiesInLambda (fused_in_post L.\\ noCopy) postlam
         let form' = ScremaForm lam' scans reduces postlam'
-        pure $ SoacNode ots pats (H.Screma w arrs form') aux
+        pure $ SoacNode ots pats (H.Screma w arrs form') aux pre_stms
     _any -> do
       let lam = H.lambda soac
       localScope (scopeOf lam) $ do
@@ -213,7 +215,7 @@ makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
           filterM (fmap (not . isAcc) . lookupType) . namesToList . consumedByLambda $
             Alias.analyseLambda mempty lam
         lam' <- makeCopiesInLambda (fused_inner L.\\ noCopy) lam
-        pure $ SoacNode ots pats (H.setLambda lam' soac) aux
+        pure $ SoacNode ots pats (H.setLambda lam' soac) aux pre_stms
 makeCopiesOfFusedExcept _ nodeT = pure nodeT
 
 makeCopiesInLambda ::
@@ -240,11 +242,11 @@ makeCopyStms vs = do
   where
     makeNewName name = newVName $ baseName name <> "_copy"
 
-okToFuseProducer :: H.SOAC SOACS -> FusionM Bool
-okToFuseProducer (H.Screma _ _ form) = do
+okToFuseScan :: H.SOAC SOACS -> FusionM Bool
+okToFuseScan (H.Screma _ _ form) = do
   let is_scan = isJust $ Futhark.isScanomapSOAC form
   gets $ (not is_scan ||) . fuseScans
-okToFuseProducer _ = pure True
+okToFuseScan _ = pure True
 
 -- First node is producer, second is consumer.
 vFuseNodeT ::
@@ -257,7 +259,7 @@ vFuseNodeT _ infusible (s1, _, e1s) (MatchNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
       pure $ Just $ MatchNode stm2 $ (s1, e1s) : dfused
-vFuseNodeT _ infusible (TransNode stm1_out tr stm1_in, _, _) (SoacNode ots2 pats2 soac2 aux2, _)
+vFuseNodeT _ infusible (TransNode stm1_out tr stm1_in, _, _) (SoacNode ots2 pats2 soac2 aux2 pre2, _)
   | null infusible = do
       stm1_in_t <- lookupType stm1_in
       let onInput inp
@@ -266,22 +268,24 @@ vFuseNodeT _ infusible (TransNode stm1_out tr stm1_in, _, _) (SoacNode ots2 pats
             | otherwise =
                 inp
           soac2' = map onInput (H.inputs soac2) `H.setInputs` soac2
-      pure $ Just $ SoacNode ots2 pats2 soac2' aux2
+      pure $ Just $ SoacNode ots2 pats2 soac2' aux2 pre2
 vFuseNodeT
   _
   _
-  (SoacNode ots1 pats1 soac1 aux1, i1s, _e1s)
-  (SoacNode ots2 pats2 soac2 aux2, _e2s) = do
+  (SoacNode ots1 pats1 soac1 aux1 _, i1s, _e1s)
+  (SoacNode ots2 pats2 soac2 aux2 pre2, _e2s) = do
     let ker =
           TF.FusedSOAC
             { TF.fsSOAC = soac2,
               TF.fsOutputTransform = ots2,
-              TF.fsOutNames = patNames pats2
+              TF.fsOutNames = patNames pats2,
+              TF.fsPreStms = pre2
             }
         preserveEdge InfDep {} = True
         preserveEdge e = isDep e
         preserve = namesFromList $ map getName $ filter preserveEdge i1s
-    ok <- okToFuseProducer soac1
+    ok_prod <- okToFuseScan soac1
+    ok_cons <- okToFuseScan soac2
     -- It is not safe to fuse if any accumulators are updated by both, as the
     -- semantics require that any updates done by the consumer take precedence
     -- over those in the producer. This is implemented with a manual check here
@@ -290,7 +294,7 @@ vFuseNodeT
     let isProducedAcc (H.Input _ v Acc {}) = v `elem` patNames pats1
         isProducedAcc _ = False
     r <-
-      if ok && ots1 == mempty && not (any isProducedAcc (H.inputs soac2))
+      if ok_prod && ok_cons && ots1 == mempty && not (any isProducedAcc (H.inputs soac2))
         then TF.attemptFusion TF.Vertical preserve (patNames pats1) soac1 ker
         else pure Nothing
     case r of
@@ -303,11 +307,12 @@ vFuseNodeT
             (Pat pats2')
             (TF.fsSOAC ker')
             (aux1 <> aux2)
+            (TF.fsPreStms ker')
       Nothing -> pure Nothing
 vFuseNodeT
   _
   infusible
-  (SoacNode ots1 pat1 (H.Screma w inps form) aux1, _, _)
+  (SoacNode ots1 pat1 (H.Screma w inps form) aux1 pre1, _, _)
   (TransNode stm2_out (H.Index cs slice@(Slice (ds@(DimSlice _ w' _) : ds_rest))) _, _)
     | null infusible,
       w /= w',
@@ -325,6 +330,7 @@ vFuseNodeT
             (Pat [PatElem stm2_out out_t])
             (H.Screma w' inps' form)
             aux1
+            pre1
     where
       sliceInput inp =
         H.addTransform
@@ -343,7 +349,7 @@ vFuseNodeT
 vFuseNodeT
   edges
   _infusible
-  (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, _is1, os1)
+  (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1 _, _is1, os1)
   (StmNode (Let pat2 aux2 (WithAcc w_inps lam0)), _os2)
     | ots1 == mempty,
       not $ any isFake edges,
@@ -384,7 +390,7 @@ vFuseNodeT
   edges
   _infusible
   (StmNode (Let pat1 aux1 (WithAcc w_inps wlam0)), _is1, _os1)
-  (SoacNode ots2 pat2 soac@(H.Screma _w _form _s_inps) aux2, _os2)
+  (SoacNode ots2 pat2 soac@(H.Screma _w _form _s_inps) aux2 _, _os2)
     | ots2 == mempty,
       n <- length (lambdaParams wlam0) `div` 2,
       pat1_acc_nms <- namesFromList $ take n $ map patElemName $ patElems pat1,
@@ -452,23 +458,29 @@ hasNoDifferingInputs is1 is2 =
    in null $ vs1 `L.intersect` vs2
 
 hFuseNodeT :: NodeT -> NodeT -> FusionM (Maybe NodeT)
-hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
+hFuseNodeT (SoacNode ots1 pats1 soac1 aux1 _) (SoacNode ots2 pats2 soac2 aux2 pre2)
   | ots1 == mempty,
     ots2 == mempty,
     hasNoDifferingInputs (H.inputs soac1) (H.inputs soac2) = do
+      ok_prod <- okToFuseScan soac1
+      ok_cons <- okToFuseScan soac2
       let ker =
             TF.FusedSOAC
               { TF.fsSOAC = soac2,
                 TF.fsOutputTransform = mempty,
-                TF.fsOutNames = patNames pats2
+                TF.fsOutNames = patNames pats2,
+                TF.fsPreStms = pre2
               }
           preserve = namesFromList $ patNames pats1
-      r <- TF.attemptFusion TF.Horizontal preserve (patNames pats1) soac1 ker
+      r <-
+        if ok_prod && ok_cons
+          then TF.attemptFusion TF.Horizontal preserve (patNames pats1) soac1 ker
+          else pure Nothing
       case r of
         Just ker' -> do
           let pats2' =
                 zipWith PatElem (TF.fsOutNames ker') (H.typeOf (TF.fsSOAC ker'))
-          fusedSomething $ SoacNode mempty (Pat pats2') (TF.fsSOAC ker') (aux1 <> aux2)
+          fusedSomething $ SoacNode mempty (Pat pats2') (TF.fsSOAC ker') (aux1 <> aux2) (TF.fsPreStms ker')
         Nothing -> pure Nothing
 hFuseNodeT
   (StmNode (Let pat1 aux1 (WithAcc w1_inps lam1)))
@@ -499,7 +511,7 @@ hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> FusionM NodeT
 removeOutputsExcept toKeep s = case s of
-  SoacNode ots (Pat pats) (H.Screma w inp (ScremaForm pre_lam [] red post_lam)) aux1 -> do
+  SoacNode ots (Pat pats) (H.Screma w inp (ScremaForm pre_lam [] red post_lam)) aux1 pre_stms -> do
     pre_lam' <- if changed then simplifyLambda new_pre else pure new_pre
     post_lam' <- if changed then simplifyLambda new_post else pure new_post
     pure $
@@ -508,6 +520,7 @@ removeOutputsExcept toKeep s = case s of
         (Pat $ red_pats <> new_pats)
         (H.Screma w inp (ScremaForm pre_lam' [] red post_lam'))
         aux1
+        pre_stms
     where
       (pre_red_res, pre_map_res) =
         splitAt (redResults red) $ resFromLambda pre_lam
@@ -549,7 +562,7 @@ removeOutputsExcept toKeep s = case s of
                 { bodyResult = pre_red_res <> new_pre_map_res
                 }
           }
-  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam scan red post_lam)) aux1 -> do
+  SoacNode ots (Pat pats1) (H.Screma w inp (ScremaForm pre_lam scan red post_lam)) aux1 pre_stms -> do
     post_lam' <- if changed then simplifyLambda new_post else pure new_post
     pure $
       SoacNode
@@ -557,6 +570,7 @@ removeOutputsExcept toKeep s = case s of
         (Pat $ pats_unchanged <> pats_new)
         (H.Screma w inp (ScremaForm pre_lam scan red post_lam'))
         aux1
+        pre_stms
     where
       red_output_size = Futhark.redResults red
 
@@ -610,8 +624,8 @@ doHorizontalFusion dg = applyAugs (soac_pairs <> withacc_pairs) dg
   where
     soac_pairs, withacc_pairs :: [DepGraphAug FusionM]
     soac_pairs = do
-      (x, SoacNode _ _ soac_x _) <- G.labNodes $ dgGraph dg
-      (y, SoacNode _ _ soac_y _) <- G.labNodes $ dgGraph dg
+      (x, SoacNode _ _ soac_x _ _) <- G.labNodes $ dgGraph dg
+      (y, SoacNode _ _ soac_y _ _) <- G.labNodes $ dgGraph dg
       guard $ x < y
       -- Must share an input.
       guard $
@@ -676,7 +690,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   StmNode (Let pat aux (WithAcc inputs lam)) -> doFuseScans $ do
     lam' <- fst <$> doFusionInLambda lam
     pure (incoming, node, StmNode (Let pat aux (WithAcc inputs lam')), outgoing)
-  SoacNode ots pat soac aux -> do
+  SoacNode ots pat soac aux pre_stms -> do
     soac' <- case soac of
       H.Stream w inputs accs lam ->
         H.Stream w inputs accs <$> dontFuseScans (onLambda lam)
@@ -690,12 +704,12 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
               )
       _ ->
         H.setLambda <$> doFuseScans (onLambda (H.lambda soac)) <*> pure soac
-    let nodeT' = SoacNode ots pat soac' aux
+    let nodeT' = SoacNode ots pat soac' aux pre_stms
     pure (incoming, node, nodeT', outgoing)
   _ -> pure c
   where
     onLambda lam = inScopeOf lam . fmap fst $ doFusionInLambda lam
-    onScan (Scan lam nes) = Scan <$> onLambda lam <*> pure nes
+    onScan (Scan lam) = Scan <$> onLambda lam
     onRed (Reduce comm lam nes) = Reduce comm <$> onLambda lam <*> pure nes
 
     doFusionWithDelayed :: Body SOACS -> [(NodeT, [EdgeT])] -> FusionM (Body SOACS)

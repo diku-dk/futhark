@@ -32,6 +32,7 @@ import Futhark.IR.TypeCheck qualified as TypeCheck
 import Futhark.Optimise.Simplify qualified as Simplify
 import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rules
+import Futhark.Optimise.Simplify.Rules.Loop (peelIsFirstRules)
 import Futhark.Pass
 
 data MC
@@ -67,7 +68,7 @@ simplifyProg :: Prog MC -> PassM (Prog MC)
 simplifyProg = Simplify.simplifyProg simpleMC rules blockers
   where
     blockers = Engine.noExtraHoistBlockers
-    rules = standardRules <> segOpRules
+    rules = standardRules <> peelIsFirstRules <> segOpRules
 
 instance HasSegOp MC where
   type SegOpLevel MC = ()

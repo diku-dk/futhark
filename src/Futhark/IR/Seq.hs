@@ -25,6 +25,7 @@ import Futhark.IR.TypeCheck qualified as TC
 import Futhark.Optimise.Simplify qualified as Simplify
 import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rules
+import Futhark.Optimise.Simplify.Rules.Loop (peelIsFirstRules)
 import Futhark.Pass
 
 -- | The phantom type for the Seq representation.
@@ -61,6 +62,7 @@ simpleSeq = Simplify.bindableSimpleOps (const $ pure (NoOp, mempty))
 
 -- | Simplify a sequential program.
 simplifyProg :: Prog Seq -> PassM (Prog Seq)
-simplifyProg = Simplify.simplifyProg simpleSeq standardRules blockers
+simplifyProg = Simplify.simplifyProg simpleSeq rules blockers
   where
     blockers = Engine.noExtraHoistBlockers
+    rules = standardRules <> peelIsFirstRules

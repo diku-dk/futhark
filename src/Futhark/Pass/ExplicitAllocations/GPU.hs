@@ -75,6 +75,9 @@ handleSegOp outer_lvl op = do
           mapOnSegBinOpLambda =
             local inThread
               . allocInBinOpLambda num_threads (segSpace op),
+          mapOnSegScanOpLambda =
+            local inThread
+              . allocInBinOpLambda num_threads (segSpace op),
           mapOnSegPostOpLambda =
             localScope scope
               . local inThread

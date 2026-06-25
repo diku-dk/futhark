@@ -324,7 +324,7 @@ lastUseSegOp (SegRed _ _ tps kbody sbos) used_nms = do
 lastUseSegOp (SegScan _ _ tps kbody sbos post_op) used_nms = do
   (lutab_spo, lu_vars_spo, used_nms_spo) <- lastUseSegPostOp post_op used_nms
   (used_nms', lu_vars) <- lastUsedInNames used_nms_spo $ freeIn tps
-  (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseSegBinOp sbos used_nms
+  (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseSegScanOp sbos used_nms
   (used_nms'', lu_vars') <- lastUsedInNames used_nms_spo $ freeIn tps
   (body_lutab, used_nms''') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (M.unions [lutab_spo, lutab_sbo, body_lutab], lu_vars <> lu_vars' <> lu_vars_sbo <> lu_vars_spo, used_nms_spo <> used_nms_sbo <> used_nms' <> used_nms'' <> used_nms''')
@@ -372,6 +372,20 @@ lastUseSegBinOp sbos used_nms = do
   where
     helper (SegBinOp _ l@(Lambda _ _ body) neutral shp) = inScopeOf l $ do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn neutral <> freeIn shp
+      (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
+      pure (body_lutab, lu_vars, used_nms'')
+
+lastUseSegScanOp ::
+  (Constraints rep) =>
+  [SegScanOp (Aliases rep)] ->
+  Names ->
+  LastUseM rep (LUTabFun, Names, Names)
+lastUseSegScanOp ssos used_nms = do
+  (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper ssos
+  pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
+  where
+    helper (SegScanOp l@(Lambda _ _ body) shp) = inScopeOf l $ do
+      (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn shp
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')
 

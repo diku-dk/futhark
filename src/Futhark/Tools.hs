@@ -33,15 +33,16 @@ splitScanOrRedomap ::
   [PatElem Type] ->
   SubExp ->
   Lambda rep ->
-  [[SubExp]] ->
+  [Int] ->
   m (Pat Type, Pat Type, [VName], Lambda rep)
-splitScanOrRedomap pes w map_lam nes = do
-  let (nonmap_pes, map_pes) =
-        splitAt (length $ concat nes) pes
+splitScanOrRedomap pes w map_lam sizes = do
+  let total = sum sizes
+      (nonmap_pes, map_pes) =
+        splitAt total pes
       (nonmap_ts, map_ts) =
-        splitAt (length (concat nes)) $ lambdaReturnType map_lam
+        splitAt total $ lambdaReturnType map_lam
       (nonmap_res, map_res) =
-        splitAt (length (concat nes)) $ bodyResult $ lambdaBody map_lam
+        splitAt total $ bodyResult $ lambdaBody map_lam
 
   -- Put some care into not having duplicate results from the map function.
   (red_arrs, acc_info) <-
@@ -93,7 +94,7 @@ redomapToMapAndReduce ::
   m (Stm rep, Stm rep)
 redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
   (map_pat, red_pat, red_arrs, map_lam') <-
-    splitScanOrRedomap pes w map_lam $ map redNeutral reds
+    splitScanOrRedomap pes w map_lam $ map (length . redNeutral) reds
 
   map_stm <- Let map_pat (defAux ()) . Op . Screma w arrs <$> mapSOAC map_lam'
   red_stm <-
@@ -117,7 +118,7 @@ scanomapToMapAndScan ::
   m (Stm rep, Stm rep)
 scanomapToMapAndScan (Pat pes) (w, scans, map_lam, arrs) = do
   (map_pat, scan_pat, scan_arrs, map_lam') <-
-    splitScanOrRedomap pes w map_lam $ map scanNeutral scans
+    splitScanOrRedomap pes w map_lam $ map (length . lambdaReturnType . scanLambda) scans
   map_stm <- Let map_pat (defAux ()) . Op . Screma w arrs <$> mapSOAC map_lam'
   scan_stm <-
     Let scan_pat (defAux ()) . Op

@@ -127,9 +127,9 @@ transformExp (Op (Inner (SegOp (SegRed lvl space ts kbody reds)))) = do
     )
 transformExp (Op (Inner (SegOp (SegScan lvl space ts kbody scans post_op)))) = do
   (alloc_stms, (lvl', lams', kbody')) <-
-    transformScanRed lvl space (segPostOpLambda post_op : map segBinOpLambda scans) kbody
+    transformScanRed lvl space (segPostOpLambda post_op : map segScanOpLambda scans) kbody
   let post_op_lam : lams = lams'
-  let scans' = zipWith (\red lam -> red {segBinOpLambda = lam}) scans lams
+  let scans' = zipWith (\scan lam -> scan {segScanOpLambda = lam}) scans lams
   pure
     ( alloc_stms,
       Op $ Inner $ SegOp $ SegScan lvl' space ts kbody' scans' (post_op {segPostOpLambda = post_op_lam})
@@ -457,6 +457,7 @@ extractStmAllocations user bound_outside bound_kernel stm = do
     opMapper user' =
       identitySegOpMapper
         { mapOnSegBinOpLambda = onLambda user',
+          mapOnSegScanOpLambda = onLambda user',
           mapOnSegPostOpLambda = onLambda user',
           mapOnSegOpBody = onKernelBody user'
         }
@@ -815,6 +816,7 @@ offsetMemoryInExp offsets = mapExpM recurse
           identitySegOpMapper
             { mapOnSegOpBody = offsetMemoryInKernelBody offsets,
               mapOnSegBinOpLambda = offsetMemoryInLambda offsets,
+              mapOnSegScanOpLambda = offsetMemoryInLambda offsets,
               mapOnSegPostOpLambda = offsetMemoryInLambda offsets
             }
     onOp op = pure op
@@ -905,6 +907,7 @@ unAllocGPUStms = unAllocStms False
         mapper =
           identitySegOpMapper
             { mapOnSegBinOpLambda = unAllocLambda,
+              mapOnSegScanOpLambda = unAllocLambda,
               mapOnSegPostOpLambda = unAllocLambda,
               mapOnSegOpBody = unAllocKernelBody
             }

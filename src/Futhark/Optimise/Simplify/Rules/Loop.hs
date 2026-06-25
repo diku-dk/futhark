@@ -1,5 +1,12 @@
 -- | Loop simplification rules.
-module Futhark.Optimise.Simplify.Rules.Loop (loopRules) where
+module Futhark.Optimise.Simplify.Rules.Loop
+  ( loopRules,
+    -- | Peel an @is_first@ toggle out of a 'Loop'.  Kept separate from
+    -- 'loopRules' so it can be enabled only by the per-backend rule
+    -- books (post-fusion, post-extraction).  See 'peelIsFirstParam'.
+    peelIsFirstRules,
+  )
+where
 
 import Control.Monad
 import Data.Bifunctor (second)
@@ -207,6 +214,137 @@ simplifyKnownIterationLoop _ pat aux (merge, ForLoop i it (Constant iters), body
 simplifyKnownIterationLoop _ _ _ _ =
   Skip
 
+-- | Peel a merge parameter that follows the \"is_first\" pattern:
+--
+--   * The parameter has type @bool@.
+--   * Its initial value is the constant @true@.
+--   * The body's result for that position is the constant @false@.
+--   * Every top-level body statement that mentions the parameter is a
+--     'Match' whose sole scrutinee is exactly that parameter, and the
+--     parameter does not occur elsewhere in the body's result.
+--
+-- When matched, we peel iteration 0 (with the parameter substituted to
+-- @true@, so each match collapses to its @True@ branch) and run the
+-- remainder of the loop with the parameter removed.  This eliminates
+-- the cross-iteration boolean and the in-loop branch.
+--
+-- Restricted to constant bounds @≥ 1@ (so peeling never changes
+-- observable behaviour) and to top-level matches (nested matches and
+-- indirect uses cause the rule to skip).
+peelIsFirstParam :: (BuilderOps rep) => TopDownRuleLoop rep
+peelIsFirstParam _ pat aux (merge, ForLoop i it (Constant bound_v), body)
+  | IntValue bound_n <- bound_v,
+    not (zeroIshInt bound_n),
+    Just (idx, p) <- findIsFirstSlot merge body,
+    bodyUsesParamOnlyAsTopLevelMatchCond idx (paramName p) body =
+      Simplify $ do
+        -- Peel iteration 0 by binding merge params to their initial
+        -- values (substituting @true@ for the is_first param) and
+        -- inlining the body once.
+        forM_ (zip merge [0 :: Int ..]) $ \((p', se), j) ->
+          if j == idx
+            then
+              letBindNames [paramName p'] . BasicOp . SubExp $
+                Constant (BoolValue True)
+            else letBindNames [paramName p'] . BasicOp $ SubExp se
+        letBindNames [i] . BasicOp . SubExp $ intConst it 0
+        peeled_body <- renameBody body
+        addStms $ bodyStms peeled_body
+        let peeled_res = bodyResult peeled_body
+
+        let keepIdx j = j /= idx
+            new_merge =
+              [ (p', new_se)
+              | ((p', _), j, new_se) <-
+                  zip3
+                    merge
+                    [0 :: Int ..]
+                    (map resSubExp peeled_res),
+                keepIdx j
+              ]
+            new_body_results =
+              [ se
+              | (se, j) <- zip (bodyResult body) [0 :: Int ..],
+                keepIdx j
+              ]
+
+        -- Rebuild the body with @i@ rebound to @i' + 1@ and the
+        -- is_first param substituted to @false@.
+        i' <- newVName (baseName i <> "_peel")
+        one_se <- letSubExp "one" . BasicOp . SubExp $ intConst it 1
+        rest_body <- insertStmsM $ do
+          letBindNames [i] . BasicOp $
+            BinOp (Add it OverflowWrap) (Var i') one_se
+          letBindNames [paramName p] . BasicOp . SubExp $
+            Constant (BoolValue False)
+          addStms $ bodyStms body
+          mkBodyM mempty new_body_results
+
+        let bound_minus_one =
+              constant
+                ( case bound_n of
+                    Int8Value n -> Int8Value (n - 1)
+                    Int16Value n -> Int16Value (n - 1)
+                    Int32Value n -> Int32Value (n - 1)
+                    Int64Value n -> Int64Value (n - 1)
+                    _ -> bound_n
+                )
+            rest_loop =
+              Loop new_merge (ForLoop i' it bound_minus_one) rest_body
+            new_pat_elems =
+              [ pe
+              | (pe, j) <- zip (patElems pat) [0 :: Int ..],
+                keepIdx j
+              ]
+            bool_pat_elem = patElems pat !! idx
+
+        rest_results <- letTupExp "peel_rest" rest_loop
+        auxing aux $ do
+          letBindNames [patElemName bool_pat_elem] . BasicOp . SubExp $
+            Constant (BoolValue False)
+          forM_ (zip (map patElemName new_pat_elems) rest_results) $ \(v, r) ->
+            letBindNames [v] . BasicOp . SubExp $ Var r
+peelIsFirstParam _ _ _ _ = Skip
+
+-- | Find an @is_first@-shaped merge param: bool, init True, body
+-- result False.  Returns its position in the merge and the parameter.
+findIsFirstSlot ::
+  (ASTRep rep) =>
+  [(FParam rep, SubExp)] ->
+  Body rep ->
+  Maybe (Int, FParam rep)
+findIsFirstSlot merge body =
+  listToMaybe
+    [ (j, p)
+    | (j, (p, init_se), body_se) <-
+        zip3 [0 ..] merge (map resSubExp (bodyResult body)),
+      paramType p == Prim Bool,
+      init_se == Constant (BoolValue True),
+      body_se == Constant (BoolValue False)
+    ]
+
+-- | Conservative check: every top-level body statement that mentions
+-- @v@ does so only as the sole scrutinee of a 'Match', and the body's
+-- result tuple does not mention @v@ outside its own slot.
+bodyUsesParamOnlyAsTopLevelMatchCond ::
+  (ASTRep rep) =>
+  Int ->
+  VName ->
+  Body rep ->
+  Bool
+bodyUsesParamOnlyAsTopLevelMatchCond own_idx v body =
+  let inResultElsewhere =
+        any
+          (\(j, se) -> v `nameIn` freeIn se && j /= own_idx)
+          (zip [0 :: Int ..] (map resSubExp (bodyResult body)))
+      okStm stm
+        | v `nameIn` freeIn stm =
+            case stmExp stm of
+              Match [Var scrut] _ _ _ -> scrut == v
+              _ -> False
+        | otherwise = True
+   in not inResultElsewhere && all okStm (bodyStms body)
+
 topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
   [ RuleLoop hoistLoopInvariantLoopParams,
@@ -222,3 +360,11 @@ bottomUpRules =
 -- | Standard loop simplification rules.
 loopRules :: (BuilderOps rep) => RuleBook rep
 loopRules = ruleBook topDownRules bottomUpRules
+
+-- | The @is_first@-peeling rule, packaged as a separate rule book so
+-- it can be enabled only after fusion has had a chance to operate on
+-- the loop.  Adding this to the SOACS-stage simplify is harmless in
+-- practice (the pattern does not appear until after stream extraction
+-- or first-order transform) but conceptually inappropriate.
+peelIsFirstRules :: (BuilderOps rep) => RuleBook rep
+peelIsFirstRules = ruleBook [RuleLoop peelIsFirstParam] []

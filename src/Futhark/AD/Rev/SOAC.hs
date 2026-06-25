@@ -19,12 +19,12 @@ import Futhark.Util (chunks)
 -- again.
 splitScanRed ::
   VjpOps ->
-  ([a] -> ADM (ScremaForm SOACS), a -> [SubExp]) ->
+  ([a] -> ADM (ScremaForm SOACS), a -> Int) ->
   (Pat Type, StmAux (), [a], SubExp, [VName]) ->
   ADM () ->
   ADM ()
-splitScanRed vjpops (opSOAC, opNeutral) (pat, aux, ops, w, as) m = do
-  let ks = map (length . opNeutral) ops
+splitScanRed vjpops (opSOAC, opSize) (pat, aux, ops, w, as) m = do
+  let ks = map opSize ops
       pat_per_op = map Pat $ chunks ks $ patElems pat
       as_per_op = chunks ks as
       onOps (op : ops') (op_pat : op_pats') (op_as : op_as') = do
@@ -77,7 +77,7 @@ vjpSOAC ops pat aux soac@(Screma w as form) m
       diffVecReduce ops pat aux w iscomm op ne a m
   | Just reds <- isReduceSOAC form,
     length reds > 1 =
-      splitScanRed ops (reduceSOAC, redNeutral) (pat, aux, reds, w, as) m
+      splitScanRed ops (reduceSOAC, length . redNeutral) (pat, aux, reds, w, as) m
   | Just [red] <- isReduceSOAC form,
     [x] <- patNames pat,
     [ne] <- redNeutral red,
@@ -98,19 +98,23 @@ vjpSOAC ops pat aux soac@(Screma w as form) m
 
 -- Differentiating Scans
 vjpSOAC ops pat aux soac@(Screma w as form) m
-  | Just [Scan lam [ne]] <- isScanSOAC form,
+  | Just [Scan lam] <- isScanSOAC form,
     [x] <- patNames pat,
     [a] <- as,
     Just [(op, _, _, _)] <- lamIsBinOp lam,
     isAddOp op = do
       void $ commonSOAC pat aux soac m
-      diffScanAdd ops x w lam ne a
-  | Just [Scan lam ne] <- isScanSOAC form,
+      diffScanAdd ops x w lam a
+  | Just [Scan lam] <- isScanSOAC form,
     Just op <- mapOp lam = do
-      diffScanVec ops (patNames pat) aux w op ne as m
+      diffScanVec ops (patNames pat) aux w op as m
   | Just scans <- isScanSOAC form,
     length scans > 1 =
-      splitScanRed ops (scanSOAC, scanNeutral) (pat, aux, scans, w, as) m
+      splitScanRed
+        ops
+        (scanSOAC, length . lambdaReturnType . scanLambda)
+        (pat, aux, scans, w, as)
+        m
   | Just red <- singleScan <$> isScanSOAC form = do
       void $ commonSOAC pat aux soac m
       diffScan ops (patNames pat) w as red

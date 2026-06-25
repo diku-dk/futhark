@@ -371,16 +371,17 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
       [scan] = scans
-      shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
+      shpT op = (segScanOpShape op,) <$> lambdaReturnType (segScanOpLambda op)
       scan_ts = concatMap shpT scans
       shpOfT t s =
         arrayShape $
           foldr (flip arrayOfRow) (arrayOfShape t s) $
             segSpaceDims space
+      num_scan_res = length $ lambdaReturnType $ segScanOpLambda scan
       (scan_pars, map_pars) =
-        splitAt (length $ segBinOpNeutral scan) $ lambdaParams $ segPostOpLambda post_op
+        splitAt num_scan_res $ lambdaParams $ segPostOpLambda post_op
       (body_scan_res, body_map_res) =
-        splitAt (length $ segBinOpNeutral scan) $ bodyResult body
+        splitAt num_scan_res $ bodyResult body
 
   scan_out <- forM scan_ts $ \(s, t) ->
     sAllocArray "scan_out" (elemType t) (shpOfT t s) $ Space "shared"
@@ -422,14 +423,14 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
       virtualisedBlockScan
         (Just crossesSegment)
         (sExt32 $ tvExp dims_flat)
-        (segBinOpLambda scan)
+        (segScanOpLambda scan)
         arrs_flat
     _ ->
       blockScan
         (Just crossesSegment)
         (product dims')
         (product dims')
-        (segBinOpLambda scan)
+        (segScanOpLambda scan)
         arrs_flat
 
   -- FIXME: we actually need something like blockCoverSegSpacee here, although in

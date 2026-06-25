@@ -131,15 +131,14 @@ singleBinOp lams =
     yParams lam = drop (length (lambdaReturnType lam)) (lambdaParams lam)
 
 -- | How to compute a single scan result.
-data Scan rep = Scan
-  { scanLambda :: Lambda rep,
-    scanNeutral :: [SubExp]
+newtype Scan rep = Scan
+  { scanLambda :: Lambda rep
   }
   deriving (Eq, Ord, Show)
 
 -- | What are the sizes of reduction results produced by these 'Scan's?
 scanSizes :: [Scan rep] -> [Int]
-scanSizes = map (length . scanNeutral)
+scanSizes = map (length . lambdaReturnType . scanLambda)
 
 -- | How many reduction results are produced by these 'Scan's?
 scanResults :: [Scan rep] -> Int
@@ -148,9 +147,7 @@ scanResults = sum . scanSizes
 -- | Combine multiple scan operators to a single operator.
 singleScan :: (Buildable rep) => [Scan rep] -> Scan rep
 singleScan scans =
-  let scan_nes = concatMap scanNeutral scans
-      scan_lam = singleBinOp $ map scanLambda scans
-   in Scan scan_lam scan_nes
+  Scan $ singleBinOp $ map scanLambda scans
 
 -- | How to compute a single reduction result.
 data Reduce rep = Reduce
@@ -449,10 +446,8 @@ mapSOACM tv (Screma w arrs (ScremaForm map_lam scans reds post_lam)) =
         )
 
 mapOnSOACScan :: (Monad m) => SOACMapper frep trep m -> Scan frep -> m (Scan trep)
-mapOnSOACScan tv (Scan red_lam red_nes) =
-  Scan
-    <$> mapOnSOACLambda tv red_lam
-    <*> mapM (mapOnSOACSubExp tv) red_nes
+mapOnSOACScan tv (Scan lam) =
+  Scan <$> mapOnSOACLambda tv lam
 
 mapOnSOACReduce :: (Monad m) => SOACMapper frep trep m -> Reduce frep -> m (Reduce trep)
 mapOnSOACReduce tv (Reduce comm red_lam red_nes) =
@@ -467,7 +462,7 @@ traverseSOACStms f = mapSOACM mapper
     mapper = identitySOACMapper {mapOnSOACLambda = traverseLambdaStms f}
 
 instance (ASTRep rep) => FreeIn (Scan rep) where
-  freeIn' (Scan lam ne) = freeIn' lam <> freeIn' ne
+  freeIn' (Scan lam) = freeIn' lam
 
 instance (ASTRep rep) => FreeIn (Reduce rep) where
   freeIn' (Reduce _ lam ne) = freeIn' lam <> freeIn' ne
@@ -587,7 +582,7 @@ instance CanBeAliased SOAC where
         (Alias.analyseLambda aliases post_lam)
     where
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
-      onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
+      onScan (Scan lam) = Scan $ Alias.analyseLambda aliases lam
 
 instance IsOp SOAC where
   safeOp _ = False
@@ -645,8 +640,8 @@ instance IsOp SOAC where
           concatMap depsOfRed (zip reds $ chunks (redSizes reds) reds_in)
      in reds_deps <> lambdaDependencies mempty post_lam (scans_deps <> map_deps)
     where
-      depsOfScan (Scan lam nes, deps_in) =
-        reductionDependencies mempty lam nes deps_in
+      depsOfScan (Scan lam, deps_in) =
+        lambdaDependencies mempty lam deps_in
       depsOfRed (Reduce _ lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
 
@@ -824,17 +819,11 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
       TC.TypeError "Screma has post-lambda but no scan operations."
 
 typeCheckScan :: (TC.Checkable rep) => Scan (Aliases rep) -> TC.TypeM rep [(Type, Names)]
-typeCheckScan (Scan scan_lam scan_nes) = do
-  scan_nes' <- mapM TC.checkArg scan_nes
-  let scan_t = map TC.argType scan_nes'
-  TC.checkLambda scan_lam $ map TC.noArgAliases $ scan_nes' ++ scan_nes'
-  unless (scan_t == lambdaReturnType scan_lam) $
-    TC.bad . TC.TypeError $
-      "Scan function returns type "
-        <> prettyTuple (lambdaReturnType scan_lam)
-        <> " but neutral element has type "
-        <> prettyTuple scan_t
-  pure scan_nes'
+typeCheckScan (Scan scan_lam) = do
+  let scan_t = lambdaReturnType scan_lam
+      dummy = map (,mempty) scan_t
+  TC.checkLambda scan_lam $ dummy ++ dummy
+  pure dummy
 
 typeCheckReduce :: (TC.Checkable rep) => Reduce (Aliases rep) -> TC.TypeM rep [(Type, Names)]
 typeCheckReduce (Reduce _ red_lam red_nes) = do
@@ -877,8 +866,8 @@ rephraseRed r (Reduce comm op nes) =
   Reduce comm <$> rephraseLambda r op <*> pure nes
 
 rephraseScan :: (Monad m) => Rephraser m from to -> Scan from -> m (Scan to)
-rephraseScan r (Scan op nes) =
-  Scan <$> rephraseLambda r op <*> pure nes
+rephraseScan r (Scan op) =
+  Scan <$> rephraseLambda r op
 
 instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
   opMetrics (VJP _ _ lam) =
@@ -992,8 +981,7 @@ ppStream size arrs acc lam =
       )
 
 instance (PrettyRep rep) => Pretty (Scan rep) where
-  pretty (Scan scan_lam scan_nes) =
-    pretty scan_lam <> comma </> PP.braces (commasep $ map pretty scan_nes)
+  pretty (Scan scan_lam) = pretty scan_lam
 
 ppComm :: Commutativity -> Doc ann
 ppComm Noncommutative = mempty

@@ -648,7 +648,7 @@ radixSortStep xs tps bit n w = do
       fmap subExpsRes . mapM (letSubExp "scan_res") =<< do
         uncurry (zipWithM (eBinOp $ Add Int64 OverflowUndef)) $ splitAt 4 $ map eParam scan_params
 
-  scan <- scanSOAC $ pure $ Scan scan_lam $ map (intConst Int64) [0, 0, 0, 0]
+  scan <- scanSOAC $ pure $ Scan scan_lam
   offsets <- letTupExp "offsets" $ Op $ Screma n flags scan
 
   ind <- letSubExp "ind_last" =<< eBinOp (Sub Int64 OverflowUndef) (eSubExp n) (iConst 1)
@@ -891,11 +891,9 @@ diffHist ops xs aux n lam0 ne as w rf dst m = do
       )
       [lam, lam']
 
-  let ne' = Constant (BoolValue False) : ne
-
   scansres <-
     letTupExp "adj_ctrb_scan" . Op . Screma n [iota_n]
-      =<< scanomapSOAC (map (`Scan` ne') scan_lams) g_lam
+      =<< scanomapSOAC (map Scan scan_lams) g_lam
 
   let (_ : ls_arr, _ : rs_arr_rev) = splitAt (length ne + 1) scansres
 

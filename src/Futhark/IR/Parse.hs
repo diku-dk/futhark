@@ -566,10 +566,7 @@ pReduce pr =
 
 pScan :: PR rep -> Parser (SOAC.Scan rep)
 pScan pr =
-  SOAC.Scan
-    <$> pLambda pr
-    <* pComma
-    <*> braces (pSubExp `sepBy` pComma)
+  SOAC.Scan <$> pLambda pr
 
 pWithAcc :: PR rep -> Parser (Exp rep)
 pWithAcc pr =
@@ -967,6 +964,10 @@ pSegOp pr pLvl =
       comm <- pComm
       lam <- pLambda pr
       pure $ SegOp.SegBinOp comm lam nes shape
+    pSegScanOp = do
+      shape <- pShape <* pComma
+      lam <- pLambda pr
+      pure $ SegOp.SegScanOp lam shape
     pSegPostOp =
       SegOp.SegPostOp
         <$> pLambda pr
@@ -985,7 +986,7 @@ pSegOp pr pLvl =
         <*> pLambda pr
     pSegMap = pSegOp' SegOp.SegMap
     pSegRed = pSegOp' SegOp.SegRed <*> parens (pSegBinOp `sepBy` pComma)
-    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma) <*> pSegPostOp
+    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegScanOp `sepBy` pComma) <*> pSegPostOp
     pSegHist = pSegOp' SegOp.SegHist <*> parens (pHistOp `sepBy` pComma)
 
 pSegLevel :: Parser GPU.SegLevel

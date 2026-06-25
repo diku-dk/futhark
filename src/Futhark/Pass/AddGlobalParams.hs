@@ -111,6 +111,9 @@ callsInSegOp mode segop =
         { mapOnSegBinOpLambda = \lam -> do
             tell $ callsInLambda mode True lam
             pure lam,
+          mapOnSegScanOpLambda = \lam -> do
+            tell $ callsInLambda mode True lam
+            pure lam,
           mapOnSegPostOpLambda = \lam -> do
             tell $ callsInLambda mode True lam
             pure lam,
@@ -242,6 +245,7 @@ transformProg prog = do
         let segmapper =
               identitySegOpMapper
                 { mapOnSegBinOpLambda = pure . rewriteLambda env,
+                  mapOnSegScanOpLambda = pure . rewriteLambda env,
                   mapOnSegPostOpLambda = pure . rewriteLambda env,
                   mapOnSegOpBody = pure . rewriteKernelBody env
                 }
