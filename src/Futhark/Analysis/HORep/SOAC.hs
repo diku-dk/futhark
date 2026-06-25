@@ -72,6 +72,7 @@ module Futhark.Analysis.HORep.SOAC
   )
 where
 
+import Control.Monad (forM)
 import Data.Foldable as Foldable
 import Data.Maybe
 import Data.Sequence qualified as Seq
@@ -540,163 +541,112 @@ soacToStream soac = do
           -- map(f,a) creates a stream with NO accumulators
           pure (Stream w inps [] strmlam, [], mempty)
       | Just (scans, _) <- Futhark.isScanomapSOAC form -> do
-          -- Scanomap(scan_lam, map_lam, a) is converted to a stream with
-          -- the same width w as the original SOAC so that downstream
-          -- stream-stream fusion is not blocked by a width mismatch.
+          -- Scanomap(scan_lam, map_lam, a) is converted to a stream
+          -- whose body is itself a (neutral-free) scanomap Screma SOAC
+          -- over the chunk, plus a top-level shift map that combines
+          -- each per-chunk scan output with the cross-chunk
+          -- accumulator inherited from the previous chunk.  Keeping
+          -- the per-chunk scan as a SOAC (rather than a hand-written
+          -- for-loop) is important because
+          -- `sequentialStreamWholeArray` later inlines the body with
+          -- chunk = w, and `ExtractMulticore` /`ExtractKernels` then
+          -- recognise the inlined Screma as a parallel scanomap and
+          -- extract it as a `SegScan`.
           --
-          -- Because Scan no longer stores a neutral element we use an
-          -- extra boolean accumulator 'is_first' (initialised to True)
-          -- alongside blank-initialised scan accumulators.  The stream
-          -- body processes all chunk elements via a sequential for-loop
-          -- using the is_first trick:
-          --
-          --   new_acc = if is_first then map_scan_res
-          --             else scan_lam(acc, map_scan_res)
-          --
-          -- This is correct because f(ne,x) = x for any monoid neutral.
-          -- The for-loop resets is_first to False after the first element.
+          -- Without a neutral element, the very first chunk has no
+          -- valid `acc` to shift by, so we guard the shift with the
+          -- usual `is_first` toggle and similarly guard the
+          -- cross-chunk accumulator update.  In the common case
+          -- `sequentialStreamWholeArray` makes `is_first` the
+          -- constant `true`, so the `if` collapses to the then-branch
+          -- and the shift map disappears, leaving a single full-width
+          -- scanomap.
           let Futhark.Scan scan_lam = Futhark.singleScan scans
               num_scan_res = length $ lambdaReturnType scan_lam
               scan_ts = take num_scan_res $ lambdaReturnType lam
-              map_only_ts = drop num_scan_res $ lambdaReturnType lam
-              arr_ts = map inputRowType inps
 
           is_first_param <- newParam "is_first" $ Prim Bool
           inpacc_ids <- mapM (newParam "inpacc") scan_ts
 
-          strmlam <- fmap fst . runBuilder . mkLambda (chunk_param : is_first_param : inpacc_ids ++ strm_inpids) $ do
-            -- Allocate scratch output arrays for scan and map-only results.
-            scan_arrs <-
-              mapM
-                (\t -> letExp "scan_arr_init" $ Futhark.BasicOp $ Futhark.Scratch (elemType t) [chvar])
-                scan_ts
-            map_arrs <-
-              mapM
-                (\t -> letExp "map_arr_init" $ Futhark.BasicOp $ Futhark.Scratch (elemType t) [chvar])
-                map_only_ts
-
-            j <- newVName "j"
-
-            -- Loop merge: (is_first, acc..., scan_arrs..., map_arrs...).
-            -- All params need DeclType for Loop merge.
-            loop_is_first_p <- newParam "loop_is_first" (toDecl (Prim Bool) Nonunique)
-            loop_acc_ps <- mapM (newParam "loop_acc" . (`toDecl` Nonunique)) scan_ts
-            loop_scan_ps <-
-              mapM
-                (\t -> newParam "loop_scan_arr" (toDecl t Unique))
-                (map (`arrayOfRow` chvar) scan_ts)
-            loop_map_ps <-
-              mapM
-                (\t -> newParam "loop_map_arr" (toDecl t Unique))
-                (map (`arrayOfRow` chvar) map_only_ts)
-
-            let loop_merge =
-                  (loop_is_first_p, Var $ paramName is_first_param)
-                    : zip loop_acc_ps (map (Var . paramName) inpacc_ids)
-                    ++ zip loop_scan_ps (map Var scan_arrs)
-                    ++ zip loop_map_ps (map Var map_arrs)
-
-            loop_body <- runBodyBuilder
-              $ localScope
-                ( scopeOfLoopForm (ForLoop j Int64 chvar)
-                    <> scopeOfFParams (map fst loop_merge)
-                )
+          strmlam <-
+            fmap fst . runBuilder
+              . mkLambda
+                (chunk_param : is_first_param : inpacc_ids ++ strm_inpids)
               $ do
-                map_lam_b <- renameLambda lam
-                scan_lam_b <- renameLambda scan_lam
+                -- 1. Per-chunk neutral-free scanomap (a Screma SOAC).
+                scan_form <-
+                  Futhark.scanomapSOAC [Futhark.Scan scan_lam] lam'
+                chunk_res <-
+                  letTupExp "chunk_scan" . Op $
+                    Futhark.Screma chvar (map paramName strm_inpids) scan_form
+                let (scan_chunk_vs, map_chunk_vs) =
+                      splitAt num_scan_res chunk_res
 
-                -- Index element j of each chunk input, bind to map_lam params.
-                forM_ (zip3 (lambdaParams map_lam_b) strm_inpids arr_ts) $
-                  \(p, inp_p, t) ->
-                    letBindNames [paramName p] $
-                      Futhark.BasicOp $
-                        Futhark.Index
-                          (paramName inp_p)
-                          (fullSlice (arrayOfRow t chvar) [DimFix $ Var j])
-                mapM_ addStm $ bodyStms $ lambdaBody map_lam_b
-                let map_res = bodyResult $ lambdaBody map_lam_b
-                    map_scan_res = take num_scan_res map_res
-                    map_only_res = drop num_scan_res map_res
+                -- 2. Shift map: combine each scan_chunk[j] with the
+                -- cross-chunk acc using scan_lam.  On the first
+                -- chunk we skip the shift (no valid acc).
+                shift_lam <-
+                  mkScanShiftLam scan_lam (map paramName inpacc_ids)
+                shifted_scan_vs <-
+                  letTupExp "scan_chunk_shifted"
+                    =<< eIf
+                      (eSubExp . Var $ paramName is_first_param)
+                      (resultBodyM $ map Var scan_chunk_vs)
+                      ( buildBody_ $ do
+                          shifted_v <-
+                            letTupExp "shifted" . Op
+                              =<< (Futhark.Screma chvar scan_chunk_vs <$> Futhark.mapSOAC shift_lam)
+                          pure $ map (subExpRes . Var) shifted_v
+                      )
 
-                -- new_acc = if is_first then map_scan_res else scan_lam(acc, map_scan_res)
+                -- 3. New cross-chunk acc.  Take the last element of
+                -- each per-chunk scan and combine with the inherited
+                -- acc (or use it directly on the first chunk).
+                cm1 <-
+                  letSubExp "cm1" . Futhark.BasicOp $
+                    Futhark.BinOp
+                      (Sub Int64 OverflowWrap)
+                      chvar
+                      (Futhark.intConst Int64 1)
+                last_vs <-
+                  forM (zip scan_chunk_vs scan_ts) $ \(arr, t) ->
+                    letSubExp "last_v" . Futhark.BasicOp $
+                      Futhark.Index
+                        arr
+                        (fullSlice (arrayOfRow t chvar) [DimFix cm1])
                 new_acc_vs <-
                   letTupExp "new_acc"
                     =<< eIf
-                      (eSubExp $ Var $ paramName loop_is_first_p)
-                      (resultBodyM $ map resSubExp map_scan_res)
+                      (eSubExp . Var $ paramName is_first_param)
+                      (resultBodyM last_vs)
                       ( buildBody_ $ do
-                          forM_ (zip (take num_scan_res $ lambdaParams scan_lam_b) loop_acc_ps) $
+                          combine_lam <- renameLambda scan_lam
+                          let (xparams, yparams) =
+                                splitAt num_scan_res $ lambdaParams combine_lam
+                          forM_ (zip xparams (map (Var . paramName) inpacc_ids)) $
                             \(p, v) ->
-                              letBindNames [paramName p] $
-                                Futhark.BasicOp $
-                                  Futhark.SubExp $
-                                    Var $
-                                      paramName v
-                          forM_ (zip (drop num_scan_res $ lambdaParams scan_lam_b) map_scan_res) $
-                            \(p, se) ->
-                              letBindNames [paramName p] $
-                                Futhark.BasicOp $
-                                  Futhark.SubExp $
-                                    resSubExp se
-                          addStms $ bodyStms $ lambdaBody scan_lam_b
-                          pure $ bodyResult $ lambdaBody scan_lam_b
+                              letBindNames [paramName p]
+                                . Futhark.BasicOp
+                                . Futhark.SubExp
+                                $ v
+                          forM_ (zip yparams last_vs) $ \(p, v) ->
+                            letBindNames [paramName p]
+                              . Futhark.BasicOp
+                              . Futhark.SubExp
+                              $ v
+                          addStms . bodyStms $ lambdaBody combine_lam
+                          pure . bodyResult $ lambdaBody combine_lam
                       )
 
-                -- Write new_acc into scan output arrays at position j.
-                new_scan_arrs <-
-                  mapM
-                    ( \(arr_p, v) -> do
-                        arr_t <- lookupType (paramName arr_p)
-                        letExp "scan_arr" $
-                          Futhark.BasicOp $
-                            Futhark.Update
-                              Futhark.Unsafe
-                              (paramName arr_p)
-                              (fullSlice arr_t [DimFix $ Var j])
-                              (Var v)
-                    )
-                    (zip loop_scan_ps new_acc_vs)
-
-                -- Write map-only results into map output arrays at position j.
-                new_map_arrs <-
-                  mapM
-                    ( \(arr_p, SubExpRes _ se) -> do
-                        arr_t <- lookupType (paramName arr_p)
-                        letExp "map_arr" $
-                          Futhark.BasicOp $
-                            Futhark.Update
-                              Futhark.Unsafe
-                              (paramName arr_p)
-                              (fullSlice arr_t [DimFix $ Var j])
-                              se
-                    )
-                    (zip loop_map_ps map_only_res)
-
-                -- Next iteration: is_first=False, acc=new_acc.
+                -- Return (False, new_acc..., shifted_scan_chunk..., map_chunk...)
                 pure $
                   subExpRes (Futhark.Constant $ BoolValue False)
                     : map (subExpRes . Var) new_acc_vs
-                    ++ map (subExpRes . Var) (new_scan_arrs ++ new_map_arrs)
+                    ++ map (subExpRes . Var) shifted_scan_vs
+                    ++ map (subExpRes . Var) map_chunk_vs
 
-            -- Emit the loop; bind all results.
-            loop_res <-
-              letTupExp "scan_loop_res" $
-                Futhark.Loop loop_merge (ForLoop j Int64 chvar) loop_body
-
-            -- loop_res = [is_first_final, acc_final..., scan_arr_final..., map_arr_final...]
-            let (_, rest) = splitAt 1 loop_res
-                (new_acc_vs, arr_vs) = splitAt num_scan_res rest
-                (scan_arr_vs, map_arr_vs) = splitAt (length scan_ts) arr_vs
-
-            -- Return: (False, new_acc_scalars, scan_arrays, map_arrays)
-            pure $
-              subExpRes (Futhark.Constant $ BoolValue False)
-                : map (subExpRes . Var) new_acc_vs
-                ++ map (subExpRes . Var) (scan_arr_vs ++ map_arr_vs)
-
-          -- Initial accumulators: is_first=True, scan accs = blank.
-          -- Scan accumulators are always scalars (Prim type), so
-          -- blankPrimValue suffices.
+          -- Initial cross-chunk accumulators: is_first=True, scan
+          -- accs = blank (never read because of the is_first guard).
           let blankScanAcc (Prim pt) = Futhark.Constant $ blankPrimValue pt
               blankScanAcc t = error $ "soacToStream: non-primitive scan acc type: " <> show t
               blank_accs = map blankScanAcc scan_ts
@@ -756,6 +706,33 @@ soacToStream soac = do
               accels
           body = lambdaBody plus'
       pure $ body {bodyStms = stmsFromList parstms <> bodyStms body}
+
+    -- Build a unary lambda over the scan element types that
+    -- applies scan_lam with the inpacc names bound to its x-side
+    -- parameters, returning `scan_lam(inpacc, y)`.  Used to shift
+    -- a per-chunk scan output by the cross-chunk accumulator.
+    mkScanShiftLam ::
+      (MonadFreshNames m, Buildable rep) =>
+      Lambda rep ->
+      [VName] ->
+      m (Lambda rep)
+    mkScanShiftLam scan_lam inpaccs = do
+      scan_lam' <- renameLambda scan_lam
+      let n = length inpaccs
+          (xparams, yparams) = splitAt n (lambdaParams scan_lam')
+          parstms =
+            zipWith
+              ( \par v ->
+                  mkLet [paramIdent par] . BasicOp . SubExp $ Var v
+              )
+              xparams
+              inpaccs
+          new_body =
+            (lambdaBody scan_lam')
+              { bodyStms =
+                  stmsFromList parstms <> bodyStms (lambdaBody scan_lam')
+              }
+      pure $ Lambda yparams (lambdaReturnType scan_lam') new_body
 
 ppArrayTransform :: PP.Doc a -> ArrayTransform -> PP.Doc a
 ppArrayTransform e (Rearrange cs perm) =
