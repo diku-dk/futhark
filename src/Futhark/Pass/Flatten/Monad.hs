@@ -725,15 +725,20 @@ scatterIrregular ::
   (VName, IrregularRep) ->
   FlattenM VName
 scatterIrregular lvl offsets space (is, irregRep) = do
-  dense_irreg <- ensureDenseIrregular lvl "scatter_irreg" irregRep
-  let IrregularRep {irregularS = segs, irregularD = elems, irregularK = _kind} = dense_irreg
+  let IrregularRep {irregularS = segs, irregularD = elems, irregularO = off, irregularK = kind} = irregRep
   (_, _, ii1) <- doRepIota lvl segs
   (_, _, ii2) <- doSegIota lvl segs
-  ~(Array _ (Shape [size]) _) <- lookupType elems
-  letExp "irregular_scatter" <=< genScatter lvl space size $ \gtid -> do
-    x <- letSubExp "x" =<< eIndex elems [eSubExp gtid]
-    offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp gtid]]]
-    i <- letExp "i" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp gtid])
+  m <- arraySize 0 <$> lookupType ii1
+  letExp "irregular_scatter" <=< genScatter lvl space m $ \gtid -> do
+    segment <- letSubExp "segment" =<< eIndex ii1 [eSubExp gtid]
+    intra_segment <- letSubExp "segment" =<< eIndex ii2 [eSubExp gtid]
+    x <- case kind of 
+      Dense -> letSubExp "x" =<< eIndex elems [eSubExp gtid]
+      Replicated -> do 
+        o <- letSubExp "rep_O" =<< eIndex off [eSubExp segment]
+        letSubExp "x" =<< eIndex elems [toExp $ pe64 o + pe64 intra_segment]
+    offset <- letExp "offset" =<< eIndex offsets [eIndex is [eSubExp segment]]
+    i <- letExp "i" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eSubExp intra_segment)
     pure (i, x)
 
 -- | Write back the regular results to a (partially) blank space
