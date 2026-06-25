@@ -44,12 +44,18 @@
                             },
                             "additionalProperties": false
                         }
+                    },
+                    "doc": {
+                        "type": "string"
                     }
                 }
             }
         },
         "types": {
             "type": "object",
+            "doc": {
+                "type": "string"
+            },
             "additionalProperties": {
                 "oneOf": [
                     { "type": "object",

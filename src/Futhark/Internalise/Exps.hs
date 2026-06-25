@@ -116,7 +116,7 @@ internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams pa
     zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: VisibleTypes -> E.EntryPoint -> E.ValBind -> InternaliseM ()
-generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
+generateEntryPoint types (E.EntryPoint e_params e_rettype doc) vb = do
   let (E.ValBind _ ofname _ _ (Info rettype) tparams params _ _ attrs _) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     let all_params = map pure shapeparams ++ concat params'
@@ -126,6 +126,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
           entryPoint
             types
             (baseName ofname)
+            doc
             (zip e_params $ map (foldMap toList) params')
             (e_rettype, map (map I.rankShaped) entry_rettype)
         args = map (I.Var . I.paramName) $ foldMap (foldMap toList) params'

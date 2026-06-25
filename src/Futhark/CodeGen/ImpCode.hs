@@ -217,7 +217,8 @@ data ExternalValue
 data EntryPoint = EntryPoint
   { entryPointName :: Name,
     entryPointResults :: (Uniqueness, ExternalValue),
-    entryPointArgs :: [((Name, Uniqueness), ExternalValue)]
+    entryPointArgs :: [((Name, Uniqueness), ExternalValue)],
+    entryPointDocs :: Maybe T.Text
   }
   deriving (Show)
 
@@ -515,7 +516,7 @@ instance (Pretty op) => Pretty (Constants op) where
       <+> nestedBlock (pretty code)
 
 instance Pretty EntryPoint where
-  pretty (EntryPoint name result args) =
+  pretty (EntryPoint name result args _doc) =
     stack
       [ "name" <+> nestedBlock (dquotes (pretty name)),
         "arguments" <+> nestedBlock (stack $ map ppArg args),
@@ -777,7 +778,7 @@ declaredIn (While _ body) = declaredIn body
 declaredIn _ = mempty
 
 instance FreeIn EntryPoint where
-  freeIn' (EntryPoint _ res args) =
+  freeIn' (EntryPoint _ res args _) =
     freeIn' (snd res) <> freeIn' (map snd args)
 
 instance (FreeIn a) => FreeIn (Functions a) where
