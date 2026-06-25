@@ -255,17 +255,17 @@ peelIsFirstParam _ pat aux (merge, ForLoop i it (Constant bound_v), body)
         let keepIdx j = j /= idx
             new_merge =
               [ (p', new_se)
-                | ((p', _), j, new_se) <-
-                    zip3
-                      merge
-                      [0 :: Int ..]
-                      (map resSubExp peeled_res),
-                  keepIdx j
+              | ((p', _), j, new_se) <-
+                  zip3
+                    merge
+                    [0 :: Int ..]
+                    (map resSubExp peeled_res),
+                keepIdx j
               ]
             new_body_results =
               [ se
-                | (se, j) <- zip (bodyResult body) [0 :: Int ..],
-                  keepIdx j
+              | (se, j) <- zip (bodyResult body) [0 :: Int ..],
+                keepIdx j
               ]
 
         -- Rebuild the body with @i@ rebound to @i' + 1@ and the
@@ -293,8 +293,8 @@ peelIsFirstParam _ pat aux (merge, ForLoop i it (Constant bound_v), body)
               Loop new_merge (ForLoop i' it bound_minus_one) rest_body
             new_pat_elems =
               [ pe
-                | (pe, j) <- zip (patElems pat) [0 :: Int ..],
-                  keepIdx j
+              | (pe, j) <- zip (patElems pat) [0 :: Int ..],
+                keepIdx j
               ]
             bool_pat_elem = patElems pat !! idx
 
@@ -316,11 +316,11 @@ findIsFirstSlot ::
 findIsFirstSlot merge body =
   listToMaybe
     [ (j, p)
-      | (j, (p, init_se), body_se) <-
-          zip3 [0 ..] merge (map resSubExp (bodyResult body)),
-        paramType p == Prim Bool,
-        init_se == Constant (BoolValue True),
-        body_se == Constant (BoolValue False)
+    | (j, (p, init_se), body_se) <-
+        zip3 [0 ..] merge (map resSubExp (bodyResult body)),
+      paramType p == Prim Bool,
+      init_se == Constant (BoolValue True),
+      body_se == Constant (BoolValue False)
     ]
 
 -- | Conservative check: every top-level body statement that mentions

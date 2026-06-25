@@ -351,8 +351,8 @@ revLoop diffStms pat loop =
                 -- corresponding loop parameter so this side stays in sync.
                 let resVarParams =
                       [ p
-                        | (p, se_res) <- zip loop_params' (bodyResult body'),
-                          isJust (subExpResVName se_res)
+                      | (p, se_res) <- zip loop_params' (bodyResult body'),
+                        isJust (subExpResVName se_res)
                       ]
                 loop_res_adjs <- mapM (lookupAdjVal . paramName) resVarParams
                 loop_free_adjs <- mapM lookupAdjVal $ loopFree loop_vnames
@@ -392,8 +392,8 @@ revLoop diffStms pat loop =
             -- constant on the first iteration and contribute no adjoint.
             let resVarLoopVals =
                   [ se
-                    | (se, se_res) <- zip loop_vals' (bodyResult body'),
-                      isJust (subExpResVName se_res)
+                  | (se, se_res) <- zip loop_vals' (bodyResult body'),
+                    isJust (subExpResVName se_res)
                   ]
             returnSweepCode $ do
               zipWithM_ updateSubExpAdj resVarLoopVals loop_res_adjs

@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | High-level representation of SOACs.  When performing
@@ -569,7 +568,8 @@ soacToStream soac = do
           inpacc_ids <- mapM (newParam "inpacc") scan_ts
 
           strmlam <-
-            fmap fst . runBuilder
+            fmap fst
+              . runBuilder
               . mkLambda
                 (chunk_param : is_first_param : inpacc_ids ++ strm_inpids)
               $ do
@@ -594,8 +594,8 @@ soacToStream soac = do
                       (resultBodyM $ map Var scan_chunk_vs)
                       ( buildBody_ $ do
                           shifted_v <-
-                            letTupExp "shifted" . Op
-                              =<< (Futhark.Screma chvar scan_chunk_vs <$> Futhark.mapSOAC shift_lam)
+                            (letTupExp "shifted" . Op) . Futhark.Screma chvar scan_chunk_vs
+                              =<< Futhark.mapSOAC shift_lam
                           pure $ map (subExpRes . Var) shifted_v
                       )
 
@@ -653,7 +653,7 @@ soacToStream soac = do
               init_ne = Futhark.Constant (BoolValue True) : blank_accs
               newacc_idents =
                 Ident (paramName is_first_param) (Prim Bool)
-                  : zipWith (\p t -> Ident (paramName p) t) inpacc_ids scan_ts
+                  : zipWith (Ident . paramName) inpacc_ids scan_ts
           pure (Stream w inps init_ne strmlam, newacc_idents, mempty)
       | Just (reds, _) <- Futhark.isRedomapSOAC form,
         Futhark.Reduce comm lamin nes <- Futhark.singleReduce reds -> do
