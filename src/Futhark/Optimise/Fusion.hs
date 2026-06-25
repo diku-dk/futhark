@@ -681,7 +681,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     cases' <- mapM (traverse $ renameBody <=< (`doFusionWithDelayed` to_fuse)) cases
     defbody' <- doFusionWithDelayed defbody to_fuse
     pure (incoming, node, MatchNode (Let pat aux (Match cond cases' defbody' dec)) [], outgoing)
-  StmNode (Let pat aux (Op (Futhark.VJP args vec lam))) -> dontFuseScans $ do
+  StmNode (Let pat aux (Op (Futhark.VJP args vec lam))) -> doFuseScans $ do
     lam' <- fst <$> doFusionInLambda lam
     pure (incoming, node, StmNode (Let pat aux (Op (Futhark.VJP args vec lam'))), outgoing)
   StmNode (Let pat aux (Op (Futhark.JVP args vec lam))) -> doFuseScans $ do

@@ -20,6 +20,7 @@ import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
+import Futhark.Optimise.Simplify.Rules.Loop (peelIsFirstRules)
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (simplifiable)
 
@@ -152,6 +153,7 @@ copyManifest _ _ _ _ = Skip
 memRuleBook :: (SimplifyMemory rep inner) => RuleBook (Wise rep)
 memRuleBook =
   standardRules
+    <> peelIsFirstRules
     <> ruleBook
       [ RuleOp decertifySafeAlloc,
         RuleBasicOp copyManifest,

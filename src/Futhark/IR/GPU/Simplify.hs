@@ -21,6 +21,7 @@ import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
+import Futhark.Optimise.Simplify.Rules.Loop (peelIsFirstRules)
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Util (focusNth)
@@ -93,6 +94,7 @@ instance SOAC.HasSOAC (Wise GPU) where
 kernelRules :: RuleBook (Wise GPU)
 kernelRules =
   standardRules
+    <> peelIsFirstRules
     <> segOpRules
     <> ruleBook
       [ RuleOp SOAC.simplifyKnownIterationSOAC,
