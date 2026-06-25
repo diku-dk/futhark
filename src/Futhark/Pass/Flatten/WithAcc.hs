@@ -205,6 +205,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
             then
               pure rep
             else
+              -- TODO: I removed the ensureDenseIrregular in liftDistResultRep but I think here we won't need it either?
               liftDistResultRep lvl segs inputs env' dist_res res
         Constant _ -> liftDistResultRep lvl segs inputs env' dist_res res
 

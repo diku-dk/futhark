@@ -408,7 +408,7 @@ liftDistResultRep lvl segments inps env dist_res res
       case resSubExp res of
         Var v -> do
           rep <- getIrregRep lvl segments env inps v
-          Irregular <$> ensureDenseIrregular lvl "liftDistResultRep_dense" rep
+          pure $ Irregular rep
         _ -> error "liftBranchResultRep: irregular result is not a variable"
 
 liftDistResult :: SegLevel -> Segments -> DistInputs -> DistEnv -> DistResult -> SubExpRes -> FlattenM Result

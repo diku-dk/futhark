@@ -950,11 +950,10 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       | otherwise -> do
           irreg <- getIrregRep lvl segments env inps v
           -- TODO: Maybe we can avoid this?
-          irreg_dense <- ensureDenseIrregular lvl (baseName v <> "_rearrange_dense") irreg
           t <- lookupInputType inps v
           rep' <-
             certifying (distCerts inps aux env) $
-              rearrangeIrreg lvl segments env inps t perm irreg_dense
+              rearrangeIrreg lvl segments env inps t perm irreg
           pure $ insertRep (distResTag res) (Irregular rep') env
     Scratch pt dims
       | not $ any (isVariant inps env) dims -> do
