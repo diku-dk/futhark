@@ -123,10 +123,10 @@ entryAssert (x : xs) body =
     andop = Var (qualName (intrinsicVar "&&")) (Info opt) mempty
     eqop = Var (qualName (intrinsicVar "==")) (Info opt) mempty
     logAnd x' y =
-      mkApply andop [(Nothing, x'), (Nothing, y)] $
+      mkApply andop [(Nothing, mempty, x'), (Nothing, mempty, y)] $
         AppRes bool []
     cmpExp (ReplacedExp x', y) =
-      mkApply eqop [(Nothing, x'), (Nothing, y')] $
+      mkApply eqop [(Nothing, mempty, x'), (Nothing, mempty, y')] $
         AppRes bool []
       where
         y' = Var (qualName y) (Info i64) mempty
@@ -414,7 +414,7 @@ transformFName loc fname ft = do
       ( i - 1,
         mkApply
           f
-          [(Nothing, size_arg)]
+          [(Nothing, mempty, size_arg)]
           (AppRes (foldFunType (replicate i i64) (RetType [] t)) [])
       )
 
@@ -519,7 +519,7 @@ transformAppExp (Apply fe args loc) res =
   setApplyLoc loc
     <$> (mkApply <$> transformExp fe <*> mapM onArg (NE.toList args) <*> transformAppRes res)
   where
-    onArg (Info ext, e) = (ext,) <$> transformExp e
+    onArg (Info (ext, am), e) = (ext,am,) <$> transformExp e
 transformAppExp (Loop sparams pat loopinit form body loc) res = do
   e1' <- transformExp $ loopInitExp loopinit
 
@@ -548,7 +548,7 @@ transformAppExp (Loop sparams pat loopinit form body loc) res = do
   (pat_sizes, pat'') <- sizesForPat pat'
   res' <- transformAppRes res
   pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' (LoopInitExplicit e1') form' body' loc) (Info res')
-transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
+transformAppExp (BinOp (fname, _) (Info t) (e1, Info (d1, _)) (e2, Info (d2, _)) loc) res = do
   (AppRes ret ext) <- transformAppRes res
   fname' <- transformFName loc fname (toStruct t)
   e1' <- transformExp e1
@@ -583,8 +583,8 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
   where
     applyOp ret ext fname' x y =
       mkApply
-        (mkApply fname' [(unInfo d1, x)] (AppRes ret mempty))
-        [(unInfo d2, y)]
+        (mkApply fname' [(d1, mempty, x)] (AppRes ret mempty))
+        [(d2, mempty, y)]
         (AppRes ret ext)
 
     makeVarParam arg = do
@@ -670,7 +670,7 @@ transformExp (Lambda {}) =
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc) = do
-  let (Info (xp, xtype, xargext), Info (yp, ytype)) = arg
+  let (Info (xp, xtype, xargext, _), Info (yp, ytype)) = arg
   e' <- transformExp e
   desugarBinOpSection
     fname
@@ -682,7 +682,7 @@ transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc
     (rettype, retext)
     loc
 transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
-  let (Info (xp, xtype), Info (yp, ytype, yargext)) = arg
+  let (Info (xp, xtype), Info (yp, ytype, yargext, _)) = arg
   e' <- transformExp e
   desugarBinOpSection
     fname
@@ -756,7 +756,7 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
   let apply_left =
         mkApply
           op
-          [(xext, e1)]
+          [(xext, mempty, e1)]
           (AppRes (Scalar $ Arrow mempty yp (diet ytype) (toStruct ytype) (RetType [] $ toRes Nonunique t')) [])
       onDim (Var d typ _)
         | Named p <- xp, qualLeaf d == p = Var (qualName v1) typ loc
@@ -765,7 +765,7 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
       rettype' = first onDim rettype
   body <-
     scoping (S.fromList [v1, v2]) $
-      mkApply apply_left [(yext, e2)]
+      mkApply apply_left [(yext, mempty, e2)]
         <$> transformAppRes (AppRes (toStruct rettype') retext)
   rettype'' <- transformRetTypeSizes (S.fromList [v1, v2]) $ RetType dims rettype'
   pure . wrap_left . wrap_right $

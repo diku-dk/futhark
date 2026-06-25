@@ -102,7 +102,7 @@ wellTypedLoopArg src sparams pat arg = do
 
 -- | An un-checked loop.
 type UncheckedLoop =
-  (PatBase NoInfo VName ParamType, LoopInitBase NoInfo VName, LoopFormBase NoInfo VName, ExpBase NoInfo VName)
+  (Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
 
 -- | A loop that has been type-checked.
 type CheckedLoop =
@@ -153,22 +153,14 @@ checkForEscaped loc initial_levels sparams = do
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
-  (ExpBase NoInfo VName -> TermTypeM Exp) ->
+  (Exp -> TermTypeM Exp) ->
   UncheckedLoop ->
   SrcLoc ->
   TermTypeM (CheckedLoop, AppRes)
 checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
-  loopinit' <- checkExp $ case loopinit of
-    LoopInitExplicit e -> e
-    LoopInitImplicit _ ->
-      -- Should have been filled out in Names
-      error "Unspected LoopInitImplicit"
+  loopinit' <- checkExp $ loopInitExp loopinit
   known_before <- M.keysSet <$> getConstraints
-  zeroOrderType
-    (mkUsage loopinit' "use as loop variable")
-    "type used as loop variable"
-    . toStruct
-    =<< expTypeFully loopinit'
+  mustBeOrderZero (locOf loopinit') =<< expTypeFully loopinit'
 
   -- The handling of dimension sizes is a bit intricate, but very
   -- similar to checking a function, followed by checking a call to
@@ -279,11 +271,10 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
   (sparams, looppat', form', loopbody') <-
     case form of
       For i uboundexp -> do
-        uboundexp' <-
-          require "being the bound in a 'for' loop" anySignedType
-            =<< checkExp uboundexp
-        bound_t <- expTypeFully uboundexp'
-        bindingIdent i bound_t $ \i' ->
+        uboundexp' <- checkExp uboundexp
+        it <- expType uboundexp'
+        let i' = i {identType = Info it}
+        bindingIdent i' $
           bindingPat [] looppat loop_t $ \looppat' -> incLevel $ do
             loopbody' <- checkExp loopbody
             (sparams, looppat'') <- checkLoopReturnSize looppat' loopbody'
@@ -301,7 +292,7 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
           _
             | Just t' <- peelArray 1 t ->
                 bindingPat [] xpat t' $ \xpat' ->
-                  bindingPat [] looppat loop_t $ \looppat' -> incLevel $ do
+                  bindingParam looppat loop_t $ \looppat' -> incLevel $ do
                     loopbody' <- checkExp loopbody
                     (sparams, looppat'') <- checkLoopReturnSize looppat' loopbody'
                     pure
@@ -315,7 +306,7 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
                   "Iteratee of a for-in loop must be an array, but expression has type"
                     <+> pretty t
       While cond ->
-        bindingPat [] looppat loop_t $ \looppat' ->
+        bindingParam looppat loop_t $ \looppat' ->
           incLevel $ do
             cond' <-
               checkExp cond

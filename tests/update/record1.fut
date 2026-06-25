@@ -1,6 +1,6 @@
 -- Type-changing record update.
 -- ==
--- error: i32.*bool
+-- error: bool.*i32
 
 def main (x: i32) (y: i32) : (bool, i32) =
   let r0 = {x, y}

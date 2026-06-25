@@ -1006,9 +1006,11 @@ This notation is syntactic sugar for ``let r = r with f = v in body``.
 ...............................
 
 Bind ``f`` to a function with the given parameters and definition
-(``e``) and evaluate ``body``.  The function will be treated as
-aliasing any free variables in ``e``.  The function is not in scope of
-itself, and hence cannot be recursive.
+(``e``) and evaluate ``body``. The function will be treated as
+aliasing any free variables in ``e``. The function is not in scope of
+itself, and hence cannot be recursive. While the function can be made
+polymorphic by putting in explicit size parameters, it is not
+automatically generalised the way top level functions are.
 
 ``loop pat = initial for x in a do loopbody``
 .............................................

@@ -1,5 +1,5 @@
 -- ==
--- error: cannot match
+-- error: differ in arity
 
 type surface =
     #asphere {curvature: f64}
