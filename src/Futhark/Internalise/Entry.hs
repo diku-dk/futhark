@@ -11,6 +11,7 @@ import Control.Monad.State.Strict
 import Data.Bifunctor (first)
 import Data.List (find, intersperse)
 import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.IR qualified as I
 import Futhark.Internalise.TypesValues (internaliseSumTypeRep, internalisedTypeSize)
 import Futhark.Util (chunks)
@@ -81,17 +82,17 @@ type GenOpaque = State I.OpaqueTypes
 runGenOpaque :: GenOpaque a -> (a, I.OpaqueTypes)
 runGenOpaque = flip runState mempty
 
-addType :: Name -> I.OpaqueType -> GenOpaque ()
-addType name t = modify $ \(I.OpaqueTypes ts) ->
-  case find ((== name) . fst) ts of
-    Just (_, t')
+addType :: Name -> Maybe T.Text -> I.OpaqueType -> GenOpaque ()
+addType name doc t = modify $ \(I.OpaqueTypes ts) ->
+  case lookup name ts of
+    Just (t', _)
       | t /= t' ->
           error . unlines $
             [ "Duplicate definition of entry point type " <> E.prettyString name,
               show t,
               show t'
             ]
-    _ -> I.OpaqueTypes ts <> I.OpaqueTypes [(name, t)]
+    _ -> I.OpaqueTypes ts <> I.OpaqueTypes [(name, (t, doc))]
 
 isRecord ::
   VisibleTypes ->
@@ -228,13 +229,13 @@ entryPointType types t ts
       case E.entryType t of
         E.Scalar (E.Record fs) -> do
           let fs' = recordFields types fs $ E.entryAscribed t
-          addType desc . I.OpaqueRecord =<< opaqueRecord types fs' ts
+          addType desc doc . I.OpaqueRecord =<< opaqueRecord types fs' ts
         E.Scalar (E.Sum cs) -> do
           let (_, places) = internaliseSumTypeRep cs
               cs' = sumConstrs types cs $ E.entryAscribed t
               cs'' = zip (map fst cs') (zip (map snd cs') (map snd places))
               ts' = if length cs == 1 then ts else drop 1 ts
-          addType desc . I.OpaqueSum (map valueType ts)
+          addType desc doc . I.OpaqueSum (map valueType ts)
             =<< opaqueSum types cs'' ts'
         E.Array _ shape (E.Record fs) | not $ null fs -> do
           let rank = E.shapeRank shape
@@ -243,19 +244,20 @@ entryPointType types t ts
               record_t = E.Scalar (E.Record fs)
               record_te = rowTypeExp rank =<< E.entryAscribed t
           ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
-          addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
+          addType desc doc . I.OpaqueRecordArray rank (entryPointTypeName ept)
             =<< opaqueRecordArray types rank fs' ts
         E.Array _ shape et -> do
           let ts' = map (strip (E.shapeRank shape)) ts
               rank = E.shapeRank shape
               elem_te = rowTypeExp rank =<< E.entryAscribed t
           ept <- snd <$> entryPointType types (E.EntryType (E.Scalar et) elem_te) ts'
-          addType desc . I.OpaqueArray (E.shapeRank shape) (entryPointTypeName ept) $
+          addType desc doc . I.OpaqueArray (E.shapeRank shape) (entryPointTypeName ept) $
             map valueType ts
         _ -> error $ "entryPointType: " <> E.prettyString (E.entryType t)
 
       pure (u, I.TypeOpaque desc)
   where
+    doc = Nothing
     u = foldl max Nonunique $ map I.uniqueness ts
     desc =
       maybe (nameFromText $ prettyTextOneLine t') typeExpOpaqueName $
@@ -268,14 +270,15 @@ entryPointType types t ts
 entryPoint ::
   VisibleTypes ->
   Name ->
+  Maybe T.Text ->
   [(E.EntryParam, [I.Param I.DeclType])] ->
   ( E.EntryType,
     [[I.TypeBase I.Rank I.Uniqueness]]
   ) ->
   (I.EntryPoint, I.OpaqueTypes)
-entryPoint types name params (eret, crets) =
+entryPoint types name doc params (eret, crets) =
   runGenOpaque $
-    (name,,)
+    (name,,,doc)
       <$> mapM onParam params
       <*> ( uncurry I.EntryResult
               <$> entryPointType types eret (concat crets)

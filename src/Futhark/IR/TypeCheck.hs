@@ -549,7 +549,7 @@ checkOpaques :: OpaqueTypes -> Either (TypeError rep) ()
 checkOpaques (OpaqueTypes types) = descend [] types
   where
     descend _ [] = pure ()
-    descend known ((name, t) : ts) = do
+    descend known ((name, (t, _)) : ts) = do
       check known t
       descend (name : known) ts
     check known (OpaqueRecord fs) =
