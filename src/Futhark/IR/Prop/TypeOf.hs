@@ -54,7 +54,7 @@ subExpResType = subExpType . resSubExp
 mapType :: SubExp -> Lambda rep -> [Type]
 mapType outersize f =
   [ arrayOf t (Shape [outersize]) NoUniqueness
-    | t <- lambdaReturnType f
+  | t <- lambdaReturnType f
   ]
 
 -- | The type of a primitive operation.
@@ -119,6 +119,7 @@ basicOpType Assert {} =
   pure [Prim Unit]
 basicOpType (UpdateAcc _ v _ _) =
   pure <$> lookupType v
+basicOpType UserParam {} = pure [Prim int64]
 
 -- | The type of an expression.
 expExtType ::

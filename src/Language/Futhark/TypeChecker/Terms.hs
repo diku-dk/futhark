@@ -517,57 +517,54 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, _, e) body loc) _
           loc
       )
       (Info $ AppRes body_t ext)
-checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
-  src_t <- lookupVar loc (qualName (identName src)) (unInfo (identType src))
+checkExp (AppExp (LetWith dest src steps ve body loc) _) = do
+  src_t <- normTypeFully $ unInfo $ identType src
   let src' = src {identType = Info src_t}
-      dest' = dest {identType = Info src_t}
-  slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage src' "type of source array") "src" $ sliceDims slice'
-  unify (mkUsage loc "type of target array") t $ unInfo $ identType src'
 
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
+  case mapAndUnzipM isField steps of
+    Just (steps', names) -> do
+      ve' <- checkExp ve
+      ve_t <- expType ve'
+      updated_t <- updateFieldPath src names ve_t src_t
 
-  ve' <- unifies "type of target array" elemt =<< checkExp ve
+      let dest' = dest {identType = Info updated_t}
+      bindingIdent dest' $ do
+        body' <- checkExp body
+        (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
+        pure $ AppExp (LetWith dest' src' steps' ve' body' loc) (Info $ AppRes body_t ext)
+    Nothing -> do
+      (steps', target_t) <- checkUpdateSteps loc src_t steps
+      ve' <- unifies "type of update target" target_t =<< checkExp ve
 
-  bindingIdent dest' $ do
-    body' <- checkExp body
-    (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
-    pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
-checkExp (Update src slice ve loc) = do
-  slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
-  ve' <- unifies "type of target array" elemt =<< checkExp ve
-  src' <- unifies "type of target array" t =<< checkExp src
-  pure $ Update src' slice' ve' loc
+      let dest' = dest {identType = Info src_t}
+      bindingIdent dest' $ do
+        body' <- checkExp body
+        (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
+        pure $ AppExp (LetWith dest' src' steps' ve' body' loc) (Info $ AppRes body_t ext)
+  where
+    isField (UpdateStepField f) = Just (UpdateStepField f, f)
+    isField _ = Nothing
 
 -- Record updates are a bit hacky, because we do not have row typing
 -- (yet?).  For now, we only permit record updates where we know the
 -- full type up to the field we are updating.
-checkExp (RecordUpdate src fields ve _ loc) = do
+checkExp (Update src steps ve _ loc) = do
   src' <- checkExp src
-  ve' <- checkExp ve
-  ve_t <- expType ve'
-  updated_t <- updateField fields ve_t =<< expTypeFully src'
-  pure $ RecordUpdate src' fields ve' (Info updated_t) loc
+  src_t <- expTypeFully src'
+  case mapAndUnzipM isField steps of
+    Just (steps', names) -> do
+      ve' <- checkExp ve
+      ve_t <- expType ve'
+      updated_t <- updateFieldPath src names ve_t src_t
+      pure $ Update src' steps' ve' (Info updated_t) loc
+    Nothing -> do
+      (steps', target_t) <- checkUpdateSteps loc src_t steps
+      ve' <- unifies "type of update target" target_t =<< checkExp ve
+      src_t' <- expTypeFully src'
+      pure $ Update src' steps' ve' (Info src_t') loc
   where
-    usage = mkUsage loc "record update"
-    updateField [] ve_t src_t = do
-      (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
-      onFailure (CheckingRecordUpdate fields src_t' ve_t) $
-        unify usage src_t' ve_t
-      pure ve_t
-    updateField (f : fs) ve_t (Scalar (Record m))
-      | Just f_t <- M.lookup f m = do
-          f_t' <- updateField fs ve_t f_t
-          pure $ Scalar $ Record $ M.insert f f_t' m
-    updateField _ _ _ =
-      typeError loc mempty . withIndexLink "record-type-not-known" $
-        "Full type of"
-          </> indent 2 (pretty src)
-          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
-
---
+    isField (UpdateStepField f) = Just (UpdateStepField f, f)
+    isField _ = Nothing
 checkExp (AppExp (Index e slice loc) _) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
@@ -685,20 +682,26 @@ checkExp (OpSectionRight op (Info op_t) e (_, Info (_, _, _, am)) _ loc) = do
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (ProjectSection fields (Info t) loc) = do
-  t' <- replaceTyVars loc t
-  case t' of
-    Scalar (Arrow _ _ _ t'' (RetType _ rt))
-      | Just ft <- recordField fields t'' ->
-          unify (mkUsage loc "result of projection") ft $ toStruct rt
-    _ -> error $ "checkExp ProjectSection: " <> show t'
-  pure $ ProjectSection fields (Info t') loc
-checkExp (IndexSection slice _ loc) = do
-  slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
-  (t', retext) <- sliceShape Nothing slice' t
-  let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ toRes Nonunique t'
-  pure $ IndexSection slice' (Info ft) loc
+checkExp (UpdateSection steps _ loc) = do
+  a <- newTypeVar loc "a"
+  (steps', b, retext) <- checkSectionSteps a steps
+  let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType retext $ toRes Nonunique b
+  pure $ UpdateSection steps' (Info ft) loc
+  where
+    checkSectionSteps t [] =
+      pure ([], t, [])
+    checkSectionSteps t (step : rest) =
+      case step of
+        UpdateStepField f -> do
+          (rest', target_t, retext) <- checkSectionSteps t rest
+          pure (UpdateStepField f : rest', target_t, retext)
+        UpdateStepSlice slice -> do
+          slice' <- checkSlice slice
+          (arr_t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
+          unify (mkUsage loc "type of section indexing") arr_t t
+          (t', retext) <- sliceShape Nothing slice' =<< normTypeFully arr_t
+          (rest', target_t, retext_rest) <- checkSectionSteps t' rest
+          pure (UpdateStepSlice slice' : rest', target_t, retext <> retext_rest)
 checkExp (AppExp (Loop _ mergepat loopinit form loopbody loc) _) = do
   ((sparams, mergepat', loopinit', form', loopbody'), appres) <-
     checkLoop checkExp (mergepat, loopinit, form, loopbody) loc
@@ -753,6 +756,56 @@ checkCase mt (CasePat p e loc) =
     e_t <- expTypeFully e'
     (e_t', retext) <- unscopeType loc (patNames p') e_t
     pure (CasePat (fmap toStruct p') e' loc, e_t', retext)
+
+updateFieldPath ::
+  (Pretty a, Located a) =>
+  a ->
+  [Name] ->
+  StructType ->
+  StructType ->
+  TermTypeM StructType
+updateFieldPath src all_fs ve_t = recurse [] all_fs
+  where
+    recurse seen [] t = do
+      (t', _) <- allDimsFreshInType usage Nonrigid "any" t
+      onFailure (CheckingRecordUpdate seen t' ve_t) $
+        unify usage t' ve_t
+      pure ve_t
+      where
+        usage = mkUsage (locOf src) "record update"
+    recurse seen (f : fs) (Scalar (Record m))
+      | Just f_t <- M.lookup f m = do
+          f_t' <- recurse (seen ++ [f]) fs f_t
+          pure $ Scalar $ Record $ M.insert f f_t' m
+    recurse _ _ _ =
+      typeError (locOf src) mempty . withIndexLink "record-type-not-known" $
+        "Full type of"
+          </> indent 2 (pretty src)
+          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
+
+checkUpdateSteps ::
+  SrcLoc ->
+  StructType ->
+  [UpdateStep Info VName] ->
+  TermTypeM ([UpdateStep Info VName], StructType)
+checkUpdateSteps _ t [] =
+  pure ([], t)
+checkUpdateSteps loc t (step : rest) =
+  case step of
+    UpdateStepSlice slice -> do
+      slice' <- checkSlice slice
+      (arr_t, _) <- newArrayType (mkUsage' loc) "update_path_src" $ sliceDims slice'
+      unify (mkUsage loc "type of update path indexing") arr_t t
+      (elem_t, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully arr_t
+      (rest', target_t) <- checkUpdateSteps loc elem_t rest
+      pure (UpdateStepSlice slice' : rest', target_t)
+    UpdateStepField f -> do
+      t' <- normTypeFully t
+      case t' of
+        Scalar (Record fs) | Just f_t <- M.lookup f fs -> do
+          (rest', target_t) <- checkUpdateSteps loc f_t rest
+          pure (UpdateStepField f : rest', target_t)
+        _ -> error $ "checkUpdateSteps: " <> show t'
 
 checkCases ::
   StructType ->
@@ -1036,10 +1089,7 @@ causalityCheck binding_body = do
       onExp known (Var v (Info t) loc)
         | Just bad <- checkCausality (dquotes (pretty v)) known t loc =
             bad
-      onExp known (ProjectSection _ (Info t) loc)
-        | Just bad <- checkCausality "projection section" known t loc =
-            bad
-      onExp known (IndexSection _ (Info t) loc)
+      onExp known (UpdateSection _ (Info t) loc)
         | Just bad <- checkCausality "projection section" known t loc =
             bad
       onExp known (OpSectionRight _ (Info t) _ _ _ loc)
@@ -1218,7 +1268,7 @@ localChecks = void . check
     check e@(AppExp (BinOp (QualName [] v, _) _ (x, _) _ loc) _)
       | baseName v == "==",
         Array {} <- typeOf x,
-        baseTag v <= maxIntrinsicTag = do
+        isIntrinsic v = do
           warn loc $
             textwrap
               "Comparing arrays with \"==\" is deprecated and will stop working in a future revision of the language."
@@ -1474,12 +1524,12 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, _)
       | k `elem` map typeParamName tparams =
           pure Nothing
-    closeOver (k, NoConstraint l usage) =
-      pure $ Just $ Left $ TypeParamType l k $ srclocOf usage
-    closeOver (k, ParamType l loc) =
-      pure $ Just $ Left $ TypeParamType l k $ srclocOf loc
-    closeOver (k, Size Nothing usage) =
-      pure $ Just $ Left $ TypeParamDim k $ srclocOf usage
+    closeOver (k, NoConstraint l _) =
+      pure $ Just $ Left $ TypeParamType l k mempty
+    closeOver (k, ParamType l _) =
+      pure $ Just $ Left $ TypeParamType l k mempty
+    closeOver (k, Size Nothing _) =
+      pure $ Just $ Left $ TypeParamDim k mempty
     closeOver (k, UnknownSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do

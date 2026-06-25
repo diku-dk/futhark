@@ -261,7 +261,7 @@ pPkgManifest = do
   required <-
     ( lexstr "require"
         *> braces (many $ (Left <$> pComment) <|> (Right <$> pRequired))
-      )
+    )
       <|> pure []
   c3 <- pComments
   eof

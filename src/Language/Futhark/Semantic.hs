@@ -169,7 +169,7 @@ instance Pretty Mod where
 
 instance Pretty Env where
   pretty (Env vtable ttable sigtable modtable _) =
-    nestedBlock "{" "}" $
+    nestedBlock $
       stack $
         punctuate line $
           concat

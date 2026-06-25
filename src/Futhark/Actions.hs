@@ -536,6 +536,9 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
                    else []
                )
             ++ ["-s", "WASM_BIGINT"]
+            ++ [ "-s",
+                 "EXPORTED_RUNTIME_METHODS=['HEAP8','HEAP16','HEAP32','HEAP64','HEAPU8','HEAPU16','HEAPU32','HEAPF32','HEAPF64']"
+               ]
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
             ++ [ "-s",

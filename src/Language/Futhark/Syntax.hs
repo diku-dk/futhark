@@ -61,6 +61,7 @@ module Language.Futhark.Syntax
     AppExpBase (..),
     AppRes (..),
     ExpBase (..),
+    UpdateStep (..),
     FieldBase (..),
     CaseBase (..),
     LoopInitBase (..),
@@ -765,7 +766,7 @@ data AppExpBase f vn
   | LetWith
       (IdentBase f vn StructType)
       (IdentBase f vn StructType)
-      (SliceBase f vn)
+      [UpdateStep f vn]
       (ExpBase f vn)
       (ExpBase f vn)
       SrcLoc
@@ -796,6 +797,22 @@ instance Located (AppExpBase f vn) where
   locOf (Index _ _ loc) = locOf loc
   locOf (Loop _ _ _ _ _ loc) = locOf loc
   locOf (Match _ _ loc) = locOf loc
+
+data UpdateStep f vn
+  = UpdateStepSlice (SliceBase f vn)
+  | UpdateStepField Name
+
+deriving instance Show (UpdateStep Info VName)
+
+deriving instance (Show vn) => Show (UpdateStep NoInfo vn)
+
+deriving instance Eq (UpdateStep NoInfo VName)
+
+deriving instance Ord (UpdateStep NoInfo VName)
+
+deriving instance Eq (UpdateStep Info VName)
+
+deriving instance Ord (UpdateStep Info VName)
 
 -- | An annotation inserted by the type checker on constructs that are
 -- "function calls" (either literally or conceptually).  This
@@ -854,8 +871,7 @@ data ExpBase f vn
     Assert (ExpBase f vn) (ExpBase f vn) (f T.Text) SrcLoc
   | -- | An n-ary value constructor.
     Constr Name [ExpBase f vn] (f StructType) SrcLoc
-  | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc
-  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f StructType) SrcLoc
+  | Update (ExpBase f vn) [UpdateStep f vn] (ExpBase f vn) (f StructType) SrcLoc
   | Lambda
       [PatBase f vn ParamType]
       (ExpBase f vn)
@@ -880,10 +896,8 @@ data ExpBase f vn
       (f (PName, ParamType), f (PName, ParamType, Maybe VName, AutoMap))
       (f ResRetType)
       SrcLoc
-  | -- | Field projection as a section: @(.x.y.z)@.
-    ProjectSection [Name] (f StructType) SrcLoc
-  | -- | Array indexing as a section: @(.[i,j])@.
-    IndexSection (SliceBase f vn) (f StructType) SrcLoc
+  | -- | Field projection and array indexing as a section, e.g. @(.x)@, @(.[i,j])@, @(.[0].x)@.
+    UpdateSection [UpdateStep f vn] (f StructType) SrcLoc
   | -- | Type ascription: @e : t@.
     Ascript (ExpBase f vn) (TypeExp (ExpBase f vn) vn) SrcLoc
   | -- | Size coercion: @e :> t@.
@@ -919,19 +933,17 @@ instance Located (ExpBase f vn) where
   locOf (Coerce _ _ _ loc) = locOf loc
   locOf (Negate _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
-  locOf (Update _ _ _ pos) = locOf pos
-  locOf (RecordUpdate _ _ _ _ pos) = locOf pos
   locOf (Lambda _ _ _ _ loc) = locOf loc
   locOf (Hole _ loc) = locOf loc
   locOf (OpSection _ _ loc) = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc) = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc
-  locOf (ProjectSection _ _ loc) = locOf loc
-  locOf (IndexSection _ _ loc) = locOf loc
+  locOf (UpdateSection _ _ loc) = locOf loc
   locOf (Assert _ _ _ loc) = locOf loc
   locOf (Constr _ _ _ loc) = locOf loc
   locOf (Attr _ _ loc) = locOf loc
   locOf (AppExp e _) = locOf e
+  locOf (Update _ _ _ _ pos) = locOf pos
 
 -- | An entry in a record literal.
 data FieldBase f vn
@@ -1118,6 +1130,8 @@ data ValBindBase f vn = ValBind
     -- may refer to abstract types that are no longer in scope.
     valBindEntryPoint :: Maybe (f EntryPoint),
     valBindName :: vn,
+    -- | Location of the name of this binding itself.
+    valBindNameLoc :: SrcLoc,
     valBindRetDecl :: Maybe (TypeExp (ExpBase f vn) vn),
     -- | If 'valBindParams' is null, then the 'retDims' are brought
     -- into scope at this point.

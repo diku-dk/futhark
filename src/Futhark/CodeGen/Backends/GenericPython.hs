@@ -5,7 +5,6 @@ module Futhark.CodeGen.Backends.GenericPython
   ( compileProg,
     CompilerMode,
     Constructor (..),
-    emptyConstructor,
     compileName,
     compileVar,
     compileDim,
@@ -36,15 +35,19 @@ module Futhark.CodeGen.Backends.GenericPython
     atInit,
     collect',
     collect,
+    getParamByKey,
     simpleCall,
+    sizeClassesToPython,
   )
 where
 
 import Control.Monad
 import Control.Monad.RWS hiding (reader, writer)
+import Data.Bifunctor (first)
 import Data.Char (isAlpha, isAlphaNum)
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
@@ -272,7 +275,7 @@ standardOptions =
       { optionLongName = "tuning",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "open",
-        optionAction = [Exp $ simpleCall "read_tuning_file" [Var "sizes", Var "optarg"]]
+        optionAction = [Exp $ simpleCall "read_tuning_file" [Var "user_sizes", Var "optarg"]]
       },
     -- Does not actually do anything for Python backends.
     Option
@@ -331,7 +334,7 @@ executableOptions =
 
 functionExternalValues :: Imp.EntryPoint -> [Imp.ExternalValue]
 functionExternalValues entry =
-  map snd (Imp.entryPointResults entry) ++ map snd (Imp.entryPointArgs entry)
+  snd (Imp.entryPointResults entry) : map snd (Imp.entryPointArgs entry)
 
 -- | Is this name a valid Python identifier?  If not, it should be escaped
 -- before being emitted.
@@ -369,10 +372,6 @@ opaqueDefs (Imp.Functions funs) =
 -- constructor, although it can be vacuous.
 data Constructor = Constructor [String] [PyStmt]
 
--- | A constructor that takes no arguments and does nothing.
-emptyConstructor :: Constructor
-emptyConstructor = Constructor ["self"] [Pass]
-
 constructorToFunDef :: Constructor -> [PyStmt] -> PyFunDef
 constructorToFunDef (Constructor params body) at_init =
   Def "__init__" params $ body <> at_init
@@ -396,7 +395,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
   pure . prettyText . PyProg $
     imports
       ++ [ Import "argparse" Nothing,
-           Assign (Var "sizes") $ Dict []
+           Assign (Var "user_sizes") $ Dict []
          ]
       ++ defines
       ++ [ Escape valuesPy,
@@ -408,7 +407,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
          ]
       ++ prog'
   where
-    Imp.Definitions _types consts (Imp.Functions funs) = prog
+    Imp.Definitions params opaques consts (Imp.Functions funs) = prog
     compileProg' = withConstantSubsts consts $ do
       compileConstants consts
 
@@ -416,32 +415,62 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
       at_inits <- gets compInit
 
       let constructor' = constructorToFunDef constructor at_inits
+          paramAssign (v, (c, _)) =
+            ( String (nameToText v),
+              Dict
+                [ (String "class", String $ maybe "user" prettyText c),
+                  (String "value", None)
+                ]
+            )
+
+          pair x y = Tuple [x, y]
+
+          opaques_def =
+            Assign
+              (Var "opaques")
+              ( Dict $
+                  zip
+                    (map String opaque_names)
+                    ( zipWith
+                        pair
+                        (map Tuple opaque_payloads)
+                        (map opaqueTupleElems opaque_names)
+                    )
+              )
 
       case mode of
         ToLibrary -> do
-          (entry_points, entry_point_types) <-
+          (entry_points, entry_point_info) <-
             unzip . catMaybes <$> mapM (compileEntryFun sync DoNotReturnTiming) funs
           pure
             [ ClassDef $
                 Class class_name $
-                  Assign (Var "entry_points") (Dict entry_point_types)
-                    : Assign
-                      (Var "opaques")
-                      (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads))
-                    : map FunDef (constructor' : definitions ++ entry_points)
+                  [ Assign
+                      (Var "entry_points")
+                      (strDict entry_point_info),
+                    opaques_def,
+                    Assign
+                      (Var "sizes")
+                      (Dict $ map paramAssign $ M.toList params)
+                  ]
+                    <> map FunDef (constructor' : definitions ++ entry_points)
             ]
         ToServer -> do
-          (entry_points, entry_point_types) <-
+          (entry_points, entry_point_info) <-
             unzip . catMaybes <$> mapM (compileEntryFun sync ReturnTiming) funs
           pure $
             parse_options_server
               ++ [ ClassDef
                      ( Class class_name $
-                         Assign (Var "entry_points") (Dict entry_point_types)
-                           : Assign
-                             (Var "opaques")
-                             (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads))
-                           : map FunDef (constructor' : definitions ++ entry_points)
+                         [ Assign
+                             (Var "entry_points")
+                             (strDict entry_point_info),
+                           opaques_def,
+                           Assign
+                             (Var "sizes")
+                             (Dict $ map paramAssign $ M.toList params)
+                         ]
+                           <> map FunDef (constructor' : definitions ++ entry_points)
                      ),
                    Assign
                      (Var "server")
@@ -456,8 +485,10 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
             parse_options_executable
               ++ ClassDef
                 ( Class class_name $
-                    map FunDef $
-                      constructor' : definitions
+                    Assign
+                      (Var "sizes")
+                      (Dict $ map paramAssign $ M.toList params)
+                      : map FunDef (constructor' : definitions)
                 )
               : classinst
               : map FunDef entry_point_defs
@@ -477,10 +508,21 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
     (opaque_names, opaque_payloads) =
       unzip $ M.toList $ opaqueDefs $ Imp.defFuns prog
 
+    opaqueTupleElems opaque_name =
+      case opaques of
+        Imp.OpaqueTypes m
+          | Just (Imp.OpaqueRecord ts) <- lookup (nameFromText opaque_name) m ->
+              -- XXX: might not be tuple.
+              Tuple $ map (String . p . snd) ts
+          where
+            p (Imp.TypeOpaque tname) = nameToText tname
+            p (Imp.TypeTransparent vt) = prettyText vt
+        _ -> None
+
     selectEntryPoint entry_point_names entry_points =
       [ Assign (Var "entry_points") $
-          Dict $
-            zip (map String entry_point_names) entry_points,
+          strDict $
+            zip entry_point_names entry_points,
         Assign (Var "entry_point_fun") $
           simpleCall "entry_points.get" [Var "entry_point"],
         If
@@ -519,7 +561,7 @@ compileConstants (Imp.Constants _ init_consts) = do
   mapM_ atInit =<< collect (compileCode init_consts)
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunDef
-compileFunc (fname, Imp.Function _ outputs inputs body) = do
+compileFunc (fname, Imp.Function _ outputs inputs _ body) = do
   body' <- collect $ compileCode body
   let inputs' = map (compileName . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
@@ -565,7 +607,12 @@ unpackDim arr_name (Imp.Var var) i = do
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
 entryPointOutput (Imp.OpaqueValue desc vs) =
-  simpleCall "opaque" . (String (prettyText desc) :)
+  simpleCall "opaque"
+    . ( [ String (prettyText desc),
+          Field (Var "self") "opaques"
+        ]
+          <>
+      )
     <$> mapM (entryPointOutput . Imp.TransparentValue) vs
 entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) = do
   name' <- compileVar name
@@ -781,34 +828,32 @@ readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ bt ept dims)) =
           "read_value"
           [String $ mconcat (replicate (length dims) "[]") <> type_name]
 
-printValue :: [(Imp.ExternalValue, PyExp)] -> CompilerM op s [PyStmt]
-printValue = fmap concat . mapM (uncurry printValue')
-  where
-    -- We copy non-host arrays to the host before printing.  This is
-    -- done in a hacky way - we assume the value has a .get()-method
-    -- that returns an equivalent Numpy array.  This works for PyOpenCL,
-    -- but we will probably need yet another plugin mechanism here in
-    -- the future.
-    printValue' (Imp.OpaqueValue desc _) _ =
-      pure
-        [ Exp $
-            simpleCall
-              "sys.stdout.write"
-              [String $ "#<opaque " <> nameToText desc <> ">"]
-        ]
-    printValue' (Imp.TransparentValue (Imp.ArrayValue mem (Space _) bt ept shape)) e =
-      printValue' (Imp.TransparentValue (Imp.ArrayValue mem DefaultSpace bt ept shape)) $
-        simpleCall (prettyString e ++ ".get") []
-    printValue' (Imp.TransparentValue _) e =
-      pure
-        [ Exp $
-            Call
-              (Var "write_value")
-              [ Arg e,
-                ArgKeyword "binary" (Var "binary_output")
-              ],
-          Exp $ simpleCall "sys.stdout.write" [String "\n"]
-        ]
+printValue :: Imp.ExternalValue -> PyExp -> CompilerM op s [PyStmt]
+-- We copy non-host arrays to the host before printing.  This is
+-- done in a hacky way - we assume the value has a .get()-method
+-- that returns an equivalent Numpy array.  This works for PyOpenCL,
+-- but we will probably need yet another plugin mechanism here in
+-- the future.
+printValue (Imp.OpaqueValue desc _) _ =
+  pure
+    [ Exp $
+        simpleCall
+          "sys.stdout.write"
+          [String $ "#<opaque " <> nameToText desc <> ">"]
+    ]
+printValue (Imp.TransparentValue (Imp.ArrayValue mem (Space _) bt ept shape)) e =
+  printValue (Imp.TransparentValue (Imp.ArrayValue mem DefaultSpace bt ept shape)) $
+    simpleCall (prettyString e ++ ".get") []
+printValue (Imp.TransparentValue _) e =
+  pure
+    [ Exp $
+        Call
+          (Var "write_value")
+          [ Arg e,
+            ArgKeyword "binary" (Var "binary_output")
+          ],
+      Exp $ simpleCall "sys.stdout.write" [String "\n"]
+    ]
 
 prepareEntry ::
   Imp.EntryPoint ->
@@ -820,9 +865,9 @@ prepareEntry ::
       [PyStmt],
       [PyStmt],
       [PyStmt],
-      [(Imp.ExternalValue, PyExp)]
+      (Imp.ExternalValue, PyExp)
     )
-prepareEntry (Imp.EntryPoint _ results args) (fname, Imp.Function _ outputs inputs _) = do
+prepareEntry (Imp.EntryPoint _ result args) (fname, Imp.Function _ outputs inputs _ _) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
 
@@ -830,7 +875,7 @@ prepareEntry (Imp.EntryPoint _ results args) (fname, Imp.Function _ outputs inpu
     declEntryPointInputSizes $ map snd args
     mapM_ entryPointInput . zip3 [0 ..] (map snd args) $
       map (Var . T.unpack . extValueDescName . snd) args
-  (res, prepareOut) <- collect' $ mapM (entryPointOutput . snd) results
+  (res, prepareOut) <- collect' $ entryPointOutput $ snd result
 
   let argexps_lib = map (compileName . Imp.paramName) inputs
       fname' = "self." <> futharkFun (nameToText fname)
@@ -851,16 +896,20 @@ prepareEntry (Imp.EntryPoint _ results args) (fname, Imp.Function _ outputs inpu
       prepareIn,
       call argexps_lib,
       prepareOut,
-      zip (map snd results) res
+      (snd result, res)
     )
 
 data ReturnTiming = ReturnTiming | DoNotReturnTiming
+
+-- | Construct a dictionary with string keys.
+strDict :: [(T.Text, PyExp)] -> PyExp
+strDict = Dict . map (first String)
 
 compileEntryFun ::
   [PyStmt] ->
   ReturnTiming ->
   (Name, Imp.Function op) ->
-  CompilerM op s (Maybe (PyFunDef, (PyExp, PyExp)))
+  CompilerM op s (Maybe (PyFunDef, (T.Text, PyExp)))
 compileEntryFun sync timing fun
   | Just entry <- Imp.functionEntry $ snd fun = do
       let ename = Imp.entryPointName entry
@@ -869,14 +918,14 @@ compileEntryFun sync timing fun
             case timing of
               DoNotReturnTiming ->
                 ( [],
-                  Return $ tupleOrSingle $ map snd res
+                  Return $ snd res
                 )
               ReturnTiming ->
                 ( sync,
                   Return $
                     Tuple
                       [ Var "runtime",
-                        tupleOrSingle $ map snd res
+                        snd res
                       ]
                 )
           (pts, rts) = entryTypes entry
@@ -896,19 +945,24 @@ compileEntryFun sync timing fun
         Just
           ( Def (T.unpack (escapeName ename)) ("self" : params) $
               prepareIn ++ do_run ++ prepareOut ++ sync ++ [ret],
-            ( String (nameToText ename),
-              Tuple
-                [ String (escapeName ename),
-                  List (map String pts),
-                  List (map String rts)
+            ( nameToText ename,
+              strDict
+                [ ("name", String (escapeName ename)),
+                  ("inputs", List (map String pts)),
+                  ("output", String rts),
+                  ( "attributes",
+                    List . map (String . prettyText) $
+                      S.toList . Imp.unAttrs . Imp.functionAttrs $
+                        snd fun
+                  )
                 ]
             )
           )
   | otherwise = pure Nothing
 
-entryTypes :: Imp.EntryPoint -> ([T.Text], [T.Text])
+entryTypes :: Imp.EntryPoint -> ([T.Text], T.Text)
 entryTypes (Imp.EntryPoint _ res args) =
-  (map descArg args, map desc res)
+  (map descArg args, desc res)
   where
     descArg ((_, u), d) = desc (u, d)
     desc (u, Imp.OpaqueValue d _) = prettyText u <> nameToText d
@@ -920,8 +974,8 @@ callEntryFun ::
   [PyStmt] ->
   (Name, Imp.Function op) ->
   CompilerM op s (Maybe (PyFunDef, T.Text, PyExp))
-callEntryFun _ (_, Imp.Function Nothing _ _ _) = pure Nothing
-callEntryFun pre_timing fun@(fname, Imp.Function (Just entry) _ _ _) = do
+callEntryFun _ (_, Imp.Function Nothing _ _ _ _) = pure Nothing
+callEntryFun pre_timing fun@(fname, Imp.Function (Just entry) _ _ _ _) = do
   let Imp.EntryPoint ename _ decl_args = entry
   (_, prepare_in, body_bin, _, res) <- prepareEntry entry fun
 
@@ -942,7 +996,7 @@ callEntryFun pre_timing fun@(fname, Imp.Function (Just entry) _ _ _) = do
           (simpleCall "range" [simpleCall "int" [Var "num_runs"]])
           do_run_with_timing
 
-  str_output <- printValue res
+  str_output <- uncurry printValue res
 
   let fname' = "entry_" ++ T.unpack (escapeName fname)
 
@@ -1248,6 +1302,9 @@ compileCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
       doRead src_i = generateRead src' src_i t srcspace
   compileCopyWith shape doWrite dst_lmad doRead src_lmad
 
+getParamByKey :: Name -> PyExp
+getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+
 compileCode :: Imp.Code op -> CompilerM op s ()
 compileCode Imp.DebugPrint {} =
   pure ()
@@ -1378,6 +1435,14 @@ compileCode (Imp.Read x src (Imp.Count iexp) pt space _) = do
   src' <- compileVar src
   stm . Assign x' =<< generateRead src' iexp' pt space
 compileCode Imp.Skip = pure ()
+compileCode (Imp.GetUserParam v name def) = do
+  v' <- compileVar v
+  def' <- compileExp $ untyped def
+  stm $
+    If
+      (BinOp "==" (Index (getParamByKey name) (IdxExp $ String "value")) None)
+      [Assign v' def']
+      [Assign v' $ Index (getParamByKey name) (IdxExp $ String "value")]
 
 lmadcopyCPU :: DoCopy op s
 lmadcopyCPU t shape dst (dstoffset, dststride) src (srcoffset, srcstride) =
@@ -1391,3 +1456,19 @@ lmadcopyCPU t shape dst (dstoffset, dststride) src (srcoffset, srcstride) =
       List (map unCount srcstride),
       List (map unCount shape)
     ]
+
+sizeClassesToPython :: Imp.ParamMap -> PyExp
+sizeClassesToPython = Dict . map f . M.toList
+  where
+    f (size_name, (size_class, _)) =
+      ( String $ prettyText size_name,
+        Dict
+          [ (String "class", maybe None (String . prettyText) size_class),
+            ( String "value",
+              maybe
+                None
+                (maybe None (Integer . fromIntegral) . Imp.sizeDefault)
+                size_class
+            )
+          ]
+      )

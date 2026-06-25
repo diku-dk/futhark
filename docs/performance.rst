@@ -191,7 +191,7 @@ Sum Types
 ~~~~~~~~~
 
 A sum type value is represented as a tuple containing all the payload
-components in order, prefixed with an `i8` tag to identify the
+components in order, prefixed with an ``i8`` tag to identify the
 constructor.  For example,
 
 .. code-block:: futhark

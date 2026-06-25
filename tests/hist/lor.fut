@@ -1,0 +1,31 @@
+-- Test with ||.
+-- ==
+-- input  {
+--   5i64
+--   [0, 1, 2, 3, 4]
+--   [true, true, true, true, true]
+-- }
+-- output {
+--   [true, true, true, true, true]
+-- }
+--
+-- input  {
+--   5i64
+--   [0, 0, 0, 0, 0]
+--   [true, false, true, false, true]
+-- }
+-- output {
+--   [true, false, false, false, false]
+-- }
+--
+-- input  {
+--   1i64
+--   [0, 0, 0, 0, 0]
+--   [true, true, true, true, true]
+-- }
+-- output {
+--   [true]
+-- }
+
+entry main [m] (n: i64) (is: [m]i32) (image: [m]bool) : [n]bool =
+  hist (||) false n (map i64.i32 is) image

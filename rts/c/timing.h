@@ -5,6 +5,7 @@
 
 #ifdef _WIN32
 
+#define NOGDI
 #include <windows.h>
 
 static int64_t get_wall_time(void) {

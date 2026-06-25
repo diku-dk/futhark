@@ -8,6 +8,7 @@ module Language.Futhark.Prop
     intrinsics,
     intrinsicVar,
     maxIntrinsicTag,
+    isIntrinsic,
     namesToPrimTypes,
     qualName,
     qualify,
@@ -23,6 +24,7 @@ module Language.Futhark.Prop
     paramName,
     anySize,
     isAnySize,
+    setApplyLoc,
 
     -- * Queries on expressions
     typeOf,
@@ -56,6 +58,7 @@ module Language.Futhark.Prop
     unfoldFunType,
     unfoldFunTypeWithRet,
     foldFunType,
+    typeQualVars,
     typeVars,
     isAccType,
     recordField,
@@ -392,6 +395,17 @@ isAnySize :: Size -> Maybe Int
 isAnySize (StringLit xs _) = Just $ read $ map (chr . fromIntegral) xs
 isAnySize _ = Nothing
 
+-- | Override the location of an 'Apply' expression.
+--
+-- This is useful because 'mkApply' sets the location to be the span of the
+-- function and all arguments, but during many frontend transformations we
+-- insert additional arguments for which we do not care about the original
+-- source location. Our goal is to maintain a correspondence between the
+-- original source code and the generated code.
+setApplyLoc :: SrcLoc -> Exp -> Exp
+setApplyLoc loc (AppExp (Apply f args _) info) = AppExp (Apply f args loc) info
+setApplyLoc _ e = e
+
 -- | Match the dimensions of otherwise assumed-equal types.  The
 -- combining function is also passed the names bound within the type
 -- (from named parameters or return types).
@@ -497,8 +511,7 @@ typeOf (Ascript e _ _) = typeOf e
 typeOf (Coerce _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (Not e _) = typeOf e
-typeOf (Update e _ _ _) = typeOf e
-typeOf (RecordUpdate _ _ _ (Info t) _) = t
+typeOf (Update _ _ _ (Info t) _) = t
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (Lambda params _ _ (Info t) _) = funType params t
 typeOf (OpSection _ (Info t) _) = t
@@ -506,8 +519,7 @@ typeOf (OpSectionLeft _ _ _ (_, Info (pn, pt2)) (Info ret, _) _) =
   Scalar $ Arrow mempty pn (diet pt2) (toStruct pt2) ret
 typeOf (OpSectionRight _ _ _ (Info (pn, pt1), _) (Info ret) _) =
   Scalar $ Arrow mempty pn (diet pt1) (toStruct pt1) ret
-typeOf (ProjectSection _ (Info t) _) = t
-typeOf (IndexSection _ (Info t) _) = t
+typeOf (UpdateSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t
 typeOf (Attr _ e _) = typeOf e
 typeOf (AppExp _ (Info res)) = appResType res
@@ -569,20 +581,24 @@ valBindBound vb =
       [] -> retDims (unInfo (valBindRetType vb))
       _ -> []
 
--- | The type names mentioned in a type.
-typeVars :: TypeBase dim as -> S.Set VName
-typeVars t =
+-- | The qualified type names mentioned in a type.
+typeQualVars :: TypeBase dim as -> [QualName VName]
+typeQualVars t =
   case t of
     Scalar Prim {} -> mempty
     Scalar (TypeVar _ tn targs) ->
-      mconcat $ S.singleton (qualLeaf tn) : map typeArgFree targs
-    Scalar (Arrow _ _ _ t1 (RetType _ t2)) -> typeVars t1 <> typeVars t2
-    Scalar (Record fields) -> foldMap typeVars fields
-    Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
-    Array _ _ rt -> typeVars $ Scalar rt
+      tn : concatMap typeArgFree targs
+    Scalar (Arrow _ _ _ t1 (RetType _ t2)) -> typeQualVars t1 <> typeQualVars t2
+    Scalar (Record fields) -> foldMap typeQualVars fields
+    Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeQualVars cs
+    Array _ _ rt -> typeQualVars $ Scalar rt
   where
-    typeArgFree (TypeArgType ta) = typeVars ta
+    typeArgFree (TypeArgType ta) = typeQualVars ta
     typeArgFree TypeArgDim {} = mempty
+
+-- | The type names mentioned in a type.
+typeVars :: TypeBase dim as -> S.Set VName
+typeVars = S.fromList . map qualLeaf . typeQualVars
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
 -- a function type, does not contain a function type as a subcomponent, and may
@@ -660,12 +676,12 @@ patternParam p =
 namesToPrimTypes :: M.Map Name PrimType
 namesToPrimTypes =
   M.fromList
-    [ (nameFromString $ prettyString t, t)
-      | t <-
-          Bool
-            : map Signed [minBound .. maxBound]
-            ++ map Unsigned [minBound .. maxBound]
-            ++ map FloatType [minBound .. maxBound]
+    [ (nameFromText $ prettyText t, t)
+    | t <-
+        Bool
+          : map Signed [minBound .. maxBound]
+          ++ map Unsigned [minBound .. maxBound]
+          ++ map FloatType [minBound .. maxBound]
     ]
 
 -- | The nature of something predefined.  For functions, these can
@@ -983,6 +999,19 @@ intrinsics =
                   $ RetType []
                   $ Scalar
                   $ tupleRecord [Scalar $ t_b Nonunique, Scalar $ t_a Nonunique]
+              ),
+              ( "with_vjp",
+                IntrinsicPolyFun
+                  [tp_a, tp_b]
+                  [ Scalar (t_a NoUniqueness) `arr` Scalar (t_b Nonunique),
+                    Scalar (t_b NoUniqueness)
+                      `arr` ( Scalar (t_b NoUniqueness)
+                                `arr` Scalar (t_a Nonunique)
+                            ),
+                    Scalar (t_a Observe)
+                  ]
+                  $ RetType []
+                  $ Scalar (t_b Nonunique)
               )
             ]
               ++
@@ -1232,6 +1261,10 @@ intrinsics =
 maxIntrinsicTag :: Int
 maxIntrinsicTag = maxinum $ map baseTag $ M.keys intrinsics
 
+-- | Is this the name of an intrinsic?
+isIntrinsic :: VName -> Bool
+isIntrinsic = (<= maxIntrinsicTag) . baseTag
+
 -- | Create a name with no qualifiers from a name.
 qualName :: v -> QualName v
 qualName = QualName []
@@ -1471,21 +1504,30 @@ similarExps (Constr n1 es1 _ _) (Constr n2 es2 _ _)
   | length es1 == length es2,
     n1 == n2 =
       Just $ zip es1 es2
-similarExps (Update e1 slice1 e'1 _) (Update e2 slice2 e'2 _) =
-  ([(e1, e2), (e'1, e'2)] ++) <$> similarSlices slice1 slice2
-similarExps (RecordUpdate e1 names1 e'1 _ _) (RecordUpdate e2 names2 e'2 _ _)
-  | names1 == names2 =
-      Just [(e1, e2), (e'1, e'2)]
+similarExps (Update e1 steps1 e'1 _ _) (Update e2 steps2 e'2 _ _)
+  | length steps1 == length steps2 = do
+      step_pairs <- concat <$> zipWithM similarStep steps1 steps2
+      pure $ [(e1, e2), (e'1, e'2)] ++ step_pairs
+  where
+    similarStep (UpdateStepField f1) (UpdateStepField f2)
+      | f1 == f2 = Just []
+    similarStep (UpdateStepSlice s1) (UpdateStepSlice s2) =
+      similarSlices s1 s2
+    similarStep _ _ = Nothing
 similarExps (OpSection op1 _ _) (OpSection op2 _ _)
   | op1 == op2 = Just []
 similarExps (OpSectionLeft op1 _ x1 _ _ _) (OpSectionLeft op2 _ x2 _ _ _)
   | op1 == op2 = Just [(x1, x2)]
 similarExps (OpSectionRight op1 _ x1 _ _ _) (OpSectionRight op2 _ x2 _ _ _)
   | op1 == op2 = Just [(x1, x2)]
-similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
-  | names1 == names2 = Just []
-similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
-  similarSlices slice1 slice2
+similarExps (UpdateSection steps1 _ _) (UpdateSection steps2 _ _)
+  | length steps1 == length steps2 = concat <$> zipWithM similarStep steps1 steps2
+  where
+    similarStep (UpdateStepField f1) (UpdateStepField f2)
+      | f1 == f2 = Just []
+    similarStep (UpdateStepSlice s1) (UpdateStepSlice s2) =
+      similarSlices s1 s2
+    similarStep _ _ = Nothing
 similarExps _ _ = Nothing
 
 -- | Are these the same expression as per recursively invoking

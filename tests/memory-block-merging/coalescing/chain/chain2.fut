@@ -9,7 +9,7 @@
 -- output { [[[2, 2], [3, 5]], [[2, 2], [2, 2]]]
 --          [[[5, 5], [5, 5]], [[5, 5], [5, 5]]]
 --        }
--- structure seq-mem { Alloc 5 }
+-- structure seq-mem { Alloc 3 }
 -- structure gpu-mem { Alloc 5 }
 
 def main [n]

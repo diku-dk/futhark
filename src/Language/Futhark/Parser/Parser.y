@@ -40,6 +40,8 @@ import Language.Futhark.Parser.Monad
 
 }
 
+%expect 0
+
 %name prog Prog
 %name futharkType TypeExp
 %name expression Exp
@@ -300,9 +302,9 @@ Spec :: { SpecBase NoInfo Name }
         { let L loc (ID name) = $2
           in ValSpec name $3 $5 NoInfo Nothing (srcspan $1 $>) }
       | val BindingBinOp TypeParams ':' TypeExp
-        { ValSpec $2 $3 $5 NoInfo Nothing (srcspan $1 $>) }
+        { ValSpec (fst $2) $3 $5 NoInfo Nothing (srcspan $1 $>) }
       | val '(' BindingBinOp ')' TypeParams ':' TypeExp
-        { ValSpec $3 $5 $7 NoInfo Nothing (srcspan $1 $>) }
+        { ValSpec (fst $3) $5 $7 NoInfo Nothing (srcspan $1 $>) }
       | TypeAbbr
         { TypeAbbrSpec $1 }
 
@@ -393,43 +395,43 @@ BinOp :: { (QualName Name, Loc) }
       | '=...'     { binOpName $1 }
       | '`' QualName '`' { $2 }
 
-BindingBinOp :: { Name }
+BindingBinOp :: { (Name, SrcLoc) }
       : BinOp {% let (QualName qs name, loc) = $1 in do
                    unless (null qs) $ parseErrorAt loc $
                      Just "Cannot use a qualified name in binding position."
-                   pure name }
-      | '-'   { nameFromString "-" }
+                   pure (name, srclocOf loc) }
+      | '-'   { (nameFromString "-", srclocOf $1) }
       | '!'   {% parseErrorAt $1 $ Just $ "'!' is a prefix operator and cannot be used as infix operator." }
 
-BindingId :: { (Name, Loc) }
-     : id                   { let L loc (ID name) = $1 in (name, loc) }
-     | '(' BindingBinOp ')' { ($2, $1) }
+BindingId :: { (Name, SrcLoc) }
+     : id                   { let L loc (ID name) = $1 in (name, srclocOf loc) }
+     | '(' BindingBinOp ')' { $2 }
 
 Val    :: { ValBindBase NoInfo Name }
 Val     : def BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
-          { let (name, _) = $2
-            in ValBind Nothing name $5 NoInfo
+          { let (name, loc) = $2
+            in ValBind Nothing name loc $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
 
         | entry BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
           { let (name, loc) = $2
-            in ValBind (Just NoInfo) name $5 NoInfo
+            in ValBind (Just NoInfo) name loc $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>) }
 
         | def FunParam BindingBinOp FunParam maybeAscription(TypeExp) '=' Exp
-          { ValBind Nothing $3 $5 NoInfo [] [$2,$4] $7
+          { ValBind Nothing (fst $3) (snd $3) $5 NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
           }
 
         -- The next two for backwards compatibility.
         | let BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
-          { let (name, _) = $2
-            in ValBind Nothing name $5 NoInfo
+          { let (name, loc) = $2
+            in ValBind Nothing name loc $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
         | let FunParam BindingBinOp FunParam maybeAscription(TypeExp) '=' Exp
-          { ValBind Nothing $3 $5 NoInfo [] [$2,$4] $7
+          { ValBind Nothing (fst $3) (snd $3) $5 NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
           }
 
@@ -574,14 +576,8 @@ Exp2 :: { UncheckedExp }
      | Atom '..' Exp2            {% twoDotsRange $2 }
      | '-' Exp2  %prec juxtprec  { Negate $2 (srcspan $1 $>) }
      | '!' Exp2 %prec juxtprec   { Not $2 (srcspan $1 $>) }
-
-     | Exp2 with '[' DimIndices ']' '=' Exp2
-       { Update $1 $4 $7 (srcspan $1 $>) }
-     | Exp2 with '...[' DimIndices ']' '=' Exp2
-       { Update $1 $4 $7 (srcspan $1 $>) }
-
-     | Exp2 with FieldAccesses_ '=' Exp2
-       { RecordUpdate $1 (map unLoc $3) $5 NoInfo (srcspan $1 $>) }
+     | Exp2 with Update '=' Exp2
+       { Update $1 $3 $5 NoInfo (srcspan $1 $>) }
 
      | ApplyList {% applyExp $1 }
 
@@ -669,12 +665,38 @@ Exps1_ :: { [UncheckedExp] }
         | Exps1_ ','     { $1 }
         | Exp            { [$1] }
 
-FieldAccesses :: { [L Name] }
-               : '.' FieldId FieldAccesses { $2 : $3 }
-               |                           { [] }
+Update :: { [UpdateStep NoInfo Name] }
+           : UpdateStep UpdateTail { $1 : $2 }
 
-FieldAccesses_ :: { [L Name] }
-               : FieldId FieldAccesses { $1 : $2 }
+UpdateTail :: { [UpdateStep NoInfo Name] }
+               : UpdateStep UpdateTail { $1 : $2 }
+               |                              { [] }
+
+UpdateStep :: { UpdateStep NoInfo Name }
+               : '[' DimIndices ']'    { UpdateStepSlice $2 }
+               | '...[' DimIndices ']' { UpdateStepSlice $2 }
+               | FieldId               { UpdateStepField (unLoc $1) }
+               | '.' FieldId           { UpdateStepField (unLoc $2) }
+
+LetUpdate :: { [UpdateStep NoInfo Name] }
+          : LetUpdateStep LetUpdateTail { $1 : $2 }
+
+LetUpdateTail :: { [UpdateStep NoInfo Name] }
+              : LetUpdateStep LetUpdateTail { $1 : $2 }
+              |                             { [] }
+
+LetUpdateStep :: { UpdateStep NoInfo Name }
+              : '...[' DimIndices ']' { UpdateStepSlice $2 }
+              | '.' FieldId           { UpdateStepField (unLoc $2) }
+
+SectionUpdate :: { [UpdateStep NoInfo Name] }
+              : '.' FieldId SectionUpdateTail            { UpdateStepField (unLoc $2) : $3 }
+              | '.' '[' DimIndices ']' SectionUpdateTail { UpdateStepSlice $3 : $5 }
+
+SectionUpdateTail :: { [UpdateStep NoInfo Name] }
+                  : '.' FieldId SectionUpdateTail           { UpdateStepField (unLoc $2) : $3 }
+                  | '...[' DimIndices ']' SectionUpdateTail { UpdateStepSlice $2 : $4 }
+                  |                                         { [] }
 
 Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordFieldExplicit $1 $3 (srcspan $1 $>) }
@@ -692,14 +714,17 @@ LetExp :: { UncheckedExp }
        { AppExp (LetPat [] $2 $4 $5 (srcspan $1 $>)) NoInfo }
 
      | let id LocalFunTypeParams FunParams1 maybeAscription(TypeExp) '=' Exp LetBody
-       { let L nameloc (ID name) = $2
-           in AppExp (LetFun (name, srclocOf nameloc) ($3, fst $4 : snd $4, $5, NoInfo, $7)
-                     $8 (srcspan $1 $>))
-                     NoInfo}
+       { let { L nameloc (ID name) = $2 }
+         in AppExp (LetFun (name, srclocOf nameloc) ($3, fst $4 : snd $4, $5, NoInfo, $7)
+                    $8 (srcspan $1 $>)) NoInfo
+       }
 
-     | let id '...[' DimIndices ']' '=' Exp LetBody
-       { let L vloc (ID v) = $2; ident = Ident v NoInfo (srclocOf vloc)
-         in AppExp (LetWith ident ident $4 $7 $8 (srcspan $1 $>)) NoInfo }
+     | let id LetUpdate '=' Exp LetBody
+       { let { L vloc (ID v) = $2
+             ; ident = Ident v NoInfo (srclocOf vloc)
+             }
+         in AppExp (LetWith ident ident $3 $5 $6 (srcspan $1 $>)) NoInfo
+       }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
@@ -754,11 +779,8 @@ SectionExp :: { UncheckedExp }
   | '(' BinOp ')'
     { OpSection (fst $2) NoInfo (srcspan $1 $>) }
 
-  | '(' '.' FieldAccesses_ ')'
-    { ProjectSection (map unLoc $3) NoInfo (srcspan $1 $>) }
-
-  | '(' '.' '[' DimIndices ']' ')'
-    { IndexSection $4 NoInfo (srcspan $1 $>) }
+  | '(' SectionUpdate ')'
+    { UpdateSection $2 NoInfo (srcspan $1 $>) }
 
 RangeExp :: { UncheckedExp }
   : Exp2 '...' Exp2           { AppExp (Range $1 Nothing (ToInclusive $3) (srcspan $1 $>)) NoInfo }
@@ -802,7 +824,7 @@ Pat :: { PatBase NoInfo Name StructType }
 -- Parameter patterns are slightly restricted; see #2017.
 ParamPat :: { PatBase NoInfo Name StructType }
                : id                   { let L loc (ID name) = $1 in Id name NoInfo (srclocOf loc) }
-               | '(' BindingBinOp ')' { Id $2 NoInfo (srcspan $1 $>) }
+               | '(' BindingBinOp ')' { Id (fst $2) NoInfo (srcspan $1 $>) }
                | '_'                  { Wildcard NoInfo (srclocOf $1) }
                | '(' ')'              { TuplePat [] (srcspan $1 $>) }
                | '(' Pat ')'          { PatParens $2 (srcspan $1 $>) }
@@ -819,7 +841,7 @@ Pats1 :: { [PatBase NoInfo Name StructType] }
 
 InnerPat :: { PatBase NoInfo Name StructType }
                : id                   { let L loc (ID name) = $1 in Id name NoInfo (srclocOf loc) }
-               | '(' BindingBinOp ')' { Id $2 NoInfo (srcspan $1 $>) }
+               | '(' BindingBinOp ')' { Id (fst $2) NoInfo (srcspan $1 $>) }
                | '_'                  { Wildcard NoInfo (srclocOf $1) }
                | '(' ')'              { TuplePat [] (srcspan $1 $>) }
                | '(' Pat ')'          { PatParens $2 (srcspan $1 $>) }

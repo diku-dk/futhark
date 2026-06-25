@@ -11,17 +11,17 @@ import Data.Char (isAlpha, isSpace, toUpper)
 import Data.List (find, groupBy, inits, intersperse, isPrefixOf, partition, sort, sortOn, tails)
 import Data.Map qualified as M
 import Data.Maybe
-import Data.Ord
 import Data.Set qualified as S
 import Data.String (fromString)
 import Data.Text qualified as T
 import Data.Version
+import Futhark.Util.Html (headHtml, relativise)
 import Futhark.Util.Pretty (Doc, docText, pretty)
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Warnings
-import System.FilePath (makeRelative, splitPath, (-<.>), (</>))
+import System.FilePath (makeRelative, (-<.>), (</>))
 import Text.Blaze.Html5 (AttributeValue, Html, toHtml, (!))
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
@@ -135,7 +135,7 @@ fullRow :: Html -> Html
 fullRow = H.tr . (H.td ! A.colspan "3")
 
 emptyRow :: Html
-emptyRow = H.tr $ H.td mempty <> H.td mempty <> H.td mempty
+emptyRow = H.tr ! A.class_ "empty_spec_row" $ H.td mempty <> H.td mempty <> H.td mempty
 
 specRow :: Html -> Html -> Html -> Html
 specRow a b c =
@@ -285,17 +285,7 @@ indexPage important_imports imports documented fm =
 
 addBoilerplate :: String -> String -> Html -> Html
 addBoilerplate current titleText content =
-  let headHtml =
-        H.head $
-          H.meta
-            ! A.charset "utf-8"
-            <> H.title (fromString titleText)
-            <> H.link
-              ! A.href (fromString $ relativise "style.css" current)
-              ! A.rel "stylesheet"
-              ! A.type_ "text/css"
-
-      navigation =
+  let navigation =
         H.ul ! A.id "navigation" $
           H.li (H.a ! A.href (fromString $ relativise "index.html" current) $ "Contents")
             <> H.li (H.a ! A.href (fromString $ relativise "doc-index.html" current) $ "Index")
@@ -305,7 +295,7 @@ addBoilerplate current titleText content =
           <> (H.a ! A.href futhark_doc_url) "futhark-doc"
           <> " "
           <> fromString (showVersion version)
-   in headHtml
+   in headHtml current titleText
         <> H.body
           ( (H.div ! A.id "header") (H.h1 (toHtml titleText) <> navigation)
               <> (H.div ! A.id "content") content
@@ -387,7 +377,7 @@ synopsisValBind vb = Just $ do
   pure $ specRow lhs (mhs <> " : ") rhs
 
 valBindHtml :: Html -> ValBind -> DocM (Html, Html, Html)
-valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = do
+valBindHtml name (ValBind _ _ _ retdecl (Info rettype) tparams params _ _ _ _) = do
   tparams' <- mconcat <$> mapM (fmap (" " <>) . typeParamHtml) tparams
   let noLink' = noLink $ map typeParamName tparams <> foldMap patNames params
   rettype' <- noLink' $ maybe (retTypeHtml rettype) typeExpHtml retdecl
@@ -644,15 +634,15 @@ typeExpHtml e = case e of
     pure $ "?" <> mconcat (map (brackets . renderName . baseName) dims) <> "." <> t'
 
 qualNameHtml :: QualName VName -> DocM Html
-qualNameHtml (QualName names vname@(VName name tag)) =
-  if tag <= maxIntrinsicTag
-    then pure $ renderName name
+qualNameHtml (QualName names vname) =
+  if isIntrinsic vname
+    then pure $ renderName $ baseName vname
     else f <$> ref
   where
     prefix :: Html
     prefix = mapM_ ((<> ".") . renderName . baseName) names
-    f (Just s) = H.a ! A.href (fromString s) $ prefix <> renderName name
-    f Nothing = prefix <> renderName name
+    f (Just s) = H.a ! A.href (fromString s) $ prefix <> renderName (baseName vname)
+    f Nothing = prefix <> renderName (baseName vname)
 
     ref = do
       boring <- asks $ S.member vname . ctxNoLink
@@ -682,10 +672,6 @@ paramHtml pat = do
       v' <- vnameHtml v
       pure $ parens $ v' <> ": " <> dietHtml d <> t'
     Unnamed -> pure t'
-
-relativise :: FilePath -> FilePath -> FilePath
-relativise dest src =
-  concat (replicate (length (splitPath src) - 1) "../") ++ makeRelative "/" dest
 
 dimDeclHtml :: Size -> DocM Html
 dimDeclHtml = pure . brackets . toHtml . prettyString

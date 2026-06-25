@@ -70,7 +70,7 @@ intrablockParallelise knest lam = runMaybeT $ do
   let available v =
         v `M.member` outside_scope
           && v `notElem` map kernelInputName inps
-  unless (all available $ namesToList $ freeIn (wss_min ++ wss_avail)) $
+  unless (allNames available $ freeIn (wss_min ++ wss_avail)) $
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $
@@ -251,14 +251,15 @@ intrablockStm stm@(Let pat aux e) = do
           addStms
             =<< runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
     Op (Screma w arrs form)
-      | Just (scans, mapfun) <- isScanomapSOAC form,
+      | Just (post_lam, scans, mapfun) <- isMaposcanomapSOAC form,
         -- FIXME: Futhark.CodeGen.ImpGen.GPU.Block.compileGroupOp
         -- cannot handle multiple scan operators yet.
         Scan scanfun nes <- singleScan scans -> do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
+              post_op = SegPostOp $ soacsLambdaToGPU post_lam
           certifying (stmAuxCerts aux) $
-            addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
+            addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' post_op arrs [] []
           parallelMin [w]
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form -> do

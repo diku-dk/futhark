@@ -8,14 +8,15 @@ module Futhark.LSP.Diagnostic
   )
 where
 
-import Colog.Core (logStringStderr, (<&))
+import Colog.Core (Severity (Debug), (<&))
 import Control.Lens ((^.))
 import Data.Foldable (for_)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.Compiler.Program (ProgError (..))
-import Futhark.LSP.Tool (posToUri, rangeFromLoc)
+import Futhark.LSP.Tool (logWithSeverity, posToUri, rangeFromLoc)
+import Futhark.Util (showText)
 import Futhark.Util.Loc (Loc (..))
 import Futhark.Util.Pretty (Doc, docText)
 import Language.LSP.Diagnostics (partitionBySource)
@@ -40,8 +41,8 @@ mkDiagnostic range severity msg =
 publish :: [(Uri, [Diagnostic])] -> LspT () IO ()
 publish uri_diags_map = for_ uri_diags_map $ \(uri, diags) -> do
   doc <- getVersionedTextDoc $ TextDocumentIdentifier uri
-  logStringStderr
-    <& ("Publishing diagnostics for " ++ show uri ++ " Version: " ++ show (doc ^. version))
+  logWithSeverity Debug
+    <& ("Publishing diagnostics for " <> showText uri <> " Version: " <> showText (doc ^. version))
   publishDiagnostics
     maxDiagnostic
     (toNormalizedUri uri)

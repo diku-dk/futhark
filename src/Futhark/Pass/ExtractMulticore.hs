@@ -213,6 +213,8 @@ transformSOAC _ _ JVP {} =
   error "transformSOAC: unhandled JVP"
 transformSOAC _ _ VJP {} =
   error "transformSOAC: unhandled VJP"
+transformSOAC _ _ WithVJP {} =
+  error "transformSOAC: unhandled WithVJP"
 transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
       seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs
@@ -235,17 +237,18 @@ transformSOAC pat _ (Screma w arrs form)
           pure $
             mconcat seq_reds_stms
               <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
-  | Just (scans, map_lam) <- isScanomapSOAC form = do
+  | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form = do
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
       (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
+      post_op <- SegPostOp <$> transformLambda post_lam
       pure $
         mconcat scans_stms
           <> oneStm
             ( Let pat (defAux ()) $
                 Op $
                   ParOp Nothing $
-                    SegScan () space (lambdaReturnType map_lam) kbody scans'
+                    SegScan () space (lambdaReturnType map_lam) kbody scans' post_op
             )
   | otherwise = do
       -- This screma is too complicated for us to immediately do

@@ -17,7 +17,6 @@ where
 import Control.Monad
 import Data.Char (chr)
 import Data.Functor
-import Data.List (intersperse)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -282,11 +281,11 @@ prettyAppExp _ (LetFun (fname, _) (tparams, params, retdecl, rettype, e) body _)
     retdecl' = case (pretty <$> unAnnot rettype) `mplus` (pretty <$> retdecl) of
       Just rettype' -> colon <+> align rettype'
       Nothing -> mempty
-prettyAppExp _ (LetWith dest src idxs ve body _)
+prettyAppExp _ (LetWith dest src steps ve body _)
   | dest == src =
       "let"
         <+> pretty dest
-        <> list (map pretty idxs)
+        <> prettyLetLhsUpdate steps
           <+> equals
           <+> align (pretty ve)
           </> letBody body
@@ -296,7 +295,7 @@ prettyAppExp _ (LetWith dest src idxs ve body _)
         <+> equals
         <+> pretty src
         <+> "with"
-        <+> brackets (commasep (map pretty idxs))
+        <+> prettyUpdate steps
         <+> "="
         <+> align (pretty ve)
         </> letBody body
@@ -326,6 +325,12 @@ prettyAppExp p (Apply f args _) =
           | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 3 ->
               parens (prettyExp 10 e <+> "Δ" <+> pretty am)
         _ -> prettyExp 10 e
+
+prettyLetLhsUpdate :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
+prettyLetLhsUpdate = mconcat . map pp
+  where
+    pp (UpdateStepSlice idxs) = brackets (commasep (map pretty idxs))
+    pp (UpdateStepField f) = "." <> pretty f
 
 instance (IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)
@@ -385,16 +390,10 @@ prettyExp _ (StringLit s _) =
 prettyExp _ (Project k e _ _) = prettyExp 11 e <> "." <> pretty k
 prettyExp _ (Negate e _) = "-" <> pretty e
 prettyExp _ (Not e _) = "!" <> pretty e
-prettyExp _ (Update src idxs ve _) =
+prettyExp _ (Update src steps ve _ _) =
   pretty src
     <+> "with"
-    <+> brackets (commasep (map pretty idxs))
-    <+> "="
-    <+> align (pretty ve)
-prettyExp _ (RecordUpdate src fs ve _ _) =
-  pretty src
-    <+> "with"
-    <+> mconcat (intersperse "." (map pretty fs))
+    <+> prettyUpdate steps
     <+> "="
     <+> align (pretty ve)
 prettyExp _ (Assert e1 e2 _ _) =
@@ -412,17 +411,17 @@ prettyExp _ (OpSectionLeft binop _ x _ _ _) =
   parens $ pretty x <+> ppBinOp binop
 prettyExp _ (OpSectionRight binop _ x _ _ _) =
   parens $ ppBinOp binop <+> pretty x
-prettyExp _ (ProjectSection fields _ _) =
-  parens $ mconcat $ map p fields
+prettyExp _ (UpdateSection steps _ _) =
+  parens $ mconcat $ zipWith p [(0 :: Int) ..] steps
   where
-    p name = "." <> pretty name
-prettyExp _ (IndexSection idxs _ _) =
-  parens $ "." <> brackets (commasep (map pretty idxs))
+    p _ (UpdateStepField name) = "." <> pretty name
+    p 0 (UpdateStepSlice idxs) = "." <> brackets (commasep (map pretty idxs))
+    p _ (UpdateStepSlice idxs) = brackets (commasep (map pretty idxs))
 prettyExp p (Constr n cs t _) =
   parensIf (p >= 10) $
     "#" <> pretty n <+> sep (map (prettyExp 10) cs) <> prettyInst t
-prettyExp _ (Attr attr e _) =
-  prettyAttr attr </> prettyExp (-1) e
+prettyExp p (Attr attr e _) =
+  parensIf (p >= 10) $ align $ prettyAttr attr </> prettyExp (-1) e
 prettyExp i (AppExp e res)
   | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2,
     Just (AppRes t ext) <- unAnnot res,
@@ -431,6 +430,16 @@ prettyExp i (AppExp e res)
         </> "@"
         <> parens (pretty t <> "," <+> brackets (commasep $ map prettyName ext))
   | otherwise = prettyAppExp i e
+
+prettyUpdate :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
+prettyUpdate = mconcat . zipWith pp [0 :: Int ..]
+  where
+    pp _ (UpdateStepSlice idxs) =
+      brackets (commasep (map pretty idxs))
+    pp 0 (UpdateStepField f) =
+      pretty f
+    pp _ (UpdateStepField f) =
+      "." <> pretty f
 
 instance (IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pretty = prettyExp (-1)
@@ -508,7 +517,7 @@ prettyModExp _ (ModParens e _) =
 prettyModExp _ (ModImport v _ _) =
   "import" <+> pretty (show v)
 prettyModExp _ (ModDecs ds _) =
-  nestedBlock "{" "}" $ stack $ punctuate line $ map pretty ds
+  nestedBlock $ stack $ punctuate line $ map pretty ds
 prettyModExp p (ModApply f a _ _ _) =
   parensIf (p >= 10) $ prettyModExp 0 f <+> prettyModExp 10 a
 prettyModExp p (ModAscript me se _ _) =
@@ -546,7 +555,7 @@ instance (IsName vn) => Pretty (TypeParamBase vn) where
   pretty (TypeParamType l name _) = "'" <> pretty l <> prettyName name
 
 instance (IsName vn, Annot f) => Pretty (ValBindBase f vn) where
-  pretty (ValBind entry name retdecl rettype tparams args body _ attrs _) =
+  pretty (ValBind entry name _ retdecl rettype tparams args body _ attrs _) =
     mconcat (map ((<> line) . prettyAttr) attrs)
       <> fun
         <+> align
@@ -586,7 +595,7 @@ instance (IsName vn, Annot f) => Pretty (SpecBase f vn) where
 instance (IsName vn, Annot f) => Pretty (ModTypeExpBase f vn) where
   pretty (ModTypeVar v _ _) = pretty v
   pretty (ModTypeParens e _) = parens $ pretty e
-  pretty (ModTypeSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ss)
+  pretty (ModTypeSpecs ss _) = nestedBlock (stack $ punctuate line $ map pretty ss)
   pretty (ModTypeWith s (TypeRef v ps td _) _) =
     pretty s <+> "with" <+> pretty v <+> hsep (map pretty ps) <> " =" <+> pretty td
   pretty (ModTypeArrow (Just v) e1 e2 _) =

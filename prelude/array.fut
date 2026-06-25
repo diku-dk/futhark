@@ -73,7 +73,7 @@ def reverse [n] 't (x: [n]t) : [n]t = x[::-1]
 -- | Concatenate two arrays.  Warning: never try to perform a reduction
 -- with this operator; it will not work.
 --
--- **Work:** O(n).
+-- **Work:** O(n + m).
 --
 -- **Span:** O(1).
 #[inline]

@@ -16,6 +16,7 @@ module Futhark.IR.Parse
     parseVName,
     parseSubExp,
     parseSubExpRes,
+    parseIdent,
 
     -- * Representation-specific fragments
     parseLambdaSOACS,
@@ -69,7 +70,7 @@ pName =
   lexeme . fmap nameFromString $
     (:) <$> satisfy leading <*> many (satisfy constituent)
   where
-    leading c = isAlpha c || c `elem` ("_+-*/%=!<>|&^.#" :: String)
+    leading c = isAlpha c || c `elem` ("_+-*/%=!<>|&^." :: String)
 
 pVName :: Parser VName
 pVName = lexeme $ do
@@ -347,6 +348,8 @@ pBasicOp =
         safety <-
           choice [keyword "update_acc_unsafe" $> Unsafe, keyword "update_acc" $> Safe]
         parens (UpdateAcc safety <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
+      keyword "user_param"
+        *> parens (UserParam <$> pName <* pComma <*> pSubExp),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,
@@ -661,10 +664,9 @@ pEntry =
       <* pComma
       <*> pEntryPointInputs
       <* pComma
-      <*> pEntryPointResults
+      <*> pEntryPointResult
   where
     pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
-    pEntryPointResults = braces (pEntryPointResult `sepBy` pComma)
     pEntryPointInput =
       EntryParam <$> pName <* pColon <*> pUniqueness <*> pEntryPointType
     pEntryPointResult =
@@ -688,7 +690,7 @@ pOpaqueType :: Parser (Name, OpaqueType)
 pOpaqueType =
   (,)
     <$> (keyword "type" *> (nameFromText <$> pStringLiteral) <* pEqual)
-    <*> choice [pRecord, pSum, pOpaque, pRecordArray, pOpaqueArray]
+    <*> choice [pRecord, pSum, pRecordArray, pOpaqueArray]
   where
     pFieldName = choice [pName, nameFromString . show <$> pInt]
     pField = (,) <$> pFieldName <* pColon <*> pEntryPointType
@@ -708,8 +710,6 @@ pOpaqueType =
               <$> brackets (pValueType `sepBy` pComma)
               <*> many pVariant
           )
-
-    pOpaque = keyword "opaque" $> OpaqueType <*> braces (many pValueType)
 
     pRecordArray =
       keyword "record_array"
@@ -743,6 +743,9 @@ pProg pr =
 pStateAndProg :: PR rep -> Parser (VNameSource, Prog rep)
 pStateAndProg pr = (,) <$> (pVNameSource <|> pure (VNameSource 0)) <*> pProg pr
 
+pIdent :: Parser Ident
+pIdent = Ident <$> pVName <* pColon <*> pType
+
 pSOAC :: PR rep -> Parser (SOAC.SOAC rep)
 pSOAC pr =
   choice
@@ -771,20 +774,33 @@ pSOAC pr =
         <*> braces (pScan pr `sepBy` pComma)
         <* pComma
         <*> braces (pReduce pr `sepBy` pComma)
+        <* pComma
+        <*> pLambda pr
     pRedomapForm =
       SOAC.ScremaForm
         <$> pLambda pr
         <*> pure []
         <* pComma
         <*> braces (pReduce pr `sepBy` pComma)
+        <* pComma
+        -- NOTE: This is dumb, but it also seems weird to have
+        -- multiple waus of parsing a screma? but it is human readable.
+        <*> pLambda pr
     pScanomapForm =
       SOAC.ScremaForm
         <$> pLambda pr
         <* pComma
         <*> braces (pScan pr `sepBy` pComma)
         <*> pure []
+        <* pComma
+        <*> pLambda pr
     pMapForm =
-      SOAC.ScremaForm <$> pLambda pr <*> pure mempty <*> pure mempty
+      SOAC.ScremaForm
+        <$> pLambda pr
+        <*> pure mempty
+        <*> pure mempty
+        <* pComma
+        <*> pLambda pr
     pHist =
       keyword "hist"
         *> parens
@@ -851,9 +867,7 @@ pSizeClass =
               <$> choice [Just <$> pInt64, "def" $> Nothing]
               <* pComma
               <*> pKernelPath
-          ),
-      keyword "bespoke"
-        *> parens (GPU.SizeBespoke <$> pName <* pComma <*> pInt64)
+          )
     ]
   where
     pKernelPath = many pStep
@@ -951,6 +965,9 @@ pSegOp pr pLvl =
       comm <- pComm
       lam <- pLambda pr
       pure $ SegOp.SegBinOp comm lam nes shape
+    pSegPostOp =
+      SegOp.SegPostOp
+        <$> pLambda pr
     pHistOp =
       SegOp.HistOp
         <$> pShape
@@ -966,7 +983,7 @@ pSegOp pr pLvl =
         <*> pLambda pr
     pSegMap = pSegOp' SegOp.SegMap
     pSegRed = pSegOp' SegOp.SegRed <*> parens (pSegBinOp `sepBy` pComma)
-    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma)
+    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma) <*> pSegPostOp
     pSegHist = pSegOp' SegOp.SegHist <*> parens (pHistOp `sepBy` pComma)
 
 pSegLevel :: Parser GPU.SegLevel
@@ -1113,6 +1130,8 @@ pMemOp pInner =
     [ keyword "alloc"
         *> parens
           (Alloc <$> pSubExp <*> choice [pComma *> pSpace, pure DefaultSpace]),
+      keyword "ensure_direct"
+        *> parens (EnsureDirect <$> pVName),
       Inner <$> pInner
     ]
 
@@ -1202,6 +1221,9 @@ parseSubExp = parseFull pSubExp
 
 parseSubExpRes :: FilePath -> T.Text -> Either T.Text SubExpRes
 parseSubExpRes = parseFull pSubExpRes
+
+parseIdent :: FilePath -> T.Text -> Either T.Text Ident
+parseIdent = parseFull pIdent
 
 -- Rep-specific fragment parsers
 

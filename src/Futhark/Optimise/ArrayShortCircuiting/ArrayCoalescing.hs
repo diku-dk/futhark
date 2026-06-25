@@ -218,13 +218,22 @@ shortCircuitSegOp lvlOK lutab pat pat_certs (SegRed lvl space _ kernel_body bino
       op <- binops
       let shp = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shp) (lambdaReturnType $ segBinOpLambda op)
-shortCircuitSegOp lvlOK lutab pat pat_certs (SegScan lvl space _ kernel_body binops) td_env bu_env =
-  -- Like in the handling of 'SegRed', we do not want to coalesce anything that
-  -- is used in the 'SegBinOp'
-  let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
-      (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
-      bu_env' = bu_env {activeCoals = active, inhibit = inh}
-   in shortCircuitSegOpHelper 0 lvlOK lvl lutab pat pat_certs space kernel_body td_env bu_env'
+shortCircuitSegOp lvlOK lutab pat pat_certs (SegScan lvl space _ kernel_body binops post_op) td_env bu_env
+  -- FIXME: shortCircuitSegOpHelper assumes that the kernel_body results go
+  -- directly to the pattern, which is not the case when there is a non-identity
+  -- postop. We might lose some optimisation possibilities due to this
+  -- conservative check.
+  | not $ isIdentityLambda $ segPostOpLambda post_op =
+      let (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys (activeCoals bu_env)
+       in pure $ bu_env {activeCoals = active, inhibit = inh}
+  | otherwise =
+      -- Like in the handling of 'SegRed', we do not want to coalesce anything that
+      -- is used in the 'SegBinOp'. We do not coalesce anything that is using in SegPostOp either.
+      let free_in_lams = freeIn (segPostOpLambda post_op) <> foldMap (freeIn . segBinOpLambda) binops
+          to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` free_in_lams) $ activeCoals bu_env
+          (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
+          bu_env' = bu_env {activeCoals = active, inhibit = inh}
+       in shortCircuitSegOpHelper 0 lvlOK lvl lutab pat pat_certs space kernel_body td_env bu_env'
 shortCircuitSegOp lvlOK lutab pat pat_certs (SegHist lvl space _ kernel_body histops) td_env bu_env = do
   -- Need to take zipped patterns and histDest (flattened) and insert transitive coalesces
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . histOp) histops) $ activeCoals bu_env
@@ -265,6 +274,7 @@ shortCircuitGPUMem ::
   BotUpEnv ->
   ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMem _ _ _ (Alloc _ _) _ bu_env = pure bu_env
+shortCircuitGPUMem _ _ _ (EnsureDirect _) _ bu_env = pure bu_env
 shortCircuitGPUMem lutab pat certs (Inner (GPU.SegOp op)) td_env bu_env =
   shortCircuitSegOp isSegThread lutab pat certs op td_env bu_env
 shortCircuitGPUMem lutab pat certs (Inner (GPU.GPUBody _ body)) td_env bu_env = do
@@ -299,6 +309,7 @@ shortCircuitMCMem ::
   BotUpEnv ->
   ShortCircuitM MCMem BotUpEnv
 shortCircuitMCMem _ _ _ (Alloc _ _) _ bu_env = pure bu_env
+shortCircuitMCMem _ _ _ (EnsureDirect _) _ bu_env = pure bu_env
 shortCircuitMCMem _ _ _ (Inner (MC.OtherOp NoOp)) _ bu_env = pure bu_env
 shortCircuitMCMem lutab pat certs (Inner (MC.ParOp (Just par_op) op)) td_env bu_env =
   shortCircuitSegOp (const True) lutab pat certs par_op td_env bu_env
@@ -1729,6 +1740,7 @@ computeScalarTable _ _ = pure mempty
 computeScalarTableMemOp ::
   ComputeScalarTable rep (inner (Aliases rep)) -> ComputeScalarTable rep (MemOp inner (Aliases rep))
 computeScalarTableMemOp _ _ (Alloc _ _) = pure mempty
+computeScalarTableMemOp _ _ (EnsureDirect _) = pure mempty
 computeScalarTableMemOp onInner scope_table (Inner op) = onInner scope_table op
 
 computeScalarTableSegOp ::

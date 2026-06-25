@@ -1,5 +1,5 @@
 packages: futhark.cabal
-index-state: 2025-09-09T17:04:35Z
+index-state: 2026-05-14T15:59:02Z
 multi-repl: True
 
 package futhark
@@ -11,5 +11,3 @@ source-repository-package
     tag: 1f276aa19861203ea8367dc27a6ad4c8a31c9062
 
 allow-newer: base, template-haskell, ghc-prim
-
-multi-repl: True

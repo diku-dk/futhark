@@ -73,6 +73,27 @@ import Prelude hiding (quot, rem)
 forM2_ :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m ()
 forM2_ xs ys f = forM_ (zip xs ys) (uncurry f)
 
+-- | Given available register and a list of parameter types, compute
+-- the largest available chunk size given the parameters for which we
+-- want chunking and the available resources.
+getRedChunkSize :: [Type] -> Imp.KernelConstExp
+getRedChunkSize types = do
+  let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
+      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
+      max_block_reg = Imp.SizeMaxConst SizeRegisters
+      k_mem = le64 max_block_mem `quot` le64 max_tblock_size
+      k_reg = le64 max_block_reg `quot` le64 max_tblock_size
+      types' = map elemType $ filter primType types
+      sizes = map primByteSize types'
+
+      sum_sizes = sum sizes
+      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
+      max_size = maximum sizes
+
+      mem_constraint = max k_mem sum_sizes `quot` max_size
+      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
+  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+
 -- | The maximum number of operators we support in a single SegRed.
 -- This limit arises out of the static allocation of counters.
 maxNumOps :: Int
@@ -157,7 +178,7 @@ compileSegRed' pat grid space segbinops map_body_cont
           compileReduction (chunk_v, chunk_const) nonsegmentedReduction
         _ -> do
           let segment_size = pe64 $ last $ segSpaceDims space
-              use_small_segments = segment_size * 2 .<. pe64 (unCount tblock_size) * tvExp chunk_v
+              use_small_segments = segment_size * 2 .<. pe64 (unCount tblock_size)
           sIf
             use_small_segments
             (compileReduction (chunk_v, chunk_const) smallSegmentsReduction)
@@ -174,7 +195,7 @@ compileSegRed' pat grid space segbinops map_body_cont
     chunk_const =
       if Noncommutative `elem` map segBinOpComm segbinops
         && all isPrimSegBinOp segbinops
-        then getChunkSize param_types
+        then getRedChunkSize param_types
         else Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed
@@ -197,7 +218,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     all isPrimSegBinOp segbinops =
       noncommPrimSegRedInterms
   | otherwise =
-      generalSegRedInterms False tblock_id tblock_size segbinops
+      generalSegRedInterms tblock_id tblock_size segbinops
   where
     params = map paramOf segbinops
 
@@ -222,7 +243,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
       lmem <- sAlloc "local_mem" lmem_total_size (Space "shared")
       let arrInLMem ptype name len_se offset =
             sArray
-              (name <> "_" <> nameFromString (prettyString ptype))
+              (name <> "_" <> nameFromText (prettyText ptype))
               ptype
               (Shape [len_se])
               lmem
@@ -251,24 +272,18 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
 
 generalSegRedInterms ::
-  Bool ->
   Imp.TExp Int64 ->
   SubExp ->
   [SegBinOp GPUMem] ->
   InKernelGen [SegRedIntermediateArrays]
-generalSegRedInterms segmented tblock_id tblock_size segbinops =
+generalSegRedInterms tblock_id tblock_size segbinops =
   fmap (map GeneralSegRedInterms) . forM (map paramOf segbinops) . mapM $ \p ->
     case paramDec p of
-      MemArray pt shape _ (ArrayIn mem ixfun) -> do
+      MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [tblock_size] <> shape
         let shape_E = map pe64 $ shapeDims shape'
         sArray ("red_arr_" <> nameFromText (prettyText pt)) pt shape' mem $
-          -- This 'segmented' thing here is a hack, related to #2227.
-          -- There absolutely must be some unifying principle we are
-          -- missing.
-          if segmented
-            then ixfun
-            else LMAD.iota (tblock_id * product shape_E) shape_E
+          LMAD.iota (tblock_id * product shape_E) shape_E
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [tblock_size]
@@ -405,10 +420,10 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
 
   sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_tblocks tblock_size) $ do
     constants <- kernelConstants <$> askEnv
-    let tblock_id = kernelBlockSize constants
+    let tblock_id = kernelBlockId constants
         ltid = sExt64 $ kernelLocalThreadId constants
 
-    interms <- generalSegRedInterms True tblock_id tblock_size_se segbinops
+    interms <- generalSegRedInterms (sExt64 tblock_id) tblock_size_se segbinops
     let reds_arrs = map blockRedArrs interms
 
     -- We probably do not have enough actual threadblocks to cover the
@@ -428,10 +443,9 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
 
       let in_bounds =
             map_body_cont $ \red_res ->
-              sComment "save results to be reduced" $ do
-                let red_dests = map (,[ltid]) (concat reds_arrs)
-                forM2_ red_dests red_res $ \(d, d_is) (res, res_is) ->
-                  copyDWIMFix d d_is res res_is
+              sComment "save results to be reduced" $
+                forM2_ (concat reds_arrs) red_res $ \d (res, res_is) ->
+                  copyDWIMFix d [ltid] res res_is
           out_of_bounds =
             forM2_ segbinops reds_arrs $ \(SegBinOp _ _ nes _) red_arrs ->
               forM2_ red_arrs nes $ \arr ne ->

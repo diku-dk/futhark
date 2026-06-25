@@ -1,0 +1,4 @@
+Property prop_reverse_involution_bad (size=50, seed=REDACTED) failed after N tests:
+Counterexample: [0i32, -5i32]
+Property prop_reverse_involution_bad2 (size=50, seed=REDACTED) failed after N tests:
+Counterexample: [-1i32, 1i32]

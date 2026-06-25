@@ -60,9 +60,8 @@ entry g' (x: i32) (y: i32) (z: i32) = {x, y = (y, z)}
 > (f' 1 2 3).0
 ```
 
-**FAILED**
 ```
-Cannot project from non-record.
+1i32
 ```
 
 
@@ -90,4 +89,16 @@ Cannot project from non-record.
 
 ```
 2i32
+```
+
+```futhark
+entry h () (x: i32) = (x, ())
+```
+
+```
+> h () 2
+```
+
+```
+(2i32, ())
 ```

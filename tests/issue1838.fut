@@ -1,5 +1,5 @@
 -- ==
--- structure gpu-mem { SegMap 6 SegRed 1 }
+-- structure gpu-mem { SegMap 2 SegRed 2 }
 
 entry main [n] (xs: [n]i64) =
   tabulate n

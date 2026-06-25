@@ -23,7 +23,7 @@ propPrimValuesHaveRightType =
     "propPrimValuesHaveRightTypes"
     [ testCase (show t ++ " has blank of right type") $
         primValueType (blankPrimValue t) @?= t
-      | t <- [minBound .. maxBound]
+    | t <- [minBound .. maxBound]
     ]
 
 instance Arbitrary IntType where

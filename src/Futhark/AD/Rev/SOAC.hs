@@ -53,7 +53,7 @@ splitHist vjpops pat aux ops w is as m = do
 histomapToMapAndHist :: Pat Type -> (SubExp, [HistOp SOACS], Lambda SOACS, [VName]) -> ADM (Stm SOACS, Stm SOACS)
 histomapToMapAndHist (Pat pes) (w, histops, map_lam, as) = do
   map_pat <- traverse accMapPatElem $ lambdaReturnType map_lam
-  let map_stm = mkLet map_pat $ Op $ Screma w as $ mapSOAC map_lam
+  map_stm <- mkLet map_pat . Op . Screma w as <$> mapSOAC map_lam
   new_lam <- mkIdentityLambda $ lambdaReturnType map_lam
   let hist_stm = Let (Pat pes) (defAux ()) $ Op $ Hist w (map identName map_pat) histops new_lam
   pure (map_stm, hist_stm)
@@ -137,6 +137,12 @@ vjpSOAC ops pat _aux (Screma w as form) m
         scanomapToMapAndScan pat (w, scans, map_lam, as)
       vjpStm ops mapstm $ vjpStm ops scanstm m
 
+-- Get rid of post-lambdas
+vjpSOAC ops pat aux (Screma w as form) m
+  | not $ isIdentityLambda $ scremaPostLambda form = do
+      stms <- collectStms_ $ auxing aux $ extractPostLambda pat w as form
+      foldr (vjpStm ops) m stms
+
 -- Differentiating Histograms
 vjpSOAC ops pat aux (Hist n as histops f) m
   | isIdentityLambda f,
@@ -183,6 +189,18 @@ vjpSOAC ops pat _aux (Hist n as histops f) m
 vjpSOAC ops pat aux (Stream w as accs lam) m = do
   stms <- collectStms_ $ auxing aux $ sequentialStreamWholeArray pat w accs lam as
   foldr (vjpStm ops) m stms
+vjpSOAC _ops pat aux (WithVJP args lam lam_adj) m = do
+  lam_res <- auxing aux (eLambda lam (map eSubExp args))
+  forM_ (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
+    certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
+  m
+  pat_adj <- mapM lookupAdjVal $ patNames pat
+  contribs <-
+    eLambda lam_adj (map (eSubExp . resSubExp) lam_res ++ map (eSubExp . Var) pat_adj)
+  forM_ (zip args contribs) $ \(arg, contrib) ->
+    (updateSubExpAdj arg <=< letExp "contrib") $
+      BasicOp . SubExp . resSubExp $
+        contrib
 vjpSOAC _ _ _ soac _ =
   error $ "vjpSOAC unhandled:\n" ++ prettyString soac
 
@@ -218,7 +236,8 @@ mapOp (Lambda [pa1, pa2] _ lam_body)
     cs == mempty,
     [map_stm] <- stmsToList (bodyStms lam_body),
     (Let (Pat [pe]) _ (Op scrm)) <- map_stm,
-    (Screma _ [a1, a2] (ScremaForm map_lam [] [])) <- scrm,
+    (Screma _ [a1, a2] (ScremaForm map_lam [] [] post_lam)) <- scrm,
+    isIdentityLambda post_lam,
     (a1 == paramName pa1 && a2 == paramName pa2) || (a1 == paramName pa2 && a2 == paramName pa1),
     r == Var (patElemName pe) =
       Just map_lam

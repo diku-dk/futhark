@@ -67,7 +67,7 @@ typeExpOpaqueName = nameFromText . f
     g (E.TERecord tes _) =
       "{" <> mconcat (intersperse ", " (map onField tes)) <> "}"
       where
-        onField (L _ k, te) = E.nameToText k <> ":" <> f te
+        onField (L _ k, te) = E.nameToText k <> ": " <> f te
     g (E.TESum cs _) =
       mconcat (intersperse " | " (map onConstr cs))
       where
@@ -129,6 +129,13 @@ opaqueRecord types ((f, t) : fs) ts = do
   where
     opaqueField e_t i_ts = snd <$> entryPointType types e_t i_ts
 
+teArrayOf :: Int -> E.TypeExp d vn -> E.TypeExp d vn
+teArrayOf rank t =
+  foldl
+    (\x _ -> E.TEArray (E.SizeExpAny mempty) x mempty)
+    t
+    [0 .. rank - 1]
+
 opaqueRecordArray ::
   VisibleTypes ->
   Int ->
@@ -141,10 +148,11 @@ opaqueRecordArray types rank ((f, t) : fs) ts = do
   f' <- opaqueField t f_ts
   ((f, f') :) <$> opaqueRecordArray types rank fs ts'
   where
-    opaqueField (E.EntryType e_t _) i_ts =
-      snd <$> entryPointType types (E.EntryType e_t' Nothing) i_ts
+    opaqueField (E.EntryType e_t ascribed) i_ts =
+      snd <$> entryPointType types (E.EntryType e_t' ascribed') i_ts
       where
         e_t' = E.arrayOf (E.Shape (replicate rank $ E.anySize 0)) e_t
+        ascribed' = teArrayOf rank <$> ascribed
 
 isSum ::
   VisibleTypes ->
@@ -218,10 +226,9 @@ entryPointType types t ts
       pure (u, I.TypeTransparent $ I.ValueType I.Signed r ts0)
   | otherwise = do
       case E.entryType t of
-        E.Scalar (E.Record fs)
-          | not $ null fs -> do
-              let fs' = recordFields types fs $ E.entryAscribed t
-              addType desc . I.OpaqueRecord =<< opaqueRecord types fs' ts
+        E.Scalar (E.Record fs) -> do
+          let fs' = recordFields types fs $ E.entryAscribed t
+          addType desc . I.OpaqueRecord =<< opaqueRecord types fs' ts
         E.Scalar (E.Sum cs) -> do
           let (_, places) = internaliseSumTypeRep cs
               cs' = sumConstrs types cs $ E.entryAscribed t
@@ -229,16 +236,15 @@ entryPointType types t ts
               ts' = if length cs == 1 then ts else drop 1 ts
           addType desc . I.OpaqueSum (map valueType ts)
             =<< opaqueSum types cs'' ts'
-        E.Array _ shape (E.Record fs)
-          | not $ null fs -> do
-              let fs' = recordFields types fs $ E.entryAscribed t
-                  rank = E.shapeRank shape
-                  ts' = map (strip rank) ts
-                  record_t = E.Scalar (E.Record fs)
-                  record_te = rowTypeExp rank =<< E.entryAscribed t
-              ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
-              addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
-                =<< opaqueRecordArray types rank fs' ts
+        E.Array _ shape (E.Record fs) | not $ null fs -> do
+          let rank = E.shapeRank shape
+              fs' = recordFields types fs $ rowTypeExp rank =<< E.entryAscribed t
+              ts' = map (strip rank) ts
+              record_t = E.Scalar (E.Record fs)
+              record_te = rowTypeExp rank =<< E.entryAscribed t
+          ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
+          addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
+            =<< opaqueRecordArray types rank fs' ts
         E.Array _ shape et -> do
           let ts' = map (strip (E.shapeRank shape)) ts
               rank = E.shapeRank shape
@@ -246,7 +252,7 @@ entryPointType types t ts
           ept <- snd <$> entryPointType types (E.EntryType (E.Scalar et) elem_te) ts'
           addType desc . I.OpaqueArray (E.shapeRank shape) (entryPointTypeName ept) $
             map valueType ts
-        _ -> addType desc $ I.OpaqueType $ map valueType ts
+        _ -> error $ "entryPointType: " <> E.prettyString (E.entryType t)
 
       pure (u, I.TypeOpaque desc)
   where
@@ -271,22 +277,8 @@ entryPoint types name params (eret, crets) =
   runGenOpaque $
     (name,,)
       <$> mapM onParam params
-      <*> ( map (uncurry I.EntryResult)
-              <$> case ( E.isTupleRecord $ E.entryType eret,
-                         E.entryAscribed eret
-                       ) of
-                (Just ts, Just (E.TETuple e_ts _)) ->
-                  zipWithM
-                    (entryPointType types)
-                    (zipWith E.EntryType ts (map Just e_ts))
-                    crets
-                (Just ts, Nothing) ->
-                  zipWithM
-                    (entryPointType types)
-                    (map (`E.EntryType` Nothing) ts)
-                    crets
-                _ ->
-                  pure <$> entryPointType types eret (concat crets)
+      <*> ( uncurry I.EntryResult
+              <$> entryPointType types eret (concat crets)
           )
   where
     onParam (E.EntryParam e_p e_t, ps) =
