@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * All opaque values available over the C API can now be decomposed into their
   constituents.
 
+* The manifest now contains documentation for entry points and opaque types.
+
 ### Removed
 
 ### Changed

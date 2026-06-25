@@ -659,12 +659,16 @@ pEntryPointType =
 pEntry :: Parser EntryPoint
 pEntry =
   parens $
-    (,,)
+    (,,,)
       <$> (nameFromText <$> pStringLiteral)
       <* pComma
       <*> pEntryPointInputs
       <* pComma
       <*> pEntryPointResult
+      <*> choice
+        [ pComma *> (Just <$> pStringLiteral),
+          pure Nothing
+        ]
   where
     pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
     pEntryPointInput =
@@ -686,11 +690,11 @@ pFunDef pr = do
   FunDef entry attrs fname ret fparams
     <$> (pEqual *> braces (pBody pr))
 
-pOpaqueType :: Parser (Name, OpaqueType)
+pOpaqueType :: Parser (Name, (OpaqueType, Maybe T.Text))
 pOpaqueType =
   (,)
     <$> (keyword "type" *> (nameFromText <$> pStringLiteral) <* pEqual)
-    <*> choice [pRecord, pSum, pRecordArray, pOpaqueArray]
+    <*> ((,Nothing) <$> choice [pRecord, pSum, pRecordArray, pOpaqueArray])
   where
     pFieldName = choice [pName, nameFromString . show <$> pInt]
     pField = (,) <$> pFieldName <* pColon <*> pEntryPointType

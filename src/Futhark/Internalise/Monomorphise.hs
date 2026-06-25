@@ -1225,9 +1225,7 @@ transformValBind valbind = do
           M.insert (valBindName valbind) (removeEntryPoint valbind') $
             envPolyBindings env,
         envGlobalScope = global <> envGlobalScope env,
-        envScope =
-          S.insert (valBindName valbind) global
-            <> envScope env
+        envScope = S.insert (valBindName valbind) global <> envScope env
       }
 
 transformValBinds :: [ValBind] -> MonoM ()

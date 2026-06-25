@@ -77,7 +77,7 @@ data JSOpaqueType
 opaqueToJS :: Imp.OpaqueTypes -> [(String, JSOpaqueType)]
 opaqueToJS (Imp.OpaqueTypes types) = map convertOne types
   where
-    convertOne (desc, Imp.OpaqueRecord fields) =
+    convertOne (desc, (Imp.OpaqueRecord fields, _)) =
       (T.unpack (opaqueName desc), JSOpaqueRecord (map (convertField desc) fields))
     convertOne (desc, _) =
       (T.unpack (opaqueName desc), JSOpaqueOther)
