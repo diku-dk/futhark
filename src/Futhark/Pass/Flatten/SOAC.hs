@@ -797,7 +797,7 @@ onMapInputArrMultiDim lvl old_segments w env inps ws ws_O ws_data p arr = do
   case lookup arr inps of
     Just v_inp ->
       case v_inp of
-        DistInputFree vs t -> pure $ MapArray vs t
+        DistInputFree vs t -> pure $ MapArray vs (rowType t)
         DistInput rt t -> case resVar rt env of
           Irregular rep -> do
             ws_prod <- arraySize 0 <$> lookupType ws_data
