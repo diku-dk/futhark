@@ -184,11 +184,14 @@ findUnmatched pmat n
                 pure $ MatchConstr (Constr cname) (map (const (MatchWild ())) ts) () : u
            in sigmaWitnesses ++ missingWitnesses
       | any isWild cs,
-        not (null [() | MatchConstr (Constr _) _ _ <- cs]) = recurseOnConstrHeads cs
+        not (null [() | MatchConstr (Constr _) _ _ <- cs]) =
+          recurseOnConstrHeads cs
       | any isWild cs,
-        not (null [() | MatchConstr ConstrTuple _ _ <- cs]) = recurseOnConstrHeads cs
+        not (null [() | MatchConstr ConstrTuple _ _ <- cs]) =
+          recurseOnConstrHeads cs
       | any isWild cs,
-        not (null [() | MatchConstr (ConstrRecord _) _ _ <- cs]) = recurseOnConstrHeads cs
+        not (null [() | MatchConstr (ConstrRecord _) _ _ <- cs]) =
+          recurseOnConstrHeads cs
       | Scalar (Sum all_cs) <- pt = do
           let sigma = mapMaybe isConstr cs
               notCovered (k, _) = k `notElem` sigma
