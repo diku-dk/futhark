@@ -27,6 +27,7 @@ import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
+import Futhark.Transform.Rename (renameLambda)
 import Futhark.Util (chunks, splitAt3)
 
 -- | The constraints that must hold for a rep in order to be the
@@ -126,85 +127,106 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
   -- See Note [Translation of Screma].
   --
   -- Start by combining all the reduction and scan parts into a single
-  -- operator
+  -- operator.
   let Reduce _ red_lam red_nes = singleReduce reds
-      Scan scan_lam scan_nes = singleScan scans
+      Scan scan_lam = singleScan scans
+      scan_ts = lambdaReturnType scan_lam
+      num_scan_res = length scan_ts
       (_red_ts, post_ts) =
         splitAt (length red_nes) $ scremaType w form
 
   post_arrs <- resultArray arrs post_ts
 
-  scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) $ lambdaReturnType scan_lam
+  scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) scan_ts
   redout_params <- mapM (newParam "redout" . flip toDecl Nonunique) $ lambdaReturnType red_lam
   out_params <- mapM (newParam "out" . flip toDecl Unique) post_ts
 
   arr_ts <- mapM lookupType arrs
-  let paramForAcc (Acc c _ _ _) = find (f . paramType) out_params
-        where
-          f (Acc c2 _ _ _) = c == c2
-          f _ = False
-      paramForAcc _ = Nothing
+
+  -- For Acc-typed inputs, find the corresponding output accumulator name.
+  let accForArr arr =
+        case lookup arr (zip arrs arr_ts) of
+          Just (Acc c _ _ _) ->
+            lookup c [(c2, v) | (v, Acc c2 _ _ _) <- zip (map paramName out_params) post_ts]
+          _ -> Nothing
+
+  -- See Note [Translation of Screma].
+  scanacc_blanks <- mapM (letSubExp "scan_blank" <=< eBlank) scan_ts
 
   let merge =
         concat
-          [ zip scanacc_params scan_nes,
+          [ zip scanacc_params scanacc_blanks,
             zip redout_params red_nes,
             zip out_params $ map Var post_arrs
           ]
+
   i <- newVName "i"
   let loopform = ForLoop i Int64 w
-      lam_cons = consumedByLambda $ Alias.analyseLambda mempty map_lam
 
   loop_body <- runBodyBuilder
     . localScope (scopeOfFParams (map fst merge) <> scopeOfLoopForm loopform)
     $ do
-      -- Bind the parameters to the lambda.
-      forM_ (zip3 (lambdaParams map_lam) arrs arr_ts) $ \(p, arr, arr_t) ->
-        case paramForAcc arr_t of
-          Just acc_out_p ->
-            letBindNames [paramName p] . BasicOp $
-              SubExp $
-                Var $
-                  paramName acc_out_p
+      -- Rename lambdas for this loop body instantiation.
+      map_lam1 <- renameLambda map_lam
+      scan_lam1 <- renameLambda scan_lam
+      red_lam1 <- renameLambda red_lam
+      post_lam1 <- renameLambda post_lam
+      let lam_cons1 = consumedByLambda $ Alias.analyseLambda mempty map_lam1
+
+      -- Bind the map-lam inputs and run map-lam body.
+      forM_ (zip3 (lambdaParams map_lam1) arrs arr_ts) $ \(p, arr, arr_t) ->
+        case accForArr arr of
+          Just acc_v ->
+            letBindNames [paramName p] . BasicOp $ SubExp $ Var acc_v
           Nothing
-            | paramName p `nameIn` lam_cons -> do
+            | paramName p `nameIn` lam_cons1 -> do
                 p' <-
                   letExp (baseName (paramName p)) . BasicOp $
                     Index arr $
-                      fullSlice arr_t [DimFix $ Var i]
+                      fullSlice arr_t [DimFix (Var i)]
                 letBindNames [paramName p] $ BasicOp $ Replicate mempty $ Var p'
             | otherwise ->
                 letBindNames [paramName p] . BasicOp . Index arr $
-                  fullSlice arr_t [DimFix $ Var i]
-
-      -- Insert the statements of the lambda.  We have taken care to
-      -- ensure that the parameters are bound at this point.
-      mapM_ addStm $ bodyStms $ lambdaBody map_lam
-      -- Split into scan results, reduce results, and map results.
+                  fullSlice arr_t [DimFix (Var i)]
+      mapM_ addStm $ bodyStms $ lambdaBody map_lam1
       let (scan_res, red_res, map_res) =
-            splitAt3 (length scan_nes) (length red_nes) $
-              bodyResult $
-                lambdaBody map_lam
+            splitAt3
+              num_scan_res
+              (length red_nes)
+              (bodyResult $ lambdaBody map_lam1)
 
+      -- At i=0: use map result directly as scan output (f(ne,x)=x).
+      -- At i>0: apply scan_lam(scanacc, map_scan_res).
+      is_first <-
+        letSubExp "is_first" $
+          BasicOp $
+            CmpOp (CmpEq int64) (Var i) (intConst Int64 0)
       scan_res' <-
-        eLambda scan_lam $
-          map (pure . BasicOp . SubExp) $
-            map (Var . paramName) scanacc_params ++ map resSubExp scan_res
+        fmap varsRes . letTupExp "scan_acc"
+          =<< eIf
+            (eSubExp is_first)
+            (resultBodyM $ map resSubExp scan_res)
+            ( buildBody_ $
+                eLambda scan_lam1 $
+                  map (pure . BasicOp . SubExp) $
+                    map (Var . paramName) scanacc_params ++ map resSubExp scan_res
+            )
+
+      -- Reduce accumulator update.
       red_res' <-
-        eLambda red_lam $
+        eLambda red_lam1 $
           map (pure . BasicOp . SubExp) $
             map (Var . paramName) redout_params ++ map resSubExp red_res
 
+      -- Run post_lam and update output arrays at i.
       let res = scan_res' <> map_res
           param_bind = resSubExp <$> res
           certs = resCerts <$> res
-      forM_ (zip3 (paramName <$> lambdaParams post_lam) param_bind certs) $
-        \(par, v, cs) -> do
+      forM_ (zip3 (paramName <$> lambdaParams post_lam1) param_bind certs) $
+        \(par, v, cs) ->
           certifying cs $ letBindNames [par] $ BasicOp $ SubExp v
-
-      mapM_ addStm $ bodyStms $ lambdaBody post_lam
-
-      let post_res = bodyResult $ lambdaBody post_lam
+      mapM_ addStm $ bodyStms $ lambdaBody post_lam1
+      let post_res = bodyResult $ lambdaBody post_lam1
       outarrs <-
         certifying (foldMap resCerts post_res) $
           letwith (map paramName out_params) (Var i) $
@@ -417,44 +439,34 @@ loopMerge' vars vals =
 -- Note [Translation of Screma]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 --
--- Screma is the most general SOAC.  It is translated by constructing
--- a loop that contains several groups of parameters, in this order:
+-- Screma is the most general SOAC.  It is translated into a single
+-- loop over i=0..w-1.  The loop merge variables are:
 --
--- (0) Scan accumulator, initialised with neutral element.
--- (1) Scan results, initialised with Scratch.
--- (2) Reduce results (also functioning as accumulators),
---     initialised with neutral element.
--- (3) Map results, mostly initialised with Scratch.
+-- (0) Scan accumulator, initialised with blank values.
+-- (1) Reduce results (also functioning as accumulators),
+--     initialised with the reduce neutral elements.
+-- (2) Map/post results, initialised with Scratch arrays.
 --
--- However, category (3) is a little more tricky in the case where one
--- of the results is an Acc.  In that case, the result is not an
--- array, but another Acc.  Any Acc result of a Map must correspond to
--- an Acc that is an input to the map, and the result is initialised
--- to be that input.  This requires a 1:1 relationship between Acc
--- inputs and Acc outputs, which the type checker should enforce.
--- There is no guarantee that the map results appear in any particular
--- order (e.g. accumulator results before non-accumulator results), so
--- we need to do a little sleuthing to establish the relationship.
+-- Inside the loop, the scan step is guarded by @is_first@ (i==0):
+-- on iteration 0 the map result is stored directly as the scan output
+-- (since f(ne, x) = x for any monoid neutral ne); on subsequent
+-- iterations scan_op(acc, map_result) is applied normally.
+--
+-- The reduce step applies red_op(acc, map_result) unconditionally on
+-- every iteration, starting from the neutral element.
+--
+-- Category (2) is a little more tricky in the case where one of the
+-- results is an Acc.  In that case, the result is not an array, but
+-- another Acc.  Any Acc result of a Map must correspond to an Acc
+-- that is an input to the map, and the result is initialised to be
+-- that input.  This requires a 1:1 relationship between Acc inputs
+-- and Acc outputs, which the type checker should enforce.  There is
+-- no guarantee that the map results appear in any particular order
+-- (e.g. accumulator results before non-accumulator results), so we
+-- need to do a little sleuthing to establish the relationship.
 --
 -- Inside the loop, the non-Acc parameters to map_lam become for-in
 -- parameters.  Acc parameters refer to the loop parameters for the
 -- corresponding Map result instead.
---
--- Intuitively, a Screma(w,
---                       (scan_op, scan_ne),
---                       (red_op, red_ne),
---                       map_fn,
---                       {acc_input, arr_input})
---
--- then becomes
---
--- loop (scan_acc, scan_arr, red_acc, map_acc, map_arr) =
---   for i < w, x in arr_input do
---     let (a,b,map_acc',d) = map_fn(map_acc, x)
---     let scan_acc' = scan_op(scan_acc, a)
---     let scan_arr[i] = scan_acc'
---     let red_acc' = red_op(red_acc, b)
---     let map_arr[i] = d
---     in (scan_acc', scan_arr', red_acc', map_acc', map_arr)
 --
 -- A similar operation is done for Stream.

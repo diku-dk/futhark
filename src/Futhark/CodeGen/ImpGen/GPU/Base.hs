@@ -460,6 +460,7 @@ blockScan seg_flag arrs_full_size w lam arrs = do
         copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
 
   doInChunkScan seg_flag ltid_in_bounds lam
+  errorsync
   barrier
 
   let is_first_block = chunk_id .==. 0
@@ -473,8 +474,13 @@ blockScan seg_flag arrs_full_size w lam arrs = do
     barrier
 
   let last_in_block = in_chunk_id .==. chunk_size - 1
+      -- When w is not a multiple of chunk_size (e.g. partial last block with
+      -- no neutral element), the last active thread may not sit at position 31.
+      -- Allow it to write the chunk aggregate so the block-of-chunks scan sees
+      -- the correct value.
+      is_last_active = ltid32 .==. sExt32 w - 1
   sComment "last thread of block 'i' writes its result to offset 'i'" $
-    sWhen (last_in_block .&&. ltid_in_bounds) $
+    sWhen ((last_in_block .||. is_last_active) .&&. ltid_in_bounds) $
       everythingVolatile $
         zipWithM_ writeBlockResult x_params arrs
 
@@ -484,9 +490,14 @@ blockScan seg_flag arrs_full_size w lam arrs = do
         flag_true <- seg_flag
         Just $ \from to ->
           flag_true (from * chunk_size + chunk_size - 1) (to * chunk_size + chunk_size - 1)
+      -- Only scan the chunks that actually exist.  In warp 0 (the first block),
+      -- thread k represents chunk k.  Limit to ceil(w/chunk_size) chunks.
+      num_chunks = sExt32 w `divUp` chunk_size
+      first_block_active =
+        is_first_block .&&. ltid_in_bounds .&&. ltid32 .<. num_chunks
   sComment
     "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
-    $ doInChunkScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
+    $ doInChunkScan first_block_seg_flag first_block_active renamed_lam
 
   errorsync
 

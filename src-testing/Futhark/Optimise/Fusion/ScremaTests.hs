@@ -146,7 +146,6 @@ fuseSuperScremaTests =
                       "in {defunc_0_op_res_5573}"
                     ]
                 )
-                ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             ident_b = "input_b_5538 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
@@ -214,7 +213,6 @@ fuseSuperScremaTests =
                       "in {defunc_0_op_res_5573}"
                     ]
                 )
-                ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             ident_b = "input_b_5538 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
@@ -283,7 +281,6 @@ fuseSuperScremaTests =
                       "in {defunc_0_op_res_5573}"
                     ]
                 )
-                ["0i32"]
             reduce_op =
               Reduce
                 Commutative
@@ -436,7 +433,6 @@ fuseSuperScremaTests =
                       "in {defunc_0_op_res_5573}"
                     ]
                 )
-                ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             ident_b = "input_b_5538 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
@@ -586,7 +582,6 @@ fuseSuperScremaTests =
                       "in {c_2}"
                     ]
                 )
-                ["0i32"]
             scan_op =
               Scan
                 ( fromLines
@@ -595,7 +590,6 @@ fuseSuperScremaTests =
                       "in {c_6}"
                     ]
                 )
-                ["0.0f32"]
             ident_a = "input_a_7 : [d_9]i32"
             input_a = SOAC.identInput ident_a
             ident_b = "input_b_8 : [d_9]f32"
@@ -692,7 +686,6 @@ fuseSuperScremaTests =
                       "in {c_9}"
                     ]
                 )
-                ["0i32"]
             scan_op =
               Scan
                 ( fromLines
@@ -701,7 +694,6 @@ fuseSuperScremaTests =
                       "in {c_12}"
                     ]
                 )
-                ["0.0f32"]
             ident_a = "input_a_13 : [d_27]i64"
             input_a = SOAC.identInput ident_a
             ident_b = "input_b_15 : [d_27]i32"
@@ -948,7 +940,6 @@ moveRedScanSuperScremaTests =
                       "in {defunc_0_op_res_5573}"
                     ]
                 )
-                ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
          in P
@@ -1021,7 +1012,6 @@ moveRedScanSuperScremaTests =
                       "in {defunc_0_op_res_5573}"
                     ]
                 )
-                ["0i32"]
             ident_a = "input_a_5565 : [d_5537]i32"
             input_a = SOAC.identInput ident_a
          in P
@@ -1093,7 +1083,6 @@ moveRedScanSuperScremaTests =
                       "in {defunc_0_op_res_5573}"
                     ]
                 )
-                ["0i32"]
             reduce_op =
               Reduce
                 Commutative
@@ -1176,7 +1165,6 @@ moveRedScanSuperScremaTests =
                       "in {defunc_0_op_res_5573}"
                     ]
                 )
-                ["0i32"]
             reduce_op =
               Reduce
                 Commutative

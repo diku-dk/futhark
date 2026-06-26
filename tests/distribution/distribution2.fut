@@ -3,8 +3,8 @@
 --
 -- ==
 -- structure gpu {
---   SegMap 6
---   Loop 10
+--   SegMap 4
+--   Loop 8
 -- }
 
 def fftmp (num_paths: i64) (md_c: [][]f64) (zi: []f64) : [num_paths]f64 =

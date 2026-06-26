@@ -227,6 +227,12 @@ optimiseSegOp onOp vtable sinking op =
                     lambdaBody lam
             modify (<> sunk)
             pure lam {lambdaBody = body},
+          mapOnSegScanOpLambda = \lam -> do
+            let (body, sunk) =
+                  optimiseBody onOp op_vtable sinking $
+                    lambdaBody lam
+            modify (<> sunk)
+            pure lam {lambdaBody = body},
           mapOnSegPostOpLambda = \lam -> do
             let (body, sunk) =
                   optimiseBody onOp op_vtable sinking $

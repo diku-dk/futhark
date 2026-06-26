@@ -156,6 +156,7 @@ optimiseGPUOp (Inner (SegOp op)) =
     mapper =
       identitySegOpMapper
         { mapOnSegBinOpLambda = optimiseLambda,
+          mapOnSegScanOpLambda = optimiseLambda,
           mapOnSegPostOpLambda = optimiseLambda,
           mapOnSegOpBody = optimiseKernelBody
         }
@@ -171,6 +172,7 @@ optimiseMCOp (Inner (ParOp par_op op)) =
     mapper =
       identitySegOpMapper
         { mapOnSegBinOpLambda = optimiseLambda,
+          mapOnSegScanOpLambda = optimiseLambda,
           mapOnSegPostOpLambda = optimiseLambda,
           mapOnSegOpBody = optimiseKernelBody
         }

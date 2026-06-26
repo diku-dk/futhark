@@ -6,6 +6,7 @@ module Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass (compileSegScan) where
 
 import Control.Monad
 import Control.Monad.State
+import Data.List (zip4)
 import Data.List qualified as L
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
@@ -22,7 +23,7 @@ import Prelude hiding (quot, rem)
 makeLocalArrays ::
   Imp.TExp Int64 ->
   Count BlockSize SubExp ->
-  [SegBinOp GPUMem] ->
+  [SegScanOp GPUMem] ->
   InKernelGen [[VName]]
 makeLocalArrays tblock_id (Count tblock_size) scans = do
   (arrs, mems_and_sizes) <- runStateT (mapM onScan scans) mempty
@@ -31,9 +32,9 @@ makeLocalArrays tblock_id (Count tblock_size) scans = do
     sAlloc_ mem (maxSize sizes) (Space "shared")
   pure arrs
   where
-    onScan (SegBinOp _ scan_op nes _) = do
+    onScan (SegScanOp scan_op _) = do
       let (scan_x_params, _scan_y_params) =
-            splitAt (length nes) $ lambdaParams scan_op
+            splitAt (length (lambdaReturnType scan_op)) $ lambdaParams scan_op
       (arrs, used_mems) <- fmap unzip . forM scan_x_params $ \p ->
         case paramDec p of
           MemArray pt shape _ (ArrayIn mem _) -> do
@@ -79,18 +80,16 @@ barrierFor scan_op = (array_scan, fence, sOp $ Imp.Barrier fence)
       | array_scan = Imp.FenceGlobal
       | otherwise = Imp.FenceLocal
 
-xParams, yParams :: SegBinOp GPUMem -> [LParam GPUMem]
-xParams scan =
-  take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
-yParams scan =
-  drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
+xParams, yParams :: SegScanOp GPUMem -> [LParam GPUMem]
+xParams = segScanOpXParams
+yParams = segScanOpYParams
 
 writeToScanValues ::
   [VName] ->
-  ([VName], SegBinOp GPUMem, [KernelResult]) ->
+  ([VName], SegScanOp GPUMem, [KernelResult]) ->
   InKernelGen ()
 writeToScanValues gtids (pes, scan, scan_res)
-  | shapeRank (segBinOpShape scan) > 0 =
+  | shapeRank (segScanOpShape scan) > 0 =
       forM_ (zip pes scan_res) $ \(pe, res) ->
         copyDWIMFix
           pe
@@ -104,10 +103,10 @@ writeToScanValues gtids (pes, scan, scan_res)
 readToScanValues ::
   [Imp.TExp Int64] ->
   [VName] ->
-  SegBinOp GPUMem ->
+  SegScanOp GPUMem ->
   InKernelGen ()
 readToScanValues is pes scan
-  | shapeRank (segBinOpShape scan) > 0 =
+  | shapeRank (segScanOpShape scan) > 0 =
       forM_ (zip (yParams scan) pes) $ \(p, pe) ->
         copyDWIMFix (paramName p) [] (Var pe) is
   | otherwise =
@@ -119,23 +118,26 @@ readCarries ::
   [Imp.TExp Int64] ->
   [Imp.TExp Int64] ->
   [VName] ->
-  SegBinOp GPUMem ->
+  SegScanOp GPUMem ->
+  TV Bool ->
   InKernelGen ()
-readCarries chunk_id chunk_offset dims' vec_is pes scan
-  | shapeRank (segBinOpShape scan) > 0 = do
+readCarries chunk_id chunk_offset dims' vec_is pes scan has_carry
+  | shapeRank (segScanOpShape scan) > 0 = do
       ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-      -- We may have to reload the carries from the output of the
-      -- previous chunk.
-      sIf
-        (chunk_id .>. 0 .&&. ltid .==. 0)
-        ( do
-            let is = unflattenIndex dims' $ chunk_offset - 1
-            forM_ (zip (xParams scan) pes) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var pe) (is ++ vec_is)
-        )
-        ( forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
-            copyDWIMFix (paramName p) [] ne []
-        )
+      -- For each vec-loop iteration, thread 0 either reloads carry from
+      -- the global output of the previous chunk (when j > 0) or resets
+      -- has_carry to False.  This prevents the k=0 carry from bleeding
+      -- into k=1 via the per-j carry-update.
+      sWhen (ltid .==. 0) $
+        sIf
+          (chunk_id .>. 0)
+          ( do
+              let is = unflattenIndex dims' $ chunk_offset - 1
+              forM_ (zip (xParams scan) pes) $ \(p, pe) ->
+                copyDWIMFix (paramName p) [] (Var pe) (is ++ vec_is)
+              has_carry <-- fromBool True
+          )
+          (has_carry <-- fromBool False)
   | otherwise =
       pure ()
 
@@ -149,7 +151,7 @@ scanStage1 ::
   Count NumBlocks SubExp ->
   Count BlockSize SubExp ->
   SegSpace ->
-  [SegBinOp GPUMem] ->
+  [SegScanOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen (TV Int32, Imp.TExp Int64, CrossesSegment)
 scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
@@ -174,12 +176,11 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
     let tblock_id = kernelBlockId constants
     all_local_arrs <- makeLocalArrays (sExt64 tblock_id) tblock_size scans
 
-    -- The variables from scan_op will be used for the carry and such
-    -- in the big chunking loop.
-    forM_ scans $ \scan -> do
-      dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan
-      forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
-        copyDWIMFix (paramName p) [] ne []
+    -- Declare lambda params; has_carry tracks whether thread 0 holds a
+    -- valid carry-in (avoids using neutral elements).
+    all_has_carry <- forM scans $ \scan -> do
+      dScope Nothing $ scopeOfLParams $ lambdaParams $ segScanOpLambda scan
+      dPrimV "has_carry" $ fromBool False
 
     sFor "j" elems_per_thread $ \j -> do
       chunk_offset <-
@@ -192,7 +193,7 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
       -- Construct segment indices.
       zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
 
-      let per_scan_pes = segBinOpChunks scans scan_out
+      let per_scan_pes = segScanOpChunks scans scan_out
 
           in_bounds =
             foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
@@ -200,9 +201,9 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
           when_in_bounds =
             compileStms mempty (bodyStms kbody) $ do
               let (all_scan_res, map_res) =
-                    splitAt (segBinOpResults scans) $ bodyResult kbody
+                    splitAt (segScanOpResults scans) $ bodyResult kbody
                   per_scan_res =
-                    segBinOpChunks scans all_scan_res
+                    segScanOpChunks scans all_scan_res
 
               sComment "write to-scan values to parameters" $
                 mapM_ (writeToScanValues gtids) $
@@ -220,12 +221,20 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
       sComment "threads in bounds read input" $
         sWhen in_bounds when_in_bounds
 
-      unless (all (null . segBinOpShape) scans) $
+      unless (all (null . segScanOpShape) scans) $
         sOp $
           Imp.Barrier Imp.FenceGlobal
 
-      forM_ (zip3 per_scan_pes scans all_local_arrs) $
-        \(pes, scan@(SegBinOp _ scan_op nes vec_shape), local_arrs) ->
+      -- Number of in-bounds threads for this chunk: at most blockSize,
+      -- but clamped to the remaining elements.
+      active_w <-
+        dPrimVE "active_w" $
+          sMin64
+            (sExt64 $ kernelBlockSize constants)
+            (sMax64 0 $ num_elements - tvExp chunk_offset)
+
+      forM_ (zip4 per_scan_pes scans all_local_arrs all_has_carry) $
+        \(pes, scan@(SegScanOp scan_op vec_shape), local_arrs, has_carry) ->
           sComment "do one intra-group scan operation" $ do
             let scan_x_params = xParams scan
                 (array_scan, fence, barrier) = barrierFor scan_op
@@ -233,22 +242,26 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
             when array_scan barrier
 
             sLoopNest vec_shape $ \vec_is -> do
-              sComment "maybe restore some to-scan values to parameters, or read neutral" $
+              -- For in-bounds threads: load the to-scan value into yParams and
+              -- reload carry (xParams) for array scans.  For thread 0 with a
+              -- valid carry, run scan_op(carry, y); for all other in-bounds
+              -- threads (and thread 0 without a carry) write yParams directly.
+              -- Out-of-bounds threads do not write to shared memory at all.
+              sWhen in_bounds $ do
+                readToScanValues (map Imp.le64 gtids ++ vec_is) pes scan
+                readCarries j (tvExp chunk_offset) dims' vec_is pes scan has_carry
                 sIf
-                  in_bounds
-                  ( do
-                      readToScanValues (map Imp.le64 gtids ++ vec_is) pes scan
-                      readCarries j (tvExp chunk_offset) dims' vec_is pes scan
+                  (kernelLocalThreadId constants .==. 0 .&&. tvExp has_carry)
+                  ( sComment "combine carry with value and write to shared memory" $
+                      compileStms mempty (bodyStms $ lambdaBody scan_op) $
+                        forM_ (zip local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
+                          \(arr, se) ->
+                            copyDWIMFix arr [localArrayIndex constants] se []
                   )
-                  ( forM_ (zip (yParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
-                      copyDWIMFix (paramName p) [] ne []
+                  ( sComment "write value directly to shared memory (no carry)" $
+                      forM_ (zip local_arrs $ yParams scan) $ \(arr, p) ->
+                        copyDWIMFix arr [localArrayIndex constants] (Var $ paramName p) []
                   )
-
-              sComment "combine with carry and write to shared memory" $
-                compileStms mempty (bodyStms $ lambdaBody scan_op) $
-                  forM_ (zip local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
-                    \(arr, se) ->
-                      copyDWIMFix arr [localArrayIndex constants] se []
 
               let crossesSegment' = do
                     f <- crossesSegment
@@ -264,7 +277,7 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
               blockScan
                 crossesSegment'
                 (sExt64 $ tvExp num_threads)
-                (sExt64 $ kernelBlockSize constants)
+                active_w
                 scan_op_renamed
                 local_arrs
 
@@ -279,18 +292,9 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
 
               barrier
 
-              let load_carry =
-                    forM_ (zip local_arrs scan_x_params) $ \(arr, p) ->
-                      copyDWIMFix
-                        (paramName p)
-                        []
-                        (Var arr)
-                        [ sExt64 (kernelBlockSize constants) - 1
-                        ]
-                  load_neutral =
-                    forM_ (zip nes scan_x_params) $ \(ne, p) ->
-                      copyDWIMFix (paramName p) [] ne []
-
+              -- Thread 0 reads the last active element as carry-in for the
+              -- next iteration, unless a segment boundary falls at the end of
+              -- this chunk (in which case it has no carry for the next chunk).
               sComment "first thread reads last element as carry-in for next iteration" $ do
                 crosses_segment <- dPrimVE "crosses_segment" $
                   case crossesSegment of
@@ -298,18 +302,26 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
                     Just f ->
                       f
                         ( tvExp chunk_offset
-                            + sExt64 (kernelBlockSize constants)
+                            + active_w
                             - 1
                         )
                         ( tvExp chunk_offset
-                            + sExt64 (kernelBlockSize constants)
+                            + active_w
                         )
-                should_load_carry <-
-                  dPrimVE "should_load_carry" $
-                    kernelLocalThreadId constants .==. 0 .&&. bNot crosses_segment
-                sWhen should_load_carry load_carry
+                sWhen (kernelLocalThreadId constants .==. 0 .&&. active_w .>. 0) $ do
+                  sIf
+                    crosses_segment
+                    (has_carry <-- fromBool False)
+                    ( do
+                        forM_ (zip local_arrs scan_x_params) $ \(arr, p) ->
+                          copyDWIMFix
+                            (paramName p)
+                            []
+                            (Var arr)
+                            [active_w - 1]
+                        has_carry <-- fromBool True
+                    )
                 when array_scan barrier
-                sUnless should_load_carry load_neutral
 
               barrier
 
@@ -323,7 +335,7 @@ scanStage2 ::
   Count BlockSize SubExp ->
   CrossesSegment ->
   SegSpace ->
-  [SegBinOp GPUMem] ->
+  [SegScanOp GPUMem] ->
   CallKernelGen ()
 scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2_tblock_size crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
@@ -340,16 +352,13 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
     constants <- kernelConstants <$> askEnv
     let tblock_id = kernelBlockId constants
     per_scan_local_arrs <- makeLocalArrays (sExt64 tblock_id) stage2_tblock_size scans
-    let per_scan_pes = segBinOpChunks scans scan_out
+    let per_scan_pes = segScanOpChunks scans scan_out
 
-    -- Declare lambda params and initialise carries (xParams) to the
-    -- neutral element.  For scalar scans these persist across chunk
-    -- iterations as registers; for array scans they are reloaded from
-    -- global memory at the start of each chunk.
-    forM_ scans $ \scan -> do
-      dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan
-      forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
-        copyDWIMFix (paramName p) [] ne []
+    -- Declare lambda params; has_carry tracks whether thread 0 holds a
+    -- valid carry-in (avoids using neutral elements).
+    all_has_carry <- forM scans $ \scan -> do
+      dScope Nothing $ scopeOfLParams $ lambdaParams $ segScanOpLambda scan
+      dPrimV "has_carry" $ fromBool False
 
     sFor "chunk_id" num_chunks $ \chunk_id -> do
       let chunk_offset = chunk_id * stage2_tblock_size_e
@@ -360,8 +369,21 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
       -- Construct segment indices.
       zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
 
-      forM_ (L.zip3 scans per_scan_local_arrs per_scan_pes) $
-        \(scan@(SegBinOp _ scan_op nes vec_shape), local_arrs, pes) ->
+      -- Number of in-bounds threads: thread t is in-bounds iff
+      -- (chunk_offset + t + 1) * elems_per_group - 1 < num_elements,
+      -- i.e. t < floor(num_elements / elems_per_group) - chunk_offset.
+      -- The partial last stage-1 block, if any, has its last element
+      -- outside num_elements and is therefore excluded from active_w;
+      -- its carry is not needed by stage 3.
+      let num_complete_groups = product dims' `quot` elems_per_group
+      active_w <-
+        dPrimVE "active_w" $
+          sMin64
+            (sExt64 $ kernelBlockSize constants)
+            (sMax64 0 $ num_complete_groups - chunk_offset)
+
+      forM_ (zip4 scans per_scan_local_arrs per_scan_pes all_has_carry) $
+        \(scan@(SegScanOp scan_op vec_shape), local_arrs, pes, has_carry) ->
           sComment "do one stage-2 scan chunk" $ do
             let (array_scan, fence, barrier) = barrierFor scan_op
                 scan_x_params = xParams scan
@@ -385,45 +407,45 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
               -- For array scans and scalar scans with non-trivial vec_shape,
               -- reload carry (xParams) from the scan output written by the
               -- previous chunk.  Thread 0 reads the last element of the
-              -- previous chunk, unless a segment boundary falls between the
-              -- chunks.
+              -- previous chunk if chunk_id > 0 and no segment boundary falls
+              -- between chunks; otherwise thread 0 has no carry.
               when use_global_carry $ do
                 crosses_seg <-
                   dPrimVE "crosses_seg" $
                     case crossesSegment of
                       Nothing -> false
                       Just f -> f prev_chunk_last (prev_chunk_last + 1)
+                sWhen (kernelLocalThreadId constants .==. 0) $
+                  sIf
+                    (chunk_id .>. 0 .&&. bNot crosses_seg)
+                    ( do
+                        let carry_is = unflattenIndex dims' prev_chunk_last
+                        forM_ (zip scan_x_params pes) $ \(p, pe) ->
+                          copyDWIMFix (paramName p) [] (Var pe) (carry_is ++ vec_is)
+                        has_carry <-- fromBool True
+                    )
+                    (has_carry <-- fromBool False)
+
+              -- Load the stage-1 partial-scan result for this thread's block
+              -- into yParams.  Out-of-bounds threads do not write to shared memory.
+              sWhen in_bounds $
+                forM_ (zip scan_y_params pes) $ \(p, pe) ->
+                  copyDWIMFix (paramName p) [] (Var pe) glob_is
+
+              -- Combine carry (xParams) with value (yParams) for thread 0
+              -- when it has a valid carry; all other in-bounds threads write
+              -- yParams directly.  Out-of-bounds threads do not write.
+              sWhen in_bounds $
                 sIf
-                  (chunk_id .>. 0 .&&. kernelLocalThreadId constants .==. 0 .&&. bNot crosses_seg)
-                  ( do
-                      let carry_is = unflattenIndex dims' prev_chunk_last
-                      forM_ (zip scan_x_params pes) $ \(p, pe) ->
-                        copyDWIMFix (paramName p) [] (Var pe) (carry_is ++ vec_is)
+                  (kernelLocalThreadId constants .==. 0 .&&. tvExp has_carry)
+                  ( compileStms mempty (bodyStms $ lambdaBody scan_op) $
+                      forM_ (zip local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
+                        \(arr, se) ->
+                          copyDWIMFix arr [localArrayIndex constants] se []
                   )
-                  ( forM_ (zip scan_x_params nes) $ \(p, ne) ->
-                      copyDWIMFix (paramName p) [] ne []
+                  ( forM_ (zip local_arrs scan_y_params) $ \(arr, p) ->
+                      copyDWIMFix arr [localArrayIndex constants] (Var $ paramName p) []
                   )
-
-              -- Load the stage-1 partial-scan result for this thread's
-              -- block into yParams (or the neutral element when out of
-              -- bounds).
-              sIf
-                in_bounds
-                ( forM_ (zip scan_y_params pes) $ \(p, pe) ->
-                    copyDWIMFix (paramName p) [] (Var pe) glob_is
-                )
-                ( forM_ (zip scan_y_params nes) $ \(p, ne) ->
-                    copyDWIMFix (paramName p) [] ne []
-                )
-
-              -- Combine carry (xParams) with new value (yParams) and
-              -- write the result to shared/local memory.  Thread 0
-              -- incorporates the inter-chunk carry; other threads have
-              -- neutral in xParams, so the op is a no-op for them.
-              compileStms mempty (bodyStms $ lambdaBody scan_op) $
-                forM_ (zip local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
-                  \(arr, se) ->
-                    copyDWIMFix arr [localArrayIndex constants] se []
 
               sOp $ Imp.ErrorSync fence
 
@@ -440,7 +462,7 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
               blockScan
                 crossesSegment'
                 (sExt64 $ tvExp stage1_num_threads)
-                (sExt64 $ kernelBlockSize constants)
+                active_w
                 scan_op_renamed
                 local_arrs
 
@@ -470,20 +492,19 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
                         f
                           (next_chunk_start * elems_per_group - 1)
                           ((next_chunk_start + 1) * elems_per_group - 1)
-                let should_load_carry =
-                      kernelLocalThreadId constants .==. 0 .&&. bNot crosses_seg2
-                    load_carry =
-                      forM_ (zip local_arrs scan_x_params) $ \(arr, p) ->
-                        copyDWIMFix
-                          (paramName p)
-                          []
-                          (Var arr)
-                          [sExt64 (kernelBlockSize constants) - 1]
-                    load_neutral =
-                      forM_ (zip nes scan_x_params) $ \(ne, p) ->
-                        copyDWIMFix (paramName p) [] ne []
-                sWhen should_load_carry load_carry
-                sUnless should_load_carry load_neutral
+                sWhen (kernelLocalThreadId constants .==. 0) $
+                  sIf
+                    (bNot crosses_seg2 .&&. active_w .>. 0)
+                    ( do
+                        forM_ (zip local_arrs scan_x_params) $ \(arr, p) ->
+                          copyDWIMFix
+                            (paramName p)
+                            []
+                            (Var arr)
+                            [active_w - 1]
+                        has_carry <-- fromBool True
+                    )
+                    (has_carry <-- fromBool False)
 
               barrier
 
@@ -496,7 +517,7 @@ scanStage3 ::
   Imp.TExp Int64 ->
   CrossesSegment ->
   SegSpace ->
-  [SegBinOp GPUMem] ->
+  [SegScanOp GPUMem] ->
   SegPostOp GPUMem ->
   CallKernelGen ()
 scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesSegment space scans post_op = do
@@ -542,14 +563,14 @@ scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesS
           is_a_carry = flat_idx .==. (tvExp orig_group + 1) * elems_per_group - 1
           no_carry_in = tvExp orig_group .==. 0 .||. is_a_carry .||. crosses_segment
 
-      let per_scan_pes = segBinOpChunks scans scan_out
+      let per_scan_pes = segScanOpChunks scans scan_out
       sWhen in_bounds $ do
         sUnless no_carry_in $
           forM_ (zip per_scan_pes scans) $
-            \(pes, SegBinOp _ scan_op nes vec_shape) -> do
+            \(pes, SegScanOp scan_op vec_shape) -> do
               dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
               let (scan_x_params, scan_y_params) =
-                    splitAt (length nes) $ lambdaParams scan_op
+                    splitAt (length (lambdaReturnType scan_op)) $ lambdaParams scan_op
 
               sLoopNest vec_shape $ \vec_is -> do
                 forM_ (zip scan_x_params pes) $ \(p, pe) ->
@@ -581,7 +602,7 @@ scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesS
         then pure ()
         else do
           sWhen in_bounds $ do
-            let (scan_pars, map_pars) = splitAt (segBinOpResults scans) $ lambdaParams $ segPostOpLambda post_op
+            let (scan_pars, map_pars) = splitAt (segScanOpResults scans) $ lambdaParams $ segPostOpLambda post_op
             dScope Nothing $
               scopeOfLParams $
                 lambdaParams $
@@ -623,7 +644,7 @@ compileSegScan ::
   SegLevel ->
   SegSpace ->
   [Type] ->
-  [SegBinOp GPUMem] ->
+  [SegScanOp GPUMem] ->
   KernelBody GPUMem ->
   SegPostOp GPUMem ->
   CallKernelGen ()
@@ -643,7 +664,7 @@ compileSegScan pat lvl space ts scans kbody post_op = do
       dPrimV "stage2_tblock_size" $
         tvExp stage2_tblock_size_param
 
-  let shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
+  let shpT op = (segScanOpShape op,) <$> lambdaReturnType (segScanOpLambda op)
       scan_ts = concatMap shpT scans
       shpOfT t s =
         arrayShape $
@@ -653,20 +674,20 @@ compileSegScan pat lvl space ts scans kbody post_op = do
   (scan_out, map_out) <-
     if isIdentityPostOp post_op
       then
-        let (scan_out, map_out) = splitAt (segBinOpResults scans) $ patElemName <$> patElems pat
+        let (scan_out, map_out) = splitAt (segScanOpResults scans) $ patElemName <$> patElems pat
             map_out' =
               zipWith
                 ( \t n ->
                     if isAcc t then Nothing else Just n
                 )
-                (drop (segBinOpResults scans) ts)
+                (drop (segScanOpResults scans) ts)
                 map_out
          in pure (scan_out, map_out')
       else do
         scan_out <- forM scan_ts $ \(s, t) ->
           sAllocArray "scan_out" (elemType t) (shpOfT t s) (Space "device")
 
-        map_out <- forM (drop (segBinOpResults scans) ts) $ \t ->
+        map_out <- forM (drop (segScanOpResults scans) ts) $ \t ->
           if isAcc t
             then pure Nothing
             else Just <$> sAllocArray "map_out" (elemType t) (shpOfT t mempty) (Space "device")

@@ -81,12 +81,19 @@ data FusedSOAC = FusedSOAC
     fsOutputTransform :: SOAC.ArrayTransforms,
     -- | The outputs of the SOAC (i.e. the names in the pattern that
     -- the result of this SOAC should be bound to).
-    fsOutNames :: [VName]
+    fsOutNames :: [VName],
+    -- | Statements that must be emitted immediately before the SOAC.
+    -- Used to hold the loop-peeled first iteration when converting a
+    -- scanomap to a stream.
+    fsPreStms :: Stms SOACS
   }
   deriving (Show)
 
 inputs :: FusedSOAC -> [SOAC.Input]
 inputs = SOAC.inputs . fsSOAC
+
+prependPreStms :: Stms SOACS -> FusedSOAC -> FusedSOAC
+prependPreStms stms ker = ker {fsPreStms = stms <> fsPreStms ker}
 
 setInputs :: [SOAC.Input] -> FusedSOAC -> FusedSOAC
 setInputs inps ker = ker {fsSOAC = inps `SOAC.setInputs` fsSOAC ker}
@@ -272,15 +279,17 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
             -- this mattering is when the producer is a scan and the consumer is
             -- a reduction.
             Just _ <- pure $ Futhark.isScanomapSOAC form_p
-            (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
+            (soac_p', newacc_ids, pre_stms) <- SOAC.soacToStream soac_p
             if soac_p' /= soac_p
-              then
-                fuseSOACwithKer
-                  mode
-                  (namesFromList (map identName newacc_ids) <> unfus_set)
-                  (map identName newacc_ids ++ outVars)
-                  soac_p'
-                  ker
+              then do
+                ker' <-
+                  fuseSOACwithKer
+                    mode
+                    (namesFromList (map identName newacc_ids) <> unfus_set)
+                    (map identName newacc_ids ++ outVars)
+                    soac_p'
+                    ker
+                pure $ prependPreStms pre_stms ker'
               else fail "SOAC could not be turned into stream."
 
     -- Map-Hist fusion.
@@ -356,28 +365,36 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       -- To fuse a stream kernel, we transform soac_p to a stream, which
       -- borrows the sequential/parallel property of the soac_c Stream,
       -- and recursively perform stream-stream fusion.
-      (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
-      fuseSOACwithKer
-        mode
-        (namesFromList (map identName newacc_ids) <> unfus_set)
-        (map identName newacc_ids ++ outVars)
-        soac_p'
-        ker
+      (soac_p', newacc_ids, pre_stms) <- SOAC.soacToStream soac_p
+      guard $ soac_p' /= soac_p
+      ker' <-
+        fuseSOACwithKer
+          mode
+          (namesFromList (map identName newacc_ids) <> unfus_set)
+          (map identName newacc_ids ++ outVars)
+          soac_p'
+          ker
+      pure $ prependPreStms pre_stms ker'
     (_, SOAC.Stream {}, _) -> do
       -- If it reached this case then soac_c is NOT a Stream kernel,
       -- hence transform the kernel's soac to a stream and attempt
       -- stream-stream fusion recursivelly.
       -- The newly created stream corresponding to soac_c borrows the
       -- sequential/parallel property of the soac_p stream.
-      (soac_c', newacc_ids) <- SOAC.soacToStream soac_c
+      (soac_c', newacc_ids, pre_stms) <- SOAC.soacToStream soac_c
       if soac_c' /= soac_c
-        then
-          fuseSOACwithKer
-            mode
-            (namesFromList (map identName newacc_ids) <> unfus_set)
-            outVars
-            soac_p
-            $ ker {fsSOAC = soac_c', fsOutNames = map identName newacc_ids ++ fsOutNames ker}
+        then do
+          ker' <-
+            fuseSOACwithKer
+              mode
+              (namesFromList (map identName newacc_ids) <> unfus_set)
+              outVars
+              soac_p
+              ker
+                { fsSOAC = soac_c',
+                  fsOutNames = map identName newacc_ids ++ fsOutNames ker
+                }
+          pure $ prependPreStms pre_stms ker'
         else fail "SOAC could not be turned into stream."
 
 fuseStreamHelper ::
@@ -465,27 +482,20 @@ iswim ::
   SOAC.ArrayTransforms ->
   TryFusion (SOAC, SOAC.ArrayTransforms)
 iswim _ (SOAC.Screma w arrs form) ots
-  | Just [Futhark.Scan scan_fun nes] <- Futhark.isScanSOAC form,
-    Just (map_pat, map_aux, map_w, map_fun) <- rwimPossible scan_fun,
-    Just nes_names <- mapM subExpVar nes = do
-      let nes_idents = zipWith Ident nes_names $ lambdaReturnType scan_fun
-          map_nes = map SOAC.identInput nes_idents
-          map_arrs' = map_nes ++ map (SOAC.transposeInput 0 1) arrs
-          (scan_acc_params, scan_elem_params) =
-            splitAt (length arrs) $ lambdaParams scan_fun
-          map_params =
-            map removeParamOuterDim scan_acc_params
-              ++ map (setParamOuterDimTo w) scan_elem_params
+  | Just [Futhark.Scan scan_fun] <- Futhark.isScanSOAC form,
+    Just (map_pat, map_aux, map_w, map_fun) <- rwimPossible scan_fun = do
+      let map_arrs' = map (SOAC.transposeInput 0 1) arrs
+          scan_elem_params = drop (length arrs) $ lambdaParams scan_fun
+          map_params = map (setParamOuterDimTo w) scan_elem_params
           map_rettype = map (`setOuterSize` w) $ lambdaReturnType scan_fun
 
           scan_params = lambdaParams map_fun
           scan_body = lambdaBody map_fun
           scan_rettype = lambdaReturnType map_fun
           scan_fun' = Lambda scan_params scan_rettype scan_body
-          nes' = map Var $ take (length map_nes) $ map paramName map_params
-          arrs' = drop (length map_nes) $ map paramName map_params
+          arrs' = map paramName map_params
 
-      scan_form <- scanSOAC [Futhark.Scan scan_fun' nes']
+      scan_form <- Futhark.scanSOAC [Futhark.Scan scan_fun']
 
       let map_body =
             mkBody
@@ -496,25 +506,19 @@ iswim _ (SOAC.Screma w arrs form) ots
               $ varsRes
               $ patNames map_pat
           map_fun' = Lambda map_params map_rettype map_body
-          perm = case lambdaReturnType scan_fun of -- instead of map_fun
+          perm = case lambdaReturnType scan_fun of
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 
       (,ots SOAC.|> SOAC.Rearrange map_aux perm)
         . SOAC.Screma map_w map_arrs'
-        <$> mapSOAC map_fun'
+        <$> Futhark.mapSOAC map_fun'
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
-removeParamOuterDim :: LParam SOACS -> LParam SOACS
-removeParamOuterDim param =
-  let t = rowType $ paramType param
-   in param {paramDec = t}
-
 setParamOuterDimTo :: SubExp -> LParam SOACS -> LParam SOACS
 setParamOuterDimTo w param =
-  let t = paramType param `setOuterSize` w
-   in param {paramDec = t}
+  param {paramDec = paramType param `setOuterSize` w}
 
 setPatOuterDimTo :: SubExp -> Pat Type -> Pat Type
 setPatOuterDimTo w = fmap (`setOuterSize` w)

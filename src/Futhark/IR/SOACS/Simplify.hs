@@ -142,10 +142,9 @@ simplifySOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
 simplifyScan ::
   (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (Scan (Wise rep))
-simplifyScan (Scan lam nes) = do
+simplifyScan (Scan lam) = do
   (lam', hoisted) <- Engine.simplifyLambda mempty lam
-  nes' <- Engine.simplify nes
-  pure (Scan lam' nes', hoisted)
+  pure (Scan lam', hoisted)
 
 simplifyReduce ::
   (Simplify.SimplifiableRep rep) =>
@@ -643,31 +642,59 @@ removeDeadReduction _ _ _ _ = Skip
 {-# NOINLINE removeDeadScan #-}
 removeDeadScan :: TopDownRuleOp (Wise SOACS)
 removeDeadScan _ pat aux (Screma w arrs form)
-  | ScremaForm prelam [Scan scanlam nes] [] postlam <- form,
-    -- Quick/cheap check
+  | ScremaForm prelam [Scan scanlam] [] postlam <- form,
+    -- Quick/cheap check: some postlam param might be unused.
     not $ all ((`nameIn` freeIn postlam) . paramName) (lambdaParams postlam),
-    let used = (`nameIn` freeIn (lambdaBody postlam)) . paramName,
-    (used_postlam_scanparams, postlam_mapparams, used_nes, alive_mask) <-
-      deadRedScanCheck used scanlam nes (lambdaParams postlam),
-    used_nes /= nes = Simplify $ do
-      let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
-          dead_fix = zipWith fixDeadToNeutral alive_mask nes
-
+    alive_mask <- scanAliveMask scanlam postlam,
+    any not alive_mask = Simplify $ do
+      let scan_ts = lambdaReturnType scanlam
+          scan_n = length scan_ts
+          (postlam_scanparams, postlam_mapparams) =
+            splitAt scan_n (lambdaParams postlam)
+          used_postlam_scanparams =
+            [p | (True, p) <- zip alive_mask postlam_scanparams]
+      dead_fix <-
+        mapM
+          ( \(lives, t) ->
+              if lives
+                then pure Nothing
+                else Just <$> (letSubExp "dead_blank" =<< eBlank t)
+          )
+          (zip alive_mask scan_ts)
       let prelam' = removeLambdaResults alive_mask prelam
       scanlam' <-
         removeLambdaResults alive_mask
           <$> fixLambdaParams scanlam (dead_fix ++ dead_fix)
-
       postlam' <-
         runLambdaBuilder (used_postlam_scanparams <> postlam_mapparams) $
           bodyBind (lambdaBody postlam)
-
       auxing aux
         . letBind pat
         . Op
         . Screma w arrs
-        $ ScremaForm prelam' [Scan scanlam' used_nes] [] postlam'
+        $ ScremaForm prelam' [Scan scanlam'] [] postlam'
 removeDeadScan _ _ _ _ = Skip
+
+scanAliveMask :: Lambda (Wise SOACS) -> Lambda (Wise SOACS) -> [Bool]
+scanAliveMask scanlam postlam =
+  let scan_n = length $ lambdaReturnType scanlam
+      (postlam_scanparams, _) = splitAt scan_n $ lambdaParams postlam
+      oplam_deps = dataDependencies $ lambdaBody scanlam
+      oplam_res = bodyResult $ lambdaBody scanlam
+      oplam_params = lambdaParams scanlam
+      (oplam_xparams, oplam_yparams) = splitAt scan_n oplam_params
+      used = (`nameIn` freeIn (lambdaBody postlam)) . paramName
+      used_in_postlam =
+        map snd $ filter (used . fst) $ zip postlam_scanparams oplam_params
+      necessary =
+        findNecessaryForReturned
+          (`elem` used_in_postlam)
+          (zip oplam_params $ map resSubExp $ oplam_res <> oplam_res)
+          oplam_deps
+   in zipWith
+        (||)
+        (map ((`nameIn` necessary) . paramName) oplam_xparams)
+        (map ((`nameIn` necessary) . paramName) oplam_yparams)
 
 {-# NOINLINE fuseConcatScatter #-}
 fuseConcatScatter :: TopDownRuleOp (Wise SOACS)
@@ -736,7 +763,8 @@ simplifyKnownIterationSOAC _ pat _ op
   | Just (Screma (Constant k) arrs (ScremaForm map_lam scans reds post_lam)) <- asSOAC op,
     oneIsh k = Simplify $ do
       let (Reduce _ red_lam red_nes) = singleReduce reds
-          (Scan scan_lam scan_nes) = singleScan scans
+          Scan scan_lam = singleScan scans
+          num_scan = length $ lambdaReturnType scan_lam
           (red_pes, post_pes) =
             splitAt (length red_nes) $ patElems pat
           bindMapParam p a = do
@@ -756,9 +784,10 @@ simplifyKnownIterationSOAC _ pat _ op
 
       zipWithM_ bindMapParam (lambdaParams map_lam) arrs
       (to_scan, to_red, map_res) <-
-        splitAt3 (length scan_nes) (length red_nes)
+        splitAt3 num_scan (length red_nes)
           <$> bodyBind (lambdaBody map_lam)
-      scan_res <- eLambda scan_lam $ map eSubExp $ scan_nes ++ map resSubExp to_scan
+      -- For a singleton array, scan result[0] = map_result[0] (ne is identity).
+      let scan_res = to_scan
       red_res <- eLambda red_lam $ map eSubExp $ red_nes ++ map resSubExp to_red
 
       zipWithM_ bindResult (patElemName <$> red_pes) red_res
@@ -1269,7 +1298,7 @@ prunePreLambdaScanResults (ScremaForm pre_lam scan red post_lam) =
           }
 
     chunkByScan :: [a] -> [[a]]
-    chunkByScan = chunks (map (length . scanNeutral) scan)
+    chunkByScan = chunks (map (length . lambdaReturnType . scanLambda) scan)
 
     chunked_scan_res_p = chunkByScan scan_res_p
     chunked_scan_ts_p = chunkByScan scan_ts_p

@@ -1848,8 +1848,8 @@ isIntrinsicFunction qname args = do
     handleSOACs [lam, ne, arr] "scan" = Just $ \desc ->
       internaliseScanOrReduce desc "scan" reduce (lam, ne, arr)
       where
-        reduce w scan_lam nes arrs =
-          I.Screma w arrs <$> I.scanSOAC [Scan scan_lam nes]
+        reduce w scan_lam _nes arrs =
+          I.Screma w arrs <$> I.scanSOAC [Scan scan_lam]
     handleSOACs [rf, dest, op, ne, buckets, img] "hist_1d" = Just $ \desc ->
       internaliseHist 1 desc rf dest op ne buckets img
     handleSOACs [rf, dest, op, ne, buckets, img] "hist_2d" = Just $ \desc ->

@@ -81,11 +81,11 @@ reduceToSegBinOp (Reduce comm lam nes) = do
         | otherwise = comm
   pure (stms, SegBinOp comm' lam'' nes' shape)
 
-scanToSegBinOp :: Scan SOACS -> ExtractM (Stms MC, SegBinOp MC)
-scanToSegBinOp (Scan lam nes) = do
-  ((lam', nes', shape), stms) <- runBuilder $ determineReduceOp lam nes
+scanToSegScanOp :: Scan SOACS -> ExtractM (Stms MC, SegScanOp MC)
+scanToSegScanOp (Scan lam) = do
+  let (shape, lam') = isVectorMap lam
   lam'' <- transformLambda lam'
-  pure (stms, SegBinOp Noncommutative lam'' nes' shape)
+  pure (mempty, SegScanOp lam'' shape)
 
 histToSegBinOp :: SOACS.HistOp SOACS -> ExtractM (Stms MC, MC.HistOp MC)
 histToSegBinOp (SOACS.HistOp num_bins rf dests nes op) = do
@@ -240,7 +240,7 @@ transformSOAC pat _ (Screma w arrs form)
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form = do
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
-      (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
+      (scans_stms, scans') <- mapAndUnzipM scanToSegScanOp scans
       post_op <- SegPostOp <$> transformLambda post_lam
       pure $
         mconcat scans_stms

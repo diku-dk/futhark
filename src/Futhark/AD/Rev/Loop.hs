@@ -345,7 +345,16 @@ revLoop diffStms pat loop =
                   (concat loop_vnames)
                 diffStms $ bodyStms body'
 
-                loop_res_adjs <- mapM (lookupAdjVal . paramName) loop_params'
+                -- A body result that is a Constant contributes no
+                -- adjoint and has no slot in val_pat_adjs.loopRes (because
+                -- loop_vnames.loopRes filters constants).  Skip the
+                -- corresponding loop parameter so this side stays in sync.
+                let resVarParams =
+                      [ p
+                      | (p, se_res) <- zip loop_params' (bodyResult body'),
+                        isJust (subExpResVName se_res)
+                      ]
+                loop_res_adjs <- mapM (lookupAdjVal . paramName) resVarParams
                 loop_free_adjs <- mapM lookupAdjVal $ loopFree loop_vnames
                 loop_vals_adjs <- mapM lookupAdjVal $ loopVals loop_vnames
 
@@ -377,8 +386,17 @@ revLoop diffStms pat loop =
                   splitAt (length $ loopRes loop_adjs) adjs'
                 (loop_free_adjs, loop_val_adjs) =
                   splitAt (length $ loopFree loop_adjs) loop_free_var_val_adjs
+            -- Mirror the filtering of resVarParams above: only initial
+            -- values whose body result is a Var have an entry in
+            -- loop_res_adjs.  The remaining inits are overwritten by a
+            -- constant on the first iteration and contribute no adjoint.
+            let resVarLoopVals =
+                  [ se
+                  | (se, se_res) <- zip loop_vals' (bodyResult body'),
+                    isJust (subExpResVName se_res)
+                  ]
             returnSweepCode $ do
-              zipWithM_ updateSubExpAdj loop_vals' loop_res_adjs
+              zipWithM_ updateSubExpAdj resVarLoopVals loop_res_adjs
               zipWithM_ insAdj (loopFree loop_vnames) loop_free_adjs
               zipWithM_ updateAdj (loopVals loop_vnames) loop_val_adjs
 

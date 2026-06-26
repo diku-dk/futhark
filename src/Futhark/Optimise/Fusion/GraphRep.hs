@@ -80,7 +80,7 @@ data EdgeT
 -- | Information associated with a node in the graph.
 data NodeT
   = StmNode (Stm SOACS)
-  | SoacNode H.ArrayTransforms (Pat Type) (H.SOAC SOACS) (StmAux (ExpDec SOACS))
+  | SoacNode H.ArrayTransforms (Pat Type) (H.SOAC SOACS) (StmAux (ExpDec SOACS)) (Stms SOACS)
   | -- | First 'VName' is result; last is input.
     TransNode VName H.ArrayTransform VName
   | -- | Node corresponding to a result of the entire computation
@@ -126,7 +126,7 @@ pprg = G.showDot . G.fglToDotString . G.nemap onNode onEdge . dgGraph
     onEdge (Alias _) = "Alias"
 
     onNode (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
-    onNode (SoacNode _ pat _ _) = prettyString pat
+    onNode (SoacNode _ pat _ _ _) = prettyString pat
     onNode (TransNode _ tr _) = prettyString tr
     onNode (ResNode name) = prettyString $ "Res: " ++ prettyString name
     onNode (FreeNode name) = prettyString $ "Input: " ++ prettyString name
@@ -288,7 +288,7 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
   Op {} -> do
     maybeSoac <- H.fromExp op
     case maybeSoac of
-      Right hsoac -> pure $ SoacNode mempty pat hsoac aux
+      Right hsoac -> pure $ SoacNode mempty pat hsoac aux mempty
       Left H.NotSOAC -> pure n
   Loop {} ->
     pure $ DoNode s []
@@ -414,7 +414,7 @@ getOutputs node = case node of
   (FreeNode name) -> [name]
   (MatchNode stm _) -> stmNames stm
   (DoNode stm _) -> stmNames stm
-  (SoacNode _ pat _ _) -> patNames pat
+  (SoacNode _ pat _ _ _) -> patNames pat
 
 -- | Is there a possibility of fusion?
 isDep :: EdgeT -> Bool

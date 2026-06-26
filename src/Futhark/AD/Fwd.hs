@@ -274,14 +274,7 @@ fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds post_lam)) = do
   addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm f' scs' reds' post_lam'
   where
     fwdScan :: Scan SOACS -> ADM (Scan SOACS)
-    fwdScan sc = do
-      op' <- fwdLambda $ scanLambda sc
-      neutral_tans <- mapM zeroFromSubExp $ scanNeutral sc
-      pure $
-        Scan
-          { scanNeutral = scanNeutral sc `interleave` map Var neutral_tans,
-            scanLambda = op'
-          }
+    fwdScan sc = Scan <$> fwdLambda (scanLambda sc)
     fwdRed :: Reduce SOACS -> ADM (Reduce SOACS)
     fwdRed red = do
       op' <- fwdLambda $ redLambda red

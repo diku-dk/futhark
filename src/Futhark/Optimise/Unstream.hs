@@ -117,6 +117,7 @@ optimiseSegOp onOp op =
       identitySegOpMapper
         { mapOnSegOpBody = optimiseBody onOp,
           mapOnSegBinOpLambda = optimiseLambda onOp,
+          mapOnSegScanOpLambda = optimiseLambda onOp,
           mapOnSegPostOpLambda = optimiseLambda onOp
         }
 
