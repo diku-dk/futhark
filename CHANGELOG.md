@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Use ascripted element type in API functions for arrays of records. (#2485)
 
+* Consumption checking of certain local polymorphic functions (in practice,
+  polymorphic functions that can only be written via holes). (#2488)
+
 ## [0.26.3]
 
 ### Added
