@@ -25,14 +25,8 @@ cacheSize :: Imp.TExp Int64
 cacheSize = 65536 -- 64 KB
 
 xParams, yParams :: SegScanOp MCMem -> [LParam MCMem]
-xParams scan =
-  take
-    (length (lambdaReturnType (segScanOpLambda scan)))
-    (lambdaParams (segScanOpLambda scan))
-yParams scan =
-  drop
-    (length (lambdaReturnType (segScanOpLambda scan)))
-    (lambdaParams (segScanOpLambda scan))
+xParams = segScanOpXParams
+yParams = segScanOpYParams
 
 lamBody :: SegScanOp MCMem -> Body MCMem
 lamBody = lambdaBody . segScanOpLambda

@@ -92,6 +92,9 @@ data FusedSOAC = FusedSOAC
 inputs :: FusedSOAC -> [SOAC.Input]
 inputs = SOAC.inputs . fsSOAC
 
+prependPreStms :: Stms SOACS -> FusedSOAC -> FusedSOAC
+prependPreStms stms ker = ker {fsPreStms = stms <> fsPreStms ker}
+
 setInputs :: [SOAC.Input] -> FusedSOAC -> FusedSOAC
 setInputs inps ker = ker {fsSOAC = inps `SOAC.setInputs` fsSOAC ker}
 
@@ -286,7 +289,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                     (map identName newacc_ids ++ outVars)
                     soac_p'
                     ker
-                pure ker' {fsPreStms = pre_stms <> fsPreStms ker'}
+                pure $ prependPreStms pre_stms ker'
               else fail "SOAC could not be turned into stream."
 
     -- Map-Hist fusion.
@@ -371,7 +374,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
           (map identName newacc_ids ++ outVars)
           soac_p'
           ker
-      pure ker' {fsPreStms = pre_stms <> fsPreStms ker'}
+      pure $ prependPreStms pre_stms ker'
     (_, SOAC.Stream {}, _) -> do
       -- If it reached this case then soac_c is NOT a Stream kernel,
       -- hence transform the kernel's soac to a stream and attempt
@@ -391,7 +394,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                 { fsSOAC = soac_c',
                   fsOutNames = map identName newacc_ids ++ fsOutNames ker
                 }
-          pure ker' {fsPreStms = pre_stms <> fsPreStms ker'}
+          pure $ prependPreStms pre_stms ker'
         else fail "SOAC could not be turned into stream."
 
 fuseStreamHelper ::

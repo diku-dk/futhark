@@ -20,14 +20,8 @@ import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, nextMul, quot)
 import Prelude hiding (mod, quot, rem)
 
 xParams, yParams :: SegScanOp GPUMem -> [LParam GPUMem]
-xParams scan =
-  take
-    (length (lambdaReturnType (segScanOpLambda scan)))
-    (lambdaParams (segScanOpLambda scan))
-yParams scan =
-  drop
-    (length (lambdaReturnType (segScanOpLambda scan)))
-    (lambdaParams (segScanOpLambda scan))
+xParams = segScanOpXParams
+yParams = segScanOpYParams
 
 -- | Given available register, thread block size, scan parameter
 -- types, and map parameter types, compute the largest available chunk
@@ -318,7 +312,7 @@ earlyReturn ::
 earlyReturn pat scan_op post_op = (early_write_pats, res_flags)
   where
     post_lam = segPostOpLambda post_op
-    num_scan_res = length $ lambdaReturnType $ segScanOpLambda scan_op
+    num_scan_res = segScanOpArity scan_op
     earlyWrite i par =
       if num_scan_res < i && paramName par `notNameIn` free_in_post
         then
@@ -920,7 +914,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           sOp local_barrier
 
       let (scan_pars, map_pars) =
-            splitAt (length $ lambdaReturnType $ segScanOpLambda scan_op) $
+            splitAt (segScanOpArity scan_op) $
               map paramName $
                 lambdaParams $
                   segPostOpLambda post_op

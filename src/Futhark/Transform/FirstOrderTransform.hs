@@ -115,100 +115,6 @@ resultArray arrs ts = do
         letExp "result" =<< eBlank t
   mapM oneArray ts
 
--- | Context bundle for 'scremaOneIter'.
-data ScremaIterCtx rep = ScremaIterCtx
-  { -- Lambdas (renamed fresh for this call site).
-    iterMapLam :: Lambda rep,
-    iterScanLam :: Lambda rep,
-    iterRedLam :: Lambda rep,
-    iterPostLam :: Lambda rep,
-    -- Array inputs and their types.
-    iterArrs :: [VName],
-    iterArrTs :: [Type],
-    -- Which map-lam params are consumed (need Replicate before use).
-    iterLamCons :: Names,
-    -- Number of scan results in the map-lam output.
-    iterNumScan :: Int,
-    -- Number of reduce results in the map-lam output.
-    iterNumRed :: Int,
-    -- Previous scan accumulators.  Nothing for the first iteration
-    -- (map result used directly, no scan_lam applied).
-    iterPrevScanAcc :: Maybe [SubExp],
-    -- Previous reduce accumulators.
-    iterPrevRedAcc :: [SubExp],
-    -- Output arrays to update (in-place at idx).
-    iterOutArrs :: [VName],
-    -- For Acc-typed inputs: maps the input array to the corresponding
-    -- output accumulator name (so we use the current acc instead of indexing).
-    iterAccForArr :: VName -> Maybe VName
-  }
-
--- | Execute one Screma iteration at array index @idx@.
--- Returns @(new_scan_res, new_red_res, updated_out_arrs)@.
-scremaOneIter ::
-  (Transformer m) =>
-  ScremaIterCtx (Rep m) ->
-  SubExp ->
-  m ([SubExpRes], [SubExpRes], [VName])
-scremaOneIter ctx idx = do
-  -- Bind map_lam params for arrs[idx].  Acc-typed inputs use the current
-  -- accumulator value instead of being indexed into the array.
-  forM_ (zip3 (lambdaParams $ iterMapLam ctx) (iterArrs ctx) (iterArrTs ctx)) $
-    \(p, arr, arr_t) ->
-      case iterAccForArr ctx arr of
-        Just acc_v ->
-          letBindNames [paramName p] . BasicOp $
-            SubExp $
-              Var acc_v
-        Nothing
-          | paramName p `nameIn` iterLamCons ctx -> do
-              p' <-
-                letExp (baseName (paramName p)) . BasicOp $
-                  Index arr $
-                    fullSlice arr_t [DimFix idx]
-              letBindNames [paramName p] $ BasicOp $ Replicate mempty $ Var p'
-          | otherwise ->
-              letBindNames [paramName p] . BasicOp . Index arr $
-                fullSlice arr_t [DimFix idx]
-  mapM_ addStm $ bodyStms $ lambdaBody $ iterMapLam ctx
-  let (scan_res, red_res, map_res) =
-        splitAt3
-          (iterNumScan ctx)
-          (iterNumRed ctx)
-          (bodyResult $ lambdaBody $ iterMapLam ctx)
-
-  -- Compute new scan accumulator: apply scan_lam if we have a previous acc.
-  scan_res' <- case iterPrevScanAcc ctx of
-    Nothing ->
-      -- First iteration: map result IS the scan output (f(ne, x) = x).
-      pure scan_res
-    Just prev ->
-      eLambda (iterScanLam ctx) $
-        map (pure . BasicOp . SubExp) $
-          prev ++ map resSubExp scan_res
-
-  -- Compute new reduce accumulator.
-  red_res' <-
-    eLambda (iterRedLam ctx) $
-      map (pure . BasicOp . SubExp) $
-        iterPrevRedAcc ctx ++ map resSubExp red_res
-
-  -- Run post_lam and update output arrays at idx.
-  let res = scan_res' <> map_res
-      param_bind = resSubExp <$> res
-      certs = resCerts <$> res
-  forM_ (zip3 (paramName <$> lambdaParams (iterPostLam ctx)) param_bind certs) $
-    \(par, v, cs) ->
-      certifying cs $ letBindNames [par] $ BasicOp $ SubExp v
-  mapM_ addStm $ bodyStms $ lambdaBody $ iterPostLam ctx
-  let post_res = bodyResult $ lambdaBody $ iterPostLam ctx
-  outarrs <-
-    certifying (foldMap resCerts post_res) $
-      letwith (iterOutArrs ctx) idx $
-        map resSubExp post_res
-
-  pure (scan_res', red_res', outarrs)
-
 -- | Sequentialise a single Screma.
 transformScrema ::
   (Transformer m) =>
@@ -237,30 +143,13 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
 
   arr_ts <- mapM lookupType arrs
 
-  -- Build a mapping from Acc-typed input array to the corresponding
-  -- output VName (for use in 'scremaOneIter').  Non-Acc inputs map to Nothing.
-  let accForArrUsing outVNames arr =
+  -- For Acc-typed inputs, find the corresponding output accumulator name.
+  let accForArr arr =
         case lookup arr (zip arrs arr_ts) of
           Just (Acc c _ _ _) ->
-            -- Find the out VName whose post_ts entry has the same Acc cert.
-            lookup
-              c
-              [ (c2, v)
-              | (v, Acc c2 _ _ _) <- zip outVNames post_ts
-              ]
+            lookup c [(c2, v) | (v, Acc c2 _ _ _) <- zip (map paramName out_params) post_ts]
           _ -> Nothing
 
-  -- The scan accumulator is initialised to blank values.  The scan
-  -- lambda is guarded by i>0: on the first iteration (i=0) the map
-  -- result is stored directly as both the scan output and the initial
-  -- scan accumulator (f(ne, x) = x for any monoid neutral ne).  On
-  -- subsequent iterations f(acc, x) is applied normally.
-  --
-  -- This produces a single "for i < w" loop (same as the old neutral-
-  -- based code), which allows downstream loop fusion and avoids
-  -- exposing variable-size array allocations to the memory allocator
-  -- in per-thread context.
-  --
   -- See Note [Translation of Screma].
   scanacc_blanks <- mapM (letSubExp "scan_blank" <=< eBlank) scan_ts
 
@@ -286,7 +175,7 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
 
       -- Bind the map-lam inputs and run map-lam body.
       forM_ (zip3 (lambdaParams map_lam1) arrs arr_ts) $ \(p, arr, arr_t) ->
-        case accForArrUsing (map paramName out_params) arr of
+        case accForArr arr of
           Just acc_v ->
             letBindNames [paramName p] . BasicOp $ SubExp $ Var acc_v
           Nothing
@@ -550,18 +439,21 @@ loopMerge' vars vals =
 -- Note [Translation of Screma]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 --
--- Screma is the most general SOAC.  It is translated by peeling the
--- first iteration (i=0) out before constructing a loop over i=1..w-1.
--- The loop merge variables are:
+-- Screma is the most general SOAC.  It is translated into a single
+-- loop over i=0..w-1.  The loop merge variables are:
 --
--- (0) Scan accumulator, initialised with the map result at i=0.
+-- (0) Scan accumulator, initialised with blank values.
 -- (1) Reduce results (also functioning as accumulators),
---     initialised with red_op(red_ne, map_red_result[0]).
--- (2) Map results, mostly initialised with Scratch updated at i=0.
+--     initialised with the reduce neutral elements.
+-- (2) Map/post results, initialised with Scratch arrays.
 --
--- Peeling avoids storing the scan neutral element in the Scan type:
--- the first map result is a valid initial scan accumulator (f(ne,x)=x
--- means that applying scan_op with ne would give the same result).
+-- Inside the loop, the scan step is guarded by @is_first@ (i==0):
+-- on iteration 0 the map result is stored directly as the scan output
+-- (since f(ne, x) = x for any monoid neutral ne); on subsequent
+-- iterations scan_op(acc, map_result) is applied normally.
+--
+-- The reduce step applies red_op(acc, map_result) unconditionally on
+-- every iteration, starting from the neutral element.
 --
 -- Category (2) is a little more tricky in the case where one of the
 -- results is an Acc.  In that case, the result is not an array, but
@@ -576,24 +468,5 @@ loopMerge' vars vals =
 -- Inside the loop, the non-Acc parameters to map_lam become for-in
 -- parameters.  Acc parameters refer to the loop parameters for the
 -- corresponding Map result instead.
---
--- Intuitively, a Screma(w,
---                       scan_op,
---                       (red_op, red_ne),
---                       map_fn,
---                       {acc_input, arr_input})
---
--- then becomes
---
--- let (scan_acc0, red_acc0, map_arr0) = map_fn(acc_input, arr_input[0])
--- let red_acc0' = red_op(red_ne, red_acc0)
--- let map_arr[0] = map_arr0
--- loop (scan_acc, red_acc, map_arr) = (scan_acc0, red_acc0', map_arr) for i < w-1 do
---   let (a,b,map_acc',d) = map_fn(map_acc, arr_input[i+1])
---   let scan_acc' = scan_op(scan_acc, a)
---   let scan_arr[i+1] = scan_acc'
---   let red_acc' = red_op(red_acc, b)
---   let map_arr[i+1] = d
---   in (scan_acc', red_acc', map_arr)
 --
 -- A similar operation is done for Stream.

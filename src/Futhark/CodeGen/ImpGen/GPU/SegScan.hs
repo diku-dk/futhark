@@ -21,18 +21,17 @@ combineScanOps ops =
       segScanOpShape = mempty -- Assumed
     }
   where
-    lams = map segScanOpLambda ops
-    xParams lam = take (length (lambdaReturnType lam)) (lambdaParams lam)
-    yParams lam = drop (length (lambdaReturnType lam)) (lambdaParams lam)
+    splitParams op = splitAt (segScanOpArity op) $ lambdaParams $ segScanOpLambda op
+    (allXParams, allYParams) = unzip $ map splitParams ops
     lam' =
       Lambda
-        { lambdaParams = concatMap xParams lams ++ concatMap yParams lams,
-          lambdaReturnType = concatMap lambdaReturnType lams,
+        { lambdaParams = concat allXParams ++ concat allYParams,
+          lambdaReturnType = concatMap (lambdaReturnType . segScanOpLambda) ops,
           lambdaBody =
             Body
               ()
-              (mconcat (map (bodyStms . lambdaBody) lams))
-              (concatMap (bodyResult . lambdaBody) lams)
+              (mconcat (map (bodyStms . lambdaBody . segScanOpLambda) ops))
+              (concatMap (bodyResult . lambdaBody . segScanOpLambda) ops)
         }
 
 bodyHas :: (Exp GPUMem -> Bool) -> Body GPUMem -> Bool
@@ -54,8 +53,10 @@ canBeSinglePass scan_ops =
   where
     ok op =
       segScanOpShape op == mempty
-        && all primType (lambdaReturnType (segScanOpLambda op))
-        && not (bodyHas isAssert (lambdaBody (segScanOpLambda op)))
+        && all primType (lambdaReturnType lam)
+        && not (bodyHas isAssert (lambdaBody lam))
+      where
+        lam = segScanOpLambda op
     isAssert (BasicOp Assert {}) = True
     isAssert _ = False
 

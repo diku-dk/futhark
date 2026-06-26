@@ -377,7 +377,7 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
         arrayShape $
           foldr (flip arrayOfRow) (arrayOfShape t s) $
             segSpaceDims space
-      num_scan_res = length $ lambdaReturnType $ segScanOpLambda scan
+      num_scan_res = segScanOpArity scan
       (scan_pars, map_pars) =
         splitAt num_scan_res $ lambdaParams $ segPostOpLambda post_op
       (body_scan_res, body_map_res) =

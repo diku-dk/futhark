@@ -22,6 +22,9 @@ module Futhark.IR.SegOp
     segBinOpResults,
     segBinOpChunks,
     SegScanOp (..),
+    segScanOpArity,
+    segScanOpXParams,
+    segScanOpYParams,
     segScanOpResults,
     segScanOpChunks,
     KernelBody,
@@ -181,14 +184,26 @@ data SegScanOp rep = SegScanOp
   }
   deriving (Eq, Ord, Show)
 
+-- | Number of values produced (and consumed) by a single 'SegScanOp'.
+segScanOpArity :: SegScanOp rep -> Int
+segScanOpArity = length . lambdaReturnType . segScanOpLambda
+
+-- | The x (left / carry-in) parameters of a 'SegScanOp' lambda.
+segScanOpXParams :: SegScanOp rep -> [LParam rep]
+segScanOpXParams op = take (segScanOpArity op) $ lambdaParams $ segScanOpLambda op
+
+-- | The y (right / new-value) parameters of a 'SegScanOp' lambda.
+segScanOpYParams :: SegScanOp rep -> [LParam rep]
+segScanOpYParams op = drop (segScanOpArity op) $ lambdaParams $ segScanOpLambda op
+
 -- | How many scan results are produced by these 'SegScanOp's?
 segScanOpResults :: [SegScanOp rep] -> Int
-segScanOpResults = sum . map (length . lambdaReturnType . segScanOpLambda)
+segScanOpResults = sum . map segScanOpArity
 
 -- | Split some list into chunks equal to the number of values
 -- returned by each 'SegScanOp'.
 segScanOpChunks :: [SegScanOp rep] -> [a] -> [[a]]
-segScanOpChunks = chunks . map (length . lambdaReturnType . segScanOpLambda)
+segScanOpChunks = chunks . map segScanOpArity
 
 -- | The body of a 'SegOp'.
 type KernelBody rep = GBody rep KernelResult

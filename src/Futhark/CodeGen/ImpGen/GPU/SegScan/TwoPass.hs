@@ -81,10 +81,8 @@ barrierFor scan_op = (array_scan, fence, sOp $ Imp.Barrier fence)
       | otherwise = Imp.FenceLocal
 
 xParams, yParams :: SegScanOp GPUMem -> [LParam GPUMem]
-xParams scan =
-  take (length (lambdaReturnType (segScanOpLambda scan))) (lambdaParams (segScanOpLambda scan))
-yParams scan =
-  drop (length (lambdaReturnType (segScanOpLambda scan))) (lambdaParams (segScanOpLambda scan))
+xParams = segScanOpXParams
+yParams = segScanOpYParams
 
 writeToScanValues ::
   [VName] ->
