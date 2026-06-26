@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Non-exhaustive pattern match warnings were not always emitted when wildcard
+  patterns and explicit constructors were mixed. (#2483)
+
 * Invalid fusion that could cause compiler crash. (#2474)
 
 * GPU code generation of segmented reductions with array operands. (#2227,
