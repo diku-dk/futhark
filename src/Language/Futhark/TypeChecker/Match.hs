@@ -81,6 +81,12 @@ isBool :: Match t -> Maybe Bool
 isBool (MatchConstr (ConstrLit (PatLitPrim (BoolValue b))) _ _) = Just b
 isBool _ = Nothing
 
+isStructuralConstr :: Match t -> Bool
+isStructuralConstr (MatchConstr (Constr _) _ _) = True
+isStructuralConstr (MatchConstr ConstrTuple _ _) = True
+isStructuralConstr (MatchConstr (ConstrRecord _) _ _) = True
+isStructuralConstr _ = False
+
 complete :: [Match StructType] -> Bool
 complete xs
   | Just x <- maybeHead xs,
@@ -154,16 +160,13 @@ findUnmatched pmat n
     -- When wildcards make the column complete, recurse on unique constructor
     -- heads (wildcard rows are included via specialise).
     recurseOnConstrHeads cs = do
-      c <- nubOrd [c | c@(MatchConstr {}) <- cs]
-      let ats = case c of MatchConstr _ args _ -> map matchType args; _ -> []
+      c@(MatchConstr c' args _) <- nubOrd $ filter isStructuralConstr cs
+      let ats = map matchType args
           a_k = length ats
           pmat' = specialise ats c pmat
       u <- findUnmatched pmat' (a_k + n - 1)
-      pure $ case c of
-        MatchConstr c' _ _ ->
-          let (r, rest) = splitAt a_k u
-           in MatchConstr c' r () : rest
-        _ -> MatchWild () : u
+      let (r, rest) = splitAt a_k u
+      pure $ MatchConstr c' r () : rest
 
     incompleteCase pt cs
       | null cs = do
@@ -184,13 +187,7 @@ findUnmatched pmat n
                 pure $ MatchConstr (Constr cname) (map (const (MatchWild ())) ts) () : u
            in sigmaWitnesses ++ missingWitnesses
       | any isWild cs,
-        not (null [() | MatchConstr (Constr _) _ _ <- cs]) =
-          recurseOnConstrHeads cs
-      | any isWild cs,
-        not (null [() | MatchConstr ConstrTuple _ _ <- cs]) =
-          recurseOnConstrHeads cs
-      | any isWild cs,
-        not (null [() | MatchConstr (ConstrRecord _) _ _ <- cs]) =
+        any isStructuralConstr cs =
           recurseOnConstrHeads cs
       | Scalar (Sum all_cs) <- pt = do
           let sigma = mapMaybe isConstr cs
