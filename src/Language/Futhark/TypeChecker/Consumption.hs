@@ -580,7 +580,10 @@ returnType appres (Scalar (Sum cs)) d arg =
 applyArg :: TypeAliases -> TypeAliases -> TypeAliases
 applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
   returnType closure_als rettype d arg_als
-applyArg t _ = error $ "applyArg: " <> show t
+-- When the function type is a type variable (e.g. the result of a hole),
+-- we cannot determine the return type, so keep the existing type with no
+-- new aliases.
+applyArg t _ = second (const mempty) t
 
 applyLoopArg :: Aliases -> ParamType -> TypeAliases -> ResType -> TypeAliases
 applyLoopArg appres (Scalar (Record pfs)) (Scalar (Record afs)) (Scalar (Record rfs)) =
@@ -786,8 +789,13 @@ checkExp (AppExp (Apply f args loc) appres) = do
       args'' <- maybe (pure []) (fmap NE.toList . checkArgs rt) $ NE.nonEmpty args'
       (x', x_als) <- checkArg' (map (first snd) args'') d x
       pure $ (x', x_als) NE.:| args''
-    checkArgs t _ =
-      error $ "checkArgs: " <> prettyString t
+    -- When the function type is not an arrow (e.g. a hole with unconstrained
+    -- return type), fall back to observing all remaining arguments.
+    checkArgs _ (x NE.:| args') = do
+      -- Preserve right-to-left evaluation order.
+      args'' <- maybe (pure []) (fmap NE.toList . checkArgs (Scalar (Prim Bool))) $ NE.nonEmpty args'
+      (x', x_als) <- checkArg' (map (first snd) args'') Observe x
+      pure $ (x', x_als) NE.:| args''
 
 --
 checkExp (AppExp (Loop sparams pat loopinit form body loc) appres) = do
