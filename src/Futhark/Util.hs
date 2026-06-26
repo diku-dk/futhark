@@ -55,6 +55,8 @@ module Futhark.Util
     topologicalSort,
     debugTraceM,
     ensureCacheDirectory,
+    interleave,
+    unterleave,
   )
 where
 
@@ -375,6 +377,15 @@ convFloat v
   | isInfinite v, v < 0 = -1 / 0
   | isNaN v = 0 / 0
   | otherwise = fromRational $ toRational v
+
+-- | Interleave two lists.
+interleave :: [a] -> [a] -> [a]
+interleave xs ys = concat $ L.transpose [xs, ys]
+
+-- | The inverse of interleave.
+unterleave :: [a] -> ([a], [a])
+unterleave (x : y : xys) = bimap (x :) (y :) $ unterleave xys
+unterleave _ = ([], [])
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

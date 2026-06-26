@@ -1,7 +1,7 @@
 -- Scan with 3x3 matrix multiplication.
 -- ==
 -- tags { autodiff }
--- entry: fwd rev
+-- entry: fwd rev fwd_vec rev_vec
 -- input { [[1f32,2f32,3f32,4f32,5f32,6f32,7f32,8f32,9f32],
 -- [9f32,8f32,7f32,6f32,5f32,4f32,3f32,2f32,1f32],
 -- [1f32,2f32,3f32,4f32,5f32,6f32,7f32,8f32,9f32],
@@ -174,5 +174,21 @@ entry fwd [n] (input: [n][9]f32) : [n][9][n][9]f32 =
 entry rev [n] (input: [n][9]f32) : [n][9][n][9]f32 =
   let input = fromarrs3 input
   in tabulate (n * 9) (\i -> vjp primal3 input (fromarrs3 (onehot_2d n 9 (i / 9) (i % 9))))
+     |> unflatten
+     |> map (map toarrs3)
+
+entry fwd_vec [n] (input: [n][9]f32) : [n][9][n][9]f32 =
+  let input = fromarrs3 input
+  let seeds = tabulate (n * 9) (\i -> fromarrs3 (onehot_2d n 9 (i / 9) (i % 9)))
+  in jmp primal3 input seeds
+     |> map toarrs3
+     |> transpose
+     |> map transpose
+     |> map (map unflatten)
+
+entry rev_vec [n] (input: [n][9]f32) : [n][9][n][9]f32 =
+  let input = fromarrs3 input
+  let seeds = tabulate (n * 9) (\i -> fromarrs3 (onehot_2d n 9 (i / 9) (i % 9)))
+  in mjp primal3 input seeds
      |> unflatten
      |> map (map toarrs3)

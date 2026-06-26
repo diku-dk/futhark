@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   uses the hardware support for `f16`, similarly to the CUDA backend.
   Implemented by Jérôme Wagner. (#2470)
 
+* Vector AD, exposed through the functions `jmp` and `mjp`.
+
 * All opaque values available over the C API can now be decomposed into their
   constituents.
 

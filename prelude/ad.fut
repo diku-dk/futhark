@@ -14,104 +14,130 @@
 --
 -- Futhark's AD support includes the following:
 --
---   * Differentiation operators for forward-mode (`jvp`) and reverse-mode
---     (`vjp`).
+--   * Differential operators for forward-mode (`jvp`@term) and reverse-mode
+--     (`vjp`@term).
 --
---   * Arbitrary control flow in differentiable code.
+--   * Almost arbitrary control flow in differentiable code (some limitations
+--     apply when using GPU backends, see below).
 --
 --   * Higher order derivatives by nesting differentiation operators, including
 --     arbitrary mixing of forward- and reverse mode (although using multiple
 --     rounds of reverse mode is rarely useful and often slow).
 --
---   * Custom derivatives (`with_vjp`).
+--   * Custom derivatives (`with_vjp`@term).
+--
+--   * Vector AD (`mjp`@term, `jmp`@term), sometimes also known as "batched" or
+--    "multi-directional" AD.
 --
 --   * Checkpointing of sequential loops.
 --
 -- ## Jacobians
 --
--- For a differentiable function *f* whose input comprise *n* scalars
--- and whose output comprises *m* scalars, the
--- [Jacobian](https://en.wikipedia.org/wiki/Jacobian_matrix_and_determinant)
--- for a given input point is an *m* by *n* matrix of scalars that
--- each represent a [partial
--- derivatives](https://en.wikipedia.org/wiki/Partial_derivative).
--- Intuitively, position *(i,j)* of the Jacobian describes how
--- sensitive output *i* is to input *j*. The notion of Jacobian
--- generalises to functions that accept or produce compound structures
--- such as arrays, records, sums, and so on, simply by "flattening
--- out" the values and considering only their constituent scalars.
+-- For a differentiable function *f* whose input comprise *n* scalars and whose
+-- output comprises *m* scalars, the
+-- [Jacobian](https://en.wikipedia.org/wiki/Jacobian_matrix_and_determinant) for
+-- a given input point is an *m* by *n* matrix of scalars that each represent a
+-- [partial derivative](https://en.wikipedia.org/wiki/Partial_derivative).
+-- Intuitively, position *(i,j)* of the Jacobian describes how sensitive output
+-- *i* is to input *j*. The notion of Jacobian generalises to functions that
+-- accept or produce compound structures such as arrays, records, sums, and so
+-- on, simply by "flattening out" the values and considering only their
+-- constituent scalars.
 --
--- Computing the full Jacobian is usually costly and sometimes not
--- necessary, and it is not part of the AD facility provided by
--- Futhark. Instead it is possible to parts of the Jacobian.
+-- Computing the full Jacobian is usually costly and sometimes not necessary,
+-- and it is not part of the AD facility provided by Futhark. Instead it is
+-- possible to compute parts of the Jacobian, which semantically (but not
+-- operationally) can be seen as multiplying the Jacobian with a vector,
+-- producing a vector. However, it is important to understand that the full
+-- Jacobian is *not* constructed as an intermediate step.
 --
--- We can take the product of an an *m* by *n* Jacobian with an
--- *n*-element *tangent vector* to produce an *m*-element vector
--- (*Jacobian-vector product*). Such a product can be computed in a
--- single (augmented) execution of the function *f*, and by choosing
--- the tangent vector appropriately we can use this to compute the
--- full Jacobian. This is provided by the function `jvp`.
+-- We can take the product of an *m* by *n* Jacobian with an *n*-element
+-- *tangent vector* to produce an *m*-element vector (*Jacobian-vector
+-- product*). Such a product can be computed in a single (augmented) execution
+-- of the function *f*. This is provided by the function `jvp`.
 --
 -- We can also take the product of an *m*-element vector *cotangent
 -- vector* with the *m* by *n* Jacobian to produce an *n*-element
--- vector (*Vector-Jacobian product*). This too can be computed in a
+-- vector (*vector-Jacobian product*). This too can be computed in a
 -- single execution of *f*, with `vjp`.
 --
--- We can use the `jvp` function to produce a *column* of the full
--- Jacobian, and `vjp` to produce a *row*. Which is superior for a
--- given situation depends on whether the function has more inputs or
--- outputs.
+-- A tangent has the same structure as the input and represents a direction in
+-- input space. A cotangent has the same structure as the output and represents
+-- sensitivities flowing backwards through the computation.
 --
--- You can freely nest `vjp` and `jvp` to compute higher-order
--- derivatives.
+-- Using an elementary (co-)tangent vector, we can use the `jvp` function to
+-- produce a *column* of the full Jacobian, and `vjp` to produce a *row*, with
+-- the nonzero element of the vector identifying which column or row is
+-- extracted. Which is superior for a given situation depends on whether the
+-- function has more inputs or outputs.
+--
+-- We can freely nest `vjp` and `jvp` to compute higher-order derivatives.
 --
 -- ## Efficiency
 --
 -- Both `jvp` and `vjp` work by transforming the program to carry
 -- along extra information associated with each scalar value.
 --
--- In the case of `jvp`, this extra information takes the form of an
--- additional scalar representing the tangent, which is then
--- propagated in each scalar computation using essentially the [chain
--- rule](https://en.wikipedia.org/wiki/Chain_rule). Therefore, `jvp`
--- has a memory overhead of approximately *2x*, and a computational
--- overhead of slightly more, but usually less than *4x*.
+-- In the case of `jvp` ("forward mode", or "tangent mode"), this extra
+-- information takes the form of an additional scalar representing the tangent,
+-- which is then propagated in each scalar computation using essentially the
+-- [chain rule](https://en.wikipedia.org/wiki/Chain_rule). Therefore, `jvp` has
+-- a memory overhead of approximately *2x*, and a computational overhead of
+-- slightly more, but usually less than *4x*.
 --
--- In the case of `vjp`, since our starting point is a *cotangent*,
--- the function is essentially first run forward, then backwards (the
--- *return sweep*) to propagate the cotangent. During the return
--- sweep, all intermediate results computed during the forward sweep
--- must still be available, and must therefore be stored in memory
--- during the forward sweep. This means that the memory usage of `vjp`
--- is proportional to the number of sequential steps of the original
--- function (essentially turning *time* into *space*). The compiler
--- does a nontrivial amount of optimisation to ameliorate this
--- overhead (see [AD for an Array Language with Nested
--- Parallelism](https://futhark-lang.org/publications/sc22-ad.pdf)),
--- but it can still be substantial for programs with deep sequential
--- loops.
+-- In the case of `vjp` ("reverse mode" or "adjoint mode"), since our starting
+-- point is a *cotangent*, the function is essentially first run forward, then
+-- backwards (the *return sweep*) to propagate the cotangent. During the return
+-- sweep, all intermediate results computed during the forward sweep must still
+-- be available, and must therefore be stored in memory during the forward sweep
+-- - this is called "the tape". This means that the memory usage of `vjp` is
+-- proportional to the number of sequential steps of the original function
+-- (essentially turning *time* into *space*). The compiler does a nontrivial
+-- amount of optimisation to ameliorate this overhead (see [AD for an Array
+-- Language with Nested
+-- Parallelism](https://futhark-lang.org/publications/sc22-ad.pdf)), but it can
+-- still be substantial for programs with deep sequential loops.
+--
+-- Nesting `vjp`, understood as applying `vjp` to the result of `vjp`, is
+-- usually a bad idea, as the code structure produced by `vjp` is fairly
+-- complicated, due to the tape management. Passing the output of `jvp` to
+-- `vjp`, or the other way, is however fine. As a rule of thumb, whenever you
+-- stack multiple differential operators, make sure only one of them is `vjp` or
+-- related ones.
+--
+-- When using vector AD (`mjp`@term/`jmp`@term), each scalar is associated with
+-- a vector of tangents or cotangents, and the space overhead for storing these
+-- is therefore multiplied with the vector size. However, in the case of `vjp`,
+-- the intermediate results are only stored once. It varies on a case-by-case
+-- basis whether vector AD is faster than using `map` on top of
+-- `vjp`@term/`jvp`@term. Vector AD essentially converts propagation of
+-- (co-)tangents from scalar to array operations, which can have a significant
+-- impact on memory accesses, depending on how the compiler manages to optimise
+-- the resulting code. It is hard to predict whether this offsets the reduction
+-- in primal work. If the vector size is a constant, and the `#[unroll]`
+-- attribute is put on the AD operator, then the vectors become unrolled (turned
+-- into tuples, essentially), although this should only be done when the vector
+-- size is quite small, as the increase in code size is substantial.
 --
 -- ## Differentiable functions
 --
--- AD only gives meaningful results for differentiable functions. The
--- Futhark type system does not distinguish differentiable or
--- non-differentiable operations. As a rule of thumb, a function is
--- differentiable if its results are computed using a composition of
--- primitive floating-point operations, without ever converting to or
--- from integers.
+-- AD only gives meaningful results for differentiable functions. The Futhark
+-- type system does not distinguish differentiable from non-differentiable
+-- operations. As a rule of thumb, a function is differentiable if its results
+-- are computed using a composition of primitive floating-point operations,
+-- without ever converting to or from integers. Most functions will also have
+-- discontinuities around values that influence control flow.
 --
--- Note that a function whose input or output is a sum type with more
--- than one constructor is *not* differentiable (or at least the
--- sum-typed part is not). This is because the choice of constructor
--- is not a continuous quantity.
+-- Note that a function whose input or output is a sum type with more than one
+-- constructor is *not* differentiable (or at least the sum-typed part is not).
+-- This is because the choice of constructor is not a continuous quantity.
 --
 -- ## Limitations
 --
--- `jvp` is expected to work in all cases. `vjp` has limitations when
--- using the GPU backends similar to those for irregular flattening.
--- Specifically, you should avoid structures with variant sizes, such
--- as loops that carry an array that changes size through the
--- execution of the loop.
+-- `jvp` is expected to work in all cases. `vjp` has limitations when using the
+-- GPU backends similar to those for irregular flattening. Specifically, you
+-- should avoid structures with variant sizes, such as loops that carry an array
+-- that changes size through the execution of the loop.
 
 -- | Jacobian-Vector Product ("forward mode"), producing also the
 -- primal result as the first element of the result tuple.
@@ -123,6 +149,20 @@ def jvp2 'a 'b (f: a -> b) (x: a) (x': a) : (b, b) =
 def vjp2 'a 'b (f: a -> b) (x: a) (y': b) : (b, a) =
   intrinsics.vjp2 f x y'
 
+-- | Jacobian-Matrix Product, returning also the primal result. As `jvp2`, but
+-- accepts an array of seed vectors (hence "matrix", although transposed).
+-- Semantically equivalent to mapping, but may be more efficient. If used with
+-- `#[unroll]`, tangent calculations are unrolled when possible.
+def jmp2 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : (b, [n]b) =
+  intrinsics.jmp2 f x x'
+
+-- | Matrix-Jacobian Product, returning also the primal result. As `vjp2`, but
+-- accepts an array of seed vectors (hence "matrix"). Semantically equivalent to
+-- mapping, but may be more efficient. If used with `#[unroll]`, adjoint
+-- calculations are unrolled when possible.
+def mjp2 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : (b, [n]a) =
+  intrinsics.mjp2 f x y'
+
 -- | Jacobian-Vector Product ("forward mode").
 def jvp 'a 'b (f: a -> b) (x: a) (x': a) : b =
   (jvp2 f x x').1
@@ -130,6 +170,16 @@ def jvp 'a 'b (f: a -> b) (x: a) (x': a) : b =
 -- | Vector-Jacobian Product ("reverse mode").
 def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
   (vjp2 f x y').1
+
+-- | Jacobian-Matrix Product. As `jvp`, but accepts a vector of seed values.
+-- Semantically equivalent to mapping, but may be more efficient.
+def jmp 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : [n]b =
+  (jmp2 f x x').1
+
+-- | Matrix-Jacobian product. As `vjp`, but accepts a vector of seed values.
+-- Semantically equivalent to mapping, but may be more efficient.
+def mjp 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : [n]a =
+  (mjp2 f x y').1
 
 -- | Provide custom reverse-mode adjoint code for a given function. This is
 -- useful when the adjoint synthesised by AD is not as good as one that is known
@@ -144,8 +194,7 @@ def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
 -- primal result of `with_vjp`, and some part is only used in `f'`.
 --
 -- **Beware:** if `f` uses any free variables, these will not be taken into
--- **account when computing the adjoint. Make these part of the argument
--- **instead.
+-- account when computing the adjoint. Make these part of the argument instead.
 def with_vjp 'a 'b (f: a -> b) (f': (res: b) -> (b_adj: b) -> a) (x: a) : b =
   intrinsics.with_vjp f f' x
 
