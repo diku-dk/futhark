@@ -747,7 +747,8 @@ onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod =
             pure $ subExpsRes [sz]
       rep' <- case irregularK rep of
         Dense -> do
-          (new_F, new_O, _new_elems) <- doSegIota lvl new_S
+          (_, new_O, m) <- exScanAndSum lvl new_S
+          new_F <- genFlags lvl m new_O
           pure $
             IrregularRep
               { irregularD = irregularD rep,
