@@ -79,6 +79,11 @@ def ker2Blk [n]
 
 -- Simple test for fusing scatter-flatten with the preceding
 -- map nest that produces its indices and values
+--
+-- The expected structure test (that the WithAcc contains a WithAcc) is just a
+-- proxy for detecting that the map (which happens to contain its own WithAcc,
+-- that is, a scatter) ends up inside the outermost WithAcc (from the scatter at
+-- the end of radixIt).
 -- ==
 -- entry: radixIt
 -- input { 3i64 8i64 0u32
@@ -93,6 +98,7 @@ def ker2Blk [n]
 --          , 9u32, 9u32, 10u32, 10u32, 11u32, 11u32, 12u32, 12u32
 --          ]
 -- }
+-- structure { /WithAcc/WithAcc 1 }
 
 entry radixIt (m: i64)
               (bq: i64)
