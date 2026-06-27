@@ -37,7 +37,6 @@ import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe (maybeToList)
 import Futhark.Analysis.HORep.SOAC qualified as H
-import Futhark.Builder (runLambdaBuilder)
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.Optimise.Fusion.GraphRep
