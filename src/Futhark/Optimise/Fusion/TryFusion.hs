@@ -538,11 +538,21 @@ commonTransforms' inps =
     Just (Just mot, inps') -> first (mot SOAC.<|) $ commonTransforms' $ reverse inps'
     _ -> (SOAC.noTransforms, map snd inps)
   where
+    -- Two reshapes with the same shape are compatible even if their certs differ;
+    -- merge the certs to produce a single common reshape transform.
+    compatibleTransforms (SOAC.Reshape aux1 shape1) (SOAC.Reshape aux2 shape2)
+      | shape1 == shape2 =
+          Just $ SOAC.Reshape (aux1 <> aux2) shape1
+    compatibleTransforms ot1 ot2
+      | ot1 == ot2 = Just ot1
+    compatibleTransforms _ _ = Nothing
+
     inspect (mot, prev) (True, inp) =
       case (mot, inputToOutput inp) of
         (Nothing, Just (ot, inp')) -> Just (Just ot, (True, inp') : prev)
         (Just ot1, Just (ot2, inp'))
-          | ot1 == ot2 -> Just (Just ot2, (True, inp') : prev)
+          | Just combined <- compatibleTransforms ot1 ot2 ->
+              Just (Just combined, (True, inp') : prev)
         _ -> Nothing
     inspect (mot, prev) inp = Just (mot, inp : prev)
 
@@ -676,13 +686,11 @@ pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransf
 pullReshape soac ots = do
   Just mapnest <- MapNest.fromSOAC soac
   SOAC.Reshape cs newshape SOAC.:< ots' <- pure $ SOAC.viewf ots
-  -- This handles only the easy case where the underlying lambda is
-  -- scalar. The more complicated cases could also be handled, but
-  -- requires more tricky checks.
-  guard $
-    all
-      ((== MapNest.depth mapnest) . arrayRank)
-      (MapNest.typeOf mapnest)
+  let out_types = MapNest.typeOf mapnest
+      out_rank = maximum $ map arrayRank out_types
+      nest_depth = MapNest.depth mapnest
+  guard $ all ((== out_rank) . arrayRank) out_types
+  guard $ out_rank == nest_depth
   mapnest' <- MapNest.reshape cs (newShape newshape) mapnest
   soac' <- MapNest.toSOAC mapnest'
   pure (soac', ots')
