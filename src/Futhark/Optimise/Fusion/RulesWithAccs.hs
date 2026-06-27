@@ -249,9 +249,7 @@ trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGra
             SoacNode {} <- maybeToList $ G.lab g sn_id
             pure sn_id
       case (trans_preds, soac_ids) of
-        ([], _) -> pure dg
-        (_, []) -> pure dg
-        (_, soac_id : rest)
+        (_ : _, soac_id : rest)
           | not (all (== soac_id) rest) -> pure dg
           | Just (SoacNode ots1 pat1 soac@(H.Screma {}) aux1) <- G.lab g soac_id,
             ots1 == mempty,
@@ -259,41 +257,46 @@ trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGra
             all ((`elem` trans_ids) . fst) (G.lpre g soac_id),
             let wacc_cons_nms = namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps
                 soac_inp_nms = map H.inputArray $ H.inputs soac,
-            all (`notNameIn` wacc_cons_nms) soac_inp_nms -> do
-              let trans_info = map (\(_, out, tr, inp) -> (out, tr, inp)) trans_preds
-              lam' <- runLambdaBuilder (lambdaParams lam0) $ do
-                soac' <- H.toExp soac
-                addStm $ Let pat1 aux1 soac'
-                forM_ trans_info $ \(out, tr, inp) -> do
-                  (tr_aux, tr_exp) <- H.transformToExp tr inp
-                  out_t <- lookupType out
-                  addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
-                bodyBind $ lambdaBody lam0
-              lam_renamed <- renameLambda lam'
-              (lam'', success) <- doFusionInLambda lam_renamed
-              if not success
-                then pure dg
-                else do
-                  void $ fusedSomething (StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'')
-                  -- Rebuild the graph: remove absorbed nodes and rewire wacc's edges.
-                  -- G.context returns (in_adj, n, label, out_adj) where both adjacency
-                  -- lists are [(EdgeT, Node)] (edge-first). G.lsuc/lpre are (Node, EdgeT).
-                  let new_wacc = StmNode $ Let pat2 aux2 $ WithAcc w_inps lam''
-                      to_remove = soac_id : map (\(tn_id, _, _, _) -> tn_id) trans_preds
-                      g' = foldr G.delNode g to_remove
-                      (wacc_preds, _, _, wacc_succs) = G.context g wacc_id
-                      new_succs =
-                        nubOrd $
-                          filter ((`G.gelem` g') . fst) (G.lsuc g soac_id)
-                            ++ concatMap (filter (\(n, _) -> G.gelem n g' && n /= soac_id) . (\(tn_id, _, _, _) -> G.lsuc g tn_id)) trans_preds
-                            ++ map (\(e, n) -> (n, e)) (filter ((`G.gelem` g') . snd) wacc_succs)
-                      new_preds = filter ((`G.gelem` g') . snd) wacc_preds
-                      g'' = G.insNode (wacc_id, new_wacc) $ G.delNode wacc_id g'
-                      g''' = foldr (\(e, n) gr -> G.insEdge (n, wacc_id, e) gr) g'' new_preds
-                      g'''' = foldr (\(n, e) gr -> G.insEdge (wacc_id, n, e) gr) g''' new_succs
-                  pure dg {dgGraph = g''''}
-          | otherwise -> pure dg
+            all (`notNameIn` wacc_cons_nms) soac_inp_nms ->
+              attempt trans_preds soac_id pat1 aux1 pat2 aux2 w_inps lam0 soac
+        _ -> pure dg
   | otherwise = pure dg
+  where
+    attempt trans_preds soac_id pat1 aux1 pat2 aux2 w_inps lam0 soac = do
+      let trans_info = map (\(_, out, tr, inp) -> (out, tr, inp)) trans_preds
+      lam' <- renameLambda <=< runLambdaBuilder (lambdaParams lam0) $ do
+        soac' <- H.toExp soac
+        addStm $ Let pat1 aux1 soac'
+        forM_ trans_info $ \(out, tr, inp) -> do
+          (tr_aux, tr_exp) <- H.transformToExp tr inp
+          out_t <- lookupType out
+          addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
+        bodyBind $ lambdaBody lam0
+      (lam'', success) <- doFusionInLambda lam'
+      if success
+        then onSuccess trans_preds soac_id pat2 aux2 w_inps lam''
+        else pure dg
+
+    onSuccess trans_preds soac_id pat2 aux2 w_inps lam'' = do
+      void $ fusedSomething (StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'')
+      -- Rebuild the graph: remove absorbed nodes and rewire wacc's
+      -- edges. G.context returns (in_adj, n, label, out_adj) where
+      -- both adjacency lists are [(EdgeT, Node)] (edge-first).
+      -- G.lsuc/lpre are (Node, EdgeT).
+      let new_wacc = StmNode $ Let pat2 aux2 $ WithAcc w_inps lam''
+          to_remove = soac_id : map (\(tn_id, _, _, _) -> tn_id) trans_preds
+          g' = foldr G.delNode g to_remove
+          (wacc_preds, _, _, wacc_succs) = G.context g wacc_id
+          new_succs =
+            nubOrd $
+              filter ((`G.gelem` g') . fst) (G.lsuc g soac_id)
+                ++ concatMap (filter (\(n, _) -> G.gelem n g' && n /= soac_id) . (\(tn_id, _, _, _) -> G.lsuc g tn_id)) trans_preds
+                ++ map (\(e, n) -> (n, e)) (filter ((`G.gelem` g') . snd) wacc_succs)
+          new_preds = filter ((`G.gelem` g') . snd) wacc_preds
+          g'' = G.insNode (wacc_id, new_wacc) $ G.delNode wacc_id g'
+          g''' = foldr (\(e, n) gr -> G.insEdge (n, wacc_id, e) gr) g'' new_preds
+          g'''' = foldr (\(n, e) gr -> G.insEdge (wacc_id, n, e) gr) g''' new_succs
+      pure dg {dgGraph = g''''}
 
 -------------------------------
 --- simple helper functions ---
