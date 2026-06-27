@@ -14,8 +14,8 @@
 --        simplifyLambda to hoist the cheap reshape back out, recreating
 --        the same TransNode and triggering the rule again. The strategy
 --        is to prepend the SoacNode and all TransNode statements into
---        the WithAcc lambda body and run doFusionInLambda, which can
---        then fuse the SoacNode with the inner scatter via pullReshape.
+--        the WithAcc lambda body and run doFusionInLambda to fuse
+--        further where possible.
 --
 --    II. WithAcc-WithAcc fusion: two withaccs can be
 --        fused as long as the common accumulators use
@@ -238,61 +238,72 @@ trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGra
   | Just (StmNode (Let pat2 aux2 (WithAcc w_inps lam0))) <- G.lab g wacc_id = do
       -- Edges go FROM consumers TO producers:
       --   G.lpre g n = consumers of n; G.lsuc g n = producers n depends on.
-      let trans_preds = do
+      -- realConsumers n: consumers of n, excluding Alias edges and self-loops.
+      let wacc_cons_nms = namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps
+          realConsumers n =
+            nubOrd $
+              map fst $
+                filter (\(m, e) -> m /= n && case e of Alias {} -> False; _ -> True) $
+                  G.lpre g n
+          -- TransNodes that directly feed wacc and are exclusively consumed by wacc.
+          trans_preds = do
             (tn_id, _) <- G.lsuc g wacc_id
             TransNode out tr inp <- maybeToList $ G.lab g tn_id
-            guard $ all ((== wacc_id) . fst) (G.lpre g tn_id)
+            guard $ realConsumers tn_id == [wacc_id]
             pure (tn_id, out, tr, inp)
-          soac_ids = do
+          trans_ids = map (\(a, _, _, _) -> a) trans_preds
+          trans_out_nms = namesFromList $ map (\(_, out, _, _) -> out) trans_preds
+          -- The unique Screma SoacNode that feeds all TransNodes and has no
+          -- other consumers besides those TransNodes.
+          soac_preds = do
             (tn_id, _, _, _) <- trans_preds
             (sn_id, _) <- G.lsuc g tn_id
-            SoacNode {} <- maybeToList $ G.lab g sn_id
+            guard $ sn_id `notElem` trans_ids
+            guard $ all (\c -> c `elem` trans_ids) (realConsumers sn_id)
             pure sn_id
-      case (trans_preds, soac_ids) of
-        (_ : _, soac_id : rest)
-          | not (all (== soac_id) rest) -> pure dg
-          | Just (SoacNode ots1 pat1 soac@(H.Screma {}) aux1) <- G.lab g soac_id,
+          prod_ids = nubOrd soac_preds
+      case (trans_preds, prod_ids) of
+        (_ : _, [prod_id])
+          | Just (SoacNode ots1 pat1 soac@(H.Screma {}) aux1) <- G.lab g prod_id,
             ots1 == mempty,
-            let trans_ids = map (\(a, _, _, _) -> a) trans_preds,
-            all ((`elem` trans_ids) . fst) (G.lpre g soac_id),
-            let wacc_cons_nms = namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps
-                soac_inp_nms = map H.inputArray $ H.inputs soac
-                trans_out_nms = namesFromList $ map (\(_, out, _, _) -> out) trans_preds,
-            all (`notNameIn` wacc_cons_nms) soac_inp_nms,
+            all (`notNameIn` wacc_cons_nms) (map H.inputArray $ H.inputs soac),
             not $ namesIntersect trans_out_nms wacc_cons_nms ->
-              attempt trans_preds soac_id pat1 aux1 pat2 aux2 w_inps lam0 soac
+              attempt trans_ids trans_preds prod_id pat1 aux1 soac pat2 aux2 w_inps lam0
         _ -> pure dg
   | otherwise = pure dg
   where
-    attempt trans_preds soac_id pat1 aux1 pat2 aux2 w_inps lam0 soac = do
+    attempt trans_ids trans_preds prod_id pat1 aux1 soac pat2 aux2 w_inps lam0 = do
       let trans_info = map (\(_, out, tr, inp) -> (out, tr, inp)) trans_preds
       lam' <- renameLambda <=< runLambdaBuilder (lambdaParams lam0) $ do
         soac' <- H.toExp soac
         addStm $ Let pat1 aux1 soac'
         forM_ trans_info $ \(out, tr, inp) -> do
           (tr_aux, tr_exp) <- H.transformToExp tr inp
-          out_t <- lookupType out
-          addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
+          auxing tr_aux $ letBindNames [out] tr_exp
         bodyBind $ lambdaBody lam0
-      (lam'', success) <- doFusionInLambda lam'
-      if success
-        then onSuccess trans_preds soac_id pat2 aux2 w_inps lam''
-        else pure dg
+      -- Run inner fusion. We always proceed with onSuccess because embedding
+      -- the SoacNode + TransNodes into the WithAcc is itself a valid fusion
+      -- step and avoids potential infinite loops from simplifyLambda hoisting
+      -- a reshape back out.
+      lam'' <- fst <$> doFusionInLambda lam'
+      onSuccess trans_ids prod_id pat2 aux2 w_inps lam''
 
-    onSuccess trans_preds soac_id pat2 aux2 w_inps lam'' = do
+    onSuccess trans_ids prod_id pat2 aux2 w_inps lam'' = do
       void $ fusedSomething (StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'')
-      -- Rebuild the graph: remove absorbed nodes and rewire wacc's
-      -- edges. G.context returns (in_adj, n, label, out_adj) where
-      -- both adjacency lists are [(EdgeT, Node)] (edge-first).
-      -- G.lsuc/lpre are (Node, EdgeT).
-      let new_wacc = StmNode $ Let pat2 aux2 $ WithAcc w_inps lam''
-          to_remove = soac_id : map (\(tn_id, _, _, _) -> tn_id) trans_preds
+      -- Rebuild the graph: remove absorbed nodes and rewire wacc's edges.
+      -- G.context returns (in_adj, n, label, out_adj) where both adjacency
+      -- lists are [(EdgeT, Node)]. G.lsuc/lpre are (Node, EdgeT).
+      let to_remove = prod_id : trans_ids
+          new_wacc = StmNode $ Let pat2 aux2 $ WithAcc w_inps lam''
           g' = foldr G.delNode g to_remove
           (wacc_preds, _, _, wacc_succs) = G.context g wacc_id
+          -- Inherit producers of the absorbed nodes that are still in g'.
+          removed_succs =
+            nubOrd $
+              concatMap (\n -> filter ((`G.gelem` g') . fst) (G.lsuc g n)) to_remove
           new_succs =
             nubOrd $
-              filter ((`G.gelem` g') . fst) (G.lsuc g soac_id)
-                ++ concatMap (filter (\(n, _) -> G.gelem n g' && n /= soac_id) . (\(tn_id, _, _, _) -> G.lsuc g tn_id)) trans_preds
+              removed_succs
                 ++ map (\(e, n) -> (n, e)) (filter ((`G.gelem` g') . snd) wacc_succs)
           new_preds = filter ((`G.gelem` g') . snd) wacc_preds
           g'' = G.insNode (wacc_id, new_wacc) $ G.delNode wacc_id g'
