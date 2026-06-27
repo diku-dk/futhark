@@ -256,8 +256,10 @@ trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGra
             let trans_ids = map (\(a, _, _, _) -> a) trans_preds,
             all ((`elem` trans_ids) . fst) (G.lpre g soac_id),
             let wacc_cons_nms = namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps
-                soac_inp_nms = map H.inputArray $ H.inputs soac,
-            all (`notNameIn` wacc_cons_nms) soac_inp_nms ->
+                soac_inp_nms = map H.inputArray $ H.inputs soac
+                trans_out_nms = namesFromList $ map (\(_, out, _, _) -> out) trans_preds,
+            all (`notNameIn` wacc_cons_nms) soac_inp_nms,
+            not $ namesIntersect trans_out_nms wacc_cons_nms ->
               attempt trans_preds soac_id pat1 aux1 pat2 aux2 w_inps lam0 soac
         _ -> pure dg
   | otherwise = pure dg
