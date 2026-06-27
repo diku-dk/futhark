@@ -362,12 +362,14 @@ vFuseNodeT
         let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
             pat = Pat $ patElems pat2 ++ patElems pat1
         lam' <- renameLambda $ lam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
-        -- Only commit if inner fusion actually benefited; avoids infinite loop
-        -- in keepTrying when the rule fires but pullReshape cannot proceed.
+        -- see if bringing the map inside the scatter has actually benefitted fusion
         (lam'', success) <- doFusionInLambda lam'
         if not success
           then pure Nothing
-          else fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
+          else do
+            -- `aux1` already appear in the moved SOAC stm; is there
+            -- any need to add it to the enclosing withAcc stm as well?
+            fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
 
 --
 -- The reverse of the case above, i.e., fusing a screma at the back of an

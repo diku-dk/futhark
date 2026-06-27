@@ -686,11 +686,10 @@ pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransf
 pullReshape soac ots = do
   Just mapnest <- MapNest.fromSOAC soac
   SOAC.Reshape cs newshape SOAC.:< ots' <- pure $ SOAC.viewf ots
-  let out_types = MapNest.typeOf mapnest
-      out_rank = maximum $ map arrayRank out_types
-      nest_depth = MapNest.depth mapnest
-  guard $ all ((== out_rank) . arrayRank) out_types
-  guard $ out_rank == nest_depth
+  guard $
+    all
+      ((== MapNest.depth mapnest) . arrayRank)
+      (MapNest.typeOf mapnest)
   mapnest' <- MapNest.reshape cs (newShape newshape) mapnest
   soac' <- MapNest.toSOAC mapnest'
   pure (soac', ots')
