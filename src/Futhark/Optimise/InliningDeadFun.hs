@@ -10,8 +10,8 @@ where
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
-import Data.Foldable (traverse_)
 import Control.Parallel.Strategies
+import Data.Foldable (traverse_)
 import Data.Functor (($>))
 import Data.List (partition)
 import Data.Map.Strict qualified as M
