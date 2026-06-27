@@ -27,12 +27,14 @@
 --        they can be transformed by various optimizations passes.
 module Futhark.Optimise.Fusion.RulesWithAccs
   ( tryFuseWithAccs,
+    trySoacThroughTransBody,
   )
 where
 
 import Control.Monad
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.Transform.Rename
@@ -211,6 +213,35 @@ tryFuseWithAccs
 --
 tryFuseWithAccs _ _ _ =
   Nothing
+
+---------------------------------------------------
+--- Soac-through-Trans-into-WithAcc body builder
+---------------------------------------------------
+
+-- | Build the new 'Lambda' for the atomic soac-through-trans fusion.
+-- Prepends @soac_stm@ and @trans_stms@ in front of @lam0@'s body, so that
+-- 'doFusionInLambda' can fire 'pullReshape' on the result.
+trySoacThroughTransBody ::
+  (HasScope SOACS m, MonadFreshNames m) =>
+  -- | The WithAcc lambda whose body we are extending.
+  Lambda SOACS ->
+  -- | The SOAC statement to prepend: (pattern, aux, soac).
+  (Pat Type, StmAux (), H.SOAC SOACS) ->
+  -- | The transform statements to prepend: (output name, transform, input).
+  [(VName, H.ArrayTransform, VName)] ->
+  m (Lambda SOACS)
+trySoacThroughTransBody lam0 (pat1, aux1, soac) trans_info = do
+  bdy' <- runBodyBuilder $ inScopeOf lam0 $ do
+    soac' <- H.toExp soac
+    addStm $ Let pat1 aux1 soac'
+    forM_ trans_info $ \(out, tr, inp) -> do
+      (tr_aux, tr_exp) <- H.transformToExp tr inp
+      out_t <- lookupType out
+      addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
+    bodyBind $ lambdaBody lam0
+  pure $ mkLambda' (lambdaParams lam0) (lambdaReturnType lam0) bdy'
+  where
+    mkLambda' params ret body = Lambda {lambdaParams = params, lambdaReturnType = ret, lambdaBody = body}
 
 -------------------------------
 --- simple helper functions ---
