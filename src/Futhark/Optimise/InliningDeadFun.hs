@@ -10,6 +10,7 @@ where
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
+import Data.Foldable (traverse_)
 import Control.Parallel.Strategies
 import Data.Functor (($>))
 import Data.List (partition)
@@ -136,6 +137,15 @@ directlyCalledInSOACs = flip execState mempty . mapM_ (onStm Nothing) . progStms
     onStm u stm = onExp u (stmExp stm) $> stm
     onExp (Just u) (Apply fname _ _ _) = modify $ M.insertWith max fname u
     onExp Nothing Apply {} = pure ()
+    -- Treat functions called inside WithAcc lambda bodies as called inside
+    -- a SOAC, so they get inlined aggressively. This restores the inlining
+    -- behaviour for functions involved in accumulator-based scatter patterns.
+    onExp u (WithAcc inputs lam) = do
+      forM_ inputs $ \(_, _, mop) ->
+        traverse_ (\(oplam, _) -> onBody u' (lambdaBody oplam)) mop
+      onBody u' (lambdaBody lam)
+      where
+        u' = max u (Just InSOAC)
     onExp u e = walkExpM (walker u) e
     onSOAC u soac = void $ traverseSOACStms (const (traverse (onStm u'))) soac
       where
