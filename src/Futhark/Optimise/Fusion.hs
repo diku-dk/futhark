@@ -347,9 +347,6 @@ vFuseNodeT
   (StmNode (Let pat2 aux2 (WithAcc w_inps lam0)), _os2)
     | ots1 == mempty,
       not $ any isFake edges,
-      -- Only attempt when the SOAC produces multi-dimensional arrays; scalar
-      -- or 1D outputs can't benefit from pullReshape inside the WithAcc lambda.
-      any ((> 1) . arrayRank) $ map patElemType $ patElems pat1,
       wacc_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps,
       soac_prod_nms <- map patElemName $ patElems pat1,
       soac_indep_nms <- map getName os1,
