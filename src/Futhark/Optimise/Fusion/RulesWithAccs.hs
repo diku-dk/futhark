@@ -27,18 +27,23 @@
 --        they can be transformed by various optimizations passes.
 module Futhark.Optimise.Fusion.RulesWithAccs
   ( tryFuseWithAccs,
-    trySoacThroughTransBody,
+    trySoacThroughTransIntoWithAcc,
   )
 where
 
 import Control.Monad
+import Data.Graph.Inductive.Graph qualified as G
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Data.Maybe (maybeToList)
 import Futhark.Analysis.HORep.SOAC qualified as H
+import Futhark.Builder (runLambdaBuilder)
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
+import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util (nubOrd)
 
 ---------------------------------------------------
 --- II. WithAcc-WithAcc Fusion
@@ -215,33 +220,91 @@ tryFuseWithAccs _ _ _ =
   Nothing
 
 ---------------------------------------------------
---- Soac-through-Trans-into-WithAcc body builder
+--- Soac-through-Trans-into-WithAcc fusion
 ---------------------------------------------------
 
--- | Build the new 'Lambda' for the atomic soac-through-trans fusion.
--- Prepends @soac_stm@ and @trans_stms@ in front of @lam0@'s body, so that
--- 'doFusionInLambda' can fire 'pullReshape' on the result.
-trySoacThroughTransBody ::
+-- | Fuse a SoacNode into a WithAcc atomically when all dep-paths between
+-- them go through TransNodes (reshapes/rearranges) that have no other
+-- consumers. This must be done in one step to avoid an infinite loop:
+-- absorbing only the TransNode into the WithAcc lambda and then calling
+-- doFusionInLambda causes simplifyLambda to hoist the (cheap/safe) reshape
+-- back out, recreating the same TransNode node and triggering the rule again.
+--
+-- Strategy: prepend the SoacNode statement and all TransNode statements into
+-- the WithAcc lambda body, run doFusionInLambda (which can now fuse the
+-- SoacNode with the innerscatter via pullReshape), and commit only on success.
+-- Then remove the consumed SoacNode and TransNode graph nodes.
+--
+-- The @doFusionInLambda@ and @fusedSomething@ arguments are callbacks from
+-- Fusion.hs to avoid a circular import.
+trySoacThroughTransIntoWithAcc ::
   (HasScope SOACS m, MonadFreshNames m) =>
-  -- | The WithAcc lambda whose body we are extending.
-  Lambda SOACS ->
-  -- | The SOAC statement to prepend: (pattern, aux, soac).
-  (Pat Type, StmAux (), H.SOAC SOACS) ->
-  -- | The transform statements to prepend: (output name, transform, input).
-  [(VName, H.ArrayTransform, VName)] ->
-  m (Lambda SOACS)
-trySoacThroughTransBody lam0 (pat1, aux1, soac) trans_info = do
-  bdy' <- runBodyBuilder $ inScopeOf lam0 $ do
-    soac' <- H.toExp soac
-    addStm $ Let pat1 aux1 soac'
-    forM_ trans_info $ \(out, tr, inp) -> do
-      (tr_aux, tr_exp) <- H.transformToExp tr inp
-      out_t <- lookupType out
-      addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
-    bodyBind $ lambdaBody lam0
-  pure $ mkLambda' (lambdaParams lam0) (lambdaReturnType lam0) bdy'
-  where
-    mkLambda' params ret body = Lambda {lambdaParams = params, lambdaReturnType = ret, lambdaBody = body}
+  (Lambda SOACS -> m (Lambda SOACS, Bool)) ->
+  (NodeT -> m (Maybe NodeT)) ->
+  G.Node ->
+  DepGraphAug m
+trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGraph {dgGraph = g}
+  | not (G.gelem wacc_id g) = pure dg
+  | Just (StmNode (Let pat2 aux2 (WithAcc w_inps lam0))) <- G.lab g wacc_id = do
+      -- Edges go FROM consumers TO producers:
+      --   G.lpre g n = consumers of n; G.lsuc g n = producers n depends on.
+      let trans_preds = do
+            (tn_id, _) <- G.lsuc g wacc_id
+            TransNode out tr inp <- maybeToList $ G.lab g tn_id
+            guard $ all ((== wacc_id) . fst) (G.lpre g tn_id)
+            pure (tn_id, out, tr, inp)
+          soac_ids = do
+            (tn_id, _, _, _) <- trans_preds
+            (sn_id, _) <- G.lsuc g tn_id
+            SoacNode {} <- maybeToList $ G.lab g sn_id
+            pure sn_id
+      case (trans_preds, soac_ids) of
+        ([], _) -> pure dg
+        (_, []) -> pure dg
+        (_, soac_id : rest)
+          | not (all (== soac_id) rest) -> pure dg
+          | Just (SoacNode ots1 pat1 soac@(H.Screma {}) aux1) <- G.lab g soac_id,
+            ots1 == mempty,
+            let trans_ids = map (\(a, _, _, _) -> a) trans_preds,
+            all ((`elem` trans_ids) . fst) (G.lpre g soac_id),
+            let wacc_cons_nms = namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps
+                soac_inp_nms = map H.inputArray $ H.inputs soac,
+            all (`notNameIn` wacc_cons_nms) soac_inp_nms -> do
+              let trans_info = map (\(_, out, tr, inp) -> (out, tr, inp)) trans_preds
+              lam' <- runLambdaBuilder (lambdaParams lam0) $
+                inScopeOf lam0 $ do
+                  soac' <- H.toExp soac
+                  addStm $ Let pat1 aux1 soac'
+                  forM_ trans_info $ \(out, tr, inp) -> do
+                    (tr_aux, tr_exp) <- H.transformToExp tr inp
+                    out_t <- lookupType out
+                    addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
+                  bodyBind $ lambdaBody lam0
+              lam_renamed <- renameLambda lam'
+              (lam'', success) <- doFusionInLambda lam_renamed
+              if not success
+                then pure dg
+                else do
+                  void $ fusedSomething (StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'')
+                  -- Rebuild the graph: remove absorbed nodes and rewire wacc's edges.
+                  -- G.context returns (in_adj, n, label, out_adj) where both adjacency
+                  -- lists are [(EdgeT, Node)] (edge-first). G.lsuc/lpre are (Node, EdgeT).
+                  let new_wacc = StmNode $ Let pat2 aux2 $ WithAcc w_inps lam''
+                      to_remove = soac_id : map (\(tn_id, _, _, _) -> tn_id) trans_preds
+                      g' = foldr G.delNode g to_remove
+                      (wacc_preds, _, _, wacc_succs) = G.context g wacc_id
+                      new_succs =
+                        nubOrd $
+                          filter ((`G.gelem` g') . fst) (G.lsuc g soac_id)
+                            ++ concatMap (filter (\(n, _) -> G.gelem n g' && n /= soac_id) . (\(tn_id, _, _, _) -> G.lsuc g tn_id)) trans_preds
+                            ++ map (\(e, n) -> (n, e)) (filter ((`G.gelem` g') . snd) wacc_succs)
+                      new_preds = filter ((`G.gelem` g') . snd) wacc_preds
+                      g'' = G.insNode (wacc_id, new_wacc) $ G.delNode wacc_id g'
+                      g''' = foldr (\(e, n) gr -> G.insEdge (n, wacc_id, e) gr) g'' new_preds
+                      g'''' = foldr (\(n, e) gr -> G.insEdge (wacc_id, n, e) gr) g''' new_succs
+                  pure dg {dgGraph = g''''}
+          | otherwise -> pure dg
+  | otherwise = pure dg
 
 -------------------------------
 --- simple helper functions ---
