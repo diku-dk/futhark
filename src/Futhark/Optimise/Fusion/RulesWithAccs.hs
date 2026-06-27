@@ -4,16 +4,18 @@
 --     that involves WithAcc constructs.
 --   Currently, we support two non-trivial
 --   transformations:
---     I. map-flatten-scatter: a map nest produces
---        multi-dimensional index and values arrays
---        that are then flattened and used in a
---        scatter consumer. Such pattern can be fused
---        by re-writing the scatter by means of a WithAcc
---        containing a map-nest, thus eliminating the flatten
---        operations. The obtained WithAcc can then be fused
---        with the producer map nest, e.g., benefiting intra-group
---        kernels. The eloquent target for this rule is
---        an efficient implementation of radix-sort.
+--     I. SOAC-through-Trans-into-WithAcc fusion: a SoacNode is fused
+--        into a WithAcc atomically when all dependency paths between
+--        them go through TransNodes (reshapes/rearranges) that have no
+--        other consumers. The canonical example is a map nest producing
+--        multi-dimensional index and value arrays that are flattened
+--        and consumed by a scatter. This must be done atomically to
+--        avoid an infinite loop: absorbing only the TransNode causes
+--        simplifyLambda to hoist the cheap reshape back out, recreating
+--        the same TransNode and triggering the rule again. The strategy
+--        is to prepend the SoacNode and all TransNode statements into
+--        the WithAcc lambda body and run doFusionInLambda, which can
+--        then fuse the SoacNode with the inner scatter via pullReshape.
 --
 --    II. WithAcc-WithAcc fusion: two withaccs can be
 --        fused as long as the common accumulators use
@@ -219,23 +221,12 @@ tryFuseWithAccs _ _ _ =
   Nothing
 
 ---------------------------------------------------
---- Soac-through-Trans-into-WithAcc fusion
+--- I. SOAC-through-Trans-into-WithAcc Fusion
 ---------------------------------------------------
 
--- | Fuse a SoacNode into a WithAcc atomically when all dep-paths between
--- them go through TransNodes (reshapes/rearranges) that have no other
--- consumers. This must be done in one step to avoid an infinite loop:
--- absorbing only the TransNode into the WithAcc lambda and then calling
--- doFusionInLambda causes simplifyLambda to hoist the (cheap/safe) reshape
--- back out, recreating the same TransNode node and triggering the rule again.
---
--- Strategy: prepend the SoacNode statement and all TransNode statements into
--- the WithAcc lambda body, run doFusionInLambda (which can now fuse the
--- SoacNode with the innerscatter via pullReshape), and commit only on success.
--- Then remove the consumed SoacNode and TransNode graph nodes.
---
--- The @doFusionInLambda@ and @fusedSomething@ arguments are callbacks from
--- Fusion.hs to avoid a circular import.
+-- | See the module-level description of transformation I.
+-- The @doFusionInLambda@ and @fusedSomething@ arguments are callbacks
+-- from Fusion.hs to avoid a circular import.
 trySoacThroughTransIntoWithAcc ::
   (HasScope SOACS m, MonadFreshNames m) =>
   (Lambda SOACS -> m (Lambda SOACS, Bool)) ->
