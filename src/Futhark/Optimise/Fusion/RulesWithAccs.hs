@@ -261,15 +261,14 @@ trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGra
                 soac_inp_nms = map H.inputArray $ H.inputs soac,
             all (`notNameIn` wacc_cons_nms) soac_inp_nms -> do
               let trans_info = map (\(_, out, tr, inp) -> (out, tr, inp)) trans_preds
-              lam' <- runLambdaBuilder (lambdaParams lam0) $
-                inScopeOf lam0 $ do
-                  soac' <- H.toExp soac
-                  addStm $ Let pat1 aux1 soac'
-                  forM_ trans_info $ \(out, tr, inp) -> do
-                    (tr_aux, tr_exp) <- H.transformToExp tr inp
-                    out_t <- lookupType out
-                    addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
-                  bodyBind $ lambdaBody lam0
+              lam' <- runLambdaBuilder (lambdaParams lam0) $ do
+                soac' <- H.toExp soac
+                addStm $ Let pat1 aux1 soac'
+                forM_ trans_info $ \(out, tr, inp) -> do
+                  (tr_aux, tr_exp) <- H.transformToExp tr inp
+                  out_t <- lookupType out
+                  addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
+                bodyBind $ lambdaBody lam0
               lam_renamed <- renameLambda lam'
               (lam'', success) <- doFusionInLambda lam_renamed
               if not success
