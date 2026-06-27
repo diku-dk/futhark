@@ -686,6 +686,9 @@ pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransf
 pullReshape soac ots = do
   Just mapnest <- MapNest.fromSOAC soac
   SOAC.Reshape cs newshape SOAC.:< ots' <- pure $ SOAC.viewf ots
+  -- This handles only the easy case where the underlying lambda is
+  -- scalar. The more complicated cases could also be handled, but
+  -- requires more tricky checks.
   guard $
     all
       ((== MapNest.depth mapnest) . arrayRank)
