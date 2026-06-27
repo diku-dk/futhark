@@ -343,32 +343,25 @@ vFuseNodeT
 vFuseNodeT
   edges
   _infusible
-  (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, is1, os1)
+  (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, _is1, os1)
   (StmNode (Let pat2 aux2 (WithAcc w_inps lam0)), _os2)
     | ots1 == mempty,
       not $ any isFake edges,
       wacc_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps,
       soac_prod_nms <- map patElemName $ patElems pat1,
       soac_indep_nms <- map getName os1,
-      soac_inp_nms <- map H.inputArray $ H.inputs soac,
-      -- soac inputs must not be consumed destinations of the with_acc;
-      -- moving soac inside the lambda would read a consumed array.
-      all (`notNameIn` wacc_cons_nms) soac_inp_nms,
       all (`notNameIn` wacc_cons_nms) (soac_indep_nms ++ soac_prod_nms) = do
-        -- If soac has no other consumers (is1 is empty), we don't need to
-        -- return its outputs from the lambda — they'll be fused into map_mn.
-        -- This avoids adding pat1 outputs to unfus_nms, enabling pullReshape.
-        let has_other_consumers = not (null is1)
+        lam <- fst <$> doFusionInLambda lam0
         bdy' <-
-          runBodyBuilder $ inScopeOf lam0 $ do
+          runBodyBuilder $ inScopeOf lam $ do
             soac' <- H.toExp soac
             addStm $ Let pat1 aux1 soac'
-            lam_res <- bodyBind $ lambdaBody lam0
+            lam_res <- bodyBind $ lambdaBody lam
             let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms
-            pure $ lam_res ++ if has_other_consumers then pat1_res else []
-        let lam_ret_tp = lambdaReturnType lam0 ++ if has_other_consumers then map patElemType (patElems pat1) else []
-            pat = Pat $ patElems pat2 ++ if has_other_consumers then patElems pat1 else []
-        lam' <- renameLambda $ lam0 {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
+            pure $ lam_res ++ pat1_res
+        let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
+            pat = Pat $ patElems pat2 ++ patElems pat1
+        lam' <- renameLambda $ lam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
         -- Only commit if inner fusion actually benefited; avoids infinite loop
         -- in keepTrying when the rule fires but pullReshape cannot proceed.
         (lam'', success) <- doFusionInLambda lam'
@@ -601,6 +594,102 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} =
     relevant (_, e) = isDep e
     fuses_with = map fst $ filter relevant $ G.lpre g node_to_fuse_id
 
+-- | Fuse a SoacNode into a WithAcc atomically when all dep-paths between
+-- them go through TransNodes (reshapes/rearranges) that have no other
+-- consumers. This must be done in one step to avoid an infinite loop:
+-- absorbing only the TransNode into the WithAcc lambda and then calling
+-- doFusionInLambda causes simplifyLambda to hoist the (cheap/safe) reshape
+-- back out, recreating the same TransNode node and triggering the rule again.
+--
+-- Strategy: prepend the SoacNode statement and all TransNode statements into
+-- the WithAcc lambda body, run doFusionInLambda (which can now fuse the
+-- SoacNode with the innerscatter via pullReshape), and commit only on success.
+-- Then remove the consumed SoacNode and TransNode graph nodes.
+trySoacThroughTransIntoWithAcc :: G.Node -> DepGraphAug FusionM
+trySoacThroughTransIntoWithAcc wacc_id dg@DepGraph {dgGraph = g}
+  | not (G.gelem wacc_id g) = pure dg
+  | Just (StmNode (Let pat2 aux2 (WithAcc w_inps lam0))) <- G.lab g wacc_id = do
+      -- TransNode predecessors (producers) of WithAcc that are exclusively consumed here.
+      -- Edges go FROM consumers TO producers, so:
+      --   G.lpre g n = consumers of n (nodes that depend on n)
+      --   G.lsuc g n = producers that n depends on
+      let trans_preds =
+            [ (tn_id, out, tr, inp)
+            | (tn_id, _) <- G.lsuc g wacc_id,
+              Just (TransNode out tr inp) <- [G.lab g tn_id],
+              all (== wacc_id) [s | (s, _) <- G.lpre g tn_id]
+            ]
+      -- All TransNodes must come from a single SoacNode.
+      let soac_ids =
+            [ sn_id
+            | (tn_id, _, _, _) <- trans_preds,
+              (sn_id, _) <- G.lsuc g tn_id,
+              Just (SoacNode {}) <- [G.lab g sn_id]
+            ]
+      case (trans_preds, soac_ids) of
+        ([], _) -> pure dg
+        (_, []) -> pure dg
+        _ | not (all (== head soac_ids) soac_ids) -> pure dg
+        _ -> do
+          let soac_id = head soac_ids
+          case G.lab g soac_id of
+            Just (SoacNode ots1 pat1 soac@(H.Screma {}) aux1)
+              | ots1 == mempty,
+                -- SoacNode must only be consumed by these TransNodes.
+                let trans_ids = map (\(a, _, _, _) -> a) trans_preds,
+                all (`elem` trans_ids) [tn_id | (tn_id, _) <- G.lpre g soac_id],
+                -- SoacNode inputs must not overlap with WithAcc consumed arrays.
+                let wacc_cons_nms = namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps
+                    soac_inp_nms = map H.inputArray $ H.inputs soac,
+                all (`notNameIn` wacc_cons_nms) soac_inp_nms -> do
+                  -- Build the new lambda body: SoacNode stmt + TransNode stmts + original body.
+                  -- H.toExp and Let construction must happen inside runBodyBuilder.
+                  bdy' <-
+                    runBodyBuilder $ inScopeOf lam0 $ do
+                      soac' <- H.toExp soac
+                      addStm $ Let pat1 aux1 soac'
+                      forM_ trans_preds $ \(_, out, tr, inp) -> do
+                        (tr_aux, tr_exp) <- H.transformToExp tr inp
+                        out_t <- lookupType out
+                        addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
+                      lam_res <- bodyBind $ lambdaBody lam0
+                      pure lam_res
+                  lam' <- renameLambda $ lam0 {lambdaBody = bdy'}
+                  (lam'', success) <- doFusionInLambda lam'
+                  if not success
+                    then pure dg
+                    else do
+                      void $ fusedSomething (StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'')
+                      -- Rebuild the graph: remove the absorbed nodes and rewire wacc's edges.
+                      -- Edges go consumer→producer; G.context (in_adj, n, label, out_adj) gives
+                      --   in_adj [(EdgeT,Node)] = consumers of wacc, out_adj = producers wacc depends on.
+                      -- G.lsuc/lpre return [(Node, EdgeT)] (node-first).
+                      let new_wacc = StmNode $ Let pat2 aux2 $ WithAcc w_inps lam''
+                          to_remove = soac_id : map (\(tn_id, _, _, _) -> tn_id) trans_preds
+                          g' = foldr G.delNode g to_remove
+                          (wacc_preds, _, _, wacc_succs) = G.context g wacc_id
+                          -- Union of producers: soac's deps + each trans's deps + wacc's surviving deps.
+                          new_succs =
+                            L.nub $
+                              [(n, e) | (n, e) <- G.lsuc g soac_id, G.gelem n g']
+                                ++ [(n, e) | (tn_id, _, _, _) <- trans_preds, (n, e) <- G.lsuc g tn_id, G.gelem n g', n /= soac_id]
+                                ++ [(n, e) | (e, n) <- wacc_succs, G.gelem n g']
+                          new_preds = [(e, n) | (e, n) <- wacc_preds, G.gelem n g']
+                          g'' = G.insNode (wacc_id, new_wacc) $ G.delNode wacc_id g'
+                          g''' = foldr (\(e, n) gr -> G.insEdge (n, wacc_id, e) gr) g'' new_preds
+                          g'''' = foldr (\(n, e) gr -> G.insEdge (wacc_id, n, e) gr) g''' new_succs
+                      pure dg {dgGraph = g''''}
+            _ -> pure dg
+  | otherwise = pure dg
+
+doSoacThroughTransFusion :: DepGraphAug FusionM
+doSoacThroughTransFusion dg =
+  applyAugs
+    [ trySoacThroughTransIntoWithAcc wacc_id
+    | (wacc_id, StmNode (Let _ _ (WithAcc {}))) <- G.labNodes (dgGraph dg)
+    ]
+    dg
+
 doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
   where
@@ -656,7 +745,8 @@ keepTrying f g = do
 doAllFusion :: DepGraphAug FusionM
 doAllFusion =
   keepTrying . applyAugs $
-    [ doVerticalFusion,
+    [ doSoacThroughTransFusion,
+      doVerticalFusion,
       doHorizontalFusion,
       doInnerFusion,
       removeUnusedOutputs
