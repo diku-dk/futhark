@@ -267,25 +267,6 @@ vFuseNodeT _ infusible (TransNode stm1_out tr stm1_in, _, _) (SoacNode ots2 pats
                 inp
           soac2' = map onInput (H.inputs soac2) `H.setInputs` soac2
       pure $ Just $ SoacNode ots2 pats2 soac2' aux2
--- Absorb a reshape/rearrange TransNode into a WithAcc lambda body by prepending
--- the transform as a statement inside the body. This creates a direct edge from
--- any preceding SoacNode to the WithAcc, enabling SoacNode→WithAcc fusion.
--- Only safe when the TransNode has no other consumers (is1 is empty).
-vFuseNodeT _ infusible (TransNode stm1_out tr stm1_in, is1, _) (StmNode (Let pat2 aux2 (WithAcc w_inps lam0)), _)
-  | null infusible,
-    null is1,
-    -- stm1_out and stm1_in must not appear in w_inps destination arrays of
-    -- the with_acc. stm1_out scoping: if stm1_out is a w_inps destination it
-    -- is consumed before the lambda runs. stm1_in safety: we move the
-    -- transform inside the lambda body, so stm1_in must be in scope there;
-    -- if stm1_in is consumed as a destination it won't be available inside.
-    let w_dest_arrs = concatMap (\(_, arrs, _) -> arrs) w_inps
-    in stm1_out `notElem` w_dest_arrs && stm1_in `notElem` w_dest_arrs = do
-      (tr_aux, tr_exp) <- H.transformToExp tr stm1_in
-      stm1_out_t <- lookupType stm1_out
-      let tr_stm = Let (Pat [PatElem stm1_out stm1_out_t]) tr_aux tr_exp
-          lam0' = lam0 {lambdaBody = (lambdaBody lam0) {bodyStms = oneStm tr_stm <> bodyStms (lambdaBody lam0)}}
-      fusedSomething $ StmNode $ Let pat2 aux2 $ WithAcc w_inps lam0'
 vFuseNodeT
   _
   _
@@ -391,9 +372,12 @@ vFuseNodeT
         let lam_ret_tp = lambdaReturnType lam0 ++ if has_other_consumers then map patElemType (patElems pat1) else []
             pat = Pat $ patElems pat2 ++ if has_other_consumers then patElems pat1 else []
         lam' <- renameLambda $ lam0 {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
-        -- Inner fusion (pullReshape etc.) will be handled by doInnerFusion in
-        -- subsequent keepTrying iterations; no need to call doFusionInLambda here.
-        fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam'
+        -- Only commit if inner fusion actually benefited; avoids infinite loop
+        -- in keepTrying when the rule fires but pullReshape cannot proceed.
+        (lam'', success) <- doFusionInLambda lam'
+        if not success
+          then pure Nothing
+          else fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
 
 --
 -- The reverse of the case above, i.e., fusing a screma at the back of an
