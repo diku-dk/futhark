@@ -27,6 +27,7 @@ import Futhark.Optimise.Fusion.TryFusion qualified as TF
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util (nubOrd)
 
 data FusionEnv = FusionEnv
   { vNameSource :: VNameSource,
@@ -618,8 +619,8 @@ trySoacThroughTransIntoWithAcc wacc_id dg@DepGraph {dgGraph = g}
       let trans_preds =
             [ (tn_id, out, tr, inp)
             | (tn_id, _) <- G.lsuc g wacc_id,
-              Just (TransNode out tr inp) <- [G.lab g tn_id],
-              all (== wacc_id) [s | (s, _) <- G.lpre g tn_id]
+              all (== wacc_id) [s | (s, _) <- G.lpre g tn_id],
+              Just (TransNode out tr inp) <- [G.lab g tn_id]
             ]
       -- All TransNodes must come from a single SoacNode.
       let soac_ids =
@@ -654,8 +655,7 @@ trySoacThroughTransIntoWithAcc wacc_id dg@DepGraph {dgGraph = g}
                         (tr_aux, tr_exp) <- H.transformToExp tr inp
                         out_t <- lookupType out
                         addStm $ Let (Pat [PatElem out out_t]) tr_aux tr_exp
-                      lam_res <- bodyBind $ lambdaBody lam0
-                      pure lam_res
+                      bodyBind $ lambdaBody lam0
                   lam' <- renameLambda $ lam0 {lambdaBody = bdy'}
                   (lam'', success) <- doFusionInLambda lam'
                   if not success
@@ -672,7 +672,7 @@ trySoacThroughTransIntoWithAcc wacc_id dg@DepGraph {dgGraph = g}
                           (wacc_preds, _, _, wacc_succs) = G.context g wacc_id
                           -- Union of producers: soac's deps + each trans's deps + wacc's surviving deps.
                           new_succs =
-                            L.nub $
+                            nubOrd $
                               [(n, e) | (n, e) <- G.lsuc g soac_id, G.gelem n g']
                                 ++ [(n, e) | (tn_id, _, _, _) <- trans_preds, (n, e) <- G.lsuc g tn_id, G.gelem n g', n /= soac_id]
                                 ++ [(n, e) | (e, n) <- wacc_succs, G.gelem n g']
