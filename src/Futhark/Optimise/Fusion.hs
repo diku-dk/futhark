@@ -596,6 +596,14 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} =
     relevant (_, e) = isDep e
     fuses_with = map fst $ filter relevant $ G.lpre g node_to_fuse_id
 
+doSoacThroughTransFusion :: DepGraphAug FusionM
+doSoacThroughTransFusion dg =
+  applyAugs
+    [ SF.trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id
+    | (wacc_id, StmNode (Let _ _ (WithAcc {}))) <- G.labNodes (dgGraph dg)
+    ]
+    dg
+
 doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
   where
@@ -651,7 +659,8 @@ keepTrying f g = do
 doAllFusion :: DepGraphAug FusionM
 doAllFusion =
   keepTrying . applyAugs $
-    [ doVerticalFusion,
+    [ doSoacThroughTransFusion,
+      doVerticalFusion,
       doHorizontalFusion,
       doInnerFusion,
       removeUnusedOutputs
