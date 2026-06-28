@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Consumption checking of certain local polymorphic functions (in practice,
   polymorphic functions that can only be written via holes). (#2488)
 
+* A regression in fusion of forms such as `scatter dest (flatten inds) (flatten
+  vals)`. (#2452)
+
 ## [0.26.3]
 
 ### Added
