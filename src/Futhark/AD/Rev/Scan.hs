@@ -379,7 +379,7 @@ finalMapPPAD ops as scan = do
     eLambda op_bar_2 $ toExp . Var . paramName <$> par_y_right ++ par_a
 
 diffScan :: VjpOps -> [VName] -> SubExp -> [VName] -> Scan SOACS -> ADM ()
-diffScan ops ys w as scan = do
+diffScan ops ys w as scan = locallyNonvector (ys, scan, as) $ do
   -- ys ~ results of scan, w ~ size of input array, as ~ (unzipped)
   -- arrays, scan ~ scan: operator with ne
   scan_case <- identifyCase ops $ scanLambda scan
@@ -409,14 +409,12 @@ diffScan ops ys w as scan = do
       map1_lam <- mkScanFusedMapLam ops w (scanLambda scan) as ys ys_adj sc d
       scans_lin_fun_o <- mkScanLinFunO (head as_ts) sc
       scan_lams <- mkScans (specialScans sc) scans_lin_fun_o
-      iota <-
-        letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
+      iota <- letExp "iota" $ iota64 w
       r_scan <-
         letTupExp "adj_ctrb_scan" . Op . Screma w [iota]
           =<< scanomapSOAC scan_lams map1_lam
       mkScanFinalMap ops w (scanLambda scan) as ys (splitScanRes sc r_scan d)
   -- Goal: calculate as_contribs in new way
-  -- zipWithM_ updateAdj as as_contribs -- as_bar += new adjoint
   zipWithM_ updateAdj as as_contribs
   where
     mkScans :: Int -> Scan SOACS -> ADM [Scan SOACS]
@@ -468,7 +466,7 @@ diffScanVec ops ys aux w lam ne as m = do
   foldr (vjpStm ops) m stmts
 
 diffScanAdd :: VjpOps -> VName -> SubExp -> Lambda SOACS -> SubExp -> VName -> ADM ()
-diffScanAdd _ops ys n lam' ne as = do
+diffScanAdd _ops ys n lam' ne as = locallyNonvector (ys, lam', as) $ do
   lam <- renameLambda lam'
   ys_bar <- lookupAdjVal ys
 

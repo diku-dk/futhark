@@ -580,7 +580,7 @@ returnType appres (Scalar (Sum cs)) d arg =
 applyArg :: TypeAliases -> TypeAliases -> TypeAliases
 applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
   returnType closure_als rettype d arg_als
-applyArg t _ = error $ "applyArg: " <> show t
+applyArg _ arg_als = arg_als
 
 applyLoopArg :: Aliases -> ParamType -> TypeAliases -> ResType -> TypeAliases
 applyLoopArg appres (Scalar (Record pfs)) (Scalar (Record afs)) (Scalar (Record rfs)) =
@@ -770,7 +770,7 @@ checkExp :: Exp -> CheckM (Exp, TypeAliases)
 --
 checkExp (AppExp (Apply f args loc) appres) = do
   (f', f_als) <- checkExp f
-  (args', args_als) <- NE.unzip <$> checkArgs (toRes Nonunique f_als) args
+  (args', args_als) <- NE.unzip <$> checkArgs (diets $ toRes Nonunique f_als) args
   res_als <- checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
   where
@@ -781,13 +781,16 @@ checkExp (AppExp (Apply f args loc) appres) = do
       (e', e_als) <- checkArg prev (second (const d) (typeOf e)) e
       pure ((Info p, e'), e_als)
 
-    checkArgs (Scalar (Arrow _ _ d _ (RetType _ rt))) (x NE.:| args') = do
+    diets (Scalar (Arrow _ _ d _ (RetType _ rt))) =
+      d : diets rt
+    diets _ = repeat Observe
+
+    checkArgs ds (x NE.:| args') = do
+      let (d, ds') = fromMaybe (Observe, []) $ L.uncons ds
       -- Note Futhark uses right-to-left evaluation of applications.
-      args'' <- maybe (pure []) (fmap NE.toList . checkArgs rt) $ NE.nonEmpty args'
+      args'' <- maybe (pure []) (fmap NE.toList . checkArgs ds') $ NE.nonEmpty args'
       (x', x_als) <- checkArg' (map (first snd) args'') d x
       pure $ (x', x_als) NE.:| args''
-    checkArgs t _ =
-      error $ "checkArgs: " <> prettyString t
 
 --
 checkExp (AppExp (Loop sparams pat loopinit form body loc) appres) = do
