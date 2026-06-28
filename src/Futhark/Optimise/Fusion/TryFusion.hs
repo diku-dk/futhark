@@ -530,7 +530,7 @@ unflattenAccOnlyMap ::
 unflattenAccOnlyMap (Just outVars) (SOAC.Screma _nm inps form) ots = do
   lam <- liftMaybe $ isMapSOAC form
   -- All results must be accumulator types.
-  guard $ all isAcc (lambdaReturnType lam)
+  guard $ all isAcc $ lambdaReturnType lam
   -- Only apply when the producer outputs non-scalar rows (rank > 1), meaning
   -- pullReshape cannot handle this case (it requires scalar-leaf map nests).
   -- When the producer outputs scalars, the simpler prepend approach works fine.
@@ -550,6 +550,9 @@ unflattenAccOnlyMap (Just outVars) (SOAC.Screma _nm inps form) ots = do
         partitionEithers $ zipWith (curry classifyInp) inps (lambdaParams lam)
   -- Need at least one flattened input.
   guard $ not (null flat_pairs)
+  -- The non-flattened inputs must be accumulators, because we are changing the
+  -- width of the SOAC.
+  guard $ all (isAcc . SOAC.inputType . fst) pass_pairs
   -- All flattened inputs must agree on the outer dim n and inner dim m.
   let dims2d base_t = (arraySize 0 base_t, arraySize 1 base_t)
       getBaseTy (SOAC.Input _ _ base_t, _) = base_t
