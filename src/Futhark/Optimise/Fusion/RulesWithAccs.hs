@@ -41,7 +41,6 @@ import Data.Maybe (maybeToList)
 import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
-import Futhark.IR.SOACS qualified as F
 import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -274,130 +273,20 @@ trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGra
   | otherwise = pure dg
   where
     attempt trans_ids trans_preds prod_id pat1 aux1 soac pat2 aux2 w_inps lam0 = do
-      -- trySoacThroughTransIntoWithAcc:
-      -- We have:
-      --   soac      = map3(m, soac_inps, map3_lam)  →  [m][bq]xs', [m][bq]inds'
-      --   trans_preds: reshape [m][bq] → [m*bq]  for each soac output
-      --   lam0      = \ acc_cert acc_p → scatter_map(m*bq, {acc_p, flat_inds, flat_xs}, update_lam)
-      --
-      -- Strategy: instead of prepending soac+reshapes into lam0 (which gets hoisted
-      -- back out by simplifyLambda because the map3 doesn't use acc_p), restructure
-      -- the WithAcc body to:
-      --
-      --   \ acc_cert acc_p →
-      --     let acc' = Screma(m, {acc_p, soac_inps...}, per_block_lam)
-      --     in  acc'
-      --
-      -- where per_block_lam runs ker2Blk per row (map3_lam's body) then scatters
-      -- bq results into acc_p.  Since the outer Screma over m takes acc_p as its
-      -- first input, simplifyLambda cannot hoist it out of the WithAcc lambda.
-      --
-      -- This gives the IR structure /WithAcc/Screma/Loop/WithAcc (the partition2
-      -- inner scatter inside ker2Blk which has a loop), which survives simplification.
-      --
-      -- Fall back to the prepend approach if soac isn't a pure map or if we cannot
-      -- identify the scatter map in lam0 (handles edge cases generically).
-      case tryPerBlockFusion of
-        Just buildIt -> do
-          new_lam <- buildIt
-          lam_fused <- fst <$> doFusionInLambda new_lam
-          onSuccess trans_ids prod_id pat2 aux2 w_inps lam_fused
-        Nothing -> do
-          -- Fallback: prepend soac + trans stmts into the WithAcc lambda.
-          let trans_info = map (\(_, out, tr, inp) -> (out, tr, inp)) trans_preds
-          lam' <- renameLambda <=< runLambdaBuilder (lambdaParams lam0) $ do
-            soac' <- H.toExp soac
-            addStm $ Let pat1 aux1 soac'
-            forM_ trans_info $ \(out, tr, inp) -> do
-              (tr_aux, tr_exp) <- H.transformToExp tr inp
-              auxing tr_aux $ letBindNames [out] tr_exp
-            bodyBind $ lambdaBody lam0
-          lam'' <- fst <$> doFusionInLambda lam'
-          onSuccess trans_ids prod_id pat2 aux2 w_inps lam''
-      where
-        -- Try to build a new lambda using the per-block restructuring.
-        -- Only use per-block when map3_lam's body contains a Loop or inner
-        -- WithAcc (which would prevent doFusionInLambda from merging them
-        -- into a single Screma via the simpler prepend approach).
-        tryPerBlockFusion =
-          case (soac, lambdaParams lam0) of
-            (H.Screma _ _ soac_form, [acc_cert_param, acc_p_param])
-              | Just map3_lam <- isMapSOAC soac_form,
-                any stmHasLoopOrWithAcc (stmsToList (bodyStms (lambdaBody map3_lam))) ->
-                  let acc_p_nm = paramName acc_p_param
-                      lam0_stms = stmsToList (bodyStms (lambdaBody lam0))
-                      -- Find the scatter Screma in lam0's body: first Screma that
-                      -- uses acc_p_nm as its first input array.
-                      scatter_info =
-                        [ (rest_arrs, sform)
-                        | Let _ _ (Op (F.Screma _ (first_arr : rest_arrs) sform)) <- lam0_stms,
-                          first_arr == acc_p_nm
-                        ]
-                      pat1_nms = map patElemName (patElems pat1)
-                      -- Map: flat name → position in pat1 (= position in map3_lam results)
-                      pos_of_flat =
-                        M.fromList
-                          [ (out_flat, pos)
-                          | (_, out_flat, _, inp_2d) <- trans_preds,
-                            Just pos <- [L.elemIndex inp_2d pat1_nms]
-                          ]
-                   in case scatter_info of
-                        [(flat_nm_args, scatter_form)]
-                          | all (`M.member` pos_of_flat) flat_nm_args ->
-                              Just $
-                                buildPerBlockLam
-                                  acc_cert_param
-                                  acc_p_param
-                                  acc_p_nm
-                                  map3_lam
-                                  flat_nm_args
-                                  scatter_form
-                                  pos_of_flat
-                        _ -> Nothing
-            _ -> Nothing
-
-        buildPerBlockLam
-          acc_cert_param
-          acc_p_param
-          acc_p_nm
-          map3_lam
-          flat_nm_args
-          scatter_form
-          pos_of_flat = do
-            let H.Screma m soac_inps _ = soac
-                -- Inner dimension bq from map3_lam's return type
-                bq = arraySize 0 (head (lambdaReturnType map3_lam))
-            map3_lam_ren <- renameLambda map3_lam
-            let row_params = lambdaParams map3_lam_ren
-            -- per_block_lam: params = [acc_p_param, row_p1, ..., row_pk]
-            -- body: run ker2Blk body, then scatter bq results into acc_p
-            per_block_lam <- runLambdaBuilder (acc_p_param : row_params) $ do
-              -- Inline map3_lam_ren's body statements (ker2Blk computation).
-              -- row_params (= lambdaParams map3_lam_ren) are already in scope
-              -- as per_block_lam's parameters via runLambdaBuilder's localScope.
-              mapM_ addStm (stmsToList (bodyStms (lambdaBody map3_lam_ren)))
-              let row_results = bodyResult (lambdaBody map3_lam_ren)
-              -- Bind each row result to a VName.
-              row_nms <- forM row_results $ \res ->
-                letExp "row_res" (BasicOp (SubExp (resSubExp res)))
-              -- Build inner scatter Screma over bq:
-              --   inputs = acc_p + row versions of flat_nm_args (in same order)
-              let inner_arrs =
-                    acc_p_nm
-                      : [ row_nms !! (pos_of_flat M.! flat_nm)
-                        | flat_nm <- flat_nm_args
-                        ]
-              scatter_nms <- letTupExp "scatter_res" (Op (F.Screma bq inner_arrs scatter_form))
-              pure $ map (subExpRes . Var) scatter_nms
-            per_block_form <- mapSOAC per_block_lam
-            -- Build outer Screma over m: acc_p as first input, then soac's inputs.
-            acc_p_inp <- H.varInput acc_p_nm
-            let outer_soac = H.Screma m (acc_p_inp : soac_inps) per_block_form
-            -- Build new with_acc lambda body: one Screma stmt returning acc_p'.
-            renameLambda <=< runLambdaBuilder [acc_cert_param, acc_p_param] $ do
-              outer_exp <- H.toExp outer_soac
-              acc_out_nms <- letTupExp "acc_out" outer_exp
-              pure $ map (subExpRes . Var) acc_out_nms
+      let trans_info = map (\(_, out, tr, inp) -> (out, tr, inp)) trans_preds
+      lam' <- renameLambda <=< runLambdaBuilder (lambdaParams lam0) $ do
+        soac' <- H.toExp soac
+        addStm $ Let pat1 aux1 soac'
+        forM_ trans_info $ \(out, tr, inp) -> do
+          (tr_aux, tr_exp) <- H.transformToExp tr inp
+          auxing tr_aux $ letBindNames [out] tr_exp
+        bodyBind $ lambdaBody lam0
+      -- Run inner fusion. We always proceed with onSuccess because embedding
+      -- the SoacNode + TransNodes into the WithAcc is itself a valid fusion
+      -- step and avoids potential infinite loops from simplifyLambda hoisting
+      -- a reshape back out.
+      lam'' <- fst <$> doFusionInLambda lam'
+      onSuccess trans_ids prod_id pat2 aux2 w_inps lam''
 
     onSuccess trans_ids prod_id pat2 aux2 w_inps lam'' = do
       void $ fusedSomething (StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'')
@@ -425,26 +314,6 @@ trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGra
 -------------------------------
 --- simple helper functions ---
 -------------------------------
-
--- | Returns True if the statement is a Loop or WithAcc, or recursively
--- contains one (in lambdas of SOACs etc.).
-stmHasLoopOrWithAcc :: Stm SOACS -> Bool
-stmHasLoopOrWithAcc (Let _ _ e) = expHasLoopOrWithAcc e
-
-expHasLoopOrWithAcc :: Exp SOACS -> Bool
-expHasLoopOrWithAcc (Loop {}) = True
-expHasLoopOrWithAcc (WithAcc {}) = True
-expHasLoopOrWithAcc e = any stmHasLoopOrWithAcc $ stmsToList $ foldMap (bodyStms . lambdaBody) (soacLambdas e)
-  where
-    soacLambdas (Op (F.Screma _ _ form)) = scremaFormLambdas form
-    soacLambdas (Op (F.Stream _ _ _ lam)) = [lam]
-    soacLambdas (Op (F.Hist _ _ _ lam)) = [lam]
-    soacLambdas (Op (F.JVP _ _ lam)) = [lam]
-    soacLambdas (Op (F.VJP _ _ lam)) = [lam]
-    soacLambdas (Op (F.WithVJP _ lam1 lam2)) = [lam1, lam2]
-    soacLambdas _ = []
-    scremaFormLambdas (ScremaForm lam scans reds post_lam) =
-      [lam, post_lam] ++ map scanLambda scans ++ map redLambda reds
 
 substInSEs :: M.Map VName VName -> [SubExp] -> [SubExp]
 substInSEs vtab = map substInSE
