@@ -1096,7 +1096,7 @@ transformInnerMap ops segments env inps pat w arrs map_lam = do
   gpu_scope <- askScope
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
   lam <- preprocessLambda pp_scope map_lam
-  if not (isVariant inps env w)
+  if not (isVariant inps w)
     then transformInnerMapMultiDim ops segments env inps pat w arrs lam
     else transformInnerMapSingleDim ops segments env inps pat w arrs lam
 
@@ -1228,7 +1228,7 @@ transformScrema ::
   FlattenM DistEnv
 transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
   | Just (reds, map_lam) <- isRedomapSOAC form,
-    not $ isVariant inps env w,
+    not $ isVariant inps w,
     all isRegularDistResult res,
     all (\red -> suitableUniformOperator env inps (redLambda red) (redNeutral red)) reds = do
       let outer_only = transformUniformRedomap (flattenSegLevel ops) segments env inps w arrs reds map_lam
@@ -1247,7 +1247,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
       reps <- mapM (segOpInputRep lvl segments env inps) arrs
       let sing_red = singleReduce reds
           zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-          hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn sing_red <> freeIn map_lam)
+          hasNoFreeVariant = allNames (not . isVariant inps . Var) (freeIn sing_red <> freeIn map_lam)
       (ws_F, ws_O, ws_S, elems, elems_kind) <-
         prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
       nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
@@ -1285,7 +1285,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
           env
       pure $ insertRegulars (map distResTag red_res) red_elems' env'
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-    not $ isVariant inps env w,
+    not $ isVariant inps w,
     all isRegularDistResult res,
     all (\scan -> suitableUniformOperator env inps (scanLambda scan) (scanNeutral scan)) scans = do
       let outer_only =
@@ -1304,7 +1304,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
     not $ lambdaHasParallelism funHasParallelism post_lam,
     all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans = do
       reps <- mapM (segOpInputRep lvl segments env inps) arrs
-      let hasNoFreeVariant = allNames (not . isVariant inps env . Var) (freeIn post_lam <> freeIn map_lam <> foldMap freeIn scans)
+      let hasNoFreeVariant = allNames (not . isVariant inps . Var) (freeIn post_lam <> freeIn map_lam <> foldMap freeIn scans)
       (ws_F, ws_O, ws_S, elems, elems_kind) <-
         prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
       let free = freeIn map_lam <> freeIn post_lam
@@ -1368,11 +1368,11 @@ transformHist ::
 transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops, bucket_fun) = do
   -- todo: add this suitableUniformOperator
   nonuniform_inps <-
-    any (any (isVariant inps env) . arrayDims)
+    any (any (isVariant inps) . arrayDims)
       <$> mapM (lookupInputType inps) hist_inputs
   let nonuniform =
         nonuniform_inps
-          || isVariant inps env w
+          || isVariant inps w
           || not (all isRegularDistResult res)
   if nonuniform
     then error "TODO : transformDistStm: Unhandled nonuniform hist"

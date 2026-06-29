@@ -339,10 +339,9 @@ subExpInputType _ (Constant val) =
 subExpInputType inps (Var v) =
   lookupInputType inps v
 
-isVariant :: DistInputs -> DistEnv -> SubExp -> Bool
-isVariant inps env se = case se of
-  Constant _ -> False
-  Var v -> isJust $ M.lookup v $ inputReps inps env
+isVariant :: DistInputs  -> SubExp -> Bool
+isVariant _ (Constant _) = False
+isVariant inps (Var v) = isJust $ lookup v inps
 
 ensureDenseIrregular :: SegLevel -> Name -> IrregularRep -> FlattenM IrregularRep
 ensureDenseIrregular _ _ rep@IrregularRep {irregularK = Dense} =

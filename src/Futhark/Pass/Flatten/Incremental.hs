@@ -124,9 +124,9 @@ isParallelFunInside funHasParallelism = inBody
     callParallelFunction (Op WithVJP {}) = error "isParallelFunInside: unexpected WithVJP"
 
 isVersionableMap :: FunHasParallelism -> DistInputs -> DistEnv -> SubExp -> [DistResult] -> Lambda SOACS -> Bool
-isVersionableMap funHasParallelism inps env w dist_res map_lam =
+isVersionableMap funHasParallelism inps _env w dist_res map_lam =
   all isRegularDistResult dist_res
-    && not (isVariant inps env w)
+    && not (isVariant inps w)
     && not (isParallelFunInside funHasParallelism (lambdaBody map_lam))
 
 onlyExploitIntra :: Attrs -> Bool

@@ -67,7 +67,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
 
   -- Potentially change to distres option.
   nonuniform <-
-    any (any (any (isVariant inps env) . arrayDims))
+    any (any (any (isVariant inps) . arrayDims))
       <$> mapM inputTypes withacc_inputs
 
   (withacc_inputs', trAccIndex, non_uniform_reps) <-

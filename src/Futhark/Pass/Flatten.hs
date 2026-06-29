@@ -137,7 +137,7 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
     Let pat aux (Op (Screma w arrs form)) ->
       transformScrema (flattenOpsFor funHasParallelism lvl) segments env inps res (pat, aux) (w, arrs, form)
     Let _ aux (Match scrutinees cases defaultCase rt) ->
-      if any (isVariant inps env) scrutinees
+      if any (isVariant inps) scrutinees
         then transformVariantMatch ops segments env inps res aux scrutinees cases defaultCase rt
         else transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt
     Let pat aux (Apply name args rettype s) ->

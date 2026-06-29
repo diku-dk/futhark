@@ -373,7 +373,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       scalarCase
     -- Potentially no need for this
     ArrayLit [] row_type
-      | not $ any (isVariant inps env) (arrayDims row_type) -> do
+      | not $ any (isVariant inps) (arrayDims row_type) -> do
           let resultType =
                 Array
                   (elemType row_type)
@@ -388,9 +388,9 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           elems <- letExp "arraylit_empty_elems" =<< eBlank resultType
           pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
     ArrayLit vs row_type
-      | not $ any (isVariant inps env) (arrayDims row_type) -> do
+      | not $ any (isVariant inps) (arrayDims row_type) -> do
           res_v <-
-            if any (isVariant inps env) vs
+            if any (isVariant inps) vs
               then do
                 let seg_shape = segmentsShape segments
                     one = intConst Int64 1
@@ -492,14 +492,14 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           scalarCase
     Reshape arr reshape
       | isRegularDistResult res,
-        not (any (isVariant inps env) reshape) -> do
+        not (any (isVariant inps) reshape) -> do
           let outer = segmentsShape segments
               inner_target = newShape reshape
               reshape' = reshapeCoerce outer <> newshapeInner outer reshape
 
           arr_t <- lookupInputType inps arr
           let arr_shape = arrayShape arr_t
-          let unform_arr = not (any (isVariant inps env) arr_shape)
+          let unform_arr = not (any (isVariant inps) arr_shape)
           if unform_arr
             then do
               arr' <-
@@ -527,7 +527,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           pure $ insertRep (distResTag res) (Irregular irreg_v) env
     Index arr slice
       | isRegularDistResult res,
-        not (any (isVariant inps env) slice) -> do
+        not (any (isVariant inps) slice) -> do
           arr_t <- lookupInputType inps arr
           arr' <-
             liftSubExpRegular
@@ -568,7 +568,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
     FlatIndex arr flat_slice
       | isRegularDistResult res,
-        not (any (isVariant inps env) flat_slice) -> do
+        not (any (isVariant inps) flat_slice) -> do
           arr_t <- lookupInputType inps arr
           -- arr should be 1D
           let [n] = arrayDims arr_t
@@ -646,9 +646,9 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
     Concat d arr shp -> do
       arr_ts <- mapM (lookupInputType inps) (NE.toList arr)
       let inputShapeUniform t =
-            not $ any (isVariant inps env) (arrayDims t)
+            not $ any (isVariant inps) (arrayDims t)
       if isRegularDistResult res
-        && not (isVariant inps env shp)
+        && not (isVariant inps shp)
         && all inputShapeUniform arr_ts
         then do
           --  Unifrom Concat
@@ -772,7 +772,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       -- Uniform Update
       | Just as_t <- distInputType <$> lookup as inps,
         isRegularDistResult res,
-        not (any (isVariant inps env) slice) -> do
+        not (any (isVariant inps) slice) -> do
           as' <-
             liftSubExpRegular
               lvl
@@ -850,7 +850,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       -- Uniform Flat Update
       | Just as_t <- distInputType <$> lookup as inps,
         isRegularDistResult res,
-        not (any (isVariant inps env) flat_slice) -> do
+        not (any (isVariant inps) flat_slice) -> do
           -- as should be 1D
           let [n] = arrayDims as_t
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
@@ -956,7 +956,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
               rearrangeIrreg lvl segments env inps t perm irreg
           pure $ insertRep (distResTag res) (Irregular rep') env
     Scratch pt dims
-      | not $ any (isVariant inps env) dims -> do
+      | not $ any (isVariant inps) dims -> do
           -- All dims are invariant result is regular across segments.
           v' <-
             letExp "scratch" . BasicOp $

@@ -95,11 +95,11 @@ distributeBranch ::
   M.Map VName ResRep ->
   FlattenM (DistInputs, DistEnv, [DistStm])
 distributeBranch funHasParallelism lvl segments env inps is body acc_reps = do
-  let free_in_body = filter (isVariant inps env . Var) (namesToList $ freeIn body)
+  let free_in_body = filter (isVariant inps . Var) (namesToList $ freeIn body)
   scope <- askScope
   free_sizes <-
     foldMap freeIn <$> mapM (lookupInputType inps) free_in_body
-  let free_variant_sizes = filter (isVariant inps env . Var) (namesToList free_sizes)
+  let free_variant_sizes = filter (isVariant inps . Var) (namesToList free_sizes)
       free_size_vars = nubOrd (free_variant_sizes <> free_in_body)
   (ts, vs, reps) <-
     unzip3 <$> mapM (splitInput lvl segments env inps is acc_reps) free_size_vars

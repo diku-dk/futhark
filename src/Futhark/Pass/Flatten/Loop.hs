@@ -24,13 +24,13 @@ import Prelude hiding (div, quot, rem)
 -- we need the irregular representation when any of its dimensions are either:
 -- a loop parameter name or variant in the outer map context
 needsIrregular :: DistInputs -> DistEnv -> S.Set VName -> DeclType -> Bool
-needsIrregular inps env loopParamNames t =
+needsIrregular inps _env loopParamNames t =
   case t of
     Array {} -> any dimIsVariant (arrayDims t)
     _ -> False
   where
     dimIsVariant (Constant _) = False
-    dimIsVariant (Var v) = v `S.member` loopParamNames || isVariant inps env (Var v)
+    dimIsVariant (Var v) = v `S.member` loopParamNames || isVariant inps (Var v)
 
 -- Lift a loop parameter and its initial value together.
 -- If the parameter is an array whose dimensions are all invariant,
@@ -292,7 +292,7 @@ transformLoop ::
   ([(Param DeclType, SubExp)], LoopForm, Body SOACS) ->
   FlattenM DistEnv
 transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body) = do
-  if isVariant inps env n
+  if isVariant inps n
     then transformForToWhile ops segments env inps res aux merge i it n body
     else do
       let old_loop_params = map fst merge
@@ -463,11 +463,11 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
 
           let free_in_body =
                 filter
-                  (isVariant loop_new_inputs loop_env_local . Var)
+                  (isVariant loop_new_inputs . Var)
                   (namesToList $ freeIn body)
           free_sizes <-
             foldMap freeIn <$> mapM (lookupInputType loop_new_inputs) free_in_body
-          let free_variant_sizes = filter (isVariant loop_new_inputs loop_env_local . Var) (namesToList free_sizes)
+          let free_variant_sizes = filter (isVariant loop_new_inputs . Var) (namesToList free_sizes)
               free_size_vars = nubOrd (free_variant_sizes <> free_in_body)
           (ts, vs, reps) <- unzip3 <$> mapM (splitInput lvl segments loop_new_inputs loop_env_local active_inds) free_size_vars
           let subset_inputs = do
