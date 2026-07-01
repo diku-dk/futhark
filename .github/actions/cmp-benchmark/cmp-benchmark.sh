@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -ex
 
 BACKEND=$1
 SYSTEM=$2
@@ -13,7 +13,7 @@ make -C /tmp/futhark-master/ install PREFIX=$HOME/.local-master
 
 # Find the benchmark suite commit pinned by the master compiler.
 MASTER_SHA=$(cat /tmp/futhark-master/commit-id)
-BENCH_SHA=$(git ls-tree "$MASTER_SHA" futhark-benchmarks | cut -f3)
+BENCH_SHA=$(git ls-tree "$MASTER_SHA" futhark-benchmarks | awk '{print $3}')
 git -C futhark-benchmarks checkout "$BENCH_SHA"
 cp -r futhark-benchmarks futhark-benchmarks-master
 git -C futhark-benchmarks checkout -
