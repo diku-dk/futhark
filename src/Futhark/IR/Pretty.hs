@@ -7,6 +7,7 @@ module Futhark.IR.Pretty
   ( prettyTuple,
     prettyTupleLines,
     prettyString,
+    prettyRet,
     PrettyRep (..),
   )
 where
