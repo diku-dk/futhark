@@ -2164,6 +2164,18 @@ initialCtx =
     def "manifest" = Just $ fun1 pure
     def "jvp2" = Just $ fun3 doJVP2
     def "vjp2" = Just $ fun3 doVJP2
+    def "jmp2" = Just $ fun3 $ \f x seeds -> do
+      v <- apply noLoc mempty f x
+      dvs <-
+        toArray' (valueShape v) . map (project "1")
+          <$> mapM (doJVP2 f x) (snd (fromArray seeds))
+      pure $ toTuple [v, dvs]
+    def "mjp2" = Just $ fun3 $ \f x seeds -> do
+      v <- apply noLoc mempty f x
+      dvs <-
+        toArray' (valueShape x) . map (project "1")
+          <$> mapM (doVJP2 f x) (snd (fromArray seeds))
+      pure $ toTuple [v, dvs]
     def "with_vjp" = Just $ fun3 $ \f _ arg ->
       -- XXX? We simply ignore the custom derivative. This is correct, but makes
       -- it more of a hassle to test them.

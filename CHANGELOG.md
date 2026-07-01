@@ -15,11 +15,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   uses the hardware support for `f16`, similarly to the CUDA backend.
   Implemented by Jérôme Wagner. (#2470)
 
+* Vector AD, exposed through the functions `jmp` and `mjp`.
+
+* All opaque values available over the C API can now be decomposed into their
+  constituents.
+
+* The manifest now contains documentation for entry points and opaque types.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* Non-exhaustive pattern match warnings were not always emitted when wildcard
+  patterns and explicit constructors were mixed. (#2483)
 
 * Invalid fusion that could cause compiler crash. (#2474)
 
@@ -27,6 +37,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   properly this time, and #2482)
 
 * Use ascripted element type in API functions for arrays of records. (#2485)
+
+* Consumption checking of certain local polymorphic functions (in practice,
+  polymorphic functions that can only be written via holes). (#2488)
+
+* A regression in fusion of forms such as `scatter dest (flatten inds) (flatten
+  vals)`. (#2452)
 
 ## [0.26.3]
 

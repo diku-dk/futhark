@@ -511,7 +511,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
     opaqueTupleElems opaque_name =
       case opaques of
         Imp.OpaqueTypes m
-          | Just (Imp.OpaqueRecord ts) <- lookup (nameFromText opaque_name) m ->
+          | Just (Imp.OpaqueRecord ts, _) <- lookup (nameFromText opaque_name) m ->
               -- XXX: might not be tuple.
               Tuple $ map (String . p . snd) ts
           where
@@ -867,7 +867,7 @@ prepareEntry ::
       [PyStmt],
       (Imp.ExternalValue, PyExp)
     )
-prepareEntry (Imp.EntryPoint _ result args) (fname, Imp.Function _ outputs inputs _ _) = do
+prepareEntry (Imp.EntryPoint _ result args _doc) (fname, Imp.Function _ outputs inputs _ _) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
 
@@ -961,7 +961,7 @@ compileEntryFun sync timing fun
   | otherwise = pure Nothing
 
 entryTypes :: Imp.EntryPoint -> ([T.Text], T.Text)
-entryTypes (Imp.EntryPoint _ res args) =
+entryTypes (Imp.EntryPoint _ res args _doc) =
   (map descArg args, desc res)
   where
     descArg ((_, u), d) = desc (u, d)
@@ -976,7 +976,7 @@ callEntryFun ::
   CompilerM op s (Maybe (PyFunDef, T.Text, PyExp))
 callEntryFun _ (_, Imp.Function Nothing _ _ _ _) = pure Nothing
 callEntryFun pre_timing fun@(fname, Imp.Function (Just entry) _ _ _ _) = do
-  let Imp.EntryPoint ename _ decl_args = entry
+  let Imp.EntryPoint ename _ decl_args _doc = entry
   (_, prepare_in, body_bin, _, res) <- prepareEntry entry fun
 
   let str_input = map (readInput . snd) decl_args

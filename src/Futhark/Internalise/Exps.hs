@@ -116,7 +116,7 @@ internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams pa
     zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: VisibleTypes -> E.EntryPoint -> E.ValBind -> InternaliseM ()
-generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
+generateEntryPoint types (E.EntryPoint e_params e_rettype doc) vb = do
   let (E.ValBind _ ofname _ _ (Info rettype) tparams params _ _ attrs _) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     let all_params = map pure shapeparams ++ concat params'
@@ -126,6 +126,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
           entryPoint
             types
             (baseName ofname)
+            doc
             (zip e_params $ map (foldMap toList) params')
             (e_rettype, map (map I.rankShaped) entry_rettype)
         args = map (I.Var . I.paramName) $ foldMap (foldMap toList) params'
@@ -1869,14 +1870,24 @@ isIntrinsicFunction qname args = do
     handleAccs _ _ = Nothing
 
     handleAD [f, x, v] fname
-      | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
+      | fname `elem` ["jvp2", "vjp2", "jmp2", "mjp2"] = Just $ \desc -> do
           x' <- internaliseExp "ad_x" x
           v' <- internaliseExp "ad_v" v
+          x_t <- subExpType $ head x'
+          v_t <- subExpType $ head v'
           lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
           fmap (map I.Var) . letTupExp desc . Op $
             case fname of
-              "jvp2" -> JVP x' v' lam
-              _ -> VJP x' v' lam
+              "jvp2" -> JVP mempty x' v' lam
+              "vjp2" -> VJP mempty x' v' lam
+              "jmp2" ->
+                JVP (vecShape x_t v_t) x' v' lam
+              "mjp2" ->
+                VJP (vecShape (head (lambdaReturnType lam)) v_t) x' v' lam
+              _ -> error "handleAD: not supposed to happen."
+      where
+        vecShape t1 t2 =
+          I.Shape $ take (I.arrayRank t2 - I.arrayRank t1) (I.arrayDims t2)
     handleAD [f, f_adj, x] "with_vjp" = Just $ \desc -> do
       x' <- internaliseExp "ad_x" x
       lam <- internaliseLambdaCoerce f =<< mapM subExpType x'

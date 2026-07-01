@@ -501,7 +501,7 @@ compileConsts used_consts stms = genConstants $ do
 lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
 lookupOpaqueType v (OpaqueTypes types) =
   case lookup v types of
-    Just t -> t
+    Just (t, _) -> t
     Nothing -> error $ "Unknown opaque type: " ++ show v
 
 valueTypeSign :: ValueType -> Signedness
@@ -511,9 +511,9 @@ entryPointSignedness :: OpaqueTypes -> EntryPointType -> [Signedness]
 entryPointSignedness _ (TypeTransparent vt) = [valueTypeSign vt]
 entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
-    OpaqueType vts -> map valueTypeSign vts
     OpaqueArray _ _ vts -> map valueTypeSign vts
     OpaqueRecordArray _ _ fs -> foldMap (entryPointSignedness types . snd) fs
+    OpaqueRecord [] -> [Signed]
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueSum vts _ -> map valueTypeSign vts
 
@@ -525,9 +525,9 @@ entryPointSize :: OpaqueTypes -> EntryPointType -> Int
 entryPointSize _ (TypeTransparent _) = 1
 entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
-    OpaqueType vts -> length vts
     OpaqueArray _ _ vts -> length vts
     OpaqueRecordArray _ _ fs -> sum $ map (entryPointSize types . snd) fs
+    OpaqueRecord [] -> 1
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueSum vts _ -> length vts
 
@@ -692,16 +692,16 @@ compileFunDef ::
 compileFunDef types (FunDef entry attrs fname rettype params body) =
   local (\env -> env {envFunction = name_entry `mplus` Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
-    let entry' = case (name_entry, results, args) of
-          (Just name_entry', Just results', Just args') ->
-            Just $ Imp.EntryPoint name_entry' results' args'
+    let entry' = case (name_entry, results, args, doc_entry) of
+          (Just name_entry', Just results', Just args', Just docs') ->
+            Just $ Imp.EntryPoint name_entry' results' args' docs'
           _ ->
             Nothing
     emitFunction fname $ Imp.Function entry' outparams inparams attrs body'
   where
-    (name_entry, params_entry, ret_entry) = case entry of
-      Nothing -> (Nothing, Nothing, Nothing)
-      Just (x, y, z) -> (Just x, Just y, Just z)
+    (name_entry, params_entry, ret_entry, doc_entry) = case entry of
+      Nothing -> (Nothing, Nothing, Nothing, Nothing)
+      Just (x, y, z, v) -> (Just x, Just y, Just z, Just v)
     compile = do
       (inparams, arrayds, args) <- compileInParams types params params_entry
       (results, outparams, dests) <- compileOutParams types (map fst rettype) ret_entry

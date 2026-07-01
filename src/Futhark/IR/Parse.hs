@@ -659,12 +659,16 @@ pEntryPointType =
 pEntry :: Parser EntryPoint
 pEntry =
   parens $
-    (,,)
+    (,,,)
       <$> (nameFromText <$> pStringLiteral)
       <* pComma
       <*> pEntryPointInputs
       <* pComma
       <*> pEntryPointResult
+      <*> choice
+        [ pComma *> (Just <$> pStringLiteral),
+          pure Nothing
+        ]
   where
     pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
     pEntryPointInput =
@@ -686,11 +690,11 @@ pFunDef pr = do
   FunDef entry attrs fname ret fparams
     <$> (pEqual *> braces (pBody pr))
 
-pOpaqueType :: Parser (Name, OpaqueType)
+pOpaqueType :: Parser (Name, (OpaqueType, Maybe T.Text))
 pOpaqueType =
   (,)
     <$> (keyword "type" *> (nameFromText <$> pStringLiteral) <* pEqual)
-    <*> choice [pRecord, pSum, pOpaque, pRecordArray, pOpaqueArray]
+    <*> ((,Nothing) <$> choice [pRecord, pSum, pRecordArray, pOpaqueArray])
   where
     pFieldName = choice [pName, nameFromString . show <$> pInt]
     pField = (,) <$> pFieldName <* pColon <*> pEntryPointType
@@ -710,8 +714,6 @@ pOpaqueType =
               <$> brackets (pValueType `sepBy` pComma)
               <*> many pVariant
           )
-
-    pOpaque = keyword "opaque" $> OpaqueType <*> braces (many pValueType)
 
     pRecordArray =
       keyword "record_array"
@@ -841,7 +843,9 @@ pSOAC pr =
     pVJP =
       parens $
         SOAC.VJP
-          <$> braces (pSubExp `sepBy` pComma)
+          <$> pShape
+          <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
@@ -849,7 +853,9 @@ pSOAC pr =
     pJVP =
       parens $
         SOAC.JVP
-          <$> braces (pSubExp `sepBy` pComma)
+          <$> pShape
+          <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma

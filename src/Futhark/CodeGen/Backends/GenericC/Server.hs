@@ -121,7 +121,7 @@ cType :: Manifest -> TypeName -> C.Type
 cType manifest tname =
   case M.lookup tname $ manifestTypes manifest of
     Just (TypeArray ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
-    Just (TypeOpaque ctype _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
+    Just (TypeOpaque ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
     Nothing -> uncurry primAPIType $ scalarToPrim tname
 
 data Kind
@@ -208,7 +208,7 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 .info = &$id:array_name
               };|]
       )
-typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
+typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
   let type_name = typeStructName tname
       aux_name = type_name <> "_aux"
       (transparent_edecls, transparent_init, kind) = transparentDefs type_name extra_ops
@@ -450,7 +450,7 @@ entryTypeBoilerplate manifest =
     manifest
 
 oneEntryBoilerplate :: Manifest -> (T.Text, EntryPoint) -> ([C.Definition], C.Initializer)
-oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs attrs) =
+oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs attrs _doc) =
   let call_f = "call_" <> nameFromText name
       out_type = outputType output
       in_types = map inputType inputs

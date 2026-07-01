@@ -1,7 +1,7 @@
 -- Map with free array variable.
 -- ==
 -- tags { autodiff }
--- entry: fwd_J rev_J
+-- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input { [[1,2,3],[4,5,6]] [0,0] }
 -- output { [[1, 0], [0, 1]] }
 
@@ -16,3 +16,11 @@ entry fwd_J [n] [m] (free: [n][m]i32) (is: [n]i32) =
 
 entry rev_J [n] [m] (free: [n][m]i32) (is: [n]i32) =
   tabulate n (\i -> vjp (f free) is (onehot n i))
+
+entry fwd_vec_J [n] [m] (free: [n][m]i32) (is: [n]i32) =
+  let seeds = tabulate n (\i -> onehot n i)
+  in jmp (f free) is seeds |> transpose
+
+entry rev_vec_J [n] [m] (free: [n][m]i32) (is: [n]i32) =
+  let seeds = tabulate n (\i -> onehot n i)
+  in mjp (f free) is seeds

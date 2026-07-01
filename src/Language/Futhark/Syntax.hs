@@ -1092,7 +1092,8 @@ data EntryParam = EntryParam
 -- points, so the types can be either ascribed or inferred.
 data EntryPoint = EntryPoint
   { entryParams :: [EntryParam],
-    entryReturn :: EntryType
+    entryReturn :: EntryType,
+    entryDoc :: Maybe T.Text
   }
   deriving (Show)
 

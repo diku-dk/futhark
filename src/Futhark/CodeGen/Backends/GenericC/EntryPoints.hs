@@ -137,7 +137,7 @@ onEntryPoint ::
   Function op ->
   CompilerM op s (Maybe (C.Definition, (T.Text, Manifest.EntryPoint)))
 onEntryPoint _ _ _ (Function Nothing _ _ _ _) = pure Nothing
-onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename results args)) outputs inputs attrs _) = inNewFunction $ do
+onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename results args doc)) outputs inputs attrs _) = inNewFunction $ do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -216,7 +216,8 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
             -- manifest and ImpCode.
             Manifest.entryPointOutput = outputManifest results,
             Manifest.entryPointInputs = map inputManifest args,
-            Manifest.entryPointAttrs = map prettyText (S.toList (unAttrs attrs))
+            Manifest.entryPointAttrs = map prettyText (S.toList (unAttrs attrs)),
+            Manifest.entryPointDoc = doc
           }
 
   pure $ Just (cdef, (nameToText ename, manifest))

@@ -111,7 +111,7 @@ instance (Checkable rep) => Show (ErrorCase rep) where
   show (InvalidPatError pat t desc) =
     "Pat\n"
       ++ prettyString pat
-      ++ "\ncannot match value of type\n"
+      ++ "\ncannot match expression of type\n"
       ++ T.unpack (prettyTupleLines t)
       ++ end
     where
@@ -549,7 +549,7 @@ checkOpaques :: OpaqueTypes -> Either (TypeError rep) ()
 checkOpaques (OpaqueTypes types) = descend [] types
   where
     descend _ [] = pure ()
-    descend known ((name, t) : ts) = do
+    descend known ((name, (t, _)) : ts) = do
       check known t
       descend (name : known) ts
     check known (OpaqueRecord fs) =
@@ -561,8 +561,6 @@ checkOpaques (OpaqueTypes types) = descend [] types
     check known (OpaqueRecordArray _ v fs) = do
       checkEntryPointType known (TypeOpaque v)
       mapM_ (checkEntryPointType known . snd) fs
-    check _ (OpaqueType _) =
-      pure ()
     checkEntryPointType known (TypeOpaque s) =
       unless (s `elem` known) $
         Left . Error [] . TypeError $
