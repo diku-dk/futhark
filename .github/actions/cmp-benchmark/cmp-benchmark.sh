@@ -24,17 +24,21 @@ hostname
 module unload cuda
 module load cuda/11.8
 
+echo "::group::Benchmarking with master compiler"
 $HOME/.local-master/bin/futhark bench futhark-benchmarks \
   --backend "$BACKEND" \
   --exclude "no_$SYSTEM" \
   --json "old-$BACKEND.json" \
   --ignore-files /lib/
+echo "::endgroup::"
 
+echo "::group::Benchmarking with PR compiler"
 futhark bench futhark-benchmarks \
   --backend "$BACKEND" \
   --exclude "no_$SYSTEM" \
   --json "new-$BACKEND.json" \
   --ignore-files /lib/
+echo "::endgroup::"
 
 echo "::group::Sorted by significant regressions"
 futhark benchcmp --sort-by=significant "old-$BACKEND.json" "new-$BACKEND.json"
