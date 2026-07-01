@@ -200,4 +200,4 @@ different sizes::
 SEE ALSO
 ========
 
-:ref:`futhark-c(1)`, :ref:`futhark-test(1)`
+:ref:`futhark-c(1)`, :ref:`futhark-test(1)`, :ref:`futhark-benchcmp(1)`

@@ -1,0 +1,89 @@
+name: Compare Benchmarks
+
+on:
+  pull_request:
+    types: [ labeled, synchronize ]
+
+  workflow_dispatch:
+
+jobs:
+  build-linux-nix:
+    if: >
+      github.repository == 'diku-dk/futhark' &&
+      !github.event.pull_request.draft &&
+      contains(github.event.pull_request.labels.*.name, 'cmp-benchmarks')
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v27
+
+    - uses: cachix/cachix-action@v17
+      with:
+        name: futhark
+        authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+    - name: Build Futhark
+      run: nix build .#tarball-nightly
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+        path: result/futhark-nightly-linux-x86_64.tar.xz
+
+  cmp-benchmark-MI100-opencl:
+    runs-on: MI100
+    needs: [build-linux-nix]
+
+    env:
+      TMPDIR: "/scratch"
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/cmp-benchmark
+      with:
+        backend: opencl
+        system: MI100
+        slurm-options: --time=0-04:00:00
+
+  cmp-benchmark-MI100-hip:
+    runs-on: MI100
+    needs: [build-linux-nix]
+
+    env:
+      TMPDIR: "/scratch"
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/cmp-benchmark
+      with:
+        backend: hip
+        system: MI100
+        slurm-options: --time=0-04:00:00
+
+  cmp-benchmark-A100:
+    runs-on: hendrix
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/cmp-benchmark
+      with:
+        backend: opencl
+        system: A100
+        slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cmp-opencl-A100 --exclude=hendrixgpu14fl --time=0-04:00:00
+    - uses: ./.github/actions/cmp-benchmark
+      with:
+        backend: cuda
+        system: A100
+        slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cmp-cuda-A100 --exclude=hendrixgpu14fl --time=0-04:00:00
