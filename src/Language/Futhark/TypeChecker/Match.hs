@@ -73,9 +73,19 @@ isConstr :: Match t -> Maybe Name
 isConstr (MatchConstr (Constr c) _ _) = Just c
 isConstr _ = Nothing
 
+isWild :: Match t -> Bool
+isWild MatchWild {} = True
+isWild _ = False
+
 isBool :: Match t -> Maybe Bool
 isBool (MatchConstr (ConstrLit (PatLitPrim (BoolValue b))) _ _) = Just b
 isBool _ = Nothing
+
+isStructuralConstr :: Match t -> Bool
+isStructuralConstr (MatchConstr (Constr _) _ _) = True
+isStructuralConstr (MatchConstr ConstrTuple _ _) = True
+isStructuralConstr (MatchConstr (ConstrRecord _) _ _) = True
+isStructuralConstr _ = False
 
 complete :: [Match StructType] -> Bool
 complete xs
@@ -147,28 +157,56 @@ findUnmatched pmat n
         MatchWild _ ->
           MatchWild () : u
 
-    incompleteCase pt cs = do
-      u <- findUnmatched (defaultMat pmat) (n - 1)
-      if null cs
-        then pure $ MatchWild () : u
-        else case pt of
-          Scalar (Sum all_cs) -> do
-            -- Figure out which constructors are missing.
-            let sigma = mapMaybe isConstr cs
-                notCovered (k, _) = k `notElem` sigma
-            (cname, ts) <- filter notCovered $ M.toList all_cs
-            pure $ MatchConstr (Constr cname) (map (const (MatchWild ())) ts) () : u
-          Scalar (Prim Bool) -> do
-            -- Figure out which constants are missing.
-            let sigma = mapMaybe isBool cs
-            b <- filter (`notElem` sigma) [True, False]
-            pure $ MatchConstr (ConstrLit (PatLitPrim (BoolValue b))) [] () : u
-          _ -> do
-            -- FIXME: this is wrong in the unlikely case where someone
-            -- is pattern-matching every single possible number for
-            -- some numeric type.  It should be handled more like Bool
-            -- above.
-            pure $ MatchWild () : u
+    -- When wildcards make the column complete, recurse on unique constructor
+    -- heads (wildcard rows are included via specialise).
+    recurseOnConstrHeads cs = do
+      c@(MatchConstr c' args _) <- nubOrd $ filter isStructuralConstr cs
+      let ats = map matchType args
+          a_k = length ats
+          pmat' = specialise ats c pmat
+      u <- findUnmatched pmat' (a_k + n - 1)
+      let (r, rest) = splitAt a_k u
+      pure $ MatchConstr c' r () : rest
+
+    incompleteCase pt cs
+      | null cs = do
+          u <- findUnmatched (defaultMat pmat) (n - 1)
+          pure $ MatchWild () : u
+      | any isWild cs,
+        Scalar (Sum all_cs) <- pt =
+          let sigma = mapMaybe isConstr cs
+              notCovered (k, _) = k `notElem` sigma
+              missingCs = filter notCovered $ M.toList all_cs
+              -- Sigma constructors: check sub-patterns (wildcard rows included via specialise).
+              sigmaWitnesses = recurseOnConstrHeads cs
+              -- Missing constructors: wildcard covers them, but sub-patterns
+              -- may still be unmatched (checked via default matrix).
+              missingWitnesses = do
+                u <- findUnmatched (defaultMat pmat) (n - 1)
+                (cname, ts) <- missingCs
+                pure $ MatchConstr (Constr cname) (map (const (MatchWild ())) ts) () : u
+           in sigmaWitnesses ++ missingWitnesses
+      | any isWild cs,
+        any isStructuralConstr cs =
+          recurseOnConstrHeads cs
+      | Scalar (Sum all_cs) <- pt = do
+          let sigma = mapMaybe isConstr cs
+              notCovered (k, _) = k `notElem` sigma
+          (cname, ts) <- filter notCovered $ M.toList all_cs
+          u <- findUnmatched (defaultMat pmat) (n - 1)
+          pure $ MatchConstr (Constr cname) (map (const (MatchWild ())) ts) () : u
+      | Scalar (Prim Bool) <- pt = do
+          u <- findUnmatched (defaultMat pmat) (n - 1)
+          let sigma = mapMaybe isBool cs
+          b <- filter (`notElem` sigma) [True, False]
+          pure $ MatchConstr (ConstrLit (PatLitPrim (BoolValue b))) [] () : u
+      | otherwise = do
+          u <- findUnmatched (defaultMat pmat) (n - 1)
+          -- FIXME: this is wrong in the unlikely case where someone
+          -- is pattern-matching every single possible number for
+          -- some numeric type.  It should be handled more like Bool
+          -- above.
+          pure $ MatchWild () : u
 findUnmatched [] n = [replicate n $ MatchWild ()]
 findUnmatched _ _ = []
 

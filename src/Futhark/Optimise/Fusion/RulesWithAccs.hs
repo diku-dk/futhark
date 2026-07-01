@@ -4,16 +4,18 @@
 --     that involves WithAcc constructs.
 --   Currently, we support two non-trivial
 --   transformations:
---     I. map-flatten-scatter: a map nest produces
---        multi-dimensional index and values arrays
---        that are then flattened and used in a
---        scatter consumer. Such pattern can be fused
---        by re-writing the scatter by means of a WithAcc
---        containing a map-nest, thus eliminating the flatten
---        operations. The obtained WithAcc can then be fused
---        with the producer map nest, e.g., benefiting intra-group
---        kernels. The eloquent target for this rule is
---        an efficient implementation of radix-sort.
+--     I. SOAC-through-Trans-into-WithAcc fusion: a SoacNode is fused
+--        into a WithAcc atomically when all dependency paths between
+--        them go through TransNodes (reshapes/rearranges) that have no
+--        other consumers. The canonical example is a map nest producing
+--        multi-dimensional index and value arrays that are flattened
+--        and consumed by a scatter. This must be done atomically to
+--        avoid an infinite loop: absorbing only the TransNode causes
+--        simplifyLambda to hoist the cheap reshape back out, recreating
+--        the same TransNode and triggering the rule again. The strategy
+--        is to prepend the SoacNode and all TransNode statements into
+--        the WithAcc lambda body and run doFusionInLambda to fuse
+--        further where possible.
 --
 --    II. WithAcc-WithAcc fusion: two withaccs can be
 --        fused as long as the common accumulators use
@@ -27,16 +29,22 @@
 --        they can be transformed by various optimizations passes.
 module Futhark.Optimise.Fusion.RulesWithAccs
   ( tryFuseWithAccs,
+    trySoacThroughTransIntoWithAcc,
   )
 where
 
 import Control.Monad
+import Data.Graph.Inductive.Graph qualified as G
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Data.Maybe (maybeToList)
+import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
+import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util (nubOrd)
 
 ---------------------------------------------------
 --- II. WithAcc-WithAcc Fusion
@@ -211,6 +219,97 @@ tryFuseWithAccs
 --
 tryFuseWithAccs _ _ _ =
   Nothing
+
+---------------------------------------------------
+--- I. SOAC-through-Trans-into-WithAcc Fusion
+---------------------------------------------------
+
+-- | See the module-level description of transformation I.
+-- The @doFusionInLambda@ and @fusedSomething@ arguments are callbacks
+-- from Fusion.hs to avoid a circular import.
+trySoacThroughTransIntoWithAcc ::
+  (HasScope SOACS m, MonadFreshNames m) =>
+  (Lambda SOACS -> m (Lambda SOACS, Bool)) ->
+  (NodeT -> m (Maybe NodeT)) ->
+  G.Node ->
+  DepGraphAug m
+trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGraph {dgGraph = g}
+  | not (G.gelem wacc_id g) = pure dg
+  | Just (StmNode (Let pat2 aux2 (WithAcc w_inps lam0))) <- G.lab g wacc_id = do
+      -- Edges go FROM consumers TO producers:
+      --   G.lpre g n = consumers of n; G.lsuc g n = producers n depends on.
+      -- realConsumers n: consumers of n, excluding Alias edges and self-loops.
+      let wacc_cons_nms = namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps
+          realConsumers n =
+            nubOrd $
+              map fst $
+                filter (\(m, e) -> m /= n && case e of Alias {} -> False; _ -> True) $
+                  G.lpre g n
+          -- TransNodes that directly feed wacc and are exclusively consumed by wacc.
+          trans_preds = do
+            (tn_id, _) <- G.lsuc g wacc_id
+            TransNode out tr inp <- maybeToList $ G.lab g tn_id
+            guard $ realConsumers tn_id == [wacc_id]
+            pure (tn_id, out, tr, inp)
+          trans_ids = map (\(a, _, _, _) -> a) trans_preds
+          trans_out_nms = namesFromList $ map (\(_, out, _, _) -> out) trans_preds
+          -- The unique Screma SoacNode that feeds all TransNodes and has no
+          -- other consumers besides those TransNodes.
+          soac_preds = do
+            (tn_id, _, _, _) <- trans_preds
+            (sn_id, _) <- G.lsuc g tn_id
+            guard $ sn_id `notElem` trans_ids
+            guard $ all (`elem` trans_ids) (realConsumers sn_id)
+            pure sn_id
+          prod_ids = nubOrd soac_preds
+      case (trans_preds, prod_ids) of
+        (_ : _, [prod_id])
+          | Just (SoacNode ots1 pat1 soac@(H.Screma {}) aux1) <- G.lab g prod_id,
+            ots1 == mempty,
+            all ((`notNameIn` wacc_cons_nms) . H.inputArray) (H.inputs soac),
+            not $ namesIntersect trans_out_nms wacc_cons_nms ->
+              attempt trans_ids trans_preds prod_id pat1 aux1 soac pat2 aux2 w_inps lam0
+        _ -> pure dg
+  | otherwise = pure dg
+  where
+    attempt trans_ids trans_preds prod_id pat1 aux1 soac pat2 aux2 w_inps lam0 = do
+      let trans_info = map (\(_, out, tr, inp) -> (out, tr, inp)) trans_preds
+      lam' <- renameLambda <=< runLambdaBuilder (lambdaParams lam0) $ do
+        soac' <- H.toExp soac
+        addStm $ Let pat1 aux1 soac'
+        forM_ trans_info $ \(out, tr, inp) -> do
+          (tr_aux, tr_exp) <- H.transformToExp tr inp
+          auxing tr_aux $ letBindNames [out] tr_exp
+        bodyBind $ lambdaBody lam0
+      -- Run inner fusion. We always proceed with onSuccess because embedding
+      -- the SoacNode + TransNodes into the WithAcc is itself a valid fusion
+      -- step and avoids potential infinite loops from simplifyLambda hoisting
+      -- a reshape back out.
+      lam'' <- fst <$> doFusionInLambda lam'
+      onSuccess trans_ids prod_id pat2 aux2 w_inps lam''
+
+    onSuccess trans_ids prod_id pat2 aux2 w_inps lam'' = do
+      void $ fusedSomething (StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'')
+      -- Rebuild the graph: remove absorbed nodes and rewire wacc's edges.
+      -- G.context returns (in_adj, n, label, out_adj) where both adjacency
+      -- lists are [(EdgeT, Node)]. G.lsuc/lpre are (Node, EdgeT).
+      let to_remove = prod_id : trans_ids
+          new_wacc = StmNode $ Let pat2 aux2 $ WithAcc w_inps lam''
+          g' = foldr G.delNode g to_remove
+          (wacc_preds, _, _, wacc_succs) = G.context g wacc_id
+          -- Inherit producers of the absorbed nodes that are still in g'.
+          removed_succs =
+            nubOrd $
+              concatMap (filter ((`G.gelem` g') . fst) . G.lsuc g) to_remove
+          new_succs =
+            nubOrd $
+              removed_succs
+                ++ map (\(e, n) -> (n, e)) (filter ((`G.gelem` g') . snd) wacc_succs)
+          new_preds = filter ((`G.gelem` g') . snd) wacc_preds
+          g'' = G.insNode (wacc_id, new_wacc) $ G.delNode wacc_id g'
+          g''' = foldr (\(e, n) gr -> G.insEdge (n, wacc_id, e) gr) g'' new_preds
+          g'''' = foldr (\(n, e) gr -> G.insEdge (wacc_id, n, e) gr) g''' new_succs
+      pure dg {dgGraph = g''''}
 
 -------------------------------
 --- simple helper functions ---

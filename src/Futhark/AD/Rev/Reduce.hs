@@ -9,7 +9,9 @@ module Futhark.AD.Rev.Reduce
 where
 
 import Control.Monad
+import Data.Tuple
 import Futhark.AD.Rev.Monad
+import Futhark.AD.Shared
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
@@ -78,10 +80,8 @@ diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isAdd op = do
       adj_rep <-
-        letExp (baseName adj <> "_rep") $
-          BasicOp $
-            Replicate (Shape [w]) $
-              Var adj
+        vecToInner <=< letExp (baseName adj <> "_rep") $
+          BasicOp (Replicate (Shape [w]) (Var adj))
       void $ updateAdj a adj_rep
   where
     isAdd FAdd {} = True
@@ -118,10 +118,9 @@ diffReduce ops pat_adj w as red = do
   f_adj <- vjpLambda ops (map adjFromVar pat_adj) as_params f
 
   as_adj <-
-    letTupExp "adjs" . Op . Screma w (ls ++ as ++ rs)
-      =<< mapSOAC f_adj
+    letTupExp "red_contribs" . Op . Screma w (ls ++ as ++ rs) =<< mapSOAC f_adj
 
-  zipWithM_ updateAdj as as_adj
+  zipWithM_ updateAdj as =<< mapM vecToInner as_adj
   where
     renameRed (Reduce comm lam nes) =
       Reduce comm <$> renameLambda lam <*> pure nes
@@ -253,7 +252,8 @@ diffMulReduce ::
   VjpOps -> VName -> StmAux () -> SubExp -> BinOp -> SubExp -> VName -> ADM () -> ADM ()
 diffMulReduce _ops x aux w mul ne as m = do
   let t = binOpType mul
-  let const_zero = eSubExp $ Constant $ blankPrimValue t
+  let zero = Constant $ blankPrimValue t
+      const_zero = eSubExp zero
 
   a_param <- newParam "a" $ Prim t
   map_lam <-
@@ -292,42 +292,45 @@ diffMulReduce _ops x aux w mul ne as m = do
 
   x_adj <- lookupAdjVal x
 
+  adj_shape <- askShape
+
+  zero_contrib <- letExp "zero_contrib" $ BasicOp $ Replicate adj_shape zero
+
   a_param_rev <- newParam "a" $ Prim t
   map_lam_rev <-
     mkLambda [a_param_rev] $
       fmap varsRes . letTupExp "adj_res"
         =<< eIf
           (toExp $ 0 .==. le64 zr_count)
-          ( eBody $
-              pure $
-                eBinOp mul (eSubExp $ Var x_adj) $
-                  eBinOp (getDiv t) (eSubExp $ Var nz_prods) $
-                    eParam a_param_rev
+          ( eBody
+              [ mapNest adj_shape (MkSolo (Var x_adj)) $ \(MkSolo x_adj') ->
+                  eBinOp mul (eSubExp x_adj') $
+                    eBinOp (getDiv t) (eVar nz_prods) $
+                      eParam a_param_rev
+              ]
           )
-          ( eBody $
-              pure $
-                eIf
+          ( eBody
+              [ eIf
                   (toExp $ 1 .==. le64 zr_count)
-                  ( eBody $
-                      pure $
-                        eIf
+                  ( eBody
+                      [ eIf
                           (eCmpOp (CmpEq t) (eParam a_param_rev) const_zero)
-                          ( eBody $
-                              pure $
-                                eBinOp mul (eSubExp $ Var x_adj) $
-                                  eSubExp $
-                                    Var nz_prods
+                          ( eBody
+                              [ mapNest adj_shape (MkSolo (Var x_adj)) $
+                                  \(MkSolo x_adj') ->
+                                    eBinOp mul (eSubExp x_adj') $ eVar nz_prods
+                              ]
                           )
-                          (eBody $ pure const_zero)
+                          (eBody [eVar zero_contrib])
+                      ]
                   )
-                  (eBody $ pure const_zero)
+                  (eBody [eVar zero_contrib])
+              ]
           )
 
-  as_adjup <-
-    letExp "adjs" . Op . Screma w [as]
-      =<< mapSOAC map_lam_rev
+  as_adjup <- letExp "prod_contrib" . Op . Screma w [as] =<< mapSOAC map_lam_rev
 
-  updateAdj as as_adjup
+  updateAdj as =<< vecToInner as_adjup
   where
     getDiv :: PrimType -> BinOp
     getDiv (IntType t) = SDiv t Unsafe
