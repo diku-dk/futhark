@@ -11,7 +11,7 @@ jobs:
     if: >
       github.repository == 'diku-dk/futhark' &&
       !github.event.pull_request.draft &&
-      contains(github.event.pull_request.labels.*.name, 'cmp-benchmark')
+      contains(github.event.pull_request.labels.*.name, 'cmp-benchmarks')
     runs-on: ubuntu-24.04
 
     steps:
