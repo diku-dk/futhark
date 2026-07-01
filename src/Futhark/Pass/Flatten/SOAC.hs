@@ -890,14 +890,9 @@ irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
         (new_ws_F, new_ws_O, _) <- doRepIota lvl new_shape
         letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg_dense
         mapResultRep lvl SingleDim (new_shape, new_ws_F, new_ws_O) v
-      else case mode of
-        MultiDim -> do
+      else do 
           reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
-          mapResultRep lvl MultiDim (ws, ws_F, ws_O) v
-        SingleDim -> do
-          -- TODO: have to do this even it seems very annoying should think something better
-          reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
-          mapResultRep lvl SingleDim (ws, ws_F, ws_O) v
+          mapResultRep lvl mode (ws, ws_F, ws_O) v
   where
     isTypeVariant vin se = case se of
       Var v' -> S.member v' vin
