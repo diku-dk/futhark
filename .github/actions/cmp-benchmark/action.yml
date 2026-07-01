@@ -1,0 +1,68 @@
+name: 'Compare Benchmark'
+description: 'Run futhark bench with master and PR compilers and compare results'
+inputs:
+  backend:
+    description: 'Backend to use'
+    required: true
+  system:
+    description: 'Name of system (e.g. GPU name)'
+    required: true
+  slurm-options:
+    description: 'Options to pass to srun'
+    required: false
+    default: ''
+runs:
+  using: "composite"
+  steps:
+    - uses: ./.github/actions/futhark-slurm
+      with:
+        script: |
+          set -e
+
+          # Install the master (nightly) compiler.
+          curl -L https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz \
+            -o futhark-nightly-master.tar.xz
+          mkdir -p /tmp/futhark-master
+          tar xf futhark-nightly-master.tar.xz -C /tmp/futhark-master --strip-components=1
+          make -C /tmp/futhark-master/ install PREFIX=$HOME/.local-master
+
+          # Find the benchmark suite commit pinned by the master compiler.
+          MASTER_SHA=$(cat /tmp/futhark-master/commit-id)
+          BENCH_SHA=$(git ls-tree "$MASTER_SHA" futhark-benchmarks | awk '{print $3}')
+          git -C futhark-benchmarks checkout "$BENCH_SHA"
+          cp -r futhark-benchmarks futhark-benchmarks-master
+          git -C futhark-benchmarks checkout -
+
+          # Download data for each suite independently, as they may differ.
+          module load perl
+          (cd futhark-benchmarks-master && ./get-data.sh external-data.txt)
+          (cd futhark-benchmarks && ./get-data.sh external-data.txt)
+
+          hostname
+          module unload cuda
+          module load cuda/11.8
+
+          $HOME/.local-master/bin/futhark bench futhark-benchmarks-master \
+            --backend ${{inputs.backend}} \
+            --exclude no_${{inputs.system}} \
+            --json old-${{inputs.backend}}.json \
+            --ignore-files /lib/
+
+          futhark bench futhark-benchmarks \
+            --backend ${{inputs.backend}} \
+            --exclude no_${{inputs.system}} \
+            --json new-${{inputs.backend}}.json \
+            --ignore-files /lib/
+
+          echo "::group::Sorted by significant regressions"
+          futhark benchcmp --sort-by=significant old-${{inputs.backend}}.json new-${{inputs.backend}}.json
+          echo "::endgroup::"
+
+          echo "::group::Sorted by geomean (significant only)"
+          futhark benchcmp --sort-by=geomean-significant old-${{inputs.backend}}.json new-${{inputs.backend}}.json
+          echo "::endgroup::"
+
+          echo "::group::Sorted by geomean (all datasets)"
+          futhark benchcmp --sort-by=geomean-all old-${{inputs.backend}}.json new-${{inputs.backend}}.json
+          echo "::endgroup::"
+        slurm-options: ${{inputs.slurm-options}}
