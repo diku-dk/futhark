@@ -867,10 +867,11 @@ irregularMapResult ::
   FlattenM ResRep
 irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
   do
+    irreg_dense <- ensureDenseIrregular lvl (baseName v <> "_map_result") irreg
     if any (isTypeVariant new_inp_var) (arrayShape v_t)
       then do
-        irreg_dense <- ensureDenseIrregular lvl (baseName v <> "_map_result") irreg
         old_segment <- arraySize 0 <$> lookupType ws
+        -- TODO: We can make this simpler.
         new_shape <- letExp (baseName v <> "_outer_shape") <=< segMap lvl (MkSolo old_segment) $ \(MkSolo is) -> do
           outer_ind <- letSubExp "outer_ind" =<< eIndex ws_O [eSubExp is]
           outer_ws_i <- letSubExp "outer_ws" =<< eIndex ws [eSubExp is]
@@ -891,7 +892,7 @@ irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
         letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg_dense
         mapResultRep lvl SingleDim (new_shape, new_ws_F, new_ws_O) v
       else do 
-          reshapeAndBind v (irregularD irreg) (segmentsShape segments <> arrayShape v_t)
+          reshapeAndBind v (irregularD irreg_dense) (segmentsShape segments <> arrayShape v_t)
           mapResultRep lvl mode (ws, ws_F, ws_O) v
   where
     isTypeVariant vin se = case se of

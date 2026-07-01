@@ -480,7 +480,7 @@ mkIrregFromReg lvl segments arr = do
 
 -- | Flatten the arrays of an IrregularRep to be entirely one-dimensional.
 flattenIrregularRep :: SegLevel -> IrregularRep -> FlattenM IrregularRep
-flattenIrregularRep lvl ir@(IrregularRep shape flags offsets elems kind) = do
+flattenIrregularRep lvl ir@(IrregularRep shape _ offsets elems kind) = do
   elems_t <- lookupType elems
   if arrayRank elems_t == 1
     then pure ir
@@ -490,28 +490,23 @@ flattenIrregularRep lvl ir@(IrregularRep shape flags offsets elems kind) = do
       elems' <-
         letExp (baseName elems <> "_flat") . BasicOp $
           Reshape elems (reshapeAll (arrayShape elems_t) (Shape [m']))
+      let inner_size = product $ map pe64 $ tail $ arrayDims elems_t
+      ~[shape', offsets'] <-
+        letTupExp (baseName shape <> "_flat_metadata")
+          <=< renameExp
+          <=< segMap lvl (MkSolo n)
+          $ \(MkSolo i) -> do
+            old_shape <-
+              letSubExp "old_shape" =<< eIndex shape [toExp i]
+            old_offset <-
+              letSubExp "old_offset" =<< eIndex offsets [toExp i]
 
-      shape' <- letExp (baseName shape <> "_flat") <=< renameExp <=< segMap lvl (MkSolo n) $
-        \(MkSolo i) -> do
-          old_shape <- letSubExp "old_shape" =<< eIndex shape [toExp i]
-          segment_shape <-
-            letSubExp "segment_shape" <=< toExp $
-              pe64 old_shape * product (map pe64 $ tail $ arrayDims elems_t)
-          pure [subExpRes segment_shape]
-
-      offsets' <- letExp (baseName offsets <> "_flat") <=< renameExp <=< segMap lvl (MkSolo n) $
-        \(MkSolo i) -> do
-          old_offsets <- letSubExp "old_offsets" =<< eIndex offsets [toExp i]
-          segment_offsets <-
-            letSubExp "segment_offsets" <=< toExp $
-              pe64 old_offsets * product (map pe64 $ tail $ arrayDims elems_t)
-          pure [subExpRes segment_offsets]
-
-      flags' <- letExp (baseName flags <> "_flat") <=< renameExp <=< segMap lvl (MkSolo m') $
-        \(MkSolo i) -> do
-          let head_i = head $ unflattenIndex (map pe64 $ arrayDims elems_t) (pe64 i)
-          flag <- letSubExp "flag" =<< eIndex flags [toExp head_i]
-          pure [subExpRes flag]
+            segment_shape <-
+              letSubExp "segment_shape" <=< toExp $ (pe64 old_shape * inner_size)
+            segment_offset <-
+              letSubExp "segment_offset" <=< toExp $ (pe64 old_offset * inner_size)
+            pure $ subExpsRes [segment_shape, segment_offset]
+      flags' <- genFlags lvl m' offsets'
       pure $ IrregularRep shape' flags' offsets' elems' kind
 
 -- If the sub-expression is a constant, replicate it to match the shape of `segments`
@@ -654,17 +649,26 @@ distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
           Regular vs -> vs
           Irregular r -> irregularD r
 
+flattenData :: VName -> FlattenM VName
+flattenData vs = do
+  t <- lookupType vs
+  case arrayDims t of
+    [_] -> pure vs
+    dims -> do
+      n <- toSubExp "num_data" $ product $ map pe64 dims
+      letExp (baseName vs <> "_flat") . BasicOp $
+        Reshape vs $ reshapeAll (arrayShape t) (Shape [n]) 
 -- | Only sensible for variables of segment-invariant type.
 dataArr :: SegLevel -> Segments -> DistEnv -> DistInputs -> SubExp -> FlattenM VName
-dataArr lvl segments env inps (Var v)
+dataArr lvl _segments env inps (Var v)
   | Just v_inp <- lookup v inps =
       case v_inp of
-        DistInputFree vs _ -> irregularD <$> mkIrregFromReg lvl segments vs
+        DistInputFree vs _ -> flattenData vs
         DistInput rt _ -> case resVar rt env of
           Irregular r -> do
             rep_dense <- ensureDenseIrregular lvl "dataArr" r
             pure $ irregularD rep_dense
-          Regular vs -> irregularD <$> mkIrregFromReg lvl segments vs
+          Regular vs -> flattenData vs
 dataArr _ segments _ _ se = do
   rep <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
   rep_t <- lookupType rep
