@@ -1,5 +1,5 @@
 #!/bin/bash
-set -ex
+set -e
 
 BACKEND=$1
 SYSTEM=$2
@@ -11,23 +11,20 @@ mkdir -p /tmp/futhark-master
 tar xf futhark-nightly-master.tar.xz -C /tmp/futhark-master --strip-components=1
 make -C /tmp/futhark-master/ install PREFIX=$HOME/.local-master
 
-# Find the benchmark suite commit pinned by the master compiler.
+# Pin the benchmark suite to the commit used by the master compiler so both
+# compilers are compared against an identical suite.
 MASTER_SHA=$(cat /tmp/futhark-master/commit-id)
 BENCH_SHA=$(git ls-tree "$MASTER_SHA" futhark-benchmarks | awk '{print $3}')
 git -C futhark-benchmarks checkout "$BENCH_SHA"
-cp -r futhark-benchmarks futhark-benchmarks-master
-git -C futhark-benchmarks checkout -
 
-# Download data for each suite independently, as they may differ.
 module load perl
-(cd futhark-benchmarks-master && ./get-data.sh external-data.txt)
 (cd futhark-benchmarks && ./get-data.sh external-data.txt)
 
 hostname
 module unload cuda
 module load cuda/11.8
 
-$HOME/.local-master/bin/futhark bench futhark-benchmarks-master \
+$HOME/.local-master/bin/futhark bench futhark-benchmarks \
   --backend "$BACKEND" \
   --exclude "no_$SYSTEM" \
   --json "old-$BACKEND.json" \
