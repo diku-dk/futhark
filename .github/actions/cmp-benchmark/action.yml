@@ -58,11 +58,11 @@ runs:
           futhark benchcmp --sort-by=significant old-${{inputs.backend}}.json new-${{inputs.backend}}.json
           echo "::endgroup::"
 
-          echo "::group::Sorted by geomean (significant only)"
+          echo "::group::Sorted by geomean - significant only"
           futhark benchcmp --sort-by=geomean-significant old-${{inputs.backend}}.json new-${{inputs.backend}}.json
           echo "::endgroup::"
 
-          echo "::group::Sorted by geomean (all datasets)"
+          echo "::group::Sorted by geomean - all datasets"
           futhark benchcmp --sort-by=geomean-all old-${{inputs.backend}}.json new-${{inputs.backend}}.json
           echo "::endgroup::"
         slurm-options: ${{inputs.slurm-options}}
