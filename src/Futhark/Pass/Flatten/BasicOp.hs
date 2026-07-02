@@ -620,6 +620,15 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
               fmap (subExpsRes . pure) . letSubExp "v"
                 =<< eIndex arr [toExp flat_i]
           pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
+    Iota n x s it
+      | isRegularDistResult res,
+        not (isVariant inps n),
+        not (isVariant inps x),
+        not (isVariant inps s) -> do
+          iota_row <- letExp "iota_reg_row" $ BasicOp $ Iota n x s it
+          v <- letExp "iota_reg" $
+                  BasicOp $ Replicate (segmentsShape segments) (Var iota_row)
+          pure $ insertRegulars [distResTag res] [v] env
     Iota n (Constant x) (Constant s) Int64
       | zeroIsh x,
         oneIsh s -> do
