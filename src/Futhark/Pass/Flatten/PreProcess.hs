@@ -57,6 +57,17 @@ preprocessStm scope (Let pat aux (Op (Screma w' arrs' form')))
   | shouldDissectForm form' = do
       stms <- runSimplifiedBuilder scope (auxing aux $ dissectScrema pat w' form' arrs')
       preprocessStms scope stms
+preprocessStm scope (Let pat aux (Loop merge form body)) = do
+  let scope' = scopeOfFParams (map fst merge) <> scopeOfLoopForm form <> scope
+  body' <- preprocessBody scope' body
+  pure $ oneStm $ Let pat aux $ Loop merge form body'
+preprocessStm scope (Let pat aux (Match ses cases defbody dec)) = do
+  cases' <- mapM (traverse (preprocessBody scope)) cases
+  defbody' <- preprocessBody scope defbody
+  pure $ oneStm $ Let pat aux $ Match ses cases' defbody' dec
+preprocessStm scope (Let pat aux (WithAcc inputs lam)) = do
+  lam' <- preprocessLambda scope lam
+  pure $ oneStm $ Let pat aux $ WithAcc inputs lam'
 preprocessStm _ stm = pure $ oneStm stm
 
 preprocessStms ::

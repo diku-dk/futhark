@@ -283,32 +283,39 @@ factorScremaForParallelism ::
 factorScremaForParallelism funHasParallelism scope certs pat w arrs form
   | Just (reds, map_lam) <- isRedomapSOAC form,
     lambdaHasParallelism funHasParallelism map_lam = do
+      map_lam' <- preprocessLambda scope map_lam
       (map_stm, red_stm) <-
         redomapToMapAndReduce
           pat
-          (w, reds, map_lam, arrs)
+          (w, reds, map_lam', arrs)
       Just <$> mkFactoredBody (stmsFromList [map_stm, red_stm])
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     lambdaHasParallelism funHasParallelism map_lam,
     lambdaHasParallelism funHasParallelism post_lam = do
+      map_lam' <- preprocessLambda scope map_lam
+      post_lam' <- preprocessLambda scope post_lam
       (map_stm, scan_stm, post_stm) <-
         maposcanomapToMapScanAndMap
           pat
-          (w, post_lam, scans, map_lam, arrs)
+          (w, post_lam', scans, map_lam', arrs)
       Just <$> mkFactoredBody (stmsFromList [map_stm, scan_stm, post_stm])
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     lambdaHasParallelism funHasParallelism map_lam = do
+      map_lam' <- preprocessLambda scope map_lam
+      post_lam' <- preprocessLambda scope post_lam
       (map_stm, scanomap_stm) <-
         maposcanomapToMaposcanAndMap
           pat
-          (w, post_lam, scans, map_lam, arrs)
+          (w, post_lam', scans, map_lam', arrs)
       Just <$> mkFactoredBody (stmsFromList [map_stm, scanomap_stm])
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     lambdaHasParallelism funHasParallelism post_lam = do
+      map_lam' <- preprocessLambda scope map_lam
+      post_lam' <- preprocessLambda scope post_lam
       (map_stm, scan_stm, post_stm) <-
         maposcanomapToMapScanAndMap
           pat
-          (w, post_lam, scans, map_lam, arrs)
+          (w, post_lam', scans, map_lam', arrs)
       Just <$> mkFactoredBody (stmsFromList [map_stm, scan_stm, post_stm])
   | otherwise =
       pure Nothing
