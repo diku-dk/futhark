@@ -876,6 +876,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
 -- the idea, but which could perhaps be generalised.
 simplifyMatch ::
   (Mem rep inner) =>
+  MatchSort ->
   [Case (Body rep)] ->
   Body rep ->
   [BranchTypeMem] ->
@@ -883,7 +884,10 @@ simplifyMatch ::
     Body rep,
     [BranchTypeMem]
   )
-simplifyMatch cases defbody ts =
+-- XXX: Do not simplify MatchEquivs
+simplifyMatch MatchEquiv cases defbody ts =
+  (cases, defbody, ts)
+simplifyMatch _ cases defbody ts =
   let case_reses = map (bodyResult . caseBody) cases
       defbody_res = bodyResult defbody
       (ctx_fixes, variant) =
@@ -949,7 +953,7 @@ allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   defbody'' <- addCtxToMatchBody reqs defbody'
   cases'' <- mapM (traverse $ addCtxToMatchBody reqs) cases'
   let (cases''', defbody''', rets') =
-        simplifyMatch cases'' defbody'' $ mkBranchRet reqs
+        simplifyMatch ifsort cases'' defbody'' $ mkBranchRet reqs
   pure $ Match ses cases''' defbody''' $ MatchDec rets' ifsort
   where
     onCase (Case vs body) = first (Case vs) <$> allocInMatchBody rets body
