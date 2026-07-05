@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.27.0]
 
+## Added
+
+## Removed
+
+## Changed
+
+## Fixed
+
+## [0.26.4]
+
 ### Added
 
 * `futhark repl` has a new command: `:string`.
@@ -21,10 +31,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   constituents.
 
 * The manifest now contains documentation for entry points and opaque types.
-
-### Removed
-
-### Changed
 
 ### Fixed
 

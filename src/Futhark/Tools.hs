@@ -14,6 +14,7 @@ module Futhark.Tools
     partitionChunkedFoldParameters,
     withAcc,
     doScatter,
+    doHist,
     addBinOp,
     addLambda,
 
@@ -29,7 +30,7 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.SOACS.SOAC
-import Futhark.Util (mapAccumLM)
+import Futhark.Util (chunks, mapAccumLM)
 
 splitScanOrRedomap ::
   (MonadFreshNames m) =>
@@ -360,6 +361,52 @@ doScatter desc rank dest arrs mk = do
       =<< mapSOAC map_lam
 
   letTupExp desc $ WithAcc [(acc_shape, [v], Nothing) | v <- dest] withacc_lam
+
+-- | Perform a histogram-like operation using accumulators and map.
+doHist ::
+  (MonadBuilder m, Buildable (Rep m), Op (Rep m) ~ SOAC (Rep m)) =>
+  Name ->
+  [HistOp (Rep m)] ->
+  [VName] ->
+  ([LParam (Rep m)] -> m [SubExp]) ->
+  m [[VName]]
+doHist desc ops arrs mk = do
+  (inputs, cert_ps, acc_ts) <- unzip3 <$> mapM onOp ops
+  acc_ps <- mapM (newParam "acc_p") acc_ts
+  arrs_ts <- mapM lookupType arrs
+
+  withacc_lam <- mkLambda (cert_ps <> acc_ps) $ do
+    acc_ps_inner <- mapM (newParam "acc_p") acc_ts
+    params <- mapM (newParam "v" . stripArray 1) arrs_ts
+    map_lam <-
+      mkLambda (acc_ps_inner <> params) $ do
+        let num_is_per_op = map (shapeRank . histShape) ops
+            num_vs_per_op = map (length . histDest) ops
+        (is, vs) <- splitAt (sum num_is_per_op) <$> mk params
+        let is_per_op = chunks num_is_per_op is
+            vs_per_op = chunks num_vs_per_op vs
+        fmap subExpsRes $ forM (zip3 acc_ps_inner is_per_op vs_per_op) $ \(acc_p_inner, op_is, op_vs) ->
+          letSubExp "scatter_acc" . BasicOp $
+            UpdateAcc Safe (paramName acc_p_inner) op_is op_vs
+
+    let w = arraysSize 0 arrs_ts
+    (fmap varsRes . letTupExp "acc_res")
+      . Op
+      . Screma w (map paramName acc_ps <> arrs)
+      =<< mapSOAC map_lam
+  fmap (chunks (map (length . histDest) ops)) $
+    letTupExp desc $
+      WithAcc inputs withacc_lam
+  where
+    onOp op = do
+      idx_params <- replicateM (shapeRank (histShape op)) $ newParam "idx" $ Prim int64
+      let addIdxParams lam = lam {lambdaParams = idx_params <> lambdaParams lam}
+          input = (histShape op, histDest op, Just (addIdxParams (histOp op), histNeutral op))
+          shape = histShape op
+      elem_ts <- fmap (map (stripArray (shapeRank shape))) $ mapM lookupType $ histDest op
+      cert_p <- newParam "acc_cert" $ Prim Unit
+      let cert = paramName cert_p
+      pure (input, cert_p, Acc cert shape elem_ts NoUniqueness)
 
 -- | The most addition-like binary operator for some primitive type.
 addBinOp :: PrimType -> BinOp

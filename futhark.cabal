@@ -395,6 +395,7 @@ library
       Futhark.Pass.Flatten.StreamKernel
       Futhark.Pass.LiftAllocations
       Futhark.Pass.LowerAllocations
+      Futhark.Pass.NoGrid
       Futhark.Pass.Simplify
       Futhark.Passes
       Futhark.Pipeline

@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Workaround runner image issue
       # https://github.com/actions/runner-images/issues/7061
@@ -68,7 +68,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install dependencies
       run: |
@@ -110,7 +110,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - id: setup-haskell
       uses: haskell-actions/setup@v2
@@ -146,7 +146,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
@@ -172,7 +172,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
@@ -191,7 +191,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v18
@@ -219,7 +219,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: actions/download-artifact@v4
       with:
@@ -238,7 +238,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: actions/download-artifact@v4
       with:
@@ -257,7 +257,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v18
@@ -285,7 +285,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v18
@@ -313,7 +313,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v18
@@ -342,7 +342,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v18
@@ -369,7 +369,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [build-linux-nix]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v18
@@ -395,7 +395,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [build-linux-nix]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v18
@@ -422,7 +422,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: ./.github/actions/futhark-slurm
       with:
@@ -446,7 +446,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: ./.github/actions/futhark-slurm
       with:
@@ -468,7 +468,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: ./.github/actions/futhark-slurm
       with:
@@ -494,7 +494,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - run: |
         python -m venv virtualenv
@@ -518,7 +518,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
@@ -555,7 +555,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
@@ -588,7 +588,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
@@ -619,7 +619,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: actions/download-artifact@v4
       with:
@@ -639,7 +639,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: actions/download-artifact@v4
       with:
@@ -659,7 +659,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v18
