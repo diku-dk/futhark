@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Fixed
 
+* A case where complex sizes referring to explicit parameters was mishandled by
+  monomorphisation (#2230).
+
 ## [0.26.4]
 
 ### Added
