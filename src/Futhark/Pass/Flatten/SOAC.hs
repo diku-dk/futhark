@@ -510,20 +510,21 @@ regularRepVars =
     onRep (Regular v) = v
     onRep Irregular {} = error "regularRepVars: expected regular result"
 
-transformFactoredDistBody ::
+distributeAndFlattenBody ::
   FlattenOps ->
   Segments ->
+  Name ->
   DistEnv ->
   DistInputs ->
   [DistResult] ->
   Body SOACS ->
   FlattenM [ResRep]
-transformFactoredDistBody ops segments env inps res body = do
+distributeAndFlattenBody ops segments desc env inps res body = do
   scope <- askScope
   let (inps_local, env_local, _) = localiseInputs env inps
       (inps_dist, dstms) = distributeBody (flattenFunHasParallelism ops) scope segments inps_local body
   lifted_res <- liftBodyWithDistResults ops segments inps_dist env_local dstms res (bodyResult body)
-  lifted_vs <- mapM (letExp "factored_res" <=< toExp . resSubExp) lifted_res
+  lifted_vs <- mapM (letExp desc <=< toExp . resSubExp) lifted_res
   let reps = distResultsToResReps res lifted_vs
   pure reps
 
@@ -545,7 +546,7 @@ versionScanRed ops desc segments env inps res aux w factored_body outer_only = d
         | DistResult _ (DistType _ _ t) _ <- res
         ]
   outer_body <- regularBranchBody outer_only
-  full_body <- regularBranchBody $ regularRepVars <$> transformFactoredDistBody ops segments env inps res factored_body
+  full_body <- regularBranchBody $ regularRepVars <$> distributeAndFlattenBody ops segments "versionScanRed_full_body" env inps res factored_body
 
   let attrs = stmAuxAttrs aux
       fullAlternative = kernelAlternatives desc result_ts full_body []
@@ -1326,7 +1327,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
       factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
       case factored of
         Just body -> do
-          reps <- transformFactoredDistBody ops segments env inps res body
+          reps <- distributeAndFlattenBody ops segments "factorScremaForParallelism_body" env inps res body
           pure $ insertReps (zip (map distResTag res) reps) env
         Nothing 
           -- XXX: here we silently sequentialise any SOAC that is not handled
@@ -1360,7 +1361,18 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops, b
           || isVariant inps w
           || not (all isRegularDistResult res)
   if nonuniform
-    then error "TODO : transformDistStm: Unhandled nonuniform hist"
+    then do 
+      gpu_scope <- askScope
+      let scope =  castScope $ scopeOfDistInputs inps <> gpu_scope
+      (hist_res, stms) <-
+        runBuilderT
+          (auxing aux $
+            doHist "nonuniform_hist" hist_ops hist_inputs $ \params ->
+              map resSubExp <$> eLambda bucket_fun (map eParam params))
+          scope
+      let body = mkBody stms $ varsRes $ concat hist_res
+      reps <- distributeAndFlattenBody ops segments "non_unifrom_hist_body" env inps res body
+      pure $ insertReps (zip (map distResTag res) reps) env
     else do
       let new_segment = segments <> pure w
       lifted_inps <- forM hist_inputs $ \hist_inp -> do
@@ -1370,7 +1382,6 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops, b
       let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
       hist_ops' <- forM hist_ops $ \(Futhark.IR.SOACS.HistOp num_bins rf dests nes op) -> do
         nes' <- mapM (readInput segments env zeros inps) nes
-        let
         let rr (DistType _ _ t) = t
         let ts = map (rr . distResType) res
         let expectedShapes = map (\t -> segmentsShape segments <> arrayShape t) ts
