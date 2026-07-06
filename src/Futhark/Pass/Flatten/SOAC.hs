@@ -231,7 +231,6 @@ onMapInputArr lvl segments env inps ws ws_O ws_data p arr = do
           reshapeAll (arrayShape arr_rep_t) (Shape [ws_prod] <> arrayShape arr_row_t)
       pure $ MapArray v arr_row_t
 
-
 mapArraysToInputs ::
   [VName] ->
   [MapArray IrregularRep] ->
@@ -891,9 +890,9 @@ irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
         (new_ws_F, new_ws_O, _) <- doRepIota lvl new_shape
         letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg_dense
         mapResultRep lvl SingleDim (new_shape, new_ws_F, new_ws_O) v
-      else do 
-          reshapeAndBind v (irregularD irreg_dense) (segmentsShape segments <> arrayShape v_t)
-          mapResultRep lvl mode (ws, ws_F, ws_O) v
+      else do
+        reshapeAndBind v (irregularD irreg_dense) (segmentsShape segments <> arrayShape v_t)
+        mapResultRep lvl mode (ws, ws_F, ws_O) v
   where
     isTypeVariant vin se = case se of
       Var v' -> S.member v' vin
@@ -1119,7 +1118,7 @@ runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
   free_and_sizes <- freeWithTypeDeps inps (freeIn map_lam')
   let new_segments = segments <> pure w
       (param_env, param_inputs) =
-        mapArraysToInputs (map paramName (lambdaParams map_lam'))  arrs'
+        mapArraysToInputs (map paramName (lambdaParams map_lam')) arrs'
       free_inputs =
         [ (v, inp)
         | v <- free_and_sizes,

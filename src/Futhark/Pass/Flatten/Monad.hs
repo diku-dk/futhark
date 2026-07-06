@@ -339,7 +339,7 @@ subExpInputType _ (Constant val) =
 subExpInputType inps (Var v) =
   lookupInputType inps v
 
-isVariant :: DistInputs  -> SubExp -> Bool
+isVariant :: DistInputs -> SubExp -> Bool
 isVariant _ (Constant _) = False
 isVariant inps (Var v) = isJust $ lookup v inps
 
@@ -569,7 +569,7 @@ liftSubExpRegular ::
   FlattenM VName
 liftSubExpRegular lvl segments inps env expectedShape se = do
   case se of
-    c@(Constant _) -> 
+    c@(Constant _) ->
       letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c)
     Var v -> liftVarRegular lvl segments inps env expectedShape v
 
@@ -657,7 +657,9 @@ flattenData vs = do
     dims -> do
       n <- toSubExp "num_data" $ product $ map pe64 dims
       letExp (baseName vs <> "_flat") . BasicOp $
-        Reshape vs $ reshapeAll (arrayShape t) (Shape [n]) 
+        Reshape vs $
+          reshapeAll (arrayShape t) (Shape [n])
+
 -- | Only sensible for variables of segment-invariant type.
 dataArr :: SegLevel -> Segments -> DistEnv -> DistInputs -> SubExp -> FlattenM VName
 dataArr lvl _segments env inps (Var v)
@@ -735,9 +737,9 @@ scatterIrregular lvl offsets space (is, irregRep) = do
   letExp "irregular_scatter" <=< genScatter lvl space m $ \gtid -> do
     segment <- letSubExp "segment" =<< eIndex ii1 [eSubExp gtid]
     intra_segment <- letSubExp "segment" =<< eIndex ii2 [eSubExp gtid]
-    x <- case kind of 
+    x <- case kind of
       Dense -> letSubExp "x" =<< eIndex elems [eSubExp gtid]
-      Replicated -> do 
+      Replicated -> do
         o <- letSubExp "rep_O" =<< eIndex off [eSubExp segment]
         letSubExp "x" =<< eIndex elems [toExp $ pe64 o + pe64 intra_segment]
     offset <- letExp "offset" =<< eIndex offsets [eIndex is [eSubExp segment]]

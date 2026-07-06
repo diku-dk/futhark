@@ -254,8 +254,11 @@ readInBlockInputs segments env is inputs =
               letBindNames [v] $ BasicOp $ SubExp $ Var v'
 
 prepareRegularMapInput ::
-  Segments -> DistEnv -> DistInputs ->
-  Param Type -> VName ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  Param Type ->
+  VName ->
   FlattenM (VName, DistInput)
 prepareRegularMapInput segments env inps p arr = do
   t <- lookupInputType inps arr

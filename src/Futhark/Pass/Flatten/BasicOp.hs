@@ -5,7 +5,6 @@ import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Tuple.Solo
-import Debug.Trace
 import Futhark.IR.GPU
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
@@ -59,8 +58,8 @@ concatIrreg lvl _segments _env ns reparr = do
         segment_sizes <-
           forM shapes $ \shape ->
             letSubExp "segment_size" =<< eIndex shape [eSubExp i]
-        let scanned = scanl (+) 0 $ map pe64 segment_sizes   
-        sumprefix   <- mapM (letSubExp "segment_prefix" <=< toExp) (init scanned)
+        let scanned = scanl (+) 0 $ map pe64 segment_sizes
+        sumprefix <- mapM (letSubExp "segment_prefix" <=< toExp) (init scanned)
         pure $ subExpsRes sumprefix
 
   scatter_offsets_T <-
@@ -165,8 +164,8 @@ concatIrregAlongDim lvl segments env ns rep_arr type_arr inps d = do
             v_dims <- readTypeDims segments env seg_is inps t
             letSubExp "block_size" =<< toExp (product $ map pe64 $ drop d v_dims)
 
-        let scanned = scanl (+) 0 $ map pe64 block_sizes   
-        sum_prefix   <- mapM (letSubExp "segment_prefix" <=< toExp) (init scanned)
+        let scanned = scanl (+) 0 $ map pe64 block_sizes
+        sum_prefix <- mapM (letSubExp "segment_prefix" <=< toExp) (init scanned)
         total_block <- letSubExp "total_block" =<< toExp (last scanned)
 
         pure $ subExpsRes (block_sizes <> sum_prefix <> [total_block])
@@ -482,7 +481,6 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       base_v <- letExp "arraylit_base" $ BasicOp $ ArrayVal vs row_type
       res_v <- letExp "arraylit_reg" $ BasicOp $ Replicate (segmentsShape segments) (Var base_v)
       pure $ insertRegulars [distResTag res] [res_v] env
-
     Opaque _op se
       | Var v <- se,
         Just (DistInput rt_in _) <- lookup v inps ->
@@ -626,8 +624,10 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
         not (isVariant inps x),
         not (isVariant inps s) -> do
           iota_row <- letExp "iota_reg_row" $ BasicOp $ Iota n x s it
-          v <- letExp "iota_reg" $
-                  BasicOp $ Replicate (segmentsShape segments) (Var iota_row)
+          v <-
+            letExp "iota_reg" $
+              BasicOp $
+                Replicate (segmentsShape segments) (Var iota_row)
           pure $ insertRegulars [distResTag res] [v] env
     Iota n (Constant x) (Constant s) Int64
       | zeroIsh x,
@@ -751,7 +751,6 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       rep <- getIrregRep lvl segments env inps v
       rep' <- replicateIrreg lvl segments env mul_dims (baseName v) rep
       pure $ insertRep (distResTag res) (Irregular rep') env
-    
     Manifest v perm
       | isRegularDistResult res -> do
           t <- lookupInputType inps v
