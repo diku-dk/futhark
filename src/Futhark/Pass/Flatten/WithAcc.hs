@@ -144,11 +144,12 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
     certifying (distCerts inps withacc_aux env) $
       letTupExp "withacc_flatten_out" (WithAcc withacc_inputs' withacc_lam')
 
-  -- The accumulator results are handled differently in nonuniform casesince we do not have metadata
+  -- The accumulator results are handled differently in nonuniform case since we do not have metadata
   -- for them and since all of them are turned flat even when they might be actually regular.
   -- we can still here turn the actul disrest that are regular to regualars.
-  let (withacc_out_vs_wo, withacc_out_vs_no) = splitAt num_accs withacc_out_vs
-      (distres_withacc, distres_normal) = splitAt num_accs distres
+  let num_acc_results = sum [length arrs | (_, arrs, _) <- withacc_inputs]
+      (withacc_out_vs_wo, withacc_out_vs_no) = splitAt num_acc_results withacc_out_vs
+      (distres_withacc, distres_normal) = splitAt num_acc_results distres
 
   let out_reps_normal = mkNormalResReps distres_normal withacc_out_vs_no
   out_reps_withacc <-
@@ -189,13 +190,34 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
               expected_shape = segmentsShape segments <> arr_shape
           liftSubExpRegular (flattenSegLevel ops) segments inps env expected_shape (Var arr)
 
-    onNonuniformInput (_shape, arrs, op) = do
+    onNonuniformOp rank (op, nes) = do
+      let (old_idx_ps, value_ps) = splitAt rank $ lambdaParams op
+          old_indices_used =
+            any (\p -> paramName p `nameIn` freeIn (lambdaBody op)) old_idx_ps
+      -- XXX: It is possible to change the lambda body to restore the indices based on flat_idx_p and handle this.
+      when old_indices_used $
+        error "transformWithAcc: accumulator operator uses nonuniform indices"
+      flat_idx_p <- newParam "flat_idx" $ Prim int64
+      pure
+        ( soacsLambdaToGPU $
+            op
+              { lambdaParams = flat_idx_p : value_ps
+              },
+          nes
+        )
+    onNonuniformInput (shape, arrs, op) = do
       reps <- mapM (getIrregRep (flattenSegLevel ops) segments env inps) arrs
       -- We need to ensure that the irregular arrays are dense
-      reps_dense <- mapM (ensureDenseIrregular (flattenSegLevel ops) "withacc_input") reps
+      reps_dense <- mapM (ensureDenseIrregular (flattenSegLevel ops) "withacc_input") reps      
       let arrs' = map irregularD reps_dense
       w <- fmap (arraySize 0) . lookupType $ head arrs'
-      (,reps_dense) . (Shape [w],arrs',) <$> traverse (onOpWithIndexRank 1) op
+      -- We need to reshape to make sure all of the inputs have the same shape
+      arrs'' <-  forM arrs' $ \ v -> do
+        v_t <- lookupType v
+        letExp (baseName v <> "_withacc_input_reshaped") . BasicOp $
+          Reshape v $
+            reshapeAll (arrayShape v_t) (Shape [w])
+      (,reps_dense) . (Shape [w],arrs'',) <$> traverse (onNonuniformOp (shapeRank shape)) op
 
     liftWithAccResult lvl segs inputs env' (dist_res, res) =
       case resSubExp res of
