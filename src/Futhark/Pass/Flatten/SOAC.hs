@@ -58,8 +58,8 @@ suitableOperator _env inps lam _nes =
   where
     notVariant = not . isVariant inps . Var
 
-suitableUniformOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
-suitableUniformOperator _env inps lam _nes =
+suitableUniformOperator :: DistInputs -> Lambda SOACS  -> Bool
+suitableUniformOperator inps lam =
   allNames (not . isVariant inps . Var) (freeIn lam)
 
 regularToReplicatedIrregularRep ::
@@ -1213,7 +1213,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
   | Just (reds, map_lam) <- isRedomapSOAC form,
     not $ isVariant inps w,
     all isRegularDistResult res,
-    all (\red -> suitableUniformOperator env inps (redLambda red) (redNeutral red)) reds = do
+    all (suitableUniformOperator inps . redLambda) reds = do
       let outer_only = transformUniformRedomap (flattenSegLevel ops) segments env inps w arrs reds map_lam
       gpu_scope <- askScope
       let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
@@ -1270,7 +1270,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     not $ isVariant inps w,
     all isRegularDistResult res,
-    all (\scan -> suitableUniformOperator env inps (scanLambda scan) (scanNeutral scan)) scans = do
+    all (suitableUniformOperator inps . scanLambda) scans = do
       let outer_only =
             transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam
       gpu_scope <- askScope
