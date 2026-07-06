@@ -52,17 +52,15 @@ freeWithTypeDeps inps free = do
 -- would require modifications to the SegOp representation, but it is likely not
 -- worth it, as such operators are extremely rare - and we can just fall back on
 suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
-suitableOperator env inps lam _nes =
+suitableOperator _env inps lam _nes =
   allNames notVariant (freeIn lam)
     && all primType (lambdaReturnType lam) -- TODO
   where
-    notVariant v = isNothing $ M.lookup v $ inputReps inps env
+    notVariant = not . isVariant inps . Var
 
 suitableUniformOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
-suitableUniformOperator env inps lam _nes =
-  allNames notVariant (freeIn lam)
-  where
-    notVariant v = isNothing $ M.lookup v $ inputReps inps env
+suitableUniformOperator _env inps lam _nes =
+  allNames (not . isVariant inps . Var) (freeIn lam)
 
 regularToReplicatedIrregularRep ::
   SegLevel ->
@@ -846,13 +844,8 @@ transformMapForInBlock ops pat w arrs map_lam = do
 resultMapMode :: InnerMapMode -> DistInputs -> Type -> InnerMapMode
 resultMapMode SingleDim _ _ = SingleDim
 resultMapMode MultiDim new_inps v_t
-  | any isTypeVariant (arrayDims v_t) = SingleDim
+  | any (isVariant new_inps) (arrayDims v_t) = SingleDim
   | otherwise = MultiDim
-  where
-    new_inp_var = S.fromList $ map fst new_inps
-    isTypeVariant se = case se of
-      Var v -> v `S.member` new_inp_var
-      _ -> False
 
 irregularMapResult ::
   SegLevel ->
@@ -867,7 +860,7 @@ irregularMapResult ::
 irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
   do
     irreg_dense <- ensureDenseIrregular lvl (baseName v <> "_map_result") irreg
-    if any (isTypeVariant new_inp_var) (arrayShape v_t)
+    if any (isVariant new_inps) (arrayShape v_t)
       then do
         old_segment <- arraySize 0 <$> lookupType ws
         -- TODO: We can make this simpler.
@@ -890,14 +883,9 @@ irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
         (new_ws_F, new_ws_O, _) <- doRepIota lvl new_shape
         letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg_dense
         mapResultRep lvl SingleDim (new_shape, new_ws_F, new_ws_O) v
-      else do
-        reshapeAndBind v (irregularD irreg_dense) (segmentsShape segments <> arrayShape v_t)
-        mapResultRep lvl mode (ws, ws_F, ws_O) v
-  where
-    isTypeVariant vin se = case se of
-      Var v' -> S.member v' vin
-      _ -> False
-    new_inp_var = S.fromList $ map fst new_inps
+      else do 
+          reshapeAndBind v (irregularD irreg_dense) (segmentsShape segments <> arrayShape v_t)
+          mapResultRep lvl mode (ws, ws_F, ws_O) v
 
 transformDistributedInnerMap ::
   FlattenOps ->
