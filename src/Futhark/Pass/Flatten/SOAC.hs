@@ -1340,13 +1340,15 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
         Just body -> do
           reps <- transformFactoredDistBody ops segments env inps res body
           pure $ insertReps (zip (map distResTag res) reps) env
-        Nothing ->
+        Nothing 
           -- XXX: here we silently sequentialise any SOAC that is not handled
           -- above if it is possible to do so. We need to make sure that we actually handle everything we
           -- care about!
-          if all isRegularDistResult res
-            then flattenScalarStm ops segments env inps res $ Let pat aux (Op (Screma w arrs form))
-            else error "Unhandled SOAC"
+          | shouldDissectForm form ->
+              error "transformScrema: complex Screma survived preprocessing"
+          | all isRegularDistResult res -> 
+               flattenScalarStm ops segments env inps res $ Let pat aux (Op (Screma w arrs form))
+          | otherwise -> error "Unhandled SOAC"
   where
     funHasParallelism = flattenFunHasParallelism ops
     lvl = flattenSegLevel ops

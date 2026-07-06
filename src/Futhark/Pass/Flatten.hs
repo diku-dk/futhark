@@ -394,6 +394,8 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
             letBindNames [v] $ BasicOp $ SubExp $ Var v'
       topLevelversionScanRed funHasParallelism "top_level_scan_alt" pat w arrs form aux outer_only_stms
 transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
+  | shouldDissectForm form =
+      error "transformStm: complex Screma survived preprocessing"
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       outer_only_stms <-
         collectStms_ . certifying (stmAuxCerts aux) $ do

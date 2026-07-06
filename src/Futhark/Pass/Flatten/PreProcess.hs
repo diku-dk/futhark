@@ -3,7 +3,7 @@
 -- | Preprocess the program before flattening.  This rewrites SOAC forms
 -- that flatten does not want to see directly, while leaving the result in
 -- SOACS form so the normal flattening pipeline can continue afterwards.
-module Futhark.Pass.Flatten.PreProcess (preprocessProg, preprocessBody, preprocessStms, preprocessStm, preprocessLambda) where
+module Futhark.Pass.Flatten.PreProcess (shouldDissectForm, preprocessProg, preprocessBody, preprocessStms, preprocessStm, preprocessLambda) where
 
 import Data.Maybe (isNothing)
 import Futhark.Builder
