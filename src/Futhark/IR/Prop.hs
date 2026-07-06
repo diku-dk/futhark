@@ -122,7 +122,6 @@ safeExp (BasicOp op) = safeBasicOp op
     safeBasicOp Manifest {} = True
     safeBasicOp Iota {} = True
     safeBasicOp Replicate {} = True
-    safeBasicOp (Index _ slice) = sliceShape slice /= mempty
     safeBasicOp _ = False
 safeExp (Loop _ _ body) = safeBody body
 safeExp (Apply fname _ _ _) =
