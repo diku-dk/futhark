@@ -13,7 +13,6 @@ module Language.Futhark.TypeChecker.Unify
     BreadCrumbs,
     sizeFree,
     dimNotes,
-    arrayElemType,
     normType,
     normTypeFully,
     unify,
@@ -75,6 +74,30 @@ data Constraint
     -- whose return size is existential, or otherwise
     -- hiding a size.
     UnknownSize Loc RigidSource
+  | -- | A size arising from instantiating a type parameter (of the
+    -- given liftedness) with a type whose sizes are not yet known.
+    -- In contrast to an ordinary 'Size', unification may determine
+    -- that this size is actually existential (unless the type
+    -- parameter is unlifted), in which case the constraint is
+    -- replaced with 'ExistentialSize'. See Note [Size Inference] in
+    -- Language.Futhark.TypeChecker.Terms.
+    InstSize Liftedness Usage
+  | -- | Another occurrence of the instantiated size denoted by the
+    -- given canonical size variable (an 'InstSize'). Kept distinct
+    -- from the canonical variable because if the size turns out to
+    -- be existential, every occurrence must be a distinct
+    -- existential. The integer identifies the occurrence of the
+    -- instantiated type parameter that this size is part of; copies
+    -- from the same occurrence absorbed from the same source denote
+    -- the same existential size.
+    CopySize VName Int Usage
+  | -- | An instantiated size that unification has determined to
+    -- correspond to an existential size, possibly with the variable
+    -- it was unified with (used to identify existentials with the
+    -- same origin). Each variable constrained by this (or a
+    -- 'CopySize' pointing to it) is turned into a rigid size when
+    -- the enclosing function application is complete.
+    ExistentialSize (Maybe VName) Usage
   deriving (Show)
 
 instance Located Constraint where
@@ -84,6 +107,9 @@ instance Located Constraint where
   locOf (ParamSize loc) = locOf loc
   locOf (Size _ usage) = locOf usage
   locOf (UnknownSize loc _) = locOf loc
+  locOf (InstSize _ usage) = locOf usage
+  locOf (CopySize _ _ usage) = locOf usage
+  locOf (ExistentialSize _ usage) = locOf usage
 
 -- | Mapping from fresh type variables, instantiated from the type
 -- schemes of polymorphic functions, to (possibly) specific types as
@@ -96,6 +122,12 @@ lookupSubst v constraints = case snd <$> M.lookup v constraints of
   Just (Constraint t _) -> Just $ Subst [] $ applySubst (`lookupSubst` constraints) t
   Just (Size (Just d) _) ->
     Just $ ExpSubst $ applySubst (`lookupSubst` constraints) d
+  Just (CopySize c _ _)
+    -- If the canonical size has been resolved to an actual size, we
+    -- are equal to that size. Otherwise (canonical size still
+    -- pending, or existential) we stand apart under our own name.
+    | Just (Size (Just _) _) <- snd <$> M.lookup c constraints ->
+        lookupSubst c constraints
   _ -> Nothing
 
 -- | The source of a rigid size.
@@ -255,6 +287,7 @@ rigidConstraint :: Constraint -> Bool
 rigidConstraint ParamType {} = True
 rigidConstraint ParamSize {} = True
 rigidConstraint UnknownSize {} = True
+rigidConstraint ExistentialSize {} = True
 rigidConstraint _ = False
 
 unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
@@ -269,8 +302,14 @@ unsharedConstructorsMsg cs1 cs2 =
 isNonRigid :: VName -> Constraints -> Maybe Level
 isNonRigid v constraints = do
   (lvl, c) <- M.lookup v constraints
-  guard $ not $ rigidConstraint c
-  pure lvl
+  case c of
+    -- A copy is as rigid as its canonical size.
+    CopySize c' _ _ | Just (_, c'') <- M.lookup c' constraints -> do
+      guard $ not $ rigidConstraint c''
+      pure lvl
+    _ -> do
+      guard $ not $ rigidConstraint c
+      pure lvl
 
 type UnifySizes m =
   BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> Exp -> Exp -> m ()
@@ -401,6 +440,31 @@ unifyWith onDims usage = subunify False
                   (toStruct b1')
                   (toStruct b2')
 
+                -- If a flexible existential size was resolved to a
+                -- pending instantiated size, then that size is
+                -- existential. This is how a hole absorbs an
+                -- existential size from a type it is unified with.
+                -- See Note [Size Inference] in
+                -- Language.Futhark.TypeChecker.Terms.
+                constraints_after <- getConstraints
+                let existentialise d v usage' =
+                      modifyConstraints $
+                        M.adjust (fmap $ const $ ExistentialSize (Just d) usage') v
+                    absorbExt d
+                      | Just (Size (Just de) _) <- snd <$> M.lookup d constraints_after,
+                        Var de_v _ _ <- applySubst (`lookupSubst` constraints_after) de =
+                          case snd <$> M.lookup (qualLeaf de_v) constraints_after of
+                            Just (InstSize l usage')
+                              | l /= Unlifted ->
+                                  existentialise d (qualLeaf de_v) usage'
+                            Just (CopySize c _ usage')
+                              | Just (InstSize l _) <- snd <$> M.lookup c constraints_after,
+                                l /= Unlifted ->
+                                  existentialise d c usage'
+                            _ -> pure ()
+                      | otherwise = pure ()
+                mapM_ absorbExt (b1_dims <> b2_dims)
+
                 -- Delete the size variables we introduced to represent
                 -- the existential sizes.
                 modifyConstraints $ \m -> L.foldl' (flip M.delete) m (b1_dims <> b2_dims)
@@ -452,14 +516,100 @@ unifySizes usage bcs bound nonrigid e1 (Var v2 _ _)
   | Just lvl2 <- nonrigid (qualLeaf v2),
     not (anyBound bound e1) || (qualLeaf v2 `elem` bound) =
       linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
-unifySizes usage bcs _ _ e1 e2 = do
-  notes <- (<>) <$> dimNotes usage e1 <*> dimNotes usage e2
-  unifyError usage notes bcs $
-    "Sizes"
-      <+> dquotes (pretty e1)
-      <+> "and"
-      <+> dquotes (pretty e2)
-      <+> "do not match."
+unifySizes usage bcs bound _ e1 e2 = do
+  -- A size arising from a type parameter instantiation may be linked
+  -- to sizes bound within the instantiated type itself (reconstructing
+  -- a dependent function type), and when it meets any other bound
+  -- size (an existential), it is determined to be existential itself,
+  -- rather than this being an error. This is the only way we can know
+  -- how instantiated sizes depend on binders and existentials. See
+  -- Note [Size Inference] in Language.Futhark.TypeChecker.Terms.
+  linked <- (||) <$> maybeLocalLink e1 e2 <*> maybeLocalLink e2 e1
+  absorbed <-
+    if linked
+      then pure True
+      else (||) <$> maybeAbsorb e1 e2 <*> maybeAbsorb e2 e1
+  unless absorbed $ do
+    notes <- (<>) <$> dimNotes usage e1 <*> dimNotes usage e2
+    anon1 <- instMeetsAnonymous e1 e2
+    anon2 <- instMeetsAnonymous e2 e1
+    if anon1 || anon2
+      then
+        unifyError usage notes bcs $
+          "Sizes"
+            <+> dquotes (pretty e1)
+            <+> "and"
+            <+> dquotes (pretty e2)
+            <+> "do not match."
+            </> textwrap "This is because a type parameter would be instantiated with a type containing anonymous sizes."
+      else
+        unifyError usage notes bcs $
+          "Sizes"
+            <+> dquotes (pretty e1)
+            <+> "and"
+            <+> dquotes (pretty e2)
+            <+> "do not match."
+  where
+    instConstraint constraints v = do
+      c <- snd <$> M.lookup v constraints
+      case c of
+        InstSize {} -> Just c
+        CopySize {} -> Just c
+        ExistentialSize {} -> Just c
+        _ -> Nothing
+    existentialise v other usage' =
+      modifyConstraints $ M.adjust (fmap $ const $ ExistentialSize key usage') v
+      where
+        key = case other of
+          Var other_v _ _ -> Just $ qualLeaf other_v
+          _ -> Nothing
+    -- Linking is fine if every bound size mentioned is a binder of
+    -- the instantiated type itself (a registered 'ParamSize'), as
+    -- instantiated size variables occur exactly once, and binders
+    -- are cloned between occurrences of the instantiated type.
+    maybeLocalLink (Var v _ _) other
+      | anyBound bound other,
+        qualLeaf v `notElem` bound = do
+          constraints <- getConstraints
+          let mentioned = filter (`elem` bound) $ S.toList $ fvVars $ freeInExp other
+              registeredBinder bv = case snd <$> M.lookup bv constraints of
+                Just (ParamSize _) -> True
+                _ -> False
+          case instConstraint constraints (qualLeaf v) of
+            Just c
+              | all registeredBinder mentioned,
+                notExistential c -> do
+                  modifyConstraints $
+                    M.adjust (fmap $ const $ Size (Just other) usage) (qualLeaf v)
+                  pure True
+            _ -> pure False
+      where
+        notExistential ExistentialSize {} = False
+        notExistential _ = True
+    maybeLocalLink _ _ = pure False
+    maybeAbsorb (Var v _ _) other
+      | anyBound bound other,
+        qualLeaf v `notElem` bound = do
+          constraints <- getConstraints
+          case snd <$> M.lookup (qualLeaf v) constraints of
+            Just (InstSize l usage')
+              | l /= Unlifted ->
+                  True <$ existentialise (qualLeaf v) other usage'
+            Just (ExistentialSize _ _) ->
+              pure True
+            Just (CopySize c _ usage') ->
+              case snd <$> M.lookup c constraints of
+                Just (InstSize l _)
+                  | l /= Unlifted -> True <$ existentialise c other usage'
+                Just (ExistentialSize _ _) -> pure True
+                _ -> pure False
+            _ -> pure False
+    maybeAbsorb _ _ = pure False
+    instMeetsAnonymous (Var v _ _) other
+      | anyBound bound other = do
+          constraints <- getConstraints
+          pure $ isJust $ instConstraint constraints $ qualLeaf v
+    instMeetsAnonymous _ _ = pure False
 
 -- | Unifies two types.
 unify :: (MonadUnify m) => Usage -> StructType -> StructType -> m ()
@@ -620,28 +770,31 @@ linkVarToType usage bound bcs vn lvl tp_unnorm = do
         modifyConstraints $
           M.insert vn (lvl, Constraint (RetType (ext_new <> ext_witnessed) tp') usage)
 
-  let unliftedBcs unlifted_usage =
-        matching
-          ( "When verifying that"
-              <+> dquotes (prettyName vn)
-              <+> textwrap "is not instantiated with a function type, due to"
-              <+> pretty unlifted_usage
-          )
-          <> bcs
-
+  -- Liftedness of types in terms is the responsibility of the
+  -- unsized type checker, but module type matching still unifies
+  -- against unlifted type variables here, and must respect their
+  -- unliftedness.
   constraints <- getConstraints
   case snd <$> M.lookup vn constraints of
-    Just (NoConstraint Unlifted unlift_usage) -> do
+    Just (NoConstraint Unlifted _) -> do
       link
 
-      arrayElemTypeWith usage (unliftedBcs unlift_usage) tp
-      when (any (`elem` bound) (fvVars (freeInType tp))) $
+      unless (orderZero tp) $
         unifyError usage mempty bcs $
-          "Type variable"
-            <+> prettyName vn
-            <+> "cannot be instantiated with type containing anonymous sizes:"
-            </> indent 2 (pretty tp)
-            </> textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size being a value parameter.  Add type annotation to clarify."
+          "Type" </> indent 2 (pretty tp) </> "found to be functional."
+      forM_ (S.toList $ typeVars tp) $ \tv ->
+        case M.lookup tv constraints of
+          Just (lvl', NoConstraint _ _) ->
+            modifyConstraints $ M.insert tv (lvl', NoConstraint Unlifted usage)
+          Just (_, ParamType l ploc)
+            | l `elem` [Lifted, SizeLifted] ->
+                unifyError usage mempty bcs $
+                  "Type parameter"
+                    <+> dquotes (prettyName tv)
+                    <+> "bound at"
+                    <+> pretty (locStr ploc)
+                    <+> "is lifted and cannot be an array element."
+          _ -> pure ()
     _ -> link
 
 linkVarToDim ::
@@ -655,9 +808,31 @@ linkVarToDim ::
 linkVarToDim usage bcs vn lvl e = do
   constraints <- getConstraints
 
-  mapM_ (checkVar constraints) $ fvVars $ freeInExp e
+  -- A copy of an instantiated size is equal to its canonical
+  -- variable as long as the size is not existential, so links are
+  -- expressed in terms of canonical variables: both when the linked
+  -- variable is a copy, and when copies occur in the expression
+  -- linked to.
+  let canonize v = case snd <$> M.lookup v constraints of
+        Just (CopySize c _ _) ->
+          Just $ ExpSubst $ sizeFromName (qualName c) $ srclocOf usage
+        _ -> Nothing
+      e' = applySubst canonize e
 
-  modifyConstraints $ M.insert vn (lvl, Size (Just e) usage)
+  case snd <$> M.lookup vn constraints of
+    Just (CopySize c _ _)
+      | Just (c_lvl, _) <- M.lookup c constraints ->
+          linkVarToDim usage bcs c c_lvl e'
+    _
+      -- Linking a size to itself is a no-op. This can occur when
+      -- unifying a canonical size with one of its own copies.
+      | Var (QualName _ e_v) _ _ <- e',
+        e_v == vn ->
+          pure ()
+      | otherwise -> do
+          mapM_ (checkVar constraints) $ fvVars $ freeInExp e'
+
+          modifyConstraints $ M.insert vn (lvl, Size (Just e') usage)
   where
     checkVar _ dim'
       | vn == dim' = do
@@ -687,43 +862,6 @@ linkVarToDim usage bcs vn lvl e = do
                   <+> "is introduced."
             _ -> modifyConstraints $ M.insert dim' (lvl, c)
     checkVar _ _ = pure ()
-
-arrayElemTypeWith ::
-  (MonadUnify m, Pretty (Shape dim), Pretty u) =>
-  Usage ->
-  BreadCrumbs ->
-  TypeBase dim u ->
-  m ()
-arrayElemTypeWith usage bcs t = do
-  unless (orderZero t) $
-    unifyError usage mempty bcs $
-      "Type" </> indent 2 (pretty t) </> "found to be functional."
-  mapM_ mustBeZeroOrder . S.toList . typeVars $ t
-  where
-    mustBeZeroOrder vn = do
-      constraints <- getConstraints
-      case M.lookup vn constraints of
-        Just (lvl, NoConstraint _ _) ->
-          modifyConstraints $ M.insert vn (lvl, NoConstraint Unlifted usage)
-        Just (_, ParamType l ploc)
-          | l `elem` [Lifted, SizeLifted] ->
-              unifyError usage mempty bcs $
-                "Type parameter"
-                  <+> dquotes (prettyName vn)
-                  <+> "bound at"
-                  <+> pretty (locStr ploc)
-                  <+> "is lifted and cannot be an array element."
-        _ -> pure ()
-
--- | Assert that this type must be valid as an array element.
-arrayElemType ::
-  (MonadUnify m, Pretty (Shape dim), Pretty u) =>
-  Usage ->
-  T.Text ->
-  TypeBase dim u ->
-  m ()
-arrayElemType usage desc =
-  arrayElemTypeWith usage $ matching $ "When checking" <+> textwrap desc
 
 unifySharedFields ::
   (MonadUnify m) =>

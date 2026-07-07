@@ -21,6 +21,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifoldable (bifoldMap)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Char (isAscii)
@@ -245,21 +246,44 @@ newArtificial u t = do
 -- that allow us to connect the AST annotations with the actual
 -- inferred types. The artificial variables should never occur in
 -- constraints - they can be substituted away with asType.
+--
+-- Equal components (with fully known shapes) of the same annotation
+-- are given the same artificial variable, so that the sized type
+-- checker knows that they have the same sizes.
 asStructType :: TypeBase SComp u -> TermM (TypeBase Size u)
-asStructType (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
-asStructType (Scalar (TypeVar u v [])) = pure $ Scalar $ TypeVar u v []
-asStructType (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
-  t1' <- asStructType t1
-  t2' <- asStructType t2
-  pure $ Scalar $ Arrow u pname d t1' $ RetType ext t2'
-asStructType (Scalar (Record fs)) =
-  Scalar . Record <$> traverse asStructType fs
-asStructType (Scalar (Sum cs)) =
-  Scalar . Sum <$> traverse (mapM asStructType) cs
-asStructType t@(Scalar (TypeVar u _ _)) =
-  newArtificial u t
-asStructType t@(Array u _ _) = do
-  newArtificial u t
+asStructType t = evalStateT (onType t) mempty
+  where
+    onType ::
+      TypeBase SComp u' ->
+      StateT (M.Map (TypeBase SComp NoUniqueness) TyVar) TermM (TypeBase Size u')
+    onType (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
+    onType (Scalar (TypeVar u v [])) = pure $ Scalar $ TypeVar u v []
+    onType (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
+      t1' <- onType t1
+      t2' <- onType t2
+      pure $ Scalar $ Arrow u pname d t1' $ RetType ext t2'
+    onType (Scalar (Record fs)) =
+      Scalar . Record <$> traverse onType fs
+    onType (Scalar (Sum cs)) =
+      Scalar . Sum <$> traverse (mapM onType) cs
+    onType t'@(Scalar (TypeVar u _ _)) = artificial u t'
+    onType t'@(Array u _ _) = artificial u t'
+
+    artificial u t'
+      | anonymousShape t' = lift $ newArtificial u t'
+      | otherwise = do
+          let key = second (const NoUniqueness) t'
+          seen <- get
+          case M.lookup key seen of
+            Just v -> pure $ tyVarType u v
+            Nothing -> do
+              v <- lift $ newID "artificial"
+              lift $ modify $ \s ->
+                s {termArtificial = M.insert v key $ termArtificial s}
+              modify $ M.insert key v
+              pure $ tyVarType u v
+
+    anonymousShape = elem SDim . bifoldMap (: []) (const mempty)
 
 asType :: (Monoid u) => TypeBase Size u -> TermM (TypeBase SComp u)
 asType t = do

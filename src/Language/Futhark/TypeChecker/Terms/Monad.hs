@@ -23,10 +23,10 @@ module Language.Futhark.TypeChecker.Terms.Monad
     expType,
     expTypeFully,
     constrain,
-    newArrayType,
     allDimsFreshInType,
     instTyVars,
     replaceTyVars,
+    replaceTyVarsAbsorbable,
     updateTypes,
     Names,
     mustBeOrderZero,
@@ -353,15 +353,43 @@ instance MonadUnify TermTypeM where
           </> indent 2 (pretty t2)
           </> "do not match."
 
+-- | Replace type variables inferred by the unsized type checker
+-- with their solutions, instantiating their sizes with fresh
+-- (non-absorbable) size variables. See Note [Size Inference] in
+-- Language.Futhark.TypeChecker.Terms.
 replaceTyVars :: SrcLoc -> TypeBase Size u -> TermTypeM (TypeBase Size u)
-replaceTyVars loc orig_t = do
+replaceTyVars = replaceTyVarsWith False
+
+-- | Like 'replaceTyVars', but the fresh sizes may be determined to
+-- be existential by unification, like instantiated sizes. This is
+-- used for holes, which adopt whatever type the context provides.
+-- See Note [Size Inference] in Language.Futhark.TypeChecker.Terms.
+replaceTyVarsAbsorbable :: SrcLoc -> TypeBase Size u -> TermTypeM (TypeBase Size u)
+replaceTyVarsAbsorbable = replaceTyVarsWith True
+
+replaceTyVarsWith :: Bool -> SrcLoc -> TypeBase Size u -> TermTypeM (TypeBase Size u)
+replaceTyVarsWith absorbable loc orig_t = do
   tyvars <- asks termTyVars
-  let f :: TypeBase Size u -> TermTypeM (TypeBase Size u)
+  let f ::
+        TypeBase Size u ->
+        StateT (M.Map VName (TypeBase Size NoUniqueness)) TermTypeM (TypeBase Size u)
       f (Scalar (Prim t)) = pure $ Scalar $ Prim t
       f
         (Scalar (TypeVar u (QualName [] v) []))
-          | Just t <- M.lookup v tyvars =
-              fst <$> allDimsFreshInType (mkUsage loc "replaceTyVars") Nonrigid "dv" (second (const u) t)
+          | Just t <- M.lookup v tyvars = do
+              -- Multiple occurrences of the same type variable must
+              -- be given the same sizes.
+              seen <- get
+              case M.lookup v seen of
+                Just t' -> pure $ second (const u) t'
+                Nothing -> do
+                  let usage = mkUsage loc "replaceTyVars"
+                  (t', drepl) <-
+                    lift $ allDimsFreshInType usage Nonrigid "dv" (second (const u) t)
+                  when absorbable . lift . forM_ (M.keys drepl) $ \d ->
+                    constrain d $ InstSize Lifted usage
+                  modify $ M.insert v $ second (const NoUniqueness) t'
+                  pure t'
           | otherwise =
               pure $ Scalar (TypeVar u (QualName [] v) [])
       f (Scalar (TypeVar u qn targs)) =
@@ -380,17 +408,70 @@ replaceTyVars loc orig_t = do
       f (Array u shape t) =
         arrayOfWithAliases u shape <$> f (Scalar t)
 
-  f orig_t
+  evalStateT (f orig_t) mempty
 
+-- | Check that a type is a valid instantiation of a type parameter
+-- with the given liftedness.
+checkLiftedness :: SrcLoc -> Liftedness -> TypeBase Size NoUniqueness -> TermTypeM ()
+checkLiftedness _ Lifted _ = pure ()
+checkLiftedness loc l t = do
+  constraints <- getConstraints
+  unless (orderZero t) $
+    typeError loc mempty $
+      "Type" </> indent 2 (pretty t) </> "found to be functional."
+  let bad = case l of
+        Unlifted -> [Lifted, SizeLifted]
+        _ -> [Lifted]
+      badParam vn = do
+        (_, ParamType vl ploc) <- M.lookup vn constraints
+        guard $ vl `elem` bad
+        Just (vn, ploc)
+  case mapMaybe badParam $ S.toList $ typeVars t of
+    (vn, ploc) : _ ->
+      typeError loc mempty $
+        "Type parameter"
+          <+> dquotes (prettyName vn)
+          <+> "bound at"
+          <+> pretty (locStr ploc)
+          <+> case l of
+            Unlifted -> "is lifted and cannot be an array element."
+            _ -> "is lifted and may be a functional type."
+    [] -> pure ()
+
+-- | Instantiate the type parameters of a type scheme with the types
+-- inferred by the unsized type checker, creating fresh variables for
+-- their sizes. See Note [Size Inference] in
+-- Language.Futhark.TypeChecker.Terms.
 instTyVars ::
   SrcLoc ->
-  [VName] ->
+  -- | The type parameters being instantiated, along with their
+  -- liftedness.
+  M.Map VName Liftedness ->
   TypeBase () u ->
   TypeBase Size u ->
   TermTypeM (TypeBase Size u)
 instTyVars loc names orig_t1 orig_t2 = do
   tyvars <- asks termTyVars
-  let f ::
+  let registerBinders :: TypeBase Size u' -> TermTypeM ()
+      registerBinders (Scalar (Arrow _ pn _ ta (RetType _ tr))) = do
+        case pn of
+          Named pv -> constrain pv $ ParamSize $ locOf loc
+          Unnamed -> pure ()
+        registerBinders ta
+        registerBinders tr
+      registerBinders (Scalar (Record fs)) =
+        mapM_ registerBinders fs
+      registerBinders (Scalar (Sum cs)) =
+        mapM_ (mapM_ registerBinders) cs
+      registerBinders (Scalar (TypeVar _ _ targs)) =
+        mapM_ onTArg targs
+        where
+          onTArg (TypeArgType ta) = registerBinders ta
+          onTArg TypeArgDim {} = pure ()
+      registerBinders (Scalar Prim {}) = pure ()
+      registerBinders (Array _ _ et) = registerBinders (Scalar et)
+
+      f ::
         TypeBase d u ->
         TypeBase Size u ->
         StateT (M.Map VName (TypeBase Size NoUniqueness)) TermTypeM (TypeBase Size u)
@@ -403,40 +484,68 @@ instTyVars loc names orig_t1 orig_t2 = do
         Scalar . Record <$> sequence (M.intersectionWith f fs1 fs2)
       f (Scalar (Sum fs1)) (Scalar (Sum fs2)) =
         Scalar . Sum <$> sequence (M.intersectionWith (zipWithM f) fs1 fs2)
+      -- Note: uniqueness annotations are always taken from the
+      -- second type, as the first (inferred) type comes from the
+      -- unsized type checker, which does not track uniqueness.
       f
-        (Scalar (Arrow u _ _ t1a (RetType _ t1r)))
-        (Scalar (Arrow _ pname d t2a (RetType ext t2r))) = do
+        (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
+        (Scalar (Arrow u pname d t2a (RetType ext t2r))) = do
           ta <- f t1a t2a
           tr <- f t1r t2r
           pure $ Scalar $ Arrow u pname d ta $ RetType ext tr
       f
-        (Array u (Shape (_ : ds1)) t1)
-        (Array _ (Shape (d : ds2)) t2) =
+        (Array _ (Shape (_ : ds1)) t1)
+        (Array u (Shape (d : ds2)) t2) =
           arrayOfWithAliases u (Shape [d])
             <$> f (arrayOf (Shape ds1) (Scalar t1)) (arrayOf (Shape ds2) (Scalar t2))
       f
-        (Scalar (TypeVar u v1 targs1))
-        (Scalar (TypeVar _ _ targs2))
-          | length targs1 == length targs2 =
+        (Scalar (TypeVar _ v1 targs1))
+        (Scalar (TypeVar u v2 targs2))
+          -- If v2 is a type parameter being instantiated, it must be
+          -- handled by the general case below.
+          | qualLeaf v2 `M.notMember` names,
+            length targs1 == length targs2 =
               Scalar . TypeVar u v1 <$> zipWithM g targs1 targs2
           where
             g (TypeArgType t1) (TypeArgType t2) =
               TypeArgType <$> f t1 t2
             g _ targ = pure targ
       f t1 t2 = do
-        let mkNew =
-              fst <$> lift (allDimsFreshInType (mkUsage loc "instantiation") Nonrigid "dv" t1)
+        let usage = mkUsage loc "instantiation"
+            mkNew = fst <$> lift (allDimsFreshInType usage Nonrigid "dv" t1)
         case t2 of
           Scalar (TypeVar u (QualName [] v2) [])
-            | v2 `elem` names -> do
+            | Just l <- M.lookup v2 names -> do
                 seen <- get
                 case M.lookup v2 seen of
                   Nothing -> do
-                    t <- mkNew
+                    (t, drepl) <- lift $ allDimsFreshInType usage Nonrigid "dv" t1
+                    lift $ checkLiftedness loc l $ second (const NoUniqueness) t
+                    -- These are canonical instantiated sizes, which
+                    -- unification may determine to be existential.
+                    lift $ forM_ (M.keys drepl) $ \d ->
+                      constrain d $ InstSize l usage
+                    -- Named parameters of arrows inside the
+                    -- instantiated type are registered as size
+                    -- parameters, such that unification can
+                    -- reconstruct dependent function types by
+                    -- linking instantiated sizes to them.
+                    lift $ registerBinders t
                     modify $ M.insert v2 $ second (const NoUniqueness) t
                     pure t
-                  Just t ->
-                    pure $ second (const u) t
+                  Just t -> do
+                    -- Another occurrence of an already instantiated
+                    -- type parameter. The sizes must be given
+                    -- distinct names, as each occurrence denotes a
+                    -- distinct existential size if the instantiated
+                    -- size turns out to be existential.
+                    occ <- lift incCounter
+                    let onDim (Var (QualName _ c) info dloc) = do
+                          d <- lift $ newDimVar usage Nonrigid "dv"
+                          lift $ constrain d $ CopySize c occ usage
+                          pure $ Var (qualName d) info dloc
+                        onDim d = pure d
+                    second (const u) <$> bitraverse onDim pure t
           _ -> mkNew
 
   evalStateT (f orig_t1 orig_t2) mempty
@@ -449,24 +558,27 @@ instTypeScheme ::
   SrcLoc ->
   [TypeParam] ->
   StructType ->
+  TypeBase () NoUniqueness ->
   TermTypeM ([VName], StructType)
-instTypeScheme qn loc tparams scheme_t = do
-  (names, substs) <- fmap unzip . forM tparams $ \tparam -> do
+instTypeScheme qn loc tparams scheme_t inferred = do
+  (names, substs) <- fmap (unzip . catMaybes) . forM tparams $ \tparam -> do
     case tparam of
-      TypeParamType l v _ -> do
-        i <- incCounter
-        v' <- newID $ mkTypeVarName (baseName v) i
-        constrain v' . NoConstraint l . mkUsage loc . docText $
-          "instantiated type parameter of " <> dquotes (pretty qn)
-        pure (v', (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty (qualName v') []))
+      TypeParamType {} -> pure Nothing
       TypeParamDim v _ -> do
         i <- incCounter
         v' <- newID $ mkTypeVarName (baseName v) i
-        constrain v' . Size Nothing . mkUsage loc . docText $
+        -- The instantiation of a size parameter may turn out to be
+        -- an existential size, when the value whose type contains it
+        -- is returned from a function argument.
+        constrain v' . InstSize Lifted . mkUsage loc . docText $
           "instantiated size parameter of " <> dquotes (pretty qn)
-        pure (v', (v, ExpSubst $ sizeFromName (qualName v') loc))
+        pure $ Just (v', (v, ExpSubst $ sizeFromName (qualName v') loc))
 
-  pure (names, applySubst (`lookup` substs) scheme_t)
+  let tp_names = M.fromList $ mapMaybe tpName tparams
+      tpName (TypeParamType l v _) = Just (v, l)
+      tpName TypeParamDim {} = Nothing
+  t' <- instTyVars loc tp_names inferred $ applySubst (`lookup` substs) scheme_t
+  pure (names, t')
 
 lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
 lookupQualNameEnv (QualName [q] _)
@@ -541,7 +653,7 @@ lookupVar loc qn@(QualName qs name) inst_t = do
       if null tparams && null qs
         then pure bound_t
         else do
-          (tnames, t) <- instTypeScheme qn loc tparams bound_t
+          (tnames, t) <- instTypeScheme qn loc tparams bound_t $ first (const ()) inst_t
           outer_env <- asks termOuterEnv
           pure $ qualifyTypeVars outer_env tnames qs t
     Just EqualityF ->
@@ -580,18 +692,6 @@ expType = normType . typeOf
 -- locations)!
 expTypeFully :: Exp -> TermTypeM StructType
 expTypeFully = normTypeFully . typeOf
-
-newArrayType :: Usage -> Name -> Int -> TermTypeM (StructType, StructType)
-newArrayType usage desc r = do
-  v <- newTypeName desc
-  constrain v $ NoConstraint Unlifted usage
-  dims <- replicateM r $ newDimVar usage Nonrigid "dim"
-  let rowt = TypeVar mempty (qualName v) []
-      mkSize = flip sizeFromName (srclocOf usage) . qualName
-  pure
-    ( Array mempty (Shape $ map mkSize dims) rowt,
-      Scalar rowt
-    )
 
 -- | Replace *all* dimensions with distinct fresh size variables.
 allDimsFreshInType ::
@@ -637,16 +737,20 @@ mustBeOrderZero loc t = do
 mustBeUnlifted :: Loc -> StructType -> TermTypeM ()
 mustBeUnlifted loc t = do
   constraints <- getConstraints
-  let liftedType v =
-        case M.lookup v constraints of
-          Just (_, ParamType Lifted _) -> True
-          Just (_, ParamType SizeLifted _) -> True
-          _ -> False
-  when (not (orderZero t) || any liftedType (typeVars t)) $
+  unless (orderZero t) $
     typeError loc mempty $
-      textwrap "This expression must be of unlifted type, but is inferred to be of type"
-        </> indent 2 (align (pretty t))
-        </> "which may be a function or a value with hidden sizes."
+      "Type" </> indent 2 (pretty t) </> "found to be functional."
+  forM_ (S.toList $ typeVars t) $ \tv ->
+    case M.lookup tv constraints of
+      Just (_, ParamType l ploc)
+        | l `elem` [Lifted, SizeLifted] ->
+            typeError loc mempty $
+              "Type parameter"
+                <+> dquotes (prettyName tv)
+                <+> "bound at"
+                <+> pretty (locStr ploc)
+                <+> "is lifted and cannot be an array element."
+      _ -> pure ()
 
 --- Basic checking
 

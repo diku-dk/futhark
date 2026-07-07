@@ -289,8 +289,7 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
                 loopbody'
               )
       ForIn xpat e -> do
-        (arr_t, _) <- newArrayType (mkUsage' (srclocOf e)) "e" 1
-        e' <- unifies "being iterated in a 'for-in' loop" arr_t =<< checkExp e
+        e' <- checkExp e
         t <- expTypeFully e'
         case t of
           _
