@@ -238,14 +238,10 @@ genUniformSegRed lvl desc segments red_op shape map_lam arrs readFree = do
     res_t <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, res_t)
 
-  red_lam' <-
-    localScope (scopeOfSegSpace space) $
-      withReadFree red_lam readFree gtids'
-  -- We have to rename since we are using a global readFree
-  red_lam'' <- renameLambda red_lam'
+  red_lam' <- renameLambda red_lam
 
   kbody <- renameBody $ Body () stms res
-  let op = SegBinOp comm red_lam'' nes shape
+  let op = SegBinOp comm red_lam' nes shape
   lvl' <- capThreadSegLevel segments "uniform_segred" lvl $ NoRecommendation SegNoVirt
   letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody [op]
   where
@@ -271,9 +267,7 @@ genScanWithKernelBodyAndPost lvl desc segments mkScanLam shape nes mkPostLam m =
     res_t <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, res_t)
 
-  scan_lam <-
-    localScope (scopeOfSegSpace space) $
-      mkScanLam gtids'
+  scan_lam <- mkScanLam gtids'
   post_lam <-
     localScope (scopeOfSegSpace space) $
       mkPostLam gtids' res_t
@@ -333,7 +327,7 @@ segScanLambda ::
   ([SubExp] -> m ()) ->
   [SubExp] ->
   m (Lambda GPU)
-segScanLambda lam readFree gtids = do
+segScanLambda lam _readFree _gtids = do
   x_flag_p <- newParam "x_flag" $ Prim Bool
   y_flag_p <- newParam "y_flag" $ Prim Bool
   let ts = lambdaReturnType lam
@@ -345,9 +339,7 @@ segScanLambda lam readFree gtids = do
           eIf
             (eParam y_flag_p)
             (eBody (map eParam yps))
-            ( do
-                readFree gtids
-                pure $ lambdaBody lam
+            ( pure $ lambdaBody lam
             )
         ]
 
@@ -449,7 +441,7 @@ genUniformSegScanomapWithPost lvl segments desc scan_lam shape nes post_lam map_
     lvl
     desc
     segments
-    (withReadFree scan_lam readFree)
+    (const $ pure scan_lam)
     shape
     nes
     (\gtids _res_t -> withReadFree post_lam readFree gtids)
