@@ -306,12 +306,6 @@ instance MonadUnify TermTypeM where
   getConstraints = gets stateConstraints
   putConstraints x = modify $ \s -> s {stateConstraints = x}
 
-  newTypeVar loc desc = do
-    i <- incCounter
-    v <- newID $ mkTypeVarName desc i
-    constrain v $ NoConstraint Lifted $ mkUsage' loc
-    pure $ Scalar $ TypeVar mempty (qualName v) []
-
   curLevel = asks termLevel
 
   newDimVar usage rigidity name = do

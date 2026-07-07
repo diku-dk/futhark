@@ -242,7 +242,6 @@ class (Monad m) => MonadUnify m where
     x <- getConstraints
     putConstraints $ f x
 
-  newTypeVar :: (Monoid als, Located a) => a -> Name -> m (TypeBase dim als)
   newDimVar :: Usage -> Rigidity -> Name -> m VName
   newRigidDim :: (Located a) => a -> RigidSource -> Name -> m VName
   newRigidDim loc = newDimVar (mkUsage' loc) . Rigid
@@ -985,11 +984,6 @@ newVar name = do
 instance MonadUnify UnifyM where
   getConstraints = gets fst
   putConstraints x = modify $ \(_, i) -> (x, i)
-
-  newTypeVar loc name = do
-    v <- newVar name
-    modifyConstraints $ M.insert v (0, NoConstraint Lifted $ Usage Nothing $ locOf loc)
-    pure $ Scalar $ TypeVar mempty (qualName v) []
 
   newDimVar usage rigidity name = do
     dim <- newVar name
