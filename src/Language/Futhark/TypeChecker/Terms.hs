@@ -687,19 +687,35 @@ checkExp (OpSectionRight op (Info op_t) e (_, Info (_, _, _, am)) _ loc) = do
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (UpdateSection steps _ loc) = do
-  a <- newTypeVar loc "a"
+checkExp (UpdateSection steps (Info ft) loc) = do
+  -- The unsized type checker has already determined the type of the
+  -- parameter; we just have to instantiate its sizes. The result
+  -- type is then computed by walking the steps, such that its sizes
+  -- are those of the corresponding components of the parameter type.
+  a <- case ft of
+    Scalar (Arrow _ _ _ pt _) -> replaceTyVars loc pt
+    _ -> error $ "checkExp UpdateSection: " <> prettyString ft
   (steps', b, retext) <- checkSectionSteps a steps
-  let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType retext $ toRes Nonunique b
-  pure $ UpdateSection steps' (Info ft) loc
+  let ft' = Scalar $ Arrow mempty Unnamed Observe a $ RetType retext $ toRes Nonunique b
+  pure $ UpdateSection steps' (Info ft') loc
   where
     checkSectionSteps t [] =
       pure ([], t, [])
     checkSectionSteps t (step : rest) =
       case step of
         UpdateStepField f -> do
-          (rest', target_t, retext) <- checkSectionSteps t rest
-          pure (UpdateStepField f : rest', target_t, retext)
+          t' <- normTypeFully t
+          case t' of
+            Scalar (Record fs)
+              | Just f_t <- M.lookup f fs -> do
+                  (rest', target_t, retext) <- checkSectionSteps f_t rest
+                  pure (UpdateStepField f : rest', target_t, retext)
+            _ ->
+              error $
+                "checkExp UpdateSection: cannot project field "
+                  <> prettyString f
+                  <> " from "
+                  <> prettyString t'
         UpdateStepSlice slice -> do
           slice' <- checkSlice slice
           (arr_t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
