@@ -1071,9 +1071,9 @@ checkOneExp e = do
     Right (_generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       let t = typeOf e''
-      (tparams, _, RetType _ t') <-
+      (tparams, _, _) <-
         letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
-      fixOverloadedTypes $ typeVars t'
+      detectAmbiguousSizes
       e''' <- bindExistentialInsts =<< normTypeFully e''
       localChecks e'''
       causalityCheck e'''
@@ -1427,26 +1427,18 @@ bindExistentialInsts = astMap tv
           repOf v = ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v reps
       sizeFree mempty (find pending . fvVars . freeInExp) $ applySubst repOf t
 
--- | This is "fixing" as in "setting them", not "correcting them".  We
--- only make very conservative fixing.
-fixOverloadedTypes :: Names -> TermTypeM ()
-fixOverloadedTypes tyvars_at_toplevel = do
+detectAmbiguousSizes :: TermTypeM ()
+detectAmbiguousSizes = do
   collapseInstSizes 0
-  getConstraints >>= mapM_ fixOverloaded . M.toList . M.map snd
+  getConstraints >>= mapM_ notice . M.toList . M.map snd
   where
-    fixOverloaded (v, NoConstraint _ usage) = do
-      -- See #1552.
-      unify usage (Scalar (TypeVar mempty (qualName v) [])) $
-        Scalar (tupleRecord [])
-      when (v `S.member` tyvars_at_toplevel) $
-        warn usage "Defaulting ambiguous type to ()."
-    fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
+    notice (v, Size Nothing (Usage Nothing loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
         "Ambiguous size" <+> dquotes (prettyName v) <> "."
-    fixOverloaded (v, Size Nothing (Usage (Just u) loc)) =
+    notice (v, Size Nothing (Usage (Just u) loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
         "Ambiguous size" <+> dquotes (prettyName v) <+> "arising from" <+> pretty u <> "."
-    fixOverloaded _ = pure ()
+    notice _ = pure ()
 
 hiddenParamNames :: [Pat ParamType] -> [VName]
 hiddenParamNames params = hidden
@@ -1797,8 +1789,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 
             -- Since this is a top-level function, we also resolve overloaded
             -- types, using either defaults or complaining about ambiguities.
-            fixOverloadedTypes $
-              typeVars rettype' <> foldMap (typeVars . patternType) params''
+            detectAmbiguousSizes
 
             -- Then replace all inferred types in the body and parameters.
             body''' <- bindExistentialInsts =<< normTypeFully body''
