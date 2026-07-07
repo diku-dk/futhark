@@ -518,7 +518,12 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, _, e) body loc) _
       )
       (Info $ AppRes body_t ext)
 checkExp (AppExp (LetWith dest src steps ve body loc) _) = do
-  src_t <- normTypeFully $ unInfo $ identType src
+  -- The type recorded in the AST is the unsized type from the
+  -- unsized type checker; we must consult the scope to get the
+  -- actual type of the source variable.
+  src_t <-
+    normTypeFully
+      =<< lookupVar (srclocOf src) (qualName $ identName src) (unInfo $ identType src)
   let src' = src {identType = Info src_t}
 
   case mapAndUnzipM isField steps of
