@@ -1,11 +1,22 @@
--- Simple reduce with multiplication
 -- ==
 -- tags { autodiff }
--- entry: rev
--- input { [1.0f32, 2.0f32, 3.0f32, 4.0f32] 1.0f32 } output { [24.0f32, 12.0f32, 8.0f32, 6.0f32] 24.0f32 }
+-- entry: fwd_vec fwd_map rev_vec
+-- input { [1f32, 2f32, 3f32] }
+-- output { [6f32, 3f32, 2f32] }
 
-def red_mult [n] (xs: [n]f32, c: f32) : f32 =
-  reduce (*) 1 xs * c
+def f (xs: []f32) = f32.product xs
 
-entry rev [n] (xs: [n]f32) (c: f32) =
-  vjp red_mult (xs, c) 1
+entry fwd_vec (xs: []f32) : []f32 =
+  let seeds =
+    map (\i -> map (\j -> f32.bool (i == j)) (indices xs)) (indices xs)
+  in (jmp2 f xs seeds).1
+
+entry fwd_map (xs: []f32) : []f32 =
+  map (\i -> jvp f xs (map (\j -> f32.bool (i == j)) (indices xs)))
+      (indices xs)
+
+-- No rev_map because it would just get optimised away. The rev_vec is pointless
+-- enough already.
+
+entry rev_vec (xs: []f32) : []f32 =
+  head (mjp f xs [1])

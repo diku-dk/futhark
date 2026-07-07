@@ -191,7 +191,7 @@ readInput manifest i tname =
             [C.cstm|;|],
             [C.cexp|$id:dest|]
           )
-    Just (TypeOpaque desc _ _) ->
+    Just (TypeOpaque desc _ _ _) ->
       ( [C.citems|futhark_panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:(T.unpack desc));|],
         [C.cstm|;|],
         [C.cstm|;|],
@@ -257,7 +257,7 @@ prepareOutputs manifest = zipWith prepareResult [(0 :: Int) ..]
             [C.cexp|$id:result|],
             [C.cstm|assert($id:(arrayFree ops)(ctx, $id:result) == 0);|]
           )
-        Just (TypeOpaque t ops _) ->
+        Just (TypeOpaque t ops _ _) ->
           ( [C.citem|typename $id:t $id:result;|],
             [C.cexp|$id:result|],
             [C.cstm|assert($id:(opaqueFree ops)(ctx, $id:result) == 0);|]
@@ -268,7 +268,7 @@ recordFieldCType manifest field =
   case M.lookup t $ manifestTypes manifest of
     Nothing -> uncurry primAPIType $ scalarToPrim t
     Just (TypeArray tname _ _ _) -> [C.cty|typename $id:tname|]
-    Just (TypeOpaque tname _ _) -> [C.cty|typename $id:tname|]
+    Just (TypeOpaque tname _ _ _) -> [C.cty|typename $id:tname|]
   where
     t = recordFieldType field
 
@@ -279,7 +279,7 @@ printStm manifest tname e =
     Nothing ->
       let info = tname <> "_info"
        in [C.cstm|write_scalar(stdout, binary_output, &$id:info, &$exp:e);|]
-    Just (TypeOpaque _ _ (Just (OpaqueRecord record)))
+    Just (TypeOpaque _ _ (Just (OpaqueRecord record)) _)
       | map recordFieldName fields == take (length fields) (map showText [0 :: Int ..]) ->
           [C.cstm|{$stms:(intersperse newline (map getField fields))}|]
       where
@@ -296,7 +296,7 @@ printStm manifest tname e =
                      $stm:(printField field)
                    }
                    }|]
-    Just (TypeOpaque desc _ _) ->
+    Just (TypeOpaque desc _ _ _) ->
       [C.cstm|{
          fprintf(stderr, "Values of type \"%s\" have no external representation.\n", $string:(T.unpack desc));
          retval = 1;
@@ -326,7 +326,7 @@ printResult manifest = concatMap f
 
 cliEntryPoint ::
   Manifest -> T.Text -> EntryPoint -> (C.Definition, C.Initializer)
-cliEntryPoint manifest entry_point_name (EntryPoint cfun _tuning_params output inputs _attrs) =
+cliEntryPoint manifest entry_point_name (EntryPoint cfun _tuning_params output inputs _attrs _doc) =
   let (input_items, pack_input, free_input, free_parsed, input_args) =
         unzip5 $ readInputs manifest $ map inputType inputs
 

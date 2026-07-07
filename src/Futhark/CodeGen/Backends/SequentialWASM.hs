@@ -61,7 +61,7 @@ fRepMyRep :: Imp.Program -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Functions fs = Imp.defFuns prog
       function (Imp.Function entry _ _ _ _) = do
-        Imp.EntryPoint n res args <- entry
+        Imp.EntryPoint n res args _doc <- entry
         Just $
           JSEntryPoint
             { name = nameToString n,

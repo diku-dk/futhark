@@ -2,7 +2,7 @@
 -- MatrixMul case
 -- ==
 -- tags { autodiff }
--- entry: fwd_J rev_J
+-- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input { [[1f32,2f32,3f32,4f32], [4f32,3f32,2f32,1f32], [1f32,2f32,3f32,4f32], [4f32,3f32,2f32,1f32]] }
 -- output {
 -- [[[[1f32, 0f32, 0f32, 0f32], [0f32, 0f32, 0f32, 0f32], [0f32, 0f32, 0f32, 0f32], [0f32, 0f32, 0f32, 0f32]],
@@ -51,5 +51,21 @@ entry fwd_J [n] (input: [n][4]f32) : [n][4][n][4]f32 =
 entry rev_J [n] (input: [n][4]f32) : [n][4][n][4]f32 =
   let input = fromarrs input
   in tabulate (n * 4) (\i -> vjp primal input (fromarrs (onehot_2d n 4 (i / 4) (i % 4))))
+     |> unflatten
+     |> map (map toarrs)
+
+entry fwd_vec_J [n] (input: [n][4]f32) : [n][4][n][4]f32 =
+  let input = fromarrs input
+  let seeds = tabulate (n * 4) (\i -> fromarrs (onehot_2d n 4 (i / 4) (i % 4)))
+  in jmp primal input seeds
+     |> map toarrs
+     |> transpose
+     |> map transpose
+     |> map (map unflatten)
+
+entry rev_vec_J [n] (input: [n][4]f32) : [n][4][n][4]f32 =
+  let input = fromarrs input
+  let seeds = tabulate (n * 4) (\i -> fromarrs (onehot_2d n 4 (i / 4) (i % 4)))
+  in mjp primal input seeds
      |> unflatten
      |> map (map toarrs)

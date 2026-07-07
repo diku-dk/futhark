@@ -962,12 +962,18 @@ segOpBlocker space = do
   pure $
     Engine.hasFree bound_here
       `Engine.orIf` Engine.isOp
+      `Engine.orIf` isSlice
       `Engine.orIf` par_blocker
       `Engine.orIf` Engine.isConsumed
       `Engine.orIf` Engine.isConsuming
       `Engine.orIf` Engine.isDeviceMigrated
   where
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
+    -- Hoisting out slicing is useless and potentially dangerous, as protecting
+    -- it can cause irregular parallelism.
+    isSlice _ _ (Let _ _ (BasicOp (Index _ slice))) =
+      sliceShape slice /= mempty
+    isSlice _ _ _ = False
 
 -- | We are willing to hoist potentially unsafe statements out of segops, but
 -- they must be protected by adding a branch on top of them.

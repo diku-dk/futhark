@@ -8,6 +8,8 @@
 #
 #  * 'tarball-nightly' produces a release tarball where the version number is "nightly".
 #
+#  * 'futhark-lib' is the Futhark compiler as a Haskell package.
+#
 # Just run
 #
 #   nix build
@@ -73,6 +75,68 @@
               "^tools.*"
             ];
         };
+
+      # Futhark-specific Haskell dependencies, factored out so it can be applied
+      # both to the pinned `nixpkgs` used by `packages` below, and to a
+      # downstream flake's own `nixpkgs` via `overlays.default`. Takes `pkgs`
+      # explicitly since it needs `pkgs.haskell.lib`, `pkgs.stdenv.isLinux`, and
+      # the various static library derivations.
+      mkHaskellOverrides = pkgs: new: old: {
+        # Custom dependencies for which Nixpkgs is too old.
+        lsp = new.callPackage ./nix/lsp.nix { };
+        lsp-types = new.callPackage ./nix/lsp-types.nix { };
+        lsp-test = new.callPackage ./nix/lsp-test.nix { };
+        futhark-data = new.callPackage ./nix/futhark-data.nix { };
+        futhark-server = new.callPackage ./nix/futhark-server.nix { };
+        futhark-manifest = new.callPackage ./nix/futhark-manifest.nix { };
+
+        # The plain Haskell package -- library and executable, no static
+        # linking. This is what downstream Haskell projects should depend
+        # on if they want Futhark as a library, e.g. via haskell-flake's
+        # `packages.<name>.source`, or transitively through this overlay.
+        futhark-lib = new.callCabal2nix "futhark" (cleanSource ./.) { };
+
+        # This derivation builds a statically linked 'futhark'
+        # executable on Linux; on other platforms it uses the default
+        # shared-library build.
+        futhark = pkgs.haskell.lib.overrideCabal new.futhark-lib (old: {
+          enableLibraryProfiling = false;
+          isExecutable = true;
+          isLibrary = false;
+
+          enableSharedExecutables = !pkgs.stdenv.isLinux;
+          enableSharedLibraries = !pkgs.stdenv.isLinux;
+
+          configureFlags = [
+            "--ghc-option=-Werror"
+            "--ghc-option=-split-sections"
+          ]
+          ++ lib.optionals pkgs.stdenv.isLinux (
+            [
+              "--ghc-option=-optl=-static"
+              "--ghc-option=-optl=-lbz2"
+              "--ghc-option=-optl=-lz"
+              "--ghc-option=-optl=-lelf"
+              "--ghc-option=-optl=-llzma"
+              "--ghc-option=-optl=-lzstd"
+            ]
+            ++ map (p: "--extra-lib-dirs=${p}/lib") [
+              pkgs.glibc.static
+              (pkgs.ncurses.override { enableStatic = true; })
+              (pkgs.gmp6.override { withStatic = true; })
+              (pkgs.libffi.overrideAttrs { dontDisableStatic = true; })
+              (pkgs.numactl.overrideAttrs { dontDisableStatic = true; })
+              pkgs.zlib.static
+              (pkgs.xz.override { enableStatic = true; }).out
+              (pkgs.zstd.override { enableStatic = true; }).out
+              (pkgs.bzip2.override { enableStatic = true; }).out
+              (pkgs.elfutils.overrideAttrs { dontDisableStatic = true; }).out
+            ]
+          );
+
+          preBuild = "echo ${commit} > commit-id";
+        });
+      };
     in
     {
       packages = forAllSystems (
@@ -105,61 +169,7 @@
 
             config.packageOverrides = pkgs: {
               haskellPackages = pkgs.haskellPackages.override {
-                overrides = new: old: {
-                  # Custom dependencies for which Nixpkgs is too old.
-                  lsp = new.callPackage ./nix/lsp.nix { };
-                  lsp-types = new.callPackage ./nix/lsp-types.nix { };
-                  lsp-test = new.callPackage ./nix/lsp-test.nix { };
-                  futhark-data = new.callPackage ./nix/futhark-data.nix { };
-                  futhark-server = new.callPackage ./nix/futhark-server.nix { };
-                  futhark-manifest = new.callPackage ./nix/futhark-manifest.nix { };
-
-                  # This derivation builds a statically linked 'futhark'
-                  # executable on Linux; on other platforms it uses the default
-                  # shared-library build.
-                  futhark =
-                    let
-                      base = new.callCabal2nix "futhark" (cleanSource ./.) { };
-                    in
-                    pkgs.haskell.lib.overrideCabal base (old: {
-                      enableLibraryProfiling = false;
-                      isExecutable = true;
-                      isLibrary = false;
-
-                      enableSharedExecutables = !pkgs.stdenv.isLinux;
-                      enableSharedLibraries = !pkgs.stdenv.isLinux;
-
-                      configureFlags = [
-                        "--ghc-option=-Werror"
-                        "--ghc-option=-split-sections"
-                      ]
-                      ++ lib.optionals pkgs.stdenv.isLinux (
-                        [
-                          # static linking
-                          "--ghc-option=-optl=-static"
-                          "--ghc-option=-optl=-lbz2"
-                          "--ghc-option=-optl=-lz"
-                          "--ghc-option=-optl=-lelf"
-                          "--ghc-option=-optl=-llzma"
-                          "--ghc-option=-optl=-lzstd"
-                        ]
-                        ++ map (p: "--extra-lib-dirs=${p}/lib") [
-                          pkgs.glibc.static
-                          (pkgs.ncurses.override { enableStatic = true; })
-                          (pkgs.gmp6.override { withStatic = true; })
-                          (pkgs.libffi.overrideAttrs { dontDisableStatic = true; })
-                          (pkgs.numactl.overrideAttrs { dontDisableStatic = true; })
-                          pkgs.zlib.static
-                          (pkgs.xz.override { enableStatic = true; }).out
-                          (pkgs.zstd.override { enableStatic = true; }).out
-                          (pkgs.bzip2.override { enableStatic = true; }).out
-                          (pkgs.elfutils.overrideAttrs { dontDisableStatic = true; }).out
-                        ]
-                      );
-
-                      preBuild = "echo ${commit} > commit-id";
-                    });
-                };
+                overrides = mkHaskellOverrides pkgs;
               };
             };
           };
@@ -224,6 +234,8 @@
         in
         {
           futhark = futhark versionFromCabal;
+
+          futhark-lib = pkgs'.haskellPackages.futhark-lib;
 
           tarball = tarball (futhark versionFromCabal);
 
@@ -302,6 +314,12 @@
           };
         }
       );
+
+      overlays.default = final: prev: {
+        haskellPackages = prev.haskellPackages.override (old: {
+          overrides = prev.lib.composeExtensions (old.overrides or (_: _: { })) (mkHaskellOverrides prev);
+        });
+      };
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-tree);
     };

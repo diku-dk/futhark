@@ -252,7 +252,7 @@ arrayLibraryFunctions pub space pt signed rank = do
 lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
 lookupOpaqueType v (OpaqueTypes types) =
   case lookup v types of
-    Just t -> t
+    Just (t, _) -> t
     Nothing -> error $ "Unknown opaque type: " ++ show v
 
 opaquePayload :: OpaqueTypes -> OpaqueType -> [ValueType]
@@ -1216,9 +1216,9 @@ generateArray space ((signed, pt, rank), pub) = do
 generateOpaque ::
   Space ->
   OpaqueTypes ->
-  (Name, OpaqueType) ->
+  (Name, (OpaqueType, Maybe T.Text)) ->
   CompilerM op s (T.Text, Manifest.Type)
-generateOpaque space types (desc, ot) = do
+generateOpaque space types (desc, (ot, doc)) = do
   name <- publicName $ opaqueName desc
   members <- case ot of
     -- We need to treat arrays of unit specially, because otherwise they would
@@ -1232,7 +1232,7 @@ generateOpaque space types (desc, ot) = do
   let opaque_type = [C.cty|struct $id:name*|]
   pure
     ( nameToText desc,
-      Manifest.TypeOpaque (typeText opaque_type) ops extra_ops
+      Manifest.TypeOpaque (typeText opaque_type) ops extra_ops doc
     )
   where
     field vt@(ValueType _ (Rank r) _) i = do
@@ -1252,7 +1252,7 @@ generateAPITypes ::
   OpaqueTypes ->
   CompilerM op s (M.Map T.Text Manifest.Type)
 generateAPITypes arr_space types@(OpaqueTypes opaques) = do
-  mapM_ (findNecessaryArrays . snd) opaques
+  mapM_ (findNecessaryArrays . fst . snd) opaques
   array_ts <- mapM (generateArray arr_space) . M.toList =<< gets compArrayTypes
   opaque_ts <- mapM (generateOpaque arr_space types) opaques
   pure $ M.fromList $ catMaybes array_ts <> opaque_ts

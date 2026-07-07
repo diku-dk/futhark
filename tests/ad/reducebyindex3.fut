@@ -1,6 +1,6 @@
 -- ==
 -- tags { autodiff }
---  entry: rev
+--  entry: rev rev_vec
 --  input {
 --    [0i64,1i64,2i64,1i64,0i64,1i64,2i64]
 --    [1f64,2f64,3f64,4f64,5f64,6f64,7f64] }
@@ -17,6 +17,10 @@ entry f [n] (is: [n]i64) (vs: [n]f64) =
 
 entry rev [n] (is: [n]i64) (vs: [n]f64) =
   tabulate 4 (\i -> vjp (f is) vs (replicate 4 0 with [i] = 1))
+
+entry rev_vec [n] (is: [n]i64) (vs: [n]f64) =
+  let seeds = tabulate 4 (\i -> replicate 4 0 with [i] = 1)
+  in mjp (f is) vs seeds
 
 -- entry fwd [n] (is: [n]i64) (vs: [n]f64) =
 --   tabulate n (\i -> jvp (f is) vs (replicate n 0 with [i] = 1))

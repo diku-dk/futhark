@@ -2,7 +2,7 @@
 -- ZeroQuadrant case
 -- ==
 -- tags { autodiff }
--- entry: fwd_J rev_J
+-- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input { [[1.0f32, 2.0f32, 3.0f32], [4.0f32, 3.0f32, 5.0f32], [3.0f32, 4.0f32, 2.0f32], [4.0f32, 2.0f32, 1.0f32]] }
 -- output {
 -- [[[1f32, 1f32, 1f32], [0f32, 0f32, 0f32],
@@ -30,4 +30,17 @@ entry fwd_J [n] (input: [n][3]f32) =
 entry rev_J [n] (input: [n][3]f32) =
   let input = fromarrs input
   in tabulate n (\i -> vjp primal input (replicate n (0, 0, 0) with [i] = (1, 1, 1)))
+     |> map toarrs
+
+entry fwd_vec_J [n] (input: [n][3]f32) =
+  let input = fromarrs input
+  let seeds = tabulate n (\i -> replicate n (0, 0, 0) with [i] = (1, 1, 1))
+  in jmp primal input seeds
+     |> map toarrs
+     |> transpose
+
+entry rev_vec_J [n] (input: [n][3]f32) =
+  let input = fromarrs input
+  let seeds = tabulate n (\i -> replicate n (0, 0, 0) with [i] = (1, 1, 1))
+  in mjp primal input seeds
      |> map toarrs

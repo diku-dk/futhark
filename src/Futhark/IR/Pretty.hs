@@ -14,6 +14,7 @@ where
 import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
+import Data.Text qualified as T
 import Futhark.IR.Syntax
 import Futhark.Util.Pretty
 
@@ -413,16 +414,15 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
     where
       fun = case entry of
         Nothing -> "fun"
-        Just (p_name, p_entry, ret_entry) ->
+        Just (p_name, p_entry, ret_entry, doc_entry) ->
           "entry"
             <> (parens . align)
               ( "\""
                   <> pretty p_name
                   <> "\""
-                  <> comma
-                    </> ppTupleLines' (map pretty p_entry)
-                  <> comma
-                    </> pretty ret_entry
+                  <> comma </> ppTupleLines' (map pretty p_entry)
+                  <> comma </> pretty ret_entry
+                  <> maybe mempty ((comma </>) . pretty . show) doc_entry
               )
 
 instance Pretty OpaqueType where
@@ -447,7 +447,14 @@ instance Pretty OpaqueType where
 instance Pretty OpaqueTypes where
   pretty (OpaqueTypes ts) = "types" <+> nestedBlock (stack $ map p ts)
     where
-      p (name, t) = "type" <+> dquotes (pretty name) <+> equals <+> pretty t
+      p (name, (t, doc)) =
+        ( case doc of
+            Nothing -> mempty
+            Just doc' -> mconcat $ map wrap (T.lines doc')
+        )
+          <> "type" <+> dquotes (pretty name) <+> equals <+> pretty t
+        where
+          wrap x = "-- " <> pretty x <> line
 
 instance (PrettyRep rep) => Pretty (Prog rep) where
   pretty (Prog types consts funs) =

@@ -275,8 +275,8 @@ transformExp :: Exp -> TransformM Exp
 transformExp = transformNames
 
 transformEntry :: EntryPoint -> TransformM EntryPoint
-transformEntry (EntryPoint params ret) =
-  EntryPoint <$> mapM onEntryParam params <*> onEntryType ret
+transformEntry (EntryPoint params ret doc) =
+  EntryPoint <$> mapM onEntryParam params <*> onEntryType ret <*> pure doc
   where
     onEntryParam (EntryParam v t) =
       EntryParam v <$> onEntryType t

@@ -18,6 +18,7 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Either (partitionEithers)
 import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -457,7 +458,7 @@ type Optimization =
   TryFusion (SOAC, SOAC.ArrayTransforms)
 
 optimizations :: [Optimization]
-optimizations = [iswim]
+optimizations = [iswim, unflattenAccOnlyMap]
 
 iswim ::
   Maybe [VName] ->
@@ -506,6 +507,87 @@ iswim _ (SOAC.Screma w arrs form) ots
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
+-- | When a pure-map Screma returns exclusively accumulator results and some
+-- non-accumulator inputs carry a 2D-to-1D flattening Reshape transform, we
+-- can "unflatten" the map:
+--
+--   Screma(n*m, {flat_a1:[n*m]t1, ..., acc_p:acc(...)}, lam)
+--   where lam : (t1, ..., acc) → acc
+--
+-- becomes
+--
+--   Screma(n, {a1:[n][m]t1, ..., acc_p:acc(...)}, outer_lam)
+--   where outer_lam = \(row_a1:[m]t1, ..., acc_p:acc(...)) →
+--     Screma(m, {row_a1, ..., acc_p}, lam)
+--
+-- This exposes the 2D inputs directly, enabling the standard fusion rules to
+-- fuse the resulting Screma(n,...) with an upstream Screma(n,...) producer.
+unflattenAccOnlyMap ::
+  Maybe [VName] ->
+  SOAC ->
+  SOAC.ArrayTransforms ->
+  TryFusion (SOAC, SOAC.ArrayTransforms)
+unflattenAccOnlyMap (Just outVars) (SOAC.Screma _nm inps form) ots = do
+  lam <- liftMaybe $ isMapSOAC form
+  -- All results must be accumulator types.
+  guard $ all isAcc $ lambdaReturnType lam
+  -- Only apply when the producer outputs non-scalar rows (rank > 1), meaning
+  -- pullReshape cannot handle this case (it requires scalar-leaf map nests).
+  -- When the producer outputs scalars, the simpler prepend approach works fine.
+  outVarTypes <- mapM lookupType outVars
+  guard $ any ((> 1) . arrayRank) outVarTypes
+  -- Partition inputs paired with their lambda params: those with a 2D→1D
+  -- flattening Reshape vs. those that pass through unchanged (acc params).
+  -- A flattening reshape: base type is 2D, first transform collapses it to 1D.
+  let classifyInp (inp@(SOAC.Input ts _v base_t), p)
+        | SOAC.Reshape _aux ns SOAC.:< ts' <- SOAC.viewf ts,
+          arrayRank base_t == 2,
+          shapeRank (newShape ns) == 1 =
+            Left (SOAC.Input ts' _v base_t, p)
+        | otherwise =
+            Right (inp, p)
+      (flat_pairs, pass_pairs) =
+        partitionEithers $ zipWith (curry classifyInp) inps (lambdaParams lam)
+  -- Need at least one flattened input.
+  guard $ not (null flat_pairs)
+  -- The non-flattened inputs must be accumulators, because we are changing the
+  -- width of the SOAC.
+  guard $ all (isAcc . SOAC.inputType . fst) pass_pairs
+  -- All flattened inputs must agree on the outer dim n and inner dim m.
+  let dims2d base_t = (arraySize 0 base_t, arraySize 1 base_t)
+      getBaseTy (SOAC.Input _ _ base_t, _) = base_t
+      (n, m) = dims2d (getBaseTy (head flat_pairs))
+  guard $ all ((== (n, m)) . dims2d . getBaseTy) flat_pairs
+  -- The lambda params for the flat inputs get their type changed from [n*m]t
+  -- to [m]t (a single row).  Pass-through params are unchanged.
+  let mkRowParam (_, p) = p {paramDec = rowType (paramDec p)}
+      flat_row_params = map mkRowParam flat_pairs
+      pass_params = map snd pass_pairs
+      inner_lam_params = flat_row_params ++ pass_params
+  inner_lam <- renameLambda $ lam {lambdaParams = inner_lam_params}
+  inner_form <- mapSOAC inner_lam
+  -- Inner Screma over m: plain-variable inputs for the row params, then
+  -- plain-variable inputs for the pass-through (acc) params.
+  let inner_inps =
+        map (SOAC.identInput . paramToIdent) flat_row_params
+          ++ map (SOAC.identInput . paramToIdent) pass_params
+      inner_soac = SOAC.Screma m inner_inps inner_form
+  -- Outer lambda: same param names but outer params have type [m]t (rows).
+  let outer_lam_params = flat_row_params ++ pass_params
+  outer_lam <- runLambdaBuilder outer_lam_params $ do
+    inner_exp <- SOAC.toExp inner_soac
+    res <- letTupExp "inner_acc" inner_exp
+    pure $ map (subExpRes . Var) res
+  outer_form <- mapSOAC outer_lam
+  -- Outer Screma over n: 2D inputs (flatten reshape stripped) then pass-through.
+  let outer_inps = map fst flat_pairs ++ map fst pass_pairs
+  pure (SOAC.Screma n outer_inps outer_form, ots)
+unflattenAccOnlyMap _ _ _ =
+  fail "unflattenAccOnlyMap does not apply."
+
+paramToIdent :: Param Type -> Ident
+paramToIdent p = Ident (paramName p) (paramType p)
+
 removeParamOuterDim :: LParam SOACS -> LParam SOACS
 removeParamOuterDim param =
   let t = rowType $ paramType param
@@ -538,11 +620,21 @@ commonTransforms' inps =
     Just (Just mot, inps') -> first (mot SOAC.<|) $ commonTransforms' $ reverse inps'
     _ -> (SOAC.noTransforms, map snd inps)
   where
+    -- Two reshapes with the same shape are compatible even if their certs differ;
+    -- merge the certs to produce a single common reshape transform.
+    compatibleTransforms (SOAC.Reshape aux1 shape1) (SOAC.Reshape aux2 shape2)
+      | shape1 == shape2 =
+          Just $ SOAC.Reshape (aux1 <> aux2) shape1
+    compatibleTransforms ot1 ot2
+      | ot1 == ot2 = Just ot1
+    compatibleTransforms _ _ = Nothing
+
     inspect (mot, prev) (True, inp) =
       case (mot, inputToOutput inp) of
         (Nothing, Just (ot, inp')) -> Just (Just ot, (True, inp') : prev)
         (Just ot1, Just (ot2, inp'))
-          | ot1 == ot2 -> Just (Just ot2, (True, inp') : prev)
+          | Just combined <- compatibleTransforms ot1 ot2 ->
+              Just (Just combined, (True, inp') : prev)
         _ -> Nothing
     inspect (mot, prev) inp = Just (mot, inp : prev)
 

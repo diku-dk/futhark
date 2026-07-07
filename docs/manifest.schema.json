@@ -44,12 +44,18 @@
                             },
                             "additionalProperties": false
                         }
+                    },
+                    "doc": {
+                        "type": "string"
                     }
                 }
             }
         },
         "types": {
             "type": "object",
+            "doc": {
+                "type": "string"
+            },
             "additionalProperties": {
                 "oneOf": [
                     { "type": "object",
@@ -142,7 +148,13 @@
                               "additionalProperties": false
                           }
                       },
-                      "required": [ "kind", "ctype", "ops" ]
+                      "required": ["kind", "ctype", "ops"],
+                      "anyOf": [
+                          { "required": ["record"] },
+                          { "required": ["sum"] },
+                          { "required": ["record_array"] },
+                          { "required": ["opaque_array"] }
+                      ]
                     },
                     { "type": "object",
                       "properties": {

@@ -645,7 +645,7 @@ data OpaqueType
   deriving (Eq, Ord, Show)
 
 -- | Names of opaque types and their representation.
-newtype OpaqueTypes = OpaqueTypes [(Name, OpaqueType)]
+newtype OpaqueTypes = OpaqueTypes [(Name, (OpaqueType, Maybe T.Text))]
   deriving (Eq, Ord, Show)
 
 instance Monoid OpaqueTypes where

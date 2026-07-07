@@ -177,14 +177,14 @@ vjpSOAC ops pat aux (Hist n [is, vs] [histop] f) m
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isAddOp op =
       diffAddHist ops x aux n lam ne is vs w rf dst m
-vjpSOAC ops pat aux (Hist n as [histop] f) m
+vjpSOAC ops pat aux (Hist w as [histop] f) m
   | isIdentityLambda f,
-    HistOp (Shape w) rf dst ne lam <- histop = do
-      diffHist ops (patNames pat) aux n lam ne as w rf dst m
-vjpSOAC ops pat _aux (Hist n as histops f) m
+    HistOp (Shape n) rf dst ne lam <- histop = do
+      diffHist ops (patNames pat) aux w lam ne as n rf dst m
+vjpSOAC ops pat _aux (Hist w as histops f) m
   | not (isIdentityLambda f) = do
       (mapstm, redstm) <-
-        histomapToMapAndHist pat (n, histops, f, as)
+        histomapToMapAndHist pat (w, histops, f, as)
       vjpStm ops mapstm $ vjpStm ops redstm m
 vjpSOAC ops pat aux (Stream w as accs lam) m = do
   stms <- collectStms_ $ auxing aux $ sequentialStreamWholeArray pat w accs lam as
@@ -194,13 +194,14 @@ vjpSOAC _ops pat aux (WithVJP args lam lam_adj) m = do
   forM_ (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
     certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
   m
-  pat_adj <- mapM lookupAdjVal $ patNames pat
-  contribs <-
-    eLambda lam_adj (map (eSubExp . resSubExp) lam_res ++ map (eSubExp . Var) pat_adj)
-  forM_ (zip args contribs) $ \(arg, contrib) ->
-    (updateSubExpAdj arg <=< letExp "contrib") $
-      BasicOp . SubExp . resSubExp $
-        contrib
+  locallyNonvector (patNames pat, args) $ do
+    pat_adj <- mapM lookupAdjVal $ patNames pat
+    contribs <-
+      eLambda lam_adj (map (eSubExp . resSubExp) lam_res ++ map (eSubExp . Var) pat_adj)
+    forM_ (zip args contribs) $ \(arg, contrib) ->
+      (updateSubExpAdj arg <=< letExp "contrib") $
+        BasicOp . SubExp . resSubExp $
+          contrib
 vjpSOAC _ _ _ soac _ =
   error $ "vjpSOAC unhandled:\n" ++ prettyString soac
 

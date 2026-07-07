@@ -58,6 +58,7 @@ import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
+import Futhark.Pass.NoGrid
 import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.Util.Log
@@ -721,6 +722,7 @@ commandLineOptions =
     kernelsPassOption optimiseArrayLayoutGPU [],
     mcPassOption optimiseArrayLayoutMC [],
     kernelsPassOption addGlobalParams [],
+    kernelsPassOption noGrid [],
     kernelsPassOption optimiseGenRed [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],

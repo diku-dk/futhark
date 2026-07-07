@@ -267,7 +267,7 @@ reverseIndices loop = do
 
     pure (M.singleton i i_rev, i_stms)
 
--- | Pures a substitution which substitutes values in the reverse
+-- | Returns a substitution which substitutes values in the reverse
 -- loop body with values from the tape.
 restore :: Stms SOACS -> [Param DeclType] -> VName -> ADM Substitutions
 restore stms_adj loop_params' i' =

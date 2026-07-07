@@ -600,10 +600,14 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
           TypeBind name' l tps' te' (Info elab_t) doc loc
         )
 
-entryPoint :: [Pat ParamType] -> Maybe (TypeExp Exp VName) -> ResRetType -> EntryPoint
-entryPoint params orig_ret_te (RetType _ret orig_ret) =
-  EntryPoint (map patternEntry params ++ more_params) rettype'
+entryPoint :: Maybe DocComment -> [Pat ParamType] -> Maybe (TypeExp Exp VName) -> ResRetType -> EntryPoint
+entryPoint doc params orig_ret_te (RetType _ret orig_ret) =
+  EntryPoint (map patternEntry params ++ more_params) rettype' doc'
   where
+    doc' = case doc of
+      Just (DocComment t _) -> Just t
+      _ -> Nothing
+
     (more_params, rettype') = onRetType orig_ret_te $ toStruct orig_ret
 
     patternEntry (PatParens p _) =
@@ -691,7 +695,7 @@ checkValBind vb = do
   (tparams', params', maybe_tdecl', rettype, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
-  let entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
+  let entry' = Info (entryPoint doc params' maybe_tdecl' rettype) <$ entry
       vb' = ValBind entry' fname fname_loc maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
 
   debugTraceM 3 $ unlines ["# Inferred:", prettyString vb']

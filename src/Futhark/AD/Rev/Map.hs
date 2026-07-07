@@ -75,6 +75,32 @@ withAcc inputs m = do
     subAD $ mkLambda (cert_params ++ acc_params) $ m $ map paramName acc_params
   letTupExp "withhacc_res" $ WithAcc inputs acc_lam
 
+vecPerm :: Shape -> Type -> [Int]
+vecPerm adj_shape t =
+  [shapeRank adj_shape]
+    ++ [0 .. shapeRank adj_shape - 1]
+    ++ [shapeRank adj_shape + 1 .. arrayRank t - 1]
+
+pushAdjShape :: VName -> ADM VName
+pushAdjShape v = do
+  adj_shape <- askShape
+  v_t <- lookupType v
+  if adj_shape == mempty || arrayShape v_t == adj_shape || isAcc v_t
+    then pure v
+    else do
+      let perm = vecPerm adj_shape v_t
+      letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
+
+popAdjShape :: VName -> ADM VName
+popAdjShape v = do
+  adj_shape <- askShape
+  v_t <- lookupType v
+  if adj_shape == mempty || arrayShape v_t == adj_shape || isAcc v_t
+    then pure v
+    else do
+      let perm = rearrangeInverse $ vecPerm adj_shape v_t
+      letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
+
 -- | Perform VJP on a Map.  The 'Adj' list is the adjoints of the
 -- result of the map.
 vjpMap :: VjpOps -> [Adj] -> StmAux () -> SubExp -> Lambda SOACS -> [VName] -> ADM ()
@@ -150,8 +176,8 @@ vjpMap ops res_adjs _ w map_lam as
 
       zipWithM_ forRes [0 ..] res_ivs
   where
-    isSparse (AdjSparse (Sparse shape _ ivs)) = do
-      guard $ shapeDims shape == [w]
+    isSparse (AdjSparse (Sparse shape _ vd ivs)) = do
+      guard $ drop vd (shapeDims shape) == [w]
       Just ivs
     isSparse _ =
       Nothing
@@ -161,7 +187,8 @@ vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
   pat_adj_vals <- forM (zip pat_adj (lambdaReturnType map_lam)) $ \(adj, t) ->
     case t of
       Acc {} -> letExp "acc_adj_rep" . BasicOp . Replicate (Shape [w]) . Var =<< adjVal adj
-      _ -> adjVal adj
+      _ -> pushAdjShape =<< adjVal adj
+
   pat_adj_params <-
     mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj_vals
 
@@ -195,8 +222,8 @@ vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
     let param_ts = map paramType (lambdaParams map_lam')
     forM_ (zip3 param_ts as param_contribs) $ \(param_t, a, param_contrib) ->
       case param_t of
-        Acc {} -> freeContrib a param_contrib
-        _ -> updateAdj a param_contrib
+        Acc {} -> freeContrib a =<< popAdjShape param_contrib -- CHECKME
+        _ -> updateAdj a =<< popAdjShape param_contrib
   where
     addIdxParams n lam = do
       idxs <- replicateM n $ newParam "idx" $ Prim int64
