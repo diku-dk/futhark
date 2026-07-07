@@ -64,7 +64,7 @@ applyShm2Reg =
     { passName = "Enabling Register Mapping of Arrays in IntraGroup Kernels"
     , passDescription = "Attempts to change the default allocation of fast arrays in intra-group kernels from shared memory to registers."
     , passFunction = \ prog -> do
-        -- trace ("\nProg before pass: "++prettyString prog++"\n") $
+       -- trace ("\nProg before pass: "++prettyString prog++"\n") $
         intraproceduralTransformationWithConsts pure applyShm2RegOnFun prog
     }
 
@@ -113,7 +113,7 @@ onOutStm env stm@( Let pat aux ( Op ( SegOp ( SegMap lvl space ts kbody ) ) ) )
       par_dims_pe = map (peFromSe env (IntType Int64)) par_dims
       fvs_block = freeIn stm
       bu_env = freshBotEnv (zip3 par_idxs par_dims par_dims_pe) fvs_block
-  let env_intra = (env, bu_env)
+  let env_intra = (env { rootSlcArr = mempty }, bu_env)  -- FIX: need to start with empty to track symbols from outside
       ker_idxs_params = map (\nm -> Param mempty nm (Prim (IntType Int64))) par_idxs
   scope <- askScope
   kbody' <-

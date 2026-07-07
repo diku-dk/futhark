@@ -97,6 +97,7 @@ gpuPipeline =
         -- intraSeq,
 --}
         applyShm2Reg,
+        simplifyGPU,
         addGlobalParams,
         optimiseGenRed,
         simplifyGPU,
