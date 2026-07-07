@@ -1262,6 +1262,14 @@ orderZeroM tparams t = do
 --
 -- * If any of the literals overflow their inferred types. Note:
 --  currently unable to detect float underflow (such as 1e-400 -> 0)
+--
+-- * Function types appearing in places where they are not allowed (e.g.
+--   returned from branches).
+--
+-- The rationale is that it is easier to check for these things after all of the
+-- type inference has been done, as they complicate the logic. Further, it is
+-- also easier to produce good error messages here. The key is that we can only
+-- enforce rules that do not affect type inference.
 localChecks :: [TypeParam] -> Exp -> TermTypeM ()
 localChecks tparams orig_body = void $ check orig_body
   where
