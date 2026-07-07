@@ -28,6 +28,7 @@ module Language.Futhark.TypeChecker.Monad
     MonadTypeChecker (..),
     TypeState (stateNameSource),
     addTySet,
+    getTySet,
     collectTySet,
     usedName,
     checkName,
@@ -254,6 +255,10 @@ lookupMTy loc qn = do
 -- | Add set of abstract types.
 addTySet :: TySet -> TypeM ()
 addTySet tys = modify $ \s -> s {stateTySet = tys <> stateTySet s}
+
+-- | Retrieve set of abstract types.
+getTySet :: TypeM TySet
+getTySet = gets stateTySet
 
 -- | Run type checking command while accumulating (and returning) all new
 -- abstract types, then reset to known abstract types afterwards.

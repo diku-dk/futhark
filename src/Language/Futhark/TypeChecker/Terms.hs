@@ -49,7 +49,7 @@ import Language.Futhark.Primitive (intByteSize)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Consumption qualified as Consumption
 import Language.Futhark.TypeChecker.Match
-import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
+import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupAbsTy, lookupMod)
 import Language.Futhark.TypeChecker.Terms.Loop
 import Language.Futhark.TypeChecker.Terms.Monad
 import Language.Futhark.TypeChecker.Terms.Pat
@@ -754,15 +754,11 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
 
   (t, retext) <- unifyBranches loc e2' e3'
 
-  mustBeOrderZero (locOf loc) t
-
   pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes t retext)
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
   mt <- expType e'
   (cs', t, retext) <- checkCases mt cs
-
-  mustBeOrderZero (locOf loc) t
 
   pure $ AppExp (Match e' cs' loc) (Info $ AppRes t retext)
 checkExp (Attr info e loc) =
@@ -1075,7 +1071,7 @@ checkOneExp e = do
         letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
       detectAmbiguousSizes
       e''' <- bindExistentialInsts =<< normTypeFully e''
-      localChecks e'''
+      localChecks tparams e'''
       causalityCheck e'''
       pure (tparams, e''')
 
@@ -1248,6 +1244,17 @@ supportsEquality (Scalar (Record fs)) = all supportsEquality fs
 supportsEquality (Scalar (Sum fs)) = all (all supportsEquality) fs
 supportsEquality (Scalar Arrow {}) = False
 
+-- | Check that a type is non-functional, looking up the liftedness of type
+-- variables.
+orderZeroM :: [TypeParam] -> StructType -> TermTypeM Bool
+orderZeroM tparams t = do
+  (orderZero t &&) . and <$> mapM isUnlifted (typeQualVars t)
+  where
+    isUnlifted qv = do
+      case find ((== qualLeaf qv) . typeParamName) tparams of
+        Just (TypeParamType l _ _) -> pure $ l < Lifted
+        _ -> (< Lifted) <$> lookupAbsTy qv
+
 -- | Traverse the expression, emitting warnings and errors for various
 -- problems:
 --
@@ -1255,10 +1262,15 @@ supportsEquality (Scalar Arrow {}) = False
 --
 -- * If any of the literals overflow their inferred types. Note:
 --  currently unable to detect float underflow (such as 1e-400 -> 0)
-localChecks :: Exp -> TermTypeM ()
-localChecks = void . check
+localChecks :: [TypeParam] -> Exp -> TermTypeM ()
+localChecks tparams orig_body = void $ check orig_body
   where
-    check e@(AppExp (Match _ cs loc) _) = do
+    check e@(AppExp (Match _ cs loc) (Info rt)) = do
+      ok <- orderZeroM tparams (appResType rt)
+      unless ok . typeError loc mempty $
+        "Match-expression returns type"
+          </> indent 2 (align (pretty (appResType rt)))
+          </> "but match-results may not be of function type."
       let ps = fmap (\(CasePat p _ _) -> p) cs
       case unmatched $ NE.toList ps of
         [] -> recurse e
@@ -1266,6 +1278,13 @@ localChecks = void . check
           typeError loc mempty . withIndexLink "unmatched-cases" $
             "Unmatched cases in match expression:"
               </> indent 2 (stack (map pretty ps'))
+    check e@(AppExp (If _ _ _ loc) (Info rt)) = do
+      ok <- orderZeroM tparams (appResType rt)
+      unless ok . typeError loc mempty $
+        "If-expression returns type"
+          </> indent 2 (align (pretty (appResType rt)))
+          </> "but if-results may not be of function type."
+      recurse e
     check e@(AppExp (LetPat _ p _ _ _) _) =
       mustBeIrrefutable p *> recurse e
     check e@(AppExp (BinOp (v, loc) _ (x, _) _ _) _)
@@ -1276,13 +1295,21 @@ localChecks = void . check
           checkEquality loc t *> recurse e
     check e@(Lambda ps _ _ _ _) =
       mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
-    check e@(AppExp (LetFun _ (_, ps, _, _, _) _ _) _) =
-      mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
+    check e@(AppExp (LetFun _ (tparams', ps, _, _, e1) e2 _) _) = do
+      mapM_ (mustBeIrrefutable . fmap toStruct) ps
+      localChecks (tparams' <> tparams) e1
+      void $ check e2
+      pure e
     check e@(AppExp (Loop _ p _ form _ _) _) = do
       mustBeIrrefutable (fmap toStruct p)
       case form of
         ForIn form_p _ -> mustBeIrrefutable form_p
         _ -> pure ()
+      ok <- orderZeroM tparams (patternStructType p)
+      unless ok . typeError (locOf p) mempty $
+        "Loop parameter inferred to have type"
+          </> indent 2 (align (pretty p))
+          </> "but a loop parameter may not be of function type."
       recurse e
     check e@(IntLit x ty loc) =
       e <$ case ty of
@@ -1802,7 +1829,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 
             -- Check for various problems.
             mapM_ (mustBeIrrefutable . fmap toStruct) params''
-            localChecks body'''
+            localChecks tparams' body'''
 
             let ((body'''', updated_ret), errors) =
                   Consumption.checkValDef

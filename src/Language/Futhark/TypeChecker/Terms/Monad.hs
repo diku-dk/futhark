@@ -29,7 +29,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     replaceTyVarsAbsorbable,
     updateTypes,
     Names,
-    mustBeOrderZero,
     mustBeUnlifted,
 
     -- * Primitive checking
@@ -37,6 +36,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     checkTypeExpNonrigid,
     lookupVar,
     lookupMod,
+    lookupAbsTy,
 
     -- * Sizes
     isInt64,
@@ -67,11 +67,11 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Constraints (TyVar)
 import Language.Futhark.TypeChecker.Error
-import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod, stateNameSource)
+import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupAbsTy, lookupMod, stateNameSource)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
-import Prelude hiding (mod)
+import Prelude hiding (abs, mod)
 
 type Names = S.Set VName
 
@@ -205,6 +205,7 @@ data TermEnv = TermEnv
     termLevel :: Level,
     termCheckExp :: ExpBase Info VName -> TermTypeM Exp,
     termOuterEnv :: Env,
+    termTySet :: TySet,
     termTyVars :: M.Map TyVar (TypeBase () NoUniqueness),
     termImportName :: ImportName
   }
@@ -655,6 +656,20 @@ lookupVar loc qn@(QualName qs name) inst_t = do
     Just OverloadedF {} ->
       replaceTyVars loc inst_t
 
+-- | Look up the liftedness of an abstract type.
+lookupAbsTy :: QualName VName -> TermTypeM Liftedness
+lookupAbsTy v | isIntrinsic (qualLeaf v) = pure Unlifted
+lookupAbsTy v = do
+  abs <- asks termTySet
+  case M.lookup v abs of
+    Just l -> pure l
+    Nothing ->
+      error $
+        unlines
+          [ "lookupAbsTy: " <> prettyString v,
+            "known: " <> show abs
+          ]
+
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env {termChecking = Just c}
 
@@ -714,19 +729,6 @@ updateTypes = astMap tv
           mapOnParamType = normTypeFully,
           mapOnResRetType = normTypeFully
         }
-
-mustBeOrderZero :: Loc -> StructType -> TermTypeM ()
-mustBeOrderZero loc t = do
-  constraints <- getConstraints
-  let liftedType v =
-        case M.lookup v constraints of
-          Just (_, ParamType Lifted _) -> True
-          _ -> False
-  when (not (orderZero t) || any liftedType (typeVars t)) $
-    typeError loc mempty $
-      textwrap "This expression may not be of function type, but is inferred to be of type"
-        </> indent 2 (align (pretty t))
-        </> "which may be a function."
 
 mustBeUnlifted :: Loc -> StructType -> TermTypeM ()
 mustBeUnlifted loc t = do
@@ -821,6 +823,7 @@ runTermTypeM checker tyvars (TermTypeM m) = do
   name <- askImportName
   outer_env <- askEnv
   src <- gets TypeM.stateNameSource
+  abs <- getTySet
   let initial_tenv =
         TermEnv
           { termScope = initial_scope,
@@ -829,6 +832,7 @@ runTermTypeM checker tyvars (TermTypeM m) = do
             termCheckExp = checker,
             termImportName = name,
             termOuterEnv = outer_env,
+            termTySet = abs,
             termTyVars = tyvars
           }
       initial_state =

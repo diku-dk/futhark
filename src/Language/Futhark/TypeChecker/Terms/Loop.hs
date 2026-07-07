@@ -160,7 +160,6 @@ checkLoop ::
 checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
   loopinit' <- checkExp $ loopInitExp loopinit
   known_before <- M.keysSet <$> getConstraints
-  mustBeOrderZero (locOf loopinit') =<< expTypeFully loopinit'
 
   -- The handling of dimension sizes is a bit intricate, but very
   -- similar to checking a function, followed by checking a call to
