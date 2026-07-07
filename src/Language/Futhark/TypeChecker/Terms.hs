@@ -1465,15 +1465,43 @@ bindExistentialInsts = astMap tv
 detectAmbiguousSizes :: TermTypeM ()
 detectAmbiguousSizes = do
   collapseInstSizes 0
-  getConstraints >>= mapM_ notice . M.toList . M.map snd
+  constraints <- getConstraints
+  mapM_ (notice constraints) $ M.toList $ M.map snd constraints
   where
-    notice (v, Size Nothing (Usage Nothing loc)) =
-      typeError loc mempty . withIndexLink "ambiguous-size" $
-        "Ambiguous size" <+> dquotes (prettyName v) <> "."
-    notice (v, Size Nothing (Usage (Just u) loc)) =
-      typeError loc mempty . withIndexLink "ambiguous-size" $
-        "Ambiguous size" <+> dquotes (prettyName v) <+> "arising from" <+> pretty u <> "."
-    notice _ = pure ()
+    -- Sizes that arise from instantiating inferred types have
+    -- uninformative provenance. If a size variable with better
+    -- provenance (e.g. a source-level size binder, or an
+    -- instantiated size parameter) has been unified with the
+    -- ambiguous size, we report that variable instead. This affects
+    -- only the error message; which sizes are ambiguous is already
+    -- settled.
+    uninformative (Usage Nothing _) = True
+    uninformative (Usage (Just u) _) = u `elem` ["replaceTyVars", "instantiation"]
+
+    chase constraints w = case snd <$> M.lookup w constraints of
+      Just (Size (Just (Var w' _ _)) _) -> chase constraints (qualLeaf w')
+      _ -> w
+
+    blame constraints v usage
+      | uninformative usage,
+        (v', usage') : _ <-
+          [ (w, w_usage)
+          | (w, (_, Size (Just (Var w1 _ _)) w_usage)) <- M.toList constraints,
+            not $ uninformative w_usage,
+            chase constraints (qualLeaf w1) == v
+          ] =
+          (v', usage')
+      | otherwise = (v, usage)
+
+    notice constraints (v, Size Nothing usage) =
+      case blame constraints v usage of
+        (v', Usage Nothing loc) ->
+          typeError loc mempty . withIndexLink "ambiguous-size" $
+            "Ambiguous size" <+> dquotes (prettyName v') <> "."
+        (v', Usage (Just u) loc) ->
+          typeError loc mempty . withIndexLink "ambiguous-size" $
+            "Ambiguous size" <+> dquotes (prettyName v') <+> "arising from" <+> pretty u <> "."
+    notice _ _ = pure ()
 
 hiddenParamNames :: [Pat ParamType] -> [VName]
 hiddenParamNames params = hidden
