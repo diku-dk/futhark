@@ -275,7 +275,11 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
         it <- expType uboundexp'
         let i' = i {identType = Info it}
         bindingIdent i' $
-          bindingPat [] looppat loop_t $ \looppat' -> incLevel $ do
+          -- Note: bindingParam, not bindingPat, because we must
+          -- preserve the Diet of the pattern as determined by the
+          -- unsized type checker (the loop parameter may be
+          -- consumable).
+          bindingParam looppat loop_t $ \looppat' -> incLevel $ do
             loopbody' <- checkExp loopbody
             (sparams, looppat'') <- checkLoopReturnSize looppat' loopbody'
             pure
