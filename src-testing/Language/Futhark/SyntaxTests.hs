@@ -122,9 +122,6 @@ pPrimType =
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [lexeme "*" $> Unique, pure Nonunique]
 
-pDim :: Parser d -> Parser d
-pDim = brackets
-
 pSize :: Parser Size
 pSize =
   brackets $
@@ -146,7 +143,7 @@ pScalarNonFun pd =
     pTypeVar = TypeVar <$> pUniqueness <*> pQualVName <*> many pTypeArg
     pTypeArg =
       choice
-        [ TypeArgDim <$> pDim pd,
+        [ TypeArgDim <$> pd,
           TypeArgType . second (const NoUniqueness) <$> pTypeArgType
         ]
     pTypeArgType =
@@ -159,7 +156,7 @@ pArrayType :: Parser d -> Parser (TypeBase d Uniqueness)
 pArrayType pd =
   Array
     <$> pUniqueness
-    <*> (Shape <$> some (pDim pd))
+    <*> (Shape <$> some pd)
     <*> (second (const NoUniqueness) <$> pScalarNonFun pd)
 
 pNonFunType :: Parser d -> Parser (TypeBase d Uniqueness)
@@ -223,7 +220,9 @@ instance IsString (ScalarTypeBase () NoUniqueness) where
 
 instance IsString (TypeBase () NoUniqueness) where
   fromString =
-    fromStringParse (second (const NoUniqueness) <$> pType (pure ())) "Type"
+    fromStringParse
+      (second (const NoUniqueness) <$> pType (brackets $ pure ()))
+      "Type"
 
 instance IsString StructType where
   fromString =
