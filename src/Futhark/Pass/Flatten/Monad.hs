@@ -237,6 +237,43 @@ inputReps inputs env = M.fromList $ map (second getRep) inputs
       DistInput rt t -> (t, resVar rt env)
       DistInputFree v' t -> (t, Regular v')
 
+data FlattenState = FlattenState
+  { -- In order to generate more stable threshold names, we keep track of the
+    -- numbers used for thresholds separately from the ordinary name source.
+    stateThresholdCounter :: Int,
+    stateNameSource :: VNameSource
+  }
+
+newtype FlattenM a = FlattenM (BuilderT GPU (State FlattenState) a)
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      LocalScope GPU,
+      HasScope GPU,
+      MonadState FlattenState,
+      MonadFreshNames
+    )
+
+instance MonadBuilder FlattenM where
+  type Rep FlattenM = GPU
+  mkExpDecM pat e = FlattenM $ mkExpDecM pat e
+  mkBodyM stms res = FlattenM $ mkBodyM stms res
+  mkLetNamesM pat e = FlattenM $ mkLetNamesM pat e
+
+  addStms = FlattenM . addStms
+  collectStms (FlattenM m) = FlattenM $ collectStms m
+
+instance MonadFreshNames (State FlattenState) where
+  getNameSource = gets stateNameSource
+  putNameSource src = modify $ \s -> s {stateNameSource = src}
+
+-- | Do not nest these - the counter for thresholds will be wrong.
+runFlattenM :: (MonadFreshNames m) => Scope GPU -> FlattenM a -> m a
+runFlattenM scope (FlattenM m) = modifyNameSource $ \src ->
+  second stateNameSource $
+    runState (fst <$> runBuilderT m scope) (FlattenState 0 src)
+
 readIrregularInput ::
   Segments ->
   [SubExp] ->
@@ -815,41 +852,3 @@ flattenDistStms ops w inputs env dstms result = do
   env' <- foldM (flattenDistStm ops segments) env dstms
   result' <- mapM (liftResult (flattenSegLevel ops) segments inputs env') result
   pure $ concat result'
-
-data FlattenState = FlattenState
-  { -- In order to generate more stable threshold names, we keep track of
-    -- the numbers used for thresholds separately from the ordinary name
-    -- source,
-    stateThresholdCounter :: Int,
-    stateNameSource :: VNameSource
-  }
-
-newtype FlattenM a = FlattenM (BuilderT GPU (State FlattenState) a)
-  deriving
-    ( Functor,
-      Applicative,
-      Monad,
-      LocalScope GPU,
-      HasScope GPU,
-      MonadState FlattenState,
-      MonadFreshNames
-    )
-
-instance MonadBuilder FlattenM where
-  type Rep FlattenM = GPU
-  mkExpDecM pat e = FlattenM $ mkExpDecM pat e
-  mkBodyM stms res = FlattenM $ mkBodyM stms res
-  mkLetNamesM pat e = FlattenM $ mkLetNamesM pat e
-
-  addStms = FlattenM . addStms
-  collectStms (FlattenM m) = FlattenM $ collectStms m
-
-instance MonadFreshNames (State FlattenState) where
-  getNameSource = gets stateNameSource
-  putNameSource src = modify $ \s -> s {stateNameSource = src}
-
--- | Do not nest these - the counter for thresholds will be wrong.
-runFlattenM :: (MonadFreshNames m) => Scope GPU -> FlattenM a -> m a
-runFlattenM scope (FlattenM m) = modifyNameSource $ \src ->
-  second stateNameSource $
-    runState (fst <$> runBuilderT m scope) (FlattenState 0 src)
