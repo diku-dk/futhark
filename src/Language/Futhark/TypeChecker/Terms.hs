@@ -485,9 +485,8 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
     -- pattern name with the expression in the type of the body.
     -- Otherwise, we need to come up with unknown sizes for the
     -- sizes going out of scope.
-    t' <- normType t -- Might be overloaded integer until now.
     (body_t', retext) <-
-      case (t', patNames pat') of
+      case (t, patNames pat') of
         (Scalar (Prim (Signed Int64)), [v])
           | not $ hasBinding e' -> do
               let f x = if x == v then Just (ExpSubst e') else Nothing
@@ -1703,8 +1702,6 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, _)
       | k `elem` map typeParamName tparams =
           pure Nothing
-    closeOver (k, NoConstraint l _) =
-      pure $ Just $ Left $ TypeParamType l k mempty
     closeOver (k, ParamType l _) =
       pure $ Just $ Left $ TypeParamType l k mempty
     closeOver (k, Size Nothing _) =

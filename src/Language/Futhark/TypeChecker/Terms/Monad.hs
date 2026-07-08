@@ -23,7 +23,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     expType,
     expTypeFully,
     constrain,
-    allDimsFreshInType,
     instTyVars,
     replaceTyVars,
     replaceTyVarsAbsorbable,
@@ -689,11 +688,10 @@ extSize loc e = do
 incLevel :: TermTypeM a -> TermTypeM a
 incLevel = local $ \env -> env {termLevel = termLevel env + 1}
 
--- | Get the type of an expression, with top level type variables
--- substituted.  Never call 'typeOf' directly (except in a few
--- carefully inspected locations)!
+-- | Get the type of an expression. Currently no different from
+-- 'typeOf', but kept as the counterpart of 'expTypeFully'.
 expType :: Exp -> TermTypeM StructType
-expType = normType . typeOf
+expType = pure . typeOf
 
 -- | Get the type of an expression, with all type variables
 -- substituted.  Slower than 'expType', but sometimes necessary.
@@ -701,21 +699,6 @@ expType = normType . typeOf
 -- locations)!
 expTypeFully :: Exp -> TermTypeM StructType
 expTypeFully = normTypeFully . typeOf
-
--- | Replace *all* dimensions with distinct fresh size variables.
-allDimsFreshInType ::
-  Usage ->
-  Rigidity ->
-  Name ->
-  TypeBase d als ->
-  TermTypeM (TypeBase Size als, M.Map VName d)
-allDimsFreshInType usage r desc t =
-  runStateT (bitraverse onDim pure t) mempty
-  where
-    onDim d = do
-      v <- lift $ newDimVar usage r desc
-      modify $ M.insert v d
-      pure $ sizeFromName (qualName v) $ srclocOf usage
 
 -- | Replace all type variables with their concrete types.
 updateTypes :: (ASTMappable e) => e -> TermTypeM e
