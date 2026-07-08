@@ -339,8 +339,7 @@ segScanLambda lam _readFree _gtids = do
           eIf
             (eParam y_flag_p)
             (eBody (map eParam yps))
-            ( pure $ lambdaBody lam
-            )
+            (pure $ lambdaBody lam)
         ]
 
 genSegScan ::

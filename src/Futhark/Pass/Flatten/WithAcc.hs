@@ -208,11 +208,11 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
     onNonuniformInput (shape, arrs, op) = do
       reps <- mapM (getIrregRep (flattenSegLevel ops) segments env inps) arrs
       -- We need to ensure that the irregular arrays are dense
-      reps_dense <- mapM (ensureDenseIrregular (flattenSegLevel ops) "withacc_input") reps      
+      reps_dense <- mapM (ensureDenseIrregular (flattenSegLevel ops) "withacc_input") reps
       let arrs' = map irregularD reps_dense
       w <- fmap (arraySize 0) . lookupType $ head arrs'
       -- We need to reshape to make sure all of the inputs have the same shape
-      arrs'' <-  forM arrs' $ \ v -> do
+      arrs'' <- forM arrs' $ \v -> do
         v_t <- lookupType v
         letExp (baseName v <> "_withacc_input_reshaped") . BasicOp $
           Reshape v $

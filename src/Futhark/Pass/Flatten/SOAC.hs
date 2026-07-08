@@ -17,8 +17,7 @@ import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (isNothing, mapMaybe)
-import Data.Set qualified as S
+import Data.Maybe (mapMaybe)
 import Data.Tuple.Solo
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
@@ -58,7 +57,7 @@ suitableOperator _env inps lam _nes =
   where
     notVariant = not . isVariant inps . Var
 
-suitableUniformOperator :: DistInputs -> Lambda SOACS  -> Bool
+suitableUniformOperator :: DistInputs -> Lambda SOACS -> Bool
 suitableUniformOperator inps lam =
   allNames (not . isVariant inps . Var) (freeIn lam)
 
@@ -884,9 +883,9 @@ irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
         (new_ws_F, new_ws_O, _) <- doRepIota lvl new_shape
         letBindNames [v] $ BasicOp $ Replicate mempty $ Var $ irregularD irreg_dense
         mapResultRep lvl SingleDim (new_shape, new_ws_F, new_ws_O) v
-      else do 
-          reshapeAndBind v (irregularD irreg_dense) (segmentsShape segments <> arrayShape v_t)
-          mapResultRep lvl mode (ws, ws_F, ws_O) v
+      else do
+        reshapeAndBind v (irregularD irreg_dense) (segmentsShape segments <> arrayShape v_t)
+        mapResultRep lvl mode (ws, ws_F, ws_O) v
 
 transformDistributedInnerMap ::
   FlattenOps ->
@@ -1329,14 +1328,14 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
         Just body -> do
           reps <- distributeAndFlattenBody ops segments "factorScremaForParallelism_body" env inps res body
           pure $ insertReps (zip (map distResTag res) reps) env
-        Nothing 
+        Nothing
           -- XXX: here we silently sequentialise any SOAC that is not handled
           -- above if it is possible to do so. We need to make sure that we actually handle everything we
           -- care about!
           | shouldDissectForm form ->
               error "transformScrema: complex Screma survived preprocessing"
-          | all isRegularDistResult res -> 
-               flattenScalarStm ops segments env inps res $ Let pat aux (Op (Screma w arrs form))
+          | all isRegularDistResult res ->
+              flattenScalarStm ops segments env inps res $ Let pat aux (Op (Screma w arrs form))
           | otherwise -> error "Unhandled SOAC"
   where
     funHasParallelism = flattenFunHasParallelism ops
@@ -1361,14 +1360,15 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops, b
           || isVariant inps w
           || not (all isRegularDistResult res)
   if nonuniform
-    then do 
+    then do
       gpu_scope <- askScope
-      let scope =  castScope $ scopeOfDistInputs inps <> gpu_scope
+      let scope = castScope $ scopeOfDistInputs inps <> gpu_scope
       (hist_res, stms) <-
         runBuilderT
-          (auxing aux $
-            doHist "nonuniform_hist" hist_ops hist_inputs $ \params ->
-              map resSubExp <$> eLambda bucket_fun (map eParam params))
+          ( auxing aux $
+              doHist "nonuniform_hist" hist_ops hist_inputs $ \params ->
+                map resSubExp <$> eLambda bucket_fun (map eParam params)
+          )
           scope
       let body = mkBody stms $ varsRes $ concat hist_res
       reps <- distributeAndFlattenBody ops segments "non_unifrom_hist_body" env inps res body
