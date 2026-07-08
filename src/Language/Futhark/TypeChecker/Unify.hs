@@ -273,14 +273,6 @@ rigidConstraint UnknownSize {} = True
 rigidConstraint ExistentialSize {} = True
 rigidConstraint _ = False
 
-unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
-unsharedConstructorsMsg cs1 cs2 =
-  "Unshared constructors:" <+> commasep (map (("#" <>) . pretty) missing) <> "."
-  where
-    missing =
-      filter (`notElem` M.keys cs1) (M.keys cs2)
-        ++ filter (`notElem` M.keys cs2) (M.keys cs1)
-
 -- | If the given type variable is nonrigid, what is its level?
 isNonRigid :: VName -> Constraints -> Maybe Level
 isNonRigid v constraints = do
@@ -322,12 +314,7 @@ unifyWith onDims usage = subunify False
             onDims' bcs' (swap ord d1 d2)
           unifyTypeArg bcs' (TypeArgType t) (TypeArgType arg_t) =
             subunify ord bound bcs' t arg_t
-          unifyTypeArg bcs' _ _ =
-            unifyError
-              usage
-              mempty
-              bcs'
-              "Cannot unify a type argument with a dimension argument (or vice versa)."
+          unifyTypeArg _ _ _ = failure
 
           onDims' bcs' (d1, d2) =
             onDims
@@ -337,6 +324,13 @@ unifyWith onDims usage = subunify False
               (applySubst (`lookupSubst` constraints) d1)
               (applySubst (`lookupSubst` constraints) d2)
 
+      -- The types are structurally identical, as this has already
+      -- been verified by the unsized type checker - we are here only
+      -- to unify their sizes (and check consumption and uniqueness
+      -- for functions). The 'failure' cases can be reached when the
+      -- types contain distinct abstract types that the unsized
+      -- checking could not distinguish, and serve as a backstop for
+      -- anything it may have missed.
       case (t1', t2') of
         (Scalar (Prim pt1), Scalar (Prim pt2))
           | pt1 == pt2 -> pure ()
@@ -344,13 +338,15 @@ unifyWith onDims usage = subunify False
           Scalar (Record arg_fs)
           )
             | M.keys fs == M.keys arg_fs ->
-                unifySharedFields onDims usage bound bcs fs arg_fs
-            | otherwise -> do
-                let missing =
-                      filter (`notElem` M.keys arg_fs) (M.keys fs)
-                        ++ filter (`notElem` M.keys fs) (M.keys arg_fs)
-                unifyError usage mempty bcs $
-                  "Unshared fields:" <+> commasep (map pretty missing) <> "."
+                forM_ (M.toList $ M.intersectionWith (,) fs arg_fs) $ \(f, (t1, t2)) ->
+                  subunify ord bound (matchingField f <> bcs) t1 t2
+        ( Scalar (Sum cs),
+          Scalar (Sum arg_cs)
+          )
+            | M.keys cs == M.keys arg_cs,
+              fmap length cs == fmap length arg_cs ->
+                forM_ (M.toList $ M.intersectionWith (,) cs arg_cs) $ \(c, (ts1, ts2)) ->
+                  zipWithM_ (subunify ord bound (matchingConstructor c <> bcs)) ts1 ts2
         ( Scalar (TypeVar _ (QualName _ tn) targs),
           Scalar (TypeVar _ (QualName _ arg_tn) arg_targs)
           )
@@ -402,11 +398,10 @@ unifyWith onDims usage = subunify False
                   (toStruct b1')
                   (toStruct b2')
 
-                -- If a flexible existential size was resolved to a
-                -- pending instantiated size, then that size is
-                -- existential. This is how a hole absorbs an
-                -- existential size from a type it is unified with.
-                -- See Note [Size Inference] in
+                -- If a flexible existential size was resolved to a pending
+                -- instantiated size, then that size is existential. This is how
+                -- a hole absorbs an existential size from a type it is unified
+                -- with. See Note [Size Inference] in
                 -- Language.Futhark.TypeChecker.Terms.
                 constraints_after <- getConstraints
                 let existentialise d v usage' =
@@ -427,8 +422,8 @@ unifyWith onDims usage = subunify False
                       | otherwise = pure ()
                 mapM_ absorbExt (b1_dims <> b2_dims)
 
-                -- Delete the size variables we introduced to represent
-                -- the existential sizes.
+                -- Delete the size variables we introduced to represent the
+                -- existential sizes.
                 modifyConstraints $ \m -> L.foldl' (flip M.delete) m (b1_dims <> b2_dims)
             where
               (b1', b2') =
@@ -447,20 +442,16 @@ unifyWith onDims usage = subunify False
 
               pname (Named x) = Just x
               pname Unnamed = Nothing
-        (Array {}, Array {})
-          | Shape (t1_d : _) <- arrayShape t1',
-            Shape (t2_d : _) <- arrayShape t2',
-            Just t1'' <- peelArray 1 t1',
-            Just t2'' <- peelArray 1 t2' -> do
-              onDims' bcs (swap ord t1_d t2_d)
-              subunify ord bound bcs t1'' t2''
-        ( Scalar (Sum cs),
-          Scalar (Sum arg_cs)
-          )
-            | M.keys cs == M.keys arg_cs ->
-                unifySharedConstructors onDims usage bound bcs cs arg_cs
-            | otherwise ->
-                unifyError usage mempty bcs $ unsharedConstructorsMsg arg_cs cs
+        ( Array _ (Shape (t1_d : t1_ds)) t1_et,
+          Array _ (Shape (t2_d : t2_ds)) t2_et
+          ) -> do
+            onDims' bcs (swap ord t1_d t2_d)
+            subunify
+              ord
+              bound
+              bcs
+              (arrayOf (Shape t1_ds) (Scalar t1_et))
+              (arrayOf (Shape t2_ds) (Scalar t2_et))
         _ -> failure
 
 anyBound :: [VName] -> ExpBase Info VName -> Bool
@@ -710,40 +701,6 @@ linkVarToDim usage bcs vn lvl e = do
                   <+> "is introduced."
             _ -> modifyConstraints $ M.insert dim' (lvl, c)
     checkVar _ _ = pure ()
-
-unifySharedFields ::
-  (MonadUnify m) =>
-  UnifySizes m ->
-  Usage ->
-  [VName] ->
-  BreadCrumbs ->
-  M.Map Name StructType ->
-  M.Map Name StructType ->
-  m ()
-unifySharedFields onDims usage bound bcs fs1 fs2 =
-  forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(f, (t1, t2)) ->
-    unifyWith onDims usage bound (matchingField f <> bcs) t1 t2
-
-unifySharedConstructors ::
-  (MonadUnify m) =>
-  UnifySizes m ->
-  Usage ->
-  [VName] ->
-  BreadCrumbs ->
-  M.Map Name [StructType] ->
-  M.Map Name [StructType] ->
-  m ()
-unifySharedConstructors onDims usage bound bcs cs1 cs2 =
-  forM_ (M.toList $ M.intersectionWith (,) cs1 cs2) $ \(c, (f1, f2)) ->
-    unifyConstructor c f1 f2
-  where
-    unifyConstructor c f1 f2
-      | length f1 == length f2 = do
-          let bcs' = matchingConstructor c <> bcs
-          zipWithM_ (unifyWith onDims usage bound bcs') f1 f2
-      | otherwise =
-          unifyError usage mempty bcs $
-            "Cannot unify constructor" <+> dquotes (prettyName c) <> "."
 
 newDimOnMismatch ::
   (MonadUnify m) =>
