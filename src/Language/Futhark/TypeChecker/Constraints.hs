@@ -52,7 +52,9 @@ data Reason t
   | -- | Arising from explicit ascription.
     ReasonAscription Loc t t
   | ReasonRetType Loc t t
-  | ReasonApply Loc (Maybe (QualName VName), Int) Exp t t
+  | -- | Arising from checking a function argument. The types are the
+    -- expected (parameter) and actual (argument) types.
+    ReasonApply Loc (Maybe (QualName VName), Int) Exp t t
   | -- | Used when unifying a type with a function type in a function
     -- application. If this unification fails, it means the supposed
     -- function was not a function after all.

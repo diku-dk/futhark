@@ -426,9 +426,12 @@ lookupVar loc qn@(QualName qs name) = do
       if null tparams && null qs
         then pure t
         else do
-          (_tnames, t') <- instTypeScheme qn loc tparams t
-          -- TODO - qualify type names, like in the old type checker.
-          pure t'
+          (tnames, t') <- instTypeScheme qn loc tparams t
+          outer_env <- asks termOuterEnv
+          -- Qualify abstract types, so that e.g. mismatch errors
+          -- mention them by how they were accessed. The sizes need
+          -- no qualification, as they are not even present here.
+          pure $ qualifyTypeVarsWith (\_ _ d -> d) outer_env tnames qs t'
     Just EqualityF -> do
       argtype <- tyVarType Observe <$> newTyVarWith "t" (TyVarFree (locOf loc) Unlifted)
       pure $ foldFunType [argtype, argtype] $ RetType [] $ Scalar $ Prim Bool
@@ -673,12 +676,10 @@ checkApplyOne ::
   TermM (Type, AutoMap)
 checkApplyOne loc fname (_fframe, ftype) (arg, _argframe, argtype) = do
   (a, b) <- split ftype
-  let lhs = argtype
-      rhs = a
   let reason = case arg of
-        Just arg' -> ReasonApply (locOf arg) fname arg' lhs rhs
+        Just arg' -> ReasonApply (locOf arg) fname arg' a argtype
         Nothing -> Reason (locOf loc)
-  ctEq reason lhs rhs
+  ctEq reason argtype a
   pure
     ( b,
       AutoMap
