@@ -31,8 +31,8 @@ import Futhark.Transform.Substitute
 import Futhark.Util.Pretty
   ( nestedBlock,
     pretty,
+    stack,
     (<+>),
-    (</>),
   )
 import Prelude hiding (id, (.))
 
@@ -90,7 +90,7 @@ instance (AliasedOp op) => AliasedOp (MCOp op) where
   opAliases (ParOp _ op) = opAliases op
   opAliases (OtherOp op) = opAliases op
 
-  consumedInOp (ParOp _ op) = consumedInOp op
+  consumedInOp (ParOp seq_op op) = maybe mempty consumedInOp seq_op <> consumedInOp op
   consumedInOp (OtherOp op) = consumedInOp op
 
 instance (CanBeAliased op) => CanBeAliased (MCOp op) where
@@ -116,10 +116,10 @@ instance OpReturns (MCOp NoOp) where
 instance (PrettyRep rep, Pretty (op rep)) => Pretty (MCOp op rep) where
   pretty (ParOp Nothing op) = pretty op
   pretty (ParOp (Just par_op) op) =
-    "par"
-      <+> nestedBlock "{" "}" (pretty par_op)
-      </> "seq"
-      <+> nestedBlock "{" "}" (pretty op)
+    stack
+      [ "par" <+> nestedBlock (pretty par_op),
+        "seq" <+> nestedBlock (pretty op)
+      ]
   pretty (OtherOp op) = pretty op
 
 instance (OpMetrics (Op rep), OpMetrics (op rep)) => OpMetrics (MCOp op rep) where

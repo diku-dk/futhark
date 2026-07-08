@@ -122,6 +122,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- 2D tiling of redomap.
       | (gtids, kdims) <- unzip $ unSegSpace initial_space,
         Just (w, arrs, form) <- tileable stm_to_tile,
+        all (\gtid -> subExpInvariantTo gtid variance w) gtids,
         Just inputs <-
           mapM (invariantToOneOfTwoInnerDims branch_variant variance gtids) arrs,
         not $ null $ tiledInputs inputs,
@@ -145,6 +146,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- 1D tiling of redomap.
       | (gtid, kdim) : top_space_rev <- reverse $ unSegSpace initial_space,
         Just (w, arrs, form) <- tileable stm_to_tile,
+        subExpInvariantTo gtid variance w,
         inputs <- map (is1DTileable gtid variance) arrs,
         not $ null $ tiledInputs inputs,
         gtid `notNameIn` branch_variant,
@@ -278,7 +280,7 @@ partitionPrelude variance prestms private used_after =
     invariantTo names stm =
       case patNames (stmPat stm) of
         [] -> True -- Does not matter.
-        v : _ -> all (`notNameIn` names) (namesToList $ M.findWithDefault mempty v variance)
+        v : _ -> allNames (`notNameIn` names) (M.findWithDefault mempty v variance)
 
     consumed_in_prestms =
       foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
@@ -745,9 +747,21 @@ tileReturns dims_on_top dims arr = do
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
   pure $ TileReturns mempty tile_dims arr'
 
-is1DTileable :: VName -> M.Map VName Names -> VName -> InputArray
+lookupVariance :: VName -> VarianceTable -> Names
+lookupVariance v variance = oneName v <> M.findWithDefault mempty v variance
+
+-- | Is the second name invariant to the first?
+varInvariantTo :: VName -> VarianceTable -> VName -> Bool
+varInvariantTo gtid variance v =
+  not $ nameIn gtid $ lookupVariance v variance
+
+subExpInvariantTo :: VName -> VarianceTable -> SubExp -> Bool
+subExpInvariantTo gtid variance (Var v) = varInvariantTo gtid variance v
+subExpInvariantTo _ _ Constant {} = True
+
+is1DTileable :: VName -> VarianceTable -> VName -> InputArray
 is1DTileable gtid variance arr
-  | not $ nameIn gtid $ M.findWithDefault mempty arr variance =
+  | varInvariantTo gtid variance arr =
       InputTile [0] arr
   | otherwise =
       InputDontTile arr
@@ -837,7 +851,7 @@ processTile1D gid gtid kdim tile_size (KernelGrid _num_tblocks tblock_size) tile
 
     tiles' <- mapM sliceTile tiles
 
-    let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
+    form' <- redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
     fmap varsRes $
       letTupExp "acc"
         =<< eIf
@@ -957,7 +971,7 @@ tiling1d dims_on_top gtid kdim w = do
 
 invariantToOneOfTwoInnerDims ::
   Names ->
-  M.Map VName Names ->
+  VarianceTable ->
   [VName] ->
   VName ->
   Maybe InputArray
@@ -1091,9 +1105,9 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size tile_ar
       -- point).
       thread_accs <- forM accs $ \acc ->
         letSubExp "acc" $ BasicOp $ Index acc $ Slice [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
-      let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
+      form' <- redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
 
-          sliceTile (InputUntiled arr) =
+      let sliceTile (InputUntiled arr) =
             sliceUntiled arr tile_id tile_size actual_tile_size
           sliceTile (InputTiled perm tile) = do
             tile_t <- lookupType tile
@@ -1108,8 +1122,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size tile_ar
       fmap varsRes $
         letTupExp "acc"
           =<< eIf
-            ( toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
-            )
+            (toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y)
             (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size tiles' form'])
             (resultBodyM thread_accs)
 
@@ -1178,7 +1191,7 @@ tiling2d dims_on_top (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
   gid_x <- newVName "gid_x"
   gid_y <- newVName "gid_y"
 
-  tile_size_key <- nameFromString . prettyString <$> newVName "tile_size"
+  tile_size_key <- nameFromText . prettyText <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
   tblock_size <- letSubExp "tblock_size" $ BasicOp $ BinOp (Mul Int64 OverflowUndef) tile_size tile_size
 

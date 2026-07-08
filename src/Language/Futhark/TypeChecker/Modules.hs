@@ -89,8 +89,9 @@ newNamesForMTy orig_mty = do
     pure (v, v')
   let substs = M.fromList pairs
       rev_substs = M.fromList $ map (uncurry $ flip (,)) pairs
-
-  pure (substituteInMTy substs orig_mty, rev_substs)
+      new_mty = substituteInMTy substs orig_mty
+  addTySet $ mtyAbs new_mty
+  pure (new_mty, rev_substs)
   where
     substituteInMTy :: M.Map VName VName -> MTy -> MTy
     substituteInMTy substs (MTy mty_abs mty_mod) =
@@ -500,7 +501,12 @@ matchMTys orig_mty orig_mty_sig =
             abs_name_substs = M.map (qualLeaf . fst) abs_substs
         pmod_substs <- matchMods p_abs_subst_to_type quals sig_pmod mod_pmod loc
         mod_substs <- matchMTys' abs_subst_to_type quals mod_mod sig_mod loc
-        pure (pmod_substs <> mod_substs <> abs_name_substs)
+        pure $
+          -- Avoid including substitutions that refer to abstract types, as this
+          -- results in circular substitutions (#2407).
+          M.filterWithKey (\k _ -> qualName k `M.notMember` mod_abs) pmod_substs
+            <> mod_substs
+            <> abs_name_substs
 
     matchEnvs ::
       M.Map VName (Subst StructRetType) ->

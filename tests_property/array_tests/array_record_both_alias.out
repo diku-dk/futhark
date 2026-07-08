@@ -1,0 +1,2 @@
+Property prop_record_sums_fail (size=50, seed=REDACTED) failed after N tests:
+Counterexample: [{a = 1i32, s = 2i32}]

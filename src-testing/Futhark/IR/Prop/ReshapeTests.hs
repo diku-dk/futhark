@@ -20,24 +20,24 @@ reshapeOuterTests :: [TestTree]
 reshapeOuterTests =
   [ testCase (unwords ["reshapeOuter", show sc, show n, show shape, "==", show sc_res]) $
       reshapeOuter (intShape sc) n (intShape shape) @?= intShape sc_res
-    | (sc, n, shape, sc_res) <-
-        [ ([1], 1, [4, 3], [1, 3]),
-          ([1], 2, [4, 3], [1]),
-          ([2, 2], 1, [4, 3], [2, 2, 3]),
-          ([2, 2], 2, [4, 3], [2, 2])
-        ]
+  | (sc, n, shape, sc_res) <-
+      [ ([1], 1, [4, 3], [1, 3]),
+        ([1], 2, [4, 3], [1]),
+        ([2, 2], 1, [4, 3], [2, 2, 3]),
+        ([2, 2], 2, [4, 3], [2, 2])
+      ]
   ]
 
 reshapeInnerTests :: [TestTree]
 reshapeInnerTests =
   [ testCase (unwords ["reshapeInner", show sc, show n, show shape, "==", show sc_res]) $
       reshapeInner (intShape sc) n (intShape shape) @?= intShape sc_res
-    | (sc, n, shape, sc_res) <-
-        [ ([1], 1, [4, 3], [4, 1]),
-          ([1], 0, [4, 3], [1]),
-          ([2, 2], 1, [4, 3], [4, 2, 2]),
-          ([2, 2], 0, [4, 3], [2, 2])
-        ]
+  | (sc, n, shape, sc_res) <-
+      [ ([1], 1, [4, 3], [4, 1]),
+        ([1], 0, [4, 3], [1]),
+        ([2, 2], 1, [4, 3], [4, 2, 2]),
+        ([2, 2], 0, [4, 3], [2, 2])
+      ]
   ]
 
 dimFlatten :: Int -> Int -> d -> DimSplice d
@@ -63,33 +63,33 @@ flipReshapeRearrangeTests =
           ]
       )
       $ flipReshapeRearrange v0_shape v1_shape perm @?= res
-    | (v0_shape :: [String], v1_shape, perm, res) <-
-        [ ( ["A", "B", "C"],
-            ["A", "BC"],
-            [1, 0],
-            Just [1, 2, 0]
-          ),
-          ( ["A", "B", "C", "D"],
-            ["A", "BCD"],
-            [1, 0],
-            Just [1, 2, 3, 0]
-          ),
-          ( ["A"],
-            ["B", "C"],
-            [1, 0],
-            Nothing
-          ),
-          ( ["A", "B", "C"],
-            ["AB", "C"],
-            [1, 0],
-            Just [2, 0, 1]
-          ),
-          ( ["A", "B", "C", "D"],
-            ["ABC", "D"],
-            [1, 0],
-            Just [3, 0, 1, 2]
-          )
-        ]
+  | (v0_shape :: [String], v1_shape, perm, res) <-
+      [ ( ["A", "B", "C"],
+          ["A", "BC"],
+          [1, 0],
+          Just [1, 2, 0]
+        ),
+        ( ["A", "B", "C", "D"],
+          ["A", "BCD"],
+          [1, 0],
+          Just [1, 2, 3, 0]
+        ),
+        ( ["A"],
+          ["B", "C"],
+          [1, 0],
+          Nothing
+        ),
+        ( ["A", "B", "C"],
+          ["AB", "C"],
+          [1, 0],
+          Just [2, 0, 1]
+        ),
+        ( ["A", "B", "C", "D"],
+          ["ABC", "D"],
+          [1, 0],
+          Just [3, 0, 1, 2]
+        )
+      ]
   ]
 
 flipRearrangeReshapeTests :: [TestTree]
@@ -102,25 +102,25 @@ flipRearrangeReshapeTests =
           ]
       )
       $ flipRearrangeReshape perm newshape @?= res
-    | (perm, newshape :: NewShape String, res) <-
-        [ ( [1, 0],
-            NewShape
-              [dimUnflatten 1 ["B", "C"]]
-              (Shape ["A", "B", "C"]),
-            Just
-              ( NewShape
-                  [dimUnflatten 0 ["B", "C"]]
-                  (Shape ["B", "C", "A"]),
-                [2, 0, 1]
-              )
-          ),
-          ( [1, 0],
-            NewShape
-              [dimFlatten 0 2 "AB"]
-              (Shape ["AB"]),
-            Nothing
-          )
-        ]
+  | (perm, newshape :: NewShape String, res) <-
+      [ ( [1, 0],
+          NewShape
+            [dimUnflatten 1 ["B", "C"]]
+            (Shape ["A", "B", "C"]),
+          Just
+            ( NewShape
+                [dimUnflatten 0 ["B", "C"]]
+                (Shape ["B", "C", "A"]),
+              [2, 0, 1]
+            )
+        ),
+        ( [1, 0],
+          NewShape
+            [dimFlatten 0 2 "AB"]
+            (Shape ["AB"]),
+          Nothing
+        )
+      ]
   ]
 
 simplifyTests :: TestTree

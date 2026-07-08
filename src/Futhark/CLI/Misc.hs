@@ -84,7 +84,7 @@ mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
 
     testSpecRuns = testActionRuns . testAction
     testActionRuns CompileTimeFailure {} = []
-    testActionRuns (RunCases ios _ _) = concatMap iosTestRuns ios
+    testActionRuns (RunCases ios _ _ _) = concatMap iosTestRuns ios
 
 -- | @futhark check-syntax@
 mainCheckSyntax :: String -> [String] -> IO ()

@@ -14,6 +14,7 @@ where
 import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
+import Data.Text qualified as T
 import Futhark.IR.Syntax
 import Futhark.Util.Pretty
 
@@ -267,6 +268,8 @@ instance Pretty BasicOp where
       update_acc_str = case safety of
         Safe -> "update_acc"
         Unsafe -> "update_acc_unsafe"
+  pretty (UserParam name def) =
+    "user_param" <> apply [pretty name, pretty def]
 
 instance (Pretty a) => Pretty (ErrorMsg a) where
   pretty (ErrorMsg parts) = braces $ align $ commasep $ map p parts
@@ -277,7 +280,7 @@ instance (Pretty a) => Pretty (ErrorMsg a) where
 maybeNest :: (PrettyRep rep) => Body rep -> Doc a
 maybeNest b
   | null $ bodyStms b = pretty b
-  | otherwise = nestedBlock "{" "}" $ pretty b
+  | otherwise = nestedBlock $ pretty b
 
 instance (PrettyRep rep) => Pretty (Case (Body rep)) where
   pretty (Case vs b) =
@@ -355,7 +358,7 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
                 "while" <+> pretty cond
           )
       <+> "do"
-      <+> nestedBlock "{" "}" (pretty loopbody)
+      <+> nestedBlock (pretty loopbody)
     where
       (params, args) = unzip merge
   pretty (WithAcc inputs lam) =
@@ -407,47 +410,51 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
         <+> parens (commastack $ map pretty fparams)
         </> indent 2 (colon <+> align (ppTupleLines' $ map prettyRet rettype))
         <+> equals
-        <+> nestedBlock "{" "}" (pretty body)
+        <+> nestedBlock (pretty body)
     where
       fun = case entry of
         Nothing -> "fun"
-        Just (p_name, p_entry, ret_entry) ->
+        Just (p_name, p_entry, ret_entry, doc_entry) ->
           "entry"
             <> (parens . align)
               ( "\""
                   <> pretty p_name
                   <> "\""
-                  <> comma
-                    </> ppTupleLines' (map pretty p_entry)
-                  <> comma
-                    </> ppTupleLines' (map pretty ret_entry)
+                  <> comma </> ppTupleLines' (map pretty p_entry)
+                  <> comma </> pretty ret_entry
+                  <> maybe mempty ((comma </>) . pretty . show) doc_entry
               )
 
 instance Pretty OpaqueType where
-  pretty (OpaqueType ts) =
-    "opaque" <+> nestedBlock "{" "}" (stack $ map pretty ts)
   pretty (OpaqueRecord fs) =
-    "record" <+> nestedBlock "{" "}" (stack $ map p fs)
+    "record" <+> nestedBlock (stack $ map p fs)
     where
       p (f, et) = pretty f <> ":" <+> pretty et
   pretty (OpaqueSum ts cs) =
-    "sum" <+> nestedBlock "{" "}" (stack $ pretty ts : map p cs)
+    "sum" <+> nestedBlock (stack $ pretty ts : map p cs)
     where
       p (c, ets) = hsep $ "#" <> pretty c : map pretty ets
   pretty (OpaqueArray r v ts) =
     "array" <+> pretty r
       <> "d"
         <+> dquotes (pretty v)
-        <+> nestedBlock "{" "}" (stack $ map pretty ts)
+        <+> nestedBlock (stack $ map pretty ts)
   pretty (OpaqueRecordArray r v fs) =
-    "record_array" <+> pretty r <> "d" <+> dquotes (pretty v) <+> nestedBlock "{" "}" (stack $ map p fs)
+    "record_array" <+> pretty r <> "d" <+> dquotes (pretty v) <+> nestedBlock (stack $ map p fs)
     where
       p (f, et) = pretty f <> ":" <+> pretty et
 
 instance Pretty OpaqueTypes where
-  pretty (OpaqueTypes ts) = "types" <+> nestedBlock "{" "}" (stack $ map p ts)
+  pretty (OpaqueTypes ts) = "types" <+> nestedBlock (stack $ map p ts)
     where
-      p (name, t) = "type" <+> dquotes (pretty name) <+> equals <+> pretty t
+      p (name, (t, doc)) =
+        ( case doc of
+            Nothing -> mempty
+            Just doc' -> mconcat $ map wrap (T.lines doc')
+        )
+          <> "type" <+> dquotes (pretty name) <+> equals <+> pretty t
+        where
+          wrap x = "-- " <> pretty x <> line
 
 instance (PrettyRep rep) => Pretty (Prog rep) where
   pretty (Prog types consts funs) =

@@ -85,7 +85,11 @@ internaliseProg config prog = do
   maybeLog "Defunctionalising"
   prog_decs5 <- Defunctionalise.transformProg prog_decs4
   maybeLog "Converting to core IR"
-  Exps.transformProg (futharkSafe config) (visibleTypes prog) prog_decs5
+  Exps.transformProg
+    (futharkSafe config)
+    (futharkStripProvenance config)
+    (visibleTypes prog)
+    prog_decs5
   where
     verbose = fst (futharkVerbose config) > NotVerbose
     maybeLog s

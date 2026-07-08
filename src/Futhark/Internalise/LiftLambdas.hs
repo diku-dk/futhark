@@ -7,7 +7,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
-import Data.Foldable
 import Data.List (partition)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -114,6 +113,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
   addValBind $
     ValBind
       { valBindName = fname,
+        valBindNameLoc = mempty,
         valBindTypeParams = tparams,
         valBindParams = map mkParam free_ts ++ params,
         valBindRetDecl = Nothing,

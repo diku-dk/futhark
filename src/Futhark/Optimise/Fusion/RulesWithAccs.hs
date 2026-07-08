@@ -4,16 +4,18 @@
 --     that involves WithAcc constructs.
 --   Currently, we support two non-trivial
 --   transformations:
---     I. map-flatten-scatter: a map nest produces
---        multi-dimensional index and values arrays
---        that are then flattened and used in a
---        scatter consumer. Such pattern can be fused
---        by re-writing the scatter by means of a WithAcc
---        containing a map-nest, thus eliminating the flatten
---        operations. The obtained WithAcc can then be fused
---        with the producer map nest, e.g., benefiting intra-group
---        kernels. The eloquent target for this rule is
---        an efficient implementation of radix-sort.
+--     I. SOAC-through-Trans-into-WithAcc fusion: a SoacNode is fused
+--        into a WithAcc atomically when all dependency paths between
+--        them go through TransNodes (reshapes/rearranges) that have no
+--        other consumers. The canonical example is a map nest producing
+--        multi-dimensional index and value arrays that are flattened
+--        and consumed by a scatter. This must be done atomically to
+--        avoid an infinite loop: absorbing only the TransNode causes
+--        simplifyLambda to hoist the cheap reshape back out, recreating
+--        the same TransNode and triggering the rule again. The strategy
+--        is to prepend the SoacNode and all TransNode statements into
+--        the WithAcc lambda body and run doFusionInLambda to fuse
+--        further where possible.
 --
 --    II. WithAcc-WithAcc fusion: two withaccs can be
 --        fused as long as the common accumulators use
@@ -27,15 +29,22 @@
 --        they can be transformed by various optimizations passes.
 module Futhark.Optimise.Fusion.RulesWithAccs
   ( tryFuseWithAccs,
+    trySoacThroughTransIntoWithAcc,
   )
 where
 
 import Control.Monad
+import Data.Graph.Inductive.Graph qualified as G
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Data.Maybe (maybeToList)
+import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
+import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util (nubOrd)
 
 ---------------------------------------------------
 --- II. WithAcc-WithAcc Fusion
@@ -46,28 +55,75 @@ import Futhark.Transform.Substitute
 --   2.   the withacc input
 --   3-5  withacc's lambda corresponding acc-certificate param,
 --           argument param and result name
-type AccTup =
-  ( [PatElem (LetDec SOACS)],
-    WithAccInput SOACS,
-    LParam SOACS,
-    LParam SOACS,
-    (VName, Certs)
-  )
+data AccTup = AccTup
+  { accTup1 :: [PatElem (LetDec SOACS)],
+    accTup2 :: WithAccInput SOACS,
+    accTup3 :: LParam SOACS,
+    accTup4 :: LParam SOACS,
+    accTup5 :: (VName, Certs)
+  }
+  deriving (Show)
 
-accTup1 :: AccTup -> [PatElem (LetDec SOACS)]
-accTup1 (a, _, _, _, _) = a
+groupAccs ::
+  [PatElem (LetDec SOACS)] ->
+  [WithAccInput SOACS] ->
+  Lambda SOACS ->
+  ([AccTup], [(PatElem (LetDec SOACS), SubExpRes)])
+groupAccs pat_els wacc_inps wlam =
+  let lam_params = lambdaParams wlam
+      n = length lam_params
+      (lam_par_crts, lam_par_accs) = splitAt (n `div` 2) lam_params
+      lab_res_ses = bodyResult $ lambdaBody wlam
+   in groupAccsHlp pat_els wacc_inps lam_par_crts lam_par_accs lab_res_ses
 
-accTup2 :: AccTup -> WithAccInput SOACS
-accTup2 (_, a, _, _, _) = a
+groupAccsHlp ::
+  [PatElem (LetDec SOACS)] ->
+  [WithAccInput SOACS] ->
+  [LParam SOACS] ->
+  [LParam SOACS] ->
+  [SubExpRes] ->
+  ([AccTup], [(PatElem (LetDec SOACS), SubExpRes)])
+groupAccsHlp pat_els [] [] [] lam_res_ses
+  | length pat_els == length lam_res_ses =
+      ([], zip pat_els lam_res_ses)
+groupAccsHlp
+  pat_els
+  (winp@(_, inp, _) : wacc_inps)
+  (par_crt : lam_par_crts)
+  (par_acc : lam_par_accs)
+  (res_se : lam_res_ses)
+    | n <- length inp,
+      Var res_nm <- resSubExp res_se =
+        let (pat_els_cur, pat_els') = splitAt n pat_els
+            (rec1, rec2) = groupAccsHlp pat_els' wacc_inps lam_par_crts lam_par_accs lam_res_ses
+         in (AccTup pat_els_cur winp par_crt par_acc (res_nm, resCerts res_se) : rec1, rec2)
+groupAccsHlp _ _ _ _ _ =
+  error "Unreachable case reached in groupAccsHlp!"
 
-accTup3 :: AccTup -> LParam SOACS
-accTup3 (_, _, a, _, _) = a
+matchingAccTup :: AccTup -> AccTup -> Bool
+matchingAccTup
+  (AccTup pat_els1 (shp1, _winp_arrs1, mlam1) _ _ _)
+  (AccTup _ (shp2, winp_arrs2, mlam2) _ _ _) =
+    shapeDims shp1 == shapeDims shp2
+      && map patElemName pat_els1 == winp_arrs2
+      && case (mlam1, mlam2) of
+        (Nothing, Nothing) -> True
+        (Just (lam1, see1), Just (lam2, see2)) ->
+          see1 == see2 && equivLambda M.empty lam1 lam2
+        _ -> False
 
-accTup4 :: AccTup -> LParam SOACS
-accTup4 (_, _, _, a, _) = a
-
-accTup5 :: AccTup -> (VName, Certs)
-accTup5 (_, _, _, _, a) = a
+groupCommonAccs :: [AccTup] -> [AccTup] -> ([(AccTup, AccTup)], [AccTup], [AccTup])
+groupCommonAccs [] tup_accs2 =
+  ([], [], tup_accs2)
+groupCommonAccs (tup_acc1 : tup_accs1) tup_accs2
+  | (commons2, uncommons2) <- L.partition (matchingAccTup tup_acc1) tup_accs2,
+    length commons2 <= 1 =
+      let (rec1, rec2, rec3) = groupCommonAccs tup_accs1 uncommons2
+       in if null commons2
+            then (rec1, tup_acc1 : rec2, rec3)
+            else ((tup_acc1, head commons2) : rec1, rec2, rec3)
+groupCommonAccs _ _ =
+  error "Unreachable case reached in groupCommonAccs!"
 
 -- | Simple case for fusing two withAccs (can be extended):
 --    let (b1, ..., bm, x1, ..., xq) = withAcc a1 ... am lam1
@@ -104,14 +160,13 @@ tryFuseWithAccs
         groupCommonAccs acc_tup1 acc_tup2,
       -- safety 0: make sure that the accs from acc_tup1' and
       --           acc_tup2' do not overlap
-      pnms_1' <- map patElemName $ concatMap (\(nms, _, _, _, _) -> nms) acc_tup1',
-      winp_2' <- concatMap (\(_, (_, nms, _), _, _, _) -> nms) acc_tup2',
+      pnms_1' <- map patElemName $ concatMap accTup1 acc_tup1',
+      winp_2' <- concatMap ((\(_, xs, _) -> xs) . accTup2) acc_tup2',
       not $ namesIntersect (namesFromList pnms_1') (namesFromList winp_2'),
       -- safety 1: we have already determined the commons;
       --           now we also need to check NOT-IN FV(lam2)
       not $ namesIntersect (namesFromList pnms_1') (freeIn lam2),
       -- safety 2:
-      -- bs <- map patElemName $ concatMap accTup1 acc_tup1,
       bs <- map patElemName $ concatMap (accTup1 . fst) tup_common,
       all (`notElem` infusible) bs,
       -- safety 3:
@@ -129,34 +184,25 @@ tryFuseWithAccs
             bdyres_accse = map Var comm_res_nms ++ map (Var . fst . accTup5) (acc_tup1' ++ acc_tup2')
             bdy_res_accs = zipWith SubExpRes bdyres_certs bdyres_accse
             bdy_res_others = map snd $ other_pr1 ++ other_pr2
-        scope <- askScope
-        lam_bdy <-
-          runBodyBuilder $ do
-            localScope (scope <> scopeOfLParams (rcrt_params ++ racc_params)) $ do
-              -- add the stms of lam1
-              mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam1
-              -- add the copy stms for the common accumulator
-              forM_ tup_common $ \(tup1, tup2) -> do
-                let (lpar1, lpar2) = (accTup4 tup1, accTup4 tup2)
-                    ((nm1, _), nm2, tp_acc) = (accTup5 tup1, paramName lpar2, paramDec lpar1)
-                letBind (Pat [PatElem nm2 tp_acc]) $ BasicOp $ SubExp $ Var nm1
-              -- add copy stms to bring in scope x1 ... xq
-              forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
-                let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
-                certifying (resCerts bdy_res) $
-                  letBind (Pat [PatElem nm tp]) $
-                    BasicOp (SubExp se)
-              -- add the statements of lam2 (in which the acc-certificates have been substituted)
-              mapM_ addStm $ stmsToList $ bodyStms lam2_bdy'
-              -- build the result of body
-              pure $ bdy_res_accs ++ bdy_res_others
-        let tp_res_other = map (patElemType . fst) (other_pr1 ++ other_pr2)
-            res_lam =
-              Lambda
-                { lambdaParams = rcrt_params ++ racc_params,
-                  lambdaBody = lam_bdy,
-                  lambdaReturnType = map paramDec racc_params ++ tp_res_other
-                }
+        res_lam <-
+          runLambdaBuilder (rcrt_params ++ racc_params) $ do
+            -- add the stms of lam1
+            mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam1
+            -- add the copy stms for the common accumulator
+            forM_ tup_common $ \(tup1, tup2) -> do
+              let (lpar1, lpar2) = (accTup4 tup1, accTup4 tup2)
+                  ((nm1, _), nm2, tp_acc) = (accTup5 tup1, paramName lpar2, paramDec lpar1)
+              letBind (Pat [PatElem nm2 tp_acc]) $ BasicOp $ SubExp $ Var nm1
+            -- add copy stms to bring in scope x1 ... xq
+            forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
+              let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
+              certifying (resCerts bdy_res) $
+                letBind (Pat [PatElem nm tp]) $
+                  BasicOp (SubExp se)
+            -- add the statements of lam2 (in which the acc-certificates have been substituted)
+            mapM_ addStm $ stmsToList $ bodyStms lam2_bdy'
+            -- build the result of body
+            pure $ bdy_res_accs ++ bdy_res_others
         res_lam' <- renameLambda res_lam
         let res_pat =
               concatMap (accTup1 . snd) tup_common
@@ -166,60 +212,6 @@ tryFuseWithAccs
         res_w_inps' <- mapM renameLamInWAccInp res_w_inps
         pure $ Let (Pat res_pat) (aux1 <> aux2) $ WithAcc res_w_inps' res_lam'
     where
-      -- local helpers:
-
-      groupAccs ::
-        [PatElem (LetDec SOACS)] ->
-        [WithAccInput SOACS] ->
-        Lambda SOACS ->
-        ([AccTup], [(PatElem (LetDec SOACS), SubExpRes)])
-      groupAccs pat_els wacc_inps wlam =
-        let lam_params = lambdaParams wlam
-            n = length lam_params
-            (lam_par_crts, lam_par_accs) = splitAt (n `div` 2) lam_params
-            lab_res_ses = bodyResult $ lambdaBody wlam
-         in groupAccsHlp pat_els wacc_inps lam_par_crts lam_par_accs lab_res_ses
-      groupAccsHlp ::
-        [PatElem (LetDec SOACS)] ->
-        [WithAccInput SOACS] ->
-        [LParam SOACS] ->
-        [LParam SOACS] ->
-        [SubExpRes] ->
-        ([AccTup], [(PatElem (LetDec SOACS), SubExpRes)])
-      groupAccsHlp pat_els [] [] [] lam_res_ses
-        | length pat_els == length lam_res_ses =
-            ([], zip pat_els lam_res_ses)
-      groupAccsHlp
-        pat_els
-        (winp@(_, inp, _) : wacc_inps)
-        (par_crt : lam_par_crts)
-        (par_acc : lam_par_accs)
-        (res_se : lam_res_ses)
-          | n <- length inp,
-            (n <= length pat_els) && (n <= (1 + length lam_res_ses)),
-            Var res_nm <- resSubExp res_se =
-              let (pat_els_cur, pat_els') = splitAt n pat_els
-                  (rec1, rec2) = groupAccsHlp pat_els' wacc_inps lam_par_crts lam_par_accs lam_res_ses
-               in ((pat_els_cur, winp, par_crt, par_acc, (res_nm, resCerts res_se)) : rec1, rec2)
-      groupAccsHlp _ _ _ _ _ =
-        error "Unreachable case reached in groupAccsHlp!"
-      --
-      groupCommonAccs :: [AccTup] -> [AccTup] -> ([(AccTup, AccTup)], [AccTup], [AccTup])
-      groupCommonAccs [] tup_accs2 =
-        ([], [], tup_accs2)
-      groupCommonAccs (tup_acc1 : tup_accs1) tup_accs2
-        | commons2 <- filter (matchingAccTup tup_acc1) tup_accs2,
-          length commons2 <= 1 =
-            let (rec1, rec2, rec3) =
-                  groupCommonAccs tup_accs1 $
-                    if null commons2
-                      then tup_accs2
-                      else filter (not . matchingAccTup tup_acc1) tup_accs2
-             in if null commons2
-                  then (rec1, tup_acc1 : rec2, rec3)
-                  else ((tup_acc1, head commons2) : rec1, tup_accs1, rec3)
-      groupCommonAccs _ _ =
-        error "Unreachable case reached in groupCommonAccs!"
       renameLamInWAccInp (shp, inps, Just (lam, se)) = do
         lam' <- renameLambda lam
         pure (shp, inps, Just (lam', se))
@@ -228,9 +220,107 @@ tryFuseWithAccs
 tryFuseWithAccs _ _ _ =
   Nothing
 
+---------------------------------------------------
+--- I. SOAC-through-Trans-into-WithAcc Fusion
+---------------------------------------------------
+
+-- | See the module-level description of transformation I.
+-- The @doFusionInLambda@ and @fusedSomething@ arguments are callbacks
+-- from Fusion.hs to avoid a circular import.
+trySoacThroughTransIntoWithAcc ::
+  (HasScope SOACS m, MonadFreshNames m) =>
+  (Lambda SOACS -> m (Lambda SOACS, Bool)) ->
+  (NodeT -> m (Maybe NodeT)) ->
+  G.Node ->
+  DepGraphAug m
+trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id dg@DepGraph {dgGraph = g}
+  | not (G.gelem wacc_id g) = pure dg
+  | Just (StmNode (Let pat2 aux2 (WithAcc w_inps lam0))) <- G.lab g wacc_id = do
+      -- Edges go FROM consumers TO producers:
+      --   G.lpre g n = consumers of n; G.lsuc g n = producers n depends on.
+      -- realConsumers n: consumers of n, excluding Alias edges and self-loops.
+      let wacc_cons_nms = namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps
+          realConsumers n =
+            nubOrd $
+              map fst $
+                filter (\(m, e) -> m /= n && case e of Alias {} -> False; _ -> True) $
+                  G.lpre g n
+          -- TransNodes that directly feed wacc and are exclusively consumed by wacc.
+          trans_preds = do
+            (tn_id, _) <- G.lsuc g wacc_id
+            TransNode out tr inp <- maybeToList $ G.lab g tn_id
+            guard $ realConsumers tn_id == [wacc_id]
+            pure (tn_id, out, tr, inp)
+          trans_ids = map (\(a, _, _, _) -> a) trans_preds
+          trans_out_nms = namesFromList $ map (\(_, out, _, _) -> out) trans_preds
+          -- The unique Screma SoacNode that feeds all TransNodes and has no
+          -- other consumers besides those TransNodes.
+          soac_preds = do
+            (tn_id, _, _, _) <- trans_preds
+            (sn_id, _) <- G.lsuc g tn_id
+            guard $ sn_id `notElem` trans_ids
+            guard $ all (`elem` trans_ids) (realConsumers sn_id)
+            pure sn_id
+          prod_ids = nubOrd soac_preds
+      case (trans_preds, prod_ids) of
+        (_ : _, [prod_id])
+          | Just (SoacNode ots1 pat1 soac@(H.Screma {}) aux1) <- G.lab g prod_id,
+            ots1 == mempty,
+            all ((`notNameIn` wacc_cons_nms) . H.inputArray) (H.inputs soac),
+            not $ namesIntersect trans_out_nms wacc_cons_nms ->
+              attempt trans_ids trans_preds prod_id pat1 aux1 soac pat2 aux2 w_inps lam0
+        _ -> pure dg
+  | otherwise = pure dg
+  where
+    attempt trans_ids trans_preds prod_id pat1 aux1 soac pat2 aux2 w_inps lam0 = do
+      let trans_info = map (\(_, out, tr, inp) -> (out, tr, inp)) trans_preds
+      lam' <- renameLambda <=< runLambdaBuilder (lambdaParams lam0) $ do
+        soac' <- H.toExp soac
+        addStm $ Let pat1 aux1 soac'
+        forM_ trans_info $ \(out, tr, inp) -> do
+          (tr_aux, tr_exp) <- H.transformToExp tr inp
+          auxing tr_aux $ letBindNames [out] tr_exp
+        bodyBind $ lambdaBody lam0
+      -- Run inner fusion. We always proceed with onSuccess because embedding
+      -- the SoacNode + TransNodes into the WithAcc is itself a valid fusion
+      -- step and avoids potential infinite loops from simplifyLambda hoisting
+      -- a reshape back out.
+      lam'' <- fst <$> doFusionInLambda lam'
+      onSuccess trans_ids prod_id pat2 aux2 w_inps lam''
+
+    onSuccess trans_ids prod_id pat2 aux2 w_inps lam'' = do
+      void $ fusedSomething (StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'')
+      -- Rebuild the graph: remove absorbed nodes and rewire wacc's edges.
+      -- G.context returns (in_adj, n, label, out_adj) where both adjacency
+      -- lists are [(EdgeT, Node)]. G.lsuc/lpre are (Node, EdgeT).
+      let to_remove = prod_id : trans_ids
+          new_wacc = StmNode $ Let pat2 aux2 $ WithAcc w_inps lam''
+          g' = foldr G.delNode g to_remove
+          (wacc_preds, _, _, wacc_succs) = G.context g wacc_id
+          -- Inherit producers of the absorbed nodes that are still in g'.
+          removed_succs =
+            nubOrd $
+              concatMap (filter ((`G.gelem` g') . fst) . G.lsuc g) to_remove
+          new_succs =
+            nubOrd $
+              removed_succs
+                ++ map (\(e, n) -> (n, e)) (filter ((`G.gelem` g') . snd) wacc_succs)
+          new_preds = filter ((`G.gelem` g') . snd) wacc_preds
+          g'' = G.insNode (wacc_id, new_wacc) $ G.delNode wacc_id g'
+          g''' = foldr (\(e, n) gr -> G.insEdge (n, wacc_id, e) gr) g'' new_preds
+          g'''' = foldr (\(n, e) gr -> G.insEdge (wacc_id, n, e) gr) g''' new_succs
+      pure dg {dgGraph = g''''}
+
 -------------------------------
 --- simple helper functions ---
 -------------------------------
+
+substInSEs :: M.Map VName VName -> [SubExp] -> [SubExp]
+substInSEs vtab = map substInSE
+  where
+    substInSE (Var x)
+      | Just y <- M.lookup x vtab = Var y
+    substInSE z = z
 
 equivLambda ::
   M.Map VName VName ->
@@ -277,22 +367,3 @@ equivStm
          in (M.union stab_new stab, True)
 -- To Be Continued ...
 equivStm vtab _ _ = (vtab, False)
-
-matchingAccTup :: AccTup -> AccTup -> Bool
-matchingAccTup
-  (pat_els1, (shp1, _winp_arrs1, mlam1), _, _, _)
-  (_, (shp2, winp_arrs2, mlam2), _, _, _) =
-    shapeDims shp1 == shapeDims shp2
-      && map patElemName pat_els1 == winp_arrs2
-      && case (mlam1, mlam2) of
-        (Nothing, Nothing) -> True
-        (Just (lam1, see1), Just (lam2, see2)) ->
-          (see1 == see2) && equivLambda M.empty lam1 lam2
-        _ -> False
-
-substInSEs :: M.Map VName VName -> [SubExp] -> [SubExp]
-substInSEs vtab = map substInSE
-  where
-    substInSE (Var x)
-      | Just y <- M.lookup x vtab = Var y
-    substInSE z = z

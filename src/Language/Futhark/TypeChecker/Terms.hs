@@ -49,7 +49,7 @@ import Language.Futhark.Primitive (intByteSize)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Consumption qualified as Consumption
 import Language.Futhark.TypeChecker.Match
-import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
+import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupAbsTy, lookupMod)
 import Language.Futhark.TypeChecker.Terms.Loop
 import Language.Futhark.TypeChecker.Terms.Monad
 import Language.Futhark.TypeChecker.Terms.Pat
@@ -278,7 +278,7 @@ checkExp (Var qn (Info t) loc) = do
 checkExp (Literal val loc) =
   pure $ Literal val loc
 checkExp (Hole (Info t) loc) = do
-  t' <- replaceTyVars loc t
+  t' <- replaceTyVarsAbsorbable loc t
   pure $ Hole (Info t') loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
@@ -302,25 +302,29 @@ checkExp (RecordLit fs loc) =
 -- parser if the elements are monomorphic and all match.
 checkExp (ArrayVal vs t loc) =
   pure $ ArrayVal vs t loc
-checkExp (ArrayLit all_es _ loc) =
-  -- Construct the result type and unify all elements with it.  We
-  -- only create a type variable for empty arrays; otherwise we use
-  -- the type of the first element.  This significantly cuts down on
-  -- the number of type variables generated for pathologically large
+checkExp (ArrayLit all_es (Info t) loc) =
+  -- We only consult the type inferred by the unsized type checker
+  -- for empty arrays; otherwise we use the type of the first
+  -- element.  This significantly cuts down on the number of
+  -- inferred types we have to instantiate for pathologically large
   -- multidimensional array literals.
   case all_es of
     [] -> do
-      et <- newTypeVar loc "t"
-      t <- arrayOfM loc et (Shape [sizeFromInteger 0 mempty])
-      mustBeUnlifted (locOf loc) et
-      pure $ ArrayLit [] (Info t) loc
+      t' <- replaceTyVars loc t
+      case peelArray 1 t' of
+        Just et -> do
+          let t'' = arrayOf (Shape [sizeFromInteger 0 mempty]) et
+          unify (mkUsage loc "empty array literal") t'' t'
+          mustBeUnlifted (locOf loc) et
+          pure $ ArrayLit [] (Info t'') loc
+        Nothing -> error $ "checkExp ArrayLit: " <> prettyString t'
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" et <=< checkExp) es
-      t <- arrayOfM loc et (Shape [sizeFromInteger (genericLength all_es) mempty])
+      let arr_t = arrayOf (Shape [sizeFromInteger (genericLength all_es) mempty]) et
       mustBeUnlifted (locOf loc) et
-      pure $ ArrayLit (e' : es') (Info t) loc
+      pure $ ArrayLit (e' : es') (Info arr_t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- checkExp start
   start_t <- expType start'
@@ -375,8 +379,8 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         d <- newRigidDim loc RigidRange "range_dim"
         pure (sizeFromName (qualName d) mempty, Just d)
 
-  t <- arrayOfM loc start_t (Shape [dim])
-  let res = AppRes t (maybeToList retext)
+  let t = arrayOf (Shape [dim]) start_t
+      res = AppRes t (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
   where
@@ -481,9 +485,8 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
     -- pattern name with the expression in the type of the body.
     -- Otherwise, we need to come up with unknown sizes for the
     -- sizes going out of scope.
-    t' <- normType t -- Might be overloaded integer until now.
     (body_t', retext) <-
-      case (t', patNames pat') of
+      case (t, patNames pat') of
         (Scalar (Prim (Signed Int64)), [v])
           | not $ hasBinding e' -> do
               let f x = if x == v then Just (ExpSubst e') else Nothing
@@ -517,61 +520,62 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, _, e) body loc) _
           loc
       )
       (Info $ AppRes body_t ext)
-checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
-  src_t <- lookupVar loc (qualName (identName src)) (unInfo (identType src))
+checkExp (AppExp (LetWith dest src steps ve body loc) _) = do
+  -- The type recorded in the AST is the unsized type from the
+  -- unsized type checker; we must consult the scope to get the
+  -- actual type of the source variable.
+  src_t <-
+    normTypeFully
+      =<< lookupVar (srclocOf src) (qualName $ identName src) (unInfo $ identType src)
   let src' = src {identType = Info src_t}
-      dest' = dest {identType = Info src_t}
-  slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage src' "type of source array") "src" $ sliceDims slice'
-  unify (mkUsage loc "type of target array") t $ unInfo $ identType src'
 
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
+  case mapAndUnzipM isField steps of
+    Just (steps', names) -> do
+      ve' <- checkExp ve
+      ve_t <- expType ve'
+      updated_t <- updateFieldPath src names ve_t src_t
 
-  ve' <- unifies "type of target array" elemt =<< checkExp ve
+      let dest' = dest {identType = Info updated_t}
+      bindingIdent dest' $ do
+        body' <- checkExp body
+        (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
+        pure $ AppExp (LetWith dest' src' steps' ve' body' loc) (Info $ AppRes body_t ext)
+    Nothing -> do
+      (steps', target_t) <- checkUpdateSteps loc src_t steps
+      ve' <- unifies "type of update target" target_t =<< checkExp ve
 
-  bindingIdent dest' $ do
-    body' <- checkExp body
-    (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
-    pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
-checkExp (Update src slice ve loc) = do
-  slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
-  ve' <- unifies "type of target array" elemt =<< checkExp ve
-  src' <- unifies "type of target array" t =<< checkExp src
-  pure $ Update src' slice' ve' loc
+      let dest' = dest {identType = Info src_t}
+      bindingIdent dest' $ do
+        body' <- checkExp body
+        (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
+        pure $ AppExp (LetWith dest' src' steps' ve' body' loc) (Info $ AppRes body_t ext)
+  where
+    isField (UpdateStepField f) = Just (UpdateStepField f, f)
+    isField _ = Nothing
 
 -- Record updates are a bit hacky, because we do not have row typing
 -- (yet?).  For now, we only permit record updates where we know the
 -- full type up to the field we are updating.
-checkExp (RecordUpdate src fields ve _ loc) = do
+checkExp (Update src steps ve _ loc) = do
   src' <- checkExp src
-  ve' <- checkExp ve
-  ve_t <- expType ve'
-  updated_t <- updateField fields ve_t =<< expTypeFully src'
-  pure $ RecordUpdate src' fields ve' (Info updated_t) loc
+  src_t <- expTypeFully src'
+  case mapAndUnzipM isField steps of
+    Just (steps', names) -> do
+      ve' <- checkExp ve
+      ve_t <- expType ve'
+      updated_t <- updateFieldPath src names ve_t src_t
+      pure $ Update src' steps' ve' (Info updated_t) loc
+    Nothing -> do
+      (steps', target_t) <- checkUpdateSteps loc src_t steps
+      ve' <- unifies "type of update target" target_t =<< checkExp ve
+      src_t' <- expTypeFully src'
+      pure $ Update src' steps' ve' (Info src_t') loc
   where
-    usage = mkUsage loc "record update"
-    updateField [] ve_t src_t = do
-      (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
-      onFailure (CheckingRecordUpdate fields src_t' ve_t) $
-        unify usage src_t' ve_t
-      pure ve_t
-    updateField (f : fs) ve_t (Scalar (Record m))
-      | Just f_t <- M.lookup f m = do
-          f_t' <- updateField fs ve_t f_t
-          pure $ Scalar $ Record $ M.insert f f_t' m
-    updateField _ _ _ =
-      typeError loc mempty . withIndexLink "record-type-not-known" $
-        "Full type of"
-          </> indent 2 (pretty src)
-          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
-
---
+    isField (UpdateStepField f) = Just (UpdateStepField f, f)
+    isField _ = Nothing
 checkExp (AppExp (Index e slice loc) _) = do
   slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
-  e' <- unifies "being indexed at" t =<< checkExp e
+  e' <- checkExp e
   -- XXX, the RigidSlice here will be overridden in sliceShape with a proper value.
   (t', retext) <-
     sliceShape (Just (loc, Rigid (RigidSlice Nothing ""))) slice'
@@ -685,20 +689,40 @@ checkExp (OpSectionRight op (Info op_t) e (_, Info (_, _, _, am)) _ loc) = do
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (ProjectSection fields (Info t) loc) = do
-  t' <- replaceTyVars loc t
-  case t' of
-    Scalar (Arrow _ _ _ t'' (RetType _ rt))
-      | Just ft <- recordField fields t'' ->
-          unify (mkUsage loc "result of projection") ft $ toStruct rt
-    _ -> error $ "checkExp ProjectSection: " <> show t'
-  pure $ ProjectSection fields (Info t') loc
-checkExp (IndexSection slice _ loc) = do
-  slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
-  (t', retext) <- sliceShape Nothing slice' t
-  let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ toRes Nonunique t'
-  pure $ IndexSection slice' (Info ft) loc
+checkExp (UpdateSection steps (Info ft) loc) = do
+  -- The unsized type checker has already determined the type of the
+  -- parameter; we just have to instantiate its sizes. The result
+  -- type is then computed by walking the steps, such that its sizes
+  -- are those of the corresponding components of the parameter type.
+  a <- case ft of
+    Scalar (Arrow _ _ _ pt _) -> replaceTyVars loc pt
+    _ -> error $ "checkExp UpdateSection: " <> prettyString ft
+  (steps', b, retext) <- checkSectionSteps a steps
+  let ft' = Scalar $ Arrow mempty Unnamed Observe a $ RetType retext $ toRes Nonunique b
+  pure $ UpdateSection steps' (Info ft') loc
+  where
+    checkSectionSteps t [] =
+      pure ([], t, [])
+    checkSectionSteps t (step : rest) =
+      case step of
+        UpdateStepField f -> do
+          t' <- normTypeFully t
+          case t' of
+            Scalar (Record fs)
+              | Just f_t <- M.lookup f fs -> do
+                  (rest', target_t, retext) <- checkSectionSteps f_t rest
+                  pure (UpdateStepField f : rest', target_t, retext)
+            _ ->
+              error $
+                "checkExp UpdateSection: cannot project field "
+                  <> prettyString f
+                  <> " from "
+                  <> prettyString t'
+        UpdateStepSlice slice -> do
+          slice' <- checkSlice slice
+          (t', retext) <- sliceShape Nothing slice' =<< normTypeFully t
+          (rest', target_t, retext_rest) <- checkSectionSteps t' rest
+          pure (UpdateStepSlice slice' : rest', target_t, retext <> retext_rest)
 checkExp (AppExp (Loop _ mergepat loopinit form loopbody loc) _) = do
   ((sparams, mergepat', loopinit', form', loopbody'), appres) <-
     checkLoop checkExp (mergepat, loopinit, form, loopbody) loc
@@ -729,15 +753,11 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
 
   (t, retext) <- unifyBranches loc e2' e3'
 
-  mustBeOrderZero (locOf loc) t
-
   pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes t retext)
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
   mt <- expType e'
   (cs', t, retext) <- checkCases mt cs
-
-  mustBeOrderZero (locOf loc) t
 
   pure $ AppExp (Match e' cs' loc) (Info $ AppRes t retext)
 checkExp (Attr info e loc) =
@@ -753,6 +773,54 @@ checkCase mt (CasePat p e loc) =
     e_t <- expTypeFully e'
     (e_t', retext) <- unscopeType loc (patNames p') e_t
     pure (CasePat (fmap toStruct p') e' loc, e_t', retext)
+
+updateFieldPath ::
+  (Pretty a, Located a) =>
+  a ->
+  [Name] ->
+  StructType ->
+  StructType ->
+  TermTypeM StructType
+updateFieldPath src all_fs ve_t = recurse [] all_fs
+  where
+    recurse seen [] t = do
+      (t', _) <- allDimsFreshInType usage Nonrigid "any" t
+      onFailure (CheckingRecordUpdate seen t' ve_t) $
+        unify usage t' ve_t
+      pure ve_t
+      where
+        usage = mkUsage (locOf src) "record update"
+    recurse seen (f : fs) (Scalar (Record m))
+      | Just f_t <- M.lookup f m = do
+          f_t' <- recurse (seen ++ [f]) fs f_t
+          pure $ Scalar $ Record $ M.insert f f_t' m
+    recurse _ _ _ =
+      typeError (locOf src) mempty . withIndexLink "record-type-not-known" $
+        "Full type of"
+          </> indent 2 (pretty src)
+          </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
+
+checkUpdateSteps ::
+  SrcLoc ->
+  StructType ->
+  [UpdateStep Info VName] ->
+  TermTypeM ([UpdateStep Info VName], StructType)
+checkUpdateSteps _ t [] =
+  pure ([], t)
+checkUpdateSteps loc t (step : rest) =
+  case step of
+    UpdateStepSlice slice -> do
+      slice' <- checkSlice slice
+      (elem_t, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
+      (rest', target_t) <- checkUpdateSteps loc elem_t rest
+      pure (UpdateStepSlice slice' : rest', target_t)
+    UpdateStepField f -> do
+      t' <- normTypeFully t
+      case t' of
+        Scalar (Record fs) | Just f_t <- M.lookup f fs -> do
+          (rest', target_t) <- checkUpdateSteps loc f_t rest
+          pure (UpdateStepField f : rest', target_t)
+        _ -> error $ "checkUpdateSteps: " <> show t'
 
 checkCases ::
   StructType ->
@@ -804,11 +872,6 @@ checkSlice = mapM checkDimIndex
       DimFix <$> checkExp i
     checkDimIndex (DimSlice i j s) =
       DimSlice <$> traverse checkExp i <*> traverse checkExp j <*> traverse checkExp s
-
--- The number of dimensions affected by this slice (so the minimum
--- rank of the array we are slicing).
-sliceDims :: [DimIndex] -> Int
-sliceDims = length
 
 instantiateDimsInReturnType ::
   SrcLoc ->
@@ -917,17 +980,33 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
     unify (mkUsage argexp "use as function argument") tp1_with_frame argtype_with_frame
 
     -- Perform substitutions of instantiated variables in the types.
-    (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
+    (tp2_inst, ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
     argtype' <- normTypeFully argtype
+
+    -- Unification against the argument type may have determined that
+    -- some instantiated sizes are existential. Their occurrences in
+    -- the return type are replaced with fresh rigid sizes, bound at
+    -- the innermost possible position; those bound at the top level
+    -- become existentials of the application. The pending size
+    -- variables themselves are left alone; occurrences of them
+    -- remaining in the AST are existentially bound by
+    -- 'bindExistentialInsts' at the end.
+    constraints <- getConstraints
+    let (inst_pending, inst_reps) = pendingInstSizes constraints
+        repOf v = ExpSubst . flip sizeFromName (srclocOf loc) . qualName <$> M.lookup v inst_reps
+    (tp2', inst_ext) <-
+      sizeFree loc (find inst_pending . fvVars . freeInExp) $
+        applySubst repOf tp2_inst
+    let ext' = ext <> inst_ext
 
     -- Check whether this would produce an impossible return type.
     let (tp2_produced_dims, tp2_paramdims) = dimUses tp2'
-        problematic = S.fromList ext <> boundInsideType argtype'
+        problematic = S.fromList ext' <> boundInsideType argtype'
         problem = any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)
     when (not (S.null problematic) && problem) $ do
       typeError loc mempty . withIndexLink "existential-param-ret" $
         "Existential size would appear in function parameter of return type:"
-          </> indent 2 (pretty (RetType ext tp2'))
+          </> indent 2 (pretty (RetType ext' tp2'))
           </> textwrap "This is usually because a higher-order function is used with functional arguments that return existential sizes or locally named sizes, which are then used as parameters of other function arguments."
 
     (argext, tp2'') <-
@@ -961,7 +1040,7 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
               autoFrame = am_frame_shape
             }
 
-    pure (tp1, distribute (arrayOf (autoMap am') tp2''), argext, ext, am')
+    pure (tp1, distribute (arrayOf (autoMap am') tp2''), argext, ext', am')
   where
     distribute :: TypeBase dim u -> TypeBase dim u
     distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
@@ -987,11 +1066,11 @@ checkOneExp e = do
     Right (_generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       let t = typeOf e''
-      (tparams, _, RetType _ t') <-
+      (tparams, _, _) <-
         letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
-      fixOverloadedTypes $ typeVars t'
-      e''' <- normTypeFully e''
-      localChecks e'''
+      detectAmbiguousSizes
+      e''' <- bindExistentialInsts =<< normTypeFully e''
+      localChecks tparams e'''
       causalityCheck e'''
       pure (tparams, e''')
 
@@ -1036,10 +1115,7 @@ causalityCheck binding_body = do
       onExp known (Var v (Info t) loc)
         | Just bad <- checkCausality (dquotes (pretty v)) known t loc =
             bad
-      onExp known (ProjectSection _ (Info t) loc)
-        | Just bad <- checkCausality "projection section" known t loc =
-            bad
-      onExp known (IndexSection _ (Info t) loc)
+      onExp known (UpdateSection _ (Info t) loc)
         | Just bad <- checkCausality "projection section" known t loc =
             bad
       onExp known (OpSectionRight _ (Info t) _ _ _ loc)
@@ -1167,6 +1243,17 @@ supportsEquality (Scalar (Record fs)) = all supportsEquality fs
 supportsEquality (Scalar (Sum fs)) = all (all supportsEquality) fs
 supportsEquality (Scalar Arrow {}) = False
 
+-- | Check that a type is non-functional, looking up the liftedness of type
+-- variables.
+orderZeroM :: [TypeParam] -> StructType -> TermTypeM Bool
+orderZeroM tparams t = do
+  (orderZero t &&) . and <$> mapM isUnlifted (typeQualVars t)
+  where
+    isUnlifted qv = do
+      case find ((== qualLeaf qv) . typeParamName) tparams of
+        Just (TypeParamType l _ _) -> pure $ l < Lifted
+        _ -> (< Lifted) <$> lookupAbsTy qv
+
 -- | Traverse the expression, emitting warnings and errors for various
 -- problems:
 --
@@ -1174,10 +1261,23 @@ supportsEquality (Scalar Arrow {}) = False
 --
 -- * If any of the literals overflow their inferred types. Note:
 --  currently unable to detect float underflow (such as 1e-400 -> 0)
-localChecks :: Exp -> TermTypeM ()
-localChecks = void . check
+--
+-- * Function types appearing in places where they are not allowed (e.g.
+--   returned from branches).
+--
+-- The rationale is that it is easier to check for these things after all of the
+-- type inference has been done, as they complicate the logic. Further, it is
+-- also easier to produce good error messages here. The key is that we can only
+-- enforce rules that do not affect type inference.
+localChecks :: [TypeParam] -> Exp -> TermTypeM ()
+localChecks tparams orig_body = void $ check orig_body
   where
-    check e@(AppExp (Match _ cs loc) _) = do
+    check e@(AppExp (Match _ cs loc) (Info rt)) = do
+      ok <- orderZeroM tparams (appResType rt)
+      unless ok . typeError loc mempty $
+        "Match-expression returns type"
+          </> indent 2 (align (pretty (appResType rt)))
+          </> "but match-results may not be of function type."
       let ps = fmap (\(CasePat p _ _) -> p) cs
       case unmatched $ NE.toList ps of
         [] -> recurse e
@@ -1185,6 +1285,13 @@ localChecks = void . check
           typeError loc mempty . withIndexLink "unmatched-cases" $
             "Unmatched cases in match expression:"
               </> indent 2 (stack (map pretty ps'))
+    check e@(AppExp (If _ _ _ loc) (Info rt)) = do
+      ok <- orderZeroM tparams (appResType rt)
+      unless ok . typeError loc mempty $
+        "If-expression returns type"
+          </> indent 2 (align (pretty (appResType rt)))
+          </> "but if-results may not be of function type."
+      recurse e
     check e@(AppExp (LetPat _ p _ _ _) _) =
       mustBeIrrefutable p *> recurse e
     check e@(AppExp (BinOp (v, loc) _ (x, _) _ _) _)
@@ -1195,13 +1302,21 @@ localChecks = void . check
           checkEquality loc t *> recurse e
     check e@(Lambda ps _ _ _ _) =
       mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
-    check e@(AppExp (LetFun _ (_, ps, _, _, _) _ _) _) =
-      mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
+    check e@(AppExp (LetFun _ (tparams', ps, _, _, e1) e2 _) _) = do
+      mapM_ (mustBeIrrefutable . fmap toStruct) ps
+      localChecks (tparams' <> tparams) e1
+      void $ check e2
+      pure e
     check e@(AppExp (Loop _ p _ form _ _) _) = do
       mustBeIrrefutable (fmap toStruct p)
       case form of
         ForIn form_p _ -> mustBeIrrefutable form_p
         _ -> pure ()
+      ok <- orderZeroM tparams (patternStructType p)
+      unless ok . typeError (locOf p) mempty $
+        "Loop parameter inferred to have type"
+          </> indent 2 (align (pretty p))
+          </> "but a loop parameter may not be of function type."
       recurse e
     check e@(IntLit x ty loc) =
       e <$ case ty of
@@ -1246,25 +1361,138 @@ localChecks = void . check
             <> pretty ty
             <> "."
 
--- | This is "fixing" as in "setting them", not "correcting them".  We
--- only make very conservative fixing.
-fixOverloadedTypes :: Names -> TermTypeM ()
-fixOverloadedTypes tyvars_at_toplevel =
-  getConstraints >>= mapM_ fixOverloaded . M.toList . M.map snd
+-- | Instantiated sizes that unification has determined to be existential
+-- ("pending"), and a mapping from pending copies to a representative: copies
+-- from the same occurrence of an instantiated type parameter that were absorbed
+-- from the same source denote the same existential size. See Note [Size
+-- Inference].
+pendingInstSizes :: Constraints -> (VName -> Bool, M.Map VName VName)
+pendingInstSizes constraints = (pending, reps)
   where
-    fixOverloaded (v, NoConstraint _ usage) = do
-      -- See #1552.
-      unify usage (Scalar (TypeVar mempty (qualName v) [])) $
-        Scalar (tupleRecord [])
-      when (v `S.member` tyvars_at_toplevel) $
-        warn usage "Defaulting ambiguous type to ()."
-    fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
-      typeError loc mempty . withIndexLink "ambiguous-size" $
-        "Ambiguous size" <+> dquotes (prettyName v) <> "."
-    fixOverloaded (v, Size Nothing (Usage (Just u) loc)) =
-      typeError loc mempty . withIndexLink "ambiguous-size" $
-        "Ambiguous size" <+> dquotes (prettyName v) <+> "arising from" <+> pretty u <> "."
-    fixOverloaded _ = pure ()
+    key v = case snd <$> M.lookup v constraints of
+      Just (ExistentialSize k _) -> Just k
+      _ -> Nothing
+    pending v = case snd <$> M.lookup v constraints of
+      Just (ExistentialSize _ _) -> True
+      Just (CopySize c _ _) -> isJust $ key c
+      _ -> False
+    groups =
+      M.fromListWith
+        (<>)
+        [ ((occ, k), [v])
+        | (v, (_, CopySize c occ _)) <- M.toList constraints,
+          Just (Just k) <- [key c]
+        ]
+    reps =
+      M.fromList
+        [ (v, rep)
+        | vs <- M.elems groups,
+          let rep = minimum vs,
+          v <- vs,
+          v /= rep
+        ]
+
+-- | Instantiated sizes (at or above the given level) that are still
+-- pending and have not been determined to be existential behave like
+-- ordinary sizes from here on: canonical sizes are plain size
+-- variables, and copies are equal to their canonical variable.
+-- Existential ones are left alone; they are handled by
+-- 'bindExistentialInsts'.
+collapseInstSizes :: Level -> TermTypeM ()
+collapseInstSizes min_lvl = do
+  constraints <- getConstraints
+  let nonExistential c = case snd <$> M.lookup c constraints of
+        Just (ExistentialSize _ _) -> False
+        _ -> True
+      collapse (lvl, CopySize c _ usage)
+        | lvl >= min_lvl,
+          nonExistential c =
+            (lvl, Size (Just $ sizeFromName (qualName c) $ srclocOf usage) usage)
+      collapse (lvl, InstSize _ usage)
+        | lvl >= min_lvl = (lvl, Size Nothing usage)
+      collapse x = x
+  modifyConstraints $ M.map collapse
+
+-- | Instantiated sizes that unification determined to be existential
+-- may remain free in some types recorded in the AST - in particular
+-- the instantiated types of higher-order functions, where the
+-- existential size occurs in the return type of a function-typed
+-- parameter. Existentially bind such sizes at the innermost possible
+-- position, mirroring what the type of the function argument looks
+-- like.
+bindExistentialInsts :: (ASTMappable e) => e -> TermTypeM e
+bindExistentialInsts = astMap tv
+  where
+    tv =
+      ASTMapper
+        { mapOnExp = astMap tv,
+          mapOnName = pure,
+          mapOnStructType = onStruct,
+          mapOnParamType = onStruct,
+          mapOnResRetType = \(RetType dims t) -> do
+            (t', ext) <- onType t
+            pure $ RetType (dims <> ext) t'
+        }
+    onStruct ::
+      (Substitutable (TypeBase Size u)) =>
+      TypeBase Size u ->
+      TermTypeM (TypeBase Size u)
+    onStruct t = do
+      (t', ext) <- onType t
+      -- Existential sizes at the top level of a type have nowhere to
+      -- be bound; this should not happen, but if it does, we leave
+      -- the type alone.
+      pure $ if null ext then t' else t
+    onType ::
+      (Substitutable (TypeBase Size u)) =>
+      TypeBase Size u ->
+      TermTypeM (TypeBase Size u, [VName])
+    onType t = do
+      constraints <- getConstraints
+      let (pending, reps) = pendingInstSizes constraints
+          repOf v = ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v reps
+      sizeFree mempty (find pending . fvVars . freeInExp) $ applySubst repOf t
+
+detectAmbiguousSizes :: TermTypeM ()
+detectAmbiguousSizes = do
+  collapseInstSizes 0
+  constraints <- getConstraints
+  mapM_ (notice constraints) $ M.toList $ M.map snd constraints
+  where
+    -- Sizes that arise from instantiating inferred types have
+    -- uninformative provenance. If a size variable with better
+    -- provenance (e.g. a source-level size binder, or an
+    -- instantiated size parameter) has been unified with the
+    -- ambiguous size, we report that variable instead. This affects
+    -- only the error message; which sizes are ambiguous is already
+    -- settled.
+    uninformative (Usage Nothing _) = True
+    uninformative (Usage (Just u) _) = u `elem` ["replaceTyVars", "instantiation"]
+
+    chase constraints w = case snd <$> M.lookup w constraints of
+      Just (Size (Just (Var w' _ _)) _) -> chase constraints (qualLeaf w')
+      _ -> w
+
+    blame constraints v usage
+      | uninformative usage,
+        (v', usage') : _ <-
+          [ (w, w_usage)
+          | (w, (_, Size (Just (Var w1 _ _)) w_usage)) <- M.toList constraints,
+            not $ uninformative w_usage,
+            chase constraints (qualLeaf w1) == v
+          ] =
+          (v', usage')
+      | otherwise = (v, usage)
+
+    notice constraints (v, Size Nothing usage) =
+      case blame constraints v usage of
+        (v', Usage Nothing loc) ->
+          typeError loc mempty . withIndexLink "ambiguous-size" $
+            "Ambiguous size" <+> dquotes (prettyName v') <> "."
+        (v', Usage (Just u) loc) ->
+          typeError loc mempty . withIndexLink "ambiguous-size" $
+            "Ambiguous size" <+> dquotes (prettyName v') <+> "arising from" <+> pretty u <> "."
+    notice _ _ = pure ()
 
 hiddenParamNames :: [Pat ParamType] -> [VName]
 hiddenParamNames params = hidden
@@ -1466,12 +1694,10 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, _)
       | k `elem` map typeParamName tparams =
           pure Nothing
-    closeOver (k, NoConstraint l usage) =
-      pure $ Just $ Left $ TypeParamType l k $ srclocOf usage
-    closeOver (k, ParamType l loc) =
-      pure $ Just $ Left $ TypeParamType l k $ srclocOf loc
-    closeOver (k, Size Nothing usage) =
-      pure $ Just $ Left $ TypeParamDim k $ srclocOf usage
+    closeOver (k, ParamType l _) =
+      pure $ Just $ Left $ TypeParamType l k mempty
+    closeOver (k, Size Nothing _) =
+      pure $ Just $ Left $ TypeParamDim k mempty
     closeOver (k, UnknownSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
@@ -1497,6 +1723,15 @@ letGeneralise ::
   TermTypeM ([TypeParam], [Pat ParamType], ResRetType)
 letGeneralise defname defloc tparams params restype =
   onFailure (CheckingLetGeneralise defname) $ do
+    cur_lvl <- curLevel
+    collapseInstSizes $ cur_lvl - length params
+
+    -- Re-normalise the types so that any instantiated sizes
+    -- collapsed above are expressed in terms of their canonical
+    -- variables, which can then be closed over.
+    params' <- mapM updateTypes params
+    restype' <- normTypeFully restype
+
     now_substs <- getConstraints
 
     -- Candidates for let-generalisation are those type variables that
@@ -1508,24 +1743,22 @@ letGeneralise defname defloc tparams params restype =
 
     -- Criteria (1) and (2) is implemented by looking at the binding
     -- level of the type variables.
-
-    cur_lvl <- curLevel
     let candidate (lvl, _) = lvl >= (cur_lvl - length params)
         new_substs = M.filter candidate now_substs
 
-    (tparams', RetType ret_dims restype') <-
+    (tparams', RetType ret_dims restype'') <-
       closeOverTypes
         defname
         defloc
         tparams
-        (map patternStructType params)
-        restype
+        (map patternStructType params')
+        restype'
         new_substs
 
-    restype'' <- updateTypes restype'
+    restype''' <- updateTypes restype''
 
     let used_sizes =
-          freeInType restype'' <> foldMap (freeInType . patternType) params
+          freeInType restype''' <> foldMap (freeInType . patternType) params'
     case filter ((`S.notMember` fvVars used_sizes) . typeParamName) $
       filter isSizeParam tparams' of
       [] -> pure ()
@@ -1535,7 +1768,7 @@ letGeneralise defname defloc tparams params restype =
     -- let-generalisation.
     modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` map typeParamName tparams'
 
-    pure (tparams', params, RetType ret_dims restype'')
+    pure (tparams', params', RetType ret_dims restype''')
 
 checkFunBody ::
   [Pat ParamType] ->
@@ -1574,15 +1807,6 @@ checkFunBody params body maybe_rettype loc = do
 
   pure body'
 
-arrayOfM ::
-  SrcLoc ->
-  StructType ->
-  Shape Size ->
-  TermTypeM StructType
-arrayOfM loc t shape = do
-  arrayElemType (mkUsage loc "use as array element") "type used in array" t
-  pure $ arrayOf shape t
-
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
 -- definitions, by treating them as 0-ary functions.
@@ -1617,11 +1841,10 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 
             -- Since this is a top-level function, we also resolve overloaded
             -- types, using either defaults or complaining about ambiguities.
-            fixOverloadedTypes $
-              typeVars rettype' <> foldMap (typeVars . patternType) params''
+            detectAmbiguousSizes
 
             -- Then replace all inferred types in the body and parameters.
-            body''' <- normTypeFully body''
+            body''' <- bindExistentialInsts =<< normTypeFully body''
             params''' <- mapM normTypeFully params''
             retdecl''' <- traverse updateTypes retdecl''
             rettype'' <- normTypeFully rettype'
@@ -1631,7 +1854,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 
             -- Check for various problems.
             mapM_ (mustBeIrrefutable . fmap toStruct) params''
-            localChecks body'''
+            localChecks tparams' body'''
 
             let ((body'''', updated_ret), errors) =
                   Consumption.checkValDef
@@ -1646,3 +1869,138 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
             mapM_ throwError errors
 
             pure (tparams', params''', retdecl''', updated_ret, body'''')
+
+-- Note [Size Inference]
+--
+-- Type checking of terms is split into two passes. The unsized type checker
+-- (Language.Futhark.TypeChecker.Terms.Unsized) infers types while ignoring
+-- sizes entirely - its solution maps type variables to types whose dimensions
+-- are all vacuous. The sized type checker (this module) receives that solution
+-- (the 'termTyVars' field) and is responsible only for inferring sizes: the
+-- concrete size of every dimension, and where existential quantifiers go. It
+-- never re-infers anything besides sizes and where existential quantifiers go.
+--
+-- Whenever the size checker needs the type of something that the unsized
+-- checker inferred, it instantiates the unsized type by replacing every
+-- dimension with a fresh size variable ('instTyVars' when instantiating a type
+-- scheme, 'replaceTyVars' elsewhere). Ordinary size unification then determines
+-- what these variables stand for. This works out simply enough, except for
+-- existential sizes.
+--
+-- ## Existential sizes
+--
+-- Consider
+--
+--   def (|>) '^a '^b (x: a) (f: a -> b) : b = f x
+--
+--   def main (xs: []i32) = xs |> filter (> 0)
+--
+-- where "b" is instantiated with the type of "filter (> 0)", which is [n]i32 ->
+-- ?[m].[m]i32. At instantiation time we only know the unsized type []i32 for
+-- "b" - existential sizes are invisible to the unsized pass, so we cannot know
+-- that the size of "b" might be existential to the function. Worse, if the
+-- instantiation does turn out to contain an existential size, then every
+-- occurrence of "b" in the instantiated type scheme denotes a *distinct*
+-- existential:
+--
+--   [n]i32 -> ([n]i32 -> ?[m].[m]i32) -> ?[m'].[m']i32
+--
+-- But if the instantiation turns out to have an ordinary size (say "xs |> map
+-- (+1)"), all occurrences denote the *same* size, and we must not lose that
+-- connection, or we would infer needlessly existential types.
+--
+-- We address this via three constraint forms (see 'Constraint'):
+--
+-- - InstSize: a canonical instantiated size, i.e. a dimension of the first
+--   occurrence of an instantiated type parameter (or an instantiated size
+--   parameter, which has the same nature).
+--
+-- - CopySize: a dimension of a later occurrence. These are given distinct names
+--   precisely so that occurrences can become distinct existentials, but as long
+--   as the size is not existential, a copy is equal to its canonical variable
+--   (and unification treats it so, by redirecting links to the canonical
+--   variable).
+--
+-- - ExistentialSize: When unification would otherwise fail by linking an
+--   instantiated size to a size bound locally in the other type (an existential
+--   or a parameter of a function type in the argument), it instead marks the
+--   canonical variable with this ('unifySizes'). We say that the instantiated
+--   size *absorbs* the locally bound size, and we call size variables that are
+--   permitted to do so *absorbable* (see below). Absorption is refused for
+--   unlifted type parameters, which cannot have existential sizes.
+--
+-- The pending existentials are then turned into proper sizes at the places that
+-- can bind them:
+--
+-- - checkApply binds pending sizes in the return type of an application using
+--   sizeFree: at the innermost RetType where possible, with the remainder
+--   becoming existentials of the application itself (AppRes).
+--
+-- - bindExistentialInsts does the same for pending sizes that remain in types
+--   recorded in the AST, in particular instantiated higher-order function
+--   types, where the existential occurs in the return type of a function-typed
+--   *parameter* and hence never passes through checkApply's return type.
+--
+-- - letGeneralise demotes instantiated sizes that are still pending and never
+--   became existential to ordinary sizes (collapseInstSizes), at which point
+--   they can be closed over as hidden size parameters. For local functions this
+--   recreates the per-use size freshness that the old type checker obtained
+--   from let-generalising type variables.
+--
+-- Two occurrences of an instantiated type parameter absorbed from the same
+-- source must moreover denote the *same* existential, or we would infer
+-- unwitnessed existentials where witnessed ones are possible. This is why
+-- ExistentialSize records the size it was unified with and CopySize records
+-- which occurrence it belongs to: pending sizes from the same occurrence with
+-- the same source are given a single fresh name ('pendingInstSizes' in Terms).
+--
+-- ## Dependent function types
+--
+-- A related problem is instantiating a type parameter with a dependent function
+-- type such as (n: i64) -> [n]i32 -> [n]i32. The unsized pass preserves
+-- parameter names, but the connection between the sizes and the binder is
+-- exactly what was erased. Since every instantiated size variable occurs
+-- exactly once, and binders are cloned between occurrences of the instantiated
+-- type, it is safe to link an instantiated size to a binder of the instantiated
+-- type itself - such binders are registered when the type is instantiated
+-- ('registerBinders'), and 'unifySizes' permits exactly those links. Linking to
+-- any *other* locally bound size is what signifies an existential (see above),
+-- or an error for sizes with no such privileges.
+--
+-- ## Absorption privileges
+--
+-- To make the term of art explicit: a fresh size variable is *absorbable* if
+-- unification may determine that it stands for an existential size. When an
+-- absorbable size meets a size that is bound locally within the type it is
+-- unified with, the mismatch is not an error; instead the absorbable size
+-- absorbs the locally bound size - it is marked as a pending existential
+-- (ExistentialSize), and is eventually existentially bound by the machinery
+-- above. A size variable that is not absorbable must be resolved to an ordinary
+-- size that is in scope, and encountering a locally bound size is an error for
+-- it. Mechanically, absorbable sizes are exactly those constrained by InstSize
+-- (or CopySize referring to one).
+--
+-- Which fresh sizes are absorbable is a fine line:
+--
+-- - Sizes arising from instantiation - of type parameters and of size
+--   parameters - are absorbable. They occur exactly once, and stand for
+--   "whatever size the context provides", which may well be existential.
+--
+-- - The sizes of a hole ('replaceTyVarsAbsorbable') are absorbable, as a hole
+--   adopts whatever type the context provides. This includes adopting declared
+--   existentials: a flexible existential that unification resolves to an
+--   absorbable size is absorbed by it (see the end of the arrow case of
+--   'unifyWith').
+--
+-- - Sizes in the types of lambda parameters and patterns ('replaceTyVars') are
+--   not absorbable. They name the sizes of actual bound values, and must be
+--   resolved to real sizes. For example, this is what rejects
+--
+--     def f : (k: i64) -> [k]i32 -> i64 = \_ xs -> length xs
+--
+--   where the size of "xs" would otherwise silently absorb "k", which is not in
+--   scope in the function body (tests/shapes/paramsize1.fut). Contrast with
+--   tests/issue1168.fut, where the same shape of program must be accepted
+--   because the inner function is size-generalised, and the *instantiation* of
+--   its hidden size parameter is what absorbs the bound size of the expected
+--   type.

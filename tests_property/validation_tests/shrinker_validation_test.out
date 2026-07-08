@@ -1,0 +1,12 @@
+Shrinker input arity mismatch.
+ shrinker shrink_bad_arity inputs: ["i32","u64","i32"]
+Expected exactly 2 inputs: (i32, u64).
+Shrinker input arity mismatch.
+ shrinker shrink_bad_arity2 inputs: []
+Expected exactly 2 inputs: (i32, u64).
+Shrinker Mismatch:
+Shrinker shrink_bad_input takes random value i64 but expected u64
+Shrinker output mismatch.
+Property prop_bad_output expects: i32
+Shrinker shrink_bad_output returns: "i64"
+Expected shrinker output to equal the property input type.

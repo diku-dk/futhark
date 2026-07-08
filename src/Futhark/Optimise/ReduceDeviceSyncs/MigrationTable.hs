@@ -502,6 +502,9 @@ graphStm stm = do
     -- END
     BasicOp UpdateAcc {} ->
       graphUpdateAcc (one bs) e
+    BasicOp (UserParam _name def) -> do
+      graphSimple bs e
+      one bs `reusesSubExp` def
     Apply fn _ _ _ ->
       graphApply fn bs e
     Match ses cases defbody _ ->
@@ -1078,7 +1081,7 @@ graphedScalarOperands e =
       collectSegLevel lvl
       collectSegSpace sp
       mapM_ collectSegBinOp ops
-    collectHostOp (SegOp (SegScan lvl sp _ _ ops)) = do
+    collectHostOp (SegOp (SegScan lvl sp _ _ ops _)) = do
       collectSegLevel lvl
       collectSegSpace sp
       mapM_ collectSegBinOp ops

@@ -15,7 +15,7 @@ def square [n] (xs: [n]i32) =
 entry prim [n] (xs: [n]i32) = square xs
 
 -- ==
--- entry: f_jvp f_vjp
+-- entry: f_jvp f_vjp f_jmp f_mjp
 -- input { [1,2,3,4,5] }
 -- output { [[2,0,0,0,0],
 --           [0,4,0,0,0],
@@ -28,3 +28,12 @@ entry f_jvp [n] (xs: [n]i32) =
 
 entry f_vjp [n] (xs: [n]i32) =
   tabulate n (\i -> vjp square xs (replicate n 0 with [i] = 1))
+
+entry f_jmp [n] (xs: [n]i32) =
+  let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
+  in jmp square xs seeds
+  |> transpose
+
+entry f_mjp [n] (xs: [n]i32) =
+  let seeds = tabulate n (\i -> replicate n 0 with [i] = 1)
+  in mjp square xs seeds

@@ -224,10 +224,10 @@ instance OpMetrics SizeOp where
 typeCheckSizeOp :: (TC.Checkable rep) => SizeOp -> TC.TypeM rep ()
 typeCheckSizeOp GetSize {} = pure ()
 typeCheckSizeOp GetSizeMax {} = pure ()
-typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int64] x
+typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require (Prim int64) x
 typeCheckSizeOp (CalcNumBlocks w _ tblock_size) = do
-  TC.require [Prim int64] w
-  TC.require [Prim int64] tblock_size
+  TC.require (Prim int64) w
+  TC.require (Prim int64) tblock_size
 
 -- | A host-level operation; parameterised by what else it can do.
 data HostOp op rep
@@ -341,7 +341,7 @@ instance (PrettyRep rep, PP.Pretty (op rep)) => PP.Pretty (HostOp op rep) where
   pretty (OtherOp op) = pretty op
   pretty (SizeOp op) = pretty op
   pretty (GPUBody ts body) =
-    "gpu" <+> PP.colon <+> ppTuple' (map pretty ts) <+> PP.nestedBlock "{" "}" (pretty body)
+    "gpu" <+> PP.colon <+> ppTuple' (map pretty ts) <+> PP.nestedBlock (pretty body)
 
 instance (OpMetrics (Op rep), OpMetrics (op rep)) => OpMetrics (HostOp op rep) where
   opMetrics (SegOp op) = opMetrics op
@@ -357,8 +357,8 @@ instance (RephraseOp op) => RephraseOp (HostOp op) where
 
 checkGrid :: (TC.Checkable rep) => KernelGrid -> TC.TypeM rep ()
 checkGrid grid = do
-  TC.require [Prim int64] $ unCount $ gridNumBlocks grid
-  TC.require [Prim int64] $ unCount $ gridBlockSize grid
+  TC.require (Prim int64) $ unCount $ gridNumBlocks grid
+  TC.require (Prim int64) $ unCount $ gridBlockSize grid
 
 checkSegLevel ::
   (TC.Checkable rep) =>

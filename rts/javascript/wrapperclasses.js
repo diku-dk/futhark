@@ -32,8 +32,12 @@ class FutharkArray {
   shape() {
     this.validCheck();
     var s = this.fshape(this.ctx.ctx, this.ptr) >> 3;
-    return Array.from(this.ctx.wasm.HEAP64.subarray(s, s + this.dim));
+    return this.ctx.wasm.HEAP64.subarray(s, s + this.dim);
   }
+
+  // get_shape() {
+  //   return BigInt64Array.from(this.shape());
+  // }
 
   toTypedArray(dims = this.shape()) {
     this.validCheck();
@@ -56,6 +60,10 @@ class FutharkArray {
         return Array.from(Array(d0), (x,i) => nest(offs + i * d1, ds.slice(1)));
       }
     })(0, dims);
+  }
+
+  async values() {
+    return this.toTypedArray();
   }
 }
 

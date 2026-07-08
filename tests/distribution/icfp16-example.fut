@@ -29,8 +29,8 @@ def main [n] [m] (pss: [n][m]i32) : ([n][m][m]i32, [n][m]i32) =
   let (asss, bss) =
     #[incremental_flattening(only_inner)]
     unzip (map (\(ps: []i32) : ([m][m]i32, [m]i32) ->
-                  #[incremental_flattening(only_inner)]
                   let ass =
+                    #[incremental_flattening(only_inner)]
                     map (\(p: i32) : [m]i32 ->
                            let cs = scan (+) 0 (0..1..<p)
                            let f = reduce (+) 0 cs

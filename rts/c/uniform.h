@@ -1104,10 +1104,10 @@ static inline uniform float fsignum32(uniform float x) {
 
 #ifdef FUTHARK_F64_ENABLED
 
-static inline uniform bool futrts_isinf64(uniform float x) {
+static inline uniform bool futrts_isinf64(uniform double x) {
   return !isnan(x) && isnan(x - x);
 }
-static inline uniform bool futrts_isfinite64(uniform float x) {
+static inline uniform bool futrts_isfinite64(uniform double x) {
   return !isnan(x) && !futrts_isinf64(x);
 }
 

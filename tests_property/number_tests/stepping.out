@@ -1,0 +1,2 @@
+Property prop_pair_backtrack (size=50, seed=REDACTED) failed after N tests:
+Counterexample: (3i32, 1i32)

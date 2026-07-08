@@ -32,6 +32,8 @@ module Futhark.IR.Prop
     expExtTypesFromPat,
     attrsForAssert,
     lamIsBinOp,
+    isIdentityLambda,
+    isNilLambda,
     ASTConstraints,
     IsOp (..),
     ASTRep (..),
@@ -281,3 +283,15 @@ lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
       Prim t <- Just $ patElemType pe
       pure (op, t, paramName xp, paramName yp)
     splitStm _ = Nothing
+
+-- | Is the given lambda an identity lambda?
+isIdentityLambda :: Lambda rep -> Bool
+isIdentityLambda lam =
+  map resSubExp (bodyResult (lambdaBody lam))
+    == map (Var . paramName) (lambdaParams lam)
+
+-- | Is the given lambda a nil lambda?
+isNilLambda :: Lambda rep -> Bool
+isNilLambda lam =
+  null (lambdaParams lam)
+    && isIdentityLambda lam

@@ -44,7 +44,7 @@ static void cache_hash(struct cache_hash *out, const char *in, size_t n) {
 }
 
 #define CACHE_HEADER_SIZE 8
-static const char cache_header[CACHE_HEADER_SIZE] = "FUTHARK\0";
+static const char cache_header[CACHE_HEADER_SIZE] = "FUTHARK";
 
 static int cache_restore(const char *fname, const struct cache_hash *hash,
                          unsigned char **buf, size_t *buflen) {
@@ -67,8 +67,8 @@ static int cache_restore(const char *fname, const struct cache_hash *hash,
   if (fseek(f, 0, SEEK_END) != 0) {
     goto error;
   }
-  int64_t f_size = (int64_t)ftell(f);
-  if (fseek(f, CACHE_HEADER_SIZE, SEEK_SET) != 0) {
+  int64_t f_size = (int64_t)ftello(f);
+  if (fseeko(f, CACHE_HEADER_SIZE, SEEK_SET) != 0) {
     goto error;
   }
 

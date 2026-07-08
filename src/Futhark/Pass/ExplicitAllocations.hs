@@ -16,6 +16,8 @@ module Futhark.Pass.ExplicitAllocations
     AllocEnv (..),
     SizeSubst (..),
     allocInStms,
+    allocInLambda,
+    allocInLParams,
     allocForArray,
     simplifiable,
     mkLetNamesB',
@@ -40,7 +42,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Either (partitionEithers)
-import Data.List (foldl', transpose, zip4)
+import Data.List (transpose, zip4)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -180,7 +182,7 @@ repairExpression ::
 repairExpression (BasicOp (Reshape v shape)) = do
   v_mem <- fst <$> lookupArraySummary v
   space <- lookupMemSpace v_mem
-  v' <- snd <$> ensureDirectArray (Just space) v
+  v' <- snd <$> allocLinearArray space (baseName v) v
   pure $ BasicOp $ Reshape v' shape
 repairExpression e =
   error $ "repairExpression:\n" <> prettyString e
@@ -511,7 +513,14 @@ ensureDirectArray space_ok v = do
   default_space <- askDefaultSpace
   if LMAD.isDirect lmad && maybe True (== mem_space) space_ok
     then pure (mem, v)
-    else needCopy (fromMaybe default_space space_ok)
+    else
+      if maybe True (== mem_space) space_ok
+        then do
+          mem' <- newVName $ baseName mem <> "_direct"
+          v' <- newVName $ baseName v <> "_v"
+          letBindNames [mem', v'] $ Op $ EnsureDirect v
+          pure (mem', v')
+        else needCopy (fromMaybe default_space space_ok)
   where
     needCopy space =
       -- We need to do a new allocation, copy 'v', and make a new
@@ -1078,6 +1087,8 @@ simplifyMemOp ::
   Engine.SimpleM rep (MemOp inner (Engine.Wise rep), Stms (Engine.Wise rep))
 simplifyMemOp _ (Alloc size space) =
   (,) <$> (Alloc <$> Engine.simplify size <*> pure space) <*> pure mempty
+simplifyMemOp _ (EnsureDirect v) =
+  (,) <$> (EnsureDirect <$> Engine.simplify v) <*> pure mempty
 simplifyMemOp onInner (Inner k) = do
   (k', hoisted) <- onInner k
   pure (Inner k', hoisted)
@@ -1122,6 +1133,8 @@ simplifiable innerUsage simplifyInnerOp =
       UT.sizeUsage size
     opUsage (Alloc _ _) =
       mempty
+    opUsage (EnsureDirect _) =
+      mempty
     opUsage (Inner inner) =
       innerUsage inner
 
@@ -1131,3 +1144,28 @@ data ExpHint
 
 defaultExpHints :: (ASTRep rep, HasScope rep m) => Exp rep -> m [ExpHint]
 defaultExpHints e = map (const NoHint) <$> expExtType e
+
+-- I have no Idea if this is correct
+allocInLParams ::
+  (Allocable fromrep torep inner) =>
+  SubExp ->
+  TPrimExp Int64 VName ->
+  [LParam fromrep] ->
+  AllocM fromrep torep [LParam torep]
+allocInLParams num_threads idxs = mapM alloc
+  where
+    alloc x =
+      case paramType x of
+        Array pt shape u -> do
+          let t = paramType x `arrayOfRow` num_threads
+          mem <- allocForArray t =<< askDefaultSpace
+          let base_dims = map pe64 $ arrayDims t
+              lmad_base = LMAD.iota 0 base_dims
+              lmad_x =
+                LMAD.slice lmad_base $
+                  fullSliceNum base_dims [DimFix idxs]
+          pure $ x {paramDec = MemArray pt shape u $ ArrayIn mem lmad_x}
+        Prim bt -> pure $ x {paramDec = MemPrim bt}
+        Mem space -> pure $ x {paramDec = MemMem space}
+        -- This next case will never happen.
+        Acc acc ispace ts u -> pure $ x {paramDec = MemAcc acc ispace ts u}

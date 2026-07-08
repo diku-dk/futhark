@@ -11,6 +11,7 @@ module Futhark.Compiler
     module Futhark.Compiler.Config,
     readProgramFile,
     readProgramFiles,
+    readProgramFilesExceptKnown,
     readProgramOrDie,
     readUntypedProgram,
     readUntypedProgramOrDie,
@@ -24,6 +25,7 @@ import Data.Bifunctor (first)
 import Data.List (sortOn)
 import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (..), posCoff, posFile)
+import Data.Map qualified as M
 import Data.Text.IO qualified as T
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Compiler.Config
@@ -171,11 +173,21 @@ readProgramFile extra_eps =
 -- including all imports.
 readProgramFiles ::
   (MonadError CompilerError m, MonadIO m) =>
-  [I.Name] ->
+  [Name] ->
   [FilePath] ->
   m (Warnings, Imports, VNameSource)
-readProgramFiles extra_eps =
-  throwOnProgError <=< liftIO . readLibrary extra_eps
+readProgramFiles extra_eps = readProgramFilesExceptKnown extra_eps M.empty
+
+-- | Read and type-check a Futhark library, comprising multiple files,
+-- including all imports. Use a VFS cache for IO.
+readProgramFilesExceptKnown ::
+  (MonadError CompilerError m, MonadIO m) =>
+  [I.Name] ->
+  VFS ->
+  [FilePath] ->
+  m (Warnings, Imports, VNameSource)
+readProgramFilesExceptKnown extra_eps vfs files =
+  throwOnProgError <=< liftIO $ readLibraryExceptKnown extra_eps files vfs
 
 -- | Read and parse (but do not type-check) a Futhark program,
 -- including all imports.

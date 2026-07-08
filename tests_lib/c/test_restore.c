@@ -41,8 +41,20 @@ int main() {
   struct futhark_bool_1d *out1;
   bool out2;
 
-  err = futhark_entry_unmk(ctx, &out0, &out1, &out2, whatever);
+  struct futhark_opaque_tup3_arr1d_i64_arr1d_bool_bool *unmk_out;
+  err = futhark_entry_unmk(ctx, &unmk_out, whatever);
   assert(err == 0);
+
+  err = futhark_project_opaque_tup3_arr1d_i64_arr1d_bool_bool_0(ctx, &out0, unmk_out);
+  assert(err == 0);
+  err = futhark_project_opaque_tup3_arr1d_i64_arr1d_bool_bool_1(ctx, &out1, unmk_out);
+  assert(err == 0);
+  err = futhark_project_opaque_tup3_arr1d_i64_arr1d_bool_bool_2(ctx, &out2, unmk_out);
+  assert(err == 0);
+
+  err = futhark_free_opaque_tup3_arr1d_i64_arr1d_bool_bool(ctx, unmk_out);
+  assert(err == 0);
+
   assert(out2 == 1);
 
   free(bytes0);

@@ -76,6 +76,8 @@ compilePrimExp f (CmpOpExp cmp x y) = do
   y' <- compilePrimExp f y
   pure $ case cmp of
     CmpEq {} -> [C.cexp|$exp:x' == $exp:y'|]
+    FCmpLt Float16 -> [C.cexp|cmplt16($exp:x', $exp:y')|]
+    FCmpLe Float16 -> [C.cexp|cmple16($exp:x', $exp:y')|]
     FCmpLt {} -> [C.cexp|$exp:x' < $exp:y'|]
     FCmpLe {} -> [C.cexp|$exp:x' <= $exp:y'|]
     CmpLlt {} -> [C.cexp|$exp:x' < $exp:y'|]
@@ -411,6 +413,9 @@ compileCode (Call dests fname args) = do
       <*> pure fname
       <*> mapM compileArg args
   stms $ mconcat unpack_dest
+compileCode (GetUserParam v name def) = do
+  (val, set) <- asks (opsGetParam . envOperations) <*> pure name
+  stm [C.cstm|$id:v = $exp:set ? $exp:val : $exp:def;|]
 
 -- | Compile an 'Copy' using sequential nested loops, but
 -- parameterised over how to do the reads and writes.

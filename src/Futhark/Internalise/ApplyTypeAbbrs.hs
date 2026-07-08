@@ -43,8 +43,8 @@ removeTypeVariablesInType types =
   applySubst (`M.lookup` types)
 
 substEntry :: Types -> EntryPoint -> EntryPoint
-substEntry types (EntryPoint params ret) =
-  EntryPoint (map onEntryParam params) (onEntryType ret)
+substEntry types (EntryPoint params ret doc) =
+  EntryPoint (map onEntryParam params) (onEntryType ret) doc
   where
     onEntryParam (EntryParam v t) =
       EntryParam v $ onEntryType t
@@ -54,7 +54,7 @@ substEntry types (EntryPoint params ret) =
 -- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Types -> ValBind -> ValBind
 removeTypeVariables types valbind = do
-  let (ValBind entry _ _ (Info (RetType dims rettype)) _ pats body _ _ _) = valbind
+  let (ValBind entry _ _ _ (Info (RetType dims rettype)) _ pats body _ _ _) = valbind
       mapper =
         ASTMapper
           { mapOnExp = onExp,

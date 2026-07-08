@@ -184,7 +184,7 @@ mkScanFinalMap ops w scan_lam xs ys ds = do
           )
 
   iota <- letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
-  letTupExp "scan_contribs" $ Op $ Screma w (iota : xs) $ mapSOAC map_lam
+  letTupExp "scan_contribs" . Op . Screma w (iota : xs) =<< mapSOAC map_lam
 
 -- | Scan special cases.
 data SpecialCase = ZeroQuadrant | MatrixMul deriving (Show)
@@ -286,11 +286,11 @@ scanRight as w scan = do
   map_scan <- revArrLam as
   -- perform the scan
   scan_res <-
-    letTupExp "adj_ctrb_scan" . Op . Screma w [iota] $
-      scanomapSOAC [rev_scan] map_scan
+    letTupExp "adj_ctrb_scan" . Op . Screma w [iota]
+      =<< scanomapSOAC [rev_scan] map_scan
   -- flip the output array again
   rev_lam <- revArrLam scan_res
-  letTupExp "reverse_scan_result" $ Op $ Screma w [iota] $ mapSOAC rev_lam
+  letTupExp "reverse_scan_result" . Op . Screma w [iota] =<< mapSOAC rev_lam
   where
     revArrLam :: [VName] -> ADM (Lambda SOACS)
     revArrLam arrs = do
@@ -343,13 +343,12 @@ asLiftPPAD as w e = do
                 nm1 <- toSubExp "n_minus_one" $ pe64 w - 1
                 pure $ BasicOp $ CmpOp (CmpSlt Int64) (Var $ paramName par_i) nm1
             )
-            ( buildBody_ $ (\x -> [subExpRes x]) <$> (letSubExp "val" =<< eIndex arr [toExp $ le64 (paramName par_i) + 1])
-            )
+            (buildBody_ $ (\x -> [subExpRes x]) <$> (letSubExp "val" =<< eIndex arr [toExp $ le64 (paramName par_i) + 1]))
             (buildBody_ $ pure [subExpRes arr_e])
       pure $ varRes a_lift
 
   iota <- letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
-  letTupExp "as_lift" $ Op $ Screma w [iota] $ mapSOAC lmb
+  letTupExp "as_lift" . Op . Screma w [iota] =<< mapSOAC lmb
 
 ysRightPPAD :: [VName] -> SubExp -> [SubExp] -> ADM [VName]
 ysRightPPAD ys w e = do
@@ -359,15 +358,13 @@ ysRightPPAD ys w e = do
       a_lift <-
         letExp "y_right"
           =<< eIf
-            ( pure $ BasicOp $ CmpOp (CmpEq int64) (Var $ paramName par_i) (constant (0 :: Int64))
-            )
+            (pure $ BasicOp $ CmpOp (CmpEq int64) (Var $ paramName par_i) (constant (0 :: Int64)))
             (buildBody_ $ pure [subExpRes arr_e])
-            ( buildBody_ $ (\x -> [subExpRes x]) <$> (letSubExp "val" =<< eIndex arr [toExp $ le64 (paramName par_i) - 1])
-            )
+            (buildBody_ $ (\x -> [subExpRes x]) <$> (letSubExp "val" =<< eIndex arr [toExp $ le64 (paramName par_i) - 1]))
       pure $ varRes a_lift
 
   iota <- letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
-  letTupExp "ys_right" $ Op $ Screma w [iota] $ mapSOAC lmb
+  letTupExp "ys_right" . Op . Screma w [iota] =<< mapSOAC lmb
 
 finalMapPPAD :: VjpOps -> [VName] -> Scan SOACS -> ADM (Lambda SOACS)
 finalMapPPAD ops as scan = do
@@ -382,7 +379,7 @@ finalMapPPAD ops as scan = do
     eLambda op_bar_2 $ toExp . Var . paramName <$> par_y_right ++ par_a
 
 diffScan :: VjpOps -> [VName] -> SubExp -> [VName] -> Scan SOACS -> ADM ()
-diffScan ops ys w as scan = do
+diffScan ops ys w as scan = locallyNonvector (ys, scan, as) $ do
   -- ys ~ results of scan, w ~ size of input array, as ~ (unzipped)
   -- arrays, scan ~ scan: operator with ne
   scan_case <- identifyCase ops $ scanLambda scan
@@ -405,20 +402,19 @@ diffScan ops ys w as scan = do
       ys_right <- ysRightPPAD ys w e
 
       final_lmb <- finalMapPPAD ops as scan
-      letTupExp "as_bar" $ Op $ Screma w (ys_right ++ as ++ rs_adj) $ mapSOAC final_lmb
+      letTupExp "as_bar" . Op . Screma w (ys_right ++ as ++ rs_adj)
+        =<< mapSOAC final_lmb
     GenericIFL23 sc -> do
       -- IFL23
       map1_lam <- mkScanFusedMapLam ops w (scanLambda scan) as ys ys_adj sc d
       scans_lin_fun_o <- mkScanLinFunO (head as_ts) sc
       scan_lams <- mkScans (specialScans sc) scans_lin_fun_o
-      iota <-
-        letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
+      iota <- letExp "iota" $ iota64 w
       r_scan <-
-        letTupExp "adj_ctrb_scan" . Op . Screma w [iota] $
-          scanomapSOAC scan_lams map1_lam
+        letTupExp "adj_ctrb_scan" . Op . Screma w [iota]
+          =<< scanomapSOAC scan_lams map1_lam
       mkScanFinalMap ops w (scanLambda scan) as ys (splitScanRes sc r_scan d)
   -- Goal: calculate as_contribs in new way
-  -- zipWithM_ updateAdj as as_contribs -- as_bar += new adjoint
   zipWithM_ updateAdj as as_contribs
   where
     mkScans :: Int -> Scan SOACS -> ADM [Scan SOACS]
@@ -461,8 +457,8 @@ diffScanVec ops ys aux w lam ne as m = do
         Screma w (map paramName as_par) scan_form
 
     transp_ys <-
-      letTupExp "trans_ys" . Op $
-        Screma n (transp_as ++ subExpVars ne) (mapSOAC map_lam)
+      letTupExp "trans_ys" . Op . Screma n (transp_as ++ subExpVars ne)
+        =<< mapSOAC map_lam
 
     forM (zip ys transp_ys) $ \(y, x) ->
       auxing aux $ letBindNames [y] $ BasicOp $ Rearrange x rear
@@ -470,7 +466,7 @@ diffScanVec ops ys aux w lam ne as m = do
   foldr (vjpStm ops) m stmts
 
 diffScanAdd :: VjpOps -> VName -> SubExp -> Lambda SOACS -> SubExp -> VName -> ADM ()
-diffScanAdd _ops ys n lam' ne as = do
+diffScanAdd _ops ys n lam' ne as = locallyNonvector (ys, lam', as) $ do
   lam <- renameLambda lam'
   ys_bar <- lookupAdjVal ys
 
@@ -480,10 +476,11 @@ diffScanAdd _ops ys n lam' ne as = do
     letExp "iota" $ BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
 
   scan_res <-
-    letExp "res_rev" $ Op $ Screma n [iota] $ scanomapSOAC [Scan lam [ne]] map_scan
+    letExp "res_rev" . Op . Screma n [iota]
+      =<< scanomapSOAC [Scan lam [ne]] map_scan
 
   rev_lam <- rev_arr_lam scan_res
-  contrb <- letExp "contrb" $ Op $ Screma n [iota] $ mapSOAC rev_lam
+  contrb <- letExp "contrb" . Op . Screma n [iota] =<< mapSOAC rev_lam
 
   updateAdj as contrb
   where

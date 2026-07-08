@@ -488,6 +488,7 @@ analyseBasicOp ctx expression pats =
           concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)
         FlatIndex name _ -> varInfoFromNames ctx $ oneName name
         FlatUpdate name _ source -> varInfoFromNames ctx $ namesFromList [name, source]
+        UserParam _name def -> varInfoFromSubExp def
       ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
    in (ctx', mempty)
   where
@@ -688,7 +689,7 @@ instance Pretty (DimAccess rep) where
       Nothing -> True
       Just n ->
         length (dependencies dim_access) == 1 && n == head (map fst $ M.toList $ dependencies dim_access)
-        -- Only print the original name if it is different from the first (and single) dependency
+      -- Only print the original name if it is different from the first (and single) dependency
       then
         "dependencies"
           <+> equals

@@ -64,6 +64,7 @@ standardRules =
 removeUnnecessaryCopy :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Replicate (Shape []) (Var v))
   | not (v `UT.isConsumed` used),
+    allNames (not . (`UT.isConsumed` used)) $ ST.lookupAliases v vtable,
     -- This two first clauses below are too conservative, but the
     -- problem is that 'v' might not look like it has been consumed if
     -- it is consumed in an outer scope.  This is because the

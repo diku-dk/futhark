@@ -7,11 +7,23 @@ int main() {
 
   int err;
 
+  struct futhark_opaque_tup2_i32_r *out;
+
+  err = futhark_entry_a(ctx, &out, true);
+  assert(err == 0);
+
   struct futhark_opaque_r *r;
   int x;
-  err = futhark_entry_a(ctx, &x, &r, true);
+
+  err = futhark_project_opaque_tup2_i32_r_0(ctx, &x, out);
   assert(err == 0);
   assert(x == 32);
+
+  err = futhark_project_opaque_tup2_i32_r_1(ctx, &r, out);
+  assert(err == 0);
+
+  err = futhark_free_opaque_tup2_i32_r(ctx, out);
+  assert(err == 0);
 
   err = futhark_free_opaque_r(ctx, r);
   assert(err == 0);

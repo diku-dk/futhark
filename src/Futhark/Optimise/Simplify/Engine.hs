@@ -42,6 +42,8 @@ module Futhark.Optimise.Simplify.Engine
     asksEngineEnv,
     askVtable,
     localVtable,
+    Protect,
+    protectIf,
 
     -- * Building blocks
     SimplifiableRep,
@@ -68,7 +70,7 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bitraversable
 import Data.Either
-import Data.List (find, foldl', inits, mapAccumL)
+import Data.List (find, inits, mapAccumL)
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -284,6 +286,8 @@ emptyOfType ctx_names (Array et shape _) = do
     zeroIfContext (Var v) | v `elem` ctx_names = intConst Int64 0
     zeroIfContext se = se
 
+-- | Protect a hoisted statement by enclosing it in a branch (or doing something
+-- smarter for certain statements).
 protectIf ::
   (MonadBuilder m) =>
   Protect m ->
@@ -657,7 +661,7 @@ cheapExp _ = True -- Used to be False, but
 
 loopInvariantStm :: (ASTRep rep) => ST.SymbolTable rep -> Stm rep -> Bool
 loopInvariantStm vtable =
-  all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
+  allNames (`nameIn` ST.availableAtClosestLoop vtable) . freeIn
 
 matchBlocker ::
   (SimplifiableRep rep) =>
@@ -677,7 +681,7 @@ matchBlocker cond (MatchDec _ ifsort) = do
       -- contributes to memory or array size, because that will allow
       -- allocations to be hoisted.
       cond_loop_invariant =
-        all (`nameIn` ST.availableAtClosestLoop vtable) $ namesToList $ freeIn cond
+        allNames (`nameIn` ST.availableAtClosestLoop vtable) $ freeIn cond
 
       desirableToHoist usage stm =
         is_alloc_fun stm

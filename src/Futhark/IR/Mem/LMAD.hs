@@ -17,6 +17,7 @@ module Futhark.IR.Mem.LMAD
     coerce,
     permute,
     shape,
+    rank,
     substitute,
     iota,
     equivalent,
@@ -277,6 +278,10 @@ substitute tab (LMAD offset dims) =
 shape :: LMAD num -> Shape num
 shape = map ldShape . dims
 
+-- | Rank of an LMAD.
+rank :: LMAD num -> Int
+rank = length . shape
+
 iotaStrided ::
   (IntegralExp num) =>
   -- | Offset
@@ -410,11 +415,9 @@ disjoint2 _ _ less_thans non_negatives lmad1 lmad2 =
            ) of
         (Just interval1'', Just interval2'') ->
           isNothing
-            ( selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval1''
-            )
+            (selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval1'')
             && isNothing
-              ( selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval2''
-              )
+              (selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval2'')
             && not
               ( all
                   (uncurry (intervalOverlap less_thans non_negatives))

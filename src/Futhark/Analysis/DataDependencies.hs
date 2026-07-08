@@ -2,13 +2,16 @@
 module Futhark.Analysis.DataDependencies
   ( Dependencies,
     dataDependencies,
+    dataDependencies',
     depsOf,
     depsOf',
+    depsOfVar,
     depsOfArrays,
     depsOfShape,
     lambdaDependencies,
     reductionDependencies,
     findNecessaryForReturned,
+    depsOfNames,
   )
 where
 
@@ -23,13 +26,13 @@ import Futhark.IR
 type Dependencies = M.Map VName Names
 
 -- | Compute the data dependencies for an entire body.
-dataDependencies :: (ASTRep rep) => Body rep -> Dependencies
+dataDependencies :: (ASTRep rep) => GBody rep res -> Dependencies
 dataDependencies = dataDependencies' M.empty
 
 dataDependencies' ::
   (ASTRep rep) =>
   Dependencies ->
-  Body rep ->
+  GBody rep res ->
   Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
@@ -78,13 +81,13 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
               map comb $
                 zip3
                   (patElems pat)
-                  ( L.transpose . zipWith (map . depsOf) cases_deps $
-                      map (map resSubExp . bodyResult . caseBody) cases
+                  ( L.transpose . zipWith (map . depsOfRes) cases_deps $
+                      map (bodyResult . caseBody) cases
                   )
-                  (map (depsOf defbody_deps . resSubExp) (bodyResult defbody))
+                  (map (depsOfRes defbody_deps) (bodyResult defbody))
        in M.unions $ [branchdeps, deps, defbody_deps] ++ cases_deps
-    grow deps (Let pat _ e) =
-      let free = freeIn pat <> freeIn e
+    grow deps (Let pat aux e) =
+      let free = freeIn pat <> freeIn e <> freeIn aux
           free_deps = depsOfNames deps free
        in M.fromList [(name, free_deps) | name <- patNames pat] `M.union` deps
 
@@ -100,7 +103,7 @@ depsOfVar :: Dependencies -> VName -> Names
 depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
 
 depsOfRes :: Dependencies -> SubExpRes -> Names
-depsOfRes deps (SubExpRes _ se) = depsOf deps se
+depsOfRes deps (SubExpRes cs se) = depsOf deps se <> depsOfNames deps (freeIn cs)
 
 -- | Extend @names@ with direct dependencies in @deps@.
 depsOfNames :: Dependencies -> Names -> Names

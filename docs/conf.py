@@ -526,6 +526,13 @@ man_pages: List[Tuple[str, str, str, List[Any], int]] = [
         [],
         1,
     ),
+    (
+        "man/futhark-lsp",
+        "futhark-lsp",
+        "language server for Futhark",
+        [],
+        1,
+    ),
     ("man/futhark-pkg", "futhark-pkg", "manage Futhark packages", [], 1),
     (
         "man/futhark-literate",

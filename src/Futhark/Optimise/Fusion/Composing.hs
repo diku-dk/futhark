@@ -69,14 +69,14 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
       lam2
         { lambdaParams =
             [ Param mempty name t
-              | Ident name t <- lam2redparams ++ M.keys inputmap
+            | Ident name t <- lam2redparams ++ M.keys inputmap
             ],
           lambdaBody = new_body2'
         }
     new_body2 =
       let stms res =
             [ certify cs $ mkLet [p] $ BasicOp $ SubExp e
-              | (p, SubExpRes cs e) <- zip pat res
+            | (p, SubExpRes cs e) <- zip pat res
             ]
           bindLambda res =
             stmsFromList (stms res) `insertStms` makeCopiesInner (lambdaBody lam2)

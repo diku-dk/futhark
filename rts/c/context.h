@@ -109,7 +109,7 @@ void futhark_context_config_set_cache_file(struct futhark_context_config *cfg, c
 }
 
 int futhark_get_tuning_param_count(void) {
-  return num_tuning_params;
+  return NUM_TUNING_PARAMS;
 }
 
 const char *futhark_get_tuning_param_name(int i) {
@@ -142,13 +142,13 @@ struct futhark_context_config* futhark_context_config_new(void) {
   cfg->profiling = 0;
   cfg->logging = 0;
   cfg->cache_fname = NULL;
-  cfg->num_tuning_params = num_tuning_params;
-  cfg->tuning_params = malloc(cfg->num_tuning_params * sizeof(int64_t));
-  memcpy(cfg->tuning_params, tuning_param_defaults,
-         cfg->num_tuning_params * sizeof(int64_t));
-  cfg->tuning_param_names = tuning_param_names;
-  cfg->tuning_param_vars = tuning_param_vars;
-  cfg->tuning_param_classes = tuning_param_classes;
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+    cfg->tuning_params[i].set = false;
+    cfg->tuning_params[i].val = tuning_param_defaults[i];
+    cfg->tuning_params[i].name = tuning_param_names[i];
+    cfg->tuning_params[i].var = tuning_param_vars[i];
+    cfg->tuning_params[i].class = tuning_param_classes[i];
+  }
   backend_context_config_setup(cfg);
   return cfg;
 }
@@ -157,7 +157,6 @@ void futhark_context_config_free(struct futhark_context_config* cfg) {
   assert(!cfg->in_use);
   backend_context_config_teardown(cfg);
   free(cfg->cache_fname);
-  free(cfg->tuning_params);
   free(cfg);
 }
 
@@ -184,7 +183,6 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   ctx->profiling_paused = 0;
   ctx->error = NULL;
   ctx->log = stderr;
-  set_tuning_params(ctx);
   if (backend_context_setup(ctx) == 0) {
     setup_program(ctx);
     init_constants(ctx);

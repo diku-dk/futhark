@@ -41,7 +41,9 @@ data FutharkConfig = FutharkConfig
     -- | Additional functions that should be exposed as entry points.
     futharkEntryPoints :: [Name],
     -- | If false, disable type-checking
-    futharkTypeCheck :: Bool
+    futharkTypeCheck :: Bool,
+    -- | If true, strip provenance from program.
+    futharkStripProvenance :: Bool
   }
 
 -- | The default compiler configuration.
@@ -53,5 +55,6 @@ newFutharkConfig =
       futharkWerror = False,
       futharkSafe = False,
       futharkEntryPoints = [],
-      futharkTypeCheck = True
+      futharkTypeCheck = True,
+      futharkStripProvenance = False
     }

@@ -4,7 +4,7 @@ module Language.Futhark.SyntaxTests (tests) where
 
 import Control.Applicative hiding (many, some)
 import Data.Bifunctor
-import Data.Char (isAlpha)
+import Data.Char (isAlphaNum)
 import Data.Functor
 import Data.Map qualified as M
 import Data.String
@@ -12,7 +12,7 @@ import Data.Text qualified as T
 import Data.Void
 import Language.Futhark
 import Language.Futhark.Parser (SyntaxError (syntaxErrorMsg), parseExp, parseType)
-import Language.Futhark.Primitive.Parse (constituent, keyword, lexeme)
+import Language.Futhark.Primitive.Parse (keyword, lexeme)
 import Language.Futhark.PrimitiveTests ()
 import Test.QuickCheck
 import Test.Tasty
@@ -54,8 +54,21 @@ instance IsString VName where
     let (tag, s') = bimap reverse (reverse . tail) $ span (/= '_') $ reverse s
      in VName (fromString s') (read tag)
 
-instance (IsString v) => IsString (QualName v) where
-  fromString = QualName [] . fromString
+pQualVName :: Parser (QualName VName)
+pQualVName = do
+  xs <- pVName `sepBy1` "."
+  pure $ QualName (init xs) (last xs)
+
+pQualName :: Parser (QualName Name)
+pQualName = do
+  xs <- pName `sepBy1` "."
+  pure $ QualName (init xs) (last xs)
+
+instance IsString (QualName VName) where
+  fromString = fromStringParse pQualVName "QualName VName"
+
+instance IsString (QualName Name) where
+  fromString = fromStringParse pQualName "QualName Name"
 
 instance IsString UncheckedTypeExp where
   fromString =
@@ -70,24 +83,21 @@ braces = between (lexeme "{") (lexeme "}")
 brackets = between (lexeme "[") (lexeme "]")
 parens = between (lexeme "(") (lexeme ")")
 
+constituent :: Char -> Bool
+constituent c = isAlphaNum c || (c `elem` ("_/'+-=!&^<>*|%" :: String))
+
 pName :: Parser Name
 pName =
-  lexeme . fmap nameFromString $
-    (:) <$> satisfy isAlpha <*> many (satisfy constituent)
+  lexeme . fmap nameFromString $ some $ satisfy constituent
 
 pVName :: Parser VName
 pVName = lexeme $ do
   (s, tag) <-
-    satisfy constituent
-      `manyTill_` try pTag
-      <?> "variable name"
+    satisfy constituent `manyTill_` try pTag <?> "variable name"
   pure $ VName (nameFromString s) tag
   where
     pTag =
       "_" *> L.decimal <* notFollowedBy (satisfy constituent)
-
-pQualName :: Parser (QualName VName)
-pQualName = QualName [] <$> pVName
 
 pPrimType :: Parser PrimType
 pPrimType =
@@ -112,15 +122,13 @@ pPrimType =
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [lexeme "*" $> Unique, pure Nonunique]
 
-pDim :: Parser d -> Parser d
-pDim = brackets
-
 pSize :: Parser Size
 pSize =
-  choice
-    [ flip sizeFromInteger mempty <$> lexeme L.decimal,
-      flip sizeFromName mempty <$> pQualName
-    ]
+  brackets $
+    choice
+      [ flip sizeFromInteger mempty <$> lexeme L.decimal,
+        flip sizeFromName mempty <$> pQualVName
+      ]
 
 pScalarNonFun :: Parser d -> Parser (ScalarTypeBase d Uniqueness)
 pScalarNonFun pd =
@@ -132,10 +140,10 @@ pScalarNonFun pd =
     ]
   where
     pField = (,) <$> pName <* lexeme ":" <*> pType pd
-    pTypeVar = TypeVar <$> pUniqueness <*> pQualName <*> many pTypeArg
+    pTypeVar = TypeVar <$> pUniqueness <*> pQualVName <*> many pTypeArg
     pTypeArg =
       choice
-        [ TypeArgDim <$> pDim pd,
+        [ TypeArgDim <$> pd,
           TypeArgType . second (const NoUniqueness) <$> pTypeArgType
         ]
     pTypeArgType =
@@ -148,7 +156,7 @@ pArrayType :: Parser d -> Parser (TypeBase d Uniqueness)
 pArrayType pd =
   Array
     <$> pUniqueness
-    <*> (Shape <$> some (pDim pd))
+    <*> (Shape <$> some pd)
     <*> (second (const NoUniqueness) <$> pScalarNonFun pd)
 
 pNonFunType :: Parser d -> Parser (TypeBase d Uniqueness)
@@ -212,7 +220,9 @@ instance IsString (ScalarTypeBase () NoUniqueness) where
 
 instance IsString (TypeBase () NoUniqueness) where
   fromString =
-    fromStringParse (second (const NoUniqueness) <$> pType (pure ())) "Type"
+    fromStringParse
+      (second (const NoUniqueness) <$> pType (brackets $ pure ()))
+      "Type"
 
 instance IsString StructType where
   fromString =

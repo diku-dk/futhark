@@ -45,7 +45,6 @@ module Futhark.Optimise.Sink (sinkGPU, sinkMC) where
 
 import Control.Monad.State
 import Data.Bifunctor
-import Data.List (foldl')
 import Data.Map qualified as M
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -103,7 +102,7 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
     sunkHere v stm =
       v
         `nameIn` free_in_stms
-        && all (`ST.available` vtable) (namesToList (freeIn stm))
+        && allNames (`ST.available` vtable) (freeIn stm)
     sunk = namesFromList $ foldMap (patNames . stmPat) sunk_stms
 
 optimiseLoop ::
@@ -222,7 +221,13 @@ optimiseSegOp onOp vtable sinking op =
   where
     opMapper scope =
       identitySegOpMapper
-        { mapOnSegOpLambda = \lam -> do
+        { mapOnSegBinOpLambda = \lam -> do
+            let (body, sunk) =
+                  optimiseBody onOp op_vtable sinking $
+                    lambdaBody lam
+            modify (<> sunk)
+            pure lam {lambdaBody = body},
+          mapOnSegPostOpLambda = \lam -> do
             let (body, sunk) =
                   optimiseBody onOp op_vtable sinking $
                     lambdaBody lam

@@ -93,9 +93,10 @@ void futhark_context_config_set_default_threshold(struct futhark_context_config 
 int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
                                             const char *param_name,
                                             size_t new_value) {
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
-      cfg->tuning_params[i] = new_value;
+  for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
+    if (strcmp(param_name, cfg->tuning_params[i].name) == 0) {
+      cfg->tuning_params[i].val = new_value;
+      cfg->tuning_params[i].set = true;
       return 0;
     }
   }

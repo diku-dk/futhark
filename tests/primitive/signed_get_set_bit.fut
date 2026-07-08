@@ -79,9 +79,9 @@ entry test_i32_set1 = map2 (\a bit -> i32.set_bit bit a 1)
 
 -- ==
 -- entry: test_i64_set1
--- input { [8i64, 8i64, 24i64, 4294967295i64, 4294967295i64]
---         [3,    2,    3,     31,            30] }
--- output { [8i64, 12i64, 24i64, 4294967295i64, 4294967295i64] }
+-- input { [8i64, 8i64, 24i64, 4294967295i64, 4294967295i64, 0i64]
+--         [3,    2,    3,     31,            30,            32] }
+-- output { [8i64, 12i64, 24i64, 4294967295i64, 4294967295i64, 4294967296i64] }
 
 entry test_i64_get = map2 (\a bit -> i64.get_bit bit a)
 entry test_i64_set0 = map2 (\a bit -> i64.set_bit bit a 0)

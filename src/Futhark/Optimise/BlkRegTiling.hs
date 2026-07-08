@@ -678,7 +678,13 @@ matchesBlkRegTile seg_space kstms
         code1,
     -- identify load_A, load_B
     tmp_stms <- mapMaybe (`M.lookup` tab_inv_stm) arrs,
-    length tmp_stms == length arrs =
+    length tmp_stms == length arrs,
+    -- If any tiled-loop input array is also used in the postlude code,
+    -- we cannot safely apply this optimization (the array won't be in
+    -- scope in the epilogue).  See issue #2467.
+    not $
+      namesFromList (M.keys tab_inv_stm)
+        `namesIntersect` freeIn (code2'' <> code2) =
       let zip_AB = zip3 tmp_stms arrs [map_t1_0, map_t2_0]
           [(load_A, inp_A, map_t1), (load_B, inp_B, map_t2)] =
             if var_dims == [0, 1]
@@ -720,7 +726,7 @@ mkTileMemSizes ::
 mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
   tk_name <- nameFromText . prettyText <$> newVName "Tk"
   ty_name <- nameFromText . prettyText <$> newVName "Ty"
-  ry_name <- nameFromString . prettyString <$> newVName "Ry"
+  ry_name <- nameFromText . prettyText <$> newVName "Ry"
 
   -- until we change the copying to use lmads we need to
   --   guarantee that Tx=Ty AND Rx = Ry AND Tx | Tk
@@ -1057,8 +1063,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
             (M.empty, M.empty)
             $ M.toList arr_tab0
 
-        tx_name <- nameFromString . prettyString <$> newVName "Tx"
-        ty_name <- nameFromString . prettyString <$> newVName "Ty"
+        tx_name <- nameFromText . prettyText <$> newVName "Tx"
+        ty_name <- nameFromText . prettyText <$> newVName "Ty"
 
         tx0 <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
         ty0 <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile

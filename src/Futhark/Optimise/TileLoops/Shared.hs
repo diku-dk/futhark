@@ -21,7 +21,7 @@ where
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (foldl', zip4)
+import Data.List (zip4)
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.IR.GPU

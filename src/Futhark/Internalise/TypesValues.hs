@@ -28,7 +28,7 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable (bitraverse)
 import Data.Foldable (toList)
-import Data.List (delete, find, foldl')
+import Data.List (delete, find)
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -149,7 +149,7 @@ inferAliases all_param_ts all_res_ts =
       [ if nonuniqueArray res_t
           then (res_t, RetAls pals rals)
           else (res_t, mempty)
-        | (res_t, pals, rals) <- zip3 (toList (Free res_ts)) palss ralss
+      | (res_t, pals, rals) <- zip3 (toList (Free res_ts)) palss ralss
       ]
       where
         reorder [] = replicate (length (Free res_ts)) []
@@ -256,7 +256,7 @@ internaliseTypeM exts orig_t =
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar u tn [E.TypeArgType arr_t])
-      | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
+      | E.isIntrinsic (E.qualLeaf tn),
         baseName (E.qualLeaf tn) == "acc" -> do
           ts <-
             foldMap (toList . fmap (fromDecl . onAccType))

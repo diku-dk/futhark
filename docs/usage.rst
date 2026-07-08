@@ -324,14 +324,11 @@ language, enabling integration into a larger program.
 General Concerns
 ^^^^^^^^^^^^^^^^
 
-Futhark entry points are mapped to some form of function or method in
-the target language.  Generally, an entry point taking *n* parameters
-will result in a function taking *n* parameters.  If the entry point
-returns an *m*-element tuple, then the function will return *m* values
-(although the tuple can be replaced with a single opaque value, see
-below).  Extra parameters may be added to pass in context data, or
-*out*-parameters for writing the result, for target languages that do
-not support multiple return values from functions.
+Futhark entry points are mapped to some form of function or method in the target
+language. Generally, an entry point taking *n* parameters will result in a
+function taking *n* parameters. Extra parameters may be added to pass in context
+data, or results may be passed in an *out*-parameter for writing the result, for
+target languages that do not support multiple return values from functions.
 
 The entry point should have a name that is also a valid identifier in
 the target language (usually C).
@@ -363,14 +360,6 @@ are as follows:
   with a type abbreviation to give it a specific name, otherwise one
   will be generated.
 
-Return types follow these rules, with one addition:
-
-* If the return type is an *m*-element tuple, then the function
-  returns *m* values, mapped according to the rules above (but not
-  including this one - nested tuples are not mapped directly).  This
-  rule does not apply when the entry point has been given a return
-  type ascription that is not syntactically a tuple type.
-
 .. _api-consumption:
 
 Consumption and Aliasing
@@ -394,9 +383,8 @@ essentially the same as in the language itself:
    Further, any *aliases* of that value are also considered consumed
    and may not be used.
 
-2. Each entry point output is either *unique* or *nonunique*.  A
-   unique output has no aliases.  A nonunique output aliases *every*
-   nonconsuming input parameter.
+2. The entry point output iseither *unique* or *nonunique*. A unique output has
+   no aliases. A nonunique output aliases *every* nonconsuming input parameter.
 
 Note that these distinctions are currently usually not visible in the
 generated API, and so correct usage requires knowledge of the original

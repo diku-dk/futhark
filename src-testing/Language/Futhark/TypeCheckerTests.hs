@@ -1,6 +1,7 @@
 module Language.Futhark.TypeCheckerTests (tests) where
 
 import Language.Futhark.TypeChecker.ConsumptionTests qualified
+import Language.Futhark.TypeChecker.ModulesTests qualified
 import Language.Futhark.TypeChecker.TySolveTests qualified
 import Language.Futhark.TypeChecker.TypesTests qualified
 import Test.Tasty
@@ -11,5 +12,6 @@ tests =
     "Source type checker tests"
     [ Language.Futhark.TypeChecker.TypesTests.tests,
       Language.Futhark.TypeChecker.TySolveTests.tests,
-      Language.Futhark.TypeChecker.ConsumptionTests.tests
+      Language.Futhark.TypeChecker.ConsumptionTests.tests,
+      Language.Futhark.TypeChecker.ModulesTests.tests
     ]

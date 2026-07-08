@@ -21,6 +21,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifoldable (bifoldMap)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Char (isAscii)
@@ -250,21 +251,44 @@ newArtificial u t = do
 -- that allow us to connect the AST annotations with the actual
 -- inferred types. The artificial variables should never occur in
 -- constraints - they can be substituted away with asType.
+--
+-- Equal components (with fully known shapes) of the same annotation
+-- are given the same artificial variable, so that the sized type
+-- checker knows that they have the same sizes.
 asStructType :: TypeBase SComp u -> TermM (TypeBase Size u)
-asStructType (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
-asStructType (Scalar (TypeVar u v [])) = pure $ Scalar $ TypeVar u v []
-asStructType (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
-  t1' <- asStructType t1
-  t2' <- asStructType t2
-  pure $ Scalar $ Arrow u pname d t1' $ RetType ext t2'
-asStructType (Scalar (Record fs)) =
-  Scalar . Record <$> traverse asStructType fs
-asStructType (Scalar (Sum cs)) =
-  Scalar . Sum <$> traverse (mapM asStructType) cs
-asStructType t@(Scalar (TypeVar u _ _)) =
-  newArtificial u t
-asStructType t@(Array u _ _) = do
-  newArtificial u t
+asStructType t = evalStateT (onType t) mempty
+  where
+    onType ::
+      TypeBase SComp u' ->
+      StateT (M.Map (TypeBase SComp NoUniqueness) TyVar) TermM (TypeBase Size u')
+    onType (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
+    onType (Scalar (TypeVar u v [])) = pure $ Scalar $ TypeVar u v []
+    onType (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
+      t1' <- onType t1
+      t2' <- onType t2
+      pure $ Scalar $ Arrow u pname d t1' $ RetType ext t2'
+    onType (Scalar (Record fs)) =
+      Scalar . Record <$> traverse onType fs
+    onType (Scalar (Sum cs)) =
+      Scalar . Sum <$> traverse (mapM onType) cs
+    onType t'@(Scalar (TypeVar u _ _)) = artificial u t'
+    onType t'@(Array u _ _) = artificial u t'
+
+    artificial u t'
+      | anonymousShape t' = lift $ newArtificial u t'
+      | otherwise = do
+          let key = second (const NoUniqueness) t'
+          seen <- get
+          case M.lookup key seen of
+            Just v -> pure $ tyVarType u v
+            Nothing -> do
+              v <- lift $ newID "artificial"
+              lift $ modify $ \s ->
+                s {termArtificial = M.insert v key $ termArtificial s}
+              modify $ M.insert key v
+              pure $ tyVarType u v
+
+    anonymousShape = elem SDim . bifoldMap (: []) (const mempty)
 
 asType :: (Monoid u) => TypeBase Size u -> TermM (TypeBase SComp u)
 asType t = do
@@ -749,21 +773,6 @@ isSlice :: DimIndexBase f vn -> Bool
 isSlice DimSlice {} = True
 isSlice DimFix {} = False
 
--- Add constraints saying that the first type has a (potentially
--- nested) field containing the second type.
-mustHaveFields :: SrcLoc -> Type -> [Name] -> Type -> TermM ()
-mustHaveFields loc t [] ve_t =
-  -- This case is probably never reached.
-  ctEq (Reason (locOf loc)) t ve_t
-mustHaveFields loc t [f] ve_t = do
-  rt :: Type <- newTypeWithField loc "ft" f ve_t
-  ctEq (Reason (locOf loc)) t rt
-mustHaveFields loc t (f : fs) ve_t = do
-  ft <- newType loc Lifted "ft" NoUniqueness
-  rt <- newTypeWithField loc "rt" f ft
-  mustHaveFields loc ft fs ve_t
-  ctEq (Reason (locOf loc)) t rt
-
 checkCase ::
   Type ->
   CaseBase NoInfo VName ->
@@ -828,6 +837,45 @@ checkRetDecl body (Just te) = do
   st' <- toStruct <$> asType st
   ctEq (ReasonRetType (locOf body) st' body_t) st' body_t
   pure (st', Just te')
+
+-- Add constraints saying that the first type has a (potentially nested) part
+-- containing the second type.
+--
+-- FIXME: the locations here are very bad.
+mustHaveSteps ::
+  (Pretty a, Located a) =>
+  a ->
+  Type ->
+  [UpdateStep Info VName] ->
+  Type ->
+  TermM ()
+mustHaveSteps src t [] ve_t =
+  -- This case is probably never reached.
+  ctEq (Reason (locOf src)) t ve_t
+mustHaveSteps src t [UpdateStepField f] ve_t = do
+  rt :: Type <- newTypeWithField (srclocOf src) "ft" f ve_t
+  ctEq (Reason (locOf src)) t rt
+mustHaveSteps src t (UpdateStepField f : steps) ve_t = do
+  ft <- newType (locOf src) Lifted "ft" NoUniqueness
+  rt :: Type <- newTypeWithField (srclocOf src) "ft" f ft
+  ctEq (Reason (locOf src)) t rt
+  mustHaveSteps src ft steps ve_t
+mustHaveSteps src t [UpdateStepSlice slice] ve_t = do
+  let num_slices = length $ filter isSlice slice
+  update_elem_t <- newElemType (locOf src) "update_elem" NoUniqueness
+  ctEq (Reason (locOf src)) t $ arrayOfRank (length slice) update_elem_t
+  ctEq (Reason (locOf src)) ve_t $ arrayOfRank num_slices update_elem_t
+mustHaveSteps src t (UpdateStepSlice slice : steps) ve_t = do
+  let num_slices = length $ filter isSlice slice
+  index_tv <- newTyVar (locOf src) Unlifted "index"
+  index_elem_t <- newElemType (locOf src) "index_elem" NoUniqueness
+  ctEq (Reason (locOf src)) (tyVarType NoUniqueness index_tv) $ arrayOfRank num_slices index_elem_t
+  ctEq (Reason (locOf src)) t $ arrayOfRank (length slice) index_elem_t
+  mustHaveSteps src (arrayOfRank num_slices index_elem_t) steps ve_t
+
+checkStep :: UpdateStep NoInfo VName -> TermM (UpdateStep Info VName)
+checkStep (UpdateStepField f) = pure $ UpdateStepField f
+checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSlice slice
 
 checkExp :: ExpBase NoInfo VName -> TermM (ExpBase Info VName)
 --
@@ -1024,12 +1072,18 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
       (Info $ RetType [] (rt' `setUniqueness` Nonunique))
       loc
 --
-checkExp (ProjectSection fields NoInfo loc) = do
-  a <- newType loc Lifted "a" NoUniqueness
-  b <- newType loc Lifted "b" NoUniqueness
-  mustHaveFields loc a fields b
-  ft <- asStructType $ Scalar $ Arrow mempty Unnamed Observe a $ RetType [] $ b `setUniqueness` Nonunique
-  pure $ ProjectSection fields (Info ft) loc
+checkExp e@(UpdateSection steps NoInfo loc) = do
+  steps' <- mapM checkStep steps
+  src_t <- newElemType loc "update" NoUniqueness
+  ve_t <- newElemType loc "update_elem" NoUniqueness
+  mustHaveSteps e src_t steps' ve_t
+  ft <-
+    asStructType $
+      Scalar $
+        Arrow mempty Unnamed Observe src_t $
+          second (const Nonunique) (RetType [] ve_t)
+  pure $ UpdateSection steps' (Info ft) loc
+
 --
 checkExp (Lambda params body retdecl NoInfo loc) = do
   bindParams [] params $ \params' -> do
@@ -1108,25 +1162,16 @@ checkExp (Project k e NoInfo loc) = do
   kt' <- asStructType kt
   pure $ Project k e' (Info kt') loc
 --
-checkExp (RecordUpdate src fields ve NoInfo loc) = do
+checkExp (Update src steps ve NoInfo loc) = do
   src' <- checkExp src
   src_t <- expType src'
+  src_t' <- asStructType src_t
   ve' <- checkExp ve
   ve_t <- expType ve'
-  mustHaveFields loc src_t fields ve_t
-  src_t' <- asStructType src_t
-  pure $ RecordUpdate src' fields ve' (Info src_t') loc
---
-checkExp (IndexSection slice NoInfo loc) = do
-  slice' <- checkSlice slice
-  index_arg_t <- newElemType loc "index" NoUniqueness
-  index_elem_t <- newElemType loc "index_elem" NoUniqueness
-  index_res_t <- newElemType loc "index_res" NoUniqueness
-  let num_slices = length $ filter isSlice slice
-  ctEq (Reason (locOf loc)) index_arg_t $ arrayOfRank num_slices index_elem_t
-  ctEq (Reason (locOf loc)) index_res_t $ arrayOfRank (length slice) index_elem_t
-  ft <- asStructType $ Scalar $ Arrow mempty Unnamed Observe index_arg_t $ second (const Nonunique) $ RetType [] index_res_t
-  pure $ IndexSection slice' (Info ft) loc
+  steps' <- mapM checkStep steps
+  mustHaveSteps src' src_t steps' ve_t
+  pure $ Update src' steps' ve' (Info src_t') loc
+
 --
 checkExp (AppExp (Index e slice loc) _) = do
   e' <- checkExp e
@@ -1139,35 +1184,20 @@ checkExp (AppExp (Index e slice loc) _) = do
   ctEq (Reason (locOf e')) e_t $ arrayOfRank (length slice) index_elem_t
   pure $ AppExp (Index e' slice' loc) (Info $ AppRes (tyVarType NoUniqueness index_tv) [])
 --
-checkExp (Update src slice ve loc) = do
-  src' <- checkExp src
-  src_t <- expType src'
-  slice' <- checkSlice slice
-  ve' <- checkExp ve
-  ve_t <- expType ve'
-  let num_slices = length $ filter isSlice slice
-  update_elem_t <- newElemType loc "update_elem" NoUniqueness
-  ctEq (Reason (locOf src')) src_t $ arrayOfRank (length slice) update_elem_t
-  ctEq (Reason (locOf ve')) ve_t $ arrayOfRank num_slices update_elem_t
-  pure $ Update src' slice' ve' loc
---
-checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
+checkExp (AppExp (LetWith dest src steps ve body loc) _) = do
   src_t <- lookupVar (srclocOf src) $ qualName $ identName src
   src_t' <- asStructType src_t
   let src' = src {identType = Info src_t'}
       dest' = dest {identType = Info src_t'}
-  slice' <- checkSlice slice
+  steps' <- mapM checkStep steps
   ve' <- checkExp ve
   ve_t <- expType ve'
-  let num_slices = length $ filter isSlice slice
-  update_elem_t <- newElemType loc "update_elem" NoUniqueness
-  ctEq (Reason (locOf loc)) src_t $ arrayOfRank (length slice) update_elem_t
-  ctEq (Reason (locOf ve')) ve_t $ arrayOfRank num_slices update_elem_t
+  mustHaveSteps src' src_t steps' ve_t
   bind [dest'] $ do
     body' <- checkExp body
     body_t <- expType body'
     body_t' <- asStructType body_t
-    pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t' [])
+    pure $ AppExp (LetWith dest' src' steps' ve' body' loc) (Info $ AppRes body_t' [])
 --
 checkExp (AppExp (If e1 e2 e3 loc) _) = do
   e1' <- checkExp e1

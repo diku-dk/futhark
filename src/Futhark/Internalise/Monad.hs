@@ -51,7 +51,8 @@ data InternaliseEnv = InternaliseEnv
     envDoBoundsChecks :: Bool,
     envSafe :: Bool,
     envAttrs :: Attrs,
-    envLoc :: Loc
+    envLoc :: Loc,
+    envStripProvenance :: Bool
   }
 
 data InternaliseState = InternaliseState
@@ -102,9 +103,10 @@ instance MonadBuilder InternaliseM where
 runInternaliseM ::
   (MonadFreshNames m) =>
   Bool ->
+  Bool ->
   InternaliseM () ->
   m (OpaqueTypes, Stms SOACS, [FunDef SOACS])
-runInternaliseM safe (InternaliseM m) =
+runInternaliseM safe strip (InternaliseM m) =
   modifyNameSource $ \src ->
     let ((_, consts), s) =
           runState (runReaderT (runBuilderT m mempty) newEnv) (newState src)
@@ -118,7 +120,8 @@ runInternaliseM safe (InternaliseM m) =
           envDoBoundsChecks = True,
           envSafe = safe,
           envAttrs = mempty,
-          envLoc = mempty
+          envLoc = mempty,
+          envStripProvenance = strip
         }
     newState src =
       InternaliseState
@@ -220,9 +223,11 @@ assertingOne m = asserting $ Certs . pure <$> m
 -- | Attach the provided location to all statements produced during execution of
 -- this action.
 locating :: (Located a) => a -> InternaliseM b -> InternaliseM b
-locating a
-  | loc == mempty || isBuiltinLoc loc = id
-  | otherwise = censorStms $ fmap onStm
+locating a m
+  | loc == mempty || isBuiltinLoc loc = m
+  | otherwise = do
+      strip <- asks envStripProvenance
+      if strip then m else censorStms (fmap onStm) m
   where
     loc = locOf a
     onStm (Let pat aux e) = Let pat (aux {stmAuxLoc = Provenance mempty loc}) e

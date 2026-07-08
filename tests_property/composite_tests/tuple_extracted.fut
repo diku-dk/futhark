@@ -1,0 +1,46 @@
+-- ==
+-- property: prop_simple_succ
+
+-- ==
+-- property: prop_simple_fail
+
+-- More complex test for a tuple
+import "../lib/github.com/diku-dk/cpprandom/random"
+
+--------------------- tuple tests ------------------
+-- Uniform i32 distribution using minstd_rand (u32 engine) underneath.
+module rng_engine = minstd_rand
+module rand_i32 = uniform_int_distribution i32 rng_engine
+
+entry gen_simple (size: i64) (seed: u64) : (i32, i32) =
+  let rng0 = rng_engine.rng_from_seed [i32.u64 seed]
+  let (_, x) = rand_i32.rand (-i32.i64 size, i32.i64 size) rng0
+  in (x, x - 1)
+
+def simple (r: (i32, i32)) : (i32, i32) =
+  (i32.abs r.0, i32.abs r.1)
+
+-- sometimes fails
+
+#[prop(gen(gen_simple),shrink(shrink_simple))]
+entry prop_simple_succ (r: (i32, i32)) : bool =
+  simple r == (i32.abs r.0, i32.abs r.1)
+
+-- sometimes fails
+
+#[prop(gen(gen_simple),shrink(shrink_simple))]
+entry prop_simple_fail (r: (i32, i32)) : bool =
+  simple r == (r.0, r.1)
+
+def step (v: i32) : i32 =
+  if v > 0
+  then v - 1
+  else if v < 0
+  then v + 1
+  else 0
+
+entry shrink_simple ((x: i32, y: i32)) (random: u64) : (i32, i32) =
+  let tactic = random % 2
+  in if tactic == 0
+     then (step x, y)
+     else (x, step y)

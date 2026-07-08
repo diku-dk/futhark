@@ -24,6 +24,7 @@ module Futhark.Analysis.SymbolTable
     lookupExp,
     lookupBasicOp,
     lookupType,
+    lookupSubExpType,
     lookupSubExp,
     lookupAliases,
     lookupLoopVar,
@@ -56,7 +57,7 @@ where
 
 import Control.Arrow ((&&&))
 import Control.Monad
-import Data.List (elemIndex, foldl')
+import Data.List (elemIndex)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
@@ -228,9 +229,11 @@ lookupBasicOp name vtable = case lookupExp name vtable of
   Just (BasicOp e, cs) -> Just (e, cs)
   _ -> Nothing
 
+-- | Look up the type of a name in the symbol table.
 lookupType :: (ASTRep rep) => VName -> SymbolTable rep -> Maybe Type
 lookupType name vtable = typeOf <$> lookup name vtable
 
+-- | Look up the type of a 'SubExp'.
 lookupSubExpType :: (ASTRep rep) => SubExp -> SymbolTable rep -> Maybe Type
 lookupSubExpType (Var v) = lookupType v
 lookupSubExpType (Constant v) = const $ Just $ Prim $ primValueType v

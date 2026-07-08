@@ -60,10 +60,10 @@ static inline void check_err(int errval, int sets_errno, const char *fun, int li
 // Read the rest of an open file into a NUL-terminated string; returns
 // NULL on error.
 static void* fslurp_file(FILE *f, size_t *size) {
-  long start = ftell(f);
-  fseek(f, 0, SEEK_END);
-  long src_size = ftell(f)-start;
-  fseek(f, start, SEEK_SET);
+  off_t start = ftello(f);
+  fseeko(f, 0, SEEK_END);
+  off_t src_size = ftello(f)-start;
+  fseeko(f, start, SEEK_SET);
   unsigned char *s = (unsigned char*) malloc((size_t)src_size + 1);
   if (fread(s, 1, (size_t)src_size, f) != (size_t)src_size) {
     free(s);

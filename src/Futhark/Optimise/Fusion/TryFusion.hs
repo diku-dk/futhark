@@ -18,7 +18,8 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, (\\))
+import Data.Either (partitionEithers)
+import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.HORep.MapNest (MapNest)
@@ -28,10 +29,10 @@ import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.IR.SOACS qualified as Futhark
 import Futhark.Optimise.Fusion.Composing
+import Futhark.Optimise.Fusion.Screma
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
-import Futhark.Util (splitAt3)
 
 newtype TryFusion a
   = TryFusion
@@ -187,11 +188,6 @@ attemptFusion mode unfus_nms outVars soac ker = do
   scope <- askScope
   tryFusion (applyFusionRules mode unfus_nms outVars soac ker) scope
 
--- | Check that the consumer does not use any scan or reduce results.
-scremaFusionOK :: ([VName], [VName]) -> FusedSOAC -> Bool
-scremaFusionOK (nonmap_outs, _map_outs) ker =
-  all (`notElem` nonmap_outs) $ mapMaybe SOAC.isVarishInput (inputs ker)
-
 -- | Check that the consumer uses all the outputs of the producer unmodified.
 mapWriteFusionOK :: [VName] -> FusedSOAC -> Bool
 mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
@@ -212,6 +208,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   let soac_c = fsSOAC ker
       inp_p_arr = SOAC.inputs soac_p
       inp_c_arr = SOAC.inputs soac_c
+      out_p = outVars
+      out_c = fsOutNames ker
       lam_p = SOAC.lambda soac_p
       lam_c = SOAC.lambda soac_c
       w = SOAC.width soac_p
@@ -260,53 +258,31 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
     (_, _, Vertical)
       | unfus_set /= mempty,
         not (SOAC.nullTransforms $ fsOutputTransform ker) ->
-          fail "Cannot perform diagonal fusion in the presence of output transforms."
-    ( SOAC.Screma _ _ (ScremaForm _ scans_c reds_c),
-      SOAC.Screma _ _ (ScremaForm _ scans_p reds_p),
+          fail
+            "Cannot perform diagonal fusion in the presence of output transforms."
+    ( SOAC.Screma _ inp_c form_c,
+      SOAC.Screma _ inp_p form_p,
       _
-      )
-        | scremaFusionOK
-            ( splitAt
-                ( Futhark.scanResults scans_p
-                    + Futhark.redResults reds_p
-                )
-                outVars
-            )
-            ker -> do
-            let red_nes_p = concatMap redNeutral reds_p
-                red_nes_c = concatMap redNeutral reds_c
-                scan_nes_p = concatMap scanNeutral scans_p
-                scan_nes_c = concatMap scanNeutral scans_c
-                (res_lam', new_inp) =
-                  fuseRedomap
-                    unfus_set
-                    outVars
-                    lam_p
-                    scan_nes_p
-                    red_nes_p
-                    inp_p_arr
-                    outPairs
-                    lam_c
-                    scan_nes_c
-                    red_nes_c
-                    inp_c_arr
-                (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
-                  splitAt3 (length scan_nes_p) (length red_nes_p) outVars
-                (soac_c_scanout, soac_c_redout, soac_c_mapout) =
-                  splitAt3 (length scan_nes_c) (length red_nes_c) $ fsOutNames ker
-                unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
-            success
-              ( soac_p_scanout
-                  ++ soac_c_scanout
-                  ++ soac_p_redout
-                  ++ soac_c_redout
-                  ++ soac_c_mapout
-                  ++ unfus_arrs
-              )
-              $ SOAC.Screma
-                w
-                new_inp
-                (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c))
+      ) ->
+        do
+          (inp, form, out) <- fuseScrema w inp_p form_p out_p inp_c form_c out_c
+          success out $ SOAC.Screma w inp form
+          <|> do
+            -- If these two scremas cannot be fused, then see what happens if we
+            -- turn the producer into a stream. The most common (only?) case of
+            -- this mattering is when the producer is a scan and the consumer is
+            -- a reduction.
+            Just _ <- pure $ Futhark.isScanomapSOAC form_p
+            (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
+            if soac_p' /= soac_p
+              then
+                fuseSOACwithKer
+                  mode
+                  (namesFromList (map identName newacc_ids) <> unfus_set)
+                  (map identName newacc_ids ++ outVars)
+                  soac_p'
+                  ker
+              else fail "SOAC could not be turned into stream."
 
     -- Map-Hist fusion.
     --
@@ -388,20 +364,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
         (map identName newacc_ids ++ outVars)
         soac_p'
         ker
-    (_, SOAC.Screma _ _ form, _) | Just _ <- Futhark.isScanomapSOAC form -> do
-      -- A Scan soac can be currently only fused as a (sequential) stream,
-      -- hence it is first translated to a (sequential) Stream and then
-      -- fusion with a kernel is attempted.
-      (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
-      if soac_p' /= soac_p
-        then
-          fuseSOACwithKer
-            mode
-            (namesFromList (map identName newacc_ids) <> unfus_set)
-            (map identName newacc_ids ++ outVars)
-            soac_p'
-            ker
-        else fail "SOAC could not be turned into stream."
     (_, SOAC.Stream {}, _) -> do
       -- If it reached this case then soac_c is NOT a Stream kernel,
       -- hence transform the kernel's soac to a stream and attempt
@@ -418,11 +380,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
             soac_p
             $ ker {fsSOAC = soac_c', fsOutNames = map identName newacc_ids ++ fsOutNames ker}
         else fail "SOAC could not be turned into stream."
-
-    ---------------------------------
-    --- DEFAULT, CANNOT FUSE CASE ---
-    ---------------------------------
-    _ -> fail "Cannot fuse"
 
 fuseStreamHelper ::
   [VName] ->
@@ -501,7 +458,7 @@ type Optimization =
   TryFusion (SOAC, SOAC.ArrayTransforms)
 
 optimizations :: [Optimization]
-optimizations = [iswim]
+optimizations = [iswim, unflattenAccOnlyMap]
 
 iswim ::
   Maybe [VName] ->
@@ -544,12 +501,92 @@ iswim _ (SOAC.Screma w arrs form) ots
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 
-      pure
-        ( SOAC.Screma map_w map_arrs' (mapSOAC map_fun'),
-          ots SOAC.|> SOAC.Rearrange map_aux perm
-        )
+      (,ots SOAC.|> SOAC.Rearrange map_aux perm)
+        . SOAC.Screma map_w map_arrs'
+        <$> mapSOAC map_fun'
 iswim _ _ _ =
   fail "ISWIM does not apply."
+
+-- | When a pure-map Screma returns exclusively accumulator results and some
+-- non-accumulator inputs carry a 2D-to-1D flattening Reshape transform, we
+-- can "unflatten" the map:
+--
+--   Screma(n*m, {flat_a1:[n*m]t1, ..., acc_p:acc(...)}, lam)
+--   where lam : (t1, ..., acc) → acc
+--
+-- becomes
+--
+--   Screma(n, {a1:[n][m]t1, ..., acc_p:acc(...)}, outer_lam)
+--   where outer_lam = \(row_a1:[m]t1, ..., acc_p:acc(...)) →
+--     Screma(m, {row_a1, ..., acc_p}, lam)
+--
+-- This exposes the 2D inputs directly, enabling the standard fusion rules to
+-- fuse the resulting Screma(n,...) with an upstream Screma(n,...) producer.
+unflattenAccOnlyMap ::
+  Maybe [VName] ->
+  SOAC ->
+  SOAC.ArrayTransforms ->
+  TryFusion (SOAC, SOAC.ArrayTransforms)
+unflattenAccOnlyMap (Just outVars) (SOAC.Screma _nm inps form) ots = do
+  lam <- liftMaybe $ isMapSOAC form
+  -- All results must be accumulator types.
+  guard $ all isAcc $ lambdaReturnType lam
+  -- Only apply when the producer outputs non-scalar rows (rank > 1), meaning
+  -- pullReshape cannot handle this case (it requires scalar-leaf map nests).
+  -- When the producer outputs scalars, the simpler prepend approach works fine.
+  outVarTypes <- mapM lookupType outVars
+  guard $ any ((> 1) . arrayRank) outVarTypes
+  -- Partition inputs paired with their lambda params: those with a 2D→1D
+  -- flattening Reshape vs. those that pass through unchanged (acc params).
+  -- A flattening reshape: base type is 2D, first transform collapses it to 1D.
+  let classifyInp (inp@(SOAC.Input ts _v base_t), p)
+        | SOAC.Reshape _aux ns SOAC.:< ts' <- SOAC.viewf ts,
+          arrayRank base_t == 2,
+          shapeRank (newShape ns) == 1 =
+            Left (SOAC.Input ts' _v base_t, p)
+        | otherwise =
+            Right (inp, p)
+      (flat_pairs, pass_pairs) =
+        partitionEithers $ zipWith (curry classifyInp) inps (lambdaParams lam)
+  -- Need at least one flattened input.
+  guard $ not (null flat_pairs)
+  -- The non-flattened inputs must be accumulators, because we are changing the
+  -- width of the SOAC.
+  guard $ all (isAcc . SOAC.inputType . fst) pass_pairs
+  -- All flattened inputs must agree on the outer dim n and inner dim m.
+  let dims2d base_t = (arraySize 0 base_t, arraySize 1 base_t)
+      getBaseTy (SOAC.Input _ _ base_t, _) = base_t
+      (n, m) = dims2d (getBaseTy (head flat_pairs))
+  guard $ all ((== (n, m)) . dims2d . getBaseTy) flat_pairs
+  -- The lambda params for the flat inputs get their type changed from [n*m]t
+  -- to [m]t (a single row).  Pass-through params are unchanged.
+  let mkRowParam (_, p) = p {paramDec = rowType (paramDec p)}
+      flat_row_params = map mkRowParam flat_pairs
+      pass_params = map snd pass_pairs
+      inner_lam_params = flat_row_params ++ pass_params
+  inner_lam <- renameLambda $ lam {lambdaParams = inner_lam_params}
+  inner_form <- mapSOAC inner_lam
+  -- Inner Screma over m: plain-variable inputs for the row params, then
+  -- plain-variable inputs for the pass-through (acc) params.
+  let inner_inps =
+        map (SOAC.identInput . paramToIdent) flat_row_params
+          ++ map (SOAC.identInput . paramToIdent) pass_params
+      inner_soac = SOAC.Screma m inner_inps inner_form
+  -- Outer lambda: same param names but outer params have type [m]t (rows).
+  let outer_lam_params = flat_row_params ++ pass_params
+  outer_lam <- runLambdaBuilder outer_lam_params $ do
+    inner_exp <- SOAC.toExp inner_soac
+    res <- letTupExp "inner_acc" inner_exp
+    pure $ map (subExpRes . Var) res
+  outer_form <- mapSOAC outer_lam
+  -- Outer Screma over n: 2D inputs (flatten reshape stripped) then pass-through.
+  let outer_inps = map fst flat_pairs ++ map fst pass_pairs
+  pure (SOAC.Screma n outer_inps outer_form, ots)
+unflattenAccOnlyMap _ _ _ =
+  fail "unflattenAccOnlyMap does not apply."
+
+paramToIdent :: Param Type -> Ident
+paramToIdent p = Ident (paramName p) (paramType p)
 
 removeParamOuterDim :: LParam SOACS -> LParam SOACS
 removeParamOuterDim param =
@@ -574,7 +611,7 @@ commonTransforms interesting inps = commonTransforms' inps'
   where
     inps' =
       [ (SOAC.inputArray inp `elem` interesting, inp)
-        | inp <- inps
+      | inp <- inps
       ]
 
 commonTransforms' :: [(Bool, SOAC.Input)] -> (SOAC.ArrayTransforms, [SOAC.Input])
@@ -583,11 +620,21 @@ commonTransforms' inps =
     Just (Just mot, inps') -> first (mot SOAC.<|) $ commonTransforms' $ reverse inps'
     _ -> (SOAC.noTransforms, map snd inps)
   where
+    -- Two reshapes with the same shape are compatible even if their certs differ;
+    -- merge the certs to produce a single common reshape transform.
+    compatibleTransforms (SOAC.Reshape aux1 shape1) (SOAC.Reshape aux2 shape2)
+      | shape1 == shape2 =
+          Just $ SOAC.Reshape (aux1 <> aux2) shape1
+    compatibleTransforms ot1 ot2
+      | ot1 == ot2 = Just ot1
+    compatibleTransforms _ _ = Nothing
+
     inspect (mot, prev) (True, inp) =
       case (mot, inputToOutput inp) of
         (Nothing, Just (ot, inp')) -> Just (Just ot, (True, inp') : prev)
         (Just ot1, Just (ot2, inp'))
-          | ot1 == ot2 -> Just (Just ot2, (True, inp') : prev)
+          | Just combined <- compatibleTransforms ot1 ot2 ->
+              Just (Just combined, (True, inp') : prev)
         _ -> Nothing
     inspect (mot, prev) inp = Just (mot, inp : prev)
 
@@ -651,7 +698,7 @@ pullIndex (SOAC.Screma _ inps form) ots
           else
             runLambdaBuilder (lambdaParams lam) $
               mapM sliceRes =<< bodyBind (lambdaBody lam)
-      pure (SOAC.Screma w' (map sliceInput inps) (mapSOAC lam'), ots')
+      (,ots') . SOAC.Screma w' (map sliceInput inps) <$> mapSOAC lam'
 pullIndex _ _ = fail "Cannot pull index"
 
 pushRearrange ::

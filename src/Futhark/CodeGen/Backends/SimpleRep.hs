@@ -152,7 +152,10 @@ findPrettyName =
       (("arr" <> showText (length dims) <> "d_") <>) <$> p
     pTup = between "(" ")" $ do
       ts <- p `sepBy` pComma
-      pure $ "tup" <> showText (length ts) <> "_" <> T.intercalate "_" ts
+      pure $
+        if null ts
+          then "unit"
+          else "tup" <> showText (length ts) <> "_" <> T.intercalate "_" ts
     pRec = between "{" "}" $ do
       fs <- pField `sepBy` pComma
       pure $ "rec__" <> T.intercalate "__" fs
@@ -245,7 +248,13 @@ instance C.ToExp IntValue where
   toExp (Int8Value k) _ = [C.cexp|(typename int8_t)$int:k|]
   toExp (Int16Value k) _ = [C.cexp|(typename int16_t)$int:k|]
   toExp (Int32Value k) _ = [C.cexp|$int:k|]
-  toExp (Int64Value k) _ = [C.cexp|(typename int64_t)$int:k|]
+  toExp (Int64Value k) _
+    -- C compilers warn on encountering -9223372036854775808, because this is
+    -- read as the negation operator applied to 9223372036854775808, and this
+    -- number is larger than the largest signed number. As a dumb workaround, we
+    -- construct an equivalent expression.
+    | k == minBound = [C.cexp|(typename int64_t)$int:(minBound+1::Int64)-1|]
+    | otherwise = [C.cexp|(typename int64_t)$int:k|]
 
 instance C.ToExp FloatValue where
   toExp (Float16Value x) _

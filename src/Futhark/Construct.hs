@@ -68,6 +68,7 @@ module Futhark.Construct
 
     -- * Monadic expression builders
     eSubExp,
+    eVar,
     eParam,
     eMatch',
     eMatch,
@@ -85,6 +86,7 @@ module Futhark.Construct
     eAll,
     eAny,
     eDimInBounds,
+    eShapeInBounds,
     eOutOfBounds,
     eIndex,
     eLast,
@@ -107,6 +109,7 @@ module Futhark.Construct
     fullSliceNum,
     isFullSlice,
     sliceAt,
+    iota64,
 
     -- * Result types
     instantiateShapes,
@@ -202,6 +205,13 @@ eSubExp ::
   SubExp ->
   m (Exp (Rep m))
 eSubExp = pure . BasicOp . SubExp
+
+-- | Turn a variable into a monad expression, through 'eSubExp'.
+eVar ::
+  (MonadBuilder m) =>
+  VName ->
+  m (Exp (Rep m))
+eVar = eSubExp . Var
 
 -- | Treat a parameter as a monadic expression.
 eParam ::
@@ -393,6 +403,13 @@ eDimInBounds w i =
     (eCmpOp (CmpSle Int64) (eSubExp (intConst Int64 0)) i)
     (eCmpOp (CmpSlt Int64) i w)
 
+-- | Check if the given indexes are in-bounds for the given shape. The shape may have extra dimensions.
+eShapeInBounds :: (MonadBuilder m) => Shape -> [m (Exp (Rep m))] -> m (Exp (Rep m))
+eShapeInBounds (Shape ds) is =
+  eAll
+    =<< mapM (letSubExp "dim_in_bounds")
+    =<< zipWithM eDimInBounds (map eSubExp (take (length is) ds)) is
+
 -- | Are these indexes out-of-bounds for the array?
 eOutOfBounds ::
   (MonadBuilder m) =>
@@ -566,6 +583,11 @@ fullSlice t slice =
 sliceAt :: Type -> Int -> [DimIndex SubExp] -> Slice SubExp
 sliceAt t n slice =
   fullSlice t $ map sliceDim (take n $ arrayDims t) ++ slice
+
+-- | Produce a straightforward `Int64` `Iota` of the given length with offset 0
+-- and stride 1.
+iota64 :: SubExp -> Exp rep
+iota64 n = BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
 
 -- | Like 'fullSlice', but the dimensions are simply numeric.
 fullSliceNum :: (Num d) => [d] -> [DimIndex d] -> Slice d

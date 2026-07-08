@@ -1,0 +1,7 @@
+restore input.data arr_i32 []i32 arr_bool []bool
+elemtype "[](i32, bool)"
+fields "(i32, bool)"
+zip arr_i32_bool "[](i32, bool)" arr_i32 arr_bool
+free arr_i32 arr_bool
+unzip arr_i32_bool arr_i32 arr_bool
+store output.data.actual arr_i32_bool arr_i32 arr_bool

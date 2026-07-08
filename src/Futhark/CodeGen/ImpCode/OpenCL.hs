@@ -31,7 +31,7 @@ import Futhark.CodeGen.ImpCode.GPU (BlockDim, KernelConst (..), KernelConstExp)
 import Futhark.IR.GPU.Sizes
 import Futhark.Util.Pretty
 
--- | An program calling OpenCL kernels.
+-- | A program calling OpenCL kernels.
 data Program = Program
   { openClProgram :: T.Text,
     -- | Must be prepended to the program.
@@ -42,8 +42,6 @@ data Program = Program
     openClKernelNames :: M.Map KernelName KernelSafety,
     -- | So we can detect whether the device is capable.
     openClUsedTypes :: [PrimType],
-    -- | Runtime-configurable constants.
-    openClParams :: ParamMap,
     -- | Assertion failure error messages.
     openClFailures :: [FailureMsg],
     hostDefinitions :: Definitions OpenCL

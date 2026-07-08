@@ -1,6 +1,6 @@
 -- ==
 -- tags { autodiff }
--- entry: fwd rev
+-- entry: fwd rev fwd_vec
 -- input { [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] }
 -- output { [5040.0, 2521.0, 1684.0, 1278.0, 1104.0, 1440.0] }
 
@@ -13,3 +13,7 @@ entry rev [m] (x: [m]f64) =
 
 entry fwd [m] (x: [m]f64) =
   tabulate m (\i -> jvp (\x' -> primal x') x (replicate m 0 with [i] = 1))
+
+entry fwd_vec [m] (x: [m]f64) =
+  let seeds = tabulate m (\i -> replicate m 0 with [i] = 1)
+  in jmp (\x' -> primal x') x seeds

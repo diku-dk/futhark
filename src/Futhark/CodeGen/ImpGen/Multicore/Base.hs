@@ -81,7 +81,7 @@ toParam _name Acc {} = pure [] -- FIXME?  Are we sure this works?
 getSpace :: SegOp () MCMem -> SegSpace
 getSpace (SegHist _ space _ _ _) = space
 getSpace (SegRed _ space _ _ _) = space
-getSpace (SegScan _ space _ _ _) = space
+getSpace (SegScan _ space _ _ _ _) = space
 getSpace (SegMap _ space _ _) = space
 
 getLoopBounds :: MulticoreGen (Imp.TExp Int64, Imp.TExp Int64)
@@ -197,8 +197,7 @@ extractAllocations segop_code = f segop_code
           (free_allocs, here_allocs) = f body_allocs
           free' =
             filter
-              ( (`notNameIn` Imp.declaredIn body_allocs) . Imp.paramName
-              )
+              ((`notNameIn` Imp.declaredIn body_allocs) . Imp.paramName)
               free
        in ( free_allocs,
             here_allocs <> Imp.Op (Imp.ParLoop s body' free')
@@ -493,6 +492,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
           _ -> (id, id)
 
       int
+        | primBitSize t == 8 = int8
         | primBitSize t == 16 = int16
         | primBitSize t == 32 = int32
         | otherwise = int64

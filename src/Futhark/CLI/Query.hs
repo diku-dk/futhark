@@ -25,7 +25,8 @@ main = mainWithOptions () [] "program line col" $ \args () ->
             putStrLn $ "Position: " ++ locStr (srclocOf loc)
             case def of
               Nothing -> pure ()
-              Just (BoundTerm t defloc) -> do
+              Just (BoundTerm term defloc) -> do
+                let t = termBindingType term
                 putStrLn $ "Type: " ++ prettyString t
                 putStrLn $ "Definition: " ++ locStr (srclocOf defloc)
               Just (BoundType defloc) ->

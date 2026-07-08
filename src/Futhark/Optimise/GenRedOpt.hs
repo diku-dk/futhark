@@ -159,7 +159,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       map_lam <- renameLambda map_lam0
       (k1_res, ker1_stms) <- runBuilderT' $ do
         iota <- letExp "iota" $ BasicOp $ Iota inv_dim_len (intConst Int64 0) (intConst Int64 1) Int64
-        let op_exp = Op (OtherOp (Screma inv_dim_len [iota] (ScremaForm map_lam [] [red])))
+        let op_exp = Op (OtherOp (Screma inv_dim_len [iota] (ScremaForm map_lam [] [red] nilFn)))
         res_redmap <- letTupExp "res_mapred" op_exp
         letSubExp (baseName pat_acc_nm <> "_big_update") $
           BasicOp (UpdateAcc safety acc_nm acc_inds $ map Var res_redmap)

@@ -12,7 +12,6 @@ module Futhark.Analysis.CallGraph
 where
 
 import Control.Monad.Writer.Strict
-import Data.List (foldl')
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Set qualified as S

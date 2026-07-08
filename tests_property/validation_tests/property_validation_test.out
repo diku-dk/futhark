@@ -1,0 +1,3 @@
+Property prop_bad_arity has 2 inputs; expected 1.
+Property prop_bad_arity2 has no inputs: expected 1.
+Property prop_bad_output output must be bool, got: i32

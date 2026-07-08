@@ -6,18 +6,6 @@ class Server {
     this.ctx = ctx;
     this._vars = {};
     this._types = {};
-    this._commands = [ 'inputs',
-                       'outputs',
-                       'call',
-                       'restore',
-                       'store',
-                       'free',
-                       'clear',
-                       'pause_profiling',
-                       'unpause_profiling',
-                       'report',
-                       'rename'
-                     ];
   }
 
   _get_arg(args, i) {
@@ -65,12 +53,9 @@ class Server {
     }
   }
 
-  _cmd_outputs(args) {
+  _cmd_output(args) {
     var entry = this._get_arg(args, 0);
-    var outputs = this._get_entry_point(entry)[2];
-    for (var i = 0; i < outputs.length; i++) {
-      console.log(outputs[i]);
-    }
+    console.log(this._get_entry_point(entry)[2]);
   }
 
   _cmd_dummy(args) {
@@ -97,22 +82,76 @@ class Server {
     delete this._types[oldname];
   }
 
+  _cmd_types(args) {
+    var types = this.ctx.get_types();
+    for (var t in types) {
+      console.log(t);
+    }
+  }
+
+  _cmd_fields(args) {
+    var type_name = this._get_arg(args, 0);
+    var types = this.ctx.get_types();
+    var type_info = types[type_name];
+    if (!type_info || type_info[0] !== "record") {
+      throw "Not a record type: " + type_name;
+    }
+    var fields = type_info[1];
+    for (var i = 0; i < fields.length; i++) {
+      console.log(fields[i][0] + " " + fields[i][1]);
+    }
+  }
+
+  _cmd_project(args) {
+    var to_name = this._get_arg(args, 0);
+    var from_name = this._get_arg(args, 1);
+    var field_name = this._get_arg(args, 2);
+
+    if (to_name in this._vars) {
+      throw "Variable already exists: " + to_name;
+    }
+
+    var from_val = this._get_var(from_name);
+    var from_type = this._get_type(from_name);
+
+    var types = this.ctx.get_types();
+    var type_info = types[from_type];
+    if (!type_info || type_info[0] !== "record") {
+      throw "Not a record type: " + from_type;
+    }
+
+    var fields = type_info[1];
+    var field_info = null;
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i][0] === field_name) {
+        field_info = fields[i];
+        break;
+      }
+    }
+
+    if (field_info === null) {
+      throw "No such field: " + field_name;
+    }
+
+    var field_type = field_info[1];
+    var project_fn = field_info[2];
+    var result = this.ctx[project_fn](from_val);
+    this._set_var(to_name, result, field_type);
+  }
+
   _cmd_call(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
     var num_ins = entry[1].length;
-    var num_outs = entry[2].length;
+    var num_outs = 1;
     var expected_len = 1 + num_outs + num_ins
 
     if (args.length != expected_len) {
       throw "Invalid argument count, expected " + expected_len
     }
 
-    var out_vnames = args.slice(1, num_outs+1)
-    for (var i = 0; i < out_vnames.length; i++) {
-      var out_vname = out_vnames[i];
-      if (out_vname in this._vars) {
-        throw "Variable already exists: " + out_vname;
-      }
+    var out_vname = args[1];
+    if (out_vname in this._vars) {
+      throw "Variable already exists: " + out_vname;
     }
     var in_vnames = args.slice(1+num_outs);
     var ins = [];
@@ -123,13 +162,7 @@ class Server {
     var bef = performance.now()*1000;
     var vals = this.ctx[entry[0]].apply(this.ctx, ins);
     var aft = performance.now()*1000;
-    if (num_outs == 1) {
-      this._set_var(out_vnames[0], vals, entry[2][0]);
-    } else {
-      for (var i = 0; i < out_vnames.length; i++) {
-        this._set_var(out_vnames[i], vals[i], entry[2][i]);
-      }
-    }
+    this._set_var(out_vname, vals, entry[2]);
     console.log("runtime: " + Math.round(aft-bef));
   }
 
@@ -208,22 +241,25 @@ class Server {
     } else {
       var cmd = words[0];
       var args = words.splice(1);
-      if (this._commands.includes(cmd)) {
-        switch (cmd) {
-        case 'inputs': this._cmd_inputs(args); break;
-        case 'outputs': this._cmd_outputs(args); break
-        case 'call': this._cmd_call(args); break
-        case 'restore': this._cmd_restore(args); break
-        case 'store': this._cmd_store(args); break
-        case 'free': this._cmd_free(args); break
-        case 'clear': this._cmd_dummy(args); break
-        case 'pause_profiling': this._cmd_dummy(args); break
-        case 'unpause_profiling': this._cmd_dummy(args); break
-        case 'report': this._cmd_dummy(args); break
-        case 'rename': this._cmd_rename(args); break
-        }
-      } else {
-        throw "Unknown command: " + cmd;
+      switch (cmd) {
+      case 'inputs': this._cmd_inputs(args); break;
+      case 'output': this._cmd_output(args); break
+      case 'call': this._cmd_call(args); break
+      case 'restore': this._cmd_restore(args); break
+      case 'store': this._cmd_store(args); break
+      case 'free': this._cmd_free(args); break
+      case 'clear': this._cmd_dummy(args); break
+      case 'pause_profiling': this._cmd_dummy(args); break
+      case 'unpause_profiling': this._cmd_dummy(args); break
+      case 'report': this._cmd_dummy(args); break
+      case 'rename': this._cmd_rename(args); break
+      case 'types': this._cmd_types(args); break
+      case 'fields': this._cmd_fields(args); break
+      case 'project': this._cmd_project(args); break
+          // XXX: these should be implemented.
+      case 'attributes': this._cmd_dummy(args); break
+      case 'entry_points': this._cmd_dummy(args); break
+      default: throw "Unknown command: " + cmd;
       }
     }
   }

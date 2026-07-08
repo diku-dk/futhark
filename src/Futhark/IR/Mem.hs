@@ -184,6 +184,12 @@ instance IsBodyType BodyReturns where
 data MemOp (inner :: Data.Kind.Type -> Data.Kind.Type) (rep :: Data.Kind.Type)
   = -- | Allocate a memory block.
     Alloc SubExp Space
+  | -- | If the given array has a direct index function (as 'LMAD.isDirect'),
+    -- returns the array unchanged. Otherwise, make a copy of the array. The
+    -- choice is made dynamically, and the goal is to handle cases where we must
+    -- return something that is direct (mostly entry point return types), but we
+    -- cannot statically be sure of the layout of some array.
+    EnsureDirect VName
   | Inner (inner rep)
   deriving (Eq, Ord, Show)
 
@@ -193,59 +199,79 @@ traverseMemOpStms ::
   OpStmsTraverser m (inner rep) rep ->
   OpStmsTraverser m (MemOp inner rep) rep
 traverseMemOpStms _ _ op@Alloc {} = pure op
+traverseMemOpStms _ _ op@EnsureDirect {} = pure op
 traverseMemOpStms onInner f (Inner inner) = Inner <$> onInner f inner
 
 instance (RephraseOp inner) => RephraseOp (MemOp inner) where
   rephraseInOp _ (Alloc e space) = pure (Alloc e space)
+  rephraseInOp _ (EnsureDirect v) = pure (EnsureDirect v)
   rephraseInOp r (Inner x) = Inner <$> rephraseInOp r x
 
 instance (FreeIn (inner rep)) => FreeIn (MemOp inner rep) where
   freeIn' (Alloc size _) = freeIn' size
+  freeIn' (EnsureDirect v) = freeIn' v
   freeIn' (Inner k) = freeIn' k
 
 instance (TypedOp inner) => TypedOp (MemOp inner) where
   opType (Alloc _ space) = pure [Mem space]
+  opType (EnsureDirect v) = f <$> lookupType v
+    where
+      f (Array pt shape _) =
+        [Mem DefaultSpace, Array pt (fmap Free shape) NoUniqueness]
+      f _ = error $ "EnsureDirect applied to non-array: " ++ show v
   opType (Inner k) = opType k
 
 instance (AliasedOp inner) => AliasedOp (MemOp inner) where
   opAliases Alloc {} = [mempty]
+  -- XXX - why not mem aliases for EnsureDirect?
+  opAliases (EnsureDirect v) = [mempty, oneName v]
   opAliases (Inner k) = opAliases k
 
   consumedInOp Alloc {} = mempty
+  consumedInOp EnsureDirect {} = mempty
   consumedInOp (Inner k) = consumedInOp k
 
 instance (CanBeAliased inner) => CanBeAliased (MemOp inner) where
   addOpAliases _ (Alloc se space) = Alloc se space
+  addOpAliases _ (EnsureDirect v) = EnsureDirect v
   addOpAliases aliases (Inner k) = Inner $ addOpAliases aliases k
 
 instance (Rename (inner rep)) => Rename (MemOp inner rep) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
+  rename (EnsureDirect v) = EnsureDirect <$> rename v
   rename (Inner k) = Inner <$> rename k
 
 instance (Substitute (inner rep)) => Substitute (MemOp inner rep) where
   substituteNames subst (Alloc size space) = Alloc (substituteNames subst size) space
+  substituteNames subst (EnsureDirect v) = EnsureDirect (substituteNames subst v)
   substituteNames subst (Inner k) = Inner $ substituteNames subst k
 
 instance (PP.Pretty (inner rep)) => PP.Pretty (MemOp inner rep) where
   pretty (Alloc e DefaultSpace) = "alloc" <> PP.apply [PP.pretty e]
   pretty (Alloc e s) = "alloc" <> PP.apply [PP.pretty e, PP.pretty s]
+  pretty (EnsureDirect v) = "ensure_direct" <> PP.apply [PP.pretty v]
   pretty (Inner k) = PP.pretty k
 
 instance (OpMetrics (inner rep)) => OpMetrics (MemOp inner rep) where
   opMetrics Alloc {} = seen "Alloc"
+  opMetrics EnsureDirect {} = seen "EnsureDirect"
   opMetrics (Inner k) = opMetrics k
 
 instance (IsOp inner) => IsOp (MemOp inner) where
   safeOp (Alloc (Constant (IntValue (Int64Value k))) _) = k >= 0
   safeOp Alloc {} = False
+  safeOp EnsureDirect {} = True
   safeOp (Inner k) = safeOp k
   cheapOp (Inner k) = cheapOp k
   cheapOp Alloc {} = True
+  cheapOp EnsureDirect {} = False
   opDependencies (Alloc _ e) = [freeIn e]
+  opDependencies (EnsureDirect v) = [mempty, freeIn v]
   opDependencies (Inner op) = opDependencies op
 
 instance (CanBeWise inner) => CanBeWise (MemOp inner) where
   addOpWisdom (Alloc size space) = Alloc size space
+  addOpWisdom (EnsureDirect v) = EnsureDirect v
   addOpWisdom (Inner k) = Inner $ addOpWisdom k
 
 instance (ST.IndexOp (inner rep)) => ST.IndexOp (MemOp inner rep) where
@@ -916,7 +942,7 @@ checkMemInfo ::
   MemInfo SubExp u MemBind ->
   TC.TypeM rep ()
 checkMemInfo _ (MemPrim _) = pure ()
-checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int64]) d
+checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require (Prim int64)) d
 checkMemInfo _ (MemMem _) = pure ()
 checkMemInfo _ (MemAcc acc ispace ts u) =
   TC.checkType $ Acc acc ispace ts u
@@ -1159,6 +1185,18 @@ class (IsOp op) => OpReturns op where
 
 instance (OpReturns inner) => OpReturns (MemOp inner) where
   opReturns (Alloc _ space) = pure [MemMem space]
+  opReturns (EnsureDirect v) = do
+    space <- lookupMemSpace . fst =<< lookupArraySummary v
+    summary <- lookupMemInfo v
+    case summary of
+      MemArray et shape _ _ ->
+        pure
+          [ MemMem space,
+            MemArray et (fmap Free shape) NoUniqueness . Just $
+              ReturnsNewBlock space 0 . LMAD.iota 0 $
+                fmap (fmap Free . pe64) (shapeDims shape)
+          ]
+      _ -> error "EnsureDirect applied to non-array"
   opReturns (Inner op) = opReturns op
 
 instance OpReturns NoOp where

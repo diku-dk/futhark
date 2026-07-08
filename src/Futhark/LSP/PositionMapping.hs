@@ -56,7 +56,7 @@ toStalePos :: Maybe PositionMapping -> Pos -> Maybe Pos
 toStalePos (Just (PositionMapping _ current_to_stale)) pos =
   if l > Prelude.length current_to_stale
     then Nothing
-    else Just $ Pos file (V.unsafeIndex current_to_stale (l - 1) + 1) c o
+    else Just $ Pos file ((current_to_stale V.! (l - 1)) + 1) c o
   where
     Pos file l c o = pos
 toStalePos Nothing pos = Just pos
@@ -66,7 +66,7 @@ toCurrentPos :: Maybe PositionMapping -> Pos -> Maybe Pos
 toCurrentPos (Just (PositionMapping stale_to_current _)) pos =
   if l > Prelude.length stale_to_current
     then Nothing
-    else Just $ Pos file (V.unsafeIndex stale_to_current (l - 1) + 1) c o
+    else Just $ Pos file ((stale_to_current V.! (l - 1)) + 1) c o
   where
     Pos file l c o = pos
 toCurrentPos Nothing pos = Just pos
