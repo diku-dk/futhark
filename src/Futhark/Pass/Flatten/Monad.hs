@@ -13,6 +13,8 @@ module Futhark.Pass.Flatten.Monad
 
     -- * Flattening monad
     FlattenM,
+    NeedFn (..),
+    needLifted,
     FlattenState (..),
     runFlattenM,
 
@@ -74,6 +76,7 @@ import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe, isJust)
+import Data.Set qualified as S
 import Data.Tuple.Solo
 import Futhark.IR.GPU
 import Futhark.IR.SOACS (SOACS)
@@ -237,11 +240,22 @@ inputReps inputs env = M.fromList $ map (second getRep) inputs
       DistInput rt t -> (t, resVar rt env)
       DistInputFree v' t -> (t, Regular v')
 
+-- | Indicate the need for a function to be generated. Instead of immediately
+-- generating them ourselves, we collect requirements from multiple flattening
+-- operations and satisfy them in their entirety.
+newtype NeedFn
+  = -- | We need this function to be lifted.
+    NeedLifted Name
+  deriving (Eq, Ord, Show)
+
 data FlattenState = FlattenState
   { -- In order to generate more stable threshold names, we keep track of the
     -- numbers used for thresholds separately from the ordinary name source.
     stateThresholdCounter :: Int,
-    stateNameSource :: VNameSource
+    stateNameSource :: VNameSource,
+    -- A set of those functions that we have emitted calls to, and which will
+    -- need to be generated.
+    stateNeedFns :: S.Set NeedFn
   }
 
 newtype FlattenM a = FlattenM (BuilderT GPU (State FlattenState) a)
@@ -269,10 +283,21 @@ instance MonadFreshNames (State FlattenState) where
   putNameSource src = modify $ \s -> s {stateNameSource = src}
 
 -- | Do not nest these - the counter for thresholds will be wrong.
-runFlattenM :: (MonadFreshNames m) => Scope GPU -> FlattenM a -> m a
+runFlattenM :: (MonadFreshNames m) => Scope GPU -> FlattenM a -> m (a, S.Set NeedFn)
 runFlattenM scope (FlattenM m) = modifyNameSource $ \src ->
-  second stateNameSource $
-    runState (fst <$> runBuilderT m scope) (FlattenState 0 src)
+  let initial_state =
+        FlattenState
+          { stateThresholdCounter = 0,
+            stateNameSource = src,
+            stateNeedFns = mempty
+          }
+      (x, s) = runState (fst <$> runBuilderT m scope) initial_state
+   in ((x, stateNeedFns s), stateNameSource s)
+
+-- | Indicate that we rather need a lifted version of this function.
+needLifted :: Name -> FlattenM ()
+needLifted fname = modify $ \s ->
+  s {stateNeedFns = S.insert (NeedLifted fname) $ stateNeedFns s}
 
 readIrregularInput ::
   Segments ->

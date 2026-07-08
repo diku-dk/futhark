@@ -12,12 +12,11 @@
 module Futhark.Pass.Flatten (flattenSOACs) where
 
 import Control.Monad
-import Data.Bifunctor (first)
+import Data.Bifunctor (first, second)
 import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (isNothing)
 import Data.Set qualified as S
 import Debug.Trace
 import Futhark.IR.GPU
@@ -143,6 +142,7 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
     Let pat aux (Apply name args rettype s) ->
       case lvl of
         SegThread {} -> do
+          needLifted name
           let name' = liftFunName name
           w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
           args' <- ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
@@ -312,7 +312,11 @@ addRetAls params rettype = zip rettype $ map possibleAliases rettype
       | aliasable t = RetAls aliasable_params aliasable_rets
       | otherwise = mempty
 
-liftFunDef :: FunHasParallelism -> Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
+liftFunDef ::
+  FunHasParallelism ->
+  Scope SOACS ->
+  FunDef SOACS ->
+  PassM (FunDef GPU, S.Set NeedFn)
 liftFunDef funHasParallelism const_scope fd = do
   let FunDef
         { funDefBody = body,
@@ -333,18 +337,20 @@ liftFunDef funHasParallelism const_scope fd = do
         distributeBody funHasParallelism const_scope (NE.singleton (Var (paramName wp))) inputs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
   -- Lift the body of the function and get the results
-  (result, stms) <-
+  ((result, stms), needs) <-
     runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
       collectStms . liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
         bodyResult body
   let name = liftFunName $ funDefName fd
-  pure $
-    fd
-      { funDefName = name,
-        funDefBody = Body () stms result,
-        funDefParams = fparams'',
-        funDefRetType = rettype'
-      }
+  pure
+    ( fd
+        { funDefName = name,
+          funDefBody = Body () stms result,
+          funDefParams = fparams'',
+          funDefRetType = rettype'
+        },
+      needs
+    )
 
 transformLambda :: FunHasParallelism -> Lambda SOACS -> FlattenM (Lambda GPU)
 transformLambda funHasParallelism (Lambda params ret body) = do
@@ -513,22 +519,51 @@ transformBody funHasParallelism (Body () stms res) = do
   stms' <- transformStms funHasParallelism stms
   pure $ Body () stms' res
 
-transformFunDef :: FunHasParallelism -> Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
+transformFunDef ::
+  FunHasParallelism ->
+  Scope SOACS ->
+  FunDef SOACS ->
+  PassM (FunDef GPU, S.Set NeedFn)
 transformFunDef funHasParallelism consts_scope fd = do
   let FunDef
         { funDefBody = body,
           funDefParams = fparams,
           funDefRetType = rettype
         } = fd
-  body' <-
+  (body', needs) <-
     runFlattenM (scopeOfFParams fparams <> castScope consts_scope) $
       transformBody funHasParallelism body
-  pure $
-    fd
-      { funDefBody = body',
-        funDefRetType = rettype,
-        funDefParams = fparams
-      }
+  pure
+    ( fd
+        { funDefBody = body',
+          funDefRetType = rettype,
+          funDefParams = fparams
+        },
+      needs
+    )
+
+liftUntilFixedPoint ::
+  Prog SOACS ->
+  FunHasParallelism ->
+  Scope SOACS ->
+  S.Set NeedFn ->
+  S.Set NeedFn ->
+  PassM [FunDef GPU]
+liftUntilFixedPoint prog funHasParallelism consts_scope made needed = do
+  (lifted_funs, new_needed) <-
+    fmap (second ((`S.difference` made) . mconcat)) $
+      mapAndUnzipM mkNeeded $
+        S.toList needed
+  if new_needed == mempty
+    then pure lifted_funs
+    else
+      (lifted_funs ++)
+        <$> liftUntilFixedPoint prog funHasParallelism consts_scope (made <> needed) new_needed
+  where
+    mkNeeded (NeedLifted fname) =
+      case find ((== fname) . funDefName) $ progFuns prog of
+        Just fundef -> liftFunDef funHasParallelism consts_scope fundef
+        Nothing -> error $ "mkNeeded: " <> show fname
 
 transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do
@@ -540,11 +575,20 @@ transformProg prog = do
       funHasParallelism fname =
         M.findWithDefault (not $ isBuiltInFunction fname) fname funParallelism
 
-  consts' <- runFlattenM mempty $ transformStms funHasParallelism consts
-  funs' <- mapM (transformFunDef funHasParallelism consts_scope) funs
+  (consts', consts_needs) <- runFlattenM mempty $ transformStms funHasParallelism consts
+  (funs', funs_needs) <-
+    second mconcat
+      <$> mapAndUnzipM (transformFunDef funHasParallelism consts_scope) funs
+
+  -- Now do fixpoint iteration until all needed functions have been provided.
   lifted_funs <-
-    mapM (liftFunDef funHasParallelism consts_scope) $
-      filter (isNothing . funDefEntryPoint) funs
+    liftUntilFixedPoint
+      prog
+      funHasParallelism
+      consts_scope
+      mempty
+      (consts_needs <> funs_needs)
+
   -- In extremely unlikely cases (mostly empty programs), we may end up having a
   -- name source that overlaps the names used in the builtin functions. Avoid
   -- that by bumping it by enough that we probably will not have a conflict.
