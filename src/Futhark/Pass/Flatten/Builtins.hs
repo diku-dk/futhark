@@ -45,7 +45,7 @@ mkSegSpace :: (MonadFreshNames m) => [(VName, SubExp)] -> m SegSpace
 mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims
 
 builtinName :: T.Text -> Name
-builtinName = nameFromText . ("builtin#" <>)
+builtinName = nameFromText . ("builtin/" <>)
 
 segIotaName, repIotaName, prefixSumName, partitionName :: Name
 segIotaName = builtinName "segiota"
