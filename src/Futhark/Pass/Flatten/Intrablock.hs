@@ -11,6 +11,7 @@ where
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.State.Strict (runState)
+import Control.Monad.Writer
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Set qualified as S
@@ -54,6 +55,23 @@ type InBlockMapTransformer =
 foldBinOp' :: (MonadBuilder m) => BinOp -> [SubExp] -> m (Exp (Rep m))
 foldBinOp' _ [] = eSubExp $ intConst Int64 1
 foldBinOp' bop (x : xs) = foldBinOp bop x xs
+
+-- | Extract the intra-block parallelism used by the body.
+findParallelism :: KernelBody GPU -> [[SubExp]]
+findParallelism = S.toList . execWriter . onKernelBody
+  where
+    onKernelBody = mapM_ onStm . bodyStms
+    onBody = mapM_ onStm . bodyStms
+    onStm stm = walkExpM walker $ stmExp stm
+    walker =
+      (identityWalker @GPU)
+        { walkOnBody = const onBody,
+          walkOnOp = onOp
+        }
+    onOp (SegOp op) = do
+      tell $ S.singleton $ segSpaceDims $ segSpace op
+      onKernelBody $ segBody op
+    onOp _ = pure ()
 
 computeThreadBlockSize :: [[SubExp]] -> [[SubExp]] -> FlattenM (SubExp, SubExp)
 computeThreadBlockSize wss_min wss_avail = do
@@ -132,18 +150,20 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
       body = lambdaBody lam
 
   free_inputs <- freeInputsFor inps lam
-  (wss_min, wss_avail, log, kbody) <-
+  (log, kbody) <-
     localScope (scopeOfDistInputs free_inputs <> scopeOfLParams (lambdaParams lam)) $
       intrablockParalleliseBody map_in_block body
 
-  noIrregularPar (freeIn $ wss_min <> wss_avail) $ do
+  let wss = findParallelism kbody
+
+  noIrregularPar (freeIn wss) $ do
     let new_segments_list = NE.toList new_segments
     ((intra_avail_par, tblock_size, kspace, num_tblocks), prelude_stms) <-
       collectStms $ do
         num_tblocks <-
           letSubExp "intra_num_tblocks"
             =<< foldBinOp' (Mul Int64 OverflowUndef) new_segments_list
-        (intra_avail_par, tblock_size) <- computeThreadBlockSize wss_min wss_avail
+        (intra_avail_par, tblock_size) <- computeThreadBlockSize wss wss
         gtids <- mapM (const $ newVName "gtid") new_segments_list
         kspace <- mkSegSpace $ zip gtids new_segments_list
         pure (intra_avail_par, tblock_size, kspace, num_tblocks)
@@ -193,14 +213,16 @@ intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = do
         (\pe -> PatElem <$> newName (patElemName pe) <*> pure (patElemType pe))
         (patElems pat)
 
-  (wss_min, wss_avail, log, kbody) <-
+  (log, kbody) <-
     localScope (scopeOfLParams $ lambdaParams lam) $
       intrablockParalleliseBody map_in_block body
 
-  noIrregularPar (freeIn $ wss_min <> wss_avail) $ do
+  let wss = findParallelism kbody
+
+  noIrregularPar (freeIn wss) $ do
     ((intra_avail_par, tblock_size, kspace, num_tblocks), prelude_stms) <-
       collectStms $ do
-        (intra_avail_par, tblock_size) <- computeThreadBlockSize wss_min wss_avail
+        (intra_avail_par, tblock_size) <- computeThreadBlockSize wss wss
         gtid <- newVName "gtid"
         kspace <- mkSegSpace [(gtid, w)]
         pure (intra_avail_par, tblock_size, kspace, w)
@@ -460,14 +482,12 @@ intrablockParalleliseBody ::
   (MonadFreshNames m, HasScope GPU m) =>
   InBlockMapTransformer ->
   Body SOACS ->
-  m ([[SubExp]], [[SubExp]], Log, KernelBody GPU)
+  m (Log, KernelBody GPU)
 intrablockParalleliseBody map_in_block body = do
-  (IntraAcc min_ws avail_ws log, kstms) <-
+  (IntraAcc _min_ws _avail_ws log, kstms) <-
     runIntrablockM $ intrablockStms map_in_block $ bodyStms body
   pure
-    ( S.toList min_ws,
-      S.toList avail_ws,
-      log,
+    ( log,
       Body () kstms $ map ret $ bodyResult body
     )
   where
