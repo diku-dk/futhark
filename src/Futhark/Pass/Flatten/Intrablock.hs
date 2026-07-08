@@ -394,10 +394,7 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
             addStms stms
             zipWithM_
               ( \pe v ->
-                  letBindNames [patElemName pe] $
-                    BasicOp $
-                      SubExp $
-                        Var v
+                  letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
               )
               (patElems pat)
               scan_res
@@ -417,10 +414,7 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
             addStms stms
             zipWithM_
               ( \pe v ->
-                  letBindNames [patElemName pe] $
-                    BasicOp $
-                      SubExp $
-                        Var v
+                  letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
               )
               (patElems pat)
               red_res
