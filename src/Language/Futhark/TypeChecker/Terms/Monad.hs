@@ -437,6 +437,7 @@ checkLiftedness loc l t = do
 -- their sizes. See Note [Size Inference] in
 -- Language.Futhark.TypeChecker.Terms.
 instTyVars ::
+  (Substitutable (TypeBase Size u)) =>
   SrcLoc ->
   -- | The type parameters being instantiated, along with their
   -- liftedness.
@@ -542,7 +543,14 @@ instTyVars loc names orig_t1 orig_t2 = do
                     second (const u) <$> bitraverse onDim pure t
           _ -> mkNew
 
-  evalStateT (f orig_t1 orig_t2) mempty
+  (t, seen) <- runStateT (f orig_t1 orig_t2) mempty
+  -- The walk above replaces occurrences of the type parameters at the type
+  -- level, but the types of expressions that occur as *sizes* in the original
+  -- type may also refer to the type parameters (e.g. a size 'length s - k'
+  -- where 's' has a parametric type). An ordinary substitution fixes those, as
+  -- substitution on expressions descends into their types.
+  let substs = M.map (Subst [] . RetType []) seen
+  pure $ applySubst (`M.lookup` substs) t
 
 -- | Instantiate a type scheme with fresh variables for its size and
 -- type parameters. Returns the names of the fresh size and type
