@@ -827,14 +827,12 @@ transformMapForInBlock ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU (Stms GPU)
+  FlattenM (Stms GPU)
 transformMapForInBlock ops pat w arrs map_lam = do
   scope <- askScope
   lam <- preprocessLambda (castScope scope) map_lam
-  runFlattenM scope $ collectStms_ $ do
-    let arrs' =
-          zipWith MapArray arrs $
-            map paramType (lambdaParams lam)
+  collectStms_ $ do
+    let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
         (distributed, _) =
           distributeMap (flattenFunHasParallelism ops) scope pat (NE.singleton w) arrs' lam
     transformDistributed ops' mempty (NE.singleton w) distributed

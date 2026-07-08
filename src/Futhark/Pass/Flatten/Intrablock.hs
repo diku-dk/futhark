@@ -10,7 +10,6 @@ where
 
 import Control.Monad
 import Control.Monad.RWS
-import Control.Monad.State.Strict (runState)
 import Control.Monad.Writer
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
@@ -27,7 +26,6 @@ import Futhark.Pass.Flatten.PreProcess (preprocessLambda)
 import Futhark.Tools
 import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
-import Futhark.Util.Log
 import Prelude hiding (log)
 
 -- | The minimum amount of inner parallelism we require (by default)
@@ -39,7 +37,6 @@ data IntrablockResult = IntrablockResult
   { intraMinPar :: SubExp,
     intraAvailPar :: SubExp,
     intraThreadBlockSize :: SubExp,
-    intraLog :: Log,
     intraPreludeStms :: Stms GPU,
     intraKernelStms :: Stms GPU,
     intraResultNames :: [VName]
@@ -50,7 +47,7 @@ type InBlockMapTransformer =
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  Builder GPU (Stms GPU)
+  FlattenM (Stms GPU)
 
 foldBinOp' :: (MonadBuilder m) => BinOp -> [SubExp] -> m (Exp (Rep m))
 foldBinOp' _ [] = eSubExp $ intConst Int64 1
@@ -150,7 +147,7 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
       body = lambdaBody lam
 
   free_inputs <- freeInputsFor inps lam
-  (log, kbody) <-
+  kbody <-
     localScope (scopeOfDistInputs free_inputs <> scopeOfLParams (lambdaParams lam)) $
       intrablockParalleliseBody map_in_block body
 
@@ -187,7 +184,6 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
         { intraMinPar = intra_avail_par,
           intraAvailPar = intra_avail_par,
           intraThreadBlockSize = tblock_size,
-          intraLog = log,
           intraPreludeStms = input_prelude_stms <> prelude_stms,
           intraKernelStms = oneStm kstm,
           intraResultNames = patNames nested_pat
@@ -213,7 +209,7 @@ intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = do
         (\pe -> PatElem <$> newName (patElemName pe) <*> pure (patElemType pe))
         (patElems pat)
 
-  (log, kbody) <-
+  kbody <-
     localScope (scopeOfLParams $ lambdaParams lam) $
       intrablockParalleliseBody map_in_block body
 
@@ -254,7 +250,6 @@ intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = do
         { intraMinPar = intra_avail_par,
           intraAvailPar = intra_avail_par,
           intraThreadBlockSize = tblock_size,
-          intraLog = log,
           intraPreludeStms = prelude_stms,
           intraKernelStms = oneStm kstm,
           intraResultNames = patNames nested_pat
@@ -303,78 +298,24 @@ freeInputsFor inps lam =
         Just inp <- [lookup v inps]
       ]
 
-liftBuilderStms :: Builder GPU (Stms GPU) -> IntrablockM (Stms GPU)
-liftBuilderStms m = do
-  scope <- askScope
-  src <- getNameSource
-  let ((x, stms), src') = runState (runBuilderT m scope) src
-  putNameSource src'
-  pure $ stms <> x
-
-recordInBlockParallelism :: Stms GPU -> IntrablockM ()
-recordInBlockParallelism =
-  mapM_ recordStm . stmsToList
-  where
-    recordStm (Let _ _ (Op (SegOp op))) =
-      parallelMin $ segSpaceDims $ segSpace op
-    recordStm _ =
-      pure ()
-
-data IntraAcc = IntraAcc
-  { accMinPar :: S.Set [SubExp],
-    accAvailPar :: S.Set [SubExp],
-    accLog :: Log
-  }
-
-instance Semigroup IntraAcc where
-  IntraAcc min_x avail_x log_x <> IntraAcc min_y avail_y log_y =
-    IntraAcc (min_x <> min_y) (avail_x <> avail_y) (log_x <> log_y)
-
-instance Monoid IntraAcc where
-  mempty = IntraAcc mempty mempty mempty
-
-type IntrablockM =
-  BuilderT GPU (RWS () IntraAcc VNameSource)
-
-instance MonadLogger IntrablockM where
-  addLog log = lift $ tell mempty {accLog = log}
-
-runIntrablockM ::
-  (MonadFreshNames m, HasScope GPU m) =>
-  IntrablockM () ->
-  m (IntraAcc, Stms GPU)
-runIntrablockM m = do
-  scope <- castScope <$> askScope
-  modifyNameSource $ \src ->
-    let (((), kstms), src', acc) = runRWS (runBuilderT m scope) () src
-     in ((acc, kstms), src')
-
-parallelMin :: [SubExp] -> IntrablockM ()
-parallelMin ws =
-  tell
-    mempty
-      { accMinPar = S.singleton ws,
-        accAvailPar = S.singleton ws
-      }
-
-intrablockBody :: InBlockMapTransformer -> Body SOACS -> IntrablockM (Body GPU)
+intrablockBody :: InBlockMapTransformer -> Body SOACS -> FlattenM (Body GPU)
 intrablockBody map_in_block body = do
   stms <- collectStms_ $ intrablockStms map_in_block $ bodyStms body
   pure $ mkBody stms $ bodyResult body
 
-intrablockLambda :: InBlockMapTransformer -> Lambda SOACS -> IntrablockM (Lambda GPU)
+intrablockLambda :: InBlockMapTransformer -> Lambda SOACS -> FlattenM (Lambda GPU)
 intrablockLambda map_in_block lam =
   mkLambda (lambdaParams lam) $
     bodyBind =<< intrablockBody map_in_block (lambdaBody lam)
 
-intrablockWithAccInput :: InBlockMapTransformer -> WithAccInput SOACS -> IntrablockM (WithAccInput GPU)
+intrablockWithAccInput :: InBlockMapTransformer -> WithAccInput SOACS -> FlattenM (WithAccInput GPU)
 intrablockWithAccInput _ (shape, arrs, Nothing) =
   pure (shape, arrs, Nothing)
 intrablockWithAccInput map_in_block (shape, arrs, Just (lam, nes)) = do
   lam' <- intrablockLambda map_in_block lam
   pure (shape, arrs, Just (lam', nes))
 
-intrablockStm :: InBlockMapTransformer -> Stm SOACS -> IntrablockM ()
+intrablockStm :: InBlockMapTransformer -> Stm SOACS -> FlattenM ()
 intrablockStm map_in_block stm@(Let pat aux e) = do
   scope <- askScope
   let lvl = SegThreadInBlock SegNoVirt
@@ -400,8 +341,7 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
             =<< runBuilder_ (FOT.transformSOAC pat soac)
     Op (Screma w arrs form)
       | Just lam <- isMapSOAC form -> do
-          stms <- liftBuilderStms (map_in_block pat w arrs lam)
-          recordInBlockParallelism stms
+          stms <- map_in_block pat w arrs lam
           addStms stms
     Op (Screma w arrs form)
       | Just (post_lam, scans, mapfun) <- isMaposcanomapSOAC form,
@@ -420,7 +360,6 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
               )
               (patElems pat)
               scan_res
-          parallelMin [w]
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form -> do
           let sing_red = singleReduce reds
@@ -440,7 +379,6 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
               )
               (patElems pat)
               red_res
-          parallelMin [w]
     Op (Screma w arrs form) ->
       -- This screma is too complicated for us to immediately do
       -- anything, so split it up and try again.
@@ -461,34 +399,23 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
           )
           (patElems pat)
           hist_res
-      parallelMin [w]
-    Op (Stream w arrs accs lam)
-      | chunk_size_param : _ <- lambdaParams lam -> do
-          types <- asksScope castScope
-          ((), stream_stms) <-
-            runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
-          let replace (Var v) | v == paramName chunk_size_param = w
-              replace se = se
-              replaceSets (IntraAcc x y log) =
-                IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
-          censor replaceSets $ intrablockStms map_in_block stream_stms
+    Op (Stream w arrs accs lam) -> do
+      types <- asksScope castScope
+      ((), stream_stms) <-
+        runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
+      intrablockStms map_in_block stream_stms
     _ ->
       addStm $ soacsStmToGPU stm
 
-intrablockStms :: InBlockMapTransformer -> Stms SOACS -> IntrablockM ()
+intrablockStms :: InBlockMapTransformer -> Stms SOACS -> FlattenM ()
 intrablockStms map_in_block = mapM_ $ intrablockStm map_in_block
 
 intrablockParalleliseBody ::
-  (MonadFreshNames m, HasScope GPU m) =>
   InBlockMapTransformer ->
   Body SOACS ->
-  m (Log, KernelBody GPU)
+  FlattenM (KernelBody GPU)
 intrablockParalleliseBody map_in_block body = do
-  (IntraAcc _min_ws _avail_ws log, kstms) <-
-    runIntrablockM $ intrablockStms map_in_block $ bodyStms body
-  pure
-    ( log,
-      Body () kstms $ map ret $ bodyResult body
-    )
+  kstms <- collectStms_ $ intrablockStms map_in_block $ bodyStms body
+  pure $ Body () kstms $ map ret $ bodyResult body
   where
     ret (SubExpRes cs se) = Returns ResultMaySimplify cs se
