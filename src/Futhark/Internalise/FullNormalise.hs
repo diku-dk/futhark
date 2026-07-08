@@ -28,7 +28,6 @@ import Data.List (zip4)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
-import Data.Text qualified as T
 import Futhark.MonadFreshNames
 import Futhark.Util (showText)
 import Futhark.Util.Loc (srcspan)
