@@ -100,8 +100,13 @@ data Constraint
     -- it was unified with (used to identify existentials with the
     -- same origin). Each variable constrained by this (or a
     -- 'CopySize' pointing to it) is turned into a rigid size when
-    -- the enclosing function application is complete.
-    ExistentialSize (Maybe VName) Usage
+    -- the enclosing function application is complete. The second
+    -- field, when present, means that a *rigid* unknown size was
+    -- absorbed: the existential then stands for a size that is
+    -- actually computed at that location, and if it cannot be bound
+    -- anywhere, it becomes a rigid unknown size there (see
+    -- bindExistentialInsts), subjecting it to the causality check.
+    ExistentialSize (Maybe VName) (Maybe Loc) Usage
   deriving (Show)
 
 instance Located Constraint where
@@ -111,7 +116,7 @@ instance Located Constraint where
   locOf (UnknownSize loc _) = locOf loc
   locOf (InstSize _ usage) = locOf usage
   locOf (CopySize _ _ usage) = locOf usage
-  locOf (ExistentialSize _ usage) = locOf usage
+  locOf (ExistentialSize _ _ usage) = locOf usage
 
 -- | Mapping from fresh type variables, instantiated from the type
 -- schemes of polymorphic functions, to (possibly) specific types as
@@ -404,9 +409,20 @@ unifyWith onDims usage = subunify False
                 -- with. See Note [Size Inference] in
                 -- Language.Futhark.TypeChecker.Terms.
                 constraints_after <- getConstraints
-                let existentialise d v usage' =
+                -- An existential that was already registered as a
+                -- rigid unknown size before we made it unifiable
+                -- above (e.g. a pending instantiated size bound by
+                -- checkApply) stands for a size that is actually
+                -- computed somewhere, so absorbing it incurs a
+                -- causality obligation.
+                let rigidPre d = case snd <$> M.lookup d constraints of
+                      Just (UnknownSize dloc _)
+                        | dloc == mempty -> Just $ locOf usage
+                        | otherwise -> Just dloc
+                      _ -> Nothing
+                    existentialise d v usage' =
                       modifyConstraints $
-                        M.adjust (fmap $ const $ ExistentialSize (Just d) usage') v
+                        M.adjust (fmap $ const $ ExistentialSize (Just d) (rigidPre d) usage') v
                     absorbExt d
                       | Just (Size (Just de) _) <- snd <$> M.lookup d constraints_after,
                         Var de_v _ _ <- applySubst (`lookupSubst` constraints_after) de =
@@ -510,8 +526,21 @@ unifySizes usage bcs bound _ e1 e2 = do
         CopySize {} -> Just c
         ExistentialSize {} -> Just c
         _ -> Nothing
-    existentialise v other usage' =
-      modifyConstraints $ M.adjust (fmap $ const $ ExistentialSize key usage') v
+    -- If the absorbed size is a rigid unknown size, then the
+    -- existential stands for a size that is actually computed
+    -- somewhere, and uses of it are subject to the causality check.
+    -- Sizes bound in the type itself (existentials of a declared
+    -- type, parameters) carry no such obligation.
+    existentialise v other usage' = do
+      constraints <- getConstraints
+      let rigidLoc w = case snd <$> M.lookup w constraints of
+            Just (UnknownSize wloc _)
+              | wloc == mempty -> Just $ locOf usage
+              | otherwise -> Just wloc
+            _ -> Nothing
+          computed_at =
+            listToMaybe $ mapMaybe rigidLoc $ S.toList $ fvVars $ freeInExp other
+      modifyConstraints $ M.adjust (fmap $ const $ ExistentialSize key computed_at usage') v
       where
         key = case other of
           Var other_v _ _ -> Just $ qualLeaf other_v
@@ -548,13 +577,13 @@ unifySizes usage bcs bound _ e1 e2 = do
             Just (InstSize l usage')
               | l /= Unlifted ->
                   True <$ existentialise (qualLeaf v) other usage'
-            Just (ExistentialSize _ _) ->
+            Just ExistentialSize {} ->
               pure True
             Just (CopySize c _ usage') ->
               case snd <$> M.lookup c constraints of
                 Just (InstSize l _)
                   | l /= Unlifted -> True <$ existentialise c other usage'
-                Just (ExistentialSize _ _) -> pure True
+                Just ExistentialSize {} -> pure True
                 _ -> pure False
             _ -> pure False
     maybeAbsorb _ _ = pure False
