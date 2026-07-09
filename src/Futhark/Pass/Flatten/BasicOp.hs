@@ -543,8 +543,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
         not (any (isVariant inps) (sliceDims slice)) -> do
           let space = shapeDims (segmentsShape segments) <> sliceDims slice
           v <-
-            certifying (distCerts inps aux env)
-              . letExp "index_reg_gather"
+            letExp "index_reg_gather"
               <=< renameExp
               <=< segMap lvl (NE.fromList space)
               $ \is -> do
@@ -614,8 +613,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
         not (any (isVariant inps) (flatSliceDims flat_slice)) -> do
           let space = shapeDims (segmentsShape segments) <> flatSliceDims flat_slice
           v <-
-            certifying (distCerts inps aux env)
-              . letExp "flat_index_reg_gather"
+            letExp "flat_index_reg_gather"
               <=< renameExp
               <=< segMap lvl (NE.fromList space)
               $ \is -> do
