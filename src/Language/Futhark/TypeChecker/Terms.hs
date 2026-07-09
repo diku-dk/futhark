@@ -756,14 +756,7 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
   e1' <- checkExp e1
   e2' <- checkExp e2
   e3' <- checkExp e3
-
-  let bool = Scalar $ Prim Bool
-  e1_t <- expType e1'
-  onFailure (CheckingRequired [bool] e1_t) $
-    unify (mkUsage e1' "use as 'if' condition") bool e1_t
-
   (t, retext) <- unifyBranches loc e2' e3'
-
   pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes t retext)
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
