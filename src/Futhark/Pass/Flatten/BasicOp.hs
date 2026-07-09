@@ -6,9 +6,8 @@ import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Tuple.Solo
 import Futhark.IR.GPU
-import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
-import Futhark.Pass.Flatten.Monad
+import Futhark.Pass.Flatten.General
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Util.IntegralExp

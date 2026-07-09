@@ -31,8 +31,8 @@ import Data.Maybe (isJust)
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.Pass.Flatten.Distribute
+import Futhark.Pass.Flatten.General
 import Futhark.Pass.Flatten.Intrablock qualified as Intrablock
-import Futhark.Pass.Flatten.Monad
 import Futhark.Pass.Flatten.PreProcess
 import Futhark.Tools
 import Futhark.Transform.Rename

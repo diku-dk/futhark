@@ -19,9 +19,8 @@ import Futhark.IR.GPU hiding (HistOp)
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.ToGPU
-import Futhark.Pass.Flatten.Builtins (genUniformSegHist, genUniformSegRed, genUniformSegScanomapWithPost, mkSegSpace)
 import Futhark.Pass.Flatten.Distribute
-import Futhark.Pass.Flatten.Monad
+import Futhark.Pass.Flatten.General
 import Futhark.Pass.Flatten.PreProcess (preprocessLambda)
 import Futhark.Tools
 import Futhark.Transform.FirstOrderTransform qualified as FOT

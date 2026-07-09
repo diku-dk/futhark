@@ -1,7 +1,8 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Pass.Flatten.Builtins
-  ( flatteningBuiltins,
+  ( BuiltinFn (..),
+    builtinFunDef,
     determineReduceOp,
     genUniformSegHist,
     mkSegSpace,
@@ -20,9 +21,9 @@ module Futhark.Pass.Flatten.Builtins
     genScatter,
     genShapeIota,
     exScanAndSum,
+    doRepIota,
     doSegIota,
     doPrefixSum,
-    doRepIota,
     doPartition,
   )
 where
@@ -36,6 +37,7 @@ import Futhark.IR.GPU
 import Futhark.IR.SOACS as SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU)
+import Futhark.Pass.Flatten.Monad
 import Futhark.Pass.Flatten.StreamKernel
 import Futhark.Tools
 import Futhark.Transform.Rename (renameBody, renameLambda)
@@ -855,26 +857,21 @@ partitionBuiltin = buildingBuiltin $ do
         funDefBody = body
       }
 
--- | Builtin functions used in flattening.  Must be prepended to a
--- program that is transformed by flattening.  The intention is to
--- avoid the code explosion that would result if we inserted
--- primitives everywhere.
-flatteningBuiltins :: [FunDef GPU]
-flatteningBuiltins =
-  [ segIotaBuiltin,
-    repIotaBuiltin,
-    prefixSumBuiltin,
-    partitionBuiltin
-  ]
+-- | Retrieve the function definition corresponding to a builtin.
+builtinFunDef :: BuiltinFn -> FunDef GPU
+builtinFunDef BuiltinSegIota = segIotaBuiltin
+builtinFunDef BuiltinRepIota = repIotaBuiltin
+builtinFunDef BuiltinPrefixSum = prefixSumBuiltin
+builtinFunDef BuiltinPartition = partitionBuiltin
 
 -- | @[0,1,2,0,1,0,1,2,3,4,...]@.  Returns @(flags,offsets,elems)@.
 doSegIota ::
-  (MonadBuilder m, Rep m ~ GPU) =>
-  SegLevel -> VName -> m (VName, VName, VName)
+  SegLevel -> VName -> FlattenM (VName, VName, VName)
 doSegIota lvl ns
   | inlineBuiltinAtLevel lvl =
       genSegIota lvl ns
   | otherwise = do
+      demandBuiltin BuiltinSegIota
       ns_t <- lookupType ns
       let n = arraySize 0 ns_t
       m <- newVName "m"
@@ -899,12 +896,12 @@ doSegIota lvl ns
 -- | Produces @[0,0,0,1,1,2,2,2,...]@.  Returns @(flags, offsets,
 -- elems)@.
 doRepIota ::
-  (MonadBuilder m, Rep m ~ GPU) =>
-  SegLevel -> VName -> m (VName, VName, VName)
+  SegLevel -> VName -> FlattenM (VName, VName, VName)
 doRepIota lvl ns
   | inlineBuiltinAtLevel lvl =
       genRepIota lvl ns
   | otherwise = do
+      demandBuiltin BuiltinRepIota
       ns_t <- lookupType ns
       let n = arraySize 0 ns_t
       m <- newVName "m"
@@ -927,12 +924,12 @@ doRepIota lvl ns
       pure (flags, offsets, elems)
 
 doPrefixSum ::
-  (MonadBuilder m, Rep m ~ GPU) =>
-  SegLevel -> VName -> m VName
+  SegLevel -> VName -> FlattenM VName
 doPrefixSum lvl ns
   | inlineBuiltinAtLevel lvl =
       genPrefixSum lvl "prefix_sum" ns
   | otherwise = do
+      demandBuiltin BuiltinPrefixSum
       ns_t <- lookupType ns
       let n = arraySize 0 ns_t
       letExp "prefix_sum" $
@@ -943,14 +940,14 @@ doPrefixSum lvl ns
           Safe
 
 doPartition ::
-  (MonadBuilder m, Rep m ~ GPU) =>
-  SegLevel -> VName -> VName -> m (VName, VName, VName)
+  SegLevel -> VName -> VName -> FlattenM (VName, VName, VName)
 doPartition lvl k cs
   | inlineBuiltinAtLevel lvl = do
       cs_t <- lookupType cs
       n <- letExp "n" $ BasicOp $ SubExp $ arraySize 0 cs_t
       genPartition lvl n k cs
   | otherwise = do
+      demandBuiltin BuiltinPartition
       cs_t <- lookupType cs
       let n = arraySize 0 cs_t
       counts <- newVName "partition_counts"

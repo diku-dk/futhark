@@ -27,11 +27,11 @@ import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU, soacsStmToGPU)
 import Futhark.Pass.Flatten.BasicOp
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
+import Futhark.Pass.Flatten.General
 import Futhark.Pass.Flatten.Incremental
 import Futhark.Pass.Flatten.Intrablock qualified as Intrablock
 import Futhark.Pass.Flatten.Loop
 import Futhark.Pass.Flatten.Match
-import Futhark.Pass.Flatten.Monad
 import Futhark.Pass.Flatten.PreProcess
 import Futhark.Pass.Flatten.SOAC
 import Futhark.Pass.Flatten.WithAcc
@@ -142,7 +142,7 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
     Let pat aux (Apply name args rettype s) ->
       case lvl of
         SegThread {} -> do
-          needLifted name
+          demandLifted name
           let name' = liftFunName name
           w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
           args' <- ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
@@ -550,20 +550,22 @@ liftUntilFixedPoint ::
   S.Set DemandFn ->
   PassM [FunDef GPU]
 liftUntilFixedPoint prog funHasParallelism consts_scope made needed = do
+  let made' = made <> needed
   (lifted_funs, new_needed) <-
-    fmap (second ((`S.difference` made) . mconcat)) $
+    fmap (second ((`S.difference` made') . mconcat)) $
       mapAndUnzipM mkDemanded $
         S.toList needed
   if new_needed == mempty
     then pure lifted_funs
     else
       (lifted_funs ++)
-        <$> liftUntilFixedPoint prog funHasParallelism consts_scope (made <> needed) new_needed
+        <$> liftUntilFixedPoint prog funHasParallelism consts_scope made' new_needed
   where
     mkDemanded (DemandLifted fname) =
       case find ((== fname) . funDefName) $ progFuns prog of
         Just fundef -> liftFunDef funHasParallelism consts_scope fundef
         Nothing -> error $ "mkDemanded: " <> show fname
+    mkDemanded (DemandBuiltin b) = pure (builtinFunDef b, mempty)
 
 transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do
@@ -596,7 +598,7 @@ transformProg prog = do
   pure $
     prog
       { progConsts = consts',
-        progFuns = flatteningBuiltins <> lifted_funs <> funs'
+        progFuns = lifted_funs <> funs'
       }
 
 -- | Transform a SOACS program to a GPU program, using flattening.

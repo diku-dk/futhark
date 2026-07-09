@@ -18,9 +18,8 @@ import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU)
-import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
-import Futhark.Pass.Flatten.Monad
+import Futhark.Pass.Flatten.General
 import Futhark.Tools
 import Prelude hiding (div, rem)
 

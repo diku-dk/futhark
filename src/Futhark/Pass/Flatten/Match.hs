@@ -15,9 +15,8 @@ import Data.Set qualified as S
 import Data.Tuple.Solo
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
-import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
-import Futhark.Pass.Flatten.Monad
+import Futhark.Pass.Flatten.General
 import Futhark.Tools
 
 -- Take the elements at index `is` from an input `v`.
