@@ -51,7 +51,7 @@ generateContraints num_vars
   | otherwise =
       let var_names =
             [ VName (nameFromString ("v_" ++ show i)) i
-              | i <- [0 .. num_vars - 1]
+            | i <- [0 .. num_vars - 1]
             ]
 
           ty_vars = M.fromList $ map (`tv` 0) var_names
