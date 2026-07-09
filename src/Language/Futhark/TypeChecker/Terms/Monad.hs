@@ -28,7 +28,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     replaceTyVarsAbsorbable,
     updateTypes,
     Names,
-    mustBeUnlifted,
 
     -- * Primitive checking
     unifies,
@@ -68,31 +67,18 @@ import Language.Futhark.TypeChecker.Constraints (TyVar)
 import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupAbsTy, lookupMod, stateNameSource)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
+import Language.Futhark.TypeChecker.Terms.Scope hiding (envToTermScope, initialTermScope, lookupQualNameEnv)
+import Language.Futhark.TypeChecker.Terms.Scope qualified as Scope
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (abs, mod)
 
 type Names = S.Set VName
 
-data ValBinding
-  = BoundV [TypeParam] StructType
-  | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
-  | EqualityF
-  deriving (Show)
-
 unusedSize :: (MonadTypeChecker m) => SizeBinder VName -> m a
 unusedSize p =
   typeError p mempty . withIndexLink "unused-size" $
     "Size" <+> pretty p <+> "unused in pattern."
-
-data Inferred t
-  = NoneInferred
-  | Ascribed t
-  deriving (Show)
-
-instance Functor Inferred where
-  fmap _ NoneInferred = NoneInferred
-  fmap f (Ascribed t) = Ascribed (f t)
 
 data Checking
   = CheckingApply (Maybe (QualName VName)) Exp StructType StructType
@@ -104,7 +90,6 @@ data Checking
   | CheckingLoopBody StructType StructType
   | CheckingLoopInitial StructType StructType
   | CheckingRecordUpdate [Name] StructType StructType
-  | CheckingRequired [StructType] StructType
   | CheckingBranches StructType StructType
 
 instance Pretty Checking where
@@ -174,20 +159,6 @@ instance Pretty Checking where
         <+> align (pretty actual)
     where
       fs' = mconcat $ punctuate "." $ map pretty fs
-  pretty (CheckingRequired [expected] actual) =
-    "Expression must have type"
-      <+> pretty expected
-      <> "."
-        </> "Actual type:"
-        <+> align (pretty actual)
-  pretty (CheckingRequired expected actual) =
-    "Type of expression must be one of "
-      <+> expected'
-      <> "."
-        </> "Actual type:"
-        <+> align (pretty actual)
-    where
-      expected' = commasep (map pretty expected)
   pretty (CheckingBranches t1 t2) =
     "Branches differ in type."
       </> "Former:"
@@ -199,7 +170,7 @@ instance Pretty Checking where
 -- 'TermScope' will be extended during type-checking as bindings come into
 -- scope.
 data TermEnv = TermEnv
-  { termScope :: TermScope,
+  { termScope :: TermScope Size,
     termChecking :: Maybe Checking,
     termLevel :: Level,
     termCheckExp :: ExpBase Info VName -> TermTypeM Exp,
@@ -209,27 +180,10 @@ data TermEnv = TermEnv
     termImportName :: ImportName
   }
 
-data TermScope = TermScope
-  { scopeVtable :: M.Map VName ValBinding,
-    scopeTypeTable :: M.Map VName TypeBinding,
-    scopeModTable :: M.Map VName Mod
-  }
-  deriving (Show)
-
-instance Semigroup TermScope where
-  TermScope vt1 tt1 mt1 <> TermScope vt2 tt2 mt2 =
-    TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (mt1 `M.union` mt2)
-
-envToTermScope :: Env -> TermScope
-envToTermScope env =
-  TermScope
-    { scopeVtable = vtable,
-      scopeTypeTable = envTypeTable env,
-      scopeModTable = envModTable env
-    }
-  where
-    vtable = M.map valBinding $ envVtable env
-    valBinding (TypeM.BoundV tps v) = BoundV tps v
+-- | The scope, with sized types. See
+-- "Language.Futhark.TypeChecker.Terms.Scope".
+envToTermScope :: Env -> TermScope Size
+envToTermScope = Scope.envToTermScope id
 
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}
@@ -404,34 +358,6 @@ replaceTyVarsWith absorbable loc orig_t = do
 
   evalStateT (f orig_t) mempty
 
--- | Check that a type is a valid instantiation of a type parameter
--- with the given liftedness.
-checkLiftedness :: SrcLoc -> Liftedness -> TypeBase Size NoUniqueness -> TermTypeM ()
-checkLiftedness _ Lifted _ = pure ()
-checkLiftedness loc l t = do
-  constraints <- getConstraints
-  unless (orderZero t) $
-    typeError loc mempty $
-      "Type" </> indent 2 (pretty t) </> "found to be functional."
-  let bad = case l of
-        Unlifted -> [Lifted, SizeLifted]
-        _ -> [Lifted]
-      badParam vn = do
-        (_, ParamType vl ploc) <- M.lookup vn constraints
-        guard $ vl `elem` bad
-        Just (vn, ploc)
-  case mapMaybe badParam $ S.toList $ typeVars t of
-    (vn, ploc) : _ ->
-      typeError loc mempty $
-        "Type parameter"
-          <+> dquotes (prettyName vn)
-          <+> "bound at"
-          <+> pretty (locStr ploc)
-          <+> case l of
-            Unlifted -> "is lifted and cannot be an array element."
-            _ -> "is lifted and may be a functional type."
-    [] -> pure ()
-
 -- | Instantiate the type parameters of a type scheme with the types
 -- inferred by the unsized type checker, creating fresh variables for
 -- their sizes. See Note [Size Inference] in
@@ -515,7 +441,6 @@ instTyVars loc names orig_t1 orig_t2 = do
                 case M.lookup v2 seen of
                   Nothing -> do
                     (t, drepl) <- lift $ allDimsFreshInType usage Nonrigid "dv" t1
-                    lift $ checkLiftedness loc l $ second (const NoUniqueness) t
                     -- These are canonical instantiated sizes, which
                     -- unification may determine to be existential.
                     lift $ forM_ (M.keys drepl) $ \d ->
@@ -582,19 +507,8 @@ instTypeScheme qn loc tparams scheme_t inferred = do
   t' <- instTyVars loc tp_names inferred $ applySubst (`lookup` substs) scheme_t
   pure (names, t')
 
-lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
-lookupQualNameEnv (QualName [q] _)
-  | isIntrinsic q = asks termScope -- Magical intrinsic module.
-lookupQualNameEnv qn@(QualName quals _) = do
-  scope <- asks termScope
-  descend scope quals
-  where
-    descend scope [] = pure scope
-    descend scope (q : qs)
-      | Just (ModEnv q_scope) <- M.lookup q $ scopeModTable scope =
-          descend (envToTermScope q_scope) qs
-      | otherwise =
-          error $ "lookupQualNameEnv " <> show qn
+lookupQualNameEnv :: QualName VName -> TermTypeM (TermScope Size)
+lookupQualNameEnv qn = asks $ \tenv -> Scope.lookupQualNameEnv id (termScope tenv) qn
 
 lookupMod :: QualName VName -> TermTypeM Mod
 lookupMod qn@(QualName _ name) = do
@@ -603,7 +517,7 @@ lookupMod qn@(QualName _ name) = do
     Nothing -> error $ "lookupMod: " <> show qn
     Just m -> pure m
 
-localScope :: (TermScope -> TermScope) -> TermTypeM a -> TermTypeM a
+localScope :: (TermScope Size -> TermScope Size) -> TermTypeM a -> TermTypeM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 
 instance MonadTypeChecker TermTypeM where
@@ -721,24 +635,6 @@ updateTypes = astMap tv
           mapOnResRetType = normTypeFully
         }
 
-mustBeUnlifted :: Loc -> StructType -> TermTypeM ()
-mustBeUnlifted loc t = do
-  constraints <- getConstraints
-  unless (orderZero t) $
-    typeError loc mempty $
-      "Type" </> indent 2 (pretty t) </> "found to be functional."
-  forM_ (S.toList $ typeVars t) $ \tv ->
-    case M.lookup tv constraints of
-      Just (_, ParamType l ploc)
-        | l `elem` [Lifted, SizeLifted] ->
-            typeError loc mempty $
-              "Type parameter"
-                <+> dquotes (prettyName tv)
-                <+> "bound at"
-                <+> pretty (locStr ploc)
-                <+> "is lifted and cannot be an array element."
-      _ -> pure ()
-
 --- Basic checking
 
 unifies :: T.Text -> StructType -> Exp -> TermTypeM Exp
@@ -778,39 +674,9 @@ isInt64 _ = Nothing
 
 -- Running
 
-initialTermScope :: TermScope
-initialTermScope =
-  TermScope
-    { scopeVtable = initialVtable,
-      scopeTypeTable = mempty,
-      scopeModTable = mempty
-    }
-  where
-    initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
-
-    prim = Scalar . Prim
-    arrow x y = Scalar $ Arrow mempty Unnamed Observe x y
-
-    addIntrinsicF (name, IntrinsicMonoFun pts t) =
-      Just (name, BoundV [] $ arrow pts' $ RetType [] $ prim t)
-      where
-        pts' = case pts of
-          [pt] -> prim pt
-          _ -> Scalar $ tupleRecord $ map prim pts
-    addIntrinsicF (name, IntrinsicOverloadedFun ts pts rts) =
-      Just (name, OverloadedF ts pts rts)
-    addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
-      Just
-        ( name,
-          BoundV tvs $ foldFunType pts rt
-        )
-    addIntrinsicF (name, IntrinsicEquality) =
-      Just (name, EqualityF)
-    addIntrinsicF _ = Nothing
-
 runTermTypeM :: (ExpBase Info VName -> TermTypeM Exp) -> M.Map TyVar (TypeBase () NoUniqueness) -> TermTypeM a -> TypeM a
 runTermTypeM checker tyvars (TermTypeM m) = do
-  initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
+  initial_scope <- (Scope.initialTermScope id <>) . envToTermScope <$> askEnv
   name <- askImportName
   outer_env <- askEnv
   src <- gets TypeM.stateNameSource

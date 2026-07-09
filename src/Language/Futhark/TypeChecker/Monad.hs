@@ -11,6 +11,7 @@ module Language.Futhark.TypeChecker.Monad
     bindSpaced1,
     bindIdents,
     qualifyTypeVars,
+    qualifyTypeVarsWith,
     lookupMTy,
     lookupImport,
     lookupMod,
@@ -499,14 +500,33 @@ qualifyTypeVars ::
   [VName] ->
   TypeBase Size as ->
   TypeBase Size as
-qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
+qualifyTypeVars = qualifyTypeVarsWith onDim
+  where
+    onDim qual except e = runIdentity $ onDimM except e
+      where
+        onDimM except' (Var qn typ loc) = pure $ Var (qual except' qn) typ loc
+        onDimM except' e' = astMap (identityMapper {mapOnExp = onDimM except'}) e'
+
+-- | Like 'qualifyTypeVars', but generic in the representation of
+-- sizes, which are handled by the given function (that is passed the
+-- qualification function and the set of names not to qualify).
+qualifyTypeVarsWith ::
+  forall dim as.
+  ((S.Set VName -> QualName VName -> QualName VName) -> S.Set VName -> dim -> dim) ->
+  Env ->
+  [VName] ->
+  [VName] ->
+  TypeBase dim as ->
+  TypeBase dim as
+qualifyTypeVarsWith onDim outer_env orig_except ref_qs = onType (S.fromList orig_except)
   where
     onType ::
+      forall as'.
       S.Set VName ->
-      TypeBase Size as ->
-      TypeBase Size as
+      TypeBase dim as' ->
+      TypeBase dim as'
     onType except (Array u shape et) =
-      Array u (fmap (onDim except) shape) (onScalar except et)
+      Array u (fmap (onDim qual except) shape) (onScalar except et)
     onType except (Scalar t) =
       Scalar $ onScalar except t
 
@@ -525,13 +545,9 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
           Unnamed -> except
 
     onTypeArg except (TypeArgDim d) =
-      TypeArgDim $ onDim except d
+      TypeArgDim $ onDim qual except d
     onTypeArg except (TypeArgType t) =
       TypeArgType $ onType except t
-
-    onDim except e = runIdentity $ onDimM except e
-    onDimM except (Var qn typ loc) = pure $ Var (qual except qn) typ loc
-    onDimM except e = astMap (identityMapper {mapOnExp = onDimM except}) e
 
     qual except (QualName orig_qs name)
       | name `elem` except || reachable orig_qs name outer_env =

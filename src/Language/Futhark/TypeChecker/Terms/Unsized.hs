@@ -43,6 +43,8 @@ import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Rank
+import Language.Futhark.TypeChecker.Terms.Scope hiding (envToTermScope, initialTermScope, lookupQualNameEnv)
+import Language.Futhark.TypeChecker.Terms.Scope qualified as Scope
 import Language.Futhark.TypeChecker.TySolve hiding (Type)
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify (mkUsage)
@@ -55,32 +57,24 @@ type Type = CtType SComp
 toType :: TypeBase Size u -> TypeBase SComp u
 toType = first (const SDim)
 
-data ValBinding
-  = BoundV [TypeParam] Type
-  | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
-  | EqualityF
-  deriving (Show)
-
-data TermScope = TermScope
-  { scopeVtable :: M.Map VName ValBinding,
-    scopeTypeTable :: M.Map VName TypeBinding,
-    scopeModTable :: M.Map VName Mod
-  }
-  deriving (Show)
-
-instance Semigroup TermScope where
-  TermScope vt1 tt1 mt1 <> TermScope vt2 tt2 mt2 =
-    TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (mt1 `M.union` mt2)
-
 -- | Type checking happens with access to this environment.  The
 -- 'TermScope' will be extended during type-checking as bindings come into
 -- scope.
 data TermEnv = TermEnv
-  { termScope :: TermScope,
+  { termScope :: TermScope SComp,
     termLevel :: Level,
     termOuterEnv :: Env,
-    termImportName :: ImportName
+    termImportName :: ImportName,
+    -- | The liftedness of abstract types.
+    termTySet :: TySet
   }
+
+-- | An instantiation (at the given location, of a type parameter of
+-- the given polymorphic function, with the given liftedness, as the
+-- given type variable), recorded such that we can check, after
+-- constraint solving, that the liftedness of the type parameter is
+-- respected ('checkTyInstLiftedness').
+data TyInst = TyInst Loc (QualName VName) Liftedness TyVar
 
 -- | The state is a set of constraints and a counter for generating
 -- type names.  This is distinct from the usual counter we use for
@@ -90,6 +84,7 @@ data TermState = TermState
     termAM :: [CtAM],
     termTyVars :: TyVars SComp,
     termTyParams :: TyParams,
+    termTyInsts :: [TyInst],
     termCounter :: !Int,
     termWarnings :: Warnings,
     termNameSource :: VNameSource,
@@ -112,59 +107,25 @@ newtype TermM a
       MonadState TermState
     )
 
-envToTermScope :: Env -> TermScope
-envToTermScope env =
-  TermScope
-    { scopeVtable = vtable,
-      scopeTypeTable = envTypeTable env,
-      scopeModTable = envModTable env
-    }
-  where
-    vtable = M.map valBinding $ envVtable env
-    valBinding (TypeM.BoundV tps v) = BoundV tps $ toType v
-
-initialTermScope :: TermScope
-initialTermScope =
-  TermScope
-    { scopeVtable = initialVtable,
-      scopeTypeTable = mempty,
-      scopeModTable = mempty
-    }
-  where
-    initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
-
-    prim = Scalar . Prim
-    arrow x y = Scalar $ Arrow mempty Unnamed Observe x y
-
-    addIntrinsicF (name, IntrinsicMonoFun pts t) =
-      Just (name, BoundV [] $ arrow pts' $ RetType [] $ prim t)
-      where
-        pts' = case pts of
-          [pt] -> prim pt
-          _ -> Scalar $ tupleRecord $ map prim pts
-    addIntrinsicF (name, IntrinsicOverloadedFun ts pts rts) =
-      Just (name, OverloadedF ts pts rts)
-    addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
-      Just
-        ( name,
-          BoundV tvs $ toType $ foldFunType pts rt
-        )
-    addIntrinsicF (name, IntrinsicEquality) =
-      Just (name, EqualityF)
-    addIntrinsicF _ = Nothing
+-- | The scope, with sizes erased. See
+-- "Language.Futhark.TypeChecker.Terms.Scope".
+envToTermScope :: Env -> TermScope SComp
+envToTermScope = Scope.envToTermScope toType
 
 runTermM :: TermM a -> TypeM a
 runTermM (TermM m) = do
-  initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
+  initial_scope <- (Scope.initialTermScope toType <>) . envToTermScope <$> askEnv
   name <- askImportName
   outer_env <- askEnv
   src <- gets stateNameSource
+  abs_types <- getTySet
   let initial_env =
         TermEnv
           { termScope = initial_scope,
             termLevel = 0,
             termImportName = name,
-            termOuterEnv = outer_env
+            termOuterEnv = outer_env,
+            termTySet = abs_types
           }
       initial_state =
         TermState
@@ -172,6 +133,7 @@ runTermM (TermM m) = do
             termAM = mempty,
             termTyVars = mempty,
             termTyParams = mempty,
+            termTyInsts = mempty,
             termWarnings = mempty,
             termNameSource = src,
             termCounter = 0,
@@ -316,25 +278,14 @@ ctAM reason r m f =
   where
     ct = CtAM reason r m f
 
-localScope :: (TermScope -> TermScope) -> TermM a -> TermM a
+localScope :: (TermScope SComp -> TermScope SComp) -> TermM a -> TermM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}
 
-lookupQualNameEnv :: QualName VName -> TermM TermScope
-lookupQualNameEnv (QualName [q] _)
-  | baseTag q <= maxIntrinsicTag = asks termScope -- Magical intrinsic module.
-lookupQualNameEnv qn@(QualName quals _) = do
-  scope <- asks termScope
-  descend scope quals
-  where
-    descend scope [] = pure scope
-    descend scope (q : qs)
-      | Just (ModEnv q_scope) <- M.lookup q $ scopeModTable scope =
-          descend (envToTermScope q_scope) qs
-      | otherwise =
-          error $ "lookupQualNameEnv " <> show qn
+lookupQualNameEnv :: QualName VName -> TermM (TermScope SComp)
+lookupQualNameEnv qn = asks $ \tenv -> Scope.lookupQualNameEnv toType (termScope tenv) qn
 
 instance MonadError TypeError TermM where
   throwError e = TermM $ do
@@ -408,12 +359,14 @@ instTypeScheme ::
   [TypeParam] ->
   Type ->
   TermM ([VName], Type)
-instTypeScheme _qn loc tparams t = do
+instTypeScheme qn loc tparams t = do
   (names, substs) <- fmap (unzip . catMaybes) $
     forM tparams $ \tparam ->
       case tparam of
         TypeParamType l v _ -> do
           v' <- newTyVar loc l $ nameFromText $ T.takeWhile isAscii $ nameToText $ baseName v
+          modify $
+            \s -> s {termTyInsts = TyInst (locOf loc) qn l v' : termTyInsts s}
           pure $ Just (v, (typeParamName tparam, tyVarType NoUniqueness v'))
         TypeParamDim {} ->
           pure Nothing
@@ -437,9 +390,12 @@ lookupVar loc qn@(QualName qs name) = do
       if null tparams && null qs
         then pure t
         else do
-          (_tnames, t') <- instTypeScheme qn loc tparams t
-          -- TODO - qualify type names, like in the old type checker.
-          pure t'
+          (tnames, t') <- instTypeScheme qn loc tparams t
+          outer_env <- asks termOuterEnv
+          -- Qualify abstract types, so that e.g. mismatch errors
+          -- mention them by how they were accessed. The sizes need
+          -- no qualification, as they are not even present here.
+          pure $ qualifyTypeVarsWith (\_ _ d -> d) outer_env tnames qs t'
     Just EqualityF -> do
       argtype <- tyVarType Observe <$> newTyVarWith "t" (TyVarFree (locOf loc) Unlifted)
       pure $ foldFunType [argtype, argtype] $ RetType [] $ Scalar $ Prim Bool
@@ -486,17 +442,9 @@ checkSizeExp' e = do
   ctEq (Reason (locOf e)) e_t (Scalar (Prim (Signed Int64)))
   pure e'
 
--- | During type checking a pattern, we might find an explicit
--- ascription. These contain complete type information (although they
--- must of course still be checked against what remains of the
--- pattern).
-data Inferred
-  = NoneInferred
-  | Ascribed ParamType
-
 checkPat' ::
   PatBase NoInfo VName ParamType ->
-  Inferred ->
+  Inferred ParamType ->
   TermM (Pat ParamType)
 checkPat' (PatParens p loc) t =
   PatParens <$> checkPat' p t <*> pure loc
@@ -627,11 +575,6 @@ bindLetPat p t m = do
     ctEq (ReasonPatMatch (locOf p) (fmap toStruct p) t) pt t
     bind (patIdents (fmap toStruct p')) $ m p'
 
-typeParamIdent :: TypeParam -> Maybe (Ident StructType)
-typeParamIdent (TypeParamDim v loc) =
-  Just $ Ident v (Info $ Scalar $ Prim $ Signed Int64) loc
-typeParamIdent _ = Nothing
-
 bindTypes ::
   [(VName, TypeBinding)] ->
   TermM a ->
@@ -693,29 +636,9 @@ checkApplyOne loc fname (fframe, ftype) (arg, argframe, argtype) = do
       rhs = arrayOf (toShape (SVar m)) a
   ctAM (Reason (locOf loc)) r m $ fmap toSComp (toShape m_var <> fframe)
   let reason = case arg of
-        Just arg' -> ReasonApply (locOf arg) fname arg' lhs rhs
+        Just arg' -> ReasonApply (locOf arg) fname arg' a argtype
         Nothing -> Reason (locOf loc)
   ctEq reason lhs rhs
-  debugTraceM 3 $
-    unlines
-      [ "## checkApplyOne",
-        "## fname",
-        prettyString fname,
-        "## (fframe, ftype)",
-        prettyString (fframe, ftype),
-        "## (argframe, argtype)",
-        prettyString (argframe, argtype),
-        "## r",
-        prettyString r,
-        "## m",
-        prettyString m,
-        "## lhs",
-        prettyString lhs,
-        "## rhs",
-        prettyString rhs,
-        "## ret",
-        prettyString $ arrayOf (toShape (SVar m)) b
-      ]
   pure
     ( arrayOf (toShape (SVar m)) b,
       AutoMap
@@ -1074,8 +997,11 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
 --
 checkExp e@(UpdateSection steps NoInfo loc) = do
   steps' <- mapM checkStep steps
-  src_t <- newElemType loc "update" NoUniqueness
-  ve_t <- newElemType loc "update_elem" NoUniqueness
+  -- Lifted, as a pure field projection works on records with
+  -- function-typed fields. Any slice steps will constrain the
+  -- relevant parts to be arrays (of unlifted elements) anyway.
+  src_t <- newType loc Lifted "update" NoUniqueness
+  ve_t <- newType loc Lifted "update_elem" NoUniqueness
   mustHaveSteps e src_t steps' ve_t
   ft <-
     asStructType $
@@ -1349,6 +1275,59 @@ generaliseAndDefaults unconstrained solution t = do
       M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
     )
 
+-- | Verify that the recorded type parameter instantiations respect the
+-- liftedness of the type parameters. The constraint solver merely propagates
+-- liftedness constraints; this is where they are enforced for instantiations,
+-- as only here do we know why the constraints exist. (Other liftedness rules
+-- are enforced by 'localChecks' in Language.Futhark.TypeChecker.Terms.)
+checkTyInstLiftedness :: Solution -> TermM ()
+checkTyInstLiftedness solution = do
+  typarams <- gets termTyParams
+  tyset <- asks termTySet
+  mapM_ (check typarams tyset) . reverse =<< gets termTyInsts
+  where
+    -- A Lifted type parameter permits any instantiation.
+    check _ _ (TyInst _ _ Lifted _) = pure ()
+    check typarams tyset (TyInst loc qn l v)
+      | Just (Right t) <- M.lookup v solution = do
+          unless (orderZero t) . typeError loc mempty $
+            "Type"
+              </> indent 2 (pretty t)
+              </> "found to be functional."
+              </> when_inst
+          let bad = case l of
+                Unlifted -> [Lifted, SizeLifted]
+                _ -> [Lifted]
+              -- The liftedness of a type variable is given by its
+              -- binding if it is a type parameter, and by the type
+              -- set if it is an abstract type.
+              badVar qv =
+                case M.lookup (qualLeaf qv) typarams of
+                  Just (_, pl, ploc) -> do
+                    guard $ pl `elem` bad
+                    Just $
+                      "Type parameter"
+                        <+> dquotes (prettyName (qualLeaf qv))
+                        <+> "bound at"
+                        <+> pretty (locStr ploc)
+                  Nothing -> do
+                    al <- M.lookup qv tyset
+                    guard $ al `elem` bad
+                    Just $ "Type" <+> dquotes (pretty qv)
+          case mapMaybe badVar $ typeQualVars t of
+            what : _ ->
+              typeError loc mempty $
+                what
+                  <+> case l of
+                    Unlifted -> "is lifted and cannot be an array element."
+                    _ -> "is lifted and may be a functional type."
+                  </> when_inst
+            [] -> pure ()
+      | otherwise = pure ()
+      where
+        when_inst =
+          "When instantiating type parameter of" <+> dquotes (pretty qn) <> "."
+
 -- | Type check a single value definition.
 checkValDef ::
   ( VName,
@@ -1417,6 +1396,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       pure (solution, params', retdecl', body'')
 
     onTySolution params' body' (unconstrained, solution) = do
+      checkTyInstLiftedness solution
       body_t <- expType body'
       let fun_t =
             foldFunType
@@ -1444,6 +1424,7 @@ checkSingleExp e = runTermM $ do
   case solve cts' typarams tyvars' of
     Left err -> pure (Left err, e'')
     Right (unconstrained, solution) -> do
+      checkTyInstLiftedness solution
       e_t <- expType e''
       x <- generaliseAndDefaults unconstrained solution $ first (const ()) e_t
       pure (Right x, e'')
@@ -1466,7 +1447,13 @@ checkSizeExp e = runTermM $ do
 
   solutions <-
     forM cts_tyvars' $ \(cts', _artificial', tyvars') ->
-      bitraverse pure (traverse (doDefaults mempty)) $ solve cts' typarams tyvars'
+      bitraverse
+        pure
+        ( \(unconstrained, solution) -> do
+            checkTyInstLiftedness solution
+            (unconstrained,) <$> doDefaults mempty solution
+        )
+        $ solve cts' typarams tyvars'
 
   case (solutions, es') of
     ([solution], [e'']) ->

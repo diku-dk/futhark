@@ -83,8 +83,8 @@ unifyBranchTypes loc t1 t2 =
 
 unifyBranches :: SrcLoc -> Exp -> Exp -> TermTypeM (StructType, [VName])
 unifyBranches loc e1 e2 = do
-  e1_t <- expTypeFully e1
-  e2_t <- expTypeFully e2
+  e1_t <- expType e1
+  e2_t <- expType e2
   unifyBranchTypes loc e1_t e2_t
 
 sliceShape ::
@@ -315,7 +315,6 @@ checkExp (ArrayLit all_es (Info t) loc) =
         Just et -> do
           let t'' = arrayOf (Shape [sizeFromInteger 0 mempty]) et
           unify (mkUsage loc "empty array literal") t'' t'
-          mustBeUnlifted (locOf loc) et
           pure $ ArrayLit [] (Info t'') loc
         Nothing -> error $ "checkExp ArrayLit: " <> prettyString t'
     e : es -> do
@@ -323,7 +322,6 @@ checkExp (ArrayLit all_es (Info t) loc) =
       et <- expType e'
       es' <- mapM (unifies "type of first array element" et <=< checkExp) es
       let arr_t = arrayOf (Shape [sizeFromInteger (genericLength all_es) mempty]) et
-      mustBeUnlifted (locOf loc) et
       pure $ ArrayLit (e' : es') (Info arr_t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- checkExp start
@@ -589,7 +587,10 @@ checkExp (Assert e1 e2 _ loc) = do
 checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
   (params', body', rettype', RetType dims ty) <-
     incLevel . bindingParams [] params $ \params' -> do
-      rt' <- replaceTyVars loc rt
+      -- The sizes of the return type are absorbable, as a lambda
+      -- returns whatever type the context requires. See Note [Size
+      -- Inference].
+      rt' <- replaceTyVarsAbsorbable loc rt
       rettype_checked <- traverse checkTypeExpNonrigid rettype_te
       declared_rettype <-
         case rettype_checked of
@@ -632,8 +633,14 @@ checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
           param_names = mapMaybe (named . patternParam) params'
           pos_sizes =
             sizeNamesPos $ funType params' $ RetType [] ret
-          hide k (lvl, _) =
-            lvl >= cur_lvl && k `notElem` param_names && k `S.notMember` pos_sizes
+          -- Only rigid sizes computed by the body can be hidden. A
+          -- size that is still flexible has not been determined yet,
+          -- and hiding it would sever its connection to whatever the
+          -- enclosing context determines it to be.
+          rigid UnknownSize {} = True
+          rigid _ = False
+          hide k (lvl, c) =
+            rigid c && lvl >= cur_lvl && k `notElem` param_names && k `S.notMember` pos_sizes
 
       hidden_sizes <-
         S.fromList . M.keys . M.filterWithKey hide <$> getConstraints
@@ -731,7 +738,11 @@ checkExp (AppExp (Loop _ mergepat loopinit form loopbody loc) _) = do
       (Loop sparams mergepat' loopinit' form' loopbody' loc)
       (Info appres)
 checkExp (Constr name es (Info t) loc) = do
-  t' <- replaceTyVars loc t
+  -- The sizes are absorbable: those of the payloads of the other
+  -- constructors (and any not determined by the arguments) are
+  -- adopted from the context, like the sizes of a hole. See Note
+  -- [Size Inference].
+  t' <- replaceTyVarsAbsorbable loc t
   es' <- mapM checkExp es
   case t' of
     Scalar (Sum cs)
@@ -745,14 +756,7 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
   e1' <- checkExp e1
   e2' <- checkExp e2
   e3' <- checkExp e3
-
-  let bool = Scalar $ Prim Bool
-  e1_t <- expType e1'
-  onFailure (CheckingRequired [bool] e1_t) $
-    unify (mkUsage e1' "use as 'if' condition") bool e1_t
-
   (t, retext) <- unifyBranches loc e2' e3'
-
   pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes t retext)
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
@@ -1063,11 +1067,11 @@ checkOneExp e = do
   (maybe_tysubsts, e') <- Unsized.checkSingleExp e
   case maybe_tysubsts of
     Left err -> throwError err
-    Right (_generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+    Right (generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       let t = typeOf e''
       (tparams, _, _) <-
-        letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
+        letGeneralise (nameFromString "<exp>") (srclocOf e) generalised [] $ toRes Nonunique t
       detectAmbiguousSizes
       e''' <- bindExistentialInsts =<< normTypeFully e''
       localChecks tparams e'''
@@ -1263,7 +1267,8 @@ orderZeroM tparams t = do
 --  currently unable to detect float underflow (such as 1e-400 -> 0)
 --
 -- * Function types appearing in places where they are not allowed (e.g.
---   returned from branches).
+--   returned from branches), and more generally lifted types used as
+--   array elements.
 --
 -- The rationale is that it is easier to check for these things after all of the
 -- type inference has been done, as they complicate the logic. Further, it is
@@ -1292,13 +1297,22 @@ localChecks tparams orig_body = void $ check orig_body
           </> indent 2 (align (pretty (appResType rt)))
           </> "but if-results may not be of function type."
       recurse e
+    check e@(ArrayLit _ (Info t) loc) = do
+      mapM_ (checkArrayElem loc) $ peelArray 1 t
+      recurse e
     check e@(AppExp (LetPat _ p _ _ _) _) =
       mustBeIrrefutable p *> recurse e
     check e@(AppExp (BinOp (v, loc) _ (x, _) _ _) _)
-      | qualLeaf v == intrinsicVar "==" =
+      | qualLeaf v == intrinsicVar "==" = do
+          case typeOf x of
+            Array {} -> do
+              warn loc $
+                textwrap
+                  "Comparing arrays with \"==\" is deprecated and will stop working in a future revision of the language."
+            _ -> pure ()
           checkEquality loc (typeOf x) *> recurse e
     check e@(Var v (Info t) loc)
-      | qualLeaf v == intrinsicVar "==" =
+      | qualLeaf v == intrinsicVar "==" = do
           checkEquality loc t *> recurse e
     check e@(Lambda ps _ _ _ _) =
       mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
@@ -1340,6 +1354,36 @@ localChecks tparams orig_body = void $ check orig_body
             </> indent 2 (pretty t)
             </> "which does not support equality."
 
+    -- Array elements must be unlifted: of non-varying size, and in
+    -- particular not functions. This is a stricter requirement than
+    -- 'orderZeroM', which permits size-lifted type parameters.
+    checkArrayElem loc et = do
+      unless (orderZero et) . typeError loc mempty $
+        "Type" </> indent 2 (pretty et) </> "found to be functional."
+      mapM_ checkElemVar $ typeQualVars et
+      where
+        checkElemVar qv = do
+          l <- case find ((== qualLeaf qv) . typeParamName) tparams of
+            Just (TypeParamType l _ tploc) ->
+              pure $ Left (l, locOf tploc)
+            _ -> Right <$> lookupAbsTy qv
+          case l of
+            Left (l', tploc)
+              | l' /= Unlifted ->
+                  typeError loc mempty $
+                    "Type parameter"
+                      <+> dquotes (pretty qv)
+                      <+> "bound at"
+                      <+> pretty (locStr tploc)
+                      <+> "is lifted and cannot be an array element."
+            Right l'
+              | l' /= Unlifted ->
+                  typeError loc mempty $
+                    "Type"
+                      <+> dquotes (pretty qv)
+                      <+> "is lifted and cannot be an array element."
+            _ -> pure ()
+
     bitWidth ty = 8 * intByteSize ty :: Int
 
     inBoundsI x (Signed t) = x >= -2 ^ (bitWidth t - 1) && x < 2 ^ (bitWidth t - 1)
@@ -1370,10 +1414,10 @@ pendingInstSizes :: Constraints -> (VName -> Bool, M.Map VName VName)
 pendingInstSizes constraints = (pending, reps)
   where
     key v = case snd <$> M.lookup v constraints of
-      Just (ExistentialSize k _) -> Just k
+      Just (ExistentialSize k _ _) -> Just k
       _ -> Nothing
     pending v = case snd <$> M.lookup v constraints of
-      Just (ExistentialSize _ _) -> True
+      Just ExistentialSize {} -> True
       Just (CopySize c _ _) -> isJust $ key c
       _ -> False
     groups =
@@ -1402,7 +1446,7 @@ collapseInstSizes :: Level -> TermTypeM ()
 collapseInstSizes min_lvl = do
   constraints <- getConstraints
   let nonExistential c = case snd <$> M.lookup c constraints of
-        Just (ExistentialSize _ _) -> False
+        Just ExistentialSize {} -> False
         _ -> True
       collapse (lvl, CopySize c _ usage)
         | lvl >= min_lvl,
@@ -1440,9 +1484,28 @@ bindExistentialInsts = astMap tv
     onStruct t = do
       (t', ext) <- onType t
       -- Existential sizes at the top level of a type have nowhere to
-      -- be bound; this should not happen, but if it does, we leave
-      -- the type alone.
-      pure $ if null ext then t' else t
+      -- be bound. Those that absorbed a rigid unknown size stand for
+      -- a size that is actually computed at the recorded location,
+      -- so they become rigid unknown sizes there, subjecting them to
+      -- the causality check. The rest (absorbed from declared
+      -- existentials, e.g. by a hole) are left alone.
+      if null ext
+        then pure t'
+        else do
+          constraints <- getConstraints
+          let computedAt v = case snd <$> M.lookup v constraints of
+                Just (ExistentialSize _ mloc _) -> mloc
+                Just (CopySize c _ _)
+                  | Just (ExistentialSize _ mloc _) <- snd <$> M.lookup c constraints ->
+                      mloc
+                _ -> Nothing
+          repls <- fmap (M.fromList . catMaybes) . forM (S.toList $ fvVars $ freeInType t) $ \v ->
+            case computedAt v of
+              Just dloc -> do
+                v' <- newRigidDim dloc (RigidRet Nothing) "d"
+                pure $ Just (v, ExpSubst $ sizeFromName (qualName v') $ srclocOf dloc)
+              Nothing -> pure Nothing
+          pure $ applySubst (`M.lookup` repls) t
     onType ::
       (Substitutable (TypeBase Size u)) =>
       TypeBase Size u ->
@@ -1694,8 +1757,8 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, _)
       | k `elem` map typeParamName tparams =
           pure Nothing
-    closeOver (k, ParamType l _) =
-      pure $ Just $ Left $ TypeParamType l k mempty
+    closeOver (k, ParamType {}) =
+      error $ "closeOverTypes: unexpected ParamType: " <> prettyNameString k
     closeOver (k, Size Nothing _) =
       pure $ Just $ Left $ TypeParamDim k mempty
     closeOver (k, UnknownSize _ _)
@@ -1992,6 +2055,17 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 --   absorbable size is absorbed by it (see the end of the arrow case of
 --   'unifyWith').
 --
+-- - The sizes of the inferred return type of a lambda and of a constructor
+--   expression are likewise absorbable: a lambda returns whatever type the
+--   context requires (in particular a lambda body ending in "#None" may well
+--   have an existential option type), and the payload sizes of a constructor
+--   application that are not determined by its arguments - notably those of
+--   the *other* constructors - are adopted from the context. Relatedly, the
+--   inferred return type of a lambda only hides (existentially binds) sizes
+--   that are rigid; a still-flexible size has not been determined yet, and
+--   hiding it would sever its connection to whatever the enclosing context
+--   determines it to be (see 'inferReturnSizes').
+--
 -- - Sizes in the types of lambda parameters and patterns ('replaceTyVars') are
 --   not absorbable. They name the sizes of actual bound values, and must be
 --   resolved to real sizes. For example, this is what rejects
@@ -2004,3 +2078,32 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 --   because the inner function is size-generalised, and the *instantiation* of
 --   its hidden size parameter is what absorbs the bound size of the expected
 --   type.
+--
+-- ## Absorption and causality
+--
+-- Absorbing an existential is not always innocent. Whether the size that was
+-- absorbed is a *declared* existential (of an ascribed type) or a *rigid
+-- unknown* size (one whose value is computed at a specific point in the
+-- program, such as the result of applying a function with an existential
+-- return type) makes a difference:
+--
+--   def ite b t f = if b then t () else f ()
+--   def f : () -> option ([]i32) = \() -> #None                    -- fine
+--   def g b = ite b (\() -> #None) (\() -> #Some (gen ()))         -- rejected
+--
+-- In g, the type of "#None" is forced (via the instantiation of the type
+-- parameter of "ite") to have the size produced by "gen ()" inside the other
+-- lambda - a size that is only computed elsewhere, so the constructed value
+-- cannot know its payload size (tests/sumtypes/sumtype52.fut). ExistentialSize
+-- therefore records the location when the absorbed size was rigid, and when
+-- such a pending existential remains in a type with no position to bind it,
+-- 'bindExistentialInsts' turns it into a rigid unknown size at the recorded
+-- location. The causality check then rejects expressions that need it (a sum
+-- constructor, say) before it is computed, with no knowledge of this
+-- machinery. Two subtleties: the ext variables temporarily introduced in the
+-- arrow case of 'unifyWith' shadow the registered constraints of the binders,
+-- so the rigidity of a binder is determined from the constraints as they were
+-- before ('rigidPre'); and a pending size that checkApply has already bound in
+-- a remaining parameter type (of a partially applied function) is registered
+-- as a rigid unknown size by 'sizeFree', which is what carries the obligation
+-- across applications.

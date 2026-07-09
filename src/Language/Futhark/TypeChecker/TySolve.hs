@@ -362,11 +362,11 @@ solveEq reason obcs orig_t1 orig_t2 = do
     tryUnify :: Type -> Type -> Reason Type -> BreadCrumbs -> SolveM s ()
     tryUnify t1 t2 r bcs =
       case unify t1 t2 of
-        Left details -> cannotUnify r (aNote details) bcs t1 t2
+        Left details -> cannotUnify r (foldMap aNote details) bcs t1 t2
         Right eqs -> mapM_ solveCt' eqs
 
 -- | Unify at the root, emitting new equalities that must hold.
-unify :: Type -> Type -> Either (Doc a) [(BreadCrumbs, (Type, Type))]
+unify :: Type -> Type -> Either (Maybe (Doc a)) [(BreadCrumbs, (Type, Type))]
 unify (Scalar (Prim pt1)) (Scalar (Prim pt2))
   | pt1 == pt2 = Right []
 unify
@@ -393,7 +393,7 @@ unify (Scalar (Record fs1)) (Scalar (Record fs2))
   | Just n1 <- length <$> areTupleFields fs1,
     Just n2 <- length <$> areTupleFields fs2,
     n1 /= n2 =
-      Left $
+      Left . Just $
         "Tuples have"
           <+> pretty n1
           <+> "and"
@@ -403,23 +403,23 @@ unify (Scalar (Record fs1)) (Scalar (Record fs2))
       let missing =
             filter (`notElem` M.keys fs1) (M.keys fs2)
               <> filter (`notElem` M.keys fs2) (M.keys fs1)
-       in Left $
+       in Left . Just $
             "unshared fields:" <+> commasep (map pretty missing) <> "."
 unify (Scalar (Sum cs1)) (Scalar (Sum cs2))
   | M.keys cs1 == M.keys cs2 =
       fmap concat . forM cs' $ \(c, (ts1, ts2)) -> do
         if length ts1 == length ts2
           then Right $ zipWith (curry (matchingConstructor c,)) ts1 ts2
-          else Left mempty
+          else Left Nothing
   | otherwise =
-      Left $ unsharedConstructorsMsg cs1 cs2
+      Left . Just $ unsharedConstructorsMsg cs1 cs2
   where
     cs' = M.toList $ M.intersectionWith (,) cs1 cs2
 unify t1 t2
   | Just t1' <- peelArray 1 t1,
     Just t2' <- peelArray 1 t2 =
       Right [(mempty, (t1', t2'))]
-unify _ _ = Left mempty
+unify _ _ = Left Nothing
 
 maybeLookupTyVarSol :: TyVar -> SolveM s (Maybe TyVarSol)
 maybeLookupTyVarSol tv = do
@@ -652,7 +652,9 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
 
 -- | If a type variable has a liftedness constraint, we propagate that
 -- constraint to its solution. The actual checking for correct usage
--- is done later.
+-- is done later, by 'localChecks' and 'instTyVars' in the sized type
+-- checker, which know why the constraints exist and can produce
+-- proper error messages.
 liftednessCheck :: Liftedness -> Type -> SolveM s ()
 liftednessCheck l (Scalar (TypeVar _ (QualName [] v) _)) = do
   v_info <- maybeLookupTyVarSol v
