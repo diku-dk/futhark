@@ -758,7 +758,7 @@ etaExpand e_t e = do
         M.fromList . zip (retDims ret) $
           map (ExpSubst . flip sizeFromName mempty . qualName) ext'
       ret' = applySubst (`M.lookup` extsubst) ret
-      e' = mkApply e (map (\v -> (Nothing, mempty, v)) vars) $ AppRes (toStruct $ retType ret') ext'
+      e' = mkApply e (map (\v -> (Nothing, v)) vars) $ AppRes (toStruct $ retType ret') ext'
   pure (params, e', ret)
   where
     getType (RetType _ (Scalar (Arrow _ p d t1 t2))) =
@@ -918,9 +918,9 @@ liftedName _ _ = "defunc"
 defuncApplyArg ::
   (Name, SrcLoc) ->
   (Exp, StaticVal) ->
-  (((Maybe VName, AutoMap), Exp), [ParamType]) ->
+  ((Maybe VName, Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
-defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, _), arg), _) = do
+defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) ((argext, arg), _) = do
   (arg', arg_sv) <- defuncExp arg
   let env' = alwaysMatchPatSV closure_env pat arg_sv
       dims = mempty
@@ -971,18 +971,18 @@ defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) (((a
   callret <- unRetType lifted_rettype
 
   pure
-    ( mkApply fname' [(Nothing, mempty, f'), (argext, mempty, arg')] callret,
+    ( mkApply fname' [(Nothing, f'), (argext, arg')] callret,
       sv
     )
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
 -- applied or return a higher-order value.
-defuncApplyArg _ (f', DynamicFun _ sv) (((argext, _), arg), argtypes) = do
+defuncApplyArg _ (f', DynamicFun _ sv) ((argext, arg), argtypes) = do
   (arg', _) <- defuncExp arg
   let (argtypes', rettype) = dynamicFunType sv argtypes
       restype = foldFunType argtypes' (RetType [] rettype)
       callret = AppRes restype []
-      apply_e = mkApply f' [(argext, mempty, arg')] callret
+      apply_e = mkApply f' [(argext, arg')] callret
   pure (apply_e, sv)
 --
 defuncApplyArg (fname_s, _) (_, sv) ((_, arg), _) =
@@ -999,7 +999,7 @@ updateReturn (AppRes ret1 ext1) (AppExp apply (Info (AppRes ret2 ext2))) =
   AppExp apply $ Info $ AppRes (combineTypeShapes ret1 ret2) (ext1 <> ext2)
 updateReturn _ e = e
 
-defuncApply :: Exp -> NE.NonEmpty ((Maybe VName, AutoMap), Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
+defuncApply :: Exp -> NE.NonEmpty (Maybe VName, Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
 defuncApply f args appres loc = do
   (f', f_sv) <- defuncApplyFunction f (length args)
   case f_sv of

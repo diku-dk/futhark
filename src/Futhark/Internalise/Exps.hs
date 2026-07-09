@@ -1661,7 +1661,7 @@ findFuncall (E.Apply f args _)
   | E.Hole (Info _) loc <- f =
       (FunctionHole loc, map onArg $ NE.toList args)
   where
-    onArg (Info (argext, _), e) = (e, argext)
+    onArg (Info argext, e) = (e, argext)
 findFuncall e =
   error $ "Invalid function expression in application:\n" ++ prettyString e
 

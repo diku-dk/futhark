@@ -1,11 +1,10 @@
 -- | Unsized type checking.
 --
--- This checker generates type constraints (type 'CtTy') and AUTOMAP
--- constraints (type 'CtAM') which are then solved to find a solution.
--- The result is a decorated AST where most of the type annotations
--- are just references to type variables. Further, all the
--- size-specific annotations (e.g. existential sizes) just contain
--- dummy values, such as empty lists.
+-- This checker generates type constraints (type 'CtTy') which are then solved
+-- to find a solution. The result is a decorated AST where most of the type
+-- annotations are just references to type variables. Further, all the
+-- size-specific annotations (e.g. existential sizes) just contain dummy values,
+-- such as empty lists.
 --
 -- If Futhark had no fancy type system features, then this pass would
 -- essentially be all you needed.
@@ -36,7 +35,7 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames hiding (newName)
-import Futhark.Util (debugTraceM, mapAccumLM, nubOrd)
+import Futhark.Util (debugTraceM, nubOrd)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
@@ -611,23 +610,16 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 checkApplyOne ::
   SrcLoc ->
   (Maybe (QualName VName), Int) ->
-  (Shape Size, Type) ->
-  (Maybe Exp, Shape Size, Type) ->
-  TermM (Type, AutoMap)
-checkApplyOne loc fname (_fframe, ftype) (arg, _argframe, argtype) = do
+  Type ->
+  (Maybe Exp, Type) ->
+  TermM Type
+checkApplyOne loc fname ftype (arg, argtype) = do
   (a, b) <- split ftype
   let reason = case arg of
         Just arg' -> ReasonApply (locOf arg) fname arg' a argtype
         Nothing -> Reason (locOf loc)
   ctEq reason argtype a
-  pure
-    ( b,
-      AutoMap
-        { autoRep = mempty,
-          autoMap = mempty,
-          autoFrame = mempty
-        }
-    )
+  pure b
   where
     split (Scalar (Arrow _ _ _ a (RetType _ b))) =
       pure (a, b `setUniqueness` NoUniqueness)
@@ -646,19 +638,16 @@ checkApplyOne loc fname (_fframe, ftype) (arg, _argframe, argtype) = do
 checkApply ::
   SrcLoc ->
   Maybe (QualName VName) ->
-  (Shape Size, Type) ->
-  NE.NonEmpty (Maybe Exp, Shape Size, Type) ->
-  TermM (Type, NE.NonEmpty AutoMap)
-checkApply loc fname (fframe, ftype) args = do
-  ((_, _, rt), argts) <- mapAccumLM onArg (0, fframe, ftype) args
-  pure (rt, argts)
+  Type ->
+  NE.NonEmpty (Maybe Exp, Type) ->
+  TermM Type
+checkApply loc fname ftype args = do
+  (_, rt) <- foldM onArg (0, ftype) args
+  pure rt
   where
-    onArg (i, f_f, f_t) arg = do
-      (rt, am) <- checkApplyOne loc (fname, i) (f_f, f_t) arg
-      pure
-        ( (i + 1, autoFrame am, rt),
-          am
-        )
+    onArg (i, f_t) arg = do
+      rt <- checkApplyOne loc (fname, i) f_t arg
+      pure (i + 1, rt)
 
 checkSlice :: SliceBase NoInfo VName -> TermM [DimIndex]
 checkSlice = mapM checkDimIndex
@@ -881,12 +870,11 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
     fmap NE.unzip . forM args $ \(_, arg) -> do
       arg' <- checkExp arg
       arg_t <- expType arg'
-      pure (arg', (Just arg', frameOf arg', arg_t))
+      pure (arg', (Just arg', arg_t))
   fe_t <- expType fe'
-  (rt, ams) <- checkApply loc fname (frameOf fe', fe_t) apply_args
+  rt <- checkApply loc fname fe_t apply_args
   rt' <- asStructType rt
-  let args'' =
-        NE.zipWith (\am arg -> (Info (Nothing, am), arg)) ams args'
+  let args'' = NE.map (\arg -> (Info Nothing, arg)) args'
   pure $ AppExp (Apply fe' args'' loc) $ Info (AppRes rt' [])
   where
     fname =
@@ -900,19 +888,18 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   e2' <- checkExp e2
   e2_t <- expType e2'
 
-  (rt, ams) <-
+  rt <-
     checkApply
       loc
       (Just op)
-      (mempty, ftype)
-      ((Just e1', frameOf e1', e1_t) NE.:| [(Just e2', frameOf e2', e2_t)])
+      ftype
+      ((Just e1', e1_t) NE.:| [(Just e2', e2_t)])
   rt' <- asStructType rt
-  let (am1 NE.:| [am2]) = ams
 
   ftype' <- asStructType ftype
   pure $
     AppExp
-      (BinOp (op, oploc) (Info ftype') (e1', Info (Nothing, am1)) (e2', Info (Nothing, am2)) loc)
+      (BinOp (op, oploc) (Info ftype') (e1', Info Nothing) (e2', Info Nothing) loc)
       (Info (AppRes rt' []))
 --
 checkExp (OpSectionLeft op _ e _ _ loc) = do
@@ -921,16 +908,14 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
   e_t <- expType e'
   t2 <- newType loc Lifted "t" NoUniqueness
   t2' <- asStructType t2
-  let f1 = frameOf e'
-  (rt, ams) <-
+  rt <-
     checkApply
       loc
       (Just op)
-      (mempty, optype)
-      ((Just e', f1, e_t) NE.:| [(Nothing, mempty, t2)])
+      optype
+      ((Just e', e_t) NE.:| [(Nothing, t2)])
   rt' <- asStructType rt
 
-  let (am1 NE.:| _) = ams
   t1 <- asStructType e_t
   optype' <- asStructType optype
   pure $
@@ -938,7 +923,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
       op
       (Info optype')
       e'
-      ( Info (Unnamed, toParam Observe t1, Nothing, am1),
+      ( Info (Unnamed, toParam Observe t1, Nothing),
         Info (Unnamed, toParam Observe t2')
       )
       (Info (RetType [] (rt' `setUniqueness` Nonunique)), Info [])
@@ -949,15 +934,13 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   e_t <- expType e'
   t1 <- newType loc Lifted "t" NoUniqueness
   t1' <- asStructType t1
-  let f2 = frameOf e'
-  (rt, ams) <-
+  rt <-
     checkApply
       loc
       (Just op)
-      (mempty, optype)
-      ((Nothing, mempty, t1) NE.:| [(Just e', f2, e_t)])
+      optype
+      ((Nothing, t1) NE.:| [(Just e', e_t)])
   rt' <- asStructType rt
-  let (_ NE.:| [am2]) = ams
   t2 <- asStructType e_t
 
   optype' <- asStructType optype
@@ -968,7 +951,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
       e'
       -- Dummy types.
       ( Info (Unnamed, toParam Observe t1'),
-        Info (Unnamed, toParam Observe t2, Nothing, am2)
+        Info (Unnamed, toParam Observe t2, Nothing)
       )
       (Info $ RetType [] (rt' `setUniqueness` Nonunique))
       loc

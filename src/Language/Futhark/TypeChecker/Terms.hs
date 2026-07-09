@@ -42,7 +42,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Futhark.Util (debugTraceM, mapAccumLM, nubOrd)
+import Futhark.Util (mapAccumLM, nubOrd)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
@@ -178,8 +178,8 @@ sliceShape r slice t@(Array u (Shape orig_dims) et) =
         ( BinOp
             (qualName (intrinsicVar "-"), mempty)
             sizeBinOpInfo
-            (j, Info (Nothing, mempty))
-            (i, Info (Nothing, mempty))
+            (j, Info Nothing)
+            (i, Info Nothing)
             mempty
         )
         $ Info
@@ -388,8 +388,8 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         ( BinOp
             (qualName (intrinsicVar op), mempty)
             sizeBinOpInfo
-            (x, Info (Nothing, mempty))
-            (y, Info (Nothing, mempty))
+            (x, Info Nothing)
+            (y, Info Nothing)
             mempty
         )
         (Info $ AppRes t [])
@@ -408,39 +408,38 @@ checkExp (Coerce e te _ loc) = do
   pure $ Coerce e' te' (Info t') loc
 checkExp (AppExp (Apply fe args loc) _) = do
   fe' <- checkExp fe
-  let ams = fmap (snd . unInfo . fst) args
   args' <- mapM (checkExp . snd) args
   t <- expType fe'
   let fname =
         case fe' of
           Var v _ _ -> Just v
           _ -> Nothing
-  ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) (NE.zip args' ams)
+  ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
 
   pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
   where
-    onArg fname (i, all_exts, t) (arg', am) = do
-      (_, rt, argext, exts, am') <- checkApply loc (fname, i) t arg' am
+    onArg fname (i, all_exts, t) arg' = do
+      (_, rt, argext, exts) <- checkApply loc (fname, i) t arg'
       pure
         ( (i + 1, all_exts <> exts, rt),
-          (Info (argext, am'), arg')
+          (Info argext, arg')
         )
-checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, Info (_, xam)) (e2, Info (_, yam)) loc) _) = do
+checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
   ftype <- lookupVar oploc op op_t
   e1' <- checkExp e1
   e2' <- checkExp e2
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (_, rt, p1_ext, _, am1) <- checkApply loc (Just op, 0) ftype e1' xam
-  (_, rt', p2_ext, retext, am2) <- checkApply loc (Just op, 1) rt e2' yam
+  (_, rt, p1_ext, _) <- checkApply loc (Just op, 0) ftype e1'
+  (_, rt', p2_ext, retext) <- checkApply loc (Just op, 1) rt e2'
 
   pure $
     AppExp
       ( BinOp
           (op, oploc)
           (Info ftype)
-          (e1', Info (p1_ext, am1))
-          (e2', Info (p2_ext, am2))
+          (e1', Info p1_ext)
+          (e2', Info p2_ext)
           loc
       )
       (Info (AppRes rt' retext))
@@ -653,10 +652,10 @@ checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
 checkExp (OpSection op (Info op_t) loc) = do
   ftype <- lookupVar loc op op_t
   pure $ OpSection op (Info ftype) loc
-checkExp (OpSectionLeft op (Info op_t) e (Info (_, _, _, am), _) _ loc) = do
+checkExp (OpSectionLeft op (Info op_t) e _ _ loc) = do
   ftype <- lookupVar loc op op_t
   e' <- checkExp e
-  (t1, rt, argext, retext, am') <- checkApply loc (Just op, 0) ftype e' am
+  (t1, rt, argext, retext) <- checkApply loc (Just op, 0) ftype e'
   case (ftype, rt) of
     (Scalar (Arrow _ m1 d1 _ _), Scalar (Arrow _ m2 d2 t2 (RetType ds rt2))) ->
       pure $
@@ -664,24 +663,23 @@ checkExp (OpSectionLeft op (Info op_t) e (Info (_, _, _, am), _) _ loc) = do
           op
           (Info ftype)
           e'
-          (Info (m1, toParam d1 t1, argext, am'), Info (m2, toParam d2 t2))
-          (Info $ RetType ds $ arrayOfWithAliases (uniqueness rt2) (autoFrame am') rt2, Info retext)
+          (Info (m1, toParam d1 t1, argext), Info (m2, toParam d2 t2))
+          (Info $ RetType ds rt2, Info retext)
           loc
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (OpSectionRight op (Info op_t) e (_, Info (_, _, _, am)) _ loc) = do
+checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
   ftype <- lookupVar loc op op_t
   e' <- checkExp e
   case ftype of
     Scalar (Arrow _ m1 d1 t1 (RetType [] (Scalar (Arrow _ m2 d2 t2 (RetType dims2 ret))))) -> do
-      (t2', arrow', argext, _, am') <-
+      (t2', arrow', argext, _) <-
         checkApply
           loc
           (Just op, 1)
           (Scalar $ Arrow mempty m2 d2 t2 $ RetType [] $ Scalar $ Arrow Nonunique m1 d1 t1 $ RetType dims2 ret)
           e'
-          am
       case arrow' of
         Scalar (Arrow _ _ _ t1' (RetType dims2' ret')) ->
           pure $
@@ -689,8 +687,8 @@ checkExp (OpSectionRight op (Info op_t) e (_, Info (_, _, _, am)) _ loc) = do
               op
               (Info ftype)
               e'
-              (Info (m1, toParam d1 t1'), Info (m2, toParam d2 t2', argext, am'))
-              (Info $ RetType dims2' $ arrayOfWithAliases (uniqueness ret') (autoFrame am') ret')
+              (Info (m1, toParam d1 t1'), Info (m2, toParam d2 t2', argext))
+              (Info $ RetType dims2' ret')
               loc
         _ -> error $ "OpSectionRight: impossible type\n" <> prettyString arrow'
     _ ->
@@ -933,55 +931,16 @@ dimUses = flip execState mempty . traverseDims f
       where
         fv = freeInExp e `freeWithout` bound
 
-splitArrayAt :: Int -> StructType -> (Shape Size, StructType)
-splitArrayAt x t =
-  (Shape $ take x $ shapeDims $ arrayShape t, stripArray x t)
-
 checkApply ::
   SrcLoc ->
   ApplyOp ->
   StructType ->
   Exp ->
-  AutoMap ->
-  TermTypeM (StructType, StructType, Maybe VName, [VName], AutoMap)
-checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = do
+  TermTypeM (StructType, StructType, Maybe VName, [VName])
+checkApply loc (fname, _) (Scalar (Arrow _ pname _ tp1 tp2)) argexp = do
   let argtype = typeOf argexp
   onFailure (CheckingApply fname argexp tp1 argtype) $ do
-    -- argtype = arg_frame argtype'
-    -- tp1 = f_frame tp1'
-    --
-    -- Rep case:
-    -- R arg_frame argtype' = f_frame tp1'
-    -- ==> R = (autoRepRank am)-length prefix of tp1
-    -- ==> frame = f_frame = (autoFrameRank am)-length prefix of tp1
-    --
-    -- Map case:
-    -- arg_frame argtype' = M f_frame tp1'
-    -- ==> M = (autoMapRank am)-length prefix of argtype
-    -- ==> frame = M f_frame = (autoFrameRank am)-length prefix of argtype
-    (am_map_shape, argtype_with_frame) <- splitArrayAt (autoMapRank am) <$> normTypeFully argtype
-    (am_rep_shape, tp1_with_frame) <- splitArrayAt (autoRepRank am) <$> normTypeFully tp1
-    (am_frame_shape, _) <-
-      if autoMapRank am == 0
-        then splitArrayAt (autoFrameRank am) <$> normTypeFully tp1
-        else splitArrayAt (autoFrameRank am) <$> normTypeFully argtype
-
-    debugTraceM 3 $
-      unlines
-        [ "## checkApply",
-          "## fn",
-          prettyString fn,
-          "## ft",
-          prettyString ft,
-          "## tp1_with_frame",
-          prettyString tp1_with_frame,
-          "## argtype_with_frame",
-          prettyString argtype_with_frame,
-          "## am",
-          show am
-        ]
-
-    unify (mkUsage argexp "use as function argument") tp1_with_frame argtype_with_frame
+    unify (mkUsage argexp "use as function argument") tp1 argtype
 
     -- Perform substitutions of instantiated variables in the types.
     (tp2_inst, ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
@@ -1037,26 +996,8 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
                    in pure (Nothing, applySubst parsubst $ toStruct tp2')
         _ -> pure (Nothing, toStruct tp2')
 
-    let am' =
-          AutoMap
-            { autoRep = am_rep_shape,
-              autoMap = am_map_shape,
-              autoFrame = am_frame_shape
-            }
-
-    pure (tp1, distribute (arrayOf (autoMap am') tp2''), argext, ext', am')
-  where
-    distribute :: TypeBase dim u -> TypeBase dim u
-    distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
-      Scalar $
-        Arrow
-          u
-          Unnamed
-          mempty
-          (arrayOf s ta)
-          (RetType rd $ distribute (arrayOfWithAliases (uniqueness tr) s tr))
-    distribute t = t
-checkApply _ _ _ _ _ =
+    pure (tp1, tp2'', argext, ext')
+checkApply _ _ _ _ =
   error "checkApply: array"
 
 -- | Type-check a single expression in isolation.  This expression may
@@ -1157,7 +1098,7 @@ causalityCheck binding_body = do
           seqArgs known' [] = do
             void $ onExp known' f
             modify (S.fromList (appResExt res) <>)
-          seqArgs known' ((Info (p, _), x) : xs) = do
+          seqArgs known' ((Info p, x) : xs) = do
             new_known <- collectingNewKnown $ onExp known' x
             void $ seqArgs (new_known <> known') xs
             modify ((new_known <> S.fromList (maybeToList p)) <>)
@@ -1176,7 +1117,7 @@ causalityCheck binding_body = do
             modify (new_known <>)
       onExp
         known
-        e@(AppExp (BinOp (f, floc) ft (x, Info (xp, _)) (y, Info (yp, _)) _) (Info res)) = do
+        e@(AppExp (BinOp (f, floc) ft (x, Info xp) (y, Info yp) _) (Info res)) = do
           args_known <-
             collectingNewKnown $ sequencePoint known x y $ catMaybes [xp, yp]
           void $ onExp (args_known <> known) (Var f ft floc)

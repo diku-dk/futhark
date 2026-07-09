@@ -234,13 +234,8 @@ letBody body@(AppExp LetFun {} _) = pretty body
 letBody body = "in" <+> align (pretty body)
 
 prettyAppExp :: (IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
-prettyAppExp p (BinOp (bop, _) _ (x, xi) (y, yi) _) =
-  case (unAnnot xi, unAnnot yi) of
-    (Just (_, xam), Just (_, yam))
-      | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 3 ->
-          -- fix
-          parens $ align $ prettyBinOp p bop x y </> "Δ" <+> pretty xam </> "Δ" <+> pretty yam
-    _ -> prettyBinOp p bop x y
+prettyAppExp p (BinOp (bop, _) _ (x, _) (y, _) _) =
+  prettyBinOp p bop x y
 prettyAppExp _ (Match e cs _) = "match" <+> pretty e </> (stack . map pretty) (NE.toList cs)
 prettyAppExp _ (Loop sizeparams pat initexp form loopbody _) =
   "loop"
@@ -319,12 +314,8 @@ prettyAppExp p (Apply f args _) =
     prettyExp 0 f
       <+> hsep (map prettyArg $ NE.toList args)
   where
-    prettyArg (i, e) =
-      case unAnnot i of
-        Just (_, am)
-          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 3 ->
-              parens (prettyExp 10 e <+> "Δ" <+> pretty am)
-        _ -> prettyExp 10 e
+    prettyArg (_, e) =
+      prettyExp 10 e
 
 prettyLetLhsUpdate :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
 prettyLetLhsUpdate = mconcat . map pp
@@ -334,9 +325,6 @@ prettyLetLhsUpdate = mconcat . map pp
 
 instance (IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)
-
-instance Pretty AutoMap where
-  pretty (AutoMap r m f) = encloseSep lparen rparen comma $ map pretty [r, m, f]
 
 prettyInst :: (Annot f, Pretty t) => f t -> Doc a
 prettyInst t =

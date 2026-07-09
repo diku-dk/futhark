@@ -35,7 +35,6 @@ module Language.Futhark.Prop
     subExps,
     similarExps,
     sameExp,
-    frameOf,
     shapePrefix,
     typeShapePrefix,
 
@@ -730,8 +729,8 @@ mkBinOp op t x y =
     ( BinOp
         (qualName (intrinsicVar op), mempty)
         (Info t)
-        (x, Info (Nothing, mempty))
-        (y, Info (Nothing, mempty))
+        (x, Info Nothing)
+        (y, Info Nothing)
         mempty
     )
     (Info $ AppRes t [])
@@ -1565,11 +1564,6 @@ sameExp e1 e2
   | Just es <- similarExps e1 e2 =
       all (uncurry sameExp) es
   | otherwise = False
-
-frameOf :: Exp -> Shape Size
-frameOf (AppExp (Apply _ args _) _) =
-  ((\(_, am) -> autoFrame am) . unInfo . fst) $ NE.last args
-frameOf _ = mempty
 
 -- | @s1 `shapePrefix` s2@ assumes @s1 = prefix <> s2@ and
 -- returns @prefix@.
