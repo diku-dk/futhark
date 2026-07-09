@@ -438,7 +438,6 @@ library
       Language.Futhark.TypeChecker.Consumption
       Language.Futhark.TypeChecker.Constraints
       Language.Futhark.TypeChecker.TySolve
-      Language.Futhark.TypeChecker.TySolveOld
       Language.Futhark.TypeChecker.UnionFind
       Language.Futhark.TypeChecker.Error
       Language.Futhark.TypeChecker.Names

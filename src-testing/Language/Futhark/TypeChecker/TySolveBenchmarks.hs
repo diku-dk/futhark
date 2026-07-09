@@ -16,7 +16,6 @@ import Language.Futhark.TypeChecker.Constraints
   )
 import Language.Futhark.TypeChecker.Monad (TypeError (..))
 import Language.Futhark.TypeChecker.TySolve as N (Solution, UnconTyVar, solve)
-import Language.Futhark.TypeChecker.TySolveOld as O (solve)
 
 (~) :: TypeBase () NoUniqueness -> TypeBase () NoUniqueness -> CtTy ()
 t1 ~ t2 = CtEq (Reason mempty) t1 t2
@@ -31,14 +30,6 @@ solveNew ::
   ) ->
   Either TypeError ([UnconTyVar], Solution)
 solveNew (constraints, typarams, tyvars) = N.solve constraints typarams tyvars
-
-solveOld ::
-  ( [CtTy ()],
-    TyParams,
-    TyVars ()
-  ) ->
-  Either TypeError ([UnconTyVar], Solution)
-solveOld (constraints, typarams, tyvars) = O.solve constraints typarams tyvars
 
 generateContraints :: Int -> ([CtTy ()], TyParams, TyVars ())
 generateContraints num_vars
@@ -76,18 +67,15 @@ benchmarks =
     [ bgroup "Synthetic" $
         concatMap
           ( \n ->
-              [ bench (show n ++ " variables (new)") $
-                  whnf solveNew (generateContraints n),
-                bench (show n ++ " variables (old)") $
-                  whnf solveOld (generateContraints n)
+              [ bench (show n ++ " variables") $
+                  whnf solveNew (generateContraints n)
               ]
           )
           sizes,
       bgroup "Converted" $
         concatMap
           ( \(name, dataCase) ->
-              [ bench (name <> " (new)") $ whnf solveNew dataCase,
-                bench (name <> " (old)") $ whnf solveOld dataCase
+              [ bench (name <> " (new)") $ whnf solveNew dataCase
               ]
           )
           allFutBenchmarkCases
