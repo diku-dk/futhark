@@ -43,6 +43,8 @@ import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Rank
+import Language.Futhark.TypeChecker.Terms.Scope hiding (envToTermScope, initialTermScope, lookupQualNameEnv)
+import Language.Futhark.TypeChecker.Terms.Scope qualified as Scope
 import Language.Futhark.TypeChecker.TySolve hiding (Type)
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify (mkUsage)
@@ -55,28 +57,11 @@ type Type = CtType SComp
 toType :: TypeBase Size u -> TypeBase SComp u
 toType = first (const SDim)
 
-data ValBinding
-  = BoundV [TypeParam] Type
-  | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
-  | EqualityF
-  deriving (Show)
-
-data TermScope = TermScope
-  { scopeVtable :: M.Map VName ValBinding,
-    scopeTypeTable :: M.Map VName TypeBinding,
-    scopeModTable :: M.Map VName Mod
-  }
-  deriving (Show)
-
-instance Semigroup TermScope where
-  TermScope vt1 tt1 mt1 <> TermScope vt2 tt2 mt2 =
-    TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (mt1 `M.union` mt2)
-
 -- | Type checking happens with access to this environment.  The
 -- 'TermScope' will be extended during type-checking as bindings come into
 -- scope.
 data TermEnv = TermEnv
-  { termScope :: TermScope,
+  { termScope :: TermScope SComp,
     termLevel :: Level,
     termOuterEnv :: Env,
     termImportName :: ImportName,
@@ -122,50 +107,14 @@ newtype TermM a
       MonadState TermState
     )
 
-envToTermScope :: Env -> TermScope
-envToTermScope env =
-  TermScope
-    { scopeVtable = vtable,
-      scopeTypeTable = envTypeTable env,
-      scopeModTable = envModTable env
-    }
-  where
-    vtable = M.map valBinding $ envVtable env
-    valBinding (TypeM.BoundV tps v) = BoundV tps $ toType v
-
-initialTermScope :: TermScope
-initialTermScope =
-  TermScope
-    { scopeVtable = initialVtable,
-      scopeTypeTable = mempty,
-      scopeModTable = mempty
-    }
-  where
-    initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
-
-    prim = Scalar . Prim
-    arrow x y = Scalar $ Arrow mempty Unnamed Observe x y
-
-    addIntrinsicF (name, IntrinsicMonoFun pts t) =
-      Just (name, BoundV [] $ arrow pts' $ RetType [] $ prim t)
-      where
-        pts' = case pts of
-          [pt] -> prim pt
-          _ -> Scalar $ tupleRecord $ map prim pts
-    addIntrinsicF (name, IntrinsicOverloadedFun ts pts rts) =
-      Just (name, OverloadedF ts pts rts)
-    addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
-      Just
-        ( name,
-          BoundV tvs $ toType $ foldFunType pts rt
-        )
-    addIntrinsicF (name, IntrinsicEquality) =
-      Just (name, EqualityF)
-    addIntrinsicF _ = Nothing
+-- | The scope, with sizes erased. See
+-- "Language.Futhark.TypeChecker.Terms.Scope".
+envToTermScope :: Env -> TermScope SComp
+envToTermScope = Scope.envToTermScope toType
 
 runTermM :: TermM a -> TypeM a
 runTermM (TermM m) = do
-  initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
+  initial_scope <- (Scope.initialTermScope toType <>) . envToTermScope <$> askEnv
   name <- askImportName
   outer_env <- askEnv
   src <- gets stateNameSource
@@ -318,25 +267,14 @@ ctEq reason t1 t2 =
     t1' = t1 `setUniqueness` NoUniqueness
     t2' = t2 `setUniqueness` NoUniqueness
 
-localScope :: (TermScope -> TermScope) -> TermM a -> TermM a
+localScope :: (TermScope SComp -> TermScope SComp) -> TermM a -> TermM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}
 
-lookupQualNameEnv :: QualName VName -> TermM TermScope
-lookupQualNameEnv (QualName [q] _)
-  | baseTag q <= maxIntrinsicTag = asks termScope -- Magical intrinsic module.
-lookupQualNameEnv qn@(QualName quals _) = do
-  scope <- asks termScope
-  descend scope quals
-  where
-    descend scope [] = pure scope
-    descend scope (q : qs)
-      | Just (ModEnv q_scope) <- M.lookup q $ scopeModTable scope =
-          descend (envToTermScope q_scope) qs
-      | otherwise =
-          error $ "lookupQualNameEnv " <> show qn
+lookupQualNameEnv :: QualName VName -> TermM (TermScope SComp)
+lookupQualNameEnv qn = asks $ \tenv -> Scope.lookupQualNameEnv toType (termScope tenv) qn
 
 instance MonadError TypeError TermM where
   throwError e = TermM $ do
@@ -493,17 +431,9 @@ checkSizeExp' e = do
   ctEq (Reason (locOf e)) e_t (Scalar (Prim (Signed Int64)))
   pure e'
 
--- | During type checking a pattern, we might find an explicit
--- ascription. These contain complete type information (although they
--- must of course still be checked against what remains of the
--- pattern).
-data Inferred
-  = NoneInferred
-  | Ascribed ParamType
-
 checkPat' ::
   PatBase NoInfo VName ParamType ->
-  Inferred ->
+  Inferred ParamType ->
   TermM (Pat ParamType)
 checkPat' (PatParens p loc) t =
   PatParens <$> checkPat' p t <*> pure loc
@@ -633,11 +563,6 @@ bindLetPat p t m = do
     pt <- asType $ patternType p'
     ctEq (ReasonPatMatch (locOf p) (fmap toStruct p) t) pt t
     bind (patIdents (fmap toStruct p')) $ m p'
-
-typeParamIdent :: TypeParam -> Maybe (Ident StructType)
-typeParamIdent (TypeParamDim v loc) =
-  Just $ Ident v (Info $ Scalar $ Prim $ Signed Int64) loc
-typeParamIdent _ = Nothing
 
 bindTypes ::
   [(VName, TypeBinding)] ->

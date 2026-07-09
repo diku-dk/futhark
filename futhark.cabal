@@ -450,6 +450,7 @@ library
       Language.Futhark.TypeChecker.Terms.Loop
       Language.Futhark.TypeChecker.Terms.Monad
       Language.Futhark.TypeChecker.Terms.Pat
+      Language.Futhark.TypeChecker.Terms.Scope
       Language.Futhark.TypeChecker.Terms.Unsized
       Language.Futhark.TypeChecker.Types
       Language.Futhark.TypeChecker.Unify

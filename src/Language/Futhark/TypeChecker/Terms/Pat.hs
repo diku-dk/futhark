@@ -21,6 +21,7 @@ import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Terms.Monad
+import Language.Futhark.TypeChecker.Terms.Scope (typeParamIdent)
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import Prelude hiding (mod)
@@ -85,11 +86,6 @@ bindingTypeParams tparams =
       ]
     typeParamType (TypeParamDim v loc) =
       [Right (v, ParamSize $ locOf loc)]
-
-typeParamIdent :: TypeParam -> Maybe (Ident StructType)
-typeParamIdent (TypeParamDim v loc) =
-  Just $ Ident v (Info $ Scalar $ Prim $ Signed Int64) loc
-typeParamIdent _ = Nothing
 
 -- | Bind @let@-bound sizes.  This is usually followed by 'bindingPat'
 -- immediately afterwards.
