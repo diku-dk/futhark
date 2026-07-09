@@ -652,7 +652,9 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
 
 -- | If a type variable has a liftedness constraint, we propagate that
 -- constraint to its solution. The actual checking for correct usage
--- is done later.
+-- is done later, by 'localChecks' and 'instTyVars' in the sized type
+-- checker, which know why the constraints exist and can produce
+-- proper error messages.
 liftednessCheck :: Liftedness -> Type -> SolveM s ()
 liftednessCheck l (Scalar (TypeVar _ (QualName [] v) _)) = do
   v_info <- maybeLookupTyVarSol v

@@ -315,7 +315,6 @@ checkExp (ArrayLit all_es (Info t) loc) =
         Just et -> do
           let t'' = arrayOf (Shape [sizeFromInteger 0 mempty]) et
           unify (mkUsage loc "empty array literal") t'' t'
-          mustBeUnlifted (locOf loc) et
           pure $ ArrayLit [] (Info t'') loc
         Nothing -> error $ "checkExp ArrayLit: " <> prettyString t'
     e : es -> do
@@ -323,7 +322,6 @@ checkExp (ArrayLit all_es (Info t) loc) =
       et <- expType e'
       es' <- mapM (unifies "type of first array element" et <=< checkExp) es
       let arr_t = arrayOf (Shape [sizeFromInteger (genericLength all_es) mempty]) et
-      mustBeUnlifted (locOf loc) et
       pure $ ArrayLit (e' : es') (Info arr_t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- checkExp start
@@ -1276,7 +1274,8 @@ orderZeroM tparams t = do
 --  currently unable to detect float underflow (such as 1e-400 -> 0)
 --
 -- * Function types appearing in places where they are not allowed (e.g.
---   returned from branches).
+--   returned from branches), and more generally lifted types used as
+--   array elements.
 --
 -- The rationale is that it is easier to check for these things after all of the
 -- type inference has been done, as they complicate the logic. Further, it is
@@ -1304,6 +1303,9 @@ localChecks tparams orig_body = void $ check orig_body
         "If-expression returns type"
           </> indent 2 (align (pretty (appResType rt)))
           </> "but if-results may not be of function type."
+      recurse e
+    check e@(ArrayLit _ (Info t) loc) = do
+      mapM_ (checkArrayElem loc) $ peelArray 1 t
       recurse e
     check e@(AppExp (LetPat _ p _ _ _) _) =
       mustBeIrrefutable p *> recurse e
@@ -1360,6 +1362,36 @@ localChecks tparams orig_body = void $ check orig_body
           "Comparing equality of values of type"
             </> indent 2 (pretty t)
             </> "which does not support equality."
+
+    -- Array elements must be unlifted: of non-varying size, and in
+    -- particular not functions. This is a stricter requirement than
+    -- 'orderZeroM', which permits size-lifted type parameters.
+    checkArrayElem loc et = do
+      unless (orderZero et) . typeError loc mempty $
+        "Type" </> indent 2 (pretty et) </> "found to be functional."
+      mapM_ checkElemVar $ typeQualVars et
+      where
+        checkElemVar qv = do
+          l <- case find ((== qualLeaf qv) . typeParamName) tparams of
+            Just (TypeParamType l _ tploc) ->
+              pure $ Left (l, locOf tploc)
+            _ -> Right <$> lookupAbsTy qv
+          case l of
+            Left (l', tploc)
+              | l' /= Unlifted ->
+                  typeError loc mempty $
+                    "Type parameter"
+                      <+> dquotes (pretty qv)
+                      <+> "bound at"
+                      <+> pretty (locStr tploc)
+                      <+> "is lifted and cannot be an array element."
+            Right l'
+              | l' /= Unlifted ->
+                  typeError loc mempty $
+                    "Type"
+                      <+> dquotes (pretty qv)
+                      <+> "is lifted and cannot be an array element."
+            _ -> pure ()
 
     bitWidth ty = 8 * intByteSize ty :: Int
 

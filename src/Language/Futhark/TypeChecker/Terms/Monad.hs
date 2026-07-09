@@ -28,7 +28,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     replaceTyVarsAbsorbable,
     updateTypes,
     Names,
-    mustBeUnlifted,
 
     -- * Primitive checking
     unifies,
@@ -404,34 +403,6 @@ replaceTyVarsWith absorbable loc orig_t = do
 
   evalStateT (f orig_t) mempty
 
--- | Check that a type is a valid instantiation of a type parameter
--- with the given liftedness.
-checkLiftedness :: SrcLoc -> Liftedness -> TypeBase Size NoUniqueness -> TermTypeM ()
-checkLiftedness _ Lifted _ = pure ()
-checkLiftedness loc l t = do
-  constraints <- getConstraints
-  unless (orderZero t) $
-    typeError loc mempty $
-      "Type" </> indent 2 (pretty t) </> "found to be functional."
-  let bad = case l of
-        Unlifted -> [Lifted, SizeLifted]
-        _ -> [Lifted]
-      badParam vn = do
-        (_, ParamType vl ploc) <- M.lookup vn constraints
-        guard $ vl `elem` bad
-        Just (vn, ploc)
-  case mapMaybe badParam $ S.toList $ typeVars t of
-    (vn, ploc) : _ ->
-      typeError loc mempty $
-        "Type parameter"
-          <+> dquotes (prettyName vn)
-          <+> "bound at"
-          <+> pretty (locStr ploc)
-          <+> case l of
-            Unlifted -> "is lifted and cannot be an array element."
-            _ -> "is lifted and may be a functional type."
-    [] -> pure ()
-
 -- | Instantiate the type parameters of a type scheme with the types
 -- inferred by the unsized type checker, creating fresh variables for
 -- their sizes. See Note [Size Inference] in
@@ -515,7 +486,6 @@ instTyVars loc names orig_t1 orig_t2 = do
                 case M.lookup v2 seen of
                   Nothing -> do
                     (t, drepl) <- lift $ allDimsFreshInType usage Nonrigid "dv" t1
-                    lift $ checkLiftedness loc l $ second (const NoUniqueness) t
                     -- These are canonical instantiated sizes, which
                     -- unification may determine to be existential.
                     lift $ forM_ (M.keys drepl) $ \d ->
@@ -720,24 +690,6 @@ updateTypes = astMap tv
           mapOnParamType = normTypeFully,
           mapOnResRetType = normTypeFully
         }
-
-mustBeUnlifted :: Loc -> StructType -> TermTypeM ()
-mustBeUnlifted loc t = do
-  constraints <- getConstraints
-  unless (orderZero t) $
-    typeError loc mempty $
-      "Type" </> indent 2 (pretty t) </> "found to be functional."
-  forM_ (S.toList $ typeVars t) $ \tv ->
-    case M.lookup tv constraints of
-      Just (_, ParamType l ploc)
-        | l `elem` [Lifted, SizeLifted] ->
-            typeError loc mempty $
-              "Type parameter"
-                <+> dquotes (prettyName tv)
-                <+> "bound at"
-                <+> pretty (locStr ploc)
-                <+> "is lifted and cannot be an array element."
-      _ -> pure ()
 
 --- Basic checking
 

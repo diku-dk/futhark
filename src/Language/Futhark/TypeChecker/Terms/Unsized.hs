@@ -79,8 +79,17 @@ data TermEnv = TermEnv
   { termScope :: TermScope,
     termLevel :: Level,
     termOuterEnv :: Env,
-    termImportName :: ImportName
+    termImportName :: ImportName,
+    -- | The liftedness of abstract types.
+    termTySet :: TySet
   }
+
+-- | An instantiation (at the given location, of a type parameter of
+-- the given polymorphic function, with the given liftedness, as the
+-- given type variable), recorded such that we can check, after
+-- constraint solving, that the liftedness of the type parameter is
+-- respected ('checkTyInstLiftedness').
+data TyInst = TyInst Loc (QualName VName) Liftedness TyVar
 
 -- | The state is a set of constraints and a counter for generating
 -- type names.  This is distinct from the usual counter we use for
@@ -90,6 +99,7 @@ data TermState = TermState
     termAM :: [CtAM],
     termTyVars :: TyVars SComp,
     termTyParams :: TyParams,
+    termTyInsts :: [TyInst],
     termCounter :: !Int,
     termWarnings :: Warnings,
     termNameSource :: VNameSource,
@@ -159,12 +169,14 @@ runTermM (TermM m) = do
   name <- askImportName
   outer_env <- askEnv
   src <- gets stateNameSource
+  abs_types <- getTySet
   let initial_env =
         TermEnv
           { termScope = initial_scope,
             termLevel = 0,
             termImportName = name,
-            termOuterEnv = outer_env
+            termOuterEnv = outer_env,
+            termTySet = abs_types
           }
       initial_state =
         TermState
@@ -172,6 +184,7 @@ runTermM (TermM m) = do
             termAM = mempty,
             termTyVars = mempty,
             termTyParams = mempty,
+            termTyInsts = mempty,
             termWarnings = mempty,
             termNameSource = src,
             termCounter = 0,
@@ -397,12 +410,15 @@ instTypeScheme ::
   [TypeParam] ->
   Type ->
   TermM ([VName], Type)
-instTypeScheme _qn loc tparams t = do
+instTypeScheme qn loc tparams t = do
   (names, substs) <- fmap (unzip . catMaybes) $
     forM tparams $ \tparam ->
       case tparam of
         TypeParamType l v _ -> do
           v' <- newTyVar loc l $ nameFromText $ T.takeWhile isAscii $ nameToText $ baseName v
+          unless (l == Lifted) $
+            modify $
+              \s -> s {termTyInsts = TyInst (locOf loc) qn l v' : termTyInsts s}
           pure $ Just (v, (typeParamName tparam, tyVarType NoUniqueness v'))
         TypeParamDim {} ->
           pure Nothing
@@ -1035,8 +1051,11 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
 --
 checkExp e@(UpdateSection steps NoInfo loc) = do
   steps' <- mapM checkStep steps
-  src_t <- newElemType loc "update" NoUniqueness
-  ve_t <- newElemType loc "update_elem" NoUniqueness
+  -- Lifted, as a pure field projection works on records with
+  -- function-typed fields. Any slice steps will constrain the
+  -- relevant parts to be arrays (of unlifted elements) anyway.
+  src_t <- newType loc Lifted "update" NoUniqueness
+  ve_t <- newType loc Lifted "update_elem" NoUniqueness
   mustHaveSteps e src_t steps' ve_t
   ft <-
     asStructType $
@@ -1312,6 +1331,60 @@ generaliseAndDefaults unconstrained solution t = do
       M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
     )
 
+-- | Verify that the recorded type parameter instantiations respect the
+-- liftedness of the type parameters. The constraint solver merely propagates
+-- liftedness constraints; this is where they are enforced for instantiations,
+-- as only here do we know why the constraints exist. (Other liftedness rules
+-- are enforced by 'localChecks' in Language.Futhark.TypeChecker.Terms.)
+checkTyInstLiftedness :: Solution -> TermM ()
+checkTyInstLiftedness solution = do
+  typarams <- gets termTyParams
+  tyset <- asks termTySet
+  mapM_ (check typarams tyset) . reverse =<< gets termTyInsts
+  where
+    -- A Lifted type parameter permits any instantiation. (These are
+    -- not even recorded, but let us not depend on that here.)
+    check _ _ (TyInst _ _ Lifted _) = pure ()
+    check typarams tyset (TyInst loc qn l v)
+      | Just (Right t) <- M.lookup v solution = do
+          unless (orderZero t) . typeError loc mempty $
+            "Type"
+              </> indent 2 (pretty t)
+              </> "found to be functional."
+              </> when_inst
+          let bad = case l of
+                Unlifted -> [Lifted, SizeLifted]
+                _ -> [Lifted]
+              -- The liftedness of a type variable is given by its
+              -- binding if it is a type parameter, and by the type
+              -- set if it is an abstract type.
+              badVar qv =
+                case M.lookup (qualLeaf qv) typarams of
+                  Just (_, pl, ploc) -> do
+                    guard $ pl `elem` bad
+                    Just $
+                      "Type parameter"
+                        <+> dquotes (prettyName (qualLeaf qv))
+                        <+> "bound at"
+                        <+> pretty (locStr ploc)
+                  Nothing -> do
+                    al <- M.lookup qv tyset
+                    guard $ al `elem` bad
+                    Just $ "Type" <+> dquotes (pretty qv)
+          case mapMaybe badVar $ typeQualVars t of
+            what : _ ->
+              typeError loc mempty $
+                what
+                  <+> case l of
+                    Unlifted -> "is lifted and cannot be an array element."
+                    _ -> "is lifted and may be a functional type."
+                  </> when_inst
+            [] -> pure ()
+      | otherwise = pure ()
+      where
+        when_inst =
+          "When instantiating type parameter of" <+> dquotes (pretty qn) <> "."
+
 -- | Type check a single value definition.
 checkValDef ::
   ( VName,
@@ -1380,6 +1453,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       pure (solution, params', retdecl', body'')
 
     onTySolution params' body' (unconstrained, solution) = do
+      checkTyInstLiftedness solution
       body_t <- expType body'
       let fun_t =
             foldFunType
@@ -1407,6 +1481,7 @@ checkSingleExp e = runTermM $ do
   case solve cts' typarams tyvars' of
     Left err -> pure (Left err, e'')
     Right (unconstrained, solution) -> do
+      checkTyInstLiftedness solution
       e_t <- expType e''
       x <- generaliseAndDefaults unconstrained solution $ first (const ()) e_t
       pure (Right x, e'')
@@ -1429,7 +1504,13 @@ checkSizeExp e = runTermM $ do
 
   solutions <-
     forM cts_tyvars' $ \(cts', _artificial', tyvars') ->
-      bitraverse pure (traverse (doDefaults mempty)) $ solve cts' typarams tyvars'
+      bitraverse
+        pure
+        ( \(unconstrained, solution) -> do
+            checkTyInstLiftedness solution
+            (unconstrained,) <$> doDefaults mempty solution
+        )
+        $ solve cts' typarams tyvars'
 
   case (solutions, es') of
     ([solution], [e'']) ->
