@@ -83,8 +83,8 @@ unifyBranchTypes loc t1 t2 =
 
 unifyBranches :: SrcLoc -> Exp -> Exp -> TermTypeM (StructType, [VName])
 unifyBranches loc e1 e2 = do
-  e1_t <- expTypeFully e1
-  e2_t <- expTypeFully e2
+  e1_t <- expType e1
+  e2_t <- expType e2
   unifyBranchTypes loc e1_t e2_t
 
 sliceShape ::
