@@ -354,7 +354,7 @@ addLocations attrs caller_safety p = fmap onStm
 
 -- | Remove functions not ultimately called from an entry point or a
 -- constant.
-removeDeadFunctionsF :: Prog SOACS -> Prog SOACS
+removeDeadFunctionsF :: (TraverseOpStms rep) => Prog rep -> Prog rep
 removeDeadFunctionsF prog =
   let cg = buildCallGraph prog
       live_funs = filter ((`isFunInCallGraph` cg) . funDefName) $ progFuns prog
@@ -382,7 +382,7 @@ inlineConservatively =
 
 -- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.
-removeDeadFunctions :: Pass SOACS SOACS
+removeDeadFunctions :: (TraverseOpStms rep) => Pass rep rep
 removeDeadFunctions =
   Pass
     { passName = "Remove dead functions",

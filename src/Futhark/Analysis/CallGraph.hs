@@ -15,12 +15,12 @@ import Control.Monad.Writer.Strict
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Set qualified as S
-import Futhark.IR.SOACS
+import Futhark.IR
 import Futhark.Util.Pretty
 
-type FunctionTable = M.Map Name (FunDef SOACS)
+type FunctionTable rep = M.Map Name (FunDef rep)
 
-buildFunctionTable :: Prog SOACS -> FunctionTable
+buildFunctionTable :: Prog rep -> FunctionTable rep
 buildFunctionTable = foldl expand M.empty . progFuns
   where
     expand ftab f = M.insert (funDefName f) f ftab
@@ -74,8 +74,8 @@ calledByConsts callee = fcCalled callee . cgCalledByConsts
 allCalledBy :: Name -> CallGraph -> S.Set Name
 allCalledBy f = maybe mempty fcAllCalled . M.lookup f . cgCalledByFuns
 
--- | @buildCallGraph prog@ build the program's call graph.
-buildCallGraph :: Prog SOACS -> CallGraph
+-- | Build the program's call graph.
+buildCallGraph :: (TraverseOpStms rep) => Prog rep -> CallGraph
 buildCallGraph prog =
   CallGraph fg cg
   where
@@ -99,7 +99,7 @@ numOccurences (CallGraph funs consts) =
 
 -- | @buildCallGraph ftable fg fname@ updates @fg@ with the
 -- contributions of function @fname@.
-buildFGfun :: FunctionTable -> FunGraph -> Name -> FunGraph
+buildFGfun :: (TraverseOpStms rep) => FunctionTable rep -> FunGraph -> Name -> FunGraph
 buildFGfun ftable fg fname =
   -- Check if function is a non-builtin that we have not already
   -- processed.
@@ -111,23 +111,20 @@ buildFGfun ftable fg fname =
       foldl' (buildFGfun ftable) fg' $ fcAllCalled callees
     _ -> fg
 
-buildFGStms :: Stms SOACS -> FunCalls
+buildFGStms :: (TraverseOpStms rep) => Stms rep -> FunCalls
 buildFGStms = mconcat . map buildFGstm . stmsToList
 
-buildFGBody :: Body SOACS -> FunCalls
+buildFGBody :: (TraverseOpStms rep) => Body rep -> FunCalls
 buildFGBody = buildFGStms . bodyStms
 
-buildFGstm :: Stm SOACS -> FunCalls
+buildFGstm :: (TraverseOpStms rep) => Stm rep -> FunCalls
 buildFGstm (Let (Pat (p : _)) aux (Apply fname _ _ _)) =
   FunCalls (M.singleton (patElemName p) (stmAuxAttrs aux, fname)) (S.singleton fname)
-buildFGstm (Let _ _ (Op op)) = execWriter $ mapSOACM folder op
+buildFGstm (Let _ _ (Op op)) = execWriter $ traverseOpStms onStms op
   where
-    folder =
-      identitySOACMapper
-        { mapOnSOACLambda = \lam -> do
-            tell $ buildFGBody $ lambdaBody lam
-            pure lam
-        }
+    onStms _ stms = do
+      tell $ buildFGStms stms
+      pure stms
 buildFGstm (Let _ _ e) = execWriter $ mapExpM folder e
   where
     folder =

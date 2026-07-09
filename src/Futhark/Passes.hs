@@ -87,6 +87,8 @@ gpuPipeline =
     >>> onePass flattenSOACs
     >>> passes
       [ simplifyGPU,
+        -- For getting rid of builtins added by flattening.
+        removeDeadFunctions,
         addGlobalParams,
         optimiseGenRed,
         simplifyGPU,

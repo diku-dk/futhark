@@ -45,6 +45,9 @@ instance BuilderOps SOACS
 
 instance PrettyRep SOACS
 
+instance TraverseOpStms SOACS where
+  traverseOpStms = traverseSOACStms
+
 usesAD :: Prog SOACS -> Bool
 usesAD prog = any stmUsesAD (progConsts prog) || any funUsesAD (progFuns prog)
   where
