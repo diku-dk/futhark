@@ -316,7 +316,7 @@ liftFunDef ::
   FunHasParallelism ->
   Scope SOACS ->
   FunDef SOACS ->
-  PassM (FunDef GPU, S.Set NeedFn)
+  PassM (FunDef GPU, S.Set DemandFn)
 liftFunDef funHasParallelism const_scope fd = do
   let FunDef
         { funDefBody = body,
@@ -523,7 +523,7 @@ transformFunDef ::
   FunHasParallelism ->
   Scope SOACS ->
   FunDef SOACS ->
-  PassM (FunDef GPU, S.Set NeedFn)
+  PassM (FunDef GPU, S.Set DemandFn)
 transformFunDef funHasParallelism consts_scope fd = do
   let FunDef
         { funDefBody = body,
@@ -546,13 +546,13 @@ liftUntilFixedPoint ::
   Prog SOACS ->
   FunHasParallelism ->
   Scope SOACS ->
-  S.Set NeedFn ->
-  S.Set NeedFn ->
+  S.Set DemandFn ->
+  S.Set DemandFn ->
   PassM [FunDef GPU]
 liftUntilFixedPoint prog funHasParallelism consts_scope made needed = do
   (lifted_funs, new_needed) <-
     fmap (second ((`S.difference` made) . mconcat)) $
-      mapAndUnzipM mkNeeded $
+      mapAndUnzipM mkDemanded $
         S.toList needed
   if new_needed == mempty
     then pure lifted_funs
@@ -560,10 +560,10 @@ liftUntilFixedPoint prog funHasParallelism consts_scope made needed = do
       (lifted_funs ++)
         <$> liftUntilFixedPoint prog funHasParallelism consts_scope (made <> needed) new_needed
   where
-    mkNeeded (NeedLifted fname) =
+    mkDemanded (DemandLifted fname) =
       case find ((== fname) . funDefName) $ progFuns prog of
         Just fundef -> liftFunDef funHasParallelism consts_scope fundef
-        Nothing -> error $ "mkNeeded: " <> show fname
+        Nothing -> error $ "mkDemanded: " <> show fname
 
 transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do

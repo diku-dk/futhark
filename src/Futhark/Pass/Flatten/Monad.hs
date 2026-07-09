@@ -13,7 +13,7 @@ module Futhark.Pass.Flatten.Monad
 
     -- * Flattening monad
     FlattenM,
-    NeedFn (..),
+    DemandFn (..),
     needLifted,
     FlattenState (..),
     runFlattenM,
@@ -243,9 +243,9 @@ inputReps inputs env = M.fromList $ map (second getRep) inputs
 -- | Indicate the need for a function to be generated. Instead of immediately
 -- generating them ourselves, we collect requirements from multiple flattening
 -- operations and satisfy them in their entirety.
-newtype NeedFn
+newtype DemandFn
   = -- | We need this function to be lifted.
-    NeedLifted Name
+    DemandLifted Name
   deriving (Eq, Ord, Show)
 
 data FlattenState = FlattenState
@@ -255,7 +255,7 @@ data FlattenState = FlattenState
     stateNameSource :: VNameSource,
     -- A set of those functions that we have emitted calls to, and which will
     -- need to be generated.
-    stateNeedFns :: S.Set NeedFn
+    stateDemandFns :: S.Set DemandFn
   }
 
 newtype FlattenM a = FlattenM (BuilderT GPU (State FlattenState) a)
@@ -283,21 +283,21 @@ instance MonadFreshNames (State FlattenState) where
   putNameSource src = modify $ \s -> s {stateNameSource = src}
 
 -- | Do not nest these - the counter for thresholds will be wrong.
-runFlattenM :: (MonadFreshNames m) => Scope GPU -> FlattenM a -> m (a, S.Set NeedFn)
+runFlattenM :: (MonadFreshNames m) => Scope GPU -> FlattenM a -> m (a, S.Set DemandFn)
 runFlattenM scope (FlattenM m) = modifyNameSource $ \src ->
   let initial_state =
         FlattenState
           { stateThresholdCounter = 0,
             stateNameSource = src,
-            stateNeedFns = mempty
+            stateDemandFns = mempty
           }
       (x, s) = runState (fst <$> runBuilderT m scope) initial_state
-   in ((x, stateNeedFns s), stateNameSource s)
+   in ((x, stateDemandFns s), stateNameSource s)
 
 -- | Indicate that we rather need a lifted version of this function.
 needLifted :: Name -> FlattenM ()
 needLifted fname = modify $ \s ->
-  s {stateNeedFns = S.insert (NeedLifted fname) $ stateNeedFns s}
+  s {stateDemandFns = S.insert (DemandLifted fname) $ stateDemandFns s}
 
 readIrregularInput ::
   Segments ->
