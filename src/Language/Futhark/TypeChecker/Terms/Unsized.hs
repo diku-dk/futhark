@@ -1341,8 +1341,7 @@ checkTyInstLiftedness solution = do
   tyset <- asks termTySet
   mapM_ (check typarams tyset) . reverse =<< gets termTyInsts
   where
-    -- A Lifted type parameter permits any instantiation. (These are
-    -- not even recorded, but let us not depend on that here.)
+    -- A Lifted type parameter permits any instantiation.
     check _ _ (TyInst _ _ Lifted _) = pure ()
     check typarams tyset (TyInst loc qn l v)
       | Just (Right t) <- M.lookup v solution = do

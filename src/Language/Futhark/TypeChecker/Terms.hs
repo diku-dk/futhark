@@ -1067,11 +1067,11 @@ checkOneExp e = do
   (maybe_tysubsts, e') <- Unsized.checkSingleExp e
   case maybe_tysubsts of
     Left err -> throwError err
-    Right (_generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+    Right (generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       let t = typeOf e''
       (tparams, _, _) <-
-        letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
+        letGeneralise (nameFromString "<exp>") (srclocOf e) generalised [] $ toRes Nonunique t
       detectAmbiguousSizes
       e''' <- bindExistentialInsts =<< normTypeFully e''
       localChecks tparams e'''
@@ -1757,8 +1757,8 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, _)
       | k `elem` map typeParamName tparams =
           pure Nothing
-    closeOver (k, ParamType l _) =
-      pure $ Just $ Left $ TypeParamType l k mempty
+    closeOver (k, ParamType {}) =
+      error $ "closeOverTypes: unexpected ParamType: " <> prettyNameString k
     closeOver (k, Size Nothing _) =
       pure $ Just $ Left $ TypeParamDim k mempty
     closeOver (k, UnknownSize _ _)

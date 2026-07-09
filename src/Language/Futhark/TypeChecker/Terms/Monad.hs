@@ -103,7 +103,6 @@ data Checking
   | CheckingLoopBody StructType StructType
   | CheckingLoopInitial StructType StructType
   | CheckingRecordUpdate [Name] StructType StructType
-  | CheckingRequired [StructType] StructType
   | CheckingBranches StructType StructType
 
 instance Pretty Checking where
@@ -173,20 +172,6 @@ instance Pretty Checking where
         <+> align (pretty actual)
     where
       fs' = mconcat $ punctuate "." $ map pretty fs
-  pretty (CheckingRequired [expected] actual) =
-    "Expression must have type"
-      <+> pretty expected
-      <> "."
-        </> "Actual type:"
-        <+> align (pretty actual)
-  pretty (CheckingRequired expected actual) =
-    "Type of expression must be one of "
-      <+> expected'
-      <> "."
-        </> "Actual type:"
-        <+> align (pretty actual)
-    where
-      expected' = commasep (map pretty expected)
   pretty (CheckingBranches t1 t2) =
     "Branches differ in type."
       </> "Former:"
