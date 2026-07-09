@@ -41,7 +41,6 @@ import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
-import Language.Futhark.TypeChecker.Rank
 import Language.Futhark.TypeChecker.Terms.Scope hiding (envToTermScope, initialTermScope, lookupQualNameEnv)
 import Language.Futhark.TypeChecker.Terms.Scope qualified as Scope
 import Language.Futhark.TypeChecker.TySolve hiding (Type)
@@ -80,7 +79,6 @@ data TyInst = TyInst Loc (QualName VName) Liftedness TyVar
 -- generating unique names, as these will be user-visible.
 data TermState = TermState
   { termConstraints :: [CtTy SComp],
-    termAM :: [CtAM],
     termTyVars :: TyVars SComp,
     termTyParams :: TyParams,
     termTyInsts :: [TyInst],
@@ -129,7 +127,6 @@ runTermM (TermM m) = do
       initial_state =
         TermState
           { termConstraints = mempty,
-            termAM = mempty,
             termTyVars = mempty,
             termTyParams = mempty,
             termTyInsts = mempty,
@@ -1314,7 +1311,6 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       pure (params', body', retdecl')
 
   cts <- gets termConstraints
-  cts_am <- gets termAM
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
   artificial <- gets termArtificial
@@ -1333,8 +1329,16 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         unlines $ map (\(v, t) -> prettyNameString v <> " => " <> prettyString t) (M.toList artificial)
       ]
 
-  onRankSolution typarams
-    =<< rankAnalysis1 loc (cts, cts_am) tyvars artificial params' body' retdecl'
+  onRankSolution
+    typarams
+    ( ( map void cts,
+        M.map (first (const ())) artificial,
+        fmap (second void) tyvars
+      ),
+      params',
+      body',
+      retdecl'
+    )
   where
     onRankSolution typarams ((cts', artificial, tyvars'), params', body'', retdecl') = do
       solution <-
@@ -1378,47 +1382,38 @@ checkSingleExp ::
 checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
-  cts_am <- gets termAM
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
-  artificial <- gets termArtificial
-  ((cts', _artificial', tyvars'), _, e'', _) <-
-    rankAnalysis1 (srclocOf e') (cts, cts_am) tyvars artificial [] e' Nothing
-  case solve cts' typarams tyvars' of
-    Left err -> pure (Left err, e'')
+
+  case solve (map void cts) typarams (fmap (second void) tyvars) of
+    Left err -> pure (Left err, e')
     Right (unconstrained, solution) -> do
       checkTyInstLiftedness solution
-      e_t <- expType e''
+      e_t <- expType e'
       x <- generaliseAndDefaults unconstrained solution $ first (const ()) e_t
-      pure (Right x, e'')
+      pure (Right x, e')
 
 -- | Type-check a single size expression in isolation, which must have
 -- type @i64@.
 checkSizeExp ::
   ExpBase NoInfo VName ->
-  TypeM (Either TypeError ([UnconTyVar], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+  TypeM
+    ( Either TypeError ([UnconTyVar], M.Map TyVar (TypeBase () NoUniqueness)),
+      Exp
+    )
 checkSizeExp e = runTermM $ do
   e' <- checkSizeExp' e
   cts <- gets termConstraints
-  cts_am <- gets termAM
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
-  artificial <- gets termArtificial
 
-  (cts_tyvars', _, es', _) <-
-    L.unzip4 <$> rankAnalysis (srclocOf e) (cts, cts_am) tyvars artificial [] e' Nothing
+  solution <-
+    bitraverse
+      pure
+      ( \(unconstrained, solution) -> do
+          checkTyInstLiftedness solution
+          (unconstrained,) <$> doDefaults mempty solution
+      )
+      $ solve (map void cts) typarams (fmap (second void) tyvars)
 
-  solutions <-
-    forM cts_tyvars' $ \(cts', _artificial', tyvars') ->
-      bitraverse
-        pure
-        ( \(unconstrained, solution) -> do
-            checkTyInstLiftedness solution
-            (unconstrained,) <$> doDefaults mempty solution
-        )
-        $ solve cts' typarams tyvars'
-
-  case (solutions, es') of
-    ([solution], [e'']) ->
-      pure (solution, e'')
-    _ -> pure (Left $ TypeError (locOf e) mempty "Ambiguous size expression", e')
+  pure (solution, e')

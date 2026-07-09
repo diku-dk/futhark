@@ -5,7 +5,6 @@ module Language.Futhark.TypeChecker.Constraints
     SComp (..),
     CtType,
     CtTy (..),
-    CtAM (..),
     TyVarInfo (..),
     Level,
     TyVar,
@@ -146,11 +145,3 @@ type TyVars d = M.Map TyVar (Level, TyVarInfo d)
 
 -- | Explicit type parameters.
 type TyParams = M.Map TyVar (Level, Liftedness, Loc)
-
-data CtAM = CtAM (Reason (CtType SComp)) SVar SVar (Shape SComp)
-
-instance Located CtAM where
-  locOf (CtAM r _ _ _) = locOf r
-
-instance Pretty CtAM where
-  pretty (CtAM _ r m _) = prettyName r <+> "=" <+> "•" <+> "∨" <+> prettyName m <+> "=" <+> "•"
