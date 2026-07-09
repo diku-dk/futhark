@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark repl` has a new command: `:string`.
 
+* `futhark benchcmp` has new options `--sort-by` and `--order` for
+  controlling the order in which program groups are printed.
+  `--sort-by=significant` sorts by number of statistically significant
+  regressions, `--sort-by=geomean-significant` and
+  `--sort-by=geomean-all` sort by geometric mean speedup over
+  significant or all datasets respectively.  `--order=worst-first`
+  (default) surfaces regressions at the top; `--order=best-first`
+  surfaces improvements.  The default remains unsorted (alphabetical).
+
 * The `hip` backend previously simulated `f16` operations with `f32`, but now it
   uses the hardware support for `f16`, similarly to the CUDA backend.
   Implemented by Jérôme Wagner. (#2470)
