@@ -416,9 +416,8 @@ instTypeScheme qn loc tparams t = do
       case tparam of
         TypeParamType l v _ -> do
           v' <- newTyVar loc l $ nameFromText $ T.takeWhile isAscii $ nameToText $ baseName v
-          unless (l == Lifted) $
-            modify $
-              \s -> s {termTyInsts = TyInst (locOf loc) qn l v' : termTyInsts s}
+          modify $
+            \s -> s {termTyInsts = TyInst (locOf loc) qn l v' : termTyInsts s}
           pure $ Just (v, (typeParamName tparam, tyVarType NoUniqueness v'))
         TypeParamDim {} ->
           pure Nothing

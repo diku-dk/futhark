@@ -1310,10 +1310,16 @@ localChecks tparams orig_body = void $ check orig_body
     check e@(AppExp (LetPat _ p _ _ _) _) =
       mustBeIrrefutable p *> recurse e
     check e@(AppExp (BinOp (v, loc) _ (x, _) _ _) _)
-      | qualLeaf v == intrinsicVar "==" =
+      | qualLeaf v == intrinsicVar "==" = do
+          case typeOf x of
+            Array {} -> do
+              warn loc $
+                textwrap
+                  "Comparing arrays with \"==\" is deprecated and will stop working in a future revision of the language."
+            _ -> pure ()
           checkEquality loc (typeOf x) *> recurse e
     check e@(Var v (Info t) loc)
-      | qualLeaf v == intrinsicVar "==" =
+      | qualLeaf v == intrinsicVar "==" = do
           checkEquality loc t *> recurse e
     check e@(Lambda ps _ _ _ _) =
       mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
@@ -1345,14 +1351,6 @@ localChecks tparams orig_body = void $ check orig_body
       e <$ case ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
         _ -> error "Inferred type of int literal is not a number"
-    check e@(AppExp (BinOp (QualName [] v, _) _ (x, _) _ loc) _)
-      | baseName v == "==",
-        Array {} <- typeOf x,
-        isIntrinsic v = do
-          warn loc $
-            textwrap
-              "Comparing arrays with \"==\" is deprecated and will stop working in a future revision of the language."
-          recurse e
     check e = recurse e
     recurse = astMap identityMapper {mapOnExp = check}
 
