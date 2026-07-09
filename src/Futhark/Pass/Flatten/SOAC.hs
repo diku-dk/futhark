@@ -608,7 +608,7 @@ distResCerts env = Certs . map f
 
 reshapeAndBind :: VName -> VName -> Shape -> FlattenM ()
 reshapeAndBind v src shape = do
-  v_copy <- letExp (baseName v) . BasicOp $ Replicate mempty (Var src)
+  v_copy <- letExp (baseName v) . BasicOp $ SubExp $ Var src
   v_copy_shape <- arrayShape <$> lookupType v_copy
   letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
 
@@ -905,7 +905,7 @@ transformDistributedInnerMap ops mode (ws_F, ws_O, ws) irregs segments dist = do
           (MultiDim, Regular v') -> do
             if isAcc v_t
               then do
-                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+                letBindNames [v] $ BasicOp $ SubExp $ Var v'
                 pure (v, Regular v)
               else do
                 reshapeAndBind v v' (segmentsShape segments <> arrayShape v_t)

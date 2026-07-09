@@ -65,6 +65,9 @@ test-hip:
 test-opencl:
 	cabal run -- futhark test tests -c --backend=opencl --tuning=tuning_gpu
 
+test-opencl-C:
+	cabal run -- futhark test tests -C --backend=opencl
+
 test-ispc:
 	cabal run -- futhark test -c --backend=ispc tests
 
