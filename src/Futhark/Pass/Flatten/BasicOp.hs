@@ -539,6 +539,22 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
             certifying (distCerts inps aux env) . letExp "index_reg" . BasicOp $
               Index arr' (Slice $ segmentSlice segments <> unSlice slice)
           pure $ insertRegulars [distResTag res] [v] env
+      | isRegularDistResult res,
+        not (any (isVariant inps) (sliceDims slice)) -> do
+          let space = shapeDims (segmentsShape segments) <> sliceDims slice
+          v <-
+            certifying (distCerts inps aux env)
+              . letExp "index_reg_gather"
+              <=< renameExp
+              <=< segMap lvl (NE.fromList space)
+              $ \is -> do
+                let (seg_is, in_is) = splitAt (segmentsRank segments) (toList is)
+                readInputs segments env seg_is inps
+                let slice' = fixSlice (fmap pe64 slice) (map pe64 in_is)
+                auxing aux $
+                  fmap (subExpsRes . pure) . letSubExp "v"
+                    =<< eIndex arr (map toExp slice')
+          pure $ insertRegulars [distResTag res] [v] env
       | otherwise -> do
           -- Maximally irregular case.
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
@@ -594,6 +610,25 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
                 Reshape out_flat_updated $
                   reshapeAll arr_flat_shape arr_lift_shape
           pure $ insertRegulars [distResTag res] [out_updated] env
+      | isRegularDistResult res,
+        not (any (isVariant inps) (flatSliceDims flat_slice)) -> do
+          let space = shapeDims (segmentsShape segments) <> flatSliceDims flat_slice
+          v <-
+            certifying (distCerts inps aux env)
+              . letExp "flat_index_reg_gather"
+              <=< renameExp
+              <=< segMap lvl (NE.fromList space)
+              $ \is -> do
+                let (seg_is, in_is) = splitAt (segmentsRank segments) (toList is)
+                readInputs segments env seg_is inps
+                let flat_slice'@(FlatSlice flat_offset _) = fmap pe64 flat_slice
+                    flat_i =
+                      flat_offset
+                        + sum (zipWith (*) (map pe64 in_is) (flatSliceStrides flat_slice'))
+                auxing aux $
+                  fmap (subExpsRes . pure) . letSubExp "v"
+                    =<< eIndex arr [toExp flat_i]
+          pure $ insertRegulars [distResTag res] [v] env
       | otherwise -> do
           -- Maximally irregular case.
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
