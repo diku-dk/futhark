@@ -35,8 +35,6 @@ module Language.Futhark.Prop
     subExps,
     similarExps,
     sameExp,
-    shapePrefix,
-    typeShapePrefix,
 
     -- * Queries on patterns and params
     patIdents,
@@ -55,12 +53,10 @@ module Language.Futhark.Prop
     arrayShape,
     orderZero,
     unfoldFunType,
-    unfoldFunTypeWithRet,
     foldFunType,
     typeQualVars,
     typeVars,
     isAccType,
-    recordField,
 
     -- * Operations on types
     peelArray,
@@ -253,14 +249,6 @@ diet (Scalar (Arrow {})) = Observe
 diet (Array d _ _) = d
 diet (Scalar (TypeVar d _ _)) = d
 diet (Scalar (Sum cs)) = foldl max Observe $ foldMap (map diet) cs
-
--- | Look up this record field if it exists.
-recordField :: [Name] -> TypeBase dim u -> Maybe (TypeBase dim u)
-recordField [] t = Just t
-recordField (f : fs) (Scalar (Record fts))
-  | Just ft <- M.lookup f fts =
-      recordField fs ft
-recordField _ _ = Nothing
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
@@ -549,18 +537,6 @@ unfoldFunType (Scalar (Arrow _ p d t1 (RetType _ t2))) =
   let (ps, r) = unfoldFunType t2
    in ((p, second (const d) t1) : ps, r)
 unfoldFunType t = ([], toStruct t)
-
--- | Extract the parameter types and 'RetTypeBase' from a function type.
--- If the type is not an arrow type, returns 'Nothing'.
-unfoldFunTypeWithRet ::
-  TypeBase dim as ->
-  Maybe ([(PName, TypeBase dim Diet)], RetTypeBase dim Uniqueness)
-unfoldFunTypeWithRet (Scalar (Arrow _ p d t1 (RetType _ t2@(Scalar Arrow {})))) = do
-  (ps, r) <- unfoldFunTypeWithRet t2
-  pure ((p, second (const d) t1) : ps, r)
-unfoldFunTypeWithRet (Scalar (Arrow _ p d t1 r@RetType {})) =
-  Just ([(p, second (const d) t1)], r)
-unfoldFunTypeWithRet _ = Nothing
 
 -- | The type scheme of a value binding, comprising the type
 -- parameters and the actual type.
@@ -1564,18 +1540,6 @@ sameExp e1 e2
   | Just es <- similarExps e1 e2 =
       all (uncurry sameExp) es
   | otherwise = False
-
--- | @s1 `shapePrefix` s2@ assumes @s1 = prefix <> s2@ and
--- returns @prefix@.
-shapePrefix :: Shape dim -> Shape dim -> Shape dim
-shapePrefix (Shape ss1) (Shape ss2) =
-  Shape $ take (length ss1 - length ss2) ss1
-
-typeShapePrefix :: TypeBase dim as1 -> TypeBase dim as2 -> Shape dim
-typeShapePrefix (Array _ s _) Scalar {} = s
-typeShapePrefix (Array _ s1 _) (Array _ s2 _) =
-  s1 `shapePrefix` s2
-typeShapePrefix _ _ = mempty
 
 -- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName

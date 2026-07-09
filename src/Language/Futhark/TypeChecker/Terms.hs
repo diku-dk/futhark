@@ -839,34 +839,6 @@ checkCases mt rest_cs =
       (brancht, retext) <- unifyBranchTypes (srclocOf c) c_t cs_t
       pure (NE.cons c' cs', brancht, retext)
 
--- | An unmatched pattern. Used in in the generation of
--- unmatched pattern warnings by the type checker.
-data Unmatched p
-  = UnmatchedNum p [PatLit]
-  | UnmatchedBool p
-  | UnmatchedConstr p
-  | Unmatched p
-  deriving (Functor, Show)
-
-instance Pretty (Unmatched (Pat StructType)) where
-  pretty um = case um of
-    (UnmatchedNum p nums) -> pretty' p <+> "where p is not one of" <+> pretty nums
-    (UnmatchedBool p) -> pretty' p
-    (UnmatchedConstr p) -> pretty' p
-    (Unmatched p) -> pretty' p
-    where
-      pretty' (PatAscription p t _) = pretty p <> ":" <+> pretty t
-      pretty' (PatParens p _) = parens $ pretty' p
-      pretty' (PatAttr _ p _) = parens $ pretty' p
-      pretty' (Id v _ _) = prettyName v
-      pretty' (TuplePat pats _) = parens $ commasep $ map pretty' pats
-      pretty' (RecordPat fs _) = braces $ commasep $ map ppField fs
-        where
-          ppField (L _ name, t) = pretty (nameToString name) <> equals <> pretty' t
-      pretty' Wildcard {} = "_"
-      pretty' (PatLit e _ _) = pretty e
-      pretty' (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty' ps)
-
 checkSlice :: SliceBase Info VName -> TermTypeM [DimIndex]
 checkSlice = mapM checkDimIndex
   where

@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 -- | The value representation used in the interpreter.
 --
 -- Kept simple and free of unnecessary operational details (in
@@ -9,7 +7,6 @@ module Language.Futhark.Interpreter.Values
     Shape (..),
     ValueShape,
     typeShape,
-    structTypeShape,
 
     -- * Values
     Value (..),
@@ -25,9 +22,7 @@ module Language.Futhark.Interpreter.Values
     prettyEmptyArray,
     toArray,
     toArray',
-    toArrayR,
     toTuple,
-    repArray,
 
     -- * Conversion
     fromDataValue,
@@ -36,7 +31,7 @@ where
 
 import Control.Monad.Identity
 import Data.Array
-import Data.List (genericLength, genericReplicate)
+import Data.List (genericLength)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
@@ -97,12 +92,6 @@ typeShape t
       typeShape t'
   | otherwise =
       ShapeLeaf
-
-structTypeShape :: StructType -> Shape (Maybe Int64)
-structTypeShape = fmap dim . typeShape
-  where
-    dim (IntLit x _ _) = Just $ fromIntegral x
-    dim _ = Nothing
 
 -- | A fully evaluated Futhark value.
 data Value m
@@ -260,17 +249,6 @@ toArray' rowshape vs = ValueArray shape (listArray (0, length vs - 1) vs)
   where
     shape = ShapeDim (genericLength vs) rowshape
 
--- | Produce multidimensional array from a flat list of values.
-toArrayR :: [Int64] -> ValueShape -> [Value m] -> Value m
-toArrayR [] _ = \case
-  [v] -> v
-  _ -> error "toArrayR: empty shape"
-toArrayR [_] elemshape = toArray' elemshape
-toArrayR (n : ns) elemshape =
-  toArray (foldr ShapeDim elemshape (n : ns))
-    . map (toArrayR ns elemshape)
-    . chunk (fromIntegral (product ns))
-
 arrayLength :: (Integral int) => Array Int (Value m) -> int
 arrayLength = fromIntegral . (+ 1) . snd . bounds
 
@@ -301,13 +279,6 @@ fromDataValueWith f shape vector
         $ chunk (SVec.product shape') (SVec.toList vector)
   where
     shape' = SVec.tail shape
-
-repArray :: [Int64] -> Value m -> Value m
-repArray [] v = v
-repArray (n : ns) v =
-  toArray' (valueShape v') (genericReplicate n v')
-  where
-    v' = repArray ns v
 
 -- | Convert a Futhark value in the externally observable data format
 -- to an interpreter value.

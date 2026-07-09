@@ -5,7 +5,6 @@ module Language.Futhark.TypeChecker.Error
     hasNoBreadCrumbs,
     matchingField,
     matchingConstructor,
-    matchingTypes,
     matching,
   )
 where
@@ -17,17 +16,11 @@ import Language.Futhark
 -- checker currently performing.  This is used to give better error
 -- messages for unification errors.
 data BreadCrumb
-  = MatchingTypes StructType StructType
-  | MatchingFields [Name]
+  = MatchingFields [Name]
   | MatchingConstructor Name
   | Matching (Doc ())
 
 instance Pretty BreadCrumb where
-  pretty (MatchingTypes t1 t2) =
-    "When matching type"
-      </> indent 2 (pretty t1)
-      </> "with"
-      </> indent 2 (pretty t2)
   pretty (MatchingFields fields) =
     "When matching types of record field"
       <+> dquotes (mconcat $ punctuate "." $ map pretty fields)
@@ -61,10 +54,6 @@ hasNoBreadCrumbs _ = False
 -- | Matching a record field.
 matchingField :: Name -> BreadCrumbs
 matchingField f = BreadCrumbs [MatchingFields [f]]
-
--- | Matching two types.
-matchingTypes :: StructType -> StructType -> BreadCrumbs
-matchingTypes t1 t2 = BreadCrumbs [MatchingTypes t1 t2]
 
 -- | Matching a constructor.
 matchingConstructor :: Name -> BreadCrumbs
