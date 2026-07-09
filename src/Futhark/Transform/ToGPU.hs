@@ -1,6 +1,4 @@
-{-# LANGUAGE TypeFamilies #-}
-
-module Futhark.Pass.ExtractKernels.ToGPU
+module Futhark.Transform.ToGPU
   ( getSize,
     segThread,
     soacsLambdaToGPU,
@@ -30,7 +28,7 @@ getSize desc size_class = do
   letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
 
 segThread ::
-  (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
+  (MonadBuilder m, Rep m ~ GPU) =>
   Name ->
   m SegLevel
 segThread desc =

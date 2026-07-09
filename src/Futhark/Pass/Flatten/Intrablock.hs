@@ -18,13 +18,13 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.GPU hiding (HistOp)
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
-import Futhark.Pass.ExtractKernels.ToGPU
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.General
 import Futhark.Pass.Flatten.PreProcess (preprocessLambda)
 import Futhark.Tools
 import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
+import Futhark.Transform.ToGPU
 import Prelude hiding (log)
 
 -- | The minimum amount of inner parallelism we require (by default)

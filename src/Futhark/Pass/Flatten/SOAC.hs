@@ -22,7 +22,6 @@ import Data.Tuple.Solo
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
-import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU)
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.General
 import Futhark.Pass.Flatten.Incremental
@@ -31,6 +30,7 @@ import Futhark.Pass.Flatten.PreProcess
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Transform.ToGPU (soacsLambdaToGPU)
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, quot, rem)
 

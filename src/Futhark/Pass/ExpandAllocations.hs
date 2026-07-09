@@ -25,12 +25,12 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations.GPU (explicitAllocationsInStms)
-import Futhark.Pass.ExtractKernels.BlockedKernel (nonSegRed)
-import Futhark.Pass.ExtractKernels.ToGPU (segThread)
+import Futhark.Pass.Flatten.Builtins (mkSegSpace)
 import Futhark.Tools
 import Futhark.Transform.CopyPropagate (copyPropagateInFun)
-import Futhark.Transform.Rename (renameStm)
+import Futhark.Transform.Rename (renamePat, renameStm)
 import Futhark.Transform.Substitute
+import Futhark.Transform.ToGPU (segThread)
 import Futhark.Util (mapAccumLM)
 import Prelude hiding (quot)
 
@@ -953,6 +953,108 @@ copyConsumed stms = do
     addStms $ substituteNames substs stms
   where
     copy v = letExp (baseName v <> "_copy") $ BasicOp $ Replicate mempty $ Var v
+
+data KernelInput = KernelInput
+  { kernelInputName :: VName,
+    kernelInputType :: Type,
+    kernelInputArray :: VName,
+    kernelInputIndices :: [SubExp]
+  }
+  deriving (Show)
+
+readKernelInput :: (MonadBuilder m, Rep m ~ GPU.GPU) => KernelInput -> m ()
+readKernelInput inp = do
+  let pe = PatElem (kernelInputName inp) $ kernelInputType inp
+  letBind (Pat [pe]) . BasicOp $
+    case kernelInputType inp of
+      Acc {} ->
+        SubExp $ Var $ kernelInputArray inp
+      _ ->
+        Index (kernelInputArray inp) . Slice $
+          map DimFix (kernelInputIndices inp)
+            ++ map sliceDim (arrayDims (kernelInputType inp))
+
+prepareRedOrScan ::
+  (MonadBuilder m, Rep m ~ GPU.GPU) =>
+  Certs ->
+  SubExp ->
+  Lambda GPU.GPU ->
+  [VName] ->
+  [(VName, SubExp)] ->
+  [KernelInput] ->
+  m (SegSpace, KernelBody GPU.GPU)
+prepareRedOrScan cs w map_lam arrs ispace inps = do
+  gtid <- newVName "gtid"
+  space <- mkSegSpace $ ispace ++ [(gtid, w)]
+  kbody <- fmap (uncurry (flip (Body ()))) $
+    runBuilder $
+      localScope (scopeOfSegSpace space) $ do
+        mapM_ readKernelInput inps
+        certifying cs . mapM_ readKernelInput $ do
+          (p, arr) <- zip (lambdaParams map_lam) arrs
+          pure $ KernelInput (paramName p) (paramType p) arr [Var gtid]
+        res <- bodyBind (lambdaBody map_lam)
+        forM res $ \(SubExpRes res_cs se) -> pure $ Returns ResultMaySimplify res_cs se
+
+  pure (space, kbody)
+
+segRed ::
+  (MonadBuilder m, Rep m ~ GPU.GPU) =>
+  SegOpLevel (Rep m) ->
+  Pat (LetDec (Rep m)) ->
+  Certs ->
+  SubExp -> -- segment size
+  [SegBinOp (Rep m)] ->
+  Lambda (Rep m) ->
+  [VName] ->
+  [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this reduction
+  [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
+  m (Stms (Rep m))
+segRed lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
+  (kspace, kbody) <- prepareRedOrScan cs w map_lam arrs ispace inps
+  letBind pat . Op . segOp $
+    SegRed lvl kspace (lambdaReturnType map_lam) kbody ops
+
+dummyDim ::
+  (MonadBuilder m) =>
+  Pat Type ->
+  m (Pat Type, [(VName, SubExp)], m ())
+dummyDim pat = do
+  -- We add a unit-size segment on top to ensure that the result
+  -- of the SegRed is an array, which we then immediately index.
+  -- This is useful in the case that the value is used on the
+  -- device afterwards, as this may save an expensive
+  -- host-device copy (scalars are kept on the host, but arrays
+  -- may be on the device).
+  let addDummyDim t = t `arrayOfRow` intConst Int64 1
+  pat' <- fmap addDummyDim <$> renamePat pat
+  dummy <- newVName "dummy"
+  let ispace = [(dummy, intConst Int64 1)]
+
+  pure
+    ( pat',
+      ispace,
+      forM_ (zip (patNames pat') (patNames pat)) $ \(from, to) -> do
+        from_t <- lookupType from
+        letBindNames [to] . BasicOp $
+          case from_t of
+            Acc {} -> SubExp $ Var from
+            _ -> Index from $ fullSlice from_t [DimFix $ intConst Int64 0]
+    )
+
+nonSegRed ::
+  (MonadBuilder m, Rep m ~ GPU.GPU) =>
+  SegOpLevel (Rep m) ->
+  Pat Type ->
+  SubExp ->
+  [SegBinOp (Rep m)] ->
+  Lambda (Rep m) ->
+  [VName] ->
+  m (Stms (Rep m))
+nonSegRed lvl pat w ops map_lam arrs = runBuilder_ $ do
+  (pat', ispace, read_dummy) <- dummyDim pat
+  addStms =<< segRed lvl pat' mempty w ops map_lam arrs ispace []
+  read_dummy
 
 -- Important for edge cases (#1838) that the Stms here still have the
 -- Allocs we are actually trying to get rid of.

@@ -36,11 +36,11 @@ import Data.Text qualified as T
 import Futhark.IR.GPU
 import Futhark.IR.SOACS as SOACS
 import Futhark.MonadFreshNames
-import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU)
 import Futhark.Pass.Flatten.Monad
 import Futhark.Pass.Flatten.StreamKernel
 import Futhark.Tools
 import Futhark.Transform.Rename (renameBody, renameLambda)
+import Futhark.Transform.ToGPU (soacsLambdaToGPU)
 import Futhark.Util (unsnoc)
 
 mkSegSpace :: (MonadFreshNames m) => [(VName, SubExp)] -> m SegSpace

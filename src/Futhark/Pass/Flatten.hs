@@ -23,7 +23,6 @@ import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass
-import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU, soacsStmToGPU)
 import Futhark.Pass.Flatten.BasicOp
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
@@ -38,6 +37,7 @@ import Futhark.Pass.Flatten.WithAcc
 import Futhark.Tools
 import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
+import Futhark.Transform.ToGPU (soacsLambdaToGPU, soacsStmToGPU)
 import Prelude hiding (div, quot, rem)
 
 flattenOpsFor :: FunHasParallelism -> SegLevel -> FlattenOps

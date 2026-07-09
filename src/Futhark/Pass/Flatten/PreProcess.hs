@@ -3,15 +3,23 @@
 -- | Preprocess the program before flattening.  This rewrites SOAC forms
 -- that flatten does not want to see directly, while leaving the result in
 -- SOACS form so the normal flattening pipeline can continue afterwards.
-module Futhark.Pass.Flatten.PreProcess (shouldDissectForm, preprocessProg, preprocessBody, preprocessStms, preprocessStm, preprocessLambda) where
+module Futhark.Pass.Flatten.PreProcess
+  ( shouldDissectForm,
+    preprocessProg,
+    preprocessBody,
+    preprocessStms,
+    preprocessStm,
+    preprocessLambda,
+  )
+where
 
 import Data.Maybe (isNothing)
 import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify
 import Futhark.Pass
-import Futhark.Pass.Flatten.ISRWIM (irwim, iswim)
 import Futhark.Tools
+import Futhark.Transform.ISRWIM (irwim, iswim)
 
 shouldDissectForm :: ScremaForm SOACS -> Bool
 shouldDissectForm form =

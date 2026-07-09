@@ -23,10 +23,11 @@ import Futhark.IR.SOACS hiding
   )
 import Futhark.IR.SOACS qualified as SOACS
 import Futhark.Pass
-import Futhark.Pass.ExtractKernels.DistributeNests
-import Futhark.Pass.ExtractKernels.ToGPU (injectSOACS)
+import Futhark.Pass.Flatten.Builtins (determineReduceOp)
+import Futhark.Pass.Flatten.Incremental (lambdaHasParallelism)
 import Futhark.Tools
 import Futhark.Transform.Rename (Rename, renameSomething)
+import Futhark.Transform.ToGPU (injectSOACS)
 import Futhark.Util.Log
 
 newtype ExtractM a = ExtractM (ReaderT (Scope MC) (State VNameSource) a)
@@ -218,7 +219,7 @@ transformSOAC _ _ WithVJP {} =
 transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
       seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs
-      if lambdaContainsParallelism lam
+      if lambdaHasParallelism (const False) lam
         then do
           par_op <- transformMap DoRename transformBody w lam arrs
           pure $ oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
@@ -226,7 +227,7 @@ transformSOAC pat _ (Screma w arrs form)
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       (seq_reds_stms, seq_op) <-
         transformRedomap DoNotRename sequentialiseBody w reds map_lam arrs
-      if lambdaContainsParallelism map_lam
+      if lambdaHasParallelism (const False) map_lam
         then do
           (par_reds_stms, par_op) <-
             transformRedomap DoRename transformBody w reds map_lam arrs
@@ -259,7 +260,7 @@ transformSOAC pat _ (Hist w arrs hists map_lam) = do
   (seq_hist_stms, seq_op) <-
     transformHist DoNotRename sequentialiseBody w hists map_lam arrs
 
-  if lambdaContainsParallelism map_lam
+  if lambdaHasParallelism (const False) map_lam
     then do
       (par_hist_stms, par_op) <-
         transformHist DoRename transformBody w hists map_lam arrs

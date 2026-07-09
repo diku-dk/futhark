@@ -368,22 +368,12 @@ library
       Futhark.Pass.ExplicitAllocations.MC
       Futhark.Pass.ExplicitAllocations.SegOp
       Futhark.Pass.ExplicitAllocations.Seq
-      Futhark.Pass.ExtractKernels
-      Futhark.Pass.ExtractKernels.BlockedKernel
-      Futhark.Pass.ExtractKernels.DistributeNests
-      Futhark.Pass.ExtractKernels.Distribution
-      Futhark.Pass.ExtractKernels.ISRWIM
-      Futhark.Pass.ExtractKernels.Interchange
-      Futhark.Pass.ExtractKernels.Intrablock
-      Futhark.Pass.ExtractKernels.StreamKernel
-      Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.Flatten
       Futhark.Pass.Flatten.BasicOp
       Futhark.Pass.Flatten.Builtins
       Futhark.Pass.Flatten.PreProcess
-      Futhark.Pass.Flatten.ISRWIM
       Futhark.Pass.Flatten.Incremental
       Futhark.Pass.Flatten.Intrablock
       Futhark.Pass.Flatten.Distribute
@@ -416,8 +406,10 @@ library
       Futhark.Tools
       Futhark.Transform.CopyPropagate
       Futhark.Transform.FirstOrderTransform
+      Futhark.Transform.ISRWIM
       Futhark.Transform.Rename
       Futhark.Transform.Substitute
+      Futhark.Transform.ToGPU
       Futhark.Util
       Futhark.Util.CMath
       Futhark.Util.IntegralExp

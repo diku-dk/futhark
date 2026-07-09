@@ -1,14 +1,14 @@
 {-# LANGUAGE TypeFamilies #-}
 
--- | Interchanging scans with inner maps.
-module Futhark.Pass.ExtractKernels.ISRWIM
+-- | Interchanging scans with inner maps. Basically a copy of ExtractKernels
+-- ISRWIM with small change.
+module Futhark.Transform.ISRWIM
   ( iswim,
     irwim,
     rwimPossible,
   )
 where
 
-import Control.Arrow (first)
 import Control.Monad
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -26,35 +26,41 @@ iswim ::
 iswim res_pat w scan_fun scan_input
   | Just (map_pat, map_aux, map_w, map_fun) <- rwimPossible scan_fun = Just $ do
       let (accs, arrs) = unzip scan_input
+      let indexAcc (Var v) = do
+            v_t <- lookupType v
+            letSubExp "acc" $
+              BasicOp $
+                Index v $
+                  fullSlice v_t [DimFix $ intConst Int64 0]
+          indexAcc Constant {} =
+            error "irwim: array accumulator is a constant."
       arrs' <- transposedArrays arrs
-      accs' <- mapM (letExp "acc" . BasicOp . SubExp) accs
+      accs' <- mapM indexAcc accs
 
-      let map_arrs' = accs' ++ arrs'
-          (scan_acc_params, scan_elem_params) =
+      -- let (_red_acc_params, red_elem_params) =
+      --       splitAt (length arrs) $ lambdaParams red_fun
+      --     map_rettype = map rowType $ lambdaReturnType red_fun
+      --     map_params = map (setParamOuterDimTo w) red_elem_params
+
+      let map_arrs' = arrs'
+          (_scan_acc_params, scan_elem_params) =
             splitAt (length arrs) $ lambdaParams scan_fun
-          map_params =
-            map removeParamOuterDim scan_acc_params
-              ++ map (setParamOuterDimTo w) scan_elem_params
+          map_params = map (setParamOuterDimTo w) scan_elem_params
           map_rettype = map (setOuterDimTo w) $ lambdaReturnType scan_fun
 
           scan_params = lambdaParams map_fun
           scan_body = lambdaBody map_fun
           scan_rettype = lambdaReturnType map_fun
           scan_fun' = Lambda scan_params scan_rettype scan_body
-          scan_input' =
-            map (first Var) $
-              uncurry zip $
-                splitAt (length arrs') $
-                  map paramName map_params
-          (nes', scan_arrs) = unzip scan_input'
+          scan_input' = zip accs' $ map paramName map_params
 
-      scan_soac <- scanSOAC [Scan scan_fun' nes']
+      scan_soac <- scanSOAC [Scan scan_fun' accs']
       let map_body =
             mkBody
               ( oneStm $
                   Let (setPatOuterDimTo w map_pat) (defAux ()) $
                     Op $
-                      Screma w scan_arrs scan_soac
+                      Screma w (map snd scan_input') scan_soac
               )
               $ varsRes
               $ patNames map_pat
@@ -158,11 +164,6 @@ transposedArrays arrs = forM arrs $ \arr -> do
   t <- lookupType arr
   let perm = [1, 0] ++ [2 .. arrayRank t - 1]
   letExp (baseName arr) $ BasicOp $ Rearrange arr perm
-
-removeParamOuterDim :: LParam SOACS -> LParam SOACS
-removeParamOuterDim param =
-  let t = rowType $ paramType param
-   in param {paramDec = t}
 
 setParamOuterDimTo :: SubExp -> LParam SOACS -> LParam SOACS
 setParamOuterDimTo w param =

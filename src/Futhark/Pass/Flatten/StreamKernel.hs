@@ -25,7 +25,7 @@ import Futhark.IR.GPU hiding
     RetType,
     Stm,
   )
-import Futhark.Pass.ExtractKernels.ToGPU
+import Futhark.Transform.ToGPU
 import Prelude hiding (quot)
 
 data KernelSize = KernelSize
