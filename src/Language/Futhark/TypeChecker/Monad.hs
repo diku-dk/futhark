@@ -518,7 +518,9 @@ qualifyTypeVarsWith ::
   [VName] ->
   TypeBase dim as ->
   TypeBase dim as
-qualifyTypeVarsWith onDim outer_env orig_except ref_qs = onType (S.fromList orig_except)
+qualifyTypeVarsWith onDim outer_env orig_except ref_qs
+  | null ref_qs = id
+  | otherwise = onType (S.fromList orig_except)
   where
     onType ::
       forall as'.
