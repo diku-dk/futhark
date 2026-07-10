@@ -165,7 +165,7 @@ intraBlockAlternative intra = do
           max_tblock_size
   (intra_suff, _) <-
     sufficientParallelism
-      "suff_intra_map"
+      "suff_intra_par"
       [Intrablock.intraAvailPar intra]
       mempty
       (Just Intrablock.intraMinInnerPar)
