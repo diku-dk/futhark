@@ -142,7 +142,7 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, MatchDec ret ifsort) =
       (hoistings, (pes, ts, case_reses_tr, defbody_res')) =
         (fmap unzip4 . partitionEithers) . map branchInvariant $
           zip5 [0 ..] (patElems pat) ret (transpose case_reses) defbody_res
-   in if null hoistings
+   in if null hoistings || ifsort == MatchEquiv
         then Skip
         else Simplify $ do
           ctx_fixes <- sequence hoistings
