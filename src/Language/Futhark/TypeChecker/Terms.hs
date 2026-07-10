@@ -1378,56 +1378,68 @@ collapseInstSizes min_lvl = do
 -- position, mirroring what the type of the function argument looks
 -- like.
 bindExistentialInsts :: (ASTMappable e) => e -> TermTypeM e
-bindExistentialInsts = astMap tv
-  where
-    tv =
-      ASTMapper
-        { mapOnExp = astMap tv,
-          mapOnName = pure,
-          mapOnStructType = onStruct,
-          mapOnParamType = onStruct,
-          mapOnResRetType = \(RetType dims t) -> do
-            (t', ext) <- onType t
-            pure $ RetType (dims <> ext) t'
-        }
-    onStruct ::
-      (Substitutable (TypeBase Size u)) =>
-      TypeBase Size u ->
-      TermTypeM (TypeBase Size u)
-    onStruct t = do
-      (t', ext) <- onType t
-      -- Existential sizes at the top level of a type have nowhere to
-      -- be bound. Those that absorbed a rigid unknown size stand for
-      -- a size that is actually computed at the recorded location,
-      -- so they become rigid unknown sizes there, subjecting them to
-      -- the causality check. The rest (absorbed from declared
-      -- existentials, e.g. by a hole) are left alone.
-      if null ext
-        then pure t'
-        else do
-          constraints <- getConstraints
-          let computedAt v = case snd <$> M.lookup v constraints of
-                Just (ExistentialSize _ mloc _) -> mloc
-                Just (CopySize c _ _)
-                  | Just (ExistentialSize _ mloc _) <- snd <$> M.lookup c constraints ->
-                      mloc
-                _ -> Nothing
-          repls <- fmap (M.fromList . catMaybes) . forM (S.toList $ fvVars $ freeInType t) $ \v ->
-            case computedAt v of
-              Just dloc -> do
-                v' <- newRigidDim dloc (RigidRet Nothing) "d"
-                pure $ Just (v, ExpSubst $ sizeFromName (qualName v') $ srclocOf dloc)
-              Nothing -> pure Nothing
-          pure $ applySubst (`M.lookup` repls) t
-    onType ::
-      (Substitutable (TypeBase Size u)) =>
-      TypeBase Size u ->
-      TermTypeM (TypeBase Size u, [VName])
-    onType t = do
-      constraints <- getConstraints
-      let (pending, reps) = pendingInstSizes constraints
-          repOf v = ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v reps
-      sizeFree mempty (find pending . fvVars . freeInExp) $ applySubst repOf t
+bindExistentialInsts x = do
+  -- 'pendingInstSizes' scans the entire constraint set, but its result
+  -- is invariant across this traversal (any rigid sizes we introduce
+  -- below are not instantiated sizes), so we compute it once instead of
+  -- once per type in the AST.
+  (pending, reps) <- pendingInstSizes <$> getConstraints
+  let repOf v = ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v reps
+      relevant v = pending v || v `M.member` reps
+
+      onType ::
+        (Substitutable (TypeBase Size u)) =>
+        TypeBase Size u ->
+        TermTypeM (TypeBase Size u, [VName])
+      onType t
+        -- Fast path: this type mentions no pending or copied
+        -- instantiated size, so 'applySubst'/'sizeFree' would be
+        -- no-ops. Most types take this path.
+        | not (any relevant $ fvVars $ freeInType t) = pure (t, [])
+        | otherwise =
+            sizeFree mempty (find pending . fvVars . freeInExp) $ applySubst repOf t
+
+      onStruct ::
+        (Substitutable (TypeBase Size u)) =>
+        TypeBase Size u ->
+        TermTypeM (TypeBase Size u)
+      onStruct t = do
+        (t', ext) <- onType t
+        -- Existential sizes at the top level of a type have nowhere to
+        -- be bound. Those that absorbed a rigid unknown size stand for
+        -- a size that is actually computed at the recorded location,
+        -- so they become rigid unknown sizes there, subjecting them to
+        -- the causality check. The rest (absorbed from declared
+        -- existentials, e.g. by a hole) are left alone.
+        if null ext
+          then pure t'
+          else do
+            constraints <- getConstraints
+            let computedAt v = case snd <$> M.lookup v constraints of
+                  Just (ExistentialSize _ mloc _) -> mloc
+                  Just (CopySize c _ _)
+                    | Just (ExistentialSize _ mloc _) <- snd <$> M.lookup c constraints ->
+                        mloc
+                  _ -> Nothing
+            repls <- fmap (M.fromList . catMaybes) . forM (S.toList $ fvVars $ freeInType t) $ \v ->
+              case computedAt v of
+                Just dloc -> do
+                  v' <- newRigidDim dloc (RigidRet Nothing) "d"
+                  pure $ Just (v, ExpSubst $ sizeFromName (qualName v') $ srclocOf dloc)
+                Nothing -> pure Nothing
+            pure $ applySubst (`M.lookup` repls) t
+
+      tv =
+        ASTMapper
+          { mapOnExp = astMap tv,
+            mapOnName = pure,
+            mapOnStructType = onStruct,
+            mapOnParamType = onStruct,
+            mapOnResRetType = \(RetType dims t) -> do
+              (t', ext) <- onType t
+              pure $ RetType (dims <> ext) t'
+          }
+  astMap tv x
 
 detectAmbiguousSizes :: TermTypeM ()
 detectAmbiguousSizes = do
