@@ -113,7 +113,7 @@ envToTermScope = Scope.envToTermScope toType
 
 runTermM :: TermM a -> TypeM a
 runTermM (TermM m) = do
-  initial_scope <- (Scope.initialTermScope toType <>) . envToTermScope <$> askEnv
+  initial_scope <- (Scope.initialTermScope toType <>) . Scope.envToTermScopeNoVals <$> askEnv
   name <- askImportName
   outer_env <- askEnv
   src <- gets stateNameSource
@@ -370,7 +370,11 @@ lookupMod qn@(QualName _ name) = do
 lookupVar :: SrcLoc -> QualName VName -> TermM Type
 lookupVar loc qn@(QualName qs name) = do
   scope <- lookupQualNameEnv qn
-  case M.lookup name $ scopeVtable scope of
+  outer_env <- asks termOuterEnv
+  -- Top-level value bindings are not in the term scope (see
+  -- 'envToTermScopeNoVals'); look them up on demand in the outer
+  -- environment.
+  case M.lookup name (scopeVtable scope) `mplus` Scope.lookupOuterVal toType outer_env name of
     Nothing ->
       error $ "lookupVar: " <> show qn
     Just (BoundV tparams t) -> do
@@ -378,7 +382,6 @@ lookupVar loc qn@(QualName qs name) = do
         then pure t
         else do
           (tnames, t') <- instTypeScheme qn loc tparams t
-          outer_env <- asks termOuterEnv
           -- Qualify abstract types, so that e.g. mismatch errors
           -- mention them by how they were accessed. The sizes need
           -- no qualification, as they are not even present here.

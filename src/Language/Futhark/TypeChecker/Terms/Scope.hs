@@ -10,6 +10,8 @@ module Language.Futhark.TypeChecker.Terms.Scope
     TermScope (..),
     Inferred (..),
     envToTermScope,
+    envToTermScopeNoVals,
+    lookupOuterVal,
     initialTermScope,
     lookupQualNameEnv,
     typeParamIdent,
@@ -68,6 +70,32 @@ envToTermScope onType env =
   where
     vtable = M.map valBinding $ envVtable env
     valBinding (TypeM.BoundV tps v) = BoundV tps $ onType v
+
+-- | Like 'envToTermScope', but omits the (potentially very large)
+-- value table. Its bindings are instead looked up on demand with
+-- 'lookupOuterVal'. This avoids transforming the entire value table of
+-- the outer environment - which for a top-level definition includes
+-- the whole prelude - once for every binding we check.
+envToTermScopeNoVals :: Env -> TermScope dim
+envToTermScopeNoVals env =
+  TermScope
+    { scopeVtable = mempty,
+      scopeTypeTable = envTypeTable env,
+      scopeModTable = envModTable env
+    }
+
+-- | Look up a single value binding in an 'Env' and convert it, using
+-- the given size conversion. The fallback for names not found in the
+-- (value-free) term scope built by 'envToTermScopeNoVals'.
+lookupOuterVal ::
+  (StructType -> TypeBase dim NoUniqueness) ->
+  Env ->
+  VName ->
+  Maybe (ValBinding dim)
+lookupOuterVal onType env v =
+  convert <$> M.lookup v (envVtable env)
+  where
+    convert (TypeM.BoundV tps t) = BoundV tps $ onType t
 
 -- | The initial scope, containing the intrinsics.
 initialTermScope ::

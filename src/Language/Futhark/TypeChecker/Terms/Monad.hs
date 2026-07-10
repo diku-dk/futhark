@@ -562,7 +562,12 @@ instance MonadTypeChecker TermTypeM where
 lookupVar :: SrcLoc -> QualName VName -> StructType -> TermTypeM StructType
 lookupVar loc qn@(QualName qs name) inst_t = do
   scope <- lookupQualNameEnv qn
-  case M.lookup name $ scopeVtable scope of
+  outer_env <- asks termOuterEnv
+  -- Top-level value bindings are not in the term scope (see
+  -- 'envToTermScopeNoVals'); look them up on demand in the outer
+  -- environment.
+  case M.lookup name (scopeVtable scope)
+    `mplus` Scope.lookupOuterVal id outer_env name of
     Nothing ->
       error $ "lookupVar: " <> show qn
     Just (BoundV tparams bound_t) ->
@@ -570,7 +575,6 @@ lookupVar loc qn@(QualName qs name) inst_t = do
         then pure bound_t
         else do
           (tnames, t) <- instTypeScheme qn loc tparams bound_t $ first (const ()) inst_t
-          outer_env <- asks termOuterEnv
           pure $ qualifyTypeVars outer_env tnames qs t
     Just EqualityF ->
       replaceTyVars loc inst_t
@@ -676,7 +680,7 @@ isInt64 _ = Nothing
 
 runTermTypeM :: (ExpBase Info VName -> TermTypeM Exp) -> M.Map TyVar (TypeBase () NoUniqueness) -> TermTypeM a -> TypeM a
 runTermTypeM checker tyvars (TermTypeM m) = do
-  initial_scope <- (Scope.initialTermScope id <>) . envToTermScope <$> askEnv
+  initial_scope <- (Scope.initialTermScope id <>) . Scope.envToTermScopeNoVals <$> askEnv
   name <- askImportName
   outer_env <- askEnv
   src <- gets TypeM.stateNameSource
