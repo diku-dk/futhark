@@ -1584,10 +1584,13 @@ sizeNamesPos _ = mempty
 -- These restrictions apply to all functions (anonymous or otherwise).
 -- Top-level functions have further restrictions that are checked
 -- during let-generalisation.
+--
+-- The parameters are assumed to already have their types normalised
+-- ('updateTypes'), which both callers do immediately beforehand.
 verifyFunctionParams :: Maybe VName -> [Pat ParamType] -> TermTypeM ()
 verifyFunctionParams fname params =
   onFailure (CheckingParams (baseName <$> fname)) $
-    verifyParams (foldMap patNames params) =<< mapM updateTypes params
+    verifyParams (foldMap patNames params) params
   where
     verifyParams forbidden (p : ps)
       | d : _ <- filter (`elem` forbidden) $ S.toList $ fvVars $ freeInPat p =
