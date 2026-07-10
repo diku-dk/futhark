@@ -19,6 +19,7 @@ module Futhark.Pass.Flatten.Builtins
     genSegRed,
     genSegRedomap,
     genScatter,
+    genScatterND,
     genShapeIota,
     exScanAndSum,
     doRepIota,
@@ -475,19 +476,31 @@ genSegPrefixSum lvl desc flags ns = do
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
   head <$> genSegScan lvl desc add_lam [intConst Int64 0] flags [ns]
 
+-- TODO: We can just remove this
 genScatter ::
   (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel -> VName -> SubExp -> (SubExp -> m (VName, SubExp)) -> m (Exp GPU)
-genScatter lvl dest n f = do
-  gtid <- newVName "gtid"
-  space <- mkSegSpace [(gtid, n)]
-  withAcc [dest] 1 $ \ ~[acc] -> do
+genScatter lvl dest n f =
+  genScatterND lvl dest [n] $ \[i] -> do (idx, v) <- f i; pure ([Var idx], v)
+
+genScatterND ::
+  (MonadBuilder m, Rep m ~ GPU) =>
+  SegLevel -> VName -> [SubExp] -> ([SubExp] -> m ([SubExp], SubExp)) -> m (Exp GPU)
+genScatterND lvl dest grid f = do
+  gtids <- traverse (const $ newVName "gtid") grid
+  space <- mkSegSpace $ zip gtids grid
+  dest_t <- lookupType dest
+  let accRank = arrayRank dest_t
+  withAcc [dest] accRank $ \ ~[acc] -> do
     kbody <- buildBody_ $ localScope (scopeOfSegSpace space) $ do
-      (i, v) <- f $ Var gtid
-      acc' <- letExp (baseName acc) $ BasicOp $ UpdateAcc Safe acc [Var i] [v]
+      (idxs, v) <- f $ fmap Var gtids
+      acc' <-
+        letExp (baseName acc) $
+          BasicOp $
+            UpdateAcc Safe acc idxs [v]
       pure [Returns ResultMaySimplify mempty $ Var acc']
     acc_t <- lookupType acc
-    lvl' <- capThreadSegLevel [n] "genScatter" lvl $ NoRecommendation SegVirt
+    lvl' <- capThreadSegLevel grid "genScatter2" lvl $ NoRecommendation SegVirt
     letTupExp' "scatter" $ Op $ SegOp $ SegMap lvl' space [acc_t] kbody
 
 genTabulate ::

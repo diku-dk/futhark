@@ -834,6 +834,32 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
             certifying (distCerts inps aux env) . letExp "update_reg" . BasicOp $
               Update safety as' (Slice $ segmentSlice segments <> unSlice slice) (Var se')
           pure $ insertRegulars [distResTag res] [v] env
+      | Just as_t <- distInputType <$> lookup as inps,
+        isRegularDistResult res,
+        not (any (isVariant inps) (sliceDims slice)) -> do
+          let as_lift_shape = segmentsShape segments <> arrayShape as_t
+          as' <- liftSubExpRegular lvl segments inps env as_lift_shape (Var as)
+          let update_dims = NE.toList segments <> sliceDims slice
+          updated <-
+            certifying (distCerts inps aux env)
+              . letExp "update_reg_scatter"
+              <=< renameExp
+              <=< genScatterND lvl as' update_dims
+              $ \ is -> do
+                let (seg_is, in_is) = splitAt (segmentsRank segments) (toList is)
+                readInputs segments env seg_is $ filter ((/= as) . fst) inps
+                let slice' = fixSlice (fmap pe64 slice) (map pe64 in_is)
+                -- Value to write
+                v' <- case se of
+                  Constant c -> pure $ Constant c
+                  Var se_v
+                    | null (sliceDims slice) -> pure $ Var se_v
+                    | otherwise -> letSubExp "v" =<< eIndex se_v (map toExp in_is)
+                -- Index to write `v'` at
+                in_is' <- mapM (letSubExp "i" <=< toExp) slice'
+                let is' = seg_is <> in_is'
+                pure (is', v')
+          pure $ insertRegulars [distResTag res] [updated] env
       | Just as_t <- distInputType <$> lookup as inps -> do
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
           ns <- letExp "slice_sizes"
@@ -932,6 +958,30 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
                 Reshape out_flat_updated $
                   reshapeAll as_flat_shape as_lift_shape
           pure $ insertRegulars [distResTag res] [out_updated] env
+      | Just as_t <- distInputType <$> lookup as inps,
+        isRegularDistResult res,
+        not (any (isVariant inps) (flatSliceDims flat_slice)) -> do
+          -- as should be 1D
+          let as_lift_shape = segmentsShape segments <> arrayShape as_t
+          as' <- liftSubExpRegular lvl segments inps env as_lift_shape (Var as)
+          let update_dims = NE.toList segments <> flatSliceDims flat_slice
+          updated <-
+            certifying (distCerts inps aux env)
+              . letExp "flat_update_reg_scatter"
+              <=< renameExp
+              <=< genScatterND lvl as' update_dims
+              $ \is -> do
+                let (seg_is, in_is) = splitAt (segmentsRank segments) (toList is)
+                readInputs segments env seg_is $ filter ((/= as) . fst) inps
+                let flat_slice'@(FlatSlice flat_offset _) = fmap pe64 flat_slice
+                    flat_i =
+                      flat_offset + sum (zipWith (*) (map pe64 in_is) (flatSliceStrides flat_slice'))
+                -- Value to write
+                v' <- letSubExp "v" =<< eIndex v (map toExp in_is)
+                -- Index to write `v'` at
+                i <- letSubExp "i" =<< toExp flat_i
+                pure (seg_is <> [i], v')
+          pure $ insertRegulars [distResTag res] [updated] env
       | Just _ <- distInputType <$> lookup as inps -> do
           num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
           ns <- letExp "slice_sizes"
