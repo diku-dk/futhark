@@ -111,9 +111,12 @@ newtype TermM a
 envToTermScope :: Env -> TermScope ()
 envToTermScope = Scope.envToTermScope toType
 
+initialTermScope :: TermScope ()
+initialTermScope = Scope.initialTermScope toType
+
 runTermM :: TermM a -> TypeM a
 runTermM (TermM m) = do
-  initial_scope <- (Scope.initialTermScope toType <>) . Scope.envToTermScopeNoVals <$> askEnv
+  initial_scope <- (initialTermScope <>) . Scope.envToTermScopeNoVals <$> askEnv
   name <- askImportName
   outer_env <- askEnv
   src <- gets stateNameSource

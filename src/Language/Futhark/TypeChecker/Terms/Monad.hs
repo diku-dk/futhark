@@ -678,9 +678,12 @@ isInt64 _ = Nothing
 
 -- Running
 
+initialTermScope :: TermScope Size
+initialTermScope = Scope.initialTermScope id
+
 runTermTypeM :: (ExpBase Info VName -> TermTypeM Exp) -> M.Map TyVar (TypeBase () NoUniqueness) -> TermTypeM a -> TypeM a
 runTermTypeM checker tyvars (TermTypeM m) = do
-  initial_scope <- (Scope.initialTermScope id <>) . Scope.envToTermScopeNoVals <$> askEnv
+  initial_scope <- (initialTermScope <>) . Scope.envToTermScopeNoVals <$> askEnv
   name <- askImportName
   outer_env <- askEnv
   src <- gets TypeM.stateNameSource
