@@ -13,7 +13,7 @@ where
 
 import Control.Monad
 import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.DList qualified as DL
