@@ -24,21 +24,37 @@ import Futhark.Transform.ToGPU (soacsLambdaToGPU)
 import Prelude hiding (div, rem)
 
 indexIrreg ::
-  (MonadBuilder m) =>
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
   Segments ->
   DistEnv ->
   IrregularRep ->
   SubExp ->
+  Safety ->
   ShapeBase SubExp ->
   [SubExp] ->
   m SubExp
-indexIrreg _segments _env rep is shape js = do
+indexIrreg _segments _env rep is safety shape js = do
   offset <- letSubExp "uacc_segment_offset" =<< eIndex (irregularO rep) [eSubExp is]
-  letSubExp "flat_uacc_idx" <=< toExp $
-    pe64 offset
-      + flattenIndex
-        (map pe64 (shapeDims shape))
-        (map pe64 js)
+  flat <-
+    letSubExp "flat_uacc_idx" <=< toExp $
+      pe64 offset
+        + flattenIndex
+          (map pe64 (shapeDims shape))
+          (map pe64 js)
+  case safety of
+    Unsafe -> pure flat
+    -- The original per-segment index 'js' may be out of bounds, which for a
+    -- safe 'UpdateAcc' is a deliberate no-op. Adding the segment offset might
+    -- turn such an out-of-bounds index into an in-bounds index into a
+    -- neighbouring segment, so we must preserve the out-of-boundedness
+    -- explicitly.
+    Safe -> do
+      inbounds <- letSubExp "uacc_inbounds" =<< eShapeInBounds shape (map eSubExp js)
+      letSubExp "uacc_flat_idx"
+        =<< eIf
+          (eSubExp inbounds)
+          (eBody [eSubExp flat])
+          (eBody [eSubExp (intConst Int64 (-1))])
 
 -- If just one input is nonuniform, we treat them all as nonuniform.
 transformWithAcc ::
@@ -74,16 +90,16 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
       then do
         (withacc_inputs', input_reps) <-
           mapAndUnzipM onNonuniformInput withacc_inputs
-        let trAccIndex c is = do
+        let trAccIndex c safety is = do
               ((shape, _, _), rep : _) <-
                 L.lookup c $
                   zip (map paramName lam_params') $
                     zip withacc_inputs input_reps
-              Just $ L.singleton <$> indexIrreg segments env rep iota_se shape is
+              Just $ L.singleton <$> indexIrreg segments env rep iota_se safety shape is
         pure (withacc_inputs', trAccIndex, concat input_reps)
       else do
         withacc_inputs' <- mapM onUniformInput withacc_inputs
-        let trAccIndex c is = do
+        let trAccIndex c _safety is = do
               _ <- L.lookup c $ zip (map paramName lam_params') withacc_inputs
               Just $ do
                 iota_se_unflat <-
@@ -280,7 +296,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
           dist_res
 
     trType ::
-      (VName -> Maybe Shape, VName -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
+      (VName -> Maybe Shape, VName -> Safety -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
       TypeBase shape u ->
       TypeBase shape u
     trType sf (Acc acc _ ts u)
@@ -289,7 +305,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
     trType _ t = t
 
     trParam ::
-      (VName -> Maybe Shape, VName -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
+      (VName -> Maybe Shape, VName -> Safety -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
       Param (TypeBase Shape u) ->
       Param (TypeBase Shape u)
     trParam sf = fmap $ trType sf
@@ -313,7 +329,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
     trExp sf (Pat [PatElem _ acc_t]) (BasicOp (UpdateAcc safety acc is ses)) = do
       case acc_t of
         Acc cert _ _ _
-          | Just mk <- snd sf cert is -> do
+          | Just mk <- snd sf cert safety is -> do
               is' <- mk
               pure $ BasicOp $ UpdateAcc safety acc is' ses
         _ ->
