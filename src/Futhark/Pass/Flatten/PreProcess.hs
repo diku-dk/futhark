@@ -19,6 +19,7 @@ import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify
 import Futhark.Pass
 import Futhark.Tools
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.ISRWIM (irwim, iswim)
 
 shouldDissectForm :: ScremaForm SOACS -> Bool
@@ -46,6 +47,9 @@ preprocessStm ::
   m (Stms SOACS)
 preprocessStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm stm
+preprocessStm scope (Let pat aux (Op soac))
+  | "sequential_outer" `inAttrs` stmAuxAttrs aux =
+      preprocessStms scope =<< runSimplifiedBuilder scope (FOT.transformSOAC pat soac)
 preprocessStm scope (Let pat aux (Op (Stream w arrs nes lam))) = do
   stms <- runSimplifiedBuilder scope (auxing aux $ sequentialStreamWholeArray pat w nes lam arrs)
   preprocessStms scope stms
