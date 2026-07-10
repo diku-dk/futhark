@@ -286,7 +286,7 @@ genScanWithKernelBodyAndPost lvl desc segments mkScanLam shape nes mkPostLam m =
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
 bindLambdaInputArrays ::
-  (MonadBuilder m, Rep m ~ GPU, Traversable f) =>
+  (MonadBuilder m, Traversable f) =>
   f SubExp ->
   Lambda GPU ->
   [VName] ->
