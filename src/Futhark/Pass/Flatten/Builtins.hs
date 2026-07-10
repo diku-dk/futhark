@@ -509,7 +509,7 @@ genScatterND lvl dest grid f = do
             UpdateAcc Safe acc idxs [v]
       pure [Returns ResultMaySimplify mempty $ Var acc']
     acc_t <- lookupType acc
-    lvl' <- capThreadSegLevel grid "genScatter2" lvl $ NoRecommendation SegVirt
+    lvl' <- capThreadSegLevel grid "genScatterND" lvl $ NoRecommendation SegVirt
     letTupExp' "scatter" $ Op $ SegOp $ SegMap lvl' space [acc_t] kbody
 
 genTabulate ::
