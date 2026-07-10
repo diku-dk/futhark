@@ -852,9 +852,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
                 -- Value to write
                 v' <- case se of
                   Constant c -> pure $ Constant c
-                  Var se_v
-                    | null (sliceDims slice) -> pure $ Var se_v
-                    | otherwise -> letSubExp "v" =<< eIndex se_v (map toExp in_is)
+                  Var se_v -> letSubExp "v" =<< eIndex se_v (map toExp in_is)
                 -- Index to write `v'` at
                 in_is' <- mapM (letSubExp "i" <=< toExp) slice'
                 let is' = seg_is <> in_is'

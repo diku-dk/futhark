@@ -480,8 +480,17 @@ genSegPrefixSum lvl desc flags ns = do
 genScatter ::
   (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel -> VName -> SubExp -> (SubExp -> m (VName, SubExp)) -> m (Exp GPU)
-genScatter lvl dest n f =
-  genScatterND lvl dest [n] $ \[i] -> do (idx, v) <- f i; pure ([Var idx], v)
+genScatter lvl dest n f = do
+  gtid <- newVName "gtid"
+  space <- mkSegSpace [(gtid, n)]
+  withAcc [dest] 1 $ \ ~[acc] -> do
+    kbody <- buildBody_ $ localScope (scopeOfSegSpace space) $ do
+      (i, v) <- f $ Var gtid
+      acc' <- letExp (baseName acc) $ BasicOp $ UpdateAcc Safe acc [Var i] [v]
+      pure [Returns ResultMaySimplify mempty $ Var acc']
+    acc_t <- lookupType acc
+    lvl' <- capThreadSegLevel [n] "genScatter" lvl $ NoRecommendation SegVirt
+    letTupExp' "scatter" $ Op $ SegOp $ SegMap lvl' space [acc_t] kbody
 
 genScatterND ::
   (MonadBuilder m, Rep m ~ GPU) =>
