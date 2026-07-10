@@ -91,11 +91,11 @@ scatterRegular ::
   (VName, VName) ->
   FlattenM VName
 scatterRegular lvl space (is, xs) = do
-  size <- arraySize 0 <$> lookupType xs
-  letExp "regular_scatter" <=< genScatter lvl space size $ \gtid -> do
-    x <- letSubExp "x" =<< eIndex xs [eSubExp gtid]
-    i <- letExp "i" =<< eIndex is [eSubExp gtid]
-    pure (i, x)
+  dims <- arrayDims <$> lookupType xs
+  letExp "regular_scatter" <=< genScatterND lvl space dims $ \(gtid : rest) -> do
+    x <- letSubExp "x" =<< eIndex xs (map eSubExp (gtid : rest))
+    i <- letSubExp "i" =<< eIndex is [eSubExp gtid]
+    pure (i : rest, x)
 
 ensureDenseIrregular :: SegLevel -> Name -> IrregularRep -> FlattenM IrregularRep
 ensureDenseIrregular _ _ rep@IrregularRep {irregularK = Dense} =

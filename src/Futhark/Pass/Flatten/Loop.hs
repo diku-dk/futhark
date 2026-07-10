@@ -150,11 +150,13 @@ splitInput lvl segments inps env is v = do
           pure $ Regular arr
         else do
           n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-          -- isnt' it better to do the segmap over all dims?
-          arr' <- letExp "split_arr" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
+          inner_dims <- drop (segmentsRank segments) . arrayDims <$> lookupType arr
+          -- Do the segMap over all dims, so the inner dimensions
+          -- are gathered in parallel
+          arr' <- letExp "split_arr" <=< segMap lvl (n : inner_dims) $ \(i : js) -> do
             idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
             let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
-            subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is))
+            subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is ++ map eSubExp js))
           pure $ Regular arr'
     Irregular (IrregularRep segs flags offsets elems _) -> do
       n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
