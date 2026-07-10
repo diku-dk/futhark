@@ -260,13 +260,32 @@ isParallelDistStm _ _ = False
 
 isParallelStm :: FunHasParallelism -> Stm SOACS -> Bool
 isParallelStm funHasParallelism stm =
-  isMap (stmExp stm) && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
+  noSequentialAttr stm
+    && (parallelBasicOp (stmExp stm) || hasParallelism stm)
   where
+    parallelBasicOp (BasicOp op) = isParallelBasicOp op
+    parallelBasicOp _ = False
+
+    noSequentialAttr stm' =
+      not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm'))
+    
+    hasParallelism stm' =
+      noSequentialAttr stm'
+        && case stmExp stm' of
+          BasicOp _ -> False
+          Apply fname _ _ _ -> funHasParallelism fname
+          Match _ cases def_case _ ->
+            any hasParallelism $
+              bodyStms def_case
+                <> mconcat (map (bodyStms . caseBody) cases)
+          Loop _ _ body -> any hasParallelism (bodyStms body)
+          WithAcc _ lam -> any hasParallelism (bodyStms (lambdaBody lam))
+          Op op -> isParallelOp op
+
     isParallelOp Stream {} = error "isParallelStm: Stream"
     isParallelOp JVP {} = error "isParallelStm: JVP"
     isParallelOp VJP {} = error "isParallelStm: VJP"
     isParallelOp _ = True
-
     -- TODO: Check other operations
     isParallelBasicOp (Update _ _ slice _) = not $ null $ sliceDims slice
     isParallelBasicOp Concat {} = True
@@ -281,16 +300,6 @@ isParallelStm funHasParallelism stm =
     isParallelBasicOp (FlatIndex _ flat_slice) = not $ null $ flatSliceDims flat_slice
     isParallelBasicOp (Index _ slice) = not $ null $ sliceDims slice
     isParallelBasicOp _ = False
-
-    isMap (BasicOp op) = isParallelBasicOp op
-    isMap (Apply fname _ _ _) = funHasParallelism fname
-    isMap (Match _ cases def_case _) =
-      any (isParallelStm funHasParallelism) $
-        bodyStms def_case
-          <> mconcat (map (bodyStms . caseBody) cases)
-    isMap (Loop _ _ body) = (any (isParallelStm funHasParallelism) . bodyStms) body
-    isMap (WithAcc _ lam) = (any (isParallelStm funHasParallelism) . bodyStms) $ lambdaBody lam
-    isMap (Op op) = isParallelOp op
 
 isRegularDistResult :: DistResult -> Bool
 isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
