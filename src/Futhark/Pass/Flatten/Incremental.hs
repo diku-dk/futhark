@@ -226,8 +226,8 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
 -- parallelism of an interesting kind.
 --
 -- TODO: maybe update this or just always consider Sequentialising
-worthSequentialising :: FunHasParallelism -> Lambda SOACS -> Bool
-worthSequentialising funHasParallelism lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
+worthSequentialising :: Lambda SOACS -> Bool
+worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
   where
     bodyInterest depth body =
       sum $ interest depth <$> bodyStms body
@@ -261,7 +261,7 @@ worthSequentialising funHasParallelism lam = bodyInterest (0 :: Int) (lambdaBody
       | Op (Stream _ _ _ lam') <- stmExp stm =
           bodyInterest (depth + 1) (lambdaBody lam')
       | otherwise =
-          if isParallelStm funHasParallelism stm then 1 else 0
+          0
       where
         attrs = stmAuxAttrs $ stmAux stm
         sequential_inner = "sequential_inner" `inAttrs` attrs

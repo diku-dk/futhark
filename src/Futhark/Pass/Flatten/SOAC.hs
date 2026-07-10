@@ -1165,7 +1165,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
               kernelAlternatives "match_res" result_ts outer_body []
         Nothing
           | not only_intra,
-            worthSequentialising (flattenFunHasParallelism ops) map_lam,
+            worthSequentialising map_lam,
             mayExploitOuter $ stmAuxAttrs aux -> do
               (outer_suff, _) <- sufficientParallelism "suff_outer_par" (NE.toList $ segments <> pure w) mempty Nothing
               kernelAlternatives
@@ -1179,7 +1179,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
           | only_intra -> do
               (_, intra_body) <- intraBlockAlternative intra_res
               kernelAlternatives "match_res" result_ts intra_body []
-          | worthSequentialising (flattenFunHasParallelism ops) map_lam,
+          | worthSequentialising map_lam,
             mayExploitOuter $ stmAuxAttrs aux -> do
               (outer_suff, _) <- sufficientParallelism "suff_outer_par" (NE.toList $ segments <> pure w) mempty Nothing
               intra_alts <- intraBlockAlternative intra_res

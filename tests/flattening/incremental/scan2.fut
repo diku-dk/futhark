@@ -1,7 +1,7 @@
 -- ==
 -- input { [[7i64, 2i64, 3i64], [4i64, 5i64, 6i64]] }
 -- auto output
--- structure gpu { /If/True/SegMap 1 /If/False/If/True/SegScan 1 /If/False/If/False/SegMap 2 }
+-- structure gpu { /If/True/SegScan 1 /If/False/SegScan 1 /If/False/SegMap 2 }
 
 entry main [n] [m] (xss: [n][m]i64) =
   map (\xs ->

@@ -459,7 +459,7 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
                 kernelAlternatives "top_level_map_alt" result_ts outerOnlyBody []
           Nothing
             | not only_intra,
-              worthSequentialising funHasParallelism lam,
+              worthSequentialising lam,
               mayExploitOuter (stmAuxAttrs aux) -> do
                 (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
                 kernelAlternatives
@@ -473,7 +473,7 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
             | only_intra -> do
                 (_, intra_body) <- intraBlockAlternative intra_res
                 kernelAlternatives "top_level_map_alt" result_ts intra_body []
-            | worthSequentialising funHasParallelism lam,
+            | worthSequentialising lam,
               mayExploitOuter (stmAuxAttrs aux) -> do
                 intra_alt <- intraBlockAlternative intra_res
                 (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
