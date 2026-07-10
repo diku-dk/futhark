@@ -1685,8 +1685,6 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, _)
       | k `elem` map typeParamName tparams =
           pure Nothing
-    closeOver (k, ParamType {}) =
-      error $ "closeOverTypes: unexpected ParamType: " <> prettyNameString k
     closeOver (k, Size Nothing _) =
       pure $ Just $ Left $ TypeParamDim k mempty
     closeOver (k, UnknownSize _ _)

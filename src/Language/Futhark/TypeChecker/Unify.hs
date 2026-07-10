@@ -68,8 +68,7 @@ instance Located Usage where
 -- | A constraint on a yet-ambiguous size variable, or information
 -- about a rigid type parameter or size.
 data Constraint
-  = ParamType Liftedness Loc
-  | ParamSize Loc
+  = ParamSize Loc
   | -- | Is not actually a type, but a term-level size,
     -- possibly already set to something specific.
     Size (Maybe Exp) Usage
@@ -110,7 +109,6 @@ data Constraint
   deriving (Show)
 
 instance Located Constraint where
-  locOf (ParamType _ usage) = locOf usage
   locOf (ParamSize loc) = locOf loc
   locOf (Size _ usage) = locOf usage
   locOf (UnknownSize loc _) = locOf loc
@@ -272,7 +270,6 @@ normTypeFully t = do
   pure $ applySubst (`lookupSubst` constraints) t
 
 rigidConstraint :: Constraint -> Bool
-rigidConstraint ParamType {} = True
 rigidConstraint ParamSize {} = True
 rigidConstraint UnknownSize {} = True
 rigidConstraint ExistentialSize {} = True
@@ -867,12 +864,12 @@ runUnifyM rigid_tparams nonrigid_tparams (UnifyM m) =
   where
     constraints =
       M.fromList $
-        mapMaybe nonrigid nonrigid_tparams <> map rigid rigid_tparams
+        mapMaybe nonrigid nonrigid_tparams <> mapMaybe rigid rigid_tparams
     nonrigid (TypeParamDim p ploc) =
       Just (p, (1, Size Nothing $ Usage Nothing $ locOf ploc))
     nonrigid TypeParamType {} = Nothing
-    rigid (TypeParamDim p ploc) = (p, (0, ParamSize $ locOf ploc))
-    rigid (TypeParamType l p ploc) = (p, (0, ParamType l $ locOf ploc))
+    rigid (TypeParamDim p ploc) = Just (p, (0, ParamSize $ locOf ploc))
+    rigid TypeParamType {} = Nothing
 
 -- | Check that two types match, instantiating the nonrigid type
 -- parameters of the second type as necessary. This is used when

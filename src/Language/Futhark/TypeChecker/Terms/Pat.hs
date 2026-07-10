@@ -81,8 +81,7 @@ bindingTypeParams tparams =
     . bindingTypes (concatMap typeParamType tparams)
   where
     typeParamType (TypeParamType l v loc) =
-      [ Left (v, TypeAbbr l [] $ RetType [] $ Scalar (TypeVar mempty (qualName v) [])),
-        Right (v, ParamType l $ locOf loc)
+      [ Left (v, TypeAbbr l [] $ RetType [] $ Scalar (TypeVar mempty (qualName v) []))
       ]
     typeParamType (TypeParamDim v loc) =
       [Right (v, ParamSize $ locOf loc)]
