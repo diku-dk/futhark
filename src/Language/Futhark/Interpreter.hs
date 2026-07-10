@@ -746,6 +746,39 @@ evalTermVar env qv t =
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = typeShape <$> evalTypeFully (expandType env t)
 
+-- | Compute the shape of a sum value with the given type, constructor
+-- and payload values. The shapes of the payload values take
+-- precedence over the type annotation, which may contain existential
+-- sizes that cannot be evaluated. The shapes of the other
+-- constructors are computed from the type, after resolving
+-- existential sizes against the concrete payload where possible; the
+-- type system guarantees that dimensions not determined by the
+-- payload can be evaluated.
+sumValueShape :: Env -> StructType -> Name -> [Value] -> EvalM ValueShape
+sumValueShape env t c vs =
+  case expandType env t of
+    Scalar (Sum cs) -> do
+      let payload_shapes = map valueShape vs
+          learned =
+            i64Env $ mconcat $ maybe [] (zipWith learn payload_shapes) $ M.lookup c cs
+          evalDim (SizeClosure denv e) =
+            asInt64 <$> evalWithExts (learned <> denv) e
+          onConstr c' fts
+            | c' == c = pure payload_shapes
+            | otherwise = map typeShape <$> mapM (bitraverse evalDim pure) fts
+      ShapeSum <$> M.traverseWithKey onConstr cs
+    t' -> typeShape <$> evalTypeFully t'
+  where
+    learn (ShapeDim d s) ft
+      | SizeClosure _ (Var v _ _) : _ <- shapeDims (arrayShape ft) =
+          M.insert (qualLeaf v) d $ learn s (stripArray 1 ft)
+      | otherwise = learn s (stripArray 1 ft)
+    learn (ShapeRecord fs) (Scalar (Record fts)) =
+      mconcat $ M.elems $ M.intersectionWith learn fs fts
+    learn (ShapeSum fs) (Scalar (Sum fts)) =
+      mconcat $ map mconcat $ M.elems $ M.intersectionWith (zipWith learn) fs fts
+    learn _ _ = mempty
+
 -- Sometimes type instantiation is not quite enough - then we connect
 -- up the missing sizes here.  In particular used for eta-expanded
 -- entry points.
@@ -772,7 +805,7 @@ evalBinding env missing_sizes [] body rettype =
         env'' <- linkMissingSizes missing_sizes p v <$> matchPat env' p v
         etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
-      f <- eval env' body
+      f <- localExts $ eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
 evalBinding env missing_sizes (p : ps) body rettype =
   pure . ValueFun $ \v -> do
@@ -1106,7 +1139,7 @@ eval env (Assert what e (Info s) loc) = do
   eval env e
 eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es
-  shape <- typeValueShape env $ toStruct t
+  shape <- sumValueShape env (toStruct t) c vs
   pure $ ValueSum shape c vs
 eval env (Attr (AttrAtom (AtomName "break") _) e loc) = do
   break env (locOf loc)

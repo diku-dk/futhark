@@ -24,12 +24,13 @@ documented below.
 COMMANDS
 ========
 
-futhark benchcmp FILE_A FILE_B
-------------------------------
+futhark benchcmp [options...] FILE_A FILE_B
+-------------------------------------------
 
 Compare two JSON files produced by the ``--json`` option of
-:ref:`futhark-bench(1)`.  The results show speedup of the latter file
-compared to the former.
+:ref:`futhark-bench(1)`.  ``FILE_A`` is the baseline and ``FILE_B`` is
+the new result; speedups greater than 1x mean ``FILE_B`` is faster.
+See :ref:`futhark-benchcmp(1)` for the full option reference.
 
 futhark check [-w] [-Werror] PROGRAM
 ------------------------------------
@@ -116,4 +117,4 @@ Print the tokens the given Futhark source file; one per line.
 SEE ALSO
 ========
 
-:ref:`futhark-opencl(1)`, :ref:`futhark-c(1)`, :ref:`futhark-py(1)`, :ref:`futhark-pyopencl(1)`, :ref:`futhark-wasm(1)`, :ref:`futhark-wasm-multicore(1)`, :ref:`futhark-ispc(1)`, :ref:`futhark-dataset(1)`, :ref:`futhark-doc(1)`, :ref:`futhark-test(1)`, :ref:`futhark-bench(1)`, :ref:`futhark-run(1)`, :ref:`futhark-repl(1)`, :ref:`futhark-literate(1)`
+:ref:`futhark-opencl(1)`, :ref:`futhark-c(1)`, :ref:`futhark-py(1)`, :ref:`futhark-pyopencl(1)`, :ref:`futhark-wasm(1)`, :ref:`futhark-wasm-multicore(1)`, :ref:`futhark-ispc(1)`, :ref:`futhark-dataset(1)`, :ref:`futhark-doc(1)`, :ref:`futhark-test(1)`, :ref:`futhark-bench(1)`, :ref:`futhark-benchcmp(1)`, :ref:`futhark-run(1)`, :ref:`futhark-repl(1)`, :ref:`futhark-literate(1)`

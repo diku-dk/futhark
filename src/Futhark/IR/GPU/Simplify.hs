@@ -65,7 +65,13 @@ simplifyKernelOp _ (SizeOp (CalcNumBlocks w max_num_tblocks tblock_size)) = do
 simplifyKernelOp _ (GPUBody ts body) = do
   ts' <- Engine.simplify ts
   (hoisted, body') <-
-    Engine.simplifyBody keepOnGPU mempty (map (const mempty) ts) body
+    -- A GPUBody is a single-threaded kernel that cannot perform
+    -- allocations.  By pretending we are simplifying memory (as we do
+    -- inside SegOps) we allow allocations to be hoisted out of
+    -- branches within the body, and ultimately out of the GPUBody
+    -- itself.
+    Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
+      Engine.simplifyBody keepOnGPU mempty (map (const mempty) ts) body
   pure (GPUBody ts' body', hoisted)
   where
     keepOnGPU _ _ = keepExpOnGPU . stmExp
