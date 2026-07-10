@@ -21,7 +21,7 @@ where
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Data.Bifoldable (bifoldMap)
 import Data.Bifunctor
 import Data.Bitraversable
