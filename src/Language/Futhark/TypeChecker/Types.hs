@@ -23,6 +23,7 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Set qualified as S
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
@@ -475,51 +476,95 @@ substTypesRet ::
   TypeBase Size u ->
   RetTypeBase Size u
 substTypesRet lookupSubst ot =
-  uncurry (flip RetType) $ runState (onType ot) []
+  let (t', dims) = runState (onType ot) []
+   in RetType dims (fromMaybe ot t')
   where
+    -- 'onType' returns 'Nothing' when the substitution does not change
+    -- the type, so that the (very common) unchanged parts are shared
+    -- rather than reconstructed. 'fromMaybe' at each level splices in
+    -- the original subterm for unchanged children.
     onType ::
       forall as.
       (Monoid as) =>
       TypeBase Size as ->
-      State [VName] (TypeBase Size as)
+      State [VName] (Maybe (TypeBase Size as))
 
-    onType (Array u shape et) =
-      arrayOfWithAliases u (applySubst lookupSubst' shape)
-        <$> onType (Scalar et)
-    onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
+    onType (Array u shape et) = do
+      et' <- onType (Scalar et)
+      let shape' = onShape shape
+      pure $ case (shape', et') of
+        (Nothing, Nothing) -> Nothing
+        _ ->
+          Just $
+            arrayOfWithAliases u (fromMaybe shape shape') (fromMaybe (Scalar et) et')
+    onType (Scalar (Prim _)) = pure Nothing
     onType (Scalar (TypeVar u v targs)) = do
       targs' <- mapM subsTypeArg targs
       case lookupSubst $ qualLeaf v of
         Just (Subst ps rt) -> do
           RetType ext t <- freshDims rt
           modify (ext ++)
-          pure $ second (<> u) $ applyType ps (second (const u) t) targs'
+          let targs'' = zipWith fromMaybe targs targs'
+          pure $ Just $ second (<> u) $ applyType ps (second (const u) t) targs''
         _ ->
-          pure $ Scalar $ TypeVar u v targs'
-    onType (Scalar (Record ts)) =
-      Scalar . Record <$> traverse onType ts
-    onType (Scalar (Arrow u v d t1 t2)) =
-      Scalar <$> (Arrow u v d <$> onType t1 <*> onRetType t2)
-    onType (Scalar (Sum ts)) =
-      Scalar . Sum <$> traverse (traverse onType) ts
+          pure $
+            if all isNothing targs'
+              then Nothing
+              else Just $ Scalar $ TypeVar u v (zipWith fromMaybe targs targs')
+    onType (Scalar (Record ts)) = do
+      ts' <- traverse onType ts
+      pure $
+        if all isNothing ts'
+          then Nothing
+          else Just $ Scalar $ Record $ M.intersectionWith fromMaybe ts ts'
+    onType (Scalar (Arrow u v d t1 t2)) = do
+      t1' <- onType t1
+      t2' <- onRetType t2
+      pure $ case (t1', t2') of
+        (Nothing, Nothing) -> Nothing
+        _ -> Just $ Scalar $ Arrow u v d (fromMaybe t1 t1') (fromMaybe t2 t2')
+    onType (Scalar (Sum ts)) = do
+      ts' <- traverse (traverse onType) ts
+      pure $
+        if all (all isNothing) ts'
+          then Nothing
+          else Just $ Scalar $ Sum $ M.intersectionWith (zipWith fromMaybe) ts ts'
 
     onRetType (RetType dims t) = do
       ext <- get
-      let (t', ext') = runState (onType t) ext
-          new_ext = ext' L.\\ ext
-      case t of
-        Scalar Arrow {} -> do
-          put ext'
-          pure $ RetType dims t'
-        _ ->
-          pure $ RetType (new_ext <> dims) t'
+      case runState (onType t) ext of
+        (Nothing, _) -> pure Nothing
+        (Just t', ext') -> do
+          let new_ext = ext' L.\\ ext
+          case t of
+            Scalar Arrow {} -> do
+              put ext'
+              pure $ Just $ RetType dims t'
+            _ ->
+              pure $ Just $ RetType (new_ext <> dims) t'
 
+    -- Applied type arguments are rare; substitute conservatively (do
+    -- not bother sharing them).
     subsTypeArg (TypeArgType t) = do
       let RetType dims t' = substTypesRet lookupSubst' t
       modify (dims ++)
-      pure $ TypeArgType t'
+      pure $ Just $ TypeArgType t'
     subsTypeArg (TypeArgDim v) =
-      pure $ TypeArgDim $ applySubst lookupSubst' v
+      pure $ TypeArgDim <$> onSize v
+
+    onShape (Shape ds) =
+      let ds' = map onSize ds
+       in if all isNothing ds'
+            then Nothing
+            else Just $ Shape $ zipWith fromMaybe ds ds'
+
+    -- A bare size variable is either substituted or unchanged (its own
+    -- type is always i64). Anything more complex is substituted
+    -- conservatively (rare in types).
+    onSize (Var (QualName _ v) _ _)
+      | Just (ExpSubst e') <- lookupSubst' v = Just e'
+    onSize (Var {}) = Nothing
+    onSize e = Just $ applySubst lookupSubst' e
 
     lookupSubst' = fmap (fmap $ second (const NoUniqueness)) . lookupSubst
 
