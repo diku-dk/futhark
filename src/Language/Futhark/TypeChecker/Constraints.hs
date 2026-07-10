@@ -1,8 +1,6 @@
 -- | Constraints produced (and solved) by the type checker.
 module Language.Futhark.TypeChecker.Constraints
   ( Reason (..),
-    SVar,
-    SComp (..),
     CtType,
     CtTy (..),
     TyVarInfo (..),
@@ -18,25 +16,6 @@ import Data.Loc
 import Data.Map qualified as M
 import Futhark.Util.Pretty
 import Language.Futhark
-
--- | A shape variable.
-type SVar = VName
-
--- | A shape component. `SDim` is a single dimension of unspecified
--- size, `SVar` is a shape variable. A list of shape components should
--- then be understood as concatenation of shapes (meaning you can't
--- just take the length to determine the rank of the array).
-data SComp
-  = SDim
-  | SVar SVar
-  deriving (Eq, Ord, Show)
-
-instance Pretty SComp where
-  pretty SDim = "[]"
-  pretty (SVar x) = brackets $ prettyName x
-
-instance Pretty (Shape SComp) where
-  pretty = mconcat . map pretty . shapeDims
 
 -- | The type representation used by the constraint solver.
 type CtType d = TypeBase d NoUniqueness
@@ -86,9 +65,6 @@ instance Located (CtTy d) where
 instance Pretty (CtTy Size) where
   pretty (CtEq _ t1 t2) = pretty t1 <+> "~" <+> pretty t2
 
-instance Pretty (CtTy SComp) where
-  pretty (CtEq _ t1 t2) = pretty t1 <+> "~" <+> pretty t2
-
 instance Pretty (CtTy ()) where
   pretty (CtEq _ t1 t2) = pretty t1 <+> "~" <+> pretty t2
 
@@ -119,9 +95,6 @@ prettyTyVarInfo (TyVarRecord _ fs) = pretty $ Scalar $ Record fs
 prettyTyVarInfo (TyVarSum _ cs) = pretty $ Scalar $ Sum cs
 
 instance Pretty (TyVarInfo ()) where
-  pretty = prettyTyVarInfo
-
-instance Pretty (TyVarInfo SComp) where
   pretty = prettyTyVarInfo
 
 instance Located (TyVarInfo d) where

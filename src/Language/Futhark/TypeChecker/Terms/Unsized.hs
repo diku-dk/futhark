@@ -48,18 +48,20 @@ import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify (mkUsage)
 import Prelude hiding (mod)
 
-type Type = CtType SComp
+type Type = CtType ()
 
--- | Careful when using this on something that already has an SComp
--- size: it will throw away information by converting them to SDim.
-toType :: TypeBase Size u -> TypeBase SComp u
-toType = first (const SDim)
+-- | The unsized checker ignores sizes entirely, so we erase them. (The
+-- constraint solver never inspects sizes; see '()' for the shape
+-- representation this could use if size-aware rank inference were ever
+-- wired up.)
+toType :: TypeBase Size u -> TypeBase () u
+toType = first (const ())
 
 -- | Type checking happens with access to this environment.  The
 -- 'TermScope' will be extended during type-checking as bindings come into
 -- scope.
 data TermEnv = TermEnv
-  { termScope :: TermScope SComp,
+  { termScope :: TermScope (),
     termLevel :: Level,
     termOuterEnv :: Env,
     termImportName :: ImportName,
@@ -78,8 +80,8 @@ data TyInst = TyInst Loc (QualName VName) Liftedness TyVar
 -- type names.  This is distinct from the usual counter we use for
 -- generating unique names, as these will be user-visible.
 data TermState = TermState
-  { termConstraints :: [CtTy SComp],
-    termTyVars :: TyVars SComp,
+  { termConstraints :: [CtTy ()],
+    termTyVars :: TyVars (),
     termTyParams :: TyParams,
     termTyInsts :: [TyInst],
     termCounter :: !Int,
@@ -106,7 +108,7 @@ newtype TermM a
 
 -- | The scope, with sizes erased. See
 -- "Language.Futhark.TypeChecker.Terms.Scope".
-envToTermScope :: Env -> TermScope SComp
+envToTermScope :: Env -> TermScope ()
 envToTermScope = Scope.envToTermScope toType
 
 runTermM :: TermM a -> TypeM a
@@ -159,7 +161,7 @@ incCounter = do
 tyVarType :: u -> TyVar -> TypeBase dim u
 tyVarType u v = Scalar $ TypeVar u (qualName v) []
 
-newTyVarWith :: Name -> TyVarInfo SComp -> TermM TyVar
+newTyVarWith :: Name -> TyVarInfo () -> TermM TyVar
 newTyVarWith desc info = do
   i <- incCounter
   v <- newID $ mkTypeVarName desc i
@@ -182,7 +184,7 @@ newTypeWithField loc desc k t =
   tyVarType NoUniqueness
     <$> newTyVarWith desc (TyVarRecord (locOf loc) $ M.singleton k t)
 
-newTypeWithConstr :: SrcLoc -> Name -> u -> Name -> [TypeBase SComp u] -> TermM (TypeBase d u)
+newTypeWithConstr :: SrcLoc -> Name -> u -> Name -> [TypeBase () u] -> TermM (TypeBase d u)
 newTypeWithConstr loc desc u k ts =
   tyVarType u <$> newTyVarWith desc (TyVarSum (locOf loc) $ M.singleton k ts')
   where
@@ -192,7 +194,7 @@ newTypeOverloaded :: SrcLoc -> Name -> [PrimType] -> TermM (TypeBase d NoUniquen
 newTypeOverloaded loc name pts =
   tyVarType NoUniqueness <$> newTyVarWith name (TyVarPrim (locOf loc) pts)
 
-newArtificial :: u -> TypeBase SComp u -> TermM (TypeBase Size u)
+newArtificial :: u -> TypeBase () u -> TermM (TypeBase Size u)
 newArtificial u t = do
   v <- newID "artificial"
   let t' = tyVarType u v
@@ -208,12 +210,12 @@ newArtificial u t = do
 -- Equal components (with fully known shapes) of the same annotation
 -- are given the same artificial variable, so that the sized type
 -- checker knows that they have the same sizes.
-asStructType :: TypeBase SComp u -> TermM (TypeBase Size u)
+asStructType :: TypeBase () u -> TermM (TypeBase Size u)
 asStructType t = evalStateT (onType t) mempty
   where
     onType ::
-      TypeBase SComp u' ->
-      StateT (M.Map (TypeBase SComp NoUniqueness) TyVar) TermM (TypeBase Size u')
+      TypeBase () u' ->
+      StateT (M.Map (TypeBase () NoUniqueness) TyVar) TermM (TypeBase Size u')
     onType (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
     onType (Scalar (TypeVar u v [])) = pure $ Scalar $ TypeVar u v []
     onType (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
@@ -241,9 +243,9 @@ asStructType t = evalStateT (onType t) mempty
               modify $ M.insert key v
               pure $ tyVarType u v
 
-    anonymousShape = elem SDim . bifoldMap (: []) (const mempty)
+    anonymousShape = elem () . bifoldMap (: []) (const mempty)
 
-asType :: (Monoid u) => TypeBase Size u -> TermM (TypeBase SComp u)
+asType :: (Monoid u) => TypeBase Size u -> TermM (TypeBase () u)
 asType t = do
   artificial <- gets termArtificial
   pure $ substTyVars (`M.lookup` artificial) (toType t)
@@ -251,10 +253,10 @@ asType t = do
 expType :: Exp -> TermM Type
 expType = asType . typeOf -- NOTE: Only place you should use typeOf.
 
-addCt :: CtTy SComp -> TermM ()
+addCt :: CtTy () -> TermM ()
 addCt ct = modify $ \s -> s {termConstraints = ct : termConstraints s}
 
-ctEq :: Reason (CtType SComp) -> TypeBase SComp u1 -> TypeBase SComp u2 -> TermM ()
+ctEq :: Reason (CtType ()) -> TypeBase () u1 -> TypeBase () u2 -> TermM ()
 ctEq reason t1 t2 =
   -- As a minor optimisation, do not add constraint if the types are
   -- equal.
@@ -263,13 +265,13 @@ ctEq reason t1 t2 =
     t1' = t1 `setUniqueness` NoUniqueness
     t2' = t2 `setUniqueness` NoUniqueness
 
-localScope :: (TermScope SComp -> TermScope SComp) -> TermM a -> TermM a
+localScope :: (TermScope () -> TermScope ()) -> TermM a -> TermM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}
 
-lookupQualNameEnv :: QualName VName -> TermM (TermScope SComp)
+lookupQualNameEnv :: QualName VName -> TermM (TermScope ())
 lookupQualNameEnv qn = asks $ \tenv -> Scope.lookupQualNameEnv toType (termScope tenv) qn
 
 instance MonadError TypeError TermM where
@@ -322,7 +324,7 @@ instance MonadTypeChecker TermM where
 --- All the general machinery goes above.
 
 arrayOfRank :: Int -> Type -> Type
-arrayOfRank n = arrayOf $ Shape $ replicate n SDim
+arrayOfRank n = arrayOf $ Shape $ replicate n ()
 
 require :: T.Text -> [PrimType] -> Exp -> TermM Exp
 require _why [pt] e = do
@@ -1303,9 +1305,9 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
   onRankSolution
     typarams
-    ( ( map void cts,
+    ( ( cts,
         M.map (first (const ())) artificial,
-        fmap (second void) tyvars
+        tyvars
       ),
       params',
       body',
@@ -1357,7 +1359,7 @@ checkSingleExp e = runTermM $ do
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
 
-  case solve (map void cts) typarams (fmap (second void) tyvars) of
+  case solve cts typarams tyvars of
     Left err -> pure (Left err, e')
     Right (unconstrained, solution) -> do
       checkTyInstLiftedness solution
@@ -1386,6 +1388,6 @@ checkSizeExp e = runTermM $ do
           checkTyInstLiftedness solution
           (unconstrained,) <$> doDefaults mempty solution
       )
-      $ solve (map void cts) typarams (fmap (second void) tyvars)
+      $ solve cts typarams tyvars
 
   pure (solution, e')
