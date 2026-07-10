@@ -1,3 +1,5 @@
+{-# LANGUAGE Strict #-}
+
 -- | Unsized type checking.
 --
 -- This checker generates type constraints (type 'CtTy') which are then solved
@@ -35,7 +37,7 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames hiding (newName)
-import Futhark.Util (debugTraceM, nubOrd)
+import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
@@ -1283,7 +1285,7 @@ checkValDef ::
       Maybe (TypeExp Exp VName),
       Exp
     )
-checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
+checkValDef (_fname, retdecl, tparams, params, body, _loc) = runTermM $ do
   (params', body', retdecl') <-
     bindParams tparams params $ \params' -> do
       body' <- checkExp body
@@ -1294,20 +1296,6 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
   artificial <- gets termArtificial
-
-  debugTraceM 3 $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
-
-  debugTraceM 3 $
-    unlines
-      [ "## cts:",
-        unlines $ map prettyString cts,
-        "## body:",
-        prettyString body',
-        "## tyvars:",
-        unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
-        "## artificial:",
-        unlines $ map (\(v, t) -> prettyNameString v <> " => " <> prettyString t) (M.toList artificial)
-      ]
 
   onRankSolution
     typarams
@@ -1326,20 +1314,6 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
           pure
           (fmap (second (onArtificial artificial)) . onTySolution params' body'')
           $ solve (reverse cts') typarams tyvars'
-      debugTraceM 3 $
-        unlines
-          [ "## constraints:",
-            unlines $ map prettyString cts',
-            "## typarams:",
-            let f (lvl, l, _) = (lvl, l)
-             in unlines (map (prettyString . bimap prettyNameString f) (M.toList typarams)),
-            "## tyvars':",
-            unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
-            "## solution:",
-            let p (v, t) = prettyNameString v <> " => " <> prettyString t
-             in either (docString . prettyTypeError) (unlines . map p . M.toList . snd) solution,
-            either (const mempty) (unlines . ("## generalised:" :) . map prettyString . fst) solution
-          ]
       pure (solution, params', retdecl', body'')
 
     onTySolution params' body' (unconstrained, solution) = do
