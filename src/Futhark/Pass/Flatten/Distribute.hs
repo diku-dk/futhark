@@ -282,7 +282,6 @@ isParallelStm funHasParallelism stm =
           WithAcc _ lam -> any hasParallelism (bodyStms (lambdaBody lam))
           Op op -> isParallelOp op
 
-    isParallelOp Stream {} = error "isParallelStm: Stream"
     isParallelOp JVP {} = error "isParallelStm: JVP"
     isParallelOp VJP {} = error "isParallelStm: VJP"
     isParallelOp _ = True
