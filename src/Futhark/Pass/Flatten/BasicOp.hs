@@ -845,7 +845,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
               . letExp "update_reg_scatter"
               <=< renameExp
               <=< genScatterND lvl as' update_dims
-              $ \ is -> do
+              $ \is -> do
                 let (seg_is, in_is) = splitAt (segmentsRank segments) (toList is)
                 readInputs segments env seg_is $ filter ((/= as) . fst) inps
                 let slice' = fixSlice (fmap pe64 slice) (map pe64 in_is)

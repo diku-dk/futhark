@@ -268,7 +268,7 @@ isParallelStm funHasParallelism stm =
 
     noSequentialAttr stm' =
       not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm'))
-    
+
     hasParallelism stm' =
       noSequentialAttr stm'
         && case stmExp stm' of
