@@ -642,12 +642,11 @@ transformDistributed ops irregs segments dist = do
       certifying (distResCerts env cs_inps) $
         case resVar rt env of
           Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
-          Irregular irreg ->
+          Irregular irreg -> do
             -- It might have an irregular representation, but we know
             -- that it is actually regular because it is a result.
-            do
-              irreg' <- ensureDenseIrregular (flattenSegLevel ops) (baseName v <> "_dist_res") irreg
-              reshapeAndBind v (irregularD irreg') (segmentsShape segments <> arrayShape v_t)
+            irreg' <- ensureDenseIrregular (flattenSegLevel ops) (baseName v <> "_dist_res") irreg
+            reshapeAndBind v (irregularD irreg') (segmentsShape segments <> arrayShape v_t)
   forM_ reps $ \(v, r) ->
     case r of
       Left se ->
@@ -658,10 +657,9 @@ transformDistributed ops irregs segments dist = do
       Right (DistInput rt t) ->
         case resVar rt env of
           Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
-          Irregular irreg ->
-            do
-              irreg' <- ensureDenseIrregular (flattenSegLevel ops) (baseName v <> "_dist_rep") irreg
-              reshapeAndBind v (irregularD irreg') (segmentsShape segments <> arrayShape t)
+          Irregular irreg -> do
+            irreg' <- ensureDenseIrregular (flattenSegLevel ops) (baseName v <> "_dist_rep") irreg
+            reshapeAndBind v (irregularD irreg') (segmentsShape segments <> arrayShape t)
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
 
@@ -900,7 +898,7 @@ transformDistributedInnerMap ops mode (ws_F, ws_O, ws) irregs segments dist = do
         -- FIXME: the copies are because we have too liberal aliases on
         -- lifted functions.
         case (resultMapMode mode new_inps v_t, resVar rt env) of
-          (MultiDim, Regular v') -> do
+          (MultiDim, Regular v') ->
             if isAcc v_t
               then do
                 letBindNames [v] $ BasicOp $ SubExp $ Var v'
@@ -908,7 +906,7 @@ transformDistributedInnerMap ops mode (ws_F, ws_O, ws) irregs segments dist = do
               else do
                 reshapeAndBind v v' (segmentsShape segments <> arrayShape v_t)
                 pure (v, Regular v)
-          (SingleDim, Regular v') -> do
+          (SingleDim, Regular v') ->
             if isAcc v_t
               then do
                 letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
