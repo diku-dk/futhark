@@ -490,7 +490,7 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
                   fullFlattenBody
                   [intra_alt]
         forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
-          letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
+          letBindNames [v] $ BasicOp $ SubExp $ Var v_alt
 transformStm funHasParallelism (Let pat aux (Loop params form body)) =
   localScope (scopeOfLoopForm form <> scopeOfFParams (map fst params)) $
     oneStm . Let pat aux . Loop params form <$> transformBody funHasParallelism body

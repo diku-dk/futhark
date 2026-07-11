@@ -640,10 +640,8 @@ transformDistributed ops irregs segments dist = do
   forM_ (M.toList resmap) $ \(rt, binds) ->
     forM_ binds $ \(cs_inps, v, v_t) ->
       certifying (distResCerts env cs_inps) $
-        -- FIXME: the copies are because we have too liberal aliases on
-        -- lifted functions.
         case resVar rt env of
-          Regular v' -> letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+          Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
           Irregular irreg ->
             -- It might have an irregular representation, but we know
             -- that it is actually regular because it is a result.

@@ -338,9 +338,14 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
               (ForLoop i it n)
               loop_body_gpu
 
+      -- We must copy the result because otherwise we increase the degree of
+      -- aliasing. In a loop, the result aliases the input, because it might run
+      -- for zero iterations, but in the original program the result was
+      -- produced by 'map', which has no aliases.
       loop_out_vs <-
-        certifying (distCerts inps aux env) $
-          letTupExp "loop_res_out" loop_exp_gpu
+        mapM (letExp "loop_res_out_copy" <=< eCopy . eVar)
+          <=< certifying (distCerts inps aux env)
+          $ letTupExp "loop_res_out" loop_exp_gpu
 
       let out_reps = loopResultToResReps res loop_out_vs
       pure $ insertReps (zip (map distResTag res) out_reps) env
