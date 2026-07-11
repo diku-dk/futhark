@@ -1,6 +1,9 @@
 -- Essential structure: an outer `map` over a [n][m] array, and per row an
 -- irregular (variable-length) array feeding a `hist`, then a `map` that indexes
 -- that hist result, then a reduce.
+--
+-- Here the problem was that we redundantly bound the same scope multiple times,
+-- which caused it to then be removed.
 
 def f [n] (keys0: [n]i64) : i64 =
   let xs = filter (\x -> x != 0) keys0

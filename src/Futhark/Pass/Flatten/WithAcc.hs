@@ -136,15 +136,13 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
           interchanged_inps
           acc_lam_body
 
-  withacc_lam' <- localScope (scopeOfDistInputs inps)
-    . mkLambda (map (trParam sf) lam_params')
-    $ do
-      env' <- foldM (flattenDistStm ops segments) env withacc_dstms
-      reps <-
-        mapM
-          (liftWithAccResult (flattenSegLevel ops) segments withacc_new_inputs env')
-          (zip distres (bodyResult $ lambdaBody acc_lam))
-      concat <$> mapM repToResults reps
+  withacc_lam' <- mkLambda (map (trParam sf) lam_params') $ do
+    env' <- foldM (flattenDistStm ops segments) env withacc_dstms
+    reps <-
+      mapM
+        (liftWithAccResult (flattenSegLevel ops) segments withacc_new_inputs env')
+        (zip distres (bodyResult $ lambdaBody acc_lam))
+    concat <$> mapM repToResults reps
 
   withacc_out_vs <-
     certifying (distCerts inps withacc_aux env) $
