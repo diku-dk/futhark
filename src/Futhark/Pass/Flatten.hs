@@ -298,6 +298,7 @@ liftFunName name = name <> "_lifted"
 -- are left untouched, so no superfluous copies are inserted.
 freshenResult :: [FParam GPU] -> Stms GPU -> Result -> FlattenM Result
 freshenResult params stms result = do
+  addStms stms
   let param_names = namesFromList $ map paramName params
       -- Transitive aliases of each result, including aliases with
       -- parameters and other results.
@@ -379,9 +380,7 @@ liftFunDef funHasParallelism const_scope fd = do
       (result0, body_stms) <-
         collectStms . liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
           bodyResult body
-      collectStms $ do
-        addStms body_stms
-        freshenResult fparams'' body_stms result0
+      collectStms $ freshenResult fparams'' body_stms result0
   let name = liftFunName $ funDefName fd
   pure
     ( fd
