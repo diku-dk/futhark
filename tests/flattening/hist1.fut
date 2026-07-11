@@ -1,4 +1,7 @@
 -- Needs the loop to reproduce.
+--
+-- The basic problem here was that a certificate was used inside the hist
+-- operator that was variant to the enclosing map nest.
 
 def f [n] (keys0: [n]i64) : i64 =
   let (acc, _) =

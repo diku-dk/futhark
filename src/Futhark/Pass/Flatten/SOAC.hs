@@ -14,6 +14,7 @@ where
 import Control.Monad
 import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable
+import Data.Functor.Identity (runIdentity)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
@@ -1334,6 +1335,23 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
     funHasParallelism = flattenFunHasParallelism ops
     lvl = flattenSegLevel ops
 
+-- | Remove certificates that refer to variables free in the lambda (recursing
+-- into nested bodies). Such certificates arise on pure operator lambdas (e.g.
+-- the combining function of a 'hist' or reduce) through conservative
+-- certificate propagation. They are redundant, and cannot be preserved when the
+-- operator is lifted into a segmented operation, as the certificate's binding
+-- does not survive into the generated kernel.
+stripFreeCerts :: Lambda SOACS -> Lambda SOACS
+stripFreeCerts lam = lam {lambdaBody = onBody (lambdaBody lam)}
+  where
+    frees = freeIn lam
+    onBody body = body {bodyStms = onStm <$> bodyStms body}
+    onStm (Let pat dec e) = Let pat (onDec dec) (onExp e)
+    onDec dec =
+      dec {stmAuxCerts = Certs $ filter (`notNameIn` frees) $ unCerts $ stmAuxCerts dec}
+    onExp = runIdentity . mapExpM mapper
+    mapper = identityMapper {mapOnBody = const (pure . onBody)}
+
 transformHist ::
   FlattenOps ->
   NE.NonEmpty SubExp ->
@@ -1343,7 +1361,17 @@ transformHist ::
   (Pat Type, StmAux ()) ->
   (SubExp, [VName], [Futhark.IR.SOACS.HistOp SOACS], Lambda SOACS) ->
   FlattenM DistEnv
-transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops, bucket_fun) = do
+transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops0, bucket_fun) = do
+  -- The operator is a pure combining function; any certificates on its
+  -- statements (from conservative propagation) are redundant and cannot be
+  -- preserved when it is lifted into a segmented operation, so drop the ones
+  -- referring to variables free in the operator.
+  let hist_ops = do
+        op <- hist_ops0
+        pure $
+          op
+            { Futhark.IR.SOACS.histOp = stripFreeCerts $ Futhark.IR.SOACS.histOp op
+            }
   -- todo: add this suitableUniformOperator
   nonuniform_inps <-
     any (any (isVariant inps) . arrayDims)
