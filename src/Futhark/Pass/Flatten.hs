@@ -18,6 +18,8 @@ import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Set qualified as S
+import Futhark.Analysis.Alias (analyseBody)
+import Futhark.IR.Aliases (Aliases, bodyAliases)
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -229,19 +231,26 @@ reshapeLiftedApplyResult segments Prim {} (Regular v) = do
 reshapeLiftedApplyResult _ _ rep =
   pure rep
 
--- Lifts a functions return type such that it matches the lifted functions return type.
+-- Lifts a functions return type such that it matches the lifted functions
+-- return type.
+--
+-- A lifted function corresponds to 'map f', which always produces fresh arrays.
+-- We therefore mark all array components of the return type as 'Unique', such
+-- that the results are known to not alias anything (in particular not the
+-- arguments). Maintaining this invariant may require inserting copies in the
+-- function body; see 'freshenResult'.
 liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
 liftRetType w = concat . snd . L.mapAccumL liftType 0
   where
     liftType i rettype =
       let lifted = case rettype of
-            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Nonunique
-            Array pt _ u ->
+            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
+            Array pt _ _ ->
               let num_data = Prim int64
-                  segs = arrayOf (Prim int64) (Shape [Free w]) Nonunique
-                  flags = arrayOf (Prim Bool) (Shape [Ext i]) Nonunique
-                  offsets = arrayOf (Prim int64) (Shape [Free w]) Nonunique
-                  elems = arrayOf (Prim pt) (Shape [Ext i]) u
+                  segs = arrayOf (Prim int64) (Shape [Free w]) Unique
+                  flags = arrayOf (Prim Bool) (Shape [Ext i]) Unique
+                  offsets = arrayOf (Prim int64) (Shape [Free w]) Unique
+                  elems = arrayOf (Prim pt) (Shape [Ext i]) Unique
                in [num_data, segs, flags, offsets, elems]
             Acc {} -> error "liftRetType: Acc"
             Mem {} -> error "liftRetType: Mem"
@@ -278,6 +287,34 @@ liftBody funHasParallelism lvl w inputs env dstms result = do
 
 liftFunName :: Name -> Name
 liftFunName name = name <> "_lifted"
+
+-- | A lifted function must return fresh, non-aliasing arrays (as it
+-- corresponds to 'map f'; see 'liftRetType').  This is not
+-- automatically the case: a result may alias a parameter (when a value
+-- is passed straight through), or the same array may be returned in
+-- multiple result positions (which happens for functions that return
+-- the same value more than once).  For every such result we insert a
+-- copy to re-establish the invariant.  Results that are already fresh
+-- are left untouched, so no superfluous copies are inserted.
+freshenResult :: [FParam GPU] -> Stms GPU -> Result -> FlattenM Result
+freshenResult params stms result = do
+  let param_names = namesFromList $ map paramName params
+      -- Transitive aliases of each result, including aliases with
+      -- parameters and other results.
+      als = bodyAliases (analyseBody mempty (Body () stms result) :: Body (Aliases GPU))
+  reverse . snd <$> foldM freshen (param_names, []) (zip result als)
+  where
+    freshen (taken, acc) (SubExpRes cs (Var v), v_als) = do
+      v_t <- lookupType v
+      case v_t of
+        Array {}
+          | taken `namesIntersect` v_als -> do
+              v' <- letExp "fresh_result" $ BasicOp $ Replicate mempty $ Var v
+              pure (taken, SubExpRes cs (Var v') : acc)
+        _ ->
+          pure (taken <> v_als, SubExpRes cs (Var v) : acc)
+    freshen (taken, acc) (res', _) =
+      pure (taken, res' : acc)
 
 analyseFunParallelism :: [FunDef SOACS] -> M.Map Name Bool
 analyseFunParallelism funs =
@@ -335,11 +372,16 @@ liftFunDef funHasParallelism const_scope fd = do
   let (inputs', dstms) =
         distributeBody funHasParallelism const_scope (NE.singleton (Var (paramName wp))) inputs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-  -- Lift the body of the function and get the results
+  -- Lift the body of the function and get the results, inserting copies as
+  -- necessary to ensure the results are fresh and unique (see 'freshenResult').
   ((result, stms), needs) <-
-    runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
-      collectStms . liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
-        bodyResult body
+    runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $ do
+      (result0, body_stms) <-
+        collectStms . liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
+          bodyResult body
+      collectStms $ do
+        addStms body_stms
+        freshenResult fparams'' body_stms result0
   let name = liftFunName $ funDefName fd
   pure
     ( fd
