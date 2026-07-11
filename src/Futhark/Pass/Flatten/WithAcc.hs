@@ -13,7 +13,6 @@ import Control.Monad
 import Data.Foldable
 import Data.List qualified as L
 import Data.Map qualified as M
-import Debug.Trace
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -128,14 +127,6 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
               (p, acc) <- zip orig_acc_params acc_params_tr
             ]
           ++ inps
-
-  traceM $
-    unlines
-      [ "transformWithAcc",
-        show nonuniform,
-        prettyString interchanged_inps,
-        prettyString acc_lam_body
-      ]
 
   let (withacc_new_inputs, withacc_dstms) =
         distributeBody

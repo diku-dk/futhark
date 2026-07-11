@@ -18,7 +18,6 @@ import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Set qualified as S
-import Debug.Trace
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -38,6 +37,7 @@ import Futhark.Tools
 import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Transform.ToGPU (soacsLambdaToGPU, soacsStmToGPU)
+import Futhark.Util (debugTraceM)
 import Prelude hiding (div, quot, rem)
 
 flattenOpsFor :: FunHasParallelism -> SegLevel -> FlattenOps
@@ -428,7 +428,7 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
           (distributed, _) = distributeMap funHasParallelism scope pat (NE.singleton w) arrs' lamFullFlatten
           ops = flattenOpsFor funHasParallelism defaultSegLevel
           m = transformDistributed ops mempty (NE.singleton w) distributed
-      traceM $ prettyString distributed
+      debugTraceM 1 $ prettyString distributed
       stms <- collectStms_ $ certifying certs m
       let fullFlattenBody0 = mkBody stms $ varsRes $ patNames pat
           outerOnlyBody0 = mkBody outer_only_stms $ varsRes outer_only_res
