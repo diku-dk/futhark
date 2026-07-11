@@ -2139,7 +2139,7 @@ funcall desc (QualName _ fname) args = do
 
   shapeargs <- argShapes shapes fun_params argts
   let diets =
-        replicate (length shapeargs) I.ObservePrim
+        replicate (length shapeargs) I.Observe
           ++ map I.diet value_paramts
   args' <-
     ensureArgShapes

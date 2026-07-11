@@ -149,7 +149,6 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
           args_ts <- mapM (subExpType . fst) args'
           let dietToUnique Consume = Unique
               dietToUnique Observe = Nonunique
-              dietToUnique ObservePrim = Nonunique
               param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
               rettype' = addRetAls param_ts $ liftRetType w $ map fst rettype
           result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s

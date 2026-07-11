@@ -372,7 +372,7 @@ mapOnType f (Array t shape u) =
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
 diet :: TypeBase shape Uniqueness -> Diet
-diet Prim {} = ObservePrim
+diet Prim {} = Observe
 diet (Acc _ _ _ Unique) = Consume
 diet (Acc _ _ _ Nonunique) = Observe
 diet (Array _ _ Unique) = Consume
