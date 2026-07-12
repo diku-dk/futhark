@@ -521,7 +521,7 @@ distributeAndFlattenBody ::
 distributeAndFlattenBody ops segments desc env inps res body = do
   scope <- askScope
   let (inps_local, env_local, _) = localiseInputs env inps
-      (inps_dist, dstms) = distributeBody (flattenFunHasParallelism ops) scope segments inps_local body
+      (inps_dist, dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps_local body
   lifted_res <- liftBodyWithDistResults ops segments inps_dist env_local dstms res (bodyResult body)
   lifted_vs <- mapM (letExp desc <=< toExp . resSubExp) lifted_res
   let reps = distResultsToResReps res lifted_vs
@@ -830,7 +830,7 @@ transformMapForInBlock ops pat w arrs map_lam = do
   collectStms_ $ do
     let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
         (distributed, _) =
-          distributeMap (flattenFunHasParallelism ops) scope pat (NE.singleton w) arrs' lam
+          distributeMap SequentialiseIrregular (flattenFunHasParallelism ops) scope pat (NE.singleton w) arrs' lam
     transformDistributed ops' mempty (NE.singleton w) distributed
   where
     ops' = ops {flattenSegLevel = inBlockSegLevel}
@@ -986,6 +986,7 @@ distributeAndTransformInnerMap ops mode ws_triple new_segment inps pat arrs' onF
           )
       (distributed, arrmap) =
         distributeMap
+          (distIrregularityAtLevel (flattenSegLevel ops))
           (flattenFunHasParallelism ops)
           scope
           pat

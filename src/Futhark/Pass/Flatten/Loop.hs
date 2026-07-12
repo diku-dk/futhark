@@ -339,7 +339,7 @@ transformForToWhile ops segments env inps res aux merge i it n body = do
   let (inps_local, env_local, _) = localiseInputs env inps
 
   scope <- askScope
-  let (inps_dist, dstms) = distributeBody (flattenFunHasParallelism ops) scope segments inps_local synthetic_body
+  let (inps_dist, dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps_local synthetic_body
 
   lifted_res <- liftBodyWithDistResults ops segments inps_dist env_local dstms res (bodyResult synthetic_body)
   lifted_vs <- mapM (letExp "for_variant_res" <=< toExp . resSubExp) lifted_res
@@ -446,7 +446,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
                 aux
                 body
             else do
-              let (loop_new_inputs', loop_dstms) = distributeBody (flattenFunHasParallelism ops) scope segments loop_new_inputs body
+              let (loop_new_inputs', loop_dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments loop_new_inputs body
               liftLoopBody ops segments num_segments loop_new_inputs' loop_env_local loop_dstms res (bodyResult body)
 
       let loop_body_gpu = Body () loop_body_stms loop_body_res
@@ -508,7 +508,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
     Nothing -> do
       let build_scope = scopeOfFParams lifted_loop_params'
       let (loop_new_inputs', loop_dstms) =
-            distributeBody (flattenFunHasParallelism ops) scope segments loop_new_inputs body
+            distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments loop_new_inputs body
       (loop_body_res, loop_body_stms) <-
         collectStms . localScope build_scope $
           liftLoopBody ops segments w loop_new_inputs' loop_env_local loop_dstms res (bodyResult body)
@@ -600,7 +600,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
               env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
           let subset_segments = NE.singleton active_size
           let (subset_inputs', subset_dstms) =
-                distributeBody (flattenFunHasParallelism ops) scope subset_segments subset_inputs body
+                distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope subset_segments subset_inputs body
           env_subset' <- foldM (flattenDistStm ops subset_segments) env_subset subset_dstms
           active_reps <-
             zipWithM

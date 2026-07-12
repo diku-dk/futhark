@@ -108,7 +108,7 @@ distributeBranch funHasParallelism lvl segments env inps is body acc_reps = do
         (v, t, i) <- zip3 vs ts [0 ..]
         pure (v, DistInput (ResTag i) t)
   let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-  let (inputs', dstms) = distributeBody funHasParallelism scope segments inputs body
+  let (inputs', dstms) = distributeBody (distIrregularityAtLevel lvl) funHasParallelism scope segments inputs body
   pure (inputs', env', dstms)
 
 -- Given a single result from each branch as well the *unlifted*
@@ -293,7 +293,7 @@ transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase
   scope <- askScope
   new_cases <- forM cases $ \(Case c body) -> do
     let (case_body_inputs, case_dstms) =
-          distributeBody (flattenFunHasParallelism ops) scope segments inps body
+          distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps body
 
     (case_body_res, case_body_stms) <-
       collectStms $
@@ -301,7 +301,7 @@ transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase
     pure $ Case c $ Body () case_body_stms case_body_res
   new_default_body <- do
     let (new_default_body_inputs, new_default_dstms) =
-          distributeBody (flattenFunHasParallelism ops) scope segments inps defaultCase
+          distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps defaultCase
     (new_default_body_res, new_default_body_stms) <-
       collectStms $
         liftBodyWithDistResults ops segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)

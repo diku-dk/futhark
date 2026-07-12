@@ -38,6 +38,7 @@ module Futhark.Pass.Flatten.General
     flattenDistStms,
     segmentDims,
     flattenDistStm,
+    distIrregularityAtLevel,
   )
 where
 
@@ -613,6 +614,13 @@ replicateForDims segments dims v = do
 
 flattenDistStm :: FlattenOps -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
 flattenDistStm ops = flattenDistStmAtLevel ops (flattenSegLevel ops)
+
+-- | How to treat irregularity when distributing code at this level.
+-- In-block code cannot use the irregular flattening machinery, as it
+-- produces SegOps whose sizes are bound inside the enclosing kernel.
+distIrregularityAtLevel :: SegLevel -> DistIrregularity
+distIrregularityAtLevel SegThreadInBlock {} = SequentialiseIrregular
+distIrregularityAtLevel _ = DistributeIrregular
 
 flattenDistStms ::
   FlattenOps ->

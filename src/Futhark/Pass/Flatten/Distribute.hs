@@ -16,6 +16,7 @@ module Futhark.Pass.Flatten.Distribute
     distInputType,
     DistResult (..),
     ResTag (..),
+    DistIrregularity (..),
     FunHasParallelism,
     isRegularDistResult,
     isParallelStm,
@@ -45,6 +46,22 @@ import Futhark.Util.Pretty
 type Segments = NE.NonEmpty SubExp
 
 type FunHasParallelism = Name -> Bool
+
+-- | How to treat irregularity when classifying the statements of a
+-- distributed body.
+data DistIrregularity
+  = -- | Distribute statements involving irregularity, relying on the irregular
+    -- flattening machinery to handle them.
+    DistributeIrregular
+  | -- | Sequentialise BasicOps that involve only internal irregularity instead
+    -- of distributing them. Used when generating intrablock code, where the
+    -- irregular flattening machinery would produce SegOps whose sizes are bound
+    -- inside the kernel body, which makes the enclosing intrablock kernel
+    -- infeasible ('noIrregularPar' would reject it). Irregularity that escapes
+    -- the enclosing map must still be distributed; if it occurs, the intrablock
+    -- version is correctly rejected.
+    SequentialiseIrregular
+  deriving (Eq, Show)
 
 segmentsShape :: Segments -> Shape
 segmentsShape = Shape . NE.toList
@@ -229,18 +246,19 @@ nextResTag = foldl' step (ResTag 0)
       max next (ResTag (i + 1))
 
 distributeBody ::
+  DistIrregularity ->
   FunHasParallelism ->
   Scope rep ->
   Segments ->
   DistInputs ->
   Body SOACS ->
   (DistInputs, DistStms)
-distributeBody funHasParallelism outer_scope w param_inputs body = do
+distributeBody irreg_mode funHasParallelism outer_scope w param_inputs body = do
   let ((_, avail_inputs), stms) =
         L.mapAccumL distributeStm (nextResTag param_inputs, param_inputs) $
           bodyStms body
    in ( avail_inputs,
-        classifyStms funHasParallelism (bodyResult body) stms
+        classifyStms irreg_mode funHasParallelism (bodyResult body) stms
       )
   where
     bound_outside = namesFromList $ M.keys outer_scope
@@ -325,48 +343,74 @@ isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 
 --  we should probably sort the DistStms first and we should assume they are sorted
 -- and then given to this function.
-classifyStms :: FunHasParallelism -> Result -> DistStms -> DistStms
-classifyStms funHasParallelism bodyRes = classify
+classifyStms :: DistIrregularity -> FunHasParallelism -> Result -> DistStms -> DistStms
+classifyStms irreg_mode funHasParallelism bodyRes = classify
   where
-    -- If no statement contains meaningful parallelism, treat the
-    -- trivially parallel statements as sequential as well.
-    -- Statements with irregular results must still be distributed
-    -- when those results escape the scalar group, as only regular
-    -- values can be produced by sequentially executed groups; if the
-    -- irregular values are used only internally (e.g. slices feeding
-    -- a concatenation of regular size), they can be executed
+    -- If no statement contains meaningful parallelism, treat the trivially
+    -- parallel statements as sequential as well. Statements with irregular
+    -- results must still be distributed when those results escape the scalar
+    -- group, as only regular values can be produced by sequentially executed
+    -- groups; if the irregular values are used only internally (e.g. slices
+    -- feeding a concatenation of regular size), they can be executed
     -- sequentially. See Note [Meaningful Parallelism].
+    --
+    -- With 'SequentialiseIrregular', basic operations that involve irregularity
+    -- are further only distributed when the irregularity escapes the scalar
+    -- group.
     classify ds
       | any meaningfulDistStm ds =
-          groupStms (isParallelDistStm (isParallelStm funHasParallelism)) ds
-      | otherwise = groupStms (`S.member` mustDistribute ds) ds
-    meaningfulDistStm (DistStm _ _ (ParallelStm stm)) =
-      any (`nameIn` freeIn bodyRes) (patNames (stmPat stm))
+          case irreg_mode of
+            DistributeIrregular ->
+              groupStms (isParallelDistStm (isParallelStm funHasParallelism)) ds
+            SequentialiseIrregular ->
+              let regular_parallel d =
+                    isParallelDistStm (isParallelStm funHasParallelism) d
+                      && not (isBasicOpDistStm d && involvesIrregularity ds d)
+                  forced =
+                    mustDistribute (S.fromList $ filter regular_parallel $ toList ds) ds
+               in groupStms (\d -> regular_parallel d || d `S.member` forced) ds
+      | otherwise = groupStms (`S.member` mustDistribute mempty ds) ds
+    meaningfulDistStm d@(DistStm _ _ (ParallelStm stm)) =
+      (isBasicOpDistStm d && any (`nameIn` freeIn bodyRes) (patNames (stmPat stm)))
         || stmHasMeaningfulParallelism funHasParallelism stm
     meaningfulDistStm _ = False
-    -- The statements with irregular results that require
-    -- distribution: those whose irregular results are used outside
-    -- the scalar group (by the body result, or transitively by
-    -- another distributed statement), and those that are not basic
-    -- operations. The latter is because a compound statement (e.g. a
-    -- loop) with irregular results contains irregular allocations
-    -- that only flattening can handle, while a basic operation can
-    -- reasonably be executed sequentially by a single thread when its
-    -- result stays internal.
-    mustDistribute ds = fixpoint mempty
+    isBasicOpDistStm (DistStm _ _ (ParallelStm (Let _ _ BasicOp {}))) = True
+    isBasicOpDistStm _ = False
+    -- Whether a statement produces an irregular value, or consumes
+    -- one produced elsewhere in the body.
+    involvesIrregularity ds d =
+      not (all isRegularDistResult (distStmResult d))
+        || any consumesIrregular (distStmInputs d)
+      where
+        consumesIrregular (_, DistInput rt _) = rt `S.member` irregular_tags
+        consumesIrregular _ = False
+        irregular_tags =
+          S.fromList $
+            map distResTag $
+              filter (not . isRegularDistResult) $
+                foldMap distStmResult ds
+    -- The statements with irregular results that require distribution: those
+    -- whose irregular results are used outside the scalar group (by the body
+    -- result, or transitively by another distributed statement), and those that
+    -- are not BasicOps. The latter is because a compound statement (e.g. a
+    -- loop) with irregular results contains irregular allocations that only
+    -- flattening can handle, while a basic operation can reasonably be executed
+    -- sequentially by a single thread when its result stays internal. The
+    -- initial set of forced statements may be seeded with the statements
+    -- already known to be distributed, such that irregular values they consume
+    -- are also distributed.
+    mustDistribute seed ds = fixpoint seed
       where
         bodyResNames =
           S.fromList $
             concatMap (\(SubExpRes cs se) -> subExpVars [se] <> unCerts cs) bodyRes
         irregularResults stm =
           filter (not . isRegularDistResult) $ distStmResult stm
-        isBasicOp (DistStm _ _ (ParallelStm (Let _ _ BasicOp {}))) = True
-        isBasicOp _ = False
         forcedTags forced =
           S.fromList
             [rt | stm <- S.toList forced, (_, DistInput rt _) <- distStmInputs stm]
         isForced forced stm =
-          (not (isBasicOp stm) && not (null (irregularResults stm)))
+          (not (isBasicOpDistStm stm) && not (null (irregularResults stm)))
             || any
               ( \r ->
                   distResName r `S.member` bodyResNames
@@ -374,7 +418,7 @@ classifyStms funHasParallelism bodyRes = classify
               )
               (irregularResults stm)
         fixpoint forced =
-          let forced' = S.fromList $ filter (isForced forced) $ toList ds
+          let forced' = seed <> S.fromList (filter (isForced forced) $ toList ds)
            in if forced' == forced then forced else fixpoint forced'
     groupStms _ Seq.Empty = mempty
     groupStms dist_stm_is_parallel ds' =
@@ -404,8 +448,8 @@ mergeGroup bodyRes ds rest =
       allStms = foldMap distStmStms ds
    in DistStm externalInputs externalResults (ScalarStm allStms)
 
--- | A result is external if it is used by a subsequent 'DistStm' or
--- by the body result.
+-- | A result is external if it is used by a subsequent 'DistStm' or by the body
+-- result.
 isExternal :: Result -> DistStms -> DistResult -> Bool
 isExternal bodyRes rest (DistResult rt _ rn) =
   rt `S.member` usedByRest || rn `S.member` bodyResVars || rn `S.member` bodyResCerts
@@ -427,13 +471,11 @@ isExternal bodyRes rest (DistResult rt _ rn) =
 
 -- | The input we are mapping over in 'distributeMap'.
 data MapArray t
-  = -- | A straightforward array passed in to a
-    -- top-level map.
+  = -- | A straightforward array passed in to a top-level map.
     MapArray VName Type
-  | -- | Something more exotic - distribution will assign it a
-    -- 'ResTag', but not do anything else.  This is used to
-    -- distributed nested maps whose inputs are produced in the outer
-    -- nests.
+  | -- | Something more exotic - distribution will assign it a 'ResTag', but not
+    -- do anything else. This is used to distributed nested maps whose inputs
+    -- are produced in the outer nests.
     MapOther t Type
 
 mapArrayRowType :: MapArray t -> Type
@@ -457,6 +499,7 @@ findReps avail_inputs map_pat lam =
       Just (patElemName pe, Left $ Constant v)
 
 distributeMap ::
+  DistIrregularity ->
   FunHasParallelism ->
   Scope rep ->
   Pat Type ->
@@ -464,12 +507,12 @@ distributeMap ::
   [MapArray t] ->
   Lambda SOACS ->
   (Distributed, M.Map ResTag t)
-distributeMap funHasParallelism outer_scope map_pat w arrs lam =
+distributeMap irreg_mode funHasParallelism outer_scope map_pat w arrs lam =
   let ((_, arrmap), param_inputs) =
         L.mapAccumL paramInput (ResTag 0, mempty) $
           zip (lambdaParams lam) arrs
       (avail_inputs, stms) =
-        distributeBody funHasParallelism outer_scope w param_inputs $ lambdaBody lam
+        distributeBody irreg_mode funHasParallelism outer_scope w param_inputs $ lambdaBody lam
       resmap =
         resultMap avail_inputs stms map_pat $
           bodyResult (lambdaBody lam)
@@ -529,7 +572,11 @@ distributeMap funHasParallelism outer_scope map_pat w arrs lam =
 -- irregular results make versioning worthwhile
 -- ('lambdaHasMeaningfulParallelism' in Futhark.Pass.Flatten.Incremental).
 --
--- Another exception is when the trivial statement produces the result of a body
--- - in that case we also treat it as meaningful, because we have to manifest
--- it. This is the part that would benefit from a cost model, or simply from
--- being more principled and ignoring the small inefficiencies.
+-- Another exception is when a trivial statement (a basic operation) produces
+-- the result of a body - in that case we also treat it as meaningful, because
+-- we have to manifest it. This does not extend to compound statements (e.g. a
+-- sequential loop) producing a body result: those contain no parallelism worth
+-- distributing on their own, and treating them as meaningful would needlessly
+-- split any surrounding sequential statements into multiple kernels. This is
+-- the part that would benefit from a cost model, or simply from being more
+-- principled and ignoring the small inefficiencies.

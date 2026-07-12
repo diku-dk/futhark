@@ -373,7 +373,7 @@ liftFunDef funHasParallelism const_scope fd = do
         addRetAls (map paramDeclType fparams'') $
           liftRetType w (map fst rettype)
   let (inputs', dstms) =
-        distributeBody funHasParallelism const_scope (NE.singleton (Var (paramName wp))) inputs body
+        distributeBody DistributeIrregular funHasParallelism const_scope (NE.singleton (Var (paramName wp))) inputs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
   -- Lift the body of the function and get the results, inserting copies as
   -- necessary to ensure the results are fresh and unique (see 'freshenResult').
@@ -475,7 +475,7 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
       let arrs' =
             zipWith MapArray arrs $
               map paramType (lambdaParams (scremaLambda form))
-          (distributed, _) = distributeMap funHasParallelism scope pat (NE.singleton w) arrs' lamFullFlatten
+          (distributed, _) = distributeMap DistributeIrregular funHasParallelism scope pat (NE.singleton w) arrs' lamFullFlatten
           ops = flattenOpsFor funHasParallelism defaultSegLevel
           m = transformDistributed ops mempty (NE.singleton w) distributed
       debugTraceM 1 $ prettyString distributed

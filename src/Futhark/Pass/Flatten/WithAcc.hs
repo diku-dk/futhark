@@ -130,6 +130,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
 
   let (withacc_new_inputs, withacc_dstms) =
         distributeBody
+          (distIrregularityAtLevel (flattenSegLevel ops))
           (flattenFunHasParallelism ops)
           scope
           segments
