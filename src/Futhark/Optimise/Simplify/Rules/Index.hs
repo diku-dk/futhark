@@ -101,6 +101,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         not consuming,
         not $ consumed arr,
         Just (ordering, inds''') <- first concat . unzip <$> mapM okIdx inds'',
+        length ordering == length matches,
         Just perm <- L.sort ordering `isPermutationOf` ordering ->
           if isIdentityPerm perm
             then Just $ IndexResult cs arr . Slice <$> sequence inds'''
@@ -333,3 +334,8 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
 --
 -- In such cases we must actually insert a Rearrange operation to move
 -- the dimensions of the result appropriately.
+--
+-- Similarly, Every sliced dimension must correspond to exactly one dimension of
+-- the result. If the indexing does not depend on one of them at all (e.g.
+-- because the source array is a replicate), replacing the indexes with the
+-- original slices would change the shape of the result.
