@@ -361,15 +361,15 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
               scan_res
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form -> do
-          let sing_red = singleReduce reds
-              red_lam = redLambda sing_red
-              nes = redNeutral sing_red
-              comm
-                | commutativeLambda red_lam = Commutative
-                | otherwise = redComm sing_red
-              sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes
+          let onRed red =
+                let red_lam = redLambda red
+                    comm
+                      | commutativeLambda red_lam = Commutative
+                      | otherwise = redComm red
+                 in Reduce comm (soacsLambdaToGPU red_lam) (redNeutral red)
+              reds_gpu = map onRed reds
               map_lam' = soacsLambdaToGPU map_lam
-          (red_res, stms) <- runBuilder (genUniformSegRed lvl "intra_redomap" (pure w) sing_red_gpu mempty map_lam' arrs (const $ pure ()))
+          (red_res, stms) <- runBuilder (genUniformSegRed lvl "intra_redomap" (pure w) reds_gpu mempty map_lam' arrs (const $ pure ()))
           certifying (stmAuxCerts aux) $ do
             addStms stms
             zipWithM_

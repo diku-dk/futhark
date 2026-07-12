@@ -221,16 +221,13 @@ genUniformSegRed ::
   SegLevel ->
   Name ->
   [SubExp] ->
-  Reduce GPU ->
+  [Reduce GPU] ->
   Shape ->
   Lambda GPU ->
   [VName] ->
   ([SubExp] -> m ()) ->
   m [VName]
-genUniformSegRed lvl desc segments red_op shape map_lam arrs readFree = do
-  let red_lam = redLambda red_op
-      nes = redNeutral red_op
-      comm = redComm red_op
+genUniformSegRed lvl desc segments red_ops shape map_lam arrs readFree = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
@@ -241,12 +238,13 @@ genUniformSegRed lvl desc segments red_op shape map_lam arrs readFree = do
     res_t <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, res_t)
 
-  red_lam' <- renameLambda red_lam
+  ops <- forM red_ops $ \red_op -> do
+    red_lam' <- renameLambda $ redLambda red_op
+    pure $ SegBinOp (redComm red_op) red_lam' (redNeutral red_op) shape
 
   kbody <- renameBody $ Body () stms res
-  let op = SegBinOp comm red_lam' nes shape
   lvl' <- capThreadSegLevel segments "uniform_segred" lvl $ NoRecommendation SegNoVirt
-  letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody [op]
+  letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody ops
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 

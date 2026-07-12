@@ -256,20 +256,19 @@ transformUniformRedomap ::
   Lambda SOACS ->
   FlattenM [VName]
 transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
-  let sing_red = singleReduce reds -- TODO: don't collapse them.
-      zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
+  let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
       free = freeIn map_lam
       new_segment = segments <> pure w
-  nes <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
-  -- FIXME? I think a backend problem with vectorized reduce
-  -- (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) nes
-  let red_lam = redLambda sing_red
-      nes' = nes
+      -- FIXME? I think a backend problem with vectorized reduce
+      -- (red_lam, nes', shape) <- determineReduceOp (redLambda red) nes
       shape = mempty
-  let comm
-        | commutativeLambda red_lam = Commutative
-        | otherwise = redComm sing_red
-      sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes'
+  reds_gpu <- forM reds $ \red -> do
+    nes <- mapM (readInput segments env zeros inps) (redNeutral red)
+    let red_lam = redLambda red
+        comm
+          | commutativeLambda red_lam = Commutative
+          | otherwise = redComm red
+    pure $ Reduce comm (soacsLambdaToGPU red_lam) nes
   free_and_sizes <- freeWithTypeDeps inps free
   (free_replicated, replicated) <-
     fmap unzip . sequence $
@@ -292,7 +291,7 @@ transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
 
   let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
       readFree is = readInputs new_segment free_env is free_inputs
-  genUniformSegRed lvl "uniformSegRed" (NE.toList new_segment) sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs' readFree
+  genUniformSegRed lvl "uniformSegRed" (NE.toList new_segment) reds_gpu shape (soacsLambdaToGPU map_lam) arrs' readFree
 
 doUniformSegMaposcanomap ::
   SegLevel ->
