@@ -21,17 +21,22 @@ import Futhark.Pass.Flatten.General
 import Futhark.Tools
 import Prelude hiding (div, quot, rem)
 
+-- | Is this dimension variant to the loop or the outer map context -
+-- either because it is itself a loop parameter, or because it is
+-- variant in the outer map nest?
+variantDim :: DistInputs -> S.Set VName -> SubExp -> Bool
+variantDim _ _ Constant {} = False
+variantDim inps loopParamNames (Var v) =
+  v `S.member` loopParamNames || isVariant inps (Var v)
+
 -- Check whether a loop parameter array needs irregular representation.
 -- we need the irregular representation when any of its dimensions are either:
 -- a loop parameter name or variant in the outer map context
-needsIrregular :: DistInputs -> DistEnv -> S.Set VName -> DeclType -> Bool
-needsIrregular inps _env loopParamNames t =
+needsIrregular :: DistInputs -> S.Set VName -> DeclType -> Bool
+needsIrregular inps loopParamNames t =
   case t of
-    Array {} -> any dimIsVariant (arrayDims t)
+    Array {} -> any (variantDim inps loopParamNames) (arrayDims t)
     _ -> False
-  where
-    dimIsVariant (Constant _) = False
-    dimIsVariant (Var v) = v `S.member` loopParamNames || isVariant inps (Var v)
 
 -- Lift a loop parameter and its initial value together.
 -- If the parameter is an array whose dimensions are all invariant,
@@ -56,16 +61,15 @@ liftLoopParam lvl segments num_segments inps env loopParamNames (fparam, initSE)
       initV <- liftSubExpRegular lvl segments inps env (segmentsShape segments) initSE
       pure ([param], Regular $ paramName param, [Var initV])
     Array pt _ u
-      | needsIrregular inps env loopParamNames t -> do
+      | needsIrregular inps loopParamNames t -> do
           (params, rep) <- liftParam num_segments fparam
-          -- initVals <- liftLoopInit lvl segments inps env initSE num_segments
           (_, initRep) <- liftSubExp lvl segments inps env initSE
           irreg <- case initRep of
             -- This will not happen.
             Regular v -> mkIrregFromReg lvl segments v
             Irregular irreg -> pure irreg
-          initVals <- irregularRepToLoopValues num_segments irreg
-          pure (params, rep, initVals)
+          initVals <- irregularRepToFlatArrs num_segments irreg
+          pure (params, rep, map Var initVals)
       | otherwise -> do
           -- Regular case: all dims are invariant, just add w as outermost dim
           let pShape = segmentsShape segments <> arrayShape t
@@ -82,19 +86,6 @@ liftLoopParam lvl segments num_segments inps env loopParamNames (fparam, initSE)
       pure ([param], Regular $ paramName param, [Var initV])
     Mem {} ->
       error "liftLoopParam: Mem"
-
-irregularRepToLoopValues :: SubExp -> IrregularRep -> FlattenM [SubExp]
-irregularRepToLoopValues num_segments (IrregularRep segs flags offsets elems _) = do
-  t <- lookupType elems
-  t_o <- lookupType offsets
-  flags_t <- lookupType flags
-  num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
-  let shape = Shape [Var num_data]
-  flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
-  elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
-  segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [num_segments])
-  offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
-  pure $ map Var [num_data, segs', flags', offsets', elems']
 
 -- | Construct the body of an interchanged uniform loop: a single
 -- Screma mapping the original loop body over the lifted loop
@@ -184,66 +175,48 @@ liftLoopResult lvl segments num_segments inps env dist_res res =
     else case resSubExp res of
       Var v -> do
         irreg <- getIrregRep lvl segments env inps v
-        map (SubExpRes mempty) <$> irregularRepToLoopValues num_segments irreg
+        varsRes <$> irregularRepToFlatArrs num_segments irreg
       _ -> undefined
 
-liftLoopBody :: FlattenOps -> Segments -> SubExp -> DistInputs -> DistEnv -> DistStms -> [DistResult] -> Result -> FlattenM Result
-liftLoopBody ops segments num_segments inputs env dstms dist_res result = do
-  env' <- foldM (flattenDistStm ops segments) env dstms
-  results <- zipWithM (liftLoopResult lvl segments num_segments inputs env') dist_res result
-  pure $ concat results
-  where
-    lvl = flattenSegLevel ops
-
--- FIXME: this is very similar to the one in Match.hs.
-splitInput ::
-  SegLevel ->
+-- | Distribute the loop body statement by statement and lift the
+-- distributed statements, producing the statements and result of the
+-- body of the lifted loop. The provided scope is that of the lifted
+-- loop parameters (and any loop index); it is brought into scope only
+-- after distribution, as the original body cannot reference it.
+distributedLoopBody ::
+  FlattenOps ->
   Segments ->
+  SubExp ->
+  Scope GPU ->
   DistInputs ->
   DistEnv ->
-  VName ->
-  VName ->
-  FlattenM (Type, VName, ResRep)
-splitInput lvl segments inps env is v = do
-  (t, rep) <- liftSubExpPreserveRep segments inps env (Var v)
-  (t,v,) <$> case rep of
-    Regular arr ->
-      if isAcc t
-        then
-          pure $ Regular arr
-        else do
-          n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-          inner_dims <- drop (segmentsRank segments) . arrayDims <$> lookupType arr
-          -- Do the segMap over all dims, so the inner dimensions
-          -- are gathered in parallel
-          arr' <- letExp "split_arr" <=< segMap lvl (n : inner_dims) $ \(i : js) -> do
-            idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
-            let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
-            subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is ++ map eSubExp js))
-          pure $ Regular arr'
-    Irregular (IrregularRep segs flags offsets elems _) -> do
-      n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-      segs' <- letExp "split_segs" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
-        idx <- letExp "idx" =<< eIndex is [eSubExp i]
-        subExpsRes . pure <$> (letSubExp "segs" =<< eIndex segs [toExp idx])
-      (_, offsets', num_data) <- exScanAndSum lvl segs'
-      (_, _, ii1) <- doRepIota lvl segs'
-      (_, _, ii2) <- doSegIota lvl segs'
-      ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap lvl (MkSolo num_data) $ \(MkSolo i) -> do
-        offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp i]]]
-        idx <- letExp "idx" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp i])
-        flags_split <- letSubExp "flags" =<< eIndex flags [toExp idx]
-        elems_split <- letSubExp "elems" =<< eIndex elems [toExp idx]
-        pure $ subExpsRes [flags_split, elems_split]
-      pure $
-        Irregular $
-          IrregularRep
-            { irregularS = segs',
-              irregularF = flags',
-              irregularO = offsets',
-              irregularD = elems',
-              irregularK = Dense
-            }
+  [DistResult] ->
+  Body SOACS ->
+  FlattenM (Result, Stms GPU)
+distributedLoopBody ops segments num_segments loop_scope inputs env res body = do
+  scope <- askScope
+  let lvl = flattenSegLevel ops
+      (inputs', dstms) =
+        distributeBody (distIrregularityAtLevel lvl) (flattenFunHasParallelism ops) scope segments inputs body
+  collectStms . localScope loop_scope $ do
+    env' <- foldM (flattenDistStm ops segments) env dstms
+    concat <$> zipWithM (liftLoopResult lvl segments num_segments inputs' env') res (bodyResult body)
+
+-- | Make the original loop parameters available as distribution
+-- inputs for the loop body, mapped to their lifted representations.
+loopBodyInputs :: DistEnv -> DistInputs -> [FParam SOACS] -> [ResRep] -> (DistInputs, DistEnv)
+loopBodyInputs env inps old_loop_params lifted_loop_reps =
+  let (inps_local, env_local, next) = localiseInputs env inps
+      loop_param_inputs =
+        zipWith
+          (\p j -> (paramName p, DistInput (ResTag j) (paramType p)))
+          old_loop_params
+          [next ..]
+      loop_param_reps =
+        zipWith (\j rep -> (ResTag j, rep)) [next ..] lifted_loop_reps
+   in ( inps_local <> loop_param_inputs,
+        insertReps loop_param_reps env_local
+      )
 
 -- transform a for-loop with a variant iteration count into a while-loop
 transformForToWhile ::
@@ -336,14 +309,7 @@ transformForToWhile ops segments env inps res aux merge i it n body = do
           (oneStm cond0_stm <> oneStm while_stm)
           (map (SubExpRes mempty . Var) loop_old_out_vs)
 
-  let (inps_local, env_local, _) = localiseInputs env inps
-
-  scope <- askScope
-  let (inps_dist, dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps_local synthetic_body
-
-  lifted_res <- liftBodyWithDistResults ops segments inps_dist env_local dstms res (bodyResult synthetic_body)
-  lifted_vs <- mapM (letExp "for_variant_res" <=< toExp . resSubExp) lifted_res
-  let reps = distResultsToResReps res lifted_vs
+  reps <- distributeAndFlattenBody ops segments "for_variant_res" env inps res synthetic_body
   pure $ insertReps (zip (map distResTag res) reps) env
 
 transformLoop ::
@@ -360,34 +326,19 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
     then transformForToWhile ops segments env inps res aux merge i it n body
     else do
       let old_loop_params = map fst merge
-          old_loop_inits = map snd merge
           loopParamNames = S.fromList $ map paramName old_loop_params
 
       num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
       (lifted_loop_params, lifted_loop_reps, lifted_init) <-
-        unzip3 <$> mapM (liftLoopParam (flattenSegLevel ops) segments num_segments inps env loopParamNames) (zip old_loop_params old_loop_inits)
+        unzip3 <$> mapM (liftLoopParam (flattenSegLevel ops) segments num_segments inps env loopParamNames) merge
 
       let lifted_loop_params' = concat lifted_loop_params
           lifted_init' = concat lifted_init
-
-      let (inps_local, env_local0, next0) = localiseInputs env inps
-          loop_param_inputs_local =
-            zipWith
-              (\p j -> (paramName p, DistInput (ResTag j) (paramType p)))
-              old_loop_params
-              [next0 ..]
-
-          loop_param_reps_local =
-            zipWith
-              (\j rep -> (ResTag j, rep))
-              [next0 ..]
-              lifted_loop_reps
-          loop_new_inputs = inps_local <> loop_param_inputs_local
-          loop_env_local = insertReps loop_param_reps_local env_local0
+          (loop_new_inputs, loop_env_local) =
+            loopBodyInputs env inps old_loop_params lifted_loop_reps
 
       let i_param = Param mempty i (Prim (IntType it))
-      let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfLParams [i_param]
-      scope <- askScope
+          build_scope = scopeOfFParams lifted_loop_params' <> scopeOfLParams [i_param]
 
       -- When the loop parameters and all inputs used by the body are regular,
       -- the interchange of the map nest and the loop corresponds to a perfectly
@@ -402,11 +353,8 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
               v `nameIn` body_free,
               not $ v `S.member` loopParamNames
             ]
-          dimOk (Constant {}) = True
-          dimOk (Var d) =
-            not (d `S.member` loopParamNames) && not (isVariant inps (Var d))
           regularInput (_, inp) =
-            all dimOk (arrayDims (distInputType inp))
+            not (any (variantDim inps loopParamNames) (arrayDims (distInputType inp)))
               && case inp of
                 DistInputFree {} -> True
                 DistInput rt _ -> case resVar rt env of
@@ -426,16 +374,17 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
             _ -> True
           interchangeable =
             at_host_level
+              -- Parameters with variant dimensions are lifted to an
+              -- irregular representation, so this also rejects those.
               && all regularRep lifted_loop_reps
               && all isRegularDistResult res
               && all simpleParam old_loop_params
-              && all (all dimOk . arrayDims . paramType) old_loop_params
               && all regularInput free_inps
 
       (loop_body_res, loop_body_stms) <-
-        collectStms . localScope build_scope $
-          if interchangeable
-            then
+        if interchangeable
+          then
+            collectStms . localScope build_scope $
               interchangedLoopBody
                 ops
                 num_segments
@@ -445,9 +394,8 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
                 free_inps
                 aux
                 body
-            else do
-              let (loop_new_inputs', loop_dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments loop_new_inputs body
-              liftLoopBody ops segments num_segments loop_new_inputs' loop_env_local loop_dstms res (bodyResult body)
+          else
+            distributedLoopBody ops segments num_segments build_scope loop_new_inputs loop_env_local res body
 
       let loop_body_gpu = Body () loop_body_stms loop_body_res
           loop_exp_gpu =
@@ -477,41 +425,24 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
   --  We can then merge the results of the two branches by writing them back to a blank space like we do for the branches of a match.
 
   let old_loop_params = map fst merge
-      old_loop_inits = map snd merge
       loopParamNames = S.fromList $ map paramName old_loop_params
   w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
   (lifted_loop_params, lifted_loop_reps, lifted_init) <-
-    unzip3 <$> mapM (liftLoopParam lvl segments w inps env loopParamNames) (zip old_loop_params old_loop_inits)
+    unzip3 <$> mapM (liftLoopParam lvl segments w inps env loopParamNames) merge
 
   let lifted_loop_params' = concat lifted_loop_params
       lifted_init' = concat lifted_init
+      (loop_new_inputs, loop_env_local) =
+        loopBodyInputs env inps old_loop_params lifted_loop_reps
 
   -- find cond_lifted_param in old_lifted_loop_params to get the lifted_loop_reps
-  let (inps_local, env_local0, next0) = localiseInputs env inps
-      loop_param_inputs_local =
-        zipWith
-          (\p j -> (paramName p, DistInput (ResTag j) (paramType p)))
-          old_loop_params
-          [next0 ..]
-      loop_param_reps_local =
-        zipWith
-          (\j rep -> (ResTag j, rep))
-          [next0 ..]
-          lifted_loop_reps
-      loop_new_inputs = inps_local <> loop_param_inputs_local
-      loop_env_local = insertReps loop_param_reps_local env_local0
-
   let maybe_cond = lookup cond (zip (map paramName old_loop_params) (zip lifted_loop_reps lifted_init))
   scope <- askScope
   case maybe_cond of
     -- infinite loop
     Nothing -> do
-      let build_scope = scopeOfFParams lifted_loop_params'
-      let (loop_new_inputs', loop_dstms) =
-            distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments loop_new_inputs body
       (loop_body_res, loop_body_stms) <-
-        collectStms . localScope build_scope $
-          liftLoopBody ops segments w loop_new_inputs' loop_env_local loop_dstms res (bodyResult body)
+        distributedLoopBody ops segments w (scopeOfFParams lifted_loop_params') loop_new_inputs loop_env_local res body
       let loop_body_gpu = Body () loop_body_stms loop_body_res
           loop_exp_gpu = Loop (zip lifted_loop_params' lifted_init') (WhileLoop cond) loop_body_gpu
       loop_out_vs <- certifying (distCerts inps aux env) $ letTupExp "loop_res_out" loop_exp_gpu
@@ -582,7 +513,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
           (active_size, active_inds) <- getInds "active" 1
 
           inactive_reps <- forM old_loop_params $ \p -> do
-            (_, _, rep) <- splitInput lvl segments loop_new_inputs loop_env_local inactive_inds (paramName p)
+            (_, _, rep) <- splitInput lvl segments loop_env_local loop_new_inputs inactive_inds mempty (paramName p)
             pure rep
 
           let free_in_body =
@@ -593,7 +524,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
             foldMap freeIn <$> mapM (lookupInputType loop_new_inputs) free_in_body
           let free_variant_sizes = filter (isVariant loop_new_inputs . Var) (namesToList free_sizes)
               free_size_vars = nubOrd (free_variant_sizes <> free_in_body)
-          (ts, vs, reps) <- unzip3 <$> mapM (splitInput lvl segments loop_new_inputs loop_env_local active_inds) free_size_vars
+          (ts, vs, reps) <- unzip3 <$> mapM (splitInput lvl segments loop_env_local loop_new_inputs active_inds mempty) free_size_vars
           let subset_inputs = do
                 (v, t, i) <- zip3 vs ts [0 ..]
                 pure (v, DistInput (ResTag i) t)

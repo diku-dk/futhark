@@ -34,6 +34,9 @@ module Futhark.Pass.Flatten.General
     liftBodyWithDistResults,
     distResultsToResReps,
     resultToResReps,
+    irregularRepToFlatArrs,
+    distributeAndFlattenBody,
+    splitInput,
     isVariant,
     flattenDistStms,
     segmentDims,
@@ -338,6 +341,108 @@ distResultsToResReps dist_res results =
         else
           let (segs : flags : offsets : elems : rs') = rs
            in (rs', Irregular $ IrregularRep segs flags offsets elems Dense)
+
+-- | Convert an irregular representation to its flat constituents (number of
+-- data elements, segments, flags, offsets, elements), with the structure arrays
+-- reshaped to be one-dimensional of the given width. This is the form in which
+-- irregular values are passed to lifted functions and carried through loops.
+irregularRepToFlatArrs :: SubExp -> IrregularRep -> FlattenM [VName]
+irregularRepToFlatArrs w (IrregularRep segs flags offsets elems _) = do
+  t <- lookupType elems
+  t_o <- lookupType offsets
+  flags_t <- lookupType flags
+  num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
+  let shape = Shape [Var num_data]
+  flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
+  elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
+  segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [w])
+  offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [w])
+  pure [num_data, segs', flags', offsets', elems']
+
+-- | Distribute a body and lift the distributed statements, giving
+-- back representations of the body results.
+distributeAndFlattenBody ::
+  FlattenOps ->
+  Segments ->
+  Name ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Body SOACS ->
+  FlattenM [ResRep]
+distributeAndFlattenBody ops segments desc env inps res body = do
+  scope <- askScope
+  let (inps_local, env_local, _) = localiseInputs env inps
+      (inps_dist, dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps_local body
+  lifted_res <- liftBodyWithDistResults ops segments inps_dist env_local dstms res (bodyResult body)
+  lifted_vs <- mapM (letExp desc <=< toExp . resSubExp) lifted_res
+  pure $ distResultsToResReps res lifted_vs
+
+-- | Take the elements at index @is@ from an input @v@. The representation of
+-- @v@ can be overridden through the provided mapping, which takes precedence
+-- over what the environment says.
+splitInput ::
+  SegLevel ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  VName ->
+  M.Map VName ResRep ->
+  VName ->
+  FlattenM (Type, VName, ResRep)
+splitInput lvl segments env inps is acc_reps v = do
+  (t, rep0) <- liftSubExpPreserveRep segments inps env (Var v)
+  let rep = M.findWithDefault rep0 v acc_reps
+  (t,v,) <$> case rep of
+    Regular arr -> do
+      if isAcc t
+        then
+          pure $ Regular arr
+        else do
+          -- In the regular case we just take the elements
+          -- of the array given by `is`
+          n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+          inner_dims <- drop (segmentsRank segments) . arrayDims <$> lookupType arr
+          -- Do the segMap over all dims, so the inner dimensions
+          -- are gathered in parallel
+          arr' <- letExp "split_arr" <=< segMap lvl (n : inner_dims) $ \(i : js) -> do
+            idx <- letSubExp "idx" =<< eIndex is [eSubExp i]
+            let arr_is = unflattenIndex (segmentDims segments) (pe64 idx)
+            subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr (map toExp arr_is ++ map eSubExp js))
+          pure $ Regular arr'
+    Irregular (IrregularRep segs flags offsets elems _) -> do
+      -- In the irregular case we take the elements
+      -- of the `segs` array given by `is` like in the regular case
+      n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+      segs' <- letExp "split_segs" <=< segMap lvl (MkSolo n) $ \(MkSolo i) -> do
+        idx <- letExp "idx" =<< eIndex is [eSubExp i]
+        subExpsRes . pure <$> (letSubExp "segs" =<< eIndex segs [toExp idx])
+      -- From this we calculate the offsets and number of elements
+      (_, offsets', num_data) <- exScanAndSum lvl segs'
+      (_, _, ii1) <- doRepIota lvl segs'
+      (_, _, ii2) <- doSegIota lvl segs'
+      -- We then take the elements we need from `elems` and `flags`
+      -- For each index `i`, we roughly:
+      -- Get the offset of the segment we want to copy by indexing
+      -- `offsets` through `is` further through `ii1` i.e.
+      -- `offset = offsets[is[ii1[i]]]`
+      -- We then add `ii2[i]` to `offset`
+      -- and use that to index into `elems` and `flags`.
+      ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap lvl (MkSolo num_data) $ \(MkSolo i) -> do
+        offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp i]]]
+        idx <- letExp "idx" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp i])
+        flags_split <- letSubExp "flags" =<< eIndex flags [toExp idx]
+        elems_split <- letSubExp "elems" =<< eIndex elems [toExp idx]
+        pure $ subExpsRes [flags_split, elems_split]
+      pure $
+        Irregular $
+          IrregularRep
+            { irregularS = segs',
+              irregularF = flags',
+              irregularO = offsets',
+              irregularD = elems',
+              irregularK = Dense
+            }
 
 -- | Flatten the arrays of an IrregularRep to be entirely one-dimensional.
 flattenIrregularRep :: SegLevel -> IrregularRep -> FlattenM IrregularRep

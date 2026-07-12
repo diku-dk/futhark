@@ -12,7 +12,7 @@
 module Futhark.Pass.Flatten (flattenSOACs) where
 
 import Control.Monad
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (second)
 import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -194,29 +194,10 @@ liftArg lvl segments w inps env (se, d) = do
               Reshape v $
                 reshapeAll (arrayShape v_t) (Shape [w])
       pure [(Var v', d)]
-    Irregular irreg -> mkIrrep irreg
-  where
-    mkIrrep
-      ( IrregularRep
-          { irregularS = segs,
-            irregularF = flags,
-            irregularO = offsets,
-            irregularD = elems
-          }
-        ) = do
-        t <- lookupType elems
-        t_o <- lookupType offsets
-        flags_t <- lookupType flags
-        num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
-        let shape = Shape [Var num_data]
-        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
-        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
-        segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [w])
-        offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [w])
-
-        -- Only apply the original diet to the 'elems' array
-        let diets = replicate 4 Observe ++ [d]
-        pure $ zipWith (curry (first Var)) [num_data, segs', flags', offsets', elems'] diets
+    Irregular irreg -> do
+      vs <- irregularRepToFlatArrs w irreg
+      -- Only apply the original diet to the 'elems' array.
+      pure $ zip (map Var vs) $ replicate 4 Observe ++ [d]
 
 reshapeLiftedApplyResult :: Segments -> RetType SOACS -> ResRep -> FlattenM ResRep
 reshapeLiftedApplyResult segments Prim {} (Regular v) = do

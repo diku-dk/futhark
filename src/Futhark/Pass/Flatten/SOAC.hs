@@ -509,24 +509,6 @@ regularRepVars =
     onRep (Regular v) = v
     onRep Irregular {} = error "regularRepVars: expected regular result"
 
-distributeAndFlattenBody ::
-  FlattenOps ->
-  Segments ->
-  Name ->
-  DistEnv ->
-  DistInputs ->
-  [DistResult] ->
-  Body SOACS ->
-  FlattenM [ResRep]
-distributeAndFlattenBody ops segments desc env inps res body = do
-  scope <- askScope
-  let (inps_local, env_local, _) = localiseInputs env inps
-      (inps_dist, dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps_local body
-  lifted_res <- liftBodyWithDistResults ops segments inps_dist env_local dstms res (bodyResult body)
-  lifted_vs <- mapM (letExp desc <=< toExp . resSubExp) lifted_res
-  let reps = distResultsToResReps res lifted_vs
-  pure reps
-
 versionScanRed ::
   FlattenOps ->
   Name ->
