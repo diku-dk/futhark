@@ -256,7 +256,7 @@ transformUniformRedomap ::
   Lambda SOACS ->
   FlattenM [VName]
 transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
-  let sing_red = singleReduce reds
+  let sing_red = singleReduce reds -- TODO: don't collapse them.
       zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
       free = freeIn map_lam
       new_segment = segments <> pure w
