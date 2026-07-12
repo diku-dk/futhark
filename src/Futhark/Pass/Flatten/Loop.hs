@@ -4,6 +4,7 @@ module Futhark.Pass.Flatten.Loop
 where
 
 import Control.Monad
+import Control.Monad.Reader (runReaderT)
 import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable
 import Data.List qualified as L
@@ -13,6 +14,7 @@ import Data.Set qualified as S
 import Data.Tuple.Solo
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
+import Futhark.IR.SOACS.Simplify (simplifyStms)
 import Futhark.MonadFreshNames
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.General
@@ -93,6 +95,67 @@ irregularRepToLoopValues num_segments (IrregularRep segs flags offsets elems _) 
   segs' <- letExp "segs" $ BasicOp $ Reshape segs $ reshapeAll (arrayShape t_o) (Shape [num_segments])
   offsets' <- letExp "offsets" $ BasicOp $ Reshape offsets $ reshapeAll (arrayShape t_o) (Shape [num_segments])
   pure $ map Var [num_data, segs', flags', offsets', elems']
+
+-- | Construct the body of an interchanged uniform loop: a single
+-- Screma mapping the original loop body over the lifted loop
+-- parameters (and any other inputs used by the body), transformed as
+-- if it were a top-level statement - in particular, it is subject to
+-- multi-versioning. The lambda parameters reuse the original names,
+-- so the body can be used unchanged. Only usable when all involved
+-- values are regular.
+interchangedLoopBody ::
+  FlattenOps ->
+  SubExp ->
+  Segments ->
+  DistEnv ->
+  [(FParam SOACS, FParam GPU)] ->
+  DistInputs ->
+  StmAux () ->
+  Body SOACS ->
+  FlattenM Result
+interchangedLoopBody ops num_segments segments env params free_inps aux body = do
+  let flatInput name arr t = do
+        arr_t <- lookupType arr
+        letExp (baseName name <> "_flat") . BasicOp . Reshape arr $
+          reshapeAll (arrayShape arr_t) (Shape [num_segments] <> arrayShape t)
+      inputArr (DistInputFree arr _) = arr
+      inputArr (DistInput rt _) = case resVar rt env of
+        Regular arr -> arr
+        Irregular {} -> error "interchangedLoopBody: irregular input"
+  param_arrs <- forM params $ \(p, lifted_p) ->
+    flatInput (paramName p) (paramName lifted_p) (fromDecl (declTypeOf p))
+  free_arrs <- forM free_inps $ \(v, inp) ->
+    flatInput v (inputArr inp) (distInputType inp)
+
+  let lam_params =
+        [Param mempty (paramName p) (fromDecl (declTypeOf p)) | (p, _) <- params]
+          ++ [Param mempty v (distInputType inp) | (v, inp) <- free_inps]
+      row_ts = [fromDecl (declTypeOf p) | (p, _) <- params]
+      lam = Lambda lam_params row_ts body
+  pes <- forM (zip params row_ts) $ \((p, _), t) ->
+    PatElem
+      <$> newName (paramName p)
+      <*> pure (t `arrayOfRow` num_segments)
+  form <- mapSOAC lam
+  let map_stm :: Stm SOACS
+      map_stm =
+        Let (Pat pes) (aux {stmAuxCerts = mempty}) $
+          Op $
+            Screma num_segments (param_arrs ++ free_arrs) form
+
+  -- Simplify before transforming. Apart from generally producing
+  -- better code, this hoists statements that are invariant to the
+  -- mapped values out of the Screma, and in particular any sizes
+  -- they compute must be in scope when the Screma is versioned
+  -- (e.g. for deciding intrablock feasibility).
+  scope <- castScope <$> askScope
+  map_stms <- runReaderT (simplifyStms (oneStm map_stm)) (scope :: Scope SOACS)
+  mapM_ (addStms <=< flattenTopLevelStm ops) map_stms
+  fmap (map (SubExpRes mempty . Var)) . forM (zip pes params) $ \(pe, (p, _)) -> do
+    pe_t <- lookupType (patElemName pe)
+    let seg_shape = segmentsShape segments <> arrayShape (fromDecl (declTypeOf p))
+    letExp (baseName (paramName p) <> "_unflat") . BasicOp . Reshape (patElemName pe) $
+      reshapeAll (arrayShape pe_t) seg_shape
 
 loopResultToResReps :: [DistResult] -> [VName] -> [ResRep]
 loopResultToResReps dist_res results =
@@ -325,11 +388,66 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
       let i_param = Param mempty i (Prim (IntType it))
       let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfLParams [i_param]
       scope <- askScope
-      let (loop_new_inputs', loop_dstms) = distributeBody (flattenFunHasParallelism ops) scope segments loop_new_inputs body
+
+      -- When the loop parameters and all inputs used by the body are regular,
+      -- the interchange of the map nest and the loop corresponds to a perfectly
+      -- ordinary Screma inside the loop. We then transform that Screma as if
+      -- that was what the program looked like in the first place, which in
+      -- particular means it is subject to multi-versioning. Otherwise we
+      -- distribute the loop body statement by statement.
+      let body_free = freeIn body
+          free_inps =
+            [ (v, inp)
+            | (v, inp) <- inps,
+              v `nameIn` body_free,
+              not $ v `S.member` loopParamNames
+            ]
+          dimOk (Constant {}) = True
+          dimOk (Var d) =
+            not (d `S.member` loopParamNames) && not (isVariant inps (Var d))
+          regularInput (_, inp) =
+            all dimOk (arrayDims (distInputType inp))
+              && case inp of
+                DistInputFree {} -> True
+                DistInput rt _ -> case resVar rt env of
+                  Regular {} -> True
+                  Irregular {} -> False
+          regularRep Regular {} = True
+          regularRep Irregular {} = False
+          simpleParam p = case declTypeOf p of
+            Prim {} -> True
+            Array {} -> True
+            _ -> False
+          -- The interchanged Screma is transformed as a top-level
+          -- statement, so this is only possible when we are not
+          -- generating in-block code.
+          at_host_level = case flattenSegLevel ops of
+            SegThreadInBlock {} -> False
+            _ -> True
+          interchangeable =
+            at_host_level
+              && all regularRep lifted_loop_reps
+              && all isRegularDistResult res
+              && all simpleParam old_loop_params
+              && all (all dimOk . arrayDims . paramType) old_loop_params
+              && all regularInput free_inps
 
       (loop_body_res, loop_body_stms) <-
         collectStms . localScope build_scope $
-          liftLoopBody ops segments num_segments loop_new_inputs' loop_env_local loop_dstms res (bodyResult body)
+          if interchangeable
+            then
+              interchangedLoopBody
+                ops
+                num_segments
+                segments
+                env
+                (zip old_loop_params lifted_loop_params')
+                free_inps
+                aux
+                body
+            else do
+              let (loop_new_inputs', loop_dstms) = distributeBody (flattenFunHasParallelism ops) scope segments loop_new_inputs body
+              liftLoopBody ops segments num_segments loop_new_inputs' loop_env_local loop_dstms res (bodyResult body)
 
       let loop_body_gpu = Body () loop_body_stms loop_body_res
           loop_exp_gpu =

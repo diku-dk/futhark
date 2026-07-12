@@ -7,6 +7,7 @@ module Futhark.Pass.Flatten.Incremental
     isParallelFunInside,
     kernelAlternatives,
     intraBlockAlternative,
+    propagateVersioningAttrs,
 
     -- * Transforming code
     factorScremaForParallelism,
@@ -28,6 +29,7 @@ import Control.Monad
 import Control.Monad.State
 import Data.Foldable
 import Data.Maybe (isJust)
+import Data.Set qualified as S
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.Pass.Flatten.Distribute
@@ -346,3 +348,21 @@ factorScremaForParallelism funHasParallelism scope certs pat w arrs form
     mkFactoredBody stms = do
       stms' <- fmap (certify certs) <$> preprocessStms scope stms
       pure $ mkBody stms' $ varsRes $ patNames pat
+
+-- | Propagate incremental flattening attributes to the statements of
+-- a map lambda body. Statements that carry their own incremental
+-- flattening attributes are left alone.
+propagateVersioningAttrs :: Attrs -> Lambda SOACS -> Lambda SOACS
+propagateVersioningAttrs attrs lam
+  | attrs' == mempty = lam
+  | otherwise =
+      lam {lambdaBody = (lambdaBody lam) {bodyStms = fmap onStm (bodyStms (lambdaBody lam))}}
+  where
+    attrs' = versioningAttrs attrs
+    onStm stm
+      | versioningAttrs (stmAuxAttrs (stmAux stm)) == mempty =
+          stm {stmAux = (stmAux stm) {stmAuxAttrs = attrs' <> stmAuxAttrs (stmAux stm)}}
+      | otherwise = stm
+    versioningAttrs (Attrs s) = Attrs $ S.filter isVersioningAttr s
+    isVersioningAttr (AttrComp "incremental_flattening" _) = True
+    isVersioningAttr _ = False

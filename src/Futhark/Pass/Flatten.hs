@@ -48,7 +48,8 @@ flattenOpsFor funHasParallelism lvl =
     { flattenSegLevel = lvl,
       flattenFunHasParallelism = funHasParallelism,
       flattenDistStmAtLevel = transformDistStm funHasParallelism,
-      flattenScalarStm = transformScalarStm lvl
+      flattenScalarStm = transformScalarStm lvl,
+      flattenTopLevelStm = transformStm funHasParallelism
     }
 
 transformScalarStms ::
@@ -461,7 +462,15 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
       (outer_only_res, outer_only_stms) <-
         collectStms $ certifying certs $ runInnerSeqMap w arrs lam pat []
       scope <- castScope <$> askScope
-      lamFullFlatten <- renameLambda =<< preprocessLambda scope lam
+      -- Propagate incremental flattening attributes to the
+      -- statements of the map body, such that they can influence how
+      -- those statements are versioned during distribution (e.g. the
+      -- Screma resulting from map-loop interchange). This corresponds
+      -- to the attributes applying to the entire nest.
+
+      lamFullFlatten <-
+        fmap (propagateVersioningAttrs $ stmAuxAttrs aux) . renameLambda
+          =<< preprocessLambda scope lam
       let arrs' =
             zipWith MapArray arrs $
               map paramType (lambdaParams (scremaLambda form))

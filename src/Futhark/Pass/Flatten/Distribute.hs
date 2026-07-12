@@ -327,19 +327,55 @@ classifyStms :: FunHasParallelism -> Result -> DistStms -> DistStms
 classifyStms funHasParallelism bodyRes = classify
   where
     -- If no statement contains meaningful parallelism, treat the
-    -- trivially parallel statements as sequential as well; statements
-    -- with irregular results are still distributed, as
-    -- 'isParallelDistStm' checks that regardless of the predicate.
-    -- See Note [Meaningful Parallelism].
+    -- trivially parallel statements as sequential as well.
+    -- Statements with irregular results must still be distributed
+    -- when those results escape the scalar group, as only regular
+    -- values can be produced by sequentially executed groups; if the
+    -- irregular values are used only internally (e.g. slices feeding
+    -- a concatenation of regular size), they can be executed
+    -- sequentially. See Note [Meaningful Parallelism].
     classify ds
-      | any meaningfulDistStm ds = groupStms (isParallelStm funHasParallelism) ds
-      | otherwise = groupStms (const False) ds
+      | any meaningfulDistStm ds =
+          groupStms (isParallelDistStm (isParallelStm funHasParallelism)) ds
+      | otherwise = groupStms (`S.member` mustDistribute ds) ds
     meaningfulDistStm (DistStm _ _ (ParallelStm stm)) =
       stmHasMeaningfulParallelism funHasParallelism stm
     meaningfulDistStm _ = False
+    -- The statements with irregular results that require
+    -- distribution: those whose irregular results are used outside
+    -- the scalar group (by the body result, or transitively by
+    -- another distributed statement), and those that are not basic
+    -- operations. The latter is because a compound statement (e.g. a
+    -- loop) with irregular results contains irregular allocations
+    -- that only flattening can handle, while a basic operation can
+    -- reasonably be executed sequentially by a single thread when its
+    -- result stays internal.
+    mustDistribute ds = fixpoint mempty
+      where
+        bodyResNames =
+          S.fromList $
+            concatMap (\(SubExpRes cs se) -> subExpVars [se] <> unCerts cs) bodyRes
+        irregularResults stm =
+          filter (not . isRegularDistResult) $ distStmResult stm
+        isBasicOp (DistStm _ _ (ParallelStm (Let _ _ BasicOp {}))) = True
+        isBasicOp _ = False
+        forcedTags forced =
+          S.fromList
+            [rt | stm <- S.toList forced, (_, DistInput rt _) <- distStmInputs stm]
+        isForced forced stm =
+          (not (isBasicOp stm) && not (null (irregularResults stm)))
+            || any
+              ( \r ->
+                  distResName r `S.member` bodyResNames
+                    || distResTag r `S.member` forcedTags forced
+              )
+              (irregularResults stm)
+        fixpoint forced =
+          let forced' = S.fromList $ filter (isForced forced) $ toList ds
+           in if forced' == forced then forced else fixpoint forced'
     groupStms _ Seq.Empty = mempty
-    groupStms stm_is_parallel ds' =
-      let (scalars, rest) = Seq.breakl (isParallelDistStm stm_is_parallel) ds'
+    groupStms dist_stm_is_parallel ds' =
+      let (scalars, rest) = Seq.breakl dist_stm_is_parallel ds'
           scalar_grouped
             | not $ null scalars =
                 Seq.singleton $ mergeGroup bodyRes scalars rest
@@ -347,7 +383,7 @@ classifyStms funHasParallelism bodyRes = classify
        in case rest of
             Seq.Empty -> scalar_grouped
             p Seq.:<| ps ->
-              scalar_grouped <> (p Seq.<| groupStms stm_is_parallel ps)
+              scalar_grouped <> (p Seq.<| groupStms dist_stm_is_parallel ps)
 
 -- | Merge a group of scalar 'DistStm's into a single one.
 mergeGroup :: Result -> DistStms -> DistStms -> DistStm
@@ -480,9 +516,12 @@ distributeMap funHasParallelism outer_scope map_pat w arrs lam =
 --
 -- The exception is irregularity. A statement whose result shape varies
 -- across the surrounding map nest (e.g. 'iota x' for a mapped 'x') cannot
--- simply be traversed sequentially per thread, as kernels cannot perform
--- irregular allocations - handling it is exactly what flattening is
--- for. Hence irregular results still count as meaningful: in (1) they force
--- distribution regardless of the classification (see 'isParallelDistStm'),
--- and in (2) they make versioning worthwhile
+-- in general be traversed sequentially per thread, as only regular values
+-- can be produced as results of sequentially executed groups - handling it
+-- is exactly what flattening is for. Hence irregular results still count
+-- as meaningful, with one refinement in (1): if the irregular values are
+-- used only *within* the scalar group (e.g. slices feeding a concatenation
+-- whose size is ultimately regular), the statements can be executed
+-- sequentially after all - see 'mustDistribute' in 'classifyStms'. In (2)
+-- irregular results make versioning worthwhile
 -- ('lambdaHasMeaningfulParallelism' in Futhark.Pass.Flatten.Incremental).
