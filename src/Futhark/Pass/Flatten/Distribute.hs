@@ -8,6 +8,7 @@ module Futhark.Pass.Flatten.Distribute
     ResMap,
     Distributed (..),
     DistStm (..),
+    DistStms,
     DistBody (..),
     DistInput (..),
     DistInputs,
@@ -28,10 +29,12 @@ module Futhark.Pass.Flatten.Distribute
 where
 
 import Data.Bifunctor
+import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.SOACS
@@ -95,11 +98,11 @@ data DistBody
   = -- | A single statement That may involve parallel operations or produces non unifrom array.
     ParallelStm (Stm SOACS)
   | -- | Single or Multiple scalar operations grouped into a single traversal
-    ScalarStm [Stm SOACS]
+    ScalarStm (Stms SOACS)
   deriving (Eq, Ord, Show)
 
-distBodyStms :: DistBody -> [Stm SOACS]
-distBodyStms (ParallelStm stm) = [stm]
+distBodyStms :: DistBody -> Stms SOACS
+distBodyStms (ParallelStm stm) = oneStm stm
 distBodyStms (ScalarStm stms) = stms
 
 data DistStm = DistStm
@@ -109,8 +112,11 @@ data DistStm = DistStm
   }
   deriving (Eq, Ord, Show)
 
-distStmStms :: DistStm -> [Stm SOACS]
+distStmStms :: DistStm -> Stms SOACS
 distStmStms = distBodyStms . distStmBody
+
+-- | An efficient sequence of 'DistStm's.
+type DistStms = Seq.Seq DistStm
 
 -- | First element of tuple are certificates for this result.
 --
@@ -127,7 +133,7 @@ type DistRep = (VName, Either SubExp DistInput)
 data DistResults = DistResults ResMap [DistRep]
   deriving (Eq, Ord, Show)
 
-data Distributed = Distributed [DistStm] DistResults
+data Distributed = Distributed DistStms DistResults
   deriving (Eq, Ord, Show)
 
 instance Pretty ResTag where
@@ -154,7 +160,7 @@ instance Pretty DistStm where
           <+> nestedBlock
             ( stack $
                 map onInput inputs
-                  ++ map pretty (distBodyStms stms)
+                  ++ map pretty (toList (distBodyStms stms))
                   ++ [ "return" <+> ppTuple' (map pretty res)
                      ]
             )
@@ -169,7 +175,7 @@ instance Pretty Distributed where
     stms' </> res'
     where
       res' = stack $ map onRes (M.toList resmap) <> map onRep reps
-      stms' = stack $ map pretty stms
+      stms' = stack $ map pretty $ toList stms
       onRes (rt, binds) =
         stack ["let" <+> pretty v <+> "=" <+> pretty rt | v <- binds]
       onRep (v, Left se) =
@@ -177,10 +183,13 @@ instance Pretty Distributed where
       onRep (v, Right tag) =
         "let" <+> pretty v <+> "=" <+> "rep" <> parens (pretty tag)
 
-resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat Type -> Result -> ResMap
+resultMap :: [(VName, DistInput)] -> DistStms -> Pat Type -> Result -> ResMap
 resultMap avail_inputs stms pat res = foldMap (foldMap f . distStmResult) stms
   where
-    pes = M.fromList [(patElemName pe, pe) | stm <- stms, pe <- concatMap (patElems . stmPat) (distStmStms stm)]
+    pes = M.fromList $ do
+      stm <- toList stms
+      pe <- concatMap (patElems . stmPat) (distStmStms stm)
+      pure (patElemName pe, pe)
     f (DistResult rt _ v) =
       case maybe [] findRess $ M.lookup v pes of
         [] -> mempty
@@ -224,12 +233,11 @@ distributeBody ::
   Segments ->
   DistInputs ->
   Body SOACS ->
-  (DistInputs, [DistStm])
+  (DistInputs, DistStms)
 distributeBody funHasParallelism outer_scope w param_inputs body = do
   let ((_, avail_inputs), stms) =
         L.mapAccumL distributeStm (nextResTag param_inputs, param_inputs) $
-          stmsToList $
-            bodyStms body
+          bodyStms body
    in (avail_inputs, classifyStms funHasParallelism (bodyResult body) stms)
   where
     bound_outside = namesFromList $ M.keys outer_scope
@@ -305,19 +313,21 @@ isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 
 --  we should probably sort the DistStms first and we should assume they are sorted
 -- and then given to this function.
-classifyStms :: FunHasParallelism -> Result -> [DistStm] -> [DistStm]
-classifyStms _ _ [] = []
+classifyStms :: FunHasParallelism -> Result -> DistStms -> DistStms
+classifyStms _ _ Seq.Empty = mempty
 classifyStms funHasParallelism bodyRes ds =
-  let (scalars, rest) = break (isParallelDistStm funHasParallelism) ds
-      scalar_grouped =
-        [mergeGroup bodyRes scalars rest | not (null scalars)]
+  let (scalars, rest) = Seq.breakl (isParallelDistStm funHasParallelism) ds
+      scalar_grouped
+        | not $ null scalars =
+            Seq.singleton $ mergeGroup bodyRes scalars rest
+        | otherwise = mempty
    in case rest of
-        [] -> scalar_grouped
-        p : ps ->
-          scalar_grouped ++ (p : classifyStms funHasParallelism bodyRes ps)
+        Seq.Empty -> scalar_grouped
+        p Seq.:<| ps ->
+          scalar_grouped <> (p Seq.<| classifyStms funHasParallelism bodyRes ps)
 
 -- | Merge a group of scalar 'DistStm's into a single one.
-mergeGroup :: Result -> [DistStm] -> [DistStm] -> DistStm
+mergeGroup :: Result -> DistStms -> DistStms -> DistStm
 mergeGroup bodyRes ds rest =
   let resTags =
         S.fromList $ concatMap (map distResTag . distStmResult) ds
@@ -329,12 +339,12 @@ mergeGroup bodyRes ds rest =
       externalResults =
         nubOrd $
           concatMap (filter (isExternal bodyRes rest) . distStmResult) ds
-      allStms = concatMap distStmStms ds
+      allStms = foldMap distStmStms ds
    in DistStm externalInputs externalResults (ScalarStm allStms)
 
 -- | A result is external if it is used by a subsequent 'DistStm' or
 -- by the body result.
-isExternal :: Result -> [DistStm] -> DistResult -> Bool
+isExternal :: Result -> DistStms -> DistResult -> Bool
 isExternal bodyRes rest (DistResult rt _ rn) =
   rt `S.member` usedByRest || rn `S.member` bodyResVars || rn `S.member` bodyResCerts
   where

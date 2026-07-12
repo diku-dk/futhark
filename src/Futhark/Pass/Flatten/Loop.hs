@@ -124,7 +124,7 @@ liftLoopResult lvl segments num_segments inps env dist_res res =
         map (SubExpRes mempty) <$> irregularRepToLoopValues num_segments irreg
       _ -> undefined
 
-liftLoopBody :: FlattenOps -> Segments -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> [DistResult] -> Result -> FlattenM Result
+liftLoopBody :: FlattenOps -> Segments -> SubExp -> DistInputs -> DistEnv -> DistStms -> [DistResult] -> Result -> FlattenM Result
 liftLoopBody ops segments num_segments inputs env dstms dist_res result = do
   env' <- foldM (flattenDistStm ops segments) env dstms
   results <- zipWithM (liftLoopResult lvl segments num_segments inputs env') dist_res result

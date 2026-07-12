@@ -94,7 +94,7 @@ distributeBranch ::
   VName ->
   Body SOACS ->
   M.Map VName ResRep ->
-  FlattenM (DistInputs, DistEnv, [DistStm])
+  FlattenM (DistInputs, DistEnv, DistStms)
 distributeBranch funHasParallelism lvl segments env inps is body acc_reps = do
   let free_in_body = filter (isVariant inps . Var) (namesToList $ freeIn body)
   scope <- askScope

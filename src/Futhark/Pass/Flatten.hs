@@ -128,7 +128,7 @@ topLevelversionScanRed funHasParallelism desc pat w arrs form aux outer_only_stm
 
 transformDistStm :: FunHasParallelism -> SegLevel -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
 transformDistStm _ lvl segments env (DistStm inps res (ScalarStm stms)) =
-  transformScalarStms lvl segments env inps res (stmsFromList stms)
+  transformScalarStms lvl segments env inps res stms
 transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelStm stm)) = do
   case stm of
     Let pat aux (BasicOp e) -> do
@@ -278,7 +278,7 @@ runInnerSeqMap w arrs map_lam _pat _ress = do
     addStms $ bodyStms $ lambdaBody map_lam'
     pure $ bodyResult $ lambdaBody map_lam'
 
-liftBody :: FunHasParallelism -> SegLevel -> SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> FlattenM Result
+liftBody :: FunHasParallelism -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> Result -> FlattenM Result
 liftBody funHasParallelism lvl w inputs env dstms result = do
   let segments = NE.singleton w
   env' <- foldM (transformDistStm funHasParallelism lvl segments) env dstms

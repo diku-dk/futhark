@@ -319,7 +319,7 @@ liftDistResult lvl segments inps env dist_res res =
         pure $ map (SubExpRes mempty . Var) [irregularS irreg, irregularF irreg, irregularO irreg, irregularD irreg]
       _ -> undefined
 
-liftBodyWithDistResults :: FlattenOps -> Segments -> DistInputs -> DistEnv -> [DistStm] -> [DistResult] -> Result -> FlattenM Result
+liftBodyWithDistResults :: FlattenOps -> Segments -> DistInputs -> DistEnv -> DistStms -> [DistResult] -> Result -> FlattenM Result
 liftBodyWithDistResults ops segments inputs env dstms dist_res result = do
   env' <- foldM (flattenDistStm ops segments) env dstms
   result' <- zipWithM (liftDistResult (flattenSegLevel ops) segments inputs env') dist_res result
