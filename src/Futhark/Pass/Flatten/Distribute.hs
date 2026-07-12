@@ -239,7 +239,9 @@ distributeBody funHasParallelism outer_scope w param_inputs body = do
   let ((_, avail_inputs), stms) =
         L.mapAccumL distributeStm (nextResTag param_inputs, param_inputs) $
           bodyStms body
-   in (avail_inputs, classifyStms funHasParallelism (bodyResult body) stms)
+   in ( avail_inputs,
+        classifyStms funHasParallelism (bodyResult body) stms
+      )
   where
     bound_outside = namesFromList $ M.keys outer_scope
     distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
@@ -339,7 +341,8 @@ classifyStms funHasParallelism bodyRes = classify
           groupStms (isParallelDistStm (isParallelStm funHasParallelism)) ds
       | otherwise = groupStms (`S.member` mustDistribute ds) ds
     meaningfulDistStm (DistStm _ _ (ParallelStm stm)) =
-      stmHasMeaningfulParallelism funHasParallelism stm
+      any (`nameIn` freeIn bodyRes) (patNames (stmPat stm))
+        || stmHasMeaningfulParallelism funHasParallelism stm
     meaningfulDistStm _ = False
     -- The statements with irregular results that require
     -- distribution: those whose irregular results are used outside
@@ -514,7 +517,7 @@ distributeMap funHasParallelism outer_scope map_pat w arrs lam =
 --     fully flattened code version is worth generating only when the lambda
 --     contains meaningful parallelism.
 --
--- The exception is irregularity. A statement whose result shape varies
+-- One exception is irregularity. A statement whose result shape varies
 -- across the surrounding map nest (e.g. 'iota x' for a mapped 'x') cannot
 -- in general be traversed sequentially per thread, as only regular values
 -- can be produced as results of sequentially executed groups - handling it
@@ -525,3 +528,8 @@ distributeMap funHasParallelism outer_scope map_pat w arrs lam =
 -- sequentially after all - see 'mustDistribute' in 'classifyStms'. In (2)
 -- irregular results make versioning worthwhile
 -- ('lambdaHasMeaningfulParallelism' in Futhark.Pass.Flatten.Incremental).
+--
+-- Another exception is when the trivial statement produces the result of a body
+-- - in that case we also treat it as meaningful, because we have to manifest
+-- it. This is the part that would benefit from a cost model, or simply from
+-- being more principled and ignoring the small inefficiencies.
