@@ -19,6 +19,7 @@ module Futhark.Pass.Flatten.Distribute
     FunHasParallelism,
     isRegularDistResult,
     isParallelStm,
+    stmHasMeaningfulParallelism,
 
     -- * Segments
     Segments,
@@ -261,22 +262,22 @@ distributeBody funHasParallelism outer_scope w param_inputs body = do
               (ParallelStm stm)
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
 
-isParallelDistStm :: FunHasParallelism -> DistStm -> Bool
-isParallelDistStm funHasParallelism (DistStm _ res (ParallelStm stm)) =
-  isParallelStm funHasParallelism stm || not (all isRegularDistResult res)
+isParallelDistStm :: (Stm SOACS -> Bool) -> DistStm -> Bool
+isParallelDistStm stm_is_parallel (DistStm _ res (ParallelStm stm)) =
+  stm_is_parallel stm || not (all isRegularDistResult res)
 isParallelDistStm _ _ = False
 
-isParallelStm :: FunHasParallelism -> Stm SOACS -> Bool
-isParallelStm funHasParallelism stm =
-  noSequentialAttr stm
-    && (parallelBasicOp (stmExp stm) || hasParallelism stm)
+noSequentialAttr :: Stm SOACS -> Bool
+noSequentialAttr stm =
+  not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
+
+-- | Does the statement contain meaningful parallelism - a SOAC or a call to
+-- a parallel function, possibly nested inside sequential control flow?
+-- Basic operations such as 'Iota' or 'Replicate' do not count. See Note
+-- [Meaningful Parallelism].
+stmHasMeaningfulParallelism :: FunHasParallelism -> Stm SOACS -> Bool
+stmHasMeaningfulParallelism funHasParallelism = hasParallelism
   where
-    parallelBasicOp (BasicOp op) = isParallelBasicOp op
-    parallelBasicOp _ = False
-
-    noSequentialAttr stm' =
-      not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm'))
-
     hasParallelism stm' =
       noSequentialAttr stm'
         && case stmExp stm' of
@@ -290,9 +291,18 @@ isParallelStm funHasParallelism stm =
           WithAcc _ lam -> any hasParallelism (bodyStms (lambdaBody lam))
           Op op -> isParallelOp op
 
-    isParallelOp JVP {} = error "isParallelStm: JVP"
-    isParallelOp VJP {} = error "isParallelStm: VJP"
+    isParallelOp JVP {} = error "stmHasMeaningfulParallelism: JVP"
+    isParallelOp VJP {} = error "stmHasMeaningfulParallelism: VJP"
     isParallelOp _ = True
+
+isParallelStm :: FunHasParallelism -> Stm SOACS -> Bool
+isParallelStm funHasParallelism stm =
+  noSequentialAttr stm
+    && (parallelBasicOp (stmExp stm) || stmHasMeaningfulParallelism funHasParallelism stm)
+  where
+    parallelBasicOp (BasicOp op) = isParallelBasicOp op
+    parallelBasicOp _ = False
+
     -- TODO: Check other operations
     isParallelBasicOp (Update _ _ slice _) = not $ null $ sliceDims slice
     isParallelBasicOp Concat {} = True
@@ -314,17 +324,30 @@ isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 --  we should probably sort the DistStms first and we should assume they are sorted
 -- and then given to this function.
 classifyStms :: FunHasParallelism -> Result -> DistStms -> DistStms
-classifyStms _ _ Seq.Empty = mempty
-classifyStms funHasParallelism bodyRes ds =
-  let (scalars, rest) = Seq.breakl (isParallelDistStm funHasParallelism) ds
-      scalar_grouped
-        | not $ null scalars =
-            Seq.singleton $ mergeGroup bodyRes scalars rest
-        | otherwise = mempty
-   in case rest of
-        Seq.Empty -> scalar_grouped
-        p Seq.:<| ps ->
-          scalar_grouped <> (p Seq.<| classifyStms funHasParallelism bodyRes ps)
+classifyStms funHasParallelism bodyRes = classify
+  where
+    -- If no statement contains meaningful parallelism, treat the
+    -- trivially parallel statements as sequential as well; statements
+    -- with irregular results are still distributed, as
+    -- 'isParallelDistStm' checks that regardless of the predicate.
+    -- See Note [Meaningful Parallelism].
+    classify ds
+      | any meaningfulDistStm ds = groupStms (isParallelStm funHasParallelism) ds
+      | otherwise = groupStms (const False) ds
+    meaningfulDistStm (DistStm _ _ (ParallelStm stm)) =
+      stmHasMeaningfulParallelism funHasParallelism stm
+    meaningfulDistStm _ = False
+    groupStms _ Seq.Empty = mempty
+    groupStms stm_is_parallel ds' =
+      let (scalars, rest) = Seq.breakl (isParallelDistStm stm_is_parallel) ds'
+          scalar_grouped
+            | not $ null scalars =
+                Seq.singleton $ mergeGroup bodyRes scalars rest
+            | otherwise = mempty
+       in case rest of
+            Seq.Empty -> scalar_grouped
+            p Seq.:<| ps ->
+              scalar_grouped <> (p Seq.<| groupStms stm_is_parallel ps)
 
 -- | Merge a group of scalar 'DistStm's into a single one.
 mergeGroup :: Result -> DistStms -> DistStms -> DistStm
@@ -424,3 +447,42 @@ distributeMap funHasParallelism outer_scope map_pat w arrs lam =
       ( (ResTag (i + 1), M.insert (ResTag i) x m),
         (paramName p, DistInput (ResTag i) $ paramType p)
       )
+
+-- Note [Meaningful Parallelism]
+--
+-- Many basic operations (Iota, Replicate, Concat, nontrivial slicing, and so
+-- on) are parallel in principle, but distributing one on its own gains us
+-- nothing: it performs the same work as a sequential per-thread traversal, at
+-- the cost of manifesting intermediate arrays and launching extra kernels. Our
+-- rule of thumb is that code contains *meaningful* parallelism only when it
+-- contains at least a Screma, Hist, or a call to a parallel function - possibly
+-- nested inside sequential control flow. This is what
+-- 'stmHasMeaningfulParallelism' checks. It is intended to avoid "parallelising"
+-- map bodies that are essentially sequential loops, but happen to use some
+-- basic operations to construct arrays they operate on. This is a somewhat
+-- crude classification, and it is possible to imagine a more sophisticated one
+-- based on a cost-model. Note that incremental flattening (and auto-tuning)
+-- might allow us to generate and pick the sequentialised versions anyway, but
+-- it is more efficient to not generate them in the first place.
+--
+-- The notion is used in two places:
+--
+-- (1) When classifying the statements of a distributed body as parallel or
+--     sequential ('classifyStms'): if no statement contains meaningful
+--     parallelism, then the trivially parallel statements are also grouped
+--     as sequential, so that ideally the entire body becomes a single
+--     segmented operation.
+--
+-- (2) When deciding whether to multi-version a Screma
+--     ('factorScremaForParallelism' in Futhark.Pass.Flatten.Incremental): a
+--     fully flattened code version is worth generating only when the lambda
+--     contains meaningful parallelism.
+--
+-- The exception is irregularity. A statement whose result shape varies
+-- across the surrounding map nest (e.g. 'iota x' for a mapped 'x') cannot
+-- simply be traversed sequentially per thread, as kernels cannot perform
+-- irregular allocations - handling it is exactly what flattening is
+-- for. Hence irregular results still count as meaningful: in (1) they force
+-- distribution regardless of the classification (see 'isParallelDistStm'),
+-- and in (2) they make versioning worthwhile
+-- ('lambdaHasMeaningfulParallelism' in Futhark.Pass.Flatten.Incremental).

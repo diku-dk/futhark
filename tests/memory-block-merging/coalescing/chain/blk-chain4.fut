@@ -11,10 +11,7 @@
 --           [15, 15, 15]]
 --        }
 -- structure seq-mem { Alloc 3 }
--- structure gpu-mem { Alloc 5 }
-
--- The GPU pipeline has additional allocations for the two 'replicate'
--- expressions.
+-- structure gpu-mem { Alloc 3 }
 
 def main [n] (a: [n]i32) : [][n]i32 =
   let x = map (\i -> replicate n (i + 10)) a |> opaque

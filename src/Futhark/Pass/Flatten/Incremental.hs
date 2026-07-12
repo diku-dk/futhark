@@ -270,6 +270,29 @@ lambdaHasParallelism :: FunHasParallelism -> Lambda SOACS -> Bool
 lambdaHasParallelism funHasParallelism =
   any (isParallelStm funHasParallelism) . bodyStms . lambdaBody
 
+-- | Like 'lambdaHasParallelism', but only counts meaningful
+-- parallelism: a SOAC, a call to a parallel function, or a statement
+-- with an irregular result, which requires flattening to exploit.
+-- Basic operations such as 'Replicate' of invariant size do not
+-- provide enough parallelism on their own to make multi-versioning
+-- worthwhile.  See Note [Meaningful Parallelism] in
+-- Futhark.Pass.Flatten.Distribute.
+lambdaHasMeaningfulParallelism :: FunHasParallelism -> Lambda SOACS -> Bool
+lambdaHasMeaningfulParallelism funHasParallelism lam =
+  any interesting $ bodyStms $ lambdaBody lam
+  where
+    free_in_lam = freeIn lam
+    invariantDim (Var v) = v `nameIn` free_in_lam
+    invariantDim Constant {} = True
+    irregularResult =
+      not . all (all invariantDim . arrayDims) . patTypes . stmPat
+    interesting stm =
+      stmHasMeaningfulParallelism funHasParallelism stm || irregularResult stm
+
+-- | Produce a body suitable for full flattening from a Screma, or
+-- 'Nothing' if none of its lambdas contain meaningful parallelism, in
+-- which case multi-versioning is not worthwhile.  See Note
+-- [Meaningful Parallelism] in Futhark.Pass.Flatten.Distribute.
 factorScremaForParallelism ::
   (MonadBuilder m) =>
   FunHasParallelism ->
@@ -282,7 +305,7 @@ factorScremaForParallelism ::
   m (Maybe (Body SOACS))
 factorScremaForParallelism funHasParallelism scope certs pat w arrs form
   | Just (reds, map_lam) <- isRedomapSOAC form,
-    lambdaHasParallelism funHasParallelism map_lam = do
+    lambdaHasMeaningfulParallelism funHasParallelism map_lam = do
       map_lam' <- preprocessLambda scope map_lam
       (map_stm, red_stm) <-
         redomapToMapAndReduce
@@ -290,8 +313,8 @@ factorScremaForParallelism funHasParallelism scope certs pat w arrs form
           (w, reds, map_lam', arrs)
       Just <$> mkFactoredBody (stmsFromList [map_stm, red_stm])
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-    lambdaHasParallelism funHasParallelism map_lam,
-    lambdaHasParallelism funHasParallelism post_lam = do
+    lambdaHasMeaningfulParallelism funHasParallelism map_lam,
+    lambdaHasMeaningfulParallelism funHasParallelism post_lam = do
       map_lam' <- preprocessLambda scope map_lam
       post_lam' <- preprocessLambda scope post_lam
       (map_stm, scan_stm, post_stm) <-
@@ -300,7 +323,7 @@ factorScremaForParallelism funHasParallelism scope certs pat w arrs form
           (w, post_lam', scans, map_lam', arrs)
       Just <$> mkFactoredBody (stmsFromList [map_stm, scan_stm, post_stm])
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-    lambdaHasParallelism funHasParallelism map_lam = do
+    lambdaHasMeaningfulParallelism funHasParallelism map_lam = do
       map_lam' <- preprocessLambda scope map_lam
       post_lam' <- preprocessLambda scope post_lam
       (map_stm, scanomap_stm) <-
@@ -309,7 +332,7 @@ factorScremaForParallelism funHasParallelism scope certs pat w arrs form
           (w, post_lam', scans, map_lam', arrs)
       Just <$> mkFactoredBody (stmsFromList [map_stm, scanomap_stm])
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
-    lambdaHasParallelism funHasParallelism post_lam = do
+    lambdaHasMeaningfulParallelism funHasParallelism post_lam = do
       map_lam' <- preprocessLambda scope map_lam
       post_lam' <- preprocessLambda scope post_lam
       (map_stm, scan_stm, post_stm) <-
