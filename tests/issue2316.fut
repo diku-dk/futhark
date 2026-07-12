@@ -1,5 +1,9 @@
+-- Originally a positive test for an interpreter bug, but the use of
+-- "copy" (whose type parameter is unlifted) on a value of size-lifted
+-- abstract type is actually ill-typed, which the type checker now
+-- detects.
 -- ==
--- input { 2i64 }
+-- error: is lifted
 
 module type blocked_square_regular = {
   type t

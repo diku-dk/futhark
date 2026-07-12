@@ -14,6 +14,8 @@ import Futhark.Optimise.ArrayLayoutTests qualified
 import Futhark.Optimise.FusionTests qualified
 import Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests qualified
 import Futhark.Pkg.SolveTests qualified
+import Futhark.Solve.BranchAndBoundTests qualified
+import Futhark.Solve.SimplexTests qualified
 import Language.Futhark.PrettyTests qualified
 import Language.Futhark.PrimitiveTests qualified
 import Language.Futhark.SemanticTests qualified
@@ -25,25 +27,27 @@ allTests :: TestTree
 allTests =
   testGroup
     ""
-    [ Language.Futhark.SyntaxTests.tests,
-      Language.Futhark.PrettyTests.tests,
-      Futhark.AD.DerivativesTests.tests,
-      Futhark.BenchTests.tests,
-      Futhark.IR.PropTests.tests,
-      Futhark.IR.Syntax.CoreTests.tests,
-      Futhark.Pkg.SolveTests.tests,
-      Futhark.Internalise.TypesValuesTests.tests,
-      Futhark.IR.Mem.IntervalTests.tests,
-      Futhark.IR.Mem.IxFunTests.tests,
-      Language.Futhark.PrimitiveTests.tests,
-      Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests.tests,
+    [ Futhark.AD.DerivativesTests.tests,
       Futhark.Analysis.AlgSimplifyTests.tests,
       Futhark.Analysis.DataDependenciesTests.tests,
-      Language.Futhark.TypeCheckerTests.tests,
-      Language.Futhark.SemanticTests.tests,
+      Futhark.BenchTests.tests,
+      Futhark.IR.Mem.IntervalTests.tests,
+      Futhark.IR.Mem.IxFunTests.tests,
+      Futhark.IR.PropTests.tests,
+      Futhark.IR.Syntax.CoreTests.tests,
+      Futhark.Internalise.TypesValuesTests.tests,
+      Futhark.LspTests.tests,
       Futhark.Optimise.ArrayLayoutTests.tests,
       Futhark.Optimise.FusionTests.tests,
-      Futhark.LspTests.tests
+      Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests.tests,
+      Futhark.Pkg.SolveTests.tests,
+      Futhark.Solve.BranchAndBoundTests.tests,
+      Futhark.Solve.SimplexTests.tests,
+      Language.Futhark.PrettyTests.tests,
+      Language.Futhark.PrimitiveTests.tests,
+      Language.Futhark.SemanticTests.tests,
+      Language.Futhark.TypeCheckerTests.tests,
+      Language.Futhark.SyntaxTests.tests
     ]
 
 main :: IO ()

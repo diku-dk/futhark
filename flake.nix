@@ -89,6 +89,7 @@
         futhark-data = new.callPackage ./nix/futhark-data.nix { };
         futhark-server = new.callPackage ./nix/futhark-server.nix { };
         futhark-manifest = new.callPackage ./nix/futhark-manifest.nix { };
+        glpk-hs = new.callPackage ./nix/glpk-hs.nix { };
 
         # The plain Haskell package -- library and executable, no static
         # linking. This is what downstream Haskell projects should depend
@@ -126,6 +127,7 @@
               (pkgs.gmp6.override { withStatic = true; })
               (pkgs.libffi.overrideAttrs { dontDisableStatic = true; })
               (pkgs.numactl.overrideAttrs { dontDisableStatic = true; })
+              (pkgs.glpk.overrideAttrs (old: { dontDisableStatic = true; }))
               pkgs.zlib.static
               (pkgs.xz.override { enableStatic = true; }).out
               (pkgs.zstd.override { enableStatic = true; }).out
@@ -303,6 +305,7 @@
                     doCheck = false;
                   }))
                   imagemagick # needed for literate tests
+                  glpk
                 ]
                 ++ lib.optionals (stdenv.isLinux) [
                   opencl-headers

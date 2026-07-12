@@ -1,6 +1,6 @@
 -- Unification of incomplete record variable with non-record.
 -- ==
--- error: Cannot unify a record type with a non-record type
+-- error: with type that must be a record
 
 def sameconst '^a (_: a) (y: a) = y
 
