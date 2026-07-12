@@ -1007,8 +1007,31 @@ transformInnerMapMultiDim ::
   Lambda SOACS ->
   FlattenM [ResRep]
 transformInnerMapMultiDim ops segments env inps pat w arrs map_lam = do
-  ws <- dataArr lvl segments env inps w
-  (ws_F, ws_O, ws_data) <- doRepIota lvl ws
+  outer_scope <- askScope
+  -- When the inputs are regular and all result dimensions are invariant, the
+  -- flags/offsets/elements bookkeeping produced by 'doRepIota' is never
+  -- consulted, so do not emit it. This is not just an efficiency concern: when
+  -- we are generating in-block code, the bookkeeping contains SegOps whose
+  -- dimensions are bound inside the kernel body, which would make
+  -- 'noIrregularPar' reject the enclosing intrablock version.
+  let invariantDim Constant {} = True
+      invariantDim (Var v) = v `M.member` outer_scope
+      regularInput arr = case lookup arr inps of
+        Just (DistInput rt _)
+          | Irregular {} <- resVar rt env -> False
+        _ -> True
+      uniform =
+        all (all invariantDim . arrayDims) (patTypes pat)
+          && all regularInput arrs
+  (ws, ws_F, ws_O, ws_data) <-
+    if uniform
+      -- XXX: this depends on laziness to explode only on usage. It might be
+      -- better to handle this path more explicitly.
+      then pure (bad "ws", bad "ws_F", bad "ws_O", bad "ws_data")
+      else do
+        ws <- dataArr lvl segments env inps w
+        (ws_F, ws_O, ws_data) <- doRepIota lvl ws
+        pure (ws, ws_F, ws_O, ws_data)
   arrs' <-
     zipWithM
       (onMapInputArrMultiDim lvl segments w env inps ws ws_O ws_data)
@@ -1026,6 +1049,8 @@ transformInnerMapMultiDim ops segments env inps pat w arrs map_lam = do
     map_lam
   where
     lvl = flattenSegLevel ops
+    bad what =
+      error $ "transformInnerMapMultiDim: " <> what <> " demanded in uniform case"
 
 transformInnerMapSingleDim ::
   FlattenOps ->
