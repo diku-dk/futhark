@@ -17,6 +17,7 @@ module Futhark.Pass.Flatten.Incremental
     allowVersioning,
 
     -- * Various queries
+    bodyHasParallelism,
     lambdaHasParallelism,
     mayExploitOuter,
     onlyExploitIntra,
@@ -266,9 +267,13 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
         attrs = stmAuxAttrs $ stmAux stm
         sequential_inner = "sequential_inner" `inAttrs` attrs
 
+bodyHasParallelism :: FunHasParallelism -> Body SOACS -> Bool
+bodyHasParallelism funHasParallelism =
+  any (isParallelStm funHasParallelism) . bodyStms
+
 lambdaHasParallelism :: FunHasParallelism -> Lambda SOACS -> Bool
 lambdaHasParallelism funHasParallelism =
-  any (isParallelStm funHasParallelism) . bodyStms . lambdaBody
+  bodyHasParallelism funHasParallelism . lambdaBody
 
 -- | Like 'lambdaHasParallelism', but only counts meaningful
 -- parallelism: a SOAC, a call to a parallel function, or a statement
