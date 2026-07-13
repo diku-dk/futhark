@@ -334,7 +334,7 @@ nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_c
       global_tid = Imp.le64 $ segFlat space
       n = pe64 $ last dims
 
-  counters <- genZeroes "counters" maxNumOps
+  counters <- genZeroes "counters" $ length segbinops
 
   reds_block_res_arrs <- groupResultArrays num_tblocks_se tblock_size_se segbinops
 
@@ -551,8 +551,9 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_
   -- anywhere?  There are other places in the compiler that will fail
   -- if the block count exceeds the maximum block size, which is at
   -- most 1024 anyway.
-  let num_counters = maxNumOps * 1024
-  counters <- genZeroes "counters" $ fromIntegral num_counters
+  let counters_per_op = 1024
+  counters <-
+    genZeroes "counters" $ fromIntegral $ length segbinops * counters_per_op
 
   let attrs =
         (defKernelAttrs num_tblocks tblock_size)
@@ -610,9 +611,9 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_
             forM_ (zip4 segred_pess slugs new_lambdas [0 ..]) $
               \(pes, slug, new_lambda, i) -> do
                 let counter_idx =
-                      fromIntegral (i * num_counters)
+                      fromIntegral (i * counters_per_op)
                         + flat_segment_id
-                          `rem` fromIntegral num_counters
+                          `rem` fromIntegral counters_per_op
                 reductionStageTwo
                   pes
                   virttblock_id
