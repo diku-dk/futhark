@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * An issue where `#[scratch]` would apply to subexpressions in undesirable ways,
   changing the type of the expression at the IR level.
 
+* Simplified fusibility check by removing redundant accumulator overlap check
+  and fixed fusibility check by giving the correct number of elements.
+
 ## [0.26.4]
 
 ### Added
