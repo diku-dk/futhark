@@ -78,7 +78,16 @@ liftLoopParam lvl segments num_segments inps env loopParamNames (fparam, initSE)
               (baseName (paramName fparam) <> "_lifted")
               (arrayOf (Prim pt) pShape u)
           initV <- liftSubExpRegular lvl segments inps env pShape initSE
-          pure ([p], Regular $ paramName p, [Var initV])
+          -- If the parameter is consumed, we must not consume the
+          -- representation array (it may be used by other versions in
+          -- multi-versioned code), so insert a copy. The simplifier hopefully
+          -- removes it again when consuming the representation directly is
+          -- safe.
+          initV' <-
+            if u == Unique
+              then letExp (baseName (paramName fparam) <> "_inter_copy") =<< eCopy (eVar initV)
+              else pure initV
+          pure ([p], Regular $ paramName p, [Var initV'])
     Acc {} -> do
       initV <- liftSubExpRegular lvl segments inps env mempty initSE
       let Param attrs v acc_t = fparam
