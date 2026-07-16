@@ -1,4 +1,42 @@
 -- | General definitions used for incremental flattening.
+--
+-- The idea behind incremental flattening is the observation that when
+-- flattening a program
+--
+-- @
+--   map f xs
+-- @
+--
+-- we have two options: (i) transform @f@ to exploit any parallelism it may
+-- contain, or (ii) turn @f@ into sequential code and only exploit the
+-- parallelism in @map@.
+--
+-- In some cases we do not have a choice, e.g. if @f@ contains sufficiently
+-- nonuniform operations that would result in nonuniform allocations. In other
+-- cases the choice is obvious, such as when @f@ is completely scalar. However,
+-- in the general case either will work, and it depends on the workload which of
+-- the options is optimal: if the outer @map@ is big enough, it may be best to
+-- efficiently sequentialise @f@ (which can then also permit various locality
+-- optimisations, such as tiling). But if the outer @map@ does not have many
+-- iterations, then we also need the parallelism in @f@ to fully saturate the
+-- machine.
+--
+-- The idea behind incremental flattening is to generate both versions, and
+-- select the appropriate one at run-time:
+--
+-- @
+-- if predicate then sequentialise f...
+--                   else parallelise f...
+-- @
+--
+-- The predicate is based on comparing the amount of exploitable parallelism
+-- with a threshold parameter. This threshold parameter is given a default value
+-- based on run-time hardware characteristics, but usually has to be auto-tuned
+-- in order to be optimal for a specific machine, program, and workload.
+--
+-- The multi-versioning approach is also used to generate more exotic versions,
+-- such as one that parallelises @f@ at a deeper hardware level
+-- (@Futhark.Pass.Flatten.Intrablock@).
 module Futhark.Pass.Flatten.Incremental
   ( worthIntrablock,
     worthSequentialising,

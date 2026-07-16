@@ -1,14 +1,49 @@
 {-# LANGUAGE TypeFamilies #-}
 
--- The idea is to perform distribution on one level at a time, and
--- produce "irregular Maps" that can accept and produce irregular
--- arrays.  These irregular maps will then be transformed into flat
--- parallelism based on their contents.  This is a sensitive detail,
--- but if irregular maps contain only a single Stm, then it is fairly
--- straightforward, as we simply implement flattening rules for every
--- single kind of expression.  Of course that is also somewhat
--- inefficient, so we want to support multiple Stms for things like
+-- | This pass transforms parallelism expressed with arbitrarily nested SOACs to
+-- instead be expressed with limited-nesting SegOps. This is the so-called
+-- "flattening transformation" (sometimes called "vectorization", although we do
+-- not use that term much in the Futhark compiler).
+--
+-- This is a sophisticated pass that does various clever things:
+--
+-- - Detects uniform nesting and flattens it more efficiently than the
+-- - nonuniform case.
+--
+-- - DPH-style vectorization avoidance.
+--
+-- - Incremental flattening ("Futhark.Pass.Flatten.Incremental").
+--
+-- - Intrablock flattening ("Futhark.Pass.Flatten.Intrablock").
+--
+-- The goal is that *any* Futhark program must be compilable parallel GPU code,
+-- although in some cases the resulting code is not particularly efficient.
+--
+-- The idea is to perform distribution on one level at a time, and produce
+-- "irregular Maps" that can accept and produce irregular arrays. These
+-- irregular maps will then be transformed into flat parallelism based on their
+-- contents. This is a sensitive detail, but if irregular maps contain only a
+-- single Stm, then it is fairly straightforward, as we simply implement
+-- flattening rules for every single kind of expression. Of course that is also
+-- somewhat inefficient, so we want to support multiple Stms for things like
 -- scalar code.
+--
+-- Nomenclature:
+--
+-- A map-nest is the collection of parallel operations enclosing some code. For
+-- simplicity, we say "map-nest" even when the top level parallel operation is
+-- actually a redomap or other screma.
+--
+-- An irregular array is a multidimensional array like '[[1,2],[3]]', where rows
+-- have different shapes. These are not directly supported in Futhark or in the
+-- Futhark IR, but are encoded in various ways.
+--
+-- We say that an operation or type in a map-nest is "uniform" when its size and
+-- control flow is invariant to the map-nest. Converse, it is "nonuniform" when
+-- it is variant. When we distribute a uniform statement, the intermediate
+-- results are regular, and otherwise irregular. Take care not to confuse the
+-- terms "regular" and "uniform" - we say "regular" only about arrays! "Uniform"
+-- is the general concept.
 module Futhark.Pass.Flatten (flattenSOACs) where
 
 import Control.Monad
