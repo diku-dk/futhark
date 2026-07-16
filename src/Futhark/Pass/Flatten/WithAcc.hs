@@ -149,9 +149,10 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
     certifying (distCerts inps withacc_aux env) $
       letTupExp "withacc_flatten_out" (WithAcc withacc_inputs' withacc_lam')
 
-  -- The accumulator results are handled differently in nonuniform case since we do not have metadata
-  -- for them and since all of them are turned flat even when they might be actually regular.
-  -- we can still here turn the actul disrest that are regular to regualars.
+  -- The accumulator results are handled differently in the nonuniform case,
+  -- since we do not have metadata for them and since all of them are turned
+  -- flat even when they might actually be regular. We can still turn the
+  -- distres that are regular into Regulars here.
   let num_acc_results = sum [length arrs | (_, arrs, _) <- withacc_inputs]
       (withacc_out_vs_wo, withacc_out_vs_no) = splitAt num_acc_results withacc_out_vs
       (distres_withacc, distres_normal) = splitAt num_acc_results distres
@@ -225,6 +226,14 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
             reshapeAll (arrayShape v_t) (Shape [w])
       (,reps_dense) . (Shape [w],arrs'',) <$> traverse (onNonuniformOp (shapeRank shape)) op
 
+    -- The irregular kind is not carried through the results of the
+    -- WithAcc, and 'mkNormalResReps' reconstructs the rep as Dense, so
+    -- any irregular rep must actually be made dense before it crosses
+    -- the WithAcc boundary.
+    ensureDenseRep lvl (Irregular irreg) =
+      Irregular <$> ensureDenseIrregular lvl "withacc_result" irreg
+    ensureDenseRep _ rep = pure rep
+
     liftWithAccResult lvl segs inputs env' (dist_res, res) =
       case resSubExp res of
         Var v -> do
@@ -233,9 +242,8 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
             then
               pure rep
             else
-              -- TODO: I removed the ensureDenseIrregular in liftDistResultRep but I think here we won't need it either?
-              liftDistResultRep lvl segs inputs env' dist_res res
-        Constant _ -> liftDistResultRep lvl segs inputs env' dist_res res
+              ensureDenseRep lvl =<< liftDistResultRep lvl segs inputs env' dist_res res
+        Constant _ -> ensureDenseRep lvl =<< liftDistResultRep lvl segs inputs env' dist_res res
 
     repToResults (Regular v) =
       pure [SubExpRes mempty $ Var v]

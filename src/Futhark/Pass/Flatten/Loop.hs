@@ -433,9 +433,8 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
       pure $ insertReps (zip (map distResTag res) out_reps) env
 --
 transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) = do
-  -- TODO:
-  -- 4) Use reduction rather than scan for any_active
-  -- 5) Consider updating the active segment so we don't go over w everytime
+  -- TODO: Consider updating the active segment so we don't go over w
+  -- every time.
 
   -- inside the body we should compute the indices for which the condition is true and for which it is false, and then distribute the body based on that.
   --  We can then merge the results of the two branches by writing them back to a blank space like we do for the branches of a match.
@@ -472,7 +471,6 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
             Regular v -> v
             Irregular {} -> error "WhileLoop condition cannot be irregular"
 
-      -- latter chagne to reduction
       cond_init_arr_t <- lookupType cond_init_arr_v
       cond_init_flat <-
         letExp "cond_init_flat" . BasicOp $
@@ -480,15 +478,10 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
             reshapeAll (arrayShape cond_init_arr_t) (Shape [w])
 
       or_lam <- binOpLambda LogOr Bool
-      cond_scanned <- genScan lvl "any_scan" (NE.singleton w) or_lam [constant False] [cond_init_flat]
-      let [cond_scanned_v] = cond_scanned
-
-      any_active_init <-
-        letSubExp "any_active_init"
-          =<< eIf
-            (toExp $ pe64 w .==. 0)
-            (eBody [eSubExp $ constant False])
-            (eBody [eIndex cond_scanned_v [toExp $ pe64 w - 1]])
+      map_lam <- mkIdentityLambda [Prim Bool]
+      ~[any_active_init_v] <-
+        genNonSegRed lvl "any_active_init" [w] (Reduce Commutative or_lam [constant False]) mempty map_lam [cond_init_flat]
+      let any_active_init = Var any_active_init_v
 
       any_active_param <- newParam "any_active" (Prim Bool)
       let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfFParams [any_active_param]

@@ -147,7 +147,9 @@ genScanWithKernelBody lvl desc segments lam nes =
     nes
     (\_ res_t -> mkIdentityLambda res_t)
 
--- FIXME?: I don't know why we need the readdummy
+-- The SegSpace of a SegRed must always have at least two dimensions, so that
+-- its result is an array. We therefore prepend a dummy unit dimension, and
+-- afterwards index out the single element of the unit-sized result.
 genNonSegRed ::
   (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel ->
