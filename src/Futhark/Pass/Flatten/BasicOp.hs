@@ -480,11 +480,20 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       base_v <- letExp "arraylit_base" $ BasicOp $ ArrayVal vs row_type
       res_v <- letExp "arraylit_reg" $ BasicOp $ Replicate (segmentsShape segments) (Var base_v)
       pure $ insertRegulars [distResTag res] [res_v] env
-    Opaque _op se
+    Opaque op se
       | Var v <- se,
         Just (DistInput rt_in _) <- lookup v inps ->
-          -- TODO: actually insert opaques
-          pure $ insertRep (distResTag res) (resVar rt_in env) env
+          case resVar rt_in env of
+            Regular arr -> do
+              arr' <-
+                certifying (distCerts inps aux env) . letExp (baseName v <> "_opaque") $
+                  BasicOp (Opaque op (Var arr))
+              pure $ insertRegulars [distResTag res] [arr'] env
+            Irregular irreg -> do
+              elems' <-
+                certifying (distCerts inps aux env) . letExp (baseName v <> "_opaque") $
+                  BasicOp (Opaque op (Var (irregularD irreg)))
+              pure $ insertRep (distResTag res) (Irregular irreg {irregularD = elems'}) env
       | otherwise ->
           scalarCase
     Reshape arr reshape
