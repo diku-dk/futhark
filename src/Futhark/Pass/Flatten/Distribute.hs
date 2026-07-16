@@ -339,42 +339,77 @@ isParallelStm funHasParallelism stm =
 isRegularDistResult :: DistResult -> Bool
 isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 
+-- | Does the statement contain, inside a 'Loop' or 'Match', a statement whose
+-- result is sized by a name bound within the enclosing statement itself? Such a
+-- statement can never be executed sequentially inside a GPU kernel, as it
+-- implies an allocation whose size cannot be computed before the kernel is
+-- launched; only the irregular flattening machinery can handle it. In contrast,
+-- sizes that are nonuniform merely by being variant to the enclosing map-nest
+-- are fine, as memory expansion can compute those via slicing. This is
+-- essentially a heuristic where we bet that slicing is efficient; the fully
+-- principled stance would be to not allow any nonuniformity. This is one of the
+-- criteria of 'mustDistribute' in 'classifyStms'. See Note [Meaningful
+-- Parallelism].
+stmHasNonuniformInside :: Stm SOACS -> Bool
+stmHasNonuniformInside = inExp mempty . stmExp
+  where
+    nonuniform bound = any (`nameIn` bound) . subExpVars . arrayDims
+    inExp bound e =
+      case e of
+        Loop merge form body ->
+          inBody
+            ( bound
+                <> namesFromList (map (paramName . fst) merge)
+                <> namesFromList (M.keys (scopeOfLoopForm form))
+            )
+            body
+        Match _ cases def_body _ ->
+          any (inBody bound) (def_body : map caseBody cases)
+        WithAcc _ lam -> inBody bound (lambdaBody lam)
+        _ -> False
+    inBody bound body =
+      any (inStm (bound <> boundInBody body)) $ bodyStms body
+    inStm bound stm =
+      any (nonuniform bound) (patTypes (stmPat stm))
+        || inExp bound (stmExp stm)
+
 --  we should probably sort the DistStms first and we should assume they are sorted
 -- and then given to this function.
 classifyStms :: DistIrregularity -> FunHasParallelism -> Result -> DistStms -> DistStms
 classifyStms irreg_mode funHasParallelism bodyRes = classify
   where
-    -- If no statement contains meaningful parallelism, treat the trivially
-    -- parallel statements as sequential as well. Statements with irregular
-    -- results must still be distributed when those results escape the scalar
-    -- group, as only regular values can be produced by sequentially executed
-    -- groups; if the irregular values are used only internally (e.g. slices
-    -- feeding a concatenation of regular size), they can be executed
-    -- sequentially. See Note [Meaningful Parallelism].
+    -- Distribute the statements that are parallel, plus those that
+    -- 'mustDistribute' regardless of parallelism. If no statement contains
+    -- meaningful parallelism, no statement counts as parallel, so that the
+    -- trivially parallel statements are treated as sequential as well. See
+    -- Note [Meaningful Parallelism].
     --
     -- With 'SequentialiseIrregular', basic operations that involve irregularity
-    -- are further only distributed when the irregularity escapes the scalar
+    -- further count as parallel only when the irregularity escapes the scalar
     -- group.
-    classify ds
-      | any meaningfulDistStm ds =
-          case irreg_mode of
-            DistributeIrregular ->
-              groupStms (isParallelDistStm (isParallelStm funHasParallelism)) ds
-            SequentialiseIrregular ->
-              let regular_parallel d =
-                    isParallelDistStm (isParallelStm funHasParallelism) d
-                      && not (isBasicOpDistStm d && involvesIrregularity ds d)
-                  forced =
-                    mustDistribute (S.fromList $ filter regular_parallel $ toList ds) ds
-               in groupStms (\d -> regular_parallel d || d `S.member` forced) ds
-      | otherwise = groupStms (`S.member` mustDistribute mempty ds) ds
+    classify ds =
+      let parallel
+            | any meaningfulDistStm ds =
+                case irreg_mode of
+                  DistributeIrregular ->
+                    isParallelDistStm (isParallelStm funHasParallelism)
+                  SequentialiseIrregular ->
+                    \d ->
+                      isParallelDistStm (isParallelStm funHasParallelism) d
+                        && not (isBasicOpDistStm d && involvesIrregularity ds d)
+            | otherwise = const False
+          forced = mustDistribute (S.fromList $ filter parallel $ toList ds) ds
+       in groupStms (\d -> parallel d || d `S.member` forced) ds
     meaningfulDistStm d@(DistStm _ _ (ParallelStm stm)) =
       (isBasicOpDistStm d && any (`nameIn` freeIn bodyRes) (patNames (stmPat stm)))
         || stmHasMeaningfulParallelism funHasParallelism stm
     meaningfulDistStm _ = False
     isBasicOpDistStm (DistStm _ _ (ParallelStm (Let _ _ BasicOp {}))) = True
     isBasicOpDistStm _ = False
-    -- Whether a statement produces an irregular value, or consumes
+    distStmHasNonuniformInside (DistStm _ _ (ParallelStm stm)) =
+      stmHasNonuniformInside stm
+    distStmHasNonuniformInside _ = False
+    -- Whether a statement produces an irregular array, or consumes
     -- one produced elsewhere in the body.
     involvesIrregularity ds d =
       not (all isRegularDistResult (distStmResult d))
@@ -387,15 +422,26 @@ classifyStms irreg_mode funHasParallelism bodyRes = classify
             map distResTag $
               filter (not . isRegularDistResult) $
                 foldMap distStmResult ds
-    -- The statements with irregular results that require distribution: those
-    -- whose irregular results are used outside the scalar group (by the body
-    -- result, or transitively by another distributed statement), and those that
-    -- are not BasicOps. The latter is because a compound statement (e.g. a
-    -- loop) with irregular results contains irregular allocations that only
-    -- flattening can handle, while a basic operation can reasonably be executed
-    -- sequentially by a single thread when its result stays internal. The
-    -- initial set of forced statements may be seeded with the statements
-    -- already known to be distributed, such that irregular values they consume
+    -- The statements that require distribution regardless of whether they
+    -- contain profitable parallelism, because a sequentially executed scalar
+    -- group cannot handle their sizes:
+    --
+    -- (1) Statements whose irregular results are used outside the scalar
+    --     group (by the body result, or transitively by another distributed
+    --     statement), as arrays produced by sequentially executed groups
+    --     must be regular.
+    --
+    -- (2) Compound statements (e.g. loops) with irregular results, even
+    --     internally used ones: they contain allocations of nonuniform size
+    --     that only flattening can handle, while a basic operation can
+    --     reasonably be executed sequentially by a single thread when its
+    --     result stays internal.
+    --
+    -- (3) Statements with sizes bound inside their own sequential control
+    --     flow ('stmHasNonuniformInside').
+    --
+    -- The initial set of forced statements may be seeded with the statements
+    -- already known to be distributed, such that irregular arrays they consume
     -- are also distributed.
     mustDistribute seed ds = fixpoint seed
       where
@@ -409,6 +455,7 @@ classifyStms irreg_mode funHasParallelism bodyRes = classify
             [rt | stm <- S.toList forced, (_, DistInput rt _) <- distStmInputs stm]
         isForced forced stm =
           (not (isBasicOpDistStm stm) && not (null (irregularResults stm)))
+            || distStmHasNonuniformInside stm
             || any
               ( \r ->
                   distResName r `S.member` bodyResNames
@@ -560,15 +607,22 @@ distributeMap irreg_mode funHasParallelism outer_scope map_pat w arrs lam =
 --
 -- One exception is irregularity. A statement whose result shape varies
 -- across the surrounding map nest (e.g. 'iota x' for a mapped 'x') cannot
--- in general be traversed sequentially per thread, as only regular values
--- can be produced as results of sequentially executed groups - handling it
+-- in general be traversed sequentially per thread, as arrays produced as
+-- results of sequentially executed groups must be regular - handling it
 -- is exactly what flattening is for. Hence irregular results still count
--- as meaningful, with one refinement in (1): if the irregular values are
+-- as meaningful, with one refinement in (1): if the irregular arrays are
 -- used only *within* the scalar group (e.g. slices feeding a concatenation
--- whose size is ultimately regular), the statements can be executed
+-- whose size is ultimately uniform), the statements can be executed
 -- sequentially after all - see 'mustDistribute' in 'classifyStms'. In (2)
 -- irregular results make versioning worthwhile
 -- ('lambdaHasMeaningfulParallelism' in Futhark.Pass.Flatten.Incremental).
+--
+-- The refinement above does not extend to nonuniformity arising *inside* a
+-- sequential Loop or Match: an array sized by a loop-variant name implies an
+-- allocation whose size cannot be computed before a kernel is launched, so a
+-- statement containing one can never be part of a sequentially executed
+-- scalar group, even if nothing irregular escapes it. Such statements are
+-- unconditionally forced by 'mustDistribute' - see 'stmHasNonuniformInside'.
 --
 -- Another exception is when a trivial statement (a basic operation) produces
 -- the result of a body - in that case we also treat it as meaningful, because
