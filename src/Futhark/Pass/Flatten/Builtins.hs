@@ -474,21 +474,15 @@ genSegPrefixSum lvl desc flags ns = do
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
   head <$> genSegScan lvl desc add_lam [intConst Int64 0] flags [ns]
 
--- TODO: We can just remove this
+-- | Convenience wrapper around 'genScatterND' for one-dimensional
+-- destinations.
 genScatter ::
   (MonadBuilder m, Rep m ~ GPU) =>
   SegLevel -> VName -> SubExp -> (SubExp -> m (VName, SubExp)) -> m (Exp GPU)
-genScatter lvl dest n f = do
-  gtid <- newVName "gtid"
-  space <- mkSegSpace [(gtid, n)]
-  withAcc [dest] 1 $ \ ~[acc] -> do
-    kbody <- buildBody_ $ localScope (scopeOfSegSpace space) $ do
-      (i, v) <- f $ Var gtid
-      acc' <- letExp (baseName acc) $ BasicOp $ UpdateAcc Safe acc [Var i] [v]
-      pure [Returns ResultMaySimplify mempty $ Var acc']
-    acc_t <- lookupType acc
-    lvl' <- capThreadSegLevel [n] "genScatter" lvl $ NoRecommendation SegVirt
-    letTupExp' "scatter" $ Op $ SegOp $ SegMap lvl' space [acc_t] kbody
+genScatter lvl dest n f =
+  genScatterND lvl dest [n] $ \ ~[gtid] -> do
+    (i, v) <- f gtid
+    pure ([Var i], v)
 
 genScatterND ::
   (MonadBuilder m, Rep m ~ GPU) =>
