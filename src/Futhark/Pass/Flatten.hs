@@ -93,18 +93,18 @@ topLevelversionScanRed ::
   FlattenM (Stms GPU)
 topLevelversionScanRed funHasParallelism desc pat w arrs form aux outer_only_stms = do
   scope <- castScope <$> askScope
-  let outerOnlyBody0 = mkBody outer_only_stms $ varsRes $ patNames pat
-  maybeFullFlattenBody <-
+  let body_outerpar = mkBody outer_only_stms $ varsRes $ patNames pat
+  maybe_body_flattened <-
     factorScremaForParallelism funHasParallelism scope (stmAuxCerts aux) pat w arrs form
-  case maybeFullFlattenBody of
+  case maybe_body_flattened of
     Nothing -> pure outer_only_stms
-    Just fullFlattenBody0 -> do
-      outerOnlyBody <- renameBody outerOnlyBody0
-      fullFlattenBody <- transformBody funHasParallelism =<< renameBody fullFlattenBody0
+    Just body_flattened0 -> do
+      outerOnlyBody <- renameBody body_outerpar
+      body_flattened <- transformBody funHasParallelism =<< renameBody body_flattened0
       let result_ts = patTypes pat
           attrs = stmAuxAttrs aux
       collectStms_ $ do
-        let fullAlternative = kernelAlternatives desc result_ts fullFlattenBody []
+        let fullAlternative = kernelAlternatives desc result_ts body_flattened []
             outerAlternative = kernelAlternatives desc result_ts outerOnlyBody []
             fullWithOuterAlternative = do
               (outer_suff, _) <-
@@ -113,7 +113,7 @@ topLevelversionScanRed funHasParallelism desc pat w arrs form aux outer_only_stm
                   [w]
                   mempty
                   Nothing
-              kernelAlternatives desc result_ts fullFlattenBody [(outer_suff, outerOnlyBody)]
+              kernelAlternatives desc result_ts body_flattened [(outer_suff, outerOnlyBody)]
             alternatives
               | isParallelFunInside funHasParallelism $ lambdaBody . scremaLambda $ form =
                   fullAlternative
