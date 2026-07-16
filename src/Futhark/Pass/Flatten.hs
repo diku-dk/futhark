@@ -312,8 +312,9 @@ liftFunName name = name <> "_lifted"
 -- the same value more than once).  For every such result we insert a
 -- copy to re-establish the invariant.  Results that are already fresh
 -- are left untouched, so no superfluous copies are inserted.
-freshenResult :: [FParam GPU] -> Stms GPU -> Result -> FlattenM Result
-freshenResult params stms result = do
+freshenResult :: [FParam GPU] -> FlattenM Result -> FlattenM Result
+freshenResult params m = do
+  (result, stms) <- collectStms m
   addStms stms
   let param_names = namesFromList $ map paramName params
       -- Transitive aliases of each result, including aliases with
@@ -391,17 +392,16 @@ liftFunDef funHasParallelism const_scope fd = do
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
   -- Lift the body of the function and get the results, inserting copies as
   -- necessary to ensure the results are fresh and unique (see 'freshenResult').
-  ((result, stms), needs) <-
-    runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $ do
-      (result0, body_stms) <-
-        collectStms . liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
+  (body', needs) <-
+    runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
+      buildBody_ . freshenResult fparams'' $
+        liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
           bodyResult body
-      collectStms $ freshenResult fparams'' body_stms result0
   let name = liftFunName $ funDefName fd
   pure
     ( fd
         { funDefName = name,
-          funDefBody = Body () stms result,
+          funDefBody = body',
           funDefParams = fparams'',
           funDefRetType = rettype'
         },
