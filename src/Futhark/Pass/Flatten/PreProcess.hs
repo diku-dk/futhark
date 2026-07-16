@@ -10,6 +10,7 @@ module Futhark.Pass.Flatten.PreProcess
     preprocessStms,
     preprocessStm,
     preprocessLambda,
+    runSimplifiedBuilder,
   )
 where
 

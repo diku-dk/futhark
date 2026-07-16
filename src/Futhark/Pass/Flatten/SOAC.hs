@@ -29,6 +29,7 @@ import Futhark.Pass.Flatten.Incremental
 import Futhark.Pass.Flatten.Intrablock qualified as Intrablock
 import Futhark.Pass.Flatten.PreProcess
 import Futhark.Tools
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Transform.ToGPU (soacsLambdaToGPU)
@@ -46,14 +47,16 @@ freeWithTypeDeps inps free = do
   pure $ nubOrd $ namesToList free_sizes <> free_names
 
 -- Reduction or scan operators may not have any free variables that are variant
--- to the nest (that is, are inputs to the distributed operation). This is
--- because we would be unable to express them as SegScan/SegReds. Fixing this
--- would require modifications to the SegOp representation, but it is likely not
--- worth it, as such operators are extremely rare - and we can just fall back on
+-- to the nest (that is, are inputs to the distributed operation), and must
+-- operate on primitive types. This is because we would be unable to express
+-- them as SegScan/SegReds. Fixing this would require modifications to the
+-- SegOp representation, but it is likely not worth it, as such operators are
+-- extremely rare - and we can just fall back on sequentialising the SOAC and
+-- flattening the resulting loop.
 suitableOperator :: DistEnv -> DistInputs -> Lambda SOACS -> [SubExp] -> Bool
 suitableOperator _env inps lam _nes =
   allNames notVariant (freeIn lam)
-    && all primType (lambdaReturnType lam) -- TODO
+    && all primType (lambdaReturnType lam)
   where
     notVariant = not . isVariant inps . Var
 
@@ -1332,7 +1335,20 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
               error "transformScrema: complex Screma survived preprocessing"
           | all isRegularDistResult res ->
               flattenScalarStm ops segments env inps res $ Let pat aux (Op (Screma w arrs form))
-          | otherwise -> error "Unhandled SOAC"
+          | otherwise -> do
+              -- XXX: The results are nonuniform, so we cannot run the SOAC
+              -- unchanged inside a kernel. Sequentialise it to a loop and
+              -- flatten that instead. This does lose us potential parallelism.
+              -- A solution would be to preprocess such cases to express them in
+              -- terms of loops and maps instead, which we can indeed handle.
+              stms <-
+                preprocessStms pp_scope
+                  =<< runSimplifiedBuilder
+                    pp_scope
+                    (auxing aux $ FOT.transformSOAC pat $ Screma w arrs form)
+              let body = mkBody stms $ varsRes $ patNames pat
+              reps <- distributeAndFlattenBody ops segments "sequentialised_soac" env inps res body
+              pure $ insertReps (zip (map distResTag res) reps) env
   where
     funHasParallelism = flattenFunHasParallelism ops
     lvl = flattenSegLevel ops
