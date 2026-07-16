@@ -373,16 +373,49 @@ stmHasNonuniformInside = inExp mempty . stmExp
       any (nonuniform bound) (patTypes (stmPat stm))
         || inExp bound (stmExp stm)
 
+-- | Merge a group of scalar 'DistStm's into a single one.
+mergeGroup :: Result -> DistStms -> DistStms -> DistStm
+mergeGroup bodyRes ds rest =
+  let resTags =
+        S.fromList $ concatMap (map distResTag . distStmResult) ds
+      isInternal (_, DistInput rt _) = rt `S.member` resTags
+      isInternal _ = False
+      externalInputs =
+        nubInputs $
+          concatMap (filter (not . isInternal) . distStmInputs) ds
+      externalResults =
+        nubOrd $
+          concatMap (filter (isExternal bodyRes rest) . distStmResult) ds
+      allStms = foldMap distStmStms ds
+   in DistStm externalInputs externalResults (ScalarStm allStms)
+
+groupStms ::
+  (DistStm -> Bool) ->
+  Result ->
+  Seq.Seq DistStm ->
+  Seq.Seq DistStm
+groupStms _ _ Seq.Empty = mempty
+groupStms dist_stm_is_parallel body_res ds' =
+  let (scalars, rest) = Seq.breakl dist_stm_is_parallel ds'
+      scalar_grouped
+        | not $ null scalars =
+            Seq.singleton $ mergeGroup body_res scalars rest
+        | otherwise = mempty
+   in case rest of
+        Seq.Empty -> scalar_grouped
+        p Seq.:<| ps ->
+          scalar_grouped <> (p Seq.<| groupStms dist_stm_is_parallel body_res ps)
+
 --  we should probably sort the DistStms first and we should assume they are sorted
 -- and then given to this function.
 classifyStms :: DistIrregularity -> FunHasParallelism -> Result -> DistStms -> DistStms
-classifyStms irreg_mode funHasParallelism bodyRes = classify
+classifyStms irreg_mode funHasParallelism body_res = classify
   where
     -- Distribute the statements that are parallel, plus those that
     -- 'mustDistribute' regardless of parallelism. If no statement contains
     -- meaningful parallelism, no statement counts as parallel, so that the
-    -- trivially parallel statements are treated as sequential as well. See
-    -- Note [Meaningful Parallelism].
+    -- trivially parallel statements are treated as sequential as well. See Note
+    -- [Meaningful Parallelism].
     --
     -- With 'SequentialiseIrregular', basic operations that involve irregularity
     -- further count as parallel only when the irregularity escapes the scalar
@@ -399,16 +432,20 @@ classifyStms irreg_mode funHasParallelism bodyRes = classify
                         && not (isBasicOpDistStm d && involvesIrregularity ds d)
             | otherwise = const False
           forced = mustDistribute (S.fromList $ filter parallel $ toList ds) ds
-       in groupStms (\d -> parallel d || d `S.member` forced) ds
+       in groupStms (\d -> parallel d || d `S.member` forced) body_res ds
+
     meaningfulDistStm d@(DistStm _ _ (ParallelStm stm)) =
-      (isBasicOpDistStm d && any (`nameIn` freeIn bodyRes) (patNames (stmPat stm)))
+      (isBasicOpDistStm d && any (`nameIn` freeIn body_res) (patNames (stmPat stm)))
         || stmHasMeaningfulParallelism funHasParallelism stm
     meaningfulDistStm _ = False
+
     isBasicOpDistStm (DistStm _ _ (ParallelStm (Let _ _ BasicOp {}))) = True
     isBasicOpDistStm _ = False
+
     distStmHasNonuniformInside (DistStm _ _ (ParallelStm stm)) =
       stmHasNonuniformInside stm
     distStmHasNonuniformInside _ = False
+
     -- Whether a statement produces an irregular array, or consumes
     -- one produced elsewhere in the body.
     involvesIrregularity ds d =
@@ -422,6 +459,7 @@ classifyStms irreg_mode funHasParallelism bodyRes = classify
             map distResTag $
               filter (not . isRegularDistResult) $
                 foldMap distStmResult ds
+
     -- The statements that require distribution regardless of whether they
     -- contain profitable parallelism, because a sequentially executed scalar
     -- group cannot handle their sizes:
@@ -445,9 +483,7 @@ classifyStms irreg_mode funHasParallelism bodyRes = classify
     -- are also distributed.
     mustDistribute seed ds = fixpoint seed
       where
-        bodyResNames =
-          S.fromList $
-            concatMap (\(SubExpRes cs se) -> subExpVars [se] <> unCerts cs) bodyRes
+        body_res_names = freeIn body_res
         irregularResults stm =
           filter (not . isRegularDistResult) $ distStmResult stm
         forcedTags forced =
@@ -458,40 +494,13 @@ classifyStms irreg_mode funHasParallelism bodyRes = classify
             || distStmHasNonuniformInside stm
             || any
               ( \r ->
-                  distResName r `S.member` bodyResNames
+                  distResName r `nameIn` body_res_names
                     || distResTag r `S.member` forcedTags forced
               )
               (irregularResults stm)
         fixpoint forced =
           let forced' = seed <> S.fromList (filter (isForced forced) $ toList ds)
            in if forced' == forced then forced else fixpoint forced'
-    groupStms _ Seq.Empty = mempty
-    groupStms dist_stm_is_parallel ds' =
-      let (scalars, rest) = Seq.breakl dist_stm_is_parallel ds'
-          scalar_grouped
-            | not $ null scalars =
-                Seq.singleton $ mergeGroup bodyRes scalars rest
-            | otherwise = mempty
-       in case rest of
-            Seq.Empty -> scalar_grouped
-            p Seq.:<| ps ->
-              scalar_grouped <> (p Seq.<| groupStms dist_stm_is_parallel ps)
-
--- | Merge a group of scalar 'DistStm's into a single one.
-mergeGroup :: Result -> DistStms -> DistStms -> DistStm
-mergeGroup bodyRes ds rest =
-  let resTags =
-        S.fromList $ concatMap (map distResTag . distStmResult) ds
-      isInternal (_, DistInput rt _) = rt `S.member` resTags
-      isInternal _ = False
-      externalInputs =
-        nubInputs $
-          concatMap (filter (not . isInternal) . distStmInputs) ds
-      externalResults =
-        nubOrd $
-          concatMap (filter (isExternal bodyRes rest) . distStmResult) ds
-      allStms = foldMap distStmStms ds
-   in DistStm externalInputs externalResults (ScalarStm allStms)
 
 -- | A result is external if it is used by a subsequent 'DistStm' or by the body
 -- result.
