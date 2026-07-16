@@ -1409,7 +1409,7 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops0, 
           )
           scope
       let body = mkBody stms $ varsRes $ concat hist_res
-      reps <- distributeAndFlattenBody ops segments "non_unifrom_hist_body" env inps res body
+      reps <- distributeAndFlattenBody ops segments "non_uniform_hist_body" env inps res body
       pure $ insertReps (zip (map distResTag res) reps) env
     else do
       let new_segment = segments <> pure w

@@ -173,9 +173,10 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
     num_accs = length withacc_inputs
 
     onOpWithIndexRank index_rank (op_lam, nes) = do
-      -- We need to add an additional index parameter because we are
-      -- extending the index space of the accumulator.
-      -- In the unifrom case we have the full index space of the segments, while in the nonuniform case we only have one additional dimension.
+      -- We need to add an additional index parameter because we are extending
+      -- the index space of the accumulator. In the uniform case we have the
+      -- full index space of the segments, while in the nonuniform case we only
+      -- have one additional dimension.
       idx_ps <- replicateM index_rank $ newParam "idx" $ Prim int64
       pure
         ( soacsLambdaToGPU $

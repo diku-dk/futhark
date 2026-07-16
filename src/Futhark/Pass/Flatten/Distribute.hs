@@ -113,7 +113,8 @@ data DistResult = DistResult {distResTag :: ResTag, distResType :: DistType, dis
 
 -- | The body of a distributed statement.
 data DistBody
-  = -- | A single statement That may involve parallel operations or produces non unifrom array.
+  = -- | A single statement That may involve parallel operations or produces non
+    -- uniform array.
     ParallelStm (Stm SOACS)
   | -- | Single or Multiple scalar operations grouped into a single traversal
     ScalarStm (Stms SOACS)
