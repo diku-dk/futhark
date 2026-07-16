@@ -697,12 +697,14 @@ onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod =
           v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape new_flat $ reshapeAll old_shape new_shape
           pure $ MapArray v_reshaped p_t
     else do
-      -- We need to split multi-dimensional irregular segments
-      -- into per-row segments. Compute per-row size by dividing
-      -- each segment's total size by the number of inner iterations.
-      -- Important TODO: I should ask troels about this.
-      -- we should make this consistent.
-      -- we can avoid getting per_row_size by division.
+      -- We need to split multi-dimensional irregular segments into per-row
+      -- segments. We compute the per-row size by dividing each segment's total
+      -- size by its number of rows. The division is exact: within a single
+      -- segment the array is an ordinary rectangular value, so all rows have
+      -- the same size - irregularity exists only across segments. The
+      -- alternative would be to read the row size from the sizes in the
+      -- parameter type, but those are per-segment distributed inputs, and we do
+      -- not have the environment at hand here to look them up.
       num_segments <- arraySize 0 <$> lookupType ws
       -- per_row_size[s] = irregularS[s] / ws[s]
       per_row_size <-
