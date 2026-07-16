@@ -441,8 +441,6 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
 transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
       let certs = stmAuxCerts aux
-      (outer_only_res, outer_only_stms) <-
-        collectStms $ certifying certs $ runInnerSeqMap w arrs lam pat []
       scope <- castScope <$> askScope
       -- Propagate incremental flattening attributes to the
       -- statements of the map body, such that they can influence how
@@ -450,21 +448,24 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
       -- Screma resulting from map-loop interchange). This corresponds
       -- to the attributes applying to the entire nest.
 
-      lamFullFlatten <-
+      lam_toflatten <-
         fmap (propagateVersioningAttrs $ stmAuxAttrs aux) . renameLambda
           =<< preprocessLambda scope lam
       let arrs' =
             zipWith MapArray arrs $
               map paramType (lambdaParams (scremaLambda form))
-          (distributed, _) = distributeMap DistributeIrregular funHasParallelism scope pat (NE.singleton w) arrs' lamFullFlatten
+          (distributed, _) = distributeMap DistributeIrregular funHasParallelism scope pat (NE.singleton w) arrs' lam_toflatten
           ops = flattenOpsFor funHasParallelism defaultSegLevel
-          m = transformDistributed ops mempty (NE.singleton w) distributed
       debugTraceM 1 $ prettyString distributed
-      stms <- collectStms_ $ certifying certs m
-      let fullFlattenBody0 = mkBody stms $ varsRes $ patNames pat
-          outerOnlyBody0 = mkBody outer_only_stms $ varsRes outer_only_res
-      fullFlattenBody <- renameBody fullFlattenBody0
-      outerOnlyBody <- renameBody outerOnlyBody0
+
+      body_flattened <- renameBody <=< buildBody_ $ do
+        certifying certs $ transformDistributed ops mempty (NE.singleton w) distributed
+        pure $ varsRes $ patNames pat
+
+      body_outerpar <-
+        renameBody <=< buildBody_ . fmap varsRes . certifying certs $
+          runInnerSeqMap w arrs lam pat []
+
       collectStms_ $ do
         let only_intra = onlyExploitIntra (stmAuxAttrs aux)
             may_intra = worthIntrablock lam && mayExploitIntra (stmAuxAttrs aux)
@@ -485,9 +486,9 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
           _
             -- We have non-inlined parallel function call we have to fully flatten the body
             | isParallelFunInside funHasParallelism (lambdaBody lam) ->
-                kernelAlternatives "top_level_map_alt" result_ts fullFlattenBody []
+                kernelAlternatives "top_level_map_alt" result_ts body_flattened []
             | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
-                kernelAlternatives "top_level_map_alt" result_ts outerOnlyBody []
+                kernelAlternatives "top_level_map_alt" result_ts body_outerpar []
           Nothing
             | not only_intra,
               worthSequentialising lam,
@@ -496,10 +497,10 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
                 kernelAlternatives
                   "top_level_map_alt"
                   result_ts
-                  fullFlattenBody
-                  [(outer_suff, outerOnlyBody)]
+                  body_flattened
+                  [(outer_suff, body_outerpar)]
             | otherwise ->
-                kernelAlternatives "top_level_map_alt" result_ts fullFlattenBody []
+                kernelAlternatives "top_level_map_alt" result_ts body_flattened []
           Just intra_res
             | only_intra -> do
                 (_, intra_body) <- intraBlockAlternative intra_res
@@ -511,14 +512,14 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
                 kernelAlternatives
                   "top_level_map_alt"
                   result_ts
-                  fullFlattenBody
-                  [(outer_suff, outerOnlyBody), intra_alt]
+                  body_flattened
+                  [(outer_suff, body_outerpar), intra_alt]
             | otherwise -> do
                 intra_alt <- intraBlockAlternative intra_res
                 kernelAlternatives
                   "top_level_map_alt"
                   result_ts
-                  fullFlattenBody
+                  body_flattened
                   [intra_alt]
         forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
           letBindNames [v] $ BasicOp $ SubExp $ Var v_alt
