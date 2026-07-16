@@ -443,6 +443,12 @@ prepareSegOpInputs lvl segments env inps w reps names hasNoFreeVariant
       names' <- mapM (flattenRegularRep m) reps
       pure (ws_F, ws_O, ws, names', Dense)
   | all isReplicatedIrregular reps && hasNoFreeVariant = do
+      -- We use the descriptor of the first rep for all inputs, which assumes
+      -- that all the replicated inputs have the same offsets into their
+      -- respective data arrays. This holds because same-width views produced
+      -- by onMapFreeVar inherit the offsets of their underlying arrays, and
+      -- those are compact per-segment arrays of the SOAC width (slices are
+      -- materialised before they can become inputs here).
       let Irregular rep0 = head reps
       pure (irregularF rep0, irregularO rep0, irregularS rep0, map getData reps, Replicated)
   | otherwise = do
@@ -1236,7 +1242,6 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
       free_and_sizes <- freeWithTypeDeps inps free
       ws <- dataArr lvl segments env inps w
       (_, _, ws_data) <- doRepIota lvl ws_S
-      -- TODO: this will break in certain cases where the free variable is an irregular that needs to be replicated
       (free_replicated, replicated) <-
         fmap unzip . sequence $
           mapMaybe
@@ -1291,7 +1296,6 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
       free_and_sizes <- freeWithTypeDeps inps free
       ws <- dataArr lvl segments env inps w
       (_, _, ws_data) <- doRepIota lvl ws_S
-      -- TODO: this will break in certain cases where the free variable is an irregular that needs to be replicated
       (free_replicated, replicated) <-
         fmap unzip . sequence $
           mapMaybe
