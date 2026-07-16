@@ -292,8 +292,7 @@ runInnerSeqMap w arrs map_lam _pat _ress = do
             eSubExp $ Var arr
           _ ->
             eIndex arr [eSubExp gtid]
-    addStms $ bodyStms $ lambdaBody map_lam'
-    pure $ bodyResult $ lambdaBody map_lam'
+    bodyBind $ lambdaBody map_lam'
 
 liftBody :: FunHasParallelism -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> Result -> FlattenM Result
 liftBody funHasParallelism lvl w inputs env dstms result = do

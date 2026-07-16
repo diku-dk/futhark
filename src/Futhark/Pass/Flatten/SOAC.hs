@@ -1119,8 +1119,7 @@ runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
     readInputs segments env outer_is free_inputs
     readInputs new_segments param_env full_is param_inputs
 
-    addStms $ bodyStms $ lambdaBody map_lam'
-    pure $ bodyResult $ lambdaBody map_lam'
+    bodyBind $ lambdaBody map_lam'
   forM vs $ \v -> do
     letExp (baseName v <> "_copy") $
       BasicOp $
