@@ -225,8 +225,13 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
             then 0
             else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
 
--- | A lambda is worth sequentialising if it contains enough nested
--- parallelism of an interesting kind.
+-- | A lambda is worth sequentialising if it contains enough nested parallelism
+-- of an interesting kind, or if distributing it would fragment sequential
+-- control flow - that is, if it contains meaningful parallelism nested inside a
+-- sequential loop or branch. Distribution must then split the loop or branch
+-- into separate kernel launches (and possibly host-evaluated control flow) per
+-- sequential step, so a version that instead sequentialises the nested
+-- parallelism is always worth offering.
 --
 -- TODO: maybe update this or just always consider Sequentialising
 worthSequentialising :: Lambda SOACS -> Bool
@@ -245,10 +250,10 @@ worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
       | Loop _ _ body <- stmExp stm =
           bodyInterest (depth + 1) body * 10
       | Match _ cases defbody _ <- stmExp stm =
-          foldl
-            max
-            (bodyInterest (depth + 1) defbody)
-            (map (bodyInterest (depth + 1) . caseBody) cases)
+          (2 *) $
+            maximum $
+              map (bodyInterest (depth + 1)) $
+                defbody : map caseBody cases
       | WithAcc _ withacc_lam <- stmExp stm =
           bodyInterest (depth + 1) (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm =
