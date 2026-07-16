@@ -112,8 +112,8 @@ interchangedLoopBody ::
   DistInputs ->
   StmAux () ->
   Body SOACS ->
-  FlattenM Result
-interchangedLoopBody ops num_segments segments env params free_inps aux body = do
+  FlattenM (Body GPU)
+interchangedLoopBody ops num_segments segments env params free_inps aux body = buildBody_ $ do
   let flatInput name arr t = do
         arr_t <- lookupType arr
         letExp (baseName name <> "_flat") . BasicOp . Reshape arr $
@@ -201,13 +201,13 @@ distributedLoopBody ::
   DistEnv ->
   [DistResult] ->
   Body SOACS ->
-  FlattenM (Result, Stms GPU)
+  FlattenM (Body GPU)
 distributedLoopBody ops segments num_segments loop_scope inputs env res body = do
   scope <- askScope
   let lvl = flattenSegLevel ops
       (inputs', dstms) =
         distributeBody (distIrregularityAtLevel lvl) (flattenFunHasParallelism ops) scope segments inputs body
-  collectStms . localScope loop_scope $ do
+  buildBody_ $ localScope loop_scope $ do
     env' <- foldM (flattenDistStm ops segments) env dstms
     concat <$> zipWithM (liftLoopResult lvl segments num_segments inputs' env') res (bodyResult body)
 
@@ -390,10 +390,10 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
               && all simpleParam old_loop_params
               && all regularInput free_inps
 
-      (loop_body_res, loop_body_stms) <-
+      loop_body_gpu <-
         if interchangeable
           then
-            collectStms . localScope build_scope $
+            localScope build_scope $
               interchangedLoopBody
                 ops
                 num_segments
@@ -404,10 +404,17 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
                 aux
                 body
           else
-            distributedLoopBody ops segments num_segments build_scope loop_new_inputs loop_env_local res body
+            distributedLoopBody
+              ops
+              segments
+              num_segments
+              build_scope
+              loop_new_inputs
+              loop_env_local
+              res
+              body
 
-      let loop_body_gpu = Body () loop_body_stms loop_body_res
-          loop_exp_gpu =
+      let loop_exp_gpu =
             Loop
               (zip lifted_loop_params' lifted_init')
               (ForLoop i it n)
@@ -450,10 +457,9 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
   case maybe_cond of
     -- infinite loop
     Nothing -> do
-      (loop_body_res, loop_body_stms) <-
+      loop_body_gpu <-
         distributedLoopBody ops segments w (scopeOfFParams lifted_loop_params') loop_new_inputs loop_env_local res body
-      let loop_body_gpu = Body () loop_body_stms loop_body_res
-          loop_exp_gpu = Loop (zip lifted_loop_params' lifted_init') (WhileLoop cond) loop_body_gpu
+      let loop_exp_gpu = Loop (zip lifted_loop_params' lifted_init') (WhileLoop cond) loop_body_gpu
       loop_out_vs <- certifying (distCerts inps aux env) $ letTupExp "loop_res_out" loop_exp_gpu
       let out_reps = loopResultToResReps res loop_out_vs
       pure $ insertReps (zip (map distResTag res) out_reps) env
@@ -487,8 +493,8 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
       any_active_param <- newParam "any_active" (Prim Bool)
       let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfFParams [any_active_param]
       -- ‌build body
-      (loop_body_res, loop_body_stms) <-
-        collectStms . localScope build_scope $ do
+      loop_body_gpu <-
+        buildBody_ . localScope build_scope $ do
           -- (num_data, active_inds) <- genFilter cond_lifted_param
           equiv_classes <- letExp "equiv_classes" <=< segMap lvl (MkSolo w) $ \(MkSolo i) -> do
             let seg_is = unflattenIndex (segmentDims segments) (pe64 i)
@@ -625,16 +631,17 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
 
           pure $ merged_results ++ [SubExpRes mempty any_active]
 
-      let loop_body_gpu = Body () loop_body_stms loop_body_res
-          loop_exp_gpu =
-            Loop
-              (zip (lifted_loop_params' ++ [any_active_param]) (lifted_init' ++ [any_active_init]))
-              (WhileLoop (paramName any_active_param))
-              loop_body_gpu
-
+      let merge' =
+            zip
+              (lifted_loop_params' ++ [any_active_param])
+              (lifted_init' ++ [any_active_init])
       loop_out_vs <-
         certifying (distCerts inps aux env) $
-          letTupExp "loop_res_out" loop_exp_gpu
+          letTupExp "loop_res_out" $
+            Loop
+              merge'
+              (WhileLoop (paramName any_active_param))
+              loop_body_gpu
       let loop_out_vs' = L.init loop_out_vs
       let out_reps = loopResultToResReps res loop_out_vs'
       pure $ insertReps (zip (map distResTag res) out_reps) env

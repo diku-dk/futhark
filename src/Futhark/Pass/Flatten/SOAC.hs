@@ -804,15 +804,14 @@ transformMapForInBlock ::
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  FlattenM (Stms GPU)
+  FlattenM ()
 transformMapForInBlock ops pat w arrs map_lam = do
   scope <- askScope
   lam <- preprocessLambda (castScope scope) map_lam
-  collectStms_ $ do
-    let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
-        (distributed, _) =
-          distributeMap SequentialiseIrregular (flattenFunHasParallelism ops) scope pat (NE.singleton w) arrs' lam
-    transformDistributed ops' mempty (NE.singleton w) distributed
+  let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
+      (distributed, _) =
+        distributeMap SequentialiseIrregular (flattenFunHasParallelism ops) scope pat (NE.singleton w) arrs' lam
+  transformDistributed ops' mempty (NE.singleton w) distributed
   where
     ops' = ops {flattenSegLevel = inBlockSegLevel}
 

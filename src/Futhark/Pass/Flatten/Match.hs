@@ -231,17 +231,13 @@ transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase
     let (case_body_inputs, case_dstms) =
           distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps body
 
-    (case_body_res, case_body_stms) <-
-      collectStms $
-        liftBodyWithDistResults ops segments case_body_inputs env case_dstms res (bodyResult body)
-    pure $ Case c $ Body () case_body_stms case_body_res
+    fmap (Case c) . buildBody_ $
+      liftBodyWithDistResults ops segments case_body_inputs env case_dstms res (bodyResult body)
   new_default_body <- do
     let (new_default_body_inputs, new_default_dstms) =
           distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps defaultCase
-    (new_default_body_res, new_default_body_stms) <-
-      collectStms $
-        liftBodyWithDistResults ops segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)
-    pure $ Body () new_default_body_stms new_default_body_res
+    buildBody_ $
+      liftBodyWithDistResults ops segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)
 
   -- Maybe it is better to build MatchDec ourselves
   match_e <-

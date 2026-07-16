@@ -46,7 +46,7 @@ type InBlockMapTransformer =
   SubExp ->
   [VName] ->
   Lambda SOACS ->
-  FlattenM (Stms GPU)
+  FlattenM ()
 
 foldBinOp' :: (MonadBuilder m) => BinOp -> [SubExp] -> m (Exp (Rep m))
 foldBinOp' _ [] = eSubExp $ intConst Int64 1
@@ -339,9 +339,8 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
           intrablockStms map_in_block . fmap (certify (stmAuxCerts aux))
             =<< runBuilder_ (FOT.transformSOAC pat soac)
     Op (Screma w arrs form)
-      | Just lam <- isMapSOAC form -> do
-          stms <- map_in_block pat w arrs lam
-          addStms stms
+      | Just lam <- isMapSOAC form ->
+          map_in_block pat w arrs lam
     Op (Screma w arrs form)
       | Just (post_lam, scans, mapfun) <- isMaposcanomapSOAC form,
         -- FIXME: Futhark.CodeGen.ImpGen.GPU.Block.compileGroupOp
@@ -350,15 +349,13 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
               post_op = soacsLambdaToGPU post_lam
-          (scan_res, stms) <- runBuilder (genUniformSegScanomapWithPost lvl (pure w) "intra_maposcanomap" scanfun' mempty nes post_op mapfun' arrs (const $ pure ()))
-          certifying (stmAuxCerts aux) $ do
-            addStms stms
-            zipWithM_
-              ( \pe v ->
-                  letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
-              )
-              (patElems pat)
-              scan_res
+          scan_res <- certifying (stmAuxCerts aux) $ genUniformSegScanomapWithPost lvl (pure w) "intra_maposcanomap" scanfun' mempty nes post_op mapfun' arrs (const $ pure ())
+          zipWithM_
+            ( \pe v ->
+                letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
+            )
+            (patElems pat)
+            scan_res
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form -> do
           let onRed red =
