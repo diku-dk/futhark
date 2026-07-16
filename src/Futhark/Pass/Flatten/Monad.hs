@@ -285,9 +285,9 @@ data FlattenOps = FlattenOps
     flattenFunHasParallelism :: FunHasParallelism,
     flattenDistStmAtLevel :: SegLevel -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv,
     flattenScalarStm :: Segments -> DistEnv -> DistInputs -> [DistResult] -> Stm SOACS -> FlattenM DistEnv,
-    -- | Transform a statement as if it occurred at the top level,
-    -- including multi-versioning of SOACs. Used when a transformation
-    -- (e.g. loop interchange) produces a statement that should be
-    -- treated as if the program had looked like that all along.
-    flattenTopLevelStm :: Stm SOACS -> FlattenM (Stms GPU)
+    -- | Transform a statement as if it occurred at the top level, including
+    -- multi-versioning of SOACs. Used when a transformation (e.g. loop
+    -- interchange) produces a statement that should be treated as if the
+    -- program had looked like that all along.
+    flattenTopLevelStm :: Stm SOACS -> FlattenM ()
   }

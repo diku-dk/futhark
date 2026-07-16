@@ -150,7 +150,7 @@ interchangedLoopBody ops num_segments segments env params free_inps aux body = d
   -- (e.g. for deciding intrablock feasibility).
   scope <- castScope <$> askScope
   map_stms <- runReaderT (simplifyStms (oneStm map_stm)) (scope :: Scope SOACS)
-  mapM_ (addStms <=< flattenTopLevelStm ops) map_stms
+  mapM_ (flattenTopLevelStm ops) map_stms
   fmap (map (SubExpRes mempty . Var)) . forM (zip pes params) $ \(pe, (p, _)) -> do
     pe_t <- lookupType (patElemName pe)
     let seg_shape = segmentsShape segments <> arrayShape (fromDecl (declTypeOf p))

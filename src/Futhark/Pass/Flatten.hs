@@ -90,42 +90,41 @@ topLevelversionScanRed ::
   ScremaForm SOACS ->
   StmAux dec ->
   Stms GPU ->
-  FlattenM (Stms GPU)
+  FlattenM ()
 topLevelversionScanRed funHasParallelism desc pat w arrs form aux outer_only_stms = do
   scope <- castScope <$> askScope
   let body_outerpar = mkBody outer_only_stms $ varsRes $ patNames pat
   maybe_body_flattened <-
     factorScremaForParallelism funHasParallelism scope (stmAuxCerts aux) pat w arrs form
   case maybe_body_flattened of
-    Nothing -> pure outer_only_stms
+    Nothing -> addStms outer_only_stms
     Just body_flattened0 -> do
       outerOnlyBody <- renameBody body_outerpar
       body_flattened <- transformBody funHasParallelism =<< renameBody body_flattened0
       let result_ts = patTypes pat
           attrs = stmAuxAttrs aux
-      collectStms_ $ do
-        let fullAlternative = kernelAlternatives desc result_ts body_flattened []
-            outerAlternative = kernelAlternatives desc result_ts outerOnlyBody []
-            fullWithOuterAlternative = do
-              (outer_suff, _) <-
-                sufficientParallelism
-                  (desc <> "_suff_outer")
-                  [w]
-                  mempty
-                  Nothing
-              kernelAlternatives desc result_ts body_flattened [(outer_suff, outerOnlyBody)]
-            alternatives
-              | isParallelFunInside funHasParallelism $ lambdaBody . scremaLambda $ form =
-                  fullAlternative
-              | "sequential_inner" `inAttrs` attrs =
-                  outerAlternative
-              | mayExploitOuter attrs =
-                  fullWithOuterAlternative
-              | otherwise =
-                  fullAlternative
-        alt_vs <- alternatives
-        forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
-          letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
+          fullAlternative = kernelAlternatives desc result_ts body_flattened []
+          outerAlternative = kernelAlternatives desc result_ts outerOnlyBody []
+          fullWithOuterAlternative = do
+            (outer_suff, _) <-
+              sufficientParallelism
+                (desc <> "_suff_outer")
+                [w]
+                mempty
+                Nothing
+            kernelAlternatives desc result_ts body_flattened [(outer_suff, outerOnlyBody)]
+          alternatives
+            | isParallelFunInside funHasParallelism $ lambdaBody . scremaLambda $ form =
+                fullAlternative
+            | "sequential_inner" `inAttrs` attrs =
+                outerAlternative
+            | mayExploitOuter attrs =
+                fullWithOuterAlternative
+            | otherwise =
+                fullAlternative
+      alt_vs <- alternatives
+      forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
+        letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
 
 transformDistStm :: FunHasParallelism -> SegLevel -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
 transformDistStm _ lvl segments env (DistStm inps res (ScalarStm stms)) =
@@ -380,16 +379,16 @@ transformLambda funHasParallelism (Lambda params ret body) = do
   body' <- localScope (scopeOfLParams params) $ transformBody funHasParallelism body
   pure $ Lambda params ret body'
 
-transformStm :: FunHasParallelism -> Stm SOACS -> FlattenM (Stms GPU)
+transformStm :: FunHasParallelism -> Stm SOACS -> FlattenM ()
 transformStm funHasParallelism (Let pat aux (Op soac))
   | "sequential_outer" `inAttrs` stmAuxAttrs aux = do
       scope <- askScope
       stms <- runBuilderT_ (FOT.transformSOAC pat soac) (castScope scope)
       transformStms funHasParallelism $ fmap (certify (stmAuxCerts aux)) stms
 transformStm _ stm
-  | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm $ soacsStmToGPU stm
+  | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = addStm $ soacsStmToGPU stm
 transformStm _ (Let pat aux (Op (Hist w arrs ops bucket_fun))) =
-  collectStms_ . certifying (stmAuxCerts aux) $ do
+  certifying (stmAuxCerts aux) $ do
     res <-
       genUniformSegHist
         defaultSegLevel
@@ -466,90 +465,89 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
         renameBody <=< buildBody_ . fmap varsRes . certifying certs $
           runInnerSeqMap w arrs lam pat []
 
-      collectStms_ $ do
-        let only_intra = onlyExploitIntra (stmAuxAttrs aux)
-            may_intra = worthIntrablock lam && mayExploitIntra (stmAuxAttrs aux)
-            result_ts = patTypes pat
-        intra' <-
-          if only_intra || may_intra
-            then
-              Intrablock.intrablockParalleliseTopLevelMap
-                (transformMapForInBlock ops)
-                pat
-                aux
-                w
-                arrs
-                lam
-            else
-              pure Nothing
-        alt_vs <- case intra' of
-          _
-            -- We have non-inlined parallel function call we have to fully flatten the body
-            | isParallelFunInside funHasParallelism (lambdaBody lam) ->
-                kernelAlternatives "top_level_map_alt" result_ts body_flattened []
-            | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
-                kernelAlternatives "top_level_map_alt" result_ts body_outerpar []
-          Nothing
-            | not only_intra,
-              worthSequentialising lam,
-              mayExploitOuter (stmAuxAttrs aux) -> do
-                (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
-                kernelAlternatives
-                  "top_level_map_alt"
-                  result_ts
-                  body_flattened
-                  [(outer_suff, body_outerpar)]
-            | otherwise ->
-                kernelAlternatives "top_level_map_alt" result_ts body_flattened []
-          Just intra_res
-            | only_intra -> do
-                (_, intra_body) <- intraBlockAlternative intra_res
-                kernelAlternatives "top_level_map_alt" result_ts intra_body []
-            | worthSequentialising lam,
-              mayExploitOuter (stmAuxAttrs aux) -> do
-                intra_alt <- intraBlockAlternative intra_res
-                (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
-                kernelAlternatives
-                  "top_level_map_alt"
-                  result_ts
-                  body_flattened
-                  [(outer_suff, body_outerpar), intra_alt]
-            | otherwise -> do
-                intra_alt <- intraBlockAlternative intra_res
-                kernelAlternatives
-                  "top_level_map_alt"
-                  result_ts
-                  body_flattened
-                  [intra_alt]
-        forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
-          letBindNames [v] $ BasicOp $ SubExp $ Var v_alt
+      let only_intra = onlyExploitIntra (stmAuxAttrs aux)
+          may_intra = worthIntrablock lam && mayExploitIntra (stmAuxAttrs aux)
+          result_ts = patTypes pat
+      intra' <-
+        if only_intra || may_intra
+          then
+            Intrablock.intrablockParalleliseTopLevelMap
+              (transformMapForInBlock ops)
+              pat
+              aux
+              w
+              arrs
+              lam
+          else
+            pure Nothing
+      alt_vs <- case intra' of
+        _
+          -- We have non-inlined parallel function call we have to fully flatten the body
+          | isParallelFunInside funHasParallelism (lambdaBody lam) ->
+              kernelAlternatives "top_level_map_alt" result_ts body_flattened []
+          | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
+              kernelAlternatives "top_level_map_alt" result_ts body_outerpar []
+        Nothing
+          | not only_intra,
+            worthSequentialising lam,
+            mayExploitOuter (stmAuxAttrs aux) -> do
+              (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
+              kernelAlternatives
+                "top_level_map_alt"
+                result_ts
+                body_flattened
+                [(outer_suff, body_outerpar)]
+          | otherwise ->
+              kernelAlternatives "top_level_map_alt" result_ts body_flattened []
+        Just intra_res
+          | only_intra -> do
+              (_, intra_body) <- intraBlockAlternative intra_res
+              kernelAlternatives "top_level_map_alt" result_ts intra_body []
+          | worthSequentialising lam,
+            mayExploitOuter (stmAuxAttrs aux) -> do
+              intra_alt <- intraBlockAlternative intra_res
+              (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
+              kernelAlternatives
+                "top_level_map_alt"
+                result_ts
+                body_flattened
+                [(outer_suff, body_outerpar), intra_alt]
+          | otherwise -> do
+              intra_alt <- intraBlockAlternative intra_res
+              kernelAlternatives
+                "top_level_map_alt"
+                result_ts
+                body_flattened
+                [intra_alt]
+      forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
+        letBindNames [v] $ BasicOp $ SubExp $ Var v_alt
 transformStm funHasParallelism (Let pat aux (Loop params form body)) =
   localScope (scopeOfLoopForm form <> scopeOfFParams (map fst params)) $
-    oneStm . Let pat aux . Loop params form <$> transformBody funHasParallelism body
+    addStm . Let pat aux . Loop params form =<< transformBody funHasParallelism body
 transformStm funHasParallelism (Let pat aux (Match ses cases def_body ret)) =
-  oneStm . Let pat aux
-    <$> (Match ses <$> mapM onCase cases <*> transformBody funHasParallelism def_body <*> pure ret)
+  addStm . Let pat aux
+    =<< (Match ses <$> mapM onCase cases <*> transformBody funHasParallelism def_body <*> pure ret)
   where
     onCase = traverse (transformBody funHasParallelism)
 transformStm funHasParallelism (Let pat aux (WithAcc inputs withacc_lam)) = do
-  oneStm . Let pat aux
-    <$> (WithAcc (map onInput inputs) <$> transformLambda funHasParallelism withacc_lam)
+  addStm . Let pat aux . WithAcc (map onInput inputs)
+    =<< transformLambda funHasParallelism withacc_lam
   where
     onInput (shape, arrs, Nothing) =
       (shape, arrs, Nothing)
     onInput (shape, arrs, Just (lam, nes)) =
       (shape, arrs, Just (soacsLambdaToGPU lam, nes))
-transformStm _ stm = pure $ oneStm $ soacsStmToGPU stm
+transformStm _ stm = addStm $ soacsStmToGPU stm
 
-transformStms :: FunHasParallelism -> Stms SOACS -> FlattenM (Stms GPU)
+transformStms :: FunHasParallelism -> Stms SOACS -> FlattenM ()
 transformStms funHasParallelism stms =
   localScope (castScope $ scopeOf stms) $
     fold <$> traverse (transformStm funHasParallelism) stms
 
 transformBody :: FunHasParallelism -> Body SOACS -> FlattenM (Body GPU)
-transformBody funHasParallelism (Body () stms res) = do
-  stms' <- transformStms funHasParallelism stms
-  pure $ Body () stms' res
+transformBody funHasParallelism (Body () stms res) = buildBody_ $ do
+  transformStms funHasParallelism stms
+  pure res
 
 transformFunDef ::
   FunHasParallelism ->
@@ -609,7 +607,8 @@ transformProg prog = do
       funHasParallelism fname =
         M.findWithDefault (not $ isBuiltInFunction fname) fname funParallelism
 
-  (consts', consts_needs) <- runFlattenM mempty $ transformStms funHasParallelism consts
+  (consts', consts_needs) <-
+    runFlattenM mempty $ collectStms_ $ transformStms funHasParallelism consts
   (funs', funs_needs) <-
     second mconcat
       <$> mapAndUnzipM (transformFunDef funHasParallelism consts_scope) funs
