@@ -874,8 +874,6 @@ transformDistributedInnerMap ops mode (ws_F, ws_O, ws) irregs segments dist = do
   resmap_res <- fmap concat $ forM (M.toList resmap) $ \(rt, binds) ->
     forM binds $ \(cs_inps, v, v_t) ->
       certifying (distResCerts env cs_inps) $
-        -- FIXME: the copies are because we have too liberal aliases on
-        -- lifted functions.
         case (resultMapMode mode new_inps v_t, resVar rt env) of
           (MultiDim, Regular v') ->
             if isAcc v_t
@@ -888,10 +886,10 @@ transformDistributedInnerMap ops mode (ws_F, ws_O, ws) irregs segments dist = do
           (SingleDim, Regular v') ->
             if isAcc v_t
               then do
-                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+                letBindNames [v] $ BasicOp $ SubExp $ Var v'
                 pure (v, Regular v)
               else do
-                letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
+                letBindNames [v] $ BasicOp $ SubExp $ Var v'
                 rep <- mapResultRep lvl SingleDim (ws, ws_F, ws_O) v
                 pure (v, rep)
           (result_mode, Irregular irreg) -> do
