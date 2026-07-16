@@ -259,8 +259,6 @@ transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
   let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
       free = freeIn map_lam
       new_segment = segments <> pure w
-      -- FIXME? I think a backend problem with vectorized reduce
-      -- (red_lam, nes', shape) <- determineReduceOp (redLambda red) nes
       shape = mempty
   reds_gpu <- forM reds $ \red -> do
     nes <- mapM (readInput segments env zeros inps) (redNeutral red)
