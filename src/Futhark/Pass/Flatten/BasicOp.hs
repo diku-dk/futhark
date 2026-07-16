@@ -309,7 +309,7 @@ segmentCoordsFromFlat segments seg_i =
   mapM (letSubExp "seg_coord" <=< toExp) $
     unflattenIndex (map pe64 $ shapeDims $ segmentsShape segments) (pe64 seg_i)
 
--- TODO: We do not need to actully make this Dense
+-- TODO: We do not need to actually make this Dense
 rearrangeIrreg ::
   SegLevel ->
   Segments ->

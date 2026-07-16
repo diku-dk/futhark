@@ -324,7 +324,6 @@ isParallelStm funHasParallelism stm =
     parallelBasicOp (BasicOp op) = isParallelBasicOp op
     parallelBasicOp _ = False
 
-    -- TODO: Check other operations
     isParallelBasicOp (Update _ _ slice _) = not $ null $ sliceDims slice
     isParallelBasicOp Concat {} = True
     isParallelBasicOp Iota {} = True

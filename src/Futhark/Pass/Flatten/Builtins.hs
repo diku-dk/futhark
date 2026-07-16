@@ -79,8 +79,11 @@ determineReduceOp ::
   [SubExp] ->
   m (Lambda SOACS, [SubExp], Shape)
 determineReduceOp lam nes =
-  -- FIXME? We are assuming that the accumulator is a replicate, and
-  -- we fish out its value in a gross way.
+  -- We obtain the scalar neutral element by indexing the array-typed
+  -- one at [0,...,0]. This is safe even if the array is not literally
+  -- a replicate: every lane of a vectorised operator must have a
+  -- neutral element, and neutral elements are unique, so all lanes
+  -- are forced to hold the same value.
   case mapM subExpVar nes of
     Just ne_vs' -> do
       let (shape, lam') = isVectorMap lam

@@ -307,7 +307,7 @@ doUniformSegMaposcanomap ::
   ([SubExp] -> FlattenM ()) ->
   FlattenM [VName]
 doUniformSegMaposcanomap lvl scans arrs post_lam map_lam old_segments new_segment inps env readFree = do
-  -- TODO: different segemnts fix
+  -- TODO: different segments fix
   let scan = singleScan scans
   let zeros = replicate (segmentsRank old_segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
   nes <- mapM (readInput old_segments env zeros inps) (scanNeutral scan)
@@ -659,15 +659,14 @@ onMapIrregularInputArr ::
   SubExp ->
   FlattenM (MapArray IrregularRep)
 onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod = do
-  -- new_segments has already has the the new w inside unlike other functions
+  -- new_segments already has the new w inside, unlike other functions
   rep_t <- lookupType $ irregularD rep
   let p_t = paramType p
   when (arrayRank rep_t > 1) $
-    error $
-      error "onMapIrregularInputArr: irregularD is not 1D"
+    error "onMapIrregularInputArr: irregularD is not 1D"
   if null (arrayDims p_t)
     then do
-      -- assuimg the irregD is 1D size(irregularD rep) == ws_prod should hold and this should be fine
+      -- Assuming irregularD is 1D, size(irregularD rep) == ws_prod should hold and this should be fine.
       let old_shape = arrayShape rep_t
           new_shape =
             case mode of
