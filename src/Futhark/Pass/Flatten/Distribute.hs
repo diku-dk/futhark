@@ -334,7 +334,20 @@ isParallelStm funHasParallelism stm =
     isParallelBasicOp Reshape {} = True
     isParallelBasicOp (FlatIndex _ flat_slice) = not $ null $ flatSliceDims flat_slice
     isParallelBasicOp (Index _ slice) = not $ null $ sliceDims slice
-    isParallelBasicOp _ = False
+    -- Now the sequential ones - we handle them explicitly so we will notice if
+    -- we ever add a new one.
+    isParallelBasicOp ArrayLit {} = False
+    isParallelBasicOp ArrayVal {} = False
+    isParallelBasicOp Scratch {} = False
+    isParallelBasicOp SubExp {} = False
+    isParallelBasicOp Opaque {} = False
+    isParallelBasicOp UnOp {} = False
+    isParallelBasicOp BinOp {} = False
+    isParallelBasicOp CmpOp {} = False
+    isParallelBasicOp ConvOp {} = False
+    isParallelBasicOp Assert {} = False
+    isParallelBasicOp UpdateAcc {} = False
+    isParallelBasicOp UserParam {} = False
 
 isRegularDistResult :: DistResult -> Bool
 isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
