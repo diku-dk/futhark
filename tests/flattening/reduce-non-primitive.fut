@@ -1,4 +1,4 @@
--- Currently fails
+-- An inner reduce with a non-primitive operator is sequentialised.
 -- ==
 -- input { [1i64,2i64,3i64] }
 -- output { [[1i64, 0i64], [4i64, 1i64], [9i64, 3i64]]}
