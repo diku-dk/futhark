@@ -171,23 +171,22 @@ genNonSegRed lvl desc segments red_op shape map_lam arrs = do
   let new_segment = dummy : segments
   space <- mkSegSpace $ zip (toList gtids) (toList new_segment)
   let gtids' = fmap Var gtids
-  ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
+  (kbody, res_t) <- buildBody . localScope (scopeOfSegSpace space) $ do
     bindLambdaInputArrays (drop 1 gtids') map_lam arrs
     res <- bodyBind (lambdaBody map_lam)
     res_t <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, res_t)
+  kbody' <- renameBody kbody
   red_lam' <- renameLambda red_lam
-  kbody <- renameBody $ Body () stms res
   let op = SegBinOp comm red_lam' nes shape
   lvl' <- capThreadSegLevel new_segment "uniform_nonsegred" lvl $ NoRecommendation SegNoVirt
-  ress <- letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody [op]
+  ress <- letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody' [op]
   forM ress $ \res_d -> do
     res_dt <- lookupType res_d
-    letExp desc $
-      BasicOp $
-        case res_dt of
-          Acc {} -> SubExp $ Var res_d
-          _ -> Index res_d $ fullSlice res_dt [DimFix $ intConst Int64 0]
+    letExp desc . BasicOp $
+      case res_dt of
+        Acc {} -> SubExp $ Var res_d
+        _ -> Index res_d $ fullSlice res_dt [DimFix $ intConst Int64 0]
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
@@ -209,15 +208,15 @@ genUniformSegHist lvl desc segments ops bucket_fun arrs readFree = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
-  ((res, res_t), stms) <- collectStms . localScope (scopeOfSegSpace space) $ do
+  (kbody, res_t) <- buildBody . localScope (scopeOfSegSpace space) $ do
     readFree gtids'
     bindLambdaInputArrays gtids' bucket_fun arrs
     res <- bodyBind (lambdaBody bucket_fun)
     res_t <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, res_t)
-  kbody <- renameBody $ Body () stms res
+  kbody' <- renameBody kbody
   lvl' <- capThreadSegLevel segments "uniform_seghist" lvl $ NoRecommendation SegNoVirt
-  letTupExp desc $ Op $ SegOp $ SegHist lvl' space res_t kbody ops'
+  letTupExp desc $ Op $ SegOp $ SegHist lvl' space res_t kbody' ops'
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
@@ -236,7 +235,7 @@ genUniformSegRed lvl desc segments red_ops shape map_lam arrs readFree = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
-  ((res, res_t), stms) <- collectStms . localScope (scopeOfSegSpace space) $ do
+  (kbody, res_t) <- buildBody . localScope (scopeOfSegSpace space) $ do
     readFree gtids'
     bindLambdaInputArrays gtids' map_lam arrs
     res <- bodyBind (lambdaBody map_lam)
@@ -247,9 +246,9 @@ genUniformSegRed lvl desc segments red_ops shape map_lam arrs readFree = do
     red_lam' <- renameLambda $ redLambda red_op
     pure $ SegBinOp (redComm red_op) red_lam' (redNeutral red_op) shape
 
-  kbody <- renameBody $ Body () stms res
+  kbody' <- renameBody kbody
   lvl' <- capThreadSegLevel segments "uniform_segred" lvl $ NoRecommendation SegNoVirt
-  letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody ops
+  letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody' ops
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
@@ -268,7 +267,7 @@ genScanWithKernelBodyAndPost lvl desc segments mkScanLam shape nes mkPostLam m =
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
   let gtids' = fmap Var gtids
-  ((res, res_t), stms) <- collectStms . localScope (scopeOfSegSpace space) $ do
+  (kbody, res_t) <- buildBody . localScope (scopeOfSegSpace space) $ do
     res <- m gtids'
     res_t <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, res_t)
@@ -281,10 +280,10 @@ genScanWithKernelBodyAndPost lvl desc segments mkScanLam shape nes mkPostLam m =
   scan_lam' <- renameLambda scan_lam
   post_lam' <- renameLambda post_lam
 
-  kbody <- renameBody $ Body () stms res
+  kbody' <- renameBody kbody
   let op = SegBinOp Noncommutative scan_lam' nes shape
   lvl' <- capThreadSegLevel segments "uniform_segscan" lvl $ NoRecommendation SegNoVirt
-  letTupExp desc $ Op $ SegOp $ SegScan lvl' space res_t kbody [op] (SegPostOp post_lam')
+  letTupExp desc $ Op $ SegOp $ SegScan lvl' space res_t kbody' [op] (SegPostOp post_lam')
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
