@@ -580,6 +580,8 @@ lookupVar loc qn@(QualName qs name) inst_t = do
       replaceTyVars loc inst_t
     Just OverloadedF {} ->
       replaceTyVars loc inst_t
+    Just RecursiveV ->
+      replaceTyVars loc inst_t
 
 -- | Look up the liftedness of an abstract type.
 lookupAbsTy :: QualName VName -> TermTypeM Liftedness

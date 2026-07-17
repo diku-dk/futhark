@@ -398,6 +398,10 @@ lookupVar loc qn@(QualName qs name) = do
       argtype <- newTypeOverloaded loc "t" ts
       let (pts', rt') = instOverloaded argtype pts rt
       pure $ foldFunType (map (second $ const Observe) pts') $ RetType [] $ second (const Nonunique) rt'
+    -- The unsized checker binds recursive functions directly (see
+    -- 'checkRecursive'), so it never produces a 'RecursiveV'.
+    Just RecursiveV ->
+      error $ "lookupVar: unexpected RecursiveV for " <> show qn
   where
     instOverloaded argtype pts rt =
       ( map (maybe argtype (Scalar . Prim)) pts,
@@ -1270,6 +1274,31 @@ checkTyInstLiftedness solution = do
         when_inst =
           "When instantiating type parameter of" <+> dquotes (pretty qn) <> "."
 
+-- | Check a potentially recursive function body. The function is bound to a
+-- fresh monomorphic type variable while its body is checked; that variable is
+-- then constrained to the actual function type, and the constraint solver ties
+-- the knot. A parameterless binding cannot be recursive (see 'resolveValBind'),
+-- so it is checked with no self-reference in scope.
+checkRecursive ::
+  VName ->
+  SrcLoc ->
+  [Pat ParamType] ->
+  ExpBase NoInfo VName ->
+  TermM (ExpBase Info VName)
+checkRecursive _ _ [] body = checkExp body
+checkRecursive fname loc params' body = do
+  ftype <- newType loc Lifted (baseName fname) NoUniqueness
+  let bindF scope =
+        scope {scopeVtable = M.insert fname (BoundV [] ftype) $ scopeVtable scope}
+  body' <- localScope bindF $ checkExp body
+  body_t <- expType body'
+  let fun_t =
+        foldFunType
+          (map (first (const ()) . patternType) params')
+          (RetType [] $ bimap (const ()) (const Nonunique) body_t)
+  ctEq (Reason (locOf loc)) ftype fun_t
+  pure body'
+
 -- | Type check a single value definition.
 checkValDef ::
   ( VName,
@@ -1285,10 +1314,10 @@ checkValDef ::
       Maybe (TypeExp Exp VName),
       Exp
     )
-checkValDef (_fname, retdecl, tparams, params, body, _loc) = runTermM $ do
+checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   (params', body', retdecl') <-
     bindParams tparams params $ \params' -> do
-      body' <- checkExp body
+      body' <- checkRecursive fname loc params' body
       (_, retdecl') <- checkRetDecl body' retdecl
       pure (params', body', retdecl')
 

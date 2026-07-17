@@ -501,7 +501,17 @@ resolveValBind (ValBind entry fname fname_loc ret NoInfo tparams params body doc
   resolveTypeParams tparams $ \tparams' ->
     resolveParams params $ \params' -> do
       ret' <- traverse resolveTypeExp ret
-      body' <- resolveExp body
-      bindSpaced1 Term fname loc $ \fname' -> do
-        usedName fname'
-        pure $ ValBind entry fname' fname_loc ret' NoInfo tparams' params' body' doc attrs' loc
+      -- Allow self-reference (recursion) only for syntactic functions, i.e.
+      -- those with parameters.
+      (fname', body') <-
+        case params of
+          [] -> do
+            body' <- resolveExp body
+            bindSpaced1 Term fname loc $ \fname' -> do
+              usedName fname'
+              pure (fname', body')
+          _ -> bindSpaced1 Term fname loc $ \fname' -> do
+            usedName fname'
+            body' <- resolveExp body
+            pure (fname', body')
+      pure $ ValBind entry fname' fname_loc ret' NoInfo tparams' params' body' doc attrs' loc

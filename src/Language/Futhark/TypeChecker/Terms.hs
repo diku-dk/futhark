@@ -1522,12 +1522,15 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
   incLevel . bindingParams tparams params $ \params' -> do
     maybe_retdecl' <- traverse checkTypeExpNonrigid maybe_retdecl
 
+    -- Harmless to treat everything as potentially recursive, as name resolution
+    -- has hooked things up properly anyway.
     body' <-
-      checkFunBody
-        params'
-        body
-        ((\(_, x, _) -> x) <$> maybe_retdecl')
-        (maybe loc srclocOf maybe_retdecl)
+      localScope (\scope -> scope {scopeVtable = M.insert fname RecursiveV $ scopeVtable scope}) $
+        checkFunBody
+          params'
+          body
+          ((\(_, x, _) -> x) <$> maybe_retdecl')
+          (maybe loc srclocOf maybe_retdecl)
 
     params'' <- mapM updateTypes params'
     body_t <- expTypeFully body'

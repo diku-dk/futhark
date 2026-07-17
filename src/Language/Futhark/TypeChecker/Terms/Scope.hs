@@ -30,6 +30,12 @@ data ValBinding dim
   = BoundV [TypeParam] (TypeBase dim NoUniqueness)
   | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
   | EqualityF
+  | -- | A function currently being checked, in scope of its own body so that it
+    -- may be used recursively. Each occurrence adopts the type recorded for it
+    -- by the unsized type checker, with fresh sizes - just like a call of a
+    -- monomorphic function, and which allows "size-polymorphic recursion" (but
+    -- not general polymorphic recursion).
+    RecursiveV
   deriving (Show)
 
 -- | The lexical scope information.
