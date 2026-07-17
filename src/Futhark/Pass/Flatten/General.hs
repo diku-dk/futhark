@@ -4,6 +4,7 @@ module Futhark.Pass.Flatten.General
     readInputVar,
     readInputs,
     readInput,
+    readNeutral,
     readTypeDims,
 
     -- * Building blocks
@@ -227,6 +228,29 @@ readInput _ _ _ _ (Constant x) =
   pure $ Constant x
 readInput segments env is inputs (Var v) =
   Var <$> readInputVar segments env is inputs v
+
+-- | Read the neutral element of a reduction or scan operator. The neutral
+-- element of an operator is unique because we assume uniform operators, so a
+-- valid program must have the same value in every segment, and we can read it
+-- from the first one. This is the case even if the neutral element is
+-- nonuniform, which is useless but allowed. The segment space may however be
+-- empty, in which case we produce a blank value instead; it is never used then,
+-- but an unconditional read would be out of bounds.
+readNeutral :: Segments -> DistEnv -> DistInputs -> SubExp -> FlattenM SubExp
+readNeutral segments env inps ne
+  | Var v <- ne,
+    Just _ <- lookup v inps = do
+      ne_t <- subExpInputType inps ne
+      n <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+      letSubExp (baseName v <> "_ne")
+        =<< eIf
+          (toExp $ pe64 n .==. 0)
+          (eBody [eBlank ne_t])
+          (eBody [eSubExp =<< readInput segments env zeros inps ne])
+  | otherwise =
+      readInput segments env zeros inps ne
+  where
+    zeros = replicate (segmentsRank segments) (intConst Int64 0)
 
 readTypeDims ::
   Segments ->

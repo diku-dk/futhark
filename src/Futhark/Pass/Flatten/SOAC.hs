@@ -259,12 +259,11 @@ transformUniformRedomap ::
   Lambda SOACS ->
   FlattenM [VName]
 transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
-  let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-      free = freeIn map_lam
+  let free = freeIn map_lam
       new_segment = segments <> pure w
       shape = mempty
   reds_gpu <- forM reds $ \red -> do
-    nes <- mapM (readInput segments env zeros inps) (redNeutral red)
+    nes <- mapM (readNeutral segments env inps) (redNeutral red)
     let red_lam = redLambda red
         comm
           | commutativeLambda red_lam = Commutative
@@ -307,10 +306,8 @@ doUniformSegMaposcanomap ::
   ([SubExp] -> FlattenM ()) ->
   FlattenM [VName]
 doUniformSegMaposcanomap lvl scans arrs post_lam map_lam old_segments new_segment inps env readFree = do
-  -- TODO: different segments fix
   let scan = singleScan scans
-  let zeros = replicate (segmentsRank old_segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
-  nes <- mapM (readInput old_segments env zeros inps) (scanNeutral scan)
+  nes <- mapM (readNeutral old_segments env inps) (scanNeutral scan)
   (scan_lam, nes', shape) <- determineReduceOp (scanLambda scan) nes
   genUniformSegScanomapWithPost
     lvl
@@ -375,9 +372,8 @@ doSegMaposcanomap ::
   FlattenM [VName]
 doSegMaposcanomap lvl scans flags elems post_lam map_lam segments inps env readFree = do
   let scan = singleScan scans
-  let zeros = replicate (segmentsRank segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
   let nes = scanNeutral scan
-  nes' <- mapM (readInput segments env zeros inps) nes
+  nes' <- mapM (readNeutral segments env inps) nes
   genSegScanomapWithPost
     lvl
     "maposcanomap"
@@ -1234,11 +1230,10 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
     all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds = do
       reps <- mapM (segOpInputRep lvl segments env inps) arrs
       let sing_red = singleReduce reds
-          zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
           hasNoFreeVariant = allNames (not . isVariant inps . Var) (freeIn sing_red <> freeIn map_lam)
       (ws_F, ws_O, ws_S, elems, elems_kind) <-
         prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
-      nes' <- mapM (readInput segments env zeros inps) (redNeutral sing_red)
+      nes' <- mapM (readNeutral segments env inps) (redNeutral sing_red)
       let sing_red' = sing_red {redNeutral = nes'}
       let free = freeIn map_lam
       free_and_sizes <- freeWithTypeDeps inps free
@@ -1422,9 +1417,8 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops0, 
         t <- lookupInputType inps hist_inp
         let expectedShape = segmentsShape segments <> arrayShape t
         liftSubExpRegular lvl segments inps env expectedShape (Var hist_inp)
-      let zeros = replicate (length segments) (Constant $ IntValue $ intValue Int64 (0 :: Int))
       hist_ops' <- forM hist_ops $ \(Futhark.IR.SOACS.HistOp num_bins rf dests nes op) -> do
-        nes' <- mapM (readInput segments env zeros inps) nes
+        nes' <- mapM (readNeutral segments env inps) nes
         let rr (DistType _ _ t) = t
         let ts = map (rr . distResType) res
         let expectedShapes = map (\t -> segmentsShape segments <> arrayShape t) ts
