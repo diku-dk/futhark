@@ -1419,12 +1419,16 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
   incLevel . bindingParams tparams params $ \params' -> do
     maybe_retdecl' <- traverse checkTypeExpNonrigid maybe_retdecl
 
+    assumed_ret <- newTypeVar body "r"
+    let binding_ident = Ident fname (Info (funType params' $ RetType [] assumed_ret)) loc
+
     body' <-
-      checkFunBody
-        params'
-        body
-        ((\(_, x, _) -> x) <$> maybe_retdecl')
-        (maybe loc srclocOf maybe_retdecl)
+      binding [binding_ident] $
+        checkFunBody
+          params'
+          body
+          ((\(_, x, _) -> x) <$> maybe_retdecl')
+          (maybe loc srclocOf maybe_retdecl)
 
     params'' <- mapM updateTypes params'
     body_t <- expTypeFully body'

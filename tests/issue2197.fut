@@ -4,5 +4,5 @@ def index_of_first p xs =
 def span p xs = let i = index_of_first p xs in (take i xs, drop i xs)
 
 entry part1 [l] (ls: [][l]i32) =
-  let blank (l: [l]i32) = null l
+  let blank (x: [l]i32) = null x
   in span blank ls |> \(x, y) -> (id x, tail y)

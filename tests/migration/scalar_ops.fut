@@ -25,7 +25,7 @@ def join3 'a (x: a) (y: a) (z: a) : a =
 
 entry opaque (A: [2]i32) : i32 =
   let (a, b) = (A[0], A[1])
-  let x = opaque b
+  let x = #[opaque] b
   in if hostonly x
      then join a b
      else 0

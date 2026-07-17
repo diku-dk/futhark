@@ -1240,6 +1240,31 @@ svFromType :: ParamType -> StaticVal
 svFromType (Scalar (Record fs)) = RecordSV . M.toList $ M.map svFromType fs
 svFromType t = Dynamic t
 
+-- | The static value of a (top-level) binding within the scope of its own
+-- definition, used to handle recursion. We construct a 'DynamicFun' spine
+-- matching the value parameters, ending in a 'Dynamic' for the result. This
+-- suffices for fully applied recursive calls: the residual expression simply
+-- refers to the top-level binding by name.
+--
+-- We only do this for first-order bindings (order-zero parameters and result);
+-- handling general recursion is impossible because we would need to specialise
+-- for every closure (which may be unbounded). In principle we could allow
+-- recursion when the higher-order arguments are identical in the recursive
+-- application (essentially a kind of monomorphic recursion).
+selfSV :: VName -> [Pat ParamType] -> ResType -> Maybe StaticVal
+selfSV name params rettype
+  | all patternOrderZero params,
+    orderZero rettype =
+      Just $ go params
+  | otherwise = Nothing
+  where
+    ret_sv = Dynamic $ resToParam rettype
+    go [] = ret_sv
+    go (_ : ps) =
+      let inner = go ps
+          self = Var (qualName name) (Info (structTypeFromSV inner)) mempty
+       in DynamicFun (self, inner) inner
+
 -- | Defunctionalize a top-level value binding. Returns the
 -- transformed result as well as an environment that binds the name of
 -- the value binding to the static value of the transformed body.  The
@@ -1268,8 +1293,28 @@ defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)
       show name
         ++ " has type parameters, "
         ++ "but the defunctionaliser expects a monomorphic input program."
+  -- Bind the name in the scope of its own definition, so that recursive
+  -- references can be defunctionalised. We can only produce a static value for
+  -- its (first-order) recursive uses; see 'selfSV'. Reject recursive
+  -- higher-order functions here.
+  let recursive = name `S.member` fvVars (freeInExp body)
+  self <- case selfSV name params rettype of
+    Just self_sv ->
+      pure . M.singleton name $
+        Binding
+          (Just (first (map typeParamName) (valBindTypeScheme valbind)))
+          self_sv
+    Nothing
+      | recursive ->
+          error $
+            "Cannot defunctionalise recursive higher-order function "
+              ++ prettyString name
+              ++ "."
+      | otherwise -> pure mempty
   (tparams', params', body', sv, sv_t) <-
-    defuncLet (map typeParamName tparams) params body $ RetType ret_dims rettype
+    localEnv (self <>) $
+      defuncLet (map typeParamName tparams) params body $
+        RetType ret_dims rettype
   globals <- asks $ M.keysSet . fst
   let bound_sizes = S.fromList (foldMap patNames params') <> S.fromList tparams' <> globals
   params'' <- instAnySizes params'
