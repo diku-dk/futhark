@@ -318,7 +318,9 @@ arrayOfWithAliases ::
 arrayOfWithAliases u shape2 (Array _ shape1 et) =
   Array u (shape2 <> shape1) et
 arrayOfWithAliases u shape (Scalar t) =
-  Array u shape (second (const mempty) t)
+  if shapeRank shape == 0
+    then Scalar t `setUniqueness` u
+    else Array u shape (second (const mempty) t)
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
@@ -510,7 +512,7 @@ typeOf (Attr _ e _) = typeOf e
 typeOf (AppExp _ (Info res)) = appResType res
 
 -- | The type of a function with the given parameters and return type.
-funType :: [Pat ParamType] -> ResRetType -> StructType
+funType :: [Pat (TypeBase d Diet)] -> RetTypeBase d Uniqueness -> TypeBase d NoUniqueness
 funType params ret =
   let RetType _ t = foldr (arrow . patternParam) ret params
    in toStruct t
@@ -520,7 +522,7 @@ funType params ret =
 
 -- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
 -- @ts@ as parameters and returns @ret@.
-foldFunType :: [ParamType] -> ResRetType -> StructType
+foldFunType :: [TypeBase d Diet] -> RetTypeBase d Uniqueness -> TypeBase d NoUniqueness
 foldFunType ps ret =
   let RetType _ t = foldr arrow ret ps
    in toStruct t
@@ -530,10 +532,10 @@ foldFunType ps ret =
 
 -- | Extract the parameter types and return type from a type.
 -- If the type is not an arrow type, the list of parameter types is empty.
-unfoldFunType :: TypeBase dim as -> ([TypeBase dim Diet], TypeBase dim NoUniqueness)
-unfoldFunType (Scalar (Arrow _ _ d t1 (RetType _ t2))) =
+unfoldFunType :: TypeBase dim as -> ([(PName, TypeBase dim Diet)], TypeBase dim NoUniqueness)
+unfoldFunType (Scalar (Arrow _ p d t1 (RetType _ t2))) =
   let (ps, r) = unfoldFunType t2
-   in (second (const d) t1 : ps, r)
+   in ((p, second (const d) t1) : ps, r)
 unfoldFunType t = ([], toStruct t)
 
 -- | The type scheme of a value binding, comprising the type
@@ -630,7 +632,7 @@ patternStructType = toStruct . patternType
 
 -- | When viewed as a function parameter, does this pattern correspond
 -- to a named parameter of some type?
-patternParam :: Pat ParamType -> (PName, Diet, StructType)
+patternParam :: Pat (TypeBase d Diet) -> (PName, Diet, TypeBase d NoUniqueness)
 patternParam (PatParens p _) =
   patternParam p
 patternParam (PatAttr _ p _) =

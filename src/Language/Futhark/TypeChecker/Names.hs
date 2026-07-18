@@ -20,9 +20,9 @@ import Control.Monad.State
 import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Text qualified as T
+import Futhark.Util
 import Futhark.Util.Pretty
 import Language.Futhark
-import Language.Futhark.Semantic (includeToFilePath)
 import Language.Futhark.TypeChecker.Monad
 import Prelude hiding (mod)
 
@@ -119,9 +119,8 @@ resolveQualName v loc = do
   v' <- checkValName v loc
   case v' of
     QualName (q : _) _
-      | isIntrinsic q -> do
-          me <- askImportName
-          unless (isBuiltin (includeToFilePath me)) $
+      | isIntrinsic q ->
+          unless (isBuiltinLoc loc) $
             warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
     _ -> pure ()
   pure v'
@@ -491,6 +490,9 @@ resolveSizes sizes m = do
     sizeWithSpace size =
       (Term, sizeName size, srclocOf size)
 
+allowRecursion :: Bool
+allowRecursion = isEnvVarAtLeast "FUTHARK_ALLOW_RECURSION" 1
+
 -- | Resolve names in a value binding. If this succeeds, then it is
 -- guaranteed that all names references things that are in scope.
 resolveValBind :: ValBindBase NoInfo Name -> TypeM (ValBindBase NoInfo VName)
@@ -501,9 +503,10 @@ resolveValBind (ValBind entry fname fname_loc ret NoInfo tparams params body doc
   resolveTypeParams tparams $ \tparams' ->
     resolveParams params $ \params' -> do
       ret' <- traverse resolveTypeExp ret
-      -- Allow self-reference only for syntactic functions.
+      -- Allow self-reference (recursion) only for syntactic functions, i.e.
+      -- those with parameters.
       (fname', body') <-
-        case params of
+        case if allowRecursion then params else [] of
           [] -> do
             body' <- resolveExp body
             bindSpaced1 Term fname loc $ \fname' -> do

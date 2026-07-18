@@ -74,7 +74,7 @@ instance ASTMappable (AppExpBase Info VName) where
     Match <$> mapOnExp tv e <*> astMap tv cases <*> pure loc
   astMap tv (Apply f args loc) = do
     f' <- mapOnExp tv f
-    args' <- traverse (traverse $ mapOnExp tv) args
+    args' <- traverse onArg args
     -- Safe to disregard return type because existentials cannot be
     -- instantiated here, as the return is necessarily a function.
     pure $ case f' of
@@ -82,6 +82,8 @@ instance ASTMappable (AppExpBase Info VName) where
         Apply f_inner (args_inner <> args') loc
       _ ->
         Apply f' args' loc
+    where
+      onArg (ext, e) = (ext,) <$> mapOnExp tv e
   astMap tv (LetPat sizes pat e body loc) =
     LetPat sizes <$> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
   astMap tv (LetFun name (tparams, params, ret, t, e) body loc) =
@@ -105,13 +107,15 @@ instance ASTMappable (AppExpBase Info VName) where
     where
       mapStep (UpdateStepSlice slice) = UpdateStepSlice <$> mapM (astMap tv) slice
       mapStep (UpdateStepField f) = pure $ UpdateStepField f
-  astMap tv (BinOp (fname, fname_loc) t (x, xext) (y, yext) loc) =
+  astMap tv (BinOp (fname, fname_loc) t x y loc) =
     BinOp
       <$> ((,) <$> mapOnName tv fname <*> pure fname_loc)
       <*> traverse (mapOnStructType tv) t
-      <*> ((,) <$> mapOnExp tv x <*> pure xext)
-      <*> ((,) <$> mapOnExp tv y <*> pure yext)
+      <*> onArg x
+      <*> onArg y
       <*> pure loc
+    where
+      onArg (e, ext) = (,ext) <$> mapOnExp tv e
   astMap tv (Loop sparams mergepat loopinit form loopbody loc) =
     Loop sparams
       <$> astMap tv mergepat
