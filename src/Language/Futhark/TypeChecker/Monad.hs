@@ -67,6 +67,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
+import Data.IntSet qualified as IS
 import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -178,8 +179,8 @@ data Context = Context
 data TypeState = TypeState
   { stateNameSource :: VNameSource,
     stateWarnings :: Warnings,
-    -- | Which names have been used.
-    stateUsed :: S.Set VName,
+    -- | Which names have been used?
+    stateUsed :: IS.IntSet,
     -- | Known abstract type names.
     stateTySet :: TySet,
     stateCounter :: Int
@@ -340,7 +341,7 @@ class (Monad m) => MonadTypeChecker m where
 warnIfUnused :: (Namespace, VName, SrcLoc) -> TypeM ()
 warnIfUnused (ns, name, loc) = do
   used <- gets stateUsed
-  unless (name `S.member` used || "_" `T.isPrefixOf` nameToText (baseName name)) $
+  unless (baseTag name `IS.member` used || "_" `T.isPrefixOf` nameToText (baseName name)) $
     warn loc $
       "Unused" <+> pretty ns <+> dquotes (prettyName name) <> "."
 
@@ -377,7 +378,7 @@ bindIdents idents body = do
 -- "fake" use to avoid things like top level functions being
 -- considered unused.
 usedName :: VName -> TypeM ()
-usedName name = modify $ \s -> s {stateUsed = S.insert name $ stateUsed s}
+usedName name = modify $ \s -> s {stateUsed = IS.insert (baseTag name) $ stateUsed s}
 
 instance MonadTypeChecker TypeM where
   warnings ws =
