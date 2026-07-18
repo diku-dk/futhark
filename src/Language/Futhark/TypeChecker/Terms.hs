@@ -1430,12 +1430,11 @@ pendingInstSizes constraints = (pending, reps)
           v /= rep
         ]
 
--- | Instantiated sizes (at or above the given level) that are still
--- pending and have not been determined to be existential behave like
--- ordinary sizes from here on: canonical sizes are plain size
--- variables, and copies are equal to their canonical variable.
--- Existential ones are left alone; they are handled by
--- 'bindExistentialInsts'.
+-- | Instantiated sizes (at or above the given level) that are still pending and
+-- have not been determined to be existential behave like ordinary sizes from
+-- here on: canonical sizes are plain size variables, and copies are equal to
+-- their canonical variable. Existential ones are left alone; they are handled
+-- by 'bindExistentialInsts'.
 collapseInstSizes :: Level -> TermTypeM ()
 collapseInstSizes min_lvl = do
   constraints <- getConstraints
@@ -1451,13 +1450,12 @@ collapseInstSizes min_lvl = do
       collapse x = x
   modifyConstraints $ M.map collapse
 
--- | Instantiated sizes that unification determined to be existential
--- may remain free in some types recorded in the AST - in particular
--- the instantiated types of higher-order functions, where the
--- existential size occurs in the return type of a function-typed
--- parameter. Existentially bind such sizes at the innermost possible
--- position, mirroring what the type of the function argument looks
--- like.
+-- | Instantiated sizes that unification determined to be existential may remain
+-- free in some types recorded in the AST - in particular the instantiated types
+-- of higher-order functions, where the existential size occurs in the return
+-- type of a function-typed parameter. Existentially bind such sizes at the
+-- innermost possible position, mirroring what the type of the function argument
+-- looks like.
 bindExistentialInsts :: (ASTMappable e) => e -> TermTypeM e
 bindExistentialInsts x = do
   -- 'pendingInstSizes' scans the entire constraint set, but its result
