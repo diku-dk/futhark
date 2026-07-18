@@ -243,7 +243,7 @@ checkCoerce loc te e = do
 -- Used to remove unknown sizes from function body types before we
 -- perform let-generalisation.  This is because if a function is
 -- inferred to return something of type '[x+y]t' where 'x' or 'y' are
--- unknown, we want to turn that into '[z]t', where ''z' is a fresh
+-- unknown, we want to turn that into '[z]t', where 'z' is a fresh
 -- unknown, which is then by let-generalisation turned into
 -- '?[z].[z]t'.
 unscopeUnknown ::
