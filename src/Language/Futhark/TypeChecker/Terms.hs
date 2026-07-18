@@ -240,20 +240,24 @@ checkCoerce loc te e = do
               "a size coercion where the underlying expression size cannot be determined"
           pure $ sizeFromName (qualName v) (srclocOf d)
 
--- Used to remove unknown sizes from function body types before we
--- perform let-generalisation.  This is because if a function is
--- inferred to return something of type '[x+y]t' where 'x' or 'y' are
--- unknown, we want to turn that into '[z]t', where 'z' is a fresh
--- unknown, which is then by let-generalisation turned into
--- '?[z].[z]t'.
+-- Remove unknown sizes from function body types before we perform
+-- let-generalisation. This is because if a function is inferred to return
+-- something of type '[x+y]t' where 'x' or 'y' are unknown, we want to turn that
+-- into '[z]t', where 'z' is a fresh unknown, which is then by
+-- let-generalisation turned into '?[z].[z]t'.
 unscopeUnknown ::
   TypeBase Size u ->
   TermTypeM (TypeBase Size u)
 unscopeUnknown t = do
   constraints <- getConstraints
-  -- These sizes will be immediately turned into existentials, so we
-  -- do not need to care about their location.
-  fst <$> sizeFree mempty (expKiller constraints) t
+  -- The killer only ever fires on an unknown-size variable, so if none occurs
+  -- free in the type there is nothing to do and we can skip the traversal (and
+  -- the witness computation) entirely.
+  if not (any (isUnknown constraints) (fvVars (freeInType t)))
+    then pure t
+    else -- These sizes will be immediately turned into existentials, so we do
+    -- not need to care about their location.
+      fst <$> sizeFree mempty (expKiller constraints) t
   where
     expKiller _ Var {} = Nothing
     expKiller constraints e =
@@ -932,9 +936,13 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname _ tp1 tp2)) argexp = do
     constraints <- getConstraints
     let (inst_pending, inst_reps) = pendingInstSizes constraints
         repOf v = ExpSubst . flip sizeFromName (srclocOf loc) . qualName <$> M.lookup v inst_reps
+        tp2_subst = applySubst repOf tp2_inst
     (tp2', inst_ext) <-
-      sizeFree loc (find inst_pending . fvVars . freeInExp) $
-        applySubst repOf tp2_inst
+      -- 'sizeFree' can only change the type if a pending instantiated size
+      -- occurs free in it, so check for a fast path.
+      if any inst_pending (fvVars (freeInType tp2_subst))
+        then sizeFree loc (find inst_pending . fvVars . freeInExp) tp2_subst
+        else pure (tp2_subst, [])
     let ext' = ext <> inst_ext
 
     -- Check whether this would produce an impossible return type.
