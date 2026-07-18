@@ -489,6 +489,9 @@ resolveSizes sizes m = do
     sizeWithSpace size =
       (Term, sizeName size, srclocOf size)
 
+allowRecursion :: Bool
+allowRecursion = False
+
 -- | Resolve names in a value binding. If this succeeds, then it is
 -- guaranteed that all names references things that are in scope.
 resolveValBind :: ValBindBase NoInfo Name -> TypeM (ValBindBase NoInfo VName)
@@ -502,7 +505,7 @@ resolveValBind (ValBind entry fname fname_loc ret NoInfo tparams params body doc
       -- Allow self-reference (recursion) only for syntactic functions, i.e.
       -- those with parameters.
       (fname', body') <-
-        case params of
+        case if allowRecursion then params else [] of
           [] -> do
             body' <- resolveExp body
             bindSpaced1 Term fname loc $ \fname' -> do
