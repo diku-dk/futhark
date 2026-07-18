@@ -1420,10 +1420,14 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
     maybe_retdecl' <- traverse checkTypeExpNonrigid maybe_retdecl
 
     assumed_ret <- newTypeVar body "r"
-    let binding_ident = Ident fname (Info (funType params' $ RetType [] assumed_ret)) loc
+    let fname_entry = BoundV [] $ funType params' $ RetType [] assumed_ret
+        bindF scope =
+          scope
+            { scopeVtable = M.insert fname fname_entry $ scopeVtable scope
+            }
 
     body' <-
-      binding [binding_ident] $
+      localScope bindF $
         checkFunBody
           params'
           body
