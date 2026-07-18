@@ -1133,7 +1133,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
       bind_t'' = funType params'' rettype''
       bind_r = exp_naming <> extNaming
 
-  -- It is important that we recored the lifted function before transforming the
+  -- It is important that we record the lifted function before transforming the
   -- body, in order to handle recursion. Fortunately the "calling convention"
   -- does not depend on the body.
   seen_before <- elem name . map fst . M.keys <$> getLifts
