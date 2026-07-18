@@ -20,6 +20,7 @@ import Control.Monad.State
 import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Text qualified as T
+import Futhark.Util
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad
@@ -490,7 +491,7 @@ resolveSizes sizes m = do
       (Term, sizeName size, srclocOf size)
 
 allowRecursion :: Bool
-allowRecursion = False
+allowRecursion = isEnvVarAtLeast "FUTHARK_ALLOW_RECURSION" 1
 
 -- | Resolve names in a value binding. If this succeeds, then it is
 -- guaranteed that all names references things that are in scope.
