@@ -13,7 +13,6 @@ module Language.Futhark.TypeChecker.Unify
     Rigidity (..),
     RigidSource (..),
     BreadCrumbs,
-    sizeFree,
     allDimsFreshInType,
     dimNotes,
     normTypeFully,
@@ -25,7 +24,6 @@ where
 
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
@@ -35,10 +33,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Futhark.Util (topologicalSort)
 import Futhark.Util.Pretty
 import Language.Futhark
-import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Constraints (CtTy (..), Level, Reason (..), TyVarInfo (..))
 import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
@@ -593,74 +589,6 @@ unifySizes usage bcs bound _ e1 e2 = do
 -- | Unifies two types.
 unify :: (MonadUnify m) => Usage -> StructType -> StructType -> m ()
 unify usage = unifyWith (unifySizes usage) usage mempty mempty
-
--- Expressions witnessed by type, topologically sorted.
-topWit :: TypeBase Exp u -> [Exp]
-topWit = topologicalSort depends . witnessedExps
-  where
-    witnessedExps t = execState (traverseDims onDim t) mempty
-      where
-        onDim _ PosImmediate e = modify (e :)
-        onDim _ _ _ = pure ()
-    depends a b = any (sameExp b) $ subExps a
-
-sizeFree ::
-  (MonadUnify m) =>
-  SrcLoc ->
-  (Exp -> Maybe VName) ->
-  TypeBase Size u ->
-  m (TypeBase Size u, [VName])
-sizeFree tloc expKiller orig_t = do
-  runReaderT (toBeReplaced orig_t $ onType orig_t) mempty `runStateT` mempty
-  where
-    lookReplacement e repl = snd <$> L.find (sameExp e . fst) repl
-    expReplace mapping e
-      | Just e' <- lookReplacement e mapping = e'
-      | otherwise = runIdentity $ astMap mapper e
-      where
-        mapper = identityMapper {mapOnExp = pure . expReplace mapping}
-
-    replacing e = do
-      e' <- asks (`expReplace` e)
-      case expKiller e' of
-        Nothing -> pure e'
-        Just cause -> do
-          vn <- lift $ lift $ newRigidDim tloc (RigidOutOfScope (locOf e) cause) "d"
-          modify (vn :)
-          pure $ sizeFromName (qualName vn) (srclocOf e)
-
-    toBeReplaced t m' = foldl f m' $ topWit t
-      where
-        f m e = do
-          e' <- replacing e
-          local ((e, e') :) m
-
-    onScalar (Record fs) =
-      Record <$> traverse onType fs
-    onScalar (Sum cs) =
-      Sum <$> (traverse . traverse) onType cs
-    onScalar (Arrow as pn d argT (RetType dims retT)) = do
-      argT' <- onType argT
-      old_bound <- get
-      retT' <- toBeReplaced retT $ onType retT
-      rl <- state $ L.partition (`notElem` old_bound)
-      let dims' = dims <> rl
-      pure $ Arrow as pn d argT' (RetType dims' retT')
-    onScalar (TypeVar u v args) =
-      TypeVar u v <$> mapM onTypeArg args
-      where
-        onTypeArg (TypeArgDim d) = TypeArgDim <$> replacing d
-        onTypeArg (TypeArgType ty) = TypeArgType <$> onType ty
-    onScalar (Prim pt) = pure $ Prim pt
-
-    onType ::
-      (MonadUnify m) =>
-      TypeBase Size u ->
-      ReaderT [(Exp, Exp)] (StateT [VName] m) (TypeBase Size u)
-    onType (Array u shape scalar) =
-      Array u <$> traverse replacing shape <*> onScalar scalar
-    onType (Scalar ty) =
-      Scalar <$> onScalar ty
 
 linkVarToDim ::
   (MonadUnify m) =>
