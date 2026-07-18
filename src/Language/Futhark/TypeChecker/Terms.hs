@@ -1736,12 +1736,12 @@ injectExt ext ret = RetType ext_here $ deeper ret
     deeperArg (TypeArgType t) = TypeArgType $ deeper t
     deeperArg (TypeArgDim d) = TypeArgDim d
 
--- | Find all type variables in the given type that are covered by the
--- constraints, and produce type parameters that close over them.
+-- | Find all size variables in the given type that are covered by the
+-- constraints, and produce size parameters that close over them.
 --
 -- The passed-in list of type parameters is always prepended to the
 -- produced list of type parameters.
-closeOverTypes ::
+closeOverSizes ::
   Name ->
   SrcLoc ->
   [TypeParam] ->
@@ -1749,7 +1749,7 @@ closeOverTypes ::
   ResType ->
   Constraints ->
   TermTypeM ([TypeParam], ResRetType)
-closeOverTypes defname defloc tparams paramts ret substs = do
+closeOverSizes defname defloc tparams paramts ret substs = do
   (more_tparams, retext) <-
     partitionEithers . catMaybes
       <$> mapM closeOver (M.toList $ M.map snd to_close_over)
@@ -1814,20 +1814,20 @@ letGeneralise defname defloc tparams params restype =
 
     now_substs <- getConstraints
 
-    -- Candidates for let-generalisation are those type variables that
+    -- Candidates for let-generalisation are those size variables that
     --
     -- (1) were not known before we checked this function, and
     --
-    -- (2) are not used in the (new) definition of any type variables
+    -- (2) are not used in the (new) definition of any size variables
     -- known before we checked this function.
 
     -- Criteria (1) and (2) is implemented by looking at the binding
-    -- level of the type variables.
+    -- level of the size variables.
     let candidate (lvl, _) = lvl >= (cur_lvl - length params)
         new_substs = M.filter candidate now_substs
 
     (tparams', RetType ret_dims restype'') <-
-      closeOverTypes
+      closeOverSizes
         defname
         defloc
         tparams
