@@ -64,11 +64,10 @@ internaliseParamTypes ts =
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ prettyString ts
 
--- Replace an accumulator's token, index space, and element types with
--- those of a known accumulator type, keeping the target's uniqueness.
--- We must do this because these components cannot be recovered from a
--- source type: 'internaliseTypeM' produces a placeholder token and a
--- guessed index space.  The known type is computed elsewhere (from
+-- Replace an accumulator's token, index space, and element types with those of
+-- a known accumulator type. We must do this because these components cannot be
+-- recovered from a source type: 'internaliseTypeM' produces a placeholder token
+-- and a guessed index space. The known type is computed elsewhere (from
 -- concrete loop values, or from an accumulator parameter).
 fixupAcc :: TypeBase shape1 u1 -> (TypeBase shape2 u2, b) -> (TypeBase shape2 u2, b)
 fixupAcc (Acc acc ispace ts _) (Acc _ _ _ u, b) = (Acc acc ispace ts u, b)

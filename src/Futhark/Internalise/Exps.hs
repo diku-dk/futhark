@@ -67,10 +67,10 @@ internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams pa
               "  https://github.com/diku-dk/futhark/issues"
             ]
 
-    -- The return type (and thus the function's calling information) can
-    -- be computed from the parameter types alone, without internalising
-    -- the body first.  We do so, and register the function *before*
-    -- internalising the body, so that recursive references resolve.
+    -- The return type (and thus the function's calling information) can be
+    -- computed from the parameter types alone, without internalising the body
+    -- first. We do so, and register function info *before* internalising the
+    -- body, so that recursive references resolve.
     let (rettype', retals) =
           first zeroExts . unzip $
             internaliseReturnType (map (fmap paramDeclType) all_params) rettype
@@ -86,7 +86,7 @@ internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams pa
               . applyRetType (map fst fun_rettype) (foldMap toList all_params)
           )
 
-    unless (null params') $ bindFunctionInfo fname info
+    unless (null params') $ addFunInfo fname info
 
     body' <- buildBody_ $ do
       body_res <- internaliseExp (baseName fname <> "_res") body
@@ -108,7 +108,7 @@ internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams pa
             body'
 
     if null params'
-      then bindConstant fname fd
+      then addConstant fname fd
       else addFunDef fd
 
   case entry of
