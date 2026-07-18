@@ -1394,8 +1394,9 @@ bindExistentialInsts x = do
   -- is invariant across this traversal (any rigid sizes we introduce
   -- below are not instantiated sizes), so we compute it once instead of
   -- once per type in the AST.
-  (pending, reps) <- pendingInstSizes <$> getConstraints
-  let repOf v = ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v reps
+  constraints <- getConstraints
+  let (pending, reps) = pendingInstSizes constraints
+      repOf v = ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v reps
       relevant v = pending v || v `M.member` reps
 
       onType ::
@@ -1425,7 +1426,6 @@ bindExistentialInsts x = do
         if null ext
           then pure t'
           else do
-            constraints <- getConstraints
             let computedAt v = case snd <$> M.lookup v constraints of
                   Just (ExistentialSize _ mloc _) -> mloc
                   Just (CopySize c _ _)
@@ -1450,7 +1450,16 @@ bindExistentialInsts x = do
               (t', ext) <- onType t
               pure $ RetType (dims <> ext) t'
           }
-  astMap tv x
+  -- Global fast path: with no instantiated-size constraints at all, 'relevant'
+  -- is false everywhere, so the traversal would just rebuild an identical copy.
+  -- Skip it entirely - this is the common case.
+  if any (isInstSize . snd) constraints
+    then astMap tv x
+    else pure x
+  where
+    isInstSize ExistentialSize {} = True
+    isInstSize CopySize {} = True
+    isInstSize _ = False
 
 detectAmbiguousSizes :: TermTypeM ()
 detectAmbiguousSizes = do
