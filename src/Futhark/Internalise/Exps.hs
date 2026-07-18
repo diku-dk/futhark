@@ -67,23 +67,34 @@ internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams pa
               "  https://github.com/diku-dk/futhark/issues"
             ]
 
-    (body', rettype') <- buildBody $ do
+    -- The return type (and thus the function's calling information) can be
+    -- computed from the parameter types alone, without internalising the body
+    -- first. We do so, and register function info *before* internalising the
+    -- body, so that recursive references resolve.
+    let (rettype', retals) =
+          first zeroExts . unzip $
+            internaliseReturnType (map (fmap paramDeclType) all_params) rettype
+        num_ctx = length (shapeContext rettype')
+        fun_rettype =
+          replicate num_ctx (I.Prim int64, mempty)
+            ++ zip rettype' (map (shiftRetAls num_ctx) retals)
+        info =
+          ( shapenames,
+            map declTypeOf $ foldMap (foldMap toList) params',
+            foldMap toList all_params,
+            fmap (`zip` map snd fun_rettype)
+              . applyRetType (map fst fun_rettype) (foldMap toList all_params)
+          )
+
+    unless (null params') $ addFunInfo fname info
+
+    body' <- buildBody_ $ do
       body_res <- internaliseExp (baseName fname <> "_res") body
-      (rettype', retals) <-
-        first zeroExts . unzip . internaliseReturnType (map (fmap paramDeclType) all_params) rettype
-          <$> mapM subExpType body_res
 
       when (null params') $
         bindExtSizes (E.AppRes (E.toStruct $ E.retType rettype) (E.retDims rettype)) body_res
 
-      body_res' <-
-        ensureResultExtShape msg (map I.fromDecl rettype') $ subExpsRes body_res
-      let num_ctx = length (shapeContext rettype')
-      pure
-        ( body_res',
-          replicate num_ctx (I.Prim int64, mempty)
-            ++ zip rettype' (map (shiftRetAls num_ctx) retals)
-        )
+      ensureResultExtShape msg (map I.fromDecl rettype') $ subExpsRes body_res
 
     attrs' <- internaliseAttrs attrs
 
@@ -92,22 +103,13 @@ internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams pa
             Nothing
             attrs'
             (internaliseFunName fname)
-            rettype'
+            fun_rettype
             (foldMap toList all_params)
             body'
 
     if null params'
-      then bindConstant fname fd
-      else
-        bindFunction
-          fname
-          fd
-          ( shapenames,
-            map declTypeOf $ foldMap (foldMap toList) params',
-            foldMap toList all_params,
-            fmap (`zip` map snd rettype')
-              . applyRetType (map fst rettype') (foldMap toList all_params)
-          )
+      then addConstant fname fd
+      else addFunDef fd
 
   case entry of
     Just (Info entry') -> generateEntryPoint types entry' fb
@@ -722,7 +724,7 @@ internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
 internaliseExp desc (E.Coerce e _ (Info et) _) = do
   ses <- internaliseExp desc e
-  ts <- internaliseCoerceType (E.toStruct et) <$> mapM subExpType ses
+  let ts = internaliseCoerceType (E.toStruct et)
   dt' <- typeExpForError $ toStruct et
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'

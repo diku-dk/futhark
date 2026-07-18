@@ -64,17 +64,22 @@ internaliseParamTypes ts =
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ prettyString ts
 
--- We need to fix up the arrays for any Acc return values or loop
--- parameters.  We look at the concrete types for this, since the Acc
--- parameter name in the second list will just be something we made up.
+-- Replace an accumulator's token, index space, and element types with those of
+-- a known accumulator type. We must do this because these components cannot be
+-- recovered from a source type: 'internaliseTypeM' produces a placeholder token
+-- and a guessed index space. The known type is computed elsewhere (from
+-- concrete loop values, or from an accumulator parameter).
+fixupAcc :: TypeBase shape1 u1 -> (TypeBase shape2 u2, b) -> (TypeBase shape2 u2, b)
+fixupAcc (Acc acc ispace ts _) (Acc _ _ _ u, b) = (Acc acc ispace ts u, b)
+fixupAcc _ t = t
+
+-- Fix up accumulators using a positionally-matching list of concrete
+-- types (e.g. the actual types of loop values).
 fixupKnownTypes ::
   [TypeBase shape1 u1] ->
   [(TypeBase shape2 u2, b)] ->
   [(TypeBase shape2 u2, b)]
-fixupKnownTypes = zipWith fixup
-  where
-    fixup (Acc acc ispace ts _) (Acc _ _ _ u2, b) = (Acc acc ispace ts u2, b)
-    fixup _ t = t
+fixupKnownTypes = zipWith fixupAcc
 
 -- Generate proper certificates for the placeholder accumulator
 -- certificates produced by internaliseType (identified with tag 0).
@@ -163,13 +168,17 @@ inferAliases all_param_ts all_res_ts =
 internaliseReturnType ::
   [Tree (I.TypeBase Shape Uniqueness)] ->
   E.ResRetType ->
-  [TypeBase shape u] ->
   [(I.TypeBase ExtShape Uniqueness, RetAls)]
-internaliseReturnType paramts (E.RetType dims et) ts =
-  fixupKnownTypes ts . concat . inferAliases paramts $
+internaliseReturnType paramts (E.RetType dims et) =
+  fixupAccs . concat . inferAliases paramts $
     runInternaliseTypeM' dims (internaliseTypeM exts et)
   where
     exts = M.fromList $ zip dims [0 ..]
+    -- Any 'Acc' in the return type must (by the type rules) be the function's
+    -- single 'Acc' parameter, so we substitute its known accumulator type.
+    fixupAccs = case [t | t@Acc {} <- foldMap toList paramts] of
+      acc : _ -> map (fixupAcc acc)
+      [] -> id
 
 -- | As 'internaliseReturnType', but returns components of a top-level
 -- tuple type piecemeal.
@@ -188,10 +197,9 @@ internaliseEntryReturnType paramts (E.RetType dims et) =
 
 internaliseCoerceType ::
   E.StructType ->
-  [TypeBase shape u] ->
   [I.TypeBase ExtShape Uniqueness]
-internaliseCoerceType et ts =
-  map fst $ internaliseReturnType [] (E.RetType [] $ E.toRes E.Nonunique et) ts
+internaliseCoerceType et =
+  map fst $ internaliseReturnType [] (E.RetType [] $ E.toRes E.Nonunique et)
 
 internaliseLambdaReturnType ::
   E.ResType ->

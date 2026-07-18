@@ -13,8 +13,8 @@ module Futhark.Internalise.Monad
     addFunDef,
     lookupFunction,
     lookupConst,
-    bindFunction,
-    bindConstant,
+    addFunInfo,
+    addConstant,
     assert,
     locating,
 
@@ -171,13 +171,15 @@ lookupConst fname = do
     (True, _) -> pure $ Just [Var fname]
     _ -> pure Nothing
 
-bindFunction :: VName -> FunDef SOACS -> FunInfo -> InternaliseM ()
-bindFunction fname fd info = do
-  addFunDef fd
+-- | Register the calling information for a function, but not its
+-- definition.  This is used to make a function available for
+-- (recursive) calls before its body has been internalised.
+addFunInfo :: VName -> FunInfo -> InternaliseM ()
+addFunInfo fname info =
   modify $ \s -> s {stateFunTable = M.insert fname info $ stateFunTable s}
 
-bindConstant :: VName -> FunDef SOACS -> InternaliseM ()
-bindConstant cname fd = do
+addConstant :: VName -> FunDef SOACS -> InternaliseM ()
+addConstant cname fd = do
   addStms $ bodyStms $ funDefBody fd
 
   case map resSubExp . bodyResult . funDefBody $ fd of
