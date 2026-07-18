@@ -22,7 +22,6 @@ import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Language.Futhark
-import Language.Futhark.Semantic (includeToFilePath)
 import Language.Futhark.TypeChecker.Monad
 import Prelude hiding (mod)
 
@@ -119,9 +118,8 @@ resolveQualName v loc = do
   v' <- checkValName v loc
   case v' of
     QualName (q : _) _
-      | isIntrinsic q -> do
-          me <- askImportName
-          unless (isBuiltin (includeToFilePath me)) $
+      | isIntrinsic q ->
+          unless (isBuiltinLoc loc) $
             warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
     _ -> pure ()
   pure v'
