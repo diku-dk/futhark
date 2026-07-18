@@ -1533,7 +1533,7 @@ detectAmbiguousSizes :: TermTypeM ()
 detectAmbiguousSizes = do
   collapseInstSizes 0
   constraints <- getConstraints
-  mapM_ (notice constraints) $ M.toList $ M.map snd constraints
+  mapM_ (notice constraints) $ M.toList constraints
   where
     -- Sizes that arise from instantiating inferred types have
     -- uninformative provenance. If a size variable with better
@@ -1560,7 +1560,7 @@ detectAmbiguousSizes = do
           (v', usage')
       | otherwise = (v, usage)
 
-    notice constraints (v, Size Nothing usage) =
+    notice constraints (v, (_, Size Nothing usage)) =
       case blame constraints v usage of
         (v', Usage Nothing loc) ->
           typeError loc mempty . withIndexLink "ambiguous-size" $
