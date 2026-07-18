@@ -758,7 +758,7 @@ etaExpand e_t e = do
         M.fromList . zip (retDims ret) $
           map (ExpSubst . flip sizeFromName mempty . qualName) ext'
       ret' = applySubst (`M.lookup` extsubst) ret
-      e' = mkApply e (map (\v -> (Nothing, v)) vars) $ AppRes (toStruct $ retType ret') ext'
+      e' = mkApply e (map (Nothing,) vars) $ AppRes (toStruct $ retType ret') ext'
   pure (params, e', ret)
   where
     getType (RetType _ (Scalar (Arrow _ p d t1 t2))) =

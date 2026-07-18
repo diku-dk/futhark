@@ -909,8 +909,8 @@ internaliseExp desc (E.Attr attr e loc) = do
         case t of
           I.Array pt shape _ ->
             letSubExp desc $ I.BasicOp $ I.Scratch pt $ I.shapeDims shape
-          I.Prim pt ->
-            pure $ constant $ blankPrimValue pt
+          -- Ignore scratch on non-arrays because they are sometimes applied
+          -- too promisciously.
           _ -> pure se
     "blank" -> do
       ts <- mapM subExpType e'
@@ -1765,14 +1765,11 @@ isOverloadedFunction qname desc = do
             ((name ==) . nameFromText . prettyText)
             [minBound .. maxBound :: E.BinOp] =
           Just $ \[(x_t, [x']), (y_t, [y'])] ->
-            case (arrayElem x_t, arrayElem y_t) of
+            case (x_t, y_t) of
               (E.Scalar (E.Prim t1), E.Scalar (E.Prim t2)) ->
                 internaliseBinOp desc bop x' y' t1 t2
               _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
     handle _ = Nothing
-
-    arrayElem (E.Array _ _ t) = E.Scalar t
-    arrayElem t = t
 
 scatterF :: Int -> E.Exp -> E.Exp -> E.Exp -> Name -> InternaliseM [SubExp]
 scatterF rank dest is v desc = do
@@ -1789,7 +1786,7 @@ isIntrinsicFunction ::
   E.QualName VName ->
   [E.Exp] ->
   Maybe (Name -> InternaliseM [SubExp])
-isIntrinsicFunction qname all_args = do
+isIntrinsicFunction qname args = do
   guard $ isIntrinsic $ qualLeaf qname
   let handlers =
         [ handleSign,
@@ -1799,7 +1796,7 @@ isIntrinsicFunction qname all_args = do
           handleAD,
           handleRest
         ]
-  msum [h all_args $ baseName $ qualLeaf qname | h <- handlers]
+  msum [h args $ baseName $ qualLeaf qname | h <- handlers]
   where
     handleSign [x] "sign_i8" = Just $ toSigned I.Int8 x
     handleSign [x] "sign_i16" = Just $ toSigned I.Int16 x
@@ -2142,7 +2139,7 @@ funcall desc (QualName _ fname) args = do
 
   shapeargs <- argShapes shapes fun_params argts
   let diets =
-        replicate (length shapeargs) I.ObservePrim
+        replicate (length shapeargs) I.Observe
           ++ map I.diet value_paramts
   args' <-
     ensureArgShapes

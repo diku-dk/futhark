@@ -28,7 +28,6 @@ import Data.Map qualified as M
 import Futhark.MonadFreshNames
 import Futhark.Util (showText)
 import Futhark.Util.Loc (srcspan)
-import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
@@ -302,8 +301,6 @@ getOrdering final (AppExp (Loop sizes pat einit form body loc) resT) = do
   body' <- transformBody body
   nameExp final $ AppExp (Loop sizes pat (LoopInitExplicit einit') form' body' loc) resT
 getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) loc) (Info resT)) = do
-  -- Rewrite short-circuiting boolean operators on scalars to explicit
-  -- if-then-else.
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
       el' <- naming "or_lhs" $ getOrdering True el
@@ -314,8 +311,8 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
       er' <- naming "and_rhs" $ transformBody er
       pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
     (False, False) -> do
-      el' <- naming (baseName (qualLeaf op) <> "_lhs") $ getOrdering False el
-      er' <- naming (baseName (qualLeaf op) <> "_rhs") $ getOrdering False er
+      el' <- naming (nameFromText (prettyText op) <> "_lhs") $ getOrdering False el
+      er' <- naming (nameFromText (prettyText op) <> "_rhs") $ getOrdering False er
       pure $ mkApply (Var op opT oloc) [(elp, el'), (erp, er')] resT
   nameExp final expr'
   where
@@ -356,7 +353,7 @@ getOrdering final (AppExp (Match expr cs loc) resT) = do
 -- a complete separtion of states.
 transformBody :: (MonadFreshNames m) => Exp -> m Exp
 transformBody e = do
-  (e', pre_eval) <- runOrdering $ getOrdering True e
+  (e', pre_eval) <- runOrdering (getOrdering True e)
   pure $ foldl f e' pre_eval
   where
     appRes = case e of

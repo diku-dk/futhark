@@ -639,7 +639,7 @@ transformAppExp (Loop sparams pat loopinit form body loc) res = do
   (pat_sizes, pat'') <- sizesForPat pat'
   res' <- transformAppRes res
   pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' (LoopInitExplicit e1') form' body' loc) (Info res')
-transformAppExp (BinOp (fname, _) (Info t) (e1, Info d1) (e2, Info d2) loc) res = do
+transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
   (AppRes ret ext) <- transformAppRes res
   fname' <- transformFName loc fname (toStruct t)
   e1' <- transformExp e1
@@ -674,8 +674,8 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, Info d1) (e2, Info d2) loc) res 
   where
     applyOp ret ext fname' x y =
       mkApply
-        (mkApply fname' [(d1, x)] (AppRes ret mempty))
-        [(d2, y)]
+        (mkApply fname' [(unInfo d1, x)] (AppRes ret mempty))
+        [(unInfo d2, y)]
         (AppRes ret ext)
 
     makeVarParam arg = do
