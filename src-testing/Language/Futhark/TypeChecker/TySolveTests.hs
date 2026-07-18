@@ -53,14 +53,8 @@ t1 ~ t2 = CtEq (Reason mempty) t1 t2
 tvFree :: VName -> Level -> (VName, (Level, TyVarInfo ()))
 tvFree v lvl = (v, (lvl, TyVarFree mempty Unlifted))
 
--- tvPrim :: VName -> Level -> [PrimType] -> (VName, (Level, TyVarInfo ()))
--- tvPrim v lvl types = (v, (lvl, TyVarPrim mempty types))
-
 tvRecord :: VName -> Level -> M.Map Name (TypeBase () NoUniqueness) -> (VName, (Level, TyVarInfo ()))
 tvRecord v lvl fields = (v, (lvl, TyVarRecord mempty fields))
-
--- tvSum :: VName -> Level -> M.Map Name [TypeBase () NoUniqueness] -> (VName, (Level, TyVarInfo ()))
--- tvSum v lvl fields = (v, (lvl, TyVarSum mempty fields))
 
 typaram :: VName -> Level -> Liftedness -> (VName, (Level, Liftedness, Loc))
 typaram v lvl liftedness = (v, (lvl, liftedness, noLoc))
@@ -224,7 +218,6 @@ tests =
           mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
-      -- ! This case never finishes for the original implementation.
       testCase "infinite type (record) 2" $
         testSolveFail
           ["a_0" ~ "{foo: b_1}", "b_1" ~ "c_2", "a_0" ~ "c_2"]
@@ -243,13 +236,6 @@ tests =
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
           ".?([Oo]ccurs check).?",
-      -- testCase "infinite type (sum type)" $
-      --   testSolveFail
-      --     ["a_0" ~ "#foo a_0"]
-      --     mempty
-      --     (M.fromList [tvFree "a_0" 0])
-      --     ".?([Oo]ccurs check).?",
-
       testCase "infinite type (consuming array param)" $
         testSolveFail
           ["a_0" ~ "*[]a_0"]
