@@ -268,8 +268,11 @@ unscopeType ::
   [VName] ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
-unscopeType tloc unscoped =
-  sizeFree tloc $ find (`elem` unscoped) . fvVars . freeInExp
+unscopeType tloc unscoped t
+  -- Fast-path for common case where 't' has no free variables in unscoped.
+  | not (any (`elem` unscoped) (fvVars (freeInType t))) = pure (t, [])
+  | otherwise =
+      sizeFree tloc (find (`elem` unscoped) . fvVars . freeInExp) t
 
 checkExp :: Exp -> TermTypeM Exp
 checkExp (Var qn (Info t) loc) = do
