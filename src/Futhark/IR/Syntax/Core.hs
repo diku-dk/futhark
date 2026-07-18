@@ -303,10 +303,6 @@ data Diet
   | -- | Only observes value in this position, does
     -- not consume.  A result may alias this.
     Observe
-  | -- | As 'Observe', but the result will not
-    -- alias, because the parameter does not carry
-    -- aliases.
-    ObservePrim
   deriving (Eq, Ord, Show)
 
 -- | An identifier consists of its name and the type of the value

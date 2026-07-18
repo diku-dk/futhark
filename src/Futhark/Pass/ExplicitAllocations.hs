@@ -209,15 +209,16 @@ expReturns' e = do
 allocsForStm ::
   (Allocable fromrep torep inner) =>
   [Ident] ->
+  StmAux a ->
   Exp torep ->
   AllocM fromrep torep (Stm torep)
-allocsForStm idents e = do
+allocsForStm idents aux e = do
   def_space <- askDefaultSpace
   hints <- expHints e
   (rts, e') <- expReturns' e
   pes <- allocsForPat def_space idents rts hints
   dec <- mkExpDecM (Pat pes) e'
-  pure $ Let (Pat pes) (defAux dec) e'
+  pure $ Let (Pat pes) (aux {stmAuxDec = dec}) e'
 
 patWithAllocations ::
   (MonadBuilder m, Mem (Rep m) inner) =>
@@ -726,7 +727,7 @@ allocInStms origstms m = allocInStms' $ stmsToList origstms
   where
     allocInStms' [] = m
     allocInStms' (stm : stms) = do
-      allocstms <- collectStms_ $ auxing (stmAux stm) $ allocInStm stm
+      allocstms <- collectStms_ $ allocInStm stm
       addStms allocstms
       let stms_consts = foldMap stmConsts allocstms
           f env = env {envConsts = stms_consts <> envConsts env}
@@ -736,8 +737,8 @@ allocInStm ::
   (Allocable fromrep torep inner) =>
   Stm fromrep ->
   AllocM fromrep torep ()
-allocInStm (Let (Pat pes) _ e) =
-  addStm =<< allocsForStm (map patElemIdent pes) =<< allocInExp e
+allocInStm (Let (Pat pes) aux e) =
+  addStm =<< allocsForStm (map patElemIdent pes) aux =<< allocInExp e
 
 allocInLambda ::
   (Allocable fromrep torep inner) =>
@@ -876,6 +877,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
 -- the idea, but which could perhaps be generalised.
 simplifyMatch ::
   (Mem rep inner) =>
+  MatchSort ->
   [Case (Body rep)] ->
   Body rep ->
   [BranchTypeMem] ->
@@ -883,7 +885,10 @@ simplifyMatch ::
     Body rep,
     [BranchTypeMem]
   )
-simplifyMatch cases defbody ts =
+-- XXX: Do not simplify MatchEquivs
+simplifyMatch MatchEquiv cases defbody ts =
+  (cases, defbody, ts)
+simplifyMatch _ cases defbody ts =
   let case_reses = map (bodyResult . caseBody) cases
       defbody_res = bodyResult defbody
       (ctx_fixes, variant) =
@@ -949,7 +954,7 @@ allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   defbody'' <- addCtxToMatchBody reqs defbody'
   cases'' <- mapM (traverse $ addCtxToMatchBody reqs) cases'
   let (cases''', defbody''', rets') =
-        simplifyMatch cases'' defbody'' $ mkBranchRet reqs
+        simplifyMatch ifsort cases'' defbody'' $ mkBranchRet reqs
   pure $ Match ses cases''' defbody''' $ MatchDec rets' ifsort
   where
     onCase (Case vs body) = first (Case vs) <$> allocInMatchBody rets body
