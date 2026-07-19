@@ -229,7 +229,7 @@ testInlayTypeHint =
       hintTestCase
         "type argument hint"
         "def identity = let f 'a (x: a): a = x in f"
-        [(Position 0 12, " 'a\8322"), (Position 0 12, " : (x: a\8322) -> a\8322")]
+        [(Position 0 12, " 'a\8320"), (Position 0 12, " : (x: a\8320) -> a\8320")]
     lambdaArgHint =
       hintTestCase
         "lambda argument hint"
