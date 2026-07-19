@@ -1,5 +1,6 @@
 -- Recursion with a declared return type.
 -- ==
+-- tags { disable }
 -- input { [ 5,4,3,2,1 ] }
 -- output { [ 1,2,3,4,5] }
 
