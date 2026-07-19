@@ -20,7 +20,6 @@ import Control.Monad.State
 import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Text qualified as T
-import Futhark.Util
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad
@@ -490,9 +489,6 @@ resolveSizes sizes m = do
     sizeWithSpace size =
       (Term, sizeName size, srclocOf size)
 
-allowRecursion :: Bool
-allowRecursion = isEnvVarAtLeast "FUTHARK_ALLOW_RECURSION" 1
-
 -- | Resolve names in a value binding. If this succeeds, then it is
 -- guaranteed that all names references things that are in scope.
 resolveValBind :: ValBindBase NoInfo Name -> TypeM (ValBindBase NoInfo VName)
@@ -506,7 +502,7 @@ resolveValBind (ValBind entry fname fname_loc ret NoInfo tparams params body doc
       -- Allow self-reference (recursion) only for syntactic functions, i.e.
       -- those with parameters. See Note [Checking recursive functions].
       (fname', body') <-
-        case if allowRecursion then params else [] of
+        case params of
           [] -> do
             body' <- resolveExp body
             bindSpaced1 Term fname loc $ \fname' -> do
