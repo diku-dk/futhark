@@ -58,19 +58,19 @@ substituteTypesInBoundV substs (BoundV tps t) =
 -- | All names defined anywhere in the 'Env'.
 allNamesInEnv :: Env -> S.Set VName
 allNamesInEnv (Env vtable ttable stable modtable _names) =
-  S.fromList
-    ( M.keys vtable
-        ++ M.keys ttable
-        ++ M.keys stable
-        ++ M.keys modtable
-    )
-    <> mconcat
-      ( map allNamesInMTy (M.elems stable)
-          ++ map allNamesInMod (M.elems modtable)
-          ++ map allNamesInType (M.elems ttable)
-      )
+  S.unions
+    [ M.keysSet vtable,
+      M.keysSet ttable,
+      M.keysSet stable,
+      M.keysSet modtable,
+      foldMap allNamesInVal (M.elems vtable),
+      foldMap allNamesInMTy (M.elems stable),
+      foldMap allNamesInMod (M.elems modtable),
+      foldMap allNamesInType (M.elems ttable)
+    ]
   where
     allNamesInType (TypeAbbr _ ps _) = S.fromList $ map typeParamName ps
+    allNamesInVal (BoundV ps _) = S.fromList $ map typeParamName ps
 
 allNamesInMod :: Mod -> S.Set VName
 allNamesInMod (ModEnv env) = allNamesInEnv env
