@@ -148,8 +148,8 @@ newNamesForMTy orig_mty = do
             (substituteInMod mod)
             (substituteInMTy substs mty)
 
-        substituteInTypeBinding (TypeAbbr l ps (RetType dims t)) =
-          TypeAbbr l (map substituteInTypeParam ps) $ RetType dims $ substituteInType t
+        substituteInTypeBinding (TypeAbbr l ps t) =
+          TypeAbbr l (map substituteInTypeParam ps) $ substituteInRetType t
 
         substituteInTypeParam (TypeParamDim p loc) =
           TypeParamDim (substitute p) loc
@@ -169,7 +169,8 @@ newNamesForMTy orig_mty = do
           Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
 
         substituteInRetType :: RetTypeBase Size u -> RetTypeBase Size u
-        substituteInRetType (RetType ext t) = RetType ext $ substituteInType t
+        substituteInRetType (RetType ext t) =
+          RetType (map substitute ext) $ substituteInType t
 
         substituteInType :: TypeBase Size u -> TypeBase Size u
         substituteInType (Scalar t) = Scalar $ substituteInScalarType t
