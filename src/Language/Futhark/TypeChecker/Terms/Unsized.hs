@@ -1369,7 +1369,10 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 -- type.
 checkSingleExp ::
   ExpBase NoInfo VName ->
-  TypeM (Either TypeError ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+  TypeM
+    ( Either TypeError ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)),
+      Exp
+    )
 checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
@@ -1400,14 +1403,13 @@ checkSizeExp e = runTermM $ do
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
+  artificial <- gets termArtificial
 
-  solution <-
-    bitraverse
-      pure
-      ( \(unconstrained, solution) -> do
-          checkTyInstLiftedness solution
-          (unconstrained,) <$> doDefaults mempty solution
-      )
-      $ solve cts typarams tyvars
-
-  pure (solution, e')
+  case solve cts typarams tyvars of
+    Left err -> pure (Left err, e')
+    Right (unconstrained, solution) -> do
+      checkTyInstLiftedness solution
+      solution' <-
+        onArtificial (M.map (first (const ())) artificial)
+          <$> doDefaults mempty solution
+      pure (Right (unconstrained, solution'), e')
