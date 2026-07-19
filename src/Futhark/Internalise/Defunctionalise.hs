@@ -1360,8 +1360,14 @@ defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)
               (Just (first (map typeParamName) (valBindTypeScheme valbind)))
               self_sv
         Nothing -> mempty
+  -- The self static value goes into the *global* environment (as well as the
+  -- local one) so that it is treated as a top-level function: recursive uses of
+  -- it as a value are then eta-expanded and closure-converted like any other
+  -- top-level function (see the 'DynamicFun' case of 'defuncExp'), rather than
+  -- capturing the self static value into a closure, which 'restrictEnvTo' omits
+  -- for globals.
   (tparams', params', body', sv, sv_t) <-
-    localEnv (self <>) $
+    local (bimap (self <>) (self <>)) $
       defuncLet (map typeParamName tparams) params body $
         RetType ret_dims rettype
   globals <- asks $ M.keysSet . fst
