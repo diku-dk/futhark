@@ -702,17 +702,29 @@ unifyMostCommon usage t1 t2 = do
       expLevel e =
         L.foldl' max 0 $ mapMaybe varLevel $ S.toList $ fvVars $ freeInExp e
 
+      -- Check that no free variable in the expression has a
+      -- ParamSize constraint at a level that would cause a scope
+      -- violation if we tried to link.
+      noParamScopeViolation lvl e =
+        all check $ S.toList $ fvVars $ freeInExp e
+        where
+          check v = case M.lookup v constraints of
+            Just (v_lvl, ParamSize {}) -> v_lvl < lvl
+            _ -> True
+
       onDims bcs bound nonrigid e1 e2
         | Just es <- similarExps e1 e2 =
             mapM_ (uncurry $ onDims bcs bound nonrigid) es
       onDims bcs _ nonrigid (Var v1 _ _) e2
         | Just lvl1 <- nonrigid (qualLeaf v1),
           expLevel e2 <= lvl1,
+          noParamScopeViolation lvl1 e2,
           not $ qualLeaf v1 `S.member` fvVars (freeInExp e2) =
             linkVarToDim usage bcs (qualLeaf v1) lvl1 e2
       onDims bcs _ nonrigid e1 (Var v2 _ _)
         | Just lvl2 <- nonrigid (qualLeaf v2),
           expLevel e1 <= lvl2,
+          noParamScopeViolation lvl2 e1,
           not $ qualLeaf v2 `S.member` fvVars (freeInExp e1) =
             linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
       onDims _ _ _ _ _ = pure ()
