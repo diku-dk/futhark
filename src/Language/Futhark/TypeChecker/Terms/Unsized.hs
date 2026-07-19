@@ -1278,7 +1278,8 @@ checkTyInstLiftedness solution = do
 -- fresh monomorphic type variable while its body is checked; that variable is
 -- then constrained to the actual function type, and the constraint solver ties
 -- the knot. A parameterless binding cannot be recursive (see 'resolveValBind'),
--- so it is checked with no self-reference in scope.
+-- so it is checked with no self-reference in scope. See Note [Checking recursive
+-- functions] in Language.Futhark.TypeChecker.Terms.
 checkRecursive ::
   VName ->
   SrcLoc ->

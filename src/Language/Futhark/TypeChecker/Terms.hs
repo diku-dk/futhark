@@ -1610,10 +1610,15 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
   incLevel . bindingParams tparams params $ \params' -> do
     maybe_retdecl' <- traverse checkTypeExpNonrigid maybe_retdecl
 
-    -- Harmless to treat everything as potentially recursive, as name resolution
-    -- has hooked things up properly anyway.
+    -- Bind the name in scope of its own body so it may recurse. Harmless even
+    -- when the function is not actually recursive, as name resolution has
+    -- hooked things up properly anyway. See Note [Checking recursive
+    -- functions].
+    let self_binding = case maybe_retdecl' of
+          Just (_, ret, ext) -> BoundV tparams $ funType params' $ RetType ext ret
+          Nothing -> RecursiveV
     body' <-
-      localScope (\scope -> scope {scopeVtable = M.insert fname RecursiveV $ scopeVtable scope}) $
+      localScope (\scope -> scope {scopeVtable = M.insert fname self_binding $ scopeVtable scope}) $
         checkFunBody
           params'
           body
@@ -2124,3 +2129,43 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 -- a remaining parameter type (of a partially applied function) is registered
 -- as a rigid unknown size by 'sizeFree', which is what carries the obligation
 -- across applications.
+
+-- Note [Checking recursive functions]
+--
+-- A function may refer to itself in its own body. The difficulty is that the
+-- function's type is not fully known until we have checked that body, so we
+-- cannot simply look the name up like any other. We follow the textbook
+-- Hindley-Milner treatment on monomoprhic recursion, where all occurrences of
+-- the function within its own body share a single type. However, we add the
+-- twist that *size parameters* are allowed to differ.
+--
+-- The handling is spread across name resolution and the two type-checking
+-- passes:
+--
+-- 1. Name resolution brings the function name into scope of its own body, but
+--    only for *syntactic* functions (those with parameters).
+--
+-- 2. The unsized pass binds the name to a fresh monomorphic type variable while
+--    checking the body, then emits a single constraint equating that variable
+--    with the actual function type. This is standard monomorphic recursion.
+--
+-- 3. The sized pass considers two cases, distinguished by whether the function
+--    has a declared return type:
+--
+--    * With a declared return type, the function's size-precise type is known
+--      before we check the body, so we bind the name to that type scheme
+--      ('BoundV'). Recursive occurrences are then instantiated like calls to
+--      any other function: sizes are refreshed per occurrence, but the size
+--      *relationships* of the signature are kept - e.g. that '[n]i32 -> [n]i32'
+--      returns an array the size of its argument. This permits size-polymorphic
+--      recursion.
+--
+--    * Without a declared return type, we cannot know the return type in
+--      advance, so we bind the name to 'RecursiveV' . 'lookupVar' then resolves
+--      each occurrence with 'replaceTyVars' on the type the unsized pass
+--      recorded, which creates *fresh, unrelated* sizes for every dimension,
+--      which is OK whenever no size relationship in the return type matters.
+--      This means we cannot *infer* size constraints for recursive functions.
+--
+-- Only top-level self-recursion is handled. Mutual recursion and local
+-- (let-bound) recursion are not.
