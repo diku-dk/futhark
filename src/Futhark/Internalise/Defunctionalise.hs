@@ -1298,11 +1298,12 @@ svFromType t = Dynamic t
 -- suffices for fully applied recursive calls: the residual expression simply
 -- refers to the top-level binding by name.
 --
--- We only do this for first-order bindings (order-zero parameters and result);
--- handling general recursion is impossible because we would need to specialise
--- for every closure (which may be unbounded). In principle we could allow
--- recursion when the higher-order arguments are identical in the recursive
--- application (essentially a kind of monomorphic recursion).
+-- A first-order body is defunctionalised eagerly here in 'defuncValBind', so
+-- its recursive occurrences need this self static value to resolve to; and it
+-- yields a direct recursive function rather than lifted closures. A
+-- higher-order body is instead stored raw in a 'LambdaSV' and defunctionalised
+-- when applied, by which point the binding is in scope, so it needs no self
+-- static value here.
 selfSV :: VName -> [Pat ParamType] -> ResType -> Maybe StaticVal
 selfSV name params rettype
   | all patternOrderZero params,
