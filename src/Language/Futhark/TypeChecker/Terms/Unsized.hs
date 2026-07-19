@@ -1335,27 +1335,15 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
-  artificial <- gets termArtificial
+  artificial <- gets $ M.map (first (const ())) . termArtificial
 
-  onRankSolution
-    typarams
-    ( ( cts,
-        M.map (first (const ())) artificial,
-        tyvars
-      ),
-      params',
-      body',
-      retdecl'
-    )
+  solution <-
+    bitraverse
+      pure
+      (fmap (second (onArtificial artificial)) . onTySolution params' body')
+      $ solve (reverse cts) typarams tyvars
+  pure (solution, params', retdecl', body')
   where
-    onRankSolution typarams ((cts', artificial, tyvars'), params', body'', retdecl') = do
-      solution <-
-        bitraverse
-          pure
-          (fmap (second (onArtificial artificial)) . onTySolution params' body'')
-          $ solve (reverse cts') typarams tyvars'
-      pure (solution, params', retdecl', body'')
-
     onTySolution params' body' (unconstrained, solution) = do
       checkTyInstLiftedness solution
       body_t <- expType body'
