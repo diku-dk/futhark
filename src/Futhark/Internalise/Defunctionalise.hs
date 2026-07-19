@@ -1355,11 +1355,11 @@ defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)
   -- 'defuncApplyArg' (see Note [Lifting and recursion]).
   let self = case selfSV name params rettype of
         Just self_sv ->
-          M.singleton name $
+          M.insert name $
             Binding
               (Just (first (map typeParamName) (valBindTypeScheme valbind)))
               self_sv
-        Nothing -> mempty
+        Nothing -> id
   -- The self static value goes into the *global* environment (as well as the
   -- local one) so that it is treated as a top-level function: recursive uses of
   -- it as a value are then eta-expanded and closure-converted like any other
@@ -1367,7 +1367,7 @@ defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)
   -- capturing the self static value into a closure, which 'restrictEnvTo' omits
   -- for globals.
   (tparams', params', body', sv, sv_t) <-
-    local (bimap (self <>) (self <>)) $
+    local (bimap self self) $
       defuncLet (map typeParamName tparams) params body $
         RetType ret_dims rettype
   globals <- asks $ M.keysSet . fst
@@ -1422,8 +1422,8 @@ transformProg decs = modifyNameSource $ \namesrc ->
 -- case of this; it falls out of memoising the lifting.
 --
 -- The specialisation a given step produces is fully determined by the function
--- - the 'LambdaSV', which carries the body, the parameter, and the lexical
--- closure - together with the 'StaticVal' of the argument it is applied to.
+-- (the 'LambdaSV', which carries the body, the parameter, and the lexical
+-- closure) together with the 'StaticVal' of the argument it is applied to.
 -- Everything that varies at runtime (the captured values) is passed in the
 -- closure, not baked into the lifted function. So we memoise ('LiftMemo') the
 -- lifted function under exactly that pair, and reuse it whenever the same
@@ -1435,13 +1435,13 @@ transformProg decs = modifyNameSource $ \namesrc ->
 -- 'StaticVal'), so it hits the memo and becomes a call to the function being
 -- lifted rather than another round of inlining.
 --
--- There is no detection of recursion and no distinction between recursive and
--- non-recursive functions: an ordinary call and a recursive call are the same
--- memo lookup. Note that this means a program whose recursion is not statically
--- resolvable - an indirect recursive call, or one that passes a *different*
--- function at each step (e.g. `go (\x -> g x) n = ... go (\x -> g (g x)) (n-1)`)
--- - produces ever-changing keys and does not terminate here. Such programs are
--- not defunctionalisable and must be rejected by the type checker.
+-- There is no distinction between recursive and non-recursive functions: an
+-- ordinary call and a recursive call are the same memo lookup. Note that this
+-- means a program whose recursion is not statically resolvable - an indirect
+-- recursive call, or one that passes a *different* function at each step (e.g.
+-- `go (\x -> g x) n = ... go (\x -> g (g x)) (n-1)`) - produces ever-changing
+-- keys and does not terminate here. Such programs must be rejected by the type
+-- checker.
 --
 -- One subtlety remains, and it is about knot-tying, not about recognising
 -- recursion. A curried application peels off one parameter per step; the step
