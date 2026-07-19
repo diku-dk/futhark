@@ -82,7 +82,7 @@ makeTyParamNode tv lvl lft loc = do
 -- equivalence class and the information associated with
 -- this equivalence class.
 --
--- This method performs the path compresssion.
+-- This method performs the path compression.
 find :: TyVarNode s -> ST s (TyVarNode s, ReprInfo)
 find node@(Node ref) = do
   node_info <- readSTRef ref

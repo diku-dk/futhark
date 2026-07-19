@@ -30,11 +30,11 @@ data ValBinding dim
   = BoundV [TypeParam] (TypeBase dim NoUniqueness)
   | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
   | EqualityF
-  | -- | A function currently being checked, in scope of its own body so that it
-    -- may be used recursively. Each occurrence adopts the type recorded for it
-    -- by the unsized type checker, with fresh sizes - just like a call of a
-    -- monomorphic function, and which allows "size-polymorphic recursion" (but
-    -- not general polymorphic recursion).
+  | -- | A recursive function with no declared return type, currently being
+    -- checked and in scope of its own body. Each occurrence adopts the type
+    -- recorded for it by the unsized type checker, with fresh (unrelated) sizes.
+    -- See Note [Checking recursive functions] in
+    -- Language.Futhark.TypeChecker.Terms.
     RecursiveV
   deriving (Show)
 

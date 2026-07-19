@@ -580,6 +580,8 @@ lookupVar loc qn@(QualName qs name) inst_t = do
       replaceTyVars loc inst_t
     Just OverloadedF {} ->
       replaceTyVars loc inst_t
+    -- See Note [Checking recursive functions] in
+    -- Language.Futhark.TypeChecker.Terms.
     Just RecursiveV ->
       replaceTyVars loc inst_t
 

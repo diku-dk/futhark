@@ -1278,7 +1278,8 @@ checkTyInstLiftedness solution = do
 -- fresh monomorphic type variable while its body is checked; that variable is
 -- then constrained to the actual function type, and the constraint solver ties
 -- the knot. A parameterless binding cannot be recursive (see 'resolveValBind'),
--- so it is checked with no self-reference in scope.
+-- so it is checked with no self-reference in scope. See Note [Checking recursive
+-- functions] in Language.Futhark.TypeChecker.Terms.
 checkRecursive ::
   VName ->
   SrcLoc ->
@@ -1298,6 +1299,16 @@ checkRecursive fname loc params' body = do
           (RetType [] $ bimap (const ()) (const Nonunique) body_t)
   ctEq (Reason (locOf loc)) ftype fun_t
   pure body'
+
+-- | Replace artificial variables with the types they denote, so that no
+-- artificial variable leaks into the result.
+onArtificial ::
+  M.Map TyVar (TypeBase () NoUniqueness) ->
+  M.Map TyVar (TypeBase () NoUniqueness) ->
+  M.Map TyVar (TypeBase () NoUniqueness)
+onArtificial artificial solution =
+  M.map (substTyVars (`M.lookup` solution) . first (const ())) artificial
+    <> solution
 
 -- | Type check a single value definition.
 checkValDef ::
@@ -1324,27 +1335,15 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
-  artificial <- gets termArtificial
+  artificial <- gets $ M.map (first (const ())) . termArtificial
 
-  onRankSolution
-    typarams
-    ( ( cts,
-        M.map (first (const ())) artificial,
-        tyvars
-      ),
-      params',
-      body',
-      retdecl'
-    )
+  solution <-
+    bitraverse
+      pure
+      (fmap (second (onArtificial artificial)) . onTySolution params' body')
+      $ solve (reverse cts) typarams tyvars
+  pure (solution, params', retdecl', body')
   where
-    onRankSolution typarams ((cts', artificial, tyvars'), params', body'', retdecl') = do
-      solution <-
-        bitraverse
-          pure
-          (fmap (second (onArtificial artificial)) . onTySolution params' body'')
-          $ solve (reverse cts') typarams tyvars'
-      pure (solution, params', retdecl', body'')
-
     onTySolution params' body' (unconstrained, solution) = do
       checkTyInstLiftedness solution
       body_t <- expType body'
@@ -1354,26 +1353,29 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
               (RetType [] $ bimap (const ()) (const Nonunique) body_t)
       generaliseAndDefaults unconstrained solution fun_t
 
-    onArtificial artificial solution =
-      M.map (substTyVars (`M.lookup` solution) . first (const ())) artificial <> solution
-
 -- | Type check a single expression, which may have a polymorphic
 -- type.
 checkSingleExp ::
   ExpBase NoInfo VName ->
-  TypeM (Either TypeError ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+  TypeM
+    ( Either TypeError ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)),
+      Exp
+    )
 checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
+  artificial <- gets termArtificial
 
   case solve cts typarams tyvars of
     Left err -> pure (Left err, e')
     Right (unconstrained, solution) -> do
       checkTyInstLiftedness solution
       e_t <- expType e'
-      x <- generaliseAndDefaults unconstrained solution $ first (const ()) e_t
+      x <-
+        second (onArtificial (M.map (first (const ())) artificial))
+          <$> generaliseAndDefaults unconstrained solution (first (const ()) e_t)
       pure (Right x, e')
 
 -- | Type-check a single size expression in isolation, which must have
@@ -1389,14 +1391,13 @@ checkSizeExp e = runTermM $ do
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
+  artificial <- gets termArtificial
 
-  solution <-
-    bitraverse
-      pure
-      ( \(unconstrained, solution) -> do
-          checkTyInstLiftedness solution
-          (unconstrained,) <$> doDefaults mempty solution
-      )
-      $ solve cts typarams tyvars
-
-  pure (solution, e')
+  case solve cts typarams tyvars of
+    Left err -> pure (Left err, e')
+    Right (unconstrained, solution) -> do
+      checkTyInstLiftedness solution
+      solution' <-
+        onArtificial (M.map (first (const ())) artificial)
+          <$> doDefaults mempty solution
+      pure (Right (unconstrained, solution'), e')

@@ -504,7 +504,7 @@ resolveValBind (ValBind entry fname fname_loc ret NoInfo tparams params body doc
     resolveParams params $ \params' -> do
       ret' <- traverse resolveTypeExp ret
       -- Allow self-reference (recursion) only for syntactic functions, i.e.
-      -- those with parameters.
+      -- those with parameters. See Note [Checking recursive functions].
       (fname', body') <-
         case if allowRecursion then params else [] of
           [] -> do
