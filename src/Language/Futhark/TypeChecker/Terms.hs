@@ -1399,6 +1399,53 @@ localChecks tparams orig_body = void $ check orig_body
             <> pretty ty
             <> "."
 
+-- | Check that any recursive applications of a higher-order function are
+-- invariant with respect to the higher-order arguments. This is done as a
+-- syntactic check.
+--
+-- 'fname' and 'params' are the name and parameters of the function whose body
+-- this is; if the function is not recursive, 'fname' does not occur and this is
+-- a no-op regardless.
+recursionCheck :: [TypeParam] -> VName -> [Pat ParamType] -> Exp -> TermTypeM ()
+recursionCheck tparams fname params body = do
+  higher_order <-
+    mapM (fmap not . orderZeroM tparams . patternStructType) params
+  when (or higher_order) $ void $ check higher_order body
+  where
+    check ho e@(AppExp (Apply f args _) _)
+      | Var v _ _ <- f,
+        qualLeaf v == fname = do
+          checkRecApply ho (locOf e) $ map snd $ NE.toList args
+          mapM_ (check ho . snd) args
+          pure e
+    check _ (Var v _ loc)
+      | qualLeaf v == fname =
+          typeError loc mempty $
+            "Recursive reference to"
+              <+> dquotes (prettyName fname)
+              <+> "must be a fully saturated application, as it has a higher-order parameter."
+    check ho e = recurse ho e
+    recurse ho = astMap identityMapper {mapOnExp = check ho}
+
+    checkRecApply ho loc args = do
+      unless (length args == length params) . typeError loc mempty $
+        "Recursive application of"
+          <+> dquotes (prettyName fname)
+          <+> "is not fully saturated: expected"
+          <+> pretty (length params)
+          <+> "arguments but got"
+          <+> pretty (length args)
+          <> "."
+      forM_ (zip3 ho params args) $ \(is_ho, p, arg) ->
+        when is_ho $
+          case arg of
+            Var v _ _ | qualLeaf v `elem` patNames p -> pure ()
+            _ ->
+              typeError (locOf arg) mempty $
+                "Higher-order argument in recursive application of"
+                  <+> dquotes (prettyName fname)
+                  <+> "must be passed unchanged, i.e. be the corresponding parameter."
+
 -- | Instantiated sizes that unification has determined to be existential
 -- ("pending"), and a mapping from pending copies to a representative: copies
 -- from the same occurrence of an instantiated type parameter that were absorbed
@@ -1937,6 +1984,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
             -- Check for various problems.
             mapM_ (mustBeIrrefutable . fmap toStruct) params''
             localChecks tparams' body'''
+            recursionCheck tparams' fname params''' body'''
 
             let ((body'''', updated_ret), errors) =
                   Consumption.checkValDef
