@@ -698,16 +698,17 @@ unifyMostCommon usage t1 t2 = do
   -- would fail.
   constraints <- getConstraints
 
-  let varLevel v = fst <$> M.lookup v constraints
-      expLevel e =
-        L.foldl' max 0 $ mapMaybe varLevel $ S.toList $ fvVars $ freeInExp e
+  let expFreeVars = fvVars . freeInExp
 
-      -- Check that linking to this expression would not fail in
-      -- linkVarToDim due to a ParamSize at a level >= the target
-      -- level. This replicates the scope check performed by
-      -- linkVarToDim's checkVar.
-      linkWouldFail lvl e =
-        any (wouldFail lvl) $ S.toList $ fvVars $ freeInExp e
+      varLevel v = fst <$> M.lookup v constraints
+
+      -- Can we link a variable at the given level to an expression
+      -- with the given free variables?
+      canLink lvl vn bound fvs =
+        L.foldl' max 0 (mapMaybe varLevel $ S.toList fvs) <= lvl
+          && not (any (`S.member` fvs) bound)
+          && not (any (wouldFail lvl) $ S.toList fvs)
+          && not (vn `S.member` fvs)
       wouldFail lvl v =
         case M.lookup v constraints of
           Just (dim_lvl, ParamSize {}) -> dim_lvl >= lvl
@@ -718,17 +719,11 @@ unifyMostCommon usage t1 t2 = do
             mapM_ (uncurry $ onDims bcs bound nonrigid) es
       onDims bcs bound nonrigid (Var v1 _ _) e2
         | Just lvl1 <- nonrigid (qualLeaf v1),
-          expLevel e2 <= lvl1,
-          not $ anyBound bound e2,
-          not $ linkWouldFail lvl1 e2,
-          not $ qualLeaf v1 `S.member` fvVars (freeInExp e2) =
+          canLink lvl1 (qualLeaf v1) bound (expFreeVars e2) =
             linkVarToDim usage bcs (qualLeaf v1) lvl1 e2
       onDims bcs bound nonrigid e1 (Var v2 _ _)
         | Just lvl2 <- nonrigid (qualLeaf v2),
-          expLevel e1 <= lvl2,
-          not $ anyBound bound e1,
-          not $ linkWouldFail lvl2 e1,
-          not $ qualLeaf v2 `S.member` fvVars (freeInExp e1) =
+          canLink lvl2 (qualLeaf v2) bound (expFreeVars e1) =
             linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
       onDims _ _ _ _ _ = pure ()
 
