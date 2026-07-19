@@ -1300,6 +1300,16 @@ checkRecursive fname loc params' body = do
   ctEq (Reason (locOf loc)) ftype fun_t
   pure body'
 
+-- | Replace artificial variables with the types they denote, so that no
+-- artificial variable leaks into the result.
+onArtificial ::
+  M.Map TyVar (TypeBase () NoUniqueness) ->
+  M.Map TyVar (TypeBase () NoUniqueness) ->
+  M.Map TyVar (TypeBase () NoUniqueness)
+onArtificial artificial solution =
+  M.map (substTyVars (`M.lookup` solution) . first (const ())) artificial
+    <> solution
+
 -- | Type check a single value definition.
 checkValDef ::
   ( VName,
@@ -1355,9 +1365,6 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
               (RetType [] $ bimap (const ()) (const Nonunique) body_t)
       generaliseAndDefaults unconstrained solution fun_t
 
-    onArtificial artificial solution =
-      M.map (substTyVars (`M.lookup` solution) . first (const ())) artificial <> solution
-
 -- | Type check a single expression, which may have a polymorphic
 -- type.
 checkSingleExp ::
@@ -1368,13 +1375,16 @@ checkSingleExp e = runTermM $ do
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
+  artificial <- gets termArtificial
 
   case solve cts typarams tyvars of
     Left err -> pure (Left err, e')
     Right (unconstrained, solution) -> do
       checkTyInstLiftedness solution
       e_t <- expType e'
-      x <- generaliseAndDefaults unconstrained solution $ first (const ()) e_t
+      x <-
+        second (onArtificial (M.map (first (const ())) artificial))
+          <$> generaliseAndDefaults unconstrained solution (first (const ()) e_t)
       pure (Right x, e')
 
 -- | Type-check a single size expression in isolation, which must have
