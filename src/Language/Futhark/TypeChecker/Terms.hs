@@ -1913,9 +1913,6 @@ checkFunDef ::
 checkFunDef (fname, retdecl, tparams, params, body, loc) =
   doChecks =<< Unsized.checkValDef (fname, retdecl, tparams, params, body, loc)
   where
-    -- TODO: Print out the possibilities. (And also potentially eliminate
-    --- some of the possibilities to disambiguate).
-
     doChecks (maybe_tysubsts, params', retdecl', body') =
       case maybe_tysubsts of
         Left err -> throwError err
