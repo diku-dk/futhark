@@ -27,7 +27,6 @@ import Data.Maybe
 import Data.Ord
 import Data.Set qualified as S
 import Futhark.FreshNames hiding (newName)
-import Futhark.Util (debugTraceM)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
@@ -699,8 +698,6 @@ checkValBind vb = do
 
   let entry' = Info (entryPoint doc params' maybe_tdecl' rettype) <$ entry
       vb' = ValBind entry' fname fname_loc maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
-
-  debugTraceM 3 $ unlines ["# Inferred:", prettyString vb']
 
   case entry' of
     Just _ -> checkEntryPoint loc tparams' params' rettype
