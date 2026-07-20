@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Added
 
+* The type checker has been rewritten, with contributions from Jacob Aleksandar
+  Siegumfeldt, Laust Kjæp Dengsøe, and Robert Schenck.
+
 ## Removed
 
 ## Changed
+
+* Local functions are no longer let-generalised (i.e., made polymorphic).
+  Explicitly polymorphic local functions are still supported.
 
 ## Fixed
 
