@@ -88,11 +88,13 @@ data ExtOp a
   = ExtOpTrace T.Text (Doc ()) a
   | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
+  | ExtOpCall Name [Value] ValueShape (Value -> a)
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
   fmap f (ExtOpBreak w why backtrace x) = ExtOpBreak w why backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
+  fmap f (ExtOpCall n p s c) = ExtOpCall n p s $ f . c
 
 type Stack = [StackFrame]
 
@@ -1296,7 +1298,28 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
       pure (f_env <> e_env <> res_env <> env_substs, res_mod)
     _ -> error "Expected ModuleFun."
 
+extCall :: Name -> [Value] -> ValueShape -> EvalM Value
+extCall n ps s = liftF $ ExtOpCall n ps s id
+
+extFun :: Name -> Int -> ValueShape -> EvalM Value
+extFun n c s = extFun' c []
+  where
+    extFun' :: Int -> [Value] -> EvalM Value
+    extFun' i _ | i < 1 = extCall n [] s -- Special case: Functions with 0 parameters - i.e. values
+    extFun' i vs | i == 1 = pure . ValueFun $ \v -> extCall n (reverse $ v : vs) s
+    extFun' i vs = pure . ValueFun $ \v -> extFun' (i - 1) $ v : vs
+
 evalDec :: Env -> Dec -> EvalM Env
+evalDec env (ValDec vb@(ValBind (Just _) vn@(VName n _) _ _ (Info ret) tparams ps _ _ _ _)) | "$external" `elem` valBindAttrs vb = localExts $ do
+  let bv = Just $ T.BoundV [] $ evalToStruct $ expandType env $ funType ps ret
+  sizes <- extEnv
+  if null tparams then do
+    f <- typeShape <$> evalTypeFully (structToEval env $ toStruct $ retType ret) >>= extFun n (length ps)
+    pure $ mempty {envTerm = M.singleton vn $ TermValue bv f} <> sizes
+  else
+    -- TODO: Add missing sizes?
+    let pfn t = typeShape . snd . unfoldFunType <$> evalTypeFully t >>= extFun n (length ps)
+     in pure $ mempty {envTerm = M.singleton vn $ TermPoly bv pfn} <> sizes
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env v tparams ps ret fbody
   sizes <- extEnv
