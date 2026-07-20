@@ -362,7 +362,7 @@ runInterpreter m = runF m (pure . Right) intOp
                 }
 
       c
-    intOp (I.ExtOpCall {}) = error "External calls are not supported in the REPL."
+    intOp (I.ExtOpFFI {}) = error "External calls are not yet supported in the REPL."
 
 runInterpreterNoBreak :: (MonadIO m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
@@ -377,7 +377,7 @@ runInterpreterNoBreak m = runF m (pure . Right) intOp
         T.putStrLn $
           locText w <> ": " <> "ignoring breakpoint when computating constant."
       c
-    intOp (I.ExtOpCall {}) = error "External calls are not supported in the REPL."
+    intOp (I.ExtOpFFI {}) = error "External calls are not yet supported in the REPL."
 
 replComplete :: Haskeline.CompletionFunc IO
 replComplete = loadComplete

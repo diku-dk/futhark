@@ -11,7 +11,7 @@ where
 
 import Control.Arrow (Arrow (second))
 import Control.Exception (IOException, catch)
-import Control.Monad (foldM, unless, void, when, (<=<), zipWithM)
+import Control.Monad (foldM, unless, void, when, (<=<))
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Free.Church (F, runF)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -114,7 +114,11 @@ runExpr (InterpreterState (src, env, ctx, s)) str = do
   pval <- runInterpreterNoBreak s $ I.interpretExp ctx fexp
   case pval of
     Left err -> abort $ I.prettyInterpreterError err
-    Right val -> pure $ I.prettyValue val <> hardline
+    Right val -> do
+      val' <- liftIO (either error id <$> case s of
+        Nothing -> error "External call, but no server."
+        Just s' -> FFI.runServerM s' $ FFI.getLazy val)
+      pure $ I.prettyValue val' <> hardline
 
 data EvalConfig = EvalConfig
   { evalPrintWarnings :: Bool,
@@ -223,10 +227,7 @@ runInterpreterNoBreak s m = runF m (pure . Right) intOp
       trace $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
-    intOp (I.ExtOpCall n ps shp c) =
+    intOp (I.ExtOpFFI sm c) =
       liftIO (either error id <$> case s of
         Nothing -> error "External call, but no server."
-        Just s' -> FFI.runServerM s' $ do
-          FFI.gc
-          pts <- FFI.inputs n
-          zipWithM FFI.put pts ps >>= FFI.call n >>= FFI.get shp) >>= c
+        Just s' -> FFI.runServerM s' sm) >>= c

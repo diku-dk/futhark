@@ -1,6 +1,8 @@
 module Language.Futhark.Interpreter.FFI.Push
   ( put,
     get,
+    getLazy,
+    lazyGet,
   )
 where
 
@@ -31,6 +33,19 @@ get shp@(I.ShapeSum sm) vr = do
   shps <- throwNothing ("Invalid variant " ++ nameToString vn ++ " in shape " ++ show sm ++ ".") $ M.lookup vn sm
   I.ValueSum shp vn <$> (destruct vr >>= zipWithM get shps)
 
+getLazy :: I.Value a -> ServerM (I.Value a)
+getLazy (I.ValueArray shp arr) = I.ValueArray shp <$> mapM getLazy arr
+getLazy (I.ValueRecord m) = I.ValueRecord <$> mapM getLazy m
+getLazy (I.ValueSum shp vn vs) = I.ValueSum shp vn <$> mapM getLazy vs
+getLazy (I.ValueLazyFFI shp r os) = do
+  v <- get shp r
+  pure $ foldl (\(I.ValueArray _ a) i -> a A.! fromIntegral i) v $ reverse os
+getLazy v = pure v
+
+lazyGet :: I.ValueShape -> ValueRef -> ServerM (I.Value m)
+lazyGet shp@(I.ShapeDim {}) vr = pure $ I.ValueLazyFFI shp vr []
+lazyGet shp vr = get shp vr
+
 put :: TypeName -> I.Value m -> ServerM ValueRef
 put _ (I.ValuePrim p) = putPrim p
 put tn pv@(I.ValueArray shp _) = do
@@ -51,4 +66,8 @@ put tn (I.ValueSum _ vn vs) = do
   vts <- M.lookup vn <$> variants tn >>= throwNothing ("Invalid variant " ++ nameToString vn ++ " in type " ++ T.unpack tn ++ ".")
   vrs <- zipWithM put vts vs
   mkSum tn vn vrs
+put tn v@(I.ValueLazyFFI {}) = do
+  -- TODO: Index and construct on server instead?
+  iv <- getLazy v
+  put tn iv
 put _ v = error $ "Values of type " ++ show v ++ " are unsupported in FFI."
