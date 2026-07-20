@@ -710,7 +710,9 @@ unifyMostCommon usage t1 t2 = do
           _ -> False
 
       -- Can we link a variable at the given level to an expression with the
-      -- given free variables?
+      -- given free variables? FIXME: something her is fishy. Why do we need to
+      -- treat ParamSize specially in wouldFail? Why is the level check for the
+      -- other variables not enough?
       canLink lvl vn bound fvs =
         L.foldl' max 0 (mapMaybe varLevel $ S.toList fvs) <= lvl
           && not (any (`S.member` fvs) bound)
