@@ -4,6 +4,9 @@
 module Futhark.Internalise.Bindings
   ( internaliseAttrs,
     internaliseAttr,
+    FunParams (..),
+    internaliseFParams,
+    bindFParams,
     bindingFParams,
     bindingLoopParams,
     bindingLambdaParams,
@@ -40,32 +43,53 @@ treeLike (Pure _) [b] = Pure b
 treeLike (Pure _) _ = error "treeLike: invalid input"
 treeLike (Free ls) bs = Free $ zipWith treeLike ls (chunks (map length ls) bs)
 
-bindingFParams ::
+-- | The internalised parameters of a function. Computing these assigns fresh
+-- names, so we split it from binding them in scope ('bindFParams'): that way a
+-- caller can internalise the parameters once, and both register the function's
+-- calling information and later bind the parameters for its body without
+-- recomputing them.
+data FunParams = FunParams
+  { -- | Shape (and certificate) parameters.
+    funShapeParams :: [I.FParam I.SOACS],
+    -- | Value parameters, grouped as the source parameters.
+    funValueParams :: [[Tree (I.FParam I.SOACS)]],
+    funSubsts :: VarSubsts,
+    funShapeSubst :: VarSubsts
+  }
+
+-- | All parameters, flattened; used for scoping and the 'I.FunDef'.
+funAllParams :: FunParams -> [I.FParam I.SOACS]
+funAllParams fps =
+  funShapeParams fps ++ foldMap (foldMap toList) (funValueParams fps)
+
+-- | Internalise a function's parameters (see 'FunParams').
+internaliseFParams ::
   [E.TypeParam] ->
   [E.Pat E.ParamType] ->
-  ([I.FParam I.SOACS] -> [[Tree (I.FParam I.SOACS)]] -> InternaliseM a) ->
-  InternaliseM a
-bindingFParams tparams params m = do
+  InternaliseM FunParams
+internaliseFParams tparams params = do
   flattened_params <- mapM flattenPat params
   let params_idents = concat flattened_params
   params_ts <-
     internaliseParamTypes $
       map (E.unInfo . E.identType . fst) params_idents
   let num_param_idents = map length flattened_params
-
-  let shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
+      shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]
-  bindingFlatPat params_idents (concatMap (concatMap toList) params_ts) $ \valueparams -> do
-    let (certparams, valueparams') =
-          first concat $ unzip $ map fixAccParams valueparams
-        all_params = certparams ++ shape_params ++ concat valueparams'
-    I.localScope (I.scopeOfFParams all_params) $
-      substitutingVars shape_subst $ do
-        let values_grouped_by_params = chunks num_param_idents valueparams'
-            types_grouped_by_params = chunks num_param_idents params_ts
-
-        m (certparams ++ shape_params) $
-          zipWith chunkValues types_grouped_by_params values_grouped_by_params
+  (valueparams, substs) <-
+    processFlatPat params_idents (concatMap (concatMap toList) params_ts)
+  let (certparams, valueparams') =
+        first concat $ unzip $ map fixAccParams valueparams
+      values_grouped_by_params = chunks num_param_idents valueparams'
+      types_grouped_by_params = chunks num_param_idents params_ts
+  pure
+    FunParams
+      { funShapeParams = certparams ++ shape_params,
+        funValueParams =
+          zipWith chunkValues types_grouped_by_params values_grouped_by_params,
+        funSubsts = substs,
+        funShapeSubst = shape_subst
+      }
   where
     fixAccParams ps =
       first catMaybes $ unzip $ map fixAccParam ps
@@ -83,6 +107,22 @@ bindingFParams tparams params m = do
       concat $ zipWith f tss vss
       where
         f ts vs = zipWith treeLike ts (chunks (map length ts) vs)
+
+-- | Bind already-internalised parameters (see 'internaliseFParams') in scope.
+bindFParams :: FunParams -> InternaliseM a -> InternaliseM a
+bindFParams fps m =
+  local (\env -> env {envSubsts = funSubsts fps `M.union` envSubsts env}) $
+    I.localScope (I.scopeOfFParams (funAllParams fps)) $
+      substitutingVars (funShapeSubst fps) m
+
+bindingFParams ::
+  [E.TypeParam] ->
+  [E.Pat E.ParamType] ->
+  ([I.FParam I.SOACS] -> [[Tree (I.FParam I.SOACS)]] -> InternaliseM a) ->
+  InternaliseM a
+bindingFParams tparams params m = do
+  fps <- internaliseFParams tparams params
+  bindFParams fps $ m (funShapeParams fps) (funValueParams fps)
 
 bindingLoopParams ::
   [E.TypeParam] ->
