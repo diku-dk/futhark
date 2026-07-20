@@ -1213,12 +1213,13 @@ generaliseAndDefaults ::
 generaliseAndDefaults unconstrained solution t = do
   let (generalised, unconstrained') =
         generalise t unconstrained solution
-  solution' <- doDefaults (S.toList $ typeVars t) solution
+      -- See #1552 for why we resolve unconstrained and un-generalised type
+      -- variables to ().
+      units = M.fromList (map (,Right (Scalar (Record mempty))) unconstrained')
+  solution' <- doDefaults (S.toList $ typeVars t) (units <> solution)
   pure
     ( generalised,
-      -- See #1552 for why we resolve unconstrained and
-      -- un-generalised type variables to ().
-      M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
+      solution'
     )
 
 -- | Verify that the recorded type parameter instantiations respect the
