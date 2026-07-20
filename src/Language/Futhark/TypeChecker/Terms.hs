@@ -2086,16 +2086,21 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 --
 -- ## Dependent function types
 --
--- A related problem is instantiating a type parameter with a dependent function
--- type such as (n: i64) -> [n]i32 -> [n]i32. The unsized pass preserves
+-- A related problem is a dependent function type such as (n: i64) -> [n]i32 ->
+-- [n]i32, whether reached by instantiating a type parameter with it or by
+-- projecting it out of a value (e.g. a record field). The unsized pass preserves
 -- parameter names, but the connection between the sizes and the binder is
--- exactly what was erased. Since every instantiated size variable occurs
--- exactly once, and binders are cloned between occurrences of the instantiated
--- type, it is safe to link an instantiated size to a binder of the instantiated
--- type itself - such binders are registered when the type is instantiated
--- ('registerBinders'), and 'unifySizes' permits exactly those links. Linking to
--- any *other* locally bound size is what signifies an existential (see above),
--- or an error for sizes with no such privileges.
+-- exactly what was erased. Since every fresh size variable occurs exactly once,
+-- and binders are cloned between occurrences of the type, it is safe to link a
+-- fresh size to a binder of the type itself - such binders are registered
+-- whenever the type is reconstructed from the erased solution ('registerBinders',
+-- called from both 'instTyVars' and 'replaceTyVars'), and 'unifySizes' permits
+-- exactly those links. Linking to any *other* locally bound size is what
+-- signifies an existential (see above), or an error for sizes with no such
+-- privileges. This binder linking is independent of absorption: it is available
+-- even to the non-absorbable ('Unlifted') sizes of 'replaceTyVars', which is why
+-- projecting a dependent function out of a record preserves its dependency
+-- (tests/shapes/funshape11.fut).
 --
 -- ## Absorption privileges
 --
@@ -2134,8 +2139,10 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 --   determines it to be (see 'inferReturnSizes').
 --
 -- - Sizes in the types of lambda parameters and patterns ('replaceTyVars') are
---   not absorbable. They name the sizes of actual bound values, and must be
---   resolved to real sizes. For example, this is what rejects
+--   not absorbable (they are constrained 'InstSize' 'Unlifted', which can link
+--   to binders of the type itself but not absorb an existential). They name the
+--   sizes of actual bound values, and must be resolved to real sizes. For
+--   example, this is what rejects
 --
 --     def f : (k: i64) -> [k]i32 -> i64 = \_ xs -> length xs
 --

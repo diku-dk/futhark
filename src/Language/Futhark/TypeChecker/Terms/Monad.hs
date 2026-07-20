@@ -301,6 +301,30 @@ instance MonadUnify TermTypeM where
           </> indent 2 (pretty t2)
           </> "do not match."
 
+-- | Register the named parameters of arrows within a type as size parameters
+-- ('ParamSize'), so that unification can reconstruct dependent function types
+-- by linking instantiated sizes to them (the connection between a binder and
+-- its uses is erased by the unsized pass). See Note [Size Inference] in
+-- Language.Futhark.TypeChecker.Terms.
+registerBinders :: Loc -> TypeBase Size u -> TermTypeM ()
+registerBinders loc (Scalar (Arrow _ pn _ ta (RetType _ tr))) = do
+  case pn of
+    Named pv -> constrain pv $ ParamSize loc
+    Unnamed -> pure ()
+  registerBinders loc ta
+  registerBinders loc tr
+registerBinders loc (Scalar (Record fs)) =
+  mapM_ (registerBinders loc) fs
+registerBinders loc (Scalar (Sum cs)) =
+  mapM_ (mapM_ (registerBinders loc)) cs
+registerBinders loc (Scalar (TypeVar _ _ targs)) =
+  mapM_ onTArg targs
+  where
+    onTArg (TypeArgType ta) = registerBinders loc ta
+    onTArg TypeArgDim {} = pure ()
+registerBinders _ (Scalar Prim {}) = pure ()
+registerBinders loc (Array _ _ et) = registerBinders loc (Scalar et)
+
 -- | Replace type variables inferred by the unsized type checker
 -- with their solutions, instantiating their sizes with fresh
 -- (non-absorbable) size variables. See Note [Size Inference] in
@@ -334,8 +358,14 @@ replaceTyVarsWith absorbable loc orig_t = do
                   let usage = mkUsage loc "replaceTyVars"
                   (t', drepl) <-
                     lift $ allDimsFreshInType usage Nonrigid "dv" (second (const u) t)
-                  when absorbable . lift . forM_ (M.keys drepl) $ \d ->
-                    constrain d $ InstSize Lifted usage
+                  -- The sizes are instantiated sizes: 'Unlifted' unless
+                  -- absorbable, so they can be linked to binders of the
+                  -- type itself (reconstructing dependent function
+                  -- types) but only absorb existentials when absorbable.
+                  -- See Note [Size Inference].
+                  lift . forM_ (M.keys drepl) $ \d ->
+                    constrain d $ InstSize (if absorbable then Lifted else Unlifted) usage
+                  lift $ registerBinders (locOf loc) t'
                   modify $ M.insert v $ second (const NoUniqueness) t'
                   pure t'
           | otherwise =
@@ -373,26 +403,7 @@ instTyVars ::
   TermTypeM (TypeBase Size u)
 instTyVars loc names orig_t1 orig_t2 = do
   tyvars <- asks termTyVars
-  let registerBinders :: TypeBase Size u' -> TermTypeM ()
-      registerBinders (Scalar (Arrow _ pn _ ta (RetType _ tr))) = do
-        case pn of
-          Named pv -> constrain pv $ ParamSize $ locOf loc
-          Unnamed -> pure ()
-        registerBinders ta
-        registerBinders tr
-      registerBinders (Scalar (Record fs)) =
-        mapM_ registerBinders fs
-      registerBinders (Scalar (Sum cs)) =
-        mapM_ (mapM_ registerBinders) cs
-      registerBinders (Scalar (TypeVar _ _ targs)) =
-        mapM_ onTArg targs
-        where
-          onTArg (TypeArgType ta) = registerBinders ta
-          onTArg TypeArgDim {} = pure ()
-      registerBinders (Scalar Prim {}) = pure ()
-      registerBinders (Array _ _ et) = registerBinders (Scalar et)
-
-      f ::
+  let f ::
         TypeBase d u ->
         TypeBase Size u ->
         StateT (M.Map VName (TypeBase Size NoUniqueness)) TermTypeM (TypeBase Size u)
@@ -445,12 +456,11 @@ instTyVars loc names orig_t1 orig_t2 = do
                     -- unification may determine to be existential.
                     lift $ forM_ (M.keys drepl) $ \d ->
                       constrain d $ InstSize l usage
-                    -- Named parameters of arrows inside the
-                    -- instantiated type are registered as size
-                    -- parameters, such that unification can
-                    -- reconstruct dependent function types by
-                    -- linking instantiated sizes to them.
-                    lift $ registerBinders t
+                    -- Named parameters of arrows inside the instantiated type
+                    -- are registered as size parameters, such that unification
+                    -- can reconstruct dependent function types by linking
+                    -- instantiated sizes to them.
+                    unless (null drepl) $ lift $ registerBinders (locOf loc) t
                     modify $ M.insert v2 $ second (const NoUniqueness) t
                     pure t
                   Just t -> do
