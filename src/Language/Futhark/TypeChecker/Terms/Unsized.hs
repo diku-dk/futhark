@@ -1103,6 +1103,8 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
       -- Should have been filled out in Names
       error "Unspected LoopInitImplicit"
   arg_t <- expType arg'
+  loop_t <- newType loc SizeLifted "loop_t" NoUniqueness
+  ctEq (Reason (locOf loc)) arg_t loop_t
   bindLetPat pat arg_t $ \pat' -> do
     (form', body') <-
       case form of
