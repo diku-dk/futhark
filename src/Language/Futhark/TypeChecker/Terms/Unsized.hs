@@ -1103,6 +1103,8 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
       -- Should have been filled out in Names
       error "Unspected LoopInitImplicit"
   arg_t <- expType arg'
+  loop_t <- newType loc SizeLifted "loop_t" NoUniqueness
+  ctEq (Reason (locOf loc)) arg_t loop_t
   bindLetPat pat arg_t $ \pat' -> do
     (form', body') <-
       case form of
@@ -1213,12 +1215,13 @@ generaliseAndDefaults ::
 generaliseAndDefaults unconstrained solution t = do
   let (generalised, unconstrained') =
         generalise t unconstrained solution
-  solution' <- doDefaults (S.toList $ typeVars t) solution
+      -- See #1552 for why we resolve unconstrained and un-generalised type
+      -- variables to ().
+      units = M.fromList (map (,Right (Scalar (Record mempty))) unconstrained')
+  solution' <- doDefaults (S.toList $ typeVars t) (units <> solution)
   pure
     ( generalised,
-      -- See #1552 for why we resolve unconstrained and
-      -- un-generalised type variables to ().
-      M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
+      solution'
     )
 
 -- | Verify that the recorded type parameter instantiations respect the

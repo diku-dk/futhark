@@ -593,7 +593,6 @@ library futhark-testing
     , tasty-hunit
     , tasty-quickcheck
     , text
-    , srcloc
     , regex-tdfa ^>= 1.3.2
 
 test-suite unit
