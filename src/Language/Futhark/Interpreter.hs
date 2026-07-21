@@ -814,37 +814,59 @@ evalBinding env missing_sizes (p : ps) body rettype =
 
 evalValBinding ::
   Env ->
+  VName ->
   [TypeParam] ->
   [Pat ParamType] ->
   ResRetType ->
   Exp ->
   EvalM TermBinding
-evalValBinding env tparams ps ret fbody = do
+evalValBinding env name tparams ps ret fbody = do
   let ftype = evalToStruct $ expandType env $ funType ps ret
       retext = case ps of
         [] -> retDims ret
         _ -> []
 
-  -- Distinguish polymorphic and non-polymorphic bindings here.
-  if null tparams
-    then
+  -- A function binding may refer to itself recursively, which means it muse be
+  -- in scope of itself. We tie the knot by evaluating the body in an
+  -- environment ('recenv') that maps the 'name' to itself. Crucially, in each
+  -- case below the binding is a lazy, self-referential 'let' whose right-hand
+  -- side is a value constructor (a 'ValueFun' closure or a 'TermPoly' closure).
+  --
+  -- Distinguish polymorphic, monomorphic-function, and plain-value
+  -- bindings here.
+  case (null tparams, ps) of
+    (True, []) ->
+      -- Not a syntactic function, so cannot be recursive.
       fmap (TermValue (Just $ T.BoundV [] ftype))
         . returned env (retType ret) retext
         =<< evalBinding env [] ps fbody (retType ret)
-    else pure . TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
-      let resolved =
-            resolveTypeParams (map typeParamName tparams) ftype ftype'
-      tparam_env <- evalResolved resolved
-      let env' = tparam_env <> env
-          -- In some cases (abstract lifted types) there may be
-          -- missing sizes that were not fixed by the type
-          -- instantiation.  These will have to be set by looking
-          -- at the actual function arguments.
-          missing_sizes =
-            filter (`M.notMember` envTerm env') $
-              map typeParamName (filter isSizeParam tparams)
-      returned env (retType ret) retext
-        =<< evalBinding env' missing_sizes ps fbody (retType ret)
+    (True, p : ps') ->
+      -- A monomorphic function; "unfold" the first step of what evalBinding
+      -- would do.
+      let recenv = env {envTerm = M.insert name binding $ envTerm env}
+          binding =
+            TermValue (Just $ T.BoundV [] ftype) . ValueFun $ \v -> do
+              env' <- matchPat recenv p v
+              evalBinding env' [] ps' fbody (retType ret)
+       in pure binding
+    (False, _) ->
+      -- A polymorphic function.
+      let binding = TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
+            let resolved =
+                  resolveTypeParams (map typeParamName tparams) ftype ftype'
+            tparam_env <- evalResolved resolved
+            let recenv = env {envTerm = M.insert name binding $ envTerm env}
+                env' = tparam_env <> recenv
+                -- In some cases (abstract lifted types) there may be
+                -- missing sizes that were not fixed by the type
+                -- instantiation.  These will have to be set by looking
+                -- at the actual function arguments.
+                missing_sizes =
+                  filter (`M.notMember` envTerm env') $
+                    map typeParamName (filter isSizeParam tparams)
+            returned env (retType ret) retext
+              =<< evalBinding env' missing_sizes ps fbody (retType ret)
+       in pure binding
 
 evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
@@ -920,9 +942,9 @@ evalAppExp env (LetPat sizes p e body _) = do
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
 evalAppExp env (LetFun (f, _) (tparams, ps, _, Info ret, fbody) body _) = do
-  binding <- evalValBinding env tparams ps ret fbody
+  binding <- evalValBinding env f tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
-evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
+evalAppExp env (BinOp (op, _) (Info op_t) (x, Info xext) (y, Info yext) loc)
   | baseName (qualLeaf op) == "&&" = do
       x' <- asBool <$> eval env x
       if x'
@@ -936,8 +958,9 @@ evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
   | otherwise = do
       x' <- evalArg env x xext
       y' <- evalArg env y yext
-      op' <- eval env $ Var op op_t loc
-      apply2 loc env op' x' y'
+      op' <- evalTermVar env op op_t
+      op'' <- apply loc env op' x'
+      apply loc env op'' y'
 evalAppExp env (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
@@ -1111,14 +1134,19 @@ eval env (OpSection qv (Info t) _) =
   evalTermVar env qv $ toStruct t
 eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info (RetType _ t), _) loc) = do
   v <- evalArg env e argext
-  f <- evalTermVar env qv (toStruct t)
+  f <- evalTermVar env qv t'
   apply loc env f v
+  where
+    t' = toStruct t
 eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info (RetType _ t)) loc) = do
   y <- evalArg env e argext
   pure $
     ValueFun $ \x -> do
-      f <- evalTermVar env qv $ toStruct t
-      apply2 loc env f x y
+      f <- evalTermVar env qv t'
+      f' <- apply loc env f x
+      apply loc env f' y
+  where
+    t' = toStruct t
 eval env (UpdateSection steps _ loc) =
   pure $ ValueFun $ evalSection steps
   where
@@ -1276,7 +1304,7 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
 
 evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
-  binding <- evalValBinding env tparams ps ret fbody
+  binding <- evalValBinding env v tparams ps ret fbody
   sizes <- extEnv
   pure $ mempty {envTerm = M.singleton v binding} <> sizes
 evalDec env (OpenDec me _) = do
@@ -2290,7 +2318,7 @@ checkEntryArgs entry args entry_t
           </> "Got input of types"
           </> indent 2 (stack (map pretty args_ts))
   where
-    (param_ts, _) = unfoldFunType entry_t
+    param_ts = map snd $ fst $ unfoldFunType entry_t
     args_ts = map (valueStructType . valueType) args
     expected
       | null param_ts =

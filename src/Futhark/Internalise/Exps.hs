@@ -44,7 +44,47 @@ transformProg always_safe strip_provenance types vbinds = do
   I.renameProg $ I.Prog opaques consts funs
 
 internaliseValBinds :: VisibleTypes -> [E.ValBind] -> InternaliseM ()
-internaliseValBinds types = mapM_ $ internaliseValBind types
+internaliseValBinds types vbinds = do
+  -- Internalise every function's parameters and register its calling
+  -- information *before* internalising any body, so that references between
+  -- functions resolve regardless of definition order.
+  headers <- forM vbinds $ \vb -> do
+    let E.ValBind _ fname _ _ (Info rettype) tparams params _ _ _ _ = vb
+    fps <- internaliseFParams tparams params
+    let (_, _, _, info) = funHeader (funShapeParams fps) (funValueParams fps) rettype
+    unless (null (funValueParams fps)) $ addFunInfo fname info
+    pure (vb, fps)
+  forM_ headers $ \(vb, fps) ->
+    bindFParams fps $ internaliseValBindBody types vb fps
+
+-- | A function's internalised parameters, return type, full internalised
+-- return type, and calling information, all computed from its signature alone
+-- (no body required).
+funHeader ::
+  [I.FParam I.SOACS] ->
+  [[Tree (I.FParam I.SOACS)]] ->
+  E.ResRetType ->
+  ([Tree (I.FParam I.SOACS)], [I.DeclExtType], [(I.DeclExtType, RetAls)], FunInfo)
+funHeader shapeparams params' rettype =
+  (all_params, rettype', fun_rettype, info)
+  where
+    shapenames = map I.paramName shapeparams
+    all_params = map pure shapeparams ++ concat params'
+    zeroExts ts = generaliseExtTypes ts ts
+    (rettype', retals) =
+      first zeroExts . unzip $
+        internaliseReturnType (map (fmap paramDeclType) all_params) rettype
+    num_ctx = length (shapeContext rettype')
+    fun_rettype =
+      replicate num_ctx (I.Prim int64, mempty)
+        ++ zip rettype' (map (shiftRetAls num_ctx) retals)
+    info =
+      ( shapenames,
+        map declTypeOf $ foldMap (foldMap toList) params',
+        foldMap toList all_params,
+        fmap (`zip` map snd fun_rettype)
+          . applyRetType (map fst fun_rettype) (foldMap toList all_params)
+      )
 
 internaliseFunName :: VName -> Name
 internaliseFunName = nameFromText . prettyText
@@ -52,68 +92,50 @@ internaliseFunName = nameFromText . prettyText
 shiftRetAls :: Int -> RetAls -> RetAls
 shiftRetAls d (RetAls pals rals) = RetAls pals $ map (+ d) rals
 
-internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
-internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams params body _ attrs _) = do
-  bindingFParams tparams params $ \shapeparams params' -> do
-    let shapenames = map I.paramName shapeparams
-        all_params = map pure shapeparams ++ concat params'
-        msg =
-          errorMsg
-            [ "Internal runtime error.\n",
-              "Return value of ",
-              ErrorString (prettyText fname),
-              " does not match type shape.\n",
-              "This is a bug in the Futhark compiler. Please report this:\n",
-              "  https://github.com/diku-dk/futhark/issues"
-            ]
+-- | Internalise a function's body, given its already-bound parameters (see
+-- 'internaliseFParams' and 'bindFParams'). Its calling information has already
+-- been registered by 'internaliseValBinds'.
+internaliseValBindBody :: VisibleTypes -> E.ValBind -> FunParams -> InternaliseM ()
+internaliseValBindBody types fb@(E.ValBind entry fname _ _ (Info rettype) _ _ body _ attrs _) fps = do
+  let (all_params, rettype', fun_rettype, _) =
+        funHeader (funShapeParams fps) (funValueParams fps) rettype
+      params' = funValueParams fps
+      msg =
+        errorMsg
+          [ "Internal runtime error.\n",
+            "Return value of ",
+            ErrorString (prettyText fname),
+            " does not match type shape.\n",
+            "This is a bug in the Futhark compiler. Please report this:\n",
+            "  https://github.com/diku-dk/futhark/issues"
+          ]
 
-    (body', rettype') <- buildBody $ do
-      body_res <- internaliseExp (baseName fname <> "_res") body
-      (rettype', retals) <-
-        first zeroExts . unzip . internaliseReturnType (map (fmap paramDeclType) all_params) rettype
-          <$> mapM subExpType body_res
+  body' <- buildBody_ $ do
+    body_res <- internaliseExp (baseName fname <> "_res") body
 
-      when (null params') $
-        bindExtSizes (E.AppRes (E.toStruct $ E.retType rettype) (E.retDims rettype)) body_res
+    when (null params') $
+      bindExtSizes (E.AppRes (E.toStruct $ E.retType rettype) (E.retDims rettype)) body_res
 
-      body_res' <-
-        ensureResultExtShape msg (map I.fromDecl rettype') $ subExpsRes body_res
-      let num_ctx = length (shapeContext rettype')
-      pure
-        ( body_res',
-          replicate num_ctx (I.Prim int64, mempty)
-            ++ zip rettype' (map (shiftRetAls num_ctx) retals)
-        )
+    ensureResultExtShape msg (map I.fromDecl rettype') $ subExpsRes body_res
 
-    attrs' <- internaliseAttrs attrs
+  attrs' <- internaliseAttrs attrs
 
-    let fd =
-          I.FunDef
-            Nothing
-            attrs'
-            (internaliseFunName fname)
-            rettype'
-            (foldMap toList all_params)
-            body'
+  let fd =
+        I.FunDef
+          Nothing
+          attrs'
+          (internaliseFunName fname)
+          fun_rettype
+          (foldMap toList all_params)
+          body'
 
-    if null params'
-      then bindConstant fname fd
-      else
-        bindFunction
-          fname
-          fd
-          ( shapenames,
-            map declTypeOf $ foldMap (foldMap toList) params',
-            foldMap toList all_params,
-            fmap (`zip` map snd rettype')
-              . applyRetType (map fst rettype') (foldMap toList all_params)
-          )
+  if null params'
+    then addConstant fname fd
+    else addFunDef fd
 
   case entry of
     Just (Info entry') -> generateEntryPoint types entry' fb
     Nothing -> pure ()
-  where
-    zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: VisibleTypes -> E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint types (E.EntryPoint e_params e_rettype doc) vb = do
@@ -722,7 +744,7 @@ internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
 internaliseExp desc (E.Coerce e _ (Info et) _) = do
   ses <- internaliseExp desc e
-  ts <- internaliseCoerceType (E.toStruct et) <$> mapM subExpType ses
+  let ts = internaliseCoerceType (E.toStruct et)
   dt' <- typeExpForError $ toStruct et
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
@@ -909,8 +931,8 @@ internaliseExp desc (E.Attr attr e loc) = do
         case t of
           I.Array pt shape _ ->
             letSubExp desc $ I.BasicOp $ I.Scratch pt $ I.shapeDims shape
-          I.Prim pt ->
-            pure $ constant $ blankPrimValue pt
+          -- Ignore scratch on non-arrays because they are sometimes applied
+          -- too promisciously.
           _ -> pure se
     "blank" -> do
       ts <- mapM subExpType e'

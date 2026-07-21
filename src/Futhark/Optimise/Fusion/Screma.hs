@@ -102,9 +102,6 @@ splitLambdaByPar names inp lam out = do
   when
     (parAccsOverlap new_lam new_lam')
     (fail "Can not fuse due to overlap in parameter accumalators.")
-  when
-    (resAccsOverlap new_lam new_lam')
-    (fail "Can not fuse due to overlap in result accumalators.")
   pure
     ( (new_inp, new_lam, new_out),
       (new_inp', new_lam', new_out')
@@ -134,16 +131,14 @@ splitLambdaByPar names inp lam out = do
 -- consumers scans or reduces.
 fusible ::
   (MonadFail m) =>
-  [SOAC.Input] ->
   ScremaForm SOACS ->
   [VName] ->
   [SOAC.Input] ->
   ScremaForm SOACS ->
-  [VName] ->
   m ()
-fusible inp_p form_p out_p inp_c form_c out_c = do
+fusible form_p out_p inp_c form_c = do
   ((_, post_scan_p, _), _) <-
-    splitLambdaByPar post_scan_pars_p inp_p post_p out_c
+    splitLambdaByPar post_scan_pars_p (lambdaParams post_p) post_p (lambdaReturnType post_p)
   let post_scan_res_p = bodyResult $ lambdaBody post_scan_p
       forbidden_p = namesFromList $ resToOut out_p post_p <$> post_scan_res_p
       is_fusible =
@@ -381,21 +376,11 @@ moveLastSuperScrema _ =
 parAccs :: Lambda SOACS -> [Type]
 parAccs = filter isAcc . map typeOf . lambdaParams
 
--- | Find all Accumulator results.
-resAccs :: Lambda SOACS -> [Type]
-resAccs = filter isAcc . lambdaReturnType
-
 -- | Check if the lambda parameters have overlapping accumulators.
 parAccsOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
 parAccsOverlap lam = any (`elem` accs) . parAccs
   where
     accs = parAccs lam
-
--- | Check if the lambdas result have overlapping accumulators.
-resAccsOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
-resAccsOverlap lam = any (`elem` accs) . resAccs
-  where
-    accs = resAccs lam
 
 -- | Check if the lambdas have parameters that overlap due to
 -- consumption.
@@ -496,7 +481,7 @@ fuseScrema ::
   [VName] ->
   m ([SOAC.Input], ScremaForm SOACS, [VName])
 fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
-  fusible inp_p form_p out_p inp_c form_c out_c
+  fusible form_p out_p inp_c form_c
   (super_screma, new_out) <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
   (new_inp, form') <-
     fmap (second prunePreLambdaResults . toScrema) $

@@ -435,9 +435,7 @@ transformFName loc fname ft = do
         (Nothing, Nothing) -> pure $ var fname t'
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
-          (fname', infer, funbind') <- monomorphiseBinding funbind mono_t
-          addValBind funbind'
-          addLifted (qualLeaf fname) mono_t (fname', infer)
+          (fname', infer) <- monomorphiseBinding funbind mono_t
           applySizeArgs fname' (toRes Nonunique t') <$> infer t'
   where
     var fname' t' = Var fname' (Info t') loc
@@ -1092,13 +1090,14 @@ removeEntryPoint :: PolyBinding -> PolyBinding
 removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, loc)) =
   PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
 
--- Monomorphise a polymorphic function at the types given in the instance
--- list. Monomorphises the body of the function as well. Returns the fresh name
--- of the generated monomorphic function and its 'ValBind' representation.
+-- Monomorphise a polymorphic function at the types given in the instance list.
+-- Monomorphises the body of the function as well. Returns the fresh name of the
+-- generated monomorphic function as well a function for constructing additional
+-- size arguments.
 monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
-  MonoM (VName, InferSizeArgs, ValBind)
+  MonoM (VName, InferSizeArgs)
 monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
   let bind_t = funType params rettype
   (substs, t_shape_params) <-
@@ -1133,41 +1132,49 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
 
       bind_t'' = funType params'' rettype''
       bind_r = exp_naming <> extNaming
-  body' <- updateExpTypes (`M.lookup` substs') body
-  body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
-  scope' <- S.union (shape_names <> args) <$> askScope'
-  body''' <-
-    expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< getExpReplacements)
 
+  -- It is important that we record the lifted function before transforming the
+  -- body, in order to handle recursion. Fortunately the "calling convention"
+  -- does not depend on the body.
   seen_before <- elem name . map fst . M.keys <$> getLifts
   name' <-
     if null tparams && isNothing entry && not seen_before
       then pure name
       else newName name
 
-  pure
-    ( name',
-      -- If the function is an entry point, then it cannot possibly
-      -- need any explicit size arguments (checked by type checker).
-      if isJust entry
-        then const $ pure []
-        else inferSizeArgs shape_params_explicit bind_t'' bind_r,
-      if isJust entry
-        then
-          toValBinding
-            name'
-            (shape_params_explicit ++ shape_params_implicit)
-            params''
-            rettype''
-            (entryAssert exp_naming body''')
-        else
-          toValBinding
-            name'
-            shape_params_implicit
-            (map shapeParam shape_params_explicit ++ params'')
-            rettype''
-            body'''
-    )
+  let infer =
+        -- If the function is an entry point, then it cannot possibly
+        -- need any explicit size arguments (checked by type checker).
+        if isJust entry
+          then const $ pure []
+          else inferSizeArgs shape_params_explicit bind_t'' bind_r
+
+  addLifted name inst_t (name', infer)
+
+  body' <- updateExpTypes (`M.lookup` substs') body
+  body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
+  scope' <- S.union (shape_names <> args) <$> askScope'
+  body''' <-
+    expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< getExpReplacements)
+
+  addValBind $
+    if isJust entry
+      then
+        toValBinding
+          name'
+          (shape_params_explicit ++ shape_params_implicit)
+          params''
+          rettype''
+          (entryAssert exp_naming body''')
+      else
+        toValBinding
+          name'
+          shape_params_implicit
+          (map shapeParam shape_params_explicit ++ params'')
+          rettype''
+          body'''
+
+  pure (name', infer)
   where
     askScope' = S.filter (`notElem` retDims rettype) <$> askScope
 
@@ -1299,9 +1306,7 @@ transformValBind valbind = do
           funType (valBindParams valbind) $
             unInfo $
               valBindRetType valbind
-    (name, infer, valbind'') <- monomorphiseBinding valbind' $ monoType t
-    addValBind valbind''
-    addLifted (valBindName valbind) (monoType t) (name, infer)
+    void $ monomorphiseBinding valbind' $ monoType t
 
   let global =
         if null (valBindParams valbind)

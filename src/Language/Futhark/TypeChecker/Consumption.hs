@@ -13,7 +13,7 @@ where
 
 import Control.Monad
 import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.DList qualified as DL
@@ -873,7 +873,7 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
 --
 checkExp (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
   op_als <- observeVar (locOf oploc) (qualLeaf op) (unInfo opt)
-  let at1 : at2 : _ = fst $ unfoldFunType op_als
+  let (_, at1) : (_, at2) : _ = fst $ unfoldFunType op_als
   (x', x_als) <- checkArg [] at1 x
   (y', y_als) <- checkArg [(x', x_als)] at2 y
   res_als <- checkFuncall loc (Just op) op_als [x_als, y_als]
