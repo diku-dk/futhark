@@ -944,7 +944,7 @@ evalAppExp env (LetPat sizes p e body _) = do
 evalAppExp env (LetFun (f, _) (tparams, ps, _, Info ret, fbody) body _) = do
   binding <- evalValBinding env f tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
-evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
+evalAppExp env (BinOp (op, _) (Info op_t) (x, Info xext) (y, Info yext) loc)
   | baseName (qualLeaf op) == "&&" = do
       x' <- asBool <$> eval env x
       if x'
@@ -958,8 +958,9 @@ evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
   | otherwise = do
       x' <- evalArg env x xext
       y' <- evalArg env y yext
-      op' <- eval env $ Var op op_t loc
-      apply2 loc env op' x' y'
+      op' <- evalTermVar env op op_t
+      op'' <- apply loc env op' x'
+      apply loc env op'' y'
 evalAppExp env (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
@@ -1133,14 +1134,19 @@ eval env (OpSection qv (Info t) _) =
   evalTermVar env qv $ toStruct t
 eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info (RetType _ t), _) loc) = do
   v <- evalArg env e argext
-  f <- evalTermVar env qv (toStruct t)
+  f <- evalTermVar env qv t'
   apply loc env f v
+  where
+    t' = toStruct t
 eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info (RetType _ t)) loc) = do
   y <- evalArg env e argext
   pure $
     ValueFun $ \x -> do
-      f <- evalTermVar env qv $ toStruct t
-      apply2 loc env f x y
+      f <- evalTermVar env qv t'
+      f' <- apply loc env f x
+      apply loc env f' y
+  where
+    t' = toStruct t
 eval env (UpdateSection steps _ loc) =
   pure $ ValueFun $ evalSection steps
   where
@@ -2312,7 +2318,7 @@ checkEntryArgs entry args entry_t
           </> "Got input of types"
           </> indent 2 (stack (map pretty args_ts))
   where
-    (param_ts, _) = unfoldFunType entry_t
+    param_ts = map snd $ fst $ unfoldFunType entry_t
     args_ts = map (valueStructType . valueType) args
     expected
       | null param_ts =

@@ -8,6 +8,7 @@ module Language.Futhark.Pretty
     leadingOperator,
     symbolName,
     IsName (..),
+    prettyNameText,
     prettyNameString,
     Annot (..),
   )
@@ -55,9 +56,13 @@ instance IsName Name where
   prettyName = pretty
   toName = id
 
+-- | Prettyprint name as text.
+prettyNameText :: (IsName v) => v -> T.Text
+prettyNameText = docText . prettyName
+
 -- | Prettyprint name as string.  Only use this for debugging.
 prettyNameString :: (IsName v) => v -> String
-prettyNameString = T.unpack . docText . prettyName
+prettyNameString = T.unpack . prettyNameText
 
 -- | Class for type constructors that represent annotations.  Used in
 -- the prettyprinter to either print the original AST, or the computed
@@ -153,7 +158,7 @@ instance (Pretty (Shape dim), Pretty u) => Pretty (ScalarTypeBase dim u) where
 
 prettyType :: (Pretty (Shape dim), Pretty u) => Int -> TypeBase dim u -> Doc a
 prettyType _ (Array u shape at) =
-  pretty u <> pretty shape <> align (prettyScalarType 1 at)
+  pretty u <> pretty shape <> align (prettyScalarType 2 at)
 prettyType p (Scalar t) =
   prettyScalarType p t
 
@@ -229,7 +234,8 @@ letBody body@(AppExp LetFun {} _) = pretty body
 letBody body = "in" <+> align (pretty body)
 
 prettyAppExp :: (IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
-prettyAppExp p (BinOp (bop, _) _ (x, _) (y, _) _) = prettyBinOp p bop x y
+prettyAppExp p (BinOp (bop, _) _ (x, _) (y, _) _) =
+  prettyBinOp p bop x y
 prettyAppExp _ (Match e cs _) = "match" <+> pretty e </> (stack . map pretty) (NE.toList cs)
 prettyAppExp _ (Loop sizeparams pat initexp form loopbody _) =
   "loop"
@@ -306,7 +312,10 @@ prettyAppExp _ (If c t f _) =
 prettyAppExp p (Apply f args _) =
   parensIf (p >= 10) $
     prettyExp 0 f
-      <+> hsep (map (prettyExp 10 . snd) $ NE.toList args)
+      <+> hsep (map prettyArg $ NE.toList args)
+  where
+    prettyArg (_, e) =
+      prettyExp 10 e
 
 prettyLetLhsUpdate :: (IsName vn, Annot f) => [UpdateStep f vn] -> Doc a
 prettyLetLhsUpdate = mconcat . map pp
