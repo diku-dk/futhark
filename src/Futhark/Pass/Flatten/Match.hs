@@ -109,6 +109,47 @@ mergeResult lvl segments w iss branchesRep dist_res
     irregularBranch (Irregular irreg) = pure irreg
     irregularBranch _ = error "mergeResult: mismatched reps"
 
+-- | Flatten a single branch body of a variant 'Match', but guard its execution
+-- on the branch actually being taken by some segment. When a branch receives no
+-- segments (its partition is empty) we must not run its flattened code: it may
+-- call lifted recursive functions, which would recurse forever on an empty
+-- batch. An untaken branch's results are never read ('mergeResult' scatters
+-- them back through the branch's empty index array), so we just yield blanks.
+--
+-- Like 'transformUniformMatch', the branch is lifted to a 'Result' of flat rep
+-- components and the reps recovered with 'distResultsToResReps'; here we
+-- additionally wrap it in a @branch_size > 0@ 'Match'.
+guardBranch ::
+  FlattenOps ->
+  SubExp ->
+  DistEnv ->
+  DistInputs ->
+  DistStms ->
+  [DistResult] ->
+  Result ->
+  FlattenM [ResRep]
+guardBranch ops branch_size env inputs dstms res result = do
+  let branch_segments = NE.singleton branch_size
+  (taken_body, taken_types) <-
+    buildBody $ do
+      body_res <- liftBodyWithDistResults ops branch_segments inputs env dstms res result
+      ts <- mapM (subExpType . resSubExp) body_res
+      pure (body_res, ts)
+  -- Blanks for the untaken branch have the same types as the taken branch.
+  -- Sizes bound inside the branch (the length of irregular data) are not in
+  -- scope here, so we zero them; the 'Match' then makes them existential.
+  untaken_body <- buildBody_ $ do
+    let blank t = t `setArrayShape` Shape (map (const (intConst Int64 0)) (arrayDims t))
+    subExpsRes <$> mapM (letSubExp "blank" <=< eBlank . blank) taken_types
+  match_e <-
+    eIf
+      (eCmpOp (CmpSlt Int64) (eSubExp (intConst Int64 0)) (eSubExp branch_size))
+      (pure taken_body)
+      (pure untaken_body)
+  match_res <- letTupExp "guarded_branch" match_e
+  rets <- expExtType match_e
+  pure $ distResultsToResReps res $ drop (S.size (shapeContext rets)) match_res
+
 transformVariantMatch ::
   FlattenOps ->
   Segments ->
@@ -171,6 +212,10 @@ transformVariantMatch ops segments env inps res _aux scrutinees cases defaultCas
   -- and is therefore the first segment after the partition.
   let branch_bodies = defaultCase : map (\(Case _ body) -> body) cases
   let branch_results = map bodyResult branch_bodies
+  -- Accumulator results are threaded from one branch to the next and cannot be
+  -- blanked, so we only guard branch execution when no accumulators are
+  -- involved. XXX: can we be sure this will never be a problem?
+  let hasAcc = any (\dr -> case distResType dr of DistType _ _ t -> isAcc t) res
   -- acc inputs are handled differently, each breanch use the result of the previous branch
   (branch_reps, _) <-
     foldM
@@ -178,8 +223,12 @@ transformVariantMatch ops segments env inps res _aux scrutinees cases defaultCas
           let branch_segments = NE.singleton branch_size
           (inputs, env', dstms) <-
             distributeBranch (flattenFunHasParallelism ops) lvl segments env inps branch_inds body acc_reps
-          env'' <- foldM (flattenDistStm ops branch_segments) env' dstms
-          reps <- zipWithM (liftDistResultRep lvl branch_segments inputs env'') res result
+          reps <-
+            if hasAcc
+              then do
+                env'' <- foldM (flattenDistStm ops branch_segments) env' dstms
+                zipWithM (liftDistResultRep lvl branch_segments inputs env'') res result
+              else guardBranch ops branch_size env' inputs dstms res result
           let acc_reps' = replaceAccReps acc_reps reps
           pure (branch_reps_acc <> [reps], acc_reps')
       )
