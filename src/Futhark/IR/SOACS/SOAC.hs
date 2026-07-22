@@ -87,6 +87,14 @@ data SOAC rep
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
+  | -- | Irregular map where the results are implicitly concatenated. The first
+    -- value returned is an integer denoting the size of the concatenated
+    -- arrays, then an array of element type @i64@ of the same size as the size
+    -- of the input arrays and which sums to the size of the concatenated
+    -- arrays. After that comes one array per array returned by the lambda,
+    -- corresponding to the concatenated arrays. The return size of the lambda
+    -- must be expressible in terms of the lambda parameters.
+    FlatMap SubExp [VName] (Lambda rep)
   deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
@@ -449,6 +457,11 @@ mapSOACM tv (Screma w arrs (ScremaForm map_lam scans reds post_lam)) =
             <*> mapM (mapOnSOACReduce tv) reds
             <*> mapOnSOACLambda tv post_lam
         )
+mapSOACM tv (FlatMap w arrs lam) =
+  FlatMap
+    <$> mapOnSOACSubExp tv w
+    <*> mapM (mapOnSOACVName tv) arrs
+    <*> mapOnSOACLambda tv lam
 
 mapOnSOACScan :: (Monad m) => SOACMapper frep trep m -> Scan frep -> m (Scan trep)
 mapOnSOACScan tv (Scan red_lam red_nes) =
@@ -510,27 +523,32 @@ instance (ASTRep rep) => Rename (SOAC rep) where
       renamer = SOACMapper rename rename rename
 
 -- | The type of a SOAC.
-soacType :: (Typed (LParamInfo rep)) => SOAC rep -> [Type]
+soacType :: (Typed (LParamInfo rep)) => SOAC rep -> [ExtType]
 soacType (JVP shape _ _ lam) =
-  lambdaReturnType lam ++ map (`arrayOfShape` shape) (lambdaReturnType lam)
+  staticShapes $
+    lambdaReturnType lam
+      ++ map (`arrayOfShape` shape) (lambdaReturnType lam)
 soacType (VJP shape _ _ lam) =
-  lambdaReturnType lam ++ map ((`arrayOfShape` shape) . paramType) (lambdaParams lam)
+  staticShapes $ lambdaReturnType lam ++ map ((`arrayOfShape` shape) . paramType) (lambdaParams lam)
 soacType (WithVJP _ lam _) =
-  lambdaReturnType lam
+  staticShapes $ lambdaReturnType lam
 soacType (Stream outersize _ accs lam) =
-  map (substNamesInType substs) rtp
+  staticShapes $ map (substNamesInType substs) rtp
   where
     nms = map paramName $ take (1 + length accs) params
     substs = M.fromList $ zip nms (outersize : accs)
     Lambda params rtp _ = lam
-soacType (Hist _ _ ops _bucket_fun) = do
+soacType (Hist _ _ ops _bucket_fun) = staticShapes $ do
   op <- ops
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
 soacType (Screma w _arrs form) =
-  scremaType w form
+  staticShapes $ scremaType w form
+soacType (FlatMap w _ lam) =
+  [Prim int64, arrayOfRow (Prim int64) (Free w)]
+    ++ map (`setOuterSize` Ext 0) (staticShapes $ lambdaReturnType lam)
 
 instance TypedOp SOAC where
-  opType = pure . staticShapes . soacType
+  opType = pure . soacType
 
 instance AliasedOp SOAC where
   opAliases = map (const mempty) . soacType
@@ -538,6 +556,7 @@ instance AliasedOp SOAC where
   consumedInOp JVP {} = mempty
   consumedInOp VJP {} = mempty
   consumedInOp WithVJP {} = mempty
+  consumedInOp FlatMap {} = mempty
   -- Only map functions can consume anything.  The operands to scan
   -- and reduce functions are always considered "fresh".
   consumedInOp (Screma _ arrs (ScremaForm map_lam _ _ _)) =
@@ -572,6 +591,8 @@ instance CanBeAliased SOAC where
       args
       (Alias.analyseLambda aliases lam)
       (Alias.analyseLambda aliases lam_adj)
+  addOpAliases aliases (FlatMap w arrs lam) =
+    FlatMap w arrs $ Alias.analyseLambda aliases lam
   addOpAliases aliases (Stream size arr accs lam) =
     Stream size arr accs $ Alias.analyseLambda aliases lam
   addOpAliases aliases (Hist w arrs ops bucket_fun) =
@@ -637,6 +658,8 @@ instance IsOp SOAC where
       lam
       (map depsOf' args)
       <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
+  opDependencies (FlatMap w arrs lam) =
+    [mempty, mempty] ++ lambdaDependencies mempty lam (depsOfArrays w arrs)
   opDependencies (Screma w arrs (ScremaForm map_lam scans reds post_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $
@@ -747,6 +770,10 @@ typeCheckSOAC (WithVJP args lam lam_adj) = do
         </> PP.indent 2 (pretty $ lambdaReturnType lam_adj)
         </> "does not match type of arguments"
         </> PP.indent 2 (pretty $ map TC.argType args')
+typeCheckSOAC (FlatMap w arrs lam) = do
+  TC.require (Prim int64) w
+  arrs' <- TC.checkSOACArrayArgs w arrs
+  TC.checkLambda lam arrs'
 typeCheckSOAC (Stream size arrexps accexps lam) = do
   TC.require (Prim int64) size
   accargs <- mapM TC.checkArg accexps
@@ -864,6 +891,8 @@ instance RephraseOp SOAC where
     JVP shape args vec <$> rephraseLambda r lam
   rephraseInOp r (WithVJP args lam lam_adj) =
     WithVJP args <$> rephraseLambda r lam <*> rephraseLambda r lam_adj
+  rephraseInOp r (FlatMap w arrs lam) =
+    FlatMap w arrs <$> rephraseLambda r lam
   rephraseInOp r (Stream w arrs acc lam) =
     Stream w arrs acc <$> rephraseLambda r lam
   rephraseInOp r (Hist w arrs ops lam) =
@@ -896,6 +925,8 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
   opMetrics (WithVJP _ lam lam_adj) = do
     inside "WithVJP" $ lambdaMetrics lam
     inside "WithVJP" $ lambdaMetrics lam_adj
+  opMetrics (FlatMap _ _ lam) = do
+    inside "FlatMap" $ lambdaMetrics lam
   opMetrics (Stream _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Hist _ _ ops bucket_fun) =
@@ -933,6 +964,13 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
             PP.braces (commasep $ map pretty args)
               <> comma </> pretty lam
               <> comma </> pretty lam_adj
+        )
+  pretty (FlatMap w arrs lam) =
+    "flatmap"
+      <> (parens . align)
+        ( pretty w
+            <> comma </> ppTuple' (map pretty arrs)
+            <> comma </> pretty lam
         )
   pretty (Stream size arrs acc lam) =
     ppStream size arrs acc lam

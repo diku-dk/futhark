@@ -1,7 +1,11 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Flattening rules for SOACs.
 module Futhark.Pass.Flatten.SOAC
   ( transformScrema,
     transformHist,
+    transformFlatMap,
+    transformFlatMapNested,
     transformDistributed,
     transformMapForInBlock,
 
@@ -1351,6 +1355,125 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
   where
     funHasParallelism = flattenFunHasParallelism ops
     lvl = flattenSegLevel ops
+
+-- | Flattening rule for a top-level 'FlatMap', which is a very thin wrapper
+-- over just flattening the lambda. The result produced by 'FlatMap' corresponds
+-- exactly to the internal irregular representation, so we simply distribute the
+-- lambda over the @w@ segments and obtain an 'IrregularRep' for each result
+-- (they share the same segment structure, as required by the well-formedness of
+-- 'FlatMap'), then read off:
+--
+--   * the total size (result 0) as the outer size of the concatenated data,
+--
+--   * the shape array (result 1) from 'irregularS',
+--
+--   * the concatenated data arrays (results 2..) from 'irregularD'.
+--
+-- By the invariant that only the outer dimension of each lambda result is
+-- variant, every result is irregular of rank 1.
+transformFlatMap ::
+  FlattenOps ->
+  Pat Type ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  FlattenM ()
+transformFlatMap ops pat w arrs lam = do
+  let segments = NE.singleton w
+      inps =
+        zipWith
+          (\p arr -> (paramName p, DistInputFree arr (paramType p)))
+          (lambdaParams lam)
+          arrs
+      (n_name, s_name, d_names) = case patNames pat of
+        (x : y : zs) -> (x, y, zs)
+        _ -> error "transformFlatMap: pattern too short"
+      res =
+        zipWith3
+          (\i v t -> DistResult (ResTag i) (DistType segments (Rank 1) (rowType t)) v)
+          [0 ..]
+          d_names
+          (lambdaReturnType lam)
+  reps <- distributeAndFlattenBody ops segments "flatmap" mempty inps res (lambdaBody lam)
+  irregs <- forM reps $ \case
+    Irregular ir -> ensureDenseIrregular lvl "flatmap_res" ir
+    Regular _ -> error "transformFlatMap: unexpected regular result"
+  case irregs of
+    [] -> error "transformFlatMap: FlatMap with no results"
+    ir0 : _ -> do
+      -- The total size is the outer size of the concatenated data.
+      n <- arraySize 0 <$> lookupType (irregularD ir0)
+      letBindNames [n_name] $ BasicOp $ SubExp n
+      -- The shape array.
+      s_t <- lookupType (irregularS ir0)
+      letBindNames [s_name] . BasicOp $
+        Reshape (irregularS ir0) $
+          reshapeAll (arrayShape s_t) (Shape [w])
+      -- The concatenated data arrays, coerced so their outer dimension is the
+      -- freshly bound total size.
+      forM_ (zip d_names irregs) $ \(v, ir) -> do
+        d_t <- lookupType (irregularD ir)
+        let row_shape = Shape $ drop 1 $ arrayDims d_t
+        letBindNames [v] . BasicOp $
+          Reshape (irregularD ir) $
+            reshapeAll (arrayShape d_t) (Shape [Var n_name] <> row_shape)
+  where
+    lvl = flattenSegLevel ops
+
+-- | Flattening rule for a 'FlatMap' nested inside an enclosing map nest. A
+-- 'FlatMap' is just an irregular map with implicit concatenation, so we run it
+-- through the ordinary inner-map machinery, which already produces - for a
+-- variably-sized result - an 'IrregularRep' whose segment sizes are the
+-- per-enclosing-segment concatenated lengths and whose data is the
+-- concatenation. That directly gives the data results (result 2) and, as their
+-- segment sizes, the per-segment totals (result 0).
+--
+-- The only thing the plain inner-map does not surface is the size array (result
+-- 1) - the per-iteration output sizes. We recover it by augmenting the lambda
+-- with a leading scalar result equal to the outer size of its (first) output;
+-- mapping that scalar over the nest yields exactly the irregular array of
+-- per-iteration sizes, segmented by the 'FlatMap' width.
+transformFlatMapNested ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  StmAux () ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  FlattenM DistEnv
+transformFlatMapNested ops segments env inps res aux w arrs lam = do
+  size_name <- newVName "flatmap_sizes"
+  data_names <- mapM (const $ newVName "flatmap_data") $ lambdaReturnType lam
+  let k = arraySize 0 $ head $ lambdaReturnType lam
+      body = lambdaBody lam
+      aug_lam =
+        lam
+          { lambdaReturnType = Prim int64 : lambdaReturnType lam,
+            lambdaBody = body {bodyResult = SubExpRes mempty k : bodyResult body}
+          }
+      size_pe = PatElem size_name $ arrayOfRow (Prim int64) w
+      data_pes = zipWith (\v t -> PatElem v $ arrayOfRow t w) data_names $ lambdaReturnType lam
+      aug_pat = Pat $ size_pe : data_pes
+  certifying (distCerts inps aux env) $ do
+    reps <- transformInnerMap ops segments env inps aug_pat w arrs aug_lam
+    case reps of
+      size_rep : data_reps@(first_data : _) -> do
+        -- The per-segment totals are the segment sizes of the (irregular) data
+        -- result. When the data happens to be regular (the fully uniform case),
+        -- the total is the constant inner size, replicated across the segments.
+        n_rep <- case first_data of
+          Irregular ir -> pure $ Regular $ irregularS ir
+          Regular d -> do
+            d_t <- lookupType d
+            let inner = product $ map pe64 $ drop (segmentsRank segments) $ arrayDims d_t
+            n_elem <- letSubExp "flatmap_n_elem" =<< toExp inner
+            Regular <$> letExp "flatmap_n" (BasicOp $ Replicate (segmentsShape segments) n_elem)
+        let all_reps = n_rep : size_rep : data_reps
+        pure $ insertReps (zip (map distResTag res) all_reps) env
+      _ -> error "transformFlatMapNested: FlatMap with no results"
 
 -- | Remove certificates that refer to variables free in the lambda (recursing
 -- into nested bodies). Such certificates arise on pure operator lambdas (e.g.

@@ -314,3 +314,6 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
      , res[offset0:offset0 + offset1] :> [offset1]a
      , res[offset0 + offset1:n] :> [n - offset0 - offset1]a
      )
+
+def flatmap [n] 'a 'b (f: (k: i64) -> a -> [k]b) (ks: [n]i64) (as: [n]a) : ([n]i64, ?[m].[m]b) =
+  intrinsics.flatmap f ks as

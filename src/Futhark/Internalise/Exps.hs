@@ -1878,6 +1878,14 @@ isIntrinsicFunction qname args = do
       internaliseHist 2 desc rf dest op ne buckets img
     handleSOACs [rf, dest, op, ne, buckets, img] "hist_3d" = Just $ \desc ->
       internaliseHist 3 desc rf dest op ne buckets img
+    handleSOACs [lam, ks, arr] "flatmap" = Just $ \desc -> do
+      ks' <- internaliseExpToVars "ks_arr" ks
+      arr' <- internaliseExpToVars "map_arr" arr
+      ks_ts <- mapM lookupType ks'
+      arr_ts <- mapM lookupType arr'
+      lam' <- internaliseLambdaCoerce lam $ map rowType $ ks_ts <> arr_ts
+      let w = arraysSize 0 arr_ts
+      letValExp' desc $ I.Op $ FlatMap w (ks' <> arr') lam'
     handleSOACs _ _ = Nothing
 
     handleAccs [dest, f, bs] "scatter_stream" = Just $ \desc ->

@@ -173,8 +173,13 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
     Let pat aux (Op (Screma w arrs form)) ->
       transformScrema (flattenOpsFor funHasParallelism lvl) segments env inps res (pat, aux) (w, arrs, form)
     Let _ aux (Match scrutinees cases defaultCase rt) ->
+      -- 'transformUniformMatch' keeps the scrutinees in a plain GPU 'Match',
+      -- which is only well-scoped when they are invariant to the nest. Whenever
+      -- a scrutinee is variant we must partition the segments by branch, even if
+      -- no branch contains parallelism (this happens e.g. for a variant
+      -- conditional with an irregular result, which cannot be sequentialised
+      -- into a scalar group).
       if any (isVariant inps) scrutinees
-        && any (bodyHasParallelism funHasParallelism) (defaultCase : map caseBody cases)
         then transformVariantMatch ops segments env inps res aux scrutinees cases defaultCase rt
         else transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt
     Let pat aux (Apply name args rettype s) ->
@@ -207,6 +212,8 @@ transformDistStm funHasParallelism lvl segments env (DistStm inps res (ParallelS
       transformWithAcc ops segments env inps res pat aux inputs lam
     (Let pat aux (Op (Hist w hist_inputs hist_ops bucket_fun))) ->
       transformHist ops segments env inps res (pat, aux) (w, hist_inputs, hist_ops, bucket_fun)
+    Let _ aux (Op (FlatMap w arrs lam)) ->
+      transformFlatMapNested ops segments env inps res aux w arrs lam
     Let _ _ (Op (Stream {})) -> error "transformDistStm: Stream should have been removed"
     Let _ _ (Op (JVP {})) -> error "Unhandled JVP"
     Let _ _ (Op (VJP {})) -> error "Unhandled VJP"
@@ -555,6 +562,9 @@ transformStm funHasParallelism (Let pat aux (Op (Screma w arrs form)))
                 [intra_alt]
       forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
         letBindNames [v] $ BasicOp $ SubExp $ Var v_alt
+transformStm funHasParallelism (Let pat aux (Op (FlatMap w arrs lam))) =
+  certifying (stmAuxCerts aux) $
+    transformFlatMap (flattenOpsFor funHasParallelism defaultSegLevel) pat w arrs lam
 transformStm funHasParallelism (Let pat aux (Loop params form body)) =
   localScope (scopeOfLoopForm form <> scopeOfFParams (map fst params)) $
     addStm . Let pat aux . Loop params form =<< transformBody funHasParallelism body

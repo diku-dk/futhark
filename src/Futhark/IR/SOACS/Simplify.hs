@@ -108,6 +108,11 @@ simplifySOAC (WithVJP args lam lam_adj) = do
   (lam', hoisted) <- Engine.simplifyLambda mempty lam
   (lam_adj', hoisted_adj) <- Engine.simplifyLambda mempty lam_adj
   pure (WithVJP args' lam' lam_adj', hoisted <> hoisted_adj)
+simplifySOAC (FlatMap w arrs lam) = do
+  w' <- Engine.simplify w
+  arrs' <- mapM Engine.simplify arrs
+  (lam', hoisted_lam) <- Engine.simplifyLambda mempty lam
+  pure (FlatMap w' arrs' lam', hoisted_lam)
 simplifySOAC (Stream outerdim arr nes lam) = do
   outerdim' <- Engine.simplify outerdim
   nes' <- mapM Engine.simplify nes
