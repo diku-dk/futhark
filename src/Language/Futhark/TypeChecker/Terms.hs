@@ -1638,6 +1638,27 @@ inferredReturnType loc params t = do
     hidden_params = filter (`elem` hidden) $ foldMap patNames params
     hidden = hiddenParamNames params
 
+-- | Rename the sizes bound by a type (parameter names and existential
+-- quantifiers) to fresh names.
+renameTypeBinders :: (Monoid u) => TypeBase Size u -> TermTypeM (TypeBase Size u)
+renameTypeBinders (Scalar (Arrow u pn d pt (RetType dims rt))) = do
+  pt' <- renameTypeBinders pt
+  (pn', pn_subst) <- case pn of
+    Named v -> do
+      v' <- newName v
+      pure (Named v', M.singleton v v')
+    Unnamed -> pure (Unnamed, mempty)
+  dims' <- mapM newName dims
+  let subst = pn_subst <> M.fromList (zip dims dims')
+      toSize v = ExpSubst $ sizeFromName (qualName v) mempty
+  rt' <- renameTypeBinders $ applySubst (fmap toSize . (`M.lookup` subst)) rt
+  pure $ Scalar $ Arrow u pn' d pt' $ RetType dims' rt'
+renameTypeBinders (Scalar (Record fs)) =
+  Scalar . Record <$> traverse renameTypeBinders fs
+renameTypeBinders (Scalar (Sum cs)) =
+  Scalar . Sum <$> traverse (traverse renameTypeBinders) cs
+renameTypeBinders t = pure t
+
 checkBinding ::
   ( VName,
     Maybe (TypeExp Exp VName),
@@ -1661,9 +1682,10 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
     -- when the function is not actually recursive, as name resolution has
     -- hooked things up properly anyway. See Note [Checking recursive
     -- functions].
-    let self_binding = case maybe_retdecl' of
-          Just (_, ret, ext) -> BoundV tparams $ funType params' $ RetType ext ret
-          Nothing -> RecursiveV
+    self_binding <- case maybe_retdecl' of
+      Just (_, ret, ext) ->
+        BoundV tparams <$> renameTypeBinders (funType params' (RetType ext ret))
+      Nothing -> pure RecursiveV
     body' <-
       localScope (\scope -> scope {scopeVtable = M.insert fname self_binding $ scopeVtable scope}) $
         checkFunBody
