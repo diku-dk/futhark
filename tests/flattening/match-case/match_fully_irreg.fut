@@ -10,16 +10,16 @@
 -- output         { empty([0]i64) }
 
 #[noinline]
-let foo (x : i64) (y : i64) (zs : []i64) =
-  let (a, as) = 
+def foo [n] (x: i64) (y: i64) (zs: [n]i64) =
+  let (a, as) =
     match (x, y)
-    case (0,0) -> (3,iota 5)
-    case (0,b) -> (5,iota b)
-    case (a,0) -> (a,iota 3)
-    case (a,b) -> (a*b, zs)
+    case (0, 0) -> (3, iota 5)
+    case (0, b) -> (5, iota b)
+    case (a, 0) -> (a, iota 3)
+    case (a, b) -> (a * b, zs)
   in reduce (+) 0 as - a
 
-let bar (x : i64) (y : i64) =
+def bar (x: i64) (y: i64) =
   let zs = iota (x * y) in foo x y zs
 
-def main [n] (xs : [n]i64) (ys : [n]i64) = map2 bar xs ys
+def main [n] (xs: [n]i64) (ys: [n]i64) = map2 bar xs ys
