@@ -216,7 +216,7 @@ transformVariantMatch ops segments env inps res _aux scrutinees cases defaultCas
   -- blanked, so we only guard branch execution when no accumulators are
   -- involved. XXX: can we be sure this will never be a problem?
   let hasAcc = any (\dr -> case distResType dr of DistType _ _ t -> isAcc t) res
-  -- acc inputs are handled differently, each breanch use the result of the previous branch
+  -- acc inputs are handled differently, each branch use the result of the previous branch
   (branch_reps, _) <-
     foldM
       ( \(branch_reps_acc, acc_reps) (branch_size, branch_inds, body, result) -> do
