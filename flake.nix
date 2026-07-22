@@ -281,7 +281,6 @@
                   haskell.haskell-language-server
                   haskellPackages.graphmod
                   #      haskellPackages.apply-refact
-                  xdot
                   pkg-config
                   zlib
                   zlib.out
@@ -305,6 +304,7 @@
                   imagemagick # needed for literate tests
                 ]
                 ++ lib.optionals (stdenv.isLinux) [
+                  xdot
                   opencl-headers
                   ocl-icd
                   (callPackage ./nix/oclgrind.nix { })
