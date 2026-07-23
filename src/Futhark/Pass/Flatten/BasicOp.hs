@@ -573,7 +573,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           (_n, offsets, m) <- exScanAndSum lvl ns
           (_, _, repiota_D) <- doRepIota lvl ns
           flags <- genFlags lvl m offsets
-          elems <- letExp "elems" <=< renameExp <=< segMap lvl (NE.singleton m) $ \is -> do
+          elems <- letExp "index_irreg_elems" <=< renameExp <=< segMap lvl (NE.singleton m) $ \is -> do
             segment <- letSubExp "segment" =<< eIndex repiota_D (toList $ fmap eSubExp is)
             segment_start <- letSubExp "segment_start" =<< eIndex offsets [eSubExp segment]
             segment_is <- segmentCoordsFromFlat segments segment
@@ -646,7 +646,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           (_n, offsets, m) <- exScanAndSum lvl ns
           (_, _, repiota_D) <- doRepIota lvl ns
           flags <- genFlags lvl m offsets
-          elems <- letExp "elems" <=< renameExp <=< segMap lvl (NE.singleton m) $ \is -> do
+          elems <- letExp "flat_index_irreg_elems" <=< renameExp <=< segMap lvl (NE.singleton m) $ \is -> do
             segment <- letSubExp "segment" =<< eIndex repiota_D (toList $ fmap eSubExp is)
             segment_start <- letSubExp "segment_start" =<< eIndex offsets [eSubExp segment]
             segment_is <- segmentCoordsFromFlat segments segment
