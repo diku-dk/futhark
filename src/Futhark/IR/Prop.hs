@@ -76,10 +76,28 @@ asBasicOp :: Exp rep -> Maybe BasicOp
 asBasicOp (BasicOp op) = Just op
 asBasicOp _ = Nothing
 
--- | An expression is safe if it is always well-defined (assuming that
--- any required certificates have been checked) in any context.  For
--- example, array indexing is not safe, as the index may be out of
--- bounds.  On the other hand, adding two numbers cannot fail.
+-- | An expression is safe if it is always well-defined in any context, assuming
+-- data dependencies are satisfied - and note that certificates are just a
+-- special case of data dependencies. For example, array indexing is not safe,
+-- as the index may be out of bounds. Array slicing is also considered unsafe,
+-- as semantically we consider this to be a copy (even if operationally it is
+-- usually a view). On the other hand, adding two numbers cannot fail.
+--
+-- The certificate requirement is subtle but important: Iota is safe only when
+-- the argument given is non-negative, which is assumed checked by a
+-- certificate.
+--
+-- Essentially the rule is this: if an expression is safe, then it means we can
+-- hoist it out of control flow without a soundness issue.
+--
+-- Some of these operations are less safe than you might intuitively expect,
+-- e.g. Reshape is considered unsafe despite usually not resulting in any code
+-- generation. Reshape can *semantically* fail if the original array does not
+-- have the same number of elements as the new shape.
+--
+-- Being very generous with unsafety-status is to ease program transformation,
+-- such that we do not have to worry too much about turning unsafe operations
+-- into "safe" operations.
 safeExp :: (ASTRep rep) => Exp rep -> Bool
 safeExp (BasicOp op) = safeBasicOp op
   where
@@ -117,7 +135,6 @@ safeExp (BasicOp op) = safeBasicOp op
     safeBasicOp ConvOp {} = True
     safeBasicOp Scratch {} = True
     safeBasicOp Concat {} = True
-    safeBasicOp Reshape {} = True
     safeBasicOp Rearrange {} = True
     safeBasicOp Manifest {} = True
     safeBasicOp Iota {} = True
