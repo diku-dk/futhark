@@ -227,8 +227,7 @@ intraBlockAlternative intra = do
 -- parallelism inside a loop.
 worthIntrablock :: Lambda SOACS -> Bool
 worthIntrablock lam =
-  not (bodyHasFlatMap (lambdaBody lam))
-    && bodyInterest (lambdaBody lam) > 1
+  bodyInterest (lambdaBody lam) > 1
   where
     bodyInterest body =
       sum $ interest <$> bodyStms body
@@ -266,29 +265,6 @@ worthIntrablock lam =
             then 0
             else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
 
--- | Does this body (recursively) contain a 'FlatMap'? A 'FlatMap' cannot be
--- sequentialised (it has no first-order transform, and sequentialising it would
--- re-execute its lambda to recover the concatenation sizes), so any map nest
--- containing one must be fully flattened rather than offered a sequential or
--- intrablock alternative. TODO: this should go away once we can sequentialise
--- flatmap.
-bodyHasFlatMap :: Body SOACS -> Bool
-bodyHasFlatMap = any (expHasFlatMap . stmExp) . bodyStms
-  where
-    expHasFlatMap (Op FlatMap {}) = True
-    expHasFlatMap (Op (Screma _ _ (ScremaForm l1 scans reds l2))) =
-      any (bodyHasFlatMap . lambdaBody) $
-        [l1, l2] <> map scanLambda scans <> map redLambda reds
-    expHasFlatMap (Op (Stream _ _ _ l)) = bodyHasFlatMap $ lambdaBody l
-    expHasFlatMap (Op (Hist _ _ ops l)) =
-      bodyHasFlatMap (lambdaBody l)
-        || any (bodyHasFlatMap . lambdaBody . Futhark.IR.SOACS.histOp) ops
-    expHasFlatMap (Loop _ _ body) = bodyHasFlatMap body
-    expHasFlatMap (Match _ cases def _) =
-      bodyHasFlatMap def || any (bodyHasFlatMap . caseBody) cases
-    expHasFlatMap (WithAcc _ l) = bodyHasFlatMap $ lambdaBody l
-    expHasFlatMap _ = False
-
 -- | A lambda is worth sequentialising if it contains enough nested parallelism
 -- of an interesting kind, or if distributing it would fragment sequential
 -- control flow - that is, if it contains meaningful parallelism nested inside a
@@ -300,8 +276,7 @@ bodyHasFlatMap = any (expHasFlatMap . stmExp) . bodyStms
 -- TODO: maybe update this or just always consider Sequentialising
 worthSequentialising :: Lambda SOACS -> Bool
 worthSequentialising lam =
-  not (bodyHasFlatMap (lambdaBody lam))
-    && bodyInterest (0 :: Int) (lambdaBody lam) > 1
+  bodyInterest (0 :: Int) (lambdaBody lam) > 1
   where
     bodyInterest depth body =
       sum $ interest depth <$> bodyStms body

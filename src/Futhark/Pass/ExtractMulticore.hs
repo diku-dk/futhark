@@ -26,6 +26,7 @@ import Futhark.Pass
 import Futhark.Pass.Flatten.Builtins (determineReduceOp)
 import Futhark.Pass.Flatten.Incremental (lambdaHasParallelism)
 import Futhark.Tools
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename (Rename, renameSomething)
 import Futhark.Transform.ToGPU (injectSOACS)
 import Futhark.Util.Log
@@ -216,8 +217,13 @@ transformSOAC _ _ VJP {} =
   error "transformSOAC: unhandled VJP"
 transformSOAC _ _ WithVJP {} =
   error "transformSOAC: unhandled WithVJP"
-transformSOAC _ _ FlatMap {} =
-  error "transformSOAC: unhandled FlatMap"
+transformSOAC pat _ (FlatMap w arrs lam) = do
+  -- Sequentialise the FlatMap itself (but not its contents) via the
+  -- first-order transform, then transform the resulting stms.
+  soacs_scope <- castScope <$> askScope
+  flatmap_stms <-
+    flip runBuilderT_ soacs_scope $ FOT.transformFlatMap pat w arrs lam
+  transformStms flatmap_stms
 transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
       seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs

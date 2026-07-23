@@ -14,6 +14,7 @@ module Futhark.Transform.FirstOrderTransform
     transformLambda,
     transformSOAC,
     transformScrema,
+    transformFlatMap,
   )
 where
 
@@ -113,6 +114,121 @@ resultArray arrs ts = do
       oneArray t =
         letExp "result" =<< eBlank t
   mapM oneArray ts
+
+-- | Sequentialise a single FlatMap. We do not exploit the size parameter of the
+-- lambda; instead each result array is accumulated in a growable "vector": a
+-- scratch buffer that is doubled (and copied) whenever it runs out of space,
+-- and finally truncated to the actual size.
+transformFlatMap ::
+  (Transformer m) =>
+  Pat (LetDec (Rep m)) ->
+  SubExp ->
+  [VName] ->
+  Lambda (Rep m) ->
+  m ()
+transformFlatMap pat w arrs lam = do
+  let elem_ts = map rowType $ lambdaReturnType lam
+  arrs_ts <- mapM lookupType arrs
+
+  -- Loop parameters: the current filled size, the current capacity, the
+  -- per-element shape array, and one scratch buffer per result.
+  size_p <- newParam "flatmap_size" $ toDecl (Prim int64) Nonunique
+  cap_p <- newParam "flatmap_cap" $ toDecl (Prim int64) Nonunique
+  sizes_p <- newParam "flatmap_sizes" $ toDecl (arrayOfRow (Prim int64) w) Unique
+  scratch_ps <-
+    forM elem_ts $ \et ->
+      newParam "flatmap_res" $ toDecl (arrayOfRow et (Var (paramName cap_p))) Unique
+
+  -- The capacity initially matches the input size.
+  sizes_init <- letExp "flatmap_sizes" $ BasicOp $ Scratch int64 [w]
+  scratch_init <- forM elem_ts $ \et -> letExp "flatmap_res" =<< eBlank (arrayOfRow et w)
+
+  let merge =
+        (size_p, intConst Int64 0)
+          : (cap_p, w)
+          : (sizes_p, Var sizes_init)
+          : zip scratch_ps (map Var scratch_init)
+      merge_params = map fst merge
+
+  i <- newVName "i"
+  let loop_form = ForLoop i Int64 w
+
+  loop_body <- runBodyBuilder $
+    localScope (scopeOfLoopForm loop_form <> scopeOfFParams merge_params) $ do
+      -- Apply the lambda to the current elements.
+      let arg arr arr_t = BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
+      ys <- map resSubExp <$> bindLambda lam (zipWith arg arrs arrs_ts)
+
+      -- All result arrays have the same length; use the first.
+      k <- arraySize 0 <$> subExpType (head ys)
+      new_size <-
+        letSubExp "flatmap_new_size" . BasicOp $
+          BinOp (Add Int64 OverflowUndef) (Var (paramName size_p)) k
+      grow <-
+        letSubExp "flatmap_grow" . BasicOp $
+          CmpOp (CmpSlt Int64) (Var (paramName cap_p)) new_size
+
+      -- New capacity: double it (but at least fit) when it overflows.
+      new_cap <-
+        letSubExp "flatmap_new_cap"
+          =<< eIf
+            (eSubExp grow)
+            ( buildBody_ $ do
+                doubled <-
+                  letSubExp "doubled" . BasicOp $
+                    BinOp (Mul Int64 OverflowUndef) (Var (paramName cap_p)) (intConst Int64 2)
+                fmap (pure . subExpRes) . letSubExp "atleast" . BasicOp $
+                  BinOp (SMax Int64) doubled new_size
+            )
+            (buildBody_ $ pure [subExpRes $ Var (paramName cap_p)])
+
+      let lowSlice t =
+            fullSlice t [DimSlice (intConst Int64 0) (Var (paramName size_p)) (intConst Int64 1)]
+
+      -- Grow (and copy) each scratch buffer when necessary, then write the
+      -- new elements at the end.
+      scratch_res <- forM (zip3 scratch_ps elem_ts ys) $ \(sp, et, ys_j) -> do
+        let full_t = arrayOfRow et new_cap
+        base <-
+          letExp "flatmap_grown"
+            =<< eIf
+              (eSubExp grow)
+              ( buildBody_ $ do
+                  fresh <-
+                    letExp "flatmap_fresh" . BasicOp $
+                      Scratch (elemType full_t) (arrayDims full_t)
+                  old_t <- lookupType $ paramName sp
+                  copied <-
+                    letInPlace "flatmap_fresh" fresh (lowSlice full_t) $
+                      BasicOp $
+                        Index (paramName sp) (lowSlice old_t)
+                  pure [varRes copied]
+              )
+              ( buildBody_ $
+                  fmap (pure . varRes) . letExp "flatmap_kept" $
+                    shapeCoerce (arrayDims full_t) (paramName sp)
+              )
+        letInPlace "flatmap_res" base (fullSlice full_t [DimSlice (Var (paramName size_p)) k (intConst Int64 1)]) $
+          BasicOp (SubExp ys_j)
+
+      sizes' <-
+        letInPlace "flatmap_sizes" (paramName sizes_p) (fullSlice (paramType sizes_p) [DimFix $ Var i]) $
+          BasicOp (SubExp k)
+
+      pure $ subExpsRes [new_size, new_cap] <> varsRes (sizes' : scratch_res)
+
+  loop_res <- letTupExp "flatmap" $ Loop merge loop_form loop_body
+  case (loop_res, patNames pat) of
+    (size_res : _cap_res : sizes_res : scratch_res, m_pat : sizes_pat : out_pats) -> do
+      -- Bind the total size and the size array, then truncate each buffer.
+      letBindNames [m_pat] $ BasicOp $ SubExp $ Var size_res
+      letBindNames [sizes_pat] $ BasicOp $ SubExp $ Var sizes_res
+      forM_ (zip out_pats scratch_res) $ \(out, scratch) -> do
+        scratch_t <- lookupType scratch
+        letBindNames [out] . BasicOp . Index scratch $
+          fullSlice scratch_t [DimSlice (intConst Int64 0) (Var m_pat) (intConst Int64 1)]
+    _ ->
+      error "transformFlatMap: malformed FlatMap."
 
 -- | Sequentialise a single Screma.
 transformScrema ::
@@ -237,8 +353,8 @@ transformSOAC _ VJP {} =
   error "transformSOAC: unhandled VJP"
 transformSOAC _ WithVJP {} =
   error "transformSOAC: unhandled WithVJP"
-transformSOAC _ FlatMap {} =
-  error "transformSOAC: unhandled FlatMap"
+transformSOAC pat (FlatMap w arrs lam) =
+  transformFlatMap pat w arrs lam
 transformSOAC pat (Screma w arrs form) =
   transformScrema pat w arrs form
 transformSOAC pat (Stream w arrs nes lam) = do
