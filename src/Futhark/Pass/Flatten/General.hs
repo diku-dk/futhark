@@ -16,6 +16,8 @@ module Futhark.Pass.Flatten.General
     liftSubExpRegular,
     liftVarRegular,
     liftParam,
+    liftRegularParam,
+    liftRegResult,
     mkIrregFromReg,
     flattenIrregularRep,
     distCerts,
@@ -148,6 +150,14 @@ liftResult lvl segments inps env res = map (SubExpRes mempty . Var) <$> vs
         flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
         elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
         pure [num_data, segs, flags', offsets, elems']
+
+liftRegResult :: SegLevel -> Segments -> DistInputs -> DistEnv -> SubExpRes -> FlattenM SubExpRes
+liftRegResult lvl segments inps env res = do
+  let res_se = resSubExp res
+  res_t <- subExpInputType inps res_se
+  let expectedShape = segmentsShape segments <> arrayShape res_t
+  lifted_res <- liftSubExpRegular lvl segments inps env expectedShape res_se
+  pure $ SubExpRes mempty (Var lifted_res)
 
 mkIrregFromReg ::
   SegLevel ->
@@ -621,6 +631,26 @@ liftParam w fparam =
                 irregularK = Dense
               }
         )
+    Acc {} ->
+      error "liftParam: Acc"
+    Mem {} ->
+      error "liftParam: Mem"
+  where
+    desc = baseName (paramName fparam)
+
+liftRegularParam :: (MonadFreshNames m) => SubExp -> FParam SOACS -> m (FParam GPU, ResRep)
+liftRegularParam w fparam =
+  case declTypeOf fparam of
+    Prim pt -> do
+      p <-
+        newParam
+          (desc <> "_lifted")
+          (arrayOf (Prim pt) (Shape [w]) Nonunique)
+      pure (p, Regular $ paramName p)
+    Array pt shape u -> do
+      p <- newParam (desc <> "_lifted") $
+        arrayOf (Prim pt) (Shape [w] <> shape) u
+      pure (p, Regular $ paramName p)
     Acc {} ->
       error "liftParam: Acc"
     Mem {} ->

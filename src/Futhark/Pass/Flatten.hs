@@ -280,6 +280,18 @@ liftRetType w = concat . snd . L.mapAccumL liftType 0
             Mem {} -> error "liftRetType: Mem"
        in (i + length lifted, lifted)
 
+liftRegularRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
+liftRegularRetType w = concat . snd . L.mapAccumL liftType 0
+  where
+    liftType i rettype =
+      let lifted = case rettype of
+            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
+            Array pt shape _ ->
+              pure $ arrayOf (Prim pt) (Shape [Free w] <> shape) Unique
+            Acc {} -> error "liftRetType: Acc"
+            Mem {} -> error "liftRetType: Mem"
+       in (i + length lifted, lifted)
+
 runInnerSeqMap ::
   SubExp ->
   [VName] ->
@@ -308,8 +320,17 @@ liftBody funHasParallelism lvl w inputs env dstms result = do
   result' <- mapM (liftResult lvl segments inputs env') result
   pure $ concat result'
 
+liftRegFunBody :: FunHasParallelism -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> Result -> FlattenM Result
+liftRegFunBody funHasParallelism lvl w inputs env dstms result = do
+  let segments = NE.singleton w
+  env' <- foldM (transformDistStm funHasParallelism lvl segments) env dstms
+  mapM (liftRegResult lvl segments inputs env') result
+
 liftFunName :: Name -> Name
 liftFunName name = name <> "_lifted"
+
+liftRegFunName :: Name -> Name
+liftRegFunName name = name <> "regular_lifted"
 
 -- | A lifted function must return fresh, non-aliasing arrays (as it
 -- corresponds to 'map f'; see 'liftRetType').  This is not
@@ -405,6 +426,48 @@ liftFunDef funHasParallelism const_scope fd = do
         liftBody funHasParallelism defaultSegLevel w inputs' env dstms $
           bodyResult body
   let name = liftFunName $ funDefName fd
+  pure
+    ( fd
+        { funDefName = name,
+          funDefBody = body',
+          funDefParams = fparams'',
+          funDefRetType = rettype'
+        },
+      needs
+    )
+
+liftRegFunDef ::
+  FunHasParallelism ->
+  Scope SOACS ->
+  FunDef SOACS ->
+  PassM (FunDef GPU, S.Set DemandFn)
+liftRegFunDef funHasParallelism const_scope fd = do
+  let FunDef
+        { funDefBody = body,
+          funDefParams = fparams,
+          funDefRetType = rettype
+        } = fd
+  wp <- newParam "w" $ Prim int64
+  let w = Var $ paramName wp
+  (fparams', reps) <- mapAndUnzipM (liftRegularParam w) fparams
+  let fparams'' = wp : fparams'
+  let inputs = do
+        (p, i) <- zip fparams [0 ..]
+        pure (paramName p, DistInput (ResTag i) (paramType p))
+  let rettype' =
+        addRetAls (map paramDeclType fparams'') $
+          liftRegularRetType w (map fst rettype)
+  let (inputs', dstms) =
+        distributeBody DistributeIrregular funHasParallelism const_scope (NE.singleton (Var (paramName wp))) inputs body
+      env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
+  -- Lift the body of the function and get the results, inserting copies as
+  -- necessary to ensure the results are fresh and unique (see 'freshenResult').
+  (body', needs) <-
+    runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
+      buildBody_ . freshenResult fparams'' $
+        liftRegFunBody funHasParallelism defaultSegLevel w inputs' env dstms $
+          bodyResult body
+  let name = liftRegFunName $ funDefName fd
   pure
     ( fd
         { funDefName = name,
@@ -630,16 +693,20 @@ liftUntilFixedPoint prog funHasParallelism consts_scope made needed = do
       mapAndUnzipM mkDemanded $
         S.toList needed
   if new_needed == mempty
-    then pure lifted_funs
+    then pure $ concat lifted_funs
     else
-      (lifted_funs ++)
+      (concat lifted_funs ++)
         <$> liftUntilFixedPoint prog funHasParallelism consts_scope made' new_needed
   where
     mkDemanded (DemandLifted fname) =
       case find ((== fname) . funDefName) $ progFuns prog of
-        Just fundef -> liftFunDef funHasParallelism consts_scope fundef
+        Just fundef -> do 
+          -- TODO: Redo this
+          (irreg_fun, needed') <- liftFunDef funHasParallelism consts_scope fundef
+          (reg_fun, _) <- liftRegFunDef funHasParallelism consts_scope fundef
+          pure ([irreg_fun,reg_fun],needed')
         Nothing -> error $ "mkDemanded: " <> show fname
-    mkDemanded (DemandBuiltin b) = pure (builtinFunDef b, mempty)
+    mkDemanded (DemandBuiltin b) = pure ([builtinFunDef b], mempty)
 
 transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do
