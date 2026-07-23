@@ -219,18 +219,32 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
         -- This works because we know that each dimension from
         -- new_dims in the pattern is unique and distinct.
         areSameSize <- getAreSame
-        let onDims _ x y
+        let initialOf v = snd <$> L.find (areSameSize v . fst) new_dims_to_initial_dim
+            sameSize (Var x _ _) (Var y _ _) = areSameSize (qualLeaf x) (qualLeaf y)
+            sameSize x y = x == y
+            -- Does the body-produced size 'd' originate from the same loop
+            -- initial size as 'e''?
+            sharesInitial e' (Var d _ _)
+              | Just d_init <- initialOf (qualLeaf d) = sameSize d_init e'
+            sharesInitial _ _ = False
+            onDims _ x y
               | x == y = pure x
             onDims _ e d = do
               forM_ (fvVars $ freeInExp e) $ \v -> do
-                case L.find (areSameSize v . fst) new_dims_to_initial_dim of
-                  Just (_, e') ->
-                    if e' == d
-                      then modify $ first $ M.insert v $ ExpSubst e'
-                      else
+                case initialOf v of
+                  Just e'
+                    -- 'v' is invariant if the body reproduces its initial size,
+                    -- either directly or via another loop parameter that shares
+                    -- that initial size. Resolve it to the shared initial 'e''
+                    -- rather than to 'd', so that swapping two such parameters
+                    -- does not produce a cyclic substitution.
+                    | sameSize e' d
+                        || (v `elem` new_dims && sharesInitial e' d) ->
+                        modify $ first $ M.insert v $ ExpSubst e'
+                    | otherwise ->
                         unless (v `S.member` known_before) $
                           modify (second (v :))
-                  _ ->
+                  Nothing ->
                     pure ()
               pure e
         loopbody_t' <- normTypeFully loopbody_t
