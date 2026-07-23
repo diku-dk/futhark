@@ -19,6 +19,7 @@ module Futhark.Pass.Flatten.Monad
 
     -- * Demands
     BuiltinFn (..),
+    LiftMode (..),
     DemandFn (..),
     demandLifted,
     demandBuiltin,
@@ -213,12 +214,16 @@ data BuiltinFn
   | BuiltinPartition
   deriving (Eq, Ord, Show)
 
+data LiftMode
+  = UniformLift
+  | NonUniformLift
+  deriving (Eq, Ord, Show)
 -- | Indicate the need for a function to be generated. Instead of immediately
 -- generating them ourselves, we collect requirements from multiple flattening
 -- operations and satisfy them in their entirety.
 data DemandFn
   = -- | We need this function to be lifted.
-    DemandLifted Name
+    DemandLifted Name LiftMode
   | DemandBuiltin BuiltinFn
   deriving (Eq, Ord, Show)
 
@@ -269,9 +274,9 @@ runFlattenM scope (FlattenM m) = modifyNameSource $ \src ->
    in ((x, stateDemandFns s), stateNameSource s)
 
 -- | Indicate that we rather need a lifted version of this function.
-demandLifted :: Name -> FlattenM ()
-demandLifted fname = modify $ \s ->
-  s {stateDemandFns = S.insert (DemandLifted fname) $ stateDemandFns s}
+demandLifted :: Name -> LiftMode -> FlattenM ()
+demandLifted fname mode = modify $ \s ->
+  s {stateDemandFns = S.insert (DemandLifted fname mode) $ stateDemandFns s}
 
 -- | Demand the presence of this builtin function.
 demandBuiltin :: BuiltinFn -> FlattenM ()

@@ -188,7 +188,6 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
     Let pat aux (Apply name args rettype s) ->
       case lvl of
         SegThread {} -> do
-          demandLifted name
           arg_types <- mapM (subExpInputType inps . fst) args
           let size_positions = funSizeParams name
               indexed_args = zip [0 ..] args
@@ -199,26 +198,30 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
                 nonuniform_inps
                   || not (all isRegularDistResult res)
               name' = if nonuniform then liftFunName name else liftRegFunName name
+              mode = if nonuniform then NonUniformLift else UniformLift
+          demandLifted name mode
           w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
 
-          args' <- if
-            nonuniform
-            then
-              ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
-            else do
-              value_args' <- mapM (liftRegArg lvl segments w inps env . snd) value_args
-              pure $ (w, Observe) : map snd size_args <> value_args'
+          args' <-
+            if nonuniform
+              then
+                ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
+              else do
+                value_args' <- mapM (liftRegArg lvl segments w inps env . snd) value_args
+                pure $ (w, Observe) : map snd size_args <> value_args'
           args_ts <- mapM (subExpType . fst) args'
           let dietToUnique Consume = Unique
               dietToUnique Observe = Nonunique
               param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
-              rettype' = if nonuniform 
-                          then addRetAls param_ts $ liftRetType w $ map fst rettype
-                          else addRetAls param_ts $ liftRegularRetType w $ map fst rettype
+              rettype' =
+                if nonuniform
+                  then addRetAls param_ts $ liftRetType w $ map fst rettype
+                  else addRetAls param_ts $ liftRegularRetType w $ map fst rettype
           result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
-          let reps =  if nonuniform 
-                        then resultToResReps (map fst rettype) result
-                        else distResultsToResReps res result
+          let reps =
+                if nonuniform
+                  then resultToResReps (map fst rettype) result
+                  else distResultsToResReps res result
           reps' <- zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) reps
           pure $ insertReps (zip (map distResTag res) reps') env
         -- TODO: Do something about intra functions
@@ -311,16 +314,15 @@ liftRetType w = concat . snd . L.mapAccumL liftType 0
        in (i + length lifted, lifted)
 
 liftRegularRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
-liftRegularRetType w = concat . snd . L.mapAccumL liftType 0
+liftRegularRetType w = map liftType
   where
-    liftType i rettype =
+    liftType rettype =
       let lifted = case rettype of
-            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
-            Array pt shape _ ->
-              pure $ arrayOf (Prim pt) (Shape [Free w] <> shape) Unique
+            Prim pt -> arrayOf (Prim pt) (Shape [Free w]) Unique
+            Array pt shape _ -> arrayOf (Prim pt) (Shape [Free w] <> shape) Unique
             Acc {} -> error "liftRegularRetType: Acc"
             Mem {} -> error "liftRegularRetType: Mem"
-       in (i + length lifted, lifted)
+       in lifted
 
 runInnerSeqMap ::
   SubExp ->
@@ -518,7 +520,7 @@ liftRegFunDef funHasParallelism funSizeParams const_scope fd = do
       buildBody_ . freshenResult fparams'' $
         -- If there is an existential return size then the result will not be regular
         -- therefore, we are not handling this simillar to the way we handle parameters.
-        liftRegFunBody funHasParallelism funSizeParams  defaultSegLevel w inputs' env dstms $
+        liftRegFunBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms $
           bodyResult body
   let name = liftRegFunName $ funDefName fd
   pure
@@ -748,20 +750,19 @@ liftUntilFixedPoint prog funHasParallelism funSizeParams consts_scope made neede
       mapAndUnzipM mkDemanded $
         S.toList needed
   if new_needed == mempty
-    then pure $ concat lifted_funs
+    then pure lifted_funs
     else
-      (concat lifted_funs ++)
+      (lifted_funs ++)
         <$> liftUntilFixedPoint prog funHasParallelism funSizeParams consts_scope made' new_needed
   where
-    mkDemanded (DemandLifted fname) =
+    mkDemanded (DemandLifted fname mode) =
       case find ((== fname) . funDefName) $ progFuns prog of
-        Just fundef -> do
-          -- TODO: Do not create both versions
-          (irreg_fun, needed') <- liftFunDef funHasParallelism funSizeParams consts_scope fundef
-          (reg_fun, _) <- liftRegFunDef funHasParallelism funSizeParams consts_scope fundef
-          pure ([irreg_fun, reg_fun], needed')
+        Just fundef -> 
+          case mode of 
+            UniformLift -> liftRegFunDef funHasParallelism funSizeParams consts_scope fundef
+            NonUniformLift -> liftFunDef funHasParallelism funSizeParams consts_scope fundef    
         Nothing -> error $ "mkDemanded: " <> show fname
-    mkDemanded (DemandBuiltin b) = pure ([builtinFunDef b], mempty)
+    mkDemanded (DemandBuiltin b) = pure (builtinFunDef b, mempty)
 
 transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do
@@ -773,8 +774,8 @@ transformProg prog = do
       size_param_map = analyseFunSizeParams funs
       funHasParallelism fname =
         M.findWithDefault (not $ isBuiltInFunction fname) fname funParallelism
-      funSizeParams fname = 
-         M.findWithDefault mempty fname size_param_map
+      funSizeParams fname =
+        M.findWithDefault mempty fname size_param_map
   (consts', consts_needs) <-
     runFlattenM mempty $ collectStms_ $ transformStms funHasParallelism funSizeParams consts
   (funs', funs_needs) <-
