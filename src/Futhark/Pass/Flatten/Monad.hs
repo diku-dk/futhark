@@ -76,10 +76,10 @@ import Prelude hiding (div, rem)
 --   - A_O : [n]i64; the offset array, indicating for each segment
 --     where it starts in the data (and flag) array.
 --
---   - A_II1 : [m]t; the "segment indices"; a mapping from element
+--   - A_II1 : [m]i64; the "segment indices"; a mapping from element
 --     index to index of the segment it belongs to.
 --
---   - A_II2 : [m]t; the "inner indices"; a mapping from element index
+--   - A_II2 : [m]i64; the "inner indices"; a mapping from element index
 --     to index within its corresponding segment.
 --
 -- The arrays that are not the data array are collectively called the
