@@ -757,10 +757,10 @@ liftUntilFixedPoint prog funHasParallelism funSizeParams consts_scope made neede
   where
     mkDemanded (DemandLifted fname mode) =
       case find ((== fname) . funDefName) $ progFuns prog of
-        Just fundef -> 
-          case mode of 
+        Just fundef ->
+          case mode of
             UniformLift -> liftRegFunDef funHasParallelism funSizeParams consts_scope fundef
-            NonUniformLift -> liftFunDef funHasParallelism funSizeParams consts_scope fundef    
+            NonUniformLift -> liftFunDef funHasParallelism funSizeParams consts_scope fundef
         Nothing -> error $ "mkDemanded: " <> show fname
     mkDemanded (DemandBuiltin b) = pure (builtinFunDef b, mempty)
 

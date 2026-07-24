@@ -218,6 +218,7 @@ data LiftMode
   = UniformLift
   | NonUniformLift
   deriving (Eq, Ord, Show)
+
 -- | Indicate the need for a function to be generated. Instead of immediately
 -- generating them ourselves, we collect requirements from multiple flattening
 -- operations and satisfy them in their entirety.

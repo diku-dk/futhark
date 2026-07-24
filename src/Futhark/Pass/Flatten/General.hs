@@ -648,8 +648,9 @@ liftRegularParam w fparam =
           (arrayOf (Prim pt) (Shape [w]) Nonunique)
       pure (p, Regular $ paramName p)
     Array pt shape u -> do
-      p <- newParam (desc <> "_lifted") $
-        arrayOf (Prim pt) (Shape [w] <> shape) u
+      p <-
+        newParam (desc <> "_lifted") $
+          arrayOf (Prim pt) (Shape [w] <> shape) u
       pure (p, Regular $ paramName p)
     Acc {} ->
       error "liftParam: Acc"
