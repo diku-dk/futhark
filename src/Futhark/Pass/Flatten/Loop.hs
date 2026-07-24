@@ -341,11 +341,13 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
 
       let lifted_loop_params' = concat lifted_loop_params
           lifted_init' = concat lifted_init
-      (loop_new_inputs, loop_env_local) <-
-        loopBodyInputs env inps old_loop_params lifted_loop_reps
 
       let i_param = Param mempty i (Prim (IntType it))
           build_scope = scopeOfFParams lifted_loop_params' <> scopeOfLParams [i_param]
+
+      (loop_new_inputs, loop_env_local) <-
+        localScope build_scope $
+          loopBodyInputs env inps old_loop_params lifted_loop_reps
 
       -- When the loop parameters and all inputs used by the body are regular,
       -- the interchange of the map nest and the loop corresponds to a perfectly
@@ -445,8 +447,10 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
 
   let lifted_loop_params' = concat lifted_loop_params
       lifted_init' = concat lifted_init
+      loop_params_scope = scopeOfFParams lifted_loop_params'
   (loop_new_inputs, loop_env_local) <-
-    loopBodyInputs env inps old_loop_params lifted_loop_reps
+    localScope loop_params_scope $
+      loopBodyInputs env inps old_loop_params lifted_loop_reps
 
   -- find cond_lifted_param in old_lifted_loop_params to get the lifted_loop_reps
   let maybe_cond = lookup cond (zip (map paramName old_loop_params) (zip lifted_loop_reps lifted_init))
@@ -455,7 +459,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
     -- infinite loop
     Nothing -> do
       loop_body_gpu <-
-        distributedLoopBody ops segments w (scopeOfFParams lifted_loop_params') loop_new_inputs loop_env_local res body
+        distributedLoopBody ops segments w loop_params_scope loop_new_inputs loop_env_local res body
       let loop_exp_gpu = Loop (zip lifted_loop_params' lifted_init') (WhileLoop cond) loop_body_gpu
       loop_out_vs <- certifying (distCerts inps aux env) $ letTupExp "loop_res_out" loop_exp_gpu
       let out_reps = loopResultToResReps res loop_out_vs
@@ -482,7 +486,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
       let any_active_init = Var any_active_init_v
 
       any_active_param <- newParam "any_active" (Prim Bool)
-      let build_scope = scopeOfFParams lifted_loop_params' <> scopeOfFParams [any_active_param]
+      let build_scope = loop_params_scope <> scopeOfFParams [any_active_param]
       -- ‌build body
       loop_body_gpu <-
         buildBody_ . localScope build_scope $ do
