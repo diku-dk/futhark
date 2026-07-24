@@ -1451,6 +1451,9 @@ transformFlatMap ops pat w arrs lam = do
 -- exactly the irregular array of per-iteration sizes, segmented by the 'FlatMap'
 -- width. From it we then compute the offset array (result 3), as the
 -- per-enclosing exclusive prefix sum, and the flag array (result 2).
+--
+-- FIXME: this function does not properly handle non-scalar results; see
+-- tests/soacs/flatmap6.fut. We need to scale similarly to transformFlatMap.
 transformFlatMapNested ::
   FlattenOps ->
   Segments ->
