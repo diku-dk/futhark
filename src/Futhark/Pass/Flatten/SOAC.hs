@@ -454,10 +454,21 @@ prepareSegOpInputs lvl segments env inps w reps names hasNoFreeVariant
       let Irregular rep0 = head reps
       pure (irregularF rep0, irregularO rep0, irregularS rep0, map getData reps, Replicated)
   | otherwise = do
-      desc_rep <- findOrMakeDense reps
-      m <- arraySize 0 <$> lookupType (irregularD desc_rep)
-      names' <- zipWithM (normalise m) reps names
-      pure (irregularF desc_rep, irregularO desc_rep, irregularS desc_rep, names', Dense)
+      -- The segment descriptor must count SOAC *elements* per segment, but an
+      -- 'IrregularRep' stores primitive data whose structure arrays count
+      -- _scalars_ - @c@ per element for a non-scalar element type @b=[c]t@. We
+      -- take a dense input rep as the descriptor and convert its scalar-unit
+      -- structure to element units: sizes and offsets divided by that input's
+      -- @c@, flags subsampled with stride @c@ (all no-ops when @c=1@). Each
+      -- input's flat data is reshaped into @[m]b@ rows.
+      row_types <- mapM (fmap rowType . lookupInputType inps) names
+      (desc, desc_c) <- descriptor $ zip reps row_types
+      ws_S <- scaleSizesDown lvl desc_c (irregularS desc)
+      ws_O <- scaleSizesDown lvl desc_c (irregularO desc)
+      ws_F <- subsampleFlags lvl desc_c (irregularF desc)
+      m <- arraySize 0 <$> lookupType ws_F
+      names' <- sequence $ zipWith3 (toRows m) reps names row_types
+      pure (ws_F, ws_O, ws_S, names', Dense)
   where
     isRegular (Regular _) = True
     isRegular _ = False
@@ -472,23 +483,31 @@ prepareSegOpInputs lvl segments env inps w reps names hasNoFreeVariant
     getData (Irregular rep) = irregularD rep
     getData _ = error "prepareSegOpInputs: impossible"
 
-    findOrMakeDense rs =
-      case [rep | Irregular rep <- rs, irregularK rep == Dense] of
-        rep : _ -> pure rep
+    -- A dense input rep to use as the descriptor, and its element type's inner
+    -- size @c@. Any dense irregular input serves, since all inputs share the
+    -- SOAC's segmentation.
+    descriptor rs =
+      case [(rep, t) | (Irregular rep, t) <- rs, irregularK rep == Dense] of
+        (rep, t) : _ -> pure (rep, innerSize t)
         [] ->
-          case [rep | Irregular rep <- rs] of
-            rep : _ -> ensureDenseIrregular lvl "segop_desc" rep
+          case [(rep, t) | (Irregular rep, t) <- rs] of
+            (rep, t) : _ -> do
+              rep' <- ensureDenseIrregular lvl "segop_desc" rep
+              pure (rep', innerSize t)
             [] -> error "prepareSegOpInputs: impossible"
+    innerSize t = product $ map pe64 $ arrayDims t
 
-    normalise m rep v =
-      case rep of
-        Regular v' ->
-          flattenRegularToRows segments m v'
-        Irregular ir
-          | irregularK ir == Dense ->
-              pure $ irregularD ir
-          | otherwise ->
-              irregularD <$> ensureDenseIrregular lvl (baseName v <> "_dense") ir
+    -- Reshape an input's data into @m@ rows of the (possibly non-scalar) element
+    -- type. For an irregular input the flat scalar data is grouped into rows;
+    -- for a regular input the enclosing dimensions are collapsed.
+    toRows m (Regular v') _ _ =
+      flattenRegularToRows segments m v'
+    toRows m (Irregular ir) v row_t = do
+      d <- irregularD <$> ensureDenseIrregular lvl (baseName v <> "_dense") ir
+      d_t <- lookupType d
+      letExp (baseName v <> "_rows") . BasicOp $
+        Reshape d $
+          reshapeAll (arrayShape d_t) (Shape [m] <> arrayShape row_t)
 
 flattenRegularToRows :: Segments -> SubExp -> VName -> FlattenM VName
 flattenRegularToRows segments m v = do
@@ -1370,12 +1389,14 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
 -- are @c@ scalars per @b@-element ('flatMapElemsPer'), so the two notions of
 -- "size" differ by a factor of @c@.
 --
--- The flattening rules therefore convert between the two: scalar-unit sizes are
--- divided by @c@ to recover 'FlatMap's @b@-unit metadata, and the nested rule
--- additionally reshapes each data array back to @[m]b@. That last step makes the
--- data reps carry a non-primitive 'irregularD' - a deliberate exception to the
--- otherwise-universal "'irregularD' is always primitive" invariant, relying on
--- these results only being consumed by paths that tolerate it.
+-- The flattening rules therefore convert between the two: the metadata that
+-- 'FlatMap' surfaces directly (the total @m@, and the shape, flag, and offset
+-- arrays) is put in @b@-units by dividing scalar-unit sizes by @c@. The data
+-- arrays themselves, however, keep their natural primitive 'IrregularRep' with
+-- scalar-unit structure - the "'irregularD' is always primitive" invariant is
+-- preserved. A consumer of such a data array reconstructs the @b@-element rows
+-- from the primitive rep: 'onMapIrregularInputArr' does so for a plain map, and
+-- 'prepareSegOpInputs' for a segmented redomap/scan.
 
 -- | The number of scalars per element of a 'FlatMap' lambda's (first) value
 -- result; see Note [FlatMap element counting].
@@ -1383,15 +1404,32 @@ flatMapElemsPer :: Lambda SOACS -> TPrimExp Int64 VName
 flatMapElemsPer lam =
   product $ map pe64 $ arrayDims $ rowType $ head $ lambdaReturnType lam
 
--- | Convert a per-segment size array from scalar units to @b@-element units,
--- dividing each entry by 'flatMapElemsPer' (a no-op for a scalar element type).
-flatMapToElemUnits :: SegLevel -> TPrimExp Int64 VName -> VName -> FlattenM VName
-flatMapToElemUnits lvl elems_per arr = do
+-- | Divide each entry of a per-segment size (or offset) array by the given
+-- factor, converting scalar-unit counts to element-unit counts. A no-op when the
+-- factor is statically 1 (a scalar element type). See Note [FlatMap element
+-- counting].
+scaleSizesDown :: SegLevel -> TPrimExp Int64 VName -> VName -> FlattenM VName
+scaleSizesDown _ elems_per arr | elems_per == 1 = pure arr
+scaleSizesDown lvl elems_per arr = do
   arr_t <- lookupType arr
-  letExp "flatmap_elem_units" <=< segMap lvl (arrayDims arr_t) $ \gtids -> do
+  letExp "scaled_sizes" <=< segMap lvl (arrayDims arr_t) $ \gtids -> do
     x <- letSubExp "x" =<< eIndex arr (map eSubExp gtids)
     x_b <- letSubExp "x_b" =<< toExp (pe64 x `div` elems_per)
     pure [subExpRes x_b]
+
+-- | Subsample a scalar-unit flag array to element units by taking every
+-- @elems_per@-th entry, giving one flag per element. A no-op when the factor is
+-- statically 1. This reuses the (already-built) flag array rather than
+-- recomputing segment starts with a segmented scan. See Note [FlatMap element
+-- counting].
+subsampleFlags :: SegLevel -> TPrimExp Int64 VName -> VName -> FlattenM VName
+subsampleFlags _ elems_per arr | elems_per == 1 = pure arr
+subsampleFlags lvl elems_per arr = do
+  big_m <- arraySize 0 <$> lookupType arr
+  m <- letSubExp "flags_m" =<< toExp (pe64 big_m `div` elems_per)
+  letExp "elem_flags" <=< segMap lvl (MkSolo m) $ \(MkSolo i) -> do
+    flag <- letSubExp "flag" =<< eIndex arr [toExp $ pe64 i * elems_per]
+    pure [subExpRes flag]
 
 -- | Flattening rule for a top-level 'FlatMap', which is a very thin wrapper
 -- over just flattening the lambda. The result produced by 'FlatMap' corresponds
@@ -1446,11 +1484,9 @@ transformFlatMap ops pat w arrs lam = do
       big_m <- arraySize 0 <$> lookupType (irregularD ir0)
       m <- letSubExp "flatmap_m" =<< toExp (pe64 big_m `div` elems_per)
       letBindNames [m_name] $ BasicOp $ SubExp m
-      s <- flatMapToElemUnits lvl elems_per (irregularS ir0)
-      o <- flatMapToElemUnits lvl elems_per (irregularO ir0)
-      flags <- letExp "flatmap_F" <=< segMap lvl (MkSolo m) $ \(MkSolo i) -> do
-        flag <- letSubExp "flag" =<< eIndex (irregularF ir0) [toExp $ pe64 i * elems_per]
-        pure [subExpRes flag]
+      s <- scaleSizesDown lvl elems_per (irregularS ir0)
+      o <- scaleSizesDown lvl elems_per (irregularO ir0)
+      flags <- subsampleFlags lvl elems_per (irregularF ir0)
       -- The per-segment metadata (outer size @w@): shape and offset arrays.
       bindReshape s_name s (Shape [w])
       bindReshape o_name o (Shape [w])
@@ -1527,7 +1563,7 @@ transformFlatMapNested ops segments env inps res aux w arrs lam = do
         -- is regular (the fully uniform case), it is the constant inner size,
         -- replicated across the segments.
         s_flag <- case first_data of
-          Irregular ir -> flatMapToElemUnits lvl elems_per (irregularS ir)
+          Irregular ir -> scaleSizesDown lvl elems_per (irregularS ir)
           Regular d -> do
             d_t <- lookupType d
             let inner = product $ map pe64 $ drop (segmentsRank segments) $ arrayDims d_t
@@ -1578,21 +1614,14 @@ transformFlatMapNested ops segments env inps res aux w arrs lam = do
             Reshape flag_D0 (reshapeAll (arrayShape flag_D0_t) (Shape [m_flag]))
         let flag_rep = Irregular $ IrregularRep s_flag flag_F flag_O flag_D Dense
 
-        -- The data arrays (results 4..). The inner-map machinery flattened each
-        -- to primitives with scalar-unit segment sizes; for a non-scalar element
-        -- type we restore the @b@-element structure by reshaping the data to
-        -- @[m]b@ and giving it the same (b-unit) segmentation as the flag array.
-        data_reps' <- forM (zip data_reps (lambdaReturnType lam)) $ \(rp, ret_t) ->
-          case (rp, arrayDims $ rowType ret_t) of
-            (Irregular ir, inner@(_ : _)) -> do
-              d_t <- lookupType (irregularD ir)
-              new_D <-
-                letExp "flatmap_data" . BasicOp $
-                  Reshape (irregularD ir) (reshapeAll (arrayShape d_t) (Shape (m_flag : inner)))
-              pure $ Irregular $ IrregularRep s_flag flag_F flag_O new_D Dense
-            _ -> pure rp
-
-        let all_reps = n_rep : shape_rep : flag_rep : offset_rep : data_reps'
+        -- The data arrays (results 4..). The inner-map machinery already
+        -- produced, for each, an 'IrregularRep' with primitive (scalar-unit)
+        -- data and matching scalar-unit structure arrays. These are exactly the
+        -- reps for the source @[m]b@ data arrays, so we pass them through
+        -- unchanged; any consumer reconstructs the @b@-element rows from the
+        -- primitive rep via the ordinary irregular-input machinery. See Note
+        -- [FlatMap element counting].
+        let all_reps = n_rep : shape_rep : flag_rep : offset_rep : data_reps
         insertRepsM (zip (map distResTag res) all_reps) env
       _ -> error "transformFlatMapNested: FlatMap with no results"
 
