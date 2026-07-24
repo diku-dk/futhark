@@ -518,8 +518,15 @@ liftRegFunDef funHasParallelism funSizeParams const_scope fd = do
   (body', needs) <-
     runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
       buildBody_ . freshenResult fparams'' $
-        -- If there is an existential return size then the result will not be regular
-        -- therefore, we are not handling this simillar to the way we handle parameters.
+        -- In the current setup, a result with an existential size will not be
+        -- classified as regular. We therefore do not handle existential result
+        -- sizes in the same way as invariant size parameters.
+        --
+        -- XXX: I think function lifting makes it more important to classify invariant
+        -- results in bodies. Function bodies can produce values that are
+        -- invariant to the map nest, but at this point there is no opportunity to
+        -- hoist them out of the nest.  
+
         liftRegFunBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms $
           bodyResult body
   let name = liftRegFunName $ funDefName fd
