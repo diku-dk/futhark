@@ -1030,7 +1030,9 @@ intrinsics =
                   ]
                   $ RetType [m] . Scalar . tupleRecord
                   $ [ Array Unique (shape [n]) (Prim $ Signed Int64),
-                      array_b Nonunique $ shape [m]
+                      Array Unique (shape [m]) (Prim Bool),
+                      Array Unique (shape [n]) (Prim $ Signed Int64),
+                      array_b Unique $ shape [m]
                     ]
               )
             ]

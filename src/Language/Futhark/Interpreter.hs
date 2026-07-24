@@ -1897,17 +1897,24 @@ initialCtx =
         pure $ ValueFun $ \f -> pure . ValueFun $ \sizes -> pure . ValueFun $ \xs ->
           case unfoldFunType t of
             ([_, _, _], ret_t)
-              | Just [_, res_t] <- isTupleRecord ret_t -> do
+              | Just [_, _, _, res_t] <- isTupleRecord ret_t -> do
                   rowshape <- typeShape <$> evalTypeFully (stripArray 1 res_t)
                   yss <-
                     zipWithM
                       (apply2 noLoc mempty f)
                       (snd $ fromArray sizes)
                       (snd $ fromArray xs)
-                  let sizeOf = ValuePrim . SignedValue . Int64Value . genericLength . snd . fromArray
+                  -- The metadata (shape/flag/offset) is derived from the
+                  -- per-element output sizes; see the 'flatmap' documentation.
+                  let seg_sizes = map (genericLength . snd . fromArray) yss :: [Int64]
+                      offsets = init $ scanl (+) 0 seg_sizes
+                      flag s = if s == 0 then [] else True : replicate (fromIntegral s - 1) False
+                      mkI64 = ValuePrim . SignedValue . Int64Value
                   pure $
                     toTuple
-                      [ toArray' ShapeLeaf $ map sizeOf yss,
+                      [ toArray' ShapeLeaf $ map mkI64 seg_sizes,
+                        toArray' ShapeLeaf $ map (ValuePrim . BoolValue) $ concatMap flag seg_sizes,
+                        toArray' ShapeLeaf $ map mkI64 offsets,
                         toArray' rowshape $ concatMap (snd . fromArray) yss
                       ]
             _ ->

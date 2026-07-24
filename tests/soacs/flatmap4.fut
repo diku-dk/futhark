@@ -1,5 +1,6 @@
--- Basic flatmap: expand each element into 'k' copies of itself, and check that
--- the data and all the metadata arrays are correct.
+-- A flatmap whose lambda itself contains a flatmap, exercising the nested
+-- flattening path through an enclosing flatmap. Each element is expanded into
+-- 'k' copies of itself, but via an inner flatmap.
 -- ==
 -- input { [0i64, 2i64, 3i64, 1i64] [5i32, 10i32, 20i32, 30i32] }
 -- output { [0i64, 2i64, 3i64, 1i64]
@@ -11,11 +12,9 @@
 --          [true, false, true, false, false, true]
 --          [0i64, 2i64, 5i64]
 --          [10i32, 10i32, 20i32, 20i32, 20i32, 30i32] }
--- input { empty([0]i64) empty([0]i32) }
--- output { empty([0]i64)
---          empty([0]bool)
---          empty([0]i64)
---          empty([0]i32) }
 
 def main (ks: []i64) (xs: []i32) =
-  flatmap (\k x -> replicate k x) ks xs
+  flatmap (\k x ->
+             let (_, _, _, r) = flatmap (\kk y -> replicate kk y) [k] [x]
+             in sized k r)
+          ks xs

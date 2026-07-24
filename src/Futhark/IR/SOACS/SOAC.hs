@@ -87,13 +87,22 @@ data SOAC rep
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
-  | -- | Irregular map where the results are implicitly concatenated. The first
-    -- value returned is an integer denoting the size of the concatenated
-    -- arrays, then an array of element type @i64@ of the same size as the size
-    -- of the input arrays and which sums to the size of the concatenated
-    -- arrays. After that comes one array per array returned by the lambda,
-    -- corresponding to the concatenated arrays. The return size of the lambda
-    -- must be expressible in terms of the lambda parameters.
+  | -- | Irregular map where the results are implicitly concatenated. For input
+    -- of length @n@ returns the following:
+    --
+    -- * An integer @m@ denoting the size of the data array.
+    --
+    -- * The "shape array" of type @[n]i64@, giving the size of each segment.
+    --   This array sums to @m@.
+    --
+    -- * The "flag array" of type @[m]bool@, indicating for each element when a
+    --   new segment begins.
+    --
+    -- * The "offset array" of type @[n]i64@, indicating for each segment where
+    --   its values begin in the data array.
+    --
+    -- * Finally the data arrays; one per return value of the lambda, of outer
+    --   size @[m]@
     FlatMap SubExp [VName] (Lambda rep)
   deriving (Eq, Ord, Show)
 
@@ -544,7 +553,11 @@ soacType (Hist _ _ ops _bucket_fun) = staticShapes $ do
 soacType (Screma w _arrs form) =
   staticShapes $ scremaType w form
 soacType (FlatMap w _ lam) =
-  [Prim int64, arrayOfRow (Prim int64) (Free w)]
+  [ Prim int64,
+    arrayOfRow (Prim int64) (Free w),
+    arrayOfRow (Prim Bool) (Ext 0),
+    arrayOfRow (Prim int64) (Free w)
+  ]
     ++ map (`setOuterSize` Ext 0) (staticShapes $ lambdaReturnType lam)
 
 instance TypedOp SOAC where
@@ -659,7 +672,7 @@ instance IsOp SOAC where
       (map depsOf' args)
       <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
   opDependencies (FlatMap w arrs lam) =
-    [mempty, mempty] ++ lambdaDependencies mempty lam (depsOfArrays w arrs)
+    replicate 4 mempty ++ lambdaDependencies mempty lam (depsOfArrays w arrs)
   opDependencies (Screma w arrs (ScremaForm map_lam scans reds post_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $
@@ -774,6 +787,7 @@ typeCheckSOAC (FlatMap w arrs lam) = do
   TC.require (Prim int64) w
   arrs' <- TC.checkSOACArrayArgs w arrs
   TC.checkLambda lam arrs'
+-- TODO: type check the lambda properly.
 typeCheckSOAC (Stream size arrexps accexps lam) = do
   TC.require (Prim int64) size
   accargs <- mapM TC.checkArg accexps

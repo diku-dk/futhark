@@ -218,8 +218,10 @@ transformSOAC _ _ VJP {} =
 transformSOAC _ _ WithVJP {} =
   error "transformSOAC: unhandled WithVJP"
 transformSOAC pat _ (FlatMap w arrs lam) = do
-  -- Sequentialise the FlatMap itself (but not its contents) via the
-  -- first-order transform, then transform the resulting stms.
+  -- Sequentialise the FlatMap itself (but not its contents) via the first-order
+  -- transform, then transform the resulting stms. This does lose us
+  -- parallelism, but hopefully it is not often the case that the FlatMap is the
+  -- only source of parallelism.
   soacs_scope <- castScope <$> askScope
   flatmap_stms <-
     flip runBuilderT_ soacs_scope $ FOT.transformFlatMap pat w arrs lam

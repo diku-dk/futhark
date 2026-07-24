@@ -22,6 +22,8 @@ module Futhark.Pass.Flatten.Builtins
     genScatterND,
     genShapeIota,
     exScanAndSum,
+    genExPrefixSum,
+    genSegPrefixSum,
     doRepIota,
     doSegIota,
     doPrefixSum,
@@ -722,9 +724,7 @@ genRepIota lvl ks = do
     letExp "starts" <=< genScatter lvl zeroes n $ \gtid -> do
       i <- letExp "i" =<< eIndex is [eSubExp gtid]
       pure (i, gtid)
-  flags <- letExp "flags" <=< genTabulate lvl m $ \i -> do
-    x <- letSubExp "x" =<< eIndex starts [eSubExp i]
-    letTupExp' "nonzero" =<< toExp (pe64 x .>. 0)
+  flags <- genFlags lvl m offsets
   res <- genSegPrefixSum lvl "res" flags starts
   pure (flags, offsets, res)
   where
