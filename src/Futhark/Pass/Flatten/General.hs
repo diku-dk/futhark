@@ -62,6 +62,7 @@ import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.Monad
 import Futhark.Tools
 import Futhark.Transform.Rename (renameExp)
+import Futhark.Util (mapAccumLM)
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, rem)
 
@@ -406,8 +407,8 @@ distributeAndFlattenBody ::
   FlattenM [ResRep]
 distributeAndFlattenBody ops segments desc env inps res body = do
   scope <- askScope
-  let (inps_local, env_local, _) = localiseInputs env inps
-      (inps_dist, dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps_local body
+  (inps_local, env_local, _) <- localiseInputs env inps
+  let (inps_dist, dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps_local body
   lifted_res <- liftBodyWithDistResults ops segments inps_dist env_local dstms res (bodyResult body)
   lifted_vs <- mapM (letExp desc <=< toExp . resSubExp) lifted_res
   pure $ distResultsToResReps res lifted_vs
@@ -743,21 +744,21 @@ resultToResReps types results =
 
 -- helper to not mess up the tags when generating new ones for the loop parameters
 -- probably won't be used in future
-localiseInputs :: DistEnv -> DistInputs -> (DistInputs, DistEnv, Int)
-localiseInputs env_outer inps =
+localiseInputs :: DistEnv -> DistInputs -> FlattenM (DistInputs, DistEnv, Int)
+localiseInputs env_outer inps = do
   let step (i, env_acc) (v, inp) =
         case inp of
           DistInputFree arr t ->
-            ((i, env_acc), (v, DistInputFree arr t))
-          DistInput oldrt t ->
+            pure ((i, env_acc), (v, DistInputFree arr t))
+          DistInput oldrt t -> do
             let newrt = ResTag i
                 rep = resVar oldrt env_outer
-                env_acc' = insertRep newrt rep env_acc
-             in ((i + 1, env_acc'), (v, DistInput newrt t))
+            env_acc' <- insertRepM newrt rep env_acc
+            pure ((i + 1, env_acc'), (v, DistInput newrt t))
 
-      ((next, env_local), inps_local) =
-        L.mapAccumL step (0, mempty) inps
-   in (inps_local, env_local, next)
+  ((next, env_local), inps_local) <-
+    mapAccumLM step (0, mempty) inps
+  pure (inps_local, env_local, next)
 
 -- | Replicate an array to insert new inner dimensions  after the
 -- existing segment dimensions.

@@ -213,19 +213,17 @@ distributedLoopBody ops segments num_segments loop_scope inputs env res body = d
 
 -- | Make the original loop parameters available as distribution
 -- inputs for the loop body, mapped to their lifted representations.
-loopBodyInputs :: DistEnv -> DistInputs -> [FParam SOACS] -> [ResRep] -> (DistInputs, DistEnv)
-loopBodyInputs env inps old_loop_params lifted_loop_reps =
-  let (inps_local, env_local, next) = localiseInputs env inps
-      loop_param_inputs =
+loopBodyInputs :: DistEnv -> DistInputs -> [FParam SOACS] -> [ResRep] -> FlattenM (DistInputs, DistEnv)
+loopBodyInputs env inps old_loop_params lifted_loop_reps = do
+  (inps_local, env_local, next) <- localiseInputs env inps
+  let loop_param_inputs =
         zipWith
           (\p j -> (paramName p, DistInput (ResTag j) (paramType p)))
           old_loop_params
           [next ..]
       loop_param_reps =
         zipWith (\j rep -> (ResTag j, rep)) [next ..] lifted_loop_reps
-   in ( inps_local <> loop_param_inputs,
-        insertReps loop_param_reps env_local
-      )
+  (inps_local <> loop_param_inputs,) <$> insertRepsM loop_param_reps env_local
 
 -- transform a for-loop with a variant iteration count into a while-loop
 transformForToWhile ::
@@ -319,7 +317,7 @@ transformForToWhile ops segments env inps res aux merge i it n body = do
           (map (SubExpRes mempty . Var) loop_old_out_vs)
 
   reps <- distributeAndFlattenBody ops segments "for_variant_res" env inps res synthetic_body
-  pure $ insertReps (zip (map distResTag res) reps) env
+  insertRepsM (zip (map distResTag res) reps) env
 
 transformLoop ::
   FlattenOps ->
@@ -343,8 +341,8 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
 
       let lifted_loop_params' = concat lifted_loop_params
           lifted_init' = concat lifted_init
-          (loop_new_inputs, loop_env_local) =
-            loopBodyInputs env inps old_loop_params lifted_loop_reps
+      (loop_new_inputs, loop_env_local) <-
+        loopBodyInputs env inps old_loop_params lifted_loop_reps
 
       let i_param = Param mempty i (Prim (IntType it))
           build_scope = scopeOfFParams lifted_loop_params' <> scopeOfLParams [i_param]
@@ -430,7 +428,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
           $ letTupExp "loop_res_out" loop_exp_gpu
 
       let out_reps = loopResultToResReps res loop_out_vs
-      pure $ insertReps (zip (map distResTag res) out_reps) env
+      insertRepsM (zip (map distResTag res) out_reps) env
 --
 transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) = do
   -- TODO: Consider updating the active segment so we don't go over w
@@ -447,8 +445,8 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
 
   let lifted_loop_params' = concat lifted_loop_params
       lifted_init' = concat lifted_init
-      (loop_new_inputs, loop_env_local) =
-        loopBodyInputs env inps old_loop_params lifted_loop_reps
+  (loop_new_inputs, loop_env_local) <-
+    loopBodyInputs env inps old_loop_params lifted_loop_reps
 
   -- find cond_lifted_param in old_lifted_loop_params to get the lifted_loop_reps
   let maybe_cond = lookup cond (zip (map paramName old_loop_params) (zip lifted_loop_reps lifted_init))
@@ -461,7 +459,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
       let loop_exp_gpu = Loop (zip lifted_loop_params' lifted_init') (WhileLoop cond) loop_body_gpu
       loop_out_vs <- certifying (distCerts inps aux env) $ letTupExp "loop_res_out" loop_exp_gpu
       let out_reps = loopResultToResReps res loop_out_vs
-      pure $ insertReps (zip (map distResTag res) out_reps) env
+      insertRepsM (zip (map distResTag res) out_reps) env
     Just (cond_lifted_rep, cond_init) -> do
       let [cond_init_se] = cond_init
 
@@ -637,6 +635,6 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
               loop_body_gpu
       let loop_out_vs' = L.init loop_out_vs
       let out_reps = loopResultToResReps res loop_out_vs'
-      pure $ insertReps (zip (map distResTag res) out_reps) env
+      insertRepsM (zip (map distResTag res) out_reps) env
   where
     lvl = flattenSegLevel ops

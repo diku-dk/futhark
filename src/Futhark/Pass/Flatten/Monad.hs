@@ -25,10 +25,9 @@ module Futhark.Pass.Flatten.Monad
     demandBuiltin,
 
     -- * Insertions
-    insertRep,
-    insertReps,
-    insertIrregulars,
-    insertIrregular,
+    insertRepM,
+    insertRepsM,
+    insertIrregularM,
     insertRegulars,
 
     -- * Various
@@ -50,6 +49,16 @@ import Futhark.IR.SOACS (SOACS)
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Tools
 import Prelude hiding (div, rem)
+
+-- | If true, 'sanityCheck' blocks are evaluated.
+doSanityCheck :: Bool
+doSanityCheck = True
+
+-- | Run a sanity-check that may verify invariants. The idea is that these can
+-- be disabled without affecting the correctness of the pass, although there is
+-- no constructive guarantee that no important effects take place in here.
+sanityCheck :: (Monad m) => m () -> m ()
+sanityCheck = when doSanityCheck
 
 -- Note [Representation of Flat Arrays]
 --
@@ -144,27 +153,42 @@ newtype DistEnv = DistEnv {distResMap :: M.Map ResTag ResRep}
 insertRep :: ResTag -> ResRep -> DistEnv -> DistEnv
 insertRep rt rep env = env {distResMap = M.insert rt rep $ distResMap env}
 
+insertRepM :: ResTag -> ResRep -> DistEnv -> FlattenM DistEnv
+insertRepM rt rep env = do
+  sanityCheck $ do
+    case rep of
+      Regular _ -> pure ()
+      Irregular (IrregularRep shape flags offsets data_ _kind) -> do
+        shape_t <- lookupType shape
+        flags_t <- lookupType flags
+        data_t <- lookupType data_
+        offsets_t <- lookupType offsets
+
+        unless (arrayRank flags_t == 1 && elemType flags_t == Bool) $
+          error $
+            "Invalid flag array type: " <> prettyString flags_t
+        unless (arrayRank offsets_t == 1 && elemType offsets_t == int64) $
+          error $
+            "Invalid offsets array type: " <> prettyString offsets_t
+        unless (arrayRank shape_t == 1 && elemType shape_t == int64) $
+          error $
+            "Invalid shape array type: " <> prettyString shape_t
+        when (arrayRank data_t /= 1) $
+          error $
+            "Invalid data array array: " <> prettyString data_t
+  pure $ insertRep rt rep env
+
+insertRepsM :: [(ResTag, ResRep)] -> DistEnv -> FlattenM DistEnv
+insertRepsM =
+  flip $ foldM (flip $ uncurry insertRepM)
+
 insertReps :: [(ResTag, ResRep)] -> DistEnv -> DistEnv
 insertReps = flip $ foldl (flip $ uncurry insertRep)
 
-insertIrregular :: VName -> VName -> VName -> ResTag -> VName -> IrregularKind -> DistEnv -> DistEnv
-insertIrregular ns flags offsets rt elems kind env =
-  let rep = Irregular $ IrregularRep ns flags offsets elems kind
-   in insertRep rt rep env
-
-insertIrregulars :: VName -> VName -> VName -> [(ResTag, VName)] -> IrregularKind -> DistEnv -> DistEnv
-insertIrregulars ns flags offsets bnds kind env =
-  let (tags, elems) = unzip bnds
-      mkRep elem_arr =
-        Irregular $
-          IrregularRep
-            { irregularS = ns,
-              irregularF = flags,
-              irregularO = offsets,
-              irregularD = elem_arr,
-              irregularK = kind
-            }
-   in insertReps (zip tags $ map mkRep elems) env
+insertIrregularM :: VName -> VName -> VName -> ResTag -> VName -> IrregularKind -> DistEnv -> FlattenM DistEnv
+insertIrregularM shape flags offsets rt data_ kind env = do
+  let rep = Irregular $ IrregularRep shape flags offsets data_ kind
+  insertRepM rt rep env
 
 insertRegulars :: [ResTag] -> [VName] -> DistEnv -> DistEnv
 insertRegulars rts xs =

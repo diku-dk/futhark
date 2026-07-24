@@ -384,7 +384,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           (flags, offsets, _elems) <- doRepIota lvl ns
           let resultType = Array (elemType row_type) (Shape [intConst Int64 0]) NoUniqueness
           elems <- letExp "arraylit_empty_elems" =<< eBlank resultType
-          pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
+          insertIrregularM ns flags offsets (distResTag res) elems Dense env
     ArrayLit vs row_type
       | not $ any (isVariant inps) (arrayDims row_type) -> do
           res_v <-
@@ -475,7 +475,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
               elems_blank
               $ zip [0 ..] vs_reparr
 
-          pure $ insertIrregular full_size full_flags full_offset (distResTag res) elems Dense env
+          insertIrregularM full_size full_flags full_offset (distResTag res) elems Dense env
     ArrayVal vs row_type -> do
       base_v <- letExp "arraylit_base" $ BasicOp $ ArrayVal vs row_type
       res_v <- letExp "arraylit_reg" $ BasicOp $ Replicate (segmentsShape segments) (Var base_v)
@@ -493,7 +493,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
               elems' <-
                 certifying (distCerts inps aux env) . letExp (baseName v <> "_opaque") $
                   BasicOp (Opaque op (Var (irregularD irreg)))
-              pure $ insertRep (distResTag res) (Irregular irreg {irregularD = elems'}) env
+              insertRepM (distResTag res) (Irregular irreg {irregularD = elems'}) env
       | otherwise ->
           scalarCase
     Reshape arr reshape
@@ -530,7 +530,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
               pure $ insertRegulars [distResTag res] [arr'] env
       | otherwise -> do
           irreg_v <- getIrregRep lvl segments env inps arr
-          pure $ insertRep (distResTag res) (Irregular irreg_v) env
+          insertRepM (distResTag res) (Irregular irreg_v) env
     Index arr slice
       | isRegularDistResult res,
         not (any (isVariant inps) slice) -> do
@@ -586,7 +586,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
             auxing aux $
               fmap (subExpsRes . pure) . letSubExp "v"
                 =<< eIndex arr (map toExp slice')
-          pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
+          insertIrregularM ns flags offsets (distResTag res) elems Dense env
     FlatIndex arr flat_slice
       | isRegularDistResult res,
         not (any (isVariant inps) flat_slice) -> do
@@ -658,7 +658,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
             auxing aux $
               fmap (subExpsRes . pure) . letSubExp "v"
                 =<< eIndex arr [toExp flat_i]
-          pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
+          insertIrregularM ns flags offsets (distResTag res) elems Dense env
     Iota n x s it
       | isRegularDistResult res,
         not (isVariant inps n),
@@ -675,7 +675,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
         oneIsh s -> do
           ns <- dataArr lvl segments env inps n
           (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota lvl ns
-          pure $ insertIrregular ns flags offsets (distResTag res) elems Dense env
+          insertIrregularM ns flags offsets (distResTag res) elems Dense env
     Iota n x s it -> do
       ns <- dataArr lvl segments env inps n
       xs <- dataArr lvl segments env inps x
@@ -692,7 +692,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
             ~*~ primExpFromSubExp (IntType it) s'
-      pure $ insertIrregular ns res_F res_O (distResTag res) res_D' Dense env
+      insertIrregularM ns res_F res_O (distResTag res) res_D' Dense env
     Concat d arr shp -> do
       arr_ts <- mapM (lookupInputType inps) (NE.toList arr)
       let inputShapeUniform t =
@@ -722,7 +722,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
             0 -> concatIrreg lvl segments env ns reparr
             d' -> do
               concatIrregAlongDim lvl segments env ns reparr arr_ts inps d'
-          pure $ insertRep (distResTag res) (Irregular rep') env
+          insertRepM (distResTag res) (Irregular rep') env
 
     --  Unifrom Replicate
     Replicate (Shape dims) se
@@ -736,14 +736,14 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       ns <- dataArr lvl segments env inps n
       rep <- getIrregRep lvl segments env inps v
       rep' <- replicateIrreg lvl segments env ns (baseName v) rep
-      pure $ insertRep (distResTag res) (Irregular rep') env
+      insertRepM (distResTag res) (Irregular rep') env
     Replicate (Shape [n]) (Constant v) -> do
       ns <- dataArr lvl segments env inps n
       (res_F, res_O, res_D) <-
         certifying (distCerts inps aux env) $ doSegIota lvl ns
       w <- arraySize 0 <$> lookupType res_D
       res_D' <- letExp "rep_const" $ BasicOp $ Replicate (Shape [w]) (Constant v)
-      pure $ insertIrregular ns res_F res_O (distResTag res) res_D' Dense env
+      insertIrregularM ns res_F res_O (distResTag res) res_D' Dense env
     Replicate (Shape dims) (Constant v) -> do
       dim_arrs <- mapM (dataArr lvl segments env inps) dims
       seg_number <- arraySize 0 <$> lookupType (head dim_arrs)
@@ -755,7 +755,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
         certifying (distCerts inps aux env) $ doSegIota lvl mul_dims
       w <- arraySize 0 <$> lookupType res_D
       res_D' <- letExp "rep_const" $ BasicOp $ Replicate (Shape [w]) (Constant v)
-      pure $ insertIrregular mul_dims res_F res_O (distResTag res) res_D' Dense env
+      insertIrregularM mul_dims res_F res_O (distResTag res) res_D' Dense env
     Replicate (Shape []) (Var v) ->
       case lookup v inps of
         Just (DistInputFree v' _) -> do
@@ -771,7 +771,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
                 letExp name . BasicOp $
                   Replicate mempty (Var $ irregularD r)
               let rep = Irregular $ r {irregularD = elems_copy}
-              pure $ insertRep (distResTag res) rep env
+              insertRepM (distResTag res) rep env
             Regular v' -> do
               v'' <-
                 letExp (baseName v' <> "_copy") . BasicOp $
@@ -791,7 +791,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
         pure [subExpRes n]
       rep <- getIrregRep lvl segments env inps v
       rep' <- replicateIrreg lvl segments env mul_dims (baseName v) rep
-      pure $ insertRep (distResTag res) (Irregular rep') env
+      insertRepM (distResTag res) (Irregular rep') env
     Manifest v perm
       | isRegularDistResult res -> do
           t <- lookupInputType inps v
@@ -812,11 +812,10 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           elems_copy <-
             letExp (baseName (irregularD irreg_dense) <> "_manifest") . BasicOp $
               Replicate mempty (Var $ irregularD irreg_dense)
-          pure $
-            insertRep
-              (distResTag res)
-              (Irregular $ irreg_dense {irregularD = elems_copy})
-              env
+          insertRepM
+            (distResTag res)
+            (Irregular $ irreg_dense {irregularD = elems_copy})
+            env
     Update safety as slice se
       -- Uniform Update
       | Just as_t <- distInputType <$> lookup as inps,
@@ -916,7 +915,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
                 o' <- letSubExp "o" =<< eIndex offsets [eSubExp seg_i]
                 i <- letExp "i" =<< toExp (pe64 o' + flat_i)
                 pure (i, Constant c)
-          pure $ insertIrregular shape flags offsets (distResTag res) elems' Dense env
+          insertIrregularM shape flags offsets (distResTag res) elems' Dense env
       | otherwise ->
           error "Flattening update: destination is not input."
     FlatUpdate as flat_slice v
@@ -1027,7 +1026,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
             -- Index to write `v'` at
             i <- letExp "i" =<< toExp (pe64 o' + flat_i)
             pure (i, v')
-          pure $ insertIrregular shape flags offsets (distResTag res) elems' Dense env
+          insertIrregularM shape flags offsets (distResTag res) elems' Dense env
       | otherwise ->
           error "Flattening update: destination is not input."
     Rearrange v perm
@@ -1051,7 +1050,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           rep' <-
             certifying (distCerts inps aux env) $
               rearrangeIrreg lvl segments env inps t perm irreg
-          pure $ insertRep (distResTag res) (Irregular rep') env
+          insertRepM (distResTag res) (Irregular rep') env
     Scratch pt dims
       | not $ any (isVariant inps) dims -> do
           -- All dims are invariant result is regular across segments.
@@ -1064,7 +1063,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           (_n, offsets, m) <- exScanAndSum lvl ns
           flags <- genFlags lvl m offsets
           res_D <- letExp "scratch_D" $ BasicOp $ Scratch pt [m]
-          pure $ insertIrregular ns flags offsets (distResTag res) res_D Dense env
+          insertIrregularM ns flags offsets (distResTag res) res_D Dense env
       | otherwise -> do
           dim_arrs <- mapM (dataArr lvl segments env inps) dims
           w <- arraySize 0 <$> lookupType (head dim_arrs)
@@ -1075,7 +1074,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           (_n, offsets, m) <- exScanAndSum lvl ns
           flags <- genFlags lvl m offsets
           res_D <- letExp "scratch_D" $ BasicOp $ Scratch pt [m]
-          pure $ insertIrregular ns flags offsets (distResTag res) res_D Dense env
+          insertIrregularM ns flags offsets (distResTag res) res_D Dense env
     UpdateAcc {} ->
       -- TODO: handle irregular case, which is however rare, and also needs
       -- modifications to WithAcc. The only irregularity that is possible is in

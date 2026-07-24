@@ -162,7 +162,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
     if nonuniform
       then mapM mkNonuniformWithAccRep (zip3 withacc_out_vs_wo non_uniform_reps distres_withacc)
       else pure $ map Regular withacc_out_vs_wo
-  pure $ insertReps (zip (map distResTag $ distres_withacc ++ distres_normal) (out_reps_withacc ++ out_reps_normal)) env
+  insertRepsM (zip (map distResTag $ distres_withacc ++ distres_normal) (out_reps_withacc ++ out_reps_normal)) env
   where
     newAccLamParams ps = do
       let (cert_ps, acc_ps) = splitAt num_accs ps

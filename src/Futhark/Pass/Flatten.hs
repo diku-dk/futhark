@@ -105,7 +105,7 @@ transformScalarStms lvl segments env inps distres stms = do
     readInputs segments env (toList is) inps
     addStms $ fmap soacsStmToGPU stms
     pure $ subExpsRes $ map (Var . distResName) distres
-  pure $ insertReps (zip (map distResTag distres) $ map Regular vs) env
+  insertRepsM (zip (map distResTag distres) $ map Regular vs) env
 
 transformScalarStm ::
   SegLevel ->
@@ -223,7 +223,7 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
                   then resultToResReps (map fst rettype) result
                   else distResultsToResReps res result
           reps' <- zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) reps
-          pure $ insertReps (zip (map distResTag res) reps') env
+          insertRepsM (zip (map distResTag res) reps') env
         -- TODO: Do something about intra functions
         _ ->
           if all isRegularDistResult res
@@ -525,7 +525,7 @@ liftRegFunDef funHasParallelism funSizeParams const_scope fd = do
         -- XXX: I think function lifting makes it more important to classify invariant
         -- results in bodies. Function bodies can produce values that are
         -- invariant to the map nest, but at this point there is no opportunity to
-        -- hoist them out of the nest.  
+        -- hoist them out of the nest.
 
         liftRegFunBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms $
           bodyResult body

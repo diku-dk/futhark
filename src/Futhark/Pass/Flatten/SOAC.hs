@@ -19,7 +19,6 @@ import Control.Monad
 import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable
 import Data.Functor.Identity (runIdentity)
-import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (mapMaybe)
@@ -37,6 +36,7 @@ import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Transform.ToGPU (soacsLambdaToGPU)
+import Futhark.Util (mapAccumLM)
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, quot, rem)
 
@@ -238,19 +238,21 @@ onMapInputArr lvl segments env inps ws ws_O ws_data p arr = do
 mapArraysToInputs ::
   [VName] ->
   [MapArray IrregularRep] ->
-  (DistEnv, DistInputs)
-mapArraysToInputs param_names arrs =
-  let ((_, env), inputs) =
-        L.mapAccumL onInput (0, mempty) $ zip param_names arrs
-   in (env, inputs)
+  FlattenM (DistEnv, DistInputs)
+mapArraysToInputs param_names arrs = do
+  ((_, env), inputs) <-
+    mapAccumLM onInput (0, mempty) $ zip param_names arrs
+  pure (env, inputs)
   where
     onInput (tag, env) (p, MapArray arr t) =
-      ((tag, env), (p, DistInputFree arr t))
-    onInput (tag, env) (p, MapOther rep t) =
+      pure ((tag, env), (p, DistInputFree arr t))
+    onInput (tag, env) (p, MapOther rep t) = do
       let rt = ResTag tag
-       in ( (tag + 1, insertRep rt (Irregular rep) env),
-            (p, DistInput rt t)
-          )
+      env' <- insertRepM rt (Irregular rep) env
+      pure
+        ( (tag + 1, env'),
+          (p, DistInput rt t)
+        )
 
 transformUniformRedomap ::
   SegLevel ->
@@ -293,8 +295,8 @@ transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
       (lambdaParams map_lam)
       arrs
 
-  let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
-      readFree is = readInputs new_segment free_env is free_inputs
+  (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
+  let readFree is = readInputs new_segment free_env is free_inputs
   genUniformSegRed lvl "uniformSegRed" (NE.toList new_segment) reds_gpu shape (soacsLambdaToGPU map_lam) arrs' readFree
 
 doUniformSegMaposcanomap ::
@@ -358,8 +360,8 @@ transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam
       )
       (lambdaParams map_lam)
       arrs
-  let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
-      readFree is = readInputs new_segment free_env is free_inputs
+  (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
+  let readFree is = readInputs new_segment free_env is free_inputs
   doUniformSegMaposcanomap lvl scans arrs' post_lam map_lam segments new_segment inps env readFree
 
 doSegMaposcanomap ::
@@ -585,7 +587,7 @@ insertSegOpMapResults segments segs flags offsets kind bnds env0 =
                     reshapeAll (arrayShape v_t) expected_shape
               pure $ insertRegulars [distResTag dist_res] [v'] env
       | otherwise =
-          pure $ insertIrregular segs flags offsets (distResTag dist_res) v kind env
+          insertIrregularM segs flags offsets (distResTag dist_res) v kind env
 
 distResCerts :: DistEnv -> [DistInput] -> Certs
 distResCerts env = Certs . map f
@@ -1110,9 +1112,9 @@ runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
       arrs
 
   free_and_sizes <- freeWithTypeDeps inps (freeIn map_lam')
+  (param_env, param_inputs) <-
+    mapArraysToInputs (map paramName (lambdaParams map_lam')) arrs'
   let new_segments = segments <> pure w
-      (param_env, param_inputs) =
-        mapArraysToInputs (map paramName (lambdaParams map_lam')) arrs'
       free_inputs =
         [ (v, inp)
         | v <- free_and_sizes,
@@ -1248,7 +1250,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
           mapMaybe
             (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
             free_and_sizes
-      let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
+      (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
 
       new_segment <- arraySize 0 <$> lookupType ws_F
       let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
@@ -1302,7 +1304,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
           mapMaybe
             (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
             free_and_sizes
-      let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
+      (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
       new_segment <- arraySize 0 <$> lookupType ws_F
       let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
       elems' <- doSegMaposcanomap lvl scans ws_F elems post_lam map_lam segments inps env readFree
@@ -1321,7 +1323,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
   | Just map_lam <- isMapSOAC form = do
       map_res <-
         transformInnerMap ops segments env inps pat w arrs map_lam
-      pure $ insertReps (zip (map distResTag res) map_res) env
+      insertRepsM (zip (map distResTag res) map_res) env
   | otherwise = do
       gpu_scope <- askScope
       let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
@@ -1329,7 +1331,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
       case factored of
         Just body -> do
           reps <- distributeAndFlattenBody ops segments "factorScremaForParallelism_body" env inps res body
-          pure $ insertReps (zip (map distResTag res) reps) env
+          insertRepsM (zip (map distResTag res) reps) env
         Nothing
           -- XXX: here we silently sequentialise any SOAC that is not handled
           -- above if it is possible to do so. We need to make sure that we actually handle everything we
@@ -1351,7 +1353,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
                     (auxing aux $ FOT.transformSOAC pat $ Screma w arrs form)
               let body = mkBody stms $ varsRes $ patNames pat
               reps <- distributeAndFlattenBody ops segments "sequentialised_soac" env inps res body
-              pure $ insertReps (zip (map distResTag res) reps) env
+              insertRepsM (zip (map distResTag res) reps) env
   where
     funHasParallelism = flattenFunHasParallelism ops
     lvl = flattenSegLevel ops
@@ -1591,7 +1593,7 @@ transformFlatMapNested ops segments env inps res aux w arrs lam = do
             _ -> pure rp
 
         let all_reps = n_rep : shape_rep : flag_rep : offset_rep : data_reps'
-        pure $ insertReps (zip (map distResTag res) all_reps) env
+        insertRepsM (zip (map distResTag res) all_reps) env
       _ -> error "transformFlatMapNested: FlatMap with no results"
 
 -- | Remove certificates that refer to variables free in the lambda (recursing
@@ -1652,7 +1654,7 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops0, 
           scope
       let body = mkBody stms $ varsRes $ concat hist_res
       reps <- distributeAndFlattenBody ops segments "non_uniform_hist_body" env inps res body
-      pure $ insertReps (zip (map distResTag res) reps) env
+      insertRepsM (zip (map distResTag res) reps) env
     else do
       let new_segment = segments <> pure w
       lifted_inps <- forM hist_inputs $ \hist_inp -> do
@@ -1675,8 +1677,8 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops0, 
           mapMaybe
             (onMapFreeVarMultiDim lvl segments w env inps)
             free_and_sizes
-      let (free_env, free_inputs) = mapArraysToInputs free_replicated replicated
-          readFree is = readInputs new_segment free_env is free_inputs
+      (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
+      let readFree is = readInputs new_segment free_env is free_inputs
       hist_res <-
         certifying (distCerts inps aux env) $
           genUniformSegHist lvl "Uniform_segHist" (NE.toList new_segment) hist_ops' (soacsLambdaToGPU bucket_fun) lifted_inps readFree

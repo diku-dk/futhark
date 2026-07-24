@@ -236,7 +236,7 @@ transformVariantMatch ops segments env inps res _aux scrutinees cases defaultCas
       (L.zip4 branch_sizes inds branch_bodies branch_results)
   -- Merging acc results is done by using the last branch result
   reps <- zipWithM (mergeResult lvl segments w inds) (L.transpose branch_reps) res
-  pure $ insertReps (zip (map distResTag res) reps) env
+  insertRepsM (zip (map distResTag res) reps) env
   where
     findAccCert :: VName -> (VName, DistInput) -> Maybe VName
     findAccCert cert v_inp =
@@ -304,4 +304,4 @@ transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase
   -- get rid of the existential context
   let payload_res = drop (S.size (shapeContext rets)) match_res
   let reps = distResultsToResReps res payload_res
-  pure $ insertReps (zip (map distResTag res) reps) env
+  insertRepsM (zip (map distResTag res) reps) env
