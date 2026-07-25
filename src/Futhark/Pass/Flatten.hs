@@ -189,11 +189,7 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
       case lvl of
         SegThread {} -> do
           arg_types <- mapM (subExpInputType inps . fst) args
-          let size_positions = funSizeParams name
-              indexed_args = zip [0 ..] args
-              isSizeArg = (`S.member` size_positions) . fst
-              (size_args, value_args) = L.partition isSizeArg indexed_args
-              nonuniform_inps = any (any (isVariant inps) . arrayDims) arg_types
+          let nonuniform_inps = any (any (isVariant inps) . arrayDims) arg_types
               nonuniform =
                 nonuniform_inps
                   || not (all isRegularDistResult res)
@@ -207,7 +203,13 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
               then
                 ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
               else do
+                let size_positions = funSizeParams name
+                    indexed_args = zip [0 ..] args
+                    isSizeArg = (`S.member` size_positions) . fst
+                    (size_args, value_args) = L.partition isSizeArg indexed_args
                 value_args' <- mapM (liftRegArg lvl segments w inps env . snd) value_args
+                -- We do not lift 'size_args' because they correspond to size
+                -- parameters, which are invariant in the uniform case.
                 pure $ (w, Observe) : map snd size_args <> value_args'
           args_ts <- mapM (subExpType . fst) args'
           let dietToUnique Consume = Unique
@@ -481,6 +483,9 @@ liftFunDef funHasParallelism funSizeParams const_scope fd = do
       needs
     )
 
+-- Here we assume that every type size is invariant and therefore every input
+-- array is regular. As a result, parameters that correspond to type sizes are
+-- not lifted and are also not part of 'DistInput'.
 liftRegFunDef ::
   FunHasParallelism ->
   FunSizeParams ->
