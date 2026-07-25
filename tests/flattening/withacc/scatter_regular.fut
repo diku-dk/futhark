@@ -5,6 +5,7 @@
 --         [[1,2], [3,4], [5,6]]
 --       }
 -- output { [[1, 2, 2], [4, 5, 6], [6, 5, 9]] }
+-- structure gpu { /WithAcc 1 /WithAcc/SegMap 1 }
 
 def main =
   map3 \(xs: []i32) (is: []i64) (vs: []i32) ->

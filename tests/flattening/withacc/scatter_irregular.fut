@@ -6,6 +6,7 @@
 --         [4i64, 3, 4, 5]
 --       }
 -- output { [2, 1, 3, 4] }
+-- structure gpu { /WithAcc 4 /WithAcc/SegMap 4 }
 
 def main is vs =
   map2 \n m ->
