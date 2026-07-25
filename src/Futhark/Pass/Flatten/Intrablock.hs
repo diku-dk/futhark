@@ -356,25 +356,12 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
             )
             (patElems pat)
             scan_res
-    Op (Screma w arrs form)
-      | Just (reds, map_lam) <- isRedomapSOAC form -> do
-          let onRed red =
-                let red_lam = redLambda red
-                    comm
-                      | commutativeLambda red_lam = Commutative
-                      | otherwise = redComm red
-                 in Reduce comm (soacsLambdaToGPU red_lam) (redNeutral red)
-              reds_gpu = map onRed reds
-              map_lam' = soacsLambdaToGPU map_lam
-          (red_res, stms) <- runBuilder (genUniformSegRed lvl "intra_redomap" (pure w) reds_gpu mempty map_lam' arrs (const $ pure ()))
-          certifying (stmAuxCerts aux) $ do
-            addStms stms
-            zipWithM_
-              ( \pe v ->
-                  letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
-              )
-              (patElems pat)
-              red_res
+    Op (Screma _ _ form)
+      -- Leave nested redomaps in place as (implicitly sequential) SOACs rather
+      -- than flattening them into an in-block SegRed whose size may be bound in
+      -- the body (which would inhibit the enclosing intrablock kernel).
+      | Just _ <- isRedomapSOAC form ->
+          addStm $ soacsStmToGPU stm
     Op (Screma w arrs form) ->
       -- This screma is too complicated for us to immediately do
       -- anything, so split it up and try again.

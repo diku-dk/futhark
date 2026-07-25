@@ -175,16 +175,23 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
       transformDistBasicOp ops segments env (inps, res', pe, aux, e)
     Let pat aux (Op (Screma w arrs form)) ->
       transformScrema (flattenOpsFor funHasParallelism funSizeParams lvl) segments env inps res (pat, aux) (w, arrs, form)
-    Let _ aux (Match scrutinees cases defaultCase rt) ->
+    Let _ aux (Match scrutinees cases defaultCase rt)
+      -- Inside an intrablock kernel, sequentialise nonuniform control flow
+      -- instead of flattening it: the in-loop/in-branch nonuniform parallelism
+      -- is ignored (run sequentially per thread) rather than producing SegOps
+      -- with body-bound sizes that would inhibit the enclosing intrablock kernel.
+      | SegThreadInBlock {} <- lvl ->
+          transformScalarStm lvl segments env inps res stm
       -- 'transformUniformMatch' keeps the scrutinees in a plain GPU 'Match',
       -- which is only well-scoped when they are invariant to the nest. Whenever
       -- a scrutinee is variant we must partition the segments by branch, even if
       -- no branch contains parallelism (this happens e.g. for a variant
       -- conditional with an irregular result, which cannot be sequentialised
       -- into a scalar group).
-      if any (isVariant inps) scrutinees
-        then transformVariantMatch ops segments env inps res aux scrutinees cases defaultCase rt
-        else transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt
+      | any (isVariant inps) scrutinees ->
+          transformVariantMatch ops segments env inps res aux scrutinees cases defaultCase rt
+      | otherwise ->
+          transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt
     Let pat aux (Apply name args rettype s) ->
       case lvl of
         SegThread {} -> do
@@ -229,9 +236,13 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
           if all isRegularDistResult res
             then transformScalarStm lvl segments env inps res $ Let pat aux (Apply name args rettype s)
             else error "Unhandled Apply in non SegThread Seglevel"
+    Let _ _ Loop {}
+      -- As for Match: sequentialise loops inside an intrablock kernel.
+      | SegThreadInBlock {} <- lvl ->
+          transformScalarStm lvl segments env inps res stm
     Let pat aux (Loop merge (ForLoop i it n) body) ->
       transformLoop ops segments env inps res (pat, aux) (merge, ForLoop i it n, body)
-    Let pat aux (Loop merge (WhileLoop cond) body) -> do
+    Let pat aux (Loop merge (WhileLoop cond) body) ->
       transformLoop ops segments env inps res (pat, aux) (merge, WhileLoop cond, body)
     Let pat aux (WithAcc inputs lam) ->
       transformWithAcc ops segments env inps res pat aux inputs lam
