@@ -18,6 +18,7 @@ module Futhark.Pass.Flatten.General
     liftParam,
     liftRegularParam,
     liftRegResult,
+    needsIrregularRetType,
     mkIrregFromReg,
     flattenIrregularRep,
     distCerts,
@@ -37,6 +38,7 @@ module Futhark.Pass.Flatten.General
     liftBodyWithDistResults,
     distResultsToResReps,
     resultToResReps,
+    resultToResRepsByDistResult,
     irregularRepToFlatArrs,
     distributeAndFlattenBody,
     splitInput,
@@ -152,13 +154,26 @@ liftResult lvl segments inps env res = map (SubExpRes mempty . Var) <$> vs
         elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
         pure [num_data, segs, flags', offsets, elems']
 
-liftRegResult :: SegLevel -> Segments -> DistInputs -> DistEnv -> SubExpRes -> FlattenM SubExpRes
-liftRegResult lvl segments inps env res = do
-  let res_se = resSubExp res
-  res_t <- subExpInputType inps res_se
-  let expectedShape = segmentsShape segments <> arrayShape res_t
-  lifted_res <- liftSubExpRegular lvl segments inps env expectedShape res_se
-  pure $ SubExpRes mempty (Var lifted_res)
+needsIrregularRetType :: DistInputs -> RetType SOACS -> Bool
+needsIrregularRetType inps = any needsIrregularDim . arrayExtDims
+  where
+    needsIrregularDim Ext {} = True
+    needsIrregularDim (Free se) = isVariant inps se
+
+liftRegResult :: SegLevel -> Segments -> SubExp -> DistInputs -> DistEnv -> RetType SOACS -> SubExpRes -> FlattenM Result
+liftRegResult lvl segments num_segments inps env rettype res
+  | needsIrregularRetType inps rettype = case resSubExp res of
+      Var v -> do
+        irreg <- getIrregRep lvl segments env inps v
+        varsRes <$> irregularRepToFlatArrs num_segments irreg
+      Constant {} ->
+        error "liftRegResult: irregular result is not a variable"
+  | otherwise = do
+      let res_se = resSubExp res
+      res_t <- subExpInputType inps res_se
+      let expectedShape = segmentsShape segments <> arrayShape res_t
+      lifted_res <- liftSubExpRegular lvl segments inps env expectedShape res_se
+      pure [SubExpRes mempty (Var lifted_res)]
 
 mkIrregFromReg ::
   SegLevel ->
@@ -741,6 +756,22 @@ resultToResReps types results =
       )
       results
       types
+
+resultToResRepsByDistResult :: [DistResult] -> [VName] -> [ResRep]
+resultToResRepsByDistResult dist_res results =
+  snd $
+    L.mapAccumL
+      ( \rs dist_res' ->
+          if isRegularDistResult dist_res'
+            then
+              let (v : rs') = rs
+               in (rs', Regular v)
+            else
+              let (_ : segs : flags : offsets : elems : rs') = rs
+               in (rs', Irregular $ IrregularRep segs flags offsets elems Dense)
+      )
+      results
+      dist_res
 
 -- helper to not mess up the tags when generating new ones for the loop parameters
 -- probably won't be used in future

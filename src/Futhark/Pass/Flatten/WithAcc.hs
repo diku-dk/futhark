@@ -157,7 +157,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
       (withacc_out_vs_wo, withacc_out_vs_no) = splitAt num_acc_results withacc_out_vs
       (distres_withacc, distres_normal) = splitAt num_acc_results distres
 
-  let out_reps_normal = mkNormalResReps distres_normal withacc_out_vs_no
+  let out_reps_normal = resultToResRepsByDistResult distres_normal withacc_out_vs_no
   out_reps_withacc <-
     if nonuniform
       then mapM mkNonuniformWithAccRep (zip3 withacc_out_vs_wo non_uniform_reps distres_withacc)
@@ -277,22 +277,6 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
           pure $ Regular v_reshaped
       | otherwise =
           pure $ Irregular $ rep {irregularD = v}
-
-    mkNormalResReps :: [DistResult] -> [VName] -> [ResRep]
-    mkNormalResReps dist_res results =
-      snd $
-        L.mapAccumL
-          ( \rs dist_res' ->
-              if isRegularDistResult dist_res'
-                then
-                  let (v : rs') = rs
-                   in (rs', Regular v)
-                else
-                  let (_ : segs : flags : offsets : elems : rs') = rs
-                   in (rs', Irregular $ IrregularRep segs flags offsets elems Dense)
-          )
-          results
-          dist_res
 
     trType ::
       (VName -> Maybe Shape, VName -> Safety -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->

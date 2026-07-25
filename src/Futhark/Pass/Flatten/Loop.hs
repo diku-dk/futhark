@@ -157,22 +157,6 @@ interchangedLoopBody ops num_segments segments env params free_inps aux body = b
     letExp (baseName (paramName p) <> "_unflat") . BasicOp . Reshape (patElemName pe) $
       reshapeAll (arrayShape pe_t) seg_shape
 
-loopResultToResReps :: [DistResult] -> [VName] -> [ResRep]
-loopResultToResReps dist_res results =
-  snd $
-    L.mapAccumL
-      ( \rs dist_res' ->
-          if isRegularDistResult dist_res'
-            then
-              let (v : rs') = rs
-               in (rs', Regular v)
-            else
-              let (_ : segs : flags : offsets : elems : rs') = rs
-               in (rs', Irregular $ IrregularRep segs flags offsets elems Dense)
-      )
-      results
-      dist_res
-
 liftLoopResult :: SegLevel -> Segments -> SubExp -> DistInputs -> DistEnv -> DistResult -> SubExpRes -> FlattenM Result
 liftLoopResult lvl segments num_segments inps env dist_res res =
   if isRegularDistResult dist_res
@@ -429,7 +413,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
           <=< certifying (distCerts inps aux env)
           $ letTupExp "loop_res_out" loop_exp_gpu
 
-      let out_reps = loopResultToResReps res loop_out_vs
+      let out_reps = resultToResRepsByDistResult res loop_out_vs
       insertRepsM (zip (map distResTag res) out_reps) env
 --
 transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) = do
@@ -462,7 +446,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
         distributedLoopBody ops segments w loop_params_scope loop_new_inputs loop_env_local res body
       let loop_exp_gpu = Loop (zip lifted_loop_params' lifted_init') (WhileLoop cond) loop_body_gpu
       loop_out_vs <- certifying (distCerts inps aux env) $ letTupExp "loop_res_out" loop_exp_gpu
-      let out_reps = loopResultToResReps res loop_out_vs
+      let out_reps = resultToResRepsByDistResult res loop_out_vs
       insertRepsM (zip (map distResTag res) out_reps) env
     Just (cond_lifted_rep, cond_init) -> do
       let [cond_init_se] = cond_init
@@ -638,7 +622,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
               (WhileLoop (paramName any_active_param))
               loop_body_gpu
       let loop_out_vs' = L.init loop_out_vs
-      let out_reps = loopResultToResReps res loop_out_vs'
+      let out_reps = resultToResRepsByDistResult res loop_out_vs'
       insertRepsM (zip (map distResTag res) out_reps) env
   where
     lvl = flattenSegLevel ops

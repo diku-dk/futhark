@@ -188,11 +188,11 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
     Let pat aux (Apply name args rettype s) ->
       case lvl of
         SegThread {} -> do
-          arg_types <- mapM (subExpInputType inps . fst) args
-          let nonuniform_inps = any (any (isVariant inps) . arrayDims) arg_types
-              nonuniform =
-                nonuniform_inps
-                  || not (all isRegularDistResult res)
+          let size_positions = funSizeParams name
+              indexed_args = zip [0 ..] args
+              isSizeArg = (`S.member` size_positions) . fst
+              (size_args, value_args) = L.partition isSizeArg indexed_args
+          let nonuniform = any (isVariant inps . fst . snd) size_args
               name' = if nonuniform then liftFunName name else liftRegFunName name
               mode = if nonuniform then NonUniformLift else UniformLift
           demandLifted name mode
@@ -203,10 +203,6 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
               then
                 ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
               else do
-                let size_positions = funSizeParams name
-                    indexed_args = zip [0 ..] args
-                    isSizeArg = (`S.member` size_positions) . fst
-                    (size_args, value_args) = L.partition isSizeArg indexed_args
                 value_args' <- mapM (liftRegArg lvl segments w inps env . snd) value_args
                 -- We do not lift 'size_args' because they correspond to size
                 -- parameters, which are invariant in the uniform case.
@@ -218,12 +214,14 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
               rettype' =
                 if nonuniform
                   then addRetAls param_ts $ liftRetType w $ map fst rettype
-                  else addRetAls param_ts $ liftRegularRetType w $ map fst rettype
+                  else addRetAls param_ts $ liftRegularRetType inps w $ map fst rettype
           result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
           let reps =
                 if nonuniform
                   then resultToResReps (map fst rettype) result
-                  else distResultsToResReps res result
+                  -- XXX: This could instead distinguish between regular and
+                  -- irregular results based on their return types.
+                  else resultToResRepsByDistResult res result
           reps' <- zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) reps
           insertRepsM (zip (map distResTag res) reps') env
         -- TODO: Do something about intra functions
@@ -315,16 +313,26 @@ liftRetType w = concat . snd . L.mapAccumL liftType 0
             Mem {} -> error "liftRetType: Mem"
        in (i + length lifted, lifted)
 
-liftRegularRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
-liftRegularRetType w = map liftType
+liftRegularRetType :: DistInputs -> SubExp -> [RetType SOACS] -> [RetType GPU]
+liftRegularRetType inps w = concat . snd . L.mapAccumL liftType 0
   where
-    liftType rettype =
+    liftType i rettype =
       let lifted = case rettype of
-            Prim pt -> arrayOf (Prim pt) (Shape [Free w]) Unique
-            Array pt shape _ -> arrayOf (Prim pt) (Shape [Free w] <> shape) Unique
-            Acc {} -> error "liftRegularRetType: Acc"
-            Mem {} -> error "liftRegularRetType: Mem"
-       in lifted
+            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
+            Array pt shape _ ->
+              if needsIrregularRetType inps rettype
+                then
+                  let num_data = Prim int64
+                      segs = arrayOf (Prim int64) (Shape [Free w]) Unique
+                      flags = arrayOf (Prim Bool) (Shape [Ext i]) Unique
+                      offsets = arrayOf (Prim int64) (Shape [Free w]) Unique
+                      elems = arrayOf (Prim pt) (Shape [Ext i]) Unique
+                   in [num_data, segs, flags, offsets, elems]
+                else
+                  pure $ arrayOf (Prim pt) (Shape [Free w] <> shape) Unique
+            Acc {} -> error "liftRetType: Acc"
+            Mem {} -> error "liftRetType: Mem"
+       in (i + length lifted, lifted)
 
 runInnerSeqMap ::
   SubExp ->
@@ -354,11 +362,11 @@ liftBody funHasParallelism funSizeParams lvl w inputs env dstms result = do
   result' <- mapM (liftResult lvl segments inputs env') result
   pure $ concat result'
 
-liftRegFunBody :: FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> Result -> FlattenM Result
-liftRegFunBody funHasParallelism funSizeParams lvl w inputs env dstms result = do
+liftRegFunBody :: FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> [RetType SOACS] -> Result -> FlattenM Result
+liftRegFunBody funHasParallelism funSizeParams lvl w inputs env dstms rettype result = do
   let segments = NE.singleton w
   env' <- foldM (transformDistStm funHasParallelism funSizeParams lvl segments) env dstms
-  mapM (liftRegResult lvl segments inputs env') result
+  concat <$> zipWithM (liftRegResult lvl segments w inputs env') rettype result
 
 liftFunName :: Name -> Name
 liftFunName name = name <> "_lifted"
@@ -486,6 +494,9 @@ liftFunDef funHasParallelism funSizeParams const_scope fd = do
 -- Here we assume that every type size is invariant and therefore every input
 -- array is regular. As a result, parameters that correspond to type sizes are
 -- not lifted and are also not part of 'DistInput'.
+-- Regular functions can still return irregular arrays. This happens when
+-- they return an array whose dimension size was created in the function
+-- body. In other words, the array has an existential size.
 liftRegFunDef ::
   FunHasParallelism ->
   FunSizeParams ->
@@ -512,27 +523,23 @@ liftRegFunDef funHasParallelism funSizeParams const_scope fd = do
   let inputs = do
         (p, i) <- zip fparams_explicit [0 ..]
         pure (paramName p, DistInput (ResTag i) (paramType p))
-  let rettype' =
-        addRetAls (map paramDeclType fparams'') $
-          liftRegularRetType w (map fst rettype)
   let (inputs', dstms) =
         distributeBody DistributeIrregular funHasParallelism (const_scope <> scopeOfFParams fparam_sizes) (NE.singleton (Var (paramName wp))) inputs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) value_reps
+      rettype' =
+        addRetAls (map paramDeclType fparams'') $
+          liftRegularRetType inputs' w (map fst rettype)
   -- Lift the body of the function and get the results, inserting copies as
   -- necessary to ensure the results are fresh and unique (see 'freshenResult').
   (body', needs) <-
     runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
       buildBody_ . freshenResult fparams'' $
-        -- In the current setup, a result with an existential size will not be
-        -- classified as regular. We therefore do not handle existential result
-        -- sizes in the same way as invariant size parameters.
-        --
         -- XXX: I think function lifting makes it more important to classify invariant
         -- results in bodies. Function bodies can produce values that are
         -- invariant to the map nest, but at this point there is no opportunity to
         -- hoist them out of the nest.
 
-        liftRegFunBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms $
+        liftRegFunBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms (map fst rettype) $
           bodyResult body
   let name = liftRegFunName $ funDefName fd
   pure
