@@ -74,14 +74,15 @@ type Constraints rep =
 -- than 1.
 multiplicity :: (Constraints rep) => Stm rep -> M.Map VName Int
 multiplicity stm =
-  case stmExp stm of
-    Match cond cases defbody _ ->
-      foldl' comb mempty $
-        free 1 cond : free 1 defbody : map (free 1 . caseBody) cases
-    Op {} -> free 2 stm
-    Loop {} -> free 2 stm
-    WithAcc {} -> free 2 stm
-    _ -> free 1 stm
+  free 1 (stmAux stm)
+    <> case stmExp stm of
+      Match cond cases defbody _ ->
+        foldl' comb mempty $
+          free 1 cond : free 1 defbody : map (free 1 . caseBody) cases
+      Op {} -> free 2 stm
+      Loop {} -> free 2 stm
+      WithAcc {} -> free 2 stm
+      _ -> free 1 stm
   where
     free k x = M.fromList $ map (,k) $ namesToList $ freeIn x
     comb = M.unionWith (+)
@@ -145,23 +146,23 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
         primType $ patElemType pe,
         maybe True (== 1) $ M.lookup (patElemName pe) multiplicities =
           let (stms', sunk) =
-                optimiseStms' vtable' (M.insert (patElemName pe) stm sinking') stms
+                optimiseStms' vtable' (M.insert (patElemName pe) stm sinking) stms
            in if patElemName pe `nameIn` sunk
                 then (stms', sunk)
                 else (stm : stms', sunk)
       | Match cond cases defbody ret <- stmExp stm =
           let onCase (Case vs body) =
-                let (body', body_sunk) = optimiseBranch onOp vtable sinking' body
+                let (body', body_sunk) = optimiseBranch onOp vtable sinking body
                  in (Case vs body', body_sunk)
               (cases', cases_sunk) = unzip $ map onCase cases
-              (defbody', defbody_sunk) = optimiseBranch onOp vtable sinking' defbody
+              (defbody', defbody_sunk) = optimiseBranch onOp vtable sinking defbody
               (stms', sunk) = optimiseStms' vtable' sinking stms
            in ( stm {stmExp = Match cond cases' defbody' ret} : stms',
                 mconcat cases_sunk <> defbody_sunk <> sunk
               )
       | Loop merge lform body <- stmExp stm =
           let comps = (merge, lform, body)
-              (comps', loop_sunk) = optimiseLoop onOp vtable sinking' comps
+              (comps', loop_sunk) = optimiseLoop onOp vtable sinking comps
               (merge', _, body') = comps'
 
               (stms', stms_sunk) = optimiseStms' vtable' sinking stms
@@ -169,7 +170,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
                 stms_sunk <> loop_sunk
               )
       | Op op <- stmExp stm =
-          let (op', op_sunk) = onOp vtable sinking' op
+          let (op', op_sunk) = onOp vtable sinking op
               (stms', stms_sunk) = optimiseStms' vtable' sinking stms
            in ( stm {stmExp = Op op'} : stms',
                 stms_sunk <> op_sunk
@@ -182,12 +183,6 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
               )
       where
         vtable' = ST.insertStm stm vtable
-        -- Do not the binding for 'x' inside a statement that uses 'x' in its
-        -- certificates.
-        free_in_aux = freeIn (stmAux stm)
-        sinking'
-          | free_in_aux == mempty = sinking
-          | otherwise = M.filterWithKey (\k _ -> k `notNameIn` free_in_aux) sinking
         mapper =
           identityMapper
             { mapOnBody = \scope body -> do
