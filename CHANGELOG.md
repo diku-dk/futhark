@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Simplified fusibility check by removing redundant accumulator overlap check
   and fixed fusibility check by giving the correct number of elements.
 
+* A compiler crash due to missing double buffering inside sequential code
+  migrated to GPU. (#2513)
+
 ## [0.26.4]
 
 ### Added
