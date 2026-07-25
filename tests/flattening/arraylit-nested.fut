@@ -7,6 +7,7 @@
 --     [[3i64,10i64,13i64], [3i64,20i64,23i64]]
 --   ]
 -- }
+-- structure gpu { SegMap 1 }
 entry main (xs: []i64) (ys: []i64) =
   map (\x ->
          map (\y -> [x, y, x + y]) ys)

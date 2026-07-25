@@ -9,3 +9,7 @@ me that some of the structure tests fail. This is not necessarily a problem;
 many of the structure tests here do not truly care about the specific number of
 segops (and the exceptions should be explicit), but we have to provide some
 number.
+
+Many of the tests here will use attributes to force to go flattening a certain
+way (usually full flattening). This is solely to make the code a little simpler
+to read when debugging the output.
