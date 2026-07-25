@@ -866,7 +866,12 @@ irregularMapResult lvl mode (ws, ws_F, ws_O) segments irreg v v_t new_inps =
     if any (isVariant new_inps) (arrayShape v_t)
       then do
         old_segment <- arraySize 0 <$> lookupType ws
-        -- TODO: We can make this simpler.
+        -- The size of each flattened outer segment is the sum of its rows'
+        -- sizes. Because irreg_dense is dense (compact offsets), we get this in
+        -- O(1) per segment as last_offset + last_size - start, avoiding a
+        -- segmented reduction over the row sizes. The guard handles empty outer
+        -- segments, which have no last row to read (and would index out of
+        -- bounds).
         new_shape <- letExp (baseName v <> "_outer_shape") <=< segMap lvl (MkSolo old_segment) $ \(MkSolo is) -> do
           outer_ind <- letSubExp "outer_ind" =<< eIndex ws_O [eSubExp is]
           outer_ws_i <- letSubExp "outer_ws" =<< eIndex ws [eSubExp is]

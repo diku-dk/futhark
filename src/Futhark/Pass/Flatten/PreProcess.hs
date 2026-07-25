@@ -40,7 +40,40 @@ runSimplifiedBuilder ::
 runSimplifiedBuilder scope m =
   fst <$> runBuilderT (simplifyStms =<< collectStms_ m) scope
 
--- TODO: maybe it is better to seperate these as they are doing different things.
+-- | Rewrite a SOAC form that flattening does not handle directly into one it
+-- does, recursively preprocessing the result (which may itself contain further
+-- SOACs). Returns 'Nothing' for statements that need no rewriting - those are
+-- handled structurally by 'preprocessStm'.
+rewriteSoacStm ::
+  (MonadFreshNames m) =>
+  Scope SOACS ->
+  Stm SOACS ->
+  Maybe (m (Stms SOACS))
+rewriteSoacStm scope (Let pat aux (Op soac))
+  | "sequential_outer" `inAttrs` stmAuxAttrs aux =
+      Just $
+        preprocessStms scope =<< runSimplifiedBuilder scope (FOT.transformSOAC pat soac)
+rewriteSoacStm scope (Let pat aux (Op (Stream w arrs nes lam))) = Just $ do
+  stms <- runSimplifiedBuilder scope (auxing aux $ sequentialStreamWholeArray pat w nes lam arrs)
+  preprocessStms scope stms
+rewriteSoacStm scope (Let pat aux (Op (Screma w' arrs' form')))
+  | Just scans <- isScanSOAC form',
+    Scan scan_lam nes <- singleScan scans,
+    Just do_iswim <- iswim pat w' scan_lam (zip nes arrs') = Just $ do
+      stms <- runSimplifiedBuilder scope $ auxing aux do_iswim
+      preprocessStms scope stms
+  | Just [Reduce comm red_fun nes] <- isReduceSOAC form',
+    let comm'
+          | commutativeLambda red_fun = Commutative
+          | otherwise = comm,
+    Just do_irwim <- irwim pat w' comm' red_fun (zip nes arrs') = Just $ do
+      stms <- runSimplifiedBuilder scope $ auxing aux do_irwim
+      preprocessStms scope stms
+  | shouldDissectForm form' = Just $ do
+      stms <- runSimplifiedBuilder scope (auxing aux $ dissectScrema pat w' form' arrs')
+      preprocessStms scope stms
+rewriteSoacStm _ _ = Nothing
+
 preprocessStm ::
   (MonadFreshNames m) =>
   Scope SOACS ->
@@ -48,28 +81,8 @@ preprocessStm ::
   m (Stms SOACS)
 preprocessStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = pure $ oneStm stm
-preprocessStm scope (Let pat aux (Op soac))
-  | "sequential_outer" `inAttrs` stmAuxAttrs aux =
-      preprocessStms scope =<< runSimplifiedBuilder scope (FOT.transformSOAC pat soac)
-preprocessStm scope (Let pat aux (Op (Stream w arrs nes lam))) = do
-  stms <- runSimplifiedBuilder scope (auxing aux $ sequentialStreamWholeArray pat w nes lam arrs)
-  preprocessStms scope stms
-preprocessStm scope (Let pat aux (Op (Screma w' arrs' form')))
-  | Just scans <- isScanSOAC form',
-    Scan scan_lam nes <- singleScan scans,
-    Just do_iswim <- iswim pat w' scan_lam (zip nes arrs') = do
-      stms <- runSimplifiedBuilder scope $ auxing aux do_iswim
-      preprocessStms scope stms
-  | Just [Reduce comm red_fun nes] <- isReduceSOAC form',
-    let comm'
-          | commutativeLambda red_fun = Commutative
-          | otherwise = comm,
-    Just do_irwim <- irwim pat w' comm' red_fun (zip nes arrs') = do
-      stms <- runSimplifiedBuilder scope $ auxing aux do_irwim
-      preprocessStms scope stms
-  | shouldDissectForm form' = do
-      stms <- runSimplifiedBuilder scope (auxing aux $ dissectScrema pat w' form' arrs')
-      preprocessStms scope stms
+preprocessStm scope stm
+  | Just rewritten <- rewriteSoacStm scope stm = rewritten
 preprocessStm scope (Let pat aux (Loop merge form body)) = do
   let scope' = scopeOfFParams (map fst merge) <> scopeOfLoopForm form <> scope
   body' <- preprocessBody scope' body
