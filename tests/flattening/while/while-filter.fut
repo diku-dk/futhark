@@ -1,7 +1,10 @@
 -- == Currently fails
 -- input { [3i64, 7i64, 9i64, 1i64, 7i64] }
 -- auto output
+-- structure gpu { /Loop 1 }
+
 def main (xs) =
+  #[incremental_flattening(only_inner)]
   map (\x ->
          let z' = iota x
          let (_, res, _) =

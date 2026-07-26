@@ -28,11 +28,12 @@
 --           [0, 1, 2, 8, 4],
 --           [0, 1, 2, 3, 9]]]
 -- }
+-- structure gpu { /SegMap/Update 5 }
 
-let main (arr: []i32) (is: []i32) (js: []i32) =
-  [map2(\i j -> (copy arr with [i] = j)) is js
-  ,map2(\i j -> (copy arr with [i] = j)) is js
-  ,map2(\i j -> (copy arr with [i] = j)) is js
-  ,map2(\i j -> (copy arr with [i] = j)) is js
-  ,map2(\i j -> (copy arr with [i] = j)) is js
+def main (arr: []i32) (is: []i32) (js: []i32) =
+  [ map2 (\i j -> (copy arr with [i] = j)) is js
+  , map2 (\i j -> (copy arr with [i] = j)) is js
+  , map2 (\i j -> (copy arr with [i] = j)) is js
+  , map2 (\i j -> (copy arr with [i] = j)) is js
+  , map2 (\i j -> (copy arr with [i] = j)) is js
   ]

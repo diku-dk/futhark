@@ -1,3 +1,4 @@
+-- Important that this flattens to a single SegMap.
 -- ==
 -- input { [3i64, 3i64, 3i64] [5i64,6i64,8i64] }
 -- auto output
