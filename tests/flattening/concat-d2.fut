@@ -3,6 +3,7 @@
 --         [[[[1i64,2i64],[3i64,4i64]],[[5i64,6i64],[7i64,8i64]]],
 --          [[[9i64,10i64],[11i64,12i64]],[[13i64,14i64],[15i64,16i64]]]] }
 -- auto output
+-- structure gpu { /If/True/SegMap/Concat 1 /If/False/Concat 0 }
 
 def main [k] [a] [b] [c] (is: [k]i64) (xsss: [k][a][b][c]i64) =
   map2 (\i x ->

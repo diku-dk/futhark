@@ -4,8 +4,9 @@
 --         [[[5i64, 6i64], [7i64, 8i64]],
 --          [[9i64, 10i64], [11i64, 12i64]]] }
 -- auto output
+-- structure { Concat 1 Opaque 1 }
 
-def main [n] [m] [z] [k] (xss : [n][z][k]i64) (yss : [n][m][k]i64) =
+def main [n] [m] [z] [k] (xss: [n][z][k]i64) (yss: [n][m][k]i64) =
   map2 (\xs ys ->
           opaque (concat xs ys))
        xss

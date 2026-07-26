@@ -5,12 +5,12 @@
 --          [[[13i32,14i32],[1i32,4i32],[17i32,18i32]],
 --           [[19i32,20i32],[100i32,5i32],[23i32,24i32]]]] }
 -- auto output
+-- structure gpu { Opaque 2 Concat 0 }
 
-let main [k][a][b][c] (is: [k]i64) (xsss: [k][a][b][c]i32) =
-  map2
-    (\i x ->
-       let p = map (\rows -> opaque rows[i:]) x
-       let q = map (\rows -> opaque rows[:i]) x
-       in (map2 concat p q) :> [a][b][c]i32)
-    is
-    xsss
+def main [k] [a] [b] [c] (is: [k]i64) (xsss: [k][a][b][c]i32) =
+  map2 (\i x ->
+          let p = map (\rows -> opaque rows[i:]) x
+          let q = map (\rows -> opaque rows[:i]) x
+          in (map2 concat p q) :> [a][b][c]i32)
+       is
+       xsss
