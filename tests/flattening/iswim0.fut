@@ -8,6 +8,8 @@
 -- output {
 --   [[3i32, 6i32, 11i32], [54i32, 162i32, 418i32], [2754i32, 10692i32, 34694i32], [5508i32, 32076i32, 208164i32], [60588i32, 577368i32, 5620428i32]]
 -- }
+-- structure gpu { SegScan 1 SegMap 0 }
+
 def combineVs [n] (n_row: [n]i32) : [n]i32 =
   map2 (*) n_row n_row
 

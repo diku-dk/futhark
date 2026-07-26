@@ -1,6 +1,8 @@
 -- ==
 -- input { [1i64,2i64,3i64] }
 -- auto output
+-- structure gpu { SegScan 0 SegMap 3 }
+
 entry main (xs: []i64) =
   map (\x ->
          let y = opaque (replicate 50 10 with [x] = x)
