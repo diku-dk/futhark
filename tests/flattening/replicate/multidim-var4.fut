@@ -8,9 +8,13 @@ def main [n] [m] (o: i64) (xs: [n]i64) (ys: [m]i64) =
                 map (\y ->
                        let row_y = replicate y j with [1] = j + x + y
                        let mat = replicate x (replicate y (j + 4)) with [0] = row_y
-                      --  let d = map (\row -> i64.sum row) mat
-                      --  in i64.sum d)
-                      in mat[0][0])
+                       let mat2 =
+                         map (\row ->
+                                let s = mat[0][0]
+                                let rs = row[0]
+                                in map (\x -> x + 3 + rs + s) row)
+                             mat
+                       in mat2[0][0])
                     ys)
              xs)
       (iota o)

@@ -10,8 +10,8 @@
 -- output         { empty([0]i64) }
 
 #[noinline]
-let foo (x : i64) =
+def foo (x: i64) =
   let ys = iota (i64.abs x)
-   in if x < 0 then -1 else reduce (+) 0 ys
+  in if x < 0 then -1 else reduce (+) 0 ys
 
-def main [n] (xs : [n]i64) = map foo xs
+def main [n] (xs: [n]i64) = map foo xs

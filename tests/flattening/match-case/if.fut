@@ -12,6 +12,6 @@
 -- output         { empty([0]i64) }
 
 #[noinline]
-let foo (x : i64) = if x < 0 then x * x else x * 2
+def foo (x: i64) = if x < 0 then x * x else x * 2
 
-def main [n] (xs : [n]i64) = map foo xs
+def main [n] (xs: [n]i64) = map foo xs

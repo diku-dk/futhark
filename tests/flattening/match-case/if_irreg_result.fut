@@ -10,11 +10,11 @@
 -- output         { empty([0]i64) }
 
 #[noinline]
-let bar (x : i64) = if x < 0 then iota (x*x) else iota x
+def bar (x: i64) = if x < 0 then iota (x * x) else iota x
 
 #[noinline]
-let foo (x : i64) =
+def foo (x: i64) =
   let ys = bar x
-   in reduce (+) 0 ys
+  in reduce (+) 0 ys
 
-def main [n] (xs : [n]i64) = map foo xs
+def main [n] (xs: [n]i64) = map foo xs

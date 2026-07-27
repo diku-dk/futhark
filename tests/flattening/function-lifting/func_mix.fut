@@ -9,17 +9,15 @@
 -- input  { empty([0]i64) empty([0]i64) }
 -- output { empty([0]i64) }
 
-
 #[noinline]
-let bar (y : i64) (xs : []i64) : ([]i64, i64) =
+def bar (y: i64) (xs: []i64) : ([]i64, i64) =
   let z = y * reduce (+) 0 xs
   in (iota z, z)
 
 #[noinline]
-let foo (a : i64) (b : i64) =
-  let xs      = iota a
+def foo (a: i64) (b: i64) =
+  let xs = iota a
   let (ys, z) = bar b xs
   in reduce (+) 0 ys - z
 
-def main (as : []i64) (bs : []i64) = map2 foo as bs
-
+def main (as: []i64) (bs: []i64) = map2 foo as bs

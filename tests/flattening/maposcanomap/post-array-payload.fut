@@ -8,5 +8,6 @@ entry main [n] [m] [k] (xsss: [n][m][k]i64) =
          let xs' = scan (+) 0 xs
          in map2 (\x ys ->
                     reduce (+) 0 (map (+ x) ys))
-                 xs' xss)
+                 xs'
+                 xss)
       xsss

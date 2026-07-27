@@ -5,13 +5,12 @@
 -- input  { empty([0]i64) }
 -- auto output
 
+#[noinline]
+def bar (xs: []i64) : i64 = reduce (+) 0 xs
 
 #[noinline]
-let bar (xs : []i64) : i64 = reduce (+) 0 xs
-
-#[noinline]
-let foo (x : i64) =
-  let xs = replicate 5 x 
+def foo (x: i64) =
+  let xs = replicate 5 x
   in bar xs
 
-def main (xs : []i64) = map foo xs
+def main (xs: []i64) = map foo xs

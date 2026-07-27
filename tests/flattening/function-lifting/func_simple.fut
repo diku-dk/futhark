@@ -6,11 +6,10 @@
 -- input  { empty([0]i64) }
 -- output { empty([0]i64) }
 
+#[noinline]
+def bar (x: i64) = x + 1
 
 #[noinline]
-def bar (x : i64) = x + 1
+def foo (x: i64) = bar x
 
-#[noinline]
-def foo (x : i64) = bar x
-
-def main (xs : []i64) = map foo xs
+def main (xs: []i64) = map foo xs

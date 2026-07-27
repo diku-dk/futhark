@@ -6,22 +6,21 @@
 -- input  { empty([0]i64) }
 -- output { empty([0]i64) }
 
+#[noinline]
+def v1 : []i64 = [5, 9, 6]
 
 #[noinline]
-let v1 : []i64 = [5,9,6]
+def v2 : []i64 = [3, 1, 4, 1, 5]
 
 #[noinline]
-let v2 : []i64 = [3,1,4,1,5]
-
-#[noinline]
-let bar (xs : []i64) (y : i64) : (i64, []i64) =
+def bar (xs: []i64) (y: i64) : (i64, []i64) =
   let z = y + reduce (+) 0 xs
   in (z, copy v2)
 
 #[noinline]
-let foo (x : i64) =
+def foo (x: i64) =
   let (y, zs) = bar v1 x
   let z = reduce (+) 0 zs
   in (y * z)
 
-def main (xs : []i64) = map foo xs
+def main (xs: []i64) = map foo xs

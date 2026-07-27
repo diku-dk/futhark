@@ -10,15 +10,16 @@
 -- output         { empty([0]i64) }
 
 #[noinline]
-let bar [n] (xs : [n]i64) =
-  if n <= 5 then (false, xs)
-            else (true, copy xs with [5] = n)
+def bar [n] (xs: [n]i64) =
+  if n <= 5
+  then (false, xs)
+  else (true, copy xs with [5] = n)
 
 #[noinline]
-let foo (x : i64) =
-  let xs = iota x in
+def foo (x: i64) =
+  let xs = iota x
   let (b, ys) = bar xs
   let z = reduce (+) 0 ys
-   in if b then z else z * 2
+  in if b then z else z * 2
 
-def main [n] (xs : [n]i64) = map foo xs
+def main [n] (xs: [n]i64) = map foo xs
