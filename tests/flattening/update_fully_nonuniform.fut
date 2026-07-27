@@ -1,4 +1,4 @@
--- Fully irregular test-case
+-- Fully nonuniform test-case
 -- ==
 -- input { [5i64,6i64,7i64] [2i64,3i64,1i64] [3i64,1i64,2i64] [5i64,6i64,3i64] [1i64,2i64,3i64] }
 -- output { [4i64,9i64,19i64] }

@@ -1,4 +1,4 @@
--- Maximally irregular case.
+-- Maximally nonuniform case.
 -- ==
 -- input { [0i64, 2, 1, 3, 2, 3, 10]
 --         [2,3,1,4,5,6,7]

@@ -1,4 +1,4 @@
--- Completely regular case.
+-- Completely uniform case.
 -- ==
 -- input { [[1,2,3], [4,5,6], [7,8,9]]
 --         [[0i64, 2], [-1i64, 0], [1i64,0]]

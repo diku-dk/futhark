@@ -1,9 +1,12 @@
 -- ==
 -- input { [10i64,7i64,3i64] [10i64,7i64,3i64]}
 -- auto output
+-- structure gpu { /Loop/WhileLoop 1 }
+
 def main [n] (xs: [n]i64) (is: [n]i64) =
-  map2 (\xs it ->
-          let ys = iota xs
+  #[incremental_flattening(only_inner)]
+  map2 (\x it ->
+          let ys = iota x
           let (acc_res, _) =
             loop (acc, j) = (ys, 1)
             for i < it do
