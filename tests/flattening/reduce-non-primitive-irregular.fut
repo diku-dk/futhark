@@ -8,7 +8,7 @@
 -- ==
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
--- structure gpu { /Loop 1 /SegScan 5 }
+-- structure gpu { /Loop 1 /SegScan 1 /Apply/segiota 1 }
 
 def main (ns: []i64) =
   #[incremental_flattening(only_inner)]

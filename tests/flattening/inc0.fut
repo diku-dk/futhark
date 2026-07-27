@@ -1,7 +1,7 @@
 -- ==
 -- input { [[4i64, 5i64, 6i64], [7i64, 8i64, 9i64]] [1i64, 2i64, 3i64]  }
 -- auto output
--- structure gpu { SegScan 3 SegRed 0 }
+-- structure gpu { SegScan 1 SegRed 0 /Apply/segiota 1 }
 
 def main xss ys =
   #[incremental_flattening(only_inner)]

@@ -2,7 +2,7 @@
 -- ==
 -- input { [4i64,5i64,6i64] [3i64,3i64,3i64] }
 -- output { [3i64,7i64,12i64] }
--- structure gpu { /WithAcc 4 Update 0 }
+-- structure gpu { /WithAcc 1 /Apply/segiota 2 /Apply/repiota 1 Update 0 }
 
 entry main [n] (xs: [n]i64) (vs: [n]i64) =
   #[incremental_flattening(only_inner)]

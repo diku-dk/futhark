@@ -1,7 +1,7 @@
 -- ==
 -- input { [2i64, 3i64] [1i64, 12i64] }
 -- output { [3i64, 2i64] }
--- structure gpu { Rearrange 0 SegMap 9 }
+-- structure gpu { Rearrange 0 SegMap 4 /Apply/repiota 1 /Apply/segiota 1 }
 
 def main (ns: []i64) (is: []i64) =
   map2 (\n i ->

@@ -35,7 +35,6 @@ import Control.Monad (forM, forM_, (<=<))
 import Control.Monad.State.Strict
 import Data.Foldable (toList)
 import Data.Maybe (fromMaybe)
-import Data.Text qualified as T
 import Futhark.IR.GPU
 import Futhark.IR.SOACS as SOACS
 import Futhark.MonadFreshNames
@@ -47,9 +46,6 @@ import Futhark.Util (unsnoc)
 
 mkSegSpace :: (MonadFreshNames m) => [(VName, SubExp)] -> m SegSpace
 mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims
-
-builtinName :: T.Text -> Name
-builtinName = nameFromText . ("builtin/" <>)
 
 segIotaName, repIotaName, prefixSumName, partitionName :: Name
 segIotaName = builtinName "segiota"

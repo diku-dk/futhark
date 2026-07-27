@@ -4,7 +4,7 @@
 --          [[10i64,11i64,12i64],[13i64,14i64,15i64],[16i64,17i64,18i64]]]
 --         2i64 }
 -- auto output
--- structure gpu { Rearrange 0 SegMap 14 }
+-- structure gpu { Rearrange 0 SegMap 9 /Apply/repiota 2 /Apply/segiota 1 }
 
 def main [k] (is: [k]i64) (xss: [k][][]i64) (r: i64) =
   map2 (\i xs ->
