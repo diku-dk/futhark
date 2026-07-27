@@ -4,6 +4,7 @@
 -- auto output
 -- input  { empty([0]i64) }
 -- auto output
+-- structure gpu { /Apply 2 /SegRed 1 /SegMap 0 }
 
 #[noinline]
 def bar (xs: []i64) : i64 = reduce (+) 0 xs

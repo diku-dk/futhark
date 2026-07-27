@@ -4,6 +4,7 @@
 -- output { [0i64,0i64,1i64,3i64,6i64,10i64] }
 -- input  { empty([0]i64) }
 -- output { empty([0]i64) }
+-- structure gpu { /Apply 3 /SegMap 2 }
 
 #[noinline]
 def bar (x: i64) : []i64 = iota x

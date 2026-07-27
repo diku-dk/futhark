@@ -7,6 +7,7 @@
 -- output { [0i64, 3990i64, 3990i64, 33i64, 0i64, 0i64] }
 -- input  { empty([0]i64) empty([0]i64) }
 -- output { empty([0]i64) }
+-- structure gpu { /Apply 7 /SegMap 9 }
 
 #[noinline]
 def baz (xs: []i64) (y: i64) : ([]i64, []i64) =

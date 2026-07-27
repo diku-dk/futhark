@@ -8,6 +8,7 @@
 -- output { [0i64, 9i64, 9i64, 0i64, 0i64, 0i64] }
 -- input  { empty([0]i64) empty([0]i64) }
 -- output { empty([0]i64) }
+-- structure gpu { /Apply 4 /SegMap 5 }
 
 #[noinline]
 def bar (y: i64) (xs: []i64) : ([]i64, i64) =

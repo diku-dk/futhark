@@ -6,6 +6,7 @@
 -- output { [0i64, 0i64, 0i64, 3i64, 15i64,45i64] }
 -- input  { empty([0]i64) }
 -- output { empty([0]i64) }
+-- structure gpu { /Apply 4 }
 
 #[noinline]
 def bar (xs: []i64) : []i64 =

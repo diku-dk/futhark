@@ -5,6 +5,7 @@
 -- output { [280i64,294i64,308i64,322i64,336i64,350i64] }
 -- input  { empty([0]i64) }
 -- output { empty([0]i64) }
+-- structure gpu { /Apply 2 /SegMap 2 /SegRed 2 }
 
 #[noinline]
 def v1 : []i64 = [5, 9, 6]
