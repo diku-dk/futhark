@@ -7,5 +7,8 @@
 -- error: .
 -- input { [1i64,-2i64] [0i64,1i64] }
 -- error: .
+-- structure gpu { Iota 0 /Apply/segiota 1 }
 
-def main = map2 (\n (i: i64) -> i64.sum (opaque (iota n))[i:])
+def main ns is =
+  #[incremental_flattening(only_inner)]
+  map2 (\n (i: i64) -> i64.sum (opaque (iota n))[i:]) ns is

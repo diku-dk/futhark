@@ -5,5 +5,6 @@
 -- error: out of bounds
 -- input { [1i64,-2i64] [0,1] }
 -- error: Range 0..1..<-2 is invalid
+-- structure gpu { Iota 0 /Apply/segiota 1 Assert 2 }
 
 def main = map2 (\n (i: i32) -> (opaque (iota n))[i])
