@@ -172,17 +172,32 @@ compileSegRed' pat grid space segbinops map_body_cont
         )
           <> ("Pattern: " <> prettyString pat)
   | otherwise = do
-      chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
+      -- For noncommutative primitive reductions, expose chunk_size as a
+      -- tuning parameter (similar to SegScan's chunk size), so that the
+      -- items-per-thread can be adjusted at runtime.  For other cases the
+      -- chunk is always 1 and a tuning parameter would have no effect.
+      (chunk_v, chunk_constexp) <-
+        if is_noncomm_prim
+          then do
+            v <- dPrim "chunk_size"
+            let name = nameFromText $ prettyText $ tvVar v
+            addTuningParam name Nothing
+            emit . Imp.GetUserParam (tvVar v) name . isInt64
+              =<< kernelConstToExp chunk_const
+            pure (v, LeafExp (Imp.SizeUserParam name chunk_const) int64)
+          else do
+            v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
+            pure (v, chunk_const)
       case unSegSpace space of
         [(_, Constant (IntValue (Int64Value 1))), _] ->
-          compileReduction (chunk_v, chunk_const) nonsegmentedReduction
+          compileReduction (chunk_v, chunk_constexp) nonsegmentedReduction
         _ -> do
           let segment_size = pe64 $ last $ segSpaceDims space
               use_small_segments = segment_size * 2 .<. pe64 (unCount tblock_size)
           sIf
             use_small_segments
-            (compileReduction (chunk_v, chunk_const) smallSegmentsReduction)
-            (compileReduction (chunk_v, chunk_const) largeSegmentsReduction)
+            (compileReduction (chunk_v, chunk_constexp) smallSegmentsReduction)
+            (compileReduction (chunk_v, chunk_constexp) largeSegmentsReduction)
   where
     compileReduction chunk f =
       f pat num_tblocks tblock_size chunk space segbinops map_body_cont
@@ -192,9 +207,12 @@ compileSegRed' pat grid space segbinops map_body_cont
     num_tblocks = gridNumBlocks grid
     tblock_size = gridBlockSize grid
 
-    chunk_const =
-      if Noncommutative `elem` map segBinOpComm segbinops
+    is_noncomm_prim =
+      Noncommutative `elem` map segBinOpComm segbinops
         && all isPrimSegBinOp segbinops
+
+    chunk_const =
+      if is_noncomm_prim
         then getRedChunkSize param_types
         else Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
 
