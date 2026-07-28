@@ -1346,13 +1346,16 @@ evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec vb@(ValBind (Just _) vn@(VName n _) _ _ (Info ret) tparams ps _ _ _ _)) | "$external" `elem` valBindAttrs vb = localExts $ do
   let bv = Just $ T.BoundV [] $ evalToStruct $ expandType env $ funType ps ret
   sizes <- extEnv
-  if null tparams then do
-    f <- typeShape <$> evalTypeFully (structToEval env $ toStruct $ retType ret) >>= extFun n (length ps)
-    pure $ mempty {envTerm = M.singleton vn $ TermValue bv f} <> sizes
-  else
-    -- TODO: Add missing sizes?
-    let pfn t = typeShape . snd . unfoldFunType <$> evalTypeFully t >>= extFun n (length ps)
-     in pure $ mempty {envTerm = M.singleton vn $ TermPoly bv pfn} <> sizes
+  if null tparams
+    then do
+      f <- evalTypeFully (structToEval env $ toStruct $ retType ret) >>= extFun n (length ps) . typeShape
+      pure $ mempty {envTerm = M.singleton vn $ TermValue bv f} <> sizes
+    else
+      -- TODO: Add missing sizes?
+      let pfn t =
+            extFun n (length ps) . typeShape . snd . unfoldFunType
+              =<< evalTypeFully t
+       in pure $ mempty {envTerm = M.singleton vn $ TermPoly bv pfn} <> sizes
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env v tparams ps ret fbody
   sizes <- extEnv

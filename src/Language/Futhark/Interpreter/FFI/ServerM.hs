@@ -41,18 +41,18 @@ where
 
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Reader (ReaderT, runReaderT, asks, MonadReader)
-import Data.IORef (IORef, newIORef, mkWeakIORef, readIORef)
+import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
+import Data.IORef (IORef, mkWeakIORef, newIORef, readIORef)
+import Data.List (intercalate)
 import Data.Map qualified as M
 import Data.Text qualified as T
-import Data.Unique (newUnique, hashUnique)
+import Data.Unique (hashUnique, newUnique)
 import Data.Vector.Storable qualified as V
 import Futhark.Data qualified as D
 import Futhark.Server qualified as S
 import Futhark.Server.Values qualified as S
 import Language.Futhark.Interpreter.FFI.AtomicList as AL
 import Language.Futhark.Syntax
-import Data.List (intercalate)
 
 -- | Converts a PrimValue to a Data Value
 pToD :: PrimValue -> D.Value
@@ -97,16 +97,16 @@ varName :: ValueRef -> IO S.VarName
 varName (ValueRef r) = readIORef r
 
 data Server = Server
-  { server :: S.Server
-  , queue :: AL.AtomicList S.VarName
+  { server :: S.Server,
+    queue :: AL.AtomicList S.VarName
   }
 
 newtype ServerM a = ServerM (ReaderT Server (ExceptT String IO) a)
   deriving
-    ( Functor
-    , Applicative
-    , Monad
-    , MonadError String
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadError String
     )
 
 startServer :: S.ServerCfg -> IO Server
@@ -125,12 +125,12 @@ call :: Name -> [ValueRef] -> ServerM ValueRef
 call fn ps = ServerM $ do
   s <- asks server
   nps <- liftIO $ mapM varName ps
-  ndst <- liftIO $ uniqueName
+  ndst <- liftIO uniqueName
   _ <- liftIO (S.cmdCall s (nameToText fn) ndst nps) >>= throwServerLeft ("cmdCall failed on function " ++ nameToString fn ++ " with parameters " ++ csList (map T.unpack nps) ++ ".")
   mkValueRef ndst
 
 uniqueName :: IO S.VarName
-uniqueName = ("v"<>) . T.show . hashUnique <$> newUnique
+uniqueName = ("v" <>) . T.show . hashUnique <$> newUnique
 
 -- Interrogation
 inputs :: Name -> ServerM [S.TypeName]
@@ -165,7 +165,7 @@ getPrim vr = ServerM $ do
 putPrim :: PrimValue -> ServerM ValueRef
 putPrim p = ServerM $ do
   s <- asks server
-  ndst <- liftIO $ uniqueName
+  ndst <- liftIO uniqueName
   liftIO (S.putValue s ndst $ pToD p) >>= throwServerJust ("Failed to put primitive " ++ show p ++ ".")
   mkValueRef ndst
 
@@ -184,7 +184,7 @@ mkArray :: S.TypeName -> [Int64] -> [ValueRef] -> ServerM ValueRef
 mkArray tn dims vs = ServerM $ do
   s <- asks server
   vns <- liftIO $ mapM varName vs
-  dst <- liftIO $ uniqueName
+  dst <- liftIO uniqueName
   liftIO (S.cmdNewArray s dst tn (map fromIntegral dims) vns) >>= throwServerJust ("cmdNewArray failed on type " ++ T.unpack tn ++ " with variables " ++ csList (map T.unpack vns) ++ ".")
   mkValueRef dst
 
@@ -198,7 +198,7 @@ index :: [Int64] -> ValueRef -> ServerM ValueRef
 index is src = ServerM $ do
   s <- asks server
   nsrc <- liftIO $ varName src
-  ndst <- liftIO $ uniqueName
+  ndst <- liftIO uniqueName
   liftIO (S.cmdIndex s ndst nsrc $ map fromIntegral is) >>= throwServerJust ("cmdIndex failed on source " ++ T.unpack nsrc ++ ", destination " ++ T.unpack ndst ++ ", and index " ++ show is ++ ".")
   mkValueRef ndst
 
@@ -212,9 +212,15 @@ fields tn = ServerM $ do
 mkRecord :: S.TypeName -> M.Map Name ValueRef -> ServerM ValueRef
 mkRecord tn vrm = ServerM $ do
   s <- asks server
-  fns <- map (\f -> nameFromText $ S.fieldName f) <$> (liftIO (S.cmdFields s tn) >>= throwServerLeft ("cmdFields failed on type " ++ T.unpack tn ++ "."))
-  vns <- mapM (\fn -> (throwNothing ("Mising field " ++ nameToString fn ++ " when constructing record of type " ++ T.unpack tn ++ ".") $ M.lookup fn vrm) >>= liftIO . varName) fns
-  dst <- liftIO $ uniqueName
+  fns <- map (nameFromText . S.fieldName) <$> (liftIO (S.cmdFields s tn) >>= throwServerLeft ("cmdFields failed on type " ++ T.unpack tn ++ "."))
+  vns <-
+    mapM
+      ( \fn ->
+          throwNothing ("Mising field " ++ nameToString fn ++ " when constructing record of type " ++ T.unpack tn ++ ".") (M.lookup fn vrm)
+            >>= liftIO . varName
+      )
+      fns
+  dst <- liftIO uniqueName
   liftIO (S.cmdNew s dst tn vns) >>= throwServerJust ("cmdNew failed on type " ++ T.unpack tn ++ " with variables " ++ csList (map T.unpack vns) ++ ".")
   mkValueRef dst
 
@@ -222,7 +228,7 @@ project :: ValueRef -> Name -> ServerM ValueRef
 project src fn = ServerM $ do
   s <- asks server
   nsrc <- liftIO $ varName src
-  ndst <- liftIO $ uniqueName
+  ndst <- liftIO uniqueName
   liftIO (S.cmdProject s ndst nsrc $ nameToText fn) >>= throwServerJust ("cmdKind failed on source " ++ T.unpack nsrc ++ ", destination " ++ T.unpack ndst ++ ", and field " ++ nameToString fn ++ ".")
   mkValueRef ndst
 
@@ -237,7 +243,7 @@ mkSum :: S.TypeName -> Name -> [ValueRef] -> ServerM ValueRef
 mkSum tn vn vrs = ServerM $ do
   s <- asks server
   vns <- mapM (liftIO . varName) vrs
-  dst <- liftIO $ uniqueName
+  dst <- liftIO uniqueName
   liftIO (S.cmdConstruct s dst tn (nameToText vn) vns) >>= throwServerJust ("cmdConstruct failed on type " ++ T.unpack tn ++ ", variant " ++ nameToString vn ++ " with variables " ++ csList (map T.unpack vns) ++ ".")
   mkValueRef dst
 
@@ -245,7 +251,7 @@ destruct :: ValueRef -> ServerM [ValueRef]
 destruct src = do
   vn <- variant src
   tn <- vtype src
-  vts <- M.lookup vn <$> variants tn >>= throwNothing ("Variant " ++ nameToString vn ++ " is not part of its own sum type, " ++ T.unpack tn ++ ". This should be impossible.")
+  vts <- variants tn >>= throwNothing ("Variant " ++ nameToString vn ++ " is not part of its own sum type, " ++ T.unpack tn ++ ". This should be impossible.") . M.lookup vn
   ServerM $ do
     s <- asks server
     nsrc <- liftIO $ varName src
@@ -265,22 +271,22 @@ formatServerError :: String -> S.CmdFailure -> String
 formatServerError e f | e == mempty = formatServerError "Server error." f
 formatServerError e f = T.unpack $ T.unlines $ T.pack e : "Failure message:" : S.failureMsg f
 
-throwServerLeft :: MonadError String m => String -> Either S.CmdFailure a -> m a
+throwServerLeft :: (MonadError String m) => String -> Either S.CmdFailure a -> m a
 throwServerLeft e (Left c) = throwError $ formatServerError e c
 throwServerLeft _ (Right v) = pure v
 
-throwServerJust :: MonadError String m => String -> Maybe S.CmdFailure -> m ()
+throwServerJust :: (MonadError String m) => String -> Maybe S.CmdFailure -> m ()
 throwServerJust e c = throwJust $ formatServerError e <$> c
 
-throwLeft :: MonadError String m => String -> Either T.Text a -> m a
+throwLeft :: (MonadError String m) => String -> Either T.Text a -> m a
 throwLeft t (Left e) = throwError $ T.unpack $ T.unlines [T.pack t, e]
 throwLeft _ (Right v) = pure v
 
-throwJust :: MonadError String m => Maybe String -> m ()
+throwJust :: (MonadError String m) => Maybe String -> m ()
 throwJust (Just e) = throwError e
 throwJust Nothing = pure ()
 
-throwNothing :: MonadError String m => String -> Maybe a -> m a
+throwNothing :: (MonadError String m) => String -> Maybe a -> m a
 throwNothing _ (Just v) = pure v
 throwNothing e Nothing = throwError e
 

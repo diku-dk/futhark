@@ -26,7 +26,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
 import Futhark.Compiler.Program (VFS)
-import Futhark.Eval (Evaluation (abort), EvalConfig (evalPrintWarnings, evalFile), evalConfig, newFutharkiState, runEvalRecordRef, runExpr)
+import Futhark.Eval (EvalConfig (evalFile, evalPrintWarnings), Evaluation (abort), evalConfig, newFutharkiState, runEvalRecordRef, runExpr)
 import Futhark.LSP.CommandType qualified as CommandType
 import Futhark.LSP.Tool (Execute, transformVFS)
 import Futhark.Util (showText)
@@ -291,7 +291,7 @@ executeEvalLens (EvalLensData docUri line) = do
                 toNormalizedUri docUri
                   & uriToNormalizedFilePath
                   & fmap fromNormalizedFilePath
-          let evalConfig' = evalConfig { evalPrintWarnings = False, evalFile = filePath }
+          let evalConfig' = evalConfig {evalPrintWarnings = False, evalFile = filePath}
 
           -- load the file the expression is located in
           interpreterState <-
