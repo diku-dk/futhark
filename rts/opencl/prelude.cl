@@ -29,9 +29,21 @@ typedef ulong uint64_t;
 #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
 #pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable
 
+#if (__OPENCL_C_VERSION__ >= 200 && __OPENCL_C_VERSION__ < 300) || \
+  (defined(__opencl_c_atomic_order_acq_rel) && \
+   defined(__opencl_c_atomic_scope_device))
+#define FUTHARK_OPENCL_DEVICE_ATOMICS
+#endif
+
 // NVIDIAs OpenCL does not create device-wide memory fences (see #734), so we
-// use inline assembly if we detect we are on an NVIDIA GPU.
-#ifdef cl_nv_pragma_unroll
+// use inline assembly if we detect we are on an NVIDIA GPU.  OpenCL 2.0
+// provides a portable device-wide fence.
+#ifdef FUTHARK_OPENCL_DEVICE_ATOMICS
+static inline void mem_fence_global() {
+  atomic_work_item_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE,
+                         memory_order_acq_rel, memory_scope_device);
+}
+#elif defined(cl_nv_pragma_unroll)
 static inline void mem_fence_global() {
   asm("membar.gl;");
 }
