@@ -29,7 +29,7 @@ import Futhark.Error (externalErrorS, prettyCompilerError)
 import Futhark.FreshNames (VNameSource)
 import Futhark.Server qualified as S
 import Futhark.Test (FutharkExe (..), compileProgram)
-import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, putDocLn, hardline)
+import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, hardline, putDocLn)
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Interpreter.FFI.Push qualified as FFI
 import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
@@ -115,9 +115,12 @@ runExpr (InterpreterState (src, env, ctx, s)) str = do
   case pval of
     Left err -> abort $ I.prettyInterpreterError err
     Right val -> do
-      val' <- liftIO (either error id <$> case s of
-        Nothing -> error "External call, but no server."
-        Just s' -> FFI.runServerM s' $ FFI.getLazy val)
+      val' <-
+        liftIO
+          ( either error id <$> case s of
+              Nothing -> pure $ Right val
+              Just s' -> FFI.runServerM s' $ FFI.getLazy val
+          )
       pure $ I.prettyValue val' <> hardline
 
 data EvalConfig = EvalConfig
@@ -228,6 +231,9 @@ runInterpreterNoBreak s m = runF m (pure . Right) intOp
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
     intOp (I.ExtOpFFI sm c) =
-      liftIO (either error id <$> case s of
-        Nothing -> error "External call, but no server."
-        Just s' -> FFI.runServerM s' sm) >>= c
+      liftIO
+        ( either error id <$> case s of
+            Nothing -> error "External call, but no server."
+            Just s' -> FFI.runServerM s' sm
+        )
+        >>= c
