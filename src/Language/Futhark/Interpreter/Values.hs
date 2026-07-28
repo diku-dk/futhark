@@ -151,7 +151,7 @@ prettyValueWith pprPrim = pprPrec 0
     pprPrec p (ValueSum _ n vs) =
       parensIf (p > (0 :: Int)) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
     pprPrec _ (ValueAD _ v) = pprPrim $ putV $ AD.varPrimal v
-    pprPrec _ (ValueLazyFFI _ _ _) = "#<ffi_ref>"
+    pprPrec _ (ValueLazyFFI {}) = "#<ffi_ref>"
     pprElem v@ValueArray {} = pprPrec 0 v
     pprElem v = group $ pprPrec 0 v
 
