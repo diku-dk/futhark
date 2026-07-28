@@ -886,7 +886,7 @@ unRetType (RetType ext t) = do
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)
 defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
-  let (argtypes, rettype) = unfoldFunType t
+  let (argtypes, rettype) = first (map snd) $ unfoldFunType t
   sv <- lookupVar (toStruct t) (qualLeaf qn)
 
   case sv of
@@ -1068,7 +1068,7 @@ defuncApply f args appres loc = do
           (argtypes, _) = unfoldFunType $ typeOf f
       fmap (first $ updateReturn appres) $
         foldM (defuncApplyArg (fname, loc)) (f', f_sv) $
-          NE.zip args . NE.tails $
+          NE.zip args . NE.tails . map snd $
             argtypes
   where
     intrinsicOrHole e' = do
@@ -1318,6 +1318,24 @@ selfSV name params rettype
           self = Var (qualName name) (Info (structTypeFromSV inner)) mempty
        in DynamicFun (self, inner) inner
 
+-- | The self static value binding for a top-level binding, if it is first-order
+-- (see 'selfSV'). We register these before for all bindings before
+-- defunctionalising any of them, so that mutually recursive references resolve.
+-- The real static value of each binding, added as it is processed, takes
+-- precedence over the bindings produced here. This means that true mutually
+-- recursive higher-order functions probably may not work, but our goal here is
+-- solely to handle the administrative mutually recursive functions produced by
+-- lambda lifting.
+selfBinding :: ValBind -> Env
+selfBinding valbind =
+  case selfSV (valBindName valbind) (valBindParams valbind) rettype of
+    Just self_sv ->
+      M.singleton (valBindName valbind) $
+        Binding (Just (first (map typeParamName) (valBindTypeScheme valbind))) self_sv
+    Nothing -> mempty
+  where
+    Info (RetType _ rettype) = valBindRetType valbind
+
 -- | Defunctionalize a top-level value binding. Returns the
 -- transformed result as well as an environment that binds the name of
 -- the value binding to the static value of the transformed body.  The
@@ -1353,13 +1371,7 @@ defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)
   -- defunctionalised when applied), so recursive references resolve against the
   -- global scope, and the recursion is tied off by memoisation in
   -- 'defuncApplyArg' (see Note [Lifting and recursion]).
-  let self = case selfSV name params rettype of
-        Just self_sv ->
-          M.insert name $
-            Binding
-              (Just (first (map typeParamName) (valBindTypeScheme valbind)))
-              self_sv
-        Nothing -> id
+  let self = (selfBinding valbind <>)
   -- The self static value goes into the *global* environment (as well as the
   -- local one) so that it is treated as a top-level function: recursive uses of
   -- it as a value are then eta-expanded and closure-converted like any other
@@ -1397,11 +1409,15 @@ defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)
 
 -- | Defunctionalize a list of top-level declarations.
 defuncVals :: [ValBind] -> DefM ()
-defuncVals [] = pure ()
-defuncVals (valbind : ds) = do
-  (valbind', env) <- defuncValBind valbind
-  addValBind valbind'
-  local (bimap (env <>) (env <>)) $ defuncVals ds
+defuncVals binds =
+  local (bimap (self_env <>) (self_env <>)) $ go binds
+  where
+    self_env = foldMap selfBinding binds
+    go [] = pure ()
+    go (valbind : ds) = do
+      (valbind', env) <- defuncValBind valbind
+      addValBind valbind'
+      local (bimap (env <>) (env <>)) $ go ds
 
 {-# NOINLINE transformProg #-}
 

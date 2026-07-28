@@ -443,6 +443,7 @@ withModParam (ModParam pname psig_e NoInfo loc) m = do
   (MTy p_abs p_mod, psig_e') <- checkModTypeExp psig_e
   bindSpaced1 Term pname loc $ \pname' -> do
     let in_body_env = mempty {envModTable = M.singleton pname' p_mod}
+    addTySet p_abs
     localEnv in_body_env $
       m (ModParam pname' psig_e' (Info $ map qualLeaf $ M.keys p_abs) loc) p_abs p_mod
 
@@ -632,7 +633,8 @@ entryPoint doc params orig_ret_te (RetType _ret orig_ret) =
       ([], EntryType t te)
 
 -- | Check that a type is non-functional, looking up the liftedness of abstract
--- types in the environment. This works because entry points cannot be polymorphic, so any remaining type names must be abstract.
+-- types in the environment. This works because entry points cannot be
+-- polymorphic, so any remaining type names must be abstract.
 orderZeroM :: TypeBase dim u -> TypeM Bool
 orderZeroM t = do
   (orderZero t &&) . and <$> mapM isUnlifted (typeQualVars t)
@@ -677,7 +679,7 @@ checkEntryPoint loc tparams params rettype
   where
     (RetType _ rettype_t) = rettype
     (rettype_params, rettype') = unfoldFunType rettype_t
-    param_ts = map patternType params ++ rettype_params
+    param_ts = map patternType params ++ map snd rettype_params
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind vb = do
@@ -695,11 +697,12 @@ checkValBind vb = do
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let entry' = Info (entryPoint doc params' maybe_tdecl' rettype) <$ entry
+      vb' = ValBind entry' fname fname_loc maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
+
   case entry' of
     Just _ -> checkEntryPoint loc tparams' params' rettype
     _ -> pure ()
 
-  let vb' = ValBind entry' fname fname_loc maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
   pure
     ( mempty
         { envVtable =

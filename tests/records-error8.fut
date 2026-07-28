@@ -1,6 +1,6 @@
 -- Unification of variables with incompletely known and distinct fields.
 -- ==
--- error: must be a record with fields
+-- error: Cannot unify record type
 
 def sameconst '^a (_: a) (y: a) = y
 

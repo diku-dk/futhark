@@ -122,9 +122,12 @@ replaceInStm (Let (Pat elems) (StmAux c a loc d) e) = do
   elems' <- mapM replaceInPatElem elems
   e' <- replaceInExp elems' e
   entries <- asks (M.elems . envCoalesceTab)
-  let c' = case filter (\entry -> (map patElemName elems `L.intersect` M.keys (vartab entry)) /= []) entries of
+  let bound_here = map patElemName elems
+      -- Also remove certs produced here to avoid circularity.
+      inScopeCerts = Certs . filter (`notElem` bound_here) . unCerts
+      c' = case filter (\entry -> (bound_here `L.intersect` M.keys (vartab entry)) /= []) entries of
         [] -> c
-        entries' -> c <> foldMap certs entries'
+        entries' -> c <> inScopeCerts (foldMap certs entries')
   pure $ Let (Pat elems') (StmAux c' a loc d) e'
   where
     replaceInPatElem :: PatElem LetDecMem -> UpdateM inner (PatElem LetDecMem)

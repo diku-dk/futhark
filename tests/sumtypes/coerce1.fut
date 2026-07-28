@@ -1,5 +1,4 @@
 -- ==
--- error: Ambiguous size.*anonymous size
 
 type opt 't = #some t | #none
 

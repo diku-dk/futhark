@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Added
 
+* The type checker has been rewritten, with contributions from Jacob Aleksandar
+  Siegumfeldt, Laust Kjæp Dengsøe, and Robert Schenck.
+
 ## Removed
 
 ## Changed
+
+* Local functions are no longer let-generalised (i.e., made polymorphic).
+  Explicitly polymorphic local functions are still supported.
 
 ## Fixed
 
@@ -23,6 +29,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Simplified fusibility check by removing redundant accumulator overlap check
   and fixed fusibility check by giving the correct number of elements.
+
+
+* A compiler crash due to missing double buffering inside sequential code
+  migrated to GPU. (#2513)
+
+* Atomics now use device-wide memory scope when compiling for OpenCL C 2.0, or
+  OpenCL C 3.0 with the required atomic features. OpenCL C 2.0 is selected
+  automatically for Rusticl on Asahi; elsewhere it must be selected explicitly.
+  This fixes incorrect results from cross-workgroup operations
+  ([#734](https://github.com/diku-dk/futhark/issues/734)).
 
 ## [0.26.4]
 

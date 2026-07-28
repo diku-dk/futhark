@@ -1,6 +1,6 @@
 -- The merge parameter in a loop cannot have function type.
 -- ==
--- error: used as loop variable
+-- error: may not be of function
 
 def id 'a (x: a) : a = x
 

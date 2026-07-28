@@ -149,9 +149,12 @@ optimiseStm (Let pat aux e) = do
           mapOnOp = onOp
         }
 
+optLoops :: (Constraints rep inner) => DoubleBufferM rep m -> DoubleBufferM rep m
+optLoops = local $ \env -> env {envOptimiseLoop = optimiseLoop}
+
 optimiseGPUOp :: OptimiseOp GPUMem
 optimiseGPUOp (Inner (SegOp op)) =
-  local inSegOp $ Inner . SegOp <$> mapSegOpM mapper op
+  optLoops $ Inner . SegOp <$> mapSegOpM mapper op
   where
     mapper =
       identitySegOpMapper
@@ -159,12 +162,13 @@ optimiseGPUOp (Inner (SegOp op)) =
           mapOnSegPostOpLambda = optimiseLambda,
           mapOnSegOpBody = optimiseKernelBody
         }
-    inSegOp env = env {envOptimiseLoop = optimiseLoop}
+optimiseGPUOp (Inner (GPUBody ts body)) =
+  optLoops $ Inner . GPUBody ts <$> optimiseBody body
 optimiseGPUOp op = pure op
 
 optimiseMCOp :: OptimiseOp MCMem
 optimiseMCOp (Inner (ParOp par_op op)) =
-  local inSegOp $
+  optLoops $
     Inner
       <$> (ParOp <$> traverse (mapSegOpM mapper) par_op <*> mapSegOpM mapper op)
   where
@@ -174,7 +178,6 @@ optimiseMCOp (Inner (ParOp par_op op)) =
           mapOnSegPostOpLambda = optimiseLambda,
           mapOnSegOpBody = optimiseKernelBody
         }
-    inSegOp env = env {envOptimiseLoop = optimiseLoop}
 optimiseMCOp op = pure op
 
 optimiseKernelBody ::

@@ -102,7 +102,7 @@ wellTypedLoopArg src sparams pat arg = do
 
 -- | An un-checked loop.
 type UncheckedLoop =
-  (PatBase NoInfo VName ParamType, LoopInitBase NoInfo VName, LoopFormBase NoInfo VName, ExpBase NoInfo VName)
+  (Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
 
 -- | A loop that has been type-checked.
 type CheckedLoop =
@@ -153,22 +153,13 @@ checkForEscaped loc initial_levels sparams = do
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
-  (ExpBase NoInfo VName -> TermTypeM Exp) ->
+  (Exp -> TermTypeM Exp) ->
   UncheckedLoop ->
   SrcLoc ->
   TermTypeM (CheckedLoop, AppRes)
 checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
-  loopinit' <- checkExp $ case loopinit of
-    LoopInitExplicit e -> e
-    LoopInitImplicit _ ->
-      -- Should have been filled out in Names
-      error "Unspected LoopInitImplicit"
+  loopinit' <- checkExp $ loopInitExp loopinit
   known_before <- M.keysSet <$> getConstraints
-  zeroOrderType
-    (mkUsage loopinit' "use as loop variable")
-    "type used as loop variable"
-    . toStruct
-    =<< expTypeFully loopinit'
 
   -- The handling of dimension sizes is a bit intricate, but very
   -- similar to checking a function, followed by checking a call to
@@ -228,18 +219,32 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
         -- This works because we know that each dimension from
         -- new_dims in the pattern is unique and distinct.
         areSameSize <- getAreSame
-        let onDims _ x y
+        let initialOf v = snd <$> L.find (areSameSize v . fst) new_dims_to_initial_dim
+            sameSize (Var x _ _) (Var y _ _) = areSameSize (qualLeaf x) (qualLeaf y)
+            sameSize x y = x == y
+            -- Does the body-produced size 'd' originate from the same loop
+            -- initial size as 'e''?
+            sharesInitial e' (Var d _ _)
+              | Just d_init <- initialOf (qualLeaf d) = sameSize d_init e'
+            sharesInitial _ _ = False
+            onDims _ x y
               | x == y = pure x
             onDims _ e d = do
               forM_ (fvVars $ freeInExp e) $ \v -> do
-                case L.find (areSameSize v . fst) new_dims_to_initial_dim of
-                  Just (_, e') ->
-                    if e' == d
-                      then modify $ first $ M.insert v $ ExpSubst e'
-                      else
+                case initialOf v of
+                  Just e'
+                    -- 'v' is invariant if the body reproduces its initial size,
+                    -- either directly or via another loop parameter that shares
+                    -- that initial size. Resolve it to the shared initial 'e''
+                    -- rather than to 'd', so that swapping two such parameters
+                    -- does not produce a cyclic substitution.
+                    | sameSize e' d
+                        || (v `elem` new_dims && sharesInitial e' d) ->
+                        modify $ first $ M.insert v $ ExpSubst e'
+                    | otherwise ->
                         unless (v `S.member` known_before) $
                           modify (second (v :))
-                  _ ->
+                  Nothing ->
                     pure ()
               pure e
         loopbody_t' <- normTypeFully loopbody_t
@@ -279,12 +284,15 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
   (sparams, looppat', form', loopbody') <-
     case form of
       For i uboundexp -> do
-        uboundexp' <-
-          require "being the bound in a 'for' loop" anySignedType
-            =<< checkExp uboundexp
-        bound_t <- expTypeFully uboundexp'
-        bindingIdent i bound_t $ \i' ->
-          bindingPat [] looppat loop_t $ \looppat' -> incLevel $ do
+        uboundexp' <- checkExp uboundexp
+        it <- expType uboundexp'
+        let i' = i {identType = Info it}
+        bindingIdent i' $
+          -- Note: bindingParam, not bindingPat, because we must
+          -- preserve the Diet of the pattern as determined by the
+          -- unsized type checker (the loop parameter may be
+          -- consumable).
+          bindingParam looppat loop_t $ \looppat' -> incLevel $ do
             loopbody' <- checkExp loopbody
             (sparams, looppat'') <- checkLoopReturnSize looppat' loopbody'
             pure
@@ -294,14 +302,13 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
                 loopbody'
               )
       ForIn xpat e -> do
-        (arr_t, _) <- newArrayType (mkUsage' (srclocOf e)) "e" 1
-        e' <- unifies "being iterated in a 'for-in' loop" arr_t =<< checkExp e
+        e' <- checkExp e
         t <- expTypeFully e'
         case t of
           _
             | Just t' <- peelArray 1 t ->
                 bindingPat [] xpat t' $ \xpat' ->
-                  bindingPat [] looppat loop_t $ \looppat' -> incLevel $ do
+                  bindingParam looppat loop_t $ \looppat' -> incLevel $ do
                     loopbody' <- checkExp loopbody
                     (sparams, looppat'') <- checkLoopReturnSize looppat' loopbody'
                     pure
@@ -315,7 +322,7 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
                   "Iteratee of a for-in loop must be an array, but expression has type"
                     <+> pretty t
       While cond ->
-        bindingPat [] looppat loop_t $ \looppat' ->
+        bindingParam looppat loop_t $ \looppat' ->
           incLevel $ do
             cond' <-
               checkExp cond

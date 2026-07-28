@@ -7,7 +7,6 @@ module Language.Futhark.Interpreter.Values
     Shape (..),
     ValueShape,
     typeShape,
-    structTypeShape,
 
     -- * Values
     Value (..),
@@ -94,12 +93,6 @@ typeShape t
       typeShape t'
   | otherwise =
       ShapeLeaf
-
-structTypeShape :: StructType -> Shape (Maybe Int64)
-structTypeShape = fmap dim . typeShape
-  where
-    dim (IntLit x _ _) = Just $ fromIntegral x
-    dim _ = Nothing
 
 -- | A fully evaluated Futhark value.
 data Value m
