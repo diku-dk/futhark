@@ -233,6 +233,12 @@ OPTIONS
   Set random seed used to generate values for property-based tests. If unset, a
   seed is randomly generated.
 
+--skip-compilation
+
+  Do not run the compiler, and instead assume that each test program
+  has already been compiled into a server-mode executable. Use with
+  caution.
+
 --futhark=program
 
   The program used to perform operations (eg. compilation).  Defaults

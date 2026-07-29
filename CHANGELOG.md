@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The type checker has been rewritten, with contributions from Jacob Aleksandar
   Siegumfeldt, Laust Kjæp Dengsøe, and Robert Schenck.
 
+* `futhark test` now supports a `--skip-compilation` flag, similar to
+  `futhark bench` (#1458).
+
 ## Removed
 
 ## Changed

@@ -32,6 +32,7 @@ import Futhark.Util.Pretty (annotate, bgColor, bold, hardline, pretty, putDoc, v
 import Futhark.Util.Table
 import System.Console.ANSI (clearFromCursorToScreenEnd, clearLine, cursorUpLine)
 import System.Console.Terminal.Size qualified as Terminal
+import System.Directory (doesFileExist)
 import System.Environment
 import System.Exit
 import System.FilePath
@@ -338,7 +339,12 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
 
       when (mode `elem` [Compile, Compiled]) $
         context ("Compiling with --backend=" <> T.pack backend) $ do
-          compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
+          if configSkipCompilation progs
+            then do
+              exists <- liftIO $ doesFileExist $ binaryName program
+              unless exists . throwError $
+                T.pack (binaryName program) <> " does not exist, but --skip-compilation passed."
+            else compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
           unless (mode == Compile) $ do
             (tuning_opts, _) <-
               liftIO $ determineTuning (configTuning progs) program
@@ -751,7 +757,8 @@ defaultConfig =
             configExtraOptions = [],
             configExtraCompilerOptions = [],
             configTuning = Just "tuning",
-            configCacheExt = Nothing
+            configCacheExt = Nothing,
+            configSkipCompilation = False
           },
       configLineOutput = False,
       configConcurrency = Nothing,
@@ -773,7 +780,8 @@ data ProgConfig = ProgConfig
     configTuning :: Maybe String,
     configCacheExt :: Maybe String,
     -- | Extra options passed to the programs being run.
-    configExtraOptions :: [String]
+    configExtraOptions :: [String],
+    configSkipCompilation :: Bool
   }
   deriving (Show)
 
@@ -897,6 +905,11 @@ commandLineOptions =
           "EXTENSION"
       )
       "Use cache files with this extension (none by default).",
+    Option
+      []
+      ["skip-compilation"]
+      (NoArg $ Right $ changeProgConfig $ \config -> config {configSkipCompilation = True})
+      "Use already compiled program.",
     Option
       []
       ["concurrency"]
