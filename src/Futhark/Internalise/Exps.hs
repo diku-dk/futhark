@@ -580,13 +580,17 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
             -- not in the same position), in which case we must be careful to
             -- avoid clobbering.
             let mergepat_names = map I.paramName mergepat'
-            ses' <- forM ses $ \case
-              I.Var v
+            ses' <- forM (zip mergepat' ses) $ \case
+              (p, I.Var v)
                 | v `elem` mergepat_names -> do
                     v' <- newVName $ baseName v <> "_tmp"
-                    letBindNames [v'] $ I.BasicOp (I.SubExp $ I.Var v)
+                    letBindNames [v'] $
+                      if primType $ paramType p
+                        then I.BasicOp (I.SubExp $ I.Var v)
+                        -- Need administrative coerce due to the renaming.
+                        else shapeCoerce (I.arrayDims $ paramType p) v
                     pure $ I.Var v'
-              se -> pure se
+              (_, se) -> pure se
             forM_ (zip mergepat' ses') $ \(p, se) ->
               letBindNames [I.paramName p] $
                 case se of
