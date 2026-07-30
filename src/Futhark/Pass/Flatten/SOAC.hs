@@ -556,28 +556,17 @@ versionScanRed ops desc segments env inps res aux w factored_body outer_only = d
   outer_body <- regularBranchBody outer_only
   full_body <- regularBranchBody $ regularRepVars <$> distributeAndFlattenBody ops segments "versionScanRed_full_body" env inps res factored_body
 
-  let attrs = stmAuxAttrs aux
-      fullAlternative = kernelAlternatives desc result_ts full_body []
-      outerAlternative = kernelAlternatives desc result_ts outer_body []
-      fullWithOuterAlternative = do
-        (outer_suff, _) <-
-          sufficientParallelism
-            (desc <> "_suff_outer")
-            (NE.toList $ segments <> pure w)
-            mempty
-            Nothing
-        kernelAlternatives desc result_ts full_body [(outer_suff, outer_body)]
-      alternatives
-        | isParallelFunInside (flattenFunHasParallelism ops) factored_body =
-            fullAlternative
-        | "sequential_inner" `inAttrs` attrs =
-            outerAlternative
-        | mayExploitOuter attrs && allowVersioning (flattenSegLevel ops) =
-            fullWithOuterAlternative
-        | otherwise =
-            fullAlternative
   match_res <-
-    certifying (distCerts inps aux env) alternatives
+    certifying (distCerts inps aux env) $
+      scanRedAlternatives
+        desc
+        result_ts
+        (stmAuxAttrs aux)
+        (isParallelFunInside (flattenFunHasParallelism ops) factored_body)
+        (allowVersioning (flattenSegLevel ops))
+        (NE.toList $ segments <> pure w)
+        full_body
+        outer_body
   pure $ insertRegulars (map distResTag res) match_res env
 
 insertSegOpMapResults ::
@@ -1193,41 +1182,20 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
         | DistResult _ (DistType _ _ t) _ <- ress
         ]
 
-  let alternatives = case intra' of
-        _
-          | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
-              kernelAlternatives "match_res" result_ts outer_body []
-        Nothing
-          | not only_intra,
-            worthSequentialising map_lam,
-            mayExploitOuter $ stmAuxAttrs aux -> do
-              (outer_suff, _) <- sufficientParallelism "suff_outer_par" (NE.toList $ segments <> pure w) mempty Nothing
-              kernelAlternatives
-                "match_res"
-                result_ts
-                full_body
-                [(outer_suff, outer_body)]
-          | otherwise ->
-              kernelAlternatives "match_res" result_ts full_body []
-        Just intra_res
-          | only_intra -> do
-              (_, intra_body) <- intraBlockAlternative intra_res
-              kernelAlternatives "match_res" result_ts intra_body []
-          | worthSequentialising map_lam,
-            mayExploitOuter $ stmAuxAttrs aux -> do
-              (outer_suff, _) <- sufficientParallelism "suff_outer_par" (NE.toList $ segments <> pure w) mempty Nothing
-              intra_alts <- intraBlockAlternative intra_res
-              kernelAlternatives
-                "match_res"
-                result_ts
-                full_body
-                ((outer_suff, outer_body) : [intra_alts])
-          | otherwise -> do
-              intra_alts <- intraBlockAlternative intra_res
-              kernelAlternatives "match_res" result_ts full_body [intra_alts]
-
   match_res <-
-    certifying (distCerts inps aux env) alternatives
+    certifying (distCerts inps aux env) $
+      mapAlternatives
+        "match_res"
+        result_ts
+        (stmAuxAttrs aux)
+        -- 'versionedRegularMap' is only reached via 'isVersionableMap', which
+        -- guarantees the body calls no parallel function.
+        False
+        (worthSequentialising map_lam)
+        (NE.toList $ segments <> pure w)
+        full_body
+        outer_body
+        intra'
 
   pure $ insertRegulars (map distResTag ress) match_res env
 
@@ -1341,8 +1309,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
         (zip res elems')
         env
   | Just map_lam <- isMapSOAC form,
-    allowVersioning lvl,
-    isVersionableMap funHasParallelism inps env w res map_lam =
+    isVersionableMap funHasParallelism lvl inps env w res map_lam =
       versionedRegularMap ops segments env inps res pat aux w arrs map_lam
   | Just map_lam <- isMapSOAC form = do
       map_res <-

@@ -139,28 +139,17 @@ topLevelversionScanRed funHasParallelism funSizeParams desc pat w arrs form aux 
     Just body_flattened0 -> do
       outerOnlyBody <- renameBody body_outerpar
       body_flattened <- transformBody funHasParallelism funSizeParams =<< renameBody body_flattened0
-      let result_ts = patTypes pat
-          attrs = stmAuxAttrs aux
-          fullAlternative = kernelAlternatives desc result_ts body_flattened []
-          outerAlternative = kernelAlternatives desc result_ts outerOnlyBody []
-          fullWithOuterAlternative = do
-            (outer_suff, _) <-
-              sufficientParallelism
-                (desc <> "_suff_outer")
-                [w]
-                mempty
-                Nothing
-            kernelAlternatives desc result_ts body_flattened [(outer_suff, outerOnlyBody)]
-          alternatives
-            | isParallelFunInside funHasParallelism $ lambdaBody . scremaLambda $ form =
-                fullAlternative
-            | "sequential_inner" `inAttrs` attrs =
-                outerAlternative
-            | mayExploitOuter attrs =
-                fullWithOuterAlternative
-            | otherwise =
-                fullAlternative
-      alt_vs <- alternatives
+      alt_vs <-
+        scanRedAlternatives
+          desc
+          (patTypes pat)
+          (stmAuxAttrs aux)
+          (isParallelFunInside funHasParallelism $ lambdaBody $ scremaLambda form)
+          -- Top-level code is always versioning-capable.
+          True
+          [w]
+          body_flattened
+          outerOnlyBody
       forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
         letBindNames [v] $ BasicOp $ SubExp (Var v_alt)
 
@@ -658,45 +647,17 @@ transformStm funHasParallelism funSizeParams (Let pat aux (Op (Screma w arrs for
               lam
           else
             pure Nothing
-      alt_vs <- case intra' of
-        _
-          -- We have non-inlined parallel function call we have to fully flatten the body
-          | isParallelFunInside funHasParallelism (lambdaBody lam) ->
-              kernelAlternatives "top_level_map_alt" result_ts body_flattened []
-          | "sequential_inner" `inAttrs` stmAuxAttrs aux ->
-              kernelAlternatives "top_level_map_alt" result_ts body_outerpar []
-        Nothing
-          | not only_intra,
-            worthSequentialising lam,
-            mayExploitOuter (stmAuxAttrs aux) -> do
-              (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
-              kernelAlternatives
-                "top_level_map_alt"
-                result_ts
-                body_flattened
-                [(outer_suff, body_outerpar)]
-          | otherwise ->
-              kernelAlternatives "top_level_map_alt" result_ts body_flattened []
-        Just intra_res
-          | only_intra -> do
-              (_, intra_body) <- intraBlockAlternative intra_res
-              kernelAlternatives "top_level_map_alt" result_ts intra_body []
-          | worthSequentialising lam,
-            mayExploitOuter (stmAuxAttrs aux) -> do
-              intra_alt <- intraBlockAlternative intra_res
-              (outer_suff, _) <- sufficientParallelism "suff_outer_map" [w] mempty Nothing
-              kernelAlternatives
-                "top_level_map_alt"
-                result_ts
-                body_flattened
-                [(outer_suff, body_outerpar), intra_alt]
-          | otherwise -> do
-              intra_alt <- intraBlockAlternative intra_res
-              kernelAlternatives
-                "top_level_map_alt"
-                result_ts
-                body_flattened
-                [intra_alt]
+      alt_vs <-
+        mapAlternatives
+          "top_level_map_alt"
+          result_ts
+          (stmAuxAttrs aux)
+          (isParallelFunInside funHasParallelism (lambdaBody lam))
+          (worthSequentialising lam)
+          [w]
+          body_flattened
+          body_outerpar
+          intra'
       forM_ (zip (patNames pat) alt_vs) $ \(v, v_alt) ->
         letBindNames [v] $ BasicOp $ SubExp $ Var v_alt
 transformStm funHasParallelism funSizeParams (Let pat aux (Op (FlatMap w arrs lam))) =

@@ -45,6 +45,8 @@ module Futhark.Pass.Flatten.Incremental
     isParallelFunInside,
     kernelAlternatives,
     intraBlockAlternative,
+    mapAlternatives,
+    scanRedAlternatives,
     propagateVersioningAttrs,
 
     -- * Transforming code
@@ -165,9 +167,14 @@ isParallelFunInside funHasParallelism = inBody
     callParallelFunction (Op VJP {}) = error "isParallelFunInside: unexpected VJP"
     callParallelFunction (Op WithVJP {}) = error "isParallelFunInside: unexpected WithVJP"
 
-isVersionableMap :: FunHasParallelism -> DistInputs -> DistEnv -> SubExp -> [DistResult] -> Lambda SOACS -> Bool
-isVersionableMap funHasParallelism inps _env w dist_res map_lam =
-  all isRegularDistResult dist_res
+-- | Should we generate multiple versions for this map? This requires both that
+-- we are at a level where versioning is possible ('allowVersioning') and that
+-- the map itself produces only regular results (from an invariant width) and
+-- does not call any parallel function (which force full flattening).
+isVersionableMap :: FunHasParallelism -> SegLevel -> DistInputs -> DistEnv -> SubExp -> [DistResult] -> Lambda SOACS -> Bool
+isVersionableMap funHasParallelism lvl inps _env w dist_res map_lam =
+  allowVersioning lvl
+    && all isRegularDistResult dist_res
     && not (isVariant inps w)
     && not (isParallelFunInside funHasParallelism (lambdaBody map_lam))
 
@@ -221,6 +228,100 @@ intraBlockAlternative intra = do
         (Intrablock.intraKernelStms intra)
         (varsRes $ Intrablock.intraResultNames intra)
   pure (intra_ok, intra_body)
+
+-- | Construct the multi-versioned alternatives for a map, given the
+-- fully-flattened body, the outer-parallel-only body, and an optional
+-- intrablock result. This is the shared versioning policy used both for
+-- top-level maps and for maps nested inside a map-nest; the only differences
+-- between the two are which bodies are supplied and how their results are
+-- consumed, both of which are handled by the caller. The @ws@ are the widths
+-- whose product bounds the outer parallelism (used for the 'suffOuterPar'
+-- threshold comparison). Returns the names bound to the final results.
+mapAlternatives ::
+  -- | Description for the result bindings.
+  Name ->
+  [Type] ->
+  Attrs ->
+  -- | Does the map body call a parallel function? If so we must fully flatten.
+  Bool ->
+  -- | Is the body worth sequentialising (offering an outer-only version)?
+  Bool ->
+  [SubExp] ->
+  Body GPU ->
+  Body GPU ->
+  Maybe Intrablock.IntrablockResult ->
+  FlattenM [VName]
+mapAlternatives desc result_ts attrs parallel_fun_inside worth_seq ws full_body outer_body intra' =
+  case intra' of
+    _
+      | parallel_fun_inside ->
+          kernelAlternatives desc result_ts full_body []
+      | "sequential_inner" `inAttrs` attrs ->
+          kernelAlternatives desc result_ts outer_body []
+    Nothing
+      | not only_intra,
+        worth_seq,
+        mayExploitOuter attrs -> do
+          (outer_suff, _) <- outerSuff
+          kernelAlternatives desc result_ts full_body [(outer_suff, outer_body)]
+      | otherwise ->
+          kernelAlternatives desc result_ts full_body []
+    Just intra_res
+      | only_intra -> do
+          (_, intra_body) <- intraBlockAlternative intra_res
+          kernelAlternatives desc result_ts intra_body []
+      | worth_seq,
+        mayExploitOuter attrs -> do
+          (outer_suff, _) <- outerSuff
+          intra_alt <- intraBlockAlternative intra_res
+          kernelAlternatives desc result_ts full_body [(outer_suff, outer_body), intra_alt]
+      | otherwise -> do
+          intra_alt <- intraBlockAlternative intra_res
+          kernelAlternatives desc result_ts full_body [intra_alt]
+  where
+    only_intra = onlyExploitIntra attrs
+
+    outerSuff = sufficientParallelism suffOuterPar ws mempty Nothing
+
+-- | Construct the multi-versioned alternatives for a scan or reduce, given the
+-- fully-flattened body and the outer-parallel-only body. Unlike
+-- 'mapAlternatives' there is no intrablock version, and the outer-only version
+-- is always offered (subject to attributes). Shared between top-level and
+-- nested uniform scans/reduces.
+scanRedAlternatives ::
+  Name ->
+  [Type] ->
+  Attrs ->
+  -- | Does the operator body call a parallel function? If so we must fully flatten.
+  Bool ->
+  -- | Does the seg level permit versioning at all (false in-block)?
+  Bool ->
+  [SubExp] ->
+  Body GPU ->
+  Body GPU ->
+  FlattenM [VName]
+scanRedAlternatives desc result_ts attrs parallel_fun_inside allow_versioning ws full_body outer_body
+  | parallel_fun_inside =
+      fullAlternative
+  | "sequential_inner" `inAttrs` attrs =
+      outerAlternative
+  | mayExploitOuter attrs && allow_versioning =
+      fullWithOuterAlternative
+  | otherwise =
+      fullAlternative
+  where
+    fullAlternative = kernelAlternatives desc result_ts full_body []
+
+    outerAlternative = kernelAlternatives desc result_ts outer_body []
+
+    fullWithOuterAlternative = do
+      (outer_suff, _) <- sufficientParallelism suffOuterPar ws mempty Nothing
+      kernelAlternatives desc result_ts full_body [(outer_suff, outer_body)]
+
+-- | The name of the threshold parameter that is used to select outer-only
+-- parallelism.
+suffOuterPar :: Name
+suffOuterPar = "suff_outer_par"
 
 -- | Intra-group parallelism is worthwhile if the lambda contains more
 -- than one instance of non-map nested parallelism, or any nested
