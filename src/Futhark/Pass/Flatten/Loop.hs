@@ -416,11 +416,19 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
       insertRepsM (zip (map distResTag res) out_reps) env
 --
 transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) = do
-  -- TODO: Consider updating the active segment so we don't go over w
-  -- every time.
-
-  -- inside the body we should compute the indices for which the condition is true and for which it is false, and then distribute the body based on that.
-  --  We can then merge the results of the two branches by writing them back to a blank space like we do for the branches of a match.
+  -- TODO: Consider updating the active segment so we don't go over w every
+  -- time.
+  --
+  -- inside the body we should compute the indices for which the condition is
+  -- true and for which it is false, and then distribute the body based on that.
+  -- We can then merge the results of the two branches by writing them back to a
+  -- blank space like we do for the branches of a match.
+  --
+  -- This is probably not worth it: it is faster only for uniform loop
+  -- parameters, but the common flattened-while case carries irregular state,
+  -- which cannot be narrowed - an irregular result's offsets are global, so
+  -- evicting a finished segment needs the final sizes of all segments, which
+  -- are not known until the loop ends.
 
   let old_loop_params = map fst merge
       loopParamNames = S.fromList $ map paramName old_loop_params
