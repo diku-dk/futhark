@@ -1276,6 +1276,19 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
 
   pure $ insertRegulars (map distResTag ress) match_res env
 
+-- | Can this input array be lifted to a regular array? This holds unless it is
+-- represented irregularly. The uniform SOAC alternatives lift their inputs
+-- regularly (via 'liftSubExpRegular'), which is only valid when the inputs are
+-- actually regular.
+isRegularInputArr :: DistEnv -> DistInputs -> VName -> Bool
+isRegularInputArr env inps arr =
+  case lookup arr inps of
+    Just (DistInput rt _) ->
+      case resVar rt env of
+        Regular {} -> True
+        Irregular {} -> False
+    _ -> True
+
 transformScrema ::
   FlattenOps ->
   Segments ->
@@ -1289,6 +1302,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
   | Just (reds, map_lam) <- isRedomapSOAC form,
     not $ isVariant inps w,
     all isRegularDistResult res,
+    all (isRegularInputArr env inps) arrs,
     all (suitableUniformOperator inps . redLambda) reds = do
       let outer_only = transformUniformRedomap (flattenSegLevel ops) segments env inps w arrs reds map_lam
       gpu_scope <- askScope
@@ -1344,6 +1358,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     not $ isVariant inps w,
     all isRegularDistResult res,
+    all (isRegularInputArr env inps) arrs,
     all (suitableUniformOperator inps . scanLambda) scans = do
       let outer_only =
             transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam
