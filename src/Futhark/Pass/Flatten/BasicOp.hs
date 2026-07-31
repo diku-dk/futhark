@@ -408,7 +408,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
                           reshapeAll (arrayShape v_t) stacked
 
                 case vs_reg_1 of
-                  [] -> undefined
+                  [] -> error "transformDistBasicOp: empty ArrayLit cannot have variant elements"
                   [v] ->
                     pure v
                   v : vs' ->

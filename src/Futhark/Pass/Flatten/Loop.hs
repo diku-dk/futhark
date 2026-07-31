@@ -168,7 +168,7 @@ liftLoopResult lvl segments num_segments inps env dist_res res =
       Var v -> do
         irreg <- getIrregRep lvl segments env inps v
         varsRes <$> irregularRepToFlatArrs num_segments irreg
-      _ -> undefined
+      _ -> error "liftLoopResult: irregular result is not a variable"
 
 -- | Distribute the loop body statement by statement and lift the
 -- distributed statements, producing the statements and result of the

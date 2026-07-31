@@ -370,7 +370,7 @@ liftDistResult lvl segments inps env dist_res res =
       Var v -> do
         irreg <- getIrregRep lvl segments env inps v
         pure $ map (SubExpRes mempty . Var) [irregularS irreg, irregularF irreg, irregularO irreg, irregularD irreg]
-      _ -> undefined
+      _ -> error "liftDistResult: irregular result is not a variable"
 
 liftBodyWithDistResults :: FlattenOps -> Segments -> DistInputs -> DistEnv -> DistStms -> [DistResult] -> Result -> FlattenM Result
 liftBodyWithDistResults ops segments inputs env dstms dist_res result = do
