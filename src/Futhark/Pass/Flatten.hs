@@ -209,7 +209,10 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
                   else resultToResRepsByDistResult res result
           reps' <- zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) reps
           insertRepsM (zip (map distResTag res) reps') env
-        -- TODO: Do something about intra functions
+        -- TODO: we currently do not handle intrablock function applications. It
+        -- is possible we could do intrablock-level lifting of functions, but
+        -- for now, we simply do not generate intrablock kernels if they would
+        -- contain calls to parallel functions.
         _ ->
           if all isRegularDistResult res
             then transformScalarStm lvl segments env inps res $ Let pat aux (Apply name args rettype s)
