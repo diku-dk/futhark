@@ -39,9 +39,17 @@ import Futhark.Util (mapAccumLM)
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, quot, rem)
 
+-- | How the results of a nested map are represented, determined by whether the
+-- map width is uniform (invariant to the enclosing nest) or nonuniform; see
+-- 'transformInnerMap'.
 data InnerMapMode
-  = MultiDim
-  | SingleDim
+  = -- | Uniform width: the results are regular arrays that keep the full
+    -- multi-dimensional shape (the enclosing segments followed by the map
+    -- width).
+    MultiDim
+  | -- | Nonuniform width: the results are irregular, flattened into a single
+    -- segment dimension.
+    SingleDim
 
 freeWithTypeDeps :: DistInputs -> Names -> FlattenM [VName]
 freeWithTypeDeps inps free = do
@@ -1020,7 +1028,14 @@ distributeAndTransformInnerMap ops mode ws_triple new_segment inps pat arrs' onF
   resRepsInPatOrder pat
     <$> transformDistributedInnerMap ops mode ws_triple arrmap new_segment distributed
 
-transformInnerMapMultiDim ::
+-- | Flatten a map nested in a map-nest (nonempty enclosing 'Segments'). The map
+-- width is either uniform (invariant to the nest) or nonuniform, giving the
+-- 'InnerMapMode': a uniform width produces a regular, multi-dimensional result
+-- ('MultiDim'), while a nonuniform width is irregular and flattened into a
+-- single segment dimension ('SingleDim'). The mode selects how inputs and free
+-- variables are read and how the results are represented, and is threaded
+-- through the rest of the flattening.
+transformInnerMap ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -1030,15 +1045,19 @@ transformInnerMapMultiDim ::
   [VName] ->
   Lambda SOACS ->
   FlattenM [ResRep]
-transformInnerMapMultiDim ops segments env inps pat w arrs map_lam = do
+transformInnerMap ops segments env inps pat w arrs map_lam = do
   outer_scope <- askScope
-  -- When the inputs are regular and all result dimensions are invariant, the
-  -- flags/offsets/elements bookkeeping produced by 'doRepIota' is never
-  -- consulted, so do not emit it. This is not just an efficiency concern: when
-  -- we are generating in-block code, the bookkeeping contains SegOps whose
-  -- dimensions are bound inside the kernel body, which would make
-  -- 'noIrregularPar' reject the enclosing intrablock version.
-  let invariantDim Constant {} = True
+  let mode
+        | isVariant inps w = SingleDim
+        | otherwise = MultiDim
+      -- In the uniform 'MultiDim' case - regular inputs and all result
+      -- dimensions invariant - the flags/offsets/elements bookkeeping produced
+      -- by 'doRepIota' is never consulted, so we do not emit it. This is not
+      -- just an efficiency concern: when generating in-block code, the
+      -- bookkeeping contains SegOps whose dimensions are bound inside the kernel
+      -- body, which would make 'noIrregularPar' reject the enclosing intrablock
+      -- version.
+      invariantDim Constant {} = True
       invariantDim (Var v) = v `M.member` outer_scope
       regularInput arr = case lookup arr inps of
         Just (DistInput rt _)
@@ -1048,65 +1067,38 @@ transformInnerMapMultiDim ops segments env inps pat w arrs map_lam = do
         all (all invariantDim . arrayDims) (patTypes pat)
           && all regularInput arrs
   (ws, ws_F, ws_O, ws_data) <-
-    if uniform
-      -- XXX: this depends on laziness to explode only on usage. It might be
-      -- better to handle this path more explicitly.
-      then pure (bad "ws", bad "ws_F", bad "ws_O", bad "ws_data")
-      else do
+    case mode of
+      MultiDim
+        | uniform ->
+            -- XXX: this depends on laziness to explode only on usage. It might
+            -- be better to handle this path more explicitly.
+            pure (bad "ws", bad "ws_F", bad "ws_O", bad "ws_data")
+      _ -> do
         ws <- dataArr lvl segments env inps w
         (ws_F, ws_O, ws_data) <- doRepIota lvl ws
         pure (ws, ws_F, ws_O, ws_data)
-  arrs' <-
-    zipWithM
-      (onMapInputArrMultiDim lvl segments w env inps ws ws_O ws_data)
-      (lambdaParams map_lam)
-      arrs
-  distributeAndTransformInnerMap
-    ops
-    MultiDim
-    (ws_F, ws_O, ws)
-    (segments <> pure w)
-    inps
-    pat
-    arrs'
-    (onMapFreeVarMultiDim lvl segments w env inps)
-    map_lam
+  (arrs', new_segment, onFreeVar) <-
+    case mode of
+      MultiDim -> do
+        arrs' <-
+          zipWithM
+            (onMapInputArrMultiDim lvl segments w env inps ws ws_O ws_data)
+            (lambdaParams map_lam)
+            arrs
+        pure (arrs', segments <> pure w, onMapFreeVarMultiDim lvl segments w env inps)
+      SingleDim -> do
+        arrs' <-
+          zipWithM
+            (onMapInputArr lvl segments env inps ws ws_O ws_data)
+            (lambdaParams map_lam)
+            arrs
+        new_segment <- arraySize 0 <$> lookupType ws_data
+        pure (arrs', [new_segment], onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
+  distributeAndTransformInnerMap ops mode (ws_F, ws_O, ws) new_segment inps pat arrs' onFreeVar map_lam
   where
     lvl = flattenSegLevel ops
     bad what =
-      error $ "transformInnerMapMultiDim: " <> what <> " demanded in uniform case"
-
-transformInnerMapSingleDim ::
-  FlattenOps ->
-  Segments ->
-  DistEnv ->
-  DistInputs ->
-  Pat Type ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  FlattenM [ResRep]
-transformInnerMapSingleDim ops segments env inps pat w arrs map_lam = do
-  ws <- dataArr lvl segments env inps w
-  (ws_F, ws_O, ws_data) <- doRepIota lvl ws
-  new_segment <- arraySize 0 <$> lookupType ws_data
-  arrs' <-
-    zipWithM
-      (onMapInputArr lvl segments env inps ws ws_O ws_data)
-      (lambdaParams map_lam)
-      arrs
-  distributeAndTransformInnerMap
-    ops
-    SingleDim
-    (ws_F, ws_O, ws)
-    [new_segment]
-    inps
-    pat
-    arrs'
-    (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
-    map_lam
-  where
-    lvl = flattenSegLevel ops
+      error $ "transformInnerMap: " <> what <> " demanded in uniform case"
 
 -- | Flatten a map over the given enclosing 'Segments'. With no enclosing
 -- segments this is a top-level map, whose inputs are ordinary regular values;
@@ -1142,9 +1134,7 @@ transformMap ops _attrs segments env inps pat w arrs map_lam = do
   gpu_scope <- askScope
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
   lam <- preprocessLambda pp_scope map_lam
-  if not (isVariant inps w)
-    then transformInnerMapMultiDim ops segments env inps pat w arrs lam
-    else transformInnerMapSingleDim ops segments env inps pat w arrs lam
+  transformInnerMap ops segments env inps pat w arrs lam
 
 -- | Fully flatten a regular map that has no enclosing segments (a top-level
 -- map). This is the empty-'Segments' special case of 'transformMap': the
