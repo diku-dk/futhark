@@ -1,7 +1,8 @@
--- Currently fails
 -- ==
 -- input { [5i64,7i64] [0i64,1i64] }
 -- auto output
+-- structure gpu { /SegScan 2 /SegMap 3 /Apply/segiota 1 }
+
 def main ns is =
   map2 (\n (i: i64) ->
           let is = iota n
