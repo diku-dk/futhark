@@ -847,7 +847,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
         not (any (isVariant inps) (sliceDims slice)) -> do
           let as_lift_shape = segmentsShape segments <> arrayShape as_t
           as' <- liftSubExpRegular lvl segments inps env as_lift_shape (Var as)
-          let update_dims = NE.toList segments <> sliceDims slice
+          let update_dims = segments <> sliceDims slice
           updated <-
             certifying (distCerts inps aux env)
               . letExp "update_reg_scatter"
@@ -970,7 +970,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           -- as should be 1D
           let as_lift_shape = segmentsShape segments <> arrayShape as_t
           as' <- liftSubExpRegular lvl segments inps env as_lift_shape (Var as)
-          let update_dims = NE.toList segments <> flatSliceDims flat_slice
+          let update_dims = segments <> flatSliceDims flat_slice
           updated <-
             certifying (distCerts inps aux env)
               . letExp "flat_update_reg_scatter"

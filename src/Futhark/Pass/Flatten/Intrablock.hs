@@ -3,7 +3,6 @@
 module Futhark.Pass.Flatten.Intrablock
   ( IntrablockResult (..),
     intrablockParallelise,
-    intrablockParalleliseTopLevelMap,
     intraMinInnerPar,
   )
 where
@@ -11,7 +10,6 @@ where
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.Writer
-import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp.Convert
@@ -128,40 +126,42 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
         | DistResult _ (DistType _ _ t) _ <- dist_res
         ]
 
-  ((param_inputs, nested_pat), input_prelude_stms) <- collectStms $ do
-    param_inputs <-
-      zipWithM
-        (prepareRegularMapInput segments env inps)
-        (lambdaParams lam)
-        arrs
-    nested_pat <-
-      Pat
-        <$> zipWithM
-          (\res t -> PatElem <$> newName (distResName res) <*> pure t)
-          dist_res
-          result_ts
-    pure (param_inputs, nested_pat)
+  -- Reconstruct the per-enclosing-segment inputs, so they can be read at the
+  -- appropriate indices inside the kernel.
+  (param_inputs, input_prelude_stms) <-
+    collectStms $
+      zipWithM (prepareRegularMapInput segments env inps) (lambdaParams lam) arrs
 
-  let new_segments = segments <> pure w
-      body = lambdaBody lam
-
-  free_inputs <- freeInputsFor inps lam
+  -- A free variable of the map body is a per-enclosing-segment value: it is
+  -- brought into the body's scope as a distributed input and reconstructed at
+  -- the outer indices inside the kernel (via 'readInBlockInputs' below). With no
+  -- enclosing segments, however, it is an ordinary top-level value already in
+  -- the kernel's outer scope, so there is nothing to reconstruct - hence the
+  -- empty 'free_inputs', which makes both the scope extension and the read below
+  -- vanish.
+  free_inputs <- if null segments then pure [] else freeInputsFor inps lam
   kbody <-
     localScope (scopeOfDistInputs free_inputs <> scopeOfLParams (lambdaParams lam)) $
-      intrablockParalleliseBody map_in_block body
+      intrablockParalleliseBody map_in_block (lambdaBody lam)
 
-  let wss = findParallelism kbody
+  nested_pat <-
+    fmap Pat $
+      zipWith PatElem
+        <$> mapM (newName . distResName) dist_res
+        <*> pure result_ts
+
+  let new_segments = segments <> pure w
+      wss = findParallelism kbody
 
   noIrregularPar (freeIn wss) $ do
-    let new_segments_list = NE.toList new_segments
     ((intra_avail_par, tblock_size, kspace, num_tblocks), prelude_stms) <-
       collectStms $ do
         num_tblocks <-
           letSubExp "intra_num_tblocks"
-            =<< foldBinOp' (Mul Int64 OverflowUndef) new_segments_list
+            =<< foldBinOp' (Mul Int64 OverflowUndef) new_segments
         (intra_avail_par, tblock_size) <- computeThreadBlockSize wss wss
-        gtids <- mapM (const $ newVName "gtid") new_segments_list
-        kspace <- mkSegSpace $ zip gtids new_segments_list
+        gtids <- mapM (const $ newVName "gtid") new_segments
+        kspace <- mkSegSpace $ zip gtids new_segments
         pure (intra_avail_par, tblock_size, kspace, num_tblocks)
 
     read_input_stms <-
@@ -173,7 +173,7 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
         readInBlockInputs new_segments mempty full_is param_inputs
 
     let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
-        rts = map (length new_segments_list `stripArray`) result_ts
+        rts = map (length new_segments `stripArray`) result_ts
         grid = KernelGrid (Count num_tblocks) (Count tblock_size)
         lvl = SegBlock SegNoVirt (Just grid)
         kstm = Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
@@ -184,72 +184,6 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
           intraAvailPar = intra_avail_par,
           intraThreadBlockSize = tblock_size,
           intraPreludeStms = input_prelude_stms <> prelude_stms,
-          intraKernelStms = oneStm kstm,
-          intraResultNames = patNames nested_pat
-        }
-
-intrablockParalleliseTopLevelMap ::
-  InBlockMapTransformer ->
-  Pat Type ->
-  StmAux () ->
-  SubExp ->
-  [VName] ->
-  Lambda SOACS ->
-  FlattenM (Maybe IntrablockResult)
-intrablockParalleliseTopLevelMap map_in_block pat aux w arrs lam0 = do
-  scope <- castScope <$> askScope
-  lam <- renameLambda =<< preprocessLambda scope lam0
-  let result_ts = patTypes pat
-      body = lambdaBody lam
-
-  nested_pat <-
-    Pat
-      <$> mapM
-        (\pe -> PatElem <$> newName (patElemName pe) <*> pure (patElemType pe))
-        (patElems pat)
-
-  kbody <-
-    localScope (scopeOfLParams $ lambdaParams lam) $
-      intrablockParalleliseBody map_in_block body
-
-  let wss = findParallelism kbody
-
-  noIrregularPar (freeIn wss) $ do
-    ((intra_avail_par, tblock_size, kspace, num_tblocks), prelude_stms) <-
-      collectStms $ do
-        (intra_avail_par, tblock_size) <- computeThreadBlockSize wss wss
-        gtid <- newVName "gtid"
-        kspace <- mkSegSpace [(gtid, w)]
-        pure (intra_avail_par, tblock_size, kspace, w)
-
-    read_input_stms <- collectStms_ . localScope (scopeOfSegSpace kspace) $ do
-      let SegSpace _ gtids_and_dims = kspace
-          [gtid] = map (Var . fst) gtids_and_dims
-      forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) ->
-        case paramType p of
-          Acc {} ->
-            letBindNames [paramName p] =<< eSubExp (Var arr)
-          t | arrayRank t > 0 -> do
-            v <- letExp (baseName (paramName p) <> "_global") =<< eIndex arr [eSubExp gtid]
-            letBindNames [paramName p] $
-              BasicOp $
-                Replicate mempty $
-                  Var v
-          _ ->
-            letBindNames [paramName p] =<< eIndex arr [eSubExp gtid]
-
-    let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
-        rts = map (1 `stripArray`) result_ts
-        grid = KernelGrid (Count num_tblocks) (Count tblock_size)
-        lvl = SegBlock SegNoVirt (Just grid)
-        kstm = Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
-
-    pure $
-      IntrablockResult
-        { intraMinPar = intra_avail_par,
-          intraAvailPar = intra_avail_par,
-          intraThreadBlockSize = tblock_size,
-          intraPreludeStms = prelude_stms,
           intraKernelStms = oneStm kstm,
           intraResultNames = patNames nested_pat
         }

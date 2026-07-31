@@ -8,7 +8,6 @@ import Control.Monad.Reader (runReaderT)
 import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable
 import Data.List qualified as L
-import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Data.Tuple.Solo
@@ -523,7 +522,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body
                 (v, t, i) <- zip3 vs ts [0 ..]
                 pure (v, DistInput (ResTag i) t)
               env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-          let subset_segments = NE.singleton active_size
+          let subset_segments = [active_size]
           let (subset_inputs', subset_dstms) =
                 distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope subset_segments subset_inputs body
           env_subset' <- foldM (flattenDistStm ops subset_segments) env_subset subset_dstms

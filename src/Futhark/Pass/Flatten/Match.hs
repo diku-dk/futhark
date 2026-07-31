@@ -8,7 +8,6 @@ where
 import Control.Monad
 import Data.Containers.ListUtils (nubOrd)
 import Data.List qualified as L
-import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -129,7 +128,7 @@ guardBranch ::
   Result ->
   FlattenM [ResRep]
 guardBranch ops branch_size env inputs dstms res result = do
-  let branch_segments = NE.singleton branch_size
+  let branch_segments = [branch_size]
   (taken_body, taken_types) <-
     buildBody $ do
       body_res <- liftBodyWithDistResults ops branch_segments inputs env dstms res result
@@ -220,7 +219,7 @@ transformVariantMatch ops segments env inps res _aux scrutinees cases defaultCas
   (branch_reps, _) <-
     foldM
       ( \(branch_reps_acc, acc_reps) (branch_size, branch_inds, body, result) -> do
-          let branch_segments = NE.singleton branch_size
+          let branch_segments = [branch_size]
           (inputs, env', dstms) <-
             distributeBranch (flattenFunHasParallelism ops) lvl segments env inps branch_inds body acc_reps
           reps <-

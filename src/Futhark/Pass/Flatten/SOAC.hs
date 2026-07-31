@@ -19,7 +19,6 @@ import Control.Monad
 import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable
 import Data.Functor.Identity (runIdentity)
-import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (mapMaybe)
 import Data.Tuple.Solo
@@ -264,6 +263,19 @@ transformUniformRedomap ::
   [Reduce SOACS] ->
   Lambda SOACS ->
   FlattenM [VName]
+transformUniformRedomap lvl [] _env _inps w arrs reds map_lam = do
+  -- Top-level (no enclosing segments): the arrays and any free variables are
+  -- ordinary top-level values in scope, so this is an ordinary non-segmented
+  -- reduce over the map width. We emit it as such ('genNonSegRed'); a segmented
+  -- reduce over a single implicit segment would be equivalent, but downstream
+  -- passes (e.g. migration, coalescing) handle the non-segmented form better.
+  let sing_red = singleReduce reds
+  (red_lam, nes', shape) <- determineReduceOp (redLambda sing_red) (redNeutral sing_red)
+  let comm
+        | commutativeLambda red_lam = Commutative
+        | otherwise = redComm sing_red
+      sing_red_gpu = Reduce comm (soacsLambdaToGPU red_lam) nes'
+  genNonSegRed lvl "topLevelSegRed" [w] sing_red_gpu shape (soacsLambdaToGPU map_lam) arrs
 transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
   let free = freeIn map_lam
       new_segment = segments <> pure w
@@ -297,7 +309,7 @@ transformUniformRedomap lvl segments env inps w arrs reds map_lam = do
 
   (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
   let readFree is = readInputs new_segment free_env is free_inputs
-  genUniformSegRed lvl "uniformSegRed" (NE.toList new_segment) reds_gpu shape (soacsLambdaToGPU map_lam) arrs' readFree
+  genUniformSegRed lvl "uniformSegRed" new_segment reds_gpu shape (soacsLambdaToGPU map_lam) arrs' readFree
 
 doUniformSegMaposcanomap ::
   SegLevel ->
@@ -317,7 +329,7 @@ doUniformSegMaposcanomap lvl scans arrs post_lam map_lam old_segments new_segmen
   (scan_lam, nes', shape) <- determineReduceOp (scanLambda scan) nes
   genUniformSegScanomapWithPost
     lvl
-    (NE.toList new_segment)
+    new_segment
     "uniformmaposcanomap"
     (soacsLambdaToGPU scan_lam)
     shape
@@ -554,7 +566,17 @@ versionScanRed ops desc segments env inps res aux w factored_body outer_only = d
         | DistResult _ (DistType _ _ t) _ <- res
         ]
   outer_body <- regularBranchBody outer_only
-  full_body <- regularBranchBody $ regularRepVars <$> distributeAndFlattenBody ops segments "versionScanRed_full_body" env inps res factored_body
+  full_body <- case segments of
+    -- Top-level (no enclosing segments): flatten the factored body's statements
+    -- as ordinary top-level statements. Unlike distributing them over segments,
+    -- this copes with array-valued operators and nested SOACs whose temporaries
+    -- would otherwise escape the segmented machinery's scope.
+    [] ->
+      renameBody <=< buildBody_ $ do
+        mapM_ (flattenTopLevelStm ops) $ bodyStms factored_body
+        pure $ bodyResult factored_body
+    _ ->
+      regularBranchBody $ regularRepVars <$> distributeAndFlattenBody ops segments "versionScanRed_full_body" env inps res factored_body
 
   match_res <-
     certifying (distCerts inps aux env) $
@@ -564,7 +586,7 @@ versionScanRed ops desc segments env inps res aux w factored_body outer_only = d
         (stmAuxAttrs aux)
         (isParallelFunInside (flattenFunHasParallelism ops) factored_body)
         (allowVersioning (flattenSegLevel ops))
-        (NE.toList $ segments <> pure w)
+        (segments <> pure w)
         full_body
         outer_body
   pure $ insertRegulars (map distResTag res) match_res env
@@ -828,8 +850,8 @@ transformMapForInBlock ops pat w arrs map_lam = do
   lam <- preprocessLambda (castScope scope) map_lam
   let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
       (distributed, _) =
-        distributeMap SequentialiseIrregular (flattenFunHasParallelism ops) scope pat (NE.singleton w) arrs' lam
-  transformDistributed ops' mempty (NE.singleton w) distributed
+        distributeMap SequentialiseIrregular (flattenFunHasParallelism ops) scope pat [w] arrs' lam
+  transformDistributed ops' mempty [w] distributed
   where
     ops' = ops {flattenSegLevel = inBlockSegLevel}
 
@@ -1077,7 +1099,7 @@ transformInnerMapSingleDim ops segments env inps pat w arrs map_lam = do
     ops
     SingleDim
     (ws_F, ws_O, ws)
-    (NE.singleton new_segment)
+    [new_segment]
     inps
     pat
     arrs'
@@ -1086,8 +1108,16 @@ transformInnerMapSingleDim ops segments env inps pat w arrs map_lam = do
   where
     lvl = flattenSegLevel ops
 
-transformInnerMap ::
+-- | Flatten a map over the given enclosing 'Segments'. With no enclosing
+-- segments this is a top-level map, whose inputs are ordinary regular values;
+-- otherwise it is a map nested in a map-nest, whose inputs are the
+-- per-enclosing-segment values.
+transformMap ::
   FlattenOps ->
+  -- | Incremental-flattening attributes of the enclosing statement, propagated
+  -- onto the (preprocessed) body in the top-level case; see
+  -- 'transformTopLevelMap'.
+  Attrs ->
   Segments ->
   DistEnv ->
   DistInputs ->
@@ -1096,13 +1126,53 @@ transformInnerMap ::
   [VName] ->
   Lambda SOACS ->
   FlattenM [ResRep]
-transformInnerMap ops segments env inps pat w arrs map_lam = do
+transformMap ops attrs [] _env _inps pat w arrs map_lam = do
+  -- Top-level map (no enclosing segments). Preprocess the body and then
+  -- propagate the enclosing attributes onto it, so they influence how the body
+  -- is versioned (e.g. only_inner reaching a Screma produced by interchanging a
+  -- 'sequential_outer' loop). Order matters: preprocessing may rewrite a body
+  -- statement, so propagating first would lose the attributes on the rewritten
+  -- form. XXX: this is arguably a bug in preprocessing.
+  scope <- castScope <$> askScope :: FlattenM (Scope SOACS)
+  lam <-
+    fmap (propagateVersioningAttrs attrs) . renameLambda
+      =<< preprocessLambda scope map_lam
+  transformTopLevelMap ops pat w arrs lam
+transformMap ops _attrs segments env inps pat w arrs map_lam = do
   gpu_scope <- askScope
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
   lam <- preprocessLambda pp_scope map_lam
   if not (isVariant inps w)
     then transformInnerMapMultiDim ops segments env inps pat w arrs lam
     else transformInnerMapSingleDim ops segments env inps pat w arrs lam
+
+-- | Fully flatten a regular map that has no enclosing segments (a top-level
+-- map). This is the empty-'Segments' special case of 'transformMap': the
+-- mapped arrays are ordinary regular top-level values, so we distribute the map
+-- directly over its own width and flatten the resulting body, rather than
+-- reconstructing per-enclosing-segment inputs. The results are necessarily
+-- regular.
+transformTopLevelMap ::
+  FlattenOps ->
+  Pat Type ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  FlattenM [ResRep]
+transformTopLevelMap ops pat w arrs lam = do
+  scope <- castScope <$> askScope :: FlattenM (Scope SOACS)
+  let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
+      (distributed, _) =
+        distributeMap
+          (distIrregularityAtLevel (flattenSegLevel ops))
+          (flattenFunHasParallelism ops)
+          scope
+          pat
+          [w]
+          arrs'
+          lam
+  transformDistributed ops mempty [w] distributed
+  pure $ map Regular $ patNames pat
 
 runMapLambdaBody ::
   Segments ->
@@ -1114,6 +1184,24 @@ runMapLambdaBody ::
   Pat Type ->
   [DistResult] ->
   FlattenM [VName]
+runMapLambdaBody [] _env _inps w arrs map_lam _pat _ress = do
+  -- Top level (no enclosing segments): the mapped arrays are indexed directly
+  -- and free variables are already in scope, so there is no per-segment input
+  -- reconstruction to do - just run the (sequentialised) body under a segmap
+  -- over the map width.
+  map_lam' <- renameLambda $ soacsLambdaToGPU map_lam
+  vs <- letTupExp "outer_map" <=< renameExp <=< segMap defaultSegLevel [w] $ \is -> do
+    let gtid = case toList is of
+          [i] -> i
+          _ -> error "runMapLambdaBody: expected single index"
+    forM_ (zip (lambdaParams map_lam') arrs) $ \(p, arr) ->
+      letBindNames [paramName p]
+        =<< case paramType p of
+          Acc {} -> eSubExp $ Var arr
+          _ -> eIndex arr [eSubExp gtid]
+    bodyBind $ lambdaBody map_lam'
+  forM vs $ \v ->
+    letExp (baseName v <> "_copy") $ BasicOp $ Replicate mempty (Var v)
 runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
   map_lam' <- renameLambda $ soacsLambdaToGPU map_lam
   ws <- dataArr defaultSegLevel segments env inps w
@@ -1169,7 +1257,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
       else pure Nothing
 
   let fullFlatten =
-        regularRepVars <$> transformInnerMap (ops {flattenSegLevel = defaultSegLevel}) segments env inps pat w arrs map_lam
+        regularRepVars <$> transformMap (ops {flattenSegLevel = defaultSegLevel}) (stmAuxAttrs aux) segments env inps pat w arrs map_lam
 
       outerOnly =
         runMapLambdaBody segments env inps w arrs map_lam pat ress
@@ -1192,7 +1280,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
         -- guarantees the body calls no parallel function.
         False
         (worthSequentialising map_lam)
-        (NE.toList $ segments <> pure w)
+        (segments <> pure w)
         full_body
         outer_body
         intra'
@@ -1245,7 +1333,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
       (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
 
       new_segment <- arraySize 0 <$> lookupType ws_F
-      let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
+      let readFree is = readInputs [new_segment] free_env is free_inputs
       (red_elems, mapout_elems) <-
         genSegRedomap lvl ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam) readFree
       red_elems' <- forM red_elems $ \v -> do
@@ -1298,7 +1386,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
             free_and_sizes
       (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
       new_segment <- arraySize 0 <$> lookupType ws_F
-      let readFree is = readInputs (NE.fromList [new_segment]) free_env is free_inputs
+      let readFree is = readInputs [new_segment] free_env is free_inputs
       elems' <- doSegMaposcanomap lvl scans ws_F elems post_lam map_lam segments inps env readFree
       insertSegOpMapResults
         segments
@@ -1313,7 +1401,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
       versionedRegularMap ops segments env inps res pat aux w arrs map_lam
   | Just map_lam <- isMapSOAC form = do
       map_res <-
-        transformInnerMap ops segments env inps pat w arrs map_lam
+        transformMap ops (stmAuxAttrs aux) segments env inps pat w arrs map_lam
       insertRepsM (zip (map distResTag res) map_res) env
   | otherwise = do
       gpu_scope <- askScope
@@ -1325,8 +1413,8 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
           insertRepsM (zip (map distResTag res) reps) env
         Nothing
           -- XXX: here we silently sequentialise any SOAC that is not handled
-          -- above if it is possible to do so. We need to make sure that we actually handle everything we
-          -- care about!
+          -- above if it is possible to do so. We need to make sure that we
+          -- actually handle everything we care about!
           | shouldDissectForm form ->
               error "transformScrema: complex Screma survived preprocessing"
           | all isRegularDistResult res ->
@@ -1417,7 +1505,7 @@ transformFlatMap ::
   Lambda SOACS ->
   FlattenM ()
 transformFlatMap ops pat w arrs lam = do
-  let segments = NE.singleton w
+  let segments = [w]
       inps =
         zipWith
           (\p arr -> (paramName p, DistInputFree arr (paramType p)))
@@ -1520,7 +1608,7 @@ transformFlatMapNested ops segments env inps res aux w arrs lam = do
       aug_pat = Pat $ size_pe : data_pes
   let lvl = flattenSegLevel ops
   certifying (distCerts inps aux env) $ do
-    reps <- transformInnerMap ops segments env inps aug_pat w arrs aug_lam
+    reps <- transformMap ops (stmAuxAttrs aux) segments env inps aug_pat w arrs aug_lam
     case reps of
       shape_rep : data_reps@(first_data : _) -> do
         -- An 'IrregularRep' always stores primitive data, so for a non-scalar
@@ -1616,7 +1704,7 @@ stripFreeCerts lam = lam {lambdaBody = onBody (lambdaBody lam)}
 
 transformHist ::
   FlattenOps ->
-  NE.NonEmpty SubExp ->
+  Segments ->
   DistEnv ->
   DistInputs ->
   [DistResult] ->
@@ -1682,7 +1770,7 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops0, 
       let readFree is = readInputs new_segment free_env is free_inputs
       hist_res <-
         certifying (distCerts inps aux env) $
-          genUniformSegHist lvl "Uniform_segHist" (NE.toList new_segment) hist_ops' (soacsLambdaToGPU bucket_fun) lifted_inps readFree
+          genUniformSegHist lvl "Uniform_segHist" new_segment hist_ops' (soacsLambdaToGPU bucket_fun) lifted_inps readFree
       pure $ insertRegulars (map distResTag res) hist_res env
   where
     lvl = flattenSegLevel ops

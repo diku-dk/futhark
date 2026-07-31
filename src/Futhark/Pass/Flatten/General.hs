@@ -52,7 +52,6 @@ where
 
 import Control.Monad
 import Data.List qualified as L
-import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Tuple.Solo
@@ -697,7 +696,7 @@ flattenData vs = do
         Reshape vs $
           reshapeAll (arrayShape t) (Shape [n])
 
--- | Only sensible for variables of segment-invariant type.
+-- | Only sensible for variables of uniform type.
 dataArr :: SegLevel -> Segments -> DistEnv -> DistInputs -> SubExp -> FlattenM VName
 dataArr lvl _segments env inps (Var v)
   | Just v_inp <- lookup v inps =
@@ -709,7 +708,14 @@ dataArr lvl _segments env inps (Var v)
             pure $ irregularD rep_dense
           Regular vs -> flattenData vs
 dataArr _ segments _ _ se = do
-  rep <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
+  -- The result is a one-dimensional array with one element per segment. With no
+  -- enclosing segments there is a single implicit segment, so we replicate over
+  -- a unit dimension; replicating over the empty shape would instead yield a
+  -- scalar.
+  let rep_shape = case segmentsShape segments of
+        Shape [] -> Shape [intConst Int64 1]
+        shape -> shape
+  rep <- letExp "rep" $ BasicOp $ Replicate rep_shape se
   rep_t <- lookupType rep
   let dims = arrayDims rep_t
   if length dims == 1
@@ -796,7 +802,7 @@ localiseInputs env_outer inps = do
 replicateForDims :: Segments -> Shape -> VName -> FlattenM VName
 replicateForDims segments dims v = do
   v_t <- lookupType v
-  let seg_rank = length (NE.toList segments)
+  let seg_rank = length segments
       v_rank = arrayRank v_t
       dims_rank = shapeRank dims
       perm = [dims_rank .. dims_rank + seg_rank - 1] ++ [0 .. dims_rank - 1] ++ [seg_rank + dims_rank .. dims_rank + v_rank - 1]
@@ -823,7 +829,7 @@ flattenDistStms ::
   Result ->
   FlattenM Result
 flattenDistStms ops w inputs env dstms result = do
-  let segments = NE.singleton w
+  let segments = [w]
   env' <- foldM (flattenDistStm ops segments) env dstms
   result' <- mapM (liftResult (flattenSegLevel ops) segments inputs env') result
   pure $ concat result'

@@ -33,7 +33,6 @@ where
 import Data.Bifunctor
 import Data.Foldable
 import Data.List qualified as L
-import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
@@ -43,7 +42,12 @@ import Futhark.IR.SOACS
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
 
-type Segments = NE.NonEmpty SubExp
+-- | Widths of the enclosing map-nest, outermost first. For top-level parallel
+-- constructs, this is empty, which should be treated as an implicit
+-- single-element segment (see 'segmentCount'). Generally, the empty-segments
+-- case must be treated specially in some places, which is unfortunate, but it
+-- helps unify code between the nested and top level cases.
+type Segments = [SubExp]
 
 type FunHasParallelism = Name -> Bool
 
@@ -64,7 +68,7 @@ data DistIrregularity
   deriving (Eq, Show)
 
 segmentsShape :: Segments -> Shape
-segmentsShape = Shape . NE.toList
+segmentsShape = Shape
 
 segmentsRank :: Segments -> Int
 segmentsRank = shapeRank . segmentsShape
