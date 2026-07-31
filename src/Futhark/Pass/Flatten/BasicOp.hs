@@ -1045,7 +1045,6 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
           pure $ insertRegulars [distResTag res] [v_rearrange] env
       | otherwise -> do
           irreg <- getIrregRep lvl segments env inps v
-          -- TODO: Maybe we can avoid this?
           t <- lookupInputType inps v
           rep' <-
             certifying (distCerts inps aux env) $
