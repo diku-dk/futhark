@@ -373,8 +373,6 @@ worthIntrablock lam =
 -- into separate kernel launches (and possibly host-evaluated control flow) per
 -- sequential step, so a version that instead sequentialises the nested
 -- parallelism is always worth offering.
---
--- TODO: maybe update this or just always consider Sequentialising
 worthSequentialising :: Lambda SOACS -> Bool
 worthSequentialising lam =
   bodyInterest (0 :: Int) (lambdaBody lam) > 1
