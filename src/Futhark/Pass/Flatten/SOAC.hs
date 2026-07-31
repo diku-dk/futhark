@@ -722,7 +722,6 @@ onMapIrregularInputArr lvl mode new_segments ws ws_O ws_data p arr rep ws_prod =
         Dense -> do
           v_reshaped <- letExp (baseName (paramName p) <> "_reshaped") $ BasicOp $ Reshape (irregularD rep) $ reshapeAll old_shape new_shape
           pure $ MapArray v_reshaped p_t
-        -- TODO: What if we don't do this here? we can still just read from our replicated view
         Replicated -> do
           new_flat <-
             letExp (baseName arr <> "_flat_expand")
