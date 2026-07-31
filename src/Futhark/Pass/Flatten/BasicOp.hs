@@ -480,22 +480,7 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       base_v <- letExp "arraylit_base" $ BasicOp $ ArrayVal vs row_type
       res_v <- letExp "arraylit_reg" $ BasicOp $ Replicate (segmentsShape segments) (Var base_v)
       pure $ insertRegulars [distResTag res] [res_v] env
-    Opaque op se
-      | Var v <- se,
-        Just (DistInput rt_in _) <- lookup v inps ->
-          case resVar rt_in env of
-            Regular arr -> do
-              arr' <-
-                certifying (distCerts inps aux env) . letExp (baseName v <> "_opaque") $
-                  BasicOp (Opaque op (Var arr))
-              pure $ insertRegulars [distResTag res] [arr'] env
-            Irregular irreg -> do
-              elems' <-
-                certifying (distCerts inps aux env) . letExp (baseName v <> "_opaque") $
-                  BasicOp (Opaque op (Var (irregularD irreg)))
-              insertRepM (distResTag res) (Irregular irreg {irregularD = elems'}) env
-      | otherwise ->
-          scalarCase
+    Opaque op se -> passThrough (Opaque op) se
     Reshape arr reshape
       | isRegularDistResult res,
         not (any (isVariant inps) reshape) -> do
@@ -1079,9 +1064,32 @@ transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
       -- modifications to WithAcc. The only irregularity that is possible is in
       -- the values to be written.
       scalarCase
-    _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
+    SubExp se -> passThrough SubExp se
+    UserParam _ _ ->
+      -- These are always of type i64.
+      scalarCase
   where
     lvl = flattenSegLevel ops
     scalarCase =
       flattenScalarStm ops segments env inps [res] $
         Let (Pat [pe]) aux (BasicOp e)
+
+    -- Distribute a BasicOp that merely passes its operand through, applying it
+    -- to the representation of a distributed input (or falling back to the
+    -- scalar case).
+    passThrough mkOp se
+      | Var v <- se,
+        Just (DistInput rt_in _) <- lookup v inps =
+          case resVar rt_in env of
+            Regular arr -> do
+              arr' <-
+                certifying (distCerts inps aux env) . letExp (baseName v) $
+                  BasicOp (mkOp (Var arr))
+              pure $ insertRegulars [distResTag res] [arr'] env
+            Irregular irreg -> do
+              elems' <-
+                certifying (distCerts inps aux env) . letExp (baseName v) $
+                  BasicOp (mkOp (Var (irregularD irreg)))
+              insertRepM (distResTag res) (Irregular irreg {irregularD = elems'}) env
+      | otherwise =
+          scalarCase
