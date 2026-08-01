@@ -542,12 +542,9 @@ flattenRegularToRows segments m v = do
         Reshape v $
           reshapeAll (arrayShape v_t) (Shape [m] <> row_shape)
 
-regularBranchBody ::
-  FlattenM [VName] ->
-  FlattenM (Body GPU)
-regularBranchBody m = do
-  (vs, stms) <- collectStms m
-  renameBody $ mkBody stms $ varsRes vs
+-- | Construct a body and immediately rename it.
+renamedBody :: FlattenM [VName] -> FlattenM (Body GPU)
+renamedBody = renameBody <=< buildBody_ . fmap varsRes
 
 regularRepVars :: [ResRep] -> [VName]
 regularRepVars =
@@ -573,7 +570,7 @@ versionScanRed ops desc segments env inps res aux w factored_body outer_only = d
         [ t `arrayOfShape` segmentsShape segments
         | DistResult _ (DistType _ _ t) _ <- res
         ]
-  outer_body <- regularBranchBody outer_only
+  outer_body <- renamedBody outer_only
   full_body <- case segments of
     -- Top-level (no enclosing segments): flatten the factored body's statements
     -- as ordinary top-level statements. Unlike distributing them over segments,
@@ -584,7 +581,7 @@ versionScanRed ops desc segments env inps res aux w factored_body outer_only = d
         mapM_ (flattenTopLevelStm ops) $ bodyStms factored_body
         pure $ bodyResult factored_body
     _ ->
-      regularBranchBody $ regularRepVars <$> distributeAndFlattenBody ops segments "versionScanRed_full_body" env inps res factored_body
+      renamedBody $ regularRepVars <$> distributeAndFlattenBody ops segments "versionScanRed_full_body" env inps res factored_body
 
   match_res <-
     certifying (distCerts inps aux env) $
@@ -1251,8 +1248,8 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
       outerOnly =
         runMapLambdaBody segments env inps w arrs map_lam pat ress
 
-  full_body <- regularBranchBody fullFlatten
-  outer_body <- regularBranchBody outerOnly
+  full_body <- renamedBody fullFlatten
+  outer_body <- renamedBody outerOnly
 
   let result_ts =
         [ t `arrayOfShape` segmentsShape segments
