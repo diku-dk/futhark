@@ -1,6 +1,7 @@
 -- ==
 -- input { [5i64,7i64] [5i64,7i64] }
 -- output { [5i64, 7i64] }
+-- structure gpu { /Opaque 4 /SegMap 5 }
 
 def main =
   map2 (\n x ->
