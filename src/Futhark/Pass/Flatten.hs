@@ -669,10 +669,6 @@ transformProg prog = do
       mempty
       (consts_needs <> funs_needs)
 
-  -- In extremely unlikely cases (mostly empty programs), we may end up having a
-  -- name source that overlaps the names used in the builtin functions. Avoid
-  -- that by bumping it by enough that we probably will not have a conflict.
-  modifyNameSource $ \src -> ((), mappend (newNameSource 1000) src)
   pure $
     prog
       { progConsts = consts',
