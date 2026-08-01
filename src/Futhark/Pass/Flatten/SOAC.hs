@@ -1267,6 +1267,221 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
 
   pure $ insertRegulars (map distResTag ress) match_res env
 
+flattenUniformRedomap ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  StmAux () ->
+  SubExp ->
+  [VName] ->
+  ScremaForm SOACS ->
+  [Reduce SOACS] ->
+  Lambda SOACS ->
+  FlattenM DistEnv
+flattenUniformRedomap ops segments env inps res pat aux w arrs form reds map_lam = do
+  let outer_only = transformUniformRedomap (flattenSegLevel ops) segments env inps w arrs reds map_lam
+  gpu_scope <- askScope
+  let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
+  factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
+  case factored of
+    Just body ->
+      versionScanRed ops "uniform_redomap_alt" segments env inps res aux w body outer_only
+    Nothing -> do
+      elems' <- outer_only
+      pure $ insertRegulars (map distResTag res) elems' env
+  where
+    funHasParallelism = flattenFunHasParallelism ops
+
+flattenSegRedomap ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  SubExp ->
+  [VName] ->
+  [Reduce SOACS] ->
+  Lambda SOACS ->
+  FlattenM DistEnv
+flattenSegRedomap ops segments env inps res w arrs reds map_lam = do
+  reps <- mapM (segOpInputRep lvl segments env inps) arrs
+  let sing_red = singleReduce reds
+      hasNoFreeVariant = allNames (not . isVariant inps . Var) (freeIn sing_red <> freeIn map_lam)
+  (ws_F, ws_O, ws_S, elems, elems_kind) <-
+    prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
+  nes' <- mapM (readNeutral segments env inps) (redNeutral sing_red)
+  let sing_red' = sing_red {redNeutral = nes'}
+  let free = freeIn map_lam
+  free_and_sizes <- freeWithTypeDeps inps free
+  ws <- dataArr lvl segments env inps w
+  (_, _, ws_data) <- doRepIota lvl ws_S
+  (free_replicated, replicated) <-
+    fmap unzip . sequence $
+      mapMaybe
+        (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
+        free_and_sizes
+  (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
+
+  new_segment <- arraySize 0 <$> lookupType ws_F
+  let readFree is = readInputs [new_segment] free_env is free_inputs
+  (red_elems, mapout_elems) <-
+    genSegRedomap lvl ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam) readFree
+  red_elems' <- forM red_elems $ \v -> do
+    v_t <- lookupType v
+    letExp (baseName v <> "_reshaped") . BasicOp $
+      Reshape v $
+        reshapeAll (arrayShape v_t) (segmentsShape segments)
+  let (red_res, map_res) = splitAt (redResults reds) res
+  env' <-
+    insertSegOpMapResults
+      segments
+      ws_S
+      ws_F
+      ws_O
+      elems_kind
+      (zip map_res mapout_elems)
+      env
+  pure $ insertRegulars (map distResTag red_res) red_elems' env'
+  where
+    lvl = flattenSegLevel ops
+
+flattenUniformMaposcanomap ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  StmAux () ->
+  SubExp ->
+  [VName] ->
+  ScremaForm SOACS ->
+  [Scan SOACS] ->
+  Lambda SOACS ->
+  Lambda SOACS ->
+  FlattenM DistEnv
+flattenUniformMaposcanomap ops segments env inps res pat aux w arrs form scans post_lam map_lam = do
+  let outer_only =
+        transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam
+  gpu_scope <- askScope
+  let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
+  factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
+  case factored of
+    Just body ->
+      versionScanRed ops "uniform_maposcanomap_alt" segments env inps res aux w body outer_only
+    Nothing -> do
+      elems' <- outer_only
+      pure $ insertRegulars (map distResTag res) elems' env
+  where
+    funHasParallelism = flattenFunHasParallelism ops
+    lvl = flattenSegLevel ops
+
+flattenSegMaposcanomap ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  SubExp ->
+  [VName] ->
+  [Scan SOACS] ->
+  Lambda SOACS ->
+  Lambda SOACS ->
+  FlattenM DistEnv
+flattenSegMaposcanomap ops segments env inps res w arrs scans post_lam map_lam = do
+  reps <- mapM (segOpInputRep lvl segments env inps) arrs
+  let hasNoFreeVariant = allNames (not . isVariant inps . Var) (freeIn post_lam <> freeIn map_lam <> foldMap freeIn scans)
+  (ws_F, ws_O, ws_S, elems, elems_kind) <-
+    prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
+  let free = freeIn map_lam <> freeIn post_lam
+  free_and_sizes <- freeWithTypeDeps inps free
+  ws <- dataArr lvl segments env inps w
+  (_, _, ws_data) <- doRepIota lvl ws_S
+  (free_replicated, replicated) <-
+    fmap unzip . sequence $
+      mapMaybe
+        (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
+        free_and_sizes
+  (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
+  new_segment <- arraySize 0 <$> lookupType ws_F
+  let readFree is = readInputs [new_segment] free_env is free_inputs
+  elems' <- doSegMaposcanomap lvl scans ws_F elems post_lam map_lam segments inps env readFree
+  insertSegOpMapResults
+    segments
+    ws_S
+    ws_F
+    ws_O
+    elems_kind
+    (zip res elems')
+    env
+  where
+    lvl = flattenSegLevel ops
+
+flattenPlainMap ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  StmAux () ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  FlattenM DistEnv
+flattenPlainMap ops segments env inps res pat aux w arrs map_lam = do
+  map_res <-
+    transformMap ops (stmAuxAttrs aux) segments env inps pat w arrs map_lam
+  insertRepsM (zip (map distResTag res) map_res) env
+
+flattenOtherScrema ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  StmAux () ->
+  SubExp ->
+  [VName] ->
+  ScremaForm SOACS ->
+  FlattenM DistEnv
+flattenOtherScrema ops segments env inps res pat aux w arrs form = do
+  gpu_scope <- askScope
+  let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
+  factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
+  case factored of
+    Just body -> do
+      reps <- distributeAndFlattenBody ops segments "factorScremaForParallelism_body" env inps res body
+      insertRepsM (zip (map distResTag res) reps) env
+    Nothing
+      -- XXX: here we silently sequentialise any SOAC that is not handled
+      -- above if it is possible to do so. We need to make sure that we
+      -- actually handle everything we care about!
+      | shouldDissectForm form ->
+          error "flattenScrema: complex Screma survived preprocessing"
+      | all isRegularDistResult res ->
+          flattenScalarStm ops segments env inps res $ Let pat aux (Op (Screma w arrs form))
+      | otherwise -> do
+          -- XXX: The results are nonuniform, so we cannot run the SOAC
+          -- unchanged inside a kernel. Sequentialise it to a loop and
+          -- flatten that instead. This does lose us potential parallelism.
+          -- A solution would be to preprocess such cases to express them in
+          -- terms of loops and maps instead, which we can indeed handle.
+          stms <-
+            preprocessStms pp_scope
+              =<< runSimplifiedBuilder
+                pp_scope
+                (auxing aux $ FOT.transformSOAC pat $ Screma w arrs form)
+          let body = mkBody stms $ varsRes $ patNames pat
+          reps <- distributeAndFlattenBody ops segments "sequentialised_soac" env inps res body
+          insertRepsM (zip (map distResTag res) reps) env
+  where
+    funHasParallelism = flattenFunHasParallelism ops
+
 flattenScrema ::
   FlattenOps ->
   Segments ->
@@ -1281,140 +1496,30 @@ flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
     not $ isVariant inps w,
     all isRegularDistResult res,
     all (isRegularInputArr env inps) arrs,
-    all (suitableUniformOperator inps . redLambda) reds = do
-      let outer_only = transformUniformRedomap (flattenSegLevel ops) segments env inps w arrs reds map_lam
-      gpu_scope <- askScope
-      let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-      factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
-      case factored of
-        Just body ->
-          versionScanRed ops "uniform_redomap_alt" segments env inps res aux w body outer_only
-        Nothing -> do
-          elems' <- outer_only
-          pure $ insertRegulars (map distResTag res) elems' env
+    all (suitableUniformOperator inps . redLambda) reds =
+      flattenUniformRedomap ops segments env inps res pat aux w arrs form reds map_lam
   | Just (reds, map_lam) <- isRedomapSOAC form,
     not $ lambdaHasParallelism funHasParallelism map_lam,
-    all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds = do
-      reps <- mapM (segOpInputRep lvl segments env inps) arrs
-      let sing_red = singleReduce reds
-          hasNoFreeVariant = allNames (not . isVariant inps . Var) (freeIn sing_red <> freeIn map_lam)
-      (ws_F, ws_O, ws_S, elems, elems_kind) <-
-        prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
-      nes' <- mapM (readNeutral segments env inps) (redNeutral sing_red)
-      let sing_red' = sing_red {redNeutral = nes'}
-      let free = freeIn map_lam
-      free_and_sizes <- freeWithTypeDeps inps free
-      ws <- dataArr lvl segments env inps w
-      (_, _, ws_data) <- doRepIota lvl ws_S
-      (free_replicated, replicated) <-
-        fmap unzip . sequence $
-          mapMaybe
-            (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
-            free_and_sizes
-      (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
-
-      new_segment <- arraySize 0 <$> lookupType ws_F
-      let readFree is = readInputs [new_segment] free_env is free_inputs
-      (red_elems, mapout_elems) <-
-        genSegRedomap lvl ws_S ws_F ws_O elems sing_red' (soacsLambdaToGPU map_lam) readFree
-      red_elems' <- forM red_elems $ \v -> do
-        v_t <- lookupType v
-        letExp (baseName v <> "_reshaped") . BasicOp $
-          Reshape v $
-            reshapeAll (arrayShape v_t) (segmentsShape segments)
-      let (red_res, map_res) = splitAt (redResults reds) res
-      env' <-
-        insertSegOpMapResults
-          segments
-          ws_S
-          ws_F
-          ws_O
-          elems_kind
-          (zip map_res mapout_elems)
-          env
-      pure $ insertRegulars (map distResTag red_res) red_elems' env'
+    all (\red -> suitableOperator env inps (redLambda red) (redNeutral red)) reds =
+      flattenSegRedomap ops segments env inps res w arrs reds map_lam
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     not $ isVariant inps w,
     all isRegularDistResult res,
     all (isRegularInputArr env inps) arrs,
-    all (suitableUniformOperator inps . scanLambda) scans = do
-      let outer_only =
-            transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam
-      gpu_scope <- askScope
-      let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-      factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
-      case factored of
-        Just body ->
-          versionScanRed ops "uniform_maposcanomap_alt" segments env inps res aux w body outer_only
-        Nothing -> do
-          elems' <- outer_only
-          pure $ insertRegulars (map distResTag res) elems' env
+    all (suitableUniformOperator inps . scanLambda) scans =
+      flattenUniformMaposcanomap ops segments env inps res pat aux w arrs form scans post_lam map_lam
   | Just (post_lam, scans, map_lam) <- isMaposcanomapSOAC form,
     not $ lambdaHasParallelism funHasParallelism map_lam,
     not $ lambdaHasParallelism funHasParallelism post_lam,
-    all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans = do
-      reps <- mapM (segOpInputRep lvl segments env inps) arrs
-      let hasNoFreeVariant = allNames (not . isVariant inps . Var) (freeIn post_lam <> freeIn map_lam <> foldMap freeIn scans)
-      (ws_F, ws_O, ws_S, elems, elems_kind) <-
-        prepareSegOpInputs lvl segments env inps w reps arrs hasNoFreeVariant
-      let free = freeIn map_lam <> freeIn post_lam
-      free_and_sizes <- freeWithTypeDeps inps free
-      ws <- dataArr lvl segments env inps w
-      (_, _, ws_data) <- doRepIota lvl ws_S
-      (free_replicated, replicated) <-
-        fmap unzip . sequence $
-          mapMaybe
-            (onMapFreeVar lvl segments env inps ws (ws_F, ws_O, ws_data))
-            free_and_sizes
-      (free_env, free_inputs) <- mapArraysToInputs free_replicated replicated
-      new_segment <- arraySize 0 <$> lookupType ws_F
-      let readFree is = readInputs [new_segment] free_env is free_inputs
-      elems' <- doSegMaposcanomap lvl scans ws_F elems post_lam map_lam segments inps env readFree
-      insertSegOpMapResults
-        segments
-        ws_S
-        ws_F
-        ws_O
-        elems_kind
-        (zip res elems')
-        env
+    all (\scan -> suitableOperator env inps (scanLambda scan) (scanNeutral scan)) scans =
+      flattenSegMaposcanomap ops segments env inps res w arrs scans post_lam map_lam
   | Just map_lam <- isMapSOAC form,
     isVersionableMap funHasParallelism lvl inps env w res map_lam =
       versionedRegularMap ops segments env inps res pat aux w arrs map_lam
-  | Just map_lam <- isMapSOAC form = do
-      map_res <-
-        transformMap ops (stmAuxAttrs aux) segments env inps pat w arrs map_lam
-      insertRepsM (zip (map distResTag res) map_res) env
-  | otherwise = do
-      gpu_scope <- askScope
-      let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-      factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
-      case factored of
-        Just body -> do
-          reps <- distributeAndFlattenBody ops segments "factorScremaForParallelism_body" env inps res body
-          insertRepsM (zip (map distResTag res) reps) env
-        Nothing
-          -- XXX: here we silently sequentialise any SOAC that is not handled
-          -- above if it is possible to do so. We need to make sure that we
-          -- actually handle everything we care about!
-          | shouldDissectForm form ->
-              error "flattenScrema: complex Screma survived preprocessing"
-          | all isRegularDistResult res ->
-              flattenScalarStm ops segments env inps res $ Let pat aux (Op (Screma w arrs form))
-          | otherwise -> do
-              -- XXX: The results are nonuniform, so we cannot run the SOAC
-              -- unchanged inside a kernel. Sequentialise it to a loop and
-              -- flatten that instead. This does lose us potential parallelism.
-              -- A solution would be to preprocess such cases to express them in
-              -- terms of loops and maps instead, which we can indeed handle.
-              stms <-
-                preprocessStms pp_scope
-                  =<< runSimplifiedBuilder
-                    pp_scope
-                    (auxing aux $ FOT.transformSOAC pat $ Screma w arrs form)
-              let body = mkBody stms $ varsRes $ patNames pat
-              reps <- distributeAndFlattenBody ops segments "sequentialised_soac" env inps res body
-              insertRepsM (zip (map distResTag res) reps) env
+  | Just map_lam <- isMapSOAC form =
+      flattenPlainMap ops segments env inps res pat aux w arrs map_lam
+  | otherwise =
+      flattenOtherScrema ops segments env inps res pat aux w arrs form
   where
     funHasParallelism = flattenFunHasParallelism ops
     lvl = flattenSegLevel ops
