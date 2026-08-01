@@ -62,11 +62,11 @@ mergeResult lvl segments w iss branchesRep dist_res
       let (DistType _ _ resType) = distResType dist_res
       if isAcc resType
         then do
-          xs <- mapM regularBranch branchesRep
+          xs <- mapM asRegular branchesRep
           pure $ Regular $ last xs
         else do
           let resultType = Array (elemType resType) (Shape [w] <> arrayShape resType) NoUniqueness
-          xs <- mapM regularBranch branchesRep
+          xs <- mapM asRegular branchesRep
           -- Create the blank space for the result
           resultSpace <- letExp "blank_res" =<< eBlank resultType
           -- Write back the values of each branch to the blank space
@@ -78,7 +78,7 @@ mergeResult lvl segments w iss branchesRep dist_res
           pure $ Regular result'
   -- Irregular case
   | DistType _ _ (Array pt _ _) <- distResType dist_res = do
-      branchesIrregRep <- mapM irregularBranch branchesRep
+      branchesIrregRep <- mapM asIrregular branchesRep
       let segsType = Array (IntType Int64) (Shape [w]) NoUniqueness
       -- Create a blank space for the 'segs'
       segsSpace <- letExp "blank_segs" =<< eBlank segsType
@@ -102,11 +102,11 @@ mergeResult lvl segments w iss branchesRep dist_res
             }
   | otherwise = error "mergeResult: non-array irregular result"
   where
-    regularBranch (Regular v) = pure v
-    regularBranch _ = error "mergeResult: mismatched reps"
+    asRegular (Regular v) = pure v
+    asRegular _ = error "mergeResult: mismatched reps"
 
-    irregularBranch (Irregular irreg) = pure irreg
-    irregularBranch _ = error "mergeResult: mismatched reps"
+    asIrregular (Irregular irreg) = pure irreg
+    asIrregular _ = error "mergeResult: mismatched reps"
 
 -- | Flatten a single branch body of a variant 'Match', but guard its execution
 -- on the branch actually being taken by some segment. When a branch receives no
