@@ -22,7 +22,7 @@ import Prelude hiding (div, quot, rem)
 
 -- | Is this dimension variant to the loop or the outer map context -
 -- either because it is itself a loop parameter, or because it is
--- variant in the outer map nest?
+-- variant in the outer map-nest?
 variantDim :: DistInputs -> S.Set VName -> SubExp -> Bool
 variantDim _ _ Constant {} = False
 variantDim inps loopParamNames (Var v) =
@@ -333,7 +333,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
           loopBodyInputs env inps old_loop_params lifted_loop_reps
 
       -- When the loop parameters and all inputs used by the body are regular,
-      -- the interchange of the map nest and the loop corresponds to a perfectly
+      -- the interchange of the map-nest and the loop corresponds to a perfectly
       -- ordinary Screma inside the loop. We then transform that Screma as if
       -- that was what the program looked like in the first place, which in
       -- particular means it is subject to multi-versioning. Otherwise we

@@ -81,10 +81,10 @@ newtype ResTag = ResTag Int
 
 -- | Something that is mapped.
 data DistInput
-  = -- | A value bound outside the original map nest.  By necessity
+  = -- | A value bound outside the original map-nest.  By necessity
     -- regular.  The type is the parameter type.
     DistInputFree VName Type
-  | -- | A value constructed inside the original map nest.  May be
+  | -- | A value constructed inside the original map-nest.  May be
     -- irregular.
     DistInput ResTag Type
   deriving (Eq, Ord, Show)
@@ -95,7 +95,7 @@ nubInputs :: DistInputs -> DistInputs
 nubInputs = L.nubBy (\a b -> fst a == fst b)
 
 -- | The type of a 'DistInput'.  This corresponds to the parameter
--- type of the original map nest.
+-- type of the original map-nest.
 distInputType :: DistInput -> Type
 distInputType (DistInputFree _ t) = t
 distInputType (DistInput _ t) = t
@@ -632,7 +632,7 @@ distributeMap irreg_mode funHasParallelism outer_scope map_pat w arrs lam =
 --     contains meaningful parallelism.
 --
 -- One exception is irregularity. A statement whose result shape varies
--- across the surrounding map nest (e.g. 'iota x' for a mapped 'x') cannot
+-- across the surrounding map-nest (e.g. 'iota x' for a mapped 'x') cannot
 -- in general be traversed sequentially per thread, as arrays produced as
 -- results of sequentially executed groups must be regular - handling it
 -- is exactly what flattening is for. Hence irregular results still count

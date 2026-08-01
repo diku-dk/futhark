@@ -505,7 +505,7 @@ liftRegFunDef funHasParallelism funSizeParams const_scope fd = do
       buildBody_ . freshenResult fparams'' $
         -- XXX: I think function lifting makes it more important to classify invariant
         -- results in bodies. Function bodies can produce values that are
-        -- invariant to the map nest, but at this point there is no opportunity to
+        -- invariant to the map-nest, but at this point there is no opportunity to
         -- hoist them out of the nest.
 
         liftRegFunBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms (map fst rettype) $

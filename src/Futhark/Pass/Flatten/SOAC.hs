@@ -1553,7 +1553,7 @@ transformFlatMap ops pat w arrs lam = do
       letBindNames [name] . BasicOp $
         Reshape arr (reshapeAll (arrayShape arr_t) newshape)
 
--- | Flattening rule for a 'FlatMap' nested inside an enclosing map nest. A
+-- | Flattening rule for a 'FlatMap' nested inside an enclosing map-nest. A
 -- 'FlatMap' is just an irregular map with implicit concatenation, so we run it
 -- through the ordinary inner-map machinery, which already produces - for a
 -- variably-sized result - an 'IrregularRep' whose segment sizes are the
