@@ -68,8 +68,6 @@ transformWithAcc ::
   Lambda SOACS ->
   FlattenM DistEnv
 transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_inputs acc_lam = do
-  let inputTypes (_, arrs, _) = mapM (lookupInputType inps) arrs
-
   lam_params' <- newAccLamParams $ lambdaParams acc_lam
 
   iota_w <- genShapeIota (flattenSegLevel ops) $ segmentsShape segments
@@ -80,9 +78,9 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
   let iota_se = Var (paramName iota_p)
 
   -- Potentially change to distres option.
-  nonuniform <-
-    any (any (any (isVariant inps) . arrayDims))
-      <$> mapM inputTypes withacc_inputs
+  let nonuniform =
+        not $
+          all (\(_, arrs, _) -> all (isRegularInputArr env inps) arrs) withacc_inputs
 
   (withacc_inputs', trAccIndex, non_uniform_reps) <-
     if nonuniform

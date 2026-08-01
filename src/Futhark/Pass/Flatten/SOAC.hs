@@ -1276,19 +1276,6 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
 
   pure $ insertRegulars (map distResTag ress) match_res env
 
--- | Can this input array be lifted to a regular array? This holds unless it is
--- represented irregularly. The uniform SOAC alternatives lift their inputs
--- regularly (via 'liftSubExpRegular'), which is only valid when the inputs are
--- actually regular.
-isRegularInputArr :: DistEnv -> DistInputs -> VName -> Bool
-isRegularInputArr env inps arr =
-  case lookup arr inps of
-    Just (DistInput rt _) ->
-      case resVar rt env of
-        Regular {} -> True
-        Irregular {} -> False
-    _ -> True
-
 transformScrema ::
   FlattenOps ->
   Segments ->

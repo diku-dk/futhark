@@ -15,6 +15,7 @@ module Futhark.Pass.Flatten.General
     liftSubExpPreserveRep,
     liftSubExpRegular,
     liftVarRegular,
+    isRegularInputArr,
     liftParam,
     liftRegularParam,
     liftRegResult,
@@ -610,6 +611,19 @@ liftVarRegular lvl segments inps env expectedShape x = do
     else
       letExp "reg_lifted" . BasicOp $
         Reshape v (reshapeAll (arrayShape v_t) expectedShape)
+
+-- | Can this input array be lifted to a regular array? This holds unless it is
+-- represented irregularly. The uniform alternatives lift their inputs regularly
+-- (via 'liftSubExpRegular'), which is only valid when the inputs are actually
+-- regular.
+isRegularInputArr :: DistEnv -> DistInputs -> VName -> Bool
+isRegularInputArr env inps arr =
+  case lookup arr inps of
+    Just (DistInput rt _) ->
+      case resVar rt env of
+        Regular {} -> True
+        Irregular {} -> False
+    _ -> True
 
 liftParam :: (MonadFreshNames m) => SubExp -> FParam SOACS -> m ([FParam GPU], ResRep)
 liftParam w fparam =
