@@ -38,12 +38,14 @@
 -- have different shapes. These are not directly supported in Futhark or in the
 -- Futhark IR, but are encoded in various ways.
 --
--- We say that an operation or type in a map-nest is "uniform" when its size and
--- control flow is invariant to the map-nest. Converse, it is "nonuniform" when
--- it is variant. When we distribute a uniform statement, the intermediate
--- results are regular, and otherwise irregular. Take care not to confuse the
--- terms "regular" and "uniform" - we say "regular" only about arrays! "Uniform"
--- is the general concept.
+-- We say that an operation or type in a map-nest is "uniform" when its size
+-- (including internal sizes) and control flow is invariant to the map-nest.
+-- Converse, it is "nonuniform" when it is variant. When we distribute a uniform
+-- statement, the intermediate results are regular, and otherwise irregular. A
+-- statement that uses an irregular array is necessarily nonuniform.
+--
+-- Take care not to confuse the terms "regular" and "uniform" - we say "regular"
+-- only about arrays! "Uniform" is the general concept.
 module Futhark.Pass.Flatten (flattenSOACs) where
 
 import Control.Monad

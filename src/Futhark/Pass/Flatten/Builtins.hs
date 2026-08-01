@@ -57,8 +57,8 @@ inlineBuiltinAtLevel :: SegLevel -> Bool
 inlineBuiltinAtLevel SegThreadInBlock {} = True
 inlineBuiltinAtLevel _ = False
 
-regularSegLevel :: SegLevel
-regularSegLevel = SegThread SegVirt Nothing
+topSegLevel :: SegLevel
+topSegLevel = SegThread SegVirt Nothing
 
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
 
@@ -829,7 +829,7 @@ segIotaBuiltin = buildingBuiltin $ do
   nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
     localScope (scopeOfFParams [np, nsp]) . buildBody_ $ do
-      (flags, offsets, res) <- genSegIota regularSegLevel (paramName nsp)
+      (flags, offsets, res) <- genSegIota topSegLevel (paramName nsp)
       m <- arraySize 0 <$> lookupType res
       pure $ subExpsRes [m, Var flags, Var offsets, Var res]
   pure
@@ -855,7 +855,7 @@ repIotaBuiltin = buildingBuiltin $ do
   nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
     localScope (scopeOfFParams [np, nsp]) . buildBody_ $ do
-      (flags, offsets, res) <- genRepIota regularSegLevel (paramName nsp)
+      (flags, offsets, res) <- genRepIota topSegLevel (paramName nsp)
       m <- arraySize 0 <$> lookupType res
       pure $ subExpsRes [m, Var flags, Var offsets, Var res]
   pure
@@ -881,7 +881,7 @@ prefixSumBuiltin = buildingBuiltin $ do
   nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
     localScope (scopeOfFParams [np, nsp]) . buildBody_ $
-      varsRes . pure <$> genPrefixSum regularSegLevel "res" (paramName nsp)
+      varsRes . pure <$> genPrefixSum topSegLevel "res" (paramName nsp)
   pure
     FunDef
       { funDefEntryPoint = Nothing,
@@ -900,7 +900,7 @@ partitionBuiltin = buildingBuiltin $ do
   csp <- newParam "cs" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
     localScope (scopeOfFParams [np, kp, csp]) . buildBody_ $ do
-      (counts, offsets, res) <- genPartition regularSegLevel (paramName np) (paramName kp) (paramName csp)
+      (counts, offsets, res) <- genPartition topSegLevel (paramName np) (paramName kp) (paramName csp)
       pure $ varsRes [counts, offsets, res]
   pure
     FunDef
