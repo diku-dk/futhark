@@ -4,6 +4,8 @@
 -- auto output
 -- input { empty([0]i64) }
 -- auto output
+-- structure gpu { /Apply/repiota 1 /Apply/segiota 1 }
+
 def main (ns: []i64) =
   #[incremental_flattening(only_inner)]
   map (\n ->
