@@ -151,6 +151,64 @@ transformTopLevelScrema funHasParallelism funSizeParams pat aux w arrs form = do
       Irregular _ ->
         error "transformTopLevelScrema: top-level result cannot be irregular"
 
+flattenApply ::
+  FunSizeParams ->
+  SegLevel ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  (Pat Type, StmAux ()) ->
+  (Name, [(SubExp, Diet)], [(RetType SOACS, RetAls)], Safety) ->
+  FlattenM DistEnv
+flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, rettype, s) =
+  case lvl of
+    SegThread {} -> do
+      let size_positions = funSizeParams name
+          indexed_args = zip [0 ..] args
+          isSizeArg = (`S.member` size_positions) . fst
+          (size_args, value_args) = L.partition isSizeArg indexed_args
+      let nonuniform = any (isVariant inps . fst . snd) size_args
+          name' = if nonuniform then liftFunName name else liftRegFunName name
+          mode = if nonuniform then NonUniformLift else UniformLift
+      demandLifted name mode
+      w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
+
+      args' <-
+        if nonuniform
+          then
+            ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
+          else do
+            value_args' <- mapM (liftRegArg lvl segments w inps env . snd) value_args
+            -- We do not lift 'size_args' because they correspond to size
+            -- parameters, which are invariant in the uniform case.
+            pure $ (w, Observe) : map snd size_args <> value_args'
+      args_ts <- mapM (subExpType . fst) args'
+      let dietToUnique Consume = Unique
+          dietToUnique Observe = Nonunique
+          param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
+          rettype' =
+            if nonuniform
+              then addRetAls param_ts $ liftRetType w $ map fst rettype
+              else addRetAls param_ts $ liftRegularRetType inps w $ map fst rettype
+      result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
+      let reps =
+            if nonuniform
+              then resultToResReps (map fst rettype) result
+              -- XXX: This could instead distinguish between regular and
+              -- irregular results based on their return types.
+              else resultToResRepsByDistResult res result
+      reps' <- zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) reps
+      insertRepsM (zip (map distResTag res) reps') env
+    -- TODO: we currently do not handle intrablock function applications. It
+    -- is possible we could do intrablock-level lifting of functions, but
+    -- for now, we simply do not generate intrablock kernels if they would
+    -- contain calls to parallel functions.
+    _ ->
+      if all isRegularDistResult res
+        then transformScalarStm lvl segments env inps res $ Let pat aux (Apply name args rettype s)
+        else error "Unhandled Apply in non SegThread Seglevel"
+
 transformDistStm :: FunHasParallelism -> FunSizeParams -> SegLevel -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
 transformDistStm _ _ lvl segments env (DistStm inps res (ScalarStm stms)) =
   transformScalarStms lvl segments env inps res stms
@@ -165,52 +223,7 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
     Let _ aux (Match scrutinees cases defaultCase rt) ->
       flattenMatch ops segments env inps res aux scrutinees cases defaultCase rt
     Let pat aux (Apply name args rettype s) ->
-      case lvl of
-        SegThread {} -> do
-          let size_positions = funSizeParams name
-              indexed_args = zip [0 ..] args
-              isSizeArg = (`S.member` size_positions) . fst
-              (size_args, value_args) = L.partition isSizeArg indexed_args
-          let nonuniform = any (isVariant inps . fst . snd) size_args
-              name' = if nonuniform then liftFunName name else liftRegFunName name
-              mode = if nonuniform then NonUniformLift else UniformLift
-          demandLifted name mode
-          w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
-
-          args' <-
-            if nonuniform
-              then
-                ((w, Observe) :) . concat <$> mapM (liftArg lvl segments w inps env) args
-              else do
-                value_args' <- mapM (liftRegArg lvl segments w inps env . snd) value_args
-                -- We do not lift 'size_args' because they correspond to size
-                -- parameters, which are invariant in the uniform case.
-                pure $ (w, Observe) : map snd size_args <> value_args'
-          args_ts <- mapM (subExpType . fst) args'
-          let dietToUnique Consume = Unique
-              dietToUnique Observe = Nonunique
-              param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
-              rettype' =
-                if nonuniform
-                  then addRetAls param_ts $ liftRetType w $ map fst rettype
-                  else addRetAls param_ts $ liftRegularRetType inps w $ map fst rettype
-          result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
-          let reps =
-                if nonuniform
-                  then resultToResReps (map fst rettype) result
-                  -- XXX: This could instead distinguish between regular and
-                  -- irregular results based on their return types.
-                  else resultToResRepsByDistResult res result
-          reps' <- zipWithM (reshapeLiftedApplyResult segments) (map fst rettype) reps
-          insertRepsM (zip (map distResTag res) reps') env
-        -- TODO: we currently do not handle intrablock function applications. It
-        -- is possible we could do intrablock-level lifting of functions, but
-        -- for now, we simply do not generate intrablock kernels if they would
-        -- contain calls to parallel functions.
-        _ ->
-          if all isRegularDistResult res
-            then transformScalarStm lvl segments env inps res $ Let pat aux (Apply name args rettype s)
-            else error "Unhandled Apply in non SegThread Seglevel"
+      flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, rettype, s)
     Let pat aux (Loop merge (ForLoop i it n) body) ->
       flattenLoop ops segments env inps res (pat, aux) (merge, ForLoop i it n, body)
     Let pat aux (Loop merge (WhileLoop cond) body) -> do
