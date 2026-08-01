@@ -1726,12 +1726,9 @@ transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops0, 
           op
             { Futhark.IR.SOACS.histOp = stripFreeCerts $ Futhark.IR.SOACS.histOp op
             }
-  -- todo: add this suitableUniformOperator
-  nonuniform_inps <-
-    any (any (isVariant inps) . arrayDims)
-      <$> mapM (lookupInputType inps) hist_inputs
+  -- TODO: check for suitableUniformOperator.
   let nonuniform =
-        nonuniform_inps
+        not (all (isRegularInputArr env inps) hist_inputs)
           || isVariant inps w
           || not (all isRegularDistResult res)
   if nonuniform
