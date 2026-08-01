@@ -229,7 +229,7 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
     Let pat aux (Loop merge (WhileLoop cond) body) -> do
       flattenLoop ops segments env inps res (pat, aux) (merge, WhileLoop cond, body)
     Let pat aux (WithAcc inputs lam) ->
-      transformWithAcc ops segments env inps res pat aux inputs lam
+      flattenWithAcc ops segments env inps res pat aux inputs lam
     (Let pat aux (Op (Hist w hist_inputs hist_ops bucket_fun))) ->
       flattenHist ops segments env inps res (pat, aux) (w, hist_inputs, hist_ops, bucket_fun)
     Let _ aux (Op (FlatMap w arrs lam)) ->

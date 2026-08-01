@@ -5,7 +5,7 @@
 -- 'UpdateAcc' operations to compute flat indexes, via the usual metadata
 -- arrays.
 module Futhark.Pass.Flatten.WithAcc
-  ( transformWithAcc,
+  ( flattenWithAcc,
   )
 where
 
@@ -56,7 +56,7 @@ indexIrreg _segments _env rep is safety shape js = do
           (eBody [eSubExp (intConst Int64 (-1))])
 
 -- If just one input is nonuniform, we treat them all as nonuniform.
-transformWithAcc ::
+flattenWithAcc ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -67,7 +67,7 @@ transformWithAcc ::
   [WithAccInput SOACS] ->
   Lambda SOACS ->
   FlattenM DistEnv
-transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_inputs acc_lam = do
+flattenWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_inputs acc_lam = do
   lam_params' <- newAccLamParams $ lambdaParams acc_lam
 
   iota_w <- genShapeIota (flattenSegLevel ops) $ segmentsShape segments
@@ -201,7 +201,7 @@ transformWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_
             any (\p -> paramName p `nameIn` freeIn (lambdaBody op)) old_idx_ps
       -- XXX: It is possible to change the lambda body to restore the indices based on flat_idx_p and handle this.
       when old_indices_used $
-        error "transformWithAcc: accumulator operator uses nonuniform indices"
+        error "flattenWithAcc: accumulator operator uses nonuniform indices"
       flat_idx_p <- newParam "flat_idx" $ Prim int64
       pure
         ( soacsLambdaToGPU $
