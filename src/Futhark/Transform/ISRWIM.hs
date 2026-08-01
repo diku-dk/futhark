@@ -1,7 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 
--- | Interchanging scans with inner maps. Basically a copy of ExtractKernels
--- ISRWIM with small change.
+-- | Interchanging scans with inner maps.
 module Futhark.Transform.ISRWIM
   ( iswim,
     irwim,
