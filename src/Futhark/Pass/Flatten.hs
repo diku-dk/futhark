@@ -151,6 +151,85 @@ transformTopLevelScrema funHasParallelism funSizeParams pat aux w arrs form = do
       Irregular _ ->
         error "transformTopLevelScrema: top-level result cannot be irregular"
 
+liftArg :: SegLevel -> Segments -> SubExp -> DistInputs -> DistEnv -> (SubExp, Diet) -> FlattenM [(SubExp, Diet)]
+liftArg lvl segments w inps env (se, d) = do
+  (_, rep) <- liftSubExp lvl segments inps env se
+  case rep of
+    Regular v -> do
+      v_t <- lookupType v
+      v' <-
+        if arrayShape v_t == Shape [w]
+          then pure v
+          else
+            letExp "lifted_arg_flat" . BasicOp $
+              Reshape v $
+                reshapeAll (arrayShape v_t) (Shape [w])
+      pure [(Var v', d)]
+    Irregular irreg -> do
+      vs <- irregularRepToFlatArrs w irreg
+      -- Only apply the original diet to the 'elems' array.
+      pure $ zip (map Var vs) $ replicate 4 Observe ++ [d]
+
+liftRegArg :: SegLevel -> Segments -> SubExp -> DistInputs -> DistEnv -> (SubExp, Diet) -> FlattenM (SubExp, Diet)
+liftRegArg lvl _segments w inps env (se, d) = do
+  se_t <- subExpInputType inps se
+  let se_shape = arrayShape se_t
+      expected_shape = Shape [w] <> se_shape
+  v <- liftSubExpRegular lvl [w] inps env expected_shape se
+  pure (Var v, d)
+
+-- Lifts a functions return type such that it matches the lifted functions
+-- return type.
+--
+-- A lifted function corresponds to 'map f', which always produces fresh arrays.
+-- We therefore mark all array components of the return type as 'Unique', such
+-- that the results are known to not alias anything (in particular not the
+-- arguments). Maintaining this invariant may require inserting copies in the
+-- function body; see 'freshenResult'.
+liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
+liftRetType w = concat . snd . L.mapAccumL liftType 0
+  where
+    liftType i rettype =
+      let lifted = case rettype of
+            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
+            Array pt _ _ ->
+              let num_data = Prim int64
+                  segs = arrayOf (Prim int64) (Shape [Free w]) Unique
+                  flags = arrayOf (Prim Bool) (Shape [Ext i]) Unique
+                  offsets = arrayOf (Prim int64) (Shape [Free w]) Unique
+                  elems = arrayOf (Prim pt) (Shape [Ext i]) Unique
+               in [num_data, segs, flags, offsets, elems]
+            Acc {} -> error "liftRetType: Acc"
+            Mem {} -> error "liftRetType: Mem"
+       in (i + length lifted, lifted)
+
+liftRegularRetType :: DistInputs -> SubExp -> [RetType SOACS] -> [RetType GPU]
+liftRegularRetType inps w = concat . snd . L.mapAccumL liftType 0
+  where
+    liftType i rettype =
+      let lifted = case rettype of
+            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
+            Array pt shape _ ->
+              if needsIrregularRetType inps rettype
+                then
+                  let num_data = Prim int64
+                      segs = arrayOf (Prim int64) (Shape [Free w]) Unique
+                      flags = arrayOf (Prim Bool) (Shape [Ext i]) Unique
+                      offsets = arrayOf (Prim int64) (Shape [Free w]) Unique
+                      elems = arrayOf (Prim pt) (Shape [Ext i]) Unique
+                   in [num_data, segs, flags, offsets, elems]
+                else
+                  pure $ arrayOf (Prim pt) (Shape [Free w] <> shape) Unique
+            Acc {} -> error "liftRetType: Acc"
+            Mem {} -> error "liftRetType: Mem"
+       in (i + length lifted, lifted)
+
+liftFunName :: Name -> Name
+liftFunName name = name <> "_lifted"
+
+liftRegFunName :: Name -> Name
+liftRegFunName name = name <> "_regular_lifted"
+
 flattenApply ::
   FunSizeParams ->
   SegLevel ->
@@ -241,33 +320,6 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
   where
     ops = flattenOpsFor funHasParallelism funSizeParams lvl
 
-liftArg :: SegLevel -> Segments -> SubExp -> DistInputs -> DistEnv -> (SubExp, Diet) -> FlattenM [(SubExp, Diet)]
-liftArg lvl segments w inps env (se, d) = do
-  (_, rep) <- liftSubExp lvl segments inps env se
-  case rep of
-    Regular v -> do
-      v_t <- lookupType v
-      v' <-
-        if arrayShape v_t == Shape [w]
-          then pure v
-          else
-            letExp "lifted_arg_flat" . BasicOp $
-              Reshape v $
-                reshapeAll (arrayShape v_t) (Shape [w])
-      pure [(Var v', d)]
-    Irregular irreg -> do
-      vs <- irregularRepToFlatArrs w irreg
-      -- Only apply the original diet to the 'elems' array.
-      pure $ zip (map Var vs) $ replicate 4 Observe ++ [d]
-
-liftRegArg :: SegLevel -> Segments -> SubExp -> DistInputs -> DistEnv -> (SubExp, Diet) -> FlattenM (SubExp, Diet)
-liftRegArg lvl _segments w inps env (se, d) = do
-  se_t <- subExpInputType inps se
-  let se_shape = arrayShape se_t
-      expected_shape = Shape [w] <> se_shape
-  v <- liftSubExpRegular lvl [w] inps env expected_shape se
-  pure (Var v, d)
-
 reshapeLiftedApplyResult :: Segments -> RetType SOACS -> ResRep -> FlattenM ResRep
 reshapeLiftedApplyResult segments Prim {} (Regular v) = do
   v_t <- lookupType v
@@ -283,52 +335,6 @@ reshapeLiftedApplyResult segments Prim {} (Regular v) = do
 reshapeLiftedApplyResult _ _ rep =
   pure rep
 
--- Lifts a functions return type such that it matches the lifted functions
--- return type.
---
--- A lifted function corresponds to 'map f', which always produces fresh arrays.
--- We therefore mark all array components of the return type as 'Unique', such
--- that the results are known to not alias anything (in particular not the
--- arguments). Maintaining this invariant may require inserting copies in the
--- function body; see 'freshenResult'.
-liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
-liftRetType w = concat . snd . L.mapAccumL liftType 0
-  where
-    liftType i rettype =
-      let lifted = case rettype of
-            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
-            Array pt _ _ ->
-              let num_data = Prim int64
-                  segs = arrayOf (Prim int64) (Shape [Free w]) Unique
-                  flags = arrayOf (Prim Bool) (Shape [Ext i]) Unique
-                  offsets = arrayOf (Prim int64) (Shape [Free w]) Unique
-                  elems = arrayOf (Prim pt) (Shape [Ext i]) Unique
-               in [num_data, segs, flags, offsets, elems]
-            Acc {} -> error "liftRetType: Acc"
-            Mem {} -> error "liftRetType: Mem"
-       in (i + length lifted, lifted)
-
-liftRegularRetType :: DistInputs -> SubExp -> [RetType SOACS] -> [RetType GPU]
-liftRegularRetType inps w = concat . snd . L.mapAccumL liftType 0
-  where
-    liftType i rettype =
-      let lifted = case rettype of
-            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
-            Array pt shape _ ->
-              if needsIrregularRetType inps rettype
-                then
-                  let num_data = Prim int64
-                      segs = arrayOf (Prim int64) (Shape [Free w]) Unique
-                      flags = arrayOf (Prim Bool) (Shape [Ext i]) Unique
-                      offsets = arrayOf (Prim int64) (Shape [Free w]) Unique
-                      elems = arrayOf (Prim pt) (Shape [Ext i]) Unique
-                   in [num_data, segs, flags, offsets, elems]
-                else
-                  pure $ arrayOf (Prim pt) (Shape [Free w] <> shape) Unique
-            Acc {} -> error "liftRetType: Acc"
-            Mem {} -> error "liftRetType: Mem"
-       in (i + length lifted, lifted)
-
 liftBody :: FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> Result -> FlattenM Result
 liftBody funHasParallelism funSizeParams lvl w inputs env dstms result = do
   let segments = [w]
@@ -341,12 +347,6 @@ liftRegFunBody funHasParallelism funSizeParams lvl w inputs env dstms rettype re
   let segments = [w]
   env' <- foldM (transformDistStm funHasParallelism funSizeParams lvl segments) env dstms
   concat <$> zipWithM (liftRegResult lvl segments w inputs env') rettype result
-
-liftFunName :: Name -> Name
-liftFunName name = name <> "_lifted"
-
-liftRegFunName :: Name -> Name
-liftRegFunName name = name <> "_regular_lifted"
 
 -- | A lifted function must return fresh, non-aliasing arrays (as it
 -- corresponds to 'map f'; see 'liftRetType').  This is not
