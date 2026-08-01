@@ -235,8 +235,8 @@ intraBlockAlternative intra = do
 -- top-level maps and for maps nested inside a map-nest; the only differences
 -- between the two are which bodies are supplied and how their results are
 -- consumed, both of which are handled by the caller. The @ws@ are the widths
--- whose product bounds the outer parallelism (used for the 'suffOuterPar'
--- threshold comparison). Returns the names bound to the final results.
+-- whose product bounds the outer parallelism (used for the threshold
+-- comparison). Returns the names bound to the final results.
 mapAlternatives ::
   -- | Description for the result bindings.
   Name ->

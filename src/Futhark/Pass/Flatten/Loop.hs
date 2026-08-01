@@ -1,5 +1,5 @@
 module Futhark.Pass.Flatten.Loop
-  ( transformLoop,
+  ( flattenLoop,
   )
 where
 
@@ -302,7 +302,7 @@ transformForToWhile ops segments env inps res aux merge i it n body = do
   reps <- distributeAndFlattenBody ops segments "for_variant_res" env inps res synthetic_body
   insertRepsM (zip (map distResTag res) reps) env
 
-transformLoop ::
+flattenLoop ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -311,7 +311,7 @@ transformLoop ::
   (Pat Type, StmAux ()) ->
   ([(Param DeclType, SubExp)], LoopForm, Body SOACS) ->
   FlattenM DistEnv
-transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body) = do
+flattenLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body) = do
   if isVariant inps n
     then transformForToWhile ops segments env inps res aux merge i it n body
     else do
@@ -415,7 +415,7 @@ transformLoop ops segments env inps res (_pat, aux) (merge, ForLoop i it n, body
       let out_reps = resultToResRepsByDistResult res loop_out_vs
       insertRepsM (zip (map distResTag res) out_reps) env
 --
-transformLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) = do
+flattenLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) = do
   -- TODO: Consider updating the active segment so we don't go over w every
   -- time.
   --

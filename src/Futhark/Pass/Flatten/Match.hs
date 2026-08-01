@@ -1,7 +1,6 @@
 -- | Flattening of 'Match'.
 module Futhark.Pass.Flatten.Match
-  ( transformVariantMatch,
-    transformUniformMatch,
+  ( flattenMatch,
   )
 where
 
@@ -115,7 +114,7 @@ mergeResult lvl segments w iss branchesRep dist_res
 -- batch. An untaken branch's results are never read ('mergeResult' scatters
 -- them back through the branch's empty index array), so we just yield blanks.
 --
--- Like 'transformUniformMatch', the branch is lifted to a 'Result' of flat rep
+-- Like 'flattenUniformMatch', the branch is lifted to a 'Result' of flat rep
 -- components and the reps recovered with 'distResultsToResReps'; here we
 -- additionally wrap it in a @branch_size > 0@ 'Match'.
 guardBranch ::
@@ -149,7 +148,7 @@ guardBranch ops branch_size env inputs dstms res result = do
   rets <- expExtType match_e
   pure $ distResultsToResReps res $ drop (S.size (shapeContext rets)) match_res
 
-transformVariantMatch ::
+flattenVariantMatch ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -161,7 +160,7 @@ transformVariantMatch ::
   Body SOACS ->
   MatchDec ExtType ->
   FlattenM DistEnv
-transformVariantMatch ops segments env inps res _aux scrutinees cases defaultCase _rt = do
+flattenVariantMatch ops segments env inps res _aux scrutinees cases defaultCase _rt = do
   let lvl = flattenSegLevel ops
   w <- letSubExp "w" <=< toExp $ product $ segmentDims segments
   -- We need to partition the indices of the scrutinees by which case they match.
@@ -261,7 +260,7 @@ transformVariantMatch ops segments env inps res _aux scrutinees cases defaultCas
                in foldl (\m v -> M.insert v rep m) acc_reps accVars
     replaceAccReps acc_reps reps = foldl replaceAccRep acc_reps $ zip res reps
 
-transformUniformMatch ::
+flattenUniformMatch ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -273,7 +272,7 @@ transformUniformMatch ::
   Body SOACS ->
   MatchDec ExtType ->
   FlattenM DistEnv
-transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt = do
+flattenUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt = do
   scope <- askScope
   new_cases <- forM cases $ \(Case c body) -> do
     let (case_body_inputs, case_dstms) =
@@ -304,3 +303,26 @@ transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase
   let payload_res = drop (S.size (shapeContext rets)) match_res
   let reps = distResultsToResReps res payload_res
   insertRepsM (zip (map distResTag res) reps) env
+
+-- | Flatten a 'Match'
+flattenMatch ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  StmAux () ->
+  [SubExp] ->
+  [Case (Body SOACS)] ->
+  Body SOACS ->
+  MatchDec ExtType ->
+  FlattenM DistEnv
+flattenMatch ops segments env inps res aux scrutinees cases defaultCase rt =
+  -- 'flattenUniformMatch' keeps the scrutinees in a plain GPU 'Match', which is
+  -- only well-scoped when they are invariant to the nest. Whenever a scrutinee is
+  -- variant we must partition the segments by branch, even if no branch contains
+  -- parallelism (this happens e.g. for a variant conditional with an irregular
+  -- result, which cannot be sequentialised into a scalar group).
+  if any (isVariant inps) scrutinees
+    then flattenVariantMatch ops segments env inps res aux scrutinees cases defaultCase rt
+    else flattenUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt

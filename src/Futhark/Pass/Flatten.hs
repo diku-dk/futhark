@@ -133,7 +133,7 @@ transformTopLevelScrema ::
 transformTopLevelScrema funHasParallelism funSizeParams pat aux w arrs form = do
   let ops = flattenOpsFor funHasParallelism funSizeParams defaultSegLevel
   arr_ts <- mapM lookupType arrs
-  -- 'transformScrema' may bind the names of the pattern it is given (some paths
+  -- 'flattenScrema' may bind the names of the pattern it is given (some paths
   -- bind them directly, others only insert reps), so we pass it a fresh pattern
   -- and bind the real pattern names ourselves from the result.
   nested_pat <- renamePat pat
@@ -143,7 +143,7 @@ transformTopLevelScrema funHasParallelism funSizeParams pat aux w arrs form = do
           (\i pe -> DistResult (ResTag i) (DistType [] (Rank 0) (patElemType pe)) (patElemName pe))
           [0 ..]
           (patElems nested_pat)
-  env <- transformScrema ops [] (DistEnv mempty) inps res (nested_pat, aux) (w, arrs, form)
+  env <- flattenScrema ops [] (DistEnv mempty) inps res (nested_pat, aux) (w, arrs, form)
   forM_ (zip (patNames pat) res) $ \(pat_v, r) ->
     case resVar (distResTag r) env of
       Regular v ->
@@ -159,19 +159,11 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
     Let pat aux (BasicOp e) -> do
       let ~[res'] = res
           ~[pe] = patElems pat
-      transformDistBasicOp ops segments env (inps, res', pe, aux, e)
+      flattenBasicOp ops segments env (inps, res', pe, aux, e)
     Let pat aux (Op (Screma w arrs form)) ->
-      transformScrema (flattenOpsFor funHasParallelism funSizeParams lvl) segments env inps res (pat, aux) (w, arrs, form)
+      flattenScrema (flattenOpsFor funHasParallelism funSizeParams lvl) segments env inps res (pat, aux) (w, arrs, form)
     Let _ aux (Match scrutinees cases defaultCase rt) ->
-      -- 'transformUniformMatch' keeps the scrutinees in a plain GPU 'Match',
-      -- which is only well-scoped when they are invariant to the nest. Whenever
-      -- a scrutinee is variant we must partition the segments by branch, even if
-      -- no branch contains parallelism (this happens e.g. for a variant
-      -- conditional with an irregular result, which cannot be sequentialised
-      -- into a scalar group).
-      if any (isVariant inps) scrutinees
-        then transformVariantMatch ops segments env inps res aux scrutinees cases defaultCase rt
-        else transformUniformMatch ops segments env inps res aux scrutinees cases defaultCase rt
+      flattenMatch ops segments env inps res aux scrutinees cases defaultCase rt
     Let pat aux (Apply name args rettype s) ->
       case lvl of
         SegThread {} -> do
@@ -220,15 +212,15 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
             then transformScalarStm lvl segments env inps res $ Let pat aux (Apply name args rettype s)
             else error "Unhandled Apply in non SegThread Seglevel"
     Let pat aux (Loop merge (ForLoop i it n) body) ->
-      transformLoop ops segments env inps res (pat, aux) (merge, ForLoop i it n, body)
+      flattenLoop ops segments env inps res (pat, aux) (merge, ForLoop i it n, body)
     Let pat aux (Loop merge (WhileLoop cond) body) -> do
-      transformLoop ops segments env inps res (pat, aux) (merge, WhileLoop cond, body)
+      flattenLoop ops segments env inps res (pat, aux) (merge, WhileLoop cond, body)
     Let pat aux (WithAcc inputs lam) ->
       transformWithAcc ops segments env inps res pat aux inputs lam
     (Let pat aux (Op (Hist w hist_inputs hist_ops bucket_fun))) ->
-      transformHist ops segments env inps res (pat, aux) (w, hist_inputs, hist_ops, bucket_fun)
+      flattenHist ops segments env inps res (pat, aux) (w, hist_inputs, hist_ops, bucket_fun)
     Let _ aux (Op (FlatMap w arrs lam)) ->
-      transformFlatMapNested ops segments env inps res aux w arrs lam
+      flattenFlatMapNested ops segments env inps res aux w arrs lam
     Let _ _ (Op (Stream {})) -> error "transformDistStm: Stream should have been removed"
     Let _ _ (Op (JVP {})) -> error "Unhandled JVP"
     Let _ _ (Op (VJP {})) -> error "Unhandled VJP"
@@ -554,7 +546,7 @@ transformStm funHasParallelism funSizeParams (Let pat aux (Op (Screma w arrs for
       transformTopLevelScrema funHasParallelism funSizeParams pat aux w arrs form
 transformStm funHasParallelism funSizeParams (Let pat aux (Op (FlatMap w arrs lam))) =
   certifying (stmAuxCerts aux) $
-    transformFlatMap (flattenOpsFor funHasParallelism funSizeParams defaultSegLevel) pat w arrs lam
+    flattenFlatMap (flattenOpsFor funHasParallelism funSizeParams defaultSegLevel) pat w arrs lam
 transformStm funHasParallelism funSizeParams (Let pat aux (Loop params form body)) =
   localScope (scopeOfLoopForm form <> scopeOfFParams (map fst params)) $
     addStm . Let pat aux . Loop params form =<< transformBody funHasParallelism funSizeParams body

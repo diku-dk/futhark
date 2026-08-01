@@ -2,16 +2,10 @@
 
 -- | Flattening rules for SOACs.
 module Futhark.Pass.Flatten.SOAC
-  ( transformScrema,
-    transformHist,
-    transformFlatMap,
-    transformFlatMapNested,
-    transformDistributed,
-    transformMapForInBlock,
-
-    -- * Building blocks
-    distResultsToResReps,
-    flattenIrregularRep,
+  ( flattenScrema,
+    flattenHist,
+    flattenFlatMap,
+    flattenFlatMapNested,
   )
 where
 
@@ -842,14 +836,14 @@ onMapInputArrMultiDim lvl old_segments w env inps ws ws_O ws_data p arr = do
           Replicate (segmentsShape old_segments) (Var arr)
       pure $ MapArray arr_rep arr_row_t
 
-transformMapForInBlock ::
+flattenMapForInBlock ::
   FlattenOps ->
   Pat Type ->
   SubExp ->
   [VName] ->
   Lambda SOACS ->
   FlattenM ()
-transformMapForInBlock ops pat w arrs map_lam = do
+flattenMapForInBlock ops pat w arrs map_lam = do
   scope <- askScope
   lam <- preprocessLambda (castScope scope) map_lam
   let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
@@ -1239,7 +1233,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
 
   intra' <-
     if only_intra || may_intra
-      then Intrablock.intrablockParallelise (transformMapForInBlock ops) segments env inps ress pat aux w arrs map_lam
+      then Intrablock.intrablockParallelise (flattenMapForInBlock ops) segments env inps ress pat aux w arrs map_lam
       else pure Nothing
 
   let fullFlatten =
@@ -1273,7 +1267,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
 
   pure $ insertRegulars (map distResTag ress) match_res env
 
-transformScrema ::
+flattenScrema ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -1282,7 +1276,7 @@ transformScrema ::
   (Pat Type, StmAux ()) ->
   (SubExp, [VName], ScremaForm SOACS) ->
   FlattenM DistEnv
-transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
+flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
   | Just (reds, map_lam) <- isRedomapSOAC form,
     not $ isVariant inps w,
     all isRegularDistResult res,
@@ -1404,7 +1398,7 @@ transformScrema ops segments env inps res (pat, aux) (w, arrs, form)
           -- above if it is possible to do so. We need to make sure that we
           -- actually handle everything we care about!
           | shouldDissectForm form ->
-              error "transformScrema: complex Screma survived preprocessing"
+              error "flattenScrema: complex Screma survived preprocessing"
           | all isRegularDistResult res ->
               flattenScalarStm ops segments env inps res $ Let pat aux (Op (Screma w arrs form))
           | otherwise -> do
@@ -1485,14 +1479,14 @@ subsampleFlags lvl elems_per arr = do
 -- lambda over the @w@ segments and obtain an 'IrregularRep' for each result
 -- (they share the same segment structure, as required by the type of
 -- 'FlatMap').
-transformFlatMap ::
+flattenFlatMap ::
   FlattenOps ->
   Pat Type ->
   SubExp ->
   [VName] ->
   Lambda SOACS ->
   FlattenM ()
-transformFlatMap ops pat w arrs lam = do
+flattenFlatMap ops pat w arrs lam = do
   let segments = [w]
       inps =
         zipWith
@@ -1502,7 +1496,7 @@ transformFlatMap ops pat w arrs lam = do
       (m_name, s_name, f_name, o_name, d_names) =
         case patNames pat of
           (a : b : c : d : hs) -> (a, b, c, d, hs)
-          _ -> error "transformFlatMap: pattern too short"
+          _ -> error "flattenFlatMap: pattern too short"
       res =
         zipWith3
           (\i v t -> DistResult (ResTag i) (DistType segments (Rank 1) (rowType t)) v)
@@ -1512,7 +1506,7 @@ transformFlatMap ops pat w arrs lam = do
   reps <- distributeAndFlattenBody ops segments "flatmap" mempty inps res (lambdaBody lam)
   irregs <- forM reps $ \case
     Irregular ir -> ensureDenseIrregular lvl "flatmap_res" ir
-    Regular _ -> error "transformFlatMap: unexpected regular result"
+    Regular _ -> error "flattenFlatMap: unexpected regular result"
   case (irregs, lambdaReturnType lam) of
     (ir0 : _, _ : _) -> do
       -- The flattening structure arrays are in units of scalars, but the source
@@ -1545,7 +1539,7 @@ transformFlatMap ops pat w arrs lam = do
       forM_ (zip3 d_names irregs (lambdaReturnType lam)) $ \(v, ir, ret_t) -> do
         let row_shape = Shape $ arrayDims $ rowType ret_t
         bindReshape v (irregularD ir) (Shape [Var m_name] <> row_shape)
-    _ -> error "transformFlatMap: FlatMap with no results"
+    _ -> error "flattenFlatMap: FlatMap with no results"
   where
     lvl = flattenSegLevel ops
     bindReshape name arr newshape = do
@@ -1570,7 +1564,7 @@ transformFlatMap ops pat w arrs lam = do
 -- per-enclosing exclusive prefix sum, and the flag array (result 2).
 --
 -- See also Note [FlatMap element counting].
-transformFlatMapNested ::
+flattenFlatMapNested ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -1581,7 +1575,7 @@ transformFlatMapNested ::
   [VName] ->
   Lambda SOACS ->
   FlattenM DistEnv
-transformFlatMapNested ops segments env inps res aux w arrs lam = do
+flattenFlatMapNested ops segments env inps res aux w arrs lam = do
   size_name <- newVName "flatmap_sizes"
   data_names <- mapM (const $ newVName "flatmap_data") $ lambdaReturnType lam
   let k = arraySize 0 $ head $ lambdaReturnType lam
@@ -1671,7 +1665,7 @@ transformFlatMapNested ops segments env inps res aux w arrs lam = do
         -- [FlatMap element counting].
         let all_reps = n_rep : shape_rep : flag_rep : offset_rep : data_reps
         insertRepsM (zip (map distResTag res) all_reps) env
-      _ -> error "transformFlatMapNested: FlatMap with no results"
+      _ -> error "flattenFlatMapNested: FlatMap with no results"
 
 -- | Remove certificates that refer to variables free in the lambda (recursing
 -- into nested bodies). Such certificates arise on pure operator lambdas (e.g.
@@ -1690,7 +1684,7 @@ stripFreeCerts lam = lam {lambdaBody = onBody (lambdaBody lam)}
     onExp = runIdentity . mapExpM mapper
     mapper = identityMapper {mapOnBody = const (pure . onBody)}
 
-transformHist ::
+flattenHist ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -1699,7 +1693,7 @@ transformHist ::
   (Pat Type, StmAux ()) ->
   (SubExp, [VName], [Futhark.IR.SOACS.HistOp SOACS], Lambda SOACS) ->
   FlattenM DistEnv
-transformHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops0, bucket_fun) = do
+flattenHist ops segments env inps res (_pat, aux) (w, hist_inputs, hist_ops0, bucket_fun) = do
   -- The operator is a pure combining function; any certificates on its
   -- statements (from conservative propagation) are redundant and cannot be
   -- preserved when it is lifted into a segmented operation, so drop the ones

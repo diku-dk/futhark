@@ -1,4 +1,4 @@
-module Futhark.Pass.Flatten.BasicOp (transformDistBasicOp) where
+module Futhark.Pass.Flatten.BasicOp (flattenBasicOp) where
 
 import Control.Monad
 import Data.Foldable
@@ -346,7 +346,7 @@ rearrangeIrreg lvl segments env inps v_t perm ir = do
         irregularK = Dense
       }
 
--- | Input common to 'transformDistBasicOp': the segment level, the enclosing
+-- | Input common to 'flattenBasicOp': the segment level, the enclosing
 -- segments, the distribution environment and inputs, the result being produced,
 -- and the statement auxiliary information.
 data TrCtx = TrCtx SegLevel Segments DistEnv DistInputs DistResult (StmAux ())
@@ -395,7 +395,7 @@ transformArrayLit (TrCtx lvl segments env inps res _aux) vs row_type
                       reshapeAll (arrayShape v_t) stacked
 
             case vs_reg_1 of
-              [] -> error "transformDistBasicOp: empty ArrayLit cannot have variant elements"
+              [] -> error "flattenBasicOp: empty ArrayLit cannot have variant elements"
               [v] ->
                 pure v
               v : vs' ->
@@ -1123,7 +1123,7 @@ transformScratch (TrCtx lvl segments env inps res _aux) pt dims
       res_D <- letExp "scratch_D" $ BasicOp $ Scratch pt [m]
       insertIrregularM ns flags offsets (distResTag res) res_D Dense env
 
-transformDistBasicOp ::
+flattenBasicOp ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -1134,7 +1134,7 @@ transformDistBasicOp ::
     BasicOp
   ) ->
   FlattenM DistEnv
-transformDistBasicOp ops segments env (inps, res, pe, aux, e) =
+flattenBasicOp ops segments env (inps, res, pe, aux, e) =
   case e of
     BinOp {} -> scalarCase
     CmpOp {} -> scalarCase

@@ -4,6 +4,7 @@ module Futhark.Pass.Flatten.Intrablock
   ( IntrablockResult (..),
     intrablockParallelise,
     intraMinInnerPar,
+    InBlockMapTransformer,
   )
 where
 
