@@ -358,12 +358,10 @@ diffWithAcc ops pat aux inputs lam m = do
       as'' <- mapM vecToInner as'
       pure (map Var zeroes, (shape, as'', Nothing))
 
-    diffLambda' res_adjs get_adjs_for (Lambda params ts body) = do
-      localScope (scopeOfLParams params) $ do
-        Body () stms res <- vjpBody ops res_adjs get_adjs_for body
-        let body' = Body () stms $ take n_inputs res <> takeLast (length get_adjs_for) res
-        ts' <- mapM lookupType get_adjs_for
-        pure $ Lambda params (take n_inputs ts <> ts') body'
+    diffLambda' res_adjs get_adjs_for (Lambda params _ body) =
+      mkLambda params $ do
+        res <- bodyBind =<< vjpBody ops res_adjs get_adjs_for body
+        pure $ take n_inputs res <> takeLast (length get_adjs_for) res
 
 diffUpdateAcc ::
   Pat Type ->
