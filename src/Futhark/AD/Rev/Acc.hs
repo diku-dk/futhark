@@ -392,22 +392,25 @@ diffUpdateAcc pat aux safety acc is vs m = do
         -- zero sensitivity. XXX: this is only true for scatter-like
         -- accumulators, but these are probably the only ones that need this
         -- handling, as they are all that appear in source programs.
-        zeroed = do
+        zeroed a = do
           z <- letSubExp "acc_adj_zero" $ zeroExp elem_t
-          pure $ BasicOp $ Update Unsafe adj slice z
+          pure $ BasicOp $ Update Unsafe a slice z
     (adj_i, acc_adj) <- case safety of
       Unsafe ->
         (,)
           <$> (letExp "updateacc_val_adj" =<< index_adj)
-          <*> (letExp "acc_adj" =<< zeroed)
+          <*> (letExp "acc_adj" =<< zeroed adj)
       Safe -> do
         -- The primal UpdateAcc may be out-of-bounds, in which case indexing the
         -- adjoint is dangerous and the input accumulator adjoint is unchanged.
+        -- We copy adj so the true branch can consume the copy via Update
+        -- while the false branch returns the original unchanged.
+        adj_copy <- letExp (baseName adj <> "_copy") . BasicOp $ Replicate mempty (Var adj)
         ~[adj_i, acc_adj] <-
           letTupExp "updateacc_adj"
             =<< eIf
               (eShapeInBounds (arrayShape adj_t) (map eSubExp is))
-              (eBody [index_adj, zeroed])
+              (eBody [index_adj, zeroed adj_copy])
               (eBody [pure $ zeroExp elem_t, pure $ BasicOp $ SubExp $ Var adj])
         pure (adj_i, acc_adj)
     -- XXX: this is only OK because we assume accumulators are currently

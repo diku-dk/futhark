@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Fixed
 
+* A compiler crash (internal type error after the `ad` pass) when applying
+  reverse-mode AD to a `scatter` over a 2D array with a concatenated index
+  array.  The reverse pass generated an `if`-expression that consumed the
+  accumulator adjoint in the true branch via `Update` while the false branch
+  also referenced it, violating uniqueness.
+
 * A case where complex sizes referring to explicit parameters was mishandled by
   monomorphisation (#2230).
 
