@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   This fixes incorrect results from cross-workgroup operations
   ([#734](https://github.com/diku-dk/futhark/issues/734)).
 
+* An exotic case in reverse-mode differentiation of accumulators, which in
+  practice would only occur in cases of unrolled `scatter`s.
+
 ## [0.26.4]
 
 ### Added
