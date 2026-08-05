@@ -298,8 +298,8 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         tk_rk <- letSubExp "tk_rk" =<< toExp (pe64 tk * pe64 rk)
 
         gridDim_t <- letSubExp "gridDim_t" =<< ceilDiv common_dim tk_rk
-        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv height_A ty_ry
-        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv width_B tx_rx
+        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv height_A tx_rx
+        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv width_B ty_ry
 
         let gridxyt_pexp = pe64 gridDim_x * pe64 gridDim_y * pe64 gridDim_t
             grid_pexp =
@@ -312,8 +312,8 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
 
         ---- in this binder: outer seggroup ----
         (ret_seggroup, stms_seggroup) <- runBuilder $ do
-          iii <- letExp "iii" =<< toExp (le64 gid_x * pe64 ty_ry)
-          jjj <- letExp "jjj" =<< toExp (le64 gid_y * pe64 tx_rx)
+          iii <- letExp "iii" =<< toExp (le64 gid_x * pe64 tx_rx)
+          jjj <- letExp "jjj" =<< toExp (le64 gid_y * pe64 ty_ry)
           ttt <- letExp "ttt" =<< toExp (le64 gid_t * pe64 tk_rk)
 
           -- initialize register mem with neutral elements and create shmem
@@ -488,8 +488,8 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
           mkTileMemSizes height_A width_B common_dim is_B_coal
 
-        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv width_B tx_rx
-        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv height_A ty_ry
+        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv width_B ty_ry
+        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv height_A tx_rx
         let gridxy_pexp = pe64 gridDim_x * pe64 gridDim_y
         let grid_pexp =
               foldl (\x d -> pe64 d * x) gridxy_pexp $
@@ -500,8 +500,8 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
 
         ---- in this binder: outer seggroup ----
         (ret_seggroup, stms_seggroup) <- runBuilder $ do
-          iii <- letExp "iii" =<< toExp (le64 gid_x * pe64 ty_ry)
-          jjj <- letExp "jjj" =<< toExp (le64 gid_y * pe64 tx_rx)
+          iii <- letExp "iii" =<< toExp (le64 gid_x * pe64 tx_rx)
+          jjj <- letExp "jjj" =<< toExp (le64 gid_y * pe64 ty_ry)
 
           -- initialize register mem with neutral elements and create shmem
           (cssss, a_loc_init, b_loc_init) <-
@@ -546,7 +546,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
           --  segmap (ltid_x < tx, ltid_y < ty) {
           --    for i < ry do
           --      for j < rx do
-          --        res = if (iii+ltid_x*ry+i < height_A && jjj+ltid_y*rx+j < width_B)
+          --        res = if (iii+ltid_y*ry+i < height_A && jjj+ltid_x*rx+j < width_B)
           --              then code2' else dummy
           --        final_res[i,j] = res
           mkEpiloguePrimRes
