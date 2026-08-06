@@ -1888,6 +1888,39 @@ initialCtx =
               error $
                 "Invalid arguments to map intrinsic:\n"
                   ++ unlines [prettyString t, show f, show xs]
+    def "flatmap" = Just $
+      -- We do not use the size parameter of the lambda; we simply
+      -- concatenate whatever it returns and report the actual sizes.
+      -- The result type is existentially sized, so we cannot evaluate it
+      -- fully; we only need the row shape of the concatenated array.
+      TermPoly Nothing $ \t ->
+        pure $ ValueFun $ \f -> pure . ValueFun $ \sizes -> pure . ValueFun $ \xs ->
+          case unfoldFunType t of
+            ([_, _, _], ret_t)
+              | Just [_, _, _, res_t] <- isTupleRecord ret_t -> do
+                  rowshape <- typeShape <$> evalTypeFully (stripArray 1 res_t)
+                  yss <-
+                    zipWithM
+                      (apply2 noLoc mempty f)
+                      (snd $ fromArray sizes)
+                      (snd $ fromArray xs)
+                  -- The metadata (shape/flag/offset) is derived from the
+                  -- per-element output sizes; see the 'flatmap' documentation.
+                  let seg_sizes = map (genericLength . snd . fromArray) yss :: [Int64]
+                      offsets = init $ scanl (+) 0 seg_sizes
+                      flag s = if s == 0 then [] else True : replicate (fromIntegral s - 1) False
+                      mkI64 = ValuePrim . SignedValue . Int64Value
+                  pure $
+                    toTuple
+                      [ toArray' ShapeLeaf $ map mkI64 seg_sizes,
+                        toArray' ShapeLeaf $ map (ValuePrim . BoolValue) $ concatMap flag seg_sizes,
+                        toArray' ShapeLeaf $ map mkI64 offsets,
+                        toArray' rowshape $ concatMap (snd . fromArray) yss
+                      ]
+            _ ->
+              error $
+                "Invalid arguments to flatmap intrinsic:\n"
+                  ++ unlines [show f, show sizes, show xs]
     def s | "reduce" `T.isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs

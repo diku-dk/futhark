@@ -358,12 +358,10 @@ diffWithAcc ops pat aux inputs lam m = do
       as'' <- mapM vecToInner as'
       pure (map Var zeroes, (shape, as'', Nothing))
 
-    diffLambda' res_adjs get_adjs_for (Lambda params ts body) = do
-      localScope (scopeOfLParams params) $ do
-        Body () stms res <- vjpBody ops res_adjs get_adjs_for body
-        let body' = Body () stms $ take n_inputs res <> takeLast (length get_adjs_for) res
-        ts' <- mapM lookupType get_adjs_for
-        pure $ Lambda params (take n_inputs ts <> ts') body'
+    diffLambda' res_adjs get_adjs_for (Lambda params _ body) =
+      mkLambda params $ do
+        res <- bodyBind =<< vjpBody ops res_adjs get_adjs_for body
+        pure $ take n_inputs res <> takeLast (length get_adjs_for) res
 
 diffUpdateAcc ::
   Pat Type ->
@@ -375,21 +373,44 @@ diffUpdateAcc ::
   ADM () ->
   ADM ()
 diffUpdateAcc pat aux safety acc is vs m = do
+  -- By the type rules for UpdateAcc, the pattern must be a singleton.
+  let Pat ~[pe] = pat
   addStm $ Let pat aux $ BasicOp $ UpdateAcc safety acc is vs
   m
-  pat_adjs <- mapM lookupAdjVal (patNames pat)
-  returnSweepCode $ forM_ (zip pat_adjs vs) $ \(adj, v) -> do
+  adj <- lookupAdjVal $ patElemName pe
+  returnSweepCode $ do
     adj_t <- lookupType adj
-    let index_adj = pure $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
-    adj_i <-
-      letExp "updateacc_val_adj" =<< case safety of
-        Unsafe ->
-          index_adj
-        Safe ->
-          -- The primal UpdateAcc may be out-of-bounds, in which case
-          -- indexing the adjoint is dangerous.
-          eIf
-            (eShapeInBounds (arrayShape adj_t) (map eSubExp is))
-            (eBody [index_adj])
-            (eBody [pure $ zeroExp $ stripArray (length is) adj_t])
-    updateSubExpAdj v adj_i
+    let elem_t = stripArray (length is) adj_t
+        slice = fullSlice adj_t $ map DimFix is
+        -- The value adjoint is the corresponding cell of the accumulator
+        -- adjoint.
+        index_adj = pure $ BasicOp $ Index adj slice
+        -- The input accumulator adjoint is the result adjoint with the updated
+        -- cell zeroed out. Because the accumulators behave like overwrites (see
+        -- Note [Adjoints of accumulators]), a cell of the input that is
+        -- subsequently written does not contribute to the result and so has
+        -- zero sensitivity. XXX: this is only true for scatter-like
+        -- accumulators, but these are probably the only ones that need this
+        -- handling, as they are all that appear in source programs.
+        zeroed = do
+          z <- letSubExp "acc_adj_zero" $ zeroExp elem_t
+          pure $ BasicOp $ Update Unsafe adj slice z
+    (adj_i, acc_adj) <- case safety of
+      Unsafe ->
+        (,)
+          <$> (letExp "updateacc_val_adj" =<< index_adj)
+          <*> (letExp "acc_adj" =<< zeroed)
+      Safe -> do
+        -- The primal UpdateAcc may be out-of-bounds, in which case indexing the
+        -- adjoint is dangerous and the input accumulator adjoint is unchanged.
+        ~[adj_i, acc_adj] <-
+          letTupExp "updateacc_adj"
+            =<< eIf
+              (eShapeInBounds (arrayShape adj_t) (map eSubExp is))
+              (eBody [index_adj, zeroed])
+              (eBody [pure $ zeroExp elem_t, pure $ BasicOp $ SubExp $ Var adj])
+        pure (adj_i, acc_adj)
+    -- XXX: this is only OK because we assume accumulators are currently
+    -- singleton.
+    updateSubExpAdj (head vs) adj_i
+    insAdj acc acc_adj

@@ -580,13 +580,17 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
             -- not in the same position), in which case we must be careful to
             -- avoid clobbering.
             let mergepat_names = map I.paramName mergepat'
-            ses' <- forM ses $ \case
-              I.Var v
+            ses' <- forM (zip mergepat' ses) $ \case
+              (p, I.Var v)
                 | v `elem` mergepat_names -> do
                     v' <- newVName $ baseName v <> "_tmp"
-                    letBindNames [v'] $ I.BasicOp (I.SubExp $ I.Var v)
+                    letBindNames [v'] $
+                      if primType $ paramType p
+                        then I.BasicOp (I.SubExp $ I.Var v)
+                        -- Need administrative coerce due to the renaming.
+                        else shapeCoerce (I.arrayDims $ paramType p) v
                     pure $ I.Var v'
-              se -> pure se
+              (_, se) -> pure se
             forM_ (zip mergepat' ses') $ \(p, se) ->
               letBindNames [I.paramName p] $
                 case se of
@@ -1878,6 +1882,14 @@ isIntrinsicFunction qname args = do
       internaliseHist 2 desc rf dest op ne buckets img
     handleSOACs [rf, dest, op, ne, buckets, img] "hist_3d" = Just $ \desc ->
       internaliseHist 3 desc rf dest op ne buckets img
+    handleSOACs [lam, ks, arr] "flatmap" = Just $ \desc -> do
+      ks' <- internaliseExpToVars "ks_arr" ks
+      arr' <- internaliseExpToVars "map_arr" arr
+      ks_ts <- mapM lookupType ks'
+      arr_ts <- mapM lookupType arr'
+      lam' <- internaliseLambdaCoerce lam $ map rowType $ ks_ts <> arr_ts
+      let w = arraysSize 0 arr_ts
+      letValExp' desc $ I.Op $ FlatMap w (ks' <> arr') lam'
     handleSOACs _ _ = Nothing
 
     handleAccs [dest, f, bs] "scatter_stream" = Just $ \desc ->

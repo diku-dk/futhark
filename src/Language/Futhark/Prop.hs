@@ -1015,6 +1015,25 @@ intrinsics =
                   ]
                   $ RetType []
                   $ Scalar (t_b Nonunique)
+              ),
+              ( "flatmap",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n]
+                  [ Scalar $
+                      Arrow mempty Unnamed Observe (Scalar (Prim $ Signed Int64)) $
+                        RetType [] . Scalar $
+                          Arrow mempty Unnamed Observe (Scalar (t_a NoUniqueness)) $
+                            RetType [k] $
+                              array_b Nonunique (shape [k]),
+                    Array Observe (shape [n]) (Prim $ Signed Int64),
+                    array_a Observe $ shape [n]
+                  ]
+                  $ RetType [m] . Scalar . tupleRecord
+                  $ [ Array Unique (shape [n]) (Prim $ Signed Int64),
+                      Array Unique (shape [m]) (Prim Bool),
+                      Array Unique (shape [n]) (Prim $ Signed Int64),
+                      array_b Unique $ shape [m]
+                    ]
               )
             ]
               ++

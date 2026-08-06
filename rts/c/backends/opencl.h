@@ -508,6 +508,7 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                              const char *extra_build_opts[],
                              struct opencl_device_option device_option) {
   int compile_opts_size = 1024;
+  bool cl_std_was_set = false;
 
   for (int i = 0; i < NUM_TUNING_PARAMS; i++) {
     compile_opts_size += 2*(strlen(ctx->cfg->tuning_params[i].name) + 20);
@@ -519,6 +520,7 @@ static char* mk_compile_opts(struct futhark_context *ctx,
 
   for (int i = 0; extra_build_opts[i] != NULL; i++) {
     compile_opts_size += strlen(extra_build_opts[i] + 1);
+    cl_std_was_set |= strncmp(extra_build_opts[i], "-cl-std=", 8) == 0;
   }
 
   for (int i = 0; i < num_macros; i++) {
@@ -530,6 +532,14 @@ static char* mk_compile_opts(struct futhark_context *ctx,
   int w = snprintf(compile_opts, compile_opts_size,
                    "-DLOCKSTEP_WIDTH=%d ",
                    (int)ctx->lockstep_width);
+
+  bool is_rusticl_asahi =
+    strcmp(device_option.platform_name, "rusticl") == 0 &&
+    strncmp(device_option.device_name, "Apple M", 7) == 0;
+  if (is_rusticl_asahi && !cl_std_was_set) {
+    w += snprintf(compile_opts+w, compile_opts_size-w,
+                  "-cl-std=CL2.0 ");
+  }
 
   w += snprintf(compile_opts+w, compile_opts_size-w,
                 "-D%s=%d ",

@@ -30,7 +30,7 @@ import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.IR.SOACS qualified as Futhark
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Optimise.Fusion.Screma
-import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
+import Futhark.Transform.ISRWIM (rwimPossible)
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
 
