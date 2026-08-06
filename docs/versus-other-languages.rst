@@ -84,12 +84,12 @@ applied.
 
 Lambda terms are written as ``\x -> x + 2``, as in Haskell.
 
-A Futhark program is read top-down, and all functions must be declared
-in the order they are used, like Standard ML.  Unlike just
-about all functional languages, recursive functions are *not*
-supported.  Most of the time, you will use bulk array operations
-instead, but there is also a dedicated ``loop`` language construct,
-which is essentially syntactic sugar for tail recursive functions.
+A Futhark program is read top-down, and all functions must be declared in the
+order they are used, like Standard ML. Although Futhark does support recursive
+functions with some restrictions (see :ref:`recursive-functions`), their use is
+discouraged. Most of the time, you will use bulk array operations instead, but
+there is also a dedicated ``loop`` language construct, which is essentially
+syntactic sugar for tail recursive functions.
 
 Types
 -----

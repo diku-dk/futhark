@@ -1298,12 +1298,9 @@ svFromType t = Dynamic t
 -- suffices for fully applied recursive calls: the residual expression simply
 -- refers to the top-level binding by name.
 --
--- A first-order body is defunctionalised eagerly here in 'defuncValBind', so
--- its recursive occurrences need this self static value to resolve to; and it
--- yields a direct recursive function rather than lifted closures. A
--- higher-order body is instead stored raw in a 'LambdaSV' and defunctionalised
--- when applied, by which point the binding is in scope, so it needs no self
--- static value here.
+-- This is possible only when the parameters and the result are order-zero, as
+-- the static value would otherwise depend on the body. See Note [Lifting and
+-- recursion] for why that suffices.
 selfSV :: VName -> [Pat ParamType] -> ResType -> Maybe StaticVal
 selfSV name params rettype
   | all patternOrderZero params,
@@ -1319,13 +1316,11 @@ selfSV name params rettype
        in DynamicFun (self, inner) inner
 
 -- | The self static value binding for a top-level binding, if it is first-order
--- (see 'selfSV'). We register these before for all bindings before
--- defunctionalising any of them, so that mutually recursive references resolve.
--- The real static value of each binding, added as it is processed, takes
--- precedence over the bindings produced here. This means that true mutually
--- recursive higher-order functions probably may not work, but our goal here is
--- solely to handle the administrative mutually recursive functions produced by
--- lambda lifting.
+-- (see 'selfSV'). We register these for all bindings before defunctionalising
+-- any of them, so that mutually recursive references resolve. The real static
+-- value of each binding, added as it is processed, takes precedence over the
+-- bindings produced here. This is what lets a lambda-lifted function refer to
+-- the binding it was lifted out of; see Note [Lifting and recursion].
 selfBinding :: ValBind -> Env
 selfBinding valbind =
   case selfSV (valBindName valbind) (valBindParams valbind) rettype of
@@ -1338,10 +1333,11 @@ selfBinding valbind =
 
 -- | Defunctionalize a top-level value binding. Returns the
 -- transformed result as well as an environment that binds the name of
--- the value binding to the static value of the transformed body.  The
--- boolean is true if the function is a 'DynamicFun'.
+-- the value binding to the static value of the transformed body.
 defuncValBind :: ValBind -> DefM (ValBind, Env)
--- Eta-expand entry points with a functional return type.
+-- Eta-expand a functional result into further parameters, as the core language
+-- is first-order. A recursive binding never has one (see Note [Lifting and
+-- recursion]), so this cannot affect the self static values.
 defuncValBind (ValBind entry name name_loc _ (Info rettype) tparams params body _ attrs loc)
   | Scalar Arrow {} <- retType rettype = do
       (body_pats, body', rettype') <- etaExpand (second (const mempty) rettype) body
@@ -1456,8 +1452,9 @@ transformProg decs = modifyNameSource $ \namesrc ->
 -- means a program whose recursion is not statically resolvable - an indirect
 -- recursive call, or one that passes a *different* function at each step (e.g.
 -- `go (\x -> g x) n = ... go (\x -> g (g x)) (n-1)`) - produces ever-changing
--- keys and does not terminate here. Such programs must be rejected by the type
--- checker.
+-- keys and does not terminate here. The type checker rejects such programs, by
+-- requiring a recursive application to be saturated and to pass its
+-- higher-order arguments unchanged.
 --
 -- One subtlety remains, and it is about knot-tying, not about recognising
 -- recursion. A curried application peels off one parameter per step; the step
@@ -1471,3 +1468,30 @@ transformProg decs = modifyNameSource $ \namesrc ->
 -- continue - is not known until then. This is sound because those earlier steps
 -- are all processed before the order-zero step (the body is innermost), so they
 -- are in the memo by the time the body's recursive occurrence looks for them.
+--
+-- Another problem is scoping. Recursion is resolved by name, and 'defuncVals'
+-- processes bindings in order, so a body being defunctionalised can normally
+-- see the static value of everything it refers to. Lambda lifting is the only
+-- thing that breaks this as it can introduce mutual recursion (this is not
+-- allowed in the source language).
+--
+-- Whether this is a problem depends on the lifted function:
+--
+-- - A higher-order function is not defunctionalised where it is defined - its
+--   body is stored in a 'LambdaSV' and defunctionalised when it is applied,
+--   which is necessarily from a later binding. By then the binding it refers to
+--   has been processed, and nothing more is needed.
+--
+-- - A first-order function is defunctionalised eagerly, and so does need the
+--   static value of a binding that has not been processed yet. 'selfBinding'
+--   provides it for all bindings up front, which 'selfSV' can derive from the
+--   signature alone when the parameters and the result are order-zero.
+--
+-- The type rules ensure the result of a recursive binding is always order-zero,
+-- which is crucial for making this work.
+--
+-- A binding with a higher-order parameter thus gets no self static value, and
+-- needs none: the type checker also requires a recursive application to pass
+-- such a parameter unchanged, so a lifted function containing the recursive
+-- occurrence must capture the function-typed parameter, which makes it
+-- higher-order itself - the first case above.
