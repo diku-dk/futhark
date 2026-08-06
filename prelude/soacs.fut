@@ -315,7 +315,10 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
      , res[offset0 + offset1:n] :> [n - offset0 - offset1]a
      )
 
--- | Perform a flattened map of a function over the arrays `ks` and `as`.
+-- | **Beware:** this is an experimental and unstable interface which may change
+-- at any time.
+--
+-- Perform a flattened map of a function over the arrays `ks` and `as`.
 -- Returns the concatenation of the arrays produced by `f`, alongside metadata
 -- allowing the interpretation of the result as an irregular array. In order:
 --
