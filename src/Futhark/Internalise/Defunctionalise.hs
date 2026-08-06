@@ -1487,7 +1487,7 @@ transformProg decs = modifyNameSource $ \namesrc ->
 --   provides it for all bindings up front, which 'selfSV' can derive from the
 --   signature alone when the parameters and the result are order-zero.
 --
--- The type rules snsure the result of a recursive binding is always order-zero,
+-- The type rules ensure the result of a recursive binding is always order-zero,
 -- which is crucial for making this work.
 --
 -- A binding with a higher-order parameter thus gets no self static value, and
