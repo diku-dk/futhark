@@ -293,7 +293,7 @@ of the function::
 
 Hindley-Milner-style type inference is supported. A parameter may be given a
 type with the notation ``(name: type)``. Functions may be recursive, subject to
-various restrictions - see `Recursive Functions`_. The sizes of the arguments
+various restrictions - see :ref:`recursive-functions`. The sizes of the arguments
 can be constrained - see `Size Types`_. A function can be *polymorphic* by using
 type parameters, in the same way as for `Type Abbreviations`_::
 
@@ -1108,7 +1108,7 @@ These also apply to any record or tuple containing a function (a
 * A ``loop`` parameter cannot be a function.
 
 * There are some restrictions on recursive higher-order functions, see
-  `Recursive Functions`_.
+  :ref:`recursive-functions`.
 
 Further, *type parameters* are divided into *non-lifted* (bound with
 an apostrophe, e.g. ``'t``), *size-lifted* (``'~t``), and *fully
