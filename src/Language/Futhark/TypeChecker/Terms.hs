@@ -1399,19 +1399,31 @@ localChecks tparams orig_body = void $ check orig_body
             <> pretty ty
             <> "."
 
--- | Check that any recursive applications of a higher-order function are
--- invariant with respect to the higher-order arguments. This is done as a
--- syntactic check.
+-- | Check restrictions on recursive functions: the result must be first-order,
+-- and any recursive applications must be invariant with respect to the
+-- higher-order arguments. These are syntactic checks.
 --
--- 'fname' and 'params' are the name and parameters of the function whose body
--- this is; if the function is not recursive, 'fname' does not occur and this is
--- a no-op regardless.
-recursionCheck :: [TypeParam] -> VName -> [Pat ParamType] -> Exp -> TermTypeM ()
-recursionCheck tparams fname params body = do
-  higher_order <-
-    mapM (fmap not . orderZeroM tparams . patternStructType) params
-  when (or higher_order) $ void $ check higher_order body
+-- 'fname', 'params' and 'ret' describe the function whose body this is; if the
+-- function is not recursive, this is a no-op.
+recursionCheck ::
+  [TypeParam] -> VName -> [Pat ParamType] -> ResType -> SrcLoc -> Exp -> TermTypeM ()
+recursionCheck tparams fname params ret fun_loc body =
+  when (fname `S.member` fvVars (freeInExp body)) $ do
+    checkRet
+    higher_order <-
+      mapM (fmap not . orderZeroM tparams . patternStructType) params
+    when (or higher_order) $ void $ check higher_order body
   where
+    checkRet = do
+      ok <- orderZeroM tparams $ toStruct ret
+      unless ok . typeError fun_loc mempty $
+        "Recursive function"
+          <+> dquotes (prettyName fname)
+          <+> "returns type"
+          </> indent 2 (pretty ret)
+          </> "which is not first-order."
+          </> "Write the function type as further parameters instead."
+
     check ho e@(AppExp (Apply f args _) _)
       | Var v _ _ <- f,
         qualLeaf v == fname = do
@@ -2006,7 +2018,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
             -- Check for various problems.
             mapM_ (mustBeIrrefutable . fmap toStruct) params''
             localChecks tparams' body'''
-            recursionCheck tparams' fname params''' body'''
+            recursionCheck tparams' fname params''' rettype'' loc body'''
 
             let ((body'''', updated_ret), errors) =
                   Consumption.checkValDef
