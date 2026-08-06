@@ -291,11 +291,11 @@ of the function::
 
   def name params...: rettype = body
 
-Hindley-Milner-style type inference is supported.  A parameter may be
-given a type with the notation ``(name: type)``.  Functions may not be
-recursive.  The sizes of the arguments can be constrained - see `Size
-Types`_.  A function can be *polymorphic* by using type parameters, in
-the same way as for `Type Abbreviations`_::
+Hindley-Milner-style type inference is supported. A parameter may be given a
+type with the notation ``(name: type)``. Functions may be recursive, subject to
+various restrictions - see `Recursive Functions`_. The sizes of the arguments
+can be constrained - see `Size Types`_. A function can be *polymorphic* by using
+type parameters, in the same way as for `Type Abbreviations`_::
 
   def reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
@@ -1107,6 +1107,9 @@ These also apply to any record or tuple containing a function (a
 
 * A ``loop`` parameter cannot be a function.
 
+* There are some restrictions on recursive higher-order functions, see
+  `Recursive Functions`_.
+
 Further, *type parameters* are divided into *non-lifted* (bound with
 an apostrophe, e.g. ``'t``), *size-lifted* (``'~t``), and *fully
 lifted* (``'^t``).  Only fully lifted type parameters may be
@@ -1136,6 +1139,26 @@ cannot be influenced by later uses of the function.
 Local bindings made with ``let`` are not made polymorphic through
 let-generalisation *unless* they are syntactically functions, meaning
 they have at least one named parameter.
+
+.. _recursive-functions:
+
+Recursive functions
+-------------------
+
+Functions may be recursive, subject to the following constraints.
+
+1. Mutual recursion is not supported - a function is only in scope of itself.
+
+2. A recursive function definition may not have a higher-order return type. In
+   some cases you can work around this restriction by adding more function
+   parameters.
+
+3. A recursive call of a higher-order function must be provided arguments for
+   all of its higher-order parameters, and they must be syntactically identical
+   to the corresponding parameter in the definition.
+
+Restriction 2 is to make restriction 3 feasible to check, and restriction 3
+exists to ensure defunctionalisation is possible.
 
 .. _size-types:
 
