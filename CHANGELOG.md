@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   supported, although it is not yet necessarily efficient in all cases. More
   details: https://futhark-lang.org/blog/2026-07-31-full-flattening.html
 
+* Futhark now supports recursive functions, with various restrictions.
+
 ## Removed
 
 ## Changed
