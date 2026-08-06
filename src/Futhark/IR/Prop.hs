@@ -34,6 +34,8 @@ module Futhark.IR.Prop
     lamIsBinOp,
     isIdentityLambda,
     isNilLambda,
+    builtinName,
+    isBuiltinName,
     ASTConstraints,
     IsOp (..),
     ASTRep (..),
@@ -46,6 +48,7 @@ import Data.List (elemIndex, find)
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust, mapMaybe)
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.IR.Pretty
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Names
@@ -312,3 +315,12 @@ isNilLambda :: Lambda rep -> Bool
 isNilLambda lam =
   null (lambdaParams lam)
     && isIdentityLambda lam
+
+-- | Construct a name for a builtin function. This name will be recognised by
+-- 'isBuiltinName'.
+builtinName :: T.Text -> Name
+builtinName = nameFromText . ("builtin/" <>)
+
+-- | Is this a builtin name, and if so, what is the underlying name?
+isBuiltinName :: Name -> Maybe T.Text
+isBuiltinName v = "builtin/" `T.stripPrefix` nameToText v

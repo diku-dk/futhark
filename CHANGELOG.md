@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The type checker has been rewritten, with contributions from Jacob Aleksandar
   Siegumfeldt, Laust Kjæp Dengsøe, and Robert Schenck.
 
+* Flattening has been rewritten, with the majority of the work by Amirreza
+  Hashemi. The main consequence is that irregular nested parallelism is not
+  supported, although it is not yet necessarily efficient in all cases. More
+  details: https://futhark-lang.org/blog/2026-07-31-full-flattening.html
+
 ## Removed
 
 ## Changed

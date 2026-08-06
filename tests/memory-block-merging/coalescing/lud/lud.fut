@@ -19,14 +19,14 @@ def lud_diagonal [b] (a: [b][b]f32) : *[b][b]f32 =
               let col =
                 map (\j ->
                        if j > i
-                       then (mat[j, i] - (dotprod mat[j, :i] mat[:i, i])) / mat[i, i]
+                       then (mat[j, i] - #[sequential] (dotprod mat[j, :i] mat[:i, i])) / mat[i, i]
                        else mat[j, i])
                     (iota b)
               let mat[:, i] = col
               let row =
                 map (\j ->
                        if j > i
-                       then mat[i + 1, j] - (dotprod mat[:i + 1, j] mat[i + 1, :i + 1])
+                       then mat[i + 1, j] - #[sequential] (dotprod mat[:i + 1, j] mat[i + 1, :i + 1])
                        else mat[i + 1, j])
                     (iota b)
               let mat[i + 1] = row

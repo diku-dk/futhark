@@ -757,6 +757,7 @@ pSOAC pr =
       keyword "redomap" *> pScrema pRedomapForm,
       keyword "scanomap" *> pScrema pScanomapForm,
       keyword "screma" *> pScrema pScremaForm,
+      keyword "flatmap" *> pFlatMap,
       keyword "vjp" *> pVJP,
       keyword "jvp" *> pJVP,
       pHist,
@@ -829,6 +830,14 @@ pSOAC pr =
             <*> braces (pSubExp `sepBy` pComma)
             <* pComma
             <*> pLambda pr
+    pFlatMap =
+      parens $
+        SOAC.FlatMap
+          <$> pSubExp
+          <* pComma
+          <*> braces (pVName `sepBy` pComma)
+          <* pComma
+          <*> pLambda pr
     pStream = keyword "streamSeq" *> pStreamSeq
     pStreamSeq =
       parens $

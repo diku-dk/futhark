@@ -538,6 +538,8 @@ fwdSOAC pat aux (WithVJP args lam _) = do
     lam_res <- auxing aux $ eLambda lam $ map eSubExp args
     forM (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
       certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
+fwdSOAC _ _ FlatMap {} =
+  error "fwdSOAC: unhandled FlatMap"
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =
