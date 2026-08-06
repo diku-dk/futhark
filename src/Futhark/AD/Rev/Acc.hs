@@ -384,7 +384,14 @@ diffUpdateAcc pat aux safety acc is vs m = do
         slice = fullSlice adj_t $ map DimFix is
         -- The value adjoint is the corresponding cell of the accumulator
         -- adjoint.
-        index_adj = pure $ BasicOp $ Index adj slice
+        index_adj = maybe_copy $ pure $ BasicOp $ Index adj slice
+          where
+            -- We have to copy a slice because we are updating 'adj' as well -
+            -- even though in many cases that update is likely dead code... Not
+            -- great.
+            maybe_copy
+              | null $ sliceDims slice = id
+              | otherwise = eCopy
         -- The input accumulator adjoint is the result adjoint with the updated
         -- cell zeroed out. Because the accumulators behave like overwrites (see
         -- Note [Adjoints of accumulators]), a cell of the input that is
