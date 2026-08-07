@@ -1413,9 +1413,11 @@ compileCode (Imp.Free name _) =
 compileCode (Imp.Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) = do
   cp <- asks $ M.lookup (dstspace, srcspace) . opsCopies . envOperations
   case cp of
-    Nothing ->
-      compileCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
-    Just cp' -> do
+    -- Values of unit type occupy no memory, so the arrays involved may well be
+    -- zero-sized. The specialised copies compute the element size from the
+    -- type, which they cannot do for 'Unit', so let the generic copy handle it
+    -- (where it degenerates to writing nothing).
+    Just cp' | t /= Unit -> do
       shape' <- traverse (traverse (compileExp . untyped)) shape
       dst' <- compileVar dst
       src' <- compileVar src
@@ -1424,6 +1426,8 @@ compileCode (Imp.Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcs
       srcoffset' <- traverse (compileExp . untyped) srcoffset
       srcstrides' <- traverse (traverse (compileExp . untyped)) srcstrides
       cp' t shape' dst' (dstoffset', dststrides') src' (srcoffset', srcstrides')
+    _ ->
+      compileCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
 compileCode (Imp.Write dst (Imp.Count idx) pt space _ elemexp) = do
   dst' <- compileVar dst
   idx' <- compileExp $ Imp.untyped idx
