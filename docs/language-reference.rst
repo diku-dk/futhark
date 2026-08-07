@@ -1797,6 +1797,20 @@ The compiler will treat the attributed expression as a black box.
 This is used to work around optimisation deficiencies (or bugs),
 although it should hopefully rarely be necessary.
 
+``flattening(sequentialise_irregular)``
+.......................................
+
+Within the attributed SOAC (which should not itself be nested), any irregular
+nested parallelism is sequentialised. This gives up the inner parallelism, but
+avoids the substantial bookkeeping that irregular flattening entails. Note that
+in some cases this can lead to un-compileable code, if the irregularity is too
+severe. Regular nested parallelism is unaffected. The attribute is ignored where
+the irregularity cannot be confined to a single thread, in which case such
+values are flattened as usual.
+
+Historical note: this is intended to reproduce the behaviour of Futhark prior to
+supporting irregular flattening.
+
 ``incremental_flattening(no_outer)``
 ....................................
 

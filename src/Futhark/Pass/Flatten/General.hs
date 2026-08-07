@@ -44,10 +44,12 @@ module Futhark.Pass.Flatten.General
     distributeAndFlattenBody,
     splitInput,
     isVariant,
-    flattenDistStms,
     segmentDims,
     flattenDistStm,
-    distIrregularityAtLevel,
+    flattenScalarStm,
+    distributeBodyWith,
+    distributeMapWith,
+    atSegLevel,
   )
 where
 
@@ -423,7 +425,7 @@ distributeAndFlattenBody ::
 distributeAndFlattenBody ops segments desc env inps res body = do
   scope <- askScope
   (inps_local, env_local, _) <- localiseInputs env inps
-  let (inps_dist, dstms) = distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps_local body
+  let (inps_dist, dstms) = distributeBodyWith ops scope segments inps_local body
   lifted_res <- liftBodyWithDistResults ops segments inps_dist env_local dstms res (bodyResult body)
   lifted_vs <- mapM (letExp desc <=< toExp . resSubExp) lifted_res
   pure $ distResultsToResReps res lifted_vs
@@ -824,26 +826,59 @@ replicateForDims segments dims v = do
     letExp (baseName v <> "_reg_rep") . BasicOp $ Replicate dims (Var v)
   letExp (baseName v <> "_reg_rep_tr") . BasicOp $ Rearrange v_rep perm
 
-flattenDistStm :: FlattenOps -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
-flattenDistStm ops = flattenDistStmAtLevel ops (flattenSegLevel ops)
-
--- | How to treat irregularity when distributing code at this level.
--- In-block code cannot use the irregular flattening machinery, as it
--- produces SegOps whose sizes are bound inside the enclosing kernel.
-distIrregularityAtLevel :: SegLevel -> DistIrregularity
-distIrregularityAtLevel SegThreadInBlock {} = SequentialiseIrregular
-distIrregularityAtLevel _ = DistributeIrregular
-
-flattenDistStms ::
+-- | Flatten a single 'DistStm', producing an updated environment.
+flattenDistStm ::
   FlattenOps ->
-  SubExp ->
-  DistInputs ->
+  Segments ->
   DistEnv ->
-  [DistStm] ->
-  Result ->
-  FlattenM Result
-flattenDistStms ops w inputs env dstms result = do
-  let segments = [w]
-  env' <- foldM (flattenDistStm ops segments) env dstms
-  result' <- mapM (liftResult (flattenSegLevel ops) segments inputs env') result
-  pure $ concat result'
+  DistStm ->
+  FlattenM DistEnv
+flattenDistStm ops = flattenDistStmWith ops ops
+
+-- | Flatten a single scalar statement, producing an updated environment.
+flattenScalarStm ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Stm SOACS ->
+  FlattenM DistEnv
+flattenScalarStm ops = flattenScalarStmAt ops (flattenSegLevel ops)
+
+-- | 'distributeBody' with the settings in the given 'FlattenOps'.
+distributeBodyWith ::
+  FlattenOps ->
+  Scope rep ->
+  Segments ->
+  DistInputs ->
+  Body SOACS ->
+  (DistInputs, DistStms)
+distributeBodyWith ops =
+  distributeBody (flattenIrregularity ops) (flattenFunHasParallelism ops)
+
+-- | 'distributeMap' with the settings in the given 'FlattenOps'.
+distributeMapWith ::
+  FlattenOps ->
+  Scope rep ->
+  Pat Type ->
+  Segments ->
+  [MapArray t] ->
+  Lambda SOACS ->
+  (Distributed, M.Map ResTag t)
+distributeMapWith ops =
+  distributeMap (flattenIrregularity ops) (flattenFunHasParallelism ops)
+
+-- | Continue flattening at the given seg level, adjusting the irregularity
+-- handling mode to match. Intrablock code cannot use the irregular flattening
+-- machinery, as it produces SegOps whose sizes are bound inside the enclosing
+-- kernel. 'SequentialiseIrregularAll' is requested by the user rather than
+-- implied by the level, so we keep it if provided.
+atSegLevel :: SegLevel -> FlattenOps -> FlattenOps
+atSegLevel lvl ops =
+  ops {flattenSegLevel = lvl, flattenIrregularity = irreg}
+  where
+    irreg = case (flattenIrregularity ops, lvl) of
+      (SequentialiseIrregularAll, _) -> SequentialiseIrregularAll
+      (_, SegThreadInBlock {}) -> SequentialiseIrregularBasicOps
+      _ -> DistributeIrregular

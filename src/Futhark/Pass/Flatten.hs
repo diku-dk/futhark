@@ -78,13 +78,24 @@ import Prelude hiding (div, quot, rem)
 
 type FunSizeParams = Name -> S.Set Int
 
-flattenOpsFor :: FunHasParallelism -> FunSizeParams -> SegLevel -> FlattenOps
-flattenOpsFor funHasParallelism funSizeParams lvl =
+-- | The irregularity handling mode requested by a statement, defaulting to the
+-- mode already in effect. @#[flattening(sequentialise_irregular)]@ asks that
+-- nested irregular parallelism be sequentialised rather than flattened; see
+-- 'SequentialiseIrregularAll'.
+irregularityFor :: DistIrregularity -> StmAux a -> DistIrregularity
+irregularityFor irreg aux
+  | AttrComp "flattening" ["sequentialise_irregular"] `inAttrs` stmAuxAttrs aux =
+      SequentialiseIrregularAll
+  | otherwise = irreg
+
+flattenOpsFor :: FunHasParallelism -> FunSizeParams -> DistIrregularity -> SegLevel -> FlattenOps
+flattenOpsFor funHasParallelism funSizeParams irreg lvl =
   FlattenOps
     { flattenSegLevel = lvl,
+      flattenIrregularity = irreg,
       flattenFunHasParallelism = funHasParallelism,
-      flattenDistStmAtLevel = transformDistStm funHasParallelism funSizeParams,
-      flattenScalarStm = transformScalarStm lvl,
+      flattenDistStmWith = transformDistStm funSizeParams,
+      flattenScalarStmAt = transformScalarStm,
       flattenTopLevelStm = transformStm funHasParallelism funSizeParams
     }
 
@@ -131,7 +142,8 @@ transformTopLevelScrema ::
   ScremaForm SOACS ->
   FlattenM ()
 transformTopLevelScrema funHasParallelism funSizeParams pat aux w arrs form = do
-  let ops = flattenOpsFor funHasParallelism funSizeParams defaultSegLevel
+  let irreg = irregularityFor DistributeIrregular aux
+      ops = flattenOpsFor funHasParallelism funSizeParams irreg defaultSegLevel
   arr_ts <- mapM lookupType arrs
   -- 'flattenScrema' may bind the names of the pattern it is given (some paths
   -- bind them directly, others only insert reps), so we pass it a fresh pattern
@@ -288,17 +300,17 @@ flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, ret
         then transformScalarStm lvl segments env inps res $ Let pat aux (Apply name args rettype s)
         else error "Unhandled Apply in non SegThread Seglevel"
 
-transformDistStm :: FunHasParallelism -> FunSizeParams -> SegLevel -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
-transformDistStm _ _ lvl segments env (DistStm inps res (ScalarStm stms)) =
-  transformScalarStms lvl segments env inps res stms
-transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps res (ParallelStm stm)) = do
+transformDistStm :: FunSizeParams -> FlattenOps -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
+transformDistStm _ outer_ops segments env (DistStm inps res (ScalarStm stms)) =
+  transformScalarStms (flattenSegLevel outer_ops) segments env inps res stms
+transformDistStm funSizeParams outer_ops segments env (DistStm inps res (ParallelStm stm)) = do
   case stm of
     Let pat aux (BasicOp e) -> do
       let ~[res'] = res
           ~[pe] = patElems pat
       flattenBasicOp ops segments env (inps, res', pe, aux, e)
     Let pat aux (Op (Screma w arrs form)) ->
-      flattenScrema (flattenOpsFor funHasParallelism funSizeParams lvl) segments env inps res (pat, aux) (w, arrs, form)
+      flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
     Let _ aux (Match scrutinees cases defaultCase rt) ->
       flattenMatch ops segments env inps res aux scrutinees cases defaultCase rt
     Let pat aux (Apply name args rettype s) ->
@@ -318,7 +330,12 @@ transformDistStm funHasParallelism funSizeParams lvl segments env (DistStm inps 
     Let _ _ (Op (VJP {})) -> error "Unhandled VJP"
     Let _ _ (Op (WithVJP {})) -> error "Unhandled WithVJP"
   where
-    ops = flattenOpsFor funHasParallelism funSizeParams lvl
+    lvl = flattenSegLevel outer_ops
+    ops =
+      outer_ops
+        { flattenIrregularity =
+            irregularityFor (flattenIrregularity outer_ops) (stmAux stm)
+        }
 
 reshapeLiftedApplyResult :: Segments -> RetType SOACS -> ResRep -> FlattenM ResRep
 reshapeLiftedApplyResult segments Prim {} (Regular v) = do
@@ -338,14 +355,16 @@ reshapeLiftedApplyResult _ _ rep =
 liftBody :: FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> Result -> FlattenM Result
 liftBody funHasParallelism funSizeParams lvl w inputs env dstms result = do
   let segments = [w]
-  env' <- foldM (transformDistStm funHasParallelism funSizeParams lvl segments) env dstms
+      ops = flattenOpsFor funHasParallelism funSizeParams DistributeIrregular lvl
+  env' <- foldM (flattenDistStm ops segments) env dstms
   result' <- mapM (liftResult lvl segments inputs env') result
   pure $ concat result'
 
 liftRegFunBody :: FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> [RetType SOACS] -> Result -> FlattenM Result
 liftRegFunBody funHasParallelism funSizeParams lvl w inputs env dstms rettype result = do
   let segments = [w]
-  env' <- foldM (transformDistStm funHasParallelism funSizeParams lvl segments) env dstms
+      ops = flattenOpsFor funHasParallelism funSizeParams DistributeIrregular lvl
+  env' <- foldM (flattenDistStm ops segments) env dstms
   concat <$> zipWithM (liftRegResult lvl segments w inputs env') rettype result
 
 -- | A lifted function must return fresh, non-aliasing arrays (as it
@@ -558,8 +577,10 @@ transformStm funHasParallelism funSizeParams (Let pat aux (Op (Screma w arrs for
   | otherwise =
       transformTopLevelScrema funHasParallelism funSizeParams pat aux w arrs form
 transformStm funHasParallelism funSizeParams (Let pat aux (Op (FlatMap w arrs lam))) =
-  certifying (stmAuxCerts aux) $
-    flattenFlatMap (flattenOpsFor funHasParallelism funSizeParams defaultSegLevel) pat w arrs lam
+  certifying (stmAuxCerts aux) $ flattenFlatMap ops pat w arrs lam
+  where
+    irreg = irregularityFor DistributeIrregular aux
+    ops = flattenOpsFor funHasParallelism funSizeParams irreg defaultSegLevel
 transformStm funHasParallelism funSizeParams (Let pat aux (Loop params form body)) =
   localScope (scopeOfLoopForm form <> scopeOfFParams (map fst params)) $
     addStm . Let pat aux . Loop params form =<< transformBody funHasParallelism funSizeParams body

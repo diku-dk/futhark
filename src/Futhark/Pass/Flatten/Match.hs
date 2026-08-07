@@ -20,8 +20,7 @@ import Futhark.Tools
 -- Given the indices for which a branch is taken and its body,
 -- distribute the statements of the body of that branch.
 distributeBranch ::
-  FunHasParallelism ->
-  SegLevel ->
+  FlattenOps ->
   Segments ->
   DistEnv ->
   DistInputs ->
@@ -29,8 +28,9 @@ distributeBranch ::
   Body SOACS ->
   M.Map VName ResRep ->
   FlattenM (DistInputs, DistEnv, DistStms)
-distributeBranch funHasParallelism lvl segments env inps is body acc_reps = do
-  let free_in_body = filter (isVariant inps . Var) (namesToList $ freeIn body)
+distributeBranch ops segments env inps is body acc_reps = do
+  let lvl = flattenSegLevel ops
+      free_in_body = filter (isVariant inps . Var) (namesToList $ freeIn body)
   scope <- askScope
   free_sizes <-
     foldMap freeIn <$> mapM (lookupInputType inps) free_in_body
@@ -42,7 +42,7 @@ distributeBranch funHasParallelism lvl segments env inps is body acc_reps = do
         (v, t, i) <- zip3 vs ts [0 ..]
         pure (v, DistInput (ResTag i) t)
   let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-  let (inputs', dstms) = distributeBody (distIrregularityAtLevel lvl) funHasParallelism scope segments inputs body
+  let (inputs', dstms) = distributeBodyWith ops scope segments inputs body
   pure (inputs', env', dstms)
 
 -- Given a single result from each branch as well the *unlifted*
@@ -220,7 +220,7 @@ flattenVariantMatch ops segments env inps res _aux scrutinees cases defaultCase 
       ( \(branch_reps_acc, acc_reps) (branch_size, branch_inds, body, result) -> do
           let branch_segments = [branch_size]
           (inputs, env', dstms) <-
-            distributeBranch (flattenFunHasParallelism ops) lvl segments env inps branch_inds body acc_reps
+            distributeBranch ops segments env inps branch_inds body acc_reps
           reps <-
             if hasAcc
               then do
@@ -276,13 +276,13 @@ flattenUniformMatch ops segments env inps res aux scrutinees cases defaultCase r
   scope <- askScope
   new_cases <- forM cases $ \(Case c body) -> do
     let (case_body_inputs, case_dstms) =
-          distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps body
+          distributeBodyWith ops scope segments inps body
 
     fmap (Case c) . buildBody_ $
       liftBodyWithDistResults ops segments case_body_inputs env case_dstms res (bodyResult body)
   new_default_body <- do
     let (new_default_body_inputs, new_default_dstms) =
-          distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope segments inps defaultCase
+          distributeBodyWith ops scope segments inps defaultCase
     buildBody_ $
       liftBodyWithDistResults ops segments new_default_body_inputs env new_default_dstms res (bodyResult defaultCase)
 

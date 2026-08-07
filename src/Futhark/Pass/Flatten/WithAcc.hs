@@ -127,13 +127,7 @@ flattenWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_in
           ++ inps
 
   let (withacc_new_inputs, withacc_dstms) =
-        distributeBody
-          (distIrregularityAtLevel (flattenSegLevel ops))
-          (flattenFunHasParallelism ops)
-          scope
-          segments
-          interchanged_inps
-          acc_lam_body
+        distributeBodyWith ops scope segments interchanged_inps acc_lam_body
 
   withacc_lam' <- mkLambda (map (trParam sf) lam_params') $ do
     env' <- foldM (flattenDistStm ops segments) env withacc_dstms

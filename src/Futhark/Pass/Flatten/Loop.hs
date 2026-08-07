@@ -189,7 +189,7 @@ distributedLoopBody ops segments num_segments loop_scope inputs env res body = d
   scope <- askScope
   let lvl = flattenSegLevel ops
       (inputs', dstms) =
-        distributeBody (distIrregularityAtLevel lvl) (flattenFunHasParallelism ops) scope segments inputs body
+        distributeBodyWith ops scope segments inputs body
   buildBody_ $ localScope loop_scope $ do
     env' <- foldM (flattenDistStm ops segments) env dstms
     concat <$> zipWithM (liftLoopResult lvl segments num_segments inputs' env') res (bodyResult body)
@@ -532,7 +532,7 @@ flattenLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) 
               env_subset = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
           let subset_segments = [active_size]
           let (subset_inputs', subset_dstms) =
-                distributeBody (distIrregularityAtLevel (flattenSegLevel ops)) (flattenFunHasParallelism ops) scope subset_segments subset_inputs body
+                distributeBodyWith ops scope subset_segments subset_inputs body
           env_subset' <- foldM (flattenDistStm ops subset_segments) env_subset subset_dstms
           active_reps <-
             zipWithM

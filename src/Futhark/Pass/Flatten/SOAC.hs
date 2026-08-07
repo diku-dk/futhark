@@ -848,10 +848,10 @@ flattenMapForInBlock ops pat w arrs map_lam = do
   lam <- preprocessLambda (castScope scope) map_lam
   let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
       (distributed, _) =
-        distributeMap SequentialiseIrregular (flattenFunHasParallelism ops) scope pat [w] arrs' lam
+        distributeMapWith ops' scope pat [w] arrs' lam
   transformDistributed ops' mempty [w] distributed
   where
-    ops' = ops {flattenSegLevel = inBlockSegLevel}
+    ops' = atSegLevel inBlockSegLevel ops
 
 resultMapMode :: InnerMapMode -> DistInputs -> Type -> InnerMapMode
 resultMapMode SingleDim _ _ = SingleDim
@@ -1006,14 +1006,7 @@ distributeAndTransformInnerMap ops mode ws_triple new_segment inps pat arrs' onF
               }
           )
       (distributed, arrmap) =
-        distributeMap
-          (distIrregularityAtLevel (flattenSegLevel ops))
-          (flattenFunHasParallelism ops)
-          scope
-          pat
-          new_segment
-          (replicated <> arrs')
-          map_lam'
+        distributeMapWith ops scope pat new_segment (replicated <> arrs') map_lam'
   -- order the result representations in the same order as the pattern
   resRepsInPatOrder pat
     <$> transformDistributedInnerMap ops mode ws_triple arrmap new_segment distributed
@@ -1143,14 +1136,7 @@ transformTopLevelMap ops pat w arrs lam = do
   scope <- castScope <$> askScope :: FlattenM (Scope SOACS)
   let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
       (distributed, _) =
-        distributeMap
-          (distIrregularityAtLevel (flattenSegLevel ops))
-          (flattenFunHasParallelism ops)
-          scope
-          pat
-          [w]
-          arrs'
-          lam
+        distributeMapWith ops scope pat [w] arrs' lam
   transformDistributed ops mempty [w] distributed
   pure $ map Regular $ patNames pat
 
@@ -1237,7 +1223,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
       else pure Nothing
 
   let fullFlatten =
-        regularRepVars <$> transformMap (ops {flattenSegLevel = defaultSegLevel}) (stmAuxAttrs aux) segments env inps pat w arrs map_lam
+        regularRepVars <$> transformMap (atSegLevel defaultSegLevel ops) (stmAuxAttrs aux) segments env inps pat w arrs map_lam
 
       outerOnly =
         runMapLambdaBody segments env inps w arrs map_lam pat ress

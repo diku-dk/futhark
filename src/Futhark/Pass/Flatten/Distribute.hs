@@ -51,8 +51,10 @@ type Segments = [SubExp]
 
 type FunHasParallelism = Name -> Bool
 
--- | How to treat irregularity when classifying the statements of a
--- distributed body.
+-- | How to treat irregularity when classifying the statements of a distributed
+-- body. This is mainly used to sequentialise irregular nested parallelism
+-- instead of actually exploiting the parallelism, as the overhead of doing so
+-- can sometimes be ruinous.
 data DistIrregularity
   = -- | Distribute statements involving irregularity, relying on the irregular
     -- flattening machinery to handle them.
@@ -64,7 +66,9 @@ data DistIrregularity
     -- infeasible ('noIrregularPar' would reject it). Irregularity that escapes
     -- the enclosing map must still be distributed; if it occurs, the intrablock
     -- version is correctly rejected.
-    SequentialiseIrregular
+    SequentialiseIrregularBasicOps
+  | -- | Sequentialise /any/ statement whose irregularity stays internal.
+    SequentialiseIrregularAll
   deriving (Eq, Show)
 
 segmentsShape :: Segments -> Shape
@@ -434,19 +438,22 @@ classifyStms irreg_mode funHasParallelism body_res = classify
     -- trivially parallel statements are treated as sequential as well. See Note
     -- [Meaningful Parallelism].
     --
-    -- With 'SequentialiseIrregular', basic operations that involve irregularity
-    -- further count as parallel only when the irregularity escapes the scalar
-    -- group.
+    -- With 'SequentialiseIrregularBasicOps', basic operations that involve
+    -- irregularity further count as parallel only when the irregularity escapes
+    -- the scalar group. With 'SequentialiseIrregularAll', this goes for any
+    -- statement, not just basic operations.
     classify ds =
-      let parallel
+      let -- Which statements are candidates for sequentialising when their
+          -- irregularity does not escape the scalar group.
+          sequentialisable = case irreg_mode of
+            DistributeIrregular -> const False
+            SequentialiseIrregularBasicOps -> isBasicOpDistStm
+            SequentialiseIrregularAll -> const True
+          parallel
             | any meaningfulDistStm ds =
-                case irreg_mode of
-                  DistributeIrregular ->
-                    isParallelDistStm (isParallelStm funHasParallelism)
-                  SequentialiseIrregular ->
-                    \d ->
-                      isParallelDistStm (isParallelStm funHasParallelism) d
-                        && not (isBasicOpDistStm d && involvesIrregularity ds d)
+                \d ->
+                  isParallelDistStm (isParallelStm funHasParallelism) d
+                    && not (sequentialisable d && involvesIrregularity ds d)
             | otherwise = const False
           forced = mustDistribute (S.fromList $ filter parallel $ toList ds) ds
        in groupStms (\d -> parallel d || d `S.member` forced) body_res ds
@@ -490,7 +497,10 @@ classifyStms irreg_mode funHasParallelism body_res = classify
     --     internally used ones: they contain allocations of nonuniform size
     --     that only flattening can handle, while a basic operation can
     --     reasonably be executed sequentially by a single thread when its
-    --     result stays internal.
+    --     result stays internal. This criterion does not apply under
+    --     'SequentialiseIrregularAll', which is only imposed on user request,
+    --     and may result in non-compileable code due to impossible memory
+    --     expansion.
     --
     -- (3) Statements with sizes bound inside their own sequential control
     --     flow ('stmHasNonuniformInside').
@@ -506,8 +516,12 @@ classifyStms irreg_mode funHasParallelism body_res = classify
         forcedTags forced =
           S.fromList
             [rt | stm <- S.toList forced, (_, DistInput rt _) <- distStmInputs stm]
+        compoundIrregular stm =
+          irreg_mode /= SequentialiseIrregularAll
+            && not (isBasicOpDistStm stm)
+            && not (null (irregularResults stm))
         isForced forced stm =
-          (not (isBasicOpDistStm stm) && not (null (irregularResults stm)))
+          compoundIrregular stm
             || distStmHasNonuniformInside stm
             || any
               ( \r ->

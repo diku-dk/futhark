@@ -312,9 +312,16 @@ demandBuiltin b = modify $ \s ->
 -- recursive modules.
 data FlattenOps = FlattenOps
   { flattenSegLevel :: SegLevel,
+    -- | How to treat irregularity when distributing the bodies we encounter.
+    flattenIrregularity :: DistIrregularity,
     flattenFunHasParallelism :: FunHasParallelism,
-    flattenDistStmAtLevel :: SegLevel -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv,
-    flattenScalarStm :: Segments -> DistEnv -> DistInputs -> [DistResult] -> Stm SOACS -> FlattenM DistEnv,
+    -- | Flatten a 'DistStm' using the given ops, which need not be the ones
+    -- this record belongs to - see 'atSegLevel'. Use 'flattenDistStm' to
+    -- continue with the current ops.
+    flattenDistStmWith :: FlattenOps -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv,
+    -- | Flatten a scalar statement at the given seg level, which need not be
+    -- the one this record carries. Use 'flattenScalarStm' for the latter.
+    flattenScalarStmAt :: SegLevel -> Segments -> DistEnv -> DistInputs -> [DistResult] -> Stm SOACS -> FlattenM DistEnv,
     -- | Transform a statement as if it occurred at the top level, including
     -- multi-versioning of SOACs. Used when a transformation (e.g. loop
     -- interchange) produces a statement that should be treated as if the
