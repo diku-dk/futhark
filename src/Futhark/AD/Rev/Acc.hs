@@ -136,6 +136,14 @@ where
 -- our current translation rules, they will be dead code.  As long as
 -- we are careful to run dead code elimination after revVJP, we should
 -- be good.
+--
+-- There is however one place where we must copy: the adjoint of the WithAcc
+-- result serves double duty in the return sweep.  It is the initial value of
+-- the accumulator (and thus consumed by the WithAcc), but it is *also* the
+-- adjoint of the accumulator-typed result of the lambda body, and so may be
+-- read inside the lambda - by the Map rule above, for example, which
+-- replicates it.  These two uses are incompatible unless the WithAcc consumes
+-- a copy.
 
 -- Note [Array Adjoints of Match]
 --
@@ -352,9 +360,12 @@ diffWithAcc ops pat aux inputs lam m = do
       orig_nes_ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) as
       let vec_nes_ts = map (`arrayOfShape` adj_sh) orig_nes_ts
       zeroes <- mapM (zeroArray mempty) vec_nes_ts
+      -- The result adjoint is consumed by the WithAcc, but is also the adjoint
+      -- of the accumulator inside the lambda (see Note [Adjoints of
+      -- accumulators]), so it must remain readable there. Hence the copy.
+      as' <- mapM (letExp "acc_adj_init" . BasicOp . Replicate mempty . Var <=< adjVal) as_adj
       -- Transpose adjoints from [vec...][shape...]elem to [shape...][vec...]elem
       -- so they match the accumulator layout.
-      as' <- mapM adjVal as_adj
       as'' <- mapM vecToInner as'
       pure (map Var zeroes, (shape, as'', Nothing))
 
