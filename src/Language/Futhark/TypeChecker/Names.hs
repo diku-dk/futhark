@@ -496,20 +496,21 @@ resolveValBind (ValBind entry fname fname_loc ret NoInfo tparams params body doc
   attrs' <- mapM resolveAttrInfo attrs
   checkForDuplicateNames tparams params
   checkDoNotShadow loc fname
-  resolveTypeParams tparams $ \tparams' ->
-    resolveParams params $ \params' -> do
-      ret' <- traverse resolveTypeExp ret
-      -- Allow self-reference (recursion) only for syntactic functions, i.e.
-      -- those with parameters. See Note [Checking recursive functions].
-      (fname', body') <-
-        case params of
-          [] -> do
-            body' <- resolveExp body
-            bindSpaced1 Term fname loc $ \fname' -> do
-              usedName fname'
-              pure (fname', body')
-          _ -> bindSpaced1 Term fname loc $ \fname' -> do
+  resolveTypeParams tparams $ \tparams' -> do
+    -- Allow self-reference (recursion) only for syntactic functions, i.e.
+    -- those with parameters. See Note [Checking recursive functions].
+    (fname', params', ret', body') <-
+      case params of
+        [] -> resolveParams params $ \params' -> do
+          ret' <- traverse resolveTypeExp ret
+          body' <- resolveExp body
+          bindSpaced1 Term fname loc $ \fname' -> do
             usedName fname'
+            pure (fname', params', ret', body')
+        _ -> bindSpaced1 Term fname loc $ \fname' -> do
+          resolveParams params $ \params' -> do
+            ret' <- traverse resolveTypeExp ret
             body' <- resolveExp body
-            pure (fname', body')
-      pure $ ValBind entry fname' fname_loc ret' NoInfo tparams' params' body' doc attrs' loc
+            usedName fname'
+            pure (fname', params', ret', body')
+    pure $ ValBind entry fname' fname_loc ret' NoInfo tparams' params' body' doc attrs' loc
