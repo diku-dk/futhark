@@ -61,6 +61,8 @@ import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark qualified as F
 import Language.Futhark.Interpreter.AD qualified as AD
+import Language.Futhark.Interpreter.FFI.Push qualified as FFI
+import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
 import Language.Futhark.Interpreter.Values hiding (Value)
 import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
@@ -88,11 +90,13 @@ data ExtOp a
   = ExtOpTrace T.Text (Doc ()) a
   | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
+  | ExtOpFFI (FFI.ServerM Value) (Value -> a)
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
   fmap f (ExtOpBreak w why backtrace x) = ExtOpBreak w why backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
+  fmap f (ExtOpFFI vr c) = ExtOpFFI vr $ f . c
 
 type Stack = [StackFrame]
 
@@ -595,19 +599,37 @@ indexShape (IndexingSlice start end stride : is) (ShapeDim d shape) =
 indexShape _ shape =
   shape
 
-indexArray :: [Indexing] -> Value -> Maybe Value
-indexArray (IndexingFix i : is) (ValueArray _ arr)
+iaArrayLength :: Value -> Int64
+iaArrayLength (ValueLazyFFI (ShapeDim n _) _ _) = n + 1
+iaArrayLength (ValueArray _ arr) = arrayLength arr
+iaArrayLength _ = error "Expected array."
+
+iaDimDepth :: ValueShape -> Int
+iaDimDepth (ShapeDim _ c) = 1 + iaDimDepth c
+iaDimDepth _ = 0
+
+iaIndexOnce :: Value -> Int64 -> EvalM Value
+iaIndexOnce (ValueLazyFFI shp vr os) i | length os + 1 < iaDimDepth shp = pure $ ValueLazyFFI shp vr $ i : os
+iaIndexOnce (ValueLazyFFI shp vr os) i = liftF $ ExtOpFFI (FFI.index (map fromIntegral $ reverse $ i : os) vr >>= FFI.get (valueShape $ ValueLazyFFI shp vr $ i : os)) id
+iaIndexOnce (ValueArray _ arr) i = pure $ arr ! fromIntegral i
+iaIndexOnce _ _ = error "Expected array."
+
+iaRowShape :: Value -> ValueShape
+iaRowShape (ValueLazyFFI (ShapeDim _ cshp) _ _) = cshp
+iaRowShape (ValueArray (ShapeDim _ cshp) _) = cshp
+iaRowShape _ = error "Expected array."
+
+indexArray :: [Indexing] -> Value -> MaybeT EvalM Value
+indexArray (IndexingFix i : is) v
   | i >= 0,
-    i < n =
-      indexArray is $ arr ! fromIntegral i
+    i < iaArrayLength v =
+      lift (iaIndexOnce v i) >>= indexArray is
   | otherwise =
-      Nothing
-  where
-    n = arrayLength arr
-indexArray (IndexingSlice start end stride : is) (ValueArray (ShapeDim _ rowshape) arr) = do
-  js <- indexesFor start end stride $ arrayLength arr
-  toArray' (indexShape is rowshape) <$> mapM (indexArray is . (arr !)) js
-indexArray _ v = Just v
+      MaybeT $ pure Nothing
+indexArray (IndexingSlice start end stride : is) v = do
+  js <- MaybeT $ pure <$> indexesFor start end stride $ iaArrayLength v
+  toArray' (indexShape is $ iaRowShape v) <$> mapM (\i -> MaybeT (Just <$> iaIndexOnce v (fromIntegral i)) >>= indexArray is) js
+indexArray _ v = pure v
 
 writeArray :: [Indexing] -> Value -> Value -> Maybe Value
 writeArray slice x y = runIdentity $ updateArray (\_ y' -> pure y') slice x y
@@ -663,7 +685,8 @@ evalIndex loc env is arr = do
             <> "] out of bounds for array of shape "
             <> prettyText (arrayValueShape arr)
             <> "."
-  maybe oob pure $ indexArray is arr
+  v <- runMaybeT $ indexArray is arr
+  maybe oob pure v
 
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
@@ -1195,7 +1218,8 @@ evalUpdateSteps env = go
       error "eval update: invalid field update."
     go (UpdateStepSlice is : rest) arr newv = do
       is' <- mapM (evalDimIndex env) is
-      case indexArray is' arr of
+      v <- runMaybeT $ indexArray is' arr
+      case v of
         Nothing -> pure Nothing
         Just old -> do
           newsub <- go rest old newv
@@ -1302,7 +1326,36 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
       pure (f_env <> e_env <> res_env <> env_substs, res_mod)
     _ -> error "Expected ModuleFun."
 
+extCall :: Name -> [Value] -> ValueShape -> EvalM Value
+extCall n ps shp = liftF $ ExtOpFFI call id
+  where
+    call = do
+      FFI.gc
+      pts <- FFI.inputs n
+      zipWithM FFI.put pts ps >>= FFI.call n >>= FFI.lazyGet shp
+
+extFun :: Name -> Int -> ValueShape -> EvalM Value
+extFun n c s = extFun' c []
+  where
+    extFun' :: Int -> [Value] -> EvalM Value
+    extFun' i _ | i < 1 = extCall n [] s -- Special case: Functions with 0 parameters - i.e. values
+    extFun' i vs | i == 1 = pure . ValueFun $ \v -> extCall n (reverse $ v : vs) s
+    extFun' i vs = pure . ValueFun $ \v -> extFun' (i - 1) $ v : vs
+
 evalDec :: Env -> Dec -> EvalM Env
+evalDec env (ValDec vb@(ValBind (Just _) vn@(VName n _) _ _ (Info ret) tparams ps _ _ _ _)) | "$external" `elem` valBindAttrs vb = localExts $ do
+  let bv = Just $ T.BoundV [] $ evalToStruct $ expandType env $ funType ps ret
+  sizes <- extEnv
+  if null tparams
+    then do
+      f <- evalTypeFully (structToEval env $ toStruct $ retType ret) >>= extFun n (length ps) . typeShape
+      pure $ mempty {envTerm = M.singleton vn $ TermValue bv f} <> sizes
+    else
+      -- TODO: Add missing sizes?
+      let pfn t =
+            extFun n (length ps) . typeShape . snd . unfoldFunType
+              =<< evalTypeFully t
+       in pure $ mempty {envTerm = M.singleton vn $ TermPoly bv pfn} <> sizes
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env v tparams ps ret fbody
   sizes <- extEnv
@@ -2095,7 +2148,8 @@ initialCtx =
           f i j =
             indexArray [IndexingFix $ offset' + i * s1' + j * s2'] arr
 
-      case mk1 [mk2 [f i j | j <- iota n2'] | i <- iota n1'] of
+      vs <- runMaybeT $ mk1 [mk2 [f i j | j <- iota n2'] | i <- iota n1']
+      case vs of
         Just arr' -> pure arr'
         Nothing ->
           bad mempty mempty $
@@ -2109,9 +2163,10 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 _) -> do
           let iota x = [0 .. x - 1]
               f arr' (i, j) =
-                writeArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
+                MaybeT . pure . writeArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j] v
-          case foldM f arr [(i, j) | i <- iota n1, j <- iota n2] of
+          o <- runMaybeT $ foldM f arr [(i, j) | i <- iota n1, j <- iota n2]
+          case o of
             Just arr' -> pure arr'
             Nothing ->
               bad mempty mempty $
@@ -2134,7 +2189,8 @@ initialCtx =
           f i j l =
             indexArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr
 
-      case mk1 [mk2 [mk3 [f i j l | l <- iota n3'] | j <- iota n2'] | i <- iota n1'] of
+      vs <- runMaybeT $ mk1 [mk2 [mk3 [f i j l | l <- iota n3'] | j <- iota n2'] | i <- iota n1']
+      case vs of
         Just arr' -> pure arr'
         Nothing ->
           bad mempty mempty $
@@ -2149,9 +2205,10 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 (ShapeDim n3 _)) -> do
           let iota x = [0 .. x - 1]
               f arr' (i, j, l) =
-                writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
+                MaybeT . pure . writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l] v
-          case foldM f arr [(i, j, l) | i <- iota n1, j <- iota n2, l <- iota n3] of
+          o <- runMaybeT $ foldM f arr [(i, j, l) | i <- iota n1, j <- iota n2, l <- iota n3]
+          case o of
             Just arr' -> pure arr'
             Nothing ->
               bad mempty mempty $
@@ -2177,7 +2234,8 @@ initialCtx =
           f i j l m =
             indexArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr
 
-      case mk1 [mk2 [mk3 [mk4 [f i j l m | m <- iota n4'] | l <- iota n3'] | j <- iota n2'] | i <- iota n1'] of
+      vs <- runMaybeT $ mk1 [mk2 [mk3 [mk4 [f i j l m | m <- iota n4'] | l <- iota n3'] | j <- iota n2'] | i <- iota n1']
+      case vs of
         Just arr' -> pure arr'
         Nothing ->
           bad mempty mempty $
@@ -2193,9 +2251,10 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 (ShapeDim n3 (ShapeDim n4 _))) -> do
           let iota x = [0 .. x - 1]
               f arr' (i, j, l, m) =
-                writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
+                MaybeT . pure . writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l, IndexingFix m] v
-          case foldM f arr [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4] of
+          o <- runMaybeT $ foldM f arr [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4]
+          case o of
             Just arr' -> pure arr'
             Nothing ->
               bad mempty mempty $

@@ -148,3 +148,4 @@ runInterpreter' m = runF m (pure . Right) intOp
       liftIO $ hPutDocLn stderr $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
+    intOp (I.ExtOpFFI {}) = error "External calls are not yet supported in Run."
