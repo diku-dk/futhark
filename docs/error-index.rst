@@ -339,7 +339,7 @@ problematic type.  It can be fixed using the techniques above.
 .. _aliases-previously-returned:
 
 "Return value for consuming loop parameter *x* aliases previously returned value"
----------------------------------------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when you have a loop with multiple loop parameters,
 at least one of which is consuming, and the values returned by the
@@ -359,8 +359,8 @@ A (contrived) example of this error is the following:
 
 .. _contains-consumption:
 
-Let-bound expression of higher-order type ... contains consumption
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Let-bound expression of higher-order type ... contains consumption"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This occurs when ``let``-binding an expression that contains consumption and
 returns a function. The most common case is partial application of a consuming
