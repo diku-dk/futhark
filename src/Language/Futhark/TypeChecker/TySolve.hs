@@ -701,7 +701,7 @@ solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
     Left _ ->
-      typeError loc mempty $
+      typeError loc mempty . withIndexLink "ambiguous-type" $
         "Type"
           <+> prettyName tv
           <+> "is ambiguous."
@@ -712,7 +712,7 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
     Left _ ->
-      typeError loc mempty $
+      typeError loc mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous."
           </> "Must be a sum type with constructors"
           </> indent 2 (pretty (Scalar (Sum cs1)))
