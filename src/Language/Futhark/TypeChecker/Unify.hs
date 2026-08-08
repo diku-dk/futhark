@@ -356,7 +356,7 @@ unifyWith onDims usage = subunify False
           Scalar (Arrow _ p2 d2 a2 (RetType b2_dims b2))
           )
             | uncurry (<) $ swap ord d1 d2 -> do
-                unifyError usage mempty bcs . withIndexLink "unify-consuming-param" $
+                unifyError usage mempty bcs $
                   "Parameters"
                     </> indent 2 (pretty d1 <> pretty a1)
                     </> "and"
