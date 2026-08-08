@@ -508,7 +508,7 @@ noSelfAliases loc = foldM_ check mempty . aliasParts
   where
     check seen als = do
       when (any (`S.member` seen) als) $
-        addError loc mempty . withIndexLink "self-aliases-arg" $
+        addError loc mempty . withIndexLink "self-aliasing-arg" $
           "Argument passed for consuming parameter is self-aliased."
       pure $ als <> seen
 
