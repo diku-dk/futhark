@@ -186,8 +186,8 @@ Alternative, we could duplicate the expression producing the array:
 
 .. _consuming-argument:
 
-"Argument of functional type ... contains conconsumption"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Argument of functional type ... contains consumption"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when we have a higher-order function that expects a
 function that does *not* consume its arguments, and we pass it one
@@ -336,6 +336,38 @@ also be due to size inference:
 Here the type rules force ``A`` to have size ``x``, leading to a
 problematic type.  It can be fixed using the techniques above.
 
+.. _consuming-loop-param-aliases:
+
+"Return value for consuming loop parameter *x* aliases *y*"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs for expressions like the following::
+
+    loop (xs: []i32, ys: *[]i32) = (replicate n 0, replicate n 0)
+    for i < 10 do
+      (xs, xs)
+
+
+This is not allowed, as creates aliasing between a consumeable parameter
+(``ys``) and non-consumable parameter (``xs``) in the next iteration of the
+loop, during which consumption ``ys`` would also affect ``xs``. You can solve
+this by copying one of the return values of the loop.
+
+.. _loop-parameter-aliases-other:
+
+"Return value for loop parameter *x* aliases other consumed loop parameter"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs for expressions like the following::
+
+    loop (xs: *[]i32, ys: *[]i32) = (replicate n 0, replicate n 0)
+    for i < 10 do
+      (xs, xs)
+
+This is not allowed for the same reason that we are not allowed to consume an
+array multiple times. You can solve this by copying one of the return values of
+the loop.
+
 .. _aliases-previously-returned:
 
 "Return value for consuming loop parameter *x* aliases previously returned value"
@@ -359,7 +391,7 @@ A (contrived) example of this error is the following:
 
 .. _contains-consumption:
 
-"Let-bound expression of higher-order type ... contains consumption"
+"Let-bound expression of higher-order type *t* contains consumption"
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This occurs when ``let``-binding an expression that contains consumption and

@@ -643,18 +643,22 @@ convergeLoopParam loop_loc param body_cons body_als = do
   let checkMergeReturn (Id pat_v (Info pat_v_t) patloc) t = do
         let free_als = S.filter (`notElem` patNames param) $ boundAliases (aliases t)
         when (diet pat_v_t == Consume) $ forM_ free_als $ \v ->
-          lift . addError loop_loc mempty $
-            "Return value for consuming loop parameter"
+          lift
+            . addError loop_loc mempty
+            . withIndexLink "consuming-loop-param-aliases"
+            $ "Return value for consuming loop parameter"
               <+> dquotes (prettyName pat_v)
               <+> "aliases"
               <+> dquotes (prettyName v)
               <> "."
         (cons, obs) <- get
-        unless (S.null $ aliases t `S.intersection` cons) $
-          lift . addError loop_loc mempty $
-            "Return value for loop parameter"
-              <+> dquotes (prettyName pat_v)
-              <+> "aliases other consumed loop parameter."
+        unless (S.null $ aliases t `S.intersection` cons)
+          $ lift
+            . addError loop_loc mempty
+            . withIndexLink "loop-parameter-aliases-other"
+          $ "Return value for loop parameter"
+            <+> dquotes (prettyName pat_v)
+            <+> "aliases other consumed loop parameter."
         when
           ( diet pat_v_t == Consume
               && not (S.null (aliases t `S.intersection` (cons <> obs)))
