@@ -1160,6 +1160,11 @@ Functions may be recursive, subject to the following constraints.
 Restriction 2 is to make restriction 3 feasible to check, and restriction 3
 exists to ensure defunctionalisation is possible.
 
+Recursion is monomorphic, meaning a recursive call uses the same instantiation
+of type parameters as the function definition. However, *size-polymorphic*
+recursion is allowed, but requires explicit size parameters in the function
+definition.
+
 .. _size-types:
 
 Size Types
