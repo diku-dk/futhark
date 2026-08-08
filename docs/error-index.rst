@@ -710,6 +710,27 @@ Now we can say ``M.y``.  See :ref:`module-system` for more.
 Other errors
 ------------
 
+.. _scope-violation:
+
+"Scope violation"
+~~~~~~~~~~~~~~~~~
+
+These occurs when the type checker infers that the type (or size) of a variable
+``x`` is forced to be expressed using parameters or variables not in scope when
+``x`` is bound. This only occurs when mixing explicit parameters with inference.
+Contrived example::
+
+  def f x =
+    let g 'b (y: b) = if true then y else x
+    in g
+
+The ``if`` forces ``y`` and ``x`` to be the same type, but ``y`` is has type
+``b``, which is a type parameter bound in ``g``, and not in scope where ``x`` is
+bound.
+
+These errors usually imply some form of misdesign, and can be resolved by
+manually inserting type annotations until the conceptual mistake becomes clear.
+
 .. _literal-out-of-bounds:
 
 "Literal out of bounds"

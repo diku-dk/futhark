@@ -20,7 +20,7 @@ import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Error
-import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
+import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote, withIndexLink)
 import Language.Futhark.TypeChecker.UnionFind
 
 -- | The type representation used by the constraint solver. Agnostic
@@ -618,7 +618,7 @@ unionTyVars reason bcs v v_node t_node = do
 
 scopeViolation :: Reason Type -> VName -> Type -> VName -> SolveM s ()
 scopeViolation reason v1 ty v2 =
-  typeError (locOf reason) mempty $
+  typeError (locOf reason) mempty . withIndexLink "scope-violation" $
     "Cannot unify type"
       </> indent 2 (pretty ty)
       </> "with"
