@@ -184,37 +184,6 @@ Alternative, we could duplicate the expression producing the array:
   def f n =
     g (iota n, iota n))
 
-.. _consuming-parameter:
-
-"Consuming parameter passed non-unique argument"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Caused by programs like the following:
-
-.. code-block:: futhark
-
-  def update (xs: *[]i32) = xs with [0] = 0
-
-  def f (ys: []i32) = update ys
-
-The update ``function`` *consumes* its ``xs`` argument to perform an
-:ref:`in-place update <in-place-updates>`, as denoted by the asterisk
-before the type.  However, the ``f`` function tries to pass an array
-that it is not allowed to consume (no asterisk before the type).
-
-One solution is to change the type of ``f`` so that it also consumes
-its input, which allows it to pass it on to ``update``:
-
-.. code-block:: futhark
-
-  def f (ys: *[]i32) = update ys
-
-Another solution to ``copy`` the array that we pass to ``update``:
-
-.. code-block:: futhark
-
-  def f (ys: []i32) = update (copy ys)
-
 .. _consuming-argument:
 
 "Argument of functional type ... contains conconsumption"
