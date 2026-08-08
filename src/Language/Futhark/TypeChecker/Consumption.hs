@@ -807,7 +807,7 @@ checkExp (AppExp (LetPat sizes p e body loc) appres) = do
   consumed e_cons
   let e_t = typeOf e'
   when (e_cons /= mempty && not (orderZero e_t)) $
-    addError (locOf e) mempty $
+    addError (locOf e) mempty . withIndexLink "contains-consumption" $
       "Let-bound expression of higher-order type"
         </> indent 2 (pretty e_t)
         </> "contains consumption, which is not allowed."

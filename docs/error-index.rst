@@ -357,6 +357,27 @@ A (contrived) example of this error is the following:
     -- is consumed.
     in (arr[i+1], arr)
 
+.. _contains-consumption:
+
+Let-bound expression of higher-order type ... contains consumption
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs when ``let``-binding an expression that contains consumption and
+returns a function. The most common case is partial application of a consuming
+function::
+
+  def update (xs: *[]i32) (i: i32) (y: i32) =
+    xs with [i] = y
+
+  def main (xs: *[]i32) =
+    let f = update xs
+    in (f 0 0, f 0 0)
+
+The simplest solution is to remove the consumption by doing a ``copy``.
+
+The reason for this restriction is rooted efficiency concerns.
+Defunctionalisation causes the two applications of ``f`` to both consume ``xs``,
+which is a violation of uniqueness properties.
 
 Size errors
 -----------

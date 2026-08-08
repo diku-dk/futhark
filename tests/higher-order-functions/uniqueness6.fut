@@ -1,7 +1,7 @@
 -- Nope, this one is also not OK (although it would be possible to
 -- change the type system so that it would be).
 -- ==
--- error: consumption
+-- error: contains-consumption
 
 def zero (xs: *[]i32) (i: i32) =
   xs with [i] = 0
