@@ -356,14 +356,14 @@ unifyWith onDims usage = subunify False
           Scalar (Arrow _ p2 d2 a2 (RetType b2_dims b2))
           )
             | uncurry (<) $ swap ord d1 d2 -> do
-                unifyError usage mempty bcs $
+                unifyError usage mempty bcs . withIndexLink "unify-consuming-param" $
                   "Parameters"
                     </> indent 2 (pretty d1 <> pretty a1)
                     </> "and"
                     </> indent 2 (pretty d2 <> pretty a2)
                     </> "are incompatible regarding consuming their arguments."
             | uncurry (<) $ swap ord (uniqueness b2) (uniqueness b1) -> do
-                unifyError usage mempty bcs . withIndexLink "unify-return-uniqueness" $
+                unifyError usage mempty bcs $
                   "Return types"
                     </> indent 2 (pretty b1)
                     </> "and"
