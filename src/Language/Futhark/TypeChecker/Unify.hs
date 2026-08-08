@@ -630,7 +630,7 @@ linkVarToDim usage bcs vn lvl e = do
     checkVar _ dim'
       | vn == dim' = do
           notes <- dimNotes usage e
-          unifyError usage notes bcs $
+          unifyError usage notes bcs . withIndexLink "occurs-check" $
             "Occurs check: cannot instantiate"
               <+> dquotes (prettyName vn)
               <+> "with"

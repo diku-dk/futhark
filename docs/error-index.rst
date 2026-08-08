@@ -921,6 +921,22 @@ The solution is to put a type annotation on the parameter instead:
 
   def f (r : {x:i32}) = r with x = 0
 
+.. _occurs-check:
+
+"Occurs check"
+~~~~~~~~~~~~~~
+
+Occurs check errors are reported whenever the type checker infers a type or size
+that is circular, meaning it would be infinitely large. Essentially, whenever
+the type checker infers that some ``x`` must be equal to some (compound)
+construct ``y``, it checks whether ``x`` is present inside ``y``. This is called
+the occurs check.
+
+Since it is such a general mechanism, there is no rule of thumb for how to avoid
+or fix errors that manifest as an occurs check. Since they are always the result
+of a misdesign, it can be useful to add explicit type annotations until the root
+cause is revealed.
+
 Entry points
 ------------
 

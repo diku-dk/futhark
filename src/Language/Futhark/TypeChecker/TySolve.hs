@@ -218,8 +218,10 @@ substTyVars (Array u shape elemt) = do
 occursCheck :: Reason Type -> VName -> VName -> Type -> SolveM s ()
 occursCheck reason v k tp = do
   let vars = typeVars tp
-  when (k `S.member` vars) . typeError (locOf reason) mempty $
-    "Occurs check: cannot instantiate"
+  when (k `S.member` vars)
+    . typeError (locOf reason) mempty
+    . withIndexLink "occurs-check"
+    $ "Occurs check: cannot instantiate"
       <+> prettyName v
       <+> "with"
       <+> pretty tp
