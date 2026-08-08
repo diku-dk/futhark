@@ -217,8 +217,8 @@ Another solution to ``copy`` the array that we pass to ``update``:
 
 .. _consuming-argument:
 
-"Non-consuming higher-order parameter passed consuming argument."
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Argument of functional type ... contains conconsumption"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when we have a higher-order function that expects a
 function that does *not* consume its arguments, and we pass it one

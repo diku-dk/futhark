@@ -527,7 +527,7 @@ checkArg prev p_t e = do
   consumed e_cons
   let e_t = typeOf e'
   when (e_cons /= mempty && not (orderZero e_t)) $
-    addError (locOf e) mempty $
+    addError (locOf e) mempty . withIndexLink "consuming-argument" $
       "Argument of functional type"
         </> indent 2 (pretty e_t)
         </> "contains consumption, which is not allowed."
