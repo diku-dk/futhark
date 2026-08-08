@@ -407,7 +407,7 @@ function::
 
 The simplest solution is to remove the consumption by doing a ``copy``.
 
-The reason for this restriction is rooted efficiency concerns.
+The reason for this restriction is rooted in efficiency concerns.
 Defunctionalisation causes the two applications of ``f`` to both consume ``xs``,
 which is a violation of uniqueness properties.
 
@@ -756,9 +756,8 @@ Contrived example::
     let g 'b (y: b) = if true then y else x
     in g
 
-The ``if`` forces ``y`` and ``x`` to be the same type, but ``y`` is has type
-``b``, which is a type parameter bound in ``g``, and not in scope where ``x`` is
-bound.
+The ``if`` forces ``y`` and ``x`` to be the same type, but ``y`` has type ``b``,
+which is a type parameter bound in ``g``, and not in scope where ``x`` is bound.
 
 These errors usually imply some form of misdesign, and can be resolved by
 manually inserting type annotations until the conceptual mistake becomes clear.
