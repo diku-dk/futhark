@@ -8,7 +8,7 @@
 -- structure gpu { /Apply 0 /SegScan 1 }
 
 def main (ns: []i64) (k: i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\n ->
          let ne = opaque (if n < 0 then 1i64 else 0)
          in scan (+) ne (map (+ n) (iota k)))

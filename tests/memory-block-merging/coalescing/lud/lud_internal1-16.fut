@@ -4,7 +4,7 @@
 
 def lud_internal [m] (top_per: [m][16][16]f32) (lft_per: [m][16][16]f32) (mat_slice: [m][m][16][16]f32) : *[m][m][16][16]f32 =
   let top_slice = map transpose top_per
-  in #[incremental_flattening(only_intra)]
+  in #[flattening(only_intra)]
      map2 (\mat_arr lft ->
              map2 (\mat_blk top ->
                      map2 (\mat_row lft_row ->

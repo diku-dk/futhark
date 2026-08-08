@@ -4,7 +4,7 @@
 -- structure gpu { /Loop/ForLoop 1 Loop 1 /Loop/SegRed 1 /Loop/SegMap 1 }
 
 def main [n] [m] (xss: [n][m]i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\xs ->
          let d =
            loop (ys, s) = (xs, 0)

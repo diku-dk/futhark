@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Futhark now supports recursive functions, with various restrictions.
 
+* The `incremental_flattening` attributes are now just named `flattening`,
+  although the old name continues to work.
+
 ## Removed
 
 ## Changed

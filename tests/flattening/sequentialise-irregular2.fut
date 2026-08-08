@@ -5,7 +5,7 @@
 -- structure gpu { SegMap 1 SegScan 0 SegRed 0 }
 
 def main (ns: []i32) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   #[flattening(sequentialise_irregular)]
   map (\n ->
          let k = i64.i32 n & 7

@@ -5,5 +5,5 @@
 -- structure gpu { WithAcc 0 Update 1 }
 
 entry main [n] (xs: [n]i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\x -> reduce (+) 0 (replicate 6 x with [1:4] = iota 3)) xs

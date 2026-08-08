@@ -105,7 +105,7 @@ module loess_m = {
                     (l_idx_l: [m][n_m]i64)
                     (lambda_l: [m][n_m]t)
                     (n_nn_l: [m]i64) =
-    #[incremental_flattening(no_intra)]
+    #[flattening(no_intra)]
     map5 (\xx yy ww l_idx (lambda, n_nn) ->
             loess_outer xx
                         yy

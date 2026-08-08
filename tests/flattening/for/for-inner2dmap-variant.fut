@@ -4,7 +4,7 @@
 -- structure gpu { /Loop/WhileLoop 1 Loop 1 }
 
 def main [n] [m] [k] (xss: [n][m]i64) (ys: [k]i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\xs ->
          map (\x ->
                 let it = opaque (x % 4)

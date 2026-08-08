@@ -5,5 +5,5 @@
 -- structure gpu { SegMap/SegRed 1 }
 
 def main xsss =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map (map (i32.sum >-> (* 2))) xsss

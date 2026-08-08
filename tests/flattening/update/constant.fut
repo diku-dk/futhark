@@ -5,5 +5,5 @@
 -- structure gpu { /SegRed 1 /SegMap/Update 1 }
 
 entry main [n] (xs: [n]i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\x -> reduce (+) 0 (iota 5 with [x] = 3)) xs

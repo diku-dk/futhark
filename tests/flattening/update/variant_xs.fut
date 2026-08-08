@@ -5,5 +5,5 @@
 -- structure gpu { /WithAcc 1 /Apply/segiota 2 /Apply/repiota 1 Update 0 }
 
 entry main [n] (xs: [n]i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\x -> reduce (+) 0 (iota x with [1:4] = iota 3)) xs

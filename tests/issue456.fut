@@ -6,7 +6,7 @@
 -- structure gpu { SegMap 1 }
 
 def main [n] (datas: *[][n]i32) (is: []i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\(data: [n]i32, old_data: [n]i32) ->
          let (data, _) =
            loop (data: *[n]i32, old_data: *[n]i32) = (copy data, copy old_data)

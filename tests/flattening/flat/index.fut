@@ -6,7 +6,7 @@
 -- structure gpu { FlatIndex 0 }
 
 entry main (ns: []i64) (xs: []i64) : []i64 =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\n ->
          let ys = intrinsics.flat_index_2d xs 0 n 1 1 1
          in i64.sum (flatten ys))

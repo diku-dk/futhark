@@ -11,7 +11,7 @@
 -- structure gpu { /Loop 1 }
 
 def main (ns: []i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\n ->
          i64.sum (map (\r -> i64.sum r)
                       (scan (map2 (+))

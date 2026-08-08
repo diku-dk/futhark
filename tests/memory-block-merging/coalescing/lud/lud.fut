@@ -11,7 +11,7 @@ def dotprod [n] (a: [n]f32) (b: [n]f32) : f32 =
   |> reduce (+) 0
 
 def lud_diagonal [b] (a: [b][b]f32) : *[b][b]f32 =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map (\mat ->
          let mat = copy mat
          in #[unsafe]
@@ -71,11 +71,11 @@ def lud_perimeter_lower [b] [m] (diag: [b][b]f32) (mat: [m][b][b]f32) : *[m][b][
 
 def lud_internal [m] [b] (top_per: [m][b][b]f32) (lft_per: [m][b][b]f32) (mat_slice: [m][m][b][b]f32) : *[m][m][b][b]f32 =
   let top_slice = map transpose top_per
-  in #[incremental_flattening(only_inner)]
+  in #[flattening(only_inner)]
      map2 (\mat_arr lft ->
-             #[incremental_flattening(only_inner)]
+             #[flattening(only_inner)]
              map2 (\mat_blk top ->
-                     #[incremental_flattening(only_inner)]
+                     #[flattening(only_inner)]
                      map2 (\mat_row lft_row ->
                              #[sequential_inner]
                              map2 (\mat_el top_row ->

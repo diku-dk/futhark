@@ -5,7 +5,7 @@
 -- auto output
 -- structure gpu { /SegMap 4 /SegScan 1 /Apply/segiota 1 }
 def main (xs: []i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\x ->
          let g = x * 5 * 100
          let y = g * 55

@@ -5,7 +5,7 @@
 -- auto output
 -- structure gpu { /SegScan 3 /Apply/repiota 3 /Apply/segiota 2 }
 def main (ns: []i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\n ->
          let yss = opaque (map (\i -> map (+ i) (iota n)) (iota (n + 1)))
          in i64.sum (map i64.sum yss))

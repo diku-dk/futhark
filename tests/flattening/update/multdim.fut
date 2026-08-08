@@ -9,5 +9,5 @@
 -- structure gpu { /WithAcc 1 Update 0 }
 
 def main [n] (is: [n]i64) (js: [n]i64) (ass: [n][][]f64) (vss: [n][][]f64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map4 (\i j as vs -> f64.sum (flatten (copy as with [i:j, i:j] = vs))) is js ass vss

@@ -178,25 +178,29 @@ isVersionableMap funHasParallelism lvl inps _env w dist_res map_lam =
     && not (isVariant inps w)
     && not (isParallelFunInside funHasParallelism (lambdaBody map_lam))
 
+-- | Retrieve only those attributes that apply to flattening.
+flatteningAttrs :: Attrs -> Attrs
+flatteningAttrs = mconcat . mapAttrs p
+  where
+    p (AttrComp "incremental_flattening" [x]) = oneAttr x
+    p (AttrComp "flattening" [x]) = oneAttr x
+    p _ = mempty
+
 onlyExploitIntra :: Attrs -> Bool
 onlyExploitIntra attrs =
-  AttrComp "incremental_flattening" ["only_intra"] `inAttrs` attrs
+  "only_intra" `inAttrs` flatteningAttrs attrs
 
 mayExploitOuter :: Attrs -> Bool
 mayExploitOuter attrs =
-  not $
-    AttrComp "incremental_flattening" ["no_outer"]
-      `inAttrs` attrs
-      || AttrComp "incremental_flattening" ["only_inner"]
-        `inAttrs` attrs
+  not $ "no_outer" `inAttrs` attrs' || "only_inner" `inAttrs` attrs'
+  where
+    attrs' = flatteningAttrs attrs
 
 mayExploitIntra :: Attrs -> Bool
 mayExploitIntra attrs =
-  not $
-    AttrComp "incremental_flattening" ["no_intra"]
-      `inAttrs` attrs
-      || AttrComp "incremental_flattening" ["only_inner"]
-        `inAttrs` attrs
+  not $ "no_intra" `inAttrs` attrs' || "only_inner" `inAttrs` attrs'
+  where
+    attrs' = flatteningAttrs attrs
 
 intraBlockAlternative ::
   Intrablock.IntrablockResult ->
@@ -515,4 +519,5 @@ propagateVersioningAttrs attrs lam
       | otherwise = stm
     versioningAttrs (Attrs s) = Attrs $ S.filter isVersioningAttr s
     isVersioningAttr (AttrComp "incremental_flattening" _) = True
+    isVersioningAttr (AttrComp "flattening" _) = True
     isVersioningAttr _ = False

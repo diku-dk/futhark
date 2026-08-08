@@ -4,7 +4,7 @@
 -- structure gpu { SegMap/ArrayLit 0 }
 
 def main (xs: []i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\x ->
          let ys = iota x
          let reps = opaque (replicate x 2 with [1] = x)

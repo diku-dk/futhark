@@ -6,7 +6,7 @@
 -- structure gpu { /SegMap/SegScan 1 SegMap 1 SegScan 1 }
 
 def main xsss =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   xsss
   |> map (\xss -> map (\xs -> (scan (i32.+) 0 xs, scan (i32.*) 1 xs)) xss)
   |> map unzip

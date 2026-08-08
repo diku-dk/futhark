@@ -5,7 +5,7 @@
 -- structure gpu { SegScan 1 SegRed 1 }
 
 entry main [n] [m] (a: [m][n]f32) =
-  #[incremental_flattening(flattening)]
+  #[flattening(flattening)]
   map (\row ->
          let row_scanned = scan (+) 0 row
          in (reduce (+) 0 row, row_scanned))

@@ -5,7 +5,7 @@
 -- structure gpu { /SegScan 1 /SegMap 3 /Apply/repiota 1 /Apply/segiota 1 }
 
 def main ns is =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map2 (\n (i: i64) ->
           let is = iota n
           let xs = map (+ 2) is

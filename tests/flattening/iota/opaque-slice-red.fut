@@ -10,5 +10,5 @@
 -- structure gpu { Iota 0 /Apply/segiota 1 }
 
 def main ns is =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map2 (\n (i: i64) -> i64.sum (opaque (iota n))[i:]) ns is

@@ -6,13 +6,13 @@
 
 entry main (ns: []i64) (xss: [][]i64) : []i64 =
   let irregular =
-    #[incremental_flattening(only_inner)]
+    #[flattening(only_inner)]
     map (\n ->
            let xs = manifest (iota n)
            in i64.sum xs)
         ns
   let regular =
-    #[incremental_flattening(only_inner)]
+    #[flattening(only_inner)]
     map (\xs ->
            let ys = manifest xs
            in i64.sum ys)

@@ -5,7 +5,7 @@
 -- structure gpu { /SegMap/Loop/ForLoop 1 }
 
 def main (xs: []i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\x ->
          let ys = iota x
          in reduce (\y1 y2 -> [y1[0] + y2[0], y1[1] + y2[1]]) [0, 0] (map (\y -> [x, y]) ys))

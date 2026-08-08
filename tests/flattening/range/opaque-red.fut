@@ -6,5 +6,5 @@
 -- structure gpu { /Apply/segiota 1 /SegScan 1 }
 
 def main as bs cs =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map3 (\a b c -> i64.sum (opaque (a..b..<c))) as bs cs

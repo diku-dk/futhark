@@ -5,7 +5,7 @@
 -- structure gpu { /SegMap 1 /SegRed 1 }
 
 def main (m: i64) (n: i64) : [n][n]f32 =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   tabulate n (\j ->
                 let zeros = replicate m (replicate n 0.0f32)
                 let row = replicate n 10.0f32 with [j] = 1.0f32

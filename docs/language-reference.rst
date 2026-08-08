@@ -1811,28 +1811,28 @@ values are flattened as usual.
 Historical note: this is intended to reproduce the behaviour of Futhark prior to
 supporting irregular flattening.
 
-``incremental_flattening(no_outer)``
-....................................
+``flattening(no_outer)``
+........................
 
 When using incremental flattening, do not generate the "only outer
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening(no_intra)``
-....................................
+``flattening(no_intra)``
+........................
 
 When using incremental flattening, do not generate the "intra-block
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening(only_intra)``
-......................................
+``flattening(only_intra)``
+..........................
 
 When using incremental flattening, *only* generate the "intra-block
 parallelism" version of the attributed SOACs.  **Beware**: the
 resulting program will fail to run if the inner parallelism does not
 fit on the device.
 
-``incremental_flattening(only_inner)``
-......................................
+``flattening(only_inner)``
+..........................
 
 When using incremental flattening, do not generate multiple versions
 for this SOAC, but do exploit inner parallelism (which may give rise

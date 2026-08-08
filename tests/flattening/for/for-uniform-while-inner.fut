@@ -4,7 +4,7 @@
 -- structure gpu { /Loop/ForLoop 1 /Loop/Loop/WhileLoop 1 }
 
 def main [n] [m] (xss: [n][m]i64) =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\xs ->
          loop acc = xs
          for i < 5 do

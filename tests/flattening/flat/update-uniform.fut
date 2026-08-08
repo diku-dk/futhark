@@ -4,7 +4,7 @@
 -- structure gpu { /FlatUpdate 1 }
 
 entry main (n: i64) (xs: [10]i64) : [n][10]i64 =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map (\i ->
          let v = replicate 2 (replicate 3 (i + 10) with [0] = i)
          in intrinsics.flat_update_2d (copy xs) 1 3 1 v)
