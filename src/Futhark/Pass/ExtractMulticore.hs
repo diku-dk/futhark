@@ -2,7 +2,7 @@
 
 -- | Extraction of parallelism from a SOACs program.  This generates
 -- parallel constructs aimed at CPU execution, which in particular may
--- involve ad-hoc irregular nested parallelism.
+-- involve ad-hoc nonuniform nested parallelism.
 module Futhark.Pass.ExtractMulticore (extractMulticore) where
 
 import Control.Monad

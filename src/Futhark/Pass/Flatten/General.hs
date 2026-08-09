@@ -870,10 +870,10 @@ distributeMapWith ops =
   distributeMap (flattenIrregularity ops) (flattenFunHasParallelism ops)
 
 -- | Continue flattening at the given seg level, adjusting the irregularity
--- handling mode to match. Intrablock code cannot use the irregular flattening
--- machinery, as it produces SegOps whose sizes are bound inside the enclosing
--- kernel. 'SequentialiseIrregularAll' is requested by the user rather than
--- implied by the level, so we keep it if provided.
+-- handling mode to match. Intrablock code cannot use the machinery for
+-- flattening irregular arrays, as it produces SegOps whose sizes are bound
+-- inside the enclosing kernel. 'SequentialiseIrregularAll' is requested by the
+-- user rather than implied by the level, so we keep it if provided.
 atSegLevel :: SegLevel -> FlattenOps -> FlattenOps
 atSegLevel lvl ops =
   ops {flattenSegLevel = lvl, flattenIrregularity = irreg}

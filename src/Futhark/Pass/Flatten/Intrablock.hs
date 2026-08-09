@@ -96,11 +96,12 @@ computeThreadBlockSize wss_min wss_avail = do
       else foldBinOp' (SMax Int64) ws_min
   pure (intra_avail_par, Var tblock_size)
 
--- | Check whether this result is actually something that is acceptable to use.
-noIrregularPar :: Names -> FlattenM IntrablockResult -> FlattenM (Maybe IntrablockResult)
-noIrregularPar pars m = do
+-- | Check whether this result is actually something that is acceptable to use:
+-- the parallel dimensions must all be bound outside the kernel, as nonuniform
+-- parallelism cannot be exploited inside a thread block.
+noNonuniformPar :: Names -> FlattenM IntrablockResult -> FlattenM (Maybe IntrablockResult)
+noNonuniformPar pars m = do
   outside_scope <- askScope
-  -- Reject Irregular parallelism
   if allNames (`M.member` outside_scope) pars
     then Just <$> m
     else pure Nothing
@@ -154,7 +155,7 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
   let new_segments = segments <> pure w
       wss = findParallelism kbody
 
-  noIrregularPar (freeIn wss) $ do
+  noNonuniformPar (freeIn wss) $ do
     ((intra_avail_par, tblock_size, kspace, num_tblocks), prelude_stms) <-
       collectStms $ do
         num_tblocks <-

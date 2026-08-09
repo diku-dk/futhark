@@ -553,7 +553,7 @@ transformIndex (TrCtx lvl segments env inps res aux) arr slice
                 =<< eIndex arr (map toExp slice')
       pure $ insertRegulars [distResTag res] [v] env
   | otherwise = do
-      -- Maximally irregular case.
+      -- Maximally nonuniform case.
       num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
       ns <- letExp "slice_sizes" <=< renameExp <=< segMap lvl (MkSolo num_segments) $ \(MkSolo segment) -> do
         segment_is <- segmentCoordsFromFlat segments segment
@@ -632,7 +632,7 @@ transformFlatIndex (TrCtx lvl segments env inps res aux) arr flat_slice
                 =<< eIndex arr [toExp flat_i]
       pure $ insertRegulars [distResTag res] [v] env
   | otherwise = do
-      -- Maximally irregular case.
+      -- Maximally nonuniform case.
       num_segments <- letSubExp "num_segments" =<< toExp (segmentCount segments)
       ns <- letExp "slice_sizes" <=< renameExp <=< segMap lvl (MkSolo num_segments) $ \(MkSolo segment) -> do
         segment_is <- segmentCoordsFromFlat segments segment
@@ -1157,7 +1157,7 @@ flattenBasicOp ops segments env (inps, res, pe, aux, e) =
     Rearrange v perm -> transformRearrange ctx v perm
     Scratch pt dims -> transformScratch ctx pt dims
     UpdateAcc {} ->
-      -- TODO: handle irregular case, which is however rare, and also needs
+      -- TODO: handle nonuniform case, which is however rare, and also needs
       -- modifications to WithAcc. The only irregularity that is possible is in
       -- the values to be written.
       scalarCase

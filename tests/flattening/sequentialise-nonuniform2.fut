@@ -1,4 +1,4 @@
--- Two levels of irregular nesting, all sequentialised into the outermost
+-- Two levels of nonuniform nesting, all sequentialised into the outermost
 -- SegMap.
 -- ==
 -- random input { [50]i32 } auto output
@@ -6,7 +6,7 @@
 
 def main (ns: []i32) =
   #[flattening(only_inner)]
-  #[flattening(sequentialise_irregular)]
+  #[flattening(sequentialise_nonuniform)]
   map (\n ->
          let k = i64.i32 n & 7
          in i64.sum (map (\i -> i64.product (map (+ i) (iota (k - i)))) (iota k)))

@@ -52,22 +52,22 @@ type Segments = [SubExp]
 type FunHasParallelism = Name -> Bool
 
 -- | How to treat irregularity when classifying the statements of a distributed
--- body. This is mainly used to sequentialise irregular nested parallelism
+-- body. This is mainly used to sequentialise nonuniform nested parallelism
 -- instead of actually exploiting the parallelism, as the overhead of doing so
 -- can sometimes be ruinous.
 data DistIrregularity
-  = -- | Distribute statements involving irregularity, relying on the irregular
-    -- flattening machinery to handle them.
+  = -- | Distribute statements involving irregularity, relying on the machinery
+    -- for flattening irregular arrays to handle them.
     DistributeIrregular
-  | -- | Sequentialise BasicOps that involve only internal irregularity instead
+  | -- | Sequentialise BasicOps that involve only internal nonuniformity instead
     -- of distributing them. Used when generating intrablock code, where the
-    -- irregular flattening machinery would produce SegOps whose sizes are bound
-    -- inside the kernel body, which makes the enclosing intrablock kernel
-    -- infeasible ('noIrregularPar' would reject it). Irregularity that escapes
-    -- the enclosing map must still be distributed; if it occurs, the intrablock
-    -- version is correctly rejected.
+    -- machinery for flattening nonuniform nested parallelism would produce
+    -- SegOps whose sizes are bound inside the kernel body, which makes the
+    -- enclosing intrablock kernel infeasible ('noNonuniformPar' would reject
+    -- it). Irregularity that escapes the enclosing map must still be
+    -- distributed; if it occurs, the intrablock version is correctly rejected.
     SequentialiseIrregularBasicOps
-  | -- | Sequentialise /any/ statement whose irregularity stays internal.
+  | -- | Sequentialise /any/ statement whose nonuniformity stays internal.
     SequentialiseIrregularAll
   deriving (Eq, Show)
 
@@ -121,8 +121,8 @@ data DistResult = DistResult {distResTag :: ResTag, distResType :: DistType, dis
 
 -- | The body of a distributed statement.
 data DistBody
-  = -- | A single statement That may involve parallel operations or produces non
-    -- uniform array.
+  = -- | A single statement that may involve parallel operations or produce an
+    -- irregular array.
     ParallelStm (Stm SOACS)
   | -- | Single or Multiple scalar operations grouped into a single traversal
     ScalarStm (Stms SOACS)
@@ -364,13 +364,13 @@ isRegularDistResult (DistResult _ (DistType _ (Rank r) _) _) = r == 0
 -- result is sized by a name bound within the enclosing statement itself? Such a
 -- statement can never be executed sequentially inside a GPU kernel, as it
 -- implies an allocation whose size cannot be computed before the kernel is
--- launched; only the irregular flattening machinery can handle it. In contrast,
--- sizes that are nonuniform merely by being variant to the enclosing map-nest
--- are fine, as memory expansion can compute those via slicing. This is
--- essentially a heuristic where we bet that slicing is efficient; the fully
--- principled stance would be to not allow any nonuniformity. This is one of the
--- criteria of 'mustDistribute' in 'classifyStms'. See Note [Meaningful
--- Parallelism].
+-- launched; only the machinery for flattening irregular arrays can handle it.
+-- In contrast, sizes that are nonuniform merely by being variant to the
+-- enclosing map-nest are fine, as memory expansion can compute those via
+-- slicing. This is essentially a heuristic where we bet that slicing is
+-- efficient; the fully principled stance would be to not allow any
+-- nonuniformity. This is one of the criteria of 'mustDistribute' in
+-- 'classifyStms'. See Note [Meaningful Parallelism].
 stmHasNonuniformInside :: Stm SOACS -> Bool
 stmHasNonuniformInside = inExp mempty . stmExp
   where
@@ -438,13 +438,13 @@ classifyStms irreg_mode funHasParallelism body_res = classify
     -- trivially parallel statements are treated as sequential as well. See Note
     -- [Meaningful Parallelism].
     --
-    -- With 'SequentialiseIrregularBasicOps', basic operations that involve
-    -- irregularity further count as parallel only when the irregularity escapes
-    -- the scalar group. With 'SequentialiseIrregularAll', this goes for any
+    -- With 'SequentialiseIrregularBasicOps', nonuniform basic operations
+    -- further count as parallel only when their irregular arrays escape the
+    -- scalar group. With 'SequentialiseIrregularAll', this goes for any
     -- statement, not just basic operations.
     classify ds =
       let -- Which statements are candidates for sequentialising when their
-          -- irregularity does not escape the scalar group.
+          -- nonuniformity does not escape the scalar group.
           sequentialisable = case irreg_mode of
             DistributeIrregular -> const False
             SequentialiseIrregularBasicOps -> isBasicOpDistStm
@@ -645,7 +645,7 @@ distributeMap irreg_mode funHasParallelism outer_scope map_pat w arrs lam =
 --     fully flattened code version is worth generating only when the lambda
 --     contains meaningful parallelism.
 --
--- One exception is irregularity. A statement whose result shape varies
+-- One exception is nonuniformity. A statement whose result shape varies
 -- across the surrounding map-nest (e.g. 'iota x' for a mapped 'x') cannot
 -- in general be traversed sequentially per thread, as arrays produced as
 -- results of sequentially executed groups must be regular - handling it

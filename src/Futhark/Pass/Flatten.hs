@@ -8,7 +8,7 @@
 -- This is a sophisticated pass that does various clever things:
 --
 -- - Detects uniform nesting and flattens it more efficiently than the
--- - nonuniform case.
+--   nonuniform case.
 --
 -- - DPH-style vectorization avoidance.
 --
@@ -20,32 +20,40 @@
 -- although in some cases the resulting code is not particularly efficient.
 --
 -- The idea is to perform distribution on one level at a time, and produce
--- "irregular Maps" that can accept and produce irregular arrays. These
+-- "irregular maps" that can accept and produce irregular arrays. These
 -- irregular maps will then be transformed into flat parallelism based on their
--- contents. This is a sensitive detail, but if irregular maps contain only a
--- single Stm, then it is fairly straightforward, as we simply implement
--- flattening rules for every single kind of expression. Of course that is also
--- somewhat inefficient, so we want to support multiple Stms for things like
--- scalar code.
+-- contents. If irregular maps contain only a single Stm, then it is fairly
+-- straightforward, as we simply implement flattening rules for every single
+-- kind of expression. Of course that is also somewhat inefficient, so we want
+-- to support multiple Stms for things like scalar code.
 --
 -- Nomenclature:
 --
--- A map-nest is the collection of parallel operations enclosing some code. For
+-- A /map-nest/ is the collection of parallel operations enclosing some code. For
 -- simplicity, we say "map-nest" even when the top level parallel operation is
 -- actually a redomap or other screma.
 --
--- An irregular array is a multidimensional array like '[[1,2],[3]]', where rows
+-- An /irregular array/ is a multidimensional array like '[[1,2],[3]]', where rows
 -- have different shapes. These are not directly supported in Futhark or in the
 -- Futhark IR, but are encoded in various ways.
 --
--- We say that an operation or type in a map-nest is "uniform" when its size
--- (including internal sizes) and control flow is invariant to the map-nest.
--- Converse, it is "nonuniform" when it is variant. When we distribute a uniform
--- statement, the intermediate results are regular, and otherwise irregular. A
--- statement that uses an irregular array is necessarily nonuniform.
+-- We say that an operation or type in a map-nest is /uniform/ when its size
+-- (including internal sizes and sizes of inputs) and control flow is invariant
+-- to the map-nest. Converse, it is /nonuniform/ when it is variant. When we
+-- distribute a uniform statement, the intermediate results are regular, and
+-- otherwise irregular. A statement that uses an irregular array is necessarily
+-- nonuniform.
 --
 -- Take care not to confuse the terms "regular" and "uniform" - we say "regular"
 -- only about arrays! "Uniform" is the general concept.
+--
+-- /Uniform nested parallelism/ is nested parallelism whose size is uniform to
+-- the enclosing map nest, and which uses only variables whose types are
+-- uniform, and which is enclosed in uniform control flow. /Nonuniform nested
+-- parallelism/ is the converse. Many of the optimisations here are about
+-- detecting the uniform case. We previously often used the terms "regular
+-- nested parallelism" and "irregular nested parallelism", but this is now
+-- discouraged, as explained above.
 module Futhark.Pass.Flatten (flattenSOACs) where
 
 import Control.Monad
@@ -79,12 +87,12 @@ import Prelude hiding (div, quot, rem)
 type FunSizeParams = Name -> S.Set Int
 
 -- | The irregularity handling mode requested by a statement, defaulting to the
--- mode already in effect. @#[flattening(sequentialise_irregular)]@ asks that
--- nested irregular parallelism be sequentialised rather than flattened; see
+-- mode already in effect. @#[flattening(sequentialise_nonuniform)]@ asks that
+-- nonuniform nested parallelism be sequentialised rather than flattened; see
 -- 'SequentialiseIrregularAll'.
 irregularityFor :: DistIrregularity -> StmAux a -> DistIrregularity
 irregularityFor irreg aux
-  | AttrComp "flattening" ["sequentialise_irregular"] `inAttrs` stmAuxAttrs aux =
+  | AttrComp "flattening" ["sequentialise_nonuniform"] `inAttrs` stmAuxAttrs aux =
       SequentialiseIrregularAll
   | otherwise = irreg
 
@@ -239,8 +247,8 @@ liftRegularRetType inps w = concat . snd . L.mapAccumL liftType 0
 liftFunName :: Name -> Name
 liftFunName name = name <> "_lifted"
 
-liftRegFunName :: Name -> Name
-liftRegFunName name = name <> "_regular_lifted"
+liftUniformFunName :: Name -> Name
+liftUniformFunName name = name <> "_uniform_lifted"
 
 flattenApply ::
   FunSizeParams ->
@@ -260,7 +268,7 @@ flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, ret
           isSizeArg = (`S.member` size_positions) . fst
           (size_args, value_args) = L.partition isSizeArg indexed_args
       let nonuniform = any (isVariant inps . fst . snd) size_args
-          name' = if nonuniform then liftFunName name else liftRegFunName name
+          name' = if nonuniform then liftFunName name else liftUniformFunName name
           mode = if nonuniform then NonUniformLift else UniformLift
       demandLifted name mode
       w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
@@ -360,8 +368,8 @@ liftBody funHasParallelism funSizeParams lvl w inputs env dstms result = do
   result' <- mapM (liftResult lvl segments inputs env') result
   pure $ concat result'
 
-liftRegFunBody :: FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> [RetType SOACS] -> Result -> FlattenM Result
-liftRegFunBody funHasParallelism funSizeParams lvl w inputs env dstms rettype result = do
+liftUniformFunBody :: FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> [RetType SOACS] -> Result -> FlattenM Result
+liftUniformFunBody funHasParallelism funSizeParams lvl w inputs env dstms rettype result = do
   let segments = [w]
       ops = flattenOpsFor funHasParallelism funSizeParams DistributeIrregular lvl
   env' <- foldM (flattenDistStm ops segments) env dstms
@@ -487,16 +495,16 @@ liftFunDef funHasParallelism funSizeParams const_scope fd = do
 -- Here we assume that every type size is invariant and therefore every input
 -- array is regular. As a result, parameters that correspond to type sizes are
 -- not lifted and are also not part of 'DistInput'.
--- Regular functions can still return irregular arrays. This happens when
--- they return an array whose dimension size was created in the function
+-- A uniformly lifted function can still return irregular arrays. This happens
+-- when it returns an array whose dimension size was created in the function
 -- body. In other words, the array has an existential size.
-liftRegFunDef ::
+liftUniformFunDef ::
   FunHasParallelism ->
   FunSizeParams ->
   Scope SOACS ->
   FunDef SOACS ->
   PassM (FunDef GPU, S.Set DemandFn)
-liftRegFunDef funHasParallelism funSizeParams const_scope fd = do
+liftUniformFunDef funHasParallelism funSizeParams const_scope fd = do
   let FunDef
         { funDefBody = body,
           funDefParams = fparams,
@@ -532,9 +540,9 @@ liftRegFunDef funHasParallelism funSizeParams const_scope fd = do
         -- invariant to the map-nest, but at this point there is no opportunity to
         -- hoist them out of the nest.
 
-        liftRegFunBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms (map fst rettype) $
+        liftUniformFunBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms (map fst rettype) $
           bodyResult body
-  let name = liftRegFunName $ funDefName fd
+  let name = liftUniformFunName $ funDefName fd
   pure
     ( fd
         { funDefName = name,
@@ -657,7 +665,7 @@ liftUntilFixedPoint prog funHasParallelism funSizeParams consts_scope made neede
       case find ((== fname) . funDefName) $ progFuns prog of
         Just fundef ->
           case mode of
-            UniformLift -> liftRegFunDef funHasParallelism funSizeParams consts_scope fundef
+            UniformLift -> liftUniformFunDef funHasParallelism funSizeParams consts_scope fundef
             NonUniformLift -> liftFunDef funHasParallelism funSizeParams consts_scope fundef
         Nothing -> error $ "mkDemanded: " <> show fname
     mkDemanded (DemandBuiltin b) = pure (builtinFunDef b, mempty)

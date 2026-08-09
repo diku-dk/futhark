@@ -1,4 +1,4 @@
--- The inner parallelism is irregular, but the attribute asks for it to be
+-- The inner parallelism is nonuniform, but the attribute asks for it to be
 -- sequentialised instead of flattened, so no segmented operations should be
 -- generated for it.
 -- ==
@@ -7,5 +7,5 @@
 
 def main (ns: []i32) =
   #[flattening(only_inner)]
-  #[flattening(sequentialise_irregular)]
+  #[flattening(sequentialise_nonuniform)]
   map (\n -> i64.sum (map (* 2) (iota (i64.i32 n & 7)))) ns

@@ -157,7 +157,7 @@ transformExp (WithAcc inputs lam) = do
     onInput (shape, arrs, Just (op_lam, nes)) = do
       bound_outside <- asks $ namesFromList . M.keys
       let -- XXX: fake a SegLevel, which we don't have here.  We will not
-          -- use it for anything, as we will not allow irregular
+          -- use it for anything, as we will not allow nonuniform
           -- allocations inside the update function.
           lvl = SegThread SegNoVirt Nothing
           (op_lam', lam_allocs) =
@@ -171,7 +171,7 @@ transformExp (WithAcc inputs lam) = do
           throwError $
             "Cannot handle un-sliceable allocation size: "
               ++ prettyString v
-              ++ "\nLikely cause: irregular nested operations inside accumulator update operator."
+              ++ "\nLikely cause: nonuniform nested operations inside accumulator update operator."
         [] ->
           pure ()
 
@@ -234,7 +234,7 @@ transformScanRed lvl space ops kbody = do
       throwError $
         "Cannot handle un-sliceable allocation size: "
           ++ prettyString v
-          ++ "\nLikely cause: irregular nested operations inside parallel constructs."
+          ++ "\nLikely cause: nonuniform nested operations inside parallel constructs."
     Nothing ->
       pure ()
 

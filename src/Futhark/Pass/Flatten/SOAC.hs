@@ -1038,7 +1038,7 @@ transformInnerMap ops segments env inps pat w arrs map_lam = do
       -- by 'doRepIota' is never consulted, so we do not emit it. This is not
       -- just an efficiency concern: when generating in-block code, the
       -- bookkeeping contains SegOps whose dimensions are bound inside the kernel
-      -- body, which would make 'noIrregularPar' reject the enclosing intrablock
+      -- body, which would make 'noNonuniformPar' reject the enclosing intrablock
       -- version.
       invariantDim Constant {} = True
       invariantDim (Var v) = v `M.member` outer_scope
@@ -1119,12 +1119,11 @@ transformMap ops _attrs segments env inps pat w arrs map_lam = do
   lam <- preprocessLambda pp_scope map_lam
   transformInnerMap ops segments env inps pat w arrs lam
 
--- | Fully flatten a regular map that has no enclosing segments (a top-level
--- map). This is the empty-'Segments' special case of 'transformMap': the
--- mapped arrays are ordinary regular top-level values, so we distribute the map
--- directly over its own width and flatten the resulting body, rather than
--- reconstructing per-enclosing-segment inputs. The results are necessarily
--- regular.
+-- | Fully flatten a map that has no enclosing segments (a top-level map). This
+-- is the empty-'Segments' special case of 'transformMap': the mapped arrays are
+-- ordinary regular top-level values, so we distribute the map directly over its
+-- own width and flatten the resulting body, rather than reconstructing
+-- per-enclosing-segment inputs. The results are necessarily regular.
 transformTopLevelMap ::
   FlattenOps ->
   Pat Type ->
@@ -1201,7 +1200,7 @@ runMapLambdaBody segments env inps w arrs map_lam _pat _ress = do
       BasicOp $
         Replicate mempty (Var v)
 
-versionedRegularMap ::
+versionedUniformMap ::
   FlattenOps ->
   Segments ->
   DistEnv ->
@@ -1213,7 +1212,7 @@ versionedRegularMap ::
   [VName] ->
   Lambda SOACS ->
   FlattenM DistEnv
-versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
+versionedUniformMap ops segments env inps ress pat aux w arrs map_lam = do
   let only_intra = onlyExploitIntra (stmAuxAttrs aux)
       may_intra = worthIntrablock map_lam && mayExploitIntra (stmAuxAttrs aux)
 
@@ -1242,7 +1241,7 @@ versionedRegularMap ops segments env inps ress pat aux w arrs map_lam = do
         "match_res"
         result_ts
         (stmAuxAttrs aux)
-        -- 'versionedRegularMap' is only reached via 'isVersionableMap', which
+        -- 'versionedUniformMap' is only reached via 'isVersionableMap', which
         -- guarantees the body calls no parallel function.
         False
         (worthSequentialising map_lam)
@@ -1501,7 +1500,7 @@ flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
       flattenSegMaposcanomap ops segments env inps res w arrs scans post_lam map_lam
   | Just map_lam <- isMapSOAC form,
     isVersionableMap funHasParallelism lvl inps env w res map_lam =
-      versionedRegularMap ops segments env inps res pat aux w arrs map_lam
+      versionedUniformMap ops segments env inps res pat aux w arrs map_lam
   | Just map_lam <- isMapSOAC form =
       flattenPlainMap ops segments env inps res pat aux w arrs map_lam
   | otherwise =

@@ -970,7 +970,7 @@ segOpBlocker space = do
   where
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
     -- Hoisting out slicing is useless and potentially dangerous, as protecting
-    -- it can cause irregular parallelism.
+    -- it can cause nonuniform parallelism.
     isSlice _ _ (Let _ _ (BasicOp (Index _ slice))) =
       sliceShape slice /= mempty
     isSlice _ _ _ = False
