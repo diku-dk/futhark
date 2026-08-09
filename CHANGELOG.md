@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   Siegumfeldt, Laust Kjæp Dengsøe, and Robert Schenck.
 
 * Flattening has been rewritten, with the majority of the work by Amirreza
-  Hashemi. The main consequence is that irregular nested parallelism is not
+  Hashemi. The main consequence is that nonuniform nested parallelism is now
   supported, although it is not yet necessarily efficient in all cases. More
   details: https://futhark-lang.org/blog/2026-07-31-full-flattening.html
 
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Fixed
 
-* A case where complex sizes referring to explicit parameters was mishandled by
+* A case where complex sizes referring to explicit parameters were mishandled by
   monomorphisation (#2230).
 
 * An issue where `#[scratch]` would apply to subexpressions in undesirable ways,
