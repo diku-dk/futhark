@@ -819,15 +819,33 @@ checkExtLambdaBody ::
   (Checkable rep) => [ExtType] -> Body (Aliases rep) -> TypeM rep ()
 checkExtLambdaBody ret (Body (_, rep) stms res) = do
   mapM_ checkExtType ret
-  case mapM (hasStaticShape . rowType) ret of
-    Nothing ->
+  case ret of
+    Prim (IntType Int64) : ts -> mapM_ checkValueRet ts
+    _ ->
       bad . TypeError $
-        "flatmap return type "
-          <> prettyText ret
-          <> " has existential in inner dimension."
-    _ -> pure ()
+        "flatmap lambda must return a size of type i64 first, but returns "
+          <> prettyTuple ret
   checkBodyDec rep
   checkStms stms $ checkExtLambdaResult ret res
+  where
+    -- A value result is either irregular, in which case the existential size -
+    -- the lambda's first result - is its outermost size, or regular, in which
+    -- case it has no existential size at all.
+    checkValueRet t =
+      case shapeDims $ arrayShape t of
+        _ : inner
+          | any (isJust . isExt) inner ->
+              bad . TypeError $
+                "flatmap result type "
+                  <> prettyText t
+                  <> " has existential in inner dimension."
+        Ext i : _
+          | i /= 0 ->
+              bad . TypeError $
+                "flatmap result type "
+                  <> prettyText t
+                  <> " has an existential size other than the first result."
+        _ -> pure ()
 
 checkBody ::
   (Checkable rep) =>

@@ -18,7 +18,9 @@ module Futhark.IR.SOACS.SOAC
     composeBinds,
     scremaType,
     soacType,
-    flatMapElemTypes,
+    flatMapIrregular,
+    flatMapRowTypes,
+    flatMapRegularTypes,
     typeCheckSOAC,
     mkIdentityLambda,
     nilFn,
@@ -88,12 +90,13 @@ data SOAC rep
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
-  | -- | Irregular map where the results are implicitly concatenated. The
-    -- 'ExtLambda' returns first a size @k@ and then arrays that may use @k@ as
-    -- the /outer/ size (only).
+  | -- | Irregular map where the irregular results are implicitly concatenated.
+    -- The 'ExtLambda' first returns a size @k@, then its value results, each of
+    -- which is either /irregular/ (an array with @k@ as its outermost size) or
+    -- /regular/ (not mentioning @k@ at all). The size @k@ may be used *only* as
+    -- an outermost dimension.
     --
-    -- For input
-    -- of length @n@ returns the following:
+    -- For input of length @n@ returns the following:
     --
     -- * An integer @m@ denoting the size of the data arrays.
     --
@@ -106,9 +109,10 @@ data SOAC rep
     -- * The "offset array" of type @[n]i64@, indicating for each segment where
     --   its values begin in the data array.
     --
-    -- * Finally the data arrays; one per return value of the lambda (except the
-    --   first), of outer size @[m]@. The size @m@ may be used *only* as an
-    --   outermost dimension.
+    -- * Finally one array per value result of the lambda, in the same order: an
+    --   irregular result becomes its concatenation across all iterations, of
+    --   outer size @[m]@, and a regular result the collection of its values, of
+    --   outer size @[n]@.
     FlatMap SubExp [VName] (ExtLambda rep)
   deriving (Eq, Ord, Show)
 
@@ -572,16 +576,43 @@ soacType (FlatMap w _ lam) =
     arrayOfRow (Prim Bool) (Ext 0),
     arrayOfRow (Prim int64) (Free w)
   ]
-    ++ map (`setOuterSize` Ext 0) (drop 1 (lambdaReturnType lam))
+    ++ map onValueRet (drop 1 (lambdaReturnType lam))
+  where
+    onValueRet t
+      -- An irregular result is concatenated, so its outer size becomes the
+      -- total size @m@.
+      | flatMapIrregular t = t `setOuterSize` Ext 0
+      -- A regular result is merely collected, one per input element.
+      | otherwise = t `arrayOfRow` Free w
 
--- | The element types of the data arrays produced by a 'FlatMap' lambda: its
--- return types after the leading size, with the existential outer dimension
--- stripped. The remaining dimensions are never existential.
-flatMapElemTypes :: ExtLambda rep -> [Type]
-flatMapElemTypes lam =
-  fromMaybe (error "flatMapElemTypes: existential inner dimension.") $
+-- | Is this the type of an irregular result of a 'FlatMap' lambda - one that is
+-- concatenated with the results of the other iterations, rather than merely
+-- collected? These are exactly the results whose outermost size is the
+-- existential size returned by the lambda.
+flatMapIrregular :: ExtType -> Bool
+flatMapIrregular t =
+  case shapeDims $ arrayShape t of
+    Ext 0 : _ -> True
+    _ -> False
+
+-- | The element types of the irregular (concatenated) arrays produced by a
+-- 'FlatMap' lambda, with the existential outer dimension stripped. The
+-- remaining dimensions are never existential.
+flatMapRowTypes :: ExtLambda rep -> [Type]
+flatMapRowTypes lam =
+  fromMaybe (error "flatMapRowTypes: existential inner dimension.") $
     mapM (hasStaticShape . rowType) $
-      drop 1 (lambdaReturnType lam)
+      filter flatMapIrregular $
+        drop 1 (lambdaReturnType lam)
+
+-- | The types of the regular results of a 'FlatMap' lambda - the ones that are
+-- collected rather than concatenated. These never have existential sizes.
+flatMapRegularTypes :: ExtLambda rep -> [Type]
+flatMapRegularTypes lam =
+  fromMaybe (error "flatMapRegularTypes: existential size.") $
+    mapM hasStaticShape $
+      filter (not . flatMapIrregular) $
+        drop 1 (lambdaReturnType lam)
 
 instance TypedOp SOAC where
   opType = pure . soacType

@@ -7,13 +7,14 @@
 --          [true, false, false, false, true, true, false, false]
 --          [0i64, 0i64, 4i64, 5i64]
 --          [true, false, false, false, true, true, false, false]
---          [10i32, 11i32, 12i32, 13i32, 20i32, 30i32, 31i32, 32i32] }
+--          [10i32, 11i32, 12i32, 13i32, 20i32, 30i32, 31i32, 32i32]
+--          [0i32, 1i32, 2i32, 3i32] }
 
 def main (ks: []i64) (xs: []i32) =
-  let (a, b, c, d) =
+  let (a, b, c, d, e) =
     flatmap (\(k, x) ->
-               let (_, flags, _, r) =
-                 flatmap (\(kk, y) -> map (\i -> y * 10 + i32.i64 i) (iota kk)) [(k, x)]
-               in sized k (zip flags r))
+               let (_, flags, _, r, cs) =
+                 flatmap (\(kk, y) -> (map (\i -> y * 10 + i32.i64 i) (iota kk), y)) [(k, x)]
+               in (sized k (zip flags r), cs[0]))
             (zip ks xs)
-  in (a, b, c, map (.0) d, map (.1) d)
+  in (a, b, c, map (.0) d, map (.1) d, e)

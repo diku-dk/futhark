@@ -1722,22 +1722,57 @@ internaliseLambdaCoerce lam argtypes = do
       rettype
       =<< bodyBind body
 
+-- | The number of internalised values in the array component of the result of
+-- the lambda of a 'flatmap', which returns that array paired with a value of
+-- regular type.
+flatLambdaIrregulars :: E.Exp -> Int
+flatLambdaIrregulars (E.Parens e _) = flatLambdaIrregulars e
+flatLambdaIrregulars (E.Lambda _ _ _ (Info (E.RetType _ t)) _)
+  | Just (irreg_t : _) <- E.isTupleRecord t =
+      length $ foldMap toList $ internaliseType $ E.toStruct irreg_t
+flatLambdaIrregulars e =
+  error $ "flatLambdaIrregulars: unexpected expression:\n" ++ prettyString e
+
+-- | Internalise the lambda of a 'flatmap'. The irregular results (the ones that
+-- are concatenated) are distinguished in the 'ExtLambda' by having the
+-- existential size as their outermost size, so that size must be a variable -
+-- when the lambda produces arrays of some other size, we bind that size and
+-- coerce the arrays to it.
 internaliseFlatLambda :: E.Exp -> [Type] -> InternaliseM (I.ExtLambda SOACS)
 internaliseFlatLambda lam argtypes = do
   (params, body, _) <- internaliseLambda lam argtypes
   (body', ret) <- buildBody . localScope (scopeOfLParams params) $ do
     res <- bodyBind body
-    ret <- mapM subExpResType res
-    k <- fmap (head . arrayDims) . subExpType . resSubExp . head $ res
-    let forbidden = case k of
-          I.Var v -> [v]
-          _ -> []
+    let (irreg_res, reg_res) = splitAt (flatLambdaIrregulars lam) res
+    k <- irregularSize irreg_res
+    irreg_res' <- mapM (coerceOuter k) irreg_res
+    irreg_ts <- mapM (subExpType . resSubExp) irreg_res'
+    reg_ts <- mapM (subExpType . resSubExp) reg_res
     pure
-      ( subExpRes k : res,
+      ( subExpRes (I.Var k) : irreg_res' <> reg_res,
         I.Prim int64
-          : existentialiseExtTypes forbidden (staticShapes ret)
+          : existentialiseExtTypes [k] (staticShapes irreg_ts)
+            <> staticShapes reg_ts
       )
   pure $ I.Lambda params ret body'
+  where
+    irregularSize [] =
+      error "internaliseFlatLambda: lambda has no irregular results."
+    irregularSize (r : _) = do
+      t <- subExpType $ resSubExp r
+      case arrayDims t of
+        I.Var v : _ -> pure v
+        se : _ -> letExp "flatmap_k" $ BasicOp $ SubExp se
+        [] -> error "internaliseFlatLambda: irregular result is not an array."
+    coerceOuter k r@(SubExpRes cs (I.Var v)) = do
+      t <- lookupType v
+      case arrayDims t of
+        d : ds
+          | d /= I.Var k ->
+              SubExpRes cs . I.Var
+                <$> letExp "flatmap_irreg" (shapeCoerce (I.Var k : ds) v)
+        _ -> pure r
+    coerceOuter _ r = pure r
 
 -- | Overloaded operators are treated here.
 isOverloadedFunction ::

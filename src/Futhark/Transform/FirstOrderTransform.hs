@@ -20,6 +20,7 @@ where
 
 import Control.Monad
 import Control.Monad.State
+import Data.Either (partitionEithers)
 import Data.List (find, uncons, zip4)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -120,12 +121,13 @@ resultArray arrs ts = do
         letExp "result" =<< eBlank t
   mapM oneArray ts
 
--- | Sequentialise a single FlatMap. The size of the arrays produced by the
--- lambda is not known until it has been run, so each result array is
+-- | Sequentialise a single FlatMap. The size of the irregular arrays produced
+-- by the lambda is not known until it has been run, so each of them is
 -- accumulated in a scratch buffer that is doubled whenever it runs out of
--- space, and finally truncated to the actual size. The shape and offset arrays
--- are filled in as we go, and the flag array is then a scatter of the segment
--- starts.
+-- space, and finally truncated to the actual size. The regular results need no
+-- such treatment, as there is exactly one per iteration. The shape and offset
+-- arrays are filled in as we go, and the flag array is then a scatter of the
+-- segment starts.
 transformFlatMap ::
   (Transformer m) =>
   Pat (LetDec (Rep m)) ->
@@ -134,23 +136,29 @@ transformFlatMap ::
   ExtLambda (Rep m) ->
   m ()
 transformFlatMap pat w arrs lam = do
-  let elem_ts = flatMapElemTypes lam
+  let irreg_ts = flatMapRowTypes lam
+      reg_ts = flatMapRegularTypes lam
   arrs_ts <- mapM lookupType arrs
 
   -- Loop parameters: the current filled size, the current capacity, the
-  -- per-element shape and offset arrays, and one scratch buffer per result.
+  -- per-element shape and offset arrays, one scratch buffer per irregular
+  -- result, and one array per regular result.
   size_p <- newParam "flatmap_size" $ toDecl (Prim int64) Nonunique
   cap_p <- newParam "flatmap_cap" $ toDecl (Prim int64) Nonunique
   shape_p <- newParam "flatmap_shape" $ toDecl (arrayOfRow (Prim int64) w) Unique
   offset_p <- newParam "flatmap_offset" $ toDecl (arrayOfRow (Prim int64) w) Unique
   scratch_ps <-
-    forM elem_ts $ \et ->
+    forM irreg_ts $ \et ->
       newParam "flatmap_res" $ toDecl (arrayOfRow et (Var (paramName cap_p))) Unique
+  reg_ps <-
+    forM reg_ts $ \rt ->
+      newParam "flatmap_reg" $ toDecl (arrayOfRow rt w) Unique
 
   -- The capacity initially matches the input size.
   shape_init <- letExp "flatmap_shape" $ BasicOp $ Scratch int64 [w]
   offset_init <- letExp "flatmap_offset" $ BasicOp $ Scratch int64 [w]
-  scratch_init <- forM elem_ts $ \et -> letExp "flatmap_res" =<< eBlank (arrayOfRow et w)
+  scratch_init <- forM irreg_ts $ \et -> letExp "flatmap_res" =<< eBlank (arrayOfRow et w)
+  reg_init <- forM reg_ts $ \rt -> letExp "flatmap_reg" =<< eBlank (arrayOfRow rt w)
 
   let merge =
         (size_p, intConst Int64 0)
@@ -158,6 +166,7 @@ transformFlatMap pat w arrs lam = do
           : (shape_p, Var shape_init)
           : (offset_p, Var offset_init)
           : zip scratch_ps (map Var scratch_init)
+            <> zip reg_ps (map Var reg_init)
       merge_params = map fst merge
 
   i <- newVName "i"
@@ -170,10 +179,11 @@ transformFlatMap pat w arrs lam = do
           size = Var $ paramName size_p
       lam_res <- map resSubExp <$> bindLambda lam (zipWith arg arrs arrs_ts)
 
-      -- The lambda produces the common length of its result arrays first.
+      -- The lambda produces the common length of its irregular results first.
       let (k, ys) =
             fromMaybe (error "transformFlatMap: malformed FlatMap.") $
               uncons lam_res
+          (irreg_ys, reg_ys) = splitValues ys
       new_size <-
         letSubExp "flatmap_new_size" . BasicOp $
           BinOp (Add Int64 OverflowUndef) size k
@@ -200,7 +210,7 @@ transformFlatMap pat w arrs lam = do
 
       -- Grow (and copy) each scratch buffer when necessary, then write the
       -- new elements at the end.
-      scratch_res <- forM (zip3 scratch_ps elem_ts ys) $ \(sp, et, ys_j) -> do
+      scratch_res <- forM (zip3 scratch_ps irreg_ts irreg_ys) $ \(sp, et, ys_j) -> do
         let full_t = arrayOfRow et new_cap
         base <-
           letExp "flatmap_grown"
@@ -231,25 +241,44 @@ transformFlatMap pat w arrs lam = do
         letInPlace "flatmap_offset" (paramName offset_p) (fullSlice (paramType offset_p) [DimFix $ Var i]) $
           BasicOp (SubExp size)
 
-      pure $ subExpsRes [new_size, new_cap] <> varsRes (shape' : offset' : scratch_res)
+      -- The regular results are simply written at this iteration's index.
+      reg_res <- forM (zip reg_ps reg_ys) $ \(rp, reg_y) ->
+        letInPlace "flatmap_reg" (paramName rp) (fullSlice (paramType rp) [DimFix $ Var i]) $
+          BasicOp (SubExp reg_y)
+
+      pure $
+        subExpsRes [new_size, new_cap]
+          <> varsRes (shape' : offset' : scratch_res <> reg_res)
 
   loop_res <- letTupExp "flatmap" $ Loop merge loop_form loop_body
   case (loop_res, patNames pat) of
-    (size_res : _cap_res : shape_res : offset_res : scratch_res, m_pat : shape_pat : flag_pat : offset_pat : out_pats) -> do
+    (size_res : _cap_res : shape_res : offset_res : value_res, m_pat : shape_pat : flag_pat : offset_pat : out_pats) -> do
       -- Bind the total size and the shape/offset arrays, then truncate each
-      -- buffer.
+      -- buffer. The regular results are already of the right size.
       letBindNames [m_pat] $ BasicOp $ SubExp $ Var size_res
       letBindNames [shape_pat] $ BasicOp $ SubExp $ Var shape_res
       letBindNames [offset_pat] $ BasicOp $ SubExp $ Var offset_res
-      forM_ (zip out_pats scratch_res) $ \(out, scratch) -> do
+      let (scratch_res, reg_res) = splitAt (length irreg_ts) value_res
+          (data_pats, reg_pats) = splitValues out_pats
+      forM_ (zip data_pats scratch_res) $ \(out, scratch) -> do
         scratch_t <- lookupType scratch
         letBindNames [out] . BasicOp . Index scratch $
           fullSlice scratch_t [DimSlice (intConst Int64 0) (Var m_pat) (intConst Int64 1)]
+      forM_ (zip reg_pats reg_res) $ \(out, reg) ->
+        letBindNames [out] $ BasicOp $ SubExp $ Var reg
       -- The flag array: scatter a 'true' at the offset of each non-empty
       -- segment, over an otherwise 'false' array.
       transformFlatMapFlags flag_pat w (Var m_pat) shape_res offset_res
     _ ->
       error "transformFlatMap: malformed FlatMap."
+  where
+    -- Split anything that has one element per value result of the lambda into
+    -- the irregular and the regular parts.
+    splitValues :: [a] -> ([a], [a])
+    splitValues xs =
+      partitionEithers $ zipWith f (drop 1 (lambdaReturnType lam)) xs
+      where
+        f t x = if flatMapIrregular t then Left x else Right x
 
 -- | Compute a 'FlatMap' flag array of length @m@: 'true' at the start of each
 -- non-empty segment, 'false' elsewhere. Emitted as a sequential scatter loop.
