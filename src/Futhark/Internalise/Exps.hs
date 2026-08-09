@@ -1722,6 +1722,23 @@ internaliseLambdaCoerce lam argtypes = do
       rettype
       =<< bodyBind body
 
+internaliseFlatLambda :: E.Exp -> [Type] -> InternaliseM (I.ExtLambda SOACS)
+internaliseFlatLambda lam argtypes = do
+  (params, body, _) <- internaliseLambda lam argtypes
+  (body', ret) <- buildBody . localScope (scopeOfLParams params) $ do
+    res <- bodyBind body
+    ret <- mapM subExpResType res
+    k <- fmap (head . arrayDims) . subExpType . resSubExp . head $ res
+    let forbidden = case k of
+          I.Var v -> [v]
+          _ -> []
+    pure
+      ( subExpRes k : res,
+        I.Prim int64
+          : existentialiseExtTypes forbidden (staticShapes ret)
+      )
+  pure $ I.Lambda params ret body'
+
 -- | Overloaded operators are treated here.
 isOverloadedFunction ::
   E.QualName VName ->
@@ -1882,14 +1899,12 @@ isIntrinsicFunction qname args = do
       internaliseHist 2 desc rf dest op ne buckets img
     handleSOACs [rf, dest, op, ne, buckets, img] "hist_3d" = Just $ \desc ->
       internaliseHist 3 desc rf dest op ne buckets img
-    handleSOACs [lam, ks, arr] "flatmap" = Just $ \desc -> do
-      ks' <- internaliseExpToVars "ks_arr" ks
+    handleSOACs [lam, arr] "flatmap" = Just $ \desc -> do
       arr' <- internaliseExpToVars "map_arr" arr
-      ks_ts <- mapM lookupType ks'
       arr_ts <- mapM lookupType arr'
-      lam' <- internaliseLambdaCoerce lam $ map rowType $ ks_ts <> arr_ts
+      lam' <- internaliseFlatLambda lam $ map rowType arr_ts
       let w = arraysSize 0 arr_ts
-      letValExp' desc $ I.Op $ FlatMap w (ks' <> arr') lam'
+      letValExp' desc $ I.Op $ FlatMap w arr' lam'
     handleSOACs _ _ = Nothing
 
     handleAccs [dest, f, bs] "scatter_stream" = Just $ \desc ->

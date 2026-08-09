@@ -11,4 +11,4 @@
 --           [30i32, 31i32]] }
 
 def main (ks: []i64) (xs: [][]i32) =
-  flatmap (\k x -> replicate k x) ks xs
+  flatmap (\(k, x) -> replicate k x) (zip ks xs)

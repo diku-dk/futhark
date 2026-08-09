@@ -6,7 +6,7 @@
 def main (kss: [][]i64) (xss: [][]i32) =
   map2 (\ks xs ->
           let (_, _, _, r) =
-            flatmap (\k x -> replicate k (replicate 2 x)) ks xs
+            flatmap (\(k, x) -> replicate k (replicate 2 x)) (zip ks xs)
           in map (\x -> foldl (+) 0 x) (transpose r))
        kss
        xss

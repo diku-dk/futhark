@@ -914,7 +914,16 @@ transformDistributedInnerMap ::
   FlattenM [(VName, ResRep)]
 transformDistributedInnerMap ops mode (ws_F, ws_O, ws) irregs segments dist = do
   let Distributed dstms (DistResults resmap reps) = dist
-  let new_inps = concatMap distStmInputs dstms
+  -- A name bound inside the distributed body is variant whether or not another
+  -- statement consumes it, so a result sized by such a name is irregular. Only
+  -- counting the names that are consumed would leave the size existentially
+  -- bound by a 'FlatMap' lambda - returned, but used by nothing - looking
+  -- invariant, and the result would be given a type mentioning a name that is
+  -- not in scope out here.
+  let asInput (DistResult tag (DistType _ _ t) v) = (v, DistInput tag t)
+      new_inps =
+        concatMap distStmInputs dstms
+          <> map asInput (concatMap distStmResult dstms)
   env <- foldM (flattenDistStm ops segments) env_initial dstms
   resmap_res <- fmap concat $ forM (M.toList resmap) $ \(rt, binds) ->
     forM binds $ \(cs_inps, v, v_t) ->
@@ -984,7 +993,11 @@ distributeAndTransformInnerMap ::
   Lambda SOACS ->
   FlattenM [ResRep]
 distributeAndTransformInnerMap ops mode ws_triple new_segment inps pat arrs' onFreeVar map_lam = do
-  let free = freeIn map_lam
+  -- The return type describes the results as seen from outside the map, which
+  -- is the job of 'pat' here, so its variables need not be replicated into the
+  -- body. They may not even be in scope out here: the results of a 'FlatMap'
+  -- lambda have a size that is bound inside the body.
+  let free = freeIn $ map_lam {lambdaReturnType = [] :: [Type]}
   free_and_sizes <- freeWithTypeDeps inps free
   (free_replicated, replicated) <-
     fmap unzip . sequence $
@@ -1532,9 +1545,9 @@ flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
 
 -- | The number of scalars per element of a 'FlatMap' lambda's (first) value
 -- result; see Note [FlatMap element counting].
-flatMapElemsPer :: Lambda SOACS -> TPrimExp Int64 VName
+flatMapElemsPer :: ExtLambda SOACS -> TPrimExp Int64 VName
 flatMapElemsPer lam =
-  product $ map pe64 $ arrayDims $ rowType $ head $ lambdaReturnType lam
+  product $ map pe64 $ arrayDims $ head $ flatMapElemTypes lam
 
 -- | Divide each entry of a per-segment size (or offset) array by the given
 -- factor, converting scalar-unit counts to element-unit counts. A no-op when the
@@ -1574,7 +1587,7 @@ flattenFlatMap ::
   Pat Type ->
   SubExp ->
   [VName] ->
-  Lambda SOACS ->
+  ExtLambda SOACS ->
   FlattenM ()
 flattenFlatMap ops pat w arrs lam = do
   let segments = [w]
@@ -1583,21 +1596,26 @@ flattenFlatMap ops pat w arrs lam = do
           (\p arr -> (paramName p, DistInputFree arr (paramType p)))
           (lambdaParams lam)
           arrs
+      elem_ts = flatMapElemTypes lam
       (m_name, s_name, f_name, o_name, d_names) =
         case patNames pat of
           (a : b : c : d : hs) -> (a, b, c, d, hs)
           _ -> error "flattenFlatMap: pattern too short"
       res =
         zipWith3
-          (\i v t -> DistResult (ResTag i) (DistType segments (Rank 1) (rowType t)) v)
+          (\i v t -> DistResult (ResTag i) (DistType segments (Rank 1) t) v)
           [0 ..]
           d_names
-          (lambdaReturnType lam)
-  reps <- distributeAndFlattenBody ops segments "flatmap" mempty inps res (lambdaBody lam)
+          elem_ts
+      -- The lambda's leading size result is of no use here, as the metadata is
+      -- derived from the segment structure of the flattened value results.
+      body = lambdaBody lam
+      body' = body {bodyResult = drop 1 (bodyResult body)}
+  reps <- distributeAndFlattenBody ops segments "flatmap" mempty inps res body'
   irregs <- forM reps $ \case
     Irregular ir -> ensureDenseIrregular lvl "flatmap_res" ir
     Regular _ -> error "flattenFlatMap: unexpected regular result"
-  case (irregs, lambdaReturnType lam) of
+  case (irregs, elem_ts) of
     (ir0 : _, _ : _) -> do
       -- The flattening structure arrays are in units of scalars, but the source
       -- 'flatmap' wants them in units of the lambda's element type @b@, of
@@ -1626,9 +1644,8 @@ flattenFlatMap ops pat w arrs lam = do
       bindReshape f_name flags (Shape [Var m_name])
       -- The concatenated data arrays, reshaped from the flat scalar data to
       -- @[m]b@ (the outer dimension being the freshly bound total size).
-      forM_ (zip3 d_names irregs (lambdaReturnType lam)) $ \(v, ir, ret_t) -> do
-        let row_shape = Shape $ arrayDims $ rowType ret_t
-        bindReshape v (irregularD ir) (Shape [Var m_name] <> row_shape)
+      forM_ (zip3 d_names irregs elem_ts) $ \(v, ir, elem_t) ->
+        bindReshape v (irregularD ir) (Shape [Var m_name] <> Shape (arrayDims elem_t))
     _ -> error "flattenFlatMap: FlatMap with no results"
   where
     lvl = flattenSegLevel ops
@@ -1646,10 +1663,9 @@ flattenFlatMap ops pat w arrs lam = do
 -- their per-enclosing segment sizes, the total sizes @m@ (result 0).
 --
 -- The metadata is derived from the shape array (result 1) - the per-iteration
--- output sizes - which the inner-map does not itself surface. We recover the
--- shape by augmenting the lambda with a leading scalar result equal to the
--- outer size of its (first) output; mapping that scalar over the nest yields
--- exactly the irregular array of per-iteration sizes, segmented by the 'FlatMap'
+-- output sizes - which the inner-map does not itself surface. The lambda
+-- returns exactly that size as its leading result, so mapping it over the nest
+-- yields the irregular array of per-iteration sizes, segmented by the 'FlatMap'
 -- width. From it we then compute the offset array (result 3), as the
 -- per-enclosing exclusive prefix sum, and the flag array (result 2).
 --
@@ -1663,24 +1679,17 @@ flattenFlatMapNested ::
   StmAux () ->
   SubExp ->
   [VName] ->
-  Lambda SOACS ->
+  ExtLambda SOACS ->
   FlattenM DistEnv
 flattenFlatMapNested ops segments env inps res aux w arrs lam = do
   size_name <- newVName "flatmap_sizes"
-  data_names <- mapM (const $ newVName "flatmap_data") $ lambdaReturnType lam
-  let k = arraySize 0 $ head $ lambdaReturnType lam
-      body = lambdaBody lam
-      aug_lam =
-        lam
-          { lambdaReturnType = Prim int64 : lambdaReturnType lam,
-            lambdaBody = body {bodyResult = SubExpRes mempty k : bodyResult body}
-          }
-      size_pe = PatElem size_name $ arrayOfRow (Prim int64) w
-      data_pes = zipWith (\v t -> PatElem v $ arrayOfRow t w) data_names $ lambdaReturnType lam
-      aug_pat = Pat $ size_pe : data_pes
+  data_names <- mapM (const $ newVName "flatmap_data") val_ts
+  let size_pe = PatElem size_name $ arrayOfRow (Prim int64) w
+      data_pes = zipWith (\v t -> PatElem v $ arrayOfRow t w) data_names val_ts
+      map_pat = Pat $ size_pe : data_pes
   let lvl = flattenSegLevel ops
   certifying (distCerts inps aux env) $ do
-    reps <- transformMap ops (stmAuxAttrs aux) segments env inps aug_pat w arrs aug_lam
+    reps <- transformMap ops (stmAuxAttrs aux) segments env inps map_pat w arrs map_lam
     case reps of
       shape_rep : data_reps@(first_data : _) -> do
         -- An 'IrregularRep' always stores primitive data, so for a non-scalar
@@ -1756,6 +1765,23 @@ flattenFlatMapNested ops segments env inps res aux w arrs lam = do
         let all_reps = n_rep : shape_rep : flag_rep : offset_rep : data_reps
         insertRepsM (zip (map distResTag res) all_reps) env
       _ -> error "flattenFlatMapNested: FlatMap with no results"
+  where
+    -- The size of the lambda's value results, which it returns before them. It
+    -- is bound inside the body, so it cannot be named in the type of the
+    -- 'ExtLambda' - but it can be named in the type of the ordinary lambda we
+    -- pass to the inner-map machinery, whose leading result it becomes.
+    k = case bodyResult (lambdaBody lam) of
+      r : _ -> resSubExp r
+      [] -> error "flattenFlatMapNested: FlatMap with no results"
+    val_ts =
+      runIdentity . instantiateShapes (const (pure k)) . drop 1 $
+        lambdaReturnType lam
+    map_lam =
+      Lambda
+        { lambdaParams = lambdaParams lam,
+          lambdaReturnType = Prim int64 : val_ts,
+          lambdaBody = lambdaBody lam
+        }
 
 -- | Remove certificates that refer to variables free in the lambda (recursing
 -- into nested bodies). Such certificates arise on pure operator lambdas (e.g.

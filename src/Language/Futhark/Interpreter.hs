@@ -1889,20 +1889,15 @@ initialCtx =
                 "Invalid arguments to map intrinsic:\n"
                   ++ unlines [prettyString t, show f, show xs]
     def "flatmap" = Just $
-      -- We do not use the size parameter of the lambda; we simply
-      -- concatenate whatever it returns and report the actual sizes.
-      -- The result type is existentially sized, so we cannot evaluate it
-      -- fully; we only need the row shape of the concatenated array.
       TermPoly Nothing $ \t ->
-        pure $ ValueFun $ \f -> pure . ValueFun $ \sizes -> pure . ValueFun $ \xs ->
+        pure $ ValueFun $ \f -> pure . ValueFun $ \xs ->
           case unfoldFunType t of
-            ([_, _, _], ret_t)
+            ([_, _], ret_t)
               | Just [_, _, _, res_t] <- isTupleRecord ret_t -> do
                   rowshape <- typeShape <$> evalTypeFully (stripArray 1 res_t)
                   yss <-
-                    zipWithM
-                      (apply2 noLoc mempty f)
-                      (snd $ fromArray sizes)
+                    mapM
+                      (apply noLoc mempty f)
                       (snd $ fromArray xs)
                   -- The metadata (shape/flag/offset) is derived from the
                   -- per-element output sizes; see the 'flatmap' documentation.
@@ -1920,7 +1915,7 @@ initialCtx =
             _ ->
               error $
                 "Invalid arguments to flatmap intrinsic:\n"
-                  ++ unlines [show f, show sizes, show xs]
+                  ++ unlines [show f, show xs]
     def s | "reduce" `T.isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs

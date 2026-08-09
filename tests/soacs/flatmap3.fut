@@ -7,11 +7,12 @@
 def main (kss: [][]i64) (xss: [][]i32) =
   map2 (\ks xs ->
           let (shape, flag, offset, r) =
-            flatmap (\k x -> map (\i -> x + i32.i64 i) (iota k)) ks xs
+            flatmap (\(k, x) -> map (\i -> x + i32.i64 i) (iota k)) (zip ks xs)
           in ( i64.sum shape
              , i64.sum (map i64.bool flag)
              , i64.sum offset
              , i32.sum r
              ))
-       kss xss
+       kss
+       xss
   |> unzip4

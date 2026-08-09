@@ -318,9 +318,9 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
 -- | **Beware:** this is an experimental and unstable interface which may change
 -- at any time.
 --
--- Perform a flattened map of a function over the arrays `ks` and `as`.
--- Returns the concatenation of the arrays produced by `f`, alongside metadata
--- allowing the interpretation of the result as an irregular array. In order:
+-- Perform a flattened map of a function over the array `as`. Returns the
+-- concatenation of the arrays produced by `f`, alongside metadata allowing the
+-- interpretation of the result as an irregular array. In order:
 --
 -- * The "shape array", giving the size of each segment. This array sums to `m`.
 --
@@ -331,11 +331,10 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
 --
 -- * The actual "data array", comprising the concatenated results of `f`.
 def flatmap [n] 'a 'b
-            (f: (k: i64) -> a -> [k]b)
-            (ks: [n]i64)
+            (f: a -> ?[k].[k]b)
             (as: [n]a) : ?[m].( [n]i64
                               , [m]bool
                               , [n]i64
                               , [m]b
                               ) =
-  intrinsics.flatmap f ks as
+  intrinsics.flatmap f as

@@ -118,9 +118,9 @@ depsOfShape shape = mconcat $ map (depsOf mempty) (shapeDims shape)
 -- | Determine the variables on which the results of applying
 -- anonymous function @lam@ to @inputs@ depend.
 lambdaDependencies ::
-  (ASTRep rep) =>
+  (ASTRep rep, FreeIn t) =>
   Dependencies ->
-  Lambda rep ->
+  GLambda rep t ->
   [Names] ->
   [Names]
 lambdaDependencies deps lam inputs =

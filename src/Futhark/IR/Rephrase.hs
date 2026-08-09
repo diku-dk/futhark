@@ -89,7 +89,7 @@ rephraseBody rephraser (Body rep stms res) =
     <*> pure res
 
 -- | Rephrase a lambda.
-rephraseLambda :: (Monad m) => Rephraser m from to -> Lambda from -> m (Lambda to)
+rephraseLambda :: (Monad m) => Rephraser m from to -> GLambda from t -> m (GLambda to t)
 rephraseLambda rephraser lam = do
   body' <- rephraseBody rephraser $ lambdaBody lam
   params' <- mapM (rephraseParam $ rephraseLParamDec rephraser) $ lambdaParams lam

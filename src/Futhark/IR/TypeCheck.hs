@@ -36,6 +36,7 @@ module Futhark.IR.TypeCheck
     checkArg,
     checkSOACArrayArgs,
     checkLambda,
+    checkExtLambda,
     checkBody,
     consume,
     binding,
@@ -758,10 +759,7 @@ checkStms origstms m = delve $ stmsToList origstms
     delve [] =
       m
 
-checkResult ::
-  (Checkable rep) =>
-  Result ->
-  TypeM rep ()
+checkResult :: (Checkable rep) => Result -> TypeM rep ()
 checkResult = mapM_ checkSubExpRes
 
 checkFunBody ::
@@ -777,40 +775,59 @@ checkFunBody rt (Body (_, rep) stms res) = do
       matchReturnType (map fst rt) res
     mapM (subExpAliasesM . resSubExp) res
 
-checkLambdaBody ::
-  (Checkable rep) =>
-  [Type] ->
-  Body (Aliases rep) ->
-  TypeM rep ()
-checkLambdaBody ret (Body (_, rep) stms res) = do
-  checkBodyDec rep
-  checkStms stms $ checkLambdaResult ret res
-
-checkLambdaResult ::
-  (Checkable rep) =>
-  [Type] ->
-  Result ->
-  TypeM rep ()
-checkLambdaResult ts es
-  | length ts /= length es =
+checkNumResults :: (Pretty t) => [t] -> Result -> TypeM rep ()
+checkNumResults ts res
+  | length ts /= length res =
       bad . TypeError $
         "Lambda has return type "
           <> prettyTuple ts
           <> " describing "
           <> prettyText (length ts)
           <> " values, but body returns "
-          <> prettyText (length es)
+          <> prettyText (length res)
           <> " values: "
-          <> prettyTuple es
-  | otherwise = forM_ (zip ts es) $ \(t, e) -> do
-      et <- checkSubExpRes e
-      unless (et == t) . bad . TypeError $
-        "Subexpression "
-          <> prettyText e
-          <> " has type "
-          <> prettyText et
-          <> " but expected "
-          <> prettyText t
+          <> prettyTuple res
+  | otherwise = pure ()
+
+checkLambdaResult :: (Checkable rep) => [Type] -> Result -> TypeM rep ()
+checkLambdaResult ts es = do
+  checkNumResults ts es
+  forM_ (zip ts es) $ \(t, e) -> do
+    et <- checkSubExpRes e
+    unless (et == t) . bad . TypeError $
+      "Subexpression "
+        <> prettyText e
+        <> " has type "
+        <> prettyText et
+        <> " but expected "
+        <> prettyText t
+
+checkLambdaBody ::
+  (Checkable rep) => [Type] -> Body (Aliases rep) -> TypeM rep ()
+checkLambdaBody ret (Body (_, rep) stms res) = do
+  mapM_ checkType ret
+  checkBodyDec rep
+  checkStms stms $ do
+    checkLambdaResult ret res
+
+checkExtLambdaResult :: (Checkable rep) => [ExtType] -> Result -> TypeM rep ()
+checkExtLambdaResult ts es = do
+  checkNumResults ts es
+  matchExtReturnType ts es
+
+checkExtLambdaBody ::
+  (Checkable rep) => [ExtType] -> Body (Aliases rep) -> TypeM rep ()
+checkExtLambdaBody ret (Body (_, rep) stms res) = do
+  mapM_ checkExtType ret
+  case mapM (hasStaticShape . rowType) ret of
+    Nothing ->
+      bad . TypeError $
+        "flatmap return type "
+          <> prettyText ret
+          <> " has existential in inner dimension."
+    _ -> pure ()
+  checkBodyDec rep
+  checkStms stms $ checkExtLambdaResult ret res
 
 checkBody ::
   (Checkable rep) =>
@@ -1134,7 +1151,8 @@ checkExp (WithAcc inputs lam) = do
 
     pure (Acc (paramName p) shape elem_ts NoUniqueness, mempty)
 
-  checkAnyLambda False lam $ replicate num_accs (Prim Unit, mempty) ++ acc_args
+  checkAnyLambda False checkLambdaBody lam $
+    replicate num_accs (Prim Unit, mempty) ++ acc_args
   where
     num_accs = length inputs
 checkExp (Op op) = do
@@ -1351,8 +1369,13 @@ consumeArgs paramts args =
 -- The boolean indicates whether we only allow consumption of
 -- parameters.
 checkAnyLambda ::
-  (Checkable rep) => Bool -> Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
-checkAnyLambda soac (Lambda params rettype body) args = do
+  (Checkable rep) =>
+  Bool ->
+  ([t] -> Body (Aliases rep) -> TypeM rep ()) ->
+  GLambda (Aliases rep) t ->
+  [Arg] ->
+  TypeM rep ()
+checkAnyLambda soac onBody (Lambda params rettype body) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do
@@ -1371,8 +1394,7 @@ checkAnyLambda soac (Lambda params rettype body) args = do
       binding (M.fromList params') $
         maybe id consumeOnlyParams consumable $ do
           checkLambdaParams params
-          mapM_ checkType rettype
-          checkLambdaBody rettype body
+          onBody rettype body
     else
       bad . TypeError $
         "Anonymous function defined with "
@@ -1384,7 +1406,10 @@ checkAnyLambda soac (Lambda params rettype body) args = do
           <> " arguments."
 
 checkLambda :: (Checkable rep) => Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
-checkLambda = checkAnyLambda True
+checkLambda = checkAnyLambda True checkLambdaBody
+
+checkExtLambda :: (Checkable rep) => ExtLambda (Aliases rep) -> [Arg] -> TypeM rep ()
+checkExtLambda = checkAnyLambda True checkExtLambdaBody
 
 checkPrimExp :: (Checkable rep) => PrimExp VName -> TypeM rep ()
 checkPrimExp ValueExp {} = pure ()

@@ -156,8 +156,8 @@ cseInBody ds (Body bodydec stms res) = do
 
 cseInLambda ::
   (Aliased rep, CSEInOp (Op rep)) =>
-  Lambda rep ->
-  CSEM rep (Lambda rep)
+  GLambda rep t ->
+  CSEM rep (GLambda rep t)
 cseInLambda lam = do
   body' <- cseInBody (map (const Observe) $ lambdaReturnType lam) $ lambdaBody lam
   pure lam {lambdaBody = body'}
@@ -331,4 +331,4 @@ instance
   (AliasableRep rep, CSEInOp (Op (Aliases rep))) =>
   CSEInOp (SOAC.SOAC (Aliases rep))
   where
-  cseInOp = subCSE . SOAC.mapSOACM (SOAC.SOACMapper pure cseInLambda pure)
+  cseInOp = subCSE . SOAC.mapSOACM (SOAC.SOACMapper pure cseInLambda cseInLambda pure)

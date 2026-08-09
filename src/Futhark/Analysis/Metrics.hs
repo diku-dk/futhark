@@ -149,5 +149,5 @@ basicOpMetrics UpdateAcc {} = seen "UpdateAcc"
 basicOpMetrics UserParam {} = seen "UserParam"
 
 -- | Compute metrics for this lambda.
-lambdaMetrics :: (OpMetrics (Op rep)) => Lambda rep -> MetricsM ()
+lambdaMetrics :: (OpMetrics (Op rep)) => GLambda rep t -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

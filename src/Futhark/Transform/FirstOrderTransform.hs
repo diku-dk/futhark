@@ -20,8 +20,9 @@ where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List (find, zip4)
+import Data.List (find, uncons, zip4)
 import Data.Map.Strict qualified as M
+import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.IR qualified as AST
 import Futhark.IR.Prop.Aliases
@@ -89,7 +90,11 @@ transformStmRecursively ::
 transformStmRecursively (Let pat aux (Op soac)) =
   auxing aux $ transformSOAC pat =<< mapSOACM soacTransform soac
   where
-    soacTransform = identitySOACMapper {mapOnSOACLambda = transformLambda}
+    soacTransform =
+      identitySOACMapper
+        { mapOnSOACLambda = transformLambda,
+          mapOnSOACExtLambda = transformLambda
+        }
 transformStmRecursively (Let pat aux e) =
   auxing aux $ letBind pat =<< mapExpM transform e
   where
@@ -115,20 +120,21 @@ resultArray arrs ts = do
         letExp "result" =<< eBlank t
   mapM oneArray ts
 
--- | Sequentialise a single FlatMap. We do not exploit the size parameter of the
--- lambda; instead each result array is accumulated in a scratch buffer that is
--- doubled whenever it runs out of space, and finally truncated to the actual
--- size. The shape and offset arrays are filled in as we go, and the flag array
--- is then a scatter of the segment starts.
+-- | Sequentialise a single FlatMap. The size of the arrays produced by the
+-- lambda is not known until it has been run, so each result array is
+-- accumulated in a scratch buffer that is doubled whenever it runs out of
+-- space, and finally truncated to the actual size. The shape and offset arrays
+-- are filled in as we go, and the flag array is then a scatter of the segment
+-- starts.
 transformFlatMap ::
   (Transformer m) =>
   Pat (LetDec (Rep m)) ->
   SubExp ->
   [VName] ->
-  Lambda (Rep m) ->
+  ExtLambda (Rep m) ->
   m ()
 transformFlatMap pat w arrs lam = do
-  let elem_ts = map rowType $ lambdaReturnType lam
+  let elem_ts = flatMapElemTypes lam
   arrs_ts <- mapM lookupType arrs
 
   -- Loop parameters: the current filled size, the current capacity, the
@@ -162,10 +168,12 @@ transformFlatMap pat w arrs lam = do
       -- Apply the lambda to the current elements.
       let arg arr arr_t = BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
           size = Var $ paramName size_p
-      ys <- map resSubExp <$> bindLambda lam (zipWith arg arrs arrs_ts)
+      lam_res <- map resSubExp <$> bindLambda lam (zipWith arg arrs arrs_ts)
 
-      -- All result arrays have the same length; use the first.
-      k <- arraySize 0 <$> subExpType (head ys)
+      -- The lambda produces the common length of its result arrays first.
+      let (k, ys) =
+            fromMaybe (error "transformFlatMap: malformed FlatMap.") $
+              uncons lam_res
       new_size <-
         letSubExp "flatmap_new_size" . BasicOp $
           BinOp (Add Int64 OverflowUndef) size k
@@ -542,8 +550,8 @@ transformLambda ::
     LetDec rep ~ LetDec SOACS,
     Alias.AliasableRep rep
   ) =>
-  Lambda SOACS ->
-  m (AST.Lambda rep)
+  GLambda SOACS t ->
+  m (AST.GLambda rep t)
 transformLambda (Lambda params rettype body) = do
   body' <-
     fmap fst . runBuilder $
@@ -564,7 +572,7 @@ letwith ks i vs = do
 
 bindLambda ::
   (Transformer m) =>
-  AST.Lambda (Rep m) ->
+  AST.GLambda (Rep m) t ->
   [AST.Exp (Rep m)] ->
   m Result
 bindLambda (Lambda params _ body) args = do

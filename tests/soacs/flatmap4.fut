@@ -14,7 +14,7 @@
 --          [10i32, 10i32, 20i32, 20i32, 20i32, 30i32] }
 
 def main (ks: []i64) (xs: []i32) =
-  flatmap (\k x ->
-             let (_, _, _, r) = flatmap (\kk y -> replicate kk y) [k] [x]
+  flatmap (\(k, x) ->
+             let (_, _, _, r) = flatmap (\(kk, y) -> replicate kk y) [(k, x)]
              in sized k r)
-          ks xs
+          (zip ks xs)

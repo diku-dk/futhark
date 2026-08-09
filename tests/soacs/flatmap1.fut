@@ -8,4 +8,4 @@
 --          [10i32, 11i32, 12i32, 13i32, 20i32, 30i32, 31i32, 32i32] }
 
 def main [n] (ks: [n]i64) (xs: [n]i32) =
-  flatmap (\k x -> map (\i -> x * 10 + i32.i64 i) (iota k)) ks xs
+  flatmap (\(k, x) -> map (\i -> x * 10 + i32.i64 i) (iota k)) (zip ks xs)

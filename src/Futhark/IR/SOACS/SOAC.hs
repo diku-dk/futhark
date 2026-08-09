@@ -18,6 +18,7 @@ module Futhark.IR.SOACS.SOAC
     composeBinds,
     scremaType,
     soacType,
+    flatMapElemTypes,
     typeCheckSOAC,
     mkIdentityLambda,
     nilFn,
@@ -87,10 +88,14 @@ data SOAC rep
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
-  | -- | Irregular map where the results are implicitly concatenated. For input
+  | -- | Irregular map where the results are implicitly concatenated. The
+    -- 'ExtLambda' returns first a size @k@ and then arrays that may use @k@ as
+    -- the /outer/ size (only).
+    --
+    -- For input
     -- of length @n@ returns the following:
     --
-    -- * An integer @m@ denoting the size of the data array.
+    -- * An integer @m@ denoting the size of the data arrays.
     --
     -- * The "shape array" of type @[n]i64@, giving the size of each segment.
     --   This array sums to @m@.
@@ -101,9 +106,10 @@ data SOAC rep
     -- * The "offset array" of type @[n]i64@, indicating for each segment where
     --   its values begin in the data array.
     --
-    -- * Finally the data arrays; one per return value of the lambda, of outer
-    --   size @[m]@
-    FlatMap SubExp [VName] (Lambda rep)
+    -- * Finally the data arrays; one per return value of the lambda (except the
+    --   first), of outer size @[m]@. The size @m@ may be used *only* as an
+    --   outermost dimension.
+    FlatMap SubExp [VName] (ExtLambda rep)
   deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
@@ -398,6 +404,7 @@ isMapSOAC (ScremaForm map_lam scans reds post_lam) = do
 data SOACMapper frep trep m = SOACMapper
   { mapOnSOACSubExp :: SubExp -> m SubExp,
     mapOnSOACLambda :: Lambda frep -> m (Lambda trep),
+    mapOnSOACExtLambda :: ExtLambda frep -> m (ExtLambda trep),
     mapOnSOACVName :: VName -> m VName
   }
 
@@ -407,6 +414,7 @@ identitySOACMapper =
   SOACMapper
     { mapOnSOACSubExp = pure,
       mapOnSOACLambda = pure,
+      mapOnSOACExtLambda = pure,
       mapOnSOACVName = pure
     }
 
@@ -470,7 +478,7 @@ mapSOACM tv (FlatMap w arrs lam) =
   FlatMap
     <$> mapOnSOACSubExp tv w
     <*> mapM (mapOnSOACVName tv) arrs
-    <*> mapOnSOACLambda tv lam
+    <*> mapOnSOACExtLambda tv lam
 
 mapOnSOACScan :: (Monad m) => SOACMapper frep trep m -> Scan frep -> m (Scan trep)
 mapOnSOACScan tv (Scan red_lam red_nes) =
@@ -488,7 +496,11 @@ mapOnSOACReduce tv (Reduce comm red_lam red_nes) =
 traverseSOACStms :: (Monad m) => OpStmsTraverser m (SOAC rep) rep
 traverseSOACStms f = mapSOACM mapper
   where
-    mapper = identitySOACMapper {mapOnSOACLambda = traverseLambdaStms f}
+    mapper =
+      identitySOACMapper
+        { mapOnSOACLambda = traverseLambdaStms f,
+          mapOnSOACExtLambda = traverseLambdaStms f
+        }
 
 instance (ASTRep rep) => FreeIn (Scan rep) where
   freeIn' (Scan lam ne) = freeIn' lam <> freeIn' ne
@@ -512,6 +524,7 @@ instance (ASTRep rep) => FreeIn (SOAC rep) where
         SOACMapper
           { mapOnSOACSubExp = walk freeIn',
             mapOnSOACLambda = walk freeIn',
+            mapOnSOACExtLambda = walk freeIn',
             mapOnSOACVName = walk freeIn'
           }
 
@@ -523,13 +536,14 @@ instance (ASTRep rep) => Substitute (SOAC rep) where
         SOACMapper
           { mapOnSOACSubExp = pure . substituteNames subst,
             mapOnSOACLambda = pure . substituteNames subst,
+            mapOnSOACExtLambda = pure . substituteNames subst,
             mapOnSOACVName = pure . substituteNames subst
           }
 
 instance (ASTRep rep) => Rename (SOAC rep) where
   rename = mapSOACM renamer
     where
-      renamer = SOACMapper rename rename rename
+      renamer = SOACMapper rename rename rename rename
 
 -- | The type of a SOAC.
 soacType :: (Typed (LParamInfo rep)) => SOAC rep -> [ExtType]
@@ -558,7 +572,16 @@ soacType (FlatMap w _ lam) =
     arrayOfRow (Prim Bool) (Ext 0),
     arrayOfRow (Prim int64) (Free w)
   ]
-    ++ map (`setOuterSize` Ext 0) (staticShapes $ lambdaReturnType lam)
+    ++ map (`setOuterSize` Ext 0) (drop 1 (lambdaReturnType lam))
+
+-- | The element types of the data arrays produced by a 'FlatMap' lambda: its
+-- return types after the leading size, with the existential outer dimension
+-- stripped. The remaining dimensions are never existential.
+flatMapElemTypes :: ExtLambda rep -> [Type]
+flatMapElemTypes lam =
+  fromMaybe (error "flatMapElemTypes: existential inner dimension.") $
+    mapM (hasStaticShape . rowType) $
+      drop 1 (lambdaReturnType lam)
 
 instance TypedOp SOAC where
   opType = pure . soacType
@@ -672,7 +695,8 @@ instance IsOp SOAC where
       (map depsOf' args)
       <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
   opDependencies (FlatMap w arrs lam) =
-    replicate 4 mempty ++ lambdaDependencies mempty lam (depsOfArrays w arrs)
+    replicate 4 mempty
+      ++ drop 1 (lambdaDependencies mempty lam (depsOfArrays w arrs))
   opDependencies (Screma w arrs (ScremaForm map_lam scans reds post_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $
@@ -702,7 +726,7 @@ substNamesInSubExp subs (Var idd) =
   M.findWithDefault (Var idd) idd subs
 
 instance CanBeWise SOAC where
-  addOpWisdom = runIdentity . mapSOACM (SOACMapper pure (pure . informLambda) pure)
+  addOpWisdom = runIdentity . mapSOACM (SOACMapper pure (pure . informLambda) (pure . informLambda) pure)
 
 instance (RepTypes rep) => ST.IndexOp (SOAC rep) where
   indexOp vtable k soac [i] = do
@@ -786,8 +810,7 @@ typeCheckSOAC (WithVJP args lam lam_adj) = do
 typeCheckSOAC (FlatMap w arrs lam) = do
   TC.require (Prim int64) w
   arrs' <- TC.checkSOACArrayArgs w arrs
-  TC.checkLambda lam arrs'
--- TODO: type check the lambda properly.
+  TC.checkExtLambda lam arrs'
 typeCheckSOAC (Stream size arrexps accexps lam) = do
   TC.require (Prim int64) size
   accargs <- mapM TC.checkArg accexps

@@ -7,7 +7,7 @@
 def main (kss: [][]i64) (xss: [][]i32) =
   map2 (\ks xs ->
           let (shape, flag, offset, r) =
-            flatmap (\k x -> replicate k (replicate 2 x)) ks xs
+            flatmap (\(k, x) -> replicate k (replicate 2 x)) (zip ks xs)
           in ( i64.sum shape
              , i64.sum (map i64.bool flag)
              , i64.sum offset

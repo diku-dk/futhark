@@ -18,4 +18,5 @@
 --          empty([0]i32) }
 
 def main (ks: []i64) (xs: []i32) =
-  flatmap (\k x -> replicate k x) ks xs
+  let f (k: i64, x: i32): ?[m].[m]i32 = replicate k x
+  in flatmap f (zip ks xs)

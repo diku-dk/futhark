@@ -279,9 +279,9 @@ arraysSize :: Int -> [TypeBase Shape u] -> SubExp
 arraysSize _ [] = constant (0 :: Int64)
 arraysSize i (t : _) = arraySize i t
 
--- | Return the immediate row-type of an array.  For @[[int]]@, this
--- would be @[int]@.
-rowType :: TypeBase Shape u -> TypeBase Shape u
+-- | Return the immediate row-type of an array.  For @[][]t@, this
+-- would be @[]t@.
+rowType :: TypeBase (ShapeBase d) u -> TypeBase (ShapeBase d) u
 rowType = stripArray 1
 
 -- | A type is a primitive type if it is not an array or memory block.

@@ -11,10 +11,9 @@
 
 def main (ks: []i64) (xs: []i32) =
   let (a, b, c, d) =
-    flatmap (\k x ->
+    flatmap (\(k, x) ->
                let (_, flags, _, r) =
-                 flatmap (\kk y -> map (\i -> y * 10 + i32.i64 i) (iota kk)) [k] [x]
+                 flatmap (\(kk, y) -> map (\i -> y * 10 + i32.i64 i) (iota kk)) [(k, x)]
                in sized k (zip flags r))
-            ks
-            xs
+            (zip ks xs)
   in (a, b, c, map (.0) d, map (.1) d)

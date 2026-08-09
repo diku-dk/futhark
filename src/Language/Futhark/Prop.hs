@@ -1020,12 +1020,9 @@ intrinsics =
                 IntrinsicPolyFun
                   [tp_a, tp_b, sp_n]
                   [ Scalar $
-                      Arrow mempty Unnamed Observe (Scalar (Prim $ Signed Int64)) $
-                        RetType [] . Scalar $
-                          Arrow mempty Unnamed Observe (Scalar (t_a NoUniqueness)) $
-                            RetType [k] $
-                              array_b Nonunique (shape [k]),
-                    Array Observe (shape [n]) (Prim $ Signed Int64),
+                      Arrow mempty Unnamed Observe (Scalar (t_a NoUniqueness)) $
+                        RetType [k] $
+                          array_b Nonunique (shape [k]),
                     array_a Observe $ shape [n]
                   ]
                   $ RetType [m] . Scalar . tupleRecord
