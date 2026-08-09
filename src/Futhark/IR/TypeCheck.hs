@@ -986,7 +986,7 @@ matchLoopResultExt merge loopres = do
           rettype_ext
           (staticShapes bodyt)
     Just rettype' ->
-      unless (bodyt `subtypesOf` rettype') . bad $
+      unless (bodyt == rettype') . bad $
         ReturnTypeError
           (nameFromString "<loop body>")
           (staticShapes rettype')

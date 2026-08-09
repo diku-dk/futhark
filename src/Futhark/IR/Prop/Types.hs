@@ -36,8 +36,6 @@ module Futhark.IR.Prop.Types
     mapOnExtType,
     mapOnType,
     diet,
-    subtypeOf,
-    subtypesOf,
     toDecl,
     fromDecl,
     isExt,
@@ -379,34 +377,6 @@ diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
 diet Mem {} = Observe
 
--- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
--- @y@), meaning @x@ is valid whenever @y@ is.
-subtypeOf ::
-  (Ord u, ArrayShape shape) =>
-  TypeBase shape u ->
-  TypeBase shape u ->
-  Bool
-subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
-  u2
-    <= u1
-    && t1
-      == t2
-    && shape1
-      `subShapeOf` shape2
-subtypeOf t1 t2 = t1 == t2
-
--- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,
--- and each element in @xs@ is a subtype of the corresponding element
--- in @ys@..
-subtypesOf ::
-  (Ord u, ArrayShape shape) =>
-  [TypeBase shape u] ->
-  [TypeBase shape u] ->
-  Bool
-subtypesOf xs ys =
-  length xs == length ys
-    && and (zipWith subtypeOf xs ys)
-
 -- | Add the given uniqueness information to the types.
 toDecl ::
   TypeBase shape NoUniqueness ->
@@ -468,8 +438,8 @@ hasStaticShape (Mem space) = Just $ Mem space
 hasStaticShape (Array bt (Shape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
 
--- | Given two lists of 'ExtType's of the same length, return a list
--- of 'ExtType's that is a subtype of the two operands.
+-- | Given two lists of 'ExtType's of the same length, return a list of
+-- 'ExtType's that generalises the two operands.
 generaliseExtTypes ::
   [TypeBase ExtShape u] ->
   [TypeBase ExtShape u] ->
