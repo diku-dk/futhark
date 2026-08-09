@@ -20,7 +20,6 @@ where
 
 import Control.Monad
 import Control.Monad.State
-import Data.Either (partitionEithers)
 import Data.List (find, uncons, zip4)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -183,7 +182,7 @@ transformFlatMap pat w arrs lam = do
       let (k, ys) =
             fromMaybe (error "transformFlatMap: malformed FlatMap.") $
               uncons lam_res
-          (irreg_ys, reg_ys) = splitValues ys
+          (irreg_ys, reg_ys) = flatMapSplitValues lam ys
       new_size <-
         letSubExp "flatmap_new_size" . BasicOp $
           BinOp (Add Int64 OverflowUndef) size k
@@ -259,7 +258,7 @@ transformFlatMap pat w arrs lam = do
       letBindNames [shape_pat] $ BasicOp $ SubExp $ Var shape_res
       letBindNames [offset_pat] $ BasicOp $ SubExp $ Var offset_res
       let (scratch_res, reg_res) = splitAt (length irreg_ts) value_res
-          (data_pats, reg_pats) = splitValues out_pats
+          (data_pats, reg_pats) = flatMapSplitValues lam out_pats
       forM_ (zip data_pats scratch_res) $ \(out, scratch) -> do
         scratch_t <- lookupType scratch
         letBindNames [out] . BasicOp . Index scratch $
@@ -271,14 +270,6 @@ transformFlatMap pat w arrs lam = do
       transformFlatMapFlags flag_pat w (Var m_pat) shape_res offset_res
     _ ->
       error "transformFlatMap: malformed FlatMap."
-  where
-    -- Split anything that has one element per value result of the lambda into
-    -- the irregular and the regular parts.
-    splitValues :: [a] -> ([a], [a])
-    splitValues xs =
-      partitionEithers $ zipWith f (drop 1 (lambdaReturnType lam)) xs
-      where
-        f t x = if flatMapIrregular t then Left x else Right x
 
 -- | Compute a 'FlatMap' flag array of length @m@: 'true' at the start of each
 -- non-empty segment, 'false' elsewhere. Emitted as a sequential scatter loop.

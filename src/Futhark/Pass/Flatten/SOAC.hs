@@ -11,7 +11,6 @@ where
 
 import Control.Monad
 import Data.Containers.ListUtils (nubOrd)
-import Data.Either (partitionEithers)
 import Data.Foldable
 import Data.Functor.Identity (runIdentity)
 import Data.Map qualified as M
@@ -1524,15 +1523,15 @@ flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
 
 -- Note [FlatMap element counting]
 --
--- 'FlatMap' counts in units of the lambda's element type @b@: the data array is
--- @[m]b@, the shape and offset arrays hold per-segment counts of @b@-elements,
--- and the flag array has one entry per @b@-element.
+-- 'FlatMap' counts in units of the lambda's element type @b@: the data array
+-- for irregular results is @[m]b@, the shape and offset arrays hold per-segment
+-- counts of @b@-elements, and the flag array has one entry per @b@-element.
 --
--- The flattening pass, however, represents irregular data with an 'IrregularRep'
--- whose 'irregularD' is primitive (a flat array of scalars), so its segment
--- sizes and flags count *scalars*. When @b@ is itself a @c@-element array there
--- are @c@ scalars per @b@-element ('flatMapElemsPer'), so the two notions of
--- "size" differ by a factor of @c@.
+-- The flattening pass, however, represents irregular data with an
+-- 'IrregularRep' whose 'irregularD' is primitive (a flat array of scalars), so
+-- its segment sizes and flags count *scalars*. When @b@ is itself a @c@-element
+-- array there are @c@ scalars per @b@-element ('flatMapElemsPer'), so the two
+-- notions of "size" differ by a factor of @c@.
 --
 -- The flattening rules therefore convert between the two: the metadata that
 -- 'FlatMap' surfaces directly (the total @m@, and the shape, flag, and offset
@@ -1627,7 +1626,7 @@ flattenFlatMap ops pat w arrs lam = do
         case patNames pat of
           (a : b : c : d : hs) -> (a, b, c, d, hs)
           _ -> error "flattenFlatMap: pattern too short"
-      (d_names, r_names) = splitValues value_names
+      (d_names, r_names) = flatMapSplitValues lam value_names
       -- An irregular result is distributed as a variably sized array, a regular
       -- one as an ordinary array with one element per segment.
       distTypeOf t
@@ -1644,7 +1643,7 @@ flattenFlatMap ops pat w arrs lam = do
       body = lambdaBody lam
       body' = body {bodyResult = drop 1 (bodyResult body)}
   reps <- distributeAndFlattenBody ops segments "flatmap" mempty inps res body'
-  let (irreg_reps, reg_reps) = splitValues reps
+  let (irreg_reps, reg_reps) = flatMapSplitValues lam reps
   irregs <- forM irreg_reps $ \case
     Irregular ir -> ensureDenseIrregular lvl "flatmap_res" ir
     Regular _ -> error "flattenFlatMap: irregular result is not irregular"
@@ -1689,12 +1688,6 @@ flattenFlatMap ops pat w arrs lam = do
     value_ts = drop 1 (lambdaReturnType lam)
     static =
       fromMaybe (error "flattenFlatMap: existential size.") . hasStaticShape
-    -- Split anything that has one element per value result of the lambda into
-    -- the irregular and the regular parts.
-    splitValues :: [a] -> ([a], [a])
-    splitValues xs = partitionEithers $ zipWith f value_ts xs
-      where
-        f t x = if flatMapIrregular t then Left x else Right x
     bindReshape name arr newshape = do
       arr_t <- lookupType arr
       letBindNames [name] . BasicOp $

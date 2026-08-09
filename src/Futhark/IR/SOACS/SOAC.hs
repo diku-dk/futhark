@@ -21,6 +21,7 @@ module Futhark.IR.SOACS.SOAC
     flatMapIrregular,
     flatMapRowTypes,
     flatMapRegularTypes,
+    flatMapSplitValues,
     typeCheckSOAC,
     mkIdentityLambda,
     nilFn,
@@ -53,6 +54,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
+import Data.Either (partitionEithers)
 import Data.List (intersperse)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -605,6 +607,14 @@ flatMapRowTypes lam =
       filter flatMapIrregular $
         drop 1 (lambdaReturnType lam)
 
+-- | Split a list with one element per value result of a 'FlatMap' lambda into
+-- the irregular and the regular parts.
+flatMapSplitValues :: ExtLambda rep -> [a] -> ([a], [a])
+flatMapSplitValues lam =
+  partitionEithers . zipWith f (drop 1 (lambdaReturnType lam))
+  where
+    f t x = if flatMapIrregular t then Left x else Right x
+
 -- | The types of the regular results of a 'FlatMap' lambda - the ones that are
 -- collected rather than concatenated. These never have existential sizes.
 flatMapRegularTypes :: ExtLambda rep -> [Type]
@@ -726,6 +736,8 @@ instance IsOp SOAC where
       (map depsOf' args)
       <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
   opDependencies (FlatMap w arrs lam) =
+    -- FIXME: this is strictly speaking not accurate, although it will not cause
+    -- trouble anytime soon.
     replicate 4 mempty
       ++ drop 1 (lambdaDependencies mempty lam (depsOfArrays w arrs))
   opDependencies (Screma w arrs (ScremaForm map_lam scans reds post_lam)) =
