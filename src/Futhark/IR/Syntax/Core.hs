@@ -176,20 +176,12 @@ newtype Rank = Rank Int
   deriving (Show, Eq, Ord)
 
 -- | A class encompassing types containing array shape information.
-class (Monoid a, Eq a, Ord a) => ArrayShape a where
+class (Monoid a) => ArrayShape a where
   -- | Return the rank of an array with the given size.
   shapeRank :: a -> Int
 
-  -- | Prepend the dimensions of a 'Shape'.
-  prependShape :: Shape -> a -> a
-
-instance ArrayShape (ShapeBase SubExp) where
+instance ArrayShape (ShapeBase a) where
   shapeRank (Shape l) = length l
-  prependShape = (<>)
-
-instance ArrayShape (ShapeBase ExtSize) where
-  shapeRank (Shape l) = length l
-  prependShape shape = (fmap Free shape <>)
 
 instance Semigroup Rank where
   Rank x <> Rank y = Rank $ x + y
@@ -199,7 +191,6 @@ instance Monoid Rank where
 
 instance ArrayShape Rank where
   shapeRank (Rank x) = x
-  prependShape shape (Rank x) = Rank $ shapeRank shape + x
 
 -- | The memory space of a block.  If 'DefaultSpace', this is the "default"
 -- space, whatever that is.  The exact meaning of the 'SpaceId'

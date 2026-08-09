@@ -186,7 +186,6 @@ arrayOf Mem {} _ _ =
 -- size is the given dimension.  This is just a convenient wrapper
 -- around 'arrayOf'.
 arrayOfRow ::
-  (ArrayShape (ShapeBase d)) =>
   TypeBase (ShapeBase d) NoUniqueness ->
   d ->
   TypeBase (ShapeBase d) NoUniqueness
@@ -206,7 +205,6 @@ setArrayDims t dims = t `setArrayShape` Shape dims
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
 setOuterSize ::
-  (ArrayShape (ShapeBase d)) =>
   TypeBase (ShapeBase d) u ->
   d ->
   TypeBase (ShapeBase d) u
@@ -215,7 +213,6 @@ setOuterSize = setDimSize 0
 -- | Replace the size of the given dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
 setDimSize ::
-  (ArrayShape (ShapeBase d)) =>
   Int ->
   TypeBase (ShapeBase d) u ->
   d ->
@@ -247,7 +244,7 @@ peelArray _ _ = Nothing
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
-stripArray :: Int -> TypeBase Shape u -> TypeBase Shape u
+stripArray :: Int -> TypeBase (ShapeBase d) u -> TypeBase (ShapeBase d) u
 stripArray n (Array et shape u)
   | n < shapeRank shape = Array et (stripDims n shape) u
   | otherwise = Prim et

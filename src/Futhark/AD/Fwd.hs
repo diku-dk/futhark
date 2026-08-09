@@ -27,14 +27,23 @@ zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ show t
 
-tanType :: (ArrayShape s, Monoid u) => TypeBase s u -> ADM (TypeBase s u)
+class (ArrayShape s) => FromShape s where
+  fromShape :: Shape -> s
+
+instance FromShape Shape where
+  fromShape = id
+
+instance FromShape ExtShape where
+  fromShape = fmap Free
+
+tanType :: (FromShape s, Monoid u) => TypeBase s u -> ADM (TypeBase s u)
 tanType (Acc acc ispace ts u) = do
   acc_tan <- tangent acc
   tan_shape <- askShape
   pure $ Acc acc_tan (tan_shape <> ispace) ts u
 tanType t = do
   shape <- askShape
-  pure $ arrayOf (Prim (elemType t)) (shape `prependShape` arrayShape t) u
+  pure $ arrayOf (Prim (elemType t)) (fromShape shape <> arrayShape t) u
   where
     u = case t of
       Array _ _ u' -> u'
@@ -114,7 +123,7 @@ class TanBuilder a where
 bundleNewList :: (TanBuilder a) => [a] -> ADM [a]
 bundleNewList = fmap (uncurry interleave . unzip) . mapM bundleNew
 
-instance (ArrayShape s, Monoid u) => TanBuilder (PatElem (TypeBase s u)) where
+instance (FromShape s, Monoid u) => TanBuilder (PatElem (TypeBase s u)) where
   newTan (PatElem p t) = do
     p' <- tanVName p
     insertTan p p'
@@ -130,7 +139,7 @@ newTanPat (Pat pes) = Pat <$> mapM newTan pes
 bundleNewPat :: (TanBuilder (PatElem t)) => Pat t -> ADM (Pat t)
 bundleNewPat (Pat pes) = Pat <$> bundleNewList pes
 
-instance (ArrayShape s, Monoid u) => TanBuilder (Param (TypeBase s u)) where
+instance (FromShape s, Monoid u) => TanBuilder (Param (TypeBase s u)) where
   newTan (Param _ p t) = do
     PatElem p' t' <- newTan $ PatElem p t
     pure $ Param mempty p' t'
@@ -149,7 +158,7 @@ class Tangent a where
   tangent :: a -> ADM a
   bundleTan :: a -> ADM (a, a)
 
-instance (ArrayShape s, Monoid u) => Tangent (TypeBase s u) where
+instance (FromShape s, Monoid u) => Tangent (TypeBase s u) where
   tangent = tanType
   bundleTan t = do
     t' <- tangent t
