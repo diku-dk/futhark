@@ -1,6 +1,5 @@
 -- Test that flattening of a variant 'Match' does not execute untaken branches.
 -- ==
--- tags { disable }
 -- input { 4i64 } output { 4i64 }
 
 def f (n: i64) : i64 =
