@@ -18,9 +18,9 @@ module Futhark.IR.SOACS.SOAC
     composeBinds,
     scremaType,
     soacType,
-    flatMapIrregular,
+    flatMapNonuniform,
     flatMapRowTypes,
-    flatMapRegularTypes,
+    flatMapUniformTypes,
     flatMapSplitValues,
     typeCheckSOAC,
     mkIdentityLambda,
@@ -92,10 +92,10 @@ data SOAC rep
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
-  | -- | Irregular map where the irregular results are implicitly concatenated.
+  | -- | Nonuniform map where the nonuniform results are implicitly concatenated.
     -- The 'ExtLambda' first returns a size @k@, then its value results, each of
-    -- which is either /a segment/ (an array with @k@ as its outermost size) or
-    -- a /value/ (not mentioning @k@ at all). The size @k@ may be used *only* as
+    -- which is either /nonuniform/ (an array with @k@ as its outermost size) or
+    -- /uniform/ (not mentioning @k@ at all). The size @k@ may be used *only* as
     -- an outermost dimension.
     --
     -- For input of length @n@ returns the following:
@@ -112,8 +112,8 @@ data SOAC rep
     --   its values begin in the data array.
     --
     -- * Finally one array per value result of the lambda, in the same order: a
-    --   segment result becomes its concatenation across all iterations, of
-    --   outer size @[m]@, and a regular result the collection of its values, of
+    --   nonuniform result becomes its concatenation across all iterations, of
+    --   outer size @[m]@, and a uniform result the collection of its values, of
     --   outer size @[n]@.
     FlatMap SubExp [VName] (ExtLambda rep)
   deriving (Eq, Ord, Show)
@@ -583,7 +583,7 @@ soacType (FlatMap w _ lam) =
     onValueRet t
       -- An irregular result is concatenated, so its outer size becomes the
       -- total size @m@.
-      | flatMapIrregular t = t `setOuterSize` Ext 0
+      | flatMapNonuniform t = t `setOuterSize` Ext 0
       -- A regular result is merely collected, one per input element.
       | otherwise = t `arrayOfRow` Free w
 
@@ -591,8 +591,8 @@ soacType (FlatMap w _ lam) =
 -- concatenated with the results of the other iterations, rather than merely
 -- collected? These are exactly the results whose outermost size is the
 -- existential size returned by the lambda.
-flatMapIrregular :: ExtType -> Bool
-flatMapIrregular t =
+flatMapNonuniform :: ExtType -> Bool
+flatMapNonuniform t =
   case shapeDims $ arrayShape t of
     Ext 0 : _ -> True
     _ -> False
@@ -604,7 +604,7 @@ flatMapRowTypes :: ExtLambda rep -> [Type]
 flatMapRowTypes lam =
   fromMaybe (error "flatMapRowTypes: existential inner dimension.") $
     mapM (hasStaticShape . rowType) $
-      filter flatMapIrregular $
+      filter flatMapNonuniform $
         drop 1 (lambdaReturnType lam)
 
 -- | Split a list with one element per value result of a 'FlatMap' lambda into
@@ -613,15 +613,15 @@ flatMapSplitValues :: ExtLambda rep -> [a] -> ([a], [a])
 flatMapSplitValues lam =
   partitionEithers . zipWith f (drop 1 (lambdaReturnType lam))
   where
-    f t x = if flatMapIrregular t then Left x else Right x
+    f t x = if flatMapNonuniform t then Left x else Right x
 
 -- | The types of the regular results of a 'FlatMap' lambda - the ones that are
 -- collected rather than concatenated. These never have existential sizes.
-flatMapRegularTypes :: ExtLambda rep -> [Type]
-flatMapRegularTypes lam =
-  fromMaybe (error "flatMapRegularTypes: existential size.") $
+flatMapUniformTypes :: ExtLambda rep -> [Type]
+flatMapUniformTypes lam =
+  fromMaybe (error "flatMapUniformTypes: existential size.") $
     mapM hasStaticShape $
-      filter (not . flatMapIrregular) $
+      filter (not . flatMapNonuniform) $
         drop 1 (lambdaReturnType lam)
 
 instance TypedOp SOAC where

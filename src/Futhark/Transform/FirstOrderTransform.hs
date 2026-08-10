@@ -120,13 +120,13 @@ resultArray arrs ts = do
         letExp "result" =<< eBlank t
   mapM oneArray ts
 
--- | Sequentialise a single FlatMap. The size of the segment arrays produced by
--- the lambda is not known until it has been run, so each of them is accumulated
--- in a scratch buffer that is doubled whenever it runs out of space, and
--- finally truncated to the actual size. The value results need no such
--- treatment, as there is exactly one per iteration. The shape and offset arrays
--- are filled in as we go, and the flag array is then a scatter of the segment
--- starts.
+-- | Sequentialise a single FlatMap. The size of the nonuniform results produced
+-- by the lambda is not known until it has been run, so each of them is
+-- accumulated in a scratch buffer that is doubled whenever it runs out of
+-- space, and finally truncated to the actual size. The value results need no
+-- such treatment, as there is exactly one per iteration. The shape and offset
+-- arrays are filled in as we go, and the flag array is then a scatter of the
+-- segment starts.
 transformFlatMap ::
   (Transformer m) =>
   Pat (LetDec (Rep m)) ->
@@ -136,12 +136,12 @@ transformFlatMap ::
   m ()
 transformFlatMap pat w arrs lam = do
   let irreg_ts = flatMapRowTypes lam
-      reg_ts = flatMapRegularTypes lam
+      reg_ts = flatMapUniformTypes lam
   arrs_ts <- mapM lookupType arrs
 
   -- Loop parameters: the current filled size, the current capacity, the
-  -- per-element shape and offset arrays, one scratch buffer per irregular
-  -- result, and one array per regular result.
+  -- per-element shape and offset arrays, one scratch buffer per nonuniform
+  -- result, and one array per uniform result.
   size_p <- newParam "flatmap_size" $ toDecl (Prim int64) Nonunique
   cap_p <- newParam "flatmap_cap" $ toDecl (Prim int64) Nonunique
   shape_p <- newParam "flatmap_shape" $ toDecl (arrayOfRow (Prim int64) w) Unique
@@ -170,90 +170,89 @@ transformFlatMap pat w arrs lam = do
 
   i <- newVName "i"
   let loop_form = ForLoop i Int64 w
+      loop_scope = scopeOfLoopForm loop_form <> scopeOfFParams merge_params
+  loop_body <- runBodyBuilder . localScope loop_scope $ do
+    -- Apply the lambda to the current elements.
+    let arg arr arr_t = BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
+        size = Var $ paramName size_p
+    lam_res <- map resSubExp <$> bindLambda lam (zipWith arg arrs arrs_ts)
 
-  loop_body <- runBodyBuilder $
-    localScope (scopeOfLoopForm loop_form <> scopeOfFParams merge_params) $ do
-      -- Apply the lambda to the current elements.
-      let arg arr arr_t = BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
-          size = Var $ paramName size_p
-      lam_res <- map resSubExp <$> bindLambda lam (zipWith arg arrs arrs_ts)
+    -- The lambda produces the common length of its segment results first.
+    let (k, ys) =
+          fromMaybe (error "transformFlatMap: malformed FlatMap.") $
+            uncons lam_res
+        (irreg_ys, reg_ys) = flatMapSplitValues lam ys
+    new_size <-
+      letSubExp "flatmap_new_size" . BasicOp $
+        BinOp (Add Int64 OverflowUndef) size k
+    grow <-
+      letSubExp "flatmap_grow" . BasicOp $
+        CmpOp (CmpSlt Int64) (Var (paramName cap_p)) new_size
 
-      -- The lambda produces the common length of its irregular results first.
-      let (k, ys) =
-            fromMaybe (error "transformFlatMap: malformed FlatMap.") $
-              uncons lam_res
-          (irreg_ys, reg_ys) = flatMapSplitValues lam ys
-      new_size <-
-        letSubExp "flatmap_new_size" . BasicOp $
-          BinOp (Add Int64 OverflowUndef) size k
-      grow <-
-        letSubExp "flatmap_grow" . BasicOp $
-          CmpOp (CmpSlt Int64) (Var (paramName cap_p)) new_size
+    -- New capacity: double it (but at least fit) when it overflows.
+    new_cap <-
+      letSubExp "flatmap_new_cap"
+        =<< eIf
+          (eSubExp grow)
+          ( buildBody_ $ do
+              doubled <-
+                letSubExp "doubled" . BasicOp $
+                  BinOp (Mul Int64 OverflowUndef) (Var (paramName cap_p)) (intConst Int64 2)
+              fmap (pure . subExpRes) . letSubExp "atleast" . BasicOp $
+                BinOp (SMax Int64) doubled new_size
+          )
+          (buildBody_ $ pure [subExpRes $ Var (paramName cap_p)])
 
-      -- New capacity: double it (but at least fit) when it overflows.
-      new_cap <-
-        letSubExp "flatmap_new_cap"
+    let lowSlice t =
+          fullSlice t [DimSlice (intConst Int64 0) size (intConst Int64 1)]
+
+    -- Grow (and copy) each scratch buffer when necessary, then write the
+    -- new elements at the end.
+    scratch_res <- forM (zip3 scratch_ps irreg_ts irreg_ys) $ \(sp, et, ys_j) -> do
+      let full_t = arrayOfRow et new_cap
+      base <-
+        letExp "flatmap_grown"
           =<< eIf
             (eSubExp grow)
             ( buildBody_ $ do
-                doubled <-
-                  letSubExp "doubled" . BasicOp $
-                    BinOp (Mul Int64 OverflowUndef) (Var (paramName cap_p)) (intConst Int64 2)
-                fmap (pure . subExpRes) . letSubExp "atleast" . BasicOp $
-                  BinOp (SMax Int64) doubled new_size
+                fresh <-
+                  letExp "flatmap_fresh" . BasicOp $
+                    Scratch (elemType full_t) (arrayDims full_t)
+                old_t <- lookupType $ paramName sp
+                copied <-
+                  letInPlace "flatmap_fresh" fresh (lowSlice full_t) $
+                    BasicOp (Index (paramName sp) (lowSlice old_t))
+                pure [varRes copied]
             )
-            (buildBody_ $ pure [subExpRes $ Var (paramName cap_p)])
+            ( buildBody_ $
+                fmap (pure . varRes) . letExp "flatmap_kept" $
+                  shapeCoerce (arrayDims full_t) (paramName sp)
+            )
+      letInPlace "flatmap_res" base (fullSlice full_t [DimSlice size k (intConst Int64 1)]) $
+        BasicOp (SubExp ys_j)
 
-      let lowSlice t =
-            fullSlice t [DimSlice (intConst Int64 0) size (intConst Int64 1)]
+    -- The segment's size and its offset (the running total before it).
+    shape' <-
+      letInPlace "flatmap_shape" (paramName shape_p) (fullSlice (paramType shape_p) [DimFix $ Var i]) $
+        BasicOp (SubExp k)
+    offset' <-
+      letInPlace "flatmap_offset" (paramName offset_p) (fullSlice (paramType offset_p) [DimFix $ Var i]) $
+        BasicOp (SubExp size)
 
-      -- Grow (and copy) each scratch buffer when necessary, then write the
-      -- new elements at the end.
-      scratch_res <- forM (zip3 scratch_ps irreg_ts irreg_ys) $ \(sp, et, ys_j) -> do
-        let full_t = arrayOfRow et new_cap
-        base <-
-          letExp "flatmap_grown"
-            =<< eIf
-              (eSubExp grow)
-              ( buildBody_ $ do
-                  fresh <-
-                    letExp "flatmap_fresh" . BasicOp $
-                      Scratch (elemType full_t) (arrayDims full_t)
-                  old_t <- lookupType $ paramName sp
-                  copied <-
-                    letInPlace "flatmap_fresh" fresh (lowSlice full_t) $
-                      BasicOp (Index (paramName sp) (lowSlice old_t))
-                  pure [varRes copied]
-              )
-              ( buildBody_ $
-                  fmap (pure . varRes) . letExp "flatmap_kept" $
-                    shapeCoerce (arrayDims full_t) (paramName sp)
-              )
-        letInPlace "flatmap_res" base (fullSlice full_t [DimSlice size k (intConst Int64 1)]) $
-          BasicOp (SubExp ys_j)
+    -- The uniform results are simply written at this iteration's index.
+    reg_res <- forM (zip reg_ps reg_ys) $ \(rp, reg_y) ->
+      letInPlace "flatmap_reg" (paramName rp) (fullSlice (paramType rp) [DimFix $ Var i]) $
+        BasicOp (SubExp reg_y)
 
-      -- The segment's size and its offset (the running total before it).
-      shape' <-
-        letInPlace "flatmap_shape" (paramName shape_p) (fullSlice (paramType shape_p) [DimFix $ Var i]) $
-          BasicOp (SubExp k)
-      offset' <-
-        letInPlace "flatmap_offset" (paramName offset_p) (fullSlice (paramType offset_p) [DimFix $ Var i]) $
-          BasicOp (SubExp size)
-
-      -- The regular results are simply written at this iteration's index.
-      reg_res <- forM (zip reg_ps reg_ys) $ \(rp, reg_y) ->
-        letInPlace "flatmap_reg" (paramName rp) (fullSlice (paramType rp) [DimFix $ Var i]) $
-          BasicOp (SubExp reg_y)
-
-      pure $
-        subExpsRes [new_size, new_cap]
-          <> varsRes (shape' : offset' : scratch_res <> reg_res)
+    pure $
+      subExpsRes [new_size, new_cap]
+        <> varsRes (shape' : offset' : scratch_res <> reg_res)
 
   loop_res <- letTupExp "flatmap" $ Loop merge loop_form loop_body
   case (loop_res, patNames pat) of
     (size_res : _cap_res : shape_res : offset_res : value_res, m_pat : shape_pat : flag_pat : offset_pat : out_pats) -> do
       -- Bind the total size and the shape/offset arrays, then truncate each
-      -- buffer. The regular results are already of the right size.
+      -- buffer. The uniform results are already of the right size.
       letBindNames [m_pat] $ BasicOp $ SubExp $ Var size_res
       letBindNames [shape_pat] $ BasicOp $ SubExp $ Var shape_res
       letBindNames [offset_pat] $ BasicOp $ SubExp $ Var offset_res

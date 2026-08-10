@@ -315,11 +315,11 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
      , res[offset0 + offset1:n] :> [n - offset0 - offset1]a
      )
 
--- | Perform a flattened map of a function `f`, that produces
--- existentially-sized segments and values, over the array `as`. Returns the
--- concatenation of the segments and an array of the values, alongside metadata
--- allowing the interpretation of the concatenated segments as an irregular
--- array. In order:
+-- | Perform a flattened map of a function `f`, that produces a nonuniform and
+-- uniform-sized result, over the array `as`. Returns the concatenation of the
+-- nonuniform results and an array of the uniforms, alongside metadata allowing
+-- the interpretation of the concatenated segments as an irregular array. In
+-- order:
 --
 -- * The *shape array*, giving the size of each segment. This array sums to `m`.
 --
@@ -330,7 +330,7 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
 --
 -- * The *data array*, comprising the concatenated results of `f`.
 --
--- * An array of values, which has no special name.
+-- * An array of uniform results, which has no special name.
 def flatmap [n] 'a 'b 'c
             (f: a -> ?[k].([k]b, c))
             (as: [n]a) : ?[m].( [n]i64

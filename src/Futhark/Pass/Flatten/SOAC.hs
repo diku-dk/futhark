@@ -1627,10 +1627,10 @@ flattenFlatMap ops pat w arrs lam = do
           (a : b : c : d : hs) -> (a, b, c, d, hs)
           _ -> error "flattenFlatMap: pattern too short"
       (d_names, r_names) = flatMapSplitValues lam value_names
-      -- An irregular result is distributed as a variably sized array, a regular
+      -- A nonuniform result is distributed as a variably sized array, a uniform
       -- one as an ordinary array with one element per segment.
       distTypeOf t
-        | flatMapIrregular t = DistType segments (Rank 1) $ static $ rowType t
+        | flatMapNonuniform t = DistType segments (Rank 1) $ static $ rowType t
         | otherwise = DistType segments (Rank 0) $ static t
       res =
         zipWith3
@@ -1694,7 +1694,7 @@ flattenFlatMap ops pat w arrs lam = do
         Reshape arr (reshapeAll (arrayShape arr_t) newshape)
 
 -- | Flattening rule for a 'FlatMap' nested inside an enclosing map-nest. A
--- 'FlatMap' is just an irregular map with implicit concatenation, so we run it
+-- 'FlatMap' is just a nonuniform map with implicit concatenation, so we run it
 -- through the ordinary inner-map machinery, which already produces - for a
 -- variably-sized result - an 'IrregularRep' whose segment sizes are the
 -- per-enclosing-segment concatenated lengths and whose data is the
@@ -1797,21 +1797,21 @@ flattenFlatMapNested ops segments env inps res aux w arrs lam = do
             let flag_rep = Irregular $ IrregularRep s_flag flag_F flag_O flag_D Dense
 
             -- The data arrays (results 4..). The inner-map machinery already
-            -- produced, for each, an 'IrregularRep' with primitive (scalar-unit)
-            -- data and matching scalar-unit structure arrays. These are exactly the
-            -- reps for the source @[m]b@ data arrays, so we pass them through
-            -- unchanged; any consumer reconstructs the @b@-element rows from the
-            -- primitive rep via the ordinary irregular-input machinery. See Note
-            -- [FlatMap element counting].
+            -- produced, for each, an 'IrregularRep' with primitive
+            -- (scalar-unit) data and matching scalar-unit structure arrays.
+            -- These are exactly the reps for the source @[m]b@ data arrays, so
+            -- we pass them through unchanged; any consumer reconstructs the
+            -- @b@-element rows from the primitive rep via the ordinary
+            -- irregular-input machinery. See Note [FlatMap element counting].
             let all_reps = n_rep : shape_rep : flag_rep : offset_rep : data_reps
             insertRepsM (zip (map distResTag res) all_reps) env
       _ -> error "flattenFlatMapNested: FlatMap with no irregular results"
   where
-    -- The metadata is derived from an irregular result; they all have the same
+    -- The metadata is derived from a nonuniform result; they all have the same
     -- segment structure, so any of them will do.
     firstIrregular =
       fmap snd
-        . find (flatMapIrregular . fst)
+        . find (flatMapNonuniform . fst)
         . zip (drop 1 (lambdaReturnType lam))
     -- This lambda is deliberately ill-formed; see Note [Ill-formed inner-map
     -- lambda].
