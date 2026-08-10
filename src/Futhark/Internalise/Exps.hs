@@ -1482,12 +1482,12 @@ internaliseSizeExp s e = do
     E.Scalar (E.Prim (E.Signed it)) -> (,it) <$> asIntS Int64 e'
     _ -> error "internaliseSizeExp: bad type"
 
+asVar :: Name -> I.SubExp -> InternaliseM I.VName
+asVar desc se = letExp desc $ I.BasicOp $ I.SubExp se
+
 internaliseExpToVars :: Name -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
-  mapM asIdent =<< internaliseExp desc e
-  where
-    asIdent (I.Var v) = pure v
-    asIdent se = letExp desc $ I.BasicOp $ I.SubExp se
+  mapM (asVar desc) =<< internaliseExp desc e
 
 internaliseOperation ::
   Name ->
@@ -1729,7 +1729,7 @@ flatLambdaIrregulars :: E.Exp -> Int
 flatLambdaIrregulars (E.Parens e _) = flatLambdaIrregulars e
 flatLambdaIrregulars (E.Lambda _ _ _ (Info (E.RetType _ t)) _)
   | Just (irreg_t : _) <- E.isTupleRecord t =
-      length $ foldMap toList $ internaliseType $ E.toStruct irreg_t
+      internalisedTypeSize $ E.toStruct irreg_t
 flatLambdaIrregulars e =
   error $ "flatLambdaIrregulars: unexpected expression:\n" ++ prettyString e
 
@@ -1737,7 +1737,7 @@ flatLambdaIrregulars e =
 -- are concatenated) are distinguished in the 'ExtLambda' by having the
 -- existential size as their outermost size, so that size must be a variable -
 -- when the lambda produces arrays of some other size, we bind that size and
--- coerce the arrays to it.
+-- coerce the arrays to it. By the source language type rules, this cannot fail.
 internaliseFlatLambda :: E.Exp -> [Type] -> InternaliseM (I.ExtLambda SOACS)
 internaliseFlatLambda lam argtypes = do
   (params, body, _) <- internaliseLambda lam argtypes
@@ -1758,19 +1758,16 @@ internaliseFlatLambda lam argtypes = do
   where
     irregularSize [] =
       error "internaliseFlatLambda: lambda has no irregular results."
-    irregularSize (r : _) = do
-      t <- subExpType $ resSubExp r
-      case arrayDims t of
-        I.Var v : _ -> pure v
-        se : _ -> letExp "flatmap_k" $ BasicOp $ SubExp se
-        [] -> error "internaliseFlatLambda: irregular result is not an array."
+    irregularSize (r : _) =
+      asVar "flatmap_k" . arraySize 0 =<< subExpType (resSubExp r)
+
     coerceOuter k r@(SubExpRes cs (I.Var v)) = do
       t <- lookupType v
       case arrayDims t of
         d : ds
           | d /= I.Var k ->
-              SubExpRes cs . I.Var
-                <$> letExp "flatmap_irreg" (shapeCoerce (I.Var k : ds) v)
+              SubExpRes cs
+                <$> letSubExp "flatmap_irreg" (shapeCoerce (I.Var k : ds) v)
         _ -> pure r
     coerceOuter _ r = pure r
 
