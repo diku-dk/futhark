@@ -77,7 +77,14 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
             partition (noCallsTo to_inline_now . funDefName) funs
 
       if null to_inline_now
-        then pure (consts, funs)
+        then
+          -- Everything left calls something else we want to inline, so there is
+          -- a cycle in the call graph. Break the cycle by dropping any function
+          -- with more than one call site.
+          let to_inline' = to_inline `S.intersection` calledOnce cg
+           in if to_inline' == to_inline
+                then pure (consts, funs)
+                else recurse (i, vtable) (consts, funs) to_inline'
         else do
           let inlinemap =
                 fdmap $ filter ((`S.member` to_inline_now) . funDefName) dont_inline_in

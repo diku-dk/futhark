@@ -1,7 +1,10 @@
 -- Recursive data-parallel quickhull.
+--
+-- The structure test is to verify that inlining happens as expected.
 -- ==
 -- input { [[0.0,0.0],[2.0,0.0],[2.0,2.0],[0.0,2.0],[1.0,1.0],[1.5,0.5],[0.5,1.5]] }
 -- output { [[0.0, 0.0], [0.0, 2.0], [2.0, 2.0], [2.0, 0.0]] }
+-- structure { Apply 3 }
 
 type dist = f64
 type point = {x: f64, y: f64}
