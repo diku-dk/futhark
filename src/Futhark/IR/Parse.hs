@@ -154,6 +154,9 @@ pTypes = braces $ pType `sepBy` pComma
 pExtType :: Parser ExtType
 pExtType = pTypeBase pExtShape (pure NoUniqueness)
 
+pExtTypes :: Parser [ExtType]
+pExtTypes = braces $ pExtType `sepBy` pComma
+
 pRank :: Parser Rank
 pRank = Rank . length <$> many (lexeme "[" *> lexeme "]")
 
@@ -556,6 +559,19 @@ pLambda pr =
       keyword "nilFn" $> Lambda mempty [] (Body (pBodyDec pr) mempty [])
     ]
 
+pExtLambda :: PR rep -> Parser (ExtLambda rep)
+pExtLambda pr =
+  choice
+    [ lexeme "\\"
+        $> Lambda
+        <*> pLParams pr
+        <* pColon
+        <*> pExtTypes
+        <* pArrow
+        <*> pBody pr,
+      keyword "nilFn" $> Lambda mempty [] (Body (pBodyDec pr) mempty [])
+    ]
+
 pReduce :: PR rep -> Parser (SOAC.Reduce rep)
 pReduce pr =
   SOAC.Reduce
@@ -837,7 +853,7 @@ pSOAC pr =
           <* pComma
           <*> braces (pVName `sepBy` pComma)
           <* pComma
-          <*> pLambda pr
+          <*> pExtLambda pr
     pStream = keyword "streamSeq" *> pStreamSeq
     pStreamSeq =
       parens $

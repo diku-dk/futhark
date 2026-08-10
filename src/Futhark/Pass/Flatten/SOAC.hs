@@ -14,7 +14,7 @@ import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable
 import Data.Functor.Identity (runIdentity)
 import Data.Map qualified as M
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Tuple.Solo
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
@@ -914,7 +914,16 @@ transformDistributedInnerMap ::
   FlattenM [(VName, ResRep)]
 transformDistributedInnerMap ops mode (ws_F, ws_O, ws) irregs segments dist = do
   let Distributed dstms (DistResults resmap reps) = dist
-  let new_inps = concatMap distStmInputs dstms
+  -- A name bound inside the distributed body is variant whether or not another
+  -- statement uses it, so a result sized by such a name is irregular. Only
+  -- counting the names that are used would leave the size existentially bound
+  -- by a 'FlatMap' lambda (returned, but used by nothing) looking invariant,
+  -- and the result would be given a type mentioning a name that is not in
+  -- scope.
+  let asInput (DistResult tag (DistType _ _ t) v) = (v, DistInput tag t)
+      new_inps =
+        concatMap distStmInputs dstms
+          <> map asInput (concatMap distStmResult dstms)
   env <- foldM (flattenDistStm ops segments) env_initial dstms
   resmap_res <- fmap concat $ forM (M.toList resmap) $ \(rt, binds) ->
     forM binds $ \(cs_inps, v, v_t) ->
@@ -984,7 +993,10 @@ distributeAndTransformInnerMap ::
   Lambda SOACS ->
   FlattenM [ResRep]
 distributeAndTransformInnerMap ops mode ws_triple new_segment inps pat arrs' onFreeVar map_lam = do
-  let free = freeIn map_lam
+  -- Skip the return type: the results are described by 'pat', so variables
+  -- occurring only there never need replicating into the body - and they may
+  -- not even be in scope here. See Note [Ill-formed inner-map lambda].
+  let free = freeIn $ map_lam {lambdaReturnType = [] :: [Type]}
   free_and_sizes <- freeWithTypeDeps inps free
   (free_replicated, replicated) <-
     fmap unzip . sequence $
@@ -1511,15 +1523,15 @@ flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
 
 -- Note [FlatMap element counting]
 --
--- 'FlatMap' counts in units of the lambda's element type @b@: the data array is
--- @[m]b@, the shape and offset arrays hold per-segment counts of @b@-elements,
--- and the flag array has one entry per @b@-element.
+-- 'FlatMap' counts in units of the lambda's element type @b@: the data array
+-- for irregular results is @[m]b@, the shape and offset arrays hold per-segment
+-- counts of @b@-elements, and the flag array has one entry per @b@-element.
 --
--- The flattening pass, however, represents irregular data with an 'IrregularRep'
--- whose 'irregularD' is primitive (a flat array of scalars), so its segment
--- sizes and flags count *scalars*. When @b@ is itself a @c@-element array there
--- are @c@ scalars per @b@-element ('flatMapElemsPer'), so the two notions of
--- "size" differ by a factor of @c@.
+-- The flattening pass, however, represents irregular data with an
+-- 'IrregularRep' whose 'irregularD' is primitive (a flat array of scalars), so
+-- its segment sizes and flags count *scalars*. When @b@ is itself a @c@-element
+-- array there are @c@ scalars per @b@-element ('flatMapElemsPer'), so the two
+-- notions of "size" differ by a factor of @c@.
 --
 -- The flattening rules therefore convert between the two: the metadata that
 -- 'FlatMap' surfaces directly (the total @m@, and the shape, flag, and offset
@@ -1530,11 +1542,37 @@ flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
 -- from the primitive rep: 'onMapIrregularInputArr' does so for a plain map, and
 -- 'prepareSegOpInputs' for a segmented redomap/scan.
 
+-- Note [Ill-formed inner-map lambda]
+--
+-- 'flattenFlatMapNested' hands the inner-map machinery ('transformMap') an
+-- ordinary 'Lambda' obtained from the 'FlatMap' 'ExtLambda' by instantiating
+-- the existential size with the lambda's own leading result. That lambda is
+-- ill-formed: the size is bound by a statement in the body, and so is
+-- meaningless in the return type, which describes the lambda from outside.
+--
+-- We do it because 'transformMap' requires a 'Lambda', whose types cannot
+-- express a result whose outer size varies per iteration, which is exactly what
+-- an irregular 'FlatMap' result is.
+--
+-- Nothing downstream derives meaning from the return type - the results are
+-- described by 'map_pat' throughout - but it is still traversed in two places,
+-- which is what makes this contained rather than harmless:
+--
+-- - 'distributeAndTransformInnerMap' computes the free variables that must be
+--   replicated into the body, and must skip the return type; otherwise the size
+--   is looked up in the enclosing scope, where it does not exist.
+--
+-- - 'preprocessLambda' simplifies the return type outside the scope of the
+--   parameters, where a size that resolves to nothing is left alone.
+--
+-- FIXME: Teaching the inner-map machinery to accept an 'ExtLambda' would remove
+-- the need for all of this.
+
 -- | The number of scalars per element of a 'FlatMap' lambda's (first) value
 -- result; see Note [FlatMap element counting].
-flatMapElemsPer :: Lambda SOACS -> TPrimExp Int64 VName
+flatMapElemsPer :: ExtLambda SOACS -> TPrimExp Int64 VName
 flatMapElemsPer lam =
-  product $ map pe64 $ arrayDims $ rowType $ head $ lambdaReturnType lam
+  product $ map pe64 $ arrayDims $ head $ flatMapRowTypes lam
 
 -- | Divide each entry of a per-segment size (or offset) array by the given
 -- factor, converting scalar-unit counts to element-unit counts. A no-op when the
@@ -1574,7 +1612,7 @@ flattenFlatMap ::
   Pat Type ->
   SubExp ->
   [VName] ->
-  Lambda SOACS ->
+  ExtLambda SOACS ->
   FlattenM ()
 flattenFlatMap ops pat w arrs lam = do
   let segments = [w]
@@ -1583,21 +1621,37 @@ flattenFlatMap ops pat w arrs lam = do
           (\p arr -> (paramName p, DistInputFree arr (paramType p)))
           (lambdaParams lam)
           arrs
-      (m_name, s_name, f_name, o_name, d_names) =
+      elem_ts = flatMapRowTypes lam
+      (m_name, s_name, f_name, o_name, value_names) =
         case patNames pat of
           (a : b : c : d : hs) -> (a, b, c, d, hs)
           _ -> error "flattenFlatMap: pattern too short"
+      (d_names, r_names) = flatMapSplitValues lam value_names
+      -- A nonuniform result is distributed as a variably sized array, a uniform
+      -- one as an ordinary array with one element per segment.
+      distTypeOf t
+        | flatMapNonuniform t = DistType segments (Rank 1) $ static $ rowType t
+        | otherwise = DistType segments (Rank 0) $ static t
       res =
         zipWith3
-          (\i v t -> DistResult (ResTag i) (DistType segments (Rank 1) (rowType t)) v)
+          (\i v t -> DistResult (ResTag i) (distTypeOf t) v)
           [0 ..]
-          d_names
-          (lambdaReturnType lam)
-  reps <- distributeAndFlattenBody ops segments "flatmap" mempty inps res (lambdaBody lam)
-  irregs <- forM reps $ \case
+          value_names
+          value_ts
+      -- The lambda's leading size result is of no use here, as the metadata is
+      -- derived from the segment structure of the flattened irregular results.
+      body = lambdaBody lam
+      body' = body {bodyResult = drop 1 (bodyResult body)}
+  reps <- distributeAndFlattenBody ops segments "flatmap" mempty inps res body'
+  let (irreg_reps, reg_reps) = flatMapSplitValues lam reps
+  irregs <- forM irreg_reps $ \case
     Irregular ir -> ensureDenseIrregular lvl "flatmap_res" ir
-    Regular _ -> error "flattenFlatMap: unexpected regular result"
-  case (irregs, lambdaReturnType lam) of
+    Regular _ -> error "flattenFlatMap: irregular result is not irregular"
+  -- The regular results (outer size @w@) are already in the form we want.
+  forM_ (zip r_names reg_reps) $ \(v, rep) -> case rep of
+    Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
+    Irregular _ -> error "flattenFlatMap: regular result is not regular"
+  case (irregs, elem_ts) of
     (ir0 : _, _ : _) -> do
       -- The flattening structure arrays are in units of scalars, but the source
       -- 'flatmap' wants them in units of the lambda's element type @b@, of
@@ -1626,19 +1680,21 @@ flattenFlatMap ops pat w arrs lam = do
       bindReshape f_name flags (Shape [Var m_name])
       -- The concatenated data arrays, reshaped from the flat scalar data to
       -- @[m]b@ (the outer dimension being the freshly bound total size).
-      forM_ (zip3 d_names irregs (lambdaReturnType lam)) $ \(v, ir, ret_t) -> do
-        let row_shape = Shape $ arrayDims $ rowType ret_t
-        bindReshape v (irregularD ir) (Shape [Var m_name] <> row_shape)
-    _ -> error "flattenFlatMap: FlatMap with no results"
+      forM_ (zip3 d_names irregs elem_ts) $ \(v, ir, elem_t) ->
+        bindReshape v (irregularD ir) (Shape [Var m_name] <> Shape (arrayDims elem_t))
+    _ -> error "flattenFlatMap: FlatMap with no irregular results"
   where
     lvl = flattenSegLevel ops
+    value_ts = drop 1 (lambdaReturnType lam)
+    static =
+      fromMaybe (error "flattenFlatMap: existential size.") . hasStaticShape
     bindReshape name arr newshape = do
       arr_t <- lookupType arr
       letBindNames [name] . BasicOp $
         Reshape arr (reshapeAll (arrayShape arr_t) newshape)
 
 -- | Flattening rule for a 'FlatMap' nested inside an enclosing map-nest. A
--- 'FlatMap' is just an irregular map with implicit concatenation, so we run it
+-- 'FlatMap' is just a nonuniform map with implicit concatenation, so we run it
 -- through the ordinary inner-map machinery, which already produces - for a
 -- variably-sized result - an 'IrregularRep' whose segment sizes are the
 -- per-enclosing-segment concatenated lengths and whose data is the
@@ -1646,10 +1702,9 @@ flattenFlatMap ops pat w arrs lam = do
 -- their per-enclosing segment sizes, the total sizes @m@ (result 0).
 --
 -- The metadata is derived from the shape array (result 1) - the per-iteration
--- output sizes - which the inner-map does not itself surface. We recover the
--- shape by augmenting the lambda with a leading scalar result equal to the
--- outer size of its (first) output; mapping that scalar over the nest yields
--- exactly the irregular array of per-iteration sizes, segmented by the 'FlatMap'
+-- output sizes - which the inner-map does not itself surface. The lambda
+-- returns exactly that size as its leading result, so mapping it over the nest
+-- yields the irregular array of per-iteration sizes, segmented by the 'FlatMap'
 -- width. From it we then compute the offset array (result 3), as the
 -- per-enclosing exclusive prefix sum, and the flag array (result 2).
 --
@@ -1663,99 +1718,119 @@ flattenFlatMapNested ::
   StmAux () ->
   SubExp ->
   [VName] ->
-  Lambda SOACS ->
+  ExtLambda SOACS ->
   FlattenM DistEnv
 flattenFlatMapNested ops segments env inps res aux w arrs lam = do
   size_name <- newVName "flatmap_sizes"
-  data_names <- mapM (const $ newVName "flatmap_data") $ lambdaReturnType lam
-  let k = arraySize 0 $ head $ lambdaReturnType lam
-      body = lambdaBody lam
-      aug_lam =
-        lam
-          { lambdaReturnType = Prim int64 : lambdaReturnType lam,
-            lambdaBody = body {bodyResult = SubExpRes mempty k : bodyResult body}
-          }
-      size_pe = PatElem size_name $ arrayOfRow (Prim int64) w
-      data_pes = zipWith (\v t -> PatElem v $ arrayOfRow t w) data_names $ lambdaReturnType lam
-      aug_pat = Pat $ size_pe : data_pes
+  data_names <- mapM (const $ newVName "flatmap_data") val_ts
+  let size_pe = PatElem size_name $ arrayOfRow (Prim int64) w
+      data_pes = zipWith (\v t -> PatElem v $ arrayOfRow t w) data_names val_ts
+      map_pat = Pat $ size_pe : data_pes
   let lvl = flattenSegLevel ops
   certifying (distCerts inps aux env) $ do
-    reps <- transformMap ops (stmAuxAttrs aux) segments env inps aug_pat w arrs aug_lam
+    reps <- transformMap ops (stmAuxAttrs aux) segments env inps map_pat w arrs map_lam
     case reps of
-      shape_rep : data_reps@(first_data : _) -> do
-        -- An 'IrregularRep' always stores primitive data, so for a non-scalar
-        -- element type @b@ the data result's segment sizes are in units of
-        -- scalars, of which there are 'elems_per' per b-element. The source
-        -- 'flatmap' counts b-elements, so we scale the affected metadata down.
-        let elems_per = flatMapElemsPer lam
+      shape_rep : data_reps
+        | Just first_data <- firstIrregular data_reps -> do
+            -- An 'IrregularRep' always stores primitive data, so for a
+            -- non-scalar element type @b@ the data result's segment sizes are
+            -- in units of scalars, of which there are 'elems_per' per
+            -- b-element. The source 'flatmap' counts b-elements, so we scale
+            -- the affected metadata down.
+            let elems_per = flatMapElemsPer lam
 
-        -- The number of b-elements per enclosing segment: the per-segment totals
-        -- (result 0), and the segment sizes of the flag array. These are the
-        -- data result's segment sizes, scaled to b-element units. When the data
-        -- is regular (the fully uniform case), it is the constant inner size,
-        -- replicated across the segments.
-        s_flag <- case first_data of
-          Irregular ir -> scaleSizesDown lvl elems_per (irregularS ir)
-          Regular d -> do
-            d_t <- lookupType d
-            let inner = product $ map pe64 $ drop (segmentsRank segments) $ arrayDims d_t
-            n_elem <- letSubExp "flatmap_n_elem" =<< toExp (inner `div` elems_per)
-            letExp "flatmap_n" (BasicOp $ Replicate (segmentsShape segments) n_elem)
-        let n_rep = Regular s_flag
+            -- The number of b-elements per enclosing segment: the per-segment
+            -- totals (result 0), and the segment sizes of the flag array. These
+            -- are the data result's segment sizes, scaled to b-element units.
+            -- When the data is regular (the fully uniform case), it is the
+            -- constant inner size, replicated across the segments.
+            s_flag <- case first_data of
+              Irregular ir -> scaleSizesDown lvl elems_per (irregularS ir)
+              Regular d -> do
+                d_t <- lookupType d
+                let inner = product $ map pe64 $ drop (segmentsRank segments) $ arrayDims d_t
+                n_elem <- letSubExp "flatmap_n_elem" =<< toExp (inner `div` elems_per)
+                letExp "flatmap_n" (BasicOp $ Replicate (segmentsShape segments) n_elem)
+            let n_rep = Regular s_flag
 
-        -- The offset array (result 3) has the same structure as the shape
-        -- array; its values are the exclusive prefix sum of the shape within
-        -- each enclosing segment. We also need the shape as a single flat array
-        -- of all per-iteration sizes (for the flags).
-        (offset_rep, shape_flat) <- case shape_rep of
-          Regular sd -> do
-            off <- genExPrefixSum lvl "flatmap_offset" sd
-            sd_t <- lookupType sd
-            n_shape <- letSubExp "flatmap_shape_n" =<< toExp (product $ map pe64 $ arrayDims sd_t)
-            flat <-
-              letExp "flatmap_shape_flat" . BasicOp $
-                Reshape sd (reshapeAll (arrayShape sd_t) (Shape [n_shape]))
-            pure (Regular off, flat)
-          Irregular s_ir -> do
-            inc <- genSegPrefixSum lvl "flatmap_offset_inc" (irregularF s_ir) (irregularD s_ir)
-            n_off <- arraySize 0 <$> lookupType inc
-            off_D <- letExp "flatmap_offset_D" <=< segMap lvl (MkSolo n_off) $ \(MkSolo i) -> do
-              a <- letSubExp "a" =<< eIndex inc [eSubExp i]
-              b <- letSubExp "b" =<< eIndex (irregularD s_ir) [eSubExp i]
-              off <- letSubExp "off" =<< toExp (pe64 a - pe64 b)
-              pure [subExpRes off]
-            pure (Irregular s_ir {irregularD = off_D}, irregularD s_ir)
+            -- The offset array (result 3) has the same structure as the shape
+            -- array; its values are the exclusive prefix sum of the shape
+            -- within each enclosing segment. We also need the shape as a single
+            -- flat array of all per-iteration sizes (for the flags).
+            (offset_rep, shape_flat) <- case shape_rep of
+              Regular sd -> do
+                off <- genExPrefixSum lvl "flatmap_offset" sd
+                sd_t <- lookupType sd
+                n_shape <- letSubExp "flatmap_shape_n" =<< toExp (product $ map pe64 $ arrayDims sd_t)
+                flat <-
+                  letExp "flatmap_shape_flat" . BasicOp $
+                    Reshape sd (reshapeAll (arrayShape sd_t) (Shape [n_shape]))
+                pure (Regular off, flat)
+              Irregular s_ir -> do
+                inc <- genSegPrefixSum lvl "flatmap_offset_inc" (irregularF s_ir) (irregularD s_ir)
+                n_off <- arraySize 0 <$> lookupType inc
+                off_D <- letExp "flatmap_offset_D" <=< segMap lvl (MkSolo n_off) $ \(MkSolo i) -> do
+                  a <- letSubExp "a" =<< eIndex inc [eSubExp i]
+                  b <- letSubExp "b" =<< eIndex (irregularD s_ir) [eSubExp i]
+                  off <- letSubExp "off" =<< toExp (pe64 a - pe64 b)
+                  pure [subExpRes off]
+                pure (Irregular s_ir {irregularD = off_D}, irregularD s_ir)
 
-        -- The flag array (result 2): the segment-start flags over all
-        -- b-elements. Every enclosing-segment boundary is also a segment start,
-        -- so a single 'doRepIota' over all per-iteration sizes yields the flags
-        -- for all enclosing segments at once. Its per-enclosing segment sizes
-        -- are @s_flag@ (in b-element units); we build the enclosing flag/offset
-        -- structure from those, respecting the invariant that in an
-        -- 'IrregularRep' the flag and data arrays share their shape (rather than
-        -- borrowing the scalar-unit structure of the data rep).
-        (flag_F, flag_O, _) <- doRepIota lvl s_flag
-        (flag_D0, _, _) <- doRepIota lvl shape_flat
-        -- 'flag_D0' and 'flag_F' both have the total number of b-elements as
-        -- their size, but computed by different means; coerce so the rep's flag
-        -- and data arrays share a size (the 'IrregularRep' invariant).
-        m_flag <- arraySize 0 <$> lookupType flag_F
-        flag_D0_t <- lookupType flag_D0
-        flag_D <-
-          letExp "flatmap_flag_D" . BasicOp $
-            Reshape flag_D0 (reshapeAll (arrayShape flag_D0_t) (Shape [m_flag]))
-        let flag_rep = Irregular $ IrregularRep s_flag flag_F flag_O flag_D Dense
+            -- The flag array (result 2): the segment-start flags over all
+            -- b-elements. Every enclosing-segment boundary is also a segment start,
+            -- so a single 'doRepIota' over all per-iteration sizes yields the flags
+            -- for all enclosing segments at once. Its per-enclosing segment sizes
+            -- are @s_flag@ (in b-element units); we build the enclosing flag/offset
+            -- structure from those, respecting the invariant that in an
+            -- 'IrregularRep' the flag and data arrays share their shape (rather than
+            -- borrowing the scalar-unit structure of the data rep).
+            (flag_F, flag_O, _) <- doRepIota lvl s_flag
+            (flag_D0, _, _) <- doRepIota lvl shape_flat
+            -- 'flag_D0' and 'flag_F' both have the total number of b-elements as
+            -- their size, but computed by different means; coerce so the rep's flag
+            -- and data arrays share a size (the 'IrregularRep' invariant).
+            m_flag <- arraySize 0 <$> lookupType flag_F
+            flag_D0_t <- lookupType flag_D0
+            flag_D <-
+              letExp "flatmap_flag_D" . BasicOp $
+                Reshape flag_D0 (reshapeAll (arrayShape flag_D0_t) (Shape [m_flag]))
+            let flag_rep = Irregular $ IrregularRep s_flag flag_F flag_O flag_D Dense
 
-        -- The data arrays (results 4..). The inner-map machinery already
-        -- produced, for each, an 'IrregularRep' with primitive (scalar-unit)
-        -- data and matching scalar-unit structure arrays. These are exactly the
-        -- reps for the source @[m]b@ data arrays, so we pass them through
-        -- unchanged; any consumer reconstructs the @b@-element rows from the
-        -- primitive rep via the ordinary irregular-input machinery. See Note
-        -- [FlatMap element counting].
-        let all_reps = n_rep : shape_rep : flag_rep : offset_rep : data_reps
-        insertRepsM (zip (map distResTag res) all_reps) env
-      _ -> error "flattenFlatMapNested: FlatMap with no results"
+            -- The data arrays (results 4..). The inner-map machinery already
+            -- produced, for each, an 'IrregularRep' with primitive
+            -- (scalar-unit) data and matching scalar-unit structure arrays.
+            -- These are exactly the reps for the source @[m]b@ data arrays, so
+            -- we pass them through unchanged; any consumer reconstructs the
+            -- @b@-element rows from the primitive rep via the ordinary
+            -- irregular-input machinery. See Note [FlatMap element counting].
+            let all_reps = n_rep : shape_rep : flag_rep : offset_rep : data_reps
+            insertRepsM (zip (map distResTag res) all_reps) env
+      _ -> error "flattenFlatMapNested: FlatMap with no irregular results"
+  where
+    -- The metadata is derived from a nonuniform result; they all have the same
+    -- segment structure, so any of them will do.
+    firstIrregular =
+      fmap snd
+        . find (flatMapNonuniform . fst)
+        . zip (drop 1 (lambdaReturnType lam))
+    -- This lambda is deliberately ill-formed; see Note [Ill-formed inner-map
+    -- lambda].
+    map_lam =
+      Lambda
+        { lambdaParams = lambdaParams lam,
+          lambdaReturnType = Prim int64 : val_ts,
+          lambdaBody = lambdaBody lam
+        }
+    -- Only works because we allow just a single Ext in the return type.
+    val_ts =
+      runIdentity . instantiateShapes (const (pure k)) . drop 1 $
+        lambdaReturnType lam
+      where
+        -- The size of the lambda's irregular results, which it returns before
+        -- them, and which is what 'Ext 0' stands for.
+        k = case bodyResult (lambdaBody lam) of
+          r : _ -> resSubExp r
+          [] -> error "flattenFlatMapNested: FlatMap with no results"
 
 -- | Remove certificates that refer to variables free in the lambda (recursing
 -- into nested bodies). Such certificates arise on pure operator lambdas (e.g.

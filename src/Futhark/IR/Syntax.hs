@@ -142,7 +142,9 @@ module Futhark.IR.Syntax
     MatchDec (..),
     MatchSort (..),
     Safety (..),
-    Lambda (..),
+    GLambda (..),
+    Lambda,
+    ExtLambda,
     RetAls (..),
 
     -- * Definitions
@@ -556,18 +558,26 @@ data MatchSort
     MatchEquiv
   deriving (Eq, Show, Ord)
 
--- | Anonymous function for use in a SOAC.
-data Lambda rep = Lambda
+-- | A generalised lambda consists of parameters, some kind of return type, and
+-- a body.
+data GLambda rep t = Lambda
   { lambdaParams :: [LParam rep],
-    lambdaReturnType :: [Type],
+    lambdaReturnType :: [t],
     lambdaBody :: Body rep
   }
 
-deriving instance (RepTypes rep) => Eq (Lambda rep)
+deriving instance (RepTypes rep, Eq t) => Eq (GLambda rep t)
 
-deriving instance (RepTypes rep) => Show (Lambda rep)
+deriving instance (RepTypes rep, Show t) => Show (GLambda rep t)
 
-deriving instance (RepTypes rep) => Ord (Lambda rep)
+deriving instance (RepTypes rep, Ord t) => Ord (GLambda rep t)
+
+-- | Anonymous function for use in most SOACs, where the return type is a normal
+-- type.
+type Lambda rep = GLambda rep Type
+
+-- | Anonymous function that can return arrays with existential size.
+type ExtLambda rep = GLambda rep ExtType
 
 -- | A function and loop parameter.
 type FParam rep = Param (FParamInfo rep)

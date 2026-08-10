@@ -147,6 +147,7 @@ sufficientParallelism desc ws path def =
 isParallelFunInside :: FunHasParallelism -> Body SOACS -> Bool
 isParallelFunInside funHasParallelism = inBody
   where
+    inLambda :: GLambda SOACS t -> Bool
     inLambda = any (callParallelFunction . stmExp) . bodyStms . lambdaBody
     inBody = any (callParallelFunction . stmExp) . bodyStms
     callParallelFunction (Apply fname _ _ _) = funHasParallelism fname

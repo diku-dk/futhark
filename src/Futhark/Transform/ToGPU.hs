@@ -67,7 +67,8 @@ injectSOACS f =
       SOAC.SOACMapper
         { SOAC.mapOnSOACSubExp = pure,
           SOAC.mapOnSOACVName = pure,
-          SOAC.mapOnSOACLambda = rephraseLambda $ injectSOACS f
+          SOAC.mapOnSOACLambda = rephraseLambda $ injectSOACS f,
+          SOAC.mapOnSOACExtLambda = rephraseLambda $ injectSOACS f
         }
 
 soacsStmToGPU :: Stm SOACS -> Stm GPU

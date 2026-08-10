@@ -54,6 +54,7 @@ usesAD prog = any stmUsesAD (progConsts prog) || any funUsesAD (progFuns prog)
     funUsesAD = bodyUsesAD . funDefBody
     bodyUsesAD = any stmUsesAD . bodyStms
     stmUsesAD = expUsesAD . stmExp
+    lamUsesAD :: GLambda SOACS t -> Bool
     lamUsesAD = bodyUsesAD . lambdaBody
     expUsesAD (Op JVP {}) = True
     expUsesAD (Op VJP {}) = True

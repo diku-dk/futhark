@@ -254,9 +254,10 @@ instance
     FreeIn (LetDec rep),
     FreeIn (RetType rep),
     FreeIn (BranchType rep),
-    FreeIn (Op rep)
+    FreeIn (Op rep),
+    FreeIn t
   ) =>
-  FreeIn (Lambda rep)
+  FreeIn (GLambda rep t)
   where
   freeIn' (Lambda params body rettype) =
     fvBind (namesFromList $ map paramName params) $
@@ -447,5 +448,5 @@ boundByStms :: Stms rep -> Names
 boundByStms = foldMap boundByStm
 
 -- | The names of the lambda parameters plus the index parameter.
-boundByLambda :: Lambda rep -> [VName]
+boundByLambda :: GLambda rep t -> [VName]
 boundByLambda lam = map paramName (lambdaParams lam)

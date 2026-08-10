@@ -259,6 +259,7 @@ inlineInStms fdmap stms =
   bodyStms <$> inlineInBody fdmap (mkBody stms [])
 
 inlineInBody ::
+  forall m.
   (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   Body SOACS ->
@@ -286,14 +287,8 @@ inlineInBody fdmap = onBody
     inliner =
       (identityMapper @SOACS)
         { mapOnBody = const onBody,
-          mapOnOp = onSOAC
+          mapOnOp = traverseOpStms $ \_ -> inline . stmsToList
         }
-
-    onSOAC =
-      mapSOACM identitySOACMapper {mapOnSOACLambda = onLambda}
-
-    onLambda (Lambda params ret body) =
-      Lambda params ret <$> onBody body
 
 traceLocs :: Provenance -> StmAux () -> StmAux ()
 traceLocs p aux =
@@ -321,7 +316,8 @@ addLocations attrs caller_safety p = fmap onStm
         runIdentity $
           mapSOACM
             identitySOACMapper
-              { mapOnSOACLambda = pure . onLambda
+              { mapOnSOACLambda = pure . onLambda,
+                mapOnSOACExtLambda = pure . onLambda
               }
             soac
       where

@@ -315,27 +315,39 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
      , res[offset0 + offset1:n] :> [n - offset0 - offset1]a
      )
 
--- | **Beware:** this is an experimental and unstable interface which may change
--- at any time.
+-- | Perform a flattened map of a function `f`, that produces a nonuniform and
+-- uniform-sized result, over the array `as`. Returns the concatenation of the
+-- nonuniform results and an array of the uniforms, alongside metadata allowing
+-- the interpretation of the concatenated segments as an irregular array. In
+-- order:
 --
--- Perform a flattened map of a function over the arrays `ks` and `as`.
--- Returns the concatenation of the arrays produced by `f`, alongside metadata
--- allowing the interpretation of the result as an irregular array. In order:
+-- * The *shape array*, giving the size of each segment. This array sums to `m`.
 --
--- * The "shape array", giving the size of each segment. This array sums to `m`.
+-- * The *flag array*, indicating for each element when a new segment begins.
 --
--- * The "flag array", indicating for each element when a new segment begins.
---
--- * The "offset array", indicating for each segment where its values begin in
+-- * The *offset array*, indicating for each segment where its values begin in
 --   the data array.
 --
--- * The actual "data array", comprising the concatenated results of `f`.
-def flatmap [n] 'a 'b
-            (f: (k: i64) -> a -> [k]b)
-            (ks: [n]i64)
+-- * The *data array*, comprising the concatenated results of `f`.
+--
+-- * An array of uniform results, which has no special name.
+def flatmap [n] 'a 'b 'c
+            (f: a -> ?[k].([k]b, c))
             (as: [n]a) : ?[m].( [n]i64
                               , [m]bool
                               , [n]i64
                               , [m]b
+                              , [n]c
                               ) =
-  intrinsics.flatmap f ks as
+  intrinsics.flatmap f as
+
+-- | Like `flatmap`, but without the value result.
+def flatmap' [n] 'a 'b
+             (f: a -> ?[k].[k]b)
+             (as: [n]a) : ?[m].( [n]i64
+                               , [m]bool
+                               , [n]i64
+                               , [m]b
+                               ) =
+  let (S, F, O, D, _) = flatmap (\x -> (f x, ())) as
+  in (S, F, O, D)

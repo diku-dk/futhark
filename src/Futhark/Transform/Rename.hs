@@ -96,9 +96,9 @@ renameBody = modifyNameSource . runRenamer . rename
 -- correct to begin with.  Any free variables are left untouched.
 -- Note in particular that the parameters of the lambda are renamed.
 renameLambda ::
-  (Renameable rep, MonadFreshNames m) =>
-  Lambda rep ->
-  m (Lambda rep)
+  (Renameable rep, MonadFreshNames m, Rename t) =>
+  GLambda rep t ->
+  m (GLambda rep t)
 renameLambda = modifyNameSource . runRenamer . rename
 
 -- | Produce an equivalent pattern but with each pattern element given
@@ -311,7 +311,7 @@ instance (Rename shape) => Rename (TypeBase shape u) where
   rename (Acc acc ispace ts u) =
     Acc <$> rename acc <*> rename ispace <*> rename ts <*> pure u
 
-instance (Renameable rep) => Rename (Lambda rep) where
+instance (Renameable rep, Rename t) => Rename (GLambda rep t) where
   rename (Lambda params ret body) =
     renameBound (map paramName params) $
       Lambda <$> mapM rename params <*> mapM rename ret <*> rename body
