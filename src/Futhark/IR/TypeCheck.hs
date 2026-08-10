@@ -828,9 +828,9 @@ checkExtLambdaBody ret (Body (_, rep) stms res) = do
   checkBodyDec rep
   checkStms stms $ checkExtLambdaResult ret res
   where
-    -- A value result is either irregular, in which case the existential size -
-    -- the lambda's first result - is its outermost size, or regular, in which
-    -- case it has no existential size at all.
+    -- A result is either a segment, in which case the existential size is its
+    -- outermost size, or a value, in which case it has no existential size at
+    -- all.
     checkValueRet t =
       case shapeDims $ arrayShape t of
         _ : inner
