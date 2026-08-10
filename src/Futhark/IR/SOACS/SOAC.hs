@@ -94,8 +94,8 @@ data SOAC rep
     Screma SubExp [VName] (ScremaForm rep)
   | -- | Irregular map where the irregular results are implicitly concatenated.
     -- The 'ExtLambda' first returns a size @k@, then its value results, each of
-    -- which is either /irregular/ (an array with @k@ as its outermost size) or
-    -- /regular/ (not mentioning @k@ at all). The size @k@ may be used *only* as
+    -- which is either /a segment/ (an array with @k@ as its outermost size) or
+    -- a /value/ (not mentioning @k@ at all). The size @k@ may be used *only* as
     -- an outermost dimension.
     --
     -- For input of length @n@ returns the following:
@@ -111,8 +111,8 @@ data SOAC rep
     -- * The "offset array" of type @[n]i64@, indicating for each segment where
     --   its values begin in the data array.
     --
-    -- * Finally one array per value result of the lambda, in the same order: an
-    --   irregular result becomes its concatenation across all iterations, of
+    -- * Finally one array per value result of the lambda, in the same order: a
+    --   segment result becomes its concatenation across all iterations, of
     --   outer size @[m]@, and a regular result the collection of its values, of
     --   outer size @[n]@.
     FlatMap SubExp [VName] (ExtLambda rep)

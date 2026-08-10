@@ -120,13 +120,13 @@ resultArray arrs ts = do
         letExp "result" =<< eBlank t
   mapM oneArray ts
 
--- | Sequentialise a single FlatMap. The size of the irregular arrays produced
--- by the lambda is not known until it has been run, so each of them is
--- accumulated in a scratch buffer that is doubled whenever it runs out of
--- space, and finally truncated to the actual size. The regular results need no
--- such treatment, as there is exactly one per iteration. The shape and offset
--- arrays are filled in as we go, and the flag array is then a scatter of the
--- segment starts.
+-- | Sequentialise a single FlatMap. The size of the segment arrays produced by
+-- the lambda is not known until it has been run, so each of them is accumulated
+-- in a scratch buffer that is doubled whenever it runs out of space, and
+-- finally truncated to the actual size. The value results need no such
+-- treatment, as there is exactly one per iteration. The shape and offset arrays
+-- are filled in as we go, and the flag array is then a scatter of the segment
+-- starts.
 transformFlatMap ::
   (Transformer m) =>
   Pat (LetDec (Rep m)) ->
