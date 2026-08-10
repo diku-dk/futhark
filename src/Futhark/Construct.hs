@@ -107,7 +107,7 @@ module Futhark.Construct
     sliceDim,
     fullSlice,
     fullSliceNum,
-    isFullSlice,
+    isIdentitySlice,
     sliceAt,
     iota64,
 
@@ -594,14 +594,17 @@ fullSliceNum :: (Num d) => [d] -> [DimIndex d] -> Slice d
 fullSliceNum dims slice =
   Slice $ slice ++ map (\d -> DimSlice 0 d 1) (drop (length slice) dims)
 
--- | Does the slice describe the full size of the array?  The most
--- obvious such slice is one that 'DimSlice's the full span of every
--- dimension, but also one that fixes all unit dimensions.
-isFullSlice :: Shape -> Slice SubExp -> Bool
-isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) (unSlice slice)
+-- | Does indexing an array of this shape with this slice produce the array
+-- itself? This is a slice that selects every element (which may be fixing unit
+-- dimensions) and has zero offset and unit stride.
+isIdentitySlice :: Shape -> Slice SubExp -> Bool
+isIdentitySlice shape slice =
+  length (shapeDims shape) == length (unSlice slice)
+    && and (zipWith allOfIt (shapeDims shape) (unSlice slice))
   where
     allOfIt (Constant v) DimFix {} = oneIsh v
-    allOfIt d (DimSlice _ n _) = d == n
+    allOfIt d (DimSlice (Constant off) n (Constant s)) =
+      d == n && zeroIsh off && oneIsh s
     allOfIt _ _ = False
 
 -- | Conveniently construct a body that contains no bindings.
