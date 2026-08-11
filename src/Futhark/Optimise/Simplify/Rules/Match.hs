@@ -5,13 +5,15 @@ module Futhark.Optimise.Simplify.Rules.Match (matchRules) where
 
 import Control.Monad
 import Data.Either
-import Data.List (partition, transpose, unzip4, zip5)
+import Data.List (intersect, partition, tails, transpose, unzip4, zip5)
+import Data.Map qualified as M
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
 import Futhark.Optimise.Simplify.Rule
+import Futhark.Transform.Substitute
 import Futhark.Util
 
 -- Does this case always match the scrutinees?
@@ -207,6 +209,51 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, MatchDec ret ifsort) =
     reshapeResult se _ =
       pure se
 
+-- | Pairs @(i,j)@ with @i<j@ of the indexes of identical body results.
+duplicateResults :: Body rep -> [(Int, Int)]
+duplicateResults body = do
+  (i, x) : rest <- tails $ zip [0 ..] $ bodyResult body
+  (j, y) <- rest
+  guard $ x == y
+  pure (i, j)
+
+-- | Combine duplicate branch results into a single result, with the name for
+-- the duplicate bound after the branch. This is only valid when all branches
+-- for the Match share the duplicate.
+--
+-- Example:
+--
+-- @
+-- def f (b: bool) (xs: []i32) =
+--   if b
+--   then let ys = filter (> 0) xs
+--        in (length ys, length ys)
+--   else let zs = filter (< 0) xs
+--        in (length zs, length zs)
+-- @
+unifyBranchDuplicate :: (BuilderOps rep) => TopDownRuleMatch rep
+unifyBranchDuplicate _ pat aux (cond, cases, defbody, MatchDec ret ifsort)
+  | defbody_dups <- duplicateResults defbody,
+    cases_dups <- map (duplicateResults . caseBody) cases,
+    -- We resolve only one duplicate per rule application. This is just to keep
+    -- the logic simpler, although in principle we could resolve more at a time.
+    (i, j) : _ <- foldl' intersect defbody_dups cases_dups = Simplify $ do
+      let onBody (Body _ stms res) = mkBodyM stms $ without j res
+          i_name = patNames pat !! i
+          j_name = patNames pat !! j
+          pat' =
+            Pat . substituteNames (M.singleton j_name i_name) $
+              without j (patElems pat)
+          -- We need to adjust the existential references in the branch type.
+          adjust = mapExt $ \x ->
+            if x == j then i else if x >= j then x - 1 else x
+      cases' <- mapM (traverse onBody) cases
+      defbody' <- onBody defbody
+      auxing aux . letBind pat' . Match cond cases' defbody' $
+        MatchDec (map adjust $ without j ret) ifsort
+      letBindNames [j_name] $ BasicOp $ SubExp $ Var i_name
+  | otherwise = Skip
+
 -- | Remove the return values of a branch, that are not actually used
 -- after a branch.  Standard dead code removal can remove the branch
 -- if *none* of the return values are used, but this rule is more
@@ -246,7 +293,8 @@ removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, MatchDec rettype i
 topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
   [ RuleMatch ruleMatch,
-    RuleMatch hoistBranchInvariant
+    RuleMatch hoistBranchInvariant,
+    RuleMatch unifyBranchDuplicate
   ]
 
 bottomUpRules :: (BuilderOps rep) => [BottomUpRule rep]
