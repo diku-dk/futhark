@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Added
 
+* Rewrote partition to be a single kernel.
+
 * The type checker has been rewritten, with contributions from Jacob Aleksandar
   Siegumfeldt, Laust Kjæp Dengsøe, and Robert Schenck.
 
@@ -33,6 +35,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Fixed
 
+* Filter now uses the predicate once per element instead of twice.
+
 * Fixed bug in simiplification engine, various SOACs needed to specify
   the depth of lambdas, scans, and reduces.
 
@@ -49,7 +53,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Simplified fusibility check by removing redundant accumulator overlap check
   and fixed fusibility check by giving the correct number of elements.
-
 
 * A compiler crash due to missing double buffering inside sequential code
   migrated to GPU. (#2513)
