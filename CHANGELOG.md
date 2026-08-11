@@ -35,9 +35,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Filter now uses the predicate once per element instead of twice.
 
-* Fixed bug in simiplification engine, various SOACs needed to specify
-  the depth of lambdas, scans, and reduces.
-
 * In-place updates with a slice that covers the entire array, but reorders its
   elements (such as a reversal), were simplified into a copy, discarding the
   reordering. Among other things this produced wrong gradients for `reverse`

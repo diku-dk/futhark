@@ -111,7 +111,7 @@ simplifySOAC (WithVJP args lam lam_adj) = do
 simplifySOAC (FlatMap w arrs lam) = do
   w' <- Engine.simplify w
   arrs' <- mapM Engine.simplify arrs
-  (lam', hoisted_lam) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
+  (lam', hoisted_lam) <- Engine.simplifyLambda mempty lam
   pure (FlatMap w' arrs' lam', hoisted_lam)
 simplifySOAC (Stream outerdim arr nes lam) = do
   outerdim' <- Engine.simplify outerdim
@@ -150,7 +150,7 @@ simplifyScan ::
   (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (Scan (Wise rep))
 simplifyScan (Scan lam nes) = do
-  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
+  (lam', hoisted) <- Engine.simplifyLambda mempty lam
   nes' <- Engine.simplify nes
   pure (Scan lam' nes', hoisted)
 
@@ -158,7 +158,7 @@ simplifyReduce ::
   (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (Reduce (Wise rep))
 simplifyReduce (Reduce comm lam nes) = do
-  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
+  (lam', hoisted) <- Engine.simplifyLambda mempty lam
   nes' <- Engine.simplify nes
   pure (Reduce comm lam' nes', hoisted)
 
