@@ -16,6 +16,7 @@ module Futhark.Util
     chunks,
     chunkLike,
     dropAt,
+    without,
     takeLast,
     dropLast,
     mapEither,
@@ -165,6 +166,10 @@ mininum xs = L.foldl' min (maxinum xs) xs
 -- | @dropAt i n@ drops @n@ elements starting at element @i@.
 dropAt :: Int -> Int -> [a] -> [a]
 dropAt i n xs = take i xs ++ drop (i + n) xs
+
+-- | Remove the element at the given index.
+without :: Int -> [a] -> [a]
+without j = dropAt j 1
 
 -- | @takeLast n l@ takes the last @n@ elements of @l@.
 takeLast :: Int -> [a] -> [a]
