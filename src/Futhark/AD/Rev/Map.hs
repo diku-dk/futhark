@@ -11,7 +11,7 @@ import Data.Bifunctor (first, second)
 import Data.Either (rights)
 import Data.Maybe (catMaybes)
 import Futhark.AD.Rev.Monad
-import Futhark.AD.Shared (asVName, vecPerm)
+import Futhark.AD.Shared (accAddLambda, asVName, vecPerm)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
@@ -100,20 +100,12 @@ popAdjShape v = do
       let perm = rearrangeInverse $ vecPerm adj_shape v_t
       letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
 
-addIdxParams :: Int -> Lambda SOACS -> ADM (Lambda SOACS)
-addIdxParams n lam = do
-  idxs <- replicateM n $ newParam "idx" $ Prim int64
-  pure $ lam {lambdaParams = idxs ++ lambdaParams lam}
-
-accAddLambda :: Int -> Type -> ADM (Lambda SOACS)
-accAddLambda n t = addIdxParams n =<< addLambda t
-
 withAccInput ::
   (VName, (Shape, PrimType)) ->
   ADM (Shape, [VName], Maybe (Lambda SOACS, [SubExp]))
 withAccInput (v, (shape, pt)) = do
   v_adj <- lookupAdjVal v
-  add_lam <- accAddLambda (shapeRank shape) $ Prim pt
+  add_lam <- accAddLambda (shapeRank shape) [Prim pt]
   zero <- letSubExp "zero" $ zeroExp $ Prim pt
   pure (shape, [v_adj], Just (add_lam, [zero]))
 

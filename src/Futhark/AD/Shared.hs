@@ -4,13 +4,16 @@ module Futhark.AD.Shared
     asVName,
     mapNest,
     mkMap,
+    accAddLambda,
   )
 where
 
 import Control.Monad
+import Data.Bifunctor (bimap)
 import Data.Foldable
 import Futhark.Construct
 import Futhark.IR.SOACS
+import Futhark.Tools
 
 -- | A permutation for transposing the vector shape past the next dimension.
 --
@@ -24,6 +27,22 @@ vecPerm vec_shape t =
 asVName :: (MonadBuilder m) => SubExp -> m VName
 asVName (Var v) = pure v
 asVName (Constant x) = letExp "asv" $ BasicOp $ SubExp $ Constant x
+
+-- | An addition operator for an accumulator whose index space has the given
+-- rank and whose elements have the given types.  The operators for the
+-- individual element types are fused horizontally, as an accumulator operator
+-- must handle all of them at once.
+accAddLambda ::
+  (MonadBuilder m, Rep m ~ SOACS) =>
+  Int ->
+  [Type] ->
+  m (Lambda SOACS)
+accAddLambda n ts = do
+  lams <- mapM addLambda ts
+  idx_params <- replicateM n $ newParam "idx" $ Prim int64
+  let (xs, ys) = bimap concat concat $ unzip $ map (splitAt 1 . lambdaParams) lams
+  mkLambda (idx_params <> xs <> ys) $
+    mconcat <$> mapM (bodyBind . lambdaBody) lams
 
 mapNest ::
   (MonadBuilder m, Rep m ~ SOACS, Traversable f) =>
