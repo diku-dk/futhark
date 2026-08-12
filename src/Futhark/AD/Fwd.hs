@@ -376,6 +376,40 @@ fwdLambda (Lambda params _ body) = do
   params' <- bundleNewList params
   mkLambda params' $ bodyBind =<< fwdBody body
 
+-- Differentiating a FlatMap lambda is mostly straightforward, except that we do
+-- not care about the tangent of the size result. We must also take care to
+-- reconstruct the return type, since we do not have facilities similar to
+-- mkLambda for ExtLambdas. Finally, in the vector case (see Note [Forward-Mode
+-- vector AD]) the tangent of a nonuniform result has the vector shape
+-- outermost, but a FlatMap demands that the existential size come first, so we
+-- must transpose it. It is transposed back outside the FlatMap; see 'fwdSOAC'.
+fwdFlatMapLambda :: ExtLambda SOACS -> ADM (ExtLambda SOACS)
+fwdFlatMapLambda (Lambda params rettype body) = do
+  params' <- bundleNewList params
+  (body', rettype') <- buildBody . localScope (scopeOfLParams params') $ do
+    (meta_res, val_res) <- fmap (splitAt 2) <$> bodyBind =<< fwdBody body
+    let (val_res_primal, val_res_tan) = unterleave val_res
+        val_rettype = drop 1 rettype
+    val_rettype_tan <- mapM tanType val_rettype
+    (val_res_tan', val_rettype_tan') <-
+      mapAndUnzipM pullExtDim $ zip3 val_rettype val_res_tan val_rettype_tan
+    pure
+      ( take 1 meta_res <> interleave val_res_primal val_res_tan',
+        Prim int64 : interleave val_rettype val_rettype_tan'
+      )
+  pure $ Lambda params' rettype' body'
+  where
+    -- Put the existential size back in the outermost position.
+    pullExtDim (t, res@(SubExpRes cs se), t_tan)
+      | flatMapNonuniform t = do
+          tan_shape <- askShape
+          v <- pushTanShape =<< asVName se
+          pure
+            ( SubExpRes cs $ Var v,
+              rearrangeType (vecPerm tan_shape t_tan) t_tan
+            )
+      | otherwise = pure (res, t_tan)
+
 fwdWithAccLambda :: [WithAccInput SOACS] -> Lambda SOACS -> ADM (Lambda SOACS)
 fwdWithAccLambda inputs (Lambda params _ body) = do
   let (cert_params, acc_params) = splitAt (length inputs) params
@@ -406,7 +440,7 @@ fwdStreamLambda num_accs (Lambda params _ body) = do
     zipWithM_ (trArrParamTan tan_shape) arr_params' arr_params'_tan
     (acc_res, map_res) <- fmap (splitAt (num_accs * 2)) . bodyBind =<< fwdBody body
     let (map_res_primal, map_res_tan) = unterleave map_res
-    map_res_tan' <- mapM (trMapResTan tan_shape) map_res_tan
+    map_res_tan' <- mapM trMapResTan map_res_tan
     pure $ acc_res <> interleave map_res_primal map_res_tan'
   where
     -- Array parameters need to be treated specially as the chunk parameter
@@ -426,10 +460,8 @@ fwdStreamLambda num_accs (Lambda params _ body) = do
       insertTan (paramName p) v
 
     -- Put the chunk size back in the outermost position.
-    trMapResTan tan_shape (SubExpRes cs ~(Var v)) = do
-      v_t <- lookupType v
-      let perm = vecPerm tan_shape v_t
-      fmap varRes . certifying cs $ letExp (baseName v) . BasicOp $ Rearrange v perm
+    trMapResTan (SubExpRes cs ~(Var v)) =
+      SubExpRes cs . Var <$> pushTanShape v
 
 pushTanShape :: VName -> ADM VName
 pushTanShape v = do
@@ -547,8 +579,19 @@ fwdSOAC pat aux (WithVJP args lam _) = do
     lam_res <- auxing aux $ eLambda lam $ map eSubExp args
     forM (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
       certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
-fwdSOAC _ _ FlatMap {} =
-  error "fwdSOAC: unhandled FlatMap"
+fwdSOAC (Pat pes) aux (FlatMap w arrs lam) = do
+  -- We do not bother to create tangents for the metadata part of the result.
+  let (meta_pes, val_pes) = splitAt 4 pes
+  (Pat val_pes', to_transpose) <- soacResPat 0 0 $ Pat val_pes
+  let pat' = Pat $ meta_pes <> val_pes'
+  arrs' <- soacInputsWithTangents arrs
+  lam' <- fwdFlatMapLambda lam
+  addStm $ Let pat' aux $ Op $ FlatMap w arrs' lam'
+  tan_shape <- askShape
+  forM_ to_transpose $ \(rpat, v) -> do
+    v_t <- lookupType v
+    let perm = rearrangeInverse $ vecPerm tan_shape v_t
+    letBind rpat $ BasicOp $ Rearrange v perm
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =
