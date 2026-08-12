@@ -255,6 +255,9 @@ def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
 -- | Split an array into those elements that satisfy the given
 -- predicate, and those that do not.
 --
+-- Both result arrays preserve the relative order of elements from the
+-- input array. In other words, `partition`@term is stable.
+--
 -- **Work:** *O(n ✕ W(p))*
 --
 -- **Span:** *O(log(n) ✕ W(p))*
@@ -279,6 +282,45 @@ def partition [n] 'a
   let idxs1 = map2 to_index1 f_flags offsets
   let is = intrinsics.concat idxs0 idxs1
   let res = scatter (#[scratch] [as][0]) is (intrinsics.concat as rev_as)
+  let count =
+    scatter [0]
+            (map (\j -> if j == n - 1 then 0 else -1) (0..1..<n))
+            (map (.0) offsets)
+  in (res[0:count[0]], res[count[0]:n])
+
+-- | Split an array into those elements that satisfy the given
+-- predicate, and those that do not. Elements satisfying the predicate
+-- preserve their relative order from
+--
+-- Elements satisfying the predicate preserve their relative order
+-- from the input array. Elements not satisfying the predicate are
+-- returned in reverse relative order.
+--
+-- Compared to `partition`@term, this operation performs fewer memory
+-- accesses (approximately 2n reads/writes instead of 3n), and can
+-- therefore be faster when the relaxed ordering guarantee is
+-- acceptable.
+--
+-- **Work:** *O(n ✕ W(p))*
+--
+-- **Span:** *O(log(n) ✕ W(p))*
+def semipartition [n] 'a
+                  (p: a -> bool)
+                  (as: [n]a) : ?[k].([k]a, [n - k]a) =
+  let to_index0 f (o0, o1) = if f then o0 - 1 else n - o1
+  let add2 (a0, b0) (a1, b1) = (a0 + a1, b0 + b1)
+  let t_flags = map p as
+  let f_flags = map (\x -> !x) t_flags
+  let flags =
+    map2 (\x y ->
+            ( intrinsics.btoi_bool_i64 x
+            , intrinsics.btoi_bool_i64 y
+            ))
+         t_flags
+         f_flags
+  let offsets = scan add2 (0, 0) flags
+  let is = map2 to_index0 t_flags offsets
+  let res = scatter (#[scratch] [as][0]) is as
   let count =
     scatter [0]
             (map (\j -> if j == n - 1 then 0 else -1) (0..1..<n))

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Added
 
+* Added semipartition, faster than partition but it is not stable for
+  false elements.
+
 * Rewrote partition to be a single kernel.
 
 * The type checker has been rewritten, with contributions from Jacob Aleksandar
