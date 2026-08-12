@@ -662,7 +662,9 @@ fwdStm (Let pat aux (WithAcc inputs lam)) = do
         -- kind of addition). This is the case for all WithAccs produced by VJP.
         lams <- mapM addLambda $ lambdaReturnType op_lam
         -- Horizontally fuse the lambdas to produce a single one.
-        idx_params <- replicateM (shapeRank shape) $ newParam "idx" $ Prim int64
+        idx_params <-
+          replicateM (shapeRank tan_shape + shapeRank shape) $
+            newParam "idx" (Prim int64)
         let (xs, ys) = bimap concat concat $ unzip $ map (splitAt 1 . lambdaParams) lams
         op_lam' <- mkLambda (idx_params <> xs <> ys) $ mconcat <$> mapM (bodyBind . lambdaBody) lams
         pure $ Just (op_lam', nes)
