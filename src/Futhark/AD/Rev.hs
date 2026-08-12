@@ -182,12 +182,14 @@ diffBasicOp pat aux e m =
         let sliceAdj _ [] = pure []
             sliceAdj start (v : vs) = do
               v_t <- lookupType v
-              let w = arraySize 0 v_t
+              pat_adj_t <- lookupType pat_adj
+              r <- shapeRank <$> askShape
+              let w = arraySize d v_t
                   slice = DimSlice start w (intConst Int64 1)
               pat_adj_slice <-
                 letExp (baseName pat_adj <> "_slice") $
                   BasicOp $
-                    Index pat_adj (sliceAt v_t d [slice])
+                    Index pat_adj (sliceAt pat_adj_t (r + d) [slice])
               start' <- letSubExp "start" $ BasicOp $ BinOp (Add Int64 OverflowUndef) start w
               slices <- sliceAdj start' vs
               pure $ pat_adj_slice : slices
