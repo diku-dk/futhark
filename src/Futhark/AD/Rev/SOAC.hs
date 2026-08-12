@@ -202,6 +202,9 @@ vjpSOAC _ops pat aux (WithVJP args lam lam_adj) m = do
       (updateSubExpAdj arg <=< letExp "contrib") $
         BasicOp . SubExp . resSubExp $
           contrib
+vjpSOAC ops pat aux soac@(FlatMap w as lam) m = do
+  pat_adj <- commonSOAC pat aux soac m
+  vjpFlatMap ops pat pat_adj aux w lam as
 vjpSOAC _ _ _ soac _ =
   error $ "vjpSOAC unhandled:\n" ++ prettyString soac
 

@@ -120,7 +120,7 @@ diffBasicOp pat aux e m =
       t <- lookupType pat_adj
       returnSweepCode $ do
         forM_ (zip [(0 :: Int64) ..] elems) $ \(i, se) -> do
-          let slice = fullSlice t [DimFix (constant i)]
+          slice <- vecSlice t [DimFix (constant i)]
           updateSubExpAdj se <=< letExp "elem_adj" $ BasicOp $ Index pat_adj slice
     --
     Index arr slice -> do
@@ -136,10 +136,12 @@ diffBasicOp pat aux e m =
     Reshape arr newshape -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
+        adj_shape <- askShape
         arr_shape <- arrayShape <$> lookupType arr
         void $
           updateAdj arr <=< letExp "adj_reshape" . BasicOp $
-            Reshape pat_adj (reshapeAll (newShape newshape) arr_shape)
+            Reshape pat_adj . newshapeInner adj_shape $
+              reshapeAll (newShape newshape) arr_shape
     --
     Rearrange arr perm -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -155,16 +157,24 @@ diffBasicOp pat aux e m =
     Replicate (Shape ns) x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
+        adj_shape <- askShape
         x_t <- subExpType x
         lam <- addLambda x_t
         ne <- letSubExp "zero" $ zeroExp x_t
         n <- letSubExp "rep_size" =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ns
-        pat_adj_flat <-
-          letExp (baseName pat_adj <> "_flat") . BasicOp $
-            Reshape pat_adj (reshapeAll (Shape ns) (Shape $ n : arrayDims x_t))
         reduce <- reduceSOAC [Reduce Commutative lam [ne]]
-        updateSubExpAdj x
-          =<< letExp "rep_contrib" (Op $ Screma n [pat_adj_flat] reduce)
+
+        contrib <- letExp "rep_contrib" <=< mapNest adj_shape (MkSolo (Var pat_adj)) $
+          \(MkSolo pat_adj') -> do
+            pat_adj_v <- asVName pat_adj'
+            -- Flatten the replicated dimensions into a single dimension that we
+            -- can reduce across.
+            pat_adj_flat <-
+              letExp (baseName pat_adj <> "_flat") . BasicOp . Reshape pat_adj_v $
+                reshapeAll (Shape ns <> arrayShape x_t) (Shape $ n : arrayDims x_t)
+            pure $ Op $ Screma n [pat_adj_flat] reduce
+
+        updateSubExpAdj x contrib
     --
     Concat d (arr :| arrs) _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m

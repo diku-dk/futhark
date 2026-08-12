@@ -56,6 +56,7 @@ module Futhark.AD.Rev.Monad
     --
     locallyNonvector,
     vecToInner,
+    vecSlice,
   )
 where
 
@@ -529,11 +530,12 @@ updateAdjSliceWithSafety slice v d safety = do
             UpdateAcc safety v_adj' slice' [Var d']
       pure v_adj'
     _ -> do
+      vec_slice <- vecSlice v_adj_t $ unSlice slice
       v_adjslice <-
         if primType t
           then pure v_adj
-          else letExp (baseName v <> "_slice") $ BasicOp $ Index v_adj slice
-      letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
+          else letExp (baseName v <> "_slice") $ BasicOp $ Index v_adj vec_slice
+      letInPlace "updated_adj" v_adj vec_slice =<< addExp v_adjslice d
   insAdj v v_adj'
 
 updateAdj :: VName -> VName -> ADM ()
@@ -626,6 +628,14 @@ locallyNonvector e m = do
       pure $ case v_adj of
         AdjZero {} -> False
         _ -> True
+
+-- | @vecSlice t is@ indexes an adjoint of type @t@ with @is@, which is written
+-- against the type of the corresponding primal value.  As the vector
+-- dimensions are outermost in the adjoint, they must be skipped past.
+vecSlice :: Type -> [DimIndex SubExp] -> ADM (Slice SubExp)
+vecSlice t is = do
+  adj_shape <- askShape
+  pure $ sliceAt t (shapeRank adj_shape) is
 
 -- | If we are doing vector AD, apply 'vecPerm' to the array.
 vecToInner :: VName -> ADM VName
