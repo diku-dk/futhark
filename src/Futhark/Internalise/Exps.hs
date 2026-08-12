@@ -2260,7 +2260,7 @@ bindExtSizes (AppRes ret retext) ses = do
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =
-        mconcat $ zipWith combine' (arrayExtDims t1) (arrayDims t2)
+        mconcat $ zipWith combine' (arrayDims t1) (arrayDims t2)
       combine' (I.Free (I.Var v)) se
         | v `elem` retext = M.singleton v se
       combine' _ _ = mempty

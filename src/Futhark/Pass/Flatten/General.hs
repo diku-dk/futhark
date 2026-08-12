@@ -157,7 +157,7 @@ liftResult lvl segments inps env res = map (SubExpRes mempty . Var) <$> vs
         pure [num_data, segs, flags', offsets, elems']
 
 needsIrregularRetType :: DistInputs -> RetType SOACS -> Bool
-needsIrregularRetType inps = any needsIrregularDim . arrayExtDims
+needsIrregularRetType inps = any needsIrregularDim . arrayDims
   where
     needsIrregularDim Ext {} = True
     needsIrregularDim (Free se) = isVariant inps se

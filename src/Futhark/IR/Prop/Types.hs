@@ -25,7 +25,6 @@ module Futhark.IR.Prop.Types
     peelArray,
     stripArray,
     arrayDims,
-    arrayExtDims,
     shapeSize,
     arraySize,
     arraysSize,
@@ -259,13 +258,8 @@ shapeSize i shape = case drop i $ shapeDims shape of
 
 -- | Return the dimensions of a type - for non-arrays, this is the
 -- empty list.
-arrayDims :: TypeBase Shape u -> [SubExp]
+arrayDims :: TypeBase (ShapeBase d) u -> [d]
 arrayDims = shapeDims . arrayShape
-
--- | Return the existential dimensions of a type - for non-arrays,
--- this is the empty list.
-arrayExtDims :: TypeBase ExtShape u -> [ExtSize]
-arrayExtDims = shapeDims . arrayShape
 
 -- | Return the size of the given dimension.  If the dimension does
 -- not exist, the zero constant is returned.
@@ -314,7 +308,7 @@ transposeType = rearrangeType [1, 0]
 -- | Rearrange the dimensions of the type.  If the length of the
 -- permutation does not match the rank of the type, the permutation
 -- will be extended with identity.
-rearrangeType :: [Int] -> Type -> Type
+rearrangeType :: [Int] -> TypeBase (ShapeBase d) u -> TypeBase (ShapeBase d) u
 rearrangeType perm t =
   t `setArrayShape` Shape (rearrangeShape perm' $ arrayDims t)
   where
@@ -481,7 +475,7 @@ existentialiseExtTypes inaccessible = map makeBoundShapesFree
 
 -- | Produce a mapping for the dimensions context.
 shapeExtMapping :: [TypeBase ExtShape u] -> [TypeBase Shape u1] -> M.Map Int SubExp
-shapeExtMapping = dimMapping arrayExtDims arrayDims match mappend
+shapeExtMapping = dimMapping arrayDims arrayDims match mappend
   where
     match Free {} _ = mempty
     match (Ext i) dim = M.singleton i dim
