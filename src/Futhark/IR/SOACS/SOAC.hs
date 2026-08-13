@@ -21,6 +21,7 @@ module Futhark.IR.SOACS.SOAC
     flatMapNonuniform,
     flatMapRowTypes,
     flatMapUniformTypes,
+    flatMapSplitMeta,
     flatMapSplitValues,
     typeCheckSOAC,
     mkIdentityLambda,
@@ -606,6 +607,15 @@ flatMapRowTypes lam =
     mapM (hasStaticShape . rowType) $
       filter flatMapNonuniform $
         drop 1 (lambdaReturnType lam)
+
+-- | Split a list with one element per result of a 'FlatMap' into its metadata
+-- results - the size, the shape array, the flag array, and the offset array -
+-- and its value results.
+flatMapSplitMeta :: [a] -> ((a, a, a, a), [a])
+flatMapSplitMeta (m : shape : flags : offset : vals) =
+  ((m, shape, flags, offset), vals)
+flatMapSplitMeta _ =
+  error "flatMapSplitMeta: too few results."
 
 -- | Split a list with one element per value result of a 'FlatMap' lambda into
 -- the irregular and the regular parts.

@@ -56,6 +56,9 @@ module Futhark.AD.Rev.Monad
     --
     locallyNonvector,
     vecToInner,
+    vecSlice,
+    withOperatorAccs,
+    isOperatorAcc,
   )
 where
 
@@ -215,7 +218,11 @@ data RState = RState
 
 data REnv = REnv
   { envAdjShape :: Shape,
-    envAttrs :: Attrs
+    envAttrs :: Attrs,
+    -- | The certificates of those accumulators that have a combining operator,
+    -- and so do not behave like overwrites.  See Note [Adjoints of
+    -- accumulators].
+    envOperatorAccs :: Names
   }
 
 newtype ADM a = ADM (BuilderT SOACS (ReaderT REnv (State RState)) a)
@@ -252,7 +259,7 @@ runADM shape attrs (ADM m) =
     second stateNameSource $
       runState
         ( runReaderT (fst <$> runBuilderT m mempty) $
-            REnv shape attrs
+            REnv shape attrs mempty
         )
         (RState mempty mempty mempty vn)
 
@@ -529,11 +536,12 @@ updateAdjSliceWithSafety slice v d safety = do
             UpdateAcc safety v_adj' slice' [Var d']
       pure v_adj'
     _ -> do
+      vec_slice <- vecSlice v_adj_t $ unSlice slice
       v_adjslice <-
         if primType t
           then pure v_adj
-          else letExp (baseName v <> "_slice") $ BasicOp $ Index v_adj slice
-      letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
+          else letExp (baseName v <> "_slice") $ BasicOp $ Index v_adj vec_slice
+      letInPlace "updated_adj" v_adj vec_slice =<< addExp v_adjslice d
   insAdj v v_adj'
 
 updateAdj :: VName -> VName -> ADM ()
@@ -626,6 +634,26 @@ locallyNonvector e m = do
       pure $ case v_adj of
         AdjZero {} -> False
         _ -> True
+
+-- | Note that these accumulator certificates belong to accumulators that have
+-- a combining operator, for the duration of the action.
+withOperatorAccs :: [VName] -> ADM a -> ADM a
+withOperatorAccs certs = local $ \env ->
+  env {envOperatorAccs = namesFromList certs <> envOperatorAccs env}
+
+-- | Does this accumulator certificate belong to an accumulator with a
+-- combining operator, rather than a scatter-like one that overwrites?  See Note
+-- [Adjoints of accumulators].
+isOperatorAcc :: VName -> ADM Bool
+isOperatorAcc cert = ADM $ lift $ asks $ (cert `nameIn`) . envOperatorAccs
+
+-- | @vecSlice t is@ indexes an adjoint of type @t@ with @is@, which is written
+-- against the type of the corresponding primal value.  As the vector
+-- dimensions are outermost in the adjoint, they must be skipped past.
+vecSlice :: Type -> [DimIndex SubExp] -> ADM (Slice SubExp)
+vecSlice t is = do
+  adj_shape <- askShape
+  pure $ sliceAt t (shapeRank adj_shape) is
 
 -- | If we are doing vector AD, apply 'vecPerm' to the array.
 vecToInner :: VName -> ADM VName
