@@ -18,6 +18,9 @@ entry s3: s = #c 6i32
 
 entry pa1: [3]i32 = [p1, p2, p3]
 entry pa2: [2][3]i32 = [[p1, p2, p3], [p3, p2, p1]]
+-- Deliberately not square, so that mistaking one dimension for another
+-- is observable.
+entry pa3: [3][2]i32 = [[p1, p2], [p2, p3], [p3, p1]]
 
 entry ra1: [3]r = [r1, r2, r3]
 entry ra2: [2][3]r = [[r1, r2, r3], [r3, r2, r1]]
@@ -35,3 +38,9 @@ entry sf (x: s): s =
 
 entry pa1f (x: []i32): []i32 = map (**2) x
 entry pa2f (x: [][]i32): [][]i32 = let v = map2 (**) x[0,:] x[1,:] in [v,v]
+
+entry ra1f (x: []r): []r = map rf x
+entry ra2f (x: [][]r): [][]r = map (map rf) x
+
+entry sa1f (x: []s): []s = map sf x
+entry sa2f (x: [][]s): [][]s = map (map sf) x
