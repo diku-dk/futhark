@@ -377,7 +377,7 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
                   comma </> parens (pretty op' <> comma </> ppTuple' (map pretty nes))
           )
 
-instance (PrettyRep rep) => Pretty (Lambda rep) where
+instance (PrettyRep rep, Pretty t) => Pretty (GLambda rep t) where
   pretty (Lambda [] [] (Body _ stms [])) | stms == mempty = "nilFn"
   pretty (Lambda params rettype body) =
     "\\"

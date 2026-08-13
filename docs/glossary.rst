@@ -136,10 +136,8 @@ documentation and in compiler output.
 
    GPU backend
 
-     A :term:`compiler backend` that ultimately produces GPU code.
-     The backends ``opencl`` and ``gpu`` are GPU backends.  These have
-     more restrictions than some other backends, particularly with
-     respect to :term:`irregular nested data parallelism`.
+     A :term:`compiler backend` that ultimately produces GPU code. The backends
+     ``opencl`` and ``gpu`` are GPU backends.
 
    Higher-ranked type
 
@@ -165,52 +163,11 @@ documentation and in compiler output.
      example, ``(x,y)`` is a pattern that will match any tuple. See
      also :term:`refutable pattern`.
 
-   Irregular
-
-     Something that is not regular.  Usually used as shorthand for
-     :term:`irregular nested data parallelism` or :term:`irregular
-     array`.
-
    Irregular array
 
      An array where the elements do not have the same size.  For
      example, ``[[1], [2,3]`` is irregular.  These are not supported
      in Futhark.
-
-   Irregular nested data parallelism
-
-     An instance of :term:`nested data parallelism`, where the
-     :term:`parallel width` of inner parallelism is :term:`variant` to
-     the outer parallelism.  For example, the following expression
-     exhibits irregular nested data parallelism::
-
-       map (\n -> reduce (+) 0 (iota n)) ns
-
-     Because the width of the inner ``reduce`` is ``n``, and every
-     iteration of the outer ``map`` has a (potentially) different
-     ``n``.  The Futhark :term:`GPU backends<GPU backend>` *currently*
-     do not support irregular nested data parallelism well, and will
-     usually sequentialise the irregular loops.  In cases that require
-     an :term:`irregular memory allocation`, the compiler may entirely
-     fail to generate code.
-
-   Irregular memory allocation
-
-     A situation that occurs when the generated code has to allocate
-     memory inside of an instance of :term:`nested data parallelism`,
-     where the amount to allocate is variant to the outer parallel
-     levels.  As a contrived example (that the actual compiler would
-     just optimise away), consider::
-
-       map (\n -> let A = iota n
-                  in A[10])
-           ns
-
-     To construct the array ``A`` in memory, we require ``8n`` bytes,
-     but ``n`` is not known until we start executing the body of the
-     ``map``.  While such simple cases are handled, more complicated
-     ones that involve nested sequential loops are not supported by
-     the :term:`GPU backends<GPU backend>`.
 
    Parametric module
 
@@ -238,6 +195,12 @@ documentation and in compiler output.
      A type that may contain functions, including function types
      themselves.  These have various restrictions on their use in
      order to support :term:`defunctionalisation`.  See :ref:`hofs`.
+
+   Map nest
+
+     The slightly inaccurate term for a collection of nested parallel
+     operations. We use this term even when not all of the parallel dimensions
+     are actually ``map``.
 
    Module
 
@@ -287,6 +250,43 @@ documentation and in compiler output.
      is used inside of another parallel construct.  For example, a
      ``reduce`` might be used inside a function passed to ``map``.
 
+   Nonuniform
+
+     Something that is not :term:`uniform`. Usually used as shorthand for
+     :term:`nonuniform nested data parallelism`.
+
+   Nonuniform nested data parallelism
+
+     An instance of :term:`nested data parallelism`, where the :term:`parallel
+     width` of inner parallelism is :term:`variant` to the outer parallelism.
+     For example, the following expression exhibits nonuniform nested data
+     parallelism::
+
+       map (\n -> reduce (+) 0 (iota n)) ns
+
+     Because the width of the inner ``reduce`` is ``n``, and every iteration of
+     the outer ``map`` has a (potentially) different ``n``. This is
+     substantially more difficult to handle than :term:`uniform nested data
+     parallelism` and comes with a nontrivial runtime cost.
+
+   Nonuniform memory allocation
+
+     A situation that occurs when the generated code has to allocate
+     memory inside of an instance of :term:`nested data parallelism`,
+     where the amount to allocate is variant to the outer parallel
+     levels.  As a contrived example (that the actual compiler would
+     just optimise away), consider::
+
+       map (\n -> let A = iota n
+                  in A[10])
+           ns
+
+     To construct the array ``A`` in memory, we require ``8n`` bytes,
+     but ``n`` is not known until we start executing the body of the
+     ``map``.  While such simple cases are handled, more complicated
+     ones that involve nested sequential loops are not supported by
+     the :term:`GPU backends<GPU backend>`.
+
    Parallel width
 
      A somewhat informal term used to describe the size of an array on
@@ -314,11 +314,6 @@ documentation and in compiler output.
      first element is ``1``. These may not be used in ``let``
      expressions or in function parameters. See also
      :term:`irrefutable pattern`.
-
-   Regular nested data parallelism
-
-     An instance of :term:`nested data parallelism` that is not
-     :term:`irregular`.  Fully supports by any :term:`GPU backend`.
 
    Size
 
@@ -421,6 +416,20 @@ documentation and in compiler output.
      rest of the definition.  Do not confuse them with :term:`size
      parameters <size parameter>`.
 
+   Uniform
+
+     Whether something is invariant :term:`invariant` to the enclosing
+     :term:`map nest`. The precise meaning depends on the thing is question, for
+     example, we speak of :term:`uniform nested data parallelism` if the size
+     (and control flow leading to) a parallel construct is invariant to the
+     enclosing map nest, without considering the concrete values.
+
+   Uniform nested data parallelism
+
+     An instance of :term:`nested data parallelism` that is not
+     :term:`nonuniform`. This is much more efficient than :term:`nonuniform
+     nested data parallelism`.
+
    Uniqueness types
 
      A somewhat misleading term that describes Futhark's system of
@@ -446,9 +455,8 @@ documentation and in compiler output.
 
    Variant
 
-     When some value ``v`` computed inside a loop takes a different
-     value for each iteration inside the loop, we say that ``v`` is
-     *variant* to the loop (and otherwise :term:`invariant`).  Often
-     used to talk about :term:`irregularity <irregular>`.  When
-     something is nested inside multiple loops, it may be variant to
-     just one of them.
+     When some value ``v`` computed inside a loop takes a different value for
+     each iteration inside the loop, we say that ``v`` is *variant* to the loop
+     (and otherwise :term:`invariant`). Often used to talk about
+     :term:`uniformity <uniform>`. When something is nested inside multiple
+     loops, it may be variant to just one of them.

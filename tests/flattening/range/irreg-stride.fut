@@ -1,0 +1,8 @@
+-- ==
+-- input { 10i64 [1,2] }
+-- output { [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+--           [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]]
+--        }
+-- structure gpu { /SegMap 2 /Apply/segiota 1 }
+
+def main k = map (\s -> (0..s..<s * i32.i64 k) :> [k]i32)

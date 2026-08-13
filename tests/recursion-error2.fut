@@ -2,7 +2,6 @@
 -- except as a saturated application, so it cannot be aliased and then applied
 -- with a changed argument.
 -- ==
--- tags { disable }
 -- error: higher-order parameter
 
 def repeat (n: i64) (f: i64 -> i64) (x: i64) : i64 =

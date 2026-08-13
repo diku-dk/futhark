@@ -363,7 +363,7 @@ unifyWith onDims usage = subunify False
                     </> indent 2 (pretty d2 <> pretty a2)
                     </> "are incompatible regarding consuming their arguments."
             | uncurry (<) $ swap ord (uniqueness b2) (uniqueness b1) -> do
-                unifyError usage mempty bcs . withIndexLink "unify-return-uniqueness" $
+                unifyError usage mempty bcs $
                   "Return types"
                     </> indent 2 (pretty b1)
                     </> "and"
@@ -630,7 +630,7 @@ linkVarToDim usage bcs vn lvl e = do
     checkVar _ dim'
       | vn == dim' = do
           notes <- dimNotes usage e
-          unifyError usage notes bcs $
+          unifyError usage notes bcs . withIndexLink "occurs-check" $
             "Occurs check: cannot instantiate"
               <+> dquotes (prettyName vn)
               <+> "with"
@@ -643,16 +643,17 @@ linkVarToDim usage bcs vn lvl e = do
             ParamSize {} -> do
               notes <- dimNotes usage e
               unifyError usage notes bcs $
-                "Cannot link size"
-                  <+> dquotes (prettyName vn)
-                  <+> "to"
-                  <+> dquotes (pretty e)
-                  <+> "(scope violation)."
-                  </> "This is because"
-                  <+> dquotes (pretty $ qualName dim')
-                  <+> "is not in scope when"
-                  <+> dquotes (prettyName vn)
-                  <+> "is introduced."
+                withIndexLink "scope-violation" $
+                  "Cannot link size"
+                    <+> dquotes (prettyName vn)
+                    <+> "to"
+                    <+> dquotes (pretty e)
+                    <+> "(scope violation)."
+                    </> "This is because"
+                    <+> dquotes (pretty $ qualName dim')
+                    <+> "is not in scope when"
+                    <+> dquotes (prettyName vn)
+                    <+> "is introduced."
             _ -> modifyConstraints $ M.insert dim' (lvl, c)
     checkVar _ _ = pure ()
 

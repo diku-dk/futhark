@@ -241,8 +241,7 @@ def scatter_3d 't [k] [n] [o] [l] (dest: *[k][n][o]t) (is: [l](i64, i64, i64)) (
 def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
   let flags = map p as
   let offsets = scan (+) 0 (map intrinsics.btoi_bool_i64 flags)
-  let flags' = map p as
-  let is = map2 (\f o -> if f then o - 1 else -1) flags' offsets
+  let is = map2 (\f o -> if f then o - 1 else -1) flags offsets
   -- This following is carefully written such that the two scatters will be
   -- fused horisontally, which allows the entire thing to become a single
   -- kernel.
@@ -259,13 +258,15 @@ def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
 -- **Work:** *O(n ✕ W(p))*
 --
 -- **Span:** *O(log(n) ✕ W(p))*
-def partition [n] 'a (p: a -> bool) (as: [n]a) : ?[k].([k]a, [n - k]a) =
-  let offset =
-    reduce_comm (+) 0 (map (\x -> intrinsics.btoi_bool_i64 (p x)) as)
+def partition [n] 'a
+              (p: a -> bool)
+              (as: [n]a) : ?[k].([k]a, [n - k]a) =
+  let to_index0 f (o0, _o1) = if f then o0 - 1 else -1
+  let to_index1 f (_o0, o1) = if f then n - o1 else -1
   let add2 (a0, b0) (a1, b1) = (a0 + a1, b0 + b1)
-  let to_index f (o0, o1) = if f then o0 - 1i64 else offset + o1 - 1
   let t_flags = map p as
-  let f_flags = map (\x -> !x) t_flags
+  let rev_as = as[::-1]
+  let f_flags = map (\x -> !x) (map p rev_as)
   let flags =
     map2 (\x y ->
             ( intrinsics.btoi_bool_i64 x
@@ -274,9 +275,15 @@ def partition [n] 'a (p: a -> bool) (as: [n]a) : ?[k].([k]a, [n - k]a) =
          t_flags
          f_flags
   let offsets = scan add2 (0, 0) flags
-  let idxs = map2 to_index (map p as) offsets
-  let res = scatter (#[scratch] [as][0]) idxs as
-  in (res[0:offset], res[offset:n])
+  let idxs0 = map2 to_index0 t_flags offsets
+  let idxs1 = map2 to_index1 f_flags offsets
+  let is = intrinsics.concat idxs0 idxs1
+  let res = scatter (#[scratch] [as][0]) is (intrinsics.concat as rev_as)
+  let count =
+    scatter [0]
+            (map (\j -> if j == n - 1 then 0 else -1) (0..1..<n))
+            (map (.0) offsets)
+  in (res[0:count[0]], res[count[0]:n])
 
 -- | Split an array by two predicates, producing three arrays.
 --
@@ -314,3 +321,40 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
      , res[offset0:offset0 + offset1] :> [offset1]a
      , res[offset0 + offset1:n] :> [n - offset0 - offset1]a
      )
+
+-- | Perform a flattened map of a function `f`, that produces a nonuniform and
+-- uniform-sized result, over the array `as`. Returns the concatenation of the
+-- nonuniform results and an array of the uniforms, alongside metadata allowing
+-- the interpretation of the concatenated segments as an irregular array. In
+-- order:
+--
+-- * The *shape array*, giving the size of each segment. This array sums to `m`.
+--
+-- * The *flag array*, indicating for each element when a new segment begins.
+--
+-- * The *offset array*, indicating for each segment where its values begin in
+--   the data array.
+--
+-- * The *data array*, comprising the concatenated results of `f`.
+--
+-- * An array of uniform results, which has no special name.
+def flatmap [n] 'a 'b 'c
+            (f: a -> ?[k].([k]b, c))
+            (as: [n]a) : ?[m].( [n]i64
+                              , [m]bool
+                              , [n]i64
+                              , [m]b
+                              , [n]c
+                              ) =
+  intrinsics.flatmap f as
+
+-- | Like `flatmap`, but without the value result.
+def flatmap' [n] 'a 'b
+             (f: a -> ?[k].[k]b)
+             (as: [n]a) : ?[m].( [n]i64
+                               , [m]bool
+                               , [n]i64
+                               , [m]b
+                               ) =
+  let (S, F, O, D, _) = flatmap (\x -> (f x, ())) as
+  in (S, F, O, D)

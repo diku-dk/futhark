@@ -1,5 +1,4 @@
 -- ==
--- tags { no_opencl no_cuda no_hip no_pyopencl }
 
 type index = {x: i64, y: i64, z: i64}
 

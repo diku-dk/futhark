@@ -186,7 +186,7 @@ ruleBasicOp vtable pat aux (Update _ dest destis (Var v))
       False
 ruleBasicOp vtable pat aux (Update Unsafe dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
-    isFullSlice (arrayShape dest_t) is = Simplify . auxing aux $
+    isIdentitySlice (arrayShape dest_t) is = Simplify . auxing aux $
       case se of
         Var v | not $ null $ sliceDims is -> do
           v_t <- lookupType v

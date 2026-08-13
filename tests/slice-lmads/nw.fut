@@ -113,7 +113,7 @@ entry nw_flat [n]
     loop input for i < num_blocks do
       let ip1 = i + 1
       let v =
-        #[incremental_flattening(only_intra)]
+        #[flattening(only_intra)]
         map2 (process_block penalty)
              (flat_index_3d input
                             (i * block_size)
@@ -140,7 +140,7 @@ entry nw_flat [n]
   let input =
     loop input for i < num_blocks - 1 do
       let v =
-        #[incremental_flattening(only_intra)]
+        #[flattening(only_intra)]
         map2 (process_block penalty)
              (flat_index_3d input
                             (((i + 1) * block_size + 1) * row_length - block_size - 1)

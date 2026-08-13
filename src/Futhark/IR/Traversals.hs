@@ -367,6 +367,6 @@ class TraverseOpStms rep where
   traverseOpStms :: (Monad m) => OpStmsTraverser m (Op rep) rep
 
 -- | A helper for defining 'traverseOpStms'.
-traverseLambdaStms :: (Monad m) => OpStmsTraverser m (Lambda rep) rep
+traverseLambdaStms :: (Monad m) => OpStmsTraverser m (GLambda rep t) rep
 traverseLambdaStms f (Lambda ps ret (Body dec stms res)) =
   Lambda ps ret <$> (Body dec <$> f (scopeOfLParams ps) stms <*> pure res)

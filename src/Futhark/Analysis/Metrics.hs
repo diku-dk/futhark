@@ -17,8 +17,10 @@ where
 
 import Control.Monad
 import Control.Monad.Writer
+import Data.Foldable (for_)
 import Data.List (tails)
 import Data.Map.Strict qualified as M
+import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Futhark.Analysis.Metrics.Type
@@ -78,13 +80,15 @@ inside what m = seen what >> censor addWhat m
     addWhat' (ctx, k) = (what : ctx, k)
 
 -- | Compute the metrics for a program.
+--
+-- Metrics inside builtin functions are ignored.
 progMetrics :: (OpMetrics (Op rep)) => Prog rep -> AstMetrics
 progMetrics prog =
-  actualMetrics $
-    execWriter $
-      runMetricsM $ do
-        mapM_ funDefMetrics $ progFuns prog
-        mapM_ stmMetrics $ progConsts prog
+  actualMetrics . execWriter . runMetricsM $ do
+    mapM_ funDefMetrics $
+      filter (isNothing . isBuiltinName . funDefName) $
+        progFuns prog
+    mapM_ stmMetrics $ progConsts prog
 
 funDefMetrics :: (OpMetrics (Op rep)) => FunDef rep -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
@@ -113,8 +117,8 @@ expMetrics (Match _ cases defbody _) =
     forM_ (zip [0 ..] cases) $ \(i, c) ->
       inside (showText (i :: Int)) $ bodyMetrics $ caseBody c
     inside "default" $ bodyMetrics defbody
-expMetrics Apply {} =
-  seen "Apply"
+expMetrics (Apply fname _ _ _) =
+  inside "Apply" $ for_ (isBuiltinName fname) seen
 expMetrics (WithAcc _ lam) =
   inside "WithAcc" $ lambdaMetrics lam
 expMetrics (Op op) =
@@ -145,5 +149,5 @@ basicOpMetrics UpdateAcc {} = seen "UpdateAcc"
 basicOpMetrics UserParam {} = seen "UserParam"
 
 -- | Compute metrics for this lambda.
-lambdaMetrics :: (OpMetrics (Op rep)) => Lambda rep -> MetricsM ()
+lambdaMetrics :: (OpMetrics (Op rep)) => GLambda rep t -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

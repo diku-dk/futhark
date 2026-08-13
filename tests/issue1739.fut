@@ -10,6 +10,6 @@ entry main [n] [m] (xs: [3][3]f32) (as: *[n][m]f32) =
            xs
        |> map (map (+ (f32.i64 i)))
   let bs =
-    #[incremental_flattening(no_intra)]
+    #[flattening(no_intra)]
     tabulate n f
   in bs

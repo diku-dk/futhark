@@ -20,7 +20,7 @@ import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Error
-import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
+import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote, withIndexLink)
 import Language.Futhark.TypeChecker.UnionFind
 
 -- | The type representation used by the constraint solver. Agnostic
@@ -218,8 +218,10 @@ substTyVars (Array u shape elemt) = do
 occursCheck :: Reason Type -> VName -> VName -> Type -> SolveM s ()
 occursCheck reason v k tp = do
   let vars = typeVars tp
-  when (k `S.member` vars) . typeError (locOf reason) mempty $
-    "Occurs check: cannot instantiate"
+  when (k `S.member` vars)
+    . typeError (locOf reason) mempty
+    . withIndexLink "occurs-check"
+    $ "Occurs check: cannot instantiate"
       <+> prettyName v
       <+> "with"
       <+> pretty tp
@@ -618,7 +620,7 @@ unionTyVars reason bcs v v_node t_node = do
 
 scopeViolation :: Reason Type -> VName -> Type -> VName -> SolveM s ()
 scopeViolation reason v1 ty v2 =
-  typeError (locOf reason) mempty $
+  typeError (locOf reason) mempty . withIndexLink "scope-violation" $
     "Cannot unify type"
       </> indent 2 (pretty ty)
       </> "with"
@@ -701,7 +703,7 @@ solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
     Left _ ->
-      typeError loc mempty $
+      typeError loc mempty . withIndexLink "ambiguous-type" $
         "Type"
           <+> prettyName tv
           <+> "is ambiguous."
@@ -712,7 +714,7 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
     Left _ ->
-      typeError loc mempty $
+      typeError loc mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous."
           </> "Must be a sum type with constructors"
           </> indent 2 (pretty (Scalar (Sum cs1)))

@@ -82,12 +82,10 @@ where
 
 import Control.Category
 import Control.Monad
-import Control.Monad.State
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Loc (locEnd, locStart)
-import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.String
@@ -178,43 +176,12 @@ newtype Rank = Rank Int
   deriving (Show, Eq, Ord)
 
 -- | A class encompassing types containing array shape information.
-class (Monoid a, Eq a, Ord a) => ArrayShape a where
+class (Monoid a) => ArrayShape a where
   -- | Return the rank of an array with the given size.
   shapeRank :: a -> Int
 
-  -- | Check whether one shape if a subset of another shape.
-  subShapeOf :: a -> a -> Bool
-
-  -- | Prepend the dimensions of a 'Shape'.
-  prependShape :: Shape -> a -> a
-
-instance ArrayShape (ShapeBase SubExp) where
+instance ArrayShape (ShapeBase a) where
   shapeRank (Shape l) = length l
-  subShapeOf = (==)
-  prependShape = (<>)
-
-instance ArrayShape (ShapeBase ExtSize) where
-  shapeRank (Shape l) = length l
-  subShapeOf (Shape ds1) (Shape ds2) =
-    -- Must agree on Free dimensions, and ds1 may not be existential
-    -- where ds2 is Free.  Existentials must also be congruent.
-    length ds1 == length ds2
-      && evalState (and <$> zipWithM subDimOf ds1 ds2) M.empty
-    where
-      subDimOf (Free se1) (Free se2) = pure $ se1 == se2
-      subDimOf (Ext _) (Free _) = pure False
-      subDimOf (Free _) (Ext _) = pure True
-      subDimOf (Ext x) (Ext y) = do
-        extmap <- get
-        case M.lookup y extmap of
-          Just ywas
-            | ywas == x -> pure True
-            | otherwise -> pure False
-          Nothing -> do
-            put $ M.insert y x extmap
-            pure True
-
-  prependShape shape = (fmap Free shape <>)
 
 instance Semigroup Rank where
   Rank x <> Rank y = Rank $ x + y
@@ -224,8 +191,6 @@ instance Monoid Rank where
 
 instance ArrayShape Rank where
   shapeRank (Rank x) = x
-  subShapeOf = (==)
-  prependShape shape (Rank x) = Rank $ shapeRank shape + x
 
 -- | The memory space of a block.  If 'DefaultSpace', this is the "default"
 -- space, whatever that is.  The exact meaning of the 'SpaceId'

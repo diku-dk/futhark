@@ -1941,6 +1941,40 @@ initialCtx =
               error $
                 "Invalid arguments to map intrinsic:\n"
                   ++ unlines [prettyString t, show f, show xs]
+    def "flatmap" = Just $
+      TermPoly Nothing $ \t ->
+        pure $ ValueFun $ \f -> pure . ValueFun $ \xs ->
+          case unfoldFunType t of
+            ([_, _], ret_t)
+              | Just [_, _, _, irreg_t, reg_t] <- isTupleRecord ret_t -> do
+                  irreg_rowshape <- typeShape <$> evalTypeFully (stripArray 1 irreg_t)
+                  reg_rowshape <- typeShape <$> evalTypeFully (stripArray 1 reg_t)
+                  yss <-
+                    mapM
+                      (apply noLoc mempty f)
+                      (snd $ fromArray xs)
+                  -- Each application produces a segment, which is concatenated
+                  -- with the others, and a value that is merely collected.
+                  let (segs, regs) = unzip $ map (fromPair . fromTuple) yss
+                      seg_sizes = map (genericLength . snd . fromArray) segs :: [Int64]
+                      offsets = init $ scanl (+) 0 seg_sizes
+                      flag s = if s == 0 then [] else True : replicate (fromIntegral s - 1) False
+                      mkI64 = ValuePrim . SignedValue . Int64Value
+                  pure $
+                    toTuple
+                      [ toArray' ShapeLeaf $ map mkI64 seg_sizes,
+                        toArray' ShapeLeaf $ map (ValuePrim . BoolValue) $ concatMap flag seg_sizes,
+                        toArray' ShapeLeaf $ map mkI64 offsets,
+                        toArray' irreg_rowshape $ concatMap (snd . fromArray) segs,
+                        toArray' reg_rowshape regs
+                      ]
+            _ ->
+              error $
+                "Invalid arguments to flatmap intrinsic:\n"
+                  ++ unlines [show f, show xs]
+      where
+        fromPair (Just [x, y]) = (x, y)
+        fromPair _ = error "flatmap: lambda did not return a pair"
     def s | "reduce" `T.isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs

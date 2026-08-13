@@ -970,7 +970,7 @@ segOpBlocker space = do
   where
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
     -- Hoisting out slicing is useless and potentially dangerous, as protecting
-    -- it can cause irregular parallelism.
+    -- it can cause nonuniform parallelism.
     isSlice _ _ (Let _ _ (BasicOp (Index _ slice))) =
       sliceShape slice /= mempty
     isSlice _ _ _ = False
@@ -1043,8 +1043,9 @@ simplifySegBinOp ::
   Engine.SimpleM rep (SegBinOp (Wise rep), Stms (Wise rep))
 simplifySegBinOp phys_id (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
-    Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-      simplifyLambda (oneName phys_id) lam
+    Engine.enterLoop
+      . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+      $ simplifyLambda (oneName phys_id) lam
   shape' <- Engine.simplify shape
   nes' <- mapM Engine.simplify nes
   pure (SegBinOp comm lam' nes' shape', hoisted)
@@ -1056,8 +1057,9 @@ simplifySegPostOp ::
   Engine.SimpleM rep (SegPostOp (Wise rep), Stms (Wise rep))
 simplifySegPostOp space (SegPostOp lam) = do
   (lam', hoisted) <-
-    Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-      simplifyLambda bound_here lam
+    Engine.enterLoop
+      . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+      $ simplifyLambda bound_here lam
   pure (SegPostOp lam', hoisted)
   where
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space

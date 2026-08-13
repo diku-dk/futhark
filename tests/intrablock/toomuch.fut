@@ -12,7 +12,7 @@ def vecadd (a: vec) (b: vec) =
 def psum = scan vecadd (0, 0, 0, 0)
 
 def main (xss: [][]f64) (yss: [][]f64) (zss: [][]f64) (vss: [][]f64) =
-  #[incremental_flattening(no_outer)]
+  #[flattening(no_outer)]
   map (psum >-> psum >-> psum >-> psum >-> psum >-> psum >-> psum >-> psum >-> psum)
       (map4 zip4 xss yss zss vss)
   |> map unzip4

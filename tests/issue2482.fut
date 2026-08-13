@@ -6,6 +6,6 @@ def main [n] [k] [l] (xs: [n][l][k]f32) (ys: [n][l][n][k]f32) =
     ( map2 f32.max xa ya
     , map2 (map2 (+)) xb yb
     )
-  in #[incremental_flattening(only_inner)]
+  in #[flattening(only_inner)]
      unzip (map (reduce op (replicate k f32.lowest, replicate n (replicate k 0)))
                 (map2 zip xs ys))

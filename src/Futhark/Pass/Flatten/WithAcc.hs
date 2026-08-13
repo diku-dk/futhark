@@ -1,0 +1,322 @@
+-- | Flattening of 'WithAcc'.
+--
+-- The basic idea is that in the nonuniform case, we change the 'WithAcc' to be
+-- over the data array of the irregular representation. We then update all the
+-- 'UpdateAcc' operations to compute flat indexes, via the usual metadata
+-- arrays.
+module Futhark.Pass.Flatten.WithAcc
+  ( flattenWithAcc,
+  )
+where
+
+import Control.Monad
+import Data.Foldable
+import Data.List qualified as L
+import Data.Map qualified as M
+import Futhark.IR.GPU
+import Futhark.IR.SOACS
+import Futhark.MonadFreshNames
+import Futhark.Pass.Flatten.Distribute
+import Futhark.Pass.Flatten.General
+import Futhark.Tools
+import Futhark.Transform.ToGPU (soacsLambdaToGPU)
+import Prelude hiding (div, rem)
+
+indexIrreg ::
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
+  Segments ->
+  DistEnv ->
+  IrregularRep ->
+  SubExp ->
+  Safety ->
+  ShapeBase SubExp ->
+  [SubExp] ->
+  m SubExp
+indexIrreg _segments _env rep is safety shape js = do
+  offset <- letSubExp "uacc_segment_offset" =<< eIndex (irregularO rep) [eSubExp is]
+  flat <-
+    letSubExp "flat_uacc_idx" <=< toExp $
+      pe64 offset
+        + flattenIndex
+          (map pe64 (shapeDims shape))
+          (map pe64 js)
+  case safety of
+    Unsafe -> pure flat
+    -- The original per-segment index 'js' may be out of bounds, which for a
+    -- safe 'UpdateAcc' is a deliberate no-op. Adding the segment offset might
+    -- turn such an out-of-bounds index into an in-bounds index into a
+    -- neighbouring segment, so we must preserve the out-of-boundedness
+    -- explicitly.
+    Safe -> do
+      inbounds <- letSubExp "uacc_inbounds" =<< eShapeInBounds shape (map eSubExp js)
+      letSubExp "uacc_flat_idx"
+        =<< eIf
+          (eSubExp inbounds)
+          (eBody [eSubExp flat])
+          (eBody [eSubExp (intConst Int64 (-1))])
+
+-- If just one input is nonuniform, we treat them all as nonuniform.
+flattenWithAcc ::
+  FlattenOps ->
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  [DistResult] ->
+  Pat Type ->
+  StmAux () ->
+  [WithAccInput SOACS] ->
+  Lambda SOACS ->
+  FlattenM DistEnv
+flattenWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_inputs acc_lam = do
+  lam_params' <- newAccLamParams $ lambdaParams acc_lam
+
+  iota_w <- genShapeIota (flattenSegLevel ops) $ segmentsShape segments
+
+  iota_p <- newParam "iota_p" $ Prim int64
+  -- Type in DistInputFree is parameter type
+  let iota_w_t = Prim int64
+  let iota_se = Var (paramName iota_p)
+
+  -- Potentially change to distres option.
+  let nonuniform =
+        not $
+          all (\(_, arrs, _) -> all (isRegularInputArr env inps) arrs) withacc_inputs
+
+  (withacc_inputs', trAccIndex, non_uniform_reps) <-
+    if nonuniform
+      then do
+        (withacc_inputs', input_reps) <-
+          mapAndUnzipM onNonuniformInput withacc_inputs
+        let trAccIndex c safety is = do
+              ((shape, _, _), rep : _) <-
+                L.lookup c $
+                  zip (map paramName lam_params') $
+                    zip withacc_inputs input_reps
+              Just $ L.singleton <$> indexIrreg segments env rep iota_se safety shape is
+        pure (withacc_inputs', trAccIndex, concat input_reps)
+      else do
+        withacc_inputs' <- mapM onUniformInput withacc_inputs
+        let trAccIndex c _safety is = do
+              _ <- L.lookup c $ zip (map paramName lam_params') withacc_inputs
+              Just $ do
+                iota_se_unflat <-
+                  mapM (letSubExp "iota_idx" <=< toExp) $
+                    unflattenIndex (segmentDims segments) (pe64 iota_se)
+                pure $ iota_se_unflat ++ is
+        pure (withacc_inputs', trAccIndex, [])
+  let trAccShape c = do
+        (ispace, _, _) <- L.lookup c $ zip (map paramName lam_params') withacc_inputs'
+        pure ispace
+      sf = (trAccShape, trAccIndex)
+
+  acc_lam_body <-
+    runBodyBuilder $
+      localScope (scopeOfLParams lam_params') $
+        bodyBind . lambdaBody =<< trLam sf acc_lam
+
+  scope <- askScope
+  let orig_acc_params = drop num_accs $ lambdaParams acc_lam
+      lam_params_tr = map (trParam sf) lam_params'
+      acc_params_tr = drop num_accs lam_params_tr
+      interchanged_inps =
+        (paramName iota_p, DistInputFree iota_w iota_w_t)
+          : [ (paramName p, DistInputFree (paramName acc) (paramType acc))
+            | -- This could potentially be wrong but since it's acc type it should be fine.
+              (p, acc) <- zip orig_acc_params acc_params_tr
+            ]
+          ++ inps
+
+  let (withacc_new_inputs, withacc_dstms) =
+        distributeBodyWith ops scope segments interchanged_inps acc_lam_body
+
+  withacc_lam' <- mkLambda (map (trParam sf) lam_params') $ do
+    env' <- foldM (flattenDistStm ops segments) env withacc_dstms
+    reps <-
+      mapM
+        (liftWithAccResult (flattenSegLevel ops) segments withacc_new_inputs env')
+        (zip distres (bodyResult $ lambdaBody acc_lam))
+    concat <$> mapM repToResults reps
+
+  withacc_out_vs <-
+    certifying (distCerts inps withacc_aux env) $
+      letTupExp "withacc_flatten_out" (WithAcc withacc_inputs' withacc_lam')
+
+  -- The accumulator results are handled differently in the nonuniform case,
+  -- since we do not have metadata for them and since all of them are turned
+  -- flat even when they might actually be regular. We can still turn the
+  -- distres that are regular into Regulars here.
+  let num_acc_results = sum [length arrs | (_, arrs, _) <- withacc_inputs]
+      (withacc_out_vs_wo, withacc_out_vs_no) = splitAt num_acc_results withacc_out_vs
+      (distres_withacc, distres_normal) = splitAt num_acc_results distres
+
+  let out_reps_normal = resultToResRepsByDistResult distres_normal withacc_out_vs_no
+  out_reps_withacc <-
+    if nonuniform
+      then mapM mkNonuniformWithAccRep (zip3 withacc_out_vs_wo non_uniform_reps distres_withacc)
+      else pure $ map Regular withacc_out_vs_wo
+  insertRepsM (zip (map distResTag $ distres_withacc ++ distres_normal) (out_reps_withacc ++ out_reps_normal)) env
+  where
+    newAccLamParams ps = do
+      let (cert_ps, acc_ps) = splitAt num_accs ps
+      -- Should not rename the certificates.
+      acc_ps' <- forM acc_ps $ \(Param attrs v t) ->
+        Param attrs <$> newName v <*> pure t
+      pure $ cert_ps <> acc_ps'
+
+    num_accs = length withacc_inputs
+
+    onOpWithIndexRank index_rank (op_lam, nes) = do
+      -- We need to add an additional index parameter because we are extending
+      -- the index space of the accumulator. In the uniform case we have the
+      -- full index space of the segments, while in the nonuniform case we only
+      -- have one additional dimension.
+      idx_ps <- replicateM index_rank $ newParam "idx" $ Prim int64
+      pure
+        ( soacsLambdaToGPU $
+            op_lam {lambdaParams = idx_ps <> lambdaParams op_lam},
+          nes
+        )
+
+    -- Let's use liftSubExpRegular here
+    onUniformInput (shape, arrs, op) =
+      (segmentsShape segments <> shape,,)
+        <$> mapM onArr arrs
+        <*> traverse (onOpWithIndexRank (segmentsRank segments)) op
+      where
+        onArr arr = do
+          arr_t <- lookupInputType inps arr
+          let arr_shape = arrayShape arr_t
+              expected_shape = segmentsShape segments <> arr_shape
+          liftSubExpRegular (flattenSegLevel ops) segments inps env expected_shape (Var arr)
+
+    onNonuniformOp rank (op, nes) = do
+      let (old_idx_ps, value_ps) = splitAt rank $ lambdaParams op
+          old_indices_used =
+            any (\p -> paramName p `nameIn` freeIn (lambdaBody op)) old_idx_ps
+      -- XXX: It is possible to change the lambda body to restore the indices based on flat_idx_p and handle this.
+      when old_indices_used $
+        error "flattenWithAcc: accumulator operator uses nonuniform indices"
+      flat_idx_p <- newParam "flat_idx" $ Prim int64
+      pure
+        ( soacsLambdaToGPU $
+            op
+              { lambdaParams = flat_idx_p : value_ps
+              },
+          nes
+        )
+    onNonuniformInput (shape, arrs, op) = do
+      reps <- mapM (getIrregRep (flattenSegLevel ops) segments env inps) arrs
+      -- We need to ensure that the irregular arrays are dense
+      reps_dense <- mapM (ensureDenseIrregular (flattenSegLevel ops) "withacc_input") reps
+      let arrs' = map irregularD reps_dense
+      w <- fmap (arraySize 0) . lookupType $ head arrs'
+      -- We need to reshape to make sure all of the inputs have the same shape
+      arrs'' <- forM arrs' $ \v -> do
+        v_t <- lookupType v
+        letExp (baseName v <> "_withacc_input_reshaped") . BasicOp $
+          Reshape v $
+            reshapeAll (arrayShape v_t) (Shape [w])
+      (,reps_dense) . (Shape [w],arrs'',) <$> traverse (onNonuniformOp (shapeRank shape)) op
+
+    -- The irregular kind is not carried through the results of the
+    -- WithAcc, and 'mkNormalResReps' reconstructs the rep as Dense, so
+    -- any irregular rep must actually be made dense before it crosses
+    -- the WithAcc boundary.
+    ensureDenseRep lvl (Irregular irreg) =
+      Irregular <$> ensureDenseIrregular lvl "withacc_result" irreg
+    ensureDenseRep _ rep = pure rep
+
+    liftWithAccResult lvl segs inputs env' (dist_res, res) =
+      case resSubExp res of
+        Var v -> do
+          let (Just (t, rep)) = M.lookup v $ inputReps inputs env'
+          if isAcc t
+            then
+              pure rep
+            else
+              ensureDenseRep lvl =<< liftDistResultRep lvl segs inputs env' dist_res res
+        Constant _ -> ensureDenseRep lvl =<< liftDistResultRep lvl segs inputs env' dist_res res
+
+    repToResults (Regular v) =
+      pure [SubExpRes mempty $ Var v]
+    repToResults (Irregular irreg) =
+      map (SubExpRes mempty . Var) <$> irregResults irreg
+
+    irregResults
+      ( IrregularRep
+          { irregularS = segs,
+            irregularF = flags,
+            irregularO = offsets,
+            irregularD = elems
+          }
+        ) = do
+        flags_t <- lookupType flags
+        t <- lookupType elems
+        num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
+        let shape = Shape [Var num_data]
+        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
+        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
+        pure [num_data, segs, flags', offsets, elems']
+
+    mkNonuniformWithAccRep (v, rep, dist_res)
+      | isRegularDistResult dist_res = do
+          let DistType _ _ t = distResType dist_res
+              expectedShape = segmentsShape segments <> arrayShape t
+          v_t <- lookupType v
+          v_reshaped <-
+            letExp "actual_regular_with_acc_res" . BasicOp $
+              Reshape v (reshapeAll (arrayShape v_t) expectedShape)
+          pure $ Regular v_reshaped
+      | otherwise =
+          pure $ Irregular $ rep {irregularD = v}
+
+    trType ::
+      (VName -> Maybe Shape, VName -> Safety -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
+      TypeBase shape u ->
+      TypeBase shape u
+    trType sf (Acc acc _ ts u)
+      | Just shape <- fst sf acc =
+          Acc acc shape ts u
+    trType _ t = t
+
+    trParam ::
+      (VName -> Maybe Shape, VName -> Safety -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
+      Param (TypeBase Shape u) ->
+      Param (TypeBase Shape u)
+    trParam sf = fmap $ trType sf
+
+    trBody sf (Body dec stms res) =
+      Body dec <$> collectStms_ (traverse_ onStm stms) <*> pure res
+      where
+        onStm (Let pat aux e) =
+          addStm . Let (fmap (trType sf) pat) aux =<< trExp sf pat e
+
+    trLam sf (Lambda params ret body) =
+      Lambda (map (trParam sf) params) (map (trType sf) ret) <$> trBody sf body
+
+    trSOAC sf = mapSOACM mapper
+      where
+        mapper =
+          identitySOACMapper {mapOnSOACLambda = trLam sf}
+
+    trExp sf _ (WithAcc acc_inputs lam) =
+      WithAcc acc_inputs <$> trLam sf lam
+    trExp sf (Pat [PatElem _ acc_t]) (BasicOp (UpdateAcc safety acc is ses)) = do
+      case acc_t of
+        Acc cert _ _ _
+          | Just mk <- snd sf cert safety is -> do
+              is' <- mk
+              pure $ BasicOp $ UpdateAcc safety acc is' ses
+        _ ->
+          pure $ BasicOp $ UpdateAcc safety acc is ses
+    trExp sf _ e = mapExpM mapper e
+      where
+        mapper =
+          identityMapper
+            { mapOnBody = \_ -> trBody sf,
+              mapOnRetType = pure . trType sf,
+              mapOnBranchType = pure . trType sf,
+              mapOnFParam = pure . trParam sf,
+              mapOnLParam = pure . trParam sf,
+              mapOnOp = trSOAC sf
+            }

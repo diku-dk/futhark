@@ -1074,36 +1074,36 @@ instance (Simplifiable d) => Simplifiable (Slice d) where
   simplify = traverse simplify
 
 simplifyLambda ::
-  (SimplifiableRep rep) =>
+  (SimplifiableRep rep, Simplifiable t) =>
   Names ->
-  Lambda (Wise rep) ->
-  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+  GLambda (Wise rep) t ->
+  SimpleM rep (GLambda (Wise rep) t, Stms (Wise rep))
 simplifyLambda extra_bound lam = do
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   simplifyLambdaMaybeHoist (par_blocker `orIf` hasFree extra_bound) mempty lam
 
 simplifyLambdaNoHoisting ::
-  (SimplifiableRep rep) =>
-  Lambda (Wise rep) ->
-  SimpleM rep (Lambda (Wise rep))
+  (SimplifiableRep rep, Simplifiable t) =>
+  GLambda (Wise rep) t ->
+  SimpleM rep (GLambda (Wise rep) t)
 simplifyLambdaNoHoisting lam =
   fst <$> simplifyLambdaMaybeHoist (isFalse False) mempty lam
 
 simplifyLambdaMaybeHoist ::
-  (SimplifiableRep rep) =>
+  (SimplifiableRep rep, Simplifiable t) =>
   BlockPred (Wise rep) ->
   UT.UsageTable ->
-  Lambda (Wise rep) ->
-  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+  GLambda (Wise rep) t ->
+  SimpleM rep (GLambda (Wise rep) t, Stms (Wise rep))
 simplifyLambdaMaybeHoist = simplifyLambdaWith id
 
 simplifyLambdaWith ::
-  (SimplifiableRep rep) =>
+  (SimplifiableRep rep, Simplifiable t) =>
   (ST.SymbolTable (Wise rep) -> ST.SymbolTable (Wise rep)) ->
   BlockPred (Wise rep) ->
   UT.UsageTable ->
-  Lambda (Wise rep) ->
-  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+  GLambda (Wise rep) t ->
+  SimpleM rep (GLambda (Wise rep) t, Stms (Wise rep))
 simplifyLambdaWith f blocked usage lam@(Lambda params rettype body) = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam

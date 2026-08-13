@@ -172,7 +172,7 @@ instance (Substitute shape) => Substitute (TypeBase shape u) where
   substituteNames _ (Mem space) =
     Mem space
 
-instance (Substitutable rep) => Substitute (Lambda rep) where
+instance (Substitutable rep, Substitute t) => Substitute (GLambda rep t) where
   substituteNames substs (Lambda params rettype body) =
     Lambda
       (substituteNames substs params)

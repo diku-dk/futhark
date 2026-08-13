@@ -1015,6 +1015,25 @@ intrinsics =
                   ]
                   $ RetType []
                   $ Scalar (t_b Nonunique)
+              ),
+              ( "flatmap",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, tp_c, sp_n]
+                  [ Scalar $
+                      Arrow mempty Unnamed Observe (Scalar (t_a NoUniqueness)) $
+                        RetType [k] . Scalar . tupleRecord $
+                          [ array_b Nonunique (shape [k]),
+                            Scalar $ t_c Nonunique
+                          ],
+                    array_a Observe $ shape [n]
+                  ]
+                  $ RetType [m] . Scalar . tupleRecord
+                  $ [ Array Unique (shape [n]) (Prim $ Signed Int64),
+                      Array Unique (shape [m]) (Prim Bool),
+                      Array Unique (shape [n]) (Prim $ Signed Int64),
+                      array_b Unique $ shape [m],
+                      array_c Unique $ shape [n]
+                    ]
               )
             ]
               ++
@@ -1157,7 +1176,7 @@ intrinsics =
 
     intrinsicStart = 1 + baseTag (fst $ last primOp)
 
-    [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromText ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
+    [a, b, c, n, m, k, l, p, q] = zipWith VName (map nameFromText ["a", "b", "c", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
     t_a u = TypeVar u (qualName a) []
     array_a u s = Array u s $ t_a mempty
@@ -1166,6 +1185,10 @@ intrinsics =
     t_b u = TypeVar u (qualName b) []
     array_b u s = Array u s $ t_b mempty
     tp_b = TypeParamType Unlifted b mempty
+
+    t_c u = TypeVar u (qualName c) []
+    array_c u s = Array u s $ t_c mempty
+    tp_c = TypeParamType Unlifted c mempty
 
     [sp_n, sp_m, sp_k, sp_l, sp_p, sp_q] = map (`TypeParamDim` mempty) [n, m, k, l, p, q]
 

@@ -61,11 +61,7 @@ instance IsRetType DeclExtType where
 
   applyRetType extret params args =
     if length args == length params
-      && and
-        ( zipWith subtypeOf argtypes $
-            expectedTypes (map paramName params) params $
-              map fst args
-        )
+      && argtypes == expectedTypes (map paramName params) params (map fst args)
       then Just $ map correctExtDims extret
       else Nothing
     where

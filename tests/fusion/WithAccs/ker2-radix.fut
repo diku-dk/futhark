@@ -1,5 +1,5 @@
-def mapIntra f as = #[incremental_flattening(only_intra)] #[seq_factor(22)] map f as
-def map3Intra f as bs cs = #[incremental_flattening(only_intra)] #[seq_factor(22)] map3 f as bs cs
+def mapIntra f as = #[flattening(only_intra)] #[seq_factor(22)] map f as
+def map3Intra f as bs cs = #[flattening(only_intra)] #[seq_factor(22)] map3 f as bs cs
 
 -- def mapIntra  f as = map f as
 -- def map3Intra f as bs cs = map3 f as bs cs

@@ -9,8 +9,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Added
 
+* Rewrote partition to be a single kernel.
+
 * The type checker has been rewritten, with contributions from Jacob Aleksandar
   Siegumfeldt, Laust Kjæp Dengsøe, and Robert Schenck.
+
+* Flattening has been rewritten, with the majority of the work by Amirreza
+  Hashemi. The main consequence is that nonuniform nested parallelism is now
+  supported, although it is not yet necessarily efficient in all cases. More
+  details: https://futhark-lang.org/blog/2026-07-31-full-flattening.html
+
+* Futhark now supports recursive functions, with various restrictions.
+
+* The `incremental_flattening` attributes are now just named `flattening`,
+  although the old name continues to work.
+
+* A simplification rule for branches that return common results (#2526).
 
 ## Removed
 
@@ -21,7 +35,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Fixed
 
-* A case where complex sizes referring to explicit parameters was mishandled by
+* Filter now uses the predicate once per element instead of twice.
+
+* Fixed bug in simiplification engine, various SOACs needed to specify
+  the depth of lambdas, scans, and reduces.
+
+* In-place updates with a slice that covers the entire array, but reorders its
+  elements (such as a reversal), were simplified into a copy, discarding the
+  reordering. Among other things this produced wrong gradients for `reverse`
+  (#2522).
+
+* A case where complex sizes referring to explicit parameters were mishandled by
   monomorphisation (#2230).
 
 * An issue where `#[scratch]` would apply to subexpressions in undesirable ways,
@@ -29,7 +53,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Simplified fusibility check by removing redundant accumulator overlap check
   and fixed fusibility check by giving the correct number of elements.
-
 
 * A compiler crash due to missing double buffering inside sequential code
   migrated to GPU. (#2513)
@@ -39,6 +62,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   automatically for Rusticl on Asahi; elsewhere it must be selected explicitly.
   This fixes incorrect results from cross-workgroup operations
   ([#734](https://github.com/diku-dk/futhark/issues/734)).
+
+* An exotic case in reverse-mode differentiation of accumulators, which in
+  practice would only occur in cases of unrolled `scatter`s.
 
 ## [0.26.4]
 

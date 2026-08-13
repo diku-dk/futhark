@@ -291,11 +291,11 @@ of the function::
 
   def name params...: rettype = body
 
-Hindley-Milner-style type inference is supported.  A parameter may be
-given a type with the notation ``(name: type)``.  Functions may not be
-recursive.  The sizes of the arguments can be constrained - see `Size
-Types`_.  A function can be *polymorphic* by using type parameters, in
-the same way as for `Type Abbreviations`_::
+Hindley-Milner-style type inference is supported. A parameter may be given a
+type with the notation ``(name: type)``. Functions may be recursive, subject to
+various restrictions - see :ref:`recursive-functions`. The sizes of the arguments
+can be constrained - see `Size Types`_. A function can be *polymorphic* by using
+type parameters, in the same way as for `Type Abbreviations`_::
 
   def reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
@@ -1107,6 +1107,9 @@ These also apply to any record or tuple containing a function (a
 
 * A ``loop`` parameter cannot be a function.
 
+* There are some restrictions on recursive higher-order functions, see
+  :ref:`recursive-functions`.
+
 Further, *type parameters* are divided into *non-lifted* (bound with
 an apostrophe, e.g. ``'t``), *size-lifted* (``'~t``), and *fully
 lifted* (``'^t``).  Only fully lifted type parameters may be
@@ -1136,6 +1139,31 @@ cannot be influenced by later uses of the function.
 Local bindings made with ``let`` are not made polymorphic through
 let-generalisation *unless* they are syntactically functions, meaning
 they have at least one named parameter.
+
+.. _recursive-functions:
+
+Recursive functions
+-------------------
+
+Functions may be recursive, subject to the following constraints.
+
+1. Mutual recursion is not supported - a function is only in scope of itself.
+
+2. A recursive function definition may not have a higher-order return type. In
+   some cases you can work around this restriction by adding more function
+   parameters.
+
+3. A recursive call of a higher-order function must be provided arguments for
+   all of its higher-order parameters, and they must be syntactically identical
+   to the corresponding parameter in the definition.
+
+Restriction 2 is to make restriction 3 feasible to check, and restriction 3
+exists to ensure defunctionalisation is possible.
+
+Recursion is monomorphic, meaning a recursive call uses the same instantiation
+of type parameters as the function definition. However, *size-polymorphic*
+recursion is allowed, but requires explicit size parameters in the function
+definition.
 
 .. _size-types:
 
@@ -1774,28 +1802,42 @@ The compiler will treat the attributed expression as a black box.
 This is used to work around optimisation deficiencies (or bugs),
 although it should hopefully rarely be necessary.
 
-``incremental_flattening(no_outer)``
-....................................
+``flattening(sequentialise_nonuniform)``
+........................................
+
+Within the attributed SOAC (which should not itself be nested), any nonuniform
+nested parallelism is sequentialised. This gives up the inner parallelism, but
+avoids the substantial bookkeeping that flattening irregular arrays entails.
+Note that in some cases this can lead to un-compileable code, if the
+nonuniformity is too severe. Uniform nested parallelism is unaffected. The
+attribute is ignored where the irregularity cannot be confined to a single
+thread, in which case such values are flattened as usual.
+
+Historical note: this is intended to reproduce the behaviour of Futhark prior to
+supporting irregular flattening.
+
+``flattening(no_outer)``
+........................
 
 When using incremental flattening, do not generate the "only outer
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening(no_intra)``
-....................................
+``flattening(no_intra)``
+........................
 
 When using incremental flattening, do not generate the "intra-block
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening(only_intra)``
-......................................
+``flattening(only_intra)``
+..........................
 
 When using incremental flattening, *only* generate the "intra-block
 parallelism" version of the attributed SOACs.  **Beware**: the
 resulting program will fail to run if the inner parallelism does not
 fit on the device.
 
-``incremental_flattening(only_inner)``
-......................................
+``flattening(only_inner)``
+..........................
 
 When using incremental flattening, do not generate multiple versions
 for this SOAC, but do exploit inner parallelism (which may give rise

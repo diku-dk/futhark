@@ -580,13 +580,17 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
             -- not in the same position), in which case we must be careful to
             -- avoid clobbering.
             let mergepat_names = map I.paramName mergepat'
-            ses' <- forM ses $ \case
-              I.Var v
+            ses' <- forM (zip mergepat' ses) $ \case
+              (p, I.Var v)
                 | v `elem` mergepat_names -> do
                     v' <- newVName $ baseName v <> "_tmp"
-                    letBindNames [v'] $ I.BasicOp (I.SubExp $ I.Var v)
+                    letBindNames [v'] $
+                      if primType $ paramType p
+                        then I.BasicOp (I.SubExp $ I.Var v)
+                        -- Need administrative coerce due to the renaming.
+                        else shapeCoerce (I.arrayDims $ paramType p) v
                     pure $ I.Var v'
-              se -> pure se
+              (_, se) -> pure se
             forM_ (zip mergepat' ses') $ \(p, se) ->
               letBindNames [I.paramName p] $
                 case se of
@@ -1478,12 +1482,12 @@ internaliseSizeExp s e = do
     E.Scalar (E.Prim (E.Signed it)) -> (,it) <$> asIntS Int64 e'
     _ -> error "internaliseSizeExp: bad type"
 
+asVar :: Name -> I.SubExp -> InternaliseM I.VName
+asVar desc se = letExp desc $ I.BasicOp $ I.SubExp se
+
 internaliseExpToVars :: Name -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
-  mapM asIdent =<< internaliseExp desc e
-  where
-    asIdent (I.Var v) = pure v
-    asIdent se = letExp desc $ I.BasicOp $ I.SubExp se
+  mapM (asVar desc) =<< internaliseExp desc e
 
 internaliseOperation ::
   Name ->
@@ -1718,6 +1722,55 @@ internaliseLambdaCoerce lam argtypes = do
       rettype
       =<< bodyBind body
 
+-- | The number of internalised values in the array component of the result of
+-- the lambda of a 'flatmap', which returns that array paired with a value of
+-- regular type.
+flatLambdaIrregulars :: E.Exp -> Int
+flatLambdaIrregulars (E.Parens e _) = flatLambdaIrregulars e
+flatLambdaIrregulars (E.Lambda _ _ _ (Info (E.RetType _ t)) _)
+  | Just (irreg_t : _) <- E.isTupleRecord t =
+      internalisedTypeSize $ E.toStruct irreg_t
+flatLambdaIrregulars e =
+  error $ "flatLambdaIrregulars: unexpected expression:\n" ++ prettyString e
+
+-- | Internalise the lambda of a 'flatmap'. The irregular results (the ones that
+-- are concatenated) are distinguished in the 'ExtLambda' by having the
+-- existential size as their outermost size, so that size must be a variable -
+-- when the lambda produces arrays of some other size, we bind that size and
+-- coerce the arrays to it. By the source language type rules, this cannot fail.
+internaliseFlatLambda :: E.Exp -> [Type] -> InternaliseM (I.ExtLambda SOACS)
+internaliseFlatLambda lam argtypes = do
+  (params, body, _) <- internaliseLambda lam argtypes
+  (body', ret) <- buildBody . localScope (scopeOfLParams params) $ do
+    res <- bodyBind body
+    let (irreg_res, reg_res) = splitAt (flatLambdaIrregulars lam) res
+    k <- irregularSize irreg_res
+    irreg_res' <- mapM (coerceOuter k) irreg_res
+    irreg_ts <- mapM (subExpType . resSubExp) irreg_res'
+    reg_ts <- mapM (subExpType . resSubExp) reg_res
+    pure
+      ( subExpRes (I.Var k) : irreg_res' <> reg_res,
+        I.Prim int64
+          : existentialiseExtTypes [k] (staticShapes irreg_ts)
+            <> staticShapes reg_ts
+      )
+  pure $ I.Lambda params ret body'
+  where
+    irregularSize [] =
+      error "internaliseFlatLambda: lambda has no irregular results."
+    irregularSize (r : _) =
+      asVar "flatmap_k" . arraySize 0 =<< subExpType (resSubExp r)
+
+    coerceOuter k r@(SubExpRes cs (I.Var v)) = do
+      t <- lookupType v
+      case arrayDims t of
+        d : ds
+          | d /= I.Var k ->
+              SubExpRes cs
+                <$> letSubExp "flatmap_irreg" (shapeCoerce (I.Var k : ds) v)
+        _ -> pure r
+    coerceOuter _ r = pure r
+
 -- | Overloaded operators are treated here.
 isOverloadedFunction ::
   E.QualName VName ->
@@ -1878,6 +1931,12 @@ isIntrinsicFunction qname args = do
       internaliseHist 2 desc rf dest op ne buckets img
     handleSOACs [rf, dest, op, ne, buckets, img] "hist_3d" = Just $ \desc ->
       internaliseHist 3 desc rf dest op ne buckets img
+    handleSOACs [lam, arr] "flatmap" = Just $ \desc -> do
+      arr' <- internaliseExpToVars "map_arr" arr
+      arr_ts <- mapM lookupType arr'
+      lam' <- internaliseFlatLambda lam $ map rowType arr_ts
+      let w = arraysSize 0 arr_ts
+      letValExp' desc $ I.Op $ FlatMap w arr' lam'
     handleSOACs _ _ = Nothing
 
     handleAccs [dest, f, bs] "scatter_stream" = Just $ \desc ->
@@ -2201,7 +2260,7 @@ bindExtSizes (AppRes ret retext) ses = do
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =
-        mconcat $ zipWith combine' (arrayExtDims t1) (arrayDims t2)
+        mconcat $ zipWith combine' (arrayDims t1) (arrayDims t2)
       combine' (I.Free (I.Var v)) se
         | v `elem` retext = M.singleton v se
       combine' _ _ = mempty

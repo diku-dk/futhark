@@ -674,22 +674,22 @@ checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
             unify (mkUsage body "lambda return type ascription") (toStruct rt') (toStruct st)
             pure $ Just st
           Nothing -> pure Nothing
-      body' <- checkFunBody params' body declared_rettype loc
-      body_t <- expTypeFully body'
+      (body', body_t) <- checkFunBody params' body declared_rettype loc
 
       unify (mkUsage body "inferred return type") (toStruct rt') body_t
 
       params'' <- mapM updateTypes params'
 
-      (rettype', rettype_st) <- case rettype_checked of
-        Just (te, ret, ext) -> do
-          ret' <- normTypeFully ret
-          pure (Just te, RetType ext ret')
-        Nothing -> do
-          ret <- inferReturnSizes params'' $ toRes Nonunique body_t
-          pure (Nothing, ret)
+      -- A lambda has no let-generalisation to decide where its
+      -- existential sizes go, so we infer them here - also for a
+      -- declared return type, whose quantified sizes may by now have
+      -- been solved to unknown sizes.
+      rettype_st <-
+        inferReturnSizes params'' =<< case rettype_checked of
+          Just (_, ret, _) -> normTypeFully ret
+          Nothing -> pure $ toRes Nonunique body_t
 
-      pure (params'', body', rettype', rettype_st)
+      pure (params'', body', (\(te, _, _) -> te) <$> rettype_checked, rettype_st)
 
   verifyFunctionParams Nothing params'
 
@@ -1399,19 +1399,31 @@ localChecks tparams orig_body = void $ check orig_body
             <> pretty ty
             <> "."
 
--- | Check that any recursive applications of a higher-order function are
--- invariant with respect to the higher-order arguments. This is done as a
--- syntactic check.
+-- | Check restrictions on recursive functions: the result must be first-order,
+-- and any recursive applications must be invariant with respect to the
+-- higher-order arguments. These are syntactic checks.
 --
--- 'fname' and 'params' are the name and parameters of the function whose body
--- this is; if the function is not recursive, 'fname' does not occur and this is
--- a no-op regardless.
-recursionCheck :: [TypeParam] -> VName -> [Pat ParamType] -> Exp -> TermTypeM ()
-recursionCheck tparams fname params body = do
-  higher_order <-
-    mapM (fmap not . orderZeroM tparams . patternStructType) params
-  when (or higher_order) $ void $ check higher_order body
+-- 'fname', 'params' and 'ret' describe the function whose body this is; if the
+-- function is not recursive, this is a no-op.
+recursionCheck ::
+  [TypeParam] -> VName -> [Pat ParamType] -> ResType -> SrcLoc -> Exp -> TermTypeM ()
+recursionCheck tparams fname params ret fun_loc body =
+  when (fname `S.member` fvVars (freeInExp body)) $ do
+    checkRet
+    higher_order <-
+      mapM (fmap not . orderZeroM tparams . patternStructType) params
+    when (or higher_order) $ void $ check higher_order body
   where
+    checkRet = do
+      ok <- orderZeroM tparams $ toStruct ret
+      unless ok . typeError fun_loc mempty $
+        "Recursive function"
+          <+> dquotes (prettyName fname)
+          <+> "returns type"
+          </> indent 2 (pretty ret)
+          </> "which is not first-order."
+          </> "Write the function type as further parameters instead."
+
     check ho e@(AppExp (Apply f args _) _)
       | Var v _ _ <- f,
         qualLeaf v == fname = do
@@ -1617,6 +1629,8 @@ detectAmbiguousSizes = do
             "Ambiguous size" <+> dquotes (prettyName v') <+> "arising from" <+> pretty u <> "."
     notice _ _ = pure ()
 
+-- | The names bound by these parameter patterns that are not the name of
+-- a parameter itself, and hence cannot occur in the function type.
 hiddenParamNames :: [Pat ParamType] -> [VName]
 hiddenParamNames params = hidden
   where
@@ -1626,17 +1640,6 @@ hiddenParamNames params = hidden
     param_names =
       S.fromList $ mapMaybe (named . patternParam) params
     hidden = filter (`notElem` param_names) param_all_names
-
-inferredReturnType :: SrcLoc -> [Pat ParamType] -> StructType -> TermTypeM StructType
-inferredReturnType loc params t = do
-  -- The inferred type may refer to names that are bound by the
-  -- parameter patterns, but which will not be visible in the type.
-  -- These we must turn into fresh type variables, which will be
-  -- existential in the return type.
-  fst <$> unscopeType loc hidden_params t
-  where
-    hidden_params = filter (`elem` hidden) $ foldMap patNames params
-    hidden = hiddenParamNames params
 
 -- | Rename the sizes bound by a type (parameter names and existential
 -- quantifiers) to fresh names.
@@ -1686,7 +1689,7 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
       Just (_, ret, ext) ->
         BoundV tparams <$> renameTypeBinders (funType params' (RetType ext ret))
       Nothing -> pure RecursiveV
-    body' <-
+    (body', body_t) <-
       localScope (\scope -> scope {scopeVtable = M.insert fname self_binding $ scopeVtable scope}) $
         checkFunBody
           params'
@@ -1695,18 +1698,13 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
           (maybe loc srclocOf maybe_retdecl)
 
     params'' <- mapM updateTypes params'
-    body_t <- expTypeFully body'
 
     (maybe_retdecl'', rettype) <- case maybe_retdecl' of
       Just (retdecl', ret, _) -> do
         ret' <- normTypeFully ret
         pure (Just retdecl', ret')
-      Nothing
-        | null params ->
-            pure (Nothing, toRes Nonunique body_t)
-        | otherwise -> do
-            body_t' <- inferredReturnType loc params'' body_t
-            pure (Nothing, toRes Nonunique body_t')
+      Nothing ->
+        pure (Nothing, toRes Nonunique body_t)
 
     verifyFunctionParams (Just fname) params''
 
@@ -1924,27 +1922,24 @@ letGeneralise defname defloc tparams params restype =
 
     pure (tparams', params', RetType ret_dims restype''')
 
+-- | Check the body of a function, and return it along with its type as
+-- seen from outside the function: any 'hiddenParamNames' occurring as
+-- sizes are replaced with fresh unknowns, which whoever decides the
+-- function's return type then binds existentially.
 checkFunBody ::
   [Pat ParamType] ->
   Exp ->
   Maybe ResType ->
   SrcLoc ->
-  TermTypeM Exp
+  TermTypeM (Exp, StructType)
 checkFunBody params body maybe_rettype loc = do
   body' <- checkExp body
+  let hidden = hiddenParamNames params
+  (body_t, _) <- unscopeType loc hidden =<< expTypeFully body'
 
   -- Unify body return type with return annotation, if one exists.
   case maybe_rettype of
-    Just rettype -> do
-      body_t <- expTypeFully body'
-      -- We need to turn any sizes provided by "hidden" parameter
-      -- names into existential sizes instead.
-      let hidden = hiddenParamNames params
-      (body_t', _) <-
-        unscopeType
-          loc
-          (filter (`elem` hidden) $ foldMap patNames params)
-          body_t
+    Just rettype ->
       case find (`elem` hidden) $ fvVars $ freeInType rettype of
         Just v ->
           typeError loc mempty $
@@ -1955,11 +1950,11 @@ checkFunBody params body maybe_rettype loc = do
               <+> "which is bound to an inner component of a function parameter."
         Nothing -> do
           let usage = mkUsage body "return type annotation"
-          onFailure (CheckingReturn rettype body_t') $
-            unify usage (toStruct rettype) body_t'
+          onFailure (CheckingReturn rettype body_t) $
+            unify usage (toStruct rettype) body_t
     Nothing -> pure ()
 
-  pure body'
+  pure (body', body_t)
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
@@ -2006,7 +2001,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
             -- Check for various problems.
             mapM_ (mustBeIrrefutable . fmap toStruct) params''
             localChecks tparams' body'''
-            recursionCheck tparams' fname params''' body'''
+            recursionCheck tparams' fname params''' rettype'' loc body'''
 
             let ((body'''', updated_ret), errors) =
                   Consumption.checkValDef
@@ -2105,6 +2100,19 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 -- ExistentialSize records the size it was unified with and CopySize records
 -- which occurrence it belongs to: pending sizes from the same occurrence with
 -- the same source are given a single fresh name ('pendingInstSizes' in Terms).
+--
+-- ## Sizes bound by parameter patterns
+--
+-- An existential also arises whenever the type of a function body mentions a
+-- name that a parameter *pattern* binds without it being the name of the
+-- parameter itself, as the "k" of
+--
+--   \(k: i64, x: i32) -> replicate k x
+--
+-- where the parameter as a whole is anonymous. Such a name is not bound in the
+-- function type, so we replace it with a fresh unknown size ('hiddenParamNames'
+-- and 'unscopeType') in the function type. The logic is that we want to infer
+-- the type that is visible from the "outside".
 --
 -- ## Dependent function types
 --

@@ -25,7 +25,6 @@ module Futhark.IR.Prop.Types
     peelArray,
     stripArray,
     arrayDims,
-    arrayExtDims,
     shapeSize,
     arraySize,
     arraysSize,
@@ -36,8 +35,6 @@ module Futhark.IR.Prop.Types
     mapOnExtType,
     mapOnType,
     diet,
-    subtypeOf,
-    subtypesOf,
     toDecl,
     fromDecl,
     isExt,
@@ -188,7 +185,6 @@ arrayOf Mem {} _ _ =
 -- size is the given dimension.  This is just a convenient wrapper
 -- around 'arrayOf'.
 arrayOfRow ::
-  (ArrayShape (ShapeBase d)) =>
   TypeBase (ShapeBase d) NoUniqueness ->
   d ->
   TypeBase (ShapeBase d) NoUniqueness
@@ -208,7 +204,6 @@ setArrayDims t dims = t `setArrayShape` Shape dims
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
 setOuterSize ::
-  (ArrayShape (ShapeBase d)) =>
   TypeBase (ShapeBase d) u ->
   d ->
   TypeBase (ShapeBase d) u
@@ -217,7 +212,6 @@ setOuterSize = setDimSize 0
 -- | Replace the size of the given dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
 setDimSize ::
-  (ArrayShape (ShapeBase d)) =>
   Int ->
   TypeBase (ShapeBase d) u ->
   d ->
@@ -249,7 +243,7 @@ peelArray _ _ = Nothing
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
-stripArray :: Int -> TypeBase Shape u -> TypeBase Shape u
+stripArray :: Int -> TypeBase (ShapeBase d) u -> TypeBase (ShapeBase d) u
 stripArray n (Array et shape u)
   | n < shapeRank shape = Array et (stripDims n shape) u
   | otherwise = Prim et
@@ -264,13 +258,8 @@ shapeSize i shape = case drop i $ shapeDims shape of
 
 -- | Return the dimensions of a type - for non-arrays, this is the
 -- empty list.
-arrayDims :: TypeBase Shape u -> [SubExp]
+arrayDims :: TypeBase (ShapeBase d) u -> [d]
 arrayDims = shapeDims . arrayShape
-
--- | Return the existential dimensions of a type - for non-arrays,
--- this is the empty list.
-arrayExtDims :: TypeBase ExtShape u -> [ExtSize]
-arrayExtDims = shapeDims . arrayShape
 
 -- | Return the size of the given dimension.  If the dimension does
 -- not exist, the zero constant is returned.
@@ -284,9 +273,9 @@ arraysSize :: Int -> [TypeBase Shape u] -> SubExp
 arraysSize _ [] = constant (0 :: Int64)
 arraysSize i (t : _) = arraySize i t
 
--- | Return the immediate row-type of an array.  For @[[int]]@, this
--- would be @[int]@.
-rowType :: TypeBase Shape u -> TypeBase Shape u
+-- | Return the immediate row-type of an array.  For @[][]t@, this
+-- would be @[]t@.
+rowType :: TypeBase (ShapeBase d) u -> TypeBase (ShapeBase d) u
 rowType = stripArray 1
 
 -- | A type is a primitive type if it is not an array or memory block.
@@ -319,7 +308,7 @@ transposeType = rearrangeType [1, 0]
 -- | Rearrange the dimensions of the type.  If the length of the
 -- permutation does not match the rank of the type, the permutation
 -- will be extended with identity.
-rearrangeType :: [Int] -> Type -> Type
+rearrangeType :: [Int] -> TypeBase (ShapeBase d) u -> TypeBase (ShapeBase d) u
 rearrangeType perm t =
   t `setArrayShape` Shape (rearrangeShape perm' $ arrayDims t)
   where
@@ -378,34 +367,6 @@ diet (Acc _ _ _ Nonunique) = Observe
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
 diet Mem {} = Observe
-
--- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
--- @y@), meaning @x@ is valid whenever @y@ is.
-subtypeOf ::
-  (Ord u, ArrayShape shape) =>
-  TypeBase shape u ->
-  TypeBase shape u ->
-  Bool
-subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
-  u2
-    <= u1
-    && t1
-      == t2
-    && shape1
-      `subShapeOf` shape2
-subtypeOf t1 t2 = t1 == t2
-
--- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,
--- and each element in @xs@ is a subtype of the corresponding element
--- in @ys@..
-subtypesOf ::
-  (Ord u, ArrayShape shape) =>
-  [TypeBase shape u] ->
-  [TypeBase shape u] ->
-  Bool
-subtypesOf xs ys =
-  length xs == length ys
-    && and (zipWith subtypeOf xs ys)
 
 -- | Add the given uniqueness information to the types.
 toDecl ::
@@ -468,8 +429,8 @@ hasStaticShape (Mem space) = Just $ Mem space
 hasStaticShape (Array bt (Shape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
 
--- | Given two lists of 'ExtType's of the same length, return a list
--- of 'ExtType's that is a subtype of the two operands.
+-- | Given two lists of 'ExtType's of the same length, return a list of
+-- 'ExtType's that generalises the two operands.
 generaliseExtTypes ::
   [TypeBase ExtShape u] ->
   [TypeBase ExtShape u] ->
@@ -514,7 +475,7 @@ existentialiseExtTypes inaccessible = map makeBoundShapesFree
 
 -- | Produce a mapping for the dimensions context.
 shapeExtMapping :: [TypeBase ExtShape u] -> [TypeBase Shape u1] -> M.Map Int SubExp
-shapeExtMapping = dimMapping arrayExtDims arrayDims match mappend
+shapeExtMapping = dimMapping arrayDims arrayDims match mappend
   where
     match Free {} _ = mempty
     match (Ext i) dim = M.singleton i dim

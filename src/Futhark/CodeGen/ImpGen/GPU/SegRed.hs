@@ -97,7 +97,7 @@ getRedChunkSize types = do
 -- | The maximum number of operators we support in a single SegRed.
 -- This limit arises out of the static allocation of counters.
 maxNumOps :: Int
-maxNumOps = 20
+maxNumOps = 25
 
 -- | Code generation for the body of the SegRed, taking a continuation
 -- for saving the results of the body.  The results should be

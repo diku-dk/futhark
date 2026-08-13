@@ -4,7 +4,7 @@
 -- structure gpu { /SegMap/Loop/SegHist 1 }
 
 def main [n] [k] [m] (dests: [k][n][m]f32) iss jss vss =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map3 (\dest is vs ->
           loop dest = copy dest
           for _i < 10 do

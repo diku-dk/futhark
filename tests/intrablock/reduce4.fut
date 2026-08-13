@@ -13,5 +13,5 @@ def badsum [n] [m] (xss: [n][m]i32) : []i32 =
               xss
 
 def main xs =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map badsum xs

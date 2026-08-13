@@ -27,14 +27,23 @@ zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ show t
 
-tanType :: (ArrayShape s, Monoid u) => TypeBase s u -> ADM (TypeBase s u)
+class (ArrayShape s) => FromShape s where
+  fromShape :: Shape -> s
+
+instance FromShape Shape where
+  fromShape = id
+
+instance FromShape ExtShape where
+  fromShape = fmap Free
+
+tanType :: (FromShape s, Monoid u) => TypeBase s u -> ADM (TypeBase s u)
 tanType (Acc acc ispace ts u) = do
   acc_tan <- tangent acc
   tan_shape <- askShape
   pure $ Acc acc_tan (tan_shape <> ispace) ts u
 tanType t = do
   shape <- askShape
-  pure $ arrayOf (Prim (elemType t)) (shape `prependShape` arrayShape t) u
+  pure $ arrayOf (Prim (elemType t)) (fromShape shape <> arrayShape t) u
   where
     u = case t of
       Array _ _ u' -> u'
@@ -114,7 +123,7 @@ class TanBuilder a where
 bundleNewList :: (TanBuilder a) => [a] -> ADM [a]
 bundleNewList = fmap (uncurry interleave . unzip) . mapM bundleNew
 
-instance (ArrayShape s, Monoid u) => TanBuilder (PatElem (TypeBase s u)) where
+instance (FromShape s, Monoid u) => TanBuilder (PatElem (TypeBase s u)) where
   newTan (PatElem p t) = do
     p' <- tanVName p
     insertTan p p'
@@ -130,7 +139,7 @@ newTanPat (Pat pes) = Pat <$> mapM newTan pes
 bundleNewPat :: (TanBuilder (PatElem t)) => Pat t -> ADM (Pat t)
 bundleNewPat (Pat pes) = Pat <$> bundleNewList pes
 
-instance (ArrayShape s, Monoid u) => TanBuilder (Param (TypeBase s u)) where
+instance (FromShape s, Monoid u) => TanBuilder (Param (TypeBase s u)) where
   newTan (Param _ p t) = do
     PatElem p' t' <- newTan $ PatElem p t
     pure $ Param mempty p' t'
@@ -149,7 +158,7 @@ class Tangent a where
   tangent :: a -> ADM a
   bundleTan :: a -> ADM (a, a)
 
-instance (ArrayShape s, Monoid u) => Tangent (TypeBase s u) where
+instance (FromShape s, Monoid u) => Tangent (TypeBase s u) where
   tangent = tanType
   bundleTan t = do
     t' <- tangent t
@@ -367,6 +376,40 @@ fwdLambda (Lambda params _ body) = do
   params' <- bundleNewList params
   mkLambda params' $ bodyBind =<< fwdBody body
 
+-- Differentiating a FlatMap lambda is mostly straightforward, except that we do
+-- not care about the tangent of the size result. We must also take care to
+-- reconstruct the return type, since we do not have facilities similar to
+-- mkLambda for ExtLambdas. Finally, in the vector case (see Note [Forward-Mode
+-- vector AD]) the tangent of a nonuniform result has the vector shape
+-- outermost, but a FlatMap demands that the existential size come first, so we
+-- must transpose it. It is transposed back outside the FlatMap; see 'fwdSOAC'.
+fwdFlatMapLambda :: ExtLambda SOACS -> ADM (ExtLambda SOACS)
+fwdFlatMapLambda (Lambda params rettype body) = do
+  params' <- bundleNewList params
+  (body', rettype') <- buildBody . localScope (scopeOfLParams params') $ do
+    (meta_res, val_res) <- fmap (splitAt 2) <$> bodyBind =<< fwdBody body
+    let (val_res_primal, val_res_tan) = unterleave val_res
+        val_rettype = drop 1 rettype
+    val_rettype_tan <- mapM tanType val_rettype
+    (val_res_tan', val_rettype_tan') <-
+      mapAndUnzipM pullExtDim $ zip3 val_rettype val_res_tan val_rettype_tan
+    pure
+      ( take 1 meta_res <> interleave val_res_primal val_res_tan',
+        Prim int64 : interleave val_rettype val_rettype_tan'
+      )
+  pure $ Lambda params' rettype' body'
+  where
+    -- Put the existential size back in the outermost position.
+    pullExtDim (t, res@(SubExpRes cs se), t_tan)
+      | flatMapNonuniform t = do
+          tan_shape <- askShape
+          v <- pushTanShape =<< asVName se
+          pure
+            ( SubExpRes cs $ Var v,
+              rearrangeType (vecPerm tan_shape t_tan) t_tan
+            )
+      | otherwise = pure (res, t_tan)
+
 fwdWithAccLambda :: [WithAccInput SOACS] -> Lambda SOACS -> ADM (Lambda SOACS)
 fwdWithAccLambda inputs (Lambda params _ body) = do
   let (cert_params, acc_params) = splitAt (length inputs) params
@@ -397,7 +440,7 @@ fwdStreamLambda num_accs (Lambda params _ body) = do
     zipWithM_ (trArrParamTan tan_shape) arr_params' arr_params'_tan
     (acc_res, map_res) <- fmap (splitAt (num_accs * 2)) . bodyBind =<< fwdBody body
     let (map_res_primal, map_res_tan) = unterleave map_res
-    map_res_tan' <- mapM (trMapResTan tan_shape) map_res_tan
+    map_res_tan' <- mapM trMapResTan map_res_tan
     pure $ acc_res <> interleave map_res_primal map_res_tan'
   where
     -- Array parameters need to be treated specially as the chunk parameter
@@ -417,10 +460,8 @@ fwdStreamLambda num_accs (Lambda params _ body) = do
       insertTan (paramName p) v
 
     -- Put the chunk size back in the outermost position.
-    trMapResTan tan_shape (SubExpRes cs ~(Var v)) = do
-      v_t <- lookupType v
-      let perm = vecPerm tan_shape v_t
-      fmap varRes . certifying cs $ letExp (baseName v) . BasicOp $ Rearrange v perm
+    trMapResTan (SubExpRes cs ~(Var v)) =
+      SubExpRes cs . Var <$> pushTanShape v
 
 pushTanShape :: VName -> ADM VName
 pushTanShape v = do
@@ -538,6 +579,19 @@ fwdSOAC pat aux (WithVJP args lam _) = do
     lam_res <- auxing aux $ eLambda lam $ map eSubExp args
     forM (zip (patNames pat) lam_res) $ \(v, SubExpRes cs se) ->
       certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
+fwdSOAC (Pat pes) aux (FlatMap w arrs lam) = do
+  -- We do not bother to create tangents for the metadata part of the result.
+  let (meta_pes, val_pes) = splitAt 4 pes
+  (Pat val_pes', to_transpose) <- soacResPat 0 0 $ Pat val_pes
+  let pat' = Pat $ meta_pes <> val_pes'
+  arrs' <- soacInputsWithTangents arrs
+  lam' <- fwdFlatMapLambda lam
+  addStm $ Let pat' aux $ Op $ FlatMap w arrs' lam'
+  tan_shape <- askShape
+  forM_ to_transpose $ \(rpat, v) -> do
+    v_t <- lookupType v
+    let perm = rearrangeInverse $ vecPerm tan_shape v_t
+    letBind rpat $ BasicOp $ Rearrange v perm
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =
@@ -606,11 +660,12 @@ fwdStm (Let pat aux (WithAcc inputs lam)) = do
       Just (op_lam, nes) -> do
         -- We assume that op_lam has unit partial derivatives (i.e., is some
         -- kind of addition). This is the case for all WithAccs produced by VJP.
-        lams <- mapM addLambda $ lambdaReturnType op_lam
-        -- Horizontally fuse the lambdas to produce a single one.
-        idx_params <- replicateM (shapeRank shape) $ newParam "idx" $ Prim int64
-        let (xs, ys) = bimap concat concat $ unzip $ map (splitAt 1 . lambdaParams) lams
-        op_lam' <- mkLambda (idx_params <> xs <> ys) $ mconcat <$> mapM (bodyBind . lambdaBody) lams
+        -- The operator takes one index per dimension of the index space of the
+        -- tangent accumulator, which includes the vector dimensions.
+        op_lam' <-
+          accAddLambda
+            (shapeRank tan_shape + shapeRank shape)
+            (lambdaReturnType op_lam)
         pure $ Just (op_lam', nes)
     pure (tan_shape <> shape, arrs_tan, op')
   pat' <- bundleNewPat pat

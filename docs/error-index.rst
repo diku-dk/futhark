@@ -184,41 +184,10 @@ Alternative, we could duplicate the expression producing the array:
   def f n =
     g (iota n, iota n))
 
-.. _consuming-parameter:
-
-"Consuming parameter passed non-unique argument"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Caused by programs like the following:
-
-.. code-block:: futhark
-
-  def update (xs: *[]i32) = xs with [0] = 0
-
-  def f (ys: []i32) = update ys
-
-The update ``function`` *consumes* its ``xs`` argument to perform an
-:ref:`in-place update <in-place-updates>`, as denoted by the asterisk
-before the type.  However, the ``f`` function tries to pass an array
-that it is not allowed to consume (no asterisk before the type).
-
-One solution is to change the type of ``f`` so that it also consumes
-its input, which allows it to pass it on to ``update``:
-
-.. code-block:: futhark
-
-  def f (ys: *[]i32) = update ys
-
-Another solution to ``copy`` the array that we pass to ``update``:
-
-.. code-block:: futhark
-
-  def f (ys: []i32) = update (copy ys)
-
 .. _consuming-argument:
 
-"Non-consuming higher-order parameter passed consuming argument."
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Argument of functional type ... contains consumption"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when we have a higher-order function that expects a
 function that does *not* consume its arguments, and we pass it one
@@ -285,26 +254,6 @@ but this puts a binding into a size expression, which is invalid.
 Therefore, the type checker invents an :term:`unknown size`
 variable, say ``l``, and assigns ``a`` the type ``[l]i32``.
 
-.. _size-expression-consume:
-
-"Size expression with consumption is replaced by unknown size."
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To illustrate this error, consider the following program
-
-.. code-block:: futhark
-
-   def consume (xs: *[]i64): i64 = xs[0]
-
-   def main (xs: *[]i64) =
-     let a = iota (consume xs)
-     in ...
-
-Intuitively, the type of ``a`` should be ``[consume ys]i32``, but this
-puts a consumption of the array ``ys`` into a size expression, which
-is invalid.  Therefore, the type checker invents an :term:`unknown
-size` variable, say ``l``, and assigns ``a`` the type ``[l]i32``.
-
 .. _inaccessible-size:
 
 "Parameter *x* refers to size *y* which will not be accessible to the caller
@@ -367,10 +316,42 @@ also be due to size inference:
 Here the type rules force ``A`` to have size ``x``, leading to a
 problematic type.  It can be fixed using the techniques above.
 
+.. _consuming-loop-param-aliases:
+
+"Return value for consuming loop parameter *x* aliases *y*"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs for expressions like the following::
+
+    loop (xs: []i32, ys: *[]i32) = (replicate n 0, replicate n 0)
+    for i < 10 do
+      (xs, xs)
+
+
+This is not allowed, as creates aliasing between a consumeable parameter
+(``ys``) and non-consumable parameter (``xs``) in the next iteration of the
+loop, during which consumption ``ys`` would also affect ``xs``. You can solve
+this by copying one of the return values of the loop.
+
+.. _loop-parameter-aliases-other:
+
+"Return value for loop parameter *x* aliases other consumed loop parameter"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs for expressions like the following::
+
+    loop (xs: *[]i32, ys: *[]i32) = (replicate n 0, replicate n 0)
+    for i < 10 do
+      (xs, xs)
+
+This is not allowed for the same reason that we are not allowed to consume an
+array multiple times. You can solve this by copying one of the return values of
+the loop.
+
 .. _aliases-previously-returned:
 
 "Return value for consuming loop parameter *x* aliases previously returned value"
----------------------------------------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when you have a loop with multiple loop parameters,
 at least one of which is consuming, and the values returned by the
@@ -388,6 +369,27 @@ A (contrived) example of this error is the following:
     -- is consumed.
     in (arr[i+1], arr)
 
+.. _contains-consumption:
+
+"Let-bound expression of higher-order type *t* contains consumption"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs when ``let``-binding an expression that contains consumption and
+returns a function. The most common case is partial application of a consuming
+function::
+
+  def update (xs: *[]i32) (i: i32) (y: i32) =
+    xs with [i] = y
+
+  def main (xs: *[]i32) =
+    let f = update xs
+    in (f 0 0, f 0 0)
+
+The simplest solution is to remove the consumption by doing a ``copy``.
+
+The reason for this restriction is rooted in efficiency concerns.
+Defunctionalisation causes the two applications of ``f`` to both consume ``xs``,
+which is a violation of uniqueness properties.
 
 Size errors
 -----------
@@ -720,6 +722,26 @@ Now we can say ``M.y``.  See :ref:`module-system` for more.
 Other errors
 ------------
 
+.. _scope-violation:
+
+"Scope violation"
+~~~~~~~~~~~~~~~~~
+
+These occurs when the type checker infers that the type (or size) of a variable
+``x`` is forced to be expressed using parameters or variables not in scope when
+``x`` is bound. This only occurs when mixing explicit parameters with inference.
+Contrived example::
+
+  def f x =
+    let g 'b (y: b) = if true then y else x
+    in g
+
+The ``if`` forces ``y`` and ``x`` to be the same type, but ``y`` has type ``b``,
+which is a type parameter bound in ``g``, and not in scope where ``x`` is bound.
+
+These errors usually imply some form of misdesign, and can be resolved by
+manually inserting type annotations until the conceptual mistake becomes clear.
+
 .. _literal-out-of-bounds:
 
 "Literal out of bounds"
@@ -878,6 +900,22 @@ The solution is to put a type annotation on the parameter instead:
 .. code-block:: futhark
 
   def f (r : {x:i32}) = r with x = 0
+
+.. _occurs-check:
+
+"Occurs check"
+~~~~~~~~~~~~~~
+
+Occurs check errors are reported whenever the type checker infers a type or size
+that is circular, meaning it would be infinitely large. Essentially, whenever
+the type checker infers that some ``x`` must be equal to some (compound)
+construct ``y``, it checks whether ``x`` is present inside ``y``. This is called
+the occurs check.
+
+Since it is such a general mechanism, there is no rule of thumb for how to avoid
+or fix errors that manifest as an occurs check. Since they are always the result
+of a misdesign, it can be useful to add explicit type annotations until the root
+cause is revealed.
 
 Entry points
 ------------

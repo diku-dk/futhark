@@ -1,7 +1,6 @@
 -- Make sure not to confuse the 'n' in a recursive call with the 'n' of the
 -- current instance.
 -- ==
--- tags { disable }
 -- error: Cannot apply
 
 def f (n: i64) : [n]i64 =

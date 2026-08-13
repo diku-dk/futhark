@@ -508,7 +508,7 @@ noSelfAliases loc = foldM_ check mempty . aliasParts
   where
     check seen als = do
       when (any (`S.member` seen) als) $
-        addError loc mempty . withIndexLink "self-aliases-arg" $
+        addError loc mempty . withIndexLink "self-aliasing-arg" $
           "Argument passed for consuming parameter is self-aliased."
       pure $ als <> seen
 
@@ -527,7 +527,7 @@ checkArg prev p_t e = do
   consumed e_cons
   let e_t = typeOf e'
   when (e_cons /= mempty && not (orderZero e_t)) $
-    addError (locOf e) mempty $
+    addError (locOf e) mempty . withIndexLink "consuming-argument" $
       "Argument of functional type"
         </> indent 2 (pretty e_t)
         </> "contains consumption, which is not allowed."
@@ -643,18 +643,22 @@ convergeLoopParam loop_loc param body_cons body_als = do
   let checkMergeReturn (Id pat_v (Info pat_v_t) patloc) t = do
         let free_als = S.filter (`notElem` patNames param) $ boundAliases (aliases t)
         when (diet pat_v_t == Consume) $ forM_ free_als $ \v ->
-          lift . addError loop_loc mempty $
-            "Return value for consuming loop parameter"
+          lift
+            . addError loop_loc mempty
+            . withIndexLink "consuming-loop-param-aliases"
+            $ "Return value for consuming loop parameter"
               <+> dquotes (prettyName pat_v)
               <+> "aliases"
               <+> dquotes (prettyName v)
               <> "."
         (cons, obs) <- get
-        unless (S.null $ aliases t `S.intersection` cons) $
-          lift . addError loop_loc mempty $
-            "Return value for loop parameter"
-              <+> dquotes (prettyName pat_v)
-              <+> "aliases other consumed loop parameter."
+        unless (S.null $ aliases t `S.intersection` cons)
+          $ lift
+            . addError loop_loc mempty
+            . withIndexLink "loop-parameter-aliases-other"
+          $ "Return value for loop parameter"
+            <+> dquotes (prettyName pat_v)
+            <+> "aliases other consumed loop parameter."
         when
           ( diet pat_v_t == Consume
               && not (S.null (aliases t `S.intersection` (cons <> obs)))
@@ -807,7 +811,7 @@ checkExp (AppExp (LetPat sizes p e body loc) appres) = do
   consumed e_cons
   let e_t = typeOf e'
   when (e_cons /= mempty && not (orderZero e_t)) $
-    addError (locOf e) mempty $
+    addError (locOf e) mempty . withIndexLink "contains-consumption" $
       "Let-bound expression of higher-order type"
         </> indent 2 (pretty e_t)
         </> "contains consumption, which is not allowed."

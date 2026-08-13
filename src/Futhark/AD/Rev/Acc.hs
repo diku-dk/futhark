@@ -10,16 +10,28 @@ where
 -- The general case of taking adjoints of WithAcc is tricky.  We make
 -- some assumptions and lay down a basic design.
 --
--- First, we assume that any WithAccs that occur in the program are
--- come from one of these sources:
+-- First, we assume that any WithAccs that occur in the program come from one of
+-- these sources:
 --
 -- - A previous instance of VJP, which means we can rely on the operator having
 --   a constant adjoint (it's addition as appropriate to the type).
 --
 -- - A scatter, meaning there is no operator.
 --
--- (These can actually be distinguished by the presence of an operator, although
--- we do not currently bother.)
+-- This means we are in fact ignoring one potential source:
+--
+-- - reduce_by_index_stream, where the operator is whatever the programmer
+--   wrote.
+--
+-- This is because we assume that an operator (if it exists) is addition,
+-- meaning it has a constant adjoint. This is acceptable because
+-- reduce_by_index_stream is not a real part of the language, but is exposed
+-- solely for testing the WithAcc machinery.
+--
+-- These are distinguished by the presence of an operator, which matters because
+-- only the scatter overwrites: 'update_acc' on an accumulator that has an
+-- operator combines with the value already in the cell, so that value keeps its
+-- full sensitivity. See 'isOperatorAcc'.
 --
 -- Second, the adjoint of an accumulator is an array of the same type
 -- as the underlying array.  For example, the adjoint type of the
@@ -31,11 +43,16 @@ where
 -- In the return sweep, when inserting the with_acc, we still compute the
 -- "original" accumulator result, but modified such that its initial value is
 -- the adjoint of the result of the accumulator. We also modify the update_accs
--- of these accumulators to be with zero values. This means that the array that
--- is produced will be equal to the adjoint of the result, except for those
--- places that have been updated, where it will be zero. This is intuitively
--- sensible - values that have been overwritten (and so do not contribute to the
--- result) should obviously have zero sensitivity.
+-- of these accumulators to be with zero values. For a scatter this means that
+-- the array that is produced will be equal to the adjoint of the result, except
+-- for those places that have been updated, where it will be zero. This is
+-- intuitively sensible - values that have been overwritten (and so do not
+-- contribute to the result) should obviously have zero sensitivity.
+--
+-- When the accumulator has an operator, nothing is overwritten, so the array
+-- must instead come out as the adjoint of the result in its entirety. We get
+-- that by giving the accumulator of the return sweep addition as its operator,
+-- which makes those writes of zeroes leave it alone.
 --
 -- # Adjoint of UpdateAcc
 --
@@ -54,6 +71,9 @@ where
 -- unit partial derivatives.  So the return sweep is
 --
 --     v_adj += acc_adj[i]
+--
+-- and the adjoint of the accumulator going in is the adjoint of the one coming
+-- out, except for a scatter, where the cell that is overwritten is zeroed.
 --
 -- Further, we modify the primal code so that it becomes
 --
@@ -136,6 +156,14 @@ where
 -- our current translation rules, they will be dead code.  As long as
 -- we are careful to run dead code elimination after revVJP, we should
 -- be good.
+--
+-- There is however one place where we must copy: the adjoint of the WithAcc
+-- result serves double duty in the return sweep.  It is the initial value of
+-- the accumulator (and thus consumed by the WithAcc), but it is *also* the
+-- adjoint of the accumulator-typed result of the lambda body, and so may be
+-- read inside the lambda - by the Map rule above, for example, which
+-- replicates it.  These two uses are incompatible unless the WithAcc consumes
+-- a copy.
 
 -- Note [Array Adjoints of Match]
 --
@@ -180,7 +208,9 @@ where
 import Control.Monad
 import Control.Monad.Identity
 import Data.List ((\\))
+import Data.Maybe (isJust)
 import Futhark.AD.Rev.Monad
+import Futhark.AD.Shared (accAddLambda)
 import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Tools
@@ -299,7 +329,11 @@ diffWithAcc ops pat aux inputs lam m = do
     free_vars <- filterM isActive $ namesToList $ freeIn lam'_vec
     free_accs <- filterM (fmap isAcc . lookupType) free_vars
     let free_vars' = free_vars \\ free_accs
-    lam'' <- diffLambda' adjs' free_vars' lam'_vec
+        op_certs =
+          map (paramName . fst)
+            . filter (hasOperator . snd)
+            $ zip (take n_inputs (lambdaParams lam'_vec)) inputs
+    lam'' <- withOperatorAccs op_certs $ diffLambda' adjs' free_vars' lam'_vec
     (inputs_zeroes, inputs') <-
       unzip <$> zipWithM (renameInputLambda adj_shape) (chunks lengths adjs) inputs
     let certs = map paramName $ take n_inputs $ lambdaParams lam''
@@ -317,6 +351,7 @@ diffWithAcc ops pat aux inputs lam m = do
     n_inputs = length inputs
     lengths = map (\(_, as, _) -> length as) inputs
     arrs = concatMap (\(_, as, _) -> as) inputs
+    hasOperator (_, _, op) = isJust op
 
     -- Transpose the accumulator-related adjoints from [vec...][shape...]elem
     -- to [shape...][vec...]elem. Non-accumulator adjs are left unchanged.
@@ -347,23 +382,37 @@ diffWithAcc ops pat aux inputs lam m = do
               perm = [s .. s + r - 1] ++ [0 .. s - 1] ++ [s + r .. total - 1]
           letExp (baseName v <> "_tr") $ BasicOp $ Rearrange v perm
 
-    renameInputLambda adj_sh as_adj (shape, as, _) = do
+    renameInputLambda adj_sh as_adj (shape, as, op) = do
       -- Compute element types with vectorised dimensions included.
       orig_nes_ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) as
       let vec_nes_ts = map (`arrayOfShape` adj_sh) orig_nes_ts
       zeroes <- mapM (zeroArray mempty) vec_nes_ts
+      -- The result adjoint is consumed by the WithAcc, but is also the adjoint
+      -- of the accumulator inside the lambda (see Note [Adjoints of
+      -- accumulators]), so it must remain readable there. Hence the copy.
+      as' <- mapM (letExp "acc_adj_init" . BasicOp . Replicate mempty . Var <=< adjVal) as_adj
       -- Transpose adjoints from [vec...][shape...]elem to [shape...][vec...]elem
       -- so they match the accumulator layout.
-      as' <- mapM adjVal as_adj
       as'' <- mapM vecToInner as'
-      pure (map Var zeroes, (shape, as'', Nothing))
+      -- 'zeroOutUpdates' makes the primal updates write zeroes. For a
+      -- scatter-like accumulator that overwrites the cell, this is what we
+      -- want. An accumulator with a combining operator does not overwrite, so
+      -- we give this one addition as its operator, making those writes no-ops.
+      op' <- case op of
+        Nothing -> pure Nothing
+        -- Under vectorisation the element types gain the vector dimensions, so
+        -- the original operator no longer fits. We assume it is addition
+        -- anyway, so just build that.
+        Just _ -> do
+          add_lam <- accAddLambda (shapeRank shape) vec_nes_ts
+          nes <- mapM (letSubExp "acc_adj_zero" . zeroExp) vec_nes_ts
+          pure $ Just (add_lam, nes)
+      pure (map Var zeroes, (shape, as'', op'))
 
-    diffLambda' res_adjs get_adjs_for (Lambda params ts body) = do
-      localScope (scopeOfLParams params) $ do
-        Body () stms res <- vjpBody ops res_adjs get_adjs_for body
-        let body' = Body () stms $ take n_inputs res <> takeLast (length get_adjs_for) res
-        ts' <- mapM lookupType get_adjs_for
-        pure $ Lambda params (take n_inputs ts <> ts') body'
+    diffLambda' res_adjs get_adjs_for (Lambda params _ body) =
+      mkLambda params $ do
+        res <- bodyBind =<< vjpBody ops res_adjs get_adjs_for body
+        pure $ take n_inputs res <> takeLast (length get_adjs_for) res
 
 diffUpdateAcc ::
   Pat Type ->
@@ -375,21 +424,56 @@ diffUpdateAcc ::
   ADM () ->
   ADM ()
 diffUpdateAcc pat aux safety acc is vs m = do
+  -- By the type rules for UpdateAcc, the pattern must be a singleton.
+  let Pat ~[pe] = pat
   addStm $ Let pat aux $ BasicOp $ UpdateAcc safety acc is vs
   m
-  pat_adjs <- mapM lookupAdjVal (patNames pat)
-  returnSweepCode $ forM_ (zip pat_adjs vs) $ \(adj, v) -> do
+  adj <- lookupAdjVal $ patElemName pe
+  returnSweepCode $ do
     adj_t <- lookupType adj
-    let index_adj = pure $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
-    adj_i <-
-      letExp "updateacc_val_adj" =<< case safety of
-        Unsafe ->
-          index_adj
-        Safe ->
-          -- The primal UpdateAcc may be out-of-bounds, in which case
-          -- indexing the adjoint is dangerous.
-          eIf
-            (eShapeInBounds (arrayShape adj_t) (map eSubExp is))
-            (eBody [index_adj])
-            (eBody [pure $ zeroExp $ stripArray (length is) adj_t])
-    updateSubExpAdj v adj_i
+    acc_t <- lookupType acc
+    -- An accumulator with a combining operator does not overwrite, so the
+    -- incoming value of the updated cell retains its full sensitivity.
+    overwrites <- case acc_t of
+      Acc cert _ _ _ -> not <$> isOperatorAcc cert
+      _ -> pure True
+    let elem_t = stripArray (length is) adj_t
+        slice = fullSlice adj_t $ map DimFix is
+        -- The value adjoint is the corresponding cell of the accumulator
+        -- adjoint.
+        index_adj = maybe_copy $ pure $ BasicOp $ Index adj slice
+          where
+            -- We have to copy a slice because we are updating 'adj' as well -
+            -- even though in many cases that update is likely dead code... Not
+            -- great.
+            maybe_copy
+              | null $ sliceDims slice = id
+              | otherwise = eCopy
+        -- For a scatter-like accumulator, the input accumulator adjoint is the
+        -- result adjoint with the updated cell zeroed out: a cell that is
+        -- subsequently overwritten does not contribute to the result, and so
+        -- has zero sensitivity.
+        zeroed
+          | overwrites = do
+              z <- letSubExp "acc_adj_zero" $ zeroExp elem_t
+              pure $ BasicOp $ Update Unsafe adj slice z
+          | otherwise = pure $ BasicOp $ SubExp $ Var adj
+    (adj_i, acc_adj) <- case safety of
+      Unsafe ->
+        (,)
+          <$> (letExp "updateacc_val_adj" =<< index_adj)
+          <*> (letExp "acc_adj" =<< zeroed)
+      Safe -> do
+        -- The primal UpdateAcc may be out-of-bounds, in which case indexing the
+        -- adjoint is dangerous and the input accumulator adjoint is unchanged.
+        ~[adj_i, acc_adj] <-
+          letTupExp "updateacc_adj"
+            =<< eIf
+              (eShapeInBounds (arrayShape adj_t) (map eSubExp is))
+              (eBody [index_adj, zeroed])
+              (eBody [pure $ zeroExp elem_t, pure $ BasicOp $ SubExp $ Var adj])
+        pure (adj_i, acc_adj)
+    -- XXX: this is only OK because we assume accumulators are currently
+    -- singleton.
+    updateSubExpAdj (head vs) adj_i
+    insAdj acc acc_adj

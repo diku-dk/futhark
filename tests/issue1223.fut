@@ -1,5 +1,4 @@
 -- ==
--- tags { no_opencl no_cuda no_hip no_pyopencl }
 -- structure gpu { SegMap 3 }
 
 def foo [h] [w] (seam_energy: [h][w]i64) : [h]i64 =
@@ -23,6 +22,6 @@ def helper [h] [w] (n: i64) (image: [h][w]u32) : [h][w]u32 =
 def main [m] [h] [w] (n: i64) (images: *[m][h][w]u32) : [m][h][]u32 =
   let w' = w - n
   let res =
-    #[incremental_flattening(only_intra)]
+    #[flattening(only_intra)]
     map (helper n) images
   in res[:, :, :w']

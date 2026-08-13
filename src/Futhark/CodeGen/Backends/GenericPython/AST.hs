@@ -122,52 +122,46 @@ instance Pretty PyExp where
   pretty (Lambda p e) = "lambda" <+> pretty p <> ":" <+> pretty e
   pretty None = "None"
 
+-- | The indented body of a compound statement. Python has no empty block, so
+-- an empty body must be printed as @pass@.
+pyBlock :: [PyStmt] -> Doc a
+pyBlock [] = indent 2 "pass"
+pyBlock stms = indent 2 $ stack $ map pretty stms
+
 instance Pretty PyStmt where
-  pretty (If cond [] []) =
-    "if"
-      <+> pretty cond
-      <> ":"
-        </> indent 2 "pass"
-  pretty (If cond [] fbranch) =
-    "if"
-      <+> pretty cond
-      <> ":"
-        </> indent 2 "pass"
-        </> "else:"
-        </> indent 2 (stack $ map pretty fbranch)
   pretty (If cond tbranch []) =
     "if"
       <+> pretty cond
       <> ":"
-        </> indent 2 (stack $ map pretty tbranch)
+        </> pyBlock tbranch
   pretty (If cond tbranch fbranch) =
     "if"
       <+> pretty cond
       <> ":"
-        </> indent 2 (stack $ map pretty tbranch)
+        </> pyBlock tbranch
         </> "else:"
-        </> indent 2 (stack $ map pretty fbranch)
+        </> pyBlock fbranch
   pretty (Try pystms pyexcepts) =
     "try:"
-      </> indent 2 (stack $ map pretty pystms)
+      </> pyBlock pystms
       </> stack (map pretty pyexcepts)
   pretty (While cond body) =
     "while"
       <+> pretty cond
       <> ":"
-        </> indent 2 (stack $ map pretty body)
+        </> pyBlock body
   pretty (For i what body) =
     "for"
       <+> pretty i
       <+> "in"
       <+> pretty what
       <> ":"
-        </> indent 2 (stack $ map pretty body)
+        </> pyBlock body
   pretty (With what body) =
     "with"
       <+> pretty what
       <> ":"
-        </> indent 2 (stack $ map pretty body)
+        </> pyBlock body
   pretty (Assign e1 e2) = pretty e1 <+> "=" <+> pretty e2
   pretty (AssignOp op e1 e2) = pretty e1 <+> pretty (op ++ "=") <+> pretty e2
   pretty (Comment s body) = "#" <> pretty s </> stack (map pretty body)
