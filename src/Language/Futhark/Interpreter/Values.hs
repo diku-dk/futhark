@@ -107,7 +107,8 @@ data Value m
     ValueAcc ValueShape (Value m -> Value m -> m (Value m)) !(Array Int (Value m))
   | -- A primitive value with added information used in automatic differentiation
     ValueAD AD.Depth AD.ADVariable
-  | -- A lazy reference to a value on a Futhark Server
+  | -- A lazy reference to a value on a Futhark Server. We store the full shape
+    -- locally.
     ValueLazyFFI ValueShape ValueRef [Int64]
 
 instance Show (Value m) where
