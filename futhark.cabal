@@ -386,6 +386,7 @@ library
       Futhark.Pass.LiftAllocations
       Futhark.Pass.LowerAllocations
       Futhark.Pass.NoGrid
+      Futhark.Pass.RemoveBlackboxBodies
       Futhark.Pass.Simplify
       Futhark.Passes
       Futhark.Pipeline

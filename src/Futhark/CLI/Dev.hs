@@ -59,6 +59,7 @@ import Futhark.Pass.Flatten (flattenSOACs)
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.NoGrid
+import Futhark.Pass.RemoveBlackboxBodies
 import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.Util.Log
@@ -716,6 +717,7 @@ commandLineOptions =
       "(default: infinite, provide integer to limit)",
     soacsPassOption inlineAggressively [],
     soacsPassOption inlineConservatively [],
+    soacsPassOption removeBlackboxBodies [],
     soacsPassOption removeDeadFunctions [],
     soacsPassOption applyAD [],
     soacsPassOption applyADInnermost [],
