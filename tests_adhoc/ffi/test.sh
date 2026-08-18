@@ -157,4 +157,37 @@ check 'sa1f sa1'
 check 'sa2f sa2'
 check '(sa1f sa1)[0]'
 
+# Equality must fetch values that reside on the server. Otherwise every
+# comparison involving such a value silently answers false.
+check 'pa1 == pa1'
+check 'pa2[0] == pa2[0]'
+check 'pa2[0:2] == pa2[0:2]'
+check 'ra1 == ra1'
+check 'sa1 == sa1'
+check 'pa1 != pa1'
+# A server-resident value can also end up as a component of an ordinary
+# value, without any slicing being involved.
+check '[pa2[0], pa2[1]] == pa2'
+check '(pa2[0], pa2[1]) == (pa2[0], pa2[1])'
+
+# Updating with a value that resides on the server. Only the indicated slice
+# may change; the rest of the destination must survive.
+check '[7,8,9,10] with [0:3] = pa2[0]'
+check '[7,8,9,10] with [1:4] = pa2[1]'
+check 'copy pa3 with [0:2] = pa2[0:2]'
+
+# Tracing must show the value, not a reference to it.
+check '#[trace] pa1'
+check '#[trace] pa2[0]'
+check '#[trace] ra1'
+
+# Differentiating a value that resides on the server. Note that slicing
+# produces an ordinary array whose *elements* reside on the server, which is
+# not the same thing as a value that resides on the server itself.
+check 'jvp (\(x: [3]f64) -> map (*2) x) fa1 fa1'
+check 'jvp (\(x: [3]f64) -> map (*2) x) fa2[0] fa2[0]'
+check 'jvp (\(x: [2][3]f64) -> map (map (*2)) x) fa2[0:2] fa2[0:2]'
+check 'vjp (\(x: [3]f64) -> map (*2) x) fa1 fa1'
+check 'vjp (\(x: [2][3]f64) -> map (map (*2)) x) fa2[0:2] fa2[0:2]'
+
 exit $failed

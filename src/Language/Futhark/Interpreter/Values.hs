@@ -108,7 +108,7 @@ data Value m
   | -- A primitive value with added information used in automatic differentiation
     ValueAD AD.Depth AD.ADVariable
   | -- A lazy reference to a value on a Futhark Server. We store the full shape
-    -- locally.
+    -- locally, along with the indexes applied so far.
     ValueLazyFFI ValueShape ValueRef [Int64]
 
 instance Show (Value m) where
@@ -188,6 +188,7 @@ prettyValue = prettyValueWith pprPrim
 valueText :: Value m -> T.Text
 valueText = docText . prettyValueWith pretty
 
+-- | The shape of a value.
 valueShape :: Value m -> ValueShape
 valueShape (ValueArray shape _) = shape
 valueShape (ValueAcc shape _ _) = shape

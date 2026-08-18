@@ -28,6 +28,10 @@ entry ra2: [2][3]r = [[r1, r2, r3], [r3, r2, r1]]
 entry sa1: [3]s = [s1, s2, s3]
 entry sa2: [2][3]s = [[s1, s2, s3], [s3, s2, s1]]
 
+-- Floating-point arrays, for differentiation.
+entry fa1: [3]f64 = [1, 2, 3]
+entry fa2: [2][3]f64 = [[1, 2, 3], [4, 5, 6]]
+
 entry pf (x: i32): i32 = x ** 2
 entry rf (x: r): r = { x = x.x ** 2, y = x.y + 2 }
 entry sf (x: s): s =

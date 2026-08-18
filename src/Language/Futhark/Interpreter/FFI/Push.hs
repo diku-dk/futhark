@@ -1,6 +1,7 @@
 module Language.Futhark.Interpreter.FFI.Push
   ( put,
     get,
+    hasLazy,
     getLazy,
     lazyGet,
   )
@@ -34,6 +35,16 @@ get shp@(I.ShapeSum sm) vr = do
   shps <- throwNothing ("Invalid variant " ++ nameToString vn ++ " in shape " ++ show sm ++ ".") $ M.lookup vn sm
   I.ValueSum shp vn <$> (destruct vr >>= zipWithM get shps)
 
+-- | Does this value contain any references to values residing on a server?
+hasLazy :: I.Value m -> Bool
+hasLazy I.ValueLazyFFI {} = True
+hasLazy (I.ValueArray _ arr) = any hasLazy $ A.elems arr
+hasLazy (I.ValueRecord fs) = any hasLazy fs
+hasLazy (I.ValueSum _ _ vs) = any hasLazy vs
+hasLazy _ = False
+
+-- | Get all the values residing on the server. The resulting 'I.Value' has no
+-- 'I.ValueLazyFFI' in it.
 getLazy :: I.Value a -> ServerM (I.Value a)
 getLazy (I.ValueArray shp arr) = I.ValueArray shp <$> mapM getLazy arr
 getLazy (I.ValueRecord m) = I.ValueRecord <$> mapM getLazy m

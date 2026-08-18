@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE Strict #-}
 
 -- | An interpreter operating on type-checked source Futhark terms.
@@ -452,7 +453,9 @@ bad loc env s = stacking loc env $ do
 
 trace :: T.Text -> Value -> EvalM ()
 trace w v = do
-  liftF $ ExtOpTrace w (prettyValue v) ()
+  -- Printing a value requires having it in full.
+  v' <- force v
+  liftF $ ExtOpTrace w (prettyValue v') ()
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =
@@ -474,9 +477,20 @@ break env loc = do
   backtrace <- asks ((StackFrame loc (Ctx env imports) NE.:|) . fst)
   liftF $ ExtOpBreak loc BreakPoint backtrace ()
 
-fromArray :: Value -> (ValueShape, [Value])
-fromArray (ValueArray shape as) = (shape, elems as)
-fromArray v = error $ "Expected array value, but found: " <> show v
+-- | Fetch in full a value that may reside on a server, such that it can be
+-- handled by code that knows only about ordinary values. Only indexing (see
+-- 'indexArray') is able to work directly on a server value, so anything else
+-- must force it first.
+force :: Value -> EvalM Value
+force v
+  | FFI.hasLazy v = liftF $ ExtOpFFI (FFI.getLazy v) id
+  | otherwise = pure v
+
+fromArray :: Value -> EvalM (ValueShape, [Value])
+fromArray v =
+  force v >>= \case
+    ValueArray shape as -> pure (shape, elems as)
+    v' -> error $ "Expected array value, but found: " <> show v'
 
 project :: Name -> Value -> Value
 project f (ValueRecord fs)
@@ -600,24 +614,26 @@ indexShape _ shape =
   shape
 
 iaArrayLength :: Value -> Int64
-iaArrayLength (ValueLazyFFI (ShapeDim n _) _ _) = n + 1
-iaArrayLength (ValueArray _ arr) = arrayLength arr
-iaArrayLength _ = error "Expected array."
-
-iaDimDepth :: ValueShape -> Int
-iaDimDepth (ShapeDim _ c) = 1 + iaDimDepth c
-iaDimDepth _ = 0
-
-iaIndexOnce :: Value -> Int64 -> EvalM Value
-iaIndexOnce (ValueLazyFFI shp vr os) i | length os + 1 < iaDimDepth shp = pure $ ValueLazyFFI shp vr $ i : os
-iaIndexOnce (ValueLazyFFI shp vr os) i = liftF $ ExtOpFFI (FFI.index (map fromIntegral $ reverse $ i : os) vr >>= FFI.get (valueShape $ ValueLazyFFI shp vr $ i : os)) id
-iaIndexOnce (ValueArray _ arr) i = pure $ arr ! fromIntegral i
-iaIndexOnce _ _ = error "Expected array."
+iaArrayLength v = case valueShape v of
+  ShapeDim n _ -> n
+  _ -> error "Expected array."
 
 iaRowShape :: Value -> ValueShape
-iaRowShape (ValueLazyFFI (ShapeDim _ cshp) _ _) = cshp
-iaRowShape (ValueArray (ShapeDim _ cshp) _) = cshp
-iaRowShape _ = error "Expected array."
+iaRowShape v = case valueShape v of
+  ShapeDim _ rowshape -> rowshape
+  _ -> error "Expected array."
+
+iaIndexOnce :: Value -> Int64 -> EvalM Value
+iaIndexOnce (ValueArray _ arr) i = pure $ arr ! fromIntegral i
+iaIndexOnce v@(ValueLazyFFI shp vr os) i
+  -- Indexing an array of arrays merely notes the index; nothing is
+  -- fetched until we reach an element.
+  | ShapeDim _ ShapeDim {} <- valueShape v = pure v'
+  | otherwise = liftF $ ExtOpFFI (FFI.index is vr >>= FFI.get (valueShape v')) id
+  where
+    v' = ValueLazyFFI shp vr $ i : os
+    is = map fromIntegral $ reverse $ i : os
+iaIndexOnce _ _ = error "Expected array."
 
 indexArray :: [Indexing] -> Value -> MaybeT EvalM Value
 indexArray (IndexingFix i : is) v
@@ -1016,7 +1032,7 @@ evalAppExp env (Loop sparams pat loopinit form body _) = do
       bound' <- asSigned <$> eval env bound
       forLoop (identName iv) bound' (zero bound') init_v
     ForIn in_pat in_e -> do
-      (_, in_vs) <- fromArray <$> eval env in_e
+      (_, in_vs) <- fromArray =<< eval env in_e
       foldM (forInLoop in_pat) init_v in_vs
     While cond ->
       whileLoop cond init_v
@@ -1209,7 +1225,9 @@ eval env (Attr _ e _) =
 evalUpdateSteps :: Env -> [UpdateStep Info VName] -> Value -> Value -> EvalM (Maybe Value)
 evalUpdateSteps env = go
   where
-    go [] _ newv = pure $ Just newv
+    -- The value we update with must be in full, as 'writeArray' will store
+    -- it directly in the destination.
+    go [] _ newv = Just <$> force newv
     go (UpdateStepField f : rest) (ValueRecord fs) newv
       | Just old <- M.lookup f fs = do
           newf <- go rest old newv
@@ -1218,14 +1236,16 @@ evalUpdateSteps env = go
       error "eval update: invalid field update."
     go (UpdateStepSlice is : rest) arr newv = do
       is' <- mapM (evalDimIndex env) is
-      v <- runMaybeT $ indexArray is' arr
+      -- 'writeArray' cannot update an array residing on a server.
+      arr' <- force arr
+      v <- runMaybeT $ indexArray is' arr'
       case v of
         Nothing -> pure Nothing
         Just old -> do
           newsub <- go rest old newv
           case newsub of
             Nothing -> pure Nothing
-            Just vsub -> pure $ writeArray is' arr vsub
+            Just vsub -> pure $ writeArray is' arr' vsub
 
 evalCase ::
   Value ->
@@ -1456,7 +1476,12 @@ modifyValueM f v = snd <$> valueAccumLM g 0 v
 -- Perhaps creating JVPValues could be abstracted into a function
 -- exposed by the AD module?
 doJVP2 :: Value -> Value -> Value -> EvalM Value
-doJVP2 f v s = do
+doJVP2 f v0 s0 = do
+  -- Differentiation traverses the values themselves, so anything
+  -- residing on a server must be fetched first.
+  v <- force v0
+  s <- force s0
+
   depth <- adDepth
 
   -- Turn the seeds into a list of ADValues
@@ -1508,7 +1533,12 @@ doJVP2 f v s = do
 -- Perhaps creating VJPValues could be abstracted into a function
 -- exposed by the AD module?
 doVJP2 :: Value -> Value -> Value -> EvalM Value
-doVJP2 f v s = do
+doVJP2 f v0 s0 = do
+  -- Differentiation traverses the values themselves, so anything
+  -- residing on a server must be fetched first.
+  v <- force v0
+  s <- force s0
+
   -- Get the depth
   depth <- adDepth
 
@@ -1846,12 +1876,14 @@ initialCtx =
     def ">>" = Just $ bopDef $ sintOp P.AShr ++ uintOp P.LShr
     def "<<" = Just $ bopDef $ intOp P.Shl
     def ">>>" = Just $ bopDef $ sintOp P.LShr ++ uintOp P.LShr
+    -- Equality inspects the values themselves, so anything residing on a
+    -- server must be fetched first.
     def "==" = Just $
       fun2 $
-        \xs ys -> pure $ ValuePrim $ BoolValue $ xs == ys
+        \xs ys -> ValuePrim . BoolValue <$> ((==) <$> force xs <*> force ys)
     def "!=" = Just $
       fun2 $
-        \xs ys -> pure $ ValuePrim $ BoolValue $ xs /= ys
+        \xs ys -> ValuePrim . BoolValue <$> ((/=) <$> force xs <*> force ys)
     -- The short-circuiting is handled directly in 'eval'; these cases
     -- are only used when partially applying and such.
     def "&&" = Just $
@@ -1935,8 +1967,9 @@ initialCtx =
         pure $ ValueFun $ \f -> pure . ValueFun $ \xs ->
           case unfoldFunType t' of
             ([_, _], ret_t)
-              | rowshape <- typeShape $ stripArray 1 ret_t ->
-                  toArray' rowshape <$> mapM (apply noLoc mempty f) (snd $ fromArray xs)
+              | rowshape <- typeShape $ stripArray 1 ret_t -> do
+                  xs' <- snd <$> fromArray xs
+                  toArray' rowshape <$> mapM (apply noLoc mempty f) xs'
             _ ->
               error $
                 "Invalid arguments to map intrinsic:\n"
@@ -1950,13 +1983,13 @@ initialCtx =
                   irreg_rowshape <- typeShape <$> evalTypeFully (stripArray 1 irreg_t)
                   reg_rowshape <- typeShape <$> evalTypeFully (stripArray 1 reg_t)
                   yss <-
-                    mapM
-                      (apply noLoc mempty f)
-                      (snd $ fromArray xs)
+                    mapM (apply noLoc mempty f) . snd
+                      =<< fromArray xs
                   -- Each application produces a segment, which is concatenated
                   -- with the others, and a value that is merely collected.
                   let (segs, regs) = unzip $ map (fromPair . fromTuple) yss
-                      seg_sizes = map (genericLength . snd . fromArray) segs :: [Int64]
+                  segs' <- mapM (fmap snd . fromArray) segs
+                  let seg_sizes = map genericLength segs' :: [Int64]
                       offsets = init $ scanl (+) 0 seg_sizes
                       flag s = if s == 0 then [] else True : replicate (fromIntegral s - 1) False
                       mkI64 = ValuePrim . SignedValue . Int64Value
@@ -1965,7 +1998,7 @@ initialCtx =
                       [ toArray' ShapeLeaf $ map mkI64 seg_sizes,
                         toArray' ShapeLeaf $ map (ValuePrim . BoolValue) $ concatMap flag seg_sizes,
                         toArray' ShapeLeaf $ map mkI64 offsets,
-                        toArray' irreg_rowshape $ concatMap (snd . fromArray) segs,
+                        toArray' irreg_rowshape $ concat segs',
                         toArray' reg_rowshape regs
                       ]
             _ ->
@@ -1977,24 +2010,24 @@ initialCtx =
         fromPair _ = error "flatmap: lambda did not return a pair"
     def s | "reduce" `T.isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
-        foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
+        foldM (apply2 noLoc mempty f) ne . snd =<< fromArray xs
     def "scan" = Just $
       fun3 $ \f ne xs -> do
         let next (out, acc) x = do
               x' <- apply2 noLoc mempty f acc x
               pure (x' : out, x')
+        xs' <- snd <$> fromArray xs
         toArray' (valueShape ne) . reverse . fst
-          <$> foldM next ([], ne) (snd $ fromArray xs)
+          <$> foldM next ([], ne) xs'
     def "scatter" = Just $
       fun3 $ \arr is vs ->
-        case arr of
-          ValueArray shape arr' ->
-            pure $
-              ValueArray shape $
-                foldl' update arr' $
-                  zip (map asInt $ snd $ fromArray is) (snd $ fromArray vs)
-          _ ->
-            error $ "scatter expects array, but got: " <> show arr
+        force arr >>= \case
+          ValueArray shape arr' -> do
+            is' <- map asInt . snd <$> fromArray is
+            vs' <- snd <$> fromArray vs
+            pure $ ValueArray shape $ foldl' update arr' $ zip is' vs'
+          arr' ->
+            error $ "scatter expects array, but got: " <> show arr'
       where
         update arr' (i, v) =
           if i >= 0 && i < arrayLength arr'
@@ -2002,13 +2035,13 @@ initialCtx =
             else arr'
     def "scatter_2d" = Just $
       fun3 $ \arr is vs ->
-        case arr of
-          ValueArray _ _ ->
-            pure $
-              foldl' update arr $
-                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
-          _ ->
-            error $ "scatter_2d expects array, but got: " <> show arr
+        force arr >>= \case
+          arr'@ValueArray {} -> do
+            is' <- map fromTuple . snd <$> fromArray is
+            vs' <- snd <$> fromArray vs
+            pure $ foldl' update arr' $ zip is' vs'
+          arr' ->
+            error $ "scatter_2d expects array, but got: " <> show arr'
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _], v) =
@@ -2017,33 +2050,33 @@ initialCtx =
           error "scatter_2d expects 2-dimensional indices"
     def "scatter_3d" = Just $
       fun3 $ \arr is vs ->
-        case arr of
-          ValueArray _ _ ->
-            pure $
-              foldl' update arr $
-                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
-          _ ->
-            error $ "scatter_3d expects array, but got: " <> show arr
+        force arr >>= \case
+          arr'@ValueArray {} -> do
+            is' <- map fromTuple . snd <$> fromArray is
+            vs' <- snd <$> fromArray vs
+            pure $ foldl' update arr' $ zip is' vs'
+          arr' ->
+            error $ "scatter_3d expects array, but got: " <> show arr'
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _, _], v) =
           fromMaybe arr $ writeArray (map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_3d expects 3-dimensional indices"
-    def "hist_1d" = Just . fun6 $ \_ arr fun _ is vs ->
-      foldM
-        (update fun)
-        arr
-        (zip (map asInt64 $ snd $ fromArray is) (snd $ fromArray vs))
+    def "hist_1d" = Just . fun6 $ \_ arr fun _ is vs -> do
+      arr' <- force arr
+      is' <- map asInt64 . snd <$> fromArray is
+      vs' <- snd <$> fromArray vs
+      foldM (update fun) arr' $ zip is' vs'
       where
         op = apply2 mempty mempty
         update fun arr (i, v) =
           fromMaybe arr <$> updateArray (op fun) [IndexingFix i] arr v
-    def "hist_2d" = Just . fun6 $ \_ arr fun _ is vs ->
-      foldM
-        (update fun)
-        arr
-        (zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs))
+    def "hist_2d" = Just . fun6 $ \_ arr fun _ is vs -> do
+      arr' <- force arr
+      is' <- map fromTuple . snd <$> fromArray is
+      vs' <- snd <$> fromArray vs
+      foldM (update fun) arr' $ zip is' vs'
       where
         op = apply2 mempty mempty
         update fun arr (Just idxs@[_, _], v) =
@@ -2051,11 +2084,11 @@ initialCtx =
             <$> updateArray (op fun) (map (IndexingFix . asInt64) idxs) arr v
         update _ _ _ =
           error "hist_2d: bad index value"
-    def "hist_3d" = Just . fun6 $ \_ arr fun _ is vs ->
-      foldM
-        (update fun)
-        arr
-        (zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs))
+    def "hist_3d" = Just . fun6 $ \_ arr fun _ is vs -> do
+      arr' <- force arr
+      is' <- map fromTuple . snd <$> fromArray is
+      vs' <- snd <$> fromArray vs
+      foldM (update fun) arr' $ zip is' vs'
       where
         op = apply2 mempty mempty
         update fun arr (Just idxs@[_, _, _], v) =
@@ -2065,7 +2098,9 @@ initialCtx =
           error "hist_2d: bad index value"
     def "partition" = Just $
       fun3 $ \k f xs -> do
-        let (ShapeDim _ rowshape, xs') = fromArray xs
+        (xs_shape, xs') <- fromArray xs
+
+        let ShapeDim _ rowshape = xs_shape
 
             next outs x = do
               i <- asInt <$> apply noLoc mempty f x
@@ -2084,8 +2119,10 @@ initialCtx =
         insertAt i x (l : ls) = l : insertAt (i - 1) x ls
         insertAt _ _ ls = ls
     def "scatter_stream" = Just $
-      fun3 $ \dest f vs ->
-        case (dest, vs) of
+      fun3 $ \dest f vs -> do
+        dest' <- force dest
+        vs' <- force vs
+        case (dest', vs') of
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
             ) -> do
@@ -2097,10 +2134,12 @@ initialCtx =
                 _ ->
                   error $ "scatter_stream produced: " <> show acc'
           _ ->
-            error $ "scatter_stream expects array, but got: " <> prettyString (show vs, show vs)
+            error $ "scatter_stream expects array, but got: " <> prettyString (show dest', show vs')
     def "hist_stream" = Just $
-      fun5 $ \dest op _ne f vs ->
-        case (dest, vs) of
+      fun5 $ \dest op _ne f vs -> do
+        dest' <- force dest
+        vs' <- force vs
+        case (dest', vs') of
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
             ) -> do
@@ -2112,7 +2151,7 @@ initialCtx =
                 _ ->
                   error $ "hist_stream produced: " <> show acc'
           _ ->
-            error $ "hist_stream expects array, but got: " <> prettyString (show dest, show vs)
+            error $ "hist_stream expects array, but got: " <> prettyString (show dest', show vs')
     def "acc_write" = Just $
       fun3 $ \acc i v ->
         case (acc, i) of
@@ -2166,7 +2205,8 @@ initialCtx =
               f arr' (i, j) =
                 MaybeT . pure . writeArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j] v
-          o <- runMaybeT $ foldM f arr [(i, j) | i <- iota n1, j <- iota n2]
+          dest <- force arr
+          o <- runMaybeT $ foldM f dest [(i, j) | i <- iota n1, j <- iota n2]
           case o of
             Just arr' -> pure arr'
             Nothing ->
@@ -2208,7 +2248,8 @@ initialCtx =
               f arr' (i, j, l) =
                 MaybeT . pure . writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l] v
-          o <- runMaybeT $ foldM f arr [(i, j, l) | i <- iota n1, j <- iota n2, l <- iota n3]
+          dest <- force arr
+          o <- runMaybeT $ foldM f dest [(i, j, l) | i <- iota n1, j <- iota n2, l <- iota n3]
           case o of
             Just arr' -> pure arr'
             Nothing ->
@@ -2254,7 +2295,8 @@ initialCtx =
               f arr' (i, j, l, m) =
                 MaybeT . pure . writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l, IndexingFix m] v
-          o <- runMaybeT $ foldM f arr [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4]
+          dest <- force arr
+          o <- runMaybeT $ foldM f dest [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4]
           case o of
             Just arr' -> pure arr'
             Nothing ->
@@ -2269,7 +2311,8 @@ initialCtx =
             listPair (xs, ys) =
               [toArray' xs_shape xs, toArray' ys_shape ys]
 
-        pure $ toTuple $ listPair $ unzip $ map (fromPair . fromTuple) $ snd $ fromArray x
+        x' <- snd <$> fromArray x
+        pure $ toTuple $ listPair $ unzip $ map (fromPair . fromTuple) x'
       where
         fromPair (Just [x, y]) = (x, y)
         fromPair _ = error "Not a pair"
@@ -2277,31 +2320,39 @@ initialCtx =
       fun2 $ \xs ys -> do
         let ShapeDim _ xs_rowshape = valueShape xs
             ShapeDim _ ys_rowshape = valueShape ys
+        xs' <- snd <$> fromArray xs
+        ys' <- snd <$> fromArray ys
         pure $
           toArray' (ShapeRecord (tupleFields [xs_rowshape, ys_rowshape])) $
             map toTuple $
-              transpose [snd $ fromArray xs, snd $ fromArray ys]
+              transpose [xs', ys']
     def "concat" = Just $
       fun2 $ \xs ys -> do
-        let (ShapeDim _ rowshape, xs') = fromArray xs
-            (_, ys') = fromArray ys
+        (xs_shape, xs') <- fromArray xs
+        (_, ys') <- fromArray ys
+        let ShapeDim _ rowshape = xs_shape
         pure $ toArray' rowshape $ xs' ++ ys'
     def "transpose" = Just $
       fun1 $ \xs -> do
-        let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
+        (xs_shape, xs') <- fromArray xs
+        let ShapeDim n (ShapeDim m shape) = xs_shape
+        rows <- mapM (fmap snd . fromArray) xs'
         pure $
           toArray (ShapeDim m (ShapeDim n shape)) $
             map (toArray (ShapeDim n shape)) $
               -- Slight hack to work around empty dimensions.
               genericTake m $
-                transpose (map (snd . fromArray) xs') ++ repeat []
+                transpose rows ++ repeat []
     def "flatten" = Just $
       fun1 $ \xs -> do
-        let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
-        pure $ toArray (ShapeDim (n * m) shape) $ concatMap (snd . fromArray) xs'
+        (xs_shape, xs') <- fromArray xs
+        let ShapeDim n (ShapeDim m shape) = xs_shape
+        rows <- mapM (fmap snd . fromArray) xs'
+        pure $ toArray (ShapeDim (n * m) shape) $ concat rows
     def "unflatten" = Just $
       fun3 $ \n m xs -> do
-        let (ShapeDim xs_size innershape, xs') = fromArray xs
+        (xs_shape, xs') <- fromArray xs
+        let ShapeDim xs_size innershape = xs_shape
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
         if asInt64 n * asInt64 m /= xs_size || asInt64 n < 0 || asInt64 m < 0
@@ -2320,15 +2371,17 @@ initialCtx =
     def "vjp2" = Just $ fun3 doVJP2
     def "jmp2" = Just $ fun3 $ \f x seeds -> do
       v <- apply noLoc mempty f x
+      seeds' <- snd <$> fromArray seeds
       dvs <-
         toArray' (valueShape v) . map (project "1")
-          <$> mapM (doJVP2 f x) (snd (fromArray seeds))
+          <$> mapM (doJVP2 f x) seeds'
       pure $ toTuple [v, dvs]
     def "mjp2" = Just $ fun3 $ \f x seeds -> do
       v <- apply noLoc mempty f x
+      seeds' <- snd <$> fromArray seeds
       dvs <-
         toArray' (valueShape x) . map (project "1")
-          <$> mapM (doVJP2 f x) (snd (fromArray seeds))
+          <$> mapM (doVJP2 f x) seeds'
       pure $ toTuple [v, dvs]
     def "with_vjp" = Just $ fun3 $ \f _ arg ->
       -- XXX? We simply ignore the custom derivative. This is correct, but makes
