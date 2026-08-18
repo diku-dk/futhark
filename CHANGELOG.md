@@ -613,7 +613,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark profile` now supports multiple JSON files.
 
-* `futhark fmt`, by William Due and Therese Lyngby.
+* `futhark fmt`, by Lilje Due and Therese Lyngby.
 
 * Lambdas can now be passed as the last argument to a function application.
 
@@ -1297,7 +1297,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Datasets used in `futhark test` and `futhark bench` can now be named
   (#1859).
 
-* New command `futhark benchcmp` by William Due.
+* New command `futhark benchcmp` by Lilje Due.
 
 ### Changed
 
