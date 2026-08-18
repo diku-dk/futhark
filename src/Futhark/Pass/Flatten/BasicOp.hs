@@ -521,7 +521,11 @@ transformIndex ::
   Slice SubExp ->
   FlattenM DistEnv
 transformIndex (TrCtx lvl segments env inps res aux) arr slice
-  | isRegularDistResult res,
+  | -- Must be a regular result...
+    isRegularDistResult res,
+    -- And a regular input...
+    isRegularInputArr env inps arr,
+    -- And uniform slices.
     not (any (isVariant inps) slice) = do
       arr_t <- lookupInputType inps arr
       arr' <-
