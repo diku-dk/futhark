@@ -194,10 +194,12 @@ void* value_ptr(struct value *v) {
   return &v->value.v_ptr;
 }
 
+// Variables are kept in a doubly linked list.
 struct variable {
-  // NULL name indicates free slot.  Name is owned by this struct.
+  // Name is owned by this struct.
   char *name;
   struct value value;
+  struct variable *prev, *next;
 };
 
 typedef int (*entry_point_fn)(struct futhark_context*, void*, void**);
@@ -232,16 +234,15 @@ struct server_state {
   struct futhark_prog prog;
   struct futhark_context_config *cfg;
   struct futhark_context *ctx;
-  int variables_capacity;
+  // Head of the list of variables; NULL when there are none.
   struct variable *variables;
 };
 
 struct variable* get_variable(struct server_state *s,
                               const char *name) {
-  for (int i = 0; i < s->variables_capacity; i++) {
-    if (s->variables[i].name != NULL &&
-        strcmp(s->variables[i].name, name) == 0) {
-      return &s->variables[i];
+  for (struct variable *v = s->variables; v != NULL; v = v->next) {
+    if (strcmp(v->name, name) == 0) {
+      return v;
     }
   }
 
@@ -251,42 +252,37 @@ struct variable* get_variable(struct server_state *s,
 struct variable* create_variable(struct server_state *s,
                                  const char *name,
                                  const struct type *type) {
-  int found = -1;
-  for (int i = 0; i < s->variables_capacity; i++) {
-    if (found == -1 && s->variables[i].name == NULL) {
-      found = i;
-    } else if (s->variables[i].name != NULL &&
-               strcmp(s->variables[i].name, name) == 0) {
-      return NULL;
-    }
+  if (get_variable(s, name) != NULL) {
+    return NULL;
   }
 
-  if (found != -1) {
-    // Found a free spot.
-    s->variables[found].name = strdup(name);
-    s->variables[found].value.type = type;
-    return &s->variables[found];
+  struct variable *v = malloc(sizeof(struct variable));
+  v->name = strdup(name);
+  v->value.type = type;
+  v->prev = NULL;
+  v->next = s->variables;
+
+  if (s->variables != NULL) {
+    s->variables->prev = v;
   }
+  s->variables = v;
 
-  // Need to grow the buffer.
-  found = s->variables_capacity;
-  s->variables_capacity *= 2;
-  s->variables = realloc(s->variables,
-                         s->variables_capacity * sizeof(struct variable));
-
-  s->variables[found].name = strdup(name);
-  s->variables[found].value.type = type;
-
-  for (int i = found+1; i < s->variables_capacity; i++) {
-    s->variables[i].name = NULL;
-  }
-
-  return &s->variables[found];
+  return v;
 }
 
-void drop_variable(struct variable *v) {
+void drop_variable(struct server_state *s, struct variable *v) {
+  if (v->prev != NULL) {
+    v->prev->next = v->next;
+  } else {
+    s->variables = v->next;
+  }
+
+  if (v->next != NULL) {
+    v->next->prev = v->prev;
+  }
+
   free(v->name);
-  v->name = NULL;
+  free(v);
 }
 
 int arg_exists(const char *args[], int i) {
@@ -401,7 +397,7 @@ void cmd_call(struct server_state *s, const char *args[]) {
     const char *out_name = get_arg(args, 1);
     struct variable *v = get_variable(s, out_name);
     if (v) {
-      drop_variable(v);
+      drop_variable(s, v);
     }
   }
 }
@@ -439,7 +435,7 @@ void cmd_restore(struct server_state *s, const char *args[]) {
       printf("Failed to restore variable %s.\n"
              "Possibly malformed data in %s (errno: %s)\n",
              vname, fname, strerror(errno));
-      drop_variable(v);
+      drop_variable(s, v);
       break;
     }
   }
@@ -498,7 +494,7 @@ void cmd_free(struct server_state *s, const char *args[]) {
 
     int err = t->free(t->aux, s->ctx, value_ptr(&v->value));
     error_check(s, err);
-    drop_variable(v);
+    drop_variable(s, v);
   }
 }
 
@@ -562,12 +558,13 @@ void cmd_output(struct server_state *s, const char *args[]) {
 void cmd_clear(struct server_state *s, const char *args[]) {
   (void)args;
   int err = 0;
-  for (int i = 0; i < s->variables_capacity; i++) {
-    struct variable *v = &s->variables[i];
-    if (v->name != NULL) {
-      err |= v->value.type->free(v->value.type->aux, s->ctx, value_ptr(&v->value));
-      drop_variable(v);
-    }
+  struct variable *v = s->variables;
+  while (v != NULL) {
+    // Dropping v frees it, so remember the successor first.
+    struct variable *next = v->next;
+    err |= v->value.type->free(v->value.type->aux, s->ctx, value_ptr(&v->value));
+    drop_variable(s, v);
+    v = next;
   }
   err |= futhark_context_clear_caches(s->ctx);
   error_check(s, err);
@@ -1042,7 +1039,7 @@ void cmd_zip(struct server_state *s, const char *args[]) {
   err |= futhark_context_sync(s->ctx);
   error_check(s, err);
   if (err != 0) {
-    drop_variable(to);
+    drop_variable(s, to);
   }
 }
 
@@ -1088,7 +1085,7 @@ void cmd_unzip(struct server_state *s, const char *args[]) {
       failure();
       printf("Variable already exists: %s\n", to_name);
       for (int j = 0; j < i; j++) {
-        drop_variable(outs[j]);
+        drop_variable(s, outs[j]);
       }
       return;
     }
@@ -1103,7 +1100,7 @@ void cmd_unzip(struct server_state *s, const char *args[]) {
   error_check(s, err);
   if (err != 0) {
     for (int i = 0; i < num_args; i++) {
-      drop_variable(outs[i]);
+      drop_variable(s, outs[i]);
     }
   }
 }
@@ -1547,15 +1544,9 @@ void run_server(struct futhark_prog *prog,
   struct server_state s = {
     .cfg = cfg,
     .ctx = ctx,
-    .variables_capacity = 100,
+    .variables = NULL,
     .prog = *prog
   };
-
-  s.variables = malloc(s.variables_capacity * sizeof(struct variable));
-
-  for (int i = 0; i < s.variables_capacity; i++) {
-    s.variables[i].name = NULL;
-  }
 
   ok();
   while ((linelen = getline(&line, &buflen, stdin)) > 0) {
@@ -1563,7 +1554,9 @@ void run_server(struct futhark_prog *prog,
     ok();
   }
 
-  free(s.variables);
+  while (s.variables != NULL) {
+    drop_variable(&s, s.variables);
+  }
   free(line);
 }
 
