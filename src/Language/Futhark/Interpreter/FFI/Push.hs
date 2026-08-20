@@ -60,9 +60,13 @@ lazyGet shp vr = get shp vr
 
 put :: TypeName -> I.Value m -> ServerM ValueRef
 put _ (I.ValuePrim p) = putPrim p
-put tn pv@(I.ValueArray shp _) = do
-  et <- elemType tn
-  mapM (put et) (flatten pv) >>= mkArray tn (dims shp)
+put tn pv@(I.ValueArray shp _)
+  -- TODO: array elements residing on the server currently have to be fetched
+  -- first, but this could be optimised further.
+  | hasLazy pv = put tn =<< getLazy pv
+  | otherwise = do
+      et <- elemType tn
+      mapM (put et) (flatten pv) >>= mkArray tn (dims shp)
   where
     flatten :: I.Value m -> [I.Value m]
     flatten (I.ValueArray _ a) = foldl (\o n -> o ++ flatten n) [] $ A.elems a
@@ -80,8 +84,12 @@ put tn (I.ValueSum _ vn vs) = do
       =<< variants tn
   vrs <- zipWithM put vts vs
   mkSum tn vn vrs
+-- The value already resides on the server.
+put _ (I.ValueLazyFFI _ r []) = pure r
 put tn v@(I.ValueLazyFFI {}) = do
-  -- TODO: Index and construct on server instead?
+  -- A partially indexed array cannot be constructed on the server, as the
+  -- 'index' command only indexes all the way down to an element, so this
+  -- one does have to go through the interpreter.
   iv <- getLazy v
   put tn iv
 put _ v = error $ "Values of type " ++ show v ++ " are unsupported in FFI."
