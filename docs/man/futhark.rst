@@ -74,11 +74,14 @@ A Futhark compiler development command, intentionally undocumented and
 intended for use in developing the Futhark compiler, not for
 programmers writing in Futhark.
 
-futhark eval [-f FILE] [-w] <exprs...>
---------------------------------------
+futhark eval [options...] <exprs...>
+------------------------------------
 
 Evaluates expressions given as command-line arguments. Optionally
 allows a file import using ``-f``.
+
+If ``--backend`` is passed, the entry points of the file loaded with ``-f`` are
+compiled, as for :ref:`futhark-repl(1)`.
 
 futhark hash PROGRAM
 --------------------

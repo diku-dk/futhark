@@ -133,6 +133,9 @@ check 'rf {x = 2, y = 1}'
 check 'sf (#a 2)'
 check 'sf (#b 2)'
 
+# Array construction
+check 'ca1 5'
+
 # Primitive array functions
 check 'pa1f [1,2,3]'
 check '(pa1f [1,2,3])[0]'
@@ -145,6 +148,7 @@ check '(pa2f [[1,2,3], [3,2,1]])[0,2]'
 
 # An array produced by one external function, passed to another.
 check 'pa1f pa1'
+check 'pa1f (ca1 10)'
 check 'pa2f pa2'
 
 # Record array functions

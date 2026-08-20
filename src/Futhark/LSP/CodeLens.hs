@@ -26,7 +26,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as R
 import Futhark.Compiler.Program (VFS)
-import Futhark.Eval (EvalConfig (evalFile, evalPrintWarnings), Evaluation (abort), evalConfig, newFutharkiState, runEvalRecordRef, runExpr)
+import Futhark.Eval (EvalConfig (evalFile, evalPrintWarnings), Evaluation (abort), evalConfig, newInterpreterState, runEvalRecordRef, runExpr)
 import Futhark.LSP.CommandType qualified as CommandType
 import Futhark.LSP.Tool (Execute, transformVFS)
 import Futhark.Util (showText)
@@ -295,7 +295,7 @@ executeEvalLens (EvalLensData docUri line) = do
 
           -- load the file the expression is located in
           interpreterState <-
-            newFutharkiState evalConfig' currentVFS
+            newInterpreterState evalConfig' currentVFS
               >>= either abort pure
 
           liftIO setupLimits

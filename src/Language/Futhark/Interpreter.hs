@@ -1354,27 +1354,50 @@ extCall n ps shp = liftF $ ExtOpFFI call id
       pts <- FFI.inputs n
       zipWithM FFI.put pts ps >>= FFI.call n >>= FFI.lazyGet shp
 
-extFun :: Name -> Int -> ValueShape -> EvalM Value
-extFun n c s = extFun' c []
+-- | The parameters of an external binding, represented as functions that
+-- bind an argument in the environment.
+extParams :: [Pat ParamType] -> ResRetType -> [Env -> Value -> EvalM Env]
+extParams ps ret = map fromPat ps <> map fromArrow (fst $ unfoldFunType $ retType ret)
   where
-    extFun' :: Int -> [Value] -> EvalM Value
-    extFun' i _ | i < 1 = extCall n [] s -- Special case: Functions with 0 parameters - i.e. values
-    extFun' i vs | i == 1 = pure . ValueFun $ \v -> extCall n (reverse $ v : vs) s
-    extFun' i vs = pure . ValueFun $ \v -> extFun' (i - 1) $ v : vs
+    fromPat p env = matchPat env p
+    fromArrow (Named v, t) env val =
+      pure $ valEnv (M.singleton v (Just $ T.BoundV [] $ toStruct t, val)) <> env
+    fromArrow (Unnamed, _) env _ = pure env
+
+-- | Construct the value of an external binding with the given parameters. The
+-- shape of the result may depend on the values of the parameters , so it is
+-- computed by the provided function only once every argument has been supplied
+-- and bound in the environment. A binding of arity zero is not a function, and
+-- is called immediately.
+extFun :: Name -> Env -> [Env -> Value -> EvalM Env] -> (Env -> EvalM ValueShape) -> EvalM Value
+extFun n = extFun' []
+  where
+    extFun' vs env [] resShape = extCall n (reverse vs) =<< resShape env
+    extFun' vs env (bind : binds) resShape = pure . ValueFun $ \v -> do
+      env' <- bind env v
+      extFun' (v : vs) env' binds resShape
 
 evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec vb@(ValBind (Just _) vn@(VName n _) _ _ (Info ret) tparams ps _ _ _ _)) | "$external" `elem` valBindAttrs vb = localExts $ do
-  let bv = Just $ T.BoundV [] $ evalToStruct $ expandType env $ funType ps ret
+  let ftype = evalToStruct $ expandType env $ funType ps ret
+      bv = Just $ T.BoundV [] ftype
+      params = extParams ps ret
+      -- The result shape is evaluated in the environment where the
+      -- parameters have been bound to the actual arguments, as the result
+      -- type may refer to them.
+      resShape env' =
+        typeShape <$> evalTypeFully (structToEval env' $ snd $ unfoldFunType $ retType ret)
   sizes <- extEnv
   if null tparams
     then do
-      f <- evalTypeFully (structToEval env $ toStruct $ retType ret) >>= extFun n (length ps) . typeShape
+      f <- extFun n env params resShape
       pure $ mempty {envTerm = M.singleton vn $ TermValue bv f} <> sizes
     else
       -- TODO: Add missing sizes?
-      let pfn t =
-            extFun n (length ps) . typeShape . snd . unfoldFunType
-              =<< evalTypeFully t
+      let pfn ftype' = do
+            tparam_env <-
+              evalResolved $ resolveTypeParams (map typeParamName tparams) ftype ftype'
+            extFun n (tparam_env <> env) params resShape
        in pure $ mempty {envTerm = M.singleton vn $ TermPoly bv pfn} <> sizes
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env v tparams ps ret fbody

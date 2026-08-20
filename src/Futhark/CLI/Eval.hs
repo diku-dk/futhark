@@ -9,7 +9,8 @@ import Data.Text qualified as T
 import Futhark.Eval
   ( EvalConfig (..),
     evalConfig,
-    newFutharkiState,
+    evalServerOptions,
+    newInterpreterState,
     runExpr,
   )
 import Futhark.Util.Options
@@ -34,7 +35,7 @@ main = mainWithOptions evalConfig options "options... <exprs...>" run
 
 runExprs :: [String] -> EvalConfig -> IO ()
 runExprs exprs cfg = do
-  maybe_new_state <- newFutharkiState cfg M.empty
+  maybe_new_state <- newInterpreterState cfg M.empty
   interpreter_state <- case maybe_new_state of
     Left reason -> do
       hPutDocLn stderr reason
@@ -56,40 +57,6 @@ options =
       "w"
       ["no-warnings"]
       (NoArg $ Right $ \config -> config {evalPrintWarnings = False})
-      "Do not print warnings.",
-    Option
-      "p"
-      ["pass-option"]
-      ( ReqArg
-          ( \opt ->
-              Right $ \config ->
-                config {evalExtraOptions = opt : evalExtraOptions config}
-          )
-          "OPT"
-      )
-      "Pass this option to programs being run.",
-    Option
-      []
-      ["pass-compiler-option"]
-      ( ReqArg
-          ( \opt ->
-              Right $ \config ->
-                config {evalCompilerOptions = opt : evalCompilerOptions config}
-          )
-          "OPT"
-      )
-      "Pass this option to the compiler.",
-    Option
-      ""
-      ["skip-compilation"]
-      (NoArg $ Right $ \config -> config {evalSkipCompilation = True})
-      "Use already compiled server-mode program.",
-    Option
-      []
-      ["backend"]
-      ( ReqArg
-          (\backend -> Right $ \config -> config {evalBackend = Just backend})
-          "BACKEND"
-      )
-      "The compiler backend used (defaults to interpreted)."
+      "Do not print warnings."
   ]
+    ++ evalServerOptions

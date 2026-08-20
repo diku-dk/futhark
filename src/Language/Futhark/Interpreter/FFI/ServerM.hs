@@ -3,6 +3,7 @@ module Language.Futhark.Interpreter.FFI.ServerM
     ValueRef,
     Server,
     startServer,
+    stopServer,
     ServerM,
     runServerM,
     gc,
@@ -39,6 +40,7 @@ module Language.Futhark.Interpreter.FFI.ServerM
   )
 where
 
+import Control.Exception (catch)
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ReaderT, asks, runReaderT)
@@ -108,6 +110,12 @@ askQueue = ServerM $ asks queue
 
 startServer :: S.ServerCfg -> IO Server
 startServer cfg = Server <$> S.startServer cfg <*> AL.new
+
+-- | Shut down the server. Returns a message on termination failure.
+stopServer :: Server -> IO (Maybe T.Text)
+stopServer s =
+  (Nothing <$ S.stopServer (server s))
+    `catch` \(S.ServerException e) -> pure $ Just e
 
 runServerM :: Server -> ServerM a -> IO (Either String a)
 runServerM s (ServerM m) = runExceptT $ runReaderT m s
