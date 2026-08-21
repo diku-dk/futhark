@@ -1,8 +1,18 @@
+-- | Facilities for evaluating Futhark code.
+--
+-- This most directly provides the building blocks for @futhark eval@, but this
+-- module also contains server interaction machinery used by @futhark repl@ and
+-- other commands that make use of the Futhark interpreter.
 module Futhark.Eval
-  ( InterpreterConfig (..),
+  ( EvalConfig (..),
     runExpr,
-    interpreterConfig,
-    newFutharkiState,
+    evalConfig,
+    evalServerOptions,
+    runFFI,
+    forceValue,
+    interpretImports,
+    initialiseInterpreter,
+    newInterpreterState,
     Evaluation (..),
     EvalRecordRef (),
     runEvalRecordRef,
@@ -10,33 +20,43 @@ module Futhark.Eval
 where
 
 import Control.Exception (IOException, catch)
-import Control.Monad (foldM, when, (<=<))
-import Control.Monad.Except (ExceptT, runExceptT, throwError)
+import Control.Monad (foldM, unless, void, when, (<=<))
+import Control.Monad.Except (ExceptT (..), runExceptT, throwError)
 import Control.Monad.Free.Church (F, runF)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask)
+import Data.Either (isLeft)
 import Data.IORef (IORef, modifyIORef')
 import Data.Map qualified as M
-import Data.Maybe (maybeToList)
+import Data.Maybe (isJust, maybeToList)
 import Data.Sequence (Seq, (|>))
 import Data.Text qualified as T
 import Futhark.Compiler (prettyWarnings, readProgramFilesExceptKnown)
-import Futhark.Compiler.Program (VFS, fileProg, fileScope)
-import Futhark.Error (externalErrorS, prettyCompilerError)
+import Futhark.Compiler.Program (FileModule (..), Imports, VFS, fileScope)
+import Futhark.Error (badOnLeft, externalErrorS, prettyCompilerError)
 import Futhark.FreshNames (VNameSource)
+import Futhark.Server qualified as S
+import Futhark.Test (FutharkExe (..), compileProgram, futharkServerCfg)
+import Futhark.Util (showText)
+import Futhark.Util.Options (ArgDescr (..), FunOptDescr, OptDescr (..))
 import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, hardline, putDocLn)
+import Language.Futhark.Core (locText)
 import Language.Futhark.Interpreter qualified as I
+import Language.Futhark.Interpreter.FFI.Push qualified as FFI
+import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
 import Language.Futhark.Parser (parseExp)
 import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
 import Language.Futhark.Pretty (toName)
 import Language.Futhark.Prop (typeOf)
 import Language.Futhark.Semantic qualified as T
-import Language.Futhark.Syntax (nameToText, typeParamName)
+import Language.Futhark.Syntax (DecBase (ValDec), ProgBase (progDecs), ValBindBase (..), nameToText, typeParamName)
 import Language.Futhark.TypeChecker qualified as T
 import Prettyprinter (Doc, align, pretty, unAnnotate, vcat, (<+>))
 import Prettyprinter.Render.Terminal (AnsiStyle)
+import System.Environment (getExecutablePath)
 import System.Exit (ExitCode (ExitFailure), exitWith)
+import System.FilePath (dropExtension, (</>))
 import System.IO (stderr)
 
 -- | The class of monads that can perform expression evaluation.
@@ -78,17 +98,17 @@ runEvalRecordRef ::
 runEvalRecordRef msgRef (EvalRecordRef action) =
   flip runReaderT msgRef $ runExceptT action
 
-newtype InterpreterState = InterpreterState (VNameSource, T.Env, I.Ctx)
+newtype InterpreterState = InterpreterState (VNameSource, T.Env, I.Ctx, Maybe FFI.Server)
 
 -- | Run an expression in the given interpreter state. The expression is parsed,
 -- type checked, and then run. Returns a prettyprinted result. Must be run in a
 -- monad that supports aborting and traces.
 runExpr ::
-  (Evaluation m) =>
+  (Evaluation m, MonadIO m) =>
   InterpreterState ->
   T.Text ->
   m (Doc AnsiStyle)
-runExpr (InterpreterState (src, env, ctx)) str = do
+runExpr (InterpreterState (src, env, ctx, s)) str = do
   uexp <- case parseExp "" str of
     Left (SyntaxError _ serr) -> abort $ pretty serr
     Right e -> pure e
@@ -103,27 +123,129 @@ runExpr (InterpreterState (src, env, ctx)) str = do
             "The following types are ambiguous: "
               <> commasep (map (pretty . nameToText . toName . typeParamName) tparams)
           ]
-  pval <- runInterpreterNoBreak $ I.interpretExp ctx fexp
+  pval <- runInterpreterNoBreak s $ I.interpretExp ctx fexp
   case pval of
-    Left err -> do
-      abort $ I.prettyInterpreterError err
-    Right val -> pure $ I.prettyValue val <> hardline
+    Left err -> abort $ I.prettyInterpreterError err
+    Right val -> do
+      val' <- liftIO $ forceValue s val
+      pure $ I.prettyValue val' <> hardline
 
-data InterpreterConfig = InterpreterConfig
-  { interpreterPrintWarnings :: Bool,
-    interpreterFile :: Maybe String
+data EvalConfig = EvalConfig
+  { evalPrintWarnings :: Bool,
+    evalFile :: Maybe String,
+    -- | If @Just@, compile the file using this backend.
+    evalBackend :: Maybe String,
+    evalSkipCompilation :: Bool,
+    evalExtraOptions :: [String],
+    evalCompilerOptions :: [String],
+    evalFuthark :: Maybe FilePath
   }
 
-interpreterConfig :: InterpreterConfig
-interpreterConfig = InterpreterConfig True Nothing
+evalConfig :: EvalConfig
+evalConfig =
+  EvalConfig
+    { evalPrintWarnings = True,
+      evalFile = Nothing,
+      evalBackend = Nothing,
+      evalSkipCompilation = False,
+      evalExtraOptions = [],
+      evalCompilerOptions = [],
+      evalFuthark = Nothing
+    }
 
-newFutharkiState ::
+-- | Command line options for configuring the use of an external server.
+evalServerOptions :: [FunOptDescr EvalConfig]
+evalServerOptions =
+  [ Option
+      "p"
+      ["pass-option"]
+      ( ReqArg
+          ( \opt ->
+              Right $ \config ->
+                config {evalExtraOptions = opt : evalExtraOptions config}
+          )
+          "OPT"
+      )
+      "Pass this option to programs being run.",
+    Option
+      []
+      ["pass-compiler-option"]
+      ( ReqArg
+          ( \opt ->
+              Right $ \config ->
+                config {evalCompilerOptions = opt : evalCompilerOptions config}
+          )
+          "OPT"
+      )
+      "Pass this option to the compiler.",
+    Option
+      []
+      ["skip-compilation"]
+      (NoArg $ Right $ \config -> config {evalSkipCompilation = True})
+      "Use already compiled server-mode program.",
+    Option
+      []
+      ["backend"]
+      ( ReqArg
+          (\backend -> Right $ \config -> config {evalBackend = Just backend})
+          "BACKEND"
+      )
+      "The compiler backend used (defaults to interpreted)."
+  ]
+
+-- | Compile the given file and start a server for it. Returns 'Left' on error.
+prepareServer :: EvalConfig -> FilePath -> String -> IO (Either T.Text FFI.Server)
+prepareServer cfg file backend = runExceptT $ do
+  futhark <- liftIO $ maybe getExecutablePath pure $ evalFuthark cfg
+
+  unless (evalSkipCompilation cfg) $
+    void $
+      compileProgram ("--server" : evalCompilerOptions cfg) (FutharkExe futhark) backend file
+
+  let server_cfg = futharkServerCfg ("." </> dropExtension file) $ evalExtraOptions cfg
+  started <-
+    liftIO $
+      (Right <$> FFI.startServer server_cfg)
+        `catch` (\(S.ServerException err) -> pure $ Left err)
+        `catch` (\(err :: IOException) -> pure $ Left $ showText err)
+  either throwError pure started
+
+-- | Perform an action on the server. Calls `error` if no server is provided.
+runFFI :: Maybe FFI.Server -> FFI.ServerM I.Value -> IO I.Value
+runFFI Nothing _ = error "External call, but no server."
+runFFI (Just server) m = either error id <$> FFI.runServerM server m
+
+-- | Fetch in full a value that may reside on a server, so that it can
+-- be printed or otherwise inspected.
+forceValue :: Maybe FFI.Server -> I.Value -> IO I.Value
+forceValue Nothing v = pure v
+forceValue server v = runFFI server $ FFI.getLazy v
+
+externalise :: FileModule -> FileModule
+externalise fm = fm {fileProg = (fileProg fm) {progDecs = map onDec $ progDecs $ fileProg fm}}
+  where
+    onDec (ValDec vb)
+      | isJust $ valBindEntryPoint vb =
+          ValDec $ vb {valBindAttrs = "$external" : valBindAttrs vb}
+    onDec dec = dec
+
+-- | Mark the entry points of the last import - which is the file the
+-- user actually asked us to load - as external, meaning that calls to
+-- them are dispatched to a server instead of being interpreted.
+externaliseLast :: Imports -> Imports
+externaliseLast [] = []
+externaliseLast [(k, fm)] = [(k, externalise fm)]
+externaliseLast (x : xs) = x : externaliseLast xs
+
+-- | Type check and interpret the given program (if any), producing a state
+-- in which expressions can be evaluated with 'runExpr'.
+newInterpreterState ::
   (MonadIO m, Evaluation m) =>
-  InterpreterConfig ->
-  Maybe FilePath ->
+  EvalConfig ->
   VFS ->
   m (Either (Doc AnsiStyle) InterpreterState)
-newFutharkiState cfg maybe_file vfs = runExceptT $ do
+newInterpreterState cfg vfs = runExceptT $ do
+  let maybe_file = evalFile cfg
   (ws, imports, src) <-
     badOnLeft prettyCompilerError
       =<< liftIO
@@ -131,39 +253,75 @@ newFutharkiState cfg maybe_file vfs = runExceptT $ do
             `catch` \(err :: IOException) ->
               pure (externalErrorS (show err))
         )
-  when (interpreterPrintWarnings cfg) $
-    liftIO $
-      hPutDoc stderr $
-        prettyWarnings ws
+  when (evalPrintWarnings cfg) $
+    liftIO . hPutDoc stderr $
+      prettyWarnings ws
 
-  ictx <-
-    let foldFile ctx =
-          badOnLeft I.prettyInterpreterError
-            <=< runInterpreterNoBreak
-              . I.interpretImport ctx
-     in foldM foldFile I.initialCtx $
-          map (fmap fileProg) imports
+  (s, tenv, ienv) <- ExceptT $ initialiseInterpreter cfg maybe_file imports
 
-  let (tenv, ienv) =
-        let (iname, fm) = last imports
-         in ( fileScope fm,
-              ictx {I.ctxEnv = I.ctxImports ictx M.! iname}
-            )
+  pure $ InterpreterState (src, tenv, ienv, s)
 
-  pure $ InterpreterState (src, tenv, ienv)
+-- | Interpret the given imports in order with the provided interpreter runner,
+-- and produce the type and interpreter environment of the last one.
+interpretImports ::
+  (Monad m) =>
+  (F I.ExtOp I.Ctx -> m (Either I.InterpreterError I.Ctx)) ->
+  Imports ->
+  ExceptT (Doc AnsiStyle) m (T.Env, I.Ctx)
+interpretImports runner imports = do
+  let foldFile ctx =
+        badOnLeft I.prettyInterpreterError
+          <=< lift . runner . I.interpretImport ctx
+  ictx <- foldM foldFile I.initialCtx $ map (fmap fileProg) imports
+  let (iname, fm) = last imports
+  pure (fileScope fm, ictx {I.ctxEnv = I.ctxImports ictx M.! iname})
+
+-- | Set up an interpreter context for the given program. If a backend has
+-- been requested, a server is started and the entry points of the loaded
+-- file are marked external, such that calls to them are dispatched to the
+-- server instead of being interpreted. On failure the server is shut down
+-- again, so a returned server is always one that the caller now owns (and
+-- must eventually stop).
+initialiseInterpreter ::
+  (Evaluation m, MonadIO m) =>
+  EvalConfig ->
+  Maybe FilePath ->
+  Imports ->
+  m (Either (Doc AnsiStyle) (Maybe FFI.Server, T.Env, I.Ctx))
+initialiseInterpreter cfg maybe_file imports =
+  case (maybe_file, evalBackend cfg) of
+    (Just file, Just backend) -> do
+      started <- liftIO $ prepareServer cfg file backend
+      case started of
+        Left err -> pure $ Left $ pretty err
+        Right s -> do
+          r <- interpretWith (Just s) $ externaliseLast imports
+          -- Do not leave a server running if we never got off the ground.
+          when (isLeft r) $ void $ liftIO $ FFI.stopServer s
+          pure r
+    _ -> interpretWith Nothing imports
   where
-    badOnLeft :: (Monad m) => (err -> err') -> Either err a -> ExceptT err' m a
-    badOnLeft _ (Right x) = pure x
-    badOnLeft p (Left err) = throwError $ p err
+    interpretWith s =
+      runExceptT
+        . fmap (\(tenv, ienv) -> (s, tenv, ienv))
+        . interpretImports (runInterpreterNoBreak s)
 
+-- | Run an interpreter action, dispatching external calls to the given
+-- server (if any). Breakpoints are ignored, as there is no way to enter a
+-- debugging prompt.
 runInterpreterNoBreak ::
-  (Evaluation m) =>
+  (Evaluation m, MonadIO m) =>
+  Maybe FFI.Server ->
   F I.ExtOp a ->
   m (Either I.InterpreterError a)
-runInterpreterNoBreak m = runF m (pure . Right) intOp
+runInterpreterNoBreak s m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
       trace $ pretty w <> ":" <+> align (unAnnotate v)
       c
-    intOp (I.ExtOpBreak _ _ _ c) = c
+    intOp (I.ExtOpBreak _ I.BreakNaN _ c) = c
+    intOp (I.ExtOpBreak w _ _ c) = do
+      trace $ pretty (locText w) <> ": ignoring breakpoint in top-level constant."
+      c
+    intOp (I.ExtOpFFI sm c) = c =<< liftIO (runFFI s sm)

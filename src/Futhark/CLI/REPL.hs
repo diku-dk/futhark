@@ -18,6 +18,15 @@ import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
 import Data.Version
 import Futhark.Compiler
+import Futhark.Error (badOnLeft)
+import Futhark.Eval
+  ( EvalConfig (..),
+    evalConfig,
+    evalServerOptions,
+    forceValue,
+    initialiseInterpreter,
+    runFFI,
+  )
 import Futhark.Format (parseFormatString)
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal, showText)
@@ -26,6 +35,7 @@ import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColor
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
+import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
 import Language.Futhark.Parser
 import Language.Futhark.Semantic qualified as T
 import Language.Futhark.TypeChecker qualified as T
@@ -48,10 +58,10 @@ banner =
 
 -- | Run @futhark repl@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions () [] "options... [program.fut]" run
+main = mainWithOptions evalConfig evalServerOptions "options... [program.fut]" run
   where
-    run [] _ = Just $ repl Nothing
-    run [prog] _ = Just $ repl $ Just prog
+    run [] cfg = Just $ repl cfg Nothing
+    run [prog] cfg = Just $ repl cfg $ Just prog
     run _ _ = Nothing
 
 data StopReason = EOF | Stop | Exit | Load FilePath | Interrupt
@@ -60,8 +70,8 @@ replSettings :: Haskeline.Settings IO
 replSettings =
   Haskeline.setComplete replComplete Haskeline.defaultSettings
 
-repl :: Maybe FilePath -> IO ()
-repl maybe_prog = do
+repl :: EvalConfig -> Maybe FilePath -> IO ()
+repl cfg maybe_prog = do
   when fancyTerminal $ do
     putDoc banner
     putStrLn $ "Version " ++ showVersion version ++ "."
@@ -86,20 +96,28 @@ repl maybe_prog = do
           Left (Load file) -> do
             liftIO $ T.putStrLn $ "Loading " <> T.pack file
             maybe_new_state <-
-              liftIO $ newFutharkiState (futharkiCount s) (futharkiProg s) $ Just file
+              liftIO $ newFutharkiState cfg (futharkiCount s) (futharkiProg s) $ Just file
             case maybe_new_state of
-              Right new_state -> toploop new_state
+              Right new_state -> do
+                liftIO $ stopServer s
+                toploop new_state
               Left err -> do
                 liftIO $ putDocLn err
                 toploop s'
           Right _ -> pure ()
 
-      finish _s = pure ()
+      finish = liftIO . stopServer
 
-  maybe_init_state <- liftIO $ newFutharkiState 0 noLoadedProg maybe_prog
+      -- A server that has already crashed will complain when shut
+      -- down, which is no reason to take the REPL with it.
+      stopServer s = case futharkiServer s of
+        Nothing -> pure ()
+        Just server -> mapM_ T.putStrLn =<< FFI.stopServer server
+
+  maybe_init_state <- liftIO $ newFutharkiState cfg 0 noLoadedProg maybe_prog
   s <- case maybe_init_state of
     Left prog_err -> do
-      noprog_init_state <- liftIO $ newFutharkiState 0 noLoadedProg Nothing
+      noprog_init_state <- liftIO $ newFutharkiState cfg 0 noLoadedProg Nothing
       case noprog_init_state of
         Left err ->
           error $ "Failed to initialise interpreter state: " <> T.unpack (docText err)
@@ -130,7 +148,9 @@ data FutharkiState = FutharkiState
     futharkiSkipBreaks :: [Loc],
     futharkiBreakOnNaN :: Bool,
     -- | The currently loaded file.
-    futharkiLoaded :: Maybe FilePath
+    futharkiLoaded :: Maybe FilePath,
+    -- | Possibly a computation server.
+    futharkiServer :: Maybe FFI.Server
   }
 
 extendEnvs :: LoadedProg -> (T.Env, I.Ctx) -> [ImportName] -> (T.Env, I.Ctx)
@@ -141,26 +161,23 @@ extendEnvs prog (tenv, ictx) opens = (tenv', ictx')
     t_imports = filter ((`elem` opens) . fst) $ lpImports prog
     i_envs = map snd $ filter ((`elem` opens) . fst) $ M.toList $ I.ctxImports ictx
 
-newFutharkiState :: Int -> LoadedProg -> Maybe FilePath -> IO (Either (Doc AnsiStyle) FutharkiState)
-newFutharkiState count prev_prog maybe_file = runExceptT $ do
+newFutharkiState ::
+  EvalConfig ->
+  Int ->
+  LoadedProg ->
+  Maybe FilePath ->
+  IO (Either (Doc AnsiStyle) FutharkiState)
+newFutharkiState cfg count prev_prog maybe_file = runExceptT $ do
   let files = maybeToList maybe_file
   -- Put code through the type checker.
   prog <-
     badOnLeft prettyProgErrors
       =<< liftIO (reloadProg prev_prog files M.empty)
   liftIO $ putDoc $ prettyWarnings $ lpWarnings prog
-  -- Then into the interpreter.
-  ictx <-
-    foldM
-      (\ctx -> badOnLeft (pretty . show) <=< runInterpreterNoBreak . I.interpretImport ctx)
-      I.initialCtx
-      $ map (fmap fileProg) (lpImports prog)
 
-  let (tenv, ienv) =
-        let (iname, fm) = last $ lpImports prog
-         in ( fileScope fm,
-              ictx {I.ctxEnv = I.ctxImports ictx M.! iname}
-            )
+  -- Then into the interpreter.
+  (server, tenv, ienv) <-
+    ExceptT $ initialiseInterpreter cfg maybe_file $ lpImports prog
 
   pure
     FutharkiState
@@ -170,12 +187,9 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
         futharkiBreaking = Nothing,
         futharkiSkipBreaks = mempty,
         futharkiBreakOnNaN = False,
-        futharkiLoaded = maybe_file
+        futharkiLoaded = maybe_file,
+        futharkiServer = server
       }
-  where
-    badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
-    badOnLeft _ (Right x) = pure x
-    badOnLeft p (Left err) = throwError $ p err
 
 getPrompt :: FutharkiM String
 getPrompt = do
@@ -282,7 +296,11 @@ onExp e = do
           r <- runInterpreter $ I.interpretExp ienv e'
           case r of
             Left err -> pure $ Left $ pretty $ showText err
-            Right v -> pure $ Right v
+            Right v -> do
+              -- Whatever we do with the value next (printing it, most
+              -- likely) requires having it in full.
+              server <- gets futharkiServer
+              Right <$> liftIO (forceValue server v)
       | otherwise ->
           pure $
             Left $
@@ -362,20 +380,9 @@ runInterpreter m = runF m (pure . Right) intOp
                 }
 
       c
-
-runInterpreterNoBreak :: (MonadIO m) => F I.ExtOp a -> m (Either I.InterpreterError a)
-runInterpreterNoBreak m = runF m (pure . Right) intOp
-  where
-    intOp (I.ExtOpError err) = pure $ Left err
-    intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putDocLn $ pretty w <> ":" <+> align (unAnnotate v)
-      c
-    intOp (I.ExtOpBreak _ I.BreakNaN _ c) = c
-    intOp (I.ExtOpBreak w _ _ c) = do
-      liftIO $
-        T.putStrLn $
-          locText w <> ": " <> "ignoring breakpoint when computating constant."
-      c
+    intOp (I.ExtOpFFI sm c) = do
+      server <- gets futharkiServer
+      c =<< liftIO (runFFI server sm)
 
 replComplete :: Haskeline.CompletionFunc IO
 replComplete = loadComplete
