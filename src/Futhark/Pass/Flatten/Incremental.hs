@@ -70,7 +70,6 @@ import Control.Monad
 import Control.Monad.State
 import Data.Foldable
 import Data.Maybe (isJust)
-import Data.Set qualified as S
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.Pass.Flatten.Distribute
@@ -454,13 +453,13 @@ factorScremaForParallelism ::
   (MonadBuilder m) =>
   FunHasParallelism ->
   Scope SOACS ->
-  Certs ->
+  StmAux () ->
   Pat Type ->
   SubExp ->
   [VName] ->
   ScremaForm SOACS ->
   m (Maybe (Body SOACS))
-factorScremaForParallelism funHasParallelism scope certs pat w arrs form
+factorScremaForParallelism funHasParallelism scope aux pat w arrs form
   | Just (reds, map_lam) <- isRedomapSOAC form,
     lambdaHasMeaningfulParallelism funHasParallelism map_lam = do
       map_lam' <- preprocessLambda scope map_lam
@@ -501,24 +500,37 @@ factorScremaForParallelism funHasParallelism scope certs pat w arrs form
       pure Nothing
   where
     mkFactoredBody stms = do
-      stms' <- fmap (certify certs) <$> preprocessStms scope stms
+      stms' <-
+        fmap (propagateAttrs (stmAuxAttrs aux) . certify (stmAuxCerts aux))
+          <$> preprocessStms scope stms
       pure $ mkBody stms' $ varsRes $ patNames pat
+
+-- | Add the flattening attributes of the enclosing context to a statement. A
+-- statement that carries flattening attributes of its own is left alone, as
+-- those are more specific.
+propagateAttrs :: Attrs -> Stm SOACS -> Stm SOACS
+propagateAttrs attrs stm
+  | attrs' == mempty = stm
+  | flatteningAttrs (stmAuxAttrs (stmAux stm)) == mempty =
+      stm {stmAux = (stmAux stm) {stmAuxAttrs = attrs' <> stmAuxAttrs (stmAux stm)}}
+  | otherwise = stm
+  where
+    -- 'flatteningAttrs' strips the enclosing 'flattening', which has to be put
+    -- back for the attributes to be recognised on the statement.
+    attrs' =
+      mconcat . mapAttrs (oneAttr . AttrComp "flattening" . pure) $
+        flatteningAttrs attrs
 
 -- | Propagate incremental flattening attributes to the statements of
 -- a map lambda body. Statements that carry their own incremental
 -- flattening attributes are left alone.
 propagateVersioningAttrs :: Attrs -> Lambda SOACS -> Lambda SOACS
 propagateVersioningAttrs attrs lam
-  | attrs' == mempty = lam
+  | flatteningAttrs attrs == mempty = lam
   | otherwise =
-      lam {lambdaBody = (lambdaBody lam) {bodyStms = fmap onStm (bodyStms (lambdaBody lam))}}
-  where
-    attrs' = versioningAttrs attrs
-    onStm stm
-      | versioningAttrs (stmAuxAttrs (stmAux stm)) == mempty =
-          stm {stmAux = (stmAux stm) {stmAuxAttrs = attrs' <> stmAuxAttrs (stmAux stm)}}
-      | otherwise = stm
-    versioningAttrs (Attrs s) = Attrs $ S.filter isVersioningAttr s
-    isVersioningAttr (AttrComp "incremental_flattening" _) = True
-    isVersioningAttr (AttrComp "flattening" _) = True
-    isVersioningAttr _ = False
+      lam
+        { lambdaBody =
+            (lambdaBody lam)
+              { bodyStms = fmap (propagateAttrs attrs) (bodyStms (lambdaBody lam))
+              }
+        }

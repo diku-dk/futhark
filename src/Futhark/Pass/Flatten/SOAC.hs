@@ -1282,7 +1282,7 @@ flattenUniformRedomap ops segments env inps res pat aux w arrs form reds map_lam
   let outer_only = transformUniformRedomap (flattenSegLevel ops) segments env inps w arrs reds map_lam
   gpu_scope <- askScope
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-  factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
+  factored <- factorScremaForParallelism funHasParallelism pp_scope aux pat w arrs form
   case factored of
     Just body ->
       versionScanRed ops "uniform_redomap_alt" segments env inps res aux w body outer_only
@@ -1365,7 +1365,7 @@ flattenUniformMaposcanomap ops segments env inps res pat aux w arrs form scans p
         transformUniformMaposcanomap lvl segments env inps w arrs scans post_lam map_lam
   gpu_scope <- askScope
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-  factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
+  factored <- factorScremaForParallelism funHasParallelism pp_scope aux pat w arrs form
   case factored of
     Just body ->
       versionScanRed ops "uniform_maposcanomap_alt" segments env inps res aux w body outer_only
@@ -1449,7 +1449,7 @@ flattenOtherScrema ::
 flattenOtherScrema ops segments env inps res pat aux w arrs form = do
   gpu_scope <- askScope
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-  factored <- factorScremaForParallelism funHasParallelism pp_scope (stmAuxCerts aux) pat w arrs form
+  factored <- factorScremaForParallelism funHasParallelism pp_scope aux pat w arrs form
   case factored of
     Just body -> do
       reps <- distributeAndFlattenBody ops segments "factorScremaForParallelism_body" env inps res body
