@@ -1,7 +1,11 @@
+-- The array literal is built with a concatenation outside the kernels, rather
+-- than by having each thread copy 4x50 elements into its own row.  The final
+-- SegMap is the 'opaque', which cannot be part of the same group as the
+-- distributed array literal.
 -- ==
 -- input { [1i64,2i64,3i64] }
 -- auto output
--- structure gpu { SegScan 0 SegMap 3 }
+-- structure gpu { SegScan 0 SegMap 4 SegMap/ArrayLit 0 }
 
 entry main (xs: []i64) =
   map (\x ->

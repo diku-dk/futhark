@@ -342,9 +342,12 @@ isParallelStm funHasParallelism stm =
     isParallelBasicOp Reshape {} = True
     isParallelBasicOp (FlatIndex _ flat_slice) = not $ null $ flatSliceDims flat_slice
     isParallelBasicOp (Index _ slice) = not $ null $ sliceDims slice
+    -- The work done by an 'ArrayLit' is its number of rows times the size of a
+    -- row. Since the size is syntactic, we consider a literal of scalars to be
+    -- always cheap enough for a single thread to construct.
+    isParallelBasicOp (ArrayLit _ row_t) = arrayRank row_t > 0
     -- Now the sequential ones - we handle them explicitly so we will notice if
     -- we ever add a new one.
-    isParallelBasicOp ArrayLit {} = False
     isParallelBasicOp ArrayVal {} = False
     isParallelBasicOp Scratch {} = False
     isParallelBasicOp SubExp {} = False
