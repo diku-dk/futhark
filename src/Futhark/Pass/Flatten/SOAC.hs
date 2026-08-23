@@ -1101,9 +1101,9 @@ transformInnerMap ops segments env inps pat w arrs map_lam = do
 -- per-enclosing-segment values.
 transformMap ::
   FlattenOps ->
-  -- | Incremental-flattening attributes of the enclosing statement, propagated
-  -- onto the (preprocessed) body in the top-level case; see
-  -- 'transformTopLevelMap'.
+  -- | Incremental-flattening attributes of the map itself. These are
+  -- propagated onto the (preprocessed) body, and so eventually reach maps at
+  -- any depth of the nest.
   Attrs ->
   Segments ->
   DistEnv ->
@@ -1115,8 +1115,8 @@ transformMap ::
   FlattenM [ResRep]
 transformMap ops attrs [] _env _inps pat w arrs map_lam = do
   -- Top-level map (no enclosing segments). Preprocess the body and then
-  -- propagate the enclosing attributes onto it, so they influence how the body
-  -- is versioned (e.g. only_inner reaching a Screma produced by interchanging a
+  -- propagate the attributes onto it, so they influence how the body is
+  -- versioned (e.g. only_inner reaching a Screma produced by interchanging a
   -- 'sequential_outer' loop). Order matters: preprocessing may rewrite a body
   -- statement, so propagating first would lose the attributes on the rewritten
   -- form. XXX: this is arguably a bug in preprocessing.
@@ -1125,10 +1125,12 @@ transformMap ops attrs [] _env _inps pat w arrs map_lam = do
     fmap (propagateVersioningAttrs attrs) . renameLambda
       =<< preprocessLambda scope map_lam
   transformTopLevelMap ops pat w arrs lam
-transformMap ops _attrs segments env inps pat w arrs map_lam = do
+transformMap ops attrs segments env inps pat w arrs map_lam = do
+  -- Nested map. As in the top-level case, propagate the attributes onto the
+  -- preprocessed body; this is what carries them to maps deeper in the nest.
   gpu_scope <- askScope
   let pp_scope = castScope $ scopeOfDistInputs inps <> gpu_scope
-  lam <- preprocessLambda pp_scope map_lam
+  lam <- propagateVersioningAttrs attrs <$> preprocessLambda pp_scope map_lam
   transformInnerMap ops segments env inps pat w arrs lam
 
 -- | Fully flatten a map that has no enclosing segments (a top-level map). This

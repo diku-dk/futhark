@@ -96,15 +96,21 @@ irregularityFor irreg aux
       SequentialiseIrregularAll
   | otherwise = irreg
 
-flattenOpsFor :: FunHasParallelism -> FunSizeParams -> DistIrregularity -> SegLevel -> FlattenOps
-flattenOpsFor funHasParallelism funSizeParams irreg lvl =
+flattenOpsFor ::
+  Attrs ->
+  FunHasParallelism ->
+  FunSizeParams ->
+  DistIrregularity ->
+  SegLevel ->
+  FlattenOps
+flattenOpsFor attrs funHasParallelism funSizeParams irreg lvl =
   FlattenOps
     { flattenSegLevel = lvl,
       flattenIrregularity = irreg,
       flattenFunHasParallelism = funHasParallelism,
       flattenDistStmWith = transformDistStm funSizeParams,
       flattenScalarStmAt = transformScalarStm,
-      flattenTopLevelStm = transformStm funHasParallelism funSizeParams
+      flattenTopLevelStm = transformTopLevelStm attrs funHasParallelism funSizeParams
     }
 
 transformScalarStms ::
@@ -141,6 +147,7 @@ transformScalarStm lvl segments env inps res stm =
 -- segments, the mapped arrays are plain regular top-level values
 -- ('DistInputFree'), and the results are necessarily regular.
 transformTopLevelScrema ::
+  Attrs ->
   FunHasParallelism ->
   FunSizeParams ->
   Pat Type ->
@@ -149,9 +156,9 @@ transformTopLevelScrema ::
   [VName] ->
   ScremaForm SOACS ->
   FlattenM ()
-transformTopLevelScrema funHasParallelism funSizeParams pat aux w arrs form = do
+transformTopLevelScrema attrs funHasParallelism funSizeParams pat aux w arrs form = do
   let irreg = irregularityFor DistributeIrregular aux
-      ops = flattenOpsFor funHasParallelism funSizeParams irreg defaultSegLevel
+      ops = flattenOpsFor attrs funHasParallelism funSizeParams irreg defaultSegLevel
   arr_ts <- mapM lookupType arrs
   -- 'flattenScrema' may bind the names of the pattern it is given (some paths
   -- bind them directly, others only insert reps), so we pass it a fresh pattern
@@ -311,38 +318,38 @@ flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, ret
 transformDistStm :: FunSizeParams -> FlattenOps -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
 transformDistStm _ outer_ops segments env (DistStm inps res (ScalarStm stms)) =
   transformScalarStms (flattenSegLevel outer_ops) segments env inps res stms
-transformDistStm funSizeParams outer_ops segments env (DistStm inps res (ParallelStm stm)) = do
-  case stm of
-    Let pat aux (BasicOp e) -> do
+transformDistStm funSizeParams outer_ops segments env (DistStm inps res (ParallelStm (Let pat aux e))) = do
+  case e of
+    BasicOp op -> do
       let ~[res'] = res
           ~[pe] = patElems pat
-      flattenBasicOp ops segments env (inps, res', pe, aux, e)
-    Let pat aux (Op (Screma w arrs form)) ->
+      flattenBasicOp ops segments env (inps, res', pe, aux, op)
+    Op (Screma w arrs form) ->
       flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
-    Let _ aux (Match scrutinees cases defaultCase rt) ->
+    Match scrutinees cases defaultCase rt ->
       flattenMatch ops segments env inps res aux scrutinees cases defaultCase rt
-    Let pat aux (Apply name args rettype s) ->
+    Apply name args rettype s ->
       flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, rettype, s)
-    Let pat aux (Loop merge (ForLoop i it n) body) ->
+    Loop merge (ForLoop i it n) body ->
       flattenLoop ops segments env inps res (pat, aux) (merge, ForLoop i it n, body)
-    Let pat aux (Loop merge (WhileLoop cond) body) -> do
+    Loop merge (WhileLoop cond) body -> do
       flattenLoop ops segments env inps res (pat, aux) (merge, WhileLoop cond, body)
-    Let pat aux (WithAcc inputs lam) ->
+    WithAcc inputs lam ->
       flattenWithAcc ops segments env inps res pat aux inputs lam
-    (Let pat aux (Op (Hist w hist_inputs hist_ops bucket_fun))) ->
+    Op (Hist w hist_inputs hist_ops bucket_fun) ->
       flattenHist ops segments env inps res (pat, aux) (w, hist_inputs, hist_ops, bucket_fun)
-    Let _ aux (Op (FlatMap w arrs lam)) ->
+    Op (FlatMap w arrs lam) ->
       flattenFlatMapNested ops segments env inps res aux w arrs lam
-    Let _ _ (Op (Stream {})) -> error "transformDistStm: Stream should have been removed"
-    Let _ _ (Op (JVP {})) -> error "Unhandled JVP"
-    Let _ _ (Op (VJP {})) -> error "Unhandled VJP"
-    Let _ _ (Op (WithVJP {})) -> error "Unhandled WithVJP"
+    Op (Stream {}) -> error "transformDistStm: Stream should have been removed"
+    Op (JVP {}) -> error "Unhandled JVP"
+    Op (VJP {}) -> error "Unhandled VJP"
+    Op (WithVJP {}) -> error "Unhandled WithVJP"
   where
     lvl = flattenSegLevel outer_ops
     ops =
       outer_ops
         { flattenIrregularity =
-            irregularityFor (flattenIrregularity outer_ops) (stmAux stm)
+            irregularityFor (flattenIrregularity outer_ops) aux
         }
 
 reshapeLiftedApplyResult :: Segments -> RetType SOACS -> ResRep -> FlattenM ResRep
@@ -360,18 +367,18 @@ reshapeLiftedApplyResult segments Prim {} (Regular v) = do
 reshapeLiftedApplyResult _ _ rep =
   pure rep
 
-liftBody :: FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> Result -> FlattenM Result
-liftBody funHasParallelism funSizeParams lvl w inputs env dstms result = do
+liftBody :: Attrs -> FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> Result -> FlattenM Result
+liftBody attrs funHasParallelism funSizeParams lvl w inputs env dstms result = do
   let segments = [w]
-      ops = flattenOpsFor funHasParallelism funSizeParams DistributeIrregular lvl
+      ops = flattenOpsFor attrs funHasParallelism funSizeParams DistributeIrregular lvl
   env' <- foldM (flattenDistStm ops segments) env dstms
   result' <- mapM (liftResult lvl segments inputs env') result
   pure $ concat result'
 
-liftUniformFunBody :: FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> [RetType SOACS] -> Result -> FlattenM Result
-liftUniformFunBody funHasParallelism funSizeParams lvl w inputs env dstms rettype result = do
+liftUniformFunBody :: Attrs -> FunHasParallelism -> FunSizeParams -> SegLevel -> SubExp -> DistInputs -> DistEnv -> DistStms -> [RetType SOACS] -> Result -> FlattenM Result
+liftUniformFunBody attrs funHasParallelism funSizeParams lvl w inputs env dstms rettype result = do
   let segments = [w]
-      ops = flattenOpsFor funHasParallelism funSizeParams DistributeIrregular lvl
+      ops = flattenOpsFor attrs funHasParallelism funSizeParams DistributeIrregular lvl
   env' <- foldM (flattenDistStm ops segments) env dstms
   concat <$> zipWithM (liftRegResult lvl segments w inputs env') rettype result
 
@@ -449,13 +456,20 @@ addRetAls params rettype = zip rettype $ map possibleAliases rettype
       | aliasable t = RetAls aliasable_params aliasable_rets
       | otherwise = mempty
 
+-- | Impose attributes on the statements of a function body. This is used to
+-- impose attributes on top level statements in lifted functions.
+imposeAttrsBody :: Attrs -> Body SOACS -> Body SOACS
+imposeAttrsBody attrs body =
+  body {bodyStms = fmap (imposeAttrs attrs) (bodyStms body)}
+
 liftFunDef ::
+  Attrs ->
   FunHasParallelism ->
   FunSizeParams ->
   Scope SOACS ->
   FunDef SOACS ->
   PassM (FunDef GPU, S.Set DemandFn)
-liftFunDef funHasParallelism funSizeParams const_scope fd = do
+liftFunDef attrs funHasParallelism funSizeParams const_scope fd = do
   let FunDef
         { funDefBody = body,
           funDefParams = fparams,
@@ -472,14 +486,15 @@ liftFunDef funHasParallelism funSizeParams const_scope fd = do
         addRetAls (map paramDeclType fparams'') $
           liftRetType w (map fst rettype)
   let (inputs', dstms) =
-        distributeBody DistributeIrregular funHasParallelism const_scope [Var (paramName wp)] inputs body
+        distributeBody DistributeIrregular funHasParallelism const_scope [Var (paramName wp)] inputs $
+          imposeAttrsBody attrs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
   -- Lift the body of the function and get the results, inserting copies as
   -- necessary to ensure the results are fresh and unique (see 'freshenResult').
   (body', needs) <-
     runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
       buildBody_ . freshenResult fparams'' $
-        liftBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms $
+        liftBody attrs funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms $
           bodyResult body
   let name = liftFunName $ funDefName fd
   pure
@@ -499,12 +514,13 @@ liftFunDef funHasParallelism funSizeParams const_scope fd = do
 -- when it returns an array whose dimension size was created in the function
 -- body. In other words, the array has an existential size.
 liftUniformFunDef ::
+  Attrs ->
   FunHasParallelism ->
   FunSizeParams ->
   Scope SOACS ->
   FunDef SOACS ->
   PassM (FunDef GPU, S.Set DemandFn)
-liftUniformFunDef funHasParallelism funSizeParams const_scope fd = do
+liftUniformFunDef attrs funHasParallelism funSizeParams const_scope fd = do
   let FunDef
         { funDefBody = body,
           funDefParams = fparams,
@@ -525,7 +541,8 @@ liftUniformFunDef funHasParallelism funSizeParams const_scope fd = do
         (p, i) <- zip fparams_explicit [0 ..]
         pure (paramName p, DistInput (ResTag i) (paramType p))
   let (inputs', dstms) =
-        distributeBody DistributeIrregular funHasParallelism (const_scope <> scopeOfFParams fparam_sizes) [Var (paramName wp)] inputs body
+        distributeBody DistributeIrregular funHasParallelism (const_scope <> scopeOfFParams fparam_sizes) [Var (paramName wp)] inputs $
+          imposeAttrsBody attrs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) value_reps
       rettype' =
         addRetAls (map paramDeclType fparams'') $
@@ -540,7 +557,7 @@ liftUniformFunDef funHasParallelism funSizeParams const_scope fd = do
         -- invariant to the map-nest, but at this point there is no opportunity to
         -- hoist them out of the nest.
 
-        liftUniformFunBody funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms (map fst rettype) $
+        liftUniformFunBody attrs funHasParallelism funSizeParams defaultSegLevel w inputs' env dstms (map fst rettype) $
           bodyResult body
   let name = liftUniformFunName $ funDefName fd
   pure
@@ -553,20 +570,20 @@ liftUniformFunDef funHasParallelism funSizeParams const_scope fd = do
       needs
     )
 
-transformLambda :: FunHasParallelism -> FunSizeParams -> Lambda SOACS -> FlattenM (Lambda GPU)
-transformLambda funHasParallelism funSizeParams (Lambda params ret body) = do
-  body' <- localScope (scopeOfLParams params) $ transformBody funHasParallelism funSizeParams body
+transformLambda :: Attrs -> FunHasParallelism -> FunSizeParams -> Lambda SOACS -> FlattenM (Lambda GPU)
+transformLambda attrs funHasParallelism funSizeParams (Lambda params ret body) = do
+  body' <- localScope (scopeOfLParams params) $ transformBody attrs funHasParallelism funSizeParams body
   pure $ Lambda params ret body'
 
-transformStm :: FunHasParallelism -> FunSizeParams -> Stm SOACS -> FlattenM ()
-transformStm funHasParallelism funSizeParams (Let pat aux (Op soac))
+transformStm :: Attrs -> FunHasParallelism -> FunSizeParams -> Stm SOACS -> FlattenM ()
+transformStm attrs funHasParallelism funSizeParams (Let pat aux (Op soac))
   | "sequential_outer" `inAttrs` stmAuxAttrs aux = do
       scope <- askScope
       stms <- runBuilderT_ (FOT.transformSOAC pat soac) (castScope scope)
-      transformStms funHasParallelism funSizeParams $ fmap (certify (stmAuxCerts aux)) stms
-transformStm _ _ stm
+      transformStms attrs funHasParallelism funSizeParams $ fmap (certify (stmAuxCerts aux)) stms
+transformStm _ _ _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = addStm $ soacsStmToGPU stm
-transformStm _ _ (Let pat aux (Op (Hist w arrs ops bucket_fun))) =
+transformStm _ _ _ (Let pat aux (Op (Hist w arrs ops bucket_fun))) =
   certifying (stmAuxCerts aux) $ do
     res <-
       genUniformSegHist
@@ -579,51 +596,60 @@ transformStm _ _ (Let pat aux (Op (Hist w arrs ops bucket_fun))) =
         (const $ pure ())
     forM_ (zip (patNames pat) res) $ \(v, v') ->
       letBindNames [v] $ BasicOp $ SubExp $ Var v'
-transformStm funHasParallelism funSizeParams (Let pat aux (Op (Screma w arrs form)))
+transformStm attrs funHasParallelism funSizeParams (Let pat aux (Op (Screma w arrs form)))
   | shouldDissectForm form =
       error "transformStm: complex Screma survived preprocessing"
   | otherwise =
-      transformTopLevelScrema funHasParallelism funSizeParams pat aux w arrs form
-transformStm funHasParallelism funSizeParams (Let pat aux (Op (FlatMap w arrs lam))) =
+      transformTopLevelScrema attrs funHasParallelism funSizeParams pat aux w arrs form
+transformStm attrs funHasParallelism funSizeParams (Let pat aux (Op (FlatMap w arrs lam))) =
   certifying (stmAuxCerts aux) $ flattenFlatMap ops pat w arrs lam
   where
     irreg = irregularityFor DistributeIrregular aux
-    ops = flattenOpsFor funHasParallelism funSizeParams irreg defaultSegLevel
-transformStm funHasParallelism funSizeParams (Let pat aux (Loop params form body)) =
+    ops = flattenOpsFor attrs funHasParallelism funSizeParams irreg defaultSegLevel
+transformStm attrs funHasParallelism funSizeParams (Let pat aux (Loop params form body)) =
   localScope (scopeOfLoopForm form <> scopeOfFParams (map fst params)) $
-    addStm . Let pat aux . Loop params form =<< transformBody funHasParallelism funSizeParams body
-transformStm funHasParallelism funSizeParams (Let pat aux (Match ses cases def_body ret)) =
+    addStm . Let pat aux . Loop params form =<< transformBody attrs funHasParallelism funSizeParams body
+transformStm attrs funHasParallelism funSizeParams (Let pat aux (Match ses cases def_body ret)) =
   addStm . Let pat aux
-    =<< (Match ses <$> mapM onCase cases <*> transformBody funHasParallelism funSizeParams def_body <*> pure ret)
+    =<< (Match ses <$> mapM onCase cases <*> transformBody attrs funHasParallelism funSizeParams def_body <*> pure ret)
   where
-    onCase = traverse (transformBody funHasParallelism funSizeParams)
-transformStm funHasParallelism funSizeParams (Let pat aux (WithAcc inputs withacc_lam)) = do
+    onCase = traverse (transformBody attrs funHasParallelism funSizeParams)
+transformStm attrs funHasParallelism funSizeParams (Let pat aux (WithAcc inputs withacc_lam)) = do
   addStm . Let pat aux . WithAcc (map onInput inputs)
-    =<< transformLambda funHasParallelism funSizeParams withacc_lam
+    =<< transformLambda attrs funHasParallelism funSizeParams withacc_lam
   where
     onInput (shape, arrs, Nothing) =
       (shape, arrs, Nothing)
     onInput (shape, arrs, Just (lam, nes)) =
       (shape, arrs, Just (soacsLambdaToGPU lam, nes))
-transformStm _ _ stm = addStm $ soacsStmToGPU stm
+transformStm _ _ _ stm = addStm $ soacsStmToGPU stm
 
-transformStms :: FunHasParallelism -> FunSizeParams -> Stms SOACS -> FlattenM ()
-transformStms funHasParallelism funSizeParams stms =
+-- | Transform a statement that is not enclosed in any map-nest, whether it
+-- occurs in a function body or was synthesised by flattening. This is where the
+-- attributes imposed on the pass (see 'flattenSOACs') are put on the statement.
+-- Nested statements receive them through the usual attribute propagation.
+transformTopLevelStm :: Attrs -> FunHasParallelism -> FunSizeParams -> Stm SOACS -> FlattenM ()
+transformTopLevelStm attrs funHasParallelism funSizeParams =
+  transformStm attrs funHasParallelism funSizeParams . imposeAttrs attrs
+
+transformStms :: Attrs -> FunHasParallelism -> FunSizeParams -> Stms SOACS -> FlattenM ()
+transformStms attrs funHasParallelism funSizeParams stms =
   localScope (castScope $ scopeOf stms) $
-    fold <$> traverse (transformStm funHasParallelism funSizeParams) stms
+    fold <$> traverse (transformTopLevelStm attrs funHasParallelism funSizeParams) stms
 
-transformBody :: FunHasParallelism -> FunSizeParams -> Body SOACS -> FlattenM (Body GPU)
-transformBody funHasParallelism funSizeParams (Body () stms res) = buildBody_ $ do
-  transformStms funHasParallelism funSizeParams stms
+transformBody :: Attrs -> FunHasParallelism -> FunSizeParams -> Body SOACS -> FlattenM (Body GPU)
+transformBody attrs funHasParallelism funSizeParams (Body () stms res) = buildBody_ $ do
+  transformStms attrs funHasParallelism funSizeParams stms
   pure res
 
 transformFunDef ::
+  Attrs ->
   FunHasParallelism ->
   FunSizeParams ->
   Scope SOACS ->
   FunDef SOACS ->
   PassM (FunDef GPU, S.Set DemandFn)
-transformFunDef funHasParallelism funSizeParams consts_scope fd = do
+transformFunDef attrs funHasParallelism funSizeParams consts_scope fd = do
   let FunDef
         { funDefBody = body,
           funDefParams = fparams,
@@ -631,7 +657,7 @@ transformFunDef funHasParallelism funSizeParams consts_scope fd = do
         } = fd
   (body', needs) <-
     runFlattenM (scopeOfFParams fparams <> castScope consts_scope) $
-      transformBody funHasParallelism funSizeParams body
+      transformBody attrs funHasParallelism funSizeParams body
   pure
     ( fd
         { funDefBody = body',
@@ -643,13 +669,14 @@ transformFunDef funHasParallelism funSizeParams consts_scope fd = do
 
 liftUntilFixedPoint ::
   Prog SOACS ->
+  Attrs ->
   FunHasParallelism ->
   FunSizeParams ->
   Scope SOACS ->
   S.Set DemandFn ->
   S.Set DemandFn ->
   PassM [FunDef GPU]
-liftUntilFixedPoint prog funHasParallelism funSizeParams consts_scope made needed = do
+liftUntilFixedPoint prog attrs funHasParallelism funSizeParams consts_scope made needed = do
   let made' = made <> needed
   (lifted_funs, new_needed) <-
     fmap (second ((`S.difference` made') . mconcat)) $
@@ -659,19 +686,19 @@ liftUntilFixedPoint prog funHasParallelism funSizeParams consts_scope made neede
     then pure lifted_funs
     else
       (lifted_funs ++)
-        <$> liftUntilFixedPoint prog funHasParallelism funSizeParams consts_scope made' new_needed
+        <$> liftUntilFixedPoint prog attrs funHasParallelism funSizeParams consts_scope made' new_needed
   where
     mkDemanded (DemandLifted fname mode) =
       case find ((== fname) . funDefName) $ progFuns prog of
         Just fundef ->
           case mode of
-            UniformLift -> liftUniformFunDef funHasParallelism funSizeParams consts_scope fundef
-            NonUniformLift -> liftFunDef funHasParallelism funSizeParams consts_scope fundef
+            UniformLift -> liftUniformFunDef attrs funHasParallelism funSizeParams consts_scope fundef
+            NonUniformLift -> liftFunDef attrs funHasParallelism funSizeParams consts_scope fundef
         Nothing -> error $ "mkDemanded: " <> show fname
     mkDemanded (DemandBuiltin b) = pure (builtinFunDef b, mempty)
 
-transformProg :: Prog SOACS -> PassM (Prog GPU)
-transformProg prog = do
+transformProg :: Attrs -> Prog SOACS -> PassM (Prog GPU)
+transformProg attrs prog = do
   progAfterPreProcessing <- preprocessProg prog
   let consts = progConsts progAfterPreProcessing
       consts_scope = scopeOf consts
@@ -683,15 +710,16 @@ transformProg prog = do
       funSizeParams fname =
         M.findWithDefault mempty fname size_param_map
   (consts', consts_needs) <-
-    runFlattenM mempty $ collectStms_ $ transformStms funHasParallelism funSizeParams consts
+    runFlattenM mempty $ collectStms_ $ transformStms attrs funHasParallelism funSizeParams consts
   (funs', funs_needs) <-
     second mconcat
-      <$> mapAndUnzipM (transformFunDef funHasParallelism funSizeParams consts_scope) funs
+      <$> mapAndUnzipM (transformFunDef attrs funHasParallelism funSizeParams consts_scope) funs
 
   -- Now do fixpoint iteration until all needed functions have been provided.
   lifted_funs <-
     liftUntilFixedPoint
       prog
+      attrs
       funHasParallelism
       funSizeParams
       consts_scope
@@ -705,11 +733,17 @@ transformProg prog = do
       }
 
 -- | Transform a SOACS program to a GPU program, using flattening.
-flattenSOACs :: Pass SOACS GPU
-flattenSOACs =
+--
+-- Parameterised by the names of flattening attributes to impose on top-level
+-- SOACs that do not carry flattening attributes of their own.
+flattenSOACs :: [Name] -> Pass SOACS GPU
+flattenSOACs attr_names =
   Pass
     { passName = "flatten",
       passDescription = "Perform full flattening",
-      passFunction = transformProg
+      passFunction = transformProg attrs
     }
+  where
+    attrs =
+      foldMap (oneAttr . AttrComp "flattening" . pure . AttrName) attr_names
 {-# NOINLINE flattenSOACs #-}

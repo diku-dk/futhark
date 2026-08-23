@@ -84,7 +84,7 @@ adPipeline =
 gpuPipeline :: Pipeline SOACS GPU
 gpuPipeline =
   standardPipeline
-    >>> onePass flattenSOACs
+    >>> onePass (flattenSOACs mempty)
     >>> passes
       [ simplifyGPU,
         -- For getting rid of builtins added by flattening.

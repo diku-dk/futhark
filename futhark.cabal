@@ -512,6 +512,7 @@ library
     , random >= 1.2.0
     , process-extras >=0.7.2
     , regex-tdfa >=1.2
+    , split >= 0.2
     , srcloc >=0.4
     , template-haskell >=2.11.1
     , temporary

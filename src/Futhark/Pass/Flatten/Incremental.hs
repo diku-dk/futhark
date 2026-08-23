@@ -48,6 +48,7 @@ module Futhark.Pass.Flatten.Incremental
     mapAlternatives,
     scanRedAlternatives,
     propagateVersioningAttrs,
+    imposeAttrs,
 
     -- * Transforming code
     factorScremaForParallelism,
@@ -520,6 +521,14 @@ propagateAttrs attrs stm
     attrs' =
       mconcat . mapAttrs (oneAttr . AttrComp "flattening" . pure) $
         flatteningAttrs attrs
+
+-- | Impose outside flattening attributes on a statement. Only SOACs are
+-- affected, and only those that carry no flattening attributes of their own, as
+-- those are more specific.
+imposeAttrs :: Attrs -> Stm SOACS -> Stm SOACS
+imposeAttrs attrs stm
+  | Op {} <- stmExp stm = propagateAttrs attrs stm
+  | otherwise = stm
 
 -- | Propagate incremental flattening attributes to the statements of
 -- a map lambda body. Statements that carry their own incremental

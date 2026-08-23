@@ -6,6 +6,7 @@ import Control.Monad
 import Control.Monad.State
 import Data.Kind qualified
 import Data.List (intersperse)
+import Data.List.Split (splitOn)
 import Data.Maybe
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -14,7 +15,7 @@ import Futhark.Analysis.AccessPattern (Analyse)
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI hiding (compilerMain)
-import Futhark.IR (Op, Prog, prettyString)
+import Futhark.IR (Name, Op, Prog, prettyString)
 import Futhark.IR.Aliases (AliasableRep)
 import Futhark.IR.GPU qualified as GPU
 import Futhark.IR.GPUMem qualified as GPUMem
@@ -496,6 +497,11 @@ parseGas (Just s) = case reads s of
   [(n, "")] -> Right (Just n)
   _any -> Left $ "Invalid gas value: " <> s
 
+parseAttrs :: Maybe String -> Either String [Name]
+parseAttrs Nothing = Right []
+parseAttrs (Just s) =
+  Right $ map nameFromString $ filter (not . null) $ splitOn "," s
+
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
   [ Option
@@ -729,7 +735,14 @@ commandLineOptions =
     unstreamOption [],
     sinkOption [],
     kernelsPassOption reduceDeviceSyncs [],
-    typedPassOption soacsProg GPU flattenSOACs [],
+    typedPassOptionWithArg
+      soacsProg
+      GPU
+      (fmap flattenSOACs . parseAttrs)
+      []
+      ["flatten"]
+      "ATTRS"
+      "comma-separated flattening attributes",
     typedPassOption soacsProg MC extractMulticore [],
     allocateOption "a",
     kernelsMemPassOption doubleBufferGPU [],
