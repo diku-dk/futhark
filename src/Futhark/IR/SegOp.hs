@@ -888,6 +888,19 @@ instance CanBeWise (SegOp lvl) where
       add =
         SegOpMapper pure (pure . informLambda) (pure . informLambda) (pure . informBody) pure pure
 
+-- | The element at the given index of an array literal with the given prim-typed
+-- elements, as a chain of conditionals. The index is assumed to be in bounds,
+-- so the last element is selected without testing for it.
+indexArrayLit ::
+  PrimType -> TPrimExp Int64 VName -> [PrimExp VName] -> Maybe (PrimExp VName)
+indexArrayLit t i = select 0
+  where
+    select _ [] = Nothing
+    select _ [x] = Just x
+    select j (x : xs) = do
+      y <- select (j + 1) xs
+      pure $ FunExp (condFun t) [untyped (i .==. fromInteger j), x, y] t
+
 instance (ASTRep rep) => ST.IndexOp (SegOp lvl rep) where
   indexOp vtable k (SegMap _ space _ kbody) is = do
     Returns ResultMaySimplify _ se <- maybeNth k $ bodyResult kbody
@@ -919,6 +932,12 @@ instance (ASTRep rep) => ST.IndexOp (SegOp lvl rep) where
                     arr
                     (fixSlice (fmap isInt64 slice') excess_is)
              in M.insert v idx table
+        | [v] <- patNames $ stmPat stm,
+          BasicOp (ArrayLit ses (Prim t)) <- stmExp stm,
+          [i] <- excess_is,
+          Just (pes, cs) <- runWriterT $ mapM (primExpFromSubExpM (asPrimExp table)) ses,
+          Just pe <- indexArrayLit t i pes =
+            M.insert v (ST.Indexed (stmCerts stm <> cs) pe) table
         | otherwise =
             table
 

@@ -281,7 +281,11 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
     worthInlining' (CmpOpExp _ x y) = worthInlining' x && worthInlining' y
     worthInlining' (ConvOpExp _ x) = worthInlining' x
     worthInlining' (UnOpExp _ x) = worthInlining' x
-    worthInlining' FunExp {} = False
+    -- A conditional is a cheap select, unlike the transcendental functions
+    -- that a 'FunExp' otherwise denotes.
+    worthInlining' (FunExp f args _)
+      | isJust $ isCondFun f = all worthInlining' args
+      | otherwise = False
     worthInlining' _ = True
 
     isConcat v
