@@ -564,18 +564,18 @@ versionScanRed ops desc segments env inps res aux w factored_body outer_only = d
         [ t `arrayOfShape` segmentsShape segments
         | DistResult _ (DistType _ _ t) _ <- res
         ]
-  outer_body <- renamedBody outer_only
-  full_body <- case segments of
-    -- Top-level (no enclosing segments): flatten the factored body's statements
-    -- as ordinary top-level statements. Unlike distributing them over segments,
-    -- this copes with array-valued operators and nested SOACs whose temporaries
-    -- would otherwise escape the segmented machinery's scope.
-    [] ->
-      renameBody <=< buildBody_ $ do
-        mapM_ (flattenTopLevelStm ops) $ bodyStms factored_body
-        pure $ bodyResult factored_body
-    _ ->
-      renamedBody $ regularRepVars <$> distributeAndFlattenBody ops segments "versionScanRed_full_body" env inps res factored_body
+  let fullFlatten = case segments of
+        -- Top-level (no enclosing segments): flatten the factored body's
+        -- statements as ordinary top-level statements. Unlike distributing them
+        -- over segments, this copes with array-valued operators and nested
+        -- SOACs whose temporaries would otherwise escape the segmented
+        -- machinery's scope.
+        [] ->
+          renameBody <=< buildBody_ $ do
+            mapM_ (flattenTopLevelStm ops) $ bodyStms factored_body
+            pure $ bodyResult factored_body
+        _ ->
+          renamedBody $ regularRepVars <$> distributeAndFlattenBody ops segments "versionScanRed_full_body" env inps res factored_body
 
   match_res <-
     certifying (distCerts inps aux env) $
@@ -586,8 +586,8 @@ versionScanRed ops desc segments env inps res aux w factored_body outer_only = d
         (isParallelFunInside (flattenFunHasParallelism ops) factored_body)
         (allowVersioning (flattenSegLevel ops))
         (segments <> pure w)
-        full_body
-        outer_body
+        fullFlatten
+        (renamedBody outer_only)
   pure $ insertRegulars (map distResTag res) match_res env
 
 insertSegOpMapResults ::
@@ -1241,10 +1241,7 @@ versionedUniformMap ops segments env inps ress pat aux w arrs map_lam = do
       outerOnly =
         runMapLambdaBody segments env inps w arrs map_lam pat ress
 
-  full_body <- renamedBody fullFlatten
-  outer_body <- renamedBody outerOnly
-
-  let result_ts =
+      result_ts =
         [ t `arrayOfShape` segmentsShape segments
         | DistResult _ (DistType _ _ t) _ <- ress
         ]
@@ -1260,8 +1257,8 @@ versionedUniformMap ops segments env inps ress pat aux w arrs map_lam = do
         False
         (worthSequentialising map_lam)
         (segments <> pure w)
-        full_body
-        outer_body
+        (renamedBody fullFlatten)
+        (renamedBody outerOnly)
         intra'
 
   pure $ insertRegulars (map distResTag ress) match_res env

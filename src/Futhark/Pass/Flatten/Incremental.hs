@@ -234,13 +234,13 @@ intraBlockAlternative intra = do
         (varsRes $ Intrablock.intraResultNames intra)
   pure (intra_ok, intra_body)
 
--- | Construct the multi-versioned alternatives for a map, given the
--- fully-flattened body, the outer-parallel-only body, and an optional
--- intrablock result. This is the shared versioning policy used both for
--- top-level maps and for maps nested inside a map-nest; the only differences
--- between the two are which bodies are supplied and how their results are
--- consumed, both of which are handled by the caller. The @ws@ are the widths
--- whose product bounds the outer parallelism (used for the threshold
+-- | Construct the multi-versioned alternatives for a map, given actions that
+-- construct the fully-flattened body and the outer-parallel-only body, and an
+-- optional intrablock result. This is the shared versioning policy used both
+-- for top-level maps and for maps nested inside a map-nest; the only
+-- differences between the two are which bodies are supplied and how their
+-- results are consumed, both of which are handled by the caller. The @ws@ are
+-- the widths whose product bounds the outer parallelism (used for the threshold
 -- comparison). Returns the names bound to the final results.
 mapAlternatives ::
   -- | Description for the result bindings.
@@ -252,47 +252,54 @@ mapAlternatives ::
   -- | Is the body worth sequentialising (offering an outer-only version)?
   Bool ->
   [SubExp] ->
-  Body GPU ->
-  Body GPU ->
+  -- | Construct the fully flattened body.
+  FlattenM (Body GPU) ->
+  -- | Construct the outer-parallelism-only body.
+  FlattenM (Body GPU) ->
   Maybe Intrablock.IntrablockResult ->
   FlattenM [VName]
-mapAlternatives desc result_ts attrs parallel_fun_inside worth_seq ws full_body outer_body intra' =
+mapAlternatives desc result_ts attrs parallel_fun_inside worth_seq ws mkFullBody mkOuterBody intra' =
   case intra' of
     _
       | parallel_fun_inside ->
-          kernelAlternatives desc result_ts full_body []
-      | "sequential_inner" `inAttrs` attrs ->
+          full []
+      | "sequential_inner" `inAttrs` attrs -> do
+          outer_body <- mkOuterBody
           kernelAlternatives desc result_ts outer_body []
     Nothing
       | not only_intra,
         worth_seq,
-        mayExploitOuter attrs -> do
-          (outer_suff, _) <- outerSuff
-          kernelAlternatives desc result_ts full_body [(outer_suff, outer_body)]
+        mayExploitOuter attrs ->
+          full . pure =<< outerAlternative
       | otherwise ->
-          kernelAlternatives desc result_ts full_body []
+          full []
     Just intra_res
       | only_intra -> do
           (_, intra_body) <- intraBlockAlternative intra_res
           kernelAlternatives desc result_ts intra_body []
       | worth_seq,
         mayExploitOuter attrs -> do
-          (outer_suff, _) <- outerSuff
+          outer_alt <- outerAlternative
           intra_alt <- intraBlockAlternative intra_res
-          kernelAlternatives desc result_ts full_body [(outer_suff, outer_body), intra_alt]
-      | otherwise -> do
-          intra_alt <- intraBlockAlternative intra_res
-          kernelAlternatives desc result_ts full_body [intra_alt]
+          full [outer_alt, intra_alt]
+      | otherwise ->
+          full . pure =<< intraBlockAlternative intra_res
   where
     only_intra = onlyExploitIntra attrs
 
-    outerSuff = sufficientParallelism suffOuterPar ws mempty Nothing
+    full alts = do
+      full_body <- mkFullBody
+      kernelAlternatives desc result_ts full_body alts
 
--- | Construct the multi-versioned alternatives for a scan or reduce, given the
--- fully-flattened body and the outer-parallel-only body. Unlike
--- 'mapAlternatives' there is no intrablock version, and the outer-only version
--- is always offered (subject to attributes). Shared between top-level and
--- nested uniform scans/reduces.
+    outerAlternative = do
+      outer_body <- mkOuterBody
+      (outer_suff, _) <- sufficientParallelism suffOuterPar ws mempty Nothing
+      pure (outer_suff, outer_body)
+
+-- | Construct the multi-versioned alternatives for a scan or reduce, given
+-- actions that construct the fully-flattened body and the outer-parallel-only
+-- body. Unlike 'mapAlternatives' there is no intrablock version, and the
+-- outer-only version is always offered (subject to attributes).
 scanRedAlternatives ::
   Name ->
   [Type] ->
@@ -302,10 +309,12 @@ scanRedAlternatives ::
   -- | Does the seg level permit versioning at all (false in-block)?
   Bool ->
   [SubExp] ->
-  Body GPU ->
-  Body GPU ->
+  -- | Construct the fully flattened body.
+  FlattenM (Body GPU) ->
+  -- | Construct the outer-parallelism-only body.
+  FlattenM (Body GPU) ->
   FlattenM [VName]
-scanRedAlternatives desc result_ts attrs parallel_fun_inside allow_versioning ws full_body outer_body
+scanRedAlternatives desc result_ts attrs parallel_fun_inside allow_versioning ws mkFullBody mkOuterBody
   | parallel_fun_inside =
       fullAlternative
   | "sequential_inner" `inAttrs` attrs =
@@ -315,11 +324,17 @@ scanRedAlternatives desc result_ts attrs parallel_fun_inside allow_versioning ws
   | otherwise =
       fullAlternative
   where
-    fullAlternative = kernelAlternatives desc result_ts full_body []
+    fullAlternative = do
+      full_body <- mkFullBody
+      kernelAlternatives desc result_ts full_body []
 
-    outerAlternative = kernelAlternatives desc result_ts outer_body []
+    outerAlternative = do
+      outer_body <- mkOuterBody
+      kernelAlternatives desc result_ts outer_body []
 
     fullWithOuterAlternative = do
+      outer_body <- mkOuterBody
+      full_body <- mkFullBody
       (outer_suff, _) <- sufficientParallelism suffOuterPar ws mempty Nothing
       kernelAlternatives desc result_ts full_body [(outer_suff, outer_body)]
 
