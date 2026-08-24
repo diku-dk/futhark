@@ -455,7 +455,7 @@ jobs:
           hostname
           python -m venv virtualenv
           source virtualenv/bin/activate
-          pip install numpy pyopencl jsonschema
+          pip install numpy pyopencl jsonschema mako
           module unload cuda
           module load cuda/11.8
           futhark test tests \
