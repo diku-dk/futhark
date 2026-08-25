@@ -300,7 +300,8 @@ onExp e = do
               -- Whatever we do with the value next (printing it, most
               -- likely) requires having it in full.
               server <- gets futharkiServer
-              Right <$> liftIO (forceValue server v)
+              either (Left . I.prettyInterpreterError) Right
+                <$> liftIO (forceValue server v)
       | otherwise ->
           pure $
             Left $
@@ -382,7 +383,7 @@ runInterpreter m = runF m (pure . Right) intOp
       c
     intOp (I.ExtOpFFI sm c) = do
       server <- gets futharkiServer
-      c =<< liftIO (runFFI server sm)
+      either (pure . Left) c =<< liftIO (runFFI server sm)
 
 replComplete :: Haskeline.CompletionFunc IO
 replComplete = loadComplete

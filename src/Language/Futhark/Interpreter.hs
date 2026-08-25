@@ -6,7 +6,7 @@
 module Language.Futhark.Interpreter
   ( Ctx (..),
     Env,
-    InterpreterError,
+    InterpreterError (..),
     prettyInterpreterError,
     initialCtx,
     interpretExp,
@@ -1346,13 +1346,29 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
       pure (f_env <> e_env <> res_env <> env_substs, res_mod)
     _ -> error "Expected ModuleFun."
 
-extCall :: Name -> [Value] -> ValueShape -> EvalM Value
-extCall n ps shp = liftF $ ExtOpFFI call id
+extCall :: Name -> [Value] -> FFI.ResShape -> EvalM Value
+extCall n ps resshp = liftF $ ExtOpFFI call id
   where
     call = do
       FFI.gc
       pts <- FFI.inputs n
-      zipWithM FFI.put pts ps >>= FFI.call n >>= FFI.lazyGet shp
+      vr <- FFI.call n =<< zipWithM FFI.put pts ps
+      shp <- FFI.resultShape resshp vr
+      FFI.lazyGet shp vr
+
+-- | Describe a result type for 'FFI.resultShape'. Arrays and records are
+-- merely described, never evaluated, as they may contain existential sizes;
+-- only what is neither has its shape taken from the type.
+resShapeOf :: Env -> StructType -> EvalM FFI.ResShape
+resShapeOf env t
+  | rank > 0 =
+      FFI.ResArray <$> resShapeOf env (stripArray rank t)
+  | Scalar (Record fs) <- t =
+      FFI.ResRecord <$> traverse (resShapeOf env) fs
+  | otherwise =
+      FFI.ResKnown . typeShape <$> evalTypeFully (structToEval env t)
+  where
+    rank = arrayRank t
 
 -- | The parameters of an external binding, represented as functions that
 -- bind an argument in the environment.
@@ -1365,11 +1381,16 @@ extParams ps ret = map fromPat ps <> map fromArrow (fst $ unfoldFunType $ retTyp
     fromArrow (Unnamed, _) env _ = pure env
 
 -- | Construct the value of an external binding with the given parameters. The
--- shape of the result may depend on the values of the parameters , so it is
--- computed by the provided function only once every argument has been supplied
--- and bound in the environment. A binding of arity zero is not a function, and
--- is called immediately.
-extFun :: Name -> Env -> [Env -> Value -> EvalM Env] -> (Env -> EvalM ValueShape) -> EvalM Value
+-- shape of the result may depend on the values of the parameters, so it is
+-- computed only once every argument has been supplied and bound in the
+-- environment. A binding of arity zero is not a function, and is called
+-- immediately.
+extFun ::
+  Name ->
+  Env ->
+  [Env -> Value -> EvalM Env] ->
+  (Env -> EvalM FFI.ResShape) ->
+  EvalM Value
 extFun n = extFun' []
   where
     extFun' vs env [] resShape = extCall n (reverse vs) =<< resShape env
@@ -1382,11 +1403,9 @@ evalDec env (ValDec vb@(ValBind (Just _) vn@(VName n _) _ _ (Info ret) tparams p
   let ftype = evalToStruct $ expandType env $ funType ps ret
       bv = Just $ T.BoundV [] ftype
       params = extParams ps ret
-      -- The result shape is evaluated in the environment where the
-      -- parameters have been bound to the actual arguments, as the result
-      -- type may refer to them.
-      resShape env' =
-        typeShape <$> evalTypeFully (structToEval env' $ snd $ unfoldFunType $ retType ret)
+      -- Evaluated in the environment where the parameters have been bound
+      -- to the actual arguments, as the type may refer to them.
+      resShape env' = resShapeOf env' $ snd $ unfoldFunType $ retType ret
   sizes <- extEnv
   if null tparams
     then do

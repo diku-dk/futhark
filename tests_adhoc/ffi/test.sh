@@ -33,6 +33,37 @@ check() {
     fi
 }
 
+# Errors cannot be compared against the interpreted output, as the
+# interpreter also reports its own call stack, which compiled code cannot
+# know about. What matters is that the failure is reported as an ordinary
+# Futhark error mentioning what actually went wrong, rather than as an
+# internal compiler error.
+check_error() {
+    if interpreted "$1" > /dev/null 2>&1; then
+        echo "FAIL: $1 (expected this to fail, but the interpreter accepted it)"
+        failed=1
+        return
+    fi
+
+    actual=$(external "$1"); actual_status=$?
+
+    if [ $actual_status = 0 ]; then
+        echo "FAIL: $1 (expected this to fail, but it succeeded)"
+        echo "  external: $actual"
+        failed=1
+    elif echo "$actual" | grep -qF 'Internal compiler error'; then
+        echo "FAIL: $1 (reported as an internal compiler error)"
+        echo "  external: $actual"
+        failed=1
+    elif ! echo "$actual" | grep -qF "$2"; then
+        echo "FAIL: $1 (error does not mention \"$2\")"
+        echo "  external: $actual"
+        failed=1
+    else
+        echo "PASS: $1"
+    fi
+}
+
 # Guard against the tests passing vacuously: if the entry points were
 # not actually being run through the server, then evaluation would
 # succeed even with no compiled program present.
@@ -136,6 +167,24 @@ check 'sf (#b 2)'
 # Array construction
 check 'ca1 5'
 
+# The size of the result is not known before the entry point has run, so it
+# must be obtained from the server afterwards rather than predicted.
+check 'ca2 [1,-2,3]'
+check 'ca2 [-1,-2]'
+check 'ca2 pa1'
+check 'ca3 [1,-2,3]'
+check 'ca3 [-1,-2]'
+check 'ca3[1]'
+check 'ca4 [1,-2,3]'
+check 'ca4 [-1,-2]'
+check '(ca4 [1,-2,3]).0'
+check 'ca5 [1,-2,3]'
+check '(ca5 [1,-2,3]).p'
+check 'ca6 [1,-2,3]'
+check 'ca7 [1,-2,3] 2'
+check 'ca7 [1,-2,3] 0'
+check '(ca7 [1,-2,3] 2)[0].a'
+
 # Primitive array functions
 check 'pa1f [1,2,3]'
 check '(pa1f [1,2,3])[0]'
@@ -193,5 +242,9 @@ check 'jvp (\(x: [3]f64) -> map (*2) x) fa2[0] fa2[0]'
 check 'jvp (\(x: [2][3]f64) -> map (map (*2)) x) fa2[0:2] fa2[0:2]'
 check 'vjp (\(x: [3]f64) -> map (*2) x) fa1 fa1'
 check 'vjp (\(x: [2][3]f64) -> map (map (*2)) x) fa2[0:2] fa2[0:2]'
+
+# Run-time errors in compiled code must be reported as Futhark errors.
+check_error 'oob pa1 10' 'Index [10] out of bounds for array of shape [3].'
+check_error 'positive (-1)' 'Assertion is false: (x > 0)'
 
 exit $failed

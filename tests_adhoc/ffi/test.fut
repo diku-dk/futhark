@@ -45,6 +45,31 @@ entry sf (x: s) : s =
 
 entry ca1 n = map i32.i64 (iota n)
 
+-- The size of the result depends on the input values, so it cannot be known
+-- until the entry point has actually run.
+entry ca2 (x: []i32) = filter (> 0) x
+
+-- Such a size need not be the outermost one: here the outer dimension is
+-- known from the type, but the inner one is not.
+entry ca3 (x: []i32) : [2][]i32 = let y = filter (> 0) x in [y, y]
+
+-- Nor need the array be the entire result: it may sit in a tuple or a
+-- record, at any depth.
+entry ca4 (x: []i32) = (filter (> 0) x, 1i32)
+entry ca5 (x: []i32) : {p: []i32, q: i32} = {p = filter (> 0) x, q = 1}
+entry ca6 (x: []i32) = ((filter (> 0) x, 2i32), 3i32)
+
+-- An array whose elements are records with a field of unknown size. The
+-- elements cannot be inspected to find that size - there may not be any -
+-- so the array has to be unzipped instead.
+entry ca7 (x: []i32) (n: i64) : [] {a: []i32, b: i32} =
+  replicate n {a = filter (> 0) x, b = 1}
+
+-- Entry points that fail at run time, to check how such failures are
+-- reported when they happen in compiled code rather than in the interpreter.
+entry oob (x: []i32) (i: i64) : i32 = x[i]
+entry positive (x: i32) : i32 = assert (x > 0) x
+
 entry pa1f (x: []i32) : []i32 = map (** 2) x
 entry pa2f (x: [][]i32) : [][]i32 = let v = map2 (**) x[0, :] x[1, :] in [v, v]
 

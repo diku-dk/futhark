@@ -26,6 +26,7 @@ import Control.Monad.Free.Church (F, runF)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask)
+import Data.Bifunctor (first)
 import Data.Either (isLeft)
 import Data.IORef (IORef, modifyIORef')
 import Data.Map qualified as M
@@ -127,8 +128,10 @@ runExpr (InterpreterState (src, env, ctx, s)) str = do
   case pval of
     Left err -> abort $ I.prettyInterpreterError err
     Right val -> do
-      val' <- liftIO $ forceValue s val
-      pure $ I.prettyValue val' <> hardline
+      forced <- liftIO $ forceValue s val
+      case forced of
+        Left err -> abort $ I.prettyInterpreterError err
+        Right val' -> pure $ I.prettyValue val' <> hardline
 
 data EvalConfig = EvalConfig
   { evalPrintWarnings :: Bool,
@@ -210,15 +213,23 @@ prepareServer cfg file backend = runExceptT $ do
         `catch` (\(err :: IOException) -> pure $ Left $ showText err)
   either throwError pure started
 
--- | Perform an action on the server. Calls `error` if no server is provided.
-runFFI :: Maybe FFI.Server -> FFI.ServerM I.Value -> IO I.Value
+-- | Perform an action on the server. A failure is reported as a 'Left'. Calls
+-- 'error' if no server is provided.
+runFFI ::
+  Maybe FFI.Server ->
+  FFI.ServerM I.Value ->
+  IO (Either I.InterpreterError I.Value)
 runFFI Nothing _ = error "External call, but no server."
-runFFI (Just server) m = either error id <$> FFI.runServerM server m
+runFFI (Just server) m =
+  first (I.InterpreterError . T.pack) <$> FFI.runServerM server m
 
 -- | Fetch in full a value that may reside on a server, so that it can
 -- be printed or otherwise inspected.
-forceValue :: Maybe FFI.Server -> I.Value -> IO I.Value
-forceValue Nothing v = pure v
+forceValue ::
+  Maybe FFI.Server ->
+  I.Value ->
+  IO (Either I.InterpreterError I.Value)
+forceValue Nothing v = pure $ Right v
 forceValue server v = runFFI server $ FFI.getLazy v
 
 externalise :: FileModule -> FileModule
@@ -324,4 +335,4 @@ runInterpreterNoBreak s m = runF m (pure . Right) intOp
     intOp (I.ExtOpBreak w _ _ c) = do
       trace $ pretty (locText w) <> ": ignoring breakpoint in top-level constant."
       c
-    intOp (I.ExtOpFFI sm c) = c =<< liftIO (runFFI s sm)
+    intOp (I.ExtOpFFI sm c) = either (pure . Left) c =<< liftIO (runFFI s sm)

@@ -23,9 +23,10 @@ module Language.Futhark.Interpreter.FFI.ServerM
     shape,
     index,
     -- Records
-    fields,
+    fieldOrder,
     mkRecord,
     project,
+    unzipArray,
     -- Sums
     variants,
     mkSum,
@@ -41,6 +42,7 @@ module Language.Futhark.Interpreter.FFI.ServerM
 where
 
 import Control.Exception (catch)
+import Control.Monad (replicateM)
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ReaderT, asks, runReaderT)
@@ -145,7 +147,11 @@ call fn ps = do
   s <- askServer
   nps <- mapM varName ps
   ndst <- uniqueName
-  _ <- liftIO (S.cmdCall s (nameToText fn) ndst nps) >>= throwServerLeft ("cmdCall failed on function " ++ nameToString fn ++ " with parameters " ++ csList (map T.unpack nps) ++ ".")
+  -- A failing call is usually the program itself failing (e.g. OOB), so report
+  -- just what the server said.
+  _ <-
+    liftIO (S.cmdCall s (nameToText fn) ndst nps)
+      >>= either (throwError . T.unpack . T.unlines . S.failureMsg) pure
   mkValueRef ndst
 
 -- Interrogation
@@ -219,11 +225,25 @@ index is src = do
   mkValueRef ndst
 
 -- Records
-fields :: S.TypeName -> ServerM (M.Map Name S.TypeName)
-fields tn = do
+
+-- | The fields of a record type, in the order the server uses.
+fieldOrder :: S.TypeName -> ServerM [(Name, S.TypeName)]
+fieldOrder tn = do
   s <- askServer
   fs <- liftIO (S.cmdFields s tn) >>= throwServerLeft ("cmdFields failed on type " ++ T.unpack tn ++ ".")
-  pure $ M.fromList $ map (\f -> (nameFromText $ S.fieldName f, S.fieldType f)) fs
+  pure $ map (\f -> (nameFromText $ S.fieldName f, S.fieldType f)) fs
+
+-- | Split an array of records into one array per field, in 'fieldOrder'. The
+-- fields of an array cannot be projected one element at a time, and doing so
+-- would anyway be impossible for an empty array.
+unzipArray :: ValueRef -> Int -> ServerM [ValueRef]
+unzipArray src n = do
+  s <- askServer
+  nsrc <- varName src
+  ndsts <- replicateM n uniqueName
+  liftIO (S.cmdUnzip s nsrc ndsts)
+    >>= throwServerJust ("cmdUnzip failed on variable " ++ T.unpack nsrc ++ ".")
+  mapM mkValueRef ndsts
 
 mkRecord :: S.TypeName -> M.Map Name ValueRef -> ServerM ValueRef
 mkRecord tn vrm = do
