@@ -1300,8 +1300,11 @@ toPolyBinding (ValBind entry name _ _ (Info rettype) tparams params body _ attrs
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   let valbind' = toPolyBinding valbind
+      mono_root =
+        isJust (valBindEntryPoint valbind)
+          || any isBlackBox (valBindAttrs valbind)
 
-  when (isJust $ valBindEntryPoint valbind) $ do
+  when mono_root $ do
     let t =
           funType (valBindParams valbind) $
             unInfo $
@@ -1323,6 +1326,9 @@ transformValBind valbind = do
         envGlobalScope = global <> envGlobalScope env,
         envScope = S.insert (valBindName valbind) global <> envScope env
       }
+  where
+    isBlackBox (AttrComp "blackbox" _ _) = True
+    isBlackBox _ = False
 
 transformValBinds :: [ValBind] -> MonoM ()
 transformValBinds [] = pure ()

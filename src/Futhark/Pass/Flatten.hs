@@ -61,6 +61,7 @@ import Data.Bifunctor (second)
 import Data.Foldable
 import Data.List qualified as L
 import Data.Map qualified as M
+import Data.Maybe (fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Alias (analyseBody)
 import Futhark.IR.Aliases (Aliases, bodyAliases)
@@ -257,6 +258,14 @@ liftFunName name = name <> "_lifted"
 liftUniformFunName :: Name -> Name
 liftUniformFunName name = name <> "_uniform_lifted"
 
+-- Retrieve a lifted function from an attribute. We assume (but do not check)
+-- that the attribute names a top level function that has the same type as we
+-- would obtain by lifting.
+flattenTo :: LiftMode -> Attr -> Maybe Name
+flattenTo NonUniformLift (AttrComp "flatten_to_nonuniform" [AttrName f]) = Just f
+flattenTo UniformLift (AttrComp "flatten_to_uniform" [AttrName f]) = Just f
+flattenTo _ _ = Nothing
+
 flattenApply ::
   FunSizeParams ->
   SegLevel ->
@@ -267,17 +276,23 @@ flattenApply ::
   (Pat Type, StmAux ()) ->
   (Name, [(SubExp, Diet)], [(RetType SOACS, RetAls)], Safety) ->
   FlattenM DistEnv
-flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, rettype, s) =
+flattenApply funSizeParams lvl segments env inps res (pat, aux) (fname, args, rettype, s) =
   case lvl of
     SegThread {} -> do
-      let size_positions = funSizeParams name
+      let size_positions = funSizeParams fname
           indexed_args = zip [0 ..] args
           isSizeArg = (`S.member` size_positions) . fst
           (size_args, value_args) = L.partition isSizeArg indexed_args
       let nonuniform = any (isVariant inps . fst . snd) size_args
-          name' = if nonuniform then liftFunName name else liftUniformFunName name
-          mode = if nonuniform then NonUniformLift else UniformLift
-      demandLifted name mode
+          (mode, genName) =
+            if nonuniform
+              then (NonUniformLift, liftFunName)
+              else (UniformLift, liftUniformFunName)
+          fname' =
+            fromMaybe (genName fname) $
+              mconcat (mapAttrs (flattenTo mode) $ stmAuxAttrs aux)
+
+      demandLifted fname mode
       w <- letSubExp "num_segments" =<< toExp (segmentCount segments)
 
       args' <-
@@ -297,7 +312,7 @@ flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, ret
             if nonuniform
               then addRetAls param_ts $ liftRetType w $ map fst rettype
               else addRetAls param_ts $ liftRegularRetType inps w $ map fst rettype
-      result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
+      result <- letTupExp (fname' <> "_res") $ Apply fname' args' rettype' s
       let reps =
             if nonuniform
               then resultToResReps (map fst rettype) result
@@ -312,7 +327,7 @@ flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, ret
     -- contain calls to parallel functions.
     _ ->
       if all isRegularDistResult res
-        then transformScalarStm lvl segments env inps res $ Let pat aux (Apply name args rettype s)
+        then transformScalarStm lvl segments env inps res $ Let pat aux (Apply fname args rettype s)
         else error "Unhandled Apply in non SegThread Seglevel"
 
 transformDistStm :: FunSizeParams -> FlattenOps -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
@@ -328,8 +343,8 @@ transformDistStm funSizeParams outer_ops segments env (DistStm inps res (Paralle
       flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
     Match scrutinees cases defaultCase rt ->
       flattenMatch ops segments env inps res aux scrutinees cases defaultCase rt
-    Apply name args rettype s ->
-      flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, rettype, s)
+    Apply fname args rettype s ->
+      flattenApply funSizeParams lvl segments env inps res (pat, aux) (fname, args, rettype, s)
     Loop merge (ForLoop i it n) body ->
       flattenLoop ops segments env inps res (pat, aux) (merge, ForLoop i it n, body)
     Loop merge (WhileLoop cond) body -> do

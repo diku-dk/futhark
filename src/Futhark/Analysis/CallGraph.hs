@@ -83,9 +83,14 @@ buildCallGraph prog =
     cg = buildFGStms $ progConsts prog
 
     entry_points =
-      S.fromList (map funDefName (filter (isJust . funDefEntryPoint) $ progFuns prog))
+      S.fromList (map funDefName (filter root $ progFuns prog))
         <> fcAllCalled cg
     ftable = buildFunctionTable prog
+    root fd =
+      isJust (funDefEntryPoint fd)
+        || or (mapAttrs isBlackBox $ funDefAttrs fd)
+    isBlackBox (AttrComp "blackbox" _) = True
+    isBlackBox _ = False
 
 count :: (Ord k) => [k] -> M.Map k Int
 count ks = M.fromListWith (+) $ map (,1) ks
