@@ -640,7 +640,7 @@ liftParam w fparam =
       num_data <-
         newParam (desc <> "_num_data") $ Prim int64
       segments <-
-        newParam (desc <> "_segments") $
+        newParam (desc <> "_S") $
           arrayOf (Prim int64) (Shape [w]) Nonunique
       flags <-
         newParam (desc <> "_F") $
@@ -649,7 +649,7 @@ liftParam w fparam =
         newParam (desc <> "_O") $
           arrayOf (Prim int64) (Shape [w]) Nonunique
       elems <-
-        newParam (desc <> "_data") $
+        newParam (desc <> "_D") $
           arrayOf (Prim pt) (Shape [Var (paramName num_data)]) u
       pure
         ( [num_data, segments, flags, offsets, elems],
