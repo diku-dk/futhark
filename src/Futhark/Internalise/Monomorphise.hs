@@ -1138,7 +1138,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
   -- does not depend on the body.
   seen_before <- elem name . map fst . M.keys <$> getLifts
   name' <-
-    if null tparams && isNothing entry && not seen_before
+    if not (any isTypeParam tparams) && isNothing entry && not seen_before
       then pure name
       else newName name
 
