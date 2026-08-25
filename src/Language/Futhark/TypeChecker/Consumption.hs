@@ -395,7 +395,7 @@ observeVar loc v t = do
       where
         onPath fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
         onPath fs (Scalar st) = Scalar $ onPath' fs st
-        onPath' _ (TypeVar als tn args) = TypeVar als tn args -- #1675 FIXME
+        onPath' fs (TypeVar als tn args) = TypeVar (S.insert (AliasBound v fs) als) tn args
         onPath' fs (Record ts) = Record $ M.mapWithKey (\f -> onPath (fs ++ [f])) ts
         onPath' fs (Sum cs) = Sum $ fmap (map (onPath fs)) cs
         onPath' _ et@Arrow {} = et

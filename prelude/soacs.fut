@@ -103,7 +103,7 @@ def map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [
 --
 -- Note that the complexity implies that parallelism in the combining
 -- operator will *not* be exploited.
-def reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a) : a =
+def reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a) : *a =
   intrinsics.reduce op ne as
 
 -- | As `reduce`, but the operator must also be commutative.  This is
@@ -114,7 +114,7 @@ def reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a) : a =
 -- **Work:** *O(n ✕ W(op))*
 --
 -- **Span:** *O(log(n) ✕ W(op))*
-def reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a) : a =
+def reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a) : *a =
   intrinsics.reduce_comm op ne as
 
 -- | `h = hist op ne k is as` computes a generalised `k`-bin histogram

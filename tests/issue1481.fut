@@ -2,11 +2,11 @@ module type field = {
   module R: real
   type t
   val zero : t
-  val (+) : t -> t -> t
-  val (*) : R.t -> t -> t
+  val (+) : t -> t -> *t
+  val (*) : R.t -> t -> *t
 
   -- dummy function to generate new non-zero values of for t
-  val tab3 : i64 -> i64 -> i64 -> t
+  val tab3 : i64 -> i64 -> i64 -> *t
 }
 
 module mk_scalar_field (R: real) = {
@@ -42,7 +42,7 @@ module mk_lt (F: field) = {
     |> map (\i -> R.i64 (i + 1))
     |> map (\k -> R.((r2 * k + r1) / (r2 * k)))
     |> ([r1] ++)
-    |> scan (R.*) r1
+    |> scan (R.*) (copy r1)
     |> map (\el -> R.(sqrt (el / (r4 * pi))))
 
   def amn (m: R.t) (n: R.t) : R.t = R.(sqrt ((r4 * n * n - r1) / (n * n - m * m)))
@@ -60,9 +60,9 @@ module mk_lt (F: field) = {
   -- m<n
   def Lmx' [nlat] (m: i64) (np1: i64) (amm: R.t) (cx: [nlat]R.t) (x: [nlat]F.t) : [np1]F.t =
     let n = np1 - 1
-    let X = tabulate np1 (\i -> F.zero)
+    let X = tabulate np1 (\i -> copy F.zero)
     let m' = R.i64 m
-    let Sx p = map2 (F.*) p x |> reduce (F.+) F.zero
+    let Sx p = map2 (F.*) p x |> reduce (F.+) (copy F.zero)
     -- P^m_m
     let p0 = map (\cx -> R.(amm * (r1 - cx * cx) ** (m' / r2) * (rm1) ** m')) cx
     let X[m] = Sx p0
@@ -87,9 +87,9 @@ module mk_lt (F: field) = {
   -- n==m and m<n
   def Lmx [nlat] (m: i64) (np1: i64) (amm: R.t) (cx: [nlat]R.t) (x: [nlat]F.t) : [np1]F.t =
     let n = np1 - 1
-    let X = tabulate np1 (\i -> F.zero)
+    let X = tabulate np1 (\i -> copy F.zero)
     let m' = R.i64 m
-    let Sx p = map2 (F.*) p x |> reduce (F.+) F.zero
+    let Sx p = map2 (F.*) p x |> reduce (F.+) (copy F.zero)
     -- P^m_m
     let p0 = map (\cx -> R.(amm * (r1 - cx * cx) ** (m' / r2) * (rm1) ** m')) cx
     let X[m] = Sx p0
@@ -97,7 +97,7 @@ module mk_lt (F: field) = {
 
   def iLmX' [nlat] (m: i64) (np1: i64) (amm: R.t) (cx: [nlat]R.t) (X: [np1]F.t) : [nlat]F.t =
     let n = np1 - 1
-    let x = tabulate nlat (\i -> F.zero)
+    let x = tabulate nlat (\i -> copy F.zero)
     let m' = R.i64 m
     -- at each m we do x += X[m]P^_n
     let SX m x p = map2 (\xi pi -> xi F.+ (pi F.* X[m])) x p
@@ -124,7 +124,7 @@ module mk_lt (F: field) = {
 
   def iLmX [nlat] (m: i64) (np1: i64) (amm: R.t) (cx: [nlat]R.t) (X: [np1]F.t) : [nlat]F.t =
     let n = np1 - 1
-    let x = tabulate nlat (\i -> F.zero)
+    let x = tabulate nlat (\i -> copy F.zero)
     let m' = R.i64 m
     -- at each m we do x += X[m]P^_n
     let SX m x p = map2 (\xi pi -> xi F.+ (pi F.* X[m])) x p
@@ -137,7 +137,7 @@ module mk_lt (F: field) = {
     map2 (\m x -> Lmx m np1 amm[m] cx x) (iota np1) x[:np1] :> [np1][np1]F.t
 
   def ilt [np1] [nlon] [nlat] (amm: [np1]R.t) (cx: [nlat]R.t) (X: [np1][np1]F.t) : [nlon][nlat]F.t =
-    let out = tabulate_2d nlon nlat (\_ _ -> F.zero)
+    let out = tabulate_2d nlon nlat (\_ _ -> copy F.zero)
     let out[:np1] = map2 (\m x -> iLmX m np1 amm[m] cx x) (iota np1) X
     in out :> [nlon][nlat]F.t
 

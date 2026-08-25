@@ -57,7 +57,7 @@ module adam (V: vspace) = {
   def result (x: state) : v = x.w
 
   def initial_state (x: v) : state =
-    {step = 0, mw = V.zero, vw = S.i32 0, w = x}
+    {step = 0, mw = copy V.zero, vw = S.i32 0, w = x}
 
   type params =
     { beta1: a
