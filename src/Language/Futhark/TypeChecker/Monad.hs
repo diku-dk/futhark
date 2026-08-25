@@ -646,3 +646,5 @@ checkAttr (AttrAtom (AtomName v) loc) =
   pure $ AttrAtom (AtomName v) loc
 checkAttr (AttrAtom (AtomInt x) loc) =
   pure $ AttrAtom (AtomInt x) loc
+checkAttr (AttrAtom (AtomVar v) loc) =
+  pure $ AttrAtom (AtomVar v) loc

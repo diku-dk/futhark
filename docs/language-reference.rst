@@ -1741,19 +1741,20 @@ Attributes
 
 .. productionlist::
    attr:   `name`
+       : | "$" `name`
        : | `decimal`
        : | `name` "(" [`attr` ("," `attr`)* [","]] ")"
 
-An expression, declaration, pattern, or module type spec can be
-prefixed with an attribute, written as ``#[attr]``.  This may affect
-how it is treated by the compiler or other tools.  In no case will
-attributes affect or change the *semantics* of a program, but it may
-affect how well it compiles and runs (or in some cases, whether it
-compiles or runs at all).  Unknown attributes are silently ignored.
-Most have no effect in the interpreter.  An attribute can be either an
-*atom*, written as an identifier or number, or *compound*, consisting
-of an identifier and a comma-separated sequence of attributes.  The
-latter is used for grouping and encoding of more complex information.
+An expression, declaration, pattern, or module type spec can be prefixed with an
+attribute, written as ``#[attr]``. This may affect how it is treated by the
+compiler or other tools. In no case will attributes affect or change the
+*semantics* of a program, but it may affect how well it compiles and runs (or in
+some cases, whether it compiles or runs at all). Unknown attributes are silently
+ignored. Most have no effect in the interpreter. An attribute can be either an
+*atom*, written as an identifier or number, or *compound*, consisting of an
+identifier and a comma-separated sequence of attributes. The latter is used for
+grouping and encoding of more complex information. An identifier prefixed with a
+``$`` must be the name of a term variable in scope.
 
 Expression attributes
 ~~~~~~~~~~~~~~~~~~~~~

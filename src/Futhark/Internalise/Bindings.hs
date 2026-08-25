@@ -32,6 +32,8 @@ internaliseAttr (E.AttrAtom (E.AtomName v) _) =
   pure $ I.AttrName v
 internaliseAttr (E.AttrAtom (E.AtomInt x) _) =
   pure $ I.AttrInt x
+internaliseAttr (E.AttrAtom (E.AtomVar v) _) =
+  pure $ I.AttrName $ nameFromText $ prettyText v
 internaliseAttr (E.AttrComp f attrs _) =
   I.AttrComp f <$> mapM internaliseAttr attrs
 

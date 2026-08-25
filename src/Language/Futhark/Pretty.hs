@@ -434,6 +434,7 @@ instance (IsName vn, Annot f) => Pretty (ExpBase f vn) where
 
 instance (IsName vn) => Pretty (AttrAtom vn) where
   pretty (AtomName v) = pretty v
+  pretty (AtomVar v) = prettyName v
   pretty (AtomInt x) = pretty x
 
 instance (IsName vn) => Pretty (AttrInfo vn) where

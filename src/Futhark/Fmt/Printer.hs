@@ -135,11 +135,12 @@ instance Format UncheckedTypeBind where
           <+> "="
           </> stdIndent (fmt e)
 
-instance Format (AttrAtom a) where
+instance Format (AttrAtom Name) where
   fmt (AtomName name) = fmt name
+  fmt (AtomVar name) = "$" <> fmt name
   fmt (AtomInt int) = text constantStyle $ prettyText int
 
-instance Format (AttrInfo a) where
+instance Format (AttrInfo Name) where
   fmt attr = "#" <> brackets (fmtAttrInfo attr)
     where
       fmtAttrInfo (AttrAtom attr' loc) = addComments loc $ fmt attr'

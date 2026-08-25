@@ -127,13 +127,14 @@ resolveQualName v loc = do
 resolveName :: Name -> SrcLoc -> TypeM VName
 resolveName v loc = qualLeaf <$> resolveQualName (qualName v) loc
 
-resolveAttrAtom :: AttrAtom Name -> TypeM (AttrAtom VName)
-resolveAttrAtom (AtomName v) = pure $ AtomName v
-resolveAttrAtom (AtomInt x) = pure $ AtomInt x
+resolveAttrAtom :: AttrAtom Name -> SrcLoc -> TypeM (AttrAtom VName)
+resolveAttrAtom (AtomName v) _ = pure $ AtomName v
+resolveAttrAtom (AtomInt x) _ = pure $ AtomInt x
+resolveAttrAtom (AtomVar v) loc = AtomVar <$> resolveName v loc
 
 resolveAttrInfo :: AttrInfo Name -> TypeM (AttrInfo VName)
 resolveAttrInfo (AttrAtom atom loc) =
-  AttrAtom <$> resolveAttrAtom atom <*> pure loc
+  AttrAtom <$> resolveAttrAtom atom loc <*> pure loc
 resolveAttrInfo (AttrComp name infos loc) =
   AttrComp name <$> mapM resolveAttrInfo infos <*> pure loc
 

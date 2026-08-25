@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Attributes may now also reference variables in scope, by prefixing a name with
+  `$`. There is no builtin use for this feature.
+
 ### Removed
 
 ### Changed
