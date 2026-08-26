@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Propagation of flattening attributes in some cases.
 
+* GPU code generation now supports reductions with more than 25 operators.
+
 ## [0.27.1]
 
 ### Added

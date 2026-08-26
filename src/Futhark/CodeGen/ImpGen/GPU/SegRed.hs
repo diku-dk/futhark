@@ -56,13 +56,12 @@ module Futhark.CodeGen.ImpGen.GPU.SegRed
 where
 
 import Control.Monad
-import Data.List (genericLength, zip4)
+import Data.List (zip4)
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
-import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
@@ -93,11 +92,6 @@ getRedChunkSize types = do
       mem_constraint = max k_mem sum_sizes `quot` max_size
       reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
   untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
-
--- | The maximum number of operators we support in a single SegRed.
--- This limit arises out of the static allocation of counters.
-maxNumOps :: Int
-maxNumOps = 25
 
 -- | Code generation for the body of the SegRed, taking a continuation
 -- for saving the results of the body.  The results should be
@@ -161,28 +155,18 @@ compileSegRed' ::
   [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
-compileSegRed' pat grid space segbinops map_body_cont
-  | genericLength segbinops > maxNumOps =
-      compilerLimitationS $
-        ( "compileSegRed': at most "
-            <> show maxNumOps
-            <> " reduction operators are supported,\nbut found kernel with "
-            <> show (length segbinops)
-            <> ".\n"
-        )
-          <> ("Pattern: " <> prettyString pat)
-  | otherwise = do
-      chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
-      case unSegSpace space of
-        [(_, Constant (IntValue (Int64Value 1))), _] ->
-          compileReduction (chunk_v, chunk_const) nonsegmentedReduction
-        _ -> do
-          let segment_size = pe64 $ last $ segSpaceDims space
-              use_small_segments = segment_size * 2 .<. pe64 (unCount tblock_size)
-          sIf
-            use_small_segments
-            (compileReduction (chunk_v, chunk_const) smallSegmentsReduction)
-            (compileReduction (chunk_v, chunk_const) largeSegmentsReduction)
+compileSegRed' pat grid space segbinops map_body_cont = do
+  chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
+  case unSegSpace space of
+    [(_, Constant (IntValue (Int64Value 1))), _] ->
+      compileReduction (chunk_v, chunk_const) nonsegmentedReduction
+    _ -> do
+      let segment_size = pe64 $ last $ segSpaceDims space
+          use_small_segments = segment_size * 2 .<. pe64 (unCount tblock_size)
+      sIf
+        use_small_segments
+        (compileReduction (chunk_v, chunk_const) smallSegmentsReduction)
+        (compileReduction (chunk_v, chunk_const) largeSegmentsReduction)
   where
     compileReduction chunk f =
       f pat num_tblocks tblock_size chunk space segbinops map_body_cont
