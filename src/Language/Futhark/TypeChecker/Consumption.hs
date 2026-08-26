@@ -481,6 +481,27 @@ arrayAliases (Scalar Arrow {}) = mempty
 arrayAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map arrayAliases) $ M.elems fs
 
+-- | The aliases of any function-typed components. This is the part of 'aliases'
+-- that 'arrayAliases' ignores.
+arrowAliases :: TypeAliases -> Aliases
+arrowAliases (Scalar (Arrow als _ _ _ _)) = als
+arrowAliases (Scalar (Record fs)) = foldMap arrowAliases fs
+arrowAliases (Scalar (Sum fs)) =
+  mconcat $ concatMap (map arrowAliases) $ M.elems fs
+arrowAliases _ = mempty
+
+-- | The aliases of the free local variables captured by a closure, plus any
+-- globals that its result aliases. See Note [Global aliases and lambdas].
+closureAliases :: Exp -> TypeAliases -> CheckM Aliases
+closureAliases e body_als = do
+  vtable <- asks envVtable
+  free_bound <- boundFreeInExp e
+  let isGlobal AliasFree {} = False
+      isGlobal a = aliasVar a `M.notMember` vtable
+  pure $
+    foldMap aliases (M.elems free_bound)
+      <> S.filter isGlobal (aliases body_als)
+
 overlapCheck :: (Pretty src, Pretty ve) => Loc -> (src, TypeAliases) -> (ve, TypeAliases) -> CheckM ()
 overlapCheck loc (src, src_als) (ve, ve_als) =
   when (any (`S.member` aliases src_als) (aliases ve_als)) $
@@ -917,10 +938,9 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
     -- anyway.
     ((funbody', funbody_als), _body_cons) <- contain $ checkExp funbody
     checkReturnAlias loc params ret funbody_als
-    checkGlobalAliases loc params funbody_als
-    free_bound <- boundFreeInExp funbody
+    -- See Note [Global aliases and lambdas].
+    als <- closureAliases funbody funbody_als
     let ret' = maybe (inferReturnUniqueness params ret funbody_als) (const ret) retdecl
-        als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure ((ret', funbody'), ftype)
   (letbody', letbody_als) <- bindingFun (fst fname) ftype $ checkExp letbody
@@ -948,10 +968,9 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
     -- anyway.
     ((body', body_als), _body_cons) <- contain $ checkExp body
     checkReturnAlias loc params ret body_als
-    checkGlobalAliases loc params body_als
-    free_bound <- boundFreeInExp e
+    -- See Note [Global aliases and lambdas].
+    als <- closureAliases e body_als
     let ret' = maybe (inferReturnUniqueness params ret body_als) (const ret) te
-        als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure
       ( Lambda params body' te (Info (RetType ext ret')) loc,
@@ -1105,7 +1124,13 @@ checkGlobalAliases :: SrcLoc -> [Pat ParamType] -> TypeAliases -> CheckM ()
 checkGlobalAliases loc params body_t = do
   vtable <- asks envVtable
   let global = flip M.notMember vtable
-  unless (null params) $ forM_ (sourceBoundAliases $ arrayAliases body_t) $ \v ->
+      -- A definition with no parameters is a constant that may alias other
+      -- globals, but a *function-valued* may not have aliases in its closure.
+      -- See Note [Global aliases and lambdas].
+      als
+        | null params = arrowAliases body_t
+        | otherwise = aliases body_t
+  forM_ (sourceBoundAliases als) $ \v ->
     when (global v) . addError loc mempty . withIndexLink "alias-free-variable" $
       "Function result aliases the free variable "
         <> dquotes (prettyName v)
@@ -1144,6 +1169,34 @@ checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (l
         body_als -- Don't matter.
       )
 {-# NOINLINE checkValDef #-}
+
+-- Note [Global aliases and lambdas]
+--
+-- A *named* function must never return a value aliasing a global, as the alias
+-- propagation rules for function application states that the result of a
+-- function application aliases only the parameters (and the closure aliases,
+-- which top level functions do not have). This is what 'checkGlobalAliases'
+-- enforces.
+--
+-- Lambdas and local functions do not have this restriction. Consider
+--
+--   def f n = tabulate n (\i -> x)
+--
+-- The lambda does return the global @x@, but it does not escape: it is used by
+-- 'tabulate', whose return type is @*[n]a@, so the array that @f@ actually
+-- returns is freshly constructed and aliases nothing.
+--
+-- Instead, we let the alias propagate and check it where it matters.
+-- The global aliases of a lambda's body are added to the closure aliases
+-- of its function type ('closureAliases'), so that:
+--
+--   * If the lambda is applied, the ordinary application rules decide
+--     whether the alias reaches the result.
+--
+--   * If the lambda is returned by the enclosing named function, then the
+--     enclosing function's result is function-typed and carries the closure
+--     aliases with it. 'checkGlobalAliases' therefore looks through arrows via
+--     'resultAliases', and catches the escape there.
 
 -- Note [Spurious closure aliases]
 --
