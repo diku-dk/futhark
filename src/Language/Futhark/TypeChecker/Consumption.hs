@@ -38,11 +38,15 @@ type Names = S.Set VName
 data Alias
   = AliasBound {aliasVar :: VName, aliasFields :: [Name]}
   | AliasFree {aliasVar :: VName, aliasFields :: [Name]}
+  | -- | Like 'AliasBound', but the alias arises from the closure of a function
+    -- with a unique return type. See Note [Spurious closure aliases].
+    AliasClosure {aliasVar :: VName, aliasFields :: [Name]}
   deriving (Eq, Ord, Show)
 
 instance Pretty Alias where
   pretty (AliasBound v fs) = prettyAlias v fs
   pretty (AliasFree v fs) = "~" <> prettyAlias v fs
+  pretty (AliasClosure v fs) = "^" <> prettyAlias v fs
 
 prettyAlias :: VName -> [Name] -> Doc ann
 prettyAlias v fs = prettyName v <> mconcat (map (("." <>) . prettyName) fs)
@@ -55,6 +59,17 @@ boundAliases :: Aliases -> S.Set VName
 boundAliases = S.map aliasVar . S.filter bound
   where
     bound AliasBound {} = True
+    bound AliasClosure {} = True
+    bound AliasFree {} = False
+
+-- | As 'boundAliases', but ignoring 'AliasClosure'. Use this when deciding
+-- whether to report an aliasing error to the user, but not when deciding what
+-- the compiler must conservatively assume.
+sourceBoundAliases :: Aliases -> S.Set VName
+sourceBoundAliases = S.map aliasVar . S.filter bound
+  where
+    bound AliasBound {} = True
+    bound AliasClosure {} = False
     bound AliasFree {} = False
 
 -- | Aliases for a type, which is a set of the variables that are
@@ -249,6 +264,7 @@ unscope bound = S.map f
   where
     f (AliasFree v fs) = AliasFree v fs
     f (AliasBound v fs) = if v `elem` bound then AliasFree v fs else AliasBound v fs
+    f (AliasClosure v fs) = if v `elem` bound then AliasFree v fs else AliasClosure v fs
 
 -- | Figure out the aliases of each bound name in a pattern.
 matchPat :: Pat t -> TypeAliases -> DL.DList (VName, (t, TypeAliases))
@@ -352,9 +368,12 @@ consumeAliases loc als = do
           Just (Nonconsumable {}) -> True
           Just _ -> False
           Nothing -> True
-      checkIfConsumable (AliasBound v _)
-        | isBad v = do
-            v' <- describeVar v
+      -- Note that 'AliasClosure' is treated exactly like 'AliasBound'
+      -- here; see Note [Spurious closure aliases].
+      checkIfConsumable AliasFree {} = pure ()
+      checkIfConsumable a
+        | isBad (aliasVar a) = do
+            v' <- describeVar $ aliasVar a
             addError loc mempty . withIndexLink "not-consumable" $
               "Consuming" <+> v' <> ", which is not consumable."
       checkIfConsumable _ = pure ()
@@ -550,6 +569,42 @@ checkArg prev p_t e = do
     prevAlias v =
       (v,) . fst <$> find (S.member v . boundAliases . aliases . snd) prev
 
+-- | Can a value produced by fully applying a function with this return type
+-- alias the closure of that function? This is not the case if every part of the
+-- (curried) return type is unique or primitive, as such a result is guaranteed
+-- to be freshly constructed.
+resultCanAlias :: ResType -> Bool
+resultCanAlias (Scalar (Arrow _ _ _ _ (RetType _ rt))) = resultCanAlias rt
+resultCanAlias (Scalar (Record fs)) = any resultCanAlias fs
+resultCanAlias (Scalar (Sum cs)) = any (any resultCanAlias) cs
+resultCanAlias (Scalar Prim {}) = False
+resultCanAlias (Scalar (TypeVar u _ _)) = u == Nonunique
+resultCanAlias (Array u _ _) = u == Nonunique
+
+-- | The aliases that may show up in a *value* derived from a value of the given
+-- type. For most types this is simply the aliases of the type itself, but
+-- functions are special: the only way to obtain a value from a function is to
+-- apply it, so when the function is guaranteed to return a fresh value
+-- ('resultCanAlias'), its closure aliases cannot really leak into that value.
+--
+-- Such aliases are weakened to 'AliasClosure' rather than dropped outright; see
+-- Note [Spurious closure aliases].
+--
+-- Note that this refinement is only valid for deriving *values*; a function
+-- derived from a function (say, by partial application) must still carry the
+-- full closure aliases, as it may later be applied in a way that does produce
+-- an aliasing value.
+derivedAliases :: TypeAliases -> Aliases
+derivedAliases (Scalar (Arrow als _ _ _ (RetType _ rt)))
+  | resultCanAlias rt = als
+  | otherwise = S.map weaken als
+  where
+    weaken (AliasBound v fs) = AliasClosure v fs
+    weaken a = a
+derivedAliases (Scalar (Record fs)) = foldMap derivedAliases fs
+derivedAliases (Scalar (Sum cs)) = foldMap (foldMap derivedAliases) cs
+derivedAliases t = aliases t
+
 -- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
 -- an argument the given types to a function with the given return
 -- type, consuming the argument with the given diet.
@@ -559,13 +614,13 @@ returnType _ (Array Unique et shape) _ _ =
 returnType appres (Array Nonunique et shape) Consume _ =
   Array appres et shape
 returnType appres (Array Nonunique et shape) Observe arg =
-  Array (appres <> aliases arg) et shape
+  Array (appres <> derivedAliases arg) et shape
 returnType _ (Scalar (TypeVar Unique t targs)) _ _ =
   Scalar $ TypeVar mempty t targs
 returnType appres (Scalar (TypeVar Nonunique t targs)) Consume _ =
   Scalar $ TypeVar appres t targs
 returnType appres (Scalar (TypeVar Nonunique t targs)) Observe arg =
-  Scalar $ TypeVar (appres <> aliases arg) t targs
+  Scalar $ TypeVar (appres <> derivedAliases arg) t targs
 returnType appres (Scalar (Record fs)) d arg =
   Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
 returnType _ (Scalar (Prim t)) _ _ =
@@ -573,7 +628,7 @@ returnType _ (Scalar (Prim t)) _ _ =
 returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Consume _ =
   Scalar $ Arrow appres v pd t1 $ RetType dims t2
 returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Observe arg =
-  Scalar $ Arrow (appres <> aliases arg) v pd t1 $ RetType dims t2
+  Scalar $ Arrow (appres <> derivedAliases arg) v pd t1 $ RetType dims t2
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
 
@@ -1050,7 +1105,7 @@ checkGlobalAliases :: SrcLoc -> [Pat ParamType] -> TypeAliases -> CheckM ()
 checkGlobalAliases loc params body_t = do
   vtable <- asks envVtable
   let global = flip M.notMember vtable
-  unless (null params) $ forM_ (boundAliases $ arrayAliases body_t) $ \v ->
+  unless (null params) $ forM_ (sourceBoundAliases $ arrayAliases body_t) $ \v ->
     when (global v) . addError loc mempty . withIndexLink "alias-free-variable" $
       "Function result aliases the free variable "
         <> dquotes (prettyName v)
@@ -1089,3 +1144,33 @@ checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (l
         body_als -- Don't matter.
       )
 {-# NOINLINE checkValDef #-}
+
+-- Note [Spurious closure aliases]
+--
+-- When a function has a unique return type, applying it yields a freshly
+-- constructed value, so the result cannot alias whatever the function closed
+-- over. 'derivedAliases' uses this to avoid reporting spurious aliasing errors
+-- for pipelines such as
+--
+--   def sum (xs: []M.t) = xs |> reduce M.op M.ne
+--
+-- where the partial application @reduce M.op M.ne@ closes over the top-level
+-- @M.ne@, but has return type @*M.t@.
+--
+-- We cannot simply *drop* the alias, though. Defunctionalisation lifts @|>@
+-- into a wrapper whose return type is inherited from the (non-unique)
+-- instantiation of its type variable, so the core language believes the result
+-- does alias the closure. If we dropped the alias here, 'inferReturnUniqueness'
+-- would infer a unique return type that the core type checker then rejects -
+-- see for instance tests/issue1525.fut and tests/ad/map2.fut, which fail
+-- exactly that way.
+--
+-- So we keep the alias, marked as 'AliasClosure', and treat it exactly like
+-- 'AliasBound' everywhere that affects what the compiler assumes (uniqueness
+-- inference, consumption checking). The marking is used only to suppress the
+-- user-visible error in 'checkGlobalAliases'.
+--
+-- Removing the marking entirely - and getting the more precise uniqueness that
+-- the type system justifies - requires defunctionalisation to preserve the
+-- knowledge that the lifted function returns a fresh value. See the comment on
+-- 'lifted_rettype' in Futhark.Internalise.Defunctionalise.
