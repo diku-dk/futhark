@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * GPU code generation now supports reductions with more than 25 operators.
 
+* `reduce` and `reduce_comm` now produce alias-free results.
+
 ## [0.27.1]
 
 ### Added

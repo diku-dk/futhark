@@ -323,7 +323,7 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
   -- operator
   let Reduce _ red_lam red_nes = singleReduce reds
       Scan scan_lam scan_nes = singleScan scans
-      (_red_ts, post_ts) =
+      (red_ts, post_ts) =
         splitAt (length red_nes) $ scremaType w form
 
   post_arrs <- resultArray arrs post_ts
@@ -410,12 +410,21 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
           varsRes outarrs
         ]
 
-  -- We need to discard the final scan accumulators, as they are not
-  -- bound in the original pattern.
-  names <-
-    (++ patNames pat)
-      <$> replicateM (length scanacc_params) (newVName "discard")
-  letBindNames names $ Loop merge loopform loop_body
+  discards <- replicateM (length scanacc_params) (newVName "discard")
+
+  -- Screma requires alias-free results, so reduction results are bound to fresh
+  -- names, so that we can copy the array-typed ones.
+  let (red_pat_names, post_pat_names) = splitAt (length red_nes) $ patNames pat
+  red_names <- mapM newName red_pat_names
+
+  letBindNames (discards ++ red_names ++ post_pat_names) $
+    Loop merge loopform loop_body
+
+  forM_ (zip3 red_pat_names red_names red_ts) $ \(to, from, t) ->
+    letBindNames [to] . BasicOp $
+      case t of
+        Array {} -> Replicate mempty $ Var from
+        _ -> SubExp $ Var from
 
 -- | Transform a single 'SOAC' into a do-loop.  The body of the lambda
 -- is untouched, and may or may not contain further 'SOAC's depending
