@@ -60,7 +60,7 @@ module mk_lt (F: field) = {
   -- m<n
   def Lmx' [nlat] (m: i64) (np1: i64) (amm: R.t) (cx: [nlat]R.t) (x: [nlat]F.t) : [np1]F.t =
     let n = np1 - 1
-    let X = tabulate np1 (\i -> copy F.zero)
+    let X = tabulate np1 (\i -> F.zero)
     let m' = R.i64 m
     let Sx p = map2 (F.*) p x |> reduce (F.+) F.zero
     -- P^m_m
@@ -87,7 +87,7 @@ module mk_lt (F: field) = {
   -- n==m and m<n
   def Lmx [nlat] (m: i64) (np1: i64) (amm: R.t) (cx: [nlat]R.t) (x: [nlat]F.t) : [np1]F.t =
     let n = np1 - 1
-    let X = tabulate np1 (\i -> copy F.zero)
+    let X = tabulate np1 (\i -> F.zero)
     let m' = R.i64 m
     let Sx p = map2 (F.*) p x |> reduce (F.+) F.zero
     -- P^m_m
@@ -97,7 +97,7 @@ module mk_lt (F: field) = {
 
   def iLmX' [nlat] (m: i64) (np1: i64) (amm: R.t) (cx: [nlat]R.t) (X: [np1]F.t) : [nlat]F.t =
     let n = np1 - 1
-    let x = tabulate nlat (\i -> copy F.zero)
+    let x = tabulate nlat (\i -> F.zero)
     let m' = R.i64 m
     -- at each m we do x += X[m]P^_n
     let SX m x p = map2 (\xi pi -> xi F.+ (pi F.* X[m])) x p
@@ -124,7 +124,7 @@ module mk_lt (F: field) = {
 
   def iLmX [nlat] (m: i64) (np1: i64) (amm: R.t) (cx: [nlat]R.t) (X: [np1]F.t) : [nlat]F.t =
     let n = np1 - 1
-    let x = tabulate nlat (\i -> copy F.zero)
+    let x = tabulate nlat (\i -> F.zero)
     let m' = R.i64 m
     -- at each m we do x += X[m]P^_n
     let SX m x p = map2 (\xi pi -> xi F.+ (pi F.* X[m])) x p
@@ -137,7 +137,7 @@ module mk_lt (F: field) = {
     map2 (\m x -> Lmx m np1 amm[m] cx x) (iota np1) x[:np1] :> [np1][np1]F.t
 
   def ilt [np1] [nlon] [nlat] (amm: [np1]R.t) (cx: [nlat]R.t) (X: [np1][np1]F.t) : [nlon][nlat]F.t =
-    let out = tabulate_2d nlon nlat (\_ _ -> copy F.zero)
+    let out = tabulate_2d nlon nlat (\_ _ -> F.zero)
     let out[:np1] = map2 (\m x -> iLmX m np1 amm[m] cx x) (iota np1) X
     in out :> [nlon][nlat]F.t
 
