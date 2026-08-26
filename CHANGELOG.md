@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.27.1]
 
-## Added
+### Added
 
 * Rewrote partition to be a single kernel.
 
@@ -41,12 +41,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A simplification rule for branches that return common results (#2526).
 
-## Changed
+### Changed
 
 * Local functions are no longer let-generalised (i.e., made polymorphic).
   Explicitly polymorphic local functions are still supported.
 
-## Fixed
+### Fixed
 
 * Filter now uses the predicate once per element instead of twice.
 
