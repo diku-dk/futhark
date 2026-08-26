@@ -6,7 +6,7 @@ module type field = {
   val (*) : R.t -> t -> *t
 
   -- dummy function to generate new non-zero values of for t
-  val tab3 : i64 -> i64 -> i64 -> *t
+  val tab3 : i64 -> i64 -> i64 -> t
 }
 
 module mk_scalar_field (R: real) = {
@@ -42,7 +42,7 @@ module mk_lt (F: field) = {
     |> map (\i -> R.i64 (i + 1))
     |> map (\k -> R.((r2 * k + r1) / (r2 * k)))
     |> ([r1] ++)
-    |> scan (R.*) (copy r1)
+    |> scan (R.*) r1
     |> map (\el -> R.(sqrt (el / (r4 * pi))))
 
   def amn (m: R.t) (n: R.t) : R.t = R.(sqrt ((r4 * n * n - r1) / (n * n - m * m)))
@@ -62,7 +62,7 @@ module mk_lt (F: field) = {
     let n = np1 - 1
     let X = tabulate np1 (\i -> copy F.zero)
     let m' = R.i64 m
-    let Sx p = map2 (F.*) p x |> reduce (F.+) (copy F.zero)
+    let Sx p = map2 (F.*) p x |> reduce (F.+) F.zero
     -- P^m_m
     let p0 = map (\cx -> R.(amm * (r1 - cx * cx) ** (m' / r2) * (rm1) ** m')) cx
     let X[m] = Sx p0
@@ -89,7 +89,7 @@ module mk_lt (F: field) = {
     let n = np1 - 1
     let X = tabulate np1 (\i -> copy F.zero)
     let m' = R.i64 m
-    let Sx p = map2 (F.*) p x |> reduce (F.+) (copy F.zero)
+    let Sx p = map2 (F.*) p x |> reduce (F.+) F.zero
     -- P^m_m
     let p0 = map (\cx -> R.(amm * (r1 - cx * cx) ** (m' / r2) * (rm1) ** m')) cx
     let X[m] = Sx p0

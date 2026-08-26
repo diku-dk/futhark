@@ -13,11 +13,11 @@ module type vspace = {
   type vector
 
   val zero : vector
-  val scale : scalar -> vector -> vector
-  val dot : vector -> vector -> scalar
-  val (+) : vector -> vector -> vector
-  val neg : vector -> vector
-  val to_array : vector -> []scalar
+  val scale : scalar -> vector -> *vector
+  val dot : vector -> vector -> *scalar
+  val (+) : vector -> vector -> *vector
+  val neg : vector -> *vector
+  val to_array : vector -> *[]scalar
 }
 
 module array_vec (T: real) (Size: {val n : i64}) = {
@@ -26,20 +26,20 @@ module array_vec (T: real) (Size: {val n : i64}) = {
   type vector = [Size.n]scalar
   def zero : vector = rep (T.i32 0)
 
-  def scale (s: scalar) (v: vector) : vector =
+  def scale (s: scalar) (v: vector) : *vector =
     map (s T.*) v
 
-  def dot (v: vector) (u: vector) : scalar =
+  def dot (v: vector) (u: vector) : *scalar =
     T.sum (map2 (T.*) v u)
 
-  def (+) (v: vector) (u: vector) : vector =
+  def (+) (v: vector) (u: vector) : *vector =
     map2 (T.+) v u
 
-  def neg (v: vector) : vector =
+  def neg (v: vector) : *vector =
     map T.neg v
 
-  def from_array (x: [Size.n]scalar) : vector = x
-  def to_array (x: vector) : [Size.n]scalar = x
+  def from_array (x: [Size.n]scalar) : *vector = copy x
+  def to_array (x: vector) : *[Size.n]scalar = copy x
 }
 
 module adam (V: vspace) = {

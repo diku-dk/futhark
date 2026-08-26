@@ -5,8 +5,8 @@
 
 module type NUMERIC = {
   type num
-  val plus : num -> num -> *num
-  val mult : num -> num -> *num
+  val plus : num -> num -> num
+  val mult : num -> num -> num
   val one : num
   val zero : num
 }
@@ -28,7 +28,7 @@ module Float32 = {
 }
 
 module DotProd (T: NUMERIC) = {
-  def dotprod [n] (xs: [n]T.num) (ys: [n]T.num) : *T.num =
+  def dotprod [n] (xs: [n]T.num) (ys: [n]T.num) : T.num =
     reduce T.mult T.one (map2 T.plus xs ys)
 }
 
