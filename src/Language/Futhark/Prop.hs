@@ -962,7 +962,7 @@ intrinsics =
                   ]
                   $ RetType []
                   $ Scalar
-                  $ tupleRecord [Scalar $ t_b Nonunique, Scalar $ t_b Nonunique]
+                  $ tupleRecord [Scalar $ t_b Nonunique, Scalar $ t_b Unique]
               ),
               ( "vjp2",
                 IntrinsicPolyFun
@@ -973,7 +973,7 @@ intrinsics =
                   ]
                   $ RetType []
                   $ Scalar
-                  $ tupleRecord [Scalar $ t_b Nonunique, Scalar $ t_a Nonunique]
+                  $ tupleRecord [Scalar $ t_b Nonunique, Scalar $ t_a Unique]
               ),
               ( "jmp2",
                 IntrinsicPolyFun
