@@ -528,16 +528,17 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
     delve t t_als
       | all (`S.member` consumings) $ boundAliases (arrayAliases t_als),
         not $ any ((`S.member` forbidden) . aliasVar) (aliases t_als) =
-          withArrowRet t t_als `setUniqueness` Unique
+          withArrowRet t t_als Unique
       | otherwise =
-          withArrowRet t t_als `setUniqueness` Nonunique
+          withArrowRet t t_als Nonunique
 
     -- 'setUniqueness' does not look inside an arrow, but when we return a
     -- function, the uniqueness of *its* return type has already been inferred
     -- when checking the lambda.
     withArrowRet
       (Scalar (Arrow u pn d pt (RetType ext t1)))
-      (Scalar (Arrow _ _ _ _ (RetType _ t2))) =
+      (Scalar (Arrow _ _ _ _ (RetType _ t2)))
+      _ =
         Scalar . Arrow u pn d pt . RetType ext $ go t1 t2
         where
           go (Scalar (Record fs1)) (Scalar (Record fs2)) =
@@ -549,7 +550,7 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
             (Scalar (Arrow _ _ _ _ (RetType _ b))) =
               Scalar . Arrow u' pn' d' pt' . RetType ext' $ go a b
           go a b = a `setUniqueness` uniqueness b
-    withArrowRet t _ = t
+    withArrowRet t _ u = t `setUniqueness` u
 
 checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
