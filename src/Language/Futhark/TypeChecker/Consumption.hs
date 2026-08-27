@@ -482,9 +482,10 @@ arrayAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map arrayAliases) $ M.elems fs
 
 -- | The aliases of any function-typed components. This is the part of 'aliases'
--- that 'arrayAliases' ignores.
+-- that 'arrayAliases' ignores. We ignore closure aliases if the return type is
+-- Unique. See Note [Spurious closure aliases].
 arrowAliases :: TypeAliases -> Aliases
-arrowAliases (Scalar (Arrow als _ _ _ _)) = als
+arrowAliases t@(Scalar Arrow {}) = derivedAliases t
 arrowAliases (Scalar (Record fs)) = foldMap arrowAliases fs
 arrowAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map arrowAliases) $ M.elems fs
@@ -527,9 +528,28 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
     delve t t_als
       | all (`S.member` consumings) $ boundAliases (arrayAliases t_als),
         not $ any ((`S.member` forbidden) . aliasVar) (aliases t_als) =
-          t `setUniqueness` Unique
+          withArrowRet t t_als `setUniqueness` Unique
       | otherwise =
-          t `setUniqueness` Nonunique
+          withArrowRet t t_als `setUniqueness` Nonunique
+
+    -- 'setUniqueness' does not look inside an arrow, but when we return a
+    -- function, the uniqueness of *its* return type has already been inferred
+    -- when checking the lambda.
+    withArrowRet
+      (Scalar (Arrow u pn d pt (RetType ext t1)))
+      (Scalar (Arrow _ _ _ _ (RetType _ t2))) =
+        Scalar . Arrow u pn d pt . RetType ext $ go t1 t2
+        where
+          go (Scalar (Record fs1)) (Scalar (Record fs2)) =
+            Scalar $ Record $ M.intersectionWith go fs1 fs2
+          go (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
+            Scalar $ Sum $ M.intersectionWith (zipWith go) cs1 cs2
+          go
+            (Scalar (Arrow u' pn' d' pt' (RetType ext' a)))
+            (Scalar (Arrow _ _ _ _ (RetType _ b))) =
+              Scalar . Arrow u' pn' d' pt' . RetType ext' $ go a b
+          go a b = a `setUniqueness` uniqueness b
+    withArrowRet t _ = t
 
 checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
@@ -605,8 +625,8 @@ resultCanAlias (Array u _ _) = u == Nonunique
 -- | The aliases that may show up in a *value* derived from a value of the given
 -- type. For most types this is simply the aliases of the type itself, but
 -- functions are special: the only way to obtain a value from a function is to
--- apply it, so when the function is guaranteed to return a fresh value
--- ('resultCanAlias'), its closure aliases cannot really leak into that value.
+-- apply it, so when a function returns a Unique value ('resultCanAlias'), that
+-- does not alias the closure.
 --
 -- Such aliases are weakened to 'AliasClosure' rather than dropped outright; see
 -- Note [Spurious closure aliases].
@@ -1129,7 +1149,7 @@ checkGlobalAliases loc params body_t = do
       -- See Note [Global aliases and lambdas].
       als
         | null params = arrowAliases body_t
-        | otherwise = aliases body_t
+        | otherwise = arrayAliases body_t <> arrowAliases body_t
   forM_ (sourceBoundAliases als) $ \v ->
     when (global v) . addError loc mempty . withIndexLink "alias-free-variable" $
       "Function result aliases the free variable "
