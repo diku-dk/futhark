@@ -27,7 +27,7 @@ are bugs too.
 
 ## Building
 
-We include a `Makefile` with the following targets.
+We include a `Makefile` that includes the following targets.
 
 * `make build` (or just `make`) builds the compiler.
 
@@ -86,12 +86,11 @@ you are looking for.
 
 ## Testing
 
-### Only internal compilation
-
-This command tests compilation *without* compiling the generated C
-code, which speeds up testing for internal compiler errors:
-
-    futhark test -C tests --pass-compiler-option=--library
+The `Makefile` contains various targets for running the test suite. These
+targets are of the form `test-foo`, where `foo` varies. To avoid documentation
+drift, they are not documented here. Read the `Makefile` to see what is
+available. Feel free to extract the `futhark test` commands to run them on
+single programs.
 
 ### Running only a single unit test
 
