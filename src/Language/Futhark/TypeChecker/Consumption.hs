@@ -515,6 +515,27 @@ overlapCheck loc (src, src_als) (ve, ve_als) =
         <+> dquotes "copy"
         <+> "to remove aliases from the value."
 
+-- 'setUniqueness' does not look inside an arrow, but when we return a function,
+-- the uniqueness of *its* return type has already been inferred when checking
+-- the lambda. So go past all the arrows and set the uniqueness appropriately.
+withArrowRet :: ResType -> TypeAliases -> Uniqueness -> ResType
+withArrowRet
+  (Scalar (Arrow u pn d pt (RetType ext t1)))
+  (Scalar (Arrow _ _ _ _ (RetType _ t2)))
+  _ =
+    Scalar . Arrow u pn d pt . RetType ext $ go t1 t2
+    where
+      go (Scalar (Record fs1)) (Scalar (Record fs2)) =
+        Scalar $ Record $ M.intersectionWith go fs1 fs2
+      go (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
+        Scalar $ Sum $ M.intersectionWith (zipWith go) cs1 cs2
+      go
+        (Scalar (Arrow u' pn' d' pt' (RetType ext' a)))
+        (Scalar (Arrow _ _ _ _ (RetType _ b))) =
+          Scalar . Arrow u' pn' d' pt' . RetType ext' $ go a b
+      go a b = a `setUniqueness` uniqueness b
+withArrowRet t _ u = t `setUniqueness` u
+
 inferReturnUniqueness :: [Pat ParamType] -> ResType -> TypeAliases -> ResType
 inferReturnUniqueness [] ret _ = ret `setUniqueness` Nonunique
 inferReturnUniqueness params ret ret_als = delve ret ret_als
@@ -531,26 +552,6 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
           withArrowRet t t_als Unique
       | otherwise =
           withArrowRet t t_als Nonunique
-
-    -- 'setUniqueness' does not look inside an arrow, but when we return a
-    -- function, the uniqueness of *its* return type has already been inferred
-    -- when checking the lambda.
-    withArrowRet
-      (Scalar (Arrow u pn d pt (RetType ext t1)))
-      (Scalar (Arrow _ _ _ _ (RetType _ t2)))
-      _ =
-        Scalar . Arrow u pn d pt . RetType ext $ go t1 t2
-        where
-          go (Scalar (Record fs1)) (Scalar (Record fs2)) =
-            Scalar $ Record $ M.intersectionWith go fs1 fs2
-          go (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
-            Scalar $ Sum $ M.intersectionWith (zipWith go) cs1 cs2
-          go
-            (Scalar (Arrow u' pn' d' pt' (RetType ext' a)))
-            (Scalar (Arrow _ _ _ _ (RetType _ b))) =
-              Scalar . Arrow u' pn' d' pt' . RetType ext' $ go a b
-          go a b = a `setUniqueness` uniqueness b
-    withArrowRet t _ u = t `setUniqueness` u
 
 checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
