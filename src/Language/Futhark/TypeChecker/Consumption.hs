@@ -36,13 +36,35 @@ type Names = S.Set VName
 -- an equivalence class.  See uniqueness-error18.fut for an example of
 -- why this is necessary.
 data Alias
-  = AliasBound {aliasVar :: VName, aliasFields :: [Name]}
-  | AliasFree {aliasVar :: VName, aliasFields :: [Name]}
+  = AliasBound VName [Name]
+  | AliasFree VName [Name]
+  | -- | Like 'AliasBound', but the alias arises from the closure of a function
+    -- with a unique return type. See Note [Spurious closure aliases].
+    AliasClosure VName [Name]
+  | -- | Used to represent unknowable internal aliasing, which may
+    -- occur for a function that returns a non-unique abstract type.
+    -- (It may internally be a pair of arrays that alias each other.)
+    AliasSelf
   deriving (Eq, Ord, Show)
 
 instance Pretty Alias where
   pretty (AliasBound v fs) = prettyAlias v fs
   pretty (AliasFree v fs) = "~" <> prettyAlias v fs
+  pretty (AliasClosure v fs) = "^" <> prettyAlias v fs
+  pretty AliasSelf = "self"
+
+-- | The variable an alias refers to.  'AliasSelf' does not refer to any
+-- variable, as it denotes aliasing internal to a value.
+aliasVar :: Alias -> Maybe VName
+aliasVar (AliasBound v _) = Just v
+aliasVar (AliasFree v _) = Just v
+aliasVar (AliasClosure v _) = Just v
+aliasVar AliasSelf = Nothing
+
+-- | Does this value have internal aliasing, meaning it can neither be consumed
+-- nor given a unique type?  See 'AliasSelf'.
+selfAliased :: Aliases -> Bool
+selfAliased = S.member AliasSelf
 
 prettyAlias :: VName -> [Name] -> Doc ann
 prettyAlias v fs = prettyName v <> mconcat (map (("." <>) . prettyName) fs)
@@ -52,10 +74,23 @@ instance Pretty (S.Set Alias) where
 
 -- | The set of in-scope variables that are being aliased.
 boundAliases :: Aliases -> S.Set VName
-boundAliases = S.map aliasVar . S.filter bound
+boundAliases = S.fromList . mapMaybe aliasVar . filter bound . S.toList
   where
     bound AliasBound {} = True
+    bound AliasClosure {} = True
     bound AliasFree {} = False
+    bound AliasSelf = False
+
+-- | As 'boundAliases', but ignoring 'AliasClosure'. Use this when deciding
+-- whether to report an aliasing error to the user, but not when deciding what
+-- the compiler must conservatively assume.
+sourceBoundAliases :: Aliases -> S.Set VName
+sourceBoundAliases = S.fromList . mapMaybe aliasVar . filter bound . S.toList
+  where
+    bound AliasBound {} = True
+    bound AliasClosure {} = False
+    bound AliasFree {} = False
+    bound AliasSelf {} = False
 
 -- | Aliases for a type, which is a set of the variables that are
 -- aliased.
@@ -201,6 +236,14 @@ returnAliased name loc =
       <+> dquotes (prettyName name)
       <> ", which is not consumable."
 
+-- | Returning a value for a unique return type is equivalent to consuming it,
+-- so a value with internal aliasing cannot be returned that way.
+selfAliasedReturn :: (Located loc) => loc -> CheckM ()
+selfAliasedReturn loc =
+  addError loc mempty $
+    "A unique-typed component of the return value may have internal aliases,"
+      </> "and so cannot be given a unique type."
+
 uniqueReturnAliased :: SrcLoc -> CheckM ()
 uniqueReturnAliased loc =
   addError loc mempty . withIndexLink "unique-return-aliased" $
@@ -213,7 +256,8 @@ checkReturnAlias loc params rettp =
     checkReturnAlias' params' seen (Unique, names) = do
       when (any (`S.member` S.map snd seen) $ S.toList names) $
         uniqueReturnAliased loc
-      notAliasesParam params' $ S.map aliasVar names
+      when (selfAliased names) $ selfAliasedReturn loc
+      notAliasesParam params' $ S.fromList $ mapMaybe aliasVar $ S.toList names
       pure $ seen `S.union` tag Unique names
     checkReturnAlias' _ seen (Nonunique, names) = do
       when (any (`S.member` seen) $ S.toList $ tag Unique names) $
@@ -249,6 +293,8 @@ unscope bound = S.map f
   where
     f (AliasFree v fs) = AliasFree v fs
     f (AliasBound v fs) = if v `elem` bound then AliasFree v fs else AliasBound v fs
+    f (AliasClosure v fs) = if v `elem` bound then AliasFree v fs else AliasClosure v fs
+    f AliasSelf = AliasSelf
 
 -- | Figure out the aliases of each bound name in a pattern.
 matchPat :: Pat t -> TypeAliases -> DL.DList (VName, (t, TypeAliases))
@@ -332,7 +378,7 @@ checkIfConsumed :: Loc -> Aliases -> CheckM ()
 checkIfConsumed rloc als = do
   cons <- gets stateConsumed
   let bad v = fmap (v,) $ v `M.lookup` cons
-  forM_ (mapMaybe (bad . aliasVar) $ S.toList als) $ \(v, wloc) -> do
+  forM_ (mapMaybe (bad <=< aliasVar) $ S.toList als) $ \(v, wloc) -> do
     v' <- describeVar v
     addError rloc mempty . withIndexLink "use-after-consume" $
       "Using"
@@ -352,8 +398,17 @@ consumeAliases loc als = do
           Just (Nonconsumable {}) -> True
           Just _ -> False
           Nothing -> True
-      checkIfConsumable (AliasBound v _)
-        | isBad v = do
+      -- Note that 'AliasClosure' is treated exactly like 'AliasBound'
+      -- here; see Note [Spurious closure aliases].
+      checkIfConsumable AliasFree {} = pure ()
+      checkIfConsumable AliasSelf =
+        addError
+          loc
+          mempty
+          "Consuming a value that may have internal aliases."
+      checkIfConsumable a
+        | Just v <- aliasVar a,
+          isBad v = do
             v' <- describeVar v
             addError loc mempty . withIndexLink "not-consumable" $
               "Consuming" <+> v' <> ", which is not consumable."
@@ -362,7 +417,7 @@ consumeAliases loc als = do
   checkIfConsumed loc als
   consumed als'
   where
-    als' = M.fromList $ map ((,loc) . aliasVar) $ S.toList als
+    als' = M.fromList $ map (,loc) $ mapMaybe aliasVar $ S.toList als
 
 -- | Observe the given name here and return its aliases.
 observeVar :: Loc -> VName -> StructType -> CheckM TypeAliases
@@ -395,7 +450,7 @@ observeVar loc v t = do
       where
         onPath fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
         onPath fs (Scalar st) = Scalar $ onPath' fs st
-        onPath' _ (TypeVar als tn args) = TypeVar als tn args -- #1675 FIXME
+        onPath' fs (TypeVar als tn args) = TypeVar (S.insert (AliasBound v fs) als) tn args
         onPath' fs (Record ts) = Record $ M.mapWithKey (\f -> onPath (fs ++ [f])) ts
         onPath' fs (Sum cs) = Sum $ fmap (map (onPath fs)) cs
         onPath' _ et@Arrow {} = et
@@ -442,12 +497,8 @@ aliasesMultipleTimes = S.fromList . map fst . filter ((> 1) . snd) . M.toList . 
   where
     delve (Scalar (Record fs)) =
       foldl' (M.unionWith (+)) mempty $ map delve $ M.elems fs
-    delve (Scalar (TypeVar als _ _)) =
-      -- We cannot know anything about abstract types, but must conservatively
-      -- assume the worst.
-      M.fromList $ map ((,2 :: Int) . aliasVar) $ S.toList als
     delve t =
-      M.fromList $ map ((,1 :: Int) . aliasVar) $ S.toList $ aliases t
+      M.fromList $ map (,1 :: Int) $ mapMaybe aliasVar $ S.toList $ aliases t
 
 consumingParams :: [Pat ParamType] -> Names
 consumingParams =
@@ -462,6 +513,29 @@ arrayAliases (Scalar Arrow {}) = mempty
 arrayAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map arrayAliases) $ M.elems fs
 
+-- | The aliases of any function-typed components. This is the part of 'aliases'
+-- that 'arrayAliases' ignores. We ignore closure aliases if the return type is
+-- Unique. See Note [Spurious closure aliases].
+arrowAliases :: TypeAliases -> Aliases
+arrowAliases t@(Scalar Arrow {}) = derivedAliases t
+arrowAliases (Scalar (Record fs)) = foldMap arrowAliases fs
+arrowAliases (Scalar (Sum fs)) =
+  mconcat $ concatMap (map arrowAliases) $ M.elems fs
+arrowAliases _ = mempty
+
+-- | The aliases of the free local variables captured by a closure, plus any
+-- globals that its result aliases. See Note [Global aliases and lambdas].
+closureAliases :: Exp -> TypeAliases -> CheckM Aliases
+closureAliases e body_als = do
+  vtable <- asks envVtable
+  free_bound <- boundFreeInExp e
+  let isGlobal AliasFree {} = False
+      isGlobal AliasSelf = False
+      isGlobal a = maybe False (`M.notMember` vtable) $ aliasVar a
+  pure $
+    foldMap aliases (M.elems free_bound)
+      <> S.filter isGlobal (aliases body_als)
+
 overlapCheck :: (Pretty src, Pretty ve) => Loc -> (src, TypeAliases) -> (ve, TypeAliases) -> CheckM ()
 overlapCheck loc (src, src_als) (ve, ve_als) =
   when (any (`S.member` aliases src_als) (aliases ve_als)) $
@@ -473,6 +547,27 @@ overlapCheck loc (src, src_als) (ve, ve_als) =
         </> "Hint: use"
         <+> dquotes "copy"
         <+> "to remove aliases from the value."
+
+-- 'setUniqueness' does not look inside an arrow, but when we return a function,
+-- the uniqueness of *its* return type has already been inferred when checking
+-- the lambda. So go past all the arrows and set the uniqueness appropriately.
+withArrowRet :: ResType -> TypeAliases -> Uniqueness -> ResType
+withArrowRet
+  (Scalar (Arrow u pn d pt (RetType ext t1)))
+  (Scalar (Arrow _ _ _ _ (RetType _ t2)))
+  _ =
+    Scalar . Arrow u pn d pt . RetType ext $ go t1 t2
+    where
+      go (Scalar (Record fs1)) (Scalar (Record fs2)) =
+        Scalar $ Record $ M.intersectionWith go fs1 fs2
+      go (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
+        Scalar $ Sum $ M.intersectionWith (zipWith go) cs1 cs2
+      go
+        (Scalar (Arrow u' pn' d' pt' (RetType ext' a)))
+        (Scalar (Arrow _ _ _ _ (RetType _ b))) =
+          Scalar . Arrow u' pn' d' pt' . RetType ext' $ go a b
+      go a b = a `setUniqueness` uniqueness b
+withArrowRet t _ u = t `setUniqueness` u
 
 inferReturnUniqueness :: [Pat ParamType] -> ResType -> TypeAliases -> ResType
 inferReturnUniqueness [] ret _ = ret `setUniqueness` Nonunique
@@ -486,10 +581,11 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
       Scalar $ Sum $ M.intersectionWith (zipWith delve) cs1 cs2
     delve t t_als
       | all (`S.member` consumings) $ boundAliases (arrayAliases t_als),
-        not $ any ((`S.member` forbidden) . aliasVar) (aliases t_als) =
-          t `setUniqueness` Unique
+        not $ selfAliased (aliases t_als),
+        not $ any (`S.member` forbidden) (mapMaybe aliasVar (S.toList (aliases t_als))) =
+          withArrowRet t t_als Unique
       | otherwise =
-          t `setUniqueness` Nonunique
+          withArrowRet t t_als Nonunique
 
 checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
@@ -550,6 +646,52 @@ checkArg prev p_t e = do
     prevAlias v =
       (v,) . fst <$> find (S.member v . boundAliases . aliases . snd) prev
 
+-- | Can a value produced by fully applying a function with this return type
+-- alias the closure of that function? This is not the case if every part of the
+-- (curried) return type is unique or primitive, as such a result is guaranteed
+-- to be freshly constructed.
+resultCanAlias :: ResType -> Bool
+resultCanAlias (Scalar (Arrow _ _ _ _ (RetType _ rt))) = resultCanAlias rt
+resultCanAlias (Scalar (Record fs)) = any resultCanAlias fs
+resultCanAlias (Scalar (Sum cs)) = any (any resultCanAlias) cs
+resultCanAlias (Scalar Prim {}) = False
+resultCanAlias (Scalar (TypeVar u _ _)) = u == Nonunique
+resultCanAlias (Array u _ _) = u == Nonunique
+
+-- | The aliases that may show up in a *value* derived from a value of the given
+-- type. For most types this is simply the aliases of the type itself, but
+-- functions are special: the only way to obtain a value from a function is to
+-- apply it, so when a function returns a Unique value ('resultCanAlias'), that
+-- does not alias the closure.
+--
+-- Such aliases are weakened to 'AliasClosure' rather than dropped outright; see
+-- Note [Spurious closure aliases].
+--
+-- Note that this refinement is only valid for deriving *values*; a function
+-- derived from a function (say, by partial application) must still carry the
+-- full closure aliases, as it may later be applied in a way that does produce
+-- an aliasing value.
+derivedAliases :: TypeAliases -> Aliases
+derivedAliases (Scalar (Arrow als _ _ _ (RetType _ rt)))
+  | resultCanAlias rt = als
+  | otherwise = S.map weaken als
+  where
+    weaken (AliasBound v fs) = AliasClosure v fs
+    weaken a = a
+derivedAliases (Scalar (Record fs)) = foldMap derivedAliases fs
+derivedAliases (Scalar (Sum cs)) = foldMap (foldMap derivedAliases) cs
+derivedAliases t = aliases t
+
+-- | Applying a function that returns a non-unique abstract type yields a value
+-- that may have internal aliasing, as we cannot see its representation.  This
+-- does not apply to intrinsic types (notably accumulators), whose
+-- representation the compiler does know, and which have no components that
+-- could alias each other.
+selfAliasOf :: QualName VName -> Aliases
+selfAliasOf t
+  | isIntrinsic (qualLeaf t) = mempty
+  | otherwise = S.singleton AliasSelf
+
 -- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
 -- an argument the given types to a function with the given return
 -- type, consuming the argument with the given diet.
@@ -559,13 +701,13 @@ returnType _ (Array Unique et shape) _ _ =
 returnType appres (Array Nonunique et shape) Consume _ =
   Array appres et shape
 returnType appres (Array Nonunique et shape) Observe arg =
-  Array (appres <> aliases arg) et shape
+  Array (appres <> derivedAliases arg) et shape
 returnType _ (Scalar (TypeVar Unique t targs)) _ _ =
   Scalar $ TypeVar mempty t targs
 returnType appres (Scalar (TypeVar Nonunique t targs)) Consume _ =
-  Scalar $ TypeVar appres t targs
+  Scalar $ TypeVar (selfAliasOf t <> appres) t targs
 returnType appres (Scalar (TypeVar Nonunique t targs)) Observe arg =
-  Scalar $ TypeVar (appres <> aliases arg) t targs
+  Scalar $ TypeVar (selfAliasOf t <> appres <> derivedAliases arg) t targs
 returnType appres (Scalar (Record fs)) d arg =
   Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
 returnType _ (Scalar (Prim t)) _ _ =
@@ -573,7 +715,7 @@ returnType _ (Scalar (Prim t)) _ _ =
 returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Consume _ =
   Scalar $ Arrow appres v pd t1 $ RetType dims t2
 returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Observe arg =
-  Scalar $ Arrow (appres <> aliases arg) v pd t1 $ RetType dims t2
+  Scalar $ Arrow (appres <> derivedAliases arg) v pd t1 $ RetType dims t2
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
 
@@ -695,7 +837,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
   (param'', (param_cons, _)) <-
     runStateT (checkMergeReturn param' body_als) (mempty, mempty)
 
-  let body_cons' = body_cons <> S.map aliasVar param_cons
+  let body_cons' = body_cons <> S.fromList (mapMaybe aliasVar (S.toList param_cons))
   if body_cons' == body_cons && patternType param'' == patternType param
     then pure param'
     else convergeLoopParam loop_loc param'' body_cons' body_als
@@ -828,7 +970,7 @@ checkExp (AppExp (If cond te fe loc) appres) = do
   ((te', te_als), te_cons) <- contain $ checkExp te
   ((fe', fe_als), fe_cons) <- contain $ checkExp fe
   let all_cons = te_cons <> fe_cons
-      notConsumed = not . (`M.member` all_cons) . aliasVar
+      notConsumed = maybe True (not . (`M.member` all_cons)) . aliasVar
       comb_als = second (S.filter notConsumed) $ te_als `combineAliases` fe_als
   consumed all_cons
   pure
@@ -842,7 +984,7 @@ checkExp (AppExp (Match cond cs loc) appres) = do
   ((cs', cs_als), cs_cons) <-
     first NE.unzip . NE.unzip <$> mapM (checkCase cond_als) cs
   let all_cons = fold cs_cons
-      notConsumed = not . (`M.member` all_cons) . aliasVar
+      notConsumed = maybe True (not . (`M.member` all_cons)) . aliasVar
       comb_als = second (S.filter notConsumed) $ foldl1 combineAliases cs_als
   consumed all_cons
   pure
@@ -862,10 +1004,9 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
     -- anyway.
     ((funbody', funbody_als), _body_cons) <- contain $ checkExp funbody
     checkReturnAlias loc params ret funbody_als
-    checkGlobalAliases loc params funbody_als
-    free_bound <- boundFreeInExp funbody
+    -- See Note [Global aliases and lambdas].
+    als <- closureAliases funbody funbody_als
     let ret' = maybe (inferReturnUniqueness params ret funbody_als) (const ret) retdecl
-        als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure ((ret', funbody'), ftype)
   (letbody', letbody_als) <- bindingFun (fst fname) ftype $ checkExp letbody
@@ -893,10 +1034,9 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
     -- anyway.
     ((body', body_als), _body_cons) <- contain $ checkExp body
     checkReturnAlias loc params ret body_als
-    checkGlobalAliases loc params body_als
-    free_bound <- boundFreeInExp e
+    -- See Note [Global aliases and lambdas].
+    als <- closureAliases e body_als
     let ret' = maybe (inferReturnUniqueness params ret body_als) (const ret) te
-        als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure
       ( Lambda params body' te (Info (RetType ext ret')) loc,
@@ -1050,7 +1190,13 @@ checkGlobalAliases :: SrcLoc -> [Pat ParamType] -> TypeAliases -> CheckM ()
 checkGlobalAliases loc params body_t = do
   vtable <- asks envVtable
   let global = flip M.notMember vtable
-  unless (null params) $ forM_ (boundAliases $ arrayAliases body_t) $ \v ->
+      -- A definition with no parameters is a constant that may alias other
+      -- globals, but a *function-valued* may not have aliases in its closure.
+      -- See Note [Global aliases and lambdas].
+      als
+        | null params = arrowAliases body_t
+        | otherwise = arrayAliases body_t <> arrowAliases body_t
+  forM_ (sourceBoundAliases als) $ \v ->
     when (global v) . addError loc mempty . withIndexLink "alias-free-variable" $
       "Function result aliases the free variable "
         <> dquotes (prettyName v)
@@ -1089,3 +1235,61 @@ checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (l
         body_als -- Don't matter.
       )
 {-# NOINLINE checkValDef #-}
+
+-- Note [Global aliases and lambdas]
+--
+-- A *named* function must never return a value aliasing a global, as the alias
+-- propagation rules for function application states that the result of a
+-- function application aliases only the parameters (and the closure aliases,
+-- which top level functions do not have). This is what 'checkGlobalAliases'
+-- enforces.
+--
+-- Lambdas and local functions do not have this restriction. Consider
+--
+--   def f n = tabulate n (\i -> x)
+--
+-- The lambda does return the global @x@, but it does not escape: it is used by
+-- 'tabulate', whose return type is @*[n]a@, so the array that @f@ actually
+-- returns is freshly constructed and aliases nothing.
+--
+-- Instead, we let the alias propagate and check it where it matters.
+-- The global aliases of a lambda's body are added to the closure aliases
+-- of its function type ('closureAliases'), so that:
+--
+--   * If the lambda is applied, the ordinary application rules decide
+--     whether the alias reaches the result.
+--
+--   * If the lambda is returned by the enclosing named function, then the
+--     enclosing function's result is function-typed and carries the closure
+--     aliases with it. 'checkGlobalAliases' therefore looks through arrows via
+--     'resultAliases', and catches the escape there.
+
+-- Note [Spurious closure aliases]
+--
+-- When a function has a unique return type, applying it yields a freshly
+-- constructed value, so the result cannot alias whatever the function closed
+-- over. 'derivedAliases' uses this to avoid reporting spurious aliasing errors
+-- for pipelines such as
+--
+--   def sum (xs: []M.t) = xs |> reduce M.op M.ne
+--
+-- where the partial application @reduce M.op M.ne@ closes over the top-level
+-- @M.ne@, but has return type @*M.t@.
+--
+-- We cannot simply *drop* the alias, though. Defunctionalisation lifts @|>@
+-- into a wrapper whose return type is inherited from the (non-unique)
+-- instantiation of its type variable, so the core language believes the result
+-- does alias the closure. If we dropped the alias here, 'inferReturnUniqueness'
+-- would infer a unique return type that the core type checker then rejects -
+-- see for instance tests/issue1525.fut and tests/ad/map2.fut, which fail
+-- exactly that way.
+--
+-- So we keep the alias, marked as 'AliasClosure', and treat it exactly like
+-- 'AliasBound' everywhere that affects what the compiler assumes (uniqueness
+-- inference, consumption checking). The marking is used only to suppress the
+-- user-visible error in 'checkGlobalAliases'.
+--
+-- Removing the marking entirely - and getting the more precise uniqueness that
+-- the type system justifies - requires defunctionalisation to preserve the
+-- knowledge that the lifted function returns a fresh value. See the comment on
+-- 'lifted_rettype' in Futhark.Internalise.Defunctionalise.
