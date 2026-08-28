@@ -4,7 +4,7 @@
 
 module type QCircuit = {
   type Circuit [n]
-  val create : (n: i64) -> Circuit [n]
+  val create : (n: i64) -> *Circuit [n]
   val H [n] : i64 -> *Circuit [n] -> *Circuit [n]
 }
 
