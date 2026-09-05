@@ -44,8 +44,48 @@ evalStm funs env (Let pat _ e) = do
 -- Produce one Val per pattern element the expression is expected to bind.
 evalExp :: FunEnv -> Env -> Exp SOACS -> InterpM [Val]
 evalExp _ env (BasicOp op) = evalBasicOp env op
-evalExp _ _ Match {} = Left "Match not implemented yet"
-evalExp _ _ Loop {} = Left "Loop not implemented yet"
+evalExp funs env (Match ses cases defaultBody _) = do
+  values <- mapM (\se -> evalSubExp env se >>= expectPrimVal) ses
+  evalBody funs env $ selectCase values cases
+  where
+    selectCase values (Case patterns body : remaining)
+      | matches patterns values = body
+      | otherwise = selectCase values remaining
+    selectCase _ [] = defaultBody
+
+    matches patterns values =
+      length patterns == length values
+        && and (zipWith matchesValue patterns values)
+
+    matchesValue Nothing _ = True
+    matchesValue (Just expected) actual = expected == actual
+evalExp funs env (Loop merge (ForLoop iterator intType boundExp) body) = do
+  initialValues <- mapM (evalSubExp env . snd) merge
+  boundValue <- evalSubExp env boundExp >>= expectPrimVal
+  bound <- expectInt boundValue
+  runIterations 0 bound initialValues
+  where
+    mergeNames = map (paramName . fst) merge
+
+    runIterations iteration bound currentValues
+      | iteration >= bound =
+          pure currentValues
+      | otherwise = do
+          let iteratorValue =
+                PrimVal $ IntValue $ P.intValue intType iteration
+              loopBindings =
+                M.fromList $
+                  (iterator, iteratorValue)
+                    : zip mergeNames currentValues
+              iterationEnv =
+                M.union loopBindings env
+
+          nextValues <- evalBody funs iterationEnv body
+
+          if length nextValues /= length mergeNames
+            then Left "loop result count mismatch"
+            else runIterations (iteration + 1) bound nextValues
+evalExp _ _ (Loop _ WhileLoop {} _) = Left "WhileLoop not implemented yet"
 evalExp funs env (Apply fname args _ _) = do
   callee <-
     maybe
@@ -72,6 +112,10 @@ expectPrimVal :: Val -> InterpM PrimValue
 expectPrimVal (PrimVal pv) = pure pv
 expectPrimVal (ArrayValue _) = Left "expected a primitive value"
 
+expectInt :: PrimValue -> InterpM Int
+expectInt (IntValue i) = pure $ P.valueIntegral i
+expectInt _ = Left "expected an integer value"
+
 evalBasicOp :: Env -> BasicOp -> InterpM [Val]
 evalBasicOp env (SubExp se) = pure <$> evalSubExp env se
 evalBasicOp env (BinOp op x y) = do
@@ -80,6 +124,22 @@ evalBasicOp env (BinOp op x y) = do
   case P.doBinOp op xv yv of
     Just result -> pure [PrimVal result]
     Nothing -> Left "invalid binary operation"
+evalBasicOp env (UnOp op x) = do
+  xv <- expectPrimVal =<< evalSubExp env x
+  case P.doUnOp op xv of
+    Just result -> pure [PrimVal result]
+    Nothing -> Left "invalid unary operation"
+evalBasicOp env (CmpOp op x y) = do
+  xv <- expectPrimVal =<< evalSubExp env x
+  yv <- expectPrimVal =<< evalSubExp env y
+  case P.doCmpOp op xv yv of
+    Just result -> pure [PrimVal $ BoolValue result]
+    Nothing -> Left "invalid comparison operation"
+evalBasicOp env (ConvOp op x) = do
+  xv <- expectPrimVal =<< evalSubExp env x
+  case P.doConvOp op xv of
+    Just result -> pure [PrimVal result]
+    Nothing -> Left "invalid conversion operation"
 evalBasicOp _ _ = Left "basic operation not implemented yet"
 
 evalSOAC :: Env -> SOAC SOACS -> InterpM [Val]
@@ -121,14 +181,20 @@ fromValue (V.I32Value shape values)
   | SVec.null shape,
     [v] <- SVec.toList values =
       pure $ PrimVal $ IntValue $ Int32Value v
+fromValue (V.BoolValue shape values)
+  | SVec.null shape,
+    [v] <- SVec.toList values =
+      pure $ PrimVal $ BoolValue v
 fromValue _ =
-  Left "only scalar i32 values are currently supported"
+  Left "only scalar i32 and bool values are currently supported"
 
 toValue :: Val -> InterpM V.Value
 toValue (PrimVal (IntValue (Int32Value v))) =
   pure $ V.I32Value SVec.empty (SVec.singleton v)
+toValue (PrimVal (BoolValue v)) =
+  pure $ V.BoolValue SVec.empty (SVec.singleton v)
 toValue _ =
-  Left "only scalar i32 values are currently supported"
+  Left "only scalar i32 and bool values are currently supported"
 
 -- | Run a program in the GPU IR.
 runGPU :: Prog GPU -> Name -> [V.Value] -> Either T.Text [V.Value]
