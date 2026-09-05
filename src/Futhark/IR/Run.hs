@@ -18,7 +18,13 @@ import Futhark.IR.GPU (GPU)
 import Futhark.IR.SOACS (SOAC (Screma), SOACS)
 import Language.Futhark.Primitive qualified as P
 
-data Val = PrimVal PrimValue | ArrayValue [Val]
+data Val
+  = PrimVal PrimValue
+  | ArrayValue [Int] PrimType [PrimValue]
+
+data DimSelection
+  = Fixed Int
+  | Selected [Int]
 
 type Env = M.Map VName Val
 
@@ -85,7 +91,30 @@ evalExp funs env (Loop merge (ForLoop iterator intType boundExp) body) = do
           if length nextValues /= length mergeNames
             then Left "loop result count mismatch"
             else runIterations (iteration + 1) bound nextValues
-evalExp _ _ (Loop _ WhileLoop {} _) = Left "WhileLoop not implemented yet"
+evalExp funs env (Loop merge (WhileLoop condition) body) = do
+  initialValues <- mapM (evalSubExp env . snd) merge
+  runWhile initialValues
+  where
+    mergeNames = map (paramName . fst) merge
+
+    runWhile currentValues = do
+      let loopEnv =
+            M.union
+              (M.fromList $ zip mergeNames currentValues)
+              env
+
+      conditionValue <- evalSubExp loopEnv (Var condition)
+
+      case conditionValue of
+        PrimVal (BoolValue False) ->
+          pure currentValues
+        PrimVal (BoolValue True) -> do
+          nextValues <- evalBody funs loopEnv body
+          if length nextValues /= length mergeNames
+            then Left "loop result count mismatch"
+            else runWhile nextValues
+        _ ->
+          Left "while-loop condition is not boolean"
 evalExp funs env (Apply fname args _ _) = do
   callee <-
     maybe
@@ -110,11 +139,15 @@ evalSubExp env (Var v) =
 
 expectPrimVal :: Val -> InterpM PrimValue
 expectPrimVal (PrimVal pv) = pure pv
-expectPrimVal (ArrayValue _) = Left "expected a primitive value"
+expectPrimVal (ArrayValue _ _ _) = Left "expected a primitive value"
 
 expectInt :: PrimValue -> InterpM Int
 expectInt (IntValue i) = pure $ P.valueIntegral i
 expectInt _ = Left "expected an integer value"
+
+expectI32 :: PrimValue -> InterpM Int32
+expectI32 (IntValue (Int32Value v)) = pure v
+expectI32 _ = Left "expected an i32 value"
 
 evalBasicOp :: Env -> BasicOp -> InterpM [Val]
 evalBasicOp env (SubExp se) = pure <$> evalSubExp env se
@@ -140,7 +173,93 @@ evalBasicOp env (ConvOp op x) = do
   case P.doConvOp op xv of
     Just result -> pure [PrimVal result]
     Nothing -> Left "invalid conversion operation"
+evalBasicOp env (ArrayLit elements (Prim elementType)) = do
+  values <- mapM (evalSubExp env) elements
+  primitiveValues <- mapM expectPrimVal values
+  pure [ArrayValue [length elements] elementType primitiveValues]
+evalBasicOp _ (ArrayVal values elementType) =
+  pure [ArrayValue [length values] elementType values]
+evalBasicOp env (Assert condition _) = do
+  conditionValue <- evalSubExp env condition >>= expectPrimVal
+  case conditionValue of
+    BoolValue True -> pure [PrimVal UnitValue]
+    BoolValue False -> Left "assertion failed"
+    _ -> Left "assert condition is not boolean"
+evalBasicOp env (Index arrayName slice) = do
+  array <-
+    maybe (Left $ "unbound array: " <> prettyText arrayName) pure $
+      M.lookup arrayName env
+  case array of
+    ArrayValue shape elementType values ->
+      indexArray env shape elementType values slice
+    PrimVal _ ->
+      Left "cannot index a primitive value"
+evalBasicOp env (Reshape arrayName reshape) = do
+  array <-
+    maybe (Left $ "unbound array: " <> prettyText arrayName) pure $
+      M.lookup arrayName env
+  dimensions <-
+    mapM
+      (\subExp -> evalSubExp env subExp >>= expectPrimVal >>= expectInt)
+      (shapeDims $ newShape reshape)
+  case array of
+    ArrayValue _ elementType values
+      | product dimensions == length values ->
+          pure [ArrayValue dimensions elementType values]
+      | otherwise ->
+          Left "reshape element count mismatch"
+    PrimVal _ -> Left "cannot rehsape a primitive value"
 evalBasicOp _ _ = Left "basic operation not implemented yet"
+
+indexArray :: Env -> [Int] -> PrimType -> [PrimValue] -> Slice SubExp -> InterpM [Val]
+indexArray env shape elementType values (Slice dimensions)
+  | length shape /= length dimensions = Left "slice dimensions do not match array dimensions"
+  | otherwise = do
+      selections <- mapM evalDimension dimensions
+      mapM_ checkSelectionBounds $ zip shape selections
+
+      let resultShape = [length indices | Selected indices <- selections]
+          coordinates = sequence $ map selectionIndices selections
+          selectedValues = map (values !!) $ map (linearIndex shape) coordinates
+      case resultShape of
+        [] -> case selectedValues of
+          [val] -> pure [PrimVal val]
+          _ -> Left "invalid scalar index result"
+        _ -> pure [ArrayValue resultShape elementType selectedValues]
+  where
+    evalDimension (DimFix indexExp) =
+      Fixed <$> evalInt indexExp
+    evalDimension (DimSlice startExp countExp strideExp) = do
+      start <- evalInt startExp
+      count <- evalInt countExp
+      stride <- evalInt strideExp
+      if count < 0
+        then Left "slice length cannot be negative"
+        else
+          pure $
+            Selected
+              [start + position * stride | position <- [0 .. count - 1]]
+
+    evalInt subExp =
+      evalSubExp env subExp >>= expectPrimVal >>= expectInt
+
+    selectionIndices (Fixed index) = [index]
+    selectionIndices (Selected indices) = indices
+
+    checkSelectionBounds (dimension, Fixed index) =
+      checkIndex dimension index
+    checkSelectionBounds (dimension, Selected indices) =
+      mapM_ (checkIndex dimension) indices
+
+    checkIndex dimension index
+      | index < 0 || index >= dimension =
+          Left "array index out of bounds"
+      | otherwise =
+          pure ()
+
+linearIndex :: [Int] -> [Int] -> Int
+linearIndex shape indices =
+  foldl (\acc (dimSize, index) -> acc * dimSize + index) 0 $ zip shape indices
 
 evalSOAC :: Env -> SOAC SOACS -> InterpM [Val]
 evalSOAC _ Screma {} = Left "Screma not implemented yet"
@@ -156,10 +275,19 @@ runSOACS prog entry inputs = do
   let funs = M.fromList [(funDefName fun, fun) | fun <- progFuns prog]
   constsEnv <- foldConsts funs mempty (stmsToList (progConsts prog)) -- top-level consts
   fun <- findEntry prog entry
-  argVals <- mapM fromValue inputs
-  let env = M.union (M.fromList (zip (map paramName (funDefParams fun)) argVals)) constsEnv
-  results <- evalBody funs env (funDefBody fun)
-  mapM toValue results
+  convertedInputs <- mapM fromValue inputs
+  let shapeArgs = concatMap fst convertedInputs
+      valueArgs = map snd convertedInputs
+      argVals = shapeArgs <> valueArgs
+      params = map paramName $ funDefParams fun
+  if length params /= length argVals
+    then Left "entry point argument count mismatch"
+    else do
+      let env = M.union (M.fromList $ zip params argVals) constsEnv
+      results <- evalBody funs env (funDefBody fun)
+      case reverse results of
+        result : _ -> pure <$> toValue result
+        [] -> Left "entry point returned no values"
   where
     foldConsts _ e [] = pure e
     foldConsts funs e (s : ss) = evalStm funs e s >>= \e' -> foldConsts funs e' ss
@@ -176,15 +304,26 @@ findEntry prog name =
         Just (entryName, _, _, _) <- [funDefEntryPoint fun]
       ]
 
-fromValue :: V.Value -> InterpM Val
+fromValue :: V.Value -> InterpM ([Val], Val)
 fromValue (V.I32Value shape values)
   | SVec.null shape,
     [v] <- SVec.toList values =
-      pure $ PrimVal $ IntValue $ Int32Value v
+      pure ([], PrimVal $ IntValue $ Int32Value v)
+  | otherwise =
+      let shapeValues =
+            map
+              (PrimVal . IntValue . Int64Value . fromIntegral)
+              (SVec.toList shape)
+          array =
+            ArrayValue
+              (SVec.toList shape)
+              (IntType Int32)
+              (map (IntValue . Int32Value) $ SVec.toList values)
+       in pure (shapeValues, array)
 fromValue (V.BoolValue shape values)
   | SVec.null shape,
     [v] <- SVec.toList values =
-      pure $ PrimVal $ BoolValue v
+      pure ([], PrimVal $ BoolValue v)
 fromValue _ =
   Left "only scalar i32 and bool values are currently supported"
 
@@ -193,6 +332,12 @@ toValue (PrimVal (IntValue (Int32Value v))) =
   pure $ V.I32Value SVec.empty (SVec.singleton v)
 toValue (PrimVal (BoolValue v)) =
   pure $ V.BoolValue SVec.empty (SVec.singleton v)
+toValue (ArrayValue shape (IntType Int32) values) = do
+  values' <- mapM expectI32 values
+  pure $
+    V.I32Value
+      (SVec.fromList shape)
+      (SVec.fromList values')
 toValue _ =
   Left "only scalar i32 and bool values are currently supported"
 
