@@ -208,7 +208,32 @@ evalBasicOp env (Reshape arrayName reshape) = do
           pure [ArrayValue dimensions elementType values]
       | otherwise ->
           Left "reshape element count mismatch"
-    PrimVal _ -> Left "cannot rehsape a primitive value"
+    PrimVal _ -> Left "cannot reshape a primitive value"
+evalBasicOp env (Opaque OpaqueNil se) =
+  pure <$> evalSubExp env se
+evalBasicOp env (Opaque (OpaqueTrace _) se) =
+  pure <$> evalSubExp env se -- Perhaps include IO to print here?
+evalBasicOp env (Manifest arrayName _) =
+  case M.lookup arrayName env of
+    Just array@ArrayValue {} -> pure [array]
+    Just PrimVal {} -> Left "cannot manifest a primitive value"
+    Nothing -> Left $ "unbound array: " <> prettyText arrayName
+evalBasicOp env (Iota countSubExp strideSubExp startSubExp intType) = do
+  count <- evalSubExp env countSubExp >>= expectPrimVal >>= expectInt
+  stride <- evalSubExp env strideSubExp >>= expectPrimVal >>= expectInt
+  start <- evalSubExp env startSubExp >>= expectPrimVal >>= expectInt
+
+  if count < 0
+    then Left "iota length cannot be negative"
+    else
+      pure
+        [ ArrayValue
+            [count]
+            (IntType intType)
+            [ IntValue $ P.intValue intType (start + i * stride)
+            | i <- [0 .. count - 1]
+            ]
+        ]
 evalBasicOp _ _ = Left "basic operation not implemented yet"
 
 indexArray :: Env -> [Int] -> PrimType -> [PrimValue] -> Slice SubExp -> InterpM [Val]
