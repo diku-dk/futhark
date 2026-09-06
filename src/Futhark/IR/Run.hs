@@ -9,6 +9,8 @@
 -- Hence you should not expect programs to run fast at all.
 module Futhark.IR.Run (runSOACS, runGPU) where
 
+import Data.List qualified as L
+import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Vector.Storable qualified as SVec
@@ -218,7 +220,7 @@ evalBasicOp env (Manifest arrayName _) =
     Just array@ArrayValue {} -> pure [array]
     Just PrimVal {} -> Left "cannot manifest a primitive value"
     Nothing -> Left $ "unbound array: " <> prettyText arrayName
-evalBasicOp env (Iota countSubExp strideSubExp startSubExp intType) = do
+evalBasicOp env (Iota countSubExp startSubExp strideSubExp intType) = do
   count <- evalSubExp env countSubExp >>= expectPrimVal >>= expectInt
   stride <- evalSubExp env strideSubExp >>= expectPrimVal >>= expectInt
   start <- evalSubExp env startSubExp >>= expectPrimVal >>= expectInt
@@ -234,7 +236,115 @@ evalBasicOp env (Iota countSubExp strideSubExp startSubExp intType) = do
             | i <- [0 .. count - 1]
             ]
         ]
+evalBasicOp env (Replicate (Shape shapeExps) valExp) = do
+  dimensions <- mapM (\dim -> evalSubExp env dim >>= expectPrimVal >>= expectInt) shapeExps
+  if any (< 0) dimensions
+    then Left " replicate dimensions cannot be negative"
+    else do
+      val <- evalSubExp env valExp
+      let copies = product dimensions
+
+      case (dimensions, val) of
+        ([], _) -> pure [val]
+        (_, PrimVal primitiveValue) ->
+          pure [ArrayValue dimensions (P.primValueType primitiveValue) (replicate copies primitiveValue)]
+        (_, ArrayValue oldShape elementType values) ->
+          pure [ArrayValue (dimensions <> oldShape) elementType (concat $ replicate copies values)]
+evalBasicOp env (Rearrange arrayName permutation) = do
+  array <-
+    maybe (Left $ "unbound array: " <> prettyText arrayName) pure $
+      M.lookup arrayName env
+  case array of
+    ArrayValue oldShape elementType values
+      | not $ validPermutation (length oldShape) permutation -> Left "invalid rearrange permutation"
+      | otherwise ->
+          let newShape = map (oldShape !!) permutation
+              newCoordinates =
+                sequence [[0 .. dimension - 1] | dimension <- newShape]
+              oldCoordinate newCoordinate =
+                [newCoordinate !! position | position <- inversePermutation permutation]
+              newValues = [values !! linearIndex oldShape (oldCoordinate coordinate) | coordinate <- newCoordinates]
+           in pure [ArrayValue newShape elementType newValues]
+    PrimVal _ -> Left "cannot rearrange a primitive value"
+evalBasicOp env (Concat concatDim arrayNames resultSizeExp) = do
+  arrays <- mapM lookupArray $ NE.toList arrayNames
+  declaredSize <-
+    evalSubExp env resultSizeExp >>= expectPrimVal >>= expectInt
+
+  case arrays of
+    [] ->
+      Left "concat requires at least one array"
+    firstArray@(firstShape, elementType, _) : remaining
+      | concatDim < 0 || concatDim >= length firstShape ->
+          Left "concat dimension out of bounds"
+      | not $ all (compatible firstArray) remaining ->
+          Left "concat array shapes or element types do not match"
+      | declaredSize /= actualSize arrays ->
+          Left "concat result size mismatch"
+      | otherwise -> do
+          let resultShape =
+                replaceAt concatDim declaredSize firstShape
+              coordinates =
+                sequence [[0 .. size - 1] | size <- resultShape]
+
+          resultValues <- mapM (valueAt arrays) coordinates
+          pure [ArrayValue resultShape elementType resultValues]
+  where
+    lookupArray name =
+      case M.lookup name env of
+        Just (ArrayValue shape elementType values) ->
+          pure (shape, elementType, values)
+        Just PrimVal {} ->
+          Left "cannot concatenate a primitive value"
+        Nothing ->
+          Left $ "unbound array: " <> prettyText name
+
+    compatible (firstShape, firstType, _) (shape, elementType, _) =
+      firstType == elementType
+        && length firstShape == length shape
+        && removeAt concatDim firstShape == removeAt concatDim shape
+
+    actualSize =
+      sum . map (\(shape, _, _) -> shape !! concatDim)
+
+    valueAt arrays coordinate = do
+      let concatIndex = coordinate !! concatDim
+      (sourceShape, sourceValues, localIndex) <-
+        findSource concatIndex arrays
+
+      let sourceCoordinate =
+            replaceAt concatDim localIndex coordinate
+          offset =
+            linearIndex sourceShape sourceCoordinate
+
+      pure $ sourceValues !! offset
+
+    findSource _ [] =
+      Left "invalid concat coordinate"
+    findSource index ((shape, _, values) : arrays)
+      | index < size =
+          pure (shape, values, index)
+      | otherwise =
+          findSource (index - size) arrays
+      where
+        size = shape !! concatDim
 evalBasicOp _ _ = Left "basic operation not implemented yet"
+
+replaceAt :: Int -> a -> [a] -> [a]
+replaceAt index val xs =
+  take index xs <> [val] <> drop (index + 1) xs
+
+removeAt :: Int -> [a] -> [a]
+removeAt index xs =
+  take index xs <> drop (index + 1) xs
+
+validPermutation :: Int -> [Int] -> Bool
+validPermutation rank permutation =
+  L.sort permutation == [0 .. rank - 1]
+
+inversePermutation :: [Int] -> [Int]
+inversePermutation permutation =
+  map snd $ L.sortOn fst $ zip permutation [0 ..]
 
 indexArray :: Env -> [Int] -> PrimType -> [PrimValue] -> Slice SubExp -> InterpM [Val]
 indexArray env shape elementType values (Slice dimensions)
