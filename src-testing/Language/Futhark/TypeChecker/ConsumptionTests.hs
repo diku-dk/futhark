@@ -44,12 +44,15 @@ tests =
               )
               @?= "([2]i32, [2]i32)",
           --
+          -- An opaque value that may have internal aliasing cannot be given
+          -- a unique type.  See Note [Parametric results] in
+          -- Language.Futhark.TypeChecker.Consumption.
           testCase "opaque" $
             let t = Scalar (TypeVar Nonunique (qualName "t_2") [])
              in inferReturnUniqueness
                   [Id "n_1" (Info "i64") mempty]
                   t
-                  (second (const (S.singleton (AliasFree "y_3" []))) t)
+                  (second (const (S.singleton AliasSelf)) t)
                   @?= (t `setUniqueness` Nonunique),
           --
           testCase "*opaque" $

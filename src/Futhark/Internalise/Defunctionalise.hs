@@ -26,13 +26,15 @@ import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
 -- The Ord instance here is really important, as it is used for the memoisation
 -- machinery that handles recursive functions.
 data StaticVal
-  = Dynamic ParamType
+  = -- | A first-order value.  The uniqueness records whether the value is
+    -- freshly constructed; see Note [Dynamic diets].
+    Dynamic ResType
   | -- | The Env is the lexical closure of the lambda.
     LambdaSV (Pat ParamType) ResRetType Exp Env
   | RecordSV [(Name, StaticVal)]
   | -- | The constructor that is actually present, plus
     -- the others that are not.
-    SumSV Name [StaticVal] [(Name, [ParamType])]
+    SumSV Name [StaticVal] [(Name, [ResType])]
   | -- | The pair is the StaticVal and residual expression of this
     -- function as a whole, while the second StaticVal is its
     -- body. (Don't trust this too much, my understanding may have
@@ -487,13 +489,13 @@ defuncFun tparams pats e0 ret loc = do
 -- the associated static value in the defunctionalization monad.
 defuncExp :: Exp -> DefM (Exp, StaticVal)
 defuncExp e@Literal {} =
-  pure (e, Dynamic $ toParam Observe $ typeOf e)
+  pure (e, Dynamic $ toRes Nonunique $ typeOf e)
 defuncExp e@IntLit {} =
-  pure (e, Dynamic $ toParam Observe $ typeOf e)
+  pure (e, Dynamic $ toRes Nonunique $ typeOf e)
 defuncExp e@FloatLit {} =
-  pure (e, Dynamic $ toParam Observe $ typeOf e)
+  pure (e, Dynamic $ toRes Nonunique $ typeOf e)
 defuncExp e@StringLit {} =
-  pure (e, Dynamic $ toParam Observe $ typeOf e)
+  pure (e, Dynamic $ toRes Nonunique $ typeOf e)
 defuncExp (Parens e loc) = do
   (e', sv) <- defuncExp e
   pure (Parens e' loc, sv)
@@ -531,17 +533,17 @@ defuncExp (RecordLit fs loc) = do
                   (baseName vn, sv)
                 )
 defuncExp e@(ArrayVal vs t loc) =
-  pure (ArrayVal vs t loc, Dynamic $ toParam Observe $ typeOf e)
+  pure (ArrayVal vs t loc, Dynamic $ toRes Nonunique $ typeOf e)
 defuncExp (ArrayLit es t@(Info t') loc) = do
   es' <- mapM defuncExp' es
-  pure (ArrayLit es' t loc, Dynamic $ toParam Observe t')
+  pure (ArrayLit es' t loc, Dynamic $ toRes Nonunique t')
 defuncExp (AppExp (Range e1 me incl loc) res) = do
   e1' <- defuncExp' e1
   me' <- mapM defuncExp' me
   incl' <- mapM defuncExp' incl
   pure
     ( AppExp (Range e1' me' incl' loc) res,
-      Dynamic $ toParam Observe $ appResType $ unInfo res
+      Dynamic $ toRes Nonunique $ appResType $ unInfo res
     )
 defuncExp e@(Var qn (Info t) loc) = do
   sv <- lookupVar (toStruct t) (qualLeaf qn)
@@ -588,9 +590,9 @@ defuncExp (AppExp (LetFun vn _ _ _) _) =
   error $ "defuncExp: Unexpected LetFun: " ++ show vn
 defuncExp (AppExp (If e1 e2 e3 loc) res) = do
   (e1', _) <- defuncExp e1
-  (e2', sv) <- defuncExp e2
-  (e3', _) <- defuncExp e3
-  pure (AppExp (If e1' e2' e3' loc) res, sv)
+  (e2', sv2) <- defuncExp e2
+  (e3', sv3) <- defuncExp e3
+  pure (AppExp (If e1' e2' e3' loc) res, combineSV sv2 sv3)
 defuncExp (AppExp (Apply f args loc) (Info appres)) =
   defuncApply f (fmap (first unInfo) args) appres loc
 defuncExp (Negate e0 loc) = do
@@ -625,10 +627,13 @@ defuncExp (AppExp (Loop sparams pat loopinit form e3 loc) res) = do
       e2' <- local (second (const env1)) $ defuncExp' e2
       pure (While e2', env1)
   (e3', sv) <- local (second (const env2)) $ defuncExp e3
-  pure (AppExp (Loop sparams pat (LoopInitExplicit e1') form' e3' loc) res, sv)
+  pure
+    ( AppExp (Loop sparams pat (LoopInitExplicit e1') form' e3' loc) res,
+      combineSV sv sv1
+    )
   where
     insertIdent (Ident vn (Info tp) _) =
-      M.insert vn $ Binding Nothing $ Dynamic $ toParam Observe tp
+      M.insert vn $ Binding Nothing $ Dynamic $ toRes Nonunique tp
 defuncExp e@(AppExp BinOp {} _) =
   error $ "defuncExp: unexpected binary operator: " ++ prettyString e
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
@@ -637,7 +642,7 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
     RecordSV svs -> case lookup vn svs of
       Just sv -> pure (Project vn e0' (Info $ structTypeFromSV sv) loc, sv)
       Nothing -> error "Invalid record projection."
-    Dynamic _ -> pure (Project vn e0' tp loc, Dynamic $ toParam Observe tp')
+    Dynamic _ -> pure (Project vn e0' tp loc, Dynamic $ toRes Nonunique tp')
     HoleSV _ hloc -> pure (Project vn e0' tp loc, HoleSV tp' hloc)
     _ -> error $ "Projection of an expression with static value " ++ show sv0
 defuncExp (AppExp LetWith {} _) =
@@ -647,7 +652,7 @@ defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
   idxs' <- mapM defuncDimIndex idxs
   pure
     ( AppExp (Index e0' idxs' loc) res,
-      Dynamic $ toParam Observe $ typeOf expr
+      Dynamic $ toRes Nonunique $ typeOf expr
     )
 
 -- Note that we might change the type of the record field here.  This
@@ -688,7 +693,7 @@ defuncExp (Constr name es (Info sum_t@(Scalar (Sum all_fs))) loc) = do
   let sv =
         SumSV name svs $
           M.toList $
-            name `M.delete` M.map (map (toParam Observe . defuncType)) all_fs
+            name `M.delete` M.map (map (toRes Nonunique . defuncType)) all_fs
       sum_t' = combineTypeShapes sum_t (structTypeFromSV sv)
   pure (Constr name es' (Info sum_t') loc, sv)
   where
@@ -723,7 +728,7 @@ defuncExp (AppExp (Match e cs loc) res) = do
     fromMaybe bad . NE.nonEmpty . catMaybes
       <$> mapM (defuncCase sv) (NE.toList cs)
   let cs' = fmap fst csPairs
-      sv' = snd $ NE.head csPairs
+      sv' = foldl1 combineSV $ fmap snd csPairs
   pure (AppExp (Match e' cs' loc) res, sv')
 defuncExp (Attr info e loc) = do
   (e', sv) <- defuncExp e
@@ -846,7 +851,7 @@ defuncLet _ [] body (RetType _ rettype) = do
     ( [],
       [],
       body',
-      imposeType sv $ resToParam rettype,
+      imposeType sv rettype,
       resTypeFromSV sv
     )
   where
@@ -982,7 +987,7 @@ defuncApplyArg (fname_s, floc) (f', fsv@(LambdaSV pat lam_e_t lam_e closure_env)
       fname <- newVName fname_s
       let memo_ret = RetType (retDims lam_e_t) (retType lam_e_t)
       when is_body $
-        insertLift key (fname, memo_ret, Dynamic $ resToParam $ retType memo_ret)
+        insertLift key (fname, memo_ret, Dynamic $ retType memo_ret)
       (lam_e', sv) <-
         localNewEnv env' $
           defuncExp lam_e
@@ -992,14 +997,21 @@ defuncApplyArg (fname_s, floc) (f', fsv@(LambdaSV pat lam_e_t lam_e closure_env)
 
       globals <- asks $ M.keysSet . fst
 
-      -- Lift lambda to top-level function definition.  We put in
-      -- a lot of effort to try to infer the uniqueness attributes
-      -- of the lifted function, but this is ultimately all a sham
-      -- and a hack.  There is some piece we're missing.
+      -- Lift lambda to top-level function definition. The uniqueness of the
+      -- lifted function is inferred from the static value of the body (see Note
+      -- [Dynamic diets]), joined with what the declared type says. This may
+      -- fail in some edge cases, but I cannot think of when.
       let params = [closure_pat, pat']
+          -- The declared return type is an instantiation of the lambda's return
+          -- type, which for a polymorphic higher-order function cannot express
+          -- that the result is freshly constructed. The static value of the
+          -- body can. Neither subsumes the other, so take both. See Note
+          -- [Dynamic diets].
+          sv_rettype = resTypeFromSV sv
           lifted_rettype =
             RetType (retDims lam_e_t) $
-              combineTypeShapes (retType lam_e_t) (resTypeFromSV sv)
+              combineTypeShapes (retType lam_e_t) sv_rettype
+                `orUniqueOf` sv_rettype
 
           already_bound =
             globals <> S.fromList (dims <> foldMap patNames params)
@@ -1022,10 +1034,15 @@ defuncApplyArg (fname_s, floc) (f', fsv@(LambdaSV pat lam_e_t lam_e closure_env)
         params'
         lam_e'
 
-      insertLift key (fname, lifted_rettype, sv)
+      -- The lifted function's return type is the most we know about its
+      -- result; record that in the static value, so that a caller that in turn
+      -- lifts this very application can see it.  See Note [Dynamic diets].
+      let sv' = markFresh (retType lifted_rettype) sv
+
+      insertLift key (fname, lifted_rettype, sv')
 
       e <- mkCall fname lifted_rettype
-      pure (e, sv)
+      pure (e, sv')
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
 -- applied or return a higher-order value.
@@ -1078,7 +1095,7 @@ defuncApply f args appres loc = do
       -- immediately any time we encounter a non-fully-applied
       -- intrinsic?
       if null $ fst $ unfoldFunType $ appResType appres
-        then pure (e', Dynamic $ toParam Observe $ appResType appres)
+        then pure (e', Dynamic $ toRes Nonunique $ appResType appres)
         else do
           (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique $ typeOf e') e'
           defuncExp $ Lambda pats body Nothing (Info tp) mempty
@@ -1117,7 +1134,7 @@ envFromPat env pat = case pat of
   RecordPat fs _ -> foldl' envFromPat env $ map snd fs
   PatParens p _ -> envFromPat env p
   PatAttr _ p _ -> envFromPat env p
-  Id vn (Info t) _ -> M.insert vn (Binding Nothing $ Dynamic t) env
+  Id vn (Info t) _ -> M.insert vn (Binding Nothing $ Dynamic $ paramToRes t) env
   Wildcard _ _ -> env
   PatAscription p _ _ -> envFromPat env p
   PatLit {} -> env
@@ -1136,36 +1153,103 @@ buildEnvPat sizes env = RecordPat (map buildField $ M.toList env) mempty
           else Id vn (Info $ paramTypeFromSV sv) mempty
       )
 
+-- | Assume that nothing in this value is freshly constructed.  See Note
+-- [Dynamic diets].
+notFresh :: StaticVal -> StaticVal
+notFresh (Dynamic t) = Dynamic $ t `setUniqueness` Nonunique
+notFresh (RecordSV fs) = RecordSV $ map (fmap notFresh) fs
+notFresh (SumSV c svs fs) = SumSV c (map notFresh svs) fs
+notFresh sv = sv
+
+-- | The static value of something that may turn out to be either of these two
+-- values.  They necessarily describe the same value, so all that has to be
+-- combined is which parts are freshly constructed - and a part is, only if it
+-- is so either way.  Where we cannot line the two up, we must assume none of it
+-- is.  See Note [Dynamic diets].
+--
+-- The case that makes this necessary is the loop, which may run zero times and
+-- so produce its initial value rather than the value of its body; see
+-- tests/higher-order-functions/uniqueness12.fut.
+combineSV :: StaticVal -> StaticVal -> StaticVal
+combineSV (Dynamic t1) (Dynamic t2) =
+  Dynamic $ t1 `andUniqueOf` t2
+combineSV (RecordSV fs1) (RecordSV fs2)
+  | fs2' <- M.fromList fs2,
+    all ((`M.member` fs2') . fst) fs1 =
+      RecordSV [(f, combineSV sv1 (fs2' M.! f)) | (f, sv1) <- fs1]
+combineSV sv _ = notFresh sv
+
+-- | Record in a static value that the result it describes is freshly
+-- constructed, where the given return type says that it is.  A lifted function
+-- knows its own return type, so its callers should not have to rediscover it.
+-- See Note [Dynamic diets].
+markFresh :: ResType -> StaticVal -> StaticVal
+markFresh (Scalar (Record rfs)) (RecordSV fs)
+  | all ((`M.member` rfs) . fst) fs =
+      RecordSV [(f, markFresh (rfs M.! f) sv) | (f, sv) <- fs]
+markFresh ret (Dynamic t) = Dynamic $ t `orUniqueOf` ret
+markFresh _ sv = sv
+
+-- | The first type, but also unique wherever the second one is.  Both are
+-- sound descriptions of the same value, but each knows something the other does
+-- not; see Note [Dynamic diets].
+orUniqueOf :: ResType -> ResType -> ResType
+orUniqueOf = combineUniqueness max
+
+-- | The first type, but unique only where the second one is too.  Use this
+-- where the value must be as described on more than one path.  See Note
+-- [Dynamic diets].
+andUniqueOf :: ResType -> ResType -> ResType
+andUniqueOf = combineUniqueness min
+
+-- | Combine two types that describe the same value, component by component,
+-- with the given operator on uniqueness. A type and the representation of its
+-- static value need not have the same shape - 'typeFromSV' of a 'LambdaSV' is a
+-- record of what the closure captures - so where one side is compound and the
+-- other is not, we keep the first unchanged rather than let a summary of the
+-- whole of one side stand in for a component of the other, which would be wrong
+-- for 'max' uniqueness.
+combineUniqueness ::
+  (Uniqueness -> Uniqueness -> Uniqueness) -> ResType -> ResType -> ResType
+combineUniqueness f (Scalar (Record fs1)) (Scalar (Record fs2)) =
+  Scalar $ Record $ M.intersectionWith (combineUniqueness f) fs1 fs2
+combineUniqueness f (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
+  Scalar $ Sum $ M.intersectionWith (zipWith (combineUniqueness f)) cs1 cs2
+combineUniqueness f t1 t2
+  | compound t1 || compound t2 = t1
+  | otherwise = t1 `setUniqueness` f (uniqueness t1) (uniqueness t2)
+  where
+    compound (Scalar Record {}) = True
+    compound (Scalar Sum {}) = True
+    compound _ = False
+
 -- | Compute the corresponding type for the *representation* of a
 -- given static value (not the original possibly higher-order value).
-typeFromSV :: StaticVal -> ParamType
-typeFromSV (Dynamic tp) =
+resTypeFromSV :: StaticVal -> ResType
+resTypeFromSV (Dynamic tp) =
   tp
-typeFromSV (LambdaSV _ _ _ env) =
+resTypeFromSV (LambdaSV _ _ _ env) =
   Scalar . Record . M.fromList $
-    map (bimap (nameFromText . prettyText) (typeFromSV . bindingSV)) $
+    map (bimap (nameFromText . prettyText) (resTypeFromSV . bindingSV)) $
       M.toList env
-typeFromSV (RecordSV ls) =
-  let ts = map (fmap typeFromSV) ls
+resTypeFromSV (RecordSV ls) =
+  let ts = map (fmap resTypeFromSV) ls
    in Scalar $ Record $ M.fromList ts
-typeFromSV (DynamicFun (_, sv) _) =
-  typeFromSV sv
-typeFromSV (SumSV name svs fields) =
-  let svs' = map typeFromSV svs
+resTypeFromSV (DynamicFun (_, sv) _) =
+  resTypeFromSV sv
+resTypeFromSV (SumSV name svs fields) =
+  let svs' = map resTypeFromSV svs
    in Scalar $ Sum $ M.insert name svs' $ M.fromList fields
-typeFromSV (HoleSV t _) =
-  toParam Observe t
-typeFromSV IntrinsicSV =
+resTypeFromSV (HoleSV t _) =
+  toRes Nonunique t
+resTypeFromSV IntrinsicSV =
   error "Tried to get the type from the static value of an intrinsic."
 
-resTypeFromSV :: StaticVal -> ResType
-resTypeFromSV = paramToRes . typeFromSV
-
 structTypeFromSV :: StaticVal -> StructType
-structTypeFromSV = toStruct . typeFromSV
+structTypeFromSV = toStruct . resTypeFromSV
 
 paramTypeFromSV :: StaticVal -> ParamType
-paramTypeFromSV = typeFromSV
+paramTypeFromSV = resToParam . resTypeFromSV
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
@@ -1196,7 +1280,7 @@ matchPatSV env (Id vn (Info t) _) sv =
   -- (but probably reveals a flaw in our bookkeeping).
   pure $
     if orderZero t
-      then dim_env <> M.insert vn (Binding Nothing $ Dynamic t) env
+      then dim_env <> M.insert vn (Binding Nothing $ Dynamic $ paramToRes t) env
       else dim_env <> M.insert vn (Binding Nothing sv) env
   where
     -- Extract all sizes that are potentially bound here. This is
@@ -1224,7 +1308,7 @@ matchPatSV env (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV env pat (Dynamic t) = matchPatSV env pat $ svFromType t
-matchPatSV env pat (HoleSV t _) = matchPatSV env pat $ svFromType $ toParam Observe t
+matchPatSV env pat (HoleSV t _) = matchPatSV env pat $ svFromType $ toRes Nonunique t
 matchPatSV _ pat sv =
   error $
     "Tried to match pattern\n"
@@ -1277,7 +1361,7 @@ updatePat pat@(PatConstr c1 (Info t) ps loc) sv@(SumSV _ svs _)
 updatePat (PatConstr c1 _ ps loc) (Dynamic t) =
   PatConstr c1 (Info $ toParam Observe t) ps loc
 updatePat pat (Dynamic t) = updatePat pat (svFromType t)
-updatePat pat (HoleSV t _) = updatePat pat (svFromType $ toParam Observe t)
+updatePat pat (HoleSV t _) = updatePat pat (svFromType $ toRes Nonunique t)
 updatePat pat sv =
   error $
     "Tried to update pattern\n"
@@ -1288,7 +1372,7 @@ updatePat pat sv =
 -- | Convert a record (or tuple) type to a record static value. This
 -- is used for "unwrapping" tuples and records that are nested in
 -- 'Dynamic' static values.
-svFromType :: ParamType -> StaticVal
+svFromType :: ResType -> StaticVal
 svFromType (Scalar (Record fs)) = RecordSV . M.toList $ M.map svFromType fs
 svFromType t = Dynamic t
 
@@ -1308,7 +1392,7 @@ selfSV name params rettype
       Just $ go params
   | otherwise = Nothing
   where
-    ret_sv = Dynamic $ resToParam rettype
+    ret_sv = Dynamic rettype
     go [] = ret_sv
     go (_ : ps) =
       let inner = go ps
@@ -1495,3 +1579,50 @@ transformProg decs = modifyNameSource $ \namesrc ->
 -- such a parameter unchanged, so a lifted function containing the recursive
 -- occurrence must capture the function-typed parameter, which makes it
 -- higher-order itself - the first case above.
+
+-- Note [Dynamic diets]
+--
+-- A 'Dynamic' static value carries a 'ResType', whose uniqueness records
+-- whether the value is *freshly constructed*.
+--
+-- The same annotation means something else on a parameter: that the function
+-- may consume it. The conversion is therefore explicit at the two places where
+-- the static-value world meets the parameter world - 'paramTypeFromSV', used to
+-- build the closure record ('buildEnvPat'), and 'envFromPat', which reads a
+-- parameter pattern. The two readings agree on what matters: a function owns
+-- what it consumes, so returning a consumed parameter as a fresh result is
+-- exactly what Futhark permits.
+--
+-- This matters because the declared return type of a lifted function cannot
+-- always express what its result is. Specialising a polymorphic higher-order
+-- function gives a lifted function whose declared return type is an
+-- instantiation of a type variable - and a type variable can never be unique.
+-- So for
+--
+--   def (|>) 'a '^b (x: a) (f: a -> b) : b = f x
+--
+-- the lifted @xs |> copy@ is declared to return a non-unique array no matter
+-- what @f@ is, and the core language then has to assume its result aliases
+-- @xs@. The type checker meanwhile may conclude that the result is fresh,
+-- because parametricity tells it the result *is* @copy xs@. This can result in
+-- a lifted function with a wrong uniqueness annotation on the return type.
+--
+-- However, the static value of the body is annotated with the declared return
+-- type of whichever binding produced it ('defuncLet'), and with the return type
+-- of any lifted function it came from ('markFresh'), so @copy@'s @*t@ reaches
+-- the lift. 'lifted_rettype' therefore takes its uniqueness from there as well.
+--
+-- We cannot use just the static value, so we combine with the declared return
+-- type ('orUniqueOf'):
+--
+--   * The declared type is where freshness *enters*; the static value is used
+--     for propagation. A static value learns freshness at exactly four places,
+--     every one of which declares a return type: 'defuncLet', 'selfSV',
+--     'markFresh', and the memo entry that ties off recursion. Anything that
+--     produces a 'StructType' cannot supply it because these do not provide
+--     freshness information. Note also that 'markFresh' feeds *from*
+--     'lifted_rettype': consulting only the static value would leave freshness
+--     unable to enter at a lift at all, only to be propagated.
+--
+--   * The static value knows things the declared type does not: exactly the
+--     @|>@ case above.

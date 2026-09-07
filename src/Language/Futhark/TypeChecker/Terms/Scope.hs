@@ -14,6 +14,7 @@ module Language.Futhark.TypeChecker.Terms.Scope
     lookupOuterVal,
     initialTermScope,
     lookupQualNameEnv,
+    lookupQualNameEnvMaybe,
     typeParamIdent,
   )
 where
@@ -145,16 +146,28 @@ lookupQualNameEnv ::
   TermScope dim ->
   QualName VName ->
   TermScope dim
-lookupQualNameEnv _ scope (QualName [q] _)
-  | isIntrinsic q = scope -- Magical intrinsic module.
-lookupQualNameEnv onType scope qn@(QualName quals _) = descend scope quals
+lookupQualNameEnv onType scope qn =
+  fromMaybe (error $ "lookupQualNameEnv " <> show qn) $
+    lookupQualNameEnvMaybe onType scope qn
+
+-- | As 'lookupQualNameEnv', but 'Nothing' when the qualifiers do not name a
+-- module in this scope. Use this when the name is merely being looked up
+-- opportunistically, and so may well be one that has gone out of scope.
+lookupQualNameEnvMaybe ::
+  (StructType -> TypeBase dim NoUniqueness) ->
+  TermScope dim ->
+  QualName VName ->
+  Maybe (TermScope dim)
+lookupQualNameEnvMaybe _ scope (QualName [q] _)
+  | isIntrinsic q = Just scope -- Magical intrinsic module.
+lookupQualNameEnvMaybe onType scope (QualName quals _) = descend scope quals
   where
-    descend s [] = s
+    descend s [] = Just s
     descend s (q : qs)
       | Just (ModEnv q_env) <- M.lookup q $ scopeModTable s =
           descend (envToTermScope onType q_env) qs
       | otherwise =
-          error $ "lookupQualNameEnv " <> show qn
+          Nothing
 
 -- | An identifier corresponding to a type parameter, for size
 -- parameters, which also exist as terms.

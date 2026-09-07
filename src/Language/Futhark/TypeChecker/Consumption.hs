@@ -66,6 +66,17 @@ aliasVar AliasSelf = Nothing
 selfAliased :: Aliases -> Bool
 selfAliased = S.member AliasSelf
 
+-- | Might two values with these aliases share memory?  This is not the same
+-- question as whether the sets intersect: 'AliasSelf' denotes a property of a
+-- single value rather than a shared referent ('aliasVar' is 'Nothing' for it),
+-- so two values that both have internal aliasing are not thereby aliases of
+-- each other.  Ask this question through here rather than by comparing alias
+-- sets directly.
+overlaps :: Aliases -> Aliases -> Bool
+overlaps x y = any (`S.member` referents y) $ referents x
+  where
+    referents = S.filter (isJust . aliasVar)
+
 prettyAlias :: VName -> [Name] -> Doc ann
 prettyAlias v fs = prettyName v <> mconcat (map (("." <>) . prettyName) fs)
 
@@ -115,17 +126,24 @@ aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
 
 selfAliasType :: VName -> TypeBase Size asf -> TypeAliases
-selfAliasType v = insertSelfAliases v . second (const mempty)
+selfAliasType v = insertSelfAliases True v . unknownAliases
 
-insertSelfAliases :: VName -> TypeAliases -> TypeAliases
-insertSelfAliases v = onPath []
+-- | @insertSelfAliases functions v t@ adds an alias of @v@ to every component
+-- of @t@, noting the record path at which the component sits.  Function
+-- components are included only if @functions@: we do not track the aliases of
+-- functions bound outside the definition being checked, as they cannot alias
+-- anything we could consume.
+insertSelfAliases :: Bool -> VName -> TypeAliases -> TypeAliases
+insertSelfAliases functions v = onPath []
   where
     onPath fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
     onPath fs (Scalar st) = Scalar $ onPath' fs st
     onPath' fs (TypeVar als tn args) = TypeVar (S.insert (AliasBound v fs) als) tn args
     onPath' fs (Record ts) = Record $ M.mapWithKey (\f -> onPath (fs ++ [f])) ts
     onPath' fs (Sum cs) = Sum $ fmap (map (onPath fs)) cs
-    onPath' fs (Arrow als mn d ps rt) = Arrow (S.insert (AliasBound v fs) als) mn d ps rt
+    onPath' fs (Arrow als mn d ps rt)
+      | functions = Arrow (S.insert (AliasBound v fs) als) mn d ps rt
+      | otherwise = Arrow als mn d ps rt
     onPath' _ et@Prim {} = et
 
 updateAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
@@ -152,7 +170,10 @@ instance Functor Entry where
 data CheckEnv = CheckEnv
   { envVtable :: M.Map VName (Entry TypeAliases),
     -- | Location of the definition we are checking.
-    envLoc :: Loc
+    envLoc :: Loc,
+    -- | The declared type of a global, along with the type parameters it is
+    -- polymorphic in.  See Note [Parametric results].
+    envGlobal :: QualName VName -> Maybe ([TypeParam], StructType)
   }
 
 -- | A description of where an artificial compiler-generated
@@ -190,15 +211,20 @@ newtype CheckM a = CheckM (ReaderT CheckEnv (State CheckState) a)
       MonadState CheckState
     )
 
-runCheckM :: Loc -> CheckM a -> (a, [TypeError])
-runCheckM loc (CheckM m) =
+runCheckM ::
+  (QualName VName -> Maybe ([TypeParam], StructType)) ->
+  Loc ->
+  CheckM a ->
+  (a, [TypeError])
+runCheckM globals loc (CheckM m) =
   let (a, s) = runState (runReaderT m env) initial_state
    in (a, DL.toList (stateErrors s))
   where
     env =
       CheckEnv
         { envVtable = mempty,
-          envLoc = loc
+          envLoc = loc,
+          envGlobal = globals
         }
     initial_state =
       CheckState
@@ -251,18 +277,18 @@ uniqueReturnAliased loc =
 
 checkReturnAlias :: SrcLoc -> [Pat ParamType] -> ResType -> TypeAliases -> CheckM ()
 checkReturnAlias loc params rettp =
-  foldM_ (checkReturnAlias' params) S.empty . returnAliases rettp
+  foldM_ (checkReturnAlias' params) (mempty, mempty) . returnAliases rettp
   where
-    checkReturnAlias' params' seen (Unique, names) = do
-      when (any (`S.member` S.map snd seen) $ S.toList names) $
-        uniqueReturnAliased loc
+    -- The state is the aliases of the components seen so far: those of the
+    -- unique ones, and those of all of them.
+    checkReturnAlias' params' (uniques, seen) (Unique, names) = do
+      when (names `overlaps` seen) $ uniqueReturnAliased loc
       when (selfAliased names) $ selfAliasedReturn loc
       notAliasesParam params' $ S.fromList $ mapMaybe aliasVar $ S.toList names
-      pure $ seen `S.union` tag Unique names
-    checkReturnAlias' _ seen (Nonunique, names) = do
-      when (any (`S.member` seen) $ S.toList $ tag Unique names) $
-        uniqueReturnAliased loc
-      pure $ seen `S.union` tag Nonunique names
+      pure (uniques <> names, seen <> names)
+    checkReturnAlias' _ (uniques, seen) (Nonunique, names) = do
+      when (names `overlaps` uniques) $ uniqueReturnAliased loc
+      pure (uniques, seen <> names)
 
     notAliasesParam params' names =
       forM_ params' $ \p ->
@@ -273,8 +299,6 @@ checkReturnAlias loc params rettp =
                 returnAliased (baseName v) loc
               Nothing ->
                 pure ()
-
-    tag u = S.map (u,)
 
     returnAliases (Scalar (Record ets1)) (Scalar (Record ets2)) =
       concat $ M.elems $ M.intersectionWith returnAliases ets1 ets2
@@ -331,7 +355,7 @@ bindingPat p t = fmap (second (second (unscope (patNames p)))) . local bind
             foldr (uncurry M.insert . f) (envVtable env) (matchPat p t)
         }
       where
-        f (v, (_, als)) = (v, Consumable $ insertSelfAliases v als)
+        f (v, (_, als)) = (v, Consumable $ insertSelfAliases True v als)
 
 bindingParam :: Pat ParamType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingParam p m = do
@@ -420,15 +444,17 @@ consumeAliases loc als = do
     als' = M.fromList $ map (,loc) $ mapMaybe aliasVar $ S.toList als
 
 -- | Observe the given name here and return its aliases.
-observeVar :: Loc -> VName -> StructType -> CheckM TypeAliases
-observeVar loc v t = do
+observeVar :: Loc -> QualName VName -> StructType -> CheckM TypeAliases
+observeVar loc qv t = do
   als <-
     asks $ \env ->
-      maybe (isGlobal (envVtable env)) isLocal $
+      maybe (isGlobal env) isLocal $
         M.lookup v (envVtable env)
   checkIfConsumed loc (aliases als)
   pure als
   where
+    v = qualLeaf qv
+
     isLocal = entryAliases
 
     -- Handling globals is tricky.  For arrays and such, we do want to
@@ -439,22 +465,25 @@ observeVar loc v t = do
     -- having to plumb that all the way here, we infer that an array
     -- binding is a polymorphic instantiation if its size contains any
     -- locally bound names.
-    isGlobal vtable
-      | isInstantiation vtable t = second (const mempty) t
-      | otherwise = selfAlias $ second (const mempty) t
+    isGlobal env
+      | isInstantiation (envVtable env) t = noted env $ second (const mempty) t
+      | otherwise = noted env $ insertSelfAliases False v $ second (const mempty) t
 
     isInstantiation vtable =
       any (`M.member` vtable) . fvVars . freeInType
 
-    selfAlias = onPath []
-      where
-        onPath fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
-        onPath fs (Scalar st) = Scalar $ onPath' fs st
-        onPath' fs (TypeVar als tn args) = TypeVar (S.insert (AliasBound v fs) als) tn args
-        onPath' fs (Record ts) = Record $ M.mapWithKey (\f -> onPath (fs ++ [f])) ts
-        onPath' fs (Sum cs) = Sum $ fmap (map (onPath fs)) cs
-        onPath' _ et@Arrow {} = et
-        onPath' _ et@Prim {} = et
+    -- Note where applying this global may produce a value with internal
+    -- aliasing.  Its declared type is what makes parametricity visible; if we
+    -- cannot find it, fall back to the instantiated type, which amounts to
+    -- assuming no parametricity at all.  See Note [Parametric results].
+    noted env t'
+      | mayManufacture env = noteSelfAliases t'
+      | otherwise = t'
+
+    mayManufacture env =
+      case envGlobal env qv of
+        Just (tparams, decl) -> manufacturesAbstract tparams decl
+        Nothing -> manufacturesAbstract [] t
 
 -- Capture any newly consumed variables that occur during the provided action.
 contain :: CheckM a -> CheckM (a, Consumed)
@@ -538,7 +567,7 @@ closureAliases e body_als = do
 
 overlapCheck :: (Pretty src, Pretty ve) => Loc -> (src, TypeAliases) -> (ve, TypeAliases) -> CheckM ()
 overlapCheck loc (src, src_als) (ve, ve_als) =
-  when (any (`S.member` aliases src_als) (aliases ve_als)) $
+  when (aliases src_als `overlaps` aliases ve_als) $
     addError loc mempty $
       "Source array for in-place update"
         </> indent 2 (pretty src)
@@ -593,7 +622,7 @@ checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
 noAliases :: Exp -> CheckM (Exp, TypeAliases)
 noAliases e = do
   e' <- checkSubExps e
-  pure (e', second (const mempty) (typeOf e))
+  pure (e', unknownAliases (typeOf e))
 
 aliasParts :: TypeAliases -> [Aliases]
 aliasParts (Scalar (Record ts)) = foldMap aliasParts $ M.elems ts
@@ -603,7 +632,7 @@ noSelfAliases :: Loc -> TypeAliases -> CheckM ()
 noSelfAliases loc = foldM_ check mempty . aliasParts
   where
     check seen als = do
-      when (any (`S.member` seen) als) $
+      when (als `overlaps` seen) $
         addError loc mempty . withIndexLink "self-aliasing-arg" $
           "Argument passed for consuming parameter is self-aliased."
       pure $ als <> seen
@@ -651,12 +680,20 @@ checkArg prev p_t e = do
 -- (curried) return type is unique or primitive, as such a result is guaranteed
 -- to be freshly constructed.
 resultCanAlias :: ResType -> Bool
-resultCanAlias (Scalar (Arrow _ _ _ _ (RetType _ rt))) = resultCanAlias rt
-resultCanAlias (Scalar (Record fs)) = any resultCanAlias fs
-resultCanAlias (Scalar (Sum cs)) = any (any resultCanAlias) cs
-resultCanAlias (Scalar Prim {}) = False
-resultCanAlias (Scalar (TypeVar u _ _)) = u == Nonunique
-resultCanAlias (Array u _ _) = u == Nonunique
+resultCanAlias = anyResultComponent canAlias
+  where
+    canAlias (Scalar (TypeVar u _ _)) = u == Nonunique
+    canAlias (Array u _ _) = u == Nonunique
+    canAlias _ = False
+
+-- | Does any component of the value that this type ultimately produces satisfy
+-- the predicate?  Function types are followed to their (curried) result, as the
+-- only way to obtain a value from a function is to apply it.
+anyResultComponent :: (ResType -> Bool) -> ResType -> Bool
+anyResultComponent p (Scalar (Arrow _ _ _ _ (RetType _ t))) = anyResultComponent p t
+anyResultComponent p (Scalar (Record fs)) = any (anyResultComponent p) fs
+anyResultComponent p (Scalar (Sum cs)) = any (any (anyResultComponent p)) cs
+anyResultComponent p t = p t
 
 -- | The aliases that may show up in a *value* derived from a value of the given
 -- type. For most types this is simply the aliases of the type itself, but
@@ -682,15 +719,106 @@ derivedAliases (Scalar (Record fs)) = foldMap derivedAliases fs
 derivedAliases (Scalar (Sum cs)) = foldMap (foldMap derivedAliases) cs
 derivedAliases t = aliases t
 
--- | Applying a function that returns a non-unique abstract type yields a value
--- that may have internal aliasing, as we cannot see its representation.  This
--- does not apply to intrinsic types (notably accumulators), whose
--- representation the compiler does know, and which have no components that
--- could alias each other.
-selfAliasOf :: QualName VName -> Aliases
-selfAliasOf t
-  | isIntrinsic (qualLeaf t) = mempty
-  | otherwise = S.singleton AliasSelf
+-- | Peel the parameters off a function type, returning their types (in order)
+-- and the type of the final result.  'Nothing' for a non-function type.  This
+-- is 'unfoldFunType' except that it preserves the uniqueness of the result,
+-- which is exactly what we are asking about here.
+funParts :: TypeBase Size u -> Maybe ([StructType], ResType)
+funParts (Scalar (Arrow _ _ _ pt (RetType _ t))) = Just $ go [pt] t
+  where
+    go ps (Scalar (Arrow _ _ _ pt' (RetType _ t'))) = go (pt' : ps) t'
+    go ps t' = (reverse ps, t')
+funParts _ = Nothing
+
+-- | If the result of a function with this declared type can only be the result
+-- of applying one of its own parameters, the position of that parameter.  That
+-- is the case when the result is a type parameter which occurs in exactly one
+-- of the parameters, and there only as the result of a function: the only way
+-- to obtain a value of an unknown type is to be handed one, and no parameter
+-- but that one holds any.  See Note [Parametric results].
+resultFromParam :: [TypeParam] -> [StructType] -> ResType -> Maybe Int
+resultFromParam tparams params res
+  | Scalar (TypeVar Nonunique v _) <- res,
+    qualLeaf v `elem` [pv | TypeParamType _ pv _ <- tparams],
+    [(i, pt)] <- filter (S.member (qualLeaf v) . typeVars . snd) $ zip [0 ..] params,
+    isFunResult (qualLeaf v) pt =
+      Just i
+  | otherwise = Nothing
+  where
+    isFunResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
+    isFunResult _ _ = False
+    isResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
+    isResult v (Scalar (TypeVar _ t _)) = qualLeaf t == v
+    isResult _ _ = False
+
+-- | Refine the aliases of the result of saturating the named global with the
+-- given arguments, for when parametricity tells us that this result is really
+-- the result of applying one of those arguments, and that argument constructs
+-- its result freshly.  See Note [Parametric results].
+parametricResult ::
+  Maybe (QualName VName) ->
+  [TypeAliases] ->
+  TypeAliases ->
+  CheckM TypeAliases
+parametricResult fname args res_als = do
+  env <- ask
+  pure $ maybe res_als (setAliases res_als) $ do
+    qv <- fname
+    guard $ qualLeaf qv `M.notMember` envVtable env
+    (tparams, decl) <- envGlobal env qv
+    (param_ts, res) <- funParts decl
+    guard $ length param_ts == length args
+    arg <- (args !!) <$> resultFromParam tparams param_ts res
+    guard $ freshResult arg
+    Just $ derivedAliases arg
+  where
+    -- Only a function that produces a value that is unique all the way through
+    -- constructs that value freshly.  Requiring the result to be order zero
+    -- keeps us from claiming that a closure over the other arguments (which a
+    -- lifted type parameter may well turn out to be) aliases nothing.
+    freshResult (Scalar (Arrow _ _ _ _ (RetType _ rt))) =
+      orderZero rt && not (resultCanAlias rt)
+    freshResult _ = False
+
+-- | Can a value of this declared type produce, when its function components
+-- are applied, a value whose internal aliasing we cannot see?  That is so
+-- exactly when some component of what it produces is a non-unique abstract type
+-- that is not one of the type parameters it is polymorphic in: it must then
+-- have manufactured that value, rather than been handed it.  Intrinsic types
+-- (notably accumulators) are exempt, as the compiler does know their
+-- representation, and they have no components that could alias each other.  See
+-- Note [Parametric results].
+manufacturesAbstract :: [TypeParam] -> TypeBase Size u -> Bool
+manufacturesAbstract tparams = anyResultComponent manufactured . toRes Nonunique
+  where
+    tparams' = [v | TypeParamType _ v _ <- tparams]
+    manufactured (Scalar (TypeVar u t _)) =
+      u == Nonunique
+        && not (isIntrinsic (qualLeaf t))
+        && qualLeaf t `notElem` tparams'
+    manufactured _ = False
+
+-- | Note on every function component of a type that applying it may yield a
+-- value with internal aliasing.  See Note [Parametric results].
+noteSelfAliases :: TypeAliases -> TypeAliases
+noteSelfAliases (Scalar (Arrow als mn d pt rt)) =
+  Scalar $ Arrow (S.insert AliasSelf als) mn d pt rt
+noteSelfAliases (Scalar (Record fs)) = Scalar $ Record $ fmap noteSelfAliases fs
+noteSelfAliases (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) noteSelfAliases cs
+noteSelfAliases t = t
+
+-- | The aliases to assume for a value whose provenance we know nothing about:
+-- none at all, except that applying any function component of it may produce a
+-- value with internal aliasing.  See Note [Parametric results].
+unknownAliases :: TypeBase Size u -> TypeAliases
+unknownAliases = noteSelfAliases . second (const mempty)
+
+-- | The note for a function defined here, based on whether its body may produce
+-- a value with internal aliasing.  See Note [Parametric results].
+selfAliasesOfBody :: TypeAliases -> Aliases
+selfAliasesOfBody body_als
+  | selfAliased (aliases body_als) = S.singleton AliasSelf
+  | otherwise = mempty
 
 -- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
 -- an argument the given types to a function with the given return
@@ -705,9 +833,9 @@ returnType appres (Array Nonunique et shape) Observe arg =
 returnType _ (Scalar (TypeVar Unique t targs)) _ _ =
   Scalar $ TypeVar mempty t targs
 returnType appres (Scalar (TypeVar Nonunique t targs)) Consume _ =
-  Scalar $ TypeVar (selfAliasOf t <> appres) t targs
+  Scalar $ TypeVar appres t targs
 returnType appres (Scalar (TypeVar Nonunique t targs)) Observe arg =
-  Scalar $ TypeVar (selfAliasOf t <> appres <> derivedAliases arg) t targs
+  Scalar $ TypeVar (appres <> derivedAliases arg) t targs
 returnType appres (Scalar (Record fs)) d arg =
   Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
 returnType _ (Scalar (Prim t)) _ _ =
@@ -794,7 +922,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
               <+> dquotes (prettyName v)
               <> "."
         (cons, obs) <- get
-        unless (S.null $ aliases t `S.intersection` cons)
+        when (aliases t `overlaps` cons)
           $ lift
             . addError loop_loc mempty
             . withIndexLink "loop-parameter-aliases-other"
@@ -802,9 +930,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
             <+> dquotes (prettyName pat_v)
             <+> "aliases other consumed loop parameter."
         when
-          ( diet pat_v_t == Consume
-              && not (S.null (aliases t `S.intersection` (cons <> obs)))
-          )
+          (diet pat_v_t == Consume && aliases t `overlaps` (cons <> obs))
           $ lift . addError loop_loc mempty
           $ withIndexLink "aliases-previously-returned"
           $ "Return value for consuming loop parameter"
@@ -917,9 +1043,16 @@ checkExp :: Exp -> CheckM (Exp, TypeAliases)
 checkExp (AppExp (Apply f args loc) appres) = do
   (f', f_als) <- checkExp f
   (args', args_als) <- NE.unzip <$> checkArgs (diets $ toRes Nonunique f_als) args
-  res_als <- checkFuncall loc (fname f) f_als args_als
+  res_als <-
+    parametricResult (global f) (NE.toList args_als)
+      =<< checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
   where
+    -- Only a direct mention of a global can produce a parametric result, as
+    -- 'fname' - which is used just for diagnostics - also looks through nested
+    -- and hence unsaturated applications.
+    global (Var v _ _) = Just v
+    global _ = Nothing
     fname (Var v _ _) = Just v
     fname (AppExp (Apply e _ _) _) = fname e
     fname _ = Nothing
@@ -1007,7 +1140,9 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
     -- See Note [Global aliases and lambdas].
     als <- closureAliases funbody funbody_als
     let ret' = maybe (inferReturnUniqueness params ret funbody_als) (const ret) retdecl
-        ftype = funType params (RetType ext ret') `setAliases` als
+        ftype =
+          funType params (RetType ext ret')
+            `setAliases` (als <> selfAliasesOfBody funbody_als)
     pure ((ret', funbody'), ftype)
   (letbody', letbody_als) <- bindingFun (fst fname) ftype $ checkExp letbody
   pure
@@ -1017,11 +1152,13 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
 
 --
 checkExp (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
-  op_als <- observeVar (locOf oploc) (qualLeaf op) (unInfo opt)
+  op_als <- observeVar (locOf oploc) op (unInfo opt)
   let (_, at1) : (_, at2) : _ = fst $ unfoldFunType op_als
   (x', x_als) <- checkArg [] at1 x
   (y', y_als) <- checkArg [(x', x_als)] at2 y
-  res_als <- checkFuncall loc (Just op) op_als [x_als, y_als]
+  res_als <-
+    parametricResult (Just op) [x_als, y_als]
+      =<< checkFuncall loc (Just op) op_als [x_als, y_als]
   pure
     ( AppExp (BinOp (op, oploc) opt (x', xp) (y', yp) loc) appres,
       res_als
@@ -1037,7 +1174,9 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
     -- See Note [Global aliases and lambdas].
     als <- closureAliases e body_als
     let ret' = maybe (inferReturnUniqueness params ret body_als) (const ret) te
-        ftype = funType params (RetType ext ret') `setAliases` als
+        ftype =
+          funType params (RetType ext ret')
+            `setAliases` (als <> selfAliasesOfBody body_als)
     pure
       ( Lambda params body' te (Info (RetType ext ret')) loc,
         ftype
@@ -1047,7 +1186,7 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
 checkExp (AppExp (LetWith dst src steps ve body loc) appres) = do
   steps' <- mapM checkStep steps
   (ve', ve_als) <- checkExp ve
-  src_als <- observeVar (locOf src) (identName src) (unInfo $ identType src)
+  src_als <- observeVar (locOf src) (qualName (identName src)) (unInfo $ identType src)
 
   let hasIndex = any isIndex steps
 
@@ -1084,17 +1223,17 @@ checkExp (Update src steps ve t loc) = do
 
 -- Cases that simply propagate aliases directly.
 checkExp (Var v (Info t) loc) = do
-  als <- observeVar (locOf loc) (qualLeaf v) t
+  als <- observeVar (locOf loc) v t
   checkIfConsumed (locOf loc) (aliases als)
   pure (Var v (Info t) loc, als)
 checkExp (OpSection v (Info t) loc) = do
-  als <- observeVar (locOf loc) (qualLeaf v) t
+  als <- observeVar (locOf loc) v t
   checkIfConsumed (locOf loc) (aliases als)
   pure (OpSection v (Info t) loc, als)
 checkExp (OpSectionLeft op ftype arg arginfo retinfo loc) = do
   let (_, Info (pn, pt2)) = arginfo
       (Info ret, _) = retinfo
-  als <- observeVar (locOf loc) (qualLeaf op) (unInfo ftype)
+  als <- observeVar (locOf loc) op (unInfo ftype)
   (arg', arg_als) <- checkExp arg
   pure
     ( OpSectionLeft op ftype arg' arginfo retinfo loc,
@@ -1103,7 +1242,7 @@ checkExp (OpSectionLeft op ftype arg arginfo retinfo loc) = do
 checkExp (OpSectionRight op ftype arg arginfo retinfo loc) = do
   let (Info (pn, pt2), _) = arginfo
       Info ret = retinfo
-  als <- observeVar (locOf loc) (qualLeaf op) (unInfo ftype)
+  als <- observeVar (locOf loc) op (unInfo ftype)
   (arg', arg_als) <- checkExp arg
   pure
     ( OpSectionRight op ftype arg' arginfo retinfo loc,
@@ -1111,7 +1250,7 @@ checkExp (OpSectionRight op ftype arg arginfo retinfo loc) = do
     )
 checkExp (UpdateSection steps t loc) = do
   steps' <- mapM checkStep steps
-  pure (UpdateSection steps' t loc, unInfo t `setAliases` mempty)
+  pure (UpdateSection steps' t loc, unknownAliases (unInfo t))
   where
     checkStep (UpdateStepField f) = pure $ UpdateStepField f
     checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
@@ -1171,7 +1310,7 @@ checkExp (RecordLit fs loc) = do
       (e', e_als) <- checkExp e
       pure (RecordFieldExplicit name e' floc, (unLoc name, e_als))
     checkField (RecordFieldImplicit name t floc) = do
-      name_als <- observeVar (locOf floc) (unLoc name) $ unInfo t
+      name_als <- observeVar (locOf floc) (qualName (unLoc name)) $ unInfo t
       pure (RecordFieldImplicit name t floc, (baseName (unLoc name), name_als))
 
 -- Cases that create alias-free values.
@@ -1208,9 +1347,12 @@ checkGlobalAliases loc params body_t = do
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be more unique than previously.
 checkValDef ::
+  -- | The declared type of any global, along with the type parameters it is
+  -- polymorphic in.  See Note [Parametric results].
+  (QualName VName -> Maybe ([TypeParam], StructType)) ->
   (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Exp VName), SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
-checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (locOf loc) $ do
+checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM globals (locOf loc) $ do
   fmap fst . bindingParams params $ do
     (body', body_als) <- checkExp body
     checkReturnAlias loc params ret body_als
@@ -1293,3 +1435,97 @@ checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (l
 -- the type system justifies - requires defunctionalisation to preserve the
 -- knowledge that the lifted function returns a fresh value. See the comment on
 -- 'lifted_rettype' in Futhark.Internalise.Defunctionalise.
+
+-- Note [Parametric results]
+--
+-- The type system cannot talk about a value that aliases *itself*: a value
+-- that is, behind an abstraction boundary, a pair of arrays that are really the
+-- same array.  Such a value can never be consumed, nor given a unique type.
+-- 'AliasSelf' stands for that possibility.  It is not an alias of any variable
+-- ('aliasVar' is 'Nothing' for it), so it must never be mistaken for one; ask
+-- "might these two values share memory?" through 'overlaps' rather than by
+-- comparing alias sets directly.
+--
+-- Parametricity is what tells us where such a value can, and cannot, have come
+-- from.  It answers two separate questions.
+--
+-- ## Which functions may manufacture
+--
+-- The crude answer - a value has internal aliasing whenever it is produced by
+-- applying a function whose result type is a non-unique abstract type - is
+-- sound but far too coarse.  It refuses
+--
+--   module pm (M: {type t}) = {
+--     def f (x: *M.t) : *M.t = id x
+--   }
+--
+-- because @id@ is instantiated at @M.t -> M.t@.  But @id@ manufactures
+-- nothing: its declared type @a -> a@ means, by parametricity, that what it
+-- returns *is* its argument, whose aliases we already track.
+--
+-- So the property is about the *declared* type: a function can only manufacture
+-- an abstract value if its result mentions an abstract type that is not one of
+-- its own type parameters ('manufacturesAbstract').  This is not the same as
+-- "the abstract type also occurs in a parameter": a monomorphic @f: M.t -> M.t@
+-- inside a module might well be @\_ -> M.mk 5@, so its type tells us nothing
+-- (tests/uniqueness/uniqueness-error75.fut).  Only genuine polymorphism does.
+--
+-- Consumption checking sees only instantiated types, so the declared type is
+-- looked up when a name is mentioned ('envGlobal', consulted by 'observeVar')
+-- and the answer recorded in the type as an 'AliasSelf' on each function
+-- component ('noteSelfAliases').  From there ordinary alias propagation carries
+-- it: through binding, so @let my_mk = M.mk in my_mk n@ still manufactures;
+-- through 'returnType', so partial application does not lose it; and through
+-- 'derivedAliases', so @n |> M.mk@ manufactures even though @|>@ itself does
+-- not.  No arity bookkeeping is needed, because the note means the same thing
+-- at every arity: on a function, "applying this may yield an internally-aliased
+-- value", and on a value, "this may have internal aliasing".  'returnType'
+-- moves between the two readings for free as the result stops being an arrow.
+--
+-- Because the note is a "may", anything whose provenance we cannot see must
+-- carry it, or we would promise something we have not checked.  Hence
+-- 'unknownAliases', used for parameters ('selfAliasType') and for any type we
+-- build out of thin air, and hence 'selfAliasesOfBody' for functions defined
+-- here.  Alias sets are joined by union throughout this module, and a union of
+-- "may" is again a "may", so the lattice works out.
+--
+-- ## Where a result must have come from
+--
+-- Parametricity also says where a result came from, and not just whether it was
+-- manufactured.  In
+--
+--   def (|>) '^a '^b (x: a) (f: a -> b) : b = f x
+--
+-- the result is a type parameter that occurs in exactly one of the parameters,
+-- and there only as the result of a function.  The only way to obtain a value
+-- of an unknown type is to be handed one, and no parameter but @f@ holds any,
+-- so the result of @|>@ is necessarily the result of applying @f@
+-- ('resultFromParam').
+--
+-- What that buys is freshness.  The result of @|>@ is *not* independent of @x@:
+-- @f@ may well return its own argument, which is why @flatten A |> unflatten@
+-- must keep aliasing @A@.  But when @f@'s own return type is unique - as for
+-- @copy: t -> *t@, visible at the call site because an arrow's return slot is a
+-- 'RetTypeBase' 'Uniqueness' regardless of the enclosing annotation - the value
+-- it returns is freshly constructed, and so is the result of the pipeline.  So
+-- @xs |> copy@ aliases only what applying @copy@ would, which is
+-- 'derivedAliases' of @copy@ itself.  This removes a long-standing wart: the
+-- documented advice to "use copy to break the aliasing" did not work in
+-- pipeline position.
+--
+-- Unlike the first question, this one is decided at the application site
+-- ('parametricResult'), where the whole application is at hand: the global must
+-- be mentioned directly and be saturated.  Letting it travel with a function
+-- value instead - so that @let p = (|>) in xs `p` copy@ also worked - would
+-- mean tracking it through partial application, closures and branches, which is
+-- a great deal of machinery for a case nobody writes.  The result is restricted
+-- to be order-zero for the same reason: @f x@ where @b@ is itself a function
+-- type is a closure over @x@, and saying that it aliases only @f@ would be
+-- wrong.
+--
+-- This half relies on defunctionalisation agreeing.  A lifted @|>@ is declared
+-- to return an instantiation of @b@, which cannot be unique, so the core
+-- language would otherwise assume its result aliases @xs@ and reject the type
+-- inferred here.  See Note [Dynamic diets] in Futhark.Internalise.Defunctionalise
+-- for how the lifted function recovers the uniqueness it already had.  Neither
+-- half is any use without the other.
