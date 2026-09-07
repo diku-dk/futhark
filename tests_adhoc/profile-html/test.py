@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 import json
-import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -76,7 +75,7 @@ class ProfileHtmlTests(unittest.TestCase):
         original = json.dumps(payload, ensure_ascii=False)
         path.write_text(original, encoding="utf-8")
         run = subprocess.run(
-            [os.environ.get("FUTHARK", "futhark"), "profile", str(path)],
+            ["futhark", "profile", str(path)],
             cwd=self.root,
             check=True,
             capture_output=True,
