@@ -179,6 +179,45 @@ evalBasicOp env (ArrayLit elements (Prim elementType)) = do
   values <- mapM (evalSubExp env) elements
   primitiveValues <- mapM expectPrimVal values
   pure [ArrayValue [length elements] elementType primitiveValues]
+evalBasicOp env (ArrayLit elements (Array elementType (Shape rowShapeExps) _)) = do
+  expectedRowShape <-
+    mapM
+      ( \dimension ->
+          evalSubExp env dimension >>= expectPrimVal >>= expectInt
+      )
+      rowShapeExps
+
+  if any (< 0) expectedRowShape
+    then Left "array literal dimensions cannot be negative"
+    else do
+      rows <- mapM (evalSubExp env) elements
+      rowValues <- mapM (expectRow expectedRowShape elementType) rows
+
+      pure
+        [ ArrayValue
+            (length elements : expectedRowShape)
+            elementType
+            (concat rowValues)
+        ]
+  where
+    expectRow
+      expectedShape
+      expectedType
+      (ArrayValue actualShape actualType values)
+        | actualShape /= expectedShape =
+            Left "array literal row shape mismatch"
+        | actualType /= expectedType =
+            Left "array literal row element type mismatch"
+        | length values /= product actualShape =
+            Left "invalid array literal row storage"
+        | otherwise =
+            pure values
+    expectRow _ _ PrimVal {} =
+      Left "expected an array-valued row"
+evalBasicOp _ (ArrayLit _ Acc {}) =
+  Left "accumulator array literals are not implemented"
+evalBasicOp _ (ArrayLit _ Mem {}) =
+  Left "memory array literals are unsupported in SOACS"
 evalBasicOp _ (ArrayVal values elementType) =
   pure [ArrayValue [length values] elementType values]
 evalBasicOp env (Assert condition _) = do
@@ -355,7 +394,125 @@ evalBasicOp env (Update _ arrayName slice valueExp) = do
               (zip offsets replacementValues)
 
       pure [ArrayValue shape elementType newValues]
+evalBasicOp env (FlatIndex arrayName flatSlice) = do
+  array <-
+    maybe
+      (Left $ "unbound array: " <> prettyText arrayName)
+      pure
+      (M.lookup arrayName env)
+
+  (resultShape, offsets) <- evalFlatSlice env flatSlice
+
+  case array of
+    ArrayValue [_] elementType values
+      | any (not . validOffset values) offsets ->
+          Left "flat index out of bounds"
+      | null resultShape ->
+          case offsets of
+            [offset] -> pure [PrimVal $ values !! offset]
+            _ -> Left "invalid scalar flat index"
+      | otherwise ->
+          pure
+            [ ArrayValue
+                resultShape
+                elementType
+                [values !! offset | offset <- offsets]
+            ]
+    ArrayValue _ _ _ ->
+      Left "flat index source must be one-dimensional"
+    PrimVal {} ->
+      Left "cannot flat-index a primitive value"
+  where
+    validOffset values offset =
+      offset >= 0 && offset < length values
+evalBasicOp env (FlatUpdate sourceName flatSlice replacementName) = do
+  source <-
+    maybe
+      (Left $ "unbound array: " <> prettyText sourceName)
+      pure
+      (M.lookup sourceName env)
+  replacement <-
+    maybe
+      (Left $ "unbound replacement: " <> prettyText sourceName)
+      pure
+      (M.lookup replacementName env)
+  (replacementShape, offsets) <- evalFlatSlice env flatSlice
+  case source of
+    ArrayValue sourceShape@[_] sourceType sourceValues -> do
+      replacementValues <-
+        valuesForReplacement sourceType replacementShape replacement
+
+      if any (not . validOffset sourceValues) offsets
+        then Left "flat update out of bounds"
+        else
+          pure
+            [ ArrayValue
+                sourceShape
+                sourceType
+                ( foldl applyUpdate sourceValues $
+                    zip offsets replacementValues
+                )
+            ]
+    ArrayValue _ _ _ ->
+      Left "flat update source must be one-dimensional"
+    PrimVal {} ->
+      Left "cannot flat-update a primitive value"
+  where
+    validOffset values offset =
+      offset >= 0 && offset < length values
+
+    applyUpdate values (offset, val) =
+      replaceAt offset val values
+
+    valuesForReplacement expectedType [] (PrimVal val)
+      | P.primValueType val == expectedType =
+          pure [val]
+      | otherwise =
+          Left "flat update element type mismatch"
+    valuesForReplacement
+      expectedType
+      expectedShape
+      (ArrayValue actualShape actualType values)
+        | actualShape /= expectedShape =
+            Left "flat update replacement shape mismatch"
+        | actualType /= expectedType =
+            Left "flat update element type mismatch"
+        | otherwise =
+            pure values
+    valuesForReplacement _ _ _ =
+      Left "invalid flat update replacement"
+evalBasicOp env (Scratch elementType dimensionExps) = do
+  dimensions <-
+    mapM (\dimensionExp -> evalSubExp env dimensionExp >>= expectPrimVal >>= expectInt) dimensionExps
+  if any (< 0) dimensions
+    then Left "scratch dimensions cannot be negative"
+    else
+      let elementCount = product dimensions
+          blankValue = P.blankPrimValue elementType
+       in pure [ArrayValue dimensions elementType (replicate elementCount blankValue)]
+evalBasicOp env (UserParam _ defaultSubExp) =
+  pure <$> evalSubExp env defaultSubExp
 evalBasicOp _ _ = Left "basic operation not implemented yet"
+
+evalFlatSlice :: Env -> FlatSlice SubExp -> InterpM ([Int], [Int])
+evalFlatSlice env (FlatSlice offsetExp dimensions) = do
+  offset <- evalInt offsetExp
+  evaluatedDimensions <- mapM evalDimension dimensions
+
+  let resultShape = map fst evaluatedDimensions
+      strides = map snd evaluatedDimensions
+      coordinates = sequence [[0 .. size - 1] | size <- resultShape]
+      offsets = [offset + sum (zipWith (*) coordinate strides) | coordinate <- coordinates]
+  if any (< 0) resultShape
+    then Left "flat slice dimensions cannot be negative"
+    else pure (resultShape, offsets)
+  where
+    evalInt subExp = evalSubExp env subExp >>= expectPrimVal >>= expectInt
+
+    evalDimension (FlatDimIndex sizeExp strideExp) = do
+      size <- evalInt sizeExp
+      stride <- evalInt strideExp
+      pure (size, stride)
 
 replaceAt :: Int -> a -> [a] -> [a]
 replaceAt index val xs =
