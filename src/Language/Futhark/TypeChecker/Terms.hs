@@ -493,7 +493,15 @@ checkExp (AppExp (Apply fe args loc) _) = do
           _ -> Nothing
   ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
 
-  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
+  -- Record in the type of the function what parametricity tells us about the
+  -- freshness of the result; see 'freshenParametricResult'.
+  fe'' <- case fe' of
+    Var qn (Info ft) feloc -> do
+      ft' <- freshenParametricResult qn ft $ map (Just . typeOf) $ NE.toList args'
+      pure $ Var qn (Info ft') feloc
+    _ -> pure fe'
+
+  pure $ AppExp (Apply fe'' args'' loc) $ Info $ AppRes rt exts
   where
     onArg fname (i, all_exts, t) arg' = do
       (_, rt, argext, exts) <- checkApply loc (fname, i) t arg'
@@ -510,11 +518,13 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
   (_, rt, p1_ext, _) <- checkApply loc (Just op, 0) ftype e1'
   (_, rt', p2_ext, retext) <- checkApply loc (Just op, 1) rt e2'
 
+  ftype' <- freshenParametricResult op ftype [Just $ typeOf e1', Just $ typeOf e2']
+
   pure $
     AppExp
       ( BinOp
           (op, oploc)
-          (Info ftype)
+          (Info ftype')
           (e1', Info p1_ext)
           (e2', Info p2_ext)
           loc
@@ -730,8 +740,9 @@ checkExp (OpSection op (Info op_t) loc) = do
   ftype <- lookupVar loc op op_t
   pure $ OpSection op (Info ftype) loc
 checkExp (OpSectionLeft op (Info op_t) e _ _ loc) = do
-  ftype <- lookupVar loc op op_t
+  ftype0 <- lookupVar loc op op_t
   e' <- checkExp e
+  ftype <- freshenParametricResult op ftype0 [Just $ typeOf e', Nothing]
   (t1, rt, argext, retext) <- checkApply loc (Just op, 0) ftype e'
   case (ftype, rt) of
     (Scalar (Arrow _ m1 d1 _ _), Scalar (Arrow _ m2 d2 t2 (RetType ds rt2))) ->
@@ -747,8 +758,9 @@ checkExp (OpSectionLeft op (Info op_t) e _ _ loc) = do
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
 checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
-  ftype <- lookupVar loc op op_t
+  ftype0 <- lookupVar loc op op_t
   e' <- checkExp e
+  ftype <- freshenParametricResult op ftype0 [Nothing, Just $ typeOf e']
   case ftype of
     Scalar (Arrow _ m1 d1 t1 (RetType [] (Scalar (Arrow _ m2 d2 t2 (RetType dims2 ret))))) -> do
       (t2', arrow', argext, _) <-
@@ -979,6 +991,98 @@ dimUses = flip execState mempty . traverseDims f
         PosReturn -> pure ()
       where
         fv = freeInExp e `freeWithout` bound
+
+-- | If parametricity tells us that the result of applying this global can only
+-- be the result of applying one of its own arguments, and that argument
+-- constructs its result freshly, then say so in the instantiated type.  See
+-- Note [Parametric freshness].
+--
+-- The arguments are those of the application, in order, and 'Nothing' for any
+-- that is not known - an operator section knows only one of its operands.
+freshenParametricResult ::
+  QualName VName -> StructType -> [Maybe StructType] -> TermTypeM StructType
+freshenParametricResult qn ftype argtypes = do
+  globals <- declaredTypes
+  pure $ fromMaybe ftype $ do
+    (tparams, decl) <- globals qn
+    (param_ts, res) <- funParts decl
+    guard $ length param_ts == length argtypes
+    i <- resultFromParam tparams param_ts res
+    x <- case res of
+      Scalar (TypeVar _ v _) -> Just $ qualLeaf v
+      _ -> Nothing
+    argtype <- argtypes !! i
+    guard $ constructsFresh argtype
+    Just $ freshenOccurrences x decl ftype
+
+-- | Peel the parameters off a function type, returning their types (in order)
+-- and the type of the final result.  'Nothing' for a non-function type.  This
+-- is 'unfoldFunType' except that it preserves the freshness of the result,
+-- which is exactly what we are asking about here.
+funParts :: TypeBase Size u -> Maybe ([StructType], ResType)
+funParts (Scalar (Arrow _ _ _ pt (RetType _ t))) = Just $ go [pt] t
+  where
+    go ps (Scalar (Arrow _ _ _ pt' (RetType _ t'))) = go (pt' : ps) t'
+    go ps t' = (reverse ps, t')
+funParts _ = Nothing
+
+-- | If the result of a function with this declared type can only be the result
+-- of applying one of its own parameters, the position of that parameter.  That
+-- is the case when the result is a type parameter which occurs in exactly one
+-- of the parameters, and there only as the result of a function: the only way
+-- to obtain a value of an unknown type is to be handed one, and no parameter
+-- but that one holds any.
+resultFromParam :: [TypeParam] -> [StructType] -> ResType -> Maybe Int
+resultFromParam tparams params res
+  | Scalar (TypeVar Nonunique v _) <- res,
+    qualLeaf v `elem` [pv | TypeParamType _ pv _ <- tparams],
+    [(i, pt)] <- filter (S.member (qualLeaf v) . typeVars . snd) $ zip [0 ..] params,
+    isFunResult (qualLeaf v) pt =
+      Just i
+  | otherwise = Nothing
+  where
+    isFunResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
+    isFunResult _ _ = False
+    isResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
+    isResult v (Scalar (TypeVar _ t _)) = qualLeaf t == v
+    isResult _ _ = False
+
+-- | Does applying this function construct its result freshly?  That is so when
+-- every part of its (curried) result is fresh or primitive.  Requiring the
+-- result to be order zero keeps us from claiming that a closure over the other
+-- arguments aliases nothing.
+constructsFresh :: TypeBase Size u -> Bool
+constructsFresh t
+  | Just (_, rt) <- funParts t = orderZero rt && allFresh rt
+  | otherwise = False
+  where
+    allFresh (Scalar (Record fs)) = all allFresh fs
+    allFresh (Scalar (Sum cs)) = all (all allFresh) cs
+    allFresh (Scalar Prim {}) = True
+    allFresh (Scalar (TypeVar u _ _)) = u == Unique
+    allFresh (Array u _ _) = u == Unique
+    allFresh (Scalar Arrow {}) = False
+
+-- | Mark as fresh every return-type slot that the declared type fills with the
+-- given type parameter.  Both the result of the function and the result of the
+-- parameter it came from must say so, or the instantiation would not be
+-- well-typed.
+freshenOccurrences :: VName -> StructType -> StructType -> StructType
+freshenOccurrences x = onStruct
+  where
+    onStruct
+      (Scalar (Arrow _ _ _ sa (RetType _ sr)))
+      (Scalar (Arrow u pn d ta (RetType ext tr))) =
+        Scalar $ Arrow u pn d (onStruct sa ta) $ RetType ext (onRes sr tr)
+    onStruct _ t = t
+
+    onRes (Scalar (TypeVar _ v _)) tr
+      | qualLeaf v == x = tr `setUniqueness` Unique
+    onRes
+      (Scalar (Arrow _ _ _ sa (RetType _ sr)))
+      (Scalar (Arrow u pn d ta (RetType ext tr))) =
+        Scalar $ Arrow u pn d (onStruct sa ta) $ RetType ext (onRes sr tr)
+    onRes _ tr = tr
 
 checkApply ::
   SrcLoc ->
@@ -2253,3 +2357,79 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 --
 -- Only top-level self-recursion is handled. Mutual recursion and local
 -- (let-bound) recursion are not.
+
+-- Note [Parametric freshness]
+--
+-- Consider
+--
+--   def (|>) 'a '^b (x: a) (f: a -> b) : b = f x
+--
+-- The result of @|>@ is a type parameter that occurs in exactly one of the
+-- parameters, and there only as the result of a function. The only way to
+-- obtain a value of an unknown type is to be handed one, and no parameter but
+-- @f@ holds any, so the result of @|>@ is necessarily the result of applying
+-- @f@ ('resultFromParam'). When @f@ in addition constructs its result freshly -
+-- as @copy: t -> *t@ does - so does the application.
+--
+-- We record that in the *instantiated* type of @|>@ at the use site, which
+-- becomes
+--
+--   (x: []i32) -> (f: []i32 -> *[]i32) -> *[]i32
+--
+-- Both slots must be marked, not just the result: the monomorphic instance
+-- generated for this type has body @f x@, which would not justify a fresh
+-- result if @f@ were still declared to return a nonfresh one.
+--
+-- ## Why this is decided at the application
+--
+-- The property is not a property of @|>@, nor of its instantiation at a given
+-- type: @xs |> copy@ is fresh and @xs |> id@ is not, at the very same
+-- instantiation. It is a property of the *application*, because the freshness
+-- comes from the argument. So it cannot be settled at an occurrence of the
+-- variable - a bare @let p = (|>)@ has no arguments to be fresh - and every
+-- form that applies a function must ask: 'Apply', 'BinOp', and the two operator
+-- sections, which know only one of their operands and so pass 'Nothing' for the
+-- other. This is also why the unsized checker cannot help: freshness is not
+-- part of its solution, and 'instTyVars' takes uniqueness from the declared
+-- scheme.
+--
+-- ## This is a syntactic condition, and that is a wart
+--
+-- Which parameter a type variable came from is a fact about the declared
+-- scheme, and the instantiated type does not record it. We recover it by
+-- looking at the syntax: the applied expression must be a direct mention of a
+-- named global. So semantically equal programs are treated differently -
+--
+--   xs |> copy      -- fresh
+--   (|>) xs copy    -- not fresh
+--   (app) xs copy   -- not fresh, where app is the same function
+--
+-- - and the refinement is lost by anything that obscures the head, including
+-- parentheses and @let@. This is never *wrong*, only conservative: a spelling
+-- we do not recognise yields the type we would have inferred anyway. Do not add
+-- tests pinning the conservative answers; they are not intended behaviour.
+--
+-- Doing better means carrying the link in the type, so that unification against
+-- the argument resolves it - the return slot would hold a type variable that
+-- phase 2 associates with a freshness, in the way it already associates
+-- instantiated sizes with 'InstSize' and 'CopySize'. That is the right shape,
+-- but note that every 'Constraint' in phase 2 is currently a *size*: types are
+-- fully solved by the unsized checker (see Note [Size Inference]), so this
+-- would give the pass its first non-size unknown, with its own resolution and
+-- defaulting, and a leaked marker would be a wrong type rather than a
+-- conservative one. Judged not worth it for one idiom, but nothing here
+-- prevents it: 'resultFromParam' and 'constructsFresh' are the same predicates
+-- either way, and 'freshenFromInst' in Futhark.Internalise.Monomorphise is
+-- needed either way. Only 'freshenOccurrences' and its four call sites would
+-- go.
+--
+-- ## What this buys, and where it lands
+--
+-- Recording the conclusion in the type means every later pass gets it for free.
+-- The monomorphiser keys instances on the type, so @xs |> copy@ and @xs |> id@
+-- become distinct instances, and 'freshenFromInst' in
+-- Futhark.Internalise.Monomorphise carries the freshness into the generated
+-- definition. Defunctionalisation then reads a lifted return type that is
+-- already correct, and consumption checking sees a fresh result through the
+-- ordinary rule for applying a function with a unique return type - no special
+-- case in any of them.

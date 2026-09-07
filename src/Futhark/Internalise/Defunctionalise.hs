@@ -26,8 +26,9 @@ import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
 -- The Ord instance here is really important, as it is used for the memoisation
 -- machinery that handles recursive functions.
 data StaticVal
-  = -- | A first-order value.  The uniqueness records whether the value is
-    -- freshly constructed; see Note [Dynamic diets].
+  = -- | A first-order value.  The uniqueness slot is meaningful only where the
+    -- value is used as a parameter, and is converted at those boundaries; see
+    -- 'paramTypeFromSV'.
     Dynamic ResType
   | -- | The Env is the lexical closure of the lambda.
     LambdaSV (Pat ParamType) ResRetType Exp Env
@@ -590,9 +591,9 @@ defuncExp (AppExp (LetFun vn _ _ _) _) =
   error $ "defuncExp: Unexpected LetFun: " ++ show vn
 defuncExp (AppExp (If e1 e2 e3 loc) res) = do
   (e1', _) <- defuncExp e1
-  (e2', sv2) <- defuncExp e2
-  (e3', sv3) <- defuncExp e3
-  pure (AppExp (If e1' e2' e3' loc) res, combineSV sv2 sv3)
+  (e2', sv) <- defuncExp e2
+  (e3', _) <- defuncExp e3
+  pure (AppExp (If e1' e2' e3' loc) res, sv)
 defuncExp (AppExp (Apply f args loc) (Info appres)) =
   defuncApply f (fmap (first unInfo) args) appres loc
 defuncExp (Negate e0 loc) = do
@@ -627,10 +628,7 @@ defuncExp (AppExp (Loop sparams pat loopinit form e3 loc) res) = do
       e2' <- local (second (const env1)) $ defuncExp' e2
       pure (While e2', env1)
   (e3', sv) <- local (second (const env2)) $ defuncExp e3
-  pure
-    ( AppExp (Loop sparams pat (LoopInitExplicit e1') form' e3' loc) res,
-      combineSV sv sv1
-    )
+  pure (AppExp (Loop sparams pat (LoopInitExplicit e1') form' e3' loc) res, sv)
   where
     insertIdent (Ident vn (Info tp) _) =
       M.insert vn $ Binding Nothing $ Dynamic $ toRes Nonunique tp
@@ -728,7 +726,7 @@ defuncExp (AppExp (Match e cs loc) res) = do
     fromMaybe bad . NE.nonEmpty . catMaybes
       <$> mapM (defuncCase sv) (NE.toList cs)
   let cs' = fmap fst csPairs
-      sv' = foldl1 combineSV $ fmap snd csPairs
+      sv' = snd $ NE.head csPairs
   pure (AppExp (Match e' cs' loc) res, sv')
 defuncExp (Attr info e loc) = do
   (e', sv) <- defuncExp e
@@ -997,21 +995,14 @@ defuncApplyArg (fname_s, floc) (f', fsv@(LambdaSV pat lam_e_t lam_e closure_env)
 
       globals <- asks $ M.keysSet . fst
 
-      -- Lift lambda to top-level function definition. The uniqueness of the
-      -- lifted function is inferred from the static value of the body (see Note
-      -- [Dynamic diets]), joined with what the declared type says. This may
-      -- fail in some edge cases, but I cannot think of when.
+      -- Lift lambda to top-level function definition.  We put in
+      -- a lot of effort to try to infer the uniqueness attributes
+      -- of the lifted function, but this is ultimately all a sham
+      -- and a hack.  There is some piece we're missing.
       let params = [closure_pat, pat']
-          -- The declared return type is an instantiation of the lambda's return
-          -- type, which for a polymorphic higher-order function cannot express
-          -- that the result is freshly constructed. The static value of the
-          -- body can. Neither subsumes the other, so take both. See Note
-          -- [Dynamic diets].
-          sv_rettype = resTypeFromSV sv
           lifted_rettype =
             RetType (retDims lam_e_t) $
-              combineTypeShapes (retType lam_e_t) sv_rettype
-                `orUniqueOf` sv_rettype
+              combineTypeShapes (retType lam_e_t) (resTypeFromSV sv)
 
           already_bound =
             globals <> S.fromList (dims <> foldMap patNames params)
@@ -1034,15 +1025,10 @@ defuncApplyArg (fname_s, floc) (f', fsv@(LambdaSV pat lam_e_t lam_e closure_env)
         params'
         lam_e'
 
-      -- The lifted function's return type is the most we know about its
-      -- result; record that in the static value, so that a caller that in turn
-      -- lifts this very application can see it.  See Note [Dynamic diets].
-      let sv' = markFresh (retType lifted_rettype) sv
-
-      insertLift key (fname, lifted_rettype, sv')
+      insertLift key (fname, lifted_rettype, sv)
 
       e <- mkCall fname lifted_rettype
-      pure (e, sv')
+      pure (e, sv)
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
 -- applied or return a higher-order value.
@@ -1153,76 +1139,6 @@ buildEnvPat sizes env = RecordPat (map buildField $ M.toList env) mempty
           else Id vn (Info $ paramTypeFromSV sv) mempty
       )
 
--- | Assume that nothing in this value is freshly constructed.  See Note
--- [Dynamic diets].
-notFresh :: StaticVal -> StaticVal
-notFresh (Dynamic t) = Dynamic $ t `setUniqueness` Nonunique
-notFresh (RecordSV fs) = RecordSV $ map (fmap notFresh) fs
-notFresh (SumSV c svs fs) = SumSV c (map notFresh svs) fs
-notFresh sv = sv
-
--- | The static value of something that may turn out to be either of these two
--- values.  They necessarily describe the same value, so all that has to be
--- combined is which parts are freshly constructed - and a part is, only if it
--- is so either way.  Where we cannot line the two up, we must assume none of it
--- is.  See Note [Dynamic diets].
---
--- The case that makes this necessary is the loop, which may run zero times and
--- so produce its initial value rather than the value of its body; see
--- tests/higher-order-functions/uniqueness12.fut.
-combineSV :: StaticVal -> StaticVal -> StaticVal
-combineSV (Dynamic t1) (Dynamic t2) =
-  Dynamic $ t1 `andUniqueOf` t2
-combineSV (RecordSV fs1) (RecordSV fs2)
-  | fs2' <- M.fromList fs2,
-    all ((`M.member` fs2') . fst) fs1 =
-      RecordSV [(f, combineSV sv1 (fs2' M.! f)) | (f, sv1) <- fs1]
-combineSV sv _ = notFresh sv
-
--- | Record in a static value that the result it describes is freshly
--- constructed, where the given return type says that it is.  A lifted function
--- knows its own return type, so its callers should not have to rediscover it.
--- See Note [Dynamic diets].
-markFresh :: ResType -> StaticVal -> StaticVal
-markFresh (Scalar (Record rfs)) (RecordSV fs)
-  | all ((`M.member` rfs) . fst) fs =
-      RecordSV [(f, markFresh (rfs M.! f) sv) | (f, sv) <- fs]
-markFresh ret (Dynamic t) = Dynamic $ t `orUniqueOf` ret
-markFresh _ sv = sv
-
--- | The first type, but also unique wherever the second one is.  Both are
--- sound descriptions of the same value, but each knows something the other does
--- not; see Note [Dynamic diets].
-orUniqueOf :: ResType -> ResType -> ResType
-orUniqueOf = combineUniqueness max
-
--- | The first type, but unique only where the second one is too.  Use this
--- where the value must be as described on more than one path.  See Note
--- [Dynamic diets].
-andUniqueOf :: ResType -> ResType -> ResType
-andUniqueOf = combineUniqueness min
-
--- | Combine two types that describe the same value, component by component,
--- with the given operator on uniqueness. A type and the representation of its
--- static value need not have the same shape - 'typeFromSV' of a 'LambdaSV' is a
--- record of what the closure captures - so where one side is compound and the
--- other is not, we keep the first unchanged rather than let a summary of the
--- whole of one side stand in for a component of the other, which would be wrong
--- for 'max' uniqueness.
-combineUniqueness ::
-  (Uniqueness -> Uniqueness -> Uniqueness) -> ResType -> ResType -> ResType
-combineUniqueness f (Scalar (Record fs1)) (Scalar (Record fs2)) =
-  Scalar $ Record $ M.intersectionWith (combineUniqueness f) fs1 fs2
-combineUniqueness f (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
-  Scalar $ Sum $ M.intersectionWith (zipWith (combineUniqueness f)) cs1 cs2
-combineUniqueness f t1 t2
-  | compound t1 || compound t2 = t1
-  | otherwise = t1 `setUniqueness` f (uniqueness t1) (uniqueness t2)
-  where
-    compound (Scalar Record {}) = True
-    compound (Scalar Sum {}) = True
-    compound _ = False
-
 -- | Compute the corresponding type for the *representation* of a
 -- given static value (not the original possibly higher-order value).
 resTypeFromSV :: StaticVal -> ResType
@@ -1248,6 +1164,9 @@ resTypeFromSV IntrinsicSV =
 structTypeFromSV :: StaticVal -> StructType
 structTypeFromSV = toStruct . resTypeFromSV
 
+-- | The 'Diet' of the result means something else than the uniqueness it is
+-- converted from: that the function may consume the parameter.  The two agree
+-- on what matters, since a function owns what it consumes.
 paramTypeFromSV :: StaticVal -> ParamType
 paramTypeFromSV = resToParam . resTypeFromSV
 
@@ -1579,50 +1498,3 @@ transformProg decs = modifyNameSource $ \namesrc ->
 -- such a parameter unchanged, so a lifted function containing the recursive
 -- occurrence must capture the function-typed parameter, which makes it
 -- higher-order itself - the first case above.
-
--- Note [Dynamic diets]
---
--- A 'Dynamic' static value carries a 'ResType', whose uniqueness records
--- whether the value is *freshly constructed*.
---
--- The same annotation means something else on a parameter: that the function
--- may consume it. The conversion is therefore explicit at the two places where
--- the static-value world meets the parameter world - 'paramTypeFromSV', used to
--- build the closure record ('buildEnvPat'), and 'envFromPat', which reads a
--- parameter pattern. The two readings agree on what matters: a function owns
--- what it consumes, so returning a consumed parameter as a fresh result is
--- exactly what Futhark permits.
---
--- This matters because the declared return type of a lifted function cannot
--- always express what its result is. Specialising a polymorphic higher-order
--- function gives a lifted function whose declared return type is an
--- instantiation of a type variable - and a type variable can never be unique.
--- So for
---
---   def (|>) 'a '^b (x: a) (f: a -> b) : b = f x
---
--- the lifted @xs |> copy@ is declared to return a non-unique array no matter
--- what @f@ is, and the core language then has to assume its result aliases
--- @xs@. The type checker meanwhile may conclude that the result is fresh,
--- because parametricity tells it the result *is* @copy xs@. This can result in
--- a lifted function with a wrong uniqueness annotation on the return type.
---
--- However, the static value of the body is annotated with the declared return
--- type of whichever binding produced it ('defuncLet'), and with the return type
--- of any lifted function it came from ('markFresh'), so @copy@'s @*t@ reaches
--- the lift. 'lifted_rettype' therefore takes its uniqueness from there as well.
---
--- We cannot use just the static value, so we combine with the declared return
--- type ('orUniqueOf'):
---
---   * The declared type is where freshness *enters*; the static value is used
---     for propagation. A static value learns freshness at exactly four places,
---     every one of which declares a return type: 'defuncLet', 'selfSV',
---     'markFresh', and the memo entry that ties off recursion. Anything that
---     produces a 'StructType' cannot supply it because these do not provide
---     freshness information. Note also that 'markFresh' feeds *from*
---     'lifted_rettype': consulting only the static value would leave freshness
---     unable to enter at a lift at all, only to be propagated.
---
---   * The static value knows things the declared type does not: exactly the
---     @|>@ case above.
