@@ -102,6 +102,7 @@ instance Located Comment where
 data ParserState = ParserState
   { _parserFile :: FilePath,
     parserInput :: T.Text,
+    parserOffset :: Int,
     -- | Note: reverse order.
     parserComments :: [Comment],
     parserLexerState :: AlexInput
@@ -198,8 +199,9 @@ parseError (L loc (ERROR "\""), _) =
     Just "Unclosed string literal."
 parseError (L loc _, expected) = do
   input <- lift $ gets parserInput
+  offset <- lift $ gets parserOffset
   let ~(Loc (Pos _ _ _ beg) (Pos _ _ _ end)) = locOf loc
-      tok_src = T.take (end - beg) $ T.drop beg input
+      tok_src = T.take (end - beg) $ T.drop (beg - offset) input
   parseErrorAt loc . Just . T.unlines $
     [ "Unexpected token: '" <> tok_src <> "'",
       "Expected one of the following: " <> T.unwords (map T.pack expected)
@@ -230,23 +232,26 @@ data SyntaxError = SyntaxError {syntaxErrorLoc :: Loc, syntaxErrorMsg :: T.Text}
 lexerErrToParseErr :: LexerError -> SyntaxError
 lexerErrToParseErr (LexerError loc msg) = SyntaxError loc msg
 
+-- | Parse something starting at the given position. The position also contains
+-- the input file name.
 parseWithComments ::
   ParserMonad a ->
-  FilePath ->
+  Pos ->
   T.Text ->
   Either SyntaxError (a, [Comment])
-parseWithComments p file program =
+parseWithComments p start program =
   onRes $ runState (runExceptT p) env
   where
     env =
       ParserState
-        file
+        (posFile start)
         program
+        (posCoff start)
         []
         (initialLexerState start $ BS.fromStrict . T.encodeUtf8 $ program)
-    start = Pos file 1 1 0
     onRes (Left err, _) = Left err
     onRes (Right x, s) = Right (x, reverse $ parserComments s)
 
-parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
-parse p file program = fst <$> parseWithComments p file program
+-- | As 'parseWithComments, but throw away the comments.
+parse :: ParserMonad a -> Pos -> T.Text -> Either SyntaxError a
+parse p start program = fst <$> parseWithComments p start program
