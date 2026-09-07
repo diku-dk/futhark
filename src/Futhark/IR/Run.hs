@@ -9,15 +9,17 @@
 -- Hence you should not expect programs to run fast at all.
 module Futhark.IR.Run (runSOACS, runGPU) where
 
+import Control.Monad (foldM, zipWithM)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Vector.Storable qualified as SVec
+import Foreign.Storable (Storable)
 import Futhark.Data qualified as V
 import Futhark.IR
 import Futhark.IR.GPU (GPU)
-import Futhark.IR.SOACS (SOAC (Screma), SOACS)
+import Futhark.IR.SOACS (Reduce (..), SOAC (Screma), SOACS, Scan (..), ScremaForm (..))
 import Language.Futhark.Primitive qualified as P
 
 data Val
@@ -131,7 +133,7 @@ evalExp funs env (Apply fname args _ _) = do
       let bindings = M.fromList $ zip params argVals
           calleeEnv = M.union bindings env
        in evalBody funs calleeEnv (funDefBody callee)
-evalExp _ env (Op soac) = evalSOAC env soac -- map/reduction/scan
+evalExp funs env (Op soac) = evalSOAC funs env soac -- map/reduction/scan
 evalExp _ _ WithAcc {} = Left "WithAcc not implemented yet"
 
 evalSubExp :: Env -> SubExp -> InterpM Val
@@ -146,10 +148,6 @@ expectPrimVal (ArrayValue _ _ _) = Left "expected a primitive value"
 expectInt :: PrimValue -> InterpM Int
 expectInt (IntValue i) = pure $ P.valueIntegral i
 expectInt _ = Left "expected an integer value"
-
-expectI32 :: PrimValue -> InterpM Int32
-expectI32 (IntValue (Int32Value v)) = pure v
-expectI32 _ = Left "expected an i32 value"
 
 evalBasicOp :: Env -> BasicOp -> InterpM [Val]
 evalBasicOp env (SubExp se) = pure <$> evalSubExp env se
@@ -629,13 +627,248 @@ linearIndex :: [Int] -> [Int] -> Int
 linearIndex shape indices =
   foldl (\acc (dimSize, index) -> acc * dimSize + index) 0 $ zip shape indices
 
-evalSOAC :: Env -> SOAC SOACS -> InterpM [Val]
-evalSOAC _ Screma {} = Left "Screma not implemented yet"
-evalSOAC _ _ = Left "SOAC not implemented yet"
+evalSOAC :: FunEnv -> Env -> SOAC SOACS -> InterpM [Val]
+evalSOAC funs env (Screma widthExp inputNames form) =
+  evalScrema funs env widthExp inputNames form
+evalSOAC _ _ _ = Left "SOAC not implemented yet"
 
-_evalLambda :: FunEnv -> Env -> Lambda SOACS -> [Val] -> InterpM [Val]
-_evalLambda funs env (Lambda ps _ body) args = do
-  evalBody funs (M.union (M.fromList $ zip (map paramName ps) args) env) body
+evalScrema :: FunEnv -> Env -> SubExp -> [VName] -> ScremaForm SOACS -> InterpM [Val]
+evalScrema funs env widthExp inputNames (ScremaForm preLambda scans reductions postLambda) = do
+  width <- evalSubExp env widthExp >>= expectPrimVal >>= expectInt
+  if width < 0
+    then Left "Screma width cannot be negative"
+    else do
+      inputs <- mapM (lookupScremaInput env) inputNames
+      mapM_ (validateScremaInput width) inputs
+
+      if length inputs /= length (lambdaParams preLambda)
+        then Left "Screma input count does not match lambda parameters"
+        else do
+          initialScanStates <- mapM (mapM (evalSubExp env) . scanNeutral) scans
+          initialReductionStates <- mapM (mapM (evalSubExp env) . redNeutral) reductions
+          (_, finalReductionStates, reversedOutputRows) <-
+            foldM
+              (runIteration inputs)
+              (initialScanStates, initialReductionStates, [])
+              [0 .. width - 1]
+          outputs <-
+            collectScremaOutputs
+              env
+              width
+              (lambdaReturnType postLambda)
+              (reverse reversedOutputRows)
+          pure $ concat finalReductionStates <> outputs
+  where
+    scanSizes =
+      map (length . scanNeutral) scans
+    reductionSizes =
+      map (length . redNeutral) reductions
+
+    runIteration
+      inputs
+      (scanStates, reductionStates, outputRows)
+      index = do
+        inputRows <- mapM (rowAt index) inputs
+        preResults <- evalLambda funs env preLambda inputRows
+        (scanContributions, afterScans) <- splitGroups scanSizes preResults
+        (reductionContributions, mapValues) <- splitGroups reductionSizes afterScans
+        nextScanStates <- updateScanStates funs env scans scanStates scanContributions
+        nextReductionStates <- updateReductionStates funs env reductions reductionStates reductionContributions
+        postResults <- evalLambda funs env postLambda (concat nextScanStates <> mapValues)
+        pure (nextScanStates, nextReductionStates, postResults : outputRows)
+
+splitGroups :: [Int] -> [a] -> InterpM ([[a]], [a])
+splitGroups [] values =
+  pure ([], values)
+splitGroups (size : sizes) values
+  | length group /= size =
+      Left "Screma lambda returned too few values"
+  | otherwise = do
+      (groups, remaining) <- splitGroups sizes rest
+      pure (group : groups, remaining)
+  where
+    (group, rest) = splitAt size values
+
+evalLambda :: FunEnv -> Env -> Lambda SOACS -> [Val] -> InterpM [Val]
+evalLambda funs env (Lambda ps returnTypes body) args
+  | length ps /= length args = Left "lambda argument count mismatch"
+  | otherwise = do
+      let bindings = M.fromList $ zip (map paramName ps) args
+          lambdaEnv = M.union bindings env
+      results <- evalBody funs lambdaEnv body
+
+      if length results /= length returnTypes
+        then Left "lambda result count mismatch"
+        else pure results
+
+updateScanStates ::
+  FunEnv ->
+  Env ->
+  [Scan SOACS] ->
+  [[Val]] ->
+  [[Val]] ->
+  InterpM [[Val]]
+updateScanStates funs env scans states contributions
+  | length scans /= length states
+      || length scans /= length contributions =
+      Left "Screma scan state count mismatch"
+  | otherwise =
+      zipWithM updateOne scans (zip states contributions)
+  where
+    updateOne scan (state, contribution) = do
+      next <-
+        evalLambda
+          funs
+          env
+          (scanLambda scan)
+          (state <> contribution)
+
+      if length next /= length state
+        then Left "scan result count mismatch"
+        else pure next
+
+updateReductionStates ::
+  FunEnv ->
+  Env ->
+  [Reduce SOACS] ->
+  [[Val]] ->
+  [[Val]] ->
+  InterpM [[Val]]
+updateReductionStates funs env reductions states contributions
+  | length reductions /= length states
+      || length reductions /= length contributions =
+      Left "Screma reduction state count mismatch"
+  | otherwise =
+      zipWithM updateOne reductions (zip states contributions)
+  where
+    updateOne reduction (state, contribution) = do
+      next <-
+        evalLambda
+          funs
+          env
+          (redLambda reduction)
+          (state <> contribution)
+
+      if length next /= length state
+        then Left "reduction result count mismatch"
+        else pure next
+
+lookupScremaInput :: Env -> VName -> InterpM Val
+lookupScremaInput env name =
+  case M.lookup name env of
+    Just array@ArrayValue {} ->
+      pure array
+    Just PrimVal {} ->
+      Left "Screma input must be an array"
+    Nothing ->
+      Left $ "unbound Screma input: " <> prettyText name
+
+validateScremaInput :: Int -> Val -> InterpM ()
+validateScremaInput width (ArrayValue shape _ values) =
+  case shape of
+    outerSize : _
+      | outerSize /= width ->
+          Left "Screma input outer size mismatch"
+      | length values /= product shape ->
+          Left "invalid Screma input storage"
+      | otherwise ->
+          pure ()
+    [] ->
+      Left "Screma input must have positive rank"
+validateScremaInput _ PrimVal {} =
+  Left "Screma input must be an array"
+
+rowAt :: Int -> Val -> InterpM Val
+rowAt index (ArrayValue (_ : rowShape) elementType values)
+  | null rowShape =
+      case drop index values of
+        val : _ -> pure $ PrimVal val
+        [] -> Left "Screma input index out of bounds"
+  | otherwise =
+      let rowSize = product rowShape
+          offset = index * rowSize
+          rowValues = take rowSize $ drop offset values
+       in if length rowValues /= rowSize
+            then Left "invalid Screma input row"
+            else
+              pure $
+                ArrayValue rowShape elementType rowValues
+rowAt _ _ =
+  Left "cannot extract a row from this value"
+
+collectScremaOutputs ::
+  Env ->
+  Int ->
+  [Type] ->
+  [[Val]] ->
+  InterpM [Val]
+collectScremaOutputs env width returnTypes iterationResults
+  | any ((/= length returnTypes) . length) iterationResults =
+      Left "inconsistent Screma output count"
+  | otherwise =
+      zipWithM collectOne returnTypes columns
+  where
+    columns
+      | null iterationResults =
+          replicate (length returnTypes) []
+      | otherwise =
+          L.transpose iterationResults
+
+    collectOne (Prim expectedType) rows = do
+      values <- mapM expectPrimitive rows
+
+      if all ((== expectedType) . P.primValueType) values
+        then pure $ ArrayValue [width] expectedType values
+        else Left "Screma primitive output type mismatch"
+    collectOne (Array expectedType annotatedShape _) [] = do
+      rowShape <-
+        mapM
+          ( \dimension ->
+              evalSubExp env dimension >>= expectPrimVal >>= expectInt
+          )
+          (shapeDims annotatedShape)
+
+      pure $ ArrayValue (width : rowShape) expectedType []
+    collectOne (Array expectedType _ _) rows = do
+      evaluatedRows <- mapM expectArray rows
+
+      case evaluatedRows of
+        [] ->
+          Left "internal empty Screma output"
+        (firstShape, firstType, firstValues) : remaining
+          | firstType /= expectedType ->
+              Left "Screma array output type mismatch"
+          | not $ all (sameRow firstShape firstType) remaining ->
+              Left "inconsistent Screma array output rows"
+          | otherwise ->
+              pure $
+                ArrayValue
+                  (width : firstShape)
+                  expectedType
+                  (firstValues <> concatMap third remaining)
+    collectOne Acc {} _ =
+      Left "Screma accumulator outputs are unsupported" -- This should never happen?
+    collectOne Mem {} _ =
+      Left "Screma memory outputs are unsupported" -- This should never happen?
+    expectPrimitive (PrimVal val) =
+      pure val
+    expectPrimitive ArrayValue {} =
+      Left "expected primitive Screma output"
+
+    expectArray (ArrayValue shape elementType values)
+      | length values == product shape =
+          pure (shape, elementType, values)
+      | otherwise =
+          Left "invalid Screma output row storage"
+    expectArray PrimVal {} =
+      Left "expected array-valued Screma output"
+
+    sameRow expectedShape expectedType (shape, elementType, values) =
+      shape == expectedShape
+        && elementType == expectedType
+        && length values == product shape
+
+    third (_, _, values) = values
 
 -- | Run a program in the SOACS IR.
 runSOACS :: Prog SOACS -> Name -> [V.Value] -> Either T.Text [V.Value]
@@ -653,9 +886,7 @@ runSOACS prog entry inputs = do
     else do
       let env = M.union (M.fromList $ zip params argVals) constsEnv
       results <- evalBody funs env (funDefBody fun)
-      case reverse results of
-        result : _ -> pure <$> toValue result
-        [] -> Left "entry point returned no values"
+      mapM toValue results
   where
     foldConsts _ e [] = pure e
     foldConsts funs e (s : ss) = evalStm funs e s >>= \e' -> foldConsts funs e' ss
@@ -673,41 +904,108 @@ findEntry prog name =
       ]
 
 fromValue :: V.Value -> InterpM ([Val], Val)
-fromValue (V.I32Value shape values)
-  | SVec.null shape,
-    [v] <- SVec.toList values =
-      pure ([], PrimVal $ IntValue $ Int32Value v)
+fromValue (V.I8Value shape values) =
+  fromPrimitiveVector shape (IntType Int8) (IntValue . Int8Value) values
+fromValue (V.I16Value shape values) =
+  fromPrimitiveVector shape (IntType Int16) (IntValue . Int16Value) values
+fromValue (V.I32Value shape values) =
+  fromPrimitiveVector shape (IntType Int32) (IntValue . Int32Value) values
+fromValue (V.I64Value shape values) =
+  fromPrimitiveVector shape (IntType Int64) (IntValue . Int64Value) values
+fromValue (V.U8Value shape values) =
+  fromPrimitiveVector shape (IntType Int8) (IntValue . Int8Value . fromIntegral) values
+fromValue (V.U16Value shape values) =
+  fromPrimitiveVector shape (IntType Int16) (IntValue . Int16Value . fromIntegral) values
+fromValue (V.U32Value shape values) =
+  fromPrimitiveVector shape (IntType Int32) (IntValue . Int32Value . fromIntegral) values
+fromValue (V.U64Value shape values) =
+  fromPrimitiveVector shape (IntType Int64) (IntValue . Int64Value . fromIntegral) values
+fromValue (V.F16Value shape values) =
+  fromPrimitiveVector shape (FloatType Float16) (FloatValue . Float16Value) values
+fromValue (V.F32Value shape values) =
+  fromPrimitiveVector shape (FloatType Float32) (FloatValue . Float32Value) values
+fromValue (V.F64Value shape values) =
+  fromPrimitiveVector shape (FloatType Float64) (FloatValue . Float64Value) values
+fromValue (V.BoolValue shape values) =
+  fromPrimitiveVector shape Bool BoolValue values
+
+fromPrimitiveVector ::
+  (Storable a) =>
+  SVec.Vector Int ->
+  PrimType ->
+  (a -> PrimValue) ->
+  SVec.Vector a ->
+  InterpM ([Val], Val)
+fromPrimitiveVector shape elementType wrap values
+  | any (< 0) dimensions =
+      Left "input array dimensions cannot be negative"
+  | null dimensions =
+      case primitiveValues of
+        [primitiveValue] -> pure ([], PrimVal primitiveValue)
+        _ -> Left "invalid scalar input storage"
+  | length primitiveValues /= product dimensions =
+      Left "invalid input array storage"
   | otherwise =
-      let shapeValues =
-            map
-              (PrimVal . IntValue . Int64Value . fromIntegral)
-              (SVec.toList shape)
-          array =
-            ArrayValue
-              (SVec.toList shape)
-              (IntType Int32)
-              (map (IntValue . Int32Value) $ SVec.toList values)
-       in pure (shapeValues, array)
-fromValue (V.BoolValue shape values)
-  | SVec.null shape,
-    [v] <- SVec.toList values =
-      pure ([], PrimVal $ BoolValue v)
-fromValue _ =
-  Left "only scalar i32 and bool values are currently supported"
+      pure
+        ( map (PrimVal . IntValue . Int64Value . fromIntegral) dimensions,
+          ArrayValue dimensions elementType primitiveValues
+        )
+  where
+    dimensions = SVec.toList shape
+    primitiveValues = map wrap $ SVec.toList values
 
 toValue :: Val -> InterpM V.Value
-toValue (PrimVal (IntValue (Int32Value v))) =
-  pure $ V.I32Value SVec.empty (SVec.singleton v)
-toValue (PrimVal (BoolValue v)) =
-  pure $ V.BoolValue SVec.empty (SVec.singleton v)
-toValue (ArrayValue shape (IntType Int32) values) = do
-  values' <- mapM expectI32 values
-  pure $
-    V.I32Value
-      (SVec.fromList shape)
-      (SVec.fromList values')
-toValue _ =
-  Left "only scalar i32 and bool values are currently supported"
+toValue (PrimVal primitiveValue) =
+  toPrimitiveValue [] (P.primValueType primitiveValue) [primitiveValue]
+toValue (ArrayValue shape elementType values) =
+  toPrimitiveValue shape elementType values
+
+toPrimitiveValue :: [Int] -> PrimType -> [PrimValue] -> InterpM V.Value
+toPrimitiveValue shape (IntType Int8) values =
+  V.I8Value (shapeVector shape) . SVec.fromList <$> mapM expectInt8 values
+  where
+    expectInt8 (IntValue (Int8Value element)) = pure element
+    expectInt8 _ = Left "expected an i8 value"
+toPrimitiveValue shape (IntType Int16) values =
+  V.I16Value (shapeVector shape) . SVec.fromList <$> mapM expectInt16 values
+  where
+    expectInt16 (IntValue (Int16Value element)) = pure element
+    expectInt16 _ = Left "expected an i16 value"
+toPrimitiveValue shape (IntType Int32) values =
+  V.I32Value (shapeVector shape) . SVec.fromList <$> mapM expectInt32 values
+  where
+    expectInt32 (IntValue (Int32Value element)) = pure element
+    expectInt32 _ = Left "expected an i32 value"
+toPrimitiveValue shape (IntType Int64) values =
+  V.I64Value (shapeVector shape) . SVec.fromList <$> mapM expectInt64 values
+  where
+    expectInt64 (IntValue (Int64Value element)) = pure element
+    expectInt64 _ = Left "expected an i64 value"
+toPrimitiveValue shape (FloatType Float16) values =
+  V.F16Value (shapeVector shape) . SVec.fromList <$> mapM expectFloat16 values
+  where
+    expectFloat16 (FloatValue (Float16Value element)) = pure element
+    expectFloat16 _ = Left "expected an f16 value"
+toPrimitiveValue shape (FloatType Float32) values =
+  V.F32Value (shapeVector shape) . SVec.fromList <$> mapM expectFloat32 values
+  where
+    expectFloat32 (FloatValue (Float32Value element)) = pure element
+    expectFloat32 _ = Left "expected an f32 value"
+toPrimitiveValue shape (FloatType Float64) values =
+  V.F64Value (shapeVector shape) . SVec.fromList <$> mapM expectFloat64 values
+  where
+    expectFloat64 (FloatValue (Float64Value element)) = pure element
+    expectFloat64 _ = Left "expected an f64 value"
+toPrimitiveValue shape Bool values =
+  V.BoolValue (shapeVector shape) . SVec.fromList <$> mapM expectBool values
+  where
+    expectBool (BoolValue element) = pure element
+    expectBool _ = Left "expected a bool value"
+toPrimitiveValue _ Unit _ =
+  Left "unit values cannot be represented as external values"
+
+shapeVector :: [Int] -> SVec.Vector Int
+shapeVector = SVec.fromList
 
 -- | Run a program in the GPU IR.
 runGPU :: Prog GPU -> Name -> [V.Value] -> Either T.Text [V.Value]
