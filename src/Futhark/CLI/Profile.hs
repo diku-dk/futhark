@@ -3,7 +3,7 @@ module Futhark.CLI.Profile (main) where
 
 import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
-import Control.Monad (forM_, when)
+import Control.Monad (forM_)
 import Control.Monad.Except (ExceptT, liftEither, runExcept, runExceptT)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (Except)
@@ -40,7 +40,7 @@ import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (showText)
 import Futhark.Util.Html (cssFile)
 import Futhark.Util.Options (mainWithOptions)
-import System.Directory (createDirectoryIfMissing, doesFileExist, removePathForcibly)
+import System.Directory (createDirectoryIfMissing, removePathForcibly)
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.FilePath
   ( dropExtension,
@@ -457,12 +457,11 @@ analyseBenchResults json_path bench_results = do
                 htmlIndexFile = name' <> "-index.html",
                 htmlDir = name' <> ".html/"
               }
-      when (isJust (stdErr res) || isJust (report res)) $
-        writeAnalysis tf (stdErr res) (report res)
-      exists <- doesFileExist $ htmlIndexFile tf
-      pure $ case exists of
-        True -> Just (name, makeRelative prog_dir $ htmlIndexFile tf)
-        False -> Nothing
+      if isJust (stdErr res) || isJust (report res)
+        then do
+          writeAnalysis tf (stdErr res) (report res)
+          pure $ Just (name, makeRelative prog_dir $ htmlIndexFile tf)
+        else pure Nothing
 
 -- | Write an index of generated reports, with paths relative to the index.
 writeNavigationIndex :: FilePath -> T.Text -> [(T.Text, FilePath)] -> IO ()
