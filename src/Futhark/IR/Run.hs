@@ -328,6 +328,33 @@ evalBasicOp env (Concat concatDim arrayNames resultSizeExp) = do
           findSource (index - size) arrays
       where
         size = shape !! concatDim
+evalBasicOp env (Update _ arrayName slice valueExp) = do
+  array <-
+    maybe (Left $ "unbound array: " <> prettyText arrayName) pure $
+      M.lookup arrayName env
+
+  replacement <- evalSubExp env valueExp
+
+  case array of
+    PrimVal _ ->
+      Left "cannot update a primitive value"
+    ArrayValue shape elementType oldValues -> do
+      (sliceShp, coordinates) <- resolveSlice env shape slice
+
+      replacementValues <-
+        updateValues elementType sliceShp replacement
+
+      let offsets =
+            map (linearIndex shape) coordinates
+          newValues =
+            L.foldl'
+              ( \values (offset, newValue) ->
+                  replaceAt offset newValue values
+              )
+              oldValues
+              (zip offsets replacementValues)
+
+      pure [ArrayValue shape elementType newValues]
 evalBasicOp _ _ = Left "basic operation not implemented yet"
 
 replaceAt :: Int -> a -> [a] -> [a]
@@ -346,21 +373,46 @@ inversePermutation :: [Int] -> [Int]
 inversePermutation permutation =
   map snd $ L.sortOn fst $ zip permutation [0 ..]
 
-indexArray :: Env -> [Int] -> PrimType -> [PrimValue] -> Slice SubExp -> InterpM [Val]
-indexArray env shape elementType values (Slice dimensions)
-  | length shape /= length dimensions = Left "slice dimensions do not match array dimensions"
+updateValues ::
+  PrimType ->
+  [Int] ->
+  Val ->
+  InterpM [PrimValue]
+updateValues elementType slcShape replacement =
+  case replacement of
+    PrimVal primitiveValue
+      | slcShape /= [] ->
+          Left "cannot use a scalar to update a non-scalar slice"
+      | P.primValueType primitiveValue /= elementType ->
+          Left "update element type mismatch"
+      | otherwise ->
+          pure [primitiveValue]
+    ArrayValue replacementShape replacementType replacementValues
+      | replacementType /= elementType ->
+          Left "update element type mismatch"
+      | replacementShape /= slcShape ->
+          Left "update value shape does not match slice shape"
+      | otherwise ->
+          pure replacementValues
+
+resolveSlice ::
+  Env ->
+  [Int] ->
+  Slice SubExp ->
+  InterpM ([Int], [[Int]])
+resolveSlice env shape (Slice dimensions)
+  | length shape /= length dimensions =
+      Left "slice dimensions do not match array dimensions"
   | otherwise = do
       selections <- mapM evalDimension dimensions
       mapM_ checkSelectionBounds $ zip shape selections
 
-      let resultShape = [length indices | Selected indices <- selections]
-          coordinates = sequence $ map selectionIndices selections
-          selectedValues = map (values !!) $ map (linearIndex shape) coordinates
-      case resultShape of
-        [] -> case selectedValues of
-          [val] -> pure [PrimVal val]
-          _ -> Left "invalid scalar index result"
-        _ -> pure [ArrayValue resultShape elementType selectedValues]
+      let resultShape =
+            [length indices | Selected indices <- selections]
+          coordinates =
+            sequence $ map selectionIndices selections
+
+      pure (resultShape, coordinates)
   where
     evalDimension (DimFix indexExp) =
       Fixed <$> evalInt indexExp
@@ -368,6 +420,7 @@ indexArray env shape elementType values (Slice dimensions)
       start <- evalInt startExp
       count <- evalInt countExp
       stride <- evalInt strideExp
+
       if count < 0
         then Left "slice length cannot be negative"
         else
@@ -391,6 +444,29 @@ indexArray env shape elementType values (Slice dimensions)
           Left "array index out of bounds"
       | otherwise =
           pure ()
+
+indexArray ::
+  Env ->
+  [Int] ->
+  PrimType ->
+  [PrimValue] ->
+  Slice SubExp ->
+  InterpM [Val]
+indexArray env shape elementType values slice = do
+  (resultShape, coordinates) <- resolveSlice env shape slice
+
+  let selectedValues =
+        [values !! linearIndex shape coordinate | coordinate <- coordinates]
+
+  case resultShape of
+    [] ->
+      case selectedValues of
+        [val] ->
+          pure [PrimVal val]
+        _ ->
+          Left "invalid scalar index result"
+    _ ->
+      pure [ArrayValue resultShape elementType selectedValues]
 
 linearIndex :: [Int] -> [Int] -> Int
 linearIndex shape indices =
