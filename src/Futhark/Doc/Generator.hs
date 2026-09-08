@@ -33,8 +33,8 @@ docToHtml = toHtml . docText
 primTypeHtml :: PrimType -> Html
 primTypeHtml = docToHtml . pretty
 
-prettyU :: Uniqueness -> Html
-prettyU = docToHtml . pretty
+prettyMode :: Freshness -> Html
+prettyMode = docToHtml . pretty
 
 renderName :: Name -> Html
 renderName name = docToHtml (pretty name)
@@ -442,7 +442,7 @@ renderValBind = fmap H.div . synopsisValBindBind
 
 renderTypeBind :: (VName, TypeBinding) -> DocM Html
 renderTypeBind (name, TypeAbbr l tps tp) = do
-  tp' <- retTypeHtml $ toResRet Nonunique tp
+  tp' <- retTypeHtml $ toResRet Nonfresh tp
   name' <- vnameHtml name
   abbrev <- typeAbbrevHtml l name' tps
   pure $ H.div $ abbrev <> " = " <> tp'
@@ -450,7 +450,7 @@ renderTypeBind (name, TypeAbbr l tps tp) = do
 synopsisValBindBind :: (VName, BoundV) -> DocM Html
 synopsisValBindBind (name, BoundV tps t) = do
   tps' <- mapM typeParamHtml tps
-  t' <- typeHtml $ second (const Nonunique) t
+  t' <- typeHtml $ second (const Nonfresh) t
   name' <- vnameHtml name
   pure $ keyword "val " <> name' <> mconcat (map (" " <>) tps') <> ": " <> t'
 
@@ -458,12 +458,12 @@ dietHtml :: Diet -> Html
 dietHtml Consume = "*"
 dietHtml Observe = ""
 
-typeHtml :: TypeBase Size Uniqueness -> DocM Html
+typeHtml :: TypeBase Size Freshness -> DocM Html
 typeHtml t = case t of
-  Array u shape et -> do
+  Array o shape et -> do
     shape' <- prettyShape shape
-    et' <- typeHtml $ Scalar $ second (const Nonunique) et
-    pure $ prettyU u <> shape' <> et'
+    et' <- typeHtml $ Scalar $ second (const Nonfresh) et
+    pure $ prettyMode o <> shape' <> et'
   Scalar (Prim et) -> pure $ primTypeHtml et
   Scalar (Record fs)
     | Just ts <- areTupleFields fs ->
@@ -474,12 +474,12 @@ typeHtml t = case t of
       ppField (name, tp) = do
         tp' <- typeHtml tp
         pure $ toHtml (nameToString name) <> ": " <> tp'
-  Scalar (TypeVar u et targs) -> do
+  Scalar (TypeVar o et targs) -> do
     targs' <- mapM typeArgHtml targs
     et' <- qualNameHtml et
-    pure $ prettyU u <> et' <> mconcat (map (" " <>) targs')
+    pure $ prettyMode o <> et' <> mconcat (map (" " <>) targs')
   Scalar (Arrow _ pname d t1 t2) -> do
-    t1' <- typeHtml $ second (const Nonunique) t1
+    t1' <- typeHtml $ second (const Nonfresh) t1
     t2' <- retTypeHtml t2
     case pname of
       Named v -> do
@@ -505,7 +505,7 @@ prettyShape (Shape ds) =
 
 typeArgHtml :: TypeArg Size -> DocM Html
 typeArgHtml (TypeArgDim d) = dimDeclHtml d
-typeArgHtml (TypeArgType t) = typeHtml $ second (const Nonunique) t
+typeArgHtml (TypeArgType t) = typeHtml $ second (const Nonfresh) t
 
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
 modParamHtml [] = pure mempty
@@ -597,7 +597,7 @@ synopsisSpec spec = case spec of
 
 typeExpHtml :: TypeExp Exp VName -> DocM Html
 typeExpHtml e = case e of
-  TEUnique t _ -> ("*" <>) <$> typeExpHtml t
+  TEStar t _ -> ("*" <>) <$> typeExpHtml t
   TEArray d at _ -> do
     at' <- typeExpHtml at
     d' <- dimExpHtml d
@@ -666,7 +666,7 @@ vnameLink' tag current file =
 paramHtml :: Pat ParamType -> DocM Html
 paramHtml pat = do
   let (pat_param, d, t) = patternParam pat
-  t' <- typeHtml $ second (const Nonunique) t
+  t' <- typeHtml $ second (const Nonfresh) t
   case pat_param of
     Named v -> do
       v' <- vnameHtml v

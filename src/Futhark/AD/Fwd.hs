@@ -36,17 +36,17 @@ instance FromShape Shape where
 instance FromShape ExtShape where
   fromShape = fmap Free
 
-tanType :: (FromShape s, Monoid u) => TypeBase s u -> ADM (TypeBase s u)
-tanType (Acc acc ispace ts u) = do
+tanType :: (FromShape s, Monoid o) => TypeBase s o -> ADM (TypeBase s o)
+tanType (Acc acc ispace ts) = do
   acc_tan <- tangent acc
   tan_shape <- askShape
-  pure $ Acc acc_tan (tan_shape <> ispace) ts u
+  pure $ Acc acc_tan (tan_shape <> ispace) ts
 tanType t = do
   shape <- askShape
-  pure $ arrayOf (Prim (elemType t)) (fromShape shape <> arrayShape t) u
+  pure $ arrayOf (Prim (elemType t)) (fromShape shape <> arrayShape t) o
   where
-    u = case t of
-      Array _ _ u' -> u'
+    o = case t of
+      Array _ _ o' -> o'
       _ -> mempty
 
 slocal' :: ADM a -> ADM a
@@ -123,7 +123,7 @@ class TanBuilder a where
 bundleNewList :: (TanBuilder a) => [a] -> ADM [a]
 bundleNewList = fmap (uncurry interleave . unzip) . mapM bundleNew
 
-instance (FromShape s, Monoid u) => TanBuilder (PatElem (TypeBase s u)) where
+instance (FromShape s, Monoid o) => TanBuilder (PatElem (TypeBase s o)) where
   newTan (PatElem p t) = do
     p' <- tanVName p
     insertTan p p'
@@ -139,7 +139,7 @@ newTanPat (Pat pes) = Pat <$> mapM newTan pes
 bundleNewPat :: (TanBuilder (PatElem t)) => Pat t -> ADM (Pat t)
 bundleNewPat (Pat pes) = Pat <$> bundleNewList pes
 
-instance (FromShape s, Monoid u) => TanBuilder (Param (TypeBase s u)) where
+instance (FromShape s, Monoid o) => TanBuilder (Param (TypeBase s o)) where
   newTan (Param _ p t) = do
     PatElem p' t' <- newTan $ PatElem p t
     pure $ Param mempty p' t'
@@ -158,7 +158,7 @@ class Tangent a where
   tangent :: a -> ADM a
   bundleTan :: a -> ADM (a, a)
 
-instance (FromShape s, Monoid u) => Tangent (TypeBase s u) where
+instance (FromShape s, Monoid o) => Tangent (TypeBase s o) where
   tangent = tanType
   bundleTan t = do
     t' <- tangent t
@@ -426,7 +426,7 @@ fwdWithAccLambda inputs (Lambda params _ body) = do
     mkAccParam c (shape, arrs, _) = do
       tan_shape <- askShape
       ts <- map (stripArray (shapeRank shape)) <$> mapM lookupType arrs
-      newParam "acc_p_tan" $ Acc c (tan_shape <> shape) ts NoUniqueness
+      newParam "acc_p_tan" $ Acc c (tan_shape <> shape) ts
 
 fwdStreamLambda :: Int -> Lambda SOACS -> ADM (Lambda SOACS)
 fwdStreamLambda num_accs (Lambda params _ body) = do

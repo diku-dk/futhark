@@ -15,7 +15,7 @@ import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
-import Futhark.IR
+import Futhark.IR hiding (consuming)
 import Futhark.Optimise.Simplify.Rules.Simple
 import Futhark.Util
 

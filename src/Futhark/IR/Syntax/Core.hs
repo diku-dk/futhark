@@ -11,7 +11,6 @@ module Futhark.IR.Syntax.Core
 
     -- * Types
     Commutativity (..),
-    Uniqueness (..),
     ShapeBase (..),
     Shape,
     stripDims,
@@ -212,18 +211,24 @@ type SpaceId = String
 
 -- | The type of a value.  When comparing types for equality with
 -- '==', shapes must match.
-data TypeBase shape u
+-- The @o@ parameter is the /mode/; see the corresponding note on the
+-- source language 'Language.Futhark.Syntax.TypeBase'.  In the core
+-- language it is 'Diet' or 'NoMode'.
+data TypeBase shape o
   = Prim PrimType
-  | -- | Token, index space, element type, and uniqueness.
-    Acc VName Shape [Type] u
-  | Array PrimType shape u
+  | -- | Token, index space, and element type.  Accumulators carry no
+    -- uniqueness: every use of an accumulator consumes it ('diet' is
+    -- unconditionally 'Consume'), so there is no way for a function to
+    -- merely observe one.
+    Acc VName Shape [Type]
+  | Array PrimType shape o
   | Mem Space
   deriving (Show, Eq, Ord)
 
 instance Bitraversable TypeBase where
-  bitraverse f g (Array t shape u) = Array t <$> f shape <*> g u
+  bitraverse f g (Array t shape o) = Array t <$> f shape <*> g o
   bitraverse _ _ (Prim pt) = pure $ Prim pt
-  bitraverse _ g (Acc arrs ispace ts u) = Acc arrs ispace ts <$> g u
+  bitraverse _ _ (Acc arrs ispace ts) = pure $ Acc arrs ispace ts
   bitraverse _ _ (Mem s) = pure $ Mem s
 
 instance Functor (TypeBase shape) where
@@ -243,32 +248,38 @@ instance Bifoldable TypeBase where
 
 -- | A type with shape information, used for describing the type of
 -- variables.
-type Type = TypeBase Shape NoUniqueness
+type Type = TypeBase Shape NoMode
 
 -- | A type with existentially quantified shapes - used as part of
 -- function (and function-like) return types.  Generally only makes
 -- sense when used in a list.
-type ExtType = TypeBase ExtShape NoUniqueness
+type ExtType = TypeBase ExtShape NoMode
 
--- | A type with shape and uniqueness information, used declaring
--- return- and parameters types.
-type DeclType = TypeBase Shape Uniqueness
+-- | A type with shape and 'Diet' information, used for declaring
+-- function and loop parameters.
+type DeclType = TypeBase Shape Diet
 
--- | An 'ExtType' with uniqueness information, used for function
--- return types.
-type DeclExtType = TypeBase ExtShape Uniqueness
+-- | An 'ExtType' with 'Diet' information, used as the input to alias
+-- inference during internalisation.  It is not an IR return type;
+-- those carry no mode.
+type DeclExtType = TypeBase ExtShape Diet
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking three arguments of
 -- types @([int], *[int], [int])@ has diet @[Observe, Consume,
 -- Observe]@.
 data Diet
-  = -- | Consumes this value.
-    Consume
-  | -- | Only observes value in this position, does
-    -- not consume.  A result may alias this.
+  = -- | Only observes the value in this position, does not consume it.
     Observe
-  deriving (Eq, Ord, Show)
+  | -- | Consumes the value in this position.
+    Consume
+  deriving (Eq, Ord, Show, Bounded)
+
+instance Semigroup Diet where
+  (<>) = max
+
+instance Monoid Diet where
+  mempty = Observe
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.

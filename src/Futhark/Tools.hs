@@ -314,7 +314,7 @@ withAcc dest rank mk = do
   cert_ps <- replicateM (length dest) $ newParam "acc_cert" $ Prim Unit
   dest_ts <- mapM lookupType dest
   let acc_shape = Shape $ take rank $ arrayDims $ head dest_ts
-      mkT cert elem_t = Acc cert acc_shape [elem_t] NoUniqueness
+      mkT cert elem_t = Acc cert acc_shape [elem_t]
       acc_ts =
         zipWith mkT (map paramName cert_ps) $
           map (stripArray rank) dest_ts
@@ -337,7 +337,7 @@ doScatter desc rank dest arrs mk = do
   cert_ps <- replicateM (length dest) $ newParam "acc_cert" $ Prim Unit
   dest_ts <- mapM lookupType dest
   let acc_shape = Shape $ take rank $ arrayDims $ head dest_ts
-      mkT cert elem_t = Acc cert acc_shape [elem_t] NoUniqueness
+      mkT cert elem_t = Acc cert acc_shape [elem_t]
       acc_ts =
         zipWith mkT (map paramName cert_ps) $
           map (stripArray rank) dest_ts
@@ -406,7 +406,7 @@ doHist desc ops arrs mk = do
       elem_ts <- fmap (map (stripArray (shapeRank shape))) $ mapM lookupType $ histDest op
       cert_p <- newParam "acc_cert" $ Prim Unit
       let cert = paramName cert_p
-      pure (input, cert_p, Acc cert shape elem_ts NoUniqueness)
+      pure (input, cert_p, Acc cert shape elem_ts)
 
 -- | The most addition-like binary operator for some primitive type.
 addBinOp :: PrimType -> BinOp
@@ -421,7 +421,7 @@ addLambda ::
     MonadBuilder m,
     Buildable (Rep m)
   ) =>
-  TypeBase Shape NoUniqueness ->
+  TypeBase Shape NoMode ->
   m (Lambda (Rep m))
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
 addLambda t@Array {} = do

@@ -72,7 +72,7 @@ concatIrreg lvl _segments _env ns reparr = do
   m <- arraySize 0 <$> lookupType ns_full_F
   data_t <- lookupType (irregularD (head reparr))
   let pt = elemType data_t
-  let result_type = Array pt (Shape [m]) NoUniqueness
+  let result_type = Array pt (Shape [m]) NoMode
   elems_blank <- letExp "blank_res" =<< eBlank result_type
 
   -- Scatter data into result array
@@ -176,7 +176,7 @@ concatIrregAlongDim lvl segments env ns rep_arr type_arr inps d = do
   m <- arraySize 0 <$> lookupType ns_full_F
   data_t <- lookupType (irregularD (head rep_arr))
   let pt = elemType data_t
-  let result_type = Array pt (Shape [m]) NoUniqueness
+  let result_type = Array pt (Shape [m]) NoMode
   elems_blank <- letExp "blank_res" =<< eBlank result_type
 
   -- Scatter data into result array
@@ -315,7 +315,7 @@ rearrangeIrreg ::
   Segments ->
   DistEnv ->
   DistInputs ->
-  TypeBase Shape u ->
+  TypeBase Shape o ->
   [Int] ->
   IrregularRep ->
   FlattenM IrregularRep
@@ -363,13 +363,13 @@ transformArrayLit (TrCtx lvl segments env inps res _aux) [] row_type
             Array
               (elemType row_type)
               (segmentsShape segments <> Shape [intConst Int64 0] <> arrayShape row_type)
-              NoUniqueness
+              NoMode
       v <- letExp "arraylit_empty_reg" =<< eBlank resultType
       pure $ insertRegulars [distResTag res] [v] env
   | otherwise = do
       ns <- dataArr lvl segments env inps $ intConst Int64 0
       (flags, offsets, _elems) <- doRepIota lvl ns
-      let resultType = Array (elemType row_type) (Shape [intConst Int64 0]) NoUniqueness
+      let resultType = Array (elemType row_type) (Shape [intConst Int64 0]) NoMode
       elems <- letExp "arraylit_empty_elems" =<< eBlank resultType
       insertIrregularM ns flags offsets (distResTag res) elems Dense env
 transformArrayLit (TrCtx lvl segments env inps res _aux) vs row_type
@@ -426,7 +426,7 @@ transformArrayLit (TrCtx lvl segments env inps res _aux) vs row_type
 
       m <- arraySize 0 <$> lookupType full_II1
       let pt = elemType row_type
-      let resultType = Array pt (Shape [m]) NoUniqueness
+      let resultType = Array pt (Shape [m]) NoMode
       elems_blank <- letExp "blank_res" =<< eBlank resultType
 
       elems <-

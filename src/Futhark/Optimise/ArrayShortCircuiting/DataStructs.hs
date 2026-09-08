@@ -276,12 +276,12 @@ getArrMemAssoc pat =
 
 -- | Get the names of arrays in a list of 'FParam' and the corresponding
 -- 'ArrayMemBound' information for each array.
-getArrMemAssocFParam :: [Param FParamMem] -> [(VName, Uniqueness, ArrayMemBound)]
+getArrMemAssocFParam :: [Param FParamMem] -> [(VName, Diet, ArrayMemBound)]
 getArrMemAssocFParam =
   mapMaybe
     ( \param -> case paramDec param of
-        (MemArray tp shp u (ArrayIn mem_nm indfun)) ->
-          Just (paramName param, u, MemBlock tp shp mem_nm indfun)
+        (MemArray tp shp o (ArrayIn mem_nm indfun)) ->
+          Just (paramName param, o, MemBlock tp shp mem_nm indfun)
         MemMem _ -> Nothing
         MemPrim _ -> Nothing
         MemAcc {} -> Nothing
@@ -297,7 +297,7 @@ getUniqueMemFParam params =
   where
     justMem (Param _ nm (MemMem sp)) = Just (nm, sp)
     justMem _ = Nothing
-    justArrayMem (MemArray _ _ Unique (ArrayIn mem_nm _)) = Just mem_nm
+    justArrayMem (MemArray _ _ Consume (ArrayIn mem_nm _)) = Just mem_nm
     justArrayMem _ = Nothing
 
 class HasMemBlock rep where
@@ -398,6 +398,6 @@ vnameToPrimExp scopetab scaltab v =
         )
 
 -- | Attempt to extract the 'PrimType' from a 'TypeBase'.
-toPrimType :: TypeBase shp u -> Maybe PrimType
+toPrimType :: TypeBase shp o -> Maybe PrimType
 toPrimType (Prim pt) = Just pt
 toPrimType _ = Nothing

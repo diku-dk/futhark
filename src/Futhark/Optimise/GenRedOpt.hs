@@ -202,7 +202,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     --
     getAccLambda acc_tp =
       case acc_tp of
-        (Acc tp_id _shp el_tps _) ->
+        (Acc tp_id _shp el_tps) ->
           case M.lookup tp_id (fst env) of
             Just lam -> Just (lam, el_tps)
             _ -> Nothing

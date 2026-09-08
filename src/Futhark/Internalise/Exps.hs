@@ -64,7 +64,7 @@ funHeader ::
   [I.FParam I.SOACS] ->
   [[Tree (I.FParam I.SOACS)]] ->
   E.ResRetType ->
-  ([Tree (I.FParam I.SOACS)], [I.DeclExtType], [(I.DeclExtType, RetAls)], FunInfo)
+  ([Tree (I.FParam I.SOACS)], [I.ExtType], [(I.ExtType, RetAls)], FunInfo)
 funHeader shapeparams params' rettype =
   (all_params, rettype', fun_rettype, info)
   where
@@ -116,7 +116,7 @@ internaliseValBindBody types fb@(E.ValBind entry fname _ _ (Info rettype) _ _ bo
     when (null params') $
       bindExtSizes (E.AppRes (E.toStruct $ E.retType rettype) (E.retDims rettype)) body_res
 
-    ensureResultExtShape msg (map I.fromDecl rettype') $ subExpsRes body_res
+    ensureResultExtShape msg rettype' $ subExpsRes body_res
 
   attrs' <- internaliseAttrs attrs
 
@@ -178,7 +178,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype doc) vb = do
         ("entry_" <> baseName ofname)
         ( ctx_ts
             ++ zip
-              (zeroExts (concat entry_rettype))
+              (map I.fromDecl (zeroExts (concat entry_rettype)))
               (map (shiftRetAls num_ctx) $ concat retals)
         )
         (shapeparams ++ foldMap (foldMap toList) params')
@@ -758,7 +758,7 @@ internaliseExp desc (E.Coerce e _ (Info et) _) = do
             ++ ["] cannot match shape of type \""]
             ++ dt'
             ++ ["\"."]
-    ensureExtShape (errorMsg parts) (I.fromDecl t') desc e'
+    ensureExtShape (errorMsg parts) t' desc e'
 internaliseExp desc (E.Negate e loc) = locating loc $ do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
@@ -907,10 +907,10 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
           ++ prettyString t
 
     indexType :: E.StructType -> [E.DimIndex] -> E.StructType
-    indexType (E.Array u (E.Shape dims) et) idxs =
+    indexType (E.Array o (E.Shape dims) et) idxs =
       case dims' of
         [] -> E.Scalar et
-        ds -> E.Array u (E.Shape ds) et
+        ds -> E.Array o (E.Shape ds) et
       where
         dims' = keptPrefix <> suffix
         keptPrefix = [d | (d, i) <- zip prefix idxs, keepDim i]
@@ -1436,7 +1436,7 @@ internaliseStreamAcc desc dest op lam bs = do
   acc_cert_v <- newVName "acc_cert"
   dest_ts <- mapM lookupType dest'
   let dest_w = arraysSize 0 dest_ts
-      acc_t = Acc acc_cert_v (I.Shape [dest_w]) (map rowType dest_ts) NoUniqueness
+      acc_t = Acc acc_cert_v (I.Shape [dest_w]) (map rowType dest_ts)
   acc_p <- newParam "acc_p" acc_t
   withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
     bs_ts <- mapM lookupType bs'
@@ -2280,7 +2280,7 @@ sizeExpForError e
       e' <- internaliseExp1 "size" e
       pure ["[", ErrorVal int64 e', "]"]
 
-typeExpForError :: E.TypeBase Size u -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError :: E.TypeBase Size o -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.Scalar (E.Prim t)) = pure [ErrorString $ prettyText t]
 typeExpForError (E.Scalar (E.TypeVar _ v args)) = do
   args' <- concat <$> mapM onArg args

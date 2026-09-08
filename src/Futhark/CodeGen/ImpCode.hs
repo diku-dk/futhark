@@ -114,6 +114,7 @@ import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax.Core
   ( Attrs (..),
+    Diet (..),
     EntryPointType (..),
     ErrorMsg (..),
     ErrorMsgPart (..),
@@ -216,8 +217,8 @@ data ExternalValue
 -- | Information about how this function can be called from the outside world.
 data EntryPoint = EntryPoint
   { entryPointName :: Name,
-    entryPointResults :: (Uniqueness, ExternalValue),
-    entryPointArgs :: [((Name, Uniqueness), ExternalValue)],
+    entryPointResults :: (Diet, ExternalValue),
+    entryPointArgs :: [((Name, Diet), ExternalValue)],
     entryPointDocs :: Maybe T.Text
   }
   deriving (Show)
@@ -523,8 +524,8 @@ instance Pretty EntryPoint where
         "results" <+> nestedBlock (ppRes result)
       ]
     where
-      ppArg ((p, u), t) = pretty p <+> ":" <+> ppRes (u, t)
-      ppRes (u, t) = pretty u <> pretty t
+      ppArg ((p, o), t) = pretty p <+> ":" <+> ppRes (o, t)
+      ppRes (o, t) = pretty o <> pretty t
 
 instance (Pretty op) => Pretty (FunctionT op) where
   pretty (Function entry outs ins attrs body) =

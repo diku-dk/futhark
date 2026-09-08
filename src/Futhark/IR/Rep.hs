@@ -13,7 +13,7 @@ where
 import Data.Kind qualified
 import Futhark.IR.Prop.Types
 import Futhark.IR.RetType
-import Futhark.IR.Syntax.Core (DeclExtType, DeclType, ExtType, Type)
+import Futhark.IR.Syntax.Core (DeclType, ExtType, Type)
 
 -- | Returns nothing and does nothing.  Placeholder for when we don't
 -- really want an operation.
@@ -82,10 +82,12 @@ class
 
   type LParamInfo l = Type
 
-  -- | The return type decoration of function calls.
+  -- | The return type decoration of function calls.  Note that this
+  -- carries no mode: whether a result aliases anything is recorded in
+  -- the accompanying 'RetAls', not in the type.
   type RetType l :: Data.Kind.Type
 
-  type RetType l = DeclExtType
+  type RetType l = ExtType
 
   -- | The return type decoration of branches.
   type BranchType l :: Data.Kind.Type

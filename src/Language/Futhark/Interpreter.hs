@@ -182,7 +182,7 @@ instance Pretty (F.Shape SizeClosure) where
   pretty = mconcat . map (brackets . pretty) . shapeDims
 
 -- | A type where the sizes are unevaluated expressions.
-type EvalType = TypeBase SizeClosure NoUniqueness
+type EvalType = TypeBase SizeClosure NoMode
 
 structToEval :: Env -> StructType -> EvalType
 structToEval env = first (SizeClosure env)
@@ -373,7 +373,7 @@ data TypeBinding
   = TypeConBinding
       Env
       [TypeParam]
-      (RetTypeBase Size NoUniqueness)
+      (RetTypeBase Size NoMode)
   | TypeBinding
       EvalType
   deriving (Show)
@@ -488,14 +488,14 @@ apply2 loc env f x y = stacking loc env $ do
   f' <- apply noLoc mempty f x
   apply noLoc mempty f' y
 
-matchPat :: Env -> Pat (TypeBase Size u) -> Value -> EvalM Env
+matchPat :: Env -> Pat (TypeBase Size o) -> Value -> EvalM Env
 matchPat env p v = do
   m <- runMaybeT $ patternMatch env p v
   case m of
     Nothing -> error $ "matchPat: missing case for " <> prettyString (toStruct <$> p) ++ " and " <> show v
     Just env' -> pure env'
 
-patternMatch :: Env -> Pat (TypeBase Size u) -> Value -> MaybeT EvalM Env
+patternMatch :: Env -> Pat (TypeBase Size o) -> Value -> MaybeT EvalM Env
 patternMatch env (PatAttr _ p _) val =
   patternMatch env p val
 patternMatch env (Id v (Info t) _) val =
@@ -667,20 +667,20 @@ evalIndex loc env is arr = do
 
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
-expandType :: (Pretty u) => Env -> TypeBase Size u -> TypeBase SizeClosure u
+expandType :: (Pretty o) => Env -> TypeBase Size o -> TypeBase SizeClosure o
 expandType _ (Scalar (Prim pt)) = Scalar $ Prim pt
 expandType env (Scalar (Record fs)) = Scalar $ Record $ fmap (expandType env) fs
-expandType env (Scalar (Arrow u p d t1 (RetType dims t2))) =
-  Scalar $ Arrow u p d (expandType env t1) (RetType dims (expandType env t2))
-expandType env t@(Array u shape _) =
+expandType env (Scalar (Arrow o p d t1 (RetType dims t2))) =
+  Scalar $ Arrow o p d (expandType env t1) (RetType dims (expandType env t2))
+expandType env t@(Array o shape _) =
   let et = stripArray (shapeRank shape) t
       et' = expandType env et
       shape' = fmap (SizeClosure env) shape
-   in second (const u) (arrayOf shape' $ toStruct et')
-expandType env (Scalar (TypeVar u tn args)) =
+   in second (const o) (arrayOf shape' $ toStruct et')
+expandType env (Scalar (TypeVar o tn args)) =
   case lookupType tn env of
     Just (TypeBinding t') ->
-      second (const u) t'
+      second (const o) t'
     Just (TypeConBinding tn_env ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
           onDim (SizeClosure dim_env dim)
@@ -692,11 +692,11 @@ expandType env (Scalar (TypeVar u tn args)) =
             | otherwise =
                 SizeClosure (env <> dim_env) $
                   applySubst (`M.lookup` substs) dim
-       in bimap onDim (const u) $ expandType (Env mempty types <> tn_env) t'
+       in bimap onDim (const o) $ expandType (Env mempty types <> tn_env) t'
     Nothing ->
       -- This case only happens for built-in abstract types,
       -- e.g. accumulators.
-      Scalar (TypeVar u tn $ map expandArg args)
+      Scalar (TypeVar o tn $ map expandArg args)
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
       (M.singleton p $ ExpSubst e, mempty)
@@ -710,7 +710,7 @@ expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env)
 
 -- | Evaluate all possible sizes, except those that contain free
 -- variables in the set of names.
-evalType :: S.Set VName -> EvalType -> EvalM (TypeBase (Either Int64 SizeClosure) NoUniqueness)
+evalType :: S.Set VName -> EvalType -> EvalM (TypeBase (Either Int64 SizeClosure) NoMode)
 evalType outer_bound t = do
   let evalDim bound _ (SizeClosure env e)
         | canBeEvaluated bound e =
@@ -782,7 +782,7 @@ sumValueShape env t c vs =
 -- Sometimes type instantiation is not quite enough - then we connect
 -- up the missing sizes here.  In particular used for eta-expanded
 -- entry points.
-linkMissingSizes :: [VName] -> Pat (TypeBase Size u) -> Value -> Env -> Env
+linkMissingSizes :: [VName] -> Pat (TypeBase Size o) -> Value -> Env -> Env
 linkMissingSizes [] _ _ env = env
 linkMissingSizes missing_sizes p v env =
   env <> i64Env (resolveExistentials missing_sizes p_t (valueShape v))
@@ -876,7 +876,7 @@ evalArg env e ext = do
     _ -> pure ()
   pure v
 
-returned :: Env -> TypeBase Size u -> [VName] -> Value -> EvalM Value
+returned :: Env -> TypeBase Size o -> [VName] -> Value -> EvalM Value
 returned _ _ [] v = pure v
 returned env ret retext v = do
   mapM_ (uncurry putExtSize . second (ValuePrim . SignedValue . Int64Value))
@@ -2389,7 +2389,7 @@ interpretFunction ctx fname vs = do
   where
     updateType (vt : vts) (Scalar (Arrow als pn d pt (RetType dims rt))) = do
       checkInput vt pt
-      Scalar . Arrow als pn d (valueStructType vt) . RetType dims . toRes Nonunique
+      Scalar . Arrow als pn d (valueStructType vt) . RetType dims . toRes Nonfresh
         <$> updateType vts (toStruct rt)
     updateType _ t =
       Right t

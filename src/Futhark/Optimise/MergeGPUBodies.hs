@@ -580,15 +580,15 @@ rewriteCerts :: Certs -> RewriteM Certs
 rewriteCerts (Certs cs) =
   Certs <$> mapM rewriteName cs
 
-rewriteType :: TypeBase Shape u -> RewriteM (TypeBase Shape u)
+rewriteType :: TypeBase Shape o -> RewriteM (TypeBase Shape o)
 -- Note: mapOnType also maps the VName token of accumulators
 rewriteType = mapOnType rewriteSubExp
 
-rewriteExtType :: TypeBase ExtShape u -> RewriteM (TypeBase ExtShape u)
+rewriteExtType :: TypeBase ExtShape o -> RewriteM (TypeBase ExtShape o)
 -- Note: mapOnExtType also maps the VName token of accumulators
 rewriteExtType = mapOnExtType rewriteSubExp
 
-rewriteParam :: Param (TypeBase Shape u) -> RewriteM (Param (TypeBase Shape u))
+rewriteParam :: Param (TypeBase Shape o) -> RewriteM (Param (TypeBase Shape o))
 rewriteParam (Param attrs n t) =
   Param attrs n <$> rewriteType t
 

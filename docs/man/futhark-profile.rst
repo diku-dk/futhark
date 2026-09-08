@@ -39,9 +39,10 @@ contains files with human-readable profiling information. A set of files will be
 created for each benchmark dataset. If the original invocation of ``futhark
 bench`` included multiple programs, then ``futhark profile`` will create
 subdirectories for each program (although all inside the same top level
-directory). If the source files passed to ``futhark bench`` are accessible via
-the original paths, then the directory will also contain HTML files with
-annotated source code.
+directory). The dataset HTML reports include the log and timeline even when
+the source files are unavailable. If the source files passed to ``futhark
+bench`` are accessible via the original paths, the reports also link to HTML
+files with annotated source code.
 
 You can pass multiple JSON files to ``futhark profile``. Each will
 produce a distinct top level directory.
@@ -64,8 +65,17 @@ level directory.
   most importantly the source locations.
 
 * ``foo-index.html``: overview file and guide to the other html files.
-  Contains explanations for the concepts, links to other pages.
-  This is the entry file for profile exploration.
+  Contains the log and timeline as preformatted text, with links to jump to
+  either section, and navigation to the source and cost centre pages.
+  This is the entry file for profile exploration. Missing logs or profiling
+  information are indicated explicitly; a recorded empty log or timeline is
+  shown as empty. A dataset with only a log still gets an HTML report. Failed
+  datasets and datasets with neither a log nor a profile do not.
+
+The HTML sections contain the same text as the log and timeline files, which
+remain available separately. Event order, durations, and provenance are
+preserved; backend-specific event details remain in the input JSON. No
+allocation/deallocation events or start times are inferred from the log.
 
 The log file is often too verbose to be useful, but the summary and timeline
 should be inspected, even if the latter is sometimes fairly large.
@@ -89,7 +99,9 @@ Raw reports
 Alternatively, the JSON file passed to ``futhark profile`` may also be a raw
 profiling report as produced by the C API function ``futhark_context_report()``.
 A directory is still created, but it will only contain a single set of files,
-and it will not contain a log.
+and it will not contain a log. Open ``index.html`` in this directory to read
+the timeline and browse the source information. The text files are named
+``summary`` and ``timeline``.
 
 EXAMPLES
 ========

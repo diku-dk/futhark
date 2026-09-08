@@ -50,7 +50,7 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
-i64 :: TypeBase dim als
+i64 :: TypeBase dim o
 i64 = Scalar $ Prim $ Signed Int64
 
 -- The monomorphization monad reads 'PolyBinding's and writes
@@ -323,14 +323,14 @@ instance Pretty (Shape MonoSize) where
 -- | The kind of type relative to which we monomorphise. What is most important
 -- to us is not the specific dimensions, but merely whether they are known or
 -- anonymous/local.
-type MonoType = TypeBase MonoSize NoUniqueness
+type MonoType = TypeBase MonoSize NoMode
 
-monoType :: TypeBase Size als -> MonoType
+monoType :: TypeBase Size o -> MonoType
 monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
   where
     -- Remove exts from return types because we don't use them anymore.
-    noExts :: TypeBase MonoSize u -> TypeBase MonoSize u
-    noExts (Array u shape t) = Array u shape $ noExtsScalar t
+    noExts :: TypeBase MonoSize o -> TypeBase MonoSize o
+    noExts (Array o shape t) = Array o shape $ noExtsScalar t
     noExts (Scalar t) = Scalar $ noExtsScalar t
     noExtsScalar (Record fs) = Record $ M.map noExts fs
     noExtsScalar (Sum fs) = Sum $ M.map (map noExts) fs
@@ -430,13 +430,13 @@ transformFName loc fname ft = do
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphised.
         (Just (fname', infer), _) ->
-          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
+          applySizeArgs fname' (toRes Nonfresh t') <$> infer t'
         -- An intrinsic function.
         (Nothing, Nothing) -> pure $ var fname t'
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
           (fname', infer) <- monomorphiseBinding funbind mono_t
-          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
+          applySizeArgs fname' (toRes Nonfresh t') <$> infer t'
   where
     var fname' t' = Var fname' (Info t') loc
 
@@ -472,7 +472,7 @@ transformFName loc fname ft = do
 -- depends on what the caller of 'transformType' does with the resulting
 -- 'ExpReplacements' afterwards; 'transformType' itself does not add any
 -- parameters. See Note [Higher-Order Parameter Sizes].
-transformType :: TypeBase Size u -> MonoM (TypeBase Size u)
+transformType :: TypeBase Size o -> MonoM (TypeBase Size o)
 transformType = traverseDims onDim
   where
     onDim _ pos e
@@ -506,15 +506,15 @@ transformType = traverseDims onDim
 -- same type, so each 'Arrow' we cross must, before returning, re-scope any
 -- such size locally to its own return type (via 'transformRetTypeSizesWith').
 -- See Note [Higher-Order Parameter Sizes].
-transformFNameType :: TypeBase Size u -> MonoM (TypeBase Size u)
+transformFNameType :: TypeBase Size o -> MonoM (TypeBase Size o)
 transformFNameType typ =
   case typ of
     Scalar scalar ->
       Scalar <$> transformScalarSizes scalar
-    Array u shape scalar ->
-      Array u <$> mapM onDim shape <*> transformScalarSizes scalar
+    Array o shape scalar ->
+      Array o <$> mapM onDim shape <*> transformScalarSizes scalar
   where
-    transformScalarSizes :: ScalarTypeBase Size u -> MonoM (ScalarTypeBase Size u)
+    transformScalarSizes :: ScalarTypeBase Size o -> MonoM (ScalarTypeBase Size o)
     transformScalarSizes (Record fs) =
       Record <$> traverse transformFNameType fs
     transformScalarSizes (Sum cs) =
@@ -528,8 +528,8 @@ transformFNameType typ =
           case argName of
             Unnamed -> mempty
             Named vn -> S.singleton vn
-    transformScalarSizes (TypeVar u qn args) =
-      TypeVar u qn <$> mapM onArg args
+    transformScalarSizes (TypeVar o qn args) =
+      TypeVar o qn <$> mapM onArg args
       where
         onArg (TypeArgDim dim) = TypeArgDim <$> onDim dim
         onArg (TypeArgType ty) = TypeArgType <$> transformFNameType ty
@@ -546,17 +546,17 @@ transformFNameType typ =
 -- be a top-level named parameter (those names are not in scope outside), so it
 -- is instead added to the return type's own existentially-bound sizes.
 transformRetTypeSizesWith ::
-  (TypeBase Size as -> MonoM (TypeBase Size as)) ->
+  (TypeBase Size o -> MonoM (TypeBase Size o)) ->
   S.Set VName ->
-  RetTypeBase Size as ->
-  MonoM (RetTypeBase Size as)
+  RetTypeBase Size o ->
+  MonoM (RetTypeBase Size o)
 transformRetTypeSizesWith f argset (RetType dims ty) = do
   ty' <- withArgs argset $ withMono dims $ f ty
   rl <- parametrizing argset
   let dims' = dims <> map snd rl
   pure $ RetType dims' ty'
 
-transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
+transformRetTypeSizes :: S.Set VName -> RetTypeBase Size o -> MonoM (RetTypeBase Size o)
 transformRetTypeSizes = transformRetTypeSizesWith transformType
 
 sizesForPat :: (MonadFreshNames m) => Pat ParamType -> m ([VName], Pat ParamType)
@@ -846,7 +846,7 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
         mkApply
           op
           [(xext, e1)]
-          (AppRes (Scalar $ Arrow mempty yp (diet ytype) (toStruct ytype) (RetType [] $ toRes Nonunique t')) [])
+          (AppRes (Scalar $ Arrow mempty yp (diet ytype) (toStruct ytype) (RetType [] $ toRes Nonfresh t')) [])
       onDim (Var d typ _)
         | Named p <- xp, qualLeaf d == p = Var (qualName v1) typ loc
         | Named p <- yp, qualLeaf d == p = Var (qualName v2) typ loc
@@ -910,15 +910,15 @@ desugarUpdateSection steps (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
     isFix _ = False
 desugarUpdateSection _ t _ = error $ "desugarUpdateSection: not a function type: " ++ prettyString t
 
-transformPat :: Pat (TypeBase Size u) -> MonoM (Pat (TypeBase Size u))
+transformPat :: Pat (TypeBase Size o) -> MonoM (Pat (TypeBase Size o))
 transformPat = traverse transformType
 
 type DimInst = M.Map VName Size
 
 dimMapping ::
-  (Monoid a) =>
-  TypeBase Size a ->
-  TypeBase Size a ->
+  (Monoid o) =>
+  TypeBase Size o ->
+  TypeBase Size o ->
   ExpReplacements ->
   ExpReplacements ->
   DimInst
@@ -988,14 +988,14 @@ inferSizeArgs tparams bind_t bind_r t = do
 noNamedParams :: MonoType -> MonoType
 noNamedParams = f
   where
-    f :: TypeBase MonoSize u -> TypeBase MonoSize u
-    f (Array u shape t) = Array u shape (f' t)
+    f :: TypeBase MonoSize o -> TypeBase MonoSize o
+    f (Array o shape t) = Array o shape (f' t)
     f (Scalar t) = Scalar $ f' t
-    f' :: ScalarTypeBase MonoSize u -> ScalarTypeBase MonoSize u
+    f' :: ScalarTypeBase MonoSize o -> ScalarTypeBase MonoSize o
     f' (Record fs) = Record $ fmap f fs
     f' (Sum cs) = Sum $ fmap (map f) cs
-    f' (Arrow u _ d1 t1 (RetType dims t2)) =
-      Arrow u Unnamed d1 (f t1) (RetType dims (f t2))
+    f' (Arrow o _ d1 t1 (RetType dims t2)) =
+      Arrow o Unnamed d1 (f t1) (RetType dims (f t2))
     f' t = t
 
 -- | arrowArg takes a return type and returns it
@@ -1005,8 +1005,8 @@ arrowArg ::
   S.Set VName -> -- scope
   S.Set VName -> -- set of argument
   [VName] -> -- size parameters
-  RetTypeBase Size as ->
-  (RetTypeBase Size as, S.Set VName)
+  RetTypeBase Size o ->
+  (RetTypeBase Size o, S.Set VName)
 arrowArg scope argset args_params rety =
   let (rety', (funArgs, _)) = runWriter (arrowArgRetType (scope, mempty) argset rety)
       new_params = funArgs `S.union` S.fromList args_params
@@ -1020,8 +1020,8 @@ arrowArg scope argset args_params rety =
     arrowArgRetType ::
       (S.Set VName, [VName]) ->
       S.Set VName ->
-      RetTypeBase Size as' ->
-      Writer (S.Set VName, S.Set VName) (RetTypeBase Size as')
+      RetTypeBase Size o' ->
+      Writer (S.Set VName, S.Set VName) (RetTypeBase Size o')
     arrowArgRetType (scope', dimsToPush) argset' (RetType dims ty) = pass $ do
       let dims' = dims <> dimsToPush
       (ty', (_, canExt)) <- listen $ arrowArgType (argset' `S.union` scope', dims') ty
@@ -1042,8 +1042,8 @@ arrowArg scope argset args_params rety =
           case argName of
             Unnamed -> argset'
             Named vn -> S.insert vn argset'
-    arrowArgScalar env (TypeVar u qn args) =
-      TypeVar u qn <$> mapM arrowArgArg args
+    arrowArgScalar env (TypeVar o qn args) =
+      TypeVar o qn <$> mapM arrowArgArg args
       where
         arrowArgArg (TypeArgDim dim) = TypeArgDim <$> arrowArgSize dim
         arrowArgArg (TypeArgType ty) = TypeArgType <$> arrowArgType env ty
@@ -1051,10 +1051,10 @@ arrowArg scope argset args_params rety =
 
     arrowArgType ::
       (S.Set VName, [VName]) ->
-      TypeBase Size as' ->
-      Writer (S.Set VName, S.Set VName) (TypeBase Size as')
-    arrowArgType env (Array u shape scalar) =
-      Array u <$> traverse arrowArgSize shape <*> arrowArgScalar env scalar
+      TypeBase Size o' ->
+      Writer (S.Set VName, S.Set VName) (TypeBase Size o')
+    arrowArgType env (Array o shape scalar) =
+      Array o <$> traverse arrowArgSize shape <*> arrowArgScalar env scalar
     arrowArgType env (Scalar ty) =
       Scalar <$> arrowArgScalar env ty
 
@@ -1062,27 +1062,27 @@ arrowArg scope argset args_params rety =
     arrowArgSize s = pure s
 
     -- \| arrowClean cleans the mess in the type
-    arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
+    arrowCleanRetType :: S.Set VName -> RetTypeBase Size o -> RetTypeBase Size o
     arrowCleanRetType paramed (RetType dims ty) =
       RetType (nubOrd $ filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
 
-    arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size as -> ScalarTypeBase Size as
+    arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size o -> ScalarTypeBase Size o
     arrowCleanScalar paramed (Record fs) =
       Record $ M.map (arrowCleanType paramed) fs
     arrowCleanScalar paramed (Sum cs) =
       Sum $ (M.map . map) (arrowCleanType paramed) cs
     arrowCleanScalar paramed (Arrow as argName d argT retT) =
       Arrow as argName d argT (arrowCleanRetType paramed retT)
-    arrowCleanScalar paramed (TypeVar u qn args) =
-      TypeVar u qn $ map arrowCleanArg args
+    arrowCleanScalar paramed (TypeVar o qn args) =
+      TypeVar o qn $ map arrowCleanArg args
       where
         arrowCleanArg (TypeArgDim dim) = TypeArgDim dim
         arrowCleanArg (TypeArgType ty) = TypeArgType $ arrowCleanType paramed ty
     arrowCleanScalar _ ty = ty
 
-    arrowCleanType :: S.Set VName -> TypeBase Size as -> TypeBase Size as
-    arrowCleanType paramed (Array u shape scalar) =
-      Array u shape $ arrowCleanScalar paramed scalar
+    arrowCleanType :: S.Set VName -> TypeBase Size o -> TypeBase Size o
+    arrowCleanType paramed (Array o shape scalar) =
+      Array o shape $ arrowCleanScalar paramed scalar
     arrowCleanType paramed (Scalar ty) =
       Scalar $ arrowCleanScalar paramed ty
 
@@ -1099,28 +1099,28 @@ removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, l
 -- not justify a fresh result.  See Note [Parametric results] in
 -- Language.Futhark.TypeChecker.Consumption.
 freshenFromInst ::
-  TypeBase d Uniqueness ->
+  TypeBase d Freshness ->
   [Pat ParamType] ->
   ResRetType ->
   ([Pat ParamType], ResRetType)
 freshenFromInst (Scalar (Arrow _ _ _ ia (RetType _ ir))) (p : ps) rt =
   let (ps', rt') = freshenFromInst ir ps rt
-   in (fmap (freshenAsType (second (const Nonunique) ia)) p : ps', rt')
+   in (fmap (freshenAsType (second (const Nonfresh) ia)) p : ps', rt')
 freshenFromInst it [] (RetType ext t) = ([], RetType ext (freshenAs it t))
 freshenFromInst _ ps rt = (ps, rt)
 
 -- | Copy freshness from the instantiated type into the return slots of the
 -- declared one.
-freshenAsType :: TypeBase d Uniqueness -> TypeBase Size u -> TypeBase Size u
+freshenAsType :: TypeBase d Freshness -> TypeBase Size u -> TypeBase Size u
 freshenAsType
   (Scalar (Arrow _ _ _ ia (RetType _ ir)))
   (Scalar (Arrow u pn d a (RetType ext r))) =
     Scalar $
-      Arrow u pn d (freshenAsType (second (const Nonunique) ia) a) $
+      Arrow u pn d (freshenAsType (second (const Nonfresh) ia) a) $
         RetType ext (freshenAs ir r)
 freshenAsType _ t = t
 
-freshenAs :: TypeBase d1 Uniqueness -> TypeBase d2 Uniqueness -> TypeBase d2 Uniqueness
+freshenAs :: TypeBase d1 Freshness -> TypeBase d2 Freshness -> TypeBase d2 Freshness
 freshenAs (Scalar (Record ifs)) (Scalar (Record fs))
   | M.keys ifs == M.keys fs =
       Scalar $ Record $ M.intersectionWith freshenAs ifs fs
@@ -1128,10 +1128,10 @@ freshenAs (Scalar (Sum ics)) (Scalar (Sum cs))
   | M.keys ics == M.keys cs =
       Scalar $ Sum $ M.intersectionWith (zipWith freshenAs) ics cs
 freshenAs it t
-  -- 'setUniqueness' writes every node, and 'uniqueness' of a record is Unique
+  -- 'setMode' writes every node, and 'freshness' of a record is Fresh
   -- if *any* field is, so this must not be reached for compound types.
   | compound it || compound t = t
-  | uniqueness it == Unique = t `setUniqueness` Unique
+  | freshness it == Fresh = t `setMode` Fresh
   | otherwise = t
   where
     compound (Scalar Record {}) = True
@@ -1146,7 +1146,7 @@ monomorphiseBinding ::
   MonoType ->
   MonoM (VName, InferSizeArgs)
 monomorphiseBinding (PolyBinding (entry, name, tparams, params0, rettype0, body, attrs, loc)) inst_t = isolateNormalisation $ do
-  let (params, rettype) = freshenFromInst (second (const Nonunique) inst_t) params0 rettype0
+  let (params, rettype) = freshenFromInst (second (const Nonfresh) inst_t) params0 rettype0
       bind_t = funType params rettype
   (substs, t_shape_params) <-
     typeSubstsM loc bind_t $ noNamedParams inst_t
@@ -1296,7 +1296,7 @@ typeSubstsM loc orig_t1 orig_t2 =
     sub (Scalar Prim {}) (Scalar Prim {}) = pure ()
     sub (Scalar (Arrow _ _ _ t1a (RetType _ t1b))) (Scalar (Arrow _ _ _ t2a t2b)) = do
       sub t1a t2a
-      subRet (toStruct t1b) (second (const NoUniqueness) t2b)
+      subRet (toStruct t1b) (second (const NoMode) t2b)
     sub (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
       zipWithM_ typeSubstClause (sortConstrs cs1) (sortConstrs cs2)
       where

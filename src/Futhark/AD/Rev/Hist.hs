@@ -68,7 +68,7 @@ bindSubExpRes s =
 nestedmap :: [SubExp] -> [PrimType] -> Lambda SOACS -> ADM (Lambda SOACS)
 nestedmap [] _ lam = pure lam
 nestedmap s@(h : r) pt lam = do
-  params <- traverse (\tp -> newParam "x" $ Array tp (Shape s) NoUniqueness) pt
+  params <- traverse (\tp -> newParam "x" $ Array tp (Shape s) NoMode) pt
   body <- nestedmap r pt lam
   mkLambda params $
     fmap varsRes . letTupExp "res" . Op . Screma h (map paramName params)
@@ -232,7 +232,7 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
         letExp "res" . Op . Screma n [iota_n] =<< mapSOAC lam
 
   let hist_op = HistOp (Shape [w]) rf [dst_cpy, dst_minus_ones] [ne, if nr_dims == 1 then intConst Int64 (-1) else ne_minus_ones] hist_lam
-  f' <- mkIdentityLambda [Prim int64, rowType vs_type, rowType $ Array int64 (Shape vs_dims) NoUniqueness]
+  f' <- mkIdentityLambda [Prim int64, rowType vs_type, rowType $ Array int64 (Shape vs_dims) NoMode]
   x_inds <- newVName (baseName x <> "_inds")
   auxing aux $
     letBindNames [x, x_inds] $
@@ -389,7 +389,7 @@ diffMulHist _ops x aux n mul ne is vs w rf dst m = do
   zrn_ne <- letSubExp "zr_ne" $ BasicOp $ Replicate (Shape inner_dims) (intConst Int64 0)
   let hist_zrn = HistOp (Shape [w]) rf [zr_counts0] [if length vs_dims == 1 then intConst Int64 0 else zrn_ne] lam_add
 
-  f' <- mkIdentityLambda [Prim int64, Prim int64, rowType vs_type, rowType $ Array int64 (Shape vs_dims) NoUniqueness]
+  f' <- mkIdentityLambda [Prim int64, Prim int64, rowType vs_type, rowType $ Array int64 (Shape vs_dims) NoMode]
   nz_prods <- newVName "non_zero_prod"
   zr_counts <- newVName "zero_count"
   auxing aux $
@@ -696,7 +696,7 @@ radixSort xs n w = do
   iters <- letSubExp "iters" =<< toExp (untyped (pe64 logw + 1) ~/~ untyped (pe64 (intConst Int64 2)))
 
   types <- traverse lookupType xs
-  params <- zipWithM (\x -> newParam (baseName x) . flip toDecl Nonunique) xs types
+  params <- zipWithM (\x -> newParam (baseName x) . flip toDecl Observe) xs types
   i <- newVName "i"
   loopbody <- buildBody_ . localScope (scopeOfFParams params) $
     fmap varsRes $ do

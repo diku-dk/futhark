@@ -167,7 +167,7 @@ globalTypes =
   M.fromList
     . concatMap
       ( map
-          (\pe -> (patElemName pe, toDecl (patElemType pe) Nonunique))
+          (\pe -> (patElemName pe, toDecl (patElemType pe) Observe))
           . patElems
           . stmPat
       )

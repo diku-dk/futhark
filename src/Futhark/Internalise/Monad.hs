@@ -37,7 +37,7 @@ type FunInfo =
   ( [VName],
     [DeclType],
     [FParam SOACS],
-    [(SubExp, Type)] -> Maybe [(DeclExtType, RetAls)]
+    [(SubExp, Type)] -> Maybe [(ExtType, RetAls)]
   )
 
 type FunTable = M.Map VName FunInfo

@@ -209,22 +209,22 @@ liftRegArg lvl _segments w inps env (se, d) = do
 -- return type.
 --
 -- A lifted function corresponds to 'map f', which always produces fresh arrays.
--- We therefore mark all array components of the return type as 'Unique', such
--- that the results are known to not alias anything (in particular not the
--- arguments). Maintaining this invariant may require inserting copies in the
--- function body; see 'freshenResult'.
+-- No result therefore aliases anything - neither an argument nor another
+-- result - which is recorded by giving each an empty 'RetAls'; see 'noRetAls'.
+-- Maintaining this invariant may require inserting copies in the function body;
+-- see 'freshenResult'.
 liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
 liftRetType w = concat . snd . L.mapAccumL liftType 0
   where
     liftType i rettype =
       let lifted = case rettype of
-            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
+            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) NoMode
             Array pt _ _ ->
               let num_data = Prim int64
-                  segs = arrayOf (Prim int64) (Shape [Free w]) Unique
-                  flags = arrayOf (Prim Bool) (Shape [Ext i]) Unique
-                  offsets = arrayOf (Prim int64) (Shape [Free w]) Unique
-                  elems = arrayOf (Prim pt) (Shape [Ext i]) Unique
+                  segs = arrayOf (Prim int64) (Shape [Free w]) NoMode
+                  flags = arrayOf (Prim Bool) (Shape [Ext i]) NoMode
+                  offsets = arrayOf (Prim int64) (Shape [Free w]) NoMode
+                  elems = arrayOf (Prim pt) (Shape [Ext i]) NoMode
                in [num_data, segs, flags, offsets, elems]
             Acc {} -> error "liftRetType: Acc"
             Mem {} -> error "liftRetType: Mem"
@@ -235,18 +235,18 @@ liftRegularRetType inps w = concat . snd . L.mapAccumL liftType 0
   where
     liftType i rettype =
       let lifted = case rettype of
-            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Unique
+            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) NoMode
             Array pt shape _ ->
               if needsIrregularRetType inps rettype
                 then
                   let num_data = Prim int64
-                      segs = arrayOf (Prim int64) (Shape [Free w]) Unique
-                      flags = arrayOf (Prim Bool) (Shape [Ext i]) Unique
-                      offsets = arrayOf (Prim int64) (Shape [Free w]) Unique
-                      elems = arrayOf (Prim pt) (Shape [Ext i]) Unique
+                      segs = arrayOf (Prim int64) (Shape [Free w]) NoMode
+                      flags = arrayOf (Prim Bool) (Shape [Ext i]) NoMode
+                      offsets = arrayOf (Prim int64) (Shape [Free w]) NoMode
+                      elems = arrayOf (Prim pt) (Shape [Ext i]) NoMode
                    in [num_data, segs, flags, offsets, elems]
                 else
-                  pure $ arrayOf (Prim pt) (Shape [Free w] <> shape) Unique
+                  pure $ arrayOf (Prim pt) (Shape [Free w] <> shape) NoMode
             Acc {} -> error "liftRetType: Acc"
             Mem {} -> error "liftRetType: Mem"
        in (i + length lifted, lifted)
@@ -289,14 +289,10 @@ flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, ret
             -- We do not lift 'size_args' because they correspond to size
             -- parameters, which are invariant in the uniform case.
             pure $ (w, Observe) : map snd size_args <> value_args'
-      args_ts <- mapM (subExpType . fst) args'
-      let dietToUnique Consume = Unique
-          dietToUnique Observe = Nonunique
-          param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
-          rettype' =
+      let rettype' =
             if nonuniform
-              then addRetAls param_ts $ liftRetType w $ map fst rettype
-              else addRetAls param_ts $ liftRegularRetType inps w $ map fst rettype
+              then noRetAls $ liftRetType w $ map fst rettype
+              else noRetAls $ liftRegularRetType inps w $ map fst rettype
       result <- letTupExp (name' <> "_res") $ Apply name' args' rettype' s
       let reps =
             if nonuniform
@@ -443,18 +439,10 @@ analyseFunSizeParams = M.fromList . map analyse
           size_params = filter (isSizeParam . snd) indexed_params
        in (funDefName fd, S.fromList $ map fst size_params)
 
-addRetAls :: [DeclType] -> [RetType GPU] -> [(RetType GPU, RetAls)]
-addRetAls params rettype = zip rettype $ map possibleAliases rettype
-  where
-    aliasable (Array _ _ Nonunique) = True
-    aliasable _ = False
-    aliasable_params =
-      map snd $ filter (aliasable . fst) $ zip params [0 ..]
-    aliasable_rets =
-      map snd $ filter (aliasable . declExtTypeOf . fst) $ zip rettype [0 ..]
-    possibleAliases t
-      | aliasable t = RetAls aliasable_params aliasable_rets
-      | otherwise = mempty
+-- | Every result of a lifted function is fresh (see 'liftRetType'), so
+-- none of them alias a parameter or each other.
+noRetAls :: [RetType GPU] -> [(RetType GPU, RetAls)]
+noRetAls = map (,mempty)
 
 -- | Impose attributes on the statements of a function body. This is used to
 -- impose attributes on top level statements in lifted functions.
@@ -483,7 +471,7 @@ liftFunDef attrs funHasParallelism funSizeParams const_scope fd = do
         (p, i) <- zip fparams [0 ..]
         pure (paramName p, DistInput (ResTag i) (paramType p))
   let rettype' =
-        addRetAls (map paramDeclType fparams'') $
+        noRetAls $
           liftRetType w (map fst rettype)
   let (inputs', dstms) =
         distributeBody DistributeIrregular funHasParallelism const_scope [Var (paramName wp)] inputs $
@@ -545,7 +533,7 @@ liftUniformFunDef attrs funHasParallelism funSizeParams const_scope fd = do
           imposeAttrsBody attrs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) value_reps
       rettype' =
-        addRetAls (map paramDeclType fparams'') $
+        noRetAls $
           liftRegularRetType inputs' w (map fst rettype)
   -- Lift the body of the function and get the results, inserting copies as
   -- necessary to ensure the results are fresh and unique (see 'freshenResult').

@@ -7,7 +7,7 @@ module Language.Futhark.TypeChecker.Consumption
     Alias (..),
     Aliases,
     TypeAliases,
-    inferReturnUniqueness,
+    inferReturnFreshness,
   )
 where
 
@@ -39,10 +39,10 @@ data Alias
   = AliasBound VName [Name]
   | AliasFree VName [Name]
   | -- | Like 'AliasBound', but the alias arises from the closure of a function
-    -- with a unique return type. See Note [Spurious closure aliases].
+    -- with a fresh return type. See Note [Spurious closure aliases].
     AliasClosure VName [Name]
   | -- | Used to represent unknowable internal aliasing, which may
-    -- occur for a function that returns a non-unique abstract type.
+    -- occur for a function that returns a nonfresh abstract type.
     -- (It may internally be a pair of arrays that alias each other.)
     AliasSelf
   deriving (Eq, Ord, Show)
@@ -62,7 +62,7 @@ aliasVar (AliasClosure v _) = Just v
 aliasVar AliasSelf = Nothing
 
 -- | Does this value have internal aliasing, meaning it can neither be consumed
--- nor given a unique type?  See 'AliasSelf'.
+-- nor given a fresh type?  See 'AliasSelf'.
 selfAliased :: Aliases -> Bool
 selfAliased = S.member AliasSelf
 
@@ -85,23 +85,23 @@ instance Pretty (S.Set Alias) where
 
 -- | The set of in-scope variables that are being aliased.
 boundAliases :: Aliases -> S.Set VName
-boundAliases = S.fromList . mapMaybe aliasVar . filter bound . S.toList
-  where
-    bound AliasBound {} = True
-    bound AliasClosure {} = True
-    bound AliasFree {} = False
-    bound AliasSelf = False
+boundAliases = boundAliasesWith True
 
 -- | As 'boundAliases', but ignoring 'AliasClosure'. Use this when deciding
 -- whether to report an aliasing error to the user, but not when deciding what
 -- the compiler must conservatively assume.
 sourceBoundAliases :: Aliases -> S.Set VName
-sourceBoundAliases = S.fromList . mapMaybe aliasVar . filter bound . S.toList
+sourceBoundAliases = boundAliasesWith False
+
+-- | The in-scope variables aliased here, counting those aliased only through a
+-- closure if asked.  'AliasFree' has left scope and 'AliasSelf' is no variable
+-- at all, so neither is ever included.
+boundAliasesWith :: Bool -> Aliases -> S.Set VName
+boundAliasesWith closures = S.fromList . mapMaybe aliasVar . filter bound . S.toList
   where
     bound AliasBound {} = True
-    bound AliasClosure {} = False
-    bound AliasFree {} = False
-    bound AliasSelf {} = False
+    bound AliasClosure {} = closures
+    bound _ = False
 
 -- | Aliases for a type, which is a set of the variables that are
 -- aliased.
@@ -111,21 +111,21 @@ type TypeAliases = TypeBase Size Aliases
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
 -- any already present aliases.
-setAliases :: TypeBase dim asf -> ast -> TypeBase dim ast
+setAliases :: TypeBase dim o1 -> o2 -> TypeBase dim o2
 setAliases t = addAliases t . const
 
 -- | @t \`addAliases\` f@ returns @t@, but with any already present
 -- aliases replaced by @f@ applied to that aliases.
 addAliases ::
-  TypeBase dim asf ->
-  (asf -> ast) ->
-  TypeBase dim ast
+  TypeBase dim o1 ->
+  (o1 -> o2) ->
+  TypeBase dim o2
 addAliases = flip second
 
 aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
 
-selfAliasType :: VName -> TypeBase Size asf -> TypeAliases
+selfAliasType :: VName -> TypeBase Size o -> TypeAliases
 selfAliasType v = insertSelfAliases True v . unknownAliases
 
 -- | @insertSelfAliases functions v t@ adds an alias of @v@ to every component
@@ -259,43 +259,43 @@ incCounter =
 returnAliased :: Name -> SrcLoc -> CheckM ()
 returnAliased name loc =
   addError loc mempty . withIndexLink "return-aliased" $
-    "Unique-typed return value is aliased to"
+    "Fresh-declared return value is aliased to"
       <+> dquotes (prettyName name)
       <> ", which is not consumable."
 
--- | Returning a value for a unique return type is equivalent to consuming it,
+-- | Returning a value for a fresh return type is equivalent to consuming it,
 -- so a value with internal aliasing cannot be returned that way.
 selfAliasedReturn :: (Located loc) => loc -> CheckM ()
 selfAliasedReturn loc =
   addError loc mempty $
-    "A unique-typed component of the return value may have internal aliases,"
-      </> "and so cannot be given a unique type."
+    "A fresh-declared component of the return value may have internal aliases,"
+      </> "and so cannot be given a fresh type."
 
-uniqueReturnAliased :: SrcLoc -> CheckM ()
-uniqueReturnAliased loc =
-  addError loc mempty . withIndexLink "unique-return-aliased" $
-    "A unique-typed component of the return value is aliased to some other component."
+freshReturnAliased :: SrcLoc -> CheckM ()
+freshReturnAliased loc =
+  addError loc mempty . withIndexLink "fresh-return-aliased" $
+    "A fresh-declared component of the return value is aliased to some other component."
 
 checkReturnAlias :: SrcLoc -> [Pat ParamType] -> ResType -> TypeAliases -> CheckM ()
 checkReturnAlias loc params rettp =
   foldM_ (checkReturnAlias' params) (mempty, mempty) . returnAliases rettp
   where
     -- The state is the aliases of the components seen so far: those of the
-    -- unique ones, and those of all of them.
-    checkReturnAlias' params' (uniques, seen) (Unique, names) = do
-      when (names `overlaps` seen) $ uniqueReturnAliased loc
+    -- fresh ones, and those of all of them.
+    checkReturnAlias' params' (uniques, seen) (Fresh, names) = do
+      when (names `overlaps` seen) $ freshReturnAliased loc
       when (selfAliased names) $ selfAliasedReturn loc
       notAliasesParam params' $ S.fromList $ mapMaybe aliasVar $ S.toList names
       pure (uniques <> names, seen <> names)
-    checkReturnAlias' _ (uniques, seen) (Nonunique, names) = do
-      when (names `overlaps` uniques) $ uniqueReturnAliased loc
+    checkReturnAlias' _ (uniques, seen) (Nonfresh, names) = do
+      when (names `overlaps` uniques) $ freshReturnAliased loc
       pure (uniques, seen <> names)
 
     notAliasesParam params' names =
       forM_ params' $ \p ->
-        let consumedNonunique (v, t) =
+        let aliasedNonconsumable (v, t) =
               not (consumableParamType t) && (v `S.member` names)
-         in case find consumedNonunique $ patternMap p of
+         in case find aliasedNonconsumable $ patternMap p of
               Just (v, _) ->
                 returnAliased (baseName v) loc
               Nothing ->
@@ -304,11 +304,11 @@ checkReturnAlias loc params rettp =
     returnAliases (Scalar (Record ets1)) (Scalar (Record ets2)) =
       concat $ M.elems $ M.intersectionWith returnAliases ets1 ets2
     returnAliases expected got =
-      [(uniqueness expected, aliases got)]
+      [(freshness expected, aliases got)]
 
-    consumableParamType (Array u _ _) = u == Consume
+    consumableParamType (Array o _ _) = o == Consume
     consumableParamType (Scalar Prim {}) = True
-    consumableParamType (Scalar (TypeVar u _ _)) = u == Consume
+    consumableParamType (Scalar (TypeVar o _ _)) = o == Consume
     consumableParamType (Scalar (Record fs)) = all consumableParamType fs
     consumableParamType (Scalar (Sum fs)) = all (all consumableParamType) fs
     consumableParamType (Scalar Arrow {}) = False
@@ -316,10 +316,9 @@ checkReturnAlias loc params rettp =
 unscope :: [VName] -> Aliases -> Aliases
 unscope bound = S.map f
   where
-    f (AliasFree v fs) = AliasFree v fs
     f (AliasBound v fs) = if v `elem` bound then AliasFree v fs else AliasBound v fs
     f (AliasClosure v fs) = if v `elem` bound then AliasFree v fs else AliasClosure v fs
-    f AliasSelf = AliasSelf
+    f a = a
 
 -- | Figure out the aliases of each bound name in a pattern.
 matchPat :: Pat t -> TypeAliases -> DL.DList (VName, (t, TypeAliases))
@@ -479,10 +478,7 @@ observeVar loc qv t = do
     -- aliasing.  Its declared type is what makes parametricity visible; if we
     -- cannot find it, fall back to the instantiated type, which amounts to
     -- assuming no parametricity at all.  See Note [Parametric results].
-    noted env
-      | uncurry manufacturesAbstract $ fromMaybe ([], t) $ envGlobal env qv =
-          noteSelfAliases
-      | otherwise = id
+    noted env = uncurry notedAliases $ fromMaybe ([], t) $ envGlobal env qv
 
 -- Capture any newly consumed variables that occur during the provided action.
 contain :: CheckM a -> CheckM (a, Consumed)
@@ -519,7 +515,7 @@ combineAliases (Scalar (Prim t)) _ = Scalar $ Prim t
 combineAliases t1 t2 =
   error $ "combineAliases invalid args: " ++ show (t1, t2)
 
--- An alias inhibits uniqueness if it is used in disjoint values.
+-- An alias inhibits freshness if it is used in disjoint values.
 aliasesMultipleTimes :: TypeAliases -> Names
 aliasesMultipleTimes = S.fromList . map fst . filter ((> 1) . snd) . M.toList . delve
   where
@@ -543,7 +539,7 @@ arrayAliases (Scalar (Sum fs)) =
 
 -- | The aliases of any function-typed components. This is the part of 'aliases'
 -- that 'arrayAliases' ignores. We ignore closure aliases if the return type is
--- Unique. See Note [Spurious closure aliases].
+-- Fresh. See Note [Spurious closure aliases].
 arrowAliases :: TypeAliases -> Aliases
 arrowAliases t@(Scalar Arrow {}) = derivedAliases t
 arrowAliases (Scalar (Record fs)) = foldMap arrowAliases fs
@@ -578,10 +574,10 @@ overlapCheck loc (src, src_als) (ve, ve_als) =
         <+> dquotes "copy"
         <+> "to remove aliases from the value."
 
--- 'setUniqueness' does not look inside an arrow, but when we return a function,
--- the uniqueness of *its* return type has already been inferred when checking
--- the lambda. So go past all the arrows and set the uniqueness appropriately.
-withArrowRet :: ResType -> TypeAliases -> Uniqueness -> ResType
+-- 'setMode' does not look inside an arrow, but when we return a function,
+-- the freshness of *its* return type has already been inferred when checking
+-- the lambda. So go past all the arrows and set the freshness appropriately.
+withArrowRet :: ResType -> TypeAliases -> Freshness -> ResType
 withArrowRet
   (Scalar (Arrow u pn d pt (RetType ext t1)))
   (Scalar (Arrow _ _ _ _ (RetType _ t2)))
@@ -596,12 +592,12 @@ withArrowRet
         (Scalar (Arrow u' pn' d' pt' (RetType ext' a)))
         (Scalar (Arrow _ _ _ _ (RetType _ b))) =
           Scalar . Arrow u' pn' d' pt' . RetType ext' $ go a b
-      go a b = a `setUniqueness` uniqueness b
-withArrowRet t _ u = t `setUniqueness` u
+      go a b = a `setMode` freshness b
+withArrowRet t _ u = t `setMode` u
 
-inferReturnUniqueness :: [Pat ParamType] -> ResType -> TypeAliases -> ResType
-inferReturnUniqueness [] ret _ = ret `setUniqueness` Nonunique
-inferReturnUniqueness params ret ret_als = delve ret ret_als
+inferReturnFreshness :: [Pat ParamType] -> ResType -> TypeAliases -> ResType
+inferReturnFreshness [] ret _ = ret `setMode` Nonfresh
+inferReturnFreshness params ret ret_als = delve ret ret_als
   where
     forbidden = aliasesMultipleTimes ret_als
     consumings = consumingParams params
@@ -613,9 +609,9 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
       | all (`S.member` consumings) $ boundAliases (arrayAliases t_als),
         not $ selfAliased (aliases t_als),
         not $ any (`S.member` forbidden) (mapMaybe aliasVar (S.toList (aliases t_als))) =
-          withArrowRet t t_als Unique
+          withArrowRet t t_als Fresh
       | otherwise =
-          withArrowRet t t_als Nonunique
+          withArrowRet t t_als Nonfresh
 
 checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
@@ -678,13 +674,13 @@ checkArg prev p_t e = do
 
 -- | Can a value produced by fully applying a function with this return type
 -- alias the closure of that function? This is not the case if every part of the
--- (curried) return type is unique or primitive, as such a result is guaranteed
+-- (curried) return type is fresh or primitive, as such a result is guaranteed
 -- to be freshly constructed.
 resultCanAlias :: ResType -> Bool
 resultCanAlias = anyResultComponent canAlias
   where
-    canAlias (Scalar (TypeVar u _ _)) = u == Nonunique
-    canAlias (Array u _ _) = u == Nonunique
+    canAlias (Scalar (TypeVar u _ _)) = u == Nonfresh
+    canAlias (Array u _ _) = u == Nonfresh
     canAlias _ = False
 
 -- | Does any component of the value that this type ultimately produces satisfy
@@ -699,7 +695,7 @@ anyResultComponent p t = p t
 -- | The aliases that may show up in a *value* derived from a value of the given
 -- type. For most types this is simply the aliases of the type itself, but
 -- functions are special: the only way to obtain a value from a function is to
--- apply it, so when a function returns a Unique value ('resultCanAlias'), that
+-- apply it, so when a function returns a Fresh value ('resultCanAlias'), that
 -- does not alias the closure.
 --
 -- Such aliases are weakened to 'AliasClosure' rather than dropped outright; see
@@ -722,18 +718,18 @@ derivedAliases t = aliases t
 
 -- | Can a value of this declared type produce, when its function components
 -- are applied, a value whose internal aliasing we cannot see?  That is so
--- exactly when some component of what it produces is a non-unique abstract type
+-- exactly when some component of what it produces is a nonfresh abstract type
 -- that is not one of the type parameters it is polymorphic in: it must then
 -- have manufactured that value, rather than been handed it.  Intrinsic types
 -- (notably accumulators) are exempt, as the compiler does know their
 -- representation, and they have no components that could alias each other.  See
 -- Note [Parametric results].
 manufacturesAbstract :: [TypeParam] -> TypeBase Size u -> Bool
-manufacturesAbstract tparams = anyResultComponent manufactured . toRes Nonunique
+manufacturesAbstract tparams = anyResultComponent manufactured . toRes Nonfresh
   where
     tparams' = [v | TypeParamType _ v _ <- tparams]
     manufactured (Scalar (TypeVar u t _)) =
-      u == Nonunique
+      u == Nonfresh
         && not (isIntrinsic (qualLeaf t))
         && qualLeaf t `notElem` tparams'
     manufactured _ = False
@@ -747,27 +743,36 @@ noteSelfAliases (Scalar (Record fs)) = Scalar $ Record $ fmap noteSelfAliases fs
 noteSelfAliases (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) noteSelfAliases cs
 noteSelfAliases t = t
 
+-- | Note on the function components of a value that applying them may produce a
+-- value with internal aliasing, when the given declared type says they may.
+-- See Note [Parametric results].
+notedAliases :: [TypeParam] -> TypeBase Size u -> TypeAliases -> TypeAliases
+notedAliases tparams decl
+  | manufacturesAbstract tparams decl = noteSelfAliases
+  | otherwise = id
+
 -- | The aliases to assume for a value whose provenance we know nothing about:
--- none at all, except that applying any function component of it may produce a
--- value with internal aliasing.  See Note [Parametric results].
+-- none at all, except what its own type says it may manufacture.  This is
+-- 'notedAliases' with no type parameters to exploit.  See Note [Parametric
+-- results].
 unknownAliases :: TypeBase Size u -> TypeAliases
-unknownAliases = noteSelfAliases . second (const mempty)
+unknownAliases t = notedAliases [] t $ second (const mempty) t
 
 -- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
 -- an argument the given types to a function with the given return
 -- type, consuming the argument with the given diet.
 returnType :: Aliases -> ResType -> Diet -> TypeAliases -> TypeAliases
-returnType _ (Array Unique et shape) _ _ =
+returnType _ (Array Fresh et shape) _ _ =
   Array mempty et shape
-returnType appres (Array Nonunique et shape) Consume _ =
+returnType appres (Array Nonfresh et shape) Consume _ =
   Array appres et shape
-returnType appres (Array Nonunique et shape) Observe arg =
+returnType appres (Array Nonfresh et shape) Observe arg =
   Array (appres <> derivedAliases arg) et shape
-returnType _ (Scalar (TypeVar Unique t targs)) _ _ =
+returnType _ (Scalar (TypeVar Fresh t targs)) _ _ =
   Scalar $ TypeVar mempty t targs
-returnType appres (Scalar (TypeVar Nonunique t targs)) Consume _ =
+returnType appres (Scalar (TypeVar Nonfresh t targs)) Consume _ =
   Scalar $ TypeVar appres t targs
-returnType appres (Scalar (TypeVar Nonunique t targs)) Observe arg =
+returnType appres (Scalar (TypeVar Nonfresh t targs)) Observe arg =
   Scalar $ TypeVar (appres <> derivedAliases arg) t targs
 returnType appres (Scalar (Record fs)) d arg =
   Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
@@ -801,7 +806,7 @@ boundFreeInExp e = do
     M.mapMaybe (fmap entryAliases) . M.fromSet (`M.lookup` vtable) $
       fvVars (freeInExp e)
 
--- Loops are tricky because we want to infer the uniqueness of their
+-- Loops are tricky because we want to infer the freshness of their
 -- parameters.  This is pretty unusual: we do not do this for ordinary
 -- functions.
 type Loop = (Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
@@ -812,17 +817,17 @@ updateParamDiet :: (VName -> Bool) -> Pat ParamType -> Pat ParamType
 updateParamDiet cons = recurse
   where
     recurse (Wildcard (Info t) wloc) =
-      Wildcard (Info $ t `setUniqueness` Observe) wloc
+      Wildcard (Info $ t `setMode` Observe) wloc
     recurse (PatParens p ploc) =
       PatParens (recurse p) ploc
     recurse (PatAttr attr p ploc) =
       PatAttr attr (recurse p) ploc
     recurse (Id name (Info t) iloc)
       | cons name =
-          let t' = t `setUniqueness` Consume
+          let t' = t `setMode` Consume
            in Id name (Info t') iloc
       | otherwise =
-          let t' = t `setUniqueness` Observe
+          let t' = t `setMode` Observe
            in Id name (Info t') iloc
     recurse (TuplePat pats ploc) =
       TuplePat (map recurse pats) ploc
@@ -841,7 +846,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
 
   -- Check that the new values of consumed merge parameters do not
   -- alias something bound outside the loop, AND that anything
-  -- returned for a unique merge parameter does not alias anything
+  -- returned for a consumed merge parameter does not alias anything
   -- else returned.
   let checkMergeReturn (Id pat_v (Info pat_v_t) patloc) t = do
         let free_als = S.filter (`notElem` patNames param) $ boundAliases (aliases t)
@@ -975,7 +980,7 @@ checkExp :: Exp -> CheckM (Exp, TypeAliases)
 --
 checkExp (AppExp (Apply f args loc) appres) = do
   (f', f_als) <- checkExp f
-  (args', args_als) <- NE.unzip <$> checkArgs (diets $ toRes Nonunique f_als) args
+  (args', args_als) <- NE.unzip <$> checkArgs (diets $ toRes Nonfresh f_als) args
   res_als <- checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
   where
@@ -1065,7 +1070,7 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
     checkReturnAlias loc params ret funbody_als
     -- See Note [Global aliases and lambdas].
     als <- closureAliases funbody funbody_als
-    let ret' = maybe (inferReturnUniqueness params ret funbody_als) (const ret) retdecl
+    let ret' = maybe (inferReturnFreshness params ret funbody_als) (const ret) retdecl
         ftype = funType params (RetType ext ret') `setAliases` als
     pure ((ret', funbody'), ftype)
   (letbody', letbody_als) <- bindingFun (fst fname) ftype $ checkExp letbody
@@ -1095,7 +1100,7 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
     checkReturnAlias loc params ret body_als
     -- See Note [Global aliases and lambdas].
     als <- closureAliases e body_als
-    let ret' = maybe (inferReturnUniqueness params ret body_als) (const ret) te
+    let ret' = maybe (inferReturnFreshness params ret body_als) (const ret) te
         ftype = funType params (RetType ext ret') `setAliases` als
     pure
       ( Lambda params body' te (Info (RetType ext ret')) loc,
@@ -1265,7 +1270,7 @@ checkGlobalAliases loc params body_t = do
           <+> "to break the aliasing."
 
 -- | Type-check a value definition.  This also infers a new return
--- type that may be more unique than previously.
+-- type that may be fresher than previously.
 checkValDef ::
   -- | The declared type of any global, along with the type parameters it is
   -- polymorphic in.  See Note [Parametric results].
@@ -1278,19 +1283,19 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
     checkReturnAlias loc params ret body_als
     checkGlobalAliases loc params body_als
     -- If the user did not provide an annotation (meaning the return
-    -- type is fully inferred), we infer the uniqueness.  Otherwise,
+    -- type is fully inferred), we infer the freshness.  Otherwise,
     -- we go with whatever they wanted.  This lets the user define
-    -- non-unique return types even if the body actually has no
+    -- nonfresh return types even if the body actually has no
     -- aliases.
     ret' <- case retdecl of
       Just retdecl' -> do
-        when (null params && unique ret) $
-          addError retdecl' mempty "A top-level constant cannot have a unique type."
+        when (null params && fresh ret) $
+          addError retdecl' mempty "A top-level constant cannot be declared fresh."
         pure $ RetType ext ret
       Nothing ->
         pure $
           RetType ext $
-            inferReturnUniqueness params ret body_als
+            inferReturnFreshness params ret body_als
 
     pure
       ( (body', ret'),
@@ -1328,7 +1333,7 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 
 -- Note [Spurious closure aliases]
 --
--- When a function has a unique return type, applying it yields a freshly
+-- When a function has a fresh return type, applying it yields a freshly
 -- constructed value, so the result cannot alias whatever the function closed
 -- over. 'derivedAliases' uses this to avoid reporting spurious aliasing errors
 -- for pipelines such as
@@ -1338,29 +1343,55 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- where the partial application @reduce M.op M.ne@ closes over the top-level
 -- @M.ne@, but has return type @*M.t@.
 --
--- We cannot simply *drop* the alias, though. Defunctionalisation lifts @|>@
--- into a wrapper whose return type is inherited from the (non-unique)
--- instantiation of its type variable, so the core language believes the result
--- does alias the closure. If we dropped the alias here, 'inferReturnUniqueness'
--- would infer a unique return type that the core type checker then rejects -
--- see for instance tests/issue1525.fut and tests/ad/map2.fut, which fail
--- exactly that way.
+-- We cannot simply *drop* the alias, though. Not because a lifted function may
+-- understate the freshness of its result - that is harmless, in the source
+-- language and in the IR alike - but because the reasoning above is a precision
+-- the *core* does not have. Dropping the alias lets 'inferReturnFreshness'
+-- turn that extra precision into a fresh return type on the caller, which the
+-- core then cannot verify and rejects.
 --
 -- So we keep the alias, marked as 'AliasClosure', and treat it exactly like
--- 'AliasBound' everywhere that affects what the compiler assumes (uniqueness
+-- 'AliasBound' everywhere that affects what the compiler assumes (freshness
 -- inference, consumption checking). The marking is used only to suppress the
 -- user-visible error in 'checkGlobalAliases'.
 --
--- Removing the marking entirely - and getting the more precise uniqueness that
--- the type system justifies - requires defunctionalisation to preserve the
--- knowledge that the lifted function returns a fresh value. See the comment on
--- 'lifted_rettype' in Futhark.Internalise.Defunctionalise.
+-- The reason this is still needed is *not* the one it used to be. It used to be
+-- that a lifted @|>@ inherited the nonfresh instantiation of its type
+-- variable; that is now settled during type inference (see Note [Parametric
+-- freshness] in Language.Futhark.TypeChecker.Terms), and the tests that
+-- formerly demonstrated it - tests/issue1525.fut, tests/ad/map2.fut - no longer
+-- do. Dropping the weakening now costs exactly two tests: tests/issue995.fut
+-- and tests/ad/issue1564.fut.
+--
+-- What remains is that a lifted function *inherits its declared return type*.
+-- In tests/issue995.fut,
+--
+--   def render (color_fun: i64 -> i32) (h: i64) (w: i64) : []i32 =
+--     tabulate h (\i -> color_fun i)
+--
+-- is declared nonfresh by the programmer, so the lifted @defunc_0_render@ is
+-- too, although its body returns the @*[n]i32@ of a lifted @tabulate@. The core
+-- language therefore assumes the result aliases the closure - which holds the
+-- array that @color_fun@ closed over - while consumption checking, having
+-- dropped the alias, infers a fresh return type for the caller.
+--
+-- Removing the marking entirely therefore requires the core to be able to prove
+-- what consumption checking concluded, which means the lifted return types must
+-- be *inferred from their bodies* rather than inherited. Note that this has to
+-- hold along the whole chain: making @defunc_0_render@ alone as fresh as its
+-- body is not enough, because the freshness it would report comes in turn from
+-- @defunc_0_tabulate@, and so on. Measured: doing it for one link fixes
+-- tests/ad/issue1564.fut but not tests/issue995.fut.
+--
+-- Defunctionalisation is source-to-source, so a lifted body is ordinary source
+-- AST and 'checkValDef' would infer its return type directly; the obstacle is
+-- the recursive case, which needs a return type before the body exists.
 
 -- Note [Parametric results]
 --
 -- The type system cannot talk about a value that aliases *itself*: a value
 -- that is, behind an abstraction boundary, a pair of arrays that are really the
--- same array.  Such a value can never be consumed, nor given a unique type.
+-- same array.  Such a value can never be consumed, nor given a fresh type.
 -- 'AliasSelf' stands for that possibility.  It is not an alias of any variable
 -- ('aliasVar' is 'Nothing' for it), so it must never be mistaken for one; ask
 -- "might these two values share memory?" through 'overlaps' rather than by
@@ -1375,7 +1406,7 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- Language.Futhark.TypeChecker.Terms.)
 --
 -- The crude answer - a value has internal aliasing whenever it is produced by
--- applying a function whose result type is a non-unique abstract type - is
+-- applying a function whose result type is a nonfresh abstract type - is
 -- sound but far too coarse.  It refuses
 --
 --   module pm (M: {type t}) = {

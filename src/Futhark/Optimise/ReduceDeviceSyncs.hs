@@ -130,7 +130,7 @@ optimizeStm out stm = do
                 n' <- newName n
                 -- v_kept_on_device implies that v is a scalar.
                 let dims' = dims ++ [intConst Int64 1]
-                let arr_t' = Array (elemType arr_t) (Shape dims') NoUniqueness
+                let arr_t' = Array (elemType arr_t) (Shape dims') NoMode
                 let pat' = Pat [PatElem n' arr_t']
                 let e' = BasicOp $ Replicate (Shape dims) (Var v')
                 let repl = Let pat' (stmAux stm) e'
@@ -209,7 +209,7 @@ optimizeStm out stm = do
 
               -- Migrate the parameter.
               pn' <- newName pn
-              let pt' = toDecl (patElemType pe') Nonunique
+              let pt' = toDecl (patElemType pe') Observe
               let pval' = Var arr
               let param' = (Param mempty pn' pt', pval')
 
@@ -250,7 +250,7 @@ optimizeStm out stm = do
         -- Read migrated scalars that are used on host.
         foldM addRead (out' |> stm') (zip pes pes')
       WithAcc inputs lmd -> do
-        let getAcc (Acc a _ _ _) = a
+        let getAcc (Acc a _ _) = a
             getAcc _ =
               compilerBugS
                 "Type error: WithAcc expression did not return accumulator."
@@ -775,7 +775,7 @@ rewriteExp =
 -- | Rewrite the binding introduced by a single parameter (to ensure it is
 -- unique) and fix any dependencies that are broken as a result of migration or
 -- rewriting.
-rewriteParam :: Param (TypeBase Shape u) -> RewriteM (Param (TypeBase Shape u))
+rewriteParam :: Param (TypeBase Shape o) -> RewriteM (Param (TypeBase Shape o))
 rewriteParam (Param attrs n t) = do
   n' <- rewriteName n
   t' <- renameType t
@@ -826,12 +826,12 @@ renameSubExp se = pure se
 
 -- | Update the variable names within a type to account for migration and
 -- rewriting.
-renameType :: TypeBase Shape u -> RewriteM (TypeBase Shape u)
+renameType :: TypeBase Shape o -> RewriteM (TypeBase Shape o)
 -- Note: mapOnType also maps the VName token of accumulators
 renameType = mapOnType renameSubExp
 
 -- | Update the variable names within an existential type to account for
 -- migration and rewriting.
-renameExtType :: TypeBase ExtShape u -> RewriteM (TypeBase ExtShape u)
+renameExtType :: TypeBase ExtShape o -> RewriteM (TypeBase ExtShape o)
 -- Note: mapOnExtType also maps the VName token of accumulators
 renameExtType = mapOnExtType renameSubExp

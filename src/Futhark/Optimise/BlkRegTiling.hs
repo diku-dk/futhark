@@ -393,10 +393,10 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
       pure $ Just (host_stms, new_kernel)
   where
-    sameAccType acc_sglton (Acc sglton _ _ _) =
+    sameAccType acc_sglton (Acc sglton _ _) =
       acc_sglton == sglton
     sameAccType _ _ = False
-    getAccumFV (Acc singleton _shp [_eltp] _) = do
+    getAccumFV (Acc singleton _shp [_eltp]) = do
       let fvs = namesToList $ freeIn old_kbody -- code
       tps <- localScope (scopeOfSegSpace seg_space) $ do
         mapM lookupType fvs

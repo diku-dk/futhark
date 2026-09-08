@@ -132,7 +132,7 @@ cseInFunDef cse_arrays fundec =
     -- inlining.
     ds = map (retDiet . fst) $ funDefRetType fundec
     retDiet t
-      | primType $ declExtTypeOf t = Observe
+      | primType $ extTypeOf t = Observe
       | otherwise = Consume
 
 type CSEM rep = Reader (CSEState rep)

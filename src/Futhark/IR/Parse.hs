@@ -11,8 +11,9 @@ module Futhark.IR.Parse
 
     -- * Representation-agnostic fragments
     parseType,
-    parseDeclExtType,
     parseDeclType,
+    parseDeclExtType,
+    parseExtType,
     parseVName,
     parseSubExp,
     parseSubExpRes,
@@ -103,7 +104,7 @@ pSlash = void $ lexeme "/"
 pAsterisk = void $ lexeme "*"
 pArrow = void $ lexeme "->"
 
-pNonArray :: Parser (TypeBase shape NoUniqueness)
+pNonArray :: Parser (TypeBase shape NoMode)
 pNonArray =
   choice
     [ Prim <$> pPrimType,
@@ -115,19 +116,18 @@ pNonArray =
               <*> pShape
               <* pComma
               <*> pTypes
-              <*> pure NoUniqueness
           )
     ]
 
 pTypeBase ::
   (ArrayShape shape) =>
   Parser shape ->
-  Parser u ->
-  Parser (TypeBase shape u)
-pTypeBase ps pu = do
-  u <- pu
+  Parser o ->
+  Parser (TypeBase shape o)
+pTypeBase ps po = do
+  o <- po
   shape <- ps
-  arrayOf <$> pNonArray <*> pure shape <*> pure u
+  arrayOf <$> pNonArray <*> pure shape <*> pure o
 
 pShape :: Parser Shape
 pShape = Shape <$> many (brackets pSubExp)
@@ -146,13 +146,13 @@ pExtShape :: Parser ExtShape
 pExtShape = Shape <$> many (brackets pExtSize)
 
 pType :: Parser Type
-pType = pTypeBase pShape (pure NoUniqueness)
+pType = pTypeBase pShape (pure NoMode)
 
 pTypes :: Parser [Type]
 pTypes = braces $ pType `sepBy` pComma
 
 pExtType :: Parser ExtType
-pExtType = pTypeBase pExtShape (pure NoUniqueness)
+pExtType = pTypeBase pExtShape (pure NoMode)
 
 pExtTypes :: Parser [ExtType]
 pExtTypes = braces $ pExtType `sepBy` pComma
@@ -160,19 +160,19 @@ pExtTypes = braces $ pExtType `sepBy` pComma
 pRank :: Parser Rank
 pRank = Rank . length <$> many (lexeme "[" *> lexeme "]")
 
-pUniqueness :: Parser Uniqueness
-pUniqueness = choice [pAsterisk $> Unique, pure Nonunique]
+pDiet :: Parser Diet
+pDiet = choice [pAsterisk $> Consume, pure Observe]
 
 pDeclBase ::
-  Parser (TypeBase shape NoUniqueness) ->
-  Parser (TypeBase shape Uniqueness)
-pDeclBase p = flip toDecl <$> pUniqueness <*> p
-
-pDeclType :: Parser DeclType
-pDeclType = pDeclBase pType
+  Parser (TypeBase shape NoMode) ->
+  Parser (TypeBase shape Diet)
+pDeclBase p = flip toDecl <$> pDiet <*> p
 
 pDeclExtType :: Parser DeclExtType
 pDeclExtType = pDeclBase pExtType
+
+pDeclType :: Parser DeclType
+pDeclType = pDeclBase pType
 
 pSubExp :: Parser SubExp
 pSubExp = Var <$> pVName <|> Constant <$> pPrimValue
@@ -688,9 +688,9 @@ pEntry =
   where
     pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
     pEntryPointInput =
-      EntryParam <$> pName <* pColon <*> pUniqueness <*> pEntryPointType
+      EntryParam <$> pName <* pColon <*> pDiet <*> pEntryPointType
     pEntryPointResult =
-      EntryResult <$> pUniqueness <*> pEntryPointType
+      EntryResult <$> pDiet <*> pEntryPointType
 
 pFunDef :: PR rep -> Parser (FunDef rep)
 pFunDef pr = do
@@ -1094,8 +1094,8 @@ pLMAD = pLMADBase $ isInt64 <$> pPrimExp int64 pPrimExpLeaf
 pExtLMAD :: Parser ExtLMAD
 pExtLMAD = pLMADBase $ isInt64 <$> pPrimExp int64 pExtPrimExpLeaf
 
-pMemInfo :: Parser d -> Parser u -> Parser ret -> Parser (MemInfo d u ret)
-pMemInfo pd pu pret =
+pMemInfo :: Parser d -> Parser o -> Parser ret -> Parser (MemInfo d o ret)
+pMemInfo pd po pret =
   choice
     [ MemPrim <$> pPrimType,
       keyword "mem" $> MemMem <*> choice [pSpace, pure DefaultSpace],
@@ -1103,13 +1103,13 @@ pMemInfo pd pu pret =
     ]
   where
     pArrayOrAcc = do
-      u <- pu
+      o <- po
       shape <- Shape <$> many (brackets pd)
-      choice [pArray u shape, pAcc u]
-    pArray u shape = do
+      choice [pArray o shape, pAcc]
+    pArray o shape = do
       pt <- pPrimType
-      MemArray pt shape u <$> (lexeme "@" *> pret)
-    pAcc u =
+      MemArray pt shape o <$> (lexeme "@" *> pret)
+    pAcc =
       keyword "acc"
         *> parens
           ( MemAcc
@@ -1118,7 +1118,6 @@ pMemInfo pd pu pret =
               <*> pShape
               <* pComma
               <*> pTypes
-              <*> pure u
           )
 
 pSpace :: Parser Space
@@ -1143,19 +1142,19 @@ pMemReturn =
     ]
 
 pRetTypeMem :: Parser RetTypeMem
-pRetTypeMem = pMemInfo pExtSize pUniqueness pMemReturn
+pRetTypeMem = pMemInfo pExtSize (pure NoMode) pMemReturn
 
 pBranchTypeMem :: Parser BranchTypeMem
-pBranchTypeMem = pMemInfo pExtSize (pure NoUniqueness) pMemReturn
+pBranchTypeMem = pMemInfo pExtSize (pure NoMode) pMemReturn
 
 pFParamMem :: Parser FParamMem
-pFParamMem = pMemInfo pSubExp pUniqueness pMemBind
+pFParamMem = pMemInfo pSubExp pDiet pMemBind
 
 pLParamMem :: Parser LParamMem
-pLParamMem = pMemInfo pSubExp (pure NoUniqueness) pMemBind
+pLParamMem = pMemInfo pSubExp (pure NoMode) pMemBind
 
 pLetDecMem :: Parser LetDecMem
-pLetDecMem = pMemInfo pSubExp (pure NoUniqueness) pMemBind
+pLetDecMem = pMemInfo pSubExp (pure NoMode) pMemBind
 
 pMemOp :: Parser (inner rep) -> Parser (MemOp inner rep)
 pMemOp pInner =
@@ -1170,11 +1169,11 @@ pMemOp pInner =
 
 prSOACS :: PR SOACS
 prSOACS =
-  PR pDeclExtType pExtType pDeclType pType pType (pSOAC prSOACS) () ()
+  PR pExtType pExtType pDeclType pType pType (pSOAC prSOACS) () ()
 
 prSeq :: PR Seq
 prSeq =
-  PR pDeclExtType pExtType pDeclType pType pType empty () ()
+  PR pExtType pExtType pDeclType pType pType empty () ()
 
 prSeqMem :: PR SeqMem
 prSeqMem =
@@ -1184,7 +1183,7 @@ prSeqMem =
 
 prGPU :: PR GPU
 prGPU =
-  PR pDeclExtType pExtType pDeclType pType pType op () ()
+  PR pExtType pExtType pDeclType pType pType op () ()
   where
     op = pHostOp prGPU (pSOAC prGPU)
 
@@ -1196,7 +1195,7 @@ prGPUMem =
 
 prMC :: PR MC
 prMC =
-  PR pDeclExtType pExtType pDeclType pType pType op () ()
+  PR pExtType pExtType pDeclType pType pType op () ()
   where
     op = pMCOp prMC (pSOAC prMC)
 
@@ -1242,6 +1241,9 @@ parseType = parseFull pType
 
 parseDeclExtType :: FilePath -> T.Text -> Either T.Text DeclExtType
 parseDeclExtType = parseFull pDeclExtType
+
+parseExtType :: FilePath -> T.Text -> Either T.Text ExtType
+parseExtType = parseFull pExtType
 
 parseDeclType :: FilePath -> T.Text -> Either T.Text DeclType
 parseDeclType = parseFull pDeclType

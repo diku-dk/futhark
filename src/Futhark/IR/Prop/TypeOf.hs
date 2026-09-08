@@ -53,7 +53,7 @@ subExpResType = subExpType . resSubExp
 -- element of @arrts@.
 mapType :: SubExp -> Lambda rep -> [Type]
 mapType outersize f =
-  [ arrayOf t (Shape [outersize]) NoUniqueness
+  [ arrayOf t (Shape [outersize]) NoMode
   | t <- lambdaReturnType f
   ]
 
@@ -64,11 +64,11 @@ basicOpType (SubExp se) =
 basicOpType (Opaque _ se) =
   pure <$> subExpType se
 basicOpType (ArrayVal vs t) =
-  pure [arrayOf (Prim t) (Shape [n]) NoUniqueness]
+  pure [arrayOf (Prim t) (Shape [n]) NoMode]
   where
     n = intConst Int64 $ toInteger $ length vs
 basicOpType (ArrayLit es rt) =
-  pure [arrayOf rt (Shape [n]) NoUniqueness]
+  pure [arrayOf rt (Shape [n]) NoMode]
   where
     n = intConst Int64 $ toInteger $ length es
 basicOpType (BinOp bop _ _) =
@@ -94,13 +94,13 @@ basicOpType (FlatIndex ident slice) =
 basicOpType (FlatUpdate src _ _) =
   pure <$> lookupType src
 basicOpType (Iota n _ _ et) =
-  pure [arrayOf (Prim (IntType et)) (Shape [n]) NoUniqueness]
+  pure [arrayOf (Prim (IntType et)) (Shape [n]) NoMode]
 basicOpType (Replicate (Shape []) e) =
   pure <$> subExpType e
 basicOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
 basicOpType (Scratch t shape) =
-  pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
+  pure [arrayOf (Prim t) (Shape shape) NoMode]
 basicOpType (Reshape e shape) =
   result <$> lookupType e
   where
@@ -126,7 +126,7 @@ expExtType ::
   (HasScope rep m, TypedOp (OpC rep)) =>
   Exp rep ->
   m [ExtType]
-expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf . fst) rt
+expExtType (Apply _ _ rt _) = pure $ map (extTypeOf . fst) rt
 expExtType (Match _ _ _ rt) = pure $ map extTypeOf $ matchReturns rt
 expExtType (Loop merge _ _) =
   pure $ loopExtType $ map fst merge

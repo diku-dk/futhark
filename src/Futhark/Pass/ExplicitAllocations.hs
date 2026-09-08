@@ -67,7 +67,7 @@ type Allocable fromrep torep inner =
     FParamInfo fromrep ~ DeclType,
     LParamInfo fromrep ~ Type,
     BranchType fromrep ~ ExtType,
-    RetType fromrep ~ DeclExtType,
+    RetType fromrep ~ ExtType,
     BodyDec fromrep ~ (),
     BodyDec torep ~ (),
     ExpDec torep ~ (),
@@ -259,19 +259,19 @@ allocsForPat def_space some_idents rts hints = do
         pure $ PatElem (identName ident) summary
       MemMem space ->
         pure $ PatElem (identName ident) $ MemMem space
-      MemArray bt _ u (Just (ReturnsInBlock mem extlmad)) -> do
+      MemArray bt _ o (Just (ReturnsInBlock mem extlmad)) -> do
         let ixfn = instantiateExtLMAD idents extlmad
-        pure . PatElem (identName ident) . MemArray bt ident_shape u $ ArrayIn mem ixfn
+        pure . PatElem (identName ident) . MemArray bt ident_shape o $ ArrayIn mem ixfn
       MemArray _ extshape _ Nothing
         | Just _ <- knownShape extshape -> do
             summary <- summaryForBindage def_space (identType ident) hint
             pure $ PatElem (identName ident) summary
-      MemArray bt _ u (Just (ReturnsNewBlock _ i extixfn)) -> do
+      MemArray bt _ o (Just (ReturnsNewBlock _ i extixfn)) -> do
         let ixfn = instantiateExtLMAD idents extixfn
-        pure . PatElem (identName ident) . MemArray bt ident_shape u $
+        pure . PatElem (identName ident) . MemArray bt ident_shape o $
           ArrayIn (getIdent idents i) ixfn
-      MemAcc acc ispace ts u ->
-        pure $ PatElem (identName ident) $ MemAcc acc ispace ts u
+      MemAcc acc ispace ts ->
+        pure $ PatElem (identName ident) $ MemAcc acc ispace ts
       _ -> error "Impossible case reached in allocsForPat!"
   where
     knownShape = mapM known . shapeDims
@@ -300,22 +300,22 @@ summaryForBindage ::
   Space ->
   Type ->
   ExpHint ->
-  m (MemBound NoUniqueness)
+  m (MemBound NoMode)
 summaryForBindage _ (Prim bt) _ =
   pure $ MemPrim bt
 summaryForBindage _ (Mem space) _ =
   pure $ MemMem space
-summaryForBindage _ (Acc acc ispace ts u) _ =
-  pure $ MemAcc acc ispace ts u
-summaryForBindage def_space t@(Array pt shape u) NoHint = do
+summaryForBindage _ (Acc acc ispace ts) _ =
+  pure $ MemAcc acc ispace ts
+summaryForBindage def_space t@(Array pt shape o) NoHint = do
   m <- allocForArray' t def_space
-  pure $ MemArray pt shape u $ ArrayIn m $ LMAD.iota 0 $ map pe64 $ arrayDims t
+  pure $ MemArray pt shape o $ ArrayIn m $ LMAD.iota 0 $ map pe64 $ arrayDims t
 summaryForBindage _ t@(Array pt _ _) (Hint lmad space) = do
   bytes <-
     letSubExp "bytes" <=< toExp . untyped $
       primByteSize pt * (1 + LMAD.range lmad)
   m <- letExp "mem" $ Op $ Alloc bytes space
-  pure $ MemArray pt (arrayShape t) NoUniqueness $ ArrayIn m lmad
+  pure $ MemArray pt (arrayShape t) NoMode $ ArrayIn m lmad
 
 allocInFParams ::
   (Allocable fromrep torep inner) =>
@@ -339,18 +339,18 @@ allocInFParam ::
     (FParam torep)
 allocInFParam param pspace =
   case paramDeclType param of
-    Array pt shape u -> do
+    Array pt shape o -> do
       let memname = baseName (paramName param) <> "_mem"
           lmad = LMAD.iota 0 $ map pe64 $ shapeDims shape
       mem <- lift $ newVName memname
       tell ([Param (paramAttrs param) mem $ MemMem pspace], [])
-      pure param {paramDec = MemArray pt shape u $ ArrayIn mem lmad}
+      pure param {paramDec = MemArray pt shape o $ ArrayIn mem lmad}
     Prim pt ->
       pure param {paramDec = MemPrim pt}
     Mem space ->
       pure param {paramDec = MemMem space}
-    Acc acc ispace ts u ->
-      pure param {paramDec = MemAcc acc ispace ts u}
+    Acc acc ispace ts ->
+      pure param {paramDec = MemAcc acc ispace ts}
 
 ensureRowMajorArray ::
   (Allocable fromrep torep inner) =>
@@ -431,7 +431,7 @@ allocInLoopParams merge m = do
           SubExp -> WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
         )
     allocInLoopParam (mergeparam, Var v)
-      | param_t@(Array pt shape u) <- paramDeclType mergeparam = do
+      | param_t@(Array pt shape o) <- paramDeclType mergeparam = do
           (v_mem, v_lmad) <- lift $ lookupArraySummary v
           v_mem_space <- lift $ lookupMemSpace v_mem
 
@@ -452,7 +452,7 @@ allocInLoopParams merge m = do
                   tell ([p], [])
 
                   pure
-                    ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName p) v_lmad},
+                    ( mergeparam {paramDec = MemArray pt shape o $ ArrayIn (paramName p) v_lmad},
                       Var v,
                       scalarRes param_t v_mem_space v_lmad
                     )
@@ -478,7 +478,7 @@ allocInLoopParams merge m = do
               mem_param <- newParam "mem_param" $ MemMem v_mem_space'
               tell ([mem_param], ctx_params)
               pure
-                ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName mem_param) param_lmad},
+                ( mergeparam {paramDec = MemArray pt shape o $ ArrayIn (paramName mem_param) param_lmad},
                   Var v',
                   ensureArrayIn v_mem_space'
                 )
@@ -496,10 +496,10 @@ arrayWithLMAD ::
   VName ->
   m (VName, VName)
 arrayWithLMAD space lmad v_t v = do
-  let Array pt shape u = v_t
+  let Array pt shape o = v_t
   mem <- allocForArray' v_t space
   v_copy <- newVName $ baseName v <> "_scalcopy"
-  let pe = PatElem v_copy $ MemArray pt shape u $ ArrayIn mem lmad
+  let pe = PatElem v_copy $ MemArray pt shape o $ ArrayIn mem lmad
   letBind (Pat [pe]) $ BasicOp $ Replicate mempty $ Var v
   pure (mem, v_copy)
 
@@ -538,11 +538,11 @@ allocPermArray ::
 allocPermArray space perm s v = do
   t <- lookupType v
   case t of
-    Array pt shape u -> do
+    Array pt shape o -> do
       mem <- allocForArray t space
       v' <- newVName $ s <> "_desired_form"
       let info =
-            MemArray pt shape u . ArrayIn mem $
+            MemArray pt shape o . ArrayIn mem $
               LMAD.permute (LMAD.iota 0 $ map pe64 $ arrayDims t) perm
           pat = Pat [PatElem v' info]
       addStm $ Let pat (defAux ()) $ BasicOp $ Manifest v perm
@@ -631,7 +631,7 @@ explicitAllocationsGeneric space handleOp hints =
               rettype' =
                 map (,mem_als) mem_rets
                   ++ zip
-                    (memoryInDeclExtType space (length mem_rets) (map fst rettype))
+                    (memoryInRetType space (length mem_rets) (map fst rettype))
                     (map (shiftRetAls num_extra_params num_extra_rets . snd) rettype)
           pure $ FunDef entry attrs fname rettype' params' fbody'
 
@@ -653,17 +653,17 @@ explicitAllocationsInStmsGeneric space handleOp hints stms = do
         allocInStms stms $
           pure ()
 
-memoryInDeclExtType :: Space -> Int -> [DeclExtType] -> [FunReturns]
-memoryInDeclExtType space k dets = evalState (mapM addMem dets) 0
+memoryInRetType :: Space -> Int -> [ExtType] -> [FunReturns]
+memoryInRetType space k dets = evalState (mapM addMem dets) 0
   where
     addMem (Prim t) = pure $ MemPrim t
-    addMem Mem {} = error "memoryInDeclExtType: too much memory"
-    addMem (Array pt shape u) = do
+    addMem Mem {} = error "memoryInRetType: too much memory"
+    addMem (Array pt shape o) = do
       i <- get <* modify (+ 1)
       let shape' = fmap shift shape
-      pure . MemArray pt shape' u . ReturnsNewBlock space i $
+      pure . MemArray pt shape' o . ReturnsNewBlock space i $
         LMAD.iota 0 (map convert $ shapeDims shape')
-    addMem (Acc acc ispace ts u) = pure $ MemAcc acc ispace ts u
+    addMem (Acc acc ispace ts) = pure $ MemAcc acc ispace ts
 
     convert (Ext i) = le64 $ Ext i
     convert (Free v) = Free <$> pe64 v
@@ -674,7 +674,7 @@ memoryInDeclExtType space k dets = evalState (mapM addMem dets) 0
 bodyReturnMemCtx ::
   (Allocable fromrep torep inner) =>
   SubExpRes ->
-  AllocM fromrep torep [(SubExpRes, MemInfo ExtSize u MemReturn)]
+  AllocM fromrep torep [(SubExpRes, MemInfo ExtSize o MemReturn)]
 bodyReturnMemCtx (SubExpRes _ Constant {}) =
   pure []
 bodyReturnMemCtx (SubExpRes _ (Var v)) = do
@@ -759,14 +759,14 @@ combMemReqs _ y@NeedsNormalisation {} = y
 combMemReqs x@(MemReq x_space) y@MemReq {} =
   if x == y then x else NeedsNormalisation x_space
 
-type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
+type MemReqType = MemInfo (Ext SubExp) NoMode MemReq
 
 combMemReqTypes :: MemReqType -> MemReqType -> MemReqType
-combMemReqTypes (MemArray pt shape u x) (MemArray _ _ _ y) =
-  MemArray pt shape u $ combMemReqs x y
+combMemReqTypes (MemArray pt shape o x) (MemArray _ _ _ y) =
+  MemArray pt shape o $ combMemReqs x y
 combMemReqTypes x _ = x
 
-contextRets :: MemReqType -> [MemInfo d u r]
+contextRets :: MemReqType -> [MemInfo d o r]
 contextRets (MemArray _ shape _ (MemReq space)) =
   -- Memory + offset + stride*rank.
   [MemMem space, MemPrim int64]
@@ -794,12 +794,12 @@ allocInMatchBody rets (Body _ stms res) =
     restriction t se = do
       v_info <- subExpMemInfo se
       case (t, v_info) of
-        (Array pt shape u, MemArray _ _ _ (ArrayIn mem _)) -> do
+        (Array pt shape o, MemArray _ _ _ (ArrayIn mem _)) -> do
           space <- lookupMemSpace mem
-          pure $ MemArray pt shape u $ MemReq space
+          pure $ MemArray pt shape o $ MemReq space
         (_, MemMem space) -> pure $ MemMem space
         (_, MemPrim pt) -> pure $ MemPrim pt
-        (_, MemAcc acc ispace ts u) -> pure $ MemAcc acc ispace ts u
+        (_, MemAcc acc ispace ts) -> pure $ MemAcc acc ispace ts
         _ -> error $ "allocInMatchBody: mismatch: " ++ show (t, v_info)
 
 mkBranchRet :: [MemReqType] -> [BranchTypeMem]
@@ -822,13 +822,13 @@ mkBranchRet reqs =
     arrayInfo (MemReq space) =
       space
 
-    inspect ctx_offset (MemArray pt shape u req) =
+    inspect ctx_offset (MemArray pt shape o req) =
       let shape' = fmap (adjustExt num_new_ctx) shape
           space = arrayInfo req
-       in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
+       in MemArray pt shape' o . ReturnsNewBlock space ctx_offset $
             convert
               <$> LMAD.mkExistential (shapeDims shape') (ctx_offset + 1)
-    inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
+    inspect _ (MemAcc acc ispace ts) = MemAcc acc ispace ts
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
 
@@ -942,11 +942,11 @@ allocInExp (Apply fname args rettype loc) = do
       rettype' =
         mems
           ++ zip
-            (memoryInDeclExtType space num_arrays (map fst rettype))
+            (memoryInRetType space num_arrays (map fst rettype))
             (map (shiftRetAls num_extra_args num_arrays . snd) rettype)
   pure $ Apply fname args' rettype' loc
   where
-    num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf . fst) rettype
+    num_arrays = length $ filter ((> 0) . arrayRank . extTypeOf . fst) rettype
 allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   (defbody', def_reqs) <- allocInMatchBody rets defbody
   (cases', cases_reqs) <- mapAndUnzipM onCase cases
@@ -965,7 +965,7 @@ allocInExp (WithAcc inputs bodylam) =
       params <- forM (lambdaParams lam) $ \(Param attrs pv t) ->
         case t of
           Prim Unit -> pure $ Param attrs pv $ MemPrim Unit
-          Acc acc ispace ts u -> pure $ Param attrs pv $ MemAcc acc ispace ts u
+          Acc acc ispace ts -> pure $ Param attrs pv $ MemAcc acc ispace ts
           _ -> error $ "Unexpected WithAcc lambda param: " ++ prettyString (Param attrs pv t)
       allocInLambda params (lambdaBody lam)
 
@@ -987,29 +987,29 @@ allocInExp (WithAcc inputs bodylam) =
           (lambdaBody lam)
       pure (lam', nes)
 
-    mkP attrs p pt shape u mem lmad is =
-      Param attrs p . MemArray pt shape u . ArrayIn mem . LMAD.slice lmad $
+    mkP attrs p pt shape o mem lmad is =
+      Param attrs p . MemArray pt shape o . ArrayIn mem . LMAD.slice lmad $
         fmap pe64 $
           Slice $
             is ++ map sliceDim (shapeDims shape)
 
     onXParam _ (Param attrs p (Prim t)) _ =
       pure $ Param attrs p (MemPrim t)
-    onXParam is (Param attrs p (Array pt shape u)) arr = do
+    onXParam is (Param attrs p (Array pt shape o)) arr = do
       (mem, lmad) <- lookupArraySummary arr
-      pure $ mkP attrs p pt shape u mem lmad is
+      pure $ mkP attrs p pt shape o mem lmad is
     onXParam _ p _ =
       error $ "Cannot handle MkAcc param: " ++ prettyString p
 
     onYParam _ (Param attrs p (Prim t)) _ =
       pure $ Param attrs p $ MemPrim t
-    onYParam is (Param attrs p (Array pt shape u)) arr = do
+    onYParam is (Param attrs p (Array pt shape o)) arr = do
       arr_t <- lookupType arr
       space <- askDefaultSpace
       mem <- allocForArray arr_t space
       let base_dims = map pe64 $ arrayDims arr_t
           lmad = LMAD.iota 0 base_dims
-      pure $ mkP attrs p pt shape u mem lmad is
+      pure $ mkP attrs p pt shape o mem lmad is
     onYParam _ p _ =
       error $ "Cannot handle MkAcc param: " ++ prettyString p
 allocInExp e = mapExpM alloc e
@@ -1161,7 +1161,7 @@ allocInLParams num_threads idxs = mapM alloc
   where
     alloc x =
       case paramType x of
-        Array pt shape u -> do
+        Array pt shape o -> do
           let t = paramType x `arrayOfRow` num_threads
           mem <- allocForArray t =<< askDefaultSpace
           let base_dims = map pe64 $ arrayDims t
@@ -1169,8 +1169,8 @@ allocInLParams num_threads idxs = mapM alloc
               lmad_x =
                 LMAD.slice lmad_base $
                   fullSliceNum base_dims [DimFix idxs]
-          pure $ x {paramDec = MemArray pt shape u $ ArrayIn mem lmad_x}
+          pure $ x {paramDec = MemArray pt shape o $ ArrayIn mem lmad_x}
         Prim bt -> pure $ x {paramDec = MemPrim bt}
         Mem space -> pure $ x {paramDec = MemMem space}
         -- This next case will never happen.
-        Acc acc ispace ts u -> pure $ x {paramDec = MemAcc acc ispace ts u}
+        Acc acc ispace ts -> pure $ x {paramDec = MemAcc acc ispace ts}

@@ -489,14 +489,14 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs 
             .in_types = $id:in_types_name,
             .out_type = $init:(typeStructInit out_type),
             .in_unique = $id:in_unique_name,
-            .out_unique = $init:(outputUniqueInit output),
+            .out_fresh = $init:(outputUniqueInit output),
             .attrs = $id:attrs_name
             }|]
       )
   where
     typeStructInit tname = [C.cinit|&$id:(typeStructName tname)|]
-    inputUniqueInit = uniqueInit . inputUnique
-    outputUniqueInit = uniqueInit . outputUnique
+    inputUniqueInit = uniqueInit . inputConsumed
+    outputUniqueInit = uniqueInit . outputFresh
     uniqueInit True = [C.cinit|true|]
     uniqueInit False = [C.cinit|false|]
 

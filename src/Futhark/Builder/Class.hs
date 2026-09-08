@@ -36,7 +36,7 @@ class
   ( ASTRep rep,
     FParamInfo rep ~ DeclType,
     LParamInfo rep ~ Type,
-    RetType rep ~ DeclExtType,
+    RetType rep ~ ExtType,
     BranchType rep ~ ExtType
   ) =>
   Buildable rep

@@ -1,10 +1,10 @@
 -- | Facilities for type-checking Futhark terms.  Checking a term
--- requires a little more context to track uniqueness and such.
+-- requires a little more context to track consumption and such.
 --
 -- Type inference is implemented through a variation of
 -- Hindley-Milner.  The main complication is supporting the rich
--- number of built-in language constructs, as well as uniqueness
--- types.  This is mostly done in an ad hoc way, and many programs
+-- number of built-in language constructs, as well as consumption
+-- and freshness.  This is mostly done in an ad hoc way, and many programs
 -- will require the programmer to fall back on type annotations.
 --
 -- The strategy is to split type checking into sveral (main) passes:
@@ -18,8 +18,8 @@
 -- full unsized type of everything. This is done using a syntax-driven
 -- approach, similar to Algorithm W.
 --
--- 3) The program is then checked for violation of uniqueness
--- properties, which is implemented in
+-- 3) The program is then checked for violation of the consumption
+-- and freshness rules, which is implemented in
 -- "Language.Futhark.TypeChecker.Consumption".
 module Language.Futhark.TypeChecker.Terms
   ( checkOneExp,
@@ -74,7 +74,7 @@ hasBinding e = isNothing $ astMap m e
 
 --- Basic checking
 
--- | Determine if the two types are identical, ignoring uniqueness.
+-- | Determine if the two types are identical, ignoring annotations.
 -- Mismatched dimensions are turned into fresh rigid type variables.
 -- Causes a 'TypeError' if they fail to match, and otherwise returns
 -- one of them.
@@ -92,13 +92,13 @@ unifyBranches loc e1 e2 = do
 sliceShape ::
   Maybe (SrcLoc, Rigidity) ->
   [DimIndex] ->
-  TypeBase Size as ->
-  TermTypeM (TypeBase Size as, [VName])
-sliceShape r slice t@(Array u (Shape orig_dims) et) =
+  TypeBase Size o ->
+  TermTypeM (TypeBase Size o, [VName])
+sliceShape r slice t@(Array o (Shape orig_dims) et) =
   runStateT (setDims <$> adjustDims slice orig_dims) []
   where
     setDims [] = stripArray (length orig_dims) t
-    setDims dims' = Array u (Shape dims') et
+    setDims dims' = Array o (Shape dims') et
 
     -- If the result is supposed to be a nonrigid size variable, then
     -- don't bother trying to create non-existential sizes.  This is
@@ -243,7 +243,7 @@ checkCoerce loc te e = do
           pure $ sizeFromName (qualName v) (srclocOf d)
 
 -- Expressions witnessed by type, topologically sorted.
-topWit :: TypeBase Exp u -> [Exp]
+topWit :: TypeBase Exp o -> [Exp]
 topWit = topologicalSort depends . witnessedExps
   where
     witnessedExps t = execState (traverseDims onDim t) mempty
@@ -256,8 +256,8 @@ sizeFree ::
   (MonadUnify m) =>
   SrcLoc ->
   (Exp -> Maybe VName) ->
-  TypeBase Size u ->
-  m (TypeBase Size u, [VName])
+  TypeBase Size o ->
+  m (TypeBase Size o, [VName])
 sizeFree tloc expKiller orig_t = do
   runReaderT (toBeReplaced orig_t $ onType orig_t) mempty `runStateT` mempty
   where
@@ -294,8 +294,8 @@ sizeFree tloc expKiller orig_t = do
       rl <- state $ L.partition (`notElem` old_bound)
       let dims' = dims <> rl
       pure $ Arrow as pn d argT' (RetType dims' retT')
-    onScalar (TypeVar u v args) =
-      TypeVar u v <$> mapM onTypeArg args
+    onScalar (TypeVar o v args) =
+      TypeVar o v <$> mapM onTypeArg args
       where
         onTypeArg (TypeArgDim d) = TypeArgDim <$> replacing d
         onTypeArg (TypeArgType ty) = TypeArgType <$> onType ty
@@ -303,10 +303,10 @@ sizeFree tloc expKiller orig_t = do
 
     onType ::
       (MonadUnify m) =>
-      TypeBase Size u ->
-      ReaderT [(Exp, Exp)] (StateT [VName] m) (TypeBase Size u)
-    onType (Array u shape scalar) =
-      Array u <$> traverse replacing shape <*> onScalar scalar
+      TypeBase Size o ->
+      ReaderT [(Exp, Exp)] (StateT [VName] m) (TypeBase Size o)
+    onType (Array o shape scalar) =
+      Array o <$> traverse replacing shape <*> onScalar scalar
     onType (Scalar ty) =
       Scalar <$> onScalar ty
 
@@ -316,8 +316,8 @@ sizeFree tloc expKiller orig_t = do
 -- into '[z]t', where 'z' is a fresh unknown, which is then by
 -- let-generalisation turned into '?[z].[z]t'.
 unscopeUnknown ::
-  TypeBase Size u ->
-  TermTypeM (TypeBase Size u)
+  TypeBase Size o ->
+  TermTypeM (TypeBase Size o)
 unscopeUnknown t = do
   constraints <- getConstraints
   -- The killer only ever fires on an unknown-size variable, so if none occurs
@@ -340,8 +340,8 @@ unscopeUnknown t = do
 unscopeType ::
   SrcLoc ->
   [VName] ->
-  TypeBase Size as ->
-  TermTypeM (TypeBase Size as, [VName])
+  TypeBase Size o ->
+  TermTypeM (TypeBase Size o, [VName])
 unscopeType tloc unscoped t
   -- Fast-path for common case where 't' has no free variables in unscoped.
   | not (any (`elem` unscoped) (fvVars (freeInType t))) = pure (t, [])
@@ -697,7 +697,7 @@ checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
       rettype_st <-
         inferReturnSizes params'' =<< case rettype_checked of
           Just (_, ret, _) -> normTypeFully ret
-          Nothing -> pure $ toRes Nonunique body_t
+          Nothing -> pure $ toRes Nonfresh body_t
 
       pure (params'', body', (\(te, _, _) -> te) <$> rettype_checked, rettype_st)
 
@@ -767,7 +767,7 @@ checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
         checkApply
           loc
           (Just op, 1)
-          (Scalar $ Arrow mempty m2 d2 t2 $ RetType [] $ Scalar $ Arrow Nonunique m1 d1 t1 $ RetType dims2 ret)
+          (Scalar $ Arrow mempty m2 d2 t2 $ RetType [] $ Scalar $ Arrow Nonfresh m1 d1 t1 $ RetType dims2 ret)
           e'
       case arrow' of
         Scalar (Arrow _ _ _ t1' (RetType dims2' ret')) ->
@@ -792,7 +792,7 @@ checkExp (UpdateSection steps (Info ft) loc) = do
     Scalar (Arrow _ _ _ pt _) -> replaceTyVars loc pt
     _ -> error $ "checkExp UpdateSection: " <> prettyString ft
   (steps', b, retext) <- checkSectionSteps a steps
-  let ft' = Scalar $ Arrow mempty Unnamed Observe a $ RetType retext $ toRes Nonunique b
+  let ft' = Scalar $ Arrow mempty Unnamed Observe a $ RetType retext $ toRes Nonfresh b
   pure $ UpdateSection steps' (Info ft') loc
   where
     checkSectionSteps t [] =
@@ -961,7 +961,7 @@ instantiateDimsInReturnType loc fname (RetType dims t)
 type ApplyOp = (Maybe (QualName VName), Int)
 
 -- | Extract all those names that are bound inside the type.
-boundInsideType :: TypeBase Size as -> S.Set VName
+boundInsideType :: TypeBase Size o -> S.Set VName
 boundInsideType (Array _ _ t) = boundInsideType (Scalar t)
 boundInsideType (Scalar Prim {}) = mempty
 boundInsideType (Scalar (TypeVar _ _ targs)) = foldMap f targs
@@ -979,7 +979,7 @@ boundInsideType (Scalar (Arrow _ pn _ t1 (RetType dims t2))) =
 
 -- Returns the sizes of the immediate type produced,
 -- the sizes of parameter types, and the sizes of return types.
-dimUses :: TypeBase Size u -> (Names, Names)
+dimUses :: TypeBase Size o -> (Names, Names)
 dimUses = flip execState mempty . traverseDims f
   where
     f bound pos e =
@@ -1034,7 +1034,7 @@ funParts _ = Nothing
 -- but that one holds any.
 resultFromParam :: [TypeParam] -> [StructType] -> ResType -> Maybe Int
 resultFromParam tparams params res
-  | Scalar (TypeVar Nonunique v _) <- res,
+  | Scalar (TypeVar Nonfresh v _) <- res,
     qualLeaf v `elem` [pv | TypeParamType _ pv _ <- tparams],
     [(i, pt)] <- filter (S.member (qualLeaf v) . typeVars . snd) $ zip [0 ..] params,
     isFunResult (qualLeaf v) pt =
@@ -1059,8 +1059,8 @@ constructsFresh t
     allFresh (Scalar (Record fs)) = all allFresh fs
     allFresh (Scalar (Sum cs)) = all (all allFresh) cs
     allFresh (Scalar Prim {}) = True
-    allFresh (Scalar (TypeVar u _ _)) = u == Unique
-    allFresh (Array u _ _) = u == Unique
+    allFresh (Scalar (TypeVar u _ _)) = u == Fresh
+    allFresh (Array u _ _) = u == Fresh
     allFresh (Scalar Arrow {}) = False
 
 -- | Mark as fresh every return-type slot that the declared type fills with the
@@ -1077,7 +1077,7 @@ freshenOccurrences x = onStruct
     onStruct _ t = t
 
     onRes (Scalar (TypeVar _ v _)) tr
-      | qualLeaf v == x = tr `setUniqueness` Unique
+      | qualLeaf v == x = tr `setMode` Fresh
     onRes
       (Scalar (Arrow _ _ _ sa (RetType _ sr)))
       (Scalar (Arrow u pn d ta (RetType ext tr))) =
@@ -1169,7 +1169,7 @@ checkOneExp e = do
       e'' <- checkExp e'
       let t = typeOf e''
       (tparams, _, _) <-
-        letGeneralise (nameFromString "<exp>") (srclocOf e) generalised [] $ toRes Nonunique t
+        letGeneralise (nameFromString "<exp>") (srclocOf e) generalised [] $ toRes Nonfresh t
       detectAmbiguousSizes
       e''' <- bindExistentialInsts =<< normTypeFully e''
       localChecks tparams e'''
@@ -1337,7 +1337,7 @@ mustBeIrrefutable p = do
         "Refutable pattern not allowed here.\nUnmatched cases:"
           </> indent 2 (stack (map pretty ps'))
 
-supportsEquality :: TypeBase dim u -> Bool
+supportsEquality :: TypeBase dim o -> Bool
 supportsEquality (Array _ _ t) = supportsEquality $ Scalar t
 supportsEquality (Scalar Prim {}) = True
 supportsEquality (Scalar TypeVar {}) = False
@@ -1631,9 +1631,9 @@ bindExistentialInsts x = do
       relevant v = pending v || v `M.member` reps
 
       onType ::
-        (Substitutable (TypeBase Size u)) =>
-        TypeBase Size u ->
-        TermTypeM (TypeBase Size u, [VName])
+        (Substitutable (TypeBase Size o)) =>
+        TypeBase Size o ->
+        TermTypeM (TypeBase Size o, [VName])
       onType t
         -- Fast path: this type mentions no pending or copied
         -- instantiated size, so 'applySubst'/'sizeFree' would be
@@ -1643,9 +1643,9 @@ bindExistentialInsts x = do
             sizeFree mempty (find pending . fvVars . freeInExp) $ applySubst repOf t
 
       onStruct ::
-        (Substitutable (TypeBase Size u)) =>
-        TypeBase Size u ->
-        TermTypeM (TypeBase Size u)
+        (Substitutable (TypeBase Size o)) =>
+        TypeBase Size o ->
+        TermTypeM (TypeBase Size o)
       onStruct t = do
         (t', ext) <- onType t
         -- Existential sizes at the top level of a type have nowhere to
@@ -1747,8 +1747,8 @@ hiddenParamNames params = hidden
 
 -- | Rename the sizes bound by a type (parameter names and existential
 -- quantifiers) to fresh names.
-renameTypeBinders :: (Monoid u) => TypeBase Size u -> TermTypeM (TypeBase Size u)
-renameTypeBinders (Scalar (Arrow u pn d pt (RetType dims rt))) = do
+renameTypeBinders :: (Monoid o) => TypeBase Size o -> TermTypeM (TypeBase Size o)
+renameTypeBinders (Scalar (Arrow o pn d pt (RetType dims rt))) = do
   pt' <- renameTypeBinders pt
   (pn', pn_subst) <- case pn of
     Named v -> do
@@ -1759,7 +1759,7 @@ renameTypeBinders (Scalar (Arrow u pn d pt (RetType dims rt))) = do
   let subst = pn_subst <> M.fromList (zip dims dims')
       toSize v = ExpSubst $ sizeFromName (qualName v) mempty
   rt' <- renameTypeBinders $ applySubst (fmap toSize . (`M.lookup` subst)) rt
-  pure $ Scalar $ Arrow u pn' d pt' $ RetType dims' rt'
+  pure $ Scalar $ Arrow o pn' d pt' $ RetType dims' rt'
 renameTypeBinders (Scalar (Record fs)) =
   Scalar . Record <$> traverse renameTypeBinders fs
 renameTypeBinders (Scalar (Sum cs)) =
@@ -1808,7 +1808,7 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
         ret' <- normTypeFully ret
         pure (Just retdecl', ret')
       Nothing ->
-        pure (Nothing, toRes Nonunique body_t)
+        pure (Nothing, toRes Nonfresh body_t)
 
     verifyFunctionParams (Just fname) params''
 
@@ -1832,10 +1832,10 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
 
 -- | Extract all the shape names that occur in positive position
 -- (roughly, left side of an arrow) in a given type.
-sizeNamesPos :: TypeBase Size als -> S.Set VName
+sizeNamesPos :: TypeBase Size o -> S.Set VName
 sizeNamesPos (Scalar (Arrow _ _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesPos t2
   where
-    onParam :: TypeBase Size als -> S.Set VName
+    onParam :: TypeBase Size o -> S.Set VName
     onParam (Scalar Arrow {}) = mempty
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ targs)) = mconcat $ map onTypeArg targs
@@ -1893,20 +1893,20 @@ verifyFunctionParams fname params =
 -- @
 -- bool -> ?[n].[n]bool
 -- @
-injectExt :: [VName] -> TypeBase Size u -> RetTypeBase Size u
+injectExt :: [VName] -> TypeBase Size o -> RetTypeBase Size o
 injectExt [] ret = RetType [] ret
 injectExt ext ret = RetType ext_here $ deeper ret
   where
     (immediate, _) = dimUses ret
     (ext_here, ext_there) = partition (`S.member` immediate) ext
-    deeper :: TypeBase Size u -> TypeBase Size u
+    deeper :: TypeBase Size o -> TypeBase Size o
     deeper (Scalar (Prim t)) = Scalar $ Prim t
     deeper (Scalar (Record fs)) = Scalar $ Record $ M.map deeper fs
     deeper (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map deeper) cs
     deeper (Scalar (Arrow als p d1 t1 (RetType t2_ext t2))) =
       Scalar $ Arrow als p d1 t1 $ injectExt (nubOrd (ext_there <> t2_ext)) t2
-    deeper (Scalar (TypeVar u tn targs)) =
-      Scalar $ TypeVar u tn $ map deeperArg targs
+    deeper (Scalar (TypeVar o tn targs)) =
+      Scalar $ TypeVar o tn $ map deeperArg targs
     deeper t@Array {} = t
 
     deeperArg (TypeArgType t) = TypeArgType $ deeper t
@@ -2390,7 +2390,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 -- form that applies a function must ask: 'Apply', 'BinOp', and the two operator
 -- sections, which know only one of their operands and so pass 'Nothing' for the
 -- other. This is also why the unsized checker cannot help: freshness is not
--- part of its solution, and 'instTyVars' takes uniqueness from the declared
+-- part of its solution, and 'instTyVars' takes freshness from the declared
 -- scheme.
 --
 -- ## This is a syntactic condition, and that is a wart
@@ -2431,5 +2431,5 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 -- Futhark.Internalise.Monomorphise carries the freshness into the generated
 -- definition. Defunctionalisation then reads a lifted return type that is
 -- already correct, and consumption checking sees a fresh result through the
--- ordinary rule for applying a function with a unique return type - no special
+-- ordinary rule for applying a function with a fresh return type - no special
 -- case in any of them.

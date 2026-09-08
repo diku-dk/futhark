@@ -231,7 +231,7 @@ zeroOutUpdates certs_to_zeroes lam = lam {lambdaBody = onBody $ lambdaBody lam}
             }
     onStms = fmap onStm
     onStm (Let (Pat [pe]) aux (BasicOp (UpdateAcc safety acc is _)))
-      | Acc c _ _ _ <- patElemType pe,
+      | Acc c _ _ <- patElemType pe,
         Just zero <- lookup c certs_to_zeroes =
           Let (Pat [pe]) aux (BasicOp (UpdateAcc safety acc is zero))
     onStm (Let pat aux e) = Let pat aux $ onExp e
@@ -262,9 +262,9 @@ updateAccParamTypes n_inputs adj_sh lam
       p {paramDec = updateAccType certs (paramDec p)}
 
     updateAccType :: [VName] -> Type -> Type
-    updateAccType certs (Acc cert acc_shape ts u)
+    updateAccType certs (Acc cert acc_shape ts)
       | cert `elem` certs =
-          Acc cert acc_shape (map (`arrayOfShape` adj_sh) ts) u
+          Acc cert acc_shape (map (`arrayOfShape` adj_sh) ts)
     updateAccType _ t = t
 
     updateBody :: [VName] -> Body SOACS -> Body SOACS
@@ -435,7 +435,7 @@ diffUpdateAcc pat aux safety acc is vs m = do
     -- An accumulator with a combining operator does not overwrite, so the
     -- incoming value of the updated cell retains its full sensitivity.
     overwrites <- case acc_t of
-      Acc cert _ _ _ -> not <$> isOperatorAcc cert
+      Acc cert _ _ -> not <$> isOperatorAcc cert
       _ -> pure True
     let elem_t = stripArray (length is) adj_t
         slice = fullSlice adj_t $ map DimFix is
