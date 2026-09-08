@@ -3,7 +3,7 @@ module Futhark.CLI.Profile (main) where
 
 import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
-import Control.Monad (forM_, (>=>))
+import Control.Monad (forM_, when)
 import Control.Monad.Except (ExceptT, liftEither, runExcept, runExceptT)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (Except)
@@ -13,6 +13,7 @@ import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.List qualified as L
 import Data.Map qualified as M
+import Data.Maybe (isJust)
 import Data.Monoid (Sum (..))
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
@@ -32,7 +33,7 @@ import Futhark.Bench
   )
 import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails), CostCentreName (CostCentreName), CostCentres, SourceRangeDetails (SourceRangeDetails), SourceRanges, containingCostCentres)
 import Futhark.Profile.EventSummary qualified as ES
-import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml, generateHtmlIndex, securedHashPath)
+import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml, generateHtmlIndex, generateSourceIndex, securedHashPath)
 import Futhark.Profile.SourceRange (SourceRange)
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (showText)
@@ -151,27 +152,36 @@ data TargetFiles = TargetFiles
     htmlDir :: FilePath
   }
 
-writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
-writeAnalysis tf r = runExceptT >=> handleException $ do
-  let evSummaryMap = ES.eventSummaries $ profilingEvents r
+-- | Write text and HTML reports, even if source analysis is unavailable.
+writeAnalysis :: TargetFiles -> Maybe T.Text -> Maybe ProfilingReport -> IO ()
+writeAnalysis tf logText profilingReport = do
+  createDirectoryIfMissing True $ htmlDir tf
+  T.writeFile (htmlDir tf </> "style.css") cssFile
 
-  -- heatmap html and cost centres
-  writeHtml tf evSummaryMap
+  let timelineText = timeline . profilingEvents <$> profilingReport
+  sourceIndex <- case profilingReport of
+    Nothing -> pure $ H.p "No profiling information recorded."
+    Just r -> do
+      let evSummaryMap = ES.eventSummaries $ profilingEvents r
+      T.writeFile (summaryFile tf) $
+        memoryReport (profilingMemory r)
+          <> "\n\n"
+          <> tabulateEvents evSummaryMap
+      forM_ timelineText $ T.writeFile (timelineFile tf)
 
-  -- profile.summary
-  liftIO $
-    T.writeFile (summaryFile tf) $
-      memoryReport (profilingMemory r)
-        <> "\n\n"
-        <> tabulateEvents evSummaryMap
+      sourceResult <- runExceptT $ writeHtml tf evSummaryMap
+      case sourceResult of
+        Left err -> do
+          T.hPutStrLn stderr err
+          pure $ do
+            H.p "Source information unavailable."
+            H.pre $ H.text err
+        Right html -> pure html
 
-  -- profile.timeline
-  liftIO $
-    T.writeFile (timelineFile tf) $
-      timeline (profilingEvents r)
-  where
-    handleException :: Either T.Text () -> IO ()
-    handleException = either (T.hPutStrLn stderr) pure
+  let relHtmlDirPath = last $ splitPath $ htmlDir tf
+  LT.writeFile (htmlIndexFile tf) $
+    H.renderHtml $
+      generateHtmlIndex relHtmlDirPath logText timelineText sourceIndex
 
 toIOExcept :: Except T.Text a -> ExceptT T.Text IO a
 toIOExcept = liftEither . runExcept
@@ -181,27 +191,14 @@ writeHtml ::
   TargetFiles ->
   -- | mapping keys are (name, provenance)
   M.Map (T.Text, T.Text) ES.EvSummary ->
-  ExceptT T.Text IO ()
+  ExceptT T.Text IO H.Html
 writeHtml tf evSummaryMap = do
   let htmlDirPath = htmlDir tf
-  let htmlIndexPath = htmlIndexFile tf
   (sourceRanges, costCentres) <- toIOExcept $ buildDetailStructures evSummaryMap
   htmlFiles <- generateHtmlHeatmaps sourceRanges
   let costCentreOverview = generateCCOverviewHtml costCentres
 
   liftIO $ do
-    -- create the bench.html/ directory
-    createDirectoryIfMissing True htmlDirPath
-    -- style is needed by both cc-overview and source ranges
-    let cssPath = htmlDirPath </> "style.css"
-    T.writeFile cssPath cssFile
-
-    -- index file
-    let relHtmlDirPath = last $ splitPath htmlDirPath
-    LT.writeFile
-      htmlIndexPath
-      (H.renderHtml $ generateHtmlIndex relHtmlDirPath sourceRanges costCentres)
-
     -- cost centre file
     LT.writeFile
       (htmlDirPath </> "cost-centres.html")
@@ -212,6 +209,9 @@ writeHtml tf evSummaryMap = do
       let absPath =
             htmlDirPath </> makeRelative "/" (srcFilePath <> ".html")
       writeLazyTextFile absPath (H.renderHtml html)
+
+  let relHtmlDirPath = last $ splitPath htmlDirPath
+  pure $ generateSourceIndex relHtmlDirPath sourceRanges
 
 writeLazyTextFile :: FilePath -> LT.Text -> IO ()
 writeLazyTextFile filepath content = do
@@ -402,10 +402,10 @@ analyseProfilingReport json_path r = do
         TargetFiles
           { summaryFile = top_dir </> "summary",
             timelineFile = top_dir </> "timeline",
-            htmlIndexFile = top_dir </> "index",
+            htmlIndexFile = top_dir </> "index.html",
             htmlDir = top_dir </> "html/"
           }
-  writeAnalysis tf r
+  writeAnalysis tf Nothing $ Just r
 
 analyseBenchResults :: FilePath -> [BenchResult] -> IO ()
 analyseBenchResults json_path bench_results = do
@@ -438,15 +438,16 @@ analyseBenchResults json_path bench_results = do
         Just text -> T.writeFile (name' <.> ".log") text
       case report res of
         Nothing -> problem prog_name name "no profiling information"
-        Just r ->
-          let tf =
-                TargetFiles
-                  { summaryFile = name' <> ".summary",
-                    timelineFile = name' <> ".timeline",
-                    htmlIndexFile = name' <> "-index.html",
-                    htmlDir = name' <> ".html/"
-                  }
-           in writeAnalysis tf r
+        Just _ -> pure ()
+      let tf =
+            TargetFiles
+              { summaryFile = name' <> ".summary",
+                timelineFile = name' <> ".timeline",
+                htmlIndexFile = name' <> "-index.html",
+                htmlDir = name' <> ".html/"
+              }
+      when (isJust (stdErr res) || isJust (report res)) $
+        writeAnalysis tf (stdErr res) (report res)
 
 readFileSafely :: FilePath -> IO (Either String BS.ByteString)
 readFileSafely filepath =
