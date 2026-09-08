@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -64,7 +63,7 @@ class ProfileIndexTests(unittest.TestCase):
         input_path = self.root / "results.json"
         input_path.write_text(json.dumps(programs))
         run = subprocess.run(
-            [os.environ.get("FUTHARK", "futhark"), "profile", str(input_path)],
+            ["futhark", "profile", str(input_path)],
             cwd=self.root,
             capture_output=True,
             text=True,
