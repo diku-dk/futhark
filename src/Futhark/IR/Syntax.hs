@@ -14,7 +14,7 @@
 -- v'Acc' for now).  Types are represented as t'TypeBase', which is
 -- parameterised by the shape of the array and whether we keep
 -- uniqueness information.  The t'Type' alias, which is the most
--- commonly used, uses t'Shape' and t'NoUniqueness'.
+-- commonly used, uses t'Shape' and t'NoMode'.
 --
 -- This means that the records, tuples, and sum types of the source
 -- language are represented merely as collections of primitives and
@@ -107,8 +107,8 @@ module Futhark.IR.Syntax
     module Futhark.IR.Syntax.Core,
 
     -- * Types
-    Uniqueness (..),
-    NoUniqueness (..),
+    Diet (..),
+    NoMode (..),
     Rank (..),
     ArrayShape (..),
     Space (..),
@@ -606,14 +606,14 @@ deriving instance (RepTypes rep) => Ord (FunDef rep)
 -- | An entry point parameter, comprising its name and original type.
 data EntryParam = EntryParam
   { entryParamName :: Name,
-    entryParamUniqueness :: Uniqueness,
+    entryParamUniqueness :: Diet,
     entryParamType :: EntryPointType
   }
   deriving (Eq, Show, Ord)
 
 -- | An entry point result type.
 data EntryResult = EntryResult
-  { entryResultUniqueness :: Uniqueness,
+  { entryResultUniqueness :: Diet,
     entryResultType :: EntryPointType
   }
   deriving (Eq, Show, Ord)

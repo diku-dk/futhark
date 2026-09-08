@@ -49,7 +49,7 @@ instance TC.Checkable MCMem where
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
-  checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
+  checkRetType = mapM_ (TC.checkExtType . extTypeOf)
   primFParam name t = pure $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType

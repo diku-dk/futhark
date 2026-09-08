@@ -62,7 +62,7 @@ checkForDuplicateNamesInType = check mempty
       check seen t1 >> check seen t2
     check seen (TETuple ts _) = mapM_ (check seen) ts
     check seen (TERecord fs _) = mapM_ (check seen . snd) fs
-    check seen (TEUnique t _) = check seen t
+    check seen (TEStar t _) = check seen t
     check seen (TESum cs _) = mapM_ (mapM (check seen) . snd) cs
     check seen (TEApply t1 (TypeArgExpType t2) _) =
       check seen t1 >> check seen t2
@@ -156,8 +156,8 @@ resolveTypeExp orig = checkForDuplicateNamesInType orig >> f orig
       TETuple <$> mapM f tes <*> pure loc
     f (TERecord fs loc) =
       TERecord <$> mapM (traverse f) fs <*> pure loc
-    f (TEUnique te loc) =
-      TEUnique <$> f te <*> pure loc
+    f (TEStar te loc) =
+      TEStar <$> f te <*> pure loc
     f (TEApply te1 args loc) =
       TEApply <$> f te1 <*> onArg args <*> pure loc
       where

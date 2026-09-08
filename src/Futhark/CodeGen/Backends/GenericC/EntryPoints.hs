@@ -236,14 +236,14 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
     vdType (OpaqueValue name _) =
       nameToText name
 
-    outputManifest (u, vd) =
+    outputManifest (o, vd) =
       Manifest.Output
         { Manifest.outputType = vdType vd,
-          Manifest.outputUnique = u == Unique
+          Manifest.outputUnique = o == Consume
         }
-    inputManifest ((v, u), vd) =
+    inputManifest ((v, o), vd) =
       Manifest.Input
         { Manifest.inputName = nameToText v,
           Manifest.inputType = vdType vd,
-          Manifest.inputUnique = u == Unique
+          Manifest.inputUnique = o == Consume
         }

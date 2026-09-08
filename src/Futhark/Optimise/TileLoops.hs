@@ -379,7 +379,7 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
   let (mergeparams, mergeinits) = unzip merge
 
       -- Expand the loop merge parameters to be arrays.
-      tileDim t = arrayOf t (tilingTileShape tiling) $ uniqueness t
+      tileDim t = arrayOf t (tilingTileShape tiling) $ diet t
 
       merge_scope = M.insert i (IndexName it) $ scopeOfFParams mergeparams
 
@@ -697,7 +697,7 @@ tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res 
         (,)
           <$> newParam
             (baseName (paramName p) <> "_merge")
-            (paramType p `arrayOfShape` tile_shape `toDecl` Unique)
+            (paramType p `arrayOfShape` tile_shape `toDecl` Consume)
           <*> pure (Var mergeinit)
 
       tile_id <- newVName "tile_id"

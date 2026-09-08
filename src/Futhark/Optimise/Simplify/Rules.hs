@@ -88,7 +88,7 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Replicate (Shape []) (Var v)
       guard $ ST.entryDepth e == ST.loopDepth vtable
       consumableStm e `mplus` consumableFParam e
     consumableFParam =
-      Just . maybe False (unique . declTypeOf) . ST.entryFParam
+      Just . maybe False (consuming . declTypeOf) . ST.entryFParam
     consumableStm e = do
       void $ ST.entryStm e -- Must be a stm.
       guard v_is_fresh

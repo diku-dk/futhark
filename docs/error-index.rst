@@ -6,30 +6,29 @@ Compiler Error Index
 Elaboration on type errors produced by the compiler.  Many error
 messages contain links to the sections below.
 
-Uniqueness errors
------------------
+Consumption errors
+------------------
 
 .. _use-after-consume:
 
 "Using *x*, but this was consumed at *y*."
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A core principle of uniqueness typing (see :ref:`in-place-updates`) is
-that after a variable is "consumed", it must not be used again.  For
-example, this is invalid, and will result in the error above:
+A core principle of type-checking in-place updates (see :ref:`in-place-updates`)
+is that after a variable is *consumed*, it must not be used again. For example,
+this is invalid, and will result in the error above:
 
 .. code-block:: futhark
 
   let y = x with [0] = 0
   in x
 
-Several operations can *consume* a variable: array update expressions,
-calling a function with unique-typed parameters, or passing it as the
-initial value of a unique-typed loop parameter.  When a variable is
-consumed, its *aliases* are also considered consumed.  Aliasing is the
-possibility of two variables occupying the same memory at run-time.
-For example, this will fail as above, because ``y`` and ``x`` are
-aliased:
+Several operations can *consume* a variable: array update expressions, calling a
+function with consumed parameters, or passing it as the initial value of a
+consuming loop parameter. When a variable is consumed, its *aliases* are also
+considered consumed. Aliasing is the possibility of two variables occupying the
+same memory at run-time. For example, this will fail as above, because ``y`` and
+``x`` are aliased:
 
 .. code-block:: futhark
 
@@ -60,9 +59,9 @@ consumable.  For example, it would occur for the following program:
     let a[0] = a[0]+1
     in a
 
-Only arrays with a a *unique array type* can be consumed.  Such a type
-is written by prefixing the array type with an asterisk.  The program
-could be fixed by writing it like this:
+Only parameters marked as *consumable* can be consumed. This is designated in
+the type by prefixing it with an asterisk. The program could be fixed by writing
+it like this:
 
 .. code-block:: futhark
 
@@ -74,8 +73,7 @@ Note that this places extra obligations on the caller of the ``f``
 function, since it now *consumes* its argument.  See
 :ref:`in-place-updates` for the full details.
 
-You can always obtain a unique copy of an array by using
-``copy``:
+You can always obtain a *fresh* copy of an array by using ``copy``:
 
 .. code-block:: futhark
 
@@ -89,8 +87,8 @@ purpose of using in-place updates in the first place.
 
 .. _return-aliased:
 
-"Unique-typed return value of *x* is aliased to *y*, which is not consumable"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Fresh-declared return value of *x* is aliased to *y*, which is not consumable"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This can be caused by a function like this:
 
@@ -98,13 +96,12 @@ This can be caused by a function like this:
 
   def f (xs: []i32) : *[]i32 = xs
 
-We are saying that ``f`` returns a *unique* array - meaning it has no
-aliases - but at the same time, it aliases the parameter *xs*, which
-is not marked as being unique (see :ref:`in-place-updates`).  This
-violates one of the core guarantees provided by uniqueness types,
-namely that a unique return value does not alias any value that might
-be used in the future.  Imagine if this was permitted, and we had a
-program that used ``f``:
+We are saying that ``f`` returns a *fresh* array - meaning it has no aliases -
+but at the same time, it aliases the parameter *xs*, which is not marked as
+being consumable (see :ref:`in-place-updates`). This violates one of the core
+safety guarantees for in-place updates, namely that a fresh return value does
+not alias any value that might be used in the future. Imagine if this was
+permitted, and we had a program that used ``f``:
 
 .. code-block:: futhark
 
@@ -116,9 +113,9 @@ The update of ``b`` is fine, but if ``b`` was allowed to alias ``a``
 (hence occupying the same memory), then we would be modifying ``a`` as
 well, which is a violation of referential transparency.
 
-As with most uniqueness errors, it can be fixed by using ``copy xs``
-to break the aliasing.  We can also change the type of ``f`` to take a
-unique array as input:
+As with most alias-related errors errors, it can be fixed by using ``copy xs``
+to break the aliasing. We can also change the type of ``f`` to consume its
+parameter:
 
 .. code-block:: futhark
 
@@ -126,10 +123,10 @@ unique array as input:
 
 This makes ``xs`` "consumable", in the sense used by the error message.
 
-.. _unique-return-aliased:
+.. _fresh-return-aliased:
 
-"A unique-typed component of the return value of *x* is aliased to some other component"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"A fresh-declared component of the return value of *x* is aliased to some other component"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Caused by programs like the following:
 
@@ -137,13 +134,12 @@ Caused by programs like the following:
 
   def main (xs: *[]i32) : (*[]i32, *[]i32) = (xs, xs)
 
-While we are allowed to "consume" ``xs``, as it is a unique parameter,
-this function is trying to return two unique values that alias each
-other.  This violates one of the core guarantees provided by
-uniqueness types, namely that a unique return value does not alias any
-value that might be used in the future (see :ref:`in-place-updates`) -
-and in this case, the two values alias each other.  We can fix this by
-inserting copies to break the aliasing:
+While we are allowed to "consume" ``xs``, as it is a consumed parameter, this
+function is trying to return two fresh values that alias each other. This
+violates one of the core safety guarantees for in-place updates, namely that a
+fresh return value does not alias any value that might be used in the future
+(see :ref:`in-place-updates`) - and in this case, the two values alias each
+other. We can fix this by inserting copies to break the aliasing:
 
 .. code-block:: futhark
 
@@ -357,7 +353,7 @@ This error occurs when you have a loop with multiple loop parameters,
 at least one of which is consuming, and the values returned by the
 loop body alias each other. This would result in the consuming loop
 parameter aliasing another loop parameter, which is not allowed. It is
-essentially :ref:`unique-return-aliased` from a loop perspective.
+essentially :ref:`fresh-return-aliased` from a loop perspective.
 
 A (contrived) example of this error is the following:
 
@@ -389,7 +385,7 @@ The simplest solution is to remove the consumption by doing a ``copy``.
 
 The reason for this restriction is rooted in efficiency concerns.
 Defunctionalisation causes the two applications of ``f`` to both consume ``xs``,
-which is a violation of uniqueness properties.
+which is a violation of the safety requirements for :ref:`in-place updates`.
 
 Size errors
 -----------

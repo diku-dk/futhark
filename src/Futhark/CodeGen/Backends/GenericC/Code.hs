@@ -179,7 +179,7 @@ generateWrite dest idx elemtype (Space space) vol elemexp = do
 
 compileRead ::
   VName ->
-  Count u (TPrimExp t VName) ->
+  Count m (TPrimExp t VName) ->
   PrimType ->
   Space ->
   Volatility ->

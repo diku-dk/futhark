@@ -784,10 +784,9 @@ OpenCL) may perform file system operations during startup, and perhaps
 for caching GPU kernels in some cases.  This is beyond Futhark's
 control.
 
-Violation the restrictions of consumption (see :ref:`api-consumption`)
-can result in undefined behaviour.  This does not matter for programs
-whose entry points do not have unique parameter types
-(:ref:`in-place-updates`).
+Violation the restrictions of consumption (see :ref:`api-consumption`) can
+result in undefined behaviour. This does not matter for programs whose entry
+points do not consume their input (:ref:`in-place-updates`).
 
 .. _manifest:
 
@@ -803,10 +802,10 @@ the compiled Futhark program. Specifically, the manifest contains:
   * The C function name of the entry point.
 
   * A list of all *inputs*, including their type (as a name) and
-    *whether they are unique* (consuming).
+    *whether they are consuming*.
 
-  * A list of all *outputs*, including their type (as a name) and
-    *whether they are unique*.
+  * A list of all *outputs*, including their type (as a name) and whether they
+    *are fresh*.
 
   * A list of all *tuning parameters* that can influence the execution
     of this entry point.  These are not necessarily unique to the

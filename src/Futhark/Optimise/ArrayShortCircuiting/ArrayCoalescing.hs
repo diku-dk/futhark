@@ -621,9 +621,9 @@ fixPointCoalesce lutab fpar bdy topenv = do
       inhb_tab = inhibit buenv
       -- Allow short-circuiting function parameters that are unique and have
       -- matching index functions, otherwise mark as failed
-      handleFunctionParams (a, i, s) (_, u, MemBlock _ _ m ixf) =
-        case (u, M.lookup m a) of
-          (Unique, Just entry)
+      handleFunctionParams (a, i, s) (_, o, MemBlock _ _ m ixf) =
+        case (o, M.lookup m a) of
+          (Consume, Just entry)
             | dstind entry == ixf,
               Set dst_uses <- dstrefs (memrefs entry),
               dst_uses == mempty ->

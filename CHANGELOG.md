@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Attributes may now also reference variables in scope, by prefixing a name with
   `$`. There is no builtin use for this feature.
 
+* The "uniqueness" terminology for in-place updates has now been completely
+  replaced with the notions of "consumption" and "freshness".
+
 ### Removed
 
 ### Changed

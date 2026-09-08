@@ -223,7 +223,7 @@ prepareIntraBlockSegHist segments tblock_size =
           let num_locks = pe64 $ unCount tblock_size
               dims = map pe64 $ shapeDims (segments <> histOpShape op <> histShape op)
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
-              locks_t = Array int32 (Shape [unCount tblock_size]) NoUniqueness
+              locks_t = Array int32 (Shape [unCount tblock_size]) NoMode
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "shared"
           dArray locks int32 (arrayShape locks_t) locks_mem $

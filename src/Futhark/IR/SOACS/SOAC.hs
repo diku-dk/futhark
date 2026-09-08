@@ -769,9 +769,9 @@ substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
 substNamesInType _ t@Acc {} = t
 substNamesInType _ (Mem space) = Mem space
-substNamesInType subs (Array btp shp u) =
+substNamesInType subs (Array btp shp o) =
   let shp' = Shape $ map (substNamesInSubExp subs) (shapeDims shp)
-   in Array btp shp' u
+   in Array btp shp' o
 
 substNamesInSubExp :: M.Map VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e

@@ -363,7 +363,7 @@ instance (FreeIn d) => FreeIn (Ext d) where
 instance FreeIn PrimType where
   freeIn' _ = mempty
 
-instance (FreeIn shape) => FreeIn (TypeBase shape u) where
+instance (FreeIn shape) => FreeIn (TypeBase shape o) where
   freeIn' (Array t shape _) = freeIn' t <> freeIn' shape
   freeIn' (Mem s) = freeIn' s
   freeIn' Prim {} = mempty

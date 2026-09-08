@@ -150,7 +150,7 @@ instance (Checkable rep) => Show (ErrorCase rep) where
       ++ prettyString got
       ++ "."
   show (ReturnAliased fname name) =
-    "Unique return value of function "
+    "Consume return value of function "
       ++ nameToString fname
       ++ " is aliased to "
       ++ prettyString name
@@ -622,7 +622,7 @@ checkFun (FunDef _ _ fname rettype params body) =
   context ("In function " <> nameToText fname)
     $ checkFun'
       ( fname,
-        map (first declExtTypeOf) rettype,
+        map (first extTypeOf) rettype,
         funParamsToNameInfos params
       )
       (Just consumable)
@@ -634,7 +634,7 @@ checkFun (FunDef _ _ fname rettype params body) =
     consumable =
       [ (paramName param, mempty)
       | param <- params,
-        unique $ paramDeclType param
+        consuming $ paramDeclType param
       ]
 
 funParamsToNameInfos ::
@@ -675,7 +675,7 @@ checkNoDuplicateParams fname = foldM_ expand []
 checkFun' ::
   (Checkable rep) =>
   ( Name,
-    [(DeclExtType, RetAls)],
+    [(ExtType, RetAls)],
     [(VName, NameInfo (Aliases rep))]
   ) ->
   Maybe [(VName, Names)] ->
@@ -698,7 +698,7 @@ checkFun' (fname, rettype, params) consumable check = do
 
     unique_names = namesFromList $ do
       (v, FParamName t) <- params
-      guard $ unique $ declTypeOf t
+      guard $ consuming $ declTypeOf t
       pure v
 
     allowedArgAliases pals =
@@ -909,8 +909,8 @@ checkBasicOp (Update _ src slice se) = do
     bad $
       TypeError "The target of an Update must not alias the value to be written."
 
-  checkSlice (arrayOf (Prim src_pt) src_shape NoUniqueness) slice
-  require (arrayOf (Prim src_pt) (sliceShape slice) NoUniqueness) se
+  checkSlice (arrayOf (Prim src_pt) src_shape NoMode) slice
+  require (arrayOf (Prim src_pt) (sliceShape slice) NoMode) se
   consume =<< lookupAliases src
 checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
@@ -927,7 +927,7 @@ checkBasicOp (FlatUpdate src slice v) = do
       TypeError "The target of an Update must not alias the value to be written."
 
   checkFlatSlice slice
-  requireI (arrayOf (Prim src_pt) (Shape (flatSliceDims slice)) NoUniqueness) v
+  requireI (arrayOf (Prim src_pt) (Shape (flatSliceDims slice)) NoMode) v
   consume =<< lookupAliases src
 checkBasicOp (Iota e x s et) = do
   require (Prim int64) e
@@ -1073,11 +1073,11 @@ checkExp (Loop merge form loopbody) = do
   binding (scopeOfLoopForm form) $ do
     checkForm form
 
-    let rettype = map paramDeclType mergepat
+    let rettype = map paramType mergepat
         consumable =
           [ (paramName param, mempty)
           | param <- mergepat,
-            unique $ paramDeclType param
+            consuming $ paramDeclType param
           ]
 
     context "Inside the loop body"
@@ -1204,7 +1204,7 @@ checkSOACArrayArgs width = mapM checkSOACArrayArg
 
 checkType ::
   (Checkable rep) =>
-  TypeBase Shape u ->
+  TypeBase Shape o ->
   TypeM rep ()
 checkType (Mem (ScalarSpace d _)) = mapM_ (require (Prim int64)) d
 checkType (Acc cert shape ts) = do
@@ -1215,7 +1215,7 @@ checkType t = mapM_ checkSubExp $ arrayDims t
 
 checkExtType ::
   (Checkable rep) =>
-  TypeBase ExtShape u ->
+  TypeBase ExtShape o ->
   TypeM rep ()
 checkExtType = mapM_ checkExtDim . shapeDims . arrayShape
   where
@@ -1400,7 +1400,7 @@ checkAnyLambda soac onBody (Lambda params rettype body) args = do
       -- Consumption for this is done explicitly elsewhere.
       checkFuncall
         Nothing
-        (map ((`toDecl` Nonunique) . paramType) params)
+        (map ((`toDecl` Observe) . paramType) params)
         $ map noArgAliases args
       let consumable =
             if soac
@@ -1497,8 +1497,8 @@ class (AliasableRep rep, TypedOp (OpC rep)) => Checkable rep where
   default checkLetBoundDec :: (LetDec rep ~ Type) => VName -> LetDec rep -> TypeM rep ()
   checkLetBoundDec _ = checkType
 
-  default checkRetType :: (RetType rep ~ DeclExtType) => [RetType rep] -> TypeM rep ()
-  checkRetType = mapM_ $ checkExtType . declExtTypeOf
+  default checkRetType :: (RetType rep ~ ExtType) => [RetType rep] -> TypeM rep ()
+  checkRetType = mapM_ checkExtType
 
   default matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
   matchPat pat = matchExtPat pat <=< expExtType
@@ -1506,8 +1506,8 @@ class (AliasableRep rep, TypedOp (OpC rep)) => Checkable rep where
   default primFParam :: (FParamInfo rep ~ DeclType) => VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   primFParam name t = pure $ Param mempty name (Prim t)
 
-  default matchReturnType :: (RetType rep ~ DeclExtType) => [RetType rep] -> Result -> TypeM rep ()
-  matchReturnType = matchExtReturnType . map fromDecl
+  default matchReturnType :: (RetType rep ~ ExtType) => [RetType rep] -> Result -> TypeM rep ()
+  matchReturnType = matchExtReturnType
 
   default matchBranchType :: (BranchType rep ~ ExtType) => [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
   matchBranchType = matchExtBranchType

@@ -72,7 +72,7 @@ arrParam arr = do
       pure $ Imp.MemParam mem DefaultSpace
     _ -> error $ "arrParam: could not handle array " ++ show arr
 
-toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
+toParam :: VName -> TypeBase shape o -> MulticoreGen [Imp.Param]
 toParam name (Prim pt) = pure [Imp.ScalarParam name pt]
 toParam name (Mem space) = pure [Imp.MemParam name space]
 toParam name Array {} = pure <$> arrParam name

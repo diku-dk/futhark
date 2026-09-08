@@ -56,9 +56,9 @@ replaceInParams coalstab fparams =
         MemMem _
           | Just entry <- M.lookup name coalstab ->
               (oneName (dstmem entry) <> to_remove, Param attrs (dstmem entry) dec : acc)
-        MemArray pt shp u (ArrayIn m ixf)
+        MemArray pt shp o (ArrayIn m ixf)
           | Just entry <- M.lookup m coalstab ->
-              (to_remove, Param attrs name (MemArray pt shp u $ ArrayIn (dstmem entry) ixf) : acc)
+              (to_remove, Param attrs name (MemArray pt shp o $ ArrayIn (dstmem entry) ixf) : acc)
         _ -> (to_remove, Param attrs name dec : acc)
 
 removeAllocsInStms :: Stms rep -> UpdateM inner (Stms rep)
@@ -131,8 +131,8 @@ replaceInStm (Let (Pat elems) (StmAux c a loc d) e) = do
   pure $ Let (Pat elems') (StmAux c' a loc d) e'
   where
     replaceInPatElem :: PatElem LetDecMem -> UpdateM inner (PatElem LetDecMem)
-    replaceInPatElem p@(PatElem vname (MemArray _ _ u _)) =
-      fromMaybe p <$> lookupAndReplace vname PatElem u
+    replaceInPatElem p@(PatElem vname (MemArray _ _ o _)) =
+      fromMaybe p <$> lookupAndReplace vname PatElem o
     replaceInPatElem p = pure p
 
 replaceInExp ::
@@ -192,13 +192,13 @@ generalizeIxfun :: [PatElem dec] -> PatElem LetDecMem -> BodyReturns -> UpdateM 
 generalizeIxfun
   pat_elems
   (PatElem vname (MemArray _ _ _ (ArrayIn mem ixf)))
-  m@(MemArray pt shp u _) = do
+  m@(MemArray pt shp o _) = do
     coaltab <- asks envCoalesceTab
     if any (M.member vname . vartab) coaltab
       then
         existentialiseLMAD (map patElemName pat_elems) ixf
           & ReturnsInBlock mem
-          & MemArray pt shp u
+          & MemArray pt shp o
           & pure
       else pure m
 generalizeIxfun _ _ m = pure m
@@ -210,23 +210,23 @@ replaceInIfBody b@(Body _ stms res) = do
   pure $ b {bodyStms = stms', bodyResult = map (replaceResMem coaltab) res}
 
 replaceInFParam :: Param FParamMem -> UpdateM inner (Param FParamMem)
-replaceInFParam p@(Param _ vname (MemArray _ _ u _)) = do
-  fromMaybe p <$> lookupAndReplace vname (Param mempty) u
+replaceInFParam p@(Param _ vname (MemArray _ _ o _)) = do
+  fromMaybe p <$> lookupAndReplace vname (Param mempty) o
 replaceInFParam p = pure p
 
 lookupAndReplace ::
   VName ->
-  (VName -> MemBound u -> a) ->
-  u ->
+  (VName -> MemBound o -> a) ->
+  o ->
   UpdateM inner (Maybe a)
-lookupAndReplace vname f u = do
+lookupAndReplace vname f o = do
   coaltab <- asks envCoalesceTab
   case M.lookup vname $ foldMap vartab coaltab of
     Just (Coalesced _ (MemBlock pt shp mem ixf) subs) ->
       ixf
         & fixPoint (LMAD.substitute subs)
         & ArrayIn mem
-        & MemArray pt shp u
+        & MemArray pt shp o
         & f vname
         & Just
         & pure

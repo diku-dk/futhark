@@ -2,8 +2,7 @@
 -- that they can be shared between the internal and external
 -- representation.
 module Language.Futhark.Core
-  ( Uniqueness (..),
-    NoUniqueness (..),
+  ( NoMode (..),
 
     -- * Location utilities
     SrcLoc,
@@ -58,38 +57,18 @@ import Numeric.Half
 import System.FilePath (takeDirectory)
 import Prelude hiding (id, (.))
 
--- | The uniqueness attribute of a type.  This essentially indicates
--- whether or not in-place modifications are acceptable.  With respect
--- to ordering, 'Unique' is greater than 'Nonunique'.
-data Uniqueness
-  = -- | May have references outside current function.
-    Nonunique
-  | -- | No references outside current function.
-    Unique
+-- | A fancier name for @()@ - the mode of a type that has none.  Also
+-- has a different prettyprinting instance.
+data NoMode = NoMode
   deriving (Eq, Ord, Show)
 
-instance Semigroup Uniqueness where
-  (<>) = min
+instance Semigroup NoMode where
+  NoMode <> NoMode = NoMode
 
-instance Monoid Uniqueness where
-  mempty = Unique
+instance Monoid NoMode where
+  mempty = NoMode
 
-instance Pretty Uniqueness where
-  pretty Unique = "*"
-  pretty Nonunique = mempty
-
--- | A fancier name for @()@ - encodes no uniqueness information.
--- Also has a different prettyprinting instance.
-data NoUniqueness = NoUniqueness
-  deriving (Eq, Ord, Show)
-
-instance Semigroup NoUniqueness where
-  NoUniqueness <> NoUniqueness = NoUniqueness
-
-instance Monoid NoUniqueness where
-  mempty = NoUniqueness
-
-instance Pretty NoUniqueness where
+instance Pretty NoMode where
   pretty _ = mempty
 
 -- | The abstract (not really) type representing names in the Futhark
