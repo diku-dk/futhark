@@ -380,7 +380,7 @@ has an unspecified value, and may never be used again. It must still be manually
 freed, if applicable. Further, any *aliases* of that value are also considered
 consumed and may not be used.
 
-2. The entry point output iseither *fresh* or *nonfresh*. A fresh output has no
+2. The entry point output is either *fresh* or *nonfresh*. A fresh output has no
    aliases. A nonfresh output aliases *every* nonconsumed input parameter.
 
 Note that these distinctions are currently usually not visible in the generated

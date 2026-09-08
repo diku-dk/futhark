@@ -784,7 +784,7 @@ OpenCL) may perform file system operations during startup, and perhaps
 for caching GPU kernels in some cases.  This is beyond Futhark's
 control.
 
-Violation the restrictions of consumption (see :ref:`api-consumption`) can
+Violating the restrictions of consumption (see :ref:`api-consumption`) can
 result in undefined behaviour. This does not matter for programs whose entry
 points do not consume their input (:ref:`in-place-updates`).
 

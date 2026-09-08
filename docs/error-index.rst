@@ -113,9 +113,8 @@ The update of ``b`` is fine, but if ``b`` was allowed to alias ``a``
 (hence occupying the same memory), then we would be modifying ``a`` as
 well, which is a violation of referential transparency.
 
-As with most alias-related errors errors, it can be fixed by using ``copy xs``
-to break the aliasing. We can also change the type of ``f`` to consume its
-parameter:
+As with most alias-related errors, it can be fixed by using ``copy xs`` to break
+the aliasing. We can also change the type of ``f`` to consume its parameter:
 
 .. code-block:: futhark
 
