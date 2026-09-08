@@ -231,7 +231,7 @@ elimUpdates get_rid_of = flip runState mempty . onBody
       pure body {bodyStms = stms'}
     onStms = traverse onStm
     onStm (Let pat@(Pat [PatElem _ dec]) aux (BasicOp (UpdateAcc _ acc _ _)))
-      | Acc c _ _ _ <- typeOf dec,
+      | Acc c _ _ <- typeOf dec,
         c `elem` get_rid_of = do
           modify (insert c)
           pure $ Let pat aux $ BasicOp $ SubExp $ Var acc

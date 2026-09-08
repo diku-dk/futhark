@@ -1059,8 +1059,8 @@ instance Simplifiable PrimType where
 instance (Simplifiable shape) => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) =
     Array <$> simplify et <*> simplify shape <*> pure u
-  simplify (Acc acc ispace ts u) =
-    Acc <$> simplify acc <*> simplify ispace <*> simplify ts <*> pure u
+  simplify (Acc acc ispace ts) =
+    Acc <$> simplify acc <*> simplify ispace <*> simplify ts
   simplify (Mem space) =
     Mem <$> simplify space
   simplify (Prim bt) =

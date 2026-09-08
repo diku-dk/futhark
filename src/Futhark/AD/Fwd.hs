@@ -37,10 +37,10 @@ instance FromShape ExtShape where
   fromShape = fmap Free
 
 tanType :: (FromShape s, Monoid u) => TypeBase s u -> ADM (TypeBase s u)
-tanType (Acc acc ispace ts u) = do
+tanType (Acc acc ispace ts) = do
   acc_tan <- tangent acc
   tan_shape <- askShape
-  pure $ Acc acc_tan (tan_shape <> ispace) ts u
+  pure $ Acc acc_tan (tan_shape <> ispace) ts
 tanType t = do
   shape <- askShape
   pure $ arrayOf (Prim (elemType t)) (fromShape shape <> arrayShape t) u
@@ -426,7 +426,7 @@ fwdWithAccLambda inputs (Lambda params _ body) = do
     mkAccParam c (shape, arrs, _) = do
       tan_shape <- askShape
       ts <- map (stripArray (shapeRank shape)) <$> mapM lookupType arrs
-      newParam "acc_p_tan" $ Acc c (tan_shape <> shape) ts NoUniqueness
+      newParam "acc_p_tan" $ Acc c (tan_shape <> shape) ts
 
 fwdStreamLambda :: Int -> Lambda SOACS -> ADM (Lambda SOACS)
 fwdStreamLambda num_accs (Lambda params _ body) = do

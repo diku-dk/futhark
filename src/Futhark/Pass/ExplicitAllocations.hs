@@ -270,8 +270,8 @@ allocsForPat def_space some_idents rts hints = do
         let ixfn = instantiateExtLMAD idents extixfn
         pure . PatElem (identName ident) . MemArray bt ident_shape u $
           ArrayIn (getIdent idents i) ixfn
-      MemAcc acc ispace ts u ->
-        pure $ PatElem (identName ident) $ MemAcc acc ispace ts u
+      MemAcc acc ispace ts ->
+        pure $ PatElem (identName ident) $ MemAcc acc ispace ts
       _ -> error "Impossible case reached in allocsForPat!"
   where
     knownShape = mapM known . shapeDims
@@ -305,8 +305,8 @@ summaryForBindage _ (Prim bt) _ =
   pure $ MemPrim bt
 summaryForBindage _ (Mem space) _ =
   pure $ MemMem space
-summaryForBindage _ (Acc acc ispace ts u) _ =
-  pure $ MemAcc acc ispace ts u
+summaryForBindage _ (Acc acc ispace ts) _ =
+  pure $ MemAcc acc ispace ts
 summaryForBindage def_space t@(Array pt shape u) NoHint = do
   m <- allocForArray' t def_space
   pure $ MemArray pt shape u $ ArrayIn m $ LMAD.iota 0 $ map pe64 $ arrayDims t
@@ -349,8 +349,8 @@ allocInFParam param pspace =
       pure param {paramDec = MemPrim pt}
     Mem space ->
       pure param {paramDec = MemMem space}
-    Acc acc ispace ts u ->
-      pure param {paramDec = MemAcc acc ispace ts u}
+    Acc acc ispace ts ->
+      pure param {paramDec = MemAcc acc ispace ts}
 
 ensureRowMajorArray ::
   (Allocable fromrep torep inner) =>
@@ -663,7 +663,7 @@ memoryInDeclExtType space k dets = evalState (mapM addMem dets) 0
       let shape' = fmap shift shape
       pure . MemArray pt shape' u . ReturnsNewBlock space i $
         LMAD.iota 0 (map convert $ shapeDims shape')
-    addMem (Acc acc ispace ts u) = pure $ MemAcc acc ispace ts u
+    addMem (Acc acc ispace ts) = pure $ MemAcc acc ispace ts
 
     convert (Ext i) = le64 $ Ext i
     convert (Free v) = Free <$> pe64 v
@@ -799,7 +799,7 @@ allocInMatchBody rets (Body _ stms res) =
           pure $ MemArray pt shape u $ MemReq space
         (_, MemMem space) -> pure $ MemMem space
         (_, MemPrim pt) -> pure $ MemPrim pt
-        (_, MemAcc acc ispace ts u) -> pure $ MemAcc acc ispace ts u
+        (_, MemAcc acc ispace ts) -> pure $ MemAcc acc ispace ts
         _ -> error $ "allocInMatchBody: mismatch: " ++ show (t, v_info)
 
 mkBranchRet :: [MemReqType] -> [BranchTypeMem]
@@ -828,7 +828,7 @@ mkBranchRet reqs =
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
             convert
               <$> LMAD.mkExistential (shapeDims shape') (ctx_offset + 1)
-    inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
+    inspect _ (MemAcc acc ispace ts) = MemAcc acc ispace ts
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
 
@@ -965,7 +965,7 @@ allocInExp (WithAcc inputs bodylam) =
       params <- forM (lambdaParams lam) $ \(Param attrs pv t) ->
         case t of
           Prim Unit -> pure $ Param attrs pv $ MemPrim Unit
-          Acc acc ispace ts u -> pure $ Param attrs pv $ MemAcc acc ispace ts u
+          Acc acc ispace ts -> pure $ Param attrs pv $ MemAcc acc ispace ts
           _ -> error $ "Unexpected WithAcc lambda param: " ++ prettyString (Param attrs pv t)
       allocInLambda params (lambdaBody lam)
 
@@ -1173,4 +1173,4 @@ allocInLParams num_threads idxs = mapM alloc
         Prim bt -> pure $ x {paramDec = MemPrim bt}
         Mem space -> pure $ x {paramDec = MemMem space}
         -- This next case will never happen.
-        Acc acc ispace ts u -> pure $ x {paramDec = MemAcc acc ispace ts u}
+        Acc acc ispace ts -> pure $ x {paramDec = MemAcc acc ispace ts}

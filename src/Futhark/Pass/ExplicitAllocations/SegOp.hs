@@ -66,10 +66,10 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
               y {paramDec = MemMem space}
             )
         -- This next case will never happen.
-        Acc acc ispace ts u ->
+        Acc acc ispace ts ->
           pure
-            ( x {paramDec = MemAcc acc ispace ts u},
-              y {paramDec = MemAcc acc ispace ts u}
+            ( x {paramDec = MemAcc acc ispace ts},
+              y {paramDec = MemAcc acc ispace ts}
             )
 
 allocInBinOpLambda ::

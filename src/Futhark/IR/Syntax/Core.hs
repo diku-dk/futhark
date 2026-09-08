@@ -214,8 +214,11 @@ type SpaceId = String
 -- '==', shapes must match.
 data TypeBase shape u
   = Prim PrimType
-  | -- | Token, index space, element type, and uniqueness.
-    Acc VName Shape [Type] u
+  | -- | Token, index space, and element type.  Accumulators carry no
+    -- uniqueness: every use of an accumulator consumes it ('diet' is
+    -- unconditionally 'Consume'), so there is no way for a function to
+    -- merely observe one.
+    Acc VName Shape [Type]
   | Array PrimType shape u
   | Mem Space
   deriving (Show, Eq, Ord)
@@ -223,7 +226,7 @@ data TypeBase shape u
 instance Bitraversable TypeBase where
   bitraverse f g (Array t shape u) = Array t <$> f shape <*> g u
   bitraverse _ _ (Prim pt) = pure $ Prim pt
-  bitraverse _ g (Acc arrs ispace ts u) = Acc arrs ispace ts <$> g u
+  bitraverse _ _ (Acc arrs ispace ts) = pure $ Acc arrs ispace ts
   bitraverse _ _ (Mem s) = pure $ Mem s
 
 instance Functor (TypeBase shape) where

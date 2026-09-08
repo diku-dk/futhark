@@ -161,12 +161,11 @@ instance Substitute PrimType where
 instance (Substitute shape) => Substitute (TypeBase shape u) where
   substituteNames _ (Prim et) =
     Prim et
-  substituteNames substs (Acc acc ispace ts u) =
+  substituteNames substs (Acc acc ispace ts) =
     Acc
       (substituteNames substs acc)
       (substituteNames substs ispace)
       (substituteNames substs ts)
-      u
   substituteNames substs (Array et sz u) =
     Array (substituteNames substs et) (substituteNames substs sz) u
   substituteNames _ (Mem space) =

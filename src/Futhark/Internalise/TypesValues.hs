@@ -70,7 +70,7 @@ internaliseParamTypes ts =
 -- and a guessed index space. The known type is computed elsewhere (from
 -- concrete loop values, or from an accumulator parameter).
 fixupAcc :: TypeBase shape1 u1 -> (TypeBase shape2 u2, b) -> (TypeBase shape2 u2, b)
-fixupAcc (Acc acc ispace ts _) (Acc _ _ _ u, b) = (Acc acc ispace ts u, b)
+fixupAcc (Acc acc ispace ts) (Acc {}, b) = (Acc acc ispace ts, b)
 fixupAcc _ t = t
 
 -- Fix up accumulators using a positionally-matching list of concrete
@@ -87,8 +87,8 @@ fixupKnownTypes = zipWith fixupAcc
 mkAccCerts :: TypeBase shape u -> InternaliseM (TypeBase shape u)
 mkAccCerts (Array pt shape u) =
   pure $ Array pt shape u
-mkAccCerts (Acc c shape ts u) =
-  Acc <$> c' <*> pure shape <*> pure ts <*> pure u
+mkAccCerts (Acc c shape ts) =
+  Acc <$> c' <*> pure shape <*> pure ts
   where
     c'
       | baseTag c == 0 = newVName "acc_cert"
@@ -263,7 +263,7 @@ internaliseTypeM exts orig_t =
       | null ets -> pure [Pure $ I.Prim I.Unit]
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
-    E.Scalar (E.TypeVar u tn [E.TypeArgType arr_t])
+    E.Scalar (E.TypeVar _ tn [E.TypeArgType arr_t])
       | E.isIntrinsic (E.qualLeaf tn),
         baseName (E.qualLeaf tn) == "acc" -> do
           ts <-
@@ -271,8 +271,7 @@ internaliseTypeM exts orig_t =
               <$> internaliseTypeM exts (E.toRes Nonunique arr_t)
           let acc_param = VName "PLACEHOLDER" 0 -- See mkAccCerts.
               acc_shape = Shape [arraysSize 0 ts]
-              u' = internaliseUniqueness u
-              acc_t = Acc acc_param acc_shape (map rowType ts) u'
+              acc_t = Acc acc_param acc_shape (map rowType ts)
           pure [Pure acc_t]
     E.Scalar E.TypeVar {} ->
       error $ "internaliseTypeM: cannot handle type variable: " ++ prettyString orig_t

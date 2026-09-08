@@ -538,7 +538,7 @@ checkAccIdent ::
 checkAccIdent v = do
   t <- lookupType v
   case t of
-    Acc _ ispace ts _ ->
+    Acc _ ispace ts ->
       pure (ispace, ts)
     _ ->
       bad . TypeError $
@@ -1167,7 +1167,7 @@ checkExp (WithAcc inputs lam) = do
       Nothing ->
         pure ()
 
-    pure (Acc (paramName p) shape elem_ts NoUniqueness, mempty)
+    pure (Acc (paramName p) shape elem_ts, mempty)
 
   checkAnyLambda False checkLambdaBody lam $
     replicate num_accs (Prim Unit, mempty) ++ acc_args
@@ -1207,7 +1207,7 @@ checkType ::
   TypeBase Shape u ->
   TypeM rep ()
 checkType (Mem (ScalarSpace d _)) = mapM_ (require (Prim int64)) d
-checkType (Acc cert shape ts _) = do
+checkType (Acc cert shape ts) = do
   requireI (Prim Unit) cert
   mapM_ (require (Prim int64)) $ shapeDims shape
   mapM_ checkType ts

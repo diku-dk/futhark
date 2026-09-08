@@ -274,9 +274,9 @@ flattenWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_in
       (VName -> Maybe Shape, VName -> Safety -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
       TypeBase shape u ->
       TypeBase shape u
-    trType sf (Acc acc _ ts u)
+    trType sf (Acc acc _ ts)
       | Just shape <- fst sf acc =
-          Acc acc shape ts u
+          Acc acc shape ts
     trType _ t = t
 
     trParam ::
@@ -303,7 +303,7 @@ flattenWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_in
       WithAcc acc_inputs <$> trLam sf lam
     trExp sf (Pat [PatElem _ acc_t]) (BasicOp (UpdateAcc safety acc is ses)) = do
       case acc_t of
-        Acc cert _ _ _
+        Acc cert _ _
           | Just mk <- snd sf cert safety is -> do
               is' <- mk
               pure $ BasicOp $ UpdateAcc safety acc is' ses

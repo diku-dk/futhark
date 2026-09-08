@@ -250,7 +250,7 @@ optimizeStm out stm = do
         -- Read migrated scalars that are used on host.
         foldM addRead (out' |> stm') (zip pes pes')
       WithAcc inputs lmd -> do
-        let getAcc (Acc a _ _ _) = a
+        let getAcc (Acc a _ _) = a
             getAcc _ =
               compilerBugS
                 "Type error: WithAcc expression did not return accumulator."

@@ -61,9 +61,8 @@ instance Pretty Space where
 
 instance (Pretty u) => Pretty (TypeBase Shape u) where
   pretty (Prim t) = pretty t
-  pretty (Acc acc ispace ts u) =
-    pretty u
-      <> "acc"
+  pretty (Acc acc ispace ts) =
+    "acc"
       <> apply
         [ pretty acc,
           pretty ispace,
@@ -75,9 +74,8 @@ instance (Pretty u) => Pretty (TypeBase Shape u) where
 
 instance (Pretty u) => Pretty (TypeBase ExtShape u) where
   pretty (Prim t) = pretty t
-  pretty (Acc acc ispace ts u) =
-    pretty u
-      <> "acc"
+  pretty (Acc acc ispace ts) =
+    "acc"
       <> apply
         [ pretty acc,
           pretty ispace,
@@ -89,9 +87,8 @@ instance (Pretty u) => Pretty (TypeBase ExtShape u) where
 
 instance (Pretty u) => Pretty (TypeBase Rank u) where
   pretty (Prim t) = pretty t
-  pretty (Acc acc ispace ts u) =
-    pretty u
-      <> "acc"
+  pretty (Acc acc ispace ts) =
+    "acc"
       <> apply
         [ pretty acc,
           pretty ispace,

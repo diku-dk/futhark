@@ -928,7 +928,7 @@ unAllocGPUStms = unAllocStms False
 unMem :: MemInfo d u ret -> TypeBase (ShapeBase d) u
 unMem (MemPrim pt) = Prim pt
 unMem (MemArray pt shape u _) = Array pt shape u
-unMem (MemAcc acc ispace ts u) = Acc acc ispace ts u
+unMem (MemAcc acc ispace ts) = Acc acc ispace ts
 unMem MemMem {} = Prim Unit
 
 unAllocScope :: Scope GPUMem -> Scope GPU.GPU

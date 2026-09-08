@@ -429,8 +429,8 @@ lookupAdj v = do
     Nothing -> do
       v_t <- lookupType v
       case v_t of
-        Acc _ shape [Prim t] _ -> pure $ AdjZero shape t
-        Acc _ shape [t] _ -> pure $ AdjZero (shape <> arrayShape t) (elemType t)
+        Acc _ shape [Prim t] -> pure $ AdjZero shape t
+        Acc _ shape [t] -> pure $ AdjZero (shape <> arrayShape t) (elemType t)
         Acc {} -> error $ "lookupAdj: Non-singleton accumulator adjoint: " <> prettyString v_t
         _ -> pure $ AdjZero (adj_shape <> arrayShape v_t) (elemType v_t)
     Just v_adj -> pure v_adj

@@ -333,9 +333,9 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
   out_params <- mapM (newParam "out" . flip toDecl Unique) post_ts
 
   arr_ts <- mapM lookupType arrs
-  let paramForAcc (Acc c _ _ _) = find (f . paramType) out_params
+  let paramForAcc (Acc c _ _) = find (f . paramType) out_params
         where
-          f (Acc c2 _ _ _) = c == c2
+          f (Acc c2 _ _) = c == c2
           f _ = False
       paramForAcc _ = Nothing
 
@@ -458,9 +458,9 @@ transformSOAC pat (Stream w arrs nes lam) = do
     newParam "stream_mapout" $ toDecl t Unique
   let mapout_merge = zip mapout_params $ map Var mapout_initial
 
-  let paramForAcc (Acc c _ _ _) = find (f . paramType) mapout_params
+  let paramForAcc (Acc c _ _) = find (f . paramType) mapout_params
         where
-          f (Acc c2 _ _ _) = c == c2
+          f (Acc c2 _ _) = c == c2
           f _ = False
       paramForAcc _ = Nothing
 
@@ -634,15 +634,15 @@ loopMerge' vars vals =
 -- However, category (3) is a little more tricky in the case where one
 -- of the results is an Acc.  In that case, the result is not an
 -- array, but another Acc.  Any Acc result of a Map must correspond to
--- an Acc that is an input to the map, and the result is initialised
+-- an Acc that is an to the map, and the result is initialised
 -- to be that input.  This requires a 1:1 relationship between Acc
 -- inputs and Acc outputs, which the type checker should enforce.
 -- There is no guarantee that the map results appear in any particular
 -- order (e.g. accumulator results before non-accumulator results), so
 -- we need to do a little sleuthing to establish the relationship.
 --
--- Inside the loop, the non-Acc parameters to map_lam become for-in
--- parameters.  Acc parameters refer to the loop parameters for the
+-- Inside the loop, the non-Acc parameters to map_lam for-in
+-- parameters.  Acc parameters refer to loop parameters for the
 -- corresponding Map result instead.
 --
 -- Intuitively, a Screma(w,
