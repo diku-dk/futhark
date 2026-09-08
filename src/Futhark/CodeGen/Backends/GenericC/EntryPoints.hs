@@ -239,11 +239,11 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
     outputManifest (o, vd) =
       Manifest.Output
         { Manifest.outputType = vdType vd,
-          Manifest.outputUnique = o == Consume
+          Manifest.outputFresh = o == Consume
         }
     inputManifest ((v, o), vd) =
       Manifest.Input
         { Manifest.inputName = nameToText v,
           Manifest.inputType = vdType vd,
-          Manifest.inputUnique = o == Consume
+          Manifest.inputConsumed = o == Consume
         }

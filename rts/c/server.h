@@ -210,7 +210,7 @@ struct entry_point {
   const char** tuning_params;
   const char** attrs;
   const struct type *out_type;
-  bool out_unique;
+  bool out_fresh;
   const struct type **in_types;
   bool *in_unique;
 };
@@ -549,7 +549,7 @@ void cmd_output(struct server_state *s, const char *args[]) {
     return;
   }
 
-  if (e->out_unique) {
+  if (e->out_fresh) {
     putchar('*');
   }
   puts(e->out_type->name);

@@ -145,7 +145,7 @@ toScratch _ _ = Skip
 
 simplifyIndex :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pat [pe]) aux (Index idd inds)
-  | Just m <- simplifyIndexing vtable seType idd inds consumed consuming =
+  | Just m <- simplifyIndexing vtable seType idd inds consumed consuming' =
       Simplify $ certifying (stmAuxCerts aux) $ do
         res <- m
         attributing (stmAuxAttrs aux) $ case res of
@@ -154,8 +154,8 @@ simplifyIndex (vtable, used) pat@(Pat [pe]) aux (Index idd inds)
           IndexResult extra_cs idd' inds' ->
             certifying extra_cs $ letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
   where
-    consuming = (`UT.isConsumed` used)
-    consumed = consuming $ patElemName pe
+    consuming' = (`UT.isConsumed` used)
+    consumed = consuming' $ patElemName pe
     seType (Var v) = ST.lookupType v vtable
     seType (Constant v) = Just $ Prim $ primValueType v
 simplifyIndex _ _ _ _ = Skip

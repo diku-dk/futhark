@@ -76,8 +76,6 @@ data ErrorCase rep
   | ParameterMismatch (Maybe Name) [Type] [Type]
   | SlicingError Shape Int
   | BadAnnotation String Type Type
-  | ReturnAliased Name VName
-  | UniqueReturnAliased Name
   | NotAnArray VName Type
   | PermutationError [Int] Int (Maybe VName)
 
@@ -149,16 +147,6 @@ instance (Checkable rep) => Show (ErrorCase rep) where
       ++ ", but derived to be "
       ++ prettyString got
       ++ "."
-  show (ReturnAliased fname name) =
-    "Consume return value of function "
-      ++ nameToString fname
-      ++ " is aliased to "
-      ++ prettyString name
-      ++ ", which is not consumed."
-  show (UniqueReturnAliased fname) =
-    "A unique tuple element of return value of function "
-      ++ nameToString fname
-      ++ " is aliased to some other tuple component."
   show (NotAnArray e t) =
     "The expression "
       ++ prettyString e
