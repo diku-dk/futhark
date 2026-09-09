@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Facilities for type-checking Futhark terms.  Checking a term
 -- requires a little more context to track consumption and such.
 --
@@ -484,24 +486,19 @@ checkExp (Coerce e te _ loc) = do
   t' <- matchDims (const . const pure) t te_t
   pure $ Coerce e' te' (Info t') loc
 checkExp (AppExp (Apply fe args loc) _) = do
-  fe' <- checkExp fe
   args' <- mapM (checkExp . snd) args
+  -- Record in the type of the function what parametricity tells us about the
+  -- freshness of the result.
+  (fe', fname) <-
+    checkExp fe >>= \case
+      Var qn (Info ft) feloc -> do
+        ft' <- freshenParametricResult qn ft $ map (Just . typeOf) $ NE.toList args'
+        pure (Var qn (Info ft') feloc, Just qn)
+      fe' -> pure (fe', Nothing)
   t <- expType fe'
-  let fname =
-        case fe' of
-          Var v _ _ -> Just v
-          _ -> Nothing
   ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
 
-  -- Record in the type of the function what parametricity tells us about the
-  -- freshness of the result; see 'freshenParametricResult'.
-  fe'' <- case fe' of
-    Var qn (Info ft) feloc -> do
-      ft' <- freshenParametricResult qn ft $ map (Just . typeOf) $ NE.toList args'
-      pure $ Var qn (Info ft') feloc
-    _ -> pure fe'
-
-  pure $ AppExp (Apply fe'' args'' loc) $ Info $ AppRes rt exts
+  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
   where
     onArg fname (i, all_exts, t) arg' = do
       (_, rt, argext, exts) <- checkApply loc (fname, i) t arg'
@@ -510,21 +507,20 @@ checkExp (AppExp (Apply fe args loc) _) = do
           (Info argext, arg')
         )
 checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
-  ftype <- lookupVar oploc op op_t
+  ftype0 <- lookupVar oploc op op_t
   e1' <- checkExp e1
   e2' <- checkExp e2
+  ftype <- freshenParametricResult op ftype0 [Just $ typeOf e1', Just $ typeOf e2']
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
   (_, rt, p1_ext, _) <- checkApply loc (Just op, 0) ftype e1'
   (_, rt', p2_ext, retext) <- checkApply loc (Just op, 1) rt e2'
 
-  ftype' <- freshenParametricResult op ftype [Just $ typeOf e1', Just $ typeOf e2']
-
   pure $
     AppExp
       ( BinOp
           (op, oploc)
-          (Info ftype')
+          (Info ftype)
           (e1', Info p1_ext)
           (e2', Info p2_ext)
           loc
