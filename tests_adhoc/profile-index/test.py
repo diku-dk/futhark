@@ -109,6 +109,7 @@ class ProfileIndexTests(unittest.TestCase):
     def test_single_program_and_multiple_entry_points(self):
         for names in (
             ["prog.fut"],
+            ["prog.fut:main"],
             ["prog.fut:main", "prog.fut:other"],
             ["prefix.fut", "prefix-long.fut"],
             [str(self.root / "input/prog.fut") + ":main"],
@@ -120,6 +121,10 @@ class ProfileIndexTests(unittest.TestCase):
                 programs = self.links(top / "index.html")
                 self.assertEqual(set(programs), set(names))
                 self.assertEqual(len(set(programs.values())), len(names))
+                if names == ["prog.fut:main"]:
+                    self.assertEqual(
+                        programs[names[0]], top / "main/index.html"
+                    )
                 for index in programs.values():
                     self.assertNotEqual(index, top / "index.html")
                     self.assertEqual(set(self.links(index)), {"input"})

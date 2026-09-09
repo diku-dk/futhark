@@ -416,10 +416,10 @@ analyseBenchResults json_path bench_results = do
   programs <- mapM (onBenchResult top_dir) bench_results
   writeNavigationIndex (top_dir </> "index.html") "Program Index" programs
   where
-    prefix =
-      takeDirectory $
-        longestCommonPrefix $
-          map (takeWhile (/= ':') . benchResultProg) bench_results
+    programPaths = map (takeWhile (/= ':') . benchResultProg) bench_results
+    prefix = case S.toList $ S.fromList programPaths of
+      [path] -> path
+      paths -> takeDirectory $ longestCommonPrefix paths
 
     -- Eliminate characters that are filesystem-meaningful.
     escape '/' = '_'
@@ -431,7 +431,15 @@ analyseBenchResults json_path bench_results = do
     onBenchResult top_dir (BenchResult prog_path data_results) = do
       let (prog_path', entry) = span (/= ':') prog_path
           prog_name = makeRelative prefix prog_path'
-          prog_dir = top_dir </> dropExtension prog_name </> drop 1 entry
+          relative_dir = dropExtension prog_name </> drop 1 entry
+          -- Preserve the established <entry>/<dataset>-index.html layout for
+          -- one source file. A file without an entry point still needs its
+          -- own directory so it does not collide with the top-level index.
+          prog_dir =
+            top_dir
+              </> if null relative_dir || relative_dir == "."
+                then "program"
+                else relative_dir
       createDirectoryIfMissing True prog_dir
       datasets <-
         catMaybes <$> mapM (onDataResult prog_dir (T.pack prog_name)) data_results
