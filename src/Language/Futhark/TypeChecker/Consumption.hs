@@ -61,6 +61,11 @@ aliasVar (AliasFree v _) = Just v
 aliasVar (AliasClosure v _) = Just v
 aliasVar AliasSelf = Nothing
 
+-- | The variables these aliases refer to.  'AliasSelf' contributes nothing,
+-- as it refers to no variable.
+aliasVars :: Aliases -> S.Set VName
+aliasVars = S.fromList . mapMaybe aliasVar . S.toList
+
 -- | Does this value have internal aliasing, meaning it can neither be consumed
 -- nor given a fresh type?  See 'AliasSelf'.
 selfAliased :: Aliases -> Bool
@@ -73,7 +78,7 @@ selfAliased = S.member AliasSelf
 -- each other.  Ask this question through here rather than by comparing alias
 -- sets directly.
 overlaps :: Aliases -> Aliases -> Bool
-overlaps x y = any (`S.member` referents y) $ referents x
+overlaps x y = not $ S.disjoint (referents x) (referents y)
   where
     referents = S.filter (isJust . aliasVar)
 
@@ -97,11 +102,12 @@ sourceBoundAliases = boundAliasesWith False
 -- closure if asked.  'AliasFree' has left scope and 'AliasSelf' is no variable
 -- at all, so neither is ever included.
 boundAliasesWith :: Bool -> Aliases -> S.Set VName
-boundAliasesWith closures = S.fromList . mapMaybe aliasVar . filter bound . S.toList
+boundAliasesWith closures = aliasVars . S.filter bound
   where
     bound AliasBound {} = True
     bound AliasClosure {} = closures
-    bound _ = False
+    bound AliasFree {} = False
+    bound AliasSelf = False
 
 -- | Aliases for a type, which is a set of the variables that are
 -- aliased.
@@ -122,19 +128,30 @@ addAliases ::
   TypeBase dim o2
 addAliases = flip second
 
+-- See also 'derivedAliases', which is what a /value/ obtained from this type
+-- may alias.  The two differ only at function types, and choosing the wrong one
+-- is silent, so consider which you want.
 aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
 
 selfAliasType :: VName -> TypeBase Size o -> TypeAliases
-selfAliasType v = insertSelfAliases True v . unknownAliases
+selfAliasType v = insertSelfAliases AliasFuns v . unknownAliases
 
--- | @insertSelfAliases functions v t@ adds an alias of @v@ to every component
--- of @t@, noting the record path at which the component sits.  Function
--- components are included only if @functions@: we do not track the aliases of
--- functions bound outside the definition being checked, as they cannot alias
--- anything we could consume.
-insertSelfAliases :: Bool -> VName -> TypeAliases -> TypeAliases
-insertSelfAliases functions v = onPath []
+-- | Should 'insertSelfAliases' also alias the function-typed components?
+data AliasFuns
+  = -- | Yes: the binding is local, so a function it holds may close over
+    -- something we could consume.
+    AliasFuns
+  | -- | No: the binding is global, and we do not track the aliases of
+    -- functions bound outside the definition being checked, as they cannot
+    -- alias anything we could consume.
+    NoAliasFuns
+  deriving (Eq)
+
+-- | @insertSelfAliases funs v t@ adds an alias of @v@ to every component of
+-- @t@, noting the record path at which the component sits.
+insertSelfAliases :: AliasFuns -> VName -> TypeAliases -> TypeAliases
+insertSelfAliases funs v = onPath []
   where
     onPath fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
     onPath fs (Scalar st) = Scalar $ onPath' fs st
@@ -142,7 +159,7 @@ insertSelfAliases functions v = onPath []
     onPath' fs (Record ts) = Record $ M.mapWithKey (\f -> onPath (fs ++ [f])) ts
     onPath' fs (Sum cs) = Sum $ fmap (map (onPath fs)) cs
     onPath' fs (Arrow als mn d ps rt)
-      | functions = Arrow (S.insert (AliasBound v fs) als) mn d ps rt
+      | funs == AliasFuns = Arrow (S.insert (AliasBound v fs) als) mn d ps rt
       | otherwise = Arrow als mn d ps rt
     onPath' _ et@Prim {} = et
 
@@ -285,7 +302,7 @@ checkReturnAlias loc params rettp =
     checkReturnAlias' params' (uniques, seen) (Fresh, names) = do
       when (names `overlaps` seen) $ freshReturnAliased loc
       when (selfAliased names) $ selfAliasedReturn loc
-      notAliasesParam params' $ S.fromList $ mapMaybe aliasVar $ S.toList names
+      notAliasesParam params' $ aliasVars names
       pure (uniques <> names, seen <> names)
     checkReturnAlias' _ (uniques, seen) (Nonfresh, names) = do
       when (names `overlaps` uniques) $ freshReturnAliased loc
@@ -355,7 +372,7 @@ bindingPat p t = fmap (second (second (unscope (patNames p)))) . local bind
             foldr (uncurry M.insert . f) (envVtable env) (matchPat p t)
         }
       where
-        f (v, (_, als)) = (v, Consumable $ insertSelfAliases True v als)
+        f (v, (_, als)) = (v, Consumable $ insertSelfAliases AliasFuns v als)
 
 bindingParam :: Pat ParamType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingParam p m = do
@@ -441,7 +458,7 @@ consumeAliases loc als = do
   checkIfConsumed loc als
   consumed als'
   where
-    als' = M.fromList $ map (,loc) $ mapMaybe aliasVar $ S.toList als
+    als' = M.fromList $ map (,loc) $ S.toList $ aliasVars als
 
 -- | Observe the given name here and return its aliases.
 observeVar :: Loc -> QualName VName -> StructType -> CheckM TypeAliases
@@ -467,7 +484,7 @@ observeVar loc qv t = do
     -- locally bound names.
     isGlobal env
       | isInstantiation (envVtable env) t = noted env bare
-      | otherwise = noted env $ insertSelfAliases False v bare
+      | otherwise = noted env $ insertSelfAliases NoAliasFuns v bare
       where
         bare = second (const mempty) t
 
@@ -522,7 +539,7 @@ aliasesMultipleTimes = S.fromList . map fst . filter ((> 1) . snd) . M.toList . 
     delve (Scalar (Record fs)) =
       foldl' (M.unionWith (+)) mempty $ map delve $ M.elems fs
     delve t =
-      M.fromList $ map (,1 :: Int) $ mapMaybe aliasVar $ S.toList $ aliases t
+      M.fromList $ map (,1 :: Int) $ S.toList $ aliasVars $ aliases t
 
 consumingParams :: [Pat ParamType] -> Names
 consumingParams =
@@ -537,9 +554,11 @@ arrayAliases (Scalar Arrow {}) = mempty
 arrayAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map arrayAliases) $ M.elems fs
 
--- | The aliases of any function-typed components. This is the part of 'aliases'
--- that 'arrayAliases' ignores. We ignore closure aliases if the return type is
--- Fresh. See Note [Spurious closure aliases].
+-- | The aliases of any function-typed components: the part of 'aliases' that
+-- 'arrayAliases' ignores.  Note that this goes through 'derivedAliases', so a
+-- closure alias of a function with a fresh return type comes back weakened to
+-- 'AliasClosure' - it is 'sourceBoundAliases' that later drops it.  See Note
+-- [Spurious closure aliases].
 arrowAliases :: TypeAliases -> Aliases
 arrowAliases t@(Scalar Arrow {}) = derivedAliases t
 arrowAliases (Scalar (Record fs)) = foldMap arrowAliases fs
@@ -574,9 +593,11 @@ overlapCheck loc (src, src_als) (ve, ve_als) =
         <+> dquotes "copy"
         <+> "to remove aliases from the value."
 
--- 'setMode' does not look inside an arrow, but when we return a function,
--- the freshness of *its* return type has already been inferred when checking
--- the lambda. So go past all the arrows and set the freshness appropriately.
+-- | 'setMode' does not look inside an arrow, but when we return a function, the
+-- freshness of *its* return type has already been inferred when checking the
+-- lambda.  So go past all the arrows and set the freshness appropriately - note
+-- that for a function the given 'Freshness' is therefore ignored, as the answer
+-- is already recorded in the type.
 withArrowRet :: ResType -> TypeAliases -> Freshness -> ResType
 withArrowRet
   (Scalar (Arrow u pn d pt (RetType ext t1)))
@@ -605,13 +626,12 @@ inferReturnFreshness params ret ret_als = delve ret ret_als
       Scalar $ Record $ M.intersectionWith delve fs1 fs2
     delve (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
       Scalar $ Sum $ M.intersectionWith (zipWith delve) cs1 cs2
-    delve t t_als
-      | all (`S.member` consumings) $ boundAliases (arrayAliases t_als),
-        not $ selfAliased (aliases t_als),
-        not $ any (`S.member` forbidden) (mapMaybe aliasVar (S.toList (aliases t_als))) =
-          withArrowRet t t_als Fresh
-      | otherwise =
-          withArrowRet t t_als Nonfresh
+    delve t t_als = withArrowRet t t_als $ if isFresh then Fresh else Nonfresh
+      where
+        isFresh =
+          all (`S.member` consumings) (boundAliases (arrayAliases t_als))
+            && not (selfAliased (aliases t_als))
+            && not (any (`S.member` forbidden) (aliasVars (aliases t_als)))
 
 checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
@@ -901,7 +921,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
   (param'', (param_cons, _)) <-
     runStateT (checkMergeReturn param' body_als) (mempty, mempty)
 
-  let body_cons' = body_cons <> S.fromList (mapMaybe aliasVar (S.toList param_cons))
+  let body_cons' = body_cons <> aliasVars param_cons
   if body_cons' == body_cons && patternType param'' == patternType param
     then pure param'
     else convergeLoopParam loop_loc param'' body_cons' body_als
@@ -1255,8 +1275,8 @@ checkGlobalAliases loc params body_t = do
   vtable <- asks envVtable
   let global = flip M.notMember vtable
       -- A definition with no parameters is a constant that may alias other
-      -- globals, but a *function-valued* may not have aliases in its closure.
-      -- See Note [Global aliases and lambdas].
+      -- globals, but a *function-typed* definition may not have aliases in its
+      -- closure. See Note [Global aliases and lambdas].
       als
         | null params = arrowAliases body_t
         | otherwise = arrayAliases body_t <> arrowAliases body_t
@@ -1329,7 +1349,7 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 --   * If the lambda is returned by the enclosing named function, then the
 --     enclosing function's result is function-typed and carries the closure
 --     aliases with it. 'checkGlobalAliases' therefore looks through arrows via
---     'resultAliases', and catches the escape there.
+--     'arrowAliases', and catches the escape there.
 
 -- Note [Spurious closure aliases]
 --
@@ -1355,13 +1375,11 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- inference, consumption checking). The marking is used only to suppress the
 -- user-visible error in 'checkGlobalAliases'.
 --
--- The reason this is still needed is *not* the one it used to be. It used to be
--- that a lifted @|>@ inherited the nonfresh instantiation of its type
--- variable; that is now settled during type inference (see Note [Parametric
--- freshness] in Language.Futhark.TypeChecker.Terms), and the tests that
--- formerly demonstrated it - tests/issue1525.fut, tests/ad/map2.fut - no longer
--- do. Dropping the weakening now costs exactly two tests: tests/issue995.fut
--- and tests/ad/issue1564.fut.
+-- What the weakening is needed *for* is narrow. A lifted @|>@ gets the
+-- freshness of its instantiation settled during type inference (see Note
+-- [Parametric freshness] in Language.Futhark.TypeChecker.Terms), so that is not
+-- it. Dropping the weakening costs exactly two tests: tests/issue995.fut and
+-- tests/ad/issue1564.fut.
 --
 -- What remains is that a lifted function *inherits its declared return type*.
 -- In tests/issue995.fut,
@@ -1380,8 +1398,8 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- be *inferred from their bodies* rather than inherited. Note that this has to
 -- hold along the whole chain: making @defunc_0_render@ alone as fresh as its
 -- body is not enough, because the freshness it would report comes in turn from
--- @defunc_0_tabulate@, and so on. Measured: doing it for one link fixes
--- tests/ad/issue1564.fut but not tests/issue995.fut.
+-- @defunc_0_tabulate@, and so on (doing it for one link only is enough for
+-- tests/ad/issue1564.fut, but not for tests/issue995.fut).
 --
 -- Defunctionalisation is source-to-source, so a lifted body is ordinary source
 -- AST and 'checkValDef' would infer its return type directly; the obstacle is
@@ -1439,7 +1457,7 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- Because the note is a "may", anything whose provenance we cannot see must
 -- carry it, or we would promise something we have not checked.  Hence
 -- 'unknownAliases', used for parameters ('selfAliasType') and for any type we
--- build out of thin air, and hence 'selfAliasesOfBody' for functions defined
--- here.  Alias sets are joined by union throughout this module, and a union of
--- "may" is again a "may", so the lattice works out.
---
+-- build out of thin air, and hence 'closureAliases' keeping the note that a
+-- function defined here picked up from its own body.  Alias sets are joined by
+-- union throughout this module, and a union of "may" is again a "may", so the
+-- lattice works out.
