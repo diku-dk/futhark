@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -66,6 +67,7 @@ class ProfileIndexTests(unittest.TestCase):
             ["futhark", "profile", str(input_path)],
             cwd=self.root,
             capture_output=True,
+            env={**os.environ, "LC_ALL": "C.UTF-8"},
             text=True,
         )
         self.assertEqual(run.returncode, 0, run.stderr)
