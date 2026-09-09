@@ -67,8 +67,8 @@ class ProfileIndexTests(unittest.TestCase):
             cwd=self.root,
             capture_output=True,
             text=True,
-            check=True,
         )
+        self.assertEqual(run.returncode, 0, run.stderr)
         return self.root / "results.prof", run.stderr
 
     def links(self, path):
@@ -77,9 +77,10 @@ class ProfileIndexTests(unittest.TestCase):
         resolved = {}
         for href, label in page.links:
             url = urlsplit(href)
-            self.assertFalse(
-                url.scheme or url.netloc or url.query or url.fragment
-            )
+            self.assertFalse(url.scheme or url.netloc or url.query)
+            if url.fragment:
+                self.assertFalse(url.path)
+                continue
             self.assertFalse(Path(unquote(url.path)).is_absolute())
             target = (path.parent / unquote(url.path)).resolve()
             self.assertTrue(target.is_relative_to(self.root))
@@ -162,9 +163,12 @@ class ProfileIndexTests(unittest.TestCase):
         programs = self.links(top / "index.html")
         self.assertEqual(set(programs), {"good.fut:main", "empty.fut:main"})
         self.assertEqual(
-            set(self.links(programs["good.fut:main"])), {"present"}
+            set(self.links(programs["good.fut:main"])),
+            {"present", "missing", "null", "bad source"},
         )
-        self.assertEqual(self.links(programs["empty.fut:main"]), {})
+        self.assertEqual(
+            set(self.links(programs["empty.fut:main"])), {"missing"}
+        )
         self.assertIn("no profiling information", stderr)
         self.assertIn("execution failed", stderr)
         self.assertIn("missing.fut", stderr)
