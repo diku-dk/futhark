@@ -105,10 +105,10 @@ combineDuplicates =
   where
     f [] = Nothing
     f (x : xs) =
-      Just
-        $ BenchResult (benchResultProg x)
-        $ concatMap benchResultResults
-        $ x : xs
+      Just $
+        BenchResult (benchResultProg x) $
+          concatMap benchResultResults $
+            x : xs
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -164,9 +164,9 @@ runBenchmarks opts paths = do
                 benchCompilerOptions = map T.pack $ optCompilerOptions opts,
                 benchRuntimeOptions = map T.pack $ optExtraOptions opts
               }
-      LBS.writeFile file
-        $ encodeBenchResultsWithMetadata metadata
-        $ combineDuplicates results
+      LBS.writeFile file $
+        encodeBenchResultsWithMetadata metadata $
+          combineDuplicates results
   when (any isNothing maybe_results || anyFailed results) exitFailure
   where
     ignored f = any (`match` f) $ optIgnoreFiles opts
