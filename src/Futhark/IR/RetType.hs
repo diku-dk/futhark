@@ -28,7 +28,7 @@ instance IsBodyType ExtType where
 -- a list of these will be used.  It should contain at least the
 -- information contained in an 'ExtType', but may have more, notably
 -- an existential context.
-class (Show rt, Eq rt, Ord rt, ExtTyped rt, DeclExtTyped rt) => IsRetType rt where
+class (Show rt, Eq rt, Ord rt, ExtTyped rt) => IsRetType rt where
   -- | Contruct a return type from a primitive type.
   primRetType :: PrimType -> rt
 
@@ -56,7 +56,7 @@ expectedTypes shapes value_ts args = map (correctDims . typeOf) value_ts
           | Just se <- M.lookup v parammap = se
         f se = se
 
-instance IsRetType DeclExtType where
+instance IsRetType ExtType where
   primRetType = Prim
 
   applyRetType extret params args =

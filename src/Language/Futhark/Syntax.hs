@@ -15,7 +15,6 @@ module Language.Futhark.Syntax
     prettyText,
 
     -- * Types
-    Uniqueness (..),
     IntType (..),
     FloatType (..),
     PrimType (..),
@@ -38,6 +37,7 @@ module Language.Futhark.Syntax
     ResRetType,
     ValueType,
     Diet (..),
+    Freshness (..),
 
     -- * Values
     IntValue (..),
@@ -278,9 +278,9 @@ instance Ord PName where
 
 -- | Types that can appear to the right of a function arrow.  This
 -- just means they can be existentially quantified.
-data RetTypeBase dim as = RetType
+data RetTypeBase dim o = RetType
   { retDims :: [VName],
-    retType :: TypeBase dim as
+    retType :: TypeBase dim o
   }
   deriving (Eq, Ord, Show)
 
@@ -305,14 +305,14 @@ instance Bifoldable RetTypeBase where
 -- | Types that can be elements of arrays.  This representation does
 -- allow arrays of records of functions, which is nonsensical, but it
 -- convolutes the code too much if we try to statically rule it out.
-data ScalarTypeBase dim u
+data ScalarTypeBase dim o
   = Prim PrimType
-  | TypeVar u (QualName VName) [TypeArg dim]
-  | Record (M.Map Name (TypeBase dim u))
-  | Sum (M.Map Name [TypeBase dim u])
+  | TypeVar o (QualName VName) [TypeArg dim]
+  | Record (M.Map Name (TypeBase dim o))
+  | Sum (M.Map Name [TypeBase dim o])
   | -- | The aliasing corresponds to the lexical
     -- closure of the function.
-    Arrow u PName Diet (TypeBase dim NoUniqueness) (RetTypeBase dim Uniqueness)
+    Arrow o PName Diet (TypeBase dim NoMode) (RetTypeBase dim Freshness)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable ScalarTypeBase where
@@ -320,8 +320,8 @@ instance Bitraversable ScalarTypeBase where
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar als t args) =
     TypeVar <$> g als <*> pure t <*> traverse (traverse f) args
-  bitraverse f g (Arrow u v d t1 t2) =
-    Arrow <$> g u <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f pure t2
+  bitraverse f g (Arrow o v d t1 t2) =
+    Arrow <$> g o <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f pure t2
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
 
 instance Functor (ScalarTypeBase dim) where
@@ -344,9 +344,14 @@ instance Bifoldable ScalarTypeBase where
 -- function parameter names are ignored.  This representation permits
 -- some malformed types (arrays of functions), but importantly rules
 -- out arrays-of-arrays.
-data TypeBase dim u
-  = Scalar (ScalarTypeBase dim u)
-  | Array u (Shape dim) (ScalarTypeBase dim NoUniqueness)
+-- The @o@ parameter is the /mode/: what the type says about how the
+-- value may be used, beyond its structure.  It is 'Diet' for
+-- parameters, 'Freshness' for return types, and 'NoMode' where nothing
+-- is said.  Note that these are unrelated to each other - a mode is
+-- whatever the position calls for, not a single property.
+data TypeBase dim o
+  = Scalar (ScalarTypeBase dim o)
+  | Array o (Shape dim) (ScalarTypeBase dim NoMode)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable TypeBase where
@@ -372,7 +377,7 @@ instance Bifoldable TypeBase where
 -- | An argument passed to a type constructor.
 data TypeArg dim
   = TypeArgDim dim
-  | TypeArgType (TypeBase dim NoUniqueness)
+  | TypeArgType (TypeBase dim NoMode)
   deriving (Eq, Ord, Show)
 
 instance Traversable TypeArg where
@@ -387,23 +392,23 @@ instance Foldable TypeArg where
 
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
-type StructType = TypeBase Size NoUniqueness
+type StructType = TypeBase Size NoMode
 
 -- | A type with consumption information, used for function parameters
 -- (but not in function types).
 type ParamType = TypeBase Size Diet
 
--- | A type with uniqueness information, used for function return types
-type ResType = TypeBase Size Uniqueness
+-- | A type with freshness information, used for function return types
+type ResType = TypeBase Size Freshness
 
 -- | A value type contains full, manifest size information.
-type ValueType = TypeBase Int64 NoUniqueness
+type ValueType = TypeBase Int64 NoMode
 
 -- | The return type version of a 'ResType'.
-type StructRetType = RetTypeBase Size NoUniqueness
+type StructRetType = RetTypeBase Size NoMode
 
 -- | The return type version of a 'StructType'.
-type ResRetType = RetTypeBase Size Uniqueness
+type ResRetType = RetTypeBase Size Freshness
 
 -- | A dimension declaration expression for use in a 'TypeExp'.
 -- Syntactically includes the brackets.
@@ -458,17 +463,18 @@ instance Located (TypeArgExp f vn) where
   locOf (TypeArgExpSize e) = locOf e
   locOf (TypeArgExpType t) = locOf t
 
--- | An unstructured syntactic type with type variables and possibly
--- shape declarations - this is what the user types in the source
--- program.  These are used to construct 'TypeBase's in the type
--- checker.
+-- | An unstructured syntactic type with type variables and possibly shape
+-- declarations - this is what the user types in the source program. These are
+-- used to construct 'TypeBase's in the type checker.
 data TypeExp d vn
   = TEVar (QualName vn) SrcLoc
   | TEParens (TypeExp d vn) SrcLoc
   | TETuple [TypeExp d vn] SrcLoc
   | TERecord [(L Name, TypeExp d vn)] SrcLoc
   | TEArray (SizeExp d) (TypeExp d vn) SrcLoc
-  | TEUnique (TypeExp d vn) SrcLoc
+  | -- | A @*@ prefix. The meaning depends on where the type expression occurs:
+    -- consumption on a parameter, freshness on a return type.
+    TEStar (TypeExp d vn) SrcLoc
   | TEApply (TypeExp d vn) (TypeArgExp d vn) SrcLoc
   | TEArrow (Maybe vn) (TypeExp d vn) (TypeExp d vn) SrcLoc
   | TESum [(Name, [TypeExp d vn])] SrcLoc
@@ -488,8 +494,8 @@ instance Bitraversable TypeExp where
     TESum <$> traverse (traverse (traverse (bitraverse f g))) cs <*> pure loc
   bitraverse f g (TEArray d te loc) =
     TEArray <$> traverse f d <*> bitraverse f g te <*> pure loc
-  bitraverse f g (TEUnique te loc) =
-    TEUnique <$> bitraverse f g te <*> pure loc
+  bitraverse f g (TEStar te loc) =
+    TEStar <$> bitraverse f g te <*> pure loc
   bitraverse f g (TEApply te arg loc) =
     TEApply <$> bitraverse f g te <*> bitraverse f g arg <*> pure loc
   bitraverse f g (TEArrow pn te1 te2 loc) =
@@ -518,14 +524,14 @@ instance Located (TypeExp f vn) where
   locOf (TERecord _ loc) = locOf loc
   locOf (TEVar _ loc) = locOf loc
   locOf (TEParens _ loc) = locOf loc
-  locOf (TEUnique _ loc) = locOf loc
+  locOf (TEStar _ loc) = locOf loc
   locOf (TEApply _ _ loc) = locOf loc
   locOf (TEArrow _ _ _ loc) = locOf loc
   locOf (TESum _ loc) = locOf loc
   locOf (TEDim _ _ loc) = locOf loc
 
--- | Information about which parts of a parameter are consumed.  This
--- can be considered kind of an effect on the function.
+-- | The mode of a function parameter: which parts of it are consumed.
+-- This can be considered kind of an effect on the function.
 data Diet
   = -- | Does not consume the parameter.
     Observe
@@ -538,6 +544,23 @@ instance Semigroup Diet where
 
 instance Monoid Diet where
   mempty = Observe
+
+-- | The mode of a function result: whether it may alias the
+-- arguments.  Note the
+-- asymmetry: 'Fresh' is a guarantee about the result, while 'Nonfresh'
+-- is a permission granted to the implementation.
+data Freshness
+  = -- | May alias the observed arguments.
+    Nonfresh
+  | -- | Aliases nothing that is visible to the caller.
+    Fresh
+  deriving (Eq, Ord, Show, Bounded)
+
+instance Semigroup Freshness where
+  (<>) = min
+
+instance Monoid Freshness where
+  mempty = Fresh
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.

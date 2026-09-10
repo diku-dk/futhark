@@ -142,16 +142,16 @@ transformFlatMap pat w arrs lam = do
   -- Loop parameters: the current filled size, the current capacity, the
   -- per-element shape and offset arrays, one scratch buffer per nonuniform
   -- result, and one array per uniform result.
-  size_p <- newParam "flatmap_size" $ toDecl (Prim int64) Nonunique
-  cap_p <- newParam "flatmap_cap" $ toDecl (Prim int64) Nonunique
-  shape_p <- newParam "flatmap_shape" $ toDecl (arrayOfRow (Prim int64) w) Unique
-  offset_p <- newParam "flatmap_offset" $ toDecl (arrayOfRow (Prim int64) w) Unique
+  size_p <- newParam "flatmap_size" $ toDecl (Prim int64) Observe
+  cap_p <- newParam "flatmap_cap" $ toDecl (Prim int64) Observe
+  shape_p <- newParam "flatmap_shape" $ toDecl (arrayOfRow (Prim int64) w) Consume
+  offset_p <- newParam "flatmap_offset" $ toDecl (arrayOfRow (Prim int64) w) Consume
   scratch_ps <-
     forM irreg_ts $ \et ->
-      newParam "flatmap_res" $ toDecl (arrayOfRow et (Var (paramName cap_p))) Unique
+      newParam "flatmap_res" $ toDecl (arrayOfRow et (Var (paramName cap_p))) Consume
   reg_ps <-
     forM reg_ts $ \rt ->
-      newParam "flatmap_reg" $ toDecl (arrayOfRow rt w) Unique
+      newParam "flatmap_reg" $ toDecl (arrayOfRow rt w) Consume
 
   -- The capacity initially matches the input size.
   shape_init <- letExp "flatmap_shape" $ BasicOp $ Scratch int64 [w]
@@ -283,7 +283,7 @@ transformFlatMapFlags ::
 transformFlatMapFlags flag_pat w m shape offset = do
   let flag_t = arrayOfRow (Prim Bool) m
   flags_init <- letExp "flatmap_flags" $ BasicOp $ Replicate (Shape [m]) (constant False)
-  flags_p <- newParam "flatmap_flags" $ toDecl flag_t Unique
+  flags_p <- newParam "flatmap_flags" $ toDecl flag_t Consume
   j <- newVName "j"
   let flag_form = ForLoop j Int64 w
   shape_t <- lookupType shape
@@ -328,9 +328,9 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
 
   post_arrs <- resultArray arrs post_ts
 
-  scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) $ lambdaReturnType scan_lam
-  redout_params <- mapM (newParam "redout" . flip toDecl Nonunique) $ lambdaReturnType red_lam
-  out_params <- mapM (newParam "out" . flip toDecl Unique) post_ts
+  scanacc_params <- mapM (newParam "scanacc" . flip toDecl Observe) $ lambdaReturnType scan_lam
+  redout_params <- mapM (newParam "redout" . flip toDecl Observe) $ lambdaReturnType red_lam
+  out_params <- mapM (newParam "out" . flip toDecl Consume) post_ts
 
   arr_ts <- mapM lookupType arrs
   let paramForAcc (Acc c _ _) = find (f . paramType) out_params
@@ -455,7 +455,7 @@ transformSOAC pat (Stream w arrs nes lam) = do
 
   mapout_initial <- resultArray arrs mapout_ts
   mapout_params <- forM mapout_ts $ \t ->
-    newParam "stream_mapout" $ toDecl t Unique
+    newParam "stream_mapout" $ toDecl t Consume
   let mapout_merge = zip mapout_params $ map Var mapout_initial
 
   let paramForAcc (Acc c _ _) = find (f . paramType) mapout_params
@@ -474,7 +474,7 @@ transformSOAC pat (Stream w arrs nes lam) = do
           _ -> pure se
   nes' <- mapM copyIfArray nes
 
-  let onType t = t `toDecl` Unique
+  let onType t = t `toDecl` Consume
       merge = zip (map (fmap onType) fold_params) nes' ++ mapout_merge
       merge_params = map fst merge
 
@@ -611,12 +611,12 @@ bindLambda (Lambda params _ body) args = do
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(Param DeclType, SubExp)]
-loopMerge vars = loopMerge' $ map (,Unique) vars
+loopMerge vars = loopMerge' $ map (,Consume) vars
 
-loopMerge' :: [(Ident, Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
+loopMerge' :: [(Ident, Diet)] -> [SubExp] -> [(Param DeclType, SubExp)]
 loopMerge' vars vals =
-  [ (Param mempty pname $ toDecl ptype u, val)
-  | ((Ident pname ptype, u), val) <- zip vars vals
+  [ (Param mempty pname $ toDecl ptype o, val)
+  | ((Ident pname ptype, o), val) <- zip vars vals
   ]
 
 -- Note [Translation of Screma]

@@ -53,7 +53,7 @@ makeLocalArrays tblock_id (Count tblock_size) scans = do
       pure arrs
 
     getMem pt shape = do
-      let size = typeSize $ Array pt shape NoUniqueness
+      let size = typeSize $ Array pt shape NoMode
       mems <- get
       case (L.find ((size `elem`) . fst) mems, mems) of
         (Just mem, _) -> do

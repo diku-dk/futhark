@@ -635,7 +635,7 @@ entryPoint doc params orig_ret_te (RetType _ret orig_ret) =
 -- | Check that a type is non-functional, looking up the liftedness of abstract
 -- types in the environment. This works because entry points cannot be
 -- polymorphic, so any remaining type names must be abstract.
-orderZeroM :: TypeBase dim u -> TypeM Bool
+orderZeroM :: TypeBase dim o -> TypeM Bool
 orderZeroM t = do
   (orderZero t &&) . and <$> mapM isUnlifted (typeQualVars t)
   where

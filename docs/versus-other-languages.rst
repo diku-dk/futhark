@@ -6,20 +6,19 @@ Futhark Compared to Other Functional Languages
 This guide is intended for programmers who are familiar with other functional
 languages and want to start working with Futhark.
 
-Futhark is a simple language with a complex compiler.  Functional
-programming is fundamentally well suited to data parallelism, so
-Futhark's syntax and underlying concepts are taken directly from
-established functional languages such as Haskell and the ML family.
-While Futhark does add a few small conveniences (built-in array types)
-and one complicated and unusual feature (in-place updates via
-uniqueness types, see :ref:`in-place-updates`), a programmer familiar
-with a common functional language should be able to understand the
-meaning of a Futhark program and quickly begin writing their own
-programs.  To speed up this process, we describe here some of the
-various quirks and unexpected limitations imposed by Futhark. We also
-recommended reading some of the `example programs`_ along with this
-guide.  The guide does *not* cover all Futhark features worth knowing,
-so do also skim :ref:`language-reference` and the :ref:`glossary`.
+Futhark is a simple language with a complex compiler. Functional programming is
+fundamentally well suited to data parallelism, so Futhark's syntax and
+underlying concepts are taken directly from established functional languages
+such as Haskell and the ML family. While Futhark does add a few small
+conveniences (built-in array types) and one complicated and unusual feature
+(in-place updates via effects and aliases, see :ref:`in-place-updates`), a
+programmer familiar with a common functional language should be able to
+understand the meaning of a Futhark program and quickly begin writing their own
+programs. To speed up this process, we describe here some of the various quirks
+and unexpected limitations imposed by Futhark. We also recommended reading some
+of the `example programs`_ along with this guide. The guide does *not* cover all
+Futhark features worth knowing, so do also skim :ref:`language-reference` and
+the :ref:`glossary`.
 
 .. _`example programs`: https://futhark-lang.org/examples.html
 

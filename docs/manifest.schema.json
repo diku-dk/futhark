@@ -29,7 +29,7 @@
                         "type": "object",
                         "properties": {
                             "type": {"type": "string"},
-                            "unique": {"type": "boolean"}
+                            "fresh": {"type": "boolean"}
                         },
                         "additionalProperties": false
                     },
@@ -40,7 +40,7 @@
                             "properties": {
                                 "name": {"type": "string"},
                                 "type": {"type": "string"},
-                                "unique": {"type": "boolean"}
+                                "consumed": {"type": "boolean"}
                             },
                             "additionalProperties": false
                         }

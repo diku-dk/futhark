@@ -98,7 +98,7 @@ instance Format UncheckedTypeExp where
     where
       fmtFieldType (L _ name', t) = fmtName mempty name' <> ":" <+> align (fmt t)
   fmt (TEArray se te loc) = addComments loc $ fmt se <> fmt te
-  fmt (TEUnique te loc) = addComments loc $ "*" <> fmt te
+  fmt (TEStar te loc) = addComments loc $ "*" <> fmt te
   fmt (TEApply te tArgE loc) = addComments loc $ fmt te <+> fmt tArgE
   fmt (TEArrow name te0 te1 loc) =
     addComments loc $

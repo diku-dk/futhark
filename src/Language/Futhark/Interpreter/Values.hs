@@ -80,7 +80,7 @@ emptyShape :: ValueShape -> Bool
 emptyShape (ShapeDim d s) = d == 0 || emptyShape s
 emptyShape _ = False
 
-typeShape :: TypeBase d u -> Shape d
+typeShape :: TypeBase d o -> Shape d
 typeShape (Array _ shape et) =
   foldr ShapeDim (typeShape (Scalar et)) $ shapeDims shape
 typeShape (Scalar (Record fs)) =
@@ -232,7 +232,7 @@ isEmptyArray = emptyShape . valueShape
 -- | String representation of an empty array with the provided element
 -- type.  This is pretty ad-hoc - don't expect good results unless the
 -- element type is a primitive.
-prettyEmptyArray :: TypeBase () () -> Value m -> T.Text
+prettyEmptyArray :: TypeBase () NoMode -> Value m -> T.Text
 prettyEmptyArray t v =
   "empty(" <> dims (valueShape v) <> prettyText t' <> ")"
   where

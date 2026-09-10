@@ -74,7 +74,7 @@ removeRedundantLoopParams (_, used) pat aux (merge, form, body)
 
     dummyStms = map dummyStm
     dummyStm ((p, e), _)
-      | unique (paramDeclType p),
+      | consuming (paramDeclType p),
         Var v <- e =
           ([paramName p], BasicOp $ Replicate mempty $ Var v)
       | otherwise = ([paramName p], BasicOp $ SubExp e)

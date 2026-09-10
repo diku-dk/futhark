@@ -12,10 +12,10 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Prelude
 
-instance Arbitrary NoUniqueness where
-  arbitrary = pure NoUniqueness
+instance Arbitrary NoMode where
+  arbitrary = pure NoMode
 
-instance (Arbitrary shape, Arbitrary u) => Arbitrary (TypeBase shape u) where
+instance (Arbitrary shape, Arbitrary o) => Arbitrary (TypeBase shape o) where
   arbitrary =
     oneof
       [ Prim <$> arbitrary,

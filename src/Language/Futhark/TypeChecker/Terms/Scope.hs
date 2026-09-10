@@ -27,7 +27,7 @@ import Language.Futhark.TypeChecker.Monad qualified as TypeM
 -- | What a bound value stands for. Note that although modules are in the same
 -- name space, they are not value bindings.
 data ValBinding dim
-  = BoundV [TypeParam] (TypeBase dim NoUniqueness)
+  = BoundV [TypeParam] (TypeBase dim NoMode)
   | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
   | EqualityF
   | -- | A recursive function with no declared return type, currently being
@@ -64,7 +64,7 @@ instance Functor Inferred where
 
 -- | Create a scope from a module-level environment.
 envToTermScope ::
-  (StructType -> TypeBase dim NoUniqueness) ->
+  (StructType -> TypeBase dim NoMode) ->
   Env ->
   TermScope dim
 envToTermScope onType env =
@@ -94,7 +94,7 @@ envToTermScopeNoVals env =
 -- the given size conversion. The fallback for names not found in the
 -- (value-free) term scope built by 'envToTermScopeNoVals'.
 lookupOuterVal ::
-  (StructType -> TypeBase dim NoUniqueness) ->
+  (StructType -> TypeBase dim NoMode) ->
   Env ->
   VName ->
   Maybe (ValBinding dim)
@@ -105,7 +105,7 @@ lookupOuterVal onType env v =
 
 -- | The initial scope, containing the intrinsics.
 initialTermScope ::
-  (StructType -> TypeBase dim NoUniqueness) ->
+  (StructType -> TypeBase dim NoMode) ->
   TermScope dim
 initialTermScope onType =
   TermScope
@@ -141,7 +141,7 @@ initialTermScope onType =
 -- as this means the program should not have made it through earlier
 -- checks.
 lookupQualNameEnv ::
-  (StructType -> TypeBase dim NoUniqueness) ->
+  (StructType -> TypeBase dim NoMode) ->
   TermScope dim ->
   QualName VName ->
   TermScope dim
