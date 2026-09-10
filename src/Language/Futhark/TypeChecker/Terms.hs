@@ -994,7 +994,9 @@ dimUses = flip execState mempty . traverseDims f
 -- Note [Parametric freshness].
 --
 -- The arguments are those of the application, in order, and 'Nothing' for any
--- that is not known - an operator section knows only one of its operands.
+-- that is not known - an operator section knows only one of its operands.  The
+-- list may be shorter than the parameter list, as the function need not be
+-- fully applied; only the argument the result comes from must be present.
 freshenParametricResult ::
   QualName VName -> StructType -> [Maybe StructType] -> TermTypeM StructType
 freshenParametricResult qn ftype argtypes = do
@@ -1002,11 +1004,12 @@ freshenParametricResult qn ftype argtypes = do
   pure $ fromMaybe ftype $ do
     (tparams, decl) <- globals qn
     (param_ts, res) <- funParts decl
-    guard $ length param_ts == length argtypes
+    guard $ length argtypes <= length param_ts
     i <- resultFromParam tparams param_ts res
     x <- case res of
       Scalar (TypeVar _ v _) -> Just $ qualLeaf v
       _ -> Nothing
+    guard $ i < length argtypes
     argtype <- argtypes !! i
     guard $ constructsFresh argtype
     Just $ freshenOccurrences x decl ftype
@@ -2375,6 +2378,11 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 -- Both slots must be marked, not just the result: the monomorphic instance
 -- generated for this type has body @f x@, which would not justify a fresh
 -- result if @f@ were still declared to return a nonfresh one.
+--
+-- The function need not be fully applied. Only the argument the result comes
+-- from must be present, and the mark sits in the operator's own type, so a
+-- partial application carries it to whatever it eventually produces. The claim
+-- is about the value that applying it yields, not about the closure itself.
 --
 -- ## Why this is decided at the application
 --
