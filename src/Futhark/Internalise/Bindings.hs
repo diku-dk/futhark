@@ -95,9 +95,9 @@ internaliseFParams tparams params = do
   where
     fixAccParams ps =
       first catMaybes $ unzip $ map fixAccParam ps
-    fixAccParam (I.Param attrs pv (I.Acc acc ispace ts u)) =
+    fixAccParam (I.Param attrs pv (I.Acc acc ispace ts)) =
       ( Just (I.Param attrs acc $ I.Prim I.Unit),
-        I.Param attrs pv (I.Acc acc ispace ts u)
+        I.Param attrs pv (I.Acc acc ispace ts)
       )
     fixAccParam p = (Nothing, p)
 

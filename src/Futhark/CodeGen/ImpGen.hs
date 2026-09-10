@@ -337,7 +337,7 @@ instance HasScope SOACS (ImpM rep r op) where
       entryType (ScalarVar _ scalarEntry) =
         Prim $ entryScalarType scalarEntry
       entryType (AccVar _ (acc, ispace, ts)) =
-        Acc acc ispace ts NoUniqueness
+        Acc acc ispace ts
 
 runImpM ::
   ImpM rep r op a ->
@@ -1166,7 +1166,7 @@ memBoundToVarEntry e (MemPrim bt) =
   ScalarVar e ScalarEntry {entryScalarType = bt}
 memBoundToVarEntry e (MemMem space) =
   MemVar e $ MemEntry space
-memBoundToVarEntry e (MemAcc acc ispace ts _) =
+memBoundToVarEntry e (MemAcc acc ispace ts) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem lmad)) =
   let location = MemLoc mem (shapeDims shape) lmad

@@ -234,8 +234,8 @@ letBody body@(AppExp LetFun {} _) = pretty body
 letBody body = "in" <+> align (pretty body)
 
 prettyAppExp :: (IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
-prettyAppExp p (BinOp (bop, _) _ (x, _) (y, _) _) =
-  prettyBinOp p bop x y
+prettyAppExp p (BinOp (bop, _) bop_t (x, _) (y, _) _) =
+  prettyBinOp p bop bop_t x y
 prettyAppExp _ (Match e cs _) = "match" <+> pretty e </> (stack . map pretty) (NE.toList cs)
 prettyAppExp _ (Loop sizeparams pat initexp form loopbody _) =
   "loop"
@@ -620,13 +620,14 @@ prettyBinOp ::
   (IsName vn, Annot f) =>
   Int ->
   QualName vn ->
+  f StructType ->
   ExpBase f vn ->
   ExpBase f vn ->
   Doc a
-prettyBinOp p bop x y =
+prettyBinOp p bop bop_t x y =
   parensIf (p > symPrecedence) $
     prettyExp symPrecedence x
-      <+> bop'
+      <+> (bop' <> prettyInst bop_t)
       <+> prettyExp symRPrecedence y
   where
     bop' = case leading of

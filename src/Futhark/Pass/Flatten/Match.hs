@@ -241,7 +241,7 @@ flattenVariantMatch ops segments env inps res _aux scrutinees cases defaultCase 
       let (v, inp) = v_inp
        in if isAcc (distInputType inp)
             then case distInputType inp of
-              Acc cert' _ _ _ | cert == cert' -> Just v
+              Acc cert' _ _ | cert == cert' -> Just v
               _ -> Nothing
             else Nothing
 
@@ -255,7 +255,7 @@ flattenVariantMatch ops segments env inps res _aux scrutinees cases defaultCase 
             then
               acc_reps
             else
-              let (Acc cert _ _ _) = t
+              let (Acc cert _ _) = t
                   accVars = findAccCerts cert
                in foldl (\m v -> M.insert v rep m) acc_reps accVars
     replaceAccReps acc_reps reps = foldl replaceAccRep acc_reps $ zip res reps

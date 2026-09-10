@@ -115,7 +115,6 @@ pNonArray =
               <*> pShape
               <* pComma
               <*> pTypes
-              <*> pure NoUniqueness
           )
     ]
 
@@ -1105,11 +1104,11 @@ pMemInfo pd pu pret =
     pArrayOrAcc = do
       u <- pu
       shape <- Shape <$> many (brackets pd)
-      choice [pArray u shape, pAcc u]
+      choice [pArray u shape, pAcc]
     pArray u shape = do
       pt <- pPrimType
       MemArray pt shape u <$> (lexeme "@" *> pret)
-    pAcc u =
+    pAcc =
       keyword "acc"
         *> parens
           ( MemAcc
@@ -1118,7 +1117,6 @@ pMemInfo pd pu pret =
               <*> pShape
               <* pComma
               <*> pTypes
-              <*> pure u
           )
 
 pSpace :: Parser Space

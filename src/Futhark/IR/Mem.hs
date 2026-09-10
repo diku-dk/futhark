@@ -299,7 +299,7 @@ data MemInfo d u ret
     -- element type.
     MemArray PrimType (ShapeBase d) u ret
   | -- | An accumulator, which is not stored anywhere.
-    MemAcc VName Shape [Type] u
+    MemAcc VName Shape [Type]
   deriving (Eq, Show, Ord) --- XXX Ord?
 
 type MemBound u = MemInfo SubExp u MemBind
@@ -308,7 +308,7 @@ instance (FixExt ret) => DeclExtTyped (MemInfo ExtSize Uniqueness ret) where
   declExtTypeOf (MemPrim pt) = Prim pt
   declExtTypeOf (MemMem space) = Mem space
   declExtTypeOf (MemArray pt shape u _) = Array pt shape u
-  declExtTypeOf (MemAcc acc ispace ts u) = Acc acc ispace ts u
+  declExtTypeOf (MemAcc acc ispace ts) = Acc acc ispace ts
 
 instance (FixExt ret) => ExtTyped (MemInfo ExtSize Uniqueness ret) where
   extTypeOf = fromDecl . declExtTypeOf
@@ -317,18 +317,18 @@ instance (FixExt ret) => ExtTyped (MemInfo ExtSize NoUniqueness ret) where
   extTypeOf (MemPrim pt) = Prim pt
   extTypeOf (MemMem space) = Mem space
   extTypeOf (MemArray pt shape u _) = Array pt shape u
-  extTypeOf (MemAcc acc ispace ts u) = Acc acc ispace ts u
+  extTypeOf (MemAcc acc ispace ts) = Acc acc ispace ts
 
 instance (FixExt ret) => FixExt (MemInfo ExtSize u ret) where
   fixExt _ _ (MemPrim pt) = MemPrim pt
   fixExt _ _ (MemMem space) = MemMem space
-  fixExt _ _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
+  fixExt _ _ (MemAcc acc ispace ts) = MemAcc acc ispace ts
   fixExt i se (MemArray pt shape u ret) =
     MemArray pt (fixExt i se shape) u (fixExt i se ret)
 
   mapExt _ (MemPrim pt) = MemPrim pt
   mapExt _ (MemMem space) = MemMem space
-  mapExt _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
+  mapExt _ (MemAcc acc ispace ts) = MemAcc acc ispace ts
   mapExt f (MemArray pt shape u ret) =
     MemArray pt (mapExt f shape) u (mapExt f ret)
 
@@ -339,19 +339,19 @@ instance Typed (MemInfo SubExp NoUniqueness ret) where
   typeOf (MemPrim pt) = Prim pt
   typeOf (MemMem space) = Mem space
   typeOf (MemArray bt shape u _) = Array bt shape u
-  typeOf (MemAcc acc ispace ts u) = Acc acc ispace ts u
+  typeOf (MemAcc acc ispace ts) = Acc acc ispace ts
 
 instance DeclTyped (MemInfo SubExp Uniqueness ret) where
   declTypeOf (MemPrim bt) = Prim bt
   declTypeOf (MemMem space) = Mem space
   declTypeOf (MemArray bt shape u _) = Array bt shape u
-  declTypeOf (MemAcc acc ispace ts u) = Acc acc ispace ts u
+  declTypeOf (MemAcc acc ispace ts) = Acc acc ispace ts
 
 instance (FreeIn d, FreeIn ret) => FreeIn (MemInfo d u ret) where
   freeIn' (MemArray _ shape _ ret) = freeIn' shape <> freeIn' ret
   freeIn' (MemMem s) = freeIn' s
   freeIn' MemPrim {} = mempty
-  freeIn' (MemAcc acc ispace ts _) = freeIn' (acc, ispace, ts)
+  freeIn' (MemAcc acc ispace ts) = freeIn' (acc, ispace, ts)
 
 instance (Substitute d, Substitute ret) => Substitute (MemInfo d u ret) where
   substituteNames subst (MemArray bt shape u ret) =
@@ -360,12 +360,11 @@ instance (Substitute d, Substitute ret) => Substitute (MemInfo d u ret) where
       (substituteNames subst shape)
       u
       (substituteNames subst ret)
-  substituteNames substs (MemAcc acc ispace ts u) =
+  substituteNames substs (MemAcc acc ispace ts) =
     MemAcc
       (substituteNames substs acc)
       (substituteNames substs ispace)
       (substituteNames substs ts)
-      u
   substituteNames _ (MemMem space) =
     MemMem space
   substituteNames _ (MemPrim bt) =
@@ -402,8 +401,8 @@ instance
     pure $ MemMem space
   simplify (MemArray bt shape u ret) =
     MemArray bt <$> Engine.simplify shape <*> pure u <*> Engine.simplify ret
-  simplify (MemAcc acc ispace ts u) =
-    MemAcc <$> Engine.simplify acc <*> Engine.simplify ispace <*> Engine.simplify ts <*> pure u
+  simplify (MemAcc acc ispace ts) =
+    MemAcc <$> Engine.simplify acc <*> Engine.simplify ispace <*> Engine.simplify ts
 
 instance
   ( PP.Pretty (ShapeBase d),
@@ -419,8 +418,8 @@ instance
   pretty (MemMem s) = "mem" <> PP.pretty s
   pretty (MemArray bt shape u ret) =
     PP.pretty (Array bt shape u) <+> "@" <+> PP.pretty ret
-  pretty (MemAcc acc ispace ts u) =
-    PP.pretty u <> PP.pretty (Acc acc ispace ts NoUniqueness :: Type)
+  pretty (MemAcc acc ispace ts) =
+    PP.pretty (Acc acc ispace ts :: Type)
 
 -- | Memory information for an array bound somewhere in the program.
 data MemBind
@@ -572,8 +571,8 @@ maybeReturns (MemPrim bt) =
   MemPrim bt
 maybeReturns (MemMem space) =
   MemMem space
-maybeReturns (MemAcc acc ispace ts u) =
-  MemAcc acc ispace ts u
+maybeReturns (MemAcc acc ispace ts) =
+  MemAcc acc ispace ts
 
 noUniquenessReturns :: MemInfo d u r -> MemInfo d NoUniqueness r
 noUniquenessReturns (MemArray bt shape _ r) =
@@ -582,8 +581,8 @@ noUniquenessReturns (MemPrim bt) =
   MemPrim bt
 noUniquenessReturns (MemMem space) =
   MemMem space
-noUniquenessReturns (MemAcc acc ispace ts _) =
-  MemAcc acc ispace ts NoUniqueness
+noUniquenessReturns (MemAcc acc ispace ts) =
+  MemAcc acc ispace ts
 
 funReturnsToExpReturns :: FunReturns -> ExpReturns
 funReturnsToExpReturns = noUniquenessReturns . maybeReturns
@@ -598,7 +597,7 @@ varInfoToExpReturns (MemArray et shape u (ArrayIn mem lmad)) =
       ReturnsInBlock mem $
         existentialiseLMAD [] lmad
 varInfoToExpReturns (MemPrim pt) = MemPrim pt
-varInfoToExpReturns (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
+varInfoToExpReturns (MemAcc acc ispace ts) = MemAcc acc ispace ts
 varInfoToExpReturns (MemMem space) = MemMem space
 
 matchRetTypeToResult ::
@@ -662,8 +661,8 @@ matchLoopResultMem params = matchRetTypeToResult rettype
       MemPrim t
     toRet (MemMem space) =
       MemMem space
-    toRet (MemAcc acc ispace ts u) =
-      MemAcc acc ispace ts u
+    toRet (MemAcc acc ispace ts) =
+      MemAcc acc ispace ts
     toRet (MemArray pt shape u (ArrayIn mem lmad))
       | Just i <- mem `elemIndex` param_names,
         Param _ _ (MemMem space) : _ <- drop i params =
@@ -731,7 +730,7 @@ matchReturnType rettype res ts = do
         | x == y = pure ()
       checkReturn (MemMem x) (MemMem y)
         | x == y = pure ()
-      checkReturn (MemAcc xacc xispace xts _) (MemAcc yacc yispace yts _)
+      checkReturn (MemAcc xacc xispace xts) (MemAcc yacc yispace yts)
         | (xacc, xispace, xts) == (yacc, yispace, yts) =
             pure ()
       checkReturn
@@ -842,7 +841,7 @@ matchPatToExp pat e = do
     matches _ _ (MemPrim x) (MemPrim y) = x == y
     matches _ _ (MemMem x_space) (MemMem y_space) =
       x_space == y_space
-    matches _ _ (MemAcc x_accs x_ispace x_ts _) (MemAcc y_accs y_ispace y_ts _) =
+    matches _ _ (MemAcc x_accs x_ispace x_ts) (MemAcc y_accs y_ispace y_ts) =
       (x_accs, x_ispace, x_ts) == (y_accs, y_ispace, y_ts)
     matches ctxids ctxexts (MemArray x_pt x_shape _ x_ret) (MemArray y_pt y_shape _ y_ret) =
       x_pt == y_pt
@@ -944,8 +943,8 @@ checkMemInfo ::
 checkMemInfo _ (MemPrim _) = pure ()
 checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require (Prim int64)) d
 checkMemInfo _ (MemMem _) = pure ()
-checkMemInfo _ (MemAcc acc ispace ts u) =
-  TC.checkType $ Acc acc ispace ts u
+checkMemInfo _ (MemAcc acc ispace ts) =
+  TC.checkType $ Acc acc ispace ts
 checkMemInfo name (MemArray _ shape _ (ArrayIn v lmad)) = do
   t <- lookupType v
   case t of
@@ -997,7 +996,7 @@ bodyReturnsFromPat pat =
                   ReturnsNewBlock space i $
                     existentialiseLMAD (map patElemName ctx) lmad
                 _ -> ReturnsInBlock mem $ existentialiseLMAD [] lmad
-          MemAcc acc ispace ts u -> MemAcc acc ispace ts u
+          MemAcc acc ispace ts -> MemAcc acc ispace ts
       )
 
 extReturns :: [ExtType] -> [ExpReturns]
@@ -1016,8 +1015,8 @@ extReturns ets =
               LMAD.iota 0 (map convert $ shapeDims shape)
       | otherwise =
           pure $ MemArray bt shape u Nothing
-    addDec (Acc acc ispace ts u) =
-      pure $ MemAcc acc ispace ts u
+    addDec (Acc acc ispace ts) =
+      pure $ MemAcc acc ispace ts
     convert (Ext i) = le64 (Ext i)
     convert (Free v) = Free <$> pe64 v
 
@@ -1050,8 +1049,8 @@ varReturns v = do
               existentialiseLMAD [] lmad
     MemMem space ->
       pure $ MemMem space
-    MemAcc acc ispace ts u ->
-      pure $ MemAcc acc ispace ts u
+    MemAcc acc ispace ts ->
+      pure $ MemAcc acc ispace ts
 
 subExpReturns :: (HasScope rep m, Monad m, Mem rep inner) => SubExp -> m ExpReturns
 subExpReturns (Var v) =
@@ -1125,8 +1124,8 @@ expReturns e@(Loop merge _ _) = do
               lmad' = existentialiseLMAD (map paramName mergevars) lmad
         (Array {}, _) ->
           error "expReturns: Array return type but not array merge variable."
-        (Acc acc ispace ts u, _) ->
-          pure $ MemAcc acc ispace ts u
+        (Acc acc ispace ts, _) ->
+          pure $ MemAcc acc ispace ts
         (Prim pt, _) ->
           pure $ MemPrim pt
         (Mem space, _) ->
@@ -1231,8 +1230,8 @@ applyFunReturns rets params args
     correctDims (MemArray et shape u memsummary) =
       MemArray et (correctShape shape) u $
         correctSummary memsummary
-    correctDims (MemAcc acc ispace ts u) =
-      MemAcc acc ispace ts u
+    correctDims (MemAcc acc ispace ts) =
+      MemAcc acc ispace ts
 
     correctShape = Shape . map correctDim . shapeDims
     correctDim (Ext i) = Ext i

@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module Futhark.Profile.Html (securedHashPath, generateHeatmapHtml, generateCCOverviewHtml, generateHtmlIndex) where
+module Futhark.Profile.Html (securedHashPath, generateHeatmapHtml, generateCCOverviewHtml, generateHtmlIndex, generateSourceIndex) where
 
 import Control.Monad (join)
 import Control.Monad.State.Strict (State, evalState, get, modify)
@@ -14,7 +14,7 @@ import Data.Set (Set)
 import Data.String (IsString (fromString))
 import Data.Text qualified as T
 import Data.Word (Word8)
-import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), CostCentreName (CostCentreName, getCostCentreName), CostCentres, SourceRangeDetails (SourceRangeDetails, containingCostCentres), SourceRanges, sourceRangeDetailsFraction)
+import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails, summary), CostCentreName (CostCentreName, getCostCentreName), SourceRangeDetails (SourceRangeDetails, containingCostCentres), SourceRanges, sourceRangeDetailsFraction)
 import Futhark.Profile.Details qualified as D
 import Futhark.Profile.EventSummary qualified as ES
 import Futhark.Profile.SourceRange qualified as SR
@@ -39,20 +39,47 @@ data RenderState = RenderState
     remainingText :: !T.Text
   }
 
+-- | A dataset report with browser-readable logs and timeline.  The source
+-- index may instead explain why source analysis was unavailable.
 generateHtmlIndex ::
   -- | Path of the bench dir
   FilePath ->
-  M.Map FilePath SourceRanges ->
-  CostCentres ->
+  Maybe T.Text ->
+  Maybe T.Text ->
+  H.Html ->
   H.Html
-generateHtmlIndex benchDir _pathToSourceRanges _costCentres = do
+generateHtmlIndex benchDir logText timelineText sourceIndex =
   H.docTypeHtml $ do
-    headHtmlWithCss (benchDir </> "style.css") pageTitle
-    H.h2 $ H.string pageTitle
-    introductionIndex (T.pack benchDir)
-    sourceFileIndex benchDir (M.keysSet _pathToSourceRanges)
-  where
-    pageTitle = "Source File Index"
+    headHtmlWithCss (benchDir </> "style.css") "Profiling Report"
+    H.body $ H.main $ do
+      H.h1 "Profiling Report"
+      H.nav $ H.ul $ do
+        H.li $ H.a ! A.href "#log" $ "Log"
+        H.li $ H.a ! A.href "#timeline" $ "Timeline"
+        H.li $ H.a ! A.href "#sources" $ "Source information"
+      H.section ! A.id "log" $ do
+        H.h2 "Log"
+        H.p "The running log produced during execution."
+        maybe
+          (H.p "No log recorded.")
+          ((H.pre ! A.id "log-text") . H.code . H.text)
+          logText
+      H.section ! A.id "timeline" $ do
+        H.h2 "Timeline"
+        H.p "Recorded events in order, with durations in microseconds."
+        maybe
+          (H.p "No profiling information recorded.")
+          ((H.pre ! A.id "timeline-text") . H.code . H.text)
+          timelineText
+      H.section ! A.id "sources" $ do
+        H.h2 "Source information"
+        sourceIndex
+
+-- | Navigation to the successfully generated source and cost centre pages.
+generateSourceIndex :: FilePath -> M.Map FilePath SourceRanges -> H.Html
+generateSourceIndex benchDir pathToSourceRanges = do
+  introductionIndex (T.pack benchDir)
+  sourceFileIndex benchDir (M.keysSet pathToSourceRanges)
 
 introductionIndex :: T.Text -> H.Html
 introductionIndex benchDir = do

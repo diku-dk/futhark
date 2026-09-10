@@ -77,7 +77,7 @@ import Futhark.IR.Syntax.Core
 rankShaped :: (ArrayShape shape) => TypeBase shape u -> TypeBase Rank u
 rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
 rankShaped (Prim pt) = Prim pt
-rankShaped (Acc acc ispace ts u) = Acc acc ispace ts u
+rankShaped (Acc acc ispace ts) = Acc acc ispace ts
 rankShaped (Mem space) = Mem space
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
@@ -104,7 +104,7 @@ modifyArrayShape f (Array t ds u)
   where
     ds' = f ds
 modifyArrayShape _ (Prim t) = Prim t
-modifyArrayShape _ (Acc acc ispace ts u) = Acc acc ispace ts u
+modifyArrayShape _ (Acc acc ispace ts) = Acc acc ispace ts
 modifyArrayShape _ (Mem space) = Mem space
 
 -- | Set the shape of an array.  If the given type is not an
@@ -133,7 +133,9 @@ existential = any ext . shapeDims . arrayShape
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape Uniqueness -> Uniqueness
 uniqueness (Array _ _ u) = u
-uniqueness (Acc _ _ _ u) = u
+-- An accumulator is consumed by any use, so it is unconditionally
+-- unique.
+uniqueness Acc {} = Unique
 uniqueness _ = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
@@ -150,8 +152,8 @@ staticShapes = map staticShapes1
 staticShapes1 :: TypeBase Shape u -> TypeBase ExtShape u
 staticShapes1 (Prim t) =
   Prim t
-staticShapes1 (Acc acc ispace ts u) =
-  Acc acc ispace ts u
+staticShapes1 (Acc acc ispace ts) =
+  Acc acc ispace ts
 staticShapes1 (Array bt (Shape shape) u) =
   Array bt (Shape $ map Free shape) u
 staticShapes1 (Mem space) =
@@ -176,8 +178,8 @@ arrayOf (Array et size1 _) size2 u =
 arrayOf (Prim t) shape u
   | 0 <- shapeRank shape = Prim t
   | otherwise = Array t shape u
-arrayOf (Acc acc ispace ts _) _shape u =
-  Acc acc ispace ts u
+arrayOf (Acc acc ispace ts) _shape _ =
+  Acc acc ispace ts
 arrayOf Mem {} _ _ =
   error "arrayOf Mem"
 
@@ -322,8 +324,8 @@ mapOnExtType ::
   m (TypeBase ExtShape u)
 mapOnExtType _ (Prim bt) =
   pure $ Prim bt
-mapOnExtType f (Acc acc ispace ts u) =
-  Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts <*> pure u
+mapOnExtType f (Acc acc ispace ts) =
+  Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts
   where
     f' v = do
       x <- f $ Var v
@@ -344,8 +346,8 @@ mapOnType ::
   TypeBase Shape u ->
   m (TypeBase Shape u)
 mapOnType _ (Prim bt) = pure $ Prim bt
-mapOnType f (Acc acc ispace ts u) =
-  Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts <*> pure u
+mapOnType f (Acc acc ispace ts) =
+  Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts
   where
     f' v = do
       x <- f $ Var v
@@ -362,8 +364,7 @@ mapOnType f (Array t shape u) =
 -- type @t@ might consume its argument.
 diet :: TypeBase shape Uniqueness -> Diet
 diet Prim {} = Observe
-diet (Acc _ _ _ Unique) = Consume
-diet (Acc _ _ _ Nonunique) = Observe
+diet Acc {} = Consume
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
 diet Mem {} = Observe
@@ -374,7 +375,7 @@ toDecl ::
   Uniqueness ->
   TypeBase shape Uniqueness
 toDecl (Prim t) _ = Prim t
-toDecl (Acc acc ispace ts _) u = Acc acc ispace ts u
+toDecl (Acc acc ispace ts) _ = Acc acc ispace ts
 toDecl (Array et shape _) u = Array et shape u
 toDecl (Mem space) _ = Mem space
 
@@ -383,7 +384,7 @@ fromDecl ::
   TypeBase shape Uniqueness ->
   TypeBase shape NoUniqueness
 fromDecl (Prim t) = Prim t
-fromDecl (Acc acc ispace ts _) = Acc acc ispace ts NoUniqueness
+fromDecl (Acc acc ispace ts) = Acc acc ispace ts
 fromDecl (Array et shape _) = Array et shape NoUniqueness
 fromDecl (Mem space) = Mem space
 
@@ -424,7 +425,7 @@ shapeContext = S.fromList . concatMap (mapMaybe isExt . shapeDims . arrayShape)
 -- change to the corresponding t'Shape'.
 hasStaticShape :: TypeBase ExtShape u -> Maybe (TypeBase Shape u)
 hasStaticShape (Prim bt) = Just $ Prim bt
-hasStaticShape (Acc acc ispace ts u) = Just $ Acc acc ispace ts u
+hasStaticShape (Acc acc ispace ts) = Just $ Acc acc ispace ts
 hasStaticShape (Mem space) = Just $ Mem space
 hasStaticShape (Array bt (Shape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u

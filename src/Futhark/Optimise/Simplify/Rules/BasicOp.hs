@@ -352,7 +352,7 @@ ruleBasicOp vtable pat aux (SubExp (Var v))
 -- always a no-op.
 ruleBasicOp vtable pat aux (UpdateAcc _ acc _ vs)
   | Pat [pe] <- pat,
-    Acc token _ _ _ <- patElemType pe,
+    Acc token _ _ <- patElemType pe,
     Just (_, _, Just (_, ne)) <- ST.entryAccInput =<< ST.lookup token vtable,
     vs == ne =
       Simplify . auxing aux $ letBind pat $ BasicOp $ SubExp $ Var acc
