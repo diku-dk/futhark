@@ -1445,7 +1445,7 @@ char *next_word(char **line) {
 }
 
 void process_line(struct server_state *s, char *line) {
-  int max_num_tokens = 1000;
+  int max_num_tokens = 10000;
   const char* tokens[max_num_tokens];
   int num_tokens = 0;
 
