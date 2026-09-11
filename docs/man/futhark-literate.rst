@@ -308,4 +308,4 @@ passed to ``futhark literate``, not any names in imported files.
 SEE ALSO
 ========
 
-:ref:`futhark-script(1)`, :ref:`futhark-test(1)`, :ref:`futhark-bench(1)`
+:ref:`futhark-test(1)`, :ref:`futhark-bench(1)`
