@@ -692,8 +692,6 @@ jobs:
 
     - run: |
         cd tests_adhoc && sh test.sh
-      env:
-        LC_ALL: C.UTF-8
 
     - run: |
         cd tests_fmt && sh test.sh
