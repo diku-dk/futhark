@@ -282,6 +282,7 @@ library
       Futhark.IR.Rep
       Futhark.IR.Rephrase
       Futhark.IR.RetType
+      Futhark.IR.Run
       Futhark.IR.SOACS
       Futhark.IR.SOACS.SOAC
       Futhark.IR.SOACS.Simplify

@@ -23,6 +23,8 @@ module Futhark.Actions
     compileMulticoreToWASMAction,
     compilePythonAction,
     compilePyOpenCLAction,
+    runSOACSAction,
+    runGPUAction,
   )
 where
 
@@ -30,6 +32,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State (get)
 import Data.Bifunctor
+import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.List (intercalate)
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
@@ -56,9 +59,13 @@ import Futhark.CodeGen.ImpGen.GPU qualified as ImpGenGPU
 import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGenMulticore
 import Futhark.CodeGen.ImpGen.Sequential qualified as ImpGenSequential
 import Futhark.Compiler.CLI
+import Futhark.Data qualified as V
+import Futhark.Data.Reader (readValues)
 import Futhark.IR
+import Futhark.IR.GPU (GPU)
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MCMem (MCMem)
+import Futhark.IR.Run (runGPU, runSOACS)
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.Fusion.GraphRep qualified
@@ -68,6 +75,7 @@ import Futhark.Version (versionString)
 import System.Directory
 import System.Exit
 import System.FilePath hiding ((</>))
+import System.IO
 import System.Info qualified
 
 -- | Convert the program and compiler state to a textual form.
@@ -629,3 +637,37 @@ compileMulticoreToWASMAction fcfg mode outpath =
     hpath = outpath `addExtension` "h"
     mjspath = outpath `addExtension` "mjs"
     classpath = outpath `addExtension` ".class.js"
+
+runWith ::
+  Name ->
+  (Prog rep -> Name -> [V.Value] -> Either T.Text [V.Value]) ->
+  Prog rep ->
+  FutharkM ()
+runWith entry_name f prog = do
+  maybe_vs <- readValues <$> liftIO BS.getContents
+  case maybe_vs of
+    Nothing -> liftIO $ do
+      hPutStrLn stderr "Malformed data on standard input."
+      exitFailure
+    Just vs ->
+      case f prog entry_name vs of
+        Left err -> liftIO $ do
+          T.hPutStrLn stderr err
+          exitFailure
+        Right vs' -> liftIO $ mapM_ (T.putStrLn . V.valueText) vs'
+
+runSOACSAction :: Name -> Action SOACS
+runSOACSAction entry_name =
+  Action
+    { actionName = "Run SOACS program",
+      actionDescription = "Run program through the IR interpreter",
+      actionProcedure = runWith entry_name runSOACS
+    }
+
+runGPUAction :: Name -> Action GPU
+runGPUAction entry_name =
+  Action
+    { actionName = "Run GPU program",
+      actionDescription = "Run program through the IR interpreter",
+      actionProcedure = runWith entry_name runGPU
+    }
