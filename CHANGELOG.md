@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * AD operators now return alias-free results.
 
+* Shared memory histograms no longer occasionally exceed the shared memory
+  limit when chunking the buckets.
+
 ## [0.27.1]
 
 ### Added
