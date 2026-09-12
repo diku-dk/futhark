@@ -34,6 +34,7 @@ import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
+import System.Process.ByteString (readProcessWithExitCode)
 import System.Random.MWC (create)
 import Text.Printf
 import Text.Regex.TDFA
@@ -115,6 +116,7 @@ runBenchmarks opts paths = do
   -- Otherwise, CI tools and the like may believe we are hung and kill
   -- us.
   hSetBuffering stdout LineBuffering
+  start_time <- getCurrentTime
 
   benchmarks <- filter (not . ignored . fst) <$> testSpecsFromPathsOrDie paths
   -- Try to avoid concurrency at both program and data set level.
@@ -147,13 +149,37 @@ runBenchmarks opts paths = do
   let results = concat $ catMaybes maybe_results
   case optJSON opts of
     Nothing -> pure ()
-    Just file ->
+    Just file -> do
+      end_time <- getCurrentTime
+      hostname <- commandOutput "hostname" []
+      compile_opts <- compileOptions opts
+      compiler_version <- commandOutput (compFuthark compile_opts) ["--version"]
+      let metadata =
+            BenchMetadata
+              { benchStartTime = start_time,
+                benchEndTime = end_time,
+                benchHostname = hostname,
+                benchCompilerVersion = compiler_version,
+                benchBackend = T.pack $ optBackend opts,
+                benchCompilerOptions = map T.pack $ optCompilerOptions opts,
+                benchRuntimeOptions = map T.pack $ optExtraOptions opts
+              }
       LBS.writeFile file $
-        encodeBenchResults $
+        encodeBenchResultsWithMetadata metadata $
           combineDuplicates results
   when (any isNothing maybe_results || anyFailed results) exitFailure
   where
     ignored f = any (`match` f) $ optIgnoreFiles opts
+
+commandOutput :: FilePath -> [String] -> IO (Maybe T.Text)
+commandOutput command args = do
+  result <-
+    try (readProcessWithExitCode command args SBS.empty) ::
+      IO (Either SomeException (ExitCode, SBS.ByteString, SBS.ByteString))
+  pure $ case result of
+    Right (ExitSuccess, output, _) ->
+      Just $ T.strip $ T.pack $ SBS.unpack output
+    _ -> Nothing
 
 anyFailed :: [BenchResult] -> Bool
 anyFailed = any failedBenchResult
