@@ -574,7 +574,7 @@ evalBasicOp env (Update _ array_name slice value_exp) = do
             map (linearIndex shape) coordinates
           new_values =
             L.foldl'
-                ( \values (offset, new_value) ->
+              ( \values (offset, new_value) ->
                   replaceAt offset new_value values
               )
               old_primitives
@@ -961,7 +961,7 @@ evalHist funs env width_exp input_names hist_ops bucket_lambda = do
             else
               mapM
                 ( \(hist_operation, indices, value_and_histograms) ->
-                  updateHistogram hist_operation indices value_and_histograms
+                    updateHistogram hist_operation indices value_and_histograms
                 )
                 (zip3 hist_ops index_groups' (zip value_groups histograms))
         else interpError "Hist bucket lambda returned too many values"
