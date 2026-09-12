@@ -19,7 +19,7 @@ import Foreign.Storable (Storable)
 import Futhark.Data qualified as V
 import Futhark.IR
 import Futhark.IR.GPU (GPU)
-import Futhark.IR.SOACS (Reduce (..), SOAC (Screma), SOACS, Scan (..), ScremaForm (..))
+import Futhark.IR.SOACS (HistOp (..), Reduce (..), SOAC (FlatMap, Hist, Screma, Stream), SOACS, Scan (..), ScremaForm (..), flatMapNonuniform)
 import Language.Futhark.Primitive qualified as P
 
 data Val
@@ -630,7 +630,179 @@ linearIndex shape indices =
 evalSOAC :: FunEnv -> Env -> SOAC SOACS -> InterpM [Val]
 evalSOAC funs env (Screma widthExp inputNames form) =
   evalScrema funs env widthExp inputNames form
+evalSOAC funs env (Stream widthExp inputNames initialAccumulators lambda) =
+  evalStream funs env widthExp inputNames initialAccumulators lambda
+evalSOAC funs env (Hist widthExp inputNames histOps lambda) = evalHist funs env widthExp inputNames histOps lambda
+evalSOAC funs env (FlatMap widthExp inputNames lambda) = evalFlatMap funs env widthExp inputNames lambda
 evalSOAC _ _ _ = Left "SOAC not implemented yet"
+
+evalFlatMap ::
+  FunEnv ->
+  Env ->
+  SubExp ->
+  [VName] ->
+  ExtLambda SOACS ->
+  InterpM [Val]
+evalFlatMap funs env widthExp inputNames lambda = do
+  width <- evalSubExp env widthExp >>= expectPrimVal >>= expectInt
+  if width < 0
+    then Left "FlatMap width cannot be negative"
+    else do
+      inputs <- mapM (lookupSoacInput env) inputNames
+      mapM_ (validateSoacInput width) inputs
+
+      if length inputs /= length (lambdaParams lambda)
+        then Left "FlatMap input count does not match lambda parameters"
+        else do
+          rows <- mapM (runIteration inputs) [0 .. width - 1]
+          let sizes = map fst rows
+              valueRows = map snd rows
+              offsets = init $ scanl (+) 0 sizes
+              totalSize = sum sizes
+              returnTypes = drop 1 $ lambdaReturnType lambda
+              columns
+                | null valueRows = replicate (length returnTypes) []
+                | otherwise = L.transpose valueRows
+          values <-
+            zipWithM
+              (collectFlatMapOutput env sizes totalSize)
+              returnTypes
+              columns
+          let flags = L.foldl' markSegmentStart (replicate totalSize False) (zip offsets sizes)
+
+          pure $
+            [ int64Val totalSize,
+              ArrayValue [width] int64Type $ map int64Prim sizes,
+              ArrayValue [totalSize] Bool $ map BoolValue flags,
+              ArrayValue [width] int64Type $ map int64Prim offsets
+            ]
+              <> values
+  where
+    runIteration inputs index = do
+      inputRows <- mapM (rowAt index) inputs
+      results <- evalLambda funs env lambda inputRows
+
+      case results of
+        sizeValue : values -> do
+          size <- expectPrimVal sizeValue >>= expectInt
+          if size < 0
+            then Left "FlatMap segment size cannot be negative"
+            else pure (size, values)
+        [] ->
+          Left "FlatMap lambda returned no segment size"
+
+    markSegmentStart flags (offset, size)
+      | size > 0 = replaceAt offset True flags
+      | otherwise = flags
+
+    int64Type = IntType Int64
+    int64Prim = IntValue . Int64Value . fromIntegral
+    int64Val = PrimVal . int64Prim
+
+evalHist ::
+  FunEnv ->
+  Env ->
+  SubExp ->
+  [VName] ->
+  [HistOp SOACS] ->
+  Lambda SOACS ->
+  InterpM [Val]
+evalHist funs env widthExp inputNames histOps bucketLambda = do
+  width <- evalSubExp env widthExp >>= expectPrimVal >>= expectInt
+
+  if width < 0
+    then Left "Hist width cannot be negative"
+    else do
+      inputs <- mapM (lookupSoacInput env) inputNames
+      mapM_ (validateSoacInput width) inputs
+
+      initialHistograms <- mapM initialHistogramsFor histOps
+      finalHistograms <-
+        foldM
+          (runIteration inputs)
+          initialHistograms
+          [0 .. width - 1]
+
+      pure $ concat finalHistograms
+  where
+    indexCounts = map (shapeRank . histShape) histOps
+    valueCounts = map (length . histDest) histOps
+
+    initialHistogramsFor histOp =
+      mapM lookupHistogram $ histDest histOp
+
+    lookupHistogram name =
+      case M.lookup name env of
+        Just histogram@ArrayValue {} -> pure histogram
+        Just PrimVal {} -> Left "Hist destination must be an array"
+        Nothing -> Left $ "unbound Hist destination: " <> prettyText name
+
+    runIteration inputs histograms iteration = do
+      inputRows <- mapM (rowAt iteration) inputs
+      bucketResults <- evalLambda funs env bucketLambda inputRows
+
+      (indexGroups, remaining) <- splitGroups indexCounts bucketResults
+      (valueGroups, extra) <- splitGroups valueCounts remaining
+
+      indexGroups' <-
+        mapM
+          (mapM (\val -> expectPrimVal val >>= expectInt))
+          indexGroups
+
+      if null extra
+        then
+          if length histOps /= length indexGroups'
+            || length histOps /= length valueGroups
+            || length histOps /= length histograms
+            then Left "Hist operation count mismatch"
+            else
+              mapM
+                ( \(histOperation, indices, valueAndHistograms) ->
+                    updateHistogram histOperation indices valueAndHistograms
+                )
+                (zip3 histOps indexGroups' (zip valueGroups histograms))
+        else Left "Hist bucket lambda returned too many values"
+
+    updateHistogram histOperation indices (values, histograms)
+      | length histograms /= length (histDest histOperation) =
+          Left "Hist destination count mismatch"
+      | not (inBounds indices histograms) =
+          pure histograms
+      | otherwise = do
+          oldBins <- mapM (readHistogramBin indices) histograms
+          newBins <-
+            evalLambda funs env (histOp histOperation) (oldBins <> values)
+
+          if length newBins /= length histograms
+            then Left "Hist operator result count mismatch"
+            else zipWithM (writeHistogramBin indices) histograms newBins
+
+    inBounds indices histograms =
+      case histograms of
+        [] -> False
+        ArrayValue shape _ _ : _ ->
+          length indices <= length shape
+            && and (zipWith validIndex indices shape)
+        _ -> False
+
+    validIndex index dimension =
+      index >= 0 && index < dimension
+
+evalStream :: FunEnv -> Env -> SubExp -> [VName] -> [SubExp] -> Lambda SOACS -> InterpM [Val]
+evalStream funs env widthExp inputNames initialAccumulators lambda = do
+  widthValue <- evalSubExp env widthExp >>= expectPrimVal
+  width <- expectInt widthValue
+
+  if width < 0
+    then Left "Stream width cannot be negative"
+    else do
+      inputs <- mapM (lookupSoacInput env) inputNames
+      mapM_ (validateSoacInput width) inputs
+      accumulators <- mapM (evalSubExp env) initialAccumulators
+
+      let chunkSize = PrimVal $ IntValue $ Int64Value $ fromIntegral width
+          lambdaArgs = chunkSize : accumulators <> inputs
+      evalLambda funs env lambda lambdaArgs
 
 evalScrema :: FunEnv -> Env -> SubExp -> [VName] -> ScremaForm SOACS -> InterpM [Val]
 evalScrema funs env widthExp inputNames (ScremaForm preLambda scans reductions postLambda) = do
@@ -638,8 +810,8 @@ evalScrema funs env widthExp inputNames (ScremaForm preLambda scans reductions p
   if width < 0
     then Left "Screma width cannot be negative"
     else do
-      inputs <- mapM (lookupScremaInput env) inputNames
-      mapM_ (validateScremaInput width) inputs
+      inputs <- mapM (lookupSoacInput env) inputNames
+      mapM_ (validateSoacInput width) inputs
 
       if length inputs /= length (lambdaParams preLambda)
         then Left "Screma input count does not match lambda parameters"
@@ -689,12 +861,21 @@ splitGroups (size : sizes) values
   where
     (group, rest) = splitAt size values
 
-evalLambda :: FunEnv -> Env -> Lambda SOACS -> [Val] -> InterpM [Val]
-evalLambda funs env (Lambda ps returnTypes body) args
-  | length ps /= length args = Left "lambda argument count mismatch"
+evalLambda ::
+  FunEnv ->
+  Env ->
+  GLambda SOACS returnType ->
+  [Val] ->
+  InterpM [Val]
+evalLambda funs env (Lambda params returnTypes body) args
+  | length params /= length args =
+      Left "lambda argument count mismatch"
   | otherwise = do
-      let bindings = M.fromList $ zip (map paramName ps) args
-          lambdaEnv = M.union bindings env
+      let bindings =
+            M.fromList $ zip (map paramName params) args
+          lambdaEnv =
+            M.union bindings env
+
       results <- evalBody funs lambdaEnv body
 
       if length results /= length returnTypes
@@ -753,8 +934,8 @@ updateReductionStates funs env reductions states contributions
         then Left "reduction result count mismatch"
         else pure next
 
-lookupScremaInput :: Env -> VName -> InterpM Val
-lookupScremaInput env name =
+lookupSoacInput :: Env -> VName -> InterpM Val
+lookupSoacInput env name =
   case M.lookup name env of
     Just array@ArrayValue {} ->
       pure array
@@ -763,8 +944,8 @@ lookupScremaInput env name =
     Nothing ->
       Left $ "unbound Screma input: " <> prettyText name
 
-validateScremaInput :: Int -> Val -> InterpM ()
-validateScremaInput width (ArrayValue shape _ values) =
+validateSoacInput :: Int -> Val -> InterpM ()
+validateSoacInput width (ArrayValue shape _ values) =
   case shape of
     outerSize : _
       | outerSize /= width ->
@@ -775,7 +956,7 @@ validateScremaInput width (ArrayValue shape _ values) =
           pure ()
     [] ->
       Left "Screma input must have positive rank"
-validateScremaInput _ PrimVal {} =
+validateSoacInput _ PrimVal {} =
   Left "Screma input must be an array"
 
 rowAt :: Int -> Val -> InterpM Val
@@ -795,6 +976,154 @@ rowAt index (ArrayValue (_ : rowShape) elementType values)
                 ArrayValue rowShape elementType rowValues
 rowAt _ _ =
   Left "cannot extract a row from this value"
+
+readHistogramBin :: [Int] -> Val -> InterpM Val
+readHistogramBin indices (ArrayValue shape elementType values) =
+  let rank = length indices
+      binShape = drop rank shape
+      binSize = product binShape
+      offset = linearIndex (take rank shape) indices * binSize
+      binValues = take binSize $ drop offset values
+   in case binShape of
+        [] ->
+          case binValues of
+            [val] -> pure $ PrimVal val
+            _ -> Left "invalid scalar Hist bin"
+        _ ->
+          if length binValues == binSize
+            then pure $ ArrayValue binShape elementType binValues
+            else Left "invalid Hist bin storage"
+readHistogramBin _ PrimVal {} =
+  Left "Hist destination must be an array"
+
+writeHistogramBin :: [Int] -> Val -> Val -> InterpM Val
+writeHistogramBin indices histogram@(ArrayValue shape elementType oldValues) replacement = do
+  let rank = length indices
+      binShape = drop rank shape
+      binSize = product binShape
+      offset = linearIndex (take rank shape) indices * binSize
+
+  replacementValues <- updateValues elementType binShape replacement
+
+  if length replacementValues /= binSize
+    then Left "invalid Hist operator result storage"
+    else pure $
+      case histogram of
+        ArrayValue _ _ _ ->
+          ArrayValue
+            shape
+            elementType
+            ( take offset oldValues
+                <> replacementValues
+                <> drop (offset + binSize) oldValues
+            )
+writeHistogramBin _ PrimVal {} _ =
+  Left "Hist destination must be an array"
+
+collectFlatMapOutput ::
+  Env ->
+  [Int] ->
+  Int ->
+  ExtType ->
+  [Val] ->
+  InterpM Val
+collectFlatMapOutput env sizes totalSize resultType rows
+  | flatMapNonuniform resultType =
+      collectNonuniform
+  | otherwise =
+      collectUniform
+  where
+    collectNonuniform = do
+      arrays <- zipWithM expectSegment sizes rows
+
+      case arrays of
+        [] -> do
+          (elementType, rowShape) <- emptyArrayType True
+          pure $ ArrayValue (totalSize : rowShape) elementType []
+        (rowShape, elementType, values) : remaining
+          | not $ all (sameArray rowShape elementType) remaining ->
+              Left "inconsistent FlatMap segment results"
+          | otherwise ->
+              pure $
+                ArrayValue
+                  (totalSize : rowShape)
+                  elementType
+                  (values <> concatMap third remaining)
+
+    collectUniform =
+      case resultType of
+        Prim expectedType -> do
+          values <- mapM expectPrimitive rows
+          if all ((== expectedType) . P.primValueType) values
+            then pure $ ArrayValue [length rows] expectedType values
+            else Left "FlatMap uniform result type mismatch"
+        Array expectedType _ _ ->
+          case rows of
+            [] -> do
+              (_, rowShape) <- emptyArrayType False
+              pure $ ArrayValue (0 : rowShape) expectedType []
+            _ -> do
+              arrays <- mapM expectArray rows
+              case arrays of
+                [] -> Left "internal empty FlatMap output"
+                (rowShape, elementType, values) : remaining
+                  | elementType /= expectedType ->
+                      Left "FlatMap uniform result type mismatch"
+                  | not $ all (sameArray rowShape elementType) remaining ->
+                      Left "inconsistent FlatMap uniform results"
+                  | otherwise ->
+                      pure $
+                        ArrayValue
+                          (length rows : rowShape)
+                          elementType
+                          (values <> concatMap third remaining)
+        Acc {} -> Left "FlatMap accumulator outputs are unsupported"
+        Mem {} -> Left "FlatMap memory outputs are unsupported"
+
+    expectSegment expectedSize (ArrayValue (size : rowShape) elementType values)
+      | size /= expectedSize =
+          Left "FlatMap segment size does not match returned size"
+      | length values /= product (size : rowShape) =
+          Left "invalid FlatMap segment storage"
+      | otherwise =
+          pure (rowShape, elementType, values)
+    expectSegment _ _ =
+      Left "nonuniform FlatMap result must be an array"
+
+    expectPrimitive (PrimVal val) = pure val
+    expectPrimitive ArrayValue {} =
+      Left "expected primitive FlatMap result"
+
+    expectArray (ArrayValue shape elementType values)
+      | length values == product shape =
+          pure (shape, elementType, values)
+      | otherwise =
+          Left "invalid FlatMap result storage"
+    expectArray PrimVal {} =
+      Left "expected array-valued FlatMap result"
+
+    sameArray shape elementType (otherShape, otherType, values) =
+      shape == otherShape
+        && elementType == otherType
+        && length values == product otherShape
+
+    third (_, _, values) = values
+
+    emptyArrayType dropExistential =
+      case resultType of
+        Array elementType (Shape dimensions) _ -> do
+          let dimensions'
+                | dropExistential = drop 1 dimensions
+                | otherwise = dimensions
+          shape <- mapM evalFreeDimension dimensions'
+          pure (elementType, shape)
+        _ ->
+          Left "nonuniform FlatMap result must be an array"
+
+    evalFreeDimension (Free dimension) =
+      evalSubExp env dimension >>= expectPrimVal >>= expectInt
+    evalFreeDimension (Ext _) =
+      Left "unexpected existential FlatMap result dimension"
 
 collectScremaOutputs ::
   Env ->
