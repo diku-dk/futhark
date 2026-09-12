@@ -153,7 +153,7 @@ mkCoalsTabProg (_, lutab_prog) r computeScalarOnOp prog =
     consts_scope = scopeOf (progConsts prog)
     onFun fun@(FunDef _ _ fname _ fpars body) = do
       -- First compute last-use information
-      let unique_mems = getUniqueMemFParam fpars
+      let consuming_mems = getConsumingMemFParam fpars
           lutab = lutab_prog M.! fname
           scalar_table =
             runReader
@@ -169,7 +169,7 @@ mkCoalsTabProg (_, lutab_prog) r computeScalarOnOp prog =
           topenv =
             emptyTopdownEnv
               { scope = consts_scope <> scopeOfFParams fpars,
-                alloc = unique_mems,
+                alloc = consuming_mems,
                 scalarTable = scalar_table,
                 nonNegatives = foldMap paramSizes fpars
               }
@@ -619,7 +619,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
   let succ_tab = successCoals buenv
       actv_tab = activeCoals buenv
       inhb_tab = inhibit buenv
-      -- Allow short-circuiting function parameters that are unique and have
+      -- Allow short-circuiting function parameters that are consuming and have
       -- matching index functions, otherwise mark as failed
       handleFunctionParams (a, i, s) (_, o, MemBlock _ _ m ixf) =
         case (o, M.lookup m a) of
@@ -1452,8 +1452,8 @@ genSSPointInfoSeqMem _ _ _ _ _ _ =
 --  only the values from the 'SegSpace'.
 --
 --  3. The array being indexed is last-used in that statement, is free in the
---  'SegMap', is unique or has been recently allocated (specifically, it should
---  not be a non-unique argument to the enclosing function), has elements with
+--  'SegMap', is consumed or has been recently allocated (specifically, it should
+--  not be a non-consumed argument to the enclosing function), has elements with
 --  the same bit-size as the pattern elements, and has the exact same 'LMAD' as
 --  the pattern of the 'SegMap' statement.
 --
@@ -1491,8 +1491,8 @@ genSSPointInfoSegOp
             getScopeMemInfo src scopetab,
           src_mem `nameIn` last_uses,
           -- The 'alloc' table contains allocated memory blocks, including
-          -- unique memory blocks from the enclosing function. It does _not_
-          -- include non-unique memory blocks from the enclosing function.
+          -- consumed memory blocks from the enclosing function. It does _not_
+          -- include non-consumed memory blocks from the enclosing function.
           src_mem `M.member` alloc td_env,
           src `nameIn` frees,
           src_ixf == dst_ixf,

@@ -33,7 +33,7 @@
 -- array is always stored in the "first" memory block at the beginning
 -- of the loop (and also in the final result).  We do need to add an
 -- extra element to the pattern, however.  The initial copy of @A@
--- could be elided if @A@ is unique (thus @A_in_mem=A_mem@).  This is
+-- could be elided if @A@ is consuming (thus @A_in_mem=A_mem@).  This is
 -- because only then is it safe to use @A_mem@ to store loop results.
 -- We don't currently do this.
 --

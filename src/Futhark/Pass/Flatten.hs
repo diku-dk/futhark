@@ -478,7 +478,7 @@ liftFunDef attrs funHasParallelism funSizeParams const_scope fd = do
           imposeAttrsBody attrs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
   -- Lift the body of the function and get the results, inserting copies as
-  -- necessary to ensure the results are fresh and unique (see 'freshenResult').
+  -- necessary to ensure the results are fresh (see 'freshenResult').
   (body', needs) <-
     runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
       buildBody_ . freshenResult fparams'' $
@@ -536,7 +536,7 @@ liftUniformFunDef attrs funHasParallelism funSizeParams const_scope fd = do
         noRetAls $
           liftRegularRetType inputs' w (map fst rettype)
   -- Lift the body of the function and get the results, inserting copies as
-  -- necessary to ensure the results are fresh and unique (see 'freshenResult').
+  -- necessary to ensure the results are fresh (see 'freshenResult').
   (body', needs) <-
     runFlattenM (castScope const_scope <> scopeOfFParams fparams'') $
       buildBody_ . freshenResult fparams'' $
