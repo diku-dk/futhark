@@ -25,6 +25,9 @@ import Language.Futhark.Primitive qualified as P
 data Val
   = PrimVal PrimValue
   | ArrayValue [Int] PrimType [PrimValue]
+  | AccValue [AccUpdate]
+
+data AccUpdate = AccUpdate Safety [Int] [Val]
 
 data DimSelection
   = Fixed Int
@@ -134,7 +137,137 @@ evalExp funs env (Apply fname args _ _) = do
           calleeEnv = M.union bindings env
        in evalBody funs calleeEnv (funDefBody callee)
 evalExp funs env (Op soac) = evalSOAC funs env soac -- map/reduction/scan
-evalExp _ _ WithAcc {} = Left "WithAcc not implemented yet"
+evalExp funs env (WithAcc inputs lambda) =
+  evalWithAcc funs env inputs lambda
+
+evalWithAcc ::
+  FunEnv ->
+  Env ->
+  [WithAccInput SOACS] ->
+  Lambda SOACS ->
+  InterpM [Val]
+evalWithAcc funs env inputs lambda = do
+  evaluatedInputs <- mapM evaluateInput inputs
+
+  let accumulatorCount = length inputs
+      (certificateParams, accumulatorParams) =
+        splitAt accumulatorCount $ lambdaParams lambda
+
+  if length certificateParams /= accumulatorCount
+    || length accumulatorParams /= accumulatorCount
+    then Left "WithAcc lambda parameter count mismatch"
+    else do
+      let certificates =
+            replicate accumulatorCount $ PrimVal UnitValue
+          accumulators =
+            replicate accumulatorCount $ AccValue []
+          bindings =
+            M.fromList $
+              zip
+                (map paramName certificateParams <> map paramName accumulatorParams)
+                (certificates <> accumulators)
+          lambdaEnv = M.union bindings env
+
+      results <- evalBody funs lambdaEnv $ lambdaBody lambda
+
+      let (accumulatorResults, ordinaryResults) =
+            splitAt accumulatorCount results
+
+      if length accumulatorResults /= accumulatorCount
+        then Left "WithAcc lambda returned too few accumulators"
+        else do
+          updatedArrays <-
+            concat
+              <$> zipWithM
+                applyAccumulator
+                evaluatedInputs
+                accumulatorResults
+
+          pure $ updatedArrays <> ordinaryResults
+  where
+    evaluateInput (Shape dimensionExps, arrayNames, operator) = do
+      indexShape <-
+        mapM
+          (\dimension -> evalSubExp env dimension >>= expectPrimVal >>= expectInt)
+          dimensionExps
+
+      if any (< 0) indexShape
+        then Left "WithAcc index-space dimensions cannot be negative"
+        else do
+          arrays <- mapM lookupArray arrayNames
+          mapM_ (validateArray indexShape) arrays
+          pure (indexShape, arrays, operator)
+
+    lookupArray name =
+      case M.lookup name env of
+        Just array@ArrayValue {} ->
+          pure array
+        Just _ ->
+          Left "WithAcc input must be an array"
+        Nothing ->
+          Left $ "unbound WithAcc input: " <> prettyText name
+
+    validateArray indexShape (ArrayValue shape _ values)
+      | indexShape /= take (length indexShape) shape =
+          Left "WithAcc input array does not match index space"
+      | length values /= product shape =
+          Left "invalid WithAcc input array storage"
+      | otherwise =
+          pure ()
+    validateArray _ _ =
+      Left "WithAcc input must be an array"
+
+    applyAccumulator
+      (indexShape, initialArrays, operator)
+      (AccValue updates) =
+        foldM
+          (applyUpdateLog indexShape operator)
+          initialArrays
+          updates
+    applyAccumulator _ _ =
+      Left "WithAcc lambda did not return an accumulator"
+
+    applyUpdateLog
+      indexShape
+      operator
+      arrays
+      (AccUpdate safety indices newValues)
+        | length indices /= length indexShape =
+            Left "accumulator update index rank mismatch"
+        | length newValues /= length arrays =
+            Left "accumulator update value count mismatch"
+        | not (indicesInBounds indexShape indices) =
+            case safety of
+              Safe -> pure arrays
+              Unsafe -> Left "unsafe accumulator update out of bounds"
+        | otherwise = do
+            oldValues <-
+              mapM (readAccumulatorElement indices) arrays
+
+            replacementValues <-
+              case operator of
+                Nothing ->
+                  pure newValues
+                Just (operatorLambda, _) ->
+                  evalLambda
+                    funs
+                    env
+                    operatorLambda
+                    (map int64Val indices <> oldValues <> newValues)
+
+            if length replacementValues /= length arrays
+              then Left "accumulator operator result count mismatch"
+              else
+                zipWithM
+                  (writeAccumulatorElement indices)
+                  arrays
+                  replacementValues
+
+    indicesInBounds shape indices =
+      and $ zipWith (\size index -> index >= 0 && index < size) shape indices
+
+    int64Val =
+      PrimVal . IntValue . Int64Value . fromIntegral
 
 evalSubExp :: Env -> SubExp -> InterpM Val
 evalSubExp _ (Constant pv) = pure $ PrimVal pv
@@ -144,6 +277,8 @@ evalSubExp env (Var v) =
 expectPrimVal :: Val -> InterpM PrimValue
 expectPrimVal (PrimVal pv) = pure pv
 expectPrimVal (ArrayValue _ _ _) = Left "expected a primitive value"
+expectPrimVal AccValue {} =
+  Left "expected a primitive value"
 
 expectInt :: PrimValue -> InterpM Int
 expectInt (IntValue i) = pure $ P.valueIntegral i
@@ -212,6 +347,8 @@ evalBasicOp env (ArrayLit elements (Array elementType (Shape rowShapeExps) _)) =
             pure values
     expectRow _ _ PrimVal {} =
       Left "expected an array-valued row"
+    expectRow _ _ AccValue {} =
+      Left "expected an array-valued row"
 evalBasicOp _ (ArrayLit _ Acc {}) =
   Left "accumulator array literals are not implemented"
 evalBasicOp _ (ArrayLit _ Mem {}) =
@@ -233,6 +370,8 @@ evalBasicOp env (Index arrayName slice) = do
       indexArray env shape elementType values slice
     PrimVal _ ->
       Left "cannot index a primitive value"
+    AccValue _ ->
+      Left "cannot index an accumulator value"
 evalBasicOp env (Reshape arrayName reshape) = do
   array <-
     maybe (Left $ "unbound array: " <> prettyText arrayName) pure $
@@ -248,6 +387,7 @@ evalBasicOp env (Reshape arrayName reshape) = do
       | otherwise ->
           Left "reshape element count mismatch"
     PrimVal _ -> Left "cannot reshape a primitive value"
+    AccValue _ -> Left "cannot reshape an accumulator value"
 evalBasicOp env (Opaque OpaqueNil se) =
   pure <$> evalSubExp env se
 evalBasicOp env (Opaque (OpaqueTrace _) se) =
@@ -256,6 +396,7 @@ evalBasicOp env (Manifest arrayName _) =
   case M.lookup arrayName env of
     Just array@ArrayValue {} -> pure [array]
     Just PrimVal {} -> Left "cannot manifest a primitive value"
+    Just AccValue {} -> Left "cannot manifest an accumulator value"
     Nothing -> Left $ "unbound array: " <> prettyText arrayName
 evalBasicOp env (Iota countSubExp startSubExp strideSubExp intType) = do
   count <- evalSubExp env countSubExp >>= expectPrimVal >>= expectInt
@@ -287,6 +428,8 @@ evalBasicOp env (Replicate (Shape shapeExps) valExp) = do
           pure [ArrayValue dimensions (P.primValueType primitiveValue) (replicate copies primitiveValue)]
         (_, ArrayValue oldShape elementType values) ->
           pure [ArrayValue (dimensions <> oldShape) elementType (concat $ replicate copies values)]
+        (_, AccValue {}) ->
+          Left "cannot replicate an accumulator value"
 evalBasicOp env (Rearrange arrayName permutation) = do
   array <-
     maybe (Left $ "unbound array: " <> prettyText arrayName) pure $
@@ -303,6 +446,7 @@ evalBasicOp env (Rearrange arrayName permutation) = do
               newValues = [values !! linearIndex oldShape (oldCoordinate coordinate) | coordinate <- newCoordinates]
            in pure [ArrayValue newShape elementType newValues]
     PrimVal _ -> Left "cannot rearrange a primitive value"
+    AccValue _ -> Left "cannot rearrange an accumulator value"
 evalBasicOp env (Concat concatDim arrayNames resultSizeExp) = do
   arrays <- mapM lookupArray $ NE.toList arrayNames
   declaredSize <-
@@ -333,6 +477,8 @@ evalBasicOp env (Concat concatDim arrayNames resultSizeExp) = do
           pure (shape, elementType, values)
         Just PrimVal {} ->
           Left "cannot concatenate a primitive value"
+        Just AccValue {} ->
+          Left "cannot concatenate an accumulator value"
         Nothing ->
           Left $ "unbound array: " <> prettyText name
 
@@ -375,6 +521,8 @@ evalBasicOp env (Update _ arrayName slice valueExp) = do
   case array of
     PrimVal _ ->
       Left "cannot update a primitive value"
+    AccValue _ ->
+      Left "cannot update an accumulator value"
     ArrayValue shape elementType oldValues -> do
       (sliceShp, coordinates) <- resolveSlice env shape slice
 
@@ -420,6 +568,8 @@ evalBasicOp env (FlatIndex arrayName flatSlice) = do
       Left "flat index source must be one-dimensional"
     PrimVal {} ->
       Left "cannot flat-index a primitive value"
+    AccValue {} ->
+      Left "cannot flat-index an accumulator value"
   where
     validOffset values offset =
       offset >= 0 && offset < length values
@@ -455,6 +605,7 @@ evalBasicOp env (FlatUpdate sourceName flatSlice replacementName) = do
       Left "flat update source must be one-dimensional"
     PrimVal {} ->
       Left "cannot flat-update a primitive value"
+    AccValue {} -> Left "cannot flat-update an accumulator value"
   where
     validOffset values offset =
       offset >= 0 && offset < length values
@@ -490,7 +641,24 @@ evalBasicOp env (Scratch elementType dimensionExps) = do
        in pure [ArrayValue dimensions elementType (replicate elementCount blankValue)]
 evalBasicOp env (UserParam _ defaultSubExp) =
   pure <$> evalSubExp env defaultSubExp
-evalBasicOp _ _ = Left "basic operation not implemented yet"
+evalBasicOp env (UpdateAcc safety accumulatorName indexExps valueExps) = do
+  accumulator <-
+    maybe
+      (Left $ "unbound accumulator: " <> prettyText accumulatorName)
+      pure
+      (M.lookup accumulatorName env)
+
+  indices <-
+    mapM
+      (\indexExp -> evalSubExp env indexExp >>= expectPrimVal >>= expectInt)
+      indexExps
+  values <- mapM (evalSubExp env) valueExps
+
+  case accumulator of
+    AccValue updates ->
+      pure [AccValue $ updates <> [AccUpdate safety indices values]]
+    _ ->
+      Left "UpdateAcc argument is not an accumulator"
 
 evalFlatSlice :: Env -> FlatSlice SubExp -> InterpM ([Int], [Int])
 evalFlatSlice env (FlatSlice offsetExp dimensions) = do
@@ -549,6 +717,7 @@ updateValues elementType slcShape replacement =
           Left "update value shape does not match slice shape"
       | otherwise ->
           pure replacementValues
+    AccValue {} -> Left "cannot use an accumulator as an update value"
 
 resolveSlice ::
   Env ->
@@ -735,6 +904,7 @@ evalHist funs env widthExp inputNames histOps bucketLambda = do
       case M.lookup name env of
         Just histogram@ArrayValue {} -> pure histogram
         Just PrimVal {} -> Left "Hist destination must be an array"
+        Just AccValue {} -> Left "Hist destination must be an array"
         Nothing -> Left $ "unbound Hist destination: " <> prettyText name
 
     runIteration inputs histograms iteration = do
@@ -823,12 +993,14 @@ evalScrema funs env widthExp inputNames (ScremaForm preLambda scans reductions p
               (runIteration inputs)
               (initialScanStates, initialReductionStates, [])
               [0 .. width - 1]
-          outputs <-
+          collectedOutputs <-
             collectScremaOutputs
               env
               width
               (lambdaReturnType postLambda)
               (reverse reversedOutputRows)
+
+          outputs <- prependAccumulatorInputs inputs collectedOutputs
           pure $ concat finalReductionStates <> outputs
   where
     scanSizes =
@@ -848,6 +1020,21 @@ evalScrema funs env widthExp inputNames (ScremaForm preLambda scans reductions p
         nextReductionStates <- updateReductionStates funs env reductions reductionStates reductionContributions
         postResults <- evalLambda funs env postLambda (concat nextScanStates <> mapValues)
         pure (nextScanStates, nextReductionStates, postResults : outputRows)
+
+prependAccumulatorInputs :: [Val] -> [Val] -> InterpM [Val]
+prependAccumulatorInputs inputs =
+  go [updates | AccValue updates <- inputs]
+  where
+    go [] outputs = pure outputs
+    go remaining [] =
+      if null remaining
+        then pure []
+        else Left "Screma dropped an accumulator result"
+    go (initial : remaining) (AccValue updates : outputs) =
+      (AccValue (initial <> updates) :)
+        <$> go remaining outputs
+    go remaining (output : outputs) =
+      (output :) <$> go remaining outputs
 
 splitGroups :: [Int] -> [a] -> InterpM ([[a]], [a])
 splitGroups [] values =
@@ -939,6 +1126,8 @@ lookupSoacInput env name =
   case M.lookup name env of
     Just array@ArrayValue {} ->
       pure array
+    Just val@AccValue {} ->
+      pure val
     Just PrimVal {} ->
       Left "Screma input must be an array"
     Nothing ->
@@ -958,6 +1147,8 @@ validateSoacInput width (ArrayValue shape _ values) =
       Left "Screma input must have positive rank"
 validateSoacInput _ PrimVal {} =
   Left "Screma input must be an array"
+validateSoacInput _ AccValue {} =
+  Left "Screma input must be an array"
 
 rowAt :: Int -> Val -> InterpM Val
 rowAt index (ArrayValue (_ : rowShape) elementType values)
@@ -974,8 +1165,62 @@ rowAt index (ArrayValue (_ : rowShape) elementType values)
             else
               pure $
                 ArrayValue rowShape elementType rowValues
+rowAt _ AccValue {} =
+  pure $ AccValue []
 rowAt _ _ =
   Left "cannot extract a row from this value"
+
+readAccumulatorElement :: [Int] -> Val -> InterpM Val
+readAccumulatorElement indices (ArrayValue shape elementType values)
+  | length indices > length shape =
+      Left "accumulator index rank exceeds array rank"
+  | length values /= product shape =
+      Left "invalid accumulator backing-array storage"
+  | otherwise =
+      let indexRank = length indices
+          indexShape = take indexRank shape
+          elementShape = drop indexRank shape
+          elementSize = product elementShape
+          offset = linearIndex indexShape indices * elementSize
+          elementValues = take elementSize $ drop offset values
+       in case elementShape of
+            [] ->
+              case elementValues of
+                [val] -> pure $ PrimVal val
+                _ -> Left "invalid scalar accumulator element"
+            _ ->
+              pure $
+                ArrayValue elementShape elementType elementValues
+readAccumulatorElement _ _ =
+  Left "accumulator backing value must be an array"
+
+writeAccumulatorElement :: [Int] -> Val -> Val -> InterpM Val
+writeAccumulatorElement
+  indices
+  (ArrayValue shape elementType oldValues)
+  replacement
+    | length indices > length shape =
+        Left "accumulator index rank exceeds array rank"
+    | otherwise = do
+        let indexRank = length indices
+            indexShape = take indexRank shape
+            elementShape = drop indexRank shape
+            elementSize = product elementShape
+            offset = linearIndex indexShape indices * elementSize
+
+        replacementValues <-
+          updateValues elementType elementShape replacement
+
+        pure $
+          ArrayValue
+            shape
+            elementType
+            ( take offset oldValues
+                <> replacementValues
+                <> drop (offset + elementSize) oldValues
+            )
+writeAccumulatorElement _ _ _ =
+  Left "accumulator backing value must be an array"
 
 readHistogramBin :: [Int] -> Val -> InterpM Val
 readHistogramBin indices (ArrayValue shape elementType values) =
@@ -994,6 +1239,8 @@ readHistogramBin indices (ArrayValue shape elementType values) =
             then pure $ ArrayValue binShape elementType binValues
             else Left "invalid Hist bin storage"
 readHistogramBin _ PrimVal {} =
+  Left "Hist destination must be an array"
+readHistogramBin _ AccValue {} =
   Left "Hist destination must be an array"
 
 writeHistogramBin :: [Int] -> Val -> Val -> InterpM Val
@@ -1018,6 +1265,8 @@ writeHistogramBin indices histogram@(ArrayValue shape elementType oldValues) rep
                 <> drop (offset + binSize) oldValues
             )
 writeHistogramBin _ PrimVal {} _ =
+  Left "Hist destination must be an array"
+writeHistogramBin _ AccValue {} _ =
   Left "Hist destination must be an array"
 
 collectFlatMapOutput ::
@@ -1093,6 +1342,8 @@ collectFlatMapOutput env sizes totalSize resultType rows
     expectPrimitive (PrimVal val) = pure val
     expectPrimitive ArrayValue {} =
       Left "expected primitive FlatMap result"
+    expectPrimitive AccValue {} =
+      Left "expected primitive FlatMap result"
 
     expectArray (ArrayValue shape elementType values)
       | length values == product shape =
@@ -1100,6 +1351,8 @@ collectFlatMapOutput env sizes totalSize resultType rows
       | otherwise =
           Left "invalid FlatMap result storage"
     expectArray PrimVal {} =
+      Left "expected array-valued FlatMap result"
+    expectArray AccValue {} =
       Left "expected array-valued FlatMap result"
 
     sameArray shape elementType (otherShape, otherType, values) =
@@ -1175,13 +1428,15 @@ collectScremaOutputs env width returnTypes iterationResults
                   (width : firstShape)
                   expectedType
                   (firstValues <> concatMap third remaining)
-    collectOne Acc {} _ =
-      Left "Screma accumulator outputs are unsupported" -- This should never happen?
+    collectOne Acc {} rows =
+      AccValue . concat <$> mapM expectAccumulator rows
     collectOne Mem {} _ =
       Left "Screma memory outputs are unsupported" -- This should never happen?
     expectPrimitive (PrimVal val) =
       pure val
     expectPrimitive ArrayValue {} =
+      Left "expected primitive Screma output"
+    expectPrimitive AccValue {} =
       Left "expected primitive Screma output"
 
     expectArray (ArrayValue shape elementType values)
@@ -1191,6 +1446,12 @@ collectScremaOutputs env width returnTypes iterationResults
           Left "invalid Screma output row storage"
     expectArray PrimVal {} =
       Left "expected array-valued Screma output"
+    expectArray AccValue {} =
+      Left "expected array-valued Screma output"
+    expectAccumulator (AccValue updates) =
+      pure updates
+    expectAccumulator _ =
+      Left "expected accumulator-valued Screma output"
 
     sameRow expectedShape expectedType (shape, elementType, values) =
       shape == expectedShape
@@ -1288,6 +1549,8 @@ toValue (PrimVal primitiveValue) =
   toPrimitiveValue [] (P.primValueType primitiveValue) [primitiveValue]
 toValue (ArrayValue shape elementType values) =
   toPrimitiveValue shape elementType values
+toValue AccValue {} =
+  Left "accumulators cannot be represented as external values"
 
 toPrimitiveValue :: [Int] -> PrimType -> [PrimValue] -> InterpM V.Value
 toPrimitiveValue shape (IntType Int8) values =
