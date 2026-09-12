@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * AD is now supposed for scans with array operators (#2208). Work by Yifan Chen.
 
+* AD operators now return alias-free results.
+
 ## [0.27.1]
 
 ### Added
