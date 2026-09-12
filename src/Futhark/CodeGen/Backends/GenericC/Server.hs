@@ -455,7 +455,7 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs 
       out_type = outputType output
       in_types = map inputType inputs
       in_types_name = nameFromText name <> "_in_types"
-      in_unique_name = nameFromText name <> "_in_unique"
+      in_consumed_name = nameFromText name <> "_in_consumed"
       tuning_params_name = nameFromText name <> "_tuning_params"
       attrs_name = nameFromText name <> "_attrs"
       (in_items, in_args)
@@ -466,7 +466,7 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs 
                   $inits:(map typeStructInit in_types),
                   NULL
                 };
-                bool $id:in_unique_name[] = {
+                bool $id:in_consumed_name[] = {
                   $inits:(map inputUniqueInit inputs)
                 };
                 const char* $id:tuning_params_name[] = {
@@ -488,7 +488,7 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs 
             .tuning_params = $id:tuning_params_name,
             .in_types = $id:in_types_name,
             .out_type = $init:(typeStructInit out_type),
-            .in_unique = $id:in_unique_name,
+            .in_consumed = $id:in_consumed_name,
             .out_fresh = $init:(outputUniqueInit output),
             .attrs = $id:attrs_name
             }|]

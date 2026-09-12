@@ -964,7 +964,7 @@ intrinsics =
                   ]
                   $ RetType []
                   $ Scalar
-                  $ tupleRecord [Scalar $ t_b Nonfresh, Scalar $ t_b Fresh]
+                  $ tupleRecord [Scalar $ t_b Fresh, Scalar $ t_b Fresh]
               ),
               ( "vjp2",
                 IntrinsicPolyFun
@@ -975,7 +975,7 @@ intrinsics =
                   ]
                   $ RetType []
                   $ Scalar
-                  $ tupleRecord [Scalar $ t_b Nonfresh, Scalar $ t_a Fresh]
+                  $ tupleRecord [Scalar $ t_b Fresh, Scalar $ t_a Fresh]
               ),
               ( "jmp2",
                 IntrinsicPolyFun
@@ -987,7 +987,7 @@ intrinsics =
                   $ RetType []
                   $ Scalar
                   $ tupleRecord
-                    [ Scalar $ t_b Nonfresh,
+                    [ Scalar $ t_b Fresh,
                       array_b Fresh $ shape [n]
                     ]
               ),
@@ -1001,7 +1001,7 @@ intrinsics =
                   $ RetType []
                   $ Scalar
                   $ tupleRecord
-                    [ Scalar $ t_b Nonfresh,
+                    [ Scalar $ t_b Fresh,
                       array_a Fresh $ shape [n]
                     ]
               ),

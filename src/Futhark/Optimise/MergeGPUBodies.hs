@@ -203,7 +203,7 @@ transformExp aliases e =
     WithAcc inputs lambda -> do
       accs <- mapM (transformWithAccInput aliases) inputs
       let (inputs', input_deps) = unzip accs
-      -- The lambda parameters are all unique and thus have no aliases.
+      -- The lambda parameters are all consuming and thus have no aliases.
       (lambda', deps) <- transformLambda aliases lambda
       pure (WithAcc inputs' lambda', deps <> fold input_deps)
     Op {} ->

@@ -141,26 +141,26 @@
 
 -- | Jacobian-Vector Product ("forward mode"), producing also the
 -- primal result as the first element of the result tuple.
-def jvp2 'a 'b (f: a -> b) (x: a) (x': a) : (b, *b) =
+def jvp2 'a 'b (f: a -> b) (x: a) (x': a) : (*b, *b) =
   intrinsics.jvp2 f x x'
 
 -- | Vector-Jacobian Product ("reverse mode"), producing also the
 -- primal result as the first element of the result tuple.
-def vjp2 'a 'b (f: a -> b) (x: a) (y': b) : (b, *a) =
+def vjp2 'a 'b (f: a -> b) (x: a) (y': b) : (*b, *a) =
   intrinsics.vjp2 f x y'
 
 -- | Jacobian-Matrix Product, returning also the primal result. As `jvp2`, but
 -- accepts an array of seed vectors (hence "matrix", although transposed).
 -- Semantically equivalent to mapping, but may be more efficient. If used with
 -- `#[unroll]`, tangent calculations are unrolled when possible.
-def jmp2 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : (b, *[n]b) =
+def jmp2 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : (*b, *[n]b) =
   intrinsics.jmp2 f x x'
 
 -- | Matrix-Jacobian Product, returning also the primal result. As `vjp2`, but
 -- accepts an array of seed vectors (hence "matrix"). Semantically equivalent to
 -- mapping, but may be more efficient. If used with `#[unroll]`, adjoint
 -- calculations are unrolled when possible.
-def mjp2 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : (b, *[n]a) =
+def mjp2 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : (*b, *[n]a) =
   intrinsics.mjp2 f x y'
 
 -- | Jacobian-Vector Product ("forward mode").

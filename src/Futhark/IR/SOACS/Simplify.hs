@@ -1312,7 +1312,7 @@ prunePreLambdaResults form =
 --
 -- When the same input appears multiple times in the input list (with
 -- corresponding duplicate lambda parameters), this function: 1. Keeps
--- only one copy of each unique input 2. Creates let-bindings in the
+-- only one copy of each distinct input 2. Creates let-bindings in the
 -- lambda body to alias the duplicates
 --
 -- Example: If inputs [x, y, x] map to lambda params [a, b, c], the

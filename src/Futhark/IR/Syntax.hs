@@ -7,14 +7,13 @@
 --
 -- == Types and values
 --
--- The core language type system is much more restricted than the core
--- language.  This is a theme that repeats often.  The only types that
--- are supported in the core language are various primitive types
--- t'PrimType' which can be combined in arrays (ignore v'Mem' and
--- v'Acc' for now).  Types are represented as t'TypeBase', which is
--- parameterised by the shape of the array and whether we keep
--- uniqueness information.  The t'Type' alias, which is the most
--- commonly used, uses t'Shape' and t'NoMode'.
+-- The core language type system is much more restricted than the core language.
+-- This is a theme that repeats often. The only types that are supported in the
+-- core language are various primitive types t'PrimType' which can be combined
+-- in arrays (ignore v'Mem' and v'Acc' for now). Types are represented as
+-- t'TypeBase', which is parameterised by the shape of the array and whether we
+-- keep a mode. The t'Type' alias, which is the most commonly used, uses
+-- t'Shape' and t'NoMode'.
 --
 -- This means that the records, tuples, and sum types of the source
 -- language are represented merely as collections of primitives and
@@ -606,14 +605,15 @@ deriving instance (RepTypes rep) => Ord (FunDef rep)
 -- | An entry point parameter, comprising its name and original type.
 data EntryParam = EntryParam
   { entryParamName :: Name,
-    entryParamUniqueness :: Diet,
+    entryParamDiet :: Diet,
     entryParamType :: EntryPointType
   }
   deriving (Eq, Show, Ord)
 
 -- | An entry point result type.
 data EntryResult = EntryResult
-  { entryResultUniqueness :: Diet,
+  { -- | Here we overload "consumable" as "fresh".
+    entryResultFreshness :: Diet,
     entryResultType :: EntryPointType
   }
   deriving (Eq, Show, Ord)

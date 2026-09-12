@@ -563,7 +563,7 @@ diffVecHist ops x aux n op nes is vss w rf dst m = do
     f <- mkIdentityLambda (Prim int64 : lambdaReturnType op)
     map_lam <-
       mkLambda [dst_col, vss_col, ne] $ do
-        -- TODO Have to copy dst_col, but isn't it already unique?
+        -- TODO Have to copy dst_col, but isn't it already fresh?
         dst_col_cpy <-
           letExp "dst_col_cpy" . BasicOp $
             Replicate mempty (Var $ paramName dst_col)

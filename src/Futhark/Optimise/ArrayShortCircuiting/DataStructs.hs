@@ -25,7 +25,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     getScopeMemInfo,
     createsNewArrOK,
     getArrMemAssoc,
-    getUniqueMemFParam,
+    getConsumingMemFParam,
     markFailedCoal,
     accessSubtract,
     markSuccessCoal,
@@ -287,10 +287,10 @@ getArrMemAssocFParam =
         MemAcc {} -> Nothing
     )
 
--- | Get memory blocks in a list of 'FParam' that are used for unique arrays in
--- the same list of 'FParam'.
-getUniqueMemFParam :: [Param FParamMem] -> M.Map VName Space
-getUniqueMemFParam params =
+-- | Get memory blocks in a list of 'FParam' that are used for consumed arrays
+-- in the same list of 'FParam'.
+getConsumingMemFParam :: [Param FParamMem] -> M.Map VName Space
+getConsumingMemFParam params =
   let mems = M.fromList $ mapMaybe justMem params
       arrayMems = S.fromList $ mapMaybe (justArrayMem . paramDec) params
    in mems `M.restrictKeys` arrayMems

@@ -209,17 +209,15 @@ data Space
 -- | A string representing a specific non-default memory space.
 type SpaceId = String
 
--- | The type of a value.  When comparing types for equality with
--- '==', shapes must match.
--- The @o@ parameter is the /mode/; see the corresponding note on the
--- source language 'Language.Futhark.Syntax.TypeBase'.  In the core
--- language it is 'Diet' or 'NoMode'.
+-- | The type of a value. When comparing types for equality with '==', shapes
+-- must match. The @o@ parameter is the /mode/; denoting based on context how
+-- the values of the type may be used. In the IR it is 'Diet' or 'NoMode',
+-- although we still use the term "fresh" to denote a value with no aliases.
 data TypeBase shape o
   = Prim PrimType
-  | -- | Token, index space, and element type.  Accumulators carry no
-    -- uniqueness: every use of an accumulator consumes it ('diet' is
-    -- unconditionally 'Consume'), so there is no way for a function to
-    -- merely observe one.
+  | -- | Token, index space, and element type. Accumulators carry no mode: every
+    -- use of an accumulator consumes it ('diet' is unconditionally 'Consume'),
+    -- so there is no way for a function to merely observe one.
     Acc VName Shape [Type]
   | Array PrimType shape o
   | Mem Space

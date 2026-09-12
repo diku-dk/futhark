@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The "uniqueness" terminology for in-place updates has now been completely
   replaced with the notions of "consumption" and "freshness".
 
+* `futhark bench`: JSON files now contain metadata about the configuration and
+  execution environment (#2381). Work by Yifan Chen.
+
 ### Removed
 
 ### Changed
@@ -26,6 +29,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * GPU code generation now supports reductions with more than 25 operators.
 
 * `reduce` and `reduce_comm` now produce alias-free results.
+
+* AD is now supposed for scans with array operators (#2208). Work by Yifan Chen.
+
+* AD operators now return alias-free results.
 
 ## [0.27.1]
 

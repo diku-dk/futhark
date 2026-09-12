@@ -99,7 +99,11 @@ OPTIONS
 
 --json=file
 
-  Write raw results in JSON format to the specified file.
+  Write raw results in JSON format to the specified file.  Each benchmark
+  includes metadata describing when and where it ran, the compiler version and
+  backend, and options explicitly forwarded to the compiler or runtime.  This
+  makes it possible to identify the environment and invocation that produced a
+  result file.
 
 --no-tuning
 

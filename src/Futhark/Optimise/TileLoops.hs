@@ -617,7 +617,7 @@ protectOutOfBounds desc in_bounds ts m = do
   -- This is more complicated than you might expect, because we need
   -- to be able to produce a blank accumulator, which eBlank cannot
   -- do.  By the linear type rules of accumulators, the body returns
-  -- an accumulator of type 'acc_t', then a unique variable of type
+  -- an accumulator of type 'acc_t', then a distinct variable of type
   -- 'acc_t' must also be free in the body.  This means we can find it
   -- based just on the type.
   m_body <- insertStmsM $ mkBody mempty <$> m

@@ -212,7 +212,7 @@ struct entry_point {
   const struct type *out_type;
   bool out_fresh;
   const struct type **in_types;
-  bool *in_unique;
+  bool *in_consumed;
 };
 
 int entry_num_ins(struct entry_point *e) {
@@ -532,7 +532,7 @@ void cmd_inputs(struct server_state *s, const char *args[]) {
 
   int num_ins = entry_num_ins(e);
   for (int i = 0; i < num_ins; i++) {
-    if (e->in_unique[i]) {
+    if (e->in_consumed[i]) {
       putchar('*');
     }
     puts(e->in_types[i]->name);
@@ -1445,7 +1445,7 @@ char *next_word(char **line) {
 }
 
 void process_line(struct server_state *s, char *line) {
-  int max_num_tokens = 1000;
+  int max_num_tokens = 10000;
   const char* tokens[max_num_tokens];
   int num_tokens = 0;
 
