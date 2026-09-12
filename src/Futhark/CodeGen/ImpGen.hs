@@ -1076,7 +1076,7 @@ addFParams = mapM_ addFParam
     addFParam fparam =
       addVar (paramName fparam) $
         memBoundToVarEntry Nothing $
-          noUniquenessReturns $
+          noModeReturns $
             paramDec fparam
 
 -- | Another hack.
@@ -1182,7 +1182,7 @@ infoDec ::
   NameInfo rep ->
   MemInfo SubExp NoMode MemBind
 infoDec (LetName dec) = letDecMem dec
-infoDec (FParamName dec) = noUniquenessReturns dec
+infoDec (FParamName dec) = noModeReturns dec
 infoDec (LParamName dec) = dec
 infoDec (IndexName it) = MemPrim $ IntType it
 

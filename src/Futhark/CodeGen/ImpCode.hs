@@ -203,10 +203,9 @@ data ValueDesc
     ScalarValue PrimType Signedness VName
   deriving (Eq, Show)
 
--- | ^ An externally visible value.  This can be an opaque value
+-- | An externally visible value.  This can be an opaque value
 -- (covering several physical internal values), or a single value that
--- can be used externally.  We record the uniqueness because it is
--- important to the external interface as well.
+-- can be used externally.
 data ExternalValue
   = -- | The string is a human-readable description with no other
     -- semantics.
@@ -215,6 +214,8 @@ data ExternalValue
   deriving (Show)
 
 -- | Information about how this function can be called from the outside world.
+-- We record the consumption/freshness because it is important to the external
+-- interface as well.
 data EntryPoint = EntryPoint
   { entryPointName :: Name,
     entryPointResults :: (Diet, ExternalValue),

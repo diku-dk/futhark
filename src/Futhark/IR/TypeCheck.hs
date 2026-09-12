@@ -684,13 +684,13 @@ checkFun' (fname, rettype, params) consumable check = do
 
     isParam = (`elem` param_names)
 
-    unique_names = namesFromList $ do
+    consumable_names = namesFromList $ do
       (v, FParamName t) <- params
       guard $ consuming $ declTypeOf t
       pure v
 
     allowedArgAliases pals =
-      namesFromList (map (param_names !!) pals) <> unique_names
+      namesFromList (map (param_names !!) pals) <> consumable_names
 
     checkReturnAlias retals = zipWithM_ checkRet (zip [(0 :: Int) ..] rettype) retals
       where

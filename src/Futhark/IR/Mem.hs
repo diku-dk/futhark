@@ -68,7 +68,7 @@ module Futhark.IR.Mem
     ExpReturns,
     BodyReturns,
     FunReturns,
-    noUniquenessReturns,
+    noModeReturns,
     bodyReturnsToExpReturns,
     Mem,
     HasLetDecMem (..),
@@ -284,9 +284,9 @@ type LMAD = LMAD.LMAD (TPrimExp Int64 VName)
 -- | An index function that may contain existential variables.
 type ExtLMAD = LMAD.LMAD (TPrimExp Int64 (Ext VName))
 
--- | A summary of the memory information for every let-bound
--- identifier, function parameter, and return value.  Parameterisered
--- over uniqueness, dimension, and auxiliary array information.
+-- | A summary of the memory information for every let-bound identifier,
+-- function parameter, and return value. Parameterisered over mode, dimension,
+-- and auxiliary array information.
 data MemInfo d o ret
   = -- | A primitive value.
     MemPrim PrimType
@@ -565,21 +565,21 @@ maybeReturns (MemMem space) =
 maybeReturns (MemAcc acc ispace ts) =
   MemAcc acc ispace ts
 
-noUniquenessReturns :: MemInfo d o r -> MemInfo d NoMode r
-noUniquenessReturns (MemArray bt shape _ r) =
+noModeReturns :: MemInfo d o r -> MemInfo d NoMode r
+noModeReturns (MemArray bt shape _ r) =
   MemArray bt shape NoMode r
-noUniquenessReturns (MemPrim bt) =
+noModeReturns (MemPrim bt) =
   MemPrim bt
-noUniquenessReturns (MemMem space) =
+noModeReturns (MemMem space) =
   MemMem space
-noUniquenessReturns (MemAcc acc ispace ts) =
+noModeReturns (MemAcc acc ispace ts) =
   MemAcc acc ispace ts
 
 funReturnsToExpReturns :: FunReturns -> ExpReturns
-funReturnsToExpReturns = noUniquenessReturns . maybeReturns
+funReturnsToExpReturns = noModeReturns . maybeReturns
 
 bodyReturnsToExpReturns :: BodyReturns -> ExpReturns
-bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
+bodyReturnsToExpReturns = noModeReturns . maybeReturns
 
 varInfoToExpReturns :: MemInfo SubExp NoMode MemBind -> ExpReturns
 varInfoToExpReturns (MemArray et shape o (ArrayIn mem lmad)) =
@@ -867,7 +867,7 @@ varMemInfo name = do
 
   case dec of
     LetName (_, summary) -> pure $ letDecMem summary
-    FParamName summary -> pure $ noUniquenessReturns summary
+    FParamName summary -> pure $ noModeReturns summary
     LParamName summary -> pure summary
     IndexName it -> pure $ MemPrim $ IntType it
 
@@ -875,7 +875,7 @@ varMemInfo name = do
 nameInfoToMemInfo :: (Mem rep inner) => NameInfo rep -> MemBound NoMode
 nameInfoToMemInfo info =
   case info of
-    FParamName summary -> noUniquenessReturns summary
+    FParamName summary -> noModeReturns summary
     LParamName summary -> summary
     LetName summary -> letDecMem summary
     IndexName it -> MemPrim $ IntType it
