@@ -1091,6 +1091,53 @@ removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, l
   PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
 
 -- Monomorphise a polymorphic function at the types given in the instance list.
+
+-- | The type checker may instantiate a type parameter in result position at a
+-- *fresh* type, which the declared type of the polymorphic binding cannot
+-- express.  The instantiation can, so take it from there - for the return type
+-- and for the function-typed parameters alike, since the body would otherwise
+-- not justify a fresh result.  See Note [Parametric results] in
+-- Language.Futhark.TypeChecker.Consumption.
+freshenFromInst ::
+  TypeBase d Freshness ->
+  [Pat ParamType] ->
+  ResRetType ->
+  ([Pat ParamType], ResRetType)
+freshenFromInst (Scalar (Arrow _ _ _ ia (RetType _ ir))) (p : ps) rt =
+  let (ps', rt') = freshenFromInst ir ps rt
+   in (fmap (freshenAsType (second (const Nonfresh) ia)) p : ps', rt')
+freshenFromInst it [] (RetType ext t) = ([], RetType ext (freshenAs it t))
+freshenFromInst _ ps rt = (ps, rt)
+
+-- | Copy freshness from the instantiated type into the return slots of the
+-- declared one.
+freshenAsType :: TypeBase d Freshness -> TypeBase Size u -> TypeBase Size u
+freshenAsType
+  (Scalar (Arrow _ _ _ ia (RetType _ ir)))
+  (Scalar (Arrow u pn d a (RetType ext r))) =
+    Scalar $
+      Arrow u pn d (freshenAsType (second (const Nonfresh) ia) a) $
+        RetType ext (freshenAs ir r)
+freshenAsType _ t = t
+
+freshenAs :: TypeBase d1 Freshness -> TypeBase d2 Freshness -> TypeBase d2 Freshness
+freshenAs (Scalar (Record ifs)) (Scalar (Record fs))
+  | M.keys ifs == M.keys fs =
+      Scalar $ Record $ M.intersectionWith freshenAs ifs fs
+freshenAs (Scalar (Sum ics)) (Scalar (Sum cs))
+  | M.keys ics == M.keys cs =
+      Scalar $ Sum $ M.intersectionWith (zipWith freshenAs) ics cs
+freshenAs it t
+  -- 'setMode' writes every node, and 'freshness' of a record is Fresh
+  -- if *any* field is, so this must not be reached for compound types.
+  | compound it || compound t = t
+  | freshness it == Fresh = t `setMode` Fresh
+  | otherwise = t
+  where
+    compound (Scalar Record {}) = True
+    compound (Scalar Sum {}) = True
+    compound _ = False
+
 -- Monomorphises the body of the function as well. Returns the fresh name of the
 -- generated monomorphic function as well a function for constructing additional
 -- size arguments.
@@ -1098,8 +1145,9 @@ monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs)
-monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
-  let bind_t = funType params rettype
+monomorphiseBinding (PolyBinding (entry, name, tparams, params0, rettype0, body, attrs, loc)) inst_t = isolateNormalisation $ do
+  let (params, rettype) = freshenFromInst (second (const Nonfresh) inst_t) params0 rettype0
+      bind_t = funType params rettype
   (substs, t_shape_params) <-
     typeSubstsM loc bind_t $ noNamedParams inst_t
   let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
@@ -1176,7 +1224,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
 
   pure (name', infer)
   where
-    askScope' = S.filter (`notElem` retDims rettype) <$> askScope
+    askScope' = S.filter (`notElem` retDims rettype0) <$> askScope
 
     shape_params = filter (not . isTypeParam) tparams
 

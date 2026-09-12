@@ -8,9 +8,9 @@ module type obs_monoid = {
   type ix
   type obs
   val ne : t
-  val op : t -> t -> t
-  val gen : ix -> t
-  val obs : t -> obs
+  val op : t -> t -> *t
+  val gen : ix -> *t
+  val obs : t -> *obs
 }
 
 module horner : obs_monoid with t = (i64, i64) with ix = u8 with obs = i64 = {
@@ -50,11 +50,11 @@ module mk_chunk
   type t = M1.t
   def ne = M1.ne
   def convert (x: M1.t) : M2.t = M2.gen (#E (M1.obs x))
-  def op (x: t) (y: t) : t = M1.op x y
+  def op (x: t) (y: t) : *t = M1.op x y
   type ix = del M1.ix
-  def gen (ix: ix) : t = match ix case #E x -> M1.gen x case #Del _ -> M1.ne
+  def gen (ix: ix) : *t = match ix case #E x -> M1.gen x case #Del _ -> copy M1.ne
   type obs = M2.obs
-  def obs (x: t) : obs = M2.((op (convert x) ne) |> obs)
+  def obs (x: t) : *obs = M2.((op (convert x) ne) |> obs)
 }
 
 module m5 = mk_chunk m1 m2
