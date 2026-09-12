@@ -1180,8 +1180,7 @@ validateSoacInput width (ArrayValue shape _ values) =
       interpError "Screma input must have positive rank"
 validateSoacInput _ PrimVal {} =
   interpError "Screma input must be an array"
-validateSoacInput _ AccValue {} =
-  interpError "Screma input must be an array"
+validateSoacInput _ AccValue {} = pure ()
 
 rowAt :: Int -> Val -> InterpM Val
 rowAt index (ArrayValue (_ : row_shape) element_type values)
