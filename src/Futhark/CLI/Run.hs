@@ -3,7 +3,7 @@ module Futhark.CLI.Run (main) where
 
 import Control.Exception
 import Control.Monad
-import Control.Monad.Except (ExceptT, runExceptT, throwError)
+import Control.Monad.Except (runExceptT)
 import Control.Monad.Free.Church
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy qualified as BS
@@ -12,6 +12,7 @@ import Data.Maybe
 import Data.Text.IO qualified as T
 import Futhark.Compiler
 import Futhark.Data.Reader (readValues)
+import Futhark.Eval (interpretImports)
 import Futhark.Pipeline
 import Futhark.Util.Options
 import Futhark.Util.Pretty (AnsiStyle, Doc, align, hPutDoc, hPutDocLn, pretty, unAnnotate, (<+>))
@@ -32,7 +33,7 @@ main = mainWithOptions interpreterConfig options "options... <program.fut>" run
 
 interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config fp = do
-  pr <- newFutharkiState config fp
+  pr <- newInterpreterEnv config fp
   (tenv, ienv) <- case pr of
     Left err -> do
       hPutDocLn stderr err
@@ -106,11 +107,11 @@ options =
       "Do not print warnings."
   ]
 
-newFutharkiState ::
+newInterpreterEnv ::
   InterpreterConfig ->
   FilePath ->
   IO (Either (Doc AnsiStyle) (T.Env, I.Ctx))
-newFutharkiState cfg file = runExceptT $ do
+newInterpreterEnv cfg file = runExceptT $ do
   (ws, imports, _src) <-
     badOnLeft prettyCompilerError
       =<< liftIO
@@ -123,22 +124,7 @@ newFutharkiState cfg file = runExceptT $ do
       hPutDoc stderr $
         prettyWarnings ws
 
-  let loadImport ctx =
-        badOnLeft I.prettyInterpreterError
-          <=< runInterpreter' . I.interpretImport ctx
-
-  ictx <- foldM loadImport I.initialCtx $ map (fmap fileProg) imports
-  let (tenv, ienv) =
-        let (iname, fm) = last imports
-         in ( fileScope fm,
-              ictx {I.ctxEnv = I.ctxImports ictx M.! iname}
-            )
-
-  pure (tenv, ienv)
-  where
-    badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
-    badOnLeft _ (Right x) = pure x
-    badOnLeft p (Left err) = throwError $ p err
+  interpretImports runInterpreter' imports
 
 runInterpreter' :: (MonadIO m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreter' m = runF m (pure . Right) intOp
@@ -148,3 +134,4 @@ runInterpreter' m = runF m (pure . Right) intOp
       liftIO $ hPutDocLn stderr $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
+    intOp (I.ExtOpFFI {}) = error "External calls are not yet supported in Run."

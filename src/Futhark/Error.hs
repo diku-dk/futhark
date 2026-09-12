@@ -11,6 +11,7 @@ module Futhark.Error
     compilerLimitation,
     compilerLimitationS,
     internalErrorS,
+    badOnLeft,
   )
 where
 
@@ -36,6 +37,11 @@ data CompilerError
   | -- | An internal compiler error.  The second pretty is extra data
     -- for debugging, which can be written to a file.
     InternalError T.Text T.Text ErrorClass
+
+-- | Turn a failure into an error in the current monad, mapping the
+-- failure with the given function.
+badOnLeft :: (MonadError err' m) => (err -> err') -> Either err a -> m a
+badOnLeft f = either (throwError . f) pure
 
 -- | Print an error intended for human consumption.
 prettyCompilerError :: CompilerError -> Doc AnsiStyle
