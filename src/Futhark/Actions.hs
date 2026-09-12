@@ -640,7 +640,7 @@ compileMulticoreToWASMAction fcfg mode outpath =
 
 runWith ::
   Name ->
-  (Prog rep -> Name -> [V.Value] -> Either T.Text [V.Value]) ->
+  (Prog rep -> Name -> [V.Value] -> IO (Either T.Text [V.Value])) ->
   Prog rep ->
   FutharkM ()
 runWith entry_name f prog = do
@@ -649,8 +649,9 @@ runWith entry_name f prog = do
     Nothing -> liftIO $ do
       hPutStrLn stderr "Malformed data on standard input."
       exitFailure
-    Just vs ->
-      case f prog entry_name vs of
+    Just vs -> do
+      result <- liftIO $ f prog entry_name vs
+      case result of
         Left err -> liftIO $ do
           T.hPutStrLn stderr err
           exitFailure
