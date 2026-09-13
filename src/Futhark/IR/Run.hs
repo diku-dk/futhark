@@ -9,7 +9,7 @@
 -- Hence you should not expect programs to run fast at all.
 module Futhark.IR.Run (runSOACS, runGPU) where
 
-import Control.Monad (foldM, zipWithM)
+import Control.Monad (foldM, zipWithM, (>=>))
 import Control.Monad.Error.Class
 import Control.Monad.Except (ExceptT, runExceptT)
 import Control.Monad.IO.Class
@@ -58,7 +58,7 @@ newArrayValue shape element_type values
       vector <- liftIO $ MV.new (length values)
       liftIO $
         mapM_
-          (\(index, val) -> MV.write vector index val)
+          (uncurry (MV.write vector))
           (zip [0 ..] values)
       pure $ ArrayValue shape element_type vector
 
@@ -96,7 +96,7 @@ evalStm funs env (Let pat _ e) = do
 evalExp :: FunEnv -> Env -> Exp SOACS -> InterpM [Val]
 evalExp _ env (BasicOp op) = evalBasicOp env op
 evalExp funs env (Match ses cases default_body _) = do
-  values <- mapM (\se -> evalSubExp env se >>= expectPrimVal) ses
+  values <- mapM (evalSubExp env >=> expectPrimVal) ses
   evalBody funs env $ selectCase values cases
   where
     selectCase values (Case patterns body : remaining)
@@ -314,7 +314,7 @@ evalSubExp env (Var v) =
 
 expectPrimVal :: Val -> InterpM PrimValue
 expectPrimVal (PrimVal pv) = pure pv
-expectPrimVal (ArrayValue _ _ _) = interpError "expected a primitive value"
+expectPrimVal ArrayValue {} = interpError "expected a primitive value"
 expectPrimVal AccValue {} =
   interpError "expected a primitive value"
 
@@ -570,12 +570,12 @@ evalBasicOp env (Update _ array_name slice value_exp) = do
 
       replacement_values <-
         updateValues element_type slice_shp replacement
-      
+
       let offsets = map (linearIndex shape) coordinates
 
-      liftIO $ 
+      liftIO $
         mapM_
-          (uncurry $ MV.write values)
+          (uncurry (MV.write values))
           (zip offsets replacement_values)
 
       pure [ArrayValue shape element_type values]
@@ -590,7 +590,7 @@ evalBasicOp env (FlatIndex array_name flat_slice) = do
 
   case array of
     ArrayValue [_] element_type values
-      | any (not . validOffset values) offsets ->
+      | not $ all (validOffset values) offsets ->
           interpError "flat index out of bounds"
       | otherwise -> do
           selected_values <- mapM (readArrayValue values) offsets
@@ -600,7 +600,7 @@ evalBasicOp env (FlatIndex array_name flat_slice) = do
                 [primitive_value] -> pure [PrimVal primitive_value]
                 _ -> interpError "invalid scalar flat index"
             _ -> pure <$> newArrayValue result_shape element_type selected_values
-    ArrayValue _ _ _ ->
+    ArrayValue {} ->
       interpError "flat index source must be one-dimensional"
     PrimVal {} ->
       interpError "cannot flat-index a primitive value"
@@ -626,15 +626,15 @@ evalBasicOp env (FlatUpdate source_name flat_slice replacement_name) = do
       replacement_values <-
         valuesForReplacement source_type replacement_shape replacement
 
-      if any (not . validOffset source_values) offsets
+      if not $ all (validOffset source_values) offsets
         then interpError "flat update out of bounds"
         else do
-          liftIO $ 
+          liftIO $
             mapM_
               (uncurry $ MV.write source_values)
               (zip offsets replacement_values)
           pure [ArrayValue source_shape source_type source_values]
-    ArrayValue _ _ _ ->
+    ArrayValue {} ->
       interpError "flat update source must be one-dimensional"
     PrimVal {} ->
       interpError "cannot flat-update a primitive value"
@@ -764,7 +764,7 @@ resolveSlice env shape (Slice dimensions)
       let result_shape =
             [length indices | Selected indices <- selections]
           coordinates =
-            sequence $ map selectionIndices selections
+            mapM selectionIndices selections
 
       pure (result_shape, coordinates)
   where
@@ -944,7 +944,7 @@ evalHist funs env width_exp input_names hist_ops bucket_lambda = do
 
       index_groups' <-
         mapM
-          (mapM (\val -> expectPrimVal val >>= expectInt))
+          (mapM (expectPrimVal >=> expectInt))
           index_groups
 
       if null extra
