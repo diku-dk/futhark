@@ -431,7 +431,9 @@ evalBasicOp env (Opaque (OpaqueTrace _) se) =
   pure <$> evalSubExp env se -- Perhaps include IO to print here?
 evalBasicOp env (Manifest array_name _) =
   case M.lookup array_name env of
-    Just array@ArrayValue {} -> pure [array]
+    Just (ArrayValue shape element_type values) -> do
+      values' <- liftIO $ MV.clone values
+      pure [ArrayValue shape element_type values']
     Just PrimVal {} -> interpError "cannot manifest a primitive value"
     Just AccValue {} -> interpError "cannot manifest an accumulator value"
     Nothing -> interpError $ "unbound array: " <> prettyText array_name
