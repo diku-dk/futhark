@@ -563,24 +563,20 @@ evalBasicOp env (Update _ array_name slice value_exp) = do
       interpError "cannot update a primitive value"
     AccValue _ ->
       interpError "cannot update an accumulator value"
-    ArrayValue shape element_type old_values -> do
+    ArrayValue shape element_type values -> do
       (slice_shp, coordinates) <- resolveSlice env shape slice
 
       replacement_values <-
         updateValues element_type slice_shp replacement
-      old_primitives <- arrayValues old_values
+      
+      let offsets = map (linearIndex shape) coordinates
 
-      let offsets =
-            map (linearIndex shape) coordinates
-          new_values =
-            L.foldl'
-              ( \values (offset, new_value) ->
-                  replaceAt offset new_value values
-              )
-              old_primitives
-              (zip offsets replacement_values)
+      liftIO $ 
+        mapM_
+          (uncurry $ MV.write values)
+          (zip offsets replacement_values)
 
-      pure <$> newArrayValue shape element_type new_values
+      pure [ArrayValue shape element_type values]
 evalBasicOp env (FlatIndex array_name flat_slice) = do
   array <-
     maybe
@@ -631,11 +627,11 @@ evalBasicOp env (FlatUpdate source_name flat_slice replacement_name) = do
       if any (not . validOffset source_values) offsets
         then interpError "flat update out of bounds"
         else do
-          source_primitive_values <- arrayValues source_values
-          let new_values =
-                foldl applyUpdate source_primitive_values $
-                  zip offsets replacement_values
-          pure <$> newArrayValue source_shape source_type new_values
+          liftIO $ 
+            mapM_
+              (uncurry $ MV.write source_values)
+              (zip offsets replacement_values)
+          pure [ArrayValue source_shape source_type source_values]
     ArrayValue _ _ _ ->
       interpError "flat update source must be one-dimensional"
     PrimVal {} ->
@@ -644,9 +640,6 @@ evalBasicOp env (FlatUpdate source_name flat_slice replacement_name) = do
   where
     validOffset values offset =
       offset >= 0 && offset < MV.length values
-
-    applyUpdate values (offset, val) =
-      replaceAt offset val values
 
     valuesForReplacement expected_type [] (PrimVal val)
       | P.primValueType val == expected_type =
@@ -1222,7 +1215,7 @@ readAccumulatorElement _ _ =
 writeAccumulatorElement :: [Int] -> Val -> Val -> InterpM Val
 writeAccumulatorElement
   indices
-  (ArrayValue shape element_type old_values)
+  array@(ArrayValue shape element_type values)
   replacement
     | length indices > length shape =
         interpError "accumulator index rank exceeds array rank"
@@ -1235,14 +1228,13 @@ writeAccumulatorElement
 
         replacement_values <-
           updateValues element_type element_shape replacement
-        old_primitive_values <- arrayValues old_values
-        newArrayValue
-          shape
-          element_type
-          ( take offset old_primitive_values
-              <> replacement_values
-              <> drop (offset + element_size) old_primitive_values
-          )
+
+        liftIO $
+          mapM_
+            (uncurry $ MV.write values)
+            (zip [offset ..] replacement_values)
+
+        pure array
 writeAccumulatorElement _ _ _ =
   interpError "accumulator backing value must be an array"
 
@@ -1268,23 +1260,27 @@ readHistogramBin _ AccValue {} =
   interpError "Hist destination must be an array"
 
 writeHistogramBin :: [Int] -> Val -> Val -> InterpM Val
-writeHistogramBin indices histogram@(ArrayValue shape element_type old_values) replacement = do
-  let rank = length indices
-      bin_shape = drop rank shape
-      bin_size = product bin_shape
-      offset = linearIndex (take rank shape) indices * bin_size
+writeHistogramBin
+  indices
+  histogram@(ArrayValue shape element_type values)
+  replacement = do
+    let rank = length indices
+        bin_shape = drop rank shape
+        bin_size = product bin_shape
+        offset = linearIndex (take rank shape) indices * bin_size
 
-  replacement_values <- updateValues element_type bin_shape replacement
+    replacement_values <-
+      updateValues element_type bin_shape replacement
 
-  if length replacement_values /= bin_size
-    then interpError "invalid Hist operator result storage"
-    else case histogram of
-      ArrayValue _ _ _ -> do
-        old_primitive_values <- arrayValues old_values
-        newArrayValue shape element_type $
-          take offset old_primitive_values
-            <> replacement_values
-            <> drop (offset + bin_size) old_primitive_values
+    if length replacement_values /= bin_size
+      then interpError "invalid Hist operator result storage"
+      else do
+        liftIO $
+          mapM_
+            (uncurry $ MV.write values)
+            (zip [offset ..] replacement_values)
+
+        pure histogram
 writeHistogramBin _ PrimVal {} _ =
   interpError "Hist destination must be an array"
 writeHistogramBin _ AccValue {} _ =
