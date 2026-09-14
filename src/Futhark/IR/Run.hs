@@ -39,7 +39,10 @@ data DimSelection
 
 type Env = M.Map VName Val
 
-type FunEnv = M.Map Name (FunDef SOACS)
+type FunEnv rep = M.Map Name (FunDef rep)
+
+type OpEvaluator rep = 
+  FunEnv rep -> Env -> Op rep -> InterpM [Val]
 
 newtype InterpM a = InterpM
   { unInterpM :: ExceptT T.Text IO a
@@ -77,27 +80,27 @@ readArrayValue vector index
   | otherwise =
       liftIO $ MV.read vector index
 
-evalBody :: FunEnv -> Env -> Body SOACS -> InterpM [Val]
-evalBody funs env (Body _ stms res) = do
+evalBody :: OpEvaluator rep -> FunEnv rep -> Env -> Body rep -> InterpM [Val]
+evalBody eval_op funs env (Body _ stms res) = do
   env' <- foldStms env (stmsToList stms)
   mapM (evalSubExp env' . resSubExp) res
   where
     foldStms e [] = pure e
-    foldStms e (s : ss) = evalStm funs e s >>= \e' -> foldStms e' ss
+    foldStms e (s : ss) = evalStm eval_op funs e s >>= \e' -> foldStms e' ss
 
 -- Evaluate the expression then bind the pattern names to its results
-evalStm :: FunEnv -> Env -> Stm SOACS -> InterpM Env
-evalStm funs env (Let pat _ e) = do
-  vals <- evalExp funs env e
+evalStm :: OpEvaluator rep -> FunEnv rep -> Env -> Stm rep -> InterpM Env
+evalStm eval_op funs env (Let pat _ e) = do
+  vals <- evalExp eval_op funs env e
   let names = map patElemName $ patElems pat
   pure $ M.union (M.fromList $ zip names vals) env
 
 -- Produce one Val per pattern element the expression is expected to bind.
-evalExp :: FunEnv -> Env -> Exp SOACS -> InterpM [Val]
-evalExp _ env (BasicOp op) = evalBasicOp env op
-evalExp funs env (Match ses cases default_body _) = do
-  values <- mapM (evalSubExp env >=> expectPrimVal) ses
-  evalBody funs env $ selectCase values cases
+evalExp :: OpEvaluator rep -> FunEnv rep -> Env -> Exp rep -> InterpM [Val]
+evalExp _ _ env (BasicOp op) = evalBasicOp env op
+evalExp eval_op funs env (Match ses cases default_body _) = do
+  values <- mapM (\se -> evalSubExp env se >>= expectPrimVal) ses
+  evalBody eval_op funs env $ selectCase values cases
   where
     selectCase values (Case patterns body : remaining)
       | matches patterns values = body
@@ -110,7 +113,7 @@ evalExp funs env (Match ses cases default_body _) = do
 
     matchesValue Nothing _ = True
     matchesValue (Just expected) actual = expected == actual
-evalExp funs env (Loop merge (ForLoop iterator int_type bound_exp) body) = do
+evalExp eval_op funs env (Loop merge (ForLoop iterator int_type bound_exp) body) = do
   initial_values <- mapM (evalSubExp env . snd) merge
   bound_value <- evalSubExp env bound_exp >>= expectPrimVal
   bound <- expectInt bound_value
@@ -131,12 +134,12 @@ evalExp funs env (Loop merge (ForLoop iterator int_type bound_exp) body) = do
               iteration_env =
                 M.union loop_bindings env
 
-          next_values <- evalBody funs iteration_env body
+          next_values <- evalBody eval_op funs iteration_env body
 
           if length next_values /= length merge_names
             then interpError "loop result count mismatch"
             else runIterations (iteration + 1) bound next_values
-evalExp funs env (Loop merge (WhileLoop condition) body) = do
+evalExp eval_op funs env (Loop merge (WhileLoop condition) body) = do
   initial_values <- mapM (evalSubExp env . snd) merge
   runWhile initial_values
   where
@@ -154,13 +157,13 @@ evalExp funs env (Loop merge (WhileLoop condition) body) = do
         PrimVal (BoolValue False) ->
           pure current_values
         PrimVal (BoolValue True) -> do
-          next_values <- evalBody funs loop_env body
+          next_values <- evalBody eval_op funs loop_env body
           if length next_values /= length merge_names
             then interpError "loop result count mismatch"
             else runWhile next_values
         _ ->
           interpError "while-loop condition is not boolean"
-evalExp funs env (Apply fname args _ _) = do
+evalExp eval_op funs env (Apply fname args _ _) = do
   callee <-
     maybe
       (interpError $ "function not found: " <> prettyText fname)
@@ -173,18 +176,19 @@ evalExp funs env (Apply fname args _ _) = do
     else
       let bindings = M.fromList $ zip params arg_vals
           callee_env = M.union bindings env
-       in evalBody funs callee_env (funDefBody callee)
-evalExp funs env (Op soac) = evalSOAC funs env soac -- map/reduction/scan
-evalExp funs env (WithAcc inputs lambda) =
-  evalWithAcc funs env inputs lambda
+       in evalBody eval_op funs callee_env (funDefBody callee)
+evalExp eval_op funs env (Op op) = eval_op funs env op -- map/reduction/scan
+evalExp eval_op funs env (WithAcc inputs lambda) =
+  evalWithAcc eval_op funs env inputs lambda
 
 evalWithAcc ::
-  FunEnv ->
+  OpEvaluator rep ->
+  FunEnv rep ->
   Env ->
-  [WithAccInput SOACS] ->
-  Lambda SOACS ->
+  [WithAccInput rep] ->
+  Lambda rep ->
   InterpM [Val]
-evalWithAcc funs env inputs lambda = do
+evalWithAcc eval_op funs env inputs lambda = do
   evaluated_inputs <- mapM evaluateInput inputs
 
   let accumulator_count = length inputs
@@ -206,7 +210,7 @@ evalWithAcc funs env inputs lambda = do
                 (certificates <> accumulators)
           lambda_env = M.union bindings env
 
-      results <- evalBody funs lambda_env $ lambdaBody lambda
+      results <- evalBody eval_op funs lambda_env $ lambdaBody lambda
 
       let (accumulator_results, ordinary_results) =
             splitAt accumulator_count results
@@ -288,6 +292,7 @@ evalWithAcc funs env inputs lambda = do
                   pure new_values
                 Just (operator_lambda, _) ->
                   evalLambda
+                    eval_op
                     funs
                     env
                     operator_lambda
@@ -825,23 +830,24 @@ linearIndex :: [Int] -> [Int] -> Int
 linearIndex shape indices =
   foldl (\acc (dim_size, index) -> acc * dim_size + index) 0 $ zip shape indices
 
-evalSOAC :: FunEnv -> Env -> SOAC SOACS -> InterpM [Val]
-evalSOAC funs env (Screma width_exp input_names form) =
-  evalScrema funs env width_exp input_names form
-evalSOAC funs env (Stream width_exp input_names initial_accumulators lambda) =
-  evalStream funs env width_exp input_names initial_accumulators lambda
-evalSOAC funs env (Hist width_exp input_names hist_ops lambda) = evalHist funs env width_exp input_names hist_ops lambda
-evalSOAC funs env (FlatMap width_exp input_names lambda) = evalFlatMap funs env width_exp input_names lambda
-evalSOAC _ _ _ = interpError "SOAC not implemented yet"
+evalSOAC :: OpEvaluator rep -> FunEnv rep -> Env -> SOAC rep -> InterpM [Val]
+evalSOAC eval_soac_op funs env (Screma width_exp input_names form) =
+  evalScrema eval_soac_op funs env width_exp input_names form
+evalSOAC eval_soac_op funs env (Stream width_exp input_names initial_accumulators lambda) =
+  evalStream eval_soac_op funs env width_exp input_names initial_accumulators lambda
+evalSOAC eval_soac_op funs env (Hist width_exp input_names hist_ops lambda) = evalHist eval_soac_op funs env width_exp input_names hist_ops lambda
+evalSOAC eval_soac_op funs env (FlatMap width_exp input_names lambda) = evalFlatMap eval_soac_op funs env width_exp input_names lambda
+evalSOAC _ _ _ _ = interpError "SOAC not implemented yet"
 
 evalFlatMap ::
-  FunEnv ->
+  OpEvaluator rep ->
+  FunEnv rep ->
   Env ->
   SubExp ->
   [VName] ->
-  ExtLambda SOACS ->
+  ExtLambda rep ->
   InterpM [Val]
-evalFlatMap funs env width_exp input_names lambda = do
+evalFlatMap eval_op funs env width_exp input_names lambda = do
   width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
   if width < 0
     then interpError "FlatMap width cannot be negative"
@@ -877,7 +883,7 @@ evalFlatMap funs env width_exp input_names lambda = do
   where
     runIteration inputs index = do
       input_rows <- mapM (rowAt index) inputs
-      results <- evalLambda funs env lambda input_rows
+      results <- evalLambda eval_op funs env lambda input_rows
 
       case results of
         size_value : values -> do
@@ -897,14 +903,15 @@ evalFlatMap funs env width_exp input_names lambda = do
     int64Val = PrimVal . int64Prim
 
 evalHist ::
-  FunEnv ->
+  OpEvaluator rep ->
+  FunEnv rep ->
   Env ->
   SubExp ->
   [VName] ->
-  [HistOp SOACS] ->
-  Lambda SOACS ->
+  [HistOp rep] ->
+  Lambda rep ->
   InterpM [Val]
-evalHist funs env width_exp input_names hist_ops bucket_lambda = do
+evalHist eval_op funs env width_exp input_names hist_ops bucket_lambda = do
   width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
 
   if width < 0
@@ -937,7 +944,7 @@ evalHist funs env width_exp input_names hist_ops bucket_lambda = do
 
     runIteration inputs histograms iteration = do
       input_rows <- mapM (rowAt iteration) inputs
-      bucket_results <- evalLambda funs env bucket_lambda input_rows
+      bucket_results <- evalLambda eval_op funs env bucket_lambda input_rows
 
       (index_groups, remaining) <- splitGroups index_counts bucket_results
       (value_groups, extra) <- splitGroups value_counts remaining
@@ -969,7 +976,7 @@ evalHist funs env width_exp input_names hist_ops bucket_lambda = do
       | otherwise = do
           old_bins <- mapM (readHistogramBin indices) histograms
           new_bins <-
-            evalLambda funs env (histOp hist_operation) (old_bins <> values)
+            evalLambda eval_op funs env (histOp hist_operation) (old_bins <> values)
 
           if length new_bins /= length histograms
             then interpError "Hist operator result count mismatch"
@@ -986,8 +993,8 @@ evalHist funs env width_exp input_names hist_ops bucket_lambda = do
     validIndex index dimension =
       index >= 0 && index < dimension
 
-evalStream :: FunEnv -> Env -> SubExp -> [VName] -> [SubExp] -> Lambda SOACS -> InterpM [Val]
-evalStream funs env width_exp input_names initial_accumulators lambda = do
+evalStream :: OpEvaluator rep -> FunEnv rep -> Env -> SubExp -> [VName] -> [SubExp] -> Lambda rep -> InterpM [Val]
+evalStream eval_rep funs env width_exp input_names initial_accumulators lambda = do
   width_value <- evalSubExp env width_exp >>= expectPrimVal
   width <- expectInt width_value
 
@@ -1000,10 +1007,10 @@ evalStream funs env width_exp input_names initial_accumulators lambda = do
 
       let chunk_size = PrimVal $ IntValue $ Int64Value $ fromIntegral width
           lambda_args = chunk_size : accumulators <> inputs
-      evalLambda funs env lambda lambda_args
+      evalLambda eval_rep funs env lambda lambda_args
 
-evalScrema :: FunEnv -> Env -> SubExp -> [VName] -> ScremaForm SOACS -> InterpM [Val]
-evalScrema funs env width_exp input_names (ScremaForm pre_lambda scans reductions post_lambda) = do
+evalScrema :: OpEvaluator rep -> FunEnv rep -> Env -> SubExp -> [VName] -> ScremaForm rep -> InterpM [Val]
+evalScrema eval_op funs env width_exp input_names (ScremaForm pre_lambda scans reductions post_lambda) = do
   width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
   if width < 0
     then interpError "Screma width cannot be negative"
@@ -1041,12 +1048,12 @@ evalScrema funs env width_exp input_names (ScremaForm pre_lambda scans reduction
       (scan_states, reduction_states, output_rows)
       index = do
         input_rows <- mapM (rowAt index) inputs
-        pre_results <- evalLambda funs env pre_lambda input_rows
+        pre_results <- evalLambda eval_op funs env pre_lambda input_rows
         (scan_contributions, after_scans) <- splitGroups scan_sizes pre_results
         (reduction_contributions, map_values) <- splitGroups reduction_sizes after_scans
-        next_scan_states <- updateScanStates funs env scans scan_states scan_contributions
-        next_reduction_states <- updateReductionStates funs env reductions reduction_states reduction_contributions
-        post_results <- evalLambda funs env post_lambda (concat next_scan_states <> map_values)
+        next_scan_states <- updateScanStates eval_op funs env scans scan_states scan_contributions
+        next_reduction_states <- updateReductionStates eval_op funs env reductions reduction_states reduction_contributions
+        post_results <- evalLambda eval_op funs env post_lambda (concat next_scan_states <> map_values)
         pure (next_scan_states, next_reduction_states, post_results : output_rows)
 
 prependAccumulatorInputs :: [Val] -> [Val] -> InterpM [Val]
@@ -1077,12 +1084,13 @@ splitGroups (size : sizes) values
     (group, rest) = splitAt size values
 
 evalLambda ::
-  FunEnv ->
+  OpEvaluator rep ->
+  FunEnv rep ->
   Env ->
-  GLambda SOACS return_type ->
+  GLambda rep return_type ->
   [Val] ->
   InterpM [Val]
-evalLambda funs env (Lambda params return_types body) args
+evalLambda eval_op funs env (Lambda params return_types body) args
   | length params /= length args =
       interpError "lambda argument count mismatch"
   | otherwise = do
@@ -1091,20 +1099,21 @@ evalLambda funs env (Lambda params return_types body) args
           lambda_env =
             M.union bindings env
 
-      results <- evalBody funs lambda_env body
+      results <- evalBody eval_op funs lambda_env body
 
       if length results /= length return_types
         then interpError "lambda result count mismatch"
         else pure results
 
 updateScanStates ::
-  FunEnv ->
+  OpEvaluator rep ->
+  FunEnv rep ->
   Env ->
-  [Scan SOACS] ->
+  [Scan rep] ->
   [[Val]] ->
   [[Val]] ->
   InterpM [[Val]]
-updateScanStates funs env scans states contributions
+updateScanStates eval_op funs env scans states contributions
   | length scans /= length states
       || length scans /= length contributions =
       interpError "Screma scan state count mismatch"
@@ -1114,6 +1123,7 @@ updateScanStates funs env scans states contributions
     updateOne scan (state, contribution) = do
       next <-
         evalLambda
+          eval_op
           funs
           env
           (scanLambda scan)
@@ -1124,13 +1134,14 @@ updateScanStates funs env scans states contributions
         else pure next
 
 updateReductionStates ::
-  FunEnv ->
+  OpEvaluator rep ->
+  FunEnv rep ->
   Env ->
-  [Reduce SOACS] ->
+  [Reduce rep] ->
   [[Val]] ->
   [[Val]] ->
   InterpM [[Val]]
-updateReductionStates funs env reductions states contributions
+updateReductionStates eval_op funs env reductions states contributions
   | length reductions /= length states
       || length reductions /= length contributions =
       interpError "Screma reduction state count mismatch"
@@ -1140,6 +1151,7 @@ updateReductionStates funs env reductions states contributions
     updateOne reduction (state, contribution) = do
       next <-
         evalLambda
+          eval_op
           funs
           env
           (redLambda reduction)
@@ -1482,9 +1494,9 @@ collectScremaOutputs env width return_types iteration_results
 
     third (_, _, values) = values
 
--- | Run a program in the SOACS IR.
-runSOACS :: Prog SOACS -> Name -> [V.Value] -> IO (Either T.Text [V.Value])
-runSOACS prog entry inputs = runExceptT . unInterpM $ do
+-- | Run a program in the IR specified by rep.
+runProgram :: OpEvaluator rep -> Prog rep -> Name -> [V.Value] -> IO (Either T.Text [V.Value])
+runProgram eval_op prog entry inputs = runExceptT . unInterpM $ do
   let funs = M.fromList [(funDefName fun, fun) | fun <- progFuns prog]
   consts_env <- foldConsts funs mempty (stmsToList (progConsts prog)) -- top-level consts
   fun <- findEntry prog entry
@@ -1497,13 +1509,13 @@ runSOACS prog entry inputs = runExceptT . unInterpM $ do
     then interpError "entry point argument count mismatch"
     else do
       let env = M.union (M.fromList $ zip params arg_vals) consts_env
-      results <- evalBody funs env (funDefBody fun)
+      results <- evalBody eval_op funs env (funDefBody fun)
       mapM toValue results
   where
     foldConsts _ e [] = pure e
-    foldConsts funs e (s : ss) = evalStm funs e s >>= \e' -> foldConsts funs e' ss
+    foldConsts funs e (s : ss) = evalStm eval_op funs e s >>= \e' -> foldConsts funs e' ss
 
-findEntry :: Prog SOACS -> Name -> InterpM (FunDef SOACS)
+findEntry :: Prog rep -> Name -> InterpM (FunDef rep)
 findEntry prog name =
   maybe
     (interpError $ "entry point not found: " <> prettyText name)
@@ -1624,6 +1636,19 @@ toPrimitiveValue _ Unit _ =
 
 shapeVector :: [Int] -> SVec.Vector Int
 shapeVector = SVec.fromList
+
+evalSOACSOp :: OpEvaluator SOACS
+evalSOACSOp funs env soac =
+  evalSOAC evalSOACSOp funs env soac
+
+-- | Run a program in the SOAC IR
+runSOACS ::
+  Prog SOACS ->
+  Name ->
+  [V.Value] ->
+  IO (Either T.Text [V.Value])
+runSOACS =
+  runProgram evalSOACSOp
 
 -- | Run a program in the GPU IR.
 runGPU :: Prog GPU -> Name -> [V.Value] -> IO (Either T.Text [V.Value])
