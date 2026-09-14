@@ -41,7 +41,7 @@ type Env = M.Map VName Val
 
 type FunEnv rep = M.Map Name (FunDef rep)
 
-type OpEvaluator rep = 
+type OpEvaluator rep =
   FunEnv rep -> Env -> Op rep -> InterpM [Val]
 
 newtype InterpM a = InterpM
@@ -99,7 +99,7 @@ evalStm eval_op funs env (Let pat _ e) = do
 evalExp :: OpEvaluator rep -> FunEnv rep -> Env -> Exp rep -> InterpM [Val]
 evalExp _ _ env (BasicOp op) = evalBasicOp env op
 evalExp eval_op funs env (Match ses cases default_body _) = do
-  values <- mapM (\se -> evalSubExp env se >>= expectPrimVal) ses
+  values <- mapM (evalSubExp env >=> expectPrimVal) ses
   evalBody eval_op funs env $ selectCase values cases
   where
     selectCase values (Case patterns body : remaining)
@@ -1638,8 +1638,7 @@ shapeVector :: [Int] -> SVec.Vector Int
 shapeVector = SVec.fromList
 
 evalSOACSOp :: OpEvaluator SOACS
-evalSOACSOp funs env soac =
-  evalSOAC evalSOACSOp funs env soac
+evalSOACSOp = evalSOAC evalSOACSOp
 
 -- | Run a program in the SOAC IR
 runSOACS ::
