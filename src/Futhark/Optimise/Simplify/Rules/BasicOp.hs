@@ -252,26 +252,6 @@ ruleBasicOp _ pat _ (ArrayLit (se : ses) _)
       Simplify $
         let n = constant (fromIntegral (length ses) + 1 :: Int64)
          in letBind pat $ BasicOp $ Replicate (Shape [n]) se
-ruleBasicOp vtable pat aux (Index idd slice)
-  | Just inds <- sliceIndices slice,
-    Just (BasicOp (Reshape idd2 newshape), idd_cs) <- ST.lookupExp idd vtable,
-    shapeRank (newShape newshape) == length inds,
-    Just oldshape <- arrayShape <$> ST.lookupType idd2 vtable,
-    -- Map indices to the old index space, one splice at a time.
-    Just new_inds <-
-      mapM dimFix
-        =<< unreshapeSlice (pe64 <$> oldshape) (pe64 <$> newshape) (map (DimFix . pe64) inds) =
-      Simplify $
-        case reshapeKind newshape of
-          ReshapeCoerce ->
-            certifying idd_cs . auxing aux . letBind pat . BasicOp $
-              Index idd2 slice
-          ReshapeArbitrary -> do
-            new_inds' <-
-              mapM (toSubExp "new_index") new_inds
-            certifying idd_cs . auxing aux . letBind pat . BasicOp $
-              Index idd2 (Slice $ map DimFix new_inds')
-
 -- Copying an iota is pointless; just make it an iota instead.
 ruleBasicOp vtable pat aux (Replicate (Shape []) (Var v))
   | Just (Iota n x s it, v_cs) <- ST.lookupBasicOp v vtable =
