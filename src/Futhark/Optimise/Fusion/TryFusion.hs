@@ -775,9 +775,24 @@ pullReshape soac ots = do
     all
       ((== MapNest.depth mapnest) . arrayRank)
       (MapNest.typeOf mapnest)
+  -- Reshaping the nest changes its parallel dimensions, e.g. an unflattening
+  -- splits one dimension into several. When the innermost lambda contains a
+  -- SOAC (such as a reduction), this can inhibit later optimisations: a matrix
+  -- multiplication whose result is unflattened becomes a nest where one operand
+  -- varies with two of the dimensions, which tiling cannot handle (see
+  -- tests/tiling/tiling_mm_unflatten.fut). In that case we only allow
+  -- coercions. As a simple heuristic, we only look at the top-level statements
+  -- of the innermost lambda. The proper solution is for tiling to handle such
+  -- nests.
+  guard $
+    reshapeKind newshape == ReshapeCoerce
+      || not (any (isSOAC . stmExp) (bodyStms (lambdaBody (MapNest.mapNestLambda mapnest))))
   mapnest' <- MapNest.reshape cs newshape mapnest
   soac' <- MapNest.toSOAC mapnest'
   pure (soac', ots')
+  where
+    isSOAC Op {} = True
+    isSOAC _ = False
 
 -- Tie it all together in exposeInputs (for making inputs to a
 -- consumer available) and pullOutputTransforms (for moving
