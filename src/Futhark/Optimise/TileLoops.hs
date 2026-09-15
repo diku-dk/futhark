@@ -448,13 +448,23 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
 
 doPrelude :: Tiling -> PrivStms -> Stms GPU -> [VName] -> Builder GPU [VName]
 doPrelude tiling privstms prestms prestms_live =
-  -- Create a SegMap that takes care of the prelude for every thread.
-  tilingSegMap tiling "prelude" ResultPrivate $ \in_bounds slice -> do
-    ts <- mapM lookupType prestms_live
-    fmap varsRes . protectOutOfBounds "pre" in_bounds ts $ do
-      addPrivStms slice privstms
-      addStms prestms
-      pure $ varsRes prestms_live
+  -- Create a SegMap that takes care of the prelude for every thread,
+  -- including those that are out of bounds. See Note [Clamped thread
+  -- indices].
+  tilingSegMap tiling "prelude" ResultPrivate $ \_in_bounds slice -> do
+    addPrivStms slice privstms
+    addStms prestms
+    pure $ varsRes prestms_live
+
+-- Note [Clamped thread indices]
+--
+-- The thread indices bound by 'tilingSegMap' are clamped to be in
+-- bounds, with the actual in-bounds status passed separately. This lets
+-- every thread compute the prelude, which is needed because the prelude
+-- is also used when threads collectively read tiles: in 2D tiling, a
+-- thread that is out of bounds in one dimension must still read tile
+-- elements of inputs that depend only on the other dimension (and
+-- clamping does not affect those).
 
 liveSet :: (FreeIn a) => Stms GPU -> a -> Names
 liveSet stms after =
@@ -583,7 +593,9 @@ data Tiling = Tiling
       ResultManifest ->
       (PrimExp VName -> [DimIndex SubExp] -> Builder GPU Result) ->
       Builder GPU [VName],
-    -- The boolean PrimExp indicates whether they are in-bounds.
+    -- The thread indices are clamped to be in bounds, and the boolean
+    -- PrimExp indicates whether the thread is actually in bounds. See
+    -- Note [Clamped thread indices].
 
     tilingReadTile ::
       TileKind ->
@@ -953,9 +965,10 @@ tiling1d dims_on_top gtid kdim w = do
   pure
     Tiling
       { tilingSegMap = \desc manifest f -> segMap1D desc tiling_lvl manifest tile_size $ \ltid -> do
-          letBindNames [gtid]
-            =<< toExp (le64 gid * pe64 tile_size + le64 ltid)
-          f (untyped $ le64 gtid .<. pe64 kdim) [DimFix $ Var ltid],
+          -- See Note [Clamped thread indices].
+          let pos = le64 gid * pe64 tile_size + le64 ltid
+          letBindNames [gtid] =<< toExp (sMin64 pos (pe64 kdim - 1))
+          f (untyped $ pos .<. pe64 kdim) [DimFix $ Var ltid],
         tilingReadTile =
           readTile1D tile_size gid gtid grid,
         tilingProcessTile =
@@ -1226,11 +1239,13 @@ tiling2d dims_on_top (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
     Tiling
       { tilingSegMap = \desc manifest f ->
           segMap2D desc tiling_lvl manifest (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
-            reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
+            -- See Note [Clamped thread indices].
+            let pos_x = le64 gid_x * pe64 tile_size + le64 ltid_x
+                pos_y = le64 gid_y * pe64 tile_size + le64 ltid_y
+            letBindNames [gtid_x] =<< toExp (sMin64 pos_x (pe64 kdim_x - 1))
+            letBindNames [gtid_y] =<< toExp (sMin64 pos_y (pe64 kdim_y - 1))
             f
-              ( untyped $
-                  le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
-              )
+              (untyped $ pos_x .<. pe64 kdim_x .&&. pos_y .<. pe64 kdim_y)
               [DimFix $ Var ltid_x, DimFix $ Var ltid_y],
         tilingReadTile = readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size,
         tilingProcessTile = processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size,
