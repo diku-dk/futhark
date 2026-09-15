@@ -252,6 +252,8 @@
           pkgs = import nixpkgs { inherit system; };
           python = pkgs.python313Packages;
           haskell = pkgs.haskell.packages.ghc910;
+          # macOS does not have the C.UTF-8 locale.
+          utf8Locale = if pkgs.stdenv.isDarwin then "en_US.UTF-8" else "C.UTF-8";
         in
         {
           # A shell that only contains tools for style checking.
@@ -262,6 +264,11 @@
           # A shell for running tests in CI.
           test = pkgs.mkShell {
             nativeBuildInputs = import ./nix/pkgs-test.nix { inherit pkgs python; };
+
+            # Some tests involve non-ASCII text, so make sure we have a
+            # UTF-8 locale no matter what the ambient environment says.
+            LANG = utf8Locale;
+            LC_ALL = utf8Locale;
           };
 
           # The main development shell that contains all development tools.
