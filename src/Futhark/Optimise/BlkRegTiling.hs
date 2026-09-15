@@ -46,9 +46,10 @@ se4 = intConst Int64 4
 se8 :: SubExp
 se8 = intConst Int64 8
 
-isInnerCoal :: Env -> VName -> Stm GPU -> Bool
-isInnerCoal (_, ixfn_env) slc_X (Let (Pat [pe]) _ (BasicOp (Index x _)))
-  | slc_X == patElemName pe =
+isInnerCoal :: Env -> VName -> Stms GPU -> Bool
+isInnerCoal (_, ixfn_env) slc_X load_X
+  | Just (_, Let (Pat [pe]) _ (BasicOp (Index x _))) <- stmsLast load_X,
+    slc_X == patElemName pe =
       -- if not in the table, we assume not-transposed!
       maybe True innerHasStride1 $ M.lookup x ixfn_env
   where
@@ -70,7 +71,7 @@ kkLoopBody ::
     [Int],
     (VName, SubExp, VName, SubExp, SubExp),
     (VName, VName),
-    (Stm GPU, VName, PrimType, Stm GPU, VName, PrimType),
+    (Stms GPU, VName, PrimType, Stms GPU, VName, PrimType),
     (Lambda GPU, Lambda GPU)
   ) ->
   VName ->
@@ -185,7 +186,7 @@ kkLoopBody
       copyGlb2ShMem ::
         Bool ->
         VName ->
-        (VName, VName, PrimType, SubExp, VName, Stm GPU, VName) ->
+        (VName, VName, PrimType, SubExp, VName, Stms GPU, VName) ->
         Builder GPU (VName, VName -> VName -> VName -> Builder GPU VName)
       copyGlb2ShMem is_B kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, x_loc_init') = do
         let (t_par, r_par, tseq_div_tpar) = (tx, rx, tk_div_tx)
@@ -239,7 +240,7 @@ kkLoopBody
                           else true
                   )
                   ( do
-                      addStm load_X
+                      addStms load_X
                       res <- index "A_elem" inp_X [a_seqdim_idx]
                       resultBodyM [Var res]
                   )
@@ -633,7 +634,7 @@ matchesBlkRegTile ::
   Stms GPU ->
   Maybe
     ( Stms GPU,
-      (Stm GPU, VName, PrimType, Stm GPU, VName, PrimType),
+      (Stms GPU, VName, PrimType, Stms GPU, VName, PrimType),
       SubExp,
       [Int],
       (Lambda GPU, Lambda GPU, SubExp, VName, PrimType)
@@ -666,16 +667,11 @@ matchesBlkRegTile seg_space kstms
     [redomap_orig_res] <- patNames pat_redomap,
     Just res_red_var <- M.lookup redomap_orig_res variance, -- variance of the reduce result
 
-    -- we furthermore check that code1 is only formed by
-    -- 1. statements that slice some globally-declared arrays
-    --    to produce the input for the redomap, and
-    -- 2. potentially some statements on which the redomap
-    --    is independent; these are recorded in `code2''`
+    -- we furthermore check that code1 can be split into the
+    -- statements producing the input for the redomap, and some
+    -- statements that are moved after it; see `processIndirections`.
     Just (code2'', tab_inv_stm) <-
-      foldl
-        (processIndirections (namesFromList arrs) res_red_var)
-        (Just (Seq.empty, M.empty))
-        code1,
+      processIndirections (namesFromList arrs) res_red_var (freeIn screma_stmt) code1,
     -- identify load_A, load_B
     tmp_stms <- mapMaybe (`M.lookup` tab_inv_stm) arrs,
     length tmp_stms == length arrs,
@@ -879,24 +875,43 @@ isInvarTo1of2InnerDims branch_variant kspace variance arrs =
                 then Just 1
                 else Nothing
 
+-- | Split the statements preceding the redomap into
+--
+-- 1. the slices that produce the input arrays of the redomap, each
+--    preceded by the scalar statements computing its indices (these
+--    are re-executed when reading tiles), and
+--
+-- 2. the remaining statements, which are moved after the redomap.
+--    Except for those computing slice indices, the redomap must not
+--    depend on these.
 processIndirections ::
   Names -> -- input arrays to redomap
   Names -> -- variables on which the result of redomap depends on.
-  Maybe (Stms GPU, M.Map VName (Stm GPU)) ->
-  Stm GPU ->
-  Maybe (Stms GPU, M.Map VName (Stm GPU))
-processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
-  | Just (ss, tab) <- acc,
-    [p] <- patElems patt,
-    p_nm <- patElemName p,
-    p_nm `nameIn` arrs =
-      Just (ss, M.insert p_nm stm tab)
-processIndirections _ res_red_var acc stm'@(Let patt _ _)
-  | Just (ss, tab) <- acc,
-    ps <- patElems patt,
-    all (\p -> patElemName p `notNameIn` res_red_var) ps =
-      Just (ss Seq.|> stm', tab)
-  | otherwise = Nothing
+  Names -> -- free variables of the redomap
+  Stms GPU ->
+  Maybe (Stms GPU, M.Map VName (Stms GPU))
+processIndirections arrs res_red_var red_free code1 = do
+  let (loads, rest) = Seq.partition isLoad code1
+      withDeps stm = dependencies rest stm Seq.|> stm
+      deps = foldMap (dependencies rest) loads
+  guard $ all isScalarBasicOp deps
+  guard $ not $ boundByStms deps `namesIntersect` red_free
+  guard $ not $ (boundByStms rest `namesSubtract` boundByStms deps) `namesIntersect` res_red_var
+  pure (rest, M.fromList [(v, withDeps stm) | stm <- stmsToList loads, v <- patNames $ stmPat stm])
+  where
+    isLoad (Let (Pat [pe]) _ (BasicOp Index {})) = patElemName pe `nameIn` arrs
+    isLoad _ = False
+    isScalarBasicOp (Let pat _ BasicOp {}) = all primType $ patTypes pat
+    isScalarBasicOp _ = False
+
+-- | The statements among the given ones that the statement
+-- transitively depends on.
+dependencies :: Stms GPU -> Stm GPU -> Stms GPU
+dependencies stms stm = snd $ foldr f (freeIn stm, mempty) stms
+  where
+    f s (needed, deps)
+      | boundByStm s `namesIntersect` needed = (needed <> freeIn s, s Seq.<| deps)
+      | otherwise = (needed, deps)
 
 getParTiles :: (Name, Name) -> (Name, Name) -> SubExp -> Builder GPU (SubExp, SubExp)
 getParTiles (t_str, r_str) (t_name, r_name) len_dim =
@@ -990,9 +1005,7 @@ isInvarTo2of3InnerDims branch_variant kspace variance arrs =
 --              to exactly one of the three innermost-parallel dimension
 --              of the kernel. This condition can be relaxed by interchanging
 --              kernel dimensions whenever possible.
---     3. For scalar-code-1:
---          a) each of the statements is a slice that produces one of the
---             streamed arrays
+--     3. For scalar-code-1: see `processIndirections`.
 --
 -- mmBlkRegTiling :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 -- mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
@@ -1031,16 +1044,11 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     res_red_var <- -- variance of the reduce result
       mconcat $ mapMaybe ((`M.lookup` variance) . patElemName) redomap_orig_res,
     mempty /= res_red_var,
-    -- we furthermore check that code1 is only formed by
-    -- 1. statements that slice some globally-declared arrays
-    --    to produce the input for the redomap, and
-    -- 2. potentially some statements on which the redomap
-    --    is independent; these are recorded in `code2''`
+    -- we furthermore check that code1 can be split into the
+    -- statements producing the input for the redomap, and some
+    -- statements that are moved after it; see `processIndirections`.
     Just (code2'', arr_tab0) <-
-      foldl
-        (processIndirections (namesFromList inp_soac_arrs) res_red_var)
-        (Just (Seq.empty, M.empty))
-        code1,
+      processIndirections (namesFromList inp_soac_arrs) res_red_var (freeIn screma_stmt) code1,
     -- check that code1 contains exacly one slice for each of the input array to redomap
     tmp_stms <- mapMaybe (`M.lookup` arr_tab0) inp_soac_arrs,
     length tmp_stms == length inp_soac_arrs,
@@ -1133,7 +1141,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                                 =<< eIf
                                   (toExp $ le64 glb_ind .<. pe64 d_Kx)
                                   ( do
-                                      addStm load_Y
+                                      addStms load_Y
                                       res <- index "Y_elem" glb_Y_nm [q]
                                       resultBodyM [Var res]
                                   )
@@ -1167,7 +1175,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                           ( do
                               inp_scals_invar_outer <-
                                 forM (M.toList tab_inn) $ \(inp_arr_nm, load_stm) -> do
-                                  addStm load_stm
+                                  addStms load_stm
                                   index (baseName inp_arr_nm) inp_arr_nm [q]
                               -- build the loop of count R whose body is semantically the redomap code
                               reg_arr_merge_nms' <-
@@ -1296,15 +1304,16 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     insertTranspose ::
       VarianceTable ->
       (VName, SubExp) ->
-      (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU)) ->
-      (VName, Stm GPU) ->
-      Builder GPU (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU))
-    insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
-      | [p] <- patElems patt,
+      (M.Map VName (Stms GPU), M.Map VName (PrimType, Stms GPU)) ->
+      (VName, Stms GPU) ->
+      Builder GPU (M.Map VName (Stms GPU), M.Map VName (PrimType, Stms GPU))
+    insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stms)
+      | Just (deps, Let patt yy (BasicOp (Index arr_nm slc))) <- stmsLast stms,
+        [p] <- patElems patt,
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p =
           case L.findIndices (variantSliceDim variance gidz) (unSlice slc) of
-            [] -> pure (M.insert p_nm stm tab_inn, tab_out)
+            [] -> pure (M.insert p_nm stms tab_inn, tab_out)
             i : _ -> do
               arr_tp <- lookupType arr_nm
               let perm = [i + 1 .. arrayRank arr_tp - 1] ++ [0 .. i]
@@ -1312,7 +1321,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
               arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest arr_nm perm
               let e_ind' = BasicOp $ Index arr_tr_nm slc
               let stm' = Let patt yy e_ind'
-              pure (tab_inn, M.insert p_nm (ptp, stm') tab_out)
+              pure (tab_inn, M.insert p_nm (ptp, deps Seq.|> stm') tab_out)
     insertTranspose _ _ _ _ = error "\nUnreachable case reached in insertTranspose case, doRegTiling3D\n"
 
     variantSliceDim :: VarianceTable -> VName -> DimIndex SubExp -> Bool
