@@ -30,6 +30,7 @@ import Futhark.Optimise.TileLoops.Shared
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util.IntegralExp qualified as IE
 
 se0 :: SubExp
 se0 = intConst Int64 0
@@ -80,7 +81,7 @@ kkLoopBody ::
   Builder GPU [VName]
 kkLoopBody
   env
-  ( (rx, ry, tx, ty, tk, tk_div_tx, _tk_div_ty, tx_rx),
+  ( (rx, ry, tx, ty, tk, tk_div_tx, _tk_div_ty, _tx_rx),
     segthd_lvl,
     var_dims,
     (gtid_x, width_B, gtid_y, height_A, common_dim),
@@ -105,24 +106,26 @@ kkLoopBody
     thd_acc <- mkRedomapOneTileBody kk thd_res_merge aCopyLoc2Reg bCopyLoc2Reg True
     pure [thd_acc, a_loc, b_loc]
     where
-      mk_ik is_B is_coal (thd_y, thd_x) (i0, k0)
+      mk_ik _ is_coal (thd_y, thd_x) (i0, k0)
         | is_coal = do
             -- not-transposed case (i.e., already coalesced)
             let (t_par, t_seq) = (tx, tk)
             k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 t_par)
             i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 t_par)
-            -- to optimize bank conflicts, we use padding only for B
-            -- iff B has the last dimension permuted.
-            let pad_term = if is_B then pe64 se1 else pe64 se0
-            let e = le64 k + le64 i * (pe64 t_seq + pad_term)
+            -- rows are padded to an odd length to avoid bank conflicts.
+            let e = le64 k + le64 i * oddUp (pe64 t_seq)
             pure (i, k, e)
       mk_ik _ _ (thd_y, thd_x) (i0, k0) = do
         -- matrix is transposed case (i.e., uncoalesced):
-        let (t_par, tr_par) = (tx, tx_rx)
+        let t_par = tx
         k <- letExp "k" =<< toExp (le64 thd_y + le64 k0 * pe64 t_par)
         i <- letExp "i" =<< toExp (le64 thd_x + le64 i0 * pe64 t_par)
-        -- no padding
-        let e = le64 i + le64 k * pe64 tr_par
+        -- the rx elements of each thread are padded to an odd stride to
+        -- avoid bank conflicts.
+        let e =
+              le64 i
+                + le64 i `IE.quot` pe64 rx * (oddUp (pe64 rx) - pe64 rx)
+                + le64 k * pe64 tx * oddUp (pe64 rx)
         pure (i, k, e)
       --
       mkCompLoopRxRy fits_ij css_init (a_idx_fn, b_idx_fn) (ltid_y, ltid_x) = do
@@ -206,14 +209,13 @@ kkLoopBody
             VName ->
             Builder GPU VName
           indexLocMem is_inner_coal str_A x_loc k ltid_yx ij = do
-            let (r_par, t_seq, tr_par) = (rx, tk, tx_rx)
-            let pad_term = if is_B then pe64 se1 else pe64 se0
+            let (r_par, t_seq) = (rx, tk)
             x_loc_ind_32 <-
               letExp (str_A <> "_loc_ind_64")
                 =<< toExp
                   ( if is_inner_coal -- ToDo: check this is correct + turn to i32
-                      then le64 k + (le64 ltid_yx * pe64 r_par + le64 ij) * (pe64 t_seq + pad_term)
-                      else le64 ij + le64 ltid_yx * pe64 r_par + le64 k * pe64 tr_par
+                      then le64 k + (le64 ltid_yx * pe64 r_par + le64 ij) * oddUp (pe64 t_seq)
+                      else le64 ij + le64 ltid_yx * oddUp (pe64 r_par) + le64 k * pe64 tx * oddUp (pe64 r_par)
                   )
             index (str_A <> "_loc_elem") x_loc [x_loc_ind_32]
           --
@@ -696,7 +698,12 @@ matchesBlkRegTile seg_space kstms
             )
 matchesBlkRegTile _ _ = Nothing
 
--- ceiled division expression
+-- | Round up to an odd number.  Shared memory strides are padded like
+-- this to avoid bank conflicts.
+oddUp :: TPrimExp Int64 VName -> TPrimExp Int64 VName
+oddUp x = 2 * (x `IE.quot` 2) + 1
+
+-- | Ceiled division expression.
 ceilDiv :: (MonadBuilder m) => SubExp -> SubExp -> m (Exp (Rep m))
 ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
 
@@ -719,7 +726,7 @@ mkTileMemSizes ::
       SubExp,
       SubExp
     )
-mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
+mkTileMemSizes height_A _width_B common_dim _is_B_not_transp = do
   tk_name <- nameFromText . prettyText <$> newVName "Tk"
   ty_name <- nameFromText . prettyText <$> newVName "Ty"
   ry_name <- nameFromText . prettyText <$> newVName "Ry"
@@ -738,19 +745,13 @@ mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
   tx_rx <- letSubExp "TxRx" =<< toExp (pe64 tx * pe64 rx)
   ty_ry <- letSubExp "TyRy" =<< toExp (pe64 ty * pe64 ry)
 
-  -- let pad_term = sMax64 (pe64 tk) (pe64 ty * pe64 ry)
-  let pad_term =
-        if is_B_not_transp
-          then pe64 ty * pe64 ry
-          else pe64 se0
+  -- Large enough for either layout, including padding (see mk_ik).
   a_loc_sz <-
     letSubExp "a_loc_sz"
-      =<< toExp (pe64 ty * pe64 ry * pe64 tk)
-  -- if B is transposed, its shmem should be [tk][tx*rx]
-  -- we pad as above, by assuming tx*rx == ty*ry >= tk
+      =<< toExp (pe64 ty * (pe64 ry + 1) * (pe64 tk + 1))
   b_loc_sz <-
     letSubExp "b_loc_sz"
-      =<< toExp (pe64 tx * pe64 rx * pe64 tk + pad_term)
+      =<< toExp (pe64 tx * (pe64 rx + 1) * (pe64 tk + 1))
   pure (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz)
 
 mkNewSegthdLvl ::
