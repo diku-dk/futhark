@@ -224,17 +224,21 @@ fixInputs w ourInps = mapM inspect
       pure (param', SOAC.Input (ts SOAC.|> SOAC.Replicate mempty (Shape [w])) a t)
 
 -- | Reshape a map nest. It is assumed that any validity tests have
--- already been done. Will automatically reshape the inputs
+-- already been done, and in particular that the result of the map nest
+-- has the same rank as its depth. Will automatically reshape the inputs
 -- appropriately.
-reshape :: (MonadFreshNames m) => StmAux () -> Shape -> MapNest -> m MapNest
-reshape aux shape (MapNest _ map_lam _ inps) =
+reshape :: (MonadFreshNames m) => StmAux () -> NewShape SubExp -> MapNest -> m MapNest
+reshape aux (NewShape splices shape) (MapNest _ map_lam _ inps) =
   descend [] $ stripDims 1 shape
   where
     w = shapeSize 0 shape
+    -- The splices only affect the dimensions of the nest, which are the
+    -- outer dimensions of every input, so we can apply them to the inputs
+    -- unchanged. This preserves the structure of the reshape (e.g. that it
+    -- merely unflattens a dimension), rather than turning it into a
+    -- reshape of the entire input.
     transform p inp =
-      let shape' = shape <> arrayShape p
-          inp_shape = arrayShape (SOAC.inputType inp)
-          tr = SOAC.Reshape aux $ reshapeAll inp_shape shape'
+      let tr = SOAC.Reshape aux $ NewShape splices $ shape <> arrayShape p
        in SOAC.addTransform tr inp
     inps' = zipWith transform (map paramType $ lambdaParams map_lam) inps
 

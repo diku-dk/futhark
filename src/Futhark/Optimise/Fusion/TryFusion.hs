@@ -775,7 +775,7 @@ pullReshape soac ots = do
     all
       ((== MapNest.depth mapnest) . arrayRank)
       (MapNest.typeOf mapnest)
-  mapnest' <- MapNest.reshape cs (newShape newshape) mapnest
+  mapnest' <- MapNest.reshape cs newshape mapnest
   soac' <- MapNest.toSOAC mapnest'
   pure (soac', ots')
 
