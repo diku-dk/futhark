@@ -48,10 +48,10 @@ se8 = intConst Int64 8
 
 isInnerCoal :: Env -> VName -> Stms GPU -> Bool
 isInnerCoal (_, ixfn_env) slc_X load_X
-  | Just (_, Let (Pat [pe]) _ (BasicOp (Index x _))) <- stmsLast load_X,
+  | Just (_, Let (Pat [pe]) _ (BasicOp (Index x slice))) <- stmsLast load_X,
     slc_X == patElemName pe =
       -- if not in the table, we assume not-transposed!
-      maybe True innerHasStride1 $ M.lookup x ixfn_env
+      maybe True (innerHasStride1 . (`LMAD.slice` fmap pe64 slice)) $ M.lookup x ixfn_env
   where
     innerHasStride1 lmad =
       let lmad_dims = LMAD.dims lmad
