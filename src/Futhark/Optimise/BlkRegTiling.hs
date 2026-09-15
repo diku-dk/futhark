@@ -927,9 +927,11 @@ getParTiles (t_str, r_str) (t_name, r_name) len_dim =
       r <- letSubExp r_str $ Op $ SizeOp $ GetSize r_name SizeRegTile
       pure (t, r)
 
+-- | The sequential tile size. It is rounded up to a multiple of @tx@, as the
+-- tile loops assume that @tx@ divides it.
 getSeqTile :: Name -> Name -> SubExp -> SubExp -> SubExp -> Builder GPU SubExp
-getSeqTile tk_str tk_name len_dim tx ty =
-  case (tx, ty) of
+getSeqTile tk_str tk_name len_dim tx ty = do
+  tk <- case (tx, ty) of
     (Constant (IntValue (Int64Value v_x)), Constant (IntValue (Int64Value v_y))) ->
       letSubExp tk_str . BasicOp . SubExp . constant $
         case len_dim of
@@ -937,6 +939,8 @@ getSeqTile tk_str tk_name len_dim tx ty =
           _ -> min v_x v_y
     _ ->
       letSubExp tk_str $ Op $ SizeOp $ GetSize tk_name SizeTile
+  tk_div_tx <- letSubExp "tk_div_tx" =<< ceilDiv tk tx
+  letSubExp tk_str =<< toExp (pe64 tk_div_tx * pe64 tx)
 
 ----------------------------------------------------------------------------------------------
 --- 3D Tiling (RegTiling for the outermost dimension & Block tiling for the innermost two) ---
