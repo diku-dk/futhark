@@ -835,6 +835,9 @@ processTile1D gid gtid kdim tile_size (KernelGrid _num_tblocks tblock_size) tile
       tile_id = processTileId tile_args
       accs = processAcc tile_args
 
+  -- Might be truncated in case of a partial tile.
+  actual_tile_size <- findTileSize tiles
+
   segMap1D "acc" lvl ResultPrivate (unCount tblock_size) $ \ltid -> do
     reconstructGtids1D tblock_size gtid gid ltid
     addPrivStms [DimFix $ Var ltid] privstms
@@ -847,7 +850,7 @@ processTile1D gid gtid kdim tile_size (KernelGrid _num_tblocks tblock_size) tile
     let sliceTile (InputTiled _ arr) =
           pure arr
         sliceTile (InputUntiled arr) =
-          sliceUntiled arr tile_id tile_size tile_size
+          sliceUntiled arr tile_id tile_size actual_tile_size
 
     tiles' <- mapM sliceTile tiles
 
@@ -856,7 +859,7 @@ processTile1D gid gtid kdim tile_size (KernelGrid _num_tblocks tblock_size) tile
       letTupExp "acc"
         =<< eIf
           (toExp $ le64 gtid .<. pe64 kdim)
-          (eBody [pure $ Op $ OtherOp $ Screma tile_size tiles' form'])
+          (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size tiles' form'])
           (resultBodyM thread_accs)
   where
     lvl = SegThreadInBlock SegNoVirt
@@ -920,7 +923,7 @@ processResidualTile1D gid gtid kdim tile_size grid args = do
       -- updates its accumulator.
       let tile_args =
             ProcessTileArgs privstms red_comm red_lam map_lam tiles accs num_whole_tiles
-      varsRes <$> processTile1D gid gtid kdim residual_input grid tile_args
+      varsRes <$> processTile1D gid gtid kdim tile_size grid tile_args
 
 tiling1d :: [(VName, SubExp)] -> DoTiling VName SubExp
 tiling1d dims_on_top gtid kdim w = do

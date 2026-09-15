@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Shared memory histograms no longer occasionally exceed the shared memory
   limit when chunking the buckets.
 
+* Tiling would produce invalid code in some cases.
+
 ## [0.27.1]
 
 ### Added
