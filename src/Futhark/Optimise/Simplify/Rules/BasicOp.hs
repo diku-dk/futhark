@@ -255,23 +255,22 @@ ruleBasicOp _ pat _ (ArrayLit (se : ses) _)
 ruleBasicOp vtable pat aux (Index idd slice)
   | Just inds <- sliceIndices slice,
     Just (BasicOp (Reshape idd2 newshape), idd_cs) <- ST.lookupExp idd vtable,
-    shapeRank (newShape newshape) == length inds = Simplify $
-      case reshapeKind newshape of
-        ReshapeCoerce ->
-          certifying idd_cs . auxing aux . letBind pat . BasicOp $
-            Index idd2 slice
-        ReshapeArbitrary -> do
-          -- Linearise indices and map to old index space.
-          oldshape <- arrayDims <$> lookupType idd2
-          let new_inds =
-                reshapeIndex
-                  (map pe64 oldshape)
-                  (map pe64 $ shapeDims $ newShape newshape)
-                  (map pe64 inds)
-          new_inds' <-
-            mapM (toSubExp "new_index") new_inds
-          certifying idd_cs . auxing aux . letBind pat . BasicOp $
-            Index idd2 (Slice $ map DimFix new_inds')
+    shapeRank (newShape newshape) == length inds,
+    Just oldshape <- arrayShape <$> ST.lookupType idd2 vtable,
+    -- Map indices to the old index space, one splice at a time.
+    Just new_inds <-
+      mapM dimFix
+        =<< unreshapeSlice (pe64 <$> oldshape) (pe64 <$> newshape) (map (DimFix . pe64) inds) =
+      Simplify $
+        case reshapeKind newshape of
+          ReshapeCoerce ->
+            certifying idd_cs . auxing aux . letBind pat . BasicOp $
+              Index idd2 slice
+          ReshapeArbitrary -> do
+            new_inds' <-
+              mapM (toSubExp "new_index") new_inds
+            certifying idd_cs . auxing aux . letBind pat . BasicOp $
+              Index idd2 (Slice $ map DimFix new_inds')
 
 -- Copying an iota is pointless; just make it an iota instead.
 ruleBasicOp vtable pat aux (Replicate (Shape []) (Var v))
