@@ -96,17 +96,17 @@ kkLoopBody
     kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
     -- copy A to shared memory
     (a_loc, aCopyLoc2Reg) <-
-      copyGlb2ShMem False kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
+      copyGlb2ShMem kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
 
     -- copy B from global to shared memory
     (b_loc, bCopyLoc2Reg) <-
-      copyGlb2ShMem True kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_init')
+      copyGlb2ShMem kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_init')
 
     -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
     thd_acc <- mkRedomapOneTileBody kk thd_res_merge aCopyLoc2Reg bCopyLoc2Reg True
     pure [thd_acc, a_loc, b_loc]
     where
-      mk_ik _ is_coal (thd_y, thd_x) (i0, k0)
+      mk_ik is_coal (thd_y, thd_x) (i0, k0)
         | is_coal = do
             -- not-transposed case (i.e., already coalesced)
             let (t_par, t_seq) = (tx, tk)
@@ -115,7 +115,7 @@ kkLoopBody
             -- rows are padded to an odd length to avoid bank conflicts.
             let e = le64 k + le64 i * oddUp (pe64 t_seq)
             pure (i, k, e)
-      mk_ik _ _ (thd_y, thd_x) (i0, k0) = do
+      mk_ik _ (thd_y, thd_x) (i0, k0) = do
         -- matrix is transposed case (i.e., uncoalesced):
         let t_par = tx
         k <- letExp "k" =<< toExp (le64 thd_y + le64 k0 * pe64 t_par)
@@ -187,11 +187,10 @@ kkLoopBody
         pure $ head redomap_res
       --
       copyGlb2ShMem ::
-        Bool ->
         VName ->
         (VName, VName, PrimType, SubExp, VName, Stms GPU, VName) ->
         Builder GPU (VName, VName -> VName -> VName -> Builder GPU VName)
-      copyGlb2ShMem is_B kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, x_loc_init') = do
+      copyGlb2ShMem kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, x_loc_init') = do
         let (t_par, r_par, tseq_div_tpar) = (tx, rx, tk_div_tx)
             is_inner_coal = isInnerCoal env inp_X load_X
             str_A = baseName inp_X
@@ -227,7 +226,7 @@ kkLoopBody
           scatterFun is_inner_coal [i0, k0] (thd_y, thd_x) = do
             let str_A = baseName inp_X
                 t_seq = tk
-            (i, k, epx_loc_fi) <- mk_ik is_B is_inner_coal (thd_y, thd_x) (i0, k0)
+            (i, k, epx_loc_fi) <- mk_ik is_inner_coal (thd_y, thd_x) (i0, k0)
             letBindNames [gtid] =<< toExp (le64 ii + le64 i)
             a_seqdim_idx <- letExp (str_A <> "_seqdim_idx") =<< toExp (le64 kk + le64 k)
 
@@ -290,12 +289,11 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       matchesBlkRegTile seg_space kstms,
     checkAccumulatesRedomapRes res_nm code2' redomap_orig_res = do
       -- Here we start the implementation --
-      let is_B_coal = isInnerCoal env inp_B load_B
       ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
       (new_kernel, host_stms) <- runBuilder $ do
         -- host code
         (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
-          mkTileMemSizes height_A width_B common_dim is_B_coal
+          mkTileMemSizes height_A width_B common_dim
 
         rk <- letSubExp "rk" $ BasicOp $ SubExp $ intConst Int64 8 -- 16 and 8 seem good values
         tk_rk <- letSubExp "tk_rk" =<< toExp (pe64 tk * pe64 rk)
@@ -484,12 +482,11 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         ) <-
       matchesBlkRegTile seg_space kstms = do
       -- Here we start the implementation
-      let is_B_coal = isInnerCoal env inp_B load_B
       ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
       (new_kernel, host_stms) <- runBuilder $ do
         -- host code
         (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
-          mkTileMemSizes height_A width_B common_dim is_B_coal
+          mkTileMemSizes height_A width_B common_dim
 
         gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv width_B ty_ry
         gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv height_A tx_rx
@@ -711,7 +708,6 @@ mkTileMemSizes ::
   SubExp ->
   SubExp ->
   SubExp ->
-  Bool ->
   Builder
     GPU
     ( SubExp,
@@ -726,7 +722,7 @@ mkTileMemSizes ::
       SubExp,
       SubExp
     )
-mkTileMemSizes height_A _width_B common_dim _is_B_not_transp = do
+mkTileMemSizes height_A _width_B common_dim = do
   tk_name <- nameFromText . prettyText <$> newVName "Tk"
   ty_name <- nameFromText . prettyText <$> newVName "Ty"
   ry_name <- nameFromText . prettyText <$> newVName "Ry"
