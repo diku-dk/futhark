@@ -698,7 +698,7 @@ matchesBlkRegTile _ _ = Nothing
 
 -- ceiled division expression
 ceilDiv :: (MonadBuilder m) => SubExp -> SubExp -> m (Exp (Rep m))
-ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
+ceilDiv x y = pure $ BasicOp $ BinOp (SCeilDiv Int64 Unsafe) x y
 
 mkTileMemSizes ::
   SubExp ->

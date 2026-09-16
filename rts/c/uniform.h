@@ -69,19 +69,19 @@ static inline uniform uint64_t udiv64(uniform uint64_t x, uniform uint64_t y) {
   return x / y;
 }
 
-static inline uniform uint8_t udiv_up8(uniform uint8_t x, uniform uint8_t y) {
+static inline uniform uint8_t uceil_div8(uniform uint8_t x, uniform uint8_t y) {
   return (x + y - 1) / y;
 }
 
-static inline uniform uint16_t udiv_up16(uniform uint16_t x, uniform uint16_t y) {
+static inline uniform uint16_t uceil_div16(uniform uint16_t x, uniform uint16_t y) {
   return (x + y - 1) / y;
 }
 
-static inline uniform uint32_t udiv_up32(uniform uint32_t x, uniform uint32_t y) {
+static inline uniform uint32_t uceil_div32(uniform uint32_t x, uniform uint32_t y) {
   return (x + y - 1) / y;
 }
 
-static inline uniform uint64_t udiv_up64(uniform uint64_t x, uniform uint64_t y) {
+static inline uniform uint64_t uceil_div64(uniform uint64_t x, uniform uint64_t y) {
   return (x + y - 1) / y;
 }
 
@@ -117,19 +117,19 @@ static inline uniform uint64_t udiv_safe64(uniform uint64_t x, uniform uint64_t 
   return y == 0 ? 0 : x / y;
 }
 
-static inline uniform uint8_t udiv_up_safe8(uniform uint8_t x, uniform uint8_t y) {
+static inline uniform uint8_t uceil_div_safe8(uniform uint8_t x, uniform uint8_t y) {
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
-static inline uniform uint16_t udiv_up_safe16(uniform uint16_t x, uniform uint16_t y) {
+static inline uniform uint16_t uceil_div_safe16(uniform uint16_t x, uniform uint16_t y) {
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
-static inline uniform uint32_t udiv_up_safe32(uniform uint32_t x, uniform uint32_t y) {
+static inline uniform uint32_t uceil_div_safe32(uniform uint32_t x, uniform uint32_t y) {
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
-static inline uniform uint64_t udiv_up_safe64(uniform uint64_t x, uniform uint64_t y) {
+static inline uniform uint64_t uceil_div_safe64(uniform uint64_t x, uniform uint64_t y) {
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
@@ -177,19 +177,19 @@ static inline uniform int64_t sdiv64(uniform int64_t x, uniform int64_t y) {
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
-static inline uniform int8_t sdiv_up8(uniform int8_t x, uniform int8_t y) {
+static inline uniform int8_t sceil_div8(uniform int8_t x, uniform int8_t y) {
   return sdiv8(x + y - 1, y);
 }
 
-static inline uniform int16_t sdiv_up16(uniform int16_t x, uniform int16_t y) {
+static inline uniform int16_t sceil_div16(uniform int16_t x, uniform int16_t y) {
   return sdiv16(x + y - 1, y);
 }
 
-static inline uniform int32_t sdiv_up32(uniform int32_t x, uniform int32_t y) {
+static inline uniform int32_t sceil_div32(uniform int32_t x, uniform int32_t y) {
   return sdiv32(x + y - 1, y);
 }
 
-static inline uniform int64_t sdiv_up64(uniform int64_t x, uniform int64_t y) {
+static inline uniform int64_t sceil_div64(uniform int64_t x, uniform int64_t y) {
   return sdiv64(x + y - 1, y);
 }
 
@@ -233,19 +233,19 @@ static inline uniform int64_t sdiv_safe64(uniform int64_t x, uniform int64_t y) 
   return y == 0 ? 0 : sdiv64(x, y);
 }
 
-static inline uniform int8_t sdiv_up_safe8(uniform int8_t x, uniform int8_t y) {
+static inline uniform int8_t sceil_div_safe8(uniform int8_t x, uniform int8_t y) {
   return sdiv_safe8(x + y - 1, y);
 }
 
-static inline uniform int16_t sdiv_up_safe16(uniform int16_t x, uniform int16_t y) {
+static inline uniform int16_t sceil_div_safe16(uniform int16_t x, uniform int16_t y) {
   return sdiv_safe16(x + y - 1, y);
 }
 
-static inline uniform int32_t sdiv_up_safe32(uniform int32_t x, uniform int32_t y) {
+static inline uniform int32_t sceil_div_safe32(uniform int32_t x, uniform int32_t y) {
   return sdiv_safe32(x + y - 1, y);
 }
 
-static inline uniform int64_t sdiv_up_safe64(uniform int64_t x, uniform int64_t y) {
+static inline uniform int64_t sceil_div_safe64(uniform int64_t x, uniform int64_t y) {
   return sdiv_safe64(x + y - 1, y);
 }
 

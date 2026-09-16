@@ -255,14 +255,14 @@ bindLoopVar var it bound =
 makeSafe :: Exp rep -> Maybe (Exp rep)
 makeSafe (BasicOp (BinOp (SDiv t _) x y)) =
   Just $ BasicOp (BinOp (SDiv t Safe) x y)
-makeSafe (BasicOp (BinOp (SDivUp t _) x y)) =
-  Just $ BasicOp (BinOp (SDivUp t Safe) x y)
+makeSafe (BasicOp (BinOp (SCeilDiv t _) x y)) =
+  Just $ BasicOp (BinOp (SCeilDiv t Safe) x y)
 makeSafe (BasicOp (BinOp (SQuot t _) x y)) =
   Just $ BasicOp (BinOp (SQuot t Safe) x y)
 makeSafe (BasicOp (BinOp (UDiv t _) x y)) =
   Just $ BasicOp (BinOp (UDiv t Safe) x y)
-makeSafe (BasicOp (BinOp (UDivUp t _) x y)) =
-  Just $ BasicOp (BinOp (UDivUp t Safe) x y)
+makeSafe (BasicOp (BinOp (UCeilDiv t _) x y)) =
+  Just $ BasicOp (BinOp (UCeilDiv t Safe) x y)
 makeSafe (BasicOp (BinOp (SMod t _) x y)) =
   Just $ BasicOp (BinOp (SMod t Safe) x y)
 makeSafe (BasicOp (BinOp (SRem t _) x y)) =
