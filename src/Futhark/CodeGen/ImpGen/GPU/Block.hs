@@ -29,7 +29,7 @@ import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (chunks, mapAccumLM, takeLast)
-import Futhark.Util.IntegralExp (divUp, rem)
+import Futhark.Util.IntegralExp (ceilDiv, rem)
 import Prelude hiding (quot, rem)
 
 -- | @flattenArray k flat arr@ flattens the outer @k@ dimensions of
@@ -105,7 +105,7 @@ blockChunkLoop ::
 blockChunkLoop w m = do
   constants <- kernelConstants <$> askEnv
   let max_chunk_size = sExt32 $ kernelBlockSize constants
-  num_chunks <- dPrimVE "num_chunks" $ w `divUp` max_chunk_size
+  num_chunks <- dPrimVE "num_chunks" $ w `ceilDiv` max_chunk_size
   sFor "chunk_i" num_chunks $ \chunk_i -> do
     chunk_start <-
       dPrimVE "chunk_start" $ chunk_i * max_chunk_size
@@ -668,7 +668,7 @@ compileBlockResult _ pe (TileReturns _ [(w, per_block_elems)] what) = do
       then
         sWhen (ltid + offset .<. pe64 w) $
           copyDWIMFix (patElemName pe) [ltid + offset] (Var what) [ltid]
-      else sFor "i" (n `divUp` kernelBlockSize constants) $ \i -> do
+      else sFor "i" (n `ceilDiv` kernelBlockSize constants) $ \i -> do
         j <- dPrimVE "j" $ kernelBlockSize constants * i + ltid
         sWhen (j + offset .<. pe64 w) $
           copyDWIMFix (patElemName pe) [j + offset] (Var what) [j]
@@ -776,7 +776,7 @@ precomputeConstants tblock_size stms = do
   where
     mkMap dims = do
       let n = product $ map Imp.pe64 dims
-      num_chunks <- dPrimVE "num_chunks" $ sExt32 $ n `divUp` unCount tblock_size
+      num_chunks <- dPrimVE "num_chunks" $ sExt32 $ n `ceilDiv` unCount tblock_size
       pure (dims, num_chunks)
 
 -- | Make use of various precomputed constants.

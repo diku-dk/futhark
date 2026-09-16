@@ -98,7 +98,7 @@ segThreadCapped ws desc r = do
       usable_groups <-
         letSubExp "segmap_usable_groups"
           =<< eBinOp
-            (SDivUp Int64 Unsafe)
+            (SCeilDiv Int64 Unsafe)
             (eSubExp w)
             (eSubExp =<< asIntS Int64 tblock_size)
       let grid = KernelGrid (Count usable_groups) (Count tblock_size)

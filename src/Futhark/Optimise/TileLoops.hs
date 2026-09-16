@@ -950,7 +950,7 @@ tiling1d dims_on_top gtid kdim w = do
     -- How many blocks we need to exhaust the innermost dimension.
     ldim <-
       letSubExp "ldim" . BasicOp $
-        BinOp (SDivUp Int64 Unsafe) kdim tblock_size
+        BinOp (SCeilDiv Int64 Unsafe) kdim tblock_size
 
     num_tblocks <-
       letSubExp "computed_num_tblocks"
@@ -1214,11 +1214,11 @@ tiling2d dims_on_top (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
   num_tblocks_x <-
     letSubExp "num_tblocks_x" $
       BasicOp $
-        BinOp (SDivUp Int64 Unsafe) kdim_x tile_size
+        BinOp (SCeilDiv Int64 Unsafe) kdim_x tile_size
   num_tblocks_y <-
     letSubExp "num_tblocks_y" $
       BasicOp $
-        BinOp (SDivUp Int64 Unsafe) kdim_y tile_size
+        BinOp (SCeilDiv Int64 Unsafe) kdim_y tile_size
 
   num_tblocks <-
     letSubExp "num_tblocks_top"
