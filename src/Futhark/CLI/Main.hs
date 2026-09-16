@@ -40,7 +40,9 @@ import Futhark.CLI.WASM qualified as WASM
 import Futhark.Error
 import Futhark.Util (maxinum, showText)
 import Futhark.Util.Options
-import GHC.IO.Encoding (setLocaleEncoding)
+import GHC.IO.Encoding (setFileSystemEncoding, setForeignEncoding, setLocaleEncoding)
+import GHC.IO.Encoding.Failure (CodingFailureMode (RoundtripFailure))
+import GHC.IO.Encoding.UTF8 (mkUTF8)
 import GHC.IO.Exception (IOErrorType (..), IOException (..))
 import System.Environment
 import System.Exit
@@ -150,6 +152,10 @@ main = reportingIOErrors $ do
   hSetEncoding stdout utf8
   hSetEncoding stderr utf8
   setLocaleEncoding utf8
+  -- RoundtripFailure means file names that are not valid UTF-8 survive a
+  -- decode/encode cycle unharmed.
+  setFileSystemEncoding $ mkUTF8 RoundtripFailure
+  setForeignEncoding $ mkUTF8 RoundtripFailure
   args <- getArgs
   prog <- getProgName
   case args of

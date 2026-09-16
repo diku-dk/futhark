@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* File names are now always encoded as UTF-8. Non-UTF-8 locales are not
+  supported.
+
 * Propagation of flattening attributes in some cases.
 
 * GPU code generation now supports reductions with more than 25 operators.
