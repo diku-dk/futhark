@@ -44,5 +44,23 @@ encodeDecodeJSON = testProperty "encoding and decoding are inverse" prop
     prop :: BenchResult -> Bool
     prop brs = decodeBenchResults (encodeBenchResults [brs]) == Right [brs]
 
+metadataJSON :: TestTree
+metadataJSON = testProperty "metadata preserves benchmark decoding" prop
+  where
+    prop :: BenchResult -> Bool
+    prop brs =
+      decodeBenchResults (encodeBenchResultsWithMetadata metadata [brs])
+        == Right [brs]
+    metadata =
+      BenchMetadata
+        { benchStartTime = read "2026-09-09 01:02:03 UTC",
+          benchEndTime = read "2026-09-09 01:02:04 UTC",
+          benchHostname = Just "benchmark-host",
+          benchCompilerVersion = Just "Futhark test compiler",
+          benchBackend = "c",
+          benchCompilerOptions = ["--safe"],
+          benchRuntimeOptions = ["--debugging"]
+        }
+
 tests :: TestTree
-tests = testGroup "Futhark.BenchTests" [encodeDecodeJSON]
+tests = testGroup "Futhark.BenchTests" [encodeDecodeJSON, metadataJSON]

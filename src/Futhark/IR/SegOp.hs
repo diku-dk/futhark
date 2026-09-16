@@ -686,8 +686,8 @@ mapOnSegOpType tv (Acc acc ispace ts) =
     <$> mapOnSegOpVName tv acc
     <*> traverse (mapOnSegOpSubExp tv) ispace
     <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
-mapOnSegOpType tv (Array et shape u) =
-  Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
+mapOnSegOpType tv (Array et shape o) =
+  Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure o
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
 rephraseBinOp ::

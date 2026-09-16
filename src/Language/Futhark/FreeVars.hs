@@ -126,11 +126,11 @@ freeInDimIndex (DimSlice me1 me2 me3) =
   foldMap (foldMap freeInExp) [me1, me2, me3]
 
 -- | Free variables in pattern (including types of the bound identifiers).
-freeInPat :: Pat (TypeBase Size u) -> FV
+freeInPat :: Pat (TypeBase Size o) -> FV
 freeInPat = foldMap freeInType
 
 -- | Free variables in the type (meaning those that are used in size expression).
-freeInType :: TypeBase Size u -> FV
+freeInType :: TypeBase Size o -> FV
 freeInType t =
   case t of
     Array _ s a ->

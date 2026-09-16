@@ -470,7 +470,7 @@ TypeExpDims :: { [Name] }
 
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
-           { TEUnique $2 (srcspan $1 $>) }
+           { TEStar $2 (srcspan $1 $>) }
          | TypeExpApply %prec typeprec { $1 }
          | SumClauses %prec sumprec
            { let (cs, loc) = $1 in TESum cs (srclocOf loc) }

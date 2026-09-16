@@ -34,7 +34,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
   where
     alloc x y =
       case paramType x of
-        Array pt shape u -> do
+        Array pt shape o -> do
           let name = maybe "num_threads" baseName (subExpVar num_threads)
           twice_num_threads <-
             letSubExp ("twice_" <> name) . BasicOp $
@@ -52,8 +52,8 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
                 LMAD.slice lmad_base $
                   fullSliceNum base_dims [DimFix other_id]
           pure
-            ( x {paramDec = MemArray pt shape u $ ArrayIn mem lmad_x},
-              y {paramDec = MemArray pt shape u $ ArrayIn mem lmad_y}
+            ( x {paramDec = MemArray pt shape o $ ArrayIn mem lmad_x},
+              y {paramDec = MemArray pt shape o $ ArrayIn mem lmad_y}
             )
         Prim bt ->
           pure

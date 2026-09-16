@@ -353,14 +353,12 @@ indexExp table (BasicOp (Replicate s (Var v))) _ is = do
   guard $ v `available` table
   Just $ indexNext v (drop (shapeRank s) is) table
 indexExp table (BasicOp (Reshape v newshape)) _ is
-  | Just oldshape <- arrayDims <$> lookupType v table =
-      -- TODO: handle coercions more efficiently.
-      let is' =
-            reshapeIndex
-              (map pe64 oldshape)
-              (map pe64 $ shapeDims $ newShape newshape)
-              is
-       in Just $ indexNext v is' table
+  | Just oldshape <- arrayShape <$> lookupType v table,
+    -- Map the indices to the old index space, one splice at a time.
+    Just is' <-
+      mapM dimFix
+        =<< unreshapeSlice (pe64 <$> oldshape) (pe64 <$> newshape) (map DimFix is) =
+      Just $ indexNext v is' table
 indexExp table (BasicOp (Rearrange v perm)) _ is =
   Just $ indexNext v (rearrangeShape (rearrangeInverse perm) is) table
 indexExp table (BasicOp (Index v slice)) _ is = do

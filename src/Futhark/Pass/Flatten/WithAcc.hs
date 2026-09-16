@@ -272,8 +272,8 @@ flattenWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_in
 
     trType ::
       (VName -> Maybe Shape, VName -> Safety -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
-      TypeBase shape u ->
-      TypeBase shape u
+      TypeBase shape o ->
+      TypeBase shape o
     trType sf (Acc acc _ ts)
       | Just shape <- fst sf acc =
           Acc acc shape ts
@@ -281,8 +281,8 @@ flattenWithAcc ops segments env inps distres _withacc_pat withacc_aux withacc_in
 
     trParam ::
       (VName -> Maybe Shape, VName -> Safety -> [SubExp] -> Maybe (Builder SOACS [SubExp])) ->
-      Param (TypeBase Shape u) ->
-      Param (TypeBase Shape u)
+      Param (TypeBase Shape o) ->
+      Param (TypeBase Shape o)
     trParam sf = fmap $ trType sf
 
     trBody sf (Body dec stms res) =

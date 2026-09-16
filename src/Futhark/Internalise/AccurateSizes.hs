@@ -106,10 +106,10 @@ ensureShape msg = ensureExtShape msg . staticShapes1
 -- shape declarations.  Not used to change rank of arguments.  Assumes
 -- everything is otherwise type-correct.
 ensureArgShapes ::
-  (Typed (TypeBase Shape u)) =>
+  (Typed (TypeBase Shape o)) =>
   ErrorMsg SubExp ->
   [VName] ->
-  [TypeBase Shape u] ->
+  [TypeBase Shape o] ->
   [SubExp] ->
   InternaliseM [SubExp]
 ensureArgShapes msg shapes paramts args =

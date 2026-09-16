@@ -15,7 +15,7 @@ import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
-import Futhark.IR
+import Futhark.IR hiding (consuming)
 import Futhark.Optimise.Simplify.Rules.Simple
 import Futhark.Util
 
@@ -56,15 +56,10 @@ simplifyIndexing ::
   Maybe (m IndexResult)
 simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
   case defOf idd of
-    -- FIXME: This is a special case to avoid simplifying away a slice of a
-    -- rearrange. This is because register tiling cannot otherwise properly
-    -- detect what is going on.
     Just (Rearrange src perm, cs)
       | rearrangeReach perm <= length (takeWhile isIndex inds) ->
           let inds' = rearrangeShape (rearrangeInverse perm) inds
            in Just $ pure $ IndexResult cs src $ Slice inds'
-      | any isIndex inds ->
-          Nothing
       where
         isIndex DimFix {} = True
         isIndex _ = False
@@ -197,20 +192,6 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         not consuming,
         ST.available src vtable ->
           Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape src newshape, cs)
-      | ReshapeCoerce <- reshapeKind newshape,
-        Just olddims <- arrayDims <$> seType (Var src),
-        changed_dims <- zipWith (/=) (shapeDims (newShape newshape)) olddims,
-        not $ or $ drop (length inds) changed_dims ->
-          Just $ pure $ IndexResult cs src $ Slice inds
-      | Just olddims <- arrayDims <$> seType (Var src),
-        length newshape == length inds,
-        length olddims == length (shapeDims (newShape newshape)) ->
-          Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape v2 newshape, cs)
-      | Shape [_] <- newShape newshape,
-        Just [_] <- arrayDims <$> seType (Var v2) ->
-          Just $ pure $ IndexResult cs v2 $ Slice inds
     Just (Concat d (x :| xs) _, cs)
       | -- HACK: simplifying the indexing of an N-array concatenation
         -- is going to produce an N-deep if expression, which is bad

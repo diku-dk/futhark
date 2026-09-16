@@ -129,6 +129,13 @@ documentation and in compiler output.
      such a function is applied, each existential size is instantiated
      as an :term:`unknown size`.
 
+   Fresh
+
+     A value returned by a function that is guaranteed not to :term:`alias
+     <aliases>` its parameters. In function types, this is denoted by putting an
+     asterisk (``*``) in the return type. The prelude function ``copy`` always
+     returns a fresh value, and is the easiest way of obtaining one.
+
    Functor
 
      The Standard ML term for what Futhark calls a :term:`parametric
@@ -429,15 +436,6 @@ documentation and in compiler output.
      An instance of :term:`nested data parallelism` that is not
      :term:`nonuniform`. This is much more efficient than :term:`nonuniform
      nested data parallelism`.
-
-   Uniqueness types
-
-     A somewhat misleading term that describes Futhark's system of
-     allowing :term:`consumption` of values, in the interest of
-     allowing :term:`in-place updates`.  The only place where
-     *uniqueness* truly occurs is in return types, where e.g. the
-     return type of ``copy`` is *unique* to indicate that the result
-     does not :term:`alias<aliasing>` the argument.
 
    Unknown size
 

@@ -458,7 +458,7 @@ doAtomic ::
   (C.ToIdent a1) =>
   a1 ->
   VName ->
-  Count u (TExp Int32) ->
+  Count m (TExp Int32) ->
   Exp ->
   String ->
   C.Type ->

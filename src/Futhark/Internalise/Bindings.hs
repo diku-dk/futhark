@@ -102,7 +102,7 @@ internaliseFParams tparams params = do
     fixAccParam p = (Nothing, p)
 
     chunkValues ::
-      [[Tree (I.TypeBase I.Shape Uniqueness)]] ->
+      [[Tree (I.TypeBase I.Shape I.Diet)]] ->
       [[I.FParam I.SOACS]] ->
       [Tree (I.FParam I.SOACS)]
     chunkValues tss vss =
@@ -203,7 +203,7 @@ bindingFlatPat idents ts m = do
     m ps
 
 -- | Flatten a pattern.  Returns a list of identifiers.
-flattenPat :: (MonadFreshNames m) => E.Pat (TypeBase Size u) -> m [(E.Ident (TypeBase Size u), [E.AttrInfo VName])]
+flattenPat :: (MonadFreshNames m) => E.Pat (TypeBase Size o) -> m [(E.Ident (TypeBase Size o), [E.AttrInfo VName])]
 flattenPat = flattenPat'
   where
     flattenPat' (E.PatParens p _) =

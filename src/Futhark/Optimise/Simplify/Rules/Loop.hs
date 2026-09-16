@@ -57,7 +57,7 @@ removeRedundantLoopParams (_, used) pat aux (merge, form, body)
               -- body may still use their names in (now-dead) expressions.
               -- Hence, we add them inside the loop, fully aware that dead-code
               -- removal will eventually get rid of them.  Some care is
-              -- necessary to handle unique bindings.
+              -- necessary to handle consuming parameters.
               body'' <- insertStmsM $ do
                 mapM_ (uncurry letBindNames) $ dummyStms discard_val
                 pure body'
@@ -74,7 +74,7 @@ removeRedundantLoopParams (_, used) pat aux (merge, form, body)
 
     dummyStms = map dummyStm
     dummyStm ((p, e), _)
-      | unique (paramDeclType p),
+      | consuming (paramDeclType p),
         Var v <- e =
           ([paramName p], BasicOp $ Replicate mempty $ Var v)
       | otherwise = ([paramName p], BasicOp $ SubExp e)

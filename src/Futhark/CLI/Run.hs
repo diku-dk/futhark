@@ -74,7 +74,7 @@ interpret config fp = do
             (Just vs, Just ts) -> zipWithM_ putValue vs ts
             _ -> putValue res ret
 
-putValue :: I.Value -> TypeBase () () -> IO ()
+putValue :: I.Value -> TypeBase () NoMode -> IO ()
 putValue v t
   | I.isEmptyArray v = T.putStrLn $ I.prettyEmptyArray t v
   | otherwise = T.putStrLn $ I.valueText v

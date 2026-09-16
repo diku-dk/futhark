@@ -964,11 +964,11 @@ entryTypes :: Imp.EntryPoint -> ([T.Text], T.Text)
 entryTypes (Imp.EntryPoint _ res args _doc) =
   (map descArg args, desc res)
   where
-    descArg ((_, u), d) = desc (u, d)
-    desc (u, Imp.OpaqueValue d _) = prettyText u <> nameToText d
-    desc (u, Imp.TransparentValue (Imp.ScalarValue pt s _)) = prettyText u <> readTypeEnum pt s
-    desc (u, Imp.TransparentValue (Imp.ArrayValue _ _ pt s dims)) =
-      prettyText u <> mconcat (replicate (length dims) "[]") <> readTypeEnum pt s
+    descArg ((_, o), d) = desc (o, d)
+    desc (o, Imp.OpaqueValue d _) = prettyText o <> nameToText d
+    desc (o, Imp.TransparentValue (Imp.ScalarValue pt s _)) = prettyText o <> readTypeEnum pt s
+    desc (o, Imp.TransparentValue (Imp.ArrayValue _ _ pt s dims)) =
+      prettyText o <> mconcat (replicate (length dims) "[]") <> readTypeEnum pt s
 
 callEntryFun ::
   [PyStmt] ->

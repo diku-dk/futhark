@@ -16,16 +16,16 @@ tests =
   testGroup
     "ConsumptionTests"
     [ testGroup
-        "inferReturnUniqueness"
+        "inferReturnFreshness"
         [ testCase "*[]i32" $
-            inferReturnUniqueness
+            inferReturnFreshness
               [Id "x_1" (Info "[2]i32") mempty]
               "[2]i32"
               (second (const mempty) ("[2]i32" :: StructType))
               @?= "*[2]i32",
           --
           testCase "[]i32" $
-            inferReturnUniqueness
+            inferReturnFreshness
               [Id "x_1" (Info "[2]i32") mempty]
               "[2]i32"
               ( second
@@ -35,7 +35,7 @@ tests =
               @?= "[2]i32",
           --
           testCase "([]i32,[]i32)" $
-            inferReturnUniqueness
+            inferReturnFreshness
               [Id "x_1" (Info "[2]i32") mempty]
               "([2]i32, [2]i32)"
               ( second
@@ -45,19 +45,19 @@ tests =
               @?= "([2]i32, [2]i32)",
           --
           testCase "opaque" $
-            let t = Scalar (TypeVar Nonunique (qualName "t_2") [])
-             in inferReturnUniqueness
+            let t = Scalar (TypeVar Nonfresh (qualName "t_2") [])
+             in inferReturnFreshness
                   [Id "n_1" (Info "i64") mempty]
                   t
                   (second (const (S.singleton (AliasFree "y_3" []))) t)
-                  @?= (t `setUniqueness` Nonunique),
+                  @?= (t `setMode` Nonfresh),
           --
           testCase "*opaque" $
-            let t = Scalar (TypeVar Nonunique (qualName "t_2") [])
-             in inferReturnUniqueness
+            let t = Scalar (TypeVar Nonfresh (qualName "t_2") [])
+             in inferReturnFreshness
                   [Id "n_1" (Info "i64") mempty]
                   t
                   (second (const mempty) t)
-                  @?= (t `setUniqueness` Unique)
+                  @?= (t `setMode` Fresh)
         ]
     ]

@@ -826,7 +826,7 @@ buildingBuiltin m = fst $ evalState (runBuilderT m mempty) blankNameSource
 segIotaBuiltin :: FunDef GPU
 segIotaBuiltin = buildingBuiltin $ do
   np <- newParam "n" $ Prim int64
-  nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
+  nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Observe
   body <-
     localScope (scopeOfFParams [np, nsp]) . buildBody_ $ do
       (flags, offsets, res) <- genSegIota topSegLevel (paramName nsp)
@@ -841,9 +841,9 @@ segIotaBuiltin = buildingBuiltin $ do
           map
             (,mempty)
             [ Prim int64,
-              Array Bool (Shape [Ext 0]) Unique,
-              Array int64 (Shape [Free $ Var $ paramName np]) Unique,
-              Array int64 (Shape [Ext 0]) Unique
+              Array Bool (Shape [Ext 0]) NoMode,
+              Array int64 (Shape [Free $ Var $ paramName np]) NoMode,
+              Array int64 (Shape [Ext 0]) NoMode
             ],
         funDefParams = [np, nsp],
         funDefBody = body
@@ -852,7 +852,7 @@ segIotaBuiltin = buildingBuiltin $ do
 repIotaBuiltin :: FunDef GPU
 repIotaBuiltin = buildingBuiltin $ do
   np <- newParam "n" $ Prim int64
-  nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
+  nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Observe
   body <-
     localScope (scopeOfFParams [np, nsp]) . buildBody_ $ do
       (flags, offsets, res) <- genRepIota topSegLevel (paramName nsp)
@@ -867,9 +867,9 @@ repIotaBuiltin = buildingBuiltin $ do
           map
             (,mempty)
             [ Prim int64,
-              Array Bool (Shape [Ext 0]) Unique,
-              Array int64 (Shape [Free $ Var $ paramName np]) Unique,
-              Array int64 (Shape [Ext 0]) Unique
+              Array Bool (Shape [Ext 0]) NoMode,
+              Array int64 (Shape [Free $ Var $ paramName np]) NoMode,
+              Array int64 (Shape [Ext 0]) NoMode
             ],
         funDefParams = [np, nsp],
         funDefBody = body
@@ -878,7 +878,7 @@ repIotaBuiltin = buildingBuiltin $ do
 prefixSumBuiltin :: FunDef GPU
 prefixSumBuiltin = buildingBuiltin $ do
   np <- newParam "n" $ Prim int64
-  nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
+  nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Observe
   body <-
     localScope (scopeOfFParams [np, nsp]) . buildBody_ $
       varsRes . pure <$> genPrefixSum topSegLevel "res" (paramName nsp)
@@ -888,7 +888,7 @@ prefixSumBuiltin = buildingBuiltin $ do
         funDefAttrs = mempty,
         funDefName = prefixSumName,
         funDefRetType =
-          [(Array int64 (Shape [Free $ Var $ paramName np]) Unique, mempty)],
+          [(Array int64 (Shape [Free $ Var $ paramName np]) NoMode, mempty)],
         funDefParams = [np, nsp],
         funDefBody = body
       }
@@ -897,7 +897,7 @@ partitionBuiltin :: FunDef GPU
 partitionBuiltin = buildingBuiltin $ do
   np <- newParam "n" $ Prim int64
   kp <- newParam "k" $ Prim int64
-  csp <- newParam "cs" $ Array int64 (Shape [Var (paramName np)]) Nonunique
+  csp <- newParam "cs" $ Array int64 (Shape [Var (paramName np)]) Observe
   body <-
     localScope (scopeOfFParams [np, kp, csp]) . buildBody_ $ do
       (counts, offsets, res) <- genPartition topSegLevel (paramName np) (paramName kp) (paramName csp)
@@ -910,9 +910,9 @@ partitionBuiltin = buildingBuiltin $ do
         funDefRetType =
           map
             (,mempty)
-            [ Array int64 (Shape [Free $ Var $ paramName kp]) Unique,
-              Array int64 (Shape [Free $ Var $ paramName kp]) Unique,
-              Array int64 (Shape [Free $ Var $ paramName np]) Unique
+            [ Array int64 (Shape [Free $ Var $ paramName kp]) NoMode,
+              Array int64 (Shape [Free $ Var $ paramName kp]) NoMode,
+              Array int64 (Shape [Free $ Var $ paramName np]) NoMode
             ],
         funDefParams = [np, kp, csp],
         funDefBody = body
@@ -997,7 +997,7 @@ doPrefixSum lvl ns
         Apply
           (funDefName prefixSumBuiltin)
           [(n, Observe), (Var ns, Observe)]
-          [(toDecl (staticShapes1 ns_t) Unique, mempty)]
+          [(staticShapes1 ns_t, mempty)]
           Safe
 
 doPartition ::

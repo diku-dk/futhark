@@ -678,7 +678,7 @@ addParamsContext ps = localScope (scopeOfFParams ps) $ do
   (ps_ctx, ps') <- mapAccumLM onType [] ps
   pure $ ps' <> ps_ctx
   where
-    onType acc (Param attr v (MemArray pt shape u (ArrayIn mem lmad))) = do
+    onType acc (Param attr v (MemArray pt shape o (ArrayIn mem lmad))) = do
       space <- lookupMemSpace mem
       mem' <- newVName $ baseName mem <> "_ext"
       let num_exts = length (LMAD.existentialized lmad)
@@ -688,7 +688,7 @@ addParamsContext ps = localScope (scopeOfFParams ps) $ do
       let lmad' = lmadFrom (LMAD.shape lmad) $ map (le64 . paramName) lmad_exts
       pure
         ( acc ++ Param mempty mem' (MemMem space) : lmad_exts,
-          Param attr v $ MemArray pt shape u $ ArrayIn mem' lmad'
+          Param attr v $ MemArray pt shape o $ ArrayIn mem' lmad'
         )
     onType acc t = pure (acc, t)
 
@@ -704,7 +704,7 @@ offsetBranch (Pat pes) ts = do
     onType
       acc
       ( PatElem pe_v (MemArray _ pe_shape pe_u (ArrayIn pe_mem pe_lmad)),
-        MemArray pt shape u meminfo
+        MemArray pt shape o meminfo
         ) = do
         (space, lmad) <- case meminfo of
           ReturnsInBlock mem lmad -> do
@@ -726,7 +726,7 @@ offsetBranch (Pat pes) ts = do
               ++ (PatElem pe_mem' $ MemMem space, MemMem space)
               : map (,MemPrim int64) lmad_exts,
             ( PatElem pe_v $ MemArray pt pe_shape pe_u $ ArrayIn pe_mem' pe_lmad',
-              MemArray pt shape u . ReturnsNewBlock space start . fmap ext $
+              MemArray pt shape o . ReturnsNewBlock space start . fmap ext $
                 LMAD.mkExistential (shapeDims shape) (1 + start)
             )
           )
@@ -737,10 +737,10 @@ offsetMemoryInPat offsets (Pat pes) rets = do
   Pat $ zipWith onPE pes rets
   where
     onPE
-      (PatElem name (MemArray pt shape u (ArrayIn mem _)))
+      (PatElem name (MemArray pt shape o (ArrayIn mem _)))
       (MemArray _ _ _ info)
         | Just lmad <- getLMAD info =
-            PatElem name . MemArray pt shape u . ArrayIn mem $
+            PatElem name . MemArray pt shape o . ArrayIn mem $
               fmap (fmap unExt) lmad
     onPE pe _ =
       offsetMemoryInMemBound offsets <$> pe
@@ -750,22 +750,22 @@ offsetMemoryInPat offsets (Pat pes) rets = do
     getLMAD (Just (ReturnsInBlock _ lmad)) = Just lmad
     getLMAD _ = Nothing
 
-offsetMemoryInParam :: RebaseMap -> Param (MemBound u) -> Param (MemBound u)
+offsetMemoryInParam :: RebaseMap -> Param (MemBound o) -> Param (MemBound o)
 offsetMemoryInParam offsets = fmap $ offsetMemoryInMemBound offsets
 
-offsetMemoryInMemBound :: RebaseMap -> MemBound u -> MemBound u
-offsetMemoryInMemBound offsets (MemArray pt shape u (ArrayIn mem lmad))
-  | Just (o, p) <- lookupNewBase mem (LMAD.shape lmad) offsets =
-      MemArray pt shape u $ ArrayIn mem $ LMAD.expand o p lmad
+offsetMemoryInMemBound :: RebaseMap -> MemBound o -> MemBound o
+offsetMemoryInMemBound offsets (MemArray pt shape o (ArrayIn mem lmad))
+  | Just (base, p) <- lookupNewBase mem (LMAD.shape lmad) offsets =
+      MemArray pt shape o $ ArrayIn mem $ LMAD.expand base p lmad
 offsetMemoryInMemBound _ info = info
 
 offsetMemoryInBodyReturns :: RebaseMap -> BodyReturns -> BodyReturns
-offsetMemoryInBodyReturns offsets (MemArray pt shape u (ReturnsInBlock mem lmad))
+offsetMemoryInBodyReturns offsets (MemArray pt shape o (ReturnsInBlock mem lmad))
   | Just lmad' <- isStaticLMAD lmad,
-    Just (o, p) <- lookupNewBase mem (LMAD.shape lmad') offsets =
-      MemArray pt shape u $
+    Just (base, p) <- lookupNewBase mem (LMAD.shape lmad') offsets =
+      MemArray pt shape o $
         ReturnsInBlock mem $
-          LMAD.expand (Free <$> o) (fmap Free p) lmad
+          LMAD.expand (Free <$> base) (fmap Free p) lmad
 offsetMemoryInBodyReturns _ br = br
 
 offsetMemoryInLambda :: RebaseMap -> Lambda GPUMem -> OffsetM (Lambda GPUMem)
@@ -853,10 +853,10 @@ offsetMemoryInStm offsets (Let pat dec e) = do
   pure $ Let pat'' dec e'
   where
     pick
-      (PatElem name (MemArray pt s u _ret))
+      (PatElem name (MemArray pt s o _ret))
       (MemArray _ _ _ (Just (ReturnsInBlock m extlmad)))
         | Just lmad <- instantiateLMAD extlmad =
-            PatElem name (MemArray pt s u (ArrayIn m lmad))
+            PatElem name (MemArray pt s o (ArrayIn m lmad))
     pick p _ = p
 
     instantiateLMAD :: ExtLMAD -> Maybe LMAD
@@ -925,9 +925,9 @@ unAllocGPUStms = unAllocStms False
           mapOnVName = Right
         }
 
-unMem :: MemInfo d u ret -> TypeBase (ShapeBase d) u
+unMem :: MemInfo d o ret -> TypeBase (ShapeBase d) o
 unMem (MemPrim pt) = Prim pt
-unMem (MemArray pt shape u _) = Array pt shape u
+unMem (MemArray pt shape o _) = Array pt shape o
 unMem (MemAcc acc ispace ts) = Acc acc ispace ts
 unMem MemMem {} = Prim Unit
 
