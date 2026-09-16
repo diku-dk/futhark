@@ -367,7 +367,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end _) = do
     certifying cs $
       letSubExp "num_elems" $
         I.BasicOp $
-          I.BinOp (SDivUp Int64 I.Unsafe) distance pos_step
+          I.BinOp (SCeilDiv Int64 I.Unsafe) distance pos_step
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   pure [se]

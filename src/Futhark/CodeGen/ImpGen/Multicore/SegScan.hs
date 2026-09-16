@@ -15,7 +15,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Transform.Rename (renameBody)
-import Futhark.Util.IntegralExp (divUp)
+import Futhark.Util.IntegralExp (ceilDiv)
 import Prelude hiding (quot, rem)
 
 -- This does not correspond with the actual cache size, but the actual cache
@@ -422,9 +422,9 @@ nonsegmentedScan
   post_op
   nsubtasks = do
     let multiplier = 1 -- For playing with.
-        blockSize = cacheSize `divUp` (totalBytes scan_ops * multiplier)
+        blockSize = cacheSize `ceilDiv` (totalBytes scan_ops * multiplier)
 
-    block_no <- dPrimV "nblocks" (pe64 n `divUp` blockSize)
+    block_no <- dPrimV "nblocks" (pe64 n `ceilDiv` blockSize)
 
     -- allocate flags/aggr/prefix arrays of length nblocks
     flagsArr <- sAllocArray "scan_flags" int64 (Shape [Var (tvVar block_no)]) DefaultSpace

@@ -61,7 +61,7 @@ import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, nubOrd, splitFromEnd)
-import Futhark.Util.IntegralExp (divUp, quot, rem)
+import Futhark.Util.IntegralExp (ceilDiv, quot, rem)
 import Prelude hiding (quot, rem)
 
 -- | Which target are we ultimately generating code for?  While most
@@ -219,7 +219,7 @@ kernelLoop tid num_threads n f =
     if n == num_threads
       then f tid
       else do
-        num_chunks <- dPrimVE "num_chunks" $ n `divUp` num_threads
+        num_chunks <- dPrimVE "num_chunks" $ n `ceilDiv` num_threads
         sFor "chunk_i" num_chunks $ \chunk_i -> do
           i <- dPrimVE "i" $ chunk_i * num_threads + tid
           sWhen (i .<. n) $ f i
@@ -1026,7 +1026,7 @@ simpleKernelBlocks max_num_tblocks kernel_size = do
   let tblock_size_key = keyWithEntryPoint fname $ nameFromText $ prettyText $ tvVar tblock_size
   addTuningParam tblock_size_key $ Just Imp.SizeThreadBlock
   sOp $ Imp.GetSize (tvVar tblock_size) tblock_size_key Imp.SizeThreadBlock
-  virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `divUp` tvExp tblock_size
+  virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `ceilDiv` tvExp tblock_size
   num_tblocks <- dPrimV "num_tblocks" $ virt_num_tblocks `sMin64` max_num_tblocks
   pure (sExt32 virt_num_tblocks, Count $ tvSize num_tblocks, Count $ tvSize tblock_size)
 
@@ -1103,7 +1103,7 @@ virtualiseBlocks SegVirt required_blocks m = do
   sOp $ Imp.GetBlockId (tvVar phys_tblock_id) 0
   iterations <-
     dPrimVE "iterations" $
-      (required_blocks - tvExp phys_tblock_id) `divUp` sExt32 (kernelNumBlocks constants)
+      (required_blocks - tvExp phys_tblock_id) `ceilDiv` sExt32 (kernelNumBlocks constants)
 
   sFor "i" iterations $ \i -> do
     m . tvExp
