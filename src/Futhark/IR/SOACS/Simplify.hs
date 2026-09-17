@@ -1304,9 +1304,21 @@ prunePreLambdaScanResults (ScremaForm pre_lam scan red post_lam) =
 -- results eliminated.
 prunePreLambdaResults :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
 prunePreLambdaResults form =
-  if form == form' then form' else prunePreLambdaResults form'
+  if extent form == extent form' then form' else prunePreLambdaResults form'
   where
     form' = prunePreLambdaScanResults $ prunePreLambdaMapResults form
+    -- Both prunings only ever remove results, parameters and statements, so a
+    -- round that changes nothing leaves all of these counts alone.  Comparing
+    -- them detects a change without comparing the lambda bodies, which may be
+    -- very large when this is called on a repeatedly fused SOAC.
+    extent (ScremaForm pre scan red post) =
+      ( length $ bodyResult $ lambdaBody pre,
+        length $ bodyStms $ lambdaBody pre,
+        length $ lambdaParams post,
+        length $ bodyStms $ lambdaBody post,
+        scanResults scan,
+        redResults red
+      )
 
 -- | Removes duplicate inputs from a ScremaForm's lambda parameters.
 --
