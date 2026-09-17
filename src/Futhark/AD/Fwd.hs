@@ -628,7 +628,7 @@ fwdStm stm@(Let pat aux (Apply f args _ _))
                 where
                   e_t = primExpType e
 
-          auxing aux . letBind pat_tan <=< withAnyTans (map fst args) $
+          bindTanPat pat_tan aux <=< withAnyTans (map fst args) $
             \arg_tans' ->
               foldl1 (~+~) $ zipWith (~*~) (map (convertTo ret) arg_tans') derivs
 fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
