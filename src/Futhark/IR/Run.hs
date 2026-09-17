@@ -1601,10 +1601,39 @@ runProgram eval_op prog entry inputs = runExceptT . unInterpM $ do
     else do
       let env = M.union (M.fromList $ zip params arg_vals) consts_env
       results <- evalBody eval_op funs env (funDefBody fun)
-      mapM toValue results
+      result_count <- entryResultValueCount prog fun
+      let context_count = length results - result_count
+      if context_count < 0
+        then interpError "entry point returned too few values"
+        else mapM toValue $ drop context_count results
   where
     foldConsts _ e [] = pure e
     foldConsts funs e (s : ss) = evalStm eval_op funs e s >>= \e' -> foldConsts funs e' ss
+
+entryResultValueCount :: Prog rep -> FunDef rep -> InterpM Int
+entryResultValueCount prog fun =
+  case funDefEntryPoint fun of
+    Just (_, _, result, _) ->
+      entryPointTypeSize (progTypes prog) $ entryResultType result
+    Nothing ->
+      interpError "function is not an entry point"
+  where
+    entryPointTypeSize _ TypeTransparent {} = pure 1
+    entryPointTypeSize types@(OpaqueTypes opaque_types) (TypeOpaque name) =
+      case lookup name opaque_types of
+        Nothing -> interpError $ "unknown opaque type: " <> prettyText name
+        Just (opaque_type, _) -> opaqueTypeSize types opaque_type
+
+    opaqueTypeSize _ (OpaqueArray _ _ value_types) =
+      pure $ length value_types
+    opaqueTypeSize types (OpaqueRecordArray _ _ fields) =
+      sum <$> mapM (entryPointTypeSize types . snd) fields
+    opaqueTypeSize _ (OpaqueRecord []) =
+      pure 1
+    opaqueTypeSize types (OpaqueRecord fields) =
+      sum <$> mapM (entryPointTypeSize types . snd) fields
+    opaqueTypeSize _ (OpaqueSum value_types _) =
+      pure $ length value_types
 
 findEntry :: Prog rep -> Name -> InterpM (FunDef rep)
 findEntry prog name =
