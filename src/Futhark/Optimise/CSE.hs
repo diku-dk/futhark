@@ -137,6 +137,13 @@ cseInFunDef cse_arrays fundec =
 
 type CSEM rep = Reader (CSEState rep)
 
+-- | Like 'substituteNames', but leaves the term alone rather than
+-- rebuilding an identical one when there is nothing to substitute.
+substituteNames' :: (Substitute a) => M.Map VName VName -> a -> a
+substituteNames' substs x
+  | M.null substs = x
+  | otherwise = substituteNames substs x
+
 cseInBody ::
   (Aliased rep, CSEInOp (Op rep)) =>
   [Diet] ->
@@ -146,7 +153,7 @@ cseInBody ds (Body bodydec stms res) = do
   (stms', res') <-
     cseInStms (res_cons <> stms_cons) (stmsToList stms) $ do
       CSEState (_, nsubsts) _ <- ask
-      pure $ substituteNames nsubsts res
+      pure $ substituteNames' nsubsts res
   pure $ Body bodydec stms' res'
   where
     (res_als, stms_cons) = mkStmsAliases stms res
@@ -204,8 +211,8 @@ cseInStm ::
   CSEM rep a
 cseInStm consumed (Let pat aux e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
-  let e' = substituteNames nsubsts e
-      pat' = substituteNames nsubsts pat
+  let e' = substituteNames' nsubsts e
+      pat' = substituteNames' nsubsts pat
   if not (alreadyAliases e) && any (bad cse_arrays) (patElems pat)
     then m [Let pat' aux e']
     else case M.lookup (stmAuxDec aux, e') esubsts of
