@@ -202,7 +202,10 @@ fuseSOACwithKer ::
   SOAC ->
   FusedSOAC ->
   TryFusion FusedSOAC
-fuseSOACwithKer mode unfus_set outVars soac_p ker = do
+fuseSOACwithKer mode unfus_set outVars soac_p0 ker = do
+  -- soac_p0 is not removed from the program until much later, so the copy of it
+  -- that ends up inside the fused SOAC must be given fresh names.
+  soac_p <- flip SOAC.setLambda soac_p0 <$> renameLambda (SOAC.lambda soac_p0)
   -- We are fusing soac_p into soac_c, i.e, the output of soac_p is going
   -- into soac_c.
   let soac_c = fsSOAC ker
@@ -214,15 +217,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       lam_c = SOAC.lambda soac_c
       w = SOAC.width soac_p
       returned_outvars = filter (`nameIn` unfus_set) outVars
-      success res_outnms res_soac = do
-        -- Avoid name duplication, because the producer lambda is not
-        -- removed from the program until much later.
-        uniq_lam <- renameLambda $ SOAC.lambda res_soac
-        pure $
-          ker
-            { fsSOAC = uniq_lam `SOAC.setLambda` res_soac,
-              fsOutNames = res_outnms
-            }
+      success res_outnms res_soac =
+        pure $ ker {fsSOAC = res_soac, fsOutNames = res_outnms}
 
   -- Can only fuse SOACs with same width.
   guard $ SOAC.width soac_p == SOAC.width soac_c
