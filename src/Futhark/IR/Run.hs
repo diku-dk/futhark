@@ -13,23 +13,36 @@ import Control.Monad (foldM, zipWithM, (>=>))
 import Control.Monad.Error.Class
 import Control.Monad.Except (ExceptT, runExceptT)
 import Control.Monad.IO.Class
+import Data.Int qualified as I
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Text qualified as T
-import Data.Vector.Mutable qualified as MV
 import Data.Vector.Storable qualified as SVec
+import Data.Vector.Storable.Mutable qualified as MSVec
 import Foreign.Storable (Storable)
 import Futhark.Data qualified as V
 import Futhark.IR
 import Futhark.IR.GPU (GPU)
 import Futhark.IR.SOACS (HistOp (..), Reduce (..), SOAC (FlatMap, Hist, Screma, Stream), SOACS, Scan (..), ScremaForm (..), flatMapNonuniform)
 import Language.Futhark.Primitive qualified as P
+import Numeric.Half qualified as H
 
 data Val
   = PrimVal PrimValue
-  | ArrayValue [Int] PrimType (MV.IOVector PrimValue)
+  | ArrayValue [Int] PrimType ArrayValues
   | AccValue [AccUpdate]
+
+data ArrayValues
+  = I8ArrayValues (MSVec.IOVector I.Int8)
+  | I16ArrayValues (MSVec.IOVector I.Int16)
+  | I32ArrayValues (MSVec.IOVector I.Int32)
+  | I64ArrayValues (MSVec.IOVector I.Int64)
+  | F16ArrayValues (MSVec.IOVector H.Half)
+  | F32ArrayValues (MSVec.IOVector Float)
+  | F64ArrayValues (MSVec.IOVector Double)
+  | BoolArrayValues (MSVec.IOVector Bool)
+  | UnitArrayValues (MSVec.IOVector ())
 
 data AccUpdate = AccUpdate Safety [Int] [Val]
 
@@ -57,28 +70,110 @@ newArrayValue :: [Int] -> PrimType -> [PrimValue] -> InterpM Val
 newArrayValue shape element_type values
   | length values /= product shape =
       interpError "invalid array storage"
-  | otherwise = do
-      vector <- liftIO $ MV.new (length values)
-      liftIO $
-        mapM_
-          (uncurry (MV.write vector))
-          (zip [0 ..] values)
-      pure $ ArrayValue shape element_type vector
+  | otherwise = ArrayValue shape element_type <$> newValues element_type
+  where
+    newValues (IntType Int8) = I8ArrayValues <$> newPrimVector expectInt8
+    newValues (IntType Int16) = I16ArrayValues <$> newPrimVector expectInt16
+    newValues (IntType Int32) = I32ArrayValues <$> newPrimVector expectInt32
+    newValues (IntType Int64) = I64ArrayValues <$> newPrimVector expectInt64
+    newValues (FloatType Float16) = F16ArrayValues <$> newPrimVector expectFloat16
+    newValues (FloatType Float32) = F32ArrayValues <$> newPrimVector expectFloat32
+    newValues (FloatType Float64) = F64ArrayValues <$> newPrimVector expectFloat64
+    newValues Bool = BoolArrayValues <$> newPrimVector expectBool
+    newValues Unit = UnitArrayValues <$> newPrimVector expectUnit
 
-arrayValues :: MV.IOVector PrimValue -> InterpM [PrimValue]
-arrayValues vector =
-  liftIO $
-    mapM (MV.read vector) [0 .. MV.length vector - 1]
+    newPrimVector unwrap =
+      mapM unwrap values >>= liftIO . SVec.thaw . SVec.fromList
 
-readArrayValue ::
-  MV.IOVector PrimValue ->
-  Int ->
-  InterpM PrimValue
+    expectInt8 (IntValue (Int8Value element)) = pure element
+    expectInt8 _ = interpError "expected an i8 value"
+    expectInt16 (IntValue (Int16Value element)) = pure element
+    expectInt16 _ = interpError "expected an i16 value"
+    expectInt32 (IntValue (Int32Value element)) = pure element
+    expectInt32 _ = interpError "expected an i32 value"
+    expectInt64 (IntValue (Int64Value element)) = pure element
+    expectInt64 _ = interpError "expected an i64 value"
+    expectFloat16 (FloatValue (Float16Value element)) = pure element
+    expectFloat16 _ = interpError "expected an f16 value"
+    expectFloat32 (FloatValue (Float32Value element)) = pure element
+    expectFloat32 _ = interpError "expected an f32 value"
+    expectFloat64 (FloatValue (Float64Value element)) = pure element
+    expectFloat64 _ = interpError "expected an f64 value"
+    expectBool (BoolValue element) = pure element
+    expectBool _ = interpError "expected a bool value"
+    expectUnit UnitValue = pure ()
+    expectUnit _ = interpError "expected a unit value"
+
+arrayValues :: ArrayValues -> InterpM [PrimValue]
+arrayValues values =
+  mapM (readArrayValue values) [0 .. arrayValuesLength values - 1]
+
+arrayValuesLength :: ArrayValues -> Int
+arrayValuesLength (I8ArrayValues values) = MSVec.length values
+arrayValuesLength (I16ArrayValues values) = MSVec.length values
+arrayValuesLength (I32ArrayValues values) = MSVec.length values
+arrayValuesLength (I64ArrayValues values) = MSVec.length values
+arrayValuesLength (F16ArrayValues values) = MSVec.length values
+arrayValuesLength (F32ArrayValues values) = MSVec.length values
+arrayValuesLength (F64ArrayValues values) = MSVec.length values
+arrayValuesLength (BoolArrayValues values) = MSVec.length values
+arrayValuesLength (UnitArrayValues values) = MSVec.length values
+
+readArrayValue :: ArrayValues -> Int -> InterpM PrimValue
 readArrayValue vector index
-  | index < 0 || index >= MV.length vector =
+  | index < 0 || index >= arrayValuesLength vector =
       interpError "array index out of bounds"
-  | otherwise =
-      liftIO $ MV.read vector index
+readArrayValue (I8ArrayValues values) index =
+  IntValue . Int8Value <$> liftIO (MSVec.read values index)
+readArrayValue (I16ArrayValues values) index =
+  IntValue . Int16Value <$> liftIO (MSVec.read values index)
+readArrayValue (I32ArrayValues values) index =
+  IntValue . Int32Value <$> liftIO (MSVec.read values index)
+readArrayValue (I64ArrayValues values) index =
+  IntValue . Int64Value <$> liftIO (MSVec.read values index)
+readArrayValue (F16ArrayValues values) index =
+  FloatValue . Float16Value <$> liftIO (MSVec.read values index)
+readArrayValue (F32ArrayValues values) index =
+  FloatValue . Float32Value <$> liftIO (MSVec.read values index)
+readArrayValue (F64ArrayValues values) index =
+  FloatValue . Float64Value <$> liftIO (MSVec.read values index)
+readArrayValue (BoolArrayValues values) index =
+  BoolValue <$> liftIO (MSVec.read values index)
+readArrayValue (UnitArrayValues values) index =
+  UnitValue <$ liftIO (MSVec.read values index)
+
+writeArrayValue :: ArrayValues -> Int -> PrimValue -> InterpM ()
+writeArrayValue (I8ArrayValues values) index (IntValue (Int8Value element)) =
+  liftIO $ MSVec.write values index element
+writeArrayValue (I16ArrayValues values) index (IntValue (Int16Value element)) =
+  liftIO $ MSVec.write values index element
+writeArrayValue (I32ArrayValues values) index (IntValue (Int32Value element)) =
+  liftIO $ MSVec.write values index element
+writeArrayValue (I64ArrayValues values) index (IntValue (Int64Value element)) =
+  liftIO $ MSVec.write values index element
+writeArrayValue (F16ArrayValues values) index (FloatValue (Float16Value element)) =
+  liftIO $ MSVec.write values index element
+writeArrayValue (F32ArrayValues values) index (FloatValue (Float32Value element)) =
+  liftIO $ MSVec.write values index element
+writeArrayValue (F64ArrayValues values) index (FloatValue (Float64Value element)) =
+  liftIO $ MSVec.write values index element
+writeArrayValue (BoolArrayValues values) index (BoolValue element) =
+  liftIO $ MSVec.write values index element
+writeArrayValue (UnitArrayValues values) index UnitValue =
+  liftIO $ MSVec.write values index ()
+writeArrayValue _ _ _ =
+  interpError "array element type mismatch"
+
+cloneArrayValues :: ArrayValues -> IO ArrayValues
+cloneArrayValues (I8ArrayValues values) = I8ArrayValues <$> MSVec.clone values
+cloneArrayValues (I16ArrayValues values) = I16ArrayValues <$> MSVec.clone values
+cloneArrayValues (I32ArrayValues values) = I32ArrayValues <$> MSVec.clone values
+cloneArrayValues (I64ArrayValues values) = I64ArrayValues <$> MSVec.clone values
+cloneArrayValues (F16ArrayValues values) = F16ArrayValues <$> MSVec.clone values
+cloneArrayValues (F32ArrayValues values) = F32ArrayValues <$> MSVec.clone values
+cloneArrayValues (F64ArrayValues values) = F64ArrayValues <$> MSVec.clone values
+cloneArrayValues (BoolArrayValues values) = BoolArrayValues <$> MSVec.clone values
+cloneArrayValues (UnitArrayValues values) = UnitArrayValues <$> MSVec.clone values
 
 evalBody :: OpEvaluator rep -> FunEnv rep -> Env -> Body rep -> InterpM [Val]
 evalBody eval_op funs env (Body _ stms res) = do
@@ -252,7 +347,7 @@ evalWithAcc eval_op funs env inputs lambda = do
     validateArray index_shape (ArrayValue shape _ values)
       | index_shape /= take (length index_shape) shape =
           interpError "WithAcc input array does not match index space"
-      | MV.length values /= product shape =
+      | arrayValuesLength values /= product shape =
           interpError "invalid WithAcc input array storage"
       | otherwise =
           pure ()
@@ -383,7 +478,7 @@ evalBasicOp env (ArrayLit elements (Array element_type (Shape row_shape_exps) _)
             interpError "array literal row shape mismatch"
         | actual_type /= expected_type =
             interpError "array literal row element type mismatch"
-        | MV.length values /= product actual_shape =
+        | arrayValuesLength values /= product actual_shape =
             interpError "invalid array literal row storage"
         | otherwise =
             arrayValues values
@@ -424,7 +519,7 @@ evalBasicOp env (Reshape array_name reshape) = do
       (shapeDims $ newShape reshape)
   case array of
     ArrayValue _ element_type values
-      | product dimensions == MV.length values ->
+      | product dimensions == arrayValuesLength values ->
           pure [ArrayValue dimensions element_type values]
       | otherwise ->
           interpError "reshape element count mismatch"
@@ -437,7 +532,7 @@ evalBasicOp env (Opaque (OpaqueTrace _) se) =
 evalBasicOp env (Manifest array_name _) =
   case M.lookup array_name env of
     Just (ArrayValue shape element_type values) -> do
-      values' <- liftIO $ MV.clone values
+      values' <- liftIO $ cloneArrayValues values
       pure [ArrayValue shape element_type values']
     Just PrimVal {} -> interpError "cannot manifest a primitive value"
     Just AccValue {} -> interpError "cannot manifest an accumulator value"
@@ -578,10 +673,9 @@ evalBasicOp env (Update _ array_name slice value_exp) = do
 
       let offsets = map (linearIndex shape) coordinates
 
-      liftIO $
-        mapM_
-          (uncurry (MV.write values))
-          (zip offsets replacement_values)
+      mapM_
+        (uncurry $ writeArrayValue values)
+        (zip offsets replacement_values)
 
       pure [ArrayValue shape element_type values]
 evalBasicOp env (FlatIndex array_name flat_slice) = do
@@ -613,7 +707,7 @@ evalBasicOp env (FlatIndex array_name flat_slice) = do
       interpError "cannot flat-index an accumulator value"
   where
     validOffset values offset =
-      offset >= 0 && offset < MV.length values
+      offset >= 0 && offset < arrayValuesLength values
 evalBasicOp env (FlatUpdate source_name flat_slice replacement_name) = do
   source <-
     maybe
@@ -634,10 +728,9 @@ evalBasicOp env (FlatUpdate source_name flat_slice replacement_name) = do
       if not $ all (validOffset source_values) offsets
         then interpError "flat update out of bounds"
         else do
-          liftIO $
-            mapM_
-              (uncurry $ MV.write source_values)
-              (zip offsets replacement_values)
+          mapM_
+            (uncurry $ writeArrayValue source_values)
+            (zip offsets replacement_values)
           pure [ArrayValue source_shape source_type source_values]
     ArrayValue {} ->
       interpError "flat update source must be one-dimensional"
@@ -646,7 +739,7 @@ evalBasicOp env (FlatUpdate source_name flat_slice replacement_name) = do
     AccValue {} -> interpError "cannot flat-update an accumulator value"
   where
     validOffset values offset =
-      offset >= 0 && offset < MV.length values
+      offset >= 0 && offset < arrayValuesLength values
 
     valuesForReplacement expected_type [] (PrimVal val)
       | P.primValueType val == expected_type =
@@ -808,7 +901,7 @@ indexArray ::
   Env ->
   [Int] ->
   PrimType ->
-  MV.IOVector PrimValue ->
+  ArrayValues ->
   Slice SubExp ->
   InterpM [Val]
 indexArray env shape element_type values slice = do
@@ -1179,7 +1272,7 @@ validateSoacInput width (ArrayValue shape _ values) =
     outer_size : _
       | outer_size /= width ->
           interpError "Screma input outer size mismatch"
-      | MV.length values /= product shape ->
+      | arrayValuesLength values /= product shape ->
           interpError "invalid Screma input storage"
       | otherwise ->
           pure ()
@@ -1208,7 +1301,7 @@ readAccumulatorElement :: [Int] -> Val -> InterpM Val
 readAccumulatorElement indices (ArrayValue shape element_type values)
   | length indices > length shape =
       interpError "accumulator index rank exceeds array rank"
-  | MV.length values /= product shape =
+  | arrayValuesLength values /= product shape =
       interpError "invalid accumulator backing-array storage"
   | otherwise = do
       let index_rank = length indices
@@ -1243,10 +1336,9 @@ writeAccumulatorElement
         replacement_values <-
           updateValues element_type element_shape replacement
 
-        liftIO $
-          mapM_
-            (uncurry $ MV.write values)
-            (zip [offset ..] replacement_values)
+        mapM_
+          (uncurry $ writeArrayValue values)
+          (zip [offset ..] replacement_values)
 
         pure array
 writeAccumulatorElement _ _ _ =
@@ -1289,10 +1381,9 @@ writeHistogramBin
     if length replacement_values /= bin_size
       then interpError "invalid Hist operator result storage"
       else do
-        liftIO $
-          mapM_
-            (uncurry $ MV.write values)
-            (zip [offset ..] replacement_values)
+        mapM_
+          (uncurry $ writeArrayValue values)
+          (zip [offset ..] replacement_values)
 
         pure histogram
 writeHistogramBin _ PrimVal {} _ =
@@ -1364,7 +1455,7 @@ collectFlatMapOutput env sizes total_size result_type rows
     expectSegment expected_size (ArrayValue (size : row_shape) element_type values)
       | size /= expected_size =
           interpError "FlatMap segment size does not match returned size"
-      | MV.length values /= product (size : row_shape) =
+      | arrayValuesLength values /= product (size : row_shape) =
           interpError "invalid FlatMap segment storage"
       | otherwise = do
           primitive_values <- arrayValues values
@@ -1379,7 +1470,7 @@ collectFlatMapOutput env sizes total_size result_type rows
       interpError "expected primitive FlatMap result"
 
     expectArray (ArrayValue shape element_type values)
-      | MV.length values == product shape = do
+      | arrayValuesLength values == product shape = do
           primitive_values <- arrayValues values
           pure (shape, element_type, primitive_values)
       | otherwise =
@@ -1473,7 +1564,7 @@ collectScremaOutputs env width return_types iteration_results
       interpError "expected primitive Screma output"
 
     expectArray (ArrayValue shape element_type values)
-      | MV.length values == product shape = do
+      | arrayValuesLength values == product shape = do
           primitive_values <- arrayValues values
           pure (shape, element_type, primitive_values)
       | otherwise =
