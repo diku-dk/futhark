@@ -49,7 +49,6 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Futhark.IR.Prop.Pat
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty
@@ -90,7 +89,9 @@ notNameIn v (Names vs) = baseTag v `IM.notMember` vs
 
 -- | Construct a name set from a list.  Slow.
 namesFromList :: [VName] -> Names
-namesFromList vs = Names $ IM.fromList $ zip (map baseTag vs) vs
+namesFromList = Names . foldl' insert IM.empty
+  where
+    insert m v = IM.insert (baseTag v) v m
 
 -- | Turn a name set into a list of names.  Slow.
 namesToList :: Names -> [VName]
@@ -441,7 +442,9 @@ boundInBody = boundByStms . bodyStms
 
 -- | The names bound by a binding.
 boundByStm :: Stm rep -> Names
-boundByStm = namesFromList . patNames . stmPat
+boundByStm = Names . foldl' insert IM.empty . patElems . stmPat
+  where
+    insert m pe = IM.insert (baseTag (patElemName pe)) (patElemName pe) m
 
 -- | The names bound by the bindings.
 boundByStms :: Stms rep -> Names
