@@ -430,7 +430,7 @@ nonrecSimplifyStm ::
 nonrecSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) = do
   cs' <- simplify cs
   e' <- simplifyExpBase e
-  (pat', pat_cs) <- collectCerts $ traverse simplify $ removePatWisdom pat
+  (pat', pat_cs) <- collectCerts $ traverse (simplify . snd) pat
   let aux' = StmAux (cs' <> pat_cs) attrs loc dec
   pure $ mkWiseStm pat' aux' e'
 
@@ -1114,6 +1114,7 @@ simplifyLambdaWith f blocked usage lam@(Lambda params rettype body) = do
   pure (Lambda params' rettype' body', hoisted)
 
 instance Simplifiable Certs where
+  simplify (Certs []) = pure (Certs [])
   simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs
     where
       check idd = do
