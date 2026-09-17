@@ -1181,7 +1181,7 @@ eliminate = auxiliary (stmsFromList [])
   where
     auxiliary stms' deps stms
       | Just (stms'', stm@(Let v aux e)) <- stmsLast stms =
-          if namesIntersect deps $ namesFromList $ patNames v
+          if any (`nameIn` deps) (patNames v)
             then
               auxiliary (oneStm stm <> stms') (freeIn (aux, e) <> deps) stms''
             else
