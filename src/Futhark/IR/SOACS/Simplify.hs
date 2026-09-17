@@ -1288,8 +1288,8 @@ prunePreLambdaScanResults (ScremaForm pre_lam scan red post_lam) =
     temp_post_lam = eliminateByRes post_lam
     deps = freeIn $ lambdaBody temp_post_lam
 
--- | Prunes all unused results from the pre-lambda in a ScremaForm
--- (fixed-point).
+-- | Prunes all unused results from the pre-lambda in a ScremaForm with scans or
+-- reduces (fixed-point).
 --
 -- Repeatedly prunes unused scan and map results until no further
 -- changes occur.  This is necessary because eliminating some results
@@ -1303,8 +1303,13 @@ prunePreLambdaScanResults (ScremaForm pre_lam scan red post_lam) =
 -- Returns: A ScremaForm with all transitively unused pre-lambda
 -- results eliminated.
 prunePreLambdaResults :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
-prunePreLambdaResults form =
-  if extent form == extent form' then form' else prunePreLambdaResults form'
+prunePreLambdaResults form
+  -- Performance weak: without scans or reductions, every pre-lambda result is a
+  -- map result that the post-lambda consumes directly, so there is nothing here
+  -- that the ordinary simplifier will not remove later.
+  | null (scremaScans form), null (scremaReduces form) = form
+  | otherwise =
+      if extent form == extent form' then form' else prunePreLambdaResults form'
   where
     form' = prunePreLambdaScanResults $ prunePreLambdaMapResults form
     -- Both prunings only ever remove results, parameters and statements, so a
