@@ -94,13 +94,16 @@ closureRetvalStructField :: VName -> Name
 closureRetvalStructField v =
   nameFromString "retval_" <> nameFromText (prettyText v)
 
-data ValueType = Prim PrimType | MemBlock | RawMem
+-- | How a value is passed to a worker through the closure struct.
+data ValueType = Prim PrimType | MemBlock | RawMem | ScalarMem
 
 compileFreeStructFields :: [VName] -> [(C.Type, C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
   where
     field name (_, storage_ty, Prim _) =
       [C.csdecl|$ty:storage_ty $id:(closureFreeStructField name);|]
+    field name (ty, _, ScalarMem) =
+      [C.csdecl|$ty:ty $id:(closureFreeStructField name);|]
     field name (_, _, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureFreeStructField name);|]
 
@@ -109,6 +112,8 @@ compileRetvalStructFields = zipWith field
   where
     field name (ty, _, Prim _) =
       [C.csdecl|$ty:ty *$id:(closureRetvalStructField name);|]
+    field name (ty, _, ScalarMem) =
+      [C.csdecl|$ty:ty $id:(closureRetvalStructField name);|]
     field name (_, _, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureRetvalStructField name);|]
 
@@ -125,6 +130,8 @@ compileSetStructValues struct = zipWith field
     field name (_, _, MemBlock) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name.mem;|]
     field name (_, _, RawMem) =
+      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
+    field name (_, _, ScalarMem) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
 
 compileSetRetvalStructValues ::
@@ -144,6 +151,8 @@ compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
     field name (_, _, RawMem) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
+    field name (_, _, ScalarMem) =
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
 
 compileGetRetvalStructVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, C.Type, ValueType)] -> [C.InitGroup]
 compileGetRetvalStructVals struct = zipWith field
@@ -151,6 +160,8 @@ compileGetRetvalStructVals struct = zipWith field
     field name (ty, _storage_ty, Prim _) =
       let inner = [C.cexp|*$id:struct->$id:(closureRetvalStructField name)|]
        in [C.cdecl|$ty:ty $id:name = $exp:inner;|]
+    field name (ty, _, ScalarMem) =
+      [C.cdecl|$ty:ty $id:name = $id:struct->$id:(closureRetvalStructField name);|]
     field name (ty, _, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(prettyString name),
@@ -168,6 +179,8 @@ compileGetStructVals struct = zipWith field
     field name (ty, _storage_ty, Prim pt) =
       let inner = [C.cexp|$id:struct->$id:(closureFreeStructField name)|]
        in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
+    field name (ty, _, ScalarMem) =
+      [C.cdecl|$ty:ty $id:name = $id:struct->$id:(closureFreeStructField name);|]
     field name (ty, _, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(prettyString name),
@@ -179,6 +192,8 @@ compileWriteBackResVals struct = zipWith field
   where
     field name (_, _, Prim _) =
       [C.cstm|*$id:struct->$id:(closureRetvalStructField name) = $exp:(C.toExp name noLoc);|]
+    field name (_, _, ScalarMem) =
+      [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name;|]
     field name (_, _, _) =
       [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name.mem;|]
 
@@ -190,6 +205,8 @@ paramToCType (MemParam name space') = do
   pure (ct, ct, vt)
 
 mcMemToCType :: VName -> Space -> GC.CompilerM op s (C.Type, ValueType)
+mcMemToCType _ (ScalarSpace _ pt) =
+  pure ([C.cty|$ty:(GC.primTypeToCType pt)*|], ScalarMem)
 mcMemToCType v space = do
   refcount <- GC.fatMemory space
   cached <- isJust <$> GC.cacheMem v
