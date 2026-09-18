@@ -426,8 +426,8 @@ compileOp (ParLoop s' body free) = do
                }|]
 
   mapM_ GC.item code'
-compileOp (Atomic aop) =
-  atomicOps aop (\ty _ -> pure [C.cty|$ty:ty*|])
+compileOp (Atomic space aop) =
+  atomicOps space aop (\ty _ -> pure [C.cty|$ty:ty*|])
 compileOp (ISPCKernel body _) =
   scopedBlock body
 compileOp (ForEach i from bound body) = do
@@ -456,6 +456,7 @@ scopedBlock code = do
 
 doAtomic ::
   (C.ToIdent a1) =>
+  Space ->
   a1 ->
   VName ->
   Count m (TExp Int32) ->
@@ -464,19 +465,19 @@ doAtomic ::
   C.Type ->
   (C.Type -> VName -> GC.CompilerM op s C.Type) ->
   GC.CompilerM op s ()
-doAtomic old arr ind val op ty castf = do
+doAtomic space old arr ind val op ty castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   cast <- castf ty arr
-  arr' <- GC.rawMem arr DefaultSpace
+  arr' <- GC.rawMem arr space
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
 
-atomicOps :: AtomicOp -> (C.Type -> VName -> GC.CompilerM op s C.Type) -> GC.CompilerM op s ()
-atomicOps (AtomicCmpXchg t old arr ind res val) castf = do
+atomicOps :: Space -> AtomicOp -> (C.Type -> VName -> GC.CompilerM op s C.Type) -> GC.CompilerM op s ()
+atomicOps space (AtomicCmpXchg t old arr ind res val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
-  arr' <- GC.rawMem arr DefaultSpace
+  arr' <- GC.rawMem arr space
   GC.stm
     [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
                  &$id:old,
@@ -485,36 +486,39 @@ atomicOps (AtomicCmpXchg t old arr ind res val) castf = do
   where
     op :: String
     op = "__atomic_compare_exchange_n"
-atomicOps (AtomicXchg t old arr ind val) castf = do
+atomicOps space (AtomicXchg t old arr ind val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
-  GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_SEQ_CST);|]
+  arr' <- GC.rawMem arr space
+  GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'], $exp:val', __ATOMIC_SEQ_CST);|]
   where
     op :: String
     op = "__atomic_exchange_n"
-atomicOps (AtomicLoad t ret arr ind) castf = do
+atomicOps space (AtomicLoad t ret arr ind) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
-  GC.stm [C.cstm|$id:ret = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], __ATOMIC_ACQUIRE);|]
+  arr' <- GC.rawMem arr space
+  GC.stm [C.cstm|$id:ret = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'], __ATOMIC_ACQUIRE);|]
   where
     op :: String
     op = "__atomic_load_n"
-atomicOps (AtomicStore t arr ind val) castf = do
+atomicOps space (AtomicStore t arr ind val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
-  GC.stm [C.cstm|$id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_RELEASE);|]
+  arr' <- GC.rawMem arr space
+  GC.stm [C.cstm|$id:op(&(($ty:cast)$exp:arr')[$exp:ind'], $exp:val', __ATOMIC_RELEASE);|]
   where
     op :: String
     op = "__atomic_store_n"
-atomicOps (AtomicAdd t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|] castf
-atomicOps (AtomicSub t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|] castf
-atomicOps (AtomicAnd t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|] castf
-atomicOps (AtomicOr t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|] castf
-atomicOps (AtomicXor t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicAdd t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicSub t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicAnd t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicOr t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicXor t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|] castf

@@ -379,16 +379,16 @@ atomicUpdateLocking atomicBinOp lam
           -- Common variables.
           old <- dPrimS "old" t
 
-          (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
+          (arr', a_space, bucket_offset) <- fullyIndexArray a bucket
 
-          case opHasAtomicSupport old arr' (sExt32 <$> bucket_offset) op of
+          case opHasAtomicSupport a_space old arr' (sExt32 <$> bucket_offset) op of
             Just f -> sOp $ f $ Imp.var y t
             Nothing ->
               atomicUpdateCAS t a old bucket x $
                 x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
-    opHasAtomicSupport old arr' bucket' bop = do
-      let atomic f = Imp.Atomic . f old arr' bucket'
+    opHasAtomicSupport space old arr' bucket' bop = do
+      let atomic f = Imp.Atomic space . f old arr' bucket'
       atomic <$> atomicBinOp bop
 
     primOrCas ops
@@ -409,13 +409,13 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)
 
   -- Correctly index into locks.
-  (locks', _locks_space, locks_offset) <-
+  (locks', locks_space, locks_offset) <-
     fullyIndexArray (lockingArray locking) $ lockingMapping locking bucket
 
   -- Critical section
   let try_acquire_lock = do
         old <-- (0 :: Imp.TExp Int32)
-        sOp . Imp.Atomic $
+        sOp . Imp.Atomic locks_space $
           Imp.AtomicCmpXchg
             int32
             (tvVar old)
@@ -428,7 +428,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
       -- simple write, for memory coherency reasons.
       release_lock = do
         old <-- lockingToLock locking
-        sOp . Imp.Atomic $
+        sOp . Imp.Atomic locks_space $
           Imp.AtomicCmpXchg
             int32
             (tvVar old)
@@ -480,7 +480,7 @@ atomicUpdateCAS ::
   MulticoreGen ()
 atomicUpdateCAS t arr old bucket x do_op = do
   run_loop <- dPrimV "run_loop" (0 :: Imp.TExp Int32)
-  (arr', _a_space, bucket_offset) <- fullyIndexArray arr bucket
+  (arr', a_space, bucket_offset) <- fullyIndexArray arr bucket
 
   bytes <- toIntegral $ primBitSize t
   let (toBits, fromBits) =
@@ -507,7 +507,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
   sWhile (tvExp run_loop .==. 0) $ do
     x <~~ Imp.var old t
     do_op -- Writes result into x
-    sOp . Imp.Atomic $
+    sOp . Imp.Atomic a_space $
       Imp.AtomicCmpXchg
         bytes
         old_bits_v

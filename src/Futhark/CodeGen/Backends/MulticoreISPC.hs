@@ -933,8 +933,8 @@ compileOp (ExtractLane dest tar lane) = do
   tar' <- compileExp tar
   lane' <- compileExp lane
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
-compileOp (Atomic aop) =
-  MC.atomicOps aop $ \ty arr -> do
+compileOp (Atomic space aop) =
+  MC.atomicOps space aop $ \ty arr -> do
     cached <- isJust <$> GC.cacheMem arr
     if cached
       then pure [C.cty|$tyqual:varying $ty:ty* $tyqual:uniform|]
@@ -1039,7 +1039,7 @@ findDeps (Op (GetLoopBounds x y)) = do
   addDeps y mempty
 findDeps (Op (ExtractLane x _ _)) = do
   addDeps x mempty
-findDeps (Op (Atomic (AtomicCmpXchg _ old arr ind res val))) = do
+findDeps (Op (Atomic _ (AtomicCmpXchg _ old arr ind res val))) = do
   addDeps res $ freeIn arr <> freeIn ind <> freeIn val
   addDeps old $ freeIn arr <> freeIn ind <> freeIn val
 findDeps _ = pure ()

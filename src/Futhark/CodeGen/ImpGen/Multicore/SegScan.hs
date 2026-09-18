@@ -344,14 +344,18 @@ load64 ::
   VName ->
   Imp.Count Imp.Elements (Imp.TExp Int32) ->
   MulticoreGen ()
-load64 v arr i = sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) v arr i
+load64 v arr i = do
+  space <- entryMemSpace <$> lookupMemory arr
+  sOp $ Imp.Atomic space $ Imp.AtomicLoad (IntType Int64) v arr i
 
 store64 ::
   VName ->
   Imp.Count Imp.Elements (Imp.TExp Int32) ->
   Imp.TExp Int64 ->
   MulticoreGen ()
-store64 arr i x = sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) arr i (untyped x)
+store64 arr i x = do
+  space <- entryMemSpace <$> lookupMemory arr
+  sOp $ Imp.Atomic space $ Imp.AtomicStore (IntType Int64) arr i (untyped x)
 
 add64 ::
   TV Int64 ->
@@ -359,7 +363,9 @@ add64 ::
   Imp.Count Imp.Elements (Imp.TExp Int32) ->
   Imp.TExp Int64 ->
   MulticoreGen ()
-add64 v arr i x = sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar v) arr i (untyped x)
+add64 v arr i x = do
+  space <- entryMemSpace <$> lookupMemory arr
+  sOp $ Imp.Atomic space $ Imp.AtomicAdd Int64 (tvVar v) arr i (untyped x)
 
 applyPostOp ::
   Pat LetDecMem ->
