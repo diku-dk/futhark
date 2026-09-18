@@ -69,7 +69,7 @@ arrParam arr = do
   name_entry <- lookupVar arr
   case name_entry of
     ArrayVar _ (ArrayEntry (MemLoc mem _ _) _) ->
-      pure $ Imp.MemParam mem DefaultSpace
+      Imp.MemParam mem . entryMemSpace <$> lookupMemory mem
     _ -> error $ "arrParam: could not handle array " ++ show arr
 
 toParam :: VName -> TypeBase shape o -> MulticoreGen [Imp.Param]
