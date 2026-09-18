@@ -160,6 +160,15 @@ makeStringLiteral str = do
 
 -- | Set memory in ISPC
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> ISPCCompilerM ()
+-- A 'ScalarSpace' block is an array, not a reference-counted pointer, so
+-- assigning one to another is an element-wise copy.
+setMem dest src (ScalarSpace ds _) = do
+  i <- C.toIdent <$> newVName "i"
+  let bound = cproduct $ map (`C.toExp` noLoc) ds
+  GC.stm
+    [C.cstm|for ($tyqual:uniform typename int32_t $id:i = 0; $id:i < $exp:bound; $id:i++) {
+              $exp:dest[$id:i] = $exp:src[$id:i];
+            }|]
 setMem dest src space = do
   let src_s = T.unpack $ expText $ C.toExp src noLoc
   strlit <- makeStringLiteral src_s
@@ -171,6 +180,8 @@ setMem dest src space = do
 
 -- | Unref memory in ISPC
 unRefMem :: (C.ToExp a) => a -> Space -> ISPCCompilerM ()
+-- A 'ScalarSpace' block is not reference counted; there is nothing to free.
+unRefMem _ ScalarSpace {} = pure ()
 unRefMem mem space = do
   cached <- isJust <$> GC.cacheMem mem
   let mem_s = T.unpack $ expText $ C.toExp mem noLoc
@@ -510,6 +521,21 @@ compileCode (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
           go code
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
+compileCode (DeclareMem name (ScalarSpace ds t)) = do
+  -- A 'ScalarSpace' block is an array, and an ISPC varying array has no
+  -- address, so it cannot not be passed to a task. Give each program instance a
+  -- row of an array-of-structs and name that row with a varying pointer, which
+  -- is addressable and which every other use of the block can treat exactly
+  -- like the array it replaces.
+  storage <- newVName "scalar_storage"
+  let ct = GC.primTypeToCType t
+      n = cproduct $ map (`C.toExp` noLoc) ds
+  GC.decl [C.cdecl|$tyqual:uniform $ty:ct $id:storage[programCount][$exp:n];|]
+  GC.decl [C.cdecl|$tyqual:uniform $ty:ct * $tyqual:varying $id:name = &$id:storage[programIndex][0];|]
+compileCode (Allocate _ _ ScalarSpace {}) =
+  -- Handled by the declaration of the memory block, which is translated to
+  -- an actual array.
+  pure ()
 compileCode (Allocate name (Count (TPrimExp e)) space) = do
   size <- compileExp e
   cached <- GC.cacheMem name
