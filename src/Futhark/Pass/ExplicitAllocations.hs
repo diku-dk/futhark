@@ -753,18 +753,30 @@ data MemReq
   | NeedsNormalisation Space
   deriving (Eq, Show)
 
-combMemReqs :: MemReq -> MemReq -> MemReq
-combMemReqs x@NeedsNormalisation {} _ = x
-combMemReqs _ y@NeedsNormalisation {} = y
-combMemReqs x@(MemReq x_space) y@MemReq {} =
-  if x == y then x else NeedsNormalisation x_space
+-- | Unify the memory requirements of two branches of a 'Match'.  The first
+-- argument is the default space, used when the branches disagree and we
+-- cannot normalise to either of them.
+combMemReqs :: Space -> MemReq -> MemReq -> MemReq
+combMemReqs _ x@NeedsNormalisation {} _ = x
+combMemReqs _ _ y@NeedsNormalisation {} = y
+combMemReqs def_space (MemReq x_space) (MemReq y_space)
+  | x_space == y_space = MemReq x_space
+  -- A 'ScalarSpace' states the size of the array as part of the space, so
+  -- normalising to the space of one branch would give the other branch an
+  -- array of the wrong size.  Normalise to the default space instead.
+  | isScalarSpace x_space || isScalarSpace y_space = NeedsNormalisation def_space
+  | otherwise = NeedsNormalisation x_space
+
+isScalarSpace :: Space -> Bool
+isScalarSpace ScalarSpace {} = True
+isScalarSpace _ = False
 
 type MemReqType = MemInfo (Ext SubExp) NoMode MemReq
 
-combMemReqTypes :: MemReqType -> MemReqType -> MemReqType
-combMemReqTypes (MemArray pt shape o x) (MemArray _ _ _ y) =
-  MemArray pt shape o $ combMemReqs x y
-combMemReqTypes x _ = x
+combMemReqTypes :: Space -> MemReqType -> MemReqType -> MemReqType
+combMemReqTypes def_space (MemArray pt shape o x) (MemArray _ _ _ y) =
+  MemArray pt shape o $ combMemReqs def_space x y
+combMemReqTypes _ x _ = x
 
 contextRets :: MemReqType -> [MemInfo d o r]
 contextRets (MemArray _ shape _ (MemReq space)) =
@@ -950,7 +962,8 @@ allocInExp (Apply fname args rettype loc) = do
 allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   (defbody', def_reqs) <- allocInMatchBody rets defbody
   (cases', cases_reqs) <- mapAndUnzipM onCase cases
-  let reqs = zipWith (foldl combMemReqTypes) def_reqs (transpose cases_reqs)
+  def_space <- askDefaultSpace
+  let reqs = zipWith (foldl (combMemReqTypes def_space)) def_reqs (transpose cases_reqs)
   defbody'' <- addCtxToMatchBody reqs defbody'
   cases'' <- mapM (traverse $ addCtxToMatchBody reqs) cases'
   let (cases''', defbody''', rets') =
