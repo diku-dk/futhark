@@ -58,6 +58,14 @@ export = C.EscTypeQual "export" noLoc
 varying :: C.TypeQual
 varying = C.EscTypeQual "varying" noLoc
 
+-- | Qualify a pointer type so that the pointer itself is uniform, not just
+-- what it points at: @uniform T *@ is a varying pointer in ISPC, @uniform T *
+-- uniform@ is not.
+uniformly :: C.Type -> C.Type
+uniformly (C.Type ds (C.Ptr quals d dl) l) =
+  C.Type ds (C.Ptr (uniform : quals) d dl) l
+uniformly t = t
+
 -- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
   (MonadFreshNames m) => T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
@@ -733,6 +741,12 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
     field name (ty, _, MC.Prim pt) = do
       let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
       pure [C.citems|$tyqual:uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
+    field name (ty, _, MC.ScalarMem) =
+      -- The block belongs to this task alone, so the pointer is uniform.
+      -- Note the second 'uniform': without it the pointer itself is varying.
+      pure
+        [C.citems|$ty:(uniformly ty) $id:name =
+                    $id:struct'->$id:(MC.closureFreeStructField name);|]
     field name (_, _, _) = do
       strlit <- makeStringLiteral $ prettyString name
       pure
