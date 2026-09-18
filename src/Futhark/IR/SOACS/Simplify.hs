@@ -18,6 +18,7 @@ module Futhark.IR.SOACS.Simplify
     simplifyMapIota,
     SOACS,
     eliminate,
+    eliminateWithDeps,
     eliminateByRes,
     prunePreLambdaResults,
     dedupInput,
@@ -1177,16 +1178,32 @@ moveTransformToOutput _ _ _ _ =
 -- | Eliminate statements if it is not an dependency used to form the
 -- names given.
 eliminate :: (Buildable rep) => Names -> Stms rep -> Stms rep
-eliminate = auxiliary (stmsFromList [])
+eliminate deps = snd . eliminateWithDeps deps
+
+-- | As 'eliminate', but also return everything the retained statements and the
+-- results depend upon. A lambda parameter is live exactly when it is in this
+-- set, which saves traversing the pruned body again just to find its free
+-- variables. The pair is lazy in its second component, so a caller that only
+-- wants to know what is live need not pay for rebuilding the statements.
+eliminateWithDeps :: (Buildable rep) => Names -> Stms rep -> (Names, Stms rep)
+eliminateWithDeps deps stms
+  -- If nothing needs preserving then nothing is live, as a statement is kept
+  -- only when it binds a name already needed, and the set of needed names grows
+  -- only from statements we keep.
+  | namesNull deps = (mempty, mempty)
+  | otherwise = (final_deps, stmsFromList kept)
   where
-    auxiliary stms' deps stms
-      | Just (stms'', stm@(Let v aux e)) <- stmsLast stms =
-          if any (`nameIn` deps) (patNames v)
-            then
-              auxiliary (oneStm stm <> stms') (freeIn (aux, e) <> deps) stms''
-            else
-              auxiliary stms' deps stms''
-      | otherwise = stms'
+    -- Walking the statements as a list and rebuilding the sequence once is much
+    -- cheaper than peeling them off the right of the sequence, which allocates
+    -- a new sequence per statement in both directions.
+    (final_deps, kept) = auxiliary deps (reverse (stmsToList stms)) []
+
+    auxiliary deps' [] kept' = (deps', kept')
+    auxiliary deps' (stm@(Let v aux e) : stms') kept'
+      | any (`nameIn` deps') (patNames v) =
+          auxiliary (freeIn (aux, e) <> deps') stms' (stm : kept')
+      | otherwise =
+          auxiliary deps' stms' kept'
 
 -- | Eliminate statements inside a lambda if they are not used to
 -- compute the result.

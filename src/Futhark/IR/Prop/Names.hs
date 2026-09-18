@@ -10,6 +10,7 @@ module Futhark.IR.Prop.Names
     namesIntMap,
     namesIntSet,
     nameIn,
+    namesNull,
     notNameIn,
     oneName,
     namesFromList,
@@ -78,6 +79,10 @@ instance Monoid Names where
 
 instance Pretty Names where
   pretty = pretty . namesToList
+
+-- | Is the set of names empty?
+namesNull :: Names -> Bool
+namesNull (Names vs) = IM.null vs
 
 -- | Does the set of names contain this name?
 nameIn :: VName -> Names -> Bool
