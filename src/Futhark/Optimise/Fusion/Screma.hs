@@ -283,6 +283,8 @@ moveRedScanSuperScrema ::
   (MonadFail m, MonadFreshNames m) =>
   SuperScrema SOACS ->
   m (SuperScrema SOACS)
+moveRedScanSuperScrema super_screma@(SuperScrema _ _ _ _ _ _ [] [] _) =
+  pure super_screma
 moveRedScanSuperScrema super_screma = do
   ((scan_red_inp_c, scan_red_lam', _), (_, map_lam', _)) <-
     splitAtLambdaByRes
