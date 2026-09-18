@@ -10,6 +10,7 @@ module Futhark.Pass.ExplicitAllocations
     explicitAllocationsInStmsGeneric,
     ExpHint (..),
     defaultExpHints,
+    scalarSpaceExpHints,
     askDefaultSpace,
     Allocable,
     AllocM,
@@ -1162,6 +1163,38 @@ data ExpHint
 
 defaultExpHints :: (ASTRep rep, HasScope rep m) => Exp rep -> m [ExpHint]
 defaultExpHints e = map (const NoHint) <$> expExtType e
+
+-- | Arrays of at most this many bytes are put in 'ScalarSpace'. The point is to
+-- reach values that the C compiler can keep in registers or at least on the
+-- stack, so this is deliberately small.
+maxScalarSpaceBytes :: Int64
+maxScalarSpaceBytes = 1024
+
+-- | Put small arrays of statically known size in 'ScalarSpace', which the CPU
+-- backends turn into ordinary C arrays of scalars rather than heap allocations.
+-- This matters most for arrays carried by a loop, where the alternative is an
+-- allocation (and a reference count update) per iteration. Only for
+-- representations where the default space is the one the host can address
+-- directly; a GPU array must stay in device memory.
+scalarSpaceExpHints ::
+  (Allocable fromrep torep inner) =>
+  Exp torep ->
+  AllocM fromrep torep [ExpHint]
+scalarSpaceExpHints e = map hint <$> expExtType e
+  where
+    hint t
+      | Just (Array pt shape _) <- hasStaticShape t,
+        Just ns <- mapM knownDim $ shapeDims shape,
+        let bytes = product ns * primByteSize pt,
+        -- An empty array, or one of 'Unit' elements, cannot be stored.
+        bytes > 0,
+        bytes <= maxScalarSpaceBytes =
+          Hint (LMAD.iota 0 $ map pe64 $ shapeDims shape) $
+            ScalarSpace (shapeDims shape) pt
+      | otherwise = NoHint
+
+    knownDim (Constant (IntValue v)) = Just $ valueIntegral v
+    knownDim _ = Nothing
 
 -- I have no Idea if this is correct
 allocInLParams ::
